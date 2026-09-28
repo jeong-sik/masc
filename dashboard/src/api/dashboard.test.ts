@@ -750,6 +750,10 @@ describe('keeper tool telemetry fetchers', () => {
               request_body_bytes: null,
               usage_scope: 'per_request',
               response_observed_model_input: null,
+              transmitted_atoms: null,
+              total_atoms: null,
+              model_input_measurement: null,
+              model_input_front: null,
               execution_ids: [],
             },
             diff_vs_prev: null,
@@ -773,6 +777,10 @@ describe('keeper tool telemetry fetchers', () => {
               request_body_bytes: null,
               usage_scope: 'per_request',
               response_observed_model_input: null,
+              transmitted_atoms: null,
+              total_atoms: null,
+              model_input_measurement: null,
+              model_input_front: null,
               execution_ids: [],
             },
             diff_vs_prev: null,
@@ -3579,6 +3587,12 @@ describe('fetchKeeperConfig', () => {
 
     fetchWith(unavailable)
     expect((await fetchKeeperConfig('keeper-sangsu')).prompt.system_prompt).toEqual(unavailable)
+
+    const promptFailure = { state: 'unavailable', reason: 'prompt_unrenderable', detail: 'Primary prompt is empty' }
+    fetchWith(promptFailure)
+    const editableConfig = await fetchKeeperConfig('keeper-sangsu')
+    expect(editableConfig.prompt.system_prompt).toEqual(promptFailure)
+    expect(editableConfig.prompt.instructions).toBe('be exact')
 
     fetchWith({ ...unavailable, reason: 'something_else' })
     const unknownReason = await fetchKeeperConfig('keeper-sangsu')

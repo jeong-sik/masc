@@ -112,21 +112,31 @@ let test_fusion_judge_schema_uses_parser_wire_contract () =
        ; Fusion_judge_parse.wire_field_resolved_answer
        ])
     (required_strings schema);
-  let decision_kind_schema =
-    schema
-    |> schema_property Fusion_judge_parse.wire_field_decision
-    |> schema_property Fusion_judge_parse.wire_field_decision_kind
+  let decision_branches =
+    match
+      schema
+      |> schema_property Fusion_judge_parse.wire_field_decision
+      |> schema_member "oneOf"
+    with
+    | Some (`List branches) -> branches
+    | _ -> fail "fusion decision schema has no oneOf branches"
   in
   check
     (list string)
-    "fusion decision enum"
+    "fusion decision variants"
     (List.sort
        String.compare
        [ Fusion_judge_parse.wire_decision_answer
        ; Fusion_judge_parse.wire_decision_insufficient
        ; Fusion_judge_parse.wire_decision_recommend
        ])
-    (enum_strings decision_kind_schema);
+    (decision_branches
+     |> List.map (fun branch ->
+       branch
+       |> schema_property Fusion_judge_parse.wire_field_decision_kind
+       |> enum_strings)
+     |> List.concat
+     |> List.sort String.compare);
   let _consensus_text_schema =
     schema
     |> schema_property Fusion_judge_parse.wire_field_consensus

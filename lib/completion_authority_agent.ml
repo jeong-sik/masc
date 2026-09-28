@@ -574,7 +574,6 @@ type stop_cause =
 
 type process_outcome =
   | Committed
-  | Operator_routed
   | Stalled of stop_cause
 
 (* The one place that reads the evaluator's retryability. [Some true] is the
@@ -742,29 +741,13 @@ let commit_verdict
 ;;
 
 (** What the system lane does with one Task it was woken for, read off the
-    status alone. Which question was asked lives on the Task, put there by
-    the transition that created the obligation; it is not copied into the
-    request record, so one field has one owner and the record cannot disagree
-    with the status the verdict is applied to.
-
-    RFC-0417 §4.1: completion review is the system LLM's job; a cancellation
-    is permission for work to stop existing, and that authority belongs to
-    the operator's one click. No review prompt exists for a cancel claim —
-    the lane records it as [Verification_run_registry.Operator_routed] and
-    the Task stays [AwaitingVerification] (§5 stay_pending) until the
-    operator clicks, so a keeper's refusal of its own cancel request cannot
-    be laundered into a system-LLM verdict either. Pure, so the routing is
-    testable without a runtime. *)
+    status alone. Pure, so the routing is testable without a runtime. *)
 type admission =
   | Review_completion
-  | Operator_routed
   | Not_awaiting
 
 let admission_of_status = function
-  | Masc_domain.AwaitingVerification { intent = Masc_domain.Complete_task; _ } ->
-    Review_completion
-  | Masc_domain.AwaitingVerification { intent = Masc_domain.Cancel_task; _ } ->
-    Operator_routed
+  | Masc_domain.AwaitingVerification _ -> Review_completion
   | Masc_domain.Todo
   | Masc_domain.Claimed _
   | Masc_domain.InProgress _
@@ -815,10 +798,6 @@ let process_task_once
   let defer_unavailable ~stage ~detail = stop (Infrastructure_unavailable { stage; detail }) in
   try
     match admission_of_status task.task_status with
-    (* Not deferred for retry and not auto-finalized: the operator's click is
-       the next event, and the row says so. *)
-    | Operator_routed ->
-      complete ((Operator_routed : process_outcome), Verification_run_registry.Operator_routed)
     | Not_awaiting ->
       defer_unavailable
         ~stage:Verification_run_registry.Review_preparation
@@ -1125,11 +1104,6 @@ let process_task (runtime : runtime) (task : Masc_domain.task) ~assignee ~verifi
     in
     match outcome with
     | Committed -> ()
-    | Operator_routed ->
-      Log.Misc.info
-        "system LLM completion authority handed the cancel claim to the operator task_id=%s verification_id=%s"
-        task.id
-        verification_id
     | Stalled cause ->
       (* Nothing schedules another look at a key that requests no retry: the
          scope rule admits it again only through a fresh submission, or
@@ -1373,7 +1347,6 @@ module For_testing = struct
 
   type nonrec process_outcome = process_outcome =
     | Committed
-    | Operator_routed
     | Stalled of stop_cause
 
   let retry_request_of_evaluator_retryable = retry_request_of_evaluator_retryable
@@ -1402,7 +1375,6 @@ module For_testing = struct
 
   type nonrec admission = admission =
     | Review_completion
-    | Operator_routed
     | Not_awaiting
 
   let admission_of_status = admission_of_status

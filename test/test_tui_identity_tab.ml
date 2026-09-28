@@ -230,7 +230,7 @@ let test_no_notice_reserves_no_room () =
   let drawn ~cols =
     match
       Masc_tui_footer.drop_hint_items ~max_cells:cols ~conflicts:[]
-        (hint ^ "  Left / Esc:back  q:quit")
+        (Masc_tui_footer.prepare_hints (hint ^ "  Left / Esc:back  q:quit"))
     with
     | Some row -> row
     | None -> Alcotest.failf "no footer row fits %d columns" cols

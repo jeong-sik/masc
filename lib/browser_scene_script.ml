@@ -298,4 +298,6 @@ let runtime = {js|function browserScene(args) {
 }
 |js}
 
-let read = runtime ^ "\nreturn browserScene(arguments[0]);"
+(* The call a read runs after the runtime, with the scene arguments. *)
+let read_call = "return browserScene(arguments[0]);"
+let read = runtime ^ "\n" ^ read_call

@@ -130,6 +130,7 @@ let one_dynamic_tool
       ~keeper_name:"keeper-raw-authority"
       ~turn_count:1
       ~tools:[ tool ]
+      ~loading_plan:Host.All_on_demand
       ~hooks
       ~event_bus:None
       ~context_injector:None
@@ -2610,6 +2611,49 @@ let test_the_observation_records_the_front_or_why_the_choice_was_not_applied () 
   | _ -> fail "a choice the lane cut passed was recorded as applied"
 ;;
 
+(* #39445: the bundle's declaration decides each tool's loading; without one
+   every tool keeps the on-demand shape the lanes had before. *)
+let test_loading_plan_names_the_on_demand_tools () =
+  let is_on_demand plan name =
+    match Host.loading_of_plan plan name with
+    | Runtime_official_client_tool.On_demand -> true
+    | Runtime_official_client_tool.Upfront -> false
+  in
+  check bool "no declaration keeps a tool on demand" true
+    (is_on_demand Host.All_on_demand "masc_board_post");
+  let declared =
+    Host.Declared { on_demand = [ "masc_board_post" ]; result_bounds = [] }
+  in
+  check bool "a named tool loads on demand" true
+    (is_on_demand declared "masc_board_post");
+  check bool "an unnamed tool loads upfront" false
+    (is_on_demand declared "keeper_task_done")
+;;
+
+(* A result bound is declared only for a tool the bundle bounded, with that
+   bound. Everything else -- an attached-service tool above all, whose result
+   reaches the wire as the service returned it -- declares nothing, so the
+   client keeps its own threshold. *)
+let test_result_bound_follows_the_bundle_bounds () =
+  let bound plan name =
+    match Host.result_bound_of_plan plan name with
+    | Runtime_official_client_tool.Bounded_bytes bytes -> Some bytes
+    | Runtime_official_client_tool.Unbounded -> None
+  in
+  let declared =
+    Host.Declared
+      { on_demand = [ "attached__search" ]
+      ; result_bounds = [ "keeper_task_done", 16384 ]
+      }
+  in
+  check (option int) "no declaration bounds nothing" None
+    (bound Host.All_on_demand "keeper_task_done");
+  check (option int) "a bounded tool declares its bound" (Some 16384)
+    (bound declared "keeper_task_done");
+  check (option int) "an attached-service tool declares no bound" None
+    (bound declared "attached__search")
+;;
+
 let () =
   run
     "keeper official-client host"
@@ -2875,6 +2919,14 @@ let () =
             "the observation records the front or why the choice was not applied"
             `Quick
             test_the_observation_records_the_front_or_why_the_choice_was_not_applied
+        ; test_case
+            "the loading plan names the on-demand tools"
+            `Quick
+            test_loading_plan_names_the_on_demand_tools
+        ; test_case
+            "the result bound follows the bundle bounds"
+            `Quick
+            test_result_bound_follows_the_bundle_bounds
         ] )
     ]
 ;;

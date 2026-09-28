@@ -65,7 +65,7 @@ thinking-support = true
                lane lane_slot)
           (List.sort_uniq
              String.compare
-             (lane_id :: Server_runtime_bootstrap.mandatory_exact_output_lane_ids))))
+             (lane_id :: Standalone_lane.required_ids))))
     protocol
     endpoint
     exact_body_timeout_s

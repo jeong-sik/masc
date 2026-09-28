@@ -23,7 +23,17 @@
     meta ([<masc>/keepers/<name>.json]) and the current Memory OS snapshot
     ([config/keepers/<name>.memory-current.json]) are [Refuse_boot]: without
     them a keeper starts as another keeper or with empty memory, and
-    overwrites what it lost. The goal store ([goals.json]) is
+    overwrites what it lost. The official-client session binding
+    ([<masc>/keepers/<name>/official-client-runtime/session.json]) is
+    [Refuse_boot] too: while it does not decode, every turn of its keeper
+    fails (2026-09-26, #38986); moved aside under its store lock, the
+    keeper's next claim starts a new vendor session. The event queue
+    ([<masc>/keepers/<name>/event-queue-v*.json] and its transition WAL) is
+    [Refuse_boot] as well: while it does not decode, the keeper does not
+    register and takes no turn; the row names the file that failed, and the
+    snapshot and the WAL move aside together under the queue owner lock,
+    the WAL first. The goal store ([goals.json]) is
+
     [Degrade_typed]: every goal writer refuses an unreadable store and no
     reader turns it into an empty goal list, so keepers run on tasks, board
     and schedules and nothing overwrites the file. [examine] reads it and
@@ -41,9 +51,28 @@ type undecodable =
   ; rejection : string
   }
 
+type discovery_failure =
+  { store : Keeper_durable_store.Refusing.t
+  ; path : string
+  ; rejection : string
+  }
+
+type failure =
+  { store : Keeper_durable_store.Refusing.t
+  ; keeper : string
+  ; path : string
+  ; error : string
+  }
+
+type refusal =
+  | Undecodable of undecodable
+  | Discovery_failed of discovery_failure
+  | Quarantine_failed of failure
+
 type examination =
   { readable : int
   ; undecodable : undecodable list
+  ; discovery_failures : discovery_failure list
   }
 
 val examine : Workspace.config -> examination
@@ -63,28 +92,28 @@ val examine : Workspace.config -> examination
 val admit
   :  accept_quarantine:bool
   -> examination
-  -> (examination, undecodable list) result
+  -> (examination, refusal list) result
 (** Whether boot may go on. [Ok] when nothing is undecodable, or the operator
-    accepted the quarantine. [Error] names every store boot refuses to move;
+    accepted the quarantine. Discovery failures always refuse boot, including
+    when quarantine was accepted: no per-keeper inventory was read.
+    [Error] names every store boot refuses to move;
     the files stay where they are. *)
 
-val refusal_to_string : undecodable list -> string
+val refusal_to_string : refusal list -> string
 (** The boot refusal: one line per store (kind, keeper, path, rejection) and
-    the two ways forward. *)
+    the required repair or quarantine action. Failed inventory reads and
+    failed quarantine moves cannot be bypassed with the quarantine flag. *)
 
 type quarantined =
   { store : Keeper_durable_store.Refusing.t
   ; keeper : string
   ; path : string
-  ; rejected_path : string
+  ; rejected_path : string  (** Where [path] went. *)
+  ; moved_with : (string * string) option
+      (** The file moved together with [path] and where it went: the other
+          file of an event queue's snapshot and WAL pair, when it existed.
+          [None] for every other store. *)
   ; rejection : string
-  }
-
-type failure =
-  { store : Keeper_durable_store.Refusing.t
-  ; keeper : string
-  ; path : string
-  ; error : string
   }
 
 type report =
@@ -92,8 +121,11 @@ type report =
   ; readable : int
   ; quarantined : quarantined list
   ; failed : failure list
-      (** Refused by the decoder but not moved aside; the file stays and the
-          lazy paths (writer quarantine, meta re-materialisation) meet it. *)
+      (** Refused by the decoder but not moved aside; each is logged at
+          ERROR with its path and error. Boot must refuse while any remains,
+          even when the operator accepted quarantine. An event queue whose
+          move stopped halfway keeps its snapshot and names the WAL already
+          moved in [error]. *)
   }
 
 val quarantine : now:float -> Workspace.config -> examination -> report

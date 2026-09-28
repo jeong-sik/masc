@@ -180,11 +180,13 @@ let overview_pulse_line ~cols state = pulse_line ~cols state (calculate_kpis sta
    the order 1, 2 and 3 select. *)
 let section_pills_line ~cols ~(active : metrics_section) : string =
   let inner_width = max 10 (framed_inner_width cols) in
-  let tab section = (metrics_section_label section, active = section) in
+  let tab section = (metrics_section_label section, active = section, section) in
   let line =
     "  "
     ^ tab_strip
         ~width:(tab_strip_width ~cols ~before:"  " ~after:"")
+        ~press:(fun section text ->
+          Masc_tui_press.(pressable (Press_metrics_section section)) text)
         (List.map tab [ Section_fleet; Section_resources; Section_tools ])
   in
   if Layout.display_width line > inner_width then
@@ -223,7 +225,7 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
   in
   let domains = match sched_opt with
     | Some { ssch_pool_domains = Some count; _ } -> string_of_int count
-    | _ -> "?"
+    | Some { ssch_pool_domains = None; _ } | None -> Masc_tui_theme.Glyph.no_value
   in
   let c1_l1, c1_l2 = match gc_opt with
     | Some gc ->

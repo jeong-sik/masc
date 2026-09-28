@@ -863,8 +863,10 @@ ENVS
           ran=$((ran + 1))
         elif [ "${status}" -eq 124 ] && [ "${limit}" -lt "${per_suite_timeout}" ]; then
           failed="${failed}${id} (stopped at the step budget after ${limit}s)\n"
+        elif [ "${status}" -eq 124 ]; then
+          failed="${failed}${id} (timed out after ${limit}s; exit ${status})\n"
         else
-          failed="${failed}${id} (run)\n"
+          failed="${failed}${id} (run: exit ${status}, limit ${limit}s)\n"
         fi
         wave_index=$((wave_index + 1))
       done
@@ -910,8 +912,10 @@ ENVS
             failed="${failed}${dir}/${name} (not run: the step budget ran out)\n"
           elif [ "${status}" -eq 124 ] && [ "${limit}" -lt "${per_suite_timeout}" ]; then
             failed="${failed}${dir}/${name} (dune-rule batch stopped at the step budget after ${limit}s)\n"
+          elif [ "${status}" -eq 124 ]; then
+            failed="${failed}${dir}/${name} (dune-rule batch timed out after ${limit}s; exit ${status})\n"
           else
-            failed="${failed}${dir}/${name} (dune-rule batch)\n"
+            failed="${failed}${dir}/${name} (dune-rule batch: exit ${status}, limit ${limit}s)\n"
           fi
         done
       fi
@@ -938,8 +942,10 @@ ENVS
           ran=$((ran + 1))
         elif [ "${status}" -eq 124 ] && [ "${limit}" -lt "${own}" ]; then
           failed="${failed}${dir}/${name} (stopped at the step budget after ${limit}s)\n"
+        elif [ "${status}" -eq 124 ]; then
+          failed="${failed}${dir}/${name} (timed out after ${limit}s; exit ${status})\n"
         else
-          failed="${failed}${dir}/${name} (run)\n"
+          failed="${failed}${dir}/${name} (run: exit ${status}, limit ${limit}s)\n"
         fi
       done
     fi
@@ -1234,7 +1240,7 @@ self_test() {
   # The harness brings the suites that name it: scenario selection and
   # request teardown are checked without opening a terminal.
   check "an edited terminal scenario is selected" \
-    "test/test_tui_fixture_shutdown.py test/test_tui_keyboard_input.py test/test_tui_keyboard_scenario_selection.py" \
+    "test/test_tui_fixture_shutdown.py test/test_tui_keyboard_input.py test/test_tui_keyboard_scenario_selection.py test/test_tui_stall_observation.py" \
     "test/test_tui_keyboard_input.py"
   check_direct "an edited suite stays direct before attribution expands selection" \
     "test/test_tui_keyboard_input.py" \
@@ -1277,6 +1283,7 @@ for target in "$@"; do
     *broken*) echo "stand-in dune: ${name} does not link" >&2; status=1; continue ;;
     *slow*) body='sleep "${FAKE_DUNE_SUITE_SECONDS:-60}"' ;;
     *failing*) body='exit 1' ;;
+    *exit137*) body='exit 137' ;;
     *) body='exit 0' ;;
   esac
   case "${target}" in
@@ -1288,6 +1295,7 @@ for target in "$@"; do
       case "${name}" in
         *slow*) sleep "${FAKE_DUNE_SUITE_SECONDS:-60}" ;;
         *failing*) status=1 ;;
+        *exit137*) status=137 ;;
       esac
       continue
       ;;
@@ -1332,10 +1340,11 @@ FAKE
     done
     direct_sources="${RUNNER_DIRECT_SOURCES:-}"
     budget_seconds="${budget}"
+    per_suite_timeout=${RUNNER_PER_SUITE_TIMEOUT:-${per_suite_timeout}}
     SECONDS=0
     run_selected > /dev/null 2>&1
     # The seconds a stopped suite was given depend on where the clock stood.
-    printf '%b' "${failed}" | sed -E 's/ after [0-9]+s\)/)/' | tr '\n' ';'
+    printf '%b' "${failed}" | sed -E -e 's/ after [0-9]+s\)/)/' -e 's/limit [0-9]+s/limit <bounded>s/g' | tr '\n' ';'
   }
   runner_check() {
     local label="$1" want="$2"
@@ -1371,30 +1380,53 @@ FAKE
   runner_check "suites within the budget all run" "" 0 30 \
     test_ok test_ok_too
   runner_check "the budget stops a slow suite and names the suites after it" \
-    "test/test_broken (build);test/test_failing (run);test/test_slow (stopped at the step budget);test/test_zz_after (not run: the step budget ran out);" \
+    "test/test_broken (build);test/test_failing (run: exit 1, limit <bounded>s);test/test_slow (stopped at the step budget);test/test_zz_after (not run: the step budget ran out);" \
     0 3 test_ok test_broken test_failing test_slow test_zz_after
   RUNNER_DIRECT_SOURCES="test/test_zz_direct_failing.ml" \
     runner_check "a directly edited suite runs before attributed suites spend the budget" \
-      "test/test_zz_direct_failing (run);test/test_aa_slow (stopped at the step budget);" \
+      "test/test_zz_direct_failing (run: exit 1, limit <bounded>s);test/test_aa_slow (stopped at the step budget);" \
       0 3 test_aa_slow test_zz_direct_failing
   RUNNER_DIRECT_SOURCES="test/test_zz_direct_broken.py" \
     runner_check "a directly edited Python rule runs before attributed linked suites" \
-      "test/test_zz_direct_broken (run);test/test_aa_slow (stopped at the step budget);" \
+      "test/test_zz_direct_broken (run: exit 1, limit <bounded>s);test/test_aa_slow (stopped at the step budget);" \
       0 3 test_aa_slow test/test_zz_direct_broken.py
   RUNNER_DUNE_JOBS=2 FAKE_DUNE_SUITE_SECONDS=1 \
     runner_check "linked suites share the existing Dune worker count" "" \
       0 3 test_slow_one test_slow_two
   RUNNER_DUNE_JOBS=2 \
     runner_check "a linked failure stays named beside a parallel pass" \
-      "test/test_failing (run);" 0 3 test_failing test_ok
+      "test/test_failing (run: exit 1, limit <bounded>s);" 0 3 test_failing test_ok
   RUNNER_DUNE_JOBS=2 \
     runner_check "a parallel wave that spends the budget names every remainder" \
       "test/test_slow_one (stopped at the step budget);test/test_slow_two (stopped at the step budget);test/test_zz_after (not run: the step budget ran out);" \
       0 2 test_slow_one test_slow_two test_zz_after
 
   runner_check "a failing Python alias rejects the parallel batch" \
-    "test/test_python_failing (dune-rule batch);test/test_python_ok (dune-rule batch);" \
+    "test/test_python_failing (dune-rule batch: exit 1, limit <bounded>s);test/test_python_ok (dune-rule batch: exit 1, limit <bounded>s);" \
     0 30 test/test_python_failing.py test/test_python_ok.py
+  RUNNER_PER_SUITE_TIMEOUT=1 \
+    runner_check "a linked suite cap records timeout status" \
+      "test/test_slow (timed out after 1s; exit 124);" \
+      0 30 test_slow
+  RUNNER_PER_SUITE_TIMEOUT=1 \
+    runner_check "a single Python rule cap records timeout status" \
+      "test/test_python_slow (timed out after 1s; exit 124);" \
+      0 30 test/test_python_slow.py
+  RUNNER_PER_SUITE_TIMEOUT=1 \
+    runner_check "a Python batch cap records shared timeout status" \
+      "test/test_python_slow (dune-rule batch timed out after 1s; exit 124);test/test_python_ok (dune-rule batch timed out after 1s; exit 124);" \
+      0 30 test/test_python_slow.py test/test_python_ok.py
+  runner_check "a Python batch stopped by the step budget stays distinct" \
+    "test/test_python_slow (dune-rule batch stopped at the step budget);test/test_python_ok (dune-rule batch stopped at the step budget);" \
+    0 3 test/test_python_slow.py test/test_python_ok.py
+  runner_check "a linked exit status is preserved without inferring its cause" \
+    "test/test_exit137 (run: exit 137, limit <bounded>s);" 0 600 test_exit137
+  runner_check "a single Python rule preserves its exit status" \
+    "test/test_python_exit137 (run: exit 137, limit <bounded>s);" \
+    0 600 test/test_python_exit137.py
+  runner_check "a Python batch preserves its shared exit status" \
+    "test/test_python_exit137 (dune-rule batch: exit 137, limit <bounded>s);test/test_python_ok (dune-rule batch: exit 137, limit <bounded>s);" \
+    0 600 test/test_python_exit137.py test/test_python_ok.py
   runner_calls_check "the keyboard alias joins the default-bound Python batch" \
     "@test/runtest-test_tui_keyboard_input @test/runtest-test_python_one" \
     0 30 test/test_tui_keyboard_input.py test/test_python_one.py

@@ -41,6 +41,7 @@ val execute_keeper_tool_descriptor_for_capability_surface_with_outcome
   -> ?mcp_session_id:string
   -> ?continuation_channel:Keeper_continuation_channel.t
   -> ?gate_context:(unit -> Keeper_gate.causal_context)
+  -> ?turn_ref:Ids.Turn_ref.t
   -> ?gate_grant:Keeper_gate.cycle_grant
   -> ?tool_use_id:string
      (* #35456: parent agent-core invocation identity, threaded to in-process
@@ -67,6 +68,7 @@ val execute_keeper_tool_call_for_capability_surface_with_outcome
   -> ?mcp_session_id:string
   -> ?continuation_channel:Keeper_continuation_channel.t
   -> ?gate_context:(unit -> Keeper_gate.causal_context)
+  -> ?turn_ref:Ids.Turn_ref.t
   -> ?gate_grant:Keeper_gate.cycle_grant
   -> ?tool_use_id:string
   -> ?trace_id:string
@@ -91,6 +93,7 @@ module Compatibility : sig
     -> ?mcp_session_id:string
     -> ?continuation_channel:Keeper_continuation_channel.t
     -> ?gate_context:(unit -> Keeper_gate.causal_context)
+    -> ?turn_ref:Ids.Turn_ref.t
     -> ?gate_grant:Keeper_gate.cycle_grant
     -> ?tool_use_id:string
     -> ?trace_id:string
@@ -114,6 +117,7 @@ module Compatibility : sig
     -> ?mcp_session_id:string
     -> ?continuation_channel:Keeper_continuation_channel.t
     -> ?gate_context:(unit -> Keeper_gate.causal_context)
+    -> ?turn_ref:Ids.Turn_ref.t
     -> ?gate_grant:Keeper_gate.cycle_grant
     -> ?tool_use_id:string
     -> ?trace_id:string

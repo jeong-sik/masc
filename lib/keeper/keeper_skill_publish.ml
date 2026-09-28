@@ -93,7 +93,7 @@ let handle ~config ~keeper_name ~args =
       ]
     in
     (match (Atomic.get Workspace_hooks.keeper_skill_publish_fn) config request with
-     | Ok (Publish.Created_and_published { reference; snapshot_revision }) ->
+     | Ok (Publish.Created_and_published { reference; snapshot_revision; kind; diagnostics }) ->
        Keeper_tool_execution.success_data
          (`Assoc
             (identity
@@ -101,8 +101,11 @@ let handle ~config ~keeper_name ~args =
                ; "status", `String "created_and_published"
                ; "reference", Skill_reference.to_yojson reference
                ; "snapshot_revision", `String snapshot_revision
+               ; "kind", `String kind
+               ; ( "diagnostics"
+                 , `List (List.map (fun value -> `String value) diagnostics) )
                ]))
-     | Ok (Created_but_shadowed { reference; snapshot_revision; winner }) ->
+     | Ok (Created_but_shadowed { reference; snapshot_revision; winner; kind; diagnostics }) ->
        (* The write and the republish both committed; the catalog lists
           [winner] first under the same name, so turns that list Skills by
           name see it instead. The call did what it does, so it completes and
@@ -118,6 +121,9 @@ let handle ~config ~keeper_name ~args =
                ; "status", `String "created_but_shadowed"
                ; "reference", Skill_reference.to_yojson reference
                ; "snapshot_revision", `String snapshot_revision
+               ; "kind", `String kind
+               ; ( "diagnostics"
+                 , `List (List.map (fun value -> `String value) diagnostics) )
                ; "winner", Skill_reference.identity_to_yojson winner
                ; ( "message"
                  , `String
@@ -131,7 +137,7 @@ let handle ~config ~keeper_name ~args =
                         (Skill_reference.identity_package_id_to_string winner)
                         winner.name) )
                ]))
-     | Ok (Created_but_unpublished { reference; reason }) ->
+     | Ok (Created_but_unpublished { reference; reason; kind; diagnostics }) ->
        (* SKILL.md is on disk, so a retry answers package_already_exists; the
           Keeper learns the write committed and why later turns cannot see it
           yet. *)
@@ -144,6 +150,9 @@ let handle ~config ~keeper_name ~args =
           @ [ "status", `String "created_but_unpublished"
             ; "reference", Skill_reference.to_yojson reference
             ; "reason", `String reason
+            ; "kind", `String kind
+            ; ( "diagnostics"
+              , `List (List.map (fun value -> `String value) diagnostics) )
             ])
      | Error Publish.Not_installed ->
        failure

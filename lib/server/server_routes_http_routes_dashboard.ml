@@ -3466,6 +3466,23 @@ let add_routes ~sw ~clock router =
                ~sw ~clock state agent_name req reqd body_str))
          request reqd)
 
+  (* Fleet-wide event-queue bulk cancel — dry-run by default, explicit confirm
+     to execute, backup before mutation. The URL prefix is intentionally
+     outside [/api/v1/keepers/] so it does not collide with the per-name
+     [prefix_post] catch-all below. *)
+  |> Http.Router.post "/api/v1/keepers_bulk/event-queue" (fun request reqd ->
+       with_token_permission_auth
+         ~permission:Server_dashboard_http_keeper_event_queue_bulk.permission
+         (fun state agent_name req reqd ->
+           Http.Request.read_body_async reqd (fun body_str ->
+             Server_dashboard_http_keeper_event_queue_bulk.handle_post
+               state
+               ~actor:agent_name
+               req
+               reqd
+               body_str))
+         request reqd)
+
   |> Http.Router.post "/api/v1/keepers/chat/stream" (fun request reqd ->
        with_tool_actor_auth ~tool_name:Keeper_tool_name.(to_string Keeper_delegate) (fun state submitted_by _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->

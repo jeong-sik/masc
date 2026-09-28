@@ -553,9 +553,6 @@ export function RuntimeEnvironmentEditor({
       )
       return
     }
-    if (selectedProvider?.protocol === 'muse-serve' && !((environment.models.find(m => m.id === bindingModelId)?.maxPromptBytes ?? 0) > 0)) {
-      setBindingFormError('Muse 모델에는 명시적인 max-prompt-bytes가 필요합니다. 모델의 입력 바이트 한도를 설정하세요.'); return
-    }
     const exists = environment.bindings.some(
       b => b.providerId === bindingProviderId && b.modelId === bindingModelId,
     )
@@ -1212,7 +1209,7 @@ export function RuntimeEnvironmentEditor({
                   />
                 </div>
                 <div class="rt-field">
-                  <span class="sub-k">max-prompt-bytes · Muse 필수</span>
+                  <span class="sub-k">max-prompt-bytes · 선택</span>
                   <input class="rt-input mono" type="number" min="1" step="1"
                     value=${newModel.maxPromptBytes} disabled=${isDisabled}
                     aria-label="새 model max-prompt-bytes" data-testid="runtime-add-model-max-prompt-bytes"

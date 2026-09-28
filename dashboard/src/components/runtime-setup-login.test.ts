@@ -35,7 +35,6 @@ it.each(clients)('%s login binds account through discovery, selection and verifi
   expect(api.discoverSetupModels).toHaveBeenCalledWith({ integration_id: integrationId, account_ref: account }, expect.anything())
   expect(api.selectSetupAccount).not.toHaveBeenCalled()
   fireEvent.click(screen.getByLabelText('Selected Model'))
-  if (integrationId === 'muse') fireEvent.input(screen.getByLabelText('Muse 입력 한도 (bytes)'), { target: { value: '12345' } })
   fireEvent.click(screen.getByText('선택한 모델 추가'))
   expect((screen.getByText('선택한 계정 다시 로그인') as HTMLButtonElement).disabled).toBe(false)
   fireEvent.click(screen.getByText('검증 후 선택 저장'))

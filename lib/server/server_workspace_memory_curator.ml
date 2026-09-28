@@ -33,12 +33,15 @@ let flow_failure =
     ~callback_error_to_string:Fun.id
     ~raw_response_to_string:Keeper_exact_flow_detail.raw_response_excerpt
 
-let execute ~(resolved : Runtime_exact_output_registry.resolved_lane) ~rendered_prompt context =
-  (* This workspace owner has no Keeper identity or Keeper CLI sandbox. Refuse
-     an unsupported CLI tail explicitly instead of silently skipping it. *)
-  let* () = match resolved.cli_slots with
-    | [] -> Ok ()
-    | _ -> Error "workspace curator requires admitted exact-output slots; CLI tails are not supported" in
+(* How the lane's HTTP slots ended when none of them answered. *)
+type http_failure =
+  | No_http_slot
+  | Http_failed of string
+
+(* The lane's HTTP slots, as one exact-output flow. *)
+let execute_http ~(resolved : Runtime_exact_output_registry.resolved_lane) ~requirement
+    ~rendered_prompt context =
+  let failed result = Result.map_error (fun detail -> Http_failed detail) result in
   let rec candidates = function
     | [] -> Ok []
     | (slot : Runtime_exact_output_registry.selected_slot) :: rest ->
@@ -51,19 +54,17 @@ let execute ~(resolved : Runtime_exact_output_registry.resolved_lane) ~rendered_
   (* Ordered here, not in [prepare_execution]: the declared order is part of
      the published configuration, and a rest must not change its identity. *)
   let* candidates =
-    candidates (Runtime_exact_lane_backpressure.order resolved).selected_slots in
+    candidates (Runtime_exact_lane_backpressure.order resolved).selected_slots |> failed in
   let* first, rest = match candidates with
-    | [] -> Error "workspace curator has no admitted exact-output slot"
+    | [] -> Error No_http_slot
     | first :: rest -> Ok (first, rest) in
   let messages = Agent_core.Types.[
     make_message ~role:User [Text rendered_prompt] ] in
-  let requirement = Exact.make_output_requirement ~schema:output_schema
-      ~minimum_guarantee:Exact.Json_syntax in
   let* snapshot = Exact.snapshot_flow ~first ~rest ~messages requirement
     |> Result.map_error (function Exact.Duplicate_flow_candidate_id { candidate_id; _ } ->
-      "duplicate candidate: " ^ candidate_id) in
+      "duplicate candidate: " ^ candidate_id) |> failed in
   let* attempt = Exact.start_flow snapshot
-    |> Result.map_error (function Exact.Flow_id_generation_failed detail -> detail) in
+    |> Result.map_error (function Exact.Flow_id_generation_failed detail -> detail) |> failed in
   match Eio_context.get_net_opt (), Eio_context.get_clock_opt () with
   | Some net, Some clock ->
     let validate success =
@@ -81,11 +82,44 @@ let execute ~(resolved : Runtime_exact_output_registry.resolved_lane) ~rendered_
      | Ok success ->
        let candidate = Exact.flow_success_candidate success.transport_success in
        Ok (success.accepted, candidate.visit.identity.candidate_id)
-     | Error (Exact.Flow_execution_terminal { cause; _ }) -> Error (flow_failure cause)
+     | Error (Exact.Flow_execution_terminal { cause; _ }) ->
+       Error (Http_failed (flow_failure cause))
      | Error (Exact.Flow_semantic_candidates_exhausted { rejections; _ }) ->
-       Error (String.concat "; " (List.map (fun rejection -> rejection.Exact.rejection)
-         (rejections.first :: rejections.rest))))
-  | _ -> Error "workspace curator execution context unavailable"
+       Error (Http_failed (String.concat "; " (List.map (fun rejection -> rejection.Exact.rejection)
+         (rejections.first :: rejections.rest)))))
+  | _ -> Error (Http_failed "workspace curator execution context unavailable")
+
+(* The lane's CLI slots answer after its HTTP slots, or in their place when
+   the lane admits none -- the order every exact lane walks, through the same
+   one-shot executor the Librarian and the Stagehand lane use. The answer is
+   checked by the proposal decode the HTTP flow uses. *)
+let execute ?cli_runner ~base_path ~(resolved : Runtime_exact_output_registry.resolved_lane)
+    ~rendered_prompt context =
+  let requirement = Exact.make_output_requirement ~schema:output_schema
+      ~minimum_guarantee:Exact.Json_syntax in
+  match execute_http ~resolved ~requirement ~rendered_prompt context, resolved.cli_slots with
+  | Ok answer, _ -> Ok answer
+  | Error No_http_slot, [] -> Error "workspace curator has no admitted exact-output slot"
+  | Error (Http_failed detail), [] -> Error detail
+  | Error http, (_ :: _ as cli_slots) ->
+    (match
+       Keeper_lane_cli_oneshot.walk ?runner:cli_runner ~base_dir:base_path ~cli_slots
+         ~system_prompt:""
+         ~requirement ~prompt:rendered_prompt
+         ~validate:(fun raw ->
+           Proposals.decode (Context.proposal_json context raw) |> Result.map (fun _ -> raw))
+         ~on_failure:(fun failure ->
+           Log.Server.warn "workspace curator cli slot: %s"
+             (Keeper_lane_cli_oneshot.failure_to_string failure))
+         ()
+     with
+     | Ok (runtime_id, raw) -> Ok (raw, runtime_id)
+     | Error failures ->
+       let cli =
+         String.concat "; " (List.map Keeper_lane_cli_oneshot.failure_to_string failures) in
+       Error (match http with
+         | No_http_slot -> cli
+         | Http_failed detail -> detail ^ "; " ^ cli))
 
 type owner =
   { mutex : Stdlib.Mutex.t
@@ -168,7 +202,7 @@ type execution =
   ; execute : rendered_prompt:string -> Context.t -> (Yojson.Safe.t * string, string) result
   }
 
-let prepare_execution () =
+let prepare_execution ~base_path =
   let* registry = Runtime_exact_output_registry.current ()
     |> Result.map_error Runtime_exact_output_registry.publication_error_to_string in
   let* resolved = Runtime_exact_output_registry.resolve_lane registry ~lane_id
@@ -177,7 +211,7 @@ let prepare_execution () =
     [ "catalog_generation", `String (Runtime_exact_output_registry.catalog_generation_fingerprint registry)
     ; "slots", `List (List.map (fun (slot : Runtime_exact_output_registry.selected_slot) -> `String slot.slot_id) resolved.selected_slots)
     ; "cli_slots", `List (List.map (fun id -> `String id) resolved.cli_slots) ] in
-  Ok { configuration; execute = execute ~resolved }
+  Ok { configuration; execute = execute ?cli_runner:None ~base_path ~resolved }
 
 let run ~base_path ~prepare =
   let registry = Runs.global () in
@@ -311,9 +345,11 @@ let start ~sw ~base_path =
       (match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
        | Error (Runtime_exact_output_registry.Exact_lane_unconfigured _) -> false
        | Ok _ | Error (Runtime_exact_output_registry.No_admitted_lane_slots _) -> true) in
-  start_with ~sw ~base_path ~enabled ~prepare:prepare_execution
+  start_with ~sw ~base_path ~enabled ~prepare:(fun () -> prepare_execution ~base_path)
 
 module For_testing = struct
+  let execute = execute
+
   let start ~sw ~base_path ~execute =
     start_with ~sw ~base_path ~enabled:(fun () -> true)
       ~prepare:(fun () -> Ok { configuration = `Assoc ["injected_runner", `Bool true];

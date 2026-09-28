@@ -45,7 +45,7 @@ let account_and_default () =
   let unknown=Login.create "not-a-client" in
   check bool "unknown client refused" true (Result.is_error (Login.inventory unknown inventory));
   let t=Login.create "codex" in ok (Login.inventory t inventory);t.provider<-Some provider;t.account_ref<-Some account;
-  let body=Login.save_body t (model 0) None in
+  let body=Login.save_body t (model 0) in
   let open Yojson.Safe.Util in
   check string "current default stays first" "primary" (body |> member "selection" |> to_list |> List.hd |> member "runtime_id" |> to_string);
   check (list string) "only declared fallback order is preserved" ["primary"; "fallback"] t.existing;
@@ -166,7 +166,7 @@ let missing_model_context () =
       check bool "empty context cannot save" true (Login.key t "\r"=Login.Nothing);
       Login.paste t "32768";
       (match Login.key t "\r" with
-       | Login.Save (selected,None) -> check (option int) "operator documented value still goes through save verification" (Some 32768) selected.context
+       | Login.Save selected -> check (option int) "operator documented value still goes through save verification" (Some 32768) selected.context
        | _ -> fail "documented context did not reach verification"))
     [Login.Codex;Login.Claude;Login.Antigravity;Login.Muse]
 let named_default_identity () =
@@ -174,7 +174,7 @@ let named_default_identity () =
   let t=Login.create "codex" in
   ok (Login.inventory t (`Assoc (("default_runtime_id",`String "named-lane") :: fields)));
   t.provider<-Some provider;t.account_ref<-Some account;
-  let body=Login.save_body t (model 0) None in
+  let body=Login.save_body t (model 0) in
   let open Yojson.Safe.Util in
   check string "named default remains an explicit lane identity" "named-lane" (body |> member "default_runtime_id" |> to_string);
   check bool "lane identity is not submitted as a concrete candidate" false
@@ -212,10 +212,10 @@ let failed_save_refresh () =
   check bool "refresh awaits deliberate retry on retained model" true (t.phase=Login.Models && t.cursor=1);
   check (option string) "refresh retains authenticated account" (Some account) t.account_ref;
   match Login.key t "\r" with
-  | Login.Save (chosen,None) ->
+  | Login.Save chosen ->
     check string "same model retained" selected.id chosen.id;
     check (option int) "documented context survives failed save" selected.context chosen.context;
-    let body=Login.save_body t chosen None in
+    let body=Login.save_body t chosen in
     let open Yojson.Safe.Util in
     check string "retry uses new revision" "new-revision" (body |> member "revision" |> to_string);
     check string "retry preserves new default" "new-default" (body |> member "default_runtime_id" |> to_string);
@@ -303,10 +303,19 @@ let account_emails_beside_providers () =
   ok (Login.inventory t (with_emails [
     row "codex" "recorded" ["email", `String "operator@example.com"];
     row "claude-code" "absent" [];
+    row "muse-code" "not_read" ["cause", `String "source_unrecognized"];
     row "antigravity" "unreadable" [] ]));
   check (list string) "each selected account row names its email or why not"
     [ "> codex · operator@example.com"; "  claude-code · 이메일 기록 없음";
-      "  muse-code"; "  antigravity · 이메일 기록을 읽지 못함" ]
+      "  muse-code · 이메일 모름: 로그인 파일 형식을 모름"; "  antigravity · 이메일 기록을 읽지 못함" ]
+    (List.map Login.row_text (List.tl (Login.lines t)));
+  let t = Login.create "" in
+  ok (Login.inventory t (with_emails [
+    row "codex" "login_unfinished" [];
+    row "claude-code" "not_read" ["cause", `String "not_reported"] ]));
+  check (list string) "an unfinished login and an unreported email are told apart"
+    [ "> codex · 마지막 로그인이 끝나지 않음"; "  claude-code · 이메일 모름: 클라이언트가 알려 주지 않음";
+      "  muse-code"; "  antigravity" ]
     (List.map Login.row_text (List.tl (Login.lines t)));
   List.iter (fun (name, rows) ->
     let t = Login.create "" in
@@ -314,6 +323,10 @@ let account_emails_beside_providers () =
     [ "unknown state is refused", [ row "codex" "verified" [] ];
       "recorded without an email is refused", [ row "codex" "recorded" [] ];
       "an email on an absent record is refused", [ row "codex" "absent" ["email", `String "x@example.com"] ];
+      "an unknown cause is refused", [ row "codex" "not_read" ["cause", `String "vanished"] ];
+      "not read without a cause is refused", [ row "codex" "not_read" [] ];
+      "an email on an unfinished login is refused",
+      [ row "codex" "login_unfinished" ["email", `String "x@example.com"] ];
       "one account listed twice is refused", [ row "codex" "absent" []; row "codex" "unreadable" [] ];
       "an account for no listed integration is refused", [ row "missing" "absent" [] ] ];
   let fields = match inventory with `Assoc fields -> List.remove_assoc "account_emails" fields | _ -> [] in

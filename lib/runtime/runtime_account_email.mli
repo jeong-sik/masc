@@ -31,6 +31,11 @@ type missing =
 
 val missing_to_string : missing -> string
 
+val missing_to_wire : missing -> string
+val missing_of_wire : string -> missing option
+(** The spelling of each {!missing} case in setup's private record and in the
+    setup inventory. [missing_of_wire] is [None] for any other text. *)
+
 val of_codex_auth : string -> (t, missing) result
 val of_claude_account : string -> (t, missing) result
 val of_muse_auth : string -> (t, missing) result
@@ -38,9 +43,12 @@ val of_google_oauth : string -> (t, missing) result
 (** Each reads the bytes of one client's login file. A key that appears twice
     in one object is [Source_unrecognized]; [null] reads as absent. *)
 
+type native_client = Codex | Claude_code | Muse_code
+
 type account =
-  | Native_home of string
-      (** Codex, Claude Code or Muse Code [account-home], exact spelling *)
+  | Native_home of { client : native_client; home : string }
+      (** a Codex, Claude Code or Muse Code [account-home], exact spelling.
+          Two clients declaring the same home are two accounts. *)
   | Credential_file of string  (** Antigravity durable OAuth file *)
 
 val account_of_provider : Runtime_schema.provider -> account option
@@ -48,13 +56,23 @@ val account_of_provider : Runtime_schema.provider -> account option
     [account-home] runs on the inherited home, which setup login never
     selects, so it has no account here; neither does any HTTP provider. *)
 
+type record =
+  | Email of t  (** the last setup login on this account completed and read it *)
+  | Not_read of missing
+      (** the last setup login on this account completed without an email *)
+  | Login_unfinished
+      (** a setup login started on this account and did not complete, so its
+          login files may now hold another identity *)
+
 type recorded =
-  | Recorded of t
-  | Absent  (** no login through setup recorded an email for this account *)
+  | Record of record
+  | Absent  (** no setup login has started on this account *)
   | Unreadable  (** the private record exists but could not be read *)
 
 val inventory_json : lookup:(account -> recorded) -> Runtime_schema.config -> Yojson.Safe.t
 (** One row per declared provider with an account:
-    [{"integration_id", "state": "recorded", "email"}], or [state] ["absent"]
-    or ["unreadable"] without [email]. [lookup] reads only setup's own
-    records, so building this never opens an account's login files. *)
+    [{"integration_id", "state": "recorded", "email"}],
+    [{"integration_id", "state": "not_read", "cause"}] with [cause] from
+    {!missing_to_wire}, or [state] ["login_unfinished"], ["absent"] or
+    ["unreadable"] alone. [lookup] reads only setup's own records, so building
+    this never opens an account's login files. *)

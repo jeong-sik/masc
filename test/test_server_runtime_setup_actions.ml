@@ -248,7 +248,7 @@ let test_selected_native_account () = fixture (fun base runtime binary net ->
       (match request with `Assoc root -> `Assoc (List.map (fun (key,v) ->
         if key<>"connections" then key,v else key,`List [`Assoc ["source",selected;
           "models",`List [`Assoc ["id",`String "reported-muse";"context",`Int 8192;
-            "streaming",`Bool true;"max_prompt_bytes",`Int 45678]]]]) root)
+            "streaming",`Bool true]]]]) root)
        | _ -> assert false) in
     let account_reference=Runtime_setup_accounts.reference_of_string reference |> Result.get_ok in
     let resolve ()=Runtime_setup_accounts.resolve ~workspace:base ~integration_id:id ~cli_path:command account_reference in
@@ -266,12 +266,14 @@ let test_selected_native_account () = fixture (fun base runtime binary net ->
     Alcotest.check Alcotest.bool "successful save retains the actual account" true (Sys.is_directory account_home);
     let parsed=Runtime_toml.parse_file runtime |> Result.get_ok in
     if protocol="muse-serve" then (
-      let inventory = Runtime_wizard_inventory.to_json parsed in
-      let rows = inventory |> member "runtimes" |> to_list in
       let saved_runtime_id = receipt |> member "runtime_id" |> to_string in
-      let selected_row = List.find (fun row -> row |> member "id" = `String saved_runtime_id) rows in
-      Alcotest.check Alcotest.int "existing model inventory retains explicit byte capacity"
-        45678 (selected_row |> member "max_prompt_bytes" |> to_int));
+      let model_id = match String.index_opt saved_runtime_id '.' with
+        | Some i -> String.sub saved_runtime_id (i + 1) (String.length saved_runtime_id - i - 1)
+        | None -> Alcotest.fail "saved runtime id names no model" in
+      let model = List.find (fun (m : Runtime_schema.model_spec) -> String.equal m.id model_id)
+          parsed.Runtime_schema.models in
+      Alcotest.check Alcotest.(option int) "a saved Muse model declares no byte capacity"
+        None model.max_prompt_bytes);
     let homes=List.filter_map (fun (p:Runtime_schema.provider) -> p.account_home) parsed.providers in
     Alcotest.check Alcotest.bool "selected native home survives save byte-for-byte" true (List.mem account_home homes))
     ["selected-claude","claude-code","claude";"selected-codex","codex-app-server","codex";
@@ -295,7 +297,7 @@ let test_muse_save_rechecks_selected_catalog () = fixture (fun base runtime bina
   let revision=Runtime_setup_batch.observe ~base_path:base |> Result.get_ok |> Runtime_setup_batch.revision_to_string in
   let request id context=`Assoc ["revision",`String revision;
     "connections",`List [`Assoc ["source",selected;"models",`List [`Assoc [
-      "id",`String id;"context",`Int context;"streaming",`Bool true;"max_prompt_bytes",`Int 45678]]]];
+      "id",`String id;"context",`Int context;"streaming",`Bool true]]]];
     "selection",`List [`Assoc ["connection",`Int 0;"model",`Int 0]]] in
   let row context=`Assoc ["id",`String "reported-muse";"context",context] in
   let reported=row (`Int 8192) in

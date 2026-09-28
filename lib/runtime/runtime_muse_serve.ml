@@ -131,6 +131,7 @@ type stream_event =
       ; decision : Runtime_muse_msp.approval_decision
       }
   | Subscription_usage_observed of Runtime_muse_msp.subscription_usage
+  | Compaction_observed of Runtime_muse_msp.compaction
   | Turn_terminal_received of Runtime_muse_msp.terminal
   | Usage_reported of
       { session_id : string
@@ -918,6 +919,10 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
                  | Some text -> Some text
                  | None -> state.final_text)
             }
+        | Msp.Compaction ->
+          Option.iter (fun compaction -> emit (Compaction_observed compaction))
+            item.Msp.compaction;
+          continue { state with open_items }
         | _ -> continue { state with open_items })
      | Msp.Usage_changed usage ->
        emit (Subscription_usage_observed usage);

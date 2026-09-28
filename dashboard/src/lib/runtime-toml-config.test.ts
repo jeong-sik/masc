@@ -588,6 +588,29 @@ sangsu = "runpod_mtp.qwen"
     expect(next).not.toContain('sangsu = "runpod_mtp.qwen"')
   })
 
+  it('clears the routes to a reserved provider it deletes and keeps that reader\'s table', () => {
+    // No binding of "voice" is read, because the name is reserved; the
+    // default and the assignment still name it and must not dangle.
+    const source = `${sourceText.replace('default = "runpod_mtp.qwen"', 'default = "voice.tts"')}
+[providers.voice]
+protocol = "openai-http"
+endpoint = "https://v.example/v1"
+
+[voice.tts]
+endpoint = "http://127.0.0.1:9000"
+
+[runtime.assignments]
+sangsu = "voice.tts"
+`
+    const next = cascadeDeleteProvider(source, 'voice', runtimeReservedProviderIdsFixture)
+    const env = parseRuntimeTomlEnvironment(next, runtimeReservedProviderIdsFixture)
+
+    expect(next).not.toContain('[providers.voice]')
+    expect(next).toContain('[voice.tts]')
+    expect(env.defaultRuntimeId).toBe('runpod_mtp.qwen')
+    expect(env.assignments).toEqual({})
+  })
+
   it('does not delete reserved runtime namespaces when a legacy provider id is reserved', () => {
     const withReservedProvider = `${sourceText}
 
@@ -820,6 +843,21 @@ max-context = 1024
 `
       const env = parseRuntimeTomlEnvironment(source, runtimeReservedProviderIdsFixture)
       expect(env.bindings.map(binding => binding.id)).toEqual(['inline_p.m', 'dotted_p.m'])
+    })
+
+    it('reads the bindings of a provider whose id is __proto__', () => {
+      const source = `[providers.__proto__]
+protocol = "openai-http"
+endpoint = "https://p.example/v1"
+
+[models.m]
+api-name = "m"
+max-context = 1024
+
+[__proto__.m]
+`
+      const env = parseRuntimeTomlEnvironment(source, runtimeReservedProviderIdsFixture)
+      expect(env.bindings.map(binding => binding.id)).toEqual(['__proto__.m'])
     })
 
     it('reads a declared provider\'s table as a binding whatever its name', () => {

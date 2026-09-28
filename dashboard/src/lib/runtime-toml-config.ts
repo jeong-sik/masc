@@ -101,10 +101,6 @@ interface TomlDocument {
   readonly declaredProviderIds: ReadonlySet<string>
 }
 
-function isTomlTable(value: unknown): value is Readonly<Record<string, unknown>> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) && !(value instanceof Date)
-}
-
 type TomlScalar = string | number | boolean | null
 
 // Parse the complete document so quoted/escaped keys, dotted-key whitespace
@@ -125,13 +121,40 @@ function parseDocument(sourceText: string): TomlDocument {
       end: nextTable ? nextTable.loc.start.line - 1 : lines.length,
     }
   })
-  const providers = getStaticTOMLValue(ast).providers
+  const rootEntries = ast.body[0].body.filter((node): node is AST.TOMLKeyValue => node.type === 'TOMLKeyValue')
   return {
     source: sourceText,
     lines,
     sections,
-    declaredProviderIds: new Set(isTomlTable(providers) ? Object.keys(providers) : []),
+    declaredProviderIds: declaredProviderIdsOf(rootEntries, sections),
   }
+}
+
+// The keys under [providers], in every shape the server's loader accepts:
+// [providers.<id>] headers, keys inside a [providers] table, and dotted or
+// inline keys at the top level. Read from key nodes rather than from a built
+// object, which would drop an id such as __proto__.
+function declaredProviderIdsOf(
+  rootEntries: readonly AST.TOMLKeyValue[],
+  sections: readonly TomlSection[],
+): ReadonlySet<string> {
+  const ids = new Set<string>()
+  const firstKey = (entry: AST.TOMLKeyValue) => getStaticTOMLValue(entry.key)[0]
+  for (const section of sections) {
+    const [namespace, id] = section.path
+    if (namespace !== 'providers') continue
+    if (id !== undefined) ids.add(id)
+    else section.entries.map(firstKey).forEach(key => { if (key !== undefined) ids.add(key) })
+  }
+  for (const entry of rootEntries) {
+    const [namespace, id] = getStaticTOMLValue(entry.key)
+    if (namespace !== 'providers') continue
+    if (id !== undefined) ids.add(id)
+    else if (entry.value.type === 'TOMLInlineTable') {
+      entry.value.body.map(firstKey).forEach(key => { if (key !== undefined) ids.add(key) })
+    }
+  }
+  return ids
 }
 
 function tablePath(name: string): readonly string[] {
@@ -532,7 +555,6 @@ export function cascadeDeleteProvider(
   reservedProviderIds: readonly string[],
 ): string {
   const document = parseDocument(sourceText)
-  const env = parseRuntimeTomlEnvironment(sourceText, reservedProviderIds)
   const canDeleteBindingNamespace = !reservedProviderIds.includes(providerId)
   const sectionsToDelete = document.sections.filter(section =>
     (section.path[0] === 'providers' && section.path[1] === providerId)
@@ -547,10 +569,12 @@ export function cascadeDeleteProvider(
   // Also remove from runtime defaults/assignments if they reference this provider
   const nextDocument = parseDocument(next)
   const runtimeValues = sectionValues(nextDocument, 'runtime')
-  const toDeleteBindings = new Set(env.bindings.filter(b => b.providerId === providerId).map(b => b.id))
+  // A route names its provider before the first dot. It is cleared by that
+  // name, not by the bindings read, since a reserved provider has none read.
+  const routesToDeleted = (runtimeId: string) => splitRuntimeId(runtimeId)?.providerId === providerId
   const remainingBindings = parseRuntimeTomlEnvironment(next, reservedProviderIds).bindings.map(binding => binding.id)
   
-  if (typeof runtimeValues.default === 'string' && toDeleteBindings.has(runtimeValues.default)) {
+  if (typeof runtimeValues.default === 'string' && routesToDeleted(runtimeValues.default)) {
     const fallback = remainingBindings[0]
     next = fallback
       ? setRuntimeTomlKey(next, 'runtime', 'default', fallback)
@@ -560,7 +584,7 @@ export function cascadeDeleteProvider(
   // Clean up assignments
   const assignments = sectionValues(nextDocument, 'runtime.assignments')
   for (const [key, value] of Object.entries(assignments)) {
-    if (typeof value === 'string' && toDeleteBindings.has(value)) {
+    if (typeof value === 'string' && routesToDeleted(value)) {
       next = deleteRuntimeTomlKey(next, 'runtime.assignments', key)
     }
   }
@@ -640,17 +664,23 @@ export function setRuntimeTomlModelField(
   return setRuntimeTomlKey(sourceText, `models.${serializeTomlKey(modelId)}`, field, value)
 }
 
+// Runtime identifiers separate a bare provider id from the model id at the
+// first dot; a model id may itself contain dots and must remain one key.
+function splitRuntimeId(runtimeId: string): { providerId: string; modelId: string } | null {
+  const boundary = runtimeId.indexOf('.')
+  if (boundary <= 0 || boundary === runtimeId.length - 1) return null
+  return { providerId: runtimeId.slice(0, boundary), modelId: runtimeId.slice(boundary + 1) }
+}
+
 export function setRuntimeTomlBindingField(
   sourceText: string,
   runtimeId: string,
   field: 'enabled' | 'is-default' | 'max-concurrent' | 'keep-alive' | 'num-ctx',
   value: string | number | boolean | null,
 ): string {
-  // Runtime identifiers separate a bare provider id from the model id at
-  // the first dot; a model id may itself contain dots and must remain one key.
-  const boundary = runtimeId.indexOf('.')
-  if (boundary <= 0 || boundary === runtimeId.length - 1) throw new Error('Invalid runtime identifier')
-  const table = `${serializeTomlKey(runtimeId.slice(0, boundary))}.${serializeTomlKey(runtimeId.slice(boundary + 1))}`
+  const parts = splitRuntimeId(runtimeId)
+  if (parts === null) throw new Error('Invalid runtime identifier')
+  const table = `${serializeTomlKey(parts.providerId)}.${serializeTomlKey(parts.modelId)}`
   if (value === null) return deleteRuntimeTomlKey(sourceText, table, field)
   return setRuntimeTomlKey(sourceText, table, field, value)
 }

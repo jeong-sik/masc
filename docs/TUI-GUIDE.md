@@ -262,7 +262,10 @@ reveal a hidden toggle that had no visible effect when it was pressed.
 ### The Activity pane
 
 `Ctrl-L` walks the pane on the right of every surface through narrow, wide
-and hidden. Its `[Recent]` tab is what each keeper is doing now, one row
+and hidden. The pane opens only where the surface keeps at least 100 columns
+beside it, the width the tables are laid out for: from 156 columns for the
+narrow pane and from 174 for the wide one. Below that the surface has the
+whole terminal. Its `[Recent]` tab is what each keeper is doing now, one row
 each:
 
 ```

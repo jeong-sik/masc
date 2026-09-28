@@ -25,11 +25,19 @@ let gap_cells = 1
 let reading_cells = 36
 let pane_cols = border_cells + mark_cells + name_cells + gap_cells + reading_cells
 
-(* What the roster pane leaves a surface is the least a surface lays out
-   against anywhere in the TUI. Sharing that floor means a screen wide
-   enough for both panes gives the surface no less than the roster alone. *)
-let surface_floor_cols =
-  Masc_tui_roster_pane.threshold_cols - Masc_tui_roster_pane.pane_cols
+(* What a surface keeps beside this pane: at least 100 columns. The screens
+   the pane stands beside are tables laid out for 100 -- the Keepers list
+   shows its whole column set from an inner width of 98
+   ([Masc_tui_render_schedule.keeper_flags_minimum_inner_width]), Memory
+   keeps its SOURCE column at 100 (#36351), and RFC-0459 §4.1 gives one
+   primary pane 100 columns. Opening the pane with less left takes a surface
+   from the whole terminal to that remainder in one column of resize: Board
+   read about 57 title cells at 131 columns and 11 at 132, and cut SCORE and
+   REPLIES (2026-09-28). One floor holds on every surface, so moving between
+   surfaces never opens or closes the pane (operator, 2026-09-28). The
+   roster keeps its own floor ([Masc_tui_roster_pane.threshold_cols]): it
+   stands beside the chat, whose prose reads in less. *)
+let surface_floor_cols = 100
 
 let threshold_cols = pane_cols + surface_floor_cols
 
@@ -39,8 +47,9 @@ let threshold_cols = pane_cols + surface_floor_cols
    (kidsnote-slack-context-collector, 32 of 34); the calls' own column is
    the call row's remaining width, so the tool names gain the rest.
 
-   What it costs: every reader needs a 150-column terminal for the wide
-   pane, and fourteen of the eighteen are for that one name -- the next
+   What it costs: the wide pane opens eighteen columns later than the
+   narrow one ([wide_threshold_cols]), and fourteen of the eighteen are for
+   that one name -- the next
    longest, kidsnote-spec-mania, is 19, and a longer name still reads,
    folded in the middle by [Layout.fit_middle]. The floor is seven: the age
    and its gap take seven cells of any extra, and fewer would leave the

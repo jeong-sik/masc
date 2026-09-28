@@ -565,12 +565,14 @@ let test_content_cols_give_the_surface_the_rest () =
   check int "hidden takes nothing" roomy (Pane.content_cols ~layout:Pane.Hidden ~cols:roomy);
   check int "no room takes nothing" narrow (Pane.content_cols ~layout:Pane.Narrow ~cols:narrow)
 
-let test_threshold_leaves_the_surface_the_roster_floor () =
-  check int "surface floor is what the roster leaves"
-    (Masc_tui_roster_pane.threshold_cols - Masc_tui_roster_pane.pane_cols)
-    (Pane.threshold_cols - Pane.pane_cols);
-  check int "the wide pane leaves the same floor" (Pane.threshold_cols - Pane.pane_cols)
-    (Pane.wide_threshold_cols - Pane.wide_pane_cols)
+let test_both_panes_leave_the_surface_one_floor () =
+  check int "the wide pane leaves the floor the narrow one does"
+    (Pane.threshold_cols - Pane.pane_cols)
+    (Pane.wide_threshold_cols - Pane.wide_pane_cols);
+  check bool "beside the pane a surface keeps no less than the chat beside the roster"
+    true
+    (Pane.threshold_cols - Pane.pane_cols
+     >= Masc_tui_roster_pane.threshold_cols - Masc_tui_roster_pane.pane_cols)
 
 (* ── rows ───────────────────────────────────────────────────────────── *)
 
@@ -2115,8 +2117,8 @@ let () =
             test_ctrl_l_walks_narrow_wide_hidden
         ; test_case "content cols give the surface the rest" `Quick
             test_content_cols_give_the_surface_the_rest
-        ; test_case "threshold leaves the surface the roster floor" `Quick
-            test_threshold_leaves_the_surface_the_roster_floor
+        ; test_case "both panes leave the surface one floor" `Quick
+            test_both_panes_leave_the_surface_one_floor
         ; test_case "clipped header preserves styled Unicode spans" `Quick
             test_clipped_header_preserves_spans_and_padding
         ; test_case "full-width row retains empty toned spans" `Quick

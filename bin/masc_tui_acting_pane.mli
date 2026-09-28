@@ -36,9 +36,11 @@ val reading_cells : int
     the list. Exported so a test can hold that sum without restating it. *)
 
 val threshold_cols : int
-(** The width from which a surface can afford the pane beside it. The pane
-    plus what the roster pane leaves a surface, so the two panes sharing one
-    screen leave the surface no narrower than the roster alone would. *)
+(** The width from which a surface can afford the pane beside it: the pane
+    plus the 100 columns every surface keeps beside it, the width its tables
+    were laid out for. The floor is the same on every surface, so moving
+    between surfaces never opens or closes the pane. It is no smaller than
+    what the roster pane leaves the chat. *)
 
 val wide_threshold_cols : int
 (** The width from which a surface can afford the wide pane: the wide pane

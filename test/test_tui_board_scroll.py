@@ -62,7 +62,7 @@ def run(executable: str) -> None:
 
 # The Board read pane gets what is left after two panes that stand beside it:
 # the acting pane on the right (Masc_tui_acting_pane.pane_cols = 56, shown from
-# threshold_cols = 132; render reserves it through get_terminal_size) and the
+# threshold_cols = 156; render reserves it through get_terminal_size) and the
 # roster pane on the left (Masc_tui_roster_pane.pane_cols = 34). The side layout
 # needs 120 read-pane columns (Masc_tui_layout.board_read_side_minimum_cols),
 # so the terminal must be at least 56 + 34 + 120 = 210. At 180 the read pane is

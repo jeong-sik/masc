@@ -988,6 +988,107 @@ let test_edit_public_validation_rejects_content () =
   | None -> Alcotest.fail "Edit public descriptor did not resolve"
 ;;
 
+(* Fleet evidence (tool_calls 2026-09-26/27/28): 25 Edit calls carried a [cwd]
+   Read would have honoured and Edit rejected. Validation accepts it now;
+   translation joins it into [path] the way Read resolves it, and [cwd]
+   itself never reaches the runtime — the joined string faces containment
+   exactly as a directly spelled path. *)
+let test_edit_public_validation_translates_cwd () =
+  let fields_of input =
+    match
+      Resolution.validated_descriptor_and_input_for_tool_call ~tool_name:"Edit" ~input
+    with
+    | Some (Ok (_, `Assoc fields)) -> fields
+    | Some (Ok (_, other)) ->
+      Alcotest.failf "Edit translated input is not an object: %s" (Yojson.Safe.to_string other)
+    | Some (Error validation_result) ->
+      Alcotest.failf
+        "Edit public validation unexpectedly failed: %s"
+        (Tool_result.data validation_result |> Yojson.Safe.to_string)
+    | None -> Alcotest.fail "Edit public descriptor did not resolve"
+  in
+  let string_field fields key =
+    match List.assoc_opt key fields with
+    | Some (`String value) -> Some value
+    | Some _ | None -> None
+  in
+  let edit_input ?cwd file_path =
+    `Assoc
+      ([ "file_path", `String file_path
+       ; "old_string", `String "let x = 1"
+       ; "new_string", `String "let x = 2"
+       ]
+       @ match cwd with None -> [] | Some cwd -> [ "cwd", `String cwd ])
+  in
+  let fields = fields_of (edit_input ~cwd:"lib" "src.ml") in
+  Alcotest.(check (option string))
+    "relative file_path joins against cwd"
+    (Some "lib/src.ml")
+    (string_field fields "path");
+  Alcotest.(check bool)
+    "cwd is consumed by translation"
+    true
+    (List.assoc_opt "cwd" fields = None);
+  Alcotest.(check (option string))
+    "mode stays pinned to patch"
+    (Some "patch")
+    (string_field fields "mode");
+  let fields = fields_of (edit_input ~cwd:"lib" "/abs/src.ml") in
+  Alcotest.(check (option string))
+    "absolute file_path ignores cwd"
+    (Some "/abs/src.ml")
+    (string_field fields "path");
+  let fields = fields_of (edit_input "lib/src.ml") in
+  Alcotest.(check (option string))
+    "missing cwd leaves the path alone"
+    (Some "lib/src.ml")
+    (string_field fields "path");
+  let fields = fields_of (edit_input ~cwd:"  " "lib/src.ml") in
+  Alcotest.(check (option string))
+    "blank cwd is ignored"
+    (Some "lib/src.ml")
+    (string_field fields "path")
+;;
+
+(* The translator stays closed for callers that bypass validation: a
+   non-string [cwd] is ignored rather than joined, and undeclared keys still
+   never reach the runtime. *)
+let test_edit_translation_consumes_cwd_without_validation () =
+  let fields =
+    match
+      Descriptor.translate_input
+        ~public:"Edit"
+        (`Assoc
+          [ "file_path", `String "src.ml"
+          ; "old_string", `String "let x = 1"
+          ; "new_string", `String "let x = 2"
+          ; "cwd", `Int 42
+          ; "content", `String "let clobbered = true"
+          ])
+    with
+    | `Assoc fields -> fields
+    | other ->
+      Alcotest.failf "Edit translated input is not an object: %s" (Yojson.Safe.to_string other)
+  in
+  let string_field key =
+    match List.assoc_opt key fields with
+    | Some (`String value) -> Some value
+    | Some _ | None -> None
+  in
+  Alcotest.(check (option string))
+    "non-string cwd is ignored"
+    (Some "src.ml")
+    (string_field "path");
+  Alcotest.(check bool)
+    "cwd never reaches the runtime"
+    true
+    (List.assoc_opt "cwd" fields = None);
+  Alcotest.(check bool)
+    "content still never reaches the runtime"
+    true
+    (List.assoc_opt "content" fields = None)
+;;
+
 let test_read_public_validation_translates_supported_fields () =
   let input =
     `Assoc
@@ -2085,6 +2186,14 @@ let () =
             "Edit rejects an undeclared content key before translation"
             `Quick
             test_edit_public_validation_rejects_content
+        ; test_case
+            "Edit validates then joins an explicit cwd into path"
+            `Quick
+            test_edit_public_validation_translates_cwd
+        ; test_case
+            "Edit translation consumes cwd without validation"
+            `Quick
+            test_edit_translation_consumes_cwd_without_validation
         ; test_case
             "translation validation policy is typed for all descriptors"
             `Quick

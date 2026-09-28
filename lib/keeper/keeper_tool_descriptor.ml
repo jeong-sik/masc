@@ -346,16 +346,33 @@ let translate_read_file input =
    inferring overwrite from its presence turned a mistaken key into a silent
    whole-file overwrite (masc#31573). Translation is closed to match: only the
    declared patch fields reach the runtime, so even a validation-bypassing
-   caller cannot smuggle extra members through this path. *)
+   caller cannot smuggle extra members through this path.
+   [cwd] joins here, syntactically, the way Read resolves it: a relative
+   [file_path] reads against [cwd] and an absolute one ignores it. The joined
+   string faces the runtime's containment and gates exactly as a directly
+   spelled path, so no new expressiveness reaches the write path; [cwd]
+   itself never leaves the translator. *)
 let translate_edit_file input =
   match input with
   | `Assoc fields ->
     let out = ref [ "mode", `String "patch" ] in
+    let cwd =
+      match List.assoc_opt "cwd" fields with
+      | Some (`String cwd) when String.trim cwd <> "" -> Some cwd
+      | Some _ | None -> None
+    in
+    let join_cwd path =
+      match path, cwd with
+      | `String file, Some cwd when Filename.is_relative file ->
+        `String (Filename.concat cwd file)
+      | path, _ -> path
+    in
     List.iter
       (fun (k, v) ->
          match k with
-         | "file_path" -> out := ("path", v) :: !out
+         | "file_path" -> out := ("path", join_cwd v) :: !out
          | "old_string" | "new_string" | "replace_all" -> out := (k, v) :: !out
+         | "cwd" -> ()
          | _ -> ())
       fields;
     `Assoc (List.rev !out)

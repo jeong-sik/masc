@@ -303,7 +303,10 @@ type sub_board = {
 module Limits = struct
   let env_int name default = Env_config_core.get_int ~default name
 
-  let default_comment_page_limit = 50
+  (* The default read is the newest comments, not the oldest: a reader that
+     does not know a thread yet wants its tail, and the body travels with it.
+     A caller that wants the head names comment_offset=0. *)
+  let default_comment_page_limit = 20
   let max_comment_page_limit = 100
   let default_ttl_hours = 0    (* 0 = permanent (no expiry) *)
   let sweeper_interval_sec = env_int "MASC_BOARD_SWEEPER_INTERVAL_SEC" 10
@@ -423,7 +426,10 @@ module Comment_page = struct
      page starts, so two of them in one call name two pages. The call is
      refused rather than one of them winning: a winner the caller did not
      pick reads a page it did not ask for. comment_tail is also the page's
-     size, so comment_limit beside it is a second size. *)
+     size, so comment_limit beside it is a second size. With none of them the
+     read starts at the newest comment: a caller that does not know the
+     thread yet wants its tail, and comment_offset=0 is how it asks for the
+     head. *)
   let request_of_args (args : Yojson.Safe.t) =
     match args with
     | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
@@ -452,7 +458,7 @@ module Comment_page = struct
          Ok { start = From_offset offset; limit }
        | None, None, None, limit ->
          let* limit = bounded_limit limit in
-         Ok { start = From_offset 0; limit })
+         Ok { start = Latest; limit })
   ;;
 
   let request_error_to_string = function

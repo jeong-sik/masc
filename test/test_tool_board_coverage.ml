@@ -2067,10 +2067,10 @@ let test_post_get_comment_pages_carry_their_range () =
   check_page
     ~label:"default page"
     default_page
-    ~offset:0
-    ~returned:50
+    ~offset:79
+    ~returned:20
     ~total:99
-    ~next_offset:(Some 50);
+    ~next_offset:None;
   Alcotest.(check bool)
     "header counts the thread it pages"
     true
@@ -2449,7 +2449,11 @@ let test_post_get_page_follows_the_lane_ceiling () =
   let comment_count = 30 in
   let post_id, _ids = create_thread_of_long_comments ~count:comment_count in
   let agent_core =
-    read_page ~result_boundary:agent_core_lane ~label:"agent-core lane" post_id []
+    read_page
+      ~result_boundary:agent_core_lane
+      ~label:"agent-core lane"
+      post_id
+      [ "comment_offset", `Int 0; "comment_limit", `Int Board.Limits.max_comment_page_limit ]
   in
   check_page
     ~label:"agent-core lane"
@@ -2467,7 +2471,11 @@ let test_post_get_page_follows_the_lane_ceiling () =
     true
     (String.length agent_core.body <= Common.max_agent_core_inline_result_bytes);
   let mcp_caller =
-    read_page ~result_boundary:Tool_output.Sent_to_client ~label:"MCP caller" post_id []
+    read_page
+      ~result_boundary:Tool_output.Sent_to_client
+      ~label:"MCP caller"
+      post_id
+      [ "comment_offset", `Int 0; "comment_limit", `Int Board.Limits.max_comment_page_limit ]
   in
   Alcotest.(check int) "MCP caller: offset" 0 mcp_caller.offset;
   Alcotest.(check int) "MCP caller: total" comment_count mcp_caller.total;
@@ -2500,7 +2508,12 @@ let test_keeper_board_read_pages_by_the_projection_it_is_given () =
         ~meta:keeper_meta
         ~result_projection
         ~name:"masc_board_post_get"
-        ~args:(post_get_args post_id [])
+        ~args:
+          (post_get_args
+             post_id
+             [ "comment_offset", `Int 0
+             ; "comment_limit", `Int Board.Limits.max_comment_page_limit
+             ])
     in
     page_view_of
       ~body:execution.Keeper_tool_execution.raw_output
@@ -2607,7 +2620,7 @@ let test_post_get_a_sweep_between_pages_shows_in_the_next_page () =
        ~result_boundary:Tool_output.Sent_to_client
        ~label:"before the sweep"
        post_id
-       [ "comment_limit", `Int page_limit ])
+       [ "comment_offset", `Int 0; "comment_limit", `Int page_limit ])
     ~offset:0
     ~returned:page_limit
     ~total:comment_count

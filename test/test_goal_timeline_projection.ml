@@ -140,6 +140,8 @@ let goal : Goal_store.goal =
   ; phase = Goal_phase.Executing
   ; last_review_note = None
   ; last_review_at = None
+  ; notified_refuted_key = None
+  ; notified_overdue_key = None
   ; created_at = "2026-08-01T00:00:00Z"
   ; updated_at = "2026-08-21T00:00:00Z"
   }

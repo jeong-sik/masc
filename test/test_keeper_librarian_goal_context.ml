@@ -21,6 +21,7 @@ let goal id title : Goal_store.goal =
   ; metric = Some "accepted artifacts"; target_value = Some "2"
   ; due_date = None; priority = 3; phase = Goal_phase.Executing
   ; last_review_note = None; last_review_at = None
+  ; notified_refuted_key = None; notified_overdue_key = None
   ; created_at = now; updated_at = now }
 
 let write_goals config goals =

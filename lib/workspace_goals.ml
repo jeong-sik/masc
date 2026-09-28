@@ -538,6 +538,175 @@ let announce_proof_verdict
       (Workspace_broadcast.broadcast_error_to_string error)
 ;;
 
+(* {1 Owner-directed Goal notices (#39571)}
+
+   A Goal records the Keeper that created it. Two events are worth one direct
+   notice to that owner: a refuted proof verdict, and a due date that passed
+   while the Goal is still executing or verifying. The notice is a Pending
+   Message in the owner's own transcript, not a fleet broadcast: the owner is
+   the one who must act, and a broadcast would put the same line in every
+   Keeper's window.
+
+   A Goal with no recorded owner has no recipient. The notice is skipped and
+   the screen keeps showing "unknown" so the operator can set an owner
+   explicitly; nothing is posted to the Board on the owner's behalf.
+
+   Delivery is idempotent by the [Goal_notification] key (goal id, owner, and
+   the one event). The same event, a retry after a failed send, or a restart
+   all reuse the key, so the owner's transcript gains exactly one row. The
+   Goal's marker is written only after the row is durably committed, so a
+   crash between the two re-sends and the append-once path keeps the count at
+   one. *)
+
+type goal_notice_kind =
+  | Refuted_notice
+  | Overdue_notice
+
+let goal_notice_key ~goal_id ~owner ~event = goal_id ^ "|" ^ owner ^ "|" ^ event
+
+let goal_notice_speaker : Keeper_chat_store.speaker =
+  { speaker_id = Some "goal-verifier"
+  ; speaker_name = Some "goal-verifier"
+  ; speaker_authority = Keeper_chat_store.External
+  }
+;;
+
+let deliver_goal_owner_notice config ~(goal : Goal_store.goal) ~event ~content =
+  match goal.Goal_store.owner with
+  | Goal_store.Unknown_owner -> Ok ()
+  | Goal_store.Owner owner ->
+    let delivery_key =
+      Keeper_chat_delivery_identity.Goal_notification
+        { goal_id = goal.Goal_store.id; owner; event }
+    in
+    let mentions =
+      match Keeper_identity.Keeper_id.of_string owner with
+      | Some keeper_id -> [ keeper_id ]
+      | None -> []
+    in
+    (match
+       Keeper_chat_store.append_user_message_once
+         ~base_dir:config.Workspace_utils_backend_setup.base_path
+         ~keeper_name:owner
+         ~delivery_key
+         ~content
+         ~surface:Surface_ref.Agent
+         ~speaker:goal_notice_speaker
+         ~extra_mentions:mentions
+         ()
+     with
+     | Ok _ -> Ok ()
+     | Error detail -> Error detail)
+;;
+
+let mark_goal_notice config ~goal_id kind ~key =
+  let apply (goal : Goal_store.goal) =
+    match kind with
+    | Refuted_notice -> { goal with Goal_store.notified_refuted_key = Some key }
+    | Overdue_notice -> { goal with Goal_store.notified_overdue_key = Some key }
+  in
+  match Goal_store.transact_goal config ~goal_id (fun goal -> Ok (apply goal, ())) with
+  | Ok _ -> ()
+  | Error error ->
+    Log.Misc.warn
+      "goal notice marker write failed goal_id=%s: %s"
+      goal_id
+      (Goal_store.write_error_to_string error)
+;;
+
+let notify_goal_refuted config ~(goal : Goal_store.goal)
+    (verdict : Goal_verification.verdict) =
+  match goal.Goal_store.owner with
+  | Goal_store.Unknown_owner -> ()
+  | Goal_store.Owner owner ->
+    let event = "refuted:" ^ verdict.Goal_verification.request_id in
+    let content =
+      Printf.sprintf
+        "[goal_verdict] %s — %s\noutcome: refuted\nevidence: %s"
+        goal.Goal_store.id
+        goal.Goal_store.title
+        verdict.Goal_verification.evidence
+    in
+    (match deliver_goal_owner_notice config ~goal ~event ~content with
+     | Ok () ->
+       mark_goal_notice config ~goal_id:goal.Goal_store.id Refuted_notice
+         ~key:(goal_notice_key ~goal_id:goal.Goal_store.id ~owner ~event)
+     | Error detail ->
+       Log.Misc.warn
+         "goal refuted owner notice failed goal_id=%s owner=%s: %s"
+         goal.Goal_store.id
+         owner
+         detail)
+;;
+
+(* [due_date] is a calendar date with no zone, so it is compared with the
+   operator's own calendar date — the day [localtime] puts [now] on — matching
+   the Overview's own overdue rule. Anything that is not a calendar date is not
+   overdue. *)
+let goal_due_date_passed ~today (goal : Goal_store.goal) =
+  match goal.Goal_store.due_date with
+  | None -> false
+  | Some raw ->
+    (match
+       Scanf.sscanf_opt (String.trim raw) "%4d-%2d-%2d%!" (fun y m d -> (y, m, d))
+     with
+     | None -> false
+     | Some date ->
+       (match Ptime.of_date date with
+        | None -> false
+        | Some due -> Ptime.compare due today < 0))
+;;
+
+let local_today () =
+  let tm = Unix.localtime (Unix.gettimeofday ()) in
+  Ptime.of_date (tm.Unix.tm_year + 1900, tm.Unix.tm_mon + 1, tm.Unix.tm_mday)
+;;
+
+(* The overdue notice is judged by the server's periodic/restart scan, never as
+   a side effect of a list query: a read must not send. The scan is idempotent
+   — the marker skips an already-notified Goal, and the delivery key makes a
+   re-send a no-op — so it is safe to run on every maintenance tick. *)
+let scan_overdue_goal_notifications config =
+  match Goal_store.list_goals_result config () with
+  | Error _ -> ()
+  | Ok goals ->
+    (match local_today () with
+     | None -> ()
+     | Some today ->
+    List.iter
+      (fun (goal : Goal_store.goal) ->
+         match goal.Goal_store.owner, goal.Goal_store.phase with
+         | Goal_store.Unknown_owner, _ -> ()
+         | Goal_store.Owner owner, (Goal_phase.Executing | Goal_phase.Verifying) ->
+           if goal_due_date_passed ~today goal
+           then (
+             let due_date = Option.value goal.Goal_store.due_date ~default:"" in
+             let event = "overdue:" ^ due_date in
+             let key = goal_notice_key ~goal_id:goal.Goal_store.id ~owner ~event in
+             if goal.Goal_store.notified_overdue_key = Some key
+             then ()
+             else (
+               let content =
+                 Printf.sprintf
+                   "[goal_overdue] %s — %s\ndue_date: %s\nphase: %s"
+                   goal.Goal_store.id
+                   goal.Goal_store.title
+                   due_date
+                   (Goal_phase.to_string goal.Goal_store.phase)
+               in
+               match deliver_goal_owner_notice config ~goal ~event ~content with
+               | Ok () ->
+                 mark_goal_notice config ~goal_id:goal.Goal_store.id Overdue_notice ~key
+               | Error detail ->
+                 Log.Misc.warn
+                   "goal overdue owner notice failed goal_id=%s owner=%s: %s"
+                   goal.Goal_store.id
+                   owner
+                   detail))
+         | Goal_store.Owner _, _ -> ())
+      goals)
+;;
+
 let gate_event_payload (ctx : context) ~phase (verdict : Goal_verification.verdict) =
   let outcome_fields =
     match verdict.outcome with
@@ -632,7 +801,10 @@ let commit_verifier_decision ~tool_name ~start_time config ~goal_id
        if changed then (
          emit_goal_event ctx ~goal_id ~event_type:"goal_phase"
            ~payload:(gate_event_payload ctx ~phase:goal.phase verdict);
-         announce_proof_verdict ctx ~goal verdict);
+         announce_proof_verdict ctx ~goal verdict;
+         (match verdict.outcome with
+          | Goal_verification.Refuted _ -> notify_goal_refuted config ~goal verdict
+          | Goal_verification.Proven -> ()));
        ok_result ~tool_name ~start_time
          [ "goal_id", `String goal_id
          ; "action", `String (Goal_phase.action_to_string action)

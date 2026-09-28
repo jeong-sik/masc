@@ -120,3 +120,11 @@ val confirm_completion : Workspace_utils_backend_setup.config -> goal_id:string 
     never the request body or agent tool surface. Exact current proof
     required; a binding that does not name it is [Rejected], and a store
     this build cannot read is [Store_unavailable] with its own value. *)
+
+val scan_overdue_goal_notifications : Workspace_utils_backend_setup.config -> unit
+(** Send the one owner notice owed to each Goal past its [due_date] while still
+    executing or verifying (#39571). Judged by the server's periodic/restart
+    scan, never as a side effect of a list query. Idempotent: an already
+    notified Goal is skipped by its marker, and a re-send reuses the delivery
+    key, so the owner's transcript gains exactly one row per event. A Goal with
+    no recorded owner has no recipient and is skipped. *)

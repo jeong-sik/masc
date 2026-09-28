@@ -67,6 +67,8 @@ let goal_row ts =
     ; phase = Goal_phase.Executing
     ; last_review_note = None
     ; last_review_at = None
+    ; notified_refuted_key = None
+    ; notified_overdue_key = None
     ; created_at = ts
     ; updated_at = ts
     }

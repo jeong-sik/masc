@@ -47,6 +47,8 @@ type goal = {
   phase : Goal_phase.t;
   last_review_note : string option;
   last_review_at : string option;
+  notified_refuted_key : string option;
+  notified_overdue_key : string option;
   created_at : string;
   updated_at : string;
 }
@@ -117,6 +119,8 @@ let goal_to_yojson (goal : goal) =
       ("phase", Goal_phase.to_yojson goal.phase);
       ("last_review_note", Json_util.string_opt_to_json goal.last_review_note);
       ("last_review_at", Json_util.string_opt_to_json goal.last_review_at);
+      ("notified_refuted_key", Json_util.string_opt_to_json goal.notified_refuted_key);
+      ("notified_overdue_key", Json_util.string_opt_to_json goal.notified_overdue_key);
       ("created_at", `String goal.created_at);
       ("updated_at", `String goal.updated_at);
     ]
@@ -156,6 +160,8 @@ let accepted_goal_fields =
   ; "phase"
   ; "last_review_note"
   ; "last_review_at"
+  ; "notified_refuted_key"
+  ; "notified_overdue_key"
   ; "created_at"
   ; "updated_at"
   ]
@@ -249,6 +255,8 @@ let goal_of_yojson : Yojson.Safe.t -> (goal, schema_rejection) result = function
               phase;
               last_review_note = Json_util.get_string json "last_review_note";
               last_review_at = Json_util.get_string json "last_review_at";
+              notified_refuted_key = Json_util.get_string json "notified_refuted_key";
+              notified_overdue_key = Json_util.get_string json "notified_overdue_key";
               created_at;
               updated_at;
             }
@@ -795,6 +803,8 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
                         phase = Goal_phase.Executing;
                         last_review_note = None;
                         last_review_at = None;
+                        notified_refuted_key = None;
+                        notified_overdue_key = None;
                         created_at = now;
                         updated_at = now;
                       }

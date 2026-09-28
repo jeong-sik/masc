@@ -52,6 +52,15 @@ type goal = {
   phase : Goal_phase.t;
   last_review_note : string option;
   last_review_at : string option;
+  notified_refuted_key : string option;
+      (** The dedup key of the last owner notice sent for a refuted verdict
+          (#39571). Written only after the notice row is durably committed, so
+          a crash between the two re-sends and the idempotent append keeps the
+          owner's transcript at one row. [None] before any notice. *)
+  notified_overdue_key : string option;
+      (** The dedup key of the last owner notice sent for an overdue Goal
+          (#39571). Same write-after-commit ordering as
+          {!notified_refuted_key}. *)
   created_at : string;
   updated_at : string;
 }

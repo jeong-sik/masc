@@ -984,7 +984,20 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
               Log.Server.warn
                 "chat journal audit sweep failed: %s"
                 (Printexc.to_string exn))
-         end
+         end;
+         (* #39571: one owner notice per overdue Goal. Judged on this periodic
+            pass, never as a side effect of a list query. Idempotent by the
+            Goal marker and the delivery key, so a restart or a repeated tick
+            sends nothing twice. *)
+         (try
+            Workspace_goals.scan_overdue_goal_notifications
+              (Mcp_server.workspace_config state)
+          with
+          | Eio.Cancel.Cancelled _ as e -> raise e
+          | exn ->
+            Log.Server.warn
+              "goal overdue notice scan failed: %s"
+              (Printexc.to_string exn))
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->

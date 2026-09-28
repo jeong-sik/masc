@@ -88,6 +88,11 @@ val declare :
     [inherited_home] is the home a Claude Code or Codex provider without
     [account-home] runs on; a location equal to it is refused like any other
     login already in use, since the copy would share that login and its
-    quota. The result reads back with the login store in place and has passed
+    quota. Two locations are one login when they reach one directory on this
+    machine: the parts that exist are resolved by the filesystem ([..],
+    links, the letter case of a case-insensitive disk), and a part that does
+    not exist yet is compared as written. A part the filesystem refuses to
+    read is [Invalid_location]. The written location is kept as it is. The
+    result reads back with the login store in place and has passed
     {!Runtime_toml.parse_string}. The server's own preview still decides
     whether it can be saved. *)

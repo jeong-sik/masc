@@ -335,6 +335,69 @@ let test_every_seed_client_takes_a_second_account () =
       | Error e -> Alcotest.failf "%s refused: %s" id (D.error_message e))
     bases
 
+(* A login store is the directory the client opens, however it is spelled.
+   The review case (#39518): the base signs in at [accounts/../shared] and the
+   copy is offered [shared], which is the same directory. *)
+let test_one_directory_by_any_spelling () =
+  let root = Filename.temp_dir "masc-account-declaration" "" in
+  let path part = Filename.concat root part in
+  Sys.mkdir (path "accounts") 0o755;
+  Sys.mkdir (path "real") 0o755;
+  Unix.symlink (path "real") (path "link");
+  let text =
+    Printf.sprintf
+      {|[providers.codex_subscription]
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+account-home = "%s"
+
+[providers.codex_linked]
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+account-home = "%s"
+
+[models."gpt-5.6"]
+api-name = "gpt-5.6"
+max-context = 272000
+
+[codex_subscription."gpt-5.6"]
+
+[codex_linked."gpt-5.6"]
+|}
+      (path "accounts/../shared")
+      (path "real")
+  in
+  let t = parsed text in
+  let declare location =
+    D.declare ~inherited_home t ~base:(base_named t "codex_subscription") ~id:"codex_3"
+      ~location
+  in
+  let taken_by location =
+    match declare location with
+    | Error (D.Location_taken { provider; _ }) -> Some provider
+    | Ok _ -> None
+    | Error e -> Alcotest.failf "%s: %s" location (D.error_message e)
+  in
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote root)))
+    (fun () ->
+      Alcotest.(check (option string)) "[..] in the base's home"
+        (Some "codex_subscription") (taken_by (path "shared"));
+      Alcotest.(check (option string)) "[..] in the offered home"
+        (Some "codex_linked") (taken_by (path "accounts/../real"));
+      Alcotest.(check (option string)) "a link to a home"
+        (Some "codex_linked") (taken_by (path "link"));
+      Alcotest.(check (option string)) "another directory" None
+        (taken_by (path "elsewhere"));
+      (* Only a case-insensitive disk makes [REAL] the same directory. *)
+      let case_insensitive = Sys.file_exists (path "REAL") in
+      Alcotest.(check (option string)) "letter case, as the disk reads it"
+        (if case_insensitive then Some "codex_linked" else None)
+        (taken_by (path "REAL")))
+;;
+
 let () =
   Alcotest.run "runtime_account_declaration"
     [ ( "declare"
@@ -347,6 +410,8 @@ let () =
         ; Alcotest.test_case "antigravity copy reads the new oauth file" `Quick
             test_antigravity_copy_reads_the_new_oauth_file
         ; Alcotest.test_case "refusals" `Quick test_refusals
+        ; Alcotest.test_case "one directory by any spelling" `Quick
+            test_one_directory_by_any_spelling
         ; Alcotest.test_case "copied numbers keep their value" `Quick
             test_copied_numbers_keep_their_value
         ; Alcotest.test_case "layouts the append cannot carry" `Quick

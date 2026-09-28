@@ -5620,8 +5620,10 @@
   masc_tui_acting_pane
   masc_tui_acting
   masc_tui_observer
-  masc_tui_roster_pane
-  masc_tui_message_layout))
+  masc_tui_message_layout
+  ; the tables the pane's floor is measured against
+  masc_tui_frame
+  masc_tui_render_schedule))
 
 (test
  (name test_tui_keeper_mark)
@@ -6627,6 +6629,16 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_tab_strip_pty)))
+
+(rule
+ (alias runtest-test_tui_acting_pane_floor_pty)
+ (deps test_tui_acting_pane_floor_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_acting_pane_floor_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_acting_pane_floor_pty)))
 
 (rule
  (alias runtest-test_tui_fifo_admission_pty)

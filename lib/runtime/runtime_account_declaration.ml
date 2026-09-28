@@ -204,24 +204,59 @@ let login_store ?home_dir ~inherited_home client table =
       (Option.bind (field "credentials" table) (string_field "path"))
 ;;
 
-(* Two spellings of one directory are one login: [/a/b], [/a/b/], [/a//b] and
-   [/a/./b]. Compared lexically, without resolving links, because the text
-   written is what the client is given. *)
-let lexical path =
-  String.concat
-    "/"
+(* The directory an absolute path reaches on this machine, for comparing two
+   login stores; the text written stays as it is. Each part that exists is
+   resolved by the filesystem, so [..], links and the letter case of a
+   case-insensitive disk lead where the client would open. A part that does
+   not exist yet cannot be a link, so the rest is joined as written, without
+   empty and [.] parts. A part the filesystem refuses to read leaves the
+   directory unknown, and that is an error rather than a guess. *)
+let directory_of path =
+  let step directory part =
+    match directory with
+    | Error _ as unknown -> unknown
+    | Ok directory when part = ".." -> Ok (Filename.dirname directory)
+    | Ok directory ->
+      let next = Filename.concat directory part in
+      (match Unix.realpath next with
+       | resolved -> Ok resolved
+       | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) -> Ok next
+       | exception Unix.Unix_error (error, _, _) ->
+         Error (Printf.sprintf "%s: %s" next (Unix.error_message error)))
+  in
+  List.fold_left
+    step
+    (Ok "/")
     (List.filter (fun part -> part <> "" && part <> ".") (String.split_on_char '/' path))
 ;;
 
+(* The provider of [client] that already signs in where [location] leads.
+   Two spellings of one directory are one login: [/a/b/], [/a/./b],
+   [/a/c/../b], a link to [/a/b], or [/A/B] on a case-insensitive disk. *)
 let signed_in_at ?home_dir ~inherited_home t client location =
-  List.find_map
-    (fun (id, table) ->
-      match client_of_provider table with
-      | Some other when other = client ->
-        (match login_store ?home_dir ~inherited_home client table with
-         | Some store when lexical store = lexical location -> Some id
-         | Some _ | None -> None)
-      | Some _ | None -> None)
+  let unknown path detail =
+    Invalid_location
+      (Printf.sprintf "cannot tell which directory %s is (%s)" path detail)
+  in
+  let* target = Result.map_error (unknown location) (directory_of location) in
+  List.fold_left
+    (fun found (id, table) ->
+      match found with
+      | Error _ | Ok (Some _) -> found
+      | Ok None ->
+        (match client_of_provider table with
+         | Some other when other = client ->
+           (match login_store ?home_dir ~inherited_home client table with
+            | None -> Ok None
+            | Some store ->
+              (match directory_of store with
+               | Ok directory when directory = target -> Ok (Some id)
+               | Ok _ -> Ok None
+               | Error detail ->
+                 Error
+                   (unknown store (Printf.sprintf "provider %s signs in there; %s" id detail))))
+         | Some _ | None -> Ok None))
+    (Ok None)
     (providers t)
 ;;
 
@@ -307,8 +342,9 @@ let declare ?home_dir ~inherited_home t ~base ~id ~location =
   let* location = location_of ?home_dir base.client location in
   let* () =
     match signed_in_at ?home_dir ~inherited_home t base.client location with
-    | Some provider -> Error (Location_taken { location; provider })
-    | None -> Ok ()
+    | Ok (Some provider) -> Error (Location_taken { location; provider })
+    | Ok None -> Ok ()
+    | Error error -> Error error
   in
   let display_name = base.display_name ^ " · " ^ id in
   let appended =

@@ -1384,7 +1384,7 @@ is-non-interactive = true
     fireEvent.input(account, { target: { value: '/synthetic/another' } })
     fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement)
     await waitFor(() => expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledOnce())
-    expect(apiMocks.saveRuntimeTomlConfig.mock.calls[0][0]).toContain('account-home = "/synthetic/another"')
+    expect(apiMocks.saveRuntimeTomlConfig.mock.calls[0]?.[0]).toContain('account-home = "/synthetic/another"')
   })
 
   it.each(['claude-code', 'codex-app-server'])('keeps default-account edits available for %s', async protocol => {
@@ -1404,7 +1404,7 @@ is-non-interactive = true
     fireEvent.input(account, { target: { value: '' } })
     fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement)
     await waitFor(() => expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledOnce())
-    expect(apiMocks.saveRuntimeTomlConfig.mock.calls[0][0]).not.toContain('account-home = "/synthetic/native"')
+    expect(apiMocks.saveRuntimeTomlConfig.mock.calls[0]?.[0]).not.toContain('account-home = "/synthetic/native"')
   })
 
   it.each([false, true])('requires an explicit Muse model byte budget before adding a binding (declared=%s)', async declared => {

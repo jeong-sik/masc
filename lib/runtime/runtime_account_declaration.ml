@@ -175,9 +175,11 @@ let expand ?home_dir path =
 (* Both login stores are absolute paths kept exactly as written, which is the
    rule [Runtime_account_home] states; only the message differs. *)
 let location_of ?home_dir client raw =
-  match Runtime_account_home.of_string (expand ?home_dir raw) with
-  | Ok path -> Ok path
-  | Error reason ->
+  match home_dir, Runtime_account_home.of_string (expand ?home_dir raw) with
+  | None, Error _ when String.starts_with ~prefix:"~/" raw ->
+    Error (Invalid_location "~/ is expanded from HOME, which is not set; type an absolute path")
+  | _, Ok path -> Ok path
+  | _, Error reason ->
     (match client with
      | Claude_code | Codex -> Error (Invalid_location reason)
      | Antigravity ->

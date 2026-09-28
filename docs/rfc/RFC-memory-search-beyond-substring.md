@@ -166,21 +166,38 @@ OpenRouter 같은 외부 System One 서버라서 "기억 본문을 밖으로 내
 `[runtime.exact_output_lanes.memory_recall]` 로 slot 을 정한다. 닫힌 합이라 새 constructor 를 빠뜨린 match 는
 컴파일이 막는다. lane 이 선언되지 않으면 단계 2 는 꺼져 있고 단계 1 결과가 그대로 나간다.
 
-**입력.** query, 그리고 후보 목록 `(memory_id, claim)`. 후보는 현재 스냅숏(일반 + source-bound) 전체에서 고르되,
+**범위.** 판정은 `source=current` 와 `source=all` 의 현재 기억 부분에만 쓴다. `source=absorbed` 와
+`source=history` 는 판정을 부르지 않는다. 호출자가 고른 범위 밖의 사실을 돌려주면 안 되기 때문이다. `source=all`
+에서 absorbed 와 history 는 단계 1 결과 그대로 나간다(고를 것 3).
+
+**입력.** query, 그리고 후보 목록. 후보의 식별자는 판별된 참조다: 일반 기억은 `{"kind":"memory_id","id":…}`,
+source-bound 기억은 `{"kind":"source_sha256","id":…}`. `fact_match_to_json` 이 두 모양을 이미 구분하므로
+그대로 쓴다. 후보는 현재 스냅숏(일반 + source-bound) 전체에서 고르되,
 단계 1 이 찾은 것을 BM25 순으로 앞에 두고 나머지를 저장 순서로 뒤에 둔다. 요청 한 번의 크기는 lane 의
 `max_output_tokens` 와 따로 입력 바이트 상한 하나로 자르고, 넘치는 후보는 요청을 나누지 않고 잘라낸다(잘렸다는
-사실과 개수는 결정 로그에 남는다). 한 검색이 판정을 여러 번 부르지 않게 하려는 것이다.
+사실과 개수는 결정 로그와 **도구 응답** 양쪽에 남는다). 응답의 `recall_coverage`
+`{"candidates": n, "omitted": m}` 가 있어야 Keeper 가 "판정이 없다고 했다"와 "판정이 일부만 봤다"를 구분한다.
+한 검색이 판정을 여러 번 부르지 않게 하려는 것이다.
 
-**출력과 검증.** exact-output JSON `{"memory_ids": [...]}`. 검증은 "입력 후보의 부분집합, 중복 없음"이다.
+**출력과 검증.** exact-output JSON `{"selected": [<참조>, ...]}`. 검증은 "입력 후보의 부분집합, 중복 없음, 개수는
+호출의 `limit`(1~10) 이하"다. `limit` 을 넘는 답은 자르지 않고 디코드 실패로 버린다.
 workspace curator 의 `Workspace_memory_proposal.decode` 는 입력과 **같은** 집합을 요구하는데, 여기서는
 부분집합이면 된다. 모르는 id 가 하나라도 있으면 답 전체를 디코드 실패로 버리고 기본값을 채우지 않는다
 (`strict_parse_no_default`). 결과 순서는 판정이 준 순서를 쓰고, 판정이 고른 것 뒤에 단계 1 의 나머지를 붙이지
 않는다. 판정이 "없다"고 하면 0건이다.
 
 **기록.** `persist_before_model_call` 을 따라, 판정을 부르기 전에 결정 로그에 `memory_recall_request` 줄(query,
-후보 수, 잘린 수, `turn_ref`)을 먼저 쓴다. 판정 뒤의 `memory_search` 줄에는 `recall` 칸을 더한다:
-`not_configured | judged | lane_failed | decode_rejected`. 실패는 단계 1 결과를 그대로 돌려주고 응답에도 같은
-값을 싣는다(`failure_keeps_evidence`). 카운터 `masc_keeper_memory_search_total` 에 `recall` 라벨을 더한다.
+후보 수, 잘린 수, `turn_ref`)을 먼저 쓴다. 이 쓰기가 실패하면 판정을 부르지 않는다. 지금 `memory_search` 줄의
+쓰기는 실패해도 카운터만 올리고 넘어가는데, 요청 줄은 그 모양을 쓰지 않고 성공해야만 다음으로 간다. 판정 뒤의
+`memory_search` 줄에는 `recall` 칸을 더한다: `not_configured | not_invoked | request_not_persisted | judged |
+lane_failed | decode_rejected`. `not_invoked` 는 lane 은 있지만 호출 조건(고를 것 1)에 맞지 않아 부르지 않은
+경우다. 실패는 단계 1 결과를 그대로 돌려주고 응답에도 같은 값을 싣는다(`failure_keeps_evidence`). 카운터
+`masc_keeper_memory_search_total` 에 `recall` 라벨을 더한다.
+
+**최종 결과가 부수효과를 정한다.** 판정이 결과를 바꾸면 응답만이 아니라 `Retrieved` 사건(`record_memory_events`),
+결정 로그의 `match_count`·`matched_memory_ids`, 검색 outcome 카운터가 모두 **최종으로 돌려준 집합**을 쓴다.
+그러지 않으면 0건에서 판정이 찾아 준 기억은 `Retrieved` 가 남지 않고, 호출 조건을 넓힌 뒤에는 판정이 버린
+lexical 결과가 보이지도 않았는데 강화된다.
 
 **tool handler.** `keeper_memory_search_with_outcome` 은 지금 `sw`/`clock`/`net` 을 받지 않는다. 판정은 턴 안에서
 결과를 기다리는 동기 호출이므로 `Tool_analyze_image` 처럼 턴 범위 `ctx.sw`/`ctx.clock`/`ctx.net` 을 넘긴다. 턴이
@@ -194,6 +211,9 @@ workspace curator 의 `Workspace_memory_proposal.decode` 는 입력과 **같은*
 2. "로컬"을 어떻게 보장할지. 코드의 provider 종류는 로컬을 구분하지 못한다(llama.cpp 도 `OpenAI_compat`).
    §5 의 "기억 본문을 외부로 내보내지 않는다"가 어느 경계인지부터 정해야 한다.
    (a) 운영자 신뢰: 코드는 검사하지 않고, 운영자가 slot 을 로컬 runtime 으로만 선언한다고 믿는다.
+   어느 선택이든 (a) 가 아니면 `Memory_recall` lane 은 `cli_slot_ids` 를 가질 수 없다. official-client CLI
+   transport 는 endpoint 검사를 거치지 않고 외부 vendor 로 prompt 를 보낼 수 있기 때문이다(workspace curator 도
+   CLI tail 을 거부한다).
    (b) 호스트 로컬: 기억이 이 호스트를 떠나지 않는다. slot endpoint 의 host 는 loopback **IP 리터럴**
    (`127.0.0.0/8`, `::1`)이어야 하고, 이름(`localhost` 포함)은 lane 을 읽을 때 거부한다. 이름을 허용하면 검사한 DNS
    응답과 연결이 쓴 DNS 응답이 다를 수 있어서(DNS rebinding) 따로 검사하고 다시 연결하는 설계로는 경계를 증명하지

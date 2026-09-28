@@ -63,6 +63,9 @@ val row_json : integration_id:string -> (t, missing) result -> Yojson.Safe.t
     or [{"integration_id", "state": "not_read", "cause"}] with [cause] from
     {!missing_to_wire}. *)
 
+val providers_json : Runtime_schema.provider list -> Yojson.Safe.t
+(** {!row_json} of {!of_provider} for each provider with an account, in the
+    given order. *)
+
 val inventory_json : Runtime_schema.config -> Yojson.Safe.t
-(** {!row_json} of {!of_provider} for each declared provider with an
-    account. *)
+(** {!providers_json} of every declared provider. *)

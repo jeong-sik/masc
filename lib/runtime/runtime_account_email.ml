@@ -152,9 +152,11 @@ let row_json ~integration_id read =
   in
   `Assoc (("integration_id", `String integration_id) :: state)
 
-let inventory_json (config : Runtime_schema.config) =
+let providers_json providers =
   `List
     (List.filter_map
        (fun (provider : Runtime_schema.provider) ->
           Option.map (row_json ~integration_id:provider.id) (of_provider provider))
-       config.providers)
+       providers)
+
+let inventory_json (config : Runtime_schema.config) = providers_json config.providers

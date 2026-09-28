@@ -16057,12 +16057,13 @@ let render_config (state : state) =
 
 (* The startup splash: the Dashboard's own frame and header -- title,
    workspace, clock, connection badge -- with the candle where its sections
-   will be once the first briefing read answers. Keys are the
-   Dashboard's; the first one ends the splash and still does its job. *)
+   will be once the first briefing read answers. The footer and keys are the
+   Dashboard's; the first key ends the splash and still does its job. *)
 let render_overview_startup (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   surface_chrome ~overflow:Fits state ~terminal_rows ~cols ~surface_key:"overview"
     ~title:(overview_header state)
+    ~status:[ Masc_tui_footer.Refresh_interval state.refresh_interval ]
     ~hints:(Masc_tui_keys.footer_hints Overview)
     ~body:(fun ~budget c ->
       Masc_tui_emblem_screen.body ~screen:Masc_tui_emblem_screen.Startup

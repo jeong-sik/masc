@@ -1856,9 +1856,16 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
        ~binding_name:"render_overview" ~callee:"surface_chrome");
   check int "and reads no body height of its own" 0
-    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
-       ~binding_name:"render_overview"
-       ~callee:"Masc_tui_types.surface_body_rows");
+    (List.fold_left
+       (fun total callee ->
+         total
+         + Ast_grep.count_calls_in_value_binding ~module_path:render_path
+             ~binding_name:"render_overview" ~callee)
+       0
+       [ "Masc_tui_types.surface_body_rows"
+       ; "surface_body_rows"
+       ; "surface_chrome_budget"
+       ]);
   (* Both the attention count in the title and its empty-body note read the
      shared page state: unread/failed must not become a zero count, and unread
      must not become a blank body. *)

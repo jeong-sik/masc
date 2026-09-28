@@ -253,8 +253,25 @@ let test_frame_store_in_pool () =
   check bool "frame stored from Eio fiber through installed pool" true
     (Sys.file_exists path)
 
+let test_cancelled_frame_store_does_not_start () =
+  with_fixture "valid" @@
+  fun ~root:_ ~load:_ ~run:_ ~execute:_ ~capture:_ ~fallback_capture:_ ->
+  let dir = V.frames_dir ~keeper_name:"vision-fixture" in
+  let cancelled =
+    try
+      Eio.Cancel.sub (fun context ->
+        Eio.Cancel.cancel context (Failure "cancel artifact store");
+        ignore (V.store_frame ~keeper_name:"vision-fixture" (Base64.decode_exn png)));
+      false
+    with Eio.Cancel.Cancelled _ -> true
+  in
+  check bool "cancelled caller rejected before pool submission" true cancelled;
+  check bool "cancelled caller did not create a frame directory" false
+    (Sys.file_exists dir)
+
 let () = run "Keeper standalone official-client vision"
-  [ "artifact pool", [test_case "frame store" `Quick test_frame_store_in_pool]
+  [ "artifact pool", [test_case "frame store" `Quick test_frame_store_in_pool;
+                       test_case "cancelled frame store" `Quick test_cancelled_frame_store_does_not_start]
   ; "image and result", List.map (fun mode -> test_case mode `Quick (fun () -> test_response mode))
       ["valid"; "malformed"; "empty"; "wrong-type"]
   ; "selection", [test_case "explicit media membership and fallback" `Quick test_selection]

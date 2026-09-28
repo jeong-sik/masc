@@ -15191,7 +15191,7 @@ def paused_apart_from_stopped_interaction() -> Interaction:
             process, master_fd, output, rows=30, columns=120,
             needle=b"MASC Dashboard", controls=(FULL_REDRAW,),
         )
-        if b" idle " in frame or b"k-unknown" in frame:
+        if any(label in frame for label in (b" idle ", b" no work ", b"k-unknown")):
             raise AssertionError(f"Dashboard invented a Keeper state row: {frame!r}")
         # The harness confirms the exit that this first press arms.
         os.write(master_fd, b"q")

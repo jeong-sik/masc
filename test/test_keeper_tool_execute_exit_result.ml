@@ -115,7 +115,7 @@ let install_always_allow_gate ~base =
    factory provided)" before anything executes. The shared helper wires the
    one the production turn bundle wires. *)
 let run_execute ~config ~meta ~argv =
-  Keeper_tool_execute_runtime.handle_tool_execute_with_outcome
+  Keeper_tool_execute_runtime.handle_tool_execute_with_outcome ~result_projection:Tool_output.default_model_projection
     ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
     ~turn_sandbox_factory:(Masc_test_deps.fixture_turn_sandbox_factory ~config ~meta)
     ~config

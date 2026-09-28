@@ -72,7 +72,8 @@ let test_close_persists_successor_and_summary_across_restart () =
     (Option.is_none pre.closed);
   (match
      Board_votes.set_closed (store ()) ~post_id ~closed_by:"close-author"
-       ~successor_id ~summary:"moved to the successor" ()
+       ~successor:(Board.Successor successor_id)
+       ~summary:"moved to the successor" ()
    with
    | Ok () -> ()
    | Error e -> Alcotest.fail (Board.show_board_error e));
@@ -100,7 +101,8 @@ let test_reopen_clears_closed_state_across_restart () =
   in
   let post_id = Board.Post_id.to_string post.id in
   (match
-     Board_votes.set_closed (store ()) ~post_id ~closed_by:"reopen-author" ()
+     Board_votes.set_closed (store ()) ~post_id ~closed_by:"reopen-author"
+       ~successor:Board.No_successor ~summary:"closing to reopen" ()
    with
    | Ok () -> ()
    | Error e -> Alcotest.fail (Board.show_board_error e));
@@ -156,13 +158,13 @@ let test_reclosing_overwrites_the_previous_close () =
   let post_id = Board.Post_id.to_string post.id in
   (match
      Board_votes.set_closed (store ()) ~post_id ~closed_by:"first-closer"
-       ~summary:"first reason" ()
+       ~successor:Board.No_successor ~summary:"first reason" ()
    with
    | Ok () -> ()
    | Error e -> Alcotest.fail (Board.show_board_error e));
   (match
      Board_votes.set_closed (store ()) ~post_id ~closed_by:"second-closer"
-       ~summary:"second reason" ()
+       ~successor:Board.No_successor ~summary:"second reason" ()
    with
    | Ok () -> ()
    | Error e -> Alcotest.fail (Board.show_board_error e));
@@ -179,7 +181,8 @@ let test_reclosing_overwrites_the_previous_close () =
    Post_not_found rather than silently doing nothing. *)
 let test_close_and_reopen_report_post_not_found () =
   (match Board_votes.set_closed (store ()) ~post_id:"p-doesnotexist"
-           ~closed_by:"someone" () with
+           ~closed_by:"someone" ~successor:Board.No_successor
+           ~summary:"no such post" () with
    | Error (Board.Post_not_found _) -> ()
    | Ok () -> Alcotest.fail "set_closed on a missing post must not be Ok ()"
    | Error e ->
@@ -201,7 +204,8 @@ let test_closed_post_refuses_new_comments () =
   in
   let post_id = Board.Post_id.to_string post.id in
   (match
-     Board_votes.set_closed (store ()) ~post_id ~closed_by:"closed-thread-author" ()
+     Board_votes.set_closed (store ()) ~post_id ~closed_by:"closed-thread-author"
+       ~successor:Board.No_successor ~summary:"closing this thread" ()
    with
    | Ok () -> ()
    | Error e -> Alcotest.fail (Board.show_board_error e));
@@ -252,7 +256,8 @@ let test_closed_post_rejection_names_the_successor () =
   let successor_id = Board.Post_id.to_string successor.id in
   (match
      Board_votes.set_closed (store ()) ~post_id ~closed_by:"closed-thread-author"
-       ~successor_id ()
+       ~successor:(Board.Successor successor_id)
+       ~summary:"moved to the successor" ()
    with
    | Ok () -> ()
    | Error e -> Alcotest.fail (Board.show_board_error e));
@@ -279,7 +284,8 @@ let test_close_rejects_nonexistent_successor () =
   let post_id = Board.Post_id.to_string post.id in
   (match
      Board_votes.set_closed (store ()) ~post_id ~closed_by:"close-author"
-       ~successor_id:"p-0000000000000000000000000000dead" ()
+       ~successor:(Board.Successor "p-0000000000000000000000000000dead")
+       ~summary:"dangling successor" ()
    with
    | Ok () -> Alcotest.fail "expected Validation_error for a nonexistent successor"
    | Error (Board.Validation_error _) -> ()
@@ -297,7 +303,7 @@ let test_close_rejects_self_as_successor () =
   let post_id = Board.Post_id.to_string post.id in
   match
     Board_votes.set_closed (store ()) ~post_id ~closed_by:"close-author"
-      ~successor_id:post_id ()
+      ~successor:(Board.Successor post_id) ~summary:"self successor" ()
   with
   | Ok () -> Alcotest.fail "expected Validation_error for a self-referential successor"
   | Error (Board.Validation_error _) -> ()
@@ -370,6 +376,31 @@ let test_cap_warning_message_decides_the_nonpositive_opt_out () =
       (Astring.String.is_infix ~affix:"MASC_BOARD_COMMENT_COUNT_CAP" msg)
   | None -> Alcotest.fail "cap -1 switches the cap off and must warn"
 
+(* task-1758/#39356: the storage boundary refuses a close with no reason.
+   A blank summary -- empty or whitespace-only -- is a [Validation_error]
+   and nothing is written, so the dashboard route (which shares this
+   boundary) cannot record a close without a summary either. *)
+let test_close_rejects_blank_summary () =
+  let post =
+    create_post_exn ~author:"blank-summary-author" ~content:"needs a reason"
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  let attempt label summary =
+    match
+      Board_votes.set_closed (store ()) ~post_id ~closed_by:"blank-summary-author"
+        ~successor:Board.No_successor ~summary ()
+    with
+    | Ok () -> Alcotest.fail (label ^ " must be refused")
+    | Error (Board.Validation_error _) -> ()
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  attempt "empty summary" "";
+  attempt "whitespace-only summary" "   \t ";
+  attempt "non-breaking-space summary" "\194\160";
+  restart ();
+  Alcotest.(check bool) "post stayed open after refused closes" true
+    (Option.is_none (get_post_exn post_id).closed)
+
 let () =
   Alcotest.run "board_close_state"
     [ ( "close_state"
@@ -400,6 +431,9 @@ let () =
         ; Alcotest.test_case
             "comment past the cap is refused with the successor hint" `Quick
             (with_eio test_comment_past_the_cap_is_refused_with_successor_hint)
+        ; Alcotest.test_case
+            "close rejects a blank summary" `Quick
+            (with_eio test_close_rejects_blank_summary)
         ; Alcotest.test_case
             "cap warning message for the non-positive opt-out" `Quick
             test_cap_warning_message_decides_the_nonpositive_opt_out

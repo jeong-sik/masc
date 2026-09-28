@@ -471,9 +471,10 @@ else:
     assert server["transport"] == "streamableHttp" and server["mode"] == "required", server
 if SCENARIO == "hang_session":
     drain()
+count_key = "start_turn_count" if mode == "start" else "resume_turn_count"
 send({"jsonrpc": "2.0", "id": opened["id"], "result": {"session": {
     "sessionId": SESSION, "status": "idle",
-    "turnCount": FIXTURE.get("resume_turn_count", completed_turns), "modelId": model,
+    "turnCount": FIXTURE.get(count_key, completed_turns), "modelId": model,
     "approvalMode": {"mode": "promptUnmatched", "source": "startup", "lastCommandId": None},
     "workspaceRoot": FIXTURE["workspace_root"]}, "viewCursor": cursor()}})
 if mode == "resume":
@@ -1788,6 +1789,24 @@ let test_retry_previous_refuses_an_externally_advanced_session () =
     check (option string) "no new host turn was acknowledged" None observed_turn)
 ;;
 
+(* A started session must be empty: a host that attaches turns to a fresh
+   claim is refused before anything is dispatched. *)
+let test_nonempty_start_is_refused () =
+  with_scripted_host ~fixture:["start_turn_count", `Int 1] (fun ~base_path ->
+    let run = run_turn ~base_path ~tool:(masc_probe_tool (ref `Null)) in
+    (match run.outcome.result with
+     | Error (Agent_core.Error.Provider (Llm_provider.Error.ParseError _)) -> ()
+     | Error error -> fail (Agent_core.Error.to_string error)
+     | Ok _ -> fail "a non-empty start admitted the goal");
+    check_effect "refused start has no provider effect"
+      Keeper_provider_attempt_effect.No_effect_observed run.outcome;
+    check bool "refused start never dispatches" false
+      (Sys.file_exists (Filename.concat base_path "start-prompt.txt"));
+    let failure, observed_turn = recovery_row ~base_path in
+    check_failure "a non-empty start needs adjudication" Store.Protocol_failed failure;
+    check (option string) "no turn ran to name" None observed_turn)
+;;
+
 let test_owner_cancellation_after_completion_keeps_recovery () =
   List.iter (fun boundary -> with_scripted_host (fun ~base_path ->
     let observed = ref `Null in
@@ -2077,6 +2096,8 @@ let () =
       , [ test_case "MCP setup failure preserves previous settlement" `Quick test_bridge_setup_failure_preserves_previous_settlement
         ; test_case "capability refusal preserves previous settlement" `Quick test_capability_refusal_preserves_previous_settlement
         ; test_case "retry previous refuses externally advanced session" `Quick test_retry_previous_refuses_an_externally_advanced_session
+        ; test_case "a non-empty started session is refused" `Quick
+            test_nonempty_start_is_refused
         ; test_case "host stop resume requires folded native terminal" `Quick test_host_stop_resume_requires_a_folded_native_terminal
         ; test_case "admission timeout releases only undispatched claims" `Quick test_admission_timeout_restores_only_undispatched_claims
         ; test_case "read-only MCP failure preserves effect classification" `Quick test_read_only_mcp_failure_does_not_invent_an_effect

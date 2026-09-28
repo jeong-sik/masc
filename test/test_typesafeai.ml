@@ -191,6 +191,18 @@ let test_response_rejects_every_nonfinite_answer_field () =
       [ "NaN"; "Infinity"; "-Infinity"; "1e400"; "-1e400" ]) forms
 ;;
 
+let test_score_above_one_is_not_confidence () =
+  List.iter (fun score ->
+    let response = Yojson.Safe.from_string
+        (Printf.sprintf {|{"model":"jev-test","answers":{"q":{"type":"score","score":%s,"confidence":1,"probabilities":{"2":1}}}}|} score) in
+    match T.eval_response_of_yojson response with
+    | Ok { T.answers = [("q", T.Score_answer { score; _ })]; _ } ->
+      Alcotest.(check (float 0.0)) "score retains its own scale" 2.0 score
+    | Ok _ -> Alcotest.fail "unexpected answer"
+    | Error reason -> Alcotest.fail reason)
+    ["2"; "2.0"]
+;;
+
 let test_response_rejects_out_of_range_confidence () =
   List.iter (fun shape ->
     List.iter (fun number ->
@@ -586,6 +598,8 @@ let () =
             test_response_rejects_every_nonfinite_answer_field
         ; Alcotest.test_case "out-of-range confidence is rejected" `Quick
             test_response_rejects_out_of_range_confidence
+        ; Alcotest.test_case "score above one is not confidence" `Quick
+            test_score_above_one_is_not_confidence
         ; Alcotest.test_case
             "unknown usage preserves valid answers without inventing zero"
             `Quick

@@ -195,7 +195,7 @@ let answer_of_yojson json =
        let* score =
          match List.assoc_opt "score" fields with
          | Some (`Float f) -> finite_float ~field:"score" f
-         | Some (`Int i) -> confidence_value ~field:"score confidence" (float_of_int i)
+         | Some (`Int i) -> Ok (float_of_int i)
          | _ -> Error "typesafeai: score answer missing numeric 'score' field"
        in
        let* confidence =

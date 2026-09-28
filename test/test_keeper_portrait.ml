@@ -142,8 +142,8 @@ let test_pinned_name () =
       ~backdrop_hue:0.47156321624094832 ()
   in
   Alcotest.(check bool) "body" true (body_of_name name = expected);
-  Alcotest.(check bool) "equipment" true (equipment_of_name name = { bare with face = Freckles; base = Dish Gilt });
-  Alcotest.(check string) "pixels at 64" "4859244cb3011725145adb8bf50f53ec"
+  Alcotest.(check bool) "equipment" true (equipment_of_name name = { bare with head = Beanie; base = Dish Gilt });
+  Alcotest.(check string) "pixels at 64" "141b647cb851d95662c0bc1fd7ef80ff"
     (Digest.to_hex (Digest.string (draw ~equipment:(equipment_of_name name) (body_of_name name) 64)))
 
 (* A roster the size of the live one. Two names are stand-ins: the live
@@ -189,7 +189,9 @@ let test_every_item_shows () =
     (fun face -> match face with Bare_face -> () | Glasses | Shades | Eye_patch | Plaster | Freckles | Beard -> worn "face item" { bare with face })
     all_face_items;
   List.iter (fun neck -> match neck with Bare_neck -> () | Scarf -> worn "scarf" { bare with neck }) all_neck_items;
-  List.iter (fun head -> match head with Bare_head -> () | Bow -> worn "bow" { bare with head }) all_head_items;
+  List.iter
+    (fun head -> match head with Bare_head -> () | Bow | Crown | Beanie -> worn "head item" { bare with head })
+    all_head_items;
   List.iter
     (fun base -> match base with No_dish -> () | Dish _ -> worn "dish" { bare with base })
     all_base_items;

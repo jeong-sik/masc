@@ -73,10 +73,6 @@ type placement = {
   image : Draw.image;
 }
 
-(* 31 is the graphics query's and 32 the MSX screen's (Masc_tui_graphics,
-   Masc_tui_msx). *)
-let mascot_image_id = 41
-
 (* One placement per image: a second transfer under the same pair replaces
    the picture instead of stacking a copy. *)
 let placement_id = 1

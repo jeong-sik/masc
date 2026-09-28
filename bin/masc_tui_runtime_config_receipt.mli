@@ -84,3 +84,15 @@ type t =
 
 val decode : Yojson.Safe.t -> (t, string) result
 val summary : t -> string
+
+(** What POST /api/v1/runtime/config/raw/preview answers: whether the save
+    route would take the text, and when it would not, why. *)
+type preview =
+  | Can_save
+  | Cannot_save of string
+
+val decode_preview : Yojson.Safe.t -> (preview, string) result
+(** Reads [can_save]. A refusal carries [runtime_validation] when the runtime
+    parser refused, else the schema issues' details. An answer without a
+    boolean [can_save], or a refusal without a reason, is an error, never a
+    pass. *)

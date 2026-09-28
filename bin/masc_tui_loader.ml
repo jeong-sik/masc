@@ -1162,22 +1162,26 @@ let load_board_post ?(full_history = false) ~(host : string) ~(port : int)
     ~(post_id : string) () : (board_post * board_comment list, string) result =
   let read_page offset =
     let* json =
-      match offset with
-      | None -> fetch_board_post ~host ~port ~post_id ()
-      | Some offset ->
-          fetch_board_post ~comment_offset:offset
-            ~comment_limit:Masc.Board.Limits.max_comment_page_limit
-            ~host ~port ~post_id ()
+      Masc_tui_frame_timing.time_stage ~name:"board.http_json"
+        (fun () ->
+          match offset with
+          | None -> fetch_board_post ~host ~port ~post_id ()
+          | Some offset ->
+              fetch_board_post ~comment_offset:offset
+                ~comment_limit:Masc.Board.Limits.max_comment_page_limit
+                ~host ~port ~post_id ())
     in
-    let* comments_json = optional_list_field json "comments" in
-    let* comments = decode_board_comments comments_json in
-    let* page = required_object_field json "comment_page" in
-    let* actual_offset = required_int_field page "offset" in
-    let* total = required_int_field page "total" in
-    match offset with
-    | Some expected when actual_offset <> expected ->
-        Error "board detail returned a different comment offset"
-    | None | Some _ -> Ok (json, comments, actual_offset, total)
+    Masc_tui_frame_timing.time_stage ~name:"board.model_decode"
+      (fun () ->
+        let* comments_json = optional_list_field json "comments" in
+        let* comments = decode_board_comments comments_json in
+        let* page = required_object_field json "comment_page" in
+        let* actual_offset = required_int_field page "offset" in
+        let* total = required_int_field page "total" in
+        match offset with
+        | Some expected when actual_offset <> expected ->
+            Error "board detail returned a different comment offset"
+        | None | Some _ -> Ok (json, comments, actual_offset, total))
   in
   let* (first_json, first_comments, first_offset, total) =
     read_page (if full_history then Some 0 else None)
@@ -1187,7 +1191,10 @@ let load_board_post ?(full_history = false) ~(host : string) ~(port : int)
     | `Null -> first_json
     | value -> value
   in
-  let* post = decode_board_post ~require_body:true post_json in
+  let* post =
+    Masc_tui_frame_timing.time_stage ~name:"board.model_decode"
+      (fun () -> decode_board_post ~require_body:true post_json)
+  in
   let rec read_remaining offset total reversed =
     if offset >= total then Ok (post, List.rev reversed)
     else

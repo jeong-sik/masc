@@ -45,7 +45,8 @@ def scenario(binary, client, protocol, *, delayed_save=False, conflict_save=Fals
 
     def chunks():
         yield frame("started", {"login_id": SESSION, "integration_id": client, "account_ref": ACCOUNT})
-        yield frame("output", {"stream": "stdout", "text": "Open https://fixture-login.example/ and enter the returned code\n"})
+        # Coloured the way Codex colours its device link.
+        yield frame("output", {"stream": "stdout", "text": "Open \x1b[94mhttps://fixture-login.example/\x1b[0m and enter the returned code\n"})
         assert supplied.wait(10), "code was not forwarded to login input"
         yield frame("input_ready", {})
         yield frame("complete", {"login_id": SESSION, "integration_id": client, "account_ref": ACCOUNT,
@@ -79,6 +80,7 @@ def scenario(binary, client, protocol, *, delayed_save=False, conflict_save=Fals
         h.send_and_wait(process, fd, output, ("/login " + client + "\r").encode(), b"MASC Account Login")
         h.wait_for_output(process, fd, output, "새 계정 로그인".encode(), start=0, timeout=3.0)
         h.send_and_wait(process, fd, output, b"\r", b"fixture-login.example")
+        assert b"\\x1B" not in output, "the client's colour code was drawn as text"
         # Exercise main-loop routing, including rejection before the byte-exact paste.
         h.send_and_wait(process, fd, output, b"\x1b[200~first\nsecond\x1b[201~", "여러 줄이나 제어 문자".encode())
         assert not supplied.is_set(), "rejected multiline credential was sent"

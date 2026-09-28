@@ -611,8 +611,8 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
                 (Runtime_muse_serve.Session_model_mismatch
                   {requested=execution.model; resumed=Some model})))
             | None -> Error Model_unreported)
-         | Error (Runtime_verification_muse.Home_error Runtime_muse_home.Sign_in_required) ->
-           Error (Unavailable (Client_not_authenticated "The selected Muse account has no usable sign-in"))
+         | Error (Runtime_verification_muse.Home_error (Runtime_muse_home.Sign_in_required _ as error)) ->
+           Error (Unavailable (Client_not_authenticated (Runtime_muse_home.error_to_string error)))
          | Error (Home_error (Runtime_muse_home.Invalid_account_home detail)) ->
            Error (Unavailable (Invalid_configuration detail))
          | Error (Home_error (Runtime_muse_home.State_unavailable _)) ->

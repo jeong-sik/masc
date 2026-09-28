@@ -1081,6 +1081,17 @@ let runtime_account_form_bindings =
 let footer_hints_runtime_account_form () =
   hints_of_bindings runtime_account_form_bindings
 
+(* After a save the form shows the sign-in command and types nothing, so
+   [y] copies it as it does in the link and browser views. *)
+let runtime_account_saved_bindings =
+  [ b Act "y" "copy sign-in"
+      ~help:"send the sign-in command to the terminal clipboard (OSC 52)"
+  ; b Act "Enter / Esc" "close"
+  ]
+
+let footer_hints_runtime_account_saved () =
+  hints_of_bindings runtime_account_saved_bindings
+
 (* The prompts pane's read-only half. [o] swaps the registry for the assets
    shipped with the binary, and there [a], [i], [e] and [x] answer with a
    notice rather than acting (masc_tui.ml), so the row leaves them out and

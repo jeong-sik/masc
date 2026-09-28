@@ -62,7 +62,6 @@ type 'callback_error outcome =
       ; measurement : measurement_evidence
       }
   | Measurement_operation_start_failed of string
-  | Measurement_clock_required_for_timeout
   | Before_measurement_dispatch_failed of
       { receipt : measurement_receipt
       ; cause : 'callback_error
@@ -80,7 +79,7 @@ val receipt_outcome : receipt_snapshot -> measurement_outcome option
 
 val admit
   :  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
-  -> ?clock:_ Eio.Time.clock
+  -> clock:_ Eio.Time.clock
   -> now_unix_s:(unit -> int)
   -> on_measurement_receipt:(measurement_receipt -> unit)
   -> before_measurement_dispatch:(measurement_receipt -> (unit, 'callback_error) result)

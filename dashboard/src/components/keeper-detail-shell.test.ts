@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { html } from 'htm/preact'
 import { render } from 'preact'
+import { waitFor } from '@testing-library/preact'
 import {
   KeeperDetailSection,
   KeeperDetailHeaderInfo,
@@ -161,18 +162,28 @@ describe('KeeperDetailSectionRail', () => {
 
 describe('KeeperDetailHeaderInfo', () => {
   let container: HTMLDivElement
+  const originalCreate = URL.createObjectURL
+  const originalRevoke = URL.revokeObjectURL
 
   beforeEach(() => {
     container = document.createElement('div')
     document.body.appendChild(container)
+    URL.createObjectURL = () => 'blob:header-portrait'
+    URL.revokeObjectURL = () => {}
   })
 
   afterEach(() => {
     render(null, container)
     container.remove()
+    URL.createObjectURL = originalCreate
+    URL.revokeObjectURL = originalRevoke
+    vi.unstubAllGlobals()
   })
 
-  it('shows the keeper portrait when the live keeper has no emoji', () => {
+  it('shows the keeper portrait when the live keeper has no emoji', async () => {
+    const fetchMock = vi.fn(async (_path: string) =>
+      new Response(new Blob([new Uint8Array([137, 80, 78, 71])], { type: 'image/png' }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
     const keeper = {
       name: 'wick-header-probe',
       status: 'active',
@@ -191,14 +202,17 @@ describe('KeeperDetailHeaderInfo', () => {
       container,
     )
 
-    const portrait = container.querySelector('img[data-testid="keeper-portrait"]') as HTMLImageElement | null
-    expect(portrait).not.toBeNull()
-    expect(portrait!.getAttribute('alt')).toBe('wick-header-probe')
-    expect(portrait!.getAttribute('src')).toBe('/api/v1/keepers/wick-header-probe/portrait.png?size=64')
-    expect(container.textContent).toContain('wick-header-probe')
+    await waitFor(() => expect(container.querySelector('img[data-testid="keeper-portrait"]')).not.toBeNull())
+    const portrait = container.querySelector('img[data-testid="keeper-portrait"]') as HTMLImageElement
+    expect(fetchMock.mock.calls[0]![0]).toBe('/api/v1/keepers/wick-header-probe/portrait.png?size=64')
+    expect(portrait.getAttribute('src')).toBe('blob:header-portrait')
+    // The heading beside it already names the keeper.
+    expect(portrait.getAttribute('alt')).toBe('')
+    expect(container.querySelector('h2')?.textContent).toBe('wick-header-probe')
   })
 
   it('falls back to the keeper badge when the portrait cannot load', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"error":"not found"}', { status: 404 })))
     const keeper = {
       name: 'wick-header-probe',
       status: 'active',
@@ -217,14 +231,13 @@ describe('KeeperDetailHeaderInfo', () => {
       container,
     )
 
-    container.querySelector('img[data-testid="keeper-portrait"]')!.dispatchEvent(new Event('error'))
-    await flush()
-
+    await waitFor(() => expect(container.querySelector('[aria-label="wick-header-probe"]')).not.toBeNull())
     expect(container.querySelector('img[data-testid="keeper-portrait"]')).toBeNull()
-    expect(container.querySelector('[aria-label="wick-header-probe"]')).not.toBeNull()
   })
 
-  it('keeps the declared emoji over the portrait', () => {
+  it('keeps the declared emoji over the portrait', async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 500 }))
+    vi.stubGlobal('fetch', fetchMock)
     const keeper = {
       name: 'wick-header-probe',
       emoji: '🕯️',
@@ -246,5 +259,7 @@ describe('KeeperDetailHeaderInfo', () => {
 
     expect(container.querySelector('img[data-testid="keeper-portrait"]')).toBeNull()
     expect(container.textContent).toContain('🕯️')
+    await flush()
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })

@@ -20,14 +20,29 @@ let ihdr png =
 
 let present () = Ok true
 let never_asked () = fail "keeper presence must not be read for a malformed request"
+let holds_nothing _ = false
+let a_build = Api.Executable "portrait-test-build-a"
+let roomy_budget = 64 * 1024 * 1024
 
-let expect_png = function
-  | Api.Png png -> png
-  | Api.Invalid_name -> fail "Invalid_name"
-  | Api.Invalid_size raw -> fail ("Invalid_size " ^ raw)
-  | Api.Unknown_keeper -> fail "Unknown_keeper"
-  | Api.Lookup_failed message -> fail ("Lookup_failed " ^ message)
-  | Api.Encode_failed message -> fail ("Encode_failed " ^ message)
+(* A fresh cache per call, so every answer below draws unless it says otherwise. *)
+let answer ?(cache = Api.Cache.create ~byte_budget:roomy_budget) ?(build = a_build)
+    ?(holds_tag = holds_nothing) ~name ~size ~keeper_present () =
+  Api.answer ~cache ~build ~name ~size ~keeper_present ~holds_tag
+
+let describe = function
+  | Api.Png _ -> "Png"
+  | Api.Not_modified tag -> "Not_modified " ^ tag
+  | Api.Invalid_name -> "Invalid_name"
+  | Api.Invalid_size raw -> "Invalid_size " ^ raw
+  | Api.Unknown_keeper -> "Unknown_keeper"
+  | Api.Lookup_failed message -> "Lookup_failed " ^ message
+  | Api.Encode_failed message -> "Encode_failed " ^ message
+
+let expect_tagged_png = function
+  | Api.Png { etag; png } -> etag, png
+  | other -> fail (describe other)
+
+let expect_png answer = snd (expect_tagged_png answer)
 
 let test_route_is_exact () =
   check (option string) "portrait path" (Some keeper)
@@ -41,39 +56,86 @@ let test_route_is_exact () =
 
 let test_size_and_default () =
   let width, height, depth, colour =
-    ihdr (expect_png (Api.answer ~name:keeper ~size:None ~keeper_present:present)) in
+    ihdr (expect_png (answer ~name:keeper ~size:None ~keeper_present:present ())) in
   check int "default width" Api.default_size width;
   check int "default height" Api.default_size height;
   check int "8-bit samples" 8 depth;
   check int "RGBA colour type keeps the transparent corners" 6 colour;
   let width, _, _, _ =
-    ihdr (expect_png (Api.answer ~name:keeper ~size:(Some "64") ~keeper_present:present)) in
+    ihdr (expect_png (answer ~name:keeper ~size:(Some "64") ~keeper_present:present ())) in
   check int "requested size" 64 width
 
 let test_bad_sizes_are_refused_not_clamped () =
   List.iter (fun raw ->
-    match Api.answer ~name:keeper ~size:(Some raw) ~keeper_present:never_asked with
+    match answer ~name:keeper ~size:(Some raw) ~keeper_present:never_asked () with
     | Api.Invalid_size echoed -> check string "refusal names the value" raw echoed
-    | Api.Png _ | Api.Invalid_name | Api.Unknown_keeper | Api.Lookup_failed _
-    | Api.Encode_failed _ -> fail ("accepted size " ^ raw))
+    | other -> fail ("accepted size " ^ raw ^ ": " ^ describe other))
     [ ""; "0"; "15"; "513"; "0x40"; "+64"; "6_4"; " 64"; "64px"; "1e2"; "99999999999999999999" ]
 
 let test_order_of_checks () =
-  (match Api.answer ~name:"../escape" ~size:(Some "nonsense") ~keeper_present:never_asked with
+  let holds_everything _ = true in
+  (match answer ~name:"../escape" ~size:(Some "nonsense") ~keeper_present:never_asked () with
    | Api.Invalid_name -> ()
-   | _ -> fail "a malformed name is refused before anything else");
-  (match Api.answer ~name:keeper ~size:None ~keeper_present:(fun () -> Ok false) with
+   | other -> fail ("a malformed name is refused before anything else: " ^ describe other));
+  (match answer ~holds_tag:holds_everything ~name:keeper ~size:None ~keeper_present:(fun () -> Ok false) () with
    | Api.Unknown_keeper -> ()
-   | _ -> fail "an absent keeper is not drawn");
-  match Api.answer ~name:keeper ~size:None ~keeper_present:(fun () -> Error "store down") with
+   | other -> fail ("an absent keeper is not drawn, and its tag is never asked: " ^ describe other));
+  match answer ~name:keeper ~size:None ~keeper_present:(fun () -> Error "store down") () with
   | Api.Lookup_failed message -> check string "store error kept" "store down" message
-  | _ -> fail "a store failure is not an absent keeper"
+  | other -> fail ("a store failure is not an absent keeper: " ^ describe other)
 
 let test_same_name_same_bytes () =
-  let draw name = expect_png (Api.answer ~name ~size:(Some "96") ~keeper_present:present) in
+  let draw name = expect_png (answer ~name ~size:(Some "96") ~keeper_present:present ()) in
   check string "deterministic" (draw keeper) (draw keeper);
   check bool "another name draws another picture" false
     (String.equal (draw keeper) (draw "portrait-http-other"))
+
+let test_a_held_tag_is_answered_without_drawing () =
+  let cache = Api.Cache.create ~byte_budget:roomy_budget in
+  let offered = ref [] in
+  let holds_tag tag = offered := tag :: !offered; true in
+  (match answer ~cache ~holds_tag ~name:keeper ~size:(Some "64") ~keeper_present:present () with
+   | Api.Not_modified tag -> check (list string) "the tag it was asked about" [ tag ] !offered
+   | other -> fail ("a held tag is a 304: " ^ describe other));
+  check int "nothing was drawn, so nothing was cached" 0 (Api.Cache.length cache);
+  (* The same tag comes back with the bytes when the client does not hold it. *)
+  let etag, _ = expect_tagged_png (answer ~cache ~name:keeper ~size:(Some "64") ~keeper_present:present ()) in
+  check (list string) "one tag for name, size and build" [ etag ] !offered
+
+let test_tags_follow_build_name_and_size () =
+  let tag ?(build = a_build) ?(name = keeper) size =
+    fst (expect_tagged_png (answer ~build ~name ~size:(Some size) ~keeper_present:present ())) in
+  let base = tag "64" in
+  check string "stable" base (tag "64");
+  check bool "another build" false (String.equal base (tag ~build:(Api.Executable "portrait-test-build-b") "64"));
+  check bool "another size" false (String.equal base (tag "65"));
+  check bool "another name" false (String.equal base (tag ~name:"portrait-http-other" "64"))
+
+let test_unscoped_tags_follow_the_bytes () =
+  let etag, png =
+    expect_tagged_png (answer ~build:Api.Unscoped ~name:keeper ~size:(Some "48") ~keeper_present:present ()) in
+  check string "tag from the PNG bytes" (Http.Response.etag_of_body png) etag;
+  match answer ~build:Api.Unscoped ~holds_tag:(String.equal etag) ~name:keeper ~size:(Some "48")
+          ~keeper_present:present () with
+  | Api.Not_modified held -> check string "304 on that tag" etag held
+  | other -> fail ("an unscoped build still answers 304: " ^ describe other)
+
+let test_cache_keeps_drawings_within_its_budget () =
+  let one = expect_png (answer ~name:keeper ~size:(Some "64") ~keeper_present:present ()) in
+  let budget = (String.length one * 5) / 2 in
+  let cache = Api.Cache.create ~byte_budget:budget in
+  let draw name = expect_png (answer ~cache ~name ~size:(Some "64") ~keeper_present:present ()) in
+  let first = draw keeper in
+  check int "kept" 1 (Api.Cache.length cache);
+  check string "a kept picture is served as drawn" first (draw keeper);
+  check int "not kept twice" 1 (Api.Cache.length cache);
+  List.iter (fun suffix -> ignore (draw ("portrait-http-crowd-" ^ suffix)))
+    [ "a"; "b"; "c"; "d"; "e"; "f" ];
+  check bool "never above the budget" true (Api.Cache.bytes cache <= budget);
+  check bool "the oldest went first" true (Api.Cache.length cache < 7);
+  let tiny = Api.Cache.create ~byte_budget:1 in
+  ignore (expect_png (answer ~cache:tiny ~name:keeper ~size:(Some "64") ~keeper_present:present ()));
+  check int "a picture larger than the budget is served, not kept" 0 (Api.Cache.length tiny)
 
 (* ---- the real router, over an in-memory HTTP/1.1 connection ---- *)
 
@@ -105,18 +167,19 @@ let with_router f =
       require_ok Fun.id (Keeper_meta_store.replace_snapshot config meta);
       let router = Server_routes_http_routes_dashboard.add_routes ~sw
         ~clock:(Eio.Stdenv.clock env) (Http.Router.create ()) in
-      f router)
+      f ~config router)
 
 type reply = { status : int; headers : (string * string) list; body : string }
 
-let get ~router ?if_none_match path =
+let get ~router ?if_none_match ?token path =
   let output = Buffer.create 4096 in
   let connection = Httpun.Server_connection.create (fun reqd ->
     Http.Router.dispatch router (Httpun.Reqd.request reqd) reqd) in
-  let conditional = match if_none_match with
-    | None -> "" | Some tag -> "If-None-Match: " ^ tag ^ "\r\n" in
+  let optional name = Option.fold ~none:"" ~some:(fun value -> name ^ ": " ^ value ^ "\r\n") in
   let raw_request =
-    Printf.sprintf "GET %s HTTP/1.1\r\nHost: x\r\n%sContent-Length: 0\r\n\r\n" path conditional in
+    Printf.sprintf "GET %s HTTP/1.1\r\nHost: x\r\n%s%sContent-Length: 0\r\n\r\n" path
+      (optional "If-None-Match" if_none_match)
+      (optional "Authorization" (Option.map (fun token -> "Bearer " ^ token) token)) in
   let input = Bigstringaf.of_string ~off:0 ~len:(String.length raw_request) raw_request in
   ignore (Httpun.Server_connection.read_eof connection input ~off:0 ~len:(Bigstringaf.length input));
   let rec drain () = match Httpun.Server_connection.next_write_operation connection with
@@ -154,7 +217,7 @@ let path ?size name =
   ^ match size with None -> "" | Some size -> "?size=" ^ size
 
 let test_router_serves_png_with_a_strong_tag () =
-  with_router (fun router ->
+  with_router (fun ~config:_ router ->
     let first = get ~router (path ~size:"72" keeper) in
     check int "200 without a token" 200 first.status;
     check string "content type" "image/png" (header first "content-type");
@@ -173,15 +236,64 @@ let test_router_serves_png_with_a_strong_tag () =
     check string "304 repeats the tag" tag (header cached "etag");
     let listed = get ~router ~if_none_match:("\"stale\", " ^ tag) (path ~size:"72" keeper) in
     check int "304 when the tag is in a list" 304 listed.status;
+    let weak = get ~router ~if_none_match:("W/" ^ tag) (path ~size:"72" keeper) in
+    check int "304 on the weak form of the tag" 304 weak.status;
+    check int "304 on any tag" 304 (get ~router ~if_none_match:"*" (path ~size:"72" keeper)).status;
     let other_size = get ~router ~if_none_match:tag (path ~size:"96" keeper) in
     check int "a different size is a different image" 200 other_size.status)
 
 let test_router_refusals () =
-  with_router (fun router ->
+  with_router (fun ~config:_ router ->
     check int "unknown keeper" 404 (get ~router (path "portrait-http-nobody")).status;
     check int "size out of range" 400 (get ~router (path ~size:"4096" keeper)).status;
     check int "size not a number" 400 (get ~router (path ~size:"big" keeper)).status;
     check int "malformed name" 400 (get ~router (path "Not_A_Keeper!")).status)
+
+let token_for config ~agent_name role =
+  match Auth.create_token config.Workspace.base_path ~agent_name ~role with
+  | Ok (token, _) -> token
+  | Error error -> fail (Masc_domain.masc_error_to_string error)
+
+(* Once HTTP auth is strict the portrait is a read like any other: no token is
+   a 401, a token that may read state is a 200, a token that may only play a
+   shared machine is refused. *)
+let test_router_strict_auth_needs_a_read_token () =
+  with_router (fun ~config router ->
+    Auth.save_auth_config config.Workspace.base_path
+      { Masc_domain.default_auth_config with enabled = true; require_token = true };
+    let reader = token_for config ~agent_name:"portrait-http-reader" Masc_domain.Worker in
+    let player = token_for config ~agent_name:"portrait-http-player" Masc_domain.Player in
+    Masc_test_deps.with_process_env "MASC_HTTP_AUTH_STRICT" (Some "1") @@ fun () ->
+    let url = path ~size:"64" keeper in
+    let anonymous = get ~router url in
+    check int "no token" 401 anonymous.status;
+    check bool "no picture without a token" false (String.starts_with ~prefix:png_signature anonymous.body);
+    let read = get ~router ~token:reader url in
+    check int "a reader's token" 200 read.status;
+    check string "a PNG" "image/png" (header read "content-type");
+    check int "a player's token" 403 (get ~router ~token:player url).status)
+
+let file_state file =
+  let stats = Unix.stat file in
+  In_channel.with_open_bin file In_channel.input_all, stats.Unix.st_mtime, stats.Unix.st_ino
+
+(* The presence check looks at the file system entry only. A GET leaves the
+   metadata file as it was, and a file that does not even decode still counts
+   as a Keeper rather than being repaired or quarantined. *)
+let test_router_leaves_keeper_metadata_untouched () =
+  with_router (fun ~config router ->
+    let meta = Keeper_types_profile.keeper_meta_path config keeper in
+    let before = file_state meta in
+    check int "drawn" 200 (get ~router (path ~size:"64" keeper)).status;
+    check int "drawn again" 200 (get ~router (path ~size:"80" keeper)).status;
+    check bool "metadata bytes, time and inode unchanged" true (before = file_state meta);
+    let unreadable = "portrait-http-garbled" in
+    let garbled = Keeper_types_profile.keeper_meta_path config unreadable in
+    Out_channel.with_open_bin garbled (fun channel -> Out_channel.output_string channel "{ not json");
+    let garbled_before = file_state garbled in
+    check int "a file that does not decode is still present" 200
+      (get ~router (path ~size:"64" unreadable)).status;
+    check bool "and is not rewritten" true (garbled_before = file_state garbled))
 
 let () =
   run "Keeper portrait HTTP"
@@ -190,7 +302,13 @@ let () =
       ; test_case "default and requested size" `Quick test_size_and_default
       ; test_case "bad sizes are refused, not clamped" `Quick test_bad_sizes_are_refused_not_clamped
       ; test_case "name, size, presence, in that order" `Quick test_order_of_checks
-      ; test_case "same name, same bytes" `Quick test_same_name_same_bytes ]
+      ; test_case "same name, same bytes" `Quick test_same_name_same_bytes
+      ; test_case "a held tag is answered without drawing" `Quick test_a_held_tag_is_answered_without_drawing
+      ; test_case "tags follow build, name and size" `Quick test_tags_follow_build_name_and_size
+      ; test_case "unscoped tags follow the bytes" `Quick test_unscoped_tags_follow_the_bytes
+      ; test_case "cache stays within its byte budget" `Quick test_cache_keeps_drawings_within_its_budget ]
     ; "router",
       [ test_case "PNG with a strong tag and 304" `Quick test_router_serves_png_with_a_strong_tag
-      ; test_case "400 and 404" `Quick test_router_refusals ] ]
+      ; test_case "400 and 404" `Quick test_router_refusals
+      ; test_case "strict auth needs a read token" `Quick test_router_strict_auth_needs_a_read_token
+      ; test_case "GET leaves keeper metadata untouched" `Quick test_router_leaves_keeper_metadata_untouched ] ]

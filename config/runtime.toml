@@ -2206,10 +2206,15 @@ candidates = [
 # 서버가 등록된 GitHub 저장소의 열린 PR 을 60초마다 읽을 때 쓸 토큰의 주인
 # Keeper 다(RFC-0465). 그 Keeper 의 github-cli/hosts.yml 토큰을 읽을 때마다 새로
 # 읽는다. 적지 않으면 PR 을 읽지 않고, /api/v1/repositories/pulls 가 그 이유를
-# 말한다. 이 표에는 pr_reader 말고 다른 키를 쓸 수 없다.
+# 말한다. github_host 와 graphql_url 은 생략하면 github.com 기본값으로 읽고,
+# GitHub Enterprise 를 읽을 때만 두 키를 함께 적는다(호스트만 적으면 무효).
+# 토큰은 그 호스트 이름의 hosts.yml 칸에서 읽는다. 이 표에는 아래 세 키 말고
+# 다른 키를 쓸 수 없다.
 #
 # [repositories]
 # pr_reader = "<keeper>"
+# github_host = "github.example.com"
+# graphql_url = "https://github.example.com/api/graphql"
 
 # ═══ Connectors ══════════════════════════════════════════════════════
 # 어떤 인바운드 메시지가 턴을 시작하는지를 커넥터별로 정한다. 운영자가 적어두는

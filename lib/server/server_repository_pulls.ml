@@ -97,8 +97,11 @@ type response =
 type http_post =
   url:string -> token:string -> body:Yojson.Safe.t -> (response, string) result
 
-let graphql_url = "https://api.github.com/graphql"
-let github_hostname = "github.com"
+(* Defaults only: [\[repositories\] github_host]/[graphql_url] override both
+   without touching code, so a GitHub Enterprise host is configuration, not a
+   patch. *)
+let default_github_host = "github.com"
+let default_graphql_url = "https://api.github.com/graphql"
 
 (* GitHub caps a connection page at 100 nodes; asking for the cap keeps a
    repository with fewer than 100 open pull requests at one request. *)
@@ -199,15 +202,15 @@ let default_http_post ~url ~token ~body =
 
 (* --- Remote slug --- *)
 
-let github_remote_prefixes =
-  [ "https://github.com/"; "git@github.com:"; "ssh://git@github.com/" ]
+let github_remote_prefixes ~host =
+  [ "https://" ^ host ^ "/"; "git@" ^ host ^ ":"; "ssh://git@" ^ host ^ "/" ]
 
 let strip_suffix ~suffix s =
   if String.ends_with ~suffix s
   then String.sub s 0 (String.length s - String.length suffix)
   else s
 
-let github_slug_of_remote remote =
+let github_slug_of_remote ?(host = default_github_host) remote =
   let remote = String.trim remote in
   List.find_map
     (fun prefix ->
@@ -215,7 +218,7 @@ let github_slug_of_remote remote =
       then
         Some (String.sub remote (String.length prefix) (String.length remote - String.length prefix))
       else None)
-    github_remote_prefixes
+    (github_remote_prefixes ~host)
   |> Fun.flip Option.bind (fun path ->
     let slug = path |> strip_suffix ~suffix:"/" |> strip_suffix ~suffix:".git" in
     match String.split_on_char '/' slug with
@@ -445,7 +448,7 @@ let failure_of_status ~now_s (response : response) =
   | status when status >= 200 && status < 300 -> None
   | status -> Some (Http_status { status })
 
-let read_repository ~now ~http_post ~token repo_slug =
+let read_repository ~now ~http_post ~token ?(graphql_url = default_graphql_url) repo_slug =
   let owner, name =
     match String.index_opt repo_slug '/' with
     | Some i ->
@@ -483,13 +486,95 @@ let read_repository ~now ~http_post ~token repo_slug =
 
 let repositories_table = "repositories"
 let pr_reader_key = "pr_reader"
+let github_host_key = "github_host"
+let graphql_url_key = "graphql_url"
+let known_keys = [ pr_reader_key; github_host_key; graphql_url_key ]
+
+type endpoint =
+  { github_host : string
+  ; graphql_url : string
+  }
 
 type credential =
   { keeper : string
   ; token : string
+  ; endpoint : endpoint
   }
 
-let reader_of_declaration ~(config : Workspace.config) keeper =
+(* A bare hostname: no scheme, port, path or userinfo can hide in it, so it is
+   safe to splice into remote prefixes and to hand to the token lane as the
+   hosts.yml section. *)
+let valid_hostname_char = function
+  | 'a'..'z' | 'A'..'Z' | '0'..'9' | '.' | '-' -> true
+  | _ -> false
+
+let github_host_of_string raw =
+  let host = String.trim raw in
+  let length = String.length host in
+  let rec chars_ok i =
+    if i >= length then true else valid_hostname_char host.[i] && chars_ok (i + 1)
+  in
+  if length > 0 && chars_ok 0
+  then Ok host
+  else
+    Error
+      (Printf.sprintf
+         "[%s] %s must be a bare hostname, got %S"
+         repositories_table
+         github_host_key
+         raw)
+
+(* https only: the reader token travels in the Authorization header, and a
+   plaintext endpoint would publish it to the network. *)
+let graphql_url_of_string raw =
+  let url = String.trim raw in
+  if String.starts_with ~prefix:"https://" url && String.length url > String.length "https://"
+  then Ok url
+  else
+    Error
+      (Printf.sprintf
+         "[%s] %s must be an https:// URL, got %S"
+         repositories_table
+         graphql_url_key
+         raw)
+
+let endpoint_of_entries entries =
+  let ( let* ) = Result.bind in
+  let* github_host =
+    match List.assoc_opt github_host_key entries with
+    | None -> Ok default_github_host
+    | Some (Otoml.TomlString raw) -> github_host_of_string raw
+    | Some _ ->
+      Error
+        (Printf.sprintf "[%s] %s must be a hostname string" repositories_table github_host_key)
+  in
+  let* graphql_url =
+    match List.assoc_opt graphql_url_key entries with
+    | None -> Ok default_graphql_url
+    | Some (Otoml.TomlString raw) -> graphql_url_of_string raw
+    | Some _ ->
+      Error
+        (Printf.sprintf "[%s] %s must be a URL string" repositories_table graphql_url_key)
+  in
+  (* A non-default host without its endpoint has no valid reading: its slugs
+     posted to api.github.com would all answer NOT_FOUND, one confusing row
+     per repository. Refuse the declaration with the fix instead. An explicit
+     default host, and a lone endpoint (a proxy in front of github.com), both
+     still resolve. *)
+  let url_set = Option.is_some (List.assoc_opt graphql_url_key entries) in
+  if (not url_set) && not (String.equal github_host default_github_host)
+  then
+    Error
+      (Printf.sprintf
+         "[%s] %s %S needs an explicit %s: its slugs posted to %s would read as not visible"
+         repositories_table
+         github_host_key
+         github_host
+         graphql_url_key
+         default_graphql_url)
+  else Ok { github_host; graphql_url }
+
+let reader_of_declaration ~(config : Workspace.config) ~endpoint keeper =
   let base_path = config.base_path in
   let keeper = String.trim keeper in
   if not (Keeper_config.validate_name keeper)
@@ -505,23 +590,29 @@ let reader_of_declaration ~(config : Workspace.config) keeper =
          Keeper_github_login_lane.stored_token
            ~config
            ~keeper_name:keeper
-           ~hostname:github_hostname
+           ~hostname:endpoint.github_host
        with
        | Error refusal ->
          Error
            (Reader_token_unavailable
               { keeper; reason = Keeper_github_login_lane.stored_token_error_to_string refusal })
-       | Ok token -> Ok { keeper; token }))
+       | Ok token -> Ok { keeper; token; endpoint }))
 
 let declaration_invalid fmt = Printf.ksprintf (fun m -> Error (Reader_declaration_invalid m)) fmt
 
 let reader_of_table ~config entries =
-  match List.find_opt (fun (key, _) -> not (String.equal key pr_reader_key)) entries with
+  match List.find_opt (fun (key, _) -> not (List.exists (String.equal key) known_keys)) entries with
   | Some (key, _) -> declaration_invalid "[%s] has unknown key %S" repositories_table key
   | None ->
     (match List.assoc_opt pr_reader_key entries with
      | None -> Error Reader_not_declared
-     | Some (Otoml.TomlString keeper) -> reader_of_declaration ~config keeper
+     | Some (Otoml.TomlString keeper) ->
+       (* The endpoint keys are inert without a reader: a lone [github_host]
+          still reads as not declared, and a reader with a bad endpoint is
+          invalid rather than silently defaulted. *)
+       (match endpoint_of_entries entries with
+        | Error reason -> Error (Reader_declaration_invalid reason)
+        | Ok endpoint -> reader_of_declaration ~config ~endpoint keeper)
      | Some _ ->
        declaration_invalid "[%s] %s must be a Keeper name string" repositories_table pr_reader_key)
 
@@ -586,7 +677,7 @@ let refresh ~now ~http_post ~(config : Workspace.config) ~previous =
   let credential = resolve_reader ~config in
   let reader =
     match credential with
-    | Ok { keeper; token = _ } -> Reader_ready { keeper }
+    | Ok { keeper; token = _; endpoint = _ } -> Reader_ready { keeper }
     | Error reader -> reader
   in
   match Repo_store.load_all ~base_path with
@@ -605,12 +696,20 @@ let refresh ~now ~http_post ~(config : Workspace.config) ~previous =
       | Some entry -> entry.pulls
       | None -> Pulls_not_read
     in
+    (* Without an accepted endpoint there is no configured host: remotes then
+       parse against the default host, exactly as before, while [pulls]
+       still says why nothing is read. *)
+    let host =
+      match credential with
+      | Ok { endpoint; _ } -> endpoint.github_host
+      | Error _ -> default_github_host
+    in
     let entry (repo : Repo_manager_types.repository) =
-      let slug = github_slug_of_remote repo.url in
+      let slug = github_slug_of_remote ~host repo.url in
       let pulls =
         match slug, credential with
         | None, _ -> Pulls_not_github
-        | Some slug, Ok { token; keeper = _ } ->
+        | Some slug, Ok { token; keeper = _; endpoint } ->
           (match
              held_answer
                ~now_s
@@ -619,7 +718,7 @@ let refresh ~now ~http_post ~(config : Workspace.config) ~previous =
                (previous_pulls repo.id)
            with
            | Some held -> held
-           | None -> read_repository ~now ~http_post ~token slug)
+           | None -> read_repository ~now ~http_post ~token ~graphql_url:endpoint.graphql_url slug)
         (* An earlier read would show checks and reviews the server can no
            longer vouch for; [reader] says why nothing is read now. *)
         | Some _, Error _ -> Pulls_not_read
@@ -629,7 +728,7 @@ let refresh ~now ~http_post ~(config : Workspace.config) ~previous =
     let repositories = List.map entry repos in
     let rejected_token_digest =
       match credential with
-      | Ok { token; keeper = _ }
+      | Ok { token; keeper = _; endpoint = _ }
         when List.exists (fun entry -> is_token_rejected entry.pulls) repositories ->
         Some (token_digest token)
       | Ok _ | Error _ -> None

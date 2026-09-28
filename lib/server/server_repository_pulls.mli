@@ -1,11 +1,20 @@
 (** Open pull requests of the registered GitHub repositories (RFC-0465 §2-§4).
 
     The server reads every repository registered in
-    [.masc/config/repositories.toml] whose remote is on github.com, one
-    GraphQL query per repository page, with the token of the Keeper named by
-    runtime.toml [\[repositories\] pr_reader]. Nothing here is persisted:
-    GitHub is the source of these facts, so a restart starts at
+    [.masc/config/repositories.toml] whose remote is on the configured GitHub
+    host, one GraphQL query per repository page, with the token of the Keeper
+    named by runtime.toml [\[repositories\] pr_reader]. Nothing here is
+    persisted: GitHub is the source of these facts, so a restart starts at
     [Pulls_not_read] and the next read replaces it.
+
+    The host and the GraphQL endpoint are operator configuration, not code:
+    [\[repositories\]] accepts optional [github_host] (a bare hostname,
+    default {!default_github_host}) and [graphql_url] (an [https://] URL,
+    default {!default_graphql_url}). A GitHub Enterprise host sets both; the
+    token is then read from the reader Keeper's [github-cli/hosts.yml]
+    section for that host. A non-default [github_host] without [graphql_url]
+    is invalid: its slugs posted to the default endpoint could only answer
+    NOT_FOUND.
 
     The reader is resolved again on every refresh. runtime.toml, the Keeper
     declaration and the Keeper's [github-cli/hosts.yml] token are all read at
@@ -95,8 +104,8 @@ type repository_pulls =
       ; failure : failure
       }
   | Pulls_not_github
-      (** The remote is not one of the three github.com spellings
-          {!github_slug_of_remote} reads; not read. *)
+      (** The remote is not one of the three spellings for the configured
+          host that {!github_slug_of_remote} reads; not read. *)
 
 (** {1 Reader} *)
 
@@ -104,17 +113,20 @@ type reader =
   | Reader_not_declared
       (** runtime.toml declares no [\[repositories\] pr_reader]. *)
   | Reader_declaration_invalid of string
-      (** runtime.toml is unreadable, or [pr_reader] is not a Keeper name. *)
+      (** runtime.toml is unreadable, [pr_reader] is not a Keeper name,
+          [github_host] is not a bare hostname, [graphql_url] is not an
+          [https://] URL, or a non-default [github_host] has no
+          [graphql_url]. *)
   | Reader_keeper_missing of { keeper : string }
       (** No [keepers/<keeper>.toml] declares the named Keeper. *)
   | Reader_token_unavailable of
       { keeper : string
       ; reason : string
       }
-      (** The Keeper exists but no github.com token can be read for it on
-          this host: its GitHub CLI holds none, its meta could not be read, or
-          it is a Remote_ssh Keeper whose login lives on its endpoint
-          ({!Keeper_github_login_lane.stored_token}). *)
+      (** The Keeper exists but no token for the configured host can be
+          read for it on this host: its GitHub CLI holds none, its meta could
+          not be read, or it is a Remote_ssh Keeper whose login lives on its
+          endpoint ({!Keeper_github_login_lane.stored_token}). *)
   | Reader_ready of { keeper : string }
 
 (** {1 Snapshot} *)
@@ -132,7 +144,7 @@ type keeper_names =
 type repository_entry =
   { repository_id : string
   ; url : string
-  ; slug : string option  (** [owner/repo] when the remote is on github.com. *)
+  ; slug : string option  (** [owner/repo] when the remote is on the configured host. *)
   ; pulls : repository_pulls
   }
 
@@ -180,16 +192,26 @@ val default_http_post : http_post
 
 (** {1 Reading} *)
 
-val github_slug_of_remote : string -> string option
-(** [owner/repo] for the three spellings git accepts for a github.com remote
-    ([https://github.com/o/r(.git)], [git\@github.com:o/r(.git)],
-    [ssh://git\@github.com/o/r(.git)]); [None] for anything else. *)
+val default_github_host : string
+(** [github.com]: the remote host read when [\[repositories\]] declares no
+    [github_host]. *)
+
+val default_graphql_url : string
+(** [https://api.github.com/graphql]: the endpoint posted to when
+    [\[repositories\]] declares no [graphql_url]. *)
+
+val github_slug_of_remote : ?host:string -> string -> string option
+(** [owner/repo] for the three spellings git accepts for a [host] remote
+    ([https://<host>/o/r(.git)], [git\@<host>:o/r(.git)],
+    [ssh://git\@<host>/o/r(.git)]); [None] for anything else.
+    [host] defaults to {!default_github_host}. *)
 
 val read_repository :
-  now:(unit -> float) -> http_post:http_post -> token:string -> string -> repository_pulls
-(** [read_repository ~now ~http_post ~token slug] reads every open pull
-    request of [slug], following the GraphQL cursor until GitHub reports no
-    next page. *)
+  now:(unit -> float) -> http_post:http_post -> token:string -> ?graphql_url:string -> string -> repository_pulls
+(** [read_repository ~now ~http_post ~token ~graphql_url slug] reads every
+    open pull request of [slug], following the GraphQL cursor until GitHub
+    reports no next page. Every page is posted to [graphql_url], default
+    {!default_graphql_url}. *)
 
 val refresh :
   now:(unit -> float) -> http_post:http_post -> config:Workspace.config -> previous:snapshot -> snapshot

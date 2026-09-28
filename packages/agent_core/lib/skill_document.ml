@@ -190,6 +190,8 @@ let unicode_trim value =
   loop 0 None 0
 ;;
 
+let is_blank value = String.equal (unicode_trim value) ""
+
 let optional_string fields standard_field key =
   match field fields key with
   | None -> Ok None
@@ -203,7 +205,7 @@ let optional_string fields standard_field key =
 let required_description fields =
   match field fields "description" with
   | None | Some `Null -> Error Missing_description
-  | Some (`String value) when String.equal (unicode_trim value) "" -> Error Missing_description
+  | Some (`String value) when is_blank value -> Error Missing_description
   | Some (`String value) -> Ok value
   | Some _ ->
     Error
@@ -214,7 +216,7 @@ let required_description fields =
 let declared_name fields =
   match field fields "name" with
   | None | Some `Null -> Ok None
-  | Some (`String value) when String.equal (unicode_trim value) "" -> Ok None
+  | Some (`String value) when is_blank value -> Ok None
   | Some (`String value) -> Ok (Some value)
   | Some _ ->
     Error (Invalid_field_type { field = Standard Name; expected = String_value })

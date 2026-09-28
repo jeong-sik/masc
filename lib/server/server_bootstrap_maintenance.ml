@@ -796,6 +796,18 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
        Log.Server.warn
          "goal overdue notice startup scan failed: %s"
          (Printexc.to_string exn));
+    (* #39571: a refuted verdict is sent at commit time, but a failed send must
+       be retried. The same startup/tick scan reconciles the ledger against the
+       Goal marker, so a restart or a repeated tick re-sends nothing. *)
+    (try
+       Workspace_goals.scan_refuted_goal_notifications
+         (Mcp_server.workspace_config state)
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | exn ->
+       Log.Server.warn
+         "goal refuted notice startup scan failed: %s"
+         (Printexc.to_string exn));
     let rec loop () =
       Eio.Time.sleep clock maintenance_tick_sec;
       project_transition_outboxes Maintenance_projection;
@@ -1010,6 +1022,18 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
           | exn ->
             Log.Server.warn
               "goal overdue notice scan failed: %s"
+              (Printexc.to_string exn));
+         (* #39571: retry a refuted owner notice whose commit-time send failed,
+            and reach a new owner after an owner change. Idempotent by the Goal
+            marker and the delivery key. *)
+         (try
+            Workspace_goals.scan_refuted_goal_notifications
+              (Mcp_server.workspace_config state)
+          with
+          | Eio.Cancel.Cancelled _ as e -> raise e
+          | exn ->
+            Log.Server.warn
+              "goal refuted notice scan failed: %s"
               (Printexc.to_string exn))
        with
        | Eio.Cancel.Cancelled _ as e -> raise e

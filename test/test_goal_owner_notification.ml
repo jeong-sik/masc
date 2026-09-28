@@ -74,6 +74,256 @@ let goal_of (config : Workspace.config) id =
   | Goal_store.Goal_absent -> failwith ("goal absent: " ^ id)
   | Goal_store.Store_unavailable _ -> failwith "goal store unavailable"
 
+let dispatch ctx ~name args =
+  match Tool_workspace.dispatch ctx ~name ~args:(`Assoc args) with
+  | Some result -> result
+  | None -> failwith (name ^ " not handled")
+
+let must_succeed label result =
+  if Tool_result.is_success result
+  then Yojson.Safe.from_string (Tool_result.message result)
+  else failwith (Printf.sprintf "%s: %s" label (Tool_result.message result))
+
+let json_state json key = Yojson.Safe.Util.(member key json |> to_string)
+
+let verdict_rows (config : Workspace.config) owner =
+  owner_rows config owner
+  |> List.filter (fun (m : Keeper_chat_store.chat_message) ->
+    String.length m.content >= 14
+    && String.sub m.content 0 14 = "[goal_verdict]")
+
+(* A refuted verdict sends the owner exactly one notice, and an exact replay of
+   the same verdict sends nothing new. *)
+let test_refuted_verdict_notifies_owner_once () =
+  with_workspace (fun config ->
+    let ctx : Tool_workspace.context =
+      { Tool_workspace.config; agent_name = "planner" }
+    in
+    let created =
+      must_succeed
+        "create goal"
+        (dispatch
+           ctx
+           ~name:"masc_goal_upsert"
+           [ "title", `String "Refuted Goal"
+           ; "metric", `String "m"
+           ; "target_value", `String "1"
+           ])
+    in
+    let goal_id = json_state created "goal_id" in
+    ignore
+      (must_succeed
+         "request_complete"
+         (dispatch
+            ctx
+            ~name:"masc_goal_transition"
+            [ "goal_id", `String goal_id; "action", `String "request_complete" ]));
+    let request_id, criterion =
+      match Goal_verification.get_record_authoritative config ~goal_id with
+      | Ok (Some { completion = Goal_verification.Proof_pending pending; _ }) ->
+        pending.request_id, pending.criterion
+      | Ok _ -> failwith "test setup needs a bound proof request"
+      | Error detail -> failwith detail
+    in
+    let commit () =
+      Workspace_goals.commit_verifier_decision
+        ~tool_name:"goal_verifier_commit"
+        ~start_time:(Tool_timing.start ())
+        config
+        ~goal_id
+        ~verification_run_id:"goal-verifier-test-run"
+        ~request_id
+        ~criterion
+        ~decision:(Workspace_goals.Proof_refuted { reason = "not proven" })
+        ~evidence:"observed by the verifier"
+    in
+    ignore (must_succeed "refuted commit" (commit ()));
+    check int "the owner gets one refuted notice" 1
+      (List.length (verdict_rows config "planner"));
+    ignore (commit ());
+    check int "a replay sends nothing new" 1
+      (List.length (verdict_rows config "planner")))
+
+(* A failed commit-time send leaves no marker, so the periodic scan retries and
+   the owner ends with exactly one row — not zero, not two. *)
+let test_scan_refuted_retries_after_send_failure () =
+  with_workspace (fun config ->
+    let ctx : Tool_workspace.context =
+      { Tool_workspace.config; agent_name = "planner" }
+    in
+    let created =
+      must_succeed
+        "create goal"
+        (dispatch
+           ctx
+           ~name:"masc_goal_upsert"
+           [ "title", `String "Refuted Goal"
+           ; "metric", `String "m"
+           ; "target_value", `String "1"
+           ])
+    in
+    let goal_id = json_state created "goal_id" in
+    ignore
+      (must_succeed
+         "request_complete"
+         (dispatch
+            ctx
+            ~name:"masc_goal_transition"
+            [ "goal_id", `String goal_id; "action", `String "request_complete" ]));
+    let request_id, criterion =
+      match Goal_verification.get_record_authoritative config ~goal_id with
+      | Ok (Some { completion = Goal_verification.Proof_pending pending; _ }) ->
+        pending.request_id, pending.criterion
+      | Ok _ -> failwith "test setup needs a bound proof request"
+      | Error detail -> failwith detail
+    in
+    let chat_dir =
+      Filename.dirname
+        (Keeper_chat_store.chat_path ~base_dir:config.base_path ~keeper_name:"planner")
+    in
+    (* A file where the chat directory belongs makes the commit-time send fail. *)
+    ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote chat_dir)));
+    ignore
+      (Sys.command
+         (Printf.sprintf "mkdir -p %s" (Filename.quote (Filename.dirname chat_dir))));
+    let oc = open_out chat_dir in
+    close_out oc;
+    ignore
+      (must_succeed
+         "refuted commit"
+         (Workspace_goals.commit_verifier_decision
+            ~tool_name:"goal_verifier_commit"
+            ~start_time:(Tool_timing.start ())
+            config
+            ~goal_id
+            ~verification_run_id:"goal-verifier-test-run"
+            ~request_id
+            ~criterion
+            ~decision:(Workspace_goals.Proof_refuted { reason = "not proven" })
+            ~evidence:"observed by the verifier"));
+    check int "failed send writes no row" 0
+      (List.length (verdict_rows config "planner"));
+    check (option string) "failed send leaves no marker" None
+      (goal_of config goal_id).Goal_store.notified_refuted_key;
+    Sys.remove chat_dir;
+    Workspace_goals.scan_refuted_goal_notifications config;
+    check int "scan retry delivers one row" 1
+      (List.length (verdict_rows config "planner")))
+
+(* A Goal whose owner changed after the refuted verdict reaches the new owner:
+   the key carries the owner, so the scan delivers to the new recipient while
+   the old owner keeps the one row it already had. *)
+let test_scan_refuted_owner_change_notifies_new_owner () =
+  with_workspace (fun config ->
+    let ctx : Tool_workspace.context =
+      { Tool_workspace.config; agent_name = "planner" }
+    in
+    let created =
+      must_succeed
+        "create goal"
+        (dispatch
+           ctx
+           ~name:"masc_goal_upsert"
+           [ "title", `String "Refuted Goal"
+           ; "metric", `String "m"
+           ; "target_value", `String "1"
+           ])
+    in
+    let goal_id = json_state created "goal_id" in
+    ignore
+      (must_succeed
+         "request_complete"
+         (dispatch
+            ctx
+            ~name:"masc_goal_transition"
+            [ "goal_id", `String goal_id; "action", `String "request_complete" ]));
+    let request_id, criterion =
+      match Goal_verification.get_record_authoritative config ~goal_id with
+      | Ok (Some { completion = Goal_verification.Proof_pending pending; _ }) ->
+        pending.request_id, pending.criterion
+      | Ok _ -> failwith "test setup needs a bound proof request"
+      | Error detail -> failwith detail
+    in
+    ignore
+      (must_succeed
+         "refuted commit"
+         (Workspace_goals.commit_verifier_decision
+            ~tool_name:"goal_verifier_commit"
+            ~start_time:(Tool_timing.start ())
+            config
+            ~goal_id
+            ~verification_run_id:"goal-verifier-test-run"
+            ~request_id
+            ~criterion
+            ~decision:(Workspace_goals.Proof_refuted { reason = "not proven" })
+            ~evidence:"observed by the verifier"));
+    check int "the first owner gets one row" 1
+      (List.length (verdict_rows config "planner"));
+    (match
+       Goal_store.transact_goal config ~goal_id (fun goal ->
+         Ok ({ goal with Goal_store.owner = Goal_store.Owner "keeper-b" }, ()))
+     with
+     | Ok _ -> ()
+     | Error error -> failwith (Goal_store.write_error_to_string error));
+    Workspace_goals.scan_refuted_goal_notifications config;
+    check int "the new owner gets one row" 1
+      (List.length (verdict_rows config "keeper-b"));
+    check int "the old owner keeps one row" 1
+      (List.length (verdict_rows config "planner")))
+
+(* A restart re-reads the persisted marker, so the scan sends nothing already
+   delivered. A fresh config over the same base path is what a restart sees. *)
+let test_scan_refuted_restart_sends_nothing () =
+  with_workspace (fun config ->
+    let ctx : Tool_workspace.context =
+      { Tool_workspace.config; agent_name = "planner" }
+    in
+    let created =
+      must_succeed
+        "create goal"
+        (dispatch
+           ctx
+           ~name:"masc_goal_upsert"
+           [ "title", `String "Refuted Goal"
+           ; "metric", `String "m"
+           ; "target_value", `String "1"
+           ])
+    in
+    let goal_id = json_state created "goal_id" in
+    ignore
+      (must_succeed
+         "request_complete"
+         (dispatch
+            ctx
+            ~name:"masc_goal_transition"
+            [ "goal_id", `String goal_id; "action", `String "request_complete" ]));
+    let request_id, criterion =
+      match Goal_verification.get_record_authoritative config ~goal_id with
+      | Ok (Some { completion = Goal_verification.Proof_pending pending; _ }) ->
+        pending.request_id, pending.criterion
+      | Ok _ -> failwith "test setup needs a bound proof request"
+      | Error detail -> failwith detail
+    in
+    ignore
+      (must_succeed
+         "refuted commit"
+         (Workspace_goals.commit_verifier_decision
+            ~tool_name:"goal_verifier_commit"
+            ~start_time:(Tool_timing.start ())
+            config
+            ~goal_id
+            ~verification_run_id:"goal-verifier-test-run"
+            ~request_id
+            ~criterion
+            ~decision:(Workspace_goals.Proof_refuted { reason = "not proven" })
+            ~evidence:"observed by the verifier"));
+    check int "commit-time send delivers one row" 1
+      (List.length (verdict_rows config "planner"));
+    let restarted = Workspace.default_config_uncached config.base_path in
+    Workspace_goals.scan_refuted_goal_notifications restarted;
+    check int "restart adds nothing" 1
+      (List.length (verdict_rows config "planner")))
+
 (* The same overdue event, scanned twice (a repeated tick, or a restart),
    leaves exactly one row in the owner's transcript. *)
 let test_scan_overdue_notifies_owner_once () =
@@ -226,6 +476,16 @@ let () =
     ; ( "delivery key"
       , [ test_case "is idempotent per event" `Quick
             test_goal_notification_delivery_key_is_idempotent
+        ] )
+    ; ( "refuted verdict"
+      , [ test_case "notifies the owner once" `Quick
+            test_refuted_verdict_notifies_owner_once
+        ; test_case "the scan retries after a failed send" `Quick
+            test_scan_refuted_retries_after_send_failure
+        ; test_case "a changed owner is a new recipient" `Quick
+            test_scan_refuted_owner_change_notifies_new_owner
+        ; test_case "a restart sends nothing already delivered" `Quick
+            test_scan_refuted_restart_sends_nothing
         ] )
     ]
 ;;

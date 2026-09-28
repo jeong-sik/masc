@@ -128,3 +128,11 @@ val scan_overdue_goal_notifications : Workspace_utils_backend_setup.config -> un
     notified Goal is skipped by its marker, and a re-send reuses the delivery
     key, so the owner's transcript gains exactly one row per event. A Goal with
     no recorded owner has no recipient and is skipped. *)
+
+val scan_refuted_goal_notifications : Workspace_utils_backend_setup.config -> unit
+(** Reconcile the one owner notice owed for each Goal whose current ledger
+    verdict is refuted (#39571). The commit-time send is the fast path; this
+    periodic/restart scan is the retry: a send that failed left no marker, so
+    the next scan re-sends, and a Goal whose owner changed after the verdict
+    reaches the new owner because the delivery key carries the owner. A verdict
+    whose criterion no longer matches the Goal is stale and is not re-sent. *)

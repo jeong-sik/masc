@@ -614,29 +614,44 @@ let mark_goal_notice config ~goal_id kind ~key =
       (Goal_store.write_error_to_string error)
 ;;
 
+let refuted_notice_event (verdict : Goal_verification.verdict) =
+  "refuted:" ^ verdict.Goal_verification.request_id
+;;
+
+let refuted_notice_content ~(goal : Goal_store.goal)
+    (verdict : Goal_verification.verdict) =
+  Printf.sprintf
+    "[goal_verdict] %s — %s\noutcome: refuted\nevidence: %s"
+    goal.Goal_store.id
+    goal.Goal_store.title
+    verdict.Goal_verification.evidence
+;;
+
+(* Deliver the one refuted notice owed for [verdict] to [owner], then record the
+   marker. The marker is written only after the row is durably committed, so a
+   failed send leaves the debt outstanding for the next scan to retry. *)
+let deliver_refuted_notice config ~(goal : Goal_store.goal) ~owner
+    (verdict : Goal_verification.verdict) =
+  let event = refuted_notice_event verdict in
+  let key = goal_notice_key ~goal_id:goal.Goal_store.id ~owner ~event in
+  match
+    deliver_goal_owner_notice config ~goal ~event
+      ~content:(refuted_notice_content ~goal verdict)
+  with
+  | Ok () -> mark_goal_notice config ~goal_id:goal.Goal_store.id Refuted_notice ~key
+  | Error detail ->
+    Log.Misc.warn
+      "goal refuted owner notice failed goal_id=%s owner=%s: %s"
+      goal.Goal_store.id
+      owner
+      detail
+;;
+
 let notify_goal_refuted config ~(goal : Goal_store.goal)
     (verdict : Goal_verification.verdict) =
   match goal.Goal_store.owner with
   | Goal_store.Unknown_owner -> ()
-  | Goal_store.Owner owner ->
-    let event = "refuted:" ^ verdict.Goal_verification.request_id in
-    let content =
-      Printf.sprintf
-        "[goal_verdict] %s — %s\noutcome: refuted\nevidence: %s"
-        goal.Goal_store.id
-        goal.Goal_store.title
-        verdict.Goal_verification.evidence
-    in
-    (match deliver_goal_owner_notice config ~goal ~event ~content with
-     | Ok () ->
-       mark_goal_notice config ~goal_id:goal.Goal_store.id Refuted_notice
-         ~key:(goal_notice_key ~goal_id:goal.Goal_store.id ~owner ~event)
-     | Error detail ->
-       Log.Misc.warn
-         "goal refuted owner notice failed goal_id=%s owner=%s: %s"
-         goal.Goal_store.id
-         owner
-         detail)
+  | Goal_store.Owner owner -> deliver_refuted_notice config ~goal ~owner verdict
 ;;
 
 (* [due_date] is a calendar date with no zone, so it is compared with the
@@ -705,6 +720,43 @@ let scan_overdue_goal_notifications config =
                    detail))
          | Goal_store.Owner _, _ -> ())
       goals)
+;;
+
+(* A refuted verdict is delivered at commit time, but a failed send must not be
+   the owner's last chance to hear it. The same periodic/restart scan reconciles
+   the ledger's current refuted verdict against the Goal's marker: a send that
+   failed (no marker) is retried, and a Goal whose owner changed after the
+   verdict reaches the new owner because the key carries the owner. A verdict
+   whose criterion no longer matches the Goal is stale and is not re-sent. *)
+let scan_refuted_goal_notifications config =
+  match Goal_store.list_goals_result config () with
+  | Error _ -> ()
+  | Ok goals ->
+    (match Goal_verification.load_records_authoritative config with
+     | Error _ -> ()
+     | Ok records ->
+       List.iter
+         (fun (goal : Goal_store.goal) ->
+            match goal.Goal_store.owner with
+            | Goal_store.Unknown_owner -> ()
+            | Goal_store.Owner owner ->
+              (match
+                 List.find_opt
+                   (fun (record : Goal_verification.record) ->
+                      String.equal record.Goal_verification.goal_id goal.Goal_store.id)
+                   records
+               with
+               | Some ({ Goal_verification.completion =
+                           Goal_verification.Proof_refuted verdict; _ } as record)
+                 when Goal_verification.relation_for_goal ~goal record
+                      = Goal_verification.Current ->
+                 let event = refuted_notice_event verdict in
+                 let key = goal_notice_key ~goal_id:goal.Goal_store.id ~owner ~event in
+                 if goal.Goal_store.notified_refuted_key = Some key
+                 then ()
+                 else deliver_refuted_notice config ~goal ~owner verdict
+               | Some _ | None -> ()))
+         goals)
 ;;
 
 let gate_event_payload (ctx : context) ~phase (verdict : Goal_verification.verdict) =

@@ -252,7 +252,7 @@ In the TUI, `/login` opens the account panel; `/login codex`, `/login claude`,
 new account and `e` explicitly selects an existing account. Login codes stay
 masked in the panel and terminal keys are sent to that login process. Ctrl-C
 cancels; `r` retrieves the recovery receipt. After authentication, choose a model
-and press Enter to verify and save. Muse requires an explicit prompt byte limit.
+and press Enter to verify and save.
 The current default and its declared fallback order remain ahead of the added
 model. In dashboard runtime setup, the equivalent login panel retains the
 selected account through model discovery and save.

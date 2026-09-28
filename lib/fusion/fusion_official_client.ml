@@ -469,9 +469,7 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
     in
     let* () =
       match runtime.model.max_prompt_bytes with
-      | None ->
-        Error (Muse_failure (Runtime_muse_serve.Invalid_config
-          "Muse Code requires the model's declared max-prompt-bytes"))
+      | None -> Ok ()
       | Some capacity_bytes when String.length prompt > capacity_bytes ->
         Error (Muse_failure (Runtime_muse_serve.Invalid_config
           (Printf.sprintf

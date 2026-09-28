@@ -721,8 +721,7 @@ class SelectedNativeAccounts(unittest.TestCase):
                         env = {'HOME': home, 'CLAUDE_CONFIG_DIR': '', 'CODEX_HOME': ''}
                         if variable and override:
                             env[variable] = effective
-                        existing = dict(id='kept.binding', model='reported', max_context=8192,
-                                        max_prompt_bytes=12345, tools=True)
+                        existing = dict(id='kept.binding', model='reported', max_context=8192, tools=True)
                         source = dict(choice=choice, label=choice, rows=[existing])
                         observed = [dict(id='reported', label='Reported', context=8192)]
                         with patch.dict(os.environ, env), patch.object(SETUP, 'pick', return_value=[int(alternate)]), \
@@ -738,7 +737,7 @@ class SelectedNativeAccounts(unittest.TestCase):
                         else:
                             self.assertEqual(selected['account_home'], effective)
                             self.assertNotIn('credential_replaced', selected)
-                            self.assertEqual(models[0]['existing']['max_prompt_bytes'], 12345)
+                            self.assertEqual(models[0]['existing']['max_context'], 8192)
                             self.assertEqual(SETUP.resolve_model_spec(selected, models[0], 10),
                                              ('kept.binding', None))
                         self.assertEqual(source['rows'], [existing])
@@ -993,8 +992,7 @@ class SelectedNativeAccounts(unittest.TestCase):
             for observed in [[], [dict(id='reported', label='Reported', context=None)],
                              [dict(id='reported', label='Reported', context=8192)]]:
                 with self.subTest(tools=tools, observed=observed):
-                    existing = dict(id='muse.existing', model='reported', tools=tools,
-                                    max_context=999999, max_prompt_bytes=32768)
+                    existing = dict(id='muse.existing', model='reported', tools=tools, max_context=999999)
                     source = dict(choice='muse', command='muse', account_home='/selected', rows=[existing])
                     with patch.object(SETUP, 'muse_models', return_value=(observed, 'providerCatalog')):
                         rows, _ = SETUP.source_models('/masc', source, 10)
@@ -1014,21 +1012,17 @@ class SelectedNativeAccounts(unittest.TestCase):
                             _, spec = SETUP.resolve_model_spec(source, rows[0], 10)
                             self.assertEqual(spec['max_context'], 8192)
 
-    def test_existing_muse_binding_requires_declared_byte_capacity(self):
+    def test_existing_muse_binding_is_reused_without_a_byte_capacity(self):
         source = dict(choice='muse')
-        existing = dict(id='muse.selected', tools=True, max_prompt_bytes=45678)
+        existing = dict(id='muse.selected', tools=True)
         with patch.object(SETUP, 'render', side_effect=AssertionError('preserve existing configuration')):
             self.assertEqual(SETUP.resolve_model_spec(source, dict(existing=existing), 10), ('muse.selected', None))
-            for invalid in [None, 0, -1, True, '45678']:
-                with self.subTest(capacity=invalid), self.assertRaises(SETUP.SetupError):
-                    SETUP.resolve_model_spec(source, dict(existing=dict(existing, max_prompt_bytes=invalid)), 10)
 
-    def test_muse_byte_budget_is_operator_input_and_unknown_context_refused(self):
+    def test_muse_asks_no_byte_budget_and_unknown_context_refused(self):
         source = dict(choice='muse', command='muse', account_home='/selected', rows=[])
-        with patch.object(SETUP, 'ask_text', return_value='45678') as ask, patch.object(SETUP, 'render', return_value=('runtime', 'toml')):
+        with patch.object(SETUP, 'ask_text', side_effect=AssertionError('no operator byte budget')), patch.object(SETUP, 'render', return_value=('runtime', 'toml')):
             _, spec = SETUP.resolve_model_spec(source, dict(id='selected', context=8192), 10)
-        ask.assert_called_once()
-        self.assertEqual(spec['max_prompt_bytes'], 45678)
+        self.assertNotIn('max_prompt_bytes', spec)
         self.assertEqual(spec['account_home'], '/selected')
         with patch.object(SETUP, 'ask_text', side_effect=AssertionError('no invented context')):
             with self.assertRaises(SETUP.SetupError):
@@ -1682,7 +1676,7 @@ class CompiledRuntimeSetup(unittest.TestCase):
                 elif choice == 'muse':
                     account = base / 'selected-muse-account'
                     account.mkdir(mode=0o700)
-                    selected.update(account_home=str(account), max_prompt_bytes=32768)
+                    selected.update(account_home=str(account))
                 env = {k: v for k, v in os.environ.items() if not k.startswith(('MASC_', 'AGENT_CORE_'))}
                 with patch.dict(os.environ, env, clear=True):
                     result = SETUP.configure(BINARY, base, selected)

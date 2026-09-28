@@ -388,8 +388,9 @@ let bow_knot g x y =
 (* A beard: strands hanging from the jaw, with a mustache above the mouth.
    Separate strokes, not one filled oval: a solid oval whose top edge sits on
    the mouth line covers the mouth and reads as a mask at the sizes the TUI
-   draws. The strands start below the mouth so it stays clear, and the wax
-   shows between them. Cut at the wax's bottom edge like the rest of the face. *)
+   draws. The strands start below the mouth so it stays clear; they merge at
+   the jaw and split into tips, so the shape reads as hair. Cut at the wax's
+   bottom edge like the rest of the face. *)
 let beard_field g x y =
   let s = g.s in
   (* Below the mouth and its fang (the fang ends 0.27 face-scales under the

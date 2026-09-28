@@ -138,7 +138,7 @@ let kept_entries ~dir =
 
 let decode_snapshot raw =
   match Yojson.Safe.from_string raw with
-  | exception _ -> Error "snapshot is not JSON"
+  | exception Yojson.Json_error detail -> Error ("snapshot is not JSON: " ^ detail)
   | `List values ->
     let rec collect acc = function
       | [] -> Ok acc

@@ -55,6 +55,9 @@ val login_environment : account_home:string -> string array
     every Muse child, it runs with [TBH_CREDENTIAL_BACKEND=file], so the token
     is written into that file instead of the macOS Keychain. *)
 
+val login_argv : cli_path:string -> string list
+(** The official client's sign-in command, run with {!login_environment}. *)
+
 type session_mode =
   | Start
   | Resume of { session_id : string; expected_turn_count : int }

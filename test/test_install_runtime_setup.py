@@ -591,6 +591,25 @@ class CodexExplicitRefresh(unittest.TestCase):
         self.assertEqual(run.call_args.args[0], ['/owned/masc', 'runtime-codex-models', '--cli-path', '/owned/codex'])
         self.assertIn('refreshed', origin)
 
+    def test_private_inventory_account_reaches_terminal_refresh(self):
+        for bound in (False, True):
+            with self.subTest(bound=bound):
+                row = dict(id='selected.fixture', provider_id='selected', display_name='Codex selected',
+                           protocol='codex-app-server', command='/owned/codex', account_home='/selected/home',
+                           model='fixture', max_context=4096, tools=True, streaming=True)
+                integration = dict(id='selected', display_name='Codex selected', protocol='codex-app-server',
+                                   command='/owned/codex', account_home='/selected/home',
+                                   origin='runtime_config', setup_support='existing_binding')
+                with patch.object(SETUP, 'official_client_path', return_value=None):
+                    sources = SETUP.connection_sources('/owned/masc',
+                        dict(runtimes=[row] if bound else [], integrations=[integration]))
+                selected = next(s for s in sources if s['provider_id'] == 'selected')
+                receipt = dict(schema='masc.codex_model_refresh.v1', source='isolated_cli_cache', models=[])
+                with patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, json.dumps(receipt), '')) as run:
+                    SETUP.refresh_codex_models('/owned/masc', selected)
+                self.assertEqual(run.call_args.args[0], ['/owned/masc', 'runtime-codex-models',
+                    '--cli-path', '/owned/codex', '--account-home', '/selected/home'])
+
     def test_unavailable_refresh_is_labeled_offline_fallback(self):
         source = dict(choice='codex', command='codex', endpoint='', api_key_env='', rows=[])
         with patch.object(SETUP, 'refresh_codex_models', side_effect=SETUP.SetupError('Online unavailable; cached fallback.')), \

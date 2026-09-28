@@ -61,6 +61,11 @@ let credential_fields ~include_credential_references = function
   | Some (Runtime_schema.Inline _) -> [ "credential_kind", `String "inline" ]
   | None -> [ "credential_kind", `String "none" ]
 
+let account_fields ~include_credential_references (provider : Runtime_schema.provider) =
+  match include_credential_references, provider.account_home with
+  | true, Some home -> ["account_home", `String home]
+  | false, _ | true, None -> []
+
 let integrations_json ~include_credential_references (config : Runtime_schema.config) =
   let catalog = Catalog_binding.all () in
   let configured =
@@ -79,7 +84,8 @@ let integrations_json ~include_credential_references (config : Runtime_schema.co
         | Runtime_schema.Http endpoint -> endpoint_fields endpoint
         | Cli command -> [ "command", `String command ]
       in
-      let credential = credential_fields ~include_credential_references provider.credentials in
+      let credential = credential_fields ~include_credential_references provider.credentials
+        @ account_fields ~include_credential_references provider in
       integration_json config ~id:provider.id ~display_name:provider.display_name
         ~protocol:(Some provider.protocol) ~origin:"runtime_config" ~supported
         ~verification_supported:true
@@ -155,7 +161,8 @@ let to_json ?(include_credential_references=false) (config : Runtime_schema.conf
                | Runtime_schema.Cli command -> [ "command", `String command ]
                | Runtime_schema.Http endpoint -> endpoint_fields endpoint
              in
-             let credential = credential_fields ~include_credential_references provider.credentials in
+             let credential = credential_fields ~include_credential_references provider.credentials
+        @ account_fields ~include_credential_references provider in
              Some
                (`Assoc
                    ([ "id", `String (Runtime_schema.binding_key binding)

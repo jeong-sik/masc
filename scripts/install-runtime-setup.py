@@ -652,7 +652,7 @@ def connection_sources(binary, inventory):
                           choice=PROTOCOL_CHOICES.get(row['protocol']), endpoint=row.get('endpoint') or '',
                           command=row.get('command') or '', api_key_env=row.get('api_key_env') or '',
                           credential_kind=row.get('credential_kind', 'unknown'),
-                          credential_file=row.get('credential_file'), provider_kind=row.get('provider_kind'),
+                          credential_file=row.get('credential_file'), account_home=row.get('account_home'), provider_kind=row.get('provider_kind'),
                           rows=[])
             sources.append(source)
         source['rows'].append(row)
@@ -666,7 +666,7 @@ def connection_sources(binary, inventory):
                       endpoint=integration.get('endpoint') or '', command=integration.get('command') or '',
                       api_key_env=integration.get('api_key_env') or '',
                       credential_kind=integration.get('credential_kind', 'env' if integration.get('api_key_env') else 'none'),
-                      credential_file=integration.get('credential_file'),
+                      credential_file=integration.get('credential_file'), account_home=integration.get('account_home'),
                       provider_kind=integration.get('provider_kind'),
                       origin=integration['origin'], setup_support=integration['setup_support'], rows=[])
         # A catalog-advertised new connection carries the provider's own name,
@@ -1230,7 +1230,10 @@ def native_serving_context(binary, source, model, timeout, load=False):
 
 
 def refresh_codex_models(binary, source):
-    result = subprocess.run([str(binary), 'runtime-codex-models', '--cli-path', source.get('command') or 'codex'],
+    arguments = [str(binary), 'runtime-codex-models', '--cli-path', source.get('command') or 'codex']
+    if source.get('account_home'):
+        arguments += ['--account-home', source['account_home']]
+    result = subprocess.run(arguments,
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     if result.returncode:
         raise SetupError('Codex online model refresh unavailable; using cached or bundled metadata.')

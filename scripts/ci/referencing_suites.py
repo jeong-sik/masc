@@ -325,8 +325,6 @@ def main(argv: list[str]) -> int:
         print(f"file {suite}")
     for suite in sorted(exactpath_suites(root, tracked, changed)):
         print(f"exactpath {suite}")
-    for suite in sorted(stanza_suites(root, tracked, changed)):
-        print(f"stanza {suite}")
     return 0
 
 

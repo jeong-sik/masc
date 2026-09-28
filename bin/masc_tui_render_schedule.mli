@@ -581,6 +581,7 @@ val board_age_text : now:float -> float option -> string
     post carried no such time. Which time that is follows the sort, which
     {!Masc_tui_types.board_sort_time} answers. *)
 
+(** The list's columns, named so a narrow list can say which it spares. *)
 type board_column =
   | Board_mark
   | Board_id
@@ -590,7 +591,6 @@ type board_column =
   | Board_age
   | Board_score
   | Board_replies
-(** The list's columns, named so a narrow list can say which it spares. *)
 
 val board_layout : inner_width:int -> board_column Masc_tui_table.layout
 (** The columns the list draws in [inner_width] and the title's share of it.

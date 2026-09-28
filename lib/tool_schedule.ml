@@ -757,11 +757,8 @@ let handle_write ~action ~tool_name ~start_time ctx args =
            let* schedule_id = plain (required_string args "schedule_id") in
            let* stored = authorize_row_change ctx ~schedule_id in
            (match stored with
-            | Some request ->
-              Log.Tool_validation.warn ~category:Log.Tool
-                "schedule %s update omitted recurrence_kind; next version requires recurrence_kind"
-                schedule_id;
-              Ok request.recurrence
+            | Some _ ->
+              Error (Refusal "recurrence_kind is required for update")
             | None ->
               (* An absent row has no recurrence to preserve. Never let the
                  create parser's one_shot default decide an update. *)

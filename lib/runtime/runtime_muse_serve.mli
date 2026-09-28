@@ -234,7 +234,8 @@ val run_turn
 
     The returned model (when explicitly selected) and workspace must match the
     request on both start and resume. Mismatches refuse admission before callbacks.
-    Start must report the requested approval mode. Resume reapplies that mode
+    A started session must hold no turns; resume requires the expected retained
+    count. Start must report the requested approval mode. Resume reapplies that mode
     and verifies the returned effective mode before admitting the session.
     [on_session_ready] runs once the host has returned the session id, before
     the turn is written, so the caller can persist the id first. Its failure

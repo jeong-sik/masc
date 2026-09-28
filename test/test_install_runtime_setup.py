@@ -563,12 +563,12 @@ class RuntimeSetupAdapter(unittest.TestCase):
             SETUP.configure_many('/fixture/masc', self.base, [spec()], verify=True, expected_revision=self.revision)
 
     def test_usage_limited_receipt_is_accepted_and_names_the_unmeasured_runtime(self):
-        # A spent quota or a rate limit no longer fails the save: MASC publishes
-        # the runtime and the receipt names it, so a published configuration is
-        # not reported as unconfirmed.
+        # A spent quota or a rate limit publishes the runtime and the receipt
+        # names it, so a published configuration is not reported as
+        # unconfirmed.
         receipt = dict(runtime_id='native.model', runtime_ids=['native.model'], configured=True, validation='passed',
                        readiness='usage_limited',
-                       unverified=[dict(runtime_id='native.model', code='quota_exhausted', message='m', detail=None)])
+                       unverified=[dict(runtime_id='native.model', code='quota_exhausted')])
         def configure(answer, verify=True):
             with patch.object(SETUP, 'render', return_value=('native.model', b'', b'')), \
                     patch.object(SETUP, 'native_setup_command', return_value=answer):
@@ -579,7 +579,8 @@ class RuntimeSetupAdapter(unittest.TestCase):
         self.assertIn('native.model (quota_exhausted)', stderr.getvalue())
         for unreadable in (dict(receipt, unverified=[]),
                            dict(receipt, unverified=[dict(runtime_id='other.model', code='quota_exhausted')]),
-                           dict(receipt, unverified=[dict(runtime_id='native.model')])):
+                           dict(receipt, unverified=[dict(runtime_id='native.model')]),
+                           dict(receipt, readiness='verified')):
             with self.assertRaises(SETUP.SetupError):
                 configure(unreadable)
         with self.assertRaises(SETUP.SetupError):

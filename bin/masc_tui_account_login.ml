@@ -15,7 +15,8 @@ type removal =
    unmeasured because the provider declined for the account's usage. *)
 type unverified = { runtime_id : string; code : string }
 type saved = Saved_verified | Saved_unverified of unverified * unverified list
-type phase = Loading | Providers | Logging | Models | Documented_context of model | Saving | Finished of saved | Failed
+type phase = Loading | Providers | Logging | Models | Documented_context of model | Saving
+  | Finished of { saved : saved; refresh_failed : bool } | Failed
   | Removal of { provider : provider; revision : string; removal : removal }
 type recovery = Login_status | Refresh_configuration
 type email_gap = Login_file_unreadable | Login_file_unrecognized | Email_not_reported | Email_not_displayable
@@ -174,15 +175,22 @@ let refresh_retry t result =
   | Error _ -> t.phase <- Failed; t.notice <- "최신 설정을 읽지 못했습니다. r로 다시 확인하세요."
 let saved_notice = function
   | Saved_verified -> "모델의 응답과 도구 호출을 검증하고 저장했습니다."
+  | Saved_unverified _ -> "저장했습니다. 아래 런타임은 사용 한도에 걸려 응답·도구 검증을 못 했습니다."
+(* A runtime id is two hashes and a model name, longer than what a notice row
+   has left at 100 columns, so each unmeasured runtime gets its own row. *)
+let saved_rows = function
+  | Saved_verified -> []
   | Saved_unverified (first, rest) ->
-    "저장했습니다. 사용 한도에 걸려 응답·도구 검증은 못 했습니다: "
-    ^ String.concat ", " (List.map (fun (row:unverified) -> row.runtime_id ^ " (" ^ row.code ^ ")") (first :: rest))
+    List.map (fun (row:unverified) -> "  " ^ row.runtime_id ^ " (" ^ row.code ^ ")") (first :: rest)
 let saved_of_json json =
+  let selected = match field "runtime_ids" json with
+    | `List ids -> List.filter_map string ids
+    | _ -> [] in
   match field "configured" json, field "readiness" json, field "unverified" json with
   | `Bool true, `String "verified", `Null -> Some Saved_verified
   | `Bool true, `String "usage_limited", `List rows ->
     let parsed = List.map (fun row -> match string (field "runtime_id" row), string (field "code" row) with
-      | Some runtime_id, Some code -> Some {runtime_id; code}
+      | Some runtime_id, Some code when List.mem runtime_id selected -> Some {runtime_id; code}
       | _ -> None) rows in
     (match List.filter_map Fun.id parsed with
      | first :: rest when List.for_all Option.is_some parsed -> Some (Saved_unverified (first, rest))
@@ -190,14 +198,12 @@ let saved_of_json json =
   | _ -> None
 let saved t json =
   match saved_of_json json with
-  | Some saved -> t.phase <- Finished saved; t.notice <- saved_notice saved; Ok saved
+  | Some saved -> t.phase <- Finished {saved; refresh_failed = false}; t.notice <- saved_notice saved; Ok saved
   | None -> Error "설정 저장 결과를 확인하지 못했습니다"
 let refresh_saved t saved result =
   let refreshed = match result with Ok json -> inventory t json | Error _ as error -> error in
-  t.phase <- Finished saved;
-  t.notice <- (match refreshed with
-    | Ok () -> saved_notice saved
-    | Error _ -> saved_notice saved ^ " 목록을 새로 읽지 못했습니다. r로 다시 확인하세요.")
+  t.phase <- Finished {saved; refresh_failed = Result.is_error refreshed};
+  t.notice <- saved_notice saved
 let input_response ~sequence t result =
   match result with
   | Error _ when sequence=t.input_sequence && t.input_pending ->
@@ -351,7 +357,7 @@ let key t key =
     else if key="down" || key="j" then (let count=if t.phase=Providers then List.length t.providers else List.length t.models in t.cursor<-min (max 0 (count-1)) (t.cursor+1); Nothing)
     else if key="r" then (match t.phase with
       | Models -> Discover
-      | Finished saved -> Refresh_saved saved
+      | Finished {saved; _} -> Refresh_saved saved
       | Failed when t.recovery=Refresh_configuration -> Refresh_retry
       | Providers | Failed | Loading | Logging | Documented_context _ | Saving | Removal _ ->
         if Option.is_some t.login_id then Recover else Inventory)
@@ -421,7 +427,9 @@ let lines t =
        | Removable {changes; login_store} -> Text "지우거나 고치는 것:" :: List.map (fun change -> Text ("  " ^ describe_change change)) changes
          @ (match login_store with Some path -> [Text ("로그인 정보는 지우지 않습니다: " ^ path)] | None -> [])
        | Unremovable reason -> [Text ("지울 수 없습니다: " ^ reason)])
-    | Loading | Saving | Finished _ | Failed -> [] in
+    | Finished {saved; refresh_failed} -> List.map (fun row -> Text row) (saved_rows saved)
+      @ (if refresh_failed then [Text "목록을 새로 읽지 못했습니다. r로 다시 확인하세요."] else [])
+    | Loading | Saving | Failed -> [] in
   Text t.notice :: rows
 let row_text = function Text text -> text | Terminal line -> Masc_tui_sgr_text.text line
 let visible_lines ~height t =

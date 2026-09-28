@@ -329,7 +329,8 @@ def configure_many(binary, base_path, specs, selected_ids=None, verify=False, de
     unmeasured = unmeasured_runtimes(result, selected) if verify else None
     if (result.get('runtime_id') != default_id or result.get('runtime_ids') != selected
             or result.get('configured') is not True or result.get('validation') != 'passed'
-            or (result.get('readiness') != ('verified' if verify else 'not_probed') and unmeasured is None)):
+            or (result.get('readiness') != ('verified' if verify else 'not_probed') and unmeasured is None)
+            or ('unverified' in result and unmeasured is None)):
         raise SetupError('MASC did not confirm the selected configuration. Inspect the workspace before retrying.')
     for row in unmeasured or []:
         print(paint('! Saved without the response and tool check: ', 'warn') + terminal_text(row['runtime_id'])
@@ -2418,7 +2419,7 @@ def journey(binary, base_path, port, timeout, resume=False):
         print('The model connection was not saved. Run masc again once the '
               'problem above is resolved.', file=sys.stderr)
         return 1
-    if configured.get('readiness') != 'verified':
+    if configured.get('readiness') not in ('verified', 'usage_limited'):
         print('Your workspace is saved. Run masc to continue from here.', file=sys.stderr)
         return 0
     # Before the sandbox rather than after it: voice needs no guest and no

@@ -18,7 +18,7 @@ type authentication = Authenticated | Login_completed | Credential_captured
 type event = Started of string * string option | Output of string | Input_ready
   | Complete of string * authentication | Login_failed of string * string option | Login_error
 type action = Inventory | Refresh_saved | Refresh_retry | Start of bool | Input of int * Yojson.Safe.t | Cancel
-  | Recover | Discover | Prepare of model | Save of model * int option | Close | Nothing
+  | Recover | Discover | Prepare of model | Save of model | Close | Nothing
 let create requested = {requested; generation=0; phase=Loading; providers=[]; provider=None; models=[]; account_emails=[];
   cursor=0; account_ref=None; login_id=None; revision=""; existing=[]; default_runtime_id=None; draft="";
   output=""; notice="계정 목록을 읽고 있습니다."; input_pending=false; input_sequence=0; cancel_stream=None; recovery=Login_status}

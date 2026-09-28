@@ -353,6 +353,10 @@ type load_failure =
       ; high_water_tokens : int
       ; max_context : int
       }
+  | Muse_window_below_host_overhead of
+      { runtime_id : string
+      ; max_context : int
+      }
   | Exact_lane_cli_slot_unservable of exact_lane_cli_slot_unservable
       (** Why {!load_list} refused a configuration. Closed, so a consumer
           decides per case instead of matching rendered text — the contract
@@ -929,13 +933,24 @@ val quota_scope_of_runtime_id : string -> Runtime_quota_window.scope option
     the runtime id is unknown. Consumed by
     {!Runtime_quota_window.demote_order} and the matching note site. *)
 
+val prompt_capacity_bytes : t -> int option
+(** The start-prompt ceiling a turn on this runtime applies: the model's
+    declared [max-prompt-bytes], or for a Muse model without one the ceiling
+    derived from its resolved window ({!resolve_max_context_of_runtime},
+    {!Runtime_muse_prompt_capacity}). [None] when neither applies. *)
+
 val max_prompt_bytes_of_runtime_id : string -> int option
-(** Declared [max-prompt-bytes] for the model bound to this runtime id, or
-    [None] when the model declares none. *)
+(** {!prompt_capacity_bytes} of the runtime with this id, or [None] when the
+    id is unknown or no ceiling applies. *)
 
 val context_marks_of_runtime_id : string -> Runtime_schema.context_marks option
 (** The binding's eviction marks, or [None] when the binding declares none
     (the keeper then evicts carried history only on a provider refusal). *)
+
+val validate_muse_prompt_ceilings : t list -> (unit, load_failure) result
+(** Refuses a Muse runtime without [max-prompt-bytes] whose resolved window
+    cannot hold the host's own overhead, so no start-prompt ceiling can be
+    derived ({!prompt_capacity_bytes}). *)
 
 val validate_runtime_context_marks : t list -> (unit, load_failure) result
 (** Refuses a runtime whose high-water mark exceeds its resolved max-context;

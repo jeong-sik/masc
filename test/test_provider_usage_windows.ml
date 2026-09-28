@@ -22,6 +22,7 @@ let codex_sparse_params =
 
 let runtime_toml =
   "[providers.usage_claude]\n\
+   display-name = \"Claude usage fixture\"\n\
    protocol = \"claude-code\"\n\
    command = \"/usr/bin/true\"\n\
    is-non-interactive = true\n\
@@ -101,6 +102,11 @@ let runtime_scope_label json id =
   Yojson.Safe.Util.(runtime_row json id |> member "quota_scope" |> to_string)
 ;;
 
+let provider_ids row =
+  Yojson.Safe.Util.(
+    row |> member "providers" |> to_list |> List.map (fun p -> p |> member "id" |> to_string))
+;;
+
 let window_summary row =
   Yojson.Safe.Util.(
     row
@@ -156,8 +162,14 @@ let test_reports_reach_the_resolved_document () =
     ; "seven_day fraction=0.44 resets=1790640000 source=claude_code.rate_limit_event"
     ]
     (window_summary claude_row);
-  check (list string) "claude providers" [ "usage_claude" ]
-    Yojson.Safe.Util.(claude_row |> member "providers" |> to_list |> List.map to_string);
+  check (list (pair string string)) "claude providers carry the display name"
+    [ "usage_claude", "Claude usage fixture" ]
+    Yojson.Safe.Util.(
+      claude_row
+      |> member "providers"
+      |> to_list
+      |> List.map (fun p ->
+        p |> member "id" |> to_string, p |> member "display_name" |> to_string));
   let codex_row = usage_row after codex_label in
   check (list string) "codex windows as reported, sparse update kept them"
     [ "five_hour percent=100 resets=1790200000 source=codex.account_rate_limits_updated"
@@ -168,6 +180,8 @@ let test_reports_reach_the_resolved_document () =
     (fun window ->
        check string "codex limit id" "codex"
          Yojson.Safe.Util.(window |> member "limit_id" |> to_string);
+       check string "codex windows gate model calls" "gates_model_calls"
+         Yojson.Safe.Util.(window |> member "role" |> to_string);
        check (float 0.0) "observed_at of the report that named the window" 1790180100.0
          Yojson.Safe.Util.(window |> member "observed_at" |> to_number))
     Yojson.Safe.Util.(codex_row |> member "windows" |> to_list);
@@ -248,7 +262,7 @@ default = "usage_shared_one.sonnet"
        let shared_row = usage_row first shared_label in
        check (list string) "both provider ids share the reported row"
          [ "usage_shared_one"; "usage_shared_two" ]
-         Yojson.Safe.Util.(shared_row |> member "providers" |> to_list |> List.map to_string);
+         provider_ids shared_row;
        check bool "first account path is absent from public JSON" false
          (String_util.contains_substring (Yojson.Safe.to_string first) home_a);
        load (config home_b home_a);
@@ -266,7 +280,7 @@ default = "usage_shared_one.sonnet"
        let retained_row = usage_row after retained_label in
        check (list string) "old report belongs only to the unchanged home"
          [ "usage_shared_two" ]
-         Yojson.Safe.Util.(retained_row |> member "providers" |> to_list |> List.map to_string);
+         provider_ids retained_row;
        let public_json = Yojson.Safe.to_string after in
        List.iter
          (fun home ->
@@ -342,7 +356,7 @@ default = %S
        let row = usage_row json implicit_label in
        check (list string) "one row names both providers"
          [ implicit_id; explicit_id ]
-         Yojson.Safe.Util.(row |> member "providers" |> to_list |> List.map to_string);
+         provider_ids row;
        check bool "default home path is absent from public JSON" false
          (String_util.contains_substring (Yojson.Safe.to_string json) home))
 ;;
@@ -478,14 +492,14 @@ let test_openrouter_key () =
 
 let test_zai_quota_limit () =
   check (list string) "windows"
-    [ "limit=TIME_LIMIT label \"TIME_LIMIT, 1 x unit 5\" percent 6 resets=1790326488 role=other"
+    [ "limit=TIME_LIMIT label \"1 x unit 5\" percent 6 resets=1790326488 role=other"
     ; "limit=TOKENS_LIMIT five_hour percent 4 resets=1790259391 role=gates"
     ]
     (decoded_windows Usage.decode_zai_quota_limit ~source:"zai.quota_limit"
        zai_quota_limit_response);
   check (list string) "same limit type with known and unknown unit codes stays distinct"
     [ "limit=CREDIT_LIMIT five_hour percent 12 resets=- role=unclassified"
-    ; "limit=CREDIT_LIMIT label \"CREDIT_LIMIT, 1 x unit 6\" percent 34 resets=- role=unclassified"
+    ; "limit=CREDIT_LIMIT label \"1 x unit 6\" percent 34 resets=- role=unclassified"
     ]
     (decoded_windows Usage.decode_zai_quota_limit ~source:"zai.quota_limit"
        {|{"success":true,"data":{"limits":[{"type":"CREDIT_LIMIT","unit":3,"number":5,"percentage":12},{"type":"CREDIT_LIMIT","unit":6,"number":1,"percentage":34}]}}|});

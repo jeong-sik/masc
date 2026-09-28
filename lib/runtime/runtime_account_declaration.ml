@@ -40,6 +40,7 @@ type client =
   | Claude_code
   | Codex
   | Antigravity
+[@@deriving enumerate]
 
 type base =
   { id : string

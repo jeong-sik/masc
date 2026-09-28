@@ -1193,7 +1193,7 @@
  (name masc_tui_board_read_layout)
  (wrapped false)
  (modules masc_tui_board_read_layout)
- (libraries masc_tui_types masc_tui_board_detail))
+ (libraries masc_tui_types masc_tui_board_detail masc_tui_frame_timing))
 
 (library
  (name masc_tui_browser_lane_layout)
@@ -1564,6 +1564,7 @@
  (wrapped false)
  (modules masc_tui_render_prim)
  (libraries
+  masc_tui_frame_timing
   masc_tui_next_request_band
   masc_tui_hit
   masc_tui_press

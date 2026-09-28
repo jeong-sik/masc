@@ -177,10 +177,18 @@ let heard_text ~now observed_at =
 
 (* ---- accounts ----------------------------------------------------------- *)
 
+(* The operator's own [display-name] for each provider billed to the account.
+   A scope no configured provider names any more has only its scope id. *)
 let account_name (account : Tui_decode.provider_usage_account) =
   match account.pua_providers with
   | [] -> Terminal_text.single_line account.pua_scope
-  | providers -> Terminal_text.single_line (String.concat "," providers)
+  | providers ->
+      Terminal_text.single_line
+        (String.concat ", "
+           (List.map
+              (fun (provider : Tui_decode.provider_usage_provider) ->
+                provider.pup_display_name)
+              providers))
 
 (* The runtime catalogue's own [quota_exhausted], joined by quota scope,
    with the reopen time the catalogue states for it. That time is the

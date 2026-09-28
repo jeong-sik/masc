@@ -39,13 +39,14 @@ assert os.environ['MASC_BASE_PATH']==str(stage)
 assert os.environ['MASC_CONFIG_DIR']==str(config)
 assert stage!=base
 if a[0]=='runtime-default-set':
-    assert a[4:6]==['--setup-lanes','--setup-imp']
+    if len(a)>4: assert a[4:6]==['--setup-lanes','--setup-imp']
     (base/'selected.json').write_text(json.dumps([a[3]]+a[7::2]))
     (base/'stage-path').write_text(str(stage))
     p=config/'runtime.toml'
     p.write_text(p.read_text()+'\n# native lane writer fixture\n')
     %s
 elif a[0]=='runtime-verify':
+    with (base/'verified.jsonl').open('a') as f: f.write(json.dumps(a[3])+'\n')
     %s
 else: raise AssertionError(a)
 |} python (Yojson.Safe.to_string (`String base)) action verify);
@@ -71,6 +72,51 @@ let test_batch () = fixture (fun base runtime binary spec original ->
   ignore (get (apply base binary specs ids next false));
   (* Existing identities must not append the provider/model definitions again. *)
   Alcotest.check Alcotest.string "idempotent connection definitions" (after ^ "\n# native lane writer fixture\n") (text runtime))
+let test_named_default_lane () = fixture (fun base runtime binary spec original ->
+  let first = (Runtime_setup_spec.render (spec "old-model")).runtime_id in
+  let second = Runtime_setup_spec.render (spec "old-fallback") in
+  let added = spec "new-account-model" in
+  let added_id = (Runtime_setup_spec.render added).runtime_id in
+  let lane_id = "conversation.priority" in
+  let table lane candidates content = Toml_line_editor.edit_table_multiline_array content
+    ~path:("runtime.lanes." ^ Toml_line_editor.render_key lane) ~key:"candidates" ~values:candidates in
+  let configured = Toml_line_editor.edit_table_scalar (original ^ second.runtime_toml)
+    ~path:"runtime" ~key:"default" ~value:(Some lane_id)
+    |> table lane_id [second.runtime_id; first]
+    |> table "other-lane" [first] in
+  let configured = Toml_line_editor.edit_table_scalar configured
+    ~path:"runtime.assignments" ~key:"imp" ~value:(Some "other-lane") in
+  let configured = Toml_line_editor.edit_table_multiline_array configured
+    ~path:"runtime.exact_output_lanes.hitl_auto_judge" ~key:"cli_slots" ~values:[first] in
+  save runtime configured;
+  let parsed () = match Runtime_toml.parse_file runtime with
+    | Ok config -> config | Error _ -> Alcotest.fail "named route fixture must parse" in
+  let before = parsed () in
+  let selected = [second.runtime_id; first; added_id] in
+  let revision = get (Batch.observe ~base_path:base) in
+  fake base binary "assert len(a)==4, 'named route must not reset setup lanes or imp'";
+  let receipt = Batch.configure ~default_lane_id:lane_id ~binary ~base_path:base
+    ~expected_revision:revision ~specs:[added] ~runtime_ids:selected
+    ~default_runtime_id:second.runtime_id ~verify:true () |> get in
+  Alcotest.check Alcotest.string "receipt retains named default" lane_id receipt.runtime_id;
+  Alcotest.check (Alcotest.list Alcotest.string) "receipt reports concrete candidate order" selected receipt.runtime_ids;
+  let after = parsed () in
+  Alcotest.check (Alcotest.option Alcotest.string) "default route is not flattened" (Some lane_id) after.default_runtime_id;
+  let candidates id = List.find (fun (lane:Runtime_schema.lane_decl) -> lane.id=id) after.lane_decls in
+  Alcotest.check (Alcotest.list Alcotest.string) "existing candidates keep order before appended account"
+    selected (candidates lane_id).candidate_ids;
+  Alcotest.check (Alcotest.list Alcotest.string) "unrelated lane untouched" [first] (candidates "other-lane").candidate_ids;
+  Alcotest.check Alcotest.bool "all keeper assignments retained" true (before.keeper_assignments=after.keeper_assignments);
+  Alcotest.check Alcotest.bool "exact-output lanes retained" true (before.exact_output_lane_decls=after.exact_output_lane_decls);
+  let probes = text (Filename.concat base "verified.jsonl") |> String.split_on_char '\n'
+    |> List.filter (fun line -> line<>"") |> List.map (fun line -> Yojson.Safe.from_string line |> Yojson.Safe.Util.to_string) in
+  Alcotest.check (Alcotest.list Alcotest.string) "verification probes concrete candidates, never route ID" selected probes;
+  let saved = text runtime in
+  let revision = get (Batch.observe ~base_path:base) in
+  Alcotest.check Alcotest.bool "preserve cannot silently switch to an unrelated lane" true
+    (Batch.configure ~default_lane_id:"other-lane" ~binary ~base_path:base ~expected_revision:revision
+      ~specs:[] ~runtime_ids:selected ~default_runtime_id:second.runtime_id ~verify:false () = Error Batch.Invalid_selection);
+  Alcotest.check Alcotest.string "refused lane switch leaves bytes unchanged" saved (text runtime))
 let test_cas () = fixture (fun base runtime binary spec original ->
   fake base binary "(base/'.masc/config/runtime.toml').write_text('operator concurrent update')";
   let specs=[spec "new"] in let ids=List.map (fun s -> (Runtime_setup_spec.render s).runtime_id) specs in
@@ -201,6 +247,7 @@ let test_error_summary_is_one_line () =
 let () = Alcotest.run "runtime setup batch" ["workspace",[
   Alcotest.test_case "an error summary is one line and names the signal" `Quick test_error_summary_is_one_line;
   Alcotest.test_case "ordered multi-selection and existing bytes" `Quick test_batch;
+  Alcotest.test_case "preserve named default lane and candidate order" `Quick test_named_default_lane;
   Alcotest.test_case "runtime compare-and-swap" `Quick test_cas;
   Alcotest.test_case "native refusal publishes nothing" `Quick test_refusal;
   Alcotest.test_case "verification report is read back typed" `Quick test_verification_report;

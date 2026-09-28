@@ -962,15 +962,39 @@ let add_delete_action_routes router =
              | None -> respond_error ~request:req reqd (invalid_request "post_id")
              | Some post_id ->
              let successor_id = Safe_ops.json_string_opt "successor_id" json in
+             let no_successor = Safe_ops.json_bool_opt "no_successor" json in
              let summary = Safe_ops.json_string_opt "summary" json in
-             match
-               Board_dispatch.set_closed
-                 ~post_id ~closed_by:agent_name ?successor_id ?summary ()
-             with
-             | Ok () -> respond_ok ~request:req reqd
-             | Error err ->
-                 respond_error ~status:`Not_found ~request:req reqd
-                   (Board_tool.board_error_to_string err)
+             let successor =
+               match successor_id, no_successor with
+               | Some _, Some true ->
+                 Error "give successor_id or no_successor=true, not both"
+               | Some id, _ -> Ok (Board.Successor id)
+               | None, Some true -> Ok Board.No_successor
+               | None, Some false ->
+                 Error
+                   "no_successor=false is not a decision; pass successor_id or \
+                    no_successor=true"
+               | None, None ->
+                 Error "close requires successor_id or no_successor=true"
+             in
+             (match successor, summary with
+              | Error msg, _ -> respond_error ~request:req reqd msg
+              | Ok _, None ->
+                respond_error ~request:req reqd (invalid_request "summary")
+              | Ok successor, Some summary ->
+                (match
+                   Board_dispatch.set_closed
+                     ~post_id ~closed_by:agent_name ~successor ~summary ()
+                 with
+                 | Ok () -> respond_ok ~request:req reqd
+                 | Error err ->
+                     let status =
+                       match err with
+                       | Board.Validation_error _ -> `Bad_request
+                       | _ -> `Not_found
+                     in
+                     respond_error ~status ~request:req reqd
+                       (Board_tool.board_error_to_string err)))
            with Yojson.Json_error _ ->
              respond_error ~request:req reqd (invalid_request "post_id")
          )

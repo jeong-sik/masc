@@ -601,29 +601,49 @@ let set_pinned store ~post_id ~pinned : (unit, board_error) Result.t =
                   | _ -> ()));
                Error e))
 
+(** A close must state its successor decision explicitly: [Successor id]
+    continues the thread, [No_successor] says there is none. There is no
+    default -- a caller that names neither is refused, so a missing
+    successor is never silently read as "none". *)
+type close_successor =
+  | No_successor
+  | Successor of string
+
 (** Close a post (typed [closed] state, task-1758/#39356). Same durability
     and rollback shape as [set_pinned]: the caller ([author]/[operator]/a
     configured moderator) is checked at the HTTP/dispatch boundary, not
     here -- this function only records who closed it, once permission is
     already granted. Re-closing an already-closed post overwrites the
-    previous [closed] value (last write wins; no error). A [successor_id]
-    is validated against the live store: it must resolve to an existing
-    post and cannot be [post_id] itself, both refused as [Validation_error]
-    before anything is written -- a nonexistent or self-referential
-    successor pointer would otherwise sit in posts.jsonl forever with no
-    way for a reader to notice. [summary] is not required either way; no
-    successor-vs-summary cross rule is enforced here (open design
-    question, tracked on #39356). *)
-let set_closed store ~post_id ~closed_by ?successor_id ?summary ()
+    previous [closed] value (last write wins; no error).
+
+    A close must state two things explicitly, and both are enforced here so
+    every surface (the author tool and the operator dashboard route) shares
+    one boundary:
+
+    - [summary] must be non-empty after trimming. A whitespace-only value is
+      refused as [Validation_error]; a close with no reason is not recorded.
+    - [successor] must be [Successor id] or [No_successor]. There is no
+      default: a caller that names neither is refused, so a missing
+      successor is never silently read as "none". A [Successor] id is
+      validated against the live store: it must resolve to an existing post
+      and cannot be [post_id] itself, both refused as [Validation_error]
+      before anything is written -- a nonexistent or self-referential
+      successor pointer would otherwise sit in posts.jsonl forever with no
+      way for a reader to notice. *)
+let set_closed store ~post_id ~closed_by ~successor ~summary ()
   : (unit, board_error) Result.t =
   match Post_id.of_string post_id, Agent_id.of_string closed_by with
   | Error e, _ -> Error e
   | Ok _, Error e -> Error e
   | Ok pid, Ok closed_by_id ->
+    let summary = String.trim summary in
+    if String.equal summary "" then
+      Error (Validation_error "close summary must not be empty")
+    else
     let successor_id =
-      match successor_id with
-      | None -> Ok None
-      | Some raw ->
+      match successor with
+      | No_successor -> Ok None
+      | Successor raw ->
         (match Post_id.of_string raw with
          | Ok id -> Ok (Some id)
          | Error e -> Error e)
@@ -656,7 +676,7 @@ let set_closed store ~post_id ~closed_by ?successor_id ?summary ()
              | Some post ->
                let now = Time_compat.now () in
                let closed =
-                 Some { closed_by = closed_by_id; closed_at = now; successor_id; summary }
+                 Some { closed_by = closed_by_id; closed_at = now; successor_id; summary = Some summary }
                in
                let updated = { post with closed; updated_at = now } in
                Hashtbl.replace store.posts (Post_id.to_string pid) updated;

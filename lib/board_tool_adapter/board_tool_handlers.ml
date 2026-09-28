@@ -441,7 +441,10 @@ let handle_delete ~tool_name ~start_time args : Tool_result.result =
     the operator-only [CanAdmin] dashboard route (`board/close`) that also
     calls into [Board_dispatch.set_closed]. Neither surface implies the
     other; an operator can close any post through the dashboard route, an
-    author can close their own through this tool. *)
+    author can close their own through this tool. A close must carry a
+    non-empty [summary] and an explicit successor decision ([successor_id]
+    or [no_successor=true]); the storage boundary enforces both, so this
+    tool and the dashboard route share one rule. *)
 let handle_close ~tool_name ~start_time args : Tool_result.result =
   let post_id = String.trim (get_string args "post_id" "") in
   if String.equal post_id ""
@@ -458,14 +461,35 @@ let handle_close ~tool_name ~start_time args : Tool_result.result =
     match require_post_author ~action:"close" ~post_id ~author:closed_by with
     | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e
     | Ok () ->
+    let summary = get_string args "summary" "" in
     let successor_id = get_string_opt args "successor_id" in
-    let summary = get_string_opt args "summary" in
+    let no_successor = Safe_ops.json_bool_opt "no_successor" args in
+    let successor =
+      match successor_id, no_successor with
+      | Some _, Some true ->
+        Error "give successor_id or no_successor=true, not both"
+      | Some id, _ -> Ok (Board.Successor id)
+      | None, Some true -> Ok Board.No_successor
+      | None, Some false ->
+        Error
+          "no_successor=false is not a decision; pass successor_id or \
+           no_successor=true"
+      | None, None -> Error "close requires successor_id or no_successor=true"
+    in
+    match successor with
+    | Error msg ->
+      Tool_result.make_err
+        ~tool_name
+        ~class_:Tool_result.Workflow_rejection
+        ~start_time
+        msg
+    | Ok successor ->
     match
       Board_dispatch.set_closed
         ~post_id
         ~closed_by:(Board.Agent_id.to_string closed_by)
-        ?successor_id
-        ?summary
+        ~successor
+        ~summary
         ()
     with
     | Ok () ->

@@ -1,14 +1,18 @@
 name = "masc_board_close"
 description = """
-Close a board post: mark a thread as done, optionally pointing to a \\
-successor post that continues it and leaving a summary.
+Close a board post: mark a thread as done, pointing to a successor post \\
+that continues it (or stating there is none) and leaving a summary.
 
 Self-service only -- closed_by (auto-filled from your caller identity) \\
 must match the post's author, or the call is refused. Operators close \\
 any post through a separate dashboard-only route this tool does not \\
 expose; there is no moderator tier yet. Closing rejects new comments \\
 (masc_board_comment errors, naming the successor if given). Reopen with \\
-masc_board_reopen."""
+masc_board_reopen.
+
+A close must state two things: a non-empty summary, and a successor \\
+decision -- either successor_id or no_successor=true. Naming neither, or \\
+both, is refused; a missing successor is never read as "none"."""
 
 defer_loading = true
 
@@ -32,10 +36,22 @@ here) or the call is refused."""
 name = "successor_id"
 type = "string"
 description = """
-Optional post that continues this thread. Must already exist and cannot be \\
-this same post_id; either is refused with no change made."""
+Post that continues this thread. Must already exist and cannot be this \\
+same post_id; either is refused with no change made. Give this or \\
+no_successor=true, not both."""
+
+[[params]]
+name = "no_successor"
+type = "boolean"
+description = """
+Set true to close with no successor post. Give this or successor_id, not \\
+both; omitting both is refused so a missing successor is never read as \\
+"none"."""
 
 [[params]]
 name = "summary"
 type = "string"
-description = "Optional closing summary shown to anyone who reads the closed post."
+required = true
+description = """
+Closing summary shown to anyone who reads the closed post. Required and \\
+must not be blank."""

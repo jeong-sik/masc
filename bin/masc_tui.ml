@@ -152,12 +152,6 @@ let json_assoc_member_opt = Masc_tui_json.member_opt
 (** One 60 Hz frame window: bursts are coalesced without delaying an idle
     terminal's first changed frame. *)
 let frame_interval_ns = 16_000_000L
-let roster_marquee_interval_ns = 150_000_000L
-
-(* Four frames at 150ms is one turn of the mark per 600ms: fast enough to
-   read as alive, slow enough not to strobe. The same cadence as the marquee
-   above, so the two moving things on a masc screen move at one speed. *)
-let activity_interval_ns = 150_000_000L
 (* What one wheel detent moves. Terminals report three lines per detent, so a
    notch here is worth what a notch is worth in a pager. *)
 let wheel_notch_rows = 3
@@ -13776,7 +13770,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       (* The jump lands on a clean screen: a modal or roster search opened
          while the dispatch was in flight would otherwise sit over (or
          zombie under) a surface it was not opened on. *)
-      state.help_open <- false;
+      close_key_modals state;
       state.palette_open <- false;
       state.palette_mode <- Masc_tui_types.Palette_jump;
       state.palette_query <- "";
@@ -13824,6 +13818,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       approval_ticket;
       state.server_identity <- None;
       state.connection_status <- Masc_tui_types.Disconnected;
+      (* The splash ends here for good: the Overview's "press r" line is what
+         the operator needs, and a retry must not bring the imp back. *)
+      state.startup_emblem <- false;
       add_event state "error" err;
       react_to_server_contact state ~base_path ~host:server_peer_host
         ~port:state.port ~http_refresh_inflight ~http_scoped_refresh_inflight
@@ -19416,10 +19413,8 @@ and is loaded on demand through keeper_skill.
           modal guards as the Lanes press below, for the same reason. *)
        | Some (Mouse_left_press (row, column))
          when (not dismissed_image) && (not compact_viewport)
-              && ((not state.help_open && not state.keeper_deletions_open))
-              && (not state.agenda_open)
+              && (not (modal_owns_keys state))
               && (not state.palette_open)
-              && (not state.context_inspector_open)
               && Option.is_none state.search
               && acting_pane_hit state ~row ~column <> Pane_miss -> (
            match acting_pane_hit state ~row ~column with
@@ -19435,10 +19430,8 @@ and is loaded on demand through keeper_skill.
        | Some (Mouse_left_press (row, column))
          when state.view = Keepers Keeper_message
               && (not dismissed_image) && (not compact_viewport)
-              && ((not state.help_open && not state.keeper_deletions_open))
-              && (not state.agenda_open)
+              && (not (modal_owns_keys state))
               && (not state.palette_open)
-              && (not state.context_inspector_open)
               && Option.is_none state.search
               && keeper_chat_click_in_body state ~column
               && chat_row_action_at ~row
@@ -19458,10 +19451,8 @@ and is loaded on demand through keeper_skill.
               && state.lanes_mode = Lanes_overview
               && (not dismissed_image)
               && (not compact_viewport)
-              && ((not state.help_open && not state.keeper_deletions_open))
-              && (not state.agenda_open)
+              && (not (modal_owns_keys state))
               && (not state.palette_open)
-              && (not state.context_inspector_open)
               && Option.is_none state.search ->
            let terminal_rows, _ = get_terminal_size () in
            handle_lanes_overview_click state ~base_path ~mailbox:async_messages
@@ -19602,9 +19593,7 @@ and is loaded on demand through keeper_skill.
       let composer_claimed =
         Option.is_none state.account_login && Option.is_none state.lane_addons &&
         (not compact_viewport)
-        && ((not state.help_open && not state.keeper_deletions_open))
-        && (not state.agenda_open)
-        && (not state.context_inspector_open)
+        && (not (modal_owns_keys state))
         (* Any open field takes the key before the composer does. This was six
            conditions naming six fields, and the ones added later were not in
            it: typing an endpoint name containing [i] in the voice wizard put
@@ -20247,9 +20236,8 @@ and is loaded on demand through keeper_skill.
            Render_schedule.request render_schedule Render_schedule.Force
        | Some k
          when String.equal k toggle_browser_lane_key
-              && not state.palette_open && (not state.help_open && not state.keeper_deletions_open)
-              && not state.agenda_open && not state.answering_open
-              && not state.context_inspector_open
+              && not state.palette_open && not (modal_owns_keys state)
+              && not state.answering_open
               && not state.patch_modal_open && not state.link_modal_open
               && Option.is_none state.ask_text_entry
               && (match state.ask_answer_mode with Ask_browsing -> true | Ask_answering _ -> false)
@@ -20266,7 +20254,7 @@ and is loaded on demand through keeper_skill.
        | Some k
          when state.view = Approvals
               && Option.is_some state.ask_text_entry
-              && not state.context_inspector_open ->
+              && not (modal_owns_keys state) ->
            (match k with
             | "esc" -> cancel_ask_text_entry state
             | "\r" | "\n" | "enter" -> commit_ask_text_entry state
@@ -20288,7 +20276,7 @@ and is loaded on demand through keeper_skill.
               && (match state.ask_answer_mode with
                   | Ask_answering _ -> true
                   | Ask_browsing -> false)
-              && not state.context_inspector_open ->
+              && not (modal_owns_keys state) ->
            (match k with
             | "esc" -> leave_ask_answering state
             | "left" | "up" | "k" -> move_ask_question_cursor state (-1)
@@ -20355,7 +20343,7 @@ and is loaded on demand through keeper_skill.
                   | Ask_browsing -> true
                   | Ask_answering _ -> false)
               && (not state.approval_detail_open)
-              && not state.context_inspector_open ->
+              && not (modal_owns_keys state) ->
            move_ask_cursor state (if String.equal k "[" then -1 else 1);
            Render_schedule.request render_schedule Render_schedule.Force
        (* [/context] is modal: the summary and exact input text must not leak
@@ -20400,15 +20388,7 @@ and is loaded on demand through keeper_skill.
                        provider_input)
              | Some _ | None -> []
            in
-           let close () =
-             state.context_inspector_open <- false;
-             supersede_context_inspector_load state None;
-             state.context_inspector_exact <- None;
-             state.context_inspector_scroll <- 0;
-             state.context_inspector_detail_scroll <- 0;
-             state.context_inspector_focus <- Left_pane;
-             state.context_inspector_turn_back <- 0
-           in
+           let close () = close_context_inspector state in
            (match k with
             | "esc" ->
                 (match state.context_inspector_exact with
@@ -20650,11 +20630,7 @@ and is loaded on demand through keeper_skill.
           answering "what is coming" should not have a surface binding fire
           underneath it. *)
        | Some k when state.agenda_open ->
-           let close () =
-             state.agenda_open <- false;
-             state.agenda_scroll <- 0;
-             state.agenda_selected <- Masc_tui_agenda.Nowhere
-           in
+           let close () = close_agenda state in
            (match k with
             | ";" | "esc" -> close ()
             | "j" | "down" | "k" | "up" ->
@@ -26200,7 +26176,7 @@ and is loaded on demand through keeper_skill.
         Option.is_some current_marquee_target
         && Int64.compare
              (Int64.sub now_ns !roster_marquee_last_step_ns)
-             roster_marquee_interval_ns
+             Masc_tui_types.motion_step_ns
            >= 0
       then begin
         roster_marquee_last_step_ns := now_ns;
@@ -26247,7 +26223,7 @@ and is loaded on demand through keeper_skill.
       else if
         Int64.compare
           (Int64.sub now_ns !activity_last_step_ns)
-          activity_interval_ns
+          Masc_tui_types.motion_step_ns
         >= 0
       then begin
         activity_last_step_ns := now_ns;
@@ -26265,7 +26241,7 @@ and is loaded on demand through keeper_skill.
            if
              Int64.compare
                (Int64.sub now_ns !emblem_last_step_ns)
-               Masc_tui_emblem_screen.step_ns
+               Masc_tui_types.motion_step_ns
              >= 0
            then begin
              emblem_last_step_ns := now_ns;
@@ -26421,7 +26397,11 @@ and is loaded on demand through keeper_skill.
        with
        (* The terminal belongs to the picture until it is dismissed. A frame
           drawn now would clear the rows it occupies and leave the rest. *)
-       | Render_schedule.Render when state.image_open || state.msx_open -> ()
+       | Render_schedule.Render when state.image_open || state.msx_open ->
+           (* This frame is the picture's, so no imp is on screen and nothing
+              should keep stepping one. Closing the picture repaints in full,
+              and the imp steps again from that frame. *)
+           Masc_tui_emblem_screen.begin_frame ()
        | Render_schedule.Render ->
            let frame, clamped, approval, presses =
              Masc_tui_frame_timing.time_tagged Masc_tui_frame_timing.Build

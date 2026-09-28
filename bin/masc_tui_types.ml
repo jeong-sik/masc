@@ -5513,7 +5513,8 @@ type state = {
      back to [-1] when none did, so a screen without it stops repainting. *)
   mutable emblem_frame: int;
   (* The startup splash: the imp stands where the Overview's sections will be
-     until the first overview read answers or the operator sends any input.
+     until the first overview read answers, a refresh fails, or the operator
+     sends any input ({!startup_emblem_visible} says when it steps aside).
      Only the TUI's own start sets it, so a state built anywhere else never
      draws it. *)
   mutable startup_emblem: bool;
@@ -6848,6 +6849,20 @@ let startup_emblem_visible (state : state) =
   && Option.is_none state.task_detail_id
   && Option.is_none state.overview
   && Option.is_none state.overview_error
+  && (match state.connection_status with
+      | Connecting -> true
+      (* A booting server answers no briefing yet, but the backlog on disk
+         already has something to say: once it is read, the Overview draws
+         it rather than the imp. *)
+      | Booting -> (
+          match state.task_reading with
+          | Masc_tui_overview_tasks.Rows_unread -> true
+          | Masc_tui_overview_tasks.Rows_read _
+          | Masc_tui_overview_tasks.Rows_unavailable _ ->
+              false)
+      (* The Overview's own words for these -- "no overview data, press r" --
+         are the ones the operator needs. *)
+      | Disconnected | Reconnecting | Degraded | Connected -> false)
   &&
   match state.view with
   | Overview -> true
@@ -7597,6 +7612,18 @@ let loading_notice ?elapsed_s what =
 
 let nanoseconds_per_second = 1_000_000_000L
 
+(* One step of every moving thing on a masc screen: the running-turn mark,
+   the roster marquee and the turning imp. Four steps turn the mark once
+   every 600 ms -- fast enough to read as alive, slow enough not to strobe --
+   and one pace for all three keeps them moving together. *)
+let motion_step_ns = 150_000_000L
+
+(* How far the moving marks have gone after [frame] steps; a negative frame
+   is one that has not started. *)
+let motion_elapsed_seconds frame =
+  Int64.to_float (Int64.mul (Int64.of_int (Int.max 0 frame)) motion_step_ns)
+  /. Int64.to_float nanoseconds_per_second
+
 (* How long a read has been pending, in whole seconds. [now_ns] is an argument
    so the answer is the same every time it is asked with the same reading, and
    the stamp is the read's own rather than the state's: the Sandbox tab's status
@@ -7882,6 +7909,40 @@ let supersede_context_inspector_load state stop =
   Option.iter (fun previous -> previous ()) state.context_inspector_cancel;
   state.context_inspector_cancel <- stop
 ;;
+
+(* The overlays that take every key while they are open. Each answers its own
+   keys and swallows the rest in its dispatch arm, so nothing drawn under it --
+   the composer, a surface binding, a press on a row -- may act first. Every
+   place that has to stand aside for them asks this one question, so an
+   overlay added later is added here once rather than to each list. *)
+let modal_owns_keys (state : state) =
+  state.help_open || state.keeper_deletions_open || state.agenda_open
+  || state.context_inspector_open || state.about_open
+
+let close_context_inspector (state : state) =
+  state.context_inspector_open <- false;
+  supersede_context_inspector_load state None;
+  state.context_inspector_exact <- None;
+  state.context_inspector_scroll <- 0;
+  state.context_inspector_detail_scroll <- 0;
+  state.context_inspector_focus <- Left_pane;
+  state.context_inspector_turn_back <- 0
+
+let close_agenda (state : state) =
+  state.agenda_open <- false;
+  state.agenda_scroll <- 0;
+  state.agenda_selected <- Masc_tui_agenda.Nowhere
+
+(* Every overlay [modal_owns_keys] names, closed the way its own Esc closes
+   it. The inspector and the agenda are only closed when open: closing stops
+   an inspector read in flight, and there is none to stop otherwise. *)
+let close_key_modals (state : state) =
+  state.help_open <- false;
+  state.help_scroll <- 0;
+  state.about_open <- false;
+  state.keeper_deletions_open <- false;
+  if state.agenda_open then close_agenda state;
+  if state.context_inspector_open then close_context_inspector state
 
 let create_state
     ?(reasoning_visibility = Reasoning_hidden)

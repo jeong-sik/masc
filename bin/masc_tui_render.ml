@@ -131,9 +131,9 @@ let keeper_roster_marquee_target (state : state) ~cols =
 
 let acting_pane_suppressed (state : state) =
   let modal =
-    Option.is_some state.account_login || Option.is_some state.lane_addons || state.palette_open || state.context_inspector_open || state.keeper_deletions_open || state.help_open
-    || state.agenda_open || state.answering_open || state.memory_fact_detail_open
-    || state.about_open
+    Option.is_some state.account_login || Option.is_some state.lane_addons || state.palette_open
+    || Masc_tui_types.modal_owns_keys state
+    || state.answering_open || state.memory_fact_detail_open
   in
   modal
   || Masc_tui_types.on_activity_screen state.view
@@ -552,6 +552,18 @@ let overview_providers_section (state : state) ~cols =
     ~runtimes:state.overview_quota ~now:(Unix.gettimeofday ())
     ~width:(framed_inner_width cols)
 
+(* The Overview's title row: the name, the workspace, the clock and the
+   connection badge. The startup splash draws the same row, so the two
+   cannot disagree about what the screen is or whether it is connected. *)
+let overview_header (state : state) =
+  let now = Unix.localtime (Unix.gettimeofday ()) in
+  let timestamp = Printf.sprintf "%02d:%02d:%02d"
+    now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
+  Printf.sprintf "%s  %s[%s]%s  %s  %s"
+    (screen_title " MASC Overview")
+    (Masc_tui_theme.tone Masc_tui_theme.Accent) (Terminal_text.single_line state.workspace) Ansi.reset timestamp
+    (connection_badge state)
+
 let overview_intro_lines (state : state) =
   match state.overview, overview_team state, state.overview_error with
   | Some overview, Some _, None
@@ -647,14 +659,7 @@ let render_overview (state : state) =
      lays out fits above it. *)
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
-
-  let now = Unix.localtime (Unix.gettimeofday ()) in
-  let timestamp = Printf.sprintf "%02d:%02d:%02d"
-    now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
-  let header = Printf.sprintf "%s  %s[%s]%s  %s  %s"
-    (screen_title " MASC Overview")
-    (Masc_tui_theme.tone Masc_tui_theme.Accent) (Terminal_text.single_line state.workspace) Ansi.reset timestamp
-    (connection_badge state) in
+  let header = overview_header state in
 
   box_top buf cols;
   box_line buf cols header;
@@ -16323,26 +16328,26 @@ let render_config (state : state) =
    Overview's; the first one ends the splash and still does its job. *)
 let render_overview_startup (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let now = Unix.localtime (Unix.gettimeofday ()) in
-  let timestamp = Printf.sprintf "%02d:%02d:%02d"
-    now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
-  let header = Printf.sprintf "%s  %s[%s]%s  %s  %s"
-    (screen_title " MASC Overview")
-    (Masc_tui_theme.tone Masc_tui_theme.Accent) (Terminal_text.single_line state.workspace) Ansi.reset timestamp
-    (connection_badge state) in
   surface_chrome ~overflow:Fits state ~terminal_rows ~cols ~surface_key:"overview"
-    ~title:header
+    ~title:(overview_header state)
     ~hints:(Masc_tui_keys.footer_hints_overview ~task_focus:false)
     ~body:(fun ~budget c ->
       Masc_tui_emblem_screen.body ~cols:(framed_inner_width cols) ~rows:budget
         ~caption:
-          [ Masc_tui_theme.tone Masc_tui_theme.Accent
-            ^ "MASC \xc2\xb7 keepers on watch" ^ Ansi.reset
-          ; Ansi.dim
-            ^ Masc_tui_types.connection_status_label state.connection_status
-            ^ Ansi.reset
-          ]
-        ~frame:state.emblem_frame
+          ([ Masc_tui_theme.tone Masc_tui_theme.Accent
+             ^ "MASC \xc2\xb7 keepers on watch" ^ Ansi.reset
+           ]
+           (* The Overview's own word for this state -- the briefing is not
+              read yet -- stays on screen under the imp. *)
+           @ List.filter_map
+               (fun line ->
+                 match String.trim line with "" -> None | text -> Some text)
+               (overview_intro_lines state)
+           @ [ Ansi.dim
+               ^ Masc_tui_types.connection_status_label state.connection_status
+               ^ Ansi.reset
+             ])
+        ~elapsed:(Masc_tui_types.motion_elapsed_seconds state.emblem_frame)
       |> List.iter c.push)
 
 (* /about: the turning imp over the surface, with what the TUI is running
@@ -16370,7 +16375,7 @@ let render_about (state : state) =
             ^ Masc_tui_emblem_screen.about_facts ~theme keepers
             ^ Ansi.reset
           ]
-        ~frame:state.emblem_frame
+        ~elapsed:(Masc_tui_types.motion_elapsed_seconds state.emblem_frame)
       |> List.iter c.push)
 
 let render_surface (state : state) =

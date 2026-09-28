@@ -21,8 +21,8 @@ let caption = [ "first caption"; "second caption" ]
 let cols = 80
 let rows = 24
 
-let still_rows ?(frame = 0) () =
-  Screen.rows ~cols ~rows ~caption ~frame ~colors_enabled:false
+let still_rows ?(elapsed = 0.0) () =
+  Screen.rows ~cols ~rows ~caption ~elapsed ~colors_enabled:false
     ~backdrop:Emblem.Unknown
 
 let index_of row lines =
@@ -82,7 +82,7 @@ let test_the_imp_stands_centred_over_its_caption () =
 
 let test_too_little_space_draws_the_caption_alone () =
   let drawn, lines =
-    Screen.rows ~cols ~rows:4 ~caption ~frame:0 ~colors_enabled:true
+    Screen.rows ~cols ~rows:4 ~caption ~elapsed:0.0 ~colors_enabled:true
       ~backdrop:(Emblem.Page Masc_tui_terminal_palette.Dark)
   in
   check bool "no imp" true (drawn = Screen.Absent);
@@ -99,20 +99,23 @@ let test_it_turns_only_with_colour_and_a_known_page () =
   check bool "an unknown page holds it still" false
     (Screen.moves ~colors_enabled:true Emblem.Unknown)
 
-let test_the_step_count_turns_the_imp () =
+let test_elapsed_time_turns_the_imp () =
   let dark = Emblem.Page Masc_tui_terminal_palette.Dark in
-  let at frame =
-    Screen.rows ~cols ~rows ~caption ~frame ~colors_enabled:true ~backdrop:dark
+  let at elapsed =
+    Screen.rows ~cols ~rows ~caption ~elapsed ~colors_enabled:true ~backdrop:dark
   in
-  let drawn, first = at 0 in
+  let drawn, first = at 0.0 in
   check bool "drawn turning" true (drawn = Screen.Moving);
-  let _, later = at 10 in
-  check bool "ten steps later the imp has turned" false (first = later);
-  check bool "the same step draws the same rows" true (first = snd (at 0));
-  let _, still_first = still_rows ~frame:0 () in
-  let _, still_later = still_rows ~frame:10 () in
-  check bool "held still, the step count changes nothing" true
-    (still_first = still_later)
+  let _, later = at 1.5 in
+  check bool "a second and a half later the imp has turned" false (first = later);
+  check bool "the same moment draws the same rows" true (first = snd (at 0.0));
+  check bool "before the start is the start" true (first = snd (at (-1.0)));
+  check bool "a time that is not finite holds the imp still" true
+    (snd (at Float.nan) = snd (Screen.rows ~cols ~rows ~caption ~elapsed:0.0
+                                 ~colors_enabled:false ~backdrop:dark));
+  let _, still_first = still_rows ~elapsed:0.0 () in
+  let _, still_later = still_rows ~elapsed:1.5 () in
+  check bool "held still, time changes nothing" true (still_first = still_later)
 
 let test_about_says_only_what_was_read () =
   check string "a read roster is counted"
@@ -132,10 +135,10 @@ let test_about_says_only_what_was_read () =
 let test_a_frame_records_only_what_it_drew () =
   Screen.begin_frame ();
   check bool "a new frame has drawn no imp" true (Screen.drawn () = Screen.Absent);
-  ignore (Screen.body ~cols ~rows:4 ~caption ~frame:0);
+  ignore (Screen.body ~cols ~rows:4 ~caption ~elapsed:0.0);
   check bool "a frame too small for the imp records none" true
     (Screen.drawn () = Screen.Absent);
-  ignore (Screen.body ~cols ~rows ~caption ~frame:0);
+  ignore (Screen.body ~cols ~rows ~caption ~elapsed:0.0);
   check bool "a frame that drew it records it" false (Screen.drawn () = Screen.Absent);
   Screen.begin_frame ();
   check bool "the next frame starts empty again" true (Screen.drawn () = Screen.Absent)
@@ -151,8 +154,8 @@ let () =
     ; ( "motion"
       , [ test_case "it turns only with colour and a known page" `Quick
             test_it_turns_only_with_colour_and_a_known_page
-        ; test_case "the step count turns the imp" `Quick
-            test_the_step_count_turns_the_imp
+        ; test_case "elapsed time turns the imp" `Quick
+            test_elapsed_time_turns_the_imp
         ; test_case "a frame records only what it drew" `Quick
             test_a_frame_records_only_what_it_drew
         ] )

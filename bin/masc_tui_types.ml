@@ -5508,6 +5508,18 @@ type state = {
      there is nothing to say. [-1] is "not animating": the mark falls back
      to its still form rather than freezing on an arbitrary quarter. *)
   mutable activity_frame: int;
+  (* The turning imp's step. The main loop advances it only while the last
+     frame drew the imp turning (Masc_tui_emblem_screen.drawn) and puts it
+     back to [-1] when none did, so a screen without it stops repainting. *)
+  mutable emblem_frame: int;
+  (* The startup splash: the imp stands where the Overview's sections will be
+     until the first overview read answers or the operator sends any input.
+     Only the TUI's own start sets it, so a state built anywhere else never
+     draws it. *)
+  mutable startup_emblem: bool;
+  (* /about: the imp over the surface, with the theme and the keeper count.
+     Modal, like the help sheet; Esc closes it. *)
+  mutable about_open: bool;
   mutable keeper_detail_focus: pane_focus;
   mutable keeper_message_focus: pane_focus;
   (* Current successful /health identity. Every HTTP refresh revalidates it so
@@ -6832,6 +6844,22 @@ type text_input_target =
   | Text_github_token
   | Text_board_draft
 
+(* The startup splash stands in for the Overview's sections while they have
+   nothing to show: on the Overview's list, before the first overview read
+   answers either way. A task detail open over the list is its own screen. *)
+let startup_emblem_visible (state : state) =
+  state.startup_emblem
+  && Option.is_none state.task_detail_id
+  && Option.is_none state.overview
+  && Option.is_none state.overview_error
+  &&
+  match state.view with
+  | Overview -> true
+  | Acting | Metrics | Keepers _ | Memory | Lanes | Clients | Board | Approvals
+  | Planning | Schedules | Verification | Harness | Fusion | Repositories | Code
+  | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs ->
+      false
+
 (* The order is the key dispatch's order, which is what an operator already
    experiences: a preset name being typed holds every letter, and the two
    identity fields come last because the surface under them reads letters as
@@ -7948,6 +7976,9 @@ let create_state
   acting_pane_changes_at = None;
   roster_marquee_frame = 0;
   activity_frame = -1;
+  emblem_frame = -1;
+  startup_emblem = false;
+  about_open = false;
   keeper_detail_focus = Right_pane;
   keeper_message_focus = Right_pane;
   server_identity = None;

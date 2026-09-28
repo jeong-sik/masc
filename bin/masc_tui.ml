@@ -9725,21 +9725,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
         (String.concat "\n" Masc_tui_command.help_lines)
   | Masc_tui_command.About ->
       Buffer.clear state.msg_input;
-      let active_keepers =
-        match state.keepers_error, state.local_workspace with
-        | Some error, _ -> Some (Error error)
-        | None, Local_workspace_unread -> None
-        | None, Local_workspace_read -> Some (Ok (List.length state.keepers))
-      in
-      let theme_name =
-        match state.theme_choice with
-        | Some name -> name
-        | None -> "default"
-      in
-      let banner =
-        Masc_tui_command.about_banner ~theme_name ?active_keepers ()
-      in
-      notice ~kind:Notice_reply banner
+      state.about_open <- true
   | Masc_tui_command.Open_diff ->
       Buffer.clear state.msg_input;
       state.repository_changes_return_chat <- true;
@@ -10297,7 +10283,11 @@ let apply_transport_load state = function
         ~set_error:(fun value -> state.transport_error <- value)
         err
 
-let apply_overview_load state = function
+let apply_overview_load state result =
+  (* The first answer either way ends the startup splash: the sections, or
+     the reason there are none, now have something to say. *)
+  state.startup_emblem <- false;
+  match result with
   | Ok overview ->
       state.overview <- Some overview;
       state.overview_error <- None
@@ -17201,6 +17191,9 @@ let main
    match Masc_tui_credential.outcome_notice outcome with
    | Some notice -> add_event state (Masc_tui_credential.outcome_level outcome) notice
    | None -> ());
+  (* The imp stands in for the Overview's sections until this first read
+     answers or the operator sends anything. *)
+  state.startup_emblem <- true;
   start_http_refresh state ~host ~port ~intent:Revalidate
     ~refresh_inflight:http_refresh_inflight
     ~scoped_refresh_inflight:http_scoped_refresh_inflight
@@ -17233,6 +17226,7 @@ let main
   let roster_marquee_target = ref None in
   let roster_marquee_last_step_ns = ref (Mtime_clock.elapsed_ns ()) in
   let activity_last_step_ns = ref (Mtime_clock.elapsed_ns ()) in
+  let emblem_last_step_ns = ref (Mtime_clock.elapsed_ns ()) in
   (* A datum that is fetched only while its surface is open has nothing to draw
      the moment that surface opens, and waiting out the refresh interval would
      read as "there is nothing here". What is watched is the set of data the
@@ -18987,6 +18981,15 @@ and is loaded on demand through keeper_skill.
         close_image state;
         invalidate_frame_for_resize frame_presenter render_schedule
       end;
+      (* The startup splash is a stand-in, not a gate: the first thing the
+         operator sends ends it and still goes where it was going, so nothing
+         typed while the imp turns is lost. A terminal's own reply is not the
+         operator's. *)
+      (match input with
+       | Some (Key _ | Pasted _ | Mouse_wheel _ | Mouse_left_press _
+              | Mouse_left_release _) ->
+           state.startup_emblem <- false
+       | Some (Graphics_reply _) | None -> ());
       (* The MSX screen owns the keyboard the same way a showing picture
          does, except it answers keys instead of ending on the first one:
          each is injected into the machine and steps a frame, and only [esc]
@@ -19212,6 +19215,7 @@ and is loaded on demand through keeper_skill.
        | Some (Mouse_wheel _) | Some (Mouse_left_press _) | Some (Mouse_left_release _)
          when Option.is_some state.account_login -> ()
        | Some (Pasted _) when state.keeper_deletions_open -> ()
+       | Some (Pasted _) when state.about_open -> ()
        | Some (Pasted paste) when text_target = Some Text_account_login ->
            Option.iter (fun view ->
              if paste.Masc_tui_paste.dropped > 0 then
@@ -20581,6 +20585,13 @@ and is loaded on demand through keeper_skill.
        (* The help overlay is modal: it answers scrolling and closing, and
           swallows everything else so a surface binding cannot fire under a
           screen that is describing it. Quit stays global above. *)
+       (* /about is modal for the help sheet's reason: Esc closes it, and
+          everything else is swallowed so no surface binding fires under it.
+          Quit stays global above. *)
+       | Some k when state.about_open ->
+           (match k with
+            | "esc" -> state.about_open <- false
+            | _ -> ())
        | Some k when state.keeper_deletions_open ->
            (match k with
             | "esc" | "D" -> state.keeper_deletions_open <- false
@@ -26259,6 +26270,26 @@ and is loaded on demand through keeper_skill.
            else state.activity_frame + 1);
         Render_schedule.request render_schedule Render_schedule.Background
       end;
+      (* The turning imp -- the startup splash or /about -- steps on its own
+         clock while the last frame drew it turning. When no frame does, or
+         one holds it still, nothing here asks for a repaint, and the next
+         time it turns it starts from the first step. *)
+      (match Masc_tui_emblem_screen.drawn () with
+       | Masc_tui_emblem_screen.Moving ->
+           if
+             Int64.compare
+               (Int64.sub now_ns !emblem_last_step_ns)
+               Masc_tui_emblem_screen.step_ns
+             >= 0
+           then begin
+             emblem_last_step_ns := now_ns;
+             state.emblem_frame <-
+               (if state.emblem_frame < 0 || state.emblem_frame = max_int then 0
+                else state.emblem_frame + 1);
+             Render_schedule.request render_schedule Render_schedule.Background
+           end
+       | Masc_tui_emblem_screen.Still | Masc_tui_emblem_screen.Absent ->
+           state.emblem_frame <- -1);
       if
         Int64.compare (Int64.sub now_ns !last_check_ns) refresh_interval_ns >= 0
       then begin

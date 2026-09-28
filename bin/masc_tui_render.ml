@@ -133,6 +133,7 @@ let acting_pane_suppressed (state : state) =
   let modal =
     Option.is_some state.account_login || Option.is_some state.lane_addons || state.palette_open || state.context_inspector_open || state.keeper_deletions_open || state.help_open
     || state.agenda_open || state.answering_open || state.memory_fact_detail_open
+    || state.about_open
   in
   modal
   || Masc_tui_types.on_activity_screen state.view
@@ -16321,6 +16322,62 @@ let render_config (state : state) =
             | None -> ()
           done)
 
+(* The startup splash: the Overview's own frame and header -- title,
+   workspace, clock, connection badge -- with the turning imp where its
+   sections will be once the first overview read answers. Keys are the
+   Overview's; the first one ends the splash and still does its job. *)
+let render_overview_startup (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let now = Unix.localtime (Unix.gettimeofday ()) in
+  let timestamp = Printf.sprintf "%02d:%02d:%02d"
+    now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
+  let header = Printf.sprintf "%s  %s[%s]%s  %s  %s"
+    (screen_title " MASC Overview")
+    (Masc_tui_theme.tone Masc_tui_theme.Accent) (Terminal_text.single_line state.workspace) Ansi.reset timestamp
+    (connection_badge state) in
+  surface_chrome ~overflow:Fits state ~terminal_rows ~cols ~surface_key:"overview"
+    ~title:header
+    ~hints:(Masc_tui_keys.footer_hints_overview ~task_focus:false)
+    ~body:(fun ~budget c ->
+      Masc_tui_emblem_screen.body ~cols:(framed_inner_width cols) ~rows:budget
+        ~caption:
+          [ Masc_tui_theme.tone Masc_tui_theme.Accent
+            ^ "MASC \xc2\xb7 keepers on watch" ^ Ansi.reset
+          ; Ansi.dim
+            ^ Masc_tui_types.connection_status_label state.connection_status
+            ^ Ansi.reset
+          ]
+        ~frame:state.emblem_frame
+      |> List.iter c.push)
+
+(* /about: the turning imp over the surface, with what the TUI is running
+   under -- its colour scheme and how many Keepers the workspace holds. *)
+let render_about (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let theme =
+    Terminal_text.single_line_or ~default:"default" state.theme_choice
+  in
+  let keepers =
+    match state.keepers_error, state.local_workspace with
+    | Some _, _ -> Masc_tui_emblem_screen.Keepers_unreadable
+    | None, Local_workspace_unread -> Masc_tui_emblem_screen.Keepers_unread
+    | None, Local_workspace_read ->
+        Masc_tui_emblem_screen.Keepers_read (List.length state.keepers)
+  in
+  surface_chrome ~overflow:Fits ~frame:Chrome_overlay state ~terminal_rows ~cols
+    ~surface_key:"about" ~title:(screen_title " MASC") ~hints:"Esc:close"
+    ~body:(fun ~budget c ->
+      Masc_tui_emblem_screen.body ~cols:(framed_inner_width cols) ~rows:budget
+        ~caption:
+          [ Masc_tui_theme.tone Masc_tui_theme.Accent
+            ^ "MASC \xc2\xb7 Multi-Agent Shared Context" ^ Ansi.reset
+          ; Ansi.dim
+            ^ Masc_tui_emblem_screen.about_facts ~theme keepers
+            ^ Ansi.reset
+          ]
+        ~frame:state.emblem_frame
+      |> List.iter c.push)
+
 let render_surface (state : state) =
   match state.view with
   | Overview ->
@@ -16335,7 +16392,10 @@ let render_surface (state : state) =
            with
            | Some task -> render_task_detail state task
            | None -> render_overview state )
-       | None -> render_overview state)
+       | None ->
+           if Masc_tui_types.startup_emblem_visible state then
+             render_overview_startup state
+           else render_overview state)
   | Keepers Keeper_list ->
       if state.repository_changes_open then render_repository_changes state
       else render_keeper_list state
@@ -17217,6 +17277,8 @@ type drawn = Surface_drawn | Overlay_drawn
 let render (state : state) =
   (* Marks number the targets of this frame alone. *)
   Masc_tui_hit.reset press_marks;
+  (* And the imp is on this frame only if this frame draws it. *)
+  Masc_tui_emblem_screen.begin_frame ();
   let frame, clamped, approval, drawn =
   (* Decide the pane before any surface measures the terminal. Modals draw
      over the whole terminal and the Activity screen, both its tabs,
@@ -17238,7 +17300,10 @@ let render (state : state) =
   | Some view ->
     let frame, clamped = render_lane_addons state view in
     (frame, clamped, None, Overlay_drawn)
-  | None -> if state.palette_open then
+  | None -> if state.about_open then
+    let frame, clamped = render_about state in
+    (frame, clamped, None, Overlay_drawn)
+  else if state.palette_open then
     let frame, clamped = render_palette state in
     (frame, clamped, None, Overlay_drawn)
   else if state.context_inspector_open then

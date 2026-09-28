@@ -1739,6 +1739,7 @@
  (libraries
   masc_tui_account_login
   masc_tui_sgr_text
+  masc_tui_emblem_screen
   masc_tui_hit
   masc_tui_press
   masc_tui_pick_list
@@ -2061,6 +2062,18 @@
  (libraries
   masc_tui_color
   masc_tui_imp_shape
+  masc_tui_terminal_palette
+  masc_tui_theme))
+
+;; The imp laid out as a screen body under its caption, for the startup splash
+;; and /about. Apart from the renderer so its layout is tested without the TUI.
+(library
+ (name masc_tui_emblem_screen)
+ (wrapped false)
+ (modules masc_tui_emblem_screen)
+ (libraries
+  masc_tui_imp_emblem
+  masc_tui_message_layout
   masc_tui_terminal_palette
   masc_tui_theme))
 

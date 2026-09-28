@@ -2544,6 +2544,10 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     ; "overview_error"
     ; "ai_summary"
     ];
+  (* The startup splash draws the Overview's header, and /about the colour
+     scheme's name from the operator's configuration. *)
+  check_fields "render_overview_startup" [ "workspace" ];
+  check_fields "render_about" [ "theme_choice" ];
   check_fields "overview_layout" [ "tasks_error" ];
   (* The TUI session block prints event text this process wrote from
      server answers and editor output. *)

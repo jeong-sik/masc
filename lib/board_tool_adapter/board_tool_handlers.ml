@@ -59,6 +59,97 @@ let require_post_author ~action ~post_id ~author =
               (Board.Agent_id.to_string post.author)))
 ;;
 
+let board_moderators_from_toml ~missing contents =
+  let invalid reason =
+    Error (Board.Validation_error ("board.moderators configuration: " ^ reason))
+  in
+  match Otoml.Parser.from_string_result contents with
+  | Error _ -> invalid "runtime.toml is invalid TOML"
+  | Ok toml ->
+    (match Otoml.find_opt toml Fun.id [ "board" ] with
+     | None -> missing
+     | Some board ->
+       (match Otoml.get_table board with
+        | exception Otoml.Type_error _ -> invalid "[board] must be a table"
+        | _ ->
+          (match Otoml.find_opt board (Otoml.get_array Otoml.get_string) [ "moderators" ] with
+           | exception Otoml.Type_error _ -> invalid "moderators must be an array of keeper names"
+           | None -> missing
+           | Some names ->
+             let rec validate acc = function
+               | [] -> Ok (List.rev acc)
+               | name :: rest ->
+                 (match Board.Agent_id.of_string name with
+                  | Ok id -> validate (Board.Agent_id.to_string id :: acc) rest
+                  | Error _ -> invalid "moderators contains an invalid keeper name")
+             in
+             validate [] names)))
+;;
+
+let default_board_moderators =
+  lazy
+    (match Embedded_config.read "runtime.toml" with
+     | None -> Error (Board.Io_error "embedded runtime.toml is missing")
+     | Some contents ->
+       board_moderators_from_toml
+         ~missing:(Error (Board.Validation_error "embedded board.moderators is missing"))
+         contents)
+;;
+
+let configured_board_moderators () =
+  match Lazy.force default_board_moderators with
+  | Error _ as err -> err
+  | Ok default ->
+    let resolution =
+      Config_dir_resolver.resolve_for_base_path
+        ~base_path:(Env_config_core.base_path ())
+    in
+    let path =
+      Filename.concat
+        resolution.Config_dir_resolver.config_root.path
+        Config_dir_resolver.runtime_toml_filename
+    in
+    match resolution.config_root.source with
+    | Config_dir_resolver.Invalid_env ->
+      Error (Board.Io_error ("invalid Board config directory: " ^ resolution.config_root.path))
+    | Config_dir_resolver.Env
+    | Config_dir_resolver.Local_masc
+    | Config_dir_resolver.Missing ->
+      (match Unix.lstat path with
+       | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok default
+       | exception Unix.Unix_error _ ->
+         Error (Board.Io_error ("cannot read Board moderator config: " ^ path))
+       | _ ->
+         (match Safe_ops.read_file_safe path with
+          | Error _ -> Error (Board.Io_error ("cannot read Board moderator config: " ^ path))
+          | Ok contents -> board_moderators_from_toml ~missing:(Ok default) contents))
+;;
+
+let require_post_close_actor ~action ~post_id ~actor =
+  match Board_dispatch.get_post ~post_id with
+  | Error _ as err -> err
+  | Ok post ->
+    if same_agent_id post.Board.author actor
+    then Ok ()
+    else
+      (match configured_board_moderators () with
+       | Error _ as err -> err
+       | Ok moderators ->
+         if List.exists
+              (fun name -> String.equal name (Board.Agent_id.to_string actor))
+              moderators
+         then Ok ()
+         else
+           Error
+             (Board.Unauthorized
+                (Printf.sprintf
+                   "agent %s cannot %s post %s owned by %s: not author or configured Board moderator"
+                   (Board.Agent_id.to_string actor)
+                   action
+                   post_id
+                   (Board.Agent_id.to_string post.author))))
+;;
+
 let resolve_board_post_kind (raw_kind : string option)
   : (Board.post_kind, string) Stdlib.result
   =
@@ -436,15 +527,10 @@ let handle_delete ~tool_name ~start_time args : Tool_result.result =
            (Board_tool_format.board_error_to_string e)))
 ;;
 
-(** Close a post (task-1758/#39356 author-tier). Self-service, agent-facing:
-    same author-match gate as [handle_delete] via {!require_post_author}, not
-    the operator-only [CanAdmin] dashboard route (`board/close`) that also
-    calls into [Board_dispatch.set_closed]. Neither surface implies the
-    other; an operator can close any post through the dashboard route, an
-    author can close their own through this tool. A close must carry a
-    non-empty [summary] and an explicit successor decision ([successor_id]
-    or [no_successor=true]); the storage boundary enforces both, so this
-    tool and the dashboard route share one rule. *)
+(** Close a post (task-1758/#39356). The author or a configured Board
+    moderator uses this agent-facing tool; the operator uses the [CanAdmin]
+    dashboard route. The storage boundary requires a non-empty [summary]
+    and an explicit successor decision on both surfaces. *)
 let handle_close ~tool_name ~start_time args : Tool_result.result =
   let post_id = String.trim (get_string args "post_id" "") in
   if String.equal post_id ""
@@ -458,7 +544,7 @@ let handle_close ~tool_name ~start_time args : Tool_result.result =
     match agent_id_arg ~field:"closed_by" args with
     | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e
     | Ok closed_by ->
-    match require_post_author ~action:"close" ~post_id ~author:closed_by with
+    match require_post_close_actor ~action:"close" ~post_id ~actor:closed_by with
     | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e
     | Ok () ->
     let summary = get_string args "summary" "" in
@@ -506,10 +592,9 @@ let handle_close ~tool_name ~start_time args : Tool_result.result =
         (Printf.sprintf "Close failed: %s" (Board_tool_format.board_error_to_string e)))
 ;;
 
-(** Reopen a closed post (task-1758/#39356 author-tier). Same author-match
-    gate as [handle_close]; a former author reopens their own thread, an
-    operator uses the dashboard `board/reopen` route instead. Idempotent on
-    an already-open post, same as {!Board_votes.reopen}. *)
+(** Reopen a closed post (task-1758/#39356). The author or a configured
+    Board moderator uses this tool; the operator uses the dashboard route.
+    Idempotent on an already-open post, same as {!Board_votes.reopen}. *)
 let handle_reopen ~tool_name ~start_time args : Tool_result.result =
   let post_id = String.trim (get_string args "post_id" "") in
   if String.equal post_id ""
@@ -523,7 +608,7 @@ let handle_reopen ~tool_name ~start_time args : Tool_result.result =
     match agent_id_arg ~field:"reopened_by" args with
     | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e
     | Ok reopened_by ->
-    match require_post_author ~action:"reopen" ~post_id ~author:reopened_by with
+    match require_post_close_actor ~action:"reopen" ~post_id ~actor:reopened_by with
     | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e
     | Ok () ->
     match Board_dispatch.reopen ~post_id with

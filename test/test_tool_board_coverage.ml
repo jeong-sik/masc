@@ -1144,13 +1144,10 @@ let test_model_visible_board_maintenance_dispatches_in_process () =
   | Ok _ -> Alcotest.fail "model-visible in-process delete left the post behind"
   | Error _ -> ()
 
-(* task-1758/#39356 author self-service tier: masc_board_close/reopen use
-   the same require_post_author gate as masc_board_delete (test above), not
-   the CanAdmin-only dashboard route. Exercised through direct
-   [Board_tool.handle_tool] (no identity rewriting), so an explicitly
-   mismatched closed_by/reopened_by proves the gate itself refuses,
-   independent of whatever the MCP/Keeper runtime layers would have
-   rewritten it to. *)
+(* task-1758/#39356: close/reopen admit the post author and configured
+   Board moderators. Exercised through direct [Board_tool.handle_tool]
+   (no identity rewriting), so a mismatched actor tests the handler gate
+   independently of the MCP/Keeper identity binding. *)
 let test_masc_board_close_requires_the_post_author () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1198,6 +1195,73 @@ let test_masc_board_close_requires_the_post_author () =
   | Ok post -> Alcotest.(check bool) "post is closed in memory" true
       (Option.is_some post.closed)
   | Error e -> Alcotest.fail (Board.show_board_error e)
+
+let test_masc_board_configured_moderator_can_close_and_reopen () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let post =
+    match Board_dispatch.create_post ~author:"post-author"
+            ~content:"moderated thread" ~post_kind:Board.Human_post () with
+    | Ok post -> post
+    | Error error -> Alcotest.fail (Board.show_board_error error)
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  let close actor =
+    dispatch_result "masc_board_close"
+      (make_args
+         [ "post_id", `String post_id
+         ; "closed_by", `String actor
+         ; "summary", `String "move discussion"
+         ; "no_successor", `Bool true
+         ])
+  in
+  let reopen actor =
+    dispatch_result "masc_board_reopen"
+      (make_args [ "post_id", `String post_id; "reopened_by", `String actor ])
+  in
+  let write_config contents =
+    let path =
+      Config_dir_resolver.runtime_toml_path_for_base_path
+        ~base_path:_test_base_path
+    in
+    Fs_compat.mkdir_p (Filename.dirname path);
+    let channel = open_out path in
+    Fun.protect ~finally:(fun () -> close_out channel)
+      (fun () -> output_string channel contents)
+  in
+  Alcotest.(check bool) "default moderator can close" true
+    (Tool_result.is_success (close "e-masc-the-leader"));
+  Alcotest.(check bool) "default moderator can reopen" true
+    (Tool_result.is_success (reopen "e-masc-the-leader"));
+  write_config "[board]\nmoderators = [\" chosen-mod \"]\n";
+  let former_default = close "e-masc-the-leader" in
+  Alcotest.(check bool) "explicit config replaces default" false
+    (Tool_result.is_success former_default);
+  Alcotest.(check bool) "configured moderator can close" true
+    (Tool_result.is_success (close "chosen-mod"));
+  Alcotest.(check bool) "configured moderator can reopen" true
+    (Tool_result.is_success (reopen "chosen-mod"));
+  let stranger = close "stranger" in
+  Alcotest.(check bool) "unconfigured keeper is refused" false
+    (Tool_result.is_success stranger);
+  Alcotest.(check bool) "refusal names the permission" true
+    (String_util.contains_substring (Tool_result.message stranger)
+       "not author or configured Board moderator");
+  write_config "[board]\nmoderators = []\n";
+  Alcotest.(check bool) "empty list disables moderator tier" false
+    (Tool_result.is_success (close "e-masc-the-leader"));
+  write_config "[board]\nmoderators = \"chosen-mod\"\n";
+  let invalid = close "chosen-mod" in
+  Alcotest.(check bool) "invalid config cannot grant moderator access" false
+    (Tool_result.is_success invalid);
+  Alcotest.(check bool) "invalid config is named" true
+    (String_util.contains_substring (Tool_result.message invalid)
+       "board.moderators configuration");
+  match Board_dispatch.get_post ~post_id with
+  | Ok post -> Alcotest.(check bool) "refused closes leave post open" true
+      (Option.is_none post.closed)
+  | Error error -> Alcotest.fail (Board.show_board_error error)
 
 (* task-1758/#39356: a close must carry a non-empty summary and an explicit
    successor decision. The tool boundary refuses a missing decision, both
@@ -3436,13 +3500,15 @@ let () =
             "model-visible Board maintenance dispatches in process"
             `Quick
             test_model_visible_board_maintenance_dispatches_in_process;
-          Alcotest.test_case "masc_board_close requires the post author" `Quick
+          Alcotest.test_case "masc_board_close checks author permission" `Quick
             test_masc_board_close_requires_the_post_author;
+          Alcotest.test_case "configured moderator can close and reopen" `Quick
+            test_masc_board_configured_moderator_can_close_and_reopen;
           Alcotest.test_case
             "masc_board_close requires a summary and a successor decision"
             `Quick
             test_masc_board_close_requires_summary_and_successor_decision;
-          Alcotest.test_case "masc_board_reopen requires the post author" `Quick
+          Alcotest.test_case "masc_board_reopen checks author permission" `Quick
             test_masc_board_reopen_requires_the_post_author;
           Alcotest.test_case "keeper board dispatch uses typed names" `Quick
             test_keeper_board_dispatch_uses_typed_tool_names;

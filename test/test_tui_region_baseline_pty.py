@@ -1,0 +1,145 @@
+"""Where four surfaces put their title, their first row, their footer and
+their blank rows, at the widths the region work is judged at.
+
+The workbench RFC's region steps (section 5.9, G0 to G5) move rows: G0
+makes every reader of the frame's row count read one value from
+Masc_tui_frame, and later steps drop the title underline and merge rows.
+This suite pins where the rows sit today, so each step changes these
+numbers on purpose and its diff shows what moved. It also prints the raw
+ANSI of every measured screen to the test log, base64 between markers, so a
+reviewer can rebuild the screen from a CI run without a local binary.
+
+The surfaces are the ones the G0 readers draw: the Keepers list (the shared
+body height), a keeper's detail pane, the keeper chat (its history's first
+row, and the roster pane from 110 columns) and the Board list. The Lane run
+detail and Memory are not measured here.
+"""
+import base64
+import os
+import sys
+
+import test_tui_keyboard_input as h
+
+# The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs
+# a suite when a pull request changes a path the suite names. The frame's row
+# count lives in masc_tui_frame; render_prim and render_chat read it.
+# masc_tui_render.ml and masc_tui_types.ml read it too but are edited by most
+# TUI pull requests, and a change to the count itself goes through the frame.
+#
+# Kept out of the default keyboard walk, which already runs near the CI limit
+# (the PTY scenario guidance, #36343).
+SOURCE_MODULES = (
+    "bin/masc_tui_frame.ml",
+    "bin/masc_tui_frame.mli",
+    "bin/masc_tui_render_prim.ml",
+    "bin/masc_tui_render_chat.ml",
+)
+
+TERMINAL_ROWS = 30
+
+# 80 and 100 are the common terminals; 131 and 132 sit on either side of the
+# width where the Activity pane used to open; 140 is the widest a surface is
+# drawn at without the pane since it opens at 158.
+WIDTHS = (80, 100, 131, 132, 140)
+
+ALPHA_CHAT = b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat"
+INFO_TAB = b"\xe2\x96\xb8Info"
+
+# (surface, width) -> (title row, first row drawn under it, footer row,
+# blank rows between the title and the footer). Rows are the terminal's,
+# counted from 1.
+EXPECTED: dict[tuple[str, int], tuple[int, int, int, int]] = {}
+
+
+def measure(output: bytearray, title: bytes) -> tuple[int, int, int, int]:
+    rows = h.screen_rows(bytes(output))
+    title_row = h.screen_row_of(rows, title)
+    if title_row < 0:
+        raise AssertionError(f"{title!r} is not on screen: {rows!r}")
+    drawn = [
+        row
+        for row in range(1, TERMINAL_ROWS + 1)
+        if rows.get(row, b"").strip()
+    ]
+    footer_row = max(drawn)
+    below = [row for row in drawn if row > title_row]
+    first_below = min(below) if below else -1
+    blank = sum(
+        1
+        for row in range(title_row + 1, footer_row)
+        if not rows.get(row, b"").strip()
+    )
+    return (title_row, first_below, footer_row, blank)
+
+
+def print_frame(surface: str, width: int, output: bytearray) -> None:
+    """The bytes the screen was built from, since the last full redraw."""
+    drawn = bytes(output)
+    cleared = drawn.rfind(h.FULL_REDRAW)
+    if cleared >= 0:
+        drawn = drawn[cleared:]
+    encoded = base64.b64encode(drawn).decode("ascii")
+    print(f"=== region-baseline {surface} {width}x{TERMINAL_ROWS} begin ===")
+    for start in range(0, len(encoded), 4096):
+        print(encoded[start : start + 4096])
+    print(f"=== region-baseline {surface} {width}x{TERMINAL_ROWS} end ===")
+
+
+def region_baseline_interaction(process, fd, _slave, output, _base):
+    measured: dict[tuple[str, int], tuple[int, int, int, int]] = {}
+
+    def sweep(surface: str, title: bytes) -> None:
+        for width in WIDTHS:
+            h.resize_and_wait(
+                process,
+                fd,
+                output,
+                rows=TERMINAL_ROWS,
+                columns=width,
+                needle=title,
+                controls=(h.FULL_REDRAW,),
+            )
+            h.drain_until_quiet(process, fd, output, cap=3.0)
+            measured[(surface, width)] = measure(output, title)
+            print_frame(surface, width, output)
+
+    h.tab_until(process, fd, output, b"MASC Keepers")
+    sweep("keepers", b"MASC Keepers")
+
+    h.select_keeper_row(process, fd, output, b"alpha")
+    h.send_and_wait(process, fd, output, b"\r", INFO_TAB)
+    sweep("keeper-detail", INFO_TAB)
+
+    h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+    h.select_keeper_row(process, fd, output, b"alpha")
+    h.send_and_wait(process, fd, output, b"c", ALPHA_CHAT)
+    sweep("keeper-chat", ALPHA_CHAT)
+
+    h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+    h.palette_go(process, fd, output, b"go board", b"MASC Board")
+    sweep("board", b"MASC Board")
+
+    print("measured = {")
+    for key, value in measured.items():
+        print(f"    {key!r}: {value!r},")
+    print("}")
+    wrong = {
+        key: (EXPECTED.get(key), value)
+        for key, value in measured.items()
+        if EXPECTED.get(key) != value
+    }
+    if wrong:
+        raise AssertionError(
+            "rows moved (expected, measured): "
+            + ", ".join(f"{key}: {pair}" for key, pair in wrong.items())
+        )
+    h.send_and_wait(process, fd, output, b"q", b"q: press again to quit")
+
+
+if __name__ == "__main__":
+    h.run_terminal_scenario(
+        os.path.abspath(sys.argv[1]),
+        description="Region baseline: title, first row, footer and blank rows",
+        interact=region_baseline_interaction,
+    )
+    print("region baseline: PASS")

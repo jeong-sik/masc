@@ -1031,9 +1031,8 @@ class SelectedNativeAccounts(unittest.TestCase):
                 SETUP.resolve_model_spec(source, dict(id='unknown', context=None), 10)
 
     def test_declared_account_sign_in_is_run_by_masc(self):
-        # runtime-account-login builds the child's environment and keeps the
-        # account's email record (test_setup_cli checks both); the wizard
-        # passes no environment of its own.
+        # runtime-account-login builds the child's environment (test_setup_cli
+        # checks it); the wizard passes no environment of its own.
         for protocol, client, command in [('codex-app-server', 'codex', 'codex'),
                                           ('claude-code', 'claude', 'claude'),
                                           ('muse-serve', 'muse', 'muse')]:

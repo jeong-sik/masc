@@ -19,7 +19,8 @@ type phase = Loading | Providers | Logging | Models | Documented_context of mode
       (** [D] on a provider: what removing it changes, read at [revision]. *)
 type recovery = Login_status | Refresh_configuration
 type email_gap = Login_file_unreadable | Login_file_unrecognized | Email_not_reported | Email_not_displayable
-type account_email = Email of string | Not_read of email_gap | Login_unfinished | Not_recorded | Unreadable
+  | Environment_credential
+type account_email = Email of string | Not_read of email_gap
   | Unrecognized  (* the server's row for this account had a shape this TUI does not know *)
 type account_emails =
   | Email_rows of { rows : (string * account_email) list; unattributed : int }
@@ -55,6 +56,15 @@ val paste : t -> string -> unit
 (** Preserve printable UTF-8 and spaces; remove at most one trailing CR, LF or
     CRLF. Reject other multiline/control input without changing the draft. *)
 val inventory : t -> Yojson.Safe.t -> (unit, string) result
+val account_emails_of_inventory : Yojson.Safe.t -> account_emails
+(** The [account_emails] of a [GET /api/v1/setup/inventory] document, each row
+    attributed to one of its [integrations]. A row this TUI cannot read is that
+    row's [Unrecognized]; a document with no readable list is
+    [Email_list_unrecognized]. *)
+val emails_of_inventory : Yojson.Safe.t -> ((string * string) list, string) result
+(** The accounts whose email was read, as [(integration id, email)], for a
+    surface that draws only emails. [Error] when the document carries no
+    readable email list. *)
 val removal_preview : t -> provider -> refused:string option -> Yojson.Safe.t -> (unit, string) result
 (** The setup API's removal preview for [provider]: the changes, or why it
     cannot be removed. [Error] when the answer is for another provider or does

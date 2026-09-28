@@ -1427,6 +1427,33 @@ let connection_badge (state : state) =
   | Masc_tui_types.Workspace_identity_unread
   | Masc_tui_types.Workspace_identity_match -> connection
 
+(* The two screens that show one record by its id: a lane run, and a
+   measurement artifact named by its sha256. *)
+let lane_run_detail_title = " MASC Lane Run"
+let measurement_detail_title = " MASC Measurement"
+
+(* A heading that names one record: the screen's title, the record's id, and
+   the connection badge. The badge is the part that has to survive (see
+   [connection_badge]), so it is drawn whole and the id takes what the title
+   and the badge leave. An id that fits is drawn whole. One that does not is
+   folded in the middle: the run ids of one lane share their opening and
+   differ in their hex tail (exact-board-attention- and 32 hex digits, 54
+   cells; a sha256 is 64), so the tail is what tells two apart. A frame with
+   no room left after the title and the badge leaves the id out, and one too
+   narrow for those two cuts the badge. *)
+let detail_heading ~cols ~title ~id ~badge =
+  let cells text =
+    Message_layout.display_width (Masc_tui_theme.strip_sgr text)
+  in
+  let lead = screen_title title ^ "  " in
+  let tail = "  " ^ badge in
+  let room = framed_inner_width cols - cells lead - cells tail in
+  let id = Terminal_text.single_line id in
+  let id =
+    if cells id <= room then id else Message_layout.fit_middle (max 0 room) id
+  in
+  lead ^ id ^ tail
+
 (* The coordinator's badge beside a reading of the surface's own. The badge
    brings its colour and its reset, so a style laid over the whole row painted
    only the words in front of it -- "coordinator HTTP" went red beside a green

@@ -190,9 +190,25 @@ let prepare_locked ~sync_store ~selected_account_home ~account_home ~store ~sour
        let* () = Fs_compat.save_file_atomic_strict record_path record |> Result.map_error (fun _ -> State_unavailable "credential generation publication failed") in
        Ok { config_home = generation; account_revision = revision; account_home = selected_account_home; physical_home = account_home })
 
+(* The vendor launcher (v3) keeps its sign-in at [muse/auth.json] under
+   XDG_CONFIG_HOME, and under [HOME/.config] when that is unset. *)
+let auth_path_in ~config_home = Filename.concat config_home "muse/auth.json"
+
 (* Where the vendor CLI writes its sign-in for a HOME: XDG_CONFIG_HOME is
-   [HOME/.config] for login, and the CLI keeps [muse/auth.json] under it. *)
-let source_auth_path ~account_home = Filename.concat account_home ".config/muse/auth.json"
+   [HOME/.config] for login. *)
+let source_auth_path ~account_home =
+  auth_path_in ~config_home:(Filename.concat account_home ".config")
+
+(* The child inherits XDG_CONFIG_HOME and HOME, and never MUSE_AUTH_PATH. *)
+let auth_path = function
+  | Some account_home -> Some (source_auth_path ~account_home)
+  | None ->
+    (match
+       Env_config_core.raw_value_opt "XDG_CONFIG_HOME", Env_config_core.raw_value_opt "HOME"
+     with
+     | Some config_home, _ when config_home <> "" -> Some (auth_path_in ~config_home)
+     | (Some _ | None), Some home when home <> "" -> Some (source_auth_path ~account_home:home)
+     | (Some _ | None), (Some _ | None) -> None)
 
 let protect operation =
   try operation () with

@@ -156,8 +156,9 @@ module For_testing : sig
   (** The prompt a start turn sends, rendered by the production formatter. *)
 
   val reserved_prompt_bytes : system_prompt:string -> goal:string -> int
-  (** What the fixed sections of a start prompt charge against
-      [max-prompt-bytes] before any history message. *)
+  (** What the fixed sections of a start prompt charge against the prompt
+      ceiling ({!Runtime.muse_prompt_capacity}) before any history
+      message. *)
 
   val measure_model_input_message_bytes : Agent_core.Types.message -> int
   (** What the window charges one history message, framing included. *)

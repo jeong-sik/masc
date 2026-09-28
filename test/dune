@@ -5867,6 +5867,7 @@
 (include stanzas/test_tui_context_tokens.inc)
 (include stanzas/test_tui_next_request_band.inc)
 (include stanzas/test_tui_coordinator_status_row.inc)
+(include stanzas/test_tui_detail_heading.inc)
 (include stanzas/test_tui_board_list_reading.inc)
 (include stanzas/test_tui_planning_summary_rows.inc)
 (include stanzas/test_tui_planning_goal_window.inc)
@@ -5924,6 +5925,8 @@
 (include stanzas/test_tui_image_cache.inc)
 (include stanzas/test_tui_image_ref.inc)
 (include stanzas/test_tui_imp_emblem.inc)
+(include stanzas/test_tui_emblem_screen.inc)
+(include stanzas/test_tui_emblem_state.inc)
 (include stanzas/test_tui_link_label.inc)
 (include stanzas/test_tui_link_preview.inc)
 
@@ -7501,6 +7504,14 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_account_login_pty)))
+
+(rule
+ (alias runtest-test_tui_imp_emblem_screen_pty)
+ (deps test_tui_imp_emblem_screen_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action (run python3 %{dep:test_tui_imp_emblem_screen_pty.py} %{dep:../bin/masc_tui.exe})))
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_imp_emblem_screen_pty)))
 
 (test
  (name test_tui_account_login)

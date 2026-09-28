@@ -217,12 +217,9 @@ val session_set_model_request
   -> session_id:string
   -> model_id:string
   -> Yojson.Safe.t
-(** [session/resume] carries no model either. The host records this selection
-    durably, and it applies to the session's next model call. *)
-
-val session_read_request : id:int -> session_id:string -> Yojson.Safe.t
-(** A point-in-time read of the session's folded metadata, without its
-    history ([excludeItems]). *)
+(** [session/resume] carries no model either. The selection applies to the
+    session's next model calls; when that model already runs, the host
+    answers noop and records nothing. *)
 
 val turn_start_request
   :  id:int
@@ -294,16 +291,16 @@ type session =
   }
 
 val parse_session_result : stage:string -> Yojson.Safe.t -> (session, error) result
-(** The [session] member of a [session/start], [session/resume] or
-    [session/read] result. *)
+(** The [session] member of a [session/start] or [session/resume] result. *)
 
 val parse_set_approval_mode_result : Yojson.Safe.t -> (approval_mode, error) result
 (** Require an accepted [session/setApprovalMode] result and decode its
     [effectiveMode.mode]. Unknown, missing or malformed modes are refused. *)
 
 val parse_set_model_result : Yojson.Safe.t -> (unit, error) result
-(** Require an accepted [session/setModel] result. The ack carries no model;
-    a [session/read] shows the selection that landed. *)
+(** Require an accepted [session/setModel] result. The ack carries no model:
+    the host applies the selection to the session's next model calls, or
+    answers noop when that model already runs. *)
 
 type turn_disposition =
   | Started

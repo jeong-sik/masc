@@ -36,8 +36,8 @@ let pane_cols = border_cells + mark_cells + name_cells + gap_cells + reading_cel
    its own floor ([Masc_tui_roster_pane.threshold_cols]): it stands beside
    the chat, whose prose reads in less. *)
 let surface_floor_cols =
-  Masc_tui_frame.border_cells + Masc_tui_frame.padding_cells
-  + Masc_tui_render_schedule.keeper_flags_minimum_inner_width
+  Masc_tui_frame.outer_width
+    ~inner:Masc_tui_render_schedule.keeper_flags_minimum_inner_width
 
 let threshold_cols = pane_cols + surface_floor_cols
 

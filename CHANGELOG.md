@@ -66,6 +66,12 @@
   colour scheme and the Keeper count; like the help sheet it owns every key
   until Esc closes it. The imp turns only with colour on and a page the
   terminal described, and is held still otherwise (#39658).
+- Every keeper has a portrait: a small candle imp whose wax, flame, horns and
+  face come from the keeper's name, so the same name always draws the same
+  candle and nothing is stored. Items sit in their own slots (face, neck,
+  head, hand, base) apart from the body. A pure `Keeper_portrait_draw`
+  renders it, with an explicit animation pose (flame flicker, blink, bob) for
+  the TUI splash; nothing shows it yet (#39704).
 - The setup API can remove an account: `POST /api/v1/setup/accounts/removal`
   answers what removing a provider changes, or why it cannot be removed,
   with the runtime.toml revision it read, and

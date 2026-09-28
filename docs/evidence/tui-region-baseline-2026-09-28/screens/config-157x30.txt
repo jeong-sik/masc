@@ -1,8 +1,8 @@
  Overview  Activity  Keepers  Lanes  Memory  Board  Planning  Fusion  Workspace  ▸Config
 
-   MASC Config  9:Runtime  p:next  ▸runtime.toml  models  params  prompts  presets  themes  1›  /workspace/config/runtime.toml  13:24:39  HTTP [connected]
+   MASC Config  9:Runtime  p:next  ▸runtime.toml  models  params  prompts  presets  themes  1›  /workspace/config/runtime.toml  13:56:02  HTTP [connected]
  ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-    base /tmp/build_9c7ac4_dune/masc-tui-keyboard-h981i5au   masc <base>/.masc   binary age unknown
+    base /tmp/build_1aedcf_dune/masc-tui-keyboard-12kjnq2g   masc <base>/.masc   binary age unknown
     Source revision: fixture-read
     Validation: valid
     Routing active · Keeper pending restart

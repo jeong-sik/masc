@@ -107,8 +107,9 @@ def layout(top, title, rules, bottom, last, blank, windows=(), **pinned):
             "last": last, "blank": blank, "windows": windows, **pinned}
 
 
-# What measure() finds on each screen (Test run 36427566813's screens, replayed
-# through this measure; docs/evidence/tui-region-baseline-2026-09-28). Row 1 is
+# What measure() finds on each screen: measured by replaying Test run
+# 36427566813's screens through the helpers, confirmed by run 36431311636
+# (docs/evidence/tui-region-baseline-2026-09-28). Row 1 is
 # the tab strip, row 2 the body's top and row 3 its title everywhere here; the
 # key hints are the body's last row, 29 above the composer and 30 on the chat.
 # The Activity pane beside the body from 158 columns leaves the body's rows

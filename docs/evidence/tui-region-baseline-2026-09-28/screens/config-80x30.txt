@@ -1,8 +1,8 @@
  ‹2 Keepers  Lanes  Memory  Board  Planning  Fusion  Workspace  ▸Config
 
-  9:Runtime  p:next  ▸runtime.toml  6›  /wo…e.toml  13:24:38  HTTP [connected]
+  9:Runtime  p:next  ▸runtime.toml  6›  /wo…e.toml  13:56:00  HTTP [connected]
  ──────────────────────────────────────────────────────────────────────────────
-    base /tmp/buil…-keyboard-h981i5au   masc <base>/.masc   binary age unknown
+    base /tmp/buil…-keyboard-12kjnq2g   masc <base>/.masc   binary age unknown
     Source revision: fixture-read
     Validation: valid
     Routing active · Keeper pending restart

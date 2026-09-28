@@ -1,6 +1,6 @@
  Overview  Activity  Keepers  Lanes  Memory  ▸Board  Planning  Fusion  Workspace  Config
                                                                                                       │[Recent] Changes · 2 keepers
-   MASC Board (4)  13:24:36  HTTP [connected]                                                         │                   state     tool        calls  new tok
+   MASC Board (4)  13:55:59  HTTP [connected]                                                         │                   state     tool        calls  new tok
  ──────────────────────────────────────────────────────────────────────────────────────────────────── │● alpha            no events
     Sort [s]: net votes first; newer breaks ties · H:choose hearth                                    │· beta             no events
     f/F:next/previous · none counted yet — f narrows once they are                                    │───────────────────────────────────────────────────────

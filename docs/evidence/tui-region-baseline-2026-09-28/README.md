@@ -16,7 +16,7 @@ mouse row base, which G0 also moves onto the frame's value.
 
 | Reader | Where | Screen | Suite |
 |---|---|---|---|
-| `surface_chrome_rows` | `render_prim.ml:1277` | Keepers list, Board list, Config (`config_heading_rows`) | this one |
+| `surface_chrome_rows` | `render_prim.ml:1277` | Board list and Config, both laid out by `surface_chrome` | this one |
 | `keeper_roster_pane` | `render_prim.ml:1572` | roster beside the keeper detail and beside the chat | this one |
 | `keeper_detail_pane` | `render.ml:8503` | keeper detail without the roster (unframed) and with it (framed) | this one |
 | `chat_history_first_row` | `render_chat.ml:3055` | chat, pinned by a press on a folded Gate argument row | this one |
@@ -30,6 +30,15 @@ mouse row base, which G0 also moves onto the frame's value.
 | `context_inspector_detail_viewport` | `render.ml:16547` | context inspector | B |
 | `overlay_window_height` | `render.ml:16698` | help, keeper deletions, agenda overlays | B |
 | `answering_viewport` | `render.ml:17058` | answering overlay | B |
+
+The Keepers list reads none of these. It counts the rows it drew
+(`render_keepers`: `count_frame_lines` plus its three footer rows). This suite
+measures it as the control: a body the frame lays out without the count.
+
+Five screens subtract the same count as a literal and do not match the
+command: Approval detail and Schedule detail (`rows - 6`), Log detail and
+Harness detail (`rows - 5`), and the runtime.toml status (`- 5`). They go with
+G0 and are measured in C.
 
 B (overlays and the runtime picker) and C (the remaining detail screens) are
 separate suites that follow this one.
@@ -46,80 +55,103 @@ separate suites that follow this one.
     close a frame;
   - every one of the 30 rows was written since the last full redraw;
   - every request the TUI made was answered by a fixture;
-  - no row shows the harness's 503 text or "feed closed".
+  - no row shows the harness's 503 text, or the frame's `+N rows not shown`
+    note.
 - Data: keepers `alpha` and `beta`, four Board posts, a runtime.toml, and one
   chat history row holding a Gate argument long enough to fold. Every other
-  read is answered with its empty reading, and the live feed's stream stays
-  open.
-- Terminal: 30 rows. Widths 80 and 100 are common terminals. 109 and 110 sit
-  either side of the roster and the framed detail (110). 157 and 158 sit either
-  side of the Activity pane (158). 176 is where the pane's wide layout fits.
-  The roster is measured at 110 and 157. It is not drawn at 158: discovery
-  run 36423698174 waited for it there and timed out.
+  read is answered with its empty reading. The live feed's stream stays open
+  by writing a comment every second.
+- Terminal: 30 rows, at 80, 100, 109, 110, 157 and 158 columns.
+  - 80 and 100 are common terminals.
+  - 109 and 110 sit either side of the edge where the roster and the framed
+    detail open (110).
+  - 157 and 158 sit either side of the edge where the Activity pane opens
+    (158).
+  - The roster is measured at 110 and 157. It is not drawn at 158.
 - Rows are found by structure:
   - Row 1 is the tab strip. Row 2 is the body's top: blank, or a box's top
     border. The title is the body's first drawn row below that.
+  - The key hints are the body's last row, right above the composer. They
+    must hold text and no box glyph; a pane that outgrew its rows pushes its
+    border onto them. The chat draws its own input and has no composer row.
   - Rules are rows holding a run of box glyphs. A framed pane's bottom border
-    holds its bottom corner.
-  - The body is cut at the roster (34 cells) and the Activity pane (56 cells),
-    and each cut is checked against the pane's border glyph.
-  - The footer is the last row drawn above the composer. The chat draws its
-    own input and has no composer row.
+    holds its bottom corner. `last` is the last drawn row above the key hints.
+  - The body is cut at the roster (34 cells) and the Activity pane (56 cells).
+    Each cut is checked against the pane's border glyph. The roster's own top
+    and bottom borders are measured in its cells.
   - A list window such as `1-22/37` is the reader's computed height, as the
-    screen prints it.
+    screen prints it. Config also pins the number of the source line its body
+    ends on.
+
+## What it measured
+
+On every screen here: title row 3, key hints on row 29 (row 30 on the chat).
+Numbers that move with the width are called out.
+
+| Screen | Body top | Rules | Bottom border | Last drawn row | Blank rows | Also |
+|---|---|---|---|---|---|---|
+| Keepers list (control) | blank | 4, 7, 28 | — | 28 | 17 | |
+| Board list | blank | 4, 7, 9 | — | 13 | 15 | |
+| Config (runtime.toml) | blank | 4, 9 | — | 27 | 1 | ends on source line 18 |
+| Keeper detail | blank | 4 | — | 27 | 7 | window `1-22/37` |
+| Keeper detail beside the roster | border | 4, 28 | 28 | 28 | 0 | window `1-22/37`; roster rows 2–28 |
+| Keeper chat beside the roster | blank | 4, 26 | — | 29 | 19 | roster rows 2–27 |
+| Keeper chat | blank | 4, 26 | — | 29 | 19 (20 at 157) | |
+
+At 157 the folded Gate argument fits one row instead of two, so the chat has
+one more blank row.
+
+In the chat at 100 columns the folded Gate argument's first row is row 6. A
+press is followed by typed input, which the TUI draws only after handling the
+press. After presses on rows 5 and 7, the chat still reads `tools:results`,
+shows no tail of the argument and has read no file changes. After a press on
+row 6 it reads `tools:full`, shows the tail and reads the keeper's file
+changes.
 
 ## Runs
 
-- Measuring run: Test workflow run
-  [36426485595](https://github.com/jeong-sik/masc/actions/runs/36426485595) on
-  `e79042d83cddf1a26ab190795aa6ef5e13840461`. It ran with nothing expected, to
-  print what the screens measure. It fails by design.
 - Passing run: Test workflow run
-  [36427566813](https://github.com/jeong-sik/masc/actions/runs/36427566813) on
-  `0e9eef707897c8ddef036c110adad3d0ab209657`, with the numbers below
-  expected: `region baseline: PASS` in 42 seconds.
-- Both were dispatched with
+  [36431311636](https://github.com/jeong-sik/masc/actions/runs/36431311636) on
+  `4f174c5bdb4491164b0629d99ef89bcf5f2a6dd0`: `region baseline: PASS` in 47
+  seconds, dispatched with
 
   ```sh
   gh workflow run test.yml --ref test/tui-region-baseline \
     -f suite=test_tui_region_baseline_pty
   ```
 
-## What it measured
-
-Title row 3 and footer row 29 (row 30 on the chat), at every width measured.
-A number that moves with the width is called out.
-
-| Screen | Body top | Rules | Bottom border | Blank rows | Window |
-|---|---|---|---|---|---|
-| Keepers list | blank | 4, 7, 28 | — | 17 | — |
-| Board list | blank | 4, 7, 9 | — | 15 | — |
-| Config (runtime.toml) | blank | 4, 9 | — | 1 | — |
-| Keeper detail | blank | 4 | — | 7 | `1-22/37` |
-| Keeper detail beside the roster | border | 4, 28 | 28 | 0 | `1-22/37` |
-| Keeper chat, with and without the roster | blank | 4, 26 | — | 19 (20 at 157) | — |
-
-At 157 the folded Gate argument fits one row instead of two, so the chat has
-one more blank row. In the chat at 100 columns the folded Gate row is row 6.
-A press on row 6 unfolds it; a press on row 5 or row 7 does not.
+- The expected numbers were measured deliberately before that. Run
+  [36426485595](https://github.com/jeong-sik/masc/actions/runs/36426485595)
+  printed them with nothing expected and failed by design. The fields added
+  since then (last drawn row, roster borders, Config's source line) were
+  measured by replaying the screens of run
+  [36427566813](https://github.com/jeong-sik/masc/actions/runs/36427566813)
+  through the helpers. The passing run then confirmed them against the TUI.
 
 ## The screens
 
-`screens/` holds, for each measured screen of the passing run:
+`screens/` holds every measured screen of the passing run:
 
 - `<screen>-<cols>x30.ansi`: the bytes since its last full redraw;
-- `<screen>-<cols>x30.txt`: the text a terminal shows;
-- `<screen>-<cols>x30.png`: a picture rendered from the `.ansi` with pyte.
+- `<screen>-<cols>x30.txt`: the text a terminal shows.
 
-`render_screens.py` rebuilds all three from a run's `suite-runner-log`
-artifact:
+It also holds a picture of five of them: `keepers-80x30.png`,
+`config-158x30.png`, `keeper-detail-roster-110x30.png`,
+`keeper-chat-roster-110x30.png` and `keeper-chat-157x30.png`.
+
+`render_screens.py` rebuilds them. It needs `pyte` and `Pillow`. The pictures
+were drawn with D2Coding Ligature Nerd Font Mono (Regular and Bold), which has
+Hangul and the box glyphs.
 
 ```sh
-gh run download 36427566813 -R jeong-sik/masc -n suite-runner-log -D log
-python3 render_screens.py log/ci-run-tests.log screens \
+# From the committed bytes; the CI artifact expires on 2026-10-12.
+python3 render_screens.py ansi screens --png keepers-80x30 \
   --font D2CodingLigatureNerdFontMono-Regular.ttf \
   --bold-font D2CodingLigatureNerdFontMono-Bold.ttf
+
+# From a run's log.
+gh run download 36431311636 -R jeong-sik/masc -n suite-runner-log -D log
+python3 render_screens.py log log/ci-run-tests.log screens
 ```
 
-It needs `pyte` and `Pillow`. Colours approximate a dark theme; cell
-positions and widths are the TUI's own.
+Colours approximate a dark theme. Cell positions and widths are the TUI's own.

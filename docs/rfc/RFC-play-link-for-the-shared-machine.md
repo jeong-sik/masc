@@ -77,8 +77,11 @@ related: ["0439", "machine-spectating-goes-through-lanes"]
   - `Player` 는 `CanPlayMachine` 만 참이다.
   - `Worker`·`Admin` 도 `CanPlayMachine` 을 가진다. keeper 와 운영자는 지금처럼 논다.
 - 컴파일러가 같이 고치게 만드는 자리: `permissions_for_role`, `agent_role_to_string`/`of_string`,
-  `all_agent_roles`, `multiplier_for_role`(→ `rate_limit_config.player_multiplier` 필드 추가),
+  `all_agent_roles`, `multiplier_for_role`,
   `Server_auth.request_credential_standing`(→ `Player_credential` 값 추가. 운영자도 keeper 도 아니다).
+- `multiplier_for_role` 은 `Player` 에게 `worker_multiplier` 를 준다. 지금 역할별 한도가 걸리는 도구는
+  `masc_broadcast` 하나(`Session.check_rate_limit`)이고 `Player` 는 그 권한이 없다. 따로 설정 칸을
+  만들면 아무도 읽지 않는 값이 된다. DOS 입력에 한도를 걸 때 그 칸을 만든다.
 - **보안 경계는 credential 이다.** controller 는 차례를 정할 뿐이다. 무엇을 할 수 있는지는
   credential 이, 언제 할 수 있는지는 controller 가 정한다.
 

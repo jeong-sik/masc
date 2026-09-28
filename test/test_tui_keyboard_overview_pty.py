@@ -238,6 +238,20 @@ def opening_boot_frames(executable: str) -> None:
                 raise AssertionError(
                     f"opening={mode!r}, target={target!r} omitted {expected!r}: {visible!r}"
                 )
+            if not chat:
+                rows = visible.splitlines()
+                reason = next((i for i, row in enumerate(rows) if expected in row), None)
+                goals = next((i for i, row in enumerate(rows) if b"Goals (" in row), None)
+                if mode in ("last", "keeper") and (reason is None or goals is None or reason >= goals):
+                    raise AssertionError(f"fallback reason was not the first Overview row: {visible!r}")
+            if mode == "last" and target is None:
+                narrow = keyboard.resize_and_wait(
+                    process, fd, output, rows=20, columns=80,
+                    needle=expected, controls=(keyboard.FULL_REDRAW,),
+                    final_cursor=b"\x1b[?25l",
+                )
+                if expected not in keyboard.screen_text(narrow):
+                    raise AssertionError("the last-chat fallback reason disappeared at 80x20")
             if chat:
                 start = len(output)
                 os.write(fd, b"\x1b")

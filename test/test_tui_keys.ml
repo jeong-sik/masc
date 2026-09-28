@@ -891,7 +891,7 @@ let test_board_read_footer_carries_the_post_keys () =
             (holds key read);
           Alcotest.(check bool) (Printf.sprintf "the Board list spells %s the same" key) true
             (holds key list))
-        [ "v / V:vote"; "c:reply"; "Y:copy link" ];
+        [ "v / V:up / down"; "c:reply"; "Y:copy link" ];
       Alcotest.(check bool) "the first read offers the full history" true
         (holds "o:all comments" read);
       Alcotest.(check bool) "the full history offers the newest page" true
@@ -1993,7 +1993,7 @@ let test_config_footer_names_child_hops () =
      meets, and [test_every_config_pane_answers_once] is what holds them to
      one answer each. *)
   check str "Config names its three off-ring children"
-    "j/k:select / scroll  p:next pane  PgUp/PgDn:page  v:read status  9:Runtime  s:resources  t:tools  e:edit  e / Enter:edit  E:advanced JSON  Enter:use  x:default / clear  f:filter  n:new  u:restore  i:input  a:fragments / keeper voice  o:assets  Esc:overview  r:reload  Tab:next  q:quit"
+    "j/k:select / scroll  p:next pane  PgUp/PgDn:page  v:read status  9:Runtime  s:resources  t:tools  e:edit  e / Enter:edit  E:advanced JSON  Enter:use  x:default / clear  f:filter  n:new  u:restore  i:input  a:fragments / voice / account  o:assets  Esc:overview  r:reload  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Config);
   let hints = Masc_tui_keys.footer_hints Config in
   List.iter
@@ -2117,9 +2117,9 @@ let test_config_pane_footer_actions () =
          [ Config_runtime; Config_models; Config_params; Config_prompts; Config_voice ]);
     List.iter (fun key -> enabled key (pane = Config_presets)) [ "n"; "u" ];
     List.iter (fun key -> enabled key (pane = Config_prompts)) [ "i"; "o" ];
-    (* [a] answers on two panes now: the prompt fragments, and the keeper-voice
-       screen the voice pane opens. *)
-    enabled "a" (List.mem pane [ Config_prompts; Config_voice ]);
+    (* [a] answers on three panes: the prompt fragments, the keeper-voice
+       screen the voice pane opens, and the account form on runtime.toml. *)
+    enabled "a" (List.mem pane [ Config_runtime; Config_prompts; Config_voice ]);
     List.iter (fun key -> enabled key true) [ "j/k"; "p"; "9"; "s"; "t"; "Esc"; "q" ])
     panes;
   (* The prompts pane's read-only assets: the registry's edit keys only answer
@@ -2144,6 +2144,25 @@ let test_config_pane_footer_actions () =
       Alcotest.(check bool) ("presets keeps " ^ key ^ " at 120 columns") true
         (footer_has_key key (at_120 (Masc_tui_keys.footer_hints_config ~pane:Config_presets))))
     [ "n"; "u"; "PgUp/PgDn" ];
+  (* The account form's door, at the width the other panes promise their own
+     writes. Narrower rows keep the pane's first keys and drop [e] and [a]
+     alike; the ? sheet names both there. *)
+  Alcotest.(check bool) "runtime.toml keeps a at 120 columns" true
+    (footer_has_key "a"
+       (at_120 (Masc_tui_keys.footer_hints_config ~pane:Config_runtime)));
+  (* While the account form is open it takes every key as typing, so its row
+     names the form's keys and none of the pane's. *)
+  let form_row = Masc_tui_keys.footer_hints_runtime_account_form () in
+  List.iter
+    (fun key ->
+      Alcotest.(check bool) ("the account form names " ^ key) true
+        (footer_has_key key form_row))
+    [ "Enter"; "Esc" ];
+  List.iter
+    (fun key ->
+      Alcotest.(check bool) ("the account form leaves out " ^ key) false
+        (footer_has_key key form_row))
+    [ "e"; "r"; "q"; "Tab" ];
   Alcotest.(check bool) "the runtime assets keep their way back at 120 columns" true
     (footer_has_key "o" (at_120 assets));
   List.iter

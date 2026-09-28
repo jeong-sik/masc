@@ -5505,6 +5505,62 @@ let expect_http_status label status raw =
   if not (String.starts_with ~prefix raw)
   then failf "%s: expected %s, got %s" label prefix raw
 
+let test_board_close_route_rejects_wrong_typed_decisions_without_closing () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  with_env "MASC_BASE_PATH" config.base_path @@ fun () ->
+  Lib.Board.reset_global_for_test ();
+  Lib.Board_dispatch.reset_for_test ();
+  Lib.Board_dispatch.init_jsonl ();
+  Fun.protect
+    ~finally:(fun () ->
+      Lib.Board.reset_global_for_test ();
+      Lib.Board_dispatch.reset_for_test ())
+    (fun () ->
+      let create content =
+        match Lib.Board_dispatch.create_post
+                ~author:"close-route-test" ~content
+                ~post_kind:Lib.Board.Human_post () with
+        | Ok post -> Lib.Board.Post_id.to_string post.id
+        | Error error -> fail (Lib.Board.show_board_error error)
+      in
+      let post_id = create "thread" in
+      let successor_id = create "successor" in
+      let check_open label =
+        match Lib.Board_dispatch.get_post ~post_id with
+        | Ok post -> check bool (label ^ " leaves post open") true
+                       (Option.is_none post.closed)
+        | Error error -> fail (Lib.Board.show_board_error error)
+      in
+      let attempt label decision_fields bad_field =
+        let body = Yojson.Safe.to_string
+            (`Assoc
+               (("post_id", `String post_id)
+                :: ("summary", `String "done") :: decision_fields))
+        in
+        let raw, json =
+          post_to_handler ~target:"/api/v1/dashboard/board/close"
+            (fun request reqd body ->
+              Server_dashboard_http_delete_actions.For_testing.handle_board_close_post
+                ~agent_name:"operator" request reqd body)
+            body
+        in
+        expect_http_status label 400 raw;
+        let error = Safe_ops.json_string_opt "error" json in
+        check bool (label ^ " names malformed field") true
+          (match error with
+           | Some error -> String_util.contains_substring error bad_field
+           | None -> false);
+        check_open label
+      in
+      attempt "wrong successor_id"
+        ["successor_id", `Int 123; "no_successor", `Bool true]
+        "successor_id";
+      attempt "wrong no_successor"
+        ["successor_id", `String successor_id;
+         "no_successor", `String "true"]
+        "no_successor")
+;;
+
 (* The PAT route's hostname picks the login lane the token is written to.
    One that is written but unreadable is refused before any Keeper is read;
    falling back to the query or github.com would store the token under a host
@@ -6947,7 +7003,9 @@ let () =
             test_composite_blocked_uses_terminal_contract_not_observational_metadata;
         ] );
       ( "dashboard behavior contracts",
-        [ test_case "Skill evidence joins activation and composition" `Quick
+        [ test_case "board close route rejects wrong typed decisions" `Quick
+            test_board_close_route_rejects_wrong_typed_decisions_without_closing;
+          test_case "Skill evidence joins activation and composition" `Quick
             test_skill_evidence_joins_activation_and_composition;
           test_case "GitHub login stream includes CORS" `Quick
             test_keeper_github_login_stream_headers_include_cors;

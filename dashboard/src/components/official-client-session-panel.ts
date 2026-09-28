@@ -41,6 +41,7 @@ function retryPreviousOffered(failure: DashboardOfficialClientRecoveryFailure): 
     case 'transport_interrupted':
     case 'protocol_failed':
     case 'provider_rejected':
+    case 'retryable_turn_failed':
     case 'host_hook_failed':
     case 'state_persistence_failed':
     case 'process_restarted':

@@ -380,7 +380,8 @@ let test_board_dashboard_json_shows_closed_state_and_successor () =
   let successor_id = Board.Post_id.to_string successor.id in
   (match
      Board_votes.set_closed (Board.global ()) ~post_id
-       ~closed_by:"dashboard-close-author" ~successor_id
+       ~closed_by:"dashboard-close-author"
+       ~successor:(Board.Successor successor_id)
        ~summary:"wrapped up on the dashboard" ()
    with
    | Ok () -> ()
@@ -1177,7 +1178,11 @@ let test_masc_board_close_requires_the_post_author () =
     dispatch
       "masc_board_close"
       (make_args
-         [ "post_id", `String post_id; "closed_by", `String "post-author" ])
+         [ "post_id", `String post_id
+         ; "closed_by", `String "post-author"
+         ; "no_successor", `Bool true
+         ; "summary", `String "closing this thread"
+         ])
   in
   Alcotest.(check bool) "close by the real author succeeds" true ok;
   Alcotest.(check bool) "success message names the post" true
@@ -1186,6 +1191,98 @@ let test_masc_board_close_requires_the_post_author () =
   | Ok post -> Alcotest.(check bool) "post is closed in memory" true
       (Option.is_some post.closed)
   | Error e -> Alcotest.fail (Board.show_board_error e)
+
+(* task-1758/#39356: a close must carry a non-empty summary and an explicit
+   successor decision. The tool boundary refuses a missing decision, both
+   decisions at once, and a blank summary; the storage boundary refuses a
+   blank summary on its own, so the dashboard route shares the rule. *)
+let test_masc_board_close_requires_summary_and_successor_decision () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let ok, created =
+    dispatch
+      "masc_board_post"
+      (make_args
+         [ "content", `String "close-decision target"
+         ; "author", `String "post-author"
+         ])
+  in
+  Alcotest.(check bool) "close-decision target created" true ok;
+  let post_id =
+    Yojson.Safe.Util.(parse_create_response_json created |> member "id" |> to_string)
+  in
+  let attempt label args =
+    let ok, msg = dispatch "masc_board_close" (make_args args) in
+    Alcotest.(check bool) (label ^ " is refused") false ok;
+    msg
+  in
+  let missing =
+    attempt "close with no successor decision"
+      [ "post_id", `String post_id
+      ; "closed_by", `String "post-author"
+      ; "summary", `String "no decision"
+      ]
+  in
+  Alcotest.(check bool) "missing-decision message names the choice" true
+    (String_util.contains_substring missing "no_successor");
+  let both =
+    attempt "close with both decisions"
+      [ "post_id", `String post_id
+      ; "closed_by", `String "post-author"
+      ; "summary", `String "both"
+      ; "successor_id", `String post_id
+      ; "no_successor", `Bool true
+      ]
+  in
+  Alcotest.(check bool) "both-decisions message names the conflict" true
+    (String_util.contains_substring both "not both");
+  let both_false =
+    attempt "close with successor and no_successor=false"
+      [ "post_id", `String post_id
+      ; "closed_by", `String "post-author"
+      ; "summary", `String "both fields"
+      ; "successor_id", `String post_id
+      ; "no_successor", `Bool false
+      ]
+  in
+  Alcotest.(check bool) "both-fields message names the conflict" true
+    (String_util.contains_substring both_false "not both");
+  let blank =
+    attempt "close with a blank summary"
+      [ "post_id", `String post_id
+      ; "closed_by", `String "post-author"
+      ; "no_successor", `Bool true
+      ; "summary", `String "   "
+      ]
+  in
+  Alcotest.(check bool) "blank-summary message names the summary" true
+    (String_util.contains_substring blank "summary");
+  (match Board_dispatch.get_post ~post_id with
+   | Ok post -> Alcotest.(check bool) "post stayed open after refused closes" true
+       (Option.is_none post.closed)
+   | Error e -> Alcotest.fail (Board.show_board_error e));
+  (* The storage boundary refuses a blank summary on its own, so the
+     dashboard route cannot bypass the rule. *)
+  (match
+     Board_votes.set_closed (Board.global ()) ~post_id ~closed_by:"post-author"
+       ~successor:Board.No_successor ~summary:"  " ()
+   with
+   | Ok () -> Alcotest.fail "storage boundary must refuse a blank summary"
+   | Error (Board.Validation_error _) -> ()
+   | Error e -> Alcotest.fail (Board.show_board_error e));
+  (* A valid close with an explicit no-successor decision succeeds. *)
+  let ok, _ =
+    dispatch
+      "masc_board_close"
+      (make_args
+         [ "post_id", `String post_id
+         ; "closed_by", `String "post-author"
+         ; "no_successor", `Bool true
+         ; "summary", `String "done, no successor"
+         ])
+  in
+  Alcotest.(check bool) "explicit no-successor close succeeds" true ok
 
 let test_masc_board_reopen_requires_the_post_author () =
   with_eio @@ fun env ->
@@ -1204,7 +1301,8 @@ let test_masc_board_reopen_requires_the_post_author () =
     Yojson.Safe.Util.(parse_create_response_json created |> member "id" |> to_string)
   in
   (match
-     Board_votes.set_closed (Board.global ()) ~post_id ~closed_by:"post-author" ()
+     Board_votes.set_closed (Board.global ()) ~post_id ~closed_by:"post-author"
+       ~successor:Board.No_successor ~summary:"closing to test reopen" ()
    with
    | Ok () -> ()
    | Error e -> Alcotest.fail (Board.show_board_error e));
@@ -1849,7 +1947,7 @@ let test_post_get_shows_closed_state_and_successor () =
   let successor_id = Board.Post_id.to_string successor.id in
   (match
      Board_votes.set_closed (Board.global ()) ~post_id ~closed_by:"post-get-closer"
-       ~successor_id ()
+       ~successor:(Board.Successor successor_id) ~summary:"moved to the successor" ()
    with
    | Ok () -> ()
    | Error e -> Alcotest.fail (Board.show_board_error e));
@@ -1888,7 +1986,8 @@ let test_post_get_continued_read_shows_closed_state () =
     | Error e -> Alcotest.fail (Board.show_board_error e)
   done;
   (match
-     Board_votes.set_closed (Board.global ()) ~post_id ~closed_by:"post-get-closer" ()
+     Board_votes.set_closed (Board.global ()) ~post_id ~closed_by:"post-get-closer"
+       ~successor:Board.No_successor ~summary:"closing this thread" ()
    with
    | Ok () -> ()
    | Error e -> Alcotest.fail (Board.show_board_error e));
@@ -1992,6 +2091,26 @@ let check_page ~label page ~offset ~returned ~total ~next_offset =
   Alcotest.(check int) (label ^ ": total") total page.total;
   Alcotest.(check (option int)) (label ^ ": next_offset") next_offset page.next_offset
 
+(* Read the navigation the model actually sees, rather than deriving an
+   earlier page from [offset] in the test. *)
+let earlier_page_from_line body =
+  let line = match String.index_opt body '\n' with
+    | Some index -> String.sub body 0 index
+    | None -> body in
+  let needle = "Read earlier with comment_offset=" in
+  let n = String.length needle in
+  let rec find i =
+    if i + n > String.length line
+    then Alcotest.fail "the page gives no earlier-page instruction"
+    else if String.equal (String.sub line i n) needle
+    then i + n
+    else find (i + 1)
+  in
+  let start = find 0 in
+  let remaining = String.sub line start (String.length line - start) in
+  try Scanf.sscanf remaining "%d and comment_limit=%d." (fun offset limit -> offset, limit)
+  with Scanf.Scan_failure detail -> Alcotest.fail ("unreadable earlier-page instruction: " ^ detail)
+
 let check_get_rejected ~label post_id args expected =
   let result = dispatch_result "masc_board_post_get" (post_get_args post_id args) in
   Alcotest.(check bool) (label ^ " is not a successful read") false
@@ -2067,14 +2186,43 @@ let test_post_get_comment_pages_carry_their_range () =
   check_page
     ~label:"default page"
     default_page
-    ~offset:0
-    ~returned:50
+    ~offset:79
+    ~returned:20
     ~total:99
-    ~next_offset:(Some 50);
+    ~next_offset:None;
   Alcotest.(check bool)
     "header counts the thread it pages"
     true
     (contains default_page.thread "[99 replies]");
+  let rec read_older page seen =
+    let indices = List.init page.returned (fun index -> page.offset + index + 1) in
+    List.iter
+      (fun index ->
+         Alcotest.(check bool)
+           (Printf.sprintf "page carries comment %03d" index)
+           true
+           (contains page.body (Printf.sprintf "comment-%03d" index)))
+      indices;
+    let seen = indices @ seen in
+    if page.offset = 0
+    then seen
+    else
+      let offset, limit = earlier_page_from_line page.body in
+      Alcotest.(check int) "older page ends before current page" page.offset
+        (offset + limit);
+      Alcotest.(check bool) "older navigation makes progress" true
+        (offset < page.offset && limit > 0);
+      let older =
+        read ~label:"earlier page"
+          [ "comment_offset", `Int offset; "comment_limit", `Int limit ]
+      in
+      Alcotest.(check int) "earlier hint selects its page" offset older.offset;
+      Alcotest.(check int) "earlier hint does not overlap" limit older.returned;
+      read_older older seen
+  in
+  Alcotest.(check (list int)) "latest-to-oldest navigation covers each comment once"
+    (List.init 99 (fun index -> index + 1))
+    (List.sort Int.compare (read_older default_page []));
   check_page
     ~label:"normal page advances"
     (read ~label:"normal page" [ "comment_offset", `Int 2; "comment_limit", `Int 2 ])
@@ -2449,7 +2597,13 @@ let test_post_get_page_follows_the_lane_ceiling () =
   let comment_count = 30 in
   let post_id, _ids = create_thread_of_long_comments ~count:comment_count in
   let agent_core =
-    read_page ~result_boundary:agent_core_lane ~label:"agent-core lane" post_id []
+    read_page
+      ~result_boundary:agent_core_lane
+      ~label:"agent-core lane"
+      post_id
+      [ "comment_offset", `Int 0
+      ; "comment_limit", `Int Board.Limits.max_comment_page_limit
+      ]
   in
   check_page
     ~label:"agent-core lane"
@@ -2467,7 +2621,13 @@ let test_post_get_page_follows_the_lane_ceiling () =
     true
     (String.length agent_core.body <= Common.max_agent_core_inline_result_bytes);
   let mcp_caller =
-    read_page ~result_boundary:Tool_output.Sent_to_client ~label:"MCP caller" post_id []
+    read_page
+      ~result_boundary:Tool_output.Sent_to_client
+      ~label:"MCP caller"
+      post_id
+      [ "comment_offset", `Int 0
+      ; "comment_limit", `Int Board.Limits.max_comment_page_limit
+      ]
   in
   Alcotest.(check int) "MCP caller: offset" 0 mcp_caller.offset;
   Alcotest.(check int) "MCP caller: total" comment_count mcp_caller.total;
@@ -2500,7 +2660,12 @@ let test_keeper_board_read_pages_by_the_projection_it_is_given () =
         ~meta:keeper_meta
         ~result_projection
         ~name:"masc_board_post_get"
-        ~args:(post_get_args post_id [])
+        ~args:
+          (post_get_args
+             post_id
+             [ "comment_offset", `Int 0
+             ; "comment_limit", `Int Board.Limits.max_comment_page_limit
+             ])
     in
     page_view_of
       ~body:execution.Keeper_tool_execution.raw_output
@@ -2607,7 +2772,7 @@ let test_post_get_a_sweep_between_pages_shows_in_the_next_page () =
        ~result_boundary:Tool_output.Sent_to_client
        ~label:"before the sweep"
        post_id
-       [ "comment_limit", `Int page_limit ])
+       [ "comment_offset", `Int 0; "comment_limit", `Int page_limit ])
     ~offset:0
     ~returned:page_limit
     ~total:comment_count
@@ -3230,6 +3395,10 @@ let () =
             test_model_visible_board_maintenance_dispatches_in_process;
           Alcotest.test_case "masc_board_close requires the post author" `Quick
             test_masc_board_close_requires_the_post_author;
+          Alcotest.test_case
+            "masc_board_close requires a summary and a successor decision"
+            `Quick
+            test_masc_board_close_requires_summary_and_successor_decision;
           Alcotest.test_case "masc_board_reopen requires the post author" `Quick
             test_masc_board_reopen_requires_the_post_author;
           Alcotest.test_case "keeper board dispatch uses typed names" `Quick

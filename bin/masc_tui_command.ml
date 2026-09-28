@@ -9,6 +9,7 @@ type t =
   | About
   | Lane_addons of string
   | Open_metrics
+  | Account_login of string
   | Open_settings
   | Open_diff
   | Open_patch_modal
@@ -76,7 +77,8 @@ type command_help = {
    is a command that will be described two ways, and the one an operator
    reads first is whichever list nobody updated. *)
 let catalog =
-  [ { word = "task"
+  [ { word = "login"; aliases = []; args = "[client]"; summary = "sign in to an official client and verify a model connection" }
+  ; { word = "task"
     ; aliases = []
     ; args = "<title>"
     ; summary = "create a task for this keeper (lines below become the body)"
@@ -327,6 +329,7 @@ let parse text =
     | "about", _ | "splash", _ -> About
     | "addons", arg -> Lane_addons arg
     | "metrics", _ | "telemetry", _ -> Open_metrics
+    | "login", client -> Account_login client
     | "settings", _ -> Open_settings
     | "diff", _ -> Open_diff
     | "patch", _ | "review", _ -> Open_patch_modal

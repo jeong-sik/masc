@@ -1956,7 +1956,7 @@ let test_set_closed_and_reopen_round_trip () =
       Alcotest.(check bool) "post starts open" true (Option.is_none post.closed);
       (match
          Board_dispatch.set_closed ~post_id:pid ~closed_by:"an-operator"
-           ~summary:"wrapped up" ()
+           ~successor:Board.No_successor ~summary:"wrapped up" ()
        with
        | Error e -> Alcotest.fail (Board.show_board_error e)
        | Ok () -> ());
@@ -1990,7 +1990,10 @@ let test_set_closed_and_reopen_round_trip () =
             (Option.is_none p.closed)
 
 let test_set_closed_missing_post () =
-  match Board_dispatch.set_closed ~post_id:"never-existed" ~closed_by:"op" () with
+  match
+    Board_dispatch.set_closed ~post_id:"never-existed" ~closed_by:"op"
+      ~successor:Board.No_successor ~summary:"no such post" ()
+  with
   | Ok () -> Alcotest.fail "expected Post_not_found"
   | Error (Board.Post_not_found _) -> ()
   | Error e -> Alcotest.fail (Board.show_board_error e)

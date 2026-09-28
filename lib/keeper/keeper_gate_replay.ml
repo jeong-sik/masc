@@ -1137,6 +1137,10 @@ let replay_approved_effect_with_receipt
               looked up and no tool dispatched. The line is refused rather
               than run as a host program of that name (#32730). *)
            ~shell_ir_rewrite:Keeper_shell_tool_command.refuse_reserved_command
+           (* No turn means no lane to resolve, so the descriptor's own
+              projection stands, as [Keeper_tool_runtime.result_projection_for]
+              does for a caller that resolved none. *)
+           ~result_projection:Tool_output.default_model_projection
            ~args
            ())
      | Some Replay_network_read ->

@@ -10,6 +10,7 @@ SOURCE_MODULES = (
     "bin/masc_tui_markdown.ml",
     "bin/masc_tui_input_decoder.ml",
     "bin/masc_tui_keys.ml",
+    "bin/masc_tui_render_schedule.ml",
 )
 
 

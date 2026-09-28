@@ -34,11 +34,6 @@ let native_posture_note = function
   | Runtime_native_tools.Native_none -> []
 ;;
 
-(* A model that declares no max-prompt-bytes gets no MASC ceiling: the
-   carried range from the Librarian front goes as it is, and whether it fits
-   is the host's to say, as on the Claude Code and Codex lanes. *)
-let unbounded_model_input_capacity_bytes = max_int
-
 let config_error = Host.config_error
 let internal_error = Host.internal_error
 
@@ -495,7 +490,8 @@ let capacity_bounded_model_input_projection ~capacity_bytes ~system_prompt ~goal
       (config_error
          ~field:"max_prompt_bytes"
          (Printf.sprintf
-            "Muse Code fixed prompt sections measure %d bytes, at or above max-prompt-bytes %d"
+            "Muse Code fixed prompt sections measure %d bytes, at or above the prompt \
+             ceiling %d"
             reserved_bytes
             capacity_bytes))
   else
@@ -810,7 +806,7 @@ let phase_name : Session_store.phase -> string = function
 
 let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_session_settled
     ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
-    ~max_prompt_bytes ~configured_reasoning_effort ~turn_timeout_s ~quota_scope
+    ~prompt_capacity ~configured_reasoning_effort ~turn_timeout_s ~quota_scope
     ~on_model_input_window_observation ~carried_front_seed ~librarian_front ~on_carried_front
     ~turn_start ~pre_tool_rejects ~base_path ~workspace_root ~native_workspace_context ~goal ~goal_blocks ~system_prompt ~tools ~loading_plan
     ~initial_messages ~model_input_projection ~on_transmitted_model_input ~hooks
@@ -914,16 +910,15 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         |> Result.map_error (config_error ~field:"official_client_session.gate_continuation")
     in
     let claim_plan = Session_store.reconcile_tool_surface claim_plan ~tool_surface_sha256 in
-    (* MSP offers no replaceable configuration channel, and this client
-       names the model and the workspace root only when it starts a session.
-       A host session that settled against another canonical history, system
-       prompt, configured model or root is superseded by a fresh one seeded
-       from the canonical source; ephemeral world context stays on the
-       per-turn prompt path. Without the model here a changed model resumed
-       the old session, and the serve client refused it as
-       [Session_model_mismatch]: the turn failed before the next claim started
-       fresh. Without the root a resumed session kept working where it
-       started. *)
+    (* MSP offers no replaceable configuration channel for the root, and this
+       client names the workspace root only when it starts a session. A host
+       session that settled against another canonical history, system prompt,
+       configured model or root is superseded by a fresh one seeded from the
+       canonical source; ephemeral world context stays on the per-turn prompt
+       path. The serve client re-selects the configured model on a resumed
+       session that reports another, but a history made under one configured
+       model is not continued under a new one. Without the root a resumed
+       session kept working where it started. *)
     (* Hook nudges are ordinary history seeded only on Start. Carried context
        is sent on every Resume and must not invalidate the durable session. *)
     let canonical_messages = List.filter
@@ -1002,10 +997,17 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
              "Muse Code turn carries goal images but the runtime does not accept image input")
       | [], (true | false) | _ :: _, true -> Ok ()
     in
-    let capacity_bytes =
-      match max_prompt_bytes with
-      | Some capacity_bytes -> capacity_bytes
-      | None -> unbounded_model_input_capacity_bytes
+    (* The host rewrites an oversized input instead of refusing it, so a turn
+       without a ceiling is refused rather than sent. *)
+    let* capacity_bytes =
+      match prompt_capacity with
+      | Ok capacity_bytes -> Ok capacity_bytes
+      | Error error ->
+        Error
+          (config_error
+             ~field:"max_context"
+             ("Muse Code has no prompt ceiling: "
+              ^ Runtime_muse_prompt_capacity.error_to_string error))
     in
     let reasoning_effort =
       Host.effective_reasoning_effort
@@ -1085,23 +1087,21 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
           (config_error
              ~field:"max_prompt_bytes"
              (Printf.sprintf
-                "Muse Code final prompt measures %d bytes, above max-prompt-bytes %d"
+                "Muse Code final prompt measures %d bytes, above the prompt ceiling %d"
                 (String.length prompt)
                 capacity_bytes))
     in
     Log.Keeper.info
       ~keeper_name
       "%s turn composition: mode=%s prompt_bytes=%d system_prompt_bytes=%d goal_bytes=%d \
-       images=%d declared_max_prompt_bytes=%s"
+       images=%d prompt_capacity_bytes=%d"
       runtime_label
       (if is_resume then "resume" else "start")
       (String.length prompt)
       (String.length prepared.system_prompt)
       (String.length goal)
       (List.length goal_images)
-      (match max_prompt_bytes with
-       | Some declared -> string_of_int declared
-       | None -> "none");
+      capacity_bytes;
     let client_config : Serve.config =
       { config with
         prepared_home = Some prepared_home
@@ -1677,7 +1677,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
 ;;
 
 let run ?official_task_reference ~accepts_image_input ?required_native_posture
-    ?official_client_continuation ~runtime_id ~max_prompt_bytes ~configured_reasoning_effort
+    ?official_client_continuation ~runtime_id ~prompt_capacity ~configured_reasoning_effort
     ~turn_timeout_s ~quota_scope ~keeper_name ~pre_tool_rejects ~base_path ~workspace_root ?native_workspace_context ~goal
     ~goal_blocks ~system_prompt ~tools
     ?(loading_plan = Keeper_official_client_host.All_on_demand)
@@ -1714,7 +1714,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture
         ~required_native_posture
         ~official_client_continuation
         ~runtime_id
-        ~max_prompt_bytes ~configured_reasoning_effort ~turn_timeout_s ~quota_scope
+        ~prompt_capacity ~configured_reasoning_effort ~turn_timeout_s ~quota_scope
         ~keeper_name
         ~on_model_input_window_observation
         ~carried_front_seed

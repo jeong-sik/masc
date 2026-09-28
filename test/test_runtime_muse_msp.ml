@@ -481,6 +481,28 @@ let test_effective_approval_mode_wire_contract () =
      `Assoc ["mode", `Int 1]]
 ;;
 
+(* Frames Muse Code 1.4.0 exchanged on 2026-09-28. The ack carries no
+   model. *)
+let test_session_model_selection_wire_contract () =
+  let open Yojson.Safe.Util in
+  let set_model = Msp.session_set_model_request ~id:3 ~command_id:"c-model"
+      ~session_id:"s-1" ~model_id:"muse-spark-1.3" in
+  check string "setModel method" "session/setModel" (set_model |> member "method" |> to_string);
+  check int "setModel id" 3 (set_model |> member "id" |> to_int);
+  let params = member "params" set_model in
+  check string "setModel command" "c-model" (params |> member "commandId" |> to_string);
+  check string "setModel session" "s-1" (params |> member "sessionId" |> to_string);
+  check string "setModel selection" "muse-spark-1.3"
+    (params |> member "model" |> member "modelId" |> to_string);
+  let ack = Yojson.Safe.from_string
+      {|{"commandId":"01a0e77a-eaac-73f7-b3f6-4aa845e85360","status":"accepted"}|} in
+  ok_or_fail (Msp.parse_set_model_result ack);
+  List.iter (fun result -> match Msp.parse_set_model_result result with
+    | Error _ -> () | Ok () -> fail "unaccepted model selection was accepted")
+    [`Assoc ["commandId", `String "c"; "status", `String "rejected"];
+     `Assoc ["commandId", `String "c"]; `Null]
+;;
+
 let () =
   run
     "runtime_muse_msp"
@@ -503,6 +525,7 @@ let () =
         ; test_case "session config carries bridge" `Quick test_session_config_carries_bridge
         ; test_case "reasoning effort round trip" `Quick test_reasoning_effort_round_trip
         ; test_case "effective approval mode wire contract" `Quick test_effective_approval_mode_wire_contract
+        ; test_case "session model selection wire contract" `Quick test_session_model_selection_wire_contract
         ] )
     ]
 ;;

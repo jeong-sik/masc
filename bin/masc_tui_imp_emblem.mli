@@ -7,9 +7,11 @@
     of the dots it lights. Over one loop the emblem turns twice and changes
     from the imp to the lantern and back.
 
-    Technique after openai/codex [codex-rs/tui/src/empty_state_animation]
-    (Apache-2.0); reimplemented here with this emblem's own shapes, lights and
-    palette.
+    Adapted from openai/codex [codex-rs/tui/src/empty_state_animation]
+    (Apache License 2.0, Copyright 2025 OpenAI): the frame, shading and loop
+    follow Codex's; the marks, palettes, culling and constants were changed.
+    The implementation says what came from where; the license and NOTICE are
+    listed in THIRD-PARTY-LICENSES.md.
 
     Nothing here reads the terminal or the clock. A frame is a function of the
     size, the pose and the lighting, so the same three give the same frame. *)
@@ -82,7 +84,7 @@ val lighting : backdrop -> lighting
 
 (** {1 Frames} *)
 
-type cell =
+type cell = private
   { dots : int
         (** Lit Braille dots, as the low eight bits of the Unicode offset
             from U+2800. Zero is an empty cell. *)
@@ -90,6 +92,8 @@ type cell =
         (** The mean colour of the lit dots. [None] in an empty cell and
             under {!Unknown} lighting. *)
   }
+(** Only {!frame} makes a cell, so [dots] is always one of the 256 Braille
+    patterns and {!lines} always writes one display cell for it. *)
 
 type frame = private
   { size : size
@@ -111,18 +115,30 @@ val frame : t -> size -> pose -> lighting -> frame
 
 (** {1 Text} *)
 
-val lines : ink:(Masc_tui_terminal_palette.rgb -> string) -> frame -> string list
-(** One string per row, each exactly [size.cols] display cells: a Braille
-    glyph per lit cell, a space per empty one. [ink] is the escape that sets
-    a cell's colour; it is written only when the colour changes, and no row
-    leaves a colour in effect after it ends. An [ink] that returns the empty
-    string, or a frame with no ink, gives rows with no escapes at all. *)
+type ink
+(** How a cell's colour is projected for the terminal. The escape bytes are
+    always written by {!Masc_tui_theme.Sgr.foreground} from a
+    {!Masc_tui_terminal_palette.projected_color}, which only the palette
+    module makes, so no caller can put a colour on screen that the terminal
+    was not projected for. *)
 
-val stdout_ink : Masc_tui_terminal_palette.rgb -> string
-(** The [ink] for this process's stdout: the colour projected for what the
-    terminal can draw ({!Masc_tui_terminal_palette.best_color}) and written by
-    {!Masc_tui_theme.Sgr.foreground}, so NO_COLOR and a sixteen-colour
-    terminal get no colour escapes, as everywhere else in the TUI. *)
+val stdout_ink : ink
+(** This process's stdout: {!Masc_tui_terminal_palette.best_color}, so a
+    sixteen-colour terminal gets no colour escapes, as everywhere else in the
+    TUI. *)
+
+val ink_projected_by :
+  (Masc_tui_terminal_palette.rgb -> Masc_tui_terminal_palette.projected_color option) -> ink
+(** An ink with another projection, such as a test fixing the colour level. *)
+
+val lines : ink:ink -> frame -> string list
+(** One string per row, each exactly [size.cols] display cells: a Braille
+    glyph per lit cell, a space per empty one. A colour escape is written
+    only when a cell's colour changes. A cell whose colour projects to
+    nothing is drawn in the terminal's own text colour. Every row that set a
+    colour ends with SGR 39 (default foreground) rather than a full reset,
+    so a pane's own background and weight survive the emblem. With colours
+    off (NO_COLOR), or a frame with no ink, rows have no escapes at all. *)
 
 (** Test-only access to the projection the renderer uses. *)
 module For_testing : sig

@@ -49,11 +49,11 @@ concurrency:
 jobs:
   build:
     name: dune build @check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - name: Free disk space
-        # ubuntu-latest preinstalls the Android SDK (~9 GB), .NET (~1.6 GB),
+        # ubuntu-24.04 preinstalls the Android SDK (~9 GB), .NET (~1.6 GB),
         # GHC (~1 GB) and the CodeQL bundle (~5 GB) this OCaml build never
         # uses; removing them prevents the "No space left on device" failures
         # seen on 2026-07-03 (runs 28638901622 / 28644587505 / 28652695346).

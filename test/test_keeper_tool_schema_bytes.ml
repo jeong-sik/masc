@@ -403,7 +403,15 @@ open Alcotest
    below); #39505 changed masc_board_post_get's default read and added 48
    rendered bytes. The two touch the same file, so the merged figure is the
    measurement rather than the sum. Pin to it with no added headroom. *)
-let ceiling_bytes = 128_595
+(* 2026-09-28: 128,889, +294 over the entry above: the production renderer's
+   rules replayed on the three changed descriptions, not a CI reading.
+   masc_goal_upsert.metric +141 names the three sources the Goal judge opens
+   (4 of 17 Goals were refuted or dropped because their metric named a host
+   path the judge cannot read); masc_keeper_delegate.prompt +121 and
+   masc_ask.context +32 take the checklists the shared Keeper prompt spelled
+   out for those two calls, which the prompt no longer carries. All three
+   tools are deferred on the agent-core lane. No added headroom. *)
+let ceiling_bytes = 128_889
 
 
 let schema_json (schema : Masc_domain.tool_schema) =

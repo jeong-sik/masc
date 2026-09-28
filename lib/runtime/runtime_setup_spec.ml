@@ -173,10 +173,37 @@ type rendered = {runtime_id:string;runtime_toml:string}
    value the seed runtime.toml gives its own exact-slot providers; the
    operator narrows it in the file. *)
 let setup_exact_body_timeout_s = 1200.0
+(* Ids an operator reads: the client and the model, each followed by the same
+   short hash of the answers. The hash keeps one id per answer set (same
+   answers, same id; another account home, another id), and it stays on the
+   model key because every provider shares the [models] table. A model
+   name keeps the characters a model id admits; any other character (a UTF-8
+   sequence, not a byte) becomes one '-'. *)
+let answers_hash_length = 8
+let model_id_character decoded =
+  let c = Uchar.utf_decode_uchar decoded in
+  if Uchar.is_char c then
+    match Uchar.to_char c with
+    | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '.' | '_' | '-' as kept -> kept
+    | _ -> '-'
+  else '-'
+let model_id_text model =
+  let text = Buffer.create (String.length model) in
+  let rec copy index =
+    if index < String.length model then begin
+      let decoded = String.get_utf_8_uchar model index in
+      Buffer.add_char text (model_id_character decoded);
+      copy (index + Uchar.utf_decode_length decoded)
+    end in
+  copy 0;
+  Buffer.contents text
 let render spec =
   let name = choice_name spec.choice in
-  let provider = "setup_" ^ name ^ "_" ^ Digestif.SHA256.(to_hex (digest_string spec.canonical_spec)) in
-  let model_key = provider ^ "_model" in
+  let hash =
+    String.sub Digestif.SHA256.(to_hex (digest_string spec.canonical_spec)) 0
+      answers_hash_length in
+  let provider = name ^ "_" ^ hash in
+  let model_key = model_id_text spec.model ^ "_" ^ hash in
   let runtime_id = provider ^ "." ^ model_key in
   let fields = ["display-name",`String (name ^ " / " ^ spec.model);"protocol",`String (protocol spec.choice)] in
   let transport_fields,credential = match spec.transport with

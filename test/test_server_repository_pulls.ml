@@ -414,6 +414,26 @@ let test_explicit_default_host_needs_no_endpoint () =
     [ Pulls.default_graphql_url ]
     !urls
 
+let test_lone_endpoint_is_a_proxy_for_the_default_host () =
+  let proxy_url = "https://proxy.example/github-graphql" in
+  let base_path = ready_base_path ~token:"[REDACTED]" in
+  write_file
+    (Config_dir_resolver.runtime_toml_path_for_base_path ~base_path)
+    (Printf.sprintf "[repositories]\npr_reader = %S\ngraphql_url = %S\n" reader_keeper proxy_url);
+  let http_post, urls =
+    url_recording_stub (ok_response (page ~has_next:false ~cursor:None []))
+  in
+  let snapshot =
+    Pulls.refresh ~now ~http_post ~config:(Masc.Workspace.default_config base_path) ~previous:Pulls.initial
+  in
+  (match snapshot.reader with
+   | Pulls.Reader_ready _ -> ()
+   | _ -> failf "a lone endpoint must resolve as a proxy for the default host");
+  Alcotest.(check (list string)) "pages go to the lone endpoint" [ proxy_url ] !urls;
+  match masc_pulls snapshot with
+  | Pulls.Pulls_read _ -> ()
+  | _ -> failf "the proxied read still parses the github.com remote"
+
 let test_bad_endpoint_keys_are_invalid () =
   let cases =
     [ "github_host = \"https://ghe.example\"", "a scheme is not a bare hostname"
@@ -1100,6 +1120,10 @@ let () =
             "explicit default host needs no endpoint"
             `Quick
             test_explicit_default_host_needs_no_endpoint
+        ; Alcotest.test_case
+            "lone endpoint is a proxy for the default host"
+            `Quick
+            test_lone_endpoint_is_a_proxy_for_the_default_host
         ; Alcotest.test_case "github slug" `Quick test_github_slug
         ; Alcotest.test_case
             "ready reader reads with the keeper token"

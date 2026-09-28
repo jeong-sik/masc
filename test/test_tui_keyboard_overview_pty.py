@@ -3,6 +3,7 @@
 import base64
 import os
 import sys
+import threading
 import time
 
 import test_tui_keyboard_input as keyboard
@@ -42,16 +43,53 @@ def first_use_frames(executable: str) -> None:
     ]
     fixtures[keyboard.RUNTIME_RESOLVED_PATH] = (status, payload)
 
+    requested = threading.Event()
+    release = threading.Event()
+
+    def briefing():
+        requested.set()
+        if not release.wait(30):
+            raise AssertionError("the unread briefing fixture was never released")
+        return 200, keyboard.overview_event_briefing()
+
+    fixtures["/api/v1/dashboard/briefing"] = briefing
+
     def interact(process, fd, _slave, output, _base):
+        if not requested.wait(10):
+            raise AssertionError("the TUI did not request the briefing")
+
+        def capture(state: str, columns: int, needle: bytes) -> bytes:
+            frame = keyboard.resize_and_wait(
+                process, fd, output, rows=32, columns=columns,
+                needle=needle, controls=(keyboard.FULL_REDRAW,)
+            )
+            visible = keyboard.screen_text(frame)
+            print(
+                f"OVERVIEW_FRAME_{state}_{columns}X32_B64="
+                f"{base64.b64encode(frame).decode()}"
+            )
+            print(
+                f"OVERVIEW_SCREEN_{state}_{columns}X32_BEGIN\n"
+                f"{visible.decode(errors='replace')}\n"
+                f"OVERVIEW_SCREEN_{state}_{columns}X32_END"
+            )
+            return visible
+
+        try:
+            for columns in (80, 140):
+                unread = capture(
+                    "UNREAD", columns, b"Overview briefing not read yet"
+                )
+                if b"Start here (2 steps)" in unread:
+                    raise AssertionError("an unread briefing claimed an empty fleet")
+        finally:
+            release.set()
+
         keyboard.wait_for_output(
             process, fd, output, b"Start here (2 steps)", start=0, timeout=10
         )
         for columns in (80, 140):
-            frame = keyboard.resize_and_wait(
-                process, fd, output, rows=32, columns=columns,
-                needle=b"Start here (2 steps)", controls=(keyboard.FULL_REDRAW,)
-            )
-            visible = keyboard.screen_text(frame)
+            visible = capture("EMPTY", columns, b"Start here (2 steps)")
             for expected in (
                 b"Start here (2 steps)",
                 b"masc keeper-create --edit",
@@ -60,6 +98,7 @@ def first_use_frames(executable: str) -> None:
                 b"Nothing needs attention.",
                 b"Plan usage",
                 b"no usage data",
+                b"Approvals: 0?",
             ):
                 if expected not in visible:
                     raise AssertionError(
@@ -67,9 +106,6 @@ def first_use_frames(executable: str) -> None:
                     )
             if columns == 80 and b"5 more accounts do not fit" not in visible:
                 raise AssertionError(f"80 columns hid the usage count: {visible!r}")
-            print(f"OVERVIEW_FRAME_{columns}X32_B64={base64.b64encode(frame).decode()}")
-            print(f"OVERVIEW_SCREEN_{columns}X32_BEGIN\n{visible.decode(errors='replace')}\n"
-                  f"OVERVIEW_SCREEN_{columns}X32_END")
         os.write(fd, b"q")
 
     keyboard.run_terminal_scenario(
@@ -84,4 +120,7 @@ if __name__ == "__main__":
     keyboard.run_keyboard_regression(executable, group=2)
     first_use_frames(executable)
     finished = time.monotonic()
-    print(f"tui keyboard overview PTY regression: PASS start={started:.6f} end={finished:.6f}")
+    print(
+        "tui keyboard overview PTY regression: PASS "
+        f"start={started:.6f} end={finished:.6f}"
+    )

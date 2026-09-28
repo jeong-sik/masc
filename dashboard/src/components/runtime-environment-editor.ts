@@ -729,6 +729,9 @@ export function RuntimeEnvironmentEditor({
               protocol => protocol.protocol === provider.protocol,
             )
             const officialClient = editorProtocol?.semantics === 'official_client'
+            // This editor writes [providers.<id>] tables; a provider declared
+            // by keys would get a second, conflicting declaration.
+            const providerLocked = isDisabled || !provider.ownTable
             return html`
             <div key=${provider.id} class="rt-card" data-testid=${`runtime-provider-${provider.id}`}>
               <div class="rt-card-h">
@@ -740,7 +743,7 @@ export function RuntimeEnvironmentEditor({
                   <input
                     type="checkbox"
                     checked=${provider.enabled}
-                    disabled=${isDisabled}
+                    disabled=${providerLocked}
                     aria-label=${`${provider.id} provider enabled`}
                     data-testid=${`runtime-provider-${provider.id}-enabled`}
                     onChange=${(event: Event) => {
@@ -755,17 +758,22 @@ export function RuntimeEnvironmentEditor({
                 <button
                   type="button"
                   class="rt-delete-provider"
-                  disabled=${isDisabled}
+                  disabled=${providerLocked}
                   data-testid=${`runtime-provider-${provider.id}-delete`}
                   onClick=${() => deleteProvider(provider.id)}
                 >삭제</button>
               </div>
+              ${provider.ownTable ? null : html`
+                <div class="rt-warn" data-testid=${`runtime-provider-${provider.id}-key-declared`}>
+                  이 provider는 [providers.${provider.id}] 테이블이 아니라 키로 선언돼 있어서 여기서는 고칠 수 없어요. TOML 탭에서 고쳐 주세요.
+                </div>
+              `}
               <div class="rt-field">
                 <span class="sub-k">${providerTransportField}</span>
                 <input
                   class="rt-input mono"
                   value=${transportValue(provider)}
-                  disabled=${isDisabled}
+                  disabled=${providerLocked}
                   aria-label=${`${provider.id} provider transport value`}
                   onInput=${(event: Event) => {
                     onProviderTransportChange(
@@ -789,7 +797,7 @@ export function RuntimeEnvironmentEditor({
                       class="rt-input mono"
                       type=${provider.credentialType === 'inline' ? 'password' : 'text'}
                       value=${credentialValue(provider)}
-                      disabled=${isDisabled}
+                      disabled=${providerLocked}
                       aria-label=${`${provider.id} provider credential value`}
                       onInput=${(event: Event) => {
                         onProviderCredentialChange(
@@ -811,7 +819,7 @@ export function RuntimeEnvironmentEditor({
                     class="rt-input mono"
                     value=${provider.accountHome}
                     placeholder="절대 경로 · 비우면 기본 로그인"
-                    disabled=${isDisabled}
+                    disabled=${providerLocked}
                     aria-label=${`${provider.id} 계정 홈`}
                     data-testid=${`runtime-provider-${provider.id}-account-home`}
                     onInput=${(event: Event) => onProviderOptionChange(
@@ -828,7 +836,7 @@ export function RuntimeEnvironmentEditor({
                   <input
                     class="rt-input mono"
                     value=${provider.agent}
-                    disabled=${isDisabled}
+                    disabled=${providerLocked}
                     aria-label=${`${provider.id} Antigravity agent`}
                     onInput=${(event: Event) => onProviderOptionChange(
                       provider.id,
@@ -844,7 +852,7 @@ export function RuntimeEnvironmentEditor({
                   <select
                     class="rt-select rt-select-narrow"
                     value=${provider.effort}
-                    disabled=${isDisabled}
+                    disabled=${providerLocked}
                     aria-label=${`${provider.id} Antigravity effort`}
                     onChange=${(event: Event) => onProviderOptionChange(
                       provider.id,
@@ -868,7 +876,7 @@ export function RuntimeEnvironmentEditor({
                     min="0.001"
                     step="0.001"
                     value=${provider.timeoutS ?? ''}
-                    disabled=${isDisabled}
+                    disabled=${providerLocked}
                     aria-label=${`${provider.id} Antigravity timeout-s`}
                     onInput=${(event: Event) => {
                       const raw = (event.currentTarget as HTMLInputElement).value

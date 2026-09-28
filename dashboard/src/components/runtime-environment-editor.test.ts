@@ -305,7 +305,7 @@ price-output = 0.28
 
 function mountSection(
   container: HTMLElement,
-  section: 'models' | 'routing' | 'bindings',
+  section: 'models' | 'routing' | 'bindings' | 'providers',
   sourceText = sourceWithCapabilities,
 ) {
   render(
@@ -321,6 +321,51 @@ function mountSection(
     container,
   )
 }
+
+// The server's loader takes a provider declared by keys under [providers] as
+// well as by its own table. The editor lists it the same way but cannot edit
+// that layout, so its card is locked and says where to change it.
+describe('RuntimeEnvironmentEditor key-declared providers', () => {
+  const keyDeclared = `[providers]
+inline_p = { protocol = "openai-http", endpoint = "https://i.example/v1" }
+
+[providers.table_p]
+protocol = "openai-http"
+endpoint = "https://t.example/v1"
+
+[models.m]
+api-name = "m"
+max-context = 1024
+
+[inline_p.m]
+
+[table_p.m]
+`
+
+  it('lists a provider declared by keys with a locked card', () => {
+    const container = document.createElement('div')
+    mountSection(container, 'providers', keyDeclared)
+
+    const inlineTransport = container.querySelector('[data-testid="runtime-provider-inline_p-transport"]') as HTMLInputElement
+    const tableTransport = container.querySelector('[data-testid="runtime-provider-table_p-transport"]') as HTMLInputElement
+    expect(inlineTransport.value).toBe('https://i.example/v1')
+    expect(inlineTransport.disabled).toBe(true)
+    expect(container.querySelector('[data-testid="runtime-provider-inline_p-delete"]')).toHaveProperty('disabled', true)
+    expect(container.querySelector('[data-testid="runtime-provider-inline_p-key-declared"]')).not.toBeNull()
+    expect(tableTransport.disabled).toBe(false)
+    expect(container.querySelector('[data-testid="runtime-provider-table_p-key-declared"]')).toBeNull()
+  })
+
+  it('does not mark the binding of a key-declared provider disabled', () => {
+    const container = document.createElement('div')
+    mountSection(container, 'bindings', keyDeclared)
+
+    const rows = [...container.querySelectorAll('.rt-bind')].map(row => row.textContent ?? '')
+    const inlineRow = rows.find(text => text.includes('inline_p.m'))
+    expect(inlineRow).toBeDefined()
+    expect(inlineRow).not.toContain('disabled')
+  })
+})
 
 describe('RuntimeEnvironmentEditor capability projection', () => {
   it('renders model capability chips from the [models.<id>.capabilities] section', () => {

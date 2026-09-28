@@ -20,6 +20,10 @@ export interface RuntimeTomlProvider {
   agent: string
   effort: string
   timeoutS: number | null
+  // Declared by its own [providers.<id>] table. False when keys under
+  // [providers] or at the top level declare it; the structured editor writes
+  // tables and cannot edit that layout.
+  ownTable: boolean
 }
 
 export interface RuntimeTomlModel {
@@ -99,6 +103,8 @@ interface TomlDocument {
   // Every key under [providers], whatever shape declares it, as the server's
   // loader reads them (declared_provider_ids).
   readonly declaredProviderIds: ReadonlySet<string>
+  // Key/value lines before the first table header.
+  readonly rootEntries: readonly AST.TOMLKeyValue[]
 }
 
 type TomlScalar = string | number | boolean | null
@@ -127,6 +133,7 @@ function parseDocument(sourceText: string): TomlDocument {
     lines,
     sections,
     declaredProviderIds: declaredProviderIdsOf(rootEntries, sections),
+    rootEntries,
   }
 }
 
@@ -140,12 +147,6 @@ function declaredProviderIdsOf(
 ): ReadonlySet<string> {
   const ids = new Set<string>()
   const firstKey = (entry: AST.TOMLKeyValue) => getStaticTOMLValue(entry.key)[0]
-  for (const section of sections) {
-    const [namespace, id] = section.path
-    if (namespace !== 'providers') continue
-    if (id !== undefined) ids.add(id)
-    else section.entries.map(firstKey).forEach(key => { if (key !== undefined) ids.add(key) })
-  }
   for (const entry of rootEntries) {
     const [namespace, id] = getStaticTOMLValue(entry.key)
     if (namespace !== 'providers') continue
@@ -153,6 +154,12 @@ function declaredProviderIdsOf(
     else if (entry.value.type === 'TOMLInlineTable') {
       entry.value.body.map(firstKey).forEach(key => { if (key !== undefined) ids.add(key) })
     }
+  }
+  for (const section of sections) {
+    const [namespace, id] = section.path
+    if (namespace !== 'providers') continue
+    if (id !== undefined) ids.add(id)
+    else section.entries.map(firstKey).forEach(key => { if (key !== undefined) ids.add(key) })
   }
   return ids
 }
@@ -219,8 +226,40 @@ function tableIds(document: TomlDocument, owner: string): string[] {
   })
 }
 
+// Every declared provider, in the shape the server's loader accepts, so the
+// provider list and the bindings read the same set.
 function providerIds(document: TomlDocument): string[] {
-  return tableIds(document, 'providers')
+  return [...document.declaredProviderIds]
+}
+
+// The scalar keys of the table at [path], however the text declares them:
+// its own [header], dotted keys under a parent table or at the top level, or
+// an inline table. Built without a prototype, so any key name is kept.
+function tableValues(document: TomlDocument, path: readonly string[]): Record<string, TomlScalar> {
+  const values: Record<string, TomlScalar> = Object.create(null)
+  const visit = (base: readonly string[], entries: readonly AST.TOMLKeyValue[]) => {
+    for (const entry of entries) {
+      const full = [...base, ...getStaticTOMLValue(entry.key)]
+      const key = full[full.length - 1]
+      if (full.length === path.length + 1 && key !== undefined && samePath(full.slice(0, -1), path)) {
+        const value = getStaticTOMLValue(entry.value)
+        if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+          values[key] = value
+        }
+      } else if (
+        entry.value.type === 'TOMLInlineTable'
+        && full.length <= path.length
+        && samePath(full, path.slice(0, full.length))
+      ) {
+        visit(full, entry.value.body)
+      }
+    }
+  }
+  visit([], document.rootEntries)
+  for (const section of document.sections) {
+    if (section.kind === 'standard') visit(section.path, section.entries)
+  }
+  return values
 }
 
 function modelIds(document: TomlDocument): string[] {
@@ -292,8 +331,8 @@ function bindingSections(
 }
 
 function providerFromDocument(document: TomlDocument, id: string): RuntimeTomlProvider {
-  const values = sectionValues(document, `providers.${serializeTomlKey(id)}`)
-  const credentials = sectionValues(document, `providers.${serializeTomlKey(id)}.credentials`)
+  const values = tableValues(document, ['providers', id])
+  const credentials = tableValues(document, ['providers', id, 'credentials'])
   const endpoint = asString(values.endpoint)
   const command = asString(values.command)
   const credentialType = asString(credentials.type) as RuntimeTomlCredentialType
@@ -316,6 +355,8 @@ function providerFromDocument(document: TomlDocument, id: string): RuntimeTomlPr
     agent: asString(values.agent),
     effort: asString(values.effort),
     timeoutS: asNumber(values['timeout-s']),
+    ownTable: document.sections.some(section =>
+      section.kind === 'standard' && samePath(section.path, ['providers', id])),
   }
 }
 

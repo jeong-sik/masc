@@ -845,6 +845,34 @@ max-context = 1024
       expect(env.bindings.map(binding => binding.id)).toEqual(['inline_p.m', 'dotted_p.m'])
     })
 
+    it('lists providers declared by keys, with their fields, as not table-owned', () => {
+      const source = `[providers]
+inline_p = { protocol = "openai-http", endpoint = "https://i.example/v1", enabled = false }
+dotted_p.protocol = "openai-http"
+dotted_p.endpoint = "https://d.example/v1"
+dotted_p.credentials.type = "env"
+dotted_p.credentials.key = "D_KEY"
+
+[providers.table_p]
+protocol = "openai-http"
+endpoint = "https://t.example/v1"
+credentials.type = "file"
+credentials.path = "/secrets/t"
+`
+      const env = parseRuntimeTomlEnvironment(source, runtimeReservedProviderIdsFixture)
+      expect(env.providers.map(provider => ({
+        id: provider.id,
+        ownTable: provider.ownTable,
+        enabled: provider.enabled,
+        endpoint: provider.endpoint,
+        credential: [provider.credentialType, provider.credentialKey || provider.credentialPath],
+      }))).toEqual([
+        { id: 'inline_p', ownTable: false, enabled: false, endpoint: 'https://i.example/v1', credential: ['none', ''] },
+        { id: 'dotted_p', ownTable: false, enabled: true, endpoint: 'https://d.example/v1', credential: ['env', 'D_KEY'] },
+        { id: 'table_p', ownTable: true, enabled: true, endpoint: 'https://t.example/v1', credential: ['file', '/secrets/t'] },
+      ])
+    })
+
     it('reads the bindings of a provider whose id is __proto__', () => {
       const source = `[providers.__proto__]
 protocol = "openai-http"

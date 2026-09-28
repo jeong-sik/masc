@@ -3304,3 +3304,13 @@ let browser_lane_action ~host ~port ~source operation =
       ~path:("/api/v1/dashboard/browser-lane/" ^ endpoint) ~body in
   let* ok = get boolean "ok" json in
   if ok then Ok () else let* detail = get string "error" json in Error detail
+
+let post_setup_login_streaming ~clock ~host ~port ~body ~on_chunk =
+  let url = url_of ~host ~port ~path:"/api/v1/setup/accounts/login" in
+  match with_credential_refresh_on ~refused:stream_refused @@ fun () ->
+    Masc_http_client.post_stream ~clock ~idle_timeout_sec:Float.infinity ~url
+      ~headers:(json_headers (("Accept", "text/event-stream") :: auth_headers ()))
+      ~body ~on_chunk () with
+  | Error _ -> Error "Login stream unavailable; recheck the login status."
+  | Ok (Masc_http_client.Pool.Buffered _) -> Error "Login request was refused."
+  | Ok (Masc_http_client.Pool.Streamed _) -> Ok ()

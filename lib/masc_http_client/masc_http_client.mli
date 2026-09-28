@@ -120,6 +120,8 @@ val post_stream :
   unit ->
   (Pool.stream_outcome, string) result
 (** [post_stream ~clock ~idle_timeout_sec ~url ~headers ~body ~on_chunk ()]
+    [idle_timeout_sec = Float.infinity] leaves idle lifetime to the request
+    owner (for example, human-driven login). Disconnect/cancellation still closes it.
     POSTs and calls [on_chunk] with each response body chunk as it arrives,
     for callers rendering a live view of a server-sent event stream.
 

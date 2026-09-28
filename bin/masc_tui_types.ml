@@ -5418,6 +5418,7 @@ type state = {
      Keeper's current head" from whichever Keeper surface raised the question.
      The reading is stamped with the requested Keeper and generation so a late
      response cannot replace a newer inspection. *)
+  mutable account_login: Masc_tui_account_login.t option;
   mutable context_inspector_open: bool;
   mutable context_inspector_keeper: string option;
   mutable context_inspector_loading: bool;
@@ -6796,6 +6797,7 @@ let reconcile_fusion_launch (state : state) =
   state.view <> Fusion && abandon_fusion_launch state
 
 type text_input_target =
+  | Text_account_login
   | Text_browser_url
   | Text_ask_answer
   | Text_fusion_launch
@@ -6827,7 +6829,8 @@ let text_input_target (state : state) ~compact_viewport =
     && state.detail_tab = Detail_github
     && not compact_viewport
   in
-  if state.keeper_deletions_open then None
+  if Option.is_some state.account_login && not compact_viewport then Some Text_account_login
+  else if state.keeper_deletions_open then None
   else if
     state.view = Config
     && state.config_pane = Config_presets
@@ -6896,7 +6899,7 @@ let text_input_target (state : state) ~compact_viewport =
    function exists to stop. *)
 let quit_key_allowed_for = function
   | Some
-      ( Text_browser_url | Text_ask_answer | Text_fusion_launch
+      ( Text_account_login | Text_browser_url | Text_ask_answer | Text_fusion_launch
       | Text_preset_name | Text_runtime_lane_name | Text_runtime_param
       | Text_voice_wizard | Text_palette | Text_row_search
       | Text_runtime_picker_filter | Text_keeper_runtime_picker_filter
@@ -7881,6 +7884,7 @@ let create_state
   memory_fact_detail_scroll = 0;
   keeper_turn_finishes = [];
   keeper_turns_observed_at = None;
+  account_login = None;
   context_inspector_open = false;
   context_inspector_keeper = None;
   context_inspector_loading = false;

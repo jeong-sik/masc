@@ -994,7 +994,7 @@ let read_body_with_idle
          else
            watch ()
        in
-       watch ())
+       if idle_timeout_sec = Float.infinity then Eio.Fiber.await_cancel () else watch ())
 
 (* ── Streaming request ────────────────────────────── *)
 

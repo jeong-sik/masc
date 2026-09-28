@@ -2383,6 +2383,8 @@ type async_msg =
   | Identity_refreshed of string * (unit, string) result
   | Identity_app_saved of string * (int, string) result
       (** provider id, then how many scopes were recorded *)
+  | Account_login_event of Masc_tui_account_login.t * int * Masc_tui_account_login.event
+  | Account_login_json of Masc_tui_account_login.t * int * Masc_tui_account_login.action * (Yojson.Safe.t, string) result
   | Github_login_lines of string * string list
   | Github_login_finished of string * (unit, string) result
   | Github_token_saved of string * (Yojson.Safe.t, string) result
@@ -4256,6 +4258,118 @@ let start_code_lsp_question state ~mailbox ~(question : string)
    in the GitHub tab as it arrives so the operator can read the code and
    finish in the browser. When the stream ends the tab re-reads the
    identity observation, which is the fact the login was for. *)
+let account_login_resume_path state =
+  Filename.concat (Common.masc_dir_from_base_path ~base_path:state.local_base_path) "tui-account-login.json"
+
+let remember_account_login state (view : Masc_tui_account_login.t) =
+  match view.provider, view.login_id with
+  | Some provider, Some login_id ->
+    (try
+      Auth.save_private_text_file (account_login_resume_path state)
+        (Yojson.Safe.to_string (`Assoc ["host",`String server_peer_host;"port",`Int state.port;
+          "integration_id",`String provider.id;"login_id",`String login_id]))
+     with Unix.Unix_error _ | Sys_error _ -> view.notice <- "로그인 복구 위치를 저장하지 못했습니다. 창을 닫기 전에 완료 상태를 확인하세요.")
+  | Some _, None | None, _ -> ()
+
+let restore_account_login state (view : Masc_tui_account_login.t) =
+  try
+    let json = Yojson.Safe.from_file (account_login_resume_path state) in
+    let open Yojson.Safe.Util in
+    if json |> member "host" = `String server_peer_host && json |> member "port" = `Int state.port then (
+      let integration = json |> member "integration_id" |> to_string in
+      let login_id = json |> member "login_id" |> to_string in
+      let selected = List.nth_opt view.providers view.cursor in
+      match List.find_opt (fun (p:Masc_tui_account_login.provider) -> p.id=integration) view.providers with
+      | Some provider when Auth.is_generated_token_shape login_id &&
+          (view.requested="" || Option.exists (fun (p:Masc_tui_account_login.provider) -> p.id=integration) selected) ->
+        view.provider<-Some provider; view.login_id<-Some login_id;
+        view.notice<-"이전 로그인 기록이 있습니다. r로 상태를 확인하거나 Enter로 새 계정을 추가하세요."
+      | Some _ | None -> ())
+  with Unix.Unix_error _ | Sys_error _ | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ()
+
+let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t) action =
+  let module Login = Masc_tui_account_login in
+  let host = server_peer_host and port = state.port in
+  (match action with
+   | Login.Input _ | Nothing -> ()
+   | Inventory | Refresh_saved | Start _ | Cancel | Recover | Discover | Prepare _ | Save _ | Close ->
+     view.generation <- view.generation + 1;
+     Option.iter (fun stop -> stop ()) view.cancel_stream;
+     view.cancel_stream <- None);
+  let generation = view.generation in
+  let post path body = Masc_tui_http.post_json ~host ~port ~path ~body:(Yojson.Safe.to_string body) in
+  let login_path id = "/api/v1/setup/accounts/login/" ^ id in
+  let enqueue result = enqueue_async mailbox (Account_login_json (view, generation, action, result)) in
+  let start_job f = match Eio_context.get_switch_opt () with
+    | None -> enqueue (Error "Login requires the TUI runtime.")
+    | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () ->
+      if generation = view.generation then (
+        try Eio.Cancel.sub (fun cancellation ->
+          (match action with
+           | Login.Input _ -> ()
+           | _ -> view.cancel_stream <- Some (fun () -> Eio.Cancel.cancel cancellation (Failure "login panel superseded")));
+          Fun.protect ~finally:(fun () ->
+            if generation = view.generation then
+              match action with Login.Input _ -> () | _ -> view.cancel_stream <- None) f)
+        with
+        | Eio.Cancel.Cancelled _ as exn -> if generation = view.generation then raise exn
+        | Unix.Unix_error _ | Sys_error _ | Eio.Io _ | Yojson.Json_error _ ->
+          enqueue (Error "The account request did not complete. Recheck its state."));
+      `Stop_daemon) in
+  match action with
+  | Login.Nothing -> ()
+  | Close -> Option.iter (fun stop -> stop ()) view.cancel_stream; view.draft<-""; state.account_login<-None
+  | Cancel ->
+    Option.iter (fun stop -> stop ()) view.cancel_stream; view.cancel_stream<-None;
+    view.draft<-""; view.phase<-Login.Failed; view.notice<-"로그인을 취소했습니다. r로 저장된 상태를 확인하세요."
+  | Start existing ->
+    let provider = if view.phase=Login.Providers then List.nth_opt view.providers view.cursor else view.provider in
+    (match provider with
+     | None -> view.notice<-"공급자를 선택하세요."
+     | Some provider ->
+       if view.provider <> Some provider then (view.account_ref<-None; view.login_id<-None);
+       view.provider<-Some provider;
+       let previous = if existing then view.account_ref else None in
+       view.phase<-Login.Logging; view.output<-"";view.models<-[];view.draft<-"";view.input_pending<-false;
+       view.notice<-"공식 클라이언트의 안내 주소에서 로그인하세요.";
+       start_job (fun () ->
+         let selected = if not existing || Option.is_some previous then Ok previous else
+           let path = if provider.client=Login.Antigravity then "/api/v1/setup/accounts/antigravity" else "/api/v1/setup/accounts/select" in
+           match post path (`Assoc ["integration_id",`String provider.id]) with
+           | Error _ as error -> error
+           | Ok (`Assoc fields) -> (match List.assoc_opt "account_ref" fields with Some (`String reference) -> Ok (Some reference) | _ -> Error "No account selected.")
+           | Ok _ -> Error "No account selected." in
+         match selected, Eio_context.get_clock_opt () with
+         | Error message, _ -> enqueue (Error message)
+         | Ok _, None -> enqueue (Error "Login requires the TUI clock.")
+         | Ok reference, Some clock ->
+           let on_chunk, complete = Login.decoder ~integration_id:provider.id (fun event ->
+               enqueue_async mailbox (Account_login_event (view,generation,event))) in
+             let body=`Assoc (["integration_id",`String provider.id] @ (match reference with Some r->["account_ref",`String r] | None->[])) |> Yojson.Safe.to_string in
+             let result = Masc_tui_http.post_setup_login_streaming ~clock ~host ~port ~body ~on_chunk in
+             match result with
+             | Ok () when complete () -> ()
+             | Ok () | Error _ -> enqueue (Error "로그인 결과를 받지 못했습니다. r로 상태를 다시 확인하세요.")))
+  | Input json ->
+    (match view.login_id with None -> view.input_pending<-false
+     | Some id -> start_job (fun () -> enqueue (post (login_path id ^ "/input") json)))
+  | Inventory | Refresh_saved -> view.phase<-Login.Loading; start_job (fun () -> enqueue (Masc_tui_http.get_json ~host ~port ~path:"/api/v1/setup/inventory"))
+  | Recover -> (match view.login_id with
+      | None -> view.notice<-"조회할 로그인 세션이 없습니다. n으로 새 로그인을 시작하세요."
+      | Some id -> view.phase<-Login.Loading; start_job (fun () -> enqueue (Masc_tui_http.get_json ~host ~port ~path:(login_path id))))
+  | Discover ->
+    view.phase<-Login.Loading;
+    let source=Login.source view in
+    start_job (fun () -> enqueue (post "/api/v1/setup/models" source))
+  | Prepare model ->
+    view.phase<-Login.Loading;
+    let body=`Assoc ["source",Login.source view;"model",`String model.id;"load",`Bool false] in
+    start_job (fun () -> enqueue (post "/api/v1/setup/context" body))
+  | Save (model, bytes) ->
+    view.phase<-Login.Saving;view.notice<-"모델의 응답과 도구 호출을 검증하고 있습니다.";
+    let body=Login.save_body view model bytes in
+    start_job (fun () -> enqueue (post "/api/v1/setup/connections" body))
+
 let launch_github_login state ~mailbox keeper_name =
   let host = server_peer_host in
   let port = state.port in
@@ -9801,6 +9915,11 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
   | Masc_tui_command.Open_metrics ->
       Buffer.clear state.msg_input;
       goto_surface state ~mailbox Metrics
+  | Masc_tui_command.Account_login requested ->
+      Buffer.clear state.msg_input;
+      let view = Masc_tui_account_login.create requested in
+      state.account_login <- Some view;
+      launch_account_login_action state ~mailbox view Masc_tui_account_login.Inventory
   | Masc_tui_command.Open_settings ->
       Buffer.clear state.msg_input;
       state.config_pane <- Config_params;
@@ -12859,6 +12978,7 @@ let handle_composer_key state ~base_path ~mailbox key =
          | Masc_tui_command.Scroll_acting_pane _
          | Masc_tui_command.Acting_pane_scroll_unknown _
          | Masc_tui_command.Lane_addons _
+         | Masc_tui_command.Account_login _
          | Masc_tui_command.Open_settings | Masc_tui_command.Open_metrics
          | Masc_tui_command.Open_link_preview _
          | Masc_tui_command.Open_links_list
@@ -14560,6 +14680,46 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           state.identity_view_error <- None;
           launch_identity_view state ~mailbox keeper_name
       | Error detail -> state.identity_view_error <- Some detail)
+  | Account_login_event (view, generation, event) ->
+      (match state.account_login with
+       | Some current when current == view && view.generation = generation ->
+         let action = Masc_tui_account_login.event ~generation view event in
+         (match event with Masc_tui_account_login.Started _ -> remember_account_login state view | _ -> ());
+         launch_account_login_action state ~mailbox view action
+       | Some _ | None -> ())
+  | Account_login_json (view, generation, action, result) ->
+      (match state.account_login with
+       | Some current when current == view && view.generation = generation ->
+         let module Login = Masc_tui_account_login in
+         let applied = match result with
+           | Error _ -> Error "요청 결과를 확인하지 못했습니다. r로 재확인하세요."
+           | Ok json -> (match action with
+             | Login.Inventory ->
+               (match Login.inventory view json with
+                | Ok () -> restore_account_login state view; Ok () | Error _ as error -> error)
+             | Refresh_saved ->
+               (match Login.inventory view json with
+                | Ok () -> view.phase<-Login.Finished; view.notice<-"모델의 응답과 도구 호출을 검증하고 저장했습니다."; Ok ()
+                | Error _ -> view.phase<-Login.Finished; view.notice<-"설정은 저장했지만 목록을 새로 읽지 못했습니다. 창을 다시 열어 확인하세요."; Ok ())
+             | Discover -> Login.models view json
+             | Prepare model -> Login.prepared view model json
+             | Recover -> (match Login.receipt view json with
+               | Ok true -> launch_account_login_action state ~mailbox view Discover; Ok ()
+               | Ok false -> Ok () | Error _ as error -> error)
+             | Save _ -> (match json with
+               | `Assoc fields when List.assoc_opt "configured" fields=Some (`Bool true)
+                   && List.assoc_opt "readiness" fields=Some (`String "verified") ->
+                 view.phase<-Login.Finished; view.notice<-"모델의 응답과 도구 호출을 검증하고 저장했습니다.";
+                 launch_account_login_action state ~mailbox view Login.Refresh_saved; Ok ()
+               | _ -> Error "설정 저장 결과를 확인하지 못했습니다.")
+             | Input _ -> Ok ()
+             | Start _ | Cancel | Close | Nothing -> Ok ()) in
+         (match applied with
+          | Ok () -> ()
+          | Error message -> view.input_pending<-false; view.draft<-"";
+            (match action with Login.Input _ -> () | _ -> view.phase<-Login.Failed);
+            view.notice<-message)
+       | Some _ | None -> ())
   | Github_login_lines (keeper_name, lines) ->
       (* Append under the stamped view; a login for another keeper than the
          one on screen still lands on its own stamp. *)
@@ -19001,12 +19161,16 @@ and is loaded on demand through keeper_skill.
                 state.lane_addons <- Some { view with draft = Some (draft ^ Masc_tui_types.identity_field_paste paste.Masc_tui_paste.text) }
             | Some _ | None -> ())
        | Some (Mouse_wheel _) | Some (Mouse_left_press _) | Some (Mouse_left_release _)
+         when Option.is_some state.account_login -> ()
+       | Some (Mouse_wheel _) | Some (Mouse_left_press _) | Some (Mouse_left_release _)
          when Option.is_some state.lane_addons -> ()
        (* A paste into a one-line field is the text, on one line: no dropped
           file to classify and no spill to disk, both of which are the
           composer's and mean nothing in a field a single row high. A copied
           secret carries the newline that ended it, and a field is not a
           place for one. *)
+       | Some (Mouse_wheel _) | Some (Mouse_left_press _) | Some (Mouse_left_release _)
+         when Option.is_some state.account_login -> ()
        | Some (Pasted _) when state.keeper_deletions_open -> ()
        | Some (Pasted paste) when Option.is_some text_target ->
            let text =
@@ -19014,6 +19178,8 @@ and is loaded on demand through keeper_skill.
            in
            (match text_target with
             | None -> ()
+            | Some Text_account_login ->
+                Option.iter (fun view -> Masc_tui_account_login.paste view text) state.account_login
             | Some Text_ask_answer ->
                 edit_ask_text state (fun draft ->
                   draft ^ Keeper_chat.terminal_safe_text ~preserve_newlines:true
@@ -19364,7 +19530,7 @@ and is loaded on demand through keeper_skill.
       if Option.is_some state.acting_pane_cursor && not (acting_pane_drawn state)
       then state.acting_pane_cursor <- None;
       let composer_claimed =
-        Option.is_none state.lane_addons &&
+        Option.is_none state.account_login && Option.is_none state.lane_addons &&
         (not compact_viewport)
         && ((not state.help_open && not state.keeper_deletions_open))
         && (not state.agenda_open)
@@ -19391,6 +19557,12 @@ and is loaded on demand through keeper_skill.
            state.browser_lane <- Some (Browser_lane_view.yield_refresh_to_input view)
        | None, _ | Some _, None -> ());
       (match key with
+       | Some key when Option.is_some state.account_login ->
+           (match state.account_login with
+            | Some view ->
+              if not compact_viewport || key="esc" then
+                launch_account_login_action state ~mailbox:async_messages view (Masc_tui_account_login.key view key)
+            | None -> ())
        | Some _ when composer_claimed -> ()
        | Some _ when Option.is_some accepted_unbind_offer ->
            Option.iter handle_connector_unbind_offer_accept accepted_unbind_offer

@@ -1269,7 +1269,8 @@ let test_debt_cap_official_turn_keeps_tool_result_until_completion () =
             ~content_transport:Runtime_official_client_tool.Codex
             ~accepts_image_input:true ~tool_approval:None
             ~runtime_label:"debt-cap-fixture" ~keeper_name ~turn_count:1
-            ~tools:[tool] ~hooks:Agent_core.Hooks.empty ~event_bus:None
+            ~tools:[tool] ~loading_plan:Keeper_official_client_host.All_on_demand
+            ~hooks:Agent_core.Hooks.empty ~event_bus:None
             ~context_injector:None
             ~context:(Some (Agent_core.Context.create_sync ()))
             ~terminal_effect_state:(fun () ->

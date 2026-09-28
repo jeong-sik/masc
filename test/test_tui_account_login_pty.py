@@ -34,7 +34,11 @@ def scenario(binary, client, protocol, *, delayed_save=False, conflict_save=Fals
     secret = "  한😀  é fixture-private-login-code  "
     fixtures = h.keeper_runtime_http_fixtures()
     fixtures["/api/v1/keepers/alpha/chat/history"] = (200, [])
+    # How many saves each account-list read came after. The fixture server
+    # records POST bodies only, so the list read is counted here.
+    inventory_reads = []
     def inventory():
+        inventory_reads.append(len(save_attempts))
         refreshed = conflict_save and bool(save_attempts)
         return 200, {"setup_revision": "refreshed-revision" if refreshed else "fixture-revision",
             "default_runtime_selection": ["existing-runtime"] if refreshed else [],
@@ -113,14 +117,10 @@ def scenario(binary, client, protocol, *, delayed_save=False, conflict_save=Fals
             h.send_and_wait(process, fd, output, b"\r", b"new-runtime (quota_exhausted)")
             # The save re-reads the list; the unmeasured account must outlive it.
             deadline = time.monotonic() + 5.0
-            while time.monotonic() < deadline:
-                paths = [path for path, _ in requests]
-                saved_at = max(i for i, path in enumerate(paths) if path.endswith("/connections"))
-                if "/api/v1/setup/inventory" in paths[saved_at + 1:]:
-                    break
+            while not any(saves > 0 for saves in inventory_reads):
+                if time.monotonic() > deadline:
+                    raise AssertionError("the save did not re-read the account list")
                 time.sleep(0.05)
-            else:
-                raise AssertionError("the save did not re-read the account list")
             h.drain_until_quiet(process, fd, output)
             assert "검증하고 저장했습니다".encode() not in output, "an unmeasured save was reported as verified"
         elif delayed_save:

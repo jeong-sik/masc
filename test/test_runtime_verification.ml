@@ -869,6 +869,250 @@ let test_antigravity_private_tool_roundtrip () =
       (Sys.readdir directory |> Array.to_list |> List.sort String.compare)))
 ;;
 
+let muse_readiness_fixture = {|#!/usr/bin/env python3
+import atexit
+import signal
+import json
+import os
+from pathlib import Path
+import sys
+import urllib.error
+import urllib.request
+
+mode = Path(sys.argv[0]).name
+Path(sys.argv[0]).with_suffix(".launched").touch()
+assert sys.argv[1:] == ["serve", "--disable-write", "--disable-shell"]
+account_dir = Path(os.environ["HOME"])
+config_dir = Path(os.environ["XDG_CONFIG_HOME"])
+assert config_dir.is_relative_to(account_dir / ".local/state/masc/muse-config")
+assert json.loads((config_dir / "muse/settings.json").read_text())["permissions"]["default_profile"] == ":ask-me"
+workspace = Path.cwd()
+assert workspace.name == "workspace"
+probe_root = workspace.parent
+assert probe_root.name.startswith("muse-readiness-")
+assert workspace.stat().st_mode & 0o777 == 0o700
+storage_keys = ["XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR", "TMPDIR"]
+storage_paths = [Path(os.environ[key]) for key in storage_keys]
+for path in storage_paths:
+    assert path.parent == probe_root / "native"
+    assert path.stat().st_mode & 0o777 == 0o700
+    assert not path.is_relative_to(account_dir)
+    (path / "fixture-session").write_text("synthetic readiness session")
+receipt = Path(sys.argv[0]).with_suffix(".json")
+def record_exit():
+    # The owner closes stdin and sends TERM. If EOF has already entered
+    # atexit, a second SystemExit must not interrupt this receipt write.
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    if mode == "muse-exit-signal":
+        os.kill(os.getpid(), signal.SIGTERM)
+    receipt.write_text(json.dumps({"root": str(probe_root),
+        "native_state_at_exit": [(path / "fixture-session").is_file() for path in storage_paths],
+        "workspace_at_exit": workspace.is_dir()}))
+def terminate(_signum, _frame):
+    record_exit()
+    sys.exit(0)
+atexit.register(record_exit)
+signal.signal(signal.SIGTERM, terminate)
+
+def read():
+    return json.loads(sys.stdin.readline())
+
+def emit(frame):
+    print(json.dumps(frame), flush=True)
+
+def reply(request, result):
+    emit({"jsonrpc": "2.0", "id": request["id"], "result": result})
+
+def notify(method, **params):
+    emit({"jsonrpc": "2.0", "method": method, "params": {"sessionId": "s-readiness", "viewCursor": "v:1", **params}})
+
+request = read()
+assert request["method"] == "initialize"
+if mode == "muse-credential-exit":
+    sys.exit(3)
+if mode == "muse-usage-exit":
+    sys.exit(2)
+if mode == "muse-sdk-disabled-exit":
+    sys.exit(5)
+assert request["params"]["capabilities"]["requestedCapabilities"] == ["sessionMcp"]
+reply(request, {"serverInfo": {"name": "muse-session-server", "version": "1.4.0"},
+    "userAgent": "fixture/1", "museHome": str(account_dir), "platformFamily": "unix", "platformOs": "linux",
+    "schema": {"version": 1, "fingerprint": "sha256:fixture"}, "grantedCapabilities": ["sessionMcp"],
+    "experimentalApi": False, "sessionDurability": "durable"})
+assert read()["method"] == "initialized"
+request = read()
+assert request["method"] == "session/start"
+params = request["params"]
+assert Path(params["workspaceRoot"]) == workspace
+assert params["approvalMode"] == "promptUnmatched"
+assert list(params["config"]["mcpServers"]) == ["masc"]
+server = params["config"]["mcpServers"]["masc"]
+assert server["transport"] == "streamableHttp" and server["mode"] == "required"
+model = "another-model" if mode == "muse-wrong-model" else params["modelId"]
+reply(request, {"session": {"sessionId": "s-readiness", "status": "idle", "turnCount": 0,
+    "approvalMode": {"mode": "promptUnmatched", "source": "startup", "lastCommandId": None},
+    "modelId": model, "workspaceRoot": str(workspace)}, "viewCursor": "v:1"})
+request = read()
+assert request["method"] == "turn/start"
+assert "runtime_readiness_challenge" in str(request["params"]["input"])
+assert request["params"]["reasoningEffort"] == "high"
+reply(request, {"commandId": request["params"]["commandId"], "status": "accepted", "turnId": "t-readiness",
+    "startedNewTurn": True, "disposition": "started"})
+notify("turn/started", turnId="t-readiness", commandId=request["params"]["commandId"])
+if mode in ("muse-auth", "muse-auth-retryable"):
+    notify("turn/completed", turnId="t-readiness", terminal="failed",
+        error={"kind": "authRequired", "message": "fixture sign-in required", "retryable": mode == "muse-auth-retryable"})
+elif mode in ("muse-retryable", "muse-rejected"):
+    notify("turn/completed", turnId="t-readiness", terminal="failed",
+        error={"kind": "modelError", "message": "fixture provider failure", "retryable": mode == "muse-retryable"})
+elif mode == "muse-hang":
+    for line in sys.stdin:
+        pass
+else:
+    text = '{"challenge":"invented-without-the-tool"}'
+    if mode != "muse-no-tool":
+        headers = {**server["headers"], "Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
+        def rpc(method, params, request_id=None):
+            payload = {"jsonrpc": "2.0", "method": method, "params": params}
+            if request_id is not None:
+                payload["id"] = request_id
+            req = urllib.request.Request(server["url"], data=json.dumps(payload).encode(), headers=headers)
+            with urllib.request.urlopen(req, timeout=10) as response:
+                body = response.read()
+            return json.loads(body) if body else None
+        rpc("initialize", {"protocolVersion": "2025-11-25", "clientInfo": {"name": "muse-readiness-fixture", "version": "1"}, "capabilities": {}}, 1)
+        headers["MCP-Protocol-Version"] = "2025-11-25"
+        rpc("notifications/initialized", {})
+        listed = rpc("tools/list", {}, 2)
+        assert [tool["name"] for tool in listed["result"]["tools"]] == ["runtime_readiness_challenge"]
+        result = rpc("tools/call", {"name": "runtime_readiness_challenge", "arguments": {}}, 3)
+        text = result["result"]["content"][0]["text"]
+        assert json.loads(text)["challenge"]
+        if mode == "muse-forged":
+            text = '{"challenge":"forged-after-tool-call"}'
+    notify("item/completed", item={"itemId": "m-readiness", "kind": "agentMessage", "turnId": "t-readiness",
+        "revision": 1, "status": "completed", "text": text})
+    notify("turn/completed", turnId="t-readiness", terminal="completed")
+for line in sys.stdin:
+    pass
+|}
+
+let test_muse_private_tool_roundtrip () =
+  Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+    let directory = Filename.temp_dir "muse-readiness-test-" "" |> Unix.realpath in
+    Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree directory);
+    Eio_context.set_env env;
+    let mgr = Posix_spawn_process_mgr.foreground_mgr ~clock:env#clock
+      ~grace_seconds:Process_eio.child_exit_grace_seconds in
+    let account_home = Filename.concat directory "account" in
+    Unix.mkdir account_home 0o700;
+    let config_dir = Filename.concat account_home ".config" in
+    Unix.mkdir config_dir 0o700;
+    let muse_dir = Filename.concat config_dir "muse" in
+    Unix.mkdir muse_dir 0o700;
+    let write path content =
+      Out_channel.with_open_bin path (fun out -> output_string out content);
+      Unix.chmod path 0o600 in
+    let source = Filename.concat muse_dir "auth.json" in
+    let auth = {|{"schema_version":1,"providers":{"meta":{"api_key":"synthetic-readiness"}}}|} in
+    write source auth;
+    let durable_dir = Filename.concat account_home ".local/share/muse/sessions" in
+    Fs_compat.mkdir_p durable_dir;
+    let durable_session = Filename.concat durable_dir "account-session" in
+    write durable_session "existing selected-account session";
+    let runtime script =
+      let config = match Runtime_toml.parse_string (Printf.sprintf {|
+[providers.muse]
+protocol = "muse-serve"
+command = %S
+account-home = %S
+is-non-interactive = true
+[models.fixture]
+api-name = "fixture-selected-model"
+max-context = 4096
+max-prompt-bytes = 1048576
+reasoning-effort = "high"
+tools-support = true
+[muse.fixture]
+|} script account_home) with
+        | Ok config -> config | Error _ -> fail "Muse readiness binding must parse" in
+      match config.Runtime_schema.bindings with
+      | [binding] -> (match Runtime.of_binding config binding with
+          | Ok runtime -> runtime
+          | Error reason -> fail (Runtime.string_of_drop_reason reason))
+      | [] | _ :: _ :: _ -> fail "one Muse readiness binding" in
+    let check_case mode expected_failure =
+      let script = Filename.concat directory mode in
+      write script muse_readiness_fixture; Unix.chmod script 0o700;
+      let result = Verify.verify ~secure_random:env#secure_random ~sw ~net:env#net
+        ~mgr ~clock:env#clock ~cwd:Eio.Path.(env#fs / directory)
+        ~cwd_path:directory ~timeout_s:(if mode = "muse-hang" then 1. else 15.) (runtime script) in
+      check (option string) (mode ^ " verdict") expected_failure
+        (Option.map Verify.failure_code result.failure);
+      if mode <> "muse-wrong-model" then
+        check bool (mode ^ " tool actually called")
+          (mode = "muse-success" || mode = "muse-exit-signal" || mode = "muse-forged") result.tool_called;
+      (* A mismatched start can be refused before the turn, or after the full
+         tool roundtrip; neither may verify the requested binding. *)
+      if mode = "muse-success" || mode = "muse-exit-signal" then (
+        check bool "real MCP roundtrip consumed" true result.tool_roundtrip;
+        check (option string) "observed model is explicit" (Some "fixture-selected-model") result.observed_model);
+      check string "selected source unchanged" auth (Fs_compat.load_file source);
+      check string "selected durable session unchanged" "existing selected-account session"
+        (Fs_compat.load_file durable_session);
+      let receipt_path = script ^ ".json" in
+      let receipt = Yojson.Safe.from_file receipt_path in
+      let open Yojson.Safe.Util in
+      let root = receipt |> member "root" |> to_string in
+      check (list bool) (mode ^ " native storage exists until child exit") [true; true; true; true; true]
+        (receipt |> member "native_state_at_exit" |> to_list |> List.map to_bool);
+      check bool (mode ^ " workspace exists until child exit") true
+        (receipt |> member "workspace_at_exit" |> to_bool);
+      check bool (mode ^ " temporary tree removed after child reaping") false (Sys.file_exists root);
+      Unix.unlink receipt_path;
+      Unix.unlink (script ^ ".launched");
+      Unix.unlink script;
+      check (list string) "private workspace removed after completion/refusal/cancellation"
+        ["account"] (Sys.readdir directory |> Array.to_list |> List.sort String.compare)
+    in
+    List.iter (fun (mode, failure) -> check_case mode failure)
+      ["muse-success", None; "muse-exit-signal", None;
+       "muse-no-tool", Some "tool_not_called";
+       "muse-forged", Some "tool_result_not_consumed";
+       "muse-auth", Some "client_not_authenticated";
+       "muse-auth-retryable", Some "client_not_authenticated";
+       "muse-retryable", Some "provider_overloaded";
+       "muse-rejected", Some "provider_rejected";
+       "muse-credential-exit", Some "client_not_authenticated";
+       "muse-usage-exit", Some "invalid_configuration";
+       "muse-sdk-disabled-exit", Some "invalid_configuration";
+       "muse-wrong-model", Some "provider_rejected";
+       "muse-hang", Some "timed_out"];
+    Unix.unlink source;
+    List.iter (fun max_prompt_bytes ->
+      let script = Filename.concat directory "muse-invalid-capacity" in
+      write script muse_readiness_fixture; Unix.chmod script 0o700;
+      let selected = runtime script in
+      let selected = {selected with Runtime.model = {selected.model with max_prompt_bytes}} in
+      let result = Verify.verify ~secure_random:env#secure_random ~sw ~net:env#net
+        ~mgr ~clock:env#clock ~cwd:Eio.Path.(env#fs / directory)
+        ~cwd_path:directory ~timeout_s:15. selected in
+      check (option string) "input capacity refuses before missing-account preparation"
+        (Some "invalid_configuration") (Option.map Verify.failure_code result.failure);
+      check bool "input refusal cannot launch the selected client" false
+        (Sys.file_exists (script ^ ".launched"));
+      check bool "input refusal performs no MCP challenge" false result.tool_called;
+      Unix.unlink script;
+      check (list string) "input refusal creates no temporary storage" ["account"]
+        (Sys.readdir directory |> Array.to_list |> List.sort String.compare))
+      [None; Some 1];
+    let result = Verify.verify ~secure_random:env#secure_random ~sw ~net:env#net
+      ~mgr ~clock:env#clock ~cwd:Eio.Path.(env#fs / directory)
+      ~cwd_path:directory ~timeout_s:15. (runtime (Filename.concat directory "not-started")) in
+    check (option string) "missing selected sign-in refuses before spawn"
+      (Some "client_not_authenticated") (Option.map Verify.failure_code result.failure)))
+;;
+
 let test_vertex_native_binding () =
   let contents = {|
 [runtime]
@@ -974,6 +1218,7 @@ let () =
             test_vertex_discovery_auth_headers_without_model
         ; test_case "Google ADC refresh boundary" `Quick test_google_adc_refresh_boundary
         ; test_case "Antigravity private MCP roundtrip" `Quick test_antigravity_private_tool_roundtrip
+        ; test_case "Muse private MCP readiness" `Quick test_muse_private_tool_roundtrip
         ; test_case "Codex readiness excludes inherited tools" `Quick test_codex_readiness_excludes_inherited_tools
         ; test_case "assigned lane selects initial target" `Quick test_assigned_lane_selects_initial_target
         ; test_case "actual tool-result roundtrip" `Quick test_roundtrip

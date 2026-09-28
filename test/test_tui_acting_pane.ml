@@ -565,14 +565,36 @@ let test_content_cols_give_the_surface_the_rest () =
   check int "hidden takes nothing" roomy (Pane.content_cols ~layout:Pane.Hidden ~cols:roomy);
   check int "no room takes nothing" narrow (Pane.content_cols ~layout:Pane.Narrow ~cols:narrow)
 
-let test_both_panes_leave_the_surface_one_floor () =
-  check int "the wide pane leaves the floor the narrow one does"
-    (Pane.threshold_cols - Pane.pane_cols)
-    (Pane.wide_threshold_cols - Pane.wide_pane_cols);
-  check bool "beside the pane a surface keeps no less than the chat beside the roster"
-    true
-    (Pane.threshold_cols - Pane.pane_cols
-     >= Masc_tui_roster_pane.threshold_cols - Masc_tui_roster_pane.pane_cols)
+(* Whether the Keepers list shows its flag columns on a surface this wide: the
+   list lays out inside the frame ([Masc_tui_render.render_keeper_list]). *)
+let keepers_show_flags ~surface_cols =
+  (Masc_tui_render_schedule.allocate_keeper_columns
+     ~inner_width:(Masc_tui_frame.inner_width ~cols:surface_cols)
+     ~widest_runtime:0)
+    .Masc_tui_render_schedule.kcol_show_flags
+
+(* Memory indents its rows two cells inside the frame before it lays out its
+   columns ([Masc_tui_render_memory], the [allocate_memory_columns] call). *)
+let memory_row_indent_cells = 2
+
+let memory_shows_source ~surface_cols =
+  (Masc_tui_render_schedule.allocate_memory_columns
+     ~inner_width:
+       (Masc_tui_frame.inner_width ~cols:surface_cols - memory_row_indent_cells))
+    .Masc_tui_render_schedule.mcol_show_source
+
+let test_the_pane_leaves_the_tables_their_columns () =
+  let narrow_surface = Pane.threshold_cols - Pane.pane_cols in
+  let wide_surface = Pane.wide_threshold_cols - Pane.wide_pane_cols in
+  check bool "beside the narrow pane the Keepers list keeps its flags" true
+    (keepers_show_flags ~surface_cols:narrow_surface);
+  check bool "and beside the wide one" true
+    (keepers_show_flags ~surface_cols:wide_surface);
+  check bool "one column less and the flags drop, so the floor asks no more than that"
+    false
+    (keepers_show_flags ~surface_cols:(narrow_surface - 1));
+  check bool "Memory keeps its SOURCE column beside the pane" true
+    (memory_shows_source ~surface_cols:narrow_surface)
 
 (* ── rows ───────────────────────────────────────────────────────────── *)
 
@@ -2117,8 +2139,8 @@ let () =
             test_ctrl_l_walks_narrow_wide_hidden
         ; test_case "content cols give the surface the rest" `Quick
             test_content_cols_give_the_surface_the_rest
-        ; test_case "both panes leave the surface one floor" `Quick
-            test_both_panes_leave_the_surface_one_floor
+        ; test_case "the pane leaves the tables their columns" `Quick
+            test_the_pane_leaves_the_tables_their_columns
         ; test_case "clipped header preserves styled Unicode spans" `Quick
             test_clipped_header_preserves_spans_and_padding
         ; test_case "full-width row retains empty toned spans" `Quick

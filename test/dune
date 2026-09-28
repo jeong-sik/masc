@@ -5620,8 +5620,10 @@
   masc_tui_acting_pane
   masc_tui_acting
   masc_tui_observer
-  masc_tui_roster_pane
-  masc_tui_message_layout))
+  masc_tui_message_layout
+  ; the tables the pane's floor is measured against
+  masc_tui_frame
+  masc_tui_render_schedule))
 
 (test
  (name test_tui_keeper_mark)

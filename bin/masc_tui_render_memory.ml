@@ -79,9 +79,10 @@ let facts_title ~screen ~keeper ~reading ~timestamp ~badge =
 (* The row under the facts title. The title says the total and the filter; this
    says how that total breaks down and which sort produced the order, so each
    fact is written in one place. The split runs in this direction because the
-   title is the line with no room to spare: at 140 columns the Activity pane
-   takes 56 of the 136 inner cells, leaving the title 80 for the screen name,
-   the keeper, the total, both filters, the clock and the badge.
+   title is the line with no room to spare: beside the Activity pane at the
+   width it opens from, the title keeps only the pane's surface floor, less
+   the frame, for the screen name, the keeper, the total, both filters, the
+   clock and the badge.
 
    [grand_total] is not passed in because it is not drawn here. *)
 let facts_stats_row ~ordinary ~source ~dropped ~sort_label =

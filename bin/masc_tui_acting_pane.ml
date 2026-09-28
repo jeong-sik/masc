@@ -25,19 +25,19 @@ let gap_cells = 1
 let reading_cells = 36
 let pane_cols = border_cells + mark_cells + name_cells + gap_cells + reading_cells
 
-(* What a surface keeps beside this pane: at least 100 columns. The screens
-   the pane stands beside are tables laid out for 100 -- the Keepers list
-   shows its whole column set from an inner width of 98
-   ([Masc_tui_render_schedule.keeper_flags_minimum_inner_width]), Memory
-   keeps its SOURCE column at 100 (#36351), and RFC-0459 §4.1 gives one
-   primary pane 100 columns. Opening the pane with less left takes a surface
-   from the whole terminal to that remainder in one column of resize: Board
-   read about 57 title cells at 131 columns and 11 at 132, and cut SCORE and
-   REPLIES (2026-09-28). One floor holds on every surface, so moving between
-   surfaces never opens or closes the pane (operator, 2026-09-28). The
-   roster keeps its own floor ([Masc_tui_roster_pane.threshold_cols]): it
-   stands beside the chat, whose prose reads in less. *)
-let surface_floor_cols = 100
+(* What a surface keeps beside this pane: the width the Keepers list needs to
+   show its flag columns inside the frame every surface draws. The tables
+   beside the pane lay out against what it leaves, so a smaller floor opens
+   the pane where a table can no longer hold its columns. The Keepers RUNTIME
+   column needs more ([Masc_tui_render_schedule]'s runtime minimum) and still
+   drops beside the pane: the floor is the flag columns, not every column of
+   every table. One floor holds on every surface, so moving between surfaces
+   never opens or closes the pane (operator, 2026-09-28). The roster keeps
+   its own floor ([Masc_tui_roster_pane.threshold_cols]): it stands beside
+   the chat, whose prose reads in less. *)
+let surface_floor_cols =
+  Masc_tui_frame.border_cells + Masc_tui_frame.padding_cells
+  + Masc_tui_render_schedule.keeper_flags_minimum_inner_width
 
 let threshold_cols = pane_cols + surface_floor_cols
 

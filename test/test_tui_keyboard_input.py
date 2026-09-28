@@ -2391,15 +2391,15 @@ def navigate_with_arrows_and_quit(
 # column. The column needs 118 inner cells
 # (Render_schedule.keeper_runtime_minimum_inner_width); measured on the built
 # TUI, 118 columns drop it and 122 draw it. From
-# Masc_tui_acting_pane.threshold_cols (156) the acting pane takes its 56
-# columns, so by that arithmetic the column is gone again from 156 until 178.
+# Masc_tui_acting_pane.threshold_cols (158) the acting pane takes its 56
+# columns, so by that arithmetic the column is gone again from 158 until 178.
 # 126 is below the pane and above the column's need.
 KEEPER_RUNTIME_COLUMN_COLUMNS = 126
 
 
 # Ctrl-L walks the Activity pane narrow, wide, hidden. The widths are
 # Masc_tui_acting_pane.pane_cols and wide_pane_cols; 180 columns holds the
-# wide pane (wide_threshold_cols is 174). The pane's header row starts with
+# wide pane (wide_threshold_cols is 176). The pane's header row starts with
 # its one-cell border, so "[Recent]" sits one cell inside the pane's left
 # edge: the pane's width is read off where that header begins.
 ACTING_PANE_CYCLE_COLUMNS = 180
@@ -2407,16 +2407,19 @@ ACTING_PANE_NARROW_COLUMNS = 56
 ACTING_PANE_WIDE_COLUMNS = 74
 
 # The pane opens only where the surface keeps
-# Masc_tui_acting_pane.surface_floor_cols beside it (#36351), so its
-# threshold_cols is the narrow pane plus that floor.
-ACTING_PANE_SURFACE_FLOOR_COLUMNS = 100
+# Masc_tui_acting_pane.surface_floor_cols beside it: the frame's border and
+# padding (Masc_tui_frame, four cells) around the inner width the Keepers list
+# needs for its flag columns
+# (Render_schedule.keeper_flags_minimum_inner_width, 98). Its threshold_cols
+# is the narrow pane plus that floor.
+ACTING_PANE_SURFACE_FLOOR_COLUMNS = 102
 ACTING_PANE_THRESHOLD_COLUMNS = (
     ACTING_PANE_NARROW_COLUMNS + ACTING_PANE_SURFACE_FLOOR_COLUMNS
 )
 
 # A terminal that holds the narrow pane and not the wide one: past
-# Masc_tui_acting_pane.threshold_cols (156), short of wide_threshold_cols
-# (174). Scenarios that need the pane on screen open at this width.
+# Masc_tui_acting_pane.threshold_cols (158), short of wide_threshold_cols
+# (176). Scenarios that need the pane on screen open at this width.
 ACTING_PANE_NARROW_TERMINAL_COLUMNS = 160
 
 # A terminal below the pane's threshold where the Keeper detail's nine tabs do
@@ -2445,9 +2448,8 @@ def acting_pane_floor_interaction(
 ) -> None:
     """One column short of the threshold the surface has the whole terminal;
     at the threshold the narrow pane stands at the right edge. A pane that
-    opens with less than the floor left takes a screen from the whole
-    terminal to that remainder in one column of resize: Board went from
-    about 57 title cells to 11 (#36351)."""
+    opens with less than the floor left would narrow a screen's tables below
+    the columns the floor keeps."""
     for columns, expected in (
         (ACTING_PANE_THRESHOLD_COLUMNS - 1, -1),
         (
@@ -9936,8 +9938,8 @@ def keeper_message_switch_http_fixtures() -> tuple[HttpFixtures, GatedHttpRespon
 # The width at which the roster shares the screen with the chat and nothing
 # else does. Two thresholds bound it: the roster needs the surface at
 # Masc_tui_roster_pane.threshold_cols (110), and from
-# Masc_tui_acting_pane.threshold_cols (156) the acting pane takes its 56
-# columns off the top, which leaves the surface 100 and takes the roster away
+# Masc_tui_acting_pane.threshold_cols (158) the acting pane takes its 56
+# columns off the top, which leaves the surface 102 and takes the roster away
 # again until 166, where both panes fit.
 # The status row names the keeper, then its automation and gate, then the
 # runtime. Joining the health word to the runtime pinned that order, and the
@@ -13255,7 +13257,7 @@ def runtime_surface_interaction(
             # scenario reads (head, single candidate, the active timestamp)
             # stopped fitting. Give the row the width its facts need: 131
             # keeps the acting pane off the screen
-            # (Masc_tui_acting_pane.threshold_cols = 156), so the surface
+            # (Masc_tui_acting_pane.threshold_cols = 158), so the surface
             # keeps the whole frame. The later resize back to a
             # hundred columns is what proves the listing survives narrowing.
             resize_and_wait(
@@ -18316,6 +18318,10 @@ def run_board_list_footer_regression(executable: str) -> None:
                     drain_until_quiet(process, master_fd, output)
                     completed = bytes(output[:output.rfind(FRAME_END) + len(FRAME_END)])
                     rows = screen_rows(completed)
+                    if screen_row_of(rows, b"[Recent]") < 0:
+                        raise AssertionError(
+                            f"Board {state} at {height}: the acting pane is not open at "
+                            f"{ACTING_PANE_NARROW_TERMINAL_COLUMNS} columns: {rows!r}")
                     footer = screen_row_of(rows, b"j/k:move")
                     composer = screen_row_of(rows, "›".encode())
                     if footer < 1 or composer != footer + 1:

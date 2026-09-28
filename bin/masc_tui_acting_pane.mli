@@ -37,10 +37,11 @@ val reading_cells : int
 
 val threshold_cols : int
 (** The width from which a surface can afford the pane beside it: the pane
-    plus the 100 columns every surface keeps beside it, the width its tables
-    were laid out for. The floor is the same on every surface, so moving
-    between surfaces never opens or closes the pane. It is no smaller than
-    what the roster pane leaves the chat. *)
+    plus what every surface keeps beside it -- the frame around the inner
+    width the Keepers list needs for its flag columns
+    ({!Masc_tui_render_schedule.keeper_flags_minimum_inner_width}). The floor
+    is the same on every surface, so moving between surfaces never opens or
+    closes the pane. *)
 
 val wide_threshold_cols : int
 (** The width from which a surface can afford the wide pane: the wide pane

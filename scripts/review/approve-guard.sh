@@ -26,7 +26,7 @@
 #   approve-guard.sh --check --run PR_CHECK_ID ...
 #   approve-guard.sh --check ...   # evaluate only, never writes (safe probe)
 #   approve-guard.sh --merge-check --repo O/R --pr N --head SHA40
-#                                  # count only approvals bound to this head
+#                                  # trusted non-author approvals bound to this head
 # Exit: 0 approved/skipped/would-approve, 2 refused (reasons on stderr), 1 infra error.
 # Env: GUARD_GH overrides the gh binary (tests use a fake).
 # Needs bash + gh + git + Python 3. JSON uses gh --jq or the Python standard
@@ -136,10 +136,14 @@ if [ "$merge_check" -eq 1 ]; then
   approvals=""
   while IFS=$'\t' read -r who rid rstate; do
     [ -n "$who" ] && [ "$rstate" = "APPROVED" ] && [ "$who" != "$author" ] || continue
-    bound="$(gh_json "repos/$repo/pulls/$pr/reviews/$rid" "select(.state == \"APPROVED\" and ($approval_head_jq)) | .id")" || exit 1
+    # Authority and head binding must belong to this same latest review. A
+    # trusted footerless review cannot lend authority to an outsider's body.
+    bound="$(gh_json "repos/$repo/pulls/$pr/reviews/$rid" "select(.state == \"APPROVED\" and
+      (.author_association == \"OWNER\" or .author_association == \"MEMBER\" or .author_association == \"COLLABORATOR\") and
+      ($approval_head_jq)) | .id")" || exit 1
     [ -z "$bound" ] || approvals="$approvals $bound"
   done <<<"$review_rows"
-  [ -n "$approvals" ] || { refuse "no non-author APPROVED review has this head in its verdict and guard footer"; finish_refused; }
+  [ -n "$approvals" ] || { refuse "no non-author APPROVED review has this head in its verdict and guard footer with trusted repository authority"; finish_refused; }
   latest_head="$(gh_json "repos/$repo/pulls/$pr" '.head.sha')" || exit 1
   [ "$latest_head" = "$head" ] || { refuse "head moved during merge check: PR head is $latest_head"; finish_refused; }
   echo "MERGE-CHECK PASS #$pr head $head approvals:$approvals"

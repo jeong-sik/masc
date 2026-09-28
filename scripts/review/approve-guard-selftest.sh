@@ -74,7 +74,19 @@ case "$ep" in
   */check-runs*) f=checkruns ;;
   */actions/runs*) f=actions ;;
   user) f=user ;;
-  */reviews/*) f=reviewget ;;
+  */reviews/*)
+    # A merge check reads the selected review itself, including later-page
+    # reviews and mutations during the final CI read. Posted review 777 falls
+    # back to the dedicated readback fixture used by the approval tests.
+    pages=("$d/reviews.json")
+    for page in "$d/reviews-page-2.json" "$d/reviews-page2.json"; do
+      [ ! -f "$page" ] || pages+=("$page")
+    done
+    row=$("$FAKE_JQ" -s --argjson id "${ep##*/}" '[.[][] | select(.id==$id)] | first // empty' "${pages[@]}")
+    if [ -n "$row" ]; then
+      printf '%s\n' "$row" | "$FAKE_JQ" -r "$jqf"; exit
+    fi
+    f=reviewget ;;
   */reviews*) if [ "$method" = POST ]; then
                 [ "$body_src" = stdin ] || { echo "fake gh: POST without body=@-" >&2; exit 1; }
                 cat >"$d/posted.body"
@@ -104,6 +116,9 @@ if [ "$f" = checkruns ] && [ -f "$d/after_checks_review" ] && [ ! -f "$d/review_
         author_association:"COLLABORATOR",user:{login:"pangyo-preachers"},body:"Please fix this"}]' "$d/reviews.json" > "$d/reviews.next.json" ;;
     dismiss-approval)
       "$FAKE_JQ" 'map(if .id == 888 then .state = "DISMISSED" else . end)' \
+        "$d/reviews.json" > "$d/reviews.next.json" ;;
+    remove-footer)
+      "$FAKE_JQ" 'map(if .id == 888 then .body |= split("\n")[0] else . end)' \
         "$d/reviews.json" > "$d/reviews.next.json" ;;
     *) echo "fake gh: unknown late review mutation" >&2; exit 1 ;;
   esac
@@ -193,7 +208,7 @@ pass=0; fail=0
 
 setup() { # setup <casedir>: default happy fixtures
   local d="$1"; mkdir -p "$d"
-  echo "{\"state\":\"open\",\"draft\":false,\"merged\":false,\"changed_files\":1,\"base\":{\"ref\":\"main\"},\"head\":{\"sha\":\"$H\",\"ref\":\"pr\"}}" >"$d/pull.json"
+  echo "{\"state\":\"open\",\"draft\":false,\"merged\":false,\"changed_files\":1,\"user\":{\"login\":\"jeong-sik\"},\"base\":{\"ref\":\"main\"},\"head\":{\"sha\":\"$H\",\"ref\":\"pr\"}}" >"$d/pull.json"
   echo '{"check_runs":[{"name":"dune build @check","status":"completed","conclusion":"success","id":11},{"name":"lint suite","status":"completed","conclusion":"success","id":12}]}' >"$d/checkruns.json"
   echo '{"workflow_runs":[{"workflow_id":1,"run_number":10,"name":"PR Check","status":"completed","conclusion":"success","id":900}]}' >"$d/actions.json"
   echo '{"login":"pangyo-preachers"}' >"$d/user.json"
@@ -608,12 +623,36 @@ merge_case() {
 }
 merge_setup() {
   setup "$1"
-  "$JQ" -n --arg h "$H" '[{id:888,state:"APPROVED",commit_id:$h,
-    submitted_at:"2026-01-01T00:40:00Z",author_association:"COLLABORATOR",user:{login:"reviewer"},
-    body:("verdict: PASS head: "+$h+" run: 900 by: keeper")} ]' > "$1/reviews.json"
+  approved_review 888 "$H" "$H" "$H" | "$JQ" \
+    'map(.user.login="reviewer" | .submitted_at="2026-01-01T00:40:00Z")' > "$1/reviews.json"
 }
 d="$work/merge-fresh"; merge_setup "$d"
 merge_case merge-fresh 0 1 "$d"
+# The required wrapper must preserve the shared merge-check contract. Keep a
+# separate current PASS so these failures cannot be hidden by verdict parsing.
+for mode in write check; do
+  set --; [ "$mode" = check ] && set -- --check
+  for mutation in missing-footer retargeted author split-authority; do
+    d="$work/merge-binding-$mutation-$mode"; merge_setup "$d"
+    "$JQ" '[.[] | {created_at:"2026-01-01T00:41:00Z",body,author_association}]' "$d/reviews.json" > "$d/comments.json"
+    case "$mutation" in
+      missing-footer) expression='map(.body |= split("\n")[0])' ;;
+      retargeted) expression='map(.body |= gsub($head; $old))' ;;
+      author) expression='map(.user.login="jeong-sik")' ;;
+      split-authority)
+        expression='.[0] as $bound | map(.body |= split("\n")[0]) +
+          [($bound | .id=889 | .user.login="outsider" | .author_association="NONE")]' ;;
+    esac
+    "$JQ" --arg head "$H" --arg old "$H2" "$expression" "$d/reviews.json" > "$d/p"
+    mv "$d/p" "$d/reviews.json"
+    merge_case "merge-binding-$mutation-$mode" 2 0 "$d" "$@"
+  done
+  d="$work/merge-binding-old-commit-$mode"; merge_setup "$d"
+  "$JQ" --arg old "$H2" 'map(.commit_id=$old)' "$d/reviews.json" > "$d/p"
+  mv "$d/p" "$d/reviews.json"
+  expected_write=1; [ "$mode" != check ] || expected_write=0
+  merge_case "merge-binding-current-body-old-commit-$mode" 0 "$expected_write" "$d" "$@"
+done
 # Correcting explanatory text on an old PASS cannot resurrect it over a newer
 # refusal. Exercise approval/merge and both --check/write paths with a formal
 # approval still present, so only the structured decision blocks the write.
@@ -650,7 +689,7 @@ for verdict in HOLD FAIL; do
 done
 # A formal review can change during the final check read without a new
 # structured verdict. The last review-state read must refuse both cases.
-for review_mutation in new-cr dismiss-approval; do
+for review_mutation in new-cr dismiss-approval remove-footer; do
   for mode in write check; do
     set --; [ "$mode" = check ] && set -- --check
     d="$work/merge-final-review-$review_mutation-$mode"; merge_setup "$d"
@@ -754,8 +793,8 @@ done
 # All three repository participant classes can provide the formal approval.
 for authority in NONE CONTRIBUTOR UNKNOWN null OWNER MEMBER COLLABORATOR; do
   d="$work/merge-approval-$authority"; merge_setup "$d"
-  "$JQ" '[.[] | {created_at:.submitted_at,body,author_association}]' "$d/reviews.json" > "$d/comments.json"
-  "$JQ" --arg a "$authority" 'map(.body="LGTM" | .author_association=(if $a=="null" then null else $a end))' "$d/reviews.json" > "$d/p"
+  "$JQ" '[.[] | {created_at:"2026-01-01T00:41:00Z",body,author_association}]' "$d/reviews.json" > "$d/comments.json"
+  "$JQ" --arg a "$authority" 'map(.author_association=(if $a=="null" then null else $a end))' "$d/reviews.json" > "$d/p"
   mv "$d/p" "$d/reviews.json"
   case "$authority" in
     OWNER|MEMBER|COLLABORATOR) merge_case "merge-trusted-approval-$authority" 0 1 "$d" ;;

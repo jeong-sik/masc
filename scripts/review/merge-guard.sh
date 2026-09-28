@@ -51,25 +51,10 @@ python3 "$here/ci-freshness.py" --repo "$repo" --pr "$pr" --head "$head" \
 # finishing boundary too; separate reads cannot provide a server-side CAS.
 check_verdict
 check_formal_review_state() {
-  local review_rows review_state
-  review_rows=$("$GH" api --paginate "repos/$repo/pulls/$pr/reviews?per_page=100" \
-    --jq '.[] | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "DISMISSED") |
-      [.user.login, (.id|tostring), .state, (.commit_id//""), (.author_association//"UNKNOWN")] | @tsv')
-  # gh applies --jq per page. Aggregate rows once after every page has arrived.
-  review_state=$(printf '%s\n' "$review_rows" | awk -F '\t' -v head="$head" '
-    NF && (!( $1 in id) || $2+0 > id[$1]) { id[$1]=$2+0; state[$1]=$3; commit[$1]=$4; authority[$1]=$5 }
-    END {
-      for (user in state) {
-        if (state[user]=="CHANGES_REQUESTED") blocked=1
-        if (state[user]=="APPROVED" && commit[user]==head &&
-            (authority[user]=="OWNER" || authority[user]=="MEMBER" || authority[user]=="COLLABORATOR")) approved=1
-      }
-      print blocked ? "blocked" : (approved ? "approved" : "unapproved")
-    }')
-  if [ "$review_state" != approved ]; then
-    echo "merge-guard: current review state is $review_state" >&2
-    return 2
-  fi
+  # Preserve the shared immutable verdict/footer binding and non-author rule;
+  # a mutable REST commit_id cannot authorize a later head.
+  bash "$here/approve-guard.sh" --merge-check --repo "$repo" --pr "$pr" \
+    --head "$head" --git-dir "$gitdir"
 }
 check_formal_review_state
 # A same-head reopen/rerun can register while freshness/reviews are read.

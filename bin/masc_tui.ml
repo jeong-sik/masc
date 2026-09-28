@@ -17909,28 +17909,6 @@ let main
           | Ok summary -> report_action state "system" ("runtime.toml saved · " ^ summary)
           | Error message -> report_action state "error" message)))
   in
-  (* runtime.toml as the server holds it now. The account screens declare and
-     remove against this, not against the copy the pane drew when they
-     opened. *)
-  let runtime_toml_now () =
-    match
-      Masc_tui_http.fetch_runtime_config_raw ~host:server_peer_host ~port:state.port
-    with
-    | Error detail -> Error ("reading runtime.toml failed: " ^ detail)
-    | Ok json -> (
-        match Masc_tui_runtime_config_view.decode json with
-        | Ok reading -> Ok reading.Masc_tui_runtime_config_view.source_text
-        | Error detail -> Error ("reading runtime.toml failed: " ^ detail))
-  in
-  (* [D] on the runtime.toml pane opens the removal screen the same way. *)
-  let handle_runtime_account_removal_open () =
-    match state.runtime_config_view with
-    | None -> report_action state "error" "config not loaded yet; r to reload"
-    | Some { rcv_rows = rows; _ } -> (
-      match Masc_tui_runtime_account_removal.open_on (runtime_config_source rows) with
-      | Ok screen -> state.runtime_account_removal <- Some screen
-      | Error reason -> report_action state "error" reason)
-  in
   (* [a] on the runtime.toml pane opens the account form on the file as the
      pane shows it. *)
   let handle_runtime_account_open () =
@@ -19292,7 +19270,6 @@ and is loaded on demand through keeper_skill.
                   Option.map
                     (fun form -> Masc_tui_runtime_account_form.paste form text)
                     state.runtime_account_form
-            | Some Text_runtime_account_removal -> ()
             | Some Text_voice_wizard ->
                 Option.iter
                   (fun session ->
@@ -19995,7 +19972,17 @@ and is loaded on demand through keeper_skill.
                  report_action state "system"
                    "로그인 명령을 OSC 52로 보냈습니다 (터미널 지원은 확인 못 함)"
                | Masc_tui_runtime_account_form.Submitted form -> (
-                   let current = runtime_toml_now () in
+                   let current =
+                     match
+                       Masc_tui_http.fetch_runtime_config_raw ~host:server_peer_host
+                         ~port:state.port
+                     with
+                     | Error detail -> Error ("reading runtime.toml failed: " ^ detail)
+                     | Ok json -> (
+                         match Masc_tui_runtime_config_view.decode json with
+                         | Ok reading -> Ok reading.Masc_tui_runtime_config_view.source_text
+                         | Error detail -> Error ("reading runtime.toml failed: " ^ detail))
+                   in
                    let declared =
                      match current with
                      | Error message -> Error (Masc_tui_runtime_account_form.refused form message)
@@ -20029,39 +20016,6 @@ and is loaded on demand through keeper_skill.
                        | Error message ->
                          state.runtime_account_form <-
                            Some (Masc_tui_runtime_account_form.refused form message)))))
-       | Some k
-         when text_input_target state ~compact_viewport
-              = Some Text_runtime_account_removal -> (
-           match state.runtime_account_removal with
-           | None -> ()
-           | Some screen -> (
-               match Masc_tui_runtime_account_removal.key screen k with
-               | Masc_tui_runtime_account_removal.Choosing screen ->
-                 state.runtime_account_removal <- Some screen
-               | Masc_tui_runtime_account_removal.Cancelled ->
-                 state.runtime_account_removal <- None
-               | Masc_tui_runtime_account_removal.Submitted screen -> (
-                   let removed =
-                     match runtime_toml_now () with
-                     | Error message -> Error (Masc_tui_runtime_account_removal.refused screen message)
-                     | Ok current -> Masc_tui_runtime_account_removal.remove_on screen current
-                   in
-                   match removed with
-                   | Error screen -> state.runtime_account_removal <- Some screen
-                   | Ok { Runtime_account_removal.text; login_store; _ } -> (
-                       let id = Masc_tui_runtime_account_removal.chosen screen in
-                       match save_runtime_config_text text with
-                       | Ok summary ->
-                         state.runtime_account_removal <- None;
-                         report_action state "system"
-                           (Printf.sprintf "runtime.toml saved · %s · %s 를 지웠습니다" summary id);
-                         Option.iter
-                           (fun path ->
-                              add_event state "info" (id ^ " 로그인 정보는 남아 있습니다: " ^ path))
-                           login_store
-                       | Error message ->
-                         state.runtime_account_removal <-
-                           Some (Masc_tui_runtime_account_removal.refused screen message)))))
        | Some k
          when text_input_target state ~compact_viewport
               = Some Text_runtime_param ->
@@ -26066,12 +26020,6 @@ and is loaded on demand through keeper_skill.
          when state.view = Config && state.config_pane = Config_runtime
               && not state.runtime_config_status_open ->
            handle_runtime_account_open ()
-       (* [D] on the runtime.toml pane: remove one of those accounts and what
-          routes to it, capital like the lane removal on Lanes. *)
-       | Some "D"
-         when state.view = Config && state.config_pane = Config_runtime
-              && not state.runtime_config_status_open ->
-           handle_runtime_account_removal_open ()
        (* [a] on the voice pane: the keepers this workspace has on one axis and
           the voices the section's first endpoint answers to on the other. The
           revision the pane read is what the save carries, so a screen opened

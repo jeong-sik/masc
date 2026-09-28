@@ -54,6 +54,21 @@ let resolve_reasoning_effort ~runtime_id =
 
 let resolve_turn_timeout_s ~runtime_id = Runtime.turn_timeout_s_of_runtime_id runtime_id
 
+(* One spelling for the turn-timeout rule every official-client boundary
+   shares. Absent leaves the caller's default standing; a non-positive
+   declaration removes the bound — the deadline exists to notice a client
+   that has gone silent, not to cap how long legitimate work may take, so a
+   deployment is allowed to say the client decides. *)
+let turn_timeout_s_of_declared ~default = function
+  | None -> Some default
+  | Some seconds when seconds <= 0.0 -> None
+  | Some seconds -> Some seconds
+;;
+
+let resolve_turn_timeout_s_or ~runtime_id ~default =
+  turn_timeout_s_of_declared ~default (resolve_turn_timeout_s ~runtime_id)
+;;
+
 let resolve_max_prompt_bytes ~runtime_id =
   Runtime.max_prompt_bytes_of_runtime_id runtime_id
 

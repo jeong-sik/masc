@@ -113,7 +113,12 @@ let decide
     Error Invalid_transition
   | Masc_domain.Cancel, Masc_domain.Cancelled _ -> ok task_status
   | Masc_domain.Cancel, Masc_domain.Todo ->
-    ok (cancelled_status ~agent_name ~now ~reason)
+    (* Same gate as the holder's cancel below: an unclaimed Task's author is
+       owed the sentence too, and the persisted release note is the previous
+       owner's (RFC-0365), not this caller's reason. *)
+    (match reason with
+     | None -> Error Cancel_reason_required
+     | Some _ -> ok (cancelled_status ~agent_name ~now ~reason))
   (* The holder stops its own work outright: giving up work you hold needs
      nobody's permission (RFC-0417 §4.1). A pending submission is the
      producer's own, so withdrawing it ends the same way.

@@ -101,7 +101,7 @@ type panel_answer =
 type panel_error =
   { failed_model : string
   ; reason : panel_failure
-  ; usage : usage  (** Reported usage across every failed candidate in this seat. *)
+  ; usage : usage
   }
 [@@deriving yojson, show, eq]
 

@@ -1450,13 +1450,21 @@ let test_historical_unreadable_reason_fields_remain_readable () =
     (names (Yojson.Safe.Util.member "reason" encoded));
   List.iter
     (fun (code, reason) ->
-      let historical = `Assoc [ "code", `String code ] in
+      let historical =
+        `Assoc
+          [ "kind", `String "artifact_unreadable"
+          ; "reference", `String "artifact:missing.txt"
+          ; "reason", `Assoc [ "code", `String code ]
+          ]
+      in
+      let expected = VS.Evidence_artifact_unreadable
+        { reference = "artifact:missing.txt"; reason } in
       Alcotest.(check string) "historical code-only reason writer"
         (Yojson.Safe.to_string historical)
-        (Yojson.Safe.to_string (VS.evidence_read_failure_to_yojson reason));
-      match VS.evidence_read_failure_of_yojson historical with
+        (Yojson.Safe.to_string (VS.submitted_evidence_item_to_yojson expected));
+      match VS.submitted_evidence_item_of_yojson historical with
       | Ok decoded -> Alcotest.(check bool) "historical code-only reason" true
-                        (decoded = reason)
+                        (decoded = expected)
       | Error detail -> Alcotest.fail detail)
     [ "missing", VS.Evidence_missing
     ; "not_regular_file", VS.Evidence_not_regular_file

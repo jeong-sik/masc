@@ -64,7 +64,7 @@ let copy_chunks ?expected_bytes path emit =
 let unlink_if_present path =
   try Unix.unlink path with Unix.Unix_error (Unix.ENOENT, _, _) -> ()
 
-let publish ~base_path ~redaction (files : Process_output_capture.files) =
+let publish ~inline_ceiling_bytes ~base_path ~redaction (files : Process_output_capture.files) =
   let* stdout_path, stdout_bytes = complete_path "stdout" files.stdout in
   let* stderr_path, stderr_bytes = complete_path "stderr" files.stderr in
   Eio_guard.run_in_systhread ~label:"keeper-execute-publish-output" (fun () ->

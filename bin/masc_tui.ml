@@ -17639,6 +17639,55 @@ let main
          | Some session -> state.lane_addons <- Some (Addons.put_document {view with editor_ready=true;scroll=0} session)
          | None -> launch_lane_declaration state ~mailbox:async_messages ~edit:true (Masc_tui_lane_declaration.Read path))
   in
+  (* Rebuilt from the rows on screen rather than kept as a second copy. The
+     editor and the account form have to start from the file as it is, and
+     the colours are a reading of that file rather than a change to it --
+     dropping the kinds gives back exactly what was loaded. *)
+  let runtime_config_source rows =
+    String.concat "\n"
+      (List.map (fun segments -> String.concat "" (List.map fst segments)) rows)
+  in
+  (* Preview, then save: the one write path for runtime.toml text, which the
+     $EDITOR round trip and the account form both take. The save route
+     validates the text again but does not compare it with what the file held
+     when the text was read, so a caller that holds text for long re-reads
+     the file first; the account form does. *)
+  let save_runtime_config_text edited =
+    let host = server_peer_host in
+    let port = state.port in
+    match
+      Masc_tui_http.post_runtime_config_preview ~host ~port ~source_text:edited
+    with
+    | Error detail -> Error ("preview failed: " ^ detail)
+    | Ok preview -> (
+      let ok =
+        match preview with
+        | `Assoc fields -> (
+            match List.assoc_opt "validation" fields with
+            | Some (`Assoc v) -> (
+                match List.assoc_opt "ok" v with
+                | Some (`Bool value) -> Some value
+                | _ -> None)
+            | _ -> (
+                match List.assoc_opt "ok" fields with
+                | Some (`Bool value) -> Some value
+                | _ -> None))
+        | _ -> None
+      in
+      match ok with
+      | Some false ->
+        Error
+          ("preview rejected the edit: "
+           ^ Terminal_text.single_line (Yojson.Safe.to_string preview))
+      | Some true | None -> (
+        match
+          Masc_tui_http.post_runtime_config_raw ~host ~port ~source_text:edited
+        with
+        | Ok receipt ->
+          launch_runtime_config_load state ~mailbox:async_messages;
+          Ok (Masc_tui_http.runtime_config_commit_receipt_summary receipt)
+        | Error detail -> Error ("save failed: " ^ detail)))
+  in
   let handle_runtime_config_edit () =
     match state.runtime_config_view with
     | None -> report_action state "error" "config not loaded yet; r to reload"
@@ -17648,63 +17697,30 @@ let main
         report_action state "error"
           "no $EDITOR set; export EDITOR to edit runtime.toml here"
       | Some _ -> (
-        (* Rebuilt from the rows on screen rather than kept as a second copy.
-           The editor has to receive the file as it is, and the colours are a
-           reading of that file rather than a change to it -- dropping the
-           kinds gives back exactly what was loaded. *)
-        let stem =
-          String.concat "\n"
-            (List.map
-               (fun segments -> String.concat "" (List.map fst segments))
-               rows)
-        in
         match
           Masc_tui_editor.roundtrip ~restore:restore_terminal
-            ~reenter:reenter_terminal stem
+            ~reenter:reenter_terminal (runtime_config_source rows)
         with
         | Error abort ->
           report_editor_abort state ~action:"runtime.toml"
             ~cancelled:"runtime.toml unchanged" abort
         | Ok edited -> (
-          let host = server_peer_host in
-          let port = state.port in
-          match
-            Masc_tui_http.post_runtime_config_preview ~host ~port
-              ~source_text:edited
-          with
-          | Error detail -> report_action state "error" ("preview failed: " ^ detail)
-          | Ok preview -> (
-            let ok =
-              match preview with
-              | `Assoc fields -> (
-                  match List.assoc_opt "validation" fields with
-                  | Some (`Assoc v) -> (
-                      match List.assoc_opt "ok" v with
-                      | Some (`Bool value) -> Some value
-                      | _ -> None)
-                  | _ -> (
-                      match List.assoc_opt "ok" fields with
-                      | Some (`Bool value) -> Some value
-                      | _ -> None))
-              | _ -> None
-            in
-            match ok with
-            | Some false ->
-              report_action state "error"
-                ("preview rejected the edit: "
-                 ^ Terminal_text.single_line
-                     (Yojson.Safe.to_string preview))
-            | Some true | None -> (
-              match
-                Masc_tui_http.post_runtime_config_raw ~host ~port
-                  ~source_text:edited
-              with
-              | Ok receipt ->
-                report_action state "system"
-                  ("runtime.toml saved · "
-                   ^ Masc_tui_http.runtime_config_commit_receipt_summary receipt);
-                launch_runtime_config_load state ~mailbox:async_messages
-              | Error detail -> report_action state "error" ("save failed: " ^ detail))))))
+          match save_runtime_config_text edited with
+          | Ok summary -> report_action state "system" ("runtime.toml saved · " ^ summary)
+          | Error message -> report_action state "error" message)))
+  in
+  (* [a] on the runtime.toml pane opens the account form on the file as the
+     pane shows it. *)
+  let handle_runtime_account_open () =
+    match state.runtime_config_view with
+    | None -> report_action state "error" "config not loaded yet; r to reload"
+    | Some { rcv_rows = rows; _ } -> (
+      match
+        Masc_tui_runtime_account_form.open_on ?home_dir:(Sys.getenv_opt "HOME")
+          (runtime_config_source rows)
+      with
+      | Ok form -> state.runtime_account_form <- Some form
+      | Error reason -> report_action state "error" reason)
   in
   let open_selected_slot_config () =
     match Masc_tui_types.slot_editor_cursor_row state with
@@ -19038,6 +19054,11 @@ and is loaded on demand through keeper_skill.
                       Some (Masc_tui_types.runtime_param_edit_append edit text);
                     state.runtime_params_notice <- None)
                   state.runtime_param_edit
+            | Some Text_runtime_account_form ->
+                state.runtime_account_form <-
+                  Option.map
+                    (fun form -> Masc_tui_runtime_account_form.paste form text)
+                    state.runtime_account_form
             | Some Text_voice_wizard ->
                 Option.iter
                   (fun session ->
@@ -19711,6 +19732,59 @@ and is loaded on demand through keeper_skill.
                  if length > 0 then set (String.sub draft 0 (length - 1))
                | s when String.length s = 1 && Char.code s.[0] >= 32 -> set (draft ^ s)
                | _ -> ()))
+       (* The account form takes every key while it is open. Submitting
+          declares against runtime.toml as the server holds it now, not the
+          text the form was opened on, so a change made in between is kept.
+          A refusal keeps the form and what was typed, with the reason on it;
+          only a save that lands closes it. The sign-in command goes to the
+          session log, where it stays readable after the footer moves on. *)
+       | Some k
+         when text_input_target state ~compact_viewport
+              = Some Text_runtime_account_form -> (
+           match state.runtime_account_form with
+           | None -> ()
+           | Some form -> (
+               match Masc_tui_runtime_account_form.key form k with
+               | Masc_tui_runtime_account_form.Editing form ->
+                 state.runtime_account_form <- Some form
+               | Masc_tui_runtime_account_form.Cancelled ->
+                 state.runtime_account_form <- None
+               | Masc_tui_runtime_account_form.Submitted form -> (
+                   let current =
+                     match
+                       Masc_tui_http.fetch_runtime_config_raw ~host:server_peer_host
+                         ~port:state.port
+                     with
+                     | Error detail -> Error ("reading runtime.toml failed: " ^ detail)
+                     | Ok json -> (
+                         match Masc_tui_runtime_config_view.decode json with
+                         | Ok reading -> Ok reading.Masc_tui_runtime_config_view.source_text
+                         | Error detail -> Error ("reading runtime.toml failed: " ^ detail))
+                   in
+                   let declared =
+                     match current with
+                     | Error message -> Error (Masc_tui_runtime_account_form.refused form message)
+                     | Ok current ->
+                       Masc_tui_runtime_account_form.declare_on
+                         ~inherited_home:Masc_tui_runtime_account_form.inherited_home form
+                         current
+                   in
+                   match declared with
+                   | Error form -> state.runtime_account_form <- Some form
+                   | Ok { Masc_tui_runtime_account_form.id; text; sign_in } -> (
+                       match save_runtime_config_text text with
+                       | Ok summary ->
+                         state.runtime_account_form <- None;
+                         report_action state "system"
+                           (Printf.sprintf
+                              "runtime.toml saved · %s · %s: lane 후보에 넣어야 턴이 갑니다"
+                              summary id);
+                         Option.iter
+                           (fun command -> add_event state "info" (id ^ " 로그인: " ^ command))
+                           sign_in
+                       | Error message ->
+                         state.runtime_account_form <-
+                           Some (Masc_tui_runtime_account_form.refused form message)))))
        | Some k
          when text_input_target state ~compact_viewport
               = Some Text_runtime_param ->
@@ -25708,6 +25782,13 @@ and is loaded on demand through keeper_skill.
            if state.prompts_show_runtime_assets
            then report_action state "system" "런타임 프롬프트 자산은 읽기 전용입니다"
            else handle_prompt_clear ()
+       (* [a] on the runtime.toml pane: one more account of a Claude Code,
+          Codex or Antigravity provider the file already declares. The status
+          reading hides the source, so it does not open there. *)
+       | Some ("a" | "A")
+         when state.view = Config && state.config_pane = Config_runtime
+              && not state.runtime_config_status_open ->
+           handle_runtime_account_open ()
        (* [a] on the voice pane: the keepers this workspace has on one axis and
           the voices the section's first endpoint answers to on the other. The
           revision the pane read is what the save carries, so a screen opened

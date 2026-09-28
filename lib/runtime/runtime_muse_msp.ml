@@ -251,6 +251,120 @@ let reasoning_effort_of_string = function
   | _ -> None
 ;;
 
+type model_catalog_source =
+  | Provider_catalog
+  | Fake_catalog
+  | Unresolved_catalog
+  | Bundled_catalog
+  | Config_catalog
+  | Unknown_catalog_source of string
+
+let model_catalog_source_to_string = function
+  | Provider_catalog -> "providerCatalog"
+  | Fake_catalog -> "fakeCatalog"
+  | Unresolved_catalog -> "unresolvedCatalog"
+  | Bundled_catalog -> "bundledCatalog"
+  | Config_catalog -> "configCatalog"
+  | Unknown_catalog_source source -> source
+;;
+
+let model_catalog_source_of_string = function
+  | "providerCatalog" -> Provider_catalog
+  | "fakeCatalog" -> Fake_catalog
+  | "unresolvedCatalog" -> Unresolved_catalog
+  | "bundledCatalog" -> Bundled_catalog
+  | "configCatalog" -> Config_catalog
+  | source -> Unknown_catalog_source source
+;;
+
+type model_effort_variants =
+  | Unknown_efforts
+  | Known_efforts of reasoning_effort list
+
+type model_catalog_entry =
+  { model_id : string
+  ; display_label : string
+  ; provider_id : string
+  ; profile_id : string option
+  ; context_limit : int option
+  ; output_limit : int option
+  ; is_default : bool
+  ; variants : model_effort_variants
+  }
+
+type model_catalog =
+  { source : model_catalog_source
+  ; provider_id : string
+  ; profile_id : string option
+  ; models : model_catalog_entry list
+  }
+
+let model_list_request ~id = request ~id ~method_:"model/list" []
+
+(* These nullable members are required by MSP. Missing is not an unreported
+   limit: it is a malformed response. The protocol carries integer values
+   verbatim; setup admission separately requires a positive context. *)
+let nullable_model_field stage key parse fields =
+  let* value = required_member stage key fields in
+  match value with
+  | `Null -> Ok None
+  | value -> Result.map Option.some (parse value)
+;;
+
+let model_nullable_text stage key fields =
+  nullable_model_field stage key (function
+    | `String text -> Ok text
+    | _ -> fail stage (Printf.sprintf "field %S must be a string or null" key)) fields
+;;
+
+let model_nullable_int stage key fields =
+  nullable_model_field stage key (function
+    | `Int value -> Ok value
+    | _ -> fail stage (Printf.sprintf "field %S must be an integer or null" key)) fields
+;;
+
+let parse_model_variants stage fields =
+  match List.assoc_opt "variants" fields with
+  | None | Some (`String "unknown") -> Ok Unknown_efforts
+  | Some (`List values) ->
+    let* efforts = map_result (function
+      | `String value ->
+        (match reasoning_effort_of_string value with
+         | Some effort -> Ok effort
+         | None -> fail stage "unknown model reasoning effort")
+      | _ -> fail stage "model reasoning effort must be a string") values in
+    Ok (Known_efforts efforts)
+  | Some _ -> fail stage "model variants must be an effort array or unknown"
+;;
+
+let parse_model_catalog_entry stage json =
+  let* fields = assoc_at stage json in
+  let* model_id = required_string stage "modelId" fields in
+  let* display_label = required_text stage "displayLabel" fields in
+  let* provider_id = required_string stage "providerId" fields in
+  let* profile_id = model_nullable_text stage "profileId" fields in
+  let* context_limit = model_nullable_int stage "contextLimit" fields in
+  let* output_limit = model_nullable_int stage "outputLimit" fields in
+  let* is_default = required_bool stage "isDefault" fields in
+  let* variants = parse_model_variants stage fields in
+  Ok { model_id; display_label; provider_id; profile_id; context_limit;
+       output_limit; is_default; variants }
+;;
+
+let parse_model_list_result json =
+  let stage = "model/list" in
+  let* fields = assoc_at stage json in
+  let* source = required_string stage "source" fields in
+  let source = model_catalog_source_of_string source in
+  let* provider_id = required_string stage "providerId" fields in
+  let* profile_id = model_nullable_text stage "profileId" fields in
+  let* models = required_member stage "models" fields in
+  let* models = match models with
+    | `List rows -> map_result (parse_model_catalog_entry stage) rows
+    | _ -> fail stage "models must be an array" in
+  Ok { source; provider_id; profile_id; models }
+;;
+
 type mcp_server =
   | Streamable_http of
       { url : string

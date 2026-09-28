@@ -27,7 +27,7 @@ let configured_runtime_ids (config : Runtime_schema.config) provider_id =
     then Some (`String (Runtime_schema.binding_key binding)) else None)
 ;;
 
-let integration_json config ~id ~display_name ~protocol ~origin ~supported fields =
+let integration_json config ~id ~display_name ~protocol ~origin ~supported ~verification_supported fields =
   let configured = configured_runtime_ids config id in
   let setup_support =
     if not supported then Unsupported
@@ -40,7 +40,7 @@ let integration_json config ~id ~display_name ~protocol ~origin ~supported field
      ; "origin", `String origin
      ; "configured_runtime_ids", `List configured
      ; "setup_support", setup_support_json setup_support
-     ; "verification_support", `String (if supported then "response_tool" else "unsupported")
+     ; "verification_support", `String (if verification_supported then "response_tool" else "unsupported")
      ; "account_availability_verified", `Bool false
      ] @ fields)
 ;;
@@ -61,6 +61,11 @@ let credential_fields ~include_credential_references = function
   | Some (Runtime_schema.Inline _) -> [ "credential_kind", `String "inline" ]
   | None -> [ "credential_kind", `String "none" ]
 
+let account_fields ~include_credential_references (provider : Runtime_schema.provider) =
+  match include_credential_references, provider.account_home with
+  | true, Some home -> ["account_home", `String home]
+  | false, _ | true, None -> []
+
 let integrations_json ~include_credential_references (config : Runtime_schema.config) =
   let catalog = Catalog_binding.all () in
   let configured =
@@ -70,9 +75,8 @@ let integrations_json ~include_credential_references (config : Runtime_schema.co
         | Runtime_schema.Antigravity_cli_runtime | Messages_api | Chat_completions_api | Ollama_api
         | Codex_app_server_runtime | Claude_code_runtime
         | Gemini_api | Vertex_gemini_api -> true
-        (* Setup offers no Muse Code connection and readiness cannot verify
-           one (Runtime_verification), so a declared provider is listed as
-           unsupported for both. *)
+        (* Readiness can verify a configured Muse binding independently of
+           whether this setup surface can create a new Muse connection. *)
         | Muse_serve_runtime -> false
       in
       let fields =
@@ -80,9 +84,11 @@ let integrations_json ~include_credential_references (config : Runtime_schema.co
         | Runtime_schema.Http endpoint -> endpoint_fields endpoint
         | Cli command -> [ "command", `String command ]
       in
-      let credential = credential_fields ~include_credential_references provider.credentials in
+      let credential = credential_fields ~include_credential_references provider.credentials
+        @ account_fields ~include_credential_references provider in
       integration_json config ~id:provider.id ~display_name:provider.display_name
         ~protocol:(Some provider.protocol) ~origin:"runtime_config" ~supported
+        ~verification_supported:true
         (fields @ credential @ http_fields provider @ [ "enabled", `Bool provider.enabled ])) config.providers
   in
   let declared id =
@@ -105,7 +111,7 @@ let integrations_json ~include_credential_references (config : Runtime_schema.co
       in
       let supported = protocol <> None && task = None in
       Some (integration_json config ~id:entry.id ~display_name:entry.id ~protocol
-        ~origin:"agent_core_catalog" ~supported
+        ~origin:"agent_core_catalog" ~supported ~verification_supported:supported
         (endpoint_fields entry.base_url
          @ [ "request_path", `String entry.request_path
            ; "api_key_env", `String entry.api_key_env
@@ -127,7 +133,7 @@ let integrations_json ~include_credential_references (config : Runtime_schema.co
       if declared id || List.exists (fun (entry : Catalog_binding.t) -> entry.id = id) catalog
       then None else
       Some (integration_json config ~id ~display_name ~protocol:(Some protocol)
-        ~origin:"masc_integration" ~supported
+        ~origin:"masc_integration" ~supported ~verification_supported:supported
         (match command with None -> [] | Some command -> [ "command", `String command ])))
   in
   `List (configured @ prototypes @ clients)
@@ -155,7 +161,8 @@ let to_json ?(include_credential_references=false) (config : Runtime_schema.conf
                | Runtime_schema.Cli command -> [ "command", `String command ]
                | Runtime_schema.Http endpoint -> endpoint_fields endpoint
              in
-             let credential = credential_fields ~include_credential_references provider.credentials in
+             let credential = credential_fields ~include_credential_references provider.credentials
+        @ account_fields ~include_credential_references provider in
              Some
                (`Assoc
                    ([ "id", `String (Runtime_schema.binding_key binding)

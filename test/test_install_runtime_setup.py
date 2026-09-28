@@ -591,6 +591,25 @@ class CodexExplicitRefresh(unittest.TestCase):
         self.assertEqual(run.call_args.args[0], ['/owned/masc', 'runtime-codex-models', '--cli-path', '/owned/codex'])
         self.assertIn('refreshed', origin)
 
+    def test_private_inventory_account_reaches_terminal_refresh(self):
+        for bound in (False, True):
+            with self.subTest(bound=bound):
+                row = dict(id='selected.fixture', provider_id='selected', display_name='Codex selected',
+                           protocol='codex-app-server', command='/owned/codex', account_home='/selected/home',
+                           model='fixture', max_context=4096, tools=True, streaming=True)
+                integration = dict(id='selected', display_name='Codex selected', protocol='codex-app-server',
+                                   command='/owned/codex', account_home='/selected/home',
+                                   origin='runtime_config', setup_support='existing_binding')
+                with patch.object(SETUP, 'official_client_path', return_value=None):
+                    sources = SETUP.connection_sources('/owned/masc',
+                        dict(runtimes=[row] if bound else [], integrations=[integration]))
+                selected = next(s for s in sources if s['provider_id'] == 'selected')
+                receipt = dict(schema='masc.codex_model_refresh.v1', source='isolated_cli_cache', models=[])
+                with patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, json.dumps(receipt), '')) as run:
+                    SETUP.refresh_codex_models('/owned/masc', selected)
+                self.assertEqual(run.call_args.args[0], ['/owned/masc', 'runtime-codex-models',
+                    '--cli-path', '/owned/codex', '--account-home', '/selected/home'])
+
     def test_unavailable_refresh_is_labeled_offline_fallback(self):
         source = dict(choice='codex', command='codex', endpoint='', api_key_env='', rows=[])
         with patch.object(SETUP, 'refresh_codex_models', side_effect=SETUP.SetupError('Online unavailable; cached fallback.')), \
@@ -598,6 +617,22 @@ class CodexExplicitRefresh(unittest.TestCase):
             rows, origin = SETUP.source_models('/owned/masc', source, 10, refresh=True)
         self.assertEqual(rows[0]['id'], 'cached')
         self.assertIn('cached fallback', origin)
+
+    def test_new_codex_model_spec_preserves_selected_account_home(self):
+        source = dict(choice='codex', command='codex', endpoint='', api_key_env='',
+                      rows=[], account_home='/selected/home')
+        with patch.object(SETUP, 'render', return_value=('codex.new-model', b'')) as renderer:
+            _, selected = SETUP.resolve_model_spec(
+                source, dict(id='new-model', context=8192), 10)
+        self.assertEqual(selected['account_home'], '/selected/home')
+        self.assertEqual(renderer.call_args.args[0]['account_home'], '/selected/home')
+
+    def test_new_codex_model_spec_omits_undeclared_account_home(self):
+        source = dict(choice='codex', command='codex', endpoint='', api_key_env='', rows=[])
+        with patch.object(SETUP, 'render', return_value=('codex.new-model', b'')):
+            _, selected = SETUP.resolve_model_spec(
+                source, dict(id='new-model', context=8192), 10)
+        self.assertNotIn('account_home', selected)
 
     @unittest.skipUnless(BINARY, 'requires CI-built native executable')
     def test_native_refresh_has_no_old_cache_or_turn_and_preserves_source(self):

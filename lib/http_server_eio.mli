@@ -234,6 +234,20 @@ module Response : sig
     -> Httpun.Reqd.t
     -> unit
 
+  (** A [`OK] body whose bytes are its own validator, such as a generated
+      image: a strong [ETag] of ["\"<etag>\""] and the given [Cache-Control],
+      and [`Not_modified] with those two headers and no body when the request's
+      [If-None-Match] lists that tag (or is ["*"]). The body is sent as it is;
+      formats that are already compressed gain nothing from a second pass. *)
+  val bytes_cached
+    :  etag:string
+    -> cache_control:string
+    -> request:Httpun.Request.t
+    -> content_type:string
+    -> string
+    -> Httpun.Reqd.t
+    -> unit
+
   (** Pinned ["404 Not Found"] body, status [`Not_found]. *)
   val not_found : Httpun.Reqd.t -> unit
 

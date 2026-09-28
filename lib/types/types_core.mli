@@ -252,16 +252,10 @@ type nested_field_outcome =
 
 val nested_field_outcome_is_unreadable : nested_field_outcome -> bool
 
-type legacy_awaiting_intent = Legacy_complete | Legacy_cancel
-[@@deriving show, eq]
-(** One-version decode bridge for the old awaiting-verification intent field. *)
-
-(** Per-field decode outcome for the two optional nested fields and the
-    one-version legacy submission intent. *)
+(** Per-field decode outcome for the two optional nested fields. *)
 type task_decode_diagnostics =
   { handoff_context_outcome : nested_field_outcome
   ; reclaim_policy_outcome : nested_field_outcome
-  ; legacy_intent_dropped : legacy_awaiting_intent option
   }
 [@@deriving show, eq]
 

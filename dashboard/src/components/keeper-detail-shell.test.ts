@@ -172,9 +172,9 @@ describe('KeeperDetailHeaderInfo', () => {
     container.remove()
   })
 
-  it('uses the keeper badge when the live keeper has no emoji', () => {
+  it('shows the keeper portrait when the live keeper has no emoji', () => {
     const keeper = {
-      name: 'sangsu',
+      name: 'wick-header-probe',
       status: 'active',
       phase: 'Running',
       lifecycle_phase: 'Running',
@@ -191,7 +191,60 @@ describe('KeeperDetailHeaderInfo', () => {
       container,
     )
 
-    expect(container.querySelector('[aria-label="sangsu"]')).not.toBeNull()
-    expect(container.textContent).toContain('sangsu')
+    const portrait = container.querySelector('img[data-testid="keeper-portrait"]') as HTMLImageElement | null
+    expect(portrait).not.toBeNull()
+    expect(portrait!.getAttribute('alt')).toBe('wick-header-probe')
+    expect(portrait!.getAttribute('src')).toBe('/api/v1/keepers/wick-header-probe/portrait.png?size=64')
+    expect(container.textContent).toContain('wick-header-probe')
+  })
+
+  it('falls back to the keeper badge when the portrait cannot load', async () => {
+    const keeper = {
+      name: 'wick-header-probe',
+      status: 'active',
+      phase: 'Running',
+      lifecycle_phase: 'Running',
+      model: 'claude-sonnet-4',
+    } as Keeper
+
+    render(
+      html`<${KeeperDetailHeaderInfo}
+        keeper=${keeper}
+        titleId="keeper-title"
+        phaseEnteredAtSec=${null}
+        onClose=${() => {}}
+      />`,
+      container,
+    )
+
+    container.querySelector('img[data-testid="keeper-portrait"]')!.dispatchEvent(new Event('error'))
+    await flush()
+
+    expect(container.querySelector('img[data-testid="keeper-portrait"]')).toBeNull()
+    expect(container.querySelector('[aria-label="wick-header-probe"]')).not.toBeNull()
+  })
+
+  it('keeps the declared emoji over the portrait', () => {
+    const keeper = {
+      name: 'wick-header-probe',
+      emoji: '🕯️',
+      status: 'active',
+      phase: 'Running',
+      lifecycle_phase: 'Running',
+      model: 'claude-sonnet-4',
+    } as Keeper
+
+    render(
+      html`<${KeeperDetailHeaderInfo}
+        keeper=${keeper}
+        titleId="keeper-title"
+        phaseEnteredAtSec=${null}
+        onClose=${() => {}}
+      />`,
+      container,
+    )
+
+    expect(container.querySelector('img[data-testid="keeper-portrait"]')).toBeNull()
+    expect(container.textContent).toContain('🕯️')
   })
 })

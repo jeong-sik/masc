@@ -1,7 +1,7 @@
 open Alcotest
 open Masc
 
-let decode_with_python ~png ~rgb ~width ~height =
+let decode_png_with_python ~colour_type ~png ~pixels:rgb ~width ~height =
   (* An independent standard-library decoder verifies both PNG framing and
      decoded pixels, including channel order and every row's filter byte. *)
   let script = {|
@@ -13,11 +13,11 @@ while i<len(p):
  n=struct.unpack('>I',p[i:i+4])[0]; k=p[i+4:i+8]; b=p[i+8:i+8+n]
  assert len(b)==n and zlib.crc32(k+b)==struct.unpack('>I',p[i+8+n:i+12+n])[0]
  chunks.append(k)
- if k==b'IHDR': assert struct.unpack('>IIBBBBB',b)==(d['width'],d['height'],8,2,0,0,0)
+ if k==b'IHDR': assert struct.unpack('>IIBBBBB',b)==(d['width'],d['height'],8,d['colour'],0,0,0)
  if k==b'IDAT': compressed+=b
  i+=n+12
 assert i==len(p) and chunks==[b'IHDR',b'IDAT',b'IEND']
-raw=zlib.decompress(compressed); stride=d['width']*3
+raw=zlib.decompress(compressed); stride=d['width']*{2:3,6:4}[d['colour']]
 assert len(raw)==(stride+1)*d['height']
 assert all(raw[y*(stride+1)]==0 for y in range(d['height']))
 pixels=b''.join(raw[y*(stride+1)+1:(y+1)*(stride+1)] for y in range(d['height']))
@@ -27,7 +27,8 @@ print('decoded exact pixels')
   let channels = Unix.open_process_args_full "python3" [|"python3"; "-c"; script|] (Unix.environment ()) in
   let input, output, errors = channels in
   let request = `Assoc ["png", `String (Base64.encode_string png);
-    "rgb", `String (Base64.encode_string rgb); "width", `Int width; "height", `Int height] in
+    "rgb", `String (Base64.encode_string rgb); "width", `Int width; "height", `Int height;
+    "colour", `Int colour_type] in
   output_string output (Yojson.Safe.to_string request ^ "\n");
   flush output;
   let reply = In_channel.input_all input in
@@ -35,6 +36,9 @@ print('decoded exact pixels')
   let status = Unix.close_process_full channels in
   check bool ("PNG decoder: " ^ error) true (status = Unix.WEXITED 0);
   check string "independent pixels" "decoded exact pixels\n" reply
+
+let decode_with_python ~png ~rgb ~width ~height =
+  decode_png_with_python ~colour_type:2 ~png ~pixels:rgb ~width ~height
 
 let test_rgb () =
   List.iter (fun (width, height) ->
@@ -47,6 +51,19 @@ let test_rgb () =
     (Result.is_error (Rgb_png.encode ~width:2 ~height:1 ~rgb:"abc"));
   check bool "overflow rejected" true
     (Result.is_error (Rgb_png.encode ~width:max_int ~height:max_int ~rgb:""))
+
+let test_rgba () =
+  (* Straight alpha: a pixel's colour bytes survive at every alpha, including 0. *)
+  List.iter (fun (width, height) ->
+    let rgba = String.init (width * height * 4) (fun i -> Char.chr ((i * 53 + i / 13) mod 256)) in
+    match Rgb_png.encode_rgba ~width ~height ~rgba with
+    | Error e -> fail e
+    | Ok png -> decode_png_with_python ~colour_type:6 ~png ~pixels:rgba ~width ~height)
+    [1,1; 3,2; 160,160];
+  check bool "RGB-length bytes rejected as RGBA" true
+    (Result.is_error (Rgb_png.encode_rgba ~width:2 ~height:1 ~rgba:"abcdef"));
+  check bool "overflow rejected" true
+    (Result.is_error (Rgb_png.encode_rgba ~width:max_int ~height:max_int ~rgba:""))
 
 let test_keeper_capture () =
   let base = Filename.temp_dir "msx-vision-" "" in
@@ -115,5 +132,6 @@ let test_keeper_capture () =
         (match (screen ()).disposition with Tool_result.Failed _ -> true | _ -> false))
 
 let () = run "MSX vision"
-  ["pixels", [test_case "PNG roundtrip" `Quick test_rgb];
+  ["pixels", [test_case "PNG roundtrip" `Quick test_rgb;
+               test_case "RGBA PNG roundtrip" `Quick test_rgba];
    "Keeper", [test_case "screen yields owned image without input" `Quick test_keeper_capture]]

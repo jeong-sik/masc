@@ -71,9 +71,57 @@ COMPOSER_ROWS = {"keepers": 1, "board": 1, "config": 1, "keeper-detail": 1,
 EXPECTED: dict[tuple[str, int], dict[str, object]] = {}
 
 
+# The Config body's source: the harness's navigation fixture, whose first
+# value line the sweep waits for.
+CONFIG_LOADED = b"first-value = 1"
+
+
 def fixtures() -> region.ServedFixtures:
+    """Every request the TUI makes on its way to these screens, answered.
+
+    Where nothing is waiting -- no approvals, asks, schedules, pull requests,
+    open turns or lanes -- the answer is the empty reading, so no row on a
+    measured screen reports a read that failed."""
     served = h.keeper_runtime_http_fixtures()
     served.update(h.board_reference_http_fixtures())
+    served["/api/v1/board/hearths"] = (200, {"hearths": []})
+    served["/api/v1/dashboard/gate"] = h.empty_gate_snapshot()
+    served["/api/v1/dashboard/gate/keeper-settings"] = (200, {
+        "modes": [], "modes_state": {"state": "ready"},
+        "exact_lanes": [], "exact_lanes_state": {"state": "ready"},
+    })
+    served["/api/v1/keepers/tool-approval-mode"] = (200, {"overrides": []})
+    served["/api/v1/keepers/tool-approvals"] = (200, {"pending": []})
+    served[h.KEEPER_ASKS_PATH] = (200, {"keeper": None, "open_count": 0, "asks": []})
+    served[h.SCHEDULES_PATH] = (200, {
+        "status": "ok", "schedule_runner": h.SCHEDULE_RUNNER_OK,
+        "schedule_store_read_error": None, "request_count": 0,
+        "truncated": False, "fsm": {"next_due_at_iso": None}, "requests": [],
+    })
+    served[h.KEEPER_LANES_PATH] = h.keeper_lanes_response([])
+    served["/api/v1/keepers/turns"] = (200, {
+        "schema": "masc.keeper_turns.v1",
+        "keepers": [
+            {"keeper_name": name, "status": "ok",
+             "chat_control_token": f"control-{name}", "turn": None}
+            for name in ("alpha", "beta")
+        ],
+    })
+    served["/api/v1/repositories/pulls"] = (200, {
+        "reader": {"state": "ready", "keeper": "pr-updater"},
+        "repositories_error": None, "keepers": {"state": "listed"},
+        "repositories": [],
+    })
+    served[h.RUNTIME_CONFIG_RAW_PATH] = (200, {
+        **h.runtime_config_read_metadata(),
+        "path": "/workspace/config/runtime.toml",
+        "source_text": h.config_navigation_source(),
+    })
+    # The MCP session the live feed opens: its handshake, and an observer
+    # stream with nothing to say.
+    served["/mcp"] = h.observer_http_fixtures()["/mcp"]
+    served["/mcp?sse_kind=observer"] = h.RawHttpResponse(
+        200, b": region baseline\n\n", content_type="text/event-stream")
     served["/api/v1/keepers/alpha/chat/history"] = (200, [{
         "id": "region-gate", "role": "system", "content": GATE_ARGUMENT,
         "ts": 1787348491.3,
@@ -124,7 +172,7 @@ def interaction(served: region.ServedFixtures):
         sweep(process, fd, output, "board", b"Hostile", WIDTHS)
 
         h.tab_until(process, fd, output, b"MASC Config")
-        sweep(process, fd, output, "config", b"MASC Config", WIDTHS)
+        sweep(process, fd, output, "config", CONFIG_LOADED, WIDTHS)
 
         h.tab_until(process, fd, output, b"MASC Keepers")
         h.select_keeper_row(process, fd, output, b"alpha")

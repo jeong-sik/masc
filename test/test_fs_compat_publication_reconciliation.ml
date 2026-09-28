@@ -236,7 +236,7 @@ let test_bound_stage_is_preserved () =
   |> require_fixture;
   let bound_path =
     Filename.concat
-      (owner_area_path ~registry_root ~owner:owner_name "active")
+      (owner_area_path ~registry_root ~owner:owner_name "owned")
       (Uuidm.to_string operation_id)
   in
   let bound_json = Fs_compat.load_file bound_path |> Yojson.Safe.from_string in

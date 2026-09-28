@@ -26,6 +26,19 @@ let missing_to_string = function
   | Not_reported -> "the client's login file names no account email"
   | Invalid_email -> "the client's reported account email is not displayable text"
 
+let missing_to_wire = function
+  | Source_unavailable -> "source_unavailable"
+  | Source_unrecognized -> "source_unrecognized"
+  | Not_reported -> "not_reported"
+  | Invalid_email -> "invalid_email"
+
+let missing_of_wire = function
+  | "source_unavailable" -> Some Source_unavailable
+  | "source_unrecognized" -> Some Source_unrecognized
+  | "not_reported" -> Some Not_reported
+  | "invalid_email" -> Some Invalid_email
+  | _ -> None
+
 let ( let* ) = Result.bind
 
 let parse bytes =
@@ -95,22 +108,31 @@ let of_google_oauth bytes =
   let* json = parse bytes in
   email_in_id_token [ "id_token" ] json
 
+type native_client = Codex | Claude_code | Muse_code
+
 type account =
-  | Native_home of string
+  | Native_home of { client : native_client; home : string }
   | Credential_file of string
 
 let account_of_provider (provider : Runtime_schema.provider) =
-  match provider.api_format, provider.account_home, provider.credentials with
-  | (Runtime_schema.Codex_app_server_runtime | Claude_code_runtime | Muse_serve_runtime),
-    Some home, _ -> Some (Native_home home)
-  | (Codex_app_server_runtime | Claude_code_runtime | Muse_serve_runtime), None, _ -> None
-  | Antigravity_cli_runtime, _, Some (Runtime_schema.File path) -> Some (Credential_file path)
-  | Antigravity_cli_runtime, _, (Some (Runtime_schema.Env _ | Inline _) | None) -> None
-  | (Messages_api | Chat_completions_api | Ollama_api | Gemini_api | Vertex_gemini_api), _, _ ->
+  let native client =
+    Option.map (fun home -> Native_home { client; home }) provider.account_home in
+  match provider.api_format, provider.credentials with
+  | Runtime_schema.Codex_app_server_runtime, _ -> native Codex
+  | Claude_code_runtime, _ -> native Claude_code
+  | Muse_serve_runtime, _ -> native Muse_code
+  | Antigravity_cli_runtime, Some (Runtime_schema.File path) -> Some (Credential_file path)
+  | Antigravity_cli_runtime, (Some (Runtime_schema.Env _ | Inline _) | None) -> None
+  | (Messages_api | Chat_completions_api | Ollama_api | Gemini_api | Vertex_gemini_api), _ ->
     None
 
+type record =
+  | Email of t
+  | Not_read of missing
+  | Login_unfinished
+
 type recorded =
-  | Recorded of t
+  | Record of record
   | Absent
   | Unreadable
 
@@ -122,7 +144,10 @@ let inventory_json ~lookup (config : Runtime_schema.config) =
             (fun account ->
                let state =
                  match lookup account with
-                 | Recorded email -> [ "state", `String "recorded"; "email", `String email ]
+                 | Record (Email email) -> [ "state", `String "recorded"; "email", `String email ]
+                 | Record (Not_read missing) ->
+                   [ "state", `String "not_read"; "cause", `String (missing_to_wire missing) ]
+                 | Record Login_unfinished -> [ "state", `String "login_unfinished" ]
                  | Absent -> [ "state", `String "absent" ]
                  | Unreadable -> [ "state", `String "unreadable" ]
                in

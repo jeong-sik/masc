@@ -3,7 +3,8 @@ type provider = { id : string; label : string; client : client }
 type model = { id : string; label : string; context : int option; tools : bool option }
 type phase = Loading | Providers | Logging | Models | Documented_context of model | Saving | Finished | Failed
 type recovery = Login_status | Refresh_configuration
-type account_email = Email of string | Not_recorded | Unreadable
+type email_gap = Login_file_unreadable | Login_file_unrecognized | Email_not_reported | Email_not_displayable
+type account_email = Email of string | Not_read of email_gap | Login_unfinished | Not_recorded | Unreadable
 type t = {
   requested : string; mutable generation : int; mutable phase : phase; mutable providers : provider list;
   mutable provider : provider option; mutable models : model list; mutable cursor : int;
@@ -42,14 +43,25 @@ let authentication = function
   | `String "login_completed" -> Some Login_completed
   | `String "credential_captured" -> Some Credential_captured
   | _ -> None
+let email_gap = function
+  | `String "source_unavailable" -> Some Login_file_unreadable
+  | `String "source_unrecognized" -> Some Login_file_unrecognized
+  | `String "not_reported" -> Some Email_not_reported
+  | `String "invalid_email" -> Some Email_not_displayable
+  | _ -> None
 let account_email_of_row = function
   | `Assoc fields as row ->
     let keys = List.sort String.compare (List.map fst fields) in
-    (match string (field "integration_id" row), field "state" row, field "email" row with
-     | Some id, `String "recorded", `String email
-       when email <> "" && keys = ["email"; "integration_id"; "state"] -> Some (id, Email email)
-     | Some id, `String "absent", `Null when keys = ["integration_id"; "state"] -> Some (id, Not_recorded)
-     | Some id, `String "unreadable", `Null when keys = ["integration_id"; "state"] -> Some (id, Unreadable)
+    (match string (field "integration_id" row), field "state" row with
+     | Some id, `String "recorded" when keys = ["email"; "integration_id"; "state"] ->
+       (match field "email" row with
+        | `String email when email <> "" -> Some (id, Email email)
+        | _ -> None)
+     | Some id, `String "not_read" when keys = ["cause"; "integration_id"; "state"] ->
+       Option.map (fun gap -> id, Not_read gap) (email_gap (field "cause" row))
+     | Some id, `String "login_unfinished" when keys = ["integration_id"; "state"] -> Some (id, Login_unfinished)
+     | Some id, `String "absent" when keys = ["integration_id"; "state"] -> Some (id, Not_recorded)
+     | Some id, `String "unreadable" when keys = ["integration_id"; "state"] -> Some (id, Unreadable)
      | _ -> None)
   | _ -> None
 let inventory t json =
@@ -254,6 +266,11 @@ type row = Text of string | Terminal of Masc_tui_sgr_text.line
    provider on the inherited home that setup login never records). *)
 let account_suffix t (p:provider) = match List.assoc_opt p.id t.account_emails with
   | Some (Email email) -> " · " ^ email
+  | Some (Not_read Login_file_unreadable) -> " · 이메일 모름: 로그인 파일을 못 읽음"
+  | Some (Not_read Login_file_unrecognized) -> " · 이메일 모름: 로그인 파일 형식을 모름"
+  | Some (Not_read Email_not_reported) -> " · 이메일 모름: 클라이언트가 알려 주지 않음"
+  | Some (Not_read Email_not_displayable) -> " · 이메일 모름: 표시할 수 없는 값"
+  | Some Login_unfinished -> " · 마지막 로그인이 끝나지 않음"
   | Some Not_recorded -> " · 이메일 기록 없음"
   | Some Unreadable -> " · 이메일 기록을 읽지 못함"
   | None -> ""

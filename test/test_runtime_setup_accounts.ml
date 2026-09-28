@@ -220,14 +220,16 @@ let recorded_login_email () = fixture (fun directory _ ->
   Unix.mkdir account_home 0o700;
   let oauth_file = Filename.concat directory "agy-oauth.json" in
   write oauth_file "{}";
-  let account = Email.Native_home account_home in
+  let account = Email.Native_home {client = Email.Claude_code; home = account_home} in
   check bool "nothing is recorded before a login" true (Accounts.email account = Email.Absent);
   let email = match Email.of_claude_account {|{"oauthAccount":{"emailAddress":"operator@example.com"}}|} with
     | Ok email -> email | Error missing -> fail (Email.missing_to_string missing) in
-  Accounts.set_email account (Some email) |> get;
-  check bool "login email is read back" true (Accounts.email account = Email.Recorded email);
+  Accounts.set_email account (Email.Email email) |> get;
+  check bool "login email is read back" true (Accounts.email account = Email.Record (Email.Email email));
   check bool "another spelling is another account" true
-    (Accounts.email (Email.Native_home (account_home ^ "/")) = Email.Absent);
+    (Accounts.email (Email.Native_home {client = Email.Claude_code; home = account_home ^ "/"}) = Email.Absent);
+  check bool "another client on the same home is another account" true
+    (Accounts.email (Email.Native_home {client = Email.Codex; home = account_home}) = Email.Absent);
   check bool "a credential file with the same text is another account" true
     (Accounts.email (Email.Credential_file account_home) = Email.Absent);
   let records = List.fold_left Filename.concat directory ["masc"; "credentials"; "setup-accounts"; "account-emails"] in
@@ -235,21 +237,35 @@ let recorded_login_email () = fixture (fun directory _ ->
   check int "one record" 1 (List.length files);
   let record = Filename.concat records (List.hd files) in
   check int "record is private" 0o600 ((Unix.stat record).st_perm land 0o777);
+  (* The account's own login file names someone else: the inventory must show
+     the record, which it only can if it never reads that file. *)
+  write (Filename.concat account_home ".claude.json")
+    {|{"oauthAccount":{"emailAddress":"native-file@example.com"}}|};
   check (list (pair string string)) "inventory reads the record, only for selected accounts"
     [ "agy", {|{"integration_id":"agy","state":"absent"}|};
       "claude-selected", {|{"integration_id":"claude-selected","state":"recorded","email":"operator@example.com"}|} ]
     (inventory_rows (inventory_config ~account_home ~oauth_file));
-  check (list string) "inventory opens no account file" [] (Sys.readdir account_home |> Array.to_list);
   let original = In_channel.with_open_bin record In_channel.input_all in
-  write record (Yojson.Safe.to_string (`Assoc ["schema",`String "masc.setup_account_email.v1";
-    "account_kind",`String "native_home";"account",`String "/elsewhere";"email",`String "other@example.com"]));
+  let tampered fields = write record (Yojson.Safe.to_string (`Assoc
+    (["schema",`String "masc.setup_account_email.v2"; "account_kind",`String "claude_code_home"] @ fields))) in
+  tampered ["account",`String "/elsewhere"; "state",`String "email"; "email",`String "other@example.com"];
   check bool "a record naming another account is not shown" true (Accounts.email account = Email.Unreadable);
+  tampered ["account",`String account_home; "state",`String "not_read"; "cause",`String "vanished"];
+  check bool "an unknown cause is not shown" true (Accounts.email account = Email.Unreadable);
+  tampered ["account",`String account_home; "state",`String "email"];
+  check bool "an email state without an email is not shown" true (Accounts.email account = Email.Unreadable);
   write record original;
   Unix.chmod record 0o644;
   check bool "a readable-by-others record is not trusted" true (Accounts.email account = Email.Unreadable);
   Unix.chmod record 0o600;
-  Accounts.set_email account None |> get;
-  check bool "a later login without an email clears the old one" true (Accounts.email account = Email.Absent))
+  Accounts.set_email account Email.Login_unfinished |> get;
+  check bool "a started login replaces the old email" true
+    (Accounts.email account = Email.Record Email.Login_unfinished);
+  Accounts.set_email account (Email.Not_read Email.Not_reported) |> get;
+  check (list (pair string string)) "a login that read no email says why"
+    [ "agy", {|{"integration_id":"agy","state":"absent"}|};
+      "claude-selected", {|{"integration_id":"claude-selected","state":"not_read","cause":"not_reported"}|} ]
+    (inventory_rows (inventory_config ~account_home ~oauth_file)))
 
 let () = run "setup account references" ["private account",[
   test_case "native home revalidated on resolution" `Quick native_home_revalidated;

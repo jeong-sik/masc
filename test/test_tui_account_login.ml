@@ -303,10 +303,19 @@ let account_emails_beside_providers () =
   ok (Login.inventory t (with_emails [
     row "codex" "recorded" ["email", `String "operator@example.com"];
     row "claude-code" "absent" [];
+    row "muse-code" "not_read" ["cause", `String "source_unrecognized"];
     row "antigravity" "unreadable" [] ]));
   check (list string) "each selected account row names its email or why not"
     [ "> codex · operator@example.com"; "  claude-code · 이메일 기록 없음";
-      "  muse-code"; "  antigravity · 이메일 기록을 읽지 못함" ]
+      "  muse-code · 이메일 모름: 로그인 파일 형식을 모름"; "  antigravity · 이메일 기록을 읽지 못함" ]
+    (List.map Login.row_text (List.tl (Login.lines t)));
+  let t = Login.create "" in
+  ok (Login.inventory t (with_emails [
+    row "codex" "login_unfinished" [];
+    row "claude-code" "not_read" ["cause", `String "not_reported"] ]));
+  check (list string) "an unfinished login and an unreported email are told apart"
+    [ "> codex · 마지막 로그인이 끝나지 않음"; "  claude-code · 이메일 모름: 클라이언트가 알려 주지 않음";
+      "  muse-code"; "  antigravity" ]
     (List.map Login.row_text (List.tl (Login.lines t)));
   List.iter (fun (name, rows) ->
     let t = Login.create "" in
@@ -314,6 +323,10 @@ let account_emails_beside_providers () =
     [ "unknown state is refused", [ row "codex" "verified" [] ];
       "recorded without an email is refused", [ row "codex" "recorded" [] ];
       "an email on an absent record is refused", [ row "codex" "absent" ["email", `String "x@example.com"] ];
+      "an unknown cause is refused", [ row "codex" "not_read" ["cause", `String "vanished"] ];
+      "not read without a cause is refused", [ row "codex" "not_read" [] ];
+      "an email on an unfinished login is refused",
+      [ row "codex" "login_unfinished" ["email", `String "x@example.com"] ];
       "one account listed twice is refused", [ row "codex" "absent" []; row "codex" "unreadable" [] ];
       "an account for no listed integration is refused", [ row "missing" "absent" [] ] ];
   let fields = match inventory with `Assoc fields -> List.remove_assoc "account_emails" fields | _ -> [] in

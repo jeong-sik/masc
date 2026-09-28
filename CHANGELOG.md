@@ -78,9 +78,10 @@
   reason is shown over a fresh preview and nothing is removed until Enter is
   pressed again (#39664).
 - The Overview's Plan usage rows name each account's email, dim, under the
-  account name, read from `/api/v1/setup/inventory` when the Overview opens.
-  A failed read (the route needs Admin) is said in one note after the rows
-  (#39683).
+  account name. The TUI reads them on every Overview refresh from
+  `GET /api/v1/setup/account-emails`, an Admin route that returns only the
+  emails of the providers the loaded runtimes run on. A failed read, or rows
+  this build cannot read, are said in one note after the rows (#39683).
 - The runtime.toml pane of the TUI config screen adds one more Claude Code,
   Codex or Antigravity account with `a`: pick a provider the file already
   declares, keep or change the suggested id, and type where the new account
@@ -148,13 +149,13 @@
 - Setup reads each account's email from its official client's login file
   whenever `/api/v1/setup/inventory` is built, so a provider without
   `account-home` shows the email of the home it inherits, and a sign-in made
-  outside setup shows at once. `/login` and `masc runtime-account-login` no
-  longer write an email record. `account_emails` rows are `read` or
+  outside setup shows at once. `account_emails` rows are `read` or
   `not_read`; deploy the server and the TUI together (#39661).
 - A Claude Code provider on the inherited home shows no email while the
   server's environment gives it `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`,
-  `CLAUDE_CODE_OAUTH_TOKEN` or a cloud provider selection, which Claude Code
-  uses before its `/login` account; the row says so (#39661).
+  `CLAUDE_CODE_OAUTH_TOKEN` or a cloud provider switch Claude Code reads as
+  on, all of which it uses before its `/login` account; the row says so
+  (#39661).
 - The TUI Changes, Harness and Planning tables give up columns in an order
   each declares before they cut the column a reader reads the row for. At
   eighty columns Changes drops the turn and the task and shows 20 cells of
@@ -400,6 +401,14 @@
 - Login setup answers with its usual HTTP 503 preparation error, instead of
   failing the request, when the chosen account folder disappears during setup
   (#39588).
+- A `/login` model save the server refuses now shows the server's reason,
+  such as which runtime failed response and tool verification, instead of
+  a fixed "could not confirm the request" sentence. Other account login
+  requests keep their own error too (#39695).
+- The TUI Fusion detail heading keeps the connection badge whole, as the
+  Lane Run and Measurement headings do since #39684: the run id takes what
+  the title and the badge leave and is folded in the middle when it does
+  not fit, where it had been cut at 38 cells (#39698).
 
 ### Documentation
 

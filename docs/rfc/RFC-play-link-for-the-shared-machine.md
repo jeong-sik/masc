@@ -195,15 +195,22 @@ related: ["0439", "machine-spectating-goes-through-lanes"]
   읽을 이름. 예: `BTN_SOUTH = ["return"], "결정"`, `BTN_EAST = ["esc"], "취소"`.
   - 비어 있는 버튼을 누르면 거절하고 이유를 말한다. 기본값으로 무언가를 누르지 않는다.
   - 배치가 없는 프로그램에서는 패드가 열리지 않고 이유를 말한다. 키보드와 글자 입력 칸은 열린다.
-  - 배치는 `<.masc>/dos/pads/<프로그램 이름>.toml` 에 둔다. 체크포인트(`<.masc>/dos/checkpoints/`)와
+  - 배치는 `<.masc>/dos/pads/<saves 이름>.toml` 에 둔다. 체크포인트(`<.masc>/dos/checkpoints/`)와
     같은 층이다. 프로그램 디렉터리 안에는 두지 않는다. `masc_dos_load` 는 실행 파일 옆 파일을
     DOS 에 마운트하므로, 거기 두면 배치 파일이 게임 안에서 보인다.
+  - "프로그램 이름" 은 부팅한 파일이 아니라 saves 이름(`masc_dos_load` 에 준 인벤토리 이름)이다.
+    Koei 의 DOS 게임은 여러 편이 같은 `KOEI.COM` 으로 부팅한다. `Dos_lane.observation.saves_name` 이 이 이름이다.
+  - 워크스페이스 파일이 없으면 masc 에 들어 있는 기본 배치를 쓴다. 첫 기본 배치는 `samguk3` 하나다.
+    답은 어느 쪽 배치인지(`source: workspace | builtin`) 말한다. 워크스페이스 파일이 깨져 있으면
+    기본 배치로 넘어가지 않고 오류다.
   - 게임 지식(메뉴 순서, 저장 키)은 지금처럼 Skill 에 둔다. 배치는 버튼과 키의 짝만 담는다.
   - 배치 파일은 읽을 때 닫힌 타입으로 파싱한다. 모르는 버튼 이름이나 `Dos_machine.key_of_string`
     이 모르는 키 이름은 로드 오류다.
 - **패드로 안 되는 입력.** 삼국지3 은 병력·금 같은 숫자와 이름을 입력한다. 글자 입력 칸
   (화면 키패드 → `/api/v1/dos/type`)을 패드 옆에 둔다.
 - 폰이 주 무대다. QR 을 찍으면 화면과 터치 패드가 뜬다.
+- 실제 게임패드도 같은 버튼으로 읽는다. 브라우저 Gamepad API 의 표준 매핑(0 South, 1 East, 2 West,
+  3 North, 4·5 어깨, 8 Select, 9 Start, 12–15 십자키)만 읽고, 버튼을 누를 때 한 번 보낸다.
 
 ## 3. 범위
 

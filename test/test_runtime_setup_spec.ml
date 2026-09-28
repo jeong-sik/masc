@@ -130,6 +130,35 @@ let test_muse_requires_explicit_account_and_prompt_budget () =
     Alcotest.(check (option int)) "operator bytes retained without token conversion"
       (Some 16384) model.max_prompt_bytes
 
+(* Discovery lists Codex models from the declared provider's account home;
+   the saved provider must keep that home or it renders the ambient
+   account instead. *)
+let test_codex_account_home_preserved () =
+  let parse input =
+    match Runtime_setup_spec.of_json (Yojson.Safe.from_string input) with
+    | Ok spec -> spec | Error error -> Alcotest.fail (Runtime_setup_spec.error_message error) in
+  let base = {|"choice":"codex","model":"m","max_context":1024,"tools":true,"streaming":true|} in
+  let spec = parse ("{" ^ base ^ {|,"account_home":"/accounts/a"|} ^ "}") in
+  let rendered = Runtime_setup_spec.render spec in
+  let whole = "[runtime]\ndefault = " ^ Yojson.Safe.to_string (`String rendered.runtime_id) ^ "\n" ^ rendered.runtime_toml in
+  let home = match Runtime_toml.parse_string whole with
+    | Ok parsed -> (match parsed.Runtime_schema.providers with
+      | [ provider ] -> provider.Runtime_schema.account_home
+      | _ -> Alcotest.fail "rendered fragment declares one provider")
+    | Error _ -> Alcotest.fail "rendered account-home is not native runtime TOML" in
+  Alcotest.check (Alcotest.option Alcotest.string) "saved provider keeps the discovered account home"
+    (Some "/accounts/a") home;
+  let other = (Runtime_setup_spec.render (parse ("{" ^ base ^ {|,"account_home":"/accounts/b"|} ^ "}"))).runtime_id in
+  let ambient = (Runtime_setup_spec.render (parse ("{" ^ base ^ "}"))).runtime_id in
+  Alcotest.check Alcotest.bool "different account homes are different connections" true (rendered.runtime_id <> other);
+  Alcotest.check Alcotest.bool "a declared home leaves the ambient identity" true (rendered.runtime_id <> ambient);
+  List.iter (fun (label, input) ->
+    Alcotest.check Alcotest.bool label true
+      (Result.is_error (Runtime_setup_spec.of_json (Yojson.Safe.from_string input))))
+    [ "a relative account home is refused",
+      "{" ^ base ^ {|,"account_home":"accounts/a"|} ^ "}"
+    ; "an HTTP connection cannot carry an account home",
+      {|{"choice":"messages","model":"m","max_context":1024,"tools":true,"streaming":true,"endpoint":"https://fixture.invalid","provider_kind":"anthropic","account_home":"/accounts/a"}|} ]
 let () = Alcotest.run "native runtime setup spec" ["contract",[
   Alcotest.test_case "representative installer identity and TOML parity" `Quick test_existing_installer_contract;
   Alcotest.test_case "native fractional number identity" `Quick test_native_fractional_identity;
@@ -137,4 +166,5 @@ let () = Alcotest.run "native runtime setup spec" ["contract",[
   Alcotest.test_case "one answer is one connection" `Quick test_one_answer_is_one_connection;
   Alcotest.test_case "selected official accounts remain distinct" `Quick test_official_client_account_selection_is_identity;
   Alcotest.test_case "empty selected account does not inherit" `Quick test_empty_selected_account_never_becomes_ambient;
-  Alcotest.test_case "Muse account and byte budget are explicit" `Quick test_muse_requires_explicit_account_and_prompt_budget]]
+  Alcotest.test_case "Muse account and byte budget are explicit" `Quick test_muse_requires_explicit_account_and_prompt_budget;
+  Alcotest.test_case "codex account home survives save" `Quick test_codex_account_home_preserved]]

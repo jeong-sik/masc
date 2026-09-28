@@ -1316,13 +1316,14 @@ export type DashboardOfficialClientRecoveryFailure =
   | 'transport_interrupted'
   | 'protocol_failed'
   | 'provider_rejected'
+  | 'retryable_turn_failed'
   | 'host_hook_failed'
   | 'state_persistence_failed'
   | 'process_restarted'
   | 'vendor_session_full_no_activity'
   | 'vendor_session_full_after_activity'
 
-export type DashboardOfficialClientKind = 'codex' | 'claude_code' | 'antigravity'
+export type DashboardOfficialClientKind = 'codex' | 'claude_code' | 'antigravity' | 'muse'
 
 export interface DashboardOfficialClientSettlement {
   session_id: string
@@ -1375,7 +1376,7 @@ export interface DashboardOfficialClientRecoveryResolutionRecord {
 }
 
 export interface DashboardOfficialClientTransientReleaseRecord {
-  failure: 'pre_dispatch_failed' | 'transient_spawn_failed'
+  failure: 'pre_dispatch_failed' | 'transient_spawn_failed' | 'owner_stopped_turn' | 'retryable_turn_failed'
   owner_epoch: string
   released_at: number
 }
@@ -1456,6 +1457,7 @@ const OFFICIAL_CLIENT_RECOVERY_FAILURES = new Set<DashboardOfficialClientRecover
   'transport_interrupted',
   'protocol_failed',
   'provider_rejected',
+  'retryable_turn_failed',
   'host_hook_failed',
   'state_persistence_failed',
   'process_restarted',
@@ -1467,6 +1469,7 @@ const OFFICIAL_CLIENT_KINDS = new Set<DashboardOfficialClientKind>([
   'codex',
   'claude_code',
   'antigravity',
+  'muse',
 ])
 
 const OFFICIAL_CLIENT_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -1613,7 +1616,7 @@ function decodeOfficialClientTransientRelease(raw: unknown): DashboardOfficialCl
   const failure = typeof raw.failure === 'string' ? raw.failure : null
   const owner_epoch = decodeOfficialClientUuid(raw.owner_epoch)
   const released_at = asNumber(raw.released_at)
-  if ((failure !== 'transient_spawn_failed' && failure !== 'pre_dispatch_failed') || !owner_epoch || released_at == null) return null
+  if ((failure !== 'pre_dispatch_failed' && failure !== 'transient_spawn_failed' && failure !== 'owner_stopped_turn' && failure !== 'retryable_turn_failed') || !owner_epoch || released_at == null) return null
   return { failure, owner_epoch, released_at }
 }
 

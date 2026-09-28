@@ -474,7 +474,7 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
         | n -> Some (Printf.sprintf "%d %s" n label))
       [ (Overview_team.Needs_you, "need you")
       ; (Overview_team.Working, "working")
-      ; (Overview_team.Idle, "idle")
+      ; (Overview_team.Idle, "no work")
       ; (Overview_team.No_phase, "no phase")
       ; (Overview_team.Paused, "paused")
       ; (Overview_team.Stopped, "stopped")
@@ -16085,7 +16085,9 @@ let render_config (state : state) =
          cells (78 of 150 at the time) but because nobody wrote Esc or q
          into it. It also named PgUp/PgDn, which the table did not have, so
          the two had drifted in both directions. *)
-      (Masc_tui_keys.footer_hints_config ~pane:state.config_pane)
+      (match state.runtime_account_form with
+       | Some _ -> Masc_tui_keys.footer_hints_runtime_account_form ()
+       | None -> Masc_tui_keys.footer_hints_config ~pane:state.config_pane)
     ~body:(fun ~budget:_ c ->
       (* Where this server reads from, and how old the binary serving it is.
          A stale binary answers every request as confidently as a current
@@ -16150,6 +16152,11 @@ let render_config (state : state) =
           ("  " ^ Terminal_text.single_line text)) (config_metadata_summary state);
       c.push_divider ();
       let content_height = config_content_height state in
+      (* The account form stands where the file is drawn: it is opened on that
+         file, and what it saves is that file with one provider added. *)
+      match state.runtime_account_form with
+      | Some form -> List.iter c.push (Masc_tui_runtime_account_form.rows form)
+      | None ->
       match state.runtime_config_view_error, state.runtime_config_view with
       | Some detail, _ ->
           c.push ((Theme.bad ()) ^ "  " ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset)

@@ -1503,7 +1503,7 @@ account-home = "/synthetic/muse"
 is-non-interactive = true
 [models.muse_fixture]
 api-name = "synthetic-model"
-max-context = 8192
+max-context = 200000
 ${declared ? 'max-prompt-bytes = 45678' : ''}
 ` })
     render(html`<${RuntimeTomlEditor} />`, container)

@@ -814,18 +814,18 @@ val entry_runtime_id_of_route : string -> string option
     answers [None] for a lane name. *)
 
 val smallest_max_prompt_bytes_of_route : string -> int option
-(** The smallest [max-prompt-bytes] declared by any candidate the route may
-    walk: every candidate of a declared lane, or the runtime itself when the
-    route names one. A candidate that declares none adds no ceiling and does
-    not erase one a sibling declares. [None] when no candidate declares a
-    ceiling, or when the route names neither a lane nor a runtime. *)
+(** The smallest start-prompt ceiling ({!prompt_capacity_bytes}) of any
+    candidate the route may walk: every candidate of a declared lane, or the
+    runtime itself when the route names one. A candidate without one adds no
+    ceiling and does not erase one a sibling has. [None] when no candidate
+    has a ceiling, or when the route names neither a lane nor a runtime. *)
 
 val smallest_max_prompt_bytes_of_runtime_ids : string list -> int option
-(** The smallest [max-prompt-bytes] declared by the named runtimes, for a
-    walk whose candidate list is already fixed (a deferred lane suffix). An id
-    that declares none, or that the loaded catalog does not hold, adds no
-    ceiling and does not erase one another id declares. [None] when no named
-    runtime declares a ceiling. *)
+(** The smallest start-prompt ceiling ({!prompt_capacity_bytes}) of the
+    named runtimes, for a walk whose candidate list is already fixed (a
+    deferred lane suffix). An id without one, or that the loaded catalog does
+    not hold, adds no ceiling and does not erase one another id has. [None]
+    when no named runtime has a ceiling. *)
 
 val get_runtime_by_id : string -> t option
 (** [get_runtime_by_id id] is the materialized runtime whose binding-key id
@@ -933,11 +933,17 @@ val quota_scope_of_runtime_id : string -> Runtime_quota_window.scope option
     the runtime id is unknown. Consumed by
     {!Runtime_quota_window.demote_order} and the matching note site. *)
 
+val muse_prompt_capacity : t -> (int, Runtime_muse_prompt_capacity.error) result
+(** The start-prompt ceiling of a Muse runtime: derived from its resolved
+    window ({!resolve_max_context_of_runtime}) and narrowed by a declared
+    [max-prompt-bytes] ({!Runtime_muse_prompt_capacity.start_prompt_bytes}).
+    A Muse turn applies this and refuses with the error's cause. *)
+
 val prompt_capacity_bytes : t -> int option
 (** The start-prompt ceiling a turn on this runtime applies: the model's
-    declared [max-prompt-bytes], or for a Muse model without one the ceiling
-    derived from its resolved window ({!resolve_max_context_of_runtime},
-    {!Runtime_muse_prompt_capacity}). [None] when neither applies. *)
+    declared [max-prompt-bytes], or for a Muse model {!muse_prompt_capacity}.
+    [None] when no ceiling applies, which for Muse means the ceiling cannot
+    be derived and the turn itself refuses. *)
 
 val max_prompt_bytes_of_runtime_id : string -> int option
 (** {!prompt_capacity_bytes} of the runtime with this id, or [None] when the
@@ -948,9 +954,9 @@ val context_marks_of_runtime_id : string -> Runtime_schema.context_marks option
     (the keeper then evicts carried history only on a provider refusal). *)
 
 val validate_muse_prompt_ceilings : t list -> (unit, load_failure) result
-(** Refuses a Muse runtime without [max-prompt-bytes] whose resolved window
-    cannot hold the host's own overhead, so no start-prompt ceiling can be
-    derived ({!prompt_capacity_bytes}). *)
+(** Refuses a Muse runtime whose resolved window cannot hold the host's own
+    overhead, so no start-prompt ceiling exists ({!muse_prompt_capacity})
+    whatever [max-prompt-bytes] it declares. *)
 
 val validate_runtime_context_marks : t list -> (unit, load_failure) result
 (** Refuses a runtime whose high-water mark exceeds its resolved max-context;

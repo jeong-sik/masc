@@ -58,10 +58,10 @@ bin/masc_cli_codex_models.ml
 # before returning a nonzero exit code; its stdout is the model-list JSON receipt.
 # This is user-facing one-shot CLI output, not a running server log.
 bin/masc_cli_muse_models.ml
-# masc_cli_muse_login reports a refused account HOME or a client that could not
-# start on stderr before the installer reads its exit code; on success the
-# process becomes the official client. User-facing CLI output.
-bin/masc_cli_muse_login.ml
+# masc_cli_account_login reports a refused account HOME or a client that could
+# not start on stderr before the installer reads its exit code; the official
+# client's own output goes straight to the terminal. User-facing CLI output.
+bin/masc_cli_account_login.ml
 # gen_board_tool_registry is a Dune-time generator; its eprintf reports a
 # malformed or incomplete Board TOML declaration to the build operator.
 bin/gen_board_tool_registry.ml

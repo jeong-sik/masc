@@ -25,3 +25,14 @@ source. A file adapted from another project carries its notice in the same packa
 | File | Notice | Upstream |
 |---|---|---|
 | `skills/root-cause-first/references/root-cause-tracing.md` | [MIT](skills/root-cause-first/references/superpowers-LICENSE.txt), Copyright (c) 2025 Jesse Vincent | [obra/superpowers](https://github.com/obra/superpowers) `skills/systematic-debugging/root-cause-tracing.md` |
+
+## Adapted TUI source
+
+The TUI's imp emblem adapts openai/codex's empty-state animation. The adapted
+files say in their header what was kept and what was changed; Codex's license
+and NOTICE sit beside them.
+
+| File | Notice | Upstream |
+|---|---|---|
+| `bin/masc_tui_imp_emblem.ml` | [Apache-2.0](bin/codex-empty-state-animation-LICENSE.txt), [NOTICE](bin/codex-empty-state-animation-NOTICE.txt), Copyright 2025 OpenAI | [openai/codex](https://github.com/openai/codex) `codex-rs/tui/src/empty_state_animation/{renderer,lighting,sequence}.rs` at `5c5308fc9a9e` |
+| `bin/masc_tui_imp_shape.ml` | [Apache-2.0](bin/codex-empty-state-animation-LICENSE.txt), [NOTICE](bin/codex-empty-state-animation-NOTICE.txt), Copyright 2025 OpenAI | [openai/codex](https://github.com/openai/codex) `codex-rs/tui/src/empty_state_animation/geometry.rs` at `5c5308fc9a9e` |

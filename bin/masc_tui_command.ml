@@ -218,7 +218,7 @@ let catalog =
   ; { word = "about"
     ; aliases = [ "splash" ]
     ; args = ""
-    ; summary = "display MASC Horned Reaper ASCII emblem and system telemetry"
+    ; summary = "the turning MASC imp, with the theme and the keeper count"
     }
   ; { word = "metrics"
     ; aliases = [ "telemetry" ]
@@ -835,25 +835,3 @@ let is_slash_navigable ?(keeper_names = []) text =
         let rest = String.trim after_space in
         List.exists (fun opt -> String.starts_with ~prefix:rest opt) options
 
-(* Every value in the box is one the caller read. A row that said "Gates: All
-   Secure" sat beside the keeper count in the same frame and style, and nothing
-   here is given a gate to read -- it described a state no one had checked. *)
-let about_banner ?(theme_name = "default") ?active_keepers () =
-  let keepers =
-    match active_keepers with
-    | Some (Ok count) -> string_of_int count
-    | Some (Error _) -> "unavailable"
-    | None -> "not loaded"
-  in
-  String.concat "\n"
-    [ "   ___  ___  ___  _____ _____ "
-    ; "  |   \\/   |/ _ \\/  ___/  __ \\"
-    ; "  | /\\  / / /_\\ \\ `--.| /  \\/"
-    ; "  | | \\/| |  _  | `--. \\ |    "
-    ; "  | |   | | | | /\\__/ / \\__/\\"
-    ; "  \\_|   |_|_| |_\\____/ \\____/"
-    ; " ╭────────────────────────────────────────────────────────╮"
-    ; " │  HORNED REAPER CORE · Multi-Agent Shared Context       │"
-    ; Printf.sprintf " │  Theme: %-22s  Keepers: %-13s │" theme_name keepers
-    ; " ╰────────────────────────────────────────────────────────╯"
-    ]

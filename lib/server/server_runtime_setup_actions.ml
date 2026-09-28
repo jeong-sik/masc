@@ -243,6 +243,26 @@ let select_account ~base_path request =
     "account_ref", `String (Runtime_setup_accounts.reference_to_string reference);
     "account_selected", `Bool true; "invocation_verified", `Bool false])
 
+let login_target ~base_path ~integration_id =
+  let* config = config ~base_path in
+  let rows = match Runtime_wizard_inventory.to_json config with
+    | `Assoc row -> (match value "integrations" row with `List rows -> rows | _ -> [])
+    | _ -> [] in
+  let* selected = match List.filter_map (function
+    | `Assoc row when value "id" row = `String integration_id -> Some row
+    | _ -> None) rows with
+    | [row] -> Ok row | _ -> Error Invalid_request in
+  let* protocol = text (value "protocol" selected) in
+  let* selected_choice = choice config ~id:integration_id ~protocol in
+  let* client = match selected_choice with
+    | Runtime_setup_spec.Codex -> Ok Runtime_setup_login_client.Codex
+    | Claude_code -> Ok Runtime_setup_login_client.Claude
+    | Antigravity -> Ok Runtime_setup_login_client.Antigravity
+    | Muse -> Ok Runtime_setup_login_client.Muse
+    | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages -> Error Unsupported_connection in
+  let* command = text (value "command" selected) in
+  Ok (client, command)
+
 let selected_home_args template = match value "account_home" template with
   | `String home -> ["--account-home"; home]
   | _ -> []

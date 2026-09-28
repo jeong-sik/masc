@@ -70,7 +70,8 @@ val request_to_yojson :
 
 val answer_of_yojson : Yojson.Safe.t -> (answer, string) result
 (** Rejects non-finite values in every numeric answer field, including
-    confidence and probability maps, before they can enter durable JSON. *)
+    confidence and probability maps, before they can enter durable JSON.
+    Choice and score confidence must also be within [0, 1]. *)
 
 val answer_to_yojson : answer -> Yojson.Safe.t
 val eval_response_of_yojson : Yojson.Safe.t -> (eval_response, string) result

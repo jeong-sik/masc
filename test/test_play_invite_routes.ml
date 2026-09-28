@@ -173,6 +173,27 @@ let test_invite_routes () =
           (Result.is_error (Auth.find_credential_by_token base_path ~token:player));
         check int "revoking it again finds nothing" 404
           (status_of (call ~token:operator "DELETE" (invites ^ "/minsu")));
+        (* A request the invitee sent before the delete can take the freed
+           controller after it. Revoking again frees it. *)
+        let dir = Filename.temp_dir "play-invite-retake-" "" in
+        Fun.protect
+          ~finally:(fun () ->
+            (match Dos_lane.eject ~who:"operator" ~announce:ignore () with
+             | Ok () | Error _ -> ());
+            remove_tree dir)
+          (fun () ->
+            dos_ok "load"
+              (Dos_lane.load ~who:"operator" ~ledger_dir:(Filename.concat dir "ledger")
+                 ~saves_dir:(Filename.concat dir "saves")
+                 ~checkpoint_dir:(Filename.concat dir "checkpoints") ~program_name:"game.com"
+                 ~program_bytes:hello_com ~files:[] ~announce:ignore);
+            dos_ok "the late request" (Dos_lane.pass ~who:"operator" ~to_:(Some "minsu") ~announce:ignore);
+            let freed = call ~token:operator "DELETE" (invites ^ "/minsu") in
+            check int "revoking a gone invite that holds the controller frees it" 200 (status_of freed);
+            check bool "it says nothing was revoked" false (bool_member "revoked" (body_of freed));
+            check bool "and that the controller was freed" true
+              (bool_member "released_controller" (body_of freed));
+            check (option string) "nobody holds the controller" None (controller ()));
         let not_invite = call ~token:operator "DELETE" (invites ^ "/codex") in
         check int "a worker's credential is not an invite" 409 (status_of not_invite);
         check bool "and the worker keeps it" true (Option.is_some (Auth.load_credential base_path "codex")))))

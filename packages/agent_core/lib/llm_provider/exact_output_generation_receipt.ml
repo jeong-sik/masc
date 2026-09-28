@@ -75,8 +75,12 @@ let create
   }
 ;;
 
-let try_start receipt =
-  Atomic.compare_and_set receipt.state Not_started_state Before_dispatch_state
+(* An attempt is started once, by the flow step that allocated it; nothing
+   else holds the attempt. A second start is a bug in that step, not an
+   outcome a caller can act on. *)
+let start receipt =
+  if not (Atomic.compare_and_set receipt.state Not_started_state Before_dispatch_state)
+  then invalid_arg "Exact_output: generation attempt started twice"
 ;;
 
 let call_id (receipt : t) = receipt.call_id

@@ -492,6 +492,12 @@ let client_environment ?storage_root account_home prepared_home =
   Array.of_list selected
 ;;
 
+let login_environment ~account_home =
+  (* The official launcher otherwise forks a detached install/update job before
+     executing login. Setup owns one login process, not a shared installation
+     update or its independent download-authentication flow. *)
+  Array.append [|"MUSE_NO_AUTO_UPDATE=1"|] (client_environment (Some account_home) None)
+
 let client_argv config =
   [ config.cli_path; "serve" ]
   @ (match config.native with
@@ -721,7 +727,7 @@ let request io ~method_ build =
   await_response io ~id ~method_
 ;;
 
-let handshake io ~requested_capabilities =
+let handshake io ~requested_capabilities ~requires_durable_session =
   let* result =
     request io ~method_:"initialize" (fun ~id ->
       Msp.initialize_request
@@ -734,7 +740,7 @@ let handshake io ~requested_capabilities =
   let* () =
     match init.Msp.session_durability with
     | Msp.Durable -> Ok ()
-    | Msp.Ephemeral -> Error Session_not_durable
+    | Msp.Ephemeral -> if requires_durable_session then Error Session_not_durable else Ok ()
   in
   let* () =
     match
@@ -1020,7 +1026,7 @@ let run_protocol
     | [] -> []
     | _ :: _ -> [ Msp.Session_mcp ]
   in
-  let* init = handshake io ~requested_capabilities in
+  let* init = handshake io ~requested_capabilities ~requires_durable_session:true in
   let* session, resumed =
     open_session
       io
@@ -1200,7 +1206,18 @@ let read_usage ~mgr ~clock ~cwd config =
   let* config = prepare_account_config config in
   guard_idle_timeout (fun () ->
     with_spawned_client ~mgr ~clock ~cwd config (fun io ->
-      let* (_ : Msp.initialize_result) = handshake io ~requested_capabilities:[] in
+      let* (_ : Msp.initialize_result) = handshake io ~requested_capabilities:[] ~requires_durable_session:true in
       let* result = request io ~method_:"usage/read" (fun ~id -> Msp.usage_read_request ~id) in
       lift (Msp.parse_usage_read_result result)))
+;;
+
+let list_models ~mgr ~clock ~cwd config =
+  let* () = validate_process_config config in
+  let* config = prepare_account_config config in
+  guard_idle_timeout (fun () ->
+    with_spawned_client ~mgr ~clock ~cwd config (fun io ->
+      let* (_ : Msp.initialize_result) = handshake io ~requested_capabilities:[]
+          ~requires_durable_session:false in
+      let* result = request io ~method_:"model/list" Msp.model_list_request in
+      lift (Msp.parse_model_list_result result)))
 ;;

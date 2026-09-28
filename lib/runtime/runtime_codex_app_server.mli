@@ -358,6 +358,8 @@ val input_capacity_refusal : error -> input_capacity option
     remain ordinary RPC errors. Counts come from the server, never a local cap. *)
 
 val error_to_string : error -> string
+val client_environment : string option -> (string array, error) result
+(** Selected-account child environment shared by execution and explicit login. *)
 
 val refused_for_spent_usage : error -> bool
 (** [true] when the account refused the turn because its usage is spent: the

@@ -14,6 +14,7 @@ let target =
   testable
     (Fmt.of_to_string (function
       | None -> "none"
+      | Some Tui_types.Text_account_login -> "account-login"
       | Some Tui_types.Text_preset_name -> "preset-name"
       | Some Tui_types.Text_runtime_lane_name -> "runtime-lane-name"
       | Some Tui_types.Text_runtime_param -> "runtime-param"

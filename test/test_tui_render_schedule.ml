@@ -1475,7 +1475,6 @@ let lane_probe =
   ; lrow_status = "C"
   ; lrow_elapsed = "D"
   ; lrow_slot = "E"
-  ; lrow_run_id = "F"
   }
 
 let lane_overflowing =
@@ -1484,7 +1483,6 @@ let lane_overflowing =
   ; lrow_elapsed = "1234.5s"
   ; lrow_status = "cancelled-by-operator"
   ; lrow_slot = "antigravity_subscription.gemini-3-8-flash-high"
-  ; lrow_run_id = "run-1788427841647-00000-abcdef"
   }
 
 let change_probe =
@@ -1505,29 +1503,121 @@ let change_overflowing =
   ; crow_summary = String.concat "" (List.init 20 (fun _ -> "summary "))
   }
 
+let lane_identity_header = "ACTOR"
+
+let lane_header_of ~layout =
+  Schedule.lane_run_header_row ~identity_header:lane_identity_header ~layout
+
+let lane_header_width layout =
+  Masc_tui_message_layout.display_width (lane_header_of ~layout)
+
+let lane_every_column =
+  Schedule.[ Lane_started; Lane_subject; Lane_status; Lane_elapsed; Lane_slot ]
+
+let lane_without_start =
+  Schedule.[ Lane_subject; Lane_status; Lane_elapsed; Lane_slot ]
+
+(* The widths the list is read at, as table insides: the frame's four cells
+   and the row's two of lead come off the terminal's width. Every column
+   needs 56 cells with its gaps, and the slot's floor is 24.
+   - 80 columns leave 74: the start time goes, and the slot has 36.
+   - 100 columns leave 94: everything is drawn, the slot has 38.
+   - 158 columns open the Activity pane, which leaves the body 102 cells,
+     so 96: the slot has 40. *)
+let test_the_lane_run_list_at_the_widths_it_is_read_at () =
+  List.iter
+    (fun (where, inner_width, shown, slot) ->
+      let layout = Schedule.lane_run_layout ~inner_width in
+      check bool
+        (Printf.sprintf "%s: the columns drawn" where)
+        true
+        (layout.Masc_tui_table.shown = shown);
+      check int
+        (Printf.sprintf "%s: the slot's cells" where)
+        slot layout.Masc_tui_table.flex_width;
+      check int
+        (Printf.sprintf "%s: the row ends at the frame" where)
+        inner_width (lane_header_width layout))
+    [ ("80 columns", 74, lane_without_start, 36)
+    ; ("100 columns", 94, lane_every_column, 38)
+    ; ("158 columns beside the Activity pane", 96, lane_every_column, 40)
+    ]
+
+(* Narrower: the elapsed time follows the start time, and what the run was
+   for, how it ended and its slot stay. Without the start the rest need 62
+   cells; without the elapsed time too, 53, and the row is that wide. *)
+let test_a_narrow_lane_run_list_gives_up_columns_in_its_order () =
+  let at inner_width = Schedule.lane_run_layout ~inner_width in
+  check bool "at 62 only the start time has gone" true
+    ((at 62).Masc_tui_table.shown = lane_without_start);
+  check bool "at 61 the elapsed time follows" true
+    ((at 61).Masc_tui_table.shown
+    = Schedule.[ Lane_subject; Lane_status; Lane_slot ]);
+  let narrowest = at 20 in
+  check bool "the subject, the status and the slot never go" true
+    (narrowest.Masc_tui_table.shown
+    = Schedule.[ Lane_subject; Lane_status; Lane_slot ]);
+  check int "the slot stays at its floor" 24
+    narrowest.Masc_tui_table.flex_width;
+  check int "the row is wider than the space, as the frame's cut expects" 53
+    (lane_header_width narrowest)
+
+(* The columns placed by their left edge, with the reading the probe puts in
+   each; the elapsed time is right-aligned and placed by its right edge. A
+   column the list has given up has no name in the header and no reading in
+   the row. No width names a run id. *)
+let lane_left_cells =
+  Schedule.
+    [ (Lane_started, "STARTED", "A")
+    ; (Lane_subject, lane_identity_header, "B")
+    ; (Lane_status, "STATUS", "C")
+    ; (Lane_slot, "SLOT", "E")
+    ]
+
+let check_lane_cells ~layout ~header ~row ~inner_width =
+  let placed_or_gone column label mark place =
+    if List.mem column layout.Masc_tui_table.shown then place ()
+    else begin
+      check bool
+        (Printf.sprintf "inner %d: %s has left the header" inner_width label)
+        true
+        (index_of header label = None);
+      check bool
+        (Printf.sprintf "inner %d: %s has left the row" inner_width label)
+        true
+        (index_of row mark = None)
+    end
+  in
+  List.iter
+    (fun (column, label, mark) ->
+      placed_or_gone column label mark (fun () ->
+          check_left_cell label mark ~header ~row ~inner_width))
+    lane_left_cells;
+  placed_or_gone Schedule.Lane_elapsed "ELAPSED" "D" (fun () ->
+      check_right_cell "ELAPSED" "D" ~header ~row ~inner_width);
+  check bool
+    (Printf.sprintf "inner %d: no RUN ID column" inner_width)
+    true
+    (index_of header "RUN ID" = None)
+
+(* From below the slot's floor, so every width at which a column goes is
+   crossed. *)
 let test_lane_columns_hold_their_offsets () =
-  for inner_width = 80 to 240 do
-    let run_id_width = Schedule.lane_run_id_width ~inner_width in
-    let identity_header = "ACTOR" in
+  for inner_width = 20 to 240 do
+    let layout = Schedule.lane_run_layout ~inner_width in
     let width text = Masc_tui_message_layout.display_width text in
-    let header =
-      Schedule.lane_run_header_row ~identity_header ~run_id_width
-    in
+    let header = lane_header_of ~layout in
     let row =
-      Schedule.lane_run_row ~identity_header ~status_style:"" ~run_id_width
-        lane_probe
+      Schedule.lane_run_row ~identity_header:lane_identity_header
+        ~status_style:"" ~layout lane_probe
     in
-    check_left_cell "STARTED" "A" ~header ~row ~inner_width;
-    check_left_cell identity_header "B" ~header ~row ~inner_width;
-    check_left_cell "STATUS" "C" ~header ~row ~inner_width;
-    check_left_cell "SLOT" "E" ~header ~row ~inner_width;
-    check_left_cell "RUN ID" "F" ~header ~row ~inner_width;
+    check_lane_cells ~layout ~header ~row ~inner_width;
     check int
       (Printf.sprintf "inner %d: a dressed overflowing run" inner_width)
       (width header)
       (width
-         (Schedule.lane_run_row ~identity_header ~status_style:"\027[31m"
-            ~run_id_width lane_overflowing))
+         (Schedule.lane_run_row ~identity_header:lane_identity_header
+            ~status_style:"\027[31m" ~layout lane_overflowing))
   done
 
 let test_change_columns_hold_their_offsets () =
@@ -1581,7 +1671,7 @@ let test_headers_fit_their_columns () =
             ~message_width:(Schedule.system_log_message_width ~inner_width) )
       ; ( "lane run"
         , Schedule.lane_run_header_row ~identity_header:"ACTOR"
-            ~run_id_width:(Schedule.lane_run_id_width ~inner_width) )
+            ~layout:(Schedule.lane_run_layout ~inner_width) )
       ; ( "change"
         , Schedule.change_header_row
             ~summary_width:(Schedule.change_summary_width ~inner_width) )
@@ -2609,6 +2699,10 @@ let () =
             test_system_log_header_and_row_share_their_offsets
         ; test_case "lane columns hold their offsets" `Quick
             test_lane_columns_hold_their_offsets
+        ; test_case "the lane run list at the widths it is read at" `Quick
+            test_the_lane_run_list_at_the_widths_it_is_read_at
+        ; test_case "a narrow lane run list gives up columns in its order"
+            `Quick test_a_narrow_lane_run_list_gives_up_columns_in_its_order
         ; test_case "change columns hold their offsets" `Quick
             test_change_columns_hold_their_offsets
         ; test_case "harness columns hold their offsets" `Quick

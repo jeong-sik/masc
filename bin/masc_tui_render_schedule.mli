@@ -357,24 +357,33 @@ type lane_run_row_values = {
   lrow_status : string;
   lrow_elapsed : string;
   lrow_slot : string;
-  lrow_run_id : string;
 }
 
-val lane_run_id_width : inner_width:int -> int
-(** Cells the run id may occupy: the remainder, never below
-    {!lane_minimum_run_id_width}. *)
+(** The list's columns, named so a narrow list can say which it spares. *)
+type lane_run_column =
+  | Lane_started
+  | Lane_subject
+  | Lane_status
+  | Lane_elapsed
+  | Lane_slot
 
-val lane_run_header_row : identity_header:string -> run_id_width:int -> string
+val lane_run_layout : inner_width:int -> lane_run_column Masc_tui_table.layout
+(** The columns the list draws in [inner_width] and the slot's share of it.
+    A narrow list gives up the start time and then the elapsed time; the
+    subject, the status and the slot stay, the slot never below its floor. *)
+
+val lane_run_header_row :
+  identity_header:string -> layout:lane_run_column Masc_tui_table.layout -> string
 
 val lane_run_row :
   identity_header:string ->
   status_style:string ->
-  run_id_width:int ->
+  layout:lane_run_column Masc_tui_table.layout ->
   lane_run_row_values ->
   string
 (** One run, on the same columns as {!lane_run_header_row}. [identity_header]
-    names the second column, which reads differently for one keeper's runs and
-    for a fleet's. *)
+    names the subject column: the Verifier's runs are about a task or a goal,
+    every other lane's about who asked. *)
 
 (** {1 File change columns} *)
 

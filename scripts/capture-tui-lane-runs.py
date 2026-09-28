@@ -13,7 +13,7 @@ Frames:
     01-lanes-overview-standalone.png — Lanes overview, cursor band on the
         Board Attention standalone row (k clamps at the first standalone row).
     02-lane-run-list.png — Enter on Board Attention: "MASC Lanes · Board
-        Attention (N runs)", STARTED/ACTOR/STATUS/ELAPSED/SLOT/RUN ID columns.
+        Attention (N runs)", STARTED/ACTOR/STATUS/ELAPSED/SLOT columns.
     03-lane-run-detail.png — Enter on an exact-output run: sticky decision,
         execution, and Tool summaries above side-by-side prompt/model JSON.
     04-verifier-run-list.png — Verifier's retained Task/Goal decisions with
@@ -78,6 +78,8 @@ TERMINAL_VERIFIER_STATUSES = (
     "raised",
 )
 RUN_STATUS_COLUMN_CELLS = 11
+# The run list's column that no width gives up, so it marks the header row.
+RUN_LIST_HEADER = "SLOT"
 
 # Length-preserving placeholder: a terminal row is a grid, so a replacement
 # that is shorter than the name it covers moves every cell after it.
@@ -377,12 +379,12 @@ def select_standalone_lane(page: Page, label: str) -> None:
 def first_succeeded_row_index(text: str) -> int:
     """Index of the first run-list row whose STATUS reads succeeded, or 0.
 
-    Rows sit below the RUN ID column header; a header/footer line never
+    Rows sit below the column header; a header/footer line never
     carries the status word.
     """
     lines = text.splitlines()
     try:
-        header = next(i for i, line in enumerate(lines) if "RUN ID" in line)
+        header = next(i for i, line in enumerate(lines) if RUN_LIST_HEADER in line)
     except StopIteration:
         return 0
     index = 0
@@ -400,9 +402,9 @@ def first_terminal_verifier_row(text: str) -> tuple[int, str]:
     """Return the first completed Verifier row and its typed status label."""
     lines = text.splitlines()
     try:
-        header = next(i for i, line in enumerate(lines) if "RUN ID" in line)
+        header = next(i for i, line in enumerate(lines) if RUN_LIST_HEADER in line)
     except StopIteration as error:
-        raise WaitFailed("Verifier run list has no RUN ID header") from error
+        raise WaitFailed(f"Verifier run list has no {RUN_LIST_HEADER} header") from error
     index = 0
     for line in lines[header + 1 :]:
         if re.search(r"\b\d{2}-\d{2} \d{2}:\d{2}:\d{2}\b", line):
@@ -518,7 +520,7 @@ def main() -> int:
                 # "Board Attention" here also proves frame 1's selection.
                 press(page, "Enter")
                 text = wait_text(
-                    page, "Board Attention", "RUN ID", "Right / Enter:prompt"
+                    page, "Board Attention", RUN_LIST_HEADER, "Right / Enter:prompt"
                 )
                 page.wait_for_timeout(500)
                 saved.append(capture(page, pairs, args.out, "02-lane-run-list"))
@@ -551,13 +553,13 @@ def main() -> int:
                 # 4. Back to the overview (Esc detail -> list, Esc list ->
                 # overview), then open the Verifier decision ledger.
                 press(page, "Escape")
-                wait_text(page, "RUN ID")
+                wait_text(page, RUN_LIST_HEADER)
                 press(page, "Escape")
                 wait_text(page, "Standalone LLM lanes", "Board Attention")
                 select_standalone_lane(page, "Verifier")
                 press(page, "Enter")
                 verifier_list = wait_text(
-                    page, "MASC Lanes", "Verifier", "SUBJECT", "RUN ID"
+                    page, "MASC Lanes", "Verifier", "SUBJECT", RUN_LIST_HEADER
                 )
                 page.wait_for_timeout(500)
                 saved.append(capture(page, pairs, args.out, "04-verifier-run-list"))

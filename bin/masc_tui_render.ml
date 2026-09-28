@@ -6339,16 +6339,15 @@ let render_lane_run_list (state : state) ~(lane : Standalone_lane.t) =
     | Standalone_lane.Workspace_curator
     | Standalone_lane.Browser_stagehand -> "ACTOR"
   in
-  (* The run id takes what the named columns leave; it used to run off the
-     header with no end while the row cut it at twelve. *)
-  let run_id_width =
-    Render_schedule.lane_run_id_width
+  (* Two cells of lead ahead of the first column, the same on every row. *)
+  let layout =
+    Render_schedule.lane_run_layout
       ~inner_width:(max 1 (framed_inner_width cols - 2))
   in
   box_line_styled buf cols ~style:(Theme.recede ())
     ("  "
     ^ Render_schedule.lane_run_header_row ~identity_header:identity_heading
-        ~run_id_width);
+        ~layout);
   box_divider buf cols;
   (match state.lane_runs_error with
    | None -> ()
@@ -6396,7 +6395,7 @@ let render_lane_run_list (state : state) ~(lane : Standalone_lane.t) =
             "  "
             ^ Render_schedule.lane_run_row ~identity_header:identity_heading
                 ~status_style:(lane_run_status_style run.lrs_status)
-                ~run_id_width
+                ~layout
                 { Render_schedule.lrow_started =
                     lane_run_clock run.lrs_started_at
                 ; lrow_subject =
@@ -6407,7 +6406,6 @@ let render_lane_run_list (state : state) ~(lane : Standalone_lane.t) =
                 ; lrow_slot =
                     Terminal_text.single_line_or ~default:Masc_tui_theme.Glyph.no_value
                       run.lrs_selected_slot
-                ; lrow_run_id = Terminal_text.single_line run.lrs_run_id
                 }
           in
           if index + scroll = state.lane_runs_cursor then
@@ -6991,11 +6989,15 @@ let render_lane_run_detail (state : state) ~run_id =
         Some (Inspection_lane detail)
     | Some _ | None -> None
   in
+  (* The id is what this heading names, so it is drawn whole; the connection
+     badge takes what the title and the id leave, and is what a narrow frame
+     cuts. Ids run to 54 cells (exact-board-attention- and 32 hex digits). *)
   let header =
-    Printf.sprintf "%s  %s  %s"
-      (screen_title (if measurement then " MASC Measurement" else " MASC Lane Run"))
-      (fit_width (Terminal_text.single_line run_id) 38)
-      (connection_badge state)
+    row_with_field ~cols
+      ~lead:
+        (screen_title (if measurement then " MASC Measurement" else " MASC Lane Run")
+        ^ "  " ^ Terminal_text.single_line run_id ^ "  ")
+      ~field:(connection_badge state) ~tail:""
   in
   box_top buf cols;
   box_line buf cols header;

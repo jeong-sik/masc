@@ -832,20 +832,21 @@ let schedule_row ?status_style ?wake_style ?recurrence_style ~target_width
 
 (* Lane run columns.
 
-   The header and the rows carried the same six widths in two format strings,
-   the row's with the status colour spliced between two of them. The run id was
-   the tail of the header and a twelve-cell fit in the row, so the column the
-   header opened had no end and the reading in it had one nobody could see. *)
+   A row says when a run started, what or whom it was for, how it ended, how
+   long it took, and which model slot served it. The row is opened with the
+   cursor and Enter; the run's id is the detail's heading, drawn whole there. *)
 
 let lane_started_width = 17
 let lane_subject_width = 16
 let lane_status_width = 11
 let lane_elapsed_width = 8
-let lane_slot_width = 16
 
-(* A run id truncated below this identifies nothing; the screen is better off
-   dropping the frame's last cells than showing half of one. *)
-let lane_minimum_run_id_width = 12
+(* The slot takes what the other columns leave. The slots the lanes reported
+   on 2026-09-28 ran from 24 cells (glm-coding.glm-5.3-flash) to 45
+   (ollama_cloud.ollama-cloud-deepseek-v4-1-flash). The floor holds the short
+   one whole; a longer one folds in the middle, which keeps the provider at
+   its head and the model at its tail. *)
+let lane_minimum_slot_width = 24
 
 type lane_run_row_values = {
   lrow_started : string;
@@ -853,7 +854,6 @@ type lane_run_row_values = {
   lrow_status : string;
   lrow_elapsed : string;
   lrow_slot : string;
-  lrow_run_id : string;
 }
 
 let lane_run_no_values =
@@ -862,37 +862,66 @@ let lane_run_no_values =
   ; lrow_status = ""
   ; lrow_elapsed = ""
   ; lrow_slot = ""
-  ; lrow_run_id = ""
   }
 
-(* The identity column is named by the caller: this table lists runs of one
-   keeper under one heading and runs of many under another. *)
-let lane_run_cells ~identity_header ?(status_style = "") ~run_id_width values =
-  [ Table.cell ~header:"STARTED" ~width:lane_started_width values.lrow_started
-  ; Table.cell ~header:identity_header ~width:lane_subject_width
-      values.lrow_subject
-  ; Table.cell ~style:status_style ~header:"STATUS" ~width:lane_status_width
-      values.lrow_status
-  ; Table.cell ~align:Table.Right ~header:"ELAPSED" ~width:lane_elapsed_width
-      values.lrow_elapsed
-  ; Table.cell ~header:"SLOT" ~width:lane_slot_width values.lrow_slot
-  ; Table.cell ~header:"RUN ID" ~width:run_id_width values.lrow_run_id
-  ]
+(* The list's columns, named so the table can say which of them it spares
+   when the row is narrow (workbench RFC section 5.4, #38988). *)
+type lane_run_column =
+  | Lane_started
+  | Lane_subject
+  | Lane_status
+  | Lane_elapsed
+  | Lane_slot
 
-let lane_run_id_width ~inner_width =
-  let named =
-    Table.used_width
-      (lane_run_cells ~identity_header:"" ~run_id_width:0 lane_run_no_values)
-  in
-  max lane_minimum_run_id_width (inner_width - named)
+let lane_run_columns =
+  [ Lane_started; Lane_subject; Lane_status; Lane_elapsed; Lane_slot ]
 
-let lane_run_header_row ~identity_header ~run_id_width =
-  Table.header_row
-    (lane_run_cells ~identity_header ~run_id_width lane_run_no_values)
+(* The slot's entry is its floor: it is the flexible column. *)
+let lane_run_column_width = function
+  | Lane_started -> lane_started_width
+  | Lane_subject -> lane_subject_width
+  | Lane_status -> lane_status_width
+  | Lane_elapsed -> lane_elapsed_width
+  | Lane_slot -> lane_minimum_slot_width
 
-let lane_run_row ~identity_header ~status_style ~run_id_width values =
-  Table.row
-    (lane_run_cells ~identity_header ~status_style ~run_id_width values)
+(* What a narrow list gives up, first to go first (operator, 2026-09-28): when
+   the run started, then how long it took. What or whom it was for, how it
+   ended and which slot served it never go. *)
+let lane_run_drop_order = [ Lane_started; Lane_elapsed ]
+
+let lane_run_layout ~inner_width =
+  Table.fit ~inner_width ~width:lane_run_column_width ~flex:Lane_slot
+    ~drop_order:lane_run_drop_order lane_run_columns
+
+(* The identity column is named by the caller: the Verifier's runs are about a
+   task or a goal, every other lane's about who asked. *)
+let lane_run_cell ~identity_header ~status_style ~slot_width values = function
+  | Lane_started ->
+      Table.cell ~header:"STARTED" ~width:lane_started_width
+        values.lrow_started
+  | Lane_subject ->
+      Table.cell ~header:identity_header ~width:lane_subject_width
+        values.lrow_subject
+  | Lane_status ->
+      Table.cell ~style:status_style ~header:"STATUS" ~width:lane_status_width
+        values.lrow_status
+  | Lane_elapsed ->
+      Table.cell ~align:Table.Right ~header:"ELAPSED"
+        ~width:lane_elapsed_width values.lrow_elapsed
+  | Lane_slot -> Table.cell ~header:"SLOT" ~width:slot_width values.lrow_slot
+
+let lane_run_cells ~identity_header ?(status_style = "")
+    ~(layout : lane_run_column Table.layout) values =
+  List.map
+    (lane_run_cell ~identity_header ~status_style
+       ~slot_width:layout.Table.flex_width values)
+    layout.Table.shown
+
+let lane_run_header_row ~identity_header ~layout =
+  Table.header_row (lane_run_cells ~identity_header ~layout lane_run_no_values)
+
+let lane_run_row ~identity_header ~status_style ~layout values =
+  Table.row (lane_run_cells ~identity_header ~status_style ~layout values)
 
 (* File change columns.
 

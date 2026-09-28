@@ -382,7 +382,7 @@ let test_update_keeps_public_id_and_replaces_instance () =
     (List.length (Schedule_store.read_state config).schedules)
 ;;
 
-let test_update_requires_explicit_recurrence_kind () =
+let test_update_omitted_kind_preserves_daily_and_warns () =
   with_config
   @@ fun config ->
   let schedule_id = "sched-daily-edit" in
@@ -406,22 +406,52 @@ let test_update_requires_explicit_recurrence_kind () =
     | Some request -> request
     | None -> fail "daily schedule missing"
   in
+  let before_log = (Log.Ring.bounds ()).total - 1 in
   let omitted = update [] in
-  check bool "omitting kind is refused" false (Tool_result.is_success omitted);
-  check bool "refusal names the stored daily kind" true
-    (String_util.contains_substring (Tool_result.message omitted)
-       "stored recurrence_kind is daily");
-  let unchanged = stored () in
-  check string "instance is unchanged" original.schedule_instance_id
-    unchanged.schedule_instance_id;
-  check string "recurrence is unchanged" "daily"
-    (Schedule_domain.recurrence_kind_to_string unchanged.recurrence);
+  check bool "omitting kind updates the daily schedule" true (Tool_result.is_success omitted);
+  let retained = stored () in
+  check bool "replacement gets a new instance" false
+    (String.equal original.schedule_instance_id retained.schedule_instance_id);
+  check string "omission retains the stored recurrence" "daily"
+    (Schedule_domain.recurrence_kind_to_string retained.recurrence);
+  let warnings =
+    Log.Ring.recent ~since_seq:before_log ~module_filter:"ToolValidation" ()
+    |> List.filter (fun (entry : Log.Ring.entry) ->
+      entry.level = Log.Warn
+      && String_util.contains_substring entry.message schedule_id
+      && String_util.contains_substring entry.message "recurrence_kind"
+      && String_util.contains_substring entry.message "next version")
+  in
+  check int "one migration warning names the schedule and deadline" 1
+    (List.length warnings);
   let explicit = update [ "recurrence_kind", `String "one_shot" ] in
   check bool "explicit one-shot replacement succeeds" true
     (Tool_result.is_success explicit);
   check string "explicit replacement is one-shot" "one_shot"
     (Schedule_domain.recurrence_kind_to_string
        (stored ()).recurrence)
+;;
+
+let test_update_omitted_kind_preserves_one_shot () =
+  with_config
+  @@ fun config ->
+  let schedule_id = "sched-one-shot-edit" in
+  let created =
+    dispatch_exn config Tool_schemas_schedule.Create_request
+      (create_args ~schedule_id ())
+  in
+  check bool "one-shot fixture created" true (Tool_result.is_success created);
+  let updated =
+    dispatch_exn config Tool_schemas_schedule.Update_request
+      (create_args ~schedule_id ~message:"edited one-shot" ())
+  in
+  check bool "omission updates the one-shot schedule" true
+    (Tool_result.is_success updated);
+  let stored = match Schedule_store.get_schedule config ~schedule_id with
+    | Some request -> request
+    | None -> fail "one-shot schedule missing" in
+  check string "omission retains one-shot" "one_shot"
+    (Schedule_domain.recurrence_kind_to_string stored.recurrence)
 ;;
 
 let test_update_requires_id_and_active_row () =
@@ -1953,8 +1983,10 @@ let () =
         ; test_case "create list get cancel" `Quick test_create_list_get_cancel
         ; test_case "update keeps public id and replaces instance" `Quick
             test_update_keeps_public_id_and_replaces_instance
-        ; test_case "update requires explicit recurrence kind" `Quick
-            test_update_requires_explicit_recurrence_kind
+        ; test_case "update omitted kind keeps daily and warns" `Quick
+            test_update_omitted_kind_preserves_daily_and_warns
+        ; test_case "update omitted kind keeps one-shot" `Quick
+            test_update_omitted_kind_preserves_one_shot
         ; test_case "update requires id and active row" `Quick
             test_update_requires_id_and_active_row
         ; test_case "results survive the checkpoint encoder" `Quick

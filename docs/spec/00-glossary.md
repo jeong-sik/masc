@@ -1106,10 +1106,12 @@ status: reference
   그 계산을 격리한다. attach·detach와 Add-on 장애는 기존 Keeper의 권한·도구·진행 중
   작업을 축소하지 않으며, 추가 근거는 활용·보류·무시할 수 있다. 원천 어댑터는
   `snapshot_file`·`msx_capture`·`dos_capture`·`lane_output`·`browser_document`이고,
-  코어는 도메인 의미를 해석하지 않고 공통 row/coverage를 검사·표시한다.
+  코어는 도메인 의미를 해석하지 않고 공통 row/coverage를 검사·표시한다. 내장 lane은
+  바인딩에 제공하는 원천 종류를 정하며, `browser_document`는 목록에 든 Browser Lane
+  백엔드만 받는다 — Stagehand에는 유휴 문서 관측자가 없어 이 원천을 제공하지 않는다.
   → [설계 계약](../design/lane-addon-v0.md),
   [Lane_addon_types](../../lib/lane_addon/lane_addon_types.mli),
-  [Lane_addon_sources](../../lib/lane_addon/lane_addon_sources.ml)
+  [Lane_addon_sources](../../lib/lane_addon/lane_addon_sources.mli)
 
 **Quiz Lane (퀴즈 레인)**
 : 저장된 기록(Board·기억 OS·GitHub)에서 인용한 사실 묶음(`deck.json`, `snapshot_file`)을
@@ -1413,8 +1415,10 @@ status: reference
   - 미기동·정지 대상 수락: 대상 Keeper가 등록되어 있으나 fiber가 돌지 않는 상태
     (`offline`·`crashed`·`restarting`·`draining`)이거나 일시정지(`paused`) 상태일 때의
     due 발화는 재시도 실패로 튕기지 않고 단 1회 수락(`accepted`)되어 해당 Keeper의
-    durable 큐에 대기한다(#38523). 다음 턴이 깨어날 때 stimulus로 읽히며, 새 발화가
-    이전 대기를 대체하여 큐에는 스케줄당 최대 1건만 유지된다.
+    durable 큐에 대기한다(#38523). 다음 턴이 깨어날 때 stimulus로 읽히며, 새 발화는 아직
+    턴이 시작하지 않은 이전 대기를 대체하여 큐에는 스케줄당 최대 1건만 유지된다.
+    턴이 이미 가져간 발화는 이후 발화가 앞선 대기를 대체하거나 대상 Keeper 퇴역으로
+    예약이 취소돼도 그 턴의 ACK가 올 때까지 남는다(#39521).
   - 보류(hold): due가 된 발화를 이번 tick에 보내지 않고 두는 것. 상태 값이 아니다 — 예약은
     `Due`에 머물고 다음 tick에 다시 판정된다. 이유는 닫힌 둘(`Schedule_runner.hold_reason`)이고
     wire `kind`로 적힌다. `previous_occurrence_unconsumed`는 대상 Keeper가 같은 예약의 이전

@@ -12,9 +12,8 @@ a local binary.
 
 The surfaces are the ones the G0 readers draw: the Keepers list (the shared
 body height), a keeper's detail pane, the keeper chat (its history's first
-row, and the roster pane from 110 columns) and the Board list, with the
-harness's keepers alpha and beta and four Board posts. The Lane run detail
-and Memory are not measured here.
+row) and the Board list, with the harness's keepers alpha and beta and four
+Board posts. The Lane run detail and Memory are not measured here.
 """
 import base64
 import os
@@ -54,8 +53,22 @@ HELP_HINT = b"\xe2\x80\xa6?"
 
 # (surface, width) -> (title row, first row drawn under it, footer row,
 # blank rows between the title and the footer). Rows are the terminal's,
-# counted from 1.
-EXPECTED: dict[tuple[str, int], tuple[int, int, int, int]] = {}
+# counted from 1: the tab strip is row 1, the frame's top row 2, the title 3
+# and its divider 4. The key hints sit on row 29 with the composer on row 30
+# below them; the chat draws its own input and puts its hints on row 30. None
+# of the four moves with the width today; the blank rows are what each
+# surface's fixture leaves unfilled. Measured by Test run 36414157831 on
+# 214fd9c212 (docs/evidence/tui-region-baseline-2026-09-28/README.md).
+EXPECTED: dict[tuple[str, int], tuple[int, int, int, int]] = {
+    (surface, width): rows
+    for surface, rows in (
+        ("keepers", (3, 4, 29, 16)),
+        ("keeper-detail", (3, 4, 29, 7)),
+        ("keeper-chat", (3, 4, 30, 18)),
+        ("board", (3, 4, 29, 15)),
+    )
+    for width in WIDTHS
+}
 
 
 def measure(output: bytearray, title: bytes) -> tuple[int, int, int, int]:

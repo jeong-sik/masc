@@ -1121,8 +1121,9 @@ status: reference
   → [Runtime_execution.t](../../lib/runtime/runtime_execution.mli)
 
 **Exact-output route**
-: Librarian, Workspace memory curator, HITL auto judge, Board attention 같은 단독
-  모델 작업의 목적별 실행 경로(`Agent_core.Exact_output`). 설정은 API slot과 후속 CLI
+: Keeper의 목적별 단독 모델 작업(Librarian, Workspace memory curator, HITL auto judge,
+  Board attention)과 Browser Stagehand 확장의 구조화 `llm.generate` 요청이 쓰는 실행
+  경로(`Agent_core.Exact_output`). 설정은 API slot과 후속 CLI
   후보 순서를 선언한다(`exact_output_lane_decl`). 대부분의 exact route는 도구를 쓰지
   않고 단일 완결 응답을 받아 도메인 검증기가 유효성을 판정하며, Keeper turn의
   Runtime Candidate Order와는 다른 층이다. 단 **verifier_exact은 예외로 도구를 호출한다** —
@@ -1130,6 +1131,11 @@ status: reference
   (`lib/task/anti_rationalization.ml`: "The verdict channel is the
   report_review_verdict tool call, so every slot needs a tool-calling model"). 이 lane의
   모든 slot은 도구 호출이 가능한 모델이어야 한다.
+  - **Browser Stagehand `llm.generate`**: `browser_stagehand_exact` route는 구조화
+    (`json_schema`) 요청과 text-only message만 제공한다. 스키마는 AGENT_CORE의
+    `Json_syntax` 프롬프트 텍스트로 전달되고, 응답은 JSON 값·선언된 필수 객체 키·방문한
+    primitive 모양만 검사한다. 전체 JSON Schema 검증은 하지 않으며, 그 밖의 요청 모양은
+    provider 호출 전에 거절한다(#38708).
   - **슬롯 전진 조건 (`execution_failure_may_advance`)**: 한 슬롯이 실패했을 때 패스를
     끝내거나 범위를 줄이지 않고 선언된 다음 후보 슬롯으로 넘어가는 경우는 둘이다.
     (1) 보내기 직전 단계(`Before_dispatch`)에서 실패했고 이 슬롯이 아무것도 보내지 않았다
@@ -1190,7 +1196,8 @@ status: reference
   → [Exact_output](../../packages/agent_core/lib/llm_provider/exact_output.mli),
   [Exact_lane_run_registry](../../lib/exact_lane_run_registry.mli),
   [Runtime_exact_lane_backpressure](../../lib/runtime/runtime_exact_lane_backpressure.mli),
-  [Keeper_board_attention_exact_flow](../../lib/keeper/keeper_board_attention_exact_flow.mli)
+  [Keeper_board_attention_exact_flow](../../lib/keeper/keeper_board_attention_exact_flow.mli),
+  [Browser_stagehand_model](../../lib/browser_stagehand_model.mli)
 
 **Memory queue**
 : Keeper별 Librarian 작업을 직렬화하는 제출 경로. 현재 실행 하나와 교체 가능한
@@ -1801,8 +1808,16 @@ status: reference
   명령의 표준 입출력과 종료 상태를 `run_outcome`(`Ran`·`Transport_failed`)으로
   전달하여, 원격 런타임 전송 장애와 명령의 자체 실패를 명확히 분리한다.
   호출 페이로드는 `argv`(셸 없이 그대로 실행하는 프로세스 벡터)와 `command`(셸에
-  넘기는 한 줄) 중 정확히 하나만 받는다.
-  → [config/tools/tool_execute.toml](../../config/tools/tool_execute.toml)
+  넘기는 한 줄) 중 정확히 하나만 받는다. Keeper의 `sandbox_image`는 내장
+  `config/sandbox-images.toml`의 이름이다. 선택값이 없거나 빈 문자열이면 `Not_declared`로
+  거절한다. Docker와 MicroVM의 컨테이너를 시작할 때는 현재 config root의
+  `sandbox-image-builds.toml`에서 그 이름에 대해 image store별로
+  기록된 `repository:tag`를 읽는다. `masc sandbox-image promote`는 선택한 store에 이미 있는 tag를
+  기록하며 이미지를 빌드하지 않는다. 이름·promote된 build가 없거나 catalog를 못 읽으면
+  임의의 image를 고르지 않고 거절한다.
+  → [config/tools/tool_execute.toml](../../config/tools/tool_execute.toml),
+  [Keeper_sandbox_image_resolver](../../lib/keeper/keeper_sandbox_image_resolver.mli),
+  [Keeper_sandbox_image_catalog](../../lib/keeper/keeper_sandbox_image_catalog.mli)
 
 **Endpoint Allowed Paths (엔드포인트 허용 경로)**
 : SSH 샌드박스 타깃(`Sandbox_target.Ssh`, `Exec_ssh_endpoint.t`)에서 명령이 접근할 수 있는

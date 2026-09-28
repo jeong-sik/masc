@@ -252,13 +252,54 @@ let test_sweep_drains_a_post_larger_than_two_comment_batches () =
   in
   let post_id = Post_id.to_string post.id in
   let comment_count = (2 * Limits.sweeper_batch_size) + 1 in
+  (* task-1758/#39356 comment cap (wool-nova FAIL issuecomment-5860167607,
+     P1): [add_comment] now refuses once a post holds
+     [Limits.comment_count_cap] live comments, so this fixture (more than
+     two sweeper batches) can no longer be built through the public write
+     path -- comment_count here already exceeds the default cap. The cap
+     only blocks the *next write*; it never trims comments already in the
+     store, so a thread this large legitimately exists whenever it grew
+     before the cap took effect (or the cap was raised then lowered).
+     Insert the filler rows directly at the same invariants [add_comment]'s
+     commit step keeps (index entry, bumped reply_count, dirty marks,
+     cache invalidation) and skip only the cap check, so this test keeps
+     exercising the sweeper's batching, not the write-time guard. *)
+  let insert_filler_comment () =
+    let author = unwrap (Agent_id.of_string "commenter") in
+    let comment =
+      { id = Comment_id.generate ()
+      ; post_id = post.id
+      ; parent_id = None
+      ; author
+      ; content = "permanent reply"
+      ; created_at = Unix.gettimeofday ()
+      ; expires_at = 0.0
+      ; votes_up = 0
+      ; votes_down = 0
+      }
+    in
+    let comment_key = Comment_id.to_string comment.id in
+    Hashtbl.add store.comments comment_key comment;
+    let existing =
+      Hashtbl.find_opt store.comments_by_post post_id
+      |> Option.value ~default:[]
+    in
+    Hashtbl.replace store.comments_by_post post_id (comment_key :: existing);
+    let current_post = Hashtbl.find store.posts post_id in
+    Hashtbl.replace store.posts post_id
+      { current_post with
+        reply_count = current_post.reply_count + 1
+      ; updated_at = comment.created_at
+      };
+    mark_dirty_post store post_id;
+    mark_dirty_comment store comment_key;
+    invalidate_post_caches store;
+    invalidate_comment_caches store;
+    comment_key
+  in
   let comment_ids =
     List.init comment_count (fun _ ->
-      let comment =
-        unwrap (add_comment store ~post_id ~author:"commenter"
-          ~content:"permanent reply" ~ttl_hours:0 ())
-      in
-      let comment_id = Comment_id.to_string comment.id in
+      let comment_id = insert_filler_comment () in
       ignore (unwrap (toggle_reaction store ~target_type:Reaction_comment
         ~target_id:comment_id ~user_id:"reactor-agent" ~emoji:"👍"));
       ignore (unwrap (vote_comment store ~voter:"voter-agent" ~comment_id

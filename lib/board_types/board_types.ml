@@ -308,6 +308,23 @@ module Limits = struct
   let default_ttl_hours = 0    (* 0 = permanent (no expiry) *)
   let sweeper_interval_sec = env_int "MASC_BOARD_SWEEPER_INTERVAL_SEC" 10
   let sweeper_batch_size = env_int "MASC_BOARD_SWEEPER_BATCH_SIZE" 100
+  (* task-1758/#39356 scope extension: once a thread holds this many
+     comments, the next one is refused at the write boundary so a hot
+     thread becomes a chain of successor posts instead of one endless row.
+     Override with MASC_BOARD_COMMENT_COUNT_CAP. *)
+  let comment_count_cap = env_int "MASC_BOARD_COMMENT_COUNT_CAP" 100
+
+  (** [comment_count_cap]'s fail-open meaning is deliberate: a non-positive
+      value switches the growth limit off. But silence would make that look
+      like a typo that silently did nothing, so the loader records one WARN
+      that names the variable and the value read (issuecomment-5858752752). *)
+  let cap_warning_message ~cap () =
+    if cap > 0 then None
+    else
+      Some
+        (Printf.sprintf
+           "MASC_BOARD_COMMENT_COUNT_CAP is %d; the comment cap is OFF"
+           cap)
 end
 
 module Comment_page = struct

@@ -570,7 +570,7 @@ let classify_image_probe_for backend ~image ~inspect ~listing =
       ~inspect ~listing
 ;;
 
-let image_probe_for backend ~image ~timeout_sec =
+let image_probe_with_inspect_for backend ~image ~timeout_sec =
   let inspect =
     Process_eio.run_argv_with_status_split
       ~timeout_sec
@@ -585,7 +585,11 @@ let image_probe_for backend ~image ~timeout_sec =
            (image_listing_argv_for backend))
     | _ -> None
   in
-  classify_image_probe_for backend ~image ~inspect ~listing
+  classify_image_probe_for backend ~image ~inspect ~listing, inspect
+;;
+
+let image_probe_for backend ~image ~timeout_sec =
+  fst (image_probe_with_inspect_for backend ~image ~timeout_sec)
 ;;
 
 (* Build the image this binary carries the recipe for, into the store the
@@ -634,36 +638,31 @@ let build_recipe_image_for backend ~image ~timeout_sec =
         | Unix.WEXITED 0, _, _ -> Ok ()
         | _, _, stderr -> Error (`Build_failed stderr))
 
-(* The presence probe above already admits the image. This second local inspect
-   reads its build marker; failure to read metadata warns but never blocks boot. *)
-let warn_if_lock_marker backend ~image ~timeout_sec =
-  match
-    Process_eio.run_argv_with_status_split
-      ~timeout_sec
-      (image_inspect_argv_for backend ~image)
-  with
-  | Unix.WEXITED 0, stdout, _ ->
-    Keeper_sandbox_image_version.lock_warning
-      ~image
-      ~built_lock_sha256:(image_lock_marker_from_inspect stdout)
-    |> Option.iter prerr_endline
-  | _, _, _ ->
-    prerr_endline
-      (Printf.sprintf
-         "sandbox_image_lock_marker_unavailable: image=%s lock freshness was not checked"
-         image)
+(* Presence and the build marker come from the same store observation.
+   Missing metadata warns but never blocks boot. *)
+let warn_if_lock_marker ~image (_, stdout, _) =
+  Keeper_sandbox_image_version.lock_warning
+    ~image
+    ~built_lock_sha256:(image_lock_marker_from_inspect stdout)
+  |> Option.iter prerr_endline
 ;;
 
 let image_present_for backend ~image ~timeout_sec =
-  match image_probe_for backend ~image ~timeout_sec with
+  let probe () =
+    let outcome, inspect = image_probe_with_inspect_for backend ~image ~timeout_sec in
+    (match outcome with
+     | Image_present -> warn_if_lock_marker ~image inspect
+     | Image_missing | Image_cli_unavailable | Image_probe_failed _ -> ());
+    outcome
+  in
+  match probe () with
   | Image_missing when String.equal image Keeper_sandbox_image.default_tag -> (
     match build_recipe_image_for backend ~image ~timeout_sec with
     | Ok () ->
       (* Ask the store again rather than trust the build's exit: the gate's
          question is whether the image is there, and only the store answers
          that. *)
-      image_probe_for backend ~image ~timeout_sec
-      |> image_present_result_for backend ~image
+      probe () |> image_present_result_for backend ~image
     | Error `No_build_command ->
       Error
         (Printf.sprintf
@@ -688,9 +687,7 @@ let image_present_for backend ~image ~timeout_sec =
            (Backend.to_string backend)
            image
            (String.trim stderr)))
-  | Image_present ->
-    warn_if_lock_marker backend ~image ~timeout_sec;
-    Ok ()
+  | Image_present -> Ok ()
   | probe -> image_present_result_for backend ~image probe
 ;;
 

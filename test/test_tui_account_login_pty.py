@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = ("bin/masc_tui_account_login.ml", "bin/masc_tui.ml", "bin/masc_tui_command.ml", "bin/masc_tui_http.ml", "bin/masc_tui_types.ml", "bin/masc_tui_render.ml")
+SOURCE_MODULES = ("bin/masc_tui_account_login.ml", "bin/masc_tui.ml", "bin/masc_tui_command.ml", "bin/masc_tui_http.ml", "bin/masc_tui_types.ml", "bin/masc_tui_render.ml", "bin/masc_tui_sgr_text.ml")
 LOGIN = "/api/v1/setup/accounts/login"
 SESSION = "a" * 64
 ACCOUNT = "b" * 64
@@ -80,7 +80,10 @@ def scenario(binary, client, protocol, *, delayed_save=False, conflict_save=Fals
         h.send_and_wait(process, fd, output, ("/login " + client + "\r").encode(), b"MASC Account Login")
         h.wait_for_output(process, fd, output, "새 계정 로그인".encode(), start=0, timeout=3.0)
         h.send_and_wait(process, fd, output, b"\r", b"fixture-login.example")
-        assert b"\\x1B" not in output, "the client's colour code was drawn as text"
+        # The harness workspace label (WORKSPACE_PAYLOAD) is an OSC 8 string the
+        # TUI always shows as "\x1B]8;;...", so look for the fixture's own codes.
+        for code in (b"\\x1B[94m", b"\\x1B[0m"):
+            assert code not in output, "the client's colour code was drawn as text"
         # Exercise main-loop routing, including rejection before the byte-exact paste.
         h.send_and_wait(process, fd, output, b"\x1b[200~first\nsecond\x1b[201~", "여러 줄이나 제어 문자".encode())
         assert not supplied.is_set(), "rejected multiline credential was sent"

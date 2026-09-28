@@ -36,6 +36,7 @@
   ; editor is what keeps the seed's comments above that key.
   masc.toml_line_editor
   masc_front_door
+  masc_collab_join
   masc_tui_server_lifecycle
   masc.keeper_sandbox_image
   masc.auth
@@ -516,6 +517,12 @@
  (wrapped false)
  (modules masc_tui_collab_text)
  (libraries masc ipaddr qrc))
+
+(library
+ (name masc_collab_join)
+ (wrapped false)
+ (modules masc_collab_join)
+ (libraries cstruct eio eio.unix masc masc.collab masc.collab_guest yojson))
 
 (library
  (name masc_tui_mcp)

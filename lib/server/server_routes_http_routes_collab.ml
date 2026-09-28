@@ -77,77 +77,16 @@ let decode_stop_request body =
 let ok_json fields : Yojson.Safe.t = `Assoc (("ok", `Bool true) :: fields)
 let error_json message : Yojson.Safe.t = `Assoc [ "ok", `Bool false; "error", `String message ]
 
-(* A base URL is an origin and nothing else: an http(s) scheme, a host,
-   an optional port. Paths, queries, fragments and userinfo are refused
-   rather than stripped — silently rewriting the operator's address
-   mints links to a place they did not name. *)
+(* A base URL is an origin and nothing else. One parser serves the
+   host trigger and the guest dial side so the two can never disagree;
+   only the scheme sets differ. *)
 let validate_base_url raw =
-  let trimmed = String.trim raw in
-  if String.equal trimmed ""
-     || String.contains trimmed ' '
-     || String.contains trimmed '\t'
-     || String.contains trimmed '\n'
-  then Error "base_url must be an http(s) URL"
-  else (
-    let uri = Uri.of_string trimmed in
-    (* A colon in the authority with no parsed port is a mangled port
-       ("h:", "h:abc"), not an absent one: refuse it rather than
-       stripping it. Bracketed literals hold colons of their own, so
-       only the text past ']' counts there. *)
-    let authority_claims_port =
-      let scheme_end =
-        match String.index_opt trimmed ':' with
-        | None -> 0
-        | Some c -> c + 3
-      in
-      let index_from_opt c =
-        match String.index_from_opt trimmed scheme_end c with
-        | None -> String.length trimmed
-        | Some i -> i
-      in
-      let auth_end =
-        min (index_from_opt '/') (min (index_from_opt '?') (index_from_opt '#'))
-      in
-      let authority =
-        if scheme_end >= auth_end
-        then ""
-        else String.sub trimmed scheme_end (auth_end - scheme_end)
-      in
-      if String.starts_with ~prefix:"[" authority
-      then (
-        match String.index_opt authority ']' with
-        | None -> false
-        | Some close ->
-          close + 1 < String.length authority && authority.[close + 1] = ':')
-      else String.contains authority ':'
-    in
-    match
-      ( Uri.scheme uri |> Option.map String.lowercase_ascii,
-        Uri.userinfo uri,
-        Uri.host uri,
-        Uri.port uri,
-        Uri.path uri,
-        Uri.query uri,
-        Uri.fragment uri )
-    with
-    | Some ("http" | "https" as scheme), None, Some host, port, path, [], None
-      when (not (String.equal host "")) && (String.equal path "" || String.equal path "/") -> (
-      match port with
-      | Some p when p < 1 || p > 65535 -> Error "base_url port out of range"
-      | None when authority_claims_port -> Error "base_url port is not a number"
-      | _ ->
-        let rendered_host =
-          match Ipaddr.V6.of_string host with
-          | Ok _ -> "[" ^ host ^ "]"
-          | Error _ -> host
-        in
-        let rendered_port =
-          match port with
-          | None -> ""
-          | Some p -> Printf.sprintf ":%d" p
-        in
-        Ok (Printf.sprintf "%s://%s%s" scheme rendered_host rendered_port))
-    | _ -> Error "base_url must be an http(s) URL with no path, query, or userinfo")
+  match Collab_origin.parse ~schemes:[ "http"; "https" ] raw with
+  | Ok origin -> Ok (Collab_origin.to_string origin)
+  | Error (Collab_origin.Blank | Collab_origin.Bad_scheme _ | Collab_origin.Has_whitespace) ->
+    Error "base_url must be an http(s) URL"
+  | Error Collab_origin.Bad_port -> Error "base_url port out of range"
+  | Error _ -> Error "base_url must be an http(s) URL with no path, query, or userinfo"
 ;;
 
 (* The admitted authority's own scheme and effective port — never the
@@ -155,18 +94,13 @@ let validate_base_url raw =
    deployment names its public base explicitly instead. *)
 let authority_base_url () =
   let authority = Server_request_authority.current_exn () in
-  let scheme =
-    Server_request_authority.scheme_to_string
-      (Server_request_authority.scheme authority)
-  in
-  let host = Server_request_authority.host authority in
-  let port = Server_request_authority.port_or_default authority in
-  let rendered_host =
-    match Ipaddr.V6.of_string host with
-    | Ok _ -> "[" ^ host ^ "]"
-    | Error _ -> host
-  in
-  Printf.sprintf "%s://%s:%d" scheme rendered_host port
+  Collab_origin.to_string
+    { Collab_origin.scheme =
+        Server_request_authority.scheme_to_string
+          (Server_request_authority.scheme authority)
+    ; host = Server_request_authority.host authority
+    ; port = Some (Server_request_authority.port_or_default authority)
+    }
 ;;
 
 let room_b64 room_id =

@@ -4113,6 +4113,38 @@ let inspect_file_cmd =
     ~doc:"Inspect original media as JSON with rendered content. No LLM verdict or Task/Goal transition.")
     Term.(const (fun base_path path -> Masc_cli_inspect_file.run ~base_path ~path) $ base_path $ path)
 
+(* `masc collab join` needs no workspace: the guest dials someone else's
+   relay, so the link and the relay flag are the whole argument. *)
+let collab_cmd =
+  let join_cmd =
+    let doc =
+      "Join a shared Keeper room as a guest. Prints the transcript, then \
+       live lines; control guests type prompts. A browser link carries its \
+       relay; a terminal link needs --relay."
+    in
+    let link =
+      Arg.(required & pos 0 (some string) None & info [] ~docv:"LINK" ~doc:"Share link to join.")
+    in
+    let relay =
+      let doc =
+        "Relay to dial (ws(s)://host:port, http(s)://host:port). Overrides \
+         the relay a browser link carries; required for a terminal link."
+      in
+      Arg.(value & opt (some string) None & info [ "relay" ] ~docv:"URL" ~doc)
+    in
+    let label =
+      let doc = "Display name stamped on this guest's prompts." in
+      Arg.(value & opt (some string) None & info [ "label" ] ~docv:"NAME" ~doc)
+    in
+    Cmd.v (Cmd.info "join" ~doc)
+      Term.(
+        const (fun link relay label ->
+            Eio_main.run (fun env -> Masc_collab_join.run ~env ~link ~relay ~label))
+        $ link $ relay $ label)
+  in
+  let doc = "Join a live-shared Keeper room as a guest." in
+  Cmd.group (Cmd.info "collab" ~doc) [ join_cmd ]
+
 let cmd =
   let doc =
     "MASC workspace: the fleet TUI on a terminal, the MCP server everywhere else"
@@ -4124,6 +4156,7 @@ let cmd =
     info
     [ init_cmd
     ; inspect_file_cmd
+    ; collab_cmd
     ; skills_refresh_cmd
     ; start_cmd
     ; login_cmd

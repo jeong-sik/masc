@@ -178,6 +178,20 @@ MASC 에 맞게 둔다.
     URL 텍스트 자체 (TUI 가 이미 레일 박스문자를 가정한다).
   - OSC-8: TUI 에 하이퍼링크 렌더가 없어 plain URL 을 찍는다. 터미널이
     linkify 한다.
+  - 스택 6 구현 기록 (터미널 게스트 `masc collab join`):
+    - `lib/collab_guest/`: `Collab_guest_join` (링크/릴레이 resolve +
+      welcome/snapshot/live 조립, pure) + `Collab_guest_session` (ws/wss
+      다이얼·hello·join 구동, Eio). 터미널 링크는 `--relay` 필수,
+      브라우저 링크는 base 내장.
+    - `bin/masc_collab_join`: keeper 이벤트→텍스트 렌더러 + line UI
+      (`/abort /fetch /quit`, view는 로컬에서 조종 거부). thinking·
+      usage·스트림 북키핑은 스킵, 판독 불가 행은 플레이스홀더.
+    - relay origin 파서는 `Collab_origin` 으로 양측 공유 (호스트
+      트리거 이식). 게스트→릴레이는 peer 0, 리소스는
+      `/r/<b64>?role=guest`.
+    - 실서버 수동 스모크는 미수행: loopback 실다이얼 테스트 + 리소스↔
+      라우트파서 왕복으로 대체, HTTP 업그레이드 경로는 스택 2 코드
+      그대로이므로 PR에서 수동 QA 권장.
 
 ## 3. 구현이 건드리는 표면
 
@@ -209,10 +223,18 @@ MASC 에 맞게 둔다.
 3. 호스트 tap + 스냅샷(`welcome`→chunks→live). (#39584)
 4. 게스트 주입 + 읽기 전용 강제 + Gate 규칙. (#39594)
 5. TUI 호스트 `/collab` + QR 출력. (#39626)
-6. TUI guest replica + 대시보드 web viewer 링크.
-7. (스택 6 이후) 같은 `lib/collab` 을 쓰는 독립 Eio 릴레이 바이너리
+6. 터미널 게스트 `masc collab join` (아래 스택 6 기록).
+7. 대시보드 web viewer 링크 수신 (TS).
+8. (스택 7 이후) 같은 `lib/collab` 을 쓰는 독립 Eio 릴레이 바이너리
    (§5 래더 2단계. 릴레이 코어가 순수하고 드라이버가 얇게 분리돼 있어
    바이너리는 소켓 수락+`Collab_relay` 호출 골격만 얹으면 된다).
+
+스택 6 범위 조정: 당초 "TUI guest replica + web viewer" 1스택에서
+터미널 게스트만 분리. 위젯 TUI replica 의 렌더러 재사용안은 기각 —
+`msg_entry` 렌더 파이프라인이 TUI 전체 `state` 를 요구해 게스트
+모드 이식이 별도 대형 작업이 된다. 대신 line-oriented 터미널
+게스트(`masc collab join`)가 터미널 표면을 맡고, 풀 위젯 replica 는
+v1 이후로 연기한다. web viewer 는 스택 7으로 이동.
 
 ## 7. 미결
 

@@ -258,6 +258,38 @@ let test_seal_rejects () =
    | Ok _ -> fail "short key accepted")
 ;;
 
+let test_origin_parses_and_renders () =
+  let parse = Collab_origin.parse ~schemes:[ "http"; "https"; "ws"; "wss" ] in
+  let ok raw expected =
+    match parse raw with
+    | Error err -> fail (Collab_origin.parse_error_to_string err)
+    | Ok origin -> check string ("render " ^ raw) expected (Collab_origin.to_string origin)
+  in
+  let refused raw =
+    check bool ("refuse " ^ raw) true (Result.is_error (parse raw))
+  in
+  ok "https://relay.test:8443" "https://relay.test:8443";
+  ok "wss://relay.test" "wss://relay.test";
+  ok "ws://10.0.0.2:1777" "ws://10.0.0.2:1777";
+  ok "  https://relay.test/  " "https://relay.test";
+  ok "HTTP://relay.test" "http://relay.test";
+  ok "http://[::1]:1777" "http://[::1]:1777";
+  refused "ftp://relay.test";
+  refused "relay.test";
+  refused "https://relay.test/r/abc";
+  refused "https://relay.test?x=1";
+  refused "https://relay.test#frag";
+  refused "https://user@relay.test";
+  refused "https://relay.test:99999";
+  refused "https://relay.test:";
+  refused "https://relay.test:abc";
+  refused "https://[::1]:abc";
+  refused "https://rel ay.test";
+  refused "";
+  check bool "scheme sets differ" true
+    (Result.is_error (Collab_origin.parse ~schemes:[ "http"; "https" ] "wss://relay.test"))
+;;
+
 let () =
   run
     "collab-core"
@@ -289,5 +321,7 @@ let () =
           test_case "seal roundtrips" `Quick test_seal_roundtrips;
           test_case "seal rejects" `Quick test_seal_rejects;
         ] );
+      ( "origin",
+        [ test_case "origin parses and renders" `Quick test_origin_parses_and_renders ] );
     ]
 ;;

@@ -1680,6 +1680,26 @@
   eio_main
   unix))
 
+; RFC-0471 stack 6: guest resolution, join assembly, loopback dial, render.
+(test
+ (name test_collab_guest)
+ (modules test_collab_guest)
+ (libraries
+  alcotest
+  base64
+  bigstringaf
+  fmt
+  masc
+  masc.collab
+  masc.collab_guest
+  masc_collab_join
+  yojson
+  eio
+  eio_main
+  unix
+  ws-direct-core
+  ws-direct-eio))
+
 ; RFC-0471 stack 5: /collab HTTP trigger pure core (decode + base URL).
 (test
  (name test_collab_http)

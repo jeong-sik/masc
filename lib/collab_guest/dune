@@ -1,0 +1,26 @@
+(include_subdirs no)
+
+(library
+ (name masc_collab_guest)
+ (public_name masc.collab_guest)
+ (wrapped false)
+ (modules collab_guest_join collab_guest_session)
+ (flags
+  (:standard -w +4 -w +33))
+ (libraries
+  base64
+  bigstringaf
+  mirage-crypto
+  yojson
+  uri
+  ipaddr
+  eio
+  eio.unix
+  ws-direct-core
+  ws-direct-eio
+  tls
+  tls-eio
+  ca-certs
+  domain-name
+  masc.collab
+  masc.crypto_rng))

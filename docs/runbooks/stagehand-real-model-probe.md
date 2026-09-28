@@ -53,9 +53,53 @@ The production lane is loaded through `Runtime.init_default_strict_report`, then
 published by the server's existing `configure_exact_output_registry` boot step. The probe requires the declared
 `browser_stagehand_exact` lane to contain **exactly two admitted HTTP slots in
 order, with no CLI slots**. It refuses missing or dropped candidates rather
-than silently reducing the test. Use the intended primary and fallback targets
-(for example `glm-coding.glm-5-3`, then `ollama_cloud.deepseek-v4-flash`) from the
-reviewed config. Model IDs in output come from the admitted target projection.
+than silently reducing the test. Use provider-qualified primary and fallback
+bindings from the reviewed isolated config, with the provider's currently
+served API model identity recorded for each. Admission checks the local catalog
+and request capabilities; it does not establish account access or provider
+availability. Model IDs in output come from the admitted target projection.
+
+### Prerequisites after the failed provider measurement
+
+The [typed diagnostic evidence](../evidence/stagehand-real-model-20260927/typed-diagnostic/README.md)
+records 27 invocations on source `fedd7dbabfcbdd14eab3480531abe7323f0148d9`:
+primary GLM returned 429 in 9/9, the old Ollama fallback returned 410 in 9/9,
+and synthetic primary 503 advanced to that fallback, which returned 410 in
+another 9/9. No response reached shape validation. Preserve that failed run;
+do not repeat the same 27-call configuration as a readiness check.
+
+Before another provider measurement:
+
+1. Review the replacement binding and its provider identity. On 2026-09-28,
+   [Ollama's old Flash page](https://ollama.com/library/deepseek-v4-flash)
+   still records retirement on 2026-09-25; the
+   [V4.1 Flash tags](https://ollama.com/library/deepseek-v4.1-flash/tags)
+   list `deepseek-v4.1-flash:cloud`. Availability in a model list does not prove
+   valid Extract/Progress/Act responses. The seed repair in
+   [#39434](https://github.com/jeong-sik/masc/pull/39434) is a separate proposal;
+   it uses the existing provider-qualified binding and leaves direct DeepSeek
+   bindings separate. Do not infer an API model name from a runtime slug or
+   change an operator's live configuration as part of this probe.
+2. Establish that the selected primary account can serve requests again,
+   using current provider/account evidence or a small isolated readiness
+   measurement. A repeated 429 under unchanged prerequisites does not justify
+   restarting the full measurement. The fallback replacement does not resolve
+   the primary account's rate limit.
+3. Record the reviewed source head, exact artifact manifest/checksums and
+   isolated slot order. A previously built binary proves its embedded source,
+   not a later branch merge. Run both offline controls before provider calls.
+4. Once those prerequisites change, run the fixture matrix below and publish
+   all nine summaries, per-trial typed outcomes and the process exit status.
+   The [#39429 completion contract](https://github.com/jeong-sik/masc/issues/39429)
+   requires real-model success evidence; a catalog edit or offline setup pass
+   does not complete it.
+
+The original [#38739 review condition](https://github.com/jeong-sik/masc/pull/38739#pullrequestreview-5326481402)
+also requires this model evidence. The Keeper's
+[post-merge audit](https://github.com/jeong-sik/masc/pull/38739#issuecomment-5851059180)
+records that the condition was unmet at merge and that the API does not expose
+which admission path allowed it. Its merged state and scripted-browser results
+do not supply the missing provider measurement.
 
 ```sh
 ./stagehand_model_probe.exe \

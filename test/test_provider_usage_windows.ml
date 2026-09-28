@@ -185,6 +185,22 @@ let test_reports_reach_the_resolved_document () =
        check (float 0.0) "observed_at of the report that named the window" 1790180100.0
          Yojson.Safe.Util.(window |> member "observed_at" |> to_number))
     Yojson.Safe.Util.(codex_row |> member "windows" |> to_list);
+  (* The TUI reads this document with its own strict decoder; a word one side
+     writes and the other does not know fails the whole Overview section. *)
+  (match Tui_decode.decode_provider_usage_windows after with
+   | Ok decoded ->
+     let claude =
+       List.find
+         (fun (account : Tui_decode.provider_usage_account) ->
+            String.equal account.pua_scope claude_label)
+         decoded.Tui_decode.puws_accounts
+     in
+     check (list string) "the TUI reads the display name the server wrote"
+       [ "Claude usage fixture" ]
+       (List.map
+          (fun (provider : Tui_decode.provider_usage_provider) -> provider.pup_display_name)
+          claude.pua_providers)
+   | Error error -> failf "the TUI decoder refuses the server's document: %s" error);
   (* An observation, not a gate: 100 % used leaves the runtime's quota state
      untouched. *)
   check bool "codex runtime is not held back by a usage report" false

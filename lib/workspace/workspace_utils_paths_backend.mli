@@ -80,13 +80,12 @@ val backend_release_lock :
   config -> key:string -> owner:string ->
   (bool, Backend_types.error) result
 
-(** [Ok true] when [owner] still holds [key] and its lease now runs
-    [ttl_seconds] from now; [Ok false] when another owner holds it. A lock
-    that is gone is the backend's [NotFound] error. The Memory backend has no
-    lease and answers [Ok true]. *)
-val backend_extend_lock :
-  config -> key:string -> ttl_seconds:int -> owner:string ->
-  (bool, Backend_types.error) result
+(** Run [publish] inside [key]'s lease fence when [owner] still holds the
+    lease, renewing it first; see {!Backend.FileSystem.commit_under_lease}.
+    The Memory backend has no lease and runs [publish] directly. *)
+val backend_commit_under_lease :
+  config -> key:string -> ttl_seconds:int -> owner:string -> (unit -> 'a) ->
+  (('a, Backend.FileSystem.lease_lost) result, Backend_types.error) result
 
 (** Returns [Ok n] where [n] is the number of subscribers notified
     (forwarded from [Pubsub_mem.publish]). *)

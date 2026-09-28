@@ -2740,9 +2740,15 @@ let with_one_worker_pool f =
           (fun () -> f ~clock:(Eio.Stdenv.clock env) pool config)))
 
 (* The writer's encode is queued behind a job holding the only worker. While
-   it waits, its lease runs out and another process takes the lock and
-   commits the next revision. When the worker frees up, the writer must
-   refuse instead of overwriting that commit with the same revision number. *)
+   it waits, its lease runs out and a simulated other holder takes the lock
+   and commits the next revision. When the worker frees up, the writer must
+   refuse instead of overwriting that commit with the same revision number.
+
+   The other holder is simulated in this process: it acquires through the
+   same backend value under its own owner token and writes the backlog file
+   directly. Exclusion from a real second process is covered by
+   test_distributed_lock_backlog_namespace ("fence excludes another
+   process"), which probes the lease fence from a child process. *)
 let test_queued_backlog_encode_refused_after_lease_loss () =
   with_one_worker_pool (fun ~clock:_ pool config ->
     ignore (Workspace.add_task config ~title:"queued" ~priority:1
@@ -2857,6 +2863,48 @@ let test_queued_backlog_encode_stamps_after_the_wait () =
          stored.last_updated !released_at)
       true
       (String.compare stored.last_updated !released_at >= 0))
+
+(* Lock keys are relative to a workspace's .masc root, so every workspace's
+   backlog lock has the same key. A fiber holding workspace A's backlog lock
+   that also takes workspace B's must still commit A's backlog under A's own
+   lease. If the lease were looked up by key alone, the innermost binding
+   (B's) would be checked against A's lock record and A's own commit would be
+   refused. *)
+let test_backlog_commit_uses_its_own_workspace_lease () =
+  with_test_env (fun outer ->
+    ignore (Workspace.add_task outer ~title:"scoped" ~priority:1
+      ~description:"initial");
+    let saved_base_path = Sys.getenv_opt "MASC_BASE_PATH" in
+    let inner_dir = temp_workspace_dir () in
+    let inner = workspace_config inner_dir in
+    Option.iter (Unix.putenv "MASC_BASE_PATH") saved_base_path;
+    let _ = Workspace.init inner ~agent_name:None in
+    Fun.protect
+      ~finally:(fun () ->
+        ignore (Workspace.reset inner);
+        try Unix.rmdir inner_dir with Unix.Unix_error _ -> ())
+      (fun () ->
+        (* Both locks must be leases for the lookup to matter. *)
+        ignore (backlog_lock_backend outer : Backend.FileSystem.t);
+        ignore (backlog_lock_backend inner : Backend.FileSystem.t);
+        Alcotest.(check string) "both workspaces use one backlog lock key"
+          (backlog_lock_key outer) (backlog_lock_key inner);
+        let result =
+          Workspace_utils.with_file_lock outer (Workspace.backlog_lock_path outer)
+            (fun () ->
+              let snapshot = Workspace.read_backlog outer in
+              Workspace_utils.with_file_lock inner
+                (Workspace.backlog_lock_path inner) (fun () ->
+                  Workspace.write_backlog_result outer
+                    (with_descriptions "scoped" snapshot)))
+        in
+        (match result with
+         | Ok _ -> ()
+         | Error message ->
+           Alcotest.failf "the outer workspace's own lease was refused: %s"
+             message);
+        Alcotest.(check (list string)) "the outer workspace stored its write"
+          [ "scoped" ] (stored_descriptions outer)))
 
 (* What separates a malformed backlog from an absent one: the decode was
    reached and failed. #34482 replaced the hand-written schema sentence this
@@ -3061,8 +3109,11 @@ let () =
         test_pooled_backlog_copies_preserve_pretty_utf8;
       Alcotest.test_case "backlog commit refused after same-process takeover" `Quick
         test_backlog_commit_refused_after_same_process_takeover;
-      Alcotest.test_case "queued backlog encode refused after lease loss" `Quick
-        test_queued_backlog_encode_refused_after_lease_loss;
+      Alcotest.test_case
+        "queued backlog encode refused after lease loss (simulated holder)"
+        `Quick test_queued_backlog_encode_refused_after_lease_loss;
+      Alcotest.test_case "backlog commit uses its own workspace's lease" `Quick
+        test_backlog_commit_uses_its_own_workspace_lease;
       Alcotest.test_case "queued backlog encode stamps after the wait" `Quick
         test_queued_backlog_encode_stamps_after_the_wait;
     ];

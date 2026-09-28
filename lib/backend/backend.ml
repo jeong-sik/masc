@@ -642,59 +642,156 @@ module FileSystem = struct
       Log.Misc.error "parse_lock_info failed: %s" (Printexc.to_string e);
       None
 
-  let acquire_lock t ~key ~owner ~ttl_seconds =
-    let lock_key = "locks:" ^ key in
-    let now = Time_compat.now () in
-    let info = {
-      owner;
-      acquired_at = now;
-      expires_at = now +. float_of_int ttl_seconds;
-    } in
-    match set_if_not_exists t lock_key (lock_info_to_json info) with
-    | Ok true -> Ok true
-    | Ok false -> Ok false
-    | Error (AlreadyExists _) ->
-        (* Check if expired *)
-        (match get t lock_key with
-         | Ok json -> (
-             match lock_info_of_json json with
-             | Some existing when existing.expires_at < now ->
-                 (* Expired, try to take over *)
-                 let* () = set t lock_key (lock_info_to_json info) in
-                 Ok true
-             | Some _ -> Ok false
-             | None ->
-                 (* Invalid lock metadata, overwrite to recover *)
-                 let* () = set t lock_key (lock_info_to_json info) in
-                 Ok true)
-         | Error _ -> Ok false)
-    | Error
-        (( NotFound _ | IOError _ | InvalidKey _ | ConnectionFailed _
-         | BackendNotSupported _ ) as e) -> Error e
+  (** {2 Lease fence}
 
-  let release_lock t ~key ~owner =
-    let lock_key = "locks:" ^ key in
+      Every change to a lease record ([acquire_lock], [release_lock],
+      [extend_lock]) and every publication made under a lease
+      ([commit_under_lease]) runs inside one fence per lock key, so a lease
+      record changes hands at most once between an owner check and the write
+      that depended on it. The fence is two locks taken in this order:
+
+      - a process-wide [Eio.Mutex] keyed by the fence file's native path, so
+        fibers of this process exclude each other even through two
+        independently created backend values for the same base path;
+      - an fcntl lock on that file ([File_lock_eio.acquire_flock_retry]),
+        so other processes on the host exclude this one. fcntl locks belong
+        to the process, which is why the mutex comes first: only one fiber
+        of the process opens and closes the fence file at a time, and closing
+        it cannot drop a lock another fiber still relies on.
+
+      The operating system releases the fcntl lock when a process dies, so a
+      crashed holder does not wedge the fence. A lease's TTL still decides
+      when an idle lease may be taken over; the fence only makes each
+      decision and the write that follows it one indivisible step. *)
+
+  let lease_fence_mutexes : (string, Eio.Mutex.t) Hashtbl.t = Hashtbl.create 16
+  let lease_fence_mutexes_mu = Stdlib.Mutex.create ()
+
+  let lease_fence_mutex fence_path =
+    Stdlib.Mutex.protect lease_fence_mutexes_mu (fun () ->
+      match Hashtbl.find_opt lease_fence_mutexes fence_path with
+      | Some mutex -> mutex
+      | None ->
+          let mutex = Eio.Mutex.create () in
+          Hashtbl.replace lease_fence_mutexes fence_path mutex;
+          mutex)
+
+  (* Test seam: runs inside the fence of [commit_under_lease], after the
+     owner is read and before the lease is renewed and the publication runs.
+     Production never sets it. *)
+  let after_lease_owner_read_hook : (key:string -> unit) Atomic.t =
+    Atomic.make (fun ~key:_ -> ())
+
+  let lease_fence_paths t ~key =
+    let* lock_path = key_to_path t ("locks:" ^ key) in
+    Ok (lock_path, Eio.Path.native_exn lock_path ^ ".fence")
+
+  let lease_fence_path t ~key =
+    let* _, fence_path = lease_fence_paths t ~key in
+    Ok fence_path
+
+  let with_lease_fence t ~key f =
+    let* lock_path, fence_path = lease_fence_paths t ~key in
+    _ensure_parent_dir ~log_errors:true lock_path;
+    Eio.Mutex.use_ro (lease_fence_mutex fence_path) (fun () ->
+      match
+        run_blocking_file_op (fun () ->
+          File_lock_eio.acquire_flock_retry ~lock_path:fence_path
+            ~mode:[ Unix.O_RDWR; Unix.O_CREAT ] ~perm:0o644
+            ~caller:"backend_lease_fence" ())
+      with
+      | exception Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exception File_lock_eio.Flock_timeout { attempts; _ } ->
+          Error
+            (IOError
+               (Printf.sprintf "lease fence %s still held after %d attempts"
+                  fence_path attempts))
+      | exception exn ->
+          Error
+            (IOError
+               (Printf.sprintf "lease fence %s unavailable: %s" fence_path
+                  (Printexc.to_string exn)))
+      | fd ->
+          Fun.protect
+            ~finally:(fun () -> File_lock_eio.release_flock_fd fd)
+            f)
+
+  (* The current record, or [None] when no lease file exists. *)
+  let read_lease_record t lock_key =
     match get t lock_key with
-    | Ok json -> (
-        match lock_info_of_json json with
-        | Some info when info.owner = owner ->
-            Ok (Result.is_ok (delete t lock_key))
-        | _ -> Ok false)  (* Not owner or invalid *)
-    | Error (NotFound _) -> Ok true  (* Already released *)
+    | Ok json -> Ok (Some json)
+    | Error (NotFound _) -> Ok None
     | Error
         (( AlreadyExists _ | IOError _ | InvalidKey _ | ConnectionFailed _
          | BackendNotSupported _ ) as e) -> Error e
 
+  let acquire_lock t ~key ~owner ~ttl_seconds =
+    let lock_key = "locks:" ^ key in
+    with_lease_fence t ~key (fun () ->
+      let now = Time_compat.now () in
+      let take () =
+        let* () =
+          set t lock_key
+            (lock_info_to_json
+               { owner; acquired_at = now;
+                 expires_at = now +. float_of_int ttl_seconds })
+        in
+        Ok true
+      in
+      let* current = read_lease_record t lock_key in
+      match current with
+      | None -> take ()
+      | Some json -> (
+          match lock_info_of_json json with
+          | Some existing when existing.expires_at >= now -> Ok false
+          | Some _ ->
+              (* Expired: take it over. *)
+              take ()
+          | None ->
+              (* Invalid lock metadata, overwrite to recover *)
+              take ()))
+
+  let release_lock t ~key ~owner =
+    let lock_key = "locks:" ^ key in
+    with_lease_fence t ~key (fun () ->
+      let* current = read_lease_record t lock_key in
+      match current with
+      | None -> Ok true  (* Already released *)
+      | Some json -> (
+          match lock_info_of_json json with
+          | Some info when String.equal info.owner owner ->
+              Ok (Result.is_ok (delete t lock_key))
+          | Some _ | None -> Ok false  (* Not owner or invalid *)))
+
+  let renew_lease t ~lock_key info ~ttl_seconds =
+    set t lock_key
+      (lock_info_to_json
+         { info with expires_at = Time_compat.now () +. float_of_int ttl_seconds })
+
   let extend_lock t ~key ~owner ~ttl_seconds =
     let lock_key = "locks:" ^ key in
-    let* json = get t lock_key in
-    match lock_info_of_json json with
-    | Some info when info.owner = owner ->
-        let now = Time_compat.now () in
-        let new_info = { info with expires_at = now +. float_of_int ttl_seconds } in
-        let* () = set t lock_key (lock_info_to_json new_info) in
-        Ok true
-    | _ -> Ok false
+    with_lease_fence t ~key (fun () ->
+      let* current = read_lease_record t lock_key in
+      match Option.bind current lock_info_of_json with
+      | Some info when String.equal info.owner owner ->
+          let* () = renew_lease t ~lock_key info ~ttl_seconds in
+          Ok true
+      | Some _ | None -> Ok false)
+
+  type lease_lost = { holder : string option }
+
+  let commit_under_lease t ~key ~owner ~ttl_seconds publish =
+    let lock_key = "locks:" ^ key in
+    with_lease_fence t ~key (fun () ->
+      let* current = read_lease_record t lock_key in
+      let record = Option.bind current lock_info_of_json in
+      (Atomic.get after_lease_owner_read_hook) ~key;
+      match record with
+      | Some info when String.equal info.owner owner ->
+          let* () = renew_lease t ~lock_key info ~ttl_seconds in
+          Ok (Ok (publish ()))
+      | Some info -> Ok (Error { holder = Some info.owner })
+      | None -> Ok (Error { holder = None }))
 
   (** {2 Atomic Operations (Cross-Process Safe)} *)
 

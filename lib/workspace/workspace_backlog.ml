@@ -231,19 +231,21 @@ type write_backlog_outcome =
 
 (* The encode can wait behind other jobs on the shared CPU pool while the
    caller holds the backlog lock, and on the FileSystem backend that lock is
-   a lease that may run out during the wait. Before anything is written the
-   caller's own acquisition is revalidated and renewed: if another
-   acquisition holds the lock now, it may already have committed a newer
-   revision, so this snapshot is refused rather than written over it. *)
-let fence_backlog_write config ~action =
-  match revalidate_held_lease config (backlog_lock_path config) with
-  | Lease_renewed | No_lease_held | No_distributed_lease -> Ok ()
-  | Lease_lost detail ->
-    Log.TaskState.error
-      "backlog %s refused before writing: %s" action detail;
+   a lease that may run out during the wait. The primary write therefore
+   runs as the protected step of the caller's own lease: inside the lock
+   key's fence the owner is checked, the lease renewed and the write made
+   before any competing acquisition can take the lease. When another
+   acquisition holds it by then, it may already have committed a newer
+   revision, so nothing is written. *)
+let publish_under_backlog_lease config ~action publish =
+  match commit_under_held_lease config (backlog_lock_path config) publish with
+  | Ok published -> published
+  | Error refusal ->
+    let detail = lease_commit_refusal_to_string refusal in
+    Log.TaskState.error "backlog %s refused, nothing written: %s" action detail;
     Error
-      (Printf.sprintf
-         "[write_backlog] %s refused before writing: %s" action detail)
+      (Printf.sprintf "[write_backlog] %s refused, nothing written: %s" action
+         detail)
 
 (** Result-returning variant with the primary backlog as the commit point.
     Once the primary write succeeds, recovery-copy failure is returned as an
@@ -274,9 +276,8 @@ let write_backlog_result ?after_commit config backlog =
            { backlog with version = committed_revision; last_updated = now_iso () }))
   in
   match
-    Result.bind
-      (fence_backlog_write config
-         ~action:(Printf.sprintf "commit of revision %d" committed_revision))
+    publish_under_backlog_lease config
+      ~action:(Printf.sprintf "commit of revision %d" committed_revision)
       (fun () -> write_encoded_json_commit_result config primary_path encoded)
   with
   | Error msg -> Error msg
@@ -375,9 +376,8 @@ let repair_backlog_copies_result config backlog =
     | Ok {mirror_error=Some message} -> Error message
     | Ok {mirror_error=None} -> Ok () in
   match
-    Result.bind
-      (fence_backlog_write config
-         ~action:(Printf.sprintf "repair of revision %d" backlog.version))
+    publish_under_backlog_lease config
+      ~action:(Printf.sprintf "repair of revision %d" backlog.version)
       (fun () -> write primary_path)
   with
   | Error _ as error -> error

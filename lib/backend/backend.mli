@@ -59,6 +59,33 @@ module FileSystem : sig
   val acquire_lock : t -> key:string -> owner:string -> ttl_seconds:int -> bool result
   val release_lock : t -> key:string -> owner:string -> bool result
   val extend_lock : t -> key:string -> owner:string -> ttl_seconds:int -> bool result
+  (** [acquire_lock], [release_lock], [extend_lock] and [commit_under_lease]
+      each run inside one fence per [key]: a process-wide mutex keyed by the
+      fence file's path, then an fcntl lock on that file. A lease record
+      therefore cannot change hands between an owner check and the write
+      that depended on it, across fibers, backend values and processes on
+      the host. *)
+
+  type lease_lost = { holder : string option }
+  (** The lease was not [owner]'s when checked inside the fence: [holder]
+      is the owner then recorded, [None] when no lease record existed or it
+      could not be decoded. *)
+
+  val commit_under_lease :
+    t -> key:string -> owner:string -> ttl_seconds:int ->
+    (unit -> 'a) -> ('a, lease_lost) Stdlib.result result
+  (** Inside [key]'s fence: when [owner] holds the lease, renew it to
+      [ttl_seconds] from now and run the publication, returning [Ok (Ok v)].
+      Otherwise return [Ok (Error lost)] without running it. [Error] is a
+      backend or fence failure; the publication did not run. *)
+
+  val lease_fence_path : t -> key:string -> string result
+  (** Native path of [key]'s fence file, for tests that probe the fence from
+      another process. *)
+
+  val after_lease_owner_read_hook : (key:string -> unit) Stdlib.Atomic.t
+  (** Test seam: called inside [commit_under_lease]'s fence after the owner
+      is read and before renewal and publication. Production never sets it. *)
 
   (** Atomic operations *)
   val atomic_increment : t -> string -> int result

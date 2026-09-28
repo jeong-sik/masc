@@ -537,15 +537,23 @@ let backoff_with_jitter delay =
    files, and adds the pid and a process-wide sequence so no two acquisitions
    share an owner. *)
 type held_lease =
-  { lease_key : string
+  { lease_scope : string
+  ; lease_key : string
   ; lease_owner : string
   ; lease_ttl_seconds : int
   }
 
+(* Lock keys are relative to a backend's base path, so two workspaces share
+   the key [tasks:.backlog]. A lease is looked up by the backend it lives in
+   as well as by key; otherwise a write to one workspace nested inside
+   another's lock would pick the inner workspace's lease. *)
+let lease_scope config = config.backend_config.base_path
+
 let lease_acquisition_seq = Atomic.make 0
 
 let fresh_lease config key =
-  { lease_key = key
+  { lease_scope = lease_scope config
+  ; lease_key = key
   ; lease_owner =
       (* DET-OK: the pid only distinguishes owner tokens of processes that
          share a node_id; no decision reads it. *)
@@ -556,7 +564,7 @@ let fresh_lease config key =
 
 (* The leases the current fiber holds, innermost first. Fiber-local rather
    than threaded through every [with_file_lock] callback: the writer that
-   must revalidate ([Workspace_backlog.write_backlog_result]) runs on the
+   publishes under it ([Workspace_backlog.write_backlog_result]) runs on the
    fiber that acquired, and a binding follows [Eio.Fiber.fork] (the
    [Eio_context] precedent). A raw systhread has no Eio context, binds
    nothing, and also never waits on the domain pool — the wait this binding
@@ -634,36 +642,44 @@ let with_distributed_lock_r ?clock config key f : ('a, masc_error) result =
        "String/Substring 분류기" anti-pattern removal). *)
     Error (System (System_error.LockContention { key; attempts = 50 }))
 
-type lease_revalidation =
-  | Lease_renewed
-  | No_lease_held
-  | No_distributed_lease
-  | Lease_lost of string
+type lease_commit_refusal =
+  | Lease_lost of { key : string; holder : string option }
+  | Lease_unverifiable of { key : string; detail : string }
 
-let revalidate_held_lease config path =
+let lease_commit_refusal_to_string = function
+  | Lease_lost { key; holder = Some holder } ->
+      Printf.sprintf "lock %s is now held by %s" key holder
+  | Lease_lost { key; holder = None } ->
+      Printf.sprintf "lock %s is no longer held" key
+  | Lease_unverifiable { key; detail } ->
+      Printf.sprintf "lock %s could not be checked: %s" key detail
+
+let commit_under_held_lease config path publish =
   match key_of_path config path, config.backend with
-  | None, _ | Some _, Memory _ -> No_distributed_lease
-  | Some key, FileSystem _ ->
-    (match
-       List.find_opt
-         (fun lease -> String.equal lease.lease_key key)
-         (current_held_leases ())
-     with
-     | None -> No_lease_held
-     | Some lease ->
-       (match
-          backend_extend_lock config ~key ~ttl_seconds:lease.lease_ttl_seconds
-            ~owner:lease.lease_owner
-        with
-        | Ok true -> Lease_renewed
-        | Ok false ->
-          Lease_lost
-            (Printf.sprintf "lock %s is held by another acquisition, not %s"
-               key lease.lease_owner)
-        | Error e ->
-          Lease_lost
-            (Printf.sprintf "lock %s could not be revalidated for %s: %s" key
-               lease.lease_owner (Backend_types.show_error e))))
+  | None, _ | Some _, Memory _ -> Ok (publish ())
+  | Some key, FileSystem _ -> (
+      let scope = lease_scope config in
+      match
+        List.find_opt
+          (fun lease ->
+            String.equal lease.lease_scope scope
+            && String.equal lease.lease_key key)
+          (current_held_leases ())
+      with
+      | None -> Ok (publish ())
+      | Some lease -> (
+          match
+            backend_commit_under_lease config ~key
+              ~ttl_seconds:lease.lease_ttl_seconds ~owner:lease.lease_owner
+              publish
+          with
+          | Ok (Ok published) -> Ok published
+          | Ok (Error { Backend.FileSystem.holder }) ->
+              Error (Lease_lost { key; holder })
+          | Error error ->
+              Error
+                (Lease_unverifiable
+                   { key; detail = Backend_types.show_error error })))
 
 let with_file_lock_impl ?clock config path f =
   match key_of_path config path with

@@ -174,32 +174,36 @@ val with_file_lock : config -> string -> (unit -> 'a) -> 'a
 val with_file_lock_r :
   config -> string -> (unit -> 'a) -> ('a, masc_error) result
 
-(** What {!revalidate_held_lease} found for the lock guarding a path.
+(** Why a publication under a held lease did not run.
 
     Each distributed-lock acquisition owns its lease under a token of its
     own ([node_id], pid and a process-wide sequence), not under the shared
-    [node_id], and the acquiring Eio fiber keeps that lease bound for the
-    body of {!with_distributed_lock}/{!with_file_lock}. *)
-type lease_revalidation =
-  | Lease_renewed
-      (** This fiber's acquisition still holds the lock; its lease now runs a
-          full TTL from now. *)
-  | No_lease_held
-      (** The lock is lease-backed but this fiber holds no acquisition of it
-          (the caller did not take the lock, or runs outside Eio, where no
-          lease is bound and the domain pool is not used). *)
-  | No_distributed_lease
-      (** The path has no lease-backed lock: Memory backend or an unkeyed
-          path, both serialised in-process without expiry. *)
-  | Lease_lost of string
-      (** This fiber acquired the lock, but another acquisition holds it now,
-          or the lock could not be read back. Writing under it could
-          overwrite a newer holder's commit. *)
+    [node_id]. The acquiring Eio fiber keeps that lease bound, together with
+    the backend's base path, for the body of
+    {!with_distributed_lock}/{!with_file_lock}. *)
+type lease_commit_refusal =
+  | Lease_lost of { key : string; holder : string option }
+      (** Inside the lease fence the record named another owner ([holder]),
+          or no record existed ([None]). Publishing could overwrite a newer
+          holder's commit. *)
+  | Lease_unverifiable of { key : string; detail : string }
+      (** The record or the fence could not be read; nothing was published. *)
 
-(** Revalidate and renew, immediately before a write, the lease this fiber
-    acquired for the lock guarding [path]. Call it after any wait that may
-    outlast the lease (for example a queued domain-pool job). *)
-val revalidate_held_lease : config -> string -> lease_revalidation
+val lease_commit_refusal_to_string : lease_commit_refusal -> string
+
+(** [commit_under_held_lease config path publish] runs [publish] as the
+    protected step of this fiber's lease on the lock guarding [path]: inside
+    that key's fence ({!Backend.FileSystem.commit_under_lease}) the owner is
+    checked, the lease renewed, and [publish] run before the fence is
+    released, so no competing acquisition can take the lease between the
+    check and the publication.
+
+    Runs [publish] directly, without a fence, when the path has no
+    lease-backed lock (Memory backend, unkeyed path) or when this fiber
+    holds no lease on it (a caller outside the lock, or a raw systhread,
+    which binds none and never waits on the domain pool). *)
+val commit_under_held_lease :
+  config -> string -> (unit -> 'a) -> ('a, lease_commit_refusal) result
 
 (** {1 Event logging} *)
 

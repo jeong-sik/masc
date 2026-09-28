@@ -4373,15 +4373,13 @@ let render_schedule_list (state : state) =
                     Terminal_text.single_line (schedule_delivery_word row))
                   snapshot.scs_rows)
            in
-           let recurrence_width =
-             Render_schedule.schedule_recurrence_width
+           let layout =
+             Render_schedule.schedule_layout
                ~inner_width:(max 1 (framed_inner_width cols - 2))
                ~target_width:subject_width ~wake_width ~delivery_width
            in
            c.push_styled ~style:(Theme.recede ())
-             ("  "
-             ^ Render_schedule.schedule_header_row ~target_width:subject_width
-                 ~wake_width ~delivery_width ~recurrence_width);
+             ("  " ^ Render_schedule.schedule_header_row ~layout);
            c.push_divider ();
            (* The column names and the rule under them, the two rows every
               other list on this screen already spends to say what it draws. *)
@@ -4439,8 +4437,7 @@ let render_schedule_list (state : state) =
                let line =
                  Render_schedule.schedule_row ~status_style:status_color
                    ~wake_style:(schedule_status_color last_wake)
-                   ~recurrence_style:Ansi.dim ~target_width:subject_width
-                   ~wake_width ~delivery_width ~recurrence_width
+                   ~recurrence_style:Ansi.dim ~layout
                    { Render_schedule.srow_status =
                        bracketed ~max_cells:10 row.sch_status
                    ; srow_due = due
@@ -16217,8 +16214,6 @@ let render_config (state : state) =
          into it. It also named PgUp/PgDn, which the table did not have, so
          the two had drifted in both directions. *)
       (match state.runtime_account_form with
-       | None when Option.is_some state.runtime_account_removal ->
-         Masc_tui_keys.footer_hints_runtime_account_removal ()
        | Some form when Masc_tui_runtime_account_form.is_saved form ->
          Masc_tui_keys.footer_hints_runtime_account_saved ()
        | Some _ -> Masc_tui_keys.footer_hints_runtime_account_form ()
@@ -16300,11 +16295,6 @@ let render_config (state : state) =
              does. *)
           if Masc_tui_runtime_account_form.is_saved form then
             c.push ("  " ^ Masc_tui_keys.footer_hints_runtime_account_saved ())
-      | None ->
-      match state.runtime_account_removal with
-      | Some screen ->
-          List.iter c.push
-            (Masc_tui_runtime_account_removal.rows ~width:(framed_inner_width cols) screen)
       | None ->
       match state.runtime_config_view_error, state.runtime_config_view with
       | Some detail, _ ->

@@ -216,12 +216,16 @@ def roll_review_state(f, gh, repo, member, run):
     review_state(f, gh, "repos/" + repo, member, failure=ExitCode.ROLL)
 
 
-def landed_review_state(f, gh, repo, member):
+def landed_review_state(f, gh, repo, member, branch):
     # A later integration finding on an already landed head revokes reuse for
     # remaining members. Closed-PR CI is not rerun or treated as a live gate.
+    # A replacement PASS still needs its cited exact-head/branch run evidence;
+    # a trusted comment alone cannot clear the earlier refusal.
     value = decision(f, gh, repo, member)
-    if value and (len(value) != 3 or value[0] != "PASS"):
+    if value and (len(value) != 3 or value[0] != "PASS" or not value[1].isdecimal()):
         raise f.Unavailable("batch_landed_member_review_refuses_evidence")
+    if value:
+        exact_run(f, gh, "repos/" + repo, member.pr, member.head, branch, int(value[1]))
     review_state(f, gh, "repos/" + repo, member)
 
 
@@ -313,7 +317,7 @@ def evaluate(f, *, line, repo, pr, head, run, git_dir, gh, landing=False):
         if pull.get("merged") and pull["state"] == "closed":
             if open_seen:
                 raise f.Unavailable("batch_landed_out_of_order")
-            landed_review_state(f, gh, repo, member)
+            landed_review_state(f, gh, repo, member, pull["head"]["ref"])
             landed.append((member, f.sha(pull["merge_commit_sha"])))
         elif pull["state"] == "open" and not pull.get("merged"):
             open_seen = True
@@ -333,9 +337,14 @@ def evaluate(f, *, line, repo, pr, head, run, git_dir, gh, landing=False):
     if landing and (candidate is None or candidate != batch.members[len(landed)]):
         raise f.Unavailable("batch_candidate_not_next_member")
 
-    reconstructed = batch.base
+    reconstructed, member_paths = batch.base, set()
     for member in batch.members:
+        before = reconstructed
         reconstructed = trees.merge(reconstructed, member.head)
+        # A later member may restore an earlier member's change. The path
+        # still participated in the tested integration, even if absent from
+        # the final ROLL diff, so external main writes must not reuse its CI.
+        member_paths.update(trees.paths(before, reconstructed))
     if trees.tree(reconstructed) != trees.tree(batch.roll):
         raise f.Unavailable("batch_roll_tree_does_not_match_members")
     roll_paths = trees.paths(batch.base, batch.roll)
@@ -367,8 +376,8 @@ def evaluate(f, *, line, repo, pr, head, run, git_dir, gh, landing=False):
             seen.append(member)
         else:
             removed = trees.paths(parent, commit, removed=True)
-            if touched & roll_paths or any(f.shared_check_input(
-                    path, roll_paths, reference_target_removed=path in removed) for path in touched):
+            if touched & member_paths or any(f.shared_check_input(
+                    path, member_paths, reference_target_removed=path in removed) for path in touched):
                 raise f.Unavailable("batch_nonmember_main_change_invalidates_roll")
             external.update(touched)
     if seen != [member for member, _ in landed]:
@@ -411,7 +420,7 @@ def evaluate(f, *, line, repo, pr, head, run, git_dir, gh, landing=False):
                 raise f.Unavailable("batch_member_verdict_changed_during_check")
             review_state(f, gh, prefix, member)
         else:
-            landed_review_state(f, gh, repo, member)
+            landed_review_state(f, gh, repo, member, start["head"]["ref"])
     end_roll = f.api(gh, f"{prefix}/pulls/{roll_pr}")
     roll_review_state(f, gh, repo, Member(roll_pr, batch.roll), batch.run)
     if (end_roll["state"] != "open" or end_roll["draft"] or end_roll.get("merged")

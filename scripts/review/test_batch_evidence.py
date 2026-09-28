@@ -151,6 +151,8 @@ print(value)
         if values:
             value = values.pop(0) if len(values) > 1 else values[0]
         else:
+            if endpoint not in self.data:
+                raise F.Unavailable("evidence_read_failed")
             value = self.data[endpoint]
         return copy.deepcopy(value)
 
@@ -180,7 +182,10 @@ print(value)
             stack.enter_context(patch.object(F, "api", self.api))
             stack.enter_context(patch.object(F, "api_pages", lambda gh, endpoint: [self.api(gh, endpoint)]))
             if not real_gates:
-                stack.enter_context(patch.object(B, "current_checks"))
+                def checks(_f, _gh, _repo, checked_pr, _head, _git_dir, **_kwargs):
+                    self.assertFalse(self.get(f"pulls/{checked_pr}")["merged"],
+                                     "closed prefix must not invoke open-PR CI gates")
+                stack.enter_context(patch.object(B, "current_checks", side_effect=checks))
                 stack.enter_context(patch.object(B, "verdict", side_effect=lambda _f, _g, _r, m: self.run_ids[m.pr]))
             return B.evaluate(F, line=self.line, repo="o/r", pr=pr, head=self.heads[pr],
                               run=self.run_ids[pr], git_dir=str(self.repo),
@@ -386,7 +391,10 @@ print(value)
                             self.put(path + "?per_page=100", comments + [refusal])
                         reason = "batch_landed_member_review_refuses_evidence"
                     self.refusal(reason, pr=2)
-                    self.assertNotIn(PREFIX + "/actions/runs/901", self.calls)
+                    # Historical exact-run reads may validate a replacement
+                    # PASS; evaluate's current_checks stub rejects any attempt
+                    # to apply the open-PR CI gate to this closed prefix.
+                    self.assertNotIn(PREFIX + f"/commits/{self.heads[1]}/check-runs?per_page=100", self.calls)
 
     def test_external_shared_and_overlap_changes_refuse(self):
         for path in ["config/runtime.toml", "specs/auth/AuthIdentityFSM.tla", "lib/one.ml"]:
@@ -771,6 +779,123 @@ print(value)
                           if '-X' in json.loads(line)]
                 self.assertEqual(len(writes), 1, "all guards must pass before the simulated API refusal")
                 self.assertIn(PREFIX + "/pulls/1/merge-async", writes[0])
+
+    def test_check_batch_enforces_next_member_and_all_pending_approvals(self):
+        self.approvals()
+        self.data["user"] = {"login": "operator"}
+        for run_id in self.run_ids.values():
+            self.get(f"actions/runs/{run_id}")["created_at"] = "2026-01-01T00:30:00Z"
+        batch = self.root / "check-gates.txt"
+        batch.write_text(self.line + "\n")
+        for pr, reason in [(2, "batch_candidate_not_next_member"), (1, "evidence_read_failed")]:
+            with self.subTest(pr=pr):
+                if pr == 1:
+                    self.put("pulls/2/reviews?per_page=100", [])
+                self.fixture.write_text(json.dumps(self.data))
+                result = subprocess.run([
+                    "bash", str(HERE / "merge-guard.sh"), "--check", "--batch", str(batch),
+                    "--repo", "o/r", "--pr", str(pr), "--head", self.heads[pr],
+                    "--run", str(self.run_ids[pr]), "--git-dir", str(self.repo)],
+                    env=dict(os.environ, GUARD_GH=str(self.fake)), capture_output=True, text=True, timeout=60)
+                self.assertEqual(result.returncode, 6, result.stdout + result.stderr)
+                self.assertIn(reason, result.stdout + result.stderr)
+                self.assertNotIn("WOULD MERGE", result.stdout)
+        requests = [json.loads(line) for line in (self.root / "requests.jsonl").read_text().splitlines()]
+        self.assertFalse(any('-X' in row for row in requests))
+
+    def test_restored_member_path_still_blocks_external_main_change(self):
+        content = "let a = 0\n" + "".join(f"let pad{i} = 0\n" for i in range(12)) + "let z = 0\n"
+        self.base = self.change(self.base, "lib/base.ml", content)
+        first = self.change(self.base, "lib/base.ml", content.replace("let a = 0", "let a = 1"))
+        restored = self.change(first, "lib/base.ml", content)
+        second = self.change(restored, "lib/two.ml", "let two = 2\n")
+        self.git("checkout", "-q", "--detach", self.base)
+        for head in [first, second]:
+            self.git("merge", "-q", "--no-ff", "--no-edit", head)
+        roll = self.git("rev-parse", "HEAD")
+        for pr, head in [(1, first), (2, second), (99, roll)]:
+            old = self.get(f"pulls/{pr}")["head"]["sha"]
+            self.get(f"pulls/{pr}")["head"]["sha"] = head
+            self.get(f"actions/runs/{self.run_ids[pr]}")["head_sha"] = head
+            for suffix in ["&event=pull_request&per_page=100", "&per_page=100"]:
+                runs = copy.deepcopy(self.get(f"actions/runs?head_sha={old}" + suffix))
+                for row in runs["workflow_runs"]:
+                    row["head_sha"] = head
+                self.put(f"actions/runs?head_sha={head}" + suffix, runs)
+            self.get(f"check-suites/{self.run_ids[pr] + 1000}")["head_sha"] = head
+            self.put(f"commits/{head}/check-runs?per_page=100",
+                     copy.deepcopy(self.get(f"commits/{old}/check-runs?per_page=100")))
+        self.heads = {1: first, 2: second}
+        self.roll = roll
+        self.main = self.base
+        self.put("commits/main", {"sha": self.main})
+        self.set_line()
+        self.assertEqual(self.git("diff", "--name-only", self.base, roll), "lib/two.ml",
+                         "ROLL must remain nonempty while the restored path disappears from its net diff")
+        self.assertEqual(self.evaluate()["status"], "fresh")
+        self.put("commits/main", {"sha": self.change(self.base, "lib/base.ml",
+                                                  content.replace("let z = 0", "let z = 1"))})
+        self.refusal("batch_nonmember_main_change_invalidates_roll")
+
+    def test_landed_replacement_pass_requires_exact_successful_run(self):
+        self.land(1)
+        failed = copy.deepcopy(self.get("actions/runs/901"))
+        failed.update(id=904, run_number=11, conclusion="failure")
+        self.put("actions/runs/904", failed)
+        original = copy.deepcopy(self.data)
+        for run_id, reason in [(999, "evidence_read_failed"),
+                               (902, "batch_run_not_current_successful_exact_pr_check"),
+                               (904, "batch_run_not_current_successful_exact_pr_check")]:
+            for late in [False, True]:
+                with self.subTest(run=run_id, late=late):
+                    self.data = copy.deepcopy(original)
+                    self.responses.clear()
+                    if run_id == 904:
+                        run_path = f"actions/runs?head_sha={self.heads[1]}&event=pull_request&per_page=100"
+                        newer_runs = {"workflow_runs": [copy.deepcopy(self.get("actions/runs/901")), failed]}
+                        if late:
+                            self.later(run_path, newer_runs)
+                        else:
+                            self.put(run_path, newer_runs)
+                    comments = copy.deepcopy(self.get("issues/1/comments"))
+                    refusal = {"id": 1005, "created_at": "2026-01-01T00:50:00Z",
+                               "author_association": "MEMBER", "user": {"login": "reviewer"},
+                               "body": f"verdict: FAIL head: {self.heads[1]} run: 901 by: reviewer"}
+                    replacement = dict(refusal, id=1006, created_at="2026-01-01T00:51:00Z",
+                                       body=f"verdict: PASS head: {self.heads[1]} run: {run_id} by: reviewer")
+                    if late:
+                        self.data["__responses"] = {PREFIX + "/issues/1/comments":
+                                                   [comments, comments + [refusal, replacement]]}
+                    else:
+                        self.put("issues/1/comments?per_page=100", comments + [refusal, replacement])
+                    self.refusal(reason, pr=2)
+
+    def test_landed_replacement_pass_accepts_valid_exact_head_run(self):
+        self.land(1)
+        replacement = copy.deepcopy(self.get("actions/runs/901"))
+        replacement.update(id=903, run_number=11, check_suite_id=1903)
+        self.put("actions/runs/903", replacement)
+        self.put("actions/runs/903/jobs?per_page=100", copy.deepcopy(self.get("actions/runs/901/jobs?per_page=100")))
+        original = copy.deepcopy(self.data)
+        for late in [False, True]:
+            with self.subTest(late=late):
+                self.data = copy.deepcopy(original)
+                self.responses.clear()
+                comments = copy.deepcopy(self.get("issues/1/comments?per_page=100"))
+                reviewed = comments + [
+                    {"id": 1007, "created_at": "2026-01-01T00:50:00Z", "author_association": "MEMBER",
+                     "user": {"login": "reviewer"}, "body": f"verdict: HOLD head: {self.heads[1]} by: reviewer"},
+                    {"id": 1008, "created_at": "2026-01-01T00:51:00Z", "author_association": "MEMBER",
+                     "user": {"login": "reviewer"}, "body": f"verdict: PASS head: {self.heads[1]} run: 903 by: reviewer"}]
+                run_path = f"actions/runs?head_sha={self.heads[1]}&event=pull_request&per_page=100"
+                newer_runs = {"workflow_runs": [copy.deepcopy(self.get("actions/runs/901")), replacement]}
+                if late:
+                    self.data["__responses"] = {PREFIX + "/issues/1/comments": [comments, reviewed]}
+                    self.later(run_path, newer_runs)
+                else:
+                    self.put("issues/1/comments?per_page=100", reviewed)
+                    self.put(run_path, newer_runs)
+                self.assertEqual(self.evaluate(pr=2)["status"], "fresh")
 
 
 if __name__ == "__main__":

@@ -80,16 +80,17 @@ check_current_ci
 check_verdict
 # Formal reviews can change while the final workflow/check API reads run.
 check_formal_review_state
-if [ "$check" -eq 1 ]; then
-  echo "WOULD MERGE #$pr head $head run $run"
-  exit 0
-fi
 if [ -n "$batch" ]; then
-  # Unlike --check preflight, a write must land the next manifest member.
+  # Both preflight and writes must land the next manifest member with every
+  # remaining member's bound approval and the same final review gates.
   python3 "$here/ci-freshness.py" --repo "$repo" --pr "$pr" --head "$head" \
     --run "$run" --git-dir "$gitdir" ${batch_args[@]+"${batch_args[@]}"} --landing
   check_verdict
   check_formal_review_state
+fi
+if [ "$check" -eq 1 ]; then
+  echo "WOULD MERGE #$pr head $head run $run"
+  exit 0
 fi
 merge_rc=0
 "$GH" api -X PUT "repos/$repo/pulls/$pr/merge-async" \

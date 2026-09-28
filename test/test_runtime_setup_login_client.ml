@@ -90,7 +90,39 @@ let claude_reference_spelling () = fixture (fun root _ ->
   check (option string) "login sees same keychain identity" (Some selected)
     (value (Login.environment login |> ok) "CLAUDE_CONFIG_DIR"))
 
+let native_authentication_observation () = fixture (fun root env ->
+  let script name body =
+    let path = Filename.concat root name in
+    Auth.save_private_text_file path ("#!/bin/sh\nset -eu\n" ^ body);
+    Unix.chmod path 0o700;
+    path in
+  let emit body = "printf '%s\\n' " ^ Filename.quote body ^ "\n" in
+  let observe client id cli_path =
+    let login = Login.prepare ~runtime_root:root ~account_id:id ~client ~existing:None |> ok in
+    Login.observe ~mgr:(Eio.Stdenv.process_mgr env) ~clock:(Eio.Stdenv.clock env)
+      ~cwd:(Eio.Stdenv.fs env) ~cli_path login in
+  let codex name account = script name
+      ("[ \"$1\" = app-server ]\nIFS= read -r request\n"
+       ^ emit {|{"id":1,"result":{"userAgent":"fixture"}}|}
+       ^ "IFS= read -r notification\nIFS= read -r request\n" ^ emit account) in
+  let unauthenticated = codex "provider-managed"
+      {|{"id":2,"result":{"account":null,"requiresOpenaiAuth":false}}|} in
+  check bool "Codex provider-managed response is not a logged-in account" true
+    (Result.is_error (observe Login.Codex "codex-managed" unauthenticated));
+  let authenticated = codex "codex-authenticated"
+      {|{"id":2,"result":{"account":{"type":"chatgpt","planType":"pro"},"requiresOpenaiAuth":true}}|} in
+  (match observe Login.Codex "codex-auth" authenticated |> ok with
+   | Login.Authenticated -> ()
+   | Login.Login_completed | Login.Credential_captured -> fail "native authentication lost");
+  let claude = script "claude-authenticated"
+      ("[ \"$1\" = auth ]\n[ \"$2\" = status ]\n"
+       ^ emit {|{"loggedIn":true,"authMethod":"claude.ai","subscriptionType":"team","apiProvider":"firstParty"}|}) in
+  (match observe Login.Claude "claude-auth" claude |> ok with
+   | Login.Authenticated -> ()
+   | Login.Login_completed | Login.Credential_captured -> fail "native authentication lost"))
+
 let () = run "official login adapters" ["selected accounts", [
   test_case "native login isolation" `Quick isolated_native_login;
+  test_case "native authentication without model calls" `Quick native_authentication_observation;
   test_case "Muse capture and durable account selection" `Quick muse_capture_and_reference;
   test_case "Claude reauthentication identity" `Quick claude_reference_spelling]]

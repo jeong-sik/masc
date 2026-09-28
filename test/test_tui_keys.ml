@@ -891,7 +891,7 @@ let test_board_read_footer_carries_the_post_keys () =
             (holds key read);
           Alcotest.(check bool) (Printf.sprintf "the Board list spells %s the same" key) true
             (holds key list))
-        [ "v / V:vote"; "c:reply"; "Y:copy link" ];
+        [ "v / V:up / down"; "c:reply"; "Y:copy link" ];
       Alcotest.(check bool) (Printf.sprintf "the pane keys follow the split (%b)" split) split
         (holds "Ctrl-W:switch" read))
     [ Masc_tui_types.Board_read_wide

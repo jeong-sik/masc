@@ -618,6 +618,22 @@ class CodexExplicitRefresh(unittest.TestCase):
         self.assertEqual(rows[0]['id'], 'cached')
         self.assertIn('cached fallback', origin)
 
+    def test_new_codex_model_spec_preserves_selected_account_home(self):
+        source = dict(choice='codex', command='codex', endpoint='', api_key_env='',
+                      rows=[], account_home='/selected/home')
+        with patch.object(SETUP, 'render', return_value=('codex.new-model', b'')) as renderer:
+            _, selected = SETUP.resolve_model_spec(
+                source, dict(id='new-model', context=8192), 10)
+        self.assertEqual(selected['account_home'], '/selected/home')
+        self.assertEqual(renderer.call_args.args[0]['account_home'], '/selected/home')
+
+    def test_new_codex_model_spec_omits_undeclared_account_home(self):
+        source = dict(choice='codex', command='codex', endpoint='', api_key_env='', rows=[])
+        with patch.object(SETUP, 'render', return_value=('codex.new-model', b'')):
+            _, selected = SETUP.resolve_model_spec(
+                source, dict(id='new-model', context=8192), 10)
+        self.assertNotIn('account_home', selected)
+
     @unittest.skipUnless(BINARY, 'requires CI-built native executable')
     def test_native_refresh_has_no_old_cache_or_turn_and_preserves_source(self):
         with tempfile.TemporaryDirectory() as directory:

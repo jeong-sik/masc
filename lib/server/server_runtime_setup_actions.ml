@@ -134,7 +134,13 @@ let source_template ~sw ~pending ~workspace config request =
           | Some provider -> (match provider.antigravity_cli with
             | Some options -> Ok ["timeout_s",`Float options.timeout_s] | None -> Error Unsupported_connection)
           | None -> Error Unsupported_connection)) in
-  Ok (("choice",`String (Runtime_setup_spec.choice_name choice))::transport @ metadata @ credentials @ timeout,id,choice)
+  let account_home = match choice with
+    | Runtime_setup_spec.Claude_code | Codex ->
+      (match Option.bind (declared_provider config id) (fun provider -> provider.Runtime_schema.account_home) with
+       | Some home -> ["account_home", `String home]
+       | None -> [])
+    | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Antigravity -> [] in
+  Ok (("choice",`String (Runtime_setup_spec.choice_name choice))::transport @ metadata @ credentials @ timeout @ account_home,id,choice)
 let native_json ~binary args =
   match Process_eio.run_argv_with_status_split_or_refusal (binary::args) with
   | Ok (Unix.WEXITED 0,body,_) ->
@@ -195,9 +201,9 @@ let discover ~binary ~sw:_ ~net ~base_path request =
       (* The account is private configured state, not browser-supplied data
          or a public inventory field. An undeclared account keeps the client's
          existing ambient selection contract. *)
-      let account_args = match declared_provider config id with
-        | Some {Runtime_schema.account_home=Some home; _} -> ["--account-home";home]
-        | Some {Runtime_schema.account_home=None; _} | None -> [] in
+      let* account_args = match List.assoc_opt "account_home" template with
+        | Some value -> let* home=text value in Ok ["--account-home";home]
+        | None -> Ok [] in
       let* json=native_json ~binary (["runtime-codex-models";"--cli-path";command] @ account_args) in
       project_client_models ~source:"codex_isolated_account_model_list" ~catalog:false json
     | Claude_code ->

@@ -13,7 +13,10 @@ type error = Invalid_spec of string
 val error_message : error -> string
 val of_json : ?home_dir:string -> Yojson.Safe.t -> (t, error) result
 (** [home_dir] resolves an explicit current-user [~/] Antigravity reference;
-    ordinary HTTP File references must already be absolute. No files are read. *)
+    ordinary HTTP File references must already be absolute. Claude Code and Codex
+    accept an absolute [account_home], preserving its exact path spelling in the
+    connection identity and rendered provider. Omission keeps ambient selection.
+    No files are read. *)
 type rendered = { runtime_id:string; runtime_toml:string }
 val setup_exact_body_timeout_s : float
 (** The [exact-body-timeout-s] setup writes on an HTTP provider it points the

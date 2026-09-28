@@ -17,7 +17,7 @@ let fixture test = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
     | Ok (Unix.WEXITED 0,s,_) -> String.trim s | _ -> Alcotest.fail "Python fixture unavailable" in
   let binary=Filename.concat base "native-fixture" in
   save binary ("#!" ^ python ^ {|
-import json,sys,os
+import json,sys,os,tomllib
 args=sys.argv[1:]
 if args[0]=='runtime-antigravity-account':
     assert args[1]=='--base-path' and args[3:]==['--cli-path','agy']
@@ -39,6 +39,14 @@ assert args[1]=='--base-path'
 if args[0]=='runtime-default-set':
     assert args[4:6]==['--setup-lanes','--setup-imp']
 elif args[0]=='runtime-verify':
+    with open(os.path.join(args[2],'.masc','config','runtime.toml'),'rb') as f:
+        staged=tomllib.load(f)
+    provider_id,model_key=args[3].split('.',1)
+    provider=staged['providers'][provider_id]
+    with open(os.path.join(os.path.dirname(__file__),'verified-provider.json'),'w') as f:
+        json.dump({'runtime_id':args[3],'command':provider.get('command'),
+          'account_home':provider.get('account-home'),
+          'model':staged['models'][model_key]['api-name']},f)
     # The shape Runtime_verification.to_json writes; of_json refuses any other key set.
     print(json.dumps({'schema':'masc.runtime_verification.v1','runtime_id':args[3],'model':'fixture-model',
       'observed_model':'fixture-model','status':'verified',
@@ -72,7 +80,7 @@ let test_forbidden_reference () = fixture (fun base runtime binary _net ->
   List.iter (fun fields ->
     Alcotest.check Alcotest.bool "browser cannot supply private files or commands" true
       (Actions.save ~binary ~base_path:base (request base (source fields)) = Error Actions.Invalid_request))
-    [["credential_file",`String "/private/credential"];["command",`String "/untrusted/program"]];
+    [["account_home",`String "/private/home"];["credential_file",`String "/private/credential"];["command",`String "/untrusted/program"]];
   Alcotest.check Alcotest.string "invalid request preserves configuration" before (In_channel.with_open_bin runtime In_channel.input_all))
 let test_native_client_metadata () = fixture (fun base _runtime binary net ->
   Eio.Switch.run (fun sw ->
@@ -85,8 +93,8 @@ let test_native_client_metadata () = fixture (fun base _runtime binary net ->
     let model=json |> member "models" |> to_list |> List.hd in
     Alcotest.check Alcotest.int "fresh client context retained" 272000 (model |> member "context" |> to_int);
     Alcotest.check Alcotest.bool "child private field not projected" true (json |> member "credential_file" = `Null)))
-let test_configured_codex_account_discovery () = fixture (fun base runtime binary net ->
-  let account_home = Filename.concat base "private-selected-codex" in
+let test_configured_codex_account_save () = fixture (fun base runtime binary net ->
+  let account_home = Filename.concat base "private-selected-codex" ^ "/" in
   Unix.mkdir account_home 0o700;
   Out_channel.with_open_gen [Open_append;Open_binary] 0o600 runtime (fun channel ->
     output_string channel (Printf.sprintf
@@ -113,7 +121,34 @@ let test_configured_codex_account_discovery () = fixture (fun base runtime binar
     Alcotest.check Alcotest.bool "browser cannot override the configured home" true
       (Actions.discover ~binary ~sw ~net ~base_path:base
         (`Assoc ["integration_id",`String "private_codex";"account_home",`String "/untrusted"])
-       = Error Actions.Invalid_request)))
+       = Error Actions.Invalid_request);
+    let open Yojson.Safe.Util in
+    let fresh_model = result |> member "models" |> to_list |> List.hd in
+    let model_id = fresh_model |> member "id" |> to_string in
+    let revision = Runtime_setup_batch.observe ~base_path:base |> Result.get_ok
+      |> Runtime_setup_batch.revision_to_string in
+    let receipt = get (Actions.save ~binary ~base_path:base (`Assoc [
+      "revision",`String revision;
+      "connections",`List [`Assoc ["source",request;"models",`List [`Assoc [
+        "id",`String model_id;"context",fresh_model |> member "context";"streaming",`Bool true]]]];
+      "selection",`List [`Assoc ["connection",`Int 0;"model",`Int 0]]])) in
+    let runtime_id = receipt |> member "runtime_id" |> to_string in
+    let verified = Yojson.Safe.from_file (Filename.concat base "verified-provider.json") in
+    Alcotest.check Alcotest.string "new selected runtime reaches staged verification"
+      runtime_id (verified |> member "runtime_id" |> to_string);
+    Alcotest.check Alcotest.string "verification uses the discovered model"
+      model_id (verified |> member "model" |> to_string);
+    Alcotest.check Alcotest.string "verification keeps the selected command"
+      "selected-codex" (verified |> member "command" |> to_string);
+    Alcotest.check Alcotest.string "verification keeps the exact configured account home"
+      account_home (verified |> member "account_home" |> to_string);
+    let saved = Runtime_toml.parse_file runtime |> Result.get_ok in
+    let binding = List.find (fun binding -> Runtime.id_of_binding binding = runtime_id) saved.bindings in
+    let provider = List.find (fun (provider:Runtime_schema.provider) -> provider.id = binding.provider_id) saved.providers in
+    Alcotest.check (Alcotest.option Alcotest.string) "new saved provider retains that same account"
+      (Some account_home) provider.account_home;
+    Alcotest.check Alcotest.bool "save receipt keeps the account path private" false
+      (String_util.contains_substring (Yojson.Safe.to_string receipt) account_home)))
 let test_configured_muse_readiness_inventory () = fixture (fun _base runtime _binary _net ->
   Out_channel.with_open_gen [Open_append;Open_binary] 0o600 runtime (fun channel ->
     output_string channel {|
@@ -192,7 +227,7 @@ let () = Alcotest.run "web setup actions" ["request boundary",[
   Alcotest.test_case "private key joins verified native save" `Quick test_private_key;
   Alcotest.test_case "no browser credential paths or executable override" `Quick test_forbidden_reference;
   Alcotest.test_case "native client metadata without private fields" `Quick test_native_client_metadata;
-  Alcotest.test_case "configured Codex account stays private during discovery" `Quick test_configured_codex_account_discovery;
+  Alcotest.test_case "configured Codex account survives discovery, verification and save" `Quick test_configured_codex_account_save;
   Alcotest.test_case "configured Muse advertises readiness independently" `Quick test_configured_muse_readiness_inventory;
   Alcotest.test_case "imported opaque account joins native save" `Quick test_account_reference;
   Alcotest.test_case "declared provider variants refuse before discovery" `Quick test_declared_provider_variants;

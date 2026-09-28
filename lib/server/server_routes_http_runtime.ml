@@ -1515,7 +1515,11 @@ let board_comment_request_of_query ~offset ~limit =
   let parsed =
     let* offset = integer_field "comment_offset" offset in
     let* limit = integer_field "comment_limit" limit in
-    let page_size = Option.value ~default:20 limit in
+    let page_size =
+      match limit with
+      | Some value -> value
+      | None -> 20 (* The absent query parameter selects the public default. *)
+    in
     let fields =
       match offset with
       | None -> [ "comment_tail", `Int page_size ]

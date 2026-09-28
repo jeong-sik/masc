@@ -55,10 +55,19 @@ input { flex:1; min-width:0; }
 #activity { margin:0; padding-left:1.2em; color:var(--dim); font-size:13px; }
 h2 { font-size:13px; color:var(--dim); margin:4px 0; font-weight:600; }
 [hidden] { display:none !important; }
-#pad { display:flex; flex-direction:column; gap:10px; user-select:none; -webkit-user-select:none; touch-action:manipulation; }
+#pad { display:flex; flex-direction:column; gap:10px; user-select:none; -webkit-user-select:none; touch-action:manipulation; container-type:inline-size; }
 #pad .shoulders, #pad .body { display:flex; justify-content:space-between; align-items:center; gap:8px; }
-#pad .dpad, #pad .face { display:grid; grid-template-columns:repeat(3, 60px); grid-template-rows:repeat(3, 60px); gap:4px; }
+#pad .dpad, #pad .face { flex:0 1 188px; min-width:0; aspect-ratio:1; display:grid; grid-template-columns:repeat(3, 1fr); grid-template-rows:repeat(3, 1fr); gap:4px; }
+#pad .dpad button, #pad .face button { min-width:0; min-height:0; }
 #pad .center { display:flex; flex-direction:column; gap:8px; }
+/* The row is two 188px grids (60px cells), SELECT and START at 44px, and two
+   8px gaps: 436px. A narrower pad -- a 375px phone leaves 343 -- puts SELECT
+   and START under the grids, and the grids share the width. */
+@container (max-width: 435px) {
+  #pad .body { flex-wrap:wrap; }
+  #pad .dpad, #pad .face { flex:1 1 0; max-width:188px; }
+  #pad .center { order:1; flex:1 0 100%; flex-direction:row; justify-content:center; }
+}
 #pad button { font-size:13px; padding:4px; }
 #pad [data-button="BTN_DPAD_UP"], #pad [data-button="BTN_NORTH"] { grid-column:2; grid-row:1; }
 #pad [data-button="BTN_DPAD_LEFT"], #pad [data-button="BTN_WEST"] { grid-column:1; grid-row:2; }
@@ -147,8 +156,10 @@ let since = null;
 let lastActivityKey = null;
 let ended = false;
 let sending = Promise.resolve();
-// The saves name the pad layout was read for; the layout changes only when
-// another program is loaded.
+// The saves name the seat last reported (null: nothing loaded), and the one
+// the pad on screen was read for (undefined: not read yet, or the last read
+// failed). The pad is read again while the two differ.
+let seatSavesName = null;
 let padFor = undefined;
 let padBound = new Set();
 const gamepadHeld = new Set();
@@ -220,12 +231,12 @@ async function refreshSeat() {
   controller = r.json.controller;
   renderTurn();
   renderPassTargets(r.json.participants);
-  const savesName = r.json.saves_name === undefined ? null : r.json.saves_name;
-  if (savesName !== padFor) { padFor = savesName; await refreshPad(); }
+  seatSavesName = r.json.saves_name === undefined ? null : r.json.saves_name;
 }
 
-function showPad(buttons) {
+function showPad(savesName, buttons) {
   const pad = el('pad');
+  padFor = savesName;
   padBound = new Set(buttons.map((b) => b.button));
   for (const node of pad.querySelectorAll('button[data-button]')) {
     const binding = buttons.find((b) => b.button === node.dataset.button);
@@ -237,17 +248,28 @@ function showPad(buttons) {
   el('keys').hidden = buttons.length !== 0;
 }
 
-// No machine, or a program with no layout: the plain keys row stays.
-async function refreshPad() {
-  if (padFor === null) { showPad([]); return; }
+// No machine, or a program with no layout: the plain keys row stays. Only
+// an answer about a program settles the pad -- its layout (200) or that it
+// has none (404) -- and it settles on the saves name that answer carries.
+// Any other answer, or a read that throws, leaves it unsettled with the keys
+// row showing, and the next poll reads it again.
+async function syncPad() {
+  if (seatSavesName === padFor) return;
+  if (seatSavesName === null) { showPad(null, []); return; }
+  showPad(undefined, []);
   const r = await api('GET', PAD_PATH);
   if (ended) return;
-  showPad(r.status === 200 && r.json && Array.isArray(r.json.buttons) ? r.json.buttons : []);
+  const named = r.json !== null && typeof r.json.saves_name === 'string';
+  if (r.status === 200 && named && Array.isArray(r.json.buttons)) showPad(r.json.saves_name, r.json.buttons);
+  else if (r.status === 404 && named) showPad(r.json.saves_name, []);
+  else setStatus('패드 배치를 읽지 못했어요 (' + r.status + '). 다시 읽고 있어요.');
 }
 
+// The saves name goes with the button: a program loaded since the pad was
+// read is refused by the server rather than sent this layout's keys.
 function padPress(button) {
   if (ended || !padBound.has(button)) return;
-  send(PAD_PATH, { button });
+  send(PAD_PATH, { button, saves_name: padFor });
 }
 
 // Rising edges only, so a held button presses once.
@@ -335,6 +357,7 @@ async function poll() {
     // only then, instead of on every poll.
     const key = activity.length === 0 ? '' : JSON.stringify(activity[0]) + '#' + activity.length;
     if (key !== lastActivityKey) { lastActivityKey = key; await refreshSeat(); }
+    await syncPad();
   }
 }
 
@@ -427,7 +450,8 @@ let controller_json () =
   | Error Dos_lane.No_machine -> [ ("machine", `Bool false); ("controller", `Null); ("saves_name", `Null) ]
   | Error
       (( Dos_lane.Invalid_request _ | Dos_lane.Unreadable _ | Dos_lane.Held_by _
-       | Dos_lane.Guest_fault _ | Dos_lane.Unsaveable _ | Dos_lane.Checkpoint_refused _ ) as err) ->
+       | Dos_lane.Guest_fault _ | Dos_lane.Unsaveable _ | Dos_lane.Checkpoint_refused _
+       | Dos_lane.Other_program _ ) as err) ->
     [ ("machine", `Bool true); ("controller", `Null); ("saves_name", `Null)
     ; ("controller_error", `String (Dos_lane.error_to_string err)) ]
 

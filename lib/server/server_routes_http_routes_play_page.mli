@@ -10,7 +10,9 @@
     again whenever the live activity feed moves. When the loaded program has
     a masc pad layout ([GET /api/v1/play/pad]) it draws that pad in place of
     the plain keys row, and reads a physical gamepad in the standard mapping
-    onto the same buttons.
+    onto the same buttons. A pad read that fails shows the keys row and a
+    status line, and the next poll reads it again. Each button press carries
+    the saves name its layout was read for.
 
     [GET /api/v1/play/seat] needs [CanPlayMachine] from a bearer and answers
     [{name, machine, controller, saves_name, participants}]: the bearer's name,

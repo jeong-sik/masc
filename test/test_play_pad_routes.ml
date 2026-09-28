@@ -136,7 +136,9 @@ let test_the_pad () =
     Eio_main.run (fun env ->
       Masc_test_deps.init_eio_clock env;
       let call ?(body = "") ~token meth = dispatch ~state ~meth ~token ~body in
-      let press ~token button = call ~token "POST" ~body:(Printf.sprintf {|{"button":%S}|} button) in
+      let press ?(saves_name = "samguk3") ~token button =
+        call ~token "POST" ~body:(Printf.sprintf {|{"button":%S,"saves_name":%S}|} button saves_name)
+      in
       eject_quietly ();
       check int "no program loaded is a conflict" 409 (status_of (call ~token:player "GET"));
       with_machine ~saves_name:"samguk3" (fun () ->
@@ -155,12 +157,26 @@ let test_the_pad () =
         dos_ok "pass" (Dos_lane.pass ~who:"operator" ~to_:(Some "minsu") ~announce:ignore);
         List.iter
           (fun (body, what) -> check int what 400 (status_of (call ~token:player "POST" ~body)))
-          [ {|{"button":"BTN_TL"}|}, "an unbound button is a 400"
-          ; {|{"button":"BTN_Z"}|}, "an unknown button is a 400"
-          ; {|{"button":"BTN_SOUTH","keys":["x"]}|}, "an unknown field is a 400"
+          [ {|{"button":"BTN_TL","saves_name":"samguk3"}|}, "an unbound button is a 400"
+          ; {|{"button":"BTN_Z","saves_name":"samguk3"}|}, "an unknown button is a 400"
+          ; {|{"button":"BTN_SOUTH","saves_name":"samguk3","keys":["x"]}|}, "an unknown field is a 400"
+          ; {|{"button":"BTN_SOUTH"}|}, "no saves name is a 400"
+          ; {|{"button":"BTN_SOUTH","saves_name":1}|}, "a saves name that is not a string is a 400"
           ; {|{}|}, "no button is a 400"
           ; {|not json|}, "not JSON is a 400"
           ];
+        (* A pad read for another program: the server answers for the
+           program loaded now instead of pressing that one's keys. *)
+        let stale = press ~saves_name:"zzt" ~token:player "BTN_SOUTH" in
+        check int "a pad read for another program is a conflict" 409 (status_of stale);
+        check bool "naming the program loaded now" true
+          (member "saves_name" (body_of stale) = Some (`String "samguk3"));
+        (* The same check under the machine's lock, where a load between the
+           screen read and the press would land. *)
+        check bool "the lane refuses keys meant for another program" true
+          (match Dos_lane.press_into ~saves_name:"zzt" ~who:"minsu" ~keys:[ "return" ] ~steps:100_000 with
+           | Error (Dos_lane.Other_program { expected = "zzt"; loaded = "samguk3" }) -> true
+           | Ok _ | Error _ -> false);
         check int "none of them moved the machine" before (change_count ());
         let pressed = press ~token:player "BTN_SOUTH" in
         check int "the holder presses a bound button" 200 (status_of pressed);

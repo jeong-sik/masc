@@ -47,6 +47,24 @@ let test_no_provider_takes_a_table_another_reader_owns () =
           (refused_at ("providers." ^ name) errors))
     names
 
+(* Written out by hand. The loop above reads the same sources as the loader,
+   so it would stay green if a table dropped out of the variant or the
+   registry; these are the names #39539 found loading as providers. *)
+let test_the_names_that_loaded_as_providers_are_refused () =
+  List.iter
+    (fun name ->
+      match Runtime_toml.parse_string (provider_named name) with
+      | Ok _ -> Alcotest.failf "a provider called %s was accepted" name
+      | Error errors ->
+        Alcotest.(check bool)
+          (Printf.sprintf "%s is refused as a provider id" name)
+          true
+          (refused_at ("providers." ^ name) errors))
+    [ "voice"; "fusion"; "tui"; "slack"; "discord"; "repositories"; "browser"
+    ; "typesafeai"; "memory_os"; "keeper_settings"; "turn"; "wire_capture"
+    ; "reactive"; "vision"
+    ]
+
 (* The same declaration under a name nobody reads loads, so the refusals
    above are about the name. *)
 let test_a_name_no_reader_owns_is_a_provider () =
@@ -101,6 +119,8 @@ let () =
     [ ( "namespaces"
       , [ Alcotest.test_case "no provider takes a table another reader owns" `Quick
             test_no_provider_takes_a_table_another_reader_owns
+        ; Alcotest.test_case "the names that loaded as providers are refused" `Quick
+            test_the_names_that_loaded_as_providers_are_refused
         ; Alcotest.test_case "a name no reader owns is a provider" `Quick
             test_a_name_no_reader_owns_is_a_provider
         ; Alcotest.test_case "model and endpoint ids may share a table name" `Quick

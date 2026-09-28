@@ -1473,7 +1473,7 @@ let runtime_missing_from_report (report : missing_catalog_report) runtime_id =
     report.missing_models
 ;;
 
-let runtime_default_route_name = "[runtime].default"
+let runtime_default_route_name = "[" ^ runtime_table ^ "].default"
 
 let unavailable_assignment_label (entry : unavailable_runtime_assignment) =
   Printf.sprintf "[%s].%s=%S" assignments_table entry.keeper_name entry.runtime_id

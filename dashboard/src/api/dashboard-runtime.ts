@@ -1231,6 +1231,12 @@ const RUNTIME_TOML_EDITOR_PROTOCOL_KEYS = [
   'transport',
 ] as const
 
+// Strict like the protocol inventory: the server always sends this list and
+// it is never empty (the variant alone names sixteen tables). A missing or
+// empty list means a server this dashboard does not match, and an empty
+// fallback would let the forms accept names the server refuses. That
+// mismatch fails this config read with an error the editor shows; an older
+// dashboard ignores the extra field.
 function parseReservedProviderIds(raw: unknown): string[] {
   if (!Array.isArray(raw) || raw.length === 0) {
     throw new Error('유효하지 않은 runtime reserved provider id 목록')

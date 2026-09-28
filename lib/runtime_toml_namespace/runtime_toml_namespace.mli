@@ -4,9 +4,12 @@
     A provider's bindings are a top-level table too, named after the provider
     id ([[codex.gpt-5.6]]). A provider called [voice] would make [[voice.tts]]
     both its bindings and the voice settings, so no provider may be called by
-    any name here. Model ids never become top-level tables and are free to. Each reader takes its table's name from {!key},
-    which keeps the spelling in one place and makes a new table something
-    that is added here before anything reads it.
+    any name here. Model ids never become top-level tables and may use
+    these names.
+
+    Each reader takes its table's name from {!key}, which keeps the spelling
+    in one place and makes a new table something that is added here before
+    anything reads it.
 
     The keeper runtime settings ([turn], [wire_capture], [web_search], ...)
     are not listed. [Keeper_runtime_setting_registry] owns those names and
@@ -19,7 +22,7 @@ type t =
   | Exec  (** SSH execution endpoints *)
   | Egress  (** per-keeper egress allowances *)
   | Lsp  (** language servers *)
-  | Typesafeai
+  | Typesafeai  (** the TypeSafeAI lane's destinations *)
   | Skills  (** skill sources *)
   | Fusion  (** Fusion presets and seats *)
   | Voice  (** voice endpoints and keeper voices *)

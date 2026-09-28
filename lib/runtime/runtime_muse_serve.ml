@@ -948,13 +948,54 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
      | Msp.Unhandled_notification _ -> continue state)
 ;;
 
-let validate_session_identity (config : config) ~workspace_root (session : Msp.session) =
-  let* () = match config.model with
-    | Some requested when session.model_id <> Some requested ->
-      Error (Session_model_mismatch {requested; resumed=session.model_id})
-    | Some _ | None -> Ok () in
+let validate_session_model (config : config) (session : Msp.session) =
+  match config.model with
+  | Some requested when session.model_id <> Some requested ->
+    Error (Session_model_mismatch {requested; resumed=session.model_id})
+  | Some _ | None -> Ok ()
+;;
+
+let validate_session_workspace ~workspace_root (session : Msp.session) =
   if session.workspace_root = Some workspace_root then Ok ()
   else Error (Session_workspace_mismatch {requested=workspace_root; reported=session.workspace_root})
+;;
+
+(* The model named on session/start is only the session's first selection.
+   Muse Code 1.4.0 folds its account default over it right after the start
+   and again when the host closes, so a resumed session reports that default
+   (muse-spark-1.3-contributor, whose content may be used for product
+   improvement) although its turns ran on the requested model. session/setModel
+   is MSP's durable selection; it outranks those folds on later resumes. The
+   read-back refuses a selection that did not land before any turn starts. *)
+let select_session_model io (config : config) (session : Msp.session) =
+  match config.model with
+  | None -> Ok session
+  | Some requested when session.model_id = Some requested -> Ok session
+  | Some requested ->
+    let* result =
+      request io ~method_:"session/setModel" (fun ~id ->
+        Msp.session_set_model_request
+          ~id
+          ~command_id:(new_command_id ())
+          ~session_id:session.session_id
+          ~model_id:requested)
+    in
+    let* () = lift (Msp.parse_set_model_result result) in
+    let* result =
+      request io ~method_:"session/read" (fun ~id ->
+        Msp.session_read_request ~id ~session_id:session.session_id)
+    in
+    let* read = lift (Msp.parse_session_result ~stage:"session/read" result) in
+    let* () =
+      if String.equal read.Msp.session_id session.session_id then Ok ()
+      else
+        protocol_error
+          "session/read"
+          (Printf.sprintf "read session id mismatch: requested %S but the host returned %S"
+             session.session_id read.Msp.session_id)
+    in
+    let* () = validate_session_model config read in
+    Ok { session with model_id = read.model_id }
 ;;
 
 let validate_session_approval_mode ~requested reported =
@@ -976,7 +1017,8 @@ let open_session io (config : config) ~approval_mode ~session_mode ~workspace_ro
           ~config:session_config)
     in
     let* session = lift (Msp.parse_session_result ~stage:"session/start" result) in
-    let* () = validate_session_identity config ~workspace_root session in
+    let* () = validate_session_model config session in
+    let* () = validate_session_workspace ~workspace_root session in
     (* A started session must be empty: turns attached to a fresh claim mean
        the host confused the new session with an existing conversation. *)
     let* () =
@@ -1009,7 +1051,7 @@ let open_session io (config : config) ~approval_mode ~session_mode ~workspace_ro
              session_id
              session.Msp.session_id)
     in
-    let* () = validate_session_identity config ~workspace_root session in
+    let* () = validate_session_workspace ~workspace_root session in
     let* () =
       if session.Msp.turn_count = expected_turn_count
       then Ok ()
@@ -1027,6 +1069,7 @@ let open_session io (config : config) ~approval_mode ~session_mode ~workspace_ro
     in
     let* effective = lift (Msp.parse_set_approval_mode_result result) in
     let* () = validate_session_approval_mode ~requested:approval_mode (Some effective) in
+    let* session = select_session_model io config session in
     Ok ({session with approval_mode=Some effective}, true)
 ;;
 

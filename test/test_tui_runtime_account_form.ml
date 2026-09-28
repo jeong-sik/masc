@@ -55,18 +55,20 @@ let press form keys =
     (fun outcome key ->
       match outcome with
       | F.Editing form -> F.key form key
-      | F.Cancelled | F.Submitted _ -> outcome)
+      | F.Cancelled | F.Submitted _ | F.Copy _ -> outcome)
     (F.Editing form) keys
 
 let editing = function
   | F.Editing form -> form
   | F.Cancelled -> Alcotest.fail "the form closed"
   | F.Submitted _ -> Alcotest.fail "the form submitted"
+  | F.Copy _ -> Alcotest.fail "the form copied"
 
 let submitted = function
   | F.Submitted form -> form
   | F.Editing _ -> Alcotest.fail "enter on the last field did not submit"
   | F.Cancelled -> Alcotest.fail "the form closed"
+  | F.Copy _ -> Alcotest.fail "the form copied"
 
 (* Submit, then declare against [current] the way the key loop does. *)
 let declare ?(current = fixture) form keys =
@@ -146,16 +148,16 @@ is-non-interactive = true
     Alcotest.(check (option string)) "the sign-in is a shell command for that home"
       (Some "(export CODEX_HOME=/home/op/.codex-account2 && codex login)")
       (Option.map
-         (fun (s : F.sign_in) -> String.concat "" (String.split_on_char '\'' s.command))
+         (fun s -> String.concat "" (String.split_on_char '\'' (F.command s)))
          sign_in)
 
 let test_a_home_with_a_space_is_one_argument () =
   let keys = [ "\r"; "\r" ] @ typed "/home/op/My Codex" @ [ "\r" ] in
   match declare (opened ()) keys with
-  | Ok { F.sign_in = Some { command; then_type }; _ } ->
+  | Ok { F.sign_in = Some s; _ } ->
     Alcotest.(check string) "the home is quoted"
-      "(export CODEX_HOME='/home/op/My Codex' && codex login)" command;
-    Alcotest.(check (option string)) "codex logs in by itself" None then_type
+      "(export CODEX_HOME='/home/op/My Codex' && codex login)" (F.command s);
+    Alcotest.(check (option string)) "codex logs in by itself" None (F.then_type s)
   | Ok { F.sign_in = None; _ } -> Alcotest.fail "no sign-in for Codex"
   | Error form -> Alcotest.failf "refused: %s" (String.concat " / " (rows form))
 
@@ -192,7 +194,7 @@ let test_a_provider_gone_from_the_file_is_refused () =
 let test_esc_abandons () =
   match press (opened ()) (typed "x" @ [ "esc" ]) with
   | F.Cancelled -> ()
-  | F.Editing _ | F.Submitted _ -> Alcotest.fail "esc did not close the form"
+  | F.Editing _ | F.Submitted _ | F.Copy _ -> Alcotest.fail "esc did not close the form"
 
 let test_a_paste_is_one_line () =
   let form = editing (press (opened ()) [ "\r"; "\r" ]) in
@@ -318,35 +320,82 @@ let copied_command ~width form =
       else text)
     (from (F.rows ~width form))
 
+(* The command rows of [form], judged against [command]. *)
+let check_command_rows ~drawn command form =
+  match copied_command ~width:width_80 form with
+  | [ one ] -> Alcotest.(check string) ("one row is the command: " ^ drawn) command one
+  | [ setup; run ] ->
+    Alcotest.(check bool) ("the first row alone does not parse: " ^ setup) false
+      (parses setup);
+    Alcotest.(check bool) ("the second row alone does not parse: " ^ run) false
+      (parses run);
+    let cut = String.ends_with ~suffix:"\xe2\x80\xa6" setup in
+    Alcotest.(check bool) ("the rows together parse unless cut: " ^ drawn) (not cut)
+      (parses (setup ^ "\n" ^ run));
+    if not cut
+    then Alcotest.(check string) "the rows are the command" command (setup ^ " " ^ run)
+  | rows -> Alcotest.failf "the command took %d rows: %s" (List.length rows) drawn
+
 (* A command copied off two rows that ran as two commands would sign the
    client in on the default login. Split or cut, no row alone parses; the
    rows together are the command the save prints, unless the pane cut the
-   first one. *)
+   first one. The saved form draws the same command the same way. *)
 let test_a_sign_in_command_runs_only_when_pasted_whole () =
   List.iter
     (fun (choose, home) ->
       let form = editing (press (opened ()) (choose @ [ "\r"; "\r" ] @ typed home)) in
-      match F.declare_on ~inherited_home (submitted (F.key form "\r")) fixture with
-      | Ok { F.sign_in = Some { command; _ }; _ } ->
-        (match copied_command ~width:width_80 form with
-         | [ one ] ->
-           Alcotest.(check string) ("one row is the command: " ^ home) command one
-         | [ setup; run ] ->
-           Alcotest.(check bool) ("the first row alone does not parse: " ^ setup) false
-             (parses setup);
-           Alcotest.(check bool) ("the second row alone does not parse: " ^ run) false
-             (parses run);
-           let cut = String.ends_with ~suffix:"\xe2\x80\xa6" setup in
-           Alcotest.(check bool) ("the rows together parse unless cut: " ^ home) (not cut)
-             (parses (setup ^ "\n" ^ run));
-           if not cut
-           then Alcotest.(check string) "the rows are the command" command (setup ^ " " ^ run)
-         | rows -> Alcotest.failf "the command took %d rows" (List.length rows))
+      let submitted_form = submitted (F.key form "\r") in
+      match F.declare_on ~inherited_home submitted_form fixture with
+      | Ok { F.id; sign_in = Some s; _ } ->
+        check_command_rows ~drawn:("typing " ^ home) (F.command s) form;
+        check_command_rows ~drawn:("saved " ^ home) (F.command s)
+          (F.saved submitted_form ~id s)
       | Ok { F.sign_in = None; _ } -> Alcotest.failf "no sign-in for %s" home
       | Error form -> Alcotest.failf "refused: %s" (String.concat " / " (rows form)))
     long_homes;
   Alcotest.(check bool) "a short command still parses on its one row" true
     (parses "(export CODEX_HOME='/home/op/.codex-2' && codex login)")
+
+(* Declares [home] on the provider [choose] picks and opens the form on the
+   save, the way the key loop does after the server saved it. *)
+let saved_on ?(choose = []) home =
+  let form = submitted (press (opened ()) (choose @ [ "\r"; "\r" ] @ typed home @ [ "\r" ])) in
+  match F.declare_on ~inherited_home form fixture with
+  | Ok { F.id; sign_in = Some s; _ } -> id, s, F.saved form ~id s
+  | Ok { F.sign_in = None; id; _ } -> Alcotest.failf "no sign-in for %s" id
+  | Error form -> Alcotest.failf "refused: %s" (String.concat " / " (rows form))
+
+(* After the save the form holds the command until it is closed: [y] hands
+   it over whole, and nothing typed changes what is shown. *)
+let test_a_saved_form_copies_its_command_until_closed () =
+  let id, s, form = saved_on "/home/op/.codex-account2" in
+  Alcotest.(check bool) "the form is saved" true (F.is_saved form);
+  Alcotest.(check bool) "the saved id is shown" true (row_mentions id form);
+  Alcotest.(check bool) "the fields are gone" false (row_mentions "새 provider id" form);
+  fits width_80 form;
+  List.iter
+    (fun key ->
+      match F.key form key with
+      | F.Copy (after, copied) ->
+        Alcotest.(check string) (key ^ " copies the command the save printed") (F.command s)
+          copied;
+        Alcotest.(check bool) (key ^ " leaves the form open") true (F.is_saved after)
+      | F.Editing _ | F.Cancelled | F.Submitted _ -> Alcotest.failf "%s did not copy" key)
+    [ "y"; "Y" ];
+  let before = rows form in
+  let after_typing = editing (press form (typed "abc" @ [ "left"; "tab"; "backspace" ])) in
+  Alcotest.(check (list string)) "typing changes nothing" before (rows after_typing);
+  List.iter
+    (fun key ->
+      match F.key form key with
+      | F.Cancelled -> ()
+      | F.Editing _ | F.Submitted _ | F.Copy _ -> Alcotest.failf "%s did not close" key)
+    [ "\r"; "esc" ]
+
+let test_a_saved_claude_code_form_says_what_to_type () =
+  let _, s, form = saved_on ~choose:[ "left" ] "/home/op/.claude-second" in
+  Alcotest.(check (option string)) "claude signs in from inside" (Some "/login") (F.then_type s);
+  Alcotest.(check bool) "the saved form says to type it" true (row_mentions "/login" form)
 
 let test_a_long_refusal_wraps_under_its_mark () =
   let reason =
@@ -403,5 +452,11 @@ let () =
             test_a_sign_in_command_runs_only_when_pasted_whole
         ; Alcotest.test_case "a long refusal wraps under its mark" `Quick
             test_a_long_refusal_wraps_under_its_mark
+        ] )
+    ; ( "saved"
+      , [ Alcotest.test_case "a saved form copies its command until closed" `Quick
+            test_a_saved_form_copies_its_command_until_closed
+        ; Alcotest.test_case "a saved claude code form says what to type" `Quick
+            test_a_saved_claude_code_form_says_what_to_type
         ] )
     ]

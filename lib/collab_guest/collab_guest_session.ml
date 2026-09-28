@@ -31,21 +31,21 @@ let send_error_to_string = function
 type session_event =
   | Frame_event of Collab_guest_join.event
   | Transport_closed of {
-      code : int;
+      code : int option;
       reason : string;
     }
 
 type inbound =
   | Message of string
   | Closed of {
-      code : int;
+      code : int option;
       reason : string;
     }
   | Eof
   | Driver_error of string
 
 let inbound_capacity = 64
-let close_code_no_status = 1006
+let close_code_abnormal = 1006
 
 type handle = {
   wsd : Ws_wsd.t;
@@ -198,9 +198,10 @@ let drive_reader ~target ~join ~events ~on_event =
       deliver ~target ~join on_event payload;
       loop ()
     | Closed { code; reason } -> on_event (Transport_closed { code; reason })
-    | Eof -> on_event (Transport_closed { code = close_code_no_status; reason = "eof" })
+    | Eof ->
+      on_event (Transport_closed { code = Some close_code_abnormal; reason = "eof" })
     | Driver_error detail ->
-      on_event (Transport_closed { code = close_code_no_status; reason = detail })
+      on_event (Transport_closed { code = Some close_code_abnormal; reason = detail })
   in
   loop ()
 ;;
@@ -229,7 +230,6 @@ let build_session ~sw ~env ~target =
               (Message (Bigstringaf.to_string message.Ws_msg.payload))
           | Ws_msg.Text -> ())
         ~on_close:(fun ~code ~reason ->
-          let code = Option.value code ~default:close_code_no_status in
           Eio.Stream.add events (Closed { code; reason }))
         ~on_error:(fun detail -> Eio.Stream.add events (Driver_error detail))
         ~on_eof:(fun () -> Eio.Stream.add events Eof)

@@ -21,11 +21,13 @@ val send_error_to_string : send_error -> string
 type session_event =
   | Frame_event of Collab_guest_join.event
   | Transport_closed of {
-      code : int;
+      code : int option;
       reason : string;
     }
-      (** The socket closed: a relay close code (4001/4004/4009/4029, a
-          room-closed bye, or a plain EOF mapped to 1006), never silent. *)
+      (** [Some code] preserves the relay close code. [None] means the
+          peer sent a Close frame without a status code; it is not an
+          abnormal close. EOF without a Close frame and driver failures
+          are reported as [Some 1006] (RFC 6455 section 7.1.5). *)
 
 type handle
 

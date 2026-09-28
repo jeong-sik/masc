@@ -119,11 +119,18 @@ let render_live_event json =
 
 let default_fetch_bytes = 65536
 
+type error =
+  | Resolve_failed of Collab_guest_join.resolve_error
+  | Connect_failed of Collab_guest_session.connect_error
+
+let error_to_string = function
+  | Resolve_failed err -> Collab_guest_join.resolve_error_to_string err
+  | Connect_failed err -> Collab_guest_session.connect_error_to_string err
+;;
+
 let run ~env ~link ~relay ~label =
   match Collab_guest_join.resolve ~link ~relay with
-  | Error err ->
-    Printf.eprintf "masc collab join: %s\n%!" (Collab_guest_join.resolve_error_to_string err);
-    1
+  | Error err -> Error (Resolve_failed err)
   | Ok target ->
     Eio.Switch.run (fun sw ->
         let print_mutex = Eio.Mutex.create () in
@@ -172,16 +179,16 @@ let run ~env ~link ~relay ~label =
               say ("(host ended the share: " ^ reason ^ ")")
             | Collab_guest_join.Error_frame message -> say ("(host error: " ^ message ^ ")"))
           | Collab_guest_session.Transport_closed { code; reason } ->
-            say (Printf.sprintf "(disconnected %d: %s)" code reason);
+            say
+              (match code with
+               | Some code -> Printf.sprintf "(disconnected %d: %s)" code reason
+               | None -> "(disconnected without status)");
             finish (if !bye_seen then 0 else 1)
         in
         (match
            Collab_guest_session.connect ~sw ~env ~target ~label ~on_event
          with
-         | Error err ->
-           Printf.eprintf "masc collab join: %s\n%!"
-             (Collab_guest_session.connect_error_to_string err);
-           1
+         | Error err -> Error (Connect_failed err)
          | Ok handle ->
            say
              (Printf.sprintf "joined as %s — /abort /fetch /quit"
@@ -262,5 +269,5 @@ let run ~env ~link ~relay ~label =
            Eio.Fiber.fork ~sw input_loop;
            let code = Eio.Promise.await done_promise in
            Collab_guest_session.close handle;
-           code))
+           Ok code))
 ;;

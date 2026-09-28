@@ -4139,7 +4139,14 @@ let collab_cmd =
     Cmd.v (Cmd.info "join" ~doc)
       Term.(
         const (fun link relay label ->
-            Eio_main.run (fun env -> Masc_collab_join.run ~env ~link ~relay ~label))
+            match
+              Eio_main.run (fun env -> Masc_collab_join.run ~env ~link ~relay ~label)
+            with
+            | Ok code -> code
+            | Error error ->
+              Printf.eprintf "masc collab join: %s\n%!"
+                (Masc_collab_join.error_to_string error);
+              1)
         $ link $ relay $ label)
   in
   let doc = "Join a live-shared Keeper room as a guest." in

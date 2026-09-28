@@ -356,6 +356,50 @@ let test_control_prompt_roundtrips () =
              Session.close handle)))
 ;;
 
+let test_peer_close ~code ~reason () =
+  Eio_main.run (fun env ->
+      Eio.Switch.run (fun sw ->
+          let net = Eio.Stdenv.net env in
+          let listener =
+            Eio.Net.listen net ~sw ~reuse_addr:true ~backlog:4
+              (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0))
+          in
+          let port =
+            match Eio.Net.listening_addr listener with
+            | `Tcp (_, port) -> port
+            | `Unix _ -> fail "TCP expected"
+          in
+          Eio.Fiber.fork ~sw (fun () ->
+              let flow, _ = Eio.Net.accept ~sw listener in
+              let builder writer =
+                Ws_direct_core.Endpoint.handlers
+                  ~on_message:(fun _ ->
+                    Ws_direct_core.Endpoint.Wsd.send_close writer ?code ~reason ())
+                  ()
+              in
+              Ws_direct_eio.Server.handle ~clock:(Eio.Stdenv.clock env) flow builder);
+          let target =
+            target_exn ~link:view_link
+              ~relay:(Some (Printf.sprintf "ws://127.0.0.1:%d" port))
+          in
+          let closed, set_closed = Eio.Promise.create () in
+          let on_event = function
+            | Session.Frame_event _ -> ()
+            | Session.Transport_closed { code; reason } ->
+              Eio.Promise.resolve set_closed (code, reason)
+          in
+          match Session.connect ~sw ~env ~target ~label:None ~on_event with
+          | Error err -> fail (Session.connect_error_to_string err)
+          | Ok handle ->
+            let actual_code, actual_reason =
+              Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 5. (fun () ->
+                  Eio.Promise.await closed)
+            in
+            Session.close handle;
+            check (option int) "peer status is preserved" code actual_code;
+            check string "peer reason is preserved" reason actual_reason))
+;;
+
 let test_render () =
   let open Masc.Keeper_chat_events in
   let row event = row_json ~seq:0 event in
@@ -405,6 +449,10 @@ let () =
     ; ( "session",
         [ test_case "dial and drive" `Quick test_dial_and_drive
         ; test_case "control prompt roundtrips" `Quick test_control_prompt_roundtrips
+        ; test_case "peer close without status" `Quick
+            (test_peer_close ~code:None ~reason:"")
+        ; test_case "peer close with relay status" `Quick
+            (test_peer_close ~code:(Some 4001) ~reason:"room missing")
         ] )
     ; ("render", [ test_case "renders events" `Quick test_render ])
     ]

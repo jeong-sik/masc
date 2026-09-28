@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
-# A workflow must name a stable Ubuntu runner image. Scan active YAML text,
-# including matrix values that reach runs-on indirectly; ignore comments.
+# A workflow must name a stable Ubuntu runner image. Scan the values that
+# actually reach `runs-on`: a literal `runs-on`, and the matrix values a
+# `runs-on: ${{ matrix.<name> }}` expression references. Everything else —
+# step bodies, `run: |` shell comments, unrelated matrix keys — is not a
+# runner label and is ignored.
 #
 # The scan parses each workflow with PyYAML and walks its node tree, so a `#`
 # inside a quoted scalar is data, not a comment. A raw-text scan that strips
@@ -12,23 +15,72 @@ set -euo pipefail
 
 scan() {
   python3 - "$@" <<'PY'
+import re
 import sys
 import yaml
 
 LABEL = "ubuntu-latest"
+MATRIX_REF = re.compile(r"matrix\.([A-Za-z_][A-Za-z0-9_-]*)")
 
 
-def walk(node, out):
+def mapping_get(node, key):
+    if not isinstance(node, yaml.MappingNode):
+        return None
+    for k, v in node.value:
+        if isinstance(k, yaml.ScalarNode) and k.value == key:
+            return v
+    return None
+
+
+def iter_scalars(node):
     if isinstance(node, yaml.ScalarNode):
-        if LABEL in str(node.value):
-            out.append((node.start_mark.line + 1, str(node.value)))
+        yield node
     elif isinstance(node, yaml.SequenceNode):
         for child in node.value:
-            walk(child, out)
-    elif isinstance(node, yaml.MappingNode):
-        for key, value in node.value:
-            walk(key, out)
-            walk(value, out)
+            if isinstance(child, yaml.ScalarNode):
+                yield child
+
+
+def matrix_values(matrix, name):
+    """(line, value) for matrix.<name>, including matrix.include entries."""
+    out = []
+    if not isinstance(matrix, yaml.MappingNode):
+        return out
+    for k, v in matrix.value:
+        if not isinstance(k, yaml.ScalarNode):
+            continue
+        if k.value == name:
+            for item in iter_scalars(v):
+                out.append((item.start_mark.line + 1, str(item.value)))
+        elif k.value == "include" and isinstance(v, yaml.SequenceNode):
+            for entry in v.value:
+                if not isinstance(entry, yaml.MappingNode):
+                    continue
+                for ek, ev in entry.value:
+                    if (
+                        isinstance(ek, yaml.ScalarNode)
+                        and ek.value == name
+                        and isinstance(ev, yaml.ScalarNode)
+                    ):
+                        out.append((ev.start_mark.line + 1, str(ev.value)))
+    return out
+
+
+def check_job(job, path, hits):
+    runs_on = mapping_get(job, "runs-on")
+    if runs_on is None:
+        return
+    matrix = mapping_get(mapping_get(job, "strategy"), "matrix")
+    for value_node in iter_scalars(runs_on):
+        text = str(value_node.value)
+        refs = MATRIX_REF.findall(text)
+        if refs:
+            for name in refs:
+                for line, value in matrix_values(matrix, name):
+                    if LABEL in value:
+                        hits.append(f"{path}:{line}:{value}")
+        elif LABEL in text:
+            hits.append(f"{path}:{value_node.start_mark.line + 1}:{text}")
 
 
 hits = []
@@ -41,10 +93,10 @@ for path in sys.argv[1:]:
         sys.exit(1)
     if root is None:
         continue
-    found = []
-    walk(root, found)
-    for line, value in found:
-        hits.append(f"{path}:{line}:{value}")
+    jobs = mapping_get(root, "jobs")
+    if isinstance(jobs, yaml.MappingNode):
+        for _job_name, job in jobs.value:
+            check_job(job, path, hits)
 
 if hits:
     print("no-ubuntu-latest-runner: pin Ubuntu runners to an explicit version:", file=sys.stderr)
@@ -93,6 +145,36 @@ jobs:
       - run: echo ok
 YAML
 
+  # 4) The label only in a shell comment inside a `run: |` body: not a runner
+  #    label, must pass (masc-pro-builder P2 on #39757).
+  cat >"$tmp/shell-comment.yml" <<'YAML'
+name: shell-comment
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: |
+          # ubuntu-latest is banned here
+          echo ok
+YAML
+
+  # 5) The label in a matrix key that `runs-on` does not reference: not a
+  #    runner label, must pass.
+  cat >"$tmp/unreferenced-matrix.yml" <<'YAML'
+name: unreferenced-matrix
+on: push
+jobs:
+  build:
+    strategy:
+      matrix:
+        note: [ubuntu-latest]
+        os: [ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - run: echo ok
+YAML
+
   fail=0
   if scan "$tmp/quoted-hash.yml" >/dev/null 2>&1; then
     echo "no-ubuntu-latest-runner self-test FAIL: quoted-hash fixture was not caught" >&2
@@ -104,6 +186,14 @@ YAML
   fi
   if ! scan "$tmp/pinned.yml" >/dev/null 2>&1; then
     echo "no-ubuntu-latest-runner self-test FAIL: pinned fixture was flagged" >&2
+    fail=1
+  fi
+  if ! scan "$tmp/shell-comment.yml" >/dev/null 2>&1; then
+    echo "no-ubuntu-latest-runner self-test FAIL: shell-comment fixture was flagged" >&2
+    fail=1
+  fi
+  if ! scan "$tmp/unreferenced-matrix.yml" >/dev/null 2>&1; then
+    echo "no-ubuntu-latest-runner self-test FAIL: unreferenced-matrix fixture was flagged" >&2
     fail=1
   fi
   if (( fail )); then

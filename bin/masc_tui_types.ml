@@ -2040,6 +2040,23 @@ type overview_providers_reading =
   | Providers_read of Tui_decode.provider_usage_windows
   | Providers_failed of string
 
+(** The Overview's reading of each account's email, [(provider id, email)] from
+    [account_emails] on [GET /api/v1/setup/inventory]. The route needs Admin,
+    so a failed read is kept apart and said, never drawn as accounts that have
+    no email. *)
+type overview_account_emails_reading =
+  | Account_emails_unread
+  | Account_emails_read of (string * string) list
+  | Account_emails_failed of string
+
+(* A read that succeeded is kept until the Overview is opened again: the
+   emails change only when someone signs in, and the inventory reads a login
+   file per account. A failed read is asked again on the next opening too, so
+   a token without Admin is not refused every tick. *)
+let account_emails_refresh_needed = function
+  | Account_emails_unread -> true
+  | Account_emails_read _ | Account_emails_failed _ -> false
+
 (** One open pull request as [GET /api/v1/repositories/pulls] reports it
     (RFC-0465). The check and review words are parsed at decode; a word this
     build cannot name makes the row undecodable rather than a default. *)
@@ -2985,6 +3002,7 @@ type surface_needs = {
   needs_repository_pulls : bool;
   needs_keeper_spend : bool;
   needs_overview_goals : bool;
+  needs_account_emails : bool;
 }
 
 let nothing =
@@ -3001,6 +3019,7 @@ let nothing =
     needs_repository_pulls = false;
     needs_keeper_spend = false;
     needs_overview_goals = false;
+    needs_account_emails = false;
   }
 
 (* Each datum is read by the surfaces that draw it, so a refresh spends a
@@ -3037,6 +3056,7 @@ and surface_needs_of_surface : surface -> surface_needs = function
       ; needs_repository_pulls = true
       ; needs_keeper_spend = true
       ; needs_overview_goals = true
+      ; needs_account_emails = true
       }
   (* Its rows come from the acting store and the keeper list, neither of which
      is fetched here. *)
@@ -3103,14 +3123,21 @@ let surface_needs_delta ~previous ~next =
       next.needs_keeper_spend && not previous.needs_keeper_spend
   ; needs_overview_goals =
       next.needs_overview_goals && not previous.needs_overview_goals
+  ; needs_account_emails =
+      next.needs_account_emails && not previous.needs_account_emails
   }
 
 let surface_needs_any needs = needs <> nothing
 
 let full_refresh_needs ~scoped_refresh_inflight ~keeper_pane_drawn ~cost_shown
-    surface =
+    ~account_emails surface =
   if scoped_refresh_inflight then nothing
-  else surface_needs ~keeper_pane_drawn ~cost_shown surface
+  else
+    let needs = surface_needs ~keeper_pane_drawn ~cost_shown surface in
+    { needs with
+      needs_account_emails =
+        needs.needs_account_emails && account_emails_refresh_needed account_emails
+    }
 
 type full_refresh_intent = Cadence | Revalidate
 
@@ -5861,6 +5888,7 @@ type state = {
      the rows under an open picker's cursor. *)
   mutable overview_quota: overview_quota_reading;
   mutable overview_providers: overview_providers_reading;
+  mutable overview_account_emails: overview_account_emails_reading;
   mutable overview_pulls: overview_pulls_reading;
   mutable overview_spend: overview_spend_reading;
   mutable overview_goals: overview_goals_reading;
@@ -8167,6 +8195,7 @@ let create_state
   runtime_catalog = [];
   overview_quota = Quota_unread;
   overview_providers = Providers_unread;
+  overview_account_emails = Account_emails_unread;
   overview_pulls = Overview_pulls_unread;
   overview_spend = Overview_spend_unread;
   overview_goals = Goals_unread;

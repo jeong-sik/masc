@@ -15,7 +15,8 @@ type phase = Loading | Providers | Logging | Models | Documented_context of mode
   | Removal of { provider : provider; revision : string; removal : removal }
 type recovery = Login_status | Refresh_configuration
 type email_gap = Login_file_unreadable | Login_file_unrecognized | Email_not_reported | Email_not_displayable
-type account_email = Email of string | Not_read of email_gap | Login_unfinished | Not_recorded | Unreadable
+  | Environment_credential
+type account_email = Email of string | Not_read of email_gap
   | Unrecognized  (* the server's row for this account had a shape this TUI does not know *)
 type account_emails =
   | Email_rows of { rows : (string * account_email) list; unattributed : int }
@@ -67,13 +68,14 @@ let email_gap = function
   | `String "source_unrecognized" -> Some Login_file_unrecognized
   | `String "not_reported" -> Some Email_not_reported
   | `String "invalid_email" -> Some Email_not_displayable
+  | `String "environment_credential" -> Some Environment_credential
   | _ -> None
 (* One row's email state. A row this TUI cannot read is that row's own
    [Unrecognized]; it never refuses the provider list. *)
 let account_email_of_row row =
   let keys = match row with `Assoc fields -> List.sort String.compare (List.map fst fields) | _ -> [] in
   match field "state" row with
-  | `String "recorded" when keys = ["email"; "integration_id"; "state"] ->
+  | `String "read" when keys = ["email"; "integration_id"; "state"] ->
     (match field "email" row with
      | `String email when email <> "" -> Email email
      | _ -> Unrecognized)
@@ -81,9 +83,6 @@ let account_email_of_row row =
     (match email_gap (field "cause" row) with
      | Some gap -> Not_read gap
      | None -> Unrecognized)
-  | `String "login_unfinished" when keys = ["integration_id"; "state"] -> Login_unfinished
-  | `String "absent" when keys = ["integration_id"; "state"] -> Not_recorded
-  | `String "unreadable" when keys = ["integration_id"; "state"] -> Unreadable
   | _ -> Unrecognized
 let account_emails_of_json ~integration_ids = function
   | `List rows ->
@@ -97,6 +96,19 @@ let account_emails_of_json ~integration_ids = function
       | _ -> id, Unrecognized) ids in
     Email_rows {rows = rows'; unattributed = List.length rows - List.length attributed}
   | _ -> Email_list_unrecognized
+let account_emails_of_inventory json =
+  match field "integrations" json with
+  | `List rows ->
+    account_emails_of_json ~integration_ids:(List.filter_map (fun row -> string (field "id" row)) rows)
+      (field "account_emails" json)
+  | _ -> Email_list_unrecognized
+let emails_of_inventory json =
+  match account_emails_of_inventory json with
+  | Email_rows {rows; _} ->
+    Ok (List.filter_map (function
+      | id, Email email -> Some (id, email)
+      | _, (Not_read _ | Unrecognized) -> None) rows)
+  | Email_list_unrecognized -> Error "the setup inventory carries no readable account email list"
 let email_notice = function
   | Email_rows {unattributed = 0; _} -> ""
   | Email_rows {unattributed; _} ->
@@ -116,8 +128,7 @@ let inventory t json =
        || List.exists (fun id -> not (List.mem id ids)) existing
     then Error "기본 모델과 대체 연결의 설정 순서를 확인하지 못했습니다."
     else
-    let integration_ids = List.filter_map (fun row -> string (field "id" row)) rows in
-    let account_emails = account_emails_of_json ~integration_ids (field "account_emails" json) in
+    let account_emails = account_emails_of_inventory json in
     let providers = List.filter_map (fun row -> match string (field "id" row), string (field "display_name" row), string (field "protocol" row) with
       | Some id, Some label, Some protocol -> Option.map (fun client -> {id;label;client}) (client_of_protocol protocol)
       | _ -> None) rows in
@@ -340,8 +351,8 @@ let hints t = match t.phase with
   | Models -> "↑↓:모델  Enter:검증 후 추가  r:목록 새로고침  e:재로그인  Esc:닫기"
   | Loading | Saving | Finished | Failed -> "r:상태 재확인  e:재로그인  n:새 계정  Esc:닫기"
 type row = Text of string | Terminal of Masc_tui_sgr_text.line
-(* A row with no entry is not a selected account (a client prototype, or a
-   provider on the inherited home that setup login never records). *)
+(* A row with no entry runs on no account: a client prototype, an HTTP
+   provider, or Antigravity without a credential file. *)
 let account_suffix t (p:provider) =
   let rows = match t.account_emails with Email_rows {rows; _} -> rows | Email_list_unrecognized -> [] in
   match List.assoc_opt p.id rows with
@@ -350,9 +361,7 @@ let account_suffix t (p:provider) =
   | Some (Not_read Login_file_unrecognized) -> " · 이메일 모름: 로그인 파일 형식을 모름"
   | Some (Not_read Email_not_reported) -> " · 이메일 모름: 클라이언트가 알려 주지 않음"
   | Some (Not_read Email_not_displayable) -> " · 이메일 모름: 표시할 수 없는 값"
-  | Some Login_unfinished -> " · 마지막 로그인이 끝나지 않음"
-  | Some Not_recorded -> " · 이메일 기록 없음"
-  | Some Unreadable -> " · 이메일 기록을 읽지 못함"
+  | Some (Not_read Environment_credential) -> " · 이메일 없음: 환경 변수의 인증 정보로 실행"
   | Some Unrecognized -> " · 이메일 정보를 알아볼 수 없음"
   | None -> ""
 let describe_change = function

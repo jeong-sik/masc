@@ -1667,8 +1667,8 @@ ACCOUNT_LOGIN_CLIENTS = {'codex': 'codex', 'claude_code': 'claude', 'muse': 'mus
 
 def account_login_command(binary, client, command, account_home):
     # masc starts the official sign-in for a declared account home itself: the
-    # child gets the environment /login gives that client, and masc records
-    # the account's email the way /login does (Runtime_setup_login_client).
+    # child gets the environment /login gives that client
+    # (Runtime_setup_login_client).
     return [str(binary), 'runtime-account-login', '--client', client, '--cli-path', command,
             '--account-home', account_home]
 
@@ -1689,7 +1689,7 @@ def login_command(binary, runtime_id, specs, inventory):
     if row.get('account_home'):
         return account_login_command(binary, client, command, row['account_home'])
     # Without account-home the client signs in on the caller's own home, which
-    # setup never selects or records; Muse always needs a selected home.
+    # setup never selects; Muse always needs a selected home.
     arguments = {'claude_code': ['auth', 'login'], 'codex': ['login', '--device-auth']}.get(choice)
     return [command] + arguments if arguments else None
 

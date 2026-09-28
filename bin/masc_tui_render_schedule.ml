@@ -794,41 +794,97 @@ let schedule_no_values =
   ; srow_recurrence = ""
   }
 
-let schedule_cells ?(status_style = "") ?(wake_style = "")
-      ?(recurrence_style = "") ~target_width ~wake_width ~delivery_width
-      ~recurrence_width values =
-  [ Table.cell ~style:status_style ~header:"STATUS" ~width:schedule_status_width
-      values.srow_status
-  ; Table.cell ~header:"DUE" ~width:schedule_due_width values.srow_due
-  ; Table.cell ~header:"TARGET" ~width:target_width values.srow_target
-  ; Table.cell ~style:wake_style ~header:"WAKE" ~width:wake_width
-      values.srow_wake
-  ; Table.cell ~header:"DELIVERY" ~width:delivery_width values.srow_delivery
-  ; Table.cell ~style:recurrence_style ~header:"RECURRENCE"
-      ~width:recurrence_width values.srow_recurrence
+(* The list's columns, named so a narrow list can say which it gives up. *)
+type schedule_column =
+  | Schedule_status
+  | Schedule_due
+  | Schedule_target
+  | Schedule_wake
+  | Schedule_delivery
+  | Schedule_recurrence
+
+let schedule_columns =
+  [ Schedule_status
+  ; Schedule_due
+  ; Schedule_target
+  ; Schedule_wake
+  ; Schedule_delivery
+  ; Schedule_recurrence
   ]
 
-let schedule_recurrence_width ~inner_width ~target_width ~wake_width
-      ~delivery_width =
-  let named =
-    Table.used_width
-      (schedule_cells ~target_width ~wake_width ~delivery_width
-         ~recurrence_width:0 schedule_no_values)
+(* What a narrow list gives up, first to go first (operator, 2026-09-28).
+   - The delivery: the two rows under the list read the selected row's
+     queue and reaction whole, so the column shortens what stays on the
+     screen for the row the cursor is on.
+   - The wake: the last wake's status, which the schedule's detail lists
+     wake by wake.
+   - The state last.
+   When it is due, whom it reaches and how it repeats never go: they are
+   what a row is for. *)
+let schedule_drop_order =
+  [ Schedule_delivery; Schedule_wake; Schedule_status ]
+
+(* The target, wake and delivery columns are measured by the caller from the
+   rows on the page, so the layout keeps the widths it was fitted with and
+   the header and every row are drawn from the same ones. *)
+type schedule_layout = {
+  sl_columns : schedule_column Table.layout;
+  sl_target_width : int;
+  sl_wake_width : int;
+  sl_delivery_width : int;
+}
+
+let schedule_layout ~inner_width ~target_width ~wake_width ~delivery_width =
+  (* The recurrence's entry is its floor: it is the flexible column and takes
+     what the others leave. *)
+  let width = function
+    | Schedule_status -> schedule_status_width
+    | Schedule_due -> schedule_due_width
+    | Schedule_target -> target_width
+    | Schedule_wake -> wake_width
+    | Schedule_delivery -> delivery_width
+    | Schedule_recurrence -> schedule_minimum_recurrence_width
   in
-  max schedule_minimum_recurrence_width (inner_width - named)
+  { sl_columns =
+      Table.fit ~inner_width ~width ~flex:Schedule_recurrence
+        ~drop_order:schedule_drop_order schedule_columns
+  ; sl_target_width = target_width
+  ; sl_wake_width = wake_width
+  ; sl_delivery_width = delivery_width
+  }
 
-let schedule_header_row ~target_width ~wake_width ~delivery_width
-      ~recurrence_width =
-  Table.header_row
-    (schedule_cells ~target_width ~wake_width ~delivery_width ~recurrence_width
-       schedule_no_values)
+let schedule_cell ~status_style ~wake_style ~recurrence_style
+    ~(layout : schedule_layout) values = function
+  | Schedule_status ->
+      Table.cell ~style:status_style ~header:"STATUS"
+        ~width:schedule_status_width values.srow_status
+  | Schedule_due ->
+      Table.cell ~header:"DUE" ~width:schedule_due_width values.srow_due
+  | Schedule_target ->
+      Table.cell ~header:"TARGET" ~width:layout.sl_target_width
+        values.srow_target
+  | Schedule_wake ->
+      Table.cell ~style:wake_style ~header:"WAKE" ~width:layout.sl_wake_width
+        values.srow_wake
+  | Schedule_delivery ->
+      Table.cell ~header:"DELIVERY" ~width:layout.sl_delivery_width
+        values.srow_delivery
+  | Schedule_recurrence ->
+      Table.cell ~style:recurrence_style ~header:"RECURRENCE"
+        ~width:layout.sl_columns.Table.flex_width values.srow_recurrence
 
-let schedule_row ?status_style ?wake_style ?recurrence_style ~target_width
-      ~wake_width ~delivery_width ~recurrence_width values =
+let schedule_cells ?(status_style = "") ?(wake_style = "")
+    ?(recurrence_style = "") ~layout values =
+  List.map
+    (schedule_cell ~status_style ~wake_style ~recurrence_style ~layout values)
+    layout.sl_columns.Table.shown
+
+let schedule_header_row ~layout =
+  Table.header_row (schedule_cells ~layout schedule_no_values)
+
+let schedule_row ?status_style ?wake_style ?recurrence_style ~layout values =
   Table.row
-    (schedule_cells ?status_style ?wake_style ?recurrence_style ~target_width
-       ~delivery_width
-       ~wake_width ~recurrence_width values)
+    (schedule_cells ?status_style ?wake_style ?recurrence_style ~layout values)
 
 (* Lane run columns.
 

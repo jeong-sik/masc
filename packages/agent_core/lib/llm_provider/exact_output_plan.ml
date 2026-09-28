@@ -37,11 +37,9 @@ type json_validation_provenance =
   | Provider_schema_requested_client_validation_required
 
 type normalized_output =
-  | Text_output of string
-  | Json_output of
-      { value : Yojson.Safe.t
-      ; validation : json_validation_provenance
-      }
+  { value : Yojson.Safe.t
+  ; validation : json_validation_provenance
+  }
 
 type output_normalization_error =
   | Incomplete_structured_response of Types.stop_reason
@@ -64,6 +62,7 @@ type frozen_wire_request =
 type t =
   { response_format : Types.response_format
   ; wire : frozen_wire_request
+  ; dispatch_request : Http_client.validated_sync_request
   ; fingerprint : fingerprint
   }
 
@@ -74,6 +73,7 @@ type preflight =
   ; capabilities : Capabilities.capabilities
   ; response_format : Types.response_format
   ; wire : frozen_wire_request
+  ; dispatch_request : Http_client.validated_sync_request
   }
 
 type admission_basis =
@@ -510,25 +510,34 @@ let preflight
                      ; "Content-Length", string_of_int (String.length body)
                      ]
                  in
-                 let wire =
-                   { response_codec
-                   ; provider_kind = config.kind
-                   ; url = request_url config
-                   ; headers
-                   ; body
-                   ; body_sha256
-                   ; connect_timeout_s = config.connect_timeout_s
-                   ; body_timeout_s = request.body_timeout_s
-                   }
-                 in
-                 Ok
-                   { prepared
-                   ; exact_completion_artifact
-                   ; config
-                   ; capabilities
-                   ; response_format
-                   ; wire
-                   }))))
+                 let url = request_url config in
+                 (* The URL and headers are parsed here, once, so a binding
+                    whose endpoint or header cannot be sent is refused before
+                    it is admitted rather than when its turn to dispatch
+                    comes. *)
+                 (match Http_client.prepare_sync_request ~url ~headers ~body with
+                  | Error error -> Error (Provider_request_rejected error)
+                  | Ok dispatch_request ->
+                    let wire =
+                      { response_codec
+                      ; provider_kind = config.kind
+                      ; url
+                      ; headers
+                      ; body
+                      ; body_sha256
+                      ; connect_timeout_s = config.connect_timeout_s
+                      ; body_timeout_s = request.body_timeout_s
+                      }
+                    in
+                    Ok
+                      { prepared
+                      ; exact_completion_artifact
+                      ; config
+                      ; capabilities
+                      ; response_format
+                      ; wire
+                      ; dispatch_request
+                      })))))
 ;;
 
 let prepared_request (preflight : preflight) = preflight.prepared
@@ -570,7 +579,11 @@ let finalize preflight admission_basis =
       ~wire:preflight.wire
       ~admission_basis
   in
-  { response_format = preflight.response_format; wire = preflight.wire; fingerprint }
+  { response_format = preflight.response_format
+  ; wire = preflight.wire
+  ; dispatch_request = preflight.dispatch_request
+  ; fingerprint
+  }
 ;;
 
 let finalize_unmeasured preflight =
@@ -593,17 +606,11 @@ let finalize_measured preflight admitted =
 let fingerprint (plan : t) = plan.fingerprint
 let response_format (plan : t) = plan.response_format
 let request_body_sha256 (plan : t) = plan.wire.body_sha256
-let request_url (plan : t) = plan.wire.url
-let request_headers (plan : t) = plan.wire.headers
-let request_body (plan : t) = plan.wire.body
+let dispatch_request (plan : t) = plan.dispatch_request
 let response_codec (plan : t) = plan.wire.response_codec
 let provider_kind (plan : t) = plan.wire.provider_kind
 let connect_timeout_s (plan : t) = plan.wire.connect_timeout_s
 let body_timeout_s (plan : t) = plan.wire.body_timeout_s
-
-let verify_frozen_request (plan : t) =
-  String.equal plan.wire.body_sha256 (sha256 plan.wire.body)
-;;
 
 let structured_text content =
   let rec loop texts = function
@@ -628,15 +635,17 @@ let structured_text content =
 let normalize_json validation text =
   try
     let value = Yojson.Safe.from_string text in
-    Ok (Json_output { value; validation })
+    Ok { value; validation }
   with
   | Yojson.Json_error detail -> Error (Invalid_json detail)
 ;;
 
+(* Every exact plan asks for JSON. Under [Off] the prompt asks for it and the
+   answer is read here, the same way [JsonMode] answers are: the provider
+   enforced nothing more than the prompt did. *)
 let normalize_text response_format text =
   match response_format with
-  | Types.Off -> Ok (Text_output text)
-  | Types.JsonMode -> normalize_json Json_syntax_validated text
+  | Types.Off | Types.JsonMode -> normalize_json Json_syntax_validated text
   | Types.JsonSchema _ ->
     normalize_json Provider_schema_requested_client_validation_required text
 ;;
@@ -681,15 +690,31 @@ let%test "JsonMode records syntax-only validation provenance" =
     }
   in
   match normalize_response Types.JsonMode response with
-  | Ok
-      (Json_output
-         { value = `Assoc [ ("accepted", `Bool true) ]
-         ; validation = Json_syntax_validated
-         }) -> true
-  | Ok _ ->
-    fail "returned a different plan than expected (non-Json_output arm)"
+  | Ok { value = `Assoc [ ("accepted", `Bool true) ]; validation = Json_syntax_validated }
+    -> true
+  | Ok _ -> fail "returned a different value or provenance than expected"
   | Error e ->
     fail "normalize_response unexpectedly failed: %s" (normalization_error_name e)
+;;
+
+let%test "Off reads the prompt-requested JSON locally and refuses other text" =
+  let response text : Types.api_response =
+    { id = "off"
+    ; model = "fixture"
+    ; stop_reason = Types.EndTurn
+    ; content = [ Types.Text text ]
+    ; usage = None
+    ; telemetry = None
+    }
+  in
+  (match normalize_response Types.Off (response {|{"accepted":true}|}) with
+   | Ok { value = `Assoc [ ("accepted", `Bool true) ]; validation = Json_syntax_validated }
+     -> true
+   | Ok _ | Error _ -> false)
+  &&
+  match normalize_response Types.Off (response "not json") with
+  | Error (Invalid_json _) -> true
+  | Ok _ | Error _ -> false
 ;;
 
 let%test "canonical fingerprint is sensitive to the frozen response codec" =

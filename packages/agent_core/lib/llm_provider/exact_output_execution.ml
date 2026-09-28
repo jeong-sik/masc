@@ -8,11 +8,9 @@ type output_normalization_error = Exact_output_plan.output_normalization_error =
   | Invalid_json of string
 
 type normalized_output = Exact_output_plan.normalized_output =
-  | Text_output of string
-  | Json_output of
-      { value : Yojson.Safe.t
-      ; validation : Exact_output_plan.json_validation_provenance
-      }
+  { value : Yojson.Safe.t
+  ; validation : Exact_output_plan.json_validation_provenance
+  }
 
 type effect_phase =
   | Before_dispatch
@@ -37,8 +35,6 @@ type one_dispatch_receipt =
   | Terminal_receipt of response_receipt
 
 type execute_once_error_cause =
-  | Clock_required_for_timeout
-  | Frozen_request_mismatch
   | Response_body_deadline_exceeded
   | Provider_error of Http_client.http_error
   | Output_normalization_failed of output_normalization_error
@@ -101,7 +97,7 @@ let raw_response_evidence (raw : Http_client.raw_sync_response) response_header_
   }
 ;;
 
-let execute_once_with_evidence ~net ?clock ?on_phase plan =
+let execute_once_with_evidence ~net ~clock ?on_phase plan =
   let fingerprint = Exact_output_plan.fingerprint plan in
   let request_body_sha256 = Exact_output_plan.request_body_sha256 plan in
   let identity = { fingerprint; request_body_sha256 } in
@@ -120,136 +116,122 @@ let execute_once_with_evidence ~net ?clock ?on_phase plan =
     | Http_client.Response_received_error { status; error = provider_error } ->
       response_received_receipt status, provider_error
   in
-  if not (Exact_output_plan.verify_frozen_request plan)
-  then error (before_dispatch_receipt ()) Frozen_request_mismatch
-  else (
-    match
-      ( Exact_output_plan.connect_timeout_s plan
-      , Exact_output_plan.body_timeout_s plan
-      , clock )
-    with
-    | connect_timeout_s, body_timeout_s, None
-      when Option.is_some connect_timeout_s || Option.is_some body_timeout_s ->
-      error (before_dispatch_receipt ()) Clock_required_for_timeout
-    | connect_timeout_s, body_timeout_s, _ ->
-      let post_once () =
-        Http_client.post_sync_once_with_evidence
-          ?clock
-          ?connect_timeout_s
-          ?body_timeout_s
-          ~net
-          ~url:(Exact_output_plan.request_url plan)
-          ~headers:(Exact_output_plan.request_headers plan)
-          ~body:(Exact_output_plan.request_body plan)
-          ()
-      in
-      (* Transport exceptions are handled upstream: post_sync_once's [fail_exn]
-         returns a typed [Unknown_provider_failure] instead of re-raising, which is
-         where that belongs because two unrelated call paths hit it. What remains here
-         is the observer: [with_observer] runs a caller-supplied [on_phase] callback,
-         and a raise from that callback is not a transport error and never reaches
-         [fail_exn]. This function returns a result, so that raise must not leave it
-         either. Reserved exceptions (cancellation) are re-raised first, the same
-         idiom as complete_common.ml:172 and five other edges.
+  let post_once () =
+    Http_client.dispatch_sync_request
+      ~clock
+      ?connect_timeout_s:(Exact_output_plan.connect_timeout_s plan)
+      ?body_timeout_s:(Exact_output_plan.body_timeout_s plan)
+      ~net
+      (Exact_output_plan.dispatch_request plan)
+      ()
+  in
+  (* Transport exceptions are handled upstream: post_sync_once's [fail_exn]
+     returns a typed [Unknown_provider_failure] instead of re-raising, which is
+     where that belongs because two unrelated call paths hit it. What remains here
+     is the observer: [with_observer] runs a caller-supplied [on_phase] callback,
+     and a raise from that callback is not a transport error and never reaches
+     [fail_exn]. This function returns a result, so that raise must not leave it
+     either. Reserved exceptions (cancellation) are re-raised first, the same
+     idiom as complete_common.ml:172 and five other edges.
 
-         Dispatch_started is a floor, not a claim: the public receipt is advanced
-         separately by the phase observer and Generation_receipt.advance only moves
-         forward, so an already-observed Response_received is not lowered by it. *)
-      let post_result =
-        try
-          match on_phase with
-          | None -> post_once ()
-          | Some observe -> Http_client_phase_observer.with_observer observe post_once
-        with
-        | exn ->
-          Reserved_exn.reraise_if_reserved exn;
-          Error
-            (Http_client.Dispatch_started_error
-               (Http_client.ProviderFailure
-                  { kind =
-                      Http_client.Unknown_provider_failure
-                        { reason = Some (Printexc.to_string exn) }
-                  ; message = "unclassified transport exception"
-                  }))
-      in
-      (match post_result with
-       | Error
-           (Http_client.Response_received_error
-              { status
-              ; error = Http_client.TimeoutError { phase = Http_client.Wall_clock; _ }
-              })
-         when Cohttp.Code.is_success status ->
-         (* The transport closes the incomplete response before returning this
-            owned deadline. Non-success statuses retain their separate
-            Not_received_in_window refusal contract. Observer exceptions are
-            Unknown_provider_failure, not this typed transport outcome. *)
-         error (response_received_receipt status) Response_body_deadline_exceeded
-       | Error transport_error ->
-         let receipt, provider_error = transport_error_receipt transport_error in
-         error receipt (Provider_error provider_error)
-       | Ok receipt
-         when receipt.response.status < 200 || receipt.response.status >= 300 ->
-         let raw = receipt.response in
-         let raw_response =
-           match receipt.body_receipt with
-           | Http_client.Received _ ->
-             Some (raw_response_evidence raw receipt.response_header_evidence)
-           | Http_client.Not_received_in_window -> None
+     Dispatch_started is a floor, not a claim: the public receipt is advanced
+     separately by the phase observer and Generation_receipt.advance only moves
+     forward, so an already-observed Response_received is not lowered by it. *)
+  let post_result =
+    try
+      match on_phase with
+      | None -> post_once ()
+      | Some observe -> Http_client_phase_observer.with_observer observe post_once
+    with
+    | exn ->
+      Reserved_exn.reraise_if_reserved exn;
+      Error
+        (Http_client.Dispatch_started_error
+           (Http_client.ProviderFailure
+              { kind =
+                  Http_client.Unknown_provider_failure
+                    { reason = Some (Printexc.to_string exn) }
+              ; message = "unclassified transport exception"
+              }))
+  in
+  (match post_result with
+   | Error
+       (Http_client.Response_received_error
+          { status
+          ; error = Http_client.TimeoutError { phase = Http_client.Wall_clock; _ }
+          })
+     when Cohttp.Code.is_success status ->
+     (* The transport closes the incomplete response before returning this
+        owned deadline. Non-success statuses retain their separate
+        Not_received_in_window refusal contract. Observer exceptions are
+        Unknown_provider_failure, not this typed transport outcome. *)
+     error (response_received_receipt status) Response_body_deadline_exceeded
+   | Error transport_error ->
+     let receipt, provider_error = transport_error_receipt transport_error in
+     error receipt (Provider_error provider_error)
+   | Ok receipt
+     when receipt.response.status < 200 || receipt.response.status >= 300 ->
+     let raw = receipt.response in
+     let raw_response =
+       match receipt.body_receipt with
+       | Http_client.Received _ ->
+         Some (raw_response_evidence raw receipt.response_header_evidence)
+       | Http_client.Not_received_in_window -> None
+     in
+     let provider_error =
+       let refusal = Http_client.HttpError
+         { code = raw.status; body = receipt.body_receipt;
+           retry_after_header = raw.retry_after_header } in
+       match Exact_output_plan.response_codec plan, receipt.body_receipt with
+       | Provider_http_codec.Glm_chat, Http_client.Received body ->
+         let envelope =
+           try Backend_glm.check_glm_error body with
+           | Yojson.Safe.Util.Type_error _ -> None
          in
-         let provider_error =
-           let refusal = Http_client.HttpError
-             { code = raw.status; body = receipt.body_receipt;
-               retry_after_header = raw.retry_after_header } in
-           match Exact_output_plan.response_codec plan, receipt.body_receipt with
-           | Provider_http_codec.Glm_chat, Http_client.Received body ->
-             let envelope =
-               try Backend_glm.check_glm_error body with
-               | Yojson.Safe.Util.Type_error _ -> None
-             in
-             (* The rule the sync and stream seams read a GLM envelope by: a
-                window refusal becomes [Context_overflow] and a quota code
-                (1113, 1304, 1308-1311, 1313) becomes [Hard_quota]. Reading only
-                the window here left a spent quota, which GLM sends as a 429,
-                classified as a rate limit on this path alone. *)
-             (match Option.bind envelope Backend_glm.provider_failure_of_glm_error with
-              | Some failure -> failure
-              | None -> refusal)
-           | _ -> refusal
-         in
-         error ?raw_response (response_received_receipt raw.status)
-           (Provider_error provider_error)
-       | Ok receipt ->
-         let raw = receipt.response in
-         let raw_response =
-           raw_response_evidence raw receipt.response_header_evidence
-         in
-         (match
-            Complete_sync.parse_sync_response
-              ~http_codec:(Exact_output_plan.response_codec plan)
-              ~provider_kind:(Exact_output_plan.provider_kind plan)
-              raw.body
-          with
-          | Error provider_error ->
-            error
-              ~raw_response
-              (response_received_receipt raw.status)
-              (Provider_error provider_error)
-          | Ok response ->
-            (match Exact_output_plan.normalize plan response with
-             | Error normalization_error ->
-               error
-                 ~raw_response
-                 (response_received_receipt raw.status)
-                 (Output_normalization_failed normalization_error)
-             | Ok output ->
-               Ok
-                 { outcome =
-                     { receipt = terminal_receipt raw.status
-                     ; response_format = Exact_output_plan.response_format plan
-                     ; response
-                     ; output
-                     ; pricing = Pricing_annotation_omitted
-                     }
-                 ; raw_response
-                 }))))
+         (* The rule the sync and stream seams read a GLM envelope by: a
+            window refusal becomes [Context_overflow] and a quota code
+            (1113, 1304, 1308-1311, 1313) becomes [Hard_quota]. Reading only
+            the window here left a spent quota, which GLM sends as a 429,
+            classified as a rate limit on this path alone. *)
+         (match Option.bind envelope Backend_glm.provider_failure_of_glm_error with
+          | Some failure -> failure
+          | None -> refusal)
+       | _ -> refusal
+     in
+     error ?raw_response (response_received_receipt raw.status)
+       (Provider_error provider_error)
+   | Ok receipt ->
+     let raw = receipt.response in
+     let raw_response =
+       raw_response_evidence raw receipt.response_header_evidence
+     in
+     (match
+        Complete_sync.parse_sync_response
+          ~http_codec:(Exact_output_plan.response_codec plan)
+          ~provider_kind:(Exact_output_plan.provider_kind plan)
+          raw.body
+      with
+      | Error provider_error ->
+        error
+          ~raw_response
+          (response_received_receipt raw.status)
+          (Provider_error provider_error)
+      | Ok response ->
+        (match Exact_output_plan.normalize plan response with
+         | Error normalization_error ->
+           error
+             ~raw_response
+             (response_received_receipt raw.status)
+             (Output_normalization_failed normalization_error)
+         | Ok output ->
+           Ok
+             { outcome =
+                 { receipt = terminal_receipt raw.status
+                 ; response_format = Exact_output_plan.response_format plan
+                 ; response
+                 ; output
+                 ; pricing = Pricing_annotation_omitted
+                 }
+             ; raw_response
+             })))
 ;;

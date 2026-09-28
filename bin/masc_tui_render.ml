@@ -562,7 +562,7 @@ let overview_goal_status_of_id (state : state) id =
   List.find_opt
     (fun (task : Masc_domain.task) -> String.equal task.id id)
     state.tasks_domain
-  |> Option.map (fun task -> task.task_status)
+  |> Option.map (fun (task : Masc_domain.task) -> task.task_status)
 
 (** Project the shared Overview row budget and its sanitized variable inputs. *)
 let overview_layout (state : state) ~terminal_rows ~cols =

@@ -259,7 +259,7 @@ let contains ~sub text =
 
 let status_of_id tasks id =
   List.find_opt (fun (task : Tui_decode.task) -> String.equal task.id id) tasks
-  |> Option.map (fun task -> task.status)
+  |> Option.map (fun (task : Tui_decode.task) -> task.status)
 
 let draw ?(rows = 25) ?(tasks = live_tasks) reading =
   Goals.lines ~now:captured_at ~localtime:Unix.gmtime ~inner_width:120 ~rows

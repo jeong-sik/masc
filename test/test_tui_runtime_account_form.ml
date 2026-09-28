@@ -39,7 +39,7 @@ tools-support = true
 |}
 
 let opened () =
-  match F.open_on fixture with
+  match F.open_on ~home_dir:"/home/op" fixture with
   | Ok form -> form
   | Error reason -> Alcotest.failf "the form did not open: %s" reason
 
@@ -50,18 +50,31 @@ let inherited_home = function
   | Runtime_account_declaration.Codex -> Some "/home/op/.codex"
   | Runtime_account_declaration.Claude_code | Runtime_account_declaration.Antigravity -> None
 
-let press ?(home_dir = "/home/op") form keys =
+let press form keys =
   List.fold_left
     (fun outcome key ->
       match outcome with
-      | F.Editing form -> F.key ~home_dir ~inherited_home form key
-      | F.Cancelled | F.Declared _ -> outcome)
+      | F.Editing form -> F.key form key
+      | F.Cancelled | F.Submitted _ -> outcome)
     (F.Editing form) keys
 
 let editing = function
   | F.Editing form -> form
   | F.Cancelled -> Alcotest.fail "the form closed"
-  | F.Declared { id; _ } -> Alcotest.failf "the form declared %s" id
+  | F.Submitted _ -> Alcotest.fail "the form submitted"
+
+let submitted = function
+  | F.Submitted form -> form
+  | F.Editing _ -> Alcotest.fail "enter on the last field did not submit"
+  | F.Cancelled -> Alcotest.fail "the form closed"
+
+(* Submit, then declare against [current] the way the key loop does. *)
+let declare ?(current = fixture) form keys =
+  F.declare_on ~inherited_home (submitted (press form keys)) current
+
+let refusal = function
+  | Error form -> form
+  | Ok { F.id; _ } -> Alcotest.failf "%s was declared" id
 
 let row_with prefix form =
   List.exists (fun row -> String.starts_with ~prefix row) (F.rows form)
@@ -74,6 +87,12 @@ let row_mentions text form =
   in
   List.exists contains (F.rows form)
 
+let account_home text id =
+  match Otoml.Parser.from_string_result text with
+  | Ok toml ->
+    Otoml.find_opt toml (fun v -> Otoml.get_string v) [ "providers"; id; "account-home" ]
+  | Error _ -> None
+
 let test_the_id_follows_the_chosen_provider () =
   let form = opened () in
   Alcotest.(check bool) "starts on the first provider with its next id" true
@@ -84,19 +103,33 @@ let test_the_id_follows_the_chosen_provider () =
   let form = editing (press form [ "left"; "left" ]) in
   Alcotest.(check bool) "left wraps to the last provider" true
     (row_mentions "claude_code_2" form);
-  let form = editing (press form [ "\r"; "\127"; "\127" ] ) in
+  let form = editing (press form [ "\r"; "\127"; "\127" ]) in
   let form = editing (press form (typed "_work" @ [ "up" ])) in
   let form = editing (press form [ "right" ]) in
   Alcotest.(check bool) "a typed id stays when the provider changes" true
     (row_mentions "claude_code_work" form)
 
-let test_enter_on_the_last_field_declares () =
-  let form = opened () in
-  match press form ([ "\r"; "\r" ] @ typed "~/.codex-account2" @ [ "\r" ]) with
-  | F.Declared { id; text; sign_in } ->
+let test_submit_declares_against_the_current_file () =
+  let keys = [ "\r"; "enter" ] @ typed "~/.codex-account2" @ [ "\r" ] in
+  (* Someone added a comment and a provider while the form stood open. *)
+  let current =
+    fixture
+    ^ {|
+# added while the form was open
+[providers.later]
+protocol = "claude-code"
+command = "claude"
+is-non-interactive = true
+|}
+  in
+  match declare ~current (opened ()) keys with
+  | Error form -> Alcotest.failf "refused: %s" (String.concat " / " (F.rows form))
+  | Ok { F.id; text; sign_in } ->
     Alcotest.(check string) "the suggested id" "codex_subscription_2" id;
-    Alcotest.(check bool) "the file keeps what it had" true
-      (String.starts_with ~prefix:fixture text);
+    Alcotest.(check bool) "the change made meanwhile is kept" true
+      (String.starts_with ~prefix:current text);
+    Alcotest.(check (option string)) "the home is expanded"
+      (Some "/home/op/.codex-account2") (account_home text id);
     (match Runtime_toml.parse_string text with
      | Error _ -> Alcotest.fail "the declared text does not load"
      | Ok config ->
@@ -105,48 +138,97 @@ let test_enter_on_the_last_field_declares () =
             (fun (b : Runtime_schema.binding) ->
               b.provider_id = "codex_subscription_2" && b.model_id = "gpt-5.6")
             config.Runtime_schema.bindings));
-    Alcotest.(check bool) "the sign-in names the expanded home" true
-      (String.starts_with ~prefix:"CODEX_HOME=/home/op/.codex-account2 codex login"
-         sign_in)
-  | F.Editing _ -> Alcotest.fail "enter on the last field did not declare"
-  | F.Cancelled -> Alcotest.fail "the form closed"
+    Alcotest.(check (option string)) "the sign-in is a shell command for that home"
+      (Some "CODEX_HOME=/home/op/.codex-account2 codex login")
+      (Option.map (fun c -> String.concat "" (String.split_on_char '\'' c)) sign_in)
+
+let test_a_home_with_a_space_is_one_argument () =
+  let keys = [ "\r"; "\r" ] @ typed "/home/op/My Codex" @ [ "\r" ] in
+  match declare (opened ()) keys with
+  | Ok { F.sign_in = Some command; _ } ->
+    Alcotest.(check string) "the home is quoted"
+      "CODEX_HOME='/home/op/My Codex' codex login" command
+  | Ok { F.sign_in = None; _ } -> Alcotest.fail "no sign-in for Codex"
+  | Error form -> Alcotest.failf "refused: %s" (String.concat " / " (F.rows form))
 
 let test_a_refusal_keeps_the_form_on_its_field () =
-  let form = opened () in
   let form =
-    editing (press form ([ "\r"; "\r" ] @ typed "/home/op/.codex-account1" @ [ "\r" ]))
+    refusal (declare (opened ()) ([ "\r"; "\r" ] @ typed "/home/op/.codex-account1" @ [ "\r" ]))
   in
   Alcotest.(check bool) "the reason is on the form" true (row_with "  ! " form);
   Alcotest.(check bool) "the cursor waits on the home" true (F.field form = F.Location);
-  let form = editing (press form [ "up"; "up" ]) in
-  let form =
-    editing
-      (press form ([ "down" ] @ List.init 20 (fun _ -> "\127") @ typed "codex_acct1" @ [ "\r" ]))
+  let keys =
+    [ "up" ] @ List.init 20 (fun _ -> "\127") @ typed "codex_acct1" @ [ "\r" ]
+    @ List.init 30 (fun _ -> "\127") @ typed "/home/op/.c3" @ [ "\r" ]
   in
-  let form = editing (press form (List.init 30 (fun _ -> "\127") @ typed "/home/op/.c3" @ [ "\r" ])) in
+  let form = refusal (F.declare_on ~inherited_home (submitted (press form keys)) fixture) in
   Alcotest.(check bool) "an id already used sends the cursor to the id" true
     (F.field form = F.Id)
+
+let test_a_provider_gone_from_the_file_is_refused () =
+  (* The provider the form was opened on was renamed meanwhile. *)
+  let current =
+    String.concat "\n"
+      (List.filter_map
+         (fun line ->
+           if String.starts_with ~prefix:"[codex_subscription" line then None
+           else if line = "[providers.codex_subscription]" then Some "[providers.gone]"
+           else Some line)
+         (String.split_on_char '\n' fixture))
+  in
+  let form =
+    refusal (declare ~current (opened ()) ([ "\r"; "\r" ] @ typed "/home/op/.c9" @ [ "\r" ]))
+  in
+  Alcotest.(check bool) "the cursor goes back to the provider" true (F.field form = F.Base)
 
 let test_esc_abandons () =
   match press (opened ()) (typed "x" @ [ "esc" ]) with
   | F.Cancelled -> ()
-  | F.Editing _ | F.Declared _ -> Alcotest.fail "esc did not close the form"
+  | F.Editing _ | F.Submitted _ -> Alcotest.fail "esc did not close the form"
 
 let test_a_paste_is_one_line () =
   let form = editing (press (opened ()) [ "\r"; "\r" ]) in
   let form = F.paste form "/home/op/.codex-pasted\n" in
   Alcotest.(check bool) "the newline a copied path carries is dropped" true
     (row_mentions "/home/op/.codex-pasted" form);
-  match F.key ~home_dir:"/home/op" ~inherited_home form "\r" with
-  | F.Declared { text; _ } ->
+  match F.declare_on ~inherited_home (submitted (F.key form "\r")) fixture with
+  | Ok { F.text; id; _ } ->
     Alcotest.(check (option string)) "and the home is written without it"
-      (Some "/home/op/.codex-pasted")
-      (match Otoml.Parser.from_string_result text with
-       | Ok toml ->
-         Otoml.find_opt toml (fun v -> Otoml.get_string v)
-           [ "providers"; "codex_subscription_2"; "account-home" ]
-       | Error _ -> None)
-  | F.Editing _ | F.Cancelled -> Alcotest.fail "the pasted home did not declare"
+      (Some "/home/op/.codex-pasted") (account_home text id)
+  | Error _ -> Alcotest.fail "the pasted home did not declare"
+
+let test_antigravity_has_no_sign_in_after_the_save () =
+  let current =
+    fixture
+    ^ {|
+[providers.agy]
+protocol = "antigravity-cli"
+command = "agy"
+is-non-interactive = true
+timeout-s = 180.0
+
+[providers.agy.credentials]
+type = "file"
+path = "/home/op/.agy/token"
+
+[models.flash]
+api-name = "gemini-3.7-flash-high"
+max-context = 1000000
+tools-support = true
+
+[agy.flash]
+|}
+  in
+  let form =
+    match F.open_on ~home_dir:"/home/op" current with
+    | Ok form -> form
+    | Error reason -> Alcotest.fail reason
+  in
+  let form = editing (press form [ "left" ]) in
+  match F.declare_on ~inherited_home (submitted (press form ([ "\r"; "\r" ] @ typed "/home/op/.agy2/token" @ [ "\r" ]))) current with
+  | Ok { F.sign_in; _ } ->
+    Alcotest.(check (option string)) "the OAuth file already exists" None sign_in
+  | Error form -> Alcotest.failf "refused: %s" (String.concat " / " (F.rows form))
 
 let test_a_name_from_the_file_cannot_colour_the_pane () =
   let form = editing (press (opened ()) [ "left" ]) in
@@ -166,12 +248,18 @@ let () =
     [ ( "form"
       , [ Alcotest.test_case "the id follows the chosen provider" `Quick
             test_the_id_follows_the_chosen_provider
-        ; Alcotest.test_case "enter on the last field declares" `Quick
-            test_enter_on_the_last_field_declares
+        ; Alcotest.test_case "submit declares against the current file" `Quick
+            test_submit_declares_against_the_current_file
+        ; Alcotest.test_case "a home with a space is one argument" `Quick
+            test_a_home_with_a_space_is_one_argument
         ; Alcotest.test_case "a refusal keeps the form on its field" `Quick
             test_a_refusal_keeps_the_form_on_its_field
+        ; Alcotest.test_case "a provider gone from the file is refused" `Quick
+            test_a_provider_gone_from_the_file_is_refused
         ; Alcotest.test_case "esc abandons" `Quick test_esc_abandons
         ; Alcotest.test_case "a paste is one line" `Quick test_a_paste_is_one_line
+        ; Alcotest.test_case "antigravity has no sign-in after the save" `Quick
+            test_antigravity_has_no_sign_in_after_the_save
         ; Alcotest.test_case "a name from the file cannot colour the pane" `Quick
             test_a_name_from_the_file_cannot_colour_the_pane
         ; Alcotest.test_case "a file with no client has nothing to copy" `Quick

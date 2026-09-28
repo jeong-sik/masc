@@ -1066,6 +1066,21 @@ let voice_agent_bindings =
 
 let footer_hints_voice_agent () = hints_of_bindings voice_agent_bindings
 
+(* The account form on runtime.toml takes every key while it is open, so the
+   pane's row -- [e], [r], [Tab], [q] -- would name keys that now type into a
+   field. The form's row names only what the form reads. *)
+let runtime_account_form_bindings =
+  [ b Navigate "\xe2\x86\x90/\xe2\x86\x92" "provider"
+      ~help:"on the provider field, the next or previous provider to copy"
+  ; b Navigate "\xe2\x86\x91/\xe2\x86\x93" "field"
+  ; b Act "Enter" "next / save"
+      ~help:"move to the next field; on the last one, declare the account and save"
+  ; b Act "Esc" "cancel" ~help:"close the form; nothing is written"
+  ]
+
+let footer_hints_runtime_account_form () =
+  hints_of_bindings runtime_account_form_bindings
+
 (* The prompts pane's read-only half. [o] swaps the registry for the assets
    shipped with the binary, and there [a], [i], [e] and [x] answer with a
    notice rather than acting (masc_tui.ml), so the row leaves them out and

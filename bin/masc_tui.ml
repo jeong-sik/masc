@@ -17648,8 +17648,10 @@ let main
       (List.map (fun segments -> String.concat "" (List.map fst segments)) rows)
   in
   (* Preview, then save: the one write path for runtime.toml text, which the
-     $EDITOR round trip and the account form both take. The save route also
-     validates, so a race between the two still fails closed. *)
+     $EDITOR round trip and the account form both take. The save route
+     validates the text again but does not compare it with what the file held
+     when the text was read, so a caller that holds text for long re-reads
+     the file first; the account form does. *)
   let save_runtime_config_text edited =
     let host = server_peer_host in
     let port = state.port in
@@ -17713,7 +17715,10 @@ let main
     match state.runtime_config_view with
     | None -> report_action state "error" "config not loaded yet; r to reload"
     | Some { rcv_rows = rows; _ } -> (
-      match Masc_tui_runtime_account_form.open_on (runtime_config_source rows) with
+      match
+        Masc_tui_runtime_account_form.open_on ?home_dir:(Sys.getenv_opt "HOME")
+          (runtime_config_source rows)
+      with
       | Ok form -> state.runtime_account_form <- Some form
       | Error reason -> report_action state "error" reason)
   in
@@ -19727,36 +19732,59 @@ and is loaded on demand through keeper_skill.
                  if length > 0 then set (String.sub draft 0 (length - 1))
                | s when String.length s = 1 && Char.code s.[0] >= 32 -> set (draft ^ s)
                | _ -> ()))
-       (* The account form takes every key while it is open. A save the
-          server refuses keeps the form and what was typed, with the reason
-          on it; only a save that lands closes it. *)
+       (* The account form takes every key while it is open. Submitting
+          declares against runtime.toml as the server holds it now, not the
+          text the form was opened on, so a change made in between is kept.
+          A refusal keeps the form and what was typed, with the reason on it;
+          only a save that lands closes it. The sign-in command goes to the
+          session log, where it stays readable after the footer moves on. *)
        | Some k
          when text_input_target state ~compact_viewport
               = Some Text_runtime_account_form -> (
            match state.runtime_account_form with
            | None -> ()
            | Some form -> (
-               match
-                 Masc_tui_runtime_account_form.key
-                   ?home_dir:(Sys.getenv_opt "HOME")
-                   ~inherited_home:Masc_tui_runtime_account_form.inherited_home form k
-               with
+               match Masc_tui_runtime_account_form.key form k with
                | Masc_tui_runtime_account_form.Editing form ->
                  state.runtime_account_form <- Some form
                | Masc_tui_runtime_account_form.Cancelled ->
                  state.runtime_account_form <- None
-               | Masc_tui_runtime_account_form.Declared { id; text; sign_in } -> (
-                   match save_runtime_config_text text with
-                   | Ok summary ->
-                     state.runtime_account_form <- None;
-                     report_action state "system"
-                       (Printf.sprintf
-                          "runtime.toml saved · %s · %s 선언됨. 로그인: %s. \
-                           턴을 보내려면 lane 후보에 넣으세요"
-                          summary id sign_in)
-                   | Error message ->
-                     state.runtime_account_form <-
-                       Some (Masc_tui_runtime_account_form.refused form message))))
+               | Masc_tui_runtime_account_form.Submitted form -> (
+                   let current =
+                     match
+                       Masc_tui_http.fetch_runtime_config_raw ~host:server_peer_host
+                         ~port:state.port
+                     with
+                     | Error detail -> Error ("reading runtime.toml failed: " ^ detail)
+                     | Ok json -> (
+                         match Masc_tui_runtime_config_view.decode json with
+                         | Ok reading -> Ok reading.Masc_tui_runtime_config_view.source_text
+                         | Error detail -> Error ("reading runtime.toml failed: " ^ detail))
+                   in
+                   let declared =
+                     match current with
+                     | Error message -> Error (Masc_tui_runtime_account_form.refused form message)
+                     | Ok current ->
+                       Masc_tui_runtime_account_form.declare_on
+                         ~inherited_home:Masc_tui_runtime_account_form.inherited_home form
+                         current
+                   in
+                   match declared with
+                   | Error form -> state.runtime_account_form <- Some form
+                   | Ok { Masc_tui_runtime_account_form.id; text; sign_in } -> (
+                       match save_runtime_config_text text with
+                       | Ok summary ->
+                         state.runtime_account_form <- None;
+                         report_action state "system"
+                           (Printf.sprintf
+                              "runtime.toml saved · %s · %s: lane 후보에 넣어야 턴이 갑니다"
+                              summary id);
+                         Option.iter
+                           (fun command -> add_event state "info" (id ^ " 로그인: " ^ command))
+                           sign_in
+                       | Error message ->
+                         state.runtime_account_form <-
+                           Some (Masc_tui_runtime_account_form.refused form message)))))
        | Some k
          when text_input_target state ~compact_viewport
               = Some Text_runtime_param ->

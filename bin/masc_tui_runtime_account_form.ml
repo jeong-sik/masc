@@ -14,8 +14,21 @@ type ring =
   ; after : D.base list
   }
 
+(* Defined before [t] so that an unannotated [x.id] below reads the form's
+   field, not this one's. *)
+type declared =
+  { id : string
+  ; text : string
+  ; sign_in : string option
+  }
+
+(* [declaration] is the file the form was opened on. It only supplies the
+   providers to choose from and the suggested id; what is saved is declared
+   against the file as the server holds it at submit, so a change made while
+   the form stood open is kept rather than written over. *)
 type t =
   { declaration : D.t
+  ; home_dir : string option
   ; ring : ring
   ; field : field
   ; id : string
@@ -26,15 +39,11 @@ type t =
 type outcome =
   | Editing of t
   | Cancelled
-  | Declared of
-      { id : string
-      ; text : string
-      ; sign_in : string
-      }
+  | Submitted of t
 
 let field t = t.field
 
-let open_on text =
+let open_on ?home_dir text =
   match D.parse text with
   | Error e -> Error (D.error_message e)
   | Ok declaration ->
@@ -43,6 +52,7 @@ let open_on text =
      | chosen :: after ->
        Ok
          { declaration
+         ; home_dir
          ; ring = { before = []; chosen; after }
          ; field = Base
          ; id = D.suggest_id declaration chosen
@@ -107,16 +117,36 @@ let inherited_home = function
   | D.Antigravity -> None
 ;;
 
-let sign_in_command client location =
-  let at = if location = "" then "<" ^ D.location_label client ^ ">" else location in
+(* The command that signs the chosen client in, with [home] as the shell
+   will read it. Antigravity has none -- its OAuth file exists before it can
+   be typed here. *)
+let command client home =
   match client with
-  | D.Codex ->
-    Printf.sprintf
-      "CODEX_HOME=%s codex login (먼저 그 폴더 config.toml 에 cli_auth_credentials_store = \"file\")"
-      at
-  | D.Claude_code -> Printf.sprintf "CLAUDE_CONFIG_DIR=%s claude 를 실행하고 /login" at
-  | D.Antigravity ->
-    "masc runtime-antigravity-account --sign-in 이 알려 주는 credential_file 경로를 넣으세요"
+  | D.Codex -> Some (Printf.sprintf "CODEX_HOME=%s codex login" home)
+  | D.Claude_code -> Some (Printf.sprintf "CLAUDE_CONFIG_DIR=%s claude, then /login" home)
+  | D.Antigravity -> None
+;;
+
+(* Quoted, because a home with a space in it is still one argument. *)
+let sign_in_command client home = command client (Filename.quote home)
+
+(* The rows under the fields: how to get the login this form points at. *)
+let sign_in_rows t =
+  let client = t.ring.chosen.client in
+  let home =
+    if t.location = ""
+    then "<" ^ D.location_label client ^ ">"
+    else Filename.quote (D.expand_home ?home_dir:t.home_dir t.location)
+  in
+  match client, command client home with
+  | D.Codex, Some line ->
+    [ "  로그인: " ^ line
+    ; "  (먼저 그 폴더의 config.toml 에 cli_auth_credentials_store = \"file\")"
+    ]
+  | D.Claude_code, Some line -> [ "  로그인: " ^ line ]
+  | D.Antigravity, _ ->
+    [ "  OAuth 파일: masc runtime-antigravity-account --sign-in 이 출력하는 credential_file" ]
+  | (D.Codex | D.Claude_code), None -> []
 ;;
 
 let edit t f =
@@ -131,7 +161,7 @@ let printable key =
   || (String.length key > 1 && Char.code key.[0] >= 0x80)
 ;;
 
-let key ?home_dir ~inherited_home t key =
+let key t key =
   match key with
   | "esc" -> Cancelled
   | "left" when t.field = Base -> Editing (choose t (previous t.ring))
@@ -140,27 +170,37 @@ let key ?home_dir ~inherited_home t key =
   | "down" | "tab" | "\t" -> Editing { t with field = field_after t.field }
   | "\127" | "\b" | "backspace" ->
     Editing (edit t Masc_tui_message_layout.drop_last_utf8_scalar)
-  | "\r" | "\n" ->
+  | "\r" | "\n" | "enter" ->
     (match t.field with
      | Base | Id -> Editing { t with field = field_after t.field }
-     | Location ->
-       (match
-          D.declare ?home_dir ~inherited_home t.declaration ~base:t.ring.chosen
-            ~id:t.id ~location:t.location
-        with
-        | Ok declared ->
-          Declared
-            { id = t.id
-            ; text = declared.D.text
-            ; sign_in = sign_in_command t.ring.chosen.client declared.D.location
-            }
-        | Error e ->
-          Editing { t with error = Some (D.error_message e); field = field_of_error e }))
+     | Location -> Submitted t)
   | typed when printable typed -> Editing (edit t (fun value -> value ^ typed))
   | _ -> Editing t
 ;;
 
 let refused t reason = { t with error = Some reason }
+
+let declare_on ~inherited_home t current =
+  let refuse e = Error { t with error = Some (D.error_message e); field = field_of_error e } in
+  match D.parse current with
+  | Error e -> refuse e
+  | Ok declaration ->
+    let chosen = t.ring.chosen.id in
+    (match List.find_opt (fun (base : D.base) -> base.id = chosen) (D.bases declaration) with
+     | None -> refuse (D.Unknown_base chosen)
+     | Some base ->
+       (match
+          D.declare ?home_dir:t.home_dir ~inherited_home declaration ~base ~id:t.id
+            ~location:t.location
+        with
+        | Ok declared ->
+          Ok
+            { id = t.id
+            ; text = declared.D.text
+            ; sign_in = sign_in_command base.client declared.D.location
+            }
+        | Error e -> refuse e))
+;;
 
 let paste t text =
   let kept = String.of_seq (Seq.filter (fun c -> Char.code c >= 32 && c <> '\127') (String.to_seq text)) in
@@ -185,12 +225,10 @@ let rows t =
          (List.length t.ring.before + 1) count)
   ; line Id "새 provider id" t.id
   ; line Location (D.location_label base.client) t.location
-  ; "  로그인: " ^ Terminal_text.single_line (sign_in_command base.client t.location)
   ]
+  @ List.map Terminal_text.single_line (sign_in_rows t)
   @ (match t.error with
      | None -> []
      | Some reason -> [ "  ! " ^ Terminal_text.single_line reason ])
-  @ [ "  \xe2\x86\x90/\xe2\x86\x92 provider \xc2\xb7 \xe2\x86\x91/\xe2\x86\x93 칸 이동 \xc2\xb7 enter 다음 칸, 마지막 칸에서 저장 \xc2\xb7 esc 취소"
-    ; ""
-    ]
+  @ [ "" ]
 ;;

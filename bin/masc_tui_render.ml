@@ -16090,7 +16090,9 @@ let render_config (state : state) =
          cells (78 of 150 at the time) but because nobody wrote Esc or q
          into it. It also named PgUp/PgDn, which the table did not have, so
          the two had drifted in both directions. *)
-      (Masc_tui_keys.footer_hints_config ~pane:state.config_pane)
+      (match state.runtime_account_form with
+       | Some _ -> Masc_tui_keys.footer_hints_runtime_account_form ()
+       | None -> Masc_tui_keys.footer_hints_config ~pane:state.config_pane)
     ~body:(fun ~budget:_ c ->
       (* Where this server reads from, and how old the binary serving it is.
          A stale binary answers every request as confidently as a current

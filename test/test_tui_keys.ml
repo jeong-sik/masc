@@ -2119,15 +2119,25 @@ let test_config_pane_footer_actions () =
       Alcotest.(check bool) ("presets keeps " ^ key ^ " at 120 columns") true
         (footer_has_key key (at_120 (Masc_tui_keys.footer_hints_config ~pane:Config_presets))))
     [ "n"; "u"; "PgUp/PgDn" ];
-  (* The account form has no other door: a runtime.toml row cut without [a]
-     leaves an operator with the hand-written TOML the form replaces. *)
+  (* The account form's door, at the width the other panes promise their own
+     writes. Narrower rows keep the pane's first keys and drop [e] and [a]
+     alike; the ? sheet names both there. *)
+  Alcotest.(check bool) "runtime.toml keeps a at 120 columns" true
+    (footer_has_key "a"
+       (at_120 (Masc_tui_keys.footer_hints_config ~pane:Config_runtime)));
+  (* While the account form is open it takes every key as typing, so its row
+     names the form's keys and none of the pane's. *)
+  let form_row = Masc_tui_keys.footer_hints_runtime_account_form () in
   List.iter
-    (fun cols ->
-      Alcotest.(check bool)
-        (Printf.sprintf "runtime.toml keeps a at %d columns" cols) true
-        (footer_has_key "a"
-           (fitted_footer ~cols (Masc_tui_keys.footer_hints_config ~pane:Config_runtime))))
-    [ 80; 120 ];
+    (fun key ->
+      Alcotest.(check bool) ("the account form names " ^ key) true
+        (footer_has_key key form_row))
+    [ "Enter"; "Esc" ];
+  List.iter
+    (fun key ->
+      Alcotest.(check bool) ("the account form leaves out " ^ key) false
+        (footer_has_key key form_row))
+    [ "e"; "r"; "q"; "Tab" ];
   Alcotest.(check bool) "the runtime assets keep their way back at 120 columns" true
     (footer_has_key "o" (at_120 assets));
   List.iter

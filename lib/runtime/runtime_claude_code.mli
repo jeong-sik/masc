@@ -77,6 +77,11 @@ val effective_account_home : string option -> string option
     CLAUDE_CONFIG_DIR is resolved against the process cwd and passed to the
     child; other inherited authentication variables are preserved. Explicit
     paths keep their literal spelling for the client's credential identity. *)
+val account_file : string option -> string option
+(** The [.claude.json] that names the account signed in to a selected home, or
+    with none to the inherited one: inside CLAUDE_CONFIG_DIR when set,
+    otherwise in HOME. A selected home runs as CLAUDE_CONFIG_DIR. [None] when
+    the environment names neither. *)
 
 (** One image attached to a turn's user message. [base64_data] is the raw
     base64 payload with no data-URL prefix and no newlines, the shape the

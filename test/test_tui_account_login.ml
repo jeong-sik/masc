@@ -292,8 +292,8 @@ let foreign_escapes_never_reach_the_terminal () =
      check (option (triple int int int)) "38;2 truecolor" (Some (10, 20, 30)) (channels (foreground z));
      check (option (triple int int int)) "colon sub-parameters" (Some (1, 2, 3)) (channels (foreground w))
    | runs -> fail (Printf.sprintf "%d runs" (List.length runs)))
-(* The server names the email it recorded at each selected account's last
-   login; the provider list shows it so the operator can tell accounts apart. *)
+(* The server reads each account's email from its client's login file; the
+   provider list shows it so the operator can tell accounts apart. *)
 let account_emails_beside_providers () =
   let with_emails rows =
     let fields = match inventory with `Assoc fields -> List.remove_assoc "account_emails" fields | _ -> [] in
@@ -301,34 +301,33 @@ let account_emails_beside_providers () =
   let row id state extra = `Assoc (["integration_id", `String id; "state", `String state] @ extra) in
   let t = Login.create "" in
   ok (Login.inventory t (with_emails [
-    row "codex" "recorded" ["email", `String "operator@example.com"];
-    row "claude-code" "absent" [];
+    row "codex" "read" ["email", `String "operator@example.com"];
+    row "claude-code" "not_read" ["cause", `String "source_unavailable"];
     row "muse-code" "not_read" ["cause", `String "source_unrecognized"];
-    row "antigravity" "unreadable" [] ]));
-  check (list string) "each selected account row names its email or why not"
-    [ "> codex · operator@example.com"; "  claude-code · 이메일 기록 없음";
-      "  muse-code · 이메일 모름: 로그인 파일 형식을 모름"; "  antigravity · 이메일 기록을 읽지 못함" ]
+    row "antigravity" "not_read" ["cause", `String "invalid_email"] ]));
+  check (list string) "each account row names its email or why not"
+    [ "> codex · operator@example.com"; "  claude-code · 이메일 모름: 로그인 파일을 못 읽음";
+      "  muse-code · 이메일 모름: 로그인 파일 형식을 모름"; "  antigravity · 이메일 모름: 표시할 수 없는 값" ]
     (List.map Login.row_text (List.tl (Login.lines t)));
   let t = Login.create "" in
-  ok (Login.inventory t (with_emails [
-    row "codex" "login_unfinished" [];
-    row "claude-code" "not_read" ["cause", `String "not_reported"] ]));
-  check (list string) "an unfinished login and an unreported email are told apart"
-    [ "> codex · 마지막 로그인이 끝나지 않음"; "  claude-code · 이메일 모름: 클라이언트가 알려 주지 않음";
-      "  muse-code"; "  antigravity" ]
+  ok (Login.inventory t (with_emails [ row "claude-code" "not_read" ["cause", `String "not_reported"] ]));
+  check (list string) "a provider with no account row draws its name alone"
+    [ "> codex"; "  claude-code · 이메일 모름: 클라이언트가 알려 주지 않음"; "  muse-code"; "  antigravity" ]
     (List.map Login.row_text (List.tl (Login.lines t)));
   List.iter (fun (name, rows) ->
     let t = Login.create "" in
     check bool name true (Result.is_error (Login.inventory t (with_emails rows))))
-    [ "unknown state is refused", [ row "codex" "verified" [] ];
-      "recorded without an email is refused", [ row "codex" "recorded" [] ];
-      "an email on an absent record is refused", [ row "codex" "absent" ["email", `String "x@example.com"] ];
+    [ "unknown state is refused", [ row "codex" "recorded" ["email", `String "x@example.com"] ];
+      "read without an email is refused", [ row "codex" "read" [] ];
+      "an email beside a cause is refused",
+      [ row "codex" "not_read" ["cause", `String "not_reported"; "email", `String "x@example.com"] ];
       "an unknown cause is refused", [ row "codex" "not_read" ["cause", `String "vanished"] ];
       "not read without a cause is refused", [ row "codex" "not_read" [] ];
-      "an email on an unfinished login is refused",
-      [ row "codex" "login_unfinished" ["email", `String "x@example.com"] ];
-      "one account listed twice is refused", [ row "codex" "absent" []; row "codex" "unreadable" [] ];
-      "an account for no listed integration is refused", [ row "missing" "absent" [] ] ];
+      "one account listed twice is refused",
+      [ row "codex" "read" ["email", `String "x@example.com"];
+        row "codex" "not_read" ["cause", `String "not_reported"] ];
+      "an account for no listed integration is refused",
+      [ row "missing" "not_read" ["cause", `String "not_reported"] ] ];
   let fields = match inventory with `Assoc fields -> List.remove_assoc "account_emails" fields | _ -> [] in
   check bool "an inventory without account emails is refused" true
     (Result.is_error (Login.inventory (Login.create "") (`Assoc fields)))

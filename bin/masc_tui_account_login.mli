@@ -4,7 +4,7 @@ type model = { id : string; label : string; context : int option; tools : bool o
 type phase = Loading | Providers | Logging | Models | Documented_context of model | Saving | Finished | Failed
 type recovery = Login_status | Refresh_configuration
 type email_gap = Login_file_unreadable | Login_file_unrecognized | Email_not_reported | Email_not_displayable
-type account_email = Email of string | Not_read of email_gap | Login_unfinished | Not_recorded | Unreadable
+type account_email = Email of string | Not_read of email_gap
 type t = {
   requested : string; mutable generation : int; mutable phase : phase; mutable providers : provider list;
   mutable provider : provider option; mutable models : model list; mutable cursor : int;

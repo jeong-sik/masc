@@ -32,13 +32,6 @@ let missing_to_wire = function
   | Not_reported -> "not_reported"
   | Invalid_email -> "invalid_email"
 
-let missing_of_wire = function
-  | "source_unavailable" -> Some Source_unavailable
-  | "source_unrecognized" -> Some Source_unrecognized
-  | "not_reported" -> Some Not_reported
-  | "invalid_email" -> Some Invalid_email
-  | _ -> None
-
 let ( let* ) = Result.bind
 
 let parse bytes =
@@ -108,49 +101,48 @@ let of_google_oauth bytes =
   let* json = parse bytes in
   email_in_id_token [ "id_token" ] json
 
-type native_client = Codex | Claude_code | Muse_code
+let read_login_file path parse =
+  match
+    Eio_guard.run_in_systhread ~label:"account-email" (fun () -> Fs_compat.load_file_opt path)
+  with
+  | Some bytes -> parse bytes
+  | None -> Error Source_unavailable
+  | exception (Unix.Unix_error _ | Sys_error _) -> Error Source_unavailable
 
-type account =
-  | Native_home of { client : native_client; home : string }
-  | Credential_file of string
-
-let account_of_provider (provider : Runtime_schema.provider) =
-  let native client =
-    Option.map (fun home -> Native_home { client; home }) provider.account_home in
+let of_provider (provider : Runtime_schema.provider) =
+  let native path parse =
+    match path with
+    | Some path -> Some (read_login_file path parse)
+    | None -> Some (Error Source_unavailable)
+  in
   match provider.api_format, provider.credentials with
-  | Runtime_schema.Codex_app_server_runtime, _ -> native Codex
-  | Claude_code_runtime, _ -> native Claude_code
-  | Muse_serve_runtime, _ -> native Muse_code
-  | Antigravity_cli_runtime, Some (Runtime_schema.File path) -> Some (Credential_file path)
+  | Runtime_schema.Codex_app_server_runtime, _ ->
+    native
+      (Option.map
+         (fun codex_home -> Runtime_verification_codex_home.auth_path ~codex_home)
+         (Runtime_codex_app_server.effective_account_home provider.account_home))
+      of_codex_auth
+  | Claude_code_runtime, _ ->
+    native (Runtime_claude_code.account_file provider.account_home) of_claude_account
+  | Muse_serve_runtime, _ -> native (Runtime_muse_home.auth_path provider.account_home) of_muse_auth
+  | Antigravity_cli_runtime, Some (Runtime_schema.File path) ->
+    Some (read_login_file path of_google_oauth)
   | Antigravity_cli_runtime, (Some (Runtime_schema.Env _ | Inline _) | None) -> None
   | (Messages_api | Chat_completions_api | Ollama_api | Gemini_api | Vertex_gemini_api), _ ->
     None
 
-type record =
-  | Email of t
-  | Not_read of missing
-  | Login_unfinished
-
-type recorded =
-  | Record of record
-  | Absent
-  | Unreadable
-
-let inventory_json ~lookup (config : Runtime_schema.config) =
+let inventory_json (config : Runtime_schema.config) =
   `List
     (List.filter_map
        (fun (provider : Runtime_schema.provider) ->
           Option.map
-            (fun account ->
+            (fun read ->
                let state =
-                 match lookup account with
-                 | Record (Email email) -> [ "state", `String "recorded"; "email", `String email ]
-                 | Record (Not_read missing) ->
+                 match read with
+                 | Ok email -> [ "state", `String "read"; "email", `String email ]
+                 | Error missing ->
                    [ "state", `String "not_read"; "cause", `String (missing_to_wire missing) ]
-                 | Record Login_unfinished -> [ "state", `String "login_unfinished" ]
-                 | Absent -> [ "state", `String "absent" ]
-                 | Unreadable -> [ "state", `String "unreadable" ]
                in
                `Assoc (("integration_id", `String provider.id) :: state))
-            (account_of_provider provider))
+            (of_provider provider))
        config.providers)

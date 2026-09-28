@@ -70,6 +70,23 @@ let effective_account_home = function
          (Env_config_core.raw_value_opt "HOME"))
 ;;
 
+(* Claude Code 2.1.283 names its global config
+   [join(CLAUDE_CONFIG_DIR || homedir(), ".claude.json")]: without
+   CLAUDE_CONFIG_DIR the file sits in HOME itself, not in the HOME/.claude
+   directory above. *)
+let account_file account_home =
+  let directory =
+    match account_home, Env_config_core.raw_value_opt "CLAUDE_CONFIG_DIR" with
+    | Some _, _ -> effective_account_home account_home
+    | None, Some path when path <> "" -> effective_account_home None
+    | None, (Some _ | None) ->
+      (match Env_config_core.raw_value_opt "HOME" with
+       | Some home when home <> "" -> Some home
+       | Some _ | None -> None)
+  in
+  Option.map (fun directory -> Filename.concat directory ".claude.json") directory
+;;
+
 let timeout_s_for_phase config ~turn_admitted =
   if turn_admitted
   then config.timeout_s

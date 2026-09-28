@@ -883,6 +883,38 @@ let row_with_field ~cols ~lead ~field ~tail =
   ^ fit_width field (max 1 (framed_inner_width cols - cells lead - cells tail))
   ^ tail
 
+(* A heading that names one record: [lead], the record's id, [after], and the
+   connection badge last. The badge is the part of a heading that has to
+   survive -- it says whether the reading is live and whether the server shares
+   this workspace -- so it is never shortened here, and neither are [lead] and
+   [after]: the id takes what they leave.
+   - An id that fits is drawn whole.
+   - One that does not is folded in the middle. The run ids of one lane share
+     their opening and differ in their hex tail, and the paths of one tree share
+     their directories and differ in their file, so both ends stay.
+   - With one cell left only the cut mark says an id was there; with none the
+     id is left out.
+   When [lead], [after] and the badge alone are wider than the frame, the frame
+   cuts the row as it draws it: the badge keeps its start, the connection
+   reading, and loses its end.
+
+   Every heading that puts an id, a name or a path before the badge is laid
+   out here; test_tui_row_wiring names each one. The id was otherwise drawn
+   before the badge at whatever width it had, and a 54-cell run id left the
+   badge four cells at eighty columns. *)
+let detail_heading ~cols ~lead ~id ~after ~badge =
+  let cells text =
+    Masc_tui_message_layout.display_width (Masc_tui_theme.strip_sgr text)
+  in
+  let tail = after ^ "  " ^ badge in
+  let room = framed_inner_width cols - cells lead - cells tail in
+  let id = Terminal_text.single_line id in
+  let id =
+    if cells id <= room then id
+    else Masc_tui_message_layout.fit_middle (max 0 room) id
+  in
+  lead ^ id ^ tail
+
 (* The selected row of a borderless list: one reverse-video band across the
    full row, box_line's geometry (two margin cells each side, content width
    {!framed_inner_width}). Reverse survives NO_COLOR by contract, so this is also the

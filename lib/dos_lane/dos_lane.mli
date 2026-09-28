@@ -63,6 +63,10 @@ type observation = {
           title screen, map and menus read here the way text programs read
           in [screen_text]. *)
   program : string option;  (** the loaded program's name *)
+  saves_name : string option;
+      (** the name the program's saves are kept under: the inventory name
+          [masc_dos_load] was given, where [program] is the file it booted.
+          Several games can boot the same launcher file. *)
   controller : string option;
       (** who may move this machine's time now; [None] until someone does.
           See {!pass}. *)
@@ -214,6 +218,10 @@ val release_left : holder:string -> announce:(unit -> unit) -> (bool, error) res
     [announce] runs under the machine's lock, as {!load}'s does. *)
 
 val screen : unit -> (observation, error) result
+
+val check_key_name : string -> (unit, string) result
+(** Whether {!press} knows [name] ({!Dos_machine.key_of_string}), without a
+    machine: a layout that names keys is checked when it is read. *)
 
 type frame = { width : int; height : int; rgb : string }
 (** The frame as the display would show it: [width * height] pixels, three

@@ -17,6 +17,7 @@ type observation = {
   frame_nonblack : int;
   frame_ascii : string;
   program : string option;
+  saves_name : string option;
   controller : string option;
   files : string list;
 }
@@ -328,6 +329,7 @@ let observe st =
     frame_nonblack = nonblack;
     frame_ascii = ascii;
     program = Some st.program;
+    saves_name = Some (Filename.basename st.saves_dir);
     controller = st.controller;
     files = Dos_machine.mounted_names m;
   }
@@ -763,6 +765,8 @@ let release_left ~holder ~announce =
       Ok true
     | Some _ | None -> Ok false)
 ;;
+
+let check_key_name name = Result.map (fun (_ : int) -> ()) (Dos_machine.key_of_string name)
 
 let screen () = with_machine (fun st -> Ok (observe st))
 

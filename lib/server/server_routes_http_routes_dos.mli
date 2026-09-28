@@ -8,4 +8,12 @@
     200 when the tool succeeded and 400 when it refused. Every call that ran
     wakes the Lane instances bound to the DOS machine once. *)
 
+val press :
+  config:Workspace.config ->
+  who:string ->
+  keys:string list ->
+  [> `OK | `Bad_request | `Internal_server_error ] * Yojson.Safe.t
+(** [POST /api/v1/dos/press] with [{keys}], for a caller that already holds
+    the key names: the same schema check, release, tool and wake. *)
+
 val add_routes : Http_server_eio.Router.t -> Http_server_eio.Router.t

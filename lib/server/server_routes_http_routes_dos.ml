@@ -79,6 +79,13 @@ let run_response ~config ~who ~route ~body =
           ( (if ok then `OK else `Bad_request)
           , result_json ~ok ~message:(Tool_result.message result) (Tool_result.data result) )))
 
+(* A press made by name, for callers that already hold the keys (the masc
+   pad). It takes the same path as [POST /api/v1/dos/press]: the schema, the
+   departed-holder release, the tool, the watchers. *)
+let press ~config ~who ~keys =
+  run_response ~config ~who ~route:Press
+    ~body:(Yojson.Safe.to_string (`Assoc [ ("keys", `List (List.map (fun key -> `String key) keys)) ]))
+
 let add_route router route =
   Http.Router.post (path route)
     (fun request reqd ->

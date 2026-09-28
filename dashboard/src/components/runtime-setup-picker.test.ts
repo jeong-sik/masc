@@ -189,7 +189,7 @@ it('does not mistake cancelled account import for missing authentication', async
   expect(screen.queryByText(/계정을 가져오지 못했습니다/)).toBeNull()
 })
 
-it('requires an explicit Muse input byte budget and retains account reference through verified save', async () => {
+it('asks no Muse input byte budget and retains account reference through verified save', async () => {
   const account_ref = 'c'.repeat(64)
   vi.mocked(post).mockImplementation(async path => {
     if (path.endsWith('/accounts/select')) return { schema: 'masc.web_setup_account_selection.v1', account_selected: true, invocation_verified: false, account_ref }

@@ -34,10 +34,13 @@ let native_posture_note = function
   | Runtime_native_tools.Native_none -> []
 ;;
 
-(* A model that declares no max-prompt-bytes gets no MASC ceiling: the
-   carried range from the Librarian front goes as it is, and whether it fits
-   is the host's to say, as on the Claude Code and Codex lanes. *)
-let unbounded_model_input_capacity_bytes = max_int
+(* The host rewrites an oversized input instead of refusing it, so a turn
+   without a ceiling is refused rather than sent. The caller passes
+   [Runtime.prompt_capacity_bytes], which derives one from [max-context]. *)
+let no_prompt_ceiling_detail =
+  "Muse Code has no prompt ceiling: the model declares neither max-context nor \
+   max-prompt-bytes"
+;;
 
 let config_error = Host.config_error
 let internal_error = Host.internal_error
@@ -1002,10 +1005,10 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
              "Muse Code turn carries goal images but the runtime does not accept image input")
       | [], (true | false) | _ :: _, true -> Ok ()
     in
-    let capacity_bytes =
+    let* capacity_bytes =
       match max_prompt_bytes with
-      | Some capacity_bytes -> capacity_bytes
-      | None -> unbounded_model_input_capacity_bytes
+      | Some capacity_bytes -> Ok capacity_bytes
+      | None -> Error (config_error ~field:"max_prompt_bytes" no_prompt_ceiling_detail)
     in
     let reasoning_effort =
       Host.effective_reasoning_effort
@@ -1092,16 +1095,14 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     Log.Keeper.info
       ~keeper_name
       "%s turn composition: mode=%s prompt_bytes=%d system_prompt_bytes=%d goal_bytes=%d \
-       images=%d declared_max_prompt_bytes=%s"
+       images=%d prompt_capacity_bytes=%d"
       runtime_label
       (if is_resume then "resume" else "start")
       (String.length prompt)
       (String.length prepared.system_prompt)
       (String.length goal)
       (List.length goal_images)
-      (match max_prompt_bytes with
-       | Some declared -> string_of_int declared
-       | None -> "none");
+      capacity_bytes;
     let client_config : Serve.config =
       { config with
         prepared_home = Some prepared_home

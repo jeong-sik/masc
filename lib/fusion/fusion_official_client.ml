@@ -468,8 +468,11 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
       |> Result.map_error (fun detail -> Setup_failure detail)
     in
     let* () =
-      match runtime.model.max_prompt_bytes with
-      | None -> Ok ()
+      match Runtime.prompt_capacity_bytes runtime with
+      | None ->
+        Error (Muse_failure (Runtime_muse_serve.Invalid_config
+          "Muse Code has no prompt ceiling: the model declares neither max-context nor \
+           max-prompt-bytes"))
       | Some capacity_bytes when String.length prompt > capacity_bytes ->
         Error (Muse_failure (Runtime_muse_serve.Invalid_config
           (Printf.sprintf

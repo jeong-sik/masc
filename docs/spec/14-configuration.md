@@ -77,8 +77,8 @@ sign-in with that selected `CLAUDE_CONFIG_DIR`, `CODEX_HOME` or `HOME`.
 Muse model discovery labels provider, bundled and configured catalog metadata;
 it does not prove account access or a successful invocation. Fake, unresolved
 and unknown catalog sources cannot admit a new setup connection. A selected Muse
-model needs a reported positive context and an operator-entered positive input
-limit in bytes (`max-prompt-bytes`); setup does not infer bytes from tokens.
+model needs a reported positive context; MASC derives its start-prompt ceiling
+from that context (see the template below), so setup asks for no byte count.
 Saving a connection then requires the separate response and MCP tool challenge.
 
 
@@ -148,9 +148,14 @@ preparation can outlast it if the selected account filesystem stalls.
 
 This template belongs in the selected base path's `.masc/config/runtime.toml`.
 Replace both uppercase placeholders with the selected vendor model's actual ID
-and documented context window before loading it. `max-prompt-bytes` is an
-operator input budget, not a measured model token limit. No runtime is assigned
-merely by adding a provider and binding.
+and documented context window before loading it. Leave `max-prompt-bytes` out:
+the Muse host rewrites an input larger than its window instead of refusing it,
+so MASC bounds the prompt it seeds a new session with at
+`4 × (⌊75% of max-context⌋ − 11,946)` bytes, from Muse Code 1.4.0's measured
+behaviour (its token estimate is UTF-8 bytes / 4, its own overhead is 11,946
+estimated tokens, and it compacts at 75% of the window). Declare
+`max-prompt-bytes` only to override that. A Muse model with neither is refused
+at load. No runtime is assigned merely by adding a provider and binding.
 
 ```toml
 [providers.muse_personal]
@@ -162,7 +167,6 @@ is-non-interactive = true
 [models.muse_selected]
 api-name = "VENDOR_MODEL_ID"
 max-context = CONTEXT_WINDOW_TOKENS
-max-prompt-bytes = 1048576
 tools-support = true
 streaming = true
 

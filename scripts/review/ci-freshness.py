@@ -235,11 +235,11 @@ def shared_check_input(path, pr_paths=(), *, reference_target_removed=False):
 def run_names_candidate(run, pr, branch):
     # SHA equality alone does not identify a PR: two branch refs can point at
     # the same commit, and GitHub can associate a run with both PRs. Keep the
-    # event branch identity as well as the PR association. Empty associations
+    # event branch identity and require an unambiguous PR association. Empty associations
     # still require the suite/check linkage below before granting freshness.
     return (run["head_branch"] == branch
             and (not run["pull_requests"]
-                 or any(row["number"] == pr for row in run["pull_requests"])))
+                 or [row["number"] for row in run["pull_requests"]] == [pr]))
 
 
 def current_pr_check(gh, prefix, head, pr, branch):
@@ -287,7 +287,7 @@ def evaluate(*, repo, pr, head, run, git_dir, gh, batch_line=None, landing=False
         raise Unavailable("run_names_another_branch")
     associations = evidence["pull_requests"]
     if associations:
-        if not any(row["number"] == pr for row in associations):
+        if [row["number"] for row in associations] != [pr]:
             raise Unavailable("run_names_another_pr")
     else:
         # Associations can disappear after branch/PR lifecycle changes. Bind
@@ -300,8 +300,7 @@ def evaluate(*, repo, pr, head, run, git_dir, gh, batch_line=None, landing=False
         checks = [check for page in api_pages(gh, f"{prefix}/commits/{head}/check-runs?per_page=100")
                   for check in page["check_runs"]]
         if (suite["head_sha"] != head or suite.get("head_branch") != current["head"]["ref"]
-                or not any(isinstance(row, dict) and row.get("number") == pr
-                           for row in suite.get("pull_requests", []))
+                or [row.get("number") for row in suite.get("pull_requests", [])] != [pr]
                 or not any(check["head_sha"] == head and check["check_suite"]["id"] == suite_id
                            for check in checks)):
             raise Unavailable("run_suite_not_linked_to_candidate")

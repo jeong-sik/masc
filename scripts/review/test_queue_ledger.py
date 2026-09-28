@@ -125,7 +125,7 @@ raise SystemExit(result.returncode)
                     state=fields.pop("state", "COMMENTED"), **fields)
 
     def approval(self, head=None, time="2026-01-01T00:55:00Z", **fields):
-        return self.message("LGTM", time, state="APPROVED",
+        return self.message(self.verdict(head=head) + f"\n\napprove-guard: head `{head or self.head}` · fixture", time, state="APPROVED",
                             commit_id=head or self.head, **fields)
 
     def ledger(self, comments=None, reviews=None, fail=None, mutate=lambda data: None,
@@ -212,6 +212,7 @@ os.execv(os.environ['LEDGER_REAL_GIT'], [os.environ['LEDGER_REAL_GIT'], *args])
                            pull_requests=[{"number": 2}])
             second["comments"][0]["body"] = self.verdict(head=second_head).replace("run: 900", "run: 901")
             second["reviews"] = [self.approval(head=second_head)]
+            second["reviews"][0]["body"] = second["reviews"][0]["body"].replace("run: 900", "run: 901")
             data["prs"].extend(second["prs"])
             data["endpoints"] = {
                 "repos/o/r/pulls/2": second["pull"],
@@ -332,7 +333,7 @@ os.execv(os.environ['LEDGER_REAL_GIT'], [os.environ['LEDGER_REAL_GIT'], *args])
                                         updated_at="2026-01-01T00:59:00Z")
                 refusal = self.message(self.verdict(state), "2026-01-01T00:50:00Z")
                 for messages in [[old_pass, refusal], [refusal, old_pass]]:
-                    row = self.ledger(comments=messages, reviews=[self.approval()])
+                    row = self.ledger(comments=messages, reviews=[self.approval(time="2026-01-01T00:30:00Z")])
                     self.assertEqual((row["waits_on"], row["verdict"]),
                                      ("review", "FAIL by reviewer" if state == "FAIL" else state))
 
@@ -663,6 +664,18 @@ os.execv(os.environ['LEDGER_REAL_GIT'], [os.environ['LEDGER_REAL_GIT'], *args])
             head_branch="other-pr", pull_requests=[{"number": 1}, {"number": 2}]))
         self.assertEqual((code, receipt["reason"]), (1, "run_names_another_branch"))
 
+    def test_same_branch_ambiguous_pr_run_refuses(self):
+        code, receipt = self.freshness(lambda d: d["run"].update(
+            pull_requests=[{"number": 1}, {"number": 2}]))
+        self.assertEqual((code, receipt["reason"]), (1, "run_names_another_pr"))
+
+    def test_retargeted_approval_commit_requires_immutable_binding(self):
+        approval = self.approval(head="b" * 40)
+        approval["commit_id"] = self.head
+        self.assertEqual(self.ledger(reviews=[approval])["waits_on"], "review")
+        approval["body"] = self.verdict()
+        self.assertEqual(self.ledger(reviews=[approval])["waits_on"], "review")
+
     def test_dependency_before_run_and_unrelated_main_change(self):
         self.main_change("masc.opam.locked", "2026-01-01T00:20:00Z")
         code, receipt = self.freshness()
@@ -693,9 +706,9 @@ os.execv(os.environ['LEDGER_REAL_GIT'], [os.environ['LEDGER_REAL_GIT'], *args])
             ("APPROVED", "COMMENTED", "merge"),
         ]
         for older_state, newer_state, expected in cases:
-            older = self.message("older decision", timestamp, id=100,
+            older = self.message(self.approval()["body"], timestamp, id=100,
                                  state=older_state, commit_id=self.head)
-            newer = self.message("newer decision", timestamp, id=101,
+            newer = self.message(self.approval()["body"], timestamp, id=101,
                                  state=newer_state, commit_id=self.head)
             for reviews in ([older, newer], [newer, older]):
                 with self.subTest(older=older_state, newer=newer_state,

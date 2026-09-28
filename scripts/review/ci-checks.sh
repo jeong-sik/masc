@@ -78,11 +78,11 @@ wf_all="$(ci_gh_json "repos/${repo}/actions/runs?head_sha=${head}&per_page=100" 
 # Empty associations require the event branch; ci-freshness validates the cited
 # run's suite linkage independently. Non-PR workflows keep their existing gate.
 unrelated_suites="$(printf '%s\n' "$wf_all" | awk -F '\t' -v branch="$ci_branch" -v pr="$pr" '
-  NF && $9=="pull_request" && ($11!=branch || ($12!="" && !index("," $12 ",", "," pr ","))) {
+  NF && $9=="pull_request" && ($11!=branch || ($12!="" && $12!=pr)) {
     if ($8!="0") printf "%s ", $8
   }')"
 wf_all="$(printf '%s\n' "$wf_all" | awk -F '\t' -v branch="$ci_branch" -v pr="$pr" '
-  NF && ($9!="pull_request" || ($11==branch && ($12=="" || index("," $12 ",", "," pr ","))))')"
+  NF && ($9!="pull_request" || ($11==branch && ($12=="" || $12==pr)))')"
 if ! printf '%s\n' "$wf_all" | awk -F '\t' '
   $9=="pull_request" && $10==".github/workflows/pr-check.yml" { found=1 }
   END { exit !found }'; then
@@ -125,6 +125,19 @@ while IFS=$'\t' read -r _wid _rank _num name status concl id _suite; do
   fi
 done <<<"$wf"
 [ ${#wf_ids[@]} -gt 0 ] || ci_reasons+=("no workflow runs for ${head}")
+# Required jobs must exist in the admitted PR-check run itself. Other workflows
+# and successful subsets cannot supply a deleted or renamed required job.
+while IFS=$'\t' read -r required_run; do
+  [ -n "$required_run" ] || continue
+  required_jobs="$(ci_gh_json "repos/${repo}/actions/runs/${required_run}/jobs?per_page=100" '.jobs[] | [.name, .status, (.conclusion // "none"), (.id|tostring)] | @tsv')" || return 1
+  required_jobs="$(printf '%s\n' "$required_jobs" | sort -t "$(printf '\t')" -k1,1 -k4,4nr | awk -F '\t' 'NF && !seen[$1]++')"
+  for required_name in "lint suite" "dune build @check" "dune build --profile release @check" "dashboard typecheck" "TLA model check"; do
+    if ! printf '%s\n' "$required_jobs" | awk -F '\t' -v name="$required_name" '$1==name && $2=="completed" && $3=="success" { found=1 } END { exit !found }'; then
+      ci_reasons+=("required PR-check job '${required_name}' missing or not successful in run ${required_run}")
+    fi
+  done
+done <<<"$(printf '%s\n' "$wf" | awk -F '\t' '$9=="pull_request" && $10==".github/workflows/pr-check.yml" { print $7 }')"
+
 
 # ---- 4. check-runs on this exact SHA ----
 # One SHA can carry several check-runs of one name: a Draft-time suite whose

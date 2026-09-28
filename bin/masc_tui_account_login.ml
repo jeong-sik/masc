@@ -1,7 +1,18 @@
 type client = Codex | Claude | Antigravity | Muse
 type provider = { id : string; label : string; client : client }
 type model = { id : string; label : string; context : int option; tools : bool option }
+(* What removing an account changes, as the setup API's removal preview lists it. *)
+type removal_change =
+  | Removed_table of string
+  | Left_lane of { lane : string; runtime : string }
+  | Left_exact_lane of { lane : string; runtime : string }
+  | Left_vision of string
+  | Unassigned of { keeper : string; runtime : string }
+type removal =
+  | Removable of { changes : removal_change list; login_store : string option }
+  | Unremovable of string
 type phase = Loading | Providers | Logging | Models | Documented_context of model | Saving | Finished | Failed
+  | Removal of { provider : provider; revision : string; removal : removal }
 type recovery = Login_status | Refresh_configuration
 type email_gap = Login_file_unreadable | Login_file_unrecognized | Email_not_reported | Email_not_displayable
 type account_email = Email of string | Not_read of email_gap | Login_unfinished | Not_recorded | Unreadable
@@ -19,6 +30,9 @@ type event = Started of string * string option | Output of string | Input_ready
   | Complete of string * authentication | Login_failed of string * string option | Login_error
 type action = Inventory | Refresh_saved | Refresh_retry | Start of bool | Input of int * Yojson.Safe.t | Cancel
   | Recover | Discover | Prepare of model | Save of model | Close | Nothing
+  | Preview_removal of { provider : provider; refused : string option }
+  | Remove of { provider : provider; revision : string; login_store : string option }
+  | Refresh_removed of string
 let create requested = {requested; generation=0; phase=Loading; providers=[]; provider=None; models=[]; account_emails=[];
   cursor=0; account_ref=None; login_id=None; revision=""; existing=[]; default_runtime_id=None; draft="";
   output=""; notice="계정 목록을 읽고 있습니다."; input_pending=false; input_sequence=0; cancel_stream=None; recovery=Login_status}
@@ -64,6 +78,7 @@ let account_email_of_row = function
      | Some id, `String "unreadable" when keys = ["integration_id"; "state"] -> Some (id, Unreadable)
      | _ -> None)
   | _ -> None
+let providers_notice = "Enter: 새 계정 로그인. 기존 계정은 e로 선택합니다."
 let inventory t json =
   match string (field "setup_revision" json), field "integrations" json, field "runtimes" json,
         field "default_runtime_selection" json, field "account_emails" json with
@@ -99,7 +114,7 @@ let inventory t json =
       t.providers <- providers; t.revision <- revision; t.account_emails <- account_emails;
       t.existing <- existing; t.default_runtime_id <- string (field "default_runtime_id" json);
       t.cursor <- (match selected with Some i -> i | None -> 0);
-      t.phase <- Providers; t.notice <- "Enter: 새 계정 로그인. 기존 계정은 e로 선택합니다."; Ok ())
+      t.phase <- Providers; t.notice <- providers_notice; Ok ())
   | _ -> Error "서버 계정 목록을 읽지 못했습니다."
 let save_failed t (model:model) message =
   t.models <- List.map (fun (existing:model) -> if existing.id=model.id then model else existing) t.models;
@@ -142,6 +157,39 @@ let prepared t model json = match field "model" json, field "context" json with
     t.models <- List.map (fun m -> if m.id=id then {m with context=Some n} else m) t.models;
     t.phase <- Models; t.notice <- "실행 context를 확인했습니다. Enter로 검증하고 추가하세요."; Ok ()
   | _ -> Error "모델 실행 context를 확인하지 못했습니다."
+let removal_change row = match string (field "kind" row) with
+  | Some "table" -> Option.map (fun path -> Removed_table path) (string (field "path" row))
+  | Some "lane_candidate" -> (match string (field "lane" row), string (field "runtime" row) with
+    | Some lane, Some runtime -> Some (Left_lane {lane; runtime}) | _ -> None)
+  | Some "exact_lane_slot" -> (match string (field "lane" row), string (field "runtime" row) with
+    | Some lane, Some runtime -> Some (Left_exact_lane {lane; runtime}) | _ -> None)
+  | Some "vision_runtime" -> Option.map (fun runtime -> Left_vision runtime) (string (field "runtime" row))
+  | Some "assignment" -> (match string (field "keeper" row), string (field "runtime" row) with
+    | Some keeper, Some runtime -> Some (Unassigned {keeper; runtime}) | _ -> None)
+  | Some _ | None -> None
+(* [refused] is why the server declined the last removal: the file moved or
+   the account can no longer go, and this preview is the file as it is now. *)
+let removal_preview t (provider:provider) ~refused json =
+  let lead = match refused with Some reason -> reason ^ " · " | None -> "" in
+  match field "integration_id" json, string (field "revision" json), field "state" json with
+  | `String id, Some revision, `String "removable" when id=provider.id ->
+    (match field "changes" json, field "login_store" json with
+     | `List rows, (`Null | `String _ as store) ->
+       let changes = List.map removal_change rows in
+       if List.exists Option.is_none changes then Error "지울 내용의 형식이 올바르지 않습니다."
+       else (
+         t.phase <- Removal {provider; revision; removal = Removable {changes = List.filter_map Fun.id changes; login_store = string store}};
+         t.notice <- lead ^ "Enter를 누르면 아래 내용대로 지우고 저장합니다."; Ok ())
+     | _ -> Error "지울 내용의 형식이 올바르지 않습니다.")
+  | `String id, Some revision, `String "refused" when id=provider.id ->
+    (match string (field "reason" json) with
+     | Some reason -> t.phase <- Removal {provider; revision; removal = Unremovable reason};
+       t.notice <- lead ^ "이 계정은 지금 지울 수 없습니다."; Ok ()
+     | None -> Error "지울 수 없는 이유를 읽지 못했습니다.")
+  | _ -> Error "지울 내용을 읽지 못했습니다."
+let removed_notice (provider:provider) login_store =
+  provider.label ^ " 계정을 지웠습니다."
+  ^ (match login_store with Some path -> " 로그인 정보는 남아 있습니다: " ^ path | None -> "")
 let source t = `Assoc (["integration_id", `String (match t.provider with Some p -> p.id | None -> "")]
   @ (match t.account_ref with Some r -> ["account_ref",`String r] | None -> []))
 let receipt t json =
@@ -196,14 +244,21 @@ let paste t text = match t.phase with
     (match pasted_line text with
      | Some text -> append_draft t text
      | None -> t.notice <- "여러 줄이나 제어 문자는 붙여넣을 수 없습니다. 한 줄을 확인해 다시 입력하세요.")
-  | Loading | Providers | Models | Saving | Finished | Failed | Logging | Documented_context _ -> ()
+  | Loading | Providers | Models | Saving | Finished | Failed | Logging | Documented_context _ | Removal _ -> ()
 let submit_input t json =
   t.input_sequence <- t.input_sequence + 1;
   t.input_pending <- true;
   Input (t.input_sequence, json)
 let key t key =
-  if key="esc" then Close else
+  if key="esc" then (match t.phase with
+    (* Esc steps back to the list rather than closing /login: the removal is
+       a question asked from it. *)
+    | Removal _ -> t.phase <- Providers; t.notice <- providers_notice; Nothing
+    | Loading | Providers | Logging | Models | Documented_context _ | Saving | Finished | Failed -> Close) else
   match t.phase with
+  | Removal {provider; revision; removal = Removable {login_store; _}} ->
+    if key="\r" || key="\n" || key="enter" then Remove {provider; revision; login_store} else Nothing
+  | Removal {removal = Unremovable _; _} -> Nothing
   | Logging ->
     if key="ctrl-c" || key="\003" then Cancel
     else if t.input_pending then Nothing
@@ -231,6 +286,8 @@ let key t key =
     if key="up" || key="k" then (t.cursor<-max 0 (t.cursor-1); Nothing)
     else if key="down" || key="j" then (let count=if t.phase=Providers then List.length t.providers else List.length t.models in t.cursor<-min (max 0 (count-1)) (t.cursor+1); Nothing)
     else if key="r" then (if t.phase=Models then Discover else if t.phase=Finished then Refresh_saved else if t.phase=Failed && t.recovery=Refresh_configuration then Refresh_retry else if Option.is_some t.login_id then Recover else Inventory)
+    else if key="D" && t.phase=Providers then
+      (match List.nth_opt t.providers t.cursor with Some provider -> Preview_removal {provider; refused = None} | None -> Nothing)
     else if key="n" || key="e" then Start (key="e")
     else if key="\r" || key="\n" || key="enter" then
       (match t.phase with
@@ -247,7 +304,7 @@ let key t key =
               t.notice<-"Muse가 이 모델의 context를 보고하지 않았습니다. CLI 설정을 확인하고 r로 목록을 새로 읽으세요."; Nothing
             | None -> Nothing)
          | Some model -> Save model)
-       | Loading | Logging | Documented_context _ | Saving | Finished | Failed -> Nothing)
+       | Loading | Logging | Documented_context _ | Saving | Finished | Failed | Removal _ -> Nothing)
     else Nothing
 let save_body t model =
   let existing=List.map (fun id -> `Assoc ["runtime_id",`String id]) t.existing in
@@ -258,7 +315,9 @@ let save_body t model =
 let hints t = match t.phase with
   | Logging -> "Enter:코드 전달  ↑↓/Tab:선택  Ctrl-D:입력 종료  Ctrl-C:취소  Esc:닫기"
   | Documented_context _ -> "확인한 context 한도(tokens)  Enter:검증 후 추가  Esc:닫기"
-  | Providers -> "↑↓:공급자  Enter/n:새 계정  e:기존 계정  Esc:닫기"
+  | Providers -> "↑↓:공급자  Enter/n:새 계정  e:기존 계정  D:지우기  Esc:닫기"
+  | Removal {removal = Removable _; _} -> "Enter:지우고 저장  Esc:목록으로"
+  | Removal {removal = Unremovable _; _} -> "Esc:목록으로"
   | Models -> "↑↓:모델  Enter:검증 후 추가  r:목록 새로고침  e:재로그인  Esc:닫기"
   | Loading | Saving | Finished | Failed -> "r:상태 재확인  e:재로그인  n:새 계정  Esc:닫기"
 type row = Text of string | Terminal of Masc_tui_sgr_text.line
@@ -274,6 +333,12 @@ let account_suffix t (p:provider) = match List.assoc_opt p.id t.account_emails w
   | Some Not_recorded -> " · 이메일 기록 없음"
   | Some Unreadable -> " · 이메일 기록을 읽지 못함"
   | None -> ""
+let describe_change = function
+  | Removed_table path -> "[" ^ path ^ "]"
+  | Left_lane {lane; runtime} -> "lane " ^ lane ^ " 후보에서 " ^ runtime ^ " 를 뺍니다"
+  | Left_exact_lane {lane; runtime} -> "exact-output lane " ^ lane ^ " 에서 " ^ runtime ^ " 를 뺍니다"
+  | Left_vision runtime -> "media_failover 에서 " ^ runtime ^ " 를 뺍니다"
+  | Unassigned {keeper; runtime} -> "keeper " ^ keeper ^ " 는 " ^ runtime ^ " 대신 default 로 갑니다"
 let lines t =
   let rows = match t.phase with
     | Providers -> List.mapi (fun i (p:provider) -> Text ((if i=t.cursor then "> " else "  ") ^ p.label ^ account_suffix t p)) t.providers
@@ -281,6 +346,11 @@ let lines t =
     | Logging -> List.map (fun line -> Terminal line) (Masc_tui_sgr_text.parse t.output)
       @ [Text ("로그인 코드: " ^ String.make (min 40 (String.length t.draft)) '*'); Text (if t.input_pending then "입력 전달 중" else if Option.is_none t.login_id then "로그인 세션 준비 중" else "코드 입력 대기")]
     | Documented_context _ -> [Text ("문서 또는 설정의 context 한도(tokens): " ^ t.draft)]
+    | Removal {provider; removal; _} -> Text ("지울 계정: " ^ provider.label ^ account_suffix t provider) ::
+      (match removal with
+       | Removable {changes; login_store} -> Text "지우거나 고치는 것:" :: List.map (fun change -> Text ("  " ^ describe_change change)) changes
+         @ (match login_store with Some path -> [Text ("로그인 정보는 지우지 않습니다: " ^ path)] | None -> [])
+       | Unremovable reason -> [Text ("지울 수 없습니다: " ^ reason)])
     | Loading | Saving | Finished | Failed -> [] in
   Text t.notice :: rows
 let row_text = function Text text -> text | Terminal line -> Masc_tui_sgr_text.text line
@@ -289,6 +359,8 @@ let visible_lines ~height t =
   let rows = lines t in
   let skip = match t.phase with
     | Providers | Models -> max 0 (t.cursor + 2 - height)
+    (* The account and what goes with it read from the top. *)
+    | Removal _ -> 0
     | Loading | Logging | Documented_context _ | Saving | Finished | Failed -> max 0 (List.length rows - height) in
   List.filteri (fun index _ -> index >= skip && index < skip + height) rows
 let decoder ~integration_id on_event =

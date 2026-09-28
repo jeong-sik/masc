@@ -333,6 +333,44 @@ let account_emails_beside_providers () =
   check bool "an inventory without account emails is refused" true
     (Result.is_error (Login.inventory (Login.create "") (`Assoc fields)))
 
+(* D on a provider asks what removing it changes; the answer is a question the
+   operator confirms with Enter, and Esc goes back to the list, not out of /login. *)
+let removal_preview_json ?(id="codex") state extra =
+  `Assoc (["integration_id",`String id;"revision",`String "rev-1";"state",`String state] @ extra)
+let removable = removal_preview_json "removable"
+  ["changes",`List [`Assoc ["kind",`String "table";"path",`String "providers.codex"];
+                    `Assoc ["kind",`String "lane_candidate";"lane",`String "coding";"runtime",`String "codex.gpt"];
+                    `Assoc ["kind",`String "assignment";"keeper",`String "sangsu";"runtime",`String "codex.gpt"]];
+   "login_store",`String "/home/op/.codex-two"]
+let rows t = List.map Login.row_text (Login.lines t)
+let mentions text t = List.exists (fun row ->
+  let n=String.length text in let rec at i = i+n <= String.length row && (String.sub row i n = text || at (i+1)) in at 0) (rows t)
+let removal_from_the_list () =
+  let t=Login.create "codex" in ok (Login.inventory t inventory);
+  (match Login.key t "D" with
+   | Login.Preview_removal {provider=p; refused=None} -> check string "the provider under the cursor" "codex" p.id
+   | _ -> fail "D did not ask for a removal preview");
+  ok (Login.removal_preview t provider ~refused:None removable);
+  List.iter (fun text -> check bool ("shows " ^ text) true (mentions text t))
+    ["[providers.codex]"; "lane coding"; "keeper sangsu"; "/home/op/.codex-two"];
+  (match Login.key t "\r" with
+   | Login.Remove {provider=p; revision; login_store} ->
+     check string "the account" "codex" p.id; check string "the revision the preview read" "rev-1" revision;
+     check (option string) "the login store for the notice" (Some "/home/op/.codex-two") login_store
+   | _ -> fail "Enter did not remove");
+  check bool "Esc goes back to the list" true (Login.key t "esc"=Login.Nothing && t.phase=Login.Providers)
+let refused_removal () =
+  let t=Login.create "codex" in ok (Login.inventory t inventory);
+  ok (Login.removal_preview t provider ~refused:(Some "runtime.toml changed")
+        (removal_preview_json "refused" ["reason",`String "[runtime].default is codex.gpt"]));
+  check bool "the reason is shown" true (mentions "[runtime].default is codex.gpt" t);
+  check bool "with why the preview was read again" true (String.length t.notice > 0 && mentions "runtime.toml changed" t);
+  check bool "Enter does not remove a refused account" true (Login.key t "\r"=Login.Nothing);
+  check bool "an answer for another account is refused" true
+    (Result.is_error (Login.removal_preview t provider ~refused:None (removal_preview_json ~id:"claude-code" "refused" ["reason",`String "x"])));
+  check bool "an unknown change is refused" true
+    (Result.is_error (Login.removal_preview t provider ~refused:None
+      (removal_preview_json "removable" ["changes",`List [`Assoc ["kind",`String "mystery"]];"login_store",`Null])))
 let () = run "TUI account login" ["workflow",[
   test_case "pasted credentials preserve bytes and reject controls" `Quick pasted_credential_bytes;
   test_case "failed save refreshes revision and retains model" `Quick failed_save_refresh;
@@ -350,4 +388,6 @@ let () = run "TUI account login" ["workflow",[
   test_case "retry preserves early input until a new session starts" `Quick retry_early_input;
   test_case "visible cursor and recovery identity" `Quick viewport_and_receipt;
   test_case "official client colours are drawn" `Quick official_client_colours;
-  test_case "foreign escapes never reach the terminal" `Quick foreign_escapes_never_reach_the_terminal]]
+  test_case "foreign escapes never reach the terminal" `Quick foreign_escapes_never_reach_the_terminal;
+  test_case "removal from the list" `Quick removal_from_the_list;
+  test_case "refused removal" `Quick refused_removal]]

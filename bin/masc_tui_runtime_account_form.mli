@@ -94,4 +94,5 @@ val rows : width:int -> t -> string list
     first half wider than the pane is cut by the pane rather than broken
     elsewhere. Each field keeps one row, so the label column holds. A saved
     form draws the saved id and the sign-in hints, without the fields. The
-    keys it reads are the footer's, not a row. *)
+    keys it reads are the footer's, not a row; the pane adds the saved
+    form's keys under it, where no notice can crowd them out. *)

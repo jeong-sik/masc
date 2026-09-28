@@ -106,14 +106,12 @@ let test_empty_selected_account_never_becomes_ambient () =
       (Result.is_error (Runtime_setup_spec.of_json (`Assoc fields))))
     ["claude_code"; "codex"]
 
-let test_muse_requires_explicit_account_and_prompt_budget () =
+let test_muse_requires_explicit_account () =
   let fields = ["choice", `String "muse"; "model", `String "fixture-model";
     "max_context", `Int 8192; "tools", `Bool true; "streaming", `Bool true;
-    "account_home", `String "/synthetic/muse-account"; "max_prompt_bytes", `Int 16384] in
-  List.iter (fun missing ->
-    Alcotest.(check bool) (missing ^ " is required") true
-      (Result.is_error (Runtime_setup_spec.of_json (`Assoc (List.remove_assoc missing fields)))))
-    ["account_home"; "max_prompt_bytes"];
+    "account_home", `String "/synthetic/muse-account"] in
+  Alcotest.(check bool) "account_home is required" true
+    (Result.is_error (Runtime_setup_spec.of_json (`Assoc (List.remove_assoc "account_home" fields))));
   let spec = match Runtime_setup_spec.of_json (`Assoc fields) with
     | Ok spec -> spec | Error error -> Alcotest.fail (Runtime_setup_spec.error_message error) in
   let rendered = Runtime_setup_spec.render spec in
@@ -127,8 +125,8 @@ let test_muse_requires_explicit_account_and_prompt_budget () =
     Alcotest.(check bool) "Muse protocol" true
       (provider.api_format = Runtime_schema.Muse_serve_runtime);
     Alcotest.(check (option string)) "selected account" (Some "/synthetic/muse-account") provider.account_home;
-    Alcotest.(check (option int)) "operator bytes retained without token conversion"
-      (Some 16384) model.max_prompt_bytes
+    Alcotest.(check (option int)) "no byte budget is invented for the model"
+      None model.max_prompt_bytes
 
 (* Discovery lists Codex models from the declared provider's account home;
    the saved provider must keep that home or it renders the ambient
@@ -166,5 +164,5 @@ let () = Alcotest.run "native runtime setup spec" ["contract",[
   Alcotest.test_case "one answer is one connection" `Quick test_one_answer_is_one_connection;
   Alcotest.test_case "selected official accounts remain distinct" `Quick test_official_client_account_selection_is_identity;
   Alcotest.test_case "empty selected account does not inherit" `Quick test_empty_selected_account_never_becomes_ambient;
-  Alcotest.test_case "Muse account and byte budget are explicit" `Quick test_muse_requires_explicit_account_and_prompt_budget;
+  Alcotest.test_case "Muse account is explicit and asks no byte budget" `Quick test_muse_requires_explicit_account;
   Alcotest.test_case "codex account home survives save" `Quick test_codex_account_home_preserved]]

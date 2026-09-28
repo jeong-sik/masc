@@ -92,13 +92,23 @@ let fenced_pretty_json text =
    a post containing a scalar or a JSON-shaped fragment remains exactly the
    Markdown its author wrote. *)
 let board_document_source body =
-  let trimmed = String.trim body in
-  match Yojson.Safe.from_string trimmed with
-  | (`Assoc _ | `List _) as json ->
-      Yojson.Safe.pretty_to_string json
-      |> fenced_document_text ~language:"json"
-  | _ -> body
-  | exception Yojson.Json_error _ -> body
+  let rec starts_with_json i =
+    if i >= String.length body then false
+    else
+      match body.[i] with
+      | ' ' | '\t' | '\n' | '\r' | '\012' -> starts_with_json (i + 1)
+      | '{' | '[' | '/' -> true
+      | _ -> false
+  in
+  if not (starts_with_json 0) then body
+  else
+    let trimmed = String.trim body in
+    match Yojson.Safe.from_string trimmed with
+    | (`Assoc _ | `List _) as json ->
+        Yojson.Safe.pretty_to_string json
+        |> fenced_document_text ~language:"json"
+    | _ -> body
+    | exception Yojson.Json_error _ -> body
 
 let board_document_markdown ~width body =
   document_markdown ~width (board_document_source body)
@@ -2239,8 +2249,8 @@ let render_question_reader (state : state) =
    REPLIES sat past the right edge whatever the title was sized to. *)
 let board_table_lead = 4
 
-let board_title_width ~cols =
-  Render_schedule.board_title_width
+let board_layout ~cols =
+  Render_schedule.board_layout
     ~inner_width:(max 0 (framed_inner_width cols - board_table_lead))
 
 (* Colour here, the glyph in {!Masc_tui_board_kind_mark}, which the help sheet
@@ -2548,7 +2558,7 @@ let render_board_list (state : state) =
     hearth timestamp
     (connection_badge state) in
 
-  let title_w = board_title_width ~cols in
+  let layout = board_layout ~cols in
   (* The frame, its fill and the footer are the contract's: this surface
      counted them by hand and counted two rows it no longer draws, so the
      footer stood two rows above the composer. *)
@@ -2587,8 +2597,7 @@ let render_board_list (state : state) =
         ; (fun () ->
             c.push_styled ~style:(Theme.recede ())
               (String.make board_table_lead ' '
-               ^ Render_schedule.board_header_row ~age_header
-                   ~title_width:title_w))
+               ^ Render_schedule.board_header_row ~age_header ~layout))
         ; c.push_divider
         ]
       in
@@ -2688,8 +2697,8 @@ let render_board_list (state : state) =
             in
             let content =
               String.make board_table_lead ' '
-              ^ Render_schedule.board_row ~styles ~age_header
-                  ~title_width:title_w values
+              ^ Render_schedule.board_row ~styles ~age_header ~layout
+                  values
             in
             if is_selected then
               c.push_selected (Masc_tui_theme.strip_sgr content)
@@ -5742,15 +5751,6 @@ let render_exact_lane_provider_editor (state : state) editor =
   let entries = Masc_tui_types.slot_editor_rows state in
   let count = List.length entries in
   let selected_index = Masc_tui_types.slot_editor_cursor_index state in
-  (* Whether the lane walks a CLI tail, once its row has been read. *)
-  let walks_cli_tail =
-    match editor.Masc_tui_types.se_target with
-    | Masc_tui_types.Exact_lane_slots target ->
-      Option.map
-        (fun (row : Tui_decode.standalone_lane) -> row.Tui_decode.sl_supports_cli_tail)
-        (Masc_tui_types.standalone_lane_row state target)
-    | Masc_tui_types.Media_failover_slots -> None
-  in
   (* j/k stop on slots, never on a group's title, so an empty group has no
      row to move into. Its title says where a slot comes from instead: [a]
      picks one, and the runtime's kind decides the group it joins. *)
@@ -5768,33 +5768,17 @@ let render_exact_lane_provider_editor (state : state) editor =
     (None, heading)
     :: List.map (fun (index, row) -> Some index, row.Masc_tui_types.sr_slot) rows
   in
-  let declares_cli_slot =
-    List.exists
-      (fun row -> row.Masc_tui_types.sr_kind = Masc_tui_types.Official_client_slot)
-      entries
-  in
-  (* A lane without a CLI tail draws no CLI group: the writer refuses every
-     CLI slot there, so the group could only invite a pick that fails. A CLI
-     slot the file declares anyway is still drawn, so it can be dropped. *)
-  let cli_group =
-    match walks_cli_tail, declares_cli_slot with
-    | Some false, false -> []
-    | Some false, true | Some true, (true | false) | None, (true | false) ->
-      group_rows Masc_tui_types.Official_client_slot
-        "CLI slots · tried after every HTTP slot"
-  in
   let display_rows =
-    group_rows Masc_tui_types.Catalog_slot "HTTP slots · tried first" @ cli_group
+    group_rows Masc_tui_types.Catalog_slot "HTTP slots · tried first"
+    @ group_rows Masc_tui_types.Official_client_slot
+        "CLI slots · tried after every HTTP slot"
   in
   box_top buf cols;
   box_line buf cols (screen_title " MASC Lanes / Providers");
   box_divider buf cols;
   box_line_styled buf cols ~style:(Theme.info ())
-    (Printf.sprintf "  [runtime.exact_output_lanes.%s] · %s"
-       (Terminal_text.single_line lane)
-       (match walks_cli_tail with
-        | Some false -> "HTTP only"
-        | Some true | None -> "HTTP then CLI"));
+    (Printf.sprintf "  [runtime.exact_output_lanes.%s] · HTTP then CLI"
+       (Terminal_text.single_line lane));
   (match state.lanes_action_error with
    | None -> ()
    | Some detail ->
@@ -5840,7 +5824,7 @@ let render_exact_lane_provider_editor (state : state) editor =
                 note
             in
             match
-              Masc_tui_types.runtime_pick_availability state
+              Masc_tui_types.runtime_pick_availability
                 picker.Masc_tui_types.rlp_pick runtime
             with
             | Masc_tui_types.Pick_refused refusal ->
@@ -6150,7 +6134,7 @@ let render_lanes_overview (state : state) =
                  after the label is the first thing the frame cuts. *)
               let refusal_prefix, note =
                 match
-                  Masc_tui_types.runtime_pick_availability state
+                  Masc_tui_types.runtime_pick_availability
                     picker.Masc_tui_types.rlp_pick runtime
                 with
                 | Masc_tui_types.Pick_refused refusal ->
@@ -16221,7 +16205,14 @@ let render_config (state : state) =
       match state.runtime_account_form with
       | Some form ->
           List.iter c.push
-            (Masc_tui_runtime_account_form.rows ~width:(framed_inner_width cols) form)
+            (Masc_tui_runtime_account_form.rows ~width:(framed_inner_width cols) form);
+          (* The saved form stays open for its copy key, and the footer can
+             lose it: the save notice leads that row and the fitter keeps only
+             the way out, so CI run 36397938379 drew "Enter / Esc:close"
+             without [y]. The card names its keys itself, as the link card
+             does. *)
+          if Masc_tui_runtime_account_form.is_saved form then
+            c.push ("  " ^ Masc_tui_keys.footer_hints_runtime_account_saved ())
       | None ->
       match state.runtime_config_view_error, state.runtime_config_view with
       | Some detail, _ ->

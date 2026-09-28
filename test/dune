@@ -152,7 +152,7 @@
  (name test_workspace_memory_curator_lane)
  (modules test_workspace_memory_curator_lane)
  (deps ../config/prompts/workspace_memory_curator.md)
- (libraries alcotest masc masc.server masc.masc_core masc.fs_compat masc.config_dir_resolver masc.prompt_registry yojson eio eio_main unix))
+ (libraries alcotest masc masc.server masc.masc_core masc.runtime masc.fs_compat masc.config_dir_resolver masc.prompt_registry exact_output_fixture yojson eio eio_main unix))
 
 (test
  (name test_msx_vision)
@@ -2949,6 +2949,7 @@
 (include stanzas/test_masc_test_deps_fixture_sandbox.inc)
 
 (include stanzas/test_runtime_account_declaration.inc)
+(include stanzas/test_runtime_account_removal.inc)
 (include stanzas/test_runtime_agent_core_eio_context_classify.inc)
 (include stanzas/test_runtime_agent_streaming_capability.inc)
 
@@ -4154,6 +4155,14 @@
  (libraries alcotest masc_tui_frame_timing)
  (action
   (setenv MASC_TUI_FRAME_TIMING test-tui-frame-timing.report
+   (run %{test}))))
+
+(test
+ (name test_tui_frame_timing_default_off)
+ (modules test_tui_frame_timing_default_off)
+ (libraries alcotest masc_tui_frame_timing)
+ (action
+  (setenv MASC_TUI_FRAME_TIMING ""
    (run %{test}))))
 
 (include stanzas/test_tui_present_timing_pty.inc)
@@ -5905,6 +5914,7 @@
 (include stanzas/test_keeper_connector_names.inc)
 (include stanzas/test_tui_image_cache.inc)
 (include stanzas/test_tui_image_ref.inc)
+(include stanzas/test_tui_imp_emblem.inc)
 (include stanzas/test_tui_link_label.inc)
 (include stanzas/test_tui_link_preview.inc)
 

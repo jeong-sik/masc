@@ -2901,16 +2901,16 @@ let test_the_session_filter_reads_the_transcript () =
 
    The shared arithmetic became a shared column description. This pins that
    the surface draws its header and its rows from it rather than either one
-   spelling widths again: one title width, asked once, and the two rows built
-   from the description that width was measured against. *)
+   spelling widths again: one layout -- the columns a narrow list keeps and
+   the title's share -- asked once, and the two rows built from it. *)
 let test_the_board_header_and_rows_share_one_layout () =
   let module_path = "bin/masc_tui_render.ml" in
   let in_board callee =
     Ast_grep.count_calls_in_value_binding ~module_path
       ~binding_name:"render_board_list" ~callee
   in
-  check int "the title is sized once for the whole surface" 1
-    (in_board "board_title_width");
+  check int "the columns are laid out once for the whole surface" 1
+    (in_board "board_layout");
   check int "the header is drawn from the column description" 1
     (in_board "Render_schedule.board_header_row");
   check int "and so is every row" 1 (in_board "Render_schedule.board_row")

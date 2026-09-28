@@ -34,9 +34,10 @@ let native_posture_note = function
   | Runtime_native_tools.Native_none -> []
 ;;
 
-let undeclared_capacity_detail =
-  "Muse Code requires max-prompt-bytes because MSP has no typed oversized-input refusal"
-;;
+(* A model that declares no max-prompt-bytes gets no MASC ceiling: the
+   carried range from the Librarian front goes as it is, and whether it fits
+   is the host's to say, as on the Claude Code and Codex lanes. *)
+let unbounded_model_input_capacity_bytes = max_int
 
 let config_error = Host.config_error
 let internal_error = Host.internal_error
@@ -723,6 +724,24 @@ let stream_projection ~quota_scope ~keeper_name ~runtime_id ~configured_model ~r
             runtime_label
             tool_name
             (approval_decision_label decision)
+        | Serve.Compaction_observed compaction ->
+          (* The host rewrote what the model sees and the turn still
+             completes, so this line is the turn's only record of it. *)
+          let unreported = "unreported" in
+          let shown to_string = function
+            | Some value -> to_string value
+            | None -> unreported
+          in
+          Log.Keeper.info
+            ~keeper_name
+            "%s host compacted the session: trigger=%s outcome=%s strategy=%s \
+             tokens_before=%s tokens_after=%s"
+            runtime_label
+            (shown Msp.compaction_trigger_to_string compaction.Msp.trigger)
+            (shown Msp.compaction_outcome_to_string compaction.Msp.outcome)
+            (shown Fun.id compaction.Msp.strategy_id)
+            (shown string_of_int compaction.Msp.tokens_before)
+            (shown string_of_int compaction.Msp.tokens_after)
         | Serve.Subscription_usage_observed usage ->
           Option.iter (fun scope ->
             Option.iter (fun reset_ms ->
@@ -983,10 +1002,10 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
              "Muse Code turn carries goal images but the runtime does not accept image input")
       | [], (true | false) | _ :: _, true -> Ok ()
     in
-    let* capacity_bytes =
+    let capacity_bytes =
       match max_prompt_bytes with
-      | Some capacity_bytes -> Ok capacity_bytes
-      | None -> Error (config_error ~field:"max_prompt_bytes" undeclared_capacity_detail)
+      | Some capacity_bytes -> capacity_bytes
+      | None -> unbounded_model_input_capacity_bytes
     in
     let reasoning_effort =
       Host.effective_reasoning_effort
@@ -1073,14 +1092,16 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     Log.Keeper.info
       ~keeper_name
       "%s turn composition: mode=%s prompt_bytes=%d system_prompt_bytes=%d goal_bytes=%d \
-       images=%d declared_max_prompt_bytes=%d"
+       images=%d declared_max_prompt_bytes=%s"
       runtime_label
       (if is_resume then "resume" else "start")
       (String.length prompt)
       (String.length prepared.system_prompt)
       (String.length goal)
       (List.length goal_images)
-      capacity_bytes;
+      (match max_prompt_bytes with
+       | Some declared -> string_of_int declared
+       | None -> "none");
     let client_config : Serve.config =
       { config with
         prepared_home = Some prepared_home
@@ -1458,6 +1479,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
                        | Serve.Turn_started _ | Serve.Text_delta _ | Serve.Text_completed _
                        | Serve.Native_tool_started _ | Serve.Native_tool_finished _
                        | Serve.Approval_decided _ | Serve.Subscription_usage_observed _
+                       | Serve.Compaction_observed _
                        | Serve.Usage_reported _ | Serve.Turn_finished _ -> ());
                       stream.on_serve_event event)
                     ~mgr:process_mgr

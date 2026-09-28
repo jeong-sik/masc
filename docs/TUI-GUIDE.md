@@ -217,7 +217,16 @@ then move the focused pane, while `PgUp`/`PgDn` move it by a page. The open post
 remains marked when the detail has focus.
 
 The Config surface shows `runtime.toml` as the server reads it; `e` opens
-it in `$EDITOR` and the server's preview validation gates the write. The
+it in `$EDITOR` and the server's preview validation gates the write. `a` on
+the same pane adds one more Claude Code, Codex or Antigravity account: pick a
+provider the file declares with `←`/`→`, keep or change the suggested id, and
+type where the new account signs in (`account-home` for Claude Code and
+Codex, the OAuth file `masc runtime-antigravity-account --sign-in` reports for
+Antigravity). The form copies that provider's command and model bindings,
+refuses a location another provider of the same client already uses, and
+saves through the same preview. It does not sign in; the line under the
+fields names the command that does. Turns reach the new account only after
+a lane lists it as a candidate. The
 Resources surface hangs off Config under `s` and lists every MCP
 resource; `Enter` reads one beside the
 list. The detail starts with the server's description, full URI, MIME type,

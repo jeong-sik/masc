@@ -5659,6 +5659,10 @@ type state = {
   mutable runtime_config_view: runtime_config_reading option;
   mutable runtime_config_status_open: bool;
   mutable runtime_config_status_scroll: int;
+  (* The [a] form on the runtime.toml pane, which declares one more account
+     of a provider the file already declares. It holds the text it was opened
+     on; the save goes through the pane's preview like [e]. *)
+  mutable runtime_account_form: Masc_tui_runtime_account_form.t option;
   (* A source section requested by another surface while runtime.toml is
      loading. The jump is consumed only after the same server-owned source
      lands, so Lanes never needs a second config writer or a guessed path. *)
@@ -6802,6 +6806,7 @@ type text_input_target =
   | Text_preset_name
   | Text_runtime_lane_name
   | Text_runtime_param
+  | Text_runtime_account_form
   | Text_voice_wizard
   | Text_palette
   | Text_row_search
@@ -6835,6 +6840,12 @@ let text_input_target (state : state) ~compact_viewport =
   then Some Text_preset_name
   else if state.view = Runtime && Option.is_some state.runtime_lane_name_draft then
     Some Text_runtime_lane_name
+  (* The account form draws on the runtime.toml pane only, and not on a
+     viewport too small to draw that pane, the rule the voice wizard keeps. *)
+  else if
+    state.view = Config && state.config_pane = Config_runtime
+    && Option.is_some state.runtime_account_form && not compact_viewport
+  then Some Text_runtime_account_form
   else if Option.is_some state.runtime_param_edit then Some Text_runtime_param
   (* A wizard is only ever open on its own pane and closing it clears this, so
      its presence is the whole condition -- except that the pane is not drawn at
@@ -6898,6 +6909,7 @@ let quit_key_allowed_for = function
   | Some
       ( Text_browser_url | Text_ask_answer | Text_fusion_launch
       | Text_preset_name | Text_runtime_lane_name | Text_runtime_param
+      | Text_runtime_account_form
       | Text_voice_wizard | Text_palette | Text_row_search
       | Text_runtime_picker_filter | Text_keeper_runtime_picker_filter
       | Text_identity_app_form | Text_identity_filter | Text_github_token
@@ -7984,6 +7996,7 @@ let create_state
   runtime_config_view = None;
   runtime_config_status_open = false;
   runtime_config_status_scroll = 0;
+  runtime_account_form = None;
   runtime_config_jump_section = None;
   config_models_rows = [];
   config_models_cursor = 0;

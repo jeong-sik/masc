@@ -12,6 +12,12 @@ type phase =
   | Build  (** state -> frame *)
   | Present  (** frame -> terminal *)
 
+val max_frames_per_phase : int
+val max_stage_samples : int
+(** Opt-in reports keep only the first 512 frames of each phase and the first
+    4096 stage records. They explicitly count omissions once these short-run
+    limits are reached. *)
+
 val enabled : bool
 (** Whether the environment asked for timing. False costs one boolean test per
     frame and nothing else. *)
@@ -23,6 +29,16 @@ val time : phase -> (unit -> 'a) -> 'a
 val time_tagged : phase -> tag:('a -> string) -> (unit -> 'a) -> 'a
 (** Like {!time}, but the sample carries [tag result]. The tag is read from
     the result because a frame's surface is only known once it is built. *)
+
+val time_stage : name:string -> (unit -> 'a) -> 'a
+val time_stage_tagged : name:('a -> string) -> (unit -> 'a) -> 'a
+val note_stage : name:string -> unit
+val start_stage : unit -> int64 option
+val finish_stage : name:string -> int64 option -> unit
+(** Stage samples inside a Build carry that Build's frame number. Samples
+    outside Build, such as Board fetch and decode, contribute one duration
+    per call to their percentile population and are reported separately.
+    A note records a branch such as a cold cache without claiming a duration. *)
 
 val time_present :
   tag:string ->
@@ -72,4 +88,14 @@ module Samples : sig
       line per tag of that phase, most frames first; then the five worst
       frames with their ordinal and tag. A phase with no samples prints
       nothing. *)
+end
+
+module Stage_samples : sig
+  type t
+  val empty : t
+  val add : t -> frame:int option -> name:string -> ms:float option -> t
+  val summary_lines : t -> string list
+  val residual_lines : t -> Samples.t -> string list
+  (** Build minus measured disjoint stages. It includes unmeasured work and
+      timing overhead, so it is not an overhead estimate by itself. *)
 end

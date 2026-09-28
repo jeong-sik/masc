@@ -846,7 +846,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
           |> Result.map_error (config_error ~field:"account_home") in
     let* prepared_home = Runtime_muse_home.prepare ~account_home
       |> Result.map_error (function
-        | Runtime_muse_home.Sign_in_required as error ->
+        | Runtime_muse_home.Sign_in_required _ as error ->
           Agent_core.Error.Provider (Llm_provider.Error.AuthError
             { provider = provider_name; detail = Runtime_muse_home.error_to_string error })
         | error -> config_error ~field:"account_home"

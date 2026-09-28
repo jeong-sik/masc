@@ -136,6 +136,7 @@ let script_text ~capture steps =
           ; "XDG_RUNTIME_DIR", Filename.concat home ".local/run"
           ];
         line "[ -z \"${META_API_KEY+x}\" ] || exit 96";
+        line "[ \"$TBH_CREDENTIAL_BACKEND\" = file ] || exit 93";
         line (Printf.sprintf "case \"$XDG_CONFIG_HOME\" in %s/*) ;; *) exit 94 ;; esac"
           (shell_quote (Filename.concat (Unix.realpath home) ".local/state/masc/muse-config")));
         line "[ -r \"$XDG_CONFIG_HOME/muse/auth.json\" ] || exit 94";
@@ -366,6 +367,7 @@ let test_selected_homes_do_not_inherit_other_account_roots () =
     ; "XDG_STATE_HOME", "/synthetic/ambient-state"
     ; "XDG_RUNTIME_DIR", "/synthetic/ambient-run"
     ; "META_API_KEY", "synthetic-payg-key"
+    ; "TBH_CREDENTIAL_BACKEND", "keychain"
     ]
   in
   let previous = List.map (fun (key, _) -> key, Sys.getenv_opt key) injected in
@@ -673,6 +675,41 @@ let test_resume_requires_the_retained_completed_turn_count () =
       ignore (request_with_method "turn/start" requests))
 ;;
 
+let test_start_requires_an_empty_session () =
+  let frame count =
+    Yojson.Safe.to_string (`Assoc ["jsonrpc", `String "2.0"; "id", `Int 2;
+      "result", `Assoc ["session", `Assoc
+        (["sessionId", `String "s-1"; "workspaceRoot", `String "/w";
+          "approvalMode", effective_mode Msp.Prompt_unmatched]
+         @ (match count with None -> [] | Some count -> ["turnCount", count]))]]) in
+  let prefix count = [Read; Write (init_frame ~granted:[]); Read; Read; Write (frame count)] in
+  List.iter (fun count ->
+    let ready = ref false and sent = ref false in
+    run_scripted ~session_mode:Serve.Start
+      ~on_session_ready:(fun ~session_id:_ -> ready := true; Ok ())
+      ~on_prompt_sent:(fun () -> sent := true)
+      (prefix count)
+      (fun result requests ->
+        (match result with
+         | Error (Serve.Protocol_error {stage="session/start"; _}) -> ()
+         | Error error -> fail (Serve.error_to_string error)
+         | Ok _ -> fail "a non-empty start dispatched a turn");
+        check bool "unverified start never persists admission" false !ready;
+        check bool "unverified start never dispatches prompt" false !sent;
+        check (list string) "no turn after refused start"
+          ["initialize"; "initialized"; "session/start"]
+          (List.map (fun request -> Yojson.Safe.Util.(request |> member "method" |> to_string)) requests)))
+    [None; Some `Null; Some (`String "0"); Some (`Int (-1)); Some (`Int 1); Some (`Int 2)];
+  run_scripted ~session_mode:Serve.Start
+    (prefix (Some (`Int 0)) @ [Read; Write turn_ack; Write turn_started;
+      Write agent_completed; Write turn_completed])
+    (fun result requests ->
+      (match result with
+       | Ok turn -> check bool "empty start completes" false turn.resumed
+       | Error error -> fail (Serve.error_to_string error));
+      ignore (request_with_method "turn/start" requests))
+;;
+
 let test_absent_durability_admits_the_v1_durable_host () =
   let frame = Yojson.Safe.from_string (init_frame ~granted:[]) in
   let fields = Yojson.Safe.Util.to_assoc frame in
@@ -713,6 +750,8 @@ let () =
             test_absent_durability_admits_the_v1_durable_host
         ; test_case "resume requires retained completed-turn count" `Quick
             test_resume_requires_the_retained_completed_turn_count
+        ; test_case "start requires an empty session" `Quick
+            test_start_requires_an_empty_session
         ] )
     ]
 ;;

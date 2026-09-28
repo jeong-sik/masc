@@ -22,12 +22,18 @@ receipts. `--output` accepts a new directory; choose a location outside system t
 when checking the negative outside-write control. Shell paths are quoted, including
 when that option contains spaces.
 
-The harness uses the vendor SDK's documented test-only
-`TBH_CREDENTIAL_BACKEND=file` and `TBH_DISABLE_TELEMETRY=1`. The file backend avoids
-synthetic credential insertion into macOS Keychain. Without it, an earlier harness
-blocked in `SecItemAdd` / `AuthorizationCopyRights` before MSP initialization;
-that was a harness credential-backend problem, not a permission-profile rejection.
-These test environment variables are not added to the production launch contract.
+The harness sets `TBH_CREDENTIAL_BACKEND=file` and `TBH_DISABLE_TELEMETRY=1`, as
+the vendor SDK's shared harness does. The file backend keeps the credential in
+`auth.json` instead of inserting it into macOS Keychain. Without it, an earlier
+harness blocked in `SecItemAdd` / `AuthorizationCopyRights` before MSP
+initialization; that was a credential-backend problem, not a permission-profile
+rejection.
+
+MASC's production launch contract sets `TBH_CREDENTIAL_BACKEND=file` too, for
+`muse login` and for every `muse serve` child (`Runtime_muse_serve`). A selected
+account HOME has no login keychain, and a managed credential generation copies
+`auth.json` only, so a Keychain-held sign-in is refused and needs a new
+`/login muse`. `TBH_DISABLE_TELEMETRY` is set by this harness only.
 
 Primary protocol references:
 

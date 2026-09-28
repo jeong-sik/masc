@@ -21,7 +21,22 @@ type section = {
   account_count : int;
       (** Accounts represented by those rows. One account can have several
           usage windows, so this can be smaller than [List.length lines]. *)
+  account_row_counts : int list;
+      (** Row count per account, in display order. *)
+  note_lines : string list;
+      (** Runtime catalogue errors after the account rows. *)
 }
+
+type visible = {
+  lines : string list;
+  shown_accounts : int;
+  hidden_accounts : int;
+  hidden_notes : int;
+}
+
+val visible_rows : section -> rows:int -> visible
+(** Only complete account groups fit. One row is reserved to say what was
+    omitted when the section is taller than its budget. *)
 
 val section :
   providers:Masc_tui_types.overview_providers_reading ->

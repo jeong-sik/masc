@@ -257,9 +257,13 @@ let contains ~sub text =
   let rec at i = i + n <= m && (String.sub text i n = sub || at (i + 1)) in
   at 0
 
+let status_of_id tasks id =
+  List.find_opt (fun (task : Tui_decode.task) -> String.equal task.id id) tasks
+  |> Option.map (fun task -> task.status)
+
 let draw ?(rows = 25) ?(tasks = live_tasks) reading =
   Goals.lines ~now:captured_at ~localtime:Unix.gmtime ~inner_width:120 ~rows
-    ~tasks:(Tasks.Rows_read tasks) reading
+    ~tasks:(Tasks.Rows_read tasks) ~status_of_id:(status_of_id tasks) reading
   |> List.map strip_ansi
 
 let find_row ~sub rows =
@@ -304,6 +308,7 @@ let test_goal_metadata_keeps_owner_state_and_due_together () =
   let rows =
     Goals.lines ~now:captured_at ~localtime:Unix.gmtime ~inner_width:46
       ~rows:12 ~tasks:(Tasks.Rows_read [ in_progress "task-1501" ])
+      ~status_of_id:(status_of_id [ in_progress "task-1501" ])
       (Types.Goals_read [ goal ])
     |> List.map strip_ansi
   in
@@ -317,6 +322,7 @@ let test_goal_metadata_keeps_owner_state_and_due_together () =
   let hidden =
     Goals.lines ~now:captured_at ~localtime:Unix.gmtime ~inner_width:46
       ~rows:2 ~tasks:(Tasks.Rows_read [ in_progress "task-1501" ])
+      ~status_of_id:(status_of_id [ in_progress "task-1501" ])
       (Types.Goals_read [ goal ])
     |> List.map strip_ansi
   in
@@ -324,6 +330,27 @@ let test_goal_metadata_keeps_owner_state_and_due_together () =
     (List.length hidden);
   check bool "the headline accounts for the hidden goal" true
     (contains ~sub:"0 of 1 goals shown" (List.hd hidden))
+
+let test_a_completed_task_keeps_its_goal_performer () =
+  let goal =
+    match Goals.drawn_goals (decode_fixture ()) with
+    | first :: _ -> { first with og_task_ids = [ "task-done" ] }
+    | [] -> fail "fixture has no drawn goal"
+  in
+  let done_task =
+    task "task-done"
+      (Masc_domain.Done
+         { assignee = "keeper-done"; completed_at = "2026-09-23T00:00:00Z"
+         ; notes = None })
+  in
+  let rows =
+    Goals.lines ~now:captured_at ~localtime:Unix.gmtime ~inner_width:120
+      ~rows:10 ~tasks:(Tasks.Rows_read [])
+      ~status_of_id:(status_of_id [ done_task ]) (Types.Goals_read [ goal ])
+    |> List.map strip_ansi
+  in
+  check bool "finished task absent from active rows still names its performer" true
+    (contains ~sub:"owner @keeper-done" (String.concat " " rows))
 
 (* The input that splits the headline: one of the active tasks is a task an
    executing goal lists. *)
@@ -343,18 +370,19 @@ let test_a_short_budget_says_what_it_cut () =
 
 let test_a_failed_read_is_one_explicit_line () =
   check (list string) "a failure is named, not drawn as an empty section"
-    [ "Goals"; ""; "Goals unavailable: goals load failed: connection refused" ]
-    (draw (Types.Goals_failed "goals load failed: connection refused"));
-  check int "a failed read asks for three rows" 3
+    [ "Goals unavailable: goals load failed: connection refused" ]
+    (draw ~rows:1 (Types.Goals_failed "goals load failed: connection refused"));
+  check int "a failed read asks for one row" 1
     (Goals.wanted_rows ~now:captured_at ~localtime:Unix.gmtime
        ~inner_width:120 ~tasks:(Tasks.Rows_read live_tasks)
-       (Types.Goals_failed "x"))
+       ~status_of_id:(status_of_id live_tasks) (Types.Goals_failed "x"))
 
 let test_an_unread_backlog_is_not_a_zero () =
   let goals = decode_fixture () in
   let rows =
     Goals.lines ~now:captured_at ~localtime:Unix.gmtime ~inner_width:120 ~rows:10
-      ~tasks:(Tasks.Rows_unavailable "backlog.json unreadable") (Types.Goals_read goals)
+      ~tasks:(Tasks.Rows_unavailable "backlog.json unreadable")
+      ~status_of_id:(status_of_id live_tasks) (Types.Goals_read goals)
     |> List.map strip_ansi
   in
   check bool "the headline names the unread backlog" true
@@ -367,7 +395,8 @@ let test_a_backlog_not_read_yet_is_not_a_zero () =
   let goals = decode_fixture () in
   let rows =
     Goals.lines ~now:captured_at ~localtime:Unix.gmtime ~inner_width:120 ~rows:10
-      ~tasks:Tasks.Rows_unread (Types.Goals_read goals)
+      ~tasks:Tasks.Rows_unread ~status_of_id:(status_of_id live_tasks)
+      (Types.Goals_read goals)
     |> List.map strip_ansi
   in
   check bool "the headline says active work is unread" true
@@ -384,7 +413,8 @@ let test_the_countdown_uses_the_operator_calendar () =
   let kst now = Unix.gmtime (now +. (9. *. 3600.)) in
   let rows =
     Goals.lines ~now:just_after_kst_midnight ~localtime:kst ~inner_width:120
-      ~rows:10 ~tasks:(Tasks.Rows_read live_tasks) (Types.Goals_read goals)
+      ~rows:10 ~tasks:(Tasks.Rows_read live_tasks)
+      ~status_of_id:(status_of_id live_tasks) (Types.Goals_read goals)
     |> List.map strip_ansi
   in
   check bool "the countdown is from the local date" true
@@ -408,7 +438,8 @@ let test_an_empty_tree_is_one_headline () =
   let empty = Types.Goals_read [] in
   check int "an empty tree asks for three rows" 3
     (Goals.wanted_rows ~now:captured_at ~localtime:Unix.gmtime
-       ~inner_width:120 ~tasks:(Tasks.Rows_read live_tasks) empty);
+       ~inner_width:120 ~tasks:(Tasks.Rows_read live_tasks)
+       ~status_of_id:(status_of_id live_tasks) empty);
   check (list string) "the empty section gives the next fact"
     [ "Goals (0)"; ""; "No goal is executing or verifying." ]
     (draw empty)
@@ -436,6 +467,8 @@ let () =
             test_live_fleet_moves_no_goal
         ; test_case "goal metadata stays whole" `Quick
             test_goal_metadata_keeps_owner_state_and_due_together
+        ; test_case "a completed task keeps its goal performer" `Quick
+            test_a_completed_task_keeps_its_goal_performer
         ; test_case "an active goal task counts" `Quick
             test_an_active_goal_task_counts
         ; test_case "a short budget says what it cut" `Quick

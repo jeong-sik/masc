@@ -73,6 +73,10 @@ type overview_allocation = {
           the middle of it. *)
 }
 
+val overview_has_spacing : terminal_rows:int -> bool
+(** The two quiet Overview rows are used at 24 rows and taller. Smaller
+    viewports keep the compact chrome; allocation and rendering agree. *)
+
 val overview_team_chrome_rows : int
 (** The Team block's title row and the divider under it, drawn only when
     [team_rows] is positive. *)

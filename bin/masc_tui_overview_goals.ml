@@ -162,22 +162,18 @@ let goal_rows ~now ~localtime ~inner_width goals =
     goals
     (List.combine counts (List.combine idles dues))
 
-let owner_text ~tasks (goal : Tui_decode.overview_goal) =
+let owner_text ~tasks ~status_of_id (goal : Tui_decode.overview_goal) =
   match tasks with
   | Masc_tui_overview_tasks.Rows_unread
   | Masc_tui_overview_tasks.Rows_unavailable _ -> "owner unknown"
-  | Masc_tui_overview_tasks.Rows_read rows ->
+  | Masc_tui_overview_tasks.Rows_read _ ->
       let names, missing =
         List.fold_left
           (fun (names, missing) id ->
-            match
-              List.find_opt
-                (fun (task : Tui_decode.task) -> String.equal task.id id)
-                rows
-            with
+            match status_of_id id with
             | None -> (names, true)
-            | Some task ->
-                (match Masc_domain.task_assignee_of_status task.status with
+            | Some status ->
+                (match Masc_domain.task_performer_of_status status with
                 | None -> (names, missing)
                 | Some name ->
                     (Terminal_text.single_line name :: names, missing)))
@@ -190,7 +186,7 @@ let owner_text ~tasks (goal : Tui_decode.overview_goal) =
           "owner @" ^ String.concat ", @" names
           ^ if missing then " · other owners unknown" else "")
 
-let goal_entries ~now ~localtime ~inner_width ~tasks goals =
+let goal_entries ~now ~localtime ~inner_width ~tasks ~status_of_id goals =
   let today = local_today ~now ~localtime in
   let summaries = goal_rows ~now ~localtime ~inner_width goals in
   List.map2
@@ -201,7 +197,7 @@ let goal_entries ~now ~localtime ~inner_width ~tasks goals =
         | None -> "due not set"
       in
       let metadata =
-        [ owner_text ~tasks goal
+        [ owner_text ~tasks ~status_of_id goal
         ; "state " ^ Masc_tui_render_prim.planning_phase_label goal.og_phase
         ; due
         ]
@@ -214,10 +210,11 @@ let goal_entries ~now ~localtime ~inner_width ~tasks goals =
       summary :: detail)
     goals summaries
 
-let wanted_rows ~now ~localtime ~inner_width ~tasks
+let wanted_rows ~now ~localtime ~inner_width ~tasks ~status_of_id
     (reading : Types.overview_goals_reading) =
   match reading with
-  | Types.Goals_unread | Types.Goals_failed _ -> 3
+  | Types.Goals_unread -> 3
+  | Types.Goals_failed _ -> 1
   | Types.Goals_read goals ->
       let goals = drawn_goals goals in
       if goals = [] then 3
@@ -225,7 +222,7 @@ let wanted_rows ~now ~localtime ~inner_width ~tasks
         1
         + List.fold_left
             (fun count entry -> count + List.length entry)
-            0 (goal_entries ~now ~localtime ~inner_width ~tasks goals)
+            0 (goal_entries ~now ~localtime ~inner_width ~tasks ~status_of_id goals)
 
 let title count =
   Ansi.bold
@@ -236,7 +233,7 @@ let title count =
 
 let take rows items = List.filteri (fun index _ -> index < rows) items
 
-let lines ~now ~localtime ~inner_width ~rows ~tasks (reading : Types.overview_goals_reading)
+let lines ~now ~localtime ~inner_width ~rows ~tasks ~status_of_id (reading : Types.overview_goals_reading)
     =
   let rows = max 0 rows in
   let all =
@@ -244,15 +241,14 @@ let lines ~now ~localtime ~inner_width ~rows ~tasks (reading : Types.overview_go
     | Types.Goals_unread ->
         [ title None; ""; Ansi.dim ^ "No goal data read yet." ^ Ansi.reset ]
     | Types.Goals_failed reason ->
-        [ title None; ""
-        ; Theme.warn () ^ "Goals unavailable: "
+        [ Theme.warn () ^ "Goals unavailable: "
           ^ Terminal_text.single_line reason ^ Ansi.reset
         ]
     | Types.Goals_read goals ->
         let drawn = drawn_goals goals in
         let goal_count = List.length drawn in
         let title = title (Some goal_count) in
-        let entries = goal_entries ~now ~localtime ~inner_width ~tasks drawn in
+        let entries = goal_entries ~now ~localtime ~inner_width ~tasks ~status_of_id drawn in
         let rec take_entries remaining shown collected = function
           | entry :: rest when List.length entry <= remaining ->
               take_entries (remaining - List.length entry) (shown + 1)
@@ -289,10 +285,10 @@ let lines ~now ~localtime ~inner_width ~rows ~tasks (reading : Types.overview_go
   in
   take rows all
 
-let draw buf ~cols ~rows ~now ~localtime ~tasks reading =
+let draw buf ~cols ~rows ~now ~localtime ~tasks ~status_of_id reading =
   if rows > 0 then begin
     let inner_width = framed_inner_width cols in
-    let drawn = lines ~now ~localtime ~inner_width ~rows ~tasks reading in
+    let drawn = lines ~now ~localtime ~inner_width ~rows ~tasks ~status_of_id reading in
     List.iter (box_line buf cols) drawn;
     (* [rows] is what the budget spent; a short list still fills it so the
        frame below starts where the budget says. *)

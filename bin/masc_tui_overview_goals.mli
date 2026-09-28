@@ -34,11 +34,12 @@ val wanted_rows :
   localtime:(float -> Unix.tm) ->
   inner_width:int ->
   tasks:Masc_tui_overview_tasks.rows_reading ->
+  status_of_id:(string -> Masc_domain.task_status option) ->
   Masc_tui_types.overview_goals_reading ->
   int
 (** Rows the section asks the Overview budget for, including every displayed
     goal's wrapped owner, state and due date. Empty or unread readings need
-    three rows to explain their state. *)
+    three rows; a failed reading carries its reason on the first row. *)
 
 val lines :
   now:float ->
@@ -46,6 +47,7 @@ val lines :
   inner_width:int ->
   rows:int ->
   tasks:Masc_tui_overview_tasks.rows_reading ->
+  status_of_id:(string -> Masc_domain.task_status option) ->
   Masc_tui_types.overview_goals_reading ->
   string list
 (** At most [rows] lines, headline first. Goals past the budget are cut from
@@ -53,7 +55,9 @@ val lines :
     time the due-date countdown counts from; [localtime] puts it on the
     operator's calendar, since a due date carries no zone. [tasks] is the
     backlog the headline counts. Only rows that were read are counted; an
-    unread or unavailable backlog is said instead. *)
+    unread or unavailable backlog is said instead. [status_of_id] looks up
+    owners in the full task snapshot, including done tasks omitted from the
+    active Overview rows; [None] means the linked id was not observed. *)
 
 val draw :
   Buffer.t ->
@@ -62,6 +66,7 @@ val draw :
   now:float ->
   localtime:(float -> Unix.tm) ->
   tasks:Masc_tui_overview_tasks.rows_reading ->
+  status_of_id:(string -> Masc_domain.task_status option) ->
   Masc_tui_types.overview_goals_reading ->
   unit
 (** The {!lines} as framed rows and the divider under them. Nothing when

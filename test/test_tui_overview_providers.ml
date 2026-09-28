@@ -119,6 +119,20 @@ let test_section_draws_three_line_shapes () =
     lines;
   check string "plain usage title" " Plan usage" (plain section.title);
   check int "four accounts behind five rows" 4 section.account_count;
+  check (list int) "account row groups" [ 1; 2; 1; 1 ]
+    section.account_row_counts;
+  let short = Providers.visible_rows section ~rows:4 in
+  check int "two complete accounts shown" 2 short.shown_accounts;
+  check int "two accounts hidden" 2 short.hidden_accounts;
+  check int "three account rows, never half a second window" 3
+    (List.length short.lines);
+  check bool "the second window remains with its account" true
+    (List.exists (contains ~affix:"7d") (List.map plain short.lines));
+  let tighter = Providers.visible_rows section ~rows:3 in
+  check int "two-row account does not split at a short height" 1
+    tighter.shown_accounts;
+  check int "only the complete first account row remains" 1
+    (List.length tighter.lines);
   match lines with
   | [ kimi; five_hour; seven_day; codex; ollama ] ->
       (* The exhausted account comes first: a budget cut from the bottom

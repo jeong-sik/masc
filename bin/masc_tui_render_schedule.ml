@@ -143,9 +143,16 @@ type overview_allocation = {
    attention now; past six rows the title counts what did not fit. *)
 let overview_panel_row_cap = 6
 
-(* Header, summary, dividers, panel and task titles, the approved section
-   spacing, and footer: the Overview rows no block can give up. *)
-let overview_fixed_rows = 12
+(* Header, summary, dividers, panel and task titles, and footer. The two
+   additional quiet rows appear only after the minimum content fits. *)
+let overview_fixed_rows = 10
+let overview_spacing_rows = 2
+(* Below the 24-row viewport covered by the full block-floor walk, preserve
+   the compact chrome so a title cannot be exchanged for a quiet row. *)
+let overview_roomy_rows = 24
+
+let overview_has_spacing ~terminal_rows =
+  terminal_rows >= overview_roomy_rows
 
 (* The Team block's title row and the divider under it. *)
 let overview_team_chrome_rows = 2
@@ -179,12 +186,16 @@ let drawn_under_chrome ~chrome given = if given > chrome then given - chrome els
 
 let allocate_overview ~terminal_rows ~intro_count ~attention_count ~goal_count
     ~team_count ~team_stuck ~providers_count ~task_count ~has_task_error =
-  (* Twelve rows are invariant chrome. What is left is shared by the blocks in
+  (* Fixed chrome and, when it fits, two quiet rows leave the rest to the blocks in
      the order they are served -- the Attention panel, GOALS, first-use
      explanation, Providers, Team, Tasks -- and whatever none of them needs
      becomes filler so the frame reaches the bottom of the terminal. The blocks are bounded by how
      many items they have, not by a constant. *)
-  let available = max 0 (terminal_rows - overview_fixed_rows) in
+  let chrome =
+    overview_fixed_rows
+    + (if overview_has_spacing ~terminal_rows then overview_spacing_rows else 0)
+  in
+  let available = max 0 (terminal_rows - chrome) in
   let desired_panel_rows = max 1 attention_count in
   let desired_task_error_rows = if has_task_error then 1 else 0 in
   let desired_task_rows =

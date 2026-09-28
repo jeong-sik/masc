@@ -9,6 +9,8 @@ type section = {
   title : string;
   lines : string list;
   account_count : int;
+  account_row_counts : int list;
+  note_lines : string list;
 }
 
 let cells_of = Masc_tui_message_layout.display_width
@@ -369,6 +371,8 @@ let section ~(providers : Types.overview_providers_reading) ~runtimes ~now ~widt
                 (Terminal_text.single_line reason) Ansi.reset
             ]
         ; account_count = 0
+        ; account_row_counts = []
+        ; note_lines = []
         }
   | Types.Providers_read { Tui_decode.puws_since = _; puws_accounts } ->
       let ordered =
@@ -398,10 +402,43 @@ let section ~(providers : Types.overview_providers_reading) ~runtimes ~now ~widt
             { title = title_text ()
             ; lines = [ " no usage data" ]
             ; account_count = 0
+            ; account_row_counts = []
+            ; note_lines = []
             }
       | _ :: _ ->
           Some
             { title = title_text ()
             ; lines = draw_rows ~now ~width rows @ runtimes_note
             ; account_count = List.length ordered
+            ; account_row_counts = List.map (fun account -> List.length (account_rows ~now account)) ordered
+            ; note_lines = runtimes_note
             }
+
+type visible = {
+  lines : string list;
+  shown_accounts : int;
+  hidden_accounts : int;
+  hidden_notes : int;
+}
+
+let visible_rows section ~rows =
+  let rows = max 0 rows in
+  let take n xs = List.filteri (fun index _ -> index < n) xs in
+  if section.account_count = 0 then
+    { lines = take rows section.lines; shown_accounts = 0; hidden_accounts = 0
+    ; hidden_notes = max 0 (List.length section.lines - rows) }
+  else
+    let rec fit cap shown used = function
+      | count :: rest when used + count <= cap ->
+          fit cap (shown + 1) (used + count) rest
+      | _ -> (shown, used)
+    in
+    let cap =
+      if List.length section.lines > rows then max 0 (rows - 1) else rows
+    in
+    let shown_accounts, account_rows = fit cap 0 0 section.account_row_counts in
+    let note_rows = min (List.length section.note_lines) (cap - account_rows) in
+    { lines = take account_rows section.lines @ take note_rows section.note_lines
+    ; shown_accounts
+    ; hidden_accounts = section.account_count - shown_accounts
+    ; hidden_notes = List.length section.note_lines - note_rows }

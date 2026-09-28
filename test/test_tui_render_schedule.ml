@@ -253,8 +253,8 @@ let test_compact_viewport_uses_largest_fixed_chrome_budget () =
   check bool "normal terminals keep the selected surface" false
     (Schedule.Viewport.requires_compact_frame ~rows:30)
 
-let overview_frame_rows (allocation : Schedule.overview_allocation) =
-  12
+let overview_frame_rows ~terminal_rows (allocation : Schedule.overview_allocation) =
+  (if Schedule.overview_has_spacing ~terminal_rows then 12 else 10)
   + allocation.intro_rows
   + allocation.attention_rows
   + (if allocation.goal_rows > 0
@@ -334,7 +334,7 @@ let test_overview_rows_are_shared_floors_first () =
                             in
                             check int (case ^ ": the frame is exact")
                               terminal_rows
-                              (overview_frame_rows allocation);
+                              (overview_frame_rows ~terminal_rows allocation);
                             List.iter
                               (fun (block, rows) ->
                                 if rows < 0 then
@@ -399,7 +399,7 @@ let test_overview_goals_and_team_leave_the_backlog_its_floor () =
   check int "every goal fits" 9 live.goal_rows;
   check int "Team takes what the backlog's floor leaves" 8 live.team_rows;
   check int "the backlog keeps a task and its backlog line" 2 live.task_rows;
-  check int "40-row frame is exact" 40 (overview_frame_rows live)
+  check int "40-row frame is exact" 40 (overview_frame_rows ~terminal_rows:40 live)
 
 (* This 32-row fixture leaves 30 Overview rows after its composer and agenda.
    The first-use guide takes five rows while nine usage accounts retain four
@@ -414,11 +414,17 @@ let test_overview_first_use_keeps_the_guide_and_usage_count () =
   check int "the empty-goals explanation" 3 allocation.goal_rows;
   check int "four accounts and an omission row" 5 allocation.providers_rows;
   check int "the task empty note remains" 1 allocation.task_rows;
-  check int "the frame remains exact" 30 (overview_frame_rows allocation)
+  check int "the frame remains exact" 30 (overview_frame_rows ~terminal_rows:30 allocation)
 
 (* Below the heights the table covers the floors do not all fit, and they
    are paid in the order the blocks are served. *)
 let test_overview_floors_are_paid_in_serving_order () =
+  check bool "14-row Overview keeps compact chrome" false
+    (Schedule.overview_has_spacing ~terminal_rows:14);
+  check bool "23-row Overview keeps compact chrome" false
+    (Schedule.overview_has_spacing ~terminal_rows:23);
+  check bool "24-row Overview gains quiet rows" true
+    (Schedule.overview_has_spacing ~terminal_rows:24);
   let tight =
     Schedule.allocate_overview ~intro_count:0 ~terminal_rows:14 ~attention_count:6
       ~goal_count:1 ~team_count:0 ~team_stuck:false ~providers_count:0
@@ -427,7 +433,7 @@ let test_overview_floors_are_paid_in_serving_order () =
   check int "the panel keeps its first item" 1 tight.attention_rows;
   check int "GOALS keeps its headline" 1 tight.goal_rows;
   check int "the backlog gets the last row" 1 tight.task_rows;
-  check int "14-row frame is exact" 14 (overview_frame_rows tight)
+  check int "14-row frame is exact" 14 (overview_frame_rows ~terminal_rows:14 tight)
 
 (* The surface is the box, the key footer under it, and -- when the post or
    the thread has more lines than it can show -- the position line the pane
@@ -474,7 +480,7 @@ let test_overview_frame_always_fills_the_terminal () =
              attention_count goal_count team_count team_stuck providers_count
              task_count has_task_error)
           terminal_rows
-          (overview_frame_rows allocation)
+          (overview_frame_rows ~terminal_rows allocation)
       done)
     [ (0, 0, 0, false, 0, 0, false)
     ; (0, 0, 0, false, 0, 0, true)
@@ -530,7 +536,7 @@ let test_team_detail_lines_take_only_spare_rows () =
   check int "three lines join the drawn block" (tall.team_rows + 3) spent.team_rows;
   check int "paid from the filler" (tall.filler_rows - 3) spent.filler_rows;
   check int "the backlog is untouched" tall.task_rows spent.task_rows;
-  check int "40-row frame is exact" 40 (overview_frame_rows spent);
+  check int "40-row frame is exact" 40 (overview_frame_rows ~terminal_rows:40 spent);
   let empty =
     Schedule.allocate_overview ~intro_count:0 ~terminal_rows:40
       ~attention_count:2 ~goal_count:0 ~team_count:0 ~team_stuck:false ~providers_count:0 ~task_count:3
@@ -540,7 +546,7 @@ let test_team_detail_lines_take_only_spare_rows () =
   check int "a new block opens with two rows" 2 spent.team_rows;
   check int "and pays its chrome from the filler"
     (empty.filler_rows - 2 - Schedule.overview_team_chrome_rows) spent.filler_rows;
-  check int "40-row frame is exact" 40 (overview_frame_rows spent)
+  check int "40-row frame is exact" 40 (overview_frame_rows ~terminal_rows:40 spent)
 
 let test_board_read_rows_reserve_comments_and_footer () =
   let crowded =

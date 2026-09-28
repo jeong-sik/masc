@@ -116,10 +116,42 @@ def first_use_frames(executable: str) -> None:
             tasks = next(i for i, line in enumerate(left) if b"Tasks (0 open)" in line)
             if left[attention + 1] or left[tasks - 1] or left[tasks + 1]:
                 raise AssertionError(f"{columns} columns lost approved section spacing: {visible!r}")
+        narrow = keyboard.resize_and_wait(
+            process, fd, output, rows=19, columns=80,
+            needle=b"Plan usage", controls=(keyboard.FULL_REDRAW,),
+            final_cursor=b"\x1b[?25l",
+        )
+        narrow_text = keyboard.screen_text(narrow)
+        if b"Start here (2 steps)" in narrow_text:
+            raise AssertionError(f"a partial first-use guide was drawn: {narrow_text!r}")
+        if b"Plan usage" not in narrow_text:
+            raise AssertionError(f"suppressed guide did not free provider rows: {narrow_text!r}")
         os.write(fd, b"q")
 
     keyboard.run_terminal_scenario(
         executable, description="first-use overview at 80 and 140 columns",
+        interact=interact, http_fixtures=fixtures,
+    )
+
+
+def unreadable_keeper_listing_has_no_first_use_guide(executable: str) -> None:
+    fixtures = keyboard.overview_event_http_fixtures()
+    fixtures["/api/v1/dashboard/briefing"] = keyboard.unlisted_keepers_briefing()
+
+    def interact(process, fd, _slave, output, _base):
+        keyboard.wait_for_output(process, fd, output, b"(EACCES)", start=0, timeout=10)
+        frame = keyboard.resize_and_wait(
+            process, fd, output, rows=32, columns=140,
+            needle=b"(EACCES)", controls=(keyboard.FULL_REDRAW,),
+            final_cursor=b"\x1b[?25l",
+        )
+        visible = keyboard.screen_text(frame)
+        if b"Start here (2 steps)" in visible or b"masc keeper-create --edit" in visible:
+            raise AssertionError(f"an unreadable listing claimed an empty fleet: {visible!r}")
+        os.write(fd, b"q")
+
+    keyboard.run_terminal_scenario(
+        executable, description="unreadable Keeper listing has no first-use guide",
         interact=interact, http_fixtures=fixtures,
     )
 
@@ -129,6 +161,7 @@ if __name__ == "__main__":
     executable = os.path.abspath(sys.argv[1])
     keyboard.run_keyboard_regression(executable, group=2)
     first_use_frames(executable)
+    unreadable_keeper_listing_has_no_first_use_guide(executable)
     finished = time.monotonic()
     print(
         "tui keyboard overview PTY regression: PASS "

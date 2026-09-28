@@ -51,7 +51,12 @@ val default_timeout_s : float
 val default_config : unit -> config
 val login_environment : account_home:string -> string array
 (** Native login writes HOME/.config/muse/auth.json. All HOME/XDG roots are
-    selected explicitly, with ambient provider API credentials excluded. *)
+    selected explicitly, with ambient provider API credentials excluded. Like
+    every Muse child, it runs with [TBH_CREDENTIAL_BACKEND=file], so the token
+    is written into that file instead of the macOS Keychain. *)
+
+val login_argv : cli_path:string -> string list
+(** The official client's sign-in command, run with {!login_environment}. *)
 
 type session_mode =
   | Start

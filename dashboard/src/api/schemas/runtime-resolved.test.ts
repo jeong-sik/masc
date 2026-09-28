@@ -65,11 +65,11 @@ describe('runtime-resolved schema', () => {
   it('decodes provider usage by account scope without turning no report into zero', () => {
     const base = responseWith(validRuntime)
     const provider_usage_windows = [
-      { scope: 'provider:claude_one', providers: ['claude_one'], state: 'reported', windows: [{
+      { scope: 'provider:claude_one', providers: [{ id: 'claude_one', display_name: 'Claude · one' }], state: 'reported', windows: [{
         limit_id: null, window: { kind: 'five_hour' }, utilization: { unit: 'fraction', value: 0.67 },
-        resets_at: null, observed_at: 1_100, source: 'claude_code.rate_limit_event',
+        resets_at: null, observed_at: 1_100, source: 'claude_code.rate_limit_event', role: 'gates_model_calls',
       }] },
-      { scope: 'provider:codex_two', providers: ['codex_two'], state: 'not_reported_since_start', windows: [] },
+      { scope: 'provider:codex_two', providers: [{ id: 'codex_two', display_name: 'Codex · two' }], state: 'not_reported_since_start', windows: [] },
     ]
     const parsed = parseRuntimeResolvedResponse({ ...base, provider_usage_windows_since: 1_000, provider_usage_windows })
     expect(parsed.provider_usage_windows?.[0]?.windows[0]?.utilization).toEqual({ unit: 'fraction', value: 0.67 })

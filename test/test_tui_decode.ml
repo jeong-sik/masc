@@ -11995,6 +11995,48 @@ let test_tool_approval_mode_unknown_word_fails () =
          in
          contains "alpha" && contains "manual")
 
+(* RFC-0471 stack 5: the /collab host answer carries the room and all four
+   share links; a refusal reads the server's sentence, and a short answer
+   is refused rather than drawn half-empty. *)
+let test_decode_collab_hosted_reads_links_and_resume () =
+  let decode text =
+    Tui_decode.decode_collab_hosted (Yojson.Safe.from_string text)
+  in
+  let answer resumed =
+    Printf.sprintf
+      {|{"ok":true,"keeper":"imp","room_id":"r","view_link":"v","control_link":"c","web_link":"w","control_web_link":"cw","base_url":"https://m:9","resumed":%b}|}
+      resumed
+  in
+  (match decode (answer false) with
+   | Error detail -> Alcotest.fail detail
+   | Ok session ->
+     Alcotest.(check string) "keeper" "imp" session.Tui_decode.chs_keeper;
+     Alcotest.(check string) "control web" "cw" session.Tui_decode.chs_control_web_link;
+     Alcotest.(check bool) "fresh" false session.Tui_decode.chs_resumed);
+  (match decode (answer true) with
+   | Error detail -> Alcotest.fail detail
+   | Ok session ->
+     Alcotest.(check bool) "resumed" true session.Tui_decode.chs_resumed);
+  Alcotest.(check bool) "a refusal reads the sentence" true
+    (decode {|{"ok":false,"error":"unknown keeper: no-one"}|}
+     = Error "unknown keeper: no-one");
+  Alcotest.(check bool) "a short answer is refused" true
+    (Result.is_error (decode {|{"ok":true,"keeper":"imp"}|}))
+;;
+
+let test_decode_collab_stopped_reads_count () =
+  let decode text =
+    Tui_decode.decode_collab_stopped (Yojson.Safe.from_string text)
+  in
+  (match decode {|{"ok":true,"keeper":"imp","stopped":2}|} with
+   | Error detail -> Alcotest.fail detail
+   | Ok report ->
+     Alcotest.(check string) "keeper" "imp" report.Tui_decode.csr_keeper;
+     Alcotest.(check int) "count" 2 report.Tui_decode.csr_stopped);
+  Alcotest.(check bool) "a refusal reads the sentence" true
+    (decode {|{"ok":false,"error":"keeper missing"}|} = Error "keeper missing")
+;;
+
 let () =
   Alcotest.run "tui_decode" [
     ( "decode_oauth_client_saved",
@@ -12809,5 +12851,11 @@ let () =
     , [ Alcotest.test_case "reads an insert" `Quick test_decode_file_change_reads_an_insert
       ; Alcotest.test_case "reads a materialize" `Quick
           test_decode_file_change_reads_a_materialize
+      ] );
+    ( "collab host"
+    , [ Alcotest.test_case "reads links and resume" `Quick
+          test_decode_collab_hosted_reads_links_and_resume
+      ; Alcotest.test_case "reads stop count" `Quick
+          test_decode_collab_stopped_reads_count
       ] );
   ]

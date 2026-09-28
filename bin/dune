@@ -512,6 +512,12 @@
  (libraries masc masc_tui_fetched))
 
 (library
+ (name masc_tui_collab_text)
+ (wrapped false)
+ (modules masc_tui_collab_text)
+ (libraries masc qrc))
+
+(library
  (name masc_tui_mcp)
  (wrapped false)
  (modules masc_tui_mcp)
@@ -1831,6 +1837,7 @@
   masc_tui_board_quarantine
   masc_tui_text_block
   masc_tui_preset_text
+  masc_tui_collab_text
   masc_tui_mcp
   masc_tui_keeper_chat_transcript
   masc_tui_composer

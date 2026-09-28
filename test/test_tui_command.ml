@@ -89,6 +89,11 @@ let describe = function
   | Command.Preset_restore_missing_name -> "preset-restore-missing-name"
   | Command.Preset_show name -> "preset-show:" ^ name
   | Command.Preset_show_missing_name -> "preset-show-missing-name"
+  | Command.Collab_host None -> "collab-host"
+  | Command.Collab_host (Some base) -> "collab-host:" ^ base
+  | Command.Collab_view None -> "collab-view"
+  | Command.Collab_view (Some base) -> "collab-view:" ^ base
+  | Command.Collab_stop -> "collab-stop"
   | Command.Unknown word -> "unknown:" ^ word
 
 let test_measurement_command () =
@@ -343,6 +348,25 @@ let test_preset_commands_parse_verb_name_and_description () =
        ; "/preset show morning"
        ; "/preset show"
        ; "/preset drop morning"
+       ])
+
+let test_collab_commands_parse_base_url_and_stop () =
+  check (list string) "collab commands"
+    [ "collab-host"
+    ; "collab-host:https://relay.test:8443"
+    ; "collab-view"
+    ; "collab-view:https://relay.test:8443"
+    ; "collab-stop"
+    ; "unknown:collab stop"
+    ]
+    (List.map
+       (fun text -> describe (Command.parse text))
+       [ "/collab"
+       ; "/collab https://relay.test:8443"
+       ; "/collab view"
+       ; "/collab view https://relay.test:8443"
+       ; "/collab stop"
+       ; "/collab stop now"
        ])
 
 let test_every_command_has_a_help_line () =
@@ -1017,6 +1041,8 @@ let () =
             test_every_command_has_a_help_line
         ; test_case "preset commands parse verb, name and description" `Quick
             test_preset_commands_parse_verb_name_and_description
+        ; test_case "collab commands parse base url and stop" `Quick
+            test_collab_commands_parse_base_url_and_stop
         ; test_case "/task takes the line as title and the rest as body" `Quick
             test_task_takes_the_line_as_title_and_the_rest_as_body
         ; test_case "an unknown command is named, not sent" `Quick

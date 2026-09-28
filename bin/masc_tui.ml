@@ -2340,6 +2340,11 @@ type async_msg =
   | Preset_contents_shown of preset_sink * (Tui_decode.preset_detail, string) result
   | Preset_saved of preset_sink * (Tui_decode.preset_manifest, string) result
   | Preset_restored of preset_sink * (Tui_decode.preset_restore_report, string) result
+  (* A /collab answer lands where it was typed, with the keeper that was
+     the target then — not the roster cursor now. *)
+  | Collab_hosted of string option * (Tui_decode.collab_host_session, string) result
+  | Collab_viewed of string option * (Tui_decode.collab_host_session, string) result
+  | Collab_stopped of string option * (Tui_decode.collab_stop_report, string) result
   | Librarian_input_loaded of string * (string list, string) result
   | Resources_listed of (Masc_tui_mcp.resource list, string) result
   (* The scope travels with the directory. Without it a reply names a
@@ -4388,6 +4393,16 @@ let launch_prompts_load state ~mailbox =
    answer comes back as a chat notice for the pane that asked, so [wrap]
    carries that pane's keeper. *)
 let launch_preset_call state ~mailbox ~call ~wrap =
+  let host = server_peer_host in
+  let port = state.port in
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (wrap result))
+    (fun () -> call ~host ~port)
+
+(* A /collab call runs off the input loop like a /preset one; its answer
+   comes back as a share card for the pane that asked. *)
+let launch_collab_call state ~mailbox ~call ~wrap =
   let host = server_peer_host in
   let port = state.port in
   Masc_tui_async_read.launch
@@ -10053,6 +10068,43 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       launch_preset_call state ~mailbox
         ~call:(fun ~host ~port -> Masc_tui_loader.restore_preset ~host ~port ~name)
         ~wrap:(fun result -> Preset_restored (Preset_to_chat target, result))
+  | Masc_tui_command.Collab_host base_url ->
+      (match target with
+       | None ->
+           notice ~kind:Notice_failure
+             "/collab needs a Keeper selected on the roster"
+       | Some keeper_name ->
+           Buffer.clear state.msg_input;
+           notice ~kind:Notice_reply
+             (Printf.sprintf "starting to share %s…" keeper_name);
+           launch_collab_call state ~mailbox
+             ~call:(fun ~host ~port ->
+               Masc_tui_loader.host_collab ~host ~port ~keeper:keeper_name
+                 ~base_url)
+             ~wrap:(fun result -> Collab_hosted (target, result)))
+  | Masc_tui_command.Collab_view base_url ->
+      (match target with
+       | None ->
+           notice ~kind:Notice_failure
+             "/collab view needs a Keeper selected on the roster"
+       | Some keeper_name ->
+           Buffer.clear state.msg_input;
+           launch_collab_call state ~mailbox
+             ~call:(fun ~host ~port ->
+               Masc_tui_loader.host_collab ~host ~port ~keeper:keeper_name
+                 ~base_url)
+             ~wrap:(fun result -> Collab_viewed (target, result)))
+  | Masc_tui_command.Collab_stop ->
+      (match target with
+       | None ->
+           notice ~kind:Notice_failure
+             "/collab stop needs a Keeper selected on the roster"
+       | Some keeper_name ->
+           Buffer.clear state.msg_input;
+           launch_collab_call state ~mailbox
+             ~call:(fun ~host ~port ->
+               Masc_tui_loader.stop_collab ~host ~port ~keeper:keeper_name)
+             ~wrap:(fun result -> Collab_stopped (target, result)))
   | Masc_tui_command.Unknown word ->
       report_action state "error"
         (Printf.sprintf
@@ -12877,6 +12929,9 @@ let handle_composer_key state ~base_path ~mailbox key =
           must not be followed by the reset to the newest row above. *)
        | Masc_tui_command.Find_in_chat _ | Masc_tui_command.Find_next
        | Masc_tui_command.Copy_latest_reply
+       | Masc_tui_command.Collab_host _
+       | Masc_tui_command.Collab_view _
+       | Masc_tui_command.Collab_stop
        | Masc_tui_command.Open_measurement _ | Masc_tui_command.Measurement_missing_sha
        | Masc_tui_command.Inspect_context
        | Masc_tui_command.View_image _ | Masc_tui_command.View_image_missing_path
@@ -14142,6 +14197,29 @@ let apply_async_message state ~base_path ~http_refresh_inflight
        | Preset_to_pane, Error detail ->
            state.preset_busy <- false;
            report_action state "error" ("preset restore: " ^ detail))
+  | Collab_hosted (target, result) ->
+      (match result with
+       | Ok session ->
+           chat_notice state ~keeper_name:target ~kind:Notice_reply
+             (String.concat "\n"
+                (Masc_tui_collab_text.hosted_lines session))
+       | Error detail ->
+           chat_notice state ~keeper_name:target ~kind:Notice_failure detail)
+  | Collab_viewed (target, result) ->
+      (match result with
+       | Ok session ->
+           chat_notice state ~keeper_name:target ~kind:Notice_reply
+             (String.concat "\n"
+                (Masc_tui_collab_text.hosted_view_lines session))
+       | Error detail ->
+           chat_notice state ~keeper_name:target ~kind:Notice_failure detail)
+  | Collab_stopped (target, result) ->
+      (match result with
+       | Ok report ->
+           chat_notice state ~keeper_name:target ~kind:Notice_reply
+             (String.concat "\n" (Masc_tui_collab_text.stopped_lines report))
+       | Error detail ->
+           chat_notice state ~keeper_name:target ~kind:Notice_failure detail)
   | Librarian_input_loaded (prompt_key, result) ->
       let still_selected =
         match selected_prompt_for_state state with

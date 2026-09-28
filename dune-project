@@ -129,6 +129,9 @@
   (cstruct (>= 6.0))
   (digestif (>= 1.1))
   (eqaf (>= 0.10))
+  ; /collab share card renders a QR of the browser join link (RFC-0471
+  ; stack 5); pure OCaml, no C bindings.
+  (qrc (>= 0.2.0))
   optint
   (ocaml-protoc-plugin (>= 4.0))
   (pbrt (and (>= 3.0) (< 4.0)))

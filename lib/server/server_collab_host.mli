@@ -68,6 +68,11 @@ val stop_all : unit -> unit
 (** [stop] every live session. The server shutdown hook calls this. Same
     suspension rule as {!stop}. *)
 
+val live_for_keeper : string -> session list
+(** Live sessions sharing [keeper], newest first. The HTTP trigger layer
+    resumes the newest instead of minting a second room when the operator
+    runs [/collab] twice. *)
+
 val session_keeper : session -> string
 val session_room_id : session -> Collab_relay.room_id
 val session_room : session -> Collab_link.room

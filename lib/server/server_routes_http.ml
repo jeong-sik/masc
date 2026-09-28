@@ -29,6 +29,7 @@ let make_routes ~port ~host:_ ~sw ~clock =
   |> Server_routes_http_routes_attribution.add_routes
   |> Server_routes_http_routes_activity.add_routes ~sw ~clock
   |> Server_routes_http_routes_presets.add_routes
+  |> Server_routes_http_routes_collab.add_routes ~sw ~port
   |> Server_routes_http_routes_browser_lane.add_routes
   |> Server_routes_http_routes_lane_addons.add_routes ~sw ~clock
   |> Server_routes_http_routes_msx.add_routes

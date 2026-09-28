@@ -1787,6 +1787,31 @@ let restore_preset ~(host : string) ~(port : int) ~(name : string)
         check the preset list for a new autosave before retrying: " ^ message)
   | Ok json -> Tui_decode.decode_preset_restore json
 
+(** POST /api/v1/collab/host — the room and its share links. An unanswered
+    call may still have minted the room; the operator recovers with [/collab]
+    again, which resumes the live room instead of minting a second one. *)
+let host_collab ~(host : string) ~(port : int) ~(keeper : string)
+    ~(base_url : string option) : (Tui_decode.collab_host_session, string) result
+  =
+  match Masc_tui_http.post_collab_host ~host ~port ~keeper ~base_url with
+  | Masc_tui_http.Post_refused message -> Error ("collab host refused: " ^ message)
+  | Masc_tui_http.Post_unanswered detail ->
+    Error
+      ("collab host outcome unknown — the room may exist; run /collab again \
+        to resume it rather than minting a second room: " ^ detail)
+  | Masc_tui_http.Post_answered json -> Tui_decode.decode_collab_hosted json
+;;
+
+(** POST /api/v1/collab/stop — how many rooms stopped. *)
+let stop_collab ~(host : string) ~(port : int) ~(keeper : string)
+  : (Tui_decode.collab_stop_report, string) result =
+  match Masc_tui_http.post_collab_stop ~host ~port ~keeper with
+  | Masc_tui_http.Post_refused message -> Error ("collab stop refused: " ^ message)
+  | Masc_tui_http.Post_unanswered detail ->
+    Error ("collab stop unanswered — retry; stopping is idempotent: " ^ detail)
+  | Masc_tui_http.Post_answered json -> Tui_decode.decode_collab_stopped json
+;;
+
 (* The fleet reading answers what the keeper list cannot: a keeper that never
    started has no row, so the roster shows nine keepers whether the tenth is
    absent by design or blocked. *)

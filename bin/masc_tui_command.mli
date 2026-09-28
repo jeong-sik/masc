@@ -153,6 +153,16 @@ type t =
   | Preset_show of string
       (** [/preset show <name>] — what that preset holds, by kind. *)
   | Preset_show_missing_name  (** [/preset show] with no name. *)
+  | Collab_host of string option
+      (** [/collab [base-url]] — share this Keeper live: mint a room and
+          print the view/control links plus a QR. The base URL names the
+          public relay guests dial; without one the links use the server
+          address the TUI itself dialed. *)
+  | Collab_view of string option
+      (** [/collab view [base-url]] — the same room, but the card carries
+          the view links only: for pasting where a control link must never
+          appear. *)
+  | Collab_stop  (** [/collab stop] — stop sharing this Keeper. *)
   | Unknown of string  (** A slash word this build does not know, by name. *)
 
 type command_help = {

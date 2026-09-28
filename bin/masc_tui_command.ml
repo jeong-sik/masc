@@ -60,6 +60,9 @@ type t =
   | Preset_restore_missing_name
   | Preset_show of string
   | Preset_show_missing_name
+  | Collab_host of string option
+  | Collab_view of string option
+  | Collab_stop
   | Unknown of string
 
 (* One list, drawn by /help and kept beside the parser so a new command
@@ -207,6 +210,11 @@ let catalog =
     ; args = "[show <name> | save <name> [description] | restore <name>]"
     ; summary = "list prompt presets; show what one holds; save the live state; restore one \
          (autosaves first)"
+    }
+  ; { word = "collab"
+    ; aliases = []
+    ; args = "[<base-url> | view [base-url] | stop]"
+    ; summary = "share this Keeper live: mint a room, print the links and a QR; view prints view links only; stop ends it"
     }
   ; { word = "help"
     ; aliases = []
@@ -432,6 +440,17 @@ let parse text =
         | "show", "" -> Preset_show_missing_name
         | "show", name -> Preset_show name
         | verb, _ -> Unknown ("preset " ^ verb))
+    | "collab", "" -> Collab_host None
+    | "collab", rest -> (
+        (* [stop] and [view] are the subcommands; anything else is a base
+           URL the server validates, so a mistyped subcommand reads as a
+           bad URL rather than guessing a verb. *)
+        match split_word (String.trim rest) with
+        | "stop", "" -> Collab_stop
+        | "stop", _ -> Unknown "collab stop"
+        | "view", "" -> Collab_view None
+        | "view", base -> Collab_view (Some (String.trim base))
+        | _, _ -> Collab_host (Some (String.trim rest)))
     | word, _ -> Unknown word
 
 type hint =
@@ -656,6 +675,7 @@ let known_sub_arguments ~keeper_names word =
   (* [show] goes last: [save] is the older word and shares its first
      letter, so leading with [show] would move where "/preset s" lands. *)
   | "preset" -> [ "save"; "restore"; "show" ]
+  | "collab" -> [ "stop"; "view" ]
   | "keeper" -> keeper_names
   | _ -> []
 

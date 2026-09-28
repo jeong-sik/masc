@@ -2930,6 +2930,29 @@ let post_preset_restore ~(host : string) ~(port : int) ~(name : string)
     | Ok json -> Ok json
     | Error message -> Error (`Refused message))
 
+(** POST /api/v1/collab/host — body {keeper, base_url?}: the room and its
+    share links. A 4xx is the server declining (unknown keeper, bad base
+    URL); anything unanswered may still have minted the room, which the
+    operator recovers by running [/collab] again — a live room resumes
+    rather than duplicating. *)
+let post_collab_host ~(host : string) ~(port : int) ~(keeper : string)
+    ~(base_url : string option) : post_outcome =
+  let body =
+    Yojson.Safe.to_string
+      (`Assoc
+        ([ ("keeper", `String keeper) ]
+         @ (match base_url with
+            | None -> []
+            | Some url -> [ ("base_url", `String url) ])))
+  in
+  post_json_outcome ~host ~port ~path:"/api/v1/collab/host" ~body
+
+(** POST /api/v1/collab/stop — body {keeper}: how many rooms stopped.
+    Stopping is idempotent, so an unanswered call is safely retried. *)
+let post_collab_stop ~(host : string) ~(port : int) ~(keeper : string) : post_outcome =
+  post_json_outcome ~host ~port ~path:"/api/v1/collab/stop"
+    ~body:(Yojson.Safe.to_string (`Assoc [ ("keeper", `String keeper) ]))
+
 (** POST /api/v1/gate/connector/bind?name= — body {channel_id, keeper_name}. *)
 let post_connector_bind ~(host : string) ~(port : int) ~(connector : string)
     ~(body_json : string) : (Yojson.Safe.t, string) result =

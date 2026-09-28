@@ -161,7 +161,23 @@ MASC 에 맞게 둔다.
   렌더, 미지원 터미널은 URL-hint fallback) 출력. `/collab view` 는 보기 링크만.
 - 게스트 replica: `bin/masc_tui_keeper_chat_{projection,live,queue}` 렌더러
   재사용. 보기 모드는 입력 레인 없이 렌더만.
-- QR 인코더 dep 은 스택 5 에서 결정 (`ocaml-qr-code` vs vendored).
+- 스택 5 구현 기록 (TUI 호스트 `/collab` + QR):
+  - 트리거는 HTTP: `POST /api/v1/collab/host {keeper, base_url?}` →
+    `{room_id, view/control 링크, web/control_web 링크, base_url,
+    resumed}`, `POST /api/v1/collab/stop {keeper}` → `{stopped}`.
+    둘 다 CanAdmin. TUI 는 loader→decode→share card notice 로 그린다.
+  - `base_url` 은 게스트가 다이얼하는 공개 릴레이 주소. 생략하면 요청
+    authority 로 폴백 (loopback이면 카드에 경고 + `/collab
+    https://host:port` 재실행 안내; live 방은 resume 되고 링크만
+    다시 찍힌다).
+  - `/collab` 재실행은 방을 복제하지 않는다: `live_for_keeper` 최신
+    세션을 resume (`resumed:true`). `/collab view` 는 같은 방의 보기
+    링크+QR 만 찍는다 (control 유출 방지용).
+  - QR 인코더는 opam `qrc`(dbuenzli, pure OCaml) + `Qrc_fmt.pp_utf_8_half`
+    로 결정 (§7). 미지원 터미널 fallback 은 별도 모드 없이 카드에 찍힌
+    URL 텍스트 자체 (TUI 가 이미 레일 박스문자를 가정한다).
+  - OSC-8: TUI 에 하이퍼링크 렌더가 없어 plain URL 을 찍는다. 터미널이
+    linkify 한다.
 
 ## 3. 구현이 건드리는 표면
 
@@ -203,7 +219,7 @@ MASC 에 맞게 둔다.
 - [x] Mirage_crypto GCM 모듈 경로 핀: `Mirage_crypto.AES.GCM`
   (`of_secret`/`authenticate_encrypt`/`authenticate_decrypt`, 12B nonce,
   mirage-crypto 1.2.0 소스 실측. 짧은 입력·태그 불일치는 `None`, 예외 없음).
-- [ ] QR 인코더 dep 선택 (스택 5 에서).
+- [x] QR 인코더 dep 선택: opam `qrc` + `Qrc_fmt.pp_utf_8_half` (스택 5).
 - [x] v1 에서 조종 게스트의 승인 settle 금지 확정 (2026-09-28 사용자 확정: 호스트만 승인).
 - [x] v1 릴레이 범위 확정 (2026-09-28 사용자 확정: 내장+자가, managed 공개 릴레이 deferred).
 - [x] 릴레이 close-code: omp 미러로 확정 (4001 room closed / 4004 no such

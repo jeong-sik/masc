@@ -9759,6 +9759,51 @@ let decode_preset_restore json =
     Ok { prr_restored; prr_autosave; prr_prompt_overrides; prr_instructions; prr_runtime }
 ;;
 
+type collab_host_session =
+  { chs_keeper : string
+  ; chs_room_id : string
+  ; chs_view_link : string
+  ; chs_control_link : string
+  ; chs_web_link : string
+  ; chs_control_web_link : string
+  ; chs_base_url : string
+  ; chs_resumed : bool
+  }
+
+type collab_stop_report =
+  { csr_keeper : string
+  ; csr_stopped : int
+  }
+
+let decode_collab_hosted json =
+  let* () = preset_ok json in
+  let* chs_keeper = required_string_field json "keeper" in
+  let* chs_room_id = required_string_field json "room_id" in
+  let* chs_view_link = required_string_field json "view_link" in
+  let* chs_control_link = required_string_field json "control_link" in
+  let* chs_web_link = required_string_field json "web_link" in
+  let* chs_control_web_link = required_string_field json "control_web_link" in
+  let* chs_base_url = required_string_field json "base_url" in
+  let* chs_resumed = required_bool_field json "resumed" in
+  Ok
+    { chs_keeper
+    ; chs_room_id
+    ; chs_view_link
+    ; chs_control_link
+    ; chs_web_link
+    ; chs_control_web_link
+    ; chs_base_url
+    ; chs_resumed
+    }
+;;
+
+let decode_collab_stopped json =
+  let* () = preset_ok json in
+  let* csr_keeper = required_string_field json "keeper" in
+  let* csr_stopped = required_int_field json "stopped" in
+  Ok { csr_keeper; csr_stopped }
+;;
+
 type librarian_run_page =
   { lrp_run_id : string option
   ; lrp_next : (float * string) option

@@ -465,6 +465,42 @@ let test_stop_and_stop_all () =
               check int "stop_all idempotent" 1 (List.length (captured capb)))))
 ;;
 
+let test_live_for_keeper () =
+  with_base_dir (fun base_dir ->
+      Eio_main.run (fun _env ->
+          Eio.Switch.run (fun sw ->
+              let start keeper =
+                match
+                  Host.start ~sw ~base_dir ~keeper
+                    ~send:(fun ~room:_ _ -> ())
+                    ()
+                with
+                | Error _ -> fail "host start"
+                | Ok session -> session
+              in
+              check int "none initially" 0
+                (List.length (Host.live_for_keeper "klive"));
+              let s1 = start "klive" in
+              let s2 = start "klive" in
+              let other = start "kother" in
+              (match Host.live_for_keeper "klive" with
+               | [ newest; older ] ->
+                 check bool "newest first" true (newest == s2 && older == s1)
+               | _ -> fail "live pair shape");
+              check int "other keeper apart" 1
+                (List.length (Host.live_for_keeper "kother"));
+              Host.stop s2;
+              (match Host.live_for_keeper "klive" with
+               | [ remaining ] -> check bool "stopped gone" true (remaining == s1)
+               | _ -> fail "live single shape");
+              Host.stop s1;
+              check int "all stopped" 0
+                (List.length (Host.live_for_keeper "klive"));
+              (* Every started session stops: a live one's forward fiber
+                 would hold the switch open forever. *)
+              Host.stop other)))
+;;
+
 let test_snapshot_tail_window () =
   with_base_dir (fun base_dir ->
       let pad = String.make 900 'p' in
@@ -748,7 +784,9 @@ let () =
           test_case "drops" `Quick test_drops;
         ] );
       ( "stop",
-        [ test_case "stop and stop_all" `Quick test_stop_and_stop_all ] );
+        [ test_case "stop and stop_all" `Quick test_stop_and_stop_all
+        ; test_case "live for keeper" `Quick test_live_for_keeper
+        ] );
       ( "inject",
         [
           test_case "control prompt" `Quick test_control_prompt;

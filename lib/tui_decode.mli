@@ -2609,6 +2609,32 @@ val decode_preset_saved : Yojson.Safe.t -> (preset_manifest, string) result
 val decode_preset_restore : Yojson.Safe.t -> (preset_restore_report, string) result
 (** POST /api/v1/presets/restore — the per-surface report. *)
 
+(** {2 Collab host sessions} — [/api/v1/collab] (RFC-0471 stack 5). *)
+
+type collab_host_session = {
+  chs_keeper : string;
+  chs_room_id : string;
+  chs_view_link : string;
+  chs_control_link : string;
+  chs_web_link : string;
+  chs_control_web_link : string;
+  chs_base_url : string;
+  chs_resumed : bool;
+      (** True when [/collab] found the keeper already sharing and re-answered
+          the live room instead of minting a second one. *)
+}
+
+type collab_stop_report = {
+  csr_keeper : string;
+  csr_stopped : int;
+}
+
+val decode_collab_hosted : Yojson.Safe.t -> (collab_host_session, string) result
+(** POST /api/v1/collab/host — the room and its share links. *)
+
+val decode_collab_stopped : Yojson.Safe.t -> (collab_stop_report, string) result
+(** POST /api/v1/collab/stop — how many rooms stopped. *)
+
 val decode_latest_librarian_run_id : Yojson.Safe.t -> (string, string) result
 (** Read the first Librarian row from the newest-first exact-lane summary. The
     summary has no payload; callers use this id for one lazy detail read. *)

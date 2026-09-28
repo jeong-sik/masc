@@ -792,6 +792,13 @@ let stop_all () =
   List.iter stop sessions
 ;;
 
+let live_for_keeper keeper =
+  Stdlib.Mutex.protect registry_mutex (fun () ->
+      match Hashtbl.find_opt sessions_by_keeper keeper with
+      | None -> []
+      | Some sessions -> sessions)
+;;
+
 let session_keeper s = s.keeper
 let session_room_id s = s.room.Collab_link.id
 let session_room s = s.room

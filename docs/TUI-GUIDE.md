@@ -224,9 +224,12 @@ type where the new account signs in (`account-home` for Claude Code and
 Codex, the OAuth file `masc runtime-antigravity-account --sign-in` reports for
 Antigravity). The form copies that provider's command and model bindings,
 refuses a location another provider of the same client already uses, and
-saves through the same preview. It does not sign in; the line under the
-fields names the command that does. Turns reach the new account only after
-a lane lists it as a candidate. The
+saves through the same preview. Enter on the last field re-reads
+`runtime.toml` from the server and declares against that, so a change made
+while the form was open is kept. It does not sign in; the rows under the
+fields name the command that does, and after the save the same command is
+in the session log. Turns reach the new account only after a lane lists it
+as a candidate. The
 Resources surface hangs off Config under `s` and lists every MCP
 resource; `Enter` reads one beside the
 list. The detail starts with the server's description, full URI, MIME type,

@@ -430,6 +430,13 @@ val planning_workspace_title :
     inside leaves room for it; without it the strip took the row and the frame
     cut the clock and the badge off the end. *)
 
+val harness_detail_heading :
+  Masc_tui_types.state -> cols:int -> task_id:string -> tail:string -> string
+(** One verdict's heading in a frame [cols] wide: the Planning strip with
+    Verdicts current, the task id, and [tail] (the connection badge). The
+    strip never goes under the width that holds its current entry; the id
+    folds first ({!Masc_tui_ansi.detail_heading}). *)
+
 val planning_proof_mark : Masc_tui_types.Tui_decode.goal_proof -> string
 
 val keeper_control_hints :

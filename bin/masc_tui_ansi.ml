@@ -883,37 +883,93 @@ let row_with_field ~cols ~lead ~field ~tail =
   ^ fit_width field (max 1 (framed_inner_width cols - cells lead - cells tail))
   ^ tail
 
-(* A heading that names one record: [lead], the record's id, [after], and the
-   connection badge last. The badge is the part of a heading that has to
-   survive -- it says whether the reading is live and whether the server shares
-   this workspace -- so it is never shortened here, and neither are [lead] and
-   [after]: the id takes what they leave.
-   - An id that fits is drawn whole.
-   - One that does not is folded in the middle. The run ids of one lane share
-     their opening and differ in their hex tail, and the paths of one tree share
-     their directories and differ in their file, so both ends stay.
-   - With one cell left only the cut mark says an id was there; with none the
-     id is left out.
-   When [lead], [after] and the badge alone are wider than the frame, the frame
-   cuts the row as it draws it: the badge keeps its start, the connection
-   reading, and loses its end.
+(* What a heading draws before the record's id. [Lead_text] is drawn as
+   given. [Lead_strip] is drawn in the width it is handed and needs [floor]
+   at least: a tab strip, which drops entries and marks the cut down to the
+   width that holds the current entry alone, and loses its press marks below
+   that. *)
+type heading_lead =
+  | Lead_text of string
+  | Lead_strip of { floor : int; draw : int -> string }
 
-   Every heading that puts an id, a name or a path before the badge is laid
-   out here; test_tui_row_wiring names each one. The id was otherwise drawn
-   before the badge at whatever width it had, and a 54-cell run id left the
-   badge four cells at eighty columns. *)
-let detail_heading ~cols ~lead ~id ~after ~badge =
+(* The fewest cells a folded id keeps while anything else on its heading can
+   still give way: [fit_middle] spends them as three of the opening, the cut
+   mark and eight of the tail. Eight hex digits tell two run ids of one lane
+   apart the way a short commit hash does, and three letters keep a name's
+   family. An id no longer than this is drawn whole. *)
+let heading_id_floor = 12
+
+(* A heading that names one record: [lead], the record's id, [after], and
+   [tail] last -- the connection badge, with the clock before it where the
+   screen draws one. The tail says whether the reading is live and whether the
+   server shares this workspace, and has no way of saying it was shortened, so
+   it is never shortened here. What gives way, first to last:
+   - the id down to [heading_id_floor], folded in the middle so its opening
+     and its distinguishing tail both stay;
+   - [after], the readings about the record (a count, a freshness verdict, a
+     filter), cut at its end with the cut mark, and dropped when nothing is
+     left for it;
+   - the id below its floor, down to the cut mark alone, and then the id;
+   - the lead, cut at its end. A lead and a tail that do not fit side by side
+     are the one case where the lead is cut: the badge carries the workspace
+     mismatch, which nothing else on the screen says.
+   The frame then never has to cut the row, so it never cuts the badge.
+   Room the id and [after] leave goes to a [Lead_strip], which draws more of
+   its entries in it.
+
+   The headings that put an id, a name or a path before the badge are laid
+   out here; test_tui_row_wiring names each one. Written by hand, the id was
+   drawn before the badge at whatever width it had: a 54-cell run id left the
+   badge four cells at eighty columns. Two rows keep their own layout: a
+   Config pane's title ([Masc_tui_render_prim.config_pane_title]), whose pane
+   reading and pane name give way in an order of their own before its file
+   path does, and the Overview's, whose workspace name every PTY scenario
+   waits to see whole when it starts. *)
+let detail_heading ~cols ~lead ~id ~after ~tail =
   let cells text =
     Masc_tui_message_layout.display_width (Masc_tui_theme.strip_sgr text)
   in
-  let tail = after ^ "  " ^ badge in
-  let room = framed_inner_width cols - cells lead - cells tail in
+  let styled text = String.contains text '\027' in
+  let tail = "  " ^ tail in
   let id = Terminal_text.single_line id in
-  let id =
-    if cells id <= room then id
-    else Masc_tui_message_layout.fit_middle (max 0 room) id
+  let id_cells = cells id and after_cells = cells after in
+  let lead_floor =
+    match lead with
+    | Lead_text text -> cells text
+    | Lead_strip { floor; _ } -> floor
   in
-  lead ^ id ^ tail
+  (* Taken in the order above out of what the frame has left over the lead's
+     floor and the tail. Once it runs out every later part gets nothing. *)
+  let take wanted room =
+    let got = max 0 (min wanted room) in
+    (got, room - got)
+  in
+  let room = framed_inner_width cols - cells tail - lead_floor in
+  let id_floor_drawn, room = take (min id_cells heading_id_floor) room in
+  let after_drawn, room = take after_cells room in
+  let id_extra, room = take (id_cells - id_floor_drawn) room in
+  let id_drawn = id_floor_drawn + id_extra in
+  let id =
+    if id_drawn >= id_cells then id
+    else if id_drawn = 0 then ""
+    else Masc_tui_message_layout.fit_middle id_drawn id
+  in
+  (* A cut or dropped [after] may have been what closed a style the lead
+     opened, so the reset it carried is put back. *)
+  let after =
+    if after_drawn >= after_cells then after
+    else
+      (if after_drawn = 0 then "" else fit_width after after_drawn)
+      ^ if styled after then Ansi.reset else ""
+  in
+  let lead =
+    match lead with
+    | Lead_text text when room >= 0 -> text
+    | Lead_strip { floor; draw } when room >= 0 -> draw (floor + room)
+    | Lead_text text -> fit_width text (max 0 (lead_floor + room))
+    | Lead_strip { floor; draw } -> fit_width (draw floor) (max 0 (floor + room))
+  in
+  lead ^ id ^ after ^ tail
 
 (* The selected row of a borderless list: one reverse-video band across the
    full row, box_line's geometry (two margin cells each side, content width

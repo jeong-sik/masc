@@ -1144,7 +1144,7 @@ elif mode == "agy":
     send({"event":"init", "conversation_id":"paid", "init":{"model":"paid-fixture", "cwd":os.getcwd(),
         "tools":[],"permission_mode":"always-proceed"}})
     send({"event":"result", "result":{"conversation_id":"paid", "status":"ERROR", "error":"paid failure",
-        "response":"", "num_turns":1, "usage":{"input_tokens":11,"output_tokens":7,"cache_read_tokens":3}}})
+        "response":"", "num_turns":1, "usage":{"input_tokens":11,"output_tokens":7,"cache_read_tokens":3,"thinking_tokens":0,"total_tokens":18}}})
 else:
     def counts(i,o): return {"inputTokens":i,"cachedInputTokens":0,"outputTokens":o,"reasoningOutputTokens":0,"totalTokens":i+o}
     def usage(total,last):

@@ -768,7 +768,7 @@ let test_execute_intent_description_names_accepted_values () =
     bool
     "the description does not name a value the schema rejects"
     false
-    (contains ~needle:"Observe" description)
+    (contains ~needle:"observe" (String.lowercase_ascii description))
 ;;
 
 let test_validate_embedded () =

@@ -601,7 +601,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
         (match Runtime_verification_muse.run ~secure_random ~net ~mgr ~clock ~cwd
            ~directory:cwd_path ~account_home:execution.account_home
            ~quota_scope:(Runtime.quota_scope_of_runtime runtime) ~config
-           ~max_prompt_bytes:runtime.model.max_prompt_bytes ~reasoning_effort ~tool ~prompt with
+           ~max_prompt_bytes:(Runtime.prompt_capacity_bytes runtime) ~reasoning_effort ~tool ~prompt with
          | Ok result ->
            (match result.model with
             | Some model when String.equal model execution.model ->

@@ -57,7 +57,7 @@ FULL_ROW_CELLS = (
 
 # The Board lays the row out in the frame's inner width, four cells short of
 # the columns the surface gets (Masc_tui_frame.inner_width). From
-# Masc_tui_acting_pane.threshold_cols (132) the acting pane takes its narrow
+# Masc_tui_acting_pane.threshold_cols (158) the acting pane takes its narrow
 # width off the terminal first, and the widths built here are all past that.
 FRAME_MARGIN_CELLS = 4
 

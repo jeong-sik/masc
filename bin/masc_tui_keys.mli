@@ -139,6 +139,10 @@ val footer_hints_runtime_account_saved : unit -> string
 (** The account form's row after a save: the copy of the sign-in command
     and the way out. *)
 
+val footer_hints_runtime_account_removal : unit -> string
+(** The runtime.toml removal screen's row: the account axis, the removal and
+    the way out. *)
+
 val footer_hints_prompt_assets : string
 (** The prompts pane while it shows the read-only runtime assets: its keys
     without the ones that edit the registry, and [o] named for the way back. *)

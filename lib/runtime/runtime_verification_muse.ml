@@ -8,7 +8,9 @@ let run ~secure_random ~net ~mgr ~clock ~cwd ~directory ~account_home ~quota_sco
   let ( let* ) = Result.bind in
   let invalid_prompt detail = Error (Client_error (Runtime_muse_serve.Invalid_config detail)) in
   let* () = match max_prompt_bytes with
-    | None -> invalid_prompt "Muse Code requires the model's declared max-prompt-bytes"
+    | None ->
+      invalid_prompt "Muse Code has no prompt ceiling: the model declares neither \
+        max-context nor max-prompt-bytes"
     | Some capacity when capacity <= 0 ->
       invalid_prompt "Muse Code max-prompt-bytes must be positive"
     | Some capacity when String.length prompt > capacity ->
@@ -69,6 +71,7 @@ let run ~secure_random ~net ~mgr ~clock ~cwd ~directory ~account_home ~quota_sco
           | Runtime_muse_serve.Turn_started _ | Runtime_muse_serve.Text_delta _
           | Runtime_muse_serve.Text_completed _ | Runtime_muse_serve.Native_tool_started _
           | Runtime_muse_serve.Native_tool_finished _ | Runtime_muse_serve.Approval_decided _
+          | Runtime_muse_serve.Compaction_observed _
           | Runtime_muse_serve.Turn_terminal_received _ | Runtime_muse_serve.Usage_reported _
           | Runtime_muse_serve.Turn_finished _ -> ())
         ~storage_root ?reasoning_effort ~mcp_servers ~mgr ~clock

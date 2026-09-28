@@ -266,8 +266,8 @@ def test_http_endpoint(
                 fixture = empty_goals_fixture()
             elif path_only == RUNTIME_RESOLVED_PATH:
                 fixture = empty_runtime_resolved_fixture()
-            elif path_only == SETUP_INVENTORY_PATH:
-                fixture = empty_setup_inventory_fixture()
+            elif path_only == ACCOUNT_EMAILS_PATH:
+                fixture = empty_account_emails_fixture()
             else:
                 fixture = (503, {"error": "fixture endpoint unavailable"})
             if isinstance(fixture, RequestHttpResponse):
@@ -1351,18 +1351,19 @@ def overview_event_briefing(cluster: str = "cluster-a") -> dict[str, object]:
 
 
 DASHBOARD_GOALS_PATH = "/api/v1/dashboard/goals"
-SETUP_INVENTORY_PATH = "/api/v1/setup/inventory"
+ACCOUNT_EMAILS_PATH = "/api/v1/setup/account-emails"
 
 
-def empty_setup_inventory_fixture() -> HttpResponse:
-    """A setup inventory with no integration and no account email.
+def empty_account_emails_fixture() -> HttpResponse:
+    """No account email, the shape the server sends when no loaded runtime
+    runs on an account.
 
-    The Overview reads its account emails for the Plan usage section.
+    The Overview reads it for the Plan usage section on every refresh.
     Unmocked, the 503 sentinel would add an "account emails unread" note to
-    every Overview scenario whose providers draw rows. A scenario about /login
-    or the emails keys this path itself.
+    every Overview scenario whose providers draw rows. A scenario about the
+    emails keys this path itself.
     """
-    return (200, {"integrations": [], "account_emails": []})
+    return (200, {"account_emails": []})
 
 
 def empty_goals_fixture() -> HttpResponse:
@@ -2816,6 +2817,15 @@ def pressing_a_row_chooses_then_opens_it(
     press lands on the name the reader pointed at."""
     wait_for_output(process, master_fd, output, b"Awaiting you", start=0, timeout=3.0)
     send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+    # The fleet and live-roster reads add rows above the list independently.
+    # Wait for both fixture results before capturing a pointer coordinate;
+    # otherwise the second press can land on the row above the first one.
+    wait_for_output(process, master_fd, output, b"fleet ok", start=0, timeout=3.0)
+    wait_for_output(
+        process, master_fd, output,
+        b"live keeper status unavailable: fixture endpoint unavailable",
+        start=0, timeout=3.0,
+    )
     select_keeper_row(process, master_fd, output, b"alpha")
     beta_row = screen_row_of(screen_rows(bytes(output)), b"beta")
     if beta_row < 0:
@@ -2859,6 +2869,15 @@ def pressing_a_row_of_a_scrolled_list_opens_it(
     window, so the second press at the same place named another Keeper."""
     wait_for_output(process, master_fd, output, b"Awaiting you", start=0, timeout=3.0)
     send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+    # The fleet and live-roster reads add rows above the list independently.
+    # Wait for both fixture results before capturing a pointer coordinate;
+    # otherwise the second press can land on the row above the first one.
+    wait_for_output(process, master_fd, output, b"fleet ok", start=0, timeout=3.0)
+    wait_for_output(
+        process, master_fd, output,
+        b"live keeper status unavailable: fixture endpoint unavailable",
+        start=0, timeout=3.0,
+    )
     select_keeper_row(process, master_fd, output, b"alpha")
     last = LONG_ROSTER_CREW[-1].encode()
     notches = b"\x1b[<65;5;5M" * (len(LONG_ROSTER_CREW) + 2)

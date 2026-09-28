@@ -659,6 +659,38 @@ let test_live_route () =
           check string "a press makes the old DOS since stale" "changed"
             (string_member "state" (body_json (get (dos_live ^ since))))))))
 
+(* RFC play-link-for-the-shared-machine §2.3: live asks for CanPlayMachine,
+   so an invited Player watches the machine through it while every
+   CanReadState route on the same router stays closed to it. A Worker holds
+   both and keeps watching. *)
+let test_player_watches_live_and_reads_nothing_else () =
+  with_dir "lane-live-player-" (fun base_path ->
+    Auth.save_auth_config base_path
+      { Masc_domain.default_auth_config with enabled = true; require_token = true };
+    let token_for ~agent_name ~role =
+      match Auth.create_token base_path ~agent_name ~role with
+      | Ok (token, _) -> token
+      | Error err -> failf "create_token failed: %s" (Masc_domain.masc_error_to_string err)
+    in
+    let player = token_for ~agent_name:"invited-guest" ~role:Masc_domain.Player in
+    let worker = token_for ~agent_name:"hotseat-keeper" ~role:Masc_domain.Worker in
+    let state = Masc.Mcp_server.For_testing.create_state ~base_path in
+    Eio_main.run (fun env ->
+      Eio.Switch.run (fun sw ->
+        let clock = (Eio.Stdenv.clock env :> float Eio.Time.clock_ty Eio.Resource.t) in
+        let status token target =
+          status_of_response (dispatch_get ~sw ~clock ~state ~authorization:(Some token) ~target)
+        in
+        List.iter
+          (fun source_kind ->
+            let live = "/api/v1/lane-addons/live?source_kind=" ^ source_kind in
+            check int ("a player watches " ^ source_kind) 200 (status player live);
+            check int ("a worker still watches " ^ source_kind) 200 (status worker live))
+          [ "dos_capture"; "msx_capture" ];
+        List.iter
+          (fun target -> check int ("a player is refused " ^ target) 403 (status player target))
+          [ "/api/v1/lane-addons"; "/api/v1/lane-addons/slice"; "/api/v1/lane-addons/actions" ])))
+
 let () =
   run "lane addon live route"
     [ ( "change counter"
@@ -675,5 +707,7 @@ let () =
             test_dos_mark_reads_while_the_lock_is_held ] )
     ; ( "route"
       , [ test_case "the query decodes into a typed source" `Quick test_decode_live_query
-        ; test_case "auth, unchanged, frame, 400, DOS, and no store writes" `Quick test_live_route ] )
+        ; test_case "auth, unchanged, frame, 400, DOS, and no store writes" `Quick test_live_route
+        ; test_case "a player watches live and reads nothing else" `Quick
+            test_player_watches_live_and_reads_nothing_else ] )
     ]

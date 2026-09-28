@@ -85,23 +85,24 @@ Operational meaning:
 
 - TOML parsing lives in
   [`Runtime_toml`](../lib/runtime/runtime_toml.ml) (`parse_file` for the path,
-  `parse_string` for text), re-homed from the deleted
-  `Runtime_declarative_parser`.
+  `parse_string` for text).
 - Parsed TOML is materialized into the typed `Runtime_schema.config` by
   [`Runtime.materialize_runtime_config_text`](../lib/runtime/runtime.ml); the
   file path goes through `Runtime.load_list`.
 - A lane's ordered candidate runtime ids are read through
   [`Runtime_lane.ordered_candidates`](../lib/runtime/runtime_lane.ml).
-- There is no source-path mtime cache: the file is re-read and re-parsed on
-  the next load rather than served from a cached JSON view.
+- The materialized config is held in memory (`Runtime.loaded_state_ref`).
+  It is replaced at boot and when a write commits through
+  `Runtime.save_config_text` (dashboard raw save, keeper assignment).
+  A hand edit to the file takes effect at the next restart.
 
 Operational meaning:
 
 - If `runtime.toml` exists, it is the authoring SSOT and invalid edits fail
   closed instead of falling back to stale JSON.
 - Path selection is still tied to cached config-root resolution.
-- Content changes are observed on the next resolve/turn, not by a dedicated
-  watcher.
+- Runtime and lane catalog changes apply at restart or through a committed
+  write; a plain file edit does not update the next resolve/turn.
 - `[fusion]` is also read from this file by `Fusion_config_loader.load` at
   `masc_fusion` handler time. Fusion edits therefore take effect on the next
   `masc_fusion` request, including `staged_judge_group_size`, and invalid

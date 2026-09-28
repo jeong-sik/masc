@@ -431,7 +431,8 @@ let after_announcing result =
    play-link-for-the-shared-machine §2.4), so revoking lets it go and tells
    the board. [by] is the operator who revoked. The credential is deleted
    first: a request the invitee sent before that and that reaches the lane
-   after this can still take the freed controller. *)
+   after this can still take the freed controller, and revoking the name
+   again frees it. *)
 let release_revoked_invite ~holder ~by =
   let released =
     off_domain (fun () ->

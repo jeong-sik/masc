@@ -22,6 +22,7 @@ Readers measured here:
 """
 import os
 import sys
+import threading
 
 import test_tui_keyboard_input as h
 import tui_region_harness as region
@@ -69,6 +70,15 @@ GATE_ARGUMENT = "GATE_CLICK " + "long-argument " * 16 + "GATE_TAIL"
 COMPOSER_ROWS = {"keepers": 1, "board": 1, "config": 1, "keeper-detail": 1,
                  "keeper-detail-roster": 1, "keeper-chat": 0,
                  "keeper-chat-roster": 0}
+# The screens with the roster beside them, and the cells it takes
+# (Masc_tui_roster_pane.pane_cols).
+ROSTER_SCREENS = frozenset(("keeper-detail-roster", "keeper-chat-roster"))
+ROSTER_PANE_COLUMNS = 34
+
+# How long the observer stream the live feed opens stays open with nothing
+# to say, at most. The scenario closes it when it ends; this bounds a
+# scenario that failed before it could.
+OBSERVER_HOLD_SECONDS = 120.0
 
 # (screen, width) -> what measure() finds there.
 EXPECTED: dict[tuple[str, int], dict[str, object]] = {}
@@ -77,6 +87,14 @@ EXPECTED: dict[tuple[str, int], dict[str, object]] = {}
 # The Config body's source: the harness's navigation fixture, whose first
 # value line the sweep waits for.
 CONFIG_LOADED = b"first-value = 1"
+
+
+OBSERVER_CLOSED = threading.Event()
+
+
+def observer_stream():
+    yield b": region baseline\n\n"
+    OBSERVER_CLOSED.wait(OBSERVER_HOLD_SECONDS)
 
 
 def fixtures() -> region.ServedFixtures:
@@ -126,11 +144,13 @@ def fixtures() -> region.ServedFixtures:
         "path": "/workspace/config/runtime.toml",
         "source_text": h.config_navigation_source(),
     })
+    served["/api/v1/keepers/alpha/memory-journal?limit=20"] = (
+        200, {"keeper": "alpha", "entries": []})
     # The MCP session the live feed opens: its handshake, and an observer
-    # stream with nothing to say.
+    # stream that stays open with nothing to say. A stream that closed would
+    # put "feed closed" in the Activity pane beside the body.
     served["/mcp"] = h.observer_http_fixtures()["/mcp"]
-    served["/mcp?sse_kind=observer"] = h.RawHttpResponse(
-        200, b": region baseline\n\n", content_type="text/event-stream")
+    served["/mcp?sse_kind=observer"] = h.StreamingHttpResponse(observer_stream)
     served["/api/v1/keepers/alpha/chat/history"] = (200, [{
         "id": "region-gate", "role": "system", "content": GATE_ARGUMENT,
         "ts": 1787348491.3,
@@ -158,8 +178,17 @@ def interaction(served: region.ServedFixtures):
         try:
             region.settle(process, fd, output)
             rows = region.whole_screen(output)
+            left = ROSTER_PANE_COLUMNS if screen in ROSTER_SCREENS else 0
+            right = (columns - h.ACTING_PANE_NARROW_COLUMNS
+                     if columns >= h.ACTING_PANE_THRESHOLD_COLUMNS else columns)
+            region.assert_no_failure_text(rows, f"{screen} at {columns}")
+            if left:
+                region.assert_pane_edge(rows, left - 1, f"{screen} at {columns}")
+            if right < columns:
+                region.assert_pane_edge(rows, right, f"{screen} at {columns}")
             measured[(screen, columns)] = region.measure(
-                rows, composer_rows=COMPOSER_ROWS[screen])
+                rows, columns=columns, composer_rows=COMPOSER_ROWS[screen],
+                left=left, right=right)
         except AssertionError as error:
             print(f"DISCOVERY {screen} {columns}: {str(error)[:600]}")
         print(f"DISCOVERY unanswered {screen} {columns}: {served.unanswered()}")
@@ -172,7 +201,13 @@ def interaction(served: region.ServedFixtures):
                               controls=(h.FULL_REDRAW,))
             take(process, fd, output, screen, columns)
 
-    def interact(process, fd, _slave, output, _base):
+    def interact(process, fd, slave, output, base):
+        try:
+            walk(process, fd, slave, output, base)
+        finally:
+            OBSERVER_CLOSED.set()
+
+    def walk(process, fd, _slave, output, _base):
         h.tab_until(process, fd, output, b"MASC Keepers")
         sweep(process, fd, output, "keepers", b"beta", WIDTHS)
 

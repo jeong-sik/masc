@@ -17,6 +17,7 @@ helpers here refuse a screen that is not:
 import base64
 import re
 import time
+import unicodedata
 import zlib
 
 import test_tui_keyboard_input as h
@@ -110,45 +111,105 @@ def whole_screen(output: bytearray) -> dict[int, bytes]:
     return rows
 
 
+# What a screen says when a read failed where the rows under test sit: the
+# harness's 503 sentinel carries the first, and a live feed whose stream ended
+# says the second in the Activity pane.
+FAILURE_TEXTS = (b"fixture endpoint unavailable", b"feed closed")
+
+
+def assert_no_failure_text(rows: dict[int, bytes], where: str) -> None:
+    failing = [row for row, text in rows.items()
+               if any(failure in text for failure in FAILURE_TEXTS)]
+    if failing:
+        raise AssertionError(f"{where}: rows {failing} report a failed read: "
+                             f"{[rows[row] for row in failing]!r}")
+
+
 def assert_answered(fixtures: ServedFixtures, where: str) -> None:
     unanswered = fixtures.unanswered()
     if unanswered:
         raise AssertionError(f"{where}: requests no fixture answered: {unanswered}")
 
 
-def is_rule(text: bytes) -> bool:
-    plain = text.decode("utf-8", "replace")
-    return any(glyph * RULE_RUN in plain for glyph in RULE_GLYPHS)
+def is_rule(text: str) -> bool:
+    return any(glyph * RULE_RUN in text for glyph in RULE_GLYPHS)
 
 
-def measure(rows: dict[int, bytes], *, composer_rows: int) -> dict[str, object]:
-    """Where the screen's rows sit, found by structure.
+def cell_width(character: str) -> int:
+    if unicodedata.combining(character):
+        return 0
+    return 2 if unicodedata.east_asian_width(character) in ("W", "F") else 1
 
-    Row 1 is the tab strip. The frame's title is the first row drawn below
-    it. Rules are the rows holding a run of box glyphs. The body ends where
-    the composer's rows begin -- [composer_rows] is the screen's, since a
-    screen that draws its own input has none -- and the footer is the body's
-    last drawn row."""
+
+def cells(text: bytes, left: int, right: int) -> str:
+    """The display cells [left, right) of a plain row. A wide glyph that
+    straddles an edge is left out: it belongs to neither side whole."""
+    out, column = [], 0
+    for character in text.decode("utf-8", "replace"):
+        width = cell_width(character)
+        if column >= left and column + width <= right:
+            out.append(character)
+        column += width
+    return "".join(out)
+
+
+def measure(
+    rows: dict[int, bytes],
+    *,
+    columns: int,
+    composer_rows: int,
+    left: int = 0,
+    right: int | None = None,
+) -> dict[str, object]:
+    """Where the body's rows sit, found by structure.
+
+    Row 1 is the tab strip and row 2 the body's top: blank on a full-screen
+    surface, a box's top border on a framed pane. The title is the body's first
+    drawn row below that top. Rules are the rows holding a run of box glyphs;
+    a framed pane's bottom border is the row holding its bottom corner. The
+    body sits between [left] and [right] -- the roster pane to its left and the
+    Activity pane to its right take the rest -- and ends where the composer's
+    [composer_rows] begin; a screen that draws its own input has none. The
+    footer spans the terminal and is the last row drawn above the composer."""
+    right = columns if right is None else right
+    body = {row: cells(rows[row], left, right) for row in range(1, TERMINAL_ROWS + 1)}
     last_body = TERMINAL_ROWS - composer_rows
     for row in range(last_body + 1, TERMINAL_ROWS + 1):
         if not rows[row].strip():
             raise AssertionError(f"composer row {row} is blank: {rows!r}")
-    drawn = [row for row in range(2, last_body + 1) if rows[row].strip()]
-    if not drawn:
-        raise AssertionError(f"nothing is drawn below the strip: {rows!r}")
+    top = body[2].strip()
+    if top and not top.startswith(BOX_TOP_LEFT):
+        raise AssertionError(f"row 2 is neither blank nor a box top: {top!r}")
+    drawn = [row for row in range(3, last_body + 1) if body[row].strip()]
+    footers = [row for row in range(3, last_body + 1) if rows[row].strip()]
+    if not drawn or not footers:
+        raise AssertionError(f"nothing is drawn in the body: {rows!r}")
     title = min(drawn)
-    footer = max(drawn)
+    footer = max(footers)
+    bottoms = [row for row in drawn if body[row].strip().startswith(BOX_BOTTOM_LEFT)]
     return {
+        "top": "border" if top else "blank",
         "title": title,
-        "rules": tuple(row for row in drawn if is_rule(rows[row])),
+        "rules": tuple(row for row in drawn if is_rule(body[row])),
+        "bottom": max(bottoms) if bottoms else None,
         "footer": footer,
-        "blank": sum(1 for row in range(title + 1, footer) if not rows[row].strip()),
+        "blank": sum(1 for row in range(title + 1, footer) if not body[row].strip()),
         "windows": tuple(
             match.decode()
-            for row in range(1, TERMINAL_ROWS + 1)
-            for match in WINDOW_RE.findall(rows[row])
+            for row in range(3, last_body + 1)
+            for match in WINDOW_RE.findall(body[row].encode())
         ),
     }
+
+
+def assert_pane_edge(rows: dict[int, bytes], column: int, where: str) -> None:
+    """The column a side pane's border stands in holds a border glyph on the
+    title row, so a body slice cut there is cut at the pane and not inside
+    the body."""
+    edge = cells(rows[3], column, column + 1)
+    if edge not in BORDER_GLYPHS:
+        raise AssertionError(f"{where}: no pane border at cell {column} "
+                             f"({edge!r}): {rows[3]!r}")
 
 
 def print_screen(name: str, columns: int, output: bytearray) -> None:

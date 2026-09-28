@@ -206,6 +206,42 @@ let test_usage_report_is_the_turn_total () =
   | reports -> failf "expected one report, got %d" (List.length reports)
 ;;
 
+(* The turn's usage belongs to the model the host named for its calls, not
+   the session's selection. *)
+let test_usage_report_names_the_model_the_calls_ran_on () =
+  match
+    Adapter.usage_reports
+      ~turn_count:4
+      ~position:Keeper_usage_resolution.Resumed
+      [ turn_started
+      ; Serve.Model_call_reported
+          { session_id; turn_id = "turn-1"; model = Some "muse-fixture-contributor" }
+      ; Serve.Usage_reported { session_id; turn_id = "turn-1"; usage }
+      ]
+  with
+  | [ report ] -> check string "model the calls ran on" "muse-fixture-contributor" report.model
+  | reports -> failf "expected one report, got %d" (List.length reports)
+;;
+
+(* A named call, then one whose model the host did not name: the turn's
+   usage is not the earlier model's. With no configured model the row falls
+   back to the runtime id. *)
+let test_usage_report_after_an_unnamed_call_is_not_the_earlier_model () =
+  match
+    Adapter.usage_reports
+      ~turn_count:4
+      ~position:Keeper_usage_resolution.Resumed
+      [ turn_started
+      ; Serve.Model_call_reported
+          { session_id; turn_id = "turn-1"; model = Some "muse-fixture-contributor" }
+      ; Serve.Model_call_reported { session_id; turn_id = "turn-1"; model = None }
+      ; Serve.Usage_reported { session_id; turn_id = "turn-1"; usage }
+      ]
+  with
+  | [ report ] -> check string "no model claimed for the last call" "muse.test" report.model
+  | reports -> failf "expected one report, got %d" (List.length reports)
+;;
+
 (* ── Error mapping ───────────────────────────────────────────────────── *)
 
 let disposition error =
@@ -548,6 +584,14 @@ def acknowledge(disposition="started"):
                                 "commandId": turn_id})
         if "subscription_usage" in FIXTURE:
             notify("usage/changed", FIXTURE["subscription_usage"])
+        # One session/tokenUsage per model call; null names no model.
+        for model in FIXTURE.get("call_models", []):
+            usage = {"sessionId": SESSION, "turnId": turn_id,
+                     "usage": {"inputTokens": 1, "outputTokens": 1},
+                     "promptTokens": 1, "totalTokens": 2}
+            if model is not None:
+                usage["modelId"] = model
+            notify("session/tokenUsage", usage)
 
 def tool_item(item_id, tool, call_id, status, revision, args="{}"):
     return {"itemId": item_id, "kind": "toolCall", "turnId": turn_id, "revision": revision,
@@ -1394,6 +1438,31 @@ let test_a_cancelled_turn_leaves_recovery () =
       (Some (started_turn_id ~base_path)) observed_turn)
 ;;
 
+(* The response label, its canonical model and the usage row name the model
+   the host named for the turn's last call. A last call with no model named
+   claims none: the canonical model is absent and the label falls back to the
+   configured model (muse-fixture-1). With no call reported, the session's
+   model names them. *)
+let test_turn_is_named_after_its_last_reported_call () =
+  List.iter (fun (calls, label, canonical) ->
+    with_scripted_host ~fixture:["call_models", `List calls] (fun ~base_path ->
+      let tool = masc_probe_tool (ref `Null) in
+      let run = run_turn_with ~model:"muse-fixture-1" ~base_path ~tool () in
+      match run.outcome.result with
+      | Error error -> fail (Agent_core.Error.to_string error)
+      | Ok result ->
+        check string "response label" label result.response.model;
+        check (option string) "canonical model" canonical
+          (Option.bind result.response.telemetry
+             (fun telemetry -> telemetry.Agent_core.Types.canonical_model_id));
+        check (list string) "usage row model" [label]
+          (List.map (fun (report : Keeper_client_usage_report.t) -> report.model) run.reports)))
+    [ [`String "muse-fixture-contributor"], "muse-fixture-contributor",
+      Some "muse-fixture-contributor"
+    ; [`String "muse-fixture-contributor"; `Null], "muse-fixture-1", None
+    ; [], "muse-fixture-1", Some "muse-fixture-1" ]
+;;
+
 (* A changed model starts a fresh session. *)
 let test_a_changed_model_starts_a_fresh_session () =
   with_scripted_host (fun ~base_path ->
@@ -2107,6 +2176,12 @@ let () =
     ; ( "usage"
       , [ test_case "turn/completed usage is the turn total" `Quick
             test_usage_report_is_the_turn_total
+        ; test_case "usage names the model the calls ran on" `Quick
+            test_usage_report_names_the_model_the_calls_ran_on
+        ; test_case "usage after an unnamed call is not the earlier model" `Quick
+            test_usage_report_after_an_unnamed_call_is_not_the_earlier_model
+        ; test_case "a turn is named after its last reported call" `Quick
+            test_turn_is_named_after_its_last_reported_call
         ] )
     ; ( "errors"
       , [ test_case "callback failure keeps persistence cause" `Quick test_persistence_cause_survives_callback_protocol_projection

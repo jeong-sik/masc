@@ -67,7 +67,13 @@ class BatchEvidenceTest(unittest.TestCase):
         self.put("commits/main", {"sha": self.main})
         self.fixture = self.root / "api.json"
         self.fake = self.root / "gh"
-        self.fake.write_text("""#!/usr/bin/env python3
+        real_jq = shutil.which("jq")
+        if real_jq is None:
+            self.fail("fake GitHub responses require jq on the test host")
+        # Keep the fixture's dependency available when a scenario removes jq
+        # from the guard's PATH. Discover it on this host before that change.
+        self.fake.write_text("#!/usr/bin/env python3\nJQ = "
+                             + repr(str(Path(real_jq).resolve())) + "\n" + """
 import json, subprocess, sys
 from pathlib import Path
 args = sys.argv[1:]
@@ -98,7 +104,7 @@ if mutation:
     Path(__file__).with_name('api.json').write_text(json.dumps(data))
 value = json.dumps(selected)
 if '--jq' in args:
-    raise SystemExit(subprocess.run(['/opt/homebrew/bin/jq', '-r', args[args.index('--jq') + 1]],
+    raise SystemExit(subprocess.run([JQ, '-r', args[args.index('--jq') + 1]],
                                    input=value, text=True).returncode)
 print(value)
 """)

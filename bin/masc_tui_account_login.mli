@@ -37,7 +37,14 @@ val receipt : t -> Yojson.Safe.t -> (bool, string) result
 val event : generation:int -> t -> event -> action
 val source : t -> Yojson.Safe.t
 val save_body : t -> model -> int option -> Yojson.Safe.t
-val lines : t -> string list
-val visible_lines : height:int -> t -> string list
+type row =
+  | Text of string  (** Written by this pane or the server: drawn as plain text. *)
+  | Terminal of Masc_tui_sgr_text.line
+      (** What the official client printed during login, with the colours it
+          chose. *)
+val lines : t -> row list
+val row_text : row -> string
+(** The row's characters without colour. *)
+val visible_lines : height:int -> t -> row list
 val hints : t -> string
 val decoder : integration_id:string -> (event -> unit) -> (string -> unit) * (unit -> bool)

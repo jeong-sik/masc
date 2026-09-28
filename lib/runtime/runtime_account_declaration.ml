@@ -41,6 +41,7 @@ type client =
   | Codex
   | Antigravity
   | Muse
+[@@deriving enumerate]
 
 type base =
   { id : string
@@ -210,41 +211,109 @@ let login_store ?home_dir ~inherited_home client table =
       (Option.bind (field "credentials" table) (string_field "path"))
 ;;
 
-(* The directory an absolute path reaches on this machine, for comparing two
-   login stores; the text written stays as it is. Each part that exists is
-   resolved by the filesystem, so [..], links and the letter case of a
-   case-insensitive disk lead where the client would open. A part that does
-   not exist yet cannot be a link, so the rest is joined as written, without
-   empty and [.] parts. A part the filesystem refuses to read leaves the
-   directory unknown, and that is an error rather than a guess. *)
-let directory_of path =
-  let step directory part =
-    match directory with
-    | Error _ as unknown -> unknown
-    | Ok directory when part = ".." -> Ok (Filename.dirname directory)
-    | Ok directory ->
+(* A file or directory that exists, told apart the way the filesystem does:
+   two names with one device and inode are one thing, whether the second
+   name is a link, a hard link or another letter case. *)
+type identity =
+  { dev : int
+  ; ino : int
+  }
+
+(* Where a login store is on this machine, for comparing two of them; the
+   text written stays as it is. A store that does not exist yet is the
+   deepest directory on its path that does, and the parts below it as
+   written. *)
+type place =
+  | Existing of identity
+  | Absent of
+      { under : identity
+      ; rest : string list
+      }
+
+(* The parts that do not exist yet are compared with ASCII letters in either
+   case taken as equal: on a case-insensitive disk [acct-new] and [ACCT-NEW]
+   become one directory once either is created, and on a case-sensitive disk
+   refusing both is the safe side. Nothing else is folded: two such names
+   that differ in the case of a non-ASCII letter, or only in Unicode
+   normalization, compare as different. *)
+let same_place a b =
+  let same_identity a b = a.dev = b.dev && a.ino = b.ino in
+  let same_part a b = String.equal (String.lowercase_ascii a) (String.lowercase_ascii b) in
+  match a, b with
+  | Existing a, Existing b -> same_identity a b
+  | Absent a, Absent b -> same_identity a.under b.under && List.equal same_part a.rest b.rest
+  | Existing _, Absent _ | Absent _, Existing _ -> false
+;;
+
+(* Links followed in one path before giving up: Linux's MAXSYMLINKS. macOS
+   gives up at 32, so a chain of 33 to 40 links is read here although the
+   client could not open it. *)
+let max_links = 40
+
+let parts_of path =
+  List.filter (fun part -> part <> "" && part <> ".") (String.split_on_char '/' path)
+;;
+
+let identity_of (stats : Unix.stats) = { dev = stats.Unix.st_dev; ino = stats.Unix.st_ino }
+
+(* Where an absolute path leads, walked one part at a time as the kernel
+   opens it. [..] goes up from where the walk has reached, so after a link it
+   is the target's parent. A link is followed even when what it names does
+   not exist yet, since signing in creates it. Nothing exists below a part
+   that does not, so the parts after it are kept without reading the disk,
+   and [..] drops the last of them. A part below a file, more than
+   [max_links] links, or a part the filesystem refuses to read leaves the
+   place unknown, and that is an error rather than a guess. *)
+let place_of path =
+  let refused name error = Error (Printf.sprintf "%s: %s" name (Unix.error_message error)) in
+  (* [directory] exists and has no link in it; [absent] is below it, last
+     part first. *)
+  let rec walk ~links directory absent parts =
+    match parts, absent with
+    | [], _ ->
+      (match Unix.stat directory with
+       | exception Unix.Unix_error (error, _, _) -> refused directory error
+       | stats ->
+         (match absent with
+          | [] -> Ok (Existing (identity_of stats))
+          | _ :: _ ->
+            Ok (Absent { under = identity_of stats; rest = List.rev absent })))
+    | ".." :: parts, _ :: above -> walk ~links directory above parts
+    | ".." :: parts, [] -> walk ~links (Filename.dirname directory) [] parts
+    | part :: parts, _ :: _ -> walk ~links directory (part :: absent) parts
+    | part :: parts, [] ->
       let next = Filename.concat directory part in
-      (match Unix.realpath next with
-       | resolved -> Ok resolved
-       | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) -> Ok next
-       | exception Unix.Unix_error (error, _, _) ->
-         Error (Printf.sprintf "%s: %s" next (Unix.error_message error)))
+      (match Unix.lstat next with
+       | exception Unix.Unix_error (Unix.ENOENT, _, _) -> walk ~links directory [ part ] parts
+       | exception Unix.Unix_error (error, _, _) -> refused next error
+       | stats ->
+         (match stats.Unix.st_kind with
+          | Unix.S_DIR -> walk ~links next [] parts
+          | Unix.S_LNK when links >= max_links -> refused next Unix.ELOOP
+          | Unix.S_LNK ->
+            (match Unix.readlink next with
+             | exception Unix.Unix_error (error, _, _) -> refused next error
+             | target ->
+               let from = if Filename.is_relative target then directory else "/" in
+               walk ~links:(links + 1) from [] (parts_of target @ parts))
+          | Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK ->
+            (match parts with
+             | [] -> Ok (Existing (identity_of stats))
+             | _ :: _ -> refused next Unix.ENOTDIR)))
   in
-  List.fold_left
-    step
-    (Ok "/")
-    (List.filter (fun part -> part <> "" && part <> ".") (String.split_on_char '/' path))
+  walk ~links:0 "/" [] (parts_of path)
 ;;
 
 (* The provider of [client] that already signs in where [location] leads.
-   Two spellings of one directory are one login: [/a/b/], [/a/./b],
-   [/a/c/../b], a link to [/a/b], or [/A/B] on a case-insensitive disk. *)
+   Two spellings of one place are one login: [/a/b/], [/a/./b], [/a/c/../b],
+   a link to [/a/b] even before [/a/b] exists, a hard link to an OAuth file,
+   or [/A/B] on a case-insensitive disk. *)
 let signed_in_at ?home_dir ~inherited_home t client location =
   let unknown path detail =
     Invalid_location
       (Printf.sprintf "cannot tell which directory %s is (%s)" path detail)
   in
-  let* target = Result.map_error (unknown location) (directory_of location) in
+  let* target = Result.map_error (unknown location) (place_of location) in
   List.fold_left
     (fun found (id, table) ->
       match found with
@@ -255,8 +324,8 @@ let signed_in_at ?home_dir ~inherited_home t client location =
            (match login_store ?home_dir ~inherited_home client table with
             | None -> Ok None
             | Some store ->
-              (match directory_of store with
-               | Ok directory when directory = target -> Ok (Some id)
+              (match place_of store with
+               | Ok place when same_place place target -> Ok (Some id)
                | Ok _ -> Ok None
                | Error detail ->
                  Error

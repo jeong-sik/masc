@@ -436,6 +436,128 @@ max-context = 272000
         (taken_by (path "REAL")))
 ;;
 
+let with_temp_dir f =
+  let root = Filename.temp_dir "masc-account-declaration" "" in
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote root)))
+    (fun () -> f (Filename.concat root))
+
+(* The provider [declare] names when it refuses [location] as a login already
+   in use; [None] when the copy is declared. *)
+let signed_in_by t ~base location =
+  match D.declare ~inherited_home t ~base:(base_named t base) ~id:"copy" ~location with
+  | Error (D.Location_taken { provider; _ }) -> Ok (Some provider)
+  | Ok _ -> Ok None
+  | Error e -> Error e
+
+let check_signed_in label expected actual =
+  Alcotest.(check (result (option string) string))
+    label expected (Result.map_error D.error_message actual)
+
+(* A home is often declared before the client first signs in, so it does not
+   exist yet. It still has to be compared with where a client will open it
+   once it does: through a link that points at it already, and in the letter
+   case a case-insensitive disk would ignore. *)
+let test_a_home_that_does_not_exist_yet () =
+  with_temp_dir (fun path ->
+    Sys.mkdir (path "accounts") 0o755;
+    Unix.symlink (path "accounts/new-home") (path "accounts/alias");
+    Unix.symlink "waiting" (path "accounts/relative-alias");
+    Unix.symlink (path "loop") (path "loop");
+    Out_channel.with_open_bin (path "regular-file") (fun out ->
+      Out_channel.output_string out "not a directory");
+    let t =
+      parsed
+        (Printf.sprintf
+           {|[providers.codex_subscription]
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+account-home = "%s"
+
+[providers.codex_waiting]
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+account-home = "%s"
+
+[providers.codex_lower]
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+account-home = "%s"
+
+[models."gpt-5.6"]
+api-name = "gpt-5.6"
+max-context = 272000
+
+[codex_subscription."gpt-5.6"]
+
+[codex_waiting."gpt-5.6"]
+
+[codex_lower."gpt-5.6"]
+|}
+           (path "accounts/alias")
+           (path "accounts/waiting")
+           (path "accounts/acct-new"))
+    in
+    let taken_by = signed_in_by t ~base:"codex_subscription" in
+    check_signed_in "the home a provider's link will lead to"
+      (Ok (Some "codex_subscription")) (taken_by (path "accounts/new-home"));
+    check_signed_in "a relative link to a home a provider will create"
+      (Ok (Some "codex_waiting")) (taken_by (path "accounts/relative-alias"));
+    check_signed_in "letter case of a name that does not exist yet"
+      (Ok (Some "codex_lower")) (taken_by (path "accounts/ACCT-NEW"));
+    check_signed_in "another name that does not exist yet" (Ok None)
+      (taken_by (path "accounts/other"));
+    (match taken_by (path "regular-file/child") with
+     | Error (D.Invalid_location _) -> ()
+     | Ok _ | Error _ -> Alcotest.fail "a home below a file is refused");
+    match taken_by (path "loop") with
+    | Error (D.Invalid_location _) -> ()
+    | Ok _ | Error _ -> Alcotest.fail "a link that leads to itself is refused")
+
+(* Antigravity signs in with a file, and a file has as many names as it has
+   hard links. *)
+let test_an_oauth_file_by_any_name () =
+  with_temp_dir (fun path ->
+    let write name =
+      Out_channel.with_open_bin (path name) (fun out ->
+        Out_channel.output_string out "token")
+    in
+    write "oauth-a";
+    write "oauth-copy";
+    Unix.link (path "oauth-a") (path "oauth-b");
+    Unix.symlink (path "oauth-a") (path "oauth-link");
+    let t =
+      parsed
+        (Printf.sprintf
+           {|[providers.agy]
+protocol = "antigravity-cli"
+command = "agy"
+is-non-interactive = true
+timeout-s = 180.0
+
+[providers.agy.credentials]
+type = "file"
+path = "%s"
+
+[models.flash]
+api-name = "gemini-3.7-flash-high"
+max-context = 1000000
+
+[agy.flash]
+|}
+           (path "oauth-a"))
+    in
+    let taken_by = signed_in_by t ~base:"agy" in
+    check_signed_in "a hard link to the file" (Ok (Some "agy"))
+      (taken_by (path "oauth-b"));
+    check_signed_in "a link to the file" (Ok (Some "agy"))
+      (taken_by (path "oauth-link"));
+    check_signed_in "another file with the same bytes" (Ok None)
+      (taken_by (path "oauth-copy")))
+
 let () =
   Alcotest.run "runtime_account_declaration"
     [ ( "declare"
@@ -452,6 +574,10 @@ let () =
         ; Alcotest.test_case "refusals" `Quick test_refusals
         ; Alcotest.test_case "one directory by any spelling" `Quick
             test_one_directory_by_any_spelling
+        ; Alcotest.test_case "a home that does not exist yet" `Quick
+            test_a_home_that_does_not_exist_yet
+        ; Alcotest.test_case "an oauth file by any name" `Quick
+            test_an_oauth_file_by_any_name
         ; Alcotest.test_case "copied numbers keep their value" `Quick
             test_copied_numbers_keep_their_value
         ; Alcotest.test_case "layouts the append cannot carry" `Quick

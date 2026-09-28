@@ -61,6 +61,42 @@ let server_shutdown () = run_process (fun env path session ->
    with Eio.Cancel.Cancelled _ -> interrupted := true);
   check bool "server cancellation propagates after cleanup" true !interrupted;
   Ok ())
+let executable_file dir name =
+  let path = Filename.concat dir name in
+  let channel = open_out path in
+  close_out channel;
+  Unix.chmod path 0o755;
+  path
+let with_path value f =
+  let old_path = Sys.getenv "PATH" in
+  Fun.protect ~finally:(fun () -> Unix.putenv "PATH" old_path)
+    (fun () -> Unix.putenv "PATH" value; f ())
+let python_prefers_the_bundled_release () = temporary (fun root ->
+  let bindir = Filename.concat root "bin" in
+  Fs_compat.mkdir_p (Filename.concat bindir "python/bin");
+  let bundled = executable_file (Filename.concat bindir "python/bin") "python3" in
+  temporary (fun other ->
+    let _ = executable_file other "python3" in
+    with_path other (fun () ->
+      check (option string) "bundled wins over PATH" (Some bundled)
+        (S.python ~binary:(Filename.concat bindir "masc")))))
+let python_falls_back_to_path () = temporary (fun root ->
+  let bindir = Filename.concat root "bin" in
+  Fs_compat.mkdir_p bindir;
+  temporary (fun other ->
+    let expected = executable_file other "python3" in
+    with_path (":" ^ other) (fun () ->
+      check (option string) "empty segments skipped, PATH searched" (Some expected)
+        (S.python ~binary:(Filename.concat bindir "masc")))))
+let python_missing_without_bundled_or_path () = temporary (fun root ->
+  let bindir = Filename.concat root "bin" in
+  Fs_compat.mkdir_p bindir;
+  with_path "" (fun () ->
+    check (option string) "no interpreter anywhere" None
+      (S.python ~binary:(Filename.concat bindir "masc"))))
 let () = run "setup-login-session" ["ownership", [test_case "scope and physical account locks" `Quick isolated_scope];
   "process lifetime", [test_case "normal exit" `Quick normal_exit; test_case "cancel" `Quick explicit_cancel;
-    test_case "disconnect" `Quick disconnect; test_case "pipe EOF" `Quick pipe_eof; test_case "server shutdown" `Quick server_shutdown]]
+    test_case "disconnect" `Quick disconnect; test_case "pipe EOF" `Quick pipe_eof; test_case "server shutdown" `Quick server_shutdown];
+  "interpreter", [test_case "bundled release preferred" `Quick python_prefers_the_bundled_release;
+    test_case "PATH fallback" `Quick python_falls_back_to_path;
+    test_case "missing without bundled or PATH" `Quick python_missing_without_bundled_or_path]]

@@ -1,13 +1,26 @@
 type t = { config_home : string; account_revision : string; account_home : string; physical_home : string }
 
+type sign_in_gap =
+  | No_file_sign_in
+  | Keychain_sign_in
+  | Unsupported_credential_storage of string
+
 type error =
   | Invalid_account_home of string
-  | Sign_in_required
+  | Sign_in_required of sign_in_gap
   | State_unavailable of string
 
 let error_to_string = function
   | Invalid_account_home detail -> "Muse account home: " ^ detail
-  | Sign_in_required -> "Muse account has no file-backed sign-in; sign in to the selected account home"
+  | Sign_in_required No_file_sign_in ->
+    "Muse account has no file-backed sign-in; sign in to the selected account home"
+  | Sign_in_required Keychain_sign_in ->
+    "Muse account keeps its sign-in in the macOS Keychain, which masc cannot hand to \
+     a selected account; sign in again with /login muse"
+  | Sign_in_required (Unsupported_credential_storage storage) ->
+    Printf.sprintf
+      "Muse account records its sign-in in storage %S, which masc cannot read; \
+       sign in again with /login muse" storage
   | State_unavailable detail -> "Muse managed configuration: " ^ detail
 
 let account_home t = t.account_home
@@ -94,14 +107,33 @@ let parse_record body =
     | _ -> unavailable "invalid credential generation record"
   with Yojson.Json_error _ -> unavailable "unreadable credential generation record"
 
+type credential_storage = In_file | In_keychain
+
+(* The vendor marks a sign-in whose secrets it moved into the macOS Keychain
+   with [storage: "keychain"] and leaves only metadata in auth.json. A slot
+   that holds its secrets inline carries no marker, or the file backend's own
+   name [file]. Only the inline form survives the copy into a managed
+   generation, which is why every Muse child runs with the file backend
+   (Runtime_muse_serve). *)
+let credential_storage meta =
+  match List.assoc_opt "storage" meta with
+  | None | Some (`String "file") -> Ok In_file
+  | Some (`String "keychain") -> Ok In_keychain
+  | Some (`String other) -> Error (Sign_in_required (Unsupported_credential_storage other))
+  | Some _ -> unavailable "selected account has a malformed Meta credential storage field"
+
 let validate_auth body =
   try match Yojson.Safe.from_string body with
   | `Assoc fields ->
     (match List.assoc_opt "schema_version" fields, List.assoc_opt "providers" fields with
      | Some (`Int 1), Some (`Assoc providers) ->
        (match List.assoc_opt "meta" providers with
-        | Some (`Assoc (_ :: _)) -> Ok ()
-        | None | Some (`Assoc []) -> Error Sign_in_required
+        | Some (`Assoc ((_ :: _) as meta)) ->
+          let* storage = credential_storage meta in
+          (match storage with
+           | In_file -> Ok ()
+           | In_keychain -> Error (Sign_in_required Keychain_sign_in))
+        | None | Some (`Assoc []) -> Error (Sign_in_required No_file_sign_in)
         | Some _ -> unavailable "selected account has malformed Meta credentials")
      | _ -> unavailable "selected account has an unsupported auth document")
   | _ -> unavailable "selected account has an invalid auth document"
@@ -110,7 +142,7 @@ let validate_auth body =
 let prepare_locked ~sync_store ~selected_account_home ~account_home ~store ~source =
   let* source_bytes = read_optional ~ownership_root:account_home source in
   match source_bytes with
-  | None -> Error Sign_in_required
+  | None -> Error (Sign_in_required No_file_sign_in)
   | Some source_bytes ->
     let* () = validate_auth source_bytes in
     let source_sha256 = digest source_bytes in
@@ -129,7 +161,7 @@ let prepare_locked ~sync_store ~selected_account_home ~account_home ~store ~sour
          | Some body when String.equal body settings -> Ok ()
          | None | Some _ -> unavailable "managed permission settings changed or are missing" in
        (match auth with
-        | None -> Error Sign_in_required
+        | None -> Error (Sign_in_required No_file_sign_in)
         | Some body ->
           let* () = validate_auth body in
           (* A previous current.json rename may have become visible even when

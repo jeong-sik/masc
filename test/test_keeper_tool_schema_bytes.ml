@@ -398,7 +398,12 @@ open Alcotest
    lookup miss, and the comment body field matches post's. The pattern mirrors
    Board.Post_id.of_string exactly, so it rejects no id the parser accepts.
    Pin to the measured inventory with no added headroom. *)
-let ceiling_bytes = 128_547
+(* 2026-09-28: 128,595 across 146 tools, this suite run locally on the merge
+   of #39505 into this branch. This branch alone measured 128,547 (entry
+   below); #39505 changed masc_board_post_get's default read and added 48
+   rendered bytes. The two touch the same file, so the merged figure is the
+   measurement rather than the sum. Pin to it with no added headroom. *)
+let ceiling_bytes = 128_595
 
 
 let schema_json (schema : Masc_domain.tool_schema) =

@@ -411,7 +411,16 @@ open Alcotest
    masc_ask.context +32 take the checklists the shared Keeper prompt spelled
    out for those two calls, which the prompt no longer carries. All three
    tools are deferred on the agent-core lane. No added headroom. *)
-let ceiling_bytes = 128_889
+(* 2026-09-28: 128,988, +99 over the entry above, again a replay and not a
+   CI reading. masc_goal_upsert.metric no longer says the judge cannot read
+   inside a Keeper's sandbox, which was false for the Docker profile's shared
+   mount. It now says a path as a Keeper sees it in its workspace is not one
+   the judge opens, which holds on every sandbox profile, and keeps the host
+   .masc/playground file for host-side authors. Correction to that entry:
+   its 128,595 base was not re-measured after #39454 trimmed four board
+   descriptions (about 67 to 98 bytes by replay), so the surface sits that
+   far under this ceiling rather than exactly at it. *)
+let ceiling_bytes = 128_988
 
 
 let schema_json (schema : Masc_domain.tool_schema) =

@@ -392,12 +392,35 @@ let item_is_pinned item =
         | Key_atom pinned -> List.exists (String.equal pinned) atoms)
       never_dropped_keys
 
+type hint_item =
+  { hint_text : string
+  ; pinned : bool
+  }
+
+type hint_row =
+  { full_text : string
+  ; items : hint_item list Lazy.t
+  }
+
+let prepare_hints full_text =
+  (* This lazy belongs to one synchronous [line] call. No fiber yields or
+     shared cache can force it concurrently. A row that fits with no conflict
+     never needs to split its hints; every narrower attempt shares the same
+     parsed items and pin decisions. Keep [full_text] verbatim for that first
+     fit, including the caller's spacing and styles. *)
+  let items = lazy (
+    split_on_double_space full_text
+    |> List.filter (fun item -> not (String.equal (String.trim item) ""))
+    |> List.map (fun hint_text ->
+        { hint_text; pinned = item_is_pinned hint_text })) in
+  { full_text; items }
+
 (* The last key this row may give up, by index. [None] once only pinned keys
    are left. *)
 let last_droppable kept =
   List.fold_left
     (fun (index, found) item ->
-      (index + 1, if item_is_pinned item then found else Some index))
+      (index + 1, if item.pinned then found else Some index))
     (0, None)
     kept
   |> snd
@@ -409,9 +432,9 @@ let rec without_lowest_priority = function
 (* The undroppable keys of a hint row: what the narrowest row this fitter can
    draw still has to carry. *)
 let undroppable_keys hints =
-  split_on_double_space hints
-  |> List.filter (fun item -> not (String.equal (String.trim item) ""))
-  |> List.filter item_is_pinned
+  Lazy.force hints.items
+  |> List.filter_map (fun item ->
+      if item.pinned then Some item.hint_text else None)
 
 (* Which notice to give up when the set will not fit. The one that cannot be
    drawn in the narrowest row that could carry it -- itself, the keys that cannot
@@ -457,16 +480,14 @@ let without_a_blocking_conflict ?literal_prefix ?position ~max_cells ~hints conf
    Otherwise one long path would starve a short, actionable build mismatch that
    ranks below it and fits on its own. *)
 let drop_hint_items ?literal_prefix ?position ~max_cells ~conflicts hints =
-  let keys =
-    split_on_double_space hints
-    |> List.filter (fun item -> not (String.equal (String.trim item) ""))
-  in
+  let keys = Lazy.force hints.items in
   let row conflicts kept =
     with_position position
       ("  "
        ^ String.concat "  "
            (List.map (fun conflict -> conflict.text) conflicts
-            @ Option.to_list literal_prefix @ kept))
+            @ Option.to_list literal_prefix
+            @ List.map (fun item -> item.hint_text) kept))
     ^ "  " ^ cut_marker
   in
   let fits conflicts kept =
@@ -485,22 +506,24 @@ let drop_hint_items ?literal_prefix ?position ~max_cells ~conflicts hints =
    drawable at this width at all, and is put aside before priority is read.
    Otherwise one long path would starve a short, actionable build mismatch that
    ranks below it and fits on its own. *)
-let drawable_conflicts ?literal_prefix ~max_cells ~hints conflicts =
-  let undroppable = undroppable_keys hints in
-  (* No cut marker in the probe. A row that gives nothing up carries none, and
-     counting it here rejected a notice that fits a row exactly. Where a key
-     does have to go the marker's cells are counted by the fit itself, which
-     then shrinks the conflict set -- the probe only has to stop a notice that
-     can never be drawn from taking the ranking down with it. *)
-  List.filter
-    (fun conflict ->
-      let row =
-        "  "
-        ^ String.concat "  "
-            ((conflict.text :: Option.to_list literal_prefix) @ undroppable)
-      in
-      Masc_tui_message_layout.display_width row <= max_cells)
-    conflicts
+let drawable_conflicts ?literal_prefix ~max_cells ~hints = function
+  | [] -> []
+  | conflicts ->
+    let undroppable = undroppable_keys hints in
+    (* No cut marker in the probe. A row that gives nothing up carries none, and
+       counting it here rejected a notice that fits a row exactly. Where a key
+       does have to go the marker's cells are counted by the fit itself, which
+       then shrinks the conflict set -- the probe only has to stop a notice that
+       can never be drawn from taking the ranking down with it. *)
+    List.filter
+      (fun conflict ->
+        let row =
+          "  "
+          ^ String.concat "  "
+              ((conflict.text :: Option.to_list literal_prefix) @ undroppable)
+        in
+        Masc_tui_message_layout.display_width row <= max_cells)
+      conflicts
 
 (* What fits with this conflict set kept whole: the status facts give way in
    [omission_order], then the keys give way as whole items. [None] when even the
@@ -511,7 +534,7 @@ let rec fit_with_conflicts ?literal_prefix ?position ~mark_omission ~max_cells
     String.concat "  "
       (List.map (fun item -> item.text) conflicts
        @ Option.to_list literal_prefix
-       @ [ with_position_and_marker ~mark_omission position hints ])
+       @ [ with_position_and_marker ~mark_omission position hints.full_text ])
   in
   let rendered = body leading statuses in
   if Masc_tui_message_layout.display_width rendered <= max_cells then
@@ -609,7 +632,7 @@ let rec fit_body ?literal_prefix ?action_text ?position ~max_cells ~conflicts ~h
           [Left / Esc:back] and [q:quit]. *)
        let cut_from =
          match undroppable_keys hints with
-         | [] -> hints
+         | [] -> hints.full_text
          | undroppable -> String.concat "  " undroppable
        in
        let rendered =
@@ -642,6 +665,7 @@ let rec fit_body ?literal_prefix ?action_text ?position ~max_cells ~conflicts ~h
     instead of going before them. *)
 let line ?literal_prefix ?action_text ?position ?(status = []) ~dim ~reset
     ~max_cells ~port ~hints () =
+  let hints = prepare_hints hints in
   let statuses =
     List.filter_map status_item_projection (status @ [ Port port ])
   in

@@ -1312,7 +1312,13 @@ let board_author_width = 16
 let board_age_width = 6
 let board_score_width = 5
 let board_replies_width = 7
-let board_minimum_title_width = 12
+
+(* The title is what the list is read for, so it is the last thing a narrow
+   list takes cells from. Thirty cells hold about fifteen Hangul syllables,
+   enough to tell one post from the next; below that the list gives up
+   columns in its drop order rather than cutting the title (operator,
+   2026-09-28). *)
+let board_minimum_title_width = 30
 
 type board_row_values = {
   brow_mark : string;

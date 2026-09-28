@@ -733,7 +733,10 @@ let scan_refuted_goal_notifications config =
   | Error _ -> ()
   | Ok goals ->
     (match Goal_verification.load_records_authoritative config with
-     | Error _ -> ()
+     | Error detail ->
+       Log.Misc.warn
+         "goal refuted owner notice scan skipped: verification ledger unreadable: %s"
+         detail
      | Ok records ->
        List.iter
          (fun (goal : Goal_store.goal) ->

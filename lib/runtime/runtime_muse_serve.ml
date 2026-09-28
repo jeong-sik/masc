@@ -506,6 +506,8 @@ let login_environment ~account_home =
      update or its independent download-authentication flow. *)
   Array.append [|"MUSE_NO_AUTO_UPDATE=1"|] (client_environment (Some account_home) None)
 
+let login_argv ~cli_path = [ cli_path; "login" ]
+
 let client_argv config =
   [ config.cli_path; "serve" ]
   @ (match config.native with

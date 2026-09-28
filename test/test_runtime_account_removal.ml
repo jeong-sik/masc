@@ -19,7 +19,7 @@ slots = ["codex_subscription.gpt-5.6"]
 cli_slots = ["codex_acct1.gpt-5.6"]
 
 [runtime.assignments]
-sangsu = "codex_acct1.gpt-5.6"
+fixture_remove_keeper = "codex_acct1.gpt-5.6"
 other = "codex_subscription.gpt-5.6"
 by_lane = "coding"
 
@@ -125,7 +125,7 @@ let test_the_account_and_what_routes_to_it_go () =
     ; "lane coding: codex_acct1.gpt-5.6"
     ; "exact lane verifier_exact: codex_acct1.gpt-5.6"
     ; "vision codex_acct1.gpt-5.6"
-    ; "keeper sangsu: codex_acct1.gpt-5.6"
+    ; "keeper fixture_remove_keeper: codex_acct1.gpt-5.6"
     ]
     (List.map show_change changes);
   Alcotest.(check (option string)) "the login store is reported, not removed"
@@ -240,13 +240,13 @@ coding = { candidates = ["codex_acct1.gpt-5.6", "codex_subscription.gpt-5.6"] }|
     ; ( "assignments written as dotted keys"
       , replace
           ~sub:{|[runtime.assignments]
-sangsu = "codex_acct1.gpt-5.6"
+fixture_remove_keeper = "codex_acct1.gpt-5.6"
 other = "codex_subscription.gpt-5.6"
 by_lane = "coding"
 |}
           ~by:""
           (replace ~sub:"[runtime]\n"
-             ~by:"[runtime]\nassignments.sangsu = \"codex_acct1.gpt-5.6\"\nassignments.by_lane = \"coding\"\n"
+             ~by:"[runtime]\nassignments.fixture_remove_keeper = \"codex_acct1.gpt-5.6\"\nassignments.by_lane = \"coding\"\n"
              fixture) )
     ; ( "a provider written inline"
       , replace

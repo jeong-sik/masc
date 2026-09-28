@@ -27,14 +27,17 @@ Codex 가 한도를 매기는 단위는 홈이 아니라 **ChatGPT 계정**이�
 제안은 이렇다.
 
 1. 계정은 Codex app-server 의 안정 계약인 `account/rateLimits/read` 응답의 `accountId` 로 안다.
-   같은 workspace 의 여러 seat 를 합치지 않도록, 같은 프로세스의 `account/read` 가 답한 `email` 과 짝지어 쓴다 (결정 1).
+   같은 workspace 의 여러 seat 를 합치지 않도록 `account/read` 의 `email` 과 짝짓되, 두 값과 기록할 사건이 같은 인증 주인에게 속한다는 증거가 필요하다 (결정 1).
 2. Codex turn 은 `account/read` 다음에 이 읽기를 **보내기만 하고** `thread/start` 로 간다. 답은 turn 이 도는 동안 받는다.
    읽기가 늦거나 실패해도 turn 은 기다리지 않는다.
-3. 그 turn 의 기록은 그 turn 의 읽기가 답한 계정에 붙인다. 답을 못 받았으면 그 홈에만 걸리는 별도 variant 에 둔다.
-4. 홈이 지금 어느 계정을 쓰는지는 프로세스 안 관측 표 하나에 둔다. 가장 새 읽기가 계정을 답하지 못하면 그 홈은 "미확인" 이 되고, 옛 계정 기록으로 밀리지 않는다.
+3. 그 turn 의 기록은 읽기와 turn 의 인증 주인이 같다고 확인된 계정에 붙인다. 답이나 귀속 증거가 없으면 그 홈에만 걸리는 별도 variant 에 둔다.
+4. 홈이 지금 어느 계정을 쓰는지는 프로세스 안 관측 표 하나에 둔다. 현재 자격 증명 세대의 가장 새 읽기가 계정을 확인하지 못하면 그 홈은 "미확인" 이 된다. 옛 세대의 읽기는 이 표를 되돌리지 못한다.
 5. 홈의 계정이 바뀌어도 기록은 옮기지 않는다. 기록은 계정의 것이고, 홈은 가리키는 계정만 바꾼다.
 
 게이트·만료 시각·호환 코드는 더하지 않는다.
+
+이 문서는 **Draft** 다. 아래 "관측 귀속의 구현 선행 조건" 두 항목은 아직 충족하지 못했다.
+같은 프로세스에서 받은 두 응답이나 요청 순번만으로 계정 공유·기록을 구현해도 된다는 뜻이 아니다.
 
 ## 지금 어떻게 동작하나
 
@@ -179,13 +182,23 @@ MASC 는 지금 이것을 `usageLimitExceeded` 와 같은 계정 소진으로 �
   (`lib/runtime/runtime_codex_app_server.ml:1715`) 지금도 받고 있지만, 안정 필드가 있는데 실험 필드에 기대지 않는다.
 - **email 단독**: 같은 사람이 개인·팀 workspace 를 따로 가지면 email 은 같고 한도는 다르다. 두 계정을 하나로 합치게 된다.
 
-### 도는 프로세스의 계정은 바뀌지 않는다
+### 프로세스가 같아도 계정 키가 고정되지는 않는다
 
-upstream `AuthManager` 는 인증 거절 복구와 토큰 갱신 때 자격 증명을 다시 읽는다.
-이때 새로 읽은 계정 id 가 원래 계정과 다르면 다시 읽기를 건너뛴다
-(`reload_if_account_id_matches`, `codex-rs/login/src/auth/manager.rs` 2487-2521행, `rust-v0.157.1`).
-그래서 turn 도중 다른 터미널에서 `codex login` 을 해도 그 turn 의 프로세스는 처음 계정을 계속 쓴다.
-무조건 다시 읽는 `reload()`(2481행)를 누가 부르는지는 다 확인하지 않았다. **확신: 중간–높음**.
+upstream `rust-v0.157.1` (`36650394c5b38c2990ccf2a3457165ca3e9d9726`) 의
+[`reload_if_account_id_matches`](https://github.com/openai/codex/blob/36650394c5b38c2990ccf2a3457165ca3e9d9726/codex-rs/login/src/auth/manager.rs#L2487-L2520)는
+새 `account_id` 가 다르면 다시 읽기를 거절한다. 같으면 **자격 증명 전체**를 교체하며 email·user id 는 비교하지 않는다.
+따라서 이 guard 는 같은 workspace 안의 사용자 변경을 막지 않고, `(accountId, email)` 키의 불변성을 증명하지 않는다.
+
+이는 인증 실패 때만의 경로가 아니다. [`auth()`](https://github.com/openai/codex/blob/36650394c5b38c2990ccf2a3457165ca3e9d9726/codex-rs/login/src/auth/manager.rs#L2389-L2414)가
+선제 갱신을 할 수 있고, [`refresh_token()`](https://github.com/openai/codex/blob/36650394c5b38c2990ccf2a3457165ca3e9d9726/codex-rs/login/src/auth/manager.rs#L2855-L2879)은 이 guard 를 거친다.
+사용량 처리기도 `auth_with_http_client_factory()` 로 이 경로에 들어간다
+([account_processor.rs:1119-1137](https://github.com/openai/codex/blob/36650394c5b38c2990ccf2a3457165ca3e9d9726/codex-rs/app-server/src/request_processors/account_processor.rs#L1119-L1137)).
+앞선 `account/read` 의 email 과 뒤의 사용량 응답이 다른 사용자에게 속할 수 있다.
+
+사용량 처리기의 `account_id`·`user_id` 비교는 CTA 관련 값을 거르는 데 쓰인다.
+일반 사용량과 `account_id` 는 그 비교가 실패해도 응답하며, `user_id` 는 응답하지 않는다
+([account_processor.rs:1192-1221](https://github.com/openai/codex/blob/36650394c5b38c2990ccf2a3457165ca3e9d9726/codex-rs/app-server/src/request_processors/account_processor.rs#L1192-L1221)).
+이는 소스에서 확인한 한계다. 실제 multi-seat 재로그인 재현이나 모든 `reload()` 호출 경로의 검증을 뜻하지 않는다.
 
 ### 한계
 
@@ -205,15 +218,35 @@ upstream `AuthManager` 는 인증 거절 복구와 토큰 갱신 때 자격 증�
 - 한도의 주인은 vendor 계정이다. 홈은 runtime 이 계정에 닿는 길이다. 둘을 다른 타입으로 둔다.
 - 계정은 vendor 가 답한 값으로만 안다. 파일을 읽거나 짐작하지 않는다.
 - 관측은 기록이고 게이트가 아니다. 계정 읽기가 늦거나 실패해도 turn 은 기다리지 않는다.
-- 가장 새 관측이 계정을 모르면 모른다고 둔다. 옛 계정으로 채우지 않는다.
+- 현재 자격 증명 세대의 가장 새 관측이 계정을 모르면 모른다고 둔다. 옛 계정으로 채우지 않는다.
+- 요청 순서와 자격 증명을 포착한 순서는 다르다. 옛 프로세스의 새 요청에 홈 갱신 권한을 다시 주지 않는다.
 - 시간이 지났다고 관측을 지우지 않는다.
+
+### 관측 귀속의 구현 선행 조건
+
+1. **홈 갱신 권한은 관측이 포착한 자격 증명 세대에 묶는다.** 읽기 요청에 새 순번을 주는 것으로 대신하지 않는다.
+   X 를 쓰던 프로세스 P 가 멈춘 사이 로그인 완료 읽기가 Y 를 확인했다면, P 가 나중에 새 요청을 보내도 홈은 Y 를 유지해야 한다.
+   P 의 증거가 X 에 속한다고 별도로 확인됐다면 X 에 기록한다. Y 로 옮기지 않는다.
+   이전 세대의 실패 응답도 Y 를 `Unconfirmed` 로 바꾸지 못한다.
+2. **계정 키와 기록할 사건이 같은 인증 주인에 속함을 확인한다.** email 과 quota 응답을 같은 인증 스냅숏에 묶는 증거가 필요하고,
+   turn 소진·성공·알림에는 해당 사건까지 그 귀속을 연결해야 한다. 같은 PID, process 시작 순번, RPC 발송 순번은 이 증거가 아니다.
+   앞뒤 email 이 같다는 검사만으로도 중간의 X→Y→X 변경을 배제할 수 없다.
+   증거가 없거나 변경이 감지되면 `Identity_unconfirmed` 로 두고 홈 미확인 scope 에 기록한다.
+   이전 email 로 새 사용량을 적거나, 이전 계정의 소진 기록을 성공으로 지우지 않는다.
+
+**미해결:** 지원하는 Codex 계약으로 자격 증명 포착 시점·세대 순서와 사건별 귀속을 얻는 경로를 아직 정하지 못했다.
+MASC 의 로그인 세션 잠금은 외부 `codex login` 과 app-server 내부 갱신을 직렬화하지 않는다.
+세대 번호를 MASC 에서 발급했다는 사실만으로 credential capture 를 증명했다고 하지 않는다.
+아래 타입과 PR 분할은 이 증거를 공급할 수 있을 때의 계약 초안이다. 공급 경로를 정하고 아래 반례 시험을 통과하기 전에는
+`Stated` 를 생성해 계정 scope 에 기록하거나 그 관측으로 홈의 계정을 바꾸는 구현으로 진행하지 않는다.
+읽기와 turn 은 계속 진행하며, 증거는 결정 4 의 홈 미확인 scope 에 남긴다.
 
 ### 타입
 
 ```ocaml
 (* lib/runtime/runtime_codex_account.mli (새 모듈) *)
 type key
-(** 한도 주인으로 쓰는 계정 키. [accountId] 와 같은 프로세스의
+(** 한도 주인으로 쓰는 계정 키. 같은 인증 주인으로 확인한 [accountId] 와
     [account/read] email 의 짝이다 (결정 1).
     표현은 문자열만 담는 불변 값이라 구조적 비교가 [equal] 과 같다.
     원문은 메모리 안에만 둔다. 밖으로 내보내는 함수는 [log_label] 하나다. *)
@@ -222,7 +255,8 @@ val equal : key -> key -> bool
 val log_label : key -> string   (* SHA-256 앞 8자리 *)
 
 type read =
-  | Stated of key
+  | Stated of key               (* 이 읽기/사건에 대한 인증 주인 귀속이 확인됨 *)
+  | Identity_unconfirmed        (* 값은 있어도 같은 인증 주인이라는 증거가 없음 *)
   | Not_stated                  (* 응답은 왔고 accountId 나 email 이 없거나 null 이다 *)
   | Not_applicable              (* ChatGPT 로그인이 아니다: apiKey, amazonBedrock, provider 관리 *)
   | Read_failed of read_failure
@@ -242,15 +276,21 @@ and read_failure =
 type serving =
   | Not_read_since_start
   | Serves of Runtime_codex_account.key
-  | Unconfirmed                 (* 가장 새 읽기가 계정을 답하지 않았다 *)
+  | Unconfirmed                 (* 현재 세대의 가장 새 읽기가 계정을 확인하지 못했다 *)
+
+type source
+(** 홈과 실제로 포착한 자격 증명 세대에 묶인 관측 출처.
+    발급에 필요한 증거 공급 경로는 위 구현 선행 조건의 미해결 항목이다. *)
 
 type ticket
-val begin_read : home:string -> ticket
-(** 요청을 보내기 직전에 받는다. 홈마다 단조 증가한다. *)
+val begin_read : source -> ticket
+(** 같은 출처 안의 요청 순서만 정한다. 새 요청은 출처의 세대를 올리지 않는다. *)
 
 val observe : ticket -> Runtime_codex_account.read -> unit
-(** 그 홈에 이미 반영된 것보다 오래된 ticket 의 결과는 버린다.
-    [Stated k] 는 [Serves k], [Not_stated]·[Not_applicable]·[Read_failed _] 는 [Unconfirmed] 가 된다. *)
+(** 현재 홈 세대에 속하는 출처의, 이미 반영한 것보다 새 요청만 홈을 갱신한다.
+    옛 세대이거나 세대 순서를 증명하지 못한 결과는 홈을 갱신하지 않는다.
+    갱신 권한이 있을 때 [Stated k] 는 [Serves k], 나머지는 [Unconfirmed] 가 된다.
+    홈 갱신의 채택/거절은 그 요청의 quota 증거 귀속을 바꾸지 않는다. *)
 
 type snapshot
 val snapshot : unit -> snapshot
@@ -260,7 +300,7 @@ val serving : snapshot -> home:string -> serving
 표의 키는 runtime 이 쓰는 홈 **문자열 그대로**다. `Runtime_account_home` 은 홈 표기를 바꾸지 않고
 (`lib/runtime/runtime_account_home.mli:1-4`), #38764 도 경로 별칭을 따로 선택된 홈으로 둔다.
 심볼릭 링크로 같은 디렉터리를 두 표기로 선언하면 표에는 두 키가 생긴다.
-각 키가 읽힐 때마다 같은 계정을 가리키게 되므로, 소진 기록은 계정 단위에서 합쳐진다.
+각 키의 현재 세대와 인증 주인 귀속이 확인되면 같은 계정을 가리키므로, 소진 기록은 계정 단위에서 합쳐진다.
 
 ```ocaml
 (* lib/runtime/runtime_quota_window.mli *)
@@ -327,9 +367,14 @@ val quota_scopes_of_runtime :
 - turn 이 끝날 때까지 답이 없으면 `Read_failed No_answer_before_turn_end` 다. 답을 기다리려고 프로세스를 붙잡지 않는다.
 - app-server 가 `thread/start` 와 이 읽기를 동시에 처리하는지, 순서대로 처리해서 `thread/start` 가 늦어지는지는 확인하지 않았다. **미검증**.
   PR1 의 가짜 app-server 시험은 답이 순서를 바꿔 오는 경우와 끝내 안 오는 경우를 다룬다.
-- 이 turn 의 계정은 이 turn 의 프로세스가 답한 값이다. 도는 프로세스는 계정을 바꾸지 않으므로 (위 "도는 프로세스의 계정은 바뀌지 않는다") turn 전체에 한 값이다.
+- quota 응답의 귀속과 turn 사건의 귀속은 각각 확인해야 한다. 프로세스가 같다는 이유로 turn 전체를 한 계정에 묶지 않는다.
+  위 구현 선행 조건을 충족하지 못한 사건은 `Identity_unconfirmed` 다.
 
 ### 기록의 주인
+
+아래 `Codex_run.read` 는 quota RPC 의 파싱 결과를 그대로 재사용한 값이 아니다.
+이 시도가 남길 소진·성공·사용량 사건까지 같은 인증 주인으로 확인한 결과다.
+quota 응답만 확인됐거나 시도 중 인증 주인이 바뀔 수 있어 이 연결을 증명하지 못하면 `Identity_unconfirmed` 다.
 
 순서를 정하는 함수와 기록할 주인을 정하는 함수를 가른다.
 지금은 `?quota_scope_of` 하나가 둘 다 한다 (`lib/keeper/keeper_turn_driver.ml:594`, `:617-623`, `:715`, `:791`).
@@ -344,7 +389,7 @@ type quota_write_owner =
 let scopes_to_write = function
   | Captured s -> Load_time s, []
   | Codex_run { home; read = Stated k } -> Codex_account k, [ Codex_home_account_not_stated home ]
-  | Codex_run { home; read = Not_stated | Not_applicable | Read_failed _ } ->
+  | Codex_run { home; read = Identity_unconfirmed | Not_stated | Not_applicable | Read_failed _ } ->
     Codex_home_account_not_stated home, []
 ```
 
@@ -356,7 +401,8 @@ let scopes_to_write = function
   계정을 확인하지 못한 turn 은 그 홈의 미확인 기록만 지운다. 어느 계정이 답했는지 모르므로 계정 기록은 건드리지 않는다.
 - 사용량 창(`account/rateLimits/updated` 알림과 turn 안 읽기의 창)은 첫 scope 에 적는다.
   알림이 읽기의 답보다 먼저 오면 turn 이 끝날 때 한꺼번에 적는다. 알림 창을 먼저 홈에 적고 나중에 옮기지 않는다.
-- turn 안 읽기의 결과는 `observe` 에도 넘긴다. ticket 은 요청을 보내기 직전에 받는다.
+- turn 안 읽기의 결과는 출처가 확인됐을 때 그 출처의 ticket 으로 `observe` 에도 넘긴다.
+  요청 시점에 옛 프로세스를 현재 자격 증명 세대로 다시 표시하지 않는다.
 
 계정을 확인하지 못한 증거를 계정 scope 로 옮기거나, 홈이 마지막으로 가리킨 계정에 붙이지 않는다.
 그렇게 하면 "이 홈의 알 수 없는 계정" 과 "계정 A" 를 조용히 같은 것으로 만든다.
@@ -370,11 +416,12 @@ let scopes_to_write = function
 
 ### 재로그인
 
-- 재로그인은 그 홈을 다음에 읽을 때 안다. 계정을 답하면 `Serves` 가 새 계정으로 바뀐다.
+- 재로그인은 그 홈의 현재 자격 증명 세대를 읽고 귀속을 확인했을 때 안다. 계정을 확인하면 `Serves` 가 새 계정으로 바뀐다.
   답하지 못하면 `Unconfirmed` 가 되어 옛 계정의 소진 기록으로 그 홈이 밀리지 않는다. 그 홈에는 미확인 기록만 걸린다.
 - Codex 가 다른 프로세스에서 한 로그인은 MASC 의 app-server 프로세스에 알림으로 오지 않는다.
   `account/updated` 는 로그인을 처리한 프로세스 안의 알림이고, 계정 id 도 없다.
-- 한 홈에 읽기가 겹쳐서 늦게 끝난 옛 읽기가 새 결과를 덮는 일은 ticket 순서로 막는다.
+- 같은 출처에서 늦게 끝난 옛 요청은 ticket 순서로 막고, 다른 출처는 포착한 자격 증명 세대의 갱신 권한으로 가른다.
+  "P 가 X 로 시작 → Y 로그인 완료 읽기 반영 → P 가 새 quota 요청" 에서 홈을 X 로 되돌리지 않아야 한다.
 - 남는 틈은 "그 홈 후보가 뒤에 있고 앞 후보가 계속 답해서 그 홈으로 turn 이 가지 않는 경우" 다. 이 틈은 결정 3 이 메운다.
 
 ### 홈의 계정이 바뀌었을 때 기존 기록
@@ -474,12 +521,12 @@ live 사례가 실제로 이 순서였는지, 그때 마법사가 `~/.codex-acco
 ### 이 RFC 가 쓰는 자리
 
 - 로그인이 끝난 자리(`lib/server/server_setup_account_login.ml:146-150`, `Client.finish`)는 결정 3 의 첫 연결 지점이다.
-  여기서 그 홈을 한 번 읽어 `observe` 하면, 새 홈이든 기존 홈이든 재로그인이든 로그인 직후에 계정이 확인된다.
+  여기서 그 홈을 한 번 읽는다. 현재 자격 증명 세대와 인증 주인 귀속이 확인된 결과만 `observe` 로 계정에 연결한다.
   로그인이 쓴 홈 표기가 runtime.toml 의 표기와 다르면(별칭) 그 runtime 의 키는 자기 다음 읽기 때 확인된다.
 - 같은 자리에서 읽은 계정을 이미 다른 홈이 쓰고 있으면 setup 화면에 "이 계정은 `codex_acct1` 도 쓰고 있어요" 를 보여 줄 수 있다.
   관측을 보여 주는 것이고 저장을 막지 않는다 (결정 5).
 - #39612 의 email 기록과 섞지 않는다. 그 email 은 `auth.json` 에서 읽은 표시용 글자다.
-  결정 1 에서 짝으로 쓰는 email 은 같은 turn 프로세스의 `account/read` 가 답한 값이고, `accountId` 없이 혼자 쓰지 않는다.
+  결정 1 에서 짝으로 쓰는 email 은 `account/read` 가 답한 값이다. 같은 인증 주인이라는 증거와 `accountId` 없이 쓰지 않는다.
 
 ### 겹치지 않는 것
 
@@ -515,8 +562,11 @@ constitution 의 testing 절에 따라 기능 단위로 본다. 기존 가짜 ap
 |---|---|
 | 홈 둘, 같은 계정 | 한 홈 후보가 `usageLimitExceeded` 로 거절된 뒤 다음 걷기에서 다른 홈 후보도 뒤에 있다. exact lane·one-shot 순서도 같다. resolved JSON 의 사용량 묶음이 하나이고 provider 둘을 싣는다 |
 | 한 홈, 재로그인 | 가짜 app-server 가 계정 X 뒤에 Y 를 답한다. X 소진 뒤 Y 를 확인하면 그 홈 후보가 앞으로 온다. X 를 쓰는 다른 홈은 계속 뒤에 있다. X 에만 있던 버킷이 Y 줄에 나오지 않는다 |
-| 재로그인 뒤 읽기 실패 | X 소진 뒤 그 홈의 다음 읽기가 오류를 답하면 홈은 `Unconfirmed` 이고, X 기록으로 뒤로 가지 않는다 |
-| 늦게 끝난 옛 읽기 | 같은 홈에 읽기 둘을 보내고 먼저 보낸 읽기가 나중에 X 를 답해도, 이미 반영된 Y 가 남는다 |
+| 재로그인 뒤 읽기 실패 | X 소진 뒤 그 홈의 현재 자격 증명 세대에서 시작한 읽기가 오류를 답하면 홈은 `Unconfirmed` 이고, X 기록으로 뒤로 가지 않는다 |
+| 늦게 끝난 옛 읽기 | 같은 출처의 읽기 둘을 보내고 먼저 보낸 읽기가 늦게 답해도 새 결과가 남는다. 다른 출처는 요청 순번 대신 자격 증명 세대의 갱신 권한을 본다 |
+| 옛 프로세스의 새 요청 | P 가 X 를 포착한 뒤 멈춤 → Y 로그인 완료 관측 반영 → P 가 더 큰 순번으로 quota 읽기. 홈은 Y 를 유지하고, X 로 귀속이 증명된 P 의 증거만 X 에 남는다. P 의 실패도 Y 를 미확인으로 바꾸지 않는다 |
+| 같은 workspace 의 사용자 변경 | `account/read` 는 `(W, email X)`, 갱신 뒤 quota/turn 은 `(W, email Y)`. 앞선 email X 로 기록하거나 X 의 소진을 성공으로 지우지 않는다. RPC 에서 귀속을 확인하지 못하면 `Identity_unconfirmed` 와 홈 scope 를 쓴다 |
+| 관측 사이의 X→Y→X | 앞뒤 email 은 같아도 중간 quota/turn 이 Y 를 쓴다. 앞뒤 일치만으로 `Stated X` 를 만들지 않는다. 인증 스냅숏 증거가 없으면 홈 scope 를 쓴다 |
 | 계정 미확인 | `accountId: null` 이면 증거가 `Codex_home_account_not_stated` 에 남고 그 홈 후보만 뒤로 간다. 주인 종류가 `codex_home_account_not_stated` 로 나온다 |
 | 읽기가 멈춤 | 가짜 app-server 가 읽기에 끝내 답하지 않아도 turn 은 admission 제한 시간에 걸리지 않고 끝난다. 기록은 `No_answer_before_turn_end` 로 홈 미확인 scope 에 간다 |
 | 답이 순서를 바꿔 옴 | 읽기의 답이 `thread/start` 답보다 늦게, 또는 먼저 와도 protocol 오류가 나지 않는다. 다른 모르는 id 는 여전히 오류다 |
@@ -533,6 +583,10 @@ constitution 의 testing 절에 따라 기능 단위로 본다. 기존 가짜 ap
 - 실패한 읽기가 마지막 `Serves` 를 남기게 하면 "재로그인 뒤 읽기 실패" 가 실패해야 한다.
 - 미확인 증거를 홈이 마지막으로 가리킨 계정에 붙이면 "계정 미확인" 이 실패해야 한다.
 - turn 안 읽기를 기다리게 되돌리면 "읽기가 멈춤" 이 실패해야 한다.
+- 세대 대신 요청 순번만으로 홈을 갱신하면 "옛 프로세스의 새 요청" 이 실패해야 한다.
+- 같은 프로세스 또는 앞뒤 email 일치만으로 귀속을 확정하면 사용자 변경·X→Y→X 시험이 실패해야 한다.
+
+추가한 세 시나리오는 구현의 수용 시험 계획이다. 실제 multi-seat 계정으로 재현했거나 구현 시험을 실행했다는 주장이 아니다.
 
 배포 뒤 실측:
 
@@ -543,36 +597,39 @@ constitution 의 testing 절에 따라 기능 단위로 본다. 기존 가짜 ap
 
 ## PR 나누기
 
+먼저 위 두 구현 선행 조건의 증거 공급 경로를 별도 설계 검토로 확정한다. 이 문서는 그 경로를 구현 완료로 세지 않는다.
 뒤 PR 은 앞 PR 에 의존하므로 stack 으로 올린다. 각 단위는 출력 20k 토큰 안으로 잡는다.
 
 1. **turn 안의 계정 읽기** — `Runtime_codex_account`(key, read). `account/rateLimits/read` 디코더가 `accountId` 를 typed 로 돌려준다.
    `await_response` 와 turn 루프에 "곁 요청" 자리를 둔다. `Chatgpt _` 일 때만 보내고 기다리지 않는다. 결과를 turn 결과에 싣는다.
    `read_rate_limits` 도 계정을 돌려준다. scope 는 아직 바꾸지 않는다.
-   시험: Stated·Not_stated·Undecodable·Rpc_error·No_answer_before_turn_end, 순서 바뀐 답, 멈춘 읽기, apiKey.
-2. **순서가 계정을 읽는다** (1 위) — `Runtime_codex_home_account`(ticket, snapshot), `load_time_scope`/`scope` 분리, `quota_owner`,
+   시험: Stated·Identity_unconfirmed·Not_stated·Undecodable·Rpc_error·No_answer_before_turn_end, 사용자 변경·X→Y→X, 순서 바뀐 답, 멈춘 읽기, apiKey.
+2. **순서가 계정을 읽는다** (1 위) — `Runtime_codex_home_account`(source, ticket, snapshot), `load_time_scope`/`scope` 분리, `quota_owner`,
    `quota_scopes_of_runtime`, `Hashtbl.Make`, `scope_to_string` 의 `log_label`.
    시작 때 읽기·거절 뒤 읽기·turn 읽기가 `observe` 한다. 순서를 읽는 곳(turn driver, path rest, exact lane, one-shot, vision)이 scope 들을 읽는다.
    이 단계에서 기록은 아직 `Codex_home_account_not_stated home` 에 적는다. 계정 scope 에는 기록이 없으므로 동작은 지금과 같다.
 3. **기록이 계정에 붙는다** (2 위) — `quota_write_owner` 를 `run_attempt` 가 돌려주고 turn driver·Fusion·Codex turn 이 그 값으로 적는다.
    사용량 창도 계정에 적는다. `sessionBudgetExceeded` 는 홈에 남긴다. Codex turn 의 scope 재계산을 지운다.
-   시험: 홈 둘·재로그인·재로그인 뒤 읽기 실패·늦은 읽기·미확인·성공·session budget, 변이 다섯.
+   시험: 홈 둘·재로그인·재로그인 뒤 읽기 실패·늦은 읽기·옛 프로세스의 새 요청·사용자 변경·미확인·성공·session budget, 위 변이 시험.
 4. **표면** (3 위) — resolved JSON 스냅숏, 묶음별 소진·주인 종류, runtime 줄 `usage_scope`. TUI decode·Overview, dashboard schema 를 같은 PR 에서 바꾼다.
    glossary 의 "닫힌 quota 창"·"Provider Usage Window" 항목과 `docs/spec/14-configuration.md`. 시험: 식별자 노출, 경합, TUI 캡처.
 5. **재로그인 알아채기** (2 위, 결정 3 에 따라) — 로그인 세션 완료 때 읽기, 운영자 다시 읽기 요청, setup 화면의 "같은 계정" 표시.
 
 ## 결정
 
-2026-09-28 에 아래 일곱 가지를 정했다.
+2026-09-28 에 아래 일곱 가지를 정했다. 결정 1 의 귀속 증명과 결정 3 의 세대 연결 경로는 위 선행 조건으로 남아 있다.
 근거는 `origin/main` `59c99562db` 과 upstream `rust-v0.157.1`, 로컬 `codex app-server generate-json-schema`(0.157.1)에서 다시 확인했다.
 
 1. **계정 키는 `accountId` 와 email 의 짝이다.**
-   - `accountId` 는 `account/rateLimits/read` 에서, email 은 같은 turn 프로세스의 `account/read` 에서 받는다.
+   - `accountId` 는 `account/rateLimits/read` 에서, email 은 `account/read` 에서 받는다. 같은 인증 주인과 사건에 묶였다는 증거가 있어야 짝을 만든다.
+     같은 프로세스라는 전제는 충분하지 않다. 증거 공급 경로는 위 구현 선행 조건으로 남아 있다.
    - app-server 도 "지금 로그인한 계정" 인지 볼 때 `account_id` 와 `user_id` 를 둘 다 비교한다
      (upstream `codex-rs/app-server/src/request_processors/account_processor.rs` 1196-1201행).
      안정 응답에는 `user_id` 가 없다. 사람마다 다른 안정 필드는 `account/read` 의 `email` 하나다
      (0.157.1 스키마: `GetAccountResponse.account.email` 은 `string | null`, `GetAccountRateLimitsResponse` 에는 `userId` 가 없다).
-   - 짝으로 두면 한도가 seat 단위일 때 seat 를 합치지 않는다. 틀리더라도 지금처럼 나뉘어 보이는 쪽으로 틀린다.
-   - `accountId` 나 email 이 null 이면 `Not_stated` 다. MASC 는 이미 email 을 선택 값으로 읽는다 (`lib/runtime/runtime_codex_app_server.ml:805`).
+   - 같은 인증 주인의 짝이라고 확인했을 때 서로 다른 email 의 seat 를 합치지 않는다. 서로 다른 시점의 값이면 잘못된 seat 에 기록할 수 있으므로 짝을 만들지 않는다.
+   - `accountId` 나 email 이 null 이면 `Not_stated` 다. 값은 있지만 귀속을 증명하지 못하면 `Identity_unconfirmed` 다.
+     MASC 는 이미 email 을 선택 값으로 읽는다 (`lib/runtime/runtime_codex_app_server.ml:805`).
    - `accountId` 하나만 쓰는 안은 버렸다. 한도가 seat 단위라면 멀쩡한 seat 가 다른 seat 의 소진 때문에 뒤로 밀린다.
 2. **turn 안의 읽기는 기다리지 않는다.**
    - 핸드셰이크는 `Awaiting_admission` 단계에서 돌고, 이 단계의 쉬는 한도는 `admission_timeout_s` 다
@@ -631,7 +688,9 @@ constitution 의 testing 절에 따라 기능 단위로 본다. 기존 가짜 ap
   로컬 `codex app-server generate-json-schema`(0.157.1). live 홈 셋의 auth.json 과 `account/rateLimits/read` 해시 비교.
 - **Timestamp**: 2026-09-28T08:36Z (코드 인용은 base `c424573c76` 기준으로 다시 맞춤).
   결정 절과 그 절이 인용하는 줄은 2026-09-28T10:50Z 에 `origin/main` `59c99562db` 기준으로 다시 확인했다.
+  리뷰 5337311627·5337367738 대응은 2026-09-28 에 upstream `36650394c5b38c2990ccf2a3457165ca3e9d9726` 소스와 안정 응답 스키마로 확인했다.
 - **Confidence**: 계정 id 출처와 필드 모양은 높음. `accountId` 가 채워진다는 것은 중간–높음 (홈 둘, 읽기 세 번).
-  강등이 홈끼리 공유되지 않는다는 것은 높음 (코드). 도는 프로세스의 계정이 바뀌지 않는다는 것은 중간–높음.
+  강등이 홈끼리 공유되지 않는다는 것은 높음 (코드). reload guard 가 account id 만 검사한다는 것은 높음 (위 고정 commit 소스).
+  `(accountId, email)` 과 turn 귀속의 안정성·홈 관측의 자격 증명 세대 공급 경로는 미해결이다.
   한도가 workspace 단위인지 seat 단위인지, app-server 가 두 요청을 동시에 처리하는지는 미검증. 재로그인 뒤 동작은 코드로만 확인.
 - **Delta**: 안정 계약의 `account/read` 에는 계정 id 가 없지만 `account/rateLimits/read` 에는 0.156.0 부터 있다. 이 RFC 는 그 필드를 한도 주인의 근거로 쓴다.

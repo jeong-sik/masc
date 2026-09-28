@@ -71,23 +71,20 @@ let start ~actor ~base_path ~body request reqd =
             let* account_key = canonical_account_key (Client.home_dir home) in
             Session.bind_account session ~account_key
             |> Result.map_error Session.error_message in
-        let* child_env = Client.environment home in
+        let started = Client.start home in
+        let* child_env = Client.environment started in
         let* reference = match client with
           | Client.Antigravity -> Ok reference
           | Codex | Claude | Muse -> Client.publish ~workspace:base_path ~integration_id ~cli_path home
               |> Result.map Option.some in
-        let* () = match reference with
-          | Some reference ->
-            Client.start_email_record ~workspace:base_path ~integration_id ~cli_path home reference
-          | None -> Ok () in
         let receipt = { Receipt.login_id = Session.id session; integration_id;
           account_ref = reference; status = Receipt.Running } in
         let* () = Receipt.save ~workspace:base_path ~actor receipt
           |> Result.map_error (fun _ -> receipt_failure) in
-        Ok (home, child_env, receipt) in
+        Ok (home, started, child_env, receipt) in
       match prepared with
       | Error _ -> respond ~status:`Service_unavailable ~request reqd account_failure; Ok ()
-      | Ok (home, child_env, initial_receipt) ->
+      | Ok (home, started, child_env, initial_receipt) ->
         let receipt = ref initial_receipt in
         let headers = Httpun.Headers.of_list
           (["content-type", "text/event-stream"; "cache-control", "no-store";
@@ -110,18 +107,6 @@ let start ~actor ~base_path ~body request reqd =
             ~grace_seconds:Process_eio.child_exit_grace_seconds in
           Client.observe ~mgr ~clock
             ~cwd:Eio.Path.(Eio.Stdenv.fs env / Client.home_dir home) ~cli_path:spawn_path home in
-        (* Display data for setup's account list. The login already succeeded,
-           so an unrecordable email is logged and never fails it; the record
-           written before the client ran then stays, and says so. *)
-        let record_account_email reference =
-          match Client.finish_email_record ~workspace:base_path ~integration_id ~cli_path home reference with
-          | Ok (Runtime_account_email.Not_read missing) ->
-            Log.Server.info "Setup login %s recorded no account email: %s"
-              (Session.id session) (Runtime_account_email.missing_to_string missing)
-          | Ok (Runtime_account_email.Email _ | Login_unfinished) -> ()
-          | Error message ->
-            Log.Server.warn "Setup login %s account email was not recorded: %s"
-              (Session.id session) message in
         let recover status =
           (* A cancelled CLI may already have saved its selected credential. Only
              Antigravity needs capture: native homes were published before spawn.
@@ -156,12 +141,14 @@ let start ~actor ~base_path ~body request reqd =
                   Receipt.Failed, "The official client did not confirm the selected account. Retry login or verify the account.") in
                 let* reference = Client.publish ~workspace:base_path ~integration_id ~cli_path home
                   |> Result.map_error (fun _ -> Receipt.Failed, "The selected account could not be published. Retry account recovery.") in
-                let* () = save { !receipt with account_ref = Some reference; status = Receipt.Complete observed }
-                  |> Result.map_error (fun message -> Receipt.Failed, message) in
-                (* After the Complete receipt, so a client disconnect here cannot
-                   turn a finished login into Interrupted. *)
-                Eio.Cancel.protect (fun () -> record_account_email reference);
-                Ok ())
+                (* The account email is display data recorded after the Complete
+                   receipt; recording it never fails the login. *)
+                Client.finish started
+                  ~save_complete:(fun () ->
+                    save { !receipt with account_ref = Some reference; status = Receipt.Complete observed })
+                  ~account:(fun () ->
+                    Client.email_account ~workspace:base_path ~integration_id ~cli_path home reference)
+                |> Result.map_error (fun message -> Receipt.Failed, message))
             with Eio.Cancel.Cancelled _ as exn ->
               Eio.Cancel.protect (fun () ->
                 match !receipt.status with

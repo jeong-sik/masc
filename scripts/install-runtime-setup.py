@@ -1346,7 +1346,7 @@ def muse_models(binary, source, timeout):
         if action == 1:
             raise SetupError('returned to connection selection')
         print('Muse will handle sign-in for the selected account.', file=sys.stderr)
-        login = muse_login_command(binary, source.get('command') or 'muse', source['account_home'])
+        login = account_login_command(binary, 'muse', source.get('command') or 'muse', source['account_home'])
         if subprocess.run(login, stdout=sys.stderr).returncode != 0:
             raise SetupError('Muse sign-in did not finish; the selected account and configuration were preserved')
     try:
@@ -1662,11 +1662,15 @@ def select_connections(binary, inventory, timeout, credentials=None):
     return selected, specs, names
 
 
-def muse_login_command(binary, command, account_home):
-    # masc starts Muse's sign-in itself, with the environment every Muse child
-    # gets (Runtime_muse_serve.login_environment), so the sign-in lands in the
-    # account's auth.json instead of the macOS Keychain.
-    return [str(binary), 'runtime-muse-login', '--cli-path', command, '--account-home', account_home]
+ACCOUNT_LOGIN_CLIENTS = {'codex': 'codex', 'claude_code': 'claude', 'muse': 'muse'}
+
+
+def account_login_command(binary, client, command, account_home):
+    # masc starts the official sign-in for a declared account home itself: the
+    # child gets the environment /login gives that client, and masc records
+    # the account's email the way /login does (Runtime_setup_login_client).
+    return [str(binary), 'runtime-account-login', '--client', client, '--cli-path', command,
+            '--account-home', account_home]
 
 
 def login_command(binary, runtime_id, specs, inventory):
@@ -1679,27 +1683,15 @@ def login_command(binary, runtime_id, specs, inventory):
         if row is None:
             return None
         choice, command = PROTOCOL_CHOICES.get(row['protocol']), row.get('command')
-    if choice == 'muse':
-        return muse_login_command(binary, command, row['account_home']) if command and row.get('account_home') else None
+    client = ACCOUNT_LOGIN_CLIENTS.get(choice)
+    if not command or client is None:
+        return None
+    if row.get('account_home'):
+        return account_login_command(binary, client, command, row['account_home'])
+    # Without account-home the client signs in on the caller's own home, which
+    # setup never selects or records; Muse always needs a selected home.
     arguments = {'claude_code': ['auth', 'login'], 'codex': ['login', '--device-auth']}.get(choice)
-    return [command] + arguments if command and arguments else None
-
-
-def login_environment(binary, runtime_id, specs, inventory):
-    spec = next((spec for spec in specs if render(spec, binary)[0] == runtime_id), None)
-    row = spec or next((row for row in inventory['runtimes'] if row['id'] == runtime_id), {})
-    return native_account_environment(row)
-
-
-def native_account_environment(row):
-    choice = row.get('choice') or PROTOCOL_CHOICES.get(row.get('protocol'))
-    # Muse is absent on purpose: runtime-muse-login builds its child's
-    # environment, and the masc process itself keeps the caller's HOME.
-    variable = {'claude_code': 'CLAUDE_CONFIG_DIR', 'codex': 'CODEX_HOME'}.get(choice)
-    environment = dict(os.environ)
-    if variable and row.get('account_home'):
-        environment[variable] = row['account_home']
-    return environment
+    return [command] + arguments if arguments else None
 
 
 def wizard(binary, base_path, timeout, quick_model=None):
@@ -1787,7 +1779,7 @@ def wizard_with_credentials(binary, base_path, timeout, credentials, quick_model
                         return dict(configured=False, readiness='deferred', base_path=str(base_path))
                     elif action == 4 and login:
                         print('The official client will handle sign-in. MASC does not ask for your password.', file=sys.stderr)
-                        if subprocess.run(login, stdout=sys.stderr, env=login_environment(binary, error.runtime_id, specs, inventory)).returncode != 0:
+                        if subprocess.run(login, stdout=sys.stderr).returncode != 0:
                             print('Sign-in did not finish. Your model choices are still selected.', file=sys.stderr)
         except (SetupError, OSError, ValueError, URLError) as error:
             if not isinstance(error, SetupError):

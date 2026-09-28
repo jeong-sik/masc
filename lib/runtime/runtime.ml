@@ -703,8 +703,8 @@ let to_diagnostic_text ~(config_path : string) : load_failure -> string = functi
       max_context
   | Muse_window_below_host_overhead { runtime_id; max_context } ->
     Printf.sprintf
-      "%s: runtime %S declares no max-prompt-bytes, and its start-prompt ceiling \
-       cannot be derived: %s. Raise max-context or declare max-prompt-bytes"
+      "%s: runtime %S has no start-prompt ceiling: %s, so the host compacts any \
+       input. Raise max-context"
       config_path
       runtime_id
       (Runtime_muse_prompt_capacity.error_to_string
@@ -1175,6 +1175,16 @@ let resolve_max_context_of_runtime (rt : t) : (int * max_context_source) option 
   | None, None -> None
 ;;
 
+(* The start-prompt ceiling of a Muse runtime: derived from the window its
+   host reports and narrowed by a declared max-prompt-bytes, because the host
+   rewrites an oversized input instead of refusing it
+   ([Runtime_muse_prompt_capacity]). *)
+let muse_prompt_capacity (runtime : t) : (int, Runtime_muse_prompt_capacity.error) result =
+  Runtime_muse_prompt_capacity.start_prompt_bytes
+    ~declared:runtime.model.max_prompt_bytes
+    ~max_context:(Option.map fst (resolve_max_context_of_runtime runtime))
+;;
+
 (* Every materialized runtime must resolve a positive context window from the
    runtime.toml override or the AGENT_CORE capability catalog. A binding that leaves
    both unset is a config error rejected here, not a runtime defaulted to a
@@ -1223,31 +1233,25 @@ let validate_runtime_context_marks (runtimes : t list) : (unit, load_failure) re
   | Some failure -> Error failure
 ;;
 
-(* A Muse model without max-prompt-bytes takes its start-prompt ceiling from
-   the resolved window ([prompt_capacity_bytes]); a window too small for the
-   host's own overhead leaves no ceiling, and is refused here rather than at
-   its first turn. A runtime with no resolved window fails
-   [validate_runtime_max_context] instead. *)
+(* A Muse window too small for the host's own overhead leaves no start-prompt
+   ceiling ([muse_prompt_capacity]), declared max-prompt-bytes or not, and is
+   refused here rather than at its first turn. *)
 let validate_muse_prompt_ceilings (runtimes : t list) : (unit, load_failure) result =
   match
     List.find_map
       (fun (r : t) ->
-         match r.provider.api_format, r.model.max_prompt_bytes, resolve_max_context_of_runtime r with
-         | Muse_serve_runtime, None, Some (max_context, _) ->
-           (match
-              Runtime_muse_prompt_capacity.start_prompt_bytes
-                ~declared:None ~max_context:(Some max_context)
-            with
+         match r.provider.api_format with
+         | Muse_serve_runtime ->
+           (match muse_prompt_capacity r with
             | Ok _ -> None
-            | Error (Runtime_muse_prompt_capacity.Window_below_host_overhead _)
-            | Error Runtime_muse_prompt_capacity.No_window_declared ->
-              Some (Muse_window_below_host_overhead { runtime_id = r.id; max_context }))
-         | Muse_serve_runtime, (Some _ | None), (Some _ | None)
-         | ( ( Messages_api | Chat_completions_api | Ollama_api | Gemini_api
-             | Vertex_gemini_api | Codex_app_server_runtime | Antigravity_cli_runtime
-             | Claude_code_runtime )
-           , _
-           , _ ) -> None)
+            | Error (Runtime_muse_prompt_capacity.Window_below_host_overhead { max_context }) ->
+              Some (Muse_window_below_host_overhead { runtime_id = r.id; max_context })
+            (* A runtime with no resolved window fails
+               [validate_runtime_max_context] instead. *)
+            | Error Runtime_muse_prompt_capacity.No_window_declared -> None)
+         | Messages_api | Chat_completions_api | Ollama_api | Gemini_api
+         | Vertex_gemini_api | Codex_app_server_runtime | Antigravity_cli_runtime
+         | Claude_code_runtime -> None)
       runtimes
   with
   | None -> Ok ()
@@ -2719,36 +2723,16 @@ let entry_runtime_id_of_route (route : string) : string option =
   | `Unavailable _ | `Missing -> None
 ;;
 
-(* A lane walks past its head: a candidate that fails is demoted behind its
-   siblings (RFC-0458 §3.4, #36935), so any candidate the walk holds may
-   serve the turn. A request sized for the whole walk therefore fits the
-   smallest ceiling any of those candidates declares, not the entry's alone.
-
-   A candidate that declares no [max-prompt-bytes] has no byte ceiling in
-   any admission path: Claude Code starts unbounded and shrinks only on the
-   provider's own refusal, Antigravity refuses such a binding before
-   sending, Codex bounds its history by the carried range alone, and no
-   other runtime reads the field. It adds no bound here, and
-   it does not erase a bound a sibling declares.
-
-   A declaration on a runtime that does not read it
-   ([Runtime_schema.api_format_reads_max_prompt_bytes]) is not a ceiling
-   either: that provider never checks the number, so counting it would shrink
-   the whole lane's budget for nothing.
-
-   An id the loaded catalog does not hold adds no bound either: the walk
-   cannot dispatch it, so it cannot serve the turn. *)
-(* The start-prompt ceiling a turn applies. A declared max-prompt-bytes wins;
-   a Muse model without one takes the ceiling derived from the window its host
-   reports, because the host rewrites an oversized input instead of refusing
-   it ([Runtime_muse_prompt_capacity]). *)
 let prompt_capacity_bytes (runtime : t) : int option =
   match runtime.provider.api_format with
   | Muse_serve_runtime ->
-    Result.to_option
-      (Runtime_muse_prompt_capacity.start_prompt_bytes
-         ~declared:runtime.model.max_prompt_bytes
-         ~max_context:(Option.map fst (resolve_max_context_of_runtime runtime)))
+    (match muse_prompt_capacity runtime with
+     | Ok bytes -> Some bytes
+     (* A full load refuses such a runtime; one built without it (a load that
+        skips the window check, [of_binding]) refuses its own turn with this
+        cause through [muse_prompt_capacity]. *)
+     | Error Runtime_muse_prompt_capacity.No_window_declared
+     | Error (Runtime_muse_prompt_capacity.Window_below_host_overhead _) -> None)
   | Claude_code_runtime
   | Antigravity_cli_runtime
   | Codex_app_server_runtime
@@ -2759,6 +2743,26 @@ let prompt_capacity_bytes (runtime : t) : int option =
   | Vertex_gemini_api -> runtime.model.max_prompt_bytes
 ;;
 
+(* A lane walks past its head: a candidate that fails is demoted behind its
+   siblings (RFC-0458 §3.4, #36935), so any candidate the walk holds may
+   serve the turn. A request sized for the whole walk therefore fits the
+   smallest ceiling any of those candidates declares, not the entry's alone.
+
+   A candidate without a ceiling ([prompt_capacity_bytes]) has no byte bound
+   in any admission path: Claude Code starts unbounded and shrinks only on
+   the provider's own refusal, Antigravity refuses such a binding before
+   sending, Codex bounds its history by the carried range alone, a Muse
+   candidate whose ceiling cannot be derived fails its own turn with that
+   cause, and no other runtime reads the field. It adds no bound here, and
+   it does not erase a bound a sibling declares.
+
+   A declaration on a runtime that does not read it
+   ([Runtime_schema.api_format_reads_max_prompt_bytes]) is not a ceiling
+   either: that provider never checks the number, so counting it would shrink
+   the whole lane's budget for nothing.
+
+   An id the loaded catalog does not hold adds no bound either: the walk
+   cannot dispatch it, so it cannot serve the turn. *)
 let smallest_declared_max_prompt_bytes (runtimes : t list) candidate_ids =
   let declared =
     List.filter_map

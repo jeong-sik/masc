@@ -2035,6 +2035,23 @@
  (modules masc_tui_image_mosaic)
  (libraries masc_tui_theme))
 
+;; The imp emblem: two flat marks as distance fields, and a renderer that
+;; turns them in Braille. Pure, so a test links it without the TUI.
+(library
+ (name masc_tui_imp_shape)
+ (wrapped false)
+ (modules masc_tui_imp_shape))
+
+(library
+ (name masc_tui_imp_emblem)
+ (wrapped false)
+ (modules masc_tui_imp_emblem)
+ (libraries
+  masc_tui_color
+  masc_tui_imp_shape
+  masc_tui_terminal_palette
+  masc_tui_theme))
+
 ;; Decides, by magic bytes, whether a downloaded body may sit in the preview
 ;; image cache, and what a curl or ffmpeg exit status means. Kept apart from
 ;; the TUI executable so cache workflows can be tested with process fixtures.

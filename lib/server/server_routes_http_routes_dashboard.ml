@@ -289,13 +289,6 @@ let keeper_setting_payload source_text =
     , Keeper_runtime_config.overlay_application_to_yojson doc )
 ;;
 
-let skill_config_state_label snapshot =
-  match Skill_catalog_snapshot.config_state snapshot with
-  | Configured _ -> "configured"
-  | Config_rejected _ -> "rejected"
-  | Config_unreadable _ -> "unreadable"
-;;
-
 let skill_application_json = function
   | Error _ -> `Assoc [ "state", `String "invalid_workspace" ]
   | Ok (Server_skill_snapshot_runtime.Superseded { commit_order; applied_order }) ->
@@ -322,7 +315,10 @@ let skill_application_json = function
           , `String
               (Skill_catalog_snapshot.catalog_revision snapshot
                |> Skill_catalog_snapshot.catalog_revision_to_string) )
-        ; "config_state", `String (skill_config_state_label snapshot)
+        ; ( "config_state"
+          , `String
+              (Skill_catalog_snapshot.config_state snapshot
+               |> Skill_catalog_snapshot.config_state_to_string) )
         ]
     in
     (match publication with

@@ -9,9 +9,9 @@ type invalid =
       (** Agent actions cannot resolve an [AwaitingVerification] obligation;
           the completion-authority entry point owns its verdict. *)
   | Cancel_reason_required
-      (** The holder cancels its own Task without a stated reason. The
-          cancellation ends the Task at once, and the reason is the only thing
-          its author is told. *)
+      (** A cancel without a stated reason. The cancellation ends the Task at
+          once, and the reason is the only thing its author is told — a
+          Cancelled record with no sentence tells that author nothing. *)
   | Invalid_transition
 
 (** Why a verdict does not commit. Only the verdict path produces these, and
@@ -55,8 +55,8 @@ val decide
   -> now:string
   -> notes:string
   -> reason:string option
-      (** The stated reason, [None] when the caller stated none. A holder's
-          cancel is refused without one. *)
+      (** The stated reason, [None] when the caller stated none. Any cancel —
+          held or unclaimed — is refused without one. *)
   -> (decision, invalid) result
 
 (** A verdict decision plus the typed authority provenance the caller records.

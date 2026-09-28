@@ -71,7 +71,7 @@ let test_accounts_settings_and_native_workspaces_are_separate () = with_fixture 
 let test_missing_signin_and_changed_managed_policy_refuse () = with_fixture (fun root ->
   let selected = account root "missing" in
   (match Home.prepare ~account_home:selected with
-   | Error Home.Sign_in_required -> ()
+   | Error (Home.Sign_in_required Home.No_file_sign_in) -> ()
    | Error error -> fail (Home.error_to_string error)
    | Ok _ -> fail "missing selected account fell back to ambient credentials");
   write (auth selected) (synthetic_auth "synthetic-source");
@@ -81,6 +81,47 @@ let test_missing_signin_and_changed_managed_policy_refuse () = with_fixture (fun
   | Error (Home.State_unavailable _) -> ()
   | Error error -> fail (Home.error_to_string error)
   | Ok _ -> fail "changed managed permission settings admitted")
+
+let auth_with_storage storage = Yojson.Safe.to_string (`Assoc [ "schema_version", `Int 1;
+  "providers", `Assoc [ "meta", `Assoc [ "mechanism", `String "oauth"; "storage", storage ] ] ])
+
+let test_only_a_sign_in_held_in_auth_json_is_admitted () = with_fixture (fun root ->
+  let file_backed = account root "file-backed" in
+  write (auth file_backed) (auth_with_storage (`String "file"));
+  ignore (ok (Home.prepare ~account_home:file_backed));
+  let keychain = account root "keychain" in
+  write (auth keychain) (auth_with_storage (`String "keychain"));
+  (match Home.prepare ~account_home:keychain with
+   | Error (Home.Sign_in_required Home.Keychain_sign_in as error) ->
+     let message = Home.error_to_string error and hint = "/login muse" in
+     let rec names_hint at =
+       at + String.length hint <= String.length message
+       && (String.sub message at (String.length hint) = hint || names_hint (at + 1)) in
+     check bool "the refusal names the command that fixes it" true (names_hint 0)
+   | Error error -> fail (Home.error_to_string error)
+   | Ok _ -> fail "a Keychain-held sign-in was imported as if auth.json held it");
+  check bool "a refused sign-in publishes no generation" false
+    (Sys.file_exists (Filename.concat keychain ".local/state/masc/muse-config/current.json"));
+  let unknown = account root "unknown" in
+  write (auth unknown) (auth_with_storage (`String "vault"));
+  (match Home.prepare ~account_home:unknown with
+   | Error (Home.Sign_in_required (Home.Unsupported_credential_storage "vault")) -> ()
+   | Error error -> fail (Home.error_to_string error)
+   | Ok _ -> fail "an unknown credential storage was admitted");
+  let malformed = account root "malformed" in
+  write (auth malformed) (auth_with_storage (`Int 1));
+  (match Home.prepare ~account_home:malformed with
+   | Error (Home.State_unavailable _) -> ()
+   | Error error -> fail (Home.error_to_string error)
+   | Ok _ -> fail "a non-string credential storage was admitted");
+  let relogin = account root "relogin" in
+  write (auth relogin) (synthetic_auth "synthetic-inline");
+  ignore (ok (Home.prepare ~account_home:relogin));
+  write (auth relogin) (auth_with_storage (`String "keychain"));
+  match Home.prepare ~account_home:relogin with
+  | Error (Home.Sign_in_required Home.Keychain_sign_in) -> ()
+  | Error error -> fail (Home.error_to_string error)
+  | Ok _ -> fail "a later Keychain sign-in kept the earlier file generation")
 
 let test_corrupt_auth_and_missing_generation_do_not_reimport () = with_fixture (fun root ->
   let selected = account root "selected" in
@@ -92,7 +133,7 @@ let test_corrupt_auth_and_missing_generation_do_not_reimport () = with_fixture (
   let first = ok (Home.prepare ~account_home:selected) in
   remove (Home.config_home first);
   (match Home.prepare ~account_home:selected with
-   | Error (Home.State_unavailable _) | Error Home.Sign_in_required -> ()
+   | Error (Home.State_unavailable _) | Error (Home.Sign_in_required _) -> ()
    | _ -> fail "missing generation silently reimported source credentials");
   check bool "missing generation is not recreated" false (Sys.file_exists (Home.config_home first));
   Sys.rename (auth selected) (auth selected ^ ".original");
@@ -243,6 +284,7 @@ let () = run "Muse managed account home"
       test_case "vendor refresh and external re-login" `Quick test_refresh_survives_and_source_relogin_gets_a_new_identity;
       test_case "accounts, settings and workspaces" `Quick test_accounts_settings_and_native_workspaces_are_separate;
       test_case "missing auth and changed policy refuse" `Quick test_missing_signin_and_changed_managed_policy_refuse;
+      test_case "only a sign-in held in auth.json is admitted" `Quick test_only_a_sign_in_held_in_auth_json_is_admitted;
       test_case "corrupt auth and missing generation refuse" `Quick test_corrupt_auth_and_missing_generation_do_not_reimport;
       test_case "symlink HOME retains identity and descendant protection" `Quick test_symlink_home_preserves_identity_and_owned_descendant_checks;
       test_case "invalid home refuses before filesystem access" `Quick test_invalid_home_is_refused_before_filesystem_access ] ]

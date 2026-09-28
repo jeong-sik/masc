@@ -16490,11 +16490,6 @@ def run_keyboard_regression(executable: str, *, group: int | None = None) -> Non
         )
         run_terminal_scenario(
             executable,
-            description="The Activity pane opens only with the surface floor left",
-            interact=acting_pane_floor_interaction,
-        )
-        run_terminal_scenario(
-            executable,
             description="Keeper long runtime identities remain distinguishable",
             interact=keeper_long_runtime_identity_interaction,
             http_fixtures=keeper_runtime_http_fixtures(

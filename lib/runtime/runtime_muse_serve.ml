@@ -489,6 +489,8 @@ let client_environment ?storage_root account_home prepared_home =
   Array.of_list selected
 ;;
 
+let login_environment ~account_home = client_environment (Some account_home) None
+
 let client_argv config =
   [ config.cli_path; "serve" ]
   @ (match config.native with

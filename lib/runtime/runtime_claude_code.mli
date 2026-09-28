@@ -69,6 +69,8 @@ type config =
 
 val default_timeout_s : float
 val default_config : cwd:string -> config
+val client_environment : string option -> string array
+(** Selected-account child environment shared by execution and explicit login. *)
 val effective_account_home : string option -> string option
 (** The selected Claude Code configuration directory: explicit home,
     CLAUDE_CONFIG_DIR, or the CLI's HOME/.claude default. An inherited relative

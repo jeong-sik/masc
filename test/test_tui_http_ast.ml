@@ -1854,9 +1854,10 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
   check int "overview renderer consumes one shared layout" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
        ~binding_name:"render_overview" ~callee:"overview_layout");
-  (* The Attention panel tells an empty answer from an unread one the way
-     every listing does, instead of leaving its rows blank. *)
-  check int "overview's attention panel reads the shared empty page" 1
+  (* Both the Attention count in the title and its empty-body note read the
+     shared page state: unread/failed must not become a zero count, and unread
+     must not become a blank body. *)
+  check int "Attention title and body both read the shared empty page" 2
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
        ~binding_name:"render_overview" ~callee:"empty_page_of");
   (* The overview reads its bounds off [row_budget], the one value the layout

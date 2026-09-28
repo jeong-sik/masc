@@ -970,12 +970,13 @@ let validate_session_workspace ~workspace_root (session : Msp.session) =
    default before any turn did. The reported model cannot tell these apart.
    session/setModel is MSP's selection for the session's next model calls:
    the host applies it, or answers noop when that model already runs, and a
-   noop leaves the metadata default in place. The accepted ack is the host's
-   answer; a refused or failed selection stops the turn before it starts. *)
+   noop leaves the metadata default in place. So every resume selects the
+   model, whatever the session reports, the way it re-applies the approval
+   mode. The accepted ack is the host's answer; a refused or failed selection
+   stops the turn before it starts. *)
 let select_session_model io (config : config) (session : Msp.session) =
   match config.model with
   | None -> Ok session
-  | Some requested when session.model_id = Some requested -> Ok session
   | Some requested ->
     let* result =
       request io ~method_:"session/setModel" (fun ~id ->

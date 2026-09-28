@@ -85,7 +85,10 @@ The read-only `approve-guard.sh --merge-check --receipt-json` option returns
 verified approval IDs and their head. Default output remains text. The landing
 command retains these IDs as `preflight_observation`, explicitly captured
 **before merge-guard**, not at its final write boundary. Save that receipt when
-recording pending work. A merged resume cannot reconstruct past approvals from
+recording pending work. On a merged resume, `tree` describes the proven squash
+landing; `main` is the current observed tip and `post_landing_commits` lists its
+later first-parent commits. Later edits do not become pre-landing conflicts or
+alter that historical tree proof. A merged resume cannot reconstruct past approvals from
 current API state: its historical approval mapping is marked unavailable
 without the saved preflight receipt. Current member head/run and actual Git
 arrival proof remain separately reported.

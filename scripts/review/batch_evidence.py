@@ -370,6 +370,7 @@ def evaluate(f, *, line, repo, pr, head, run, git_dir, gh, landing=False, expect
         history.append((commit, row[1], len(row) - 1))
         commit = row[1]
     seen, external, landing_parent = False, set(), None
+    post_landing_commits = []
     for commit, parent, parent_count in reversed(history):
         if commit == merge_commit:
             if parent_count != 1:
@@ -379,6 +380,10 @@ def evaluate(f, *, line, repo, pr, head, run, git_dir, gh, landing=False, expect
             if trees.tree(trees.merge(parent, batch.roll)) != trees.tree(commit):
                 raise f.Unavailable("batch_roll_landing_tree_mismatch")
             seen, landing_parent = True, parent
+        elif seen:
+            # Later main work does not invalidate an already proven historical
+            # landing. Keep it observable, but never test it as pre-write input.
+            post_landing_commits.append(commit)
         else:
             touched = trees.paths(parent, commit)
             removed = trees.paths(parent, commit, removed=True)
@@ -388,7 +393,7 @@ def evaluate(f, *, line, repo, pr, head, run, git_dir, gh, landing=False, expect
             external.update(touched)
     if arrived and not seen:
         raise f.Unavailable("batch_roll_merge_not_in_main_history")
-    final = main if arrived else trees.merge(main, batch.roll)
+    final = merge_commit if arrived else trees.merge(main, batch.roll)
     if (trees.paths(batch.roll, final) - external
             or (not arrived and trees.paths(main, final) & external)):
         raise f.Unavailable("batch_final_landing_tree_mismatch")
@@ -434,6 +439,7 @@ def evaluate(f, *, line, repo, pr, head, run, git_dir, gh, landing=False, expect
         result["approval_observation"] = approval_receipts
     if arrived:
         result.update(merge_commit=merge_commit, landing_parent=landing_parent,
+                      post_landing_commits=post_landing_commits,
                       historical_approval_mapping="unavailable_without_saved_preflight_receipt",
                       absorption_candidates=[member.pr for member in batch.members
                                              if pulls[member.pr]["state"] == "open"])

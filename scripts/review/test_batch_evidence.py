@@ -342,6 +342,34 @@ print(value)
         result = self.run_landing()
         self.assertEqual((self.writes, result["absorption_candidates"]), ([], [2]))
 
+    def test_resume_proves_landing_after_later_member_path_edit(self):
+        self.approvals()
+        pending = self.run_landing("pending")
+        self.assertEqual((pending["status"], self.writes), ("pending", [99]))
+        landed = self.publish_roll()
+        later = self.change(landed, "lib/one.ml", "let one = 42\n")
+        self.main = later
+        self.put("commits/main", {"sha": later})
+        result = self.run_landing()
+        self.assertEqual(self.writes, [], "resume must not submit another merge")
+        self.assertEqual((result["status"], result["absorption_candidates"]),
+                         ("published", [1, 2]))
+        self.assertEqual(result["merge_commit"], landed)
+        self.assertEqual(result["landing_parent"], self.base)
+        self.assertEqual(result["main"], later)
+        self.assertEqual(result["tree"], self.git("rev-parse", landed + "^{tree}"))
+        self.assertNotEqual(result["tree"], self.git("rev-parse", later + "^{tree}"))
+        self.assertEqual(result["post_landing_commits"], [later])
+
+    def test_resume_still_rejects_member_path_change_before_landing(self):
+        self.approvals()
+        before = self.change(self.base, "lib/one.ml", "let one = 1\n")
+        self.publish_roll(parent=before)
+        with self.assertRaisesRegex(F.Unavailable,
+                                    "^batch_nonmember_main_change_invalidates_roll$"):
+            self.run_landing()
+        self.assertEqual(self.writes, [])
+
     def test_roll_arrival_rejects_wrong_parent_tree_and_missing_main_ancestry(self):
         self.approvals()
         original = copy.deepcopy(self.data)

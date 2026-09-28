@@ -274,6 +274,16 @@ let emit_board_sse_event event =
   | Some hook -> Safe_ops.protect ~default:() (fun () -> hook event)
   | None -> ()
 
+(* The non-positive MASC_BOARD_COMMENT_COUNT_CAP opt-out stays allowed, but
+   it must not stay silent (wool-nova FAIL issuecomment-5860167607, P2):
+   emit [Limits.cap_warning_message] once at JSONL backend load -- from
+   [init_jsonl] and from [backend]'s auto-initialization branch. *)
+let warn_comment_cap_once () =
+  match Board.Limits.cap_warning_message
+          ~cap:Board.Limits.comment_count_cap () with
+  | Some msg -> Log.BoardLog.warn "%s" msg
+  | None -> ()
+
 let init_jsonl () =
   if match Atomic.get backend_state with Active _ -> true | Uninitialized -> false then
     Log.BoardLog.warn "already initialized, ignoring init_jsonl"
@@ -282,6 +292,7 @@ let init_jsonl () =
     let backend = Active (Jsonl store, false) in
     if Atomic.compare_and_set backend_state Uninitialized backend then begin
       ensure_flusher_actor store;
+      warn_comment_cap_once ();
       Log.BoardLog.info "JSONL backend initialized"
     end else
       Log.BoardLog.warn "already initialized concurrently, ignoring init_jsonl"
@@ -305,7 +316,11 @@ let backend () =
       let store = Board.global () in
       let b = Jsonl store in
       let backend_val = Active (b, false) in
-      let _ = Atomic.compare_and_set backend_state Uninitialized backend_val in
+      let won = Atomic.compare_and_set backend_state Uninitialized backend_val in
+      (* Same emission contract as [init_jsonl]: the call that performs the
+         Uninitialized -> Active transition warns once when the cap is off,
+         so the auto-init path cannot stay silent (wool-nova P2). *)
+      if won then warn_comment_cap_once ();
       match Atomic.get backend_state with
       | Active (Jsonl active_store as active_b, _) ->
           ensure_flusher_actor active_store;
@@ -812,6 +827,14 @@ let set_thread_id ~post_id ~thread_id =
 let set_pinned ~post_id ~pinned =
   match backend () with
   | Jsonl store -> Board.set_pinned store ~post_id ~pinned
+
+let set_closed ~post_id ~closed_by ?successor_id ?summary () =
+  match backend () with
+  | Jsonl store -> Board.set_closed store ~post_id ~closed_by ?successor_id ?summary ()
+
+let reopen ~post_id =
+  match backend () with
+  | Jsonl store -> Board.reopen store ~post_id
 
 let delete_post ~post_id =
   match backend () with

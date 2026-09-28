@@ -692,11 +692,11 @@ let pause_running_operation ?expected_control_token ~base_path ~keeper_name oper
     Keeper_owner.pause_and_interrupt ?expected_control_token owner (Keeper_owner.Direct_operation operation_id))
 ;;
 
-let run_next_operation ~base_path ~keeper_name ~operation_id ~interrupt_token =
+let run_next_operation ?priority_predecessors ~base_path ~keeper_name ~operation_id ~interrupt_token () =
   with_chat_admission_command ~base_path ~keeper_name (fun owner _entry ->
     let observed = Option.map (fun interrupt_token ->
       Keeper_owner.Observed_turn { interrupt_token }) interrupt_token in
-    Keeper_owner.run_next_operation owner ~operation_id ~observed)
+    Keeper_owner.run_next_operation ?priority_predecessors owner ~operation_id ~observed)
 ;;
 
 let commit_turn_runtime ~base_path ~keeper_name ~before ~after =
@@ -733,61 +733,9 @@ let direct_runtime_retry ~base_path ~keeper_name ~operation_id =
   with_owner_command ~base_path ~keeper_name (fun owner ->
     Keeper_owner.direct_runtime_retry owner ~operation_id)
 ;;
-(* The Owner never polls, and a deferred retry whose backoff is still running
-   is not claimable — without a scheduled wake it would sit in the queue until
-   some unrelated event (a submit, a child exit, a keepalive start) happened
-   to arrive after its [not_before]. The sleeper rides the pool switch, so it
-   dies with the server and never outlives the store it wakes. *)
-let schedule_deferred_retry_wake ~base_path ~keeper_name
-    (continuation : Keeper_semantic_execution.runtime_retry) =
-  match continuation.not_before with
-  | None -> ()
-  | Some not_before ->
-    (match find_pool base_path, Eio_context.get_clock_opt () with
-     | Ok pool, Some clock ->
-       (try
-          Eio.Fiber.fork_daemon ~sw:pool.sw (fun () ->
-            (try
-               Eio.Time.sleep clock
-                 (Float.max 0.0 (not_before -. Time_compat.now ()));
-               (match wake_operation_drain ~base_path ~keeper_name with
-                | Ok () -> ()
-                | Error error ->
-                  Log.Keeper.warn
-                    "deferred chat operation retry wake failed keeper=%s error=%s"
-                    keeper_name
-                    (command_error_to_string error))
-             with
-             | Eio.Cancel.Cancelled _ as cancelled -> raise cancelled
-             | exn ->
-               Log.Keeper.warn
-                 "deferred chat operation retry wake fiber failed keeper=%s error=%s"
-                 keeper_name
-                 (Printexc.to_string exn));
-            `Stop_daemon)
-        with
-        | exn -> (* cancel-guard-ok: fork_daemon registration is synchronous; a cancelled switch fails before the daemon body runs *)
-          (* The defer already committed durably; losing the wake must not
-             surface as a defer failure, but it must not be silent either. *)
-          Log.Keeper.warn
-            "deferred chat operation retry wake not scheduled keeper=%s error=%s"
-            keeper_name
-            (Printexc.to_string exn))
-     | Error _, _ | Ok _, None ->
-       Log.Keeper.warn
-         "deferred chat operation retry wake not scheduled keeper=%s (no pool or no clock)"
-         keeper_name)
-;;
-
-let defer_direct_runtime_retry ~base_path ~keeper_name ~operation_id ~execution_digest ~continuation =
-  let result =
-    with_owner_command ~base_path ~keeper_name (fun owner ->
-      Keeper_owner.defer_direct_runtime_retry owner ~operation_id ~execution_digest ~continuation)
-  in
-  (match result with
-   | Ok _ -> schedule_deferred_retry_wake ~base_path ~keeper_name continuation
-   | Error _ -> ());
-  result
+let defer_direct_runtime_retry ~base_path ~keeper_name ~operation_id ~execution_digest ~continuation ~retry_wait =
+  with_owner_command ~base_path ~keeper_name (fun owner ->
+    Keeper_owner.defer_direct_runtime_retry ?retry_wait owner ~operation_id ~execution_digest ~continuation)
 ;;
 let resume_direct_runtime_retry ~base_path ~keeper_name ~operation_id ~observed =
   with_owner_command ~base_path ~keeper_name (fun owner ->

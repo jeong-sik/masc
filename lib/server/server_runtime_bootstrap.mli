@@ -85,17 +85,15 @@ val create_server_state :
     [Masc_http_client.Pool] can lazy-init with the full
     {!Eio_unix.Stdenv.base}.  RFC-0107 Phase D.2c. *)
 
-val mandatory_exact_output_lane_ids : string list
-(** Every exact-output lane a server must find declared, with a non-empty HTTP or CLI
-    slot list, in the resolved [runtime.toml] before readiness. Startup raises
-    one [Env_config_core.Config_error] naming every lane that is missing or has
-    no slots rather than synthesizing a default, so this list is also the
-    contract every boot-path config fixture
-    has to satisfy. Exposed so a fixture that a PR never boots can still be
-    checked against it — a lane added here without a matching fixture update is
-    the failure mode this value exists to make detectable. *)
+val check_exact_output_registry : ?config_root:string -> unit -> unit
+(** What boot's exact-output registry step refuses for the runtime.toml under
+    [config_root] and the runtimes {!Runtime} has loaded: an unusable
+    mandatory lane, a resolver snapshot that does not build, or a registry
+    {!Runtime_exact_output_registry.publish} would refuse. Publishes nothing.
+    Raises [Env_config_core.Config_error] with the same text boot raises. The
+    deployment preflight runs it after {!Runtime.init_default_degraded_observation}. *)
 
-(** Why one of {!mandatory_exact_output_lane_ids} is unusable in the resolved
+(** Why one of [Standalone_lane.required_ids] is unusable in the resolved
     [runtime.toml]: it has no [\[runtime.exact_output_lanes.<id>\]] table, or
     the table declares neither [slots] nor [cli_slots]. *)
 type mandatory_exact_output_lane_violation =
@@ -108,7 +106,10 @@ module For_testing : sig
   val mandatory_exact_output_lane_violations :
     Runtime_schema.exact_output_lane_decl list ->
     mandatory_exact_output_lane_violation list
-  (** Every violation, in {!mandatory_exact_output_lane_ids} order. *)
+  (** Every violation, in [Standalone_lane.required_ids] order. Startup raises
+      one [Env_config_core.Config_error] naming every lane that is missing or
+      has no slots rather than synthesizing a default, so those ids are also
+      the contract every boot-path config fixture has to satisfy. *)
 
   val require_explicit_mandatory_exact_output_lanes :
     config_path:string -> Runtime_schema.exact_output_lane_decl list -> unit
@@ -205,7 +206,10 @@ val initialize_owner_state_blocking
     [accept_store_quarantine] is the operator's [--accept-store-quarantine]
     (RFC-0420): without it a keeper store this build cannot decode fails
     initialization with [Keeper_persistence_preparation_failed
-    (Store_quarantine_refused _)] and nothing is moved aside. *)
+    (Store_quarantine_refused _)] and nothing is moved aside. An unread store inventory
+    refuses preparation even with the flag; repair directory access first.
+    Failed quarantine moves also refuse preparation: accepting the move does
+    not authorize continuing with the unreadable store still in place. *)
 
 val activate_owner_state
   :  ?boot_stage:(string -> unit)

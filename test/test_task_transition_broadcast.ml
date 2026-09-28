@@ -80,33 +80,15 @@ let contents config ~baseline_seq =
 
 (* Every transition into [AwaitingVerification] persists a request before it
    commits, and this suite has no verification store. The stub stands in for
-   one: it writes the producer's stated reason where the approved-cancellation
-   path reads it back (#38192), and nothing else. A completion claim carries
-   no reason, so it writes no record and the path under test is unchanged. *)
-let stub_verification_request config ~task:(task : D.task) ~assignee ~verification_id
-      ~claim =
-  match claim with
-  | D.Completion_evidence _ -> Ok ()
-  | D.Cancellation_reason { reason } ->
-    Masc.Verification.create_request
-      ~base_path:config.Workspace.base_path
-      ~task_id:task.id
-      ~output:
-        (`Assoc
-          [ Workspace_verification_store.cancellation_reason_field, `String reason ])
-      ~criteria:[]
-      ~worker:assignee
-      ~request_id:verification_id
-      ()
-    |> Result.map (fun (_ : Masc.Verification.verification_request) -> ())
-;;
+   one and writes nothing, so the path under test is unchanged. *)
+let stub_verification_request ~task:_ ~assignee:_ ~verification_id:_ ~claim:_ = Ok ()
 
 let transition config ~task_id ~action
       ?prepare_verification_request ?(reason = "") ?(notes = "") () =
   let prepare_verification_request =
     match prepare_verification_request with
     | Some prepare -> prepare
-    | None -> stub_verification_request config
+    | None -> stub_verification_request
   in
   Workspace.transition_task_r
     config
@@ -154,13 +136,18 @@ let test_cancel_of_an_unclaimed_task_is_announced_as_terminal () =
       (contents config ~baseline_seq))
 ;;
 
-let test_cancel_without_reason_broadcasts_bare () =
+(* An unclaimed Task's cancel is gated like a held one's: with no reason of
+   its own the cancel is refused rather than committed bare, so the author's
+   wake never lacks the sentence it exists to carry. *)
+let test_cancel_without_reason_is_refused () =
   with_test_env (fun config ~baseline_seq ->
     seed config (make_task ~id:"task-2" ~status:D.Todo);
-    check_ok "cancel" (transition config ~task_id:"task-2" ~action:D.Cancel ());
-    Alcotest.(check (list string))
-      "empty reason omits the separator"
-      [ "Cancelled task-2" ]
+    (match transition config ~task_id:"task-2" ~action:D.Cancel () with
+     | Ok message ->
+       Alcotest.failf "a reason-less cancel was accepted: %s" message
+     | Error (D.Task (D.Task_error.InvalidState _)) -> ()
+     | Error err -> Alcotest.failf "unexpected rejection: %s" (D.masc_error_to_string err));
+    Alcotest.(check (list string)) "a refused cancel is silent" []
       (contents config ~baseline_seq))
 ;;
 
@@ -288,7 +275,6 @@ let test_explicit_reason_outranks_handoff_context () =
       (make_task ~id:"task-11" ~status:(D.InProgress { assignee = owner; started_at = now }));
     check_ok "cancel"
       (Workspace.transition_task_r config ~agent_name:owner ~task_id:"task-11"
-         ~prepare_verification_request:(stub_verification_request config)
          ~action:D.Cancel ~notes:""
          ~reason:"superseded by task-12"
          ~handoff_context:
@@ -550,17 +536,7 @@ let test_verdict_activity_tracks_the_committed_terminal () =
                 | None -> false) () in
             Alcotest.(check (list string)) "events describe committed states"
               [ "task.claimed"; "task.started"; "task.submit_for_verification"; terminal_kind ]
-              (List.map (fun (event : Activity_graph.event) -> event.kind) events);
-            let submitted =
-              List.find
-                (fun (event : Activity_graph.event) ->
-                   String.equal event.kind "task.submit_for_verification")
-                events
-            in
-            Alcotest.(check string)
-              "submission records its typed intent"
-              "complete"
-              Yojson.Safe.Util.(submitted.payload |> member "intent" |> to_string))))
+              (List.map (fun (event : Activity_graph.event) -> event.kind) events))))
     [ D.Verdict_approved, "done", "completed", false, "task.approved"
     ; D.Verdict_rejected { reason = "the evidence does not show it" },
         "in_progress", "open", true, "task.rejected"
@@ -575,8 +551,8 @@ let () =
             test_cancel_broadcasts_reason
         ; Alcotest.test_case "an unclaimed cancel is terminal" `Quick
             test_cancel_of_an_unclaimed_task_is_announced_as_terminal
-        ; Alcotest.test_case "cancel without reason" `Quick
-            test_cancel_without_reason_broadcasts_bare
+        ; Alcotest.test_case "cancel without reason is refused" `Quick
+            test_cancel_without_reason_is_refused
         ; Alcotest.test_case "release carries its reason" `Quick
             test_release_broadcasts_reason
         ; Alcotest.test_case "claim and start" `Quick test_claim_and_start_broadcast

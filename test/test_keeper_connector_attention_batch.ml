@@ -260,7 +260,8 @@ let approve_grant_exn ~base_path ~keeper_name ~request =
   (match
      Keeper_approval_queue.resolve_with_policy
        ~base_path ~id:approval_id
-       ~decision:Keeper_approval_queue_rules_types.Decision.Approve ()
+       ~decision:Keeper_approval_queue_rules_types.Decision.Approve
+       ~source:Keeper_approval_queue_rules_types.Human_operator ()
    with
    | Ok _ -> ()
    | Error error -> fail (Keeper_approval_queue.resolve_error_to_string error));

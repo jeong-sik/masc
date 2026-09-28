@@ -12,12 +12,12 @@ related: ["0247", "0418", "0456", "0463", "librarian-absorb-gate"]
 
 # Memory 검색을 substring 너머로 — 현황, absorb gate 상수, 개선 방향
 
-이 문서는 제안이다. 코드는 바꾸지 않는다. 채택할 단계를 고르면 단계마다 별도 PR 로 낸다.
+이 문서는 제안으로 시작했다. 단계 0(측정, §3.0)은 이 RFC 와 같은 PR 에 들어갔고, 단계 1 부터는 단계마다 별도 PR 로 낸다.
 
 ## 1. 현황: `keeper_memory_search` 는 두 단 substring 매칭이다
 
 Keeper 가 기억을 찾는 유일한 도구는 `keeper_memory_search` 다
-(`lib/keeper/keeper_tool_memory_runtime.ml:565`, 스키마 `config/tools/keeper_memory_search.toml`).
+(`Keeper_tool_memory_runtime.keeper_memory_search_with_outcome`, 스키마 `config/tools/keeper_memory_search.toml`).
 `keeper_memory_recall.ml` 의 키워드 분류기는 이미 지워졌고, "무엇을 떠올릴지"는 Keeper 가 이 도구에
 넣는 query 로 정한다. 그러니 이 도구가 못 찾으면 Keeper 는 모른다고 판단한다.
 
@@ -31,9 +31,9 @@ Keeper 가 기억을 찾는 유일한 도구는 `keeper_memory_search` 다
 - 대소문자 무시는 ASCII 만(`Char.lowercase_ascii`). 토큰 분리도 ASCII 공백만.
 - 점수가 없다. 각 단 안에서는 스냅숏 저장 순서를 그대로 쓰고 `take limit` 으로 자른다.
 - 순서: 일반 현재 기억 1단 → source-bound 1단 → 일반 2단 → source-bound 2단.
-- `limit` 은 1~10, 기본 5 (`keeper_tool_memory_runtime.ml:572`).
-- 같은 `answering` 을 `source=absorbed`(흡수된 원문 행)와 `source=history`(`search_history`, 같은 파일
-  `:434`, 체크포인트 user 메시지 → trace 히스토리)가 공유한다.
+- `limit` 은 1~10, 기본 5 (`Keeper_tool_memory_runtime` 의 `limit` 인자 해석).
+- 같은 `answering` 을 `source=absorbed`(흡수된 원문 행)가 공유한다. `source=history`(`search_history`,
+  체크포인트 user 메시지 → trace 히스토리)는 같은 두 규칙을 자기 코드로 적용하고 각 단을 최신순으로 둔다.
 
 ### 1.1 이 방식이 놓치는 것
 
@@ -56,7 +56,7 @@ Keeper 가 기억을 찾는 유일한 도구는 `keeper_memory_search` 다
   `record_memory_events`).
 - 검색마다 결정 로그(`<keeper>.decisions.jsonl`)에 `event = "memory_search"` 한 줄이 남는다: query, source,
   `match_count`, `matched_memory_ids`. 0건 query 도 여기 남는다.
-- 없는 것: 몇 개 중에서 찾았는지(후보 수)가 로그에 없고, 검색 결과를 세는 OTel 카운터가 없고, 로그를 모아
+- 단계 0 이전에 없던 것(§3.0 에서 더함): 몇 개 중에서 찾았는지(후보 수)가 로그에 없고, 검색 결과를 세는 OTel 카운터가 없고, 로그를 모아
   0건 비율과 "0건 뒤 다른 말로 다시 찾은" 사례를 뽑는 도구가 없다. 개선 효과를 재려면 이것부터 있어야 한다(§3.0).
 
 ## 2. absorb gate 의 상수와 휴리스틱
@@ -115,10 +115,20 @@ no stop-word, substring, regular-expression, or intent heuristics"). 같은 모�
   없으니 스냅숏과 어긋날 상태가 생기지 않는다(`authoritative_read_only` 불변식과 충돌 없음).
 - 토크나이저: `unicode61` 만으로는 한국어 교착 접미사("소주를")를 못 맞춘다. `trigram` 토크나이저는 부분 문자열을
   맞추고 유니코드 대소문자를 접는다. 단 **3글자 미만 토큰은 trigram 으로 못 찾는다**("소주", "PR").
-  그래서 두 컬럼(`unicode61` 과 `trigram`)을 같이 두고 OR 로 묻는 구성을 제안한다. 구체 구성은 단계 0 재생
-  세트로 고른다.
-- 의미 변화: AND(전부 포함) → OR + BM25 순위. 단어 하나가 더 섞여도 결과가 사라지지 않는다.
-  구절 일치는 FTS5 phrase query 로 여전히 최상위에 온다.
+- 구현(2026-09-27, `lib/keeper/keeper_memory_search_index.ml`): `trigram` 테이블 하나. query 의 공백 토큰을
+  각각 FTS5 문자열로 인용해 OR 로 묻는다(Keeper 가 친 글자가 FTS5 문법으로 읽히지 않는다). 3글자 미만 토큰은
+  인덱스에서 아무것도 맞추지 않을 뿐 오류가 아니고, 기존 "토큰 전부 substring" 규칙이 계속 답한다. 그래서
+  `unicode61` 두 번째 테이블은 두지 않았다.
+- 의미 변화: 1단(query 전체를 한 덩어리로 포함)은 그대로 저장 순서로 맨 앞에 둔다. 2단은 AND(토큰 전부 포함)에서
+  "토큰 하나라도 포함(인덱스) 또는 토큰 전부 substring"으로 넓어지고 BM25 순으로 정렬된다. 단어 하나가 더 섞여도
+  결과가 사라지지 않고, 토큰을 더 많이 가진 claim 이 앞에 온다. 1단 안의 순위는 매기지 않는다. 정확히 맞은 것
+  여럿 중에서 고르는 일은 단계 2 판정의 몫이고, 한 단어 query 의 결과 순서도 그래서 바뀌지 않는다.
+- `source=all` 에서 흡수 행을 빼는 기준(`answered_by`)은 "query 전체나 토큰 전부를 가진 claim" 으로 남긴다.
+  토큰 하나만 공유하는 claim 은 찾아지긴 해도 흡수 행이 말한 것을 말하지 않는다.
+- `source=history` 는 이 단계에서 바꾸지 않는다: `answering` 을 거치지 않으므로 여전히 query 전체 또는 토큰
+  전부(AND)를 요구하고 최신순이다. 도구 설명도 그렇게 말한다.
+- 인덱스를 만들지 못하면(SQLite 오류, 예: trigram 이 없는 3.34 미만 SQLite) 2단은 저장 순서로 두고 substring
+  규칙만으로 답한다. 같은 원인이 매 검색마다 되풀이되므로 경고는 프로세스당 한 번만 남긴다.
 - 출력은 그대로 `memory_id`·store·basis. 도구 스키마 설명만 바뀐다.
 - constitution 과의 관계: 검색 결과는 Keeper 에게 보여주는 후보일 뿐 제어 흐름 분기가 아니다. 그리고 매칭
   로직을 직접 짜는 대신 생태계 라이브러리(SQLite FTS5)에 맡긴다(`<libraries>`).
@@ -186,6 +196,5 @@ RFC-0247 의 그래프 한 홉(구조적 provenance, `Revised` 사슬, 같은 tr
 
 ## 6. 안 하는 것
 
-- 코드 변경. 이 문서는 제안만 한다.
 - 영속 검색 인덱스. 스냅숏과 어긋날 두 번째 진실을 만들지 않는다.
 - 불용어 목록, 형태소 규칙, 정규식 같은 직접 짠 텍스트 휴리스틱.

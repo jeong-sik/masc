@@ -20,6 +20,19 @@ type store =
 
 module Chat_operation = Keeper_chat_operation
 
+type runtime_retry_revalidation =
+  | Keep_retry_wait
+  | Update_retry_wait of
+      { replacement : Keeper_semantic_execution.runtime_retry
+      ; next_wait : runtime_retry_wait
+      }
+and runtime_retry_wait = now:float -> observed:Keeper_semantic_execution.runtime_retry ->
+  (runtime_retry_revalidation, string) result
+(** Non-yielding live dependency observation, evaluated only while the exact
+    durable retry is still current. [next_wait] becomes authoritative only
+    after the replacement commits. Process restart discards these witnesses
+    and preserves the persisted retry deadline. *)
+
 type operation_projection =
   { queued_count : int
   ; has_claimable_queued : bool
@@ -191,7 +204,8 @@ type operation_runner =
 (** Typed admission for the durable operation drain. [ready] must be a
     non-yielding in-memory read. When it returns [false], the FIFO head remains
     Queued and no child is started. The producer that makes the dependency
-    ready must call {!wake_operation_drain}; the Owner never polls.
+    ready must call {!wake_operation_drain}. Cooling runtime continuations alone
+    recheck their live dependency witness at the Keeper observation interval.
 
     [on_execution_settled] runs on the Owner fiber after the child switch has
     fully unwound — every executor fiber has finished or been cancelled — and
@@ -358,7 +372,7 @@ val resume_direct_checkpoint : t -> operation_id:Chat_operation.Operation_id.t -
 
 val direct_runtime_retry : t -> operation_id:Chat_operation.Operation_id.t ->
   (Keeper_semantic_execution.runtime_retry option, error) result
-val defer_direct_runtime_retry : t -> operation_id:Chat_operation.Operation_id.t ->
+val defer_direct_runtime_retry : ?retry_wait:runtime_retry_wait -> t -> operation_id:Chat_operation.Operation_id.t ->
   execution_digest:string -> continuation:Keeper_semantic_execution.runtime_retry ->
   (Chat_operation.t, error) result
 val resume_direct_runtime_retry : t -> operation_id:Chat_operation.Operation_id.t ->
@@ -371,12 +385,17 @@ val interrupt_turn : ?expected_control_token:string -> t -> interrupt_target -> 
     unless explicitly paused by an operator latch. *)
 val chat_control_token : t -> string
 val submit_interactive_operation : t -> operation_id:Chat_operation.Operation_id.t -> source:Yojson.Safe.t -> input:Yojson.Safe.t -> intent:interactive_intent -> (operation_acceptance * interactive_receipt, error) result
-(** Admit and prioritize compatible queued context in one SQLite transaction,
-    then apply the supplied exact control intent within the same mailbox command.
+(** Admit in durable FIFO queue order, then apply the supplied exact control
+    intent within the same mailbox command. Interactive admission itself does
+    not reorder queued work; explicit queue-priority operations can do so.
     Replayed admissions and stale control tokens perform no control effects. *)
-val run_next_operation : t -> operation_id:Chat_operation.Operation_id.t ->
+val run_next_operation : ?priority_predecessors:Chat_operation.Operation_id.t list ->
+  t -> operation_id:Chat_operation.Operation_id.t ->
   observed:interrupt_target option -> (run_next_result, error) result
-(** Prioritize a queued operation. Refused only while an operator's explicit pause closes admission. *)
+(** Prioritize a queued operation. [priority_predecessors] keeps automatic
+    priority after the latest still-queued earlier request. Omission retains
+    explicit run-next's absolute-front behavior. An operator pause can refuse
+    the request; invalid or unavailable queued operations return an error. *)
 
 val interrupt_running_operation
   :  t

@@ -67,7 +67,7 @@ let setup base_path ~access =
       (Service.refresh
          ~workspace
          ~user_home:None
-         ~read_config:(fun () -> Service.Config_text config_text))
+         ~read_config:(fun () -> Service.Config_text { path = "/fixture/runtime.toml"; source_text = config_text }))
   in
   let snapshot =
     match refresh () with
@@ -113,6 +113,30 @@ let test_load_preview_and_publish () =
     | Ok None | Error _ -> fail "saved SKILL.md could not be read back"
   in
   check string "durable bytes" edited persisted
+;;
+
+(* A fence info string that only normalizes to the composition contract parses
+   as an ordinary code block: the candidate stays an instruction with no
+   composition tool. The preview says so instead of reporting a clean
+   instruction. *)
+let test_near_miss_fence_is_diagnosed_in_preview () =
+  with_workspace @@ fun base_path ->
+  let _, _, reference, _ = setup base_path ~access:"read-write" in
+  let candidate =
+    skill_text
+      "Meant composition."
+      "```TOML Composition\n[[compositions]]\nname = \"sample\"\n```"
+  in
+  match Editor.preview ~base_path reference ~source_text:candidate with
+  | Error error -> fail (Editor.error_to_string error)
+  | Ok preview ->
+    check string "candidate stays an instruction" "instruction" preview.profile.kind;
+    check (list string) "near-miss is diagnosed"
+      [ "skill \"sample\": fence info \"TOML Composition\" reads like \"toml composition\" \
+         but does not match it exactly, so the block stayed an ordinary code block and \
+         the skill an instruction; write the info string exactly as \"toml composition\" \
+         to declare a composition" ]
+      preview.diagnostics
 ;;
 
 let test_invalid_candidate_is_never_written () =
@@ -419,7 +443,7 @@ let test_create_behind_an_earlier_source_names_the_winner () =
       (Service.refresh
          ~workspace
          ~user_home:None
-         ~read_config:(fun () -> Service.Config_text config_text))
+         ~read_config:(fun () -> Service.Config_text { path = "/fixture/runtime.toml"; source_text = config_text }))
   in
   (match refresh () with
    | Ok (Service.Published _ | Unchanged _) -> ()
@@ -1185,6 +1209,8 @@ let () =
     "server Skill editor"
     [ ( "editor"
       , [ test_case "load preview and publish" `Quick test_load_preview_and_publish
+        ; test_case "near-miss fence is diagnosed in preview" `Quick
+            test_near_miss_fence_is_diagnosed_in_preview
         ; test_case "invalid candidate is never written" `Quick test_invalid_candidate_is_never_written
         ; test_case "invalid new Skill is never created" `Quick
             test_invalid_new_skill_is_never_created

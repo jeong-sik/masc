@@ -142,7 +142,7 @@ let test_native_observe_private_home () =
        let home_record = Filename.concat root "observed-home" in
        let cli_path = Filename.concat root "fake-agy" in
        let python_path = python () in
-       let original = "fixture-oauth-token-never-log" in
+       let original = (Masc_test_deps.antigravity_oauth_fixture "fixture-oauth-token-never-log") in
        Out_channel.with_open_bin source (fun out -> output_string out original);
        Unix.chmod source 0o600;
        let script =
@@ -210,7 +210,7 @@ let test_native_version_probe_failure () =
        let cli_path = Filename.concat root "fake-agy" in
        let python_path = python () in
        Out_channel.with_open_bin source (fun out ->
-         output_string out "fixture-oauth-token-never-log");
+         output_string out (Masc_test_deps.antigravity_oauth_fixture "fixture-oauth-token-never-log"));
        Unix.chmod source 0o600;
        let refusal = "fixture refuses the version probe" in
        let script =

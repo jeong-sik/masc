@@ -634,6 +634,16 @@ val keeper_assignments : unit -> (string * string) list
     Dashboard/operator surfaces use this to expose assignment blast radius
     without parsing TOML independently. *)
 
+type keeper_dispatch_snapshot
+(** Effective route, ordered candidates and their frozen dispatch identities
+    from one loaded-state read. Unrelated config edits do not change it. *)
+
+val keeper_dispatch_snapshot : keeper_name:string -> keeper_dispatch_snapshot
+val same_keeper_dispatch :
+  keeper_dispatch_snapshot -> keeper_dispatch_snapshot -> bool
+(** Unchanged bindings retain their candidate cells across catalog reloads.
+    A reassignment, lane edit, removal or binding replacement differs. *)
+
 type dashboard_runtime_defaults_snapshot =
   { default_runtime : t option
   ; runtimes : t list
@@ -901,12 +911,6 @@ val turn_timeout_s_of_runtime_id : string -> float option
     "keep whatever bound the caller already has". Consumed by
     {!Runtime_inference.resolve_turn_timeout_s}. *)
 
-val wall_clock_ceiling_s_of_runtime_id : string -> float option
-(** Per-model [wall-clock-ceiling-s] from runtime.toml, or [None] when unset
-    or the runtime id is unknown. Bounds one official-client turn's total
-    duration and never resets on protocol messages ({!Runtime_wall_clock});
-    [None] keeps the runtime default ceiling. Consumed by
-    {!Runtime_inference.resolve_wall_clock_ceiling_s}. *)
 
 val quota_scope_of_runtime : t -> Runtime_quota_window.scope
 (** Non-secret quota-scope identity derived from this resolved runtime

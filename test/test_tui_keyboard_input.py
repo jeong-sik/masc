@@ -461,8 +461,21 @@ def approvals_header(count: int) -> re.Pattern[bytes]:
     )
 
 
+# The Board list draws a post's id only while it keeps every column: the
+# named columns and their gaps take 66 cells and the title's floor 30
+# (Masc_tui_render_schedule.board_layout), and the frame and the row's lead
+# take 8 more. Below 104 the id is the first column it gives up, so a case
+# that finds a Board row by its id opens this wide. It stays short of the
+# roster pane (Masc_tui_roster_pane.threshold_cols) and the Activity pane
+# (Masc_tui_acting_pane.threshold_cols), which would take cells off the body.
+BOARD_ID_DRAWN_COLS = 104
+
+
 def selected_row(post_id: bytes) -> re.Pattern[bytes]:
     """The highlighted list row for `post_id`, whatever sits in the gutter.
+
+    On the Board the id is a column the list gives up when narrow, so the
+    terminal must be at least BOARD_ID_DRAWN_COLS wide.
 
     Selection is drawn two ways while the band conversion is in flight: the
     legacy reverse-video caret, or a full-row reverse band that opens the
@@ -4054,7 +4067,7 @@ def assert_row_budgeted_surfaces(
     # Tasks row left, which draws the backlog line. The budget checked here
     # is that the panel stops where its rows stop: the first item is the
     # last one drawn and the second is not.
-    for expected in (b"attention-1", b"GOALS", b"5 todo", b"q:quit"):
+    for expected in (b"attention-1", b"Goals", b"5 todo", b"q:quit"):
         if expected not in overview:
             raise AssertionError(f"14-row Overview omitted {expected!r}: {overview!r}")
     if b"attention-2" in overview:
@@ -16504,18 +16517,21 @@ def run_keyboard_regression(executable: str, *, group: int | None = None) -> Non
                 late_list,
             ),
             http_fixtures=board_authority_fixtures,
+            terminal_cols=BOARD_ID_DRAWN_COLS,
         )
         run_terminal_scenario(
             executable,
             description="Board detail isolation",
             interact=board_detail_isolation_interaction(b_failure),
             http_fixtures=board_detail_fixtures,
+            terminal_cols=BOARD_ID_DRAWN_COLS,
         )
         run_terminal_scenario(
             executable,
             description="Board exact detail survives page omission",
             interact=board_paginated_detail_interaction(missing_target_fixtures, late_b),
             http_fixtures=missing_target_fixtures,
+            terminal_cols=BOARD_ID_DRAWN_COLS,
         )
         run_terminal_scenario(
             executable,

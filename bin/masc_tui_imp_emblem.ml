@@ -1,11 +1,24 @@
 (* A turning imp emblem in Braille.
 
-   Technique after openai/codex codex-rs/tui/src/empty_state_animation
-   (Apache-2.0); reimplemented. The steps are the same -- a flat mark's
-   distance field stood up as a bevelled slab, surface points splatted through
-   a depth buffer, a fixed set of lights, one Braille glyph per cell coloured
-   with the mean of its dots -- and the shapes, lights, palette and motion are
-   this emblem's own. *)
+   Adapted from openai/codex codex-rs/tui/src/empty_state_animation/
+   renderer.rs, lighting.rs and sequence.rs at commit 5c5308fc9a9e (Apache
+   License 2.0, Copyright 2025 OpenAI). The license and Codex's NOTICE sit
+   beside this file as codex-empty-state-animation-LICENSE.txt and
+   codex-empty-state-animation-NOTICE.txt; THIRD-PARTY-LICENSES.md lists them.
+
+   Kept from Codex: the structure of [frame] -- the distance field stood up as
+   a bevelled slab, face and side-wall points splatted through a depth buffer,
+   yaw then nod then roll, one Braille glyph per cell coloured with the mean
+   of its dots -- the five-term shading (shadow, key, bounce, rim, gloss)
+   with its depth fade, the eased loop of two turns with a change of mark in
+   each, and some constants as they are: the wall band, the skip past the
+   outline, the 24-row limit.
+
+   Changed here: the marks (analytic imp and lantern fields, not SVG paths),
+   the ember, soot and pencil palettes and how they follow the terminal's
+   page, culling of faces turned away, the surface ripple, colour written only
+   through the TUI's own projection, and retuned motion, camera and lighting
+   constants. *)
 
 module Palette = Masc_tui_terminal_palette
 module Shape = Masc_tui_imp_shape
@@ -496,13 +509,23 @@ let same_colour a b =
   && Palette.green a = Palette.green b
   && Palette.blue a = Palette.blue b
 
+type ink = Palette.rgb -> Palette.projected_color option
+
+let stdout_ink = Palette.best_color
+let ink_projected_by project = project
+
 let lines ~ink frame =
   let { cols; rows } = frame.size in
   List.init rows (fun row ->
     let buf = Buffer.create (cols * 8) in
-    (* The colour last asked for, and whether its escape was non-empty and so
-       is still in effect on the terminal. *)
-    let current = ref None and active = ref false in
+    (* The colour the last lit cell asked for, and whether a colour escape is
+       in effect on the terminal. A colour that projects to nothing leaves the
+       terminal's own text colour, so it has to end the one before it. *)
+    let current = ref None and coloured = ref false in
+    let to_default () =
+      if !coloured then Buffer.add_string buf Masc_tui_theme.Sgr.default_fg;
+      coloured := false
+    in
     for col = 0 to cols - 1 do
       let cell = frame.cells.((row * cols) + col) in
       if cell.dots = 0
@@ -511,21 +534,22 @@ let lines ~ink frame =
         (match cell.ink, !current with
          | Some colour, Some previous when same_colour colour previous -> ()
          | Some colour, (Some _ | None) ->
-           let escape = ink colour in
-           Buffer.add_string buf escape;
-           active := String.length escape > 0;
+           (match ink colour with
+            | Some projected ->
+              Buffer.add_string buf (Masc_tui_theme.Sgr.foreground (Some projected));
+              coloured := true
+            | None -> to_default ());
            current := Some colour
          | None, Some _ ->
-           if !active then Buffer.add_string buf Masc_tui_theme.Sgr.reset;
-           active := false;
+           to_default ();
            current := None
          | None, None -> ());
         Buffer.add_utf_8_uchar buf (Uchar.of_int (braille_blank + cell.dots)))
     done;
-    if !active then Buffer.add_string buf Masc_tui_theme.Sgr.reset;
+    (* SGR 39 rather than a full reset: a pane that draws the emblem on its own
+       background or weight keeps them. *)
+    to_default ();
     Buffer.contents buf)
-
-let stdout_ink colour = Masc_tui_theme.Sgr.foreground (Palette.best_color colour)
 
 module For_testing = struct
   let dot_of_front_point size pose { Shape.x; y } =

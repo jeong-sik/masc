@@ -5,6 +5,11 @@ type phase = Loading | Providers | Logging | Models | Documented_context of mode
 type recovery = Login_status | Refresh_configuration
 type email_gap = Login_file_unreadable | Login_file_unrecognized | Email_not_reported | Email_not_displayable
 type account_email = Email of string | Not_read of email_gap | Login_unfinished | Not_recorded | Unreadable
+  | Unrecognized  (* the server's row for this account had a shape this TUI does not know *)
+type account_emails =
+  | Email_rows of { rows : (string * account_email) list; unattributed : int }
+      (* [unattributed]: rows naming no listed integration, or no integration at all *)
+  | Email_list_unrecognized  (* the inventory carried no readable email list *)
 type t = {
   requested : string; mutable generation : int; mutable phase : phase; mutable providers : provider list;
   mutable provider : provider option; mutable models : model list; mutable cursor : int;
@@ -12,7 +17,7 @@ type t = {
   mutable revision : string; mutable existing : string list; mutable default_runtime_id : string option; mutable draft : string;
   mutable output : string; mutable notice : string; mutable input_pending : bool; mutable input_sequence : int;
   mutable cancel_stream : (unit -> unit) option; mutable recovery : recovery;
-  mutable account_emails : (string * account_email) list;
+  mutable account_emails : account_emails;
 }
 type authentication = Authenticated | Login_completed | Credential_captured
 type event = Started of string * string option | Output of string | Input_ready

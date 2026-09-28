@@ -25,11 +25,11 @@ let palette ~ink ~page =
 let dark_page = Emblem.lighting (Emblem.Known (palette ~ink:(rgb 220 220 220) ~page:(rgb 16 16 20)))
 let light_page = Emblem.lighting (Emblem.Known (palette ~ink:(rgb 30 30 36) ~page:(rgb 250 248 244)))
 
-let truecolor colour =
-  Printf.sprintf "\027[38;2;%d;%d;%dm" (Palette.red colour) (Palette.green colour)
-    (Palette.blue colour)
+(* Every colour kept as it is, as on a truecolour terminal. *)
+let truecolor = Emblem.ink_projected_by (Palette.For_testing.best_color_for_level ~level:Palette.True_color)
 
-let no_colour (_ : Palette.rgb) = ""
+(* Every colour projected to nothing, as on a sixteen-colour terminal. *)
+let no_colour = Emblem.ink_projected_by (fun (_ : Palette.rgb) -> None)
 
 (* One renderer for every case: its buffers carry over between frames, which
    is what a caller does too. *)
@@ -122,7 +122,7 @@ let test_every_row_fits () =
 
 let test_no_colour_writes_no_escape () =
   let frame = Emblem.frame renderer largest (pose_exn 0.2) dark_page in
-  check bool "an empty ink writes no escape" false
+  check bool "a colour projected to nothing writes no escape" false
     (List.exists has_escape (Emblem.lines ~ink:no_colour frame));
   let unknown = Emblem.frame renderer largest (pose_exn 0.2) (Emblem.lighting Emblem.Unknown) in
   check bool "an unknown page gets dots and no colour" false
@@ -173,6 +173,140 @@ let test_settled_is_the_imp () =
   check bool "settled imp shows its brow" true (dot_lit frame Emblem.settled Shape.imp_brow);
   check bool "settled imp shows its horn" true (dot_lit frame Emblem.settled Shape.imp_left_horn)
 
+(* ---- a row read back as a terminal would draw it ---- *)
+
+(* Whether each glyph of a row is drawn in a colour set by an escape, and
+   whether one is still set when the row ends. Only SGR 38 (set) and 39
+   (terminal's own colour) may appear. *)
+let read_row row =
+  let length = String.length row in
+  let rec go i coloured drawn =
+    if i >= length
+    then List.rev drawn, coloured
+    else if row.[i] = '\027'
+    then (
+      let close = String.index_from row i 'm' in
+      let params = String.sub row (i + 2) (close - i - 2) in
+      if String.equal params "39"
+      then go (close + 1) false drawn
+      else if String.starts_with ~prefix:"38;" params
+      then go (close + 1) true drawn
+      else fail ("unexpected escape: " ^ String.escaped params))
+    else if row.[i] = ' '
+    then go (i + 1) coloured (None :: drawn)
+    else
+      (* A Braille glyph: three UTF-8 bytes. *)
+      go (i + 3) coloured (Some coloured :: drawn)
+  in
+  go 0 false []
+
+(* A colour projected to nothing between two that are drawn must be drawn in
+   the terminal's own colour, not the one before it, and no row may leave a
+   colour set behind it. *)
+let test_a_row_ends_in_the_terminal_colour () =
+  let project colour =
+    if Palette.red colour >= 128
+    then Palette.For_testing.best_color_for_level ~level:Palette.True_color colour
+    else None
+  in
+  let frame = Emblem.frame renderer largest imp_front dark_page in
+  let rows = Emblem.lines ~ink:(Emblem.ink_projected_by project) frame in
+  let cols = frame.Emblem.size.Emblem.cols in
+  let expected row col =
+    let cell = frame.Emblem.cells.((row * cols) + col) in
+    if cell.Emblem.dots = 0
+    then None
+    else
+      Some
+        (match cell.Emblem.ink with
+         | Some colour -> Option.is_some (project colour)
+         | None -> false)
+  in
+  let mixed = ref false in
+  List.iteri
+    (fun row text ->
+      if Masc_tui_theme.colors_enabled
+      then (
+        let drawn, left_coloured = read_row text in
+        check bool "the row does not leave a colour set" false left_coloured;
+        let wanted = List.init cols (expected row) in
+        check (list (option bool)) "each glyph in its own colour" wanted drawn;
+        if List.mem (Some true) wanted && List.mem (Some false) wanted then mixed := true)
+      else check bool "colours off: no escape" false (has_escape text))
+    rows;
+  if Masc_tui_theme.colors_enabled
+  then check bool "some row mixes drawn and undrawn colours" true !mixed
+
+(* Read off the cells, not through the renderer's projection: the horns are
+   the top of the front imp and the chin its bottom, and the drawing fills
+   most of the box without touching its edges. An upside-down or mis-scaled
+   projection moves all of the feature probes with it, but not this. *)
+let test_the_front_imp_stands_upright () =
+  let frame = Emblem.frame renderer largest imp_front dark_page in
+  let size = frame.Emblem.size in
+  let cols = size.Emblem.cols and rows = size.Emblem.rows in
+  let lit row col = frame.Emblem.cells.((row * cols) + col).Emblem.dots <> 0 in
+  let row_lit row = List.exists (lit row) (List.init cols Fun.id) in
+  let lit_rows = List.filter row_lit (List.init rows Fun.id) in
+  let first = List.hd lit_rows and last = List.nth lit_rows (List.length lit_rows - 1) in
+  let middle = cols / 2 in
+  let centre row = lit row (middle - 1) || lit row middle in
+  let outer row =
+    List.exists (lit row) (List.init (cols / 4) Fun.id)
+    || List.exists (lit row) (List.init (cols / 4) (fun i -> cols - 1 - i))
+  in
+  let left row = List.exists (lit row) (List.init middle Fun.id) in
+  let right row = List.exists (lit row) (List.init middle (fun i -> middle + i)) in
+  check bool "the top row holds two horn tips" true
+    (left first && right first && not (centre first));
+  check bool "the bottom row is the chin" true (centre last && not (outer last));
+  check bool "room above the horns" true (first >= 1);
+  check bool "room below the chin" true (last <= rows - 2);
+  check bool "the imp fills most of the box's height" true ((last - first + 1) * 10 >= rows * 7)
+
+let luminance colour =
+  (0.2126 *. Float.of_int (Palette.red colour))
+  +. (0.7152 *. Float.of_int (Palette.green colour))
+  +. (0.0722 *. Float.of_int (Palette.blue colour))
+
+let inks (frame : Emblem.frame) =
+  Array.to_list frame.Emblem.cells
+  |> List.filter_map (fun (cell : Emblem.cell) -> cell.Emblem.ink)
+
+let mean_luminance frame =
+  let inks = inks frame in
+  List.fold_left (fun sum ink -> sum +. luminance ink) 0.0 inks /. Float.of_int (List.length inks)
+
+(* A terminal that says only whether its page is dark or light: the ink is
+   still there, darker on a light page than on a dark one, and without a page
+   colour to fade toward it differs from the same dark page with its colour
+   known. *)
+let test_a_page_known_only_as_dark_or_light () =
+  let at lighting = Emblem.frame renderer largest imp_front lighting in
+  let dark = at (Emblem.lighting (Emblem.Page Palette.Dark)) in
+  let light = at (Emblem.lighting (Emblem.Page Palette.Light)) in
+  let lit_without_ink (frame : Emblem.frame) =
+    Array.exists
+      (fun (cell : Emblem.cell) -> cell.Emblem.dots <> 0 && Option.is_none cell.Emblem.ink)
+      frame.Emblem.cells
+  in
+  check bool "every lit cell has ink on a dark page" false (lit_without_ink dark);
+  check bool "every lit cell has ink on a light page" false (lit_without_ink light);
+  check bool "the ink is darker on a light page" true (mean_luminance light < mean_luminance dark);
+  let known = at dark_page in
+  check bool "no fade without the page colour" true
+    (List.exists2 (fun a b -> luminance a <> luminance b) (inks dark) (inks known))
+
+(* The lights shade the face: a single flat colour would pass every other
+   ink test. *)
+let test_the_lights_shade_the_face () =
+  let frame = Emblem.frame renderer largest imp_front dark_page in
+  let distinct =
+    List.sort_uniq compare
+      (List.map (fun c -> Palette.red c, Palette.green c, Palette.blue c) (inks frame))
+  in
+  check bool "many shades across the face" true (List.length distinct >= 20)
+
 let () =
   let started = Unix.gettimeofday () in
   let frames = 20 in
@@ -193,12 +327,20 @@ let () =
             test_a_turned_imp_keeps_its_grin_open
         ; test_case "imp becomes the lantern" `Quick test_the_imp_becomes_the_lantern
         ; test_case "settled pose is the imp" `Quick test_settled_is_the_imp
+        ; test_case "front imp stands upright" `Quick test_the_front_imp_stands_upright
         ] )
     ; ( "text"
       , [ test_case "every row fits its box" `Quick test_every_row_fits
         ; test_case "no colour, no escape" `Quick test_no_colour_writes_no_escape
         ; test_case "page colour moves ink only" `Quick
             test_page_colour_changes_the_ink_not_the_shape
+        ; test_case "a row ends in the terminal colour" `Quick
+            test_a_row_ends_in_the_terminal_colour
+        ] )
+    ; ( "lighting"
+      , [ test_case "page known only as dark or light" `Quick
+            test_a_page_known_only_as_dark_or_light
+        ; test_case "the lights shade the face" `Quick test_the_lights_shade_the_face
         ] )
     ; ( "inputs"
       , [ test_case "fit" `Quick test_fit; test_case "turning" `Quick test_turning ] )

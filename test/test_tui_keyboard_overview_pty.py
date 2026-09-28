@@ -92,8 +92,11 @@ def first_use_frames(executable: str) -> None:
 
         try:
             # The startup splash stands while the briefing is held, and any key
-            # ends it; r only asks for the held briefing again.
-            capture("SPLASH", 80, b"Dashboard briefing not read yet")
+            # ends it; r only asks for the held briefing again. It is captured
+            # at a width neither the harness start (100) nor the checks below
+            # use: resizing to the size the terminal already has redraws
+            # nothing to wait for.
+            capture("SPLASH", 120, b"Dashboard briefing not read yet")
             os.write(fd, b"r")
             for columns in (80, 140):
                 unread = capture("UNREAD", columns, b"attention not observed")

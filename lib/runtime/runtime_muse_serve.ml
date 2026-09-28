@@ -1059,6 +1059,9 @@ let open_session io (config : config) ~approval_mode ~session_mode ~workspace_ro
           (Printf.sprintf "retained session completed-turn count changed: expected %d, reported %d"
              expected_turn_count session.Msp.turn_count)
     in
+    (* The model first: the approval mode set after it is the session state
+       the host confirms last, so no other session command follows its check. *)
+    let* session = select_session_model io config session in
     let* result =
       request io ~method_:"session/setApprovalMode" (fun ~id ->
         Msp.session_set_approval_mode_request
@@ -1069,7 +1072,6 @@ let open_session io (config : config) ~approval_mode ~session_mode ~workspace_ro
     in
     let* effective = lift (Msp.parse_set_approval_mode_result result) in
     let* () = validate_session_approval_mode ~requested:approval_mode (Some effective) in
-    let* session = select_session_model io config session in
     Ok ({session with approval_mode=Some effective}, true)
 ;;
 

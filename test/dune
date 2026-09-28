@@ -4156,6 +4156,14 @@
   (setenv MASC_TUI_FRAME_TIMING test-tui-frame-timing.report
    (run %{test}))))
 
+(test
+ (name test_tui_frame_timing_default_off)
+ (modules test_tui_frame_timing_default_off)
+ (libraries alcotest masc_tui_frame_timing)
+ (action
+  (setenv MASC_TUI_FRAME_TIMING ""
+   (run %{test}))))
+
 (include stanzas/test_tui_present_timing_pty.inc)
 
 (test

@@ -100,6 +100,15 @@ let config_bindings =
              declare one more Claude Code, Codex or Antigravity account by \
              copying a provider the file declares",
       Some [ Config_runtime; Config_prompts; Config_voice ]
+    (* After [a], so a narrow runtime.toml row gives this up before the door
+       in: measured with the fitter, the row keeps [a] at 120 columns and
+       names both at 150. Capital like the lane removal on Lanes. Not [x]:
+       its label is shared by three panes, and a fourth meaning in it costs
+       this row [a] at 120 columns and the prompts row [o] at 150. *)
+  ; b Act "D" "remove account"
+      ~help:"on runtime.toml, remove a Claude Code, Codex or Antigravity account and \
+             what routes to it; the screen lists every change before Enter saves",
+      Some [ Config_runtime ]
   ; b Act "o" "assets"
       ~help:"on prompts, switch between the read-only runtime assets and \
              the registry you can override",
@@ -1091,6 +1100,18 @@ let runtime_account_saved_bindings =
 
 let footer_hints_runtime_account_saved () =
   hints_of_bindings runtime_account_saved_bindings
+
+(* The removal screen types nothing, but it holds every key, so its row
+   names only what it reads. *)
+let runtime_account_removal_bindings =
+  [ b Navigate "\xe2\x86\x90/\xe2\x86\x92" "account"
+  ; b Act "Enter" "remove & save"
+      ~help:"remove the account and what routes to it, as listed, and save runtime.toml"
+  ; b Act "Esc" "cancel" ~help:"close the screen; nothing is written"
+  ]
+
+let footer_hints_runtime_account_removal () =
+  hints_of_bindings runtime_account_removal_bindings
 
 (* The prompts pane's read-only half. [o] swaps the registry for the assets
    shipped with the binary, and there [a], [i], [e] and [x] answer with a

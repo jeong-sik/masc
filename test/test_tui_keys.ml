@@ -1987,7 +1987,7 @@ let test_config_footer_names_child_hops () =
      meets, and [test_every_config_pane_answers_once] is what holds them to
      one answer each. *)
   check str "Config names its three off-ring children"
-    "j/k:select / scroll  p:next pane  PgUp/PgDn:page  v:read status  9:Runtime  s:resources  t:tools  e:edit  e / Enter:edit  E:advanced JSON  Enter:use  x:default / clear  f:filter  n:new  u:restore  i:input  a:fragments / voice / account  o:assets  Esc:overview  r:reload  Tab:next  q:quit"
+    "j/k:select / scroll  p:next pane  PgUp/PgDn:page  v:read status  9:Runtime  s:resources  t:tools  e:edit  e / Enter:edit  E:advanced JSON  Enter:use  x:default / clear  f:filter  n:new  u:restore  i:input  a:fragments / voice / account  D:remove account  o:assets  Esc:overview  r:reload  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Config);
   let hints = Masc_tui_keys.footer_hints Config in
   List.iter
@@ -2114,6 +2114,8 @@ let test_config_pane_footer_actions () =
     (* [a] answers on three panes: the prompt fragments, the keeper-voice
        screen the voice pane opens, and the account form on runtime.toml. *)
     enabled "a" (List.mem pane [ Config_runtime; Config_prompts; Config_voice ]);
+    (* [D] removes one of those accounts, on runtime.toml only. *)
+    enabled "D" (pane = Config_runtime);
     List.iter (fun key -> enabled key true) [ "j/k"; "p"; "9"; "s"; "t"; "Esc"; "q" ])
     panes;
   (* The prompts pane's read-only assets: the registry's edit keys only answer
@@ -2144,6 +2146,11 @@ let test_config_pane_footer_actions () =
   Alcotest.(check bool) "runtime.toml keeps a at 120 columns" true
     (footer_has_key "a"
        (at_120 (Masc_tui_keys.footer_hints_config ~pane:Config_runtime)));
+  (* [D] sits after [a], so the row gives it up first: measured with the
+     fitter, 120 columns keep [a] and 150 name both. *)
+  Alcotest.(check bool) "runtime.toml names D at 150 columns" true
+    (footer_has_key "D"
+       (fitted_footer ~cols:150 (Masc_tui_keys.footer_hints_config ~pane:Config_runtime)));
   (* While the account form is open it takes every key as typing, so its row
      names the form's keys and none of the pane's. *)
   let form_row = Masc_tui_keys.footer_hints_runtime_account_form () in
@@ -2165,6 +2172,19 @@ let test_config_pane_footer_actions () =
       Alcotest.(check bool) ("the saved account form names " ^ key) true
         (footer_has_key key saved_row))
     [ "y"; "Enter"; "Esc" ];
+  (* The removal screen holds every key and types none; its row names what it
+     reads and none of the pane's keys behind it. *)
+  let removal_row = Masc_tui_keys.footer_hints_runtime_account_removal () in
+  List.iter
+    (fun key ->
+      Alcotest.(check bool) ("the removal screen names " ^ key) true
+        (footer_has_key key removal_row))
+    [ "\xe2\x86\x90/\xe2\x86\x92"; "Enter"; "Esc" ];
+  List.iter
+    (fun key ->
+      Alcotest.(check bool) ("the removal screen leaves out " ^ key) false
+        (footer_has_key key removal_row))
+    [ "e"; "r"; "q"; "Tab"; "D"; "a" ];
   Alcotest.(check bool) "the runtime assets keep their way back at 120 columns" true
     (footer_has_key "o" (at_120 assets));
   List.iter

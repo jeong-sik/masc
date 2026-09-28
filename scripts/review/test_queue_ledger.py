@@ -441,6 +441,25 @@ os.execv(os.environ['LEDGER_REAL_GIT'], [os.environ['LEDGER_REAL_GIT'], *args])
             self.main_change(path)
         self.assertEqual(self.ledger(reviews=[self.approval()])["waits_on"], "merge")
 
+    def test_tla_spec_inputs_invalidate_without_widening_document_scope(self):
+        # Mandatory lint resolves Mirrors against source and checks the TLA
+        # set/cfg pairs. A disjoint product PR's old run did not see new inputs.
+        for path, shared in [
+                ("specs/auth/AuthIdentityFSM.tla", True),
+                ("specs/auth/AuthIdentityFSM.cfg", True),
+                ("specs/Makefile", True),
+                ("docs/evidence/tla-audit/README.md", False),
+                ("specs-not-a-check-input/example.tla", False)]:
+            with self.subTest(path=path):
+                self.git("checkout", "-q", "-B", "main", self.base)
+                self.git("push", "-q", "--force", "origin", "main")
+                self.main_change(path)
+                code, receipt = self.freshness()
+                self.assertEqual((code, receipt["status"]),
+                                 (2, "stale") if shared else (0, "fresh"))
+                self.assertEqual(receipt["dependencies"], [path] if shared else [])
+                self.assertEqual(receipt["overlap"], [])
+
     def test_unrelated_documents_and_retained_artifacts_remain_fresh(self):
         for path in ["docs/evidence/another-pr/README.md",
                      "docs/evidence/another-pr/raw.tar.gz",

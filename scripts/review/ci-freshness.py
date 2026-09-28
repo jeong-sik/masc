@@ -122,6 +122,13 @@ SHARED_CHECK_INPUTS = (
         "run-lint-suite.sh validates prompt/tool registries",
         trees=("config/",)),
     SharedCheckInputs(
+        "tla_specifications",
+        "run-lint-suite.sh runs check-spec-truth.sh Mirrors resolution, "
+        "tla-bug-model-ratchet.sh, audit-tla-cfg-orphan.sh, "
+        "audit-tla-annotation-drift.sh --check-cross-spec and "
+        "check-tla-harness-coverage.sh over the specs tree",
+        trees=("specs/",)),
+    SharedCheckInputs(
         "dashboard_build",
         "pr-check.yml dashboard-types installs pnpm dependencies, typechecks, "
         "runs backend-coupled Vitest tests and builds vite.preview.config.ts; "

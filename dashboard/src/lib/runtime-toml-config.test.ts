@@ -549,6 +549,30 @@ direct_keeper = "runpod_mtp.qwen"
     expect(declaredRuntimeLaneCandidates(next, 'runpod_mtp.coding')).toEqual(['another.coding'])
   })
 
+  it('preserves a lane sharing the deleted provider prefix in every shape the server reads', () => {
+    const assignments = `
+[runtime.assignments]
+lane_keeper = "runpod_mtp.coding"
+direct_keeper = "runpod_mtp.qwen"
+`
+    const sources = [
+      // A dotted key inside [runtime].
+      sourceText.replace('[runtime]\n', '[runtime]\nlanes."runpod_mtp.coding".candidates = ["another.coding"]\n'),
+      // [runtime.lanes] itself as an inline table.
+      sourceText.replace('[runtime]\n', '[runtime]\nlanes = { "runpod_mtp.coding" = { candidates = ["another.coding"] } }\n'),
+      // An inline table inside [runtime.lanes].
+      `${sourceText}\n[runtime.lanes]\n"runpod_mtp.coding" = { candidates = ["another.coding"] }\n`,
+      // A dotted key inside [runtime.lanes].
+      `${sourceText}\n[runtime.lanes]\n"runpod_mtp.coding".candidates = ["another.coding"]\n`,
+    ]
+    for (const source of sources) {
+      expect(source).toContain('runpod_mtp.coding')
+      const next = cascadeDeleteProvider(`${source}${assignments}`, 'runpod_mtp', runtimeReservedProviderIdsFixture)
+      expect(getRuntimeTomlKey(next, 'runtime.assignments', 'lane_keeper')).toBe('"runpod_mtp.coding"')
+      expect(getRuntimeTomlKey(next, 'runtime.assignments', 'direct_keeper')).toBeUndefined()
+    }
+  })
+
   it('deletes quoted provider and credential tables with their binding', () => {
     for (const quote of ['"', "'"]) {
       const quoted = sourceText

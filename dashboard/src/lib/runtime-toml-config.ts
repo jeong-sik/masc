@@ -133,36 +133,41 @@ function parseDocument(sourceText: string): TomlDocument {
     source: sourceText,
     lines,
     sections,
-    declaredProviderIds: declaredProviderIdsOf(rootEntries, sections),
+    declaredProviderIds: declaredKeysUnder(rootEntries, sections, ['providers']),
     rootEntries,
   }
 }
 
-// The keys under [providers], in every shape the server's loader accepts:
-// [providers.<id>] headers, keys inside a [providers] table, and dotted or
-// inline keys at the top level. Read from key nodes rather than from a built
-// object, which would drop an id such as __proto__.
-function declaredProviderIdsOf(
+// The keys directly under [path], in every shape the server's loader
+// accepts: a header at or below it ([providers.<id>], [runtime.lanes.<id>]),
+// keys inside a table above it, dotted keys, and inline tables at any depth.
+// Read from key nodes rather than from a built object, which would drop an id
+// such as __proto__.
+function declaredKeysUnder(
   rootEntries: readonly AST.TOMLKeyValue[],
   sections: readonly TomlSection[],
+  path: readonly string[],
 ): ReadonlySet<string> {
-  const ids = new Set<string>()
-  const firstKey = (entry: AST.TOMLKeyValue) => getStaticTOMLValue(entry.key)[0]
-  for (const entry of rootEntries) {
-    const [namespace, id] = getStaticTOMLValue(entry.key)
-    if (namespace !== 'providers') continue
-    if (id !== undefined) ids.add(id)
-    else if (entry.value.type === 'TOMLInlineTable') {
-      entry.value.body.map(firstKey).forEach(key => { if (key !== undefined) ids.add(key) })
+  const keys = new Set<string>()
+  const reach = (full: readonly string[], below: () => void) => {
+    if (full.length > path.length) {
+      if (samePath(full.slice(0, path.length), path)) keys.add(full[path.length]!)
+    } else if (samePath(full, path.slice(0, full.length))) {
+      below()
     }
   }
-  for (const section of sections) {
-    const [namespace, id] = section.path
-    if (namespace !== 'providers') continue
-    if (id !== undefined) ids.add(id)
-    else section.entries.map(firstKey).forEach(key => { if (key !== undefined) ids.add(key) })
+  const visit = (base: readonly string[], entries: readonly AST.TOMLKeyValue[]) => {
+    for (const entry of entries) {
+      const full = [...base, ...getStaticTOMLValue(entry.key)]
+      const value = entry.value
+      reach(full, () => { if (value.type === 'TOMLInlineTable') visit(full, value.body) })
+    }
   }
-  return ids
+  visit([], rootEntries)
+  for (const section of sections) {
+    reach(section.path, () => visit(section.path, section.entries))
+  }
+  return keys
 }
 
 function tablePath(name: string): readonly string[] {
@@ -614,7 +619,9 @@ export function cascadeDeleteProvider(
   const runtimeValues = sectionValues(nextDocument, 'runtime')
   // A route names its provider before the first dot. It is cleared by that
   // name, not by the bindings read, since a reserved provider has none read.
-  const declaredLanes = new Set(laneIdsFromDocument(nextDocument))
+  // A lane id can start the same way, so a lane declared in any shape keeps
+  // its routes.
+  const declaredLanes = declaredKeysUnder(nextDocument.rootEntries, nextDocument.sections, ['runtime', 'lanes'])
   const routesToDeleted = (runtimeId: string) => !declaredLanes.has(runtimeId)
     && splitRuntimeId(runtimeId)?.providerId === providerId
   const remainingBindings = parseRuntimeTomlEnvironment(next, reservedProviderIds).bindings.map(binding => binding.id)

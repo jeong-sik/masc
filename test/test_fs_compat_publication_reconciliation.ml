@@ -259,6 +259,27 @@ let test_bound_stage_is_preserved () =
    | [ Recovery.Publication_recovery_bound_reconciled
          Recovery.Publication_recovery_bound_stage_preserved ] -> ()
    | _ -> fail (report_text report));
+  let forensic_path =
+    Filename.concat
+      (owner_area_path ~registry_root ~owner:owner_name "forensic")
+      (Uuidm.to_string operation_id)
+  in
+  let forensic = Fs_compat.load_file forensic_path |> Yojson.Safe.from_string in
+  let names = function
+    | `Assoc fields -> List.map fst fields |> List.sort String.compare
+    | _ -> fail "bound forensic layer was not an object"
+  in
+  check string "version-1 bound source state" "bound"
+    (Yojson.Safe.Util.member "source_state" forensic
+     |> Yojson.Safe.Util.to_string);
+  let outcome = Yojson.Safe.Util.member "outcome" forensic in
+  check (list string) "version-1 bound outcome fields"
+    [ "kind"; "observed_target"; "stage_identity"; "stage_kind" ]
+    (names outcome);
+  check (list string) "version-1 observed target fields"
+    [ "identity"; "kind"; "presence" ]
+    (names (Yojson.Safe.Util.member "observed_target" outcome));
+  ignore (inventory_owner registry owner_name);
   check bool "stage remains in target parent" true (Eio.Path.is_directory stage_path);
   let target_after = Eio.Path.stat ~follow:false target_path in
   check int64 "target device unchanged" target_before.dev target_after.dev;
@@ -289,10 +310,30 @@ let test_allowed_root_identity_mismatch_is_forensic () =
   let owner = inventory_owner registry owner_name in
   let report = reconcile ~fs registry owner in
   check bool "mismatch source resolved" true (report_ready report);
-  match report_kinds report with
-  | [ Recovery.Publication_recovery_prepared_reconciled
-        Recovery.Publication_recovery_prepared_allowed_root_mismatch ] -> ()
-  | _ -> fail (report_text report)
+  (match report_kinds report with
+   | [ Recovery.Publication_recovery_prepared_reconciled
+         Recovery.Publication_recovery_prepared_allowed_root_mismatch ] -> ()
+   | _ -> fail (report_text report));
+  let forensic_path =
+    Filename.concat
+      (owner_area_path ~registry_root ~owner:owner_name "forensic")
+      "33333333-3333-4333-8333-333333333333"
+  in
+  let forensic = Fs_compat.load_file forensic_path |> Yojson.Safe.from_string in
+  let names = function
+    | `Assoc fields -> List.map fst fields |> List.sort String.compare
+    | _ -> fail "prepared mismatch layer was not an object"
+  in
+  let outcome = Yojson.Safe.Util.member "outcome" forensic in
+  check (list string) "version-1 prepared mismatch outcome fields"
+    [ "kind"; "mismatch" ] (names outcome);
+  let mismatch = Yojson.Safe.Util.member "mismatch" outcome in
+  check (list string) "version-1 mismatch fields"
+    [ "expected"; "observed" ] (names mismatch);
+  check (list string) "version-1 observed root fields"
+    [ "identity"; "kind"; "presence" ]
+    (names (Yojson.Safe.Util.member "observed" mismatch));
+  ignore (inventory_owner registry owner_name)
 ;;
 
 let write_raw ~registry ~owner ~area ~record_name raw =

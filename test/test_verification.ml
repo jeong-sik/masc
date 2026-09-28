@@ -1447,7 +1447,24 @@ let test_historical_unreadable_reason_fields_remain_readable () =
   Alcotest.(check (list string))
     "read_error writer fields"
     [ "code"; "detail" ]
-    (names (Yojson.Safe.Util.member "reason" encoded))
+    (names (Yojson.Safe.Util.member "reason" encoded));
+  List.iter
+    (fun (code, reason) ->
+      let historical = `Assoc [ "code", `String code ] in
+      Alcotest.(check string) "historical code-only reason writer"
+        (Yojson.Safe.to_string historical)
+        (Yojson.Safe.to_string (VS.evidence_read_failure_to_yojson reason));
+      match VS.evidence_read_failure_of_yojson historical with
+      | Ok decoded -> Alcotest.(check bool) "historical code-only reason" true
+                        (decoded = reason)
+      | Error detail -> Alcotest.fail detail)
+    [ "missing", VS.Evidence_missing
+    ; "not_regular_file", VS.Evidence_not_regular_file
+    ; "outside_worker_playground", VS.Evidence_outside_worker_playground
+    ; "invalid_utf8", VS.Evidence_invalid_utf8
+    ; "symbolic_link", VS.Evidence_symbolic_link
+    ; "changed_during_read", VS.Evidence_changed_during_read
+    ]
 ;;
 
 let test_invalid_reference_snapshot_rejects_hidden_payload () =

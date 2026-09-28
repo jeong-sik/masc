@@ -146,10 +146,17 @@ let inventory t json =
       t.phase <- Providers;
       t.notice <- providers_notice ^ email_notice account_emails; Ok ())
   | _ -> Error "서버 계정 목록을 읽지 못했습니다."
-let save_failed t (model:model) message =
+type save_failure = Save_refused of string | Save_unanswered of string
+(* The server's sentence is the answer and says what it left behind --
+   verification failed, or the write was rolled back or not fully -- so a
+   refusal claims nothing of its own beyond "not saved as asked". *)
+let save_failed t (model:model) failure =
   t.models <- List.map (fun (existing:model) -> if existing.id=model.id then model else existing) t.models;
   t.recovery <- Refresh_configuration; t.phase <- Failed;
-  t.notice <- "r로 설정을 새로 읽은 뒤 다시 저장하세요. " ^ message
+  t.notice <- (match failure with
+    | Save_refused reason -> "저장하지 못했습니다: " ^ reason
+    | Save_unanswered detail -> "저장됐는지 확인하지 못했습니다: " ^ detail)
+    ^ " r을 누르면 설정을 새로 읽고 모델 목록으로 돌아갑니다."
 let refresh_retry t result =
   let cursor = t.cursor in
   let refreshed = match result with Ok json -> inventory t json | Error _ as error -> error in
@@ -370,26 +377,30 @@ let describe_change = function
   | Left_exact_lane {lane; runtime} -> "exact-output lane " ^ lane ^ " 에서 " ^ runtime ^ " 를 뺍니다"
   | Left_vision runtime -> "media_failover 에서 " ^ runtime ^ " 를 뺍니다"
   | Unassigned {keeper; runtime} -> "keeper " ^ keeper ^ " 는 " ^ runtime ^ " 대신 default 로 갑니다"
-let lines t =
-  let rows = match t.phase with
-    | Providers -> List.mapi (fun i (p:provider) -> Text ((if i=t.cursor then "> " else "  ") ^ p.label ^ account_suffix t p)) t.providers
-    | Models -> List.mapi (fun i (m:model) -> Text ((if i=t.cursor then "> " else "  ") ^ m.label ^ (match m.context with None->" · context 확인 필요" | Some _ -> ""))) t.models
-    | Logging -> List.map (fun line -> Terminal line) (Masc_tui_sgr_text.parse t.output)
-      @ [Text ("로그인 코드: " ^ String.make (min 40 (String.length t.draft)) '*'); Text (if t.input_pending then "입력 전달 중" else if Option.is_none t.login_id then "로그인 세션 준비 중" else "코드 입력 대기")]
-    | Documented_context _ -> [Text ("문서 또는 설정의 context 한도(tokens): " ^ t.draft)]
-    | Removal {provider; removal; _} -> Text ("지울 계정: " ^ provider.label ^ account_suffix t provider) ::
-      (match removal with
-       | Removable {changes; login_store} -> Text "지우거나 고치는 것:" :: List.map (fun change -> Text ("  " ^ describe_change change)) changes
-         @ (match login_store with Some path -> [Text ("로그인 정보는 지우지 않습니다: " ^ path)] | None -> [])
-       | Unremovable reason -> [Text ("지울 수 없습니다: " ^ reason)])
-    | Loading | Saving | Finished | Failed -> [] in
-  Text t.notice :: rows
+(* Everything under the notice. *)
+let body_rows t =
+  match t.phase with
+  | Providers -> List.mapi (fun i (p:provider) -> Text ((if i=t.cursor then "> " else "  ") ^ p.label ^ account_suffix t p)) t.providers
+  | Models -> List.mapi (fun i (m:model) -> Text ((if i=t.cursor then "> " else "  ") ^ m.label ^ (match m.context with None->" · context 확인 필요" | Some _ -> ""))) t.models
+  | Logging -> List.map (fun line -> Terminal line) (Masc_tui_sgr_text.parse t.output)
+    @ [Text ("로그인 코드: " ^ String.make (min 40 (String.length t.draft)) '*'); Text (if t.input_pending then "입력 전달 중" else if Option.is_none t.login_id then "로그인 세션 준비 중" else "코드 입력 대기")]
+  | Documented_context _ -> [Text ("문서 또는 설정의 context 한도(tokens): " ^ t.draft)]
+  | Removal {provider; removal; _} -> Text ("지울 계정: " ^ provider.label ^ account_suffix t provider) ::
+    (match removal with
+     | Removable {changes; login_store} -> Text "지우거나 고치는 것:" :: List.map (fun change -> Text ("  " ^ describe_change change)) changes
+       @ (match login_store with Some path -> [Text ("로그인 정보는 지우지 않습니다: " ^ path)] | None -> [])
+     | Unremovable reason -> [Text ("지울 수 없습니다: " ^ reason)])
+  | Loading | Saving | Finished | Failed -> []
+let lines t = Text t.notice :: body_rows t
 let row_text = function Text text -> text | Terminal line -> Masc_tui_sgr_text.text line
-let visible_lines ~height t =
+let visible_lines ~height ~width t =
   if height <= 0 then [] else
-  let rows = lines t in
+  let notice = match Masc_tui_message_layout.wrap_words ~max_cells:width t.notice with
+    | [] -> [Text ""]
+    | wrapped -> List.map (fun line -> Text line) wrapped in
+  let rows = notice @ body_rows t in
   let skip = match t.phase with
-    | Providers | Models -> max 0 (t.cursor + 2 - height)
+    | Providers | Models -> max 0 (t.cursor + List.length notice + 1 - height)
     (* The account and what goes with it read from the top. *)
     | Removal _ -> 0
     | Loading | Logging | Documented_context _ | Saving | Finished | Failed -> max 0 (List.length rows - height) in

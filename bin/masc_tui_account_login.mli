@@ -72,7 +72,16 @@ val removal_preview : t -> provider -> refused:string option -> Yojson.Safe.t ->
 val removed_notice : provider -> string option -> string
 (** What the list says once [provider] is removed, with the login store left
     on disk. *)
-val save_failed : t -> model -> string -> unit
+(** Why a save did not finish. *)
+type save_failure =
+  | Save_refused of string
+      (** The server's own sentence: it did not take the save as asked. *)
+  | Save_unanswered of string
+      (** Nothing says what became of the save: no reply, or one that does
+          not read. *)
+val save_failed : t -> model -> save_failure -> unit
+(** Show why, keeping [model] (with any context typed for it) for the retry
+    that [r] reaches through {!refresh_retry}. *)
 val refresh_retry : t -> (Yojson.Safe.t, string) result -> unit
 (** Refresh configuration revision and selection after an unsuccessful save,
     retaining the account and chosen model for an explicit retry. *)
@@ -92,6 +101,8 @@ type row =
 val lines : t -> row list
 val row_text : row -> string
 (** The row's characters without colour. *)
-val visible_lines : height:int -> t -> row list
+val visible_lines : height:int -> width:int -> t -> row list
+(** The rows that fit [height], the notice wrapped at [width] cells so a
+    server's reason is read whole. *)
 val hints : t -> string
 val decoder : integration_id:string -> (event -> unit) -> (string -> unit) * (unit -> bool)

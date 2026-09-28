@@ -529,9 +529,10 @@ let post_json_with_timeout ~timeout_sec ~(host : string) ~(port : int)
 (* A POST whose effect matters, told apart by what is known about that effect.
    [post_json] folds a dropped connection and a server's refusal into one
    string, and a caller that cannot tell them apart treats a write that may have
-   landed as one that did not. A 4xx is the server declining in its own words.
-   Everything else -- no response, a deadline, a 5xx, a success whose body does
-   not read -- leaves the effect unknown. *)
+   landed as one that did not. [post_json_outcome] reads a 4xx as the server
+   declining in its own words, and everything else -- no response, a deadline,
+   a 5xx, a success whose body does not read -- as leaving the effect unknown.
+   [post_setup_outcome] reads the refusal from the reply's envelope instead. *)
 type post_outcome =
   | Post_answered of Yojson.Safe.t
   | Post_refused of string
@@ -562,6 +563,28 @@ let post_setup_json ~host ~port ~path ~body =
   match http_post_request ~timeout_sec:None ~headers:(auth_headers ()) ~host ~port ~path ~body with
   | Error e -> Error e
   | Ok (status_code, body) -> decode_json ~allow_empty:true ~status_code ~body
+
+(* A setup write, as [post_setup_json] sends it. The server stages, validates
+   and verifies the new runtime.toml and replaces the live file last; every
+   failure it decides it answers in its own [{"error": sentence}], which says
+   what it left behind -- a 502 (the model failed verification) as much as a
+   409. A non-success reply in that envelope is the server declining, whatever
+   its status. One outside it (httpun's plain-text page for an exception), no
+   reply, or a success that does not read leaves the effect unknown. *)
+let post_setup_outcome ~host ~port ~path ~body =
+  match http_post_request ~timeout_sec:None ~headers:(auth_headers ()) ~host ~port ~path ~body with
+  | Error detail -> Post_unanswered detail
+  | Ok (status_code, response) when Masc.Tui_decode.is_success_http_status status_code ->
+    (match decode_json ~allow_empty:false ~status_code ~body:response with
+     | Ok json -> Post_answered json
+     | Error message -> Post_unanswered message)
+  | Ok (status_code, response) ->
+    let said = refusal ~status_code ~body:response in
+    (match Yojson.Safe.from_string response with
+     | `Assoc fields when (match List.assoc_opt "error" fields with Some (`String _) -> true | Some _ | None -> false) ->
+       Post_refused said
+     | _ -> Post_unanswered said
+     | exception Yojson.Json_error _ -> Post_unanswered said)
 
 (* Press one or more keys on the shared MSX machine (RFC-0439 §3.3). Returns
    the new frame number on success, or an error string; the caller re-fetches

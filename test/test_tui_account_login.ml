@@ -117,9 +117,11 @@ let retry_early_input () =
     [true; false]
 let viewport_and_receipt () =
   let t=Login.create "codex" in t.phase<-Login.Models;t.models<-List.init 30 model;
-  List.iter (fun cursor -> t.cursor<-cursor;
+  (* 12 cells wrap the notice over several rows; the cursor row still shows. *)
+  List.iter (fun (width, cursor) -> t.cursor<-cursor;
     check bool "selected model visible in short viewport" true
-      (List.mem ("> model " ^ string_of_int cursor) (List.map Login.row_text (Login.visible_lines ~height:4 t)))) [0;15;29];
+      (List.mem ("> model " ^ string_of_int cursor) (List.map Login.row_text (Login.visible_lines ~height:6 ~width t))))
+    [80,0; 80,15; 80,29; 12,0; 12,15; 12,29];
   t.provider<-Some provider;t.login_id<-Some session;t.account_ref<-Some account;
   let receipt=`Assoc ["login_id",`String session;"integration_id",`String "codex";"invocation_verified",`Bool false;
     "status",`String "complete";"account_ref",`String other] in
@@ -199,7 +201,7 @@ let failed_save_refresh () =
   t.provider<-Some provider;t.account_ref<-Some account;t.login_id<-Some session;
   t.models<-[model 0;model 1];t.cursor<-1;t.phase<-Login.Saving;
   let selected={ (model 1) with context=Some 65536 } in
-  Login.save_failed t selected "save refused";
+  Login.save_failed t selected (Login.Save_refused "save refused");
   check bool "save failure requests current configuration despite login receipt" true (Login.key t "r"=Login.Refresh_retry);
   Login.refresh_retry t (Error "network unavailable");
   check bool "failed refresh remains retriable and cannot save stale config" true
@@ -404,6 +406,36 @@ let removable = removal_preview_json "removable"
 let rows t = List.map Login.row_text (Login.lines t)
 let mentions text t = List.exists (fun row ->
   let n=String.length text in let rec at i = i+n <= String.length row && (String.sub row i n = text || at (i+1)) in at 0) (rows t)
+(* The pasted notice was "r로 설정을 새로 읽은 뒤 다시 저장하세요. 요청 결과를
+   확인하지 못했습니다. r로 재확인하세요." over a 502 whose sentence said why. *)
+let save_failures_say_why () =
+  let reason = "HTTP 502: Runtime \"codex.gpt\" did not pass response and tool verification (tool_call_missing)" in
+  let failed failure =
+    let t=Login.create "codex" in ok (Login.inventory t inventory);
+    t.provider<-Some provider; t.models<-[model 0]; t.phase<-Login.Saving;
+    Login.save_failed t (model 0) failure; t in
+  let refused = failed (Login.Save_refused reason) in
+  check bool "the server's reason is shown" true (contains refused.notice reason);
+  check bool "a refusal is not called unknown" false (contains refused.notice "확인하지 못했습니다");
+  let unanswered = failed (Login.Save_unanswered "connection reset") in
+  check bool "no answer is called unknown, with why" true
+    (contains unanswered.notice "저장됐는지 확인하지 못했습니다" && contains unanswered.notice "connection reset");
+  List.iter (fun t ->
+    let count part =
+      let n = String.length part and text = t.Login.notice in
+      let rec from i seen = if i + n > String.length text then seen
+        else if String.sub text i n = part then from (i + n) (seen + 1) else from (i + 1) seen in
+      from 0 0 in
+    check int "one way back, named once" 1 (count "r을 누르면");
+    check int "no other r instruction" 0 (count "r로");
+    check bool "r reads the configuration again" true (Login.key t "r" = Login.Refresh_retry))
+    [refused; unanswered];
+  (* The reason is read whole at 40 cells, not cut at the pane's edge. *)
+  let drawn = List.map Login.row_text (Login.visible_lines ~height:12 ~width:40 refused) in
+  check bool "every row fits" true
+    (List.for_all (fun row -> Masc_tui_message_layout.display_width row <= 40) drawn);
+  check bool "the reason's end and the way back are on screen" true
+    (let joined = String.concat " " drawn in contains joined "(tool_call_missing)" && contains joined "돌아갑니다.")
 let removal_from_the_list () =
   let t=Login.create "codex" in ok (Login.inventory t inventory);
   (match Login.key t "D" with
@@ -433,6 +465,7 @@ let refused_removal () =
 let () = run "TUI account login" ["workflow",[
   test_case "pasted credentials preserve bytes and reject controls" `Quick pasted_credential_bytes;
   test_case "failed save refreshes revision and retains model" `Quick failed_save_refresh;
+  test_case "save failures say why" `Quick save_failures_say_why;
   test_case "named default lane remains selected" `Quick named_default_identity;
   test_case "Unicode and late input HTTP response" `Quick unicode_and_late_input_response;
   test_case "verified save survives refresh failure" `Quick verified_save_refresh;

@@ -121,27 +121,44 @@ let inherited_home = function
 
 (* The command that signs the chosen client in, with [home] as the shell
    will read it. Antigravity has none -- its OAuth file exists before it can
-   be typed here. *)
-let command client home =
-  match client with
+   be typed here. Muse sets the XDG roots alongside HOME: an exported
+   XDG_CONFIG_HOME would otherwise carry the credentials outside the new
+   account home. *)
+let muse_executable command =
+  match command with
+  | Some configured when not (Filename.is_relative configured) -> configured
+  | _ ->
+    (match Runtime_official_cli_install.executable Muse with
+     | Some resolved -> resolved
+     | None ->
+       (match command with Some configured -> configured | None -> "muse"))
+;;
+let command (base : D.base) home =
+  match base.D.client with
   | D.Codex -> Some (Printf.sprintf "CODEX_HOME=%s codex login" home)
   | D.Claude_code -> Some (Printf.sprintf "CLAUDE_CONFIG_DIR=%s claude, then /login" home)
-  | D.Muse -> Some (Printf.sprintf "HOME=%s muse login" home)
+  | D.Muse ->
+    let exe = muse_executable base.D.command in
+    Some
+      (Printf.sprintf
+         "HOME=%s XDG_CONFIG_HOME=%s/.config XDG_DATA_HOME=%s/.local/share XDG_CACHE_HOME=%s/.cache XDG_STATE_HOME=%s/.local/state XDG_RUNTIME_DIR=%s/.local/run %s login"
+         home home home home home home exe)
   | D.Antigravity -> None
 ;;
 
 (* Quoted, because a home with a space in it is still one argument. *)
-let sign_in_command client home = command client (Filename.quote home)
+let sign_in_command base home = command base (Filename.quote home)
 
 (* The rows under the fields: how to get the login this form points at. *)
 let sign_in_rows t =
-  let client = t.ring.chosen.client in
+  let chosen = t.ring.chosen in
+  let client = chosen.D.client in
   let home =
     if t.location = ""
     then "<" ^ D.location_label client ^ ">"
     else Filename.quote (D.expand_home ?home_dir:t.home_dir t.location)
   in
-  match client, command client home with
+  match client, command chosen home with
   | D.Codex, Some line ->
     [ "  로그인: " ^ line
     ; "  (먼저 그 폴더의 config.toml 에 cli_auth_credentials_store = \"file\")"
@@ -201,7 +218,7 @@ let declare_on ~inherited_home t current =
           Ok
             { id = t.id
             ; text = declared.D.text
-            ; sign_in = sign_in_command base.client declared.D.location
+            ; sign_in = sign_in_command base declared.D.location
             }
         | Error e -> refuse e))
 ;;

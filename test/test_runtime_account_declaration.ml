@@ -278,7 +278,7 @@ let test_refusals () =
    | _ -> Alcotest.fail "the loader's own id rule refuses a dotted id");
   match
     D.declare ~inherited_home t
-      ~base:{ D.id = "ollama"; display_name = "Local Ollama"; client = D.Codex }
+      ~base:{ D.id = "ollama"; display_name = "Local Ollama"; client = D.Codex; command = None }
       ~id:"ollama_2" ~location:"/home/op/.o"
   with
   | Error (D.Unknown_base "ollama") -> ()

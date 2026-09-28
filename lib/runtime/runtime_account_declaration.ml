@@ -46,6 +46,7 @@ type base =
   { id : string
   ; display_name : string
   ; client : client
+  ; command : string option
   }
 
 type declared =
@@ -144,7 +145,10 @@ let bases t =
   List.filter_map
     (fun (id, table) ->
       Option.map
-        (fun client -> { id; display_name = display_name_of ~id table; client })
+        (fun client ->
+          { id; display_name = display_name_of ~id table; client
+          ; command = string_field "command" table
+          })
         (client_of_provider table))
     (providers t)
 ;;

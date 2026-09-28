@@ -6,7 +6,10 @@
     tables, and a different login store. This module copies that provider
     from a chosen base and appends the copy to the file's text. Lines already
     in the text are not touched, so comments and layout stay as they were.
-    Nothing here reads or writes a file, and nothing signs in. *)
+    Nothing here reads or writes a file, and nothing signs in. A copied Muse
+    account still shares the macOS Keychain identity with its base: changing
+    HOME does not establish a separate one, so this flow separates file-backed
+    credentials, not Keychain quota. *)
 
 type t
 (** A runtime.toml text together with its parsed tables. *)
@@ -23,6 +26,9 @@ type base =
       (** The name the loader shows: [display-name], else [provider-name],
           else the id. *)
   ; client : client
+  ; command : string option
+      (** The provider's configured [command], so sign-in hints invoke the
+          same executable. *)
   }
 
 type declared =

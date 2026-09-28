@@ -237,12 +237,12 @@ let test_a_name_from_the_file_cannot_colour_the_pane () =
   Alcotest.(check bool) "the escape in the display name is not drawn" false
     (List.exists (fun row -> String.contains row '\027') (F.rows form))
 
-let test_muse_sign_in_points_home_at_the_new_account () =
-  let current =
+let muse_current ~command =
+  Printf.sprintf
     {|[providers.muse_personal]
 display-name = "Muse"
 protocol = "muse-serve"
-command = "muse"
+command = "%s"
 is-non-interactive = true
 
 [models.muse_fixture]
@@ -253,17 +253,58 @@ tools-support = true
 
 [muse_personal.muse_fixture]
 |}
-  in
+    command
+let declare_muse_sign_in current =
   let form =
     match F.open_on ~home_dir:"/home/op" current with
     | Ok form -> form
     | Error reason -> Alcotest.fail reason
   in
   match F.declare_on ~inherited_home (submitted (press form ([ "\r"; "\r" ] @ typed "/home/op/.muse-account2" @ [ "\r" ]))) current with
-  | Ok { F.sign_in; _ } ->
-    Alcotest.(check (option string)) "HOME selects the new account"
-      (Some "HOME=/home/op/.muse-account2 muse login") sign_in
+  | Ok { F.sign_in; _ } -> sign_in
   | Error form -> Alcotest.failf "refused: %s" (String.concat " / " (F.rows form))
+(* PATH, MUSE_INSTALL_DIR and HOME decide the hinted executable; hold all
+   three so the suite passes with or without a Muse install around. *)
+let with_muse_env ~path ~install_dir ~home f =
+  let root = Filename.temp_dir "masc-muse-hint-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
+    Masc_test_deps.with_process_env "PATH" (Some path) (fun () ->
+      Masc_test_deps.with_process_env "MUSE_INSTALL_DIR" install_dir (fun () ->
+        Masc_test_deps.with_process_env "HOME" (Some home) (fun () -> f root))))
+let write_executable path =
+  let channel = open_out path in
+  close_out channel;
+  Unix.chmod path 0o755
+let test_muse_sign_in_sets_xdg_roots_at_the_new_account () =
+  with_muse_env ~path:"/nonexistent-path" ~install_dir:None ~home:"/nonexistent-home" (fun _ ->
+    let quoted = "'/home/op/.muse-account2'" in
+    Alcotest.(check (option string)) "HOME and XDG roots select the new account"
+      (Some
+         (Printf.sprintf
+            "HOME=%s XDG_CONFIG_HOME=%s/.config XDG_DATA_HOME=%s/.local/share XDG_CACHE_HOME=%s/.cache XDG_STATE_HOME=%s/.local/state XDG_RUNTIME_DIR=%s/.local/run muse login"
+            quoted quoted quoted quoted quoted quoted))
+      (declare_muse_sign_in (muse_current ~command:"muse")))
+let test_muse_sign_in_prefers_the_resolved_executable () =
+  with_muse_env ~path:"/nonexistent-path" ~install_dir:None ~home:"/nonexistent-home" (fun root ->
+    let bindir = Filename.concat root "bin" in
+    Unix.mkdir bindir 0o755;
+    let resolved = Filename.concat bindir "muse" in
+    write_executable resolved;
+    Masc_test_deps.with_process_env "PATH" (Some bindir) (fun () ->
+      match declare_muse_sign_in (muse_current ~command:"muse") with
+      | None -> Alcotest.fail "expected a sign-in hint"
+      | Some hint ->
+        Alcotest.(check bool) "resolved executable signs in"
+          true
+          (String.ends_with ~suffix:(resolved ^ " login") hint)))
+let test_muse_sign_in_keeps_the_configured_absolute_command () =
+  with_muse_env ~path:"/nonexistent-path" ~install_dir:None ~home:"/nonexistent-home" (fun _ ->
+    match declare_muse_sign_in (muse_current ~command:"/custom/muse") with
+    | None -> Alcotest.fail "expected a sign-in hint"
+    | Some hint ->
+      Alcotest.(check bool) "configured command signs in"
+        true
+        (String.ends_with ~suffix:"/custom/muse login" hint))
 
 let test_a_file_with_no_client_has_nothing_to_copy () =
   match
@@ -292,8 +333,12 @@ let () =
             test_antigravity_has_no_sign_in_after_the_save
         ; Alcotest.test_case "a name from the file cannot colour the pane" `Quick
             test_a_name_from_the_file_cannot_colour_the_pane
-        ; Alcotest.test_case "muse sign-in points home at the new account" `Quick
-            test_muse_sign_in_points_home_at_the_new_account
+        ; Alcotest.test_case "muse sign-in sets XDG roots at the new account" `Quick
+            test_muse_sign_in_sets_xdg_roots_at_the_new_account
+        ; Alcotest.test_case "muse sign-in prefers the resolved executable" `Quick
+            test_muse_sign_in_prefers_the_resolved_executable
+        ; Alcotest.test_case "muse sign-in keeps the configured absolute command" `Quick
+            test_muse_sign_in_keeps_the_configured_absolute_command
         ; Alcotest.test_case "a file with no client has nothing to copy" `Quick
             test_a_file_with_no_client_has_nothing_to_copy
         ] )

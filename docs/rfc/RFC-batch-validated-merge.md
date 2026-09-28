@@ -61,13 +61,13 @@ main이 자주 움직이는 날에는 거의 모든 PR이 병합 직전에 다�
 
 ### 2.1 09-25 v0.39 롤업(r1 → r1c → r1d)과 tui7-r1의 좌표
 
-위 표의 일곱 번보다 먼저, 09-25에 v0.39 롤업을 r1 → r1c → r1d로 세 번 다시 잘랐다. 모두 CI 전용 PR #38925(브랜치 rollup/v039-r1)에서 돌았다. 3.1·3.3·3.5의 규칙은 이 과정과 tui7-r1에서 나왔으므로 run과 Board 기록을 그대로 적는다. Board 댓글은 전부 전체 id다.
+위 표의 일곱 번보다 먼저, 09-25에 v0.39 롤업을 r1 → r1c → r1d로 세 번 다시 잘랐다. 모두 CI 전용 PR #38925(브랜치 rollup/v039-r1)에서 돌았다. 3.1·3.3·3.5의 규칙은 이 과정과 tui7-r1을 보고 정했으므로 run과 Board 기록을 그대로 적는다. 다만 3.5는 r1d의 방식(예산 미도달을 targeted run으로 덮고 착지)을 받아들이지 않는 쪽으로 정했다. Board 댓글은 전부 전체 id다.
 
 | 롤업 | ROLL head | run | 결과 | 기록 |
 |---|---|---|---|---|
 | r1 | a3d2bb10d3e831f292feab46b3da70fd7e2bf65b | PR check 36076756737 | failure. edited-tests 단계 1080초 예산에서 244개 실행, 54개 미도달 | Board c-935b1b06cea9bfe0d0753f130305516a (p-de3d67edc5c63d23b5f5a411dce004f6) |
 | r1c | 8105fc27ebc557568c74d56407348655b9c46a84 (BASE 6985cafadc, 멤버 11) | PR check 36079355151 | cancelled. r1d로 다시 자르면서 새 push가 대체함 | Board c-fef29b22395158517017ac4a81dcfcaf (같은 글): 비멤버 병합 #38620·#38730·#38733이 롤업 파일을 건드려 r1을 버리고 다시 잘랐고, head에 판정 뒤 코드 커밋이 생긴 #38803은 뺐다. 3.3의 "BASE 이후 비멤버 겹침이면 다시 자른다"의 출처 |
-| r1d | d4cf505f404c11bf50d657d029a9d1842c4bf029 | PR check 36079784023 + Test 36079787456, 36082757057 | PR check는 failure. 미통과 목록 52건이 모두 예산 미도달(job 107899150417 로그)이다. 같은 head의 targeted Test 36079787456에서 54개 스위트가 OK, FAIL 0이다(미통과 52건 중 51건 + 목록 밖 3건). 남은 1건 test_tui_runtime_lane_editor는 36082757057에서 OK다. 로그의 `[targeted] …: OK in`·`FAIL exit` 줄 가운데 `${suite}`·`${suite_path}`가 든 줄은 스크립트 원문이라 세지 않았다 | Board c-935b1b06cea9bfe0d0753f130305516a: 3.5 예산 규칙의 출처. PR #38925 구성 감사 issuecomment-5824888941, 닫기 issuecomment-5830732833(묶은 13건 중 12건이 main에 있고 #38912는 따로 진행) |
+| r1d | d4cf505f404c11bf50d657d029a9d1842c4bf029 | PR check 36079784023 + Test 36079787456, 36082757057 | PR check는 failure. 미통과 목록 52건이 모두 예산 미도달(job 107899150417 로그)이다. 같은 head의 targeted Test 36079787456에서 54개 스위트가 OK, FAIL 0이다(미통과 52건 중 51건 + 목록 밖 3건). 남은 1건 test_tui_runtime_lane_editor는 36082757057에서 OK다. 로그의 `[targeted] …: OK in`·`FAIL exit` 줄 가운데 `${suite}`·`${suite_path}`가 든 줄은 스크립트 원문이라 세지 않았다 | Board c-935b1b06cea9bfe0d0753f130305516a. 이 RFC 전의 기록이다. 그때는 예산 미도달을 targeted run으로 덮고 착지했지만, 3.5에 따라 지금은 rc 3이며 선례로 쓰지 않는다. PR #38925 구성 감사 issuecomment-5824888941, 닫기 issuecomment-5830732833(묶은 13건 중 12건이 main에 있고 #38912는 따로 진행) |
 | tui7-r1 | d7d29b0afe39544e7449e8de165ed36b127d2a91 (BASE 141926314e) | PR check 36290780720 | success. 멤버 4건 착지 | Board c-9e4bfd559eefee2f66768f5100becb9a (p-ea1aaac11b79ea30a79e024ae2952b86): 마지막 멤버 #39293의 승인을 push하지 않은 세션으로 보냄. Board c-82a90cc7da99c160c8d023047cda9340: 03:52:27–38Z 착지, 트리 대조 OK. PR #39465 닫기 issuecomment-5852428905 |
 
 r1d의 멤버가 모두 롤업 경로로 착지했는지는 다시 세지 않았다. #38925의 닫기 댓글이 적은 "12건이 main에 있다"를 그대로 옮긴다.
@@ -80,7 +80,7 @@ r1d의 멤버가 모두 롤업 경로로 착지했는지는 다시 세지 않았
   - BASE: 자르는 시점의 main 40자 SHA.
   - MEMBERS: `(PR, head40)` 목록. 멤버 순서는 착지 순서다.
   - ROLL: BASE 위에 멤버 head를 차례로 병합한 커밋(`rollup/<name>` 브랜치).
-- 배치 신선도 증거 = ROLL에서 돈 PR-check run 한 번(필수 5개 success)과 3.5의 보충 run. 이 run은 ROLL 커밋에 붙은 run이며 어떤 멤버 head의 run도 아니다.
+- 배치 신선도 증거 = ROLL에서 돈 PR-check run 한 번이다. 필수 5개가 모두 success여야 하고, 예산 초과로 끝난 run도 실패다(3.5). 이 run은 ROLL 커밋에 붙은 run이며 어떤 멤버 head의 run도 아니다.
 - 배치는 CI 전용 PR로 올리며 그 PR 자체는 병합하지 않는다. 멤버를 착지한 뒤 닫는다.
 - 롤업 파일(roll files) = `git diff --name-only BASE ROLL`.
 
@@ -147,9 +147,12 @@ batch: PASS roll: <ROLL40> base: <BASE40> run: <ROLL PR-check run> members: <PR>
 
 ### 3.5 예산을 넘긴 스위트
 
-PR check의 edited-tests 단계는 1080초 예산이 있다. 멤버가 많으면 일부 스위트가 "(not run: the step budget ran out)"으로 남는다.
-- 그 목록 전체를 같은 ROLL head의 targeted Test run(`test.yml -f suite=…`)으로 돌려 모두 OK여야 배치가 성립한다(09-25 r1d 선례: run 36079787456).
-- 예산 초과 항목이 하나라도 초록으로 덮이지 않으면 rc 3이다.
+PR check의 edited-tests 단계는 1080초 예산이 있다. 멤버가 많으면 일부 스위트가 "(not run: the step budget ran out)"으로 남고, 그 단계가 속한 필수 체크가 failure로 끝난다.
+- **예산 초과도 ROLL run의 실패다.** 3.1의 "필수 5개 success"를 채우지 못하므로 배치는 성립하지 않는다(rc 3).
+- 같은 ROLL head의 targeted Test run(`test.yml -f suite=…`)으로 빠진 스위트를 모두 초록으로 덮어도 필수 체크 실패를 면제하지 않는다. 근거는 두 가지다. 월드 조항 a-7e31026d는 필수 체크 5/5 성공을 요구한다. 운영자 제약(Board c-f3f73a24ebbd97a4a01a6a9eb6af10a0 4번)은 실패를 면제해서 속도를 올리지 않는다고 정했다.
+- targeted run은 원인을 가르는 진단으로만 쓴다.
+- 대신 배치를 작게 다시 자른다. 컷 전에 멤버들이 고친 스위트 수를 세어 한 run 예산 안(09-25 r1 실측 244개 실행)에 들도록 멤버를 나눈다. 7절 3번의 크기 상한이 이 기준이다.
+- 2.1의 r1d(09-25)는 이 RFC 전의 기록이다. 그때는 예산 미도달을 targeted run으로 덮고 착지했다. 이 RFC 아래서는 rc 3이며, 선례로 쓰지 않는다.
 
 ### 3.6 PR마다 그대로 남는 것
 

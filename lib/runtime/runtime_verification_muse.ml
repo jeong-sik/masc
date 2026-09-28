@@ -4,18 +4,18 @@ type error =
   | Client_error of Runtime_muse_serve.error
 
 let run ~secure_random ~net ~mgr ~clock ~cwd ~directory ~account_home ~quota_scope ~config
-    ~max_prompt_bytes ~reasoning_effort ~tool ~prompt =
+    ~prompt_capacity ~reasoning_effort ~tool ~prompt =
   let ( let* ) = Result.bind in
   let invalid_prompt detail = Error (Client_error (Runtime_muse_serve.Invalid_config detail)) in
-  let* () = match max_prompt_bytes with
-    | None -> Ok ()
-    | Some capacity when capacity <= 0 ->
-      invalid_prompt "Muse Code max-prompt-bytes must be positive"
-    | Some capacity when String.length prompt > capacity ->
+  let* () = match prompt_capacity with
+    | Error error ->
+      invalid_prompt ("Muse Code has no prompt ceiling: "
+        ^ Runtime_muse_prompt_capacity.error_to_string error)
+    | Ok capacity when String.length prompt > capacity ->
       invalid_prompt (Printf.sprintf
-        "Muse Code probe input is %d bytes, exceeding declared max-prompt-bytes %d"
+        "Muse Code probe input is %d bytes, exceeding the prompt ceiling %d"
         (String.length prompt) capacity)
-    | Some _ -> Ok () in
+    | Ok _ -> Ok () in
   match Runtime_muse_home.prepare ~account_home with
   | Error error -> Error (Home_error error)
   | Ok home ->

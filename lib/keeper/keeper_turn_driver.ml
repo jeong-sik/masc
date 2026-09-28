@@ -2663,7 +2663,7 @@ let run_named
             ; effect_disposition = Keeper_provider_attempt_effect.No_effect_observed }
           | Ok (workspace_root, native_context) ->
           Keeper_muse_runtime.run
-            ~max_prompt_bytes:runtime.model.max_prompt_bytes
+            ~prompt_capacity:(Runtime.muse_prompt_capacity runtime)
             ~configured_reasoning_effort:runtime.model.reasoning_effort
             ~turn_timeout_s:runtime.model.turn_timeout_s
             ~quota_scope:runtime.quota_scope

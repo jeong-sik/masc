@@ -1,6 +1,14 @@
 (* The imp emblem's marks as signed distance fields. Each primitive returns
    the usual signed distance -- negative inside -- and [depth_in] flips the
-   sign, because the renderer asks "how far inside" when it bevels an edge. *)
+   sign, because the renderer asks "how far inside" when it bevels an edge.
+
+   The sampled square ([extent], 1.08 as it is) and its lattice step are
+   adapted from openai/codex codex-rs/tui/src/empty_state_animation/
+   geometry.rs at commit 5c5308fc9a9e (Apache License 2.0, Copyright 2025
+   OpenAI; license and NOTICE beside this file, listed in
+   THIRD-PARTY-LICENSES.md). Changed here: Codex samples its logo's SVG
+   paths; the imp and lantern below are this emblem's own analytic fields,
+   on a coarser lattice. *)
 
 type mark =
   | Imp

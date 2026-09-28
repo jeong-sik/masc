@@ -285,6 +285,28 @@ let test_fit_never_drops_the_flexible_column () =
   check bool "the sentence stays and C goes" true
     (layout.Table.shown = [ A; Flex; B ])
 
+(* A flexible column the columns do not carry, or carry twice, is a table
+   described wrongly. Absent, nothing would take the slack; twice, its floor
+   would count twice and the row would run past the space. [fit] says so
+   rather than laying either out. *)
+let test_fit_refuses_a_flexible_column_it_does_not_carry () =
+  check_raises "the flexible column must be one of the columns"
+    (Invalid_argument
+       "Masc_tui_table.fit: the flexible column is not among the columns")
+    (fun () ->
+      ignore
+        (Table.fit ~inner_width:30 ~width:probe_width ~flex:Flex
+           ~drop_order:[ C; A ] [ A; B; C ]))
+
+let test_fit_refuses_a_flexible_column_listed_twice () =
+  check_raises "the flexible column must be listed once"
+    (Invalid_argument
+       "Masc_tui_table.fit: the flexible column is listed more than once")
+    (fun () ->
+      ignore
+        (Table.fit ~inner_width:30 ~width:probe_width ~flex:Flex
+           ~drop_order:[ C; A ] [ A; Flex; B; Flex ]))
+
 let () =
   run "tui table"
     [ ( "layout"
@@ -324,5 +346,9 @@ let () =
             test_fit_keeps_the_floor_when_nothing_more_can_go
         ; test_case "the flexible column never goes" `Quick
             test_fit_never_drops_the_flexible_column
+        ; test_case "a flexible column it does not carry is refused" `Quick
+            test_fit_refuses_a_flexible_column_it_does_not_carry
+        ; test_case "a flexible column listed twice is refused" `Quick
+            test_fit_refuses_a_flexible_column_listed_twice
         ] )
     ]

@@ -257,9 +257,13 @@ let contains ~sub text =
   let rec at i = i + n <= m && (String.sub text i n = sub || at (i + 1)) in
   at 0
 
-let draw ?(rows = 10) ?(tasks = live_tasks) reading =
+let status_of_id tasks id =
+  List.find_opt (fun (task : Tui_decode.task) -> String.equal task.id id) tasks
+  |> Option.map (fun (task : Tui_decode.task) -> task.status)
+
+let draw ?(rows = 25) ?(tasks = live_tasks) reading =
   Goals.lines ~now:captured_at ~localtime:Unix.gmtime ~inner_width:120 ~rows
-    ~tasks:(Tasks.Rows_read tasks) reading
+    ~tasks:(Tasks.Rows_read tasks) ~status_of_id:(status_of_id tasks) reading
   |> List.map strip_ansi
 
 let find_row ~sub rows =
@@ -281,7 +285,7 @@ let test_live_fleet_moves_no_goal () =
        (fun (goal : Tui_decode.overview_goal) -> goal.og_id)
        (Goals.drawn_goals goals));
   let rows = draw (Types.Goals_read goals) in
-  check int "the headline and one row per executing goal" 6 (List.length rows);
+  check int "the headline and two rows per executing goal" 11 (List.length rows);
   check bool "the headline counts no active task toward a goal" true
     (contains ~sub:"active work toward a goal: 0 of 13 tasks" (List.hd rows));
   let audit = find_row ~sub:"6일간" rows in
@@ -294,6 +298,59 @@ let test_live_fleet_moves_no_goal () =
     (contains ~sub:"no tasks" release);
   check bool "a due date counts down" true
     (contains ~sub:"due 10-07 (D-14)" release)
+
+let test_goal_metadata_keeps_owner_state_and_due_together () =
+  let goal =
+    match Goals.drawn_goals (decode_fixture ()) with
+    | first :: _ -> { first with og_task_ids = [ "task-1501"; "task-gone" ] }
+    | [] -> fail "fixture has no drawn goal"
+  in
+  let rows =
+    Goals.lines ~now:captured_at ~localtime:Unix.gmtime ~inner_width:46
+      ~rows:12 ~tasks:(Tasks.Rows_read [ in_progress "task-1501" ])
+      ~status_of_id:(status_of_id [ in_progress "task-1501" ])
+      (Types.Goals_read [ goal ])
+    |> List.map strip_ansi
+  in
+  let detail = String.concat " " (List.tl (List.tl rows)) in
+  check bool "known and missing task owners stay distinct" true
+    (contains ~sub:"owner @keeper-a" detail
+     && contains ~sub:"other owners unknown" detail);
+  check bool "the phase and due date are both present" true
+    (contains ~sub:"state executing" detail
+     && contains ~sub:"due 10-07 (D-14)" detail);
+  let hidden =
+    Goals.lines ~now:captured_at ~localtime:Unix.gmtime ~inner_width:46
+      ~rows:2 ~tasks:(Tasks.Rows_read [ in_progress "task-1501" ])
+      ~status_of_id:(status_of_id [ in_progress "task-1501" ])
+      (Types.Goals_read [ goal ])
+    |> List.map strip_ansi
+  in
+  check int "a short viewport keeps the whole goal entry offscreen" 1
+    (List.length hidden);
+  check bool "the headline accounts for the hidden goal" true
+    (contains ~sub:"0 of 1 goals shown" (List.hd hidden))
+
+let test_a_completed_task_keeps_its_goal_performer () =
+  let goal =
+    match Goals.drawn_goals (decode_fixture ()) with
+    | first :: _ -> { first with og_task_ids = [ "task-done" ] }
+    | [] -> fail "fixture has no drawn goal"
+  in
+  let done_task =
+    task "task-done"
+      (Masc_domain.Done
+         { assignee = "keeper-done"; completed_at = "2026-09-23T00:00:00Z"
+         ; notes = None })
+  in
+  let rows =
+    Goals.lines ~now:captured_at ~localtime:Unix.gmtime ~inner_width:120
+      ~rows:10 ~tasks:(Tasks.Rows_read [])
+      ~status_of_id:(status_of_id [ done_task ]) (Types.Goals_read [ goal ])
+    |> List.map strip_ansi
+  in
+  check bool "finished task absent from active rows still names its performer" true
+    (contains ~sub:"owner @keeper-done" (String.concat " " rows))
 
 (* The input that splits the headline: one of the active tasks is a task an
    executing goal lists. *)
@@ -309,20 +366,32 @@ let test_a_short_budget_says_what_it_cut () =
   let rows = draw ~rows:3 (Types.Goals_read goals) in
   check int "the budget is kept" 3 (List.length rows);
   check bool "the headline says how many goals are drawn" true
-    (contains ~sub:"2 of 5 goals shown" (List.hd rows))
+    (contains ~sub:"1 of 5 goals shown" (List.hd rows))
 
 let test_a_failed_read_is_one_explicit_line () =
   check (list string) "a failure is named, not drawn as an empty section"
-    [ "GOALS   goals unavailable: goals load failed: connection refused" ]
-    (draw (Types.Goals_failed "goals load failed: connection refused"));
-  check int "a failed read asks for its one line" 1
-    (Goals.wanted_rows (Types.Goals_failed "x"))
+    [ "Goals unavailable: goals load failed: connection refused" ]
+    (draw ~rows:1 (Types.Goals_failed "goals load failed: connection refused"));
+  check int "a failed read asks for one row" 1
+    (Goals.wanted_rows ~now:captured_at ~localtime:Unix.gmtime
+       ~inner_width:120 ~tasks:(Tasks.Rows_read live_tasks)
+       ~status_of_id:(status_of_id live_tasks) (Types.Goals_failed "x"))
+
+let test_an_unread_goals_read_names_the_unknown_in_one_row () =
+  check (list string) "one allocated row includes the unread reason"
+    [ "Goals   No goal data read yet." ]
+    (draw ~rows:1 Types.Goals_unread);
+  check int "an unread read asks for one row" 1
+    (Goals.wanted_rows ~now:captured_at ~localtime:Unix.gmtime
+       ~inner_width:120 ~tasks:(Tasks.Rows_read live_tasks)
+       ~status_of_id:(status_of_id live_tasks) Types.Goals_unread)
 
 let test_an_unread_backlog_is_not_a_zero () =
   let goals = decode_fixture () in
   let rows =
     Goals.lines ~now:captured_at ~localtime:Unix.gmtime ~inner_width:120 ~rows:10
-      ~tasks:(Tasks.Rows_unavailable "backlog.json unreadable") (Types.Goals_read goals)
+      ~tasks:(Tasks.Rows_unavailable "backlog.json unreadable")
+      ~status_of_id:(status_of_id live_tasks) (Types.Goals_read goals)
     |> List.map strip_ansi
   in
   check bool "the headline names the unread backlog" true
@@ -335,7 +404,8 @@ let test_a_backlog_not_read_yet_is_not_a_zero () =
   let goals = decode_fixture () in
   let rows =
     Goals.lines ~now:captured_at ~localtime:Unix.gmtime ~inner_width:120 ~rows:10
-      ~tasks:Tasks.Rows_unread (Types.Goals_read goals)
+      ~tasks:Tasks.Rows_unread ~status_of_id:(status_of_id live_tasks)
+      (Types.Goals_read goals)
     |> List.map strip_ansi
   in
   check bool "the headline says active work is unread" true
@@ -352,7 +422,8 @@ let test_the_countdown_uses_the_operator_calendar () =
   let kst now = Unix.gmtime (now +. (9. *. 3600.)) in
   let rows =
     Goals.lines ~now:just_after_kst_midnight ~localtime:kst ~inner_width:120
-      ~rows:10 ~tasks:(Tasks.Rows_read live_tasks) (Types.Goals_read goals)
+      ~rows:10 ~tasks:(Tasks.Rows_read live_tasks)
+      ~status_of_id:(status_of_id live_tasks) (Types.Goals_read goals)
     |> List.map strip_ansi
   in
   check bool "the countdown is from the local date" true
@@ -374,10 +445,12 @@ let test_a_goal_without_children_is_refused () =
 
 let test_an_empty_tree_is_one_headline () =
   let empty = Types.Goals_read [] in
-  check int "an empty tree asks for one row" 1 (Goals.wanted_rows empty);
-  check (list string) "the headline says no goal is open"
-    [ "GOALS   active work toward a goal: 0 of 13 tasks  \xc2\xb7 no goal is \
-       executing, verifying or awaiting confirmation" ]
+  check int "an empty tree asks for one row" 1
+    (Goals.wanted_rows ~now:captured_at ~localtime:Unix.gmtime
+       ~inner_width:120 ~tasks:(Tasks.Rows_read live_tasks)
+       ~status_of_id:(status_of_id live_tasks) empty);
+  check (list string) "the empty section gives the next fact"
+    [ "Goals (0)   No goal is executing or verifying." ]
     (draw empty)
 
 let test_an_unknown_phase_is_refused () =
@@ -401,12 +474,18 @@ let () =
     [ ( "overview goals"
       , [ test_case "the live fleet moves no goal" `Quick
             test_live_fleet_moves_no_goal
+        ; test_case "goal metadata stays whole" `Quick
+            test_goal_metadata_keeps_owner_state_and_due_together
+        ; test_case "a completed task keeps its goal performer" `Quick
+            test_a_completed_task_keeps_its_goal_performer
         ; test_case "an active goal task counts" `Quick
             test_an_active_goal_task_counts
         ; test_case "a short budget says what it cut" `Quick
             test_a_short_budget_says_what_it_cut
         ; test_case "a failed read is one explicit line" `Quick
             test_a_failed_read_is_one_explicit_line
+        ; test_case "one unread goal row names the unknown" `Quick
+            test_an_unread_goals_read_names_the_unknown_in_one_row
         ; test_case "an unread backlog is not a zero" `Quick
             test_an_unread_backlog_is_not_a_zero
         ; test_case "a backlog not read yet is not a zero" `Quick

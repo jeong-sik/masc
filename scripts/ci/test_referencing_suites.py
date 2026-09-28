@@ -24,6 +24,7 @@ from referencing_suites import (  # noqa: E402
     exactpath_suites,
     file_suites,
     module_suites,
+    stanza_suites,
     tracked_files,
 )
 
@@ -31,7 +32,13 @@ FILES = {
     "lib/widgets/widget.ml": "let make () = ()\n",
     "lib/widgets/widget.mli": "val make : unit -> unit\n",
     "lib/dune": "(library (name masc))\n",
-    "test/dune": "(test (name test_qualified))\n",
+    "bin/widget.ml": "let run () = ()\n",
+    "test/dune": "(test (name test_qualified))\n(include stanzas/test_stanza_runner.inc)\n",
+    "test/stanzas/test_stanza_runner.inc": (
+        "(test\n (name test_stanza_runner)\n (deps ../bin/widget.exe)\n"
+        " (action (setenv WIDGET %{dep:../bin/widget.exe} (run %{test}))))\n"
+    ),
+    "test/test_stanza_runner.ml": "let () = ()\n",
     "scripts/install-thing.py": "print('install')\n",
     "scripts/masc-install-thing.py": "print('other')\n",
     "config/shared.toml": "a = 1\n",
@@ -163,6 +170,22 @@ def main() -> int:
         expect(
             "an edited test is not an exact path to look for",
             exactpath_suites(root, tracked, ["test/test_shared_exact.py"]),
+            set(),
+        )
+
+        expect(
+            "a bin executable a suite's stanza runs selects that suite",
+            stanza_suites(root, tracked, ["bin/widget.ml"]),
+            {"test/test_stanza_runner.ml"},
+        )
+        expect(
+            "a stanza that runs a different executable selects nothing",
+            stanza_suites(root, tracked, ["bin/other.ml"]),
+            set(),
+        )
+        expect(
+            "a changed source outside bin is not a stanza reference",
+            stanza_suites(root, tracked, ["lib/widgets/widget.ml"]),
             set(),
         )
 

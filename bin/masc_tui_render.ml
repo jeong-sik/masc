@@ -16342,7 +16342,8 @@ let render_overview_startup (state : state) =
     ~title:(overview_header state)
     ~hints:(Masc_tui_keys.footer_hints_overview ~task_focus:false)
     ~body:(fun ~budget c ->
-      Masc_tui_emblem_screen.body ~cols:(framed_inner_width cols) ~rows:budget
+      Masc_tui_emblem_screen.body ~screen:Masc_tui_emblem_screen.Startup
+        ~cols:(framed_inner_width cols) ~rows:budget
         ~origin:(c.next_origin ())
         ~caption:
           ([ Masc_tui_theme.tone Masc_tui_theme.Accent
@@ -16378,7 +16379,8 @@ let render_about (state : state) =
   surface_chrome ~overflow:Fits ~frame:Chrome_overlay state ~terminal_rows ~cols
     ~surface_key:"about" ~title:(screen_title " MASC") ~hints:"Esc:close"
     ~body:(fun ~budget c ->
-      Masc_tui_emblem_screen.body ~cols:(framed_inner_width cols) ~rows:budget
+      Masc_tui_emblem_screen.body ~screen:Masc_tui_emblem_screen.About
+        ~cols:(framed_inner_width cols) ~rows:budget
         ~origin:(c.next_origin ())
         ~caption:
           [ Masc_tui_theme.tone Masc_tui_theme.Accent

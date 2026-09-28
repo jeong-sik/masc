@@ -51,6 +51,9 @@ CENTRE_TOLERANCE_CELLS = 6
 # The fewest rows a drawn candle has: the smallest mosaic edge the renderer
 # takes is 16 pixels, two to a row.
 MIN_CANDLE_ROWS = 8
+# The most rows the splash candle takes, however tall the terminal
+# (Masc_tui_emblem_screen.startup_picture_rows).
+STARTUP_CANDLE_ROWS = 12
 # Text typed while /about is open; it must reach neither the composer nor a
 # Keeper.
 SWALLOWED_TEXT = b"not-for-alpha-39658"
@@ -156,6 +159,8 @@ def startup_splash(binary: str) -> None:
             rows = candle_rows(output)
             assert len(rows) >= MIN_CANDLE_ROWS, \
                 "no candle on the Overview while its first read is out: " + repr(screen)
+            assert len(rows) <= STARTUP_CANDLE_ROWS, \
+                f"the splash candle is {len(rows)} rows, over its {STARTUP_CANDLE_ROWS}"
             assert b"connecting" in screen, "the splash does not say it is connecting"
             assert UNREAD_BRIEFING in screen, \
                 "the splash hid that the briefing is not read yet: " + repr(screen)

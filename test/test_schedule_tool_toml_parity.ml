@@ -15,9 +15,10 @@
 
     [masc_schedule_update] was added after the migration. It deliberately
     shares the create field set and requires [schedule_id] in the schema.
-    [recurrence_kind] is required by the runtime after schedule lookup, so its
-    omission can report the stored kind. The structural assertion below pins
-    the published schema instead of pretending it has pre-migration bytes.
+    [recurrence_kind] is optional for this version's update migration: an
+    omission preserves the stored recurrence and warns. The structural
+    assertion below pins the published schema instead of pretending it has
+    pre-migration bytes.
 
     The descriptions and schemas this suite also pinned were literals read off
     the same published values before the declarations moved into

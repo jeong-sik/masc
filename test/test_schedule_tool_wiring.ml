@@ -269,8 +269,8 @@ let test_flat_tool_surface () =
   let update_schema : Masc_domain.tool_schema =
     (schedule_definition Tool_schemas_schedule.Update_request).schema
   in
-  (* Runtime checks recurrence_kind after loading the schedule, so an omission
-     can report the stored kind rather than failing at schema validation. *)
+  (* The migration accepts omission after loading the schedule so it can keep
+     the stored recurrence and warn before the next version requires it. *)
   check (list string) "update schema requires the stable identity"
     [ "schedule_id"; "keeper_name"; "message" ]
     (required_names update_schema.input_schema);

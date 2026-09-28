@@ -1,6 +1,6 @@
 """The runtime.toml account form, pressed for real.
 
-[a] on Config > runtime.toml opens the form over the file the pane shows. The
+[a] on System > runtime.toml opens the form over the file the pane shows. The
 scenario types a home another Codex provider already signs in at and reads
 the refusal on the form, fixes it, and saves. While the form stands open the
 file on the server gains a line, the way another client or a keeper would
@@ -138,7 +138,7 @@ def run(executable: str) -> None:
     requests: list[tuple[str, bytes]] = []
 
     def interact(process, fd, _slave_fd, output, _base_path) -> None:
-        h.tab_until(process, fd, output, b"MASC Config")
+        h.tab_until(process, fd, output, b"MASC System")
         h.wait_for_output(process, fd, output, b"codex_acct1", start=0, timeout=5.0)
 
         h.send_and_wait(process, fd, output, b"a", b"codex_subscription_2")

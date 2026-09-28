@@ -1,178 +1,187 @@
-"""Where four surfaces put their title, their first row, their footer and
-their blank rows, at the widths the region work is judged at.
+"""Where the frame's rows sit on the surfaces, the keeper detail and the
+keeper chat, before the region steps move them.
 
-The workbench RFC's region steps (section 5.9, G0 to G5) move rows: G0
-makes every reader of the frame's row count read one value from
-Masc_tui_frame, and later steps drop the title underline and merge rows.
-This suite pins where the rows sit today, so each step changes these
-numbers on purpose and its diff shows what moved. It also prints the raw
-ANSI of every measured screen to the test log, zlib-compressed and base64
-between markers, so a reviewer can rebuild the screen from a CI run without
-a local binary.
+The workbench RFC's region steps (section 5.9, G0 to G5) change how many rows
+the frame spends on itself. G0 makes every reader of that count read one value
+from Masc_tui_frame. This suite opens a screen for each reader below and pins
+the title row, the rule rows, the footer row, the blank rows between and any
+list window the screen prints, so a step changes these numbers on purpose and
+its diff shows what moved. docs/evidence/tui-region-baseline-2026-09-28 maps
+every reader to the screen that measures it; two more suites cover the
+overlays and the remaining detail screens.
 
-The surfaces are the ones the G0 readers draw: the Keepers list (the shared
-body height), a keeper's detail pane, the keeper chat (its history's first
-row) and the Board list, with the harness's keepers alpha and beta and four
-Board posts. The Lane run detail and Memory are not measured here.
+Readers measured here:
+- surface_chrome_rows (masc_tui_render_prim.ml): the Keepers list, the Board
+  list and the Config heading, all finished by finish_surface;
+- keeper_roster_pane (masc_tui_render_prim.ml): the roster beside the keeper
+  detail and beside the chat, shown with Ctrl-B from 110 columns;
+- keeper_detail_pane (masc_tui_render.ml): the keeper detail without the
+  roster (unframed) and with it (framed);
+- chat_history_first_row (masc_tui_render_chat.ml): pinned with a click on a
+  folded Gate argument row, which unfolds only if the press lands on it.
 """
-import base64
 import os
 import sys
-import zlib
 
 import test_tui_keyboard_input as h
+import tui_region_harness as region
 
 # The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs
-# a suite when a pull request changes a path the suite names. The frame's row
-# count lives in masc_tui_frame; render_prim and render_chat read it.
-# masc_tui_render.ml and masc_tui_types.ml read it too but are edited by most
-# TUI pull requests, and a change to the count itself goes through the frame.
+# a suite when a pull request changes a path the suite names: the frame's
+# count and its aliases (masc_tui_frame.ml, masc_tui_ansi.ml) and the files
+# holding the readers measured here.
 #
 # Kept out of the default keyboard walk, which already runs near the CI limit
 # (the PTY scenario guidance, #36343).
 SOURCE_MODULES = (
     "bin/masc_tui_frame.ml",
     "bin/masc_tui_frame.mli",
+    "bin/masc_tui_ansi.ml",
     "bin/masc_tui_render_prim.ml",
+    "bin/masc_tui_render.ml",
     "bin/masc_tui_render_chat.ml",
 )
 
-TERMINAL_ROWS = 30
-
-# 80 and 100 are the common terminals; 131 and 132 sit on either side of the
-# width where the Activity pane used to open; 140 is the widest a surface is
-# drawn at without the pane since it opens at 158.
-WIDTHS = (80, 100, 131, 132, 140)
+# 80 and 100 are the common terminals. The roster and the keeper detail's
+# framed split open at 110 (Masc_tui_roster_pane.threshold_cols), so 109 and
+# 110 sit either side of it; the Activity pane opens at 158
+# (Masc_tui_acting_pane.threshold_cols), so 157 and 158 sit either side of
+# that; 176 is where its wide layout fits.
+WIDTHS = (80, 100, 109, 110, 157, 158, 176)
+ROSTER_WIDTHS = (110, 158)
 
 ALPHA_CHAT = b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat"
 INFO_TAB = b"\xe2\x96\xb8Info"
-# Every surface's key hints end with the help key, "…?"; the row that
-# carries it is the surface's footer. On most surfaces the composer's row
-# sits below it.
-HELP_HINT = b"\xe2\x80\xa6?"
+ROSTER_HEADING = b"KEEPERS"
+CTRL_B = b"\x02"
+CTRL_D = b"\x04"
 
-# (surface, width) -> (title row, first row drawn under it, footer row,
-# blank rows between the title and the footer). Rows are the terminal's,
-# counted from 1: the tab strip is row 1, the frame's top row 2, the title 3
-# and its divider 4. The key hints sit on row 29 with the composer on row 30
-# below them; the chat draws its own input and puts its hints on row 30. None
-# of the four moves with the width today; the blank rows are what each
-# surface's fixture leaves unfilled. Measured by Test run 36414157831 on
-# 214fd9c212 (docs/evidence/tui-region-baseline-2026-09-28/README.md).
-EXPECTED: dict[tuple[str, int], tuple[int, int, int, int]] = {
-    (surface, width): rows
-    for surface, rows in (
-        ("keepers", (3, 4, 29, 16)),
-        ("keeper-detail", (3, 4, 29, 7)),
-        ("keeper-chat", (3, 4, 30, 18)),
-        ("board", (3, 4, 29, 15)),
+# A Gate argument long enough to fold at every width here, with a head the
+# screen finds and a tail that shows only once it has unfolded.
+GATE_HEAD = b"GATE_CLICK"
+GATE_TAIL = b"GATE_TAIL"
+GATE_ARGUMENT = "GATE_CLICK " + "long-argument " * 16 + "GATE_TAIL"
+
+# The screens that end in the shared composer row; the chat draws its own.
+COMPOSER_ROWS = {"keepers": 1, "board": 1, "config": 1, "keeper-detail": 1,
+                 "keeper-detail-roster": 1, "keeper-chat": 0,
+                 "keeper-chat-roster": 0}
+
+# (screen, width) -> what measure() finds there.
+EXPECTED: dict[tuple[str, int], dict[str, object]] = {}
+
+
+def fixtures() -> region.ServedFixtures:
+    served = h.keeper_runtime_http_fixtures()
+    served.update(h.board_reference_http_fixtures())
+    served["/api/v1/keepers/alpha/chat/history"] = (200, [{
+        "id": "region-gate", "role": "system", "content": GATE_ARGUMENT,
+        "ts": 1787348491.3,
+        "approval_lifecycle": {
+            "approval_id": "region-gate", "phase": "requested",
+            "tool_name": "Execute", "call_summary": GATE_ARGUMENT,
+        },
+    }])
+    served["/api/v1/keepers/alpha/tool-calls?limit=100"] = (
+        200, {"keeper": "alpha", "count": 0, "health": "ok", "entries": []},
     )
-    for width in WIDTHS
-}
+    served[h.FILE_CHANGES_ALPHA_PATH] = (200, {
+        "keeper": "alpha", "window_hours": 24.0, "calls_in_window": 0,
+        "changes": [], "over_budget": 0, "malformed": 0,
+    })
+    return region.ServedFixtures(served)
 
 
-def measure(output: bytearray, title: bytes) -> tuple[int, int, int, int]:
-    rows = h.screen_rows(bytes(output))
-    title_row = h.screen_row_of(rows, title)
-    if title_row < 0:
-        raise AssertionError(f"{title!r} is not on screen: {rows!r}")
-    drawn = [
-        row
-        for row in range(1, TERMINAL_ROWS + 1)
-        if rows.get(row, b"").strip()
-    ]
-    hinted = [row for row in drawn if HELP_HINT in rows[row]]
-    if not hinted:
-        raise AssertionError(f"no row carries the key hints: {rows!r}")
-    footer_row = max(hinted)
-    below = [row for row in drawn if row > title_row]
-    first_below = min(below) if below else -1
-    blank = sum(
-        1
-        for row in range(title_row + 1, footer_row)
-        if not rows.get(row, b"").strip()
-    )
-    return (title_row, first_below, footer_row, blank)
+def interaction(served: region.ServedFixtures):
+    measured: dict[tuple[str, int], dict[str, object]] = {}
 
+    def take(process, fd, output, screen: str, columns: int) -> None:
+        # DISCOVERY (temporary, removed before review): collect instead of
+        # failing so one run lists every unanswered request and measurement.
+        try:
+            region.settle(process, fd, output)
+            rows = region.whole_screen(output)
+            measured[(screen, columns)] = region.measure(
+                rows, composer_rows=COMPOSER_ROWS[screen])
+        except AssertionError as error:
+            print(f"DISCOVERY {screen} {columns}: {str(error)[:600]}")
+        print(f"DISCOVERY unanswered {screen} {columns}: {served.unanswered()}")
+        region.print_screen(screen, columns, output)
 
-def print_frame(surface: str, width: int, output: bytearray) -> None:
-    """The bytes the screen was built from, since the last full redraw.
+    def sweep(process, fd, output, screen: str, loaded, widths) -> None:
+        for columns in widths:
+            h.resize_and_wait(process, fd, output, rows=region.TERMINAL_ROWS,
+                              columns=columns, needle=loaded,
+                              controls=(h.FULL_REDRAW,))
+            take(process, fd, output, screen, columns)
 
-    Compressed before it is encoded: dune cuts an action's output past a
-    size, and uncompressed the twenty screens ran past it. A redraw is
-    mostly padding, so it compresses to a small fraction."""
-    drawn = bytes(output)
-    cleared = drawn.rfind(h.FULL_REDRAW)
-    if cleared >= 0:
-        drawn = drawn[cleared:]
-    encoded = base64.b64encode(zlib.compress(drawn, 9)).decode("ascii")
-    print(f"=== region-baseline {surface} {width}x{TERMINAL_ROWS} begin ===")
-    for start in range(0, len(encoded), 4096):
-        print(encoded[start : start + 4096])
-    print(f"=== region-baseline {surface} {width}x{TERMINAL_ROWS} end ===")
+    def interact(process, fd, _slave, output, _base):
+        h.tab_until(process, fd, output, b"MASC Keepers")
+        sweep(process, fd, output, "keepers", b"beta", WIDTHS)
 
+        board = h.screen_header(b"MASC Board", b" (4)")
+        h.palette_go(process, fd, output, b"go board", board)
+        sweep(process, fd, output, "board", b"Hostile", WIDTHS)
 
-def region_baseline_interaction(process, fd, _slave, output, _base):
-    measured: dict[tuple[str, int], tuple[int, int, int, int]] = {}
+        h.tab_until(process, fd, output, b"MASC Config")
+        sweep(process, fd, output, "config", b"MASC Config", WIDTHS)
 
-    def sweep(surface: str, title: bytes, needle=None) -> None:
-        for width in WIDTHS:
-            h.resize_and_wait(
-                process,
-                fd,
-                output,
-                rows=TERMINAL_ROWS,
-                columns=width,
-                needle=title if needle is None else needle,
-                controls=(h.FULL_REDRAW,),
-            )
-            h.drain_until_quiet(process, fd, output, cap=3.0)
-            measured[(surface, width)] = measure(output, title)
-            print_frame(surface, width, output)
+        h.tab_until(process, fd, output, b"MASC Keepers")
+        h.select_keeper_row(process, fd, output, b"alpha")
+        h.send_and_wait(process, fd, output, b"\r", INFO_TAB)
+        sweep(process, fd, output, "keeper-detail", INFO_TAB, WIDTHS)
 
-    h.tab_until(process, fd, output, b"MASC Keepers")
-    sweep("keepers", b"MASC Keepers")
+        # The roster opens only where it fits; the last sweep ended at 176.
+        h.send_and_wait(process, fd, output, CTRL_B, ROSTER_HEADING)
+        sweep(process, fd, output, "keeper-detail-roster", ROSTER_HEADING, ROSTER_WIDTHS)
 
-    h.select_keeper_row(process, fd, output, b"alpha")
-    h.send_and_wait(process, fd, output, b"\r", INFO_TAB)
-    sweep("keeper-detail", INFO_TAB)
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+        h.select_keeper_row(process, fd, output, b"alpha")
+        h.send_and_wait(process, fd, output, b"c", ALPHA_CHAT)
+        sweep(process, fd, output, "keeper-chat-roster", GATE_HEAD, ROSTER_WIDTHS)
+        h.send_and_wait(process, fd, output, CTRL_B, ALPHA_CHAT)
+        sweep(process, fd, output, "keeper-chat", GATE_HEAD, WIDTHS)
 
-    h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
-    h.select_keeper_row(process, fd, output, b"alpha")
-    h.send_and_wait(process, fd, output, b"c", ALPHA_CHAT)
-    sweep("keeper-chat", ALPHA_CHAT)
+        # The chat maps a press to a history row from the row its history
+        # starts on. Folded, the Gate argument's row is the one row that acts
+        # on a press, so a press on the row where the screen shows it unfolds
+        # the argument only when that mapping is right; a press on the rows
+        # either side must not.
+        h.resize_and_wait(process, fd, output, rows=region.TERMINAL_ROWS,
+                          columns=100, needle=GATE_HEAD, controls=(h.FULL_REDRAW,))
+        h.send_and_wait(process, fd, output, CTRL_D, b"tools:results")
+        region.settle(process, fd, output)
+        gate_row = h.screen_row_of(region.whole_screen(output), GATE_HEAD)
+        if gate_row < 0:
+            raise AssertionError(f"the folded Gate row is not on screen: "
+                                 f"{h.screen_text(bytes(output))!r}")
+        measured[("chat-gate-row", 100)] = {"row": gate_row}
+        for beside in (gate_row - 1, gate_row + 1):
+            os.write(fd, b"\x1b[<0;40;%dM\x1b[<0;40;%dm" % (beside, beside))
+            region.settle(process, fd, output)
+            if GATE_TAIL in h.screen_text(bytes(output)):
+                raise AssertionError(f"a press on row {beside} unfolded the Gate "
+                                     f"row at {gate_row}")
+        h.send_and_wait(process, fd, output,
+                        b"\x1b[<0;40;%dM\x1b[<0;40;%dm" % (gate_row, gate_row),
+                        b"tools:full")
+        region.settle(process, fd, output)
+        if GATE_TAIL not in h.screen_text(bytes(output)):
+            raise AssertionError("a press on the Gate row did not unfold it")
 
-    h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
-    # The emphasis on the name closes between it and the count, so the wait
-    # matches across it; the measure reads the screen's plain text.
-    board_title = h.screen_header(b"MASC Board", b" (4)")
-    h.palette_go(process, fd, output, b"go board", board_title)
-    sweep("board", b"MASC Board (4)", needle=board_title)
+        region.check_all(measured, EXPECTED)
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+        h.send_and_wait(process, fd, output, b"q", b"q: press again to quit")
 
-    print("measured = {")
-    for key, value in measured.items():
-        print(f"    {key!r}: {value!r},")
-    print("}")
-    wrong = {
-        key: (EXPECTED.get(key), value)
-        for key, value in measured.items()
-        if EXPECTED.get(key) != value
-    }
-    if wrong:
-        raise AssertionError(
-            "rows moved (expected, measured): "
-            + ", ".join(f"{key}: {pair}" for key, pair in wrong.items())
-        )
-    h.send_and_wait(process, fd, output, b"q", b"q: press again to quit")
+    return interact
 
 
 if __name__ == "__main__":
+    served = fixtures()
     h.run_terminal_scenario(
         os.path.abspath(sys.argv[1]),
-        description="Region baseline: title, first row, footer and blank rows",
-        interact=region_baseline_interaction,
-        # Keepers alpha and beta and four Board posts, so the lists are
-        # drawn with rows rather than with a load failure.
-        http_fixtures=h.board_reference_http_fixtures(),
+        description="Region baseline: surfaces, keeper detail and chat",
+        interact=interaction(served),
+        http_fixtures=served,
     )
     print("region baseline: PASS")

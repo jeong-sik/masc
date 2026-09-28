@@ -1,5 +1,8 @@
 type client = Codex | Claude | Antigravity | Muse
-type provider = { id : string; label : string; client : client }
+type origin = Configured | Catalog
+(** [Configured]: an account the runtime configuration declares.
+    [Catalog]: the client's own entry for adding a new account. *)
+type provider = { id : string; label : string; client : client; origin : origin }
 type model = { id : string; label : string; context : int option; tools : bool option }
 
 (** What removing an account changes, as the setup API's removal preview
@@ -19,12 +22,15 @@ type saved = Saved_verified | Saved_unverified of unverified * unverified list
 (** What a save published. [Saved_unverified] names the runtimes the server
     published unmeasured because their provider declined the verification
     for the account's usage (a spent quota or a rate limit). *)
-type phase = Loading | Providers | Logging | Models | Documented_context of model | Saving
+type list_view = Clients | Accounts of client
+(** The list opens on [Clients]; choosing one shows [Accounts] of that client:
+    a row that adds a new account, then its configured accounts. *)
+type phase = Loading | Providers of list_view | Logging | Models | Documented_context of model | Saving
   | Finished of { saved : saved; refresh_failed : bool }
       (** [refresh_failed]: the list read after the save did not arrive. *)
   | Failed
   | Removal of { provider : provider; revision : string; removal : removal }
-      (** [D] on a provider: what removing it changes, read at [revision]. *)
+      (** [D] on an account: what removing it changes, read at [revision]. *)
 type recovery = Login_status | Refresh_configuration
 type email_gap = Login_file_unreadable | Login_file_unrecognized | Email_not_reported | Email_not_displayable
   | Environment_credential
@@ -46,15 +52,20 @@ type t = {
 type authentication = Authenticated | Login_completed | Credential_captured
 type event = Started of string * string option | Output of string | Input_ready
   | Complete of string * authentication | Login_failed of string * string option | Login_error
-type action = Inventory | Refresh_saved of saved | Refresh_retry | Start of bool | Input of int * Yojson.Safe.t | Cancel
+type action = Inventory | Refresh_saved of saved | Refresh_retry
+  | Start of { provider : provider; existing : bool }
+      (** Log in through [provider]: a new account, or the one it holds. *)
+  | Input of int * Yojson.Safe.t | Cancel
   | Recover | Discover | Prepare of model | Save of model | Close | Nothing
   | Preview_removal of { provider : provider; refused : string option }
       (** Read what removing [provider] changes. [refused] is why the server
           declined the removal just asked for, shown above the fresh preview. *)
   | Remove of { provider : provider; revision : string; login_store : string option }
       (** Remove [provider] while runtime.toml is still [revision]. *)
-  | Refresh_removed of string
-      (** Read the list again and show this notice over it. *)
+  | Refresh_removed of { client : client; notice : string }
+      (** Read the list again, on [client]'s accounts, with this notice. *)
+  | Refresh_list of list_view
+      (** Read the list again and reopen it on this view. *)
 val create : string -> t
 val begin_attempt : t -> provider -> existing:bool -> string option
 (** Capture the requested account, clear the previous live session identity and
@@ -63,7 +74,16 @@ val key : t -> string -> action
 val paste : t -> string -> unit
 (** Preserve printable UTF-8 and spaces; remove at most one trailing CR, LF or
     CRLF. Reject other multiline/control input without changing the draft. *)
-val inventory : t -> Yojson.Safe.t -> (unit, string) result
+val inventory : ?view:list_view -> t -> Yojson.Safe.t -> (unit, string) result
+(** Read the account list and open it on [view]. Without [view] it opens on
+    the requested client's accounts, or on the clients; only then can the
+    request fail to match. *)
+val focused_client : t -> client option
+(** The client the list is on, or the one the current login is for. *)
+val requested_matches : t -> provider -> bool
+(** Whether a pending login for this row belongs to what [/login] asked for:
+    any row for a bare [/login], that row for [/login <id>], the client's rows
+    for [/login <client>]. *)
 val emails_of_document : Yojson.Safe.t -> ((string * string) list * int, string) result
 (** The [account_emails] of [GET /api/v1/setup/account-emails], for a surface
     that draws only emails: the [(integration id, email)] rows that were read,

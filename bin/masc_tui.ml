@@ -4293,12 +4293,11 @@ let restore_account_login state (view : Masc_tui_account_login.t) =
     if json |> member "host" = `String server_peer_host && json |> member "port" = `Int state.port then (
       let integration = json |> member "integration_id" |> to_string in
       let login_id = json |> member "login_id" |> to_string in
-      let selected = List.nth_opt view.providers view.cursor in
       match List.find_opt (fun (p:Masc_tui_account_login.provider) -> p.id=integration) view.providers with
       | Some provider when Auth.is_generated_token_shape login_id &&
-          (view.requested="" || Option.exists (fun (p:Masc_tui_account_login.provider) -> p.id=integration) selected) ->
+          Masc_tui_account_login.requested_matches view provider ->
         view.provider<-Some provider; view.login_id<-Some login_id;
-        view.notice<-"이전 로그인 기록이 있습니다. r로 상태를 확인하거나 Enter로 새 계정을 추가하세요."
+        view.notice<-"이전 로그인 기록이 있습니다. r로 상태를 확인하거나 n으로 새 계정을 추가하세요."
       | Some _ | None -> ())
   with Unix.Unix_error _ | Sys_error _ | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ()
 
@@ -4308,7 +4307,7 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
   (match action with
    | Login.Input _ | Nothing -> ()
    | Inventory | Refresh_saved _ | Refresh_retry | Start _ | Cancel | Recover | Discover | Prepare _ | Save _ | Close
-   | Preview_removal _ | Remove _ | Refresh_removed _ ->
+   | Preview_removal _ | Remove _ | Refresh_removed _ | Refresh_list _ ->
      view.generation <- view.generation + 1;
      Option.iter (fun stop -> stop ()) view.cancel_stream;
      view.cancel_stream <- None);
@@ -4339,11 +4338,8 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
   | Cancel ->
     Option.iter (fun stop -> stop ()) view.cancel_stream; view.cancel_stream<-None;
     view.draft<-""; view.phase<-Login.Failed; view.notice<-"로그인을 취소했습니다. r로 저장된 상태를 확인하세요."
-  | Start existing ->
-    let provider = if view.phase=Login.Providers then List.nth_opt view.providers view.cursor else view.provider in
-    (match provider with
-     | None -> view.notice<-"공급자를 선택하세요."
-     | Some provider ->
+  | Start {provider; existing} ->
+    (
        let previous = Login.begin_attempt view provider ~existing in
        start_job (fun () ->
          let selected = if not existing || Option.is_some previous then Ok previous else
@@ -4366,8 +4362,8 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
   | Input (_, json) ->
     (match view.login_id with None -> view.input_pending<-false
      | Some id -> start_job (fun () -> enqueue (post (login_path id ^ "/input") json)))
-  | Inventory | Refresh_saved _ | Refresh_retry ->
-    (match action with Inventory | Refresh_retry -> view.phase<-Login.Loading | _ -> ()); start_job (fun () -> enqueue (Masc_tui_http.get_json ~host ~port ~path:"/api/v1/setup/inventory"))
+  | Inventory | Refresh_saved _ | Refresh_retry | Refresh_list _ ->
+    (match action with Inventory | Refresh_retry | Refresh_list _ -> view.phase<-Login.Loading | _ -> ()); start_job (fun () -> enqueue (Masc_tui_http.get_json ~host ~port ~path:"/api/v1/setup/inventory"))
   | Recover -> (match view.login_id with
       | None -> view.notice<-"조회할 로그인 세션이 없습니다. n으로 새 로그인을 시작하세요."
       | Some id -> view.phase<-Login.Loading; start_job (fun () -> enqueue (Masc_tui_http.get_json ~host ~port ~path:(login_path id))))
@@ -14816,8 +14812,11 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                | Error message -> Error message)
              | Input _ -> Ok ()
              | Preview_removal {provider; refused} -> Login.removal_preview view provider ~refused json
-             | Refresh_removed notice ->
-               (match Login.inventory view json with
+             | Refresh_list list_view ->
+               (match Login.inventory ~view:list_view view json with
+                | Ok () -> restore_account_login state view; Ok () | Error _ as error -> error)
+             | Refresh_removed {client; notice} ->
+               (match Login.inventory ~view:(Login.Accounts client) view json with
                 | Ok () -> restore_account_login state view; view.notice<-notice; Ok () | Error _ as error -> error)
              (* A removal answers through [Account_login_removal]. *)
              | Remove _ -> Ok ()
@@ -14836,7 +14835,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
          let module Login = Masc_tui_account_login in
          (match outcome with
           | Masc_tui_http.Post_answered _ ->
-            launch_account_login_action state ~mailbox view (Login.Refresh_removed (Login.removed_notice provider login_store))
+            launch_account_login_action state ~mailbox view
+              (Login.Refresh_removed {client = provider.client; notice = Login.removed_notice provider login_store})
           (* The server's refusal is about the file as it is now -- it moved,
              or the account can no longer go -- so the preview is read again
              under it rather than left standing. *)

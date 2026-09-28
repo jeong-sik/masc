@@ -22,12 +22,30 @@ receipts. `--output` accepts a new directory; choose a location outside system t
 when checking the negative outside-write control. Shell paths are quoted, including
 when that option contains spaces.
 
-The harness uses the vendor SDK's documented test-only
-`TBH_CREDENTIAL_BACKEND=file` and `TBH_DISABLE_TELEMETRY=1`. The file backend avoids
-synthetic credential insertion into macOS Keychain. Without it, an earlier harness
-blocked in `SecItemAdd` / `AuthorizationCopyRights` before MSP initialization;
-that was a harness credential-backend problem, not a permission-profile rejection.
-These test environment variables are not added to the production launch contract.
+The harness sets `TBH_CREDENTIAL_BACKEND=file` and `TBH_DISABLE_TELEMETRY=1`, as
+the vendor SDK's shared harness (`isolatedHostEnv`) does, and writes a synthetic
+`api_key` into `auth.json` by hand; it never runs `muse login`. With the file
+backend the client read that credential from `auth.json`. Without it, an earlier
+harness blocked in `SecItemAdd` / `AuthorizationCopyRights` before MSP
+initialization; that was a credential-backend problem, not a permission-profile
+rejection.
+
+## Production contract
+
+This is the current launch contract, not part of the 2026-09-27 observation.
+`Runtime_muse_serve.client_environment` sets `TBH_CREDENTIAL_BACKEND=file` for
+every Muse child masc starts: each `muse serve`, and `muse login` through
+`Runtime_muse_serve.login_environment`, which both the TUI's `/login muse` and
+`masc runtime-muse-login` (the installer's sign-in) use. A `muse login` run any
+other way does not get it. A selected account HOME has no login keychain, and a
+managed credential generation copies `auth.json` only, so a sign-in marked
+`storage: "keychain"` is refused until the account signs in again through one of
+those two paths. `TBH_DISABLE_TELEMETRY` is set by this harness only.
+
+The vendor documents `TBH_CREDENTIAL_BACKEND` only inside the SDK example
+harness above; no production documentation for it was found on 2026-09-28.
+masc depends on it in production regardless, so a vendor release that drops or
+renames it would send Muse sign-ins back to the Keychain.
 
 Primary protocol references:
 
@@ -79,3 +97,11 @@ a compiled MASC Keeper end-to-end run, guest isolation, `Native_none` support, o
 proof of independent macOS Keychain account identity. Managed credential refresh,
 source relogin session rebinding, and filesystem ownership are covered separately
 by `test_runtime_muse_home.ml` and Keeper adapter tests; those require CI execution.
+
+## Model discovery query
+
+`model-list.json` records the installed native CLI against the same kind of
+synthetic loopback catalog. Only initialize, initialized and model/list were
+sent, and the provider received one catalog GET and no POST or model turn.
+It confirms the typed response shape and reported limits, not real model
+availability or account authentication.

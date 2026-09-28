@@ -226,14 +226,27 @@ def script_atoms(text: str):
         if (form[0].text != "run" or len(form) < 4
                 or not shell_executable(form[1])):
             return None
-        for index, arg in enumerate(form[2:], start=2):
+        command_mode = False
+        index = 2
+        while index < len(form):
+            arg = form[index]
             if not isinstance(arg, DuneAtom) or arg.expansions:
                 return None
-            if (arg.value.startswith(b"-") and not arg.value.startswith(b"--")
-                    and b"c" in arg.value[1:]):
-                return index + 1
-            if arg.value in (b"-", b"--") or not arg.value.startswith(b"-"):
-                return None
+            value = arg.value
+            if value in (b"-", b"--"):
+                return index + 1 if command_mode else None
+            if value in (b"--rcfile", b"--init-file"):
+                index += 2
+            elif value.startswith(b"--"):
+                index += 1
+            elif len(value) > 1 and value[:1] in (b"-", b"+"):
+                # -o/+o and Bash -O/+O consume the next argv item, including
+                # in clusters such as -eo or -co. -c selects command mode;
+                # later options are still parsed before its command operand.
+                command_mode |= b"c" in value[1:]
+                index += 1 + sum(option in b"oO" for option in value[1:])
+            else:
+                return index if command_mode else None
         return None
 
     def atoms(form, literal=True):
@@ -395,6 +408,27 @@ def self_test() -> int:
                    (run python3 "missing run.py"))))''',
             ["test/missing arg.py", "test/missing cluster.py", "test/missing run.py", "test/missing script.py",
              "test/missing shell.sh"],
+        ),
+        (
+            "shell option operands precede the command even beside -c",
+            '''(action (progn
+                 (run bash -o pipefail -c "python foo.py" shell "after-options.py")
+                 (run bash +o pipefail -O extglob -c "python foo.py")
+                 (run sh -eo pipefail -c "python foo.py")
+                 (run bash -co pipefail "python foo.py")
+                 (run bash +c "python foo.py")
+                 (run bash -oo pipefail errexit -c "python foo.py")
+                 (run bash -oc pipefail "python foo.py")
+                 (run bash -c -o pipefail "python foo.py")
+                 (run bash --rcfile "missing-init.sh" -c "python foo.py")
+                 (run bash --init-file "missing-second-init.sh" -c "python foo.py")
+                 (run bash -c -- "python foo.py" shell "after-end.py")
+                 (run bash -o pipefail "missing-shell-script.sh")
+                 (run bash -- "missing-after-end.sh")
+                 (run bash -o pipefail -c "cat %{read:missing-shell-input.py}")))''',
+            ["test/after-end.py", "test/after-options.py", "test/missing-after-end.sh",
+             "test/missing-init.sh", "test/missing-second-init.sh",
+             "test/missing-shell-input.py", "test/missing-shell-script.sh"],
         ),
         (
             "file-reading pforms check their inputs even inside shell code",

@@ -38,6 +38,18 @@ status: reference
 : Claude Code, Codex, Antigravity 같은 공식 클라이언트가 자기 프로세스에서
   provider 요청을 보내고, MASC는 새 turn과 결과를 조율·관찰하는 실행 경로.
 
+**Official Client Tool Result Bound (공식 클라이언트 도구 결과 상한)**
+: 공식 클라이언트에 넘기는 동적 도구 하나의 모델 대상 결과에 MASC가 선언하는
+  바이트 상한이다(`Runtime_official_client_tool.result_bound` = `Bounded_bytes n`·
+  `Unbounded`). `Bounded_bytes n`은 결과가 `n`바이트를 넘지 않음을 뜻하고,
+  `Unbounded`는 MASC가 결과 크기를 제한하지 않아 상한을 선언하지 않음을 뜻한다.
+  Claude Code 전송은 `Bounded_bytes n`의 수치 `n`을 `tools/list` 항목의
+  `_meta["anthropic/maxResultSizeChars"]`에 문자 기준 인라인 한도로 싣는다.
+  UTF-8 문자 수는 바이트 수를 넘지 않으므로 `n`바이트로 제한된 결과는
+  이 문자 한도를 넘지 않는다. 이 값은 제공자 토큰 한도와 다르다.
+  → [Runtime_official_client_tool](../../lib/runtime/runtime_official_client_tool.mli),
+  [Runtime_claude_code](../../lib/runtime/runtime_claude_code.mli)
+
 **Clients (TUI 클라이언트 표)**
 : `GET /api/v1/dashboard/clients` 한 읽기를 그리는 TUI 표. 한 워크스페이스에 붙은
   모두를 한 번에 보여준다 — directory agent, state-backed session, runtime fiber.
@@ -97,8 +109,11 @@ status: reference
   `Verifying`·`Awaiting_confirmation`)의 Goal마다 우선순위(낮은 숫자 우선) 및 마감일
   순으로 한 줄씩 그린다(#38386).
   - 각 행: 목표 제목, 연결 태스크 대비 완료 태스크 바(`done/linked task bar`), 정체
-    시간(`stagnation_seconds` 기준 idle 기간), 운영자의 로컬 캘린더 날짜 기준 마감
-    카운트다운(`D-N due countdown`).
+    시간(`stagnation_seconds` — 연결 태스크 갱신·승인 요청·Keeper 영수증·runtime trust
+    이벤트·Goal 메타데이터 중 가장 최근 관측 활동 시각부터 지난 시간. Team 블록의 `Idle`
+    과 다른 값이다: `Idle` 은 Keeper 의 작업 배정 상태이고 이 값은 Goal 의 마지막 관측
+    활동 이후 지난 시간이다), 운영자의 로컬 캘린더 날짜 기준 마감 카운트다운
+    (`D-N due countdown`).
   - 관측 권위: 목표가 자체 지표(`metric`·`target`)를 가지고 있어도 측정값이 보고되지
     않으면 지어내지 않고, 진행 바는 순수하게 연결된 태스크의 완료 수만 측정한다.
     보고된 측정값은 **Goal Measurement**다.
@@ -116,11 +131,22 @@ status: reference
   도구 호출을 그 아래에 붙인다. 이미지를 대신 읽는 런타임 목록(`[runtime].media_failover`)은
   Keeper 가 아니므로 fleet 이라 부르지 않고 vision runtimes 라고 부른다.
 
+**Keeper Census (키퍼 명부 조사)**
+: 워크스페이스의 Keeper 이름을 `.masc/keepers/` 안의 영속 JSON 메타데이터에서 열거하는 기본 목록 읽기
+  (`Keeper_meta_store.keeper_names_result`). 이름을 읽지 못하면 Keeper 수를 0으로 보지 않고 알 수 없는
+  상태로 남긴다. fleet-health 응답은 `status=unavailable`, `keeper_count=null`, 읽기 실패 목록으로,
+  pause-status 응답은 오류로 투영한다. Fleet의 `running N/M`에서 쓰는 부팅 대상 수나 프로세스 생존 수가
+  아니며, Board의 hearth별 게시물 수를 뜻하는 census와도 다르다.
+  → [Keeper_meta_store](../../lib/keeper/keeper_meta_store.mli),
+  [Server_routes_http_runtime_health_fleet](../../lib/server/server_routes_http_runtime_health_fleet.mli),
+  [Pause_status_backend](../../lib/pause_status_backend.mli)
+
 **Team 블록 (Overview Team)**
 : TUI Overview 에서 fleet 을 Keeper 한 명당 한 줄로 보여 주며 "누가 무엇을 하고 누가 막혔나" 에 답하는
   자리. briefing 의 `keeper_briefs` 와 backlog 를 합쳐 그린다. 줄은 네 무리로 나뉜다 —
   막힘(Failing·Crashed, 또는 phase 없이 info 가 아닌 Attention 이 가리키는 Keeper),
-  일하는 중(Running·Draining·Restarting 이고 Claimed·InProgress Task 를 잡음), 쉬는 중,
+  일하는 중(Running·Draining·Restarting 이고 Claimed·InProgress Task 를 잡음),
+  쉬는 중(`Idle` — 살아 있으며 Claimed·InProgress Task 를 맡지 않음),
   멈춤(brief 의 `paused` 가 true 이거나 Paused·Stopped·Offline, 한 줄로 모음). 순서는
   점수가 아니라 이 무리와 이름이다. 막힌 줄의 설명은 그 Keeper 를 `Attention_keeper` 로
   가리키는 info 가 아닌 첫 Attention 문장을 그대로 싣는다. Keeper 가 아닌
@@ -870,6 +896,9 @@ status: reference
   `[runtime.lanes.<이름>]` 표가 이름을 붙이고 `Runtime_lane.t`(`{id; candidates}`)가
   그 값이다. TUI 화면은 "runtime candidate order"로 읽는다. RFC-0457부터 Keeper를
   특정 lane에 배정할 수 있고, 배정된 Keeper는 그 lane의 후보 순서를 따른다.
+  Dashboard Settings는 선언된 후보 순서를 편집하며, 저장 전에 읽은 source revision이
+  바뀌었으면 충돌로 거절해 새 순서를 덮어쓰지 않는다. 빈 후보 목록은 lane 제거와
+  다른 편집이므로 거절되고, lane 제거는 별도 동작이다.
   `[runtime].media_failover`(vision runtimes, 이미지를 읽는 런타임 목록)와
   exact-output lane의 slot 우선순위 failover(`docs/spec/05-keeper-agent.md:394`)는
   런타임 후보 순서와 별개 축이다. 다만 후보 나열이 별개여도 rate-limit 증거 셀은
@@ -2177,10 +2206,16 @@ status: reference
   → [Keeper_carried_front.seed](../../lib/keeper/keeper_carried_front.mli)
 
 **Carried Front (실어 보낼 이력의 시작 위치)**
-: 요청에 실리는 가장 오래된 Atom의 번호와 그 Atom을 여는 Message의 digest.
+: 요청 범위의 시작 위치로, 전송된 Atom이 있으면 가장 오래된 Atom의 번호와 그 Atom을 여는
+  Message의 digest로 증명한다. `model_input_front`는 닫힌 세 값이다 — `At_atom`은 이 위치,
+  `After_history`는 아무 Atom도 보내지 않은 요청이 제안된 History의 끝을 마지막 Atom digest로
+  증명한 경계, `Empty_history`는 제안된 History가 비었거나 크기 축소가 이력 전체를 제외한
+  요청을 기록한다. 후자의 경우에는 끝 digest가 없어 비어 있지 않은 History에서 위치의 증거로
+  재사용할 수 없다. 입력 관측 자체가 없다는 뜻은 model-input window 기록의 부재로 남는다.
   후보별 usage 원장에서 읽되, 같은 Keeper turn의 거절이 더 뒤로 옮긴 위치가 있으면
   그 위치를 쓴다. 반 자르기와 묶음 비우기 모두 다음 후보로 이 위치를 전달한다.
-  다른 History의 위치는 digest가 맞지 않으므로 쓰지 않는다.
+  다른 History의 위치는 witness digest가 맞지 않으면 쓰지 않는다.
+  → [Model_input_front.t](../../lib/types/model_input_front.mli)
   이 위치의 출처(`Keeper_carried_front.origin`)는 여섯이다 — `Carried`(seed에서 온
   위치: 원장, turn 기록, 거절 뒤 반 자르기·묶음 비우기, 씨앗 범위 거절 뒤 turn 경계),
   `Librarian_snapshot`(하던 일 저장본이 대신하는 경계),

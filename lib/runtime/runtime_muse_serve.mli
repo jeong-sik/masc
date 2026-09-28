@@ -13,22 +13,27 @@
 
 type config =
   { cli_path : string
+  ; prepared_home : Runtime_muse_home.t option
+    (** Prepared managed config for [account_home]. Keeper prepares this before
+        claiming a session so its revision enters the binding. When absent
+        with a selected account, run and usage read prepare it before spawn. *)
   ; account_home : string option
     (** [Some absolute_path] selects this process's HOME and XDG config,
         data, cache, state and runtime roots. Ambient XDG roots are discarded.
-        [None] uses the caller's home environment. No settings or credentials
-        are copied or changed. This selects file-backed state, not a separate
+        [None] is the low-level caller environment used by protocol fixtures;
+        product routing selects an explicit account. Managed preparation
+        imports file-backed auth into a durable private generation, sets
+        XDG_CONFIG_HOME there, and replaces TMPDIR with its private directory. This is not a separate
         macOS Keychain identity, and does not confine filesystem access. *)
   ; model : string option
     (** [session/start]'s [modelId]. [None] takes the host's default. *)
   ; native : Runtime_native_tools.posture
     (** Built-in tool posture (RFC-0390), sent as the session's approval
-        mode. [Native_full] selects [allowAll]. [Native_read] selects
-        [denyUnmatched] and passes [--disable-write --disable-shell] to the
+        mode. Full uses [allowAll] under the managed sandbox profile. Read uses
+        [promptUnmatched] and passes [--disable-write --disable-shell] to the
         host: native writes and shell execution are disabled independently
         of the selected home's rules. For the remaining tools those rules decide what runs,
-        and anything they do not allow is denied instead of waiting for an
-        answer. MSP has no switch that removes the built-in tools, so
+        and any request outside the exact attached MCP tool list is denied. MSP has no switch that removes the built-in tools, so
         [Native_none] fails as config. *)
   ; admission_timeout_s : float
     (** Finite bound on the handshake, the session start or resume, the
@@ -44,10 +49,26 @@ type config =
 
 val default_timeout_s : float
 val default_config : unit -> config
+val login_environment : account_home:string -> string array
+(** Native login writes HOME/.config/muse/auth.json. All HOME/XDG roots are
+    selected explicitly, with ambient provider API credentials excluded. Like
+    every Muse child, it runs with [TBH_CREDENTIAL_BACKEND=file], so the token
+    is written into that file instead of the macOS Keychain. *)
+
+val login_argv : cli_path:string -> string list
+(** The official client's sign-in command, run with {!login_environment}. *)
 
 type session_mode =
   | Start
-  | Resume of { session_id : string }
+  | Resume of { session_id : string; expected_turn_count : int }
+      (** Resume only when the host reports this completed-turn count, before
+          changing approval mode, persisting admission or dispatching a turn. *)
+
+type mcp_server =
+  { name : string
+  ; server : Runtime_muse_msp.mcp_server
+  ; tool_names : string list
+  }
 
 type image_input =
   { media_type : string
@@ -92,9 +113,20 @@ type error =
       { requested : string
       ; resumed : string option
       }
-      (** [session/resume] cannot select a model, so a resumed session
-          running another model is refused. The caller starts a new session
-          or keeps the model. *)
+      (** A start or resume response must report the explicitly requested model.
+          Missing or different model identity is refused before session persistence
+          or turn dispatch. [resumed] carries the returned model for either mode. *)
+  | Session_workspace_mismatch of
+      { requested : string
+      ; reported : string option
+      }
+      (** Start and resume must report the exact requested workspace before admission. *)
+  | Session_approval_mode_mismatch of
+      { requested : Runtime_muse_msp.approval_mode
+      ; reported : Runtime_muse_msp.approval_mode option
+      }
+      (** The effective mode must match the native posture before session
+          persistence or dispatch. [None] means start reported no mode. *)
   | Auth_required of string
       (** The host has no usable login ([authRequired]). *)
   | Turn_failed of Runtime_muse_msp.turn_error
@@ -137,7 +169,9 @@ type stream_event =
       ; turn_id : string
       ; model : string option
       }
-  | Text_delta of string
+  | Text_delta of { item_id : string; text : string }
+  | Text_completed of { item_id : string; text : string }
+      (** The full completed agent-message text, including items with no deltas. *)
   | Native_tool_started of Runtime_native_tools.observation
   | Native_tool_finished of Runtime_native_tools.observation
   | Approval_decided of
@@ -149,14 +183,19 @@ type stream_event =
           answered from the posture: [Native_full] approves once,
           [Native_read] denies. *)
   | Subscription_usage_observed of Runtime_muse_msp.subscription_usage
-      (** A [usage/changed] notification, for the operator view only. *)
+      (** Provider subscription observation, including notifications received
+          before request acknowledgement. Consumers may record its reported
+          exhaustion/reset in the selected account's quota scope. *)
+  | Turn_terminal_received of Runtime_muse_msp.terminal
+      (** The matching durable terminal has been decoded. Emitted
+          before usage callbacks; [Turn_finished] still closes output afterward. *)
   | Usage_reported of
       { session_id : string
       ; turn_id : string
       ; usage : Runtime_muse_msp.token_usage
       }
       (** The turn's summed usage from [turn/completed], emitted before the
-          terminal is judged so a failed turn still reports it. *)
+          final success/failure projection so a failed turn still reports it. *)
   | Turn_finished of { text : string }
 
 val validate_turn
@@ -170,8 +209,9 @@ val validate_turn
     it before spawning. *)
 
 val run_turn
-  :  ?session_mode:session_mode
-  -> ?mcp_servers:(string * Runtime_muse_msp.mcp_server) list
+  :  ?storage_root:string
+  -> ?session_mode:session_mode
+  -> ?mcp_servers:mcp_server list
   -> ?reasoning_effort:Runtime_muse_msp.reasoning_effort
   -> ?on_session_ready:(session_id:string -> (unit, string) result)
   -> ?on_prompt_sent:(unit -> unit)
@@ -184,11 +224,24 @@ val run_turn
   -> prompt:string
   -> images:image_input list
   -> (turn_result, error) result
-(** [workspace_root] is the absolute directory the session works in.
+(** [storage_root] selects an absolute caller-owned per-call directory for native
+    XDG data/cache/state/runtime and temporary files, preserving the selected HOME
+    and managed authentication config. The caller creates its [data], [cache],
+    [state], [run], and [tmp] children and removes the tree after this call has
+    reaped its process. This stateless mode refuses resume before spawn; default
+    calls keep the selected account's durable storage. Native durability and
+    completion notifications remain enabled in both cases.
+
+    [workspace_root] is the absolute directory the session works in.
     [mcp_servers] are added to this session only. A non-empty list requests
     [sessionMcp] at the handshake and fails with {!Capability_not_granted}
     when the host withholds it.
 
+    The returned model (when explicitly selected) and workspace must match the
+    request on both start and resume. Mismatches refuse admission before callbacks.
+    A started session must hold no turns; resume requires the expected retained
+    count. Start must report the requested approval mode. Resume reapplies that mode
+    and verifies the returned effective mode before admitting the session.
     [on_session_ready] runs once the host has returned the session id, before
     the turn is written, so the caller can persist the id first. Its failure
     fails the turn. [on_prompt_sent] runs after the complete [turn/start]
@@ -202,3 +255,11 @@ val read_usage
   -> (Runtime_muse_msp.subscription_usage option, error) result
 (** Handshake plus [usage/read], with no session and no model call. [None]
     when the host has observed no usage yet. *)
+
+val list_models :
+  mgr:_ Eio.Process.mgr -> clock:_ Eio.Time.clock ->
+  cwd:Eio.Fs.dir_ty Eio.Path.t -> config ->
+  (Runtime_muse_msp.model_catalog, error) result
+(** Handshake plus [model/list], without session admission or model work.
+    Ephemeral servers can provide metadata too. The reported catalog source
+    is preserved; success is not authentication or invocation evidence. *)

@@ -47,19 +47,19 @@ module Post_id : sig
 end = struct
   type t = string
 
-  (* Only alphanumeric, dash, underscore. Max 64 chars. *)
+  (* Only alphanumeric, dash, underscore. Max [max_len] chars. The length
+     bound is one constant so [of_string] and [json_schema_pattern] cannot
+     drift: a schema that advertised a different bound would reject an id the
+     parser accepts, which is the mismatch this pattern exists to prevent. *)
   let valid_pattern = alphanumeric_id_re
+  let max_len = 64
 
-  (* The [of_string] shape as a JSON Schema pattern: the shared alphanumeric
-     body plus the length bound [of_string] enforces. It mirrors the parser
-     exactly, so a client that validates against it never sends an id the
-     parser would accept and the schema would reject. *)
-  let json_schema_pattern = "^[a-zA-Z0-9_-]{1,64}$"
+  let json_schema_pattern = Printf.sprintf "^[a-zA-Z0-9_-]{1,%d}$" max_len
 
   let of_string s =
     let s = String.trim s in
     let len = String.length s in
-    if len >= 1 && len <= 64 && Re.execp valid_pattern s then Ok s
+    if len >= 1 && len <= max_len && Re.execp valid_pattern s then Ok s
     else Error (Invalid_id (Printf.sprintf "Invalid post_id: %s" s))
 
   let to_string t = t

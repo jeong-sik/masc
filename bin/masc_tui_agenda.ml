@@ -234,7 +234,7 @@ let two_column ~cols left right =
   indent ^ left ^ String.make gap ' ' ^ right
 ;;
 
-let said row =
+let said (row : scheduled) =
   match String.trim row.what, String.trim row.who with
   | "", "" -> "(untitled)"
   | "", who -> who

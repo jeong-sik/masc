@@ -11,6 +11,7 @@ let started = frame "started" (`Assoc ["integration_id",`String "codex";"login_i
 let complete = frame "complete" (`Assoc ["integration_id",`String "codex";"account_ref",`String account;
   "authentication",`String "authenticated";"invocation_verified",`Bool false])
 let inventory = `Assoc ["setup_revision",`String "revision";"default_runtime_selection", `List [`String "primary"; `String "fallback"];
+  "account_emails",`List [];
   "runtimes",`List [`Assoc ["id",`String "unrelated"];`Assoc ["id",`String "fallback"];`Assoc ["id",`String "primary"]];
   "integrations",`List (List.map (fun (id,protocol) -> `Assoc ["id",`String id;"display_name",`String id;"protocol",`String protocol])
     ["codex","codex-app-server";"claude-code","claude-code";"muse-code","muse-serve";"antigravity","antigravity-cli"])]
@@ -291,6 +292,34 @@ let foreign_escapes_never_reach_the_terminal () =
      check (option (triple int int int)) "38;2 truecolor" (Some (10, 20, 30)) (channels (foreground z));
      check (option (triple int int int)) "colon sub-parameters" (Some (1, 2, 3)) (channels (foreground w))
    | runs -> fail (Printf.sprintf "%d runs" (List.length runs)))
+(* The server names the email it recorded at each selected account's last
+   login; the provider list shows it so the operator can tell accounts apart. *)
+let account_emails_beside_providers () =
+  let with_emails rows =
+    let fields = match inventory with `Assoc fields -> List.remove_assoc "account_emails" fields | _ -> [] in
+    `Assoc (("account_emails", `List rows) :: fields) in
+  let row id state extra = `Assoc (["integration_id", `String id; "state", `String state] @ extra) in
+  let t = Login.create "" in
+  ok (Login.inventory t (with_emails [
+    row "codex" "recorded" ["email", `String "operator@example.com"];
+    row "claude-code" "absent" [];
+    row "antigravity" "unreadable" [] ]));
+  check (list string) "each selected account row names its email or why not"
+    [ "> codex · operator@example.com"; "  claude-code · 이메일 기록 없음";
+      "  muse-code"; "  antigravity · 이메일 기록을 읽지 못함" ]
+    (List.map Login.row_text (List.tl (Login.lines t)));
+  List.iter (fun (name, rows) ->
+    let t = Login.create "" in
+    check bool name true (Result.is_error (Login.inventory t (with_emails rows))))
+    [ "unknown state is refused", [ row "codex" "verified" [] ];
+      "recorded without an email is refused", [ row "codex" "recorded" [] ];
+      "an email on an absent record is refused", [ row "codex" "absent" ["email", `String "x@example.com"] ];
+      "one account listed twice is refused", [ row "codex" "absent" []; row "codex" "unreadable" [] ];
+      "an account for no listed integration is refused", [ row "missing" "absent" [] ] ];
+  let fields = match inventory with `Assoc fields -> List.remove_assoc "account_emails" fields | _ -> [] in
+  check bool "an inventory without account emails is refused" true
+    (Result.is_error (Login.inventory (Login.create "") (`Assoc fields)))
+
 let () = run "TUI account login" ["workflow",[
   test_case "pasted credentials preserve bytes and reject controls" `Quick pasted_credential_bytes;
   test_case "failed save refreshes revision and retains model" `Quick failed_save_refresh;
@@ -303,6 +332,7 @@ let () = run "TUI account login" ["workflow",[
   test_case "explicit provider and preserved default" `Quick account_and_default;
   test_case "private input and superseded attempt" `Quick input_and_epoch;
   test_case "declared fallback inventory contract" `Quick inventory_selection_contract;
+  test_case "account emails beside provider rows" `Quick account_emails_beside_providers;
   test_case "spawn failure retains recovery receipt" `Quick failed_before_started;
   test_case "retry preserves early input until a new session starts" `Quick retry_early_input;
   test_case "visible cursor and recovery identity" `Quick viewport_and_receipt;

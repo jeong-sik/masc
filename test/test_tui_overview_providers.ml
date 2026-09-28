@@ -136,7 +136,7 @@ let test_section_draws_three_line_shapes () =
          && contains ~affix:"67%" five_hour
          && contains ~affix:"\xe2\x86\xbb " five_hour
          && contains ~affix:" in 4h12m" five_hour
-         && contains ~affix:"heard 3m ago" five_hour);
+         && contains ~affix:"heard 3m00s ago" five_hour);
       check bool "claude 7d row: same report, no second age" true
         (contains ~affix:"7d" seven_day
          && contains ~affix:"44%" seven_day
@@ -153,7 +153,7 @@ let test_section_draws_three_line_shapes () =
          && contains ~affix:"exhausted (observed)" kimi
          (* The catalogue's reopen time, apart from the provider's reset. *)
          && contains ~affix:"catalogue reopens " kimi
-         && contains ~affix:" in 2h0m" kimi);
+         && contains ~affix:" in 2h00m" kimi);
       (* The box cuts from the right, so the tag sits before the reset text. *)
       check bool "the tag comes before the reset text" true
         (match
@@ -174,6 +174,129 @@ let test_section_draws_three_line_shapes () =
              && not (contains ~affix:meter_open row)))
         [ ("Codex Pro", codex); ("Ollama Cloud", ollama) ]
   | _ -> failf "expected five rows, got %d" (List.length lines)
+
+let reported_section ~width =
+  let windows =
+    match Tui_decode.decode_provider_usage_windows (resolved "reported") with
+    | Ok windows -> windows
+    | Error err -> failf "fixture should decode: %s" err
+  in
+  let runtimes =
+    Types.Quota_read
+      [ runtime ~scope:"provider:kimi" ~exhausted:true
+          ~resets:(now +. 7200.0) "kimi.k3"
+      ]
+  in
+  match
+    Providers.section ~providers:(Types.Providers_read windows) ~runtimes ~now
+      ~width
+  with
+  | Some section -> List.map plain section.lines
+  | None -> fail "a read draws a section"
+
+let claude_five_hour lines =
+  match List.find_opt (contains ~affix:"Claude Max") lines with
+  | Some row -> row
+  | None -> fail "no Claude Max row"
+
+(* A wide terminal does not stretch the meter past what the value column can
+   tell apart; a narrow one keeps a readable meter and drops the hearing age
+   instead (#38611). *)
+let test_meter_width_is_bounded () =
+  let wide = claude_five_hour (reported_section ~width:220) in
+  let _, wide_cells = meter_of wide in
+  check int "a wide terminal draws a 24-cell meter" 24 wide_cells;
+  check bool "a wide terminal keeps the hearing age" true
+    (contains ~affix:"heard 3m00s ago" wide);
+  let narrow = claude_five_hour (reported_section ~width:100) in
+  let _, narrow_cells = meter_of narrow in
+  check int "a narrow terminal keeps a 10-cell meter" 10 narrow_cells;
+  check bool "a narrow terminal drops the hearing age first" false
+    (contains ~affix:"heard" narrow);
+  (* The box cuts a row from the right; the value must sit inside the cut. *)
+  let value_end =
+    match Astring.String.find_sub ~sub:"67%" narrow with
+    | Some i -> code_points (String.sub narrow 0 i) + String.length "67%"
+    | None -> fail "no value in the narrow row"
+  in
+  check bool "the value is inside a narrow row" true (value_end <= 100)
+
+(* Z.AI's TIME_LIMIT counts MCP and tool calls: at 100% it refuses no model
+   call, so it is not drawn in the exhausted tone, while the account's token
+   window beside it is still drawn as reported. A window with no reset time
+   says so with the no-value mark rather than a sentence per row. *)
+let test_window_that_gates_nothing_is_not_an_alarm () =
+  let json =
+    Yojson.Safe.from_string
+      {|{
+  "provider_usage_windows_since": 1790179140.2,
+  "provider_usage_windows": [
+    { "scope": "provider:glm", "providers": [{"id": "glm", "display_name": "Z.AI Coding"}],
+      "state": "reported",
+      "windows": [
+        { "limit_id": "TIME_LIMIT",
+          "window": {"kind": "provider_label", "label": "1 x unit 5"},
+          "role": "counts_other_use",
+          "utilization": {"unit": "percent", "value": 100},
+          "resets_at": null, "observed_at": 1790180000.0,
+          "source": "zai.quota_limit" },
+        { "limit_id": "TOKENS_LIMIT", "window": {"kind": "five_hour"},
+          "role": "gates_model_calls",
+          "utilization": {"unit": "percent", "value": 100},
+          "resets_at": 1790195300, "observed_at": 1790180000.0,
+          "source": "zai.quota_limit" } ] }
+  ]
+}|}
+  in
+  let windows =
+    match Tui_decode.decode_provider_usage_windows json with
+    | Ok windows -> windows
+    | Error err -> failf "fixture should decode: %s" err
+  in
+  let section =
+    match
+      Providers.section ~providers:(Types.Providers_read windows)
+        ~runtimes:Types.Quota_unread ~now ~width
+    with
+    | Some section -> section
+    | None -> fail "a read draws a section"
+  in
+  let bad = Masc_tui_ansi.Theme.bad () in
+  (* An empty tone would be found in every row and prove nothing. *)
+  check bool "the exhausted tone is drawn with a code" true (not (String.equal bad ""));
+  match section.lines with
+  | [ time_limit; tokens_limit ] ->
+      check bool "the MCP window reads its own label once" true
+        (contains ~affix:"TIME_LIMIT 1 x unit 5" (plain time_limit));
+      check bool "a full MCP window is not drawn exhausted" false
+        (contains ~affix:bad time_limit);
+      check bool "a full MCP window is drawn dim" true
+        (contains ~affix:(Masc_tui_ansi.Ansi.dim ^ meter_open) time_limit);
+      check bool "a full token window is drawn exhausted" true
+        (contains ~affix:bad tokens_limit);
+      check bool "no reset time is the no-value mark" true
+        (contains ~affix:Masc_tui_theme.Glyph.no_value (plain time_limit)
+         && not (contains ~affix:"not reported" (plain time_limit)))
+  | lines -> failf "expected two rows, got %d" (List.length lines)
+
+let test_unknown_role_is_rejected () =
+  let json =
+    Yojson.Safe.from_string
+      {|{
+  "provider_usage_windows_since": 1790179140.2,
+  "provider_usage_windows": [
+    { "scope": "provider:glm", "providers": [{"id": "glm", "display_name": "Z.AI Coding"}],
+      "state": "reported",
+      "windows": [
+        { "limit_id": null, "window": {"kind": "five_hour"}, "role": "advisory",
+          "utilization": {"unit": "percent", "value": 1},
+          "resets_at": null, "observed_at": 1790180000.0,
+          "source": "zai.quota_limit" } ] }
+  ]
+}|}
+  in
+  check bool "an unknown role fails the reading" true
+    (Result.is_error (Tui_decode.decode_provider_usage_windows json))
 
 let full_cells n = String.concat "" (List.init n (fun _ -> "\xe2\x96\x88"))
 
@@ -234,5 +357,9 @@ let () =
         ; test_case "values read in one unit" `Quick test_values_read_in_one_unit
         ; test_case "failed read is one line" `Quick test_failed_read_is_one_line
         ; test_case "unknown state is rejected" `Quick test_unknown_state_is_rejected
+        ; test_case "meter width is bounded" `Quick test_meter_width_is_bounded
+        ; test_case "a window that gates nothing is not an alarm" `Quick
+            test_window_that_gates_nothing_is_not_an_alarm
+        ; test_case "unknown role is rejected" `Quick test_unknown_role_is_rejected
         ] )
     ]

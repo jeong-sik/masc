@@ -5739,26 +5739,59 @@ let render_exact_lane_provider_editor (state : state) editor =
   let entries = Masc_tui_types.slot_editor_rows state in
   let count = List.length entries in
   let selected_index = Masc_tui_types.slot_editor_cursor_index state in
+  (* Whether the lane walks a CLI tail, once its row has been read. *)
+  let walks_cli_tail =
+    match editor.Masc_tui_types.se_target with
+    | Masc_tui_types.Exact_lane_slots target ->
+      Option.map
+        (fun (row : Tui_decode.standalone_lane) -> row.Tui_decode.sl_supports_cli_tail)
+        (Masc_tui_types.standalone_lane_row state target)
+    | Masc_tui_types.Media_failover_slots -> None
+  in
+  (* j/k stop on slots, never on a group's title, so an empty group has no
+     row to move into. Its title says where a slot comes from instead: [a]
+     picks one, and the runtime's kind decides the group it joins. *)
   let group_rows kind title =
     let rows =
       entries
       |> List.mapi (fun index row -> index, row)
       |> List.filter (fun (_, row) -> row.Masc_tui_types.sr_kind = kind)
     in
-    (None, Printf.sprintf "  %s (%d)" title (List.length rows))
+    let heading =
+      match rows with
+      | [] -> Printf.sprintf "  %s (0) · a adds one" title
+      | _ :: _ -> Printf.sprintf "  %s (%d)" title (List.length rows)
+    in
+    (None, heading)
     :: List.map (fun (index, row) -> Some index, row.Masc_tui_types.sr_slot) rows
   in
-  let display_rows =
-    group_rows Masc_tui_types.Catalog_slot "HTTP slots · tried first"
-    @ group_rows Masc_tui_types.Official_client_slot
+  let declares_cli_slot =
+    List.exists
+      (fun row -> row.Masc_tui_types.sr_kind = Masc_tui_types.Official_client_slot)
+      entries
+  in
+  (* A lane without a CLI tail draws no CLI group: the writer refuses every
+     CLI slot there, so the group could only invite a pick that fails. A CLI
+     slot the file declares anyway is still drawn, so it can be dropped. *)
+  let cli_group =
+    match walks_cli_tail, declares_cli_slot with
+    | Some false, false -> []
+    | Some false, true | Some true, (true | false) | None, (true | false) ->
+      group_rows Masc_tui_types.Official_client_slot
         "CLI slots · tried after every HTTP slot"
+  in
+  let display_rows =
+    group_rows Masc_tui_types.Catalog_slot "HTTP slots · tried first" @ cli_group
   in
   box_top buf cols;
   box_line buf cols (screen_title " MASC Lanes / Providers");
   box_divider buf cols;
   box_line_styled buf cols ~style:(Theme.info ())
-    (Printf.sprintf "  [runtime.exact_output_lanes.%s] · HTTP then CLI"
-       (Terminal_text.single_line lane));
+    (Printf.sprintf "  [runtime.exact_output_lanes.%s] · %s"
+       (Terminal_text.single_line lane)
+       (match walks_cli_tail with
+        | Some false -> "HTTP only"
+        | Some true | None -> "HTTP then CLI"));
   (match state.lanes_action_error with
    | None -> ()
    | Some detail ->
@@ -5793,11 +5826,11 @@ let render_exact_lane_provider_editor (state : state) editor =
               | Tui_decode.Exact_cli_slots -> "CLI tail"
               | Tui_decode.Exact_output_unsupported -> "no output schema"
             in
-            let line note =
+            let line bracket note =
               Printf.sprintf "  %s [%s] %s · %s / %s%s"
                 (if picker.Masc_tui_types.rlp_selected_row = Some offset
                  then ">" else " ")
-                destination
+                bracket
                 (Terminal_text.single_line runtime.ro_id)
                 (Terminal_text.single_line runtime.ro_provider)
                 (Terminal_text.single_line runtime.ro_model)
@@ -5807,12 +5840,14 @@ let render_exact_lane_provider_editor (state : state) editor =
               Masc_tui_types.runtime_pick_availability state
                 picker.Masc_tui_types.rlp_pick runtime
             with
-            | Masc_tui_types.Pick_refused reason ->
+            | Masc_tui_types.Pick_refused refusal ->
+              (* The bracket carries the refusal: a note after the model
+                 is the first thing the frame cuts. *)
               box_line_styled buf cols ~style:(Theme.recede ())
-                (line ("  (unavailable: " ^ Keeper_chat.terminal_safe_text reason ^ ")"))
+                (line (Masc_tui_types.runtime_pick_refusal_tag refusal) "")
             | Masc_tui_types.Pick_available ->
               box_line buf cols
-                (line
+                (line destination
                    (if List.mem runtime.ro_id picker.rlp_already
                     then "  (already declared)" else "")))
    | None ->
@@ -6108,19 +6143,24 @@ let render_lanes_overview (state : state) =
        else
          List.iteri
            (fun offset (runtime : Masc.Tui_decode.runtime_option) ->
-              let note =
+              (* A refusal leads the row, as in the provider editor: a note
+                 after the label is the first thing the frame cuts. *)
+              let refusal_prefix, note =
                 match
                   Masc_tui_types.runtime_pick_availability state
                     picker.Masc_tui_types.rlp_pick runtime
                 with
-                | Masc_tui_types.Pick_refused reason ->
-                  "  (unavailable: " ^ Keeper_chat.terminal_safe_text reason ^ ")"
+                | Masc_tui_types.Pick_refused refusal ->
+                  ( Ansi.dim ^ "[" ^ Masc_tui_types.runtime_pick_refusal_tag refusal
+                    ^ "] " ^ Ansi.reset
+                  , "" )
                 | Masc_tui_types.Pick_available ->
-                if List.exists (String.equal runtime.ro_id) picker.rlp_already
-                then "  (already a slot)"
-                else if List.exists (String.equal runtime.ro_provider) picker.rlp_providers
-                then "  (same provider as a current slot)"
-                else ""
+                  ( ""
+                  , if List.exists (String.equal runtime.ro_id) picker.rlp_already
+                    then "  (already a slot)"
+                    else if List.exists (String.equal runtime.ro_provider) picker.rlp_providers
+                    then "  (same provider as a current slot)"
+                    else "" )
               in
               let mark =
                 if picker.Masc_tui_types.rlp_selected_row = Some offset then ">" else " "
@@ -6131,8 +6171,8 @@ let render_lanes_overview (state : state) =
               in
               let def = if runtime.ro_is_default then " [default]" else "" in
               box_line buf cols
-                (Printf.sprintf "  %s %s%s%s%s"
-                   mark
+                (Printf.sprintf "  %s %s%s%s%s%s"
+                   mark refusal_prefix
                    (Masc_tui_types.runtime_picker_label runtime)
                    ctx def
                    (Ansi.dim ^ note ^ Ansi.reset)))

@@ -185,6 +185,22 @@ let test_reports_reach_the_resolved_document () =
        check (float 0.0) "observed_at of the report that named the window" 1790180100.0
          Yojson.Safe.Util.(window |> member "observed_at" |> to_number))
     Yojson.Safe.Util.(codex_row |> member "windows" |> to_list);
+  (* The TUI reads this document with its own strict decoder; a word one side
+     writes and the other does not know fails the whole Overview section. *)
+  (match Tui_decode.decode_provider_usage_windows after with
+   | Ok decoded ->
+     let claude =
+       List.find
+         (fun (account : Tui_decode.provider_usage_account) ->
+            String.equal account.pua_scope claude_label)
+         decoded.Tui_decode.puws_accounts
+     in
+     check (list string) "the TUI reads the display name the server wrote"
+       [ "Claude usage fixture" ]
+       (List.map
+          (fun (provider : Tui_decode.provider_usage_provider) -> provider.pup_display_name)
+          claude.pua_providers)
+   | Error error -> failf "the TUI decoder refuses the server's document: %s" error);
   (* An observation, not a gate: 100 % used leaves the runtime's quota state
      untouched. *)
   check bool "codex runtime is not held back by a usage report" false
@@ -262,7 +278,7 @@ default = "usage_shared_one.sonnet"
        let shared_row = usage_row first shared_label in
        check (list string) "both provider ids share the reported row"
          [ "usage_shared_one"; "usage_shared_two" ]
-         provider_ids shared_row;
+         (provider_ids shared_row);
        check bool "first account path is absent from public JSON" false
          (String_util.contains_substring (Yojson.Safe.to_string first) home_a);
        load (config home_b home_a);
@@ -280,7 +296,7 @@ default = "usage_shared_one.sonnet"
        let retained_row = usage_row after retained_label in
        check (list string) "old report belongs only to the unchanged home"
          [ "usage_shared_two" ]
-         provider_ids retained_row;
+         (provider_ids retained_row);
        let public_json = Yojson.Safe.to_string after in
        List.iter
          (fun home ->
@@ -356,7 +372,7 @@ default = %S
        let row = usage_row json implicit_label in
        check (list string) "one row names both providers"
          [ implicit_id; explicit_id ]
-         provider_ids row;
+         (provider_ids row);
        check bool "default home path is absent from public JSON" false
          (String_util.contains_substring (Yojson.Safe.to_string json) home))
 ;;

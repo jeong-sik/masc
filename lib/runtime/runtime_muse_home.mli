@@ -32,6 +32,10 @@ val prepare : account_home:string -> (t, error) result
     plugins or permission choices from source settings are imported. Owned
     account and credential-parent directories must not be group/other writable. *)
 
+val source_auth_path : account_home:string -> string
+(** The auth document the vendor CLI writes when signing in under
+    [account_home]; {!prepare} imports it. *)
+
 val account_home : t -> string
 (** Exact configured source account spelling, distinct from the canonical
     filesystem ownership root used during preparation. *)

@@ -1757,6 +1757,15 @@ let keeper_memory_write_with_outcome
      | Some source_path ->
        (match
           Keeper_memory_source_current.upsert_file_fact
+            ~ordinary_facts:(fun () ->
+              match
+                Keeper_memory_os_current.read_for_keepers_dir
+                  ~keepers_dir
+                  ~keeper_id:meta.Keeper_meta_contract.name
+              with
+              | Ok None -> Ok []
+              | Ok (Some snapshot) -> Ok snapshot.Keeper_memory_os_current.facts
+              | Error message -> Error message)
             ~config
             ~meta
             ~keepers_dir

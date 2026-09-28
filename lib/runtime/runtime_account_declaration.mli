@@ -65,6 +65,10 @@ val location_label : client -> string
 (** What [declare]'s [location] means for this client, in the words the
     runtime.toml key uses. *)
 
+val expand_home : ?home_dir:string -> string -> string
+(** A leading [~/] against [home_dir], the expansion {!declare} applies to
+    [location]. Anything else, or no [home_dir], is returned as it is. *)
+
 val declare :
   ?home_dir:string ->
   inherited_home:(client -> string option) ->

@@ -165,7 +165,7 @@ let location_label = function
   | Antigravity -> "credentials.path"
 ;;
 
-let expand ?home_dir path =
+let expand_home ?home_dir path =
   match home_dir with
   | Some home when String.starts_with ~prefix:"~/" path ->
     Filename.concat home (String.sub path 2 (String.length path - 2))
@@ -175,7 +175,7 @@ let expand ?home_dir path =
 (* Both login stores are absolute paths kept exactly as written, which is the
    rule [Runtime_account_home] states; only the message differs. *)
 let location_of ?home_dir client raw =
-  match home_dir, Runtime_account_home.of_string (expand ?home_dir raw) with
+  match home_dir, Runtime_account_home.of_string (expand_home ?home_dir raw) with
   | None, Error _ when String.starts_with ~prefix:"~/" raw ->
     Error (Invalid_location "~/ is expanded from HOME, which is not set; type an absolute path")
   | _, Ok path -> Ok path
@@ -200,7 +200,7 @@ let login_store ?home_dir ~inherited_home client table =
      | None -> inherited_home client)
   | Antigravity ->
     Option.map
-      (expand ?home_dir)
+      (expand_home ?home_dir)
       (Option.bind (field "credentials" table) (string_field "path"))
 ;;
 

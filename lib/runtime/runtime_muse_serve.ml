@@ -4,6 +4,7 @@ module Msp = Runtime_muse_msp
 
 type config =
   { cli_path : string
+  ; prepared_home : Runtime_muse_home.t option
   ; account_home : string option
   ; model : string option
   ; native : Runtime_native_tools.posture
@@ -26,6 +27,7 @@ let client_name = "masc"
 
 let default_config () =
   { cli_path = "muse"
+  ; prepared_home = None
   ; account_home = None
   ; model = None
   ; native = Runtime_native_tools.Native_read
@@ -36,7 +38,13 @@ let default_config () =
 
 type session_mode =
   | Start
-  | Resume of { session_id : string }
+  | Resume of { session_id : string; expected_turn_count : int }
+
+type mcp_server =
+  { name : string
+  ; server : Msp.mcp_server
+  ; tool_names : string list
+  }
 
 type image_input =
   { media_type : string
@@ -72,6 +80,14 @@ type error =
       { requested : string
       ; resumed : string option
       }
+  | Session_workspace_mismatch of
+      { requested : string
+      ; reported : string option
+      }
+  | Session_approval_mode_mismatch of
+      { requested : Runtime_muse_msp.approval_mode
+      ; reported : Runtime_muse_msp.approval_mode option
+      }
   | Auth_required of string
   | Turn_failed of Runtime_muse_msp.turn_error
   | Turn_cancelled
@@ -105,7 +121,8 @@ type stream_event =
       ; turn_id : string
       ; model : string option
       }
-  | Text_delta of string
+  | Text_delta of { item_id : string; text : string }
+  | Text_completed of { item_id : string; text : string }
   | Native_tool_started of Runtime_native_tools.observation
   | Native_tool_finished of Runtime_native_tools.observation
   | Approval_decided of
@@ -114,6 +131,7 @@ type stream_event =
       ; decision : Runtime_muse_msp.approval_decision
       }
   | Subscription_usage_observed of Runtime_muse_msp.subscription_usage
+  | Turn_terminal_received of Runtime_muse_msp.terminal
   | Usage_reported of
       { session_id : string
       ; turn_id : string
@@ -155,11 +173,19 @@ let error_to_string = function
     "Muse Code host uses ephemeral sessions; durable session storage is required"
   | Session_model_mismatch { requested; resumed } ->
     Printf.sprintf
-      "Muse Code resumed a session on %s, but the turn asks for %s"
+      "Muse Code returned a session on %s, but the turn asks for %s"
       (* DET-OK: display text for an absent model id; nothing branches on it. *)
       (Option.value resumed ~default:"the host default model")
       requested
+  | Session_workspace_mismatch { requested; reported } ->
+    Printf.sprintf "Muse Code returned session workspace %s, but the turn asks for %s"
+      (* DET-OK: display text for an absent workspace; admission uses typed equality. *)
+      (Option.value reported ~default:"<absent>") requested
   | Auth_required detail -> "Muse Code has no usable login: " ^ detail
+  | Session_approval_mode_mismatch { requested; reported } ->
+    Printf.sprintf "Muse Code returned approval mode %s, but the turn asks for %s"
+      (match reported with None -> "<absent>" | Some mode -> Msp.approval_mode_to_string mode)
+      (Msp.approval_mode_to_string requested)
   | Turn_failed { message; retryable; _ } ->
     Printf.sprintf
       "Muse Code turn failed%s: %s"
@@ -223,7 +249,7 @@ let exit_status_of = function
 
 let approval_mode_of_posture = function
   | Runtime_native_tools.Native_full -> Ok Msp.Allow_all
-  | Runtime_native_tools.Native_read -> Ok Msp.Deny_unmatched
+  | Runtime_native_tools.Native_read -> Ok Msp.Prompt_unmatched
   | Runtime_native_tools.Native_none ->
     Error
       (Invalid_config
@@ -241,13 +267,27 @@ let approval_preferences = function
     [ Msp.Denied; Msp.Abort ]
 ;;
 
-let approval_choice posture (approval : Msp.approval_request) =
+let approval_choice posture ~mcp_servers (approval : Msp.approval_request) =
+  let attached_mcp = approval.Msp.subject_kind = Msp.Subject_tool
+    && Option.exists (String.equal approval.Msp.tool_name) approval.Msp.subject_tool_name
+    && List.exists (fun server ->
+      List.exists (fun name ->
+        String.equal approval.Msp.tool_name ("mcp__" ^ server.name ^ "__" ^ name))
+        server.tool_names) mcp_servers in
+  let preferences =
+    if attached_mcp then [Msp.Approved]
+    else match approval.Msp.subject_kind with
+      | Msp.Unrecognized_subject _ -> [Msp.Denied; Msp.Abort]
+      | Msp.Subject_shell | Msp.Subject_file_access | Msp.Subject_network
+      | Msp.Subject_unix_socket | Msp.Subject_process | Msp.Subject_tool ->
+        approval_preferences posture in
   List.find_map
     (fun wanted ->
        List.find_opt
-         (fun (choice : Msp.approval_choice) -> choice.Msp.decision = wanted)
+         (fun (choice : Msp.approval_choice) -> choice.Msp.decision = wanted
+           && (not attached_mcp || choice.Msp.scope = Msp.Once))
          approval.Msp.choices)
-    (approval_preferences posture)
+    preferences
 ;;
 
 (* MSP asks for UUIDv7 command ids and never mints one itself. A fresh
@@ -281,13 +321,9 @@ let validate_process_config config =
     match config.account_home with
     | None -> Ok ()
     | Some home ->
-      let* home =
-        Runtime_account_home.of_string home
-        |> Result.map_error (fun detail -> Invalid_config ("account_home: " ^ detail))
-      in
-      if String.contains home '\000'
-      then Error (Invalid_config "account_home contains a NUL byte")
-      else valid_utf8 "account_home" home
+      Runtime_account_home.of_string home
+      |> Result.map (fun _ -> ())
+      |> Result.map_error (fun detail -> Invalid_config ("account_home: " ^ detail))
   in
   let* () =
     if String.trim config.cli_path = ""
@@ -325,23 +361,36 @@ let validate_turn ?(session_mode = Start) config ~workspace_root ~prompt ~images
   let* () =
     if String.trim prompt = "" then Error (Invalid_config "prompt is empty") else Ok ()
   in
-  let* () =
-    if List.exists (fun (image : image_input) -> image.base64_data = "") images
-    then Error (Invalid_config "an image carries no data")
-    else Ok ()
-  in
+  let rec validate_images index = function
+    | [] -> Ok ()
+    | (image : image_input) :: rest ->
+      let where = Printf.sprintf "images[%d]" index in
+      let* () = valid_utf8 (where ^ ".media_type") image.media_type in
+      let* () = valid_utf8 (where ^ ".base64_data") image.base64_data in
+      let* () =
+        if List.mem image.media_type Runtime_official_client_tool.official_client_image_media_types
+        then Ok ()
+        else Error (Invalid_config (where ^ ".media_type is not supported by official clients")) in
+      let* () = Runtime_official_client_tool.validate_base64_image_data image.base64_data
+        |> Result.map_error (fun detail -> Invalid_config (where ^ ".base64_data " ^ detail)) in
+      validate_images (index + 1) rest in
+  let* () = validate_images 0 images in
   match session_mode with
-  | Resume { session_id } when String.trim session_id = "" ->
+  | Resume { session_id; _ } when String.trim session_id = "" ->
     Error (Invalid_config "resumed session id is empty")
-  | Resume { session_id } -> valid_utf8 "resumed session id" session_id
+  | Resume { expected_turn_count; _ } when expected_turn_count < 0 ->
+    Error (Invalid_config "resumed completed-turn count is negative")
+  | Resume { session_id; expected_turn_count = _ } -> valid_utf8 "resumed session id" session_id
   | Start -> Ok ()
 ;;
 
 let validate_mcp_servers servers =
   List.fold_left
-    (fun checked (name, Msp.Streamable_http { url; headers; required = _ }) ->
+    (fun checked { name; server = Msp.Streamable_http { url; headers; required = _ }; tool_names } ->
        let* () = checked in
        let* () = valid_utf8 "MCP server name" name in
+       let* () = List.fold_left (fun acc name ->
+         let* () = acc in valid_utf8 "MCP tool name" name) (Ok ()) tool_names in
        let* () = valid_utf8 "MCP server url" url in
        List.fold_left
          (fun checked (header, value) ->
@@ -394,7 +443,13 @@ let child_environment_key_allowed = function
   | _ -> false
 ;;
 
-let client_environment account_home =
+let client_environment account_home prepared_home =
+  (* The configured spelling binds admission and session identity. The prepared
+     physical root binds every child storage path to that credential generation,
+     even if a configured HOME symlink is retargeted before spawn. *)
+  let account_home = match prepared_home with
+    | Some home -> Some (Runtime_muse_home.physical_home home)
+    | None -> account_home in
   let inherited =
     Unix.environment ()
     |> Array.to_list
@@ -415,6 +470,15 @@ let client_environment account_home =
       in
       List.map (fun (key, value) -> key ^ "=" ^ value) roots
       @ List.filter (fun entry -> not (List.mem_assoc (env_key entry) roots)) inherited
+  in
+  let selected = match prepared_home with
+    | None -> selected
+    | Some home ->
+      ("XDG_CONFIG_HOME=" ^ Runtime_muse_home.config_home home)
+      :: ("TMPDIR=" ^ Runtime_muse_home.private_tmpdir home)
+      :: List.filter (fun entry ->
+           let key = env_key entry in
+           key <> "XDG_CONFIG_HOME" && key <> "TMPDIR") selected
   in
   Array.of_list selected
 ;;
@@ -513,7 +577,7 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
         ~sw
         mgr
         ~cwd
-        ~env:(client_environment config.account_home)
+        ~env:(client_environment config.account_home config.prepared_home)
         ~stdin:stdin_r
         ~stdout:stdout_w
         ~stderr:stderr_w
@@ -701,9 +765,9 @@ let item_in_turn ~turn_id (item : Msp.item) =
   | None -> false
 ;;
 
-let rec await_terminal io (config : config) ~session_id ~turn_id ~on_stream_event state =
+let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~on_stream_event state =
   let continue state =
-    await_terminal io config ~session_id ~turn_id ~on_stream_event state
+    await_terminal io config ~mcp_servers ~session_id ~turn_id ~on_stream_event state
   in
   let emit = emit_stream_event on_stream_event in
   let ours sid = String.equal sid session_id in
@@ -724,7 +788,10 @@ let rec await_terminal io (config : config) ~session_id ~turn_id ~on_stream_even
     let* request = lift (Msp.parse_server_request ~method_ params) in
     (match request with
      | Msp.Approval_request approval ->
-       (match approval_choice config.native approval with
+       if not (String.equal approval.Msp.session_id session_id
+               && String.equal approval.Msp.turn_id turn_id)
+       then protocol_error "approval/request" "approval belongs to another session or turn"
+       else (match approval_choice config.native ~mcp_servers approval with
         | None ->
           protocol_error
             "approval/request"
@@ -782,7 +849,7 @@ let rec await_terminal io (config : config) ~session_id ~turn_id ~on_stream_even
        when ours sid ->
        (match List.assoc_opt item_id state.open_items with
         | Some Msp.Agent_message ->
-          emit (Text_delta delta);
+          emit (Text_delta { item_id; text = delta });
           (* The model is speaking: its window applies again, whatever tool
              items are still open. *)
           io.set_receive_phase Model_turn;
@@ -809,6 +876,7 @@ let rec await_terminal io (config : config) ~session_id ~turn_id ~on_stream_even
             ; tool_calls = (if was_open then state.tool_calls else state.tool_calls + 1)
             }
         | Msp.Agent_message ->
+          Option.iter (fun text -> emit (Text_completed {item_id=item.Msp.item_id; text})) item.Msp.text;
           continue
             { state with
               open_items
@@ -823,6 +891,7 @@ let rec await_terminal io (config : config) ~session_id ~turn_id ~on_stream_even
        continue state
      | Msp.Turn_completed { session_id = sid; turn_id = completed; terminal; usage; _ }
        when ours sid && String.equal completed turn_id ->
+       emit (Turn_terminal_received terminal);
        Option.iter (fun usage -> emit (Usage_reported { session_id; turn_id; usage })) usage;
        (match terminal with
         | Msp.Terminal_completed -> Ok (state, usage)
@@ -841,6 +910,20 @@ let rec await_terminal io (config : config) ~session_id ~turn_id ~on_stream_even
      | Msp.Unhandled_notification _ -> continue state)
 ;;
 
+let validate_session_identity (config : config) ~workspace_root (session : Msp.session) =
+  let* () = match config.model with
+    | Some requested when session.model_id <> Some requested ->
+      Error (Session_model_mismatch {requested; resumed=session.model_id})
+    | Some _ | None -> Ok () in
+  if session.workspace_root = Some workspace_root then Ok ()
+  else Error (Session_workspace_mismatch {requested=workspace_root; reported=session.workspace_root})
+;;
+
+let validate_session_approval_mode ~requested reported =
+  if reported = Some requested then Ok ()
+  else Error (Session_approval_mode_mismatch {requested; reported})
+;;
+
 let open_session io (config : config) ~approval_mode ~session_mode ~workspace_root ~session_config =
   match session_mode with
   | Start ->
@@ -855,8 +938,10 @@ let open_session io (config : config) ~approval_mode ~session_mode ~workspace_ro
           ~config:session_config)
     in
     let* session = lift (Msp.parse_session_result ~stage:"session/start" result) in
+    let* () = validate_session_identity config ~workspace_root session in
+    let* () = validate_session_approval_mode ~requested:approval_mode session.approval_mode in
     Ok (session, false)
-  | Resume { session_id } ->
+  | Resume { session_id; expected_turn_count } ->
     let* result =
       request io ~method_:"session/resume" (fun ~id ->
         Msp.session_resume_request
@@ -877,13 +962,15 @@ let open_session io (config : config) ~approval_mode ~session_mode ~workspace_ro
              session_id
              session.Msp.session_id)
     in
+    let* () = validate_session_identity config ~workspace_root session in
     let* () =
-      match config.model with
-      | Some requested when session.Msp.model_id <> Some requested ->
-        Error (Session_model_mismatch { requested; resumed = session.Msp.model_id })
-      | Some _ | None -> Ok ()
+      if session.Msp.turn_count = expected_turn_count
+      then Ok ()
+      else protocol_error "session/resume"
+          (Printf.sprintf "retained session completed-turn count changed: expected %d, reported %d"
+             expected_turn_count session.Msp.turn_count)
     in
-    let* (_ : Yojson.Safe.t) =
+    let* result =
       request io ~method_:"session/setApprovalMode" (fun ~id ->
         Msp.session_set_approval_mode_request
           ~id
@@ -891,7 +978,9 @@ let open_session io (config : config) ~approval_mode ~session_mode ~workspace_ro
           ~session_id
           approval_mode)
     in
-    Ok (session, true)
+    let* effective = lift (Msp.parse_set_approval_mode_result result) in
+    let* () = validate_session_approval_mode ~requested:approval_mode (Some effective) in
+    Ok ({session with approval_mode=Some effective}, true)
 ;;
 
 let run_protocol
@@ -922,7 +1011,7 @@ let run_protocol
       ~approval_mode
       ~session_mode
       ~workspace_root
-      ~session_config:{ Msp.mcp_servers }
+      ~session_config:{ Msp.mcp_servers = List.map (fun server -> server.name, server.server) mcp_servers }
   in
   let session_id = session.Msp.session_id in
   let* () =
@@ -990,6 +1079,7 @@ let run_protocol
       await_terminal
         io
         config
+        ~mcp_servers
         ~session_id
         ~turn_id
         ~on_stream_event
@@ -1027,6 +1117,20 @@ let guard_idle_timeout f =
   | Idle_timeout seconds -> Error (Timeout { seconds; turn_accepted = false })
 ;;
 
+let prepare_account_config config =
+  match config.prepared_home, config.account_home with
+  | Some home, Some selected when String.equal selected (Runtime_muse_home.account_home home) -> Ok config
+  | Some _, Some _ -> Error (Invalid_config "prepared_home does not match the selected account_home")
+  | None, None -> Ok config
+  | Some _, None -> Error (Invalid_config "prepared_home requires a selected account_home")
+  | None, Some account_home ->
+    (match Runtime_muse_home.prepare ~account_home with
+     | Ok home -> Ok { config with prepared_home = Some home }
+     | Error Runtime_muse_home.Sign_in_required ->
+       Error (Auth_required (Runtime_muse_home.error_to_string Runtime_muse_home.Sign_in_required))
+     | Error error -> Error (Invalid_config (Runtime_muse_home.error_to_string error)))
+;;
+
 let run_turn
       ?(session_mode = Start)
       ?(mcp_servers = [])
@@ -1044,6 +1148,7 @@ let run_turn
   =
   let* () = validate_turn ~session_mode config ~workspace_root ~prompt ~images in
   let* () = validate_mcp_servers mcp_servers in
+  let* config = prepare_account_config config in
   let* approval_mode = approval_mode_of_posture config.native in
   guard_idle_timeout (fun () ->
     with_spawned_client ~mgr ~clock ~cwd config (fun io ->
@@ -1065,6 +1170,7 @@ let run_turn
 
 let read_usage ~mgr ~clock ~cwd config =
   let* () = validate_process_config config in
+  let* config = prepare_account_config config in
   guard_idle_timeout (fun () ->
     with_spawned_client ~mgr ~clock ~cwd config (fun io ->
       let* (_ : Msp.initialize_result) = handshake io ~requested_capabilities:[] in

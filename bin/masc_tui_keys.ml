@@ -314,7 +314,7 @@ let approval_retry =
    "[c] Reply   [v/V] Vote (+/-)   [Y] Copy Link   [Esc] Back" -- above a
    footer that spelled c, Y and Esc again and had no vote key at all, so that
    row was the only place on the screen that said v votes. *)
-let board_vote_key = b Act "v / V" "vote" ~help:"vote the post up or down"
+let board_vote_key = b Act "v / V" "up / down" ~help:"v votes up; V votes down"
 let board_reply_key = b Act "c" "reply" ~help:"reply (while reading)"
 let board_copy_key = b Act "Y" "copy link" ~help:"copy the selected post reference"
 

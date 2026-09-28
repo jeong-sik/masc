@@ -47,6 +47,11 @@ val tool_row : 'message t -> unit
 (** A [tool_use] block was forwarded. The next message's text needs no
     break. *)
 
+val complete_message : 'message t -> message:'message -> text:string -> string option
+(** Forward missing text from a completed message with a wire identity. A later
+    message with no deltas starts its own paragraph; completing the same message
+    forwards only its missing suffix, so repeated completion cannot duplicate it. *)
+
 val remainder : 'message t -> final_text:string -> string option
 (** The part of the turn's recorded text the stream has not shown, to forward
     after the last text when the turn ends. [Some suffix] when everything

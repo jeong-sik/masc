@@ -82,6 +82,12 @@ val equipment_of_name : string -> equipment
 (** The keeper's starting items, from a hash separate from the body's, so
     changing which items are handed out never changes a keeper's body. *)
 
+val mascot : body * equipment
+(** MASC's own candle: the one the TUI shows on its startup splash and on
+    [/about]. Chosen by hand rather than drawn from a name -- an ivory candle
+    with an ember flame, long crimson horns, bean eyes, a small "w" mouth and
+    a blush, standing on a gilt dish, wearing nothing. *)
+
 (** Every constructor, in declaration order. Generation picks from these lists;
     tests hold them against exhaustive matches. *)
 

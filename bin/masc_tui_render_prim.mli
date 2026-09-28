@@ -191,6 +191,11 @@ type chrome_body = {
   push_selected : string -> unit;
   push_divider : unit -> unit;
   push_empty : unit -> unit;
+  next_origin : unit -> int * int;
+      (** The terminal frame's line and cell where the next pushed row's
+          content will start -- where a picture placed over body rows goes.
+          Holds while the body stays inside its budget, which a [Fits] body
+          does. *)
 }
 
 val surface_chrome_rows : int

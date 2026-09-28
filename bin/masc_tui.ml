@@ -13838,7 +13838,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       state.server_identity <- None;
       state.connection_status <- Masc_tui_types.Disconnected;
       (* The splash ends here for good: the Overview's "press r" line is what
-         the operator needs, and a retry must not bring the imp back. *)
+         the operator needs, and a retry must not bring the candle back. *)
       state.startup_emblem <- false;
       add_event state "error" err;
       react_to_server_contact state ~base_path ~host:server_peer_host
@@ -17228,8 +17228,13 @@ let main
         state.frames_presented <- state.frames_presented + 1;
         commit_presented_approval approval;
         presented_presses := presses;
-        presented_reader := reader
-    | Frame_presenter.Unchanged -> ()
+        presented_reader := reader;
+        (* The frame's pictures go over it once it is on the terminal: a
+           repainted frame may have cleared them, so all are placed again. *)
+        Masc_tui_portrait_view.flush ~presented:true ~write:write_to_terminal
+    | Frame_presenter.Unchanged ->
+        (* Same text, but a picture may have moved on a step. *)
+        Masc_tui_portrait_view.flush ~presented:false ~write:write_to_terminal
   in
   (* Bind the bearer to the workspace actually opened, before any request is
      built. Reported before the recovery load as well, so when neither source
@@ -17247,7 +17252,7 @@ let main
    match Masc_tui_credential.outcome_notice outcome with
    | Some notice -> add_event state (Masc_tui_credential.outcome_level outcome) notice
    | None -> ());
-  (* The imp stands in for the Overview's sections until this first read
+  (* The candle stands in for the Overview's sections until this first read
      answers or the operator sends anything. *)
   state.startup_emblem <- true;
   start_http_refresh state ~host ~port ~intent:Revalidate
@@ -17339,6 +17344,22 @@ let main
      image placement against the screen and cannot ask the terminal itself. *)
   Masc_tui_msx.set_cell_pixels terminal_probe.cell_pixels;
   image_cell_pixels := terminal_probe.cell_pixels;
+  (* How the splash candle reaches this terminal, from the same answers:
+     real pixels only where the graphics query was answered -- an iTerm2
+     inline image cannot be replaced in place frame by frame --, else a
+     mosaic where stdout projects colour, else none. *)
+  Masc_tui_portrait_view.set_display
+    (Masc_tui_portrait_view.display_of
+       ~kitty:
+         (match proto with
+          | Masc_tui_graphics.Kitty_protocol -> true
+          | Masc_tui_graphics.ITerm2_protocol | Masc_tui_graphics.Unsupported_protocol -> false)
+       ~cell_pixels:terminal_probe.cell_pixels
+       ~colors_enabled:Masc_tui_theme.colors_enabled
+       ~projects_colour:
+         (match Masc_tui_terminal_palette.stdout_color_level () with
+          | Masc_tui_terminal_palette.True_color | Masc_tui_terminal_palette.Ansi256 -> true
+          | Masc_tui_terminal_palette.Ansi16 | Masc_tui_terminal_palette.Unknown -> false));
   terminal_draws_images :=
     Some
       (match proto with
@@ -19017,7 +19038,7 @@ and is loaded on demand through keeper_skill.
       end;
       (* The startup splash is a stand-in, not a gate: the first thing the
          operator sends ends it and still goes where it was going, so nothing
-         typed while the imp turns is lost. A terminal's own reply is not the
+         typed while the candle flickers is lost. A terminal's own reply is not the
          operator's. *)
       (match input with
        | Some (Key _ | Pasted _ | Mouse_wheel _ | Mouse_left_press _
@@ -26253,10 +26274,10 @@ and is loaded on demand through keeper_skill.
            else state.activity_frame + 1);
         Render_schedule.request render_schedule Render_schedule.Background
       end;
-      (* The turning imp -- the startup splash or /about -- steps on its own
-         clock while the last frame drew it turning. When no frame does, or
-         one holds it still, nothing here asks for a repaint, and the next
-         time it turns it starts from the first step. *)
+      (* The candle -- the startup splash or /about -- steps on its own
+         clock while the last frame drew it. When no frame does, nothing here
+         asks for a repaint, and the next time it is drawn it starts from the
+         first step. *)
       (match Masc_tui_emblem_screen.drawn () with
        | Masc_tui_emblem_screen.Moving ->
            if
@@ -26271,8 +26292,7 @@ and is loaded on demand through keeper_skill.
                 else state.emblem_frame + 1);
              Render_schedule.request render_schedule Render_schedule.Background
            end
-       | Masc_tui_emblem_screen.Still | Masc_tui_emblem_screen.Absent ->
-           state.emblem_frame <- -1);
+       | Masc_tui_emblem_screen.Absent -> state.emblem_frame <- -1);
       if
         Int64.compare (Int64.sub now_ns !last_check_ns) refresh_interval_ns >= 0
       then begin
@@ -26419,10 +26439,14 @@ and is loaded on demand through keeper_skill.
        (* The terminal belongs to the picture until it is dismissed. A frame
           drawn now would clear the rows it occupies and leave the rest. *)
        | Render_schedule.Render when state.image_open || state.msx_open ->
-           (* This frame is the picture's, so no imp is on screen and nothing
-              should keep stepping one. Closing the picture repaints in full,
-              and the imp steps again from that frame. *)
-           Masc_tui_emblem_screen.begin_frame ()
+           (* This frame is the picture's, so no candle is on screen and
+              nothing should keep stepping one, and a candle placed over the
+              last frame comes down rather than float over the picture.
+              Closing the picture repaints in full, and the candle steps
+              again from that frame. *)
+           Masc_tui_emblem_screen.begin_frame ();
+           Masc_tui_portrait_view.begin_frame ();
+           Masc_tui_portrait_view.flush ~presented:false ~write:write_to_terminal
        | Render_schedule.Render ->
            let frame, clamped, approval, presses =
              Masc_tui_frame_timing.time_tagged Masc_tui_frame_timing.Build

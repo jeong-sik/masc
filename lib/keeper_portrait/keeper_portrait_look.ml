@@ -196,3 +196,33 @@ let equipment_of_name name =
     | On_head head -> { bare with head }
   in
   { with_item with base }
+
+(* ---- the mascot ---------------------------------------------------------- *)
+
+(* Hand-picked, not hashed: the candle that stands for MASC itself. The
+   proportions are the ones the prototype sheet settled on; two drips and a
+   plum backdrop so it does not read as a blank. *)
+let mascot =
+  ( {
+      wax = Ivory;
+      half_width = 0.30;
+      half_height = 0.40;
+      corner = 0.10;
+      drips =
+        [
+          { drip_x = -0.16; drip_length = 0.20; drip_width = 0.050 };
+          { drip_x = 0.17; drip_length = 0.12; drip_width = 0.042 };
+        ];
+      flame = Ember;
+      flame_size = 1.0;
+      flame_lean = 0.0;
+      twin_flame = false;
+      horns = Long;
+      horn_colour = Crimson;
+      horn_length = 1.0;
+      eyes = Bean;
+      mouth = W;
+      blush = true;
+      backdrop_hue = 0.83;
+    },
+    { bare with base = Dish Gilt } )

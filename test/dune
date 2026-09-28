@@ -35,6 +35,11 @@
  (libraries alcotest masc masc_test_deps))
 
 (test
+ (name test_runtime_inference_turn_timeout)
+ (modules test_runtime_inference_turn_timeout)
+ (libraries alcotest masc masc_test_deps))
+
+(test
  (name test_keeper_transcript_tail_recovery)
  (modules test_keeper_transcript_tail_recovery)
  (libraries alcotest masc masc_test_deps eio_main unix))

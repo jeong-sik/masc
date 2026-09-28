@@ -417,11 +417,7 @@ let probe_official_client_invocation ~mgr ~clock ~fs ~base_path ~now ~runtime_id
                ; setting_sources = []
                ; system_prompt = None
                ; admission_timeout_s = exec.timeout_s
-               ; timeout_s =
-                   (match Runtime_inference.resolve_turn_timeout_s ~runtime_id with
-                    | None -> Some exec.timeout_s
-                    | Some 0.0 -> None
-                    | Some s -> Some s)
+               ; timeout_s = Runtime_inference.resolve_turn_timeout_s_or ~runtime_id ~default:exec.timeout_s
 
     (* A capability probe asks what the client can do; it has no domain schema
        to hold an answer to. *)
@@ -459,11 +455,7 @@ let probe_official_client_invocation ~mgr ~clock ~fs ~base_path ~now ~runtime_id
                ; native = Runtime_native_tools.codex_default
                ; developer_instructions = None
                ; admission_timeout_s = exec.timeout_s
-               ; timeout_s =
-                   (match Runtime_inference.resolve_turn_timeout_s ~runtime_id with
-                    | None -> Some exec.timeout_s
-                    | Some 0.0 -> None
-                    | Some s -> Some s)
+               ; timeout_s = Runtime_inference.resolve_turn_timeout_s_or ~runtime_id ~default:exec.timeout_s
 
     (* A probe asks whether the client answers at all; it has no domain schema
        to hold the answer to. *)
@@ -610,11 +602,7 @@ let probe_antigravity_invocation ~sw ~net ~secure_random ~mgr ~clock ~fs ~base_p
                      ; sandbox = true
                      ; disable_slash_commands = true
                      ; admission_timeout_s = exec.timeout_s
-                     ; timeout_s =
-                         (match Runtime_inference.resolve_turn_timeout_s ~runtime_id with
-                          | None -> Some exec.timeout_s
-                          | Some 0.0 -> None
-                          | Some s -> Some s)
+                     ; timeout_s = Runtime_inference.resolve_turn_timeout_s_or ~runtime_id ~default:exec.timeout_s
 
     (* A capability probe asks what the client can do; it has no domain schema
        to hold an answer to. *)

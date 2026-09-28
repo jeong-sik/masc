@@ -566,7 +566,8 @@ let overview_header (state : state) =
     (connection_badge state)
 
 let overview_intro_lines (state : state) =
-  match state.overview, overview_team state, state.overview_error with
+  let usual =
+    match state.overview, overview_team state, state.overview_error with
   | Some overview, Some _, None
     when overview.ov_keeper_listing = Masc.Keeper_snapshot_unread.Listed
          && overview.ov_keepers = 0 ->
@@ -580,6 +581,10 @@ let overview_intro_lines (state : state) =
       ]
   | None, None, None -> [ "  Overview briefing not read yet" ]
   | _ -> []
+  in
+  match state.opening_notice with
+  | Some reason -> ("  " ^ Terminal_text.single_line reason) :: usual
+  | None -> usual
 
 (* Goal links include finished tasks, which the Overview's active task rows
    intentionally omit. Resolve owners against the full snapshot from that
@@ -625,7 +630,7 @@ let overview_layout (state : state) ~terminal_rows ~cols =
     let first = with_intro (List.length intro_lines) in
     if List.length intro_lines > 1
        && first.intro_rows < List.length intro_lines
-    then with_intro 0
+    then with_intro (if Option.is_some state.opening_notice then 1 else 0)
     else first
   in
   (* An item a drawn Team row carries -- a stuck Keeper's row prints its
@@ -758,7 +763,9 @@ let render_overview (state : state) =
   let intro_lines =
     if List.length intro_lines > 1
        && row_budget.intro_rows < List.length intro_lines
-    then []
+    then (match state.opening_notice, intro_lines with
+      | Some _, first :: _ -> [first]
+      | _ -> [])
     else intro_lines
   in
   List.iter (box_line buf cols)

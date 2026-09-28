@@ -1434,6 +1434,8 @@ def resolve_model_spec(source, model, timeout, binary=None):
         spec.update({key: source[key] for key in ('api_key_env', 'credential_file', 'provider_kind') if source.get(key)})
     elif source['command']:
         spec['command'] = source['command']
+    if choice in ('claude_code', 'codex') and source.get('account_home'):
+        spec['account_home'] = source['account_home']
     if choice == 'antigravity':
         spec.update(credential_file=source['credential_file'], timeout_s=source['provider_timeout_s'])
     return render(spec, binary)[0], spec

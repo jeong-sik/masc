@@ -407,7 +407,8 @@ let test_approved_effect_replay_consumes_one_exact_grant () =
   let approval_id = match first with Gate.Deferred { approval_id; _ } -> approval_id
     | _ -> fail "effect request should await authorization" in
   (match AQ.resolve_with_policy ~base_path ~id:approval_id
-      ~decision:Keeper_approval_queue_rules_types.Decision.Approve () with
+      ~decision:Keeper_approval_queue_rules_types.Decision.Approve
+      ~source:Keeper_approval_queue_rules_types.Human_operator () with
    | Ok _ -> () | Error error -> fail (AQ.resolve_error_to_string error));
   let queue = match Masc.Keeper_registry_event_queue.snapshot_result ~base_path "settlement" with
     | Ok queue -> queue | Error detail -> fail detail in

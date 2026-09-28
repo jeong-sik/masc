@@ -149,7 +149,7 @@ let panel_meta (o : Fusion_types.panel_outcome) : Yojson.Safe.t =
       ; ("input_tokens", `Int usage.Fusion_types.input_tokens)
       ; ("output_tokens", `Int usage.Fusion_types.output_tokens)
       ]
-  | Fusion_types.Failed { failed_model; reason } ->
+  | Fusion_types.Failed { failed_model; reason; usage } ->
     let reason_code = Fusion_agent_core.panel_failure_code reason in
     (* reason detail은 실패 시점에 raw model로 이미 attribution됐다. 여기서
        ~runtime_id:failed_model(=panelist)로 재-attribution하면 "skeptic (claude)"
@@ -160,6 +160,8 @@ let panel_meta (o : Fusion_types.panel_outcome) : Yojson.Safe.t =
       ; ("status", `String "failed")
       ; ("reason_code", `String reason_code)
       ; ("reason_detail", `String reason_detail)
+      ; ("input_tokens", `Int usage.Fusion_types.input_tokens)
+      ; ("output_tokens", `Int usage.Fusion_types.output_tokens)
       ]
 
 (* judge_synthesis → board meta_json 필드 리스트 (status/decision/resolved_answer/
@@ -595,7 +597,7 @@ let emit ~source_context ~registry ~base_dir ~keeper ~run_id ~channel ~question 
       |> List.filter_map (fun (o : Fusion_types.panel_outcome) ->
              match o with
              | Fusion_types.Answered _ -> None
-             | Fusion_types.Failed { failed_model; reason } ->
+             | Fusion_types.Failed { failed_model; reason; _ } ->
                Some
                  (Printf.sprintf "- %s: %s" failed_model
                     (Fusion_agent_core.panel_failure_text reason)))

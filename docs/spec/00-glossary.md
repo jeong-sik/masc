@@ -287,6 +287,14 @@ status: reference
   `keeper_role {name, board_interests}`뿐이다. 과거 post/comment thread,
   instructions, runtime/task identity, mention 목록은 저장하거나 보내지 않는다.
 
+**Board Comment Count Cap (게시물 댓글 수 상한)**
+: 한 Board 게시물에 붙을 수 있는 활성 댓글 수의 쓰기 한도(`Board.Limits.comment_count_cap`).
+  기본값은 100이며 `MASC_BOARD_COMMENT_COUNT_CAP`으로 바꾼다. 값이 0 이하이면 상한 검사를
+  끈다. 한도에 도달하면 다음 댓글 작성을 거절하고 새 게시물(successor) 안내를 돌려준다.
+  만료된 댓글은 활성 수에서 빠져 새 자리를 내준다. `masc_board_post_get`의
+  `comment_limit`·`comment_tail`은 한 번에 읽는 댓글 페이지 크기이므로 이 쓰기 한도와 다르다.
+  → [Board.Limits](../../lib/board_types/board_types.mli) · [Board_core](../../lib/board/board_core.ml)
+
 **Board Attention Candidate (Board 판정 후보)**
 : Board_attention lane이 판정할 게시물 하나. 어떤 모델 호출보다 먼저 durable하게
   저장되고, 생애가 `Pending → Judged → Consumed`다. 다시 해도 같은 결과가 나올 실패일
@@ -316,6 +324,10 @@ status: reference
     일치하는 후보가 아직 `Resumable_pending`이면 `ensure_roots`가 같은 결정론적 식별자의
     다음 `generation`으로 `Ready`를 다시 연다. 후보가 `Resumable_judged`나
     `Requeued_resumable`이면 `ensure_roots`는 이 루트를 건드리지 않는다.
+  - 격리된 Candidate는 남아 있지만 그 파티션 기록이 없으면 `ensure_roots`가
+    Candidate 원장을 근거로 기록된 generation의 `Blocked` 루트를 복원한다.
+    격리 원인과 호출 정체성은 보존하고, 찾을 수 없는 세부 내용은 만들어내지 않는다
+    (`Restored_candidate_quarantine`).
   - `Running`에서 `Ready`로 돌아가는 길은 둘이다. 재시작 복구는 진행 정도와 상관없이
     끊긴 실행을 모두 돌려보낸다. 레인이 거친 모든 슬롯이 계정 사정으로 거절하면 워커가
     `defer`로 돌려보낸다. 판정은 읽기만 하는 모델 호출이라 다시 보내도 토큰만 더 쓴다.
@@ -329,8 +341,10 @@ status: reference
 : 다시 시도해도 고칠 수 없는 실패로 판정을 끝내지 못한 후보(`candidate`)와 파티션을
   따로 보관하는 상태와 그 목록이다. 워커는 격리된 항목을 스스로 다시 시도하지 않고,
   운영자가 재투입(`requeue`)해야만 풀린다(#38260·#38262). 슬롯이 전부 쉬는 중이라
-  못 한 판정은 격리하지 않는다. 파티션이 `Ready`로 돌아가고, 그 Keeper에 다음 Board
-  신호가 오거나 재개·재시작하면 다시 판정한다.
+  못 한 판정은 격리하지 않는다. 파티션이 `Ready`로 돌아가면 워커가 유지보수 pulse
+  간격으로 지연 wake를 예약해 새 Board 신호가 없어도 다시 살핀다. 새 신호, 재개,
+  프로세스 시작은 더 일찍 깨울 수 있다. 지연 wake(`rearm`)는 `Running` 파티션을
+  다시 살피는 길일 뿐 격리 해제가 아니며, 격리와 지연(`defer`)은 다른 층위다.
   - 격리 원인 카테고리(`quarantine_failure_category`): 닫힌 12개 값이다.
     `Candidate_membership_conflict`·`Durable_partition_invariant`·`Exact_setup_unavailable`·`Exact_flow_replayed`·`Exact_lane_exhausted`(슬롯이
     모두 실패했지만 전부 계정 사정으로 거절한 것은 아님. 입력 크기·형식 거절, 결과를 알 수 없는
@@ -344,6 +358,8 @@ status: reference
       대기 수)되어 표시된다. 수백 건의 슬롯 소진 행이 화면을 덮지 않도록 카테고리당 한 줄로 묶는다.
     - `Q` 키를 누르면 가장 오래 대기 중인 항목(`oldest_waiting`)부터 원장의
       `Requeue_requested`로 전이시키며 재투입을 요청한다.
+    - `B` 키는 읽힌 대기 목록 전체를 오래된 순서로 별도 재투입 요청한다. 목록이 아직
+      읽히지 않았거나 오래된 상태이면 일괄 재투입을 거절한다.
     - 재투입 요청은 읽을 때의 `quarantine_id`로 펜싱되어, 같은 파티션의 더 새로운 격리 상태를
       낡은 식별자로 덮어쓰지 않는다.
     - 서버가 새로 추가한 알 수 없는 카테고리는 떨어뜨리지 않고 `Unreadable_row`로 보존·계수하여
@@ -830,7 +846,10 @@ status: reference
   특정 lane에 배정할 수 있고, 배정된 Keeper는 그 lane의 후보 순서를 따른다.
   `[runtime].media_failover`(vision runtimes, 이미지를 읽는 런타임 목록)와
   exact-output lane의 slot 우선순위 failover(`docs/spec/05-keeper-agent.md:394`)는
-  런타임 후보 순서와 별개 축이다.
+  런타임 후보 순서와 별개 축이다. 다만 후보 나열이 별개여도 rate-limit 증거 셀은
+  공유한다 — exact lane은 `Runtime_candidate_backpressure.candidate`를 읽고 자기
+  관측을 되돌려 써서, 쉬는 슬롯을 형제 뒤로 강등한다(`Demotion`의 후보 강등과 같은
+  불변식; #39077).
   → [Runtime_lane.t](../../lib/runtime/runtime_lane.mli)
 
 **Max Prompt Bytes (최대 프롬프트 바이트)**
@@ -1061,10 +1080,12 @@ status: reference
   그 계산을 격리한다. attach·detach와 Add-on 장애는 기존 Keeper의 권한·도구·진행 중
   작업을 축소하지 않으며, 추가 근거는 활용·보류·무시할 수 있다. 원천 어댑터는
   `snapshot_file`·`msx_capture`·`dos_capture`·`lane_output`·`browser_document`이고,
-  코어는 도메인 의미를 해석하지 않고 공통 row/coverage를 검사·표시한다.
+  코어는 도메인 의미를 해석하지 않고 공통 row/coverage를 검사·표시한다. 내장 lane은
+  바인딩에 제공하는 원천 종류를 정하며, `browser_document`는 목록에 든 Browser Lane
+  백엔드만 받는다 — Stagehand에는 유휴 문서 관측자가 없어 이 원천을 제공하지 않는다.
   → [설계 계약](../design/lane-addon-v0.md),
   [Lane_addon_types](../../lib/lane_addon/lane_addon_types.mli),
-  [Lane_addon_sources](../../lib/lane_addon/lane_addon_sources.ml)
+  [Lane_addon_sources](../../lib/lane_addon/lane_addon_sources.mli)
 
 **Quiz Lane (퀴즈 레인)**
 : 저장된 기록(Board·기억 OS·GitHub)에서 인용한 사실 묶음(`deck.json`, `snapshot_file`)을
@@ -1095,8 +1116,9 @@ status: reference
   → [Runtime_execution.t](../../lib/runtime/runtime_execution.mli)
 
 **Exact-output route**
-: Librarian, Workspace memory curator, HITL auto judge, Board attention 같은 단독
-  모델 작업의 목적별 실행 경로(`Agent_core.Exact_output`). 설정은 API slot과 후속 CLI
+: Keeper의 목적별 단독 모델 작업(Librarian, Workspace memory curator, HITL auto judge,
+  Board attention)과 Browser Stagehand 확장의 구조화 `llm.generate` 요청이 쓰는 실행
+  경로(`Agent_core.Exact_output`). 설정은 API slot과 후속 CLI
   후보 순서를 선언한다(`exact_output_lane_decl`). 대부분의 exact route는 도구를 쓰지
   않고 단일 완결 응답을 받아 도메인 검증기가 유효성을 판정하며, Keeper turn의
   Runtime Candidate Order와는 다른 층이다. 단 **verifier_exact은 예외로 도구를 호출한다** —
@@ -1104,6 +1126,11 @@ status: reference
   (`lib/task/anti_rationalization.ml`: "The verdict channel is the
   report_review_verdict tool call, so every slot needs a tool-calling model"). 이 lane의
   모든 slot은 도구 호출이 가능한 모델이어야 한다.
+  - **Browser Stagehand `llm.generate`**: `browser_stagehand_exact` route는 구조화
+    (`json_schema`) 요청과 text-only message만 제공한다. 스키마는 AGENT_CORE의
+    `Json_syntax` 프롬프트 텍스트로 전달되고, 응답은 JSON 값·선언된 필수 객체 키·방문한
+    primitive 모양만 검사한다. 전체 JSON Schema 검증은 하지 않으며, 그 밖의 요청 모양은
+    provider 호출 전에 거절한다(#38708).
   - **슬롯 전진 조건 (`execution_failure_may_advance`)**: 한 슬롯이 실패했을 때 패스를
     끝내거나 범위를 줄이지 않고 선언된 다음 후보 슬롯으로 넘어가는 경우는 둘이다.
     (1) 보내기 직전 단계(`Before_dispatch`)에서 실패했고 이 슬롯이 아무것도 보내지 않았다
@@ -1164,7 +1191,8 @@ status: reference
   → [Exact_output](../../packages/agent_core/lib/llm_provider/exact_output.mli),
   [Exact_lane_run_registry](../../lib/exact_lane_run_registry.mli),
   [Runtime_exact_lane_backpressure](../../lib/runtime/runtime_exact_lane_backpressure.mli),
-  [Keeper_board_attention_exact_flow](../../lib/keeper/keeper_board_attention_exact_flow.mli)
+  [Keeper_board_attention_exact_flow](../../lib/keeper/keeper_board_attention_exact_flow.mli),
+  [Browser_stagehand_model](../../lib/browser_stagehand_model.mli)
 
 **Memory queue**
 : Keeper별 Librarian 작업을 직렬화하는 제출 경로. 현재 실행 하나와 교체 가능한
@@ -1361,8 +1389,10 @@ status: reference
   - 미기동·정지 대상 수락: 대상 Keeper가 등록되어 있으나 fiber가 돌지 않는 상태
     (`offline`·`crashed`·`restarting`·`draining`)이거나 일시정지(`paused`) 상태일 때의
     due 발화는 재시도 실패로 튕기지 않고 단 1회 수락(`accepted`)되어 해당 Keeper의
-    durable 큐에 대기한다(#38523). 다음 턴이 깨어날 때 stimulus로 읽히며, 새 발화가
-    이전 대기를 대체하여 큐에는 스케줄당 최대 1건만 유지된다.
+    durable 큐에 대기한다(#38523). 다음 턴이 깨어날 때 stimulus로 읽히며, 새 발화는 아직
+    턴이 시작하지 않은 이전 대기를 대체하여 큐에는 스케줄당 최대 1건만 유지된다.
+    턴이 이미 가져간 발화는 이후 발화가 앞선 대기를 대체하거나 대상 Keeper 퇴역으로
+    예약이 취소돼도 그 턴의 ACK가 올 때까지 남는다(#39521).
   - 보류(hold): due가 된 발화를 이번 tick에 보내지 않고 두는 것. 상태 값이 아니다 — 예약은
     `Due`에 머물고 다음 tick에 다시 판정된다. 이유는 닫힌 둘(`Schedule_runner.hold_reason`)이고
     wire `kind`로 적힌다. `previous_occurrence_unconsumed`는 대상 Keeper가 같은 예약의 이전
@@ -1520,6 +1550,17 @@ status: reference
     클라이언트 관측을 위한 wire 프로젝션에서만 유지한다.
   → [keeper_approval_queue_rules_types](../../lib/keeper_contract/keeper_approval_queue_rules_types.mli),
   [Keeper_approval_queue](../../lib/keeper/keeper_approval_queue.mli)
+
+**Exact Attempt Quarantine Cause (정확 시도 격리 원인)**
+: HITL Auto Judge가 승인 요청에 대한 exact 시도를 격리할 때 기록하는 닫힌 다섯 사유
+  (`exact_attempt_quarantine_cause`): `Exact_flow_execution_failed`·`Exact_cancellation`·
+  `Exact_attempt_replay`·`Exact_domain_invalid_output`·`Exact_terminal_persistence_failure`.
+  `Exact_domain_invalid_output`은 응답을 JSON으로 파싱하지 못했거나 도메인 검증에서 거절된 경우,
+  또는 exact flow의 후보 소진 뒤 CLI 경로도 결말을 주지 못한 경우에 기록된다. 후자는
+  아직 바인딩된 후보가 있을 때 `Cli_no_slots`·`Cli_fell_back` 결과로 격리한다. 후보 소진은
+  대상을 고르거나 요청을 받아들이는 단계의 거절처럼 응답 전에 일어날 수도 있다.
+  이는 Board Attention의 `Domain_output_invalid`와 소유자 및 격리 상태가 다른 어휘다.
+  → [keeper_approval_queue_rules_types](../../lib/keeper_contract/keeper_approval_queue_rules_types.mli) · [hitl_summary_worker](../../lib/keeper/hitl_summary_worker.ml) · [Exact_output](../../packages/agent_core/lib/llm_provider/exact_output.mli)
 
 **Approval Lifecycle (승인 생애 단계)**
 : Gate 승인 하나가 durable 하게 지나온 단계를 이름 붙인 닫힌 아홉 값
@@ -1775,8 +1816,16 @@ status: reference
   명령의 표준 입출력과 종료 상태를 `run_outcome`(`Ran`·`Transport_failed`)으로
   전달하여, 원격 런타임 전송 장애와 명령의 자체 실패를 명확히 분리한다.
   호출 페이로드는 `argv`(셸 없이 그대로 실행하는 프로세스 벡터)와 `command`(셸에
-  넘기는 한 줄) 중 정확히 하나만 받는다.
-  → [config/tools/tool_execute.toml](../../config/tools/tool_execute.toml)
+  넘기는 한 줄) 중 정확히 하나만 받는다. Keeper의 `sandbox_image`는 내장
+  `config/sandbox-images.toml`의 이름이다. 선택값이 없거나 빈 문자열이면 `Not_declared`로
+  거절한다. Docker와 MicroVM의 컨테이너를 시작할 때는 현재 config root의
+  `sandbox-image-builds.toml`에서 그 이름에 대해 image store별로
+  기록된 `repository:tag`를 읽는다. `masc sandbox-image promote`는 선택한 store에 이미 있는 tag를
+  기록하며 이미지를 빌드하지 않는다. 이름·promote된 build가 없거나 catalog를 못 읽으면
+  임의의 image를 고르지 않고 거절한다.
+  → [config/tools/tool_execute.toml](../../config/tools/tool_execute.toml),
+  [Keeper_sandbox_image_resolver](../../lib/keeper/keeper_sandbox_image_resolver.mli),
+  [Keeper_sandbox_image_catalog](../../lib/keeper/keeper_sandbox_image_catalog.mli)
 
 **Endpoint Allowed Paths (엔드포인트 허용 경로)**
 : SSH 샌드박스 타깃(`Sandbox_target.Ssh`, `Exec_ssh_endpoint.t`)에서 명령이 접근할 수 있는
@@ -2274,6 +2323,10 @@ status: reference
   operator config의 Keeper 이름에 묶인다. cluster 사이에서 무엇을 같이 쓰는지는
   **Cluster** 항목에 적었다.
 
+**Workspace Memory Proposal (작업공간 기억 제안)**
+: Workspace memory curator가 캡처한 작업공간 인벤토리를 바탕으로 만든 모델 제안. 제안은 claim, conflict, exclusion을 원본 source ID에 연결하고 해당 인벤토리에 묶인다. 저장·제출은 참조 구조만 검증하며 의미상 참인지 판정하지 않고, 제안은 Keeper Memory OS를 변경하지 않는다. 게시된 proposal descriptor는 제안을 찾게 하는 기록이지 의미 검증이나 승격이 아니다.
+  → [workspace_memory_proposal](../../lib/workspace_memory/workspace_memory_proposal.mli) · [workspace_memory_context](../../lib/workspace_memory/workspace_memory_context.mli) · [workspace_memory_publication](../../lib/workspace_memory/workspace_memory_publication.mli)
+
 **Continuity Snapshot (하던 일 저장본)**
 : 이어서 할 일의 설명과, 그 설명이 대신하는 완료된 History 범위를 함께 담은
   한 파일. 설명 절반은 Working State이고, 범위 절반은 완료된 History 구간이다.
@@ -2499,8 +2552,8 @@ status: reference
 **Reverse Copy Judgment (역방향 사본 판정)**
 : Librarian 회차가 내놓은 새 claim 중 `absorbs`에 기억을 적었으나 실제로는 그 중
   아무것도 흡수하지 못한 claim에 대해, 남겨진 기억들이 그 claim의 내용을 이미
-  담고 있는지 묻는 역방향 판정. "새 claim은 항상 적용된다"는 기본 규칙의 단 하나의
-  예외다(RFC-0463 §2.8·#38243).
+  담고 있는지 묻는 역방향 판정. 흡수 판정이 완료된 회차에서 사본 claim은
+  저장하지 않는다(RFC-0463 §2.8·#38243).
   - 배경: Librarian이 매 회차 같은 주제를 조금씩 다른 문장으로 다시 써서 기존 Fact가
     흡수되지 않고 paraphrase 사본이 무한 축적되는 문제를 막는다.
   - 전이 및 판정:
@@ -2513,9 +2566,10 @@ status: reference
       동점(tie)은 claim을 버리지 않도록 미전달로 본다.
     - 결과: 모든 문장이 전달되었으면 `Copy`로 판정해 원장에 저장하지 않고
       탈락시킨다(`without_copies`). 전달되지 않은 문장이 하나라도 있으면
-      `Carries_new_statement`로 정상 적용한다. 판정 실패나 크기 초과 등
-      `Not_judged`(`Gate_judgment_failed`·`No_source_fits_the_state`·`Statement_too_large`·`No_statement`·`Request_failed`)인
-      경우에도 기존처럼 정상 적용한다.
+      `Carries_new_statement`로 정상 적용한다. 역방향 판정만 실패하거나 입력이 커서
+      `Not_judged`(`No_source_fits_the_state`·`Statement_too_large`·`No_statement`·`Request_failed`)이면
+      claim을 적용한다. 흡수 판정이 실패해 `Gate_judgment_failed`가 되면 Memory 회차의
+      스냅숏 커밋을 보류하므로 새 claim과 원본 모두 그대로 남는다.
   - 저장 및 표면: 탈락된 claim은 원장에 쓰이지 않고 로그에 남으며, Librarian 회차
     실행 결과의 `copy_checks`에 각 판정 결과(`verdict`)와 호출 횟수가 기록된다.
   → [Keeper_librarian_absorb_gate](../../lib/keeper/keeper_librarian_absorb_gate.mli)

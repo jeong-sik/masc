@@ -796,6 +796,23 @@ let periodic_cadence_after_cycle ~periodic_due ~now cadence =
   else cadence
 ;;
 
+(* A cycle that raises leaves no outcome to settle the deferred lane from.
+   Settle empty instead of skipping: the slot and its durable file then agree
+   that no suffix is running, so the next cycle walks from the head
+   in-process and after a restart alike. Skipping leaves the slot Dispatched
+   with the suffix file behind, and a restart resurrects a suffix the
+   in-process next cycle never sees. *)
+let run_cycle_and_settle_lane ~run ~settle ~lane_of_outcome =
+  match run () with
+  | outcome ->
+    settle (lane_of_outcome outcome);
+    outcome
+  | exception exn ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    settle None;
+    Printexc.raise_with_backtrace exn backtrace
+;;
+
 let run_keepalive_unified_turn
       ~wake
       ~(ctx : _ context)
@@ -1129,8 +1146,12 @@ let run_keepalive_unified_turn
               ()
           in
           let run_cycle () = run_fresh_cycle () in
-          let cycle_outcome = run_cycle () in
-          settle_deferred_runtime_lane (Cycle.deferred_runtime_lane cycle_outcome);
+          let cycle_outcome =
+            run_cycle_and_settle_lane
+              ~run:run_cycle
+              ~settle:settle_deferred_runtime_lane
+              ~lane_of_outcome:Cycle.deferred_runtime_lane
+          in
           cycle_outcome_ref := Some cycle_outcome;
           (* What the next turn is told about this one moved into
              [Keeper_heartbeat_loop_cycle.run_keeper_cycle]: every lane runs
@@ -1862,6 +1883,7 @@ module For_testing = struct
   let consume_deferred_lane = Deferred_lane_slot.consume
   let settle_deferred_lane = Deferred_lane_slot.settle
   let deferred_lane_for_assignment = Deferred_lane_slot.for_assignment
+  let run_cycle_and_settle_lane = run_cycle_and_settle_lane
   let batch_disposition_records_continuation =
     batch_disposition_records_continuation
   ;;

@@ -3651,21 +3651,16 @@ let render_planning_detail (state : state)
 (* The store's status vocabulary, as colours. An unknown word keeps its own
    text and no colour: the row is still a fact about the store, just one this
    build does not rank. *)
-(* Who the wake reaches. The payload target names a keeper on the rows this
-   list can draw; rows without one fall back to the summary, then the source,
-   so every row names something.
-
-   The kind prefix comes off first. It is "keeper:" on every row here, so it
-   separates nothing and takes seven cells out of the name -- which left two
-   schedules for two different keepers both reading "keeper:~". The agenda
-   strip has stripped it since it was written; this list is the surface that
-   did not.
+(* Who the wake reaches. The server's keeper name takes precedence over the
+   encoded target. An older server has only the target, which stays unchanged
+   rather than being parsed as a name. Rows without either fall back to the
+   summary, then the source, so every row names something.
 
    Lifted out of the row loop because the column measures itself from the
    rows now: the width and the cell have to be reading the same string. *)
 let schedule_row_subject (row : Masc_tui_types.schedule_row) =
-  match row.sch_payload_target with
-  | Some target -> Masc_tui_agenda.short_who target
+  match Masc_tui_types.schedule_row_who row with
+  | Some who -> who
   | None -> (
     match row.sch_payload_summary with
     | Some summary -> summary

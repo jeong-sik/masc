@@ -123,10 +123,8 @@ let get_action request reqd =
 
 (* Use the source binding's kind table so a new kind must say whether it has a
    current screen before the live route can decode it. *)
-type screen_source = Lane_addon_sources.live_reader = Msx_screen | Dos_screen
-
-let screen_source_kind source =
-  Lane_addon_sources.(kind_to_string (kind_of_live_reader source))
+let screen_source_kind machine =
+  Lane_addon_sources.(kind_to_string (kind_of_machine machine))
 
 type since = { count : int; incarnation : string }
 
@@ -144,13 +142,12 @@ let decode_live_query fields =
               (match Lane_addon_sources.kind_of_string raw with
                | None -> Error ("unknown source_kind: " ^ raw)
                | Some kind ->
-                   (match Lane_addon_sources.live_screen_of_kind kind with
-                    | Some screen -> Ok screen
+                   (match Lane_addon_sources.machine_of_kind kind with
+                    | Some machine -> Ok machine
                     | None ->
                         Error
                           (raw ^ " has no screen to watch; live accepts "
-                           ^ screen_source_kind Msx_screen ^ " and "
-                           ^ screen_source_kind Dos_screen))) in
+                           ^ String.concat " and " (List.map screen_source_kind Machine_lane.all)))) in
         (* Decimal digits only: int_of_string_opt also reads 0x10 and 1_000.
            Digits it still cannot read overflow an int. *)
         let count_of value =
@@ -198,11 +195,11 @@ let answer_from_publication source ~since = function
 let live_from_published_mark source ~since =
   let publication =
     match source with
-    | Msx_screen ->
+    | Machine_lane.Msx ->
         Machine_live_publication.map
           (fun { Msx_lane.count; incarnation } -> { count; incarnation })
           (Msx_lane.current_publication ())
-    | Dos_screen ->
+    | Machine_lane.Dos ->
         Machine_live_publication.map
           (fun { Dos_lane.count; incarnation } -> { count; incarnation })
           (Dos_lane.current_publication ())
@@ -246,8 +243,8 @@ let dos_live source ~since () : Yojson.Safe.t =
    which both machines share. *)
 let with_activity source json =
   match source with
-  | Msx_screen -> json
-  | Dos_screen ->
+  | Machine_lane.Msx -> json
+  | Machine_lane.Dos ->
       (match json with
        | `Assoc fields ->
            `Assoc (fields @ [ "activity", Lane_activity.to_json_list (Dos_lane.recent_activity ()) ])
@@ -259,8 +256,8 @@ let live_json source ~since : Yojson.Safe.t =
      | Answered json -> json
      | Needs_locked_read ->
          (match source with
-          | Msx_screen -> Eio_unix.run_in_systhread (msx_live source ~since)
-          | Dos_screen -> Eio_unix.run_in_systhread (dos_live source ~since)))
+          | Machine_lane.Msx -> Eio_unix.run_in_systhread (msx_live source ~since)
+          | Machine_lane.Dos -> Eio_unix.run_in_systhread (dos_live source ~since)))
 
 let get_live request reqd =
   with_read_auth (fun _state _request reqd ->

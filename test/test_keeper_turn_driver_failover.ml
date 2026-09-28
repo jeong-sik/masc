@@ -5886,6 +5886,63 @@ let test_heartbeat_restart_resumes_deferred_suffix () =
             (Loop.restore_deferred_lane_slot ~lane_now:unchanged_lane ~base_path ~keepers_dir:(cluster_keepers_dir base_path "alpha") ~keeper_name:"backend"))))
 ;;
 
+(* A cycle that raises after its dispatch consumed the suffix leaves no
+   outcome to settle from. The lane settles empty: a restart then walks from
+   the head like the in-process next cycle does, instead of resurrecting a
+   suffix the live loop never sees. *)
+let test_crashing_cycle_settles_no_suffix () =
+  with_deferred_store (fun base_path ->
+    let module Loop = Masc.Keeper_heartbeat_loop.For_testing in
+    let keepers_dir = cluster_keepers_dir base_path "alpha" in
+    let hint =
+      Driver.For_testing.make_deferred_runtime_lane
+        ~assignment_id:"lane.restart"
+        ~failed_runtime_id:"runtime.a"
+        ~next_runtime_id:"runtime.b"
+        ~later_runtime_ids:[ "runtime.c" ]
+        ~failure:(accept_empty_no_progress_error "runtime.a")
+    in
+    let slot =
+      Loop.restore_deferred_lane_slot
+        ~lane_now:unchanged_lane ~base_path ~keepers_dir ~keeper_name:"backend"
+    in
+    Loop.record_deferred_lane slot hint;
+    Loop.consume_deferred_lane slot hint;
+    (match
+       Loop.run_cycle_and_settle_lane
+         ~run:(fun () -> raise (Failure "cycle crashed"))
+         ~settle:(Loop.settle_deferred_lane slot)
+         ~lane_of_outcome:(fun () -> Alcotest.fail "no outcome on raise")
+     with
+     | _ -> Alcotest.fail "the crash did not propagate"
+     | exception (Failure msg) when String.equal msg "cycle crashed" -> ()
+     | exception _ -> Alcotest.fail "the crash propagated as another exception");
+    Alcotest.(check bool)
+      "a restart after the crash walks from the head"
+      true
+      (Option.is_none
+         (Loop.deferred_lane_for_assignment ~assignment_id:"lane.restart"
+            (Loop.restore_deferred_lane_slot
+               ~lane_now:unchanged_lane ~base_path ~keepers_dir ~keeper_name:"backend"))))
+;;
+
+(* The success path settles the outcome's own hint and returns the outcome. *)
+let test_completed_cycle_settles_its_hint () =
+  let module Loop = Masc.Keeper_heartbeat_loop.For_testing in
+  let settled = ref [] in
+  let outcome =
+    Loop.run_cycle_and_settle_lane
+      ~run:(fun () -> `Done)
+      ~settle:(fun lane -> settled := lane :: !settled)
+      ~lane_of_outcome:(function `Done -> Some "hint-b")
+  in
+  Alcotest.(check bool) "outcome is returned" true (outcome = `Done);
+  Alcotest.(check (list (option string)))
+    "outcome hint is settled"
+    [ Some "hint-b" ]
+    !settled
+;;
+
 (* Two named clusters with the same keeper name and assignment: recording or
    clearing a suffix in one leaves the other's untouched. *)
 let test_deferred_suffix_is_isolated_between_clusters () =
@@ -6697,6 +6754,14 @@ let () =
             "heartbeat restart resumes the deferred suffix"
             `Quick
             test_heartbeat_restart_resumes_deferred_suffix;
+          Alcotest.test_case
+            "crashing cycle settles no suffix"
+            `Quick
+            test_crashing_cycle_settles_no_suffix;
+          Alcotest.test_case
+            "completed cycle settles its hint"
+            `Quick
+            test_completed_cycle_settles_its_hint;
           Alcotest.test_case
             "deferred suffix is isolated between clusters"
             `Quick

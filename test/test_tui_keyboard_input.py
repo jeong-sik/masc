@@ -8718,9 +8718,22 @@ def chat_visibility_modes_interaction(
             # A forced open while the first GET is held must coalesce into
             # one follow-up. Leave results visible when the first GET returns:
             # the continuation must launch the pending read in this mode too.
+            # Compact is the resting mode, so the header omits its tools tag.
             send_and_wait(
-                process, master_fd, output, b"\x04", b"reasoning:full tools:compact"
+                process, master_fd, output, b"\x04", b"tool calls compact"
             )
+            completed_end = output.rfind(FRAME_END) + len(FRAME_END)
+            compact_rows = screen_rows(bytes(output[:completed_end]))
+            header_row = screen_row_of(compact_rows, b"reasoning:full")
+            footer_row = screen_row_of(compact_rows, b"tool calls compact")
+            if (
+                header_row < 0
+                or footer_row <= header_row
+                or b"tools:" in compact_rows[header_row]
+            ):
+                raise AssertionError(
+                    f"compact screen did not show its header and footer: {compact_rows!r}"
+                )
             send_and_wait(
                 process, master_fd, output, b"\x04", b"reasoning:full tools:results"
             )
@@ -17692,7 +17705,8 @@ def run_schedule_source_status_regression(executable: str) -> None:
         assert isinstance(good, tuple)
         recovered = json.loads(json.dumps(good[1]))
         recovered["requests"][0]["status"] = "scheduled"
-        recovered["requests"][0]["payload_target"] = "recovered-keeper"
+        recovered["requests"][0]["payload_target"] = ("keeper:" if initial_error else "") + "encoded-keeper"
+        recovered["requests"][0]["payload_keeper_name"] = "recovered-keeper"
         recovered["requests"][0]["payload"]["body"]["keeper_name"] = "recovered-keeper"
         fail_reads = threading.Event()
         recovered_reads = threading.Event()
@@ -17731,6 +17745,7 @@ def run_schedule_source_status_regression(executable: str) -> None:
                 # screens within Dune's output allowance for browser replay.
                 print("SCHEDULE_SOURCE_PTY_EVIDENCE " + json.dumps({
                     "phase": phase, "initial_error": initial_error,
+                    "has_prefix": initial_error,
                     "fixture": "isolated HTTP source status", "rows": 30, "columns": 100,
                     "binary_sha256": binary_sha256, "encoding": "zlib+base64",
                     "pty": base64.b64encode(zlib.compress(captured[start:end])).decode(),
@@ -17774,12 +17789,20 @@ def run_schedule_source_status_regression(executable: str) -> None:
 
             recovered_reads.set()
             fail_reads.clear()
-            send_and_wait(process, master_fd, output, b"r", b"recovered-keeper")
+            send_and_wait(process, master_fd, output, b"r", b"status:scheduled")
+            evidence("source-recovered")
             screen = require("status:scheduled", "Requests: 1", "schedule-proof-701")
+            agenda_rows = [
+                row for row in screen_rows(bytes(output)).values()
+                if "▸".encode() in row and b"Run the detailed scheduled sweep." in row
+            ]
+            if len(agenda_rows) != 1 or b"recovered-keeper" not in agenda_rows[0]:
+                raise AssertionError(f"agenda did not use the Keeper name field: {agenda_rows!r}")
+            if b"keeper:" in agenda_rows[0] or b"encoded-keeper" in agenda_rows[0]:
+                raise AssertionError(f"agenda parsed the encoded target: {agenda_rows[0]!r}")
             for absent in ("조회 실패:", "갱신 실패:", "HTTP 503", "status:running"):
                 if absent.encode() in screen:
                     raise AssertionError(f"Recovered source retained old status: {screen!r}")
-            evidence("source-recovered")
             os.write(master_fd, b"q")
 
         run_terminal_scenario(

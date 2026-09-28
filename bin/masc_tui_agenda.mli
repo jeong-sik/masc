@@ -36,7 +36,9 @@ type scheduled =
             scheduled row rather than an option beside it: a row on the clock
             half of the strip has a clock. *)
   ; standing : standing
-  ; who : string  (** [payload_target], e.g. ["keeper:edgar.a.poe"] *)
+  ; who : string
+        (** [payload_keeper_name] when present, otherwise the unparsed
+            [payload_target] from an older server. *)
   ; what : string  (** [payload_summary], the title the operator wrote *)
   ; recurrence : string
         (** [recurrence_summary], e.g. ["every 3600s"]. The strip has no room
@@ -183,17 +185,3 @@ val step : line list -> selected:destination -> step -> destination
 (** Explicit cursor movement between actionable identities. An absent or
     removed selection starts at the first target; no targets yields [Nowhere].
     Merely replacing a reading does not call this or select a neighbour. *)
-
-val short_who : string -> string
-(** A wake target with its kind prefix removed: ["keeper:edgar.a.poe"] reads
-    back as ["edgar.a.poe"].
-
-    Every row a wake surface draws has the same kind, so the prefix
-    distinguishes nothing and costs seven cells of a line that has to fit a
-    name. That is not only waste: on a narrow column the seven cells are
-    taken out of the name, and the name is the whole reason the cell exists.
-    Two schedules for two different keepers both drew ["keeper:~"] before the
-    Schedules list called this.
-
-    Exported because a second surface needs the same answer, and two
-    surfaces spelling the same rule twice is how they come to disagree. *)

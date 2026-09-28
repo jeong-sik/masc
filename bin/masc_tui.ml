@@ -3341,7 +3341,7 @@ let launch_dos_live_poll (state : Masc_tui_types.state) ~mailbox =
       let result =
         try
           Masc_tui_http.fetch_machine_live ~host:server_peer_host ~port:request.live_port
-            Masc_tui_machine_live.Dos ~since
+            Masc.Machine_lane.Dos ~since
         with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error (Printexc.to_string exn)
@@ -8546,13 +8546,13 @@ let msx_surface_current () =
 
 let render_spectator (state : Masc_tui_types.state) =
   match state.machine_source with
-  | Masc_tui_machine_live.Msx ->
+  | Masc.Machine_lane.Msx ->
       Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
         ~connection:state.connection_status ~live:state.msx_live state.msx_frame
         (msx_surface_current ())
-  | Masc_tui_machine_live.Dos ->
+  | Masc.Machine_lane.Dos ->
       Masc_tui_msx.render_live ~write:write_to_terminal ~connection:state.connection_status
-        ~activity:state.dos_activity Masc_tui_machine_live.Dos state.dos_live
+        ~activity:state.dos_activity Masc.Machine_lane.Dos state.dos_live
 ;;
 
 (* A live read names no mode, media or players. Keep the last tick metadata
@@ -8585,7 +8585,7 @@ let observe_msx_frame ?(clear_notice = false) (state : Masc_tui_types.state) =
        picture answer is needed by the MSX view. *)
     Result.map fst
       (Masc_tui_http.fetch_machine_live ~host:server_peer_host ~port:state.port
-         Masc_tui_machine_live.Msx ~since:(Masc_tui_machine_live.since state.msx_live))
+         Masc.Machine_lane.Msx ~since:(Masc_tui_machine_live.since state.msx_live))
   in
   (match Masc_tui_machine_live.advance state.msx_live result with
    | None -> ()
@@ -14983,8 +14983,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            state.dos_live_in_flight <- None;
            let watching_dos =
              match state.machine_source with
-             | Masc_tui_machine_live.Dos -> true
-             | Masc_tui_machine_live.Msx -> false
+             | Masc.Machine_lane.Dos -> true
+             | Masc.Machine_lane.Msx -> false
            in
            if request.live_view == !msx_poll_view && request.live_port = state.port
               && state.msx_open && (state.msx_menu_open || watching_dos) then begin
@@ -15327,10 +15327,13 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       (match result with
        | Error detail ->
            notice ~kind:Notice_failure ("/copy could not read chat history: " ^ detail)
-       | Ok { Keeper_chat_history.rows; _ } ->
+       | Ok { Keeper_chat_history.rows; dropped } ->
            (* Direct and autonomous rows arrive from separate stores. Their
               turn sequence orders two recorded turns; otherwise use the
-              display clock and keep append order on an exact tie. *)
+              display clock and keep append order on an exact tie. Unreadable
+              rows arrive only as [dropped]: the newest readable reply may not
+              be the newest reply, so the notice says what the history pane's
+              banner says rather than reporting a partial read as the latest. *)
            let newer (row : Keeper_chat_history.row) prior =
              match row.turn_sequence, prior.Keeper_chat_history.turn_sequence with
              | Some current, Some previous when current <> previous ->
@@ -15361,20 +15364,30 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                None rows
            in
            (match newest with
-            | None -> notice ~kind:Notice_failure "/copy found no completed reply"
+            | None ->
+                notice ~kind:Notice_failure
+                  (if dropped > 0 then
+                     Printf.sprintf
+                       "/copy found no completed reply (%d saved row(s) could not be read)"
+                       dropped
+                   else "/copy found no completed reply")
             | Some row ->
-                let characters =
-                  String.fold_left
-                    (fun count byte ->
-                      if Char.code byte land 0xc0 = 0x80 then count else count + 1)
-                    0 row.text
+                let characters = Masc_tui_message_layout.grapheme_count row.text in
+                let assessment =
+                  if dropped > 0 then "latest readable reply" else "latest reply"
+                in
+                let unreadable =
+                  if dropped > 0 then
+                    Printf.sprintf "; %d saved row(s) could not be read" dropped
+                  else ""
                 in
                 Terminal_write_repair.note ();
                 write_to_terminal (Link.osc52_copy row.text);
                 notice ~kind:Notice_reply
                   (Printf.sprintf
-                     "Sent %s's latest reply (%d characters, %d bytes) via OSC 52 (terminal support unconfirmed)"
-                     keeper_name characters (String.length row.text))))
+                     "Sent %s's %s (%d characters, %d bytes) via OSC 52 (terminal support unconfirmed)%s"
+                     keeper_name assessment characters (String.length row.text)
+                     unreadable)))
   | Keeper_chat_history_loaded
       (generation, keeper_name, history_result, memory_result) ->
       (match state.msg_history_inflight with
@@ -18556,8 +18569,8 @@ and is loaded on demand through keeper_skill.
              when no keeper is pressing. The DOS screen is only read, with the
              counter of the picture already drawn. *)
           match state.machine_source with
-          | Masc_tui_machine_live.Msx -> launch_msx_poll state ~mailbox:async_messages
-          | Masc_tui_machine_live.Dos -> launch_dos_live_poll state ~mailbox:async_messages
+          | Masc.Machine_lane.Msx -> launch_msx_poll state ~mailbox:async_messages
+          | Masc.Machine_lane.Dos -> launch_dos_live_poll state ~mailbox:async_messages
         end
       end;
       let guarding_before_read =
@@ -18778,15 +18791,15 @@ and is loaded on demand through keeper_skill.
          repaint, and disowning the DOS read in flight there would drop its
          answer, so keys typed steadily would freeze the picture. *)
       (match msx_key, state.machine_source with
-       | Some _, (Masc_tui_machine_live.Msx | Masc_tui_machine_live.Dos)
+       | Some _, (Masc.Machine_lane.Msx | Masc.Machine_lane.Dos)
          when state.msx_menu_open -> invalidate_msx_poll ()
-       | Some "esc", (Masc_tui_machine_live.Msx | Masc_tui_machine_live.Dos) ->
+       | Some "esc", (Masc.Machine_lane.Msx | Masc.Machine_lane.Dos) ->
            invalidate_msx_poll ()
-       | Some ("f6" | "f7" | "f8"), Masc_tui_machine_live.Msx -> invalidate_msx_poll ()
-       | Some name, Masc_tui_machine_live.Msx when Option.is_some (msx_server_key name) ->
+       | Some ("f6" | "f7" | "f8"), Masc.Machine_lane.Msx -> invalidate_msx_poll ()
+       | Some name, Masc.Machine_lane.Msx when Option.is_some (msx_server_key name) ->
            invalidate_msx_poll ()
-       | Some _, (Masc_tui_machine_live.Msx | Masc_tui_machine_live.Dos)
-       | None, (Masc_tui_machine_live.Msx | Masc_tui_machine_live.Dos) -> ());
+       | Some _, (Masc.Machine_lane.Msx | Masc.Machine_lane.Dos)
+       | None, (Masc.Machine_lane.Msx | Masc.Machine_lane.Dos) -> ());
       (match msx_key with
       | None -> ()
       | Some name when state.msx_menu_open -> (
@@ -18799,9 +18812,9 @@ and is loaded on demand through keeper_skill.
               state.msx_menu_open <- false;
               let loaded =
                 match state.machine_source, state.dos_live with
-                | Masc_tui_machine_live.Msx, _ -> Option.is_some state.msx_frame
-                | Masc_tui_machine_live.Dos, Masc_tui_machine_live.Showing _ -> true
-                | Masc_tui_machine_live.Dos,
+                | Masc.Machine_lane.Msx, _ -> Option.is_some state.msx_frame
+                | Masc.Machine_lane.Dos, Masc_tui_machine_live.Showing _ -> true
+                | Masc.Machine_lane.Dos,
                   (Masc_tui_machine_live.Unread | Masc_tui_machine_live.Not_loaded
                   | Masc_tui_machine_live.Failed _) -> false
               in
@@ -18833,7 +18846,7 @@ and is loaded on demand through keeper_skill.
               | Ok () ->
                   (match choice with Swap_disk _ -> state.msx_notice <- Some "Disk changed; backup: before-disk-change" | _ -> ());
                   state.msx_menu_open <- false;
-                  state.machine_source <- Masc_tui_machine_live.Msx;
+                  state.machine_source <- Masc.Machine_lane.Msx;
                   observe_msx_frame state;
                   state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
                   render_spectator state
@@ -18843,8 +18856,8 @@ and is loaded on demand through keeper_skill.
                     ~status:((match choice with Swap_disk _ -> "disk change failed: " | _ -> "load failed: ") ^ message) state))
       | Some name
         when (match state.machine_source with
-              | Masc_tui_machine_live.Dos -> true
-              | Masc_tui_machine_live.Msx -> false)
+              | Masc.Machine_lane.Dos -> true
+              | Masc.Machine_lane.Msx -> false)
              && not (List.mem name [ "esc"; "+"; "="; "-"; "_" ]) ->
           (* The DOS screen is watched, not driven: a key that is not the
              spectator's own (leave, size) repaints and never reaches the MSX

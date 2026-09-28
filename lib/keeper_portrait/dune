@@ -1,0 +1,15 @@
+; Keeper portraits: a candle imp whose look comes from the keeper's name.
+; Pure: no I/O, no clock, no global Random. Look (what the keeper is) and
+; draw (pixels) are separate so items can be equipped without touching the
+; name-derived body.
+
+(include_subdirs no)
+
+(library
+ (name masc_keeper_portrait)
+ (public_name masc.keeper_portrait)
+ (wrapped false)
+ (modules keeper_portrait_look keeper_portrait_draw)
+ (flags
+  (:standard -w +4 -w +33))
+ (libraries digestif))

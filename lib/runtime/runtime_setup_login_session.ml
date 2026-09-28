@@ -1,7 +1,7 @@
 type key = Enter | Up | Down | Tab | Eof
 type input = Text of string | Key of key
 type error = Already_running | Not_found | Not_running | Input_pending | Invalid_input
-  | Cancelled | Transport_failed | Process_failed of int
+  | Cancelled | Transport_failed | Process_failed of int | Interpreter_missing
 type command = Input of input | Cancel
 type phase = Preparing | Running | Observing | Closed
 type t = {
@@ -20,6 +20,8 @@ let error_message = function
   | Cancelled -> "Login was cancelled. Saved credentials may still need verification."
   | Transport_failed -> "The login process could not be observed. Check the account before retrying."
   | Process_failed code -> Printf.sprintf "The official login process exited with status %d." code
+  | Interpreter_missing ->
+    "Login needs Python 3. Reinstall the complete MASC release to restore its bundled Python, or install Python 3 and retry."
 
 let input_of_json = function
   | `Assoc fields when List.length fields = 2 ->
@@ -103,7 +105,25 @@ let command_json = function
     let key = match key with Enter -> "enter" | Up -> "up" | Down -> "down" | Tab -> "tab" | Eof -> "eof" in
     `Assoc ["kind", `String "key"; "key", `String key]
 
-let run t ~env ~child_env ~cwd ~argv ~terminal ~is_closed ~on_ready ~on_input_ready ~on_output =
+let executable path =
+  try Unix.access path [Unix.X_OK]; true with Unix.Unix_error _ -> false
+;;
+
+(* Portable releases have no python3 on PATH; the release's bundled
+   interpreter beside the server binary runs the helper there. *)
+let python ~binary =
+  let bundled = Filename.concat (Filename.dirname binary) "python/bin/python3" in
+  if executable bundled then Some bundled
+  else
+    Option.bind (Sys.getenv_opt "PATH") (fun path ->
+      String.split_on_char ':' path
+      |> List.filter (fun directory -> directory <> "")
+      |> List.find_map (fun directory ->
+        let candidate = Filename.concat directory "python3" in
+        if executable candidate then Some candidate else None))
+;;
+
+let run_with interpreter t ~env ~child_env ~cwd ~argv ~terminal ~is_closed ~on_ready ~on_input_ready ~on_output =
   let clock = Eio.Stdenv.clock env in
   Atomic.set t.terminal terminal;
   let run_child () = Eio.Switch.run (fun sw ->
@@ -115,7 +135,7 @@ let run t ~env ~child_env ~cwd ~argv ~terminal ~is_closed ~on_ready ~on_input_re
     let _proc = Eio.Process.spawn ~sw mgr ~env:child_env
       ~cwd:Eio.Path.(Eio.Stdenv.fs env / cwd)
       ~stdin:stdin_r ~stdout:stdout_w ~stderr:stderr_w
-      (["python3"; "-I"; "-B"; "-c"; Embedded_account_login.script;
+      ([interpreter; "-I"; "-B"; "-c"; Embedded_account_login.script;
         (if terminal then "pty" else "pipe")] @ argv) in
     Eio.Flow.close stdin_r; Eio.Flow.close stdout_w; Eio.Flow.close stderr_w;
     (* Close only: a release-hook await can deadlock after Eio cancels its
@@ -173,3 +193,13 @@ let run t ~env ~child_env ~cwd ~argv ~terminal ~is_closed ~on_ready ~on_input_re
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | Unix.Unix_error _ | Sys_error _ | Eio.Io _ | End_of_file
   | Yojson.Json_error _ | Eio.Buf_read.Buffer_limit_exceeded -> Error Transport_failed
+;;
+
+let run t ~env ~child_env ~cwd ~argv ~terminal ~is_closed ~on_ready ~on_input_ready ~on_output =
+  let binary =
+    try Unix.realpath Sys.executable_name with Unix.Unix_error _ | Sys_error _ -> Sys.executable_name
+  in
+  match python ~binary with
+  | None -> Error Interpreter_missing
+  | Some interpreter ->
+    run_with interpreter t ~env ~child_env ~cwd ~argv ~terminal ~is_closed ~on_ready ~on_input_ready ~on_output

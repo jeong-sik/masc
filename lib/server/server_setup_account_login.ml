@@ -30,7 +30,7 @@ let session_status = function
   | Session.Already_running | Not_running | Input_pending -> `Conflict
   | Not_found -> `Not_found
   | Invalid_input -> `Bad_request
-  | Cancelled | Transport_failed | Process_failed _ -> `Bad_gateway
+  | Cancelled | Transport_failed | Process_failed _ | Interpreter_missing -> `Bad_gateway
 
 let receipt_failure = "The private login recovery record could not be saved."
 let account_failure = "The private login account could not be prepared."
@@ -134,7 +134,7 @@ let start ~actor ~base_path ~body request reqd =
                     let status = match error with
                       | Session.Cancelled -> Receipt.Cancelled
                       | Already_running | Not_found | Not_running | Input_pending
-                      | Invalid_input | Transport_failed | Process_failed _ -> Receipt.Failed in
+                      | Invalid_input | Transport_failed | Process_failed _ | Interpreter_missing -> Receipt.Failed in
                     status, Session.error_message error) in
                 let* observed = observe () |> Result.map_error (fun _ ->
                   Receipt.Failed, "The official client did not confirm the selected account. Retry login or verify the account.") in

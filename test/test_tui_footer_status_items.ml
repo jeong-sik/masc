@@ -498,8 +498,8 @@ let test_narrow_width_drops_whole_hint_items () =
      still too wide. Items must drop from the back with an ellipsis — no
      half-word cell cut. *)
   let hints =
-    "j/k:move  right/Enter:read  s:sort  Y:copy link  v/V:vote  w:write  \
-     r:refresh  Tab:next"
+    "j/k:move  right/Enter:read  s:sort  Y:copy link  v:vote up  V:vote down  \
+     w:write  r:refresh  Tab:next"
   in
   let narrow =
     Masc_tui_footer.line ~dim:"" ~reset:"" ~max_cells:60 ~port:8935 ~hints ()
@@ -512,6 +512,22 @@ let test_narrow_width_drops_whole_hint_items () =
     (contains ~needle:"\xe2\x80\xa6" narrow);
   check_bool "no half item survives the cut" false
     (contains ~needle:"Tab:nex" narrow && not (contains ~needle:"Tab:next" narrow))
+
+(* The Board vote hint is one item per direction, because the case is the
+   direction: lowercase [v] votes up, uppercase [V] votes down (#39529). The
+   fitter drops whole items from the back on a narrow terminal, so the item
+   it keeps has to carry its exact case -- a lowercased or half-cut key would
+   read as the wrong direction. *)
+let test_vote_hint_case_survives_a_narrow_row () =
+  let hints = "v:vote up  V:vote down" in
+  let row =
+    Masc_tui_footer.line ~dim:"" ~reset:"" ~max_cells:20 ~port:8935 ~hints ()
+  in
+  check_at_most_cells "20 cells" 20 row;
+  check_bool "the kept vote key keeps its exact case" true
+    (contains ~needle:"v:vote up" row);
+  check_bool "the dropped direction is not half-cut" false
+    (contains ~needle:"V:vote" row)
 
 let test_answering_carries_the_lead_elapsed_time () =
   check_string "the lead keeper's runtime rides the badge"
@@ -873,8 +889,8 @@ let test_a_label_holding_a_colon_still_reads_its_key () =
 
 let test_cut_hints_name_the_key_that_shows_them () =
   let hints =
-    "j/k:move  right/Enter:read  s:sort  Y:copy link  v/V:vote  w:write  \
-     r:refresh  Tab:next  q:quit"
+    "j/k:move  right/Enter:read  s:sort  Y:copy link  v:vote up  V:vote down  \
+     w:write  r:refresh  Tab:next  q:quit"
   in
   let line =
     Masc_tui_footer.line ~dim:"" ~reset:"" ~max_cells:40 ~port:8935 ~hints ()
@@ -1363,6 +1379,8 @@ let tests =
           test_answering_carries_the_lead_elapsed_time
       ; Alcotest.test_case "narrow width drops whole hint items" `Quick
           test_narrow_width_drops_whole_hint_items
+      ; Alcotest.test_case "vote hint case survives a narrow row" `Quick
+          test_vote_hint_case_survives_a_narrow_row
       ; Alcotest.test_case "worktree server warning survives narrow widths"
           `Quick test_worktree_server_warning_survives_narrow_widths
       ; Alcotest.test_case "build mismatch names the older side" `Quick

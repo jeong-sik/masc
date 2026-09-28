@@ -306,7 +306,14 @@ let approval_retry =
    "[c] Reply   [v/V] Vote (+/-)   [Y] Copy Link   [Esc] Back" -- above a
    footer that spelled c, Y and Esc again and had no vote key at all, so that
    row was the only place on the screen that said v votes. *)
-let board_vote_key = b Act "v / V" "vote" ~help:"vote the post up or down"
+(* One binding per direction, because the footer draws [key:label] and a
+   single "v / V:vote" left the reader to guess which case picked which way.
+   The dispatcher already reads the shift as the direction (masc_tui.ml:
+   lowercase [v] votes up, uppercase [V] votes down), so the footer now says
+   the same thing: an operator read a +1 turn to -1 and asked whether it was
+   a bug (2026-09-28, #39529). *)
+let board_vote_up_key = b Act "v" "vote up" ~help:"vote the post up"
+let board_vote_down_key = b Act "V" "vote down" ~help:"vote the post down"
 let board_reply_key = b Act "c" "reply" ~help:"reply (while reading)"
 let board_copy_key = b Act "Y" "copy link" ~help:"copy the selected post reference"
 
@@ -554,7 +561,8 @@ let for_surface = function
       ; b Act "Right / Enter" "read" ~help:"read the post"
       ; b Act "Left / Esc" "back" ~help:"close the post"
       ; b Act "w" "write" ~help:"write a post"
-      ; board_vote_key
+      ; board_vote_up_key
+      ; board_vote_down_key
       ; board_reply_key
       (* Three keys below answer only while a post is open, and the table said
          so in prose the footer cannot read. The list footer named them and
@@ -1221,7 +1229,8 @@ let footer_hints_board_read ~focus_posts ~(layout : board_read_layout) =
      ; b Navigate "PgUp/PgDn" "page"
      ]
      @ pane_keys @ width_key
-     @ [ board_vote_key
+     @ [ board_vote_up_key
+       ; board_vote_down_key
        ; board_reply_key
        ; board_copy_key
        ; b Act "Left / Esc" "back"

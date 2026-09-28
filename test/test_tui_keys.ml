@@ -872,7 +872,7 @@ let test_board_read_footer_carries_the_post_keys () =
             (holds key read);
           Alcotest.(check bool) (Printf.sprintf "the Board list spells %s the same" key) true
             (holds key list))
-        [ "v / V:vote"; "c:reply"; "Y:copy link" ];
+        [ "v:vote up"; "V:vote down"; "c:reply"; "Y:copy link" ];
       Alcotest.(check bool) (Printf.sprintf "the pane keys follow the split (%b)" split) split
         (holds "Ctrl-W:switch" read))
     [ Masc_tui_types.Board_read_wide
@@ -883,6 +883,25 @@ let test_board_read_footer_carries_the_post_keys () =
     (holds "j/k:posts"
        (Masc_tui_keys.footer_hints_board_read ~focus_posts:true
           ~layout:Masc_tui_types.Board_read_split))
+
+(* The Board vote hint names both directions, and the case is the direction:
+   lowercase [v] votes up, uppercase [V] votes down. The footer draws
+   [key:label], so the single "v / V:vote" left the reader to guess which
+   case picked which way -- an operator read a +1 turn to -1 and asked
+   whether it was a bug (#39529). *)
+let test_board_vote_hint_names_both_directions () =
+  let holds needle haystack =
+    let n = String.length needle and h = String.length haystack in
+    let rec scan i = i + n <= h && (String.equal (String.sub haystack i n) needle || scan (i + 1)) in
+    scan 0
+  in
+  let hints = Masc_tui_keys.footer_hints Masc_tui_types.Board in
+  Alcotest.(check bool) "lowercase v names the up vote" true
+    (holds "v:vote up" hints);
+  Alcotest.(check bool) "uppercase V names the down vote" true
+    (holds "V:vote down" hints);
+  Alcotest.(check bool) "the ambiguous single hint is gone" false
+    (holds "v / V:vote" hints)
 
 (* [z] goes both ways, so its label is where it goes. Drawn as "wide" in either
    state it named the screen the operator was already on: live at two hundred
@@ -3353,6 +3372,8 @@ let () =
             test_fusion_historical_evidence_is_a_selectable_board_reference
         ; Alcotest.test_case "Board read footer carries the post keys" `Quick
             test_board_read_footer_carries_the_post_keys
+        ; Alcotest.test_case "Board vote hint names both directions" `Quick
+            test_board_vote_hint_names_both_directions
         ; Alcotest.test_case "Keeper Runs clamps selection after list changes" `Quick
             test_keeper_runs_selection_survives_a_shorter_list
         ; Alcotest.test_case "Lanes run list names the drill-down" `Quick

@@ -176,7 +176,7 @@ let test_the_board_list_keeps_the_keys_it_answers () =
     (fun key ->
       check bool ("the Board list still advertises " ^ key) true
         (contains list_hints key))
-    [ "Right / Enter"; "Left / Esc"; "w:write"; "v / V:vote"; "s:sort" ]
+    [ "Right / Enter"; "Left / Esc"; "w:write"; "v:vote up"; "V:vote down"; "s:sort" ]
 
 (* Two surfaces read their table through a filter of their own, so the state
    rule has to reach them too. Resources calls its focused pane the detail;

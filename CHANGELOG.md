@@ -7,6 +7,10 @@
 ### Upgrade notes
 
 - Schedule updates without `recurrence_kind` still work in this version, keep the stored kind, and log a warning. The next version rejects omission (#39511); clients should send `recurrence_kind` now. Explicit `one_shot` removes recurrence (#39451).
+- Muse accounts whose credentials declare `storage: "keychain"` or another
+  unsupported storage value must sign in again with `/login muse`. Existing
+  file-backed accounts (`storage: "file"` or no storage marker) do not need to
+  sign in again solely because of this change (#39597).
 
 ### Added
 
@@ -14,6 +18,166 @@
 - Deployment preflight can sweep kept vision files that remain unreferenced across two complete scans; symlinked store roots stop the sweep before deletion (#39507).
 - List every pending Keeper queue row in one flat `rows` array, with `total_row_count` and the fleet-wide oldest age, in the waiting inventory projection (#39514).
 - Add an admin-only fleet-wide event-queue bulk cancel at `POST /api/v1/keepers_bulk/event-queue`: dry-run by default, explicit confirm to execute, backup before mutation (#39514).
+- Muse Keeper sessions preserve durable start/resume state, selected account identity, exact attached MCP approvals, and recovery evidence after cancellation or uncertain effects. #39393
+- `muse-serve` providers can route Keeper turns and Fusion panelists through
+  the Muse session protocol. Select an explicit `account-home`; account selection
+  also scopes quota observations. Shared Keeper workspaces are passed to the
+  native client, while endpoint-owned workspaces use a separate host directory
+  and an explicit context note. Muse has no output-schema channel, so exact-output
+  lane configuration rejects Muse entries instead of promising schema enforcement.
+  Login probes remain unsupported rather than treating process startup as sign-in. #39394
+- Muse exposes source-labelled model metadata and verifies readiness with a real authenticated MCP challenge in a private workspace. Codex model discovery preserves the selected account home. #39400
+- Sign in to official clients through account-scoped interactive sessions with remote input, cancellation, and private recovery receipts (#39533).
+- Add official-client account login, recovery and verified model selection to dashboard setup (#39546).
+- Add a private TUI account login panel with remote input, recovery and verified model setup (#39547).
+- Bench provider lane for Ollama Cloud (`ollama_cloud/<model>`, e.g. `deepseek-v4-pro`): OpenAI-compatible wire at `https://ollama.com/v1` with `OLLAMA_CLOUD_API_KEY`, arms e and later (#39560).
+- New opt-in `ollama_cloud.ollama-cloud-deepseek-v4-1-flash-none` runtime: same weights as the low-effort binding with `reasoning-effort = "none"` for lanes trialing the no-thinking variant (#39569).
+- After the runtime.toml account form saves a Claude Code or Codex account, it
+  stays open on the sign-in command instead of closing: `y` sends the whole
+  command to the terminal clipboard through OSC 52, and Enter or Esc closes
+  the form. The command keeps the form's break after `&&`, so it is not copied
+  off a wrapped event-log line (#39599).
+- `/login` in the TUI shows the email of each account beside its provider
+  row, read from the official client's own login file.
+  `/api/v1/setup/inventory` returns it as `account_emails` (#39612).
+- `masc runtime-account-login --client muse --account-home DIR` signs a Muse
+  account in so the sign-in is written to that HOME's `auth.json` (#39619).
+- A Muse turn's compaction item now keeps its trigger, outcome, strategy and
+  token counts, the serve loop emits `Compaction_observed`, and the Keeper
+  logs it: the host compacts an oversized input and still completes the
+  turn, so this is the only trace of that loss (#39629).
+- The TUI can draw a turning imp emblem in Braille: a horned imp's head that
+  becomes its lantern and back over two turns, lit to suit the terminal's page
+  (ember tones on dark, pencil in the text colour on light, plain dots when
+  the page is unknown). Not placed on a screen yet (#39633).
+- `Runtime_account_removal.remove` removes a Claude Code, Codex or Antigravity
+  account from runtime.toml text: its provider and binding tables, and its
+  runtimes from lane candidates, exact-output lane slots,
+  `[runtime].media_failover` and keeper assignments. It refuses when
+  `[runtime].default` names one of those runtimes, when a lane would be left
+  empty, or when a table it has to edit is written inline (#39634).
+- The turning imp now appears in two places. At startup the Overview keeps
+  its frame, its header and its "Overview briefing not read yet" line, and
+  shows the imp where its sections will be while it connects; it steps
+  aside when the first overview read answers, when a booting server's
+  backlog has been read from disk, when a refresh fails (so the "press r"
+  line shows), or on the first key the operator presses, which still does
+  its own job. `/about` (and `/splash`) opens a screen with the imp, the
+  colour scheme and the Keeper count; like the help sheet it owns every key
+  until Esc closes it. The imp turns only with colour on and a page the
+  terminal described, and is held still otherwise (#39658).
+- The setup API can remove an account: `POST /api/v1/setup/accounts/removal`
+  answers what removing a provider changes, or why it cannot be removed,
+  with the runtime.toml revision it read, and
+  `POST /api/v1/setup/accounts/remove` removes it only while the file is
+  still that revision. The write is audited as `account_removal` (#39659).
+- `D` on an account in `/login` shows what removing it changes -- its
+  tables, the lanes and slots it leaves, the keepers that go back to the
+  default, the login store left on disk -- or why it cannot be removed, and
+  Enter removes it. When runtime.toml moved since the preview, the server's
+  reason is shown over a fresh preview and nothing is removed until Enter is
+  pressed again (#39664).
+- The Overview's Plan usage rows name each account's email, dim, under the
+  account name, read from `/api/v1/setup/inventory` when the Overview opens.
+  A failed read (the route needs Admin) is said in one note after the rows
+  (#39683).
+- The runtime.toml pane of the TUI config screen adds one more Claude Code,
+  Codex or Antigravity account with `a`: pick a provider the file already
+  declares, keep or change the suggested id, and type where the new account
+  signs in. The form copies that provider's command and model bindings,
+  refuses a sign-in location another provider of the same client already uses,
+  and saves through the usual preview. It does not sign in, and turns reach
+  the new account only after a lane lists it as a candidate (#39518).
+
+### Changed
+
+- Clarify tool input and result guidance for Board comment paging and Board post IDs and content fields; missing Board posts now include ID recovery steps. (#39454).
+- MCP tool `masc_board_post_get` with no page argument now returns the post body and its newest comments (up to 20) instead of the oldest; pass `comment_offset=0` to read from the head of a thread. The dashboard and TUI Board views are unchanged (#39505, part of #39356).
+- Closing a Board post now requires a non-empty summary and either a successor post or an explicit no-successor choice in the author tool and operator Dashboard (#39522, part of #39356).
+- A new workspace's Overview explains how to create and open a Keeper, shows Goal owners, states and due dates, labels held Task ages, and makes Plan usage gaps and hidden accounts visible (#39526).
+- The TUI Board footer spells out that lowercase `v` votes up and uppercase `V` votes down (#39531).
+- On the Claude Code lane, Execute now returns up to 32 KB of output inline,
+  the bound that lane declares for its tools, instead of storing anything
+  above 16 KB as a file the Keeper has to read back. Model input on that lane
+  can grow by that much per Execute call. Codex and Antigravity keep the
+  16 KB bound (#39562).
+- The TUI Activity pane opens only where the surface keeps the width the
+  Keepers list needs for its flag columns (102 columns): the narrow pane from
+  158 columns and the wide pane from 176, on every surface alike. It opened
+  from 132 and left the surface 76, so one column of resize cut Board titles
+  from about 57 cells to 11 (#39593).
+- `provider_usage_windows[].providers` in `GET /api/v1/runtime/resolved` is
+  now a list of `{id, display_name}`, and every window carries `role`
+  (`gates_model_calls`, `counts_other_use`, `unclassified_limit`). The TUI
+  Overview names an account by its providers' display names, and a Z.AI
+  window of an unknown unit no longer repeats its type in the label (#39604).
+- A Muse model no longer requires `max-prompt-bytes`: like Claude Code and
+  Codex, a declared value still bounds the seeded history, and without one
+  the host judges the fit. `/login`, the dashboard setup picker and the
+  installer no longer ask for an input byte limit, and the setup save API
+  and wizard inventory no longer carry `max_prompt_bytes` (#39623).
+- A narrow TUI table now gives up columns in the order it declares and hands
+  the freed cells to its flexible column, instead of letting the frame cut the
+  row's tail. The Board list drops the id, then the hearth, the replies, the
+  score and the author, so REPLIES is no longer cut away at eighty columns
+  (#39627).
+- The Board list keeps at least thirty cells for a post's title, about fifteen
+  Hangul syllables, and gives up columns in its drop order before it cuts the
+  title. At eighty columns the id and the hearth give way and the title gets
+  32 cells; at a hundred only the id does. A table that names its flexible
+  column zero times or twice is now refused rather than laid out (#39643).
+- The TUI Overview's Plan usage section no longer draws a row for an
+  account that has not reported usage since the server started, unless the
+  runtime catalogue observed its quota exhausted (#39644).
+- The shared Keeper prompt no longer spells out what goes into `masc_ask`,
+  `masc_keeper_delegate` and `masc_fusion`, the `keeper_skill_publish`
+  result statuses, or the constitution tool fields; each already reaches the
+  model through the tool's result, schema or description when it is used.
+  The two checklists with no other home moved into
+  `masc_keeper_delegate.prompt` and `masc_ask.context` (#39649).
+- `masc runtime-muse-login` is now `masc runtime-account-login --client
+  codex|claude|muse`, and the installer runs it for every declared account
+  home; the child gets the environment `/login` gives that client (#39657).
+- The setup wizard names a connection after its client and model, each
+  followed by a short hash of the answers (`muse_6dc7c062.muse-spark-1.3_6dc7c062`),
+  instead of `setup_<client>_<64-hex SHA-256>`. Rerunning the wizard with the
+  same answers now adds a second connection beside each old `setup_…` one,
+  because the batch only appends ids it has not seen: remove the old
+  provider, model and binding tables, and the `[runtime]`, lane and keeper
+  values that name them, before rerunning it (#39660).
+- Setup reads each account's email from its official client's login file
+  whenever `/api/v1/setup/inventory` is built, so a provider without
+  `account-home` shows the email of the home it inherits, and a sign-in made
+  outside setup shows at once. `/login` and `masc runtime-account-login` no
+  longer write an email record. `account_emails` rows are `read` or
+  `not_read`; deploy the server and the TUI together (#39661).
+- A Claude Code provider on the inherited home shows no email while the
+  server's environment gives it `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`,
+  `CLAUDE_CODE_OAUTH_TOKEN` or a cloud provider selection, which Claude Code
+  uses before its `/login` account; the row says so (#39661).
+- The TUI Changes, Harness and Planning tables give up columns in an order
+  each declares before they cut the column a reader reads the row for. At
+  eighty columns Changes drops the turn and the task and shows 20 cells of
+  what the turn did, where it showed two; Harness drops the evaluator and
+  gives the reason 30 cells, where it had five. Planning gives up the due
+  date, the age, the open-work tally and the judge's mark, in that order,
+  below 75 columns (#39662).
+- The TUI Schedules list gives up whole columns when a row is narrow instead
+  of running past the frame and cutting the recurrence: the delivery goes
+  first, then the wake, then the state, while the due time, the target and
+  the recurrence stay and the recurrence takes the cells the others leave
+  (#39671).
+- The TUI Lanes run list no longer draws a RUN ID column: every id of one lane
+  opens with the same prefix, so a narrow id cell showed the same text on
+  every row. The model SLOT takes the spare width instead (floor 24 cells),
+  and a narrow list gives up STARTED and then ELAPSED (#39673).
+- A resumed Muse session selects its model (`session/setModel`) before
+  `session/setApprovalMode`, so the verified approval mode is the last
+  session command before the turn (#39680).
+
+### Removed
+
+- `/about` no longer prints the ASCII logo notice (#39658).
 
 ### Fixed
 
@@ -46,6 +210,207 @@
   but not comments, and `masc_web_fetch`'s `maxChars` names
   `keeper_artifact_read` as the way to read the rest of a truncated page
   (#39544).
+- Verify Muse's returned effective approval mode before session persistence or turn dispatch, including the mode-change acknowledgement on resume. (#39393)
+- Muse starts a fresh session when a hook nudge changes or disappears, carries turn-local context without resetting continuity, and supports text-only hosts without session MCP. Dashboard session evidence accepts Muse. #39393
+- Muse retains typed failure evidence and reusable sessions after retryable terminals, respects read-only tool effects, and closes successful host-stop streams. Owner-stopped session releases remain visible in the dashboard. #39393
+- Muse hook and tool invocation ordinals stay consistent across context-driven vendor session restarts, while vendor usage and turn identities retain the restarted session ordinal. #39393
+- Muse refuses a prepared credential HOME bound to another selected account before starting the client. #39393
+- Validate returned Muse session model and workspace before persisting session identity or dispatching a turn, for both fresh starts and resumes. (#39393)
+- Keep prepared Muse child storage roots on the credential generation’s physical account when a configured symlink is retargeted, and preserve pre-dispatch recovery decoding after main synchronization. (#39393)
+- Validate Muse image media types, UTF-8 and Base64 before claiming a Keeper session or spawning the official client. (#39393)
+- Bind Muse sessions to hook-prepared tools, forward completed agent messages that had no deltas, and restore continuity after confirmed pre-dispatch timeouts while retaining recovery for unanswered dispatched turns. (#39393)
+- Preserve an existing Muse conversation when its local MCP listener cannot be prepared, without weakening recovery after provider dispatch. (#39393)
+- Preserve Muse settlement after a refused MCP handshake, verify the host's completed-turn count before resuming retained history, and keep completed-turn recovery evidence when owner cancellation interrupts finalization. (#39393)
+- Muse configuration now refuses an enabled binding without its declared input byte budget; the model editor exposes that field and exact-output pickers show the actual schema-channel refusal. Fusion refuses a Muse request before starting the client when its complete framed input exceeds the declared byte capacity. Fusion applies Muse reasoning effort and preserves reported token usage from all four official clients, including judge output that fails parsing. #39394
+- Muse starts without a session trace carry the newest checkpoint atom, matching other official clients. Exact-output configuration refuses Muse runtime IDs in both `slots` and `cli_slots`. #39394
+- Muse dispatch preserves the selected candidate’s input capacity, reasoning and idle timeout across configuration reloads. Keeper and Fusion remember provider-reported exhausted subscription windows in the selected account’s quota scope; disabled Muse providers do not require active input capacity. #39394
+- Probe Muse tools through the real single-tool MCP verification runner, distinguishing a callback from a reply-only claim, and resolve relative installer destinations before later workspace launches (#39394).
+- Preserve reported Muse token usage across failed and cancelled Fusion attempts, and isolate stateless Fusion session storage in a temporary native data tree removed after child reaping. (#39394)
+- Muse capability probes retain the selected model's input-byte capacity, reasoning effort and idle policy, reject oversized prompts before HOME preparation, and discard private native session storage only after the client is reaped. (#39394)
+- Keep approval-mode admission refusals distinct from account rest and return effective approval evidence in the synthetic Fusion and capability hosts. (#39394)
+- Keep reported Claude, Codex and Antigravity Fusion spend on failed attempts, and record Muse probe subscription exhaustion against the selected account. (#39394)
+- Refuse blank required or relative account homes before saving edited runtime configuration; keep native default-account selection available where the protocol permits it. (#39394)
+- Dune script wiring checks consume shell option arguments before locating command text, including `-o`/`-O`, option clusters and startup-file options. Literal script arguments and file dependencies remain checked. #39397
+- Muse readiness rejects a different reported model and preserves credential-exit sign-in guidance. Model discovery accepts a finite positive `--timeout-s` and uses one explicit command deadline across account preparation and protocol messages, so progress notifications cannot extend it. #39400
+- Browser discovery, new-model verification and saved providers retain the configured Codex account home without publishing its path. Configured Muse bindings advertise response-and-tool readiness independently of new-connection setup support. #39400
+- Muse readiness checks use disposable native session storage while retaining selected authentication and existing account sessions. The selected model's prompt capacity and reasoning effort reach verification; cleanup follows child reaping on success, refusal and cancellation. (#39400)
+- Return the selected effective approval mode in the readiness host fixture so the admission check is exercised before its MCP challenge. (#39400)
+- Preserve configured Codex account selection through private terminal inventory and model refresh, and record selected-account Muse probe quota observations. (#39400)
+- Preserve selected native accounts throughout Claude Code, Codex, Antigravity and Muse setup, discovery and configuration; reject empty account paths and stale model metadata. Muse setup validates the explicit prompt-byte limit and displays it clearly. (#39403)
+- Keep scoped account references usable across concurrent setup screens and lost-response retries. Route Muse model selection through its selected native account, and refuse reuse of a Muse binding with no declared input-byte capacity. (#39403)
+- Offer selected-account Muse sign-in when native discovery reports missing credentials, then retry model listing before verification and configuration save. (#39403)
+- Muse model selection offers reported catalog entries and refresh/back actions, avoiding an exact-ID action that cannot establish the required context metadata. (#39403)
+- Keep configured CLI accounts selectable, revalidate native account references before use, and require reported Muse model/context data in standalone setup. (#39403)
+- Require freshly reported Muse context when rendering a replacement tool-enabled binding; existing declared limits cannot substitute for discovery. (#39403)
+- Revalidate Muse model IDs and context against selected-account native discovery before web verification and configuration publication. (#39403)
+- Resolve the installed Muse client before standalone discovery and sign-in, require the context member in native Muse/Codex catalog rows, and return the selected Muse account and resolved executable with standalone model selection; server account defaults are unavailable without HOME. (#39403)
+- Preserve existing model bindings and their settings when setup reselects the effective default CLI account, including environment-selected account homes. (#39403)
+- The TUI Board-attention quarantine line no longer labels an exhausted
+  judgment lane as "every judgment model refused". That category also covers
+  a judgment call that failed, so the line now reads "every judgment model
+  failed or is unavailable" (#39548).
+- The TUI fleet header no longer draws the server's wire word for a stale
+  health snapshot. The three reasons the /health contract defines are said in
+  words (`refresh timed out`, `refresh failed`, `reading aged out`); any other
+  word is still drawn as the server wrote it (#39554).
+- The Overview Team counts line no longer labels the no-work band "idle".
+  That word also means "no turn recorded yet" on the roster legend and the
+  control plane's `Surface_idle` on the liveness row, so the count now reads
+  "no work", matching the block's own "no open task" detail (#39556).
+- `masc_board_post_get` no longer declares a machine-readable `default` for
+  `comment_offset` or `comment_limit` (#39558). Both are mutually exclusive
+  with `comment_tail` and `after_comment_id`, so a client that filled a
+  declared default would send a value that conflicts with the argument the
+  caller chose. The server still applies the default, and the descriptions
+  keep it visible.
+- `masc_board_comment` now takes `body` as an alias for `content`, the way
+  `masc_board_post` and `masc_board_post_update` already do (#39561). A caller
+  that sent `body` was refused before; the three handlers now share one
+  body/content rule.
+- Every board tool that takes a `post_id` declares the parser's shape as a
+  JSON Schema pattern, so a client that invents an id is refused with the
+  accepted shape instead of a lookup miss (#39561).
+- `Post not found` now names a way to find the id again, the way
+  `Comment not found` already does (#39561).
+- Render the bench head runtime in exact-output `slots` instead of `cli_slots`: since #39020 `cli_slots` admit only official-client runtimes, and every HTTP lane failed at `keeper_up` (#39567).
+- Declare `reasoning-uncontrolled = true` on the bench `ollama_cloud` bindings: the /v1 wire enables reasoning on its own, and the first turn was refused as `Reasoning_undeclared_on_auto_enabling_wire` (#39568).
+- The TUI saves runtime.toml text only when the server's preview answers
+  `can_save: true`. It used to read a `validation.ok` field the preview never
+  sends and saved whenever it could not tell, so a refused edit only failed at
+  the save route. A refusal now shows the runtime or schema reason, and a
+  preview answer the TUI cannot read stops the save (#39577).
+- The runtime.toml account form wraps its heading, hints and refusal to the
+  pane's width; at 80 columns the frame used to cut the Antigravity hint at
+  `creden…` (#39577).
+- The account form's sign-in command is now `(export CODEX_HOME=<home> &&
+  codex login)` (Claude Code: `... && claude)`, then `/login` inside it). When
+  it does not fit a row it breaks only after `&&`, so neither row pasted
+  alone runs; a command copied as two rows could otherwise have run
+  `codex login` on the default login (#39577).
+- Muse `session/start` reporting turns for a fresh claim is refused before dispatch instead of seeding history into a confused session (#39580).
+- The TUI Keeper chat and Board composer draw the Activity pane in the columns
+  they leave for it; from 132 columns those columns stayed empty, the surface
+  strip was cut to the surface width, and a press there hit the previous
+  surface's pane rows (#39583).
+- Main compile: drop the duplicated `Muse_serve_runtime` arm in account classification (#39576 and #39400 each added one). #39587
+- Account login runs its helper on the release-bundled Python beside the server binary, falling back to `python3` on `PATH`, and reports a typed error when neither exists. #39590
+- Declaring a second official-client account now refuses a location that is
+  already another provider's login store in four more spellings: a link to a
+  home that does not exist yet, a hard link to an Antigravity OAuth file, two
+  not-yet-existing names that differ only in ASCII letter case, and a path
+  below a regular file (refused as an invalid location). Paths are walked
+  part by part and what exists is compared by device and inode (#39592).
+- The `/login` pane draws the official client's own colours instead of
+  spelling its escape codes out as `\x1B[94m` text; cursor moves, OSC 8
+  brackets and other non-colour sequences are dropped (#39596).
+- Muse Code no longer raises the macOS "cannot find a keychain to store
+  'meta'" dialog during `/login`: every Muse child runs with the file
+  credential backend, so the sign-in stays in the selected account's
+  `auth.json`, which is what masc copies into its managed generation. A
+  sign-in whose secrets are held in the Keychain (`storage: "keychain"`) or
+  in an unknown storage is refused with a hint to run `/login muse` (#39597).
+- Account login ignores relative Python search paths so changing to the Keeper workspace cannot select a different interpreter from the one checked by the server. #39601
+- The TUI Overview's Providers meter takes 10 to 24 cells instead of every
+  cell the other columns leave, dropping the hearing age first when 10 do
+  not fit; a window that counts something a model call does not need is
+  drawn dim rather than in the exhausted tone; a window with no reset time
+  shows the no-value mark; and its spans use the Overview's shared ladder
+  (#39611).
+- A backlog writer whose lease expired while its encoding waited for the CPU
+  pool no longer overwrites a newer backlog committed by the writer that took
+  the lease over; the stale write is refused and nothing is published. The
+  backlog's `last_updated` is now stamped after that wait, when the write is
+  actually committed (#39613).
+- The TUI standalone-lane picker lists a runtime the lane refuses -- a
+  client with no output-schema channel -- below every one it takes, with the
+  reason at the front of the row, and an empty slot group's title says `a`
+  fills it (#39614).
+- `test/test_provider_usage_windows.ml` compiles again, and the dashboard's
+  shared-home line names providers by display name instead of drawing
+  `[object Object]` after the usage-scope wire change (#39617).
+- The installer's Muse sign-in no longer raises the macOS "cannot find a
+  keychain to store 'meta'" dialog or loops on a refused sign-in: it runs
+  `masc runtime-account-login --client muse`, which starts `muse login` with the same
+  environment as `/login muse` (file credential backend, selected HOME, no
+  ambient `META_API_KEY` or `TBH_*`) (#39619).
+- The saved runtime.toml account form names its `y` copy key under the card.
+  Only the footer named it, and the footer dropped it when the save notice
+  filled the row, so the screen kept open for copying showed no way to copy
+  (#39620).
+- The workspace curator lane walks its CLI slots after its HTTP slots, as
+  every other standalone lane does, instead of refusing any official client.
+  The standalone-lane projection no longer sends `supports_cli_tail`, and the
+  TUI provider editor draws the CLI group on every lane (#39622).
+- `bin/masc_tui_account_login.ml` builds again: its login `Save` action
+  carries only the model, as its interface says, and the dashboard editor
+  test no longer expects an undeclared Muse byte budget to refuse a
+  binding (#39635).
+- A Muse model takes its start-prompt ceiling from its window: `4 × (⌊75% of max-context⌋ − 11,946)` bytes, from Muse
+  Code 1.4.0's measured token estimate, overhead and compaction line. The
+  host compacts an oversized input into a short summary and still completes
+  the turn, so an unbounded seed lost history silently; a window too small
+  for the host's overhead is refused at load (#39639).
+- `masc_goal_upsert`'s `metric` description names the sources the Goal
+  judge opens (a public URL, a submitted board/fusion reference, or a host
+  file under `.masc/playground`); metrics that named other host paths or
+  files inside a microVM sandbox were refused as unreadable (#39649).
+- The imp emblem renderer now credits its source: it is adapted from
+  openai/codex's empty-state animation (Apache-2.0), whose license and NOTICE
+  ship beside it and are listed in THIRD-PARTY-LICENSES.md. Its rows no longer
+  leave a colour set, a colour the terminal cannot draw falls back to the
+  terminal's own, rows close with SGR 39 so a pane's background survives, and
+  colour is written only through the TUI's own projection (#39653).
+- A Muse model's declared `max-prompt-bytes` can only lower the ceiling
+  derived from its window, so an old value larger than the window no longer
+  lets the host compact the seed silently; a window below the host overhead
+  is refused at load whatever is declared, and a Muse turn without a ceiling
+  now says why (#39655).
+- One email row the TUI cannot read, or an inventory without a readable email
+  list, no longer blanks the `/login` provider list: that row says it could
+  not be read, and rows for no listed provider are counted in the notice
+  (#39657).
+- A setup wizard connection's model name counts characters, not UTF-8
+  bytes, when a character outside `[A-Za-z0-9._-]` becomes `-`, and the TUI
+  lane candidate chain shows the model part of an id whose model holds a dot
+  (#39672).
+- A resumed Muse session gets the configured model through
+  `session/setModel` before the turn. Muse Code 1.4.0 writes the account
+  default (`muse-spark-1.3-contributor`) into the session metadata after the
+  start and at close, so every second turn on a Muse lane failed as
+  `session_model_mismatch`; a selection the host refuses still fails the turn
+  before dispatch (#39675).
+- The world-state briefing budget no longer overflows on a saturated Muse
+  ceiling, and a Muse turn without a start-prompt ceiling names
+  `max_context` as the field to change (#39678).
+- The TUI Lane Run and Measurement detail headings keep the connection badge
+  whole. The run id or sha256 takes what the title and the badge leave, and
+  one that does not fit is folded in the middle so its opening and its hex
+  tail both stay; at 80 columns the badge had been cut to four cells beside
+  a 54-cell run id (#39684).
+- Every resumed Muse session selects the configured model with
+  `session/setModel` and is admitted once the host accepts it, including a
+  noop. The session's reported `modelId` is its metadata, which keeps naming
+  the account default after a noop, so re-reading it refused every resume
+  (#39686).
+- Render `reasoning-effort = "low"` for the bench `ollama_cloud/deepseek-v4.1-flash` lane: the uncontrolled default collapsed in reasoning on 6 of 6 matrix trials, while low passed the same task (#39687).
+- `/login` no longer keeps showing an old email after a sign-in that failed or
+  was cancelled. When the email is unknown it now says why: the login file
+  could not be read, its format is unknown, the client did not report one, the
+  value cannot be shown, or the last sign-in did not finish (#39631).
+- Login setup answers with its usual HTTP 503 preparation error, instead of
+  failing the request, when the chosen account folder disappears during setup
+  (#39588).
+
+### Documentation
+
+- Point the TOML reload matrix at the live `runtime.toml` parser
+  (`Runtime_toml`) and lane resolver (`Runtime_lane.ordered_candidates`)
+  instead of three modules that no longer exist (#39519).
+- The TUI operator workbench RFC gains §5.9: rules are drawn only between
+  regions, sections and table headers part by a heading and a blank row, the
+  one region that takes keys has a heavy border, and every list selects one
+  way; the operator's 2026-09-28 width decisions and decisions D11–D16 are
+  recorded (#39581).
 
 ### Internal
 
@@ -63,12 +428,21 @@
   so a suite timeout is distinguishable from the step budget and other
   failures (#39510).
 - Centralize the turn-timeout fallback rule (absent uses the default, non-positive disables) in `Runtime_inference` instead of repeating it at seven call sites (#39538).
+- The PR test selector now picks suites whose dune stanza runs a changed
+  `bin/` executable through `%{dep:../bin/<name>.exe}`, and a change to
+  `scripts/check-runtime-deployment-preflight.sh` selects the two deployment
+  suites that run it (#39585).
+- The `masc_tui` executable links `masc_tui_table` again, which the table
+  layout change in #39662 needed; `dune build @check` failed without it
+  (#39674).
 
 ### Performance
 
 - Reuse parsed footer hint items and pin decisions while fitting a narrow TUI row, and skip parsing when the complete row fits without conflicts (#39371).
 - Run backlog JSON projection and pretty encoding through the shared CPU pool while keeping storage and commit callbacks on the caller, with inline and pooled byte-preservation coverage. (#39392)
 - Count ASCII prefixes without UTF-8 decoding when pretty-encoding workspace JSON, retaining the standard Unicode widths and per-call formatter ownership. The completed synthetic Linux comparison did not establish a consistent end-to-end latency improvement. #39424
+- Count claimed and in-progress tasks once per execution render for the supplied worker names, preserving exact ownership and attention-row behavior. Completed synthetic Linux measurements did not establish a consistent end-to-end latency benefit. #39412
+- Board threads with many plain-text comments avoid unnecessary JSON parsing and single-line Markdown streaming setup while keeping the same rendered rows (#39466).
 
 ## [0.45.0] - 2026-09-27
 

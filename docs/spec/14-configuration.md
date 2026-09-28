@@ -222,6 +222,16 @@ and Muse from a TUI or browser connected to the server. Login runs in the
 selected account's environment. It never changes the server environment or sends
 operator input to a Keeper.
 
+In the TUI, `/login` opens the account panel; `/login codex`, `/login claude`,
+`/login antigravity`, and `/login muse` select a client directly. Enter starts a
+new account and `e` explicitly selects an existing account. Login codes stay
+masked in the panel and terminal keys are sent to that login process. Ctrl-C
+cancels; `r` retrieves the recovery receipt. After authentication, choose a model
+and press Enter to verify and save. Muse requires an explicit prompt byte limit.
+The current default and its declared fallback order remain ahead of the added
+model. In dashboard runtime setup, the equivalent login panel retains the
+selected account through model discovery and save.
+
 `POST /api/v1/setup/accounts/login` accepts `integration_id` and an optional
 `account_ref`. Omitting the reference adds a private new account; supplying one
 explicitly reauthenticates that selection. The server catalog chooses the

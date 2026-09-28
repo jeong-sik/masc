@@ -469,6 +469,24 @@ let test_an_unknown_phase_is_refused () =
         (Tui_decode.overview_goals_error_to_string other)
   | Ok _ -> fail "an unknown phase decoded"
 
+(* #39571: when the Goal records an owner, the metadata names it instead of
+   guessing from the task performers. *)
+let test_a_recorded_owner_is_shown () =
+  let goal =
+    match Goals.drawn_goals (decode_fixture ()) with
+    | first :: _ -> { first with og_owner = Goal_store.Owner "keeper-z" }
+    | [] -> fail "fixture has no drawn goal"
+  in
+  let rows =
+    Goals.lines ~now:captured_at ~localtime:Unix.gmtime ~inner_width:46
+      ~rows:12 ~tasks:(Tasks.Rows_read [])
+      ~status_of_id:(status_of_id []) (Types.Goals_read [ goal ])
+    |> List.map strip_ansi
+  in
+  let detail = String.concat " " (List.tl (List.tl rows)) in
+  check bool "the recorded owner is named" true
+    (contains ~sub:"owner keeper-z" detail)
+
 let () =
   run "tui_overview_goals"
     [ ( "overview goals"
@@ -476,6 +494,8 @@ let () =
             test_live_fleet_moves_no_goal
         ; test_case "goal metadata stays whole" `Quick
             test_goal_metadata_keeps_owner_state_and_due_together
+        ; test_case "a recorded owner is named" `Quick
+            test_a_recorded_owner_is_shown
         ; test_case "a completed task keeps its goal performer" `Quick
             test_a_completed_task_keeps_its_goal_performer
         ; test_case "an active goal task counts" `Quick

@@ -6932,6 +6932,7 @@ let decode_planning_snapshot json =
 type overview_goal = {
   og_id : string;
   og_title : string;
+  og_owner : Goal_store.owner;
   og_phase : Goal_phase.t;
   og_priority : int;
   og_due_date : string option;
@@ -6971,6 +6972,14 @@ let rec decode_overview_goal_node json =
   in
   let* og_id = malformed (required_string_field json "id") in
   let* og_title = malformed (required_string_field json "title") in
+  (* [owner] is optional so a payload written before #39571 still decodes;
+     an absent member reads as the explicit [Unknown_owner]. *)
+  let* og_owner =
+    malformed
+      (match Json_util.assoc_member_opt "owner" json with
+       | None | Some `Null -> Ok Goal_store.Unknown_owner
+       | Some owner_json -> Goal_store.owner_of_yojson owner_json)
+  in
   let* raw_phase = malformed (required_string_field json "phase") in
   let* og_phase =
     match Goal_phase.parse raw_phase with
@@ -7000,6 +7009,7 @@ let rec decode_overview_goal_node json =
   Ok
     ({ og_id
      ; og_title
+     ; og_owner
      ; og_phase
      ; og_priority
      ; og_due_date

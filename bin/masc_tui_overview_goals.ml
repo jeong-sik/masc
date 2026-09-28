@@ -163,28 +163,33 @@ let goal_rows ~now ~localtime ~inner_width goals =
     (List.combine counts (List.combine idles dues))
 
 let owner_text ~tasks ~status_of_id (goal : Tui_decode.overview_goal) =
-  match tasks with
-  | Masc_tui_overview_tasks.Rows_unread
-  | Masc_tui_overview_tasks.Rows_unavailable _ -> "owner unknown"
-  | Masc_tui_overview_tasks.Rows_read _ ->
-      let names, missing =
-        List.fold_left
-          (fun (names, missing) id ->
-            match status_of_id id with
-            | None -> (names, true)
-            | Some status ->
-                (match Masc_domain.task_performer_of_status status with
-                | None -> (names, missing)
-                | Some name ->
-                    (Terminal_text.single_line name :: names, missing)))
-          ([], false) goal.og_task_ids
-      in
-      let names = List.sort_uniq String.compare names in
-      (match names with
-      | [] -> if missing then "owner unknown" else "unassigned"
-      | _ :: _ ->
-          "owner @" ^ String.concat ", @" names
-          ^ if missing then " · other owners unknown" else "")
+  match goal.og_owner with
+  | Goal_store.Owner name -> "owner " ^ Terminal_text.single_line name
+  | Goal_store.Unknown_owner ->
+      (* No recorded owner (#39571). Fall back to the performers of the goal's
+         tasks — the only ownership signal before the owner field existed. *)
+      (match tasks with
+      | Masc_tui_overview_tasks.Rows_unread
+      | Masc_tui_overview_tasks.Rows_unavailable _ -> "owner unknown"
+      | Masc_tui_overview_tasks.Rows_read _ ->
+          let names, missing =
+            List.fold_left
+              (fun (names, missing) id ->
+                match status_of_id id with
+                | None -> (names, true)
+                | Some status ->
+                    (match Masc_domain.task_performer_of_status status with
+                    | None -> (names, missing)
+                    | Some name ->
+                        (Terminal_text.single_line name :: names, missing)))
+              ([], false) goal.og_task_ids
+          in
+          let names = List.sort_uniq String.compare names in
+          (match names with
+          | [] -> if missing then "owner unknown" else "unassigned"
+          | _ :: _ ->
+              "owner @" ^ String.concat ", @" names
+              ^ if missing then " · other owners unknown" else ""))
 
 let goal_entries ~now ~localtime ~inner_width ~tasks ~status_of_id goals =
   let today = local_today ~now ~localtime in

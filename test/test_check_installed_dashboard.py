@@ -10,7 +10,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-SCRIPT = Path(__file__).resolve().parents[1] / "check-installed-dashboard.py"
+SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "check-installed-dashboard.py"
 
 
 class DashboardMismatchDiagnostics(unittest.TestCase):

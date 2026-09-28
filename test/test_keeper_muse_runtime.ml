@@ -1413,10 +1413,10 @@ let test_a_changed_model_starts_a_fresh_session () =
        |> List.filter (fun line -> line <> "")))
 ;;
 
-(* The same configuration resumed on a session that reports another model, or
-   none (Muse Code 1.4.0 reports its account default), selects the configured
-   model before the turn; a missing model is never taken as a match. A
-   selection the host refuses fails the turn before dispatch. *)
+(* The same configuration resumed selects the configured model before the
+   turn, whatever the session reports: another model (Muse Code 1.4.0 reports
+   its account default), none, or the configured one. A selection the host
+   refuses fails the turn before dispatch. *)
 let test_resumed_model_is_reselected_before_dispatch () =
   let lines path =
     if Sys.file_exists path
@@ -1436,7 +1436,7 @@ let test_resumed_model_is_reselected_before_dispatch () =
         (lines (Filename.concat base_path "model-selections.log"));
       check (list string) "the same session continued" ["start"; "resume"]
         (lines (Filename.concat base_path "sessions.log"))))
-    [`Null; `String "muse-a-contributor"];
+    [`Null; `String "muse-a-contributor"; `String "muse-a"];
   with_scripted_host (fun ~base_path ->
     let tool = masc_probe_tool (ref `Null) in
     first_turn ~base_path ~tool;

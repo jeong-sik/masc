@@ -1397,12 +1397,13 @@ let overview_keeper_rows_of_briefs briefs =
 
 (* Plan usage on Usage names each account's email. The route needs Admin,
    and a read that fails is said beside the section rather than drawn as
-   accounts without an email. *)
+   accounts without an email. The section names the failure, so the reason is
+   passed on as the transport gave it. *)
 let load_account_emails ~(host : string) ~(port : int) :
-    ((string * string) list, string) result =
-  match Masc_tui_http.fetch_setup_inventory ~host ~port with
-  | Error err -> Error ("account emails load failed: " ^ err)
-  | Ok json -> Masc_tui_account_login.emails_of_inventory json
+    ((string * string) list * int, string) result =
+  match Masc_tui_http.fetch_account_emails ~host ~port with
+  | Error err -> Error err
+  | Ok json -> Masc_tui_account_login.emails_of_document json
 
 (* The Overview's GOALS section. A phase this build does not know refuses the
    whole reading: a goal dropped from the list, or drawn under a phase it is

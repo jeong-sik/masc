@@ -217,8 +217,9 @@ val session_set_model_request
   -> session_id:string
   -> model_id:string
   -> Yojson.Safe.t
-(** [session/resume] carries no model either. The host records this selection
-    durably, and it applies to the session's next model call. *)
+(** [session/resume] carries no model either. The selection applies to the
+    session's next model calls; when that model already runs, the host
+    answers noop and records nothing. *)
 
 val turn_start_request
   :  id:int

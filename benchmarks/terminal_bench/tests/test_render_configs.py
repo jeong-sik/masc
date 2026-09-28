@@ -346,6 +346,24 @@ def test_ollama_cloud_refuses_parallel_off_arms(tmp_path):
     assert list(tmp_path.iterdir()) == []
 
 
+def test_ollama_cloud_model_effort_wins_over_the_uncontrolled_default():
+    # deepseek-v4.1-flash mirrors its shipped binding (effort low): the
+    # uncontrolled default collapsed in reasoning on 6 of 6 matrix trials
+    # while low passed (react-lead-form, reward 1.0).
+    out = render_arm("e", runtime_id="ollama_cloud.deepseek-v4.1-flash",
+                     effort="high")
+    rt = (out / "runtime.toml").read_text()
+    assert 'reasoning-effort = "low"' in rt
+    assert 'thinking-control-format = "reasoning-effort"' in rt
+    assert "reasoning-uncontrolled" not in rt
+    # Unlisted models keep the provider default.
+    out = render_arm("e", runtime_id="ollama_cloud.deepseek-v4-pro",
+                     effort="high")
+    rt = (out / "runtime.toml").read_text()
+    assert "reasoning-uncontrolled = true" in rt
+    assert "reasoning-effort" not in rt
+
+
 def test_a_slashed_wire_model_binds_by_slug_and_keeps_the_wire_name(openrouter_lists):
     # runtime_toml.ml refuses a model id outside [A-Za-z0-9._-]+, and the
     # OpenRouter wire id carries a vendor slash. Rendering it verbatim made

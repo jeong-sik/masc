@@ -129,13 +129,11 @@ let test_equal_needs_have_no_delta () =
 let test_full_refresh_omits_scoped_datasets_while_their_owner_is_running () =
   let concurrent =
     Types.full_refresh_needs ~scoped_refresh_inflight:true
-      ~keeper_pane_drawn:true ~account_emails:Types.Account_emails_unread
-      Types.Board
+      ~keeper_pane_drawn:true Types.Board
   in
   let alone =
     Types.full_refresh_needs ~scoped_refresh_inflight:false
-      ~keeper_pane_drawn:true ~account_emails:Types.Account_emails_unread
-      Types.Board
+      ~keeper_pane_drawn:true Types.Board
   in
   check bool "concurrent full refresh is global-only" false
     (Types.surface_needs_any concurrent);
@@ -197,12 +195,16 @@ let test_usage_asks_for_keeper_usage () =
   check bool "Dashboard does not fetch Keeper detail" false
     (needs Types.Overview).Types.needs_keeper_usage
 
-(* The inventory reads a login file per account, so Usage, where Plan usage
-   names each account's email, asks for the emails when it opens, and a full
-   refresh asks only until a reading arrives. *)
-let test_account_emails_are_read_when_usage_opens () =
+(* Account emails are read on every Usage refresh, like its other readings,
+   so a sign-in, a failed read or another server on the port shows on the
+   next tick. Plan usage is on Usage, and no other surface draws them. *)
+let test_only_usage_asks_for_account_emails () =
   check bool "Usage asks for them" true
     (needs Types.Metrics).Types.needs_account_emails;
+  check bool "and so does its full refresh" true
+    (Types.full_refresh_needs ~scoped_refresh_inflight:false
+       ~keeper_pane_drawn:false Types.Metrics)
+      .Types.needs_account_emails;
   List.iter
     (fun (label, surface) ->
       check bool (label ^ " does not") false
@@ -211,21 +213,7 @@ let test_account_emails_are_read_when_usage_opens () =
     ; ("planning", Types.Planning)
     ; ("board", Types.Board)
     ; ("the keeper list", Types.Keepers Types.Keeper_list)
-    ];
-  let full account_emails =
-    (Types.full_refresh_needs ~scoped_refresh_inflight:false
-       ~keeper_pane_drawn:false ~account_emails Types.Metrics)
-      .Types.needs_account_emails
-  in
-  check bool "a full refresh asks before any reading" true
-    (full Types.Account_emails_unread);
-  check bool "not after a reading" false
-    (full (Types.Account_emails_read [ ("codex", "codex@example.com") ]));
-  check bool "nor after a failed one, which the next opening asks again" false
-    (full (Types.Account_emails_failed "HTTP 403"));
-  check bool "opening Usage asks again" true
-    (Types.surface_needs_delta ~previous:(needs Types.Board) ~next:(needs Types.Metrics))
-      .Types.needs_account_emails
+    ]
 ;;
 
 let () =
@@ -237,8 +225,8 @@ let () =
             test_only_the_overview_asks_for_the_goal_tree
         ; test_case "Usage owns Keeper usage" `Quick
             test_usage_asks_for_keeper_usage
-        ; test_case "account emails are read when Usage opens" `Quick
-            test_account_emails_are_read_when_usage_opens
+        ; test_case "only Usage asks for account emails" `Quick
+            test_only_usage_asks_for_account_emails
         ; test_case "every keeper sub-mode asks for the roster" `Quick
             test_every_keeper_sub_mode_still_asks_for_the_roster
         ; test_case "the keeper pane asks for the roster wherever it is drawn"

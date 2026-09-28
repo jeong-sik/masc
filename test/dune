@@ -2461,6 +2461,7 @@
 ; sorted alphabetically.
 
 (include stanzas/test_keeper_list_truncation.inc)
+(include stanzas/test_keeper_portrait.inc)
 
 (include stanzas/test_keeper_census_outputs.inc)
 (include stanzas/test_keeper_wire_terminal.inc)
@@ -2658,6 +2659,7 @@
 
 (include stanzas/test_dated_jsonl_count_cache.inc)
 (include stanzas/test_dated_jsonl_off_fiber.inc)
+(include stanzas/test_play_role_permissions.inc)
 (include stanzas/test_pool_body_limit.inc)
 (include stanzas/test_posix_spawn_process_mgr.inc)
 

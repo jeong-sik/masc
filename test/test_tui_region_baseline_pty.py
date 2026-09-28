@@ -80,8 +80,41 @@ ROSTER_PANE_COLUMNS = 34
 # scenario that failed before it could.
 OBSERVER_HOLD_SECONDS = 120.0
 
+
+
+def layout(top, title, rules, bottom, footer, blank, windows=()):
+    return {"top": top, "title": title, "rules": rules, "bottom": bottom,
+            "footer": footer, "blank": blank, "windows": windows}
+
+
+# What measure() found on each screen (Test run 36426485595, the measuring
+# run; docs/evidence/tui-region-baseline-2026-09-28). Row 1 is the tab strip,
+# row 2 the body's top and row 3 its title on every screen here. The
+# Activity pane beside the body from 158 columns leaves the body's rows where
+# they were. The keeper detail's list window reads 1-22 of 37 with the roster
+# beside it and without.
+KEEPERS = layout("blank", 3, (4, 7, 28), None, 29, 17)
+BOARD = layout("blank", 3, (4, 7, 9), None, 29, 15)
+CONFIG = layout("blank", 3, (4, 9), None, 29, 1)
+DETAIL = layout("blank", 3, (4,), None, 29, 7, ("1-22/37",))
+DETAIL_BESIDE_ROSTER = layout("border", 3, (4, 28), 28, 29, 0, ("1-22/37",))
+CHAT = layout("blank", 3, (4, 26), None, 30, 19)
+# At 157 the folded Gate argument fits one row instead of two.
+CHAT_ONE_ROW_GATE = layout("blank", 3, (4, 26), None, 30, 20)
+
 # (screen, width) -> what measure() finds there.
-EXPECTED: dict[tuple[str, int], dict[str, object]] = {}
+EXPECTED: dict[tuple[str, int], dict[str, object]] = {
+    **{("keepers", width): KEEPERS for width in WIDTHS},
+    **{("board", width): BOARD for width in WIDTHS},
+    **{("config", width): CONFIG for width in WIDTHS},
+    **{("keeper-detail", width): DETAIL for width in WIDTHS},
+    **{("keeper-detail-roster", width): DETAIL_BESIDE_ROSTER for width in ROSTER_WIDTHS},
+    **{("keeper-chat-roster", width): CHAT for width in ROSTER_WIDTHS},
+    **{("keeper-chat", width): CHAT for width in WIDTHS},
+    ("keeper-chat", 157): CHAT_ONE_ROW_GATE,
+    # The folded Gate argument's row in the chat at 100 columns.
+    ("chat-gate-row", 100): {"row": 6},
+}
 
 
 # The Config body's source: the harness's navigation fixture, whose first
@@ -173,25 +206,21 @@ def interaction(served: region.ServedFixtures):
     measured: dict[tuple[str, int], dict[str, object]] = {}
 
     def take(process, fd, output, screen: str, columns: int) -> None:
-        # DISCOVERY (temporary, removed before review): collect instead of
-        # failing so one run lists every unanswered request and measurement.
-        try:
-            region.settle(process, fd, output)
-            rows = region.whole_screen(output)
-            left = ROSTER_PANE_COLUMNS if screen in ROSTER_SCREENS else 0
-            right = (columns - h.ACTING_PANE_NARROW_COLUMNS
-                     if columns >= h.ACTING_PANE_THRESHOLD_COLUMNS else columns)
-            region.assert_no_failure_text(rows, f"{screen} at {columns}")
-            if left:
-                region.assert_pane_edge(rows, left - 1, f"{screen} at {columns}")
-            if right < columns:
-                region.assert_pane_edge(rows, right, f"{screen} at {columns}")
-            measured[(screen, columns)] = region.measure(
-                rows, columns=columns, composer_rows=COMPOSER_ROWS[screen],
-                left=left, right=right)
-        except AssertionError as error:
-            print(f"DISCOVERY {screen} {columns}: {str(error)[:600]}")
-        print(f"DISCOVERY unanswered {screen} {columns}: {served.unanswered()}")
+        region.settle(process, fd, output)
+        rows = region.whole_screen(output)
+        where = f"{screen} at {columns}"
+        region.assert_answered(served, where)
+        region.assert_no_failure_text(rows, where)
+        left = ROSTER_PANE_COLUMNS if screen in ROSTER_SCREENS else 0
+        right = (columns - h.ACTING_PANE_NARROW_COLUMNS
+                 if columns >= h.ACTING_PANE_THRESHOLD_COLUMNS else columns)
+        if left:
+            region.assert_pane_edge(rows, left - 1, where)
+        if right < columns:
+            region.assert_pane_edge(rows, right, where)
+        measured[(screen, columns)] = region.measure(
+            rows, columns=columns, composer_rows=COMPOSER_ROWS[screen],
+            left=left, right=right)
         region.print_screen(screen, columns, output)
 
     def sweep(process, fd, output, screen: str, loaded, widths) -> None:

@@ -11,7 +11,7 @@ default = "codex_subscription.gpt-5.6"
 candidates = ["codex_acct1.gpt-5.6", "codex_subscription.gpt-5.6"]
 
 [runtime.assignments]
-sangsu = "codex_acct1.gpt-5.6"
+kestrel = "codex_acct1.gpt-5.6"
 
 [providers.codex_subscription]
 display-name = "Codex"
@@ -75,7 +75,7 @@ let test_the_screen_lists_what_the_removal_changes () =
     [ "[providers.codex_acct1]"
     ; "[codex_acct1.\"gpt-5.6\"]"
     ; "lane coding"
-    ; "keeper sangsu"
+    ; "keeper kestrel"
     ; "/home/op/.codex-account1"
     ];
   List.iter
@@ -96,7 +96,7 @@ let test_enter_removes_what_was_shown () =
 let test_a_file_changed_meanwhile_is_shown_again () =
   let screen = submitted (on_the_second ()) in
   let current =
-    let marker = "sangsu = \"codex_acct1.gpt-5.6\"\n" in
+    let marker = "kestrel = \"codex_acct1.gpt-5.6\"\n" in
     let at = Str.search_forward (Str.regexp_string marker) fixture 0 + String.length marker in
     String.sub fixture 0 at ^ "later = \"codex_acct1.gpt-5.6\"\n"
     ^ String.sub fixture at (String.length fixture - at)

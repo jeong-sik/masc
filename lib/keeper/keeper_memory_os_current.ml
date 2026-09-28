@@ -2052,6 +2052,41 @@ let update_locked_with_output
            |> Result.map_error store_error
          in
          let* next, output = build ~snapshot_content previous in
+         let* source_lines =
+           match
+             Keeper_memory_source_current.read_for_keepers_dir
+               ~keepers_dir
+               ~keeper_id
+           with
+           | Error message -> Error (store_error message)
+           | Ok snapshot ->
+             let lines =
+               Option.fold
+                 ~none:[]
+                 ~some:(fun (snapshot : Keeper_memory_source_current.t) ->
+                   List.map
+                     (Keeper_memory_source_current.render_fact ~verified:false)
+                     snapshot.facts
+                   @ List.map
+                       Keeper_memory_source_current.render_invalidation
+                       snapshot.invalidations)
+                 snapshot
+             in
+             Ok lines
+         in
+         let previous_bytes =
+           Keeper_memory_os_render.facts_payload_bytes
+             ~ordinary_facts:
+               (Option.fold ~none:[] ~some:(fun (snapshot : t) -> snapshot.facts) previous)
+             ~source_lines
+         in
+         let* () =
+           Keeper_memory_os_render.check_facts_budget
+             ~previous_bytes
+             ~ordinary_facts:next.facts
+             ~source_lines
+           |> Result.map_error store_error
+         in
          (* The file is 150-330 KB per keeper and every commit reads it, parses
             it, prints it and replaces it. On the scheduler domain that was one
             11-24 ms run per commit (rtev, 2026-09-16), about 80 commits an

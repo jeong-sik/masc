@@ -2822,7 +2822,8 @@ let draw_board_read_side buf (state : state) document ~rows ~body_cols
       ~body_rows:side_budget.body_rows
       ~comment_line_count:detail_line_count
       ~comment_rows:comment_content_rows
-      state.board_scroll
+      ~body_scroll:state.board_scroll
+      ~comment_scroll:state.board_comment_scroll
   in
   (* box_top/box_bottom draw no border in the borderless geometry this
      pane already uses (see their definitions) -- they would only add
@@ -2846,7 +2847,10 @@ let draw_board_read_side buf (state : state) document ~rows ~body_cols
     if i = 0 && comment_header_rows > 0 then
       box_line comment_buf comment_cols
         (Ansi.bold
-        ^ Printf.sprintf "  Comments (%d)" detail_comment_count
+        ^ Printf.sprintf "%sComments (%d)"
+            (if state.board_focus = Right_pane && state.board_comments_focused
+             then "> " else "  ")
+            detail_comment_count
         ^ Ansi.reset)
     else if i < side_budget.comment_rows then
       let idx = i - comment_header_rows + scroll.comment_offset in
@@ -2887,7 +2891,9 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
   box_line buf cols header;
   box_divider buf cols;
 
-  let title_line = Printf.sprintf "  %s%s%s"
+  let title_line = Printf.sprintf "%s%s%s%s"
+    (if state.board_focus = Right_pane && not state.board_comments_focused
+     then "> " else "  ")
     Ansi.bold
     (fit_width (Terminal_text.single_line post.bp_title) (cols - 6))
     Ansi.reset
@@ -3199,7 +3205,8 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
           Layout.project_board_read_scroll
             ~body_line_count:total_lines ~body_rows:content_height
             ~comment_line_count:detail_line_count ~comment_rows:comment_height
-            state.board_scroll
+            ~body_scroll:state.board_scroll
+            ~comment_scroll:state.board_comment_scroll
         in
         for i = 0 to content_height - 1 do
           let idx = i + scroll.body_offset in
@@ -3209,7 +3216,12 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
         done;
         if comment_height > 0 then begin
           box_divider buf cols;
-          box_line buf cols (Ansi.bold ^ "  Comments" ^ Ansi.reset);
+          box_line buf cols
+            (Ansi.bold
+             ^ (if state.board_focus = Right_pane
+                   && state.board_comments_focused
+                then "> Comments" else "  Comments")
+             ^ Ansi.reset);
           for i = 0 to comment_height - 1 do
             box_line buf cols
               (Board_read_layout.comment_line document (i + scroll.comment_offset))
@@ -3241,7 +3253,7 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
           else ""));
   box_bottom buf cols;
   Masc_tui_frame_timing.finish_stage ~name:"board.frame_rows" rows_started;
-  scroll.normalized_scroll
+  scroll.body_offset, scroll.comment_offset
 
 (* The post list beside the read: position context with the open post
    marked, exactly the roster-beside-detail shape. *)
@@ -3289,7 +3301,8 @@ let render_board_read (state : state) (list_post : board_post) =
     footer_line state ~max_cells:cols
       ~hints:
         (Masc_tui_keys.footer_hints_board_read
-           ~focus_posts:(state.board_focus = Left_pane) ~layout)
+           ~focus_posts:(state.board_focus = Left_pane)
+           ~focus_comments:state.board_comments_focused ~layout)
   in
   Masc_tui_frame_timing.finish_stage ~name:"board.render_prep" prep_started;
   match layout with

@@ -39,7 +39,7 @@ module World_observation = Masc.Keeper_world_observation
    reproduces its unit projection over [resolve_with_policy] so these
    assertions keep exercising the production resolution path. *)
 let aq_resolve ~base_path ~id ~decision =
-  match AQ.resolve_with_policy ~base_path ~id ~decision () with
+  match AQ.resolve_with_policy ~base_path ~id ~decision ~source:Rule_types.Human_operator () with
   | Ok _ -> Ok ()
   | Error _ as error -> error
 ;;
@@ -392,17 +392,17 @@ let test_call_summary_is_stated_once_and_copied () =
              if String.equal lifecycle.Chat_store.approval_id approval_id
              then
                Some
-                 ( Chat_store.approval_lifecycle_phase_to_label
+                 ( Keeper_approval_lifecycle.approval_lifecycle_phase_to_label
                      lifecycle.Chat_store.phase
                  , lifecycle.Chat_store.call_summary )
              else None))
        in
        let requested =
-         Chat_store.approval_lifecycle_phase_to_label Chat_store.Approval_requested
+         Keeper_approval_lifecycle.approval_lifecycle_phase_to_label Keeper_approval_lifecycle.Approval_requested
        in
        let rejected =
-         Chat_store.approval_lifecycle_phase_to_label
-           Chat_store.Approval_resolved_rejected
+         Keeper_approval_lifecycle.approval_lifecycle_phase_to_label
+           Keeper_approval_lifecycle.Approval_resolved_rejected
        in
        Alcotest.(check (list (pair string (option string))))
          "the stated line is on the request row and copied onto the resolution row"
@@ -435,16 +435,16 @@ let test_multiple_resolution_projections_keep_fifo_order () =
               resolution rows only: their order is what FIFO is about here. *)
            Option.bind message.approval_lifecycle (fun lifecycle ->
              match lifecycle.Chat_store.phase with
-             | Chat_store.Approval_resolved_approved
-             | Chat_store.Approval_resolved_rejected ->
+             | Keeper_approval_lifecycle.Approval_resolved_approved
+             | Keeper_approval_lifecycle.Approval_resolved_rejected ->
                Some lifecycle.Chat_store.approval_id
-             | Chat_store.Approval_requested
-             | Chat_store.Approval_replay_applied
-             | Chat_store.Approval_replay_applied_with_warning
-             | Chat_store.Approval_replay_failed
-             | Chat_store.Approval_replay_indeterminate
-             | Chat_store.Approval_continuation_recorded
-             | Chat_store.Approval_continuation_failed -> None))
+             | Keeper_approval_lifecycle.Approval_requested
+             | Keeper_approval_lifecycle.Approval_replay_applied
+             | Keeper_approval_lifecycle.Approval_replay_applied_with_warning
+             | Keeper_approval_lifecycle.Approval_replay_failed
+             | Keeper_approval_lifecycle.Approval_replay_indeterminate
+             | Keeper_approval_lifecycle.Approval_continuation_recorded
+             | Keeper_approval_lifecycle.Approval_continuation_failed -> None))
        in
        Alcotest.(check (list string)) "chat projection preserves resolution FIFO"
          [ first; second ] projected_ids)
@@ -552,6 +552,7 @@ let test_retry_folds_onto_unconsumed_grant_until_consumed () =
             ~base_path
             ~id:first.approval_id
             ~decision:Rule_types.Decision.Approve
+            ~source:Rule_types.Human_operator
             ()
         with
         | Ok _ -> ()
@@ -1593,6 +1594,7 @@ let test_resolution_is_durable_and_origin_scoped () =
            ~base_path
            ~id
            ~decision:Rule_types.Decision.Approve
+           ~source:Rule_types.Human_operator
            ~remember_rule:true
            ~created_by:"operator"
            ()
@@ -1618,11 +1620,11 @@ let test_resolution_is_durable_and_origin_scoped () =
             ; _
             } ] ->
           Alcotest.(check bool) "the parked call was recorded first" true
-            (requested.phase = Chat_store.Approval_requested);
+            (requested.phase = Keeper_approval_lifecycle.Approval_requested);
           Alcotest.(check string) "approved status carries approval id" id
             lifecycle.approval_id;
           Alcotest.(check bool) "approval is not yet effect-applied" true
-            (lifecycle.phase = Chat_store.Approval_resolved_approved)
+            (lifecycle.phase = Keeper_approval_lifecycle.Approval_resolved_approved)
         | rows ->
           Alcotest.failf
             "expected a request row and an approval status row, got %d"
@@ -1884,6 +1886,7 @@ let test_remembered_rule_carries_requested_expiry () =
            ~base_path
            ~id
            ~decision:Rule_types.Decision.Approve
+           ~source:Rule_types.Human_operator
            ~remember_rule:true
            ~rule_expires_at:expires_at
            ~created_by:"operator"
@@ -1904,6 +1907,7 @@ let test_remembered_rule_carries_requested_expiry () =
             ~base_path
             ~id
             ~decision:Rule_types.Decision.Approve
+            ~source:Rule_types.Human_operator
             ~remember_rule:true
             ~rule_expires_at:expires_at
             ~created_by:"operator"
@@ -2560,7 +2564,7 @@ let test_pre_effect_replay_failure_retires_grant_and_unblocks_continuation () =
             ~base_dir:base_path
             ~keeper_name
             ~approval_id
-            ~phase:Chat_store.Approval_replay_failed);
+            ~phase:Keeper_approval_lifecycle.Approval_replay_failed);
        (match
           AQ.ensure_settled_continuation_chat_projection
             ~base_path
@@ -2588,7 +2592,7 @@ let test_pre_effect_replay_failure_retires_grant_and_unblocks_continuation () =
             ~base_dir:base_path
             ~keeper_name
             ~approval_id
-            ~phase:Chat_store.Approval_continuation_recorded))
+            ~phase:Keeper_approval_lifecycle.Approval_continuation_recorded))
 ;;
 
 (* #32956: a turn that received the replay and then failed after the
@@ -2664,7 +2668,7 @@ let test_failed_continuation_receipt_settles_once_after_the_grant_is_spent () =
             ~base_dir:base_path
             ~keeper_name
             ~approval_id
-            ~phase:Chat_store.Approval_continuation_failed);
+            ~phase:Keeper_approval_lifecycle.Approval_continuation_failed);
        Alcotest.(check bool)
          "the failed receipt is not a recorded receipt"
          false
@@ -2672,7 +2676,7 @@ let test_failed_continuation_receipt_settles_once_after_the_grant_is_spent () =
             ~base_dir:base_path
             ~keeper_name
             ~approval_id
-            ~phase:Chat_store.Approval_continuation_recorded);
+            ~phase:Keeper_approval_lifecycle.Approval_continuation_recorded);
        Alcotest.(check bool)
          "the intake reads the failed receipt as settled"
          true
@@ -3327,6 +3331,7 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
             ~base_path
             ~id:resolved_id
             ~decision:Rule_types.Decision.Approve
+            ~source:Rule_types.Human_operator
             ()
         with
         | Ok _ -> ()
@@ -3385,6 +3390,7 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
               ~base_path
               ~id:resolved_id
               ~decision:Rule_types.Decision.Approve
+              ~source:Rule_types.Human_operator
               ()
           with
           | Error (AQ.Persistence_failed _) -> ()
@@ -5610,9 +5616,9 @@ let test_nonapproved_resolution_payload_is_delivered () =
             ; _
             } ] ->
           Alcotest.(check bool) "the parked call was recorded first" true
-            (requested.phase = Chat_store.Approval_requested);
+            (requested.phase = Keeper_approval_lifecycle.Approval_requested);
           Alcotest.(check bool) "rejection status is durable" true
-            (lifecycle.phase = Chat_store.Approval_resolved_rejected)
+            (lifecycle.phase = Keeper_approval_lifecycle.Approval_resolved_rejected)
         | rows ->
           Alcotest.failf
             "expected a request row and a rejection status row, got %d"
@@ -5656,7 +5662,7 @@ let test_canonical_replay_repairs_stale_chat_receipt_once () =
        let stale_lifecycle : Chat_store.approval_lifecycle =
          { approval_id
          ; tool_name = Some "external-effect"
-         ; phase = Chat_store.Approval_replay_failed
+         ; phase = Keeper_approval_lifecycle.Approval_replay_failed
          ; artifact_ref = Some stale_ref
          ; call_summary = None
          }
@@ -5733,10 +5739,10 @@ let test_canonical_replay_repairs_stale_chat_receipt_once () =
            lifecycle_rows
        in
        match phases with
-       | [ Chat_store.Approval_requested
-         ; Chat_store.Approval_resolved_approved
-         ; Chat_store.Approval_replay_failed
-         ; Chat_store.Approval_replay_applied
+       | [ Keeper_approval_lifecycle.Approval_requested
+         ; Keeper_approval_lifecycle.Approval_resolved_approved
+         ; Keeper_approval_lifecycle.Approval_replay_failed
+         ; Keeper_approval_lifecycle.Approval_replay_applied
          ] -> ()
        | _ -> Alcotest.fail "canonical correction history is incomplete")
 ;;
@@ -5859,6 +5865,7 @@ let test_audit_append_failure_keeps_resolution_rule_and_grant_committed () =
              ~base_path
              ~id:approval_id
              ~decision:Rule_types.Decision.Approve
+             ~source:Rule_types.Human_operator
              ~remember_rule:true
              ~created_by:"test-operator"
              ()

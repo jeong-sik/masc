@@ -475,6 +475,72 @@ let test_priority_keeps_other_producers_and_survives_reopen () =
      | Error (Store.Not_queued _) -> () | _ -> fail "already running operation was promoted"))
 ;;
 
+let test_automatic_priority_keeps_accepted_cohort_fifo () =
+  with_store "auto-priority-fifo" @@ fun path store ->
+  let submit store name actor =
+    ignore (store_ok (Store.submit store ~now:1. ~operation_id:(id name)
+      ~source:(source actor) ~input:(input name))) in
+  submit store "running" "other";
+  let running = Option.get (store_ok (Store.claim_next store ~now:2.)) in
+  check string "one turn holds queue consumption" "running"
+    (Id.to_string running.operation_id);
+  List.iter (fun name -> submit store name (if name = "outsider" then "other" else "operator"))
+    ["outsider"; "auto-a"; "auto-b"; "auto-c"];
+  let move store name predecessors =
+    ignore (store_ok (Store.move_queued_priority_cohort_to_front store ~now:3.
+      ~operation_id:(id name) ~predecessors:(List.map id predecessors))) in
+  let queued store =
+    store_ok (Store.list_queued store ~after_sequence:None ~limit:10)
+    |> List.map (fun (row : Operation.t) -> Id.to_string row.operation_id) in
+  move store "auto-a" [];
+  check (list string) "first automatic promotion" ["auto-a"; "outsider"; "auto-b"; "auto-c"]
+    (queued store);
+  move store "auto-b" ["auto-a"];
+  check (list string) "second automatic promotion keeps A first"
+    ["auto-a"; "auto-b"; "outsider"; "auto-c"] (queued store);
+  move store "auto-c" ["auto-a"; "auto-b"];
+  check (list string) "third automatic promotion keeps A B C in accepted order"
+    ["auto-a"; "auto-b"; "auto-c"; "outsider"] (queued store);
+  store_ok (Store.close store);
+  let reopened = store_ok (Store.open_or_create ~path) in
+  Fun.protect ~finally:(fun () -> ignore (Store.close reopened)) (fun () ->
+    check (list string) "the queued order survives reopen"
+      ["auto-a"; "auto-b"; "auto-c"; "outsider"] (queued reopened);
+    ignore (store_ok (Store.move_queued_to_front reopened ~now:4.
+      ~operation_id:(id "outsider")));
+    check (list string) "explicit run-next still moves to absolute front"
+      ["outsider"; "auto-a"; "auto-b"; "auto-c"] (queued reopened);
+    ignore (store_ok (Store.cancel_queued reopened ~now:5.
+      ~operation_id:(id "auto-c")));
+    submit reopened "auto-d" "operator";
+    move reopened "auto-d" ["auto-a"; "auto-b"; "auto-c"];
+    check (list string) "cancelled predecessor is skipped in the next cohort"
+      ["auto-a"; "auto-b"; "auto-d"; "outsider"] (queued reopened))
+;;
+
+let test_automatic_priority_repairs_unknown_predecessor_result () =
+  with_store "auto-priority-repair" @@ fun _path store ->
+  let submit name actor = ignore (store_ok (Store.submit store ~now:1.
+    ~operation_id:(id name) ~source:(source actor) ~input:(input name))) in
+  List.iter (fun (name, actor) -> submit name actor)
+    ["outsider", "other"; "auto-a", "operator"; "auto-b", "operator"];
+  let queued () =
+    store_ok (Store.list_queued store ~after_sequence:None ~limit:10)
+    |> List.map (fun (row : Operation.t) -> Id.to_string row.operation_id) in
+  (match Store.move_queued_priority_cohort_to_front store ~now:2.
+     ~operation_id:(id "auto-b") ~predecessors:[id "outsider"] with
+   | Error (Store.Invalid_input _) -> ()
+   | _ -> fail "another source was accepted as a priority predecessor");
+  check (list string) "rejected predecessor changes no durable order"
+    ["outsider"; "auto-a"; "auto-b"] (queued ());
+  (* A's HTTP result may have been lost after the server accepted it, or the
+     server may have refused it. B's request repairs either state atomically. *)
+  ignore (store_ok (Store.move_queued_priority_cohort_to_front store ~now:3.
+    ~operation_id:(id "auto-b") ~predecessors:[id "auto-a"]));
+  check (list string) "later priority lifts the whole accepted cohort"
+    ["auto-a"; "auto-b"; "outsider"] (queued ())
+;;
+
 let test_batch_claim_freezes_inputs_and_settles_members () =
   with_store "batch" @@ fun _path store ->
   let first = id "batch-first" and second = id "batch-second" and third = id "batch-later" in
@@ -605,6 +671,10 @@ let () =
         ; test_case "batch restart and failed commit" `Quick test_batch_restart_and_commit_failure
         ; test_case "priority preserves other producers, replay and running boundary" `Quick
           test_priority_keeps_other_producers_and_survives_reopen
+        ; test_case "automatic priority preserves accepted FIFO while a turn runs" `Quick
+          test_automatic_priority_keeps_accepted_cohort_fifo
+        ; test_case "automatic priority repairs an unknown prior result" `Quick
+          test_automatic_priority_repairs_unknown_predecessor_result
         ; test_case "read-only inspection preserves absence and refuses uninitialized evidence" `Quick
             test_read_only_inspection_preserves_absence_and_refuses_uninitialized_store
         ; test_case "schema identity and budget" `Quick test_schema_identity_and_budget

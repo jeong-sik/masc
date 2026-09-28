@@ -125,6 +125,7 @@ type action =
   | Suspend_official_checkpoint of official_client_checkpoint
   | Suspend_runtime_retry of runtime_retry
   | Resume_runtime_retry of runtime_retry
+  | Update_runtime_retry_wait of { observed : runtime_retry; replacement : runtime_retry }
   | Suspend_gate_reconciliation of gate_binding * string
   | Suspend_gate of gate_wait
   | Reconcile_gate_binding of gate_binding * gate_wait

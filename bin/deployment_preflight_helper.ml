@@ -57,32 +57,6 @@ let validate_signals paths =
   Ok ()
 ;;
 
-let validate_queue ~load ~base_path ~keeper_name =
-  load ~base_path ~keeper_name
-  |> Result.map (fun (_ : Keeper_event_queue_state.t) -> ())
-  |> Result.map_error (fun detail ->
-    `Msg
-      (Printf.sprintf
-         "current event queue production validation rejected keeper=%s base_path=%s: %s"
-         keeper_name
-         base_path
-         detail))
-;;
-
-let validate_current_queue ~base_path ~keeper_name =
-  validate_queue
-    ~load:Keeper_event_queue_persistence.validate_existing_state_read_only_result
-    ~base_path
-    ~keeper_name
-;;
-
-let validate_current_wal ~base_path ~keeper_name =
-  validate_queue
-    ~load:Keeper_event_queue_persistence.validate_state_read_only_result
-    ~base_path
-    ~keeper_name
-;;
-
 (* The two rejection classes call for different operator action, so each
    verdict carries a single-token [class=] label: cmdliner re-wraps the error
    text at the terminal margin and can split a phrase across lines, a token
@@ -108,6 +82,35 @@ let validate_current_meta path =
             binding; strip retired fields or fill missing ones): %s"
            path
            detail))
+;;
+
+(* Read the original bytes with the production decoder: jq object projection
+   loses duplicate fields before it can judge the one-version intent bridge. *)
+let validate_task_backlog path =
+  try
+    let json = Yojson.Safe.from_file path in
+    let* (_backlog, diagnostics) =
+      Masc_domain.backlog_of_yojson_with_diagnostics json
+      |> Result.map_error (fun detail ->
+        `Msg (Printf.sprintf "task backlog contract rejected path=%s: %s" path detail))
+    in
+    let legacy_tasks =
+      List.filter_map (fun (row : Masc_domain.backlog_task_diagnostics) ->
+        match row.dropped_outcomes.legacy_intent_dropped with
+        | Some (Masc_domain.Legacy_complete | Masc_domain.Legacy_cancel) ->
+            Some row.dropped_task_id
+        | None -> None) diagnostics
+    in
+    (match legacy_tasks with
+     | [] -> ()
+     | _ :: _ ->
+         Printf.printf
+           "[runtime-deployment-preflight] WARN: %d legacy intent submission(s): %s (%s); this version reads and cleans these rows on the next backlog write\n%!"
+           (List.length legacy_tasks) (String.concat " " legacy_tasks) path);
+    Ok ()
+  with
+  | Sys_error detail -> errorf "task backlog unreadable path=%s: %s" path detail
+  | Yojson.Json_error detail -> errorf "task backlog JSON malformed path=%s: %s" path detail
 ;;
 
 (* The gate prints this next to its verdict so the operator can tell a
@@ -463,6 +466,134 @@ let run_tool_blob_maintenance base_path delete_previous_candidates =
               Ok ()))
 ;;
 
+(* #39331 milestone B: the reference-based sweep for every Keeper's kept
+   vision store. It runs under the same exclusive BasePath lease as
+   [tool-blob-maintenance] so a sweep never races a live writer, and it
+   reports per-store counts so the operator can measure before/after. A
+   store whose scan cannot complete is reported and makes the command fail;
+   the sweep itself deletes nothing in that store. *)
+let run_vision_kept_maintenance base_path =
+  let lease_dir = (Host_config.host ()).base_path_lease_dir in
+  match
+    Server_startup_takeover.acquire_base_path_lock ~run_dir:lease_dir base_path
+  with
+  | Server_startup_takeover.Base_path_already_owned { owner; _ } ->
+    let pid = Server_startup_takeover.base_path_owner_pid owner in
+    errorf
+      "workspace writer lease is already owned base_path=%s pid=%s"
+      base_path
+      (match pid with
+       | Some value -> string_of_int value
+       | None -> "unknown")
+  | Server_startup_takeover.Base_path_rejected rejection ->
+    errorf
+      "workspace writer lease rejected base_path=%s: %s"
+      base_path
+      (Server_startup_takeover.base_path_lock_rejection_to_string rejection)
+  | Server_startup_takeover.Base_path_acquired lease ->
+    Fun.protect
+      ~finally:(fun () -> Server_startup_takeover.release_base_path_lease lease)
+      (fun () ->
+         match Unix.realpath base_path with
+         | exception exn ->
+           errorf
+             "workspace BasePath canonicalization failed base_path=%s: %s"
+             base_path
+             (Printexc.to_string exn)
+         | canonical_base_path ->
+           let masc_dir =
+             Common.masc_dir_from_base_path ~base_path:canonical_base_path
+           in
+           let keepers_dir =
+             Config_dir_resolver.keepers_dir_for_base_path
+               ~base_path:canonical_base_path
+           in
+           let* vision_dirs =
+             match Sys.readdir keepers_dir with
+             | exception Sys_error reason ->
+               errorf "keepers dir unreadable path=%s: %s" keepers_dir reason
+             | entries ->
+               Ok
+                 (Array.to_list entries
+                  |> List.filter (fun name -> Filename.check_suffix name ".vision")
+                  |> List.sort String.compare
+                  |> List.map (fun name -> Filename.concat keepers_dir name))
+           in
+           let reports =
+             List.map
+               (fun dir ->
+                  let keeper = Filename.basename dir in
+                  keeper, dir, Multimodal.Vision_kept_maintenance.run ~masc_dir ~dir)
+               vision_dirs
+           in
+           let failed =
+             List.filter_map
+               (fun (keeper, dir, result) ->
+                  match result with
+                  | Ok _ -> None
+                  | Error error ->
+                    Some
+                      (Printf.sprintf
+                         "%s (%s): %s"
+                         keeper
+                         dir
+                         (Multimodal.Vision_kept_maintenance.error_to_string error)))
+               reports
+           in
+           if failed <> []
+           then
+             errorf
+               "vision kept maintenance failed: %s"
+               (String.concat "; " failed)
+           else begin
+             Yojson.Safe.to_channel
+               stdout
+               (`Assoc
+                 [ "base_path", `String canonical_base_path
+                 ; ( "stores"
+                   , `List
+                       (List.map
+                          (fun (keeper, dir, result) ->
+                             match result with
+                             | Ok (report : Multimodal.Vision_kept_maintenance.report) ->
+                               `Assoc
+                                 [ "keeper", `String keeper
+                                 ; "dir", `String dir
+                                 ; "scanned", `Int report.scanned
+                                 ; "live", `Int report.live
+                                 ; ( "candidates_recorded"
+                                   , `Int report.candidates_recorded
+                                   )
+                                 ; "deleted", `Int report.deleted
+                                 ; ( "reclaimed_bytes"
+                                   , `Intlit
+                                       (Int64.to_string report.reclaimed_bytes)
+                                   )
+                                 ; "remaining_count", `Int report.remaining_count
+                                 ; ( "remaining_bytes"
+                                   , `Intlit
+                                       (Int64.to_string report.remaining_bytes)
+                                   )
+                                 ]
+                             | Error error ->
+                               `Assoc
+                                 [ "keeper", `String keeper
+                                 ; "dir", `String dir
+                                 ; ( "error"
+                                   , `String
+                                       (Multimodal.Vision_kept_maintenance.error_to_string
+                                          error)
+                                   )
+                                 ])
+                          reports)
+                   )
+                 ]);
+             output_char stdout '\n';
+             flush stdout;
+             Ok ()
+           end)
+;;
+
 let handoff_base_path_lease
       base_path
       next_executable
@@ -547,16 +678,6 @@ let validate_signals_cmd =
     Term.(ret (const (fun paths -> cmdliner_result (validate_signals paths)) $ signal_files))
 ;;
 
-let current_queue_base_path =
-  let doc = "Workspace BasePath containing the current queue owner." in
-  Arg.(required & opt (some dir) None & info [ "base-path" ] ~docv:"PATH" ~doc)
-;;
-
-let current_queue_keeper_name =
-  let doc = "Exact Keeper owner whose snapshot and/or transition WAL must load." in
-  Arg.(required & opt (some string) None & info [ "keeper-name" ] ~docv:"KEEPER" ~doc)
-;;
-
 let durable_filenames_cmd =
   let doc = "print the durable event-queue filenames this binary reads and writes" in
   Cmd.v
@@ -573,32 +694,6 @@ let durable_filenames_cmd =
       $ const ())
 ;;
 
-let validate_current_queue_cmd =
-  let doc = "validate a current event-queue through production decode and replay" in
-  Cmd.v
-    (Cmd.info "validate-current-queue" ~doc)
-    Term.(
-      ret
-        (const
-           (fun base_path keeper_name ->
-              cmdliner_result (validate_current_queue ~base_path ~keeper_name))
-         $ current_queue_base_path
-         $ current_queue_keeper_name))
-;;
-
-let validate_current_wal_cmd =
-  let doc = "validate the current WAL with the production empty-state replay path" in
-  Cmd.v
-    (Cmd.info "validate-current-wal" ~doc)
-    Term.(
-      ret
-        (const
-           (fun base_path keeper_name ->
-              cmdliner_result (validate_current_wal ~base_path ~keeper_name))
-         $ current_queue_base_path
-         $ current_queue_keeper_name))
-;;
-
 let current_meta_file =
   let doc = "Validate one persisted Keeper meta against the current closed schema." in
   Arg.(required & pos 0 (some file) None & info [] ~docv:"KEEPER_META" ~doc)
@@ -612,6 +707,18 @@ let validate_current_meta_cmd =
       ret
         (const (fun path -> cmdliner_result (validate_current_meta path))
            $ current_meta_file))
+;;
+
+let task_backlog_file =
+  let doc = "Validate one task backlog without changing its bytes." in
+  Arg.(required & pos 0 (some file) None & info [] ~docv:"TASK_BACKLOG" ~doc)
+;;
+
+let validate_task_backlog_cmd =
+  let doc = "validate one task backlog with the production decoder" in
+  Cmd.v (Cmd.info "validate-task-backlog" ~doc)
+    Term.(ret (const (fun path -> cmdliner_result (validate_task_backlog path))
+               $ task_backlog_file))
 ;;
 
 let build_commit_cmd =
@@ -683,6 +790,20 @@ let tool_blob_maintenance_cmd =
          $ delete_previous_candidates))
 ;;
 
+let vision_kept_maintenance_cmd =
+  let doc =
+    "sweep un-referenced kept vision artifacts under the exclusive BasePath lease"
+  in
+  Cmd.v
+    (Cmd.info "vision-kept-maintenance" ~doc)
+    Term.(
+      ret
+        (const
+           (fun base_path ->
+              cmdliner_result (run_vision_kept_maintenance base_path))
+         $ base_path))
+;;
+
 (* Every store [Keeper_durable_store.preflight_scan] names: a deploy is where
    the operator watches, so any file or row this build cannot read stops it. *)
 let validate_stores base_path =
@@ -742,6 +863,227 @@ let validate_stores_cmd =
   Cmd.v
     (Cmd.info "validate-stores" ~doc)
     Term.(ret (const (fun base_path -> cmdliner_result (validate_stores base_path)) $ base_path))
+;;
+
+(* The runtime.toml this BasePath's server reads, judged the way the raw save
+   ([POST /api/v1/runtime/config/raw]) judges text before it writes and the way
+   boot loads it. #39040 narrowed [\[skills\] resource-read-max-bytes] while the
+   live file kept the old value, and the restarted server refused the whole
+   Skill table: every Keeper ran without Skills for about five hours (#39311).
+
+   The model catalog is installed first, as boot does, because an
+   [AGENT_CORE_MODEL_CATALOG] replacement changes which runtimes load. Then, in
+   order, the first refusal wins:
+   - the Keeper setting schema, which the save checks and which boot refuses to
+     start on ([Server_runtime_bootstrap.apply_runtime_toml]);
+   - [Runtime.validate_config_text], the rest of the save check. Its checks
+     that compare the text with the file a save replaces find nothing here,
+     because that file is this text;
+   - the [\[fusion\]] table as every Fusion run loads it;
+   - boot's runtime initialisation, refused when it would disable a runtime
+     the catalog does not carry, leave a Keeper without its runtime, or leave
+     an exact-output slot out for a missing body deadline, the states /health
+     reports as degraded;
+   - boot's exact-output registry step, without publishing.
+   Initialisation fills this process's runtime state. The helper exits after
+   its verdict, so nothing else reads that state. *)
+let keeper_setting_errors (report : Keeper_runtime_config.validation_report) =
+  List.filter_map
+    (fun (issue : Keeper_runtime_config.validation_issue) ->
+       match issue.severity with
+       | Keeper_runtime_config.Error ->
+         Some (Printf.sprintf "%s: %s" issue.key issue.detail)
+       | Keeper_runtime_config.Warning -> None)
+    report.issues
+;;
+
+let catalog_degradation_to_string (degradation : Runtime.startup_degradation) =
+  let keepers =
+    List.map
+      (fun (assignment : Runtime.unavailable_runtime_assignment) ->
+         Printf.sprintf
+           "Keeper %s assigned to %s"
+           assignment.Runtime.keeper_name
+           assignment.runtime_id)
+      degradation.Runtime.unavailable_assignments
+  in
+  Printf.sprintf
+    "boot would disable %d runtime(s) the model catalog does not carry: %s; \
+     Keepers left without their runtime: %s"
+    (List.length degradation.disabled_runtime_ids)
+    (String.concat
+       ", "
+       (List.map
+          Runtime.missing_catalog_model_to_string
+          degradation.report.Runtime.missing_models))
+    (match keepers with
+     | [] -> "none"
+     | _ :: _ -> String.concat ", " keepers)
+;;
+
+let exact_slot_degradation_to_string (degradation : Runtime.exact_slot_degradation) =
+  Printf.sprintf
+    "boot would leave these exact-output slots out: %s%s"
+    (String.concat
+       "; "
+       (List.map Runtime.exact_slot_body_deadline_gap_to_string degradation.Runtime.gaps))
+    (match degradation.emptied_lane_ids with
+     | [] -> ""
+     | lane_ids -> "; lanes left with no slot: " ^ String.concat ", " lane_ids)
+;;
+
+let judge_runtime_config ~base_path ~config_root path =
+  let judged =
+    try
+      let (_ : string option) =
+        Server_runtime_bootstrap.configure_agent_core_model_catalog_env ()
+      in
+      let* observation = Runtime.load_config_observation ~runtime_config_path:path () in
+      let source_text = observation.Runtime.source_text in
+      let* report =
+        Keeper_runtime_config.validate_source_text source_text
+        |> Result.map_error (fun detail -> "runtime config parse failed: " ^ detail)
+      in
+      let* () =
+        if Keeper_runtime_config.validation_report_is_valid report
+        then Ok ()
+        else
+          Error
+            ("Keeper setting refused: " ^ String.concat "; " (keeper_setting_errors report))
+      in
+      let* () = Runtime.validate_config_text ~runtime_config_path:path source_text in
+      let* (_ : Fusion_policy.t) = Masc.Fusion_config_loader.load ~base_path in
+      let* () =
+        match Runtime.init_default_degraded_observation observation with
+        | Error error -> Error (Runtime.strict_init_error_to_string error)
+        | Ok (Runtime.Initialized_degraded degradation) ->
+          Error (catalog_degradation_to_string degradation)
+        | Ok Runtime.Initialized -> Ok ()
+      in
+      let* () =
+        let degradation = Runtime.exact_slot_degradation () in
+        match degradation.Runtime.gaps with
+        | [] -> Ok ()
+        | _ :: _ -> Error (exact_slot_degradation_to_string degradation)
+      in
+      Server_runtime_bootstrap.check_exact_output_registry ~config_root ();
+      Ok ()
+    with
+    | Env_config_core.Config_error detail -> Error detail
+  in
+  match judged with
+  | Error detail ->
+    Printf.printf "runtime.toml refused path=%s: %s\n%!" path detail;
+    errorf "runtime.toml is one this build refuses path=%s" path
+  | Ok () ->
+    Printf.printf "runtime.toml accepted path=%s\n%!" path;
+    Ok ()
+;;
+
+(* The path is the one boot locks for this BasePath, read by
+   [Runtime.config_path]'s rules. A relative BasePath is made absolute first:
+   the resolver anchors a relative one at itself. *)
+let validate_runtime_config base_path allow_empty_workspace =
+  match Unix.realpath base_path with
+  | exception Unix.Unix_error (error, _, _) ->
+    errorf
+      "workspace BasePath cannot be resolved base_path=%s: %s"
+      base_path
+      (Unix.error_message error)
+  | base_path ->
+    let resolution = Config_dir_resolver.resolve_for_base_path ~base_path in
+    let config_root = resolution.config_root.path in
+    let path = Filename.concat config_root Config_dir_resolver.runtime_toml_filename in
+    let empty_workspace () =
+      Printf.printf "runtime.toml absent path=%s empty_workspace=allowed\n%!" path;
+      Ok ()
+    in
+    (* Boot's own config-root decision says whether it writes the file. *)
+    let absent () =
+      match Server_runtime_config_root_bootstrap.missing_runtime_toml_at_boot ~base_path with
+      | Server_runtime_config_root_bootstrap.Written_at_boot ->
+        Printf.printf "runtime.toml absent path=%s boot_writes_seed=yes\n%!" path;
+        Ok ()
+      | Server_runtime_config_root_bootstrap.Left_missing (_ : string)
+        when allow_empty_workspace -> empty_workspace ()
+      | Server_runtime_config_root_bootstrap.Left_missing reason ->
+        errorf
+          "runtime.toml is absent path=%s and boot does not write one (%s), so \
+           the server would start with no model; wrong --base-path or \
+           MASC_CONFIG_DIR? pass --allow-empty-workspace only for an \
+           intentional new workspace"
+          path
+          reason
+    in
+    (match resolution.config_root.source with
+     | Config_dir_resolver.Invalid_env
+       when allow_empty_workspace && not (Sys.file_exists config_root) ->
+       (* Boot creates the MASC_CONFIG_DIR it is given and writes nothing in it. *)
+       empty_workspace ()
+     | Config_dir_resolver.Invalid_env ->
+       errorf
+         "runtime config root is invalid base_path=%s: %s"
+         base_path
+         (String.concat "; " resolution.warnings)
+     | Config_dir_resolver.Missing -> absent ()
+     | Config_dir_resolver.Env | Config_dir_resolver.Local_masc ->
+       if Sys.file_exists path
+       then judge_runtime_config ~base_path ~config_root path
+       else absent ())
+;;
+
+let allow_empty_workspace =
+  let doc =
+    "The workspace is intentionally new, so a runtime.toml that is absent, and \
+     that boot would not write, passes instead of being refused."
+  in
+  Arg.(value & flag & info [ "allow-empty-workspace" ] ~doc)
+;;
+
+let validate_runtime_config_cmd =
+  let doc =
+    "judge the runtime.toml this BasePath's server reads with the raw save \
+     check and with what boot does with it"
+  in
+  Cmd.v
+    (Cmd.info "validate-runtime-config" ~doc)
+    Term.(
+      ret
+        (const (fun base_path allow_empty_workspace ->
+           cmdliner_result (validate_runtime_config base_path allow_empty_workspace))
+         $ base_path
+         $ allow_empty_workspace))
+;;
+
+(* The workspace masc would run against, found the way every masc command
+   finds it ([Workspace_root]: --base-path, MASC_BASE_PATH, a current directory
+   holding .masc/config, then the recorded default). A local install asks this
+   before it checks runtime.toml, so the shell does not restate the order.
+   Finding none is an answer, not a failure: [workspace=none], exit 0. *)
+let resolve_workspace requested =
+  match Workspace_root.resolve_current ~flag:requested with
+  | Ok workspace ->
+    Printf.printf
+      "workspace=resolved\nroot=%s\nsource=%s\n%!"
+      workspace.Workspace_root.root
+      (Workspace_root.source_label workspace.Workspace_root.source)
+  | Error (Workspace_root.No_workspace _ | Workspace_root.Unanchored _) ->
+    Printf.printf "workspace=none\n%!"
+;;
+
+let requested_base_path =
+  let doc =
+    "Workspace named on the command line. Without it, the one masc itself \
+     would use."
+  in
+  Arg.(value & opt (some string) None & info [ "base-path" ] ~docv:"PATH" ~doc)
+;;
+
+let resolve_workspace_cmd =
+  let doc = "print the workspace masc would run against and where it came from" in
+  Cmd.v
+    (Cmd.info "resolve-workspace" ~doc)
+    Term.(const resolve_workspace $ requested_base_path)
 ;;
 
 (* A hard-cut field leaves rows no current decoder can read. [replay] refuses
@@ -943,14 +1285,16 @@ let () =
           ; lease_run_cmd
           ; lease_handoff_cmd
           ; tool_blob_maintenance_cmd
+          ; vision_kept_maintenance_cmd
           ; verify_lease_owner_cmd
-          ; validate_current_queue_cmd
-          ; validate_current_wal_cmd
           ; validate_current_meta_cmd
+          ; validate_task_backlog_cmd
           ; build_commit_cmd
           ; validate_schedule_ledger_cmd
           ; validate_signals_cmd
           ; cut_run_registries_cmd
           ; validate_stores_cmd
+          ; validate_runtime_config_cmd
+          ; resolve_workspace_cmd
           ]))
 ;;

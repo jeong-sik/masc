@@ -4,11 +4,11 @@ module Msp = Runtime_muse_msp
 
 type config =
   { cli_path : string
+  ; account_home : string option
   ; model : string option
   ; native : Runtime_native_tools.posture
   ; admission_timeout_s : float
   ; timeout_s : float option
-  ; wall_clock_ceiling_s : float option
   }
 
 let default_timeout_s = 300.0
@@ -26,11 +26,11 @@ let client_name = "masc"
 
 let default_config () =
   { cli_path = "muse"
+  ; account_home = None
   ; model = None
   ; native = Runtime_native_tools.Native_read
   ; admission_timeout_s = default_timeout_s
   ; timeout_s = Some default_timeout_s
-  ; wall_clock_ceiling_s = None
   }
 ;;
 
@@ -67,6 +67,7 @@ type error =
       ; message : string
       }
   | Capability_not_granted of Runtime_muse_msp.capability
+  | Session_not_durable
   | Session_model_mismatch of
       { requested : string
       ; resumed : string option
@@ -150,6 +151,8 @@ let error_to_string = function
     Printf.sprintf
       "Muse Code did not grant the %s capability this session needs"
       (capability_to_string capability)
+  | Session_not_durable ->
+    "Muse Code host uses ephemeral sessions; durable session storage is required"
   | Session_model_mismatch { requested; resumed } ->
     Printf.sprintf
       "Muse Code resumed a session on %s, but the turn asks for %s"
@@ -193,7 +196,7 @@ end)
 
 open Shared_json
 
-let bounded_tail = Runtime_official_client_json.bounded_tail
+module Stderr = Runtime_official_client_json.Stderr
 
 let emit_stream_event on_stream_event event =
   match on_stream_event with
@@ -275,6 +278,18 @@ let valid_utf8 name value =
 (* What any spawn needs, with or without a session. *)
 let validate_process_config config =
   let* () =
+    match config.account_home with
+    | None -> Ok ()
+    | Some home ->
+      let* home =
+        Runtime_account_home.of_string home
+        |> Result.map_error (fun detail -> Invalid_config ("account_home: " ^ detail))
+      in
+      if String.contains home '\000'
+      then Error (Invalid_config "account_home contains a NUL byte")
+      else valid_utf8 "account_home" home
+  in
+  let* () =
     if String.trim config.cli_path = ""
     then Error (Invalid_config "cli_path is empty")
     else Ok ()
@@ -284,11 +299,6 @@ let validate_process_config config =
     match config.timeout_s with
     | None -> Ok ()
     | Some seconds -> positive_finite "timeout_s" seconds
-  in
-  let* () =
-    match config.wall_clock_ceiling_s with
-    | None -> Ok ()
-    | Some seconds -> positive_finite "wall_clock_ceiling_s" seconds
   in
   let* () =
     match config.model with
@@ -384,11 +394,37 @@ let child_environment_key_allowed = function
   | _ -> false
 ;;
 
-let client_environment () =
-  Unix.environment ()
-  |> Array.to_list
-  |> List.filter (fun entry -> child_environment_key_allowed (env_key entry))
-  |> Array.of_list
+let client_environment account_home =
+  let inherited =
+    Unix.environment ()
+    |> Array.to_list
+    |> List.filter (fun entry -> child_environment_key_allowed (env_key entry))
+  in
+  let selected =
+    match account_home with
+    | None -> inherited
+    | Some home ->
+      let roots =
+        [ "HOME", home
+        ; "XDG_CONFIG_HOME", Filename.concat home ".config"
+        ; "XDG_DATA_HOME", Filename.concat home ".local/share"
+        ; "XDG_CACHE_HOME", Filename.concat home ".cache"
+        ; "XDG_STATE_HOME", Filename.concat home ".local/state"
+        ; "XDG_RUNTIME_DIR", Filename.concat home ".local/run"
+        ]
+      in
+      List.map (fun (key, value) -> key ^ "=" ^ value) roots
+      @ List.filter (fun entry -> not (List.mem_assoc (env_key entry) roots)) inherited
+  in
+  Array.of_list selected
+;;
+
+let client_argv config =
+  [ config.cli_path; "serve" ]
+  @ (match config.native with
+     | Runtime_native_tools.Native_read | Runtime_native_tools.Native_none ->
+       [ "--disable-write"; "--disable-shell" ]
+     | Runtime_native_tools.Native_full -> [])
 ;;
 
 let drain_stderr flow tail =
@@ -397,7 +433,7 @@ let drain_stderr flow tail =
     while true do
       let count = Eio.Flow.single_read flow chunk in
       let text = Cstruct.to_string (Cstruct.sub chunk 0 count) in
-      tail := bounded_tail ~limit:stderr_tail_bytes !tail text
+      Stderr.append tail text
     done
   with
   | End_of_file -> ()
@@ -448,7 +484,7 @@ let terminate_spawned_process ~clock proc stdin_w =
    client is being admitted. During the model turn a silent host is the
    fault the idle window notices. While a tool item the host started is open
    the host may write nothing until it completes, so that silence is not
-   measured and only the wall-clock ceiling bounds it. *)
+   measured; the owner can still cancel the turn. *)
 type receive_phase =
   | Awaiting_admission
   | Model_turn
@@ -477,11 +513,11 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
         ~sw
         mgr
         ~cwd
-        ~env:(client_environment ())
+        ~env:(client_environment config.account_home)
         ~stdin:stdin_r
         ~stdout:stdout_w
         ~stderr:stderr_w
-        [ config.cli_path; "serve" ]
+        (client_argv config)
     with
     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
     | exception exn -> Error (Spawn_failed (Printexc.to_string exn))
@@ -489,25 +525,19 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
       Eio.Flow.close stdin_r;
       Eio.Flow.close stdout_w;
       Eio.Flow.close stderr_w;
-      let stderr_tail = ref "" in
+      let stderr_tail = Stderr.create ~limit:stderr_tail_bytes in
       (* Diagnostics only, so a daemon: a grandchild the CLI leaves behind
          (an MCP server) can hold this pipe open after the turn is served. *)
       Eio.Fiber.fork_daemon ~sw (fun () ->
         drain_stderr stderr_r stderr_tail;
         `Stop_daemon);
       let reader = Eio.Buf_read.of_flow ~max_size:max_wire_line_bytes stdout_r in
-      let wall_clock =
-        Runtime_wall_clock.make
-          ?ceiling_s:config.wall_clock_ceiling_s
-          ~now:(fun () -> Eio.Time.now clock)
-          ()
-      in
       let receive_phase = ref Awaiting_admission in
       let last_id = ref 0 in
       let send json =
         with_idle_timeout
           clock
-          (Runtime_wall_clock.cap_window wall_clock (Some config.admission_timeout_s))
+          config.admission_timeout_s
           (fun () ->
              let payload = Yojson.Safe.to_string json in
              (* The host decodes stdin as UTF-8; refuse the write rather
@@ -526,23 +556,10 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
         | Error `Timeout -> None
       in
       let receive () =
-        if Runtime_wall_clock.expired wall_clock
-        then
-          Error
-            (Timeout
-               { seconds =
-                   Option.value
-                     config.wall_clock_ceiling_s
-                     ~default:Runtime_wall_clock.default_ceiling_s
-               ; turn_accepted = false
-               })
-        else (
           try
-            with_idle_timeout
+            with_optional_idle_timeout
               clock
-              (Runtime_wall_clock.cap_window
-                 wall_clock
-                 (window_for_phase config !receive_phase))
+              (window_for_phase config !receive_phase)
               (fun () -> Eio.Buf_read.line reader)
             |> Msp.parse_wire_line
             |> lift
@@ -552,7 +569,7 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
             then Error Runtime_shutting_down
             else (
               let status = exited () in
-              let detail = String.trim !stderr_tail in
+              let detail = String.trim (Stderr.contents stderr_tail) in
               Error
                 (Process_exited
                    { status
@@ -562,7 +579,7 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
           | Idle_timeout seconds -> Error (Timeout { seconds; turn_accepted = false })
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | Eio.Time.Timeout as exn -> raise exn
-          | exn -> protocol_error "stdout read" (Printexc.to_string exn))
+          | exn -> protocol_error "stdout read" (Printexc.to_string exn)
       in
       Fun.protect
         ~finally:(fun () -> terminate_spawned_process ~clock proc stdin_w)
@@ -633,6 +650,11 @@ let handshake io ~requested_capabilities =
         ~user_input_dialogs:false)
   in
   let* init = lift (Msp.parse_initialize_result result) in
+  let* () =
+    match init.Msp.session_durability with
+    | Msp.Durable -> Ok ()
+    | Msp.Ephemeral -> Error Session_not_durable
+  in
   let* () =
     match
       List.find_opt

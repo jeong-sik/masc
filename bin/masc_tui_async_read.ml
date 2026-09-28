@@ -3,27 +3,28 @@ type source =
   | Standalone_lanes
   | Connectors
   | Keeper_schedule
+  | Resource_read
+  | Runtime_config
+  | Skills_catalog
 
-let source_name = function
-  | Keeper_turns -> "keeper turns"
-  | Standalone_lanes -> "standalone lanes"
-  | Connectors -> "connector"
-  | Keeper_schedule -> "keeper schedule"
+let source_prefix = function
+  | Keeper_turns -> "keeper turns load failed: "
+  | Standalone_lanes -> "standalone lanes load failed: "
+  | Connectors -> "connector load failed: "
+  | Keeper_schedule -> "keeper schedule load failed: "
+  | Resource_read -> "resource read: "
+  | Runtime_config -> "runtime config load failed: "
+  | Skills_catalog -> "skills catalog load failed: "
 
 let attribute source result =
   Result.map_error
-    (fun detail -> source_name source ^ " load failed: " ^ detail)
+    (fun detail -> source_prefix source ^ detail)
     result
 
-let launch ?source ?on_not_run ~deliver read =
-  let deliver result =
-    match source with
-    | None -> deliver result
-    | Some source -> deliver (attribute source result)
-  in
+let launch_with ?on_not_run ~boundary_error ~deliver read =
   let not_run cause =
     Option.iter (fun release -> release ()) on_not_run;
-    deliver (Error cause)
+    deliver (Error (boundary_error cause))
   in
   match Eio_context.get_switch_opt () with
   | None -> not_run "Eio switch is unavailable"
@@ -32,7 +33,15 @@ let launch ?source ?on_not_run ~deliver read =
           let result =
             try read () with
             | Eio.Cancel.Cancelled _ as exn -> raise exn
-            | exn -> Error (Printexc.to_string exn)
+            | exn -> Error (boundary_error (Printexc.to_string exn))
           in
           deliver result;
           `Stop_daemon)
+
+let launch ?source ?on_not_run ~deliver read =
+  let deliver result =
+    match source with
+    | None -> deliver result
+    | Some source -> deliver (attribute source result)
+  in
+  launch_with ?on_not_run ~boundary_error:Fun.id ~deliver read

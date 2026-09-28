@@ -282,6 +282,11 @@
   border-color: var(--volt-dim);
 }
 
+.v2-board-surface .bd-badge.closed {
+  color: var(--err-fg);
+  border-color: var(--err-border);
+}
+
 .v2-board-surface .bd-post-title {
   font-size: 13.5px;
   font-weight: 600;

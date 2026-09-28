@@ -84,9 +84,10 @@ let keeper_of_canceller ~config ~agent_name =
   keeper_of_agent_binding ~config ~actor:agent_name
 ;;
 
-(* The wake resolves the same "why" the committed broadcast published. A
-   [masc_transition] cancel with no top-level reason but a persisted handoff
-   context commits with an explanation; reading only [Cancelled.reason] here
+(* The wake resolves the same "why" the committed broadcast published. New
+   cancels always commit a stated reason ([Workspace_task_lifecycle.decide]
+   refuses one without), so the persisted-handoff fallback below serves only
+   rows committed before that gate; reading only [Cancelled.reason] for those
    delivered the author a row with none, losing exactly the context this wake
    exists to carry. [Masc_domain.stated_reason] is the shared rule. *)
 let cancellation_of_task (task : Masc_domain.task) =

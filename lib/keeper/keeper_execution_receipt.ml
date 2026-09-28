@@ -129,6 +129,7 @@ let operator_disposition (receipt : t)
     match Keeper_turn_disposition.of_wire receipt.terminal_reason_code with
     | Input_required -> true
     | Success
+    | Checkpoint
     | External_cancel
     | Runtime_attempts_exhausted
     | Provider_error _

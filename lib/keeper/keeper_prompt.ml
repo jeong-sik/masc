@@ -18,14 +18,22 @@ open Keeper_types_profile
    shared prompt body on every build. Reintroducing name interpolation belongs
    in declared template variables, not a second substitution mechanism. *)
 
-(* [keeper] declares no template variables, so it is read directly. *)
-let system_prompt_body () : string =
-  Prompt_registry.get_prompt Prompt_names.keeper
+let warned_empty_body = ref false
 
 let render_instruction key vars =
   match Prompt_registry.render_prompt_template key vars with
   | Ok prompt -> prompt
   | Error detail -> invalid_arg (Printf.sprintf "missing or invalid prompt %s: %s" key detail)
+
+(* The primary slot shares the fragment rendering contract: an operator's
+   file edit can leave it empty or introduce an unresolved variable. *)
+let system_prompt_body () : string =
+  let body = Prompt_registry.get_prompt Prompt_names.keeper in
+  if String.trim body = "" && not !warned_empty_body then (
+    warned_empty_body := true;
+    Log.Keeper.warn
+      "keeper_prompt: observed an empty shared [keeper] body; empty primary prompts are refused");
+  render_instruction Prompt_names.keeper []
 
 let build_keeper_system_prompt
     ~instructions ?(keeper_name = "") ?(workspace_root = "")

@@ -159,6 +159,17 @@ if launchctl list "$LAUNCHD_LABEL" >/dev/null 2>&1; then
     exit 1
 fi
 
+# --- 2b. Check runtime.toml while the previous prod still serves ---
+# The new build judges the live runtime.toml the way a raw save and boot do
+# (#39311). A refusal here stops nothing, so the value can still be changed
+# through the running server's editor. Step 4 checks the file again under the
+# lease, because it can change in between.
+MASC_CONFIG_DIR="${MASC_CONFIG_DIR:-$BASE_PATH/.masc/config}" \
+MASC_DEPLOYMENT_PREFLIGHT_HELPER="$BUILD_PREFLIGHT_HELPER" \
+    "$SCRIPT_DIR/check-runtime-deployment-preflight.sh" \
+    --base-path "$BASE_PATH" \
+    --runtime-config-only
+
 # --- 3. Stop existing prod (must stop before overwriting binary on macOS) ---
 if [ -f "$PID_FILE" ]; then
     OLD_PID="$(cat "$PID_FILE")"
@@ -237,6 +248,8 @@ while [ ! -f "$PREPARED_FILE" ]; do
             HANDOFF_STATUS=$?
         fi
         echo "Error: Deployment preparation exited with status $HANDOFF_STATUS" >&2
+        echo "    A preflight refusal leaves the previous prod stopped and $RELEASE_EXE not replaced." >&2
+        echo "    Its verdict is in $LOG_DIR/masc-prod.{out,err}.log." >&2
         exit 1
     fi
     sleep 0.1

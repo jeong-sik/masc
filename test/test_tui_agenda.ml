@@ -16,12 +16,14 @@ open Alcotest
 module Agenda = struct
   include Masc_tui_agenda
 
-  (* Every case written before the stuck section states the same thing about
-     it: the list was read and it was empty. Shadowing the three-argument
+  (* Every case written before the goal and stuck sections states the same
+     thing about them: the lists were read and they were empty. Shadowing
      [project] here says that once rather than at fifty call sites, and a case
-     that is about stuck tasks calls {!Masc_tui_agenda.project} directly. *)
+     about those sections calls {!Masc_tui_agenda.project} directly. *)
   let project ~scheduled ~awaiting =
-    Masc_tui_agenda.project ~scheduled ~awaiting ~stalled:(Masc_tui_agenda.Read [])
+    Masc_tui_agenda.project ~scheduled ~awaiting
+      ~confirming:(Masc_tui_agenda.Read [])
+      ~stalled:(Masc_tui_agenda.Read [])
   ;;
 end
 
@@ -36,11 +38,11 @@ let row ?(standing = Agenda.Coming) ?(recurrence = "every 3600s") at_iso who wha
   { at_iso; standing; who; what; recurrence }
 ;;
 
-let edgar = row "2026-08-26T02:45:00Z" "keeper:edgar.a.poe" "진행 상황 체크"
-let sweep = row "2026-08-26T03:14:04Z" "keeper:quill" "hourly board sweep"
+let edgar = row "2026-08-26T02:45:00Z" "edgar.a.poe" "진행 상황 체크"
+let sweep = row "2026-08-26T03:14:04Z" "quill" "hourly board sweep"
 
 let done_earlier =
-  row ~standing:Agenda.Settled "2026-08-26T01:00:00Z" "keeper:orrery" "정기 보드 스윕"
+  row ~standing:Agenda.Settled "2026-08-26T01:00:00Z" "orrery" "정기 보드 스윕"
 ;;
 
 (* [kta_asked_at] and [kta_timeout_sec] as the registry reports them: asked a
@@ -48,10 +50,11 @@ let done_earlier =
    is denied -- so four remain. *)
 let asked_at_1155 = 1787713140.0
 
-let ask ?(asked_at = asked_at_1155) ?(timeout_sec = 300.0) asked_by question
+let ask ?(asked_at = asked_at_1155) ?(timeout_sec = 300.0)
+    ?(tool_call_id = "call-1") asked_by question
   : Agenda.awaiting
   =
-  { asked_by; question; asked_at; timeout_sec }
+  { asked_by; tool_call_id; question; asked_at; timeout_sec }
 ;;
 
 let strip_of ?(now = at_2026_08_26_0300z) ?(cols = 80) t =
@@ -112,7 +115,7 @@ let test_wire_status_parsing () =
 
 let test_unrecognised_status_stays_off_the_strip () =
   let odd = row ~standing:(Agenda.Unrecognised "quantum") "2026-08-26T02:00:00Z"
-              "keeper:ghost" "무엇인지 모를 것"
+              "ghost" "무엇인지 모를 것"
   in
   let t = Agenda.project ~scheduled:(Agenda.Read [ odd; edgar ])
             ~awaiting:(Agenda.Read []) in
@@ -147,7 +150,7 @@ let test_the_clock_is_local () =
 
 (* At 23:50 a bare "08:00" reads as ten minutes away. *)
 let test_a_later_day_says_so () =
-  let tomorrow = row "2026-08-26T23:00:00Z" "keeper:edgar.a.poe" "아침 일정 정리" in
+  let tomorrow = row "2026-08-26T23:00:00Z" "edgar.a.poe" "아침 일정 정리" in
   let t = Agenda.project ~scheduled:(Agenda.Read [ tomorrow ])
             ~awaiting:(Agenda.Read []) in
   match strip_of t with
@@ -408,8 +411,10 @@ let test_empty_sections_answer_in_words () =
   check bool "the wake section answers" true (contains ~needle:"nothing is scheduled" text);
   check bool "so does the held-call section" true
     (contains ~needle:"no keeper is holding a call" text);
+  check bool "so does the goal section" true
+    (contains ~needle:"no goal awaits confirmation" text);
   check bool "and the stuck section" true (contains ~needle:"no task is stuck on you" text);
-  check int "all three headings are still drawn" 3 (List.length (tones_of lines Agenda.Heading))
+  check int "all four headings are still drawn" 4 (List.length (tones_of lines Agenda.Heading))
 ;;
 
 (* An empty section is an answer only once its list was read. With the server
@@ -492,6 +497,68 @@ let test_a_held_call_says_how_long_is_left () =
   check bool "and how long is left" true (contains ~needle:"4m 00s left" text)
 ;;
 
+let test_failed_reads_are_safe_before_the_panel_fits_them () =
+  let state =
+    Masc_tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  let raw = "오류\027[31m\n\xFF\xE2\x80\x8B literal \\x1B" in
+  let expected = "오류\\x1B[31m\\x0A\\xFF\\u200B literal \\x1B" in
+  let body_rows = Masc_tui_types.surface_body_rows state ~terminal_rows:24 in
+  state.schedules_error <- Some raw;
+  state.keeper_tool_approvals_error <- Some raw;
+  state.tasks_error <- Some raw;
+  check int "failed reads do not take a strip row" 0
+    (Masc_tui_types.agenda_chrome_rows state);
+  check int "failed reads preserve the body budget" body_rows
+    (Masc_tui_types.surface_body_rows state ~terminal_rows:24);
+  List.iter
+    (fun cols ->
+       let failures =
+         overlay_of ~cols (Masc_tui_types.agenda state)
+         |> fun lines -> tones_of lines Agenda.Failed
+       in
+       check int "all three failed reads have a row" 3 (List.length failures);
+       List.iter
+         (fun (line : Agenda.line) ->
+            check bool "controls and invalid bytes cannot reach the terminal" false
+              (String.exists
+                 (fun c -> Char.code c < 0x20 || c = '\127' || c = '\xFF')
+                 line.text);
+            check bool "invisible codepoint is shown as text" false
+              (contains ~needle:"\xE2\x80\x8B" line.text);
+            check bool "escaped text is fitted to the row width" true
+              (Masc_tui_message_layout.display_width line.text <= cols);
+            if cols = 120 then
+              check string "readable reason and literal escape are preserved"
+                expected (String.trim line.text))
+         failures)
+    [ 16; 32; 120 ]
+;;
+
+let test_failed_schedule_snapshot_uses_the_same_display_boundary () =
+  List.iter
+    (fun (reason, expected) ->
+       let state =
+         Masc_tui_types.create_state ~workspace:"test" ~port:8935
+           ~refresh_interval:2.0 ()
+       in
+       state.schedules <- Some
+         { scs_status = "unknown"; scs_read_error = reason
+         ; scs_request_count = None; scs_truncated = false
+         ; scs_next_due_iso = None; scs_counts = None; scs_rows = []
+         ; scs_runner_status = Masc.Tui_decode.Runner_unrecognised "unknown"
+         };
+       state.schedules_error <- Some "older transport failure";
+       let projection = Masc_tui_types.agenda state in
+       check int "a failed store snapshot has no strip" 0 (Agenda.rows_taken projection);
+       let failures = tones_of (overlay_of ~cols:120 projection) Agenda.Failed in
+       check (list string) "the store reason wins and is safe to draw"
+         [ expected ] (List.map (fun (line : Agenda.line) -> String.trim line.text) failures))
+    [ Some "store\027[2Jfailed", "store\\x1B[2Jfailed"
+    ; None, "schedule store unreadable"
+    ]
+;;
+
 (* A call whose wait has run out is denied, so the row says that rather than
    counting past zero. *)
 let test_an_expired_call_says_so () =
@@ -513,9 +580,9 @@ let test_rows_fit_the_width_they_were_given () =
       ~scheduled:
         (Agenda.Read
            [ row ~recurrence:"cron 45 8-23 * * * Asia/Seoul" "2026-08-26T02:45:00Z"
-               "keeper:edgar.a.poe" "진행 상황 체크"
+               "edgar.a.poe" "진행 상황 체크"
            ; row ~recurrence:"daily 20:00:00 Asia/Seoul" "2026-08-26T11:00:00Z"
-               "keeper:orrery" "정기 백로그 감사, 목표 진척, agent fitness 점검"
+               "orrery" "정기 백로그 감사, 목표 진척, agent fitness 점검"
            ])
       ~awaiting:(Agenda.Read [ ask "lane-smith" "Execute" ])
   in
@@ -532,40 +599,56 @@ let test_rows_fit_the_width_they_were_given () =
     [ 30; 46; 60; 76; 120 ]
 ;;
 
-(* [short_who] is public now: the Schedules list needed the same answer, and
-   before it called this it drew "keeper:~" -- the seven-cell prefix took the
-   name's room and two schedules for two different keepers read alike.
+(* The agenda receives a display value chosen by the schedule row projection.
+   It must leave an older server's encoded target untouched. *)
+let test_wake_name_is_drawn_without_reparsing () =
+  let clock who =
+    let wake = row "2026-08-26T02:45:00Z" who "" in
+    match strip_of ~cols:120
+            (Agenda.project ~scheduled:(Agenda.Read [ wake ])
+               ~awaiting:(Agenda.Read [])) with
+    | Some strip -> strip.clock
+    | None -> fail "the wake should draw a clock"
+  in
+  check bool "a supplied keeper name is drawn" true
+    (contains ~needle:"edgar.a.poe" (clock "edgar.a.poe"));
+  check bool "an older server's target is not parsed" true
+    (contains ~needle:"keeper:edgar.a.poe" (clock "keeper:edgar.a.poe"))
+;;
 
-   A target with no prefix, or one whose prefix is a different kind, comes
-   back untouched. Stripping up to the first colon would eat the front of any
-   name that happens to contain one. *)
-let test_the_kind_prefix_comes_off_a_target () =
-  check string "the keeper prefix comes off" "edgar.a.poe"
-    (Agenda.short_who "keeper:edgar.a.poe");
-  check string "a bare name is left alone" "edgar.a.poe"
-    (Agenda.short_who "edgar.a.poe");
-  check string "another kind is left alone" "board:sweep"
-    (Agenda.short_who "board:sweep");
-  check string "the prefix alone is not a name to shorten" "keeper:"
-    (Agenda.short_who "keeper:")
+(* The decoder and both schedule surfaces must consume one field selection.
+   The row choice itself is tested in [test_tui_keys]. *)
+let test_schedule_name_wire_is_connected () =
+  check int "decoder reads the server's bare keeper field" 1
+    (Ast_grep.count_string_literals_in_value_binding
+       ~module_path:"bin/masc_tui_loader.ml"
+       ~binding_name:"decode_schedule_row" ~literals:[ "payload_keeper_name" ]);
+  check int "agenda uses the row's selected name" 1
+    (calls ~module_path:"bin/masc_tui_types.ml" ~binding_name:"agenda"
+       ~callee:"schedule_row_who");
+  check int "Schedules list uses the same selected name" 1
+    (calls ~module_path:"bin/masc_tui_render.ml"
+       ~binding_name:"schedule_row_subject"
+       ~callee:"Masc_tui_types.schedule_row_who")
 ;;
 
 (* A task that only the operator can move is a reason to draw the strip. The
    whole point of the row is that nothing else was saying so. *)
 let stuck ?(since_iso = "2026-08-20T00:00:00Z") ?(task_id = "task-348")
-    ?(ends_at = Agenda.Verify_queue) what : Agenda.stalled =
-  { task_id; what; since_iso; ends_at }
+    what : Agenda.stalled =
+  { task_id; what; since_iso }
 ;;
 
 let with_stuck rows =
   Masc_tui_agenda.project
     ~scheduled:(Agenda.Read [])
     ~awaiting:(Agenda.Read [])
+    ~confirming:(Agenda.Read [])
     ~stalled:(Agenda.Read rows)
 ;;
 
 let test_a_stuck_task_alone_takes_the_row () =
-  let t = with_stuck [ stuck "task-348: goo-yang-bong gave up - the issue closed" ] in
+  let t = with_stuck [ stuck "task-348: held by codex-mcp-client, which has no Keeper queue" ] in
   check int "a stuck task is something to say" 1 (Agenda.rows_taken t);
   match strip_of t with
   | None -> fail "the strip must draw when a task is stuck on the operator"
@@ -575,14 +658,15 @@ let test_a_stuck_task_alone_takes_the_row () =
 ;;
 
 (* One number over both lists: a keeper holding a tool call and a task only the
-   operator can grant are the same answer to "is anything waiting on me". Two
+   operator can move are the same answer to "is anything waiting on me". Two
    badges would be an addition the operator has to do. *)
 let test_the_badge_counts_blocked_and_stuck_together () =
   let t =
     Masc_tui_agenda.project
       ~scheduled:(Agenda.Read [])
       ~awaiting:(Agenda.Read [ ask "lane-smith" "Execute" ])
-      ~stalled:(Agenda.Read [ stuck "task-348: a stop nobody granted" ])
+      ~confirming:(Agenda.Read [])
+      ~stalled:(Agenda.Read [ stuck "task-348: held by codex-mcp-client, which has no Keeper queue" ])
   in
   match strip_of t with
   | None -> fail "there is work waiting"
@@ -591,24 +675,83 @@ let test_the_badge_counts_blocked_and_stuck_together () =
       (contains ~needle:"Awaiting you\xc2\xb72" strip.Agenda.waiting)
 ;;
 
-(* Sixty-two rows is a wall. The oldest few are what the operator reads, and
-   the count is the part that has to be exact. *)
-let test_the_stuck_section_shows_a_few_and_counts_the_rest () =
+(* Every stuck row is drawn, oldest first, and every one takes the cursor.
+   The panel scrolls; a row the cursor cannot reach is work the operator
+   cannot open. *)
+let test_the_stuck_section_draws_every_row () =
   let rows =
     List.init 9 (fun index ->
       stuck
+        ~task_id:(Printf.sprintf "task-%03d" index)
         ~since_iso:(Printf.sprintf "2026-08-%02dT00:00:00Z" (index + 10))
         (Printf.sprintf "task-%03d: held by a session that is gone" index))
   in
   let lines = overlay_of (with_stuck rows) in
-  let text = joined lines in
-  check int "only the oldest few are drawn" 5
-    (List.length
-       (List.filter
-          (fun (line : Agenda.line) ->
-             contains ~needle:"held by a session that is gone" line.Agenda.text)
-          lines));
-  check bool "and the rest are counted" true (contains ~needle:"and 4 more" text)
+  let reached =
+    List.filter_map
+      (fun index ->
+        match List.nth_opt lines index with
+        | Some { Agenda.goes_to = Agenda.Stuck_task task_id; _ } -> Some task_id
+        | Some _ | None -> None)
+      (Agenda.target_indexes lines)
+  in
+  check (list string) "every row, oldest first, takes the cursor"
+    (List.map (fun (row : Agenda.stalled) -> row.Agenda.task_id) rows)
+    reached
+;;
+
+let goal ?(since_iso = "2026-08-25T00:00:00Z") ?(goal_id = "goal-1") title
+  : Agenda.goal_to_confirm =
+  { goal_id; title; since_iso }
+;;
+
+let with_goals goals =
+  Masc_tui_agenda.project
+    ~scheduled:(Agenda.Read [])
+    ~awaiting:(Agenda.Read [])
+    ~confirming:(Agenda.Read goals)
+    ~stalled:(Agenda.Read [])
+;;
+
+(* A Goal the verifier proved waits on the operator's confirmation, so it is
+   something to say on its own, it counts in the badge, and Enter leads to it. *)
+let test_a_goal_to_confirm_is_waiting_on_the_operator () =
+  let t = with_goals [ goal ~goal_id:"goal-9" "v0.38.0 release" ] in
+  check int "a goal to confirm takes the row" 1 (Agenda.rows_taken t);
+  (match strip_of t with
+   | None -> fail "the strip must draw while a goal waits for confirmation"
+   | Some strip ->
+     check bool "and it is counted" true
+       (contains ~needle:"Awaiting you\xc2\xb71" strip.Agenda.waiting));
+  let lines = overlay_of t in
+  check bool "the row names the goal and says it was proved" true
+    (contains ~needle:"v0.38.0 release" (joined lines)
+     && contains ~needle:"the verifier proved it" (joined lines));
+  match Agenda.target_indexes lines with
+  | [ index ] -> (
+      match List.nth_opt lines index with
+      | Some { Agenda.goes_to = Agenda.Goal_to_confirm goal_id; _ } ->
+          check string "Enter leads to the goal" "goal-9" goal_id
+      | Some _ | None -> fail "the goal row leads nowhere")
+  | targets ->
+      failf "expected one row to lead somewhere, got %d" (List.length targets)
+;;
+
+let test_the_goal_section_answers_in_words () =
+  check bool "an empty list read is an answer" true
+    (contains ~needle:"no goal awaits confirmation"
+       (joined (overlay_of (with_goals []))));
+  let unread =
+    joined
+      (overlay_of
+         (Masc_tui_agenda.project
+            ~scheduled:(Agenda.Read [])
+            ~awaiting:(Agenda.Read [])
+            ~confirming:Agenda.Not_read
+            ~stalled:(Agenda.Read [])))
+  in
+  check bool "a list nobody read does not say it is empty" false
+    (contains ~needle:"no goal awaits confirmation" unread)
 ;;
 
 let test_the_stuck_section_answers_in_words () =
@@ -621,6 +764,7 @@ let test_the_stuck_section_answers_in_words () =
          (Masc_tui_agenda.project
             ~scheduled:(Agenda.Read [])
             ~awaiting:(Agenda.Read [])
+            ~confirming:(Agenda.Read [])
             ~stalled:Agenda.Not_read))
   in
   check bool "a list nobody read does not say it is empty" false
@@ -641,12 +785,12 @@ let test_a_stuck_row_says_how_long_it_has_waited () =
    reach any of it, which is a count rather than an answer. The cursor stops
    on the rows that lead somewhere and steps over the prose between them. *)
 let test_only_rows_that_lead_somewhere_take_the_cursor () =
-  let t = with_stuck [ stuck ~task_id:"task-348" "a stop nobody granted" ] in
+  let t = with_stuck [ stuck ~task_id:"task-348" "work nobody holds" ] in
   let lines = overlay_of t in
   match Agenda.target_indexes lines with
   | [ index ] -> (
       match List.nth_opt lines index with
-      | Some { Agenda.goes_to = Agenda.Stuck_task { task_id; _ }; _ } ->
+      | Some { Agenda.goes_to = Agenda.Stuck_task task_id; _ } ->
           check string "the row names its task" "task-348" task_id
       | Some _ | None -> fail "the row the cursor stops on leads nowhere")
   | targets ->
@@ -658,30 +802,123 @@ let test_prose_rows_take_no_cursor () =
   check (list int) "an empty agenda opens nothing" []
     (Agenda.target_indexes (overlay_of (with_stuck [])))
 
-(* Two shapes of stuck work, two doors. A stop is granted as a verdict in the
-   verify queue; work nobody holds is read on the task itself. Collapsing them
-   would send half the rows to a screen that cannot answer them. *)
-let test_a_stop_and_held_work_lead_to_different_places () =
-  let t =
-    with_stuck
-      [ stuck ~task_id:"task-1" ~ends_at:Agenda.Verify_queue "a stop to grant"
-      ; stuck ~task_id:"task-2" ~ends_at:Agenda.The_task "work nobody holds"
-      ]
+(* Refresh the same mutable workspace fields the loader replaces. Selection
+   is the identity from the earlier displayed projection; renderer lookup and
+   Enter lookup must agree even though that projection's row numbers moved. *)
+let agenda_state () =
+  Masc_tui_types.create_state ~workspace:"" ~port:0 ~refresh_interval:0. ()
+
+let lines_of_state state = overlay_of (Masc_tui_types.agenda state)
+
+let selected_row state lines =
+  match Agenda.selected_index lines ~selected:state.Masc_tui_types.agenda_selected with
+  | Some row -> row
+  | None -> fail "selected identity should still have a visible row"
+
+let opened_target state lines =
+  Option.map (fun line -> line.Agenda.goes_to)
+    (Agenda.selected_line lines ~selected:state.Masc_tui_types.agenda_selected)
+
+let test_distinct_calls_from_one_keeper_remain_reachable () =
+  let state = agenda_state () in
+  let held tool_call_id : Masc.Tui_decode.keeper_tool_approval =
+    { kta_keeper = "keeper-a"
+    ; kta_tool_call_id = tool_call_id
+    ; kta_tool = "exec"
+    ; kta_args = "{}"
+    ; kta_question = "run?"
+    ; kta_because = None
+    ; kta_asked_at = asked_at_1155
+    ; kta_timeout_sec = 300.
+    }
   in
-  let lines = overlay_of t in
-  let doors =
-    List.filter_map
-      (fun index ->
-        match List.nth_opt lines index with
-        | Some { Agenda.goes_to = Agenda.Stuck_task { task_id; ends_at }; _ } ->
-            Some (task_id, ends_at)
-        | Some _ | None -> None)
-      (Agenda.target_indexes lines)
+  let first = held "call-a" and second = held "call-b" in
+  state.keeper_tool_approvals_observed <- true;
+  state.keeper_tool_approvals <- [first; second];
+  state.goals_to_confirm <- Agenda.Read [goal ~goal_id:"goal-a" "Proof"];
+  let displayed = lines_of_state state in
+  let advance lines =
+    state.agenda_selected <- Agenda.step lines ~selected:state.agenda_selected Agenda.Next
   in
-  check bool "the stop is answered in the verify queue" true
-    (List.mem ("task-1", Agenda.Verify_queue) doors);
-  check bool "held work is answered on the task" true
-    (List.mem ("task-2", Agenda.The_task) doors)
+  let target tool_call_id =
+    Agenda.Keeper_holding { keeper = "keeper-a"; tool_call_id }
+  in
+  advance displayed;
+  check bool "first held call is selected" true
+    (opened_target state displayed = Some (target "call-a"));
+  advance displayed;
+  check bool "j reaches the same Keeper's second call" true
+    (opened_target state displayed = Some (target "call-b"));
+  let old_row = selected_row state displayed in
+  advance displayed;
+  check bool "j passes both calls to reach the Goal" true
+    (opened_target state displayed = Some (Agenda.Goal_to_confirm "goal-a"));
+  state.agenda_selected <- Agenda.step displayed ~selected:state.agenda_selected Agenda.Previous;
+  state.keeper_tool_approvals <- [second; first];
+  let refreshed = lines_of_state state in
+  check bool "the selected call moves after refresh" true
+    (selected_row state refreshed <> old_row);
+  check bool "refresh preserves the specific held call" true
+    (opened_target state refreshed = Some (target "call-b"))
+
+let test_goal_selection_survives_refresh_reordering () =
+  let state = agenda_state () in
+  let a = goal ~goal_id:"goal-a" "First proof" in
+  let b = goal ~goal_id:"goal-b" "Second proof" in
+  state.goals_to_confirm <- Agenda.Read [a; b];
+  let displayed = lines_of_state state in
+  state.agenda_selected <- Agenda.step displayed ~selected:Agenda.Nowhere Agenda.Next;
+  let old_row = selected_row state displayed in
+  (* A priority edit changes Goal_store's sorted read. *)
+  state.goals_to_confirm <- Agenda.Read [b; a];
+  let refreshed = lines_of_state state in
+  check bool "the old index now names a different Goal" true
+    (Option.map (fun line -> line.Agenda.goes_to) (List.nth_opt refreshed old_row)
+       = Some (Agenda.Goal_to_confirm "goal-b"));
+  check bool "highlight follows the chosen Goal's new row" true
+    (selected_row state refreshed <> old_row);
+  check bool "Enter still opens the Goal actually selected" true
+    (opened_target state refreshed = Some (Agenda.Goal_to_confirm "goal-a"))
+
+let test_inserted_goals_do_not_retarget_a_selected_task () =
+  let state = agenda_state () in
+  state.goals_to_confirm <- Agenda.Read [];
+  state.operator_stalled <- Some [stuck ~task_id:"shared-id" "Task to inspect"];
+  let displayed = lines_of_state state in
+  state.agenda_selected <- Agenda.step displayed ~selected:Agenda.Nowhere Agenda.Next;
+  let old_row = selected_row state displayed in
+  state.goals_to_confirm <- Agenda.Read
+    [goal ~goal_id:"shared-id" "A Goal with the same opaque ID";
+     goal ~goal_id:"goal-b" "New proof B";
+     goal ~goal_id:"goal-c" "New proof C";
+     goal ~goal_id:"goal-d" "New proof D"];
+  let refreshed = lines_of_state state in
+  check bool "the Task moved below the inserted Goals" true
+    (selected_row state refreshed > old_row);
+  check bool "the constructor and ID both remain authoritative" true
+    (opened_target state refreshed = Some (Agenda.Stuck_task "shared-id"))
+
+let test_removed_goal_does_not_select_its_replacement () =
+  let state = agenda_state () in
+  let a = goal ~goal_id:"goal-a" "Selected proof" in
+  let b = goal ~goal_id:"goal-b" "Other proof" in
+  state.goals_to_confirm <- Agenda.Read [a; b];
+  let displayed = lines_of_state state in
+  state.agenda_selected <- Agenda.step displayed ~selected:Agenda.Nowhere Agenda.Next;
+  state.goals_to_confirm <- Agenda.Read [b];
+  let refreshed = lines_of_state state in
+  check (option int) "no replacement row is highlighted" None
+    (Agenda.selected_index refreshed ~selected:state.agenda_selected);
+  check bool "Enter does not open the Goal now at the old index" true
+    (opened_target state refreshed = None);
+  (* Only an explicit navigation key may choose a new target. *)
+  state.agenda_selected <- Agenda.step refreshed ~selected:state.agenda_selected Agenda.Next;
+  check bool "j deliberately selects the remaining Goal" true
+    (opened_target state refreshed = Some (Agenda.Goal_to_confirm "goal-b"));
+  state.goals_to_confirm <- Agenda.Read [];
+  check bool "an empty reading moves to nowhere" true
+    (Agenda.step (lines_of_state state) ~selected:state.agenda_selected Agenda.Previous
+     = Agenda.Nowhere)
 
 let () =
   run
@@ -732,21 +969,27 @@ let () =
             test_an_unread_agenda_keeps_the_strip_down
         ; test_case "the state says which lists were read" `Quick
             test_the_state_says_which_lists_were_read
+        ; test_case "failed reads are safe before the panel fits them" `Quick
+            test_failed_reads_are_safe_before_the_panel_fits_them
+        ; test_case "failed schedule snapshots share the display boundary" `Quick
+            test_failed_schedule_snapshot_uses_the_same_display_boundary
         ; test_case "a held call says how long is left" `Quick
             test_a_held_call_says_how_long_is_left
         ; test_case "an expired call says so" `Quick test_an_expired_call_says_so
         ; test_case "rows fit the width they were given" `Quick
             test_rows_fit_the_width_they_were_given
-        ; test_case "the kind prefix comes off a target" `Quick
-            test_the_kind_prefix_comes_off_a_target
+        ; test_case "a wake name is drawn without reparsing" `Quick
+            test_wake_name_is_drawn_without_reparsing
+        ; test_case "schedule name wire reaches both surfaces" `Quick
+            test_schedule_name_wire_is_connected
         ] )
     ; ( "tasks stuck on the operator"
       , [ test_case "a stuck task alone takes the row" `Quick
             test_a_stuck_task_alone_takes_the_row
         ; test_case "the badge counts blocked and stuck together" `Quick
             test_the_badge_counts_blocked_and_stuck_together
-        ; test_case "the section shows a few and counts the rest" `Quick
-            test_the_stuck_section_shows_a_few_and_counts_the_rest
+        ; test_case "the section draws every row" `Quick
+            test_the_stuck_section_draws_every_row
         ; test_case "the section answers in words" `Quick
             test_the_stuck_section_answers_in_words
         ; test_case "a stuck row says how long it has waited" `Quick
@@ -755,8 +998,22 @@ let () =
             test_only_rows_that_lead_somewhere_take_the_cursor
         ; test_case "prose rows take no cursor" `Quick
             test_prose_rows_take_no_cursor
-        ; test_case "a stop and held work lead to different places" `Quick
-            test_a_stop_and_held_work_lead_to_different_places
+        ] )
+    ; ( "goals waiting for confirmation"
+      , [ test_case "a goal to confirm is waiting on the operator" `Quick
+            test_a_goal_to_confirm_is_waiting_on_the_operator
+        ; test_case "the section answers in words" `Quick
+            test_the_goal_section_answers_in_words
+        ] )
+    ; ( "selection across refreshed agenda projections"
+      , [ test_case "same Keeper calls retain distinct navigation identities" `Quick
+            test_distinct_calls_from_one_keeper_remain_reachable
+        ; test_case "Goal reorder preserves selected identity" `Quick
+            test_goal_selection_survives_refresh_reordering
+        ; test_case "inserted Goals preserve selected Task identity" `Quick
+            test_inserted_goals_do_not_retarget_a_selected_task
+        ; test_case "removed Goal opens no replacement" `Quick
+            test_removed_goal_does_not_select_its_replacement
         ] )
     ]
 ;;

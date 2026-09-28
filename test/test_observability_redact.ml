@@ -34,6 +34,20 @@ let test_ordered_passes_cover_a_bearer_value_holding_a_url_credential () =
   Alcotest.(check string) "text with no secret is returned as is" plain
     (Observability_redact.redact_text plain)
 
+let test_raw_named_credentials_are_masked () =
+  List.iter (fun (input, expected) ->
+    Alcotest.(check string) "shared named credential masking" expected
+      (Observability_redact.redact_text input))
+    [ "Authorization: bearer ya29.synthetic", "Authorization: [REDACTED]"
+    ; "authorization: Basic opaque-value", "authorization: [REDACTED]"
+    ; "token=opaque-fixture-value", "token=[REDACTED]"
+    ; "VENDOR_API_KEY=opaque-fixture-value", "VENDOR_API_KEY=[REDACTED]"
+    ; "password=\"value with spaces\" status=failed", "password=[REDACTED] status=failed"
+    ; "token=\"unfinished value", "token=[REDACTED]"
+    ; {|token="prefix\"secret-tail"|}, "token=[REDACTED]"
+    ; "token count unavailable", "token count unavailable"
+    ]
+
 let test_max_length_enforced () =
   let long_input = String.make 500 'x' in
   let preview = Observability_redact.redact_preview long_input in
@@ -148,6 +162,210 @@ let test_redact_json_strings_redacts_secrets_in_values () =
   Alcotest.(check bool) "URL credential hidden" false
     (String_util.contains_substring raw "user:secret")
 
+(* AWS-style tool I/O uses key spellings the original 14-entry exact list
+   never enumerated. They redact by name now, whatever the value's shape. *)
+let test_redact_json_strings_redacts_key_synonyms () =
+  let json =
+    `Assoc
+      [ ("access_key", `String "contoso-deploy-key-0042")
+      ; ("secret_key", `String "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY")
+      ; ("auth_token", `String "session-secret-value")
+      ; ("X-Api-Key", `String "provider-key-value")
+      ]
+  in
+  let redacted = Observability_redact.redact_json_strings json in
+  let raw = Yojson.Safe.to_string redacted in
+  List.iter
+    (fun secret ->
+      Alcotest.(check bool) ("hidden: " ^ secret) false
+        (String_util.contains_substring raw secret))
+    [ "contoso-deploy-key-0042"
+    ; "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+    ; "session-secret-value"
+    ; "provider-key-value"
+    ]
+
+(* An unenumerated spelling still masks its string value by fragment, while
+   a count under a fragment-matching key keeps its number shape: no log
+   consumer sees a type change. *)
+let test_redact_json_strings_fragment_masks_strings_keeps_counts () =
+  let json =
+    `Assoc
+      [ ("client_secret_v2", `String "totally-unlisted-spelling")
+      ; ("token_count", `Int 5)
+      ]
+  in
+  let redacted = Observability_redact.redact_json_strings json in
+  Alcotest.(check string)
+    "fragment string masked, count kept"
+    {|{"client_secret_v2":"[REDACTED]","token_count":5}|}
+    (Yojson.Safe.to_string redacted)
+
+(* Reference-shaped keys name where a credential lives or what kind of value
+   it is, not the credential itself: an environment variable name and an
+   OAuth type tag stay readable under both JSON entry points. *)
+let test_redact_json_strings_keeps_secret_references () =
+  let json =
+    `Assoc
+      [ ("api_key_env", `String "TYPESAFEAI_API_KEY")
+      ; ("token_type", `String "Bearer")
+      ; ("credential_kind", `String "file")
+      ; ("credential_file", `String "/fixture/oauth.json")
+      ; ("CREDENTIAL_KIND", `String "env")
+      ; ("CREDENTIAL_FILE", `String "/fixture/other.json")
+      ]
+  in
+  let redacted = Observability_redact.redact_json_strings json in
+  Alcotest.(check string)
+    "reference values kept"
+    {|{"api_key_env":"TYPESAFEAI_API_KEY","token_type":"Bearer","credential_kind":"file","credential_file":"/fixture/oauth.json","CREDENTIAL_KIND":"env","CREDENTIAL_FILE":"/fixture/other.json"}|}
+    (Yojson.Safe.to_string redacted);
+  let valued = Observability_redact.redact_json_value json in
+  Alcotest.(check string)
+    "reference values kept by redact_json_value"
+    {|{"api_key_env":"TYPESAFEAI_API_KEY","token_type":"Bearer","credential_kind":"file","credential_file":"/fixture/oauth.json","CREDENTIAL_KIND":"env","CREDENTIAL_FILE":"/fixture/other.json"}|}
+    (Yojson.Safe.to_string valued)
+
+let test_credential_reference_values_still_mask_secrets () =
+  let input =
+    `Assoc
+      [ "credential_kind", `String "file"
+      ; "credential_file", `String "sk-synthetic-credential"
+      ]
+  in
+  let expected = {|{"credential_kind":"file","credential_file":"[REDACTED]"}|} in
+  List.iter
+    (fun (name, actual) ->
+      Alcotest.(check (option string)) name (Some expected)
+        (Option.map Yojson.Safe.to_string actual))
+    [ "shared log redactor", Some (Observability_redact.redact_json_strings input)
+    ; "tool input", Observability_redact.redacted_tool_input_json ~tool_name:"probe" input
+    ; "tool output", Observability_redact.redacted_tool_output_json
+        ~tool_name:"probe" (Yojson.Safe.to_string input)
+    ]
+
+(* A composite under a fragment-matching key cannot smuggle its string
+   leaves past the key-name match; non-string scalars still keep their
+   shape. Both JSON entry points share the sensitive-parent rule. *)
+let test_redact_json_strings_masks_fragment_subtree () =
+  let json =
+    `Assoc
+      [ ("client_secret_v2", `Assoc [ ("value", `String "opaque-credential") ])
+      ; ("session_tokens_v2", `List [ `String "opaque-token" ])
+      ; ( "api_secret_bundle"
+        , `Assoc [ ("version", `Int 2); ("label", `String "opaque-label") ] )
+      ]
+  in
+  let expected =
+    {|{"client_secret_v2":{"[REDACTED]":"[REDACTED]"},"session_tokens_v2":["[REDACTED]"],"api_secret_bundle":{"[REDACTED]":2,"[REDACTED]":"[REDACTED]"}}|}
+  in
+  let redacted = Observability_redact.redact_json_strings json in
+  Alcotest.(check string)
+    "fragment subtree masked, shape kept"
+    expected
+    (Yojson.Safe.to_string redacted);
+  let valued = Observability_redact.redact_json_value json in
+  Alcotest.(check string)
+    "fragment subtree masked by redact_json_value"
+    expected
+    (Yojson.Safe.to_string valued)
+
+let redacted_json_paths input =
+  [ "shared log redactor", Some (Observability_redact.redact_json_strings input)
+  ; "structural redactor", Some (Observability_redact.redact_json_value input)
+  ; "tool input", Observability_redact.redacted_tool_input_json ~tool_name:"probe" input
+  ; "tool output", Observability_redact.redacted_tool_output_json
+      ~tool_name:"probe" (Yojson.Safe.to_string input)
+  ]
+
+let test_ordinary_map_keys_mask_credential_patterns () =
+  let input = `Assoc [ "remotes", `Assoc
+    [ "https://user:pass@host", `Bool true
+    ; "https://other:secret@host", `Bool false
+    ; "visible", `Int 7
+    ] ] in
+  let expected =
+    {|{"remotes":{"https[REDACTED]host":true,"https[REDACTED]host":false,"visible":7}}|} in
+  List.iter (fun (path, actual) ->
+    Alcotest.(check (option string)) (path ^ ": keys masked, members retained")
+      (Some expected) (Option.map Yojson.Safe.to_string actual))
+    (redacted_json_paths input)
+
+let test_collision_metadata_survives_actual_log_sink () =
+  (* The four collision payload fields come from
+     Auth_credential_token.collision_log_to_yojson. Neighbouring names are
+     negative controls: this is one producer field, not a suffix exemption. *)
+  let input =
+    `Assoc
+      [ "token_hash_prefix", `String "9c723fa1"
+      ; "left_agent", `String "collision-left"
+      ; "right_agent", `String "collision-right"
+      ; "field_diffs", `List []
+      ; "TOKEN_HASH_PREFIX", `String "4f8b112c"
+      ; "token_hash_prefix_backup", `String "opaque-backup-credential"
+      ; "api_key_hash_prefix", `String "opaque-provider-credential"
+      ]
+  in
+  let expected =
+    {|{"token_hash_prefix":"9c723fa1","left_agent":"collision-left","right_agent":"collision-right","field_diffs":[],"TOKEN_HASH_PREFIX":"4f8b112c","token_hash_prefix_backup":"[REDACTED]","api_key_hash_prefix":"[REDACTED]"}|}
+  in
+  List.iter (fun (path, actual) ->
+    Alcotest.(check (option string)) path (Some expected)
+      (Option.map Yojson.Safe.to_string actual)) (redacted_json_paths input);
+  let cursor = match Log.Ring.recent ~limit:1 () with
+    | entry :: _ -> entry.Log.Ring.seq
+    | [] -> -1
+  in
+  Log.Auth.emit Log.Warn ~details:input "redaction collision metadata fixture";
+  (match Log.Ring.recent ~since_seq:cursor ~module_filter:"Auth" () with
+   | [ entry ] ->
+     Alcotest.(check string) "Auth log sink keeps collision correlation"
+       expected (Yojson.Safe.to_string entry.Log.Ring.details)
+   | entries -> Alcotest.failf "expected one Auth log, got %d" (List.length entries));
+  let secret_value = `Assoc [ "token_hash_prefix", `String "sk-synthetic-credential" ] in
+  List.iter (fun (path, actual) ->
+    Alcotest.(check (option string)) path
+      (Some {|{"token_hash_prefix":"[REDACTED]"}|})
+      (Option.map Yojson.Safe.to_string actual))
+    [ "shared values still mask", Some (Observability_redact.redact_json_strings secret_value)
+    ; "direct structural values still mask", Some (Observability_redact.redact_json_value secret_value)
+    ; "tool input values still mask", Observability_redact.redacted_tool_input_json
+        ~tool_name:"probe" secret_value
+    ; "tool output values still mask", Observability_redact.redacted_tool_output_json
+        ~tool_name:"probe" (Yojson.Safe.to_string secret_value)
+    ]
+
+let test_sensitive_fragment_map_keys_are_masked_without_dropping_members () =
+  let input =
+    `Assoc
+      [ "session_tokens_v2", `Assoc
+          [ "opaque-token-123", `Bool true
+          ; "opaque-token-456", `Bool false
+          ; "nested-token-789", `List
+              [ `Assoc [ "opaque-inner-key", `String "opaque-inner-value" ]
+              ; `Int 7; `Null
+              ]
+          ]
+      ; "public_map", `Assoc [ "visible", `Bool true ]
+      ]
+  in
+  let expected =
+    {|{"session_tokens_v2":{"[REDACTED]":true,"[REDACTED]":false,"[REDACTED]":[{"[REDACTED]":"[REDACTED]"},7,null]},"public_map":{"visible":true}}|}
+  in
+  List.iter (fun (path, actual) ->
+    Alcotest.(check (option string)) (path ^ ": members and scalar shapes retained")
+      (Some expected) (Option.map Yojson.Safe.to_string actual);
+    let output = match actual with
+      | Some json -> Yojson.Safe.to_string json
+      | None -> Alcotest.fail "redaction must retain the tool call"
+    in
+    List.iter (fun secret ->
+      Alcotest.(check bool) (path ^ ": hides " ^ secret) false
+        (String_util.contains_substring output secret))
+      [ "opaque-token-123"; "opaque-token-456"; "nested-token-789"
+      ; "opaque-inner-key"; "opaque-inner-value"
+      ]) (redacted_json_paths input)
+
 let test_tool_name_does_not_hide_input () =
   let result = Observability_redact.redact_tool_input
     ~tool_name:"tool_auth_create" (`Assoc [ "token", `String "secret data" ]) in
@@ -222,6 +440,34 @@ let test_blob_marker_redacts_preview_body () =
     (not (String_util.contains_substring redacted "abc123xyz456"));
   Alcotest.(check bool) "sha256 still present as structural field" true
     (String_util.contains_substring redacted ("sha256=" ^ sha))
+
+let test_structural_and_tool_paths_preserve_secret_bearing_markers () =
+  let sha = String.make 64 'd' in
+  let marker preview = Tool_output.encode_for_agent_core
+    (Tool_output.Stored (artifact_ref_exn ~sha256:sha ~bytes:500
+       ~preview ~mime:"text/plain")) in
+  let decode label expected = function
+    | Some (`String text) ->
+      (match Tool_output.decode_from_agent_core text with
+       | Tool_output.Decoded { sha256; bytes; mime; preview } ->
+         Alcotest.(check string) (label ^ ": sha") sha sha256;
+         Alcotest.(check int) (label ^ ": bytes") 500 bytes;
+         Alcotest.(check string) (label ^ ": mime") "text/plain" mime;
+         Alcotest.(check string) (label ^ ": preview") expected preview
+       | Tool_output.Not_marker | Tool_output.Invalid_marker _ ->
+         Alcotest.fail (label ^ ": marker was corrupted"))
+    | _ -> Alcotest.fail (label ^ ": expected a string leaf")
+  in
+  let input = `String (marker "Bearer abc") in
+  List.iter (fun (label, actual) -> decode label "[REDACTED]" actual)
+    [ "structural", Some (Observability_redact.redact_json_value input)
+    ; "tool input", Observability_redact.redacted_tool_input_json ~tool_name:"probe" input
+    ; "tool output", Observability_redact.redacted_tool_output_json ~tool_name:"probe"
+        (Yojson.Safe.to_string input)
+    ];
+  let long_preview = String.make 500 'x' ^ " Bearer abc" in
+  decode "structural does not truncate" (String.make 500 'x' ^ " [REDACTED]")
+    (Some (Observability_redact.redact_json_value (`String (marker long_preview))))
 
 (* Regression: a marker embedded inside a JSON string field used to be
    corrupted by callers that did [Yojson.Safe.to_string |> String.sub]
@@ -443,16 +689,36 @@ let () =
           Alcotest.test_case "preview_json_strings keeps utf8 valid" `Quick
             test_preview_json_strings_keeps_utf8_valid;
           Alcotest.test_case "short input unchanged" `Quick test_short_input_unchanged;
+          Alcotest.test_case "raw named credentials are masked" `Quick
+            test_raw_named_credentials_are_masked;
           Alcotest.test_case "redact_text does not truncate" `Quick
             test_redact_text_does_not_truncate;
           Alcotest.test_case "redact_json_strings redacts sensitive keys"
             `Quick test_redact_json_strings_redacts_sensitive_keys;
           Alcotest.test_case "redact_json_strings redacts secrets embedded in values"
             `Quick test_redact_json_strings_redacts_secrets_in_values;
+          Alcotest.test_case "redact_json_strings redacts key synonyms"
+            `Quick test_redact_json_strings_redacts_key_synonyms;
+          Alcotest.test_case "redact_json_strings fragment masks strings keeps counts"
+            `Quick test_redact_json_strings_fragment_masks_strings_keeps_counts;
+          Alcotest.test_case "redact_json_strings keeps secret references"
+            `Quick test_redact_json_strings_keeps_secret_references;
+          Alcotest.test_case "credential reference values still mask secrets"
+            `Quick test_credential_reference_values_still_mask_secrets;
+          Alcotest.test_case "redact_json_strings masks fragment subtree"
+            `Quick test_redact_json_strings_masks_fragment_subtree;
+          Alcotest.test_case "collision metadata survives the Auth log sink"
+            `Quick test_collision_metadata_survives_actual_log_sink;
+          Alcotest.test_case "ordinary map keys mask credential patterns"
+            `Quick test_ordinary_map_keys_mask_credential_patterns;
+          Alcotest.test_case "sensitive fragment map keys are masked"
+            `Quick test_sensitive_fragment_map_keys_are_masked_without_dropping_members;
           Alcotest.test_case "blob marker preserves structure" `Quick
             test_blob_marker_preserves_structure;
           Alcotest.test_case "blob marker redacts preview body" `Quick
             test_blob_marker_redacts_preview_body;
+          Alcotest.test_case "structural and tool paths preserve redacted markers" `Quick
+            test_structural_and_tool_paths_preserve_secret_bearing_markers;
           Alcotest.test_case "preview_json_strings preserves embedded marker"
             `Quick test_preview_json_strings_preserves_embedded_marker;
           Alcotest.test_case "no false positive on task ids" `Quick

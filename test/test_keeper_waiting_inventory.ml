@@ -277,11 +277,26 @@ let test_event_queue_pending_is_visible () =
        Otel_metric_store.metric_keeper_waiting_age_seconds
        ~labels:[ "scope", "keeper"; "source", "event_queue_pending" ]
      > 0.0);
-  check string "schema" "masc.dashboard.keeper_waiting_inventory.v3"
+  check string "schema" "masc.dashboard.keeper_waiting_inventory.v4"
     (json_string_member "schema" json);
   check int "one keeper" 1 (json_int_member "keeper_count" json);
   check int "one waiting keeper" 1 (json_int_member "waiting_keeper_count" json);
   check int "one row" 1 (json_int_member "row_count" json);
+  check int "flat total counts keeper and global rows" 1
+    (json_int_member "total_row_count" json);
+  (match U.(json |> member "rows" |> to_list) with
+   | [ flat_row ] ->
+     check string "flat row keeps its keeper" keeper_name
+       (json_string_member "keeper_name" flat_row);
+     check string "flat row keeps its next action" "keeper_drain_event_queue"
+       (json_string_member "next_action" flat_row)
+   | rows ->
+     fail
+       (Printf.sprintf
+          "expected one flat row, got %d"
+          (List.length rows)));
+  check bool "fleet oldest age is positive" true
+    (U.(json |> member "oldest_age_seconds" |> to_float) > 0.0);
   match find_keeper json keeper_name with
   | None -> fail "keeper row missing"
   | Some keeper ->

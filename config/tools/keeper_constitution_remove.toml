@@ -15,3 +15,8 @@ required = true
 # test_enum_mirror_sync compares the two; edit both or neither.
 pattern = "^a-[0-9a-f]{32}$"
 description = "The id shown beside the norm in your system prompt."
+
+[[params]]
+name = "reason"
+type = "string"
+description = "Why this norm is taken back, in one sentence. Recorded in the ledger beside by/at."

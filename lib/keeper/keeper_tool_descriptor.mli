@@ -118,6 +118,7 @@ type runtime_handler =
   | Tool_memory_retract
   | Tool_memory_write
   | Tool_constitution_write
+  | Tool_constitution_read
   | Tool_constitution_remove
   | Tool_library_search
   | Tool_library_read
@@ -141,6 +142,7 @@ type runtime_handler =
   | Tool_browser_session
   | Tool_browser_goto
   | Tool_browser_act
+  | Tool_browser_instruct
   | Tool_browser_interact
   | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch

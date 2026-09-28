@@ -136,14 +136,6 @@ let route_of_masc_internal ~err (internal : Keeper_internal_error.masc_internal_
   (* The host stopped this turn on purpose. Nothing about the provider failed,
      so there is no other candidate that would do better. *)
   | Keeper_internal_error.Host_stopped_turn _ -> exhaust_failure Internal_opaque
-  (* A person queued behind this autonomous turn before its provider produced
-     anything (RFC-0441). The abandoned candidate did not fail, so the route
-     notes no rest or demotion against it (Exhausted_visible_alive notes
-     none). The walk itself stops in [Keeper_turn_driver], which ends the lane
-     on this error ahead of any overflow; the keeper settles the turn as
-     skipped, not failed (#38094). *)
-  | Keeper_internal_error.Preempted_before_first_token _ ->
-    exhaust_failure Internal_opaque
   (* The runtime's transport closed. [route_of_provider_error] answers
      [observe_retry Server_error] for agent-core's [ProviderUnavailable]; the
      typed value must not change which runtime is tried next, so it answers
@@ -426,8 +418,9 @@ let usable_retry_after = function
    Without a usable hint (absent, zero, negative, infinite, NaN) the class decides: a
    throttle rests the named floor, and an account exhaustion rests the cap,
    because a quota that said nothing about its end is not known to come back
-   within a minute. Every result is clamped to [cap_sec] so a misread header
-   cannot park a path longer than the operator allows. *)
+   within a minute. Only the unstated fallback is clamped to [cap_sec].
+   A validated provider hint is evidence of when the path can serve again;
+   cutting it short repeatedly calls a path that is still exhausted (#39190). *)
 let path_rest_sec ~cap_sec ~retry_class ~retry_after_hint =
   let cap_sec = Float.max 0.0 cap_sec in
   let unstated () =
@@ -441,12 +434,9 @@ let path_rest_sec ~cap_sec ~retry_class ~retry_after_hint =
     | Provider_timeout ->
       Env_config_keeper.KeeperKeepalive.rate_limit_backoff_floor_sec
   in
-  let base =
-    match usable_retry_after retry_after_hint with
-    | None -> unstated ()
-    | Some hint -> Float.max hint 1.0
-  in
-  Float.min cap_sec base
+  match usable_retry_after retry_after_hint with
+  | None -> Float.min cap_sec (unstated ())
+  | Some hint -> Float.max hint 1.0
 ;;
 
 let route_kind_label = function

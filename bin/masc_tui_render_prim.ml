@@ -92,7 +92,8 @@ let acting_pane_scroll_max = ref 0
    and the frame's own reading is behind all of them. *)
 let clamped_scroll_now (state : state) = function
   | Task_detail _ -> Task_detail state.task_detail_scroll
-  | Board_read _ -> Board_read state.board_scroll
+  | Board_read _ ->
+      Board_read (state.board_scroll, state.board_comment_scroll)
   | Message_scroll _ -> Message_scroll state.msg_scroll
   | Schedule_detail_scroll _ -> Schedule_detail_scroll state.schedule_scroll
   | Keeper_detail _ -> Keeper_detail state.detail_scroll

@@ -157,7 +157,9 @@ let inventory t json =
 let save_failed t (model:model) message =
   t.models <- List.map (fun (existing:model) -> if existing.id=model.id then model else existing) t.models;
   t.recovery <- Refresh_configuration; t.phase <- Failed;
-  t.notice <- "r로 설정을 새로 읽은 뒤 다시 저장하세요. " ^ message
+  (* The reason leads: the row is cut at the pane width, and the key to press
+     is also in the hints. *)
+  t.notice <- message ^ " · r로 설정을 새로 읽은 뒤 다시 저장하세요."
 let refresh_retry t result =
   let cursor = t.cursor in
   let refreshed = match result with Ok json -> inventory t json | Error _ as error -> error in

@@ -2074,8 +2074,15 @@ let update_locked_with_output
              in
              Ok lines
          in
+         let previous_bytes =
+           Keeper_memory_os_render.facts_payload_bytes
+             ~ordinary_facts:
+               (Option.fold ~none:[] ~some:(fun (snapshot : t) -> snapshot.facts) previous)
+             ~source_lines
+         in
          let* () =
            Keeper_memory_os_render.check_facts_budget
+             ~previous_bytes
              ~ordinary_facts:next.facts
              ~source_lines
            |> Result.map_error store_error

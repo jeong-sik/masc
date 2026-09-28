@@ -37,10 +37,10 @@ let facts_payload_bytes ~ordinary_facts ~source_lines =
   |> String.length
 ;;
 
-let check_facts_budget ~ordinary_facts ~source_lines =
+let check_facts_budget ~previous_bytes ~ordinary_facts ~source_lines =
   let actual = facts_payload_bytes ~ordinary_facts ~source_lines in
   let maximum = Env_config.KeeperMemoryOs.facts_max_bytes () in
-  if actual <= maximum
+  if actual <= maximum || actual < previous_bytes
   then Ok ()
   else
     Error

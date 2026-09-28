@@ -2,6 +2,7 @@
 
 module Runtime = Masc.Keeper_tool_memory_runtime
 module Current = Masc.Keeper_memory_os_current
+module Render = Masc.Keeper_memory_os_render
 
 let ordinary_facts_for ~keepers_dir ~keeper_id () =
   match Current.read_for_keepers_dir ~keepers_dir ~keeper_id with
@@ -2994,6 +2995,54 @@ let test_ordinary_commit_budget_preserves_store_on_rejection () =
     (Fs_compat.load_file journal_path)
 ;;
 
+let test_over_budget_retraction_recovers_incrementally () =
+  with_temp_dir @@ fun keepers_dir ->
+  let keeper_id = "retraction-budget" in
+  let first = fact (String.make 300 'a') in
+  let second = fact (String.make 300 'b') in
+  with_env Env_config.KeeperMemoryOs.facts_max_bytes_env_key "1000" @@ fun () ->
+  replace_current_facts ~keepers_dir ~keeper_id [ first; second ];
+  with_env Env_config.KeeperMemoryOs.facts_max_bytes_env_key "200" @@ fun () ->
+  let source = { Current.kind = Current.Explicit_write; trace_id = "retract" } in
+  (match
+     Current.retract_fact
+       ~keepers_dir ~keeper_id ~now:(Time_compat.now ()) ~source
+       ~memory_id:(Masc.Keeper_memory_os_types.memory_id first)
+       ~reason:"less useful" ()
+   with
+   | Ok _ -> ()
+   | Error _ -> Alcotest.fail "a reducing over-budget retraction was rejected");
+  let remaining = current_facts ~keepers_dir ~keeper_id in
+  Alcotest.(check int) "one fact remains" 1
+    (List.length remaining);
+  Alcotest.(check bool) "remaining fact is still over the reduced cap" true
+    (Render.facts_payload_bytes ~ordinary_facts:remaining ~source_lines:[] > 200);
+  Alcotest.(check bool) "the second fact remains" true
+    (String.equal (List.hd remaining).claim second.claim);
+  (match
+     Current.replace
+       ~keepers_dir ~keeper_id ~expected_revision:(Some 2)
+       ~now:(Time_compat.now ()) ~source
+       ~facts:(remaining @ [ fact "new fact" ]) ()
+   with
+   | Error detail ->
+     Alcotest.(check bool) "growth fails for the budget" true
+       (contains ~needle:"exceed commit budget" detail)
+   | Ok _ -> Alcotest.fail "over-budget growth was committed");
+  Alcotest.(check int) "growth left the current set alone" 1
+    (List.length (current_facts ~keepers_dir ~keeper_id));
+  (match
+     Current.retract_fact
+       ~keepers_dir ~keeper_id ~now:(Time_compat.now ()) ~source
+       ~memory_id:(Masc.Keeper_memory_os_types.memory_id second)
+       ~reason:"less useful" ()
+   with
+   | Ok _ -> ()
+   | Error _ -> Alcotest.fail "final recovery retraction was rejected");
+  Alcotest.(check int) "all facts removed" 0
+    (List.length (current_facts ~keepers_dir ~keeper_id))
+;;
+
 let test_source_commit_budget_counts_ordinary_facts () =
   with_temp_dir @@ fun base_path ->
   with_env Env_config.KeeperMemoryOs.facts_max_bytes_env_key "500" @@ fun () ->
@@ -3116,6 +3165,10 @@ let () =
             "ordinary commit budget preserves snapshot and journal"
             `Quick
             test_ordinary_commit_budget_preserves_store_on_rejection
+        ; Alcotest.test_case
+            "over-budget retractions recover incrementally"
+            `Quick
+            test_over_budget_retraction_recovers_incrementally
         ; Alcotest.test_case
             "source commit budget counts ordinary facts"
             `Quick

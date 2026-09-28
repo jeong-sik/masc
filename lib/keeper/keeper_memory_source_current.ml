@@ -592,8 +592,16 @@ let upsert_file_fact
         List.map (render_fact ~verified:false) facts
         @ List.map render_invalidation invalidations
       in
+      let previous_bytes =
+        Keeper_memory_os_render.facts_payload_bytes
+          ~ordinary_facts:ordinary
+          ~source_lines:
+            (List.map (render_fact ~verified:false) previous_facts
+             @ List.map render_invalidation previous_invalidations)
+      in
       let* () =
         Keeper_memory_os_render.check_facts_budget
+          ~previous_bytes
           ~ordinary_facts:ordinary
           ~source_lines
       in

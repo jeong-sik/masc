@@ -121,7 +121,8 @@ val read_for_keepers_dir :
 
     [ordinary_facts] is read under the aggregate lock, then the proposed
     combined rendered facts are checked against the configured commit budget.
-    An over-budget write leaves both snapshots unchanged. *)
+    Over-budget growth is rejected without changing either snapshot; a strict
+    reduction can commit so an already over-budget store can recover. *)
 val upsert_file_fact :
   ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ordinary_facts:(unit -> (Keeper_memory_os_types.fact list, string) result)

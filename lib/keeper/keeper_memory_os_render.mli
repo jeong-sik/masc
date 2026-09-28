@@ -9,7 +9,10 @@ val facts_payload_bytes :
     [verified=false], the longest rendering recall can emit for them. *)
 
 val check_facts_budget :
-  ordinary_facts:Keeper_memory_os_types.fact list
+  previous_bytes:int
+  -> ordinary_facts:Keeper_memory_os_types.fact list
   -> source_lines:string list
   -> (unit, string) result
-(** Reject an over-budget proposed current set before either store commits. *)
+(** Reject an over-budget proposed current set before either store commits,
+    except when it strictly reduces an already over-budget set. This permits
+    incremental retraction after a configured cap is lowered. *)

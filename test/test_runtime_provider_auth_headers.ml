@@ -457,7 +457,10 @@ let test_runtime_toml_editor_protocol_inventory_is_backend_owned () =
     (List.map render Runtime_toml.editor_protocols)
 ;;
 
-let test_runtime_toml_rejects_reserved_provider_and_model_ids () =
+(* Only a provider id becomes a top-level table (its bindings), so only a
+   provider id is refused for naming one; test_runtime_toml_namespace
+   covers every name and shows model ids are not refused (#39539). *)
+let test_runtime_toml_rejects_reserved_provider_ids () =
   let cases =
     [ ( "provider"
       , "providers.runtime"
@@ -466,13 +469,6 @@ let test_runtime_toml_rejects_reserved_provider_and_model_ids () =
 display-name = "Reserved"
 protocol = "openai-compatible-http"
 endpoint = "https://example.invalid/v1"
-|} )
-    ; ( "model"
-      , "models.routes"
-      , {|
-[models.routes]
-api-name = "reserved"
-max-context = 1024
 |} )
     ]
   in
@@ -3087,7 +3083,7 @@ let () =
         ; test_case
             "runtime TOML rejects reserved provider and model ids"
             `Quick
-            test_runtime_toml_rejects_reserved_provider_and_model_ids
+            test_runtime_toml_rejects_reserved_provider_ids
         ; test_case
             "runtime TOML rejects obsolete top-level namespaces"
             `Quick

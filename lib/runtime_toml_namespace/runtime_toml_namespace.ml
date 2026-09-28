@@ -15,26 +15,7 @@ type t =
   | Repositories
   | Browser
   | Memory_os
-
-let all =
-  [ Providers
-  ; Models
-  ; Runtime
-  ; Exec
-  ; Egress
-  ; Lsp
-  ; Typesafeai
-  ; Skills
-  ; Fusion
-  ; Voice
-  ; Tui
-  ; Slack
-  ; Discord
-  ; Repositories
-  ; Browser
-  ; Memory_os
-  ]
-;;
+[@@deriving enumerate]
 
 let key = function
   | Providers -> "providers"

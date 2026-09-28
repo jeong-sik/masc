@@ -44,6 +44,33 @@ let test_a_name_no_reader_owns_is_a_provider () =
       (String.concat "; "
          (List.map (fun (e : Runtime_toml.parse_error) -> e.path ^ ": " ^ e.message) errors))
 
+(* A model id sits under [models] and inside [<provider>.<model>], and an SSH
+   endpoint under [exec.ssh.endpoints]; neither is a top-level table, so a
+   table's name is theirs to use. [vision] is a keeper-settings namespace and
+   a model id existing fixtures and scripts already declare. *)
+let test_model_and_endpoint_ids_may_share_a_table_name () =
+  let content =
+    {|[models.vision]
+api-name = "vision-model"
+max-context = 1024
+
+[models.turn]
+api-name = "turn-model"
+max-context = 1024
+
+[exec.ssh.endpoints.sandbox]
+host = "builder.local"
+user = "masc-exec"
+remote_root = "/srv/masc/playground"
+|}
+  in
+  match Runtime_toml.parse_string content with
+  | Ok _ -> ()
+  | Error errors ->
+    Alcotest.failf "model or endpoint ids named after a table were refused: %s"
+      (String.concat "; "
+         (List.map (fun (e : Runtime_toml.parse_error) -> e.path ^ ": " ^ e.message) errors))
+
 let test_each_table_has_one_spelling () =
   let keys = List.map Ns.key Ns.all in
   Alcotest.(check int) "no two tables share a spelling" (List.length keys)
@@ -62,6 +89,8 @@ let () =
             test_no_provider_takes_a_table_another_reader_owns
         ; Alcotest.test_case "a name no reader owns is a provider" `Quick
             test_a_name_no_reader_owns_is_a_provider
+        ; Alcotest.test_case "model and endpoint ids may share a table name" `Quick
+            test_model_and_endpoint_ids_may_share_a_table_name
         ; Alcotest.test_case "each table has one spelling" `Quick
             test_each_table_has_one_spelling
         ] )

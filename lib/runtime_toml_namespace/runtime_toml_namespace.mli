@@ -29,8 +29,8 @@ type t =
   | Repositories  (** the pull-request reader *)
   | Browser  (** the browser lane *)
   | Memory_os  (** read by scripts/memory_os_judge_eval.py *)
-
-val all : t list
+[@@deriving enumerate]
+(* [all] is generated, so a table added to [t] is in it. *)
 
 val key : t -> string
 (** The table's name as runtime.toml spells it. *)

@@ -7,4 +7,6 @@
 (library
  (name runtime_toml_namespace)
  (public_name masc.runtime_toml_namespace)
- (wrapped false))
+ (wrapped false)
+ (preprocess
+  (pps ppx_enumerate)))

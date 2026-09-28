@@ -6,7 +6,9 @@
     Every value is the provider's own report, as
     [GET /api/v1/runtime/resolved] carries it. Nothing here guesses a
     threshold: a meter is drawn in the exhausted style only when the reported
-    value is at or past the full value of its own unit. The one other fact
+    value is at or past the full value of its own unit and the server did not
+    classify the window as counting something a model call does not need;
+    such a window is drawn dim whatever its value. The one other fact
     drawn is the runtime catalogue's [quota_exhausted], as an
     [exhausted (observed)] tag on the account whose quota scope it names.
 
@@ -47,7 +49,8 @@ val section :
 (** [None] before the first read. A read with no account says
     ["no usage data"]. A failed read is one line,
     ["usage data unavailable: <reason>"]. [width] is the cells a row may use;
-    the meters take what the other columns leave. *)
+    a meter takes what the other columns leave, from 10 to 24 cells. When
+    even 10 cells do not fit beside the hearing age, the age is left out. *)
 
 val utilization_text : Masc.Tui_decode.provider_usage_utilization -> string
 (** The value as a whole percent, so accounts read in one unit. A percent is

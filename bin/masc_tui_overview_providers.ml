@@ -136,20 +136,9 @@ let window_label (window : Tui_decode.provider_usage_window) =
 
 (* ---- time --------------------------------------------------------------- *)
 
-let seconds_per_minute = 60
-let seconds_per_hour = 60 * seconds_per_minute
-let seconds_per_day = 24 * seconds_per_hour
-
-let span_text seconds =
-  let s = max 0 (int_of_float seconds) in
-  if s < seconds_per_minute then Printf.sprintf "%ds" s
-  else if s < seconds_per_hour then Printf.sprintf "%dm" (s / seconds_per_minute)
-  else if s < seconds_per_day then
-    Printf.sprintf "%dh%dm" (s / seconds_per_hour)
-      (s mod seconds_per_hour / seconds_per_minute)
-  else
-    Printf.sprintf "%dd%dh" (s / seconds_per_day)
-      (s mod seconds_per_day / seconds_per_hour)
+(* The screen's one ladder, so a countdown here reads like every other span
+   on the Overview. *)
+let span_text = Masc_tui_message_layout.span_text
 
 (* The screen's clock is the terminal's zone, like every other row clock. A
    time on another day carries its date. *)
@@ -167,7 +156,7 @@ let clock_text ~now at =
    window: the server keeps the last report until a newer one arrives, so the
    meter still shows what the provider last said. *)
 let reset_text ~now = function
-  | None -> (Some Ansi.dim, "reset time not reported")
+  | None -> (Some Ansi.dim, Masc_tui_theme.Glyph.no_value)
   | Some at when at <= now ->
       (Some (Theme.warn ()), "reset time passed \xc2\xb7 no newer report")
   | Some at ->
@@ -175,15 +164,26 @@ let reset_text ~now = function
       , Printf.sprintf "\xe2\x86\xbb %s in %s" (clock_text ~now at)
           (span_text (at -. now)) )
 
+(* A clock that moved backwards says nothing rather than a negative age. *)
 let heard_text ~now observed_at =
-  Printf.sprintf "heard %s ago" (span_text (now -. observed_at))
+  Option.map
+    (fun age -> Printf.sprintf "heard %s ago" age)
+    (Masc_tui_message_layout.age_text ~now ~since:observed_at)
 
 (* ---- accounts ----------------------------------------------------------- *)
 
+(* The operator's own [display-name] for each provider billed to the account.
+   A scope no configured provider names any more has only its scope id. *)
 let account_name (account : Tui_decode.provider_usage_account) =
   match account.pua_providers with
   | [] -> Terminal_text.single_line account.pua_scope
-  | providers -> Terminal_text.single_line (String.concat "," providers)
+  | providers ->
+      Terminal_text.single_line
+        (String.concat ", "
+           (List.map
+              (fun (provider : Tui_decode.provider_usage_provider) ->
+                provider.pup_display_name)
+              providers))
 
 (* The runtime catalogue's own [quota_exhausted], joined by quota scope,
    with the reopen time the catalogue states for it. That time is the
@@ -257,7 +257,7 @@ let account_rows ~now (observed, (account : Tui_decode.provider_usage_account)) 
       Window_row
         { name
         ; window = first
-        ; heard = Some (heard_text ~now first.puw_observed_at)
+        ; heard = heard_text ~now first.puw_observed_at
         ; tag
         }
       :: List.map
@@ -265,13 +265,32 @@ let account_rows ~now (observed, (account : Tui_decode.provider_usage_account)) 
              let heard =
                if Float.equal window.puw_observed_at first.puw_observed_at then
                  None
-               else Some (heard_text ~now window.puw_observed_at)
+               else heard_text ~now window.puw_observed_at
              in
              Window_row { name = ""; window; heard; tag = None })
            rest
 
 let widest cells_of_row rows =
   List.fold_left (fun widest row -> max widest (cells_of_row row)) 0 rows
+
+(* The value column prints whole percents; past this many cells (192
+   eighths) a wider meter adds ink, not resolution. *)
+let meter_max_cells = 24
+
+(* Below this many cells (80 eighths) two accounts a few percent apart draw
+   the same bar, so the hearing age gives way before the meter shrinks
+   further (#38611). *)
+let meter_min_cells = 10
+
+(* A window that counts something a model call does not need never alarms:
+   it being full refuses no model call. A limit the server could not classify
+   is drawn like one that gates, since nothing says it does not. *)
+let window_tone (window : Tui_decode.provider_usage_window) =
+  match window.puw_role with
+  | Tui_decode.Role_counts_other_use -> Some Ansi.dim
+  | Tui_decode.Role_gates_model_calls | Tui_decode.Role_unclassified_limit ->
+      if at_or_past_full window.puw_utilization then Some (Theme.bad ())
+      else None
 
 (* Columns left to right by what a narrow row can least afford to lose: the
    box cuts a row from the right, so the observed exhaustion tag sits beside
@@ -309,15 +328,18 @@ let draw_rows ~now ~width rows =
         | Window_row { heard = None; _ } | Silent_row _ -> 0)
       rows
   in
-  (* Every cell of a window row but the meter: leading space, name, gap,
-     label, space, the meter's two edges, space, value, tag, gap, reset,
-     heard. *)
+  (* Every cell of a window row but the meter and the hearing age: leading
+     space, name, gap, label, space, the meter's two edges, space, value,
+     tag, gap, reset. *)
   let columns =
     1 + name_w + cells_of gap + label_w + 1 + cells_of meter_open
     + cells_of meter_close + 1 + value_w + tag_w + cells_of gap + reset_w
-    + heard_w
   in
-  let meter_cells = max 1 (width - columns) in
+  let draws_heard = width - columns - heard_w >= meter_min_cells in
+  let meter_cells =
+    let room = width - columns - (if draws_heard then heard_w else 0) in
+    max meter_min_cells (min meter_max_cells room)
+  in
   let tag_part = function
     | None -> ""
     | Some tag -> gap ^ Theme.bad () ^ tag ^ Ansi.reset
@@ -334,15 +356,12 @@ let draw_rows ~now ~width rows =
           ^ styled (Some Ansi.dim) "no usage data"
           ^ tag_part tag
       | Window_row { name; window; heard; tag } ->
-          let tone =
-            if at_or_past_full window.puw_utilization then Some (Theme.bad ())
-            else None
-          in
+          let tone = window_tone window in
           let reset_tone, reset = reset_text ~now window.puw_resets_at in
           let heard_part =
             match heard with
-            | None -> ""
-            | Some heard -> gap ^ styled (Some Ansi.dim) heard
+            | Some heard when draws_heard -> gap ^ styled (Some Ansi.dim) heard
+            | Some _ | None -> ""
           in
           let tag_pad = String.make (tag_w - tag_cells tag) ' ' in
           " " ^ pad_right name name_w ^ gap

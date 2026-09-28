@@ -29,3 +29,18 @@ val resolve : workspace:string -> integration_id:string -> cli_path:string ->
 (** A reference from another canonical workspace is refused. After relocation,
     reimport explicitly for new selections; already-saved global File credentials
     remain at their stable user-global paths. *)
+
+val account_of_binding : binding -> Runtime_account_email.account
+(** The account a resolved reference selects, spelled as runtime.toml records
+    it for the provider saved from that reference. *)
+
+val set_email :
+  Runtime_account_email.account -> Runtime_account_email.t option -> (unit, error) result
+(** Record the email a completed setup login read for this exact account, or
+    clear the record when that login reported none, so an account signed into
+    another identity never keeps showing the previous email. The record is
+    private and user-global, beside the references, and is display data only. *)
+
+val email : Runtime_account_email.account -> Runtime_account_email.recorded
+(** Reads only the record {!set_email} wrote, never an account's login files,
+    so setup inventory can call it for every declared account. *)

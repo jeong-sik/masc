@@ -2406,7 +2406,9 @@ type planning_tab = Render_schedule.planning_tab =
    whatever followed -- at a hundred columns this title lost its badge and
    half its clock. Callers build that tail once and hand the same value here
    and to the row, so the measurement and the drawing cannot disagree. *)
-let planning_workspace_title (state : state) ~cols ~(tab : planning_tab) ~(window : string) ~(after : string) =
+let planning_workspace_lead = screen_title " MASC Planning" ^ "  "
+
+let planning_workspace_tabs (state : state) ~(tab : planning_tab) ~(window : string) =
   let review_count = Option.map (fun s -> s.vs_total) state.verification in
   let verifying_count =
     Option.map
@@ -2423,15 +2425,44 @@ let planning_workspace_title (state : state) ~cols ~(tab : planning_tab) ~(windo
     | Planning_task_review -> Verification
     | Planning_verdicts -> Harness
   in
-  screen_title " MASC Planning" ^ "  "
-  ^ tab_strip
-      ~width:
-        (tab_strip_width ~cols
-           ~before:(screen_title " MASC Planning" ^ "  ") ~after)
-      ~press:(fun surface text -> pressable (Press_surface surface) text)
-      (List.map
-         (fun (stop, label) -> (label, stop = tab, surface_of_stop stop))
-         stops)
+  List.map
+    (fun (stop, label) -> (label, stop = tab, surface_of_stop stop))
+    stops
+
+let planning_workspace_strip ~width tabs =
+  tab_strip ~width
+    ~press:(fun surface text -> pressable (Press_surface surface) text)
+    tabs
+
+let planning_workspace_title (state : state) ~cols ~(tab : planning_tab) ~(window : string) ~(after : string) =
+  planning_workspace_lead
+  ^ planning_workspace_strip
+      ~width:(tab_strip_width ~cols ~before:planning_workspace_lead ~after)
+      (planning_workspace_tabs state ~tab ~window)
+
+(* One verdict's heading: the Planning strip with Verdicts current, then the
+   task the verdict is about, then the badge. The strip keeps the width that
+   holds its current entry: below that it drops that entry too and the marks a
+   press lands on, so the task id folds before the strip goes under it. Above
+   it, the strip takes what the id leaves (#39712 review). *)
+let harness_detail_heading (state : state) ~cols ~task_id ~tail =
+  let cells text =
+    Masc_tui_message_layout.display_width (Masc_tui_theme.strip_sgr text)
+  in
+  let tabs = planning_workspace_tabs state ~tab:Planning_verdicts ~window:"" in
+  let mark = " \xe2\x96\xb8 verdict  " in
+  let around = cells planning_workspace_lead + cells mark in
+  detail_heading ~cols
+    ~lead:
+      (Lead_strip
+         { floor = around + tab_strip_min_width tabs
+         ; draw =
+             (fun width ->
+               planning_workspace_lead
+               ^ planning_workspace_strip ~width:(width - around) tabs
+               ^ mark)
+         })
+    ~id:task_id ~after:"" ~tail
 
 
 (* Where the goal stands with the completion judge, in one column. The phase
@@ -2959,8 +2990,8 @@ let render_diff_surface (state : state) (ds : diff_surface) =
   in
   let total = List.length diff_rows in
   let header =
-    detail_heading ~cols ~lead:(screen_title ds.ds_title ^ " ") ~id:ds.ds_address
-      ~after:"  vs HEAD" ~badge:(connection_badge state)
+    detail_heading ~cols ~lead:(Lead_text (screen_title ds.ds_title ^ " "))
+      ~id:ds.ds_address ~after:"  vs HEAD" ~tail:(connection_badge state)
   in
   box_top buf cols;
   box_line buf cols header;

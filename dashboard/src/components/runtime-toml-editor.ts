@@ -293,9 +293,9 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
 
   async function handleSave(sourceText?: string) {
     const nextSourceText = typeof sourceText === 'string' ? sourceText : textareaRef.current?.value ?? draft
-    const nextDirty = config !== null && nextSourceText !== config.source_text
-    if (!nextDirty || saving || loadState === 'loading') return
-    const nextEnvironment = parseRuntimeTomlEnvironment(nextSourceText)
+    if (config === null || saving || loadState === 'loading') return
+    if (nextSourceText === config.source_text) return
+    const nextEnvironment = parseRuntimeTomlEnvironment(nextSourceText, config.reserved_provider_ids)
     for (const provider of nextEnvironment.providers) {
       const protocol = config?.provider_protocols.find(item => item.protocol === provider.protocol)
       if (!protocol?.provider_fields.includes('account-home')) continue

@@ -313,6 +313,14 @@ status: reference
   `keeper_role {name, board_interests}`뿐이다. 과거 post/comment thread,
   instructions, runtime/task identity, mention 목록은 저장하거나 보내지 않는다.
 
+**Board Comment Count Cap (게시물 댓글 수 상한)**
+: 한 Board 게시물에 붙을 수 있는 활성 댓글 수의 쓰기 한도(`Board.Limits.comment_count_cap`).
+  기본값은 100이며 `MASC_BOARD_COMMENT_COUNT_CAP`으로 바꾼다. 값이 0 이하이면 상한 검사를
+  끈다. 한도에 도달하면 다음 댓글 작성을 거절하고 새 게시물(successor) 안내를 돌려준다.
+  만료된 댓글은 활성 수에서 빠져 새 자리를 내준다. `masc_board_post_get`의
+  `comment_limit`·`comment_tail`은 한 번에 읽는 댓글 페이지 크기이므로 이 쓰기 한도와 다르다.
+  → [Board.Limits](../../lib/board_types/board_types.mli) · [Board_core](../../lib/board/board_core.ml)
+
 **Board Attention Candidate (Board 판정 후보)**
 : Board_attention lane이 판정할 게시물 하나. 어떤 모델 호출보다 먼저 durable하게
   저장되고, 생애가 `Pending → Judged → Consumed`다. 다시 해도 같은 결과가 나올 실패일
@@ -1098,10 +1106,12 @@ status: reference
   그 계산을 격리한다. attach·detach와 Add-on 장애는 기존 Keeper의 권한·도구·진행 중
   작업을 축소하지 않으며, 추가 근거는 활용·보류·무시할 수 있다. 원천 어댑터는
   `snapshot_file`·`msx_capture`·`dos_capture`·`lane_output`·`browser_document`이고,
-  코어는 도메인 의미를 해석하지 않고 공통 row/coverage를 검사·표시한다.
+  코어는 도메인 의미를 해석하지 않고 공통 row/coverage를 검사·표시한다. 내장 lane은
+  바인딩에 제공하는 원천 종류를 정하며, `browser_document`는 목록에 든 Browser Lane
+  백엔드만 받는다 — Stagehand에는 유휴 문서 관측자가 없어 이 원천을 제공하지 않는다.
   → [설계 계약](../design/lane-addon-v0.md),
   [Lane_addon_types](../../lib/lane_addon/lane_addon_types.mli),
-  [Lane_addon_sources](../../lib/lane_addon/lane_addon_sources.ml)
+  [Lane_addon_sources](../../lib/lane_addon/lane_addon_sources.mli)
 
 **Quiz Lane (퀴즈 레인)**
 : 저장된 기록(Board·기억 OS·GitHub)에서 인용한 사실 묶음(`deck.json`, `snapshot_file`)을
@@ -1405,8 +1415,10 @@ status: reference
   - 미기동·정지 대상 수락: 대상 Keeper가 등록되어 있으나 fiber가 돌지 않는 상태
     (`offline`·`crashed`·`restarting`·`draining`)이거나 일시정지(`paused`) 상태일 때의
     due 발화는 재시도 실패로 튕기지 않고 단 1회 수락(`accepted`)되어 해당 Keeper의
-    durable 큐에 대기한다(#38523). 다음 턴이 깨어날 때 stimulus로 읽히며, 새 발화가
-    이전 대기를 대체하여 큐에는 스케줄당 최대 1건만 유지된다.
+    durable 큐에 대기한다(#38523). 다음 턴이 깨어날 때 stimulus로 읽히며, 새 발화는 아직
+    턴이 시작하지 않은 이전 대기를 대체하여 큐에는 스케줄당 최대 1건만 유지된다.
+    턴이 이미 가져간 발화는 이후 발화가 앞선 대기를 대체하거나 대상 Keeper 퇴역으로
+    예약이 취소돼도 그 턴의 ACK가 올 때까지 남는다(#39521).
   - 보류(hold): due가 된 발화를 이번 tick에 보내지 않고 두는 것. 상태 값이 아니다 — 예약은
     `Due`에 머물고 다음 tick에 다시 판정된다. 이유는 닫힌 둘(`Schedule_runner.hold_reason`)이고
     wire `kind`로 적힌다. `previous_occurrence_unconsumed`는 대상 Keeper가 같은 예약의 이전
@@ -1564,6 +1576,17 @@ status: reference
     클라이언트 관측을 위한 wire 프로젝션에서만 유지한다.
   → [keeper_approval_queue_rules_types](../../lib/keeper_contract/keeper_approval_queue_rules_types.mli),
   [Keeper_approval_queue](../../lib/keeper/keeper_approval_queue.mli)
+
+**Exact Attempt Quarantine Cause (정확 시도 격리 원인)**
+: HITL Auto Judge가 승인 요청에 대한 exact 시도를 격리할 때 기록하는 닫힌 다섯 사유
+  (`exact_attempt_quarantine_cause`): `Exact_flow_execution_failed`·`Exact_cancellation`·
+  `Exact_attempt_replay`·`Exact_domain_invalid_output`·`Exact_terminal_persistence_failure`.
+  `Exact_domain_invalid_output`은 응답을 JSON으로 파싱하지 못했거나 도메인 검증에서 거절된 경우,
+  또는 exact flow의 후보 소진 뒤 CLI 경로도 결말을 주지 못한 경우에 기록된다. 후자는
+  아직 바인딩된 후보가 있을 때 `Cli_no_slots`·`Cli_fell_back` 결과로 격리한다. 후보 소진은
+  대상을 고르거나 요청을 받아들이는 단계의 거절처럼 응답 전에 일어날 수도 있다.
+  이는 Board Attention의 `Domain_output_invalid`와 소유자 및 격리 상태가 다른 어휘다.
+  → [keeper_approval_queue_rules_types](../../lib/keeper_contract/keeper_approval_queue_rules_types.mli) · [hitl_summary_worker](../../lib/keeper/hitl_summary_worker.ml) · [Exact_output](../../packages/agent_core/lib/llm_provider/exact_output.mli)
 
 **Approval Lifecycle (승인 생애 단계)**
 : Gate 승인 하나가 durable 하게 지나온 단계를 이름 붙인 닫힌 아홉 값

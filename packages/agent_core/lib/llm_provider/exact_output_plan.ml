@@ -607,6 +607,7 @@ let fingerprint (plan : t) = plan.fingerprint
 let response_format (plan : t) = plan.response_format
 let request_body_sha256 (plan : t) = plan.wire.body_sha256
 let dispatch_request (plan : t) = plan.dispatch_request
+let request_body (plan : t) = plan.wire.body
 let response_codec (plan : t) = plan.wire.response_codec
 let provider_kind (plan : t) = plan.wire.provider_kind
 let connect_timeout_s (plan : t) = plan.wire.connect_timeout_s

@@ -123,25 +123,40 @@ let parse body =
         Ok { dry_run; confirm; reason; filter }
 ;;
 
+(* A census that cannot read one queue must not report a smaller fleet. The
+   dry-run count and the executed set are the same plan, so a dropped keeper
+   would make both wrong: the operator would read a failed read as an empty
+   queue and cancel a subset while the inaccessible rows stay. Every failure
+   is an [Error] that aborts the whole request. *)
 let rows_for_keeper ~base_path keeper_name =
   match Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name with
-  | Error _ -> []
+  | Error detail ->
+    Error (Printf.sprintf "keeper %s: queue read failed: %s" keeper_name detail)
   | Ok state ->
-    Keeper_event_queue_state.pending_selections state
-    |> List.map (fun (selection : Keeper_event_queue_state.pending_selection) ->
-      { keeper_name
-      ; source_ref = Keeper_event_queue_state.source_snapshot_ref selection.source
-      ; source_incarnation = selection.admitted_revision
-      ; source_label = Keeper_event_queue.payload_kind_label selection.source.payload
-      ; since = selection.source.arrived_at
-      })
+    Ok
+      (Keeper_event_queue_state.pending_selections state
+       |> List.map (fun (selection : Keeper_event_queue_state.pending_selection) ->
+         { keeper_name
+         ; source_ref = Keeper_event_queue_state.source_snapshot_ref selection.source
+         ; source_incarnation = selection.admitted_revision
+         ; source_label = Keeper_event_queue.payload_kind_label selection.source.payload
+         ; since = selection.source.arrived_at
+         }))
 ;;
 
 let all_rows config =
   let base_path = config.Workspace.base_path in
   match Keeper_meta_store.keeper_names_result config with
-  | Error _ -> []
-  | Ok keeper_names -> List.concat_map (rows_for_keeper ~base_path) keeper_names
+  | Error detail -> Error ("keeper enumeration failed: " ^ detail)
+  | Ok keeper_names ->
+    let rec loop acc = function
+      | [] -> Ok (List.concat (List.rev acc))
+      | keeper_name :: rest ->
+        (match rows_for_keeper ~base_path keeper_name with
+         | Error detail -> Error detail
+         | Ok rows -> loop (rows :: acc) rest)
+    in
+    loop [] keeper_names
 ;;
 
 let row_matches filter row =
@@ -262,82 +277,92 @@ let handle_post state ~actor:_ req reqd body =
         ])
   | Ok request ->
     let config = Mcp_server.workspace_config state in
-    let rows = plan_rows request.filter (all_rows config) in
-    let keeper_counts = count_by (fun row -> row.keeper_name) rows in
-    let source_counts = count_by (fun row -> row.source_label) rows in
-    let oldest = oldest_age_seconds rows in
-    if request.dry_run
-    then
-      respond
-        (`Assoc
-          [ "schema", `String result_schema
-          ; "ok", `Bool true
-          ; "dry_run", `Bool true
-          ; "would_cancel", `Int (List.length rows)
-          ; "keeper_counts", counts_json keeper_counts
-          ; "source_counts", counts_json source_counts
-          ; "oldest_age_seconds", Json_util.float_opt_to_json oldest
-          ; "rows", `List (List.map row_json rows)
-          ])
-    else
-      match request.confirm with
-      | Some token when String.equal token confirm_token ->
-        let operation_id = fresh_operation_id () in
-        let backup =
-          `Assoc
-            [ "schema", `String result_schema
-            ; "operation_id", `String operation_id
-            ; "reason", `String request.reason
-            ; "rows", `List (List.map row_json rows)
-            ]
-        in
-        let path = backup_path ~base_path:config.Workspace.base_path operation_id in
-        (match
-           Fs_compat.save_file_atomic_strict path (Yojson.Safe.to_string backup)
-         with
-         | Error detail ->
+    (match all_rows config with
+     | Error detail ->
+       respond
+         ~status:`Internal_server_error
+         (`Assoc
+           [ "schema", `String result_schema
+           ; "ok", `Bool false
+           ; "error", `String detail
+           ])
+     | Ok all ->
+       let rows = plan_rows request.filter all in
+       let keeper_counts = count_by (fun row -> row.keeper_name) rows in
+       let source_counts = count_by (fun row -> row.source_label) rows in
+       let oldest = oldest_age_seconds rows in
+       if request.dry_run
+       then
+         respond
+           (`Assoc
+             [ "schema", `String result_schema
+             ; "ok", `Bool true
+             ; "dry_run", `Bool true
+             ; "would_cancel", `Int (List.length rows)
+             ; "keeper_counts", counts_json keeper_counts
+             ; "source_counts", counts_json source_counts
+             ; "oldest_age_seconds", Json_util.float_opt_to_json oldest
+             ; "rows", `List (List.map row_json rows)
+             ])
+       else
+         match request.confirm with
+         | Some token when String.equal token confirm_token ->
+           let operation_id = fresh_operation_id () in
+           let backup =
+             `Assoc
+               [ "schema", `String result_schema
+               ; "operation_id", `String operation_id
+               ; "reason", `String request.reason
+               ; "rows", `List (List.map row_json rows)
+               ]
+           in
+           let path = backup_path ~base_path:config.Workspace.base_path operation_id in
+           (match
+              Fs_compat.save_file_atomic_strict path (Yojson.Safe.to_string backup)
+            with
+            | Error detail ->
+              respond
+                ~status:`Internal_server_error
+                (`Assoc
+                  [ "schema", `String result_schema
+                  ; "ok", `Bool false
+                  ; "error", `String ("backup write failed: " ^ detail)
+                  ])
+            | Ok () ->
+              let results =
+                execute_rows
+                  ~cancel:(cancel_row ~config)
+                  ~operation_id
+                  ~reason:request.reason
+                  rows
+              in
+              let cancelled =
+                List.fold_left
+                  (fun acc result ->
+                     match Json_util.assoc_member_opt "ok" result with
+                     | Some (`Bool true) -> acc + 1
+                     | _ -> acc)
+                  0
+                  results
+              in
+              respond
+                (`Assoc
+                  [ "schema", `String result_schema
+                  ; "ok", `Bool true
+                  ; "dry_run", `Bool false
+                  ; "operation_id", `String operation_id
+                  ; "backup_path", `String path
+                  ; "would_cancel", `Int (List.length rows)
+                  ; "cancelled", `Int cancelled
+                  ; "failed", `Int (List.length rows - cancelled)
+                  ; "results", `List results
+                  ]))
+         | _ ->
            respond
-             ~status:`Internal_server_error
+             ~status:`Bad_request
              (`Assoc
                [ "schema", `String result_schema
                ; "ok", `Bool false
-               ; "error", `String ("backup write failed: " ^ detail)
-               ])
-         | Ok () ->
-           let results =
-             execute_rows
-               ~cancel:(cancel_row ~config)
-               ~operation_id
-               ~reason:request.reason
-               rows
-           in
-           let cancelled =
-             List.fold_left
-               (fun acc result ->
-                  match Json_util.assoc_member_opt "ok" result with
-                  | Some (`Bool true) -> acc + 1
-                  | _ -> acc)
-               0
-               results
-           in
-           respond
-             (`Assoc
-               [ "schema", `String result_schema
-               ; "ok", `Bool true
-               ; "dry_run", `Bool false
-               ; "operation_id", `String operation_id
-               ; "backup_path", `String path
-               ; "would_cancel", `Int (List.length rows)
-               ; "cancelled", `Int cancelled
-               ; "failed", `Int (List.length rows - cancelled)
-               ; "results", `List results
+               ; "error", `String "execution requires the confirm token"
                ]))
-      | _ ->
-        respond
-          ~status:`Bad_request
-          (`Assoc
-            [ "schema", `String result_schema
-            ; "ok", `Bool false
-            ; "error", `String "execution requires the confirm token"
-            ])
 ;;

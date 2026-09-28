@@ -316,7 +316,7 @@ footer, 도움말, 키 처리가 하나의 타입 있는 키 표를 본다. 이 
 | Harness | EVALUATOR → TIME → GATE | REASON | #39662 |
 | Planning | DUE → AGE → OPEN → JUDGE | TITLE | #39662 |
 | Schedule | DELIVERY → WAKE → STATUS | RECURRENCE | `feat/tui-table-change-schedule` |
-| Lanes 실행 목록 | STARTED → ELAPSED | SLOT | `feat/tui-lane-run-columns` |
+| Lanes 실행 목록 | STARTED → ELAPSED | SLOT | #39673 |
 
 Lanes 실행 목록에는 RUN ID 열이 없다. run id 는 상세 화면 머리에 통째로 나온다.
 손으로 센 폭 상수(최상위 156개, 그중 74개가 `render_schedule.ml`)는 이 방식으로 옮긴다.

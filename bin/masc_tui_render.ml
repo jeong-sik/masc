@@ -6343,8 +6343,7 @@ let render_lane_run_list (state : state) ~(lane : Standalone_lane.t) =
     | Standalone_lane.Workspace_curator
     | Standalone_lane.Browser_stagehand -> "ACTOR"
   in
-  (* The run id takes what the drawn columns leave; it used to run off the
-     header with no end while the row cut it at twelve. *)
+  (* The slot takes what the drawn columns leave. *)
   let run_layout =
     Render_schedule.lane_run_layout
       ~inner_width:(max 1 (framed_inner_width cols - 2))
@@ -6411,7 +6410,6 @@ let render_lane_run_list (state : state) ~(lane : Standalone_lane.t) =
                 ; lrow_slot =
                     Terminal_text.single_line_or ~default:Masc_tui_theme.Glyph.no_value
                       run.lrs_selected_slot
-                ; lrow_run_id = Terminal_text.single_line run.lrs_run_id
                 }
           in
           if index + scroll = state.lane_runs_cursor then
@@ -6995,11 +6993,15 @@ let render_lane_run_detail (state : state) ~run_id =
         Some (Inspection_lane detail)
     | Some _ | None -> None
   in
+  (* The id is what this heading names, so it is drawn whole; the connection
+     badge takes what the title and the id leave, and is what a narrow frame
+     cuts. Ids run to 54 cells (exact-board-attention- and 32 hex digits). *)
   let header =
-    Printf.sprintf "%s  %s  %s"
-      (screen_title (if measurement then " MASC Measurement" else " MASC Lane Run"))
-      (fit_width (Terminal_text.single_line run_id) 38)
-      (connection_badge state)
+    row_with_field ~cols
+      ~lead:
+        (screen_title (if measurement then " MASC Measurement" else " MASC Lane Run")
+        ^ "  " ^ Terminal_text.single_line run_id ^ "  ")
+      ~field:(connection_badge state) ~tail:""
   in
   box_top buf cols;
   box_line buf cols header;
@@ -7805,12 +7807,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
             | Some lane ->
                 let hops =
                   String.concat " \xe2\x86\x92 "
-                    (List.map
-                       (fun id ->
-                          match String.split_on_char '.' id with
-                          | [ _prov; m ] -> m
-                          | _ -> id)
-                       lane.rrl_runtime_ids)
+                    (List.map runtime_id_model_part lane.rrl_runtime_ids)
                 in
                 add_row "Candidate Chain:" hops;
                 (match lane.rrl_runtime_ids with

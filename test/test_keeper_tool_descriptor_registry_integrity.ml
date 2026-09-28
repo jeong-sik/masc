@@ -1211,8 +1211,8 @@ let test_masc_board_descriptions_disambiguate_post_id_flow () =
     ~sub:"masc_board_list or masc_board_search first"
     get_schema.description;
   check_contains
-    "masc_board_post_get schema advertises pagination"
-    ~sub:"Comments are paginated by default"
+    "masc_board_post_get schema advertises the newest-first default read"
+    ~sub:"The default read returns the post body and its newest comments"
     get_schema.description;
   check_contains
     "masc_board_post_get schema forbids empty args"
@@ -1223,12 +1223,12 @@ let test_masc_board_descriptions_disambiguate_post_id_flow () =
     ~sub:"Required exact board post ID"
     get_post_id_description;
   check_contains
-    "masc_board_post_get offset description mentions default"
-    ~sub:"default: 0"
+    "masc_board_post_get offset description says omitting reads the newest"
+    ~sub:"Omit it to read the newest comments"
     comment_offset_description;
   check_contains
     "masc_board_post_get limit description mentions bounds"
-    ~sub:"default: 50, max: 100"
+    ~sub:"default: 20, max: 100"
     comment_limit_description;
   Alcotest.(check (option int))
     "masc_board_post_get offset minimum"
@@ -1250,6 +1250,19 @@ let test_masc_board_descriptions_disambiguate_post_id_flow () =
     "masc_board_post_get tail maximum"
     (Some Board_types.Limits.max_comment_page_limit)
     (schema_property_int get_schema.input_schema "comment_tail" "maximum");
+  (* #39448: comment_offset and comment_limit are mutually exclusive with
+     comment_tail and after_comment_id, so a client that filled a declared
+     [default] would send a value that conflicts with the argument the caller
+     chose. The server applies the default itself; the schema must not invite
+     the client to send one. *)
+  Alcotest.(check (option int))
+    "masc_board_post_get offset has no machine-readable default"
+    None
+    (schema_property_int get_schema.input_schema "comment_offset" "default");
+  Alcotest.(check (option int))
+    "masc_board_post_get limit has no machine-readable default"
+    None
+    (schema_property_int get_schema.input_schema "comment_limit" "default");
   check_contains
     "masc_board_post_get schema names the two ways to skip read comments"
     ~sub:"pass after_comment_id (the newest one you read) or comment_tail (the newest N)"

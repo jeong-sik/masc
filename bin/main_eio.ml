@@ -1844,7 +1844,7 @@ let runtime_verify_cmd_exit base_path runtime_id timeout_s =
 let runtime_verify_cmd =
   let runtime_id = Arg.(required & pos 0 (some string) None & info [] ~docv:"RUNTIME_ID") in
   let timeout = Arg.(value & opt float runtime_verification_timeout_s & info ["timeout"] ~docv:"SECONDS"
-    ~doc:"Deadline for this explicit readiness measurement, including client admission and model/tool roundtrip.") in
+    ~doc:"Deadline for cancellable client admission and model/tool exchange; blocking Muse account preparation can delay it.") in
   Cmd.v (Cmd.info "runtime-verify" ~doc:"Verify the selected model response and a harmless tool-result roundtrip.")
     Term.(const runtime_verify_cmd_exit $ base_path $ runtime_id $ timeout)
 
@@ -3632,7 +3632,7 @@ let runtime_muse_models_cmd =
     ~docv:"DIRECTORY" ~doc:"Explicit Muse account HOME; never inherited from the caller.") in
   let timeout = Arg.(value & opt float runtime_probe_subscription_timeout_s
     & info ["timeout-s"] ~docv:"SECONDS"
-      ~doc:"Finite positive deadline for the whole metadata operation, including protocol notifications.") in
+      ~doc:"Finite positive deadline for the metadata exchange, including protocol notifications; blocking account preparation can delay it.") in
   let run cli_path account_home timeout_s =
     if not (Float.is_finite timeout_s) || timeout_s <= 0. then (
       prerr_endline "Muse discovery timeout must be finite and positive.";

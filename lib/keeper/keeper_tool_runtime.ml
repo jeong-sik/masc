@@ -177,6 +177,7 @@ let handle_shell_ir ctx ~(dispatch : Keeper_shell_tool_command.dispatch) descrip
            (Keeper_shell_tool_command.rewrite
               ~lookup:descriptor_for_internal
               ~dispatch)
+         ~result_projection:(result_projection_for ctx descriptor)
          ~args
          ())
   | Tool_search_files ->

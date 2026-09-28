@@ -1427,20 +1427,26 @@ let connection_badge (state : state) =
   | Masc_tui_types.Workspace_identity_unread
   | Masc_tui_types.Workspace_identity_match -> connection
 
-(* The two screens that show one record by its id: a lane run, and a
-   measurement artifact named by its sha256. *)
+(* The screens that show one record by its id: a lane run, a measurement
+   artifact named by its sha256, and a Fusion run. *)
 let lane_run_detail_title = " MASC Lane Run"
 let measurement_detail_title = " MASC Measurement"
+let fusion_detail_title = " MASC Fusion"
 
 (* A heading that names one record: the screen's title, the record's id, and
    the connection badge. The badge is the part that has to survive (see
-   [connection_badge]), so it is drawn whole and the id takes what the title
-   and the badge leave. An id that fits is drawn whole. One that does not is
-   folded in the middle: the run ids of one lane share their opening and
-   differ in their hex tail (exact-board-attention- and 32 hex digits, 54
-   cells; a sha256 is 64), so the tail is what tells two apart. A frame with
-   no room left after the title and the badge leaves the id out, and one too
-   narrow for those two cuts the badge. *)
+   [connection_badge]), so it is never shortened here and the id takes what
+   the title and the badge leave.
+   - An id that fits is drawn whole.
+   - One that does not is folded in the middle. The run ids of one lane share
+     their opening and differ in their hex tail (exact-board-attention- and 32
+     hex digits, 54 cells; a sha256 is 64; a Fusion run kmsg- and 32, 37), so
+     the tail is what tells two apart.
+   - With one cell left only the cut mark says an id was there; with none the
+     id is left out.
+   When the title and the badge alone are wider than the frame, the frame cuts
+   the row as it draws it: the badge keeps its start, which is the connection
+   reading, and loses its end. *)
 let detail_heading ~cols ~title ~id ~badge =
   let cells text =
     Message_layout.display_width (Masc_tui_theme.strip_sgr text)

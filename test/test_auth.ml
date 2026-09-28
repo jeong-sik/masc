@@ -663,7 +663,7 @@ let test_load_credential_exact_wins_over_fallback () =
   | Some cred when cred.agent_name = "lambda-fair-tapir" && cred.role = Masc_domain.Admin -> ()
   | Some cred ->
       fail (Printf.sprintf "unexpected resolution: %s/%s" cred.agent_name
-              (match cred.role with Worker -> "Worker" | Admin -> "Admin"))
+              (Masc_domain.agent_role_to_string cred.role))
   | None -> fail "exact match should resolve"
 
 let test_extract_agent_type_prefix_keeper_aliases () =

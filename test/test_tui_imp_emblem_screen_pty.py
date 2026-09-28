@@ -89,6 +89,8 @@ def startup_splash(binary: str) -> None:
             assert not imp_rows(output), "the imp stayed after the Overview loaded"
             assert SPLASH_CAPTION not in h.screen_text(bytes(output)), \
                 "the splash caption stayed after the Overview loaded"
+            # Quit is armed by one q and confirmed by the harness's second.
+            os.write(fd, b"q")
         finally:
             gate.release.set()
 

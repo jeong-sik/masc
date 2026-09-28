@@ -2,6 +2,10 @@
     executable supplied by the composition root, never an HTTP input. Native
     stage validation runs in a child, without publishing its catalog globally. *)
 type revision
+val usage_limit : Runtime_verification.failure -> bool
+(** A spent quota or a rate limit: the provider answered for the account and
+    declined for its usage. Setup publishes such a runtime unmeasured and
+    [masc setup] accepts it; every other failure refuses both. *)
 type error = Invalid_selection | Invalid_configuration | Changed_configuration
   | Configuration_unavailable
   | Child_not_started of Process_eio.spawn_refusal
@@ -19,10 +23,10 @@ type error = Invalid_selection | Invalid_configuration | Changed_configuration
       (** The verification child produced no report this module can read, or
           a verified report with a failing exit. *)
   | Write_failed | Rollback_failed | Lock_unavailable
-type usage_limited = { runtime_id : string; code : string; message : string; detail : string option }
+type usage_limited = { runtime_id : string; code : string }
 (** A runtime whose provider declined the verification for the account's
     usage: a spent quota or a rate limit. It is published without a
-    response and tool measurement; the fields are the report's failure. *)
+    response and tool measurement; [code] is the report's failure code. *)
 type readiness = Not_probed | Verified | Usage_limited of usage_limited * usage_limited list
 (** [Usage_limited] lists the selected runtimes that were published
     unmeasured; every other selected runtime was verified. *)

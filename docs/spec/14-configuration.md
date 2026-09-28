@@ -315,7 +315,8 @@ the current default and its fallbacks. A runtime whose provider declines the che
 for the account's usage (`quota_exhausted` or `rate_limited`) is still published:
 the save receipt reports `readiness: "usage_limited"` and lists those runtimes
 under `unverified` with their code. Any other verification failure refuses the
-save and publishes nothing. Antigravity reauthentication publishes a new
+save and publishes nothing. `masc setup` applies the same rule when it checks
+imp's runtime: a usage limit is reported and the step succeeds. Antigravity reauthentication publishes a new
 reference, preserving the previous configured reference until an explicit save.
 
 Cancellation and connection loss preserve already-written credentials and the

@@ -1,6 +1,9 @@
 (* TUI settings read from the [tui] table of runtime.toml. See the .ml. *)
 
+type opening = Overview | Last of Keeper_id.Keeper_name.t option | Keeper of Keeper_id.Keeper_name.t
+
 type t = private {
+  opening : (opening, string) result;
   theme : string option;
   board_sort : string option;
   lift_colours : bool option;
@@ -11,11 +14,19 @@ type t = private {
   user_input_priority_next : bool option;
 }
 
+val opening_keeper_of_doc :
+  Keeper_toml_loader.toml_doc -> (Keeper_id.Keeper_name.t option, string) result
+val opening_of_doc : Keeper_toml_loader.toml_doc -> (opening, string) result
+
+val set_opening_keeper :
+  base_path:string -> Keeper_id.Keeper_name.t -> (unit, string) result
+(** Remember the last chat target under the runtime.toml config write lock. *)
+
 val load : base_path:string -> t
 (** Resolve and parse runtime.toml once, then extract an immutable snapshot of
     all TUI settings. A later call reads current disk state; no process cache.
-    Missing, unreadable or unparseable files leave every field [None], retaining
-    the caller's existing default policy. Explicit [false] stays [Some false]. *)
+    Missing, unreadable or unparseable files leave optional settings [None]
+    and [opening] at [Ok Overview]. Explicit [false] stays [Some false]. *)
 
 (* [tui].theme, given an already-parsed runtime.toml document. [None] when the
    key (or the [tui] table) is absent. Pure, so the caller's file read stays

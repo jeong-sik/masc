@@ -131,8 +131,9 @@ let keeper_roster_marquee_target (state : state) ~cols =
 
 let acting_pane_suppressed (state : state) =
   let modal =
-    Option.is_some state.account_login || Option.is_some state.lane_addons || state.palette_open || state.context_inspector_open || state.keeper_deletions_open || state.help_open
-    || state.agenda_open || state.answering_open || state.memory_fact_detail_open
+    Option.is_some state.account_login || Option.is_some state.lane_addons || state.palette_open
+    || Masc_tui_types.modal_owns_keys state
+    || state.answering_open || state.memory_fact_detail_open
   in
   modal
   || Masc_tui_types.on_activity_screen state.view
@@ -548,8 +549,21 @@ let overview_attention (state : state) =
    block. *)
 let overview_providers_section (state : state) ~cols =
   Overview_providers.section ~providers:state.overview_providers
-    ~runtimes:state.overview_quota ~now:(Unix.gettimeofday ())
+    ~runtimes:state.overview_quota ~account_emails:state.overview_account_emails
+    ~now:(Unix.gettimeofday ())
     ~width:(framed_inner_width cols)
+
+(* The Overview's title row: the name, the workspace, the clock and the
+   connection badge. The startup splash draws the same row, so the two
+   cannot disagree about what the screen is or whether it is connected. *)
+let overview_header (state : state) =
+  let now = Unix.localtime (Unix.gettimeofday ()) in
+  let timestamp = Printf.sprintf "%02d:%02d:%02d"
+    now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
+  Printf.sprintf "%s  %s[%s]%s  %s  %s"
+    (screen_title " MASC Overview")
+    (Masc_tui_theme.tone Masc_tui_theme.Accent) (Terminal_text.single_line state.workspace) Ansi.reset timestamp
+    (connection_badge state)
 
 let overview_intro_lines (state : state) =
   match state.overview, overview_team state, state.overview_error with
@@ -646,14 +660,7 @@ let render_overview (state : state) =
      lays out fits above it. *)
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
-
-  let now = Unix.localtime (Unix.gettimeofday ()) in
-  let timestamp = Printf.sprintf "%02d:%02d:%02d"
-    now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
-  let header = Printf.sprintf "%s  %s[%s]%s  %s  %s"
-    (screen_title " MASC Overview")
-    (Masc_tui_theme.tone Masc_tui_theme.Accent) (Terminal_text.single_line state.workspace) Ansi.reset timestamp
-    (connection_badge state) in
+  let header = overview_header state in
 
   box_top buf cols;
   box_line buf cols header;
@@ -4355,8 +4362,8 @@ let render_schedule_list (state : state) =
                  max widest
                    (Message_layout.display_width
                       (Terminal_text.single_line (schedule_row_subject row))))
-               16 snapshot.scs_rows
-             |> min 40
+               Render_schedule.schedule_minimum_target_width snapshot.scs_rows
+             |> min Render_schedule.schedule_maximum_target_width
            in
            let wake_width = schedule_wake_word_cells in
            (* Measured, like the target beside it. The column was a literal
@@ -4373,15 +4380,13 @@ let render_schedule_list (state : state) =
                     Terminal_text.single_line (schedule_delivery_word row))
                   snapshot.scs_rows)
            in
-           let recurrence_width =
-             Render_schedule.schedule_recurrence_width
+           let layout =
+             Render_schedule.schedule_layout
                ~inner_width:(max 1 (framed_inner_width cols - 2))
                ~target_width:subject_width ~wake_width ~delivery_width
            in
            c.push_styled ~style:(Theme.recede ())
-             ("  "
-             ^ Render_schedule.schedule_header_row ~target_width:subject_width
-                 ~wake_width ~delivery_width ~recurrence_width);
+             ("  " ^ Render_schedule.schedule_header_row ~layout);
            c.push_divider ();
            (* The column names and the rule under them, the two rows every
               other list on this screen already spends to say what it draws. *)
@@ -4439,8 +4444,7 @@ let render_schedule_list (state : state) =
                let line =
                  Render_schedule.schedule_row ~status_style:status_color
                    ~wake_style:(schedule_status_color last_wake)
-                   ~recurrence_style:Ansi.dim ~target_width:subject_width
-                   ~wake_width ~delivery_width ~recurrence_width
+                   ~recurrence_style:Ansi.dim ~layout
                    { Render_schedule.srow_status =
                        bracketed ~max_cells:10 row.sch_status
                    ; srow_due = due
@@ -6346,8 +6350,7 @@ let render_lane_run_list (state : state) ~(lane : Standalone_lane.t) =
     | Standalone_lane.Workspace_curator
     | Standalone_lane.Browser_stagehand -> "ACTOR"
   in
-  (* The run id takes what the drawn columns leave; it used to run off the
-     header with no end while the row cut it at twelve. *)
+  (* The slot takes what the drawn columns leave. *)
   let run_layout =
     Render_schedule.lane_run_layout
       ~inner_width:(max 1 (framed_inner_width cols - 2))
@@ -6414,7 +6417,6 @@ let render_lane_run_list (state : state) ~(lane : Standalone_lane.t) =
                 ; lrow_slot =
                     Terminal_text.single_line_or ~default:Masc_tui_theme.Glyph.no_value
                       run.lrs_selected_slot
-                ; lrow_run_id = Terminal_text.single_line run.lrs_run_id
                 }
           in
           if index + scroll = state.lane_runs_cursor then
@@ -6998,11 +7000,13 @@ let render_lane_run_detail (state : state) ~run_id =
         Some (Inspection_lane detail)
     | Some _ | None -> None
   in
+  (* The badge is drawn whole; the id is whole when it fits and folded in the
+     middle when it does not ([detail_heading]). *)
   let header =
-    Printf.sprintf "%s  %s  %s"
-      (screen_title (if measurement then " MASC Measurement" else " MASC Lane Run"))
-      (fit_width (Terminal_text.single_line run_id) 38)
-      (connection_badge state)
+    detail_heading ~cols
+      ~title:
+        (if measurement then measurement_detail_title else lane_run_detail_title)
+      ~id:run_id ~badge:(connection_badge state)
   in
   box_top buf cols;
   box_line buf cols header;
@@ -7808,12 +7812,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
             | Some lane ->
                 let hops =
                   String.concat " \xe2\x86\x92 "
-                    (List.map
-                       (fun id ->
-                          match String.split_on_char '.' id with
-                          | [ _prov; m ] -> m
-                          | _ -> id)
-                       lane.rrl_runtime_ids)
+                    (List.map runtime_id_model_part lane.rrl_runtime_ids)
                 in
                 add_row "Candidate Chain:" hops;
                 (match lane.rrl_runtime_ids with
@@ -16215,8 +16214,6 @@ let render_config (state : state) =
          into it. It also named PgUp/PgDn, which the table did not have, so
          the two had drifted in both directions. *)
       (match state.runtime_account_form with
-       | None when Option.is_some state.runtime_account_removal ->
-         Masc_tui_keys.footer_hints_runtime_account_removal ()
        | Some form when Masc_tui_runtime_account_form.is_saved form ->
          Masc_tui_keys.footer_hints_runtime_account_saved ()
        | Some _ -> Masc_tui_keys.footer_hints_runtime_account_form ()
@@ -16299,11 +16296,6 @@ let render_config (state : state) =
           if Masc_tui_runtime_account_form.is_saved form then
             c.push ("  " ^ Masc_tui_keys.footer_hints_runtime_account_saved ())
       | None ->
-      match state.runtime_account_removal with
-      | Some screen ->
-          List.iter c.push
-            (Masc_tui_runtime_account_removal.rows ~width:(framed_inner_width cols) screen)
-      | None ->
       match state.runtime_config_view_error, state.runtime_config_view with
       | Some detail, _ ->
           c.push ((Theme.bad ()) ^ "  " ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset)
@@ -16331,6 +16323,62 @@ let render_config (state : state) =
             | None -> ()
           done)
 
+(* The startup splash: the Overview's own frame and header -- title,
+   workspace, clock, connection badge -- with the turning imp where its
+   sections will be once the first overview read answers. Keys are the
+   Overview's; the first one ends the splash and still does its job. *)
+let render_overview_startup (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  surface_chrome ~overflow:Fits state ~terminal_rows ~cols ~surface_key:"overview"
+    ~title:(overview_header state)
+    ~hints:(Masc_tui_keys.footer_hints_overview ~task_focus:false)
+    ~body:(fun ~budget c ->
+      Masc_tui_emblem_screen.body ~cols:(framed_inner_width cols) ~rows:budget
+        ~caption:
+          ([ Masc_tui_theme.tone Masc_tui_theme.Accent
+             ^ "MASC \xc2\xb7 keepers on watch" ^ Ansi.reset
+           ]
+           (* The Overview's own word for this state -- the briefing is not
+              read yet -- stays on screen under the imp. *)
+           @ List.filter_map
+               (fun line ->
+                 match String.trim line with "" -> None | text -> Some text)
+               (overview_intro_lines state)
+           @ [ Ansi.dim
+               ^ Masc_tui_types.connection_status_label state.connection_status
+               ^ Ansi.reset
+             ])
+        ~elapsed:(Masc_tui_types.motion_elapsed_seconds state.emblem_frame)
+      |> List.iter c.push)
+
+(* /about: the turning imp over the surface, with what the TUI is running
+   under -- its colour scheme and how many Keepers the workspace holds. *)
+let render_about (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let theme =
+    Terminal_text.single_line_or ~default:"default" state.theme_choice
+  in
+  let keepers =
+    match state.keepers_error, state.local_workspace with
+    | Some _, _ -> Masc_tui_emblem_screen.Keepers_unreadable
+    | None, Local_workspace_unread -> Masc_tui_emblem_screen.Keepers_unread
+    | None, Local_workspace_read ->
+        Masc_tui_emblem_screen.Keepers_read (List.length state.keepers)
+  in
+  surface_chrome ~overflow:Fits ~frame:Chrome_overlay state ~terminal_rows ~cols
+    ~surface_key:"about" ~title:(screen_title " MASC") ~hints:"Esc:close"
+    ~body:(fun ~budget c ->
+      Masc_tui_emblem_screen.body ~cols:(framed_inner_width cols) ~rows:budget
+        ~caption:
+          [ Masc_tui_theme.tone Masc_tui_theme.Accent
+            ^ "MASC \xc2\xb7 Multi-Agent Shared Context" ^ Ansi.reset
+          ; Ansi.dim
+            ^ Masc_tui_emblem_screen.about_facts ~theme keepers
+            ^ Ansi.reset
+          ]
+        ~elapsed:(Masc_tui_types.motion_elapsed_seconds state.emblem_frame)
+      |> List.iter c.push)
+
 let render_surface (state : state) =
   match state.view with
   | Overview ->
@@ -16345,7 +16393,10 @@ let render_surface (state : state) =
            with
            | Some task -> render_task_detail state task
            | None -> render_overview state )
-       | None -> render_overview state)
+       | None ->
+           if Masc_tui_types.startup_emblem_visible state then
+             render_overview_startup state
+           else render_overview state)
   | Keepers Keeper_list ->
       if state.repository_changes_open then render_repository_changes state
       else render_keeper_list state
@@ -17227,6 +17278,8 @@ type drawn = Surface_drawn | Overlay_drawn
 let render (state : state) =
   (* Marks number the targets of this frame alone. *)
   Masc_tui_hit.reset press_marks;
+  (* And the imp is on this frame only if this frame draws it. *)
+  Masc_tui_emblem_screen.begin_frame ();
   let frame, clamped, approval, drawn =
   (* Decide the pane before any surface measures the terminal. Modals draw
      over the whole terminal and the Activity screen, both its tabs,
@@ -17248,7 +17301,10 @@ let render (state : state) =
   | Some view ->
     let frame, clamped = render_lane_addons state view in
     (frame, clamped, None, Overlay_drawn)
-  | None -> if state.palette_open then
+  | None -> if state.about_open then
+    let frame, clamped = render_about state in
+    (frame, clamped, None, Overlay_drawn)
+  else if state.palette_open then
     let frame, clamped = render_palette state in
     (frame, clamped, None, Overlay_drawn)
   else if state.context_inspector_open then

@@ -177,12 +177,26 @@ let setup_exact_body_timeout_s = 1200.0
    short hash of the answers. The hash keeps one id per answer set (same
    answers, same id; another account home, another id), and it stays on the
    model key because every provider shares the [models] table. A model
-   name keeps the characters a model id admits; any other becomes '-'. *)
+   name keeps the characters a model id admits; any other character (a UTF-8
+   sequence, not a byte) becomes one '-'. *)
 let answers_hash_length = 8
+let model_id_character decoded =
+  let c = Uchar.utf_decode_uchar decoded in
+  if Uchar.is_char c then
+    match Uchar.to_char c with
+    | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '.' | '_' | '-' as kept -> kept
+    | _ -> '-'
+  else '-'
 let model_id_text model =
-  String.map
-    (function 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '.' | '_' | '-' as c -> c | _ -> '-')
-    model
+  let text = Buffer.create (String.length model) in
+  let rec copy index =
+    if index < String.length model then begin
+      let decoded = String.get_utf_8_uchar model index in
+      Buffer.add_char text (model_id_character decoded);
+      copy (index + Uchar.utf_decode_length decoded)
+    end in
+  copy 0;
+  Buffer.contents text
 let render spec =
   let name = choice_name spec.choice in
   let hash =

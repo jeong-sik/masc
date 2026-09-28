@@ -10,8 +10,9 @@ Python suite runs. This answers those two shapes.
 
 Usage: referencing_suites.py < changed-paths
 
-Prints "module <suite>" and "file <suite>" lines, sorted, one per suite a
-rule names; a suite both rules name is printed under each.
+Prints "module <suite>", "file <suite>", "exactpath <suite>" and
+"stanza <suite>" lines, sorted, one per suite a rule names; a suite more than
+one rule names is printed under each.
 
 module: for each changed .ml or .mli under bin/, lib/ or packages/*/lib/,
 the .ml suites whose code refers to that module -- a qualified path (Foo.x),
@@ -40,6 +41,16 @@ is the claim the file rule waits for, whatever the basename, and a single
 quote is as much a literal as a double one. A path that is merely a prefix
 of a longer name -- runtime.toml inside runtime.toml.bak -- is not the file.
 
+stanza: for each changed .ml or .mli under bin/, the .ml suites whose dune
+stanza runs that executable -- a `(deps ../bin/X.exe)` or an
+`(action (setenv ... %{dep:../bin/X.exe} ...))` in the stanza that declares
+the suite. A suite can receive a bin executable without naming its module
+anywhere in its own source, so the module rule above cannot reach it; the
+stanza is the only reference. #39572 changed
+bin/deployment_preflight_helper.ml and its run was 5/5 green while
+test_deployment_store_directories still expected the removed bridge
+messages, because the edited-tests selector never picked the suite.
+
 Suite paths are relative to the repository root. Exits 1 on any argument
 or when the tracked file list cannot be read.
 """
@@ -52,6 +63,8 @@ import re
 import subprocess
 import sys
 from pathlib import Path, PurePosixPath
+
+from dune_suite_scope import expand_includes
 
 SUITE = re.compile(
     r"^(test|packages/[^/]+/test)/([a-z0-9_]+/)?test_[a-z0-9_]+\.(ml|py)$"
@@ -71,6 +84,12 @@ SPECIAL = re.compile(r"\(\*|\*\)|\"|\{[a-z_]*\||'")
 # A file name inside a longer name is not that file: install.sh is not
 # masc-install.sh.
 NAME_CHAR = r"A-Za-z0-9_.\-"
+# A bin executable a suite's stanza runs. `%{dep:../bin/X.exe}` and
+# `%{exe:../bin/X.exe}` both carry the path, and a bare `../bin/X.exe` in a
+# `(deps ...)` list is the same reference. `%{exe:X}` names an executable in
+# the suite's own directory.
+BIN_EXE = re.compile(r"\.\./bin/([A-Za-z0-9_]+)\.exe")
+EXE_VAR = re.compile(r"%\{exe:([A-Za-z0-9_]+)\}")
 
 
 def skip_string(text: str, start: int) -> int:
@@ -240,6 +259,50 @@ def exactpath_suites(root: Path, tracked: list[str], changed: list[str]) -> set[
     }
 
 
+def stanza_suites(root: Path, tracked: list[str], changed: list[str]) -> set[str]:
+    """Suites whose dune stanza runs a changed bin executable.
+
+    A suite can receive a bin executable through `(deps ../bin/X.exe)` and an
+    `(action (setenv ... %{dep:../bin/X.exe} ...))` without naming module X
+    anywhere in its source, so the module rule above cannot reach it: the
+    stanza is the reference. #39572 changed
+    bin/deployment_preflight_helper.ml and its run was 5/5 green while
+    test_deployment_store_directories still expected the removed bridge
+    messages -- the edited-tests selector never picked the suite, because the
+    suite names the binary only in its stanza.
+    """
+    stems = {
+        PurePosixPath(path).name.rsplit(".", 1)[0]
+        for path in changed
+        if re.match(r"^bin/.*\.mli?$", path)
+    }
+    if not stems:
+        return set()
+    dune = root / "test" / "dune"
+    if not dune.is_file():
+        return set()
+    by_stem = {
+        PurePosixPath(suite).name[:-3]: suite
+        for suite in tracked
+        if SUITE.match(suite) and suite.endswith(".ml")
+    }
+    suites: set[str] = set()
+    for form in expand_includes(dune):
+        if not re.match(r"\(\s*tests?\b", form):
+            continue
+        field = re.search(r"\(\s*names?\s+([^)]*)\)", form)
+        if not field:
+            continue
+        referenced = set(BIN_EXE.findall(form)) | set(EXE_VAR.findall(form))
+        if not referenced & stems:
+            continue
+        for name in field.group(1).split():
+            suite = by_stem.get(name)
+            if suite is not None:
+                suites.add(suite)
+    return suites
+
+
 def main(argv: list[str]) -> int:
     if len(argv) != 1:
         print("usage: referencing_suites.py < changed-paths", file=sys.stderr)
@@ -262,6 +325,8 @@ def main(argv: list[str]) -> int:
         print(f"file {suite}")
     for suite in sorted(exactpath_suites(root, tracked, changed)):
         print(f"exactpath {suite}")
+    for suite in sorted(stanza_suites(root, tracked, changed)):
+        print(f"stanza {suite}")
     return 0
 
 

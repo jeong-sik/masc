@@ -139,7 +139,11 @@ let world_state_briefing_budget_bytes candidates =
    | Lane_of_route route -> Runtime.smallest_max_prompt_bytes_of_route route
    | Deferred_candidates ids -> Runtime.smallest_max_prompt_bytes_of_runtime_ids ids)
   |> Option.map (fun cap ->
-    cap * Keeper_config.keeper_context_briefing_share_percent () / 100)
+    (* Divided before multiplying: a derived Muse ceiling can be as large as
+       [max_int] ([Runtime_muse_prompt_capacity]), and [cap * share]
+       would overflow. *)
+    let share = Keeper_config.keeper_context_briefing_share_percent () in
+    (cap / 100 * share) + (cap mod 100 * share / 100))
 
 let runtime_budget_logged : unit StringMap.t Atomic.t =
   Atomic.make StringMap.empty

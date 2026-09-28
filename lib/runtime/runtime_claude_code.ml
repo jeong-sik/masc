@@ -70,6 +70,55 @@ let effective_account_home = function
          (Env_config_core.raw_value_opt "HOME"))
 ;;
 
+(* Claude Code 2.1.283 reads [.config.json] in its config directory while that
+   legacy file exists, and otherwise
+   [join(CLAUDE_CONFIG_DIR || homedir(), ".claude.json")]: without
+   CLAUDE_CONFIG_DIR the file sits in HOME itself, not in the HOME/.claude
+   directory above. *)
+let account_file account_home =
+  let legacy =
+    Option.map
+      (fun directory -> Filename.concat directory ".config.json")
+      (effective_account_home account_home)
+  in
+  match legacy with
+  | Some path when Sys.file_exists path -> Some path
+  | Some _ | None ->
+    let directory =
+      match account_home, Env_config_core.raw_value_opt "CLAUDE_CONFIG_DIR" with
+      | Some _, _ -> effective_account_home account_home
+      | None, Some path when path <> "" -> effective_account_home None
+      | None, (Some _ | None) ->
+        (match Env_config_core.raw_value_opt "HOME" with
+         | Some home when home <> "" -> Some home
+         | Some _ | None -> None)
+    in
+    Option.map (fun directory -> Filename.concat directory ".claude.json") directory
+;;
+
+(* Claude Code uses a cloud provider selection, ANTHROPIC_AUTH_TOKEN,
+   ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN before the /login account, and
+   a non-interactive session always uses ANTHROPIC_API_KEY when it is set
+   (code.claude.com/docs/en/iam, "Authentication precedence", read
+   2026-09-28). [client_environment] passes all of them to a child on the
+   inherited home and none to a selected home. *)
+let credentials_over_login =
+  [ "CLAUDE_CODE_USE_BEDROCK"; "CLAUDE_CODE_USE_VERTEX"; "CLAUDE_CODE_USE_FOUNDRY"
+  ; "CLAUDE_CODE_USE_MANTLE"; "ANTHROPIC_AUTH_TOKEN"; "ANTHROPIC_API_KEY"
+  ; "CLAUDE_CODE_OAUTH_TOKEN"
+  ]
+
+let runs_on_environment_credential = function
+  | Some _ -> false
+  | None ->
+    List.exists
+      (fun name ->
+        match Env_config_core.raw_value_opt name with
+        | Some value -> value <> ""
+        | None -> false)
+      credentials_over_login
+;;
+
 let timeout_s_for_phase config ~turn_admitted =
   if turn_admitted
   then config.timeout_s

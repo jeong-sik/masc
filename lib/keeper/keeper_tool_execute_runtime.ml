@@ -171,7 +171,7 @@ let redact_execute_output redaction ~stdout ~stderr =
    stdout back at a narrower global bound would spill output the lane had
    declared (maxResultSizeChars) it would take inline. *)
 let composable_output_fields ~inline_ceiling_bytes ~base_path ~stdout ~stderr ~output =
-  if String.length output <= Tool_bridge.default_externalize_threshold_bytes
+  if String.length output <= inline_ceiling_bytes
   then Ok [ "output", `String output ]
   else
     try

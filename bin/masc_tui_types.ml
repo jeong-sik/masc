@@ -10312,6 +10312,13 @@ let runtime_pick_badge_cells =
     (Masc_tui_message_layout.display_width runtime_pick_lane_badge)
     (Masc_tui_message_layout.display_width runtime_pick_model_badge)
 
+(* A runtime id is [provider.model]. Only the first dot separates them: a
+   model id may hold more ([muse_6dc7c062.muse-spark-1.3_6dc7c062]). *)
+let runtime_id_model_part id =
+  match String.index_opt id '.' with
+  | Some at -> String.sub id (at + 1) (String.length id - at - 1)
+  | None -> id
+
 (* The words a picker row draws before its facts: the kind badge, the target
    and the route. The renderer draws these and the typed filter matches their
    join, so the operator filters by what they read. The facts are left out:
@@ -10330,12 +10337,7 @@ let runtime_pick_columns item =
          dropped: the target column already says it is a lane. *)
       let chain =
         String.concat " \xe2\x86\x92 "
-          (List.map
-             (fun id ->
-                match String.split_on_char '.' id with
-                | [ _prov; model ] -> model
-                | _ -> id)
-             lane.Tui_decode.rrl_runtime_ids)
+          (List.map runtime_id_model_part lane.Tui_decode.rrl_runtime_ids)
       in
       { rpc_badge = runtime_pick_lane_badge;
         rpc_target = single_line lane.Tui_decode.rrl_id;

@@ -7808,12 +7808,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
             | Some lane ->
                 let hops =
                   String.concat " \xe2\x86\x92 "
-                    (List.map
-                       (fun id ->
-                          match String.split_on_char '.' id with
-                          | [ _prov; m ] -> m
-                          | _ -> id)
-                       lane.rrl_runtime_ids)
+                    (List.map runtime_id_model_part lane.rrl_runtime_ids)
                 in
                 add_row "Candidate Chain:" hops;
                 (match lane.rrl_runtime_ids with

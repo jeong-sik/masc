@@ -385,6 +385,38 @@ let bow_knot g x y =
   let bx, by = bow_centre g in
   circle x y bx by 0.025
 
+(* Head items sit on the wax top, under the flame and between the horns: the
+   flame rises from the middle above the wax top and the horns leave the top
+   corners, so the band across the middle is the free row. Both stay below
+   the flame's round body at the centre and inside the horns' bases at the
+   sides. *)
+let crown_centre g = (0.0, g.top +. 0.055)
+let crown_half_width = 0.15
+let crown_band_half_height = 0.026
+
+let crown_field g x y =
+  let cx, cy = crown_centre g in
+  let band = rounded_box x y cx cy crown_half_width crown_band_half_height 0.012 in
+  let point px = taper x y px (cy -. crown_band_half_height) px (cy -. crown_band_half_height -. 0.04) 0.026 0.004 in
+  Float.min band (Float.min (point (cx -. 0.10)) (Float.min (point cx) (point (cx +. 0.10))))
+
+(* A beanie fills the whole band: a round crown from just under the flame
+   down to just above the eyes, with a folded brim wider than the crown at
+   its foot. The crown's top is behind the flame at the centre and shows at
+   the sides; the brim sits low enough that the horns, which leave the wax
+   top and rise outward, are already above it. Sized from the face scale so
+   it clears the eyes on the narrowest candle and the horns on the widest. *)
+let beanie_field g x y =
+  let s = g.s in
+  let top_y = g.top -. (0.02 *. s) in
+  let bottom_y = g.fy -. (0.13 *. s) in
+  let h = Float.max 0.06 (bottom_y -. top_y) in
+  let half_w = 0.14 *. s in
+  let cy = (top_y +. bottom_y) /. 2.0 in
+  let dome = ellipse x y 0.0 cy half_w (h /. 2.0) 0.0 in
+  let brim = rounded_box x y 0.0 (bottom_y -. (0.16 *. h)) (0.62 *. g.w) (0.16 *. h) (0.012 *. s) in
+  Float.min dome brim
+
 (* A beard: strands hanging from the jaw, with a mustache above the mouth.
    Separate strokes, not one filled oval: a solid oval whose top edge sits on
    the mouth line covers the mouth and reads as a mask at the sizes the TUI
@@ -446,6 +478,8 @@ type paint =
   | Beard_hair
   | Scarf_cloth
   | Bow_ribbon
+  | Crown_metal
+  | Beanie_felt
   | Plaster_strip
   | Patch
   | Freckle
@@ -468,35 +502,37 @@ let paint_index = function
   | Beard_hair -> 14
   | Scarf_cloth -> 15
   | Bow_ribbon -> 16
-  | Plaster_strip -> 17
-  | Patch -> 18
-  | Freckle -> 19
+  | Crown_metal -> 17
+  | Beanie_felt -> 18
+  | Plaster_strip -> 19
+  | Patch -> 20
+  | Freckle -> 21
 
 (* Soft marks and highlights sit on a part without an ink line round them. *)
 let quiet = function
   | Glint | Blush | Freckle -> true
   | Outside | Wax | Wax_drip | Flame | Flame_core | Horn | Dish_metal _ | Eye | Mouth | Tooth | Frame | Lens
-  | Beard_hair | Scarf_cloth | Bow_ribbon | Plaster_strip | Patch ->
+  | Beard_hair | Scarf_cloth | Bow_ribbon | Crown_metal | Beanie_felt | Plaster_strip | Patch ->
       false
 
 (* Parts that give light keep their colour in the shade band. *)
 let emissive = function
   | Flame | Flame_core | Glint -> true
   | Outside | Wax | Wax_drip | Horn | Dish_metal _ | Eye | Blush | Mouth | Tooth | Frame | Lens | Beard_hair
-  | Scarf_cloth | Bow_ribbon | Plaster_strip | Patch | Freckle ->
+  | Scarf_cloth | Bow_ribbon | Crown_metal | Beanie_felt | Plaster_strip | Patch | Freckle ->
       false
 
 let outside = function
   | Outside -> true
   | Wax | Wax_drip | Flame | Flame_core | Horn | Dish_metal _ | Eye | Glint | Blush | Mouth | Tooth | Frame | Lens
-  | Beard_hair | Scarf_cloth | Bow_ribbon | Plaster_strip | Patch | Freckle ->
+  | Beard_hair | Scarf_cloth | Bow_ribbon | Crown_metal | Beanie_felt | Plaster_strip | Patch | Freckle ->
       false
 
 (* The flame and its core are one light; no line between them. *)
 let flame_part = function
   | Flame | Flame_core -> true
   | Outside | Wax | Wax_drip | Horn | Dish_metal _ | Eye | Glint | Blush | Mouth | Tooth | Frame | Lens | Beard_hair
-  | Scarf_cloth | Bow_ribbon | Plaster_strip | Patch | Freckle ->
+  | Scarf_cloth | Bow_ribbon | Crown_metal | Beanie_felt | Plaster_strip | Patch | Freckle ->
       false
 
 let eye_offset = 0.19
@@ -619,7 +655,20 @@ let face_overlay (e : equipment) g x y =
 let neck_field (e : equipment) g x y = match e.neck with Scarf -> scarf_field g x y | Bare_neck -> Float.infinity
 
 let head_field (e : equipment) g x y =
-  match e.head with Bow -> Float.min (bow_field g x y) (bow_knot g x y) | Bare_head -> Float.infinity
+  match e.head with
+  | Bow -> Float.min (bow_field g x y) (bow_knot g x y)
+  | Crown -> crown_field g x y
+  | Beanie -> beanie_field g x y
+  | Bare_head -> Float.infinity
+
+(* The paint for whatever is worn on the head. [Bare_head] never reaches here:
+   its field is infinite, so no sample is inside it. *)
+let head_paint (e : equipment) =
+  match e.head with
+  | Bow -> Bow_ribbon
+  | Crown -> Crown_metal
+  | Beanie -> Beanie_felt
+  | Bare_head -> Outside
 
 let face_field (e : equipment) g x y =
   match e.face with
@@ -690,7 +739,7 @@ let sample (b : body) (e : equipment) ~dish g x y =
     let paint =
       if silhouette >= 0.0 then Outside
       else if flame_d < 0.0 then if flame_core b g x y < 0.0 then Flame_core else Flame
-      else if head_d < 0.0 then Bow_ribbon
+      else if head_d < 0.0 then head_paint e
       else
         match face_overlay e g x y with
         | Some p -> p
@@ -789,6 +838,8 @@ let paint_colour (b : body) = function
   | Beard_hair -> rgb 150 112 84
   | Scarf_cloth -> rgb 214 64 84
   | Bow_ribbon -> rgb 236 110 150
+  | Crown_metal -> rgb 240 200 70
+  | Beanie_felt -> rgb 96 76 150
   | Plaster_strip -> rgb 246 220 180
   | Patch -> rgb 40 36 44
   | Freckle -> rgb 150 96 80
@@ -843,7 +894,7 @@ let render_with ~cull (b : body) (e : equipment) (p : pose) (n : size) =
         let x = x_of i and y = y_of j in
         if Float.hypot x (y -. view_centre_y) < backdrop_r then Some backdrop else None
     | Wax | Wax_drip | Flame | Flame_core | Horn | Dish_metal _ | Eye | Glint | Blush | Mouth | Tooth | Frame | Lens
-    | Beard_hair | Scarf_cloth | Bow_ribbon | Plaster_strip | Patch | Freckle ->
+    | Beard_hair | Scarf_cloth | Bow_ribbon | Crown_metal | Beanie_felt | Plaster_strip | Patch | Freckle ->
         let d = dist i j in
         if d > -.outline || boundary i j part then Some ink
         else

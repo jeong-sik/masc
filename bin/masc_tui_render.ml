@@ -445,7 +445,7 @@ let dashboard_first_use_lines (state : state) =
           "   1. New Keeper: masc keeper-create --edit --host %s --port %d"
           Masc_network_defaults.masc_http_loopback_peer state.port
       ; Printf.sprintf "   2. Open Keepers with %s, select it, and press Enter."
-          Masc_tui_keys.keepers_jump.key
+          Masc_tui_keys.keepers_jump.Masc_tui_keys.key
       ; ""
       ]
   | (Some _ | None), (Some _ | None) -> []

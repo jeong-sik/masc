@@ -191,6 +191,43 @@ let closed_post_rejection_message ~post_id (closed : post_close_state) =
   | None -> Printf.sprintf "Post %s is closed" post_id
 ;;
 
+(* task-1758/#39356 scope extension: a post holding Limits.comment_count_cap
+   live comments refuses the next one, with the same "open a successor post"
+   guidance a closed thread gives. The count is the live per-post comment
+   list with expired rows excluded — the same visibility the sweeper
+   enforces — so threads whose timed comments have aged out keep accepting
+   new ones. Runs under the store lock (the staging/commit write boundary
+   holds it); does not mutate anything. *)
+let comment_count_cap_error_unlocked store pid =
+  let cap = Limits.comment_count_cap in
+  if cap <= 0 then None
+  else
+    let now = Time_compat.now () in
+    let comment_keys =
+      match Hashtbl.find_opt store.comments_by_post (Post_id.to_string pid) with
+      | None -> []
+      | Some keys -> keys
+    in
+    let live =
+      List.fold_left
+        (fun n key ->
+           match Hashtbl.find_opt store.comments key with
+           | Some { expires_at; _ } when
+               Stdlib.Float.compare expires_at 0.0 > 0
+               && Stdlib.Float.compare expires_at now < 0 -> n
+           | Some _ -> n + 1
+           | None -> n)
+        0 comment_keys
+    in
+    if live >= cap
+    then
+      Some
+        (Printf.sprintf
+           "Post %s has reached the comment cap of %d; open a successor post"
+           (Post_id.to_string pid) cap)
+    else None
+;;
+
 let add_comment_with_audience
       store
       ~post_id
@@ -237,6 +274,9 @@ let add_comment_with_audience
              post can close while this append is in flight. *)
           Error (Validation_error (closed_post_rejection_message ~post_id closed))
         | Some post ->
+          (match comment_count_cap_error_unlocked store pid with
+           | Some msg -> Error (Validation_error msg)
+           | None ->
           (match
              validate_sub_board_post_policy_unlocked
                store
@@ -262,7 +302,7 @@ let add_comment_with_audience
                           *. Masc_time_constants.hour))
                ; votes_up = 0
                ; votes_down = 0
-               }))
+               })))
     in
     (match staged with
      | Error _ as e -> e
@@ -284,6 +324,9 @@ let add_comment_with_audience
                   (Validation_error
                      (closed_post_rejection_message ~post_id closed))
               | Some post ->
+                (match comment_count_cap_error_unlocked store pid with
+                 | Some msg -> Error (Validation_error msg)
+                 | None ->
                 (match
                    validate_sub_board_post_policy_unlocked
                      store
@@ -318,7 +361,7 @@ let add_comment_with_audience
                    mark_dirty_comment store comment_key;
                    invalidate_post_caches store;
                    invalidate_comment_caches store;
-                   Ok { comment; audience })))) with
+                   Ok { comment; audience }))))) with
         | Error _ as e -> e
         | Ok committed ->
           (match committed with

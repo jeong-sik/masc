@@ -7422,3 +7422,12 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_tool_results_pty)))
+
+(rule
+ (alias runtest-test_check_installed_dashboard)
+ (deps test_check_installed_dashboard.py ../scripts/check-installed-dashboard.py)
+ (action (run python3 %{dep:test_check_installed_dashboard.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_check_installed_dashboard)))

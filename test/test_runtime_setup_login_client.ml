@@ -115,7 +115,7 @@ let native_authentication_observation () = fixture (fun root env ->
    | Login.Authenticated -> ()
    | Login.Login_completed | Login.Credential_captured -> fail "native authentication lost");
   let claude = script "claude-authenticated"
-      ("[ \"$1\" = auth ]\n[ \"$2\" = status ]\n"
+      ("[ \"$#\" = 4 ]\n[ \"$1\" = --setting-sources= ]\n[ \"$2\" = auth ]\n[ \"$3\" = status ]\n[ \"$4\" = --json ]\n"
        ^ emit {|{"loggedIn":true,"authMethod":"claude.ai","subscriptionType":"team","apiProvider":"firstParty"}|}) in
   (match observe Login.Claude "claude-auth" claude |> ok with
    | Login.Authenticated -> ()

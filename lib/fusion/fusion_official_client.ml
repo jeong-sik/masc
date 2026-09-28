@@ -448,6 +448,9 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
         ~base_dir ~oauth_source:execution.oauth_source in
     let config = { config with Runtime_antigravity.cwd = native_cwd } in
     (match Runtime_antigravity.run_turn
+       ~on_stream_event:(function
+         | Runtime_antigravity.Usage_reported {usage; _} -> on_usage (antigravity_usage usage)
+         | _ -> ())
        ~home_dir:(Runtime_antigravity_home.home_dir home)
        ~mgr ~clock ~cwd:Eio.Path.(Eio.Stdenv.fs env / native_cwd) config ~prompt with
      | Ok (result : Runtime_antigravity.turn_result) -> succeeded { text = result.text; model = result.model; usage = antigravity_usage result.usage }

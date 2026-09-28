@@ -7,8 +7,8 @@
     requires an explicit confirm token and writes a backup of every row it is
     about to cancel before it touches the queue. Each row is cancelled through
     the same durable, fenced per-Keeper transition the single-row operator
-    boundary uses, with a deterministic operation id so a retried bulk request
-    is idempotent. *)
+    boundary uses. A retry re-plans from current state, so a row cancelled by
+    an earlier attempt is no longer in the plan and is not cancelled twice. *)
 
 module Http = Http_server_eio
 module Execute = Server_dashboard_http_keeper_event_queue_operator_execute

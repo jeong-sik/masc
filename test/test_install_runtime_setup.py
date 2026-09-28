@@ -1683,7 +1683,9 @@ class CompiledRuntimeSetup(unittest.TestCase):
                 elif choice == 'muse':
                     account = base / 'selected-muse-account'
                     account.mkdir(mode=0o700)
-                    selected.update(account_home=str(account))
+                    # Muse reserves 11,946 tokens before the user's prompt;
+                    # the shared 8,192-token fixture cannot hold that host.
+                    selected.update(account_home=str(account), max_context=200_000)
                 env = {k: v for k, v in os.environ.items() if not k.startswith(('MASC_', 'AGENT_CORE_'))}
                 with patch.dict(os.environ, env, clear=True):
                     result = SETUP.configure(BINARY, base, selected)

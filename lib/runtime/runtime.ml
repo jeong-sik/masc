@@ -43,6 +43,11 @@ type dispatch_credential_error =
 let runtime_table = Runtime_toml_namespace.(key Runtime)
 let egress_table = Runtime_toml_namespace.(key Egress)
 let fusion_table = Runtime_toml_namespace.(key Fusion)
+let providers_table = Runtime_toml_namespace.(key Providers)
+let assignments_table = Runtime_toml_namespace.(path Runtime) "assignments"
+let lanes_table = Runtime_toml_namespace.(path Runtime) "lanes"
+let exact_output_lanes_table = Runtime_toml_namespace.(path Runtime) "exact_output_lanes"
+let fusion_presets_table = Runtime_toml_namespace.(path Fusion) "presets"
 
 let dispatch_credential_error_to_string = function
   | Required_env_credential_missing { provider_id; env_key } ->
@@ -787,7 +792,7 @@ let validate_runtime_references
 let assignment_references (assignments : (string * string) list) =
   List.map
     (fun (keeper_name, runtime_id) ->
-      { site = Printf.sprintf "[runtime.assignments].%s" keeper_name
+      { site = Printf.sprintf "[%s].%s" assignments_table keeper_name
       ; shape = Scalar
       ; id = runtime_id
       ; domain = Lane_then_runtime
@@ -1211,7 +1216,7 @@ let exact_lane_supports_cli_tail = function
 (* One [runtime.exact_output_lanes.<lane>].<key> reference, named the way
    every reference-list builder in this file names one. *)
 let exact_lane_reference ~lane_id ~key id =
-  { site = Printf.sprintf "[runtime.exact_output_lanes.%s].%s" lane_id key
+  { site = Printf.sprintf "[%s.%s].%s" exact_output_lanes_table lane_id key
   ; shape = List_entry
   ; id
   ; domain = Runtime_only
@@ -1471,7 +1476,7 @@ let runtime_missing_from_report (report : missing_catalog_report) runtime_id =
 let runtime_default_route_name = "[runtime].default"
 
 let unavailable_assignment_label (entry : unavailable_runtime_assignment) =
-  Printf.sprintf "[runtime.assignments].%s=%S" entry.keeper_name entry.runtime_id
+  Printf.sprintf "[%s].%s=%S" assignments_table entry.keeper_name entry.runtime_id
 ;;
 
 let dropped_route_label (entry : dropped_runtime_route) =
@@ -1508,9 +1513,9 @@ let missing_reference_error
                (String.concat ", " (List.map (Printf.sprintf "%S") runtime_ids))
            ])
       ; List.map
-          (dropped_lane_label "[runtime.lanes].candidates")
+          (dropped_lane_label ("[" ^ lanes_table ^ "].candidates"))
           dropped_lane_candidates
-      ; List.map (dropped_lane_label "[runtime.lanes].dropped") dropped_lanes
+      ; List.map (dropped_lane_label ("[" ^ lanes_table ^ "].dropped")) dropped_lanes
       ]
   in
   let default_fallback_explanation =
@@ -2970,7 +2975,7 @@ let remove_runtime_scalar section_lines ~key =
 ;;
 
 let append_runtime_section lines ~key ~runtime_id =
-  let section = [ "[runtime]"; runtime_scalar_line ~key ~runtime_id ] in
+  let section = [ "[" ^ runtime_table ^ "]"; runtime_scalar_line ~key ~runtime_id ] in
   match List.rev lines with
   | [] -> section
   | last :: _ when String.equal (String.trim last) "" -> lines @ section
@@ -2978,7 +2983,7 @@ let append_runtime_section lines ~key ~runtime_id =
 ;;
 
 let append_runtime_string_array_section lines ~key ~values =
-  let section = [ "[runtime]"; runtime_string_array_line ~key ~values ] in
+  let section = [ "[" ^ runtime_table ^ "]"; runtime_string_array_line ~key ~values ] in
   match List.rev lines with
   | [] -> section
   | last :: _ when String.equal (String.trim last) "" -> lines @ section
@@ -2987,7 +2992,7 @@ let append_runtime_string_array_section lines ~key ~values =
 
 let append_runtime_assignments_section lines ~keeper_name ~runtime_id =
   let section =
-    [ "[runtime.assignments]"; assignment_line ~keeper_name ~runtime_id ]
+    [ "[" ^ assignments_table ^ "]"; assignment_line ~keeper_name ~runtime_id ]
   in
   match List.rev lines with
   | [] -> section
@@ -3388,10 +3393,10 @@ type route_reference =
       }
 
 let route_reference_to_string = function
-  | Keeper_assignment keeper_name -> Printf.sprintf "[runtime.assignments].%s" keeper_name
+  | Keeper_assignment keeper_name -> Printf.sprintf "[%s].%s" assignments_table keeper_name
   | Default_runtime -> "[runtime].default, which every keeper without an assignment walks"
   | Fusion_seat { preset; seat } ->
-    Printf.sprintf "[fusion.presets.%s].%s" preset (Fusion_policy.seat_kind_key seat)
+    Printf.sprintf "[%s.%s].%s" fusion_presets_table preset (Fusion_policy.seat_kind_key seat)
 ;;
 
 (* How a run fails at a seat on [route] under the config [validated], or
@@ -4547,7 +4552,7 @@ let set_first_run_runtime ?runtime_config_path ?(fallback_runtime_ids = []) ?(bi
           with
           | Runtime_execution.Agent_core _, None, Runtime_binding_targets ->
             Toml_line_editor.edit_table_float next
-              ~path:(table_path_under "providers" runtime.provider.Runtime_schema.id)
+              ~path:(table_path_under providers_table runtime.provider.Runtime_schema.id)
               ~key:Runtime_schema.exact_body_timeout_s_key
               ~value:Runtime_setup_spec.setup_exact_body_timeout_s
           | Runtime_execution.Agent_core _, Some (_ : float), (Runtime_binding_targets | Replacement_catalog_targets _)

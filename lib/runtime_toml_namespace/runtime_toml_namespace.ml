@@ -36,5 +36,7 @@ let key = function
   | Memory_os -> "memory_os"
 ;;
 
+let path table rest = key table ^ "." ^ rest
+
 (* Read back through [key], so the spelling above is the only one. *)
 let of_key name = List.find_opt (fun table -> String.equal (key table) name) all

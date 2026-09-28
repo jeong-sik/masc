@@ -80,7 +80,8 @@ let test_each_table_has_one_spelling () =
       Alcotest.(check bool) (Ns.key table ^ " reads back") true
         (Ns.of_key (Ns.key table) = Some table))
     Ns.all;
-  Alcotest.(check bool) "another name is no table" true (Ns.of_key "codex_second" = None)
+  Alcotest.(check bool) "another name is no table" true (Ns.of_key "codex_second" = None);
+  Alcotest.(check string) "a path under a table" "runtime.lanes" (Ns.(path Runtime) "lanes")
 
 let () =
   Alcotest.run "runtime_toml_namespace"

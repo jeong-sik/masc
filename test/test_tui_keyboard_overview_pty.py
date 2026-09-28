@@ -36,7 +36,7 @@ def first_use_frames(executable: str) -> None:
     payload["provider_usage_windows"] = [
         {
             "scope": f"provider:{name}",
-            "providers": [name],
+            "providers": [{"id": name, "display_name": name}],
             "state": "not_reported_since_start",
             "windows": [],
         }

@@ -21,7 +21,8 @@ def vote_hint_at_narrow_width(executable: str) -> None:
         keyboard.wait_for_output(process, fd, output, b"Alpha", start=0, timeout=10)
         frame = keyboard.resize_and_wait(
             process, fd, output, rows=32, columns=80,
-            needle=b"Alpha", controls=(keyboard.FULL_REDRAW,)
+            needle=b"Alpha", controls=(keyboard.FULL_REDRAW,),
+            final_cursor=b"\x1b[?25l",
         )
         visible = keyboard.screen_text(frame)
         if b"v / V:up / down" not in visible:

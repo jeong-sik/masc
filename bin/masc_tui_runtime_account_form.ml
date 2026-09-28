@@ -142,7 +142,7 @@ let command (base : D.base) home =
     Some
       (Printf.sprintf
          "HOME=%s XDG_CONFIG_HOME=%s/.config XDG_DATA_HOME=%s/.local/share XDG_CACHE_HOME=%s/.cache XDG_STATE_HOME=%s/.local/state XDG_RUNTIME_DIR=%s/.local/run %s login"
-         home home home home home home exe)
+         home home home home home home (Filename.quote exe))
   | D.Antigravity -> None
 ;;
 
@@ -164,7 +164,11 @@ let sign_in_rows t =
     ; "  (먼저 그 폴더의 config.toml 에 cli_auth_credentials_store = \"file\")"
     ]
   | D.Claude_code, Some line -> [ "  로그인: " ^ line ]
-  | D.Muse, Some line -> [ "  로그인: " ^ line ]
+  | D.Muse, Some line ->
+    [ "  로그인: " ^ line
+    ; "  이 HOME의 .config/muse/auth.json 파일이 필요합니다."
+    ; "  macOS Keychain 로그인과 할당량은 HOME을 바꿔도 분리되지 않습니다."
+    ]
   | D.Antigravity, _ ->
     [ "  OAuth 파일: masc runtime-antigravity-account --sign-in 이 출력하는 credential_file" ]
   | (D.Codex | D.Claude_code | D.Muse), None -> []

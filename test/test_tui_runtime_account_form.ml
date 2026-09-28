@@ -281,7 +281,7 @@ let test_muse_sign_in_sets_xdg_roots_at_the_new_account () =
     Alcotest.(check (option string)) "HOME and XDG roots select the new account"
       (Some
          (Printf.sprintf
-            "HOME=%s XDG_CONFIG_HOME=%s/.config XDG_DATA_HOME=%s/.local/share XDG_CACHE_HOME=%s/.cache XDG_STATE_HOME=%s/.local/state XDG_RUNTIME_DIR=%s/.local/run muse login"
+            "HOME=%s XDG_CONFIG_HOME=%s/.config XDG_DATA_HOME=%s/.local/share XDG_CACHE_HOME=%s/.cache XDG_STATE_HOME=%s/.local/state XDG_RUNTIME_DIR=%s/.local/run 'muse' login"
             quoted quoted quoted quoted quoted quoted))
       (declare_muse_sign_in (muse_current ~command:"muse")))
 let test_muse_sign_in_prefers_the_resolved_executable () =
@@ -296,15 +296,26 @@ let test_muse_sign_in_prefers_the_resolved_executable () =
       | Some hint ->
         Alcotest.(check bool) "resolved executable signs in"
           true
-          (String.ends_with ~suffix:(resolved ^ " login") hint)))
+          (String.ends_with ~suffix:(Filename.quote resolved ^ " login") hint)))
 let test_muse_sign_in_keeps_the_configured_absolute_command () =
   with_muse_env ~path:"/nonexistent-path" ~install_dir:None ~home:"/nonexistent-home" (fun _ ->
-    match declare_muse_sign_in (muse_current ~command:"/custom/muse") with
+    match declare_muse_sign_in (muse_current ~command:"/custom path/muse") with
     | None -> Alcotest.fail "expected a sign-in hint"
     | Some hint ->
       Alcotest.(check bool) "configured command signs in"
         true
-        (String.ends_with ~suffix:"/custom/muse login" hint))
+        (String.ends_with ~suffix:"'/custom path/muse' login" hint))
+
+let test_muse_rows_state_the_authentication_boundary () =
+  match F.open_on ~home_dir:"/home/op" (muse_current ~command:"muse") with
+  | Error reason -> Alcotest.fail reason
+  | Ok form ->
+    let rows = F.rows form in
+    List.iter (fun expected ->
+      Alcotest.(check bool) expected true (List.mem expected rows))
+      [ "  이 HOME의 .config/muse/auth.json 파일이 필요합니다."
+      ; "  macOS Keychain 로그인과 할당량은 HOME을 바꿔도 분리되지 않습니다."
+      ]
 
 let test_a_file_with_no_client_has_nothing_to_copy () =
   match
@@ -339,6 +350,8 @@ let () =
             test_muse_sign_in_prefers_the_resolved_executable
         ; Alcotest.test_case "muse sign-in keeps the configured absolute command" `Quick
             test_muse_sign_in_keeps_the_configured_absolute_command
+        ; Alcotest.test_case "muse rows state the authentication boundary" `Quick
+            test_muse_rows_state_the_authentication_boundary
         ; Alcotest.test_case "a file with no client has nothing to copy" `Quick
             test_a_file_with_no_client_has_nothing_to_copy
         ] )

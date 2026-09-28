@@ -2745,10 +2745,17 @@ let entry_runtime_id_of_route (route : string) : string option =
 let prompt_capacity_bytes (runtime : t) : int option =
   match runtime.provider.api_format with
   | Muse_serve_runtime ->
-    Result.to_option
-      (Runtime_muse_prompt_capacity.start_prompt_bytes
+    (match Runtime_muse_prompt_capacity.start_prompt_bytes
          ~declared:runtime.model.max_prompt_bytes
-         ~max_context:(Option.map fst (resolve_max_context_of_runtime runtime)))
+         ~max_context:(Option.map fst (resolve_max_context_of_runtime runtime)) with
+     | Ok bytes -> Some bytes
+     | Error error ->
+       (* Catalog loading refuses these values before publication. A caller
+          can still construct [t] directly: retain its precise failure while
+          the Muse dispatch paths refuse the absent ceiling. *)
+       Log.Runtime.error "Muse prompt ceiling unavailable for runtime %S: %s"
+         runtime.id (Runtime_muse_prompt_capacity.error_to_string error);
+       None)
   | Claude_code_runtime
   | Antigravity_cli_runtime
   | Codex_app_server_runtime

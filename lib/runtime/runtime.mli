@@ -937,7 +937,11 @@ val prompt_capacity_bytes : t -> int option
 (** The start-prompt ceiling a turn on this runtime applies: the model's
     declared [max-prompt-bytes], or for a Muse model without one the ceiling
     derived from its resolved window ({!resolve_max_context_of_runtime},
-    {!Runtime_muse_prompt_capacity}). [None] when neither applies. *)
+    {!Runtime_muse_prompt_capacity}). [None] when neither applies. For an
+    invalid Muse value constructed outside catalog loading, logs the runtime
+    id and derivation failure before returning [None]; Muse callers must
+    refuse a prompt without a ceiling. Catalog loading rejects these values
+    before publication. *)
 
 val max_prompt_bytes_of_runtime_id : string -> int option
 (** {!prompt_capacity_bytes} of the runtime with this id, or [None] when the

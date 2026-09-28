@@ -1237,6 +1237,17 @@ let test_masc_board_close_requires_summary_and_successor_decision () =
   in
   Alcotest.(check bool) "both-decisions message names the conflict" true
     (String_util.contains_substring both "not both");
+  let both_false =
+    attempt "close with successor and no_successor=false"
+      [ "post_id", `String post_id
+      ; "closed_by", `String "post-author"
+      ; "summary", `String "both fields"
+      ; "successor_id", `String post_id
+      ; "no_successor", `Bool false
+      ]
+  in
+  Alcotest.(check bool) "both-fields message names the conflict" true
+    (String_util.contains_substring both_false "not both");
   let blank =
     attempt "close with a blank summary"
       [ "post_id", `String post_id

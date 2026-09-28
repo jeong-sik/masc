@@ -466,9 +466,9 @@ let handle_close ~tool_name ~start_time args : Tool_result.result =
     let no_successor = Safe_ops.json_bool_opt "no_successor" args in
     let successor =
       match successor_id, no_successor with
-      | Some _, Some true ->
-        Error "give successor_id or no_successor=true, not both"
-      | Some id, _ -> Ok (Board.Successor id)
+      | Some _, Some _ ->
+        Error "give successor_id or no_successor, not both"
+      | Some id, None -> Ok (Board.Successor id)
       | None, Some true -> Ok Board.No_successor
       | None, Some false ->
         Error

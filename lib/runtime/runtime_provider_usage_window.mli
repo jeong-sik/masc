@@ -199,8 +199,8 @@ val recording_since : float
 
 val record : scope:Runtime_quota_window.scope -> observed_at:float -> report -> unit
 (** Keep each window of [report] as the latest for
-    [(scope, limit_id, kind)].  An older [observed_at] than the one held does
-    not replace it.  A report with no windows changes nothing. *)
+    [(scope, limit_id, kind)]. An older or equal [observed_at] does not
+    replace the one held. A report with no windows changes nothing. *)
 
 val set_record_observer :
   (scope:Runtime_quota_window.scope -> observed_at:float -> report -> unit) -> unit

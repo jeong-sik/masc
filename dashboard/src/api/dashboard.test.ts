@@ -5099,6 +5099,37 @@ describe('fetchKeeperCostMetrics', () => {
     ))
   }
 
+  async function readyKeeperCosts() {
+    const result = await fetchKeeperCostMetrics(60)
+    expect(result.state).toBe('ready')
+    if (result.state !== 'ready') throw new Error('expected ready keeper costs')
+    return result
+  }
+
+  function stubCostPayload(raw: unknown) {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(raw), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    })))
+  }
+
+  it('keeps the warming placeholder distinct from an empty result', async () => {
+    stubCostPayload({ state: 'loading', window_minutes: 60, cache: { state: 'warming', last_error: null } })
+    expect(await fetchKeeperCostMetrics(60)).toEqual({ state: 'pending', window_minutes: 60 })
+  })
+
+  it('surfaces a failed first aggregation instead of an empty result', async () => {
+    stubCostPayload({ state: 'loading', window_minutes: 60,
+      cache: { state: 'warming', last_error: 'metrics unavailable' } })
+    expect(await fetchKeeperCostMetrics(60)).toEqual({ state: 'failed', message: 'metrics unavailable' })
+  })
+
+  it('rejects an unknown state or a result without the keeper list', async () => {
+    for (const raw of [{ state: 'unexpected', window_minutes: 60, keepers: [] }, { window_minutes: 60 }]) {
+      stubCostPayload(raw)
+      await expect(fetchKeeperCostMetrics(60)).rejects.toThrow('유효하지 않은 keeper cost metrics payload')
+    }
+  })
+
   // Token fields of a keeper whose every sample reported usage.
   const reportedTokens = {
     total_input_tokens: 10,
@@ -5124,7 +5155,7 @@ describe('fetchKeeperCostMetrics', () => {
       },
     ])
 
-    const result = await fetchKeeperCostMetrics(60)
+    const result = await readyKeeperCosts()
 
     expect(result.keepers[0]?.total_cost_usd).toBeNull()
     expect(result.keepers[0]?.cost_unreported_samples).toBe(3)
@@ -5143,7 +5174,7 @@ describe('fetchKeeperCostMetrics', () => {
       },
     ])
 
-    const result = await fetchKeeperCostMetrics(60)
+    const result = await readyKeeperCosts()
 
     expect(result.keepers[0]?.total_cost_usd).toBe(0.25)
     expect(result.keepers[0]?.cost_reported_samples).toBe(1)
@@ -5158,7 +5189,7 @@ describe('fetchKeeperCostMetrics', () => {
       { keeper_name: 'consistent', total_cost_usd: null, cost_reported_samples: 0, cost_unreported_samples: 2, cost_unread_samples: 0, ...reportedTokens, sample_count: 2 },
     ])
 
-    const result = await fetchKeeperCostMetrics(60)
+    const result = await readyKeeperCosts()
 
     expect(result.keepers.map(k => k.keeper_name)).toEqual(['consistent'])
   })
@@ -5181,7 +5212,7 @@ describe('fetchKeeperCostMetrics', () => {
       },
     ])
 
-    const result = await fetchKeeperCostMetrics(60)
+    const result = await readyKeeperCosts()
 
     expect(result.keepers[0]?.total_input_tokens).toBeNull()
     expect(result.keepers[0]?.total_output_tokens).toBeNull()
@@ -5200,7 +5231,7 @@ describe('fetchKeeperCostMetrics', () => {
       { keeper_name: 'consistent', ...costFields, ...reportedTokens },
     ])
 
-    const result = await fetchKeeperCostMetrics(60)
+    const result = await readyKeeperCosts()
 
     expect(result.keepers.map(k => k.keeper_name)).toEqual(['consistent'])
   })
@@ -5208,7 +5239,7 @@ describe('fetchKeeperCostMetrics', () => {
   it('drops a keeper row that does not say how many samples reported a cost', async () => {
     stubKeeperCosts([{ keeper_name: 'keeper-alpha', total_cost_usd: 0.5, sample_count: 2 }])
 
-    const result = await fetchKeeperCostMetrics(60)
+    const result = await readyKeeperCosts()
 
     expect(result.keepers).toEqual([])
   })

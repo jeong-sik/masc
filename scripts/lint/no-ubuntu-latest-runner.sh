@@ -66,21 +66,32 @@ def matrix_values(matrix, name):
     return out
 
 
+def check_label_node(value_node, matrix, path, hits):
+    text = str(value_node.value)
+    refs = MATRIX_REF.findall(text)
+    if refs:
+        for name in refs:
+            for line, value in matrix_values(matrix, name):
+                if LABEL in value:
+                    hits.append(f"{path}:{line}:{value}")
+    elif LABEL in text:
+        hits.append(f"{path}:{value_node.start_mark.line + 1}:{text}")
+
+
 def check_job(job, path, hits):
     runs_on = mapping_get(job, "runs-on")
     if runs_on is None:
         return
     matrix = mapping_get(mapping_get(job, "strategy"), "matrix")
+    if isinstance(runs_on, yaml.MappingNode):
+        # GitHub's mapping form names the image under `labels`; `group` selects
+        # a runner group, not an image, so only `labels` is a runner label.
+        labels = mapping_get(runs_on, "labels")
+        for value_node in iter_scalars(labels):
+            check_label_node(value_node, matrix, path, hits)
+        return
     for value_node in iter_scalars(runs_on):
-        text = str(value_node.value)
-        refs = MATRIX_REF.findall(text)
-        if refs:
-            for name in refs:
-                for line, value in matrix_values(matrix, name):
-                    if LABEL in value:
-                        hits.append(f"{path}:{line}:{value}")
-        elif LABEL in text:
-            hits.append(f"{path}:{value_node.start_mark.line + 1}:{text}")
+        check_label_node(value_node, matrix, path, hits)
 
 
 hits = []
@@ -175,6 +186,33 @@ jobs:
       - run: echo ok
 YAML
 
+  # 6) The mapping form of runs-on: `labels` names the runner image, so the
+  #    label must be caught (masc-pro-builder P2 on #39757).
+  cat >"$tmp/mapping-labels.yml" <<'YAML'
+name: mapping-labels
+on: push
+jobs:
+  build:
+    runs-on:
+      group: my-group
+      labels: [ubuntu-latest]
+    steps:
+      - run: echo ok
+YAML
+
+  # 7) The mapping form with a pinned label: must pass.
+  cat >"$tmp/mapping-pinned.yml" <<'YAML'
+name: mapping-pinned
+on: push
+jobs:
+  build:
+    runs-on:
+      group: my-group
+      labels: [ubuntu-24.04]
+    steps:
+      - run: echo ok
+YAML
+
   fail=0
   if scan "$tmp/quoted-hash.yml" >/dev/null 2>&1; then
     echo "no-ubuntu-latest-runner self-test FAIL: quoted-hash fixture was not caught" >&2
@@ -194,6 +232,14 @@ YAML
   fi
   if ! scan "$tmp/unreferenced-matrix.yml" >/dev/null 2>&1; then
     echo "no-ubuntu-latest-runner self-test FAIL: unreferenced-matrix fixture was flagged" >&2
+    fail=1
+  fi
+  if scan "$tmp/mapping-labels.yml" >/dev/null 2>&1; then
+    echo "no-ubuntu-latest-runner self-test FAIL: mapping-labels fixture was not caught" >&2
+    fail=1
+  fi
+  if ! scan "$tmp/mapping-pinned.yml" >/dev/null 2>&1; then
+    echo "no-ubuntu-latest-runner self-test FAIL: mapping-pinned fixture was flagged" >&2
     fail=1
   fi
   if (( fail )); then

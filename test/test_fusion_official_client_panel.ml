@@ -707,8 +707,14 @@ let test_unknown_route_fails_without_an_attempt () =
           ())
     in
     (match outcomes with
-     | [ Fusion_types.Failed { reason = Fusion_types.Unknown_route "nope.not-configured"; _ } ]
-       -> ()
+     | [ Fusion_types.Failed
+            { reason = Fusion_types.Unknown_route "nope.not-configured"
+            ; usage
+            ; _
+            } ] ->
+       check bool "an unattempted seat burnt nothing"
+         true
+         (Fusion_types.equal_usage usage Fusion_types.zero_usage)
      | other ->
        failf "expected one Unknown_route failure, got [%s]"
          (String.concat "; " (List.map Fusion_types.show_panel_outcome other)));

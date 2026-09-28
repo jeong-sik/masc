@@ -1799,3 +1799,9 @@
 .runtime-setup-picker li button { margin: 6px 0 0 8px; }
 .runtime-setup-picker button { cursor: pointer; min-height: 36px; padding: 6px 12px; }
 .runtime-setup-picker button:disabled { cursor: default; opacity: .55; }
+
+.setup-account-login { margin-block: 1rem; padding: 1rem; border: 1px solid var(--border, #454545); border-radius: .5rem; min-width: 0; }
+.setup-login-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-block: .5rem; }
+.setup-login-output { max-height: 16rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-family: monospace; padding: .75rem; }
+.setup-account-login form { display: flex; flex-wrap: wrap; align-items: end; gap: .5rem; }
+.setup-account-login input { max-width: 100%; }

@@ -15601,7 +15601,7 @@ def paused_apart_from_stopped_interaction() -> Interaction:
     ) -> None:
         # Each count in the Team title is the Keepers on the line it names.
         for needle in (
-            b"1 idle \xc2\xb7 1 no phase \xc2\xb7 2 paused \xc2\xb7 1 stopped",
+            b"1 no work \xc2\xb7 1 no phase \xc2\xb7 2 paused \xc2\xb7 1 stopped",
             b"? no phase: k-unknown",
             b"paused: k-flagged, k-halted",
             b"stopped: k-stopped",

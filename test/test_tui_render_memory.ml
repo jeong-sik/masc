@@ -1673,7 +1673,7 @@ let test_the_clock_and_the_badge_keep_a_fixed_tail () =
     (max 0 (Masc_tui_message_layout.display_width (live_title ()) - room));
   check bool "and a query long enough does not" true
     (Masc_tui_message_layout.display_width
-       (live_title ~query_label:" \xc2\xb7 filter \"a phrase long enough to crowd the row\"" ())
+       (live_title ~query_label:(" filter \"" ^ String.make room 'q' ^ "\"") ())
      > room)
 
 let test_the_breakdown_and_the_sort_sit_on_one_row () =

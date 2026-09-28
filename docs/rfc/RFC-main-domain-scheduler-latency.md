@@ -144,6 +144,14 @@ Phase 0·0b·1 이 머지된 빌드. 호스트는 오후의 load 80~300 상태�
 
 7.2 의 클로저가 실제로 락을 얼마나 오래 쥐는지는 여기 없다. Phase 0 의 프로브가 배포되면 `stalls` 와 p99 로 먼저 보고, 그 다음에 7.3 의 래퍼를 없앤다.
 
+### 7.5 #25893의 남은 범위 재확인 (2026-09-28, main `e84b3c3193`)
+
+이 절은 9월 5일의 55곳 재고를 현재 호출 수로 재사용하지 않는다. 현재 소스에는 `Domain_pool_ref.submit_io_or_inline`과 `submit_cpu_or_inline`이 있고(`lib/core/domain_pool_ref.ml:21-36`), 체크포인트 JSON 인코딩·디코딩도 CPU 도메인 풀로 보낸다(`lib/keeper/keeper_checkpoint_store.ml:93-116`). 반면 `Eio_guard.run_in_systhread`는 아직 임의의 `unit -> 'a`를 받는다(`lib/core/eio_guard.ml:90-104`). 호출부의 단순 syscall과 여러 단계의 OCaml 계산을 구분해야 한다.
+
+첫 구현 단위는 `Keeper_checkpoint_store.list_agent_core_history_files`다. 현재 `lib/keeper/keeper_checkpoint_store.ml:46-53`은 `Sys.readdir` 뒤의 배열 변환·필터·정렬까지 하나의 systhread 클로저에서 실행한다. 이 경로에는 Eio 효과나 공유 Eio 락이 없으므로 동일 파일의 체크포인트 JSON 변환처럼 도메인 풀로 옮길 수 있다. 기존 정렬 결과와 오류 전파를 유지하고, 실제 호출 경로를 거치는 테스트에서 파일 수를 고정해 main 도메인 지연을 수정 전후 같은 조건으로 잰다. 서버 전체의 `/health` 지연은 별도 라이브 계기이며, 이 한 경로의 개선만으로 #25893 전체가 해결됐다고 판정하지 않는다.
+
+그다음 구현 단위는 7.2의 파일 읽기·쓰기 루프와 7.3의 범용 systhread 래퍼다. 각 단위에서 Eio 효과·락·가변 상태를 먼저 추적해 순수 작업만 도메인 풀에 제출한다. 모든 호출을 하나의 래퍼 교체로 일괄 전환하지 않는다. 작업별 동일 입력의 전후 지연과 남은 호출부 재고를 기록한 뒤에만 #25893의 종료 여부를 판단한다.
+
 ## 8. Phase 4 표적 — Memprof 실측 (2026-09-05 19:15 KST, build `c94f057edc`)
 
 Phase 0c 가 머지된 빌드를 재기동하고 2분 뒤와 6분 뒤에 `GET /api/v1/diagnostics/memprof` 를 읽었다. 비율 1e-5, 두 읽기 사이 4분에 누적 할당 63.6GB → 169.6GB, 즉 **약 440MB/s**. live 추정 2.9GB → 2.8GB. 같은 시각 `/health` 는 minor 4,935/분, major 23.9/분, 할당 606MB/s(부팅 직후 창), live 3.1GB 였다.

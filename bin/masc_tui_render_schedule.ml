@@ -129,6 +129,7 @@ module Viewport = struct
 end
 
 type overview_allocation = {
+  intro_rows : int;
   attention_rows : int;
   goal_rows : int;
   team_rows : int;
@@ -149,10 +150,10 @@ let overview_fixed_rows = 10
 (* The Team block's title row and the divider under it. *)
 let overview_team_chrome_rows = 2
 
-(* The divider under the GOALS block. Its headline is one of its rows. *)
+(* The blank row under Goals. Its title is one of its rows. *)
 let overview_goal_chrome_rows = 1
 
-(* The Providers section's title row and the divider under it. *)
+(* The Plan usage title and the blank row under it. *)
 let overview_providers_chrome_rows = 2
 
 (* A block's first row: the Attention panel's first item or its empty note,
@@ -176,12 +177,12 @@ let with_chrome ~chrome rows = if rows > 0 then rows + chrome else 0
    (#38911). *)
 let drawn_under_chrome ~chrome given = if given > chrome then given - chrome else 0
 
-let allocate_overview ~terminal_rows ~attention_count ~goal_count
+let allocate_overview ~terminal_rows ~intro_count ~attention_count ~goal_count
     ~team_count ~team_stuck ~providers_count ~task_count ~has_task_error =
   (* Ten rows are invariant chrome. What is left is shared by the blocks in
-     the order they are served -- the Attention panel, GOALS, Providers,
-     Team, Tasks -- and whatever none of them needs becomes filler so the
-     frame reaches the bottom of the terminal. The blocks are bounded by how
+     the order they are served -- the Attention panel, GOALS, first-use
+     explanation, Providers, Team, Tasks -- and whatever none of them needs
+     becomes filler so the frame reaches the bottom of the terminal. The blocks are bounded by how
      many items they have, not by a constant. *)
   let available = max 0 (terminal_rows - overview_fixed_rows) in
   let desired_panel_rows = max 1 attention_count in
@@ -211,6 +212,7 @@ let allocate_overview ~terminal_rows ~attention_count ~goal_count
      and keeps its first stuck Keeper, which is the row that says someone
      needs the operator; its title counts the rest. *)
   let module Layout = Masc_tui_layout in
+  let intro = { Layout.floor = 0; want = max 0 intro_count } in
   let attention =
     { Layout.floor = min desired_panel_rows overview_leading_rows
     ; want = desired_panel_rows
@@ -246,10 +248,10 @@ let allocate_overview ~terminal_rows ~attention_count ~goal_count
   in
   match
     Layout.allocate ~budget:available
-      [ attention; goals; providers; team; tasks ]
+      [ attention; goals; intro; providers; team; tasks ]
   with
   | { Layout.rows =
-        [ attention_rows; goal_given; providers_given; team_given; task_block_rows ]
+        [ attention_rows; goal_given; intro_rows; providers_given; team_given; task_block_rows ]
     ; filler
     } ->
       let goal_rows =
@@ -270,7 +272,8 @@ let allocate_overview ~terminal_rows ~attention_count ~goal_count
         - with_chrome ~chrome:overview_team_chrome_rows team_rows
       in
       let task_error_rows = min desired_task_error_rows task_block_rows in
-      { attention_rows
+      { intro_rows
+      ; attention_rows
       ; goal_rows
       ; team_rows
       ; providers_rows

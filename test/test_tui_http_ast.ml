@@ -518,11 +518,11 @@ let test_the_attention_note_starts_where_its_rows_do () =
   check int "the note carries no indent of its own" 0
     (Ast_grep.count_exact_string_literals_in_value_binding
        ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render_overview"
-       ~needle:"  (nothing needs attention)");
+       ~needle:"  Nothing needs attention.");
   check int "it is still the panel's word" 1
     (Ast_grep.count_exact_string_literals_in_value_binding
        ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render_overview"
-       ~needle:"(nothing needs attention)")
+       ~needle:"Nothing needs attention.")
 ;;
 
 (* A surface whose load failed draws the lane-read message. It names

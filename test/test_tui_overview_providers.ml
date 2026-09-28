@@ -117,9 +117,8 @@ let test_section_draws_three_line_shapes () =
       if code_points line > width then
         failf "row is %d cells, wider than %d: %S" (code_points line) width line)
     lines;
-  check bool "title says whose numbers and since when" true
-    (contains ~affix:"reported by the provider" (plain section.title)
-     && contains ~affix:"since server start" (plain section.title));
+  check string "plain usage title" " Plan usage" (plain section.title);
+  check int "four accounts behind five rows" 4 section.account_count;
   match lines with
   | [ kimi; five_hour; seven_day; codex; ollama ] ->
       (* The exhausted account comes first: a budget cut from the bottom
@@ -167,7 +166,7 @@ let test_section_draws_three_line_shapes () =
         (fun (name, row) ->
           check bool (name ^ " says it has not reported") true
             (contains ~affix:name row
-             && contains ~affix:"no report since server start" row
+             && contains ~affix:"no usage data" row
              && not (contains ~affix:meter_open row)))
         [ ("codex", codex); ("ollama_cloud", ollama) ]
   | _ -> failf "expected five rows, got %d" (List.length lines)
@@ -214,9 +213,23 @@ let test_failed_read_is_one_line () =
   with
   | Some section ->
       check (list string) "one explicit line"
-        [ " providers unavailable: connection refused" ]
+        [ " usage data unavailable: connection refused" ]
         (List.map plain section.lines)
   | None -> fail "a failed read is drawn"
+
+let test_empty_read_names_missing_usage_data () =
+  let empty : Tui_decode.provider_usage_windows =
+    { puws_since = now; puws_accounts = [] }
+  in
+  match
+    Providers.section ~providers:(Types.Providers_read empty)
+      ~runtimes:Types.Quota_unread ~now ~width:80
+  with
+  | Some section ->
+      check int "no account is reported" 0 section.account_count;
+      check (list string) "the missing data is visible" [ " no usage data" ]
+        (List.map plain section.lines)
+  | None -> fail "an empty account list disappeared"
 
 let test_unknown_state_is_rejected () =
   check bool "an unknown state fails the reading" true
@@ -230,6 +243,8 @@ let () =
         ; test_case "eighth-block meter" `Quick test_meter_uses_eighth_blocks
         ; test_case "values read in one unit" `Quick test_values_read_in_one_unit
         ; test_case "failed read is one line" `Quick test_failed_read_is_one_line
+        ; test_case "empty read names missing usage" `Quick
+            test_empty_read_names_missing_usage_data
         ; test_case "unknown state is rejected" `Quick test_unknown_state_is_rejected
         ] )
     ]

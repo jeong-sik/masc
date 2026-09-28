@@ -2,9 +2,9 @@
     work moving any goal forward?
 
     The headline counts the active tasks (in progress or awaiting
-    verification) and how many of them a drawn goal lists. One row per drawn
-    goal follows: its title, a bar of its done tasks over its linked tasks,
-    how long it has been idle and, when it has a due date, a D-N countdown.
+    verification) and how many of them a drawn goal lists. Each drawn goal
+    has a summary followed by owner, state and due date. The detail wraps
+    within the available width.
 
     The bar measures tasks, not the goal's metric: a goal carries a metric and
     a target but no measured value, and this section does not make one up. *)
@@ -29,10 +29,16 @@ val progress :
   goals:Tui_decode.overview_goal list -> tasks:Tui_decode.task list -> progress
 (** [goals] is what the section draws ({!drawn_goals}). *)
 
-val wanted_rows : Masc_tui_types.overview_goals_reading -> int
-(** Rows the section asks the Overview budget for, headline included. A
-    reading not made yet or failed wants its one explaining line; a reading
-    with no drawn goal wants only the headline, which says so. *)
+val wanted_rows :
+  now:float ->
+  localtime:(float -> Unix.tm) ->
+  inner_width:int ->
+  tasks:Masc_tui_overview_tasks.rows_reading ->
+  Masc_tui_types.overview_goals_reading ->
+  int
+(** Rows the section asks the Overview budget for, including every displayed
+    goal's wrapped owner, state and due date. Empty or unread readings need
+    three rows to explain their state. *)
 
 val lines :
   now:float ->

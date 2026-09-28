@@ -257,7 +257,7 @@ let contains ~sub text =
   let rec at i = i + n <= m && (String.sub text i n = sub || at (i + 1)) in
   at 0
 
-let draw ?(rows = 10) ?(tasks = live_tasks) reading =
+let draw ?(rows = 25) ?(tasks = live_tasks) reading =
   Goals.lines ~now:captured_at ~localtime:Unix.gmtime ~inner_width:120 ~rows
     ~tasks:(Tasks.Rows_read tasks) reading
   |> List.map strip_ansi
@@ -281,7 +281,7 @@ let test_live_fleet_moves_no_goal () =
        (fun (goal : Tui_decode.overview_goal) -> goal.og_id)
        (Goals.drawn_goals goals));
   let rows = draw (Types.Goals_read goals) in
-  check int "the headline and one row per executing goal" 6 (List.length rows);
+  check int "the headline and two rows per executing goal" 11 (List.length rows);
   check bool "the headline counts no active task toward a goal" true
     (contains ~sub:"active work toward a goal: 0 of 13 tasks" (List.hd rows));
   let audit = find_row ~sub:"6일간" rows in
@@ -294,6 +294,36 @@ let test_live_fleet_moves_no_goal () =
     (contains ~sub:"no tasks" release);
   check bool "a due date counts down" true
     (contains ~sub:"due 10-07 (D-14)" release)
+
+let test_goal_metadata_keeps_owner_state_and_due_together () =
+  let goal =
+    match Goals.drawn_goals (decode_fixture ()) with
+    | first :: _ -> { first with og_task_ids = [ "task-1501"; "task-gone" ] }
+    | [] -> fail "fixture has no drawn goal"
+  in
+  let rows =
+    Goals.lines ~now:captured_at ~localtime:Unix.gmtime ~inner_width:46
+      ~rows:12 ~tasks:(Tasks.Rows_read [ in_progress "task-1501" ])
+      (Types.Goals_read [ goal ])
+    |> List.map strip_ansi
+  in
+  let detail = String.concat " " (List.tl (List.tl rows)) in
+  check bool "known and missing task owners stay distinct" true
+    (contains ~sub:"owner @keeper-a" detail
+     && contains ~sub:"other owners unknown" detail);
+  check bool "the phase and due date are both present" true
+    (contains ~sub:"state executing" detail
+     && contains ~sub:"due 10-07 (D-14)" detail);
+  let hidden =
+    Goals.lines ~now:captured_at ~localtime:Unix.gmtime ~inner_width:46
+      ~rows:2 ~tasks:(Tasks.Rows_read [ in_progress "task-1501" ])
+      (Types.Goals_read [ goal ])
+    |> List.map strip_ansi
+  in
+  check int "a short viewport keeps the whole goal entry offscreen" 1
+    (List.length hidden);
+  check bool "the headline accounts for the hidden goal" true
+    (contains ~sub:"0 of 1 goals shown" (List.hd hidden))
 
 (* The input that splits the headline: one of the active tasks is a task an
    executing goal lists. *)
@@ -309,14 +339,16 @@ let test_a_short_budget_says_what_it_cut () =
   let rows = draw ~rows:3 (Types.Goals_read goals) in
   check int "the budget is kept" 3 (List.length rows);
   check bool "the headline says how many goals are drawn" true
-    (contains ~sub:"2 of 5 goals shown" (List.hd rows))
+    (contains ~sub:"1 of 5 goals shown" (List.hd rows))
 
 let test_a_failed_read_is_one_explicit_line () =
   check (list string) "a failure is named, not drawn as an empty section"
-    [ "GOALS   goals unavailable: goals load failed: connection refused" ]
+    [ "Goals"; ""; "Goals unavailable: goals load failed: connection refused" ]
     (draw (Types.Goals_failed "goals load failed: connection refused"));
-  check int "a failed read asks for its one line" 1
-    (Goals.wanted_rows (Types.Goals_failed "x"))
+  check int "a failed read asks for three rows" 3
+    (Goals.wanted_rows ~now:captured_at ~localtime:Unix.gmtime
+       ~inner_width:120 ~tasks:(Tasks.Rows_read live_tasks)
+       (Types.Goals_failed "x"))
 
 let test_an_unread_backlog_is_not_a_zero () =
   let goals = decode_fixture () in
@@ -374,10 +406,11 @@ let test_a_goal_without_children_is_refused () =
 
 let test_an_empty_tree_is_one_headline () =
   let empty = Types.Goals_read [] in
-  check int "an empty tree asks for one row" 1 (Goals.wanted_rows empty);
-  check (list string) "the headline says no goal is open"
-    [ "GOALS   active work toward a goal: 0 of 13 tasks  \xc2\xb7 no goal is \
-       executing, verifying or awaiting confirmation" ]
+  check int "an empty tree asks for three rows" 3
+    (Goals.wanted_rows ~now:captured_at ~localtime:Unix.gmtime
+       ~inner_width:120 ~tasks:(Tasks.Rows_read live_tasks) empty);
+  check (list string) "the empty section gives the next fact"
+    [ "Goals (0)"; ""; "No goal is executing or verifying." ]
     (draw empty)
 
 let test_an_unknown_phase_is_refused () =
@@ -401,6 +434,8 @@ let () =
     [ ( "overview goals"
       , [ test_case "the live fleet moves no goal" `Quick
             test_live_fleet_moves_no_goal
+        ; test_case "goal metadata stays whole" `Quick
+            test_goal_metadata_keeps_owner_state_and_due_together
         ; test_case "an active goal task counts" `Quick
             test_an_active_goal_task_counts
         ; test_case "a short budget says what it cut" `Quick

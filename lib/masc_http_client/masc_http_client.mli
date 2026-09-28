@@ -111,6 +111,7 @@ val get_sync :
     that only care about status + body. *)
 
 val post_stream :
+  ?retain_body:bool ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   idle_timeout_sec:float ->
   url:string ->
@@ -125,7 +126,10 @@ val post_stream :
     POSTs and calls [on_chunk] with each response body chunk as it arrives,
     for callers rendering a live view of a server-sent event stream.
 
-    On the [Streamed] branch the complete body is returned as well, so a
+    Set [retain_body=false] when [on_chunk] owns protocol decoding; successful
+    response bodies then remain empty instead of accumulating in memory.
+
+    By default, on the [Streamed] branch the complete body is returned as well, so a
     caller can render from the chunks and still run an authoritative
     whole-body decode at the end. On a non-success status the body comes back
     as [Buffered] and [on_chunk] is never called — see {!Pool.stream_outcome}.

@@ -1294,7 +1294,7 @@
  (name masc_tui_account_login)
  (wrapped false)
  (modules masc_tui_account_login)
- (libraries yojson))
+ (libraries yojson masc_tui_message_layout))
 
 (library
  (name masc_tui_types)

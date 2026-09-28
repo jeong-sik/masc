@@ -3320,7 +3320,7 @@ let browser_lane_action ~host ~port ~source operation =
 let post_setup_login_streaming ~clock ~host ~port ~body ~on_chunk =
   let url = url_of ~host ~port ~path:"/api/v1/setup/accounts/login" in
   match with_credential_refresh_on ~refused:stream_refused @@ fun () ->
-    Masc_http_client.post_stream ~clock ~idle_timeout_sec:Float.infinity ~url
+    Masc_http_client.post_stream ~retain_body:false ~clock ~idle_timeout_sec:Float.infinity ~url
       ~headers:(json_headers (("Accept", "text/event-stream") :: auth_headers ()))
       ~body ~on_chunk () with
   | Error _ -> Error "Login stream unavailable; recheck the login status."

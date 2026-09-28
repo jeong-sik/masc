@@ -503,8 +503,8 @@ let section ~(providers : Types.overview_providers_reading) ~runtimes ~account_e
             ]
         | Types.Quota_unread | Types.Quota_read _ -> []
       in
-      (* Without the inventory the rows are drawn with no email, and the
-         section says why rather than implying the accounts have none. *)
+      (* Without the account email reading the rows are drawn with no email.
+         The section says why rather than implying the accounts have none. *)
       let emails_note =
         match (account_emails : Types.overview_account_emails_reading) with
         | Types.Account_emails_failed reason ->

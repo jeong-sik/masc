@@ -2964,7 +2964,7 @@ and surface_needs_of_surface : surface -> surface_needs = function
       { nothing with needs_operator_approvals = true; needs_asks = true }
   (* The Transport delivery block reads the transport health itself, so it
      is not whatever an Overview refresh happened to leave behind. Plan usage
-     names each account's email, so Usage reads the inventory too. *)
+     names each account's email, so Usage reads account emails too. *)
   | Metrics ->
       { nothing with
         needs_keeper_roster = true

@@ -2958,6 +2958,104 @@ let test_backlog_commit_through_an_alias_path_uses_the_held_lease () =
           (Backend.FileSystem.release_lock (backlog_lock_backend config)
              ~key:(backlog_lock_key config) ~owner:"other-holder")))
 
+let with_copy_writes_hook hook f =
+  let previous = Atomic.get Workspace.between_backlog_copy_writes_hook in
+  Atomic.set Workspace.between_backlog_copy_writes_hook hook;
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set Workspace.between_backlog_copy_writes_hook previous)
+    f
+
+(* The writer is stopped between its primary write and its recovery copy
+   write, with a lease that has already run out. A rival acquisition started
+   right then must wait until both copies are written. If the recovery copy
+   were written after the fence is released, the rival could take the lease
+   over and commit a newer primary and recovery copy before the writer's
+   late recovery write put its older snapshot back into the recovery copy,
+   the copy a reader falls back to when the primary cannot be read.
+   [write] runs under the backlog lock and makes the write being tested. *)
+let check_rival_waits_between_copy_writes ~clock config ~write =
+  let config = { config with Workspace_utils.lock_expiry_minutes = 0 } in
+  let rival_waited = ref None in
+  let hook_calls = ref 0 in
+  let rival_result =
+    Eio.Switch.run (fun sw ->
+      let rival = ref None in
+      let hook () =
+        incr hook_calls;
+        if !hook_calls = 1 then begin
+          let takeover =
+            Eio.Fiber.fork_promise ~sw (fun () ->
+              Backend.FileSystem.acquire_lock (backlog_lock_backend config)
+                ~key:(backlog_lock_key config) ~owner:"rival" ~ttl_seconds:60)
+          in
+          rival := Some takeover;
+          for _ = 1 to 20 do Eio.Fiber.yield () done;
+          Eio.Time.sleep clock 0.1;
+          rival_waited := Some (not (Eio.Promise.is_resolved takeover))
+        end
+      in
+      with_copy_writes_hook hook (fun () ->
+        Workspace_utils.with_file_lock config (Workspace.backlog_lock_path config)
+          (fun () -> write config));
+      match !rival with
+      | None -> None
+      | Some takeover -> Some (Eio.Promise.await_exn takeover))
+  in
+  Alcotest.(check int) "the writer passed between its two copy writes once" 1
+    !hook_calls;
+  Alcotest.(check (option bool))
+    "the rival waited while the writer was between its primary and recovery \
+     writes"
+    (Some true) !rival_waited;
+  (match rival_result with
+   | Some (Ok true) ->
+     ignore
+       (Backend.FileSystem.release_lock (backlog_lock_backend config)
+          ~key:(backlog_lock_key config) ~owner:"rival")
+   | Some (Ok false) -> ()
+   | Some (Error e) -> Alcotest.fail (Backend.show_error e)
+   | None -> Alcotest.fail "the rival never started");
+  let read_file path = In_channel.with_open_bin path In_channel.input_all in
+  Alcotest.(check string) "the recovery copy holds the writer's snapshot"
+    (read_file (Workspace.backlog_path config))
+    (read_file (backlog_recovery_path config))
+
+let test_backlog_commit_writes_both_copies_inside_the_fence () =
+  with_one_worker_pool (fun ~clock _pool config ->
+    ignore (Workspace.add_task config ~title:"copies" ~priority:1
+      ~description:"initial");
+    let before = (Workspace.read_backlog config).version in
+    check_rival_waits_between_copy_writes ~clock config ~write:(fun config ->
+      let snapshot = Workspace.read_backlog config in
+      match
+        Workspace.write_backlog_result config
+          (with_descriptions "committed" snapshot)
+      with
+      | Ok outcome ->
+        Alcotest.(check (option string)) "the recovery copy was written" None
+          outcome.recovery_error
+      | Error message -> Alcotest.fail message);
+    Alcotest.(check int) "the commit advanced the revision once" (before + 1)
+      (Workspace.read_backlog config).version;
+    Alcotest.(check (list string)) "the commit's tasks are stored"
+      [ "committed" ] (stored_descriptions config))
+
+let test_backlog_repair_writes_both_copies_inside_the_fence () =
+  with_one_worker_pool (fun ~clock _pool config ->
+    ignore (Workspace.add_task config ~title:"repair" ~priority:1
+      ~description:"initial");
+    Out_channel.with_open_text (backlog_recovery_path config) (fun oc ->
+      output_string oc "{}");
+    let before = (Workspace.read_backlog config).version in
+    check_rival_waits_between_copy_writes ~clock config ~write:(fun config ->
+      let stored = Workspace.read_backlog config in
+      match Workspace.repair_backlog_copies_result config stored with
+      | Ok () -> ()
+      | Error message -> Alcotest.fail message);
+    Alcotest.(check int) "the repair kept the revision" before
+      (Workspace.read_backlog config).version)
+
 (* What separates a malformed backlog from an absent one: the decode was
    reached and failed. #34482 replaced the hand-written schema sentence this
    pinned ("must contain exactly one tasks list") with the derived decoder's
@@ -3168,6 +3266,10 @@ let () =
         test_backlog_commit_uses_its_own_workspace_lease;
       Alcotest.test_case "backlog commit through an alias path uses the held lease"
         `Quick test_backlog_commit_through_an_alias_path_uses_the_held_lease;
+      Alcotest.test_case "backlog commit writes both copies inside the fence"
+        `Quick test_backlog_commit_writes_both_copies_inside_the_fence;
+      Alcotest.test_case "backlog repair writes both copies inside the fence"
+        `Quick test_backlog_repair_writes_both_copies_inside_the_fence;
       Alcotest.test_case "queued backlog encode stamps after the wait" `Quick
         test_queued_backlog_encode_stamps_after_the_wait;
     ];

@@ -676,7 +676,7 @@ module FileSystem = struct
       run_blocking_file_op (fun () -> Unix.realpath (Eio.Path.native_exn t.fs))
     with
     | root -> Ok root
-    | exception Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
     | exception exn ->
         Error
           (IOError

@@ -65,19 +65,29 @@ val write_backlog_result :
     explicitly. The pure JSON projection and encoding use the shared CPU pool
     when available; storage, mutation observers and [after_commit] remain on
     the caller. [last_updated] is stamped inside that job, after any wait for
-    a worker. The primary write runs as the protected step of the caller's
-    backlog lease ({!Workspace_utils_ops.commit_under_held_lease}): the owner
-    check, lease renewal and write happen inside the lock key's fence, and
-    when another acquisition holds the lease nothing is written and the
-    result is [Error]. *)
+    a worker. The primary write and the recovery copy write run as the
+    protected step of the caller's backlog lease
+    ({!Workspace_utils_ops.commit_under_held_lease}): the owner check, lease
+    renewal and both writes happen inside the lock key's fence, so no writer
+    that takes the lease over can commit between them. When another
+    acquisition holds the lease nothing is written and the result is
+    [Error]. The primary stays the commit point: a failed recovery write
+    after it is reported in [recovery_error], and observers and
+    [after_commit] still run. *)
 
 (** Repair primary mirrors and recovery copies with the current primary
     snapshot without incrementing its revision. Caller holds the backlog lock.
     Pure JSON projection and encoding use the shared CPU pool when available;
-    storage and mutation observers remain on the caller. The primary write is
-    protected by the caller's lease exactly as in {!write_backlog_result}. *)
+    storage and mutation observers remain on the caller. The primary and
+    recovery writes are protected by the caller's lease exactly as in
+    {!write_backlog_result}. *)
 val repair_backlog_copies_result :
   Workspace_utils_backend_setup.config -> Masc_domain.backlog -> (unit, string) result
+
+(** Test seam: runs inside the lease's fence between the primary write and
+    the recovery copy write of {!write_backlog_result} and
+    {!repair_backlog_copies_result}. Production never sets it. *)
+val between_backlog_copy_writes_hook : (unit -> unit) Atomic.t
 
 type copy_consistency = Copies_consistent | Copies_unavailable of string list
 (** Compare recovery and configured local mirrors once against a primary snapshot.

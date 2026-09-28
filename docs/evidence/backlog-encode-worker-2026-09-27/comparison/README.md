@@ -87,9 +87,15 @@ All 1,200 candidate observations exceed 0.1 ms (minimum 0.342451 ms).
 
 ## Retention and limits
 
-All 293 original artifact members are retained under `raw/` with deterministic
-gzip. `redaction.json` links original decoded hashes to published decoded
-hashes. Only CI checkout/home and owned workspace/artifact prefixes change.
+All 293 normalized artifact members are retained inside `raw.tar.gz`
+(SHA-256 `cea189a8e6ce615e7d5cd63ae7a9d244891a991ba74837c5243b00ee0e478f04`).
+The archive has fixed member order, timestamps and ownership; each member
+keeps its deterministic gzip bytes at a `raw/` path. `raw-files.json` maps
+those member paths to their SHA-256 hashes. Extract from this directory with
+`tar -xzf raw.tar.gz` to inspect them. The original Actions artifact above
+expires, so the normalized public receipts stay here as one evidence object.
+`redaction.json` links original decoded hashes to published decoded hashes.
+Only CI checkout/home and owned workspace/artifact prefixes change.
 Where a response body changes, original `body_sha256` and `json_bytes` remain
 and separate `published_body_sha256` / `published_json_bytes` describe the
 public text. Timings, wire sizes, source/binary hashes and semantic values

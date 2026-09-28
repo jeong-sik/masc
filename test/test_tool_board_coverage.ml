@@ -1992,6 +1992,26 @@ let check_page ~label page ~offset ~returned ~total ~next_offset =
   Alcotest.(check int) (label ^ ": total") total page.total;
   Alcotest.(check (option int)) (label ^ ": next_offset") next_offset page.next_offset
 
+(* Read the navigation the model actually sees, rather than deriving an
+   earlier page from [offset] in the test. *)
+let earlier_page_from_line body =
+  let line = match String.index_opt body '\n' with
+    | Some index -> String.sub body 0 index
+    | None -> body in
+  let needle = "Read earlier with comment_offset=" in
+  let n = String.length needle in
+  let rec find i =
+    if i + n > String.length line
+    then Alcotest.fail "the page gives no earlier-page instruction"
+    else if String.equal (String.sub line i n) needle
+    then i + n
+    else find (i + 1)
+  in
+  let start = find 0 in
+  let remaining = String.sub line start (String.length line - start) in
+  try Scanf.sscanf remaining "%d and comment_limit=%d." (fun offset limit -> offset, limit)
+  with Scanf.Scan_failure detail -> Alcotest.fail ("unreadable earlier-page instruction: " ^ detail)
+
 let check_get_rejected ~label post_id args expected =
   let result = dispatch_result "masc_board_post_get" (post_get_args post_id args) in
   Alcotest.(check bool) (label ^ " is not a successful read") false
@@ -2054,7 +2074,12 @@ let test_post_get_comment_pages_carry_their_range () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
-  let post_id = create_post_with_comments ~count:105 in
+  (* 99, not 105: task-1758/#39356 scope extension caps a post at
+     [Board.Limits.comment_count_cap] (100) live comments, so this fixture
+     stays one comment under the cap while keeping the same shape -- two
+     full 50-item pages would overrun it, a small tail page past them,
+     and an explicit end-of-thread read past the last comment. *)
+  let post_id = create_post_with_comments ~count:99 in
   let read ~label args =
     read_page ~result_boundary:Tool_output.Sent_to_client ~label post_id args
   in
@@ -2062,49 +2087,78 @@ let test_post_get_comment_pages_carry_their_range () =
   check_page
     ~label:"default page"
     default_page
-    ~offset:0
-    ~returned:50
-    ~total:105
-    ~next_offset:(Some 50);
+    ~offset:79
+    ~returned:20
+    ~total:99
+    ~next_offset:None;
   Alcotest.(check bool)
     "header counts the thread it pages"
     true
-    (contains default_page.thread "[105 replies]");
+    (contains default_page.thread "[99 replies]");
+  let rec read_older page seen =
+    let indices = List.init page.returned (fun index -> page.offset + index + 1) in
+    List.iter
+      (fun index ->
+         Alcotest.(check bool)
+           (Printf.sprintf "page carries comment %03d" index)
+           true
+           (contains page.body (Printf.sprintf "comment-%03d" index)))
+      indices;
+    let seen = indices @ seen in
+    if page.offset = 0
+    then seen
+    else
+      let offset, limit = earlier_page_from_line page.body in
+      Alcotest.(check int) "older page ends before current page" page.offset
+        (offset + limit);
+      Alcotest.(check bool) "older navigation makes progress" true
+        (offset < page.offset && limit > 0);
+      let older =
+        read ~label:"earlier page"
+          [ "comment_offset", `Int offset; "comment_limit", `Int limit ]
+      in
+      Alcotest.(check int) "earlier hint selects its page" offset older.offset;
+      Alcotest.(check int) "earlier hint does not overlap" limit older.returned;
+      read_older older seen
+  in
+  Alcotest.(check (list int)) "latest-to-oldest navigation covers each comment once"
+    (List.init 99 (fun index -> index + 1))
+    (List.sort Int.compare (read_older default_page []));
   check_page
     ~label:"normal page advances"
     (read ~label:"normal page" [ "comment_offset", `Int 2; "comment_limit", `Int 2 ])
     ~offset:2
     ~returned:2
-    ~total:105
+    ~total:99
     ~next_offset:(Some 4);
   check_page
     ~label:"final page"
-    (read ~label:"final page" [ "comment_offset", `Int 100; "comment_limit", `Int 100 ])
-    ~offset:100
+    (read ~label:"final page" [ "comment_offset", `Int 94; "comment_limit", `Int 100 ])
+    ~offset:94
     ~returned:5
-    ~total:105
+    ~total:99
     ~next_offset:None;
   (* A reader that finished the thread asks at its end to learn whether
      anything new arrived. That is a page, not a failure: it names the
      thread's size, so it cannot read as a thread without comments. Past the
      end is still refused. *)
-  let end_page = read ~label:"end of the thread" [ "comment_offset", `Int 105 ] in
+  let end_page = read ~label:"end of the thread" [ "comment_offset", `Int 99 ] in
   check_page
     ~label:"the end of the thread"
     end_page
-    ~offset:105
+    ~offset:99
     ~returned:0
-    ~total:105
+    ~total:99
     ~next_offset:None;
   Alcotest.(check bool) "the end page names the thread's size" true
-    (contains end_page.body "[no comments from offset 105: the thread has 105 now.]");
+    (contains end_page.body "[no comments from offset 99: the thread has 99 now.]");
   Alcotest.(check bool) "the end page does not say the thread has no comments" false
     (contains end_page.body "No comments.");
   check_get_rejected
     ~label:"offset past the end"
     post_id
-    [ "comment_offset", `Int 106 ]
-    "the thread now has 105 comments, at offsets 0-104";
+    [ "comment_offset", `Int 100 ]
+    "the thread now has 99 comments, at offsets 0-98";
   check_get_rejected
     ~label:"negative offset"
     post_id
@@ -2444,7 +2498,13 @@ let test_post_get_page_follows_the_lane_ceiling () =
   let comment_count = 30 in
   let post_id, _ids = create_thread_of_long_comments ~count:comment_count in
   let agent_core =
-    read_page ~result_boundary:agent_core_lane ~label:"agent-core lane" post_id []
+    read_page
+      ~result_boundary:agent_core_lane
+      ~label:"agent-core lane"
+      post_id
+      [ "comment_offset", `Int 0
+      ; "comment_limit", `Int Board.Limits.max_comment_page_limit
+      ]
   in
   check_page
     ~label:"agent-core lane"
@@ -2462,7 +2522,13 @@ let test_post_get_page_follows_the_lane_ceiling () =
     true
     (String.length agent_core.body <= Common.max_agent_core_inline_result_bytes);
   let mcp_caller =
-    read_page ~result_boundary:Tool_output.Sent_to_client ~label:"MCP caller" post_id []
+    read_page
+      ~result_boundary:Tool_output.Sent_to_client
+      ~label:"MCP caller"
+      post_id
+      [ "comment_offset", `Int 0
+      ; "comment_limit", `Int Board.Limits.max_comment_page_limit
+      ]
   in
   Alcotest.(check int) "MCP caller: offset" 0 mcp_caller.offset;
   Alcotest.(check int) "MCP caller: total" comment_count mcp_caller.total;
@@ -2495,7 +2561,12 @@ let test_keeper_board_read_pages_by_the_projection_it_is_given () =
         ~meta:keeper_meta
         ~result_projection
         ~name:"masc_board_post_get"
-        ~args:(post_get_args post_id [])
+        ~args:
+          (post_get_args
+             post_id
+             [ "comment_offset", `Int 0
+             ; "comment_limit", `Int Board.Limits.max_comment_page_limit
+             ])
     in
     page_view_of
       ~body:execution.Keeper_tool_execution.raw_output
@@ -2602,7 +2673,7 @@ let test_post_get_a_sweep_between_pages_shows_in_the_next_page () =
        ~result_boundary:Tool_output.Sent_to_client
        ~label:"before the sweep"
        post_id
-       [ "comment_limit", `Int page_limit ])
+       [ "comment_offset", `Int 0; "comment_limit", `Int page_limit ])
     ~offset:0
     ~returned:page_limit
     ~total:comment_count

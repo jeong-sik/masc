@@ -2828,7 +2828,7 @@ type runtime_context_source =
   | Runtime_context_capability
   | Runtime_context_clamped
 
-type exact_slot_group = Exact_http_slots | Exact_cli_slots
+type exact_slot_group = Exact_http_slots | Exact_cli_slots | Exact_output_unsupported
 
 type runtime_option = {
   ro_id : string;
@@ -2962,6 +2962,7 @@ type memory_librarian_failure_kind =
   | Failure_exact_setup
   | Failure_exact_execution
   | Failure_domain_output_invalid
+  | Failure_absorb_judgment
   | Failure_memory_snapshot_write
   | Failure_runtime_context_unavailable
   | Failure_lane_cancelled
@@ -4965,11 +4966,12 @@ let decode_runtime_option ~default_id json =
   let* ro_provider_id = required_string_field json "provider_id" in
   let* ro_model = required_string_field json "model" in
   let* ro_exact_slot_group =
-    let* group = required_string_field json "exact_slot_group" in
+    let* group = required_nullable_string_field json "exact_slot_group" in
     match group with
-    | "slots" -> Ok Exact_http_slots
-    | "cli_slots" -> Ok Exact_cli_slots
-    | _ -> Error (Printf.sprintf "unknown exact_slot_group %S" group)
+    | Some "slots" -> Ok Exact_http_slots
+    | Some "cli_slots" -> Ok Exact_cli_slots
+    | None -> Ok Exact_output_unsupported
+    | Some group -> Error (Printf.sprintf "unknown exact_slot_group %S" group)
   in
   let* ro_effective_max_context = required_int_field json "effective_max_context" in
   let* context_source = required_string_field json "max_context_source" in
@@ -5554,6 +5556,7 @@ let decode_memory_librarian_failure_kind = function
   | Some "exact_setup_failure" -> Ok (Some Failure_exact_setup)
   | Some "exact_execution_failure" -> Ok (Some Failure_exact_execution)
   | Some "domain_output_invalid" -> Ok (Some Failure_domain_output_invalid)
+  | Some "absorb_judgment_failure" -> Ok (Some Failure_absorb_judgment)
   | Some "memory_snapshot_write_failure" -> Ok (Some Failure_memory_snapshot_write)
   | Some "runtime_context_unavailable" -> Ok (Some Failure_runtime_context_unavailable)
   | Some "lane_cancelled" -> Ok (Some Failure_lane_cancelled)

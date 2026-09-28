@@ -35,11 +35,22 @@ type outcome =
             [Skill_catalog_snapshot.snapshot_revision_to_string]. Carried as
             text because this layer does not link the snapshot library;
             nothing branches on it. *)
+      ; kind : string
+        (** The observability profile kind the editor previewed,
+            ["instruction"] or ["composition"]. Carried as text for the same
+            reason as [snapshot_revision]: the publishing Keeper confirms
+            what landed without a second call. *)
+      ; diagnostics : string list
+        (** Advisory notes from the editor preview, for example a fence info
+            near-miss that left a meant composition as an instruction. Empty
+            when the candidate carried no such note. *)
       }
   | Created_but_shadowed of
       { reference : Skill_reference.t
       ; snapshot_revision : string
       ; winner : Skill_reference.identity
+      ; kind : string
+      ; diagnostics : string list
       }
       (** Written and published, but [winner] declares the same name earlier
           in catalog order. Turns that list Skills by name see [winner];
@@ -48,6 +59,8 @@ type outcome =
   | Created_but_unpublished of
       { reference : Skill_reference.t
       ; reason : string
+      ; kind : string
+      ; diagnostics : string list
       }
       (** [SKILL.md] was written, but the catalog snapshot that would make
           it visible was not published. *)

@@ -863,7 +863,7 @@ type runtime_context_source =
   | Runtime_context_capability
   | Runtime_context_clamped
 
-type exact_slot_group = Exact_http_slots | Exact_cli_slots
+type exact_slot_group = Exact_http_slots | Exact_cli_slots | Exact_output_unsupported
 
 type runtime_option = {
   ro_id : string;
@@ -1061,6 +1061,7 @@ type memory_librarian_failure_kind =
   | Failure_exact_setup
   | Failure_exact_execution
   | Failure_domain_output_invalid
+  | Failure_absorb_judgment
   | Failure_memory_snapshot_write
   | Failure_runtime_context_unavailable
   | Failure_lane_cancelled

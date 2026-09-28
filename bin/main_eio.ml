@@ -1844,7 +1844,7 @@ let runtime_verify_cmd_exit base_path runtime_id timeout_s =
 let runtime_verify_cmd =
   let runtime_id = Arg.(required & pos 0 (some string) None & info [] ~docv:"RUNTIME_ID") in
   let timeout = Arg.(value & opt float runtime_verification_timeout_s & info ["timeout"] ~docv:"SECONDS"
-    ~doc:"Deadline for this explicit readiness measurement, including client admission and model/tool roundtrip.") in
+    ~doc:"Deadline for cancellable client admission and model/tool exchange; blocking Muse account preparation can delay it.") in
   Cmd.v (Cmd.info "runtime-verify" ~doc:"Verify the selected model response and a harmless tool-result roundtrip.")
     Term.(const runtime_verify_cmd_exit $ base_path $ runtime_id $ timeout)
 
@@ -2246,6 +2246,11 @@ let runtime_probe_cmd_exit base_path runtime_id =
           | Runtime_execution.Antigravity_cli _ ->
               print_string "unsupported\n";
               Printf.eprintf "runtime %S (antigravity) exposes no login probe\n"
+                runtime_id;
+              3
+          | Runtime_execution.Muse_serve _ ->
+              print_string "unsupported\n";
+              Printf.eprintf "runtime %S (muse code) exposes no login probe\n"
                 runtime_id;
               3
           | Runtime_execution.Claude_code exec ->
@@ -3611,13 +3616,33 @@ let runtime_model_list_cmd =
 
 let runtime_codex_models_cmd =
   let cli = Arg.(value & opt string "codex" & info ["cli-path"] ~docv:"EXECUTABLE") in
-  let run cli_path =
+  let account_home = Arg.(value & opt (some string) None & info ["account-home"]
+    ~docv:"DIRECTORY" ~doc:"Selected CODEX_HOME for metadata discovery.") in
+  let run cli_path account_home =
     Masc_cli_codex_models.run
       ~cli_path:(Runtime_official_cli_install.spawn_path Codex ~command:cli_path)
-      ~timeout_s:runtime_probe_subscription_timeout_s
+      ~account_home ~timeout_s:runtime_probe_subscription_timeout_s
   in
   Cmd.v (Cmd.info "runtime-codex-models" ~doc:"Refresh selected Codex model metadata in an isolated connection home without a model turn.")
-    Term.(const run $ cli)
+    Term.(const run $ cli $ account_home)
+
+let runtime_muse_models_cmd =
+  let cli = Arg.(value & opt string "muse" & info ["cli-path"] ~docv:"EXECUTABLE") in
+  let account_home = Arg.(required & opt (some string) None & info ["account-home"]
+    ~docv:"DIRECTORY" ~doc:"Explicit Muse account HOME; never inherited from the caller.") in
+  let timeout = Arg.(value & opt float runtime_probe_subscription_timeout_s
+    & info ["timeout-s"] ~docv:"SECONDS"
+      ~doc:"Finite positive deadline for the metadata exchange, including protocol notifications; blocking account preparation can delay it.") in
+  let run cli_path account_home timeout_s =
+    if not (Float.is_finite timeout_s) || timeout_s <= 0. then (
+      prerr_endline "Muse discovery timeout must be finite and positive.";
+      1)
+    else Masc_cli_muse_models.run
+      ~cli_path:(Runtime_official_cli_install.spawn_path Muse ~command:cli_path)
+      ~account_home ~timeout_s in
+  Cmd.v (Cmd.info "runtime-muse-models"
+    ~doc:"List source-labelled Muse model metadata without a session or model turn; account availability is not verified.")
+    Term.(const run $ cli $ account_home $ timeout)
 
 let runtime_setup_render_cmd =
   let spec = Arg.(required & opt (some string) None & info ["spec"] ~doc:"Private setup JSON file.") in
@@ -3885,7 +3910,7 @@ let setup_stop_owner_cmd =
 
 let runtime_client_path_cmd =
   let client = Arg.(required & opt (some Masc_cli_client_path.client_arg) None & info ["client"]
-    ~docv:"CLIENT" ~doc:"claude-code, codex or antigravity.") in
+    ~docv:"CLIENT" ~doc:"claude-code, codex, antigravity or muse-code.") in
   let command = Arg.(value & opt (some string) None & info ["command"]
     ~docv:"COMMAND" ~doc:"The configured command; defaults to the client's own name.") in
   Cmd.v (Cmd.info "runtime-client-path"
@@ -4137,6 +4162,7 @@ let cmd =
     ; voice_local_setup_cmd
     ; runtime_model_list_cmd
     ; runtime_codex_models_cmd
+    ; runtime_muse_models_cmd
     ; runtime_setup_render_cmd
     ; runtime_setup_inventory_cmd
     ; runtime_setup_batch_cmd

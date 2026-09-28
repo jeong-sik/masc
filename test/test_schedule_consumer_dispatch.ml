@@ -986,6 +986,76 @@ let test_recurring_wake_supersedes_the_earlier_pending_occurrence () =
     (List.map (fun (stimulus : Keeper_event_queue.stimulus) -> stimulus.post_id) queued)
 ;;
 
+(* A newer occurrence supersedes the earlier pending one — unless a turn
+   already took it. The taken occurrence stays for its turn to ACK while the
+   current one still lands; superseding it underneath would fail the turn's
+   own ACK. *)
+let test_supersede_leaves_the_taken_occurrence_to_its_turn () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "schedule-keeper" in
+  let base_path = config.Workspace_utils.base_path in
+  ignore (persist_keeper_meta config keeper_name : Keeper_meta_contract.keeper_meta);
+  let channel =
+    match
+      Keeper_continuation_channel.slack
+        ~team_id:(Some "team-1")
+        ~channel_id:"channel-1"
+        ~thread_ts:(Some "1710000000.100")
+        ~user_id:"user-1"
+    with
+    | Ok channel -> channel
+    | Error detail -> fail detail
+  in
+  let _request =
+    create_routed_keeper_wake_schedule
+      ~recurrence:(Schedule_domain.Interval { interval_sec = 60 })
+      config
+      channel
+  in
+  let first_id = tick_ok config ~now:201.0 |> single_occurrence_id in
+  let selection =
+    match
+      Keeper_event_queue_persistence.select_when_result
+        ~base_path
+        ~keeper_name
+        ~now:202.0
+        ~ready:(fun _ -> true)
+    with
+    | Ok (Some selection) -> selection
+    | Ok None -> fail "the first occurrence was not queued"
+    | Error detail -> fail detail
+  in
+  check string "the turn takes the first occurrence" first_id selection.source.post_id;
+  Keeper_reaction_ledger.record_event_queue_turn_started
+    ~base_path
+    ~keeper_name
+    selection.source;
+  let second_id = tick_ok config ~now:261.0 |> single_occurrence_id in
+  let queued_ids =
+    Keeper_registry_event_queue.snapshot ~base_path keeper_name
+    |> Keeper_event_queue.to_list
+    |> List.map (fun (stimulus : Keeper_event_queue.stimulus) -> stimulus.post_id)
+    |> List.sort String.compare
+  in
+  check (list string) "taken stays while the current occurrence lands"
+    (List.sort String.compare [ first_id; second_id ])
+    queued_ids;
+  (match
+     Keeper_event_queue_persistence.ack_pending_result
+       ~base_path
+       ~keeper_name
+       ~selection
+       ()
+   with
+   | Ok () -> ()
+   | Error detail -> fail ("the turn could not ACK its own entry: " ^ detail));
+  check (list string) "the turn's ACK leaves the current occurrence" [ second_id ]
+    (Keeper_registry_event_queue.snapshot ~base_path keeper_name
+     |> Keeper_event_queue.to_list
+     |> List.map (fun (stimulus : Keeper_event_queue.stimulus) -> stimulus.post_id))
+;;
+
 let test_one_call_cancels_every_pending_occurrence_of_a_schedule () =
   (* The live shape of 2026-09-14 18:20: two occurrences of one schedule
      pending at once, cancelled in one call. The first tick was refused as an
@@ -1389,6 +1459,64 @@ let test_schedule_cancel_mid_turn_leaves_the_taken_wake_to_its_turn () =
   in
   check bool "cancel from inside the turn succeeds" true (Tool_result.is_success result);
   check (list string) "only the taken occurrence stays pending" [ taken_id ]
+    (Keeper_registry_event_queue.snapshot ~base_path keeper_name
+     |> Keeper_event_queue.to_list
+     |> List.map (fun (stimulus : Keeper_event_queue.stimulus) -> stimulus.post_id));
+  (match
+     Keeper_event_queue_persistence.ack_pending_result
+       ~base_path
+       ~keeper_name
+       ~selection
+       ()
+   with
+   | Ok () -> ()
+   | Error detail -> fail ("the turn could not ACK its own entry: " ^ detail));
+  check int "the turn's ACK empties the queue" 0
+    (Keeper_registry_event_queue.snapshot ~base_path keeper_name
+     |> Keeper_event_queue.length);
+  match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
+  | None -> fail "cancelled schedule missing"
+  | Some stored ->
+    check string "schedule is cancelled" "cancelled"
+      (Schedule_domain.schedule_status_to_string stored.status)
+;;
+
+(* Keeper retirement cancels every schedule the keeper owns. A wake a running
+   turn already took stays for that turn to ACK, the way masc_schedule_cancel
+   leaves it: retiring the keeper must not fail the turn's own ACK. *)
+let test_retirement_cancel_leaves_the_taken_wake_to_its_turn () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "schedule-keeper" in
+  let base_path = config.Workspace_utils.base_path in
+  ignore (persist_keeper_meta config keeper_name : Keeper_meta_contract.keeper_meta);
+  let request =
+    create_keeper_wake_schedule
+      ~recurrence:(Schedule_domain.Interval { interval_sec = 60 })
+      config
+  in
+  let taken_id = tick_ok config ~now:201.0 |> single_occurrence_id in
+  let selection =
+    match
+      Keeper_event_queue_persistence.select_when_result
+        ~base_path
+        ~keeper_name
+        ~now:202.0
+        ~ready:(fun _ -> true)
+    with
+    | Ok (Some selection) -> selection
+    | Ok None -> fail "the fired occurrence was not queued"
+    | Error detail -> fail detail
+  in
+  check string "the turn takes the fired occurrence" taken_id selection.source.post_id;
+  Keeper_reaction_ledger.record_event_queue_turn_started
+    ~base_path
+    ~keeper_name
+    selection.source;
+  (match Server_schedule_consumers.cancel_keeper_schedules config ~keeper_name with
+   | Ok () -> ()
+   | Error error -> fail (Schedule_store.store_error_to_string error));
+  check (list string) "the taken occurrence stays pending" [ taken_id ]
     (Keeper_registry_event_queue.snapshot ~base_path keeper_name
      |> Keeper_event_queue.to_list
      |> List.map (fun (stimulus : Keeper_event_queue.stimulus) -> stimulus.post_id));
@@ -3528,6 +3656,7 @@ let approved_grant_fixture ~base_path ~keeper_name ~input =
        ~base_path
        ~id:approval_id
        ~decision:Keeper_approval_queue_rules_types.Decision.Approve
+       ~source:Keeper_approval_queue_rules_types.Human_operator
        ()
    with
    | Ok _ -> ()
@@ -3785,6 +3914,7 @@ let test_rejected_resolution_projection_precedes_turn_intake () =
        ~base_path
        ~id:approval_id
        ~decision:(Keeper_approval_queue_rules_types.Decision.Reject "operator denied")
+       ~source:Keeper_approval_queue_rules_types.Human_operator
        ()
    with
    | Ok _ -> ()
@@ -3884,6 +4014,8 @@ let () =
             test_routed_schedule_carries_occurrence_destination_to_keeper
         ; test_case "a recurring wake supersedes the earlier pending occurrence" `Quick
             test_recurring_wake_supersedes_the_earlier_pending_occurrence
+        ; test_case "supersede leaves the taken occurrence to its turn" `Quick
+            test_supersede_leaves_the_taken_occurrence_to_its_turn
         ; test_case
             "one call cancels every pending occurrence of a schedule"
             `Quick
@@ -3904,6 +4036,10 @@ let () =
             "schedule cancel mid-turn leaves the taken wake to its turn"
             `Quick
             test_schedule_cancel_mid_turn_leaves_the_taken_wake_to_its_turn
+        ; test_case
+            "retirement cancel leaves the taken wake to its turn"
+            `Quick
+            test_retirement_cancel_leaves_the_taken_wake_to_its_turn
         ; test_case "owner absent pending demand is drained not retained" `Quick
             test_owner_absent_pending_demand_is_drained_not_retained
         ; test_case "shutdown fence rejects schedule intake before enqueue" `Quick

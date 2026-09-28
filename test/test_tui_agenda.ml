@@ -38,11 +38,11 @@ let row ?(standing = Agenda.Coming) ?(recurrence = "every 3600s") at_iso who wha
   { at_iso; standing; who; what; recurrence }
 ;;
 
-let edgar = row "2026-08-26T02:45:00Z" "keeper:edgar.a.poe" "진행 상황 체크"
-let sweep = row "2026-08-26T03:14:04Z" "keeper:quill" "hourly board sweep"
+let edgar = row "2026-08-26T02:45:00Z" "edgar.a.poe" "진행 상황 체크"
+let sweep = row "2026-08-26T03:14:04Z" "quill" "hourly board sweep"
 
 let done_earlier =
-  row ~standing:Agenda.Settled "2026-08-26T01:00:00Z" "keeper:orrery" "정기 보드 스윕"
+  row ~standing:Agenda.Settled "2026-08-26T01:00:00Z" "orrery" "정기 보드 스윕"
 ;;
 
 (* [kta_asked_at] and [kta_timeout_sec] as the registry reports them: asked a
@@ -115,7 +115,7 @@ let test_wire_status_parsing () =
 
 let test_unrecognised_status_stays_off_the_strip () =
   let odd = row ~standing:(Agenda.Unrecognised "quantum") "2026-08-26T02:00:00Z"
-              "keeper:ghost" "무엇인지 모를 것"
+              "ghost" "무엇인지 모를 것"
   in
   let t = Agenda.project ~scheduled:(Agenda.Read [ odd; edgar ])
             ~awaiting:(Agenda.Read []) in
@@ -150,7 +150,7 @@ let test_the_clock_is_local () =
 
 (* At 23:50 a bare "08:00" reads as ten minutes away. *)
 let test_a_later_day_says_so () =
-  let tomorrow = row "2026-08-26T23:00:00Z" "keeper:edgar.a.poe" "아침 일정 정리" in
+  let tomorrow = row "2026-08-26T23:00:00Z" "edgar.a.poe" "아침 일정 정리" in
   let t = Agenda.project ~scheduled:(Agenda.Read [ tomorrow ])
             ~awaiting:(Agenda.Read []) in
   match strip_of t with
@@ -580,9 +580,9 @@ let test_rows_fit_the_width_they_were_given () =
       ~scheduled:
         (Agenda.Read
            [ row ~recurrence:"cron 45 8-23 * * * Asia/Seoul" "2026-08-26T02:45:00Z"
-               "keeper:edgar.a.poe" "진행 상황 체크"
+               "edgar.a.poe" "진행 상황 체크"
            ; row ~recurrence:"daily 20:00:00 Asia/Seoul" "2026-08-26T11:00:00Z"
-               "keeper:orrery" "정기 백로그 감사, 목표 진척, agent fitness 점검"
+               "orrery" "정기 백로그 감사, 목표 진척, agent fitness 점검"
            ])
       ~awaiting:(Agenda.Read [ ask "lane-smith" "Execute" ])
   in
@@ -599,22 +599,37 @@ let test_rows_fit_the_width_they_were_given () =
     [ 30; 46; 60; 76; 120 ]
 ;;
 
-(* [short_who] is public now: the Schedules list needed the same answer, and
-   before it called this it drew "keeper:~" -- the seven-cell prefix took the
-   name's room and two schedules for two different keepers read alike.
+(* The agenda receives a display value chosen by the schedule row projection.
+   It must leave an older server's encoded target untouched. *)
+let test_wake_name_is_drawn_without_reparsing () =
+  let clock who =
+    let wake = row "2026-08-26T02:45:00Z" who "" in
+    match strip_of ~cols:120
+            (Agenda.project ~scheduled:(Agenda.Read [ wake ])
+               ~awaiting:(Agenda.Read [])) with
+    | Some strip -> strip.clock
+    | None -> fail "the wake should draw a clock"
+  in
+  check bool "a supplied keeper name is drawn" true
+    (contains ~needle:"edgar.a.poe" (clock "edgar.a.poe"));
+  check bool "an older server's target is not parsed" true
+    (contains ~needle:"keeper:edgar.a.poe" (clock "keeper:edgar.a.poe"))
+;;
 
-   A target with no prefix, or one whose prefix is a different kind, comes
-   back untouched. Stripping up to the first colon would eat the front of any
-   name that happens to contain one. *)
-let test_the_kind_prefix_comes_off_a_target () =
-  check string "the keeper prefix comes off" "edgar.a.poe"
-    (Agenda.short_who "keeper:edgar.a.poe");
-  check string "a bare name is left alone" "edgar.a.poe"
-    (Agenda.short_who "edgar.a.poe");
-  check string "another kind is left alone" "board:sweep"
-    (Agenda.short_who "board:sweep");
-  check string "the prefix alone is not a name to shorten" "keeper:"
-    (Agenda.short_who "keeper:")
+(* The decoder and both schedule surfaces must consume one field selection.
+   The row choice itself is tested in [test_tui_keys]. *)
+let test_schedule_name_wire_is_connected () =
+  check int "decoder reads the server's bare keeper field" 1
+    (Ast_grep.count_string_literals_in_value_binding
+       ~module_path:"bin/masc_tui_loader.ml"
+       ~binding_name:"decode_schedule_row" ~literals:[ "payload_keeper_name" ]);
+  check int "agenda uses the row's selected name" 1
+    (calls ~module_path:"bin/masc_tui_types.ml" ~binding_name:"agenda"
+       ~callee:"schedule_row_who");
+  check int "Schedules list uses the same selected name" 1
+    (calls ~module_path:"bin/masc_tui_render.ml"
+       ~binding_name:"schedule_row_subject"
+       ~callee:"Masc_tui_types.schedule_row_who")
 ;;
 
 (* A task that only the operator can move is a reason to draw the strip. The
@@ -963,8 +978,10 @@ let () =
         ; test_case "an expired call says so" `Quick test_an_expired_call_says_so
         ; test_case "rows fit the width they were given" `Quick
             test_rows_fit_the_width_they_were_given
-        ; test_case "the kind prefix comes off a target" `Quick
-            test_the_kind_prefix_comes_off_a_target
+        ; test_case "a wake name is drawn without reparsing" `Quick
+            test_wake_name_is_drawn_without_reparsing
+        ; test_case "schedule name wire reaches both surfaces" `Quick
+            test_schedule_name_wire_is_connected
         ] )
     ; ( "tasks stuck on the operator"
       , [ test_case "a stuck task alone takes the row" `Quick

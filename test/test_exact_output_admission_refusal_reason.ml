@@ -59,7 +59,7 @@ thinking-support = true
                lane)
           (List.sort_uniq
              String.compare
-             (lane_id :: Server_runtime_bootstrap.mandatory_exact_output_lane_ids))))
+             (lane_id :: Standalone_lane.required_ids))))
     exact_body_timeout_s
 ;;
 

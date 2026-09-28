@@ -18,6 +18,15 @@ val prepare : account_home:string -> (t, error) result
     plugins or permission choices from source settings are imported. Owned
     account and credential-parent directories must not be group/other writable. *)
 
+val account_home : t -> string
+(** Exact configured source account spelling, distinct from the canonical
+    filesystem ownership root used during preparation. *)
+
+val physical_home : t -> string
+(** The resolved physical account root used to prepare this generation. Child
+    HOME and data/state/cache roots use it so retargeting the configured symlink
+    cannot split credential and session storage across accounts. *)
+
 val config_home : t -> string
 val private_tmpdir : t -> string
 (** Override the child's TMPDIR as well: the vendor sandbox permits its temp

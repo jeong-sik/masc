@@ -303,11 +303,31 @@ type sub_board = {
 module Limits = struct
   let env_int name default = Env_config_core.get_int ~default name
 
-  let default_comment_page_limit = 50
+  (* The default read is the newest comments, not the oldest: a reader that
+     does not know a thread yet wants its tail, and the body travels with it.
+     A caller that wants the head names comment_offset=0. *)
+  let default_comment_page_limit = 20
   let max_comment_page_limit = 100
   let default_ttl_hours = 0    (* 0 = permanent (no expiry) *)
   let sweeper_interval_sec = env_int "MASC_BOARD_SWEEPER_INTERVAL_SEC" 10
   let sweeper_batch_size = env_int "MASC_BOARD_SWEEPER_BATCH_SIZE" 100
+  (* task-1758/#39356 scope extension: once a thread holds this many
+     comments, the next one is refused at the write boundary so a hot
+     thread becomes a chain of successor posts instead of one endless row.
+     Override with MASC_BOARD_COMMENT_COUNT_CAP. *)
+  let comment_count_cap = env_int "MASC_BOARD_COMMENT_COUNT_CAP" 100
+
+  (** [comment_count_cap]'s fail-open meaning is deliberate: a non-positive
+      value switches the growth limit off. But silence would make that look
+      like a typo that silently did nothing, so the loader records one WARN
+      that names the variable and the value read (issuecomment-5858752752). *)
+  let cap_warning_message ~cap () =
+    if cap > 0 then None
+    else
+      Some
+        (Printf.sprintf
+           "MASC_BOARD_COMMENT_COUNT_CAP is %d; the comment cap is OFF"
+           cap)
 end
 
 module Comment_page = struct
@@ -406,7 +426,10 @@ module Comment_page = struct
      page starts, so two of them in one call name two pages. The call is
      refused rather than one of them winning: a winner the caller did not
      pick reads a page it did not ask for. comment_tail is also the page's
-     size, so comment_limit beside it is a second size. *)
+     size, so comment_limit beside it is a second size. With none of them the
+     read starts at the newest comment: a caller that does not know the
+     thread yet wants its tail, and comment_offset=0 is how it asks for the
+     head. *)
   let request_of_args (args : Yojson.Safe.t) =
     match args with
     | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
@@ -435,7 +458,7 @@ module Comment_page = struct
          Ok { start = From_offset offset; limit }
        | None, None, None, limit ->
          let* limit = bounded_limit limit in
-         Ok { start = From_offset 0; limit })
+         Ok { start = Latest; limit })
   ;;
 
   let request_error_to_string = function
@@ -617,8 +640,8 @@ module Comment_page = struct
     ;;
 
     let line position =
-      match position.returned, position.next_offset with
-      | 0, _ ->
+      match position.returned with
+      | 0 ->
         (match position.total with
          | 0 -> "[no comments]"
          | total ->
@@ -626,19 +649,33 @@ module Comment_page = struct
              "[no comments from offset %d: the thread has %d now.]"
              position.offset
              total)
-      | returned, Some next ->
+      | returned ->
+        let following =
+          match position.next_offset with
+          | Some next -> Printf.sprintf " Read the rest with comment_offset=%d." next
+          | None -> " No comments after this page."
+        in
+        (* The newest page has no forward cursor, but it may have older
+           comments. Name a non-overlapping page immediately before this
+           one; repeating the hint walks to offset zero without rereading
+           the newest slice. A budget-shortened page uses its actual size. *)
+        let preceding =
+          if position.offset = 0
+          then ""
+          else
+            let count = min position.offset returned in
+            Printf.sprintf
+              " Read earlier with comment_offset=%d and comment_limit=%d."
+              (position.offset - count)
+              count
+        in
         Printf.sprintf
-          "[comments %d-%d of %d. Read the rest with comment_offset=%d.]"
+          "[comments %d-%d of %d.%s%s]"
           position.offset
           (position.offset + returned - 1)
           position.total
-          next
-      | returned, None ->
-        Printf.sprintf
-          "[comments %d-%d of %d. No comments after this page.]"
-          position.offset
-          (position.offset + returned - 1)
-          position.total
+          following
+          preceding
     ;;
 
     let metadata_key = "masc.comment_page"

@@ -609,6 +609,15 @@ type close_successor =
   | No_successor
   | Successor of string
 
+let summary_is_blank summary =
+  Uutf.String.fold_utf_8
+    (fun blank _ -> function
+      | `Uchar uchar -> blank && Uucp.White.is_white_space uchar
+      | `Malformed _ -> false)
+    true
+    summary
+;;
+
 (** Close a post (typed [closed] state, task-1758/#39356). Same durability
     and rollback shape as [set_pinned]: the caller ([author]/[operator]/a
     configured moderator) is checked at the HTTP/dispatch boundary, not
@@ -637,7 +646,7 @@ let set_closed store ~post_id ~closed_by ~successor ~summary ()
   | Ok _, Error e -> Error e
   | Ok pid, Ok closed_by_id ->
     let summary = String.trim summary in
-    if String.equal summary "" then
+    if summary_is_blank summary then
       Error (Validation_error "close summary must not be empty")
     else
     let successor_id =

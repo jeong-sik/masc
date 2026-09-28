@@ -396,6 +396,7 @@ let test_close_rejects_blank_summary () =
   in
   attempt "empty summary" "";
   attempt "whitespace-only summary" "   \t ";
+  attempt "non-breaking-space summary" "\194\160";
   restart ();
   Alcotest.(check bool) "post stayed open after refused closes" true
     (Option.is_none (get_post_exn post_id).closed)

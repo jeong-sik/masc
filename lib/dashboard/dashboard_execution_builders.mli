@@ -6,12 +6,8 @@
     [include Dashboard_execution_builders] to make the four brief
     builders visible bare in the dashboard JSON dispatcher.
 
-    Internal: 17 entries stay private — 2 module-local types
-    ([keeper_lifecycle] / [keeper_execution_state]) + their string
-    converters, 7 env-cached threshold constants
-    ([signal_*_sec] / [ctx_*] / [keeper_action_stale_sec]),
-    3 task / message / agent helpers.  Future "expose threshold
-    constants" PR can reopen explicitly. *)
+    Lifecycle types, threshold constants and task/message indexes stay
+    private to the projection. *)
 
 include module type of struct
   include Dashboard_execution_helpers
@@ -38,9 +34,11 @@ val build_worker_support_briefs :
   messages:Masc_domain.message list ->
   worker_context list
 (** [build_worker_support_briefs ~now_ts ~tasks ~agents ~messages]
-    returns one {!worker_context} per agent, cross-referencing current tasks
-    and messages. Used by {!Dashboard_execution}'s worker-support
-    section. *)
+    returns attention-needing {!worker_context} rows, cross-referencing
+    current tasks and messages. Claimed/in-progress task counts are built
+    once per call for the supplied agents, using exact assignee names.
+    The index is not retained across renders. Used by
+    {!Dashboard_execution}'s worker-support section. *)
 
 val continuity_row_of_keeper :
   now_ts:float ->

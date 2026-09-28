@@ -15356,10 +15356,13 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       (match result with
        | Error detail ->
            notice ~kind:Notice_failure ("/copy could not read chat history: " ^ detail)
-       | Ok { Keeper_chat_history.rows; _ } ->
+       | Ok { Keeper_chat_history.rows; dropped } ->
            (* Direct and autonomous rows arrive from separate stores. Their
               turn sequence orders two recorded turns; otherwise use the
-              display clock and keep append order on an exact tie. *)
+              display clock and keep append order on an exact tie. Unreadable
+              rows arrive only as [dropped]: the newest readable reply may not
+              be the newest reply, so the notice says what the history pane's
+              banner says rather than reporting a partial read as the latest. *)
            let newer (row : Keeper_chat_history.row) prior =
              match row.turn_sequence, prior.Keeper_chat_history.turn_sequence with
              | Some current, Some previous when current <> previous ->
@@ -15390,7 +15393,13 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                None rows
            in
            (match newest with
-            | None -> notice ~kind:Notice_failure "/copy found no completed reply"
+            | None ->
+                notice ~kind:Notice_failure
+                  (if dropped > 0 then
+                     Printf.sprintf
+                       "/copy found no completed reply (%d saved row(s) could not be read)"
+                       dropped
+                   else "/copy found no completed reply")
             | Some row ->
                 let characters =
                   String.fold_left
@@ -15398,12 +15407,21 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                       if Char.code byte land 0xc0 = 0x80 then count else count + 1)
                     0 row.text
                 in
+                let assessment =
+                  if dropped > 0 then "latest readable reply" else "latest reply"
+                in
+                let unreadable =
+                  if dropped > 0 then
+                    Printf.sprintf "; %d saved row(s) could not be read" dropped
+                  else ""
+                in
                 Terminal_write_repair.note ();
                 write_to_terminal (Link.osc52_copy row.text);
                 notice ~kind:Notice_reply
                   (Printf.sprintf
-                     "Sent %s's latest reply (%d characters, %d bytes) via OSC 52 (terminal support unconfirmed)"
-                     keeper_name characters (String.length row.text))))
+                     "Sent %s's %s (%d characters, %d bytes) via OSC 52 (terminal support unconfirmed)%s"
+                     keeper_name assessment characters (String.length row.text)
+                     unreadable)))
   | Keeper_chat_history_loaded
       (generation, keeper_name, history_result, memory_result) ->
       (match state.msg_history_inflight with

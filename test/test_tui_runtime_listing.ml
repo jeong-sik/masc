@@ -51,7 +51,6 @@ let press state keys =
       state.runtime_lane_pick <- Some (pick, moved)
 
 let test_schema_less_client_is_refused_only_for_exact_lane () =
-  let state = state () in
   let muse = { (runtime "muse.fixture") with
     ro_exact_slot_group = Masc.Tui_decode.Exact_output_unsupported } in
   (match runtime_pick_availability (Pick_exact_lane Standalone_lane.Verifier) muse with

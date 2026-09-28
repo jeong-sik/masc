@@ -260,7 +260,7 @@ let test_cli_slots_answer_the_curator () =
       commit base_path "Observation a CLI slot curates";
       let context = Inventory.collect ~base_path |> require in
       let resolved =
-        { Masc.Runtime_exact_output_registry.selected_slots = []
+        { Runtime_exact_output_registry.selected_slots = []
         ; cli_slots = [ Exact_output_fixture.cli_primary_runtime ] }
       in
       let asked = ref [] in

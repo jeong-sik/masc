@@ -244,6 +244,12 @@ type schedule_row_values = {
 
 val schedule_minimum_recurrence_width : int
 
+val schedule_minimum_target_width : int
+val schedule_maximum_target_width : int
+(** The bounds of the target column, which the caller measures from the
+    names on the page: never under the minimum, and never past the maximum,
+    so a long fallback summary cannot take the recurrence's room. *)
+
 val schedule_minimum_delivery_width : int
 val schedule_maximum_delivery_width : int
 

@@ -32,6 +32,7 @@ val scope_name : Masc.Tui_decode.provider_usage_account -> string
 val section :
   providers:Masc_tui_types.overview_providers_reading ->
   runtimes:Masc_tui_types.overview_quota_reading ->
+  account_emails:Masc_tui_types.overview_account_emails_reading ->
   now:float ->
   width:int ->
   section option
@@ -41,7 +42,12 @@ val section :
     read with no row to draw says ["no usage data"]. A failed read is one line,
     ["usage data unavailable: <reason>"]. [width] is the cells a row may use;
     a meter takes what the other columns leave, from 10 to 24 cells. When
-    even 10 cells do not fit beside the hearing age, the age is left out. *)
+    even 10 cells do not fit beside the hearing age, the age is left out.
+
+    An account whose providers have a read email draws it dim in the name
+    column under its name: on its second window row, or on a row of its own
+    when it draws only one. A failed email read adds one note,
+    ["account emails unread: <reason>"], after the runtime notes. *)
 
 val utilization_text : Masc.Tui_decode.provider_usage_utilization -> string
 (** The value as a whole percent, so accounts read in one unit. A percent is

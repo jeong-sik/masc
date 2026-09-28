@@ -33,12 +33,25 @@ def first_use_frames(executable: str) -> None:
         "openai",
         "zai",
     )
+    # One reported window per account, so the Dashboard's usage line counts
+    # nine reported scopes.
+    observed_at = time.time()
     payload["provider_usage_windows"] = [
         {
             "scope": f"provider:{name}",
+            "scope_id": f"scope-{name}",
             "providers": [{"id": name, "display_name": name}],
-            "state": "not_reported_since_start",
-            "windows": [],
+            "state": "reported",
+            "windows": [
+                {
+                    "limit_id": None,
+                    "window": {"kind": "five_hour"},
+                    "role": "gates_model_calls",
+                    "utilization": {"unit": "percent", "value": 10},
+                    "resets_at": None,
+                    "observed_at": observed_at,
+                }
+            ],
         }
         for name in names
     ]
@@ -97,6 +110,7 @@ def first_use_frames(executable: str) -> None:
                 b"masc keeper-create --edit --host 127.0.0.1 --port ",
                 b"Open Keepers with 3",
                 b"0 attention items",
+                b"9/9 quota scopes reported",
             ):
                 if expected not in visible:
                     raise AssertionError(

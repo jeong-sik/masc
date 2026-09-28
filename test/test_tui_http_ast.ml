@@ -510,8 +510,8 @@ let test_http_client_does_not_own_tui_env_contract () =
     (Ast_grep.count_value_bindings ~module_path ~name:"timeout_env")
 ;;
 
-(* The Overview's Attention panel writes two cells of indent ahead of every
-   row it draws. Its empty and unread notes stand in for rows, and they are
+(* The Dashboard's attention section writes three cells of indent ahead of
+   every row it draws. Its empty and unread notes stand in for rows, and they are
    written for a body that indents them itself -- pasted in whole, a note sat
    two cells right of the rows it replaces and of the title above them. *)
 let test_the_attention_note_starts_where_its_rows_do () =
@@ -2529,11 +2529,14 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   check_identifiers ~module_path:render_path ~binding:"task_line"
     ~callees:sanitizer_calls [ "name" ];
   check_fields "render_overview"
-    [ "workspace"
-    ; "overview_error"
+    [ "overview_error"
     ; "ai_summary"
     ];
   check_fields "render_work_tasks" [ "tasks_error" ];
+  (* The Dashboard's title row, which the startup splash draws too, and
+     /about's colour scheme name from the operator's configuration. *)
+  check_fields "overview_header" [ "workspace" ];
+  check_fields "render_about" [ "theme_choice" ];
   (* The TUI session block prints event text this process wrote from
      server answers and editor output. *)
   check_fields ~module_path:"bin/masc_tui_render_metrics.ml"

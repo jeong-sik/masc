@@ -129,8 +129,9 @@ let keeper_roster_marquee_target (state : state) ~cols =
 
 let acting_pane_suppressed (state : state) =
   let modal =
-    Option.is_some state.account_login || Option.is_some state.lane_addons || state.palette_open || state.context_inspector_open || state.keeper_deletions_open || state.help_open
-    || state.agenda_open || state.answering_open || state.memory_fact_detail_open
+    Option.is_some state.account_login || Option.is_some state.lane_addons || state.palette_open
+    || Masc_tui_types.modal_owns_keys state
+    || state.answering_open || state.memory_fact_detail_open
   in
   modal
   || Masc_tui_types.on_activity_screen state.view
@@ -353,6 +354,18 @@ let dashboard_keeper_line (state : state) =
          | [] -> ""
          | _ :: _ -> Printf.sprintf " (%s)" (String.concat ", " parts))
 
+(* The Dashboard's title row: the name, the workspace, the clock and the
+   connection badge. The startup splash draws the same row (#39658), so the
+   two cannot disagree about what the screen is or whether it is connected. *)
+let overview_header (state : state) =
+  let now = Unix.localtime (Unix.gettimeofday ()) in
+  Printf.sprintf "%s  %s[%s]%s  %02d:%02d:%02d  %s"
+    (screen_title " MASC Dashboard")
+    (Masc_tui_theme.tone Masc_tui_theme.Accent)
+    (Terminal_text.single_line state.workspace) Ansi.reset
+    now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec
+    (connection_badge state)
+
 let dashboard_work_lines (state : state) =
   match state.task_flow with
   | None ->
@@ -489,15 +502,7 @@ let render_overview (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let body_rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 2048 in
-  let now = Unix.localtime (Unix.gettimeofday ()) in
-  let header =
-    Printf.sprintf "%s  %s[%s]%s  %02d:%02d:%02d  %s"
-      (screen_title " MASC Dashboard")
-      (Masc_tui_theme.tone Masc_tui_theme.Accent)
-      (Terminal_text.single_line state.workspace) Ansi.reset
-      now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec
-      (connection_badge state)
-  in
+  let header = overview_header state in
   let overview_error = Terminal_text.optional_single_line state.overview_error in
   let health =
     match overview_error, state.overview with
@@ -563,17 +568,15 @@ let render_overview (state : state) =
       | _ :: _ -> List.map item_line shown
       | [] -> (
           match empty_page_of ~snapshot:state.overview ~error:overview_error with
-          | Page_empty -> [ Ansi.dim ^ "(nothing needs attention)" ^ Ansi.reset ]
+          | Page_empty -> [ Ansi.dim ^ "Nothing needs attention." ^ Ansi.reset ]
           | Page_unread ->
               [ Ansi.dim ^ String.trim page_unread_note ^ Ansi.reset ]
           | Page_failed -> [])
     in
     title :: List.map (fun line -> "   " ^ line) body
   in
-  let lines =
-    [ health; "" ]
-    @ dashboard_first_use_lines state
-    @ dashboard_goal_lines state
+  let summary =
+    dashboard_goal_lines state
     @ [ "" ]
     @ dashboard_work_lines state
     @ [ "" ]
@@ -585,6 +588,16 @@ let render_overview (state : state) =
     Masc_tui_frame_timing.time_stage ~name:"overview.layout"
       (fun () ->
         let capacity = max 0 (body_rows - dashboard_frame_rows) in
+        (* The first-use steps are drawn whole or not at all, and only in rows
+           the summary leaves: cut from the bottom, they would push "Needs
+           you" off a short terminal, and half a guide names a step with no
+           way to finish it (#39526). *)
+        let guide = dashboard_first_use_lines state in
+        let guide =
+          if 2 + List.length guide + List.length summary <= capacity then guide
+          else []
+        in
+        let lines = [ health; "" ] @ guide @ summary in
         (capacity, List.filteri (fun index _ -> index < capacity) lines))
   in
   let sections_started = Masc_tui_frame_timing.start_stage () in
@@ -3953,8 +3966,8 @@ let render_schedule_list (state : state) =
                  max widest
                    (Message_layout.display_width
                       (Terminal_text.single_line (schedule_row_subject row))))
-               16 snapshot.scs_rows
-             |> min 40
+               Render_schedule.schedule_minimum_target_width snapshot.scs_rows
+             |> min Render_schedule.schedule_maximum_target_width
            in
            let wake_width = schedule_wake_word_cells in
            (* Measured, like the target beside it. The column was a literal
@@ -6591,15 +6604,13 @@ let render_lane_run_detail (state : state) ~run_id =
         Some (Inspection_lane detail)
     | Some _ | None -> None
   in
-  (* The id is what this heading names, so it is drawn whole; the connection
-     badge takes what the title and the id leave, and is what a narrow frame
-     cuts. Ids run to 54 cells (exact-board-attention- and 32 hex digits). *)
+  (* The badge is drawn whole; the id is whole when it fits and folded in the
+     middle when it does not ([detail_heading]). *)
   let header =
-    row_with_field ~cols
-      ~lead:
-        (screen_title (if measurement then " MASC Measurement" else " MASC Lane Run")
-        ^ "  " ^ Terminal_text.single_line run_id ^ "  ")
-      ~field:(connection_badge state) ~tail:""
+    detail_heading ~cols
+      ~title:
+        (if measurement then measurement_detail_title else lane_run_detail_title)
+      ~id:run_id ~badge:(connection_badge state)
   in
   box_top buf cols;
   box_line buf cols header;
@@ -13315,14 +13326,11 @@ let usage_lines ~cols (state : state) =
   let scopes =
     match Overview_providers.section
             ~providers:state.overview_providers ~runtimes:state.overview_quota
+            ~account_emails:state.overview_account_emails
             ~now:(Unix.gettimeofday ()) ~width:(max 20 (cols - 4)) with
     | Some section -> section.title :: section.lines
-    | None ->
-        [ (match state.overview_providers with
-           | Providers_unread -> " Quota scopes · not observed"
-           | Providers_failed reason ->
-               " Quota scopes · unavailable: " ^ Terminal_text.single_line reason
-           | Providers_read _ -> " Quota scopes · no provider reports") ]
+    (* [section] answers [None] only before the first read. *)
+    | None -> [ " Plan usage · not observed" ]
   in
   let keepers =
     match state.keeper_usage with
@@ -16054,9 +16062,66 @@ let render_config (state : state) =
             | None -> ()
           done)
 
+(* The startup splash: the Overview's own frame and header -- title,
+   workspace, clock, connection badge -- with the turning imp where its
+   sections will be once the first overview read answers. Keys are the
+   Overview's; the first one ends the splash and still does its job. *)
+let render_overview_startup (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  surface_chrome ~overflow:Fits state ~terminal_rows ~cols ~surface_key:"overview"
+    ~title:(overview_header state)
+    ~hints:(Masc_tui_keys.footer_hints Overview)
+    ~body:(fun ~budget c ->
+      Masc_tui_emblem_screen.body ~cols:(framed_inner_width cols) ~rows:budget
+        ~caption:
+          ([ Masc_tui_theme.tone Masc_tui_theme.Accent
+             ^ "MASC \xc2\xb7 keepers on watch" ^ Ansi.reset
+           ]
+           (* The splash stands only while the briefing is unread and has not
+              failed ([startup_emblem_visible]), so it says that under the
+              imp. *)
+           @ [ "Dashboard briefing not read yet" ]
+           @ [ Ansi.dim
+               ^ Masc_tui_types.connection_status_label state.connection_status
+               ^ Ansi.reset
+             ])
+        ~elapsed:(Masc_tui_types.motion_elapsed_seconds state.emblem_frame)
+      |> List.iter c.push)
+
+(* /about: the turning imp over the surface, with what the TUI is running
+   under -- its colour scheme and how many Keepers the workspace holds. *)
+let render_about (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let theme =
+    Terminal_text.single_line_or ~default:"default" state.theme_choice
+  in
+  let keepers =
+    match state.keepers_error, state.local_workspace with
+    | Some _, _ -> Masc_tui_emblem_screen.Keepers_unreadable
+    | None, Local_workspace_unread -> Masc_tui_emblem_screen.Keepers_unread
+    | None, Local_workspace_read ->
+        Masc_tui_emblem_screen.Keepers_read (List.length state.keepers)
+  in
+  surface_chrome ~overflow:Fits ~frame:Chrome_overlay state ~terminal_rows ~cols
+    ~surface_key:"about" ~title:(screen_title " MASC") ~hints:"Esc:close"
+    ~body:(fun ~budget c ->
+      Masc_tui_emblem_screen.body ~cols:(framed_inner_width cols) ~rows:budget
+        ~caption:
+          [ Masc_tui_theme.tone Masc_tui_theme.Accent
+            ^ "MASC \xc2\xb7 Multi-Agent Shared Context" ^ Ansi.reset
+          ; Ansi.dim
+            ^ Masc_tui_emblem_screen.about_facts ~theme keepers
+            ^ Ansi.reset
+          ]
+        ~elapsed:(Masc_tui_types.motion_elapsed_seconds state.emblem_frame)
+      |> List.iter c.push)
+
 let render_surface (state : state) =
   match state.view with
-  | Overview -> render_overview state
+  | Overview ->
+      if Masc_tui_types.startup_emblem_visible state then
+        render_overview_startup state
+      else render_overview state
   | Keepers Keeper_list ->
       if state.repository_changes_open then render_repository_changes state
       else render_keeper_list state
@@ -16944,6 +17009,8 @@ type drawn = Surface_drawn | Overlay_drawn
 let render (state : state) =
   (* Marks number the targets of this frame alone. *)
   Masc_tui_hit.reset press_marks;
+  (* And the imp is on this frame only if this frame draws it. *)
+  Masc_tui_emblem_screen.begin_frame ();
   let frame, clamped, approval, drawn =
   (* Decide the pane before any surface measures the terminal. Modals draw
      over the whole terminal and the Activity screen, both its tabs,
@@ -16965,7 +17032,10 @@ let render (state : state) =
   | Some view ->
     let frame, clamped = render_lane_addons state view in
     (frame, clamped, None, Overlay_drawn)
-  | None -> if state.palette_open then
+  | None -> if state.about_open then
+    let frame, clamped = render_about state in
+    (frame, clamped, None, Overlay_drawn)
+  else if state.palette_open then
     let frame, clamped = render_palette state in
     (frame, clamped, None, Overlay_drawn)
   else if state.context_inspector_open then

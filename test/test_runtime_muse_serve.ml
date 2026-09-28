@@ -569,31 +569,34 @@ let test_session_identity_is_verified_before_admission () =
     [Serve.Start; Serve.Resume {session_id="s-1"; expected_turn_count=0}]
 ;;
 
-(* Frames shaped as Muse Code 1.4.0 answered them on 2026-09-28: a session
-   started on muse-spark-1.3 resumed as the account default
-   muse-spark-1.3-contributor, setModel was accepted with a bare ack after a
-   session/modelChanged notification, and session/read then reported
-   muse-spark-1.3. *)
+(* Frames shaped as Muse Code 1.4.0 answered them on 2026-09-28. A session
+   started on muse-spark-1.3 resumes reporting the account default
+   muse-spark-1.3-contributor, which is the host's metadata, not the model it
+   runs. setModel is accepted with a bare ack either way: after a
+   session/modelChanged notification when the selection changes the model
+   (no turn had run yet), or alone when the host answers noop because that
+   model already runs (a turn had). The model is selected before the approval
+   mode, so the verified approval ack is the last session command before the
+   turn. *)
 let test_resumed_session_model_is_selected_before_admission () =
   let requested = "muse-spark-1.3" and host_default = "muse-spark-1.3-contributor" in
-  let session_frame ~id ?(session_id = "s-1") model = Yojson.Safe.to_string
+  let session_frame ~id model = Yojson.Safe.to_string
       (`Assoc ["jsonrpc", `String "2.0"; "id", `Int id;
-        "result", `Assoc ["session", `Assoc ["sessionId", `String session_id;
-          "status", `String "idle"; "turnCount", `Int 0; "modelId", `String model;
+        "result", `Assoc ["session", `Assoc ["sessionId", `String "s-1";
+          "status", `String "idle"; "turnCount", `Int 0; "modelId", model;
           "providerId", `String "meta"; "workspaceRoot", `String "/w";
           "approvalMode", effective_mode Msp.Prompt_unmatched];
           "viewCursor", `String "v:2"]]) in
   let set_model_ack ~status = Printf.sprintf
-      {|{"jsonrpc":"2.0","id":4,"result":{"commandId":"c-model","status":%S}}|} status in
+      {|{"jsonrpc":"2.0","id":3,"result":{"commandId":"c-model","status":%S}}|} status in
   let model_changed = Printf.sprintf
       {|{"jsonrpc":"2.0","method":"session/modelChanged","params":{"sessionId":"s-1","viewCursor":"v:2","sourceRange":{"stream":{"kind":"session","id":"s-1"},"first":{"id":"r-13","sequence":13},"last":{"id":"r-13","sequence":13}},"modelId":%S,"providerId":"meta","source":"user"},"emittedAtMs":1790589987517}|}
       requested in
   let with_id id source = match Yojson.Safe.from_string source with
     | `Assoc fields -> Yojson.Safe.to_string (`Assoc (("id", `Int id) :: List.remove_assoc "id" fields))
     | _ -> fail "fixture response must be an object" in
-  let resumed = [Read; Write (init_frame ~granted:[]); Read; Read;
-                 Write (session_frame ~id:2 host_default);
-                 Read; Write (approval_mode_result ~id:3 Msp.Prompt_unmatched)] in
+  let resumed reported = [Read; Write (init_frame ~granted:[]); Read; Read;
+                          Write (session_frame ~id:2 reported)] in
   let run steps check_result =
     let ready = ref 0 and sent = ref false in
     run_scripted ~model:requested ~session_mode:(Serve.Resume {session_id="s-1"; expected_turn_count=0})
@@ -608,58 +611,54 @@ let test_resumed_session_model_is_selected_before_admission () =
       check int (name ^ " never persists session") 0 ready;
       check bool (name ^ " never sends a prompt") false sent;
       check int (name ^ " request count") request_count (List.length requests)) in
-  (* The selection lands: the turn runs after setModel and a read-back. *)
-  run (resumed @ [Read; Write model_changed; Write (set_model_ack ~status:"accepted");
-                  Read; Write (session_frame ~id:5 requested);
-                  Read; Write (with_id 6 turn_ack); Write turn_started;
-                  Write agent_completed; Write turn_completed])
-    (fun result requests ~ready ~sent:_ ->
-      (match result with
-       | Ok turn -> check string "re-selected session completes" "MASC_MUSE_OK" turn.text
-       | Error error -> fail (Serve.error_to_string error));
-      check int "re-selected session persists once" 1 ready;
-      let set_model = request_with_method "session/setModel" requests in
-      let params = Yojson.Safe.Util.member "params" set_model in
-      check string "setModel names the resumed session" "s-1"
-        Yojson.Safe.Util.(params |> member "sessionId" |> to_string);
-      check string "setModel names the configured model" requested
-        Yojson.Safe.Util.(params |> member "model" |> member "modelId" |> to_string);
-      let read = Yojson.Safe.Util.member "params" (request_with_method "session/read" requests) in
-      check string "read names the resumed session" "s-1"
-        Yojson.Safe.Util.(read |> member "sessionId" |> to_string);
-      check bool "read excludes history" true
-        Yojson.Safe.Util.(read |> member "excludeItems" |> to_bool);
-      let methods = List.map (fun json ->
-        Yojson.Safe.Util.(json |> member "method" |> to_string_option)) requests in
-      check (list (option string)) "selection precedes the turn"
-        [Some "initialize"; Some "initialized"; Some "session/resume";
-         Some "session/setApprovalMode"; Some "session/setModel"; Some "session/read";
-         Some "turn/start"]
-        methods);
-  (* The read-back still reports the host default: refused before the turn. *)
-  refused ~name:"unlanded selection" ~request_count:6
-    (resumed @ [Read; Write (set_model_ack ~status:"accepted");
-                Read; Write (session_frame ~id:5 host_default)])
-    (function
-      | Serve.Session_model_mismatch {requested=asked; resumed} ->
-        check string "mismatch names the configured model" requested asked;
-        check (option string) "mismatch names the read-back model" (Some host_default) resumed
-      | error -> fail (Serve.error_to_string error));
-  refused ~name:"unaccepted selection" ~request_count:5
-    (resumed @ [Read; Write (set_model_ack ~status:"rejected")])
+  (* An accepted selection, changed or noop, from another model or from none:
+     setModel, then the approval mode, then the turn on the requested model. *)
+  List.iter (fun (reported, ack) ->
+    run (resumed reported @ [Read] @ List.map (fun frame -> Write frame) ack
+         @ [Read; Write (approval_mode_result ~id:4 Msp.Prompt_unmatched);
+            Read; Write (with_id 5 turn_ack); Write turn_started;
+            Write agent_completed; Write turn_completed])
+      (fun result requests ~ready ~sent:_ ->
+        (match result with
+         | Ok turn ->
+           check string "re-selected session completes" "MASC_MUSE_OK" turn.text;
+           check (option string) "the turn names the selected model" (Some requested) turn.model
+         | Error error -> fail (Serve.error_to_string error));
+        check int "re-selected session persists once" 1 ready;
+        let set_model = request_with_method "session/setModel" requests in
+        let params = Yojson.Safe.Util.member "params" set_model in
+        check string "setModel names the resumed session" "s-1"
+          Yojson.Safe.Util.(params |> member "sessionId" |> to_string);
+        check string "setModel names the configured model" requested
+          Yojson.Safe.Util.(params |> member "model" |> member "modelId" |> to_string);
+        let methods = List.map (fun json ->
+          Yojson.Safe.Util.(json |> member "method" |> to_string_option)) requests in
+        check (list (option string)) "selection, then approval mode, then the turn"
+          [Some "initialize"; Some "initialized"; Some "session/resume";
+           Some "session/setModel"; Some "session/setApprovalMode"; Some "turn/start"]
+          methods))
+    [ `String host_default, [model_changed; set_model_ack ~status:"accepted"]
+    ; `String host_default, [set_model_ack ~status:"accepted"]
+    ; `Null, [model_changed; set_model_ack ~status:"accepted"] ];
+  refused ~name:"unaccepted selection" ~request_count:4
+    (resumed (`String host_default) @ [Read; Write (set_model_ack ~status:"rejected")])
     (function
       | Serve.Protocol_error {stage="session/setModel"; _} -> ()
       | error -> fail (Serve.error_to_string error));
-  refused ~name:"setModel rpc error" ~request_count:5
-    (resumed @ [Read; Write {|{"jsonrpc":"2.0","id":4,"error":{"code":-32602,"message":"unknown model"}}|}])
+  refused ~name:"setModel rpc error" ~request_count:4
+    (resumed (`String host_default)
+     @ [Read; Write {|{"jsonrpc":"2.0","id":3,"error":{"code":-32602,"message":"unknown model"}}|}])
     (function
       | Serve.Rpc_error {method_="session/setModel"; code = -32602; _} -> ()
       | error -> fail (Serve.error_to_string error));
-  refused ~name:"read of another session" ~request_count:6
-    (resumed @ [Read; Write (set_model_ack ~status:"accepted");
-                Read; Write (session_frame ~id:5 ~session_id:"s-2" requested)])
+  (* The approval mode is still verified after the selection. *)
+  refused ~name:"approval mode after selection" ~request_count:5
+    (resumed (`String host_default) @ [Read; Write (set_model_ack ~status:"accepted");
+       Read; Write (approval_mode_result ~id:4 Msp.Allow_all)])
     (function
-      | Serve.Protocol_error {stage="session/read"; _} -> ()
+      | Serve.Session_approval_mode_mismatch {requested=asked; reported} ->
+        check bool "requested mode" true (asked = Msp.Prompt_unmatched);
+        check bool "reported mode" true (reported = Some Msp.Allow_all)
       | error -> fail (Serve.error_to_string error))
 ;;
 

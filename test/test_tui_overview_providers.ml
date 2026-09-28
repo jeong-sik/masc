@@ -107,7 +107,7 @@ let test_section_draws_three_line_shapes () =
   in
   let section =
     match
-      Providers.section ~providers:(Types.Providers_read windows) ~runtimes ~now
+      Providers.section ~account_emails:Types.Account_emails_unread ~providers:(Types.Providers_read windows) ~runtimes ~now
         ~width
     with
     | Some section -> section
@@ -184,7 +184,7 @@ let test_silent_account_draws_only_its_exhaustion () =
     Types.Quota_read [ runtime ~scope:"provider:codex" ~exhausted:true "codex.gpt" ]
   in
   match
-    Providers.section ~providers:(Types.Providers_read windows) ~runtimes ~now ~width
+    Providers.section ~account_emails:Types.Account_emails_unread ~providers:(Types.Providers_read windows) ~runtimes ~now ~width
   with
   | None -> fail "a read draws a section"
   | Some section ->
@@ -212,7 +212,7 @@ let reported_section ~width =
       ]
   in
   match
-    Providers.section ~providers:(Types.Providers_read windows) ~runtimes ~now
+    Providers.section ~account_emails:Types.Account_emails_unread ~providers:(Types.Providers_read windows) ~runtimes ~now
       ~width
   with
   | Some section -> List.map plain section.lines
@@ -279,7 +279,7 @@ let test_window_that_gates_nothing_is_not_an_alarm () =
   in
   let section =
     match
-      Providers.section ~providers:(Types.Providers_read windows)
+      Providers.section ~account_emails:Types.Account_emails_unread ~providers:(Types.Providers_read windows)
         ~runtimes:Types.Quota_unread ~now ~width
     with
     | Some section -> section
@@ -359,7 +359,7 @@ let test_values_read_in_one_unit () =
 
 let test_failed_read_is_one_line () =
   match
-    Providers.section ~providers:(Types.Providers_failed "connection refused")
+    Providers.section ~account_emails:Types.Account_emails_unread ~providers:(Types.Providers_failed "connection refused")
       ~runtimes:Types.Quota_unread ~now ~width:80
   with
   | Some section ->
@@ -373,13 +373,58 @@ let test_empty_read_names_missing_usage_data () =
     { puws_since = now; puws_accounts = [] }
   in
   match
-    Providers.section ~providers:(Types.Providers_read empty)
+    Providers.section ~account_emails:Types.Account_emails_unread ~providers:(Types.Providers_read empty)
       ~runtimes:Types.Quota_unread ~now ~width:80
   with
   | Some section ->
       check (list string) "the missing data is visible" [ " no usage data" ]
         (List.map plain section.lines)
   | None -> fail "an empty account list disappeared"
+
+(* An account's email sits in the name column under its name: on its second
+   window row, or on a row of its own when it draws one window. An account
+   that draws no row draws no email either. *)
+let test_account_emails_name_their_accounts () =
+  let windows =
+    match Tui_decode.decode_provider_usage_windows (resolved "reported") with
+    | Ok windows -> windows
+    | Error err -> failf "fixture should decode: %s" err
+  in
+  let section account_emails =
+    match
+      Providers.section ~providers:(Types.Providers_read windows)
+        ~runtimes:Types.Quota_unread ~account_emails ~now ~width
+    with
+    | Some section -> section
+    | None -> fail "a read draws a section"
+  in
+  let read =
+    section
+      (Types.Account_emails_read
+         [ ("claude_code", "claude@example.com"); ("kimi", "kimi@example.com");
+           ("codex", "codex@example.com") ])
+  in
+  let starts row prefix = String.starts_with ~prefix (plain row) in
+  (match read.lines with
+   | [ claude_5h; claude_7d; kimi; kimi_email ] ->
+       check bool "the name stays on the first row" true (starts claude_5h " Claude Max ");
+       check bool "the email is under the name, on the next window row" true
+         (starts claude_7d " claude@example.com " && contains ~affix:meter_open claude_7d);
+       check bool "and drawn dim" true
+         (contains ~affix:(Masc_tui_ansi.Ansi.dim ^ "claude@example.com") claude_7d);
+       check bool "a one-window account names it on a row of its own" true
+         (starts kimi " Kimi Coding " && String.equal (String.trim (plain kimi_email)) "kimi@example.com");
+       check bool "the email row has no meter" false (contains ~affix:meter_open kimi_email)
+   | lines -> failf "expected four rows, got %d" (List.length lines));
+  check (list int) "the email row counts with its account" [ 2; 2 ] read.account_row_counts;
+  check bool "an account that draws no row draws no email" false
+    (List.exists (contains ~affix:"codex@example.com") read.lines);
+  let failed = section (Types.Account_emails_failed "HTTP 403") in
+  check (list string) "a failed read is said once, after the rows"
+    [ " account emails unread: HTTP 403" ]
+    (List.map plain failed.note_lines);
+  check bool "and no row names an email" false
+    (List.exists (contains ~affix:"@example.com") failed.lines)
 
 let test_unknown_state_is_rejected () =
   check bool "an unknown state fails the reading" true
@@ -469,5 +514,7 @@ let () =
         ; test_case "a window that gates nothing is not an alarm" `Quick
             test_window_that_gates_nothing_is_not_an_alarm
         ; test_case "unknown role is rejected" `Quick test_unknown_role_is_rejected
+        ; test_case "account emails name their accounts" `Quick
+            test_account_emails_name_their_accounts
         ] )
     ]

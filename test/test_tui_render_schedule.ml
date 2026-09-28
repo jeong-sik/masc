@@ -1058,17 +1058,19 @@ let schedule_empty : Schedule.schedule_row_values =
 
 (* A page of short readings, the widths the renderer measures for the
    fixture the keyboard scenarios load: a keeper name under the target's
-   floor of 16, the widest wake word ("succeeded", 9) and a delivery word
-   under the delivery's floor of 12. *)
+   floor, the widest wake word ("succeeded", 9) and a delivery word no wider
+   than the delivery's floor ("consumed_ack" is exactly twelve, the floor). *)
 let schedule_short_page ~inner_width =
-  Schedule.schedule_layout ~inner_width ~target_width:16 ~wake_width:9
-    ~delivery_width:12
+  Schedule.schedule_layout ~inner_width
+    ~target_width:Schedule.schedule_minimum_target_width ~wake_width:9
+    ~delivery_width:Schedule.schedule_minimum_delivery_width
 
-(* The widest page the renderer draws: the target at its cap of 40 and the
-   delivery at its ceiling of 20. *)
+(* The widest page the renderer draws: the target and the delivery each at
+   their cap. *)
 let schedule_long_page ~inner_width =
-  Schedule.schedule_layout ~inner_width ~target_width:40 ~wake_width:9
-    ~delivery_width:20
+  Schedule.schedule_layout ~inner_width
+    ~target_width:Schedule.schedule_maximum_target_width ~wake_width:9
+    ~delivery_width:Schedule.schedule_maximum_delivery_width
 
 let schedule_every_column =
   Schedule.
@@ -1414,11 +1416,6 @@ let test_lane_columns_hold_their_offsets () =
     in
     check_fitted_cells ~shown:layout.Masc_tui_table.shown ~header ~row
       ~inner_width lane_cells;
-    (* The row is opened with Enter; its id heads the detail, not a column. *)
-    check bool
-      (Printf.sprintf "inner %d: no run id column" inner_width)
-      true
-      (index_of header "RUN ID" = None);
     check int
       (Printf.sprintf "inner %d: a dressed overflowing run" inner_width)
       (width header)

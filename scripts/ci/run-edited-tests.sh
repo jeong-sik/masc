@@ -223,6 +223,18 @@ test/test_tools_coverage.ml"
     | grep -E '^config/themes/' || [ $? -eq 1 ]; } | head -1)
   theme_guard="test/test_tui_theme_contrast.ml"
 
+  # The deployment preflight suites run the compiled helper, which runs
+  # scripts/check-runtime-deployment-preflight.sh's logic. A change to that
+  # script changes what they assert, but the suites name neither the script
+  # nor the helper module, so no reference rule reaches them. #39572 changed
+  # the script and the helper and its run was 5/5 green while
+  # test_deployment_store_directories still expected the removed bridge
+  # messages.
+  preflight_script_changed=$( { printf '%s\n' "${changed}" \
+    | grep -E '^scripts/check-runtime-deployment-preflight\.sh$' || [ $? -eq 1 ]; } | head -1)
+  preflight_guards="test/test_deployment_runtime_config.ml
+test/test_deployment_store_directories.ml"
+
   # A fifth guard over the same shape, and the only one whose input is the
   # source tree itself. discovery 17 in test_keeper_toml walks bin, lib,
   # packages and test at run time (ocaml_source_files) and fails when a
@@ -509,6 +521,27 @@ EXACTPATHS
   exactpath_suites=$( { printf '%s\n' "${exactpath_suites}" \
     | grep -v '^[[:space:]]*$' || [ $? -eq 1 ]; } | sort -u)
 
+  # stanza candidates: a suite whose dune stanza runs a bin executable this
+  # pull request edits, through `(deps ../bin/X.exe)` or an
+  # `(action (setenv ... %{dep:../bin/X.exe} ...))`. The suite names the
+  # binary only in its stanza, so no rule above reaches it. #39572 changed
+  # bin/deployment_preflight_helper.ml and its run was 5/5 green while
+  # test_deployment_store_directories still expected the removed bridge
+  # messages.
+  stanza_candidates=$(printf '%s\n' "${referenced}" | sed -n 's/^stanza //p')
+  stanza_suites=""
+  while IFS= read -r candidate; do
+    [ -n "${candidate}" ] || continue
+    case "${candidate}" in
+      *.py) python_suite_is_runnable "${candidate}" || continue ;;
+    esac
+    stanza_suites=$(printf '%s\n%s\n' "${stanza_suites}" "${candidate}")
+  done <<STANZAS
+${stanza_candidates}
+STANZAS
+  stanza_suites=$( { printf '%s\n' "${stanza_suites}" \
+    | grep -v '^[[:space:]]*$' || [ $? -eq 1 ]; } | sort -u)
+
   # [themes_changed] stands beside [assets] here: the tool and prompt triggers
   # ride that variable, which matches config/(prompts|tools|mcp), and a theme
   # is none of those. Left out, a theme-only pull request returned here before
@@ -516,7 +549,8 @@ EXACTPATHS
   if [ -z "${sources}" ] && [ -z "${assets}" ] && [ -z "${themes_changed}" ] \
     && [ -z "${module_suites}" ] && [ -z "${library_suites}" ] \
     && [ -z "${declared_suites}" ] && [ -z "${referencing_suites}" ] \
-    && [ -z "${named_file_suites}" ] && [ -z "${exactpath_suites}" ]; then
+    && [ -z "${named_file_suites}" ] && [ -z "${exactpath_suites}" ] \
+    && [ -z "${stanza_suites}" ] && [ -z "${preflight_script_changed}" ]; then
     echo "no test source, config asset or named suite in this pull request"
       return 1
   fi
@@ -550,6 +584,13 @@ EXACTPATHS
   if [ -n "${themes_changed}" ]; then
     echo "this pull request changes theme assets; adding ${theme_guard}"
     sources=$(printf '%s\n%s\n' "${sources}" "${theme_guard}" \
+      | grep -v '^[[:space:]]*$' | sort -u)
+  fi
+
+  if [ -n "${preflight_script_changed}" ]; then
+    echo "this pull request changes the deployment preflight script; adding:"
+    printf '%s\n' "${preflight_guards}" | sed 's/^/  /'
+    sources=$(printf '%s\n%s\n' "${sources}" "${preflight_guards}" \
       | grep -v '^[[:space:]]*$' | sort -u)
   fi
 
@@ -599,6 +640,13 @@ EXACTPATHS
     echo "suites that open a file this pull request edits by exact path:"
     printf '%s\n' "${exactpath_suites}" | sed 's/^/  /'
     sources=$(printf '%s\n%s\n' "${sources}" "${exactpath_suites}" \
+      | grep -v '^[[:space:]]*$' | sort -u)
+  fi
+
+  if [ -n "${stanza_suites}" ]; then
+    echo "suites whose dune stanza runs a bin executable this pull request edits:"
+    printf '%s\n' "${stanza_suites}" | sed 's/^/  /'
+    sources=$(printf '%s\n%s\n' "${sources}" "${stanza_suites}" \
       | grep -v '^[[:space:]]*$' | sort -u)
   fi
 
@@ -1447,6 +1495,19 @@ FAKE
   runner_check "a build the budget cuts off names every suite" \
     "test/test_ok (not built: the step budget ran out);test/test_failing (not built: the step budget ran out);" \
     8 3 test_ok test_failing
+
+  # The deployment preflight suites receive the compiled helper through their
+  # dune stanza's (setenv ... %{dep:../bin/deployment_preflight_helper.exe}),
+  # and name neither the helper module nor the script it runs. #39572 changed
+  # both and its run was 5/5 green while test_deployment_store_directories
+  # still expected the removed bridge messages. The stanza rule and the
+  # script trigger are what select them; either one removed fails here.
+  check_required "a bin executable edit selects the suites whose stanza runs it" \
+    "test/test_deployment_runtime_config.ml test/test_deployment_store_directories.ml" \
+    "bin/deployment_preflight_helper.ml"
+  check_required "the preflight script selects the suites that run it" \
+    "test/test_deployment_runtime_config.ml test/test_deployment_store_directories.ml" \
+    "scripts/check-runtime-deployment-preflight.sh"
 
   # The empty-selection notice is part of the production path. Keep the
   # non-blocking behavior explicit while ensuring it cannot go silent again.

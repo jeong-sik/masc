@@ -479,6 +479,20 @@ send({"jsonrpc": "2.0", "id": opened["id"], "result": {"session": {
     "workspaceRoot": FIXTURE["workspace_root"]}, "viewCursor": cursor()}})
 if mode == "resume":
     approval = read()
+    if approval["method"] == "session/setModel":
+        # The selection applies to the session's next model calls. The host
+        # can refuse it; the fixture says when.
+        selected = approval["params"]["model"]["modelId"]
+        assert approval["params"]["sessionId"] == SESSION, approval
+        with open(os.path.join(HERE, "model-selections.log"), "a") as handle:
+            handle.write(selected + "\n")
+        if FIXTURE.get("refuse_selection", False):
+            send({"jsonrpc": "2.0", "id": approval["id"],
+                  "error": {"code": -32602, "message": "unknown model"}})
+            drain()
+        send({"jsonrpc": "2.0", "id": approval["id"], "result": {
+            "commandId": approval["params"]["commandId"], "status": "accepted"}})
+        approval = read()
     assert approval["method"] == "session/setApprovalMode", approval
     assert approval["params"]["mode"] == "promptUnmatched", approval
     send({"jsonrpc": "2.0", "id": approval["id"], "result": {
@@ -515,27 +529,6 @@ def call_probe():
     assert called["result"]["content"][0]["text"] == "MASC_TOOL_RESULT", called
 
 turn = read()
-if turn["method"] == "session/setModel":
-    # A durable selection. It becomes the session's model unless the fixture
-    # says the host did not land it; session/read then reports the result.
-    selected = turn["params"]["model"]["modelId"]
-    assert turn["params"]["sessionId"] == SESSION, turn
-    with open(os.path.join(HERE, "model-selections.log"), "a") as handle:
-        handle.write(selected + "\n")
-    send({"jsonrpc": "2.0", "id": turn["id"], "result": {
-        "commandId": turn["params"]["commandId"], "status": "accepted"}})
-    if FIXTURE.get("selection_lands", True):
-        model = selected
-    read_back = read()
-    assert read_back["method"] == "session/read", read_back
-    assert read_back["params"] == {"sessionId": SESSION, "excludeItems": True}, read_back
-    send({"jsonrpc": "2.0", "id": read_back["id"], "result": {"session": {
-        "sessionId": SESSION, "status": "idle", "turnCount": completed_turns, "modelId": model,
-        "approvalMode": {"mode": "promptUnmatched", "source": "replay", "lastCommandId": None},
-        "workspaceRoot": FIXTURE["workspace_root"]}, "viewCursor": cursor(),
-        "history": {"mode": "none", "items": None, "snapshot": None, "noneReason": "excluded"},
-        "pendingRequests": []}})
-    turn = read()
 assert turn["method"] == "turn/start", turn
 turn_id = turn["params"]["commandId"]
 if "expected_effort" in FIXTURE:
@@ -1422,8 +1415,8 @@ let test_a_changed_model_starts_a_fresh_session () =
 
 (* The same configuration resumed on a session that reports another model, or
    none (Muse Code 1.4.0 reports its account default), selects the configured
-   model and reads it back before the turn. A selection the host does not land
-   is refused before dispatch; a missing model is never taken as a match. *)
+   model before the turn; a missing model is never taken as a match. A
+   selection the host refuses fails the turn before dispatch. *)
 let test_resumed_model_is_reselected_before_dispatch () =
   let lines path =
     if Sys.file_exists path
@@ -1448,15 +1441,15 @@ let test_resumed_model_is_reselected_before_dispatch () =
     let tool = masc_probe_tool (ref `Null) in
     first_turn ~base_path ~tool;
     write_fixture ~base_path
-      ["resume_model_id", `String "muse-a-contributor"; "selection_lands", `Bool false];
+      ["resume_model_id", `String "muse-a-contributor"; "refuse_selection", `Bool true];
     (match (run_turn_with ~model:"muse-a" ~base_path ~tool ()).outcome.result with
      | Error (Agent_core.Error.Provider (Llm_provider.Error.ProviderReportedError
-         {error_type=Some "session_model_mismatch"; _})) -> ()
+         {error_type=Some "rpc_error"; _})) -> ()
      | Error error -> fail (Agent_core.Error.to_string error)
-     | Ok _ -> fail "a selection the host did not land was treated as matching");
+     | Ok _ -> fail "a selection the host refused was treated as matching");
     check (list string) "the configured model was asked for" ["muse-a"]
       (lines (Filename.concat base_path "model-selections.log"));
-    check bool "unlanded selection refused before turn dispatch" false
+    check bool "refused selection fails before turn dispatch" false
       (Sys.file_exists (Filename.concat base_path "resume-prompt.txt")))
 ;;
 

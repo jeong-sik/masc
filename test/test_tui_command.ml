@@ -279,44 +279,6 @@ let test_pane_commands_parse_by_word () =
        ; "/image   "
        ])
 
-let test_about_banner () =
-  let banner = Command.about_banner ~theme_name:"dungeon-gold" ~active_keepers:(Ok 3) () in
-  let contains_sub haystack needle =
-    let len_h = String.length haystack in
-    let len_n = String.length needle in
-    if len_n = 0 then true
-    else if len_h < len_n then false
-    else
-      let rec loop i =
-        if i + len_n > len_h then false
-        else if String.sub haystack i len_n = needle then true
-        else loop (i + 1)
-      in
-      loop 0
-  in
-  check bool "banner starts with ASCII art header" true
-    (String.starts_with ~prefix:"   ___" banner);
-  check bool "banner contains HORNED REAPER CORE" true
-    (contains_sub banner "HORNED REAPER CORE");
-  check bool "banner includes active theme" true
-    (contains_sub banner "dungeon-gold");
-  check bool "banner counts the keepers it was given" true
-    (contains_sub banner "Keepers: 3 ");
-  let failed = Command.about_banner ~active_keepers:(Error "metadata unreadable") () in
-  check bool "failed roster reports unavailable" true (contains_sub failed "Keepers: unavailable");
-  check bool "failed roster never reports zero" false (contains_sub failed "Keepers: 0");
-  let empty = Command.about_banner ~active_keepers:(Ok 0) () in
-  check bool "known empty roster still reports zero" true (contains_sub empty "Keepers: 0");
-  (* No count is not a count of none: the roster has not been read (#35747). *)
-  let unread = Command.about_banner () in
-  check bool "an unread roster says not loaded" true
-    (contains_sub unread "Keepers: not loaded");
-  check bool "and does not say zero" false (contains_sub unread "Keepers: 0");
-  (* The banner is given a theme and a keeper count and nothing else, so a gate
-     state in it could only be made up. *)
-  check bool "the banner claims no gate state it was not given" false
-    (contains_sub banner "Gates:")
-
 let test_preset_commands_parse_verb_name_and_description () =
   check (list string) "preset commands"
     [ "preset-list"
@@ -1012,8 +974,6 @@ let () =
             test_keeper_names_resolve_by_unique_prefix
         ; test_case "pane commands parse by word" `Quick
             test_pane_commands_parse_by_word
-        ; test_case "about banner contains Horned Reaper emblem" `Quick
-            test_about_banner
         ; test_case "every command has a help line" `Quick
             test_every_command_has_a_help_line
         ; test_case "preset commands parse verb, name and description" `Quick

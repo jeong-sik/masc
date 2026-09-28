@@ -152,12 +152,6 @@ let json_assoc_member_opt = Masc_tui_json.member_opt
 (** One 60 Hz frame window: bursts are coalesced without delaying an idle
     terminal's first changed frame. *)
 let frame_interval_ns = 16_000_000L
-let roster_marquee_interval_ns = 150_000_000L
-
-(* Four frames at 150ms is one turn of the mark per 600ms: fast enough to
-   read as alive, slow enough not to strobe. The same cadence as the marquee
-   above, so the two moving things on a masc screen move at one speed. *)
-let activity_interval_ns = 150_000_000L
 (* What one wheel detent moves. Terminals report three lines per detent, so a
    notch here is worth what a notch is worth in a pager. *)
 let wheel_notch_rows = 3
@@ -1925,6 +1919,8 @@ type http_scoped_surface_results = {
     (int * (Tui_decode.provider_usage_history, string) result) option;
   (* [None] off the Overview, the one surface that draws the GOALS section. *)
   http_overview_goals: (Tui_decode.overview_goal list, string) result option;
+  (* [None] unless the Overview was just opened or has no reading yet. *)
+  http_account_emails: ((string * string) list, string) result option;
 }
 
 type http_surface_results = {
@@ -9728,21 +9724,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
         (String.concat "\n" Masc_tui_command.help_lines)
   | Masc_tui_command.About ->
       Buffer.clear state.msg_input;
-      let active_keepers =
-        match state.keepers_error, state.local_workspace with
-        | Some error, _ -> Some (Error error)
-        | None, Local_workspace_unread -> None
-        | None, Local_workspace_read -> Some (Ok (List.length state.keepers))
-      in
-      let theme_name =
-        match state.theme_choice with
-        | Some name -> name
-        | None -> "default"
-      in
-      let banner =
-        Masc_tui_command.about_banner ~theme_name ?active_keepers ()
-      in
-      notice ~kind:Notice_reply banner
+      state.about_open <- true
   | Masc_tui_command.Open_diff ->
       Buffer.clear state.msg_input;
       state.repository_changes_return_chat <- true;
@@ -10288,7 +10270,11 @@ let apply_transport_load state = function
         ~set_error:(fun value -> state.transport_error <- value)
         err
 
-let apply_overview_load state = function
+let apply_overview_load state result =
+  (* The first answer either way ends the startup splash: the sections, or
+     the reason there are none, now have something to say. *)
+  state.startup_emblem <- false;
+  match result with
   | Ok overview ->
       state.overview <- Some overview;
       state.overview_error <- None
@@ -10510,6 +10496,10 @@ let apply_runtime_quota_load state (runtimes, providers) =
 let apply_keeper_usage_load state = function
   | Ok usage -> state.keeper_usage <- Keeper_usage_read usage
   | Error reason -> state.keeper_usage <- Keeper_usage_error reason
+
+let apply_account_emails_load state = function
+  | Ok emails -> state.overview_account_emails <- Account_emails_read emails
+  | Error err -> state.overview_account_emails <- Account_emails_failed err
 
 let apply_provider_history_load state (days, result) =
   if days = state.provider_history_days then
@@ -10798,6 +10788,13 @@ let load_http_scoped_surfaces ~host ~port ~approval_ticket ~board_sort
         | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
         | exception exn -> Error (Printexc.to_string exn))
   in
+  let http_account_emails =
+    when_needed needs.needs_account_emails (fun () ->
+        match Masc_tui_loader.load_account_emails ~host ~port with
+        | result -> result
+        | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+        | exception exn -> Error (Printexc.to_string exn))
+  in
   { http_transport
   ; http_approvals
   ; http_asks
@@ -10811,6 +10808,7 @@ let load_http_scoped_surfaces ~host ~port ~approval_ticket ~board_sort
   ; http_keeper_usage
   ; http_provider_history
   ; http_overview_goals
+  ; http_account_emails
   }
 
 let load_http_surfaces ~host ~port ~approval_ticket ~board_sort
@@ -10859,7 +10857,8 @@ let apply_http_scoped_surfaces state results =
   Option.iter (apply_runtime_quota_load state) results.http_runtime_quota;
   Option.iter (apply_keeper_usage_load state) results.http_keeper_usage;
   Option.iter (apply_provider_history_load state) results.http_provider_history;
-  Option.iter (apply_overview_goals_load state) results.http_overview_goals
+  Option.iter (apply_overview_goals_load state) results.http_overview_goals;
+  Option.iter (apply_account_emails_load state) results.http_account_emails
 
 (* This is a current reading, not a last-known cache. A failed probe makes
    the projection unread; every following refresh asks again, so a same-port
@@ -11356,6 +11355,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
         ~scoped_refresh_inflight:!scoped_refresh_inflight
         ~keeper_pane_drawn:
           (not (Masc_tui_render.acting_pane_suppressed state))
+        ~account_emails:state.overview_account_emails
         state.view
     in
     (* The chat pane's history comes down its own generation-guarded path, not
@@ -13757,7 +13757,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       (* The jump lands on a clean screen: a modal or roster search opened
          while the dispatch was in flight would otherwise sit over (or
          zombie under) a surface it was not opened on. *)
-      state.help_open <- false;
+      close_key_modals state;
       state.palette_open <- false;
       state.palette_mode <- Masc_tui_types.Palette_jump;
       state.palette_query <- "";
@@ -13805,6 +13805,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       approval_ticket;
       state.server_identity <- None;
       state.connection_status <- Masc_tui_types.Disconnected;
+      (* The splash ends here for good: the Overview's "press r" line is what
+         the operator needs, and a retry must not bring the imp back. *)
+      state.startup_emblem <- false;
       add_event state "error" err;
       react_to_server_contact state ~base_path ~host:server_peer_host
         ~port:state.port ~http_refresh_inflight ~http_scoped_refresh_inflight
@@ -17210,6 +17213,9 @@ let main
    match Masc_tui_credential.outcome_notice outcome with
    | Some notice -> add_event state (Masc_tui_credential.outcome_level outcome) notice
    | None -> ());
+  (* The imp stands in for the Overview's sections until this first read
+     answers or the operator sends anything. *)
+  state.startup_emblem <- true;
   start_http_refresh state ~host ~port ~intent:Revalidate
     ~refresh_inflight:http_refresh_inflight
     ~scoped_refresh_inflight:http_scoped_refresh_inflight
@@ -17242,6 +17248,7 @@ let main
   let roster_marquee_target = ref None in
   let roster_marquee_last_step_ns = ref (Mtime_clock.elapsed_ns ()) in
   let activity_last_step_ns = ref (Mtime_clock.elapsed_ns ()) in
+  let emblem_last_step_ns = ref (Mtime_clock.elapsed_ns ()) in
   (* A datum that is fetched only while its surface is open has nothing to draw
      the moment that surface opens, and waiting out the refresh interval would
      read as "there is nothing here". What is watched is the set of data the
@@ -18973,6 +18980,15 @@ and is loaded on demand through keeper_skill.
         close_image state;
         invalidate_frame_for_resize frame_presenter render_schedule
       end;
+      (* The startup splash is a stand-in, not a gate: the first thing the
+         operator sends ends it and still goes where it was going, so nothing
+         typed while the imp turns is lost. A terminal's own reply is not the
+         operator's. *)
+      (match input with
+       | Some (Key _ | Pasted _ | Mouse_wheel _ | Mouse_left_press _
+              | Mouse_left_release _) ->
+           state.startup_emblem <- false
+       | Some (Graphics_reply _) | None -> ());
       (* The MSX screen owns the keyboard the same way a showing picture
          does, except it answers keys instead of ending on the first one:
          each is injected into the machine and steps a frame, and only [esc]
@@ -19198,6 +19214,7 @@ and is loaded on demand through keeper_skill.
        | Some (Mouse_wheel _) | Some (Mouse_left_press _) | Some (Mouse_left_release _)
          when Option.is_some state.account_login -> ()
        | Some (Pasted _) when state.keeper_deletions_open -> ()
+       | Some (Pasted _) when state.about_open -> ()
        | Some (Pasted paste) when text_target = Some Text_account_login ->
            Option.iter (fun view ->
              if paste.Masc_tui_paste.dropped > 0 then
@@ -19382,10 +19399,8 @@ and is loaded on demand through keeper_skill.
           modal guards as the Lanes press below, for the same reason. *)
        | Some (Mouse_left_press (row, column))
          when (not dismissed_image) && (not compact_viewport)
-              && ((not state.help_open && not state.keeper_deletions_open))
-              && (not state.agenda_open)
+              && (not (modal_owns_keys state))
               && (not state.palette_open)
-              && (not state.context_inspector_open)
               && Option.is_none state.search
               && acting_pane_hit state ~row ~column <> Pane_miss -> (
            match acting_pane_hit state ~row ~column with
@@ -19401,10 +19416,8 @@ and is loaded on demand through keeper_skill.
        | Some (Mouse_left_press (row, column))
          when state.view = Keepers Keeper_message
               && (not dismissed_image) && (not compact_viewport)
-              && ((not state.help_open && not state.keeper_deletions_open))
-              && (not state.agenda_open)
+              && (not (modal_owns_keys state))
               && (not state.palette_open)
-              && (not state.context_inspector_open)
               && Option.is_none state.search
               && keeper_chat_click_in_body state ~column
               && chat_row_action_at ~row
@@ -19424,10 +19437,8 @@ and is loaded on demand through keeper_skill.
               && state.lanes_mode = Lanes_overview
               && (not dismissed_image)
               && (not compact_viewport)
-              && ((not state.help_open && not state.keeper_deletions_open))
-              && (not state.agenda_open)
+              && (not (modal_owns_keys state))
               && (not state.palette_open)
-              && (not state.context_inspector_open)
               && Option.is_none state.search ->
            let terminal_rows, _ = get_terminal_size () in
            handle_lanes_overview_click state ~base_path ~mailbox:async_messages
@@ -19568,9 +19579,7 @@ and is loaded on demand through keeper_skill.
       let composer_claimed =
         Option.is_none state.account_login && Option.is_none state.lane_addons &&
         (not compact_viewport)
-        && ((not state.help_open && not state.keeper_deletions_open))
-        && (not state.agenda_open)
-        && (not state.context_inspector_open)
+        && (not (modal_owns_keys state))
         (* Any open field takes the key before the composer does. This was six
            conditions naming six fields, and the ones added later were not in
            it: typing an endpoint name containing [i] in the voice wizard put
@@ -20213,9 +20222,8 @@ and is loaded on demand through keeper_skill.
            Render_schedule.request render_schedule Render_schedule.Force
        | Some k
          when String.equal k toggle_browser_lane_key
-              && not state.palette_open && (not state.help_open && not state.keeper_deletions_open)
-              && not state.agenda_open && not state.answering_open
-              && not state.context_inspector_open
+              && not state.palette_open && not (modal_owns_keys state)
+              && not state.answering_open
               && not state.patch_modal_open && not state.link_modal_open
               && Option.is_none state.ask_text_entry
               && (match state.ask_answer_mode with Ask_browsing -> true | Ask_answering _ -> false)
@@ -20232,7 +20240,7 @@ and is loaded on demand through keeper_skill.
        | Some k
          when state.view = Approvals
               && Option.is_some state.ask_text_entry
-              && not state.context_inspector_open ->
+              && not (modal_owns_keys state) ->
            (match k with
             | "esc" -> cancel_ask_text_entry state
             | "\r" | "\n" | "enter" -> commit_ask_text_entry state
@@ -20254,7 +20262,7 @@ and is loaded on demand through keeper_skill.
               && (match state.ask_answer_mode with
                   | Ask_answering _ -> true
                   | Ask_browsing -> false)
-              && not state.context_inspector_open ->
+              && not (modal_owns_keys state) ->
            (match k with
             | "esc" -> leave_ask_answering state
             | "left" | "up" | "k" -> move_ask_question_cursor state (-1)
@@ -20321,7 +20329,7 @@ and is loaded on demand through keeper_skill.
                   | Ask_browsing -> true
                   | Ask_answering _ -> false)
               && (not state.approval_detail_open)
-              && not state.context_inspector_open ->
+              && not (modal_owns_keys state) ->
            move_ask_cursor state (if String.equal k "[" then -1 else 1);
            Render_schedule.request render_schedule Render_schedule.Force
        (* [/context] is modal: the summary and exact input text must not leak
@@ -20366,15 +20374,7 @@ and is loaded on demand through keeper_skill.
                        provider_input)
              | Some _ | None -> []
            in
-           let close () =
-             state.context_inspector_open <- false;
-             supersede_context_inspector_load state None;
-             state.context_inspector_exact <- None;
-             state.context_inspector_scroll <- 0;
-             state.context_inspector_detail_scroll <- 0;
-             state.context_inspector_focus <- Left_pane;
-             state.context_inspector_turn_back <- 0
-           in
+           let close () = close_context_inspector state in
            (match k with
             | "esc" ->
                 (match state.context_inspector_exact with
@@ -20543,6 +20543,13 @@ and is loaded on demand through keeper_skill.
        (* The help overlay is modal: it answers scrolling and closing, and
           swallows everything else so a surface binding cannot fire under a
           screen that is describing it. Quit stays global above. *)
+       (* /about is modal for the help sheet's reason: Esc closes it, and
+          everything else is swallowed so no surface binding fires under it.
+          Quit stays global above. *)
+       | Some k when state.about_open ->
+           (match k with
+            | "esc" -> state.about_open <- false
+            | _ -> ())
        | Some k when state.keeper_deletions_open ->
            (match k with
             | "esc" | "D" -> state.keeper_deletions_open <- false
@@ -20609,11 +20616,7 @@ and is loaded on demand through keeper_skill.
           answering "what is coming" should not have a surface binding fire
           underneath it. *)
        | Some k when state.agenda_open ->
-           let close () =
-             state.agenda_open <- false;
-             state.agenda_scroll <- 0;
-             state.agenda_selected <- Masc_tui_agenda.Nowhere
-           in
+           let close () = close_agenda state in
            (match k with
             | ";" | "esc" -> close ()
             | "j" | "down" | "k" | "up" ->
@@ -26168,7 +26171,7 @@ and is loaded on demand through keeper_skill.
         Option.is_some current_marquee_target
         && Int64.compare
              (Int64.sub now_ns !roster_marquee_last_step_ns)
-             roster_marquee_interval_ns
+             Masc_tui_types.motion_step_ns
            >= 0
       then begin
         roster_marquee_last_step_ns := now_ns;
@@ -26215,7 +26218,7 @@ and is loaded on demand through keeper_skill.
       else if
         Int64.compare
           (Int64.sub now_ns !activity_last_step_ns)
-          activity_interval_ns
+          Masc_tui_types.motion_step_ns
         >= 0
       then begin
         activity_last_step_ns := now_ns;
@@ -26224,6 +26227,26 @@ and is loaded on demand through keeper_skill.
            else state.activity_frame + 1);
         Render_schedule.request render_schedule Render_schedule.Background
       end;
+      (* The turning imp -- the startup splash or /about -- steps on its own
+         clock while the last frame drew it turning. When no frame does, or
+         one holds it still, nothing here asks for a repaint, and the next
+         time it turns it starts from the first step. *)
+      (match Masc_tui_emblem_screen.drawn () with
+       | Masc_tui_emblem_screen.Moving ->
+           if
+             Int64.compare
+               (Int64.sub now_ns !emblem_last_step_ns)
+               Masc_tui_types.motion_step_ns
+             >= 0
+           then begin
+             emblem_last_step_ns := now_ns;
+             state.emblem_frame <-
+               (if state.emblem_frame < 0 || state.emblem_frame = max_int then 0
+                else state.emblem_frame + 1);
+             Render_schedule.request render_schedule Render_schedule.Background
+           end
+       | Masc_tui_emblem_screen.Still | Masc_tui_emblem_screen.Absent ->
+           state.emblem_frame <- -1);
       if
         Int64.compare (Int64.sub now_ns !last_check_ns) refresh_interval_ns >= 0
       then begin
@@ -26369,7 +26392,11 @@ and is loaded on demand through keeper_skill.
        with
        (* The terminal belongs to the picture until it is dismissed. A frame
           drawn now would clear the rows it occupies and leave the rest. *)
-       | Render_schedule.Render when state.image_open || state.msx_open -> ()
+       | Render_schedule.Render when state.image_open || state.msx_open ->
+           (* This frame is the picture's, so no imp is on screen and nothing
+              should keep stepping one. Closing the picture repaints in full,
+              and the imp steps again from that frame. *)
+           Masc_tui_emblem_screen.begin_frame ()
        | Render_schedule.Render ->
            let frame, clamped, approval, presses =
              Masc_tui_frame_timing.time_tagged Masc_tui_frame_timing.Build

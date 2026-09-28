@@ -91,7 +91,7 @@ decides whether launching one is worth it.
 | Overview - Tasks panel | works | `.masc/tasks/backlog.json` |
 | Overview - summary, Attention | unavailable | `GET /api/v1/dashboard/briefing` |
 | Overview - transport tail | unavailable | `GET /api/v1/dashboard/transport-health` |
-| Overview - Providers | unavailable | `GET /api/v1/runtime/resolved` |
+| Usage - Plan usage | unavailable | `GET /api/v1/runtime/resolved` |
 | Lanes | unavailable | `GET /api/v1/keepers/composite` |
 | Clients | unavailable | `GET /api/v1/dashboard/clients` |
 | Approvals | unavailable | `GET /api/v1/operator`, `POST /api/v1/operator/confirm` |
@@ -358,20 +358,26 @@ memory/Gate safety readings (`1`/`2`/`3` select those sections); `p` returns
 to quota and Keeper usage. Activity and the server log are reached from
 System when a detailed event timeline is needed.
 
-The provider section on Usage reads
+Plan usage on Usage reads
 `provider_usage_windows` from `GET /api/v1/runtime/resolved` and draws one
-strip per quota scope, named by its providers' `display-name` and the scope identifier: a meter
+strip per quota scope, named by its providers' `display-name` and the scope
+identifier, with the account's email under the name when the setup inventory
+reads it (`GET /api/v1/setup/inventory`, Admin): a meter
 per usage window, the value as a whole percent (a fraction is multiplied by
 100 and floored), the reset time, and how long ago the provider said so. A
 meter takes 10 to 24 cells; when 10 do not fit beside the hearing age, the
 age is left out first.
 
 ```
- Providers  reported by the provider · since server start 22:39
- Claude Max  5h ▕██████████▋     ▏  67%  ↻ 18:10 in 4h12m        heard 3m00s ago
-             7d ▕███████         ▏  44%  ↻ 09-29 13:00 in 5d23h
- Codex Pro   no report since server start
+ Plan usage
+ Claude Max · 1a2b3c4d  5h ▕██████████▋     ▏  67%  ↻ 18:10 in 4h12m        heard 3m00s ago
+                        7d ▕███████         ▏  44%  ↻ 09-29 13:00 in 5d23h
 ```
+
+An account that has not reported since the server started draws no row,
+unless the runtime catalogue observed its quota exhausted; then it draws one
+`no usage data` row with that tag. A read with no row to draw says
+`no usage data`.
 
 A meter is drawn in the exhausted style only when the value reaches the full
 value of its own unit (`1.0` for a fraction, `100` for a percent) and the
@@ -383,7 +389,8 @@ that has passed reads `reset time passed · no newer report`; the meter keeps
 the last reported value. An account whose runtime rows carry
 `quota_exhausted` wears `exhausted (observed)` with the catalogue's own reopen
 time, and is listed first. A failed read is one line,
-`providers unavailable: <reason>`.
+`usage data unavailable: <reason>`. A failed email read adds
+`account emails unread: <reason>` after the rows.
 
 
 ### Activity

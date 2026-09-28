@@ -443,7 +443,7 @@ let child_environment_key_allowed = function
   | _ -> false
 ;;
 
-let client_environment account_home prepared_home =
+let client_environment ?storage_root account_home prepared_home =
   (* The configured spelling binds admission and session identity. The prepared
      physical root binds every child storage path to that credential generation,
      even if a configured HOME symlink is retargeted before spawn. *)
@@ -480,8 +480,23 @@ let client_environment account_home prepared_home =
            let key = env_key entry in
            key <> "XDG_CONFIG_HOME" && key <> "TMPDIR") selected
   in
+  let selected = match storage_root with
+    | None -> selected
+    | Some root ->
+      let roots = [ "XDG_DATA_HOME", "data"; "XDG_CACHE_HOME", "cache";
+                    "XDG_STATE_HOME", "state"; "XDG_RUNTIME_DIR", "run";
+                    "TMPDIR", "tmp" ] in
+      List.map (fun (key, part) -> key ^ "=" ^ Filename.concat root part) roots
+      @ List.filter (fun entry -> not (List.mem_assoc (env_key entry) roots)) selected
+  in
   Array.of_list selected
 ;;
+
+let login_environment ~account_home =
+  (* The official launcher otherwise forks a detached install/update job before
+     executing login. Setup owns one login process, not a shared installation
+     update or its independent download-authentication flow. *)
+  Array.append [|"MUSE_NO_AUTO_UPDATE=1"|] (client_environment (Some account_home) None)
 
 let client_argv config =
   [ config.cli_path; "serve" ]
@@ -565,9 +580,10 @@ type io =
   ; receive : unit -> (Msp.wire_message, error) result
   ; set_receive_phase : receive_phase -> unit
   ; next_id : unit -> int
+  ; on_subscription_usage : Msp.subscription_usage -> unit
   }
 
-let with_spawned_client ~mgr ~clock ~cwd config run =
+let with_spawned_client ?storage_root ?(on_subscription_usage = fun _ -> ()) ~mgr ~clock ~cwd config run =
   Eio.Switch.run (fun sw ->
     let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
     let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
@@ -577,7 +593,7 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
         ~sw
         mgr
         ~cwd
-        ~env:(client_environment config.account_home config.prepared_home)
+        ~env:(client_environment ?storage_root config.account_home config.prepared_home)
         ~stdin:stdin_r
         ~stdout:stdout_w
         ~stderr:stderr_w
@@ -650,6 +666,7 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
         (fun () ->
            run
              { send
+             ; on_subscription_usage
              ; receive
              ; set_receive_phase = (fun phase -> receive_phase := phase)
              ; next_id =
@@ -673,9 +690,9 @@ let send_best_effort io ~what json =
     Log.Runtime_agent.debug "Muse Code %s write failed: %s" what (Printexc.to_string exn)
 ;;
 
-(* A reply to request [id]. Notifications that arrive first are session
-   projections this client does not read before the turn; a server request
-   before the turn exists is not one MASC answers. *)
+(* Subscription observations apply even before an acknowledgement or a
+   rejected turn. Other session projections are not consumed before the
+   turn; a server request before the turn exists is not one MASC answers. *)
 let rec await_response io ~id ~method_ =
   let* message = io.receive () in
   match message with
@@ -686,7 +703,13 @@ let rec await_response io ~id ~method_ =
     Error (Rpc_error { method_; code; message })
   | Msp.Response _ | Msp.Response_error _ ->
     protocol_error method_ "received a response to another request"
-  | Msp.Notification _ -> await_response io ~id ~method_
+  | Msp.Notification {method_=notification_method; params} ->
+    let* notification = lift (Msp.parse_notification ~method_:notification_method params) in
+    (match notification with
+     | Msp.Usage_changed usage -> io.on_subscription_usage usage
+     | Msp.Turn_started _ | Turn_completed _ | Item_started _ | Item_updated _
+     | Item_completed _ | Item_delta _ | Unhandled_notification _ -> ());
+    await_response io ~id ~method_
   | Msp.Server_request { id = request_id; method_ = requested; _ } ->
     send_best_effort
       io
@@ -704,7 +727,7 @@ let request io ~method_ build =
   await_response io ~id ~method_
 ;;
 
-let handshake io ~requested_capabilities =
+let handshake io ~requested_capabilities ~requires_durable_session =
   let* result =
     request io ~method_:"initialize" (fun ~id ->
       Msp.initialize_request
@@ -717,7 +740,7 @@ let handshake io ~requested_capabilities =
   let* () =
     match init.Msp.session_durability with
     | Msp.Durable -> Ok ()
-    | Msp.Ephemeral -> Error Session_not_durable
+    | Msp.Ephemeral -> if requires_durable_session then Error Session_not_durable else Ok ()
   in
   let* () =
     match
@@ -939,6 +962,15 @@ let open_session io (config : config) ~approval_mode ~session_mode ~workspace_ro
     in
     let* session = lift (Msp.parse_session_result ~stage:"session/start" result) in
     let* () = validate_session_identity config ~workspace_root session in
+    (* A started session must be empty: turns attached to a fresh claim mean
+       the host confused the new session with an existing conversation. *)
+    let* () =
+      if session.Msp.turn_count = 0
+      then Ok ()
+      else protocol_error "session/start"
+          (Printf.sprintf "started session completed-turn count changed: expected 0, reported %d"
+             session.Msp.turn_count)
+    in
     let* () = validate_session_approval_mode ~requested:approval_mode session.approval_mode in
     Ok (session, false)
   | Resume { session_id; expected_turn_count } ->
@@ -1003,7 +1035,7 @@ let run_protocol
     | [] -> []
     | _ :: _ -> [ Msp.Session_mcp ]
   in
-  let* init = handshake io ~requested_capabilities in
+  let* init = handshake io ~requested_capabilities ~requires_durable_session:true in
   let* session, resumed =
     open_session
       io
@@ -1132,6 +1164,7 @@ let prepare_account_config config =
 ;;
 
 let run_turn
+      ?storage_root
       ?(session_mode = Start)
       ?(mcp_servers = [])
       ?reasoning_effort
@@ -1146,12 +1179,21 @@ let run_turn
       ~prompt
       ~images
   =
+  let* () = match storage_root, session_mode with
+    | Some _, Resume _ -> Error (Invalid_config "isolated stateless storage cannot resume")
+    | Some root, Start when Filename.is_relative root ->
+      Error (Invalid_config "isolated storage root must be absolute")
+    | Some _, Start | None, _ -> Ok () in
   let* () = validate_turn ~session_mode config ~workspace_root ~prompt ~images in
   let* () = validate_mcp_servers mcp_servers in
   let* config = prepare_account_config config in
   let* approval_mode = approval_mode_of_posture config.native in
   guard_idle_timeout (fun () ->
-    with_spawned_client ~mgr ~clock ~cwd config (fun io ->
+    with_spawned_client
+      ?storage_root
+      ~on_subscription_usage:(fun usage ->
+        emit_stream_event on_stream_event (Subscription_usage_observed usage))
+      ~mgr ~clock ~cwd config (fun io ->
       run_protocol
         io
         config
@@ -1173,7 +1215,18 @@ let read_usage ~mgr ~clock ~cwd config =
   let* config = prepare_account_config config in
   guard_idle_timeout (fun () ->
     with_spawned_client ~mgr ~clock ~cwd config (fun io ->
-      let* (_ : Msp.initialize_result) = handshake io ~requested_capabilities:[] in
+      let* (_ : Msp.initialize_result) = handshake io ~requested_capabilities:[] ~requires_durable_session:true in
       let* result = request io ~method_:"usage/read" (fun ~id -> Msp.usage_read_request ~id) in
       lift (Msp.parse_usage_read_result result)))
+;;
+
+let list_models ~mgr ~clock ~cwd config =
+  let* () = validate_process_config config in
+  let* config = prepare_account_config config in
+  guard_idle_timeout (fun () ->
+    with_spawned_client ~mgr ~clock ~cwd config (fun io ->
+      let* (_ : Msp.initialize_result) = handshake io ~requested_capabilities:[]
+          ~requires_durable_session:false in
+      let* result = request io ~method_:"model/list" Msp.model_list_request in
+      lift (Msp.parse_model_list_result result)))
 ;;

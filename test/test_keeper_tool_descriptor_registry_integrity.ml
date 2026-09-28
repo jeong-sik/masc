@@ -1211,8 +1211,8 @@ let test_masc_board_descriptions_disambiguate_post_id_flow () =
     ~sub:"masc_board_list or masc_board_search first"
     get_schema.description;
   check_contains
-    "masc_board_post_get schema advertises pagination"
-    ~sub:"Comments are paginated by default"
+    "masc_board_post_get schema advertises the newest-first default read"
+    ~sub:"The default read returns the post body and its newest comments"
     get_schema.description;
   check_contains
     "masc_board_post_get schema forbids empty args"
@@ -1223,12 +1223,12 @@ let test_masc_board_descriptions_disambiguate_post_id_flow () =
     ~sub:"Required exact board post ID"
     get_post_id_description;
   check_contains
-    "masc_board_post_get offset description mentions default"
-    ~sub:"default: 0"
+    "masc_board_post_get offset description says omitting reads the newest"
+    ~sub:"Omit it to read the newest comments"
     comment_offset_description;
   check_contains
     "masc_board_post_get limit description mentions bounds"
-    ~sub:"default: 50, max: 100"
+    ~sub:"default: 20, max: 100"
     comment_limit_description;
   Alcotest.(check (option int))
     "masc_board_post_get offset minimum"

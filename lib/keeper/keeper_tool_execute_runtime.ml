@@ -166,8 +166,12 @@ let redact_execute_output redaction ~stdout ~stderr =
   in
   stdout, stderr, output
 
-let composable_output_fields ~base_path ~stdout ~stderr ~output =
-  if String.length output <= Tool_bridge.default_externalize_threshold_bytes
+(* [inline_ceiling_bytes] is the ceiling of the projection this call's result
+   crosses on its way to the model, resolved for the lane running it. Holding
+   stdout back at a narrower global bound would spill output the lane had
+   declared (maxResultSizeChars) it would take inline. *)
+let composable_output_fields ~inline_ceiling_bytes ~base_path ~stdout ~stderr ~output =
+  if String.length output <= inline_ceiling_bytes
   then Ok [ "output", `String output ]
   else
     try
@@ -273,9 +277,11 @@ let handle_tool_execute_typed
       ?gate_context
       ?gate_grant
       ~shell_ir_rewrite
+      ~(result_projection : Tool_output.model_projection)
       ~(args : Yojson.Safe.t)
       ()
   =
+  let inline_ceiling_bytes = Tool_output.inline_ceiling_bytes result_projection in
   match
     Keeper_tool_execute_path.resolve_tool_execute_cwd_typed
       ~config
@@ -1003,10 +1009,12 @@ let handle_tool_execute_typed
               match result.output_files with
               | Some files ->
                 Keeper_execute_output_files.publish
+                  ~inline_ceiling_bytes
                   ~base_path:config.base_path ~redaction:output_redaction files
                 |> Result.map (fun publication -> publication, [])
               | None ->
                 composable_output_fields
+                  ~inline_ceiling_bytes
                   ~base_path:config.base_path ~stdout ~stderr ~output
                 |> Result.map (fun fields ->
                   ( { Keeper_execute_output_files.fields
@@ -1127,6 +1135,7 @@ let handle_tool_execute_with_outcome
       ?gate_context
       ?gate_grant
       ~shell_ir_rewrite
+      ~result_projection
       ~(args : Yojson.Safe.t)
       ()
   =
@@ -1143,6 +1152,7 @@ let handle_tool_execute_with_outcome
     ?gate_context
     ?gate_grant
     ~shell_ir_rewrite
+    ~result_projection
     ~args
     ()
 ;;
@@ -1155,6 +1165,7 @@ let handle_tool_execute
       ?gate_context
       ?gate_grant
       ~shell_ir_rewrite
+      ~result_projection
       ~args
       ()
   =
@@ -1166,6 +1177,7 @@ let handle_tool_execute
      ?gate_context
      ?gate_grant
      ~shell_ir_rewrite
+     ~result_projection
      ~args
      ()).raw_output
 ;;

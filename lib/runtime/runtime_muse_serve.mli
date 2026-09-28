@@ -49,6 +49,9 @@ type config =
 
 val default_timeout_s : float
 val default_config : unit -> config
+val login_environment : account_home:string -> string array
+(** Native login writes HOME/.config/muse/auth.json. All HOME/XDG roots are
+    selected explicitly, with ambient provider API credentials excluded. *)
 
 type session_mode =
   | Start
@@ -175,7 +178,9 @@ type stream_event =
           answered from the posture: [Native_full] approves once,
           [Native_read] denies. *)
   | Subscription_usage_observed of Runtime_muse_msp.subscription_usage
-      (** A [usage/changed] notification, for the operator view only. *)
+      (** Provider subscription observation, including notifications received
+          before request acknowledgement. Consumers may record its reported
+          exhaustion/reset in the selected account's quota scope. *)
   | Turn_terminal_received of Runtime_muse_msp.terminal
       (** The matching durable terminal has been decoded. Emitted
           before usage callbacks; [Turn_finished] still closes output afterward. *)
@@ -199,7 +204,8 @@ val validate_turn
     it before spawning. *)
 
 val run_turn
-  :  ?session_mode:session_mode
+  :  ?storage_root:string
+  -> ?session_mode:session_mode
   -> ?mcp_servers:mcp_server list
   -> ?reasoning_effort:Runtime_muse_msp.reasoning_effort
   -> ?on_session_ready:(session_id:string -> (unit, string) result)
@@ -213,14 +219,23 @@ val run_turn
   -> prompt:string
   -> images:image_input list
   -> (turn_result, error) result
-(** [workspace_root] is the absolute directory the session works in.
+(** [storage_root] selects an absolute caller-owned per-call directory for native
+    XDG data/cache/state/runtime and temporary files, preserving the selected HOME
+    and managed authentication config. The caller creates its [data], [cache],
+    [state], [run], and [tmp] children and removes the tree after this call has
+    reaped its process. This stateless mode refuses resume before spawn; default
+    calls keep the selected account's durable storage. Native durability and
+    completion notifications remain enabled in both cases.
+
+    [workspace_root] is the absolute directory the session works in.
     [mcp_servers] are added to this session only. A non-empty list requests
     [sessionMcp] at the handshake and fails with {!Capability_not_granted}
     when the host withholds it.
 
     The returned model (when explicitly selected) and workspace must match the
     request on both start and resume. Mismatches refuse admission before callbacks.
-    Start must report the requested approval mode. Resume reapplies that mode
+    A started session must hold no turns; resume requires the expected retained
+    count. Start must report the requested approval mode. Resume reapplies that mode
     and verifies the returned effective mode before admitting the session.
     [on_session_ready] runs once the host has returned the session id, before
     the turn is written, so the caller can persist the id first. Its failure
@@ -235,3 +250,11 @@ val read_usage
   -> (Runtime_muse_msp.subscription_usage option, error) result
 (** Handshake plus [usage/read], with no session and no model call. [None]
     when the host has observed no usage yet. *)
+
+val list_models :
+  mgr:_ Eio.Process.mgr -> clock:_ Eio.Time.clock ->
+  cwd:Eio.Fs.dir_ty Eio.Path.t -> config ->
+  (Runtime_muse_msp.model_catalog, error) result
+(** Handshake plus [model/list], without session admission or model work.
+    Ephemeral servers can provide metadata too. The reported catalog source
+    is preserved; success is not authentication or invocation evidence. *)

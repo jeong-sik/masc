@@ -38,6 +38,17 @@ status: reference
 : Claude Code, Codex, Antigravity 같은 공식 클라이언트가 자기 프로세스에서
   provider 요청을 보내고, MASC는 새 turn과 결과를 조율·관찰하는 실행 경로.
 
+**Official Client Tool Result Bound (공식 클라이언트 도구 결과 상한)**
+: 공식 클라이언트에 넘기는 동적 도구 하나의 모델 대상 결과에 MASC가 선언하는
+  바이트 상한이다(`Runtime_official_client_tool.result_bound` = `Bounded_bytes n`·
+  `Unbounded`). `Bounded_bytes n`은 결과가 `n`바이트를 넘지 않음을 뜻하고,
+  `Unbounded`는 MASC가 결과 크기를 제한하지 않아 상한을 선언하지 않음을 뜻한다.
+  Claude Code 전송은 이 상한을 `tools/list` 항목의
+  `_meta["anthropic/maxResultSizeChars"]`로 싣는다. 이 선언은 바이트 상한이며
+  제공자 토큰 한도와 같은 값이 아니다.
+  → [Runtime_official_client_tool](../../lib/runtime/runtime_official_client_tool.mli),
+  [Runtime_claude_code](../../lib/runtime/runtime_claude_code.mli)
+
 **Clients (TUI 클라이언트 표)**
 : `GET /api/v1/dashboard/clients` 한 읽기를 그리는 TUI 표. 한 워크스페이스에 붙은
   모두를 한 번에 보여준다 — directory agent, state-backed session, runtime fiber.
@@ -97,8 +108,11 @@ status: reference
   `Verifying`·`Awaiting_confirmation`)의 Goal마다 우선순위(낮은 숫자 우선) 및 마감일
   순으로 한 줄씩 그린다(#38386).
   - 각 행: 목표 제목, 연결 태스크 대비 완료 태스크 바(`done/linked task bar`), 정체
-    시간(`stagnation_seconds` 기준 idle 기간), 운영자의 로컬 캘린더 날짜 기준 마감
-    카운트다운(`D-N due countdown`).
+    시간(`stagnation_seconds` — 연결 태스크 갱신·승인 요청·Keeper 영수증·runtime trust
+    이벤트·Goal 메타데이터 중 가장 최근 관측 활동 시각부터 지난 시간. Team 블록의 `Idle`
+    과 다른 값이다: `Idle` 은 Keeper 의 작업 배정 상태이고 이 값은 Goal 의 마지막 관측
+    활동 이후 지난 시간이다), 운영자의 로컬 캘린더 날짜 기준 마감 카운트다운
+    (`D-N due countdown`).
   - 관측 권위: 목표가 자체 지표(`metric`·`target`)를 가지고 있어도 측정값이 보고되지
     않으면 지어내지 않고, 진행 바는 순수하게 연결된 태스크의 완료 수만 측정한다.
     보고된 측정값은 **Goal Measurement**다.
@@ -130,7 +144,8 @@ status: reference
 : TUI Overview 에서 fleet 을 Keeper 한 명당 한 줄로 보여 주며 "누가 무엇을 하고 누가 막혔나" 에 답하는
   자리. briefing 의 `keeper_briefs` 와 backlog 를 합쳐 그린다. 줄은 네 무리로 나뉜다 —
   막힘(Failing·Crashed, 또는 phase 없이 info 가 아닌 Attention 이 가리키는 Keeper),
-  일하는 중(Running·Draining·Restarting 이고 Claimed·InProgress Task 를 잡음), 쉬는 중,
+  일하는 중(Running·Draining·Restarting 이고 Claimed·InProgress Task 를 잡음),
+  쉬는 중(`Idle` — 살아 있으며 Claimed·InProgress Task 를 맡지 않음),
   멈춤(brief 의 `paused` 가 true 이거나 Paused·Stopped·Offline, 한 줄로 모음). 순서는
   점수가 아니라 이 무리와 이름이다. 막힌 줄의 설명은 그 Keeper 를 `Attention_keeper` 로
   가리키는 info 가 아닌 첫 Attention 문장을 그대로 싣는다. Keeper 가 아닌

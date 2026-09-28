@@ -1,5 +1,5 @@
 import { signal } from '@preact/signals'
-import { post } from '../api/core'
+import { post, postControlPlane, type AbortableRequestOptions } from '../api/core'
 import { isRecord } from './type-guards'
 
 export type ModelSetupResumeState =
@@ -10,12 +10,14 @@ export type ModelSetupResumeState =
 export const modelSetupResumeState = signal<ModelSetupResumeState>({ kind: 'idle' })
 let latestRequest = 0
 
-export async function resumeSavedModelSetup(): Promise<ModelSetupResumeState> {
+export async function resumeSavedModelSetup(options: AbortableRequestOptions = {}): Promise<ModelSetupResumeState> {
   const request = ++latestRequest
   modelSetupResumeState.value = { kind: 'resuming' }
   let result: ModelSetupResumeState
   try {
-    const response = await post<unknown>('/api/v1/runtime/setup/resume', {})
+    const response = options.signal
+      ? await postControlPlane<unknown>('/api/v1/runtime/setup/resume', {}, undefined, options)
+      : await post<unknown>('/api/v1/runtime/setup/resume', {})
     if (!isRecord(response) || response.runtime_ready !== true
       || typeof response.exact_output_authority_available !== 'boolean'
       || !isRecord(response.model_setup) || response.model_setup.status !== 'available') {
@@ -28,6 +30,7 @@ export async function resumeSavedModelSetup(): Promise<ModelSetupResumeState> {
     result = { kind: 'failed', reason: status === 404 ? 'upgrade_required'
       : status === 401 || status === 403 ? 'access_required' : 'activation_failed' }
   }
+  if (options.signal?.aborted) result = { kind: 'idle' }
   if (request === latestRequest) modelSetupResumeState.value = result
   return result
 }

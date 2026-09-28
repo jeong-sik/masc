@@ -1,6 +1,6 @@
 type distribution = Debian | Ubuntu | Other
 type dependency = Sandbox of Sandbox_readiness.backend | Codex_cli | Claude_cli | Antigravity_cli
-  | Pdf_tools | Presentation_tools of {base_path:string} | Whisper_cli
+  | Muse_cli | Pdf_tools | Presentation_tools of {base_path:string} | Whisper_cli
 type action_effect = Open_official_installer of { url : string; argv : string list }
   | Run_commands of string list list
   | Install_official_cli of Runtime_official_cli_install.client
@@ -186,6 +186,11 @@ let rec catalog ?model_dir ?(apple_builder=Builder_unchecked) ~host ~distributio
         ~detail:"Follow the vendor instructions, then return to sign in and verify the selected model."
         ~source_url:(Runtime_official_cli_install.source_url Antigravity)
         (Runtime_official_cli_install.source_url Antigravity)]
+  | Muse_cli, _ -> [install_cli Muse;
+      open_ ~id:"muse_official_install" ~label:"Open official Muse Code installation"
+        ~detail:"Follow the vendor instructions. Muse Code asks for its own sign-in the first time it runs."
+        ~source_url:(Runtime_official_cli_install.source_url Muse)
+        (Runtime_official_cli_install.source_url Muse)]
   | Presentation_tools {base_path}, (Macos _ | Linux _) ->
     let parser = commands ~id:"presentation_parser_install" ~label:"Install the presentation parser for this workspace"
       ~detail:"Create a Python virtual environment under this workspace's .masc/runtime-tools/presentation and install python-pptx from PyPI. Uses the current host python3; it must support venv and pip. System Python, immutable release files, and producer containers are not modified."

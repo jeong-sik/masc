@@ -471,9 +471,10 @@ else:
     assert server["transport"] == "streamableHttp" and server["mode"] == "required", server
 if SCENARIO == "hang_session":
     drain()
+count_key = "start_turn_count" if mode == "start" else "resume_turn_count"
 send({"jsonrpc": "2.0", "id": opened["id"], "result": {"session": {
     "sessionId": SESSION, "status": "idle",
-    "turnCount": FIXTURE.get("resume_turn_count", completed_turns), "modelId": model,
+    "turnCount": FIXTURE.get(count_key, completed_turns), "modelId": model,
     "approvalMode": {"mode": "promptUnmatched", "source": "startup", "lastCommandId": None},
     "workspaceRoot": FIXTURE["workspace_root"]}, "viewCursor": cursor()}})
 if mode == "resume":
@@ -516,6 +517,8 @@ def call_probe():
 turn = read()
 assert turn["method"] == "turn/start", turn
 turn_id = turn["params"]["commandId"]
+if "expected_effort" in FIXTURE:
+    assert turn["params"]["reasoningEffort"] == FIXTURE["expected_effort"]
 text = [part["text"] for part in turn["params"]["input"] if part["type"] == "text"][0]
 with open(os.path.join(HERE, mode + "-prompt.txt"), "w") as handle:
     handle.write(text)
@@ -529,6 +532,8 @@ def acknowledge(disposition="started"):
     if disposition == "started":
         notify("turn/started", {"sessionId": SESSION, "turnId": turn_id,
                                 "commandId": turn_id})
+        if "subscription_usage" in FIXTURE:
+            notify("usage/changed", FIXTURE["subscription_usage"])
 
 def tool_item(item_id, tool, call_id, status, revision, args="{}"):
     return {"itemId": item_id, "kind": "toolCall", "turnId": turn_id, "revision": revision,
@@ -578,6 +583,8 @@ def ask(tool, subject):
 if SCENARIO == "hang_before_ack":
     drain()
 if SCENARIO == "refuse_turn":
+    if "subscription_usage" in FIXTURE:
+        notify("usage/changed", FIXTURE["subscription_usage"])
     send({"jsonrpc": "2.0", "id": turn["id"],
           "error": {"code": -32602, "message": "fixture refusal"}})
     drain()
@@ -722,17 +729,22 @@ let run_turn_with ?goal_blocks ?(accepts_image_input = false) ?model ?account_ho
   let reports = ref [] in
   let transmitted = ref [] in
   let native_actions = ref [] in
+  let selected_home = Option.value account_home ~default:(Filename.concat base_path "account-home") in
   let config =
     { (Serve.default_config ()) with
       cli_path = launcher ~base_path
     ; model
-    ; account_home = Some (Option.value account_home ~default:(Filename.concat base_path "account-home"))
+    ; account_home = Some selected_home
     ; admission_timeout_s
     ; timeout_s = Some idle_timeout_s
     }
   in
   let outcome =
     Keeper_muse_runtime.run
+      ~max_prompt_bytes:(Runtime_inference.resolve_max_prompt_bytes ~runtime_id)
+      ~configured_reasoning_effort:(Runtime_inference.resolve_reasoning_effort ~runtime_id)
+      ~turn_timeout_s:(Runtime_inference.resolve_turn_timeout_s ~runtime_id)
+      ~quota_scope:(Runtime_quota_window.scope_of_muse_home selected_home)
       ~accepts_image_input
       ~runtime_id
       ~keeper_name
@@ -1013,6 +1025,133 @@ let with_scripted_host ?(fixture = []) f =
                    | Error detail -> fail detail);
                   persist_fixture_meta ~base_path;
                   f ~base_path)))))
+;;
+
+let test_declared_muse_runtime_routes_keeper_turns () =
+  with_scripted_host @@ fun ~base_path ->
+  let runtime_path = Filename.concat base_path "runtime.toml" in
+  let declaration = Printf.sprintf
+    {|[providers.muse_fixture]
+protocol = "muse-serve"
+command = %S
+account-home = %S
+is-non-interactive = true
+[models.fixture]
+api-name = "muse-fixture-1"
+max-context = 200000
+max-prompt-bytes = 1048576
+reasoning-effort = "high"
+turn-timeout-s = 0
+tools-support = true
+streaming = true
+[muse_fixture.fixture]
+[runtime]
+default = "muse_fixture.fixture"
+|} (launcher ~base_path) (Filename.concat base_path "account-home") in
+  write_file ~mode:0o600 runtime_path declaration;
+  (match Runtime.init_default ~config_path:runtime_path with
+   | Ok () -> () | Error detail -> fail detail);
+  let observed = ref `Null in
+  let tool = masc_probe_tool observed in
+  let env = match Eio_context.get_env_opt () with
+    | Some env -> env | None -> fail "fixture Eio environment is missing" in
+  write_fixture ~base_path ["expected_effort", `String "high"];
+  let frozen_registry = Runtime.For_testing.snapshot () in
+  let replacement = Filename.concat base_path "reloaded-runtime.toml" in
+  write_file ~mode:0o600 replacement {|
+[providers.reloaded]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1/v1"
+[models.reloaded]
+api-name = "synthetic-replacement"
+max-context = 4096
+[reloaded.reloaded]
+[runtime]
+default = "reloaded.reloaded"
+|};
+  let hooks = { Agent_core.Hooks.empty with before_turn_params = Some
+    (function
+      | Agent_core.Hooks.BeforeTurnParams { current_params; _ } ->
+        check bool "hook receives frozen configured effort" true
+          (current_params.reasoning_effort = Some Llm_provider.Reasoning_effort.High);
+        (match Runtime.init_default ~config_path:replacement with
+         | Ok () -> () | Error detail -> fail detail);
+        check bool "hook reload removed the selected id" true
+          (Option.is_none (Runtime.get_runtime_by_id runtime_id));
+        Agent_core.Hooks.AdjustParams
+          { current_params with
+            system_prompt_override = Some "MUSE_ROUTED_EFFECTIVE_SYSTEM_PROMPT" }
+      | _ -> fail "expected before_turn_params hook event") } in
+  let run () = Eio.Switch.run (fun sw ->
+    match Keeper_turn_driver.run_named ~walk_owner:Keeper_turn_driver.One_shot_walk
+      ~runtime_id ~keeper_name ~base_path ~goal:"Call masc_probe once"
+      ~system_prompt:"" ~hooks
+      ~tools:[tool] ~agent_core_tools:[tool]
+      ~initial_messages:[user_message "MUSE_OLD_COMPLETED_QUESTION";
+        { (user_message "MUSE_OLD_COMPLETED_ANSWER") with role=Assistant };
+        user_message "MUSE_ROUTED_NEWEST_ATOM"]
+      ~context:(Agent_core.Context.create ()) ~sw ~net:(Eio.Stdenv.net env) () with
+    | Ok selected -> selected.Keeper_turn_driver.run_result
+    | Error error -> fail (Agent_core.Error.to_string error)) in
+  let first = run () in
+  check string "routed reply" "MASC_MUSE_KEEPER_OK" (response_text first);
+  check (option bool) "routed start" (Some false) first.session_resumed;
+  check string "routed MCP tool reached MASC" {|{"marker":"from-muse"}|}
+    (Yojson.Safe.to_string !observed);
+  let _, _, first_count = settled_turn ~base_path in
+  check int "routed first durable ordinal" 1 first_count;
+  let prompt = read_text (Filename.concat base_path "start-prompt.txt") in
+  check bool "effective hook instructions reach the client" true
+    (String_util.contains_substring prompt "MUSE_ROUTED_EFFECTIVE_SYSTEM_PROMPT");
+  check bool "native coordinate survives the hook override" true
+    (String_util.contains_substring prompt "Muse native tools use host workspace");
+  check bool "no-trace start retains the newest checkpoint atom" true
+    (String_util.contains_substring prompt "MUSE_ROUTED_NEWEST_ATOM");
+  List.iter (fun stale ->
+    check bool "no-trace start excludes completed checkpoint history" false
+      (String_util.contains_substring prompt stale))
+    ["MUSE_OLD_COMPLETED_QUESTION"; "MUSE_OLD_COMPLETED_ANSWER"];
+  Runtime.For_testing.restore frozen_registry;
+  let second = run () in
+  check (option bool) "routed resume" (Some true) second.session_resumed;
+  let _, _, second_count = settled_turn ~base_path in
+  check int "routed second durable ordinal" 2 second_count
+;;
+
+let test_subscription_exhaustion_is_account_scoped () =
+  with_scripted_host (fun ~base_path ->
+    Runtime_quota_window.reset_for_testing ();
+    let scope = Runtime_quota_window.scope_of_muse_home (Filename.concat base_path "account-home") in
+    let other = Runtime_quota_window.scope_of_muse_home (Filename.concat base_path "other-account") in
+    let usage = `Assoc ["observedAtMs", `Int 100000; "tier", `String "fixture";
+      "window", `Assoc ["usedPercent", `Int 100; "resetsAtMs", `Int 500000; "windowDurationMins", `Int 5];
+      "weekly", `Assoc ["usedPercent", `Int 101; "resetsAtMs", `Int 900000]] in
+    write_fixture ~base_path ["subscription_usage", usage];
+    (match (run_turn ~base_path ~tool:(masc_probe_tool (ref `Null))).outcome.result with
+     | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
+    check (option (float 0.)) "successful turn retains latest provider reset" (Some 900.)
+      (Runtime_quota_window.active_until ~scope ~now:100.);
+    check bool "another selected account stays available" false
+      (Runtime_quota_window.is_exhausted ~scope:other ~now:100.);
+    let same_account = Runtime_quota_window.scope_of_muse_home (Filename.concat base_path "account-home") in
+    check (list string) "same HOME candidates demote together" ["other";"first";"second"]
+      (Runtime_quota_window.demote_order ~now:100.
+        ~quota_scope_of:(function "other" -> Some other | "second" -> Some same_account | _ -> Some scope)
+        ["first";"other";"second"]);
+    check bool "provider reset expires exactly" false
+      (Runtime_quota_window.is_exhausted ~scope ~now:900.);
+    Runtime_quota_window.reset_for_testing ());
+  with_scripted_host ~fixture:["scenario", `String "refuse_turn";
+    "subscription_usage", `Assoc ["observedAtMs", `Int 100000; "tier", `String "fixture";
+      "window", `Assoc ["usedPercent", `Int 100; "resetsAtMs", `Int 500000; "windowDurationMins", `Int 5];
+      "weekly", `Assoc ["usedPercent", `Int 1; "resetsAtMs", `Int 900000]]]
+    (fun ~base_path ->
+      let run = run_turn ~base_path ~tool:(masc_probe_tool (ref `Null)) in
+      check bool "host refusal has no successful completion" true (Result.is_error run.outcome.result);
+      let scope = Runtime_quota_window.scope_of_muse_home (Filename.concat base_path "account-home") in
+      check (option (float 0.)) "pre-ack quota survives the rejected turn" (Some 500.)
+        (Runtime_quota_window.active_until ~scope ~now:100.);
+      Runtime_quota_window.reset_for_testing ())
 ;;
 
 (* Fail the actual MCP listener edge while retaining real process/filesystem
@@ -1650,6 +1789,24 @@ let test_retry_previous_refuses_an_externally_advanced_session () =
     check (option string) "no new host turn was acknowledged" None observed_turn)
 ;;
 
+(* A started session must be empty: a host that attaches turns to a fresh
+   claim is refused before anything is dispatched. *)
+let test_nonempty_start_is_refused () =
+  with_scripted_host ~fixture:["start_turn_count", `Int 1] (fun ~base_path ->
+    let run = run_turn ~base_path ~tool:(masc_probe_tool (ref `Null)) in
+    (match run.outcome.result with
+     | Error (Agent_core.Error.Provider (Llm_provider.Error.ParseError _)) -> ()
+     | Error error -> fail (Agent_core.Error.to_string error)
+     | Ok _ -> fail "a non-empty start admitted the goal");
+    check_effect "refused start has no provider effect"
+      Keeper_provider_attempt_effect.No_effect_observed run.outcome;
+    check bool "refused start never dispatches" false
+      (Sys.file_exists (Filename.concat base_path "start-prompt.txt"));
+    let failure, observed_turn = recovery_row ~base_path in
+    check_failure "a non-empty start needs adjudication" Store.Protocol_failed failure;
+    check (option string) "no turn ran to name" None observed_turn)
+;;
+
 let test_owner_cancellation_after_completion_keeps_recovery () =
   List.iter (fun boundary -> with_scripted_host (fun ~base_path ->
     let observed = ref `Null in
@@ -1926,6 +2083,10 @@ let () =
     ; ( "scripted host"
       , [ test_case "start and resume through muse serve with a MASC tool" `Quick
             test_turn_through_scripted_host
+        ; test_case "declared Muse runtime routes and resumes Keeper turns" `Quick
+            test_declared_muse_runtime_routes_keeper_turns
+        ; test_case "subscription exhaustion uses selected account scope" `Quick
+            test_subscription_exhaustion_is_account_scoped
         ; test_case "prepared hook tool surface controls session binding" `Quick test_hook_tool_surface_controls_session_binding
         ; test_case "completed message suffix is forwarded once" `Quick test_completed_message_suffix_is_forwarded_once
         ; test_case "later unstreamed message reaches live consumers" `Quick test_later_unstreamed_message_reaches_live_consumers
@@ -1935,6 +2096,8 @@ let () =
       , [ test_case "MCP setup failure preserves previous settlement" `Quick test_bridge_setup_failure_preserves_previous_settlement
         ; test_case "capability refusal preserves previous settlement" `Quick test_capability_refusal_preserves_previous_settlement
         ; test_case "retry previous refuses externally advanced session" `Quick test_retry_previous_refuses_an_externally_advanced_session
+        ; test_case "a non-empty started session is refused" `Quick
+            test_nonempty_start_is_refused
         ; test_case "host stop resume requires folded native terminal" `Quick test_host_stop_resume_requires_a_folded_native_terminal
         ; test_case "admission timeout releases only undispatched claims" `Quick test_admission_timeout_restores_only_undispatched_claims
         ; test_case "read-only MCP failure preserves effect classification" `Quick test_read_only_mcp_failure_does_not_invent_an_effect

@@ -30,6 +30,7 @@ module Handle_set = Set.Make (String)
 module String_map = Map.Make (String)
 
 type error =
+  | Invalid_store_root of { dir : string; detail : string }
   | Reference_scan_failed of
       { handle : string
       ; detail : string
@@ -42,6 +43,8 @@ type error =
       }
 
 let error_to_string = function
+  | Invalid_store_root { dir; detail } ->
+    Printf.sprintf "kept vision store root rejected at %s: %s" dir detail
   | Reference_scan_failed { handle; detail } ->
     Printf.sprintf "reference scan failed for handle %s: %s" handle detail
   | Snapshot_read_failed { detail } ->
@@ -230,10 +233,23 @@ let empty_report =
   }
 ;;
 
+let store_root_is_directory dir =
+  match Unix.lstat dir with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
+  | exception Unix.Unix_error (error, _, _) ->
+    Error (Invalid_store_root { dir; detail = Unix.error_message error })
+  | stat ->
+    (match stat.Unix.st_kind with
+     | Unix.S_DIR -> Ok true
+     | Unix.S_LNK ->
+       Error (Invalid_store_root { dir; detail = "symlinked store root" })
+     | Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK ->
+       Error (Invalid_store_root { dir; detail = "store root is not a directory" }))
+;;
+
 let run ~masc_dir ~dir =
-  if not (Sys.file_exists dir && Sys.is_directory dir)
-  then Ok empty_report
-  else
+  let* present = store_root_is_directory dir in
+  if not present then Ok empty_report else
     try
       let entries = kept_entries ~dir in
       let sizes =

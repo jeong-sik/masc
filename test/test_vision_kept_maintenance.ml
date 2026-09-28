@@ -129,6 +129,29 @@ let test_symlink_aborts_the_sweep () =
   | Ok _ -> failwith "a symlink at the kept root must abort the sweep"
 ;;
 
+(* A symlink used as the store root must not send deletion into its target,
+   even when that target contains only canonical, unreferenced handles. *)
+let test_symlinked_store_root_keeps_external_files () =
+  let masc_dir = fresh_dir () in
+  let keepers_dir = fresh_dir () in
+  let outside = fresh_dir () in
+  let dir = Filename.concat keepers_dir "fixture.vision" in
+  store_kept_file ~dir:outside handle_a;
+  Unix.symlink outside dir;
+  for _ = 1 to 2 do
+    (match Multimodal.Vision_kept_maintenance.run ~masc_dir ~dir with
+     | Error (Multimodal.Vision_kept_maintenance.Invalid_store_root rejected) ->
+       check string "error names the symlinked store" dir rejected.dir;
+       check string "error identifies the symlink" "symlinked store root" rejected.detail
+     | Error other ->
+       fail (Multimodal.Vision_kept_maintenance.error_to_string other)
+     | Ok _ -> fail "a symlinked store root must abort before deletion")
+  done;
+  check bool "external kept file is untouched" true (exists ~dir:outside handle_a);
+  check bool "no candidate snapshot is written outside" false
+    (Sys.file_exists (Filename.concat outside "kept-candidates.json"))
+;;
+
 let () =
   run
     "vision_kept_maintenance"
@@ -147,6 +170,8 @@ let () =
             `Quick
             test_reappearing_reference_is_not_deleted
         ; test_case "symlink aborts the sweep" `Quick test_symlink_aborts_the_sweep
+        ; test_case "symlinked store root stays outside the sweep" `Quick
+            test_symlinked_store_root_keeps_external_files
         ] )
     ]
 ;;

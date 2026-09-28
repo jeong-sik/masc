@@ -19,6 +19,7 @@
    deletes nothing yet. *)
 
 type error =
+  | Invalid_store_root of { dir : string; detail : string }
   | Reference_scan_failed of
       { handle : string
       ; detail : string

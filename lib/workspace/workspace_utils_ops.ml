@@ -546,13 +546,21 @@ type held_lease =
 (* Lock keys are relative to a backend's base path, so two workspaces share
    the key [tasks:.backlog]. A lease is looked up by the backend it lives in
    as well as by key; otherwise a write to one workspace nested inside
-   another's lock would pick the inner workspace's lease. *)
-let lease_scope config = config.backend_config.base_path
+   another's lock would pick the inner workspace's lease. The backend is
+   named by its physical root, the same root its lease fence is named from:
+   two configs that spell one directory differently (a link, [..]) find one
+   another's leases, and a root that cannot be resolved is an error rather
+   than a fallback to the raw spelling. *)
+let lease_scope config =
+  match config.backend with
+  | FileSystem t ->
+      Result.map_error Backend_types.show_error (Backend.FileSystem.physical_root t)
+  | Memory _ -> Ok config.backend_config.base_path
 
 let lease_acquisition_seq = Atomic.make 0
 
-let fresh_lease config key =
-  { lease_scope = lease_scope config
+let fresh_lease config key ~scope =
+  { lease_scope = scope
   ; lease_key = key
   ; lease_owner =
       (* DET-OK: the pid only distinguishes owner tokens of processes that
@@ -585,8 +593,16 @@ let with_held_lease lease f =
   | Eio_guard.Eio_fiber ->
     Eio.Fiber.with_binding held_leases_key (lease :: current_held_leases ()) f
 
+type lease_acquisition =
+  | Lease_acquired of held_lease
+  | Lease_contended
+  | Lease_root_unresolved of string
+
 let acquire_lease ?clock config key =
-  let lease = fresh_lease config key in
+  match lease_scope config with
+  | Error detail -> Lease_root_unresolved detail
+  | Ok scope ->
+  let lease = fresh_lease config key ~scope in
   let rec acquire attempts delay =
     if attempts <= 0 then false
     else
@@ -599,13 +615,13 @@ let acquire_lease ?clock config key =
           sleep_lock_retry ?clock (backoff_with_jitter delay);
           acquire (attempts - 1) (Float.min 0.5 (delay *. 2.0))
   in
-  if acquire 50 0.05 then Some lease
+  if acquire 50 0.05 then Lease_acquired lease
   else begin
     (* #9645: surface lock acquire exhaustion as a fleet-wide
        metric.  Hook is wired by [lib/workspace.ml] at startup. *)
     (Atomic.get Workspace_hooks.distributed_lock_acquire_failed_fn)
       ~key ~attempts:50;
-    None
+    Lease_contended
   end
 
 let with_lease config lease f =
@@ -625,17 +641,26 @@ let with_lease config lease f =
 
 let with_distributed_lock ?clock config key f =
   match acquire_lease ?clock config key with
-  | Some lease -> with_lease config lease f
-  | None ->
+  | Lease_acquired lease -> with_lease config lease f
+  | Lease_contended ->
     invalid_arg
       (Printf.sprintf
          "Failed to acquire distributed lock for key: %s (50 attempts exhausted)"
          key)
+  | Lease_root_unresolved detail ->
+    invalid_arg
+      (Printf.sprintf
+         "Failed to acquire distributed lock for key: %s (%s)" key detail)
 
 let with_distributed_lock_r ?clock config key f : ('a, masc_error) result =
   match acquire_lease ?clock config key with
-  | Some lease -> with_lease config lease (fun () -> Ok (f ()))
-  | None ->
+  | Lease_acquired lease -> with_lease config lease (fun () -> Ok (f ()))
+  | Lease_root_unresolved detail ->
+    Error
+      (System
+         (System_error.IoError
+            (Printf.sprintf "distributed lock %s: %s" key detail)))
+  | Lease_contended ->
     (* #18472 follow-up: surface as typed [LockContention] instead of
        [IoError msg], so callers dispatch on the variant instead of
        substring-matching "transient contention" (RFC-0088
@@ -658,16 +683,26 @@ let commit_under_held_lease config path publish =
   match key_of_path config path, config.backend with
   | None, _ | Some _, Memory _ -> Ok (publish ())
   | Some key, FileSystem _ -> (
-      let scope = lease_scope config in
-      match
-        List.find_opt
-          (fun lease ->
-            String.equal lease.lease_scope scope
-            && String.equal lease.lease_key key)
+      let held =
+        List.filter
+          (fun lease -> String.equal lease.lease_key key)
           (current_held_leases ())
-      with
-      | None -> Ok (publish ())
-      | Some lease -> (
+      in
+      let held_here =
+        match held with
+        | [] -> Ok None
+        | _ :: _ ->
+            Result.map
+              (fun scope ->
+                List.find_opt
+                  (fun lease -> String.equal lease.lease_scope scope)
+                  held)
+              (lease_scope config)
+      in
+      match held_here with
+      | Error detail -> Error (Lease_unverifiable { key; detail })
+      | Ok None -> Ok (publish ())
+      | Ok (Some lease) -> (
           match
             backend_commit_under_lease config ~key
               ~ttl_seconds:lease.lease_ttl_seconds ~owner:lease.lease_owner

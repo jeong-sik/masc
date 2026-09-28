@@ -2906,6 +2906,58 @@ let test_backlog_commit_uses_its_own_workspace_lease () =
         Alcotest.(check (list string)) "the outer workspace stored its write"
           [ "scoped" ] (stored_descriptions outer)))
 
+(* A config that reaches the workspace through a link names the same lock
+   key but spells the base path differently. The writer must still find the
+   lease this fiber holds, so the lease's loss is seen. Here the lease has
+   expired and another holder has taken it over, so a write through the link
+   must be refused. Had the lease been looked up by the base path as written,
+   the write would have found no lease and published without any check. *)
+let test_backlog_commit_through_an_alias_path_uses_the_held_lease () =
+  with_test_env (fun config ->
+    ignore (Workspace.add_task config ~title:"alias" ~priority:1
+      ~description:"initial");
+    let config = { config with Workspace_utils.lock_expiry_minutes = 0 } in
+    let link = config.Workspace_utils.base_path ^ ".alias" in
+    Unix.symlink config.Workspace_utils.base_path link;
+    Fun.protect
+      ~finally:(fun () -> try Unix.unlink link with Unix.Unix_error _ -> ())
+      (fun () ->
+        let saved_base_path = Sys.getenv_opt "MASC_BASE_PATH" in
+        let alias =
+          { (workspace_config link) with Workspace_utils.lock_expiry_minutes = 0 }
+        in
+        Option.iter (Unix.putenv "MASC_BASE_PATH") saved_base_path;
+        ignore (backlog_lock_backend alias : Backend.FileSystem.t);
+        Alcotest.(check string) "the link names the same backlog lock key"
+          (backlog_lock_key config) (backlog_lock_key alias);
+        let result =
+          Workspace_utils.with_file_lock config (Workspace.backlog_lock_path config)
+            (fun () ->
+              let snapshot = Workspace.read_backlog config in
+              (match
+                 Backend.FileSystem.acquire_lock (backlog_lock_backend config)
+                   ~key:(backlog_lock_key config) ~owner:"other-holder"
+                   ~ttl_seconds:60
+               with
+               | Ok true -> ()
+               | Ok false -> Alcotest.fail "the expired lease was not taken over"
+               | Error e -> Alcotest.fail (Backend.show_error e));
+              Workspace.write_backlog_result alias
+                (with_descriptions "stale" snapshot))
+        in
+        (match result with
+         | Error _ -> ()
+         | Ok outcome ->
+           Alcotest.failf
+             "a write through the link committed revision %d under a lease \
+              another holder took over"
+             outcome.committed_revision);
+        Alcotest.(check (list string)) "the stored tasks are untouched"
+          [ "initial" ] (stored_descriptions config);
+        ignore
+          (Backend.FileSystem.release_lock (backlog_lock_backend config)
+             ~key:(backlog_lock_key config) ~owner:"other-holder")))
+
 (* What separates a malformed backlog from an absent one: the decode was
    reached and failed. #34482 replaced the hand-written schema sentence this
    pinned ("must contain exactly one tasks list") with the derived decoder's
@@ -3114,6 +3166,8 @@ let () =
         `Quick test_queued_backlog_encode_refused_after_lease_loss;
       Alcotest.test_case "backlog commit uses its own workspace's lease" `Quick
         test_backlog_commit_uses_its_own_workspace_lease;
+      Alcotest.test_case "backlog commit through an alias path uses the held lease"
+        `Quick test_backlog_commit_through_an_alias_path_uses_the_held_lease;
       Alcotest.test_case "queued backlog encode stamps after the wait" `Quick
         test_queued_backlog_encode_stamps_after_the_wait;
     ];

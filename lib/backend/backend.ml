@@ -648,33 +648,40 @@ module FileSystem = struct
       [extend_lock]) and every publication made under a lease
       ([commit_under_lease]) runs inside one fence per lock key, so a lease
       record changes hands at most once between an owner check and the write
-      that depended on it. The fence is two locks taken in this order:
+      that depended on it.
 
-      - a process-wide [Eio.Mutex] keyed by the fence file's native path, so
-        fibers of this process exclude each other even through two
-        independently created backend values for the same base path;
-      - an fcntl lock on that file ([File_lock_eio.acquire_flock_retry]),
-        so other processes on the host exclude this one. fcntl locks belong
-        to the process, which is why the mutex comes first: only one fiber
-        of the process opens and closes the fence file at a time, and closing
-        it cannot drop a lock another fiber still relies on.
+      The fence is {!File_lock_eio.with_durable_lock_observed} on a file named
+      from the backend's physical root ({!physical_root}), not from the base
+      path as written. That lock is a process-wide mutex keyed by the path
+      string, then an fcntl lock on the file. Two backend values that reach
+      one directory through a link, [..] or another spelling therefore name
+      one fence path, take one mutex, and never hold two fcntl locks on one
+      file from this process. That matters because fcntl locks belong to the
+      process: closing either of two descriptors on the same file drops the
+      lock the other still relies on.
 
       The operating system releases the fcntl lock when a process dies, so a
       crashed holder does not wedge the fence. A lease's TTL still decides
       when an idle lease may be taken over; the fence only makes each
       decision and the write that follows it one indivisible step. *)
 
-  let lease_fence_mutexes : (string, Eio.Mutex.t) Hashtbl.t = Hashtbl.create 16
-  let lease_fence_mutexes_mu = Stdlib.Mutex.create ()
-
-  let lease_fence_mutex fence_path =
-    Stdlib.Mutex.protect lease_fence_mutexes_mu (fun () ->
-      match Hashtbl.find_opt lease_fence_mutexes fence_path with
-      | Some mutex -> mutex
-      | None ->
-          let mutex = Eio.Mutex.create () in
-          Hashtbl.replace lease_fence_mutexes fence_path mutex;
-          mutex)
+  (* The directory this backend stores under, resolved by the filesystem:
+     [realpath] of the base directory. Two backend values created for a link
+     to a directory, for [/a/../b], or for another spelling of one directory
+     get the same root. A root that cannot be resolved is an error; nothing
+     falls back to the base path as written, since a raw spelling would give
+     one directory two fences. *)
+  let physical_root t =
+    match
+      run_blocking_file_op (fun () -> Unix.realpath (Eio.Path.native_exn t.fs))
+    with
+    | root -> Ok root
+    | exception Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exception exn ->
+        Error
+          (IOError
+             (Printf.sprintf "backend root %s cannot be resolved: %s"
+                t.config.base_path (Printexc.to_string exn)))
 
   (* Test seam: runs inside the fence of [commit_under_lease], after the
      owner is read and before the lease is renewed and the publication runs.
@@ -682,9 +689,16 @@ module FileSystem = struct
   let after_lease_owner_read_hook : (key:string -> unit) Atomic.t =
     Atomic.make (fun ~key:_ -> ())
 
+  (* The lease record's storage path, and its fence file under the physical
+     root. The fence sits beside the record, so the directory the record
+     needs is the one the fence needs. *)
   let lease_fence_paths t ~key =
-    let* lock_path = key_to_path t ("locks:" ^ key) in
-    Ok (lock_path, Eio.Path.native_exn lock_path ^ ".fence")
+    let lock_key = "locks:" ^ key in
+    let* lock_path = key_to_path t lock_key in
+    let* safe_key = validate_key lock_key in
+    let* root = physical_root t in
+    let relative = String.map (function ':' -> '/' | c -> c) safe_key in
+    Ok (lock_path, Filename.concat root relative ^ ".fence")
 
   let lease_fence_path t ~key =
     let* _, fence_path = lease_fence_paths t ~key in
@@ -693,28 +707,20 @@ module FileSystem = struct
   let with_lease_fence t ~key f =
     let* lock_path, fence_path = lease_fence_paths t ~key in
     _ensure_parent_dir ~log_errors:true lock_path;
-    Eio.Mutex.use_ro (lease_fence_mutex fence_path) (fun () ->
-      match
-        run_blocking_file_op (fun () ->
-          File_lock_eio.acquire_flock_retry ~lock_path:fence_path
-            ~mode:[ Unix.O_RDWR; Unix.O_CREAT ] ~perm:0o644
-            ~caller:"backend_lease_fence" ())
-      with
-      | exception Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exception File_lock_eio.Flock_timeout { attempts; _ } ->
-          Error
-            (IOError
-               (Printf.sprintf "lease fence %s still held after %d attempts"
-                  fence_path attempts))
-      | exception exn ->
-          Error
-            (IOError
-               (Printf.sprintf "lease fence %s unavailable: %s" fence_path
-                  (Printexc.to_string exn)))
-      | fd ->
-          Fun.protect
-            ~finally:(fun () -> File_lock_eio.release_flock_fd fd)
-            f)
+    match File_lock_eio.with_durable_lock_observed ~lock_path:fence_path f with
+    | File_lock_eio.Lock_not_acquired error ->
+        Error
+          (IOError
+             (Printf.sprintf "lease fence %s unavailable: %s" fence_path
+                (File_lock_eio.durable_lock_error_to_string error)))
+    | File_lock_eio.Body_completed { value; release_error = None } -> value
+    | File_lock_eio.Body_completed { value; release_error = Some error } ->
+        (* The fenced step already ran; its result stands. Release tries
+           the unlock and the close each regardless of the other, and the
+           failure is logged rather than hidden. *)
+        Log.Misc.error "lease fence %s release failed: %s" fence_path
+          (File_lock_eio.durable_lock_error_to_string error);
+        value
 
   (* The current record, or [None] when no lease file exists. *)
   let read_lease_record t lock_key =

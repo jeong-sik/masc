@@ -240,65 +240,71 @@ let test_commit_refused_after_takeover () =
     check (option string) "the new holder keeps the lease" (Some "holder-b")
       (lease_owner backend key))
 
-(* A's lease has expired, so a rival may take it over, and A is stopped
-   inside its commit after reading itself as owner and before renewing.
-   The rival, built as a separate backend value on the same base path, tries
-   the takeover right then. It must wait until A has renewed and published,
-   and then find the lease renewed and refuse. Without the fence the rival
-   would take over between A's read and A's renewal, and A would publish
-   under a lease it no longer held. *)
+(* The holder A is stopped inside its commit after reading itself as owner
+   and before renewing, with a lease that has already expired, so a rival may
+   take it over. [rival] tries the takeover right then. It must wait until A
+   has renewed and published, and then find the lease renewed and refuse.
+   [while_held] runs while A is still stopped, after the rival has had time
+   to get through. *)
+let check_takeover_waits ~backend ~rival ~clock ~key ~while_held =
+  acquire_expired backend clock ~key ~owner:"holder-a";
+  let owner_read, owner_read_r = Eio.Promise.create () in
+  let resume, resume_r = Eio.Promise.create () in
+  let events = ref [] in
+  let note event = events := event :: !events in
+  let hook ~key:hook_key =
+    if String.equal hook_key key then begin
+      Eio.Promise.resolve owner_read_r ();
+      Eio.Promise.await resume
+    end
+  in
+  with_owner_read_hook hook (fun () ->
+    Eio.Switch.run (fun sw ->
+      let commit =
+        Eio.Fiber.fork_promise ~sw (fun () ->
+          Backend.FileSystem.commit_under_lease backend ~key ~owner:"holder-a"
+            ~ttl_seconds:60 (fun () -> note "holder-a published"))
+      in
+      Eio.Promise.await owner_read;
+      let takeover =
+        Eio.Fiber.fork_promise ~sw (fun () ->
+          let result =
+            Backend.FileSystem.acquire_lock rival ~key ~owner:"holder-b"
+              ~ttl_seconds:60
+          in
+          note "holder-b acquire returned";
+          result)
+      in
+      for _ = 1 to 20 do Eio.Fiber.yield () done;
+      Eio.Time.sleep clock 0.1;
+      check bool
+        "the takeover waits while the holder is between its owner read and \
+         its renewal"
+        false (Eio.Promise.is_resolved takeover);
+      while_held ();
+      Eio.Promise.resolve resume_r ();
+      (match Eio.Promise.await_exn commit with
+       | Ok (Ok ()) -> ()
+       | Ok (Error _) -> fail "the holder's own lease was refused"
+       | Error e -> fail (Backend.show_error e));
+      match Eio.Promise.await_exn takeover with
+      | Ok false -> ()
+      | Ok true -> fail "the rival took over a lease its holder had just renewed"
+      | Error e -> fail (Backend.show_error e)));
+  check (list string) "the publication came before the rival's decision"
+    [ "holder-a published"; "holder-b acquire returned" ]
+    (List.rev !events);
+  check (option string) "the holder keeps the renewed lease" (Some "holder-a")
+    (lease_owner backend key)
+
+(* The rival is a separate backend value on the same base path, as another
+   component of the same process would build. Without the fence it would take
+   over between A's read and A's renewal, and A would publish under a lease
+   it no longer held. *)
 let test_takeover_waits_between_owner_read_and_renewal () =
   with_eio_backends (fun backend clock rival ->
-    let key = make_unique_key "lease_race" in
-    let rival = rival () in
-    acquire_expired backend clock ~key ~owner:"holder-a";
-    let owner_read, owner_read_r = Eio.Promise.create () in
-    let resume, resume_r = Eio.Promise.create () in
-    let events = ref [] in
-    let note event = events := event :: !events in
-    let hook ~key:hook_key =
-      if String.equal hook_key key then begin
-        Eio.Promise.resolve owner_read_r ();
-        Eio.Promise.await resume
-      end
-    in
-    with_owner_read_hook hook (fun () ->
-      Eio.Switch.run (fun sw ->
-        let commit =
-          Eio.Fiber.fork_promise ~sw (fun () ->
-            Backend.FileSystem.commit_under_lease backend ~key ~owner:"holder-a"
-              ~ttl_seconds:60 (fun () -> note "holder-a published"))
-        in
-        Eio.Promise.await owner_read;
-        let takeover =
-          Eio.Fiber.fork_promise ~sw (fun () ->
-            let result =
-              Backend.FileSystem.acquire_lock rival ~key ~owner:"holder-b"
-                ~ttl_seconds:60
-            in
-            note "holder-b acquire returned";
-            result)
-        in
-        for _ = 1 to 20 do Eio.Fiber.yield () done;
-        Eio.Time.sleep clock 0.1;
-        check bool
-          "the takeover waits while the holder is between its owner read and \
-           its renewal"
-          false (Eio.Promise.is_resolved takeover);
-        Eio.Promise.resolve resume_r ();
-        (match Eio.Promise.await_exn commit with
-         | Ok (Ok ()) -> ()
-         | Ok (Error _) -> fail "the holder's own lease was refused"
-         | Error e -> fail (Backend.show_error e));
-        match Eio.Promise.await_exn takeover with
-        | Ok false -> ()
-        | Ok true -> fail "the rival took over a lease its holder had just renewed"
-        | Error e -> fail (Backend.show_error e)));
-    check (list string) "the publication came before the rival's decision"
-      [ "holder-a published"; "holder-b acquire returned" ]
-      (List.rev !events);
-    check (option string) "the holder keeps the renewed lease" (Some "holder-a")
-      (lease_owner backend key))
+    check_takeover_waits ~backend ~rival:(rival ()) ~clock
+      ~key:(make_unique_key "lease_race") ~while_held:(fun () -> ()))
 
 (* The same point seen from a real second process: while the holder is
    between its owner read and its renewal, another process cannot take the
@@ -325,6 +331,79 @@ let test_fence_excludes_another_process () =
       "another process finds the fence held between owner read and renewal" 3
       !probe_inside;
     check int "another process takes the fence once the commit is done" 0
+      (probe_fence_from_another_process fence_path))
+
+(* Backends for one directory spelled three ways: its own path, a link to
+   it, and a path through [..]. [make path] builds a backend on [path]. *)
+let with_eio_alias_backends f =
+  Eio_main.run @@ fun env ->
+  let fs = Eio.Stdenv.fs env in
+  let clock = Eio.Stdenv.clock env in
+  let tmp_dir = make_test_dir "masc_lock_alias" in
+  let link = tmp_dir ^ ".link" in
+  let config base_path =
+    { (Backend.default_config ()) with
+      base_path
+    ; node_id = "test-node"
+    ; cluster_name = "test-cluster"
+    }
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      (try Unix.unlink link with _ -> ());
+      try rm_rf tmp_dir with _ -> ())
+    (fun () ->
+      Unix.symlink tmp_dir link;
+      Unix.mkdir (Filename.concat tmp_dir "sub") 0o755;
+      let dotdot = Filename.concat (Filename.concat tmp_dir "sub") ".." in
+      Eio.Switch.run @@ fun sw ->
+      Eio_context.with_test_env
+        ~net:(Eio.Stdenv.net env)
+        ~clock
+        ~mono_clock:(Eio.Stdenv.mono_clock env)
+        ~sw
+        (fun () ->
+          let make base_path = Backend.FileSystem.create ~fs (config base_path) in
+          f ~backend:(make tmp_dir) ~via_link:(make link)
+            ~via_dotdot:(make dotdot) clock))
+
+let physical_root_of backend =
+  match Backend.FileSystem.physical_root backend with
+  | Ok root -> root
+  | Error e -> fail (Backend.show_error e)
+
+(* A fence named from the base path as written would give one directory
+   three fences here. Named from the physical root, all three spellings
+   share one root, and so one fence file and one process-wide mutex. *)
+let test_alias_backends_share_root_and_fence () =
+  with_eio_alias_backends (fun ~backend ~via_link ~via_dotdot _clock ->
+    let key = make_unique_key "lease_alias" in
+    check string "a link reaches the same physical root"
+      (physical_root_of backend) (physical_root_of via_link);
+    check string "a path through .. reaches the same physical root"
+      (physical_root_of backend) (physical_root_of via_dotdot);
+    check string "a link names the same fence" (fence_path_of backend key)
+      (fence_path_of via_link key);
+    check string "a path through .. names the same fence"
+      (fence_path_of backend key) (fence_path_of via_dotdot key))
+
+(* The rival reaches the directory through a link. With a fence per
+   spelling it would take its own mutex and a second fcntl lock on the same
+   file in this process (fcntl does not exclude a process from itself), take
+   the lease over between A's read and renewal, and closing its descriptor
+   would drop the lock A still relied on. It must wait instead, and another
+   process must find the fence held for as long as A is inside it. *)
+let test_alias_backend_waits_on_the_same_fence () =
+  with_eio_alias_backends (fun ~backend ~via_link ~via_dotdot:_ clock ->
+    let key = make_unique_key "lease_alias_race" in
+    let fence_path = fence_path_of via_link key in
+    let probe_while_held = ref (-1) in
+    check_takeover_waits ~backend ~rival:via_link ~clock ~key
+      ~while_held:(fun () ->
+        probe_while_held := probe_fence_from_another_process fence_path);
+    check int "another process finds the shared fence held while A is inside"
+      3 !probe_while_held;
+    check int "another process takes the fence once both are done" 0
       (probe_fence_from_another_process fence_path))
 
 (* After B took A's expired lease over, A's late renewal and release must
@@ -375,5 +454,9 @@ let () =
           test_fence_excludes_another_process;
         test_case "late release and extend keep the new holder" `Quick
           test_release_and_extend_after_takeover_keep_new_holder;
+        test_case "alias backends share one root and fence" `Quick
+          test_alias_backends_share_root_and_fence;
+        test_case "alias backend waits on the same fence" `Quick
+          test_alias_backend_waits_on_the_same_fence;
       ];
     ]

@@ -61,7 +61,8 @@ module FileSystem : sig
   val extend_lock : t -> key:string -> owner:string -> ttl_seconds:int -> bool result
   (** [acquire_lock], [release_lock], [extend_lock] and [commit_under_lease]
       each run inside one fence per [key]: a process-wide mutex keyed by the
-      fence file's path, then an fcntl lock on that file. A lease record
+      fence file's path under {!physical_root}, then an fcntl lock on that
+      file. A lease record
       therefore cannot change hands between an owner check and the write
       that depended on it, across fibers, backend values and processes on
       the host. *)
@@ -79,9 +80,17 @@ module FileSystem : sig
       Otherwise return [Ok (Error lost)] without running it. [Error] is a
       backend or fence failure; the publication did not run. *)
 
+  val physical_root : t -> string result
+  (** The backend's base directory resolved by the filesystem ([realpath]).
+      Backend values created for a link to one directory, for a path through
+      [..], or for another spelling of it return the same root. [Error] when
+      the directory cannot be resolved; there is no fallback to the base path
+      as written. The lease fence and the workspace's lease lookup are both
+      named from this root. *)
+
   val lease_fence_path : t -> key:string -> string result
-  (** Native path of [key]'s fence file, for tests that probe the fence from
-      another process. *)
+  (** Native path of [key]'s fence file under {!physical_root}, for tests that
+      probe the fence from another process. *)
 
   val after_lease_owner_read_hook : (key:string -> unit) Stdlib.Atomic.t
   (** Test seam: called inside [commit_under_lease]'s fence after the owner

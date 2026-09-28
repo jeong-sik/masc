@@ -179,7 +179,8 @@ val with_file_lock_r :
     Each distributed-lock acquisition owns its lease under a token of its
     own ([node_id], pid and a process-wide sequence), not under the shared
     [node_id]. The acquiring Eio fiber keeps that lease bound, together with
-    the backend's base path, for the body of
+    the backend's physical root ({!Backend.FileSystem.physical_root}), for the
+    body of
     {!with_distributed_lock}/{!with_file_lock}. *)
 type lease_commit_refusal =
   | Lease_lost of { key : string; holder : string option }
@@ -187,7 +188,8 @@ type lease_commit_refusal =
           or no record existed ([None]). Publishing could overwrite a newer
           holder's commit. *)
   | Lease_unverifiable of { key : string; detail : string }
-      (** The record or the fence could not be read; nothing was published. *)
+      (** The record, the fence, or the backend's physical root could not be
+          read; nothing was published. *)
 
 val lease_commit_refusal_to_string : lease_commit_refusal -> string
 
@@ -201,7 +203,13 @@ val lease_commit_refusal_to_string : lease_commit_refusal -> string
     Runs [publish] directly, without a fence, when the path has no
     lease-backed lock (Memory backend, unkeyed path) or when this fiber
     holds no lease on it (a caller outside the lock, or a raw systhread,
-    which binds none and never waits on the domain pool). *)
+    which binds none and never waits on the domain pool).
+
+    A held lease matches when its key and its backend's physical root are
+    the same, so a config that reaches the workspace through another
+    spelling of its directory still finds the lease. When this fiber holds a
+    lease with the same key and the physical root cannot be resolved, the
+    result is [Lease_unverifiable] and nothing is published. *)
 val commit_under_held_lease :
   config -> string -> (unit -> 'a) -> ('a, lease_commit_refusal) result
 

@@ -259,7 +259,7 @@ verifier 는 agent_core flow 가 아니라 도구 호출(`report_review_verdict`
 
 4단계에서 lane 을 하나씩 옮기는 것은 N-of-M 패치가 아니다. 공통 부분은 walker 한 곳에 먼저 생기고, 각 PR 은 lane 하나가 그것을 쓰게 바꾼다. 다섯 번째 PR 이 들어가면 "HTTP 다음 CLI" 를 조립하는 곳은 남지 않는다.
 
-## 6. 정한 것과 정할 것
+## 6. 정한 것
 
 - **Q1. 어떤 실패에서 멈추나?** (3.3) — 정함 (운영자, 2026-09-28)
   - masc 자기 기록 실패와 취소에서만 멈춘다. 나머지는 HTTP·CLI 모두 다음 슬롯으로 넘긴다.
@@ -274,11 +274,11 @@ verifier 는 agent_core flow 가 아니라 도구 호출(`report_review_verdict`
   - 막는다. 막지 않으면 CLI id 오타가 조용히 사라진다.
   - 대가: 기본 catalog 에서 옛 id 가 남으면 부팅이 멈춘다. 로드 오류는 id 를 이름으로 적는다.
   - 한계: 교체 catalog(`AGENT_CORE_MODEL_CATALOG`)를 쓰면 로드가 그 파일을 읽지 않아서, 오타는 publish 진단으로 드러난다 (3.2 표의 마지막 줄).
-- **Q5. 꺼진 binding·provider 를 가리키는 슬롯은?** (3.2) — 운영자 확인 대기
-  - 권하는 답: 받지 않고 `dropped` 로 보인다. 종류와 상관없이 같다. 꺼짐은 오타가 아니라 운영자가 정한 상태다.
+- **Q5. 꺼진 binding·provider 를 가리키는 슬롯은?** (3.2) — 정함 (운영자, 2026-09-28)
+  - 받지 않고 `dropped` 로 보인다. 종류와 상관없이 같다. 꺼짐은 오타가 아니라 운영자가 정한 상태다.
   - 바뀌는 것: 지금 `cli_slots` 의 꺼진 runtime 은 로드를 막는다 (`runtime.ml:1806-1808`). 이 규칙을 그대로 두면, provider 하나를 끄는 순간 그 provider 를 적은 lane 때문에 파일 전체가 로드되지 않는다.
-- **Q6. Board partition 의 저장된 진행 기록은?** (3.7) — 운영자 확인 대기
-  - 권하는 답: 3단계 배포 전에 진행 중인 partition 이 비기를 기다린다. 그래도 남은 Running·Blocked 행은 운영자 복구(requeue)로 처음부터 다시 판단하게 한다. 판단 대상 후보(candidate)는 partition 과 따로 durable 하게 남는다.
+- **Q6. Board partition 의 저장된 진행 기록은?** (3.7) — 정함 (운영자, 2026-09-28)
+  - 3단계 배포 전에 진행 중인 partition 이 비기를 기다린다. 그래도 남은 Running·Blocked 행은 운영자 복구(requeue)로 처음부터 다시 판단하게 한다. 판단 대상 후보(candidate)는 partition 과 따로 durable 하게 남는다.
   - 확인할 것: requeue 가 옛 모양의 진행 기록을 읽지 않고도 되는지는 3단계 PR 에서 확인한다.
 
 ## 7. 다루지 않는 것

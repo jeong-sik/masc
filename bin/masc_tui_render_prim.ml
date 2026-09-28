@@ -191,6 +191,16 @@ let get_terminal_size () =
   (max 1 (rows - navigation_rows), max 1 (cols - !acting_pane_reserved_cols))
 
 
+(* The lines a buffer has ended since [start]: how far down a frame the next
+   row lands, counted from what was drawn rather than by hand, for a picture
+   placed over the rows drawn after it. *)
+let lines_ended_since buf ~start =
+  let ended = ref 0 in
+  for index = start to Buffer.length buf - 1 do
+    if Buffer.nth buf index = '\n' then incr ended
+  done;
+  !ended
+
 let frame_lines buf =
   let str = Buffer.contents buf in
   let len = String.length str in
@@ -1341,10 +1351,7 @@ let surface_chrome ~overflow ?(frame = Chrome_screen) (state : state)
   divider buf cols;
   (* The lines drawn above the body, counted from what was drawn rather than
      by hand, and the strip [finish_surface] puts above them. *)
-  let body_top =
-    strip_rows
-    + String.fold_left (fun n c -> if c = '\n' then n + 1 else n) 0 (Buffer.contents buf)
-  in
+  let body_top = strip_rows + lines_ended_since buf ~start:0 in
   let budget = max 1 (rows - surface_chrome_rows) in
   (* The body's rows are held until it has finished, because only then is
      their count known: which of them the budget shows, and what the row that

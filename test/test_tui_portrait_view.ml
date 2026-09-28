@@ -8,6 +8,8 @@ module Draw = Keeper_portrait_draw
 module Layout = Masc_tui_message_layout
 module Palette = Masc_tui_terminal_palette
 
+let mascot_id = Masc_tui_graphics.image_id Masc_tui_graphics.Mascot
+
 let project = Palette.For_testing.best_color_for_level ~level:Palette.True_color
 
 let contains ~sub s =
@@ -93,7 +95,7 @@ let test_lines_fill_the_box () =
 let placement ?(row = 4) ?(column = 7) size_rows =
   let pixels = View.Pixels { cell_width = 10; cell_height = 20 } in
   let box = Option.get (View.fit pixels ~max_cols:60 ~max_rows:size_rows) in
-  { View.image_id = View.mascot_image_id; row; column; box; image = mascot box.View.size }
+  { View.image_id = mascot_id; row; column; box; image = mascot box.View.size }
 
 let test_placement_bytes_leave_the_cursor_where_it_was () =
   let p = placement 6 in
@@ -102,7 +104,7 @@ let test_placement_bytes_leave_the_cursor_where_it_was () =
   check bool "restores it last" true (String.ends_with ~suffix:"\0278" bytes);
   check bool "moves to the 1-based corner" true (contains ~sub:"\027[5;8H" bytes);
   check bool "under the mascot's id" true
-    (contains ~sub:(Printf.sprintf "i=%d," View.mascot_image_id) bytes);
+    (contains ~sub:(Printf.sprintf "i=%d," mascot_id) bytes);
   check bool "straight-alpha RGBA" true (contains ~sub:"f=32," bytes);
   check bool "as many rows as the box" true
     (contains ~sub:(Printf.sprintf "r=%d," p.View.box.View.rows) bytes)
@@ -114,7 +116,7 @@ let frame requests ~presented =
   View.flush ~presented ~write:(Buffer.add_string written);
   Buffer.contents written
 
-let deleted = Masc_tui_graphics.delete_image ~image_id:View.mascot_image_id
+let deleted = Masc_tui_graphics.delete_image ~image_id:mascot_id
 
 let test_flush_sends_only_what_changed () =
   ignore (frame [] ~presented:false);

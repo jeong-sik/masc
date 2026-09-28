@@ -107,13 +107,12 @@ let run t ~env ~child_env ~cwd ~argv ~terminal ~is_closed ~on_ready ~on_input_re
   let clock = Eio.Stdenv.clock env in
   Atomic.set t.terminal terminal;
   let run_child () = Eio.Switch.run (fun sw ->
-    let mgr = Eio.Stdenv.process_mgr env in
+    let mgr = Posix_spawn_process_mgr.foreground_mgr ~clock
+      ~grace_seconds:Process_eio.child_exit_grace_seconds in
     let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
     let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
     let stderr_r, stderr_w = Eio.Process.pipe ~sw mgr in
-    let process_mgr = Posix_spawn_process_mgr.foreground_mgr ~clock
-      ~grace_seconds:Process_eio.child_exit_grace_seconds in
-    let _proc = Eio.Process.spawn ~sw process_mgr ~env:child_env
+    let _proc = Eio.Process.spawn ~sw mgr ~env:child_env
       ~cwd:Eio.Path.(Eio.Stdenv.fs env / cwd)
       ~stdin:stdin_r ~stdout:stdout_w ~stderr:stderr_w
       (["python3"; "-I"; "-B"; "-c"; Embedded_account_login.script;
@@ -127,6 +126,7 @@ let run t ~env ~child_env ~cwd ~argv ~terminal ~is_closed ~on_ready ~on_input_re
       Eio.Flow.close stdin_w);
     Eio.Fiber.fork_daemon ~sw (fun () ->
       let buffer = Cstruct.create 4096 in
+      (* See helper protocol: stderr is drained for liveness; only typed stdout frames are exposed. *)
       (try while true do ignore (Eio.Flow.single_read stderr_r buffer) done
        with End_of_file -> ()); `Stop_daemon);
     Eio.Fiber.fork_daemon ~sw (fun () ->

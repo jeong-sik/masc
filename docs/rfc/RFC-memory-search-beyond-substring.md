@@ -212,8 +212,8 @@ lexical 결과가 보이지도 않았는데 강화된다.
    §5 의 "기억 본문을 외부로 내보내지 않는다"가 어느 경계인지부터 정해야 한다.
    (a) 운영자 신뢰: 코드는 검사하지 않고, 운영자가 slot 을 로컬 runtime 으로만 선언한다고 믿는다.
    어느 선택이든 (a) 가 아니면 `Memory_recall` lane 은 `cli_slot_ids` 를 가질 수 없다. official-client CLI
-   transport 는 endpoint 검사를 거치지 않고 외부 vendor 로 prompt 를 보낼 수 있기 때문이다(workspace curator 도
-   CLI tail 을 거부한다).
+   transport 는 endpoint 검사를 거치지 않고 외부 vendor 로 prompt 를 보낼 수 있기 때문이다. 이 제한은
+   이 제안의 로컬 기억 경계에서 나온다. workspace curator 는 #39622 이후 CLI tail 을 허용한다.
    (b) 호스트 로컬: 기억이 이 호스트를 떠나지 않는다. slot endpoint 의 host 는 loopback **IP 리터럴**
    (`127.0.0.0/8`, `::1`)이어야 하고, 이름(`localhost` 포함)은 lane 을 읽을 때 거부한다. 이름을 허용하면 검사한 DNS
    응답과 연결이 쓴 DNS 응답이 다를 수 있어서(DNS rebinding) 따로 검사하고 다시 연결하는 설계로는 경계를 증명하지

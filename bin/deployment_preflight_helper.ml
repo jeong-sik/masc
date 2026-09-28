@@ -466,6 +466,134 @@ let run_tool_blob_maintenance base_path delete_previous_candidates =
               Ok ()))
 ;;
 
+(* #39331 milestone B: the reference-based sweep for every Keeper's kept
+   vision store. It runs under the same exclusive BasePath lease as
+   [tool-blob-maintenance] so a sweep never races a live writer, and it
+   reports per-store counts so the operator can measure before/after. A
+   store whose scan cannot complete is reported and makes the command fail;
+   the sweep itself deletes nothing in that store. *)
+let run_vision_kept_maintenance base_path =
+  let lease_dir = (Host_config.host ()).base_path_lease_dir in
+  match
+    Server_startup_takeover.acquire_base_path_lock ~run_dir:lease_dir base_path
+  with
+  | Server_startup_takeover.Base_path_already_owned { owner; _ } ->
+    let pid = Server_startup_takeover.base_path_owner_pid owner in
+    errorf
+      "workspace writer lease is already owned base_path=%s pid=%s"
+      base_path
+      (match pid with
+       | Some value -> string_of_int value
+       | None -> "unknown")
+  | Server_startup_takeover.Base_path_rejected rejection ->
+    errorf
+      "workspace writer lease rejected base_path=%s: %s"
+      base_path
+      (Server_startup_takeover.base_path_lock_rejection_to_string rejection)
+  | Server_startup_takeover.Base_path_acquired lease ->
+    Fun.protect
+      ~finally:(fun () -> Server_startup_takeover.release_base_path_lease lease)
+      (fun () ->
+         match Unix.realpath base_path with
+         | exception exn ->
+           errorf
+             "workspace BasePath canonicalization failed base_path=%s: %s"
+             base_path
+             (Printexc.to_string exn)
+         | canonical_base_path ->
+           let masc_dir =
+             Common.masc_dir_from_base_path ~base_path:canonical_base_path
+           in
+           let keepers_dir =
+             Config_dir_resolver.keepers_dir_for_base_path
+               ~base_path:canonical_base_path
+           in
+           let* vision_dirs =
+             match Sys.readdir keepers_dir with
+             | exception Sys_error reason ->
+               errorf "keepers dir unreadable path=%s: %s" keepers_dir reason
+             | entries ->
+               Ok
+                 (Array.to_list entries
+                  |> List.filter (fun name -> Filename.check_suffix name ".vision")
+                  |> List.sort String.compare
+                  |> List.map (fun name -> Filename.concat keepers_dir name))
+           in
+           let reports =
+             List.map
+               (fun dir ->
+                  let keeper = Filename.basename dir in
+                  keeper, dir, Multimodal.Vision_kept_maintenance.run ~masc_dir ~dir)
+               vision_dirs
+           in
+           let failed =
+             List.filter_map
+               (fun (keeper, dir, result) ->
+                  match result with
+                  | Ok _ -> None
+                  | Error error ->
+                    Some
+                      (Printf.sprintf
+                         "%s (%s): %s"
+                         keeper
+                         dir
+                         (Multimodal.Vision_kept_maintenance.error_to_string error)))
+               reports
+           in
+           if failed <> []
+           then
+             errorf
+               "vision kept maintenance failed: %s"
+               (String.concat "; " failed)
+           else begin
+             Yojson.Safe.to_channel
+               stdout
+               (`Assoc
+                 [ "base_path", `String canonical_base_path
+                 ; ( "stores"
+                   , `List
+                       (List.map
+                          (fun (keeper, dir, result) ->
+                             match result with
+                             | Ok (report : Multimodal.Vision_kept_maintenance.report) ->
+                               `Assoc
+                                 [ "keeper", `String keeper
+                                 ; "dir", `String dir
+                                 ; "scanned", `Int report.scanned
+                                 ; "live", `Int report.live
+                                 ; ( "candidates_recorded"
+                                   , `Int report.candidates_recorded
+                                   )
+                                 ; "deleted", `Int report.deleted
+                                 ; ( "reclaimed_bytes"
+                                   , `Intlit
+                                       (Int64.to_string report.reclaimed_bytes)
+                                   )
+                                 ; "remaining_count", `Int report.remaining_count
+                                 ; ( "remaining_bytes"
+                                   , `Intlit
+                                       (Int64.to_string report.remaining_bytes)
+                                   )
+                                 ]
+                             | Error error ->
+                               `Assoc
+                                 [ "keeper", `String keeper
+                                 ; "dir", `String dir
+                                 ; ( "error"
+                                   , `String
+                                       (Multimodal.Vision_kept_maintenance.error_to_string
+                                          error)
+                                   )
+                                 ])
+                          reports)
+                   )
+                 ]);
+             output_char stdout '\n';
+             flush stdout;
+             Ok ()
+           end)
+;;
+
 let handoff_base_path_lease
       base_path
       next_executable
@@ -660,6 +788,20 @@ let tool_blob_maintenance_cmd =
                    delete_previous_candidates))
          $ base_path
          $ delete_previous_candidates))
+;;
+
+let vision_kept_maintenance_cmd =
+  let doc =
+    "sweep un-referenced kept vision artifacts under the exclusive BasePath lease"
+  in
+  Cmd.v
+    (Cmd.info "vision-kept-maintenance" ~doc)
+    Term.(
+      ret
+        (const
+           (fun base_path ->
+              cmdliner_result (run_vision_kept_maintenance base_path))
+         $ base_path))
 ;;
 
 (* Every store [Keeper_durable_store.preflight_scan] names: a deploy is where
@@ -1143,6 +1285,7 @@ let () =
           ; lease_run_cmd
           ; lease_handoff_cmd
           ; tool_blob_maintenance_cmd
+          ; vision_kept_maintenance_cmd
           ; verify_lease_owner_cmd
           ; validate_current_meta_cmd
           ; validate_task_backlog_cmd

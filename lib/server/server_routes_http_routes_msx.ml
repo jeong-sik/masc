@@ -89,7 +89,7 @@ let press_result_json ~ok ?message (obs : Msx_lane.observation option) : Yojson.
    realtime question has an answer. *)
 let machine_changed ~config =
   Eio.Cancel.protect (fun () ->
-    Lane_addon_runtime.notify_activity ~config ~activity:Lane_addon_sources.Msx_changed)
+    Lane_addon_runtime.notify_activity ~config ~activity:(Lane_addon_sources.Machine_changed Machine_lane.Msx))
 
 (* The keys the caller named, parsed to the lane's vocabulary; the first bad one
    fails the whole press so nothing is half-applied. *)

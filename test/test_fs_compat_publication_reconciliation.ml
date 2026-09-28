@@ -371,6 +371,9 @@ let test_remaining_forensic_outcome_fields_stay_decodable () =
   let mismatch : Core.resource_mismatch =
     { expected = root_identity; observed = Core.Absent }
   in
+  let stage_mismatch : Core.resource_mismatch =
+    { expected = stage_identity; observed = Core.Absent }
+  in
   let registry =
     transitioned
       (Core.open_registry ~sw ~registry_root:Eio.Path.(fs / registry_root))
@@ -410,7 +413,7 @@ let test_remaining_forensic_outcome_fields_stay_decodable () =
       , [ "kind"; "mismatch"; "observed_target" ]
       , write_bound
           (Core.Bound_stage_mismatch
-             { mismatch; observed_target = Core.Absent }) )
+             { mismatch = stage_mismatch; observed_target = Core.Absent }) )
     ]
   in
   List.iter

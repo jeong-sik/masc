@@ -2950,6 +2950,8 @@
 
 (include stanzas/test_runtime_account_declaration.inc)
 (include stanzas/test_runtime_account_removal.inc)
+(include stanzas/test_runtime_account_removal_setup.inc)
+(include stanzas/test_tui_account_login_removal_pty.inc)
 (include stanzas/test_runtime_agent_core_eio_context_classify.inc)
 (include stanzas/test_runtime_agent_streaming_capability.inc)
 
@@ -7496,7 +7498,7 @@
 (test
  (name test_tui_account_login)
  (modules test_tui_account_login)
- (libraries alcotest masc masc_tui_account_login masc_tui_command masc_tui_sgr_text
+ (libraries alcotest masc masc.runtime masc_tui_account_login masc_tui_command masc_tui_sgr_text
   masc_tui_terminal_palette masc_tui_theme yojson))
 
 (test

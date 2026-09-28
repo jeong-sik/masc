@@ -831,8 +831,8 @@ class SelectedNativeAccounts(unittest.TestCase):
         self.assertIn('not yet verified', origin)
         # masc runs the sign-in so the child gets the Muse login environment;
         # the masc process itself keeps the caller's HOME.
-        self.assertEqual(run.call_args_list[1].args[0], ['/masc', 'runtime-muse-login', '--cli-path', '/selected/muse',
-                                                         '--account-home', '/selected/account'])
+        self.assertEqual(run.call_args_list[1].args[0], ['/masc', 'runtime-account-login', '--client', 'muse',
+                                                         '--cli-path', '/selected/muse', '--account-home', '/selected/account'])
         self.assertNotIn('env', run.call_args_list[1].kwargs)
         self.assertEqual(run.call_args_list[0].args, run.call_args_list[2].args)
 
@@ -915,8 +915,8 @@ class SelectedNativeAccounts(unittest.TestCase):
                  patch.object(SETUP.sys, 'stdin', io.StringIO('1\n')), contextlib.redirect_stderr(io.StringIO()):
                 selected = SETUP.select_model('/masc', 'muse')
             locate.assert_called_once_with('/masc', 'muse', 'muse')
-            self.assertEqual(run.call_args_list[1].args[0], ['/masc', 'runtime-muse-login', '--cli-path', '/vendor/bin/muse',
-                                                             '--account-home', home])
+            self.assertEqual(run.call_args_list[1].args[0], ['/masc', 'runtime-account-login', '--client', 'muse',
+                                                             '--cli-path', '/vendor/bin/muse', '--account-home', home])
             self.assertEqual(selected, dict(model='reported', max_context=8192,
                                            account_home=home, command='/vendor/bin/muse'))
 
@@ -935,8 +935,8 @@ class SelectedNativeAccounts(unittest.TestCase):
              patch.object(SETUP.sys, 'stdin', io.StringIO('1\n')), contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(SETUP.select_model('/masc', 'muse')['account_home'], '/selected')
         self.assertEqual(run.call_args_list[0].args[0][3], '/owned/muse')
-        self.assertEqual(run.call_args_list[1].args[0], ['/masc', 'runtime-muse-login', '--cli-path', '/owned/muse',
-                                                         '--account-home', '/selected'])
+        self.assertEqual(run.call_args_list[1].args[0], ['/masc', 'runtime-account-login', '--client', 'muse',
+                                                         '--cli-path', '/owned/muse', '--account-home', '/selected'])
         with patch.object(SETUP, 'select_native_account', return_value=dict(source)), \
              patch.object(SETUP, 'official_client_path', return_value=None), \
              patch.object(SETUP.sys, 'stdin', io.StringIO('1\n')), contextlib.redirect_stderr(io.StringIO()):
@@ -1030,28 +1030,26 @@ class SelectedNativeAccounts(unittest.TestCase):
             with self.assertRaises(SETUP.SetupError):
                 SETUP.resolve_model_spec(source, dict(id='unknown', context=None), 10)
 
-    def test_native_sign_in_uses_selected_account_environment(self):
-        for protocol, variable, command in [
-                ('codex-app-server', 'CODEX_HOME', ['codex', 'login', '--device-auth']),
-                ('claude-code', 'CLAUDE_CONFIG_DIR', ['claude', 'auth', 'login'])]:
+    def test_declared_account_sign_in_is_run_by_masc(self):
+        # runtime-account-login builds the child's environment and keeps the
+        # account's email record (test_setup_cli checks both); the wizard
+        # passes no environment of its own.
+        for protocol, client, command in [('codex-app-server', 'codex', 'codex'),
+                                          ('claude-code', 'claude', 'claude'),
+                                          ('muse-serve', 'muse', 'muse')]:
             with self.subTest(protocol=protocol):
                 inventory = dict(runtimes=[dict(id='selected', protocol=protocol,
-                    command=command[0], account_home='/selected/account')])
-                self.assertEqual(SETUP.login_command('/masc', 'selected', [], inventory), command)
-                with patch.dict(os.environ, {key: '/wrong-account' for key in ['HOME', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_CACHE_HOME', 'XDG_STATE_HOME', 'XDG_RUNTIME_DIR']}):
-                    environment = SETUP.login_environment('/masc', 'selected', [], inventory)
-                self.assertEqual(environment[variable], '/selected/account')
+                    command=command, account_home='/selected/account')])
+                self.assertEqual(SETUP.login_command('/masc', 'selected', [], inventory),
+                                 ['/masc', 'runtime-account-login', '--client', client, '--cli-path', command,
+                                  '--account-home', '/selected/account'])
 
-    def test_muse_sign_in_is_run_by_masc_with_the_muse_login_environment(self):
-        # runtime-muse-login builds the child's environment (test_setup_cli
-        # checks it); the wizard must not point the masc process at the account.
-        inventory = dict(runtimes=[dict(id='selected', protocol='muse-serve',
-            command='muse', account_home='/selected/account')])
-        self.assertEqual(SETUP.login_command('/masc', 'selected', [], inventory),
-                         ['/masc', 'runtime-muse-login', '--cli-path', 'muse', '--account-home', '/selected/account'])
-        with patch.dict(os.environ, {'HOME': '/caller', 'XDG_CONFIG_HOME': '/caller/.config'}):
-            environment = SETUP.login_environment('/masc', 'selected', [], inventory)
-        self.assertEqual((environment['HOME'], environment['XDG_CONFIG_HOME']), ('/caller', '/caller/.config'))
+    def test_inherited_home_sign_in_runs_the_client_on_the_callers_home(self):
+        for protocol, command in [('codex-app-server', ['codex', 'login', '--device-auth']),
+                                  ('claude-code', ['claude', 'auth', 'login'])]:
+            with self.subTest(protocol=protocol):
+                inventory = dict(runtimes=[dict(id='selected', protocol=protocol, command=command[0])])
+                self.assertEqual(SETUP.login_command('/masc', 'selected', [], inventory), command)
         without_home = dict(runtimes=[dict(id='selected', protocol='muse-serve', command='muse')])
         self.assertIsNone(SETUP.login_command('/masc', 'selected', [], without_home))
 

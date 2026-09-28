@@ -673,7 +673,7 @@ let goal_due_date_passed ~today (goal : Goal_store.goal) =
 ;;
 
 let local_today () =
-  let tm = Unix.localtime (Unix.gettimeofday ()) in
+  let tm = Unix.localtime (Time_compat.now ()) in
   Ptime.of_date (tm.Unix.tm_year + 1900, tm.Unix.tm_mon + 1, tm.Unix.tm_mday)
 ;;
 
@@ -693,31 +693,31 @@ let scan_overdue_goal_notifications config =
          match goal.Goal_store.owner, goal.Goal_store.phase with
          | Goal_store.Unknown_owner, _ -> ()
          | Goal_store.Owner owner, (Goal_phase.Executing | Goal_phase.Verifying) ->
-           if goal_due_date_passed ~today goal
-           then (
-             let due_date = Option.value goal.Goal_store.due_date ~default:"" in
-             let event = "overdue:" ^ due_date in
-             let key = goal_notice_key ~goal_id:goal.Goal_store.id ~owner ~event in
-             if goal.Goal_store.notified_overdue_key = Some key
-             then ()
-             else (
-               let content =
-                 Printf.sprintf
-                   "[goal_overdue] %s — %s\ndue_date: %s\nphase: %s"
-                   goal.Goal_store.id
-                   goal.Goal_store.title
-                   due_date
-                   (Goal_phase.to_string goal.Goal_store.phase)
-               in
-               match deliver_goal_owner_notice config ~goal ~event ~content with
-               | Ok () ->
-                 mark_goal_notice config ~goal_id:goal.Goal_store.id Overdue_notice ~key
-               | Error detail ->
-                 Log.Misc.warn
-                   "goal overdue owner notice failed goal_id=%s owner=%s: %s"
-                   goal.Goal_store.id
-                   owner
-                   detail))
+           (match goal.Goal_store.due_date with
+            | Some due_date when goal_due_date_passed ~today goal ->
+              let event = "overdue:" ^ due_date in
+              let key = goal_notice_key ~goal_id:goal.Goal_store.id ~owner ~event in
+              if goal.Goal_store.notified_overdue_key = Some key
+              then ()
+              else (
+                let content =
+                  Printf.sprintf
+                    "[goal_overdue] %s — %s\ndue_date: %s\nphase: %s"
+                    goal.Goal_store.id
+                    goal.Goal_store.title
+                    due_date
+                    (Goal_phase.to_string goal.Goal_store.phase)
+                in
+                match deliver_goal_owner_notice config ~goal ~event ~content with
+                | Ok () ->
+                  mark_goal_notice config ~goal_id:goal.Goal_store.id Overdue_notice ~key
+                | Error detail ->
+                  Log.Misc.warn
+                    "goal overdue owner notice failed goal_id=%s owner=%s: %s"
+                    goal.Goal_store.id
+                    owner
+                    detail)
+            | _ -> ())
          | Goal_store.Owner _, _ -> ())
       goals)
 ;;

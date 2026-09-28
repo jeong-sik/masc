@@ -43,9 +43,9 @@ status: reference
   바이트 상한이다(`Runtime_official_client_tool.result_bound` = `Bounded_bytes n`·
   `Unbounded`). `Bounded_bytes n`은 결과가 `n`바이트를 넘지 않음을 뜻하고,
   `Unbounded`는 MASC가 결과 크기를 제한하지 않아 상한을 선언하지 않음을 뜻한다.
-  Claude Code 전송은 이 상한을 `tools/list` 항목의
-  `_meta["anthropic/maxResultSizeChars"]`로 싣는다. 이 선언은 바이트 상한이며
-  제공자 토큰 한도와 같은 값이 아니다.
+  Claude Code 전송은 같은 수치 n을 `tools/list` 항목의
+  `_meta["anthropic/maxResultSizeChars"]` 문자 기준 인라인 한도로 전달한다.
+  UTF-8 문자 수는 바이트 수를 넘지 않는다. 이 값은 제공자 토큰 한도가 아니다.
   → [Runtime_official_client_tool](../../lib/runtime/runtime_official_client_tool.mli),
   [Runtime_claude_code](../../lib/runtime/runtime_claude_code.mli)
 

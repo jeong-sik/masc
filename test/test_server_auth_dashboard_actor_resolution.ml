@@ -290,6 +290,66 @@ let test_authenticated_owner_overrides_request_hint () =
   check (option string) "authenticated projection" (Some "credential-owner")
     (project ~base_path request)
 
+(* RFC play-link-for-the-shared-machine: a Player bearer is admitted only
+   where CanPlayMachine is asked for. The /mcp transport and the observer
+   stream ask for CanReadState, so an invited Player cannot open them. *)
+let test_a_player_reaches_only_the_seat () =
+  with_temp_base_path @@ fun base_path ->
+  Auth.save_auth_config
+    base_path
+    { Masc_domain.default_auth_config with enabled = true; require_token = true };
+  let token =
+    match Auth.create_token base_path ~agent_name:"invitee" ~role:Masc_domain.Player with
+    | Ok (token, _) -> token
+    | Error err -> failf "create_token failed: %s" (Masc_domain.masc_error_to_string err)
+  in
+  let request target =
+    Httpun.Request.create
+      ~headers:(Httpun.Headers.of_list [ ("authorization", "Bearer " ^ token) ])
+      `POST
+      target
+  in
+  let mcp = request "/mcp" in
+  (match Server_auth.verify_mcp_auth ~base_path mcp with
+   | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
+   | Error err ->
+       failf "unexpected /mcp refusal: %s" (Masc_domain.masc_error_to_string err)
+   | Ok _ -> fail "a player opened /mcp");
+  (match Server_auth.verify_mcp_observer_stream_auth ~base_path (request "/mcp?sse_kind=observer") with
+   | Error _ -> ()
+   | Ok _ -> fail "a player opened the observer stream");
+  (match Server_auth.authorize_read_request ~base_path mcp with
+   | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
+   | Error err ->
+       failf "unexpected read refusal: %s" (Masc_domain.masc_error_to_string err)
+   | Ok () -> fail "a player passed read authorization");
+  (match
+     Server_auth.authorize_token_bound_permission_request
+       ~base_path ~permission:Masc_domain.CanPlayMachine mcp
+   with
+   | Ok actor -> check string "the seat is bound to the invite's name" "invitee" actor
+   | Error err -> failf "the seat refused a player: %s" (Masc_domain.masc_error_to_string err));
+  let tool tool_name =
+    Server_auth.authorize_tool_request_with_actor
+      ~base_path
+      ~tool_name
+      ~request_authority:(loopback_request_authority ())
+      (request "/api/v1/dos/press")
+  in
+  (match tool "masc_dos_press" with
+   | Ok actor -> check string "press is credited to the invite's name" "invitee" actor
+   | Error err -> failf "press refused a player: %s" (Masc_domain.masc_error_to_string err));
+  List.iter
+    (fun tool_name ->
+      match tool tool_name with
+      | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
+      | Error err ->
+          failf "unexpected %s refusal: %s" tool_name (Masc_domain.masc_error_to_string err)
+      | Ok actor -> failf "%s admitted a player as %s" tool_name actor)
+    [ "masc_dos_load"; "masc_dos_peek"; "masc_broadcast"; "masc_status" ];
+  check bool "the standing is a player's" true
+    (Server_auth.request_credential_standing ~base_path mcp = Server_auth.Player_credential)
+
 let () =
   Eio_main.run @@ fun _env ->
   Server_request_authority.with_current
@@ -309,5 +369,7 @@ let () =
                  test_mcp_auth_surfaces_preserve_typed_reasons
              ; test_case "authenticated owner is canonical" `Quick
                  test_authenticated_owner_overrides_request_hint
+             ; test_case "a player reaches only the seat" `Quick
+                 test_a_player_reaches_only_the_seat
              ] )
          ])

@@ -117,6 +117,32 @@ let test_a_labelled_field_does_not_bracket_its_missing_reading () =
        ~callee:"title_missing_reading"
      > 0)
 
+(* A heading that puts an id, a name or a path before the connection badge
+   lays it out through [detail_heading], which never shortens the badge and folds
+   the id. Written by hand, the id was drawn at whatever width it had: a 54-cell
+   run id left the badge four cells at eighty columns, and a 50-cell runtime
+   label pushed it off the frame (#39684, #39698). *)
+let test_headings_with_an_id_go_through_detail_heading () =
+  List.iter
+    (fun (module_path, binding_name) ->
+      Alcotest.(check bool)
+        (binding_name ^ " lays its heading out through detail_heading")
+        true
+        (Ast_grep.count_calls_in_value_binding ~module_path ~binding_name
+           ~callee:"detail_heading"
+        > 0))
+    [ (render, "render_lane_run_detail")
+    ; (render, "fusion_detail_pane")
+    ; (render, "harness_detail_pane")
+    ; (render, "render_runtime_detail")
+    ; (render, "render_keeper_calls")
+    ; (render, "render_changes_list")
+    ; (render, "render_changes_diff")
+    ; (render, "render_repository_changes")
+    ; ("bin/masc_tui_render_prim.ml", "render_diff_surface")
+    ; (render_memory_module, "facts_title")
+    ]
+
 let test_the_roster_title_says_whether_the_reading_is_live () =
   (* Asked as "at least once", because a surface whose title has two branches
      -- one for the reading, one for the failure -- draws it in each. *)
@@ -1386,6 +1412,8 @@ let () =
             test_a_labelled_field_does_not_bracket_its_missing_reading
         ; Alcotest.test_case "the roster title says whether it is live" `Quick
             test_the_roster_title_says_whether_the_reading_is_live
+        ; Alcotest.test_case "headings with an id go through detail_heading"
+            `Quick test_headings_with_an_id_go_through_detail_heading
         ; Alcotest.test_case "the schedule detail says what became of the wake"
             `Quick test_the_schedule_detail_says_what_became_of_the_wake
         ; Alcotest.test_case "the Schedules screen draws the runner hold"

@@ -70,6 +70,22 @@ let test_control_roundtrips () =
     cases
 ;;
 
+let test_control_peer_bounds () =
+  let max = Env.max_peer in
+  let ok_json = Wire.control_json (Wire.Peer_joined { peer = max }) in
+  check
+    (option (testable Fmt.nop ( = )))
+    "max peer accepted"
+    (Some (Wire.Peer_joined { peer = max }))
+    (Wire.control_of_string ok_json);
+  check
+    (option (testable Fmt.nop ( = )))
+    "peer above max rejected"
+    None
+    (Wire.control_of_string
+       (Printf.sprintf {|{"t":"peer-joined","peer":%d}|} (max + 1)))
+;;
+
 let test_control_rejects () =
   let bad =
     [
@@ -323,6 +339,16 @@ let test_teardown () =
    | _ -> fail "recreate failed")
 ;;
 
+let test_room_exists () =
+  let t = Relay.create () in
+  check bool "missing room" false (Relay.room_exists t ~room:room_a);
+  ignore (Relay.join t ~room:room_a ~role:Wire.Host);
+  check bool "live room" true (Relay.room_exists t ~room:room_a);
+  check bool "other room still missing" false (Relay.room_exists t ~room:room_b);
+  ignore (Relay.host_left t ~room:room_a);
+  check bool "room gone after teardown" false (Relay.room_exists t ~room:room_a)
+;;
+
 let test_guest_leave_cases () =
   let t = Relay.create () in
   ignore (Relay.join t ~room:room_a ~role:Wire.Host);
@@ -344,6 +370,7 @@ let () =
         [
           test_case "role strings" `Quick test_role_strings;
           test_case "control roundtrips" `Quick test_control_roundtrips;
+          test_case "control peer bounds" `Quick test_control_peer_bounds;
           test_case "control rejects" `Quick test_control_rejects;
           test_case "close codes" `Quick test_close_codes;
           test_case "request targets" `Quick test_request_targets;
@@ -362,6 +389,7 @@ let () =
       ( "leave",
         [
           test_case "teardown" `Quick test_teardown;
+          test_case "room exists" `Quick test_room_exists;
           test_case "guest leave cases" `Quick test_guest_leave_cases;
         ] );
     ]

@@ -12,6 +12,8 @@ type t = { rooms : (room_id, room_state) Hashtbl.t }
 
 let create () = { rooms = Hashtbl.create 16 }
 
+let room_exists t ~room = Hashtbl.mem t.rooms room
+
 type join_error =
   | Join_no_such_room
   | Host_already_connected

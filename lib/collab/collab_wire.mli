@@ -39,7 +39,7 @@ val control_json : control -> string
 
 val control_of_string : string -> control option
 (** Strict decode of {!control_json}. [None] on malformed JSON, an unknown
-    [t], or a peer id outside the guest range (below 1). Unknown extra
+    [t], or a peer id outside [1..Collab_envelope.max_peer]. Unknown extra
     fields are ignored. *)
 
 type close_reason =

@@ -102,6 +102,11 @@ MASC 에 맞게 둔다.
 - **v1: 게스트는 `keeper_approval_queue`/`keeper_tool_approval_gate` 를 settle
   하지 않는다.** 승인은 호스트 측 `keeper_gate_mode` 대로 호스트에서만
   해결되고, 게스트 화면에는 읽기 전용으로 투영된다. (2026-09-28 사용자 확정.)
+- 릴레이 계층에는 인증이 없다 (accepted risk, 리뷰 F4). 방 id 를 아는 누구든
+  `?role=host` 로 방을 선점하거나 게스트 슬롯을 채울 수 있다. 읽기·조종
+  권한은 sealed 계층(방 키·쓰기 토큰)이 강제하므로 ciphertext 이상은
+  새나가지 않는다. 선점당하면 새 방을 열면 된다 (`/collab` 재실행).
+  릴레이 계층 호스트 증명(key-commitment challenge 등)은 향후 과제 (§7).
 
 ### 2.7 TUI UX (TUI 우선)
 
@@ -158,3 +163,9 @@ MASC 에 맞게 둔다.
   room / 4009 host conflict / 4029 room full, 문자열까지 동일). 브라우저
   WebSocket 은 거부된 upgrade 의 HTTP 상태를 볼 수 없어 close 코드로만
   진단되므로, join 거절도 upgrade 후 close 로 답한다.
+- [ ] envelope peer 헤더 인증 바인딩 (리뷰 F8, 스택 4 로 연기). GCM 은
+  payload 만 덮고 4B 타깃은 평문이라 비-TLS WS 의 MITM 이 broadcast↔target
+  을 뒤집을 수 있다 (기밀성 영향 없음, room key 공유). guest→host 는
+  릴레이가 헤더를 rewrite 해서 단순 AAD 바인딩이 안 맞는다 — hello 인증
+  작업(스택 4)에서 발신자 귀속 방식으로 함께 설계한다.
+- [ ] 릴레이 계층 호스트 증명 (리뷰 F4 follow-up, v1 이후).

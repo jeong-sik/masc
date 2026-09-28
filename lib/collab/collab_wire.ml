@@ -33,7 +33,7 @@ let control_json = function
 
 let peer_field fields =
   match List.assoc_opt "peer" fields with
-  | Some (`Int n) when n >= 1 -> Some n
+  | Some (`Int n) when n >= 1 && n <= Collab_envelope.max_peer -> Some n
   | Some _ | None -> None
 ;;
 

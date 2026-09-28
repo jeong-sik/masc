@@ -28,6 +28,11 @@ type t
 
 val create : unit -> t
 
+val room_exists : t -> room:room_id -> bool
+(** [room_exists t ~room] is whether [room] currently holds a host. The
+    socket driver re-checks this inside the upgrade callback: a room that
+    died between relay join and upgrade must not gain a zombie guest. *)
+
 type join_error =
   | Join_no_such_room
   | Host_already_connected

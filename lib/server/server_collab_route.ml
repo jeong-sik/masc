@@ -86,20 +86,36 @@ let teardown_host ~room =
     guests
 ;;
 
+(* Removes one guest from both tables. True when the guest was actually
+   present. Split from the peer-left notify so the upgrade-failure path can
+   unwind a join that was never announced (F6: no left-without-join).
+   [_locked] assumes the relay mutex is held (the mutex is not reentrant). *)
+let remove_guest_locked ~room ~peer =
+  let departure = Collab_relay.guest_left relay ~room ~peer in
+  Hashtbl.remove guest_conns (room, peer);
+  match departure with
+  | Collab_relay.Guest_departed -> true
+  | Collab_relay.Leave_no_such_room | Collab_relay.Leave_no_such_guest -> false
+;;
+
+let remove_guest ~room ~peer =
+  with_relay (fun () -> remove_guest_locked ~room ~peer)
+;;
+
+(* F7: teardown is keyed by (room, peer), not connection identity. Peer ids
+   restart at 1 when a room id is recreated, so a delayed duplicate terminal
+   callback could destroy a new generation's guest. Same-room-id reuse never
+   happens today (fresh id per /collab); recheck with a generation counter or
+   conn-identity compare-and-remove when host-rejoin-same-link lands. *)
 let teardown_guest ~room ~peer =
-  let host =
-    with_relay (fun () ->
-        let departure = Collab_relay.guest_left relay ~room ~peer in
-        Hashtbl.remove guest_conns (room, peer);
-        match departure with
-        | Collab_relay.Guest_departed -> Hashtbl.find_opt host_conns room
-        | Collab_relay.Leave_no_such_room | Collab_relay.Leave_no_such_guest ->
-          None)
-  in
-  match host with
-  | None -> ()
-  | Some conn ->
-    send_text conn (Collab_wire.control_json (Collab_wire.Peer_left { peer }))
+  let departed = remove_guest ~room ~peer in
+  if departed
+  then (
+    let host = with_relay (fun () -> Hashtbl.find_opt host_conns room) in
+    match host with
+    | None -> ()
+    | Some conn ->
+      send_text conn (Collab_wire.control_json (Collab_wire.Peer_left { peer })))
 ;;
 
 let on_host_message ~room envelope =
@@ -184,6 +200,15 @@ let accept_host ~upgrade reqd ~room =
     respond_upgrade_error reqd msg
 ;;
 
+(* Outcome of registering a guest socket inside the upgrade callback. The
+   callback runs after the 101 flush, strictly after [respond_and_drive_upgrade]
+   returns, so everything the join implies (registration, peer-joined) happens
+   here, not after [Ok]. *)
+type guest_registration =
+  | Reg_room_gone
+  | Reg_host_pending
+  | Reg_announce of connection
+
 let accept_guest ~upgrade reqd ~room ~peer =
   let handlers =
     Endpoint.handlers
@@ -203,20 +228,42 @@ let accept_guest ~upgrade reqd ~room ~peer =
       ~max_frame:max_frame_bytes
       ~handler:(fun wsd ->
         let conn = { wsd; write_mutex = Stdlib.Mutex.create () } in
-        with_relay (fun () ->
-            Hashtbl.replace guest_conns (room, peer) conn);
+        let registration =
+          with_relay (fun () ->
+              if not (Collab_relay.room_exists relay ~room)
+              then (
+                (* F3: the room died between relay join and upgrade. Unwind
+                   the join silently (never announced) and close below. *)
+                ignore (remove_guest_locked ~room ~peer);
+                Reg_room_gone)
+              else (
+                Hashtbl.replace guest_conns (room, peer) conn;
+                match Hashtbl.find_opt host_conns room with
+                | None -> Reg_host_pending
+                | Some host -> Reg_announce host))
+        in
+        (match registration with
+         | Reg_room_gone ->
+           send_close
+             conn
+             ~code:(Collab_wire.close_code Collab_wire.Close_room_closed)
+             ~reason:(Collab_wire.close_message Collab_wire.Close_room_closed)
+         | Reg_host_pending ->
+           (* Unreachable once the link exists: /collab shows it only after
+              the host is established. The peer stays registered; its hello
+              still reaches the host. *)
+           Log.Server.debug
+             "collab guest %d registered before host socket; peer-joined skipped"
+             peer
+         | Reg_announce host ->
+           send_text
+             host
+             (Collab_wire.control_json (Collab_wire.Peer_joined { peer })));
         handlers)
   with
-  | Ok () ->
-    let host = with_relay (fun () -> Hashtbl.find_opt host_conns room) in
-    (match host with
-     | None -> ()
-     | Some conn ->
-       send_text
-         conn
-         (Collab_wire.control_json (Collab_wire.Peer_joined { peer })))
+  | Ok () -> ()
   | Error msg ->
-    teardown_guest ~room ~peer;
+    ignore (remove_guest ~room ~peer);
     respond_upgrade_error reqd msg
 ;;
 
@@ -229,7 +276,10 @@ let reject_join ~upgrade reqd join_error =
   in
   let code = Collab_wire.close_code reason in
   let message = Collab_wire.close_message reason in
-  let wsd_ref = ref None in
+  (* F1: the ~handler callback runs after the 101 flush, strictly after this
+     call returns, so the close MUST go out from inside the callback — a
+     post-Ok send would never find the wsd. The builder is the only open
+     hook (there is no on_open). *)
   match
     Server_mcp_transport_ws.respond_and_drive_upgrade
       ~upgrade
@@ -237,15 +287,11 @@ let reject_join ~upgrade reqd join_error =
       ~max_message:max_message_bytes
       ~max_frame:max_frame_bytes
       ~handler:(fun wsd ->
-        wsd_ref := Some wsd;
+        let conn = { wsd; write_mutex = Stdlib.Mutex.create () } in
+        send_close conn ~code ~reason:message;
         Endpoint.handlers ())
   with
-  | Ok () ->
-    (match !wsd_ref with
-     | None -> ()
-     | Some wsd ->
-       let conn = { wsd; write_mutex = Stdlib.Mutex.create () } in
-       send_close conn ~code ~reason:message)
+  | Ok () -> ()
   | Error msg -> respond_upgrade_error reqd msg
 ;;
 
@@ -274,10 +320,18 @@ let ws_handler ~upgrade request reqd =
   match Collab_wire.parse_request_target ~target with
   | Error err -> respond_request_error reqd err
   | Ok (room, role) ->
-    let outcome = with_relay (fun () -> Collab_relay.join relay ~room ~role) in
-    (match outcome with
-     | Error join_error -> reject_join ~upgrade reqd join_error
-     | Ok Collab_relay.Host_accepted -> accept_host ~upgrade reqd ~room
-     | Ok (Collab_relay.Guest_accepted { peer }) ->
-       accept_guest ~upgrade reqd ~room ~peer)
+    (* F5: validate the WS handshake BEFORE joining the relay, so stray
+       plain-HTTP GETs (crawlers, probes) burn no peer ids and emit no
+       spurious peer-left. *)
+    (match Server_mcp_transport_ws.ws_upgrade_accept request with
+     | Error msg -> respond_upgrade_error reqd msg
+     | Ok _ ->
+       let outcome =
+         with_relay (fun () -> Collab_relay.join relay ~room ~role)
+       in
+       (match outcome with
+        | Error join_error -> reject_join ~upgrade reqd join_error
+        | Ok Collab_relay.Host_accepted -> accept_host ~upgrade reqd ~room
+        | Ok (Collab_relay.Guest_accepted { peer }) ->
+          accept_guest ~upgrade reqd ~room ~peer))
 ;;

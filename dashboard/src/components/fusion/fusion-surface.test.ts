@@ -160,7 +160,7 @@ describe('FusionSurface', () => {
     const fetch = vi.spyOn(boardApi, 'fetchBoardPost').mockImplementation(async id => ({
       ...boardPost({ id, meta: { observed_usage: { input_tokens: 9321, output_tokens: 17721 } }, body: `Original evidence ${id}`,
         origin: { source: 'fusion', fusion_run_id: id === 'post-a' ? 'old-run-a' : 'old-run-b' } }),
-      comments: [],
+      comments: [], commentPage: { offset: 0, total: 0 },
     }))
     render(html`<${FusionSurface} />`, container)
     expect(container.querySelector('[data-testid="fusion-replay-notice"]')?.textContent).toContain('해석 실패 34')
@@ -188,7 +188,7 @@ describe('FusionSurface', () => {
     ] }
     vi.spyOn(boardApi, 'fetchBoardPost').mockResolvedValue({
       ...boardPost({ id: 'post-a', meta: {}, body: 'Unrelated private content',
-        origin: { source: 'fusion', fusion_run_id: 'another-run' } }), comments: [],
+        origin: { source: 'fusion', fusion_run_id: 'another-run' } }), comments: [], commentPage: { offset: 0, total: 0 },
     })
     render(html`<${FusionSurface} />`, container)
     await waitFor(() => expect(container.textContent).toContain('선택한 기록과 일치하지 않습니다'))
@@ -207,7 +207,7 @@ describe('FusionSurface', () => {
     vi.spyOn(boardApi, 'fetchBoardPost').mockResolvedValue({
       ...boardPost({ id: 'post-a', body: 'Observed original',
         meta: { observed_usage: { input_tokens: input, output_tokens: output }, cost_usd: cost },
-        origin: { source: 'fusion', fusion_run_id: 'old-run' } }), comments: [],
+        origin: { source: 'fusion', fusion_run_id: 'old-run' } }), comments: [], commentPage: { offset: 0, total: 0 },
     })
     render(html`<${FusionSurface} />`, container)
     await waitFor(() => expect(container.textContent).toContain('Observed original'))
@@ -223,7 +223,7 @@ describe('FusionSurface', () => {
     }
     const post = (body: string, input: number) => ({
       ...boardPost({ id: 'same-post', body, meta: { observed_usage: { input_tokens: input, output_tokens: 2 } },
-        origin: { source: 'fusion', fusion_run_id: 'same-run' } }), comments: [],
+        origin: { source: 'fusion', fusion_run_id: 'same-run' } }), comments: [], commentPage: { offset: 0, total: 0 },
     })
     publish()
     const fetch = vi.spyOn(boardApi, 'fetchBoardPost')
@@ -248,7 +248,7 @@ describe('FusionSurface', () => {
     }
     const post = (body: string, input: number) => ({
       ...boardPost({ id: 'same-post', body, meta: { observed_usage: { input_tokens: input, output_tokens: 2 } },
-        origin: { source: 'fusion', fusion_run_id: 'same-run' } }), comments: [],
+        origin: { source: 'fusion', fusion_run_id: 'same-run' } }), comments: [], commentPage: { offset: 0, total: 0 },
     })
     type PostRead = Awaited<ReturnType<typeof boardApi.fetchBoardPost>>
     let completeOld!: (post: PostRead) => void

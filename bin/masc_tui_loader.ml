@@ -1156,21 +1156,42 @@ let load_board_list ~(host : string) ~(port : int)
       let* posts = required_list_field json "posts" in
       decode_board_posts posts
 
-(** Load board post detail from /api/v1/board/<postId> *)
+(** Keep the TUI's complete thread view while the REST detail route defaults
+    to the newest twenty. Older comments are read through bounded pages. *)
 let load_board_post ~(host : string) ~(port : int) ~(post_id : string) :
     (board_post * board_comment list, string) result =
-  match fetch_board_post ~host ~port ~post_id with
-  | Error err -> Error err
-  | Ok json ->
-      let post_json =
-        match Yojson.Safe.Util.member "post" json with
-        | `Null -> json
-        | value -> value
-      in
-      let* post = decode_board_post ~require_body:true post_json in
-      let* comments_json = optional_list_field json "comments" in
-      let* comments = decode_board_comments comments_json in
-      Ok (post, comments)
+  let read_page offset =
+    let* json =
+      fetch_board_post ~comment_offset:offset
+        ~comment_limit:Masc.Board.Limits.max_comment_page_limit
+        ~host ~port ~post_id
+    in
+    let* comments_json = optional_list_field json "comments" in
+    let* comments = decode_board_comments comments_json in
+    let* page = required_object_field json "comment_page" in
+    let* actual_offset = required_int_field page "offset" in
+    let* total = required_int_field page "total" in
+    if actual_offset <> offset then
+      Error "board detail returned a different comment offset"
+    else Ok (json, comments, total)
+  in
+  let* (first_json, first_comments, total) = read_page 0 in
+  let post_json =
+    match Yojson.Safe.Util.member "post" first_json with
+    | `Null -> first_json
+    | value -> value
+  in
+  let* post = decode_board_post ~require_body:true post_json in
+  let rec read_remaining offset total reversed =
+    if offset >= total then Ok (post, List.rev reversed)
+    else
+      let* (_, comments, total) = read_page offset in
+      let next_offset = offset + List.length comments in
+      if next_offset <= offset then
+        Error "board detail comment page did not advance"
+      else read_remaining next_offset total (List.rev_append comments reversed)
+  in
+  read_remaining (List.length first_comments) total (List.rev first_comments)
 
 (** Load the actor-scoped pending confirmation envelope from the operator
     surface. Missing or malformed envelopes remain explicit errors. *)

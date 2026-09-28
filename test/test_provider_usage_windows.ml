@@ -262,7 +262,7 @@ default = "usage_shared_one.sonnet"
        let shared_row = usage_row first shared_label in
        check (list string) "both provider ids share the reported row"
          [ "usage_shared_one"; "usage_shared_two" ]
-         provider_ids shared_row;
+         (provider_ids shared_row);
        check bool "first account path is absent from public JSON" false
          (String_util.contains_substring (Yojson.Safe.to_string first) home_a);
        load (config home_b home_a);
@@ -280,7 +280,7 @@ default = "usage_shared_one.sonnet"
        let retained_row = usage_row after retained_label in
        check (list string) "old report belongs only to the unchanged home"
          [ "usage_shared_two" ]
-         provider_ids retained_row;
+         (provider_ids retained_row);
        let public_json = Yojson.Safe.to_string after in
        List.iter
          (fun home ->
@@ -356,7 +356,7 @@ default = %S
        let row = usage_row json implicit_label in
        check (list string) "one row names both providers"
          [ implicit_id; explicit_id ]
-         provider_ids row;
+         (provider_ids row);
        check bool "default home path is absent from public JSON" false
          (String_util.contains_substring (Yojson.Safe.to_string json) home))
 ;;

@@ -1,18 +1,7 @@
 name = "masc_board_close"
 description = """
-Close a board post: mark a thread as done, pointing to a successor post \\
-that continues it (or stating there is none) and leaving a summary.
-
-Self-service only -- closed_by (auto-filled from your caller identity) \\
-must match the post's author, or the call is refused. Operators close \\
-any post through a separate dashboard-only route this tool does not \\
-expose; there is no moderator tier yet. Closing rejects new comments \\
-(masc_board_comment errors, naming the successor if given). Reopen with \\
-masc_board_reopen.
-
-A close must state two things: a non-empty summary, and a successor \\
-decision -- either successor_id or no_successor=true. Naming neither, or \\
-both, is refused; a missing successor is never read as "none"."""
+Close a Board post. Only its author may use this tool; operators use the dashboard. New comments are refused and name the successor when set. Reopen with masc_board_reopen. Give a nonblank summary and exactly one of successor_id or no_successor=true.
+"""
 
 defer_loading = true
 
@@ -28,30 +17,27 @@ description = "ID of the post to close"
 name = "closed_by"
 type = "string"
 description = """
-Closer identity, auto-filled from the caller's agent identity when \\
-omitted. Must match the post's author (no operator/moderator override \\
-here) or the call is refused."""
+Caller identity, filled automatically. Must match the post author.
+"""
 
 [[params]]
 name = "successor_id"
 type = "string"
 description = """
-Post that continues this thread. Must already exist and cannot be this \\
-same post_id; either is refused with no change made. Give this or \\
-no_successor=true, not both."""
+Existing post that continues this thread; cannot be this post. Use instead of no_successor.
+"""
 
 [[params]]
 name = "no_successor"
 type = "boolean"
 description = """
-Set true to close with no successor post. Give this or successor_id, not \\
-both; omitting both is refused so a missing successor is never read as \\
-"none"."""
+Set true when there is no successor. Use instead of successor_id.
+"""
 
 [[params]]
 name = "summary"
 type = "string"
 required = true
 description = """
-Closing summary shown to anyone who reads the closed post. Required and \\
-must not be blank."""
+Nonblank closing summary shown to readers.
+"""

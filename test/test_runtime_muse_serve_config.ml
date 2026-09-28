@@ -207,6 +207,37 @@ let test_derived_ceiling_arithmetic () =
   check (option int) "no window, no bytes" None (bytes ~declared:None ~max_context:None)
 ;;
 
+let test_invalid_runtime_keeps_the_prompt_ceiling_diagnostic () =
+  match load (runtime_toml ()) with
+  | Error diagnostic -> failf "muse-serve did not load: %s" diagnostic
+  | Ok (_, runtime, _, _, _) ->
+    (* Direct callers can construct [Runtime.t] without catalog validation.
+       Their refusal must retain which window was invalid, including the
+       difference between no window and a window below the host overhead. *)
+    List.iter
+      (fun (max_context, reason) ->
+         let invalid =
+           { runtime with
+             Runtime.model = { runtime.model with max_prompt_bytes = None; max_context }
+           }
+         in
+         let since_seq = (Log.Ring.bounds ()).total - 1 in
+         check (option int) "invalid runtime supplies no prompt ceiling" None
+           (Runtime.prompt_capacity_bytes invalid);
+         let entries = Log.Ring.recent ~module_filter:"Runtime" ~since_seq () in
+         check (list string) "the runtime and precise failure stay observable"
+           [ Printf.sprintf "Muse prompt ceiling unavailable for runtime %S: %s"
+               runtime.id reason ]
+           (List.map (fun (entry : Log.Ring.entry) -> entry.message) entries))
+      [ None,
+        "the Muse model declares neither max-context (the window the host reports) nor \
+         max-prompt-bytes"
+      ; Some 15000,
+        "75% of the Muse model's max-context 15000 does not cover the host's own \
+         11946-token overhead"
+      ]
+;;
+
 let test_declared_credentials_are_refused () =
   let provider_extra =
     "[providers.muse_code.credentials]\ntype = \"env\"\nkey = \"META_API_KEY\"\n"
@@ -275,6 +306,8 @@ let () =
         ; test_case "the prompt ceiling comes from the window" `Quick
             test_prompt_ceiling_comes_from_the_window
         ; test_case "derived ceiling arithmetic" `Quick test_derived_ceiling_arithmetic
+        ; test_case "invalid runtime keeps the prompt ceiling diagnostic" `Quick
+            test_invalid_runtime_keeps_the_prompt_ceiling_diagnostic
         ; test_case "declared credentials are refused" `Quick
             test_declared_credentials_are_refused
         ; test_case "an HTTP endpoint is refused" `Quick test_an_http_endpoint_is_refused

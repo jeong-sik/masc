@@ -7455,3 +7455,7 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_account_login_transport)))
+(test
+ (name test_server_setup_account_login)
+ (modules test_server_setup_account_login)
+ (libraries masc_test_deps))

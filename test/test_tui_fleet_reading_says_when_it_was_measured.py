@@ -20,7 +20,9 @@ FLEET_PATH = "/health?full=1"
 # for it says the reading arrived.
 FLEET_LINE = b"turn capacity 0/0"
 STALE_TAG = b"fleet reading: stale \xc2\xb7 measured 4m"
-REASON = b"(last_good_refresh_timeout)"
+# The server's wire word is said in words (#39194): the /health contract's
+# last_good_refresh_timeout draws as "refresh timed out".
+REASON = b"(refresh timed out)"
 # Four minutes back, so the age reads "4m…" for the first minute after the
 # fixture is swapped; the scenario reaches both checks within seconds.
 STALE_AGE_SEC = 240

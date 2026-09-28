@@ -97,11 +97,13 @@ let config_bindings =
       Some [ Config_presets ]
   ; b Act "i" "input"
       ~help:"on prompts, the input this prompt was last given", Some [ Config_prompts ]
-  ; b Act "a" "fragments / keeper voice"
+  ; b Act "a" "fragments / voice / account"
       ~help:"on prompts, show or hide the internal pieces the main prompts \
              are built from, though not on the runtime assets reading; on \
-             voice, give the selected keeper its own voice",
-      Some [ Config_prompts; Config_voice ]
+             voice, give the selected keeper its own voice; on runtime.toml, \
+             declare one more Claude Code, Codex or Antigravity account by \
+             copying a provider the file declares",
+      Some [ Config_runtime; Config_prompts; Config_voice ]
   ; b Act "o" "assets"
       ~help:"on prompts, switch between the read-only runtime assets and \
              the registry you can override",
@@ -1078,6 +1080,21 @@ let voice_agent_bindings =
   ]
 
 let footer_hints_voice_agent () = hints_of_bindings voice_agent_bindings
+
+(* The account form on runtime.toml takes every key while it is open, so the
+   pane's row -- [e], [r], [Tab], [q] -- would name keys that now type into a
+   field. The form's row names only what the form reads. *)
+let runtime_account_form_bindings =
+  [ b Navigate "\xe2\x86\x90/\xe2\x86\x92" "provider"
+      ~help:"on the provider field, the next or previous provider to copy"
+  ; b Navigate "\xe2\x86\x91/\xe2\x86\x93" "field"
+  ; b Act "Enter" "next / save"
+      ~help:"move to the next field; on the last one, declare the account and save"
+  ; b Act "Esc" "cancel" ~help:"close the form; nothing is written"
+  ]
+
+let footer_hints_runtime_account_form () =
+  hints_of_bindings runtime_account_form_bindings
 
 (* The prompts pane's read-only half. [o] swaps the registry for the assets
    shipped with the binary, and there [a], [i], [e] and [x] answer with a

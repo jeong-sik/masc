@@ -329,8 +329,13 @@ def test_ollama_cloud_arm_renders_the_v1_wire():
     assert 'default = "ollama_cloud.deepseek-v4-pro"' in rt
     assert 'api-name = "deepseek-v4-pro"' in rt
     # Thinking is uncontrolled on this wire; the renderer must not emit an
-    # effort the provider never agreed to carry.
+    # effort the provider never agreed to carry. It says so out loud instead:
+    # without this line the first turn is refused as
+    # Reasoning_undeclared_on_auto_enabling_wire.
     assert "reasoning-effort" not in rt
+    assert "reasoning-uncontrolled = true" in rt
+    assert "thinking-support = true" in rt
+    assert 'thinking-control-format = "none"' in rt
 
 
 def test_ollama_cloud_refuses_parallel_off_arms(tmp_path):
@@ -577,10 +582,14 @@ def test_the_failover_arm_renders_every_model_and_a_lane_that_routes_the_keeper(
         assert model["capabilities"]["max-output-tokens"] == 16384
         assert runtime["openrouter"][binding]["disable-parallel-tool-use"] is False
     assert openrouter_lists == ["z-ai/glm-5.3", "deepseek/deepseek-v4-pro"]
-    # A lane cannot be an exact-output cli slot; those keep the head runtime.
+    # A lane cannot be an exact-output slot; those keep the head runtime.
+    # Slots, not cli_slots: cli_slots only admit official-client runtimes
+    # since #39020, and an HTTP runtime there fails the config at load.
     exact = runtime["runtime"]["exact_output_lanes"]
-    assert exact["hitl_auto_judge"]["cli_slots"] == [ids[0]]
-    assert exact["board_attention_exact"]["cli_slots"] == [ids[0]]
+    assert exact["hitl_auto_judge"]["slots"] == [ids[0]]
+    assert exact["board_attention_exact"]["slots"] == [ids[0]]
+    assert exact["hitl_auto_judge"]["cli_slots"] == []
+    assert exact["board_attention_exact"]["cli_slots"] == []
     # Arm e's treatments otherwise.
     assert (out / "keepers" / "bench-1.toml").read_text() == keeper_toml("e")
 

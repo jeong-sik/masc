@@ -94,6 +94,9 @@ status: reference
   Goal의 실제 값은 동일한 Goal ID·기준 개정·지표·목표를 가진 관측 기록에서만 읽는다.
   Task 개수나 제목을 Goal의 실제 값으로 환산하지 않는다. 각 Goal의 자세한 근거는
   Work에서 연다.
+  Goal의 정체 시간(`stagnation_seconds`)은 연결 Task 갱신·승인 요청·Keeper 영수증·
+  runtime trust 이벤트·Goal 메타데이터 중 가장 최근에 관측된 활동 이후 지난 시간이다.
+  Keeper의 작업 배정 상태와는 별개이며, Goal의 실제 측정값으로 환산하지 않는다.
   → [측정 중심 TUI 구성](../rfc/RFC-tui-measured-operator-home.md),
   [Masc_tui_overview_goals](../../bin/masc_tui_overview_goals.mli)
 

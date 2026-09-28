@@ -102,7 +102,7 @@ def print_frame(surface: str, width: int, output: bytearray) -> None:
 def region_baseline_interaction(process, fd, _slave, output, _base):
     measured: dict[tuple[str, int], tuple[int, int, int, int]] = {}
 
-    def sweep(surface: str, title: bytes) -> None:
+    def sweep(surface: str, title: bytes, needle=None) -> None:
         for width in WIDTHS:
             h.resize_and_wait(
                 process,
@@ -110,7 +110,7 @@ def region_baseline_interaction(process, fd, _slave, output, _base):
                 output,
                 rows=TERMINAL_ROWS,
                 columns=width,
-                needle=title,
+                needle=title if needle is None else needle,
                 controls=(h.FULL_REDRAW,),
             )
             h.drain_until_quiet(process, fd, output, cap=3.0)
@@ -130,8 +130,11 @@ def region_baseline_interaction(process, fd, _slave, output, _base):
     sweep("keeper-chat", ALPHA_CHAT)
 
     h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
-    h.palette_go(process, fd, output, b"go board", b"MASC Board (4)")
-    sweep("board", b"MASC Board (4)")
+    # The emphasis on the name closes between it and the count, so the wait
+    # matches across it; the measure reads the screen's plain text.
+    board_title = h.screen_header(b"MASC Board", b" (4)")
+    h.palette_go(process, fd, output, b"go board", board_title)
+    sweep("board", b"MASC Board (4)", needle=board_title)
 
     print("measured = {")
     for key, value in measured.items():

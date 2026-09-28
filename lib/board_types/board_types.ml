@@ -640,8 +640,8 @@ module Comment_page = struct
     ;;
 
     let line position =
-      match position.returned, position.next_offset with
-      | 0, _ ->
+      match position.returned with
+      | 0 ->
         (match position.total with
          | 0 -> "[no comments]"
          | total ->
@@ -649,19 +649,33 @@ module Comment_page = struct
              "[no comments from offset %d: the thread has %d now.]"
              position.offset
              total)
-      | returned, Some next ->
+      | returned ->
+        let following =
+          match position.next_offset with
+          | Some next -> Printf.sprintf " Read the rest with comment_offset=%d." next
+          | None -> " No comments after this page."
+        in
+        (* The newest page has no forward cursor, but it may have older
+           comments. Name a non-overlapping page immediately before this
+           one; repeating the hint walks to offset zero without rereading
+           the newest slice. A budget-shortened page uses its actual size. *)
+        let preceding =
+          if position.offset = 0
+          then ""
+          else
+            let count = min position.offset returned in
+            Printf.sprintf
+              " Read earlier with comment_offset=%d and comment_limit=%d."
+              (position.offset - count)
+              count
+        in
         Printf.sprintf
-          "[comments %d-%d of %d. Read the rest with comment_offset=%d.]"
+          "[comments %d-%d of %d.%s%s]"
           position.offset
           (position.offset + returned - 1)
           position.total
-          next
-      | returned, None ->
-        Printf.sprintf
-          "[comments %d-%d of %d. No comments after this page.]"
-          position.offset
-          (position.offset + returned - 1)
-          position.total
+          following
+          preceding
     ;;
 
     let metadata_key = "masc.comment_page"

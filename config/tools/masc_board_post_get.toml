@@ -4,9 +4,10 @@ name = "masc_board_post_get"
 shell_command = "board post get"
 description = """
 Read one existing board post by exact post_id. The default read returns the \
-post body and its newest comments (up to 20); the page's first line names \
-the comment_offset that reads earlier ones, and comment_offset=0 reads from \
-the oldest. To skip comments you have read, pass after_comment_id (the \
+post body and its newest comments (up to 20). The first line gives \
+comment_offset and comment_limit for the preceding, non-overlapping page; \
+follow those hints toward offset 0 to read older comments. To skip comments \
+you have read, pass after_comment_id (the \
 newest one you read) or comment_tail (the newest N). Use only after you have \
 a post_id from masc_board_list, masc_board_search, or visible board context. \
 If no post_id is visible, call masc_board_list or masc_board_search first; \

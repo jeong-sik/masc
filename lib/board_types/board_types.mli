@@ -416,11 +416,11 @@ module Comment_page : sig
     (** Total decoder: [None] for anything this module did not write. *)
 
     val line : t -> string
-    (** The one line a text page carries, naming the range it holds and the
-        [comment_offset] that continues it. A page at the end of a non-empty
-        thread names the thread's size at the read. Every text rendering of a
-        page uses this printer, so the sentence cannot drift between
-        surfaces. *)
+    (** The one line a text page carries, naming its range, a forward
+        [comment_offset] when present, and the preceding non-overlapping
+        [comment_offset]/[comment_limit] when older comments exist. A page at
+        the end of a non-empty thread names the thread's size at the read.
+        Every text rendering of a page uses this printer. *)
 
     val metadata_key : string
     (** ["masc.comment_page"]. *)

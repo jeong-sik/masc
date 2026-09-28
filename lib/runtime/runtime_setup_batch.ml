@@ -6,7 +6,8 @@ type error = Invalid_selection | Invalid_configuration | Changed_configuration
   | Verification_failed of { runtime_id : string; code : string; message : string; detail : string option }
   | Verification_unreadable of { runtime_id : string; exit : Unix.process_status; stderr : string; reason : string }
   | Write_failed | Rollback_failed | Lock_unavailable
-type readiness = Not_probed | Verified
+type usage_limited = { runtime_id : string; code : string }
+type readiness = Not_probed | Verified | Usage_limited of usage_limited * usage_limited list
 type receipt = { runtime_id:string; runtime_ids:string list; models:string list;
                  readiness:readiness }
 let ( let* ) = Result.bind
@@ -112,6 +113,17 @@ let validate ~binary ~base args =
   | Unix.WEXITED 0 -> Ok ()
   | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
     Error (Validation_failed { exit = child.status; stderr = child.stderr })
+(* A spent quota or a rate limit is the provider answering for the account and
+   declining for its usage. The probe could not show the response and tool
+   path, but nothing says the selection is wrong, so the runtime is published
+   and reported unmeasured. Every other failure refuses the save. *)
+let usage_limit (failure : Runtime_verification.failure) =
+  match failure with
+  | Runtime_verification.(Rate_limited _ | Quota_exhausted _) -> true
+  | Runtime_verification.(Unavailable _ | Provider_overloaded _ | Provider_auth_refused _
+    | Provider_unreachable _ | Model_not_found _ | Provider_rejected _ | Timed_out
+    | Tool_not_called | Tool_result_not_consumed | Empty_response | Model_unreported) -> false
+type probe = Probe_verified | Probe_usage_limited of usage_limited
 (* The child's report is the judge, read back through the same module that
    wrote it; the exit status only has to agree with a verified report. *)
 let verification ~binary ~base id =
@@ -129,12 +141,14 @@ let verification ~binary ~base id =
     unreadable (Printf.sprintf "the report names runtime %S" runtime_id)
   | Ok (Runtime_verification.Measured { Runtime_verification.failure = None; _ }) ->
     (match child.status with
-     | Unix.WEXITED 0 -> Ok ()
+     | Unix.WEXITED 0 -> Ok Probe_verified
      | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> unreadable "a verified report with a failing exit")
   | Ok (Runtime_verification.Measured { Runtime_verification.failure = Some failure; _ }) ->
-    Error (Verification_failed { runtime_id = id; code = Runtime_verification.failure_code failure;
-                                 message = Runtime_verification.failure_message failure;
-                                 detail = Runtime_verification.failure_detail failure })
+    let code = Runtime_verification.failure_code failure
+    and message = Runtime_verification.failure_message failure
+    and detail = Runtime_verification.failure_detail failure in
+    if usage_limit failure then Ok (Probe_usage_limited { runtime_id = id; code })
+    else Error (Verification_failed { runtime_id = id; code; message; detail })
   | Ok (Runtime_verification.Unmeasured { Runtime_verification.code; detail; message; runtime_id = _ }) ->
     Error (Verification_failed { runtime_id = id; code; message; detail })
 let write path mode text =
@@ -178,12 +192,18 @@ let publish_using ~(write:string -> int -> string -> (unit,Fs_compat.atomic_repl
         if restore written then Error Write_failed else Error Rollback_failed in
   (* Cancellation cannot interrupt the two replacements or their rollback. *)
   Eio.Cancel.protect (fun () -> commit [] changes)
-let configure_locked ~pending_credentials ~binary ~base ~expected_revision ~specs ~selected ~verify =
+let configure_locked ~pending_credentials ~default_lane_id ~binary ~base ~expected_revision ~specs ~selected ~verify =
   let* original = snapshot base in
   if revision original <> expected_revision then Error Changed_configuration else
   let first = original in
   let* parsed = match Runtime_toml.parse_string (content first) with
     | Ok value -> Ok value | Error _ -> Error Invalid_configuration in
+  let* () = match default_lane_id with
+    | None -> Ok ()
+    | Some lane_id ->
+      if parsed.Runtime_schema.default_runtime_id = Some lane_id
+         && List.exists (fun (lane:Runtime_schema.lane_decl) -> String.equal lane.id lane_id) parsed.lane_decls
+      then Ok () else Error Invalid_selection in
   let existing = List.map Runtime.id_of_binding parsed.Runtime_schema.bindings in
   let rendered = List.map Runtime_setup_spec.render specs in
   let additions = List.fold_left (fun acc (row:Runtime_setup_spec.rendered) ->
@@ -193,7 +213,12 @@ let configure_locked ~pending_credentials ~binary ~base ~expected_revision ~spec
   if not (List.for_all (fun id -> List.mem id available) selected) then Error Invalid_selection else
   let added = String.concat "" (List.map (fun (r:Runtime_setup_spec.rendered) -> r.runtime_toml) additions) in
   let runtime_text = content first ^ (if added="" then "" else "\n" ^ added) in
-  let* validated = with_stage (fun stage ->
+  let runtime_text = match default_lane_id with
+    | None -> runtime_text
+    | Some lane_id -> Toml_line_editor.edit_table_multiline_array runtime_text
+        ~path:("runtime.lanes." ^ Toml_line_editor.render_key lane_id)
+        ~key:"candidates" ~values:selected in
+  let* (validated, readiness) = with_stage (fun stage ->
     let _,runtime = paths stage in
     let stage_write path text = match write path 0o600 text with
       | Ok () -> Ok () | Error _ -> Error Configuration_unavailable in
@@ -201,12 +226,21 @@ let configure_locked ~pending_credentials ~binary ~base ~expected_revision ~spec
     match selected with
     | [] -> Error Invalid_selection
     | primary::fallbacks ->
-      let args = ["runtime-default-set";"--base-path";stage;primary;"--setup-lanes";"--setup-imp"]
-        @ List.concat_map (fun id -> ["--fallback-runtime";id]) fallbacks in
+      let args = match default_lane_id with
+        | Some lane_id -> ["runtime-default-set";"--base-path";stage;lane_id]
+        | None -> ["runtime-default-set";"--base-path";stage;primary;"--setup-lanes";"--setup-imp"]
+          @ List.concat_map (fun id -> ["--fallback-runtime";id]) fallbacks in
       let* () = validate ~binary ~base:stage args in
-      let rec probes = function [] -> Ok () | id::tail -> let* () = verification ~binary ~base:stage id in probes tail in
-      let* () = if verify then probes selected else Ok () in
-      let* files = snapshot stage in Ok (content files)) in
+      let rec probes limited = function
+        | [] -> Ok (List.rev limited)
+        | id::tail ->
+          let* probe = verification ~binary ~base:stage id in
+          probes (match probe with Probe_verified -> limited | Probe_usage_limited row -> row :: limited) tail in
+      let* readiness =
+        if not verify then Ok Not_probed else
+        let* limited = probes [] selected in
+        Ok (match limited with [] -> Verified | first :: rest -> Usage_limited (first, rest)) in
+      let* files = snapshot stage in Ok (content files, readiness)) in
   let* current = snapshot base in
   if not (same original current) then Error Changed_configuration else
   let _,runtime = paths base in
@@ -217,9 +251,11 @@ let configure_locked ~pending_credentials ~binary ~base ~expected_revision ~spec
     Ok ()) in
   match selected with
   | [] -> Error Invalid_selection
-  | primary::_ -> Ok {runtime_id=primary;runtime_ids=selected;
-      models=List.map Runtime_setup_spec.model_id specs; readiness=(if verify then Verified else Not_probed)}
-let configure ?(pending_credentials=[]) ~binary ~base_path ~expected_revision ~specs ~runtime_ids ~default_runtime_id ~verify () =
+  | primary::_ ->
+    let runtime_id = match default_lane_id with Some lane_id -> lane_id | None -> primary in
+    Ok {runtime_id;runtime_ids=selected;
+      models=List.map Runtime_setup_spec.model_id specs; readiness}
+let configure ?(pending_credentials=[]) ?default_lane_id ~binary ~base_path ~expected_revision ~specs ~runtime_ids ~default_runtime_id ~verify () =
   if runtime_ids=[] || not (List.for_all safe_id runtime_ids)
      || not (List.mem default_runtime_id runtime_ids) then Error Invalid_selection else
   io (fun () ->
@@ -228,14 +264,20 @@ let configure ?(pending_credentials=[]) ~binary ~base_path ~expected_revision ~s
     let selected = default_runtime_id :: List.filter ((<>) default_runtime_id) (unique runtime_ids) in
     (* Keep typed operation failures separate from the lock's string diagnostics. *)
     match Runtime.with_config_lock ~runtime_config_path:runtime (fun () ->
-      Ok (configure_locked ~pending_credentials ~binary ~base ~expected_revision ~specs ~selected ~verify)) with
+      Ok (configure_locked ~pending_credentials ~default_lane_id ~binary ~base ~expected_revision ~specs ~selected ~verify)) with
     | Ok result -> result | Error _ -> Error Lock_unavailable)
-let receipt_json receipt = `Assoc [
+let usage_limited_json (row : usage_limited) = `Assoc [
+  "runtime_id",`String row.runtime_id;"code",`String row.code]
+let receipt_json receipt = `Assoc ([
   "runtime_id",`String receipt.runtime_id;
   "runtime_ids",`List (List.map (fun s -> `String s) receipt.runtime_ids);
   "models",`List (List.map (fun s -> `String s) receipt.models);
-  "configured",`Bool true;"validation",`String "passed";
-  "readiness",`String (match receipt.readiness with Verified -> "verified" | Not_probed -> "not_probed")]
+  "configured",`Bool true;"validation",`String "passed"]
+  @ match receipt.readiness with
+    | Verified -> ["readiness",`String "verified"]
+    | Not_probed -> ["readiness",`String "not_probed"]
+    | Usage_limited (first, rest) -> ["readiness",`String "usage_limited";
+        "unverified",`List (List.map usage_limited_json (first :: rest))])
 
 module For_testing = struct
   let publish ~replace ~files =

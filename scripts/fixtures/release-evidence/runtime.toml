@@ -3,7 +3,7 @@
 # Copied verbatim into the isolated base path by scripts/release-evidence.sh.
 # It lives here as a file, not as a heredoc inside that script, so
 # test_runtime_config_validity can check it against
-# Server_runtime_bootstrap.mandatory_exact_output_lane_ids. A heredoc is
+# Standalone_lane.required_ids. A heredoc is
 # invisible to the compiler and to every test, which is how the
 # hitl_auto_judge lane requirement added in #25671 reached main unnoticed and
 # failed every push for ~29 hours (#25663).
@@ -24,7 +24,7 @@
 # gate matches against the catalog.
 default = "ollama_cloud.deepseek-v4-flash"
 
-# Startup requires every id in Server_runtime_bootstrap.mandatory_exact_output_lane_ids
+# Startup requires every id in Standalone_lane.required_ids
 # to be declared here with a non-empty slot list; it synthesizes nothing. A slot
 # names a runtime binding from this same file, so the only slot this fixture can
 # offer is the binding it declares below.

@@ -72,6 +72,11 @@ blocking_lints() {
   run_self_test_when_changed "Stagehand extension installer" \
     "connectors/browser/install-stagehand-extension.sh test/test_install_stagehand_extension.sh" \
     bash test/test_install_stagehand_extension.sh
+  # Runs deploy.sh and install-local-build.sh against a fixture with a fake
+  # helper: each must refuse before it stops or replaces anything.
+  run_self_test_when_changed "Deployment scripts refuse before touching prod" \
+    "scripts/deploy.sh scripts/install-local-build.sh scripts/check-runtime-deployment-preflight.sh test/test_deploy_preflight.sh" \
+    bash test/test_deploy_preflight.sh
   run_lint "Issue taxonomy truth" bash scripts/check-issue-taxonomy-truth.sh
   # The release page body is cut from this section by
   # scripts/ci/changelog-section.py. Checking it on every PR means a version
@@ -235,6 +240,7 @@ blocking_lints() {
   run_lint "No inline json_kind_name" bash scripts/lint/no-inline-json-kind-name.sh
   run_lint "No yojson 3.0 dead arms" bash scripts/lint/no-yojson-3-dead-arms.sh
   run_lint "Workflow YAML syntax" bash scripts/lint/yaml-syntax.sh
+  run_lint "Pinned Ubuntu runner labels" bash scripts/lint/no-ubuntu-latest-runner.sh
   # A job that needs a conditionally skipped job is skipped with it while the
   # run still reports success. That is how v0.44.0 was tagged and never
   # published: release.yml's `release` needed `build`, which could be skipped.

@@ -120,6 +120,44 @@ type reasoning_effort =
 val reasoning_effort_to_string : reasoning_effort -> string
 val reasoning_effort_of_string : string -> reasoning_effort option
 
+type model_catalog_source =
+  | Provider_catalog
+  | Fake_catalog
+  | Unresolved_catalog
+  | Bundled_catalog
+  | Config_catalog
+  | Unknown_catalog_source of string
+
+val model_catalog_source_to_string : model_catalog_source -> string
+
+type model_effort_variants =
+  | Unknown_efforts
+  | Known_efforts of reasoning_effort list
+
+type model_catalog_entry =
+  { model_id : string
+  ; display_label : string
+  ; provider_id : string
+  ; profile_id : string option
+  ; context_limit : int option
+  ; output_limit : int option
+  ; is_default : bool
+  ; variants : model_effort_variants
+  }
+
+type model_catalog =
+  { source : model_catalog_source
+  ; provider_id : string
+  ; profile_id : string option
+  ; models : model_catalog_entry list
+  }
+
+val model_list_request : id:int -> Yojson.Safe.t
+val parse_model_list_result : Yojson.Safe.t -> (model_catalog, error) result
+(** MSP model metadata, preserving its source, nullable limits and explicit
+    unknown efforts. The query names no session or command. Listing models
+    does not prove sign-in, availability to this account, or a model turn. *)
+
 (** A native MCP server added to one session only
     ([SessionConfig.mcpServers]). The schema closes the transport union.
     MASC offers its tools through a loopback HTTP bridge, so only the
@@ -172,6 +210,16 @@ val session_set_approval_mode_request
   -> Yojson.Safe.t
 (** [session/resume] carries no approval mode: a resumed session keeps the
     one it last had. This command selects the mode for the next action. *)
+
+val session_set_model_request
+  :  id:int
+  -> command_id:string
+  -> session_id:string
+  -> model_id:string
+  -> Yojson.Safe.t
+(** [session/resume] carries no model either. The selection applies to the
+    session's next model calls; when that model already runs, the host
+    answers noop and records nothing. *)
 
 val turn_start_request
   :  id:int
@@ -235,12 +283,24 @@ val corpus_schema_fingerprint : string
 
 type session =
   { session_id : string
+  ; turn_count : int (** The host's nonnegative completed-turn count. *)
   ; model_id : string option
   ; workspace_root : string option
+  ; approval_mode : approval_mode option
+    (** [None] means the host did not report a folded mode, not approval. *)
   }
 
 val parse_session_result : stage:string -> Yojson.Safe.t -> (session, error) result
 (** The [session] member of a [session/start] or [session/resume] result. *)
+
+val parse_set_approval_mode_result : Yojson.Safe.t -> (approval_mode, error) result
+(** Require an accepted [session/setApprovalMode] result and decode its
+    [effectiveMode.mode]. Unknown, missing or malformed modes are refused. *)
+
+val parse_set_model_result : Yojson.Safe.t -> (unit, error) result
+(** Require an accepted [session/setModel] result. The ack carries no model:
+    the host applies the selection to the session's next model calls, or
+    answers noop when that model already runs. *)
 
 type turn_disposition =
   | Started
@@ -277,6 +337,8 @@ type turn_error_kind =
   | Auth_required
   | Unrecognized_error_kind of string
 
+val turn_error_kind_to_string : turn_error_kind -> string
+
 type turn_error =
   { kind : turn_error_kind
   ; message : string
@@ -310,6 +372,37 @@ type item_status =
   | Item_timed_out
   | Unrecognized_item_status of string
 
+(** What started a compaction ([CompactionTrigger]); open on the wire. *)
+type compaction_trigger =
+  | Compaction_manual
+  | Compaction_auto
+  | Unrecognized_compaction_trigger of string
+
+val compaction_trigger_to_string : compaction_trigger -> string
+
+(** How a compaction ended ([CompactionOutcome]); open on the wire. *)
+type compaction_outcome =
+  | Compaction_compacted
+  | Compaction_noop
+  | Compaction_failed
+  | Compaction_cancelled
+  | Unrecognized_compaction_outcome of string
+
+val compaction_outcome_to_string : compaction_outcome -> string
+
+(** The members of a [compaction] item, each optional in the schema. A
+    [Compaction_auto] trigger with [Compaction_compacted] means the host
+    rewrote what the model will see: measured on host 1.4.0, an input larger
+    than the window reached the model as a summary of about 4 KB. *)
+type compaction =
+  { trigger : compaction_trigger option
+  ; outcome : compaction_outcome option
+  ; strategy_id : string option  (** The summarizer, as the host names it. *)
+  ; tokens_before : int option
+  ; tokens_after : int option
+  ; reason : string option  (** Display text only; never branched on. *)
+  }
+
 (** One transcript item at one revision. Only the members MASC projects are
     decoded; the schema keeps the rest open. [text] is the accumulated reply
     on an [Agent_message]. [tool], [call_id], [args] (the model's argument
@@ -325,6 +418,7 @@ type item =
   ; call_id : string option
   ; args : string option
   ; visible_output : string option
+  ; compaction : compaction option  (** [Some] on a [Compaction] item only. *)
   }
 
 (** The field an [item/delta] appends to. Absent on the wire means [text]. *)
@@ -353,6 +447,11 @@ type subscription_usage =
   ; window : usage_window
   ; weekly : usage_weekly
   }
+
+val exhausted_subscription_reset_ms : subscription_usage -> int option
+(** Latest provider reset among exhausted current/weekly windows. MSP reports
+    percentage integers (100 or above is exhausted) and epoch milliseconds;
+    nonexhausted or already-reset observations contribute no window. *)
 
 type notification =
   | Turn_started of
@@ -385,6 +484,14 @@ type notification =
       ; delta : string
       }
   | Usage_changed of subscription_usage
+  | Model_usage_reported of
+      { session_id : string
+      ; turn_id : string
+      ; model_id : string option
+      }
+      (** [session/tokenUsage], one per model call: the model that produced
+          that usage ([modelId]), [None] when the host did not name it. Only
+          the model is read; the counts arrive with [turn/completed]. *)
   | Unhandled_notification of { method_ : string }
       (** A method this codec does not project: [session/started] and the
           other session projections, approval view events, [view/gap], and
@@ -412,9 +519,16 @@ type approval_subject_kind =
   | Subject_tool
   | Unrecognized_subject of string
 
+type approval_choice_scope =
+  | Once
+  | Session
+  | Local_persistent
+  | Unrecognized_scope of string
+
 type approval_choice =
   { choice_id : string
   ; decision : approval_decision
+  ; scope : approval_choice_scope
   }
 
 type approval_requirement =
@@ -429,6 +543,7 @@ type approval_request =
   ; turn_id : string
   ; tool_name : string
   ; subject_kind : approval_subject_kind
+  ; subject_tool_name : string option
   ; choices : approval_choice list
   }
 

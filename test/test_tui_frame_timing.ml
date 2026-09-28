@@ -87,6 +87,92 @@ let test_ordinals_count_per_phase () =
   | [] -> Alcotest.fail "no worst lines"
 ;;
 
+let test_stages_keep_frame_and_outer_fetch_apart () =
+  let stages =
+    Timing.Stage_samples.empty
+    |> fun t -> Timing.Stage_samples.add t ~frame:None ~name:"board.http_json" ~ms:(Some 7.0)
+    |> fun t -> Timing.Stage_samples.add t ~frame:None ~name:"board.http_json" ~ms:(Some 13.0)
+    |> fun t -> Timing.Stage_samples.add t ~frame:None ~name:"board.http_json" ~ms:(Some 19.0)
+    |> fun t -> Timing.Stage_samples.add t ~frame:(Some 16)
+      ~name:"board.thread.wrap" ~ms:(Some 2.0)
+    |> fun t -> Timing.Stage_samples.add t ~frame:(Some 16)
+      ~name:"board.thread.wrap" ~ms:(Some 3.0)
+    |> fun t -> Timing.Stage_samples.add t ~frame:(Some 16)
+      ~name:"board.cache.cold" ~ms:None
+    |> fun t -> Timing.Stage_samples.add t ~frame:(Some 1)
+      ~name:"overview.layout" ~ms:(Some 5.0)
+    |> fun t -> Timing.Stage_samples.add t ~frame:(Some 2)
+      ~name:"board.thread.wrap" ~ms:(Some 2.0)
+    |> fun t -> Timing.Stage_samples.add t ~frame:(Some 3)
+      ~name:"board.thread.wrap" ~ms:(Some 10.0)
+  in
+  let lines = Timing.Stage_samples.summary_lines stages in
+  Alcotest.(check bool) "same-frame wrapping sums" true
+    (List.exists (fun line ->
+       contains line "frame=16 name=board.thread.wrap ms=5.000 calls=2") lines);
+  Alcotest.(check bool) "stage percentile uses frame sum" true
+    (List.exists (fun line ->
+       contains line "stage[board.thread.wrap] frames=3 p50=5.000ms p95=10.000") lines);
+  Alcotest.(check bool) "outside fetch counts calls, not frames" true
+    (List.exists (fun line ->
+       contains line "stage[board.http_json] calls=3 p50=13.000ms p95=19.000 max=19.000") lines);
+  Alcotest.(check bool) "fetch is outside Build" true
+    (List.exists (fun line ->
+       contains line "outside-build name=board.http_json ms=39.000 calls=3") lines);
+  Alcotest.(check bool) "cold is a note, not zero duration" true
+    (List.exists (fun line ->
+       contains line "frame=16 name=board.cache.cold note") lines);
+  let builds =
+    Timing.Samples.add Timing.Samples.empty Timing.Build
+      ~tag:(Some "board-read") ~ms:10.0
+  in
+  let residual = Timing.Stage_samples.residual_lines stages builds in
+  Alcotest.(check bool) "residual excludes outside-Build fetch" true
+    (List.exists (fun line ->
+       contains line "frame=1 name=unattributed ms=5.000") residual)
+;;
+
+let test_opt_in_report_is_bounded () =
+  Alcotest.(check int) "short-run frame limit" 512 Timing.max_frames_per_phase;
+  Alcotest.(check int) "short-run stage limit" 4096 Timing.max_stage_samples;
+  let builds =
+    List.init (Timing.max_frames_per_phase + 1) (fun _ -> ())
+    |> List.fold_left
+         (fun t () -> Timing.Samples.add t Timing.Build ~tag:None ~ms:1.0)
+         Timing.Samples.empty
+  in
+  let build_lines = Timing.Samples.summary_lines builds in
+  Alcotest.(check bool) "only the bounded prefix is summarized" true
+    (List.exists (fun line -> contains line "build frames=512") build_lines);
+  Alcotest.(check bool) "the omitted frame is disclosed" true
+    (List.exists (fun line -> contains line "build omitted=1") build_lines);
+  let stages =
+    List.init (Timing.max_stage_samples + 1) (fun _ -> ())
+    |> List.fold_left
+         (fun t () ->
+           Timing.Stage_samples.add t ~frame:(Some 1) ~name:"bounded"
+             ~ms:(Some 0.1))
+         Timing.Stage_samples.empty
+  in
+  let stage_lines = Timing.Stage_samples.summary_lines stages in
+  Alcotest.(check bool) "stage records stop at the cap" true
+    (List.exists (fun line -> contains line "name=bounded ms=409.600 calls=4096")
+       stage_lines);
+  Alcotest.(check bool) "omitted stage records are disclosed" true
+    (List.exists (fun line -> contains line "omitted=1 (caps: 4096 records, 512 Build frames)")
+       stage_lines);
+  Alcotest.(check (list string)) "partial residual is not reported" []
+    (Timing.Stage_samples.residual_lines stages builds);
+  let late_stage =
+    Timing.Stage_samples.add Timing.Stage_samples.empty
+      ~frame:(Some (Timing.max_frames_per_phase + 1)) ~name:"late" ~ms:(Some 1.0)
+  in
+  Alcotest.(check bool) "stage beyond the frame window is omitted" true
+    (List.exists
+       (fun line -> contains line "omitted=1 (caps: 4096 records, 512 Build frames)")
+       (Timing.Stage_samples.summary_lines late_stage))
+;;
+
 let test_output_stays_with_its_present () =
   let t =
     Timing.Samples.empty
@@ -164,6 +250,10 @@ let () =
             test_unsampled_phase_prints_nothing;
           Alcotest.test_case "ordinals count per phase" `Quick
             test_ordinals_count_per_phase;
+          Alcotest.test_case "stages retain the Build frame" `Quick
+            test_stages_keep_frame_and_outer_fetch_apart;
+          Alcotest.test_case "opt-in report has a short-run cap" `Quick
+            test_opt_in_report_is_bounded;
           Alcotest.test_case "output stays with its present" `Quick
             test_output_stays_with_its_present;
           Alcotest.test_case "presentation keeps callback semantics" `Quick

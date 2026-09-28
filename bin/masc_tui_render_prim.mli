@@ -103,10 +103,10 @@ val frame_lines : Buffer.t -> string list
 val write_two_panes :
   Buffer.t -> left_cols:int -> left:Buffer.t -> right:Buffer.t -> unit
 
-val finish_frame :
-  ?clamped:Masc_tui_types.clamped_scroll ->
-  ?compact_frame:bool ->
-  surface_key:string ->
+(** The frame for a terminal too small for any surface: the notice alone,
+    with no strip and no Activity pane. Surfaces end through [finish_surface]
+    or [finish_frame_beside_acting_pane]. *)
+val finish_terminal_too_small_frame :
   cursor:Frame_presenter.cursor ->
   rows:int ->
   cols:int ->
@@ -152,15 +152,6 @@ val keeper_split_threshold_cols : int
 
 val keeper_roster_pane_cols : int
 
-val finish_frame_with_strip :
-  Masc_tui_types.state ->
-  ?clamped:Masc_tui_types.clamped_scroll ->
-  surface_key:string ->
-  cursor:Frame_presenter.cursor ->
-  rows:int ->
-  cols:int ->
-  Buffer.t -> Frame_presenter.frame * Masc_tui_types.clamped_scroll option
-
 val change_row_address : Masc.Tui_decode.file_change -> string
 
 val file_change_evidence_label :
@@ -180,12 +171,31 @@ val finish_surface :
   cols:int ->
   Buffer.t -> Frame_presenter.frame * Masc_tui_types.clamped_scroll option
 
+(** The end of a surface that draws its own composer and footer instead of
+    taking the shared composer row. [cols] is the width it laid out against,
+    the terminal less the Activity pane; the pane is drawn in those columns
+    beside the rows the press test counts as the pane's, and the strip spans
+    the whole terminal. *)
+val finish_frame_beside_acting_pane :
+  Masc_tui_types.state ->
+  ?clamped:Masc_tui_types.clamped_scroll ->
+  surface_key:string ->
+  cursor:Frame_presenter.cursor ->
+  rows:int ->
+  cols:int ->
+  Buffer.t -> Frame_presenter.frame * Masc_tui_types.clamped_scroll option
+
 type chrome_body = {
   push : string -> unit;
   push_styled : style:string -> string -> unit;
   push_selected : string -> unit;
   push_divider : unit -> unit;
   push_empty : unit -> unit;
+  next_origin : unit -> int * int;
+      (** The terminal frame's line and cell where the next pushed row's
+          content will start -- where a picture placed over body rows goes.
+          Holds while the body stays inside its budget, which a [Fits] body
+          does. *)
 }
 
 val surface_chrome_rows : int
@@ -240,6 +250,16 @@ val surface_chrome :
   Frame_presenter.frame * Masc_tui_types.clamped_scroll option
 
 val connection_badge : Masc_tui_types.state -> string
+
+val lane_run_detail_title : string
+val measurement_detail_title : string
+val fusion_title : string
+val runtime_detail_title : string
+val keeper_calls_lead : string
+(** What the headings laid out by {!Masc_tui_ansi.detail_heading} draw before
+    the id: a lane run, a measurement artifact, a Fusion run (its list and
+    launch form carry the same title), one runtime's detail, and one keeper's
+    calls. *)
 
 val coordinator_status_row :
   Masc_tui_types.state -> style:string -> string -> string
@@ -414,6 +434,13 @@ val planning_workspace_title :
 (** [after] is what the caller draws past this title on the same row. The strip
     inside leaves room for it; without it the strip took the row and the frame
     cut the clock and the badge off the end. *)
+
+val harness_detail_heading :
+  Masc_tui_types.state -> cols:int -> task_id:string -> tail:string -> string
+(** One verdict's heading in a frame [cols] wide: the Planning strip with
+    Verdicts current, the task id, and [tail] (the connection badge). The
+    strip never goes under the width that holds its current entry; the id
+    folds first ({!Masc_tui_ansi.detail_heading}). *)
 
 val planning_proof_mark : Masc_tui_types.Tui_decode.goal_proof -> string
 

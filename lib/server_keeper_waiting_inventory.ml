@@ -1183,6 +1183,23 @@ let dashboard_json_with_pending_reader_scoped ?keeper_name ~read_pending config 
          (fun (_keeper_name, _busy, rows) -> rows)
          per_keeper)
   in
+  (* One flat list of every pending row across the fleet, so an operator can
+     read the whole queue without walking each keeper's nested [waiting_on]
+     array. The nested arrays stay for the per-keeper view; this is the same
+     rows, not a second summary. *)
+  let all_rows = all_keeper_rows @ global_rows in
+  let oldest_since =
+    all_rows
+    |> List.filter_map (fun row -> row.since)
+    |> List.fold_left
+         (fun acc ts -> match acc with None -> Some ts | Some cur -> Some (min cur ts))
+         None
+  in
+  let oldest_age_seconds =
+    match oldest_since with
+    | None -> `Null
+    | Some ts -> `Float (Float.max 0.0 (now -. ts))
+  in
   let waiting_keeper_count =
     per_keeper
     |> List.fold_left
@@ -1196,7 +1213,7 @@ let dashboard_json_with_pending_reader_scoped ?keeper_name ~read_pending config 
    | None -> record_metrics ~now ~per_keeper ~global_rows
    | Some _ -> ());
   `Assoc
-    [ "schema", `String "masc.dashboard.keeper_waiting_inventory.v3"
+    [ "schema", `String "masc.dashboard.keeper_waiting_inventory.v4"
     ; "source", `String "server_keeper_waiting_inventory"
     ; "generated_at", `String (Masc_domain.now_iso ())
     ; "supported_states", `List (List.map (fun value -> `String value) [ "idle"; "busy"; "waiting"; "deferred" ])
@@ -1205,11 +1222,16 @@ let dashboard_json_with_pending_reader_scoped ?keeper_name ~read_pending config 
     ; "waiting_keeper_count", `Int waiting_keeper_count
     ; "row_count", `Int (List.length all_keeper_rows)
     ; "global_row_count", `Int (List.length global_rows)
+    ; "total_row_count", `Int (List.length all_rows)
+    ; "oldest_since", Json_util.float_opt_to_json oldest_since
+    ; "oldest_since_iso", unix_iso_json oldest_since
+    ; "oldest_age_seconds", oldest_age_seconds
     ; ( "global_pending_confirm_count_known"
       , `Bool (List.length pending_confirm_read_error_rows = 0) )
     ; "global_pending_confirm_count", `Int (global_pending_confirm_count keeper_names pending_confirms)
     ; "pending_approval_state", pending_approval_state
     ; "source_counts", `Assoc (source_counts (all_keeper_rows @ global_rows))
+    ; "rows", `List (List.map waiting_row_json all_rows)
     ; "keepers", `List keeper_json_rows
     ; "global_waiting_on", `List (List.map waiting_row_json global_rows)
     ]

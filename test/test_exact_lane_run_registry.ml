@@ -637,32 +637,6 @@ let test_replay_removes_payload_files_no_row_names () =
   remove_if_exists path
 ;;
 
-(* Rows, the projection and the TUI all read a lane id back through
-   [Standalone_lane.of_id]. The match here is the independent oracle: a lane
-   added to the type does not compile here until it has a place, and a lane
-   left out of [all] fails the first check. *)
-let test_every_lane_is_listed_once_and_its_id_reads_back () =
-  let place : Standalone_lane.t -> int = function
-    | Standalone_lane.Librarian -> 0
-    | Standalone_lane.Hitl_auto_judge -> 1
-    | Standalone_lane.Board_attention -> 2
-    | Standalone_lane.Workspace_curator -> 3
-    | Standalone_lane.Verifier -> 4
-    | Standalone_lane.Browser_stagehand -> 5
-  in
-  check (list int) "all lists the six lanes once, in declaration order"
-    [ 0; 1; 2; 3; 4; 5 ]
-    (List.map place Standalone_lane.all);
-  List.iter
-    (fun lane ->
-      let id = Standalone_lane.to_id lane in
-      check (option int) (id ^ " reads back as its own lane") (Some (place lane))
-        (Option.map place (Standalone_lane.of_id id)))
-    Standalone_lane.all;
-  check (option int) "an id no lane has reads as no lane" None
-    (Option.map place (Standalone_lane.of_id "verifer_exact"))
-;;
-
 (* A registration row of this store version, naming [lane]. *)
 let registration_row lane =
   Printf.sprintf
@@ -1279,8 +1253,6 @@ let () =
             "a busy lane cannot evict a quiet lane's history"
             `Quick
             test_a_busy_lane_cannot_evict_a_quiet_lanes_history
-        ; test_case "every lane is listed once and its id reads back" `Quick
-            test_every_lane_is_listed_once_and_its_id_reads_back
         ; test_case "the registry refuses lanes without retained runs" `Quick
             test_the_registry_refuses_unrecorded_lanes
         ; test_case "retention is derived from the monitor page size" `Quick

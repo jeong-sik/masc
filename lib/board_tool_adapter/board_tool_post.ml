@@ -38,6 +38,17 @@ let attachment_error ~tool_name ~start_time error : Tool_result.result =
     (Board_tool_attachment.error_to_string error)
 ;;
 
+(* #39448: post and comment share one body/content rule. [body] wins over
+   [content] when both are present, and an absent pair reads as "". This was
+   three copies (create, update, comment); the comment copy accepted only
+   [content], so a caller that sent [body] -- the field masc_board_post and
+   masc_board_post_update already take -- was refused. *)
+let body_or_content_arg args =
+  match get_string_opt args "body" with
+  | Some value -> value
+  | None -> get_string args "content" ""
+;;
+
 (* Attachment syntax is checked first, like any other argument. Artifact bytes
    are read last, after every check that needs no I/O, so a post that is going
    to be rejected for its title, author or post_kind reads no blob. *)
@@ -56,11 +67,7 @@ let handle_post_create ~tool_name ~start_time args : Tool_result.result =
       "Title must not be empty or whitespace-only"
   | _ ->
     let body_arg = get_string_opt args "body" in
-    let raw_content =
-      match body_arg with
-      | Some value -> value
-      | None -> get_string args "content" ""
-    in
+    let raw_content = body_or_content_arg args in
     let sources = Board_tool_format.source_entries_arg args in
     let content =
       match sources with
@@ -160,11 +167,7 @@ let handle_post_edit ~tool_name ~start_time args : Tool_result.result =
   let post_id = get_string args "post_id" "" in
   (* Mirror create's body/content handling and let [body] win over [content]. *)
   let body_arg = get_string_opt args "body" in
-  let raw_content =
-    match body_arg with
-    | Some value -> value
-    | None -> get_string args "content" ""
-  in
+  let raw_content = body_or_content_arg args in
   let content = raw_content in
   let body = Option.map (fun _ -> content) body_arg in
   (* A blank/absent title means "re-derive from the new body"; only a non-empty
@@ -513,7 +516,7 @@ let handle_post_get ~result_boundary ~tool_name ~start_time args : Tool_result.r
 
 let handle_comment_add ~tool_name ~start_time args : Tool_result.result =
   let post_id = get_string args "post_id" "" in
-  let content = get_string args "content" "" in
+  let content = body_or_content_arg args in
   let author = get_string_opt args "author" |> Option.map String.trim in
   let parent_id = get_string_opt args "parent_id" in
   let ttl_hours = get_int args "ttl_hours" Board.Limits.default_ttl_hours in

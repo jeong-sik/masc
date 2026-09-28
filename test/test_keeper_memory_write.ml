@@ -1349,7 +1349,11 @@ let test_history_search_order () =
     (search ~limit:4 "amber");
   Alcotest.(check (list string)) "the caller limit applies to the selected result order"
     [ "amber checkpoint newer"; "amber checkpoint older"; "amber current newer" ]
-    (search ~limit:3 "amber")
+    (search ~limit:3 "amber");
+  Alcotest.(check (list string))
+    "history still needs every term: one shared term is not a match"
+    []
+    (search "amber gamma")
 ;;
 
 let test_history_search_reports_read_errors ~malformed () =
@@ -1410,7 +1414,7 @@ let test_history_search_reports_read_errors ~malformed () =
     [ "history"; "all" ]
 ;;
 
-let test_search_filters_exact_substring_without_ranking () =
+let test_search_keeps_exact_matches_in_store_order () =
   with_temp_dir
   @@ fun base_path ->
   let config = Masc.Workspace.default_config base_path in
@@ -1442,8 +1446,8 @@ let test_search_filters_exact_substring_without_ranking () =
     |> Yojson.Safe.from_string
   in
   Alcotest.(check (list string))
-    "stored order survives exact substring filtering"
-    [ first_match.claim; newer_match.claim ]
+    "complete-query matches keep store order, and a claim holding one term follows"
+    [ first_match.claim; newer_match.claim; "alpha only" ]
     (match_texts response);
   match json_field "matches" response with
   | `List matches ->
@@ -2267,9 +2271,11 @@ let test_absorbed_search_reads_events_only_for_a_stopped_chain () =
 ;;
 
 (* A keeper asks in several words, and a claim rarely holds them as one run of
-   text. A claim answers when it holds the whole query or every word of it, in
-   any order. The whole-query answers come first, so a search the substring
-   rule answered is still answered the same way at its head. The absorbed
+   text. A claim answers when it holds the whole query, or any word of it
+   (RFC-memory-search-beyond-substring section 3.1). The whole-query answers
+   come first in store order, so a search the substring rule answered is still
+   answered the same way at its head; the rest are ranked by BM25, so a claim
+   holding every word comes before one holding a single word. The absorbed
    store follows the same rule, so there too the kind of match comes before
    the order the rows were written in. *)
 let test_a_query_of_several_words_is_answered () =
@@ -2324,11 +2330,13 @@ let test_a_query_of_several_words_is_answered () =
   in
   Alcotest.(check (list string))
     "the claims holding the whole query, current then absorbed, then the ones \
-     holding its words apart in the same store order"
+     holding both words apart, then the ones holding one"
     [ "alpha tuesday checklist lives in the wiki"
     ; "the alpha tuesday window moved once"
     ; "the alpha service deploys every tuesday"
     ; "tuesday was chosen for alpha after the outage"
+    ; "beta ships on tuesday"
+    ; "alpha deploys on a fixed weekday"
     ]
     (texts (search ~source:"all" "alpha tuesday"));
   Alcotest.(check (list string))
@@ -2336,11 +2344,14 @@ let test_a_query_of_several_words_is_answered () =
     [ "alpha tuesday checklist lives in the wiki" ]
     (texts (search ~limit:1 ~source:"all" "alpha tuesday"));
   Alcotest.(check (list string))
-    "word order does not matter, and each store keeps its own order"
-    [ "the alpha service deploys every tuesday"
+    "word order does not matter: claims holding both words come before claims \
+     holding one"
+    [ "the alpha tuesday window moved once"
+    ; "the alpha service deploys every tuesday"
     ; "alpha tuesday checklist lives in the wiki"
     ; "tuesday was chosen for alpha after the outage"
-    ; "the alpha tuesday window moved once"
+    ; "beta ships on tuesday"
+    ; "alpha deploys on a fixed weekday"
     ]
     (texts (search ~source:"all" "tuesday alpha"));
   Alcotest.(check (list string))
@@ -2352,9 +2363,16 @@ let test_a_query_of_several_words_is_answered () =
     "and it is the row holding only the words that the limit cuts"
     [ "the alpha tuesday window moved once" ]
     (texts (search ~limit:1 ~source:"absorbed" "alpha tuesday"));
-  let unanswered = search ~source:"current" "alpha gamma" in
   Alcotest.(check (list string))
-    "a word no claim holds leaves the query unanswered"
+    "a word no claim holds does not take away the claims holding the others"
+    [ "alpha deploys on a fixed weekday"
+    ; "the alpha service deploys every tuesday"
+    ; "alpha tuesday checklist lives in the wiki"
+    ]
+    (texts (search ~source:"current" "alpha gamma"));
+  let unanswered = search ~source:"current" "gamma delta" in
+  Alcotest.(check (list string))
+    "a query none of whose words any claim holds is unanswered"
     []
     (texts unanswered);
   Alcotest.(check bool) "and the answer says so" true
@@ -2363,9 +2381,10 @@ let test_a_query_of_several_words_is_answered () =
 
 (* [source=all] applies the match tier before the store order. A weaker current
    fact must not consume [limit] before an exact absorbed or history result.
-   Once the tier is equal, the documented current/source-bound/absorbed/history
-   order remains deterministic. The default current search does not include
-   either historical store. *)
+   Complete-query results keep the current/source-bound/absorbed/history
+   order; the claims after them are ranked by BM25 across the stores they came
+   from (the shorter of two claims holding the same words ranks first). The
+   default current search does not include either historical store. *)
 let test_all_ranks_complete_queries_before_fragments_across_stores () =
   with_temp_dir
   @@ fun base_path ->
@@ -2455,11 +2474,11 @@ let test_all_ranks_complete_queries_before_fragments_across_stores () =
     [ "absorbed alpha tuesday exact"; "history alpha tuesday exact" ]
     (search 2);
   Alcotest.(check (list string))
-    "fragment matches follow every complete-query result in store order"
+    "word matches follow every complete-query result, ranked across stores"
     [ "absorbed alpha tuesday exact"
     ; "history alpha tuesday exact"
-    ; "ordinary alpha deploys each tuesday"
     ; "source alpha deploys each tuesday"
+    ; "ordinary alpha deploys each tuesday"
     ]
     (search 4);
   Alcotest.(check (list string))
@@ -2485,7 +2504,10 @@ let test_fragment_contract_is_whitespace_split_substring_matching () =
   replace_current_facts
     ~keepers_dir
     ~keeper_id:meta.name
-    [ fact "concatenate task-10 safely"; fact "alpha deploys tuesday" ];
+    [ fact "concatenate task-10 safely"
+    ; fact "alpha deploys tuesday"
+    ; fact "\xEC\x86\x8C\xEC\xA3\xBC\xEB\xA5\xBC \xEC\xA2\x8B\xEC\x95\x84\xED\x95\x9C\xEB\x8B\xA4" (* 소주를 좋아한다 *)
+    ];
   let search query =
     Runtime.keeper_memory_search_json
       ~config
@@ -2500,9 +2522,18 @@ let test_fragment_contract_is_whitespace_split_substring_matching () =
     [ "concatenate task-10 safely" ]
     (search "cat task-1");
   Alcotest.(check (list string))
-    "punctuation stays in a whitespace-delimited fragment"
+    "punctuation stays in a whitespace-delimited term"
     []
+    (search "alpha,");
+  Alcotest.(check (list string))
+    "and a term that does not match leaves the others answering"
+    [ "alpha deploys tuesday" ]
     (search "alpha, tuesday");
+  Alcotest.(check (list string))
+    "a term of three or more characters matches inside a word, so a Korean \
+     suffix does not hide the claim"
+    [ "\xEC\x86\x8C\xEC\xA3\xBC\xEB\xA5\xBC \xEC\xA2\x8B\xEC\x95\x84\xED\x95\x9C\xEB\x8B\xA4" ]
+    (search "\xEC\x86\x8C\xEC\xA3\xBC\xEB\xA5\xBC \xEB\xA7\x88\xEC\x85\xA8\xEB\x8B\xA4" (* 소주를 마셨다 *));
   let history_empty =
     Runtime.keeper_memory_search_json
       ~config
@@ -3024,9 +3055,9 @@ let () =
         ; Alcotest.test_case "history search reports unreadable files" `Quick
             (test_history_search_reports_read_errors ~malformed:false)
         ; Alcotest.test_case
-            "search filters exact substring without ranking"
+            "search keeps exact matches in store order"
             `Quick
-            test_search_filters_exact_substring_without_ranking
+            test_search_keeps_exact_matches_in_store_order
         ; Alcotest.test_case
             "search records a retrieval per ordinary match"
             `Quick

@@ -223,6 +223,18 @@ test/test_tools_coverage.ml"
     | grep -E '^config/themes/' || [ $? -eq 1 ]; } | head -1)
   theme_guard="test/test_tui_theme_contrast.ml"
 
+  # The deployment preflight suites run the compiled helper, which runs
+  # scripts/check-runtime-deployment-preflight.sh's logic. A change to that
+  # script changes what they assert, but the suites name neither the script
+  # nor the helper module, so no reference rule reaches them. #39572 changed
+  # the script and the helper and its run was 5/5 green while
+  # test_deployment_store_directories still expected the removed bridge
+  # messages.
+  preflight_script_changed=$( { printf '%s\n' "${changed}" \
+    | grep -E '^scripts/check-runtime-deployment-preflight\.sh$' || [ $? -eq 1 ]; } | head -1)
+  preflight_guards="test/test_deployment_runtime_config.ml
+test/test_deployment_store_directories.ml"
+
   # A fifth guard over the same shape, and the only one whose input is the
   # source tree itself. discovery 17 in test_keeper_toml walks bin, lib,
   # packages and test at run time (ocaml_source_files) and fails when a
@@ -509,6 +521,27 @@ EXACTPATHS
   exactpath_suites=$( { printf '%s\n' "${exactpath_suites}" \
     | grep -v '^[[:space:]]*$' || [ $? -eq 1 ]; } | sort -u)
 
+  # stanza candidates: a suite whose dune stanza runs a bin executable this
+  # pull request edits, through `(deps ../bin/X.exe)` or an
+  # `(action (setenv ... %{dep:../bin/X.exe} ...))`. The suite names the
+  # binary only in its stanza, so no rule above reaches it. #39572 changed
+  # bin/deployment_preflight_helper.ml and its run was 5/5 green while
+  # test_deployment_store_directories still expected the removed bridge
+  # messages.
+  stanza_candidates=$(printf '%s\n' "${referenced}" | sed -n 's/^stanza //p')
+  stanza_suites=""
+  while IFS= read -r candidate; do
+    [ -n "${candidate}" ] || continue
+    case "${candidate}" in
+      *.py) python_suite_is_runnable "${candidate}" || continue ;;
+    esac
+    stanza_suites=$(printf '%s\n%s\n' "${stanza_suites}" "${candidate}")
+  done <<STANZAS
+${stanza_candidates}
+STANZAS
+  stanza_suites=$( { printf '%s\n' "${stanza_suites}" \
+    | grep -v '^[[:space:]]*$' || [ $? -eq 1 ]; } | sort -u)
+
   # [themes_changed] stands beside [assets] here: the tool and prompt triggers
   # ride that variable, which matches config/(prompts|tools|mcp), and a theme
   # is none of those. Left out, a theme-only pull request returned here before
@@ -516,7 +549,8 @@ EXACTPATHS
   if [ -z "${sources}" ] && [ -z "${assets}" ] && [ -z "${themes_changed}" ] \
     && [ -z "${module_suites}" ] && [ -z "${library_suites}" ] \
     && [ -z "${declared_suites}" ] && [ -z "${referencing_suites}" ] \
-    && [ -z "${named_file_suites}" ] && [ -z "${exactpath_suites}" ]; then
+    && [ -z "${named_file_suites}" ] && [ -z "${exactpath_suites}" ] \
+    && [ -z "${stanza_suites}" ] && [ -z "${preflight_script_changed}" ]; then
     echo "no test source, config asset or named suite in this pull request"
       return 1
   fi
@@ -550,6 +584,13 @@ EXACTPATHS
   if [ -n "${themes_changed}" ]; then
     echo "this pull request changes theme assets; adding ${theme_guard}"
     sources=$(printf '%s\n%s\n' "${sources}" "${theme_guard}" \
+      | grep -v '^[[:space:]]*$' | sort -u)
+  fi
+
+  if [ -n "${preflight_script_changed}" ]; then
+    echo "this pull request changes the deployment preflight script; adding:"
+    printf '%s\n' "${preflight_guards}" | sed 's/^/  /'
+    sources=$(printf '%s\n%s\n' "${sources}" "${preflight_guards}" \
       | grep -v '^[[:space:]]*$' | sort -u)
   fi
 
@@ -599,6 +640,13 @@ EXACTPATHS
     echo "suites that open a file this pull request edits by exact path:"
     printf '%s\n' "${exactpath_suites}" | sed 's/^/  /'
     sources=$(printf '%s\n%s\n' "${sources}" "${exactpath_suites}" \
+      | grep -v '^[[:space:]]*$' | sort -u)
+  fi
+
+  if [ -n "${stanza_suites}" ]; then
+    echo "suites whose dune stanza runs a bin executable this pull request edits:"
+    printf '%s\n' "${stanza_suites}" | sed 's/^/  /'
+    sources=$(printf '%s\n%s\n' "${sources}" "${stanza_suites}" \
       | grep -v '^[[:space:]]*$' | sort -u)
   fi
 
@@ -863,8 +911,10 @@ ENVS
           ran=$((ran + 1))
         elif [ "${status}" -eq 124 ] && [ "${limit}" -lt "${per_suite_timeout}" ]; then
           failed="${failed}${id} (stopped at the step budget after ${limit}s)\n"
+        elif [ "${status}" -eq 124 ]; then
+          failed="${failed}${id} (timed out after ${limit}s; exit ${status})\n"
         else
-          failed="${failed}${id} (run)\n"
+          failed="${failed}${id} (run: exit ${status}, limit ${limit}s)\n"
         fi
         wave_index=$((wave_index + 1))
       done
@@ -910,8 +960,10 @@ ENVS
             failed="${failed}${dir}/${name} (not run: the step budget ran out)\n"
           elif [ "${status}" -eq 124 ] && [ "${limit}" -lt "${per_suite_timeout}" ]; then
             failed="${failed}${dir}/${name} (dune-rule batch stopped at the step budget after ${limit}s)\n"
+          elif [ "${status}" -eq 124 ]; then
+            failed="${failed}${dir}/${name} (dune-rule batch timed out after ${limit}s; exit ${status})\n"
           else
-            failed="${failed}${dir}/${name} (dune-rule batch)\n"
+            failed="${failed}${dir}/${name} (dune-rule batch: exit ${status}, limit ${limit}s)\n"
           fi
         done
       fi
@@ -938,8 +990,10 @@ ENVS
           ran=$((ran + 1))
         elif [ "${status}" -eq 124 ] && [ "${limit}" -lt "${own}" ]; then
           failed="${failed}${dir}/${name} (stopped at the step budget after ${limit}s)\n"
+        elif [ "${status}" -eq 124 ]; then
+          failed="${failed}${dir}/${name} (timed out after ${limit}s; exit ${status})\n"
         else
-          failed="${failed}${dir}/${name} (run)\n"
+          failed="${failed}${dir}/${name} (run: exit ${status}, limit ${limit}s)\n"
         fi
       done
     fi
@@ -1277,6 +1331,7 @@ for target in "$@"; do
     *broken*) echo "stand-in dune: ${name} does not link" >&2; status=1; continue ;;
     *slow*) body='sleep "${FAKE_DUNE_SUITE_SECONDS:-60}"' ;;
     *failing*) body='exit 1' ;;
+    *exit137*) body='exit 137' ;;
     *) body='exit 0' ;;
   esac
   case "${target}" in
@@ -1288,6 +1343,7 @@ for target in "$@"; do
       case "${name}" in
         *slow*) sleep "${FAKE_DUNE_SUITE_SECONDS:-60}" ;;
         *failing*) status=1 ;;
+        *exit137*) status=137 ;;
       esac
       continue
       ;;
@@ -1332,10 +1388,11 @@ FAKE
     done
     direct_sources="${RUNNER_DIRECT_SOURCES:-}"
     budget_seconds="${budget}"
+    per_suite_timeout=${RUNNER_PER_SUITE_TIMEOUT:-${per_suite_timeout}}
     SECONDS=0
     run_selected > /dev/null 2>&1
     # The seconds a stopped suite was given depend on where the clock stood.
-    printf '%b' "${failed}" | sed -E 's/ after [0-9]+s\)/)/' | tr '\n' ';'
+    printf '%b' "${failed}" | sed -E -e 's/ after [0-9]+s\)/)/' -e 's/limit [0-9]+s/limit <bounded>s/g' | tr '\n' ';'
   }
   runner_check() {
     local label="$1" want="$2"
@@ -1371,30 +1428,53 @@ FAKE
   runner_check "suites within the budget all run" "" 0 30 \
     test_ok test_ok_too
   runner_check "the budget stops a slow suite and names the suites after it" \
-    "test/test_broken (build);test/test_failing (run);test/test_slow (stopped at the step budget);test/test_zz_after (not run: the step budget ran out);" \
+    "test/test_broken (build);test/test_failing (run: exit 1, limit <bounded>s);test/test_slow (stopped at the step budget);test/test_zz_after (not run: the step budget ran out);" \
     0 3 test_ok test_broken test_failing test_slow test_zz_after
   RUNNER_DIRECT_SOURCES="test/test_zz_direct_failing.ml" \
     runner_check "a directly edited suite runs before attributed suites spend the budget" \
-      "test/test_zz_direct_failing (run);test/test_aa_slow (stopped at the step budget);" \
+      "test/test_zz_direct_failing (run: exit 1, limit <bounded>s);test/test_aa_slow (stopped at the step budget);" \
       0 3 test_aa_slow test_zz_direct_failing
   RUNNER_DIRECT_SOURCES="test/test_zz_direct_broken.py" \
     runner_check "a directly edited Python rule runs before attributed linked suites" \
-      "test/test_zz_direct_broken (run);test/test_aa_slow (stopped at the step budget);" \
+      "test/test_zz_direct_broken (run: exit 1, limit <bounded>s);test/test_aa_slow (stopped at the step budget);" \
       0 3 test_aa_slow test/test_zz_direct_broken.py
   RUNNER_DUNE_JOBS=2 FAKE_DUNE_SUITE_SECONDS=1 \
     runner_check "linked suites share the existing Dune worker count" "" \
       0 3 test_slow_one test_slow_two
   RUNNER_DUNE_JOBS=2 \
     runner_check "a linked failure stays named beside a parallel pass" \
-      "test/test_failing (run);" 0 3 test_failing test_ok
+      "test/test_failing (run: exit 1, limit <bounded>s);" 0 3 test_failing test_ok
   RUNNER_DUNE_JOBS=2 \
     runner_check "a parallel wave that spends the budget names every remainder" \
       "test/test_slow_one (stopped at the step budget);test/test_slow_two (stopped at the step budget);test/test_zz_after (not run: the step budget ran out);" \
       0 2 test_slow_one test_slow_two test_zz_after
 
   runner_check "a failing Python alias rejects the parallel batch" \
-    "test/test_python_failing (dune-rule batch);test/test_python_ok (dune-rule batch);" \
+    "test/test_python_failing (dune-rule batch: exit 1, limit <bounded>s);test/test_python_ok (dune-rule batch: exit 1, limit <bounded>s);" \
     0 30 test/test_python_failing.py test/test_python_ok.py
+  RUNNER_PER_SUITE_TIMEOUT=1 \
+    runner_check "a linked suite cap records timeout status" \
+      "test/test_slow (timed out after 1s; exit 124);" \
+      0 30 test_slow
+  RUNNER_PER_SUITE_TIMEOUT=1 \
+    runner_check "a single Python rule cap records timeout status" \
+      "test/test_python_slow (timed out after 1s; exit 124);" \
+      0 30 test/test_python_slow.py
+  RUNNER_PER_SUITE_TIMEOUT=1 \
+    runner_check "a Python batch cap records shared timeout status" \
+      "test/test_python_slow (dune-rule batch timed out after 1s; exit 124);test/test_python_ok (dune-rule batch timed out after 1s; exit 124);" \
+      0 30 test/test_python_slow.py test/test_python_ok.py
+  runner_check "a Python batch stopped by the step budget stays distinct" \
+    "test/test_python_slow (dune-rule batch stopped at the step budget);test/test_python_ok (dune-rule batch stopped at the step budget);" \
+    0 3 test/test_python_slow.py test/test_python_ok.py
+  runner_check "a linked exit status is preserved without inferring its cause" \
+    "test/test_exit137 (run: exit 137, limit <bounded>s);" 0 600 test_exit137
+  runner_check "a single Python rule preserves its exit status" \
+    "test/test_python_exit137 (run: exit 137, limit <bounded>s);" \
+    0 600 test/test_python_exit137.py
+  runner_check "a Python batch preserves its shared exit status" \
+    "test/test_python_exit137 (dune-rule batch: exit 137, limit <bounded>s);test/test_python_ok (dune-rule batch: exit 137, limit <bounded>s);" \
+    0 600 test/test_python_exit137.py test/test_python_ok.py
   runner_calls_check "the keyboard alias joins the default-bound Python batch" \
     "@test/runtest-test_tui_keyboard_input @test/runtest-test_python_one" \
     0 30 test/test_tui_keyboard_input.py test/test_python_one.py
@@ -1410,6 +1490,19 @@ FAKE
   runner_check "a build the budget cuts off names every suite" \
     "test/test_ok (not built: the step budget ran out);test/test_failing (not built: the step budget ran out);" \
     8 3 test_ok test_failing
+
+  # The deployment preflight suites receive the compiled helper through their
+  # dune stanza's (setenv ... %{dep:../bin/deployment_preflight_helper.exe}),
+  # and name neither the helper module nor the script it runs. #39572 changed
+  # both and its run was 5/5 green while test_deployment_store_directories
+  # still expected the removed bridge messages. The stanza rule and the
+  # script trigger are what select them; either one removed fails here.
+  check_required "a bin executable edit selects the suites whose stanza runs it" \
+    "test/test_deployment_runtime_config.ml test/test_deployment_store_directories.ml" \
+    "bin/deployment_preflight_helper.ml"
+  check_required "the preflight script selects the suites that run it" \
+    "test/test_deployment_runtime_config.ml test/test_deployment_store_directories.ml" \
+    "scripts/check-runtime-deployment-preflight.sh"
 
   # The empty-selection notice is part of the production path. Keep the
   # non-blocking behavior explicit while ensuring it cannot go silent again.

@@ -18,14 +18,18 @@
   masc.server
   masc.host_config
   masc.keeper_runtime
+  masc.runtime
+  masc.config
   masc.masc_schedule
   masc.masc_tool_blob_store
+  masc.multimodal
   masc.fusion_core
   masc.run_registry_core
   masc.masc_types
   masc.masc_core
   masc.config_dir_resolver
   masc.board_handlers
+  masc.skill_config
   fs_compat
   cmdliner
   unix

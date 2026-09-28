@@ -746,7 +746,27 @@ let handle_write ~action ~tool_name ~start_time ctx args =
       plain (Schedule_payload_projection.creation_keeper_wake_target ~payload)
     in
     let* source = plain (source_of_arg args) in
-    let* recurrence = plain (recurrence_of_arg args) in
+    let* recurrence =
+      match action with
+      | Create_schedule -> plain (recurrence_of_arg args)
+      | Update_schedule ->
+        let* supplied_kind = strict_string args "recurrence_kind" in
+        (match supplied_kind with
+         | Some _ -> plain (recurrence_of_arg args)
+         | None ->
+           let* schedule_id = plain (required_string args "schedule_id") in
+           let* stored = authorize_row_change ctx ~schedule_id in
+           (match stored with
+            | Some request ->
+              Log.Tool_validation.warn ~category:Log.Tool
+                "schedule %s update omitted recurrence_kind; next version requires recurrence_kind"
+                schedule_id;
+              Ok request.recurrence
+            | None ->
+              (* An absent row has no recurrence to preserve. Never let the
+                 create parser's one_shot default decide an update. *)
+              Error (Refusal "schedule not found")))
+    in
     let* requested_at =
       let* given = strict_number args "requested_at_unix" in
       (* NDT-OK: absent requested_at_unix means "schedule this from the tool

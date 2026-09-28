@@ -33,6 +33,7 @@ required = true
 name = "prompt"
 type = "string"
 required = true
+description = "The request the receiving Keeper reads: goal, scope, inputs, expected output, and how you will check it."
 
 [[params]]
 name = "artifacts"

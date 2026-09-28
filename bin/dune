@@ -20,7 +20,7 @@
 
 (executable
  (name main_eio)
- (modules main_eio masc_cli_setup masc_cli_runtime_sample masc_cli_onboarding masc_cli_prerequisites masc_cli_inspect_file masc_cli_docker_session masc_cli_model_resume masc_cli_workspace_upgrade masc_cli_antigravity masc_cli_codex_models masc_cli_owner_upgrade masc_cli_runtime_setup masc_cli_client_path)
+ (modules main_eio masc_cli_setup masc_cli_runtime_sample masc_cli_onboarding masc_cli_prerequisites masc_cli_inspect_file masc_cli_docker_session masc_cli_model_resume masc_cli_workspace_upgrade masc_cli_antigravity masc_cli_codex_models masc_cli_muse_models masc_cli_account_login masc_cli_owner_upgrade masc_cli_runtime_setup masc_cli_client_path)
  (public_name masc)
  (package masc)
  (libraries
@@ -298,14 +298,18 @@
   masc.server
   masc.host_config
   masc.keeper_runtime
+  masc.runtime
+  masc.config
   masc.masc_schedule
   masc.masc_tool_blob_store
+  masc.multimodal
   masc.fusion_core
   masc.run_registry_core
   masc.masc_types
   masc.masc_core
   masc.config_dir_resolver
   masc.board_handlers
+  masc.skill_config
   fs_compat
   cmdliner
   unix
@@ -698,6 +702,7 @@
  (libraries
   masc.config_dir_resolver
   masc.fs_compat
+  masc.keeper_registry
   masc.keeper_toml
   masc.runtime
   masc.toml_line_editor
@@ -1008,6 +1013,10 @@
   masc_tui_observer
   masc_tui_message_layout
   masc_tui_roster_pane
+  ; the pane opens only where a surface keeps the Keepers list's flag
+  ; columns inside its frame; both are leaf layout facts below this library.
+  masc_tui_frame
+  masc_tui_render_schedule
   ; agent_core for the tool schedule contract a ledger call carries: batch
   ; size and execution mode decide the dispatch marks.
   agent_core))
@@ -1186,7 +1195,7 @@
  (name masc_tui_board_read_layout)
  (wrapped false)
  (modules masc_tui_board_read_layout)
- (libraries masc_tui_types masc_tui_board_detail))
+ (libraries masc_tui_types masc_tui_board_detail masc_tui_frame_timing))
 
 (library
  (name masc_tui_browser_lane_layout)
@@ -1289,10 +1298,22 @@
  (libraries masc_types))
 
 (library
+ (name masc_tui_account_login)
+ (wrapped false)
+ (modules masc_tui_account_login)
+ (libraries yojson masc_tui_message_layout masc_tui_sgr_text))
+
+(library
+ (name masc_tui_sgr_text)
+ (wrapped false)
+ (modules masc_tui_sgr_text)
+ (libraries masc_tui_theme masc_tui_terminal_palette))
+
+(library
  (name masc_tui_types)
  (wrapped false)
  (modules masc_tui_types)
- (libraries digestif mtime.clock.os masc_tui_command masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
+ (libraries masc_tui_config masc_tui_account_login digestif mtime.clock.os masc_tui_command masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
   ;; [threshold_cols] is the width two panes need: the Board read layout is
   ;; decided here so the footer and the frame cannot disagree about it.
   masc_tui_roster_pane
@@ -1313,6 +1334,7 @@
   masc.sse_wire
   masc_tui_task_flow
   masc_tui_runtime_config_view
+  masc_tui_runtime_account_form
   masc_tui_frame
   masc_tui_image_preview
   masc
@@ -1388,6 +1410,12 @@
  (wrapped false)
  (modules masc_tui_runtime_config_view)
  (libraries masc_tui_message_layout yojson))
+
+(library
+ (name masc_tui_runtime_account_form)
+ (wrapped false)
+ (modules masc_tui_runtime_account_form)
+ (libraries masc.runtime masc_tui_ansi masc_tui_message_layout))
 
 (library
  (name masc_tui_runtime_config_receipt)
@@ -1507,7 +1535,9 @@
  (name masc_tui_machine_live)
  (wrapped false)
  (modules masc_tui_machine_live)
- (libraries yojson base64))
+ ;; Machine_lane names the machine; Lane_addon_sources and Lane_manifest spell
+ ;; its source kind and label, so neither is written a second time here.
+ (libraries yojson base64 masc))
 
 ; The primitives every surface draws through. Its own library so the
 ; direction is enforced rather than agreed to: nothing here may reach back
@@ -1536,6 +1566,7 @@
  (wrapped false)
  (modules masc_tui_render_prim)
  (libraries
+  masc_tui_frame_timing
   masc_tui_next_request_band
   masc_tui_hit
   masc_tui_press
@@ -1620,6 +1651,10 @@
   masc_tui_markdown
   masc_tui_observation_layout
   masc
+  ;; Same rule as the masc_tui stanza: Tui_decode carries
+  ;; Tool_result.recorded_call_outcome and this module words its
+  ;; constructors for the results view.
+  masc.tool_types
   masc_tui_keys
   masc_tui_types
   unix))
@@ -1656,7 +1691,13 @@
  (name masc_tui_overview_providers)
  (wrapped false)
  (modules masc_tui_overview_providers)
- (libraries masc masc_tui_types masc_tui_ansi masc_tui_message_layout unix))
+ (libraries
+  masc
+  masc_tui_types
+  masc_tui_ansi
+  masc_tui_theme
+  masc_tui_message_layout
+  unix))
 
 ;; RFC-0465: the Overview's pull request reading, decoder and lines. A
 ;; library so a test can decode the server's own encoder output.
@@ -1691,6 +1732,10 @@
  (public_name masc-tui)
  (package masc)
  (libraries
+  masc_tui_account_login
+  masc_tui_sgr_text
+  masc_tui_emblem_screen
+  masc_tui_portrait_view
   masc_tui_hit
   masc_tui_press
   masc_tui_pick_list
@@ -1713,6 +1758,9 @@
   masc_tui_lane_subscriptions
   masc_tui_lane_declaration
   masc_tui_lane_table
+  ;; masc_tui_render lays out the Lanes, Changes, Harness and Planning
+  ;; tables through Masc_tui_table.fit (#39662).
+  masc_tui_table
   masc_tui_connector_state
   masc_tui_connector_unbind
   masc_tui_fleet_line
@@ -1771,6 +1819,7 @@
   masc_tui_terminal_title
   masc_tui_runtime_config_receipt
   masc_tui_runtime_config_view
+  masc_tui_runtime_account_form
   ;; The Lanes provider jump reads runtime.toml table headers by the TOML
   ;; grammar's key path rather than by spelling.
   masc.toml_line_editor
@@ -1995,7 +2044,32 @@
  (name masc_tui_image_mosaic)
  (wrapped false)
  (modules masc_tui_image_mosaic)
- (libraries masc_tui_theme))
+ (libraries masc_tui_terminal_palette masc_tui_theme))
+
+;; A keeper's candle portrait on the terminal: real pixels over Kitty
+;; graphics, a half-block mosaic, or nothing under NO_COLOR, plus the
+;; bookkeeping that places and deletes pictures after a frame is presented.
+(library
+ (name masc_tui_portrait_view)
+ (wrapped false)
+ (modules masc_tui_portrait_view)
+ (libraries
+  masc.keeper_portrait
+  masc_tui_graphics
+  masc_tui_image_mosaic
+  masc_tui_terminal_palette))
+
+;; MASC's candle laid out as a screen body under its caption, for the startup
+;; splash and /about. Apart from the TUI so its layout is tested without it.
+(library
+ (name masc_tui_emblem_screen)
+ (wrapped false)
+ (modules masc_tui_emblem_screen)
+ (libraries
+  masc.keeper_portrait
+  masc_tui_message_layout
+  masc_tui_portrait_view
+  masc_tui_terminal_palette))
 
 ;; Decides, by magic bytes, whether a downloaded body may sit in the preview
 ;; image cache, and what a curl or ffmpeg exit status means. Kept apart from
@@ -2018,6 +2092,7 @@
 ;; pin: opam pin add ocaml-msx --kind=path <core repo>
  (modules masc_tui_msx)
  (libraries
+  masc
   masc_tui_types
   masc_tui_machine_live
   masc_tui_interactive

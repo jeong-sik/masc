@@ -8,6 +8,7 @@ from pathlib import Path
 import urllib.request
 import urllib.error
 import os
+import sys
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--binary", type=Path, required=True)
@@ -21,6 +22,11 @@ files = {entry["path"]: entry for entry in receipt["files"]}
 def get(route):
     with urllib.request.urlopen(args.base_url + route, timeout=10) as response:
         return response.read()
+
+
+def get_dashboard():
+    with urllib.request.urlopen(args.base_url + "/dashboard", timeout=10) as response:
+        return response.read(), response.status, dict(response.headers.items())
 
 
 health = json.loads(get("/health?full=1"))
@@ -37,8 +43,14 @@ if Path(installed["release_root"]) != binary.parent:
     raise SystemExit("runtime selected another installed release root")
 if installed["receipt_sha256"] != hashlib.sha256((binary.parent / "release.json").read_bytes()).hexdigest():
     raise SystemExit("runtime receipt differs from installed receipt")
-index = get("/dashboard")
+index, dashboard_status, dashboard_headers = get_dashboard()
 if hashlib.sha256(index).hexdigest() != files["index.html"]["sha256"]:
+    print("installed dashboard mismatch diagnostics:", file=sys.stderr)
+    print(f"HTTP status: {dashboard_status}", file=sys.stderr)
+    print(f"HTTP headers: {json.dumps(dashboard_headers, sort_keys=True)}", file=sys.stderr)
+    print(f"served body: length={len(index)} sha256={hashlib.sha256(index).hexdigest()}", file=sys.stderr)
+    print(f"expected body: length={files['index.html']['size']} sha256={files['index.html']['sha256']}", file=sys.stderr)
+    print(f"served body first 200 bytes: {index[:200]!r}", file=sys.stderr)
     raise SystemExit("served dashboard index differs from installed bundle")
 
 

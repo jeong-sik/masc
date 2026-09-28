@@ -121,6 +121,17 @@ val publish
     replacement requires an excused lane again unless it excuses it too.
     Returns [Publication_busy] while a replacement reservation is active. *)
 
+val check_publication
+  :  ?required_lane_ids:string list
+  -> ?excused_lane_ids:string list
+  -> lanes:Runtime_schema.exact_output_lane_decl list
+  -> Agent_core.Exact_output.resolver_snapshot
+  -> (unit, publication_error) result
+(** The admission {!publish} runs for the same arguments, without publishing
+    and without the publication lock: [Error] is what {!publish} would refuse.
+    The deployment preflight asks it for a runtime.toml before the build that
+    would publish from it is installed. *)
+
 val unpublish : unit -> (unit, publication_error) result
 (** Revoke the current registry for future lookups after owner configuration
     makes authority unavailable. Existing in-flight immutable snapshots remain

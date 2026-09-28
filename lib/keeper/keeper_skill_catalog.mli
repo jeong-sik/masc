@@ -90,6 +90,10 @@ type error =
       (** An instruction body over {!Common.max_tool_result_wire_bytes}, the
           inline tool-result boundary [keeper_skill] returns it through. Such
           a Skill would be offered and then refused on every read. *)
+  | Body_blank of { skill : string }
+      (** An instruction body with no text. [keeper_skill] returns the body as
+          the instruction; a blank body would be offered and then teach
+          nothing. *)
 
 type rejected_document = private
   { directory : string
@@ -151,12 +155,21 @@ type exact_surface = private
   ; availability : exact_surface_availability
   }
 
+val composition_info_near_misses : string -> string list
+(** Fence info strings in [body] that normalize to the composition contract
+    (ASCII lowercase + whitespace collapse) but do not match it exactly. Each
+    one parses as an ordinary code block, so the skill stays an instruction
+    with no composition tool; the author meant a composition. Report each as
+    an advisory {!Composition_info_near_miss} without touching the projection,
+    the way {!of_snapshot} does. *)
+
 val parse_skill : directory:string -> string -> (skill, error) result
 (** Parse one SKILL.md document. [directory] is the skill's directory name;
     {!Agent_core.Skill_document.decode} enforces the frontmatter contract. A
     composition block must declare exactly one composition and its [name]
     must equal the skill name. An instruction body must fit the inline
-    tool-result boundary ([Body_too_large_to_read]). *)
+    tool-result boundary ([Body_too_large_to_read]) and carry text
+    ([Body_blank]). *)
 
 type authored_source_error =
   | Source_too_large of { bytes : int; max_bytes : int }

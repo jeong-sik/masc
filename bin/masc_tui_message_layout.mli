@@ -394,6 +394,11 @@ val display_width : string -> int
     one. A cluster opening with any other scalar sums its parts, so a joiner
     inside a Devanagari conjunct changes nothing. *)
 
+val grapheme_count : string -> int
+(** How many extended grapheme clusters the text holds: what the screen
+    shows as characters. ANSI CSI spans are not characters and are not
+    counted. *)
+
 val split_at_cells : string -> int -> string * string
 (** The longest prefix fitting in the given cells without cutting a grapheme,
     and the rest. For wrapping, where nothing may be lost: a wide grapheme

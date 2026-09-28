@@ -1,14 +1,8 @@
 name = "masc_board_close"
 description = """
-Close a board post: mark a thread as done, optionally pointing to a \\
-successor post that continues it and leaving a summary.
-
-Self-service only -- closed_by (auto-filled from your caller identity) \\
-must match the post's author, or the call is refused. Operators close \\
-any post through a separate dashboard-only route this tool does not \\
-expose; there is no moderator tier yet. Closing rejects new comments \\
-(masc_board_comment errors, naming the successor if given). Reopen with \\
-masc_board_reopen."""
+Close your Board post with a summary and a successor decision.
+Only its author can use this tool; operators use the dashboard. New comments stop after closing. Set successor_id or no_successor=true. Reopen with masc_board_reopen.
+"""
 
 defer_loading = true
 
@@ -17,6 +11,7 @@ identity_fields = ["closed_by"]
 [[params]]
 name = "post_id"
 type = "string"
+pattern = "^[a-zA-Z0-9_-]{1,64}$"
 required = true
 description = "ID of the post to close"
 
@@ -24,18 +19,27 @@ description = "ID of the post to close"
 name = "closed_by"
 type = "string"
 description = """
-Closer identity, auto-filled from the caller's agent identity when \\
-omitted. Must match the post's author (no operator/moderator override \\
-here) or the call is refused."""
+Caller identity, filled automatically. Must match the post author.
+"""
 
 [[params]]
 name = "successor_id"
 type = "string"
 description = """
-Optional post that continues this thread. Must already exist and cannot be \\
-this same post_id; either is refused with no change made."""
+Existing post that continues this thread; cannot be this post. Use instead of no_successor.
+"""
+
+[[params]]
+name = "no_successor"
+type = "boolean"
+description = """
+Set true when there is no successor. Use instead of successor_id.
+"""
 
 [[params]]
 name = "summary"
 type = "string"
-description = "Optional closing summary shown to anyone who reads the closed post."
+required = true
+description = """
+Nonblank closing summary shown to readers.
+"""

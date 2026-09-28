@@ -61,11 +61,6 @@ let progress ~goals ~tasks =
            active_tasks)
   }
 
-let wanted_rows (reading : Types.overview_goals_reading) =
-  match reading with
-  | Types.Goals_unread | Types.Goals_failed _ -> 1
-  | Types.Goals_read goals -> 1 + List.length (drawn_goals goals)
-
 (* Cells of the task bar. A width, not a threshold: nothing is decided by it. *)
 let bar_cells = 16
 
@@ -167,30 +162,104 @@ let goal_rows ~now ~localtime ~inner_width goals =
     goals
     (List.combine counts (List.combine idles dues))
 
-let title = Ansi.bold ^ "GOALS" ^ Ansi.reset
+let owner_text ~tasks ~status_of_id (goal : Tui_decode.overview_goal) =
+  match tasks with
+  | Masc_tui_overview_tasks.Rows_unread
+  | Masc_tui_overview_tasks.Rows_unavailable _ -> "owner unknown"
+  | Masc_tui_overview_tasks.Rows_read _ ->
+      let names, missing =
+        List.fold_left
+          (fun (names, missing) id ->
+            match status_of_id id with
+            | None -> (names, true)
+            | Some status ->
+                (match Masc_domain.task_performer_of_status status with
+                | None -> (names, missing)
+                | Some name ->
+                    (Terminal_text.single_line name :: names, missing)))
+          ([], false) goal.og_task_ids
+      in
+      let names = List.sort_uniq String.compare names in
+      (match names with
+      | [] -> if missing then "owner unknown" else "unassigned"
+      | _ :: _ ->
+          "owner @" ^ String.concat ", @" names
+          ^ if missing then " · other owners unknown" else "")
+
+let goal_entries ~now ~localtime ~inner_width ~tasks ~status_of_id goals =
+  let today = local_today ~now ~localtime in
+  let summaries = goal_rows ~now ~localtime ~inner_width goals in
+  List.map2
+    (fun (goal : Tui_decode.overview_goal) summary ->
+      let due =
+        match due_text ~today goal with
+        | Some text -> text
+        | None -> "due not set"
+      in
+      let metadata =
+        [ owner_text ~tasks ~status_of_id goal
+        ; "state " ^ Masc_tui_render_prim.planning_phase_label goal.og_phase
+        ; due
+        ]
+      in
+      let detail =
+        Masc_tui_message_layout.pack_clauses
+          ~max_cells:(max 1 (inner_width - 2)) metadata
+        |> List.map (fun line -> "  " ^ line)
+      in
+      summary :: detail)
+    goals summaries
+
+let wanted_rows ~now ~localtime ~inner_width ~tasks ~status_of_id
+    (reading : Types.overview_goals_reading) =
+  match reading with
+  | Types.Goals_unread -> 1
+  | Types.Goals_failed _ -> 1
+  | Types.Goals_read goals ->
+      let goals = drawn_goals goals in
+      if goals = [] then 1
+      else
+        1
+        + List.fold_left
+            (fun count entry -> count + List.length entry)
+            0 (goal_entries ~now ~localtime ~inner_width ~tasks ~status_of_id goals)
+
+let title count =
+  Ansi.bold
+  ^ (match count with
+    | None -> "Goals"
+    | Some count -> Printf.sprintf "Goals (%d)" count)
+  ^ Ansi.reset
 
 let take rows items = List.filteri (fun index _ -> index < rows) items
 
-let lines ~now ~localtime ~inner_width ~rows ~tasks (reading : Types.overview_goals_reading)
+let lines ~now ~localtime ~inner_width ~rows ~tasks ~status_of_id (reading : Types.overview_goals_reading)
     =
   let rows = max 0 rows in
   let all =
     match reading with
     | Types.Goals_unread ->
-        [ Printf.sprintf "%s   %sgoals not read yet%s" title Ansi.dim Ansi.reset ]
+        [ title None ^ "   " ^ Ansi.dim ^ "No goal data read yet." ^ Ansi.reset ]
     | Types.Goals_failed reason ->
-        [ Printf.sprintf "%s   %sgoals unavailable: %s%s" title (Theme.warn ())
-            (Terminal_text.single_line reason) Ansi.reset ]
+        [ Theme.warn () ^ "Goals unavailable: "
+          ^ Terminal_text.single_line reason ^ Ansi.reset
+        ]
     | Types.Goals_read goals ->
         let drawn = drawn_goals goals in
         let goal_count = List.length drawn in
-        let shown = min goal_count (max 0 (rows - 1)) in
+        let title = title (Some goal_count) in
+        let entries = goal_entries ~now ~localtime ~inner_width ~tasks ~status_of_id drawn in
+        let rec take_entries remaining shown collected = function
+          | entry :: rest when List.length entry <= remaining ->
+              take_entries (remaining - List.length entry) (shown + 1)
+                (entry :: collected) rest
+          | _ -> (shown, List.concat (List.rev collected))
+        in
+        let shown, shown_lines =
+          take_entries (max 0 (rows - 1)) 0 [] entries
+        in
         let cut =
-          if goal_count = 0 then
-            Printf.sprintf "  %s\xc2\xb7 no goal is executing, verifying or \
-                            awaiting confirmation%s"
-              Ansi.dim Ansi.reset
-          else if shown < goal_count then
+          if shown < goal_count then
             Printf.sprintf "  %s\xc2\xb7 %d of %d goals shown%s" Ansi.dim shown
               goal_count Ansi.reset
           else ""
@@ -210,19 +279,21 @@ let lines ~now ~localtime ~inner_width ~rows ~tasks (reading : Types.overview_go
               Printf.sprintf "%s   %sactive work unread: %s%s%s" title
                 (Theme.warn ()) (Terminal_text.single_line reason) Ansi.reset cut
         in
-        headline :: goal_rows ~now ~localtime ~inner_width drawn
+        if goal_count = 0 then
+          [ title ^ "   No goal is executing or verifying." ]
+        else headline :: shown_lines
   in
   take rows all
 
-let draw buf ~cols ~rows ~now ~localtime ~tasks reading =
+let draw buf ~cols ~rows ~now ~localtime ~tasks ~status_of_id reading =
   if rows > 0 then begin
     let inner_width = framed_inner_width cols in
-    let drawn = lines ~now ~localtime ~inner_width ~rows ~tasks reading in
+    let drawn = lines ~now ~localtime ~inner_width ~rows ~tasks ~status_of_id reading in
     List.iter (box_line buf cols) drawn;
     (* [rows] is what the budget spent; a short list still fills it so the
        frame below starts where the budget says. *)
     for _ = List.length drawn to rows - 1 do
       box_line buf cols ""
     done;
-    box_divider buf cols
+    box_empty buf cols
   end

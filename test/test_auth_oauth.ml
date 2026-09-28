@@ -412,7 +412,113 @@ let test_scope_cannot_escalate_role () =
          [ Auth_oauth.Mcp_admin ]
      with
      | Ok Masc_domain.Admin -> true
-     | Ok Masc_domain.Worker | Error _ -> false)
+     | Ok (Masc_domain.Worker | Masc_domain.Player) | Error _ -> false);
+  (* An invited Player approving a tools-only grant would otherwise come
+     away with a Worker token. *)
+  List.iter
+    (fun (what, scopes) ->
+      check
+        bool
+        ("a player bootstrap approves no grant: " ^ what)
+        true
+        (match Auth_oauth.effective_role ~bootstrap_role:Masc_domain.Player scopes with
+         | Error Auth_oauth.Access_denied -> true
+         | Ok _ | Error _ -> false))
+    [ "tools", [ Auth_oauth.Mcp_tools ]
+    ; "tools and admin", [ Auth_oauth.Mcp_tools; Auth_oauth.Mcp_admin ]
+    ]
+;;
+
+(* RFC play-link-for-the-shared-machine: a Player credential is an invite
+   to the shared machine and backs no OAuth grant, through the real issue,
+   exchange and refresh path rather than [effective_role] alone. *)
+let test_a_player_credential_backs_no_grant () =
+  with_env "MASC_OAUTH_ENABLED" "1" (fun () ->
+    with_workspace (fun base_path ->
+      Eio_main.run (fun env ->
+        Fs_compat.set_fs (Eio.Stdenv.fs env);
+        Eio_guard.enable ();
+        Fun.protect
+          ~finally:(fun () ->
+            Eio_guard.disable ();
+            Fs_compat.clear_fs ())
+          (fun () ->
+            let resource = "http://127.0.0.1:8935/mcp" in
+            let _, player_credential =
+              Auth.create_token base_path ~agent_name:"invitee" ~role:Masc_domain.Player
+              |> auth_ok
+            in
+            let redirect_uri = "http://127.0.0.1:43127/callback/player" in
+            let client =
+              Auth_oauth.register_client
+                ~base_path
+                ~client_name:(Some "Guest")
+                ~redirect_uris:[ redirect_uri ]
+              |> oauth_ok
+            in
+            let request =
+              authorization_request
+                ~scope:"mcp:tools"
+                ~base_path
+                ~client_id:client.client_id
+                ~redirect_uri
+                ~resource
+                ~challenge:(Auth_oauth.pkce_s256 (String.make 43 'v'))
+                ()
+            in
+            check
+              bool
+              "a player bootstrap is refused a code"
+              true
+              (match
+                 Auth_oauth.issue_authorization_code
+                   ~base_path
+                   ~request
+                   ~bootstrap_credential:player_credential
+               with
+               | Error Auth_oauth.Access_denied -> true
+               | Ok _ | Error _ -> false);
+            let raw_token, worker_credential =
+              Auth.create_token base_path ~agent_name:"guest" ~role:Masc_domain.Worker
+              |> auth_ok
+            in
+            let worker_client, worker_pair =
+              issue_pair
+                ~base_path
+                ~bootstrap_credential:worker_credential
+                ~redirect_uri:"http://127.0.0.1:43128/callback/worker"
+                ~resource
+                ~scope:"mcp:tools"
+            in
+            let access () =
+              Auth_oauth.with_expected_resource resource (fun () ->
+                Auth.find_credential_by_token base_path ~token:worker_pair.access_token)
+            in
+            check bool "worker OAuth access starts valid" true (Result.is_ok (access ()));
+            ignore
+              (Auth.save_raw_token_credential_without_expiry
+                 base_path
+                 ~agent_name:"guest"
+                 ~role:Masc_domain.Player
+                 ~raw_token
+               |> auth_ok);
+            check
+              bool
+              "the grant is revoked once its bootstrap credential is a player"
+              true
+              (Result.is_error (access ()));
+            check
+              bool
+              "and its refresh is revoked too"
+              true
+              (Result.is_error
+                 (Auth_oauth.rotate_refresh_token
+                    ~base_path
+                    ~expected_resource:resource
+                    ~refresh_token:worker_pair.refresh_token
+                    ~client_id:worker_client.client_id
+                    ~scope:None
+                    ~resource:(Some resource)))))))
 ;;
 
 let test_live_bootstrap_credential_remains_authoritative () =
@@ -988,6 +1094,8 @@ let () =
             `Quick
             test_consumed_code_is_not_restored_after_store_failure
         ; test_case "scope cannot escalate role" `Quick test_scope_cannot_escalate_role
+        ; test_case "a player credential backs no grant" `Quick
+            test_a_player_credential_backs_no_grant
         ; test_case
             "live bootstrap credential remains authoritative"
             `Quick

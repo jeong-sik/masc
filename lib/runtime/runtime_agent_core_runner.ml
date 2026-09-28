@@ -87,6 +87,7 @@ let resolve_runtime_providers ~runtime_id () =
          Error (Runtime.dispatch_credential_error_to_string error))
     | Runtime_execution.Codex_app_server _
     | Runtime_execution.Claude_code _
+    | Runtime_execution.Muse_serve _
       ->
       Error
         (Printf.sprintf

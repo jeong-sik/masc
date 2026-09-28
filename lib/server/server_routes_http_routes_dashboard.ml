@@ -13,6 +13,7 @@ module Runtime_request = Server_dashboard_runtime_request
 include Server_routes_http_routes_dashboard_setup
 
 module Keeper_chat_operations = Server_dashboard_http_keeper_chat_operations
+module Keeper_portrait = Server_dashboard_http_keeper_portrait
 module Keeper_event_queue_operator =
   Server_dashboard_http_keeper_event_queue_operator
 module Keeper_shutdown_reconciliation =
@@ -289,13 +290,6 @@ let keeper_setting_payload source_text =
     , Keeper_runtime_config.overlay_application_to_yojson doc )
 ;;
 
-let skill_config_state_label snapshot =
-  match Skill_catalog_snapshot.config_state snapshot with
-  | Configured _ -> "configured"
-  | Config_rejected _ -> "rejected"
-  | Config_unreadable _ -> "unreadable"
-;;
-
 let skill_application_json = function
   | Error _ -> `Assoc [ "state", `String "invalid_workspace" ]
   | Ok (Server_skill_snapshot_runtime.Superseded { commit_order; applied_order }) ->
@@ -322,7 +316,10 @@ let skill_application_json = function
           , `String
               (Skill_catalog_snapshot.catalog_revision snapshot
                |> Skill_catalog_snapshot.catalog_revision_to_string) )
-        ; "config_state", `String (skill_config_state_label snapshot)
+        ; ( "config_state"
+          , `String
+              (Skill_catalog_snapshot.config_state snapshot
+               |> Skill_catalog_snapshot.config_state_to_string) )
         ]
     in
     (match publication with
@@ -609,6 +606,7 @@ type runtime_config_write_operation =
       Runtime.exact_lane * string * Runtime.exact_slot_move
   | Runtime_config_assignment of string * string option
   | Runtime_config_fusion of string
+  | Runtime_config_account_removal of string
 
 let runtime_config_write_operation_details =
   let open Runtime_request in
@@ -689,6 +687,8 @@ let runtime_config_write_operation_details =
      | Some id -> [ ("runtime_id", `String id) ])
   | Runtime_config_fusion edit ->
     [ ("operation", `String "fusion"); ("edit", `String edit) ]
+  | Runtime_config_account_removal integration_id ->
+    [ ("operation", `String "account_removal"); ("integration_id", `String integration_id) ]
 
 let runtime_config_write_operation_label = function
   | Runtime_config_raw_save -> "raw_save"
@@ -699,6 +699,17 @@ let runtime_config_write_operation_label = function
   | Runtime_config_exact_slot_moved _ -> "routing"
   | Runtime_config_assignment _ -> "assignment"
   | Runtime_config_fusion _ -> "fusion"
+  | Runtime_config_account_removal _ -> "account_removal"
+;;
+
+(* 409 while the file is not the one the preview read, or no longer allows
+   the removal it listed; 503 when it cannot be read. *)
+let account_removal_status : Runtime_account_removal_setup.error -> Httpun.Status.t = function
+  | Runtime_account_removal_setup.Invalid_request
+  | Runtime_account_removal_setup.Save_rejected _ -> `Bad_request
+  | Runtime_account_removal_setup.Configuration_unavailable _ -> `Service_unavailable
+  | Runtime_account_removal_setup.Configuration_changed
+  | Runtime_account_removal_setup.Refused _ -> `Conflict
 ;;
 
 let keeper_validation_error_message report =
@@ -1890,10 +1901,34 @@ let add_routes ~sw ~clock router =
               | Ok config -> Http.Response.json_value ~request:req
                   (match Runtime_wizard_inventory.to_json config with
                    | `Assoc fields -> `Assoc (("setup_revision",`String (Runtime_setup_batch.revision_to_string revision))
-                       ::("source_revision",`String (Runtime.config_source_revision_to_string observation.source_revision))::fields)
+                       ::("source_revision",`String (Runtime.config_source_revision_to_string observation.source_revision))
+                       ::("account_emails",Runtime_account_email.inventory_json config)::fields)
                    | value -> value) reqd)
            | _ -> Http.Response.json_value ~status:`Service_unavailable ~request:req
                (`Assoc ["error", `String "Runtime configuration is unavailable."]) reqd) request reqd)
+  |> Http.Router.get "/api/v1/setup/account-emails" (fun request reqd ->
+       (* The Overview reads this on every refresh, so it carries only the
+          emails, for the providers the loaded runtimes run on: the same
+          runtimes its Plan usage rows group. An email is personal data, so
+          the route needs Admin like the setup inventory. *)
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun _state _agent_name req reqd ->
+           let default, runtimes = Runtime.get_default_and_runtimes () in
+           let providers =
+             List.fold_left
+               (fun providers (runtime : Runtime.t) ->
+                  if List.exists
+                       (fun (known : Runtime_schema.provider) -> String.equal known.id runtime.provider.id)
+                       providers
+                  then providers
+                  else providers @ [ runtime.provider ])
+               []
+               (Option.to_list default @ runtimes)
+           in
+           Http.Response.json_value ~request:req
+             (`Assoc [ "account_emails", Runtime_account_email.providers_json providers ])
+             reqd)
+         request reqd)
   |> Http.Router.post "/api/v1/setup/models" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun state _agent_name req reqd ->
@@ -1921,6 +1956,90 @@ let add_routes ~sw ~clock router =
              | Ok json -> Http.Response.json_value ~request:req json reqd
              | Error error -> Http.Response.json_value ~status:(Server_runtime_setup_actions.status_of_error error) ~request:req
                  (`Assoc ["error",`String (Server_runtime_setup_actions.error_message error)]) reqd)) request reqd)
+  |> Http.Router.post "/api/v1/setup/accounts/login" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state actor req reqd ->
+           Http.Request.read_body_async reqd (fun body ->
+             Server_setup_account_login.start ~actor
+               ~base_path:(Mcp_server.workspace_config state).base_path ~body req reqd)) request reqd)
+  |> Http.Router.prefix_get "/api/v1/setup/accounts/login/" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state actor req reqd ->
+           Server_setup_account_login.status ~actor
+             ~base_path:(Mcp_server.workspace_config state).base_path req reqd) request reqd)
+  |> Http.Router.prefix_post "/api/v1/setup/accounts/login/" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state actor req reqd ->
+           Http.Request.read_body_async reqd (fun body ->
+             Server_setup_account_login.control ~actor
+               ~base_path:(Mcp_server.workspace_config state).base_path ~body req reqd)) request reqd)
+  |> Http.Router.post "/api/v1/setup/accounts/select" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state _agent_name req reqd ->
+           Http.Request.read_body_async reqd (fun body ->
+             let result = match (try Some (Yojson.Safe.from_string body) with Yojson.Json_error _ -> None) with
+               | None -> Error Server_runtime_setup_actions.Invalid_request
+               | Some json -> Server_runtime_setup_actions.select_account
+                   ~base_path:(Mcp_server.workspace_config state).base_path json in
+             match result with
+             | Ok json -> Http.Response.json_value ~request:req json reqd
+             | Error error -> Http.Response.json_value ~status:(Server_runtime_setup_actions.status_of_error error) ~request:req
+                 (`Assoc ["error",`String (Server_runtime_setup_actions.error_message error)]) reqd)) request reqd)
+  (* What removing an account changes, answered with the revision it was
+     read at; [/remove] commits it only while the file is still that
+     revision. *)
+  |> Http.Router.post "/api/v1/setup/accounts/removal" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state _agent_name req reqd ->
+           Http.Request.read_body_async reqd (fun body ->
+             let runtime_config_path =
+               Config_dir_resolver.runtime_toml_path_for_base_path
+                 ~base_path:(Mcp_server.workspace_config state).base_path
+             in
+             let result =
+               match Yojson.Safe.from_string body with
+               | json -> Runtime_account_removal_setup.preview ~runtime_config_path json
+               | exception Yojson.Json_error _ -> Error Runtime_account_removal_setup.Invalid_request
+             in
+             match result with
+             | Ok json -> Http.Response.json_value ~request:req json reqd
+             | Error error ->
+               respond_dashboard_error ~status:(account_removal_status error) ~request:req reqd
+                 (Runtime_account_removal_setup.error_message error))) request reqd)
+  |> Http.Router.post "/api/v1/setup/accounts/remove" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state agent_name req reqd ->
+           Http.Request.read_body_async reqd (fun body ->
+             let runtime_config_path =
+               Config_dir_resolver.runtime_toml_path_for_base_path
+                 ~base_path:(Mcp_server.workspace_config state).base_path
+             in
+             let json =
+               match Yojson.Safe.from_string body with
+               | json -> Some json
+               | exception Yojson.Json_error _ -> None
+             in
+             let integration_id =
+               match json with
+               | Some (`Assoc fields) ->
+                 (match List.assoc_opt "integration_id" fields with
+                  | Some (`String id) -> id
+                  | Some _ | None -> "")
+               | Some _ | None -> ""
+             in
+             let operation = Runtime_config_account_removal integration_id in
+             let result =
+               match json with
+               | Some json -> Runtime_account_removal_setup.remove ~runtime_config_path json
+               | None -> Error Runtime_account_removal_setup.Invalid_request
+             in
+             match result with
+             | Ok receipt -> respond_runtime_config_commit state agent_name ~operation ~receipt req reqd
+             | Error error ->
+               audit_runtime_config_write state agent_name ~operation ~text:body
+                 ~outcome:(Audit_log.Failure (Runtime_account_removal_setup.error_message error)) ();
+               respond_dashboard_error ~status:(account_removal_status error) ~request:req reqd
+                 (Runtime_account_removal_setup.error_message error))) request reqd)
   |> Http.Router.post "/api/v1/setup/context" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun state _agent_name req reqd ->
@@ -3470,6 +3589,23 @@ let add_routes ~sw ~clock router =
                ~sw ~clock state agent_name req reqd body_str))
          request reqd)
 
+  (* Fleet-wide event-queue bulk cancel — dry-run by default, explicit confirm
+     to execute, backup before mutation. The URL prefix is intentionally
+     outside [/api/v1/keepers/] so it does not collide with the per-name
+     [prefix_post] catch-all below. *)
+  |> Http.Router.post "/api/v1/keepers_bulk/event-queue" (fun request reqd ->
+       with_token_permission_auth
+         ~permission:Server_dashboard_http_keeper_event_queue_bulk.permission
+         (fun state agent_name req reqd ->
+           Http.Request.read_body_async reqd (fun body_str ->
+             Server_dashboard_http_keeper_event_queue_bulk.handle_post
+               state
+               ~actor:agent_name
+               req
+               reqd
+               body_str))
+         request reqd)
+
   |> Http.Router.post "/api/v1/keepers/chat/stream" (fun request reqd ->
        with_tool_actor_auth ~tool_name:Keeper_tool_name.(to_string Keeper_delegate) (fun state submitted_by _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
@@ -3491,6 +3627,12 @@ let add_routes ~sw ~clock router =
 
   (* Keeper GET sub-routes: /config, /chat/history, /trajectory *)
   |> Http.Router.prefix_get "/api/v1/keepers/" (fun request reqd ->
+       match Keeper_portrait.route (Http.Request.path request) with
+       | Some name ->
+         with_public_read
+           (fun state req reqd -> Keeper_portrait.handle_get state req reqd name)
+           request reqd
+       | None ->
        match Keeper_shutdown_reconciliation.route (Http.Request.path request) with
        | Some target ->
          with_token_permission_auth ~permission:Keeper_shutdown_reconciliation.permission

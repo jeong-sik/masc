@@ -58,6 +58,34 @@ let test_framing_keeps_boundaries () =
   check bool "different split, different hash" false
     (String.equal (V.inputs_sha256 one) (V.inputs_sha256 two))
 
+let test_lock_marker_matching_is_quiet_mismatch_warns_and_missing_alerts () =
+  let labels = V.labels ~built_at (recipe "base") in
+  let expected = List.assoc "masc.sandbox.opam_lock_sha256" labels in
+  check (option string) "matching marker is quiet" None
+    (V.lock_warning ~image:"masc-keeper-sandbox:local"
+       ~built_lock_sha256:(Some expected));
+  let mismatch =
+    V.lock_warning ~image:"masc-keeper-sandbox:local"
+      ~built_lock_sha256:(Some (String.make 64 '0'))
+  in
+  check (option string) "mismatch warns with both hashes"
+    (Some (Printf.sprintf
+       "sandbox_image_lock_mismatch: image=masc-keeper-sandbox:local built_lock_sha256=%s current_lock_sha256=%s"
+       (String.make 64 '0') expected))
+    mismatch;
+  let missing =
+    V.lock_warning ~image:"masc-keeper-sandbox:local" ~built_lock_sha256:None
+  in
+  check (option string) "missing marker alerts without blocking"
+    (Some "sandbox_image_lock_marker_missing: image=masc-keeper-sandbox:local marker missing; may be stale")
+    missing;
+  List.iter
+    (fun warning ->
+       match warning with
+       | Some line -> check bool "one warning line" false (String.contains line '\n')
+       | None -> ())
+    [ mismatch; missing ]
+
 let test_labels_carry_version_and_full_hash () =
   let r = recipe "base" in
   let tag = V.tag ~built_at r in
@@ -70,7 +98,20 @@ let test_labels_carry_version_and_full_hash () =
     (List.assoc_opt "org.opencontainers.image.created" labels);
   check (option string) "recipe" (Some "base") (List.assoc_opt "masc.sandbox.recipe" labels);
   check (option string) "hash" (Some (V.inputs_sha256 r))
-    (List.assoc_opt "masc.sandbox.inputs_sha256" labels)
+    (List.assoc_opt "masc.sandbox.inputs_sha256" labels);
+  (match List.assoc_opt "masc.sandbox.opam_lock_sha256" labels with
+   | Some digest ->
+     check int "embedded lock marker is full SHA-256" 64 (String.length digest);
+     check bool "embedded lock marker is lowercase hex" true
+       (String.for_all (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false) digest)
+   | None -> Alcotest.fail "embedded lock marker is absent");
+  let ocaml_recipe =
+    recipe ~inputs:[ input "masc.opam.locked" "locked contents\n" ] "ocaml"
+  in
+  check (option string) "recipe marker hashes its own lock input"
+    (Some "e8da604f4e444f512f3fec4f4a4b8ee814ecee74995acda128906844ade30234")
+    (List.assoc_opt "masc.sandbox.opam_lock_sha256"
+       (V.labels ~built_at ocaml_recipe))
 
 let test_base_is_carried () =
   check string "name" "base" V.base_embedded.name;
@@ -298,6 +339,8 @@ let () =
         ; test_case "framing keeps boundaries" `Quick test_framing_keeps_boundaries
         ; test_case "labels carry version and full hash" `Quick
             test_labels_carry_version_and_full_hash
+        ; test_case "lock marker comparison" `Quick
+            test_lock_marker_matching_is_quiet_mismatch_warns_and_missing_alerts
         ; test_case "base is carried in the binary" `Quick test_base_is_carried
         ] )
     ; ( "load"

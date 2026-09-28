@@ -4,7 +4,6 @@ bin/masc_trace.ml	[ ".masc"; "keepers"; keeper; "execution-receipts" ]
 bin/masc_trace.ml	[ ".masc"; "keepers"; keeper; "runtime-manifests" ]
 lib/config/playground_paths.ml	literal ["".masc""] lives in a single place
 lib/config/playground_paths.ml	nested ".masc/playground" directories.
-lib/config/playground_paths.ml	| ".masc" :: "playground" :: rest -> (
 lib/config/playground_paths.mli	[".masc"] lives in a single place; this module remains the SSOT
 lib/config/playground_paths.mli	literal [".masc/playground"] and the sanitization rules live in
 lib/dashboard/dashboard_http_keeper_types.ml	("durable_store", `String ".masc/keepers/:name.decisions.jsonl");

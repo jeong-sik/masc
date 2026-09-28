@@ -457,6 +457,78 @@ let test_goal_notification_delivery_key_is_idempotent () =
      | Error detail -> fail ("new event append failed: " ^ detail));
     check int "a new event appends again" 2 (List.length (owner_rows config "keeper-a")))
 
+(* A verdict whose criterion no longer matches the Goal is stale: even with no
+   marker (as after a failed send), the scan must not deliver it. *)
+let test_scan_refuted_stale_criterion_is_not_resent () =
+  with_workspace (fun config ->
+    let ctx : Tool_workspace.context =
+      { Tool_workspace.config; agent_name = "planner" }
+    in
+    let created =
+      must_succeed
+        "create goal"
+        (dispatch
+           ctx
+           ~name:"masc_goal_upsert"
+           [ "title", `String "Refuted Goal"
+           ; "metric", `String "m"
+           ; "target_value", `String "1"
+           ])
+    in
+    let goal_id = json_state created "goal_id" in
+    ignore
+      (must_succeed
+         "request_complete"
+         (dispatch
+            ctx
+            ~name:"masc_goal_transition"
+            [ "goal_id", `String goal_id; "action", `String "request_complete" ]));
+    let request_id, criterion =
+      match Goal_verification.get_record_authoritative config ~goal_id with
+      | Ok (Some { completion = Goal_verification.Proof_pending pending; _ }) ->
+        pending.request_id, pending.criterion
+      | Ok _ -> failwith "test setup needs a bound proof request"
+      | Error detail -> failwith detail
+    in
+    let chat_dir =
+      Filename.dirname
+        (Keeper_chat_store.chat_path ~base_dir:config.base_path ~keeper_name:"planner")
+    in
+    (* A file where the chat directory belongs makes the commit-time send fail,
+       so no marker is written. *)
+    ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote chat_dir)));
+    ignore
+      (Sys.command
+         (Printf.sprintf "mkdir -p %s" (Filename.quote (Filename.dirname chat_dir))));
+    let oc = open_out chat_dir in
+    close_out oc;
+    ignore
+      (must_succeed
+         "refuted commit"
+         (Workspace_goals.commit_verifier_decision
+            ~tool_name:"goal_verifier_commit"
+            ~start_time:(Tool_timing.start ())
+            config
+            ~goal_id
+            ~verification_run_id:"goal-verifier-test-run"
+            ~request_id
+            ~criterion
+            ~decision:(Workspace_goals.Proof_refuted { reason = "not proven" })
+            ~evidence:"observed by the verifier"));
+    check (option string) "failed send leaves no marker" None
+      (goal_of config goal_id).Goal_store.notified_refuted_key;
+    (* The Goal's criterion moves on, so the recorded verdict no longer applies. *)
+    (match
+       Goal_store.transact_goal config ~goal_id (fun goal ->
+         Ok ({ goal with Goal_store.criterion_revision = "rev-moved-on" }, ()))
+     with
+     | Ok _ -> ()
+     | Error error -> failwith (Goal_store.write_error_to_string error));
+    Sys.remove chat_dir;
+    Workspace_goals.scan_refuted_goal_notifications config;
+    check int "a stale-criterion verdict is not re-sent" 0
+      (List.length (verdict_rows config "planner")))
+
 let () =
   run "goal_owner_notification"
     [ ( "overdue scan"
@@ -486,6 +558,8 @@ let () =
             test_scan_refuted_owner_change_notifies_new_owner
         ; test_case "a restart sends nothing already delivered" `Quick
             test_scan_refuted_restart_sends_nothing
+        ; test_case "a stale-criterion verdict is not re-sent" `Quick
+            test_scan_refuted_stale_criterion_is_not_resent
         ] )
     ]
 ;;

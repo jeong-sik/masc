@@ -794,41 +794,97 @@ let schedule_no_values =
   ; srow_recurrence = ""
   }
 
-let schedule_cells ?(status_style = "") ?(wake_style = "")
-      ?(recurrence_style = "") ~target_width ~wake_width ~delivery_width
-      ~recurrence_width values =
-  [ Table.cell ~style:status_style ~header:"STATUS" ~width:schedule_status_width
-      values.srow_status
-  ; Table.cell ~header:"DUE" ~width:schedule_due_width values.srow_due
-  ; Table.cell ~header:"TARGET" ~width:target_width values.srow_target
-  ; Table.cell ~style:wake_style ~header:"WAKE" ~width:wake_width
-      values.srow_wake
-  ; Table.cell ~header:"DELIVERY" ~width:delivery_width values.srow_delivery
-  ; Table.cell ~style:recurrence_style ~header:"RECURRENCE"
-      ~width:recurrence_width values.srow_recurrence
+(* The list's columns, named so a narrow list can say which it gives up. *)
+type schedule_column =
+  | Schedule_status
+  | Schedule_due
+  | Schedule_target
+  | Schedule_wake
+  | Schedule_delivery
+  | Schedule_recurrence
+
+let schedule_columns =
+  [ Schedule_status
+  ; Schedule_due
+  ; Schedule_target
+  ; Schedule_wake
+  ; Schedule_delivery
+  ; Schedule_recurrence
   ]
 
-let schedule_recurrence_width ~inner_width ~target_width ~wake_width
-      ~delivery_width =
-  let named =
-    Table.used_width
-      (schedule_cells ~target_width ~wake_width ~delivery_width
-         ~recurrence_width:0 schedule_no_values)
+(* What a narrow list gives up, first to go first (operator, 2026-09-28).
+   - The delivery: the two rows under the list read the selected row's
+     queue and reaction whole, so the column shortens what stays on the
+     screen for the row the cursor is on.
+   - The wake: the last wake's status, which the schedule's detail lists
+     wake by wake.
+   - The state last.
+   When it is due, whom it reaches and how it repeats never go: they are
+   what a row is for. *)
+let schedule_drop_order =
+  [ Schedule_delivery; Schedule_wake; Schedule_status ]
+
+(* The target, wake and delivery columns are measured by the caller from the
+   rows on the page, so the layout keeps the widths it was fitted with and
+   the header and every row are drawn from the same ones. *)
+type schedule_layout = {
+  sl_columns : schedule_column Table.layout;
+  sl_target_width : int;
+  sl_wake_width : int;
+  sl_delivery_width : int;
+}
+
+let schedule_layout ~inner_width ~target_width ~wake_width ~delivery_width =
+  (* The recurrence's entry is its floor: it is the flexible column and takes
+     what the others leave. *)
+  let width = function
+    | Schedule_status -> schedule_status_width
+    | Schedule_due -> schedule_due_width
+    | Schedule_target -> target_width
+    | Schedule_wake -> wake_width
+    | Schedule_delivery -> delivery_width
+    | Schedule_recurrence -> schedule_minimum_recurrence_width
   in
-  max schedule_minimum_recurrence_width (inner_width - named)
+  { sl_columns =
+      Table.fit ~inner_width ~width ~flex:Schedule_recurrence
+        ~drop_order:schedule_drop_order schedule_columns
+  ; sl_target_width = target_width
+  ; sl_wake_width = wake_width
+  ; sl_delivery_width = delivery_width
+  }
 
-let schedule_header_row ~target_width ~wake_width ~delivery_width
-      ~recurrence_width =
-  Table.header_row
-    (schedule_cells ~target_width ~wake_width ~delivery_width ~recurrence_width
-       schedule_no_values)
+let schedule_cell ~status_style ~wake_style ~recurrence_style
+    ~(layout : schedule_layout) values = function
+  | Schedule_status ->
+      Table.cell ~style:status_style ~header:"STATUS"
+        ~width:schedule_status_width values.srow_status
+  | Schedule_due ->
+      Table.cell ~header:"DUE" ~width:schedule_due_width values.srow_due
+  | Schedule_target ->
+      Table.cell ~header:"TARGET" ~width:layout.sl_target_width
+        values.srow_target
+  | Schedule_wake ->
+      Table.cell ~style:wake_style ~header:"WAKE" ~width:layout.sl_wake_width
+        values.srow_wake
+  | Schedule_delivery ->
+      Table.cell ~header:"DELIVERY" ~width:layout.sl_delivery_width
+        values.srow_delivery
+  | Schedule_recurrence ->
+      Table.cell ~style:recurrence_style ~header:"RECURRENCE"
+        ~width:layout.sl_columns.Table.flex_width values.srow_recurrence
 
-let schedule_row ?status_style ?wake_style ?recurrence_style ~target_width
-      ~wake_width ~delivery_width ~recurrence_width values =
+let schedule_cells ?(status_style = "") ?(wake_style = "")
+    ?(recurrence_style = "") ~layout values =
+  List.map
+    (schedule_cell ~status_style ~wake_style ~recurrence_style ~layout values)
+    layout.sl_columns.Table.shown
+
+let schedule_header_row ~layout =
+  Table.header_row (schedule_cells ~layout schedule_no_values)
+
+let schedule_row ?status_style ?wake_style ?recurrence_style ~layout values =
   Table.row
-    (schedule_cells ?status_style ?wake_style ?recurrence_style ~target_width
-       ~delivery_width
-       ~wake_width ~recurrence_width values)
+    (schedule_cells ?status_style ?wake_style ?recurrence_style ~layout values)
 
 (* Lane run columns.
 
@@ -843,8 +899,8 @@ let lane_status_width = 11
 let lane_elapsed_width = 8
 let lane_slot_width = 16
 
-(* A run id truncated below this identifies nothing; the screen is better off
-   dropping the frame's last cells than showing half of one. *)
+(* A run id truncated below this identifies nothing. Below it the list gives
+   up columns in its drop order rather than cut the id. *)
 let lane_minimum_run_id_width = 12
 
 type lane_run_row_values = {
@@ -865,34 +921,78 @@ let lane_run_no_values =
   ; lrow_run_id = ""
   }
 
-(* The identity column is named by the caller: this table lists runs of one
-   keeper under one heading and runs of many under another. *)
-let lane_run_cells ~identity_header ?(status_style = "") ~run_id_width values =
-  [ Table.cell ~header:"STARTED" ~width:lane_started_width values.lrow_started
-  ; Table.cell ~header:identity_header ~width:lane_subject_width
-      values.lrow_subject
-  ; Table.cell ~style:status_style ~header:"STATUS" ~width:lane_status_width
-      values.lrow_status
-  ; Table.cell ~align:Table.Right ~header:"ELAPSED" ~width:lane_elapsed_width
-      values.lrow_elapsed
-  ; Table.cell ~header:"SLOT" ~width:lane_slot_width values.lrow_slot
-  ; Table.cell ~header:"RUN ID" ~width:run_id_width values.lrow_run_id
+(* The run list's columns, named so a narrow list can say which it spares
+   (workbench RFC section 5.4, #36347). At eighty columns every column needed
+   more than the frame held, and the run id -- the last column -- was cut
+   away whole. *)
+type lane_run_column =
+  | Lane_started
+  | Lane_subject
+  | Lane_status
+  | Lane_elapsed
+  | Lane_slot
+  | Lane_run_id
+
+let lane_run_columns =
+  [ Lane_started
+  ; Lane_subject
+  ; Lane_status
+  ; Lane_elapsed
+  ; Lane_slot
+  ; Lane_run_id
   ]
 
-let lane_run_id_width ~inner_width =
-  let named =
-    Table.used_width
-      (lane_run_cells ~identity_header:"" ~run_id_width:0 lane_run_no_values)
-  in
-  max lane_minimum_run_id_width (inner_width - named)
+(* The run id's entry is its floor: it is the flexible column and takes what
+   the others leave. *)
+let lane_run_column_width = function
+  | Lane_started -> lane_started_width
+  | Lane_subject -> lane_subject_width
+  | Lane_status -> lane_status_width
+  | Lane_elapsed -> lane_elapsed_width
+  | Lane_slot -> lane_slot_width
+  | Lane_run_id -> lane_minimum_run_id_width
 
-let lane_run_header_row ~identity_header ~run_id_width =
-  Table.header_row
-    (lane_run_cells ~identity_header ~run_id_width lane_run_no_values)
+(* What a narrow list gives up, first to go first (operator, 2026-09-28): the
+   slot, then the elapsed time, then the start. The subject, the status and
+   the run id never go: what the run was for, how it ended, and the id that
+   names it. *)
+let lane_run_drop_order = [ Lane_slot; Lane_elapsed; Lane_started ]
 
-let lane_run_row ~identity_header ~status_style ~run_id_width values =
-  Table.row
-    (lane_run_cells ~identity_header ~status_style ~run_id_width values)
+let lane_run_layout ~inner_width =
+  Table.fit ~inner_width ~width:lane_run_column_width ~flex:Lane_run_id
+    ~drop_order:lane_run_drop_order lane_run_columns
+
+(* The identity column is named by the caller: this table lists runs of one
+   keeper under one heading and runs of many under another. *)
+let lane_run_cell ~identity_header ~status_style ~run_id_width values = function
+  | Lane_started ->
+      Table.cell ~header:"STARTED" ~width:lane_started_width values.lrow_started
+  | Lane_subject ->
+      Table.cell ~header:identity_header ~width:lane_subject_width
+        values.lrow_subject
+  | Lane_status ->
+      Table.cell ~style:status_style ~header:"STATUS" ~width:lane_status_width
+        values.lrow_status
+  | Lane_elapsed ->
+      Table.cell ~align:Table.Right ~header:"ELAPSED" ~width:lane_elapsed_width
+        values.lrow_elapsed
+  | Lane_slot ->
+      Table.cell ~header:"SLOT" ~width:lane_slot_width values.lrow_slot
+  | Lane_run_id ->
+      Table.cell ~header:"RUN ID" ~width:run_id_width values.lrow_run_id
+
+let lane_run_cells ~identity_header ?(status_style = "")
+    ~(layout : lane_run_column Table.layout) values =
+  List.map
+    (lane_run_cell ~identity_header ~status_style
+       ~run_id_width:layout.Table.flex_width values)
+    layout.Table.shown
+
+let lane_run_header_row ~identity_header ~layout =
+  Table.header_row (lane_run_cells ~identity_header ~layout lane_run_no_values)
+
+let lane_run_row ~identity_header ~status_style ~layout values =
+  Table.row (lane_run_cells ~identity_header ~status_style ~layout values)
 
 (* File change columns.
 
@@ -906,6 +1006,9 @@ let change_task_width = 10
 let change_op_width = 5
 let change_result_width = 8
 let change_file_width = 38
+
+(* Below this the summary says nothing a reader can act on. Below it the list
+   gives up columns in its drop order rather than cut the summary. *)
 let change_minimum_summary_width = 12
 
 type change_row_values = {
@@ -926,33 +1029,76 @@ let change_no_values =
   ; crow_summary = ""
   }
 
-let change_cells ?(op_style = "") ?(result_style = "") ~summary_width values =
-  [ Table.cell ~align:Table.Right ~header:"TURN" ~width:change_turn_width
-      values.crow_turn
-  ; Table.cell ~header:"TASK" ~width:change_task_width values.crow_task
-  ; Table.cell ~style:op_style ~header:"OP" ~width:change_op_width
-      values.crow_op
-  ; Table.cell ~style:result_style ~header:"RESULT" ~width:change_result_width
-      values.crow_result
-  ; Table.cell ~header:"FILE" ~width:change_file_width values.crow_file
-  ; Table.cell ~fold:Table.Fold_tail ~header:"WHAT" ~width:summary_width
-      values.crow_summary
+(* The change list's columns, named so a narrow list can say which it spares
+   (workbench RFC section 5.4, #36347). At eighty columns every column needed
+   more than the frame held, and the summary -- the last column, and the one
+   that says what the turn did -- was cut away whole. *)
+type change_column =
+  | Change_turn
+  | Change_task
+  | Change_op
+  | Change_result
+  | Change_file
+  | Change_summary
+
+let change_columns =
+  [ Change_turn
+  ; Change_task
+  ; Change_op
+  ; Change_result
+  ; Change_file
+  ; Change_summary
   ]
 
-let change_summary_width ~inner_width =
-  let named =
-    Table.used_width
-      (change_cells ~summary_width:0 change_no_values)
-  in
-  max change_minimum_summary_width (inner_width - named)
+(* The summary's entry is its floor: it is the flexible column and takes what
+   the others leave. *)
+let change_column_width = function
+  | Change_turn -> change_turn_width
+  | Change_task -> change_task_width
+  | Change_op -> change_op_width
+  | Change_result -> change_result_width
+  | Change_file -> change_file_width
+  | Change_summary -> change_minimum_summary_width
 
-let change_header_row ~summary_width =
-  Table.header_row
-    (change_cells ~summary_width change_no_values)
+(* What a narrow list gives up, first to go first (operator, 2026-09-28): the
+   turn, the task, the operation, then the result. The file and the summary
+   never go: which file the turn touched and what it did there. *)
+let change_drop_order = [ Change_turn; Change_task; Change_op; Change_result ]
 
-let change_row ~op_style ~result_style ~summary_width values =
-  Table.row
-    (change_cells ~op_style ~result_style ~summary_width values)
+let change_layout ~inner_width =
+  Table.fit ~inner_width ~width:change_column_width ~flex:Change_summary
+    ~drop_order:change_drop_order change_columns
+
+let change_cell ~op_style ~result_style ~summary_width values = function
+  | Change_turn ->
+      Table.cell ~align:Table.Right ~header:"TURN" ~width:change_turn_width
+        values.crow_turn
+  | Change_task ->
+      Table.cell ~header:"TASK" ~width:change_task_width values.crow_task
+  | Change_op ->
+      Table.cell ~style:op_style ~header:"OP" ~width:change_op_width
+        values.crow_op
+  | Change_result ->
+      Table.cell ~style:result_style ~header:"RESULT"
+        ~width:change_result_width values.crow_result
+  | Change_file ->
+      Table.cell ~header:"FILE" ~width:change_file_width values.crow_file
+  | Change_summary ->
+      Table.cell ~fold:Table.Fold_tail ~header:"WHAT" ~width:summary_width
+        values.crow_summary
+
+let change_cells ?(op_style = "") ?(result_style = "")
+    ~(layout : change_column Table.layout) values =
+  List.map
+    (change_cell ~op_style ~result_style ~summary_width:layout.Table.flex_width
+       values)
+    layout.Table.shown
+
+let change_header_row ~layout =
+  Table.header_row (change_cells ~layout change_no_values)
+
+let change_row ~op_style ~result_style ~layout values =
+  Table.row (change_cells ~op_style ~result_style ~layout values)
 
 (* Fusion run columns.
 
@@ -1170,6 +1316,9 @@ let harness_task_width = 14
 let harness_gate_width = 9
 let harness_verdict_width = 9
 let harness_evaluator_width = 24
+
+(* Below this the reason says nothing a reader can act on. Below it the list
+   gives up columns in its drop order rather than cut the reason. *)
 let harness_minimum_reason_width = 12
 
 type harness_row_values = {
@@ -1190,32 +1339,74 @@ let harness_no_values =
   ; hrow_reason = ""
   }
 
-let harness_cells ?(verdict_style = "") ~reason_width values =
-  [ Table.cell ~header:"TIME" ~width:harness_time_width values.hrow_time
-  ; Table.cell ~header:"TASK" ~width:harness_task_width values.hrow_task
-  ; Table.cell ~header:"GATE" ~width:harness_gate_width values.hrow_gate
-  ; Table.cell ~style:verdict_style ~header:"VERDICT"
-      ~width:harness_verdict_width values.hrow_verdict
-  ; Table.cell ~header:"EVALUATOR" ~width:harness_evaluator_width
-      values.hrow_evaluator
-  ; Table.cell ~fold:Table.Fold_tail ~header:"REASON" ~width:reason_width
-      values.hrow_reason
+(* The verdict list's columns, named so a narrow list can say which it
+   spares (workbench RFC section 5.4, #36347). At eighty columns every column
+   needed more than the frame held, and the reason -- the last column -- kept
+   five cells. *)
+type harness_column =
+  | Harness_time
+  | Harness_task
+  | Harness_gate
+  | Harness_verdict
+  | Harness_evaluator
+  | Harness_reason
+
+let harness_columns =
+  [ Harness_time
+  ; Harness_task
+  ; Harness_gate
+  ; Harness_verdict
+  ; Harness_evaluator
+  ; Harness_reason
   ]
 
-let harness_reason_width ~inner_width =
-  let named =
-    Table.used_width
-      (harness_cells ~reason_width:0 harness_no_values)
-  in
-  max harness_minimum_reason_width (inner_width - named)
+(* The reason's entry is its floor: it is the flexible column and takes what
+   the others leave. *)
+let harness_column_width = function
+  | Harness_time -> harness_time_width
+  | Harness_task -> harness_task_width
+  | Harness_gate -> harness_gate_width
+  | Harness_verdict -> harness_verdict_width
+  | Harness_evaluator -> harness_evaluator_width
+  | Harness_reason -> harness_minimum_reason_width
 
-let harness_header_row ~reason_width =
-  Table.header_row
-    (harness_cells ~reason_width harness_no_values)
+(* What a narrow list gives up, first to go first (operator, 2026-09-28): the
+   evaluator, the time, then the gate. The task, the verdict and the reason
+   never go: which task was judged, what the judge said, and why. *)
+let harness_drop_order = [ Harness_evaluator; Harness_time; Harness_gate ]
 
-let harness_row ~verdict_style ~reason_width values =
-  Table.row
-    (harness_cells ~verdict_style ~reason_width values)
+let harness_layout ~inner_width =
+  Table.fit ~inner_width ~width:harness_column_width ~flex:Harness_reason
+    ~drop_order:harness_drop_order harness_columns
+
+let harness_cell ~verdict_style ~reason_width values = function
+  | Harness_time ->
+      Table.cell ~header:"TIME" ~width:harness_time_width values.hrow_time
+  | Harness_task ->
+      Table.cell ~header:"TASK" ~width:harness_task_width values.hrow_task
+  | Harness_gate ->
+      Table.cell ~header:"GATE" ~width:harness_gate_width values.hrow_gate
+  | Harness_verdict ->
+      Table.cell ~style:verdict_style ~header:"VERDICT"
+        ~width:harness_verdict_width values.hrow_verdict
+  | Harness_evaluator ->
+      Table.cell ~header:"EVALUATOR" ~width:harness_evaluator_width
+        values.hrow_evaluator
+  | Harness_reason ->
+      Table.cell ~fold:Table.Fold_tail ~header:"REASON" ~width:reason_width
+        values.hrow_reason
+
+let harness_cells ?(verdict_style = "")
+    ~(layout : harness_column Table.layout) values =
+  List.map
+    (harness_cell ~verdict_style ~reason_width:layout.Table.flex_width values)
+    layout.Table.shown
+
+let harness_header_row ~layout =
+  Table.header_row (harness_cells ~layout harness_no_values)
+
+let harness_row ~verdict_style ~layout values =
+  Table.row (harness_cells ~verdict_style ~layout values)
 
 (* Planning goal columns.
 
@@ -1243,6 +1434,9 @@ let planning_priority_width = 3
 let planning_open_width = 16
 let planning_age_width = 6
 let planning_due_width = 10
+
+(* A title folded below this identifies no goal. Below it the list gives up
+   columns in its drop order rather than cut the title. *)
 let planning_minimum_title_width = 12
 
 type planning_row_values = {
@@ -1265,37 +1459,89 @@ let planning_no_values =
   ; prow_due = ""
   }
 
-let planning_cells ?(phase_style = "") ?(priority_style = "") ?(open_style = "")
-    ~phase_width ~title_width values =
-  [ Table.cell ~style:phase_style ~header:"PHASE" ~width:phase_width
-      values.prow_phase
-  ; Table.cell ~header:"JUDGE" ~width:planning_proof_width values.prow_proof
-  ; Table.cell ~style:priority_style ~header:"PRI" ~width:planning_priority_width
-      values.prow_priority
-  ; Table.cell ~style:open_style ~header:"OPEN" ~width:planning_open_width
-      values.prow_open
-  ; Table.cell ~fold:Table.Fold_tail ~header:"TITLE" ~width:title_width
-      values.prow_title
-  ; Table.cell ~align:Table.Right ~header:"AGE" ~width:planning_age_width
-      values.prow_age
-  ; Table.cell ~header:"DUE" ~width:planning_due_width values.prow_due
+(* The goal list's columns, named so a narrow list can say which it spares
+   (workbench RFC section 5.4, #36347). The title sits in the middle, so when
+   the row ran past the frame the cut fell on the age and the due date after
+   it rather than on anything the list had chosen to give up. *)
+type planning_column =
+  | Planning_phase
+  | Planning_proof
+  | Planning_priority
+  | Planning_open
+  | Planning_title
+  | Planning_age
+  | Planning_due
+
+let planning_columns =
+  [ Planning_phase
+  ; Planning_proof
+  ; Planning_priority
+  ; Planning_open
+  ; Planning_title
+  ; Planning_age
+  ; Planning_due
   ]
 
-let planning_title_width ~inner_width ~phase_width =
-  let named =
-    Table.used_width
-      (planning_cells ~phase_width ~title_width:0 planning_no_values)
-  in
-  max planning_minimum_title_width (inner_width - named)
+(* The title's entry is its floor: it is the flexible column and takes what
+   the others leave. The phase is as wide as the widest bracketed label the
+   caller draws. *)
+let planning_column_width ~phase_width = function
+  | Planning_phase -> phase_width
+  | Planning_proof -> planning_proof_width
+  | Planning_priority -> planning_priority_width
+  | Planning_open -> planning_open_width
+  | Planning_title -> planning_minimum_title_width
+  | Planning_age -> planning_age_width
+  | Planning_due -> planning_due_width
 
-let planning_header_row ~phase_width ~title_width =
-  Table.header_row (planning_cells ~phase_width ~title_width planning_no_values)
+(* What a narrow list gives up, first to go first (operator, 2026-09-28): the
+   due date, the age, the open-work tally, then the judge's mark. The phase,
+   the priority and the title never go: where the goal stands, how much it
+   matters, and which goal it is. *)
+let planning_drop_order =
+  [ Planning_due; Planning_age; Planning_open; Planning_proof ]
+
+let planning_layout ~inner_width ~phase_width =
+  Table.fit ~inner_width ~width:(planning_column_width ~phase_width)
+    ~flex:Planning_title ~drop_order:planning_drop_order planning_columns
+
+let planning_cell ~phase_style ~priority_style ~open_style ~phase_width
+    ~title_width values = function
+  | Planning_phase ->
+      Table.cell ~style:phase_style ~header:"PHASE" ~width:phase_width
+        values.prow_phase
+  | Planning_proof ->
+      Table.cell ~header:"JUDGE" ~width:planning_proof_width values.prow_proof
+  | Planning_priority ->
+      Table.cell ~style:priority_style ~header:"PRI"
+        ~width:planning_priority_width values.prow_priority
+  | Planning_open ->
+      Table.cell ~style:open_style ~header:"OPEN" ~width:planning_open_width
+        values.prow_open
+  | Planning_title ->
+      Table.cell ~fold:Table.Fold_tail ~header:"TITLE" ~width:title_width
+        values.prow_title
+  | Planning_age ->
+      Table.cell ~align:Table.Right ~header:"AGE" ~width:planning_age_width
+        values.prow_age
+  | Planning_due ->
+      Table.cell ~header:"DUE" ~width:planning_due_width values.prow_due
+
+let planning_cells ?(phase_style = "") ?(priority_style = "") ?(open_style = "")
+    ~phase_width ~(layout : planning_column Table.layout) values =
+  List.map
+    (planning_cell ~phase_style ~priority_style ~open_style ~phase_width
+       ~title_width:layout.Table.flex_width values)
+    layout.Table.shown
+
+let planning_header_row ~phase_width ~layout =
+  Table.header_row (planning_cells ~phase_width ~layout planning_no_values)
 
 let planning_row ?(priority_style = "") ?(open_style = "") ~phase_style
-    ~phase_width ~title_width values =
+    ~phase_width ~layout values =
   Table.row
     (planning_cells ~phase_style ~priority_style ~open_style ~phase_width
-       ~title_width values)
+       ~layout values)
 
 (* Board post columns.
 

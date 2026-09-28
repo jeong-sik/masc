@@ -157,11 +157,38 @@ let test_codex_account_home_preserved () =
       "{" ^ base ^ {|,"account_home":"accounts/a"|} ^ "}"
     ; "an HTTP connection cannot carry an account home",
       {|{"choice":"messages","model":"m","max_context":1024,"tools":true,"streaming":true,"endpoint":"https://fixture.invalid","provider_kind":"anthropic","account_home":"/accounts/a"}|} ]
+(* The operator reads this id in the TUI and in runtime.toml, so it names the
+   client and the model. The same short hash follows each and keeps one id
+   per answer set; a character a model id does not admit becomes '-'. *)
+let test_id_names_the_client_and_the_model () =
+  let input = {|{"choice":"vllm","model":"meta-llama/Llama-3.1:8b","max_context":8192,"tools":true,"streaming":false,"endpoint":"http://h:9/v1"}|} in
+  let rendered = match Runtime_setup_spec.of_json (Yojson.Safe.from_string input) with
+    | Ok spec -> Runtime_setup_spec.render spec
+    | Error error -> Alcotest.fail (Runtime_setup_spec.error_message error) in
+  let id = rendered.runtime_id in
+  let split_last sep text = match String.rindex_opt text sep with
+    | Some at -> String.sub text 0 at, String.sub text (at + 1) (String.length text - at - 1)
+    | None -> Alcotest.fail (Printf.sprintf "%S has no %C" text sep) in
+  let provider, model_key = match String.index_opt id '.' with
+    | Some at -> String.sub id 0 at, String.sub id (at + 1) (String.length id - at - 1)
+    | None -> Alcotest.fail (Printf.sprintf "%S has no provider.model split" id) in
+  let client, provider_hash = split_last '_' provider in
+  let model, model_hash = split_last '_' model_key in
+  Alcotest.check Alcotest.string "the provider names the client" "vllm" client;
+  Alcotest.check Alcotest.string "the model key names the model" "meta-llama-Llama-3.1-8b" model;
+  Alcotest.check Alcotest.bool "a short hash follows the client" true
+    (String.length provider_hash = 8
+     && String.for_all (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false) provider_hash);
+  Alcotest.check Alcotest.string "the same hash follows the model" provider_hash model_hash;
+  let whole = "[runtime]\ndefault = " ^ Yojson.Safe.to_string (`String id) ^ "\n" ^ rendered.runtime_toml in
+  Alcotest.check Alcotest.bool "the rendered connection parses as configuration" true
+    (Result.is_ok (Runtime_toml.parse_string whole))
 let () = Alcotest.run "native runtime setup spec" ["contract",[
   Alcotest.test_case "representative installer identity and TOML parity" `Quick test_existing_installer_contract;
   Alcotest.test_case "native fractional number identity" `Quick test_native_fractional_identity;
   Alcotest.test_case "typed input rejects incompatible declarations" `Quick test_rejects_invalid_transport_claims;
   Alcotest.test_case "one answer is one connection" `Quick test_one_answer_is_one_connection;
+  Alcotest.test_case "the id names the client and the model" `Quick test_id_names_the_client_and_the_model;
   Alcotest.test_case "selected official accounts remain distinct" `Quick test_official_client_account_selection_is_identity;
   Alcotest.test_case "empty selected account does not inherit" `Quick test_empty_selected_account_never_becomes_ambient;
   Alcotest.test_case "Muse account is explicit and asks no byte budget" `Quick test_muse_requires_explicit_account;

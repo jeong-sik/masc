@@ -982,6 +982,40 @@ let check_right_cell label mark ~header ~row ~inner_width =
     (Printf.sprintf "inner %d: %s ends where its cell ends" inner_width label)
     (ends header label) (ends row mark)
 
+(* Which edge of its cell a column's reading is placed by: a right-aligned
+   reading ends where its name ends, every other starts where its name
+   starts. *)
+type cell_edge =
+  | Left_edge
+  | Right_edge
+
+(* A table laid out by [Masc_tui_table.fit] draws some of its columns. A drawn
+   column's reading sits under its name; a column the table has given up has
+   no name in the header and no reading in the row. [cells] names every
+   column with its edge, its header and the reading the probe puts in it. *)
+let check_fitted_cells ~shown ~header ~row ~inner_width cells =
+  List.iter
+    (fun (column, edge, label, mark) ->
+      if List.mem column shown then
+        match edge with
+        | Left_edge -> check_left_cell label mark ~header ~row ~inner_width
+        | Right_edge -> check_right_cell label mark ~header ~row ~inner_width
+      else begin
+        check bool
+          (Printf.sprintf "inner %d: %s has left the header" inner_width label)
+          true
+          (index_of header label = None);
+        check bool
+          (Printf.sprintf "inner %d: %s has left the row" inner_width label)
+          true
+          (index_of row mark = None)
+      end)
+    cells
+
+(* From below every fitted table's floor, so each width at which one of its
+   columns goes is crossed. *)
+let fitted_narrowest_swept_width = 20
+
 let memory_minimum_row_width =
   Schedule.memory_columns_used_width
     (Schedule.allocate_memory_columns ~inner_width:0)
@@ -1298,26 +1332,50 @@ let schedule_empty : Schedule.schedule_row_values =
   ; srow_recurrence = ""
   }
 
+(* A page of short readings, the widths the renderer measures for the
+   fixture the keyboard scenarios load: a keeper name under the target's
+   floor of 16, the widest wake word ("succeeded", 9) and a delivery word
+   under the delivery's floor of 12. *)
+let schedule_short_page ~inner_width =
+  Schedule.schedule_layout ~inner_width ~target_width:16 ~wake_width:9
+    ~delivery_width:12
+
+(* The widest page the renderer draws: the target at its cap of 40 and the
+   delivery at its ceiling of 20. *)
+let schedule_long_page ~inner_width =
+  Schedule.schedule_layout ~inner_width ~target_width:40 ~wake_width:9
+    ~delivery_width:20
+
+let schedule_every_column =
+  Schedule.
+    [ Schedule_status
+    ; Schedule_due
+    ; Schedule_target
+    ; Schedule_wake
+    ; Schedule_delivery
+    ; Schedule_recurrence
+    ]
+
+let schedule_shown (layout : Schedule.schedule_layout) =
+  layout.Schedule.sl_columns.Masc_tui_table.shown
+
+let schedule_recurrence_cells (layout : Schedule.schedule_layout) =
+  layout.Schedule.sl_columns.Masc_tui_table.flex_width
+
+let schedule_header_width layout =
+  Masc_tui_message_layout.display_width (Schedule.schedule_header_row ~layout)
+
 let test_schedule_rows_stay_on_the_header_columns () =
-  for inner_width = 60 to 240 do
-    let target_width = 16 and wake_width = 9 and delivery_width = 12 in
-    let recurrence_width =
-      Schedule.schedule_recurrence_width ~inner_width ~target_width ~wake_width ~delivery_width
-    in
+  for inner_width = fitted_narrowest_swept_width to 240 do
+    let layout = schedule_short_page ~inner_width in
     let width text = Masc_tui_message_layout.display_width text in
-    let header =
-      width
-        (Schedule.schedule_header_row ~target_width ~wake_width ~delivery_width
-           ~recurrence_width)
-    in
+    let header = width (Schedule.schedule_header_row ~layout) in
     List.iter
       (fun (what, values) ->
         check int
           (Printf.sprintf "inner %d: %s matches the header" inner_width what)
           header
-          (width
-             (Schedule.schedule_row ~target_width ~wake_width ~delivery_width ~recurrence_width
-                values)))
+          (width (Schedule.schedule_row ~layout values)))
       [ "an overlong row", schedule_probe; "an empty row", schedule_empty ];
     (* The styles a schedule row wears -- the state's colour, the wake's, the
        dim on the recurrence -- are escapes, and an escape occupies no cell. *)
@@ -1326,8 +1384,7 @@ let test_schedule_rows_stay_on_the_header_columns () =
       header
       (width
          (Schedule.schedule_row ~status_style:"\027[33m" ~wake_style:"\027[31m"
-            ~recurrence_style:"\027[2m" ~target_width ~wake_width
-            ~delivery_width ~recurrence_width schedule_probe))
+            ~recurrence_style:"\027[2m" ~layout schedule_probe))
   done
 
 (* The delivery column was a literal 12, and the projection's own words run
@@ -1351,51 +1408,158 @@ let test_the_delivery_column_holds_the_words_on_the_page () =
     (Schedule.schedule_delivery_width [ "conflicting_terminal_evidence" ])
 
 
-(* The recurrence takes what the named columns leave, down to a floor. It is
+(* The recurrence takes what the drawn columns leave, down to a floor. It is
    the column that carries the timezone, and the one the pane was cutting. *)
 let test_schedule_recurrence_takes_the_remainder () =
   for inner_width = 20 to 300 do
-    let target_width = 16 and wake_width = 9 and delivery_width = 12 in
-    let recurrence_width =
-      Schedule.schedule_recurrence_width ~inner_width ~target_width ~wake_width ~delivery_width
-    in
-    let drawn =
-      Masc_tui_message_layout.display_width
-        (Schedule.schedule_header_row ~target_width ~wake_width ~delivery_width
-           ~recurrence_width)
-    in
+    let layout = schedule_short_page ~inner_width in
+    let recurrence_width = schedule_recurrence_cells layout in
     if recurrence_width > Schedule.schedule_minimum_recurrence_width then
       check int
         (Printf.sprintf "inner %d is fully allocated" inner_width)
-        inner_width drawn
+        inner_width (schedule_header_width layout)
     else
-      check bool
+      check int
         (Printf.sprintf "inner %d keeps the floor" inner_width)
-        true
-        (recurrence_width = Schedule.schedule_minimum_recurrence_width)
+        Schedule.schedule_minimum_recurrence_width recurrence_width
   done
 
 (* Six names above the rows, and none of them left inside a row. *)
 let test_schedule_names_its_columns_once () =
-  let target_width = 16 and wake_width = 9 and delivery_width = 12 in
-  let recurrence_width =
-    Schedule.schedule_recurrence_width ~inner_width:120 ~target_width
-      ~wake_width ~delivery_width
-  in
-  let header =
-    Schedule.schedule_header_row ~target_width ~wake_width ~delivery_width ~recurrence_width
-  in
+  let layout = schedule_short_page ~inner_width:120 in
+  let header = Schedule.schedule_header_row ~layout in
   List.iter
     (fun name -> check bool (name ^ " names a column") true (holds name header))
     [ "STATUS"; "DUE"; "TARGET"; "WAKE"; "DELIVERY"; "RECURRENCE" ];
   let row =
-    Schedule.schedule_row ~target_width ~wake_width ~delivery_width ~recurrence_width
+    Schedule.schedule_row ~layout
       { schedule_probe with srow_recurrence = "every 30 minutes" }
   in
   List.iter
     (fun label ->
       check bool (label ^ " no longer sits in the row") false (holds label row))
     [ "wake:"; "\xc2\xb7" ]
+
+(* The widths the list is read at, as table insides: the frame's four cells
+   and the row's two of lead come off the terminal. An 80-column terminal
+   gives 74 and a 100-column one 94; 96 is the body at the width where the
+   Activity pane opens beside it, 102 cells less the same six.
+
+   A short page needs 85 cells for every column: 12 + 19 + 16 + 9 + 12 and
+   the recurrence's floor of 12, with five gaps. At 74 the delivery goes and
+   the rest need 72. A long page needs 117; the delivery and the wake go at
+   94 (86 left), only the delivery beside the pane (96 exactly), and the
+   state too at 74 (73 left). *)
+let test_the_schedule_at_the_widths_it_is_read_at () =
+  let without columns =
+    List.filter (fun column -> not (List.mem column columns))
+      schedule_every_column
+  in
+  List.iter
+    (fun (where, layout, inner_width, shown, recurrence) ->
+      check bool
+        (Printf.sprintf "%s: the columns drawn" where)
+        true
+        (schedule_shown layout = shown);
+      check int
+        (Printf.sprintf "%s: the recurrence's cells" where)
+        recurrence (schedule_recurrence_cells layout);
+      check int
+        (Printf.sprintf "%s: the row ends at the frame" where)
+        inner_width (schedule_header_width layout))
+    [ ( "short page, 80 columns"
+      , schedule_short_page ~inner_width:74
+      , 74
+      , without Schedule.[ Schedule_delivery ]
+      , 14 )
+    ; ( "short page, 100 columns"
+      , schedule_short_page ~inner_width:94
+      , 94
+      , schedule_every_column
+      , 21 )
+    ; ( "short page, beside the Activity pane"
+      , schedule_short_page ~inner_width:96
+      , 96
+      , schedule_every_column
+      , 23 )
+    ; ( "long page, 80 columns"
+      , schedule_long_page ~inner_width:74
+      , 74
+      , without Schedule.[ Schedule_delivery; Schedule_wake; Schedule_status ]
+      , 13 )
+    ; ( "long page, 100 columns"
+      , schedule_long_page ~inner_width:94
+      , 94
+      , without Schedule.[ Schedule_delivery; Schedule_wake ]
+      , 20 )
+    ; ( "long page, beside the Activity pane"
+      , schedule_long_page ~inner_width:96
+      , 96
+      , without Schedule.[ Schedule_delivery ]
+      , 12 )
+    ]
+
+(* Narrower still, the columns go in the order the list declares. Each width
+   sits inside the range where exactly that many have gone on a short page:
+   72 to 84 for the delivery, 62 to 71 for the wake, 49 to 61 for the state. *)
+let test_a_narrow_schedule_gives_up_columns_in_its_order () =
+  let at inner_width = schedule_shown (schedule_short_page ~inner_width) in
+  check bool "at 80 the delivery goes first" true
+    (at 80
+    = Schedule.
+        [ Schedule_status
+        ; Schedule_due
+        ; Schedule_target
+        ; Schedule_wake
+        ; Schedule_recurrence
+        ]);
+  check bool "at 66 the wake follows" true
+    (at 66
+    = Schedule.
+        [ Schedule_status; Schedule_due; Schedule_target; Schedule_recurrence ]);
+  check bool "at 55 the state goes last" true
+    (at 55 = Schedule.[ Schedule_due; Schedule_target; Schedule_recurrence ]);
+  let narrowest = schedule_short_page ~inner_width:20 in
+  check bool "the due time, the target and the recurrence never go" true
+    (schedule_shown narrowest
+    = Schedule.[ Schedule_due; Schedule_target; Schedule_recurrence ]);
+  check int "the recurrence stays at its floor"
+    Schedule.schedule_minimum_recurrence_width
+    (schedule_recurrence_cells narrowest);
+  check int "the row is wider than the space, as the frame's cut expects" 49
+    (schedule_header_width narrowest)
+
+(* The reading the probe puts in each column. Every schedule column is
+   placed by its left edge. *)
+let schedule_marks : Schedule.schedule_row_values =
+  { srow_status = "A"
+  ; srow_due = "B"
+  ; srow_target = "C"
+  ; srow_wake = "D"
+  ; srow_delivery = "E"
+  ; srow_recurrence = "F"
+  }
+
+let schedule_cells =
+  Schedule.
+    [ (Schedule_status, Left_edge, "STATUS", "A")
+    ; (Schedule_due, Left_edge, "DUE", "B")
+    ; (Schedule_target, Left_edge, "TARGET", "C")
+    ; (Schedule_wake, Left_edge, "WAKE", "D")
+    ; (Schedule_delivery, Left_edge, "DELIVERY", "E")
+    ; (Schedule_recurrence, Left_edge, "RECURRENCE", "F")
+    ]
+
+let test_schedule_columns_hold_their_offsets () =
+  for inner_width = fitted_narrowest_swept_width to 240 do
+    List.iter
+      (fun layout ->
+        let header = Schedule.schedule_header_row ~layout in
+        let row = Schedule.schedule_row ~layout schedule_marks in
+        check_fitted_cells ~shown:(schedule_shown layout) ~header ~row
+          ~inner_width schedule_cells)
+      [ schedule_short_page ~inner_width; schedule_long_page ~inner_width ]
+  done
 
 (* Escapes have no display width, so a dressed row measures exactly what an
    undressed one does -- and what the header does. A colour cannot move a
@@ -1505,46 +1669,92 @@ let change_overflowing =
   ; crow_summary = String.concat "" (List.init 20 (fun _ -> "summary "))
   }
 
+let lane_identity_header = "ACTOR"
+
+let lane_cells =
+  Schedule.
+    [ (Lane_started, Left_edge, "STARTED", "A")
+    ; (Lane_subject, Left_edge, lane_identity_header, "B")
+    ; (Lane_status, Left_edge, "STATUS", "C")
+    ; (Lane_elapsed, Right_edge, "ELAPSED", "D")
+    ; (Lane_slot, Left_edge, "SLOT", "E")
+    ; (Lane_run_id, Left_edge, "RUN ID", "F")
+    ]
+
 let test_lane_columns_hold_their_offsets () =
-  for inner_width = 80 to 240 do
-    let run_id_width = Schedule.lane_run_id_width ~inner_width in
-    let identity_header = "ACTOR" in
+  let identity_header = lane_identity_header in
+  for inner_width = fitted_narrowest_swept_width to 240 do
+    let layout = Schedule.lane_run_layout ~inner_width in
     let width text = Masc_tui_message_layout.display_width text in
-    let header =
-      Schedule.lane_run_header_row ~identity_header ~run_id_width
-    in
+    let header = Schedule.lane_run_header_row ~identity_header ~layout in
     let row =
-      Schedule.lane_run_row ~identity_header ~status_style:"" ~run_id_width
+      Schedule.lane_run_row ~identity_header ~status_style:"" ~layout
         lane_probe
     in
-    check_left_cell "STARTED" "A" ~header ~row ~inner_width;
-    check_left_cell identity_header "B" ~header ~row ~inner_width;
-    check_left_cell "STATUS" "C" ~header ~row ~inner_width;
-    check_left_cell "SLOT" "E" ~header ~row ~inner_width;
-    check_left_cell "RUN ID" "F" ~header ~row ~inner_width;
+    check_fitted_cells ~shown:layout.Masc_tui_table.shown ~header ~row
+      ~inner_width lane_cells;
     check int
       (Printf.sprintf "inner %d: a dressed overflowing run" inner_width)
       (width header)
       (width
          (Schedule.lane_run_row ~identity_header ~status_style:"\027[31m"
-            ~run_id_width lane_overflowing))
+            ~layout lane_overflowing))
   done
 
+(* An eighty-column terminal leaves the run list 74 cells: the frame's four
+   and the row's two of lead come off. Every column needs 85, so the slot
+   goes and the run id has its cells. Narrower, the elapsed time and then the
+   start follow; the subject, the status and the run id stay. *)
+let test_a_narrow_run_list_gives_up_columns_in_its_order () =
+  let at inner_width = Schedule.lane_run_layout ~inner_width in
+  List.iter
+    (fun (inner_width, shown, run_id) ->
+      let layout = at inner_width in
+      check bool
+        (Printf.sprintf "inner %d: the columns drawn" inner_width)
+        true
+        (layout.Masc_tui_table.shown = shown);
+      check int
+        (Printf.sprintf "inner %d: the run id's cells" inner_width)
+        run_id layout.Masc_tui_table.flex_width)
+    Schedule.
+      [ ( 85
+        , [ Lane_started
+          ; Lane_subject
+          ; Lane_status
+          ; Lane_elapsed
+          ; Lane_slot
+          ; Lane_run_id
+          ]
+        , 12 )
+      ; ( 74
+        , [ Lane_started; Lane_subject; Lane_status; Lane_elapsed; Lane_run_id ]
+        , 18 )
+      ; (64, [ Lane_started; Lane_subject; Lane_status; Lane_run_id ], 17)
+      ; (50, [ Lane_subject; Lane_status; Lane_run_id ], 21)
+      ; (20, [ Lane_subject; Lane_status; Lane_run_id ], 12)
+      ]
+
+let change_cells =
+  Schedule.
+    [ (Change_turn, Right_edge, "TURN", "A")
+    ; (Change_task, Left_edge, "TASK", "B")
+    ; (Change_op, Left_edge, "OP", "C")
+    ; (Change_result, Left_edge, "RESULT", "D")
+    ; (Change_file, Left_edge, "FILE", "E")
+    ; (Change_summary, Left_edge, "WHAT", "F")
+    ]
+
 let test_change_columns_hold_their_offsets () =
-  for inner_width = 80 to 240 do
-    let summary_width = Schedule.change_summary_width ~inner_width in
+  for inner_width = fitted_narrowest_swept_width to 240 do
+    let layout = Schedule.change_layout ~inner_width in
     let width text = Masc_tui_message_layout.display_width text in
-    let header = Schedule.change_header_row ~summary_width in
+    let header = Schedule.change_header_row ~layout in
     let row =
-      Schedule.change_row ~op_style:"" ~result_style:"" ~summary_width
-        change_probe
+      Schedule.change_row ~op_style:"" ~result_style:"" ~layout change_probe
     in
-    check_right_cell "TURN" "A" ~header ~row ~inner_width;
-    check_left_cell "TASK" "B" ~header ~row ~inner_width;
-    check_left_cell "OP" "C" ~header ~row ~inner_width;
-    check_left_cell "RESULT" "D" ~header ~row ~inner_width;
-    check_left_cell "FILE" "E" ~header ~row ~inner_width;
-    check_left_cell "WHAT" "F" ~header ~row ~inner_width;
+    check_fitted_cells ~shown:layout.Masc_tui_table.shown ~header ~row
+      ~inner_width change_cells;
     (* The file cell was padded and never fitted, so this row used to be wider
        than its header by the length of the path. *)
     check int
@@ -1552,8 +1762,39 @@ let test_change_columns_hold_their_offsets () =
       (width header)
       (width
          (Schedule.change_row ~op_style:"\027[33m" ~result_style:"\027[31m"
-            ~summary_width change_overflowing))
+            ~layout change_overflowing))
   done
+
+(* An eighty-column terminal leaves the change list 74 cells. Every column
+   needs 84 and all but the turn 77, so the turn and then the task go and
+   the summary -- what the turn did -- has their cells. Narrower, the
+   operation and then the result follow; the file and the summary stay. *)
+let test_a_narrow_change_list_gives_up_columns_in_its_order () =
+  List.iter
+    (fun (inner_width, shown, summary) ->
+      let layout = Schedule.change_layout ~inner_width in
+      check bool
+        (Printf.sprintf "inner %d: the columns drawn" inner_width)
+        true
+        (layout.Masc_tui_table.shown = shown);
+      check int
+        (Printf.sprintf "inner %d: the summary's cells" inner_width)
+        summary layout.Masc_tui_table.flex_width)
+    Schedule.
+      [ ( 84
+        , [ Change_turn
+          ; Change_task
+          ; Change_op
+          ; Change_result
+          ; Change_file
+          ; Change_summary
+          ]
+        , 12 )
+      ; (74, [ Change_op; Change_result; Change_file; Change_summary ], 20)
+      ; (62, [ Change_result; Change_file; Change_summary ], 14)
+      ; (55, [ Change_file; Change_summary ], 16)
+      ; (20, [ Change_file; Change_summary ], 12)
+      ]
 
 (* Every column name has to survive its own column.
 
@@ -1581,10 +1822,13 @@ let test_headers_fit_their_columns () =
             ~message_width:(Schedule.system_log_message_width ~inner_width) )
       ; ( "lane run"
         , Schedule.lane_run_header_row ~identity_header:"ACTOR"
-            ~run_id_width:(Schedule.lane_run_id_width ~inner_width) )
+            ~layout:(Schedule.lane_run_layout ~inner_width) )
+      ; ( "schedule"
+        , Schedule.schedule_header_row
+            ~layout:(schedule_short_page ~inner_width) )
       ; ( "change"
         , Schedule.change_header_row
-            ~summary_width:(Schedule.change_summary_width ~inner_width) )
+            ~layout:(Schedule.change_layout ~inner_width) )
       ; ( "fusion"
         , let keeper_width = 16 in
           Schedule.fusion_header_row
@@ -1592,11 +1836,10 @@ let test_headers_fit_their_columns () =
       ; ( "planning"
         , let phase_width = planning_phase_width in
           Schedule.planning_header_row ~phase_width
-            ~title_width:
-              (Schedule.planning_title_width ~inner_width ~phase_width) )
+            ~layout:(Schedule.planning_layout ~inner_width ~phase_width) )
       ; ( "harness"
         , Schedule.harness_header_row
-            ~reason_width:(Schedule.harness_reason_width ~inner_width) )
+            ~layout:(Schedule.harness_layout ~inner_width) )
       ; ( "board"
         , Schedule.board_header_row ~age_header:"AGE"
             ~layout:(Schedule.board_layout ~inner_width) )
@@ -1634,27 +1877,66 @@ let harness_overflowing =
   ; hrow_reason = String.concat "" (List.init 20 (fun _ -> "reason "))
   }
 
+let harness_cells =
+  Schedule.
+    [ (Harness_time, Left_edge, "TIME", "A")
+    ; (Harness_task, Left_edge, "TASK", "B")
+    ; (Harness_gate, Left_edge, "GATE", "C")
+    ; (Harness_verdict, Left_edge, "VERDICT", "D")
+    ; (Harness_evaluator, Left_edge, "EVALUATOR", "E")
+    ; (Harness_reason, Left_edge, "REASON", "F")
+    ]
+
 let test_harness_columns_hold_their_offsets () =
-  for inner_width = 80 to 240 do
-    let reason_width = Schedule.harness_reason_width ~inner_width in
+  for inner_width = fitted_narrowest_swept_width to 240 do
+    let layout = Schedule.harness_layout ~inner_width in
     let width text = Masc_tui_message_layout.display_width text in
-    let header = Schedule.harness_header_row ~reason_width in
-    let row = Schedule.harness_row ~verdict_style:"" ~reason_width harness_probe in
-    check_left_cell "TIME" "A" ~header ~row ~inner_width;
-    check_left_cell "TASK" "B" ~header ~row ~inner_width;
-    check_left_cell "GATE" "C" ~header ~row ~inner_width;
-    check_left_cell "VERDICT" "D" ~header ~row ~inner_width;
-    check_left_cell "EVALUATOR" "E" ~header ~row ~inner_width;
-    check_left_cell "REASON" "F" ~header ~row ~inner_width;
+    let header = Schedule.harness_header_row ~layout in
+    let row = Schedule.harness_row ~verdict_style:"" ~layout harness_probe in
+    check_fitted_cells ~shown:layout.Masc_tui_table.shown ~header ~row
+      ~inner_width harness_cells;
     (* The task and gate cells were padded and never fitted, so a long id used
        to make this row wider than the header it sits under. *)
     check int
       (Printf.sprintf "inner %d: a long id no longer widens the row" inner_width)
       (width header)
       (width
-         (Schedule.harness_row ~verdict_style:"\027[31m" ~reason_width
+         (Schedule.harness_row ~verdict_style:"\027[31m" ~layout
             harness_overflowing))
   done
+
+(* An eighty-column terminal leaves the verdict list 74 cells. Every column
+   needs 81, so the evaluator goes and the reason has thirty cells where it
+   had five. Narrower, the time and then the gate follow; the task, the
+   verdict and the reason stay. *)
+let test_a_narrow_verdict_list_gives_up_columns_in_its_order () =
+  List.iter
+    (fun (inner_width, shown, reason) ->
+      let layout = Schedule.harness_layout ~inner_width in
+      check bool
+        (Printf.sprintf "inner %d: the columns drawn" inner_width)
+        true
+        (layout.Masc_tui_table.shown = shown);
+      check int
+        (Printf.sprintf "inner %d: the reason's cells" inner_width)
+        reason layout.Masc_tui_table.flex_width)
+    Schedule.
+      [ ( 81
+        , [ Harness_time
+          ; Harness_task
+          ; Harness_gate
+          ; Harness_verdict
+          ; Harness_evaluator
+          ; Harness_reason
+          ]
+        , 12 )
+      ; ( 74
+        , [ Harness_time; Harness_task; Harness_gate; Harness_verdict; Harness_reason ]
+        , 30 )
+      ; (50, [ Harness_task; Harness_gate; Harness_verdict; Harness_reason ], 15)
+      ; (40, [ Harness_task; Harness_verdict; Harness_reason ], 15)
+      ; (20, [ Harness_task; Harness_verdict; Harness_reason ], 12)
+      ]
 
 (* Fusion run columns. The run id was unbounded where it was named and cut at
    fourteen where it was filled. *)
@@ -2032,57 +2314,99 @@ let planning_probe =
   ; prow_due = "G"
   }
 
-let planning_row_of ~title_width values =
+let planning_layout_at inner_width =
+  Schedule.planning_layout ~inner_width ~phase_width:planning_phase_width
+
+let planning_header_at layout =
+  Schedule.planning_header_row ~phase_width:planning_phase_width ~layout
+
+let planning_row_of ~layout values =
   Schedule.planning_row ~phase_style:"" ~phase_width:planning_phase_width
-    ~title_width values
+    ~layout values
+
+(* The judge's column was the one column with a blank header, so nothing
+   could hold it in place. *)
+let planning_cells =
+  Schedule.
+    [ (Planning_phase, Left_edge, "PHASE", "A")
+    ; (Planning_proof, Left_edge, "JUDGE", "B")
+    ; (Planning_priority, Left_edge, "PRI", "C")
+    ; (Planning_open, Left_edge, "OPEN", "D")
+    ; (Planning_title, Left_edge, "TITLE", "E")
+    ; (Planning_age, Right_edge, "AGE", "F")
+    ; (Planning_due, Left_edge, "DUE", "G")
+    ]
 
 let test_planning_columns_hold_their_offsets () =
-  for inner_width = 80 to 240 do
-    let title_width =
-      Schedule.planning_title_width ~inner_width
-        ~phase_width:planning_phase_width
-    in
-    let header =
-      Schedule.planning_header_row ~phase_width:planning_phase_width
-        ~title_width
-    in
-    let row = planning_row_of ~title_width planning_probe in
-    check_left_cell "PHASE" "A" ~header ~row ~inner_width;
-    (* The judge's column was the one column with a blank header, so nothing
-       here could hold it in place. *)
-    check_left_cell "JUDGE" "B" ~header ~row ~inner_width;
-    check_left_cell "PRI" "C" ~header ~row ~inner_width;
-    check_left_cell "OPEN" "D" ~header ~row ~inner_width;
-    check_left_cell "TITLE" "E" ~header ~row ~inner_width;
-    check_right_cell "AGE" "F" ~header ~row ~inner_width;
-    check_left_cell "DUE" "G" ~header ~row ~inner_width
+  for inner_width = fitted_narrowest_swept_width to 240 do
+    let layout = planning_layout_at inner_width in
+    let header = planning_header_at layout in
+    let row = planning_row_of ~layout planning_probe in
+    check_fitted_cells ~shown:layout.Masc_tui_table.shown ~header ~row
+      ~inner_width planning_cells
   done
 
 let test_planning_columns_with_styles_hold_their_offsets () =
-  for inner_width = 80 to 240 do
-    let title_width =
-      Schedule.planning_title_width ~inner_width
-        ~phase_width:planning_phase_width
-    in
-    let header =
-      Schedule.planning_header_row ~phase_width:planning_phase_width
-        ~title_width
-    in
+  for inner_width = fitted_narrowest_swept_width to 240 do
+    let layout = planning_layout_at inner_width in
+    let header = planning_header_at layout in
     let row =
       Schedule.planning_row ~phase_style:"\027[32m" ~priority_style:"\027[31m"
-        ~open_style:"\027[33m" ~phase_width:planning_phase_width ~title_width
+        ~open_style:"\027[33m" ~phase_width:planning_phase_width ~layout
         planning_probe
     in
-    check_left_cell "PHASE" "A" ~header ~row ~inner_width;
-    (* The judge's column was the one column with a blank header, so nothing
-       here could hold it in place. *)
-    check_left_cell "JUDGE" "B" ~header ~row ~inner_width;
-    check_left_cell "PRI" "C" ~header ~row ~inner_width;
-    check_left_cell "OPEN" "D" ~header ~row ~inner_width;
-    check_left_cell "TITLE" "E" ~header ~row ~inner_width;
-    check_right_cell "AGE" "F" ~header ~row ~inner_width;
-    check_left_cell "DUE" "G" ~header ~row ~inner_width
+    check_fitted_cells ~shown:layout.Masc_tui_table.shown ~header ~row
+      ~inner_width planning_cells
   done
+
+(* The title sits in the middle of the goal list, so a row wider than the
+   frame lost the age and the due date after it. With an eleven-cell phase
+   every column needs 69; an eighty-column terminal leaves 74 and keeps them
+   all. Narrower, the due date goes first, then the age, the open-work tally
+   and the judge's mark; the phase, the priority and the title stay. *)
+let test_a_narrow_goal_list_gives_up_columns_in_its_order () =
+  List.iter
+    (fun (inner_width, shown, title) ->
+      let layout = planning_layout_at inner_width in
+      check bool
+        (Printf.sprintf "inner %d: the columns drawn" inner_width)
+        true
+        (layout.Masc_tui_table.shown = shown);
+      check int
+        (Printf.sprintf "inner %d: the title's cells" inner_width)
+        title layout.Masc_tui_table.flex_width)
+    Schedule.
+      [ ( 74
+        , [ Planning_phase
+          ; Planning_proof
+          ; Planning_priority
+          ; Planning_open
+          ; Planning_title
+          ; Planning_age
+          ; Planning_due
+          ]
+        , 17 )
+      ; ( 60
+        , [ Planning_phase
+          ; Planning_proof
+          ; Planning_priority
+          ; Planning_open
+          ; Planning_title
+          ; Planning_age
+          ]
+        , 14 )
+      ; ( 55
+        , [ Planning_phase
+          ; Planning_proof
+          ; Planning_priority
+          ; Planning_open
+          ; Planning_title
+          ]
+        , 16 )
+      ; (40, [ Planning_phase; Planning_proof; Planning_priority; Planning_title ], 18)
+      ; (30, [ Planning_phase; Planning_priority; Planning_title ], 14)
+      ; (20, [ Planning_phase; Planning_priority; Planning_title ], 12)
+      ]
 
 let board_probe =
   { Schedule.brow_mark = "@"
@@ -2213,44 +2537,25 @@ let test_the_narrowest_board_keeps_the_title_floor () =
   check int "the row is wider than the space, as the frame's cut expects" 39
     (board_header_width layout)
 
-(* The columns placed by their left edge, with the reading the probe puts in
-   each. A column the list has given up has no name in the header and no
-   reading in the row, so it is checked for being absent instead; the age is
-   never given up and is placed by its right edge. *)
-let board_left_cells =
+(* The mark column is left out: its header is a blank, which names nothing a
+   search could place. *)
+let board_fitted_cells =
   Schedule.
-    [ (Board_id, "ID", "A")
-    ; (Board_hearth, "HEARTH", "B")
-    ; (Board_author, "AUTHOR", "C")
-    ; (Board_title, "TITLE", "D")
-    ; (Board_score, "SCORE", "F")
-    ; (Board_replies, "REPLIES", "G")
+    [ (Board_id, Left_edge, "ID", "A")
+    ; (Board_hearth, Left_edge, "HEARTH", "B")
+    ; (Board_author, Left_edge, "AUTHOR", "C")
+    ; (Board_title, Left_edge, "TITLE", "D")
+    ; (Board_age, Right_edge, "AGE", "E")
+    ; (Board_score, Left_edge, "SCORE", "F")
+    ; (Board_replies, Left_edge, "REPLIES", "G")
     ]
 
 let check_board_cells ~layout ~header ~row ~inner_width =
-  List.iter
-    (fun (column, label, mark) ->
-      if List.mem column layout.Masc_tui_table.shown then
-        check_left_cell label mark ~header ~row ~inner_width
-      else begin
-        check bool
-          (Printf.sprintf "inner %d: %s has left the header" inner_width label)
-          true
-          (index_of header label = None);
-        check bool
-          (Printf.sprintf "inner %d: %s has left the row" inner_width label)
-          true
-          (index_of row mark = None)
-      end)
-    board_left_cells;
-  check_right_cell "AGE" "E" ~header ~row ~inner_width
-
-(* From below the title's floor, so every width at which a column goes is
-   crossed. *)
-let board_narrowest_swept_width = 20
+  check_fitted_cells ~shown:layout.Masc_tui_table.shown ~header ~row
+    ~inner_width board_fitted_cells
 
 let test_board_columns_hold_their_offsets () =
-  for inner_width = board_narrowest_swept_width to 240 do
+  for inner_width = fitted_narrowest_swept_width to 240 do
     let layout = Schedule.board_layout ~inner_width in
     let header = Schedule.board_header_row ~age_header:"AGE" ~layout in
     let row = board_row_of ~layout board_probe in
@@ -2267,7 +2572,7 @@ let test_board_columns_with_styles_hold_their_offsets () =
     ; bstyle_replies = "\027[33m"
     }
   in
-  for inner_width = board_narrowest_swept_width to 240 do
+  for inner_width = fitted_narrowest_swept_width to 240 do
     let layout = Schedule.board_layout ~inner_width in
     let header = Schedule.board_header_row ~age_header:"AGE" ~layout in
     let row = Schedule.board_row ~styles ~age_header:"AGE" ~layout board_probe in
@@ -2289,10 +2594,7 @@ let test_a_title_gives_way_at_its_tail () =
       { board_probe with brow_title = title }
   in
   let planning =
-    planning_row_of
-      ~title_width:
-        (Schedule.planning_title_width ~inner_width:114
-           ~phase_width:planning_phase_width)
+    planning_row_of ~layout:(planning_layout_at 114)
       { planning_probe with prow_title = title }
   in
   List.iter
@@ -2315,6 +2617,15 @@ let test_every_sentence_column_gives_way_at_its_tail () =
     "Verify: run-exact-output-lane-board-attention-9e327af211400cba719b59128"
   in
   let prose_width = 24 in
+  (* The change list's other columns take 67 cells and the verdict list's
+     64, each with five gaps, so these widths leave each sentence column
+     [prose_width]. *)
+  let change_layout = Schedule.change_layout ~inner_width:96 in
+  let harness_layout = Schedule.harness_layout ~inner_width:93 in
+  check int "the change summary has the prose width" prose_width
+    change_layout.Masc_tui_table.flex_width;
+  check int "the verdict reason has the prose width" prose_width
+    harness_layout.Masc_tui_table.flex_width;
   let rows =
     [ ( "system log"
       , Schedule.system_log_row ~message_width:prose_width ~level_style:""
@@ -2325,11 +2636,10 @@ let test_every_sentence_column_gives_way_at_its_tail () =
           ~title_width:prose_width
           { verification_probe with vrow_title = sentence } )
     ; ( "changes"
-      , Schedule.change_row ~op_style:"" ~result_style:""
-          ~summary_width:prose_width
+      , Schedule.change_row ~op_style:"" ~result_style:"" ~layout:change_layout
           { change_probe with crow_summary = sentence } )
     ; ( "harness"
-      , Schedule.harness_row ~verdict_style:"" ~reason_width:prose_width
+      , Schedule.harness_row ~verdict_style:"" ~layout:harness_layout
           { harness_probe with hrow_reason = sentence } )
     ]
   in
@@ -2425,20 +2735,17 @@ let test_board_spaces_its_columns_like_every_other_table () =
    the date ten cells left of the goal above it, because the title was sized
    from what those two happened to measure on that row. *)
 let test_an_absent_date_does_not_move_the_age () =
-  let inner_width = 120 in
-  let title_width =
-    Schedule.planning_title_width ~inner_width ~phase_width:planning_phase_width
-  in
+  let layout = planning_layout_at 120 in
   let with_both =
-    planning_row_of ~title_width
+    planning_row_of ~layout
       { planning_probe with Schedule.prow_age = "F"; prow_due = "2026-09-04" }
   in
   let without_date =
-    planning_row_of ~title_width
+    planning_row_of ~layout
       { planning_probe with Schedule.prow_age = "F"; prow_due = "" }
   in
   let long_title =
-    planning_row_of ~title_width
+    planning_row_of ~layout
       { planning_probe with
         Schedule.prow_title = String.make 200 'x'
       ; prow_age = "F"
@@ -2603,6 +2910,12 @@ let () =
             test_schedule_recurrence_takes_the_remainder
         ; test_case "schedule names its columns once" `Quick
             test_schedule_names_its_columns_once
+        ; test_case "the schedule at the widths it is read at" `Quick
+            test_the_schedule_at_the_widths_it_is_read_at
+        ; test_case "a narrow schedule gives up columns in its order" `Quick
+            test_a_narrow_schedule_gives_up_columns_in_its_order
+        ; test_case "schedule columns hold their offsets" `Quick
+            test_schedule_columns_hold_their_offsets
         ; test_case "system log message takes the remainder" `Quick
             test_system_log_message_takes_the_remainder
         ; test_case "system log header and row share their offsets" `Quick
@@ -2617,6 +2930,14 @@ let () =
             test_planning_columns_hold_their_offsets
         ; test_case "planning columns with styles hold their offsets" `Quick
             test_planning_columns_with_styles_hold_their_offsets
+        ; test_case "a narrow run list gives up columns in its order" `Quick
+            test_a_narrow_run_list_gives_up_columns_in_its_order
+        ; test_case "a narrow change list gives up columns in its order" `Quick
+            test_a_narrow_change_list_gives_up_columns_in_its_order
+        ; test_case "a narrow verdict list gives up columns in its order" `Quick
+            test_a_narrow_verdict_list_gives_up_columns_in_its_order
+        ; test_case "a narrow goal list gives up columns in its order" `Quick
+            test_a_narrow_goal_list_gives_up_columns_in_its_order
         ; test_case "board columns hold their offsets" `Quick
             test_board_columns_hold_their_offsets
         ; test_case "board columns with styles hold their offsets" `Quick

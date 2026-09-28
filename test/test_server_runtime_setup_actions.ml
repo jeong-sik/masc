@@ -172,7 +172,7 @@ account-home = "/synthetic-selected-muse"
 is-non-interactive = true
 [models.ready_muse]
 api-name = "fixture-muse"
-max-context = 4096
+max-context = 200000
 max-prompt-bytes = 8192
 tools-support = true
 [ready_muse.ready_muse]

@@ -741,7 +741,9 @@ let run_turn_with ?goal_blocks ?(accepts_image_input = false) ?model ?account_ho
   in
   let outcome =
     Keeper_muse_runtime.run
-      ~max_prompt_bytes:(Runtime_inference.resolve_max_prompt_bytes ~runtime_id)
+      ~prompt_capacity:
+        (Option.to_result ~none:Runtime_muse_prompt_capacity.No_window_declared
+           (Runtime_inference.resolve_max_prompt_bytes ~runtime_id))
       ~configured_reasoning_effort:(Runtime_inference.resolve_reasoning_effort ~runtime_id)
       ~turn_timeout_s:(Runtime_inference.resolve_turn_timeout_s ~runtime_id)
       ~quota_scope:(Runtime_quota_window.scope_of_muse_home selected_home)

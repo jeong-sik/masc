@@ -119,6 +119,12 @@ val finalize_measured
 val fingerprint : t -> fingerprint
 val response_format : t -> Types.response_format
 val request_body_sha256 : t -> string
+
+(** Inspect the frozen wire bytes in tests without adding a production accessor. *)
+module For_testing : sig
+  val request_body : t -> string
+end
+
 (** The request parsed when the plan was frozen. A binding whose URL or
     headers cannot be sent is refused as [Provider_request_rejected] before it
     becomes a plan. *)

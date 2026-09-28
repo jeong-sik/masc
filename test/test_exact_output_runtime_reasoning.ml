@@ -181,7 +181,7 @@ let test_explicit_effort_reaches_serialized_request () =
         ~minimum_guarantee:Ready.Json_syntax in
     let ready = Ready.admit ~target:selected ~messages requirement
       |> require_ok "wire ready plan" in
-    let serialized = Plan.request_body ready.plan in
+    let serialized = Plan.For_testing.request_body ready.plan in
     (* Bind the inspected bytes to the opaque plan produced by actual runtime
        initialization and bootstrap, without dispatching a provider request. *)
     check string "runtime bootstrap freezes these exact request bytes"
@@ -207,7 +207,7 @@ let serialized_body target =
     |> require_ok "preflight"
   in
   let plan = Plan.finalize_unmeasured preflight |> require_ok "finalize" in
-  Yojson.Safe.from_string (Plan.request_body plan)
+  Yojson.Safe.from_string (Plan.For_testing.request_body plan)
 
 (* The catalog ceiling is 384000. The Librarian lane declares 4096 and its
    request carries that; the HITL lane declares nothing and its request

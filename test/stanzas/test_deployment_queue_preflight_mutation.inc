@@ -29,6 +29,7 @@
   masc.masc_core
   masc.config_dir_resolver
   masc.board_handlers
+  masc.skill_config
   fs_compat
   cmdliner
   unix

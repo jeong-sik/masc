@@ -66,15 +66,21 @@ type facts_reading =
    there goes off the right edge.
 
    [screen] and [badge] arrive rendered because colour and the connection
-   reading belong to the caller. *)
-let facts_title ~screen ~keeper ~reading ~timestamp ~badge =
-  match reading with
-  | Facts_unread { reading } ->
-    Printf.sprintf "%s \xe2\x96\xb8 %s  %s  %s  %s" screen keeper reading
-      timestamp badge
-  | Facts_loaded { total; filter_label; query_label } ->
-    Printf.sprintf "%s \xe2\x96\xb8 %s (%s \xc2\xb7 %s%s)  %s  %s" screen
-      keeper (Masc_tui_message_layout.count_noun total "fact") filter_label query_label timestamp badge
+   reading belong to the caller. The clock and the badge are the heading's
+   tail and are never shortened; when the row is narrow the keeper's name
+   folds to its floor, the counts and filters are cut at their end, and only
+   then the name goes further ([detail_heading]). *)
+let facts_title ~cols ~screen ~keeper ~reading ~timestamp ~badge =
+  let after =
+    match reading with
+    | Facts_unread { reading } -> "  " ^ reading
+    | Facts_loaded { total; filter_label; query_label } ->
+      Printf.sprintf " (%s \xc2\xb7 %s%s)"
+        (Masc_tui_message_layout.count_noun total "fact") filter_label
+        query_label
+  in
+  detail_heading ~cols ~lead:(Lead_text (screen ^ " \xe2\x96\xb8 ")) ~id:keeper
+    ~after ~tail:(timestamp ^ "  " ^ badge)
 
 (* The row under the facts title. The title says the total and the filter; this
    says how that total breaks down and which sort produced the order, so each

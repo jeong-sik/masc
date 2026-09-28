@@ -864,6 +864,10 @@ let keeper_split_threshold_cols = Masc_tui_roster_pane.threshold_cols
 let keeper_roster_pane_cols = Masc_tui_roster_pane.pane_cols
 
 
+(* The line [surface_strip] draws above every surface. A row a surface counts
+   in its own frame sits this many lines lower in the terminal's. *)
+let strip_rows = 1
+
 (* Finish a frame with the strip on top. Surfaces measured cursor rows inside
    their own frame, so a visible cursor shifts down with the prepend, and the
    declared height grows back to the terminal's real row count. *)
@@ -873,13 +877,13 @@ let finish_frame_with_strip (state : state) ?clamped ~surface_key ~cursor ~rows
     match cursor with
     | Frame_presenter.Hidden -> Frame_presenter.Hidden
     | Frame_presenter.Visible_at { row; column } ->
-      Frame_presenter.Visible_at { row = row + 1; column }
+      Frame_presenter.Visible_at { row = row + strip_rows; column }
   in
   let framed = Buffer.create (Buffer.length buf + 160) in
   Buffer.add_string framed (surface_strip state ~cols);
   Buffer.add_char framed '\n';
   Buffer.add_buffer framed buf;
-  finish_frame ?clamped ~surface_key ~cursor ~rows:(rows + 1) ~cols framed
+  finish_frame ?clamped ~surface_key ~cursor ~rows:(rows + strip_rows) ~cols framed
 
 
 (* The agenda strip: one row above the composer, on every surface.
@@ -1267,6 +1271,11 @@ type chrome_body = {
   push_selected : string -> unit;
   push_divider : unit -> unit;
   push_empty : unit -> unit;
+  next_origin : unit -> int * int;
+      (** The terminal frame's line and cell where the next pushed row's
+          content will start -- where a picture placed over body rows goes.
+          Holds while the body stays inside its budget, which a [Fits] body
+          does. *)
 }
 
 (* top + title + divider + bottom + footer: the rows [surface_chrome] draws
@@ -1330,6 +1339,12 @@ let surface_chrome ~overflow ?(frame = Chrome_screen) (state : state)
   top buf cols;
   line buf cols title;
   divider buf cols;
+  (* The lines drawn above the body, counted from what was drawn rather than
+     by hand, and the strip [finish_surface] puts above them. *)
+  let body_top =
+    strip_rows
+    + String.fold_left (fun n c -> if c = '\n' then n + 1 else n) 0 (Buffer.contents buf)
+  in
   let budget = max 1 (rows - surface_chrome_rows) in
   (* The body's rows are held until it has finished, because only then is
      their count known: which of them the budget shows, and what the row that
@@ -1343,6 +1358,8 @@ let surface_chrome ~overflow ?(frame = Chrome_screen) (state : state)
     ; push_selected = (fun text -> hold (fun () -> line_selected buf cols text))
     ; push_divider = (fun () -> hold (fun () -> divider buf cols))
     ; push_empty = (fun () -> hold (fun () -> empty buf cols))
+    ; next_origin =
+        (fun () -> (body_top + List.length !pushed, Masc_tui_ansi.framed_content_column))
     }
   in
   body ~budget body_pushers;
@@ -1427,38 +1444,15 @@ let connection_badge (state : state) =
   | Masc_tui_types.Workspace_identity_unread
   | Masc_tui_types.Workspace_identity_match -> connection
 
-(* The screens that show one record by its id: a lane run, a measurement
-   artifact named by its sha256, and a Fusion run. *)
+(* What the headings laid out by [detail_heading] draw before the id: a lane
+   run, a measurement artifact named by its sha256, a Fusion run (whose list
+   and launch form carry the same title), one runtime's detail, and one
+   keeper's calls. *)
 let lane_run_detail_title = " MASC Lane Run"
 let measurement_detail_title = " MASC Measurement"
-let fusion_detail_title = " MASC Fusion"
-
-(* A heading that names one record: the screen's title, the record's id, and
-   the connection badge. The badge is the part that has to survive (see
-   [connection_badge]), so it is never shortened here and the id takes what
-   the title and the badge leave.
-   - An id that fits is drawn whole.
-   - One that does not is folded in the middle. The run ids of one lane share
-     their opening and differ in their hex tail (exact-board-attention- and 32
-     hex digits, 54 cells; a sha256 is 64; a Fusion run kmsg- and 32, 37), so
-     the tail is what tells two apart.
-   - With one cell left only the cut mark says an id was there; with none the
-     id is left out.
-   When the title and the badge alone are wider than the frame, the frame cuts
-   the row as it draws it: the badge keeps its start, which is the connection
-   reading, and loses its end. *)
-let detail_heading ~cols ~title ~id ~badge =
-  let cells text =
-    Message_layout.display_width (Masc_tui_theme.strip_sgr text)
-  in
-  let lead = screen_title title ^ "  " in
-  let tail = "  " ^ badge in
-  let room = framed_inner_width cols - cells lead - cells tail in
-  let id = Terminal_text.single_line id in
-  let id =
-    if cells id <= room then id else Message_layout.fit_middle (max 0 room) id
-  in
-  lead ^ id ^ tail
+let fusion_title = " MASC Fusion"
+let runtime_detail_title = " MASC Config / Runtime detail"
+let keeper_calls_lead = " Keepers \xe2\x96\xb8 "
 
 (* The coordinator's badge beside a reading of the surface's own. The badge
    brings its colour and its reset, so a style laid over the whole row painted
@@ -2429,7 +2423,9 @@ type planning_tab = Render_schedule.planning_tab =
    whatever followed -- at a hundred columns this title lost its badge and
    half its clock. Callers build that tail once and hand the same value here
    and to the row, so the measurement and the drawing cannot disagree. *)
-let planning_workspace_title (state : state) ~cols ~(tab : planning_tab) ~(window : string) ~(after : string) =
+let planning_workspace_lead = screen_title " MASC Planning" ^ "  "
+
+let planning_workspace_tabs (state : state) ~(tab : planning_tab) ~(window : string) =
   let review_count = Option.map (fun s -> s.vs_total) state.verification in
   let verifying_count =
     Option.map
@@ -2446,15 +2442,44 @@ let planning_workspace_title (state : state) ~cols ~(tab : planning_tab) ~(windo
     | Planning_task_review -> Verification
     | Planning_verdicts -> Harness
   in
-  screen_title " MASC Planning" ^ "  "
-  ^ tab_strip
-      ~width:
-        (tab_strip_width ~cols
-           ~before:(screen_title " MASC Planning" ^ "  ") ~after)
-      ~press:(fun surface text -> pressable (Press_surface surface) text)
-      (List.map
-         (fun (stop, label) -> (label, stop = tab, surface_of_stop stop))
-         stops)
+  List.map
+    (fun (stop, label) -> (label, stop = tab, surface_of_stop stop))
+    stops
+
+let planning_workspace_strip ~width tabs =
+  tab_strip ~width
+    ~press:(fun surface text -> pressable (Press_surface surface) text)
+    tabs
+
+let planning_workspace_title (state : state) ~cols ~(tab : planning_tab) ~(window : string) ~(after : string) =
+  planning_workspace_lead
+  ^ planning_workspace_strip
+      ~width:(tab_strip_width ~cols ~before:planning_workspace_lead ~after)
+      (planning_workspace_tabs state ~tab ~window)
+
+(* One verdict's heading: the Planning strip with Verdicts current, then the
+   task the verdict is about, then the badge. The strip keeps the width that
+   holds its current entry: below that it drops that entry too and the marks a
+   press lands on, so the task id folds before the strip goes under it. Above
+   it, the strip takes what the id leaves (#39712 review). *)
+let harness_detail_heading (state : state) ~cols ~task_id ~tail =
+  let cells text =
+    Masc_tui_message_layout.display_width (Masc_tui_theme.strip_sgr text)
+  in
+  let tabs = planning_workspace_tabs state ~tab:Planning_verdicts ~window:"" in
+  let mark = " \xe2\x96\xb8 verdict  " in
+  let around = cells planning_workspace_lead + cells mark in
+  detail_heading ~cols
+    ~lead:
+      (Lead_strip
+         { floor = around + tab_strip_min_width tabs
+         ; draw =
+             (fun width ->
+               planning_workspace_lead
+               ^ planning_workspace_strip ~width:(width - around) tabs
+               ^ mark)
+         })
+    ~id:task_id ~after:"" ~tail
 
 
 (* Where the goal stands with the completion judge, in one column. The phase
@@ -2982,8 +3007,8 @@ let render_diff_surface (state : state) (ds : diff_surface) =
   in
   let total = List.length diff_rows in
   let header =
-    Printf.sprintf "%s %s  vs HEAD  %s" (screen_title ds.ds_title) ds.ds_address
-      (connection_badge state)
+    detail_heading ~cols ~lead:(Lead_text (screen_title ds.ds_title ^ " "))
+      ~id:ds.ds_address ~after:"  vs HEAD" ~tail:(connection_badge state)
   in
   box_top buf cols;
   box_line buf cols header;

@@ -847,12 +847,15 @@ def drain_until_quiet(
     output: bytearray,
     quiet: float = 0.25,
     cap: float = 3.0,
-) -> None:
-    """Read until the TUI has written nothing for [quiet] seconds.
+) -> bool:
+    """Read until the TUI has written nothing for [quiet] seconds. True when
+    it went quiet, False when [cap] passed with output still arriving.
 
     A keypress's consequences are not one frame: the switch redraw can be
     preceded by frames already in flight. The only moment a press can be
-    judged is after its output has stopped arriving.
+    judged is after its output has stopped arriving. A screen that animates
+    never stops, and a caller that needs the quiet asserts the answer rather
+    than reading a screen [cap] happened to cut.
     """
     deadline = time.monotonic() + cap
     grown_at = time.monotonic()
@@ -866,7 +869,8 @@ def drain_until_quiet(
             length = len(output)
             grown_at = time.monotonic()
         elif time.monotonic() - grown_at >= quiet:
-            return
+            return True
+    return False
 
 
 def tab_until(
@@ -2110,6 +2114,7 @@ def run_terminal_scenario(
     extra_env: dict[str, str] | None = None,
     conflicting_env_base_path: bool = False,
     omit_operator_token: bool = False,
+    starts_in_chat: bool = False,
 ) -> None:
     if not scenario_admitted(scenario_selection, description):
         return
@@ -2150,6 +2155,9 @@ def run_terminal_scenario(
                 # here. Both directions leave, so neither shell decides.
                 environment.pop("NO_COLOR", None)
                 environment.pop("MASC_TUI_FORCE_COLOR", None)
+                # Under TMUX the TUI wraps every picture escape for tmux, so a
+                # suite run from a tmux shell reads bytes no scenario expects.
+                environment.pop("TMUX", None)
                 # A scenario's own variables (an $EDITOR stub, say) apply
                 # before the fixed set below, so the harness keeps the last
                 # word on the terminal it describes.
@@ -2237,33 +2245,37 @@ def run_terminal_scenario(
                     # before the first frame the harness waits for.
                     os.write(master_fd, preload_input)
                 os.kill(process.pid, signal.SIGCONT)
+                startup_needle = b" \xe2\x96\xb8 chat" if starts_in_chat else b"MASC Overview"
                 wait_for_output(
                     process,
                     master_fd,
                     output,
-                    b"MASC Overview",
+                    startup_needle,
                     start=0,
                     timeout=30.0,
                 )
-                wait_for_output(
-                    process,
-                    master_fd,
-                    output,
-                    workspace_rendered,
-                    start=0,
-                    timeout=3.0,
-                )
-                workspace_offset = output.find(workspace_rendered)
+                if not starts_in_chat:
+                    wait_for_output(
+                        process,
+                        master_fd,
+                        output,
+                        workspace_rendered,
+                        start=0,
+                        timeout=3.0,
+                    )
+                    frame_offset = output.find(workspace_rendered) + len(workspace_rendered)
+                else:
+                    frame_offset = output.find(startup_needle) + len(startup_needle)
                 wait_for_output(
                     process,
                     master_fd,
                     output,
                     FRAME_END,
-                    start=workspace_offset + len(workspace_rendered),
+                    start=frame_offset,
                     timeout=3.0,
                 )
                 read_available(master_fd, output)
-                if workspace == WORKSPACE_PAYLOAD:
+                if workspace == WORKSPACE_PAYLOAD and not starts_in_chat:
                     assert_workspace_payload_is_inert(output)
                 active_lflag = int(termios.tcgetattr(slave_fd)[3])
                 if active_lflag & (termios.ICANON | termios.ECHO):

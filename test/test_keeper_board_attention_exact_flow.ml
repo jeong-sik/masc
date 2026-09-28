@@ -771,35 +771,46 @@ let test_mixed_advanceable_final_failure_walks_cli_tail () =
       check_cli_run_selected ~before ~slot_id:Fixture.cli_primary_runtime)))
 ;;
 
-let test_mixed_non_advanceable_terminal_stops_before_cli () =
+(* A request that went out and got no answer hands the partition to the CLI
+   tail like any other provider failure (RFC-exact-lane-walks-one-slot-list
+   Q1): the exact request carries no tools, so the CLI slot cannot double an
+   effect. *)
+let test_mixed_unknown_result_walks_cli_tail () =
   Fixture.with_official_client_runtimes (fun () ->
   with_prompt_registry (fun () ->
     run_eio (fun ~sw ~net ~clock ->
-      let candidate = candidate "board-attention-mixed-terminal" in
+      let candidate = candidate "board-attention-mixed-unknown-result" in
       let aborted = Fixture.start_server ~sw ~net ~clock Fixture.Abort_after_request in
       publish_lane
         ~cli_slot_ids:[ Fixture.cli_primary_runtime ]
-        [ target "board-attention-terminal-http" aborted.base_url ];
+        [ target "board-attention-unknown-result-http" aborted.base_url ];
       let prepared =
         match prepare_exact ~net:(Some net) candidate with
         | Ok prepared -> prepared
-        | Error _ -> Alcotest.fail "mixed terminal lane did not prepare"
+        | Error _ -> Alcotest.fail "mixed unknown-result lane did not prepare"
       in
+      let before = board_attention_run_ids () in
       let cli_calls = ref 0 in
-      match
-        Exact_flow.execute
-          ~cli_runner:(cli_success_runner candidate cli_calls)
-          ~clock
-          ~callback_error_to_string:Fun.id
-          ~before_dispatch:(fun _ -> Ok ())
-          ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
-          prepared
-      with
-      | Error (Exact_flow.Providers_exhausted { attempts; _ }) ->
-        Alcotest.(check int) "terminal keeps one HTTP receipt" 1 (List.length attempts);
-        Alcotest.(check int) "non-advanceable failure does not dispatch CLI" 0 !cli_calls
-      | Error _ -> Alcotest.fail "non-advanceable execution failure changed category"
-      | Ok _ -> Alcotest.fail "non-advanceable HTTP failure must remain terminal")))
+      (match
+         Exact_flow.execute
+           ~cli_runner:(cli_success_runner candidate cli_calls)
+           ~clock
+           ~callback_error_to_string:Fun.id
+           ~before_dispatch:(fun _ -> Ok ())
+           ~before_advance:(fun ~failed:_ ~next:_ ->
+             Alcotest.fail "the aborted final HTTP candidate has no HTTP successor")
+           prepared
+       with
+       | Ok judgment ->
+         Alcotest.(check string)
+           "CLI answered after the unanswered HTTP request"
+           Fixture.cli_primary_runtime
+           judgment.Candidate.slot_id
+       | Error _ -> Alcotest.fail "an unanswered HTTP request did not reach the CLI tail");
+      Alcotest.(check int) "aborted HTTP candidate dispatched once" 1
+        (Fixture.post_count aborted);
+      Alcotest.(check int) "CLI candidate dispatched once" 1 !cli_calls;
+      check_cli_run_selected ~before ~slot_id:Fixture.cli_primary_runtime)))
 ;;
 
 let test_mixed_before_advance_failure_stops_before_cli () =
@@ -1861,9 +1872,9 @@ let () =
             `Quick
             test_mixed_advanceable_final_failure_walks_cli_tail
         ; Alcotest.test_case
-            "mixed non-advanceable terminal stops before CLI"
+            "mixed unanswered HTTP request walks the CLI tail"
             `Quick
-            test_mixed_non_advanceable_terminal_stops_before_cli
+            test_mixed_unknown_result_walks_cli_tail
         ; Alcotest.test_case
             "mixed persistence failure stops before CLI"
             `Quick

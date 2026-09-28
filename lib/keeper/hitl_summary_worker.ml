@@ -1459,7 +1459,7 @@ let execute_prepared_flow_with_queue_ops_current
       ~queue_ops
       ?cli_runner
       ~net
-      ?clock
+      ~clock
       ~on_summary
       (prepared : prepared_flow)
   =
@@ -1506,7 +1506,7 @@ let execute_prepared_flow_with_queue_ops_current
     let flow =
       Exact_output.execute_flow_once
         ~net
-        ?clock
+        ~clock
         ~before_measurement_dispatch:(fun _ -> Ok ())
         ~on_measurement_terminal:(fun _ -> Ok ())
         ~before_dispatch:guarded_before_dispatch
@@ -1693,7 +1693,7 @@ let execute_prepared_flow_with_queue_ops
       ~queue_ops
       ?cli_runner
       ~net
-      ?clock
+      ~clock
       ~on_summary
       (prepared : prepared_flow)
   =
@@ -1701,16 +1701,16 @@ let execute_prepared_flow_with_queue_ops
     ~queue_ops
     ?cli_runner
     ~net
-    ?clock
+    ~clock
     ~on_summary
     prepared
 ;;
 
-let execute_prepared_flow ~net ?clock ~on_summary prepared =
+let execute_prepared_flow ~net ~clock ~on_summary prepared =
   execute_prepared_flow_with_queue_ops
     ~queue_ops:production_exact_queue_ops
     ~net
-    ?clock
+    ~clock
     ~on_summary
     prepared
 ;;
@@ -1739,10 +1739,14 @@ let spawn_with
     |> Option.to_result
          ~none:"HITL exact-output flow: Eio net is unavailable"
   in
+  let* clock =
+    Eio_context.get_clock_opt ()
+    |> Option.to_result
+         ~none:"HITL exact-output flow: Eio clock is unavailable"
+  in
   match prepare_flow ~entry with
   | Error detail -> Error detail
   | Ok prepared ->
-    let clock = Eio_context.get_clock_opt () in
     let registry = Exact_lane_run_registry.global () in
     let run_id = Random_id.prefixed ~prefix:"exact-hitl-judge-" ~bytes:16 in
     let started_at = Time_compat.now () in
@@ -1858,7 +1862,7 @@ let spawn_with
             ~queue_ops:observed_queue_ops
             ?cli_runner
             ~net
-            ?clock
+            ~clock
             ~on_summary
             prepared
         with
@@ -2002,7 +2006,7 @@ module For_testing = struct
         ~queue_ops
         ?cli_runner
         ~net
-        ?clock
+        ~clock
         ~on_summary
         prepared
     =
@@ -2010,7 +2014,7 @@ module For_testing = struct
       ~queue_ops
       ?cli_runner
       ~net
-      ?clock
+      ~clock
       ~on_summary
       prepared
   ;;

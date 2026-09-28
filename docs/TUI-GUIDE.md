@@ -191,6 +191,22 @@ theme = "monokai"
 If the file cannot be written, the scheme still applies for this session and
 the event log says which of the two happened.
 
+The opening surface can also be selected in `runtime.toml`:
+
+```toml
+[tui]
+opening = "keeper" # or "last" or "overview"
+opening_keeper = "alpha"
+```
+
+An absent `opening` or `overview` starts on Overview. `keeper` opens the
+named Keeper's chat; it needs `opening_keeper`. `last` opens the most recent
+chat target and updates `opening_keeper` when a different Keeper's chat is
+opened. The choice and the name are separate, so a Keeper named `last` can
+be selected. If the target is unavailable, the TUI starts on Overview and
+shows the reason there. An invalid opening setting also starts on Overview
+with a reason.
+
 The table measures the seven colours MASC uses for semantic text against a
 4.5:1 contrast floor. `native 7/7` means the theme clears it without help;
 `lift N/7` means MASC raises those colours to the floor. With
@@ -1840,6 +1856,7 @@ Per surface:
 | `j` / `k` | Runtime, System Logs | Move the list cursor; scroll when detail is open |
 | `j` / `k` | Keeper detail, logs, Board read, Planning detail, Fusion detail | Scroll content |
 | Right / `Enter` | Keepers | Open keeper detail |
+| Mouse click | Keepers | Select a row; click the selected row again to open its detail |
 | Right / `Enter` | Lanes | Open the selected standalone lane's exact runs |
 | `c` / `m` | Lanes | Explain that standalone lanes have no Keeper chat target |
 | Right / `Enter` | Board | Open post body |

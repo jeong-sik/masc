@@ -55,26 +55,11 @@ let test_bookkeeping_start_causes_keep_their_payloads () =
     "call_id_generation_failed detail=\"random source unavailable\""
     (Exact_output.start_attempt_error_to_string
        (Exact_output.Call_id_generation_failed "random source unavailable"));
-  let operation_id_failure =
-    Exact_output.measurement_start_error_to_string
-      (Exact_output.Measurement_operation_id_generation_failed "operation id unavailable")
-  in
-  let missing_clock =
-    Exact_output.measurement_start_error_to_string
-      Exact_output.Measurement_clock_required_for_timeout
-  in
   Alcotest.(check string)
     "operation id detail"
     "operation_id_generation_failed detail=\"operation id unavailable\""
-    operation_id_failure;
-  Alcotest.(check string)
-    "clock requirement"
-    "measurement_clock_required_for_timeout"
-    missing_clock;
-  Alcotest.(check bool)
-    "measurement causes stay distinct"
-    false
-    (String.equal operation_id_failure missing_clock)
+    (Exact_output.measurement_start_error_to_string
+       (Exact_output.Measurement_operation_id_generation_failed "operation id unavailable"))
 ;;
 
 let test_raw_response_excerpt_none () =
@@ -157,10 +142,7 @@ let test_raw_response_excerpt_cuts_on_utf8_boundary () =
    and this fails if any two collapse onto the same string. *)
 let test_every_execution_cause_renders_distinctly () =
   let causes : Exact_output.execution_error_cause list =
-    [ Attempt_already_started
-    ; Clock_required_for_timeout
-    ; Frozen_request_mismatch
-    ; Completion_failed
+    [ Completion_failed
         { error = Http.NetworkError { message = ""; kind = Http.End_of_file }
         ; dispatch = Generation_dispatch_started
         }
@@ -195,7 +177,6 @@ let test_every_execution_cause_renders_distinctly () =
     ; Ambiguous_output 3
     ; Unexpected_output_content
     ; Invalid_json_output
-    ; Internal_non_json_output
     ]
   in
   let rendered = List.map Exact_output.execution_error_cause_to_string causes in
@@ -276,6 +257,7 @@ let test_rejection_cause_reaches_terminal_and_intermediate_detail () =
   match
     Exact_output.execute_flow_once
       ~net:(Eio.Stdenv.net env)
+      ~clock:(Eio.Stdenv.clock env)
       ~before_measurement_dispatch:(fun _ -> Ok ())
       ~on_measurement_terminal:(fun _ -> Ok ())
       ~before_dispatch:(fun _ -> Alcotest.fail "missing credential reached dispatch")

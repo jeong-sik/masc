@@ -17,9 +17,12 @@ import test_tui_keyboard_input as h
 # The run detail's words ("APPROVED", "NO DECISION YET") are
 # masc_tui_render.ml's; the mismatch this proves is refused by a message
 # masc_tui.ml owns. The heading ("MASC Lane Run" and the run id) is laid out
-# by masc_tui_render_prim.ml, which is left off this list: 29 stanzas
-# link that module, and test_tui_detail_heading.ml covers the heading when
-# it changes.
+# by masc_tui_ansi.ml, with its title from masc_tui_render_prim.ml. Neither is
+# on this list: a path named here runs this PTY suite on every edit to that
+# file, and in the two weeks to 2026-09-28 masc_tui_render_prim.ml changed in
+# 33 commits and masc_tui_ansi.ml in 7, the heading in 2.
+# test_tui_detail_heading.ml covers the heading, and
+# scripts/ci/referencing_suites.py selects it when either module changes.
 SOURCE_MODULES = (
     "bin/masc_tui_render.ml",
     "bin/masc_tui.ml",

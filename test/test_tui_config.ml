@@ -366,9 +366,65 @@ let board_sort_cases =
           store_or_fail ~base_path (Some "gruvbox-dark");
           check_opt "theme update keeps order" (Some "discussed") (Config.load ~base_path).board_sort)) ]
 
+let opening_cases =
+  let parsed text = Config.opening_of_doc (doc_of text) in
+  let name = Keeper_id.Keeper_name.to_string in
+  [ Alcotest.test_case "absent opening keeps Overview" `Quick (fun () ->
+        match parsed "" with
+        | Ok Config.Overview -> ()
+        | _ -> Alcotest.fail "absent opening did not select Overview")
+  ; Alcotest.test_case "overview ignores an unrelated Keeper name" `Quick (fun () ->
+        match parsed "[tui]\nopening = \"overview\"\nopening_keeper = \"last\"\n" with
+        | Ok Config.Overview -> ()
+        | _ -> Alcotest.fail "overview did not stay Overview")
+  ; Alcotest.test_case "last reads the saved Keeper name" `Quick (fun () ->
+        match parsed "[tui]\nopening = \"last\"\nopening_keeper = \"last\"\n" with
+        | Ok (Config.Last (Some keeper)) ->
+            Alcotest.(check string) "legal Keeper named last" "last" (name keeper)
+        | _ -> Alcotest.fail "last did not read its saved target")
+  ; Alcotest.test_case "last without a saved target stays unresolved" `Quick (fun () ->
+        match parsed "[tui]\nopening = \"last\"\n" with
+        | Ok (Config.Last None) -> ()
+        | _ -> Alcotest.fail "missing last target was not retained")
+  ; Alcotest.test_case "keeper needs a name" `Quick (fun () ->
+        match parsed "[tui]\nopening = \"keeper\"\n" with
+        | Error _ -> ()
+        | _ -> Alcotest.fail "keeper without a name was accepted")
+  ; Alcotest.test_case "keeper parses a named target" `Quick (fun () ->
+        match parsed "[tui]\nopening = \"keeper\"\nopening_keeper = \"harbor-lamp\"\n" with
+        | Ok (Config.Keeper keeper) ->
+            Alcotest.(check string) "target" "harbor-lamp" (name keeper)
+        | _ -> Alcotest.fail "keeper target did not parse")
+  ; Alcotest.test_case "last target survives the config write" `Quick (fun () ->
+        with_storable_base (fun ~base_path ->
+          let path = Filename.concat base_path ".masc/config/runtime.toml" in
+          write path (storable_runtime ^ "\n[tui]\nopening = \"last\"\n");
+          let target =
+            match Keeper_id.Keeper_name.of_string "alpha" with
+            | Ok target -> target
+            | Error reason -> Alcotest.fail reason
+          in
+          (match Config.set_opening_keeper ~base_path target with
+           | Ok () -> ()
+           | Error reason -> Alcotest.fail reason);
+          (match (Config.load ~base_path).opening with
+           | Ok (Config.Last (Some saved)) ->
+               Alcotest.(check string) "saved target" "alpha" (name saved)
+           | _ -> Alcotest.fail "saved target was not read");
+          check_opt "runtime default survives" (Some "local.sample")
+            (Toml.toml_string_opt
+               (doc_of (In_channel.with_open_bin path In_channel.input_all))
+               "runtime.default")))
+  ; Alcotest.test_case "unknown opening is an error" `Quick (fun () ->
+        match parsed "[tui]\nopening = \"something-else\"\n" with
+        | Error _ -> ()
+        | _ -> Alcotest.fail "unknown opening was silently ignored")
+  ]
+
 let () =
   Alcotest.run "tui_config"
     [ ("board_sort", board_sort_cases)
+    ; ("opening", opening_cases)
     ; ("theme_of_doc", cases)
     ; ("table_frame_of_doc", frame_cases)
     ; ( "lift_colours", lift_cases )

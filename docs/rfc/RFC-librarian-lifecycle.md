@@ -3,7 +3,7 @@ rfc: "librarian-lifecycle"
 title: "Librarian 생명주기 — 끝난 턴을 빠짐없이 순서대로 읽고, 읽은 위치를 남긴다"
 status: Draft
 created: 2026-09-18
-updated: 2026-09-26
+updated: 2026-09-28
 author: vincent
 supersedes: []
 superseded_by: null
@@ -221,7 +221,7 @@ rg -n 'String\.(equal|compare|starts_with|ends_with|contains)' lib/keeper/keeper
 | D4 | 프롬프트가 "오래 쓸 지식"만 남기라고 한다. 턴 진행과 현재 상태는 저장하지 말라고 한다. 읽은 위치를 지나간 "하던 일"은 어디에도 남지 않는다 | `config/prompts/librarian.md` §남길 지식과 증거 | §7 (라) |
 | D5 | "이 턴이 이력의 어디까지인가"가 저장되지 않는다. 프롬프트의 `turn=%d` 는 턴 번호가 아니라 메시지 순번이다 | `keeper_turn_driver_try_provider.ml` `initial_message_index`, `keeper_librarian.ml` `format_messages_for_prompt` | §4.6 의 턴 끝 기록 |
 | D6 | 도구 결과와 호출은 `[... omitted]` 로만 받고 thinking 은 빠진다. 공식 클라이언트 턴은 assistant 메시지 1개만 받는다 | `keeper_librarian.ml` `text_of_content`, `keeper_agent_run_finalize_response.ml` `librarian_messages` | 공식 클라이언트는 §4.8. 도구 결과 본문은 §6 |
-| D8 | 보낸 요청이 한 슬롯에서 실패하면 다음 슬롯으로 넘어가는지를 한 표가 정한다. 넘어가는 것: `Overloaded`·`Server_error`·`Rate_limited`·`Payment_required`·`Request_body_refused`·`Context_overflow` 거절, 성공 상태인데 본문이 기한을 넘긴 답, JSON 이 아니거나 내용이 빈 답, 헤더도 오기 전에 그 슬롯의 헤더 기한이나 전체 기한을 넘긴 요청. 회차를 끝내는 것: 그 밖의 거절(`Invalid_request`·`Refusal_body_not_received` 등)과 보낸 뒤 시간 초과가 아닌 전송 실패 | `exact_output.ml` `execution_failure_may_advance` | 시간 초과 #38418. 본문 없는 거절·전송 실패는 남음 |
+| D8 | 보낸 요청이 한 슬롯에서 실패하면 다음 슬롯으로 넘어가는지를 한 표가 정한다. 넘어가는 것: `Overloaded`·`Server_error`·`Rate_limited`·`Payment_required`·`Request_body_refused`·`Context_overflow` 거절, 성공 상태인데 본문이 기한을 넘긴 답, JSON 이 아니거나 내용이 빈 답, 헤더도 오기 전에 그 슬롯의 헤더 기한이나 전체 기한을 넘긴 요청. 회차를 끝내는 것: 그 밖의 거절(`Invalid_request`·`Refusal_body_not_received` 등)과 보낸 뒤 시간 초과가 아닌 전송 실패 | `exact_output.ml` `flow_execution_terminal_kind` | 시간 초과 #38418, 본문 없는 거절 #38913, 보낸 뒤 결과를 모르는 전송 실패 `RFC-exact-lane-walks-one-slot-list.md` Q1 |
 
 이미 고쳐진 것은 다시 설계하지 않는다: 점호 제거와 `absorbs`(RFC-0456, #36936·#36937·#36948). 라이브에서 code-reviewer 의 facts 가 378개(09-16)에서 231개(09-18)로 줄었고 흡수 기록은 91건이다.
 

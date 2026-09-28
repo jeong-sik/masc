@@ -432,6 +432,24 @@ let dashboard_goal_lines (state : state) =
                (List.length active - List.length shown) ]
          else [])
 
+(* A fleet with no Keeper yet has nothing to summarize, so the first screen
+   says how to make one (#39526). Only a listing that answered with zero
+   Keepers says so: an unread or failed listing is not an empty fleet. *)
+let dashboard_first_use_lines (state : state) =
+  match state.overview, state.overview_error with
+  | Some overview, None
+    when overview.ov_keeper_listing = Keeper_snapshot_unread.Listed
+         && overview.ov_keepers = 0 ->
+      [ " Start here (2 steps)"
+      ; Printf.sprintf
+          "   1. New Keeper: masc keeper-create --edit --host %s --port %d"
+          Masc_network_defaults.masc_http_loopback_peer state.port
+      ; Printf.sprintf "   2. Open Keepers with %s, select it, and press Enter."
+          Masc_tui_keys.keepers_jump.key
+      ; ""
+      ]
+  | (Some _ | None), (Some _ | None) -> []
+
 let dashboard_usage_lines (state : state) =
   let accounts =
     match state.overview_providers with
@@ -497,9 +515,19 @@ let render_overview (state : state) =
   let approval_count = Masc_tui_types.approvals_count_label state in
   let attention = dashboard_attention state in
   let attention_lines =
+    (* An unread or failed overview is not an empty one: its count would
+       read as a zero the operator never saw (#39526). *)
+    let counted =
+      match attention with
+      | _ :: _ -> Printf.sprintf "%d attention items" (List.length attention)
+      | [] -> (
+          match empty_page_of ~snapshot:state.overview ~error:overview_error with
+          | Page_empty -> "0 attention items"
+          | Page_unread | Page_failed -> "attention not observed")
+    in
     let title =
-      Printf.sprintf " Needs you · %d attention items · %s approvals (p in Work)"
-        (List.length attention) approval_count
+      Printf.sprintf " Needs you · %s · %s approvals (p in Work)" counted
+        approval_count
     in
     let shown =
       List.filteri (fun index _ -> index < dashboard_preview_rows) attention
@@ -544,6 +572,7 @@ let render_overview (state : state) =
   in
   let lines =
     [ health; "" ]
+    @ dashboard_first_use_lines state
     @ dashboard_goal_lines state
     @ [ "" ]
     @ dashboard_work_lines state
@@ -3106,14 +3135,15 @@ let render_planning_list (state : state) =
           a goal (or empty note), its selected detail and the footer before
           adding optional trend/backlog rows. *)
        let phase_width = planning_phase_column + 2 in
-       let title_width =
-         Render_schedule.planning_title_width
+       let goal_layout =
+         Render_schedule.planning_layout
            ~inner_width:(max 1 (framed_inner_width cols - 2))
            ~phase_width
        in
        let list_header = Buffer.create 256 in
        box_line_styled list_header cols ~style:(Theme.recede ())
-         ("  " ^ Render_schedule.planning_header_row ~phase_width ~title_width);
+         ("  "
+         ^ Render_schedule.planning_header_row ~phase_width ~layout:goal_layout);
        let divider = Buffer.create 128 in
        box_divider divider cols;
        let selection_rows = if count = 0 then 0 else 1 in
@@ -3161,17 +3191,23 @@ let render_planning_list (state : state) =
           which is why the legend says the marks this list draws and only those.
           Wrap complete explanations within the frame's cell width: a clipped
           legend would lose a verdict and add a truncation mark identical to
-          the stale-proof glyph. *)
+          the stale-proof glyph. A list narrow enough to give up the JUDGE
+          column draws no marks, so it draws no legend either. *)
        (* Reserve the divider, a goal (or empty note), and the selected
           verdict before spending rows on the legend. At the minimum
           height the headers and summary stay in place and a goal remains
           visible; taller frames get the legend back. *)
        let rows_after_legend = 1 + 1 + selection_rows + tail_rows in
        let judge_legend =
-         Masc_tui_planning_proof_mark.legend_rows
-           ~max_cells:(framed_inner_width cols)
-           ~max_rows:(rows - count_frame_lines buf - rows_after_legend)
-           (List.map (fun (g : planning_goal) -> g.pg_proof) goals)
+         if
+           List.mem Render_schedule.Planning_proof
+             goal_layout.Masc_tui_table.shown
+         then
+           Masc_tui_planning_proof_mark.legend_rows
+             ~max_cells:(framed_inner_width cols)
+             ~max_rows:(rows - count_frame_lines buf - rows_after_legend)
+             (List.map (fun (g : planning_goal) -> g.pg_proof) goals)
+         else []
        in
        List.iter (box_line_styled buf cols ~style:Ansi.dim) judge_legend;
        box_divider buf cols;
@@ -3297,7 +3333,7 @@ let render_planning_list (state : state) =
              let line =
                lead
                ^ Render_schedule.planning_row ~phase_style:status_color
-                   ~priority_style ~open_style ~phase_width ~title_width
+                   ~priority_style ~open_style ~phase_width ~layout:goal_layout
                    { Render_schedule.prow_phase = "[" ^ status_label ^ "]"
                    ; prow_proof = planning_proof_mark g.pg_proof
                    ; prow_priority = Printf.sprintf "P%d" g.pg_priority
@@ -5908,16 +5944,16 @@ let render_lane_run_list (state : state) ~(lane : Standalone_lane.t) =
     | Standalone_lane.Workspace_curator
     | Standalone_lane.Browser_stagehand -> "ACTOR"
   in
-  (* The run id takes what the named columns leave; it used to run off the
+  (* The run id takes what the drawn columns leave; it used to run off the
      header with no end while the row cut it at twelve. *)
-  let run_id_width =
-    Render_schedule.lane_run_id_width
+  let run_layout =
+    Render_schedule.lane_run_layout
       ~inner_width:(max 1 (framed_inner_width cols - 2))
   in
   box_line_styled buf cols ~style:(Theme.recede ())
     ("  "
     ^ Render_schedule.lane_run_header_row ~identity_header:identity_heading
-        ~run_id_width);
+        ~layout:run_layout);
   box_divider buf cols;
   (match state.lane_runs_error with
    | None -> ()
@@ -5965,7 +6001,7 @@ let render_lane_run_list (state : state) ~(lane : Standalone_lane.t) =
             "  "
             ^ Render_schedule.lane_run_row ~identity_header:identity_heading
                 ~status_style:(lane_run_status_style run.lrs_status)
-                ~run_id_width
+                ~layout:run_layout
                 { Render_schedule.lrow_started =
                     lane_run_clock run.lrs_started_at
                 ; lrow_subject =
@@ -9294,12 +9330,14 @@ let render_harness_list (state : state) =
   (match stale_note with
    | None -> ()
    | Some note -> box_line_styled buf cols ~style:(Theme.warn ()) note);
-  (* The reason takes the cells the named columns leave. *)
-  let reason_width =
-    Render_schedule.harness_reason_width
+  (* The reason takes the cells the drawn columns leave. *)
+  let verdict_layout =
+    Render_schedule.harness_layout
       ~inner_width:(max 1 (framed_inner_width cols - 2))
   in
-  let col_hdr = "  " ^ Render_schedule.harness_header_row ~reason_width in
+  let col_hdr =
+    "  " ^ Render_schedule.harness_header_row ~layout:verdict_layout
+  in
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
   (match state.harness_error with
@@ -9385,7 +9423,8 @@ let render_harness_list (state : state) =
             let line =
               "  "
               ^ Render_schedule.harness_row
-                  ~verdict_style:(semantic_status_color ruling) ~reason_width
+                  ~verdict_style:(semantic_status_color ruling)
+                  ~layout:verdict_layout
                   { Render_schedule.hrow_time =
                     Terminal_text.clock_timestamp
                       (Masc_domain.iso8601_of_unix_seconds v.hv_at)
@@ -11225,13 +11264,13 @@ let render_changes_list (state : state) =
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
-  (* What the turn did takes the cells the named columns leave. *)
-  let summary_width =
-    Render_schedule.change_summary_width
+  (* What the turn did takes the cells the drawn columns leave. *)
+  let file_change_layout =
+    Render_schedule.change_layout
       ~inner_width:(max 1 (framed_inner_width cols - 2))
   in
   let col_hdr =
-    "  " ^ Render_schedule.change_header_row ~summary_width
+    "  " ^ Render_schedule.change_header_row ~layout:file_change_layout
   in
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
@@ -11325,7 +11364,7 @@ let render_changes_list (state : state) =
           let line =
             "  "
             ^ Render_schedule.change_row ~op_style:kind_style ~result_style
-                ~summary_width
+                ~layout:file_change_layout
                 { Render_schedule.crow_turn =
                     Option.fold ~none:Masc_tui_theme.Glyph.no_value ~some:string_of_int
                       change.Masc.Tui_decode.fc_turn
@@ -15912,6 +15951,8 @@ let render_config (state : state) =
          into it. It also named PgUp/PgDn, which the table did not have, so
          the two had drifted in both directions. *)
       (match state.runtime_account_form with
+       | None when Option.is_some state.runtime_account_removal ->
+         Masc_tui_keys.footer_hints_runtime_account_removal ()
        | Some form when Masc_tui_runtime_account_form.is_saved form ->
          Masc_tui_keys.footer_hints_runtime_account_saved ()
        | Some _ -> Masc_tui_keys.footer_hints_runtime_account_form ()
@@ -15993,6 +16034,11 @@ let render_config (state : state) =
              does. *)
           if Masc_tui_runtime_account_form.is_saved form then
             c.push ("  " ^ Masc_tui_keys.footer_hints_runtime_account_saved ())
+      | None ->
+      match state.runtime_account_removal with
+      | Some screen ->
+          List.iter c.push
+            (Masc_tui_runtime_account_removal.rows ~width:(framed_inner_width cols) screen)
       | None ->
       match state.runtime_config_view_error, state.runtime_config_view with
       | Some detail, _ ->

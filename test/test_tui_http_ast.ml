@@ -518,11 +518,11 @@ let test_the_attention_note_starts_where_its_rows_do () =
   check int "the note carries no indent of its own" 0
     (Ast_grep.count_exact_string_literals_in_value_binding
        ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render_overview"
-       ~needle:"  (nothing needs attention)");
+       ~needle:"  Nothing needs attention.");
   check int "it is still the panel's word" 1
     (Ast_grep.count_exact_string_literals_in_value_binding
        ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render_overview"
-       ~needle:"(nothing needs attention)")
+       ~needle:"Nothing needs attention.")
 ;;
 
 (* A surface whose load failed draws the lane-read message. It names
@@ -1854,9 +1854,10 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
        ~binding_name:"render_overview"
        ~callee:"Masc_tui_types.surface_body_rows");
-  (* The attention section tells an empty answer from an unread one the way
-     every listing does, instead of leaving its rows blank. *)
-  check int "Dashboard's attention section reads the shared empty page" 1
+  (* Both the attention count in the title and its empty-body note read the
+     shared page state: unread/failed must not become a zero count, and unread
+     must not become a blank body. *)
+  check int "Dashboard's attention title and body both read the shared empty page" 2
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
        ~binding_name:"render_overview" ~callee:"empty_page_of");
   check int "board read consumes one shared row allocation" 1

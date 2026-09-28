@@ -56,23 +56,33 @@ val account_of_provider : Runtime_schema.provider -> account option
     [account-home] runs on the inherited home, which setup login never
     selects, so it has no account here; neither does any HTTP provider. *)
 
+type outcome =
+  | Email of t  (** the completed login's files named this email *)
+  | Not_read of missing  (** the completed login's files named none, for this reason *)
+
 type record =
-  | Email of t  (** the last setup login on this account completed and read it *)
-  | Not_read of missing
-      (** the last setup login on this account completed without an email *)
+  | Completed of outcome  (** the last setup login on this account completed *)
   | Login_unfinished
       (** a setup login started on this account and did not complete, so its
           login files may now hold another identity *)
 
 type recorded =
   | Record of record
-  | Absent  (** no setup login has started on this account *)
+  | Absent
+      (** setup holds no record for this account: no setup login has recorded
+          one. An Antigravity credential copy published while recovering a
+          login that did not complete is not recorded, so it reads [Absent]
+          too. A record another schema version wrote reads [Absent]. *)
   | Unreadable  (** the private record exists but could not be read *)
 
-val inventory_json : lookup:(account -> recorded) -> Runtime_schema.config -> Yojson.Safe.t
-(** One row per declared provider with an account:
+val row_json : integration_id:string -> recorded -> Yojson.Safe.t
+(** One setup-inventory row:
     [{"integration_id", "state": "recorded", "email"}],
     [{"integration_id", "state": "not_read", "cause"}] with [cause] from
     {!missing_to_wire}, or [state] ["login_unfinished"], ["absent"] or
-    ["unreadable"] alone. [lookup] reads only setup's own records, so building
-    this never opens an account's login files. *)
+    ["unreadable"] alone. *)
+
+val inventory_json : lookup:(account -> recorded) -> Runtime_schema.config -> Yojson.Safe.t
+(** {!row_json} for each declared provider with an account. [lookup] reads
+    only setup's own records, so building this never opens an account's login
+    files. *)

@@ -1,5 +1,5 @@
-(* The Overview's Providers section. See the .mli for what it draws and what
-   it refuses to guess. *)
+(* The Usage surface's Plan usage section. See the .mli for what it draws and
+   what it refuses to guess. *)
 
 module Tui_decode = Masc.Tui_decode
 module Types = Masc_tui_types
@@ -245,7 +245,10 @@ type row =
       heard : string option;
       tag : string option;
     }
-  | Silent_row of { name : string; tag : string option }
+  | Silent_row of { name : string; tag : string }
+      (** An account with no report since the server started, drawn only
+          because the runtime catalogue observed its quota exhausted: that
+          tag explains a stuck Keeper. *)
 
 (* Exhausted accounts first: a short budget cuts the section from the bottom,
    and the rows it keeps should be the ones that explain a stuck Keeper. Then
@@ -256,12 +259,17 @@ let account_rank observed (account : Tui_decode.provider_usage_account) =
   | Not_observed_exhausted, Tui_decode.Account_reported _ -> 1
   | Not_observed_exhausted, Tui_decode.Account_not_reported_since_start -> 2
 
+(* An account that has not reported since the server started and has no
+   observed exhaustion draws nothing. Its row said only "no usage data" beside
+   a generic setup name, which told the operator neither which account it was
+   nor anything about it. *)
 let account_rows ~now (observed, (account : Tui_decode.provider_usage_account)) =
   let name = scope_name account in
   let tag = exhausted_tag ~now observed in
-  match account.pua_state with
-  | Tui_decode.Account_not_reported_since_start -> [ Silent_row { name; tag } ]
-  | Tui_decode.Account_reported (first, rest) ->
+  match account.pua_state, tag with
+  | Tui_decode.Account_not_reported_since_start, None -> []
+  | Tui_decode.Account_not_reported_since_start, Some tag -> [ Silent_row { name; tag } ]
+  | Tui_decode.Account_reported (first, rest), (None | Some _) ->
       (* Windows of one report share its hearing time; a window heard at
          another time says its own. *)
       Window_row
@@ -328,7 +336,9 @@ let draw_rows ~now ~width rows =
   in
   let tag_w =
     widest
-      (function Window_row { tag; _ } | Silent_row { tag; _ } -> tag_cells tag)
+      (function
+        | Window_row { tag; _ } -> tag_cells tag
+        | Silent_row { tag; _ } -> tag_cells (Some tag))
       rows
   in
   let heard_w =
@@ -363,8 +373,8 @@ let draw_rows ~now ~width rows =
     (function
       | Silent_row { name; tag } ->
           " " ^ pad_right name name_w ^ gap
-          ^ styled (Some Ansi.dim) "no report since server start"
-          ^ tag_part tag
+          ^ styled (Some Ansi.dim) "no usage data"
+          ^ tag_part (Some tag)
       | Window_row { name; window; heard; tag } ->
           let tone = window_tone window in
           let reset_tone, reset = reset_text ~now window.puw_resets_at in
@@ -387,11 +397,7 @@ let draw_rows ~now ~width rows =
           ^ heard_part)
     rows
 
-let title_text ?note () =
-  let head = Printf.sprintf " %sProvider quota scopes%s" Ansi.bold Ansi.reset in
-  match note with
-  | None -> head
-  | Some note -> Printf.sprintf "%s  %s%s%s" head Ansi.dim note Ansi.reset
+let title_text () = Printf.sprintf " %sPlan usage%s" Ansi.bold Ansi.reset
 
 let section ~(providers : Types.overview_providers_reading) ~runtimes ~now ~width =
   match providers with
@@ -400,11 +406,11 @@ let section ~(providers : Types.overview_providers_reading) ~runtimes ~now ~widt
       Some
         { title = title_text ()
         ; lines =
-            [ Printf.sprintf " %sproviders unavailable: %s%s" (Theme.warn ())
+            [ Printf.sprintf " %susage data unavailable: %s%s" (Theme.warn ())
                 (Terminal_text.single_line reason) Ansi.reset
             ]
         }
-  | Types.Providers_read { Tui_decode.puws_since; puws_accounts } ->
+  | Types.Providers_read { Tui_decode.puws_since = _; puws_accounts } ->
       let ordered =
         List.map
           (fun (account : Tui_decode.provider_usage_account) ->
@@ -426,18 +432,14 @@ let section ~(providers : Types.overview_providers_reading) ~runtimes ~now ~widt
             ]
         | Types.Quota_unread | Types.Quota_read _ -> []
       in
-      (* A catalogue with no runtime has no provider account: an empty mixer
-         has no strip, and the section takes no row from the tasks. *)
       match rows with
-      | [] -> None
+      | [] ->
+          Some
+            { title = title_text ()
+            ; lines = [ " no usage data" ]
+            }
       | _ :: _ ->
-      Some
-        { title =
-            title_text
-              ~note:
-                (Printf.sprintf
-                   "reported by the provider \xc2\xb7 since server start %s"
-                   (clock_text ~now puws_since))
-              ()
-        ; lines = draw_rows ~now ~width rows @ runtimes_note
-        }
+          Some
+            { title = title_text ()
+            ; lines = draw_rows ~now ~width rows @ runtimes_note
+            }

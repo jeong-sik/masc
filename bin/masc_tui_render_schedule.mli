@@ -295,16 +295,28 @@ type lane_run_row_values = {
   lrow_run_id : string;
 }
 
-val lane_run_id_width : inner_width:int -> int
-(** Cells the run id may occupy: the remainder, never below
-    {!lane_minimum_run_id_width}. *)
+(** The run list's columns, named so a narrow list can say which it spares. *)
+type lane_run_column =
+  | Lane_started
+  | Lane_subject
+  | Lane_status
+  | Lane_elapsed
+  | Lane_slot
+  | Lane_run_id
 
-val lane_run_header_row : identity_header:string -> run_id_width:int -> string
+val lane_run_layout : inner_width:int -> lane_run_column Masc_tui_table.layout
+(** The columns the run list draws in [inner_width] and the run id's share of
+    it. When the row is narrow the slot goes first, then the elapsed time and
+    the start; the subject, the status and the run id stay, and the run id
+    takes what the others leave, never below its floor. *)
+
+val lane_run_header_row :
+  identity_header:string -> layout:lane_run_column Masc_tui_table.layout -> string
 
 val lane_run_row :
   identity_header:string ->
   status_style:string ->
-  run_id_width:int ->
+  layout:lane_run_column Masc_tui_table.layout ->
   lane_run_row_values ->
   string
 (** One run, on the same columns as {!lane_run_header_row}. [identity_header]
@@ -322,13 +334,28 @@ type change_row_values = {
   crow_summary : string;
 }
 
-val change_summary_width : inner_width:int -> int
-val change_header_row : summary_width:int -> string
+(** The change list's columns, named so a narrow list can say which it
+    spares. *)
+type change_column =
+  | Change_turn
+  | Change_task
+  | Change_op
+  | Change_result
+  | Change_file
+  | Change_summary
+
+val change_layout : inner_width:int -> change_column Masc_tui_table.layout
+(** The columns the change list draws in [inner_width] and the summary's share
+    of it. When the row is narrow the turn goes first, then the task, the
+    operation and the result; the file and the summary stay, and the summary
+    takes what the others leave, never below its floor. *)
+
+val change_header_row : layout:change_column Masc_tui_table.layout -> string
 
 val change_row :
   op_style:string ->
   result_style:string ->
-  summary_width:int ->
+  layout:change_column Masc_tui_table.layout ->
   change_row_values ->
   string
 (** One change, on the same columns as {!change_header_row}. The file cell is
@@ -415,12 +442,27 @@ type harness_row_values = {
   hrow_reason : string;
 }
 
-val harness_reason_width : inner_width:int -> int
-val harness_header_row : reason_width:int -> string
+(** The verdict list's columns, named so a narrow list can say which it
+    spares. *)
+type harness_column =
+  | Harness_time
+  | Harness_task
+  | Harness_gate
+  | Harness_verdict
+  | Harness_evaluator
+  | Harness_reason
+
+val harness_layout : inner_width:int -> harness_column Masc_tui_table.layout
+(** The columns the verdict list draws in [inner_width] and the reason's share
+    of it. When the row is narrow the evaluator goes first, then the time and
+    the gate; the task, the verdict and the reason stay, and the reason takes
+    what the others leave, never below its floor. *)
+
+val harness_header_row : layout:harness_column Masc_tui_table.layout -> string
 
 val harness_row :
   verdict_style:string ->
-  reason_width:int ->
+  layout:harness_column Masc_tui_table.layout ->
   harness_row_values ->
   string
 (** One verdict, on the same columns as {!harness_header_row}. The task and
@@ -449,19 +491,33 @@ type planning_row_values = {
   prow_due : string;
 }
 
-val planning_title_width : inner_width:int -> phase_width:int -> int
-(** What the title has after the named columns, never below a floor: a title
-    folded past that point identifies no goal, and the row is better off
-    running to the frame's edge than naming nothing. *)
+(** The goal list's columns, named so a narrow list can say which it spares. *)
+type planning_column =
+  | Planning_phase
+  | Planning_proof
+  | Planning_priority
+  | Planning_open
+  | Planning_title
+  | Planning_age
+  | Planning_due
 
-val planning_header_row : phase_width:int -> title_width:int -> string
+val planning_layout :
+  inner_width:int -> phase_width:int -> planning_column Masc_tui_table.layout
+(** The columns the goal list draws in [inner_width] and the title's share of
+    it. When the row is narrow the due date goes first, then the age, the
+    open-work tally and the judge's mark; the phase, the priority and the
+    title stay, and the title takes what the others leave, never below its
+    floor: a title folded past that point identifies no goal. *)
+
+val planning_header_row :
+  phase_width:int -> layout:planning_column Masc_tui_table.layout -> string
 
 val planning_row :
   ?priority_style:string ->
   ?open_style:string ->
   phase_style:string ->
   phase_width:int ->
-  title_width:int ->
+  layout:planning_column Masc_tui_table.layout ->
   planning_row_values ->
   string
 (** One goal, on the same columns as {!planning_header_row}. The judge's mark
@@ -516,6 +572,7 @@ val board_age_text : now:float -> float option -> string
     post carried no such time. Which time that is follows the sort, which
     {!Masc_tui_types.board_sort_time} answers. *)
 
+(** The list's columns, named so a narrow list can say which it spares. *)
 type board_column =
   | Board_mark
   | Board_id
@@ -525,7 +582,6 @@ type board_column =
   | Board_age
   | Board_score
   | Board_replies
-(** The list's columns, named so a narrow list can say which it spares. *)
 
 val board_layout : inner_width:int -> board_column Masc_tui_table.layout
 (** The columns the list draws in [inner_width] and the title's share of it.

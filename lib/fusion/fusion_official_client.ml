@@ -517,6 +517,7 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
            | Runtime_muse_serve.Turn_started _ | Runtime_muse_serve.Text_delta _
            | Runtime_muse_serve.Text_completed _ | Runtime_muse_serve.Native_tool_started _
            | Runtime_muse_serve.Native_tool_finished _ | Runtime_muse_serve.Approval_decided _
+           | Runtime_muse_serve.Compaction_observed _
            | Runtime_muse_serve.Turn_terminal_received _ | Runtime_muse_serve.Turn_finished _ -> ())
          ~mgr
          ~clock

@@ -254,7 +254,7 @@ verifier 는 agent_core flow 가 아니라 도구 호출(`report_review_verdict`
 2. **CLI 도 429 칸에 쓴다** (3.5). 순서 규칙은 아직 바꾸지 않는다. CLI 순서가 이 칸을 읽는 것은 5단계부터다.
 3. **Board 진행 기록을 `visit` 합타입으로 바꾼다** (3.7). Board 가 CLI 방문에도 bind 하고, CLI 까지 실패한 run 에 마지막 CLI 슬롯을 기록한다. 저장된 진행 기록 처리는 Q6 을 따른다.
 4. **walker 를 만들고 lane 을 하나씩 옮긴다.** 정렬은 3.5 의 "단계마다" 규칙대로 종류별로 둔다. 옮기는 순서는 단순한 것부터 curator, Stagehand, Librarian, Board, HITL 이다. lane 하나가 PR 하나다. 옮긴 lane 의 기존 스위트가 고치지 않은 채로 초록이어야 한다. 이것이 하네스다.
-5. **`slots` 하나로 hard cut 하고, 정렬을 하나로 켠다.** 설정 형식·로드 검사(3.2), registry, 쓰기, routing API, projection v3, `exact_slot_kind`, TUI, 대시보드, 첫 설정·install, preset reader, 문서, fixture 를 바꾼다. 서버·TUI·대시보드가 함께 가야 해서 한 PR 이다. 크면 테스트 fixture 정리만 앞선 PR 로 뺀다.
+5. **`slots` 하나로 hard cut 하고, 정렬을 하나로 켠다.** 설정 형식·로드 검사(3.2), registry, 쓰기, routing API, projection v3, `exact_slot_kind`, TUI, 대시보드, 첫 설정·install, preset reader, 문서, fixture 를 바꾼다. `validate_exact_lane_cli_slots` 가 없어지므로, 그 옛 이름을 가리키는 주석(`keeper_lane_cli_oneshot.ml:171`, `.mli:34`)도 같이 지운다. 서버·TUI·대시보드가 함께 가야 해서 한 PR 이다. 크면 테스트 fixture 정리만 앞선 PR 로 뺀다.
 6. **verifier 를 3.9 대로 맞춘다.**
 
 4단계에서 lane 을 하나씩 옮기는 것은 N-of-M 패치가 아니다. 공통 부분은 walker 한 곳에 먼저 생기고, 각 PR 은 lane 하나가 그것을 쓰게 바꾼다. 다섯 번째 PR 이 들어가면 "HTTP 다음 CLI" 를 조립하는 곳은 남지 않는다.
@@ -284,10 +284,7 @@ verifier 는 agent_core flow 가 아니라 도구 호출(`report_review_verdict`
 ## 7. 다루지 않는 것
 
 - HTTP·CLI 한 번 호출에 걸리는 시간 한도는 그대로다 (HTTP `exact_body_timeout_s`, CLI 는 모델의 `turn_timeout_s` 또는 300초). lane 전체의 시간 한도는 지금도 없고, 이 RFC 도 만들지 않는다.
-- 조사 중 따로 찾은 것은 이 RFC 가 고치지 않고 issue 로 남긴다.
-  - Antigravity 실패는 quota window 에 아무것도 쓰지 않는다 (`fusion_official_client.ml:447-455`). 그래서 Antigravity 슬롯은 쉬는 슬롯으로 잡히지 않는다.
-  - `flow_execution_binding_standing` 은 "앞 슬롯은 답했지만 도메인에서 거절, 다음 슬롯은 429" 인 flow 를 "모두 쉬는 중" 으로 읽을 수 있다 (`exact_output.ml:2156-2176`). 확인이 더 필요하다.
-  - `keeper_lane_cli_oneshot.ml:171` 과 `.mli:34` 가 이름이 바뀐 `validate_exact_lane_cli_slot_official_clients` 를 가리킨다. 지금 이름은 `validate_exact_lane_cli_slots` 다.
+- Antigravity 실패는 quota window 에 아무것도 쓰지 않아서, Antigravity 슬롯은 쉬는 슬롯으로 잡히지 않는다. 이 RFC 는 고치지 않는다 (#39696).
 
 ## 8. 검증
 

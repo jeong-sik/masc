@@ -217,7 +217,19 @@ then move the focused pane, while `PgUp`/`PgDn` move it by a page. The open post
 remains marked when the detail has focus.
 
 The Config surface shows `runtime.toml` as the server reads it; `e` opens
-it in `$EDITOR` and the server's preview validation gates the write. The
+it in `$EDITOR` and the server's preview validation gates the write. `a` on
+the same pane adds one more Claude Code, Codex or Antigravity account: pick a
+provider the file declares with `←`/`→`, keep or change the suggested id, and
+type where the new account signs in (`account-home` for Claude Code and
+Codex, the OAuth file `masc runtime-antigravity-account --sign-in` reports for
+Antigravity). The form copies that provider's command and model bindings,
+refuses a location another provider of the same client already uses, and
+saves through the same preview. Enter on the last field re-reads
+`runtime.toml` from the server and declares against that, so a change made
+while the form was open is kept. It does not sign in; the rows under the
+fields name the command that does, and after the save the same command is
+in the session log. Turns reach the new account only after a lane lists it
+as a candidate. The
 Resources surface hangs off Config under `s` and lists every MCP
 resource; `Enter` reads one beside the
 list. The detail starts with the server's description, full URI, MIME type,
@@ -556,6 +568,14 @@ ids. Blank values and duplicates are rejected. The lane tries admitted catalog
 slots in declaration order, then CLI runtimes in declaration order. The
 configuration is TOML; an individual run's Input and Output are retained JSON
 evidence, not another lane configuration format.
+
+`s` opens the selected lane's provider editor. `a`, there or on the matrix,
+picks a runtime, and the runtime's kind decides the list it joins: an HTTP
+runtime goes to `slots`, an official client to `cli_slots`. `j`/`k` stop on
+slots only, so an empty group has no row to move into; its title reads
+`a adds one`. The Workspace Curator walks HTTP slots only. Its editor says
+`HTTP only` and draws no CLI group, and its picker lists every official client
+below the HTTP runtimes, each row led by `CLI · lane takes HTTP only`.
 
 Board Attention, HITL Auto Judge, and Librarian are schema-constrained
 structured-output generation flows, not MASC tool loops. Their run evidence is

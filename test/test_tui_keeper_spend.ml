@@ -463,7 +463,7 @@ let test_team_total_covers_named_keepers () =
   check string "a named Keeper nobody read makes it a floor"
     "24h \xe2\x89\xa53.5M tok" (total reading (rows @ [ "unlisted" ]))
 
-let head = " Team  1 need you \xc2\xb7 1 working \xc2\xb7 1 idle \xc2\xb7 1 stopped"
+let head = " Team  1 need you \xc2\xb7 1 working \xc2\xb7 1 no work \xc2\xb7 1 stopped"
 let full = "24h, 12m old \xe2\x89\xa5$123.45 \xe2\x89\xa5123.4M tok"
 let marker = "24h, 12m old"
 let spark = "   14d \xe2\x96\x81\xe2\x96\x81\xe2\x96\x81 today 0"

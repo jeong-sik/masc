@@ -1886,7 +1886,9 @@ let add_routes ~sw ~clock router =
               | Ok config -> Http.Response.json_value ~request:req
                   (match Runtime_wizard_inventory.to_json config with
                    | `Assoc fields -> `Assoc (("setup_revision",`String (Runtime_setup_batch.revision_to_string revision))
-                       ::("source_revision",`String (Runtime.config_source_revision_to_string observation.source_revision))::fields)
+                       ::("source_revision",`String (Runtime.config_source_revision_to_string observation.source_revision))
+                       ::("account_emails",Runtime_account_email.inventory_json
+                            ~lookup:Runtime_setup_accounts.email config)::fields)
                    | value -> value) reqd)
            | _ -> Http.Response.json_value ~status:`Service_unavailable ~request:req
                (`Assoc ["error", `String "Runtime configuration is unavailable."]) reqd) request reqd)
@@ -1912,6 +1914,35 @@ let add_routes ~sw ~clock router =
              let result = match (try Some (Yojson.Safe.from_string body) with Yojson.Json_error _ -> None) with
                | None -> Error Server_runtime_setup_actions.Invalid_request
                | Some json -> Server_runtime_setup_actions.import_account ~binary:Sys.executable_name
+                   ~base_path:(Mcp_server.workspace_config state).base_path json in
+             match result with
+             | Ok json -> Http.Response.json_value ~request:req json reqd
+             | Error error -> Http.Response.json_value ~status:(Server_runtime_setup_actions.status_of_error error) ~request:req
+                 (`Assoc ["error",`String (Server_runtime_setup_actions.error_message error)]) reqd)) request reqd)
+  |> Http.Router.post "/api/v1/setup/accounts/login" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state actor req reqd ->
+           Http.Request.read_body_async reqd (fun body ->
+             Server_setup_account_login.start ~actor
+               ~base_path:(Mcp_server.workspace_config state).base_path ~body req reqd)) request reqd)
+  |> Http.Router.prefix_get "/api/v1/setup/accounts/login/" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state actor req reqd ->
+           Server_setup_account_login.status ~actor
+             ~base_path:(Mcp_server.workspace_config state).base_path req reqd) request reqd)
+  |> Http.Router.prefix_post "/api/v1/setup/accounts/login/" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state actor req reqd ->
+           Http.Request.read_body_async reqd (fun body ->
+             Server_setup_account_login.control ~actor
+               ~base_path:(Mcp_server.workspace_config state).base_path ~body req reqd)) request reqd)
+  |> Http.Router.post "/api/v1/setup/accounts/select" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state _agent_name req reqd ->
+           Http.Request.read_body_async reqd (fun body ->
+             let result = match (try Some (Yojson.Safe.from_string body) with Yojson.Json_error _ -> None) with
+               | None -> Error Server_runtime_setup_actions.Invalid_request
+               | Some json -> Server_runtime_setup_actions.select_account
                    ~base_path:(Mcp_server.workspace_config state).base_path json in
              match result with
              | Ok json -> Http.Response.json_value ~request:req json reqd

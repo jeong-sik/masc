@@ -2,13 +2,18 @@ module Install = Runtime_official_cli_install
 
 let client_arg =
   Cmdliner.Arg.enum
-    [ "claude-code", Install.Claude; "codex", Install.Codex; "antigravity", Install.Antigravity ]
+    [ "claude-code", Install.Claude
+    ; "codex", Install.Codex
+    ; "antigravity", Install.Antigravity
+    ; "muse-code", Install.Muse
+    ]
 ;;
 
 let client_name = function
   | Install.Claude -> "claude-code"
   | Install.Codex -> "codex"
   | Install.Antigravity -> "antigravity"
+  | Install.Muse -> "muse-code"
 ;;
 
 let to_json ~client ~command ~path =

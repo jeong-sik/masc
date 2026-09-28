@@ -120,6 +120,44 @@ type reasoning_effort =
 val reasoning_effort_to_string : reasoning_effort -> string
 val reasoning_effort_of_string : string -> reasoning_effort option
 
+type model_catalog_source =
+  | Provider_catalog
+  | Fake_catalog
+  | Unresolved_catalog
+  | Bundled_catalog
+  | Config_catalog
+  | Unknown_catalog_source of string
+
+val model_catalog_source_to_string : model_catalog_source -> string
+
+type model_effort_variants =
+  | Unknown_efforts
+  | Known_efforts of reasoning_effort list
+
+type model_catalog_entry =
+  { model_id : string
+  ; display_label : string
+  ; provider_id : string
+  ; profile_id : string option
+  ; context_limit : int option
+  ; output_limit : int option
+  ; is_default : bool
+  ; variants : model_effort_variants
+  }
+
+type model_catalog =
+  { source : model_catalog_source
+  ; provider_id : string
+  ; profile_id : string option
+  ; models : model_catalog_entry list
+  }
+
+val model_list_request : id:int -> Yojson.Safe.t
+val parse_model_list_result : Yojson.Safe.t -> (model_catalog, error) result
+(** MSP model metadata, preserving its source, nullable limits and explicit
+    unknown efforts. The query names no session or command. Listing models
+    does not prove sign-in, availability to this account, or a model turn. *)
+
 (** A native MCP server added to one session only
     ([SessionConfig.mcpServers]). The schema closes the transport union.
     MASC offers its tools through a loopback HTTP bridge, so only the
@@ -235,12 +273,19 @@ val corpus_schema_fingerprint : string
 
 type session =
   { session_id : string
+  ; turn_count : int (** The host's nonnegative completed-turn count. *)
   ; model_id : string option
   ; workspace_root : string option
+  ; approval_mode : approval_mode option
+    (** [None] means the host did not report a folded mode, not approval. *)
   }
 
 val parse_session_result : stage:string -> Yojson.Safe.t -> (session, error) result
 (** The [session] member of a [session/start] or [session/resume] result. *)
+
+val parse_set_approval_mode_result : Yojson.Safe.t -> (approval_mode, error) result
+(** Require an accepted [session/setApprovalMode] result and decode its
+    [effectiveMode.mode]. Unknown, missing or malformed modes are refused. *)
 
 type turn_disposition =
   | Started
@@ -276,6 +321,8 @@ type turn_error_kind =
   | Launch_error
   | Auth_required
   | Unrecognized_error_kind of string
+
+val turn_error_kind_to_string : turn_error_kind -> string
 
 type turn_error =
   { kind : turn_error_kind
@@ -354,6 +401,11 @@ type subscription_usage =
   ; weekly : usage_weekly
   }
 
+val exhausted_subscription_reset_ms : subscription_usage -> int option
+(** Latest provider reset among exhausted current/weekly windows. MSP reports
+    percentage integers (100 or above is exhausted) and epoch milliseconds;
+    nonexhausted or already-reset observations contribute no window. *)
+
 type notification =
   | Turn_started of
       { session_id : string
@@ -412,9 +464,16 @@ type approval_subject_kind =
   | Subject_tool
   | Unrecognized_subject of string
 
+type approval_choice_scope =
+  | Once
+  | Session
+  | Local_persistent
+  | Unrecognized_scope of string
+
 type approval_choice =
   { choice_id : string
   ; decision : approval_decision
+  ; scope : approval_choice_scope
   }
 
 type approval_requirement =
@@ -429,6 +488,7 @@ type approval_request =
   ; turn_id : string
   ; tool_name : string
   ; subject_kind : approval_subject_kind
+  ; subject_tool_name : string option
   ; choices : approval_choice list
   }
 

@@ -133,6 +133,10 @@ let scope_of_codex_home =
     ~default_subdir:".codex"
 ;;
 
+let scope_of_muse_home home =
+  Official_client_home ("muse-serve", home)
+;;
+
 let scope_of_credential ~provider_id (credential : Runtime_schema.credential option) =
   match credential with
   | Some (Runtime_schema.Env key) -> Credential_env key

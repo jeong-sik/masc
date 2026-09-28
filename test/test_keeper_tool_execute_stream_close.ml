@@ -7,7 +7,11 @@
     branches. This suite drives the real production dispatch wiring through
     a controlled [Execute_shell_ir] result (via the
     [For_testing.dispatch_override] seam) and asserts that
-    [record_execute_stream_end] fires for every rejected branch. *)
+    [record_execute_stream_end] fires for every rejected branch.
+
+    The same seam also drives a completed dispatch, so the lane-ceiling group
+    checks the inline bound through the production handler rather than by
+    calling the output helper directly. *)
 
 open Alcotest
 open Masc
@@ -206,7 +210,7 @@ let test_rejected_branch_finalizes_stream (name, expected_class, dispatch) () =
         incr dispatch_count;
         dispatch ());
       let outcome =
-        Keeper_tool_execute_runtime.handle_tool_execute_with_outcome
+        Keeper_tool_execute_runtime.handle_tool_execute_with_outcome ~result_projection:Tool_output.default_model_projection
           ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
           ~turn_sandbox_factory:(Some factory)
           ~config
@@ -236,6 +240,109 @@ let test_rejected_branch_finalizes_stream (name, expected_class, dispatch) () =
         in
         check string (name ^ ": stream end status rejected tag") name rejected)
 
+(* ── Lane ceiling on a completed dispatch ─────────────────────────── *)
+
+(* The same seam drives a completed dispatch through the production handler,
+   so the ceiling the Execute result keeps inline is the one the caller's
+   projection names, from [handle_tool_execute_with_outcome] down to the
+   output fields. *)
+
+let claude_lane =
+  Runtime_execution.Claude_code
+    { cli_path = "claude"; account_home = None; model = None; timeout_s = 1.0 }
+
+let codex_lane =
+  Runtime_execution.Codex_app_server
+    { cli_path = "codex"; account_home = None; model = None; timeout_s = 1.0 }
+
+let antigravity_lane =
+  Runtime_execution.Antigravity_cli
+    { cli_path = "agy"
+    ; model = "fixture"
+    ; agent = None
+    ; effort = None
+    ; oauth_source = "fixture"
+    ; timeout_s = 1.0
+    ; add_dirs = []
+    }
+
+(* The projection the Keeper tool bundle builds for an Official-client lane:
+   [Store_above] at that lane's inline ceiling. *)
+let lane_projection lane =
+  Tool_output.Store_above
+    { threshold_bytes = Runtime_execution.tool_result_inline_ceiling_bytes lane }
+
+let payload bytes =
+  let line = "execute lane ceiling fixture 0123456789abcdefghijklmnopqrstuvwxyz\n" in
+  String.init bytes (fun index -> line.[index mod String.length line])
+
+let with_completed_execute ~lane ~stdout check_result =
+  setup @@ fun ~config ~meta ~factory ~playground ->
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_tool_execute_runtime.For_testing.dispatch_override := None)
+    (fun () ->
+      Keeper_tool_execute_runtime.For_testing.dispatch_override :=
+        Some (fun () ->
+          Ok
+            { Masc_exec.Exec_dispatch.status = Unix.WEXITED 0
+            ; stdout
+            ; stderr = ""
+            ; output_files = None
+            });
+      let outcome =
+        Keeper_tool_execute_runtime.handle_tool_execute_with_outcome
+          ~result_projection:(lane_projection lane)
+          ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
+          ~turn_sandbox_factory:(Some factory)
+          ~config
+          ~meta
+          ~args:(typed_exec_args ~cwd:playground)
+          ()
+      in
+      check_result ~base_path:config.Workspace.base_path
+        (Yojson.Safe.from_string outcome.raw_output))
+
+let stored_bytes ~base_path field result =
+  match Json.member field result with
+  | `Null -> Alcotest.failf "%s is missing" field
+  | reference ->
+    let sha256 = Json.(reference |> member "_blob" |> member "sha256" |> to_string) in
+    (match Tool_blob_store.fetch (Tool_blob_store.create ~base_path) ~sha256 with
+     | Ok (Some bytes) -> bytes
+     | Ok None -> Alcotest.failf "%s names a blob the store does not hold" field
+     | Error error -> Alcotest.fail (Tool_blob_store.fetch_error_to_string error))
+
+let test_claude_lane_returns_20000_bytes_inline () =
+  let stdout = payload 20_000 in
+  with_completed_execute ~lane:claude_lane ~stdout (fun ~base_path:_ result ->
+    check (option string) "20,000 bytes come back inline on the Claude Code lane"
+      (Some stdout)
+      (Json.member "output" result |> Json.to_string_option);
+    check bool "nothing was stored as a blob" true
+      (Json.member "output_artifact" result = `Null))
+
+let test_claude_lane_stores_40000_bytes_byte_identical () =
+  let stdout = payload 40_000 in
+  with_completed_execute ~lane:claude_lane ~stdout (fun ~base_path result ->
+    check bool "40,000 bytes are not inlined" true
+      (Json.member "output" result = `Null);
+    check string "the stored output blob is the command's bytes" stdout
+      (stored_bytes ~base_path "output_artifact" result);
+    check string "the stored stdout blob is the command's bytes" stdout
+      (stored_bytes ~base_path "stdout_artifact" result))
+
+let test_narrow_lanes_still_store_20000_bytes () =
+  let stdout = payload 20_000 in
+  List.iter
+    (fun (name, lane) ->
+      with_completed_execute ~lane ~stdout (fun ~base_path result ->
+        check bool (name ^ " does not inline 20,000 bytes") true
+          (Json.member "output" result = `Null);
+        check string (name ^ " stores the command's bytes") stdout
+          (stored_bytes ~base_path "output_artifact" result)))
+    [ "Codex", codex_lane; "Antigravity", antigravity_lane ]
+
 let () =
   Alcotest.run
     "keeper-tool-execute-stream-close"
@@ -247,5 +354,13 @@ let () =
               `Quick
               (test_rejected_branch_finalizes_stream case))
           rejected_cases )
+    ; ( "lane-ceiling"
+      , [ test_case "Claude Code lane returns 20,000 bytes inline" `Quick
+            test_claude_lane_returns_20000_bytes_inline
+        ; test_case "Claude Code lane stores 40,000 bytes byte-identical" `Quick
+            test_claude_lane_stores_40000_bytes_byte_identical
+        ; test_case "Codex and Antigravity lanes still store 20,000 bytes" `Quick
+            test_narrow_lanes_still_store_20000_bytes
+        ] )
     ]
 ;;

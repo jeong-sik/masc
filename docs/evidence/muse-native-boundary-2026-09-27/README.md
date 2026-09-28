@@ -22,12 +22,18 @@ receipts. `--output` accepts a new directory; choose a location outside system t
 when checking the negative outside-write control. Shell paths are quoted, including
 when that option contains spaces.
 
-The harness uses the vendor SDK's documented test-only
-`TBH_CREDENTIAL_BACKEND=file` and `TBH_DISABLE_TELEMETRY=1`. The file backend avoids
-synthetic credential insertion into macOS Keychain. Without it, an earlier harness
-blocked in `SecItemAdd` / `AuthorizationCopyRights` before MSP initialization;
-that was a harness credential-backend problem, not a permission-profile rejection.
-These test environment variables are not added to the production launch contract.
+The harness sets `TBH_CREDENTIAL_BACKEND=file` and `TBH_DISABLE_TELEMETRY=1`, as
+the vendor SDK's shared harness does. The file backend keeps the credential in
+`auth.json` instead of inserting it into macOS Keychain. Without it, an earlier
+harness blocked in `SecItemAdd` / `AuthorizationCopyRights` before MSP
+initialization; that was a credential-backend problem, not a permission-profile
+rejection.
+
+MASC's production launch contract sets `TBH_CREDENTIAL_BACKEND=file` too, for
+`muse login` and for every `muse serve` child (`Runtime_muse_serve`). A selected
+account HOME has no login keychain, and a managed credential generation copies
+`auth.json` only, so a Keychain-held sign-in is refused and needs a new
+`/login muse`. `TBH_DISABLE_TELEMETRY` is set by this harness only.
 
 Primary protocol references:
 
@@ -79,3 +85,11 @@ a compiled MASC Keeper end-to-end run, guest isolation, `Native_none` support, o
 proof of independent macOS Keychain account identity. Managed credential refresh,
 source relogin session rebinding, and filesystem ownership are covered separately
 by `test_runtime_muse_home.ml` and Keeper adapter tests; those require CI execution.
+
+## Model discovery query
+
+`model-list.json` records the installed native CLI against the same kind of
+synthetic loopback catalog. Only initialize, initialized and model/list were
+sent, and the provider received one catalog GET and no POST or model turn.
+It confirms the typed response shape and reported limits, not real model
+availability or account authentication.

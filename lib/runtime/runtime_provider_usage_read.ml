@@ -39,7 +39,8 @@ type readable =
    credential here would re-run alias selection against the process
    environment of the read.  runtime.toml refuses [usage-read] on an
    official-client protocol; a Codex app-server and the Antigravity CLI
-   answer without a turn. Claude Code states its windows only during one. *)
+   answer without a turn. Claude Code states its windows only during one,
+   and no read is made for Muse Code, so none of its windows is recorded. *)
 let how_of_runtime (rt : Runtime.t) =
   match rt.execution with
   | Runtime_execution.Agent_core config ->
@@ -49,7 +50,7 @@ let how_of_runtime (rt : Runtime.t) =
       rt.provider.usage_read
   | Runtime_execution.Codex_app_server codex -> Some (Codex codex)
   | Runtime_execution.Antigravity_cli antigravity -> Some (Antigravity antigravity)
-  | Runtime_execution.Claude_code _ -> None
+  | Runtime_execution.Claude_code _ | Runtime_execution.Muse_serve _ -> None
 ;;
 
 (* One runtime per account: every runtime of a quota scope shares the

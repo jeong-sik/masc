@@ -16,10 +16,11 @@ let with_home f =
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree home) (fun () ->
     Masc_test_deps.with_process_env "HOME" (Some home) (fun () ->
       Masc_test_deps.with_process_env "CODEX_INSTALL_DIR" None (fun () ->
-        (* Each case builds the installer's layout under this throwaway HOME,
-           so the fs_compat test-home guard must let these writes through. *)
-        Masc_test_deps.with_process_env "MASC_TEST_ALLOW_HOME_BASE_PATH" (Some "1") (fun () ->
-          f home))))
+        Masc_test_deps.with_process_env "MUSE_INSTALL_DIR" None (fun () ->
+          (* Each case builds the installer's layout under this throwaway HOME,
+             so the fs_compat test-home guard must let these writes through. *)
+          Masc_test_deps.with_process_env "MASC_TEST_ALLOW_HOME_BASE_PATH" (Some "1") (fun () ->
+            f home)))))
 ;;
 
 let with_path directories f =
@@ -143,6 +144,129 @@ let test_codex_install_dir_replaces_the_vendor_directory () =
     (Install.locate Install.Claude ~command:"claude")
 ;;
 
+(* Muse Code's install.sh writes [${MUSE_INSTALL_DIR:-$HOME/.local/bin}/muse],
+   so the lookup reads the same variable, and each client reads only its own. *)
+let test_muse_code_is_found_where_its_installer_writes () =
+  with_home @@ fun home ->
+  Fs_compat.mkdir_p (Filename.concat home ".local/bin");
+  let default_path = Filename.concat home ".local/bin/muse" in
+  executable default_path;
+  let custom = Filename.concat home "muse-home" in
+  Fs_compat.mkdir_p custom;
+  with_path [] @@ fun () ->
+  check string "the client's own name" "muse" (Install.name Install.Muse);
+  check (option string) "without MUSE_INSTALL_DIR, ~/.local/bin" (Some default_path)
+    (Install.locate Install.Muse ~command:"muse");
+  check string "and that is what the runtime spawns" default_path
+    (Install.spawn_path Install.Muse ~command:"muse");
+  Masc_test_deps.with_process_env "CODEX_INSTALL_DIR" (Some custom) (fun () ->
+    check (option string) "Codex's variable does not move Muse Code" (Some default_path)
+      (Install.locate Install.Muse ~command:"muse"));
+  Masc_test_deps.with_process_env "MUSE_INSTALL_DIR" (Some custom) @@ fun () ->
+  check (option string) "with it, only that directory" None
+    (Install.locate Install.Muse ~command:"muse");
+  let custom_path = Filename.concat custom "muse" in
+  executable custom_path;
+  check (option string) "where the Muse Code installer was told to write" (Some custom_path)
+    (Install.locate Install.Muse ~command:"muse")
+;;
+
+(* The download is the script dev.meta.ai/docs/muse-code documents, and it is
+   run with bash because the script it serves is a bash script. The runner
+   stands in for the terminal: it leaves a nonempty file where curl was told
+   to write, then refuses the script so nothing is installed. *)
+let test_relative_muse_install_dir_spawns_from_another_workspace () =
+  with_home @@ fun home ->
+  let setup = Filename.concat home "setup" in
+  let workspace = Filename.concat home "workspace" in
+  let target = Filename.concat setup "vendor-bin" in
+  List.iter Fs_compat.mkdir_p [target; workspace];
+  executable (Filename.concat target "muse");
+  let original = Sys.getcwd () in
+  Fun.protect ~finally:(fun () -> Unix.chdir original) (fun () ->
+    Unix.chdir setup;
+    with_path [] @@ fun () ->
+    Masc_test_deps.with_process_env "MUSE_INSTALL_DIR" (Some "vendor-bin") @@ fun () ->
+    let resolved = Install.spawn_path Install.Muse ~command:"muse" in
+    check bool "setup resolves an absolute spawn path" false (Filename.is_relative resolved);
+    Unix.chdir workspace;
+    let input = Unix.openfile "/dev/null" [Unix.O_RDONLY] 0 in
+    let read_end, write_end = Unix.pipe () in
+    let pid = Unix.create_process resolved [|resolved|] input write_end Unix.stderr in
+    Unix.close input; Unix.close write_end;
+    let channel = Unix.in_channel_of_descr read_end in
+    let text = Fun.protect ~finally:(fun () -> close_in_noerr channel)
+      (fun () -> In_channel.input_all channel) in
+    let _, status = Unix.waitpid [] pid in
+    check bool "resolved binary starts from the later workspace" true (status = Unix.WEXITED 0);
+    check string "the actual installer destination ran" "fixture\n" text)
+;;
+
+let test_explicit_relative_commands_survive_workspace_change () =
+  with_home @@ fun home ->
+  let setup = Filename.concat home "setup" in
+  let tools = Filename.concat setup "tools" in
+  let workspace = Filename.concat home "workspace" in
+  List.iter Fs_compat.mkdir_p [tools; workspace];
+  let target = Filename.concat tools "versioned-client" in
+  executable target;
+  let original = Sys.getcwd () in
+  Fun.protect ~finally:(fun () -> Unix.chdir original) (fun () ->
+    List.iter (fun client ->
+      let name = Install.name client in
+      Unix.symlink target (Filename.concat tools name);
+      Unix.chdir setup;
+      let materialization_cwd = Sys.getcwd () in
+      let command = "./tools/" ^ name in
+      let expected = Filename.concat materialization_cwd command in
+      check (option string) "explicit path keeps absolute link spelling" (Some expected)
+        (Install.locate client ~command);
+      let resolved = Install.spawn_path client ~command in
+      let missing = Install.spawn_path client ~command:"./tools/missing" in
+      check string "absent explicit path cannot drift into native cwd"
+        (Filename.concat materialization_cwd "./tools/missing") missing;
+      Unix.chdir workspace;
+      let input = Unix.openfile "/dev/null" [Unix.O_RDONLY] 0 in
+      let read_end, write_end = Unix.pipe () in
+      let pid = Unix.create_process resolved [|resolved|] input write_end Unix.stderr in
+      Unix.close input; Unix.close write_end;
+      let channel = Unix.in_channel_of_descr read_end in
+      let text = Fun.protect ~finally:(fun () -> close_in_noerr channel)
+        (fun () -> In_channel.input_all channel) in
+      let _, status = Unix.waitpid [] pid in
+      check bool "selected executable launches in another cwd" true (status = Unix.WEXITED 0);
+      check string "selected executable output" "fixture\n" text)
+      [Install.Codex; Install.Claude; Install.Antigravity; Install.Muse])
+;;
+
+let test_muse_code_installs_through_its_documented_script () =
+  with_home @@ fun _home ->
+  let calls = ref [] in
+  let rec output_of = function
+    | "--output" :: path :: _ -> path
+    | _ :: rest -> output_of rest
+    | [] -> fail "the download names no --output"
+  in
+  let run argv =
+    calls := argv :: !calls;
+    match argv with
+    | "curl" :: _ ->
+      Out_channel.with_open_text (output_of argv) (fun oc ->
+        output_string oc "#!/usr/bin/env bash\n");
+      Ok ()
+    | _ -> Error "the stub refuses the script"
+  in
+  (match Install.install ~run Install.Muse with
+   | Ok () -> fail "a refused script was reported as an installed client"
+   | Error _ -> ());
+  match List.rev !calls with
+  | [ download; script ] ->
+    check string "the documented script" "https://dev.meta.ai/install.sh"
+      (List.nth download (List.length download - 1));
+    check string "run with bash" "bash" (List.hd script)
+  | calls -> failf "expected a download and the script, got %d calls" (List.length calls)
+;;
+
 let () =
   run
     "runtime_official_cli_install"
@@ -160,6 +284,14 @@ let () =
             test_a_file_nobody_can_run_is_not_found
         ; test_case "CODEX_INSTALL_DIR replaces the vendor directory" `Quick
             test_codex_install_dir_replaces_the_vendor_directory
+        ; test_case "Muse Code is found where its installer writes" `Quick
+            test_muse_code_is_found_where_its_installer_writes
+        ; test_case "relative Muse install directory survives workspace changes" `Quick
+            test_relative_muse_install_dir_spawns_from_another_workspace
+        ; test_case "explicit relative commands survive workspace changes" `Quick
+            test_explicit_relative_commands_survive_workspace_change
+        ; test_case "Muse Code installs through its documented script" `Quick
+            test_muse_code_installs_through_its_documented_script
         ] )
     ]
 ;;

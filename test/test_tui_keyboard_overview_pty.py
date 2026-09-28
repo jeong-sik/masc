@@ -33,12 +33,24 @@ def first_use_frames(executable: str) -> None:
         "openai",
         "zai",
     )
+    # One reported window per account, so each account draws one row. An
+    # account with no report draws none, and the budget below counts rows.
+    observed_at = time.time()
     payload["provider_usage_windows"] = [
         {
             "scope": f"provider:{name}",
             "providers": [{"id": name, "display_name": name}],
-            "state": "not_reported_since_start",
-            "windows": [],
+            "state": "reported",
+            "windows": [
+                {
+                    "limit_id": None,
+                    "window": {"kind": "five_hour"},
+                    "role": "gates_model_calls",
+                    "utilization": {"unit": "percent", "value": 10},
+                    "resets_at": None,
+                    "observed_at": observed_at,
+                }
+            ],
         }
         for name in names
     ]
@@ -101,7 +113,7 @@ def first_use_frames(executable: str) -> None:
                 b"No goal is executing or verifying.",
                 b"Nothing needs attention.",
                 b"Plan usage",
-                b"no usage data",
+                b"10%",
                 b"Approvals: 0?",
             ):
                 if expected not in visible:

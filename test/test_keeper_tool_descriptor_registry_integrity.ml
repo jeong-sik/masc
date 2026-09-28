@@ -1157,7 +1157,7 @@ let test_board_descriptions_disambiguate_post_id_flow () =
     get_schema.description;
   check_contains
     "board_post_get post_id field says exact ID is required"
-    ~sub:"Required exact board post ID"
+    ~sub:"Exact post_id from masc_board_list or masc_board_post_get; do not guess."
     get_post_id_description;
   check_contains
     "board_list schema says it discovers post_id"
@@ -1175,9 +1175,17 @@ let test_board_descriptions_disambiguate_post_id_flow () =
        in
        check_contains
          (label ^ " post_id field says exact ID is required")
-         ~sub:"Required exact board post ID"
+         ~sub:"Exact post_id from masc_board_list or masc_board_post_get; do not guess."
          post_id_description)
-    [ "board_comment", comment_schema; "board_vote", vote_schema ];
+    [ "board_comment", comment_schema ];
+  let vote_post_id_description =
+    schema_property_description vote_schema.input_schema "post_id"
+    |> Option.value ~default:""
+  in
+  check_contains
+    "board_vote post_id field says exact ID is required"
+    ~sub:"Required exact board post ID"
+    vote_post_id_description;
   List.iter
     (fun (schema : Masc_domain.tool_schema) ->
        if string_contains ~sub:"BoardList" schema.description
@@ -1220,7 +1228,7 @@ let test_masc_board_descriptions_disambiguate_post_id_flow () =
     get_schema.description;
   check_contains
     "masc_board_post_get post_id field says exact ID is required"
-    ~sub:"Required exact board post ID"
+    ~sub:"Exact post_id from masc_board_list or masc_board_post_get; do not guess."
     get_post_id_description;
   check_contains
     "masc_board_post_get offset description says omitting reads the newest"
@@ -1228,7 +1236,7 @@ let test_masc_board_descriptions_disambiguate_post_id_flow () =
     comment_offset_description;
   check_contains
     "masc_board_post_get limit description mentions bounds"
-    ~sub:"default: 20, max: 100"
+    ~sub:"20 if omitted, at most 100"
     comment_limit_description;
   Alcotest.(check (option int))
     "masc_board_post_get offset minimum"
@@ -1283,9 +1291,17 @@ let test_masc_board_descriptions_disambiguate_post_id_flow () =
        in
        check_contains
          (label ^ " post_id field says exact ID is required")
-         ~sub:"Required exact board post ID"
+         ~sub:"Exact post_id from masc_board_list or masc_board_post_get; do not guess."
          post_id_description)
-    [ "masc_board_comment", comment_schema; "masc_board_vote", vote_schema ]
+    [ "masc_board_comment", comment_schema ];
+  let vote_post_id_description =
+    schema_property_description vote_schema.input_schema "post_id"
+    |> Option.value ~default:""
+  in
+  check_contains
+    "masc_board_vote post_id field says exact ID is required"
+    ~sub:"Required exact board post ID"
+    vote_post_id_description
 ;;
 
 let test_masc_board_registry_has_descriptor_projection () =

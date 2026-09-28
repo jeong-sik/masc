@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Build this checkout's masc, masc-tui and masc-browser-host, install them into
 # a prefix, and bring every registered Firefox browser lane host up to the same
-# build.
+# build. The deployment preflight helper and gate are installed into the prefix
+# too, so the preflight an operator runs there is the one this build produced
+# (#39224).
 #
 # install-host.sh copies the host executable into <workspace>/.masc/browser-lane/host
 # so a moved checkout cannot break it. That copy is what Firefox starts, and
@@ -20,7 +22,8 @@
 #
 # Usage: scripts/install-local-build.sh [--prefix DIR] [--manifest-dir DIR]
 #                                       [--skip-build] [--build-dir DIR] [--base-path DIR]
-#   --prefix        where masc, masc-tui and masc-browser-host go (default ~/.local/bin)
+#   --prefix        where masc, masc-tui, masc-browser-host and the deployment
+#                   preflight pair go (default ~/.local/bin)
 #   --manifest-dir  Firefox native messaging manifests (default: the per-user directory)
 #   --skip-build    install what --build-dir already holds
 #   --build-dir     directory holding main_eio.exe, masc_tui.exe, masc_browser_host.exe
@@ -132,7 +135,16 @@ mkdir -p "$prefix"
 install -m 755 "$build_dir/main_eio.exe" "$prefix/masc"
 install -m 755 "$build_dir/masc_tui.exe" "$prefix/masc-tui"
 install -m 755 "$build_dir/masc_browser_host.exe" "$prefix/masc-browser-host"
-echo "installed masc, masc-tui, masc-browser-host into $prefix"
+# The deployment preflight pair goes with the server, not behind it. The gate
+# resolves its helper beside itself first (check-runtime-deployment-preflight.sh
+# L95), so a prefix that holds only the server leaves the operator running
+# whatever helper was installed last: on 2026-09-26 the installed helper was
+# from 09-07 and its older decoder refused 23,767 rows the running server read
+# fine (#39224). Release install.sh already ships both (L1083, L1415-L1416);
+# this keeps a local build install on the same footing.
+install -m 755 "$build_dir/deployment_preflight_helper.exe" "$prefix/masc-deployment-preflight-helper"
+install -m 755 "$repo/scripts/check-runtime-deployment-preflight.sh" "$prefix/masc-check-runtime-deployment-preflight"
+echo "installed masc, masc-tui, masc-browser-host, masc-deployment-preflight-helper, masc-check-runtime-deployment-preflight into $prefix"
 
 exec python3 - "$repo/connectors/browser/install-host.sh" "$prefix/masc-browser-host" "$manifest_dir" <<'PY'
 import json

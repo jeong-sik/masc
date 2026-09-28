@@ -38,7 +38,7 @@ let default_config () =
 
 type session_mode =
   | Start
-  | Resume of { session_id : string }
+  | Resume of { session_id : string; expected_turn_count : int }
 
 type mcp_server =
   { name : string
@@ -375,9 +375,11 @@ let validate_turn ?(session_mode = Start) config ~workspace_root ~prompt ~images
       validate_images (index + 1) rest in
   let* () = validate_images 0 images in
   match session_mode with
-  | Resume { session_id } when String.trim session_id = "" ->
+  | Resume { session_id; _ } when String.trim session_id = "" ->
     Error (Invalid_config "resumed session id is empty")
-  | Resume { session_id } -> valid_utf8 "resumed session id" session_id
+  | Resume { expected_turn_count; _ } when expected_turn_count < 0 ->
+    Error (Invalid_config "resumed completed-turn count is negative")
+  | Resume { session_id; expected_turn_count = _ } -> valid_utf8 "resumed session id" session_id
   | Start -> Ok ()
 ;;
 
@@ -937,7 +939,7 @@ let open_session io (config : config) ~approval_mode ~session_mode ~workspace_ro
     let* () = validate_session_identity config ~workspace_root session in
     let* () = validate_session_approval_mode ~requested:approval_mode session.approval_mode in
     Ok (session, false)
-  | Resume { session_id } ->
+  | Resume { session_id; expected_turn_count } ->
     let* result =
       request io ~method_:"session/resume" (fun ~id ->
         Msp.session_resume_request
@@ -959,6 +961,13 @@ let open_session io (config : config) ~approval_mode ~session_mode ~workspace_ro
              session.Msp.session_id)
     in
     let* () = validate_session_identity config ~workspace_root session in
+    let* () =
+      if session.Msp.turn_count = expected_turn_count
+      then Ok ()
+      else protocol_error "session/resume"
+          (Printf.sprintf "retained session completed-turn count changed: expected %d, reported %d"
+             expected_turn_count session.Msp.turn_count)
+    in
     let* result =
       request io ~method_:"session/setApprovalMode" (fun ~id ->
         Msp.session_set_approval_mode_request

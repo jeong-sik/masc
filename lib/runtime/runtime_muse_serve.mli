@@ -52,7 +52,9 @@ val default_config : unit -> config
 
 type session_mode =
   | Start
-  | Resume of { session_id : string }
+  | Resume of { session_id : string; expected_turn_count : int }
+      (** Resume only when the host reports this completed-turn count, before
+          changing approval mode, persisting admission or dispatching a turn. *)
 
 type mcp_server =
   { name : string

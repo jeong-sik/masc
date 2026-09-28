@@ -393,6 +393,7 @@ FIXTURE = json.load(open(os.path.join(HERE, "fixture.json")))
 SESSION = FIXTURE["session_id"]
 SCENARIO = FIXTURE.get("scenario", "complete")
 CURSOR = [0]
+COUNT_PATH = os.path.join(HERE, "host-turn-count.txt")
 with open(os.path.join(HERE, "cwd.txt"), "w") as handle:
     handle.write(os.getcwd())
 
@@ -411,6 +412,9 @@ def cursor():
     return "v:%d" % CURSOR[0]
 
 def notify(method, params):
+    if method == "turn/completed":
+        with open(COUNT_PATH, "w") as handle:
+            handle.write(str(completed_turns + 1))
     params["viewCursor"] = cursor()
     send({"jsonrpc": "2.0", "method": method, "params": params})
 
@@ -429,8 +433,11 @@ send({"jsonrpc": "2.0", "id": init["id"], "result": {
     "serverInfo": {"name": "muse-session-server", "version": "1.3.0"},
     "userAgent": "muse/1.3.0", "museHome": "/tmp/muse", "platformFamily": "unix",
     "platformOs": "linux", "schema": {"version": 1, "fingerprint": "sha256:fixture"},
-    "grantedCapabilities": expected_capabilities, "experimentalApi": False,
+    "grantedCapabilities": [] if SCENARIO == "deny_capability" else expected_capabilities,
+    "experimentalApi": False,
     "sessionDurability": "durable"}})
+if SCENARIO == "deny_capability":
+    drain()
 assert read()["method"] == "initialized"
 
 opened = read()
@@ -440,12 +447,15 @@ if opened["method"] == "session/start":
         handle.write(opened["params"]["workspaceRoot"])
     assert opened["params"]["workspaceRoot"] == FIXTURE["workspace_root"], opened
     mode = "start"
+    completed_turns = 0
     # The session runs the model the start named, or the host default.
     model = opened["params"].get("modelId") or "muse-fixture-1"
 else:
     assert opened["method"] == "session/resume", opened
     assert opened["params"]["sessionId"] == SESSION, opened
     mode = "resume"
+    with open(COUNT_PATH) as handle:
+        completed_turns = int(handle.read())
     # What the session's record names; null when it omits the model.
     model = FIXTURE.get("resume_model_id", "muse-fixture-1")
 with open(os.path.join(HERE, "sessions.log"), "a") as handle:
@@ -460,7 +470,8 @@ else:
 if SCENARIO == "hang_session":
     drain()
 send({"jsonrpc": "2.0", "id": opened["id"], "result": {"session": {
-    "sessionId": SESSION, "status": "idle", "turnCount": 0, "modelId": model,
+    "sessionId": SESSION, "status": "idle",
+    "turnCount": FIXTURE.get("resume_turn_count", completed_turns), "modelId": model,
     "approvalMode": {"mode": "promptUnmatched", "source": "startup", "lastCommandId": None},
     "workspaceRoot": FIXTURE["workspace_root"]}, "viewCursor": cursor()}})
 if mode == "resume":
@@ -1571,6 +1582,103 @@ let test_bridge_setup_failure_preserves_previous_settlement () =
     | Error error -> fail (Agent_core.Error.to_string error))) [false; true]
 ;;
 
+let test_capability_refusal_preserves_previous_settlement () =
+  List.iter (fun seeded -> with_scripted_host (fun ~base_path ->
+    let observed = ref `Null in
+    let tool = masc_probe_tool observed in
+    if seeded then ignore (settle_first_turn ~base_path ~tool);
+    let before = Store.load ~base_path ~keeper_name |> Result.get_ok in
+    observed := `Null;
+    write_fixture ~base_path (scenario "deny_capability");
+    let run = run_turn_with ~base_path ~tool () in
+    (match run.outcome.result with
+     | Error (Agent_core.Error.Provider
+         (Llm_provider.Error.ProviderReportedError {error_type=Some "capability_not_granted"; _})) -> ()
+     | Error error -> fail (Agent_core.Error.to_string error)
+     | Ok _ -> fail "withheld sessionMcp admitted a turn");
+    check bool "no dynamic tool ran" true (!observed = `Null);
+    check int "no prompt dispatched" 0 (List.length run.transmitted);
+    check_effect "capability refusal is effect-free" Keeper_provider_attempt_effect.No_effect_observed run.outcome;
+    let after = Store.load ~base_path ~keeper_name |> Result.get_ok |> Option.get in
+    check bool "known handshake refusal is transient" true
+      (Option.map (fun (r : Store.transient_release_record) -> r.failure)
+         after.last_transient_release = Some Store.Pre_dispatch_failed);
+    (match before with
+     | None -> check bool "fresh claim returns Ready" true (after.phase = Store.Ready)
+     | Some before ->
+       check bool "prior settlement preserved" true (before.phase = after.phase);
+       check int "prior ordinal preserved" before.turn_count after.turn_count);
+    write_fixture ~base_path [];
+    match (run_turn_with ~base_path ~tool ()).outcome.result with
+    | Ok result -> check (option bool) "retry resumes only existing conversation" (Some seeded) result.session_resumed
+    | Error error -> fail (Agent_core.Error.to_string error))) [false; true]
+;;
+
+let test_retry_previous_refuses_an_externally_advanced_session () =
+  with_scripted_host (fun ~base_path ->
+    let tool = masc_probe_tool (ref `Null) in
+    let first = settle_first_turn ~base_path ~tool in
+    write_fixture ~base_path (scenario "exit_mid_turn");
+    (match (run_turn_with ~base_path ~tool ()).outcome.result with
+     | Error _ -> () | Ok _ -> fail "interrupted turn completed");
+    let interrupted = Store.load ~base_path ~keeper_name |> Result.get_ok |> Option.get in
+    let recovery_id = match interrupted.phase with
+      | Store.Recovery_required {recovery_id; _} -> recovery_id
+      | _ -> fail "interrupted turn lost recovery evidence" in
+    (match Store.resolve_recovery ~base_path ~keeper_name ~expected:interrupted ~recovery_id
+       ~resolution:Store.Retry_previous ~resolved_by:"fixture-operator" ~resolved_at:(Time_compat.now ()) with
+     | Ok _ -> () | Error _ -> fail "operator could not restore previous settlement");
+    check bool "operator selected the earlier settlement" true (settled_phase ~base_path = first);
+    (* The prior ambiguous native turn completed outside this local claim. *)
+    write_file ~mode:0o600 (Filename.concat base_path "host-turn-count.txt") "2";
+    write_fixture ~base_path [];
+    let old_turn_id = read_text (Filename.concat base_path "resume-turn-id.txt") in
+    let run = run_turn_with ~base_path ~tool () in
+    (match run.outcome.result with
+     | Error _ -> () | Ok _ -> fail "advanced retained history accepted duplicate work");
+    check int "no new prompt reached the host" 0 (List.length run.transmitted);
+    check string "no new native turn replaced the prior command identity" old_turn_id
+      (read_text (Filename.concat base_path "resume-turn-id.txt"));
+    let failure, observed_turn = recovery_row ~base_path in
+    check_failure "history mismatch retains recovery" Store.Protocol_failed failure;
+    check (option string) "no new host turn was acknowledged" None observed_turn)
+;;
+
+let test_owner_cancellation_after_completion_keeps_recovery () =
+  List.iter (fun at_hook -> with_scripted_host (fun ~base_path ->
+    let observed = ref `Null in
+    let tool = masc_probe_tool observed in
+    ignore (settle_first_turn ~base_path ~tool);
+    observed := `Null;
+    let boundary_reached = ref false in
+    (match Eio.Switch.run (fun turn_sw ->
+       let stop () =
+         boundary_reached := true;
+         Eio.Switch.fail turn_sw Keeper_registry_types.Operator_interrupt;
+         Eio.Fiber.yield () in
+       let hooks = {Agent_core.Hooks.empty with after_turn =
+         Some (fun _ -> if at_hook then stop (); Agent_core.Hooks.Continue)} in
+       Eio.Fiber.fork ~sw:turn_sw (fun () ->
+         ignore (run_turn_with ~base_path ~tool ~hooks
+           ~on_stream_event:(function
+             | Agent_core.Types.MessageStop when not at_hook -> stop ()
+             | _ -> ()) ());
+         fail "completed turn cancellation returned normally")) with
+     | () -> fail "completed turn cancellation was swallowed"
+     | exception exn when Keeper_registry_types.is_operator_interrupt exn -> ());
+    check bool "requested completion boundary reached" true !boundary_reached;
+    check bool "provider already called the real MCP tool" true (!observed <> `Null);
+    check string "host completed both turns" "2" (read_text (Filename.concat base_path "host-turn-count.txt"));
+    let after = Store.load ~base_path ~keeper_name |> Result.get_ok |> Option.get in
+    check int "completed ordinal was not rolled back" 2 after.turn_count;
+    check bool "no transient owner release" true (after.last_transient_release = None);
+    let failure, observed_turn = recovery_row ~base_path in
+    check_failure "post-completion cancellation retains its cause"
+      (if at_hook then Store.Host_hook_failed else Store.Transport_interrupted) failure;
+    check (option string) "recovery names the completed native turn"
+      (Some (read_text (Filename.concat base_path "resume-turn-id.txt"))) observed_turn)) [false; true]
+;;
+
 let test_admission_timeout_restores_only_undispatched_claims () =
   List.iter (fun seeded ->
     List.iter (fun phase -> with_scripted_host (fun ~base_path ->
@@ -1751,6 +1859,8 @@ let () =
         ] )
     ; ( "turn endings"
       , [ test_case "MCP setup failure preserves previous settlement" `Quick test_bridge_setup_failure_preserves_previous_settlement
+        ; test_case "capability refusal preserves previous settlement" `Quick test_capability_refusal_preserves_previous_settlement
+        ; test_case "retry previous refuses externally advanced session" `Quick test_retry_previous_refuses_an_externally_advanced_session
         ; test_case "admission timeout releases only undispatched claims" `Quick test_admission_timeout_restores_only_undispatched_claims
         ; test_case "read-only MCP failure preserves effect classification" `Quick test_read_only_mcp_failure_does_not_invent_an_effect
         ; test_case "a host that exits mid-turn leaves recovery" `Quick
@@ -1774,6 +1884,8 @@ let () =
             test_an_operator_interrupt_keeps_the_settled_session
         ; test_case "an operator interrupt a callback raises keeps the settled session" `Quick
             test_an_operator_interrupt_a_callback_raises_keeps_the_settled_session
+        ; test_case "owner cancellation after completion retains recovery" `Quick
+            test_owner_cancellation_after_completion_keeps_recovery
         ] )
     ; ( "account selection"
       , [ test_case "account switch starts fresh" `Quick test_account_selection_starts_a_fresh_vendor_session

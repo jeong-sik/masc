@@ -2981,7 +2981,9 @@
 (include stanzas/test_runtime_antigravity_context.inc)
 (include stanzas/test_runtime_muse_msp.inc)
 (include stanzas/test_runtime_muse_serve.inc)
+(include stanzas/test_runtime_muse_serve_config.inc)
 (include stanzas/test_runtime_muse_home.inc)
+(include stanzas/test_runtime_muse_model_discovery.inc)
 (include stanzas/test_keeper_muse_runtime.inc)
 (include stanzas/test_runtime_official_client_mcp_http.inc)
 (include stanzas/test_runtime_claude_code_config.inc)
@@ -7022,6 +7024,11 @@
  (modules test_runtime_setup_accounts)
  (libraries masc_test_deps))
 
+(test
+ (name test_runtime_setup_login_client)
+ (modules test_runtime_setup_login_client)
+ (libraries masc_test_deps))
+
 (include stanzas/test_sandbox_prerequisites.inc)
 
 (include stanzas/test_apple_container_install.inc)
@@ -7105,11 +7112,11 @@
 (test
  (name test_runtime_setup_batch)
  (modules test_runtime_setup_batch)
- (libraries alcotest yojson unix eio eio_main masc.runtime masc.masc_core masc.fs_compat masc.masc_process))
+ (libraries masc.toml_line_editor alcotest yojson unix eio eio_main masc.runtime masc.masc_core masc.fs_compat masc.masc_process))
 (test
  (name test_server_runtime_setup_actions)
  (modules test_server_runtime_setup_actions)
- (libraries alcotest yojson unix eio eio_main httpun masc.auth masc.server masc.runtime masc.masc_core masc.fs_compat masc.masc_process))
+ (libraries masc.toml_line_editor alcotest yojson unix eio eio_main httpun masc.auth masc.server masc.runtime masc.masc_core masc.fs_compat masc.masc_process))
 
 (test
  (name test_runtime_model_context_metadata)
@@ -7455,3 +7462,36 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_check_installed_dashboard)))
+
+(rule
+ (alias runtest-test_tui_account_login_pty)
+ (deps test_tui_account_login_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action (run python3 %{dep:test_tui_account_login_pty.py} %{dep:../bin/masc_tui.exe})))
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_account_login_pty)))
+
+(test
+ (name test_tui_account_login)
+ (modules test_tui_account_login)
+ (libraries alcotest masc_tui_account_login masc_tui_command yojson))
+
+(test
+ (name test_runtime_setup_login_session)
+ (modules test_runtime_setup_login_session)
+ (libraries masc_test_deps))
+(test
+ (name test_runtime_setup_login_receipt)
+ (modules test_runtime_setup_login_receipt)
+ (libraries masc_test_deps))
+(rule
+ (alias runtest-test_account_login_transport)
+ (deps test_account_login_transport.py ../scripts/account-login-transport.py)
+ (action (run python3 %{dep:test_account_login_transport.py})))
+(alias
+ (name runtest)
+ (deps (alias runtest-test_account_login_transport)))
+(test
+ (name test_server_setup_account_login)
+ (modules test_server_setup_account_login)
+ (libraries masc_test_deps))

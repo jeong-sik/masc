@@ -92,6 +92,7 @@ val scope_of_credential :
 
 val scope_of_claude_code_home : string option -> scope
 val scope_of_codex_home : string option -> scope
+val scope_of_muse_home : string -> scope
 (** Official-client quota identity is the selected CLI home, not the provider
     row id. Two rows selecting the same home share observations; selecting a
     different home under the same row id does not reuse prior observations.

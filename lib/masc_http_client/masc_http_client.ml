@@ -182,10 +182,10 @@ let get_sync ?clock ?timeout_sec ?max_body_bytes ~url ~headers () =
     [idle_timeout_sec] is required rather than defaulted. A tolerable silence
     depends on the protocol being streamed — a keeper turn goes quiet for as
     long as the tool it is running takes — and this module cannot know it. *)
-let post_stream ~clock ~idle_timeout_sec ~url ~headers ~body ~on_chunk () =
+let post_stream ?retain_body ~clock ~idle_timeout_sec ~url ~headers ~body ~on_chunk () =
   let headers = ensure_default_headers headers in
   with_pool @@ fun pool ->
-  Pool.request_streaming pool ~clock ~idle_timeout_sec ~method_:`POST ~url
+  Pool.request_streaming ?retain_body pool ~clock ~idle_timeout_sec ~method_:`POST ~url
     ~headers ~body ~on_chunk ()
 
 (** GET that hands each response body chunk to [on_chunk] as it arrives,

@@ -795,9 +795,10 @@ function FusionPanelCard({ entry }: { entry: FusionPanelEntry }) {
           : null}
         ${failed
           ? html`<span class="fus-pstate fail">${entry.reason ?? entry.status}</span>`
-          : tokenLabel
-            ? html`<span class="fus-ptok mono" title="입력+출력 토큰">${tokenLabel} tok</span>`
-            : null}
+          : null}
+        ${tokenLabel
+          ? html`<span class="fus-ptok mono" title="입력+출력 토큰">${tokenLabel} tok</span>`
+          : null}
       </div>
       ${failed
         ? html`<div class="fus-pans failed">${body}</div>`

@@ -396,13 +396,20 @@ PROVIDERS = {
     # [providers.ollama_cloud] at the same endpoint (config/runtime.toml), and
     # the provider catalog row carries the key env while the model rows carry
     # tools/reasoning (e.g. deepseek-v4-pro, kimi-k2.7-code). No
-    # carries_effort: thinking is uncontrolled on this wire
-    # (reasoning-uncontrolled in the shipped bindings). No suppression
-    # contract either, so arms b/c/d refuse at render and ollama runs use e
-    # and later.
+    # carries_effort: the wire has no thinking toggle, so the binding says
+    # out loud that it rides the provider default instead
+    # (reasoning-uncontrolled in the shipped bindings); without that line the
+    # first turn is refused as Reasoning_undeclared_on_auto_enabling_wire.
+    # thinking-control-format "none" is the request axis the shipped deepseek
+    # binding carries: without it the resolved reasoning_effort dialect cannot
+    # encode enable_thinking on this path and the turn is refused again.
+    # No suppression contract either, so arms b/c/d refuse at render and
+    # ollama runs use e and later.
     "ollama_cloud": dict(protocol="openai-compatible-http",
                          endpoint="https://ollama.com/v1",
-                         api_key_env="OLLAMA_CLOUD_API_KEY"),
+                         api_key_env="OLLAMA_CLOUD_API_KEY",
+                         reasoning_uncontrolled=True,
+                         thinking_control_line='thinking-control-format = "none"\n'),
     # Claude Code subscription lane: `--model claude_code/claude-sonnet-5`
     # gives runtime_id claude_code.claude-sonnet-5; the alias doubles as the
     # CLI api-name. bootstrap.sh installs the unmodified CLI (native
@@ -751,7 +758,10 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
             max_concurrent=4 if spec["parallel"] else 1,
             effort_lines=(
                 f'reasoning-effort = "{effort}"\nthinking-support = true\n'
-                if pcfg.get("carries_effort") else ""),
+                if pcfg.get("carries_effort") else ""
+            ) + (
+                "reasoning-uncontrolled = true\nthinking-support = true\n"
+                if pcfg.get("reasoning_uncontrolled") else ""),
             max_context_line=(
                 f"max-context = {limits.max_context}\n" if limits else ""),
             max_output_lines=(

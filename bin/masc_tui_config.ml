@@ -5,7 +5,10 @@
    The path is resolved the same way
    keeper_runtime_config resolves it, so both processes read one file. *)
 
+type opening = Overview | Last of Keeper_id.Keeper_name.t option | Keeper of Keeper_id.Keeper_name.t
+
 type t = {
+  opening : (opening, string) result;
   theme : string option;
   board_sort : string option;
   lift_colours : bool option;
@@ -30,19 +33,44 @@ let runtime_toml_path ~base_path =
    the terminal exactly as it did before this key existed. *)
 let theme_of_doc doc = Keeper_toml_loader.toml_string_opt doc "tui.theme"
 
-(* The writer for the one key above that changes while masc runs. The other
-   settings in this file are read once at boot and never moved from inside
-   the TUI, so they have nothing to store; the theme is picked on a pane, and
-   a pick that does not survive a restart is not a setting.
+let opening_keeper_of_doc doc =
+  match List.assoc_opt "tui.opening_keeper" doc with
+  | None -> Ok None
+  | Some (Keeper_toml_loader.Toml_string name) ->
+    (match Keeper_id.Keeper_name.of_string name with
+     | Ok name -> Ok (Some name)
+     | Error reason -> Error ("Invalid [tui].opening_keeper: " ^ reason))
+  | Some _ -> Error "[tui].opening_keeper must be a Keeper name string"
 
-   [None] withdraws the choice: the key is removed rather than set to a name
-   meaning "the terminal's", because absence is the state the reader is going
-   back to -- the same absence [load] reads as "no stored choice".
+let opening_of_doc doc =
+  match List.assoc_opt "tui.opening" doc with
+  | None | Some (Keeper_toml_loader.Toml_string "overview") -> Ok Overview
+  | Some (Keeper_toml_loader.Toml_string "last") ->
+    Result.map (fun name -> Last name) (opening_keeper_of_doc doc)
+  | Some (Keeper_toml_loader.Toml_string "keeper") ->
+    (match opening_keeper_of_doc doc with
+     | Ok (Some name) -> Ok (Keeper name)
+     | Ok None -> Error "[tui].opening = keeper needs opening_keeper"
+     | Error reason -> Error reason)
+  | Some (Keeper_toml_loader.Toml_string value) ->
+    Error ("Unknown [tui].opening: " ^ value)
+  | Some _ -> Error "[tui].opening must be overview, last, or keeper"
 
-   Pure, and deliberately spelled in the editor's table-and-key form while
-   [theme_of_doc] reads the loader's dotted form. The two grammars are not
-   the same, so nothing can be shared between them; what proves they meet is
-   the round trip in test_tui_config.ml. *)
+(* Remember a chat target only when [opening] is [Last] and the target
+   changes. The edit shares Runtime's config write lock with other settings. *)
+let text_with_opening_keeper content ~keeper =
+  Toml_line_editor.edit_table_scalar content ~path:"tui" ~key:"opening_keeper"
+    ~value:(Some (Keeper_id.Keeper_name.to_string keeper))
+
+let set_opening_keeper ~base_path keeper =
+  match
+    Runtime.edit_config_text
+      ~runtime_config_path:(runtime_toml_path ~base_path)
+      (fun content -> text_with_opening_keeper content ~keeper)
+  with
+  | Ok (_ : Runtime.config_commit_receipt) -> Ok ()
+  | Error message -> Error message
+
 let text_with_theme content ~theme =
   Toml_line_editor.edit_table_scalar content ~path:"tui" ~key:"theme" ~value:theme
 
@@ -146,7 +174,11 @@ let load ~base_path =
     | Error _ -> None)
   in
   let read extract = Option.bind doc extract in
-  { theme = read theme_of_doc;
+  { opening =
+      (match doc with
+       | Some doc -> opening_of_doc doc
+       | None -> Ok Overview);
+    theme = read theme_of_doc;
     board_sort = read (fun doc -> Keeper_toml_loader.toml_string_opt doc "tui.board_sort");
     lift_colours = read lift_colours_of_doc;
     table_frame = read table_frame_of_doc;

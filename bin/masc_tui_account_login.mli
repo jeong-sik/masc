@@ -14,7 +14,15 @@ type removal_change =
 type removal =
   | Removable of { changes : removal_change list; login_store : string option }
   | Unremovable of string  (** Why the server will not remove it. *)
-type phase = Loading | Providers | Logging | Models | Documented_context of model | Saving | Finished | Failed
+type unverified = { runtime_id : string; code : string }
+type saved = Saved_verified | Saved_unverified of unverified * unverified list
+(** What a save published. [Saved_unverified] names the runtimes the server
+    published unmeasured because their provider declined the verification
+    for the account's usage (a spent quota or a rate limit). *)
+type phase = Loading | Providers | Logging | Models | Documented_context of model | Saving
+  | Finished of { saved : saved; refresh_failed : bool }
+      (** [refresh_failed]: the list read after the save did not arrive. *)
+  | Failed
   | Removal of { provider : provider; revision : string; removal : removal }
       (** [D] on a provider: what removing it changes, read at [revision]. *)
 type recovery = Login_status | Refresh_configuration
@@ -38,7 +46,7 @@ type t = {
 type authentication = Authenticated | Login_completed | Credential_captured
 type event = Started of string * string option | Output of string | Input_ready
   | Complete of string * authentication | Login_failed of string * string option | Login_error
-type action = Inventory | Refresh_saved | Refresh_retry | Start of bool | Input of int * Yojson.Safe.t | Cancel
+type action = Inventory | Refresh_saved of saved | Refresh_retry | Start of bool | Input of int * Yojson.Safe.t | Cancel
   | Recover | Discover | Prepare of model | Save of model | Close | Nothing
   | Preview_removal of { provider : provider; refused : string option }
       (** Read what removing [provider] changes. [refused] is why the server
@@ -73,7 +81,11 @@ val save_failed : t -> model -> string -> unit
 val refresh_retry : t -> (Yojson.Safe.t, string) result -> unit
 (** Refresh configuration revision and selection after an unsuccessful save,
     retaining the account and chosen model for an explicit retry. *)
-val refresh_saved : t -> (Yojson.Safe.t, string) result -> unit
+val saved : t -> Yojson.Safe.t -> (saved, string) result
+(** Read a save's receipt into [Finished]. A receipt that is neither verified
+    nor a readable usage-limited list of runtimes it selected is an error. *)
+val refresh_saved : t -> saved -> (Yojson.Safe.t, string) result -> unit
+(** Re-read the list after a save, keeping what the save published on screen. *)
 val input_response : sequence:int -> t -> (Yojson.Safe.t, string) result -> unit
 val models : t -> Yojson.Safe.t -> (unit, string) result
 val prepared : t -> model -> Yojson.Safe.t -> (unit, string) result

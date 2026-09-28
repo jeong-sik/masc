@@ -41,8 +41,9 @@ val facts_title :
     filters; the breakdown and the sort belong to the row under it, which this
     module also draws. The title is the narrow line and the clock and the
     connection badge sit at its end, so a fact spelled here and there goes off
-    the right edge. The keeper's name takes what the rest leaves, folded in the
-    middle when it does not fit ({!Masc_tui_ansi.detail_heading}). *)
+    the right edge. The clock and the badge are never shortened; the keeper's
+    name folds to its floor and the counts and filters are cut before the name
+    goes further ({!Masc_tui_ansi.detail_heading}). *)
 
 val memory_fact_age_label : float -> string
 val memory_fact_row_line : ?is_fleet:bool -> cols:int -> memory_fact_row -> string

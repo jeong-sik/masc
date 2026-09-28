@@ -41,7 +41,7 @@ timeout-s = 180.0
 type = "file"
 path = "~/.gemini/antigravity-cli/antigravity-oauth-token"
 
-[providers.muse_subscription]
+[providers.muse]
 display-name = "Muse"
 protocol = "muse-serve"
 command = "muse"
@@ -89,7 +89,7 @@ price-input = 0.075
 
 [antigravity_subscription.flash]
 
-[muse_subscription.muse_fixture]
+[muse.muse_fixture]
 
 [ollama.local-model]
 
@@ -140,9 +140,9 @@ let toml_string text path =
 
 let test_bases_are_the_signed_in_clients () =
   let t = parsed fixture in
-  Alcotest.(check (list string)) "official clients in file order, HTTP left out"
+  Alcotest.(check (list string)) "supported account-copy clients in file order, HTTP left out"
     [ "claude_code"; "claude_bare"; "codex_subscription"; "codex_acct1"
-    ; "antigravity_subscription"; "muse_subscription" ]
+    ; "antigravity_subscription"; "muse" ]
     (List.map (fun (b : D.base) -> b.id) (D.bases t));
   Alcotest.(check string) "a provider without a name shows its id" "claude_bare"
     (base_named t "claude_bare").display_name;
@@ -199,16 +199,16 @@ let test_claude_copy_keeps_the_command () =
 let test_muse_copy_signs_in_at_the_new_home () =
   let t = parsed fixture in
   let text =
-    declared t ~base:"muse_subscription" ~id:"muse_subscription_2"
+    declared t ~base:"muse" ~id:"muse_2"
       ~location:"/home/op/.muse-account2"
   in
   Alcotest.(check bool) "every line the operator wrote is still there" true
     (String.starts_with ~prefix:fixture text);
   Alcotest.(check (option string)) "the new home is written as account-home"
     (Some "/home/op/.muse-account2")
-    (toml_string text [ "providers"; "muse_subscription_2"; "account-home" ]);
+    (toml_string text [ "providers"; "muse_2"; "account-home" ]);
   let config = config_of text in
-  match bindings_of config "muse_subscription_2" with
+  match bindings_of config "muse_2" with
   | [ binding ] ->
     Alcotest.(check string) "the base's model is bound" "muse_fixture" binding.model_id;
     (match Runtime_adapter.binding_to_execution config binding with

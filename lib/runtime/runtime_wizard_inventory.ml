@@ -27,7 +27,7 @@ let configured_runtime_ids (config : Runtime_schema.config) provider_id =
     then Some (`String (Runtime_schema.binding_key binding)) else None)
 ;;
 
-let integration_json config ~id ~display_name ~protocol ~origin ~supported fields =
+let integration_json config ~id ~display_name ~protocol ~origin ~supported ~verification_supported fields =
   let configured = configured_runtime_ids config id in
   let setup_support =
     if not supported then Unsupported
@@ -40,7 +40,7 @@ let integration_json config ~id ~display_name ~protocol ~origin ~supported field
      ; "origin", `String origin
      ; "configured_runtime_ids", `List configured
      ; "setup_support", setup_support_json setup_support
-     ; "verification_support", `String (if supported then "response_tool" else "unsupported")
+     ; "verification_support", `String (if verification_supported then "response_tool" else "unsupported")
      ; "account_availability_verified", `Bool false
      ] @ fields)
 ;;
@@ -61,6 +61,12 @@ let credential_fields ~include_credential_references = function
   | Some (Runtime_schema.Inline _) -> [ "credential_kind", `String "inline" ]
   | None -> [ "credential_kind", `String "none" ]
 
+let account_fields ~include_credential_references account_home =
+  ["account_configured", `Bool (Option.is_some account_home)]
+  @ (match account_home with
+     | Some home when include_credential_references -> ["account_home", `String home]
+     | Some _ | None -> [])
+
 let integrations_json ~include_credential_references (config : Runtime_schema.config) =
   let catalog = Catalog_binding.all () in
   let configured =
@@ -69,11 +75,7 @@ let integrations_json ~include_credential_references (config : Runtime_schema.co
         match provider.api_format with
         | Runtime_schema.Antigravity_cli_runtime | Messages_api | Chat_completions_api | Ollama_api
         | Codex_app_server_runtime | Claude_code_runtime
-        | Gemini_api | Vertex_gemini_api -> true
-        (* Setup offers no Muse Code connection and readiness cannot verify
-           one (Runtime_verification), so a declared provider is listed as
-           unsupported for both. *)
-        | Muse_serve_runtime -> false
+        | Gemini_api | Vertex_gemini_api | Muse_serve_runtime -> true
       in
       let fields =
         match provider.transport with
@@ -83,7 +85,8 @@ let integrations_json ~include_credential_references (config : Runtime_schema.co
       let credential = credential_fields ~include_credential_references provider.credentials in
       integration_json config ~id:provider.id ~display_name:provider.display_name
         ~protocol:(Some provider.protocol) ~origin:"runtime_config" ~supported
-        (fields @ credential @ http_fields provider @ [ "enabled", `Bool provider.enabled ])) config.providers
+        ~verification_supported:true
+        (fields @ credential @ account_fields ~include_credential_references provider.account_home @ http_fields provider @ [ "enabled", `Bool provider.enabled ])) config.providers
   in
   let declared id =
     List.exists (fun (provider : Runtime_schema.provider) -> String.equal provider.id id)
@@ -105,7 +108,7 @@ let integrations_json ~include_credential_references (config : Runtime_schema.co
       in
       let supported = protocol <> None && task = None in
       Some (integration_json config ~id:entry.id ~display_name:entry.id ~protocol
-        ~origin:"agent_core_catalog" ~supported
+        ~origin:"agent_core_catalog" ~supported ~verification_supported:supported
         (endpoint_fields entry.base_url
          @ [ "request_path", `String entry.request_path
            ; "api_key_env", `String entry.api_key_env
@@ -117,6 +120,7 @@ let integrations_json ~include_credential_references (config : Runtime_schema.co
   let clients =
     [ "codex", "Codex", "codex-app-server", Some "codex", true
     ; "claude-code", "Claude Code", "claude-code", Some "claude", true
+    ; "muse-code", "Muse Code", "muse-serve", Some "muse", true
     ; "antigravity", "Antigravity", "antigravity-cli", Some "agy", true
     ; "vllm", "vLLM", "openai-compatible-http", None, true
     ; "rapid-mlx", "RapidMLX", "openai-compatible-http", None, true
@@ -127,7 +131,7 @@ let integrations_json ~include_credential_references (config : Runtime_schema.co
       if declared id || List.exists (fun (entry : Catalog_binding.t) -> entry.id = id) catalog
       then None else
       Some (integration_json config ~id ~display_name ~protocol:(Some protocol)
-        ~origin:"masc_integration" ~supported
+        ~origin:"masc_integration" ~supported ~verification_supported:supported
         (match command with None -> [] | Some command -> [ "command", `String command ])))
   in
   `List (configured @ prototypes @ clients)
@@ -167,10 +171,15 @@ let to_json ?(include_credential_references=false) (config : Runtime_schema.conf
                       , match model.max_context with
                         | None -> `Null
                         | Some n -> `Int n )
+                    ; ( "max_prompt_bytes"
+                      , match model.max_prompt_bytes with
+                        | None -> `Null
+                        | Some n -> `Int n )
                     ; "tools", `Bool model.tools_support
                     ; "streaming", `Bool model.streaming
                     ]
                     @ transport
+                    @ account_fields ~include_credential_references provider.account_home
                     @ http_fields provider
                     @ credential))
            | _ -> None))
@@ -181,6 +190,15 @@ let to_json ?(include_credential_references=false) (config : Runtime_schema.conf
       , match config.default_runtime_id with
         | None -> `Null
         | Some id -> `String id )
+    ; ( "default_runtime_selection"
+      , `List (List.map (fun id -> `String id)
+          (match config.default_runtime_id with
+           | None -> []
+           | Some primary ->
+             match List.find_opt
+               (fun (lane : Runtime_schema.lane_decl) -> String.equal lane.id primary)
+               config.lane_decls with
+               | None -> [primary] | Some lane -> lane.candidate_ids)))
     ; "model_release_catalog", Model_release_evidence.default_catalog_json ()
     ; "runtimes", `List runtimes
     ; "integrations", integrations_json ~include_credential_references config

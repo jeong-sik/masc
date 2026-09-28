@@ -32,7 +32,7 @@ let attempt_wire_op conn label op =
       else (
         match op conn.wsd with
         | () -> ()
-        | exception (EioCancel.Cancelled _ as ex) -> raise ex
+        | exception (Eio.Cancel.Cancelled _ as ex) -> raise ex
         | exception ex ->
           Log.Server.debug
             "collab %s failed: %s"
@@ -176,7 +176,7 @@ let accept_host ~upgrade reqd ~room =
   let handlers =
     Endpoint.handlers
       ~on_message:(on_binary_message (on_host_message ~room))
-      ~on_close:(fun _code _reason -> teardown_host ~room)
+      ~on_close:(fun ~code:_ ~reason:_ -> teardown_host ~room)
       ~on_error:(fun msg ->
         Log.Server.debug "collab host conn error: %s" msg;
         teardown_host ~room)
@@ -213,7 +213,7 @@ let accept_guest ~upgrade reqd ~room ~peer =
   let handlers =
     Endpoint.handlers
       ~on_message:(on_binary_message (on_guest_message ~room ~peer))
-      ~on_close:(fun _code _reason -> teardown_guest ~room ~peer)
+      ~on_close:(fun ~code:_ ~reason:_ -> teardown_guest ~room ~peer)
       ~on_error:(fun msg ->
         Log.Server.debug "collab guest %d conn error: %s" peer msg;
         teardown_guest ~room ~peer)

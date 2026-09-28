@@ -515,6 +515,27 @@ def call_probe():
     assert called["result"]["content"][0]["text"] == "MASC_TOOL_RESULT", called
 
 turn = read()
+if turn["method"] == "session/setModel":
+    # A durable selection. It becomes the session's model unless the fixture
+    # says the host did not land it; session/read then reports the result.
+    selected = turn["params"]["model"]["modelId"]
+    assert turn["params"]["sessionId"] == SESSION, turn
+    with open(os.path.join(HERE, "model-selections.log"), "a") as handle:
+        handle.write(selected + "\n")
+    send({"jsonrpc": "2.0", "id": turn["id"], "result": {
+        "commandId": turn["params"]["commandId"], "status": "accepted"}})
+    if FIXTURE.get("selection_lands", True):
+        model = selected
+    read_back = read()
+    assert read_back["method"] == "session/read", read_back
+    assert read_back["params"] == {"sessionId": SESSION, "excludeItems": True}, read_back
+    send({"jsonrpc": "2.0", "id": read_back["id"], "result": {"session": {
+        "sessionId": SESSION, "status": "idle", "turnCount": completed_turns, "modelId": model,
+        "approvalMode": {"mode": "promptUnmatched", "source": "replay", "lastCommandId": None},
+        "workspaceRoot": FIXTURE["workspace_root"]}, "viewCursor": cursor(),
+        "history": {"mode": "none", "items": None, "snapshot": None, "noneReason": "excluded"},
+        "pendingRequests": []}})
+    turn = read()
 assert turn["method"] == "turn/start", turn
 turn_id = turn["params"]["commandId"]
 if "expected_effort" in FIXTURE:
@@ -1380,8 +1401,7 @@ let test_a_cancelled_turn_leaves_recovery () =
       (Some (started_turn_id ~base_path)) observed_turn)
 ;;
 
-(* A changed model starts a fresh session. A successful resume must report
-   that same model; a missing model is not proof of a matching binding. *)
+(* A changed model starts a fresh session. *)
 let test_a_changed_model_starts_a_fresh_session () =
   with_scripted_host (fun ~base_path ->
     let tool = masc_probe_tool (ref `Null) in
@@ -1400,18 +1420,43 @@ let test_a_changed_model_starts_a_fresh_session () =
        |> List.filter (fun line -> line <> "")))
 ;;
 
-let test_unreported_resume_model_remains_refused () =
+(* The same configuration resumed on a session that reports another model, or
+   none (Muse Code 1.4.0 reports its account default), selects the configured
+   model and reads it back before the turn. A selection the host does not land
+   is refused before dispatch; a missing model is never taken as a match. *)
+let test_resumed_model_is_reselected_before_dispatch () =
+  let lines path =
+    if Sys.file_exists path
+    then read_text path |> String.split_on_char '\n' |> List.filter (fun line -> line <> "")
+    else [] in
+  let first_turn ~base_path ~tool =
+    match (run_turn_with ~model:"muse-a" ~base_path ~tool ()).outcome.result with
+    | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error) in
+  List.iter (fun reported ->
+    with_scripted_host (fun ~base_path ->
+      let tool = masc_probe_tool (ref `Null) in
+      first_turn ~base_path ~tool;
+      write_fixture ~base_path ["resume_model_id", reported];
+      (match (run_turn_with ~model:"muse-a" ~base_path ~tool ()).outcome.result with
+       | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
+      check (list string) "the configured model was selected" ["muse-a"]
+        (lines (Filename.concat base_path "model-selections.log"));
+      check (list string) "the same session continued" ["start"; "resume"]
+        (lines (Filename.concat base_path "sessions.log"))))
+    [`Null; `String "muse-a-contributor"];
   with_scripted_host (fun ~base_path ->
     let tool = masc_probe_tool (ref `Null) in
-    (match (run_turn_with ~model:"muse-a" ~base_path ~tool ()).outcome.result with
-     | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
-    write_fixture ~base_path ["resume_model_id", `Null];
+    first_turn ~base_path ~tool;
+    write_fixture ~base_path
+      ["resume_model_id", `String "muse-a-contributor"; "selection_lands", `Bool false];
     (match (run_turn_with ~model:"muse-a" ~base_path ~tool ()).outcome.result with
      | Error (Agent_core.Error.Provider (Llm_provider.Error.ProviderReportedError
          {error_type=Some "session_model_mismatch"; _})) -> ()
      | Error error -> fail (Agent_core.Error.to_string error)
-     | Ok _ -> fail "unreported resumed model was treated as matching");
-    check bool "unconfirmed model refused before turn dispatch" false
+     | Ok _ -> fail "a selection the host did not land was treated as matching");
+    check (list string) "the configured model was asked for" ["muse-a"]
+      (lines (Filename.concat base_path "model-selections.log"));
+    check bool "unlanded selection refused before turn dispatch" false
       (Sys.file_exists (Filename.concat base_path "resume-prompt.txt")))
 ;;
 
@@ -2115,7 +2160,8 @@ let () =
             test_a_stop_before_the_turn_start_answer_settles
         ; test_case "a cancelled turn leaves recovery" `Quick
             test_a_cancelled_turn_leaves_recovery
-        ; test_case "missing resumed model remains refused" `Quick test_unreported_resume_model_remains_refused
+        ; test_case "resumed model is re-selected before dispatch" `Quick
+            test_resumed_model_is_reselected_before_dispatch
         ; test_case "a changed model starts a fresh session" `Quick
             test_a_changed_model_starts_a_fresh_session
         ] )

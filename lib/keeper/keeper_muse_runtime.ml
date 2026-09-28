@@ -910,16 +910,15 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         |> Result.map_error (config_error ~field:"official_client_session.gate_continuation")
     in
     let claim_plan = Session_store.reconcile_tool_surface claim_plan ~tool_surface_sha256 in
-    (* MSP offers no replaceable configuration channel, and this client
-       names the model and the workspace root only when it starts a session.
-       A host session that settled against another canonical history, system
-       prompt, configured model or root is superseded by a fresh one seeded
-       from the canonical source; ephemeral world context stays on the
-       per-turn prompt path. Without the model here a changed model resumed
-       the old session, and the serve client refused it as
-       [Session_model_mismatch]: the turn failed before the next claim started
-       fresh. Without the root a resumed session kept working where it
-       started. *)
+    (* MSP offers no replaceable configuration channel for the root, and this
+       client names the workspace root only when it starts a session. A host
+       session that settled against another canonical history, system prompt,
+       configured model or root is superseded by a fresh one seeded from the
+       canonical source; ephemeral world context stays on the per-turn prompt
+       path. The serve client re-selects the configured model on a resumed
+       session that reports another, but a history made under one configured
+       model is not continued under a new one. Without the root a resumed
+       session kept working where it started. *)
     (* Hook nudges are ordinary history seeded only on Start. Carried context
        is sent on every Resume and must not invalidate the durable session. *)
     let canonical_messages = List.filter

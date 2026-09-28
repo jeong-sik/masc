@@ -514,7 +514,10 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
              Option.iter (fun reset_ms -> Runtime_quota_window.note_exhausted
                ~scope:quota_scope ~resets_at:(float_of_int reset_ms /. 1000.))
                (Runtime_muse_msp.exhausted_subscription_reset_ms usage)
-           | _ -> ())
+           | Runtime_muse_serve.Turn_started _ | Runtime_muse_serve.Text_delta _
+           | Runtime_muse_serve.Text_completed _ | Runtime_muse_serve.Native_tool_started _
+           | Runtime_muse_serve.Native_tool_finished _ | Runtime_muse_serve.Approval_decided _
+           | Runtime_muse_serve.Turn_terminal_received _ | Runtime_muse_serve.Turn_finished _ -> ())
          ~mgr
          ~clock
          ~cwd:Eio.Path.(Eio.Stdenv.fs env / workspace_root)

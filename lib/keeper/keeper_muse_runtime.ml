@@ -275,7 +275,8 @@ type turn_admission =
 let recovery_failure_for_attempt ~current ~admission error =
   match current, admission, error with
   | Session_store.State_persistence_failed, _, _ -> current
-  | _, Not_dispatched, Serve.Timeout {turn_accepted=false; _} -> Session_store.Pre_dispatch_failed
+  | _, Not_dispatched, (Serve.Timeout {turn_accepted=false; _} | Serve.Capability_not_granted _) ->
+    Session_store.Pre_dispatch_failed
   | _ -> recovery_failure_of_runtime_error ~current error
 ;;
 
@@ -728,6 +729,7 @@ let stream_projection ~quota_scope ~keeper_name ~runtime_id ~configured_model ~r
               Runtime_quota_window.note_exhausted ~scope
                 ~resets_at:(float_of_int reset_ms /. 1000.))
               (Msp.exhausted_subscription_reset_ms usage)) quota_scope
+        | Serve.Turn_terminal_received _ -> ()
         | Serve.Usage_reported { session_id; turn_id; usage } ->
           (* [turn/completed] usage is "the turn's aggregate token usage,
              summed across the turn's model completions" (msp.d.ts,
@@ -954,7 +956,8 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     let session_mode =
       match claim_plan.previous_settlement with
       | None -> Serve.Start
-      | Some { session_id; _ } -> Serve.Resume { session_id }
+      | Some { session_id; _ } ->
+        Serve.Resume { session_id; expected_turn_count = claim_plan.turn_count - 1 }
     in
     let is_resume = Option.is_some claim_plan.previous_settlement in
     let context_frontier : Session_store.context_frontier =
@@ -1207,6 +1210,9 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     let started_at = Time_compat.now () in
     let observed_turn = ref None in
     let admission = ref Not_dispatched in
+    (* Capture the terminal before usage/stream callbacks, process cleanup or
+       completion hooks can yield. A later stop cannot undo a terminal turn. *)
+    let provider_terminal = ref None in
     let turn_acknowledged, acknowledge_turn = Eio.Promise.create () in
     (* The host's turn id is durable from the moment the serve client reports
        it, so a failure or a restart mid-turn leaves the recovery row naming
@@ -1446,7 +1452,14 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
                     ~on_prompt_sent:(fun () ->
                       admission := Dispatched;
                       report_transmitted_input ())
-                    ~on_stream_event:stream.on_serve_event
+                    ~on_stream_event:(fun event ->
+                      (match event with
+                       | Serve.Turn_terminal_received terminal -> provider_terminal := Some terminal
+                       | Serve.Turn_started _ | Serve.Text_delta _ | Serve.Text_completed _
+                       | Serve.Native_tool_started _ | Serve.Native_tool_finished _
+                       | Serve.Approval_decided _ | Serve.Subscription_usage_observed _
+                       | Serve.Usage_reported _ | Serve.Turn_finished _ -> ());
+                      stream.on_serve_event event)
                     ~mgr:process_mgr
                     ~clock
                     ~cwd:process_cwd
@@ -1472,10 +1485,21 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     in
     let settle_cancellation exn =
       let backtrace = Printexc.get_raw_backtrace () in
+      let terminal_failure error =
+        recovery_failure_of_runtime_error ~current:!recovery_failure error in
       recovery_failure
-        := (if Keeper_owner_signals.is_owner_cancel_reason exn then
-              Session_store.Owner_stopped_turn
-            else Session_store.Transport_interrupted);
+        := (match !provider_terminal with
+            | Some Msp.Terminal_completed -> !recovery_failure
+            | Some (Msp.Terminal_failed {kind=Msp.Auth_required; message; _}) ->
+              terminal_failure (Serve.Auth_required message)
+            | Some (Msp.Terminal_failed error) -> terminal_failure (Serve.Turn_failed error)
+            | Some Msp.Terminal_cancelled -> terminal_failure Serve.Turn_cancelled
+            | Some (Msp.Unrecognized_terminal terminal) ->
+              terminal_failure (Serve.Protocol_error
+                {stage="turn/completed"; detail="unrecognized terminal " ^ terminal})
+            | None when !recovery_failure = Session_store.State_persistence_failed -> !recovery_failure
+            | None when Keeper_owner_signals.is_owner_cancel_reason exn -> Session_store.Owner_stopped_turn
+            | None -> Session_store.Transport_interrupted);
       let detail = "Muse Code turn cancelled: " ^ Printexc.to_string exn in
       (match Eio.Cancel.protect (fun () -> settle_failed_claim detail) with
        | Ok () -> ()
@@ -1586,9 +1610,9 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
             ; stop_reason = Completed
             }
       with
-      (* A stop the owner raised is not an ambiguity: it knows the turn did
-         not finish and why. Only an unexplained cancellation needs an
-         operator to adjudicate what the transport left behind (#28012). *)
+      (* An owner stop releases an unfinished turn. Once the successful terminal
+         was observed, cancellation must retain its ordinal and recovery cause
+         until settlement succeeds; the provider's completed work cannot roll back. *)
       | Eio.Cancel.Cancelled _ as exn -> settle_cancellation exn
       | exn when Keeper_owner_signals.is_owner_cancel_reason exn ->
         settle_cancellation exn

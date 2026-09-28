@@ -1198,6 +1198,40 @@ let test_help_table_is_fail_closed () =
       (contains ~needle:"declares nothing" message)
 ;;
 
+(* #39448: a description that hides a real limit sends the Keeper to a call
+   that is refused. These pin the two descriptions that were wrong. *)
+let load_embedded_tool name =
+  let contents =
+    match Embedded_config.read ("tools/" ^ name ^ ".toml") with
+    | Some contents -> contents
+    | None -> failf "embedded %s.toml is missing" name
+  in
+  match Tool_definition_toml.load ~name ~contents with
+  | Ok loaded -> loaded
+  | Error message -> failf "%s.toml does not load: %s" name message
+;;
+
+let test_board_search_description_names_its_scope () =
+  let loaded = load_embedded_tool "masc_board_search" in
+  check
+    bool
+    "the description says comments are not searched"
+    true
+    (contains ~needle:"not comments" loaded.Tool_definition_toml.schema.description)
+;;
+
+let test_web_fetch_description_names_the_reader () =
+  let loaded = load_embedded_tool "masc_web_fetch" in
+  let serialized =
+    Yojson.Safe.to_string loaded.Tool_definition_toml.schema.input_schema
+  in
+  check
+    bool
+    "the maxChars description names keeper_artifact_read"
+    true
+    (contains ~needle:"keeper_artifact_read" serialized)
+;;
+
 let () =
   run "tool_definition_toml"
     [ ( "load"
@@ -1303,5 +1337,11 @@ let () =
         ] )
     ; ( "title"
       , [ test_case "optional, non-empty when present" `Quick test_title_key ] )
+    ; ( "descriptions"
+      , [ test_case "board search names its scope" `Quick
+            test_board_search_description_names_its_scope
+        ; test_case "web fetch names the reader" `Quick
+            test_web_fetch_description_names_the_reader
+        ] )
     ]
 ;;

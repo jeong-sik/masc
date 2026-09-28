@@ -66,7 +66,11 @@ let run ~secure_random ~net ~mgr ~clock ~cwd ~directory ~account_home ~quota_sco
             Option.iter (fun reset_ms -> Runtime_quota_window.note_exhausted
               ~scope:quota_scope ~resets_at:(float_of_int reset_ms /. 1000.))
               (Runtime_muse_msp.exhausted_subscription_reset_ms usage)
-          | _ -> ())
+          | Runtime_muse_serve.Turn_started _ | Runtime_muse_serve.Text_delta _
+          | Runtime_muse_serve.Text_completed _ | Runtime_muse_serve.Native_tool_started _
+          | Runtime_muse_serve.Native_tool_finished _ | Runtime_muse_serve.Approval_decided _
+          | Runtime_muse_serve.Turn_terminal_received _ | Runtime_muse_serve.Usage_reported _
+          | Runtime_muse_serve.Turn_finished _ -> ())
         ~storage_root ?reasoning_effort ~mcp_servers ~mgr ~clock
         ~cwd:Eio.Path.(cwd / Filename.basename root / "workspace") config
         ~workspace_root:workspace ~prompt ~images:[]

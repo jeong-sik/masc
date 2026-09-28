@@ -1361,6 +1361,34 @@ describe('RuntimeTomlEditor', () => {
     })
   })
 
+  it('saves unrelated edits with a dormant Muse provider and requires its account home when enabled', async () => {
+    const source = `${richConfig.source_text}
+[providers.muse_fixture]
+protocol = "muse-serve"
+command = "muse"
+enabled = false
+is-non-interactive = true
+`
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce({ ...richConfig, source_text: source })
+    render(html`<${RuntimeTomlEditor} />`, container)
+    await waitFor(() => expect(container.querySelector('textarea')?.value).toBe(source))
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement
+    const save = container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement
+    const edited = `${source}\n# An unrelated operator note\n`
+    fireEvent.input(textarea, { target: { value: edited } })
+    fireEvent.click(save)
+    await waitFor(() => {
+      expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledOnce()
+      expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledWith(edited)
+      expect(container.querySelector('[data-testid="runtime-toml-status"]')?.textContent).toContain('saved')
+    })
+
+    fireEvent.input(textarea, { target: { value: edited.replace('enabled = false', 'enabled = true') } })
+    fireEvent.click(save)
+    await waitFor(() => expect(container.textContent).toContain('사용할 계정 홈을 선택하세요'))
+    expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledTimes(1)
+  })
+
   it.each(['', '   ', 'relative/account'])('refuses an invalid existing Muse account home before saving (%j)', async home => {
     apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce({ ...richConfig,
       source_text: `${richConfig.source_text}

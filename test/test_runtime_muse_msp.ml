@@ -439,7 +439,7 @@ let test_session_durability_follows_v1_wire_contract () =
 
 let test_effective_approval_mode_wire_contract () =
   let parse value = Msp.parse_session_result ~stage:"session/start"
-      (`Assoc ["session", `Assoc (["sessionId", `String "s"] @
+      (`Assoc ["session", `Assoc (["sessionId", `String "s"; "turnCount", `Int 0] @
         (match value with None -> [] | Some value -> ["approvalMode", value]))]) in
   List.iter (fun mode ->
     let value = `Assoc ["mode", `String (Msp.approval_mode_to_string mode);

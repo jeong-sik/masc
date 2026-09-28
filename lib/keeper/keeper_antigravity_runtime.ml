@@ -825,17 +825,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
       ; sandbox = true
       ; disable_slash_commands = true
       ; admission_timeout_s = config.timeout_s
-      ; (* A per-model [turn-timeout-s] overrides the stream-idle bound, and
-           [0] removes it: the deadline exists to notice a client that has gone
-           silent, not to cap how long legitimate work may take, so a
-           deployment is allowed to say the client decides. Absent leaves
-           [config.timeout_s] standing, which keeps an undeclared config on the
-           previous behaviour. *)
-        timeout_s =
-          (match Runtime_inference.resolve_turn_timeout_s ~runtime_id with
-           | None -> Some config.timeout_s
-           | Some seconds when seconds <= 0.0 -> None
-           | Some seconds -> Some seconds)
+      ; timeout_s = Runtime_inference.resolve_turn_timeout_s_or ~runtime_id ~default:config.timeout_s
       (* A keeper turn is a conversation, not a schema contract: nothing
          downstream parses its text against a domain schema. *)
       ; output_schema = None

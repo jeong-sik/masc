@@ -2660,6 +2660,8 @@
 (include stanzas/test_dated_jsonl_count_cache.inc)
 (include stanzas/test_dated_jsonl_off_fiber.inc)
 (include stanzas/test_play_role_permissions.inc)
+(include stanzas/test_play_invite.inc)
+(include stanzas/test_play_invite_routes.inc)
 (include stanzas/test_pool_body_limit.inc)
 (include stanzas/test_posix_spawn_process_mgr.inc)
 

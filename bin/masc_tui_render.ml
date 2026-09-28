@@ -3581,14 +3581,15 @@ let render_planning_list (state : state) =
           a goal (or empty note), its selected detail and the footer before
           adding optional trend/backlog rows. *)
        let phase_width = planning_phase_column + 2 in
-       let title_width =
-         Render_schedule.planning_title_width
+       let goal_layout =
+         Render_schedule.planning_layout
            ~inner_width:(max 1 (framed_inner_width cols - 2))
            ~phase_width
        in
        let list_header = Buffer.create 256 in
        box_line_styled list_header cols ~style:(Theme.recede ())
-         ("  " ^ Render_schedule.planning_header_row ~phase_width ~title_width);
+         ("  "
+         ^ Render_schedule.planning_header_row ~phase_width ~layout:goal_layout);
        let divider = Buffer.create 128 in
        box_divider divider cols;
        let selection_rows = if count = 0 then 0 else 1 in
@@ -3636,17 +3637,23 @@ let render_planning_list (state : state) =
           which is why the legend says the marks this list draws and only those.
           Wrap complete explanations within the frame's cell width: a clipped
           legend would lose a verdict and add a truncation mark identical to
-          the stale-proof glyph. *)
+          the stale-proof glyph. A list narrow enough to give up the JUDGE
+          column draws no marks, so it draws no legend either. *)
        (* Reserve the divider, a goal (or empty note), and the selected
           verdict before spending rows on the legend. At the minimum
           height the headers and summary stay in place and a goal remains
           visible; taller frames get the legend back. *)
        let rows_after_legend = 1 + 1 + selection_rows + tail_rows in
        let judge_legend =
-         Masc_tui_planning_proof_mark.legend_rows
-           ~max_cells:(framed_inner_width cols)
-           ~max_rows:(rows - count_frame_lines buf - rows_after_legend)
-           (List.map (fun (g : planning_goal) -> g.pg_proof) goals)
+         if
+           List.mem Render_schedule.Planning_proof
+             goal_layout.Masc_tui_table.shown
+         then
+           Masc_tui_planning_proof_mark.legend_rows
+             ~max_cells:(framed_inner_width cols)
+             ~max_rows:(rows - count_frame_lines buf - rows_after_legend)
+             (List.map (fun (g : planning_goal) -> g.pg_proof) goals)
+         else []
        in
        List.iter (box_line_styled buf cols ~style:Ansi.dim) judge_legend;
        box_divider buf cols;
@@ -3772,7 +3779,7 @@ let render_planning_list (state : state) =
              let line =
                lead
                ^ Render_schedule.planning_row ~phase_style:status_color
-                   ~priority_style ~open_style ~phase_width ~title_width
+                   ~priority_style ~open_style ~phase_width ~layout:goal_layout
                    { Render_schedule.prow_phase = "[" ^ status_label ^ "]"
                    ; prow_proof = planning_proof_mark g.pg_proof
                    ; prow_priority = Printf.sprintf "P%d" g.pg_priority
@@ -6339,16 +6346,16 @@ let render_lane_run_list (state : state) ~(lane : Standalone_lane.t) =
     | Standalone_lane.Workspace_curator
     | Standalone_lane.Browser_stagehand -> "ACTOR"
   in
-  (* The run id takes what the named columns leave; it used to run off the
+  (* The run id takes what the drawn columns leave; it used to run off the
      header with no end while the row cut it at twelve. *)
-  let run_id_width =
-    Render_schedule.lane_run_id_width
+  let run_layout =
+    Render_schedule.lane_run_layout
       ~inner_width:(max 1 (framed_inner_width cols - 2))
   in
   box_line_styled buf cols ~style:(Theme.recede ())
     ("  "
     ^ Render_schedule.lane_run_header_row ~identity_header:identity_heading
-        ~run_id_width);
+        ~layout:run_layout);
   box_divider buf cols;
   (match state.lane_runs_error with
    | None -> ()
@@ -6396,7 +6403,7 @@ let render_lane_run_list (state : state) ~(lane : Standalone_lane.t) =
             "  "
             ^ Render_schedule.lane_run_row ~identity_header:identity_heading
                 ~status_style:(lane_run_status_style run.lrs_status)
-                ~run_id_width
+                ~layout:run_layout
                 { Render_schedule.lrow_started =
                     lane_run_clock run.lrs_started_at
                 ; lrow_subject =
@@ -9725,12 +9732,14 @@ let render_harness_list (state : state) =
   (match stale_note with
    | None -> ()
    | Some note -> box_line_styled buf cols ~style:(Theme.warn ()) note);
-  (* The reason takes the cells the named columns leave. *)
-  let reason_width =
-    Render_schedule.harness_reason_width
+  (* The reason takes the cells the drawn columns leave. *)
+  let verdict_layout =
+    Render_schedule.harness_layout
       ~inner_width:(max 1 (framed_inner_width cols - 2))
   in
-  let col_hdr = "  " ^ Render_schedule.harness_header_row ~reason_width in
+  let col_hdr =
+    "  " ^ Render_schedule.harness_header_row ~layout:verdict_layout
+  in
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
   (match state.harness_error with
@@ -9816,7 +9825,8 @@ let render_harness_list (state : state) =
             let line =
               "  "
               ^ Render_schedule.harness_row
-                  ~verdict_style:(semantic_status_color ruling) ~reason_width
+                  ~verdict_style:(semantic_status_color ruling)
+                  ~layout:verdict_layout
                   { Render_schedule.hrow_time =
                     Terminal_text.clock_timestamp
                       (Masc_domain.iso8601_of_unix_seconds v.hv_at)
@@ -11656,13 +11666,13 @@ let render_changes_list (state : state) =
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
-  (* What the turn did takes the cells the named columns leave. *)
-  let summary_width =
-    Render_schedule.change_summary_width
+  (* What the turn did takes the cells the drawn columns leave. *)
+  let file_change_layout =
+    Render_schedule.change_layout
       ~inner_width:(max 1 (framed_inner_width cols - 2))
   in
   let col_hdr =
-    "  " ^ Render_schedule.change_header_row ~summary_width
+    "  " ^ Render_schedule.change_header_row ~layout:file_change_layout
   in
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
@@ -11756,7 +11766,7 @@ let render_changes_list (state : state) =
           let line =
             "  "
             ^ Render_schedule.change_row ~op_style:kind_style ~result_style
-                ~summary_width
+                ~layout:file_change_layout
                 { Render_schedule.crow_turn =
                     Option.fold ~none:Masc_tui_theme.Glyph.no_value ~some:string_of_int
                       change.Masc.Tui_decode.fc_turn

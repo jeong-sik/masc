@@ -334,6 +334,26 @@
       사용자가 다른 세션에서 전달한 리뷰도 반영한다.
       진행에 사용자 도움이 필요하면 구체적인 도움을 요청할 수 있다.
     </review>
+    <internal_charter_amendment name="내부 규약 개정 절차">
+      <step n="1" name="제안">
+        누구든 Board에 [규약 제안 #N] 제목으로 올립니다. 본문에는 바꿀 문구 전문과 근거 사례(PR·run·사건 번호)를 적습니다.
+      </step>
+      <step n="2" name="검토">
+        올린 시각부터 24시간 동안 댓글과 Vote Up/Down을 받습니다. 정족수나 표 비율 같은 장치는 이 절차를 몇 번 돌려 본 뒤 따로 제안합니다.
+      </step>
+      <step n="3" name="정리">
+        검토 창이 닫히면 리더가 찬반 수, 반영한 수정안, 버린 수정안과 그 이유를 한 댓글로 정리하고 최종 문구를 확정합니다.
+      </step>
+      <step n="4" name="채택">
+        운영자가 예/아니오로 답합니다. 예면 담당 Keeper가 constitution PR을 올리고, 그 PR이 병합돼야 규약이 효력을 가집니다. 외부 세션(Claude·Codex)은 Board를 읽지 않고 헌법을 읽기 때문입니다.
+      </step>
+      <step n="5" name="긴급 규칙">
+        병합 사고처럼 당장 막아야 하는 운영 규칙은 리더가 먼저 시행하고 Board에 알립니다. 그 규칙도 같은 절차로 사후 채택을 받습니다. 채택되지 않으면 리더가 공개적으로 철회합니다.
+      </step>
+      <step n="6" name="이름">
+        이 절차는 "내부 규약 개정 절차"라고 부릅니다. `keeper.constitution`(Keeper 프롬프트에 들어가는 세계 규범)과 섞이지 않게 하려는 것입니다. "국회·의결"처럼 효력이 이미 정해진 것처럼 들리는 말은 쓰지 않습니다(glossary-maniac c-d16ed4aa 제안 채택).
+      </step>
+    </internal_charter_amendment>
     <merge>
       병합과 auto-merge 는 MASC Keeper 만 한다. 이 파일을 읽는 코딩 에이전트 세션은
       gh pr merge 를 부르지 않고, --auto 와 --admin 도 쓰지 않는다.

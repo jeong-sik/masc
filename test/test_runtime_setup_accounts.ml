@@ -114,9 +114,148 @@ let native_home_revalidated () = fixture (fun directory workspace ->
   Unix.mkdir account_home 0o700;
   check bool "owned directory remains usable" true (Result.is_ok (resolve ())))
 
+module Email = Runtime_account_email
+
+let email_of = function
+  | Ok email -> Email.to_string email
+  | Error missing -> fail (Email.missing_to_string missing)
+let missing = function
+  | Ok email -> fail ("unexpected email " ^ Email.to_string email)
+  | Error missing -> missing
+let id_token claims =
+  let segment text = Base64.encode_string ~pad:false ~alphabet:Base64.uri_safe_alphabet text in
+  segment {|{"alg":"none"}|} ^ "." ^ segment claims ^ ".fixture-signature"
+
+(* Each client's own login file shape, written as the client writes it.
+   Synthetic values only. *)
+let client_login_files () =
+  check string "Codex auth.json OpenID email" "codex@example.com"
+    (email_of (Email.of_codex_auth (Printf.sprintf {|{"auth_mode":"chatgpt","tokens":{"id_token":%S,"access_token":"a"}}|}
+       (id_token {|{"sub":"s","email":"codex@example.com"}|}))));
+  check bool "Codex API-key login reports no email" true
+    (missing (Email.of_codex_auth {|{"auth_mode":"apikey","OPENAI_API_KEY":"k","tokens":null}|}) = Email.Not_reported);
+  check string "Claude Code account file email" "claude@example.com"
+    (email_of (Email.of_claude_account {|{"userID":"u","oauthAccount":{"accountUuid":"a","emailAddress":"claude@example.com"}}|}));
+  check bool "Claude Code without an OAuth account reports no email" true
+    (missing (Email.of_claude_account {|{"userID":"u"}|}) = Email.Not_reported);
+  check string "Muse auth document email" "muse@example.com"
+    (email_of (Email.of_muse_auth {|{"schema_version":1,"providers":{"meta":{"mechanism":"oauth","user_email":"muse@example.com"}}}|}));
+  check string "Antigravity OAuth OpenID email" "google@example.com"
+    (email_of (Email.of_google_oauth (Printf.sprintf {|{"token":{"access_token":"a"},"auth_method":"oauth","id_token":%S}|}
+       (id_token {|{"iss":"https://accounts.google.com","sub":"s","email":"google@example.com"}|}))));
+  check bool "a key given twice is not guessed" true
+    (missing (Email.of_claude_account {|{"oauthAccount":{"emailAddress":"a@example.com","emailAddress":"b@example.com"}}|})
+     = Email.Source_unrecognized);
+  check bool "control characters are not displayable email" true
+    (missing (Email.of_claude_account "{\"oauthAccount\":{\"emailAddress\":\"a@example.com\\u001b[2J\"}}") = Email.Invalid_email);
+  check bool "a token that is not three segments is unrecognized" true
+    (missing (Email.of_google_oauth {|{"id_token":"not-a-token"}|}) = Email.Source_unrecognized);
+  check bool "unparseable bytes are unrecognized" true (missing (Email.of_muse_auth "{") = Email.Source_unrecognized)
+
+let inventory_config ~account_home ~oauth_file =
+  match Runtime_toml.parse_string (Printf.sprintf {|
+[runtime]
+default = "stub-http.stub-model"
+
+[providers.stub-http]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:9/v1"
+
+[models.stub-model]
+api-name = "gpt-5.4"
+max-context = 200000
+
+[stub-http.stub-model]
+
+[providers.claude-selected]
+protocol = "claude-code"
+command = "/usr/bin/true"
+is-non-interactive = true
+account-home = %S
+
+[providers.claude-inherited]
+protocol = "claude-code"
+command = "/usr/bin/true"
+is-non-interactive = true
+
+[models."claude-sonnet-5"]
+api-name = "claude-sonnet-5"
+max-context = 1000000
+tools-support = true
+streaming = true
+turn-timeout-s = 0
+
+[claude-selected."claude-sonnet-5"]
+
+[claude-inherited."claude-sonnet-5"]
+
+[providers.agy]
+protocol = "antigravity-cli"
+command = "/usr/bin/true"
+is-non-interactive = true
+timeout-s = 10.0
+credentials = { type = "file", path = %S }
+
+[models.gemini]
+api-name = "gemini-fixture"
+max-context = 128000
+
+[agy.gemini]
+|} account_home oauth_file) with
+  | Ok config -> config
+  | Error errors ->
+    fail (String.concat "; " (List.map (fun (e : Runtime_toml.parse_error) -> e.path ^ ": " ^ e.message) errors))
+
+let inventory_rows config =
+  match Email.inventory_json ~lookup:Accounts.email config with
+  | `List rows -> List.map (fun row -> match row with
+      | `Assoc fields -> (match List.assoc_opt "integration_id" fields with
+        | Some (`String id) -> id, Yojson.Safe.to_string row
+        | _ -> fail "row without integration_id")
+      | _ -> fail "row is not an object") rows |> List.sort compare
+  | _ -> fail "account emails are not a list"
+
+let recorded_login_email () = fixture (fun directory _ ->
+  let account_home = Filename.concat directory "claude-home" in
+  Unix.mkdir account_home 0o700;
+  let oauth_file = Filename.concat directory "agy-oauth.json" in
+  write oauth_file "{}";
+  let account = Email.Native_home account_home in
+  check bool "nothing is recorded before a login" true (Accounts.email account = Email.Absent);
+  let email = match Email.of_claude_account {|{"oauthAccount":{"emailAddress":"operator@example.com"}}|} with
+    | Ok email -> email | Error missing -> fail (Email.missing_to_string missing) in
+  Accounts.set_email account (Some email) |> get;
+  check bool "login email is read back" true (Accounts.email account = Email.Recorded email);
+  check bool "another spelling is another account" true
+    (Accounts.email (Email.Native_home (account_home ^ "/")) = Email.Absent);
+  check bool "a credential file with the same text is another account" true
+    (Accounts.email (Email.Credential_file account_home) = Email.Absent);
+  let records = List.fold_left Filename.concat directory ["masc"; "credentials"; "setup-accounts"; "account-emails"] in
+  let files = Sys.readdir records |> Array.to_list in
+  check int "one record" 1 (List.length files);
+  let record = Filename.concat records (List.hd files) in
+  check int "record is private" 0o600 ((Unix.stat record).st_perm land 0o777);
+  check (list (pair string string)) "inventory reads the record, only for selected accounts"
+    [ "agy", {|{"integration_id":"agy","state":"absent"}|};
+      "claude-selected", {|{"integration_id":"claude-selected","state":"recorded","email":"operator@example.com"}|} ]
+    (inventory_rows (inventory_config ~account_home ~oauth_file));
+  check (list string) "inventory opens no account file" [] (Sys.readdir account_home |> Array.to_list);
+  let original = In_channel.with_open_bin record In_channel.input_all in
+  write record (Yojson.Safe.to_string (`Assoc ["schema",`String "masc.setup_account_email.v1";
+    "account_kind",`String "native_home";"account",`String "/elsewhere";"email",`String "other@example.com"]));
+  check bool "a record naming another account is not shown" true (Accounts.email account = Email.Unreadable);
+  write record original;
+  Unix.chmod record 0o644;
+  check bool "a readable-by-others record is not trusted" true (Accounts.email account = Email.Unreadable);
+  Unix.chmod record 0o600;
+  Accounts.set_email account None |> get;
+  check bool "a later login without an email clears the old one" true (Accounts.email account = Email.Absent))
+
 let () = run "setup account references" ["private account",[
   test_case "native home revalidated on resolution" `Quick native_home_revalidated;
   test_case "native home scoped reference" `Quick native_home_scope;
   test_case "persistent scoped reference" `Quick persisted_scope;
   test_case "private manifest and credential required" `Quick private_manifest;
-  test_case "failed import preserves source and cleans destination" `Quick failed_import_cleanup]]
+  test_case "failed import preserves source and cleans destination" `Quick failed_import_cleanup;
+  test_case "client login files report the account email" `Quick client_login_files;
+  test_case "login email record feeds the setup inventory" `Quick recorded_login_email]]

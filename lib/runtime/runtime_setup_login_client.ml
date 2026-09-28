@@ -76,7 +76,7 @@ let home_dir = function
 let argv ~cli_path = function
   | Native {client=Codex_home; _} -> [cli_path; "login"; "--device-auth"]
   | Native {client=Claude_home; _} -> [cli_path; "auth"; "login"]
-  | Native {client=Muse_home; _} -> [cli_path; "login"]
+  | Native {client=Muse_home; _} -> Runtime_muse_serve.login_argv ~cli_path
   | Antigravity_home _ -> [cli_path]
 
 let environment = function
@@ -117,6 +117,28 @@ let observe ~mgr ~clock ~cwd ~cli_path = function
     Runtime_antigravity_setup.capture_login home
     |> Result.map (fun () -> Credential_captured)
     |> Result.map_error Runtime_antigravity_setup.error_message
+
+let read_login_file path =
+  match Eio_guard.run_in_systhread ~label:"setup-login-account-email" (fun () ->
+      Fs_compat.load_file_opt path) with
+  | Some bytes -> Ok bytes
+  | None -> Error Runtime_account_email.Source_unavailable
+  | exception (Unix.Unix_error _ | Sys_error _) -> Error Runtime_account_email.Source_unavailable
+
+let account_email login =
+  let read path parse = Result.bind (read_login_file path) parse in
+  match login with
+  | Native {client=Codex_home; account_home} ->
+    read (Filename.concat account_home "auth.json") Runtime_account_email.of_codex_auth
+  | Native {client=Claude_home; account_home} ->
+    read (Filename.concat account_home ".claude.json") Runtime_account_email.of_claude_account
+  | Native {client=Muse_home; account_home} ->
+    read (Runtime_muse_home.source_auth_path ~account_home) Runtime_account_email.of_muse_auth
+  | Antigravity_home {home; _} ->
+    (match Runtime_antigravity_setup.credential_reference home with
+     | Ok (Runtime_schema.File path) -> read path Runtime_account_email.of_google_oauth
+     | Ok (Runtime_schema.Env _ | Runtime_schema.Inline _) | Error _ ->
+       Error Runtime_account_email.Source_unavailable)
 
 let publish ~workspace ~integration_id ~cli_path = function
   | Native {account_home; _} ->

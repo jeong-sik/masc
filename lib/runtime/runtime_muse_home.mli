@@ -4,7 +4,9 @@
 type t
 
 (** Why the selected account has no sign-in masc can use. Each one is answered
-    by signing in again through [/login muse]. *)
+    by signing in again through one of masc's Muse sign-ins ([/login muse] in
+    the TUI, or [masc runtime-muse-login] from the installer), which run the
+    client with the file credential backend. *)
 type sign_in_gap =
   | No_file_sign_in
       (** No auth.json, or one without Meta credentials. *)
@@ -25,12 +27,19 @@ val error_to_string : error -> string
 val prepare : account_home:string -> (t, error) result
 (** Import the selected account's [.config/muse/auth.json] on first use or
     when its exact source bytes change. Reuse an unchanged source's generation
-    without replacing credentials the vendor refreshed there. Only a sign-in
-    whose secrets are inside auth.json is admitted; a Keychain-held one is
-    [Sign_in_required Keychain_sign_in]. Publication of
+    without replacing credentials the vendor refreshed there. The Meta slot
+    must be non-empty, and its [storage] marker must be absent or ["file"]:
+    ["keychain"] is [Sign_in_required Keychain_sign_in] and any other value is
+    [Unsupported_credential_storage]. Whether the slot actually holds a secret
+    is not checked here; a slot without one fails at the client's own
+    authentication. Publication of
     a new generation is atomic and serialized per selected account. No hooks,
     plugins or permission choices from source settings are imported. Owned
     account and credential-parent directories must not be group/other writable. *)
+
+val source_auth_path : account_home:string -> string
+(** The auth document the vendor CLI writes when signing in under
+    [account_home]; {!prepare} imports it. *)
 
 val account_home : t -> string
 (** Exact configured source account spelling, distinct from the canonical

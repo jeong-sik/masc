@@ -10,17 +10,22 @@ type error =
   | Sign_in_required of sign_in_gap
   | State_unavailable of string
 
+(* Both of masc's Muse sign-ins run the client with the file credential
+   backend; a plain [muse login] on macOS writes to the Keychain again. *)
+let sign_in_again =
+  "sign in again from masc (/login muse in the TUI, or the installer's Muse sign-in)"
+
 let error_to_string = function
   | Invalid_account_home detail -> "Muse account home: " ^ detail
   | Sign_in_required No_file_sign_in ->
     "Muse account has no file-backed sign-in; sign in to the selected account home"
   | Sign_in_required Keychain_sign_in ->
     "Muse account keeps its sign-in in the macOS Keychain, which masc cannot hand to \
-     a selected account; sign in again with /login muse"
+     a selected account; " ^ sign_in_again
   | Sign_in_required (Unsupported_credential_storage storage) ->
     Printf.sprintf
-      "Muse account records its sign-in in storage %S, which masc cannot read; \
-       sign in again with /login muse" storage
+      "Muse account records its sign-in in storage %S, which masc cannot read; %s"
+      storage sign_in_again
   | State_unavailable detail -> "Muse managed configuration: " ^ detail
 
 let account_home t = t.account_home
@@ -110,9 +115,10 @@ let parse_record body =
 type credential_storage = In_file | In_keychain
 
 (* The vendor marks a sign-in whose secrets it moved into the macOS Keychain
-   with [storage: "keychain"] and leaves only metadata in auth.json. A slot
-   that holds its secrets inline carries no marker, or the file backend's own
-   name [file]. Only the inline form survives the copy into a managed
+   with [storage: "keychain"] and leaves only metadata in auth.json. The
+   vendor binary names no other marker value, so a slot without one is read as
+   inline; the file backend's own name [file] is read the same way. Only the
+   inline form survives the copy into a managed
    generation, which is why every Muse child runs with the file backend
    (Runtime_muse_serve). *)
 let credential_storage meta =
@@ -184,6 +190,10 @@ let prepare_locked ~sync_store ~selected_account_home ~account_home ~store ~sour
        let* () = Fs_compat.save_file_atomic_strict record_path record |> Result.map_error (fun _ -> State_unavailable "credential generation publication failed") in
        Ok { config_home = generation; account_revision = revision; account_home = selected_account_home; physical_home = account_home })
 
+(* Where the vendor CLI writes its sign-in for a HOME: XDG_CONFIG_HOME is
+   [HOME/.config] for login, and the CLI keeps [muse/auth.json] under it. *)
+let source_auth_path ~account_home = Filename.concat account_home ".config/muse/auth.json"
+
 let protect operation =
   try operation () with
   | Sys_error _ | Unix.Unix_error _ -> unavailable "private account state could not be accessed"
@@ -201,7 +211,7 @@ let prepare_with_store_sync ~sync_store ~account_home =
       let* () = check_directory ~private_:false account_home in
       let* store = directories account_home [ ".local", false; "state", false; "masc", true; "muse-config", true ] in
       Ok (account_home, store)) in
-    let source = Filename.concat account_home ".config/muse/auth.json" in
+    let source = source_auth_path ~account_home in
     match File_lock_eio.with_durable_lock ~lock_path:(Filename.concat store "prepare.lock")
         (fun () -> Eio_guard.run_in_systhread ~label:"muse-managed-account-generation"
             (fun () -> prepare_locked ~sync_store ~selected_account_home ~account_home ~store ~source)) with

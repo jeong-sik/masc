@@ -97,6 +97,10 @@ let test_a_taken_name_is_refused () =
   with_workspace (fun base_path ->
     ready base_path;
     refused "a keeper's name" "name_taken keeper" (issue ~keeper_names:(Ok [ "minsu" ]) base_path "minsu");
+    (* "Minsu" and "minsu" share agents/minsu.json: the keeper booting later
+       would overwrite the invite. *)
+    refused "a keeper's name in other capitals" "name_taken keeper"
+      (issue ~keeper_names:(Ok [ "Minsu" ]) base_path "minsu");
     let _ = Auth.create_token base_path ~agent_name:"codex" ~role:Masc_domain.Worker in
     refused "a credential's name" "name_taken credential" (issue base_path "codex");
     check (option string) "the worker keeps its credential" (Some "worker")
@@ -132,11 +136,11 @@ let test_revoke () =
       | Ok issued -> token_of_link issued.I.link
       | Error err -> failf "not issued: %s" (issue_error_to_string err)
     in
-    check bool "revoked" true (I.revoke ~base_path ~name:(name "minsu") = Ok ());
+    check bool "revoked" true (I.revoke ~base_path ~name:(name "minsu") = Ok I.Deleted);
     check bool "the bearer stops resolving" true
       (Result.is_error (Auth.find_credential_by_token base_path ~token));
-    check bool "a second revoke finds nothing" true
-      (I.revoke ~base_path ~name:(name "minsu") = Error I.No_such_invite);
+    check bool "a second revoke finds it gone" true
+      (I.revoke ~base_path ~name:(name "minsu") = Ok I.Already_gone);
     let _ = Auth.create_token base_path ~agent_name:"codex" ~role:Masc_domain.Worker in
     check bool "a worker's credential is not an invite" true
       (I.revoke ~base_path ~name:(name "codex") = Error (I.Not_an_invite Masc_domain.Worker));

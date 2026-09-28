@@ -67,7 +67,7 @@ Each queued ask draws on one row. `Enter` opens the full text of a multi-line ar
 `Enter` opens nine tabs, cycled with `[`/`]`: Info · Sandbox · Settings · Secrets · GitHub · Identity · Channels · Automation · Runs.
 
 - On the **Sandbox** tab, `d`/`m`/`s` switch immediately to Docker, MicroVM, or Remote SSH. The switch posts straight through, with no config file edit.
-- On the list: `c` chat, `l` logs, `t` tool calls, `u` pick a runtime lane, `g` toggle yolo/auto approval, `p`/`w` pause/wake, `s` shutdown.
+- On the list: `c` chat, `l` logs, `t` tool calls, `u` pick a runtime lane, `g` toggle yolo/auto approval, `p`/`w` pause/wake, `s` shutdown. Click a Keeper row to select it; click the selected row again to open its detail, as `Enter` does.
 
 ### Planning and Fusion
 Planning's `v` walks three tabs: Goals, Task Review, Task Verdicts. Goals is the goal lifecycle; the other two are the near and far halves of the Task protocol, so they are separate subjects rather than an order. Fusion is its own ring stop; `Enter` opens a run's detail. While a run is active its `STATE` shows the exact stage: `accepted`, `panel(N)`, `judge(A/F)`, `computed(A/F)`, `recording(A/F)`.

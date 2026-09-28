@@ -2,16 +2,22 @@ module Http = Http_server_eio
 module Look = Keeper_portrait_look
 module Draw = Keeper_portrait_draw
 
-let prefix = "/api/v1/keepers/"
+let prefix = Server_dashboard_http_keeper_api_types.keeper_api_prefix
 let file_name = "portrait.png"
 
-(* Twice the largest avatar the dashboard draws (72 CSS px on a 2x screen
-   rounds up to this), and small enough to draw in a few milliseconds. *)
+(* A request without [size] gets a picture big enough to scale down cleanly
+   into any avatar the dashboard draws, and still quick to draw. *)
 let default_size = 160
 
-(* Store the image but revalidate before reuse: the bytes change when the
-   drawing does, and the tag is what says so. *)
+(* Store the image but revalidate before reuse: the tag says whether the
+   copy is still this binary's drawing. *)
 let cache_control = "no-cache"
+
+(* A budget in bytes rather than a count of entries, because one 512 px
+   portrait weighs as much as dozens of the 64 px ones the dashboard asks
+   for. Eight MiB holds a handful of the largest and every Keeper at the
+   dashboard's size many times over. *)
+let cache_byte_budget = 8 * 1024 * 1024
 
 let route path =
   if not (String.starts_with ~prefix path) then None
@@ -21,13 +27,70 @@ let route path =
     | [ name; file ] when name <> "" && String.equal file file_name -> Some name
     | _ -> None
 
+type build =
+  | Executable of string
+  | Unscoped
+
+(* [Build_identity] hashes the executable once per process and keeps the
+   digest; the server asks for it at start-up. *)
+let current_build () =
+  match (Build_identity.current ()).executable_sha256 with
+  | Some digest -> Executable digest
+  | None -> Unscoped
+
+module Cache = struct
+  type key = string * int
+
+  type t =
+    { byte_budget : int
+    ; table : (key, string) Hashtbl.t
+    ; order : key Queue.t  (* insertion order, oldest first *)
+    ; mutable bytes : int
+    ; lock : Mutex.t  (* no I/O or yield inside; requests may run on any domain *)
+    }
+
+  let create ~byte_budget =
+    { byte_budget; table = Hashtbl.create 64; order = Queue.create (); bytes = 0; lock = Mutex.create () }
+
+  let length t = Mutex.protect t.lock (fun () -> Hashtbl.length t.table)
+  let bytes t = Mutex.protect t.lock (fun () -> t.bytes)
+  let find t key = Mutex.protect t.lock (fun () -> Hashtbl.find_opt t.table key)
+
+  let rec evict_until_within t =
+    if t.bytes > t.byte_budget then
+      match Queue.take_opt t.order with
+      | None -> ()
+      | Some key ->
+        (match Hashtbl.find_opt t.table key with
+         | Some png ->
+           Hashtbl.remove t.table key;
+           t.bytes <- t.bytes - String.length png
+         | None -> ());
+        evict_until_within t
+
+  (* A picture larger than the whole budget is served but not kept. Two
+     requests that drew the same picture at once store it once. *)
+  let add t key png =
+    if String.length png <= t.byte_budget then
+      Mutex.protect t.lock (fun () ->
+        if not (Hashtbl.mem t.table key) then begin
+          Hashtbl.replace t.table key png;
+          Queue.push key t.order;
+          t.bytes <- t.bytes + String.length png;
+          evict_until_within t
+        end)
+end
+
+let process_cache = Cache.create ~byte_budget:cache_byte_budget
+
 type answer =
   | Invalid_name
   | Invalid_size of string
   | Unknown_keeper
   | Lookup_failed of string
   | Encode_failed of string
-  | Png of string
+  | Not_modified of string
+  | Png of { etag : string; png : string }
 
 (* Digits only: [int_of_string] would also take "0x40", "1_6" and "+64". The
    length bound keeps the conversion from overflowing before the range check. *)
@@ -53,7 +116,21 @@ let draw ~name size =
   let image = Draw.render (Look.body_of_name name) (Look.equipment_of_name name) size in
   Rgb_png.encode_rgba ~width:image.edge ~height:image.edge ~rgba:image.rgba
 
-let answer ~name ~size ~keeper_present =
+(* The cached bytes, or a drawing that is then kept. *)
+let png_of cache ~name size =
+  let edge = Draw.int_of_size size in
+  match Cache.find cache (name, edge) with
+  | Some png -> Ok png
+  | None ->
+    match Domain_pool_ref.submit_cpu_or_inline (fun () -> draw ~name size) with
+    | Ok png -> Cache.add cache (name, edge) png; Ok png
+    | Error _ as refused -> refused
+
+let build_tag digest ~name size =
+  Http.Response.etag_of_body
+    (String.concat "\000" [ digest; name; string_of_int (Draw.int_of_size size) ])
+
+let answer ~cache ~build ~name ~size ~keeper_present ~holds_tag =
   if not (Keeper_config.validate_name name) then Invalid_name
   else
     match size_of_request size with
@@ -63,17 +140,39 @@ let answer ~name ~size ~keeper_present =
       | Error message -> Lookup_failed message
       | Ok false -> Unknown_keeper
       | Ok true ->
-        match Domain_pool_ref.submit_cpu_or_inline (fun () -> draw ~name size) with
-        | Ok png -> Png png
-        | Error message -> Encode_failed message
+        match build with
+        | Executable digest ->
+          let etag = build_tag digest ~name size in
+          if holds_tag etag then Not_modified etag
+          else (
+            match png_of cache ~name size with
+            | Ok png -> Png { etag; png }
+            | Error message -> Encode_failed message)
+        | Unscoped ->
+          match png_of cache ~name size with
+          | Error message -> Encode_failed message
+          | Ok png ->
+            let etag = Http.Response.etag_of_body png in
+            if holds_tag etag then Not_modified etag else Png { etag; png }
 
+(* [lstat], not a read: a public GET must not decode, repair, rewrite or
+   count failures on the Keeper's metadata. The path is built here rather than
+   by [Keeper_types_profile.keeper_meta_path], which creates the Keeper
+   directory when it is missing. *)
 let keeper_present config name () =
-  match Keeper_meta_store.read_meta_presence config name with
-  | Error message -> Error message
-  | Ok Keeper_meta_store.Meta_absent -> Ok false
-  (* A file this binary does not decode is still a Keeper's file: the portrait
-     needs only the name. *)
-  | Ok (Keeper_meta_store.Meta_present _ | Keeper_meta_store.Meta_not_current _) -> Ok true
+  let path =
+    Filename.concat
+      (Workspace.keepers_runtime_dir config)
+      (Keeper_runtime_root_entry.keeper_basename ~keeper_name:name Keeper_runtime_root_entry.Metadata)
+  in
+  match Unix.lstat path with
+  | { Unix.st_kind = Unix.S_REG; _ } -> Ok true
+  | { Unix.st_kind = (Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK); _ } ->
+    Error (Printf.sprintf "keeper metadata %s is not a regular file" path)
+  (* A name too long for the file system cannot belong to a Keeper either. *)
+  | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR | Unix.ENAMETOOLONG), _, _) -> Ok false
+  | exception Unix.Unix_error (error, _, _) ->
+    Error (Printf.sprintf "keeper metadata %s: %s" path (Unix.error_message error))
 
 let error_json message = `Assoc [ "error", `String message ]
 
@@ -83,8 +182,10 @@ let handle_get state request reqd name =
     Server_auth.respond_json_value_with_cors ~status request reqd (error_json message)
   in
   match
-    answer ~name ~size:(Server_utils.query_param request "size")
+    answer ~cache:process_cache ~build:(current_build ()) ~name
+      ~size:(Server_utils.query_param request "size")
       ~keeper_present:(keeper_present config name)
+      ~holds_tag:(fun etag -> Http.Response.request_holds_tag ~etag request)
   with
   | Invalid_name -> refuse `Bad_request (Printf.sprintf "invalid keeper name: %s" name)
   | Invalid_size raw ->
@@ -94,6 +195,6 @@ let handle_get state request reqd name =
   | Unknown_keeper -> refuse `Not_found (Printf.sprintf "keeper %S not found" name)
   | Lookup_failed message -> refuse `Service_unavailable message
   | Encode_failed message -> refuse `Internal_server_error message
-  | Png png ->
-    Http.Response.bytes_cached ~etag:(Http.Response.etag_of_body png) ~cache_control
-      ~request ~content_type:"image/png" png reqd
+  | Not_modified etag -> Http.Response.bytes_not_modified ~etag ~cache_control reqd
+  | Png { etag; png } ->
+    Http.Response.bytes_cached ~etag ~cache_control ~request ~content_type:"image/png" png reqd

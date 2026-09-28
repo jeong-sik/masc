@@ -508,20 +508,16 @@ let transport_test_result
 
 let execute_with_accepting_test_validator
       ~net
-      ?clock
+      ~clock
       ~before_measurement_dispatch
       ~on_measurement_terminal
       ~before_dispatch
       ~before_advance
       flow
   =
-  (* Fixture targets declare a connect budget by default, and a flow with a
-     declared budget refuses to run without a measurement clock, so every
-     case that dispatches passes the stdenv clock the server runner already
-     hands it. *)
   EO.execute_flow_once
     ~net
-    ?clock
+    ~clock
     ~before_measurement_dispatch
     ~on_measurement_terminal
     ~before_dispatch
@@ -531,10 +527,10 @@ let execute_with_accepting_test_validator
   |> transport_test_result
 ;;
 
-let execute_ok ~net ?clock flow =
+let execute_ok ~net ~clock flow =
   execute_with_accepting_test_validator
     ~net
-    ?clock
+    ~clock
     ~on_measurement_terminal:(fun _ -> Ok ())
     ~before_measurement_dispatch:(fun _ -> Ok ())
     ~before_dispatch:(fun _ -> Ok ())
@@ -542,10 +538,10 @@ let execute_ok ~net ?clock flow =
     flow
 ;;
 
-let execute_with_validator ~net ?clock ~before_advance ~validate flow =
+let execute_with_validator ~net ~clock ~before_advance ~validate flow =
   EO.execute_flow_once
     ~net
-    ?clock
+    ~clock
     ~on_measurement_terminal:(fun _ -> Ok ())
     ~before_measurement_dispatch:(fun _ -> Ok ())
     ~before_dispatch:(fun _ -> Ok ())
@@ -919,7 +915,7 @@ let test_fenced_text_json_advances_to_frozen_successor () =
      check string "invalid fallback candidate" "fenced-text" failed;
      check string "frozen fallback successor" "bare-text" next;
      check bool "fenced text is invalid JSON" true (cause = EO.Invalid_json_output);
-     check bool "invalid fallback receipt is terminal" true (phase = EO.Terminal);
+     check bool "invalid fallback receipt holds the response" true (phase = EO.Response_received);
      check int "invalid fallback preserves one POST" 1 dispatch_count
    | None -> fail "invalid fallback did not request its frozen successor");
   match result with
@@ -2753,6 +2749,67 @@ let test_predispatch_measurement_failure_advances_without_wire () =
       "predispatch-measurement-successor"
       (candidate_id (EO.flow_success_candidate success))
   | Error _ -> fail "predispatch zero-dispatch failure did not advance"
+;;
+
+(* A binding whose endpoint cannot be sent (port 0 passes the catalog's
+   scheme and host check) is refused when its plan is frozen, not when its
+   turn to dispatch comes: the walk hands the input on without allocating an
+   attempt or calling [before_dispatch] for it. *)
+let test_unsendable_endpoint_is_refused_before_an_attempt () =
+  let (result, advances, evidence), posts =
+    with_server ~response:(openai_response {|{"name":"accepted"}|})
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
+    with_catalog
+      [ catalog_entry
+          ~id:"port-zero"
+          ~base_url:"http://127.0.0.1:0"
+          ~native:true
+          ~json:true
+          ()
+      ; catalog_entry ~id:"port-zero-successor" ~base_url ~native:true ~json:true ()
+      ]
+    @@ fun snapshot ->
+    let flow = start_flow (frozen_flow snapshot [ "port-zero"; "port-zero-successor" ]) in
+    let advances = ref [] in
+    let result =
+      execute_with_accepting_test_validator
+        ~clock
+        ~net
+        ~on_measurement_terminal:(fun _ -> Ok ())
+        ~before_measurement_dispatch:(fun _ -> Ok ())
+        ~before_dispatch:(fun candidate ->
+          check
+            string
+            "only the successor reaches dispatch"
+            "port-zero-successor"
+            (candidate_id candidate);
+          Ok ())
+        ~before_advance:(fun ~failed ~next:_ ->
+          (match failed with
+           | EO.Flow_candidate_rejected rejection ->
+             advances := EO.candidate_rejection_disposition rejection :: !advances
+           | EO.Flow_candidate_execution_failed _ ->
+             fail "an unsendable endpoint reached execution");
+          Ok ())
+        flow
+    in
+    result, List.rev !advances, EO.flow_attempt_evidence flow
+  in
+  check int "only the successor posts" 1 posts;
+  check
+    bool
+    "the endpoint is refused as a request preparation failure"
+    true
+    (advances = [ EO.Request_preparation_failed ]);
+  check int "only the successor owns an attempt" 1 (List.length evidence.attempts);
+  match result with
+  | Ok success ->
+    check
+      string
+      "the successor answers"
+      "port-zero-successor"
+      (candidate_id (EO.flow_success_candidate success))
+  | Error _ -> fail "the walk did not reach the successor"
 ;;
 
 let test_postdispatch_measurement_failures_advance () =
@@ -4717,111 +4774,6 @@ let test_gemini_structural_sibling_rejects_before_outer_dispatch () =
   | Ok _ | Error _ -> fail "invalid Gemini schema lost typed candidate exhaustion"
 ;;
 
-let test_structural_predispatch_failure_does_not_advance () =
-  let response =
-    {|{"id":"msg-flow","type":"message","role":"assistant","model":"flow","content":[{"type":"text","text":"{\"name\":\"unused\"}"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}|}
-  in
-  let (result, replay, evidence, intents, terminals, advances), posts =
-    with_counted_server ~measurement_reply:(Measurement_tokens 1) ~response
-    @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
-    with_catalog
-      [ catalog_entry
-          ~kind:"anthropic"
-          ~request_path:"/v1/messages"
-          ~serving_constraint:true
-          ~body_timeout_s:(Some 1.0)
-          ~id:"clock-a"
-          ~base_url
-          ~native:true
-          ~json:true
-          ()
-      ; catalog_entry ~id:"clock-b" ~base_url ~native:true ~json:true ()
-      ]
-    @@ fun snapshot ->
-    let flow = start_flow (frozen_flow snapshot [ "clock-a"; "clock-b" ]) in
-    let intents = ref 0 in
-    let terminals = ref 0 in
-    let advances = ref 0 in
-    let result =
-      (* This case must run with no clock at all, so it calls the flow
-         directly instead of through the helpers, whose call sites now
-         forward the server runner's clock. *)
-      EO.execute_flow_once
-        ~net
-        ~before_measurement_dispatch:(fun _ ->
-          incr intents;
-          Ok ())
-        ~on_measurement_terminal:(fun _ ->
-          incr terminals;
-          Ok ())
-        ~before_dispatch:(fun _ -> fail "missing measurement clock allocated generation")
-        ~before_advance:(fun ~failed:_ ~next:_ ->
-          incr advances;
-          Ok ())
-        ~validate:accepting_test_validator
-        flow
-      |> transport_test_result
-    in
-    let replay =
-      EO.execute_flow_once
-        ~net
-        ~before_measurement_dispatch:(fun _ -> Ok ())
-        ~on_measurement_terminal:(fun _ -> Ok ())
-        ~before_dispatch:(fun _ -> Ok ())
-        ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
-        ~validate:accepting_test_validator
-        flow
-      |> transport_test_result
-    in
-    ( result
-    , replay
-    , EO.flow_attempt_evidence flow
-    , !intents
-    , !terminals
-    , !advances )
-  in
-  check int "missing clock dispatches no measurement" 0 posts.measurement_posts;
-  check int "missing clock dispatches no generation" 0 posts.generation_posts;
-  check int "missing clock invokes no intent callback" 0 intents;
-  check int "missing clock invokes no terminal callback" 0 terminals;
-  check int "missing clock cannot advance" 0 advances;
-  check
-    int
-    "missing clock records no measurement receipt"
-    0
-    (List.length evidence.measurements);
-  check
-    int
-    "missing clock allocates no generation attempt"
-    0
-    (List.length evidence.attempts);
-  (match replay with
-   | Error (EO.Flow_attempt_already_started _ as terminal) ->
-     check_rendered
-       "attempt already started"
-       ~affixes:[ "attempt_already_started; flow=[" ]
-       terminal
-   | Ok _ | Error _ -> fail "missing-clock flow replayed");
-  match result with
-  | Error
-      (EO.Flow_measurement_start_failed
-         { cause = EO.Measurement_clock_required_for_timeout; evidence; _ } as terminal) ->
-    check_rendered
-      "measurement start failure"
-      ~affixes:
-        [ "measurement_start_failed: slot="
-        ; "cause=measurement_clock_required_for_timeout"
-        ]
-      terminal;
-    check
-      bool
-      "predispatch structural failure starts no outward dispatch"
-      true
-      (EO.flow_evidence_generation_dispatch evidence = EO.No_generation_dispatch);
-    check int "structural successor remains unprepared" 0 (List.length evidence.attempts)
-  | Ok _ | Error _ -> fail "missing clock was not terminal"
-;;
-
 let test_concurrent_duplicate_flow_does_not_double_dispatch () =
   let (left, right), posts =
     with_server ~response_delay_s:0.1 ~response:(openai_response {|{"name":"accepted"}|})
@@ -5001,6 +4953,10 @@ let () =
             `Quick
             test_all_candidate_rejections_return_typed_zero_dispatch_terminal
         ; test_case
+            "an unsendable endpoint is refused before an attempt"
+            `Quick
+            test_unsendable_endpoint_is_refused_before_an_attempt
+        ; test_case
             "predispatch transport failure advances durably"
             `Quick
             test_predispatch_transport_failure_advances_after_durable_callback
@@ -5116,10 +5072,6 @@ let () =
             "Gemini structural sibling rejects before outer dispatch"
             `Quick
             test_gemini_structural_sibling_rejects_before_outer_dispatch
-        ; test_case
-            "predispatch structural failure stops"
-            `Quick
-            test_structural_predispatch_failure_does_not_advance
         ; test_case
             "concurrent duplicate makes one dispatch"
             `Quick

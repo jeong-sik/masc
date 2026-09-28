@@ -1,11 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { html } from 'htm/preact'
 import { render } from 'preact'
+import { waitFor } from '@testing-library/preact'
+import { clearStoredToken, setStoredToken } from '../api/core'
 import { KeeperPortrait, keeperPortraitUrl, PORTRAIT_MAX_PX, PORTRAIT_MIN_PX } from './keeper-portrait'
-
-async function flush() {
-  await new Promise(resolve => setTimeout(resolve, 0))
-}
 
 describe('keeperPortraitUrl', () => {
   it('asks for twice the drawn size', () => {
@@ -22,39 +20,123 @@ describe('keeperPortraitUrl', () => {
   })
 })
 
+const png = () => new Response(new Blob([new Uint8Array([137, 80, 78, 71])], { type: 'image/png' }), { status: 200 })
+const refused = (status: number) => new Response('{"error":"refused"}', { status })
+
 describe('KeeperPortrait', () => {
   let container: HTMLDivElement
+  let created: string[]
+  let revoked: string[]
+  const originalCreate = URL.createObjectURL
+  const originalRevoke = URL.revokeObjectURL
 
   beforeEach(() => {
     container = document.createElement('div')
     document.body.appendChild(container)
+    created = []
+    revoked = []
+    URL.createObjectURL = () => {
+      const url = `blob:portrait-${created.length + 1}`
+      created.push(url)
+      return url
+    }
+    URL.revokeObjectURL = (url: string) => { revoked.push(url) }
   })
 
   afterEach(() => {
     render(null, container)
     container.remove()
+    URL.createObjectURL = originalCreate
+    URL.revokeObjectURL = originalRevoke
+    clearStoredToken()
+    vi.unstubAllGlobals()
   })
 
   const fallback = html`<span data-testid="fallback">KB</span>`
+  const portrait = (name: string) =>
+    html`<${KeeperPortrait} name=${name} sizePx=${40} fallback=${fallback} />`
+  const shown = () => container.querySelector('img[data-testid="keeper-portrait"]') as HTMLImageElement | null
 
-  it('reserves its box before the image arrives', () => {
-    render(html`<${KeeperPortrait} name="wick-tester" sizePx=${40} fallback=${fallback} />`, container)
-    const img = container.querySelector('img') as HTMLImageElement
-    expect(img.getAttribute('width')).toBe('40')
-    expect(img.getAttribute('height')).toBe('40')
-    expect(img.getAttribute('alt')).toBe('wick-tester')
+  it('reserves its box while the portrait is on its way', () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => {})))
+    render(portrait('wick-tester'), container)
+    const box = container.querySelector('[data-testid="keeper-portrait-loading"]') as HTMLElement
+    expect(box.style.width).toBe('40px')
+    expect(box.style.height).toBe('40px')
+    expect(shown()).toBeNull()
     expect(container.querySelector('[data-testid="fallback"]')).toBeNull()
   })
 
-  it('draws the fallback after a load error, and tries again for another keeper', async () => {
-    render(html`<${KeeperPortrait} name="wick-tester" sizePx=${40} fallback=${fallback} />`, container)
-    container.querySelector('img')!.dispatchEvent(new Event('error'))
-    await flush()
-    expect(container.querySelector('img')).toBeNull()
-    expect(container.querySelector('[data-testid="fallback"]')).not.toBeNull()
+  it('asks with the dashboard token and shows the bytes through an object URL', async () => {
+    setStoredToken('portrait-read-token')
+    const fetchMock = vi.fn(async (_path: string, _init?: RequestInit) => png())
+    vi.stubGlobal('fetch', fetchMock)
+    render(portrait('wick-tester'), container)
+    await waitFor(() => expect(shown()).not.toBeNull())
 
-    render(html`<${KeeperPortrait} name="wick-other" sizePx=${40} fallback=${fallback} />`, container)
-    await flush()
-    expect(container.querySelector('img')?.getAttribute('alt')).toBe('wick-other')
+    const [path, init] = fetchMock.mock.calls[0]!
+    expect(path).toBe('/api/v1/keepers/wick-tester/portrait.png?size=80')
+    expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer portrait-read-token')
+    expect(init?.cache).toBe('no-cache')
+    const img = shown()!
+    expect(img.getAttribute('src')).toBe('blob:portrait-1')
+    expect(img.getAttribute('alt')).toBe('')
+    expect(img.getAttribute('width')).toBe('40')
+    expect(img.getAttribute('height')).toBe('40')
+  })
+
+  it('draws the fallback when the server refuses, asks once, and asks again when opened again', async () => {
+    const fetchMock = vi.fn(async () => refused(401))
+    vi.stubGlobal('fetch', fetchMock)
+    render(portrait('wick-tester'), container)
+    await waitFor(() => expect(container.querySelector('[data-testid="fallback"]')).not.toBeNull())
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(created).toEqual([])
+
+    render(null, container)
+    fetchMock.mockImplementation(async () => png())
+    render(portrait('wick-tester'), container)
+    await waitFor(() => expect(shown()).not.toBeNull())
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('draws the fallback when the bytes are not an image it can show', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => png()))
+    render(portrait('wick-tester'), container)
+    await waitFor(() => expect(shown()).not.toBeNull())
+    shown()!.dispatchEvent(new Event('error'))
+    await waitFor(() => expect(container.querySelector('[data-testid="fallback"]')).not.toBeNull())
+    expect(shown()).toBeNull()
+  })
+
+  it('revokes each object URL when the keeper changes and when it unmounts', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => png()))
+    render(portrait('wick-tester'), container)
+    await waitFor(() => expect(shown()?.getAttribute('src')).toBe('blob:portrait-1'))
+
+    render(portrait('wick-other'), container)
+    await waitFor(() => expect(shown()?.getAttribute('src')).toBe('blob:portrait-2'))
+    expect(revoked).toEqual(['blob:portrait-1'])
+
+    render(null, container)
+    expect(revoked).toEqual(['blob:portrait-1', 'blob:portrait-2'])
+  })
+
+  it('abandons a request still on its way when it unmounts', async () => {
+    let signal: AbortSignal | undefined
+    let answer: (response: Response) => void = () => {}
+    const fetchMock = vi.fn((_path: string, init?: RequestInit) => {
+      signal = init?.signal ?? undefined
+      return new Promise<Response>(resolve => { answer = resolve })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(portrait('wick-tester'), container)
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    render(null, container)
+    expect(signal?.aborted).toBe(true)
+    answer(png())
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(created).toEqual([])
   })
 })

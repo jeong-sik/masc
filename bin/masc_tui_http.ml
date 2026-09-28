@@ -425,7 +425,7 @@ let fetch_link_preview_body ~(url : string) : (string, string) result =
         else Error (Printf.sprintf "link preview: HTTP %d" status)
 
 (** Send an HTTP POST request with a JSON body and return the structured status/body pair. *)
-let http_post_with_timeout ~timeout_sec ~headers ~(host : string) ~(port : int)
+let http_post_request ~timeout_sec ~headers ~(host : string) ~(port : int)
     ~(path : string) ~(body : string) : (int * string, string) result =
   let url = url_of ~host ~port ~path in
   timed ~verb:"POST" ~path @@ fun () ->
@@ -435,10 +435,13 @@ let http_post_with_timeout ~timeout_sec ~headers ~(host : string) ~(port : int)
   first := false;
   match
     Masc_http_client.post_sync ?clock:(request_clock ())
-      ~timeout_sec ~url ~headers:(json_headers headers) ~body ()
+      ?timeout_sec ~url ~headers:(json_headers headers) ~body ()
   with
   | Ok (status, body) -> Ok (status, body)
   | Error e -> Error (Masc.Tui_decode.http_transport_error ~verb:"POST" ~url ~detail:e)
+
+let http_post_with_timeout ~timeout_sec ~headers ~host ~port ~path ~body =
+  http_post_request ~timeout_sec:(Some timeout_sec) ~headers ~host ~port ~path ~body
 
 let http_post ~headers ~(host : string) ~(port : int) ~(path : string)
     ~(body : string) : (int * string, string) result =
@@ -500,7 +503,7 @@ let get_json ~(host : string) ~(port : int) ~(path : string) : (Yojson.Safe.t, s
    The same decode validates the spectator's activity feed: a malformed
    feed is a failed read, not a successful empty activity list. *)
 let fetch_machine_live ~(host : string) ~(port : int)
-    (source : Masc_tui_machine_live.source) ~(since : Masc_tui_machine_live.mark option) :
+    (source : Masc.Machine_lane.t) ~(since : Masc_tui_machine_live.mark option) :
     (Masc_tui_machine_live.answer * Masc_tui_machine_live.activity, string) result =
   let result =
     match http_get ~host ~port ~path:(Masc_tui_machine_live.path source ~since) with
@@ -548,6 +551,15 @@ let post_json_outcome ~(host : string) ~(port : int) ~(path : string) ~(body : s
 
 let post_json ~(host : string) ~(port : int) ~(path : string) ~(body : string) : (Yojson.Safe.t, string) result =
   match http_post ~headers:(auth_headers ()) ~host ~port ~path ~body with
+  | Error e -> Error e
+  | Ok (status_code, body) -> decode_json ~allow_empty:true ~status_code ~body
+
+(** Model discovery, preparation and serial verification own their completion.
+    The login panel's request fiber still propagates cancellation on close or
+    replacement. Omitting the pool deadline avoids misreporting a slow save as
+    failed; connection establishment keeps the pool's existing safety bound. *)
+let post_setup_json ~host ~port ~path ~body =
+  match http_post_request ~timeout_sec:None ~headers:(auth_headers ()) ~host ~port ~path ~body with
   | Error e -> Error e
   | Ok (status_code, body) -> decode_json ~allow_empty:true ~status_code ~body
 
@@ -3282,13 +3294,20 @@ let scroll_browser_scene ~host ~port ~view ~tab_id ~expected_url ~delta_y =
   act_browser_viewport ~host ~port ~view ~tab_id ~expected_url
     ~action:(Browser_lane.Scroll {x=0; y=delta_y})
 
-let browser_lane_action ~host ~port operation =
+let browser_lane_action ~host ~port ~source operation =
   let open Masc_tui_types.Browser_lane_view in
+  let lane = "lane", `String (Browser_lane.Lane_name.to_wire source) in
   let request = match operation with
     | Discover _ | Read | Read_refresh | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_scroll _ | Scene_refresh _ | Scene_focus _ | Scene_click _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> Error "read/screenshot requires its own browser endpoint"
-    | Open_session -> Ok ("session", `Assoc ["action", `String "open"], 65.0)
-    | Close_session -> Ok ("session", `Assoc ["action", `String "close"], 65.0)
-    | Goto url -> Ok ("goto", `Assoc ["url", `String url], 65.0)
+    | Open_session ->
+      let timeout_sec =
+        match source with
+        | Browser_lane.Lane_name.Stagehand -> Browser_lane.Stagehand_open_budget.http_timeout_s
+        | Browser_lane.Lane_name.Automation | Browser_lane.Lane_name.Live -> 65.0
+      in
+      Ok ("session", `Assoc ["action", `String "open"; lane], timeout_sec)
+    | Close_session -> Ok ("session", `Assoc ["action", `String "close"; lane], 65.0)
+    | Goto url -> Ok ("goto", `Assoc ["url", `String url; lane], 65.0)
   in
   let* endpoint, json, timeout_sec = request in
   let body = Yojson.Safe.to_string json in
@@ -3297,3 +3316,13 @@ let browser_lane_action ~host ~port operation =
       ~path:("/api/v1/dashboard/browser-lane/" ^ endpoint) ~body in
   let* ok = get boolean "ok" json in
   if ok then Ok () else let* detail = get string "error" json in Error detail
+
+let post_setup_login_streaming ~clock ~host ~port ~body ~on_chunk =
+  let url = url_of ~host ~port ~path:"/api/v1/setup/accounts/login" in
+  match with_credential_refresh_on ~refused:stream_refused @@ fun () ->
+    Masc_http_client.post_stream ~retain_body:false ~clock ~idle_timeout_sec:Float.infinity ~url
+      ~headers:(json_headers (("Accept", "text/event-stream") :: auth_headers ()))
+      ~body ~on_chunk () with
+  | Error _ -> Error "Login stream unavailable; recheck the login status."
+  | Ok (Masc_http_client.Pool.Buffered _) -> Error "Login request was refused."
+  | Ok (Masc_http_client.Pool.Streamed _) -> Ok ()

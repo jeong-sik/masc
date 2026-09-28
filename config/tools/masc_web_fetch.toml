@@ -36,8 +36,8 @@ name = "maxChars"
 type = "integer"
 description = """
 Maximum extracted content characters to return. Longer pages come back as a \
-head/tail window around a [TRUNCATED ...] marker whose full_text path holds \
-the complete extraction."""
+head/tail window around a [TRUNCATED ...] marker whose full_text_sha256 is \
+read with keeper_artifact_read(sha256, offset)."""
 minimum = 1
 maximum = 100000
 default = 50000

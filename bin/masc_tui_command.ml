@@ -9,6 +9,7 @@ type t =
   | About
   | Lane_addons of string
   | Open_metrics
+  | Account_login of string
   | Open_settings
   | Open_diff
   | Open_patch_modal
@@ -36,7 +37,7 @@ type t =
   | Steer_turn of string
   | Steer_missing_message
   | Set_thinking of [ `Cycle | `Hidden | `Folded | `Full ]
-  | Set_tools of [ `Toggle | `Compact | `Full ]
+  | Set_tools of [ `Toggle | `Compact | `Results | `Full ]
   | Cycle_memory
   | Open_fleet_memory
   | Find_in_chat of string
@@ -76,7 +77,8 @@ type command_help = {
    is a command that will be described two ways, and the one an operator
    reads first is whichever list nobody updated. *)
 let catalog =
-  [ { word = "task"
+  [ { word = "login"; aliases = []; args = "[client]"; summary = "sign in to an official client and verify a model connection" }
+  ; { word = "task"
     ; aliases = []
     ; args = "<title>"
     ; summary = "create a task for this keeper (lines below become the body)"
@@ -154,8 +156,8 @@ let catalog =
     }
   ; { word = "tools"
     ; aliases = []
-    ; args = "[compact|full]"
-    ; summary = "set or toggle tool-call detail"
+    ; args = "[compact|results|full]"
+    ; summary = "cycle or set tool summary, short results, or full detail"
     }
   ; { word = "memory"
     ; aliases = []
@@ -327,6 +329,7 @@ let parse text =
     | "about", _ | "splash", _ -> About
     | "addons", arg -> Lane_addons arg
     | "metrics", _ | "telemetry", _ -> Open_metrics
+    | "login", client -> Account_login client
     | "settings", _ -> Open_settings
     | "diff", _ -> Open_diff
     | "patch", _ | "review", _ -> Open_patch_modal
@@ -394,6 +397,7 @@ let parse text =
     | "thinking", "full" -> Set_thinking `Full
     | "tools", "" -> Set_tools `Toggle
     | "tools", "compact" -> Set_tools `Compact
+    | "tools", "results" -> Set_tools `Results
     | "tools", "full" -> Set_tools `Full
     | "memory", _ -> Cycle_memory
     | "fleet-memory", _ -> Open_fleet_memory
@@ -651,7 +655,7 @@ let cycle_step ~direction ~items current =
 let known_sub_arguments ~keeper_names word =
   match word with
   | "thinking" -> [ "hidden"; "folded"; "full" ]
-  | "tools" -> [ "compact"; "full" ]
+  | "tools" -> [ "compact"; "results"; "full" ]
   (* [show] goes last: [save] is the older word and shares its first
      letter, so leading with [show] would move where "/preset s" lands. *)
   | "preset" -> [ "save"; "restore"; "show" ]
@@ -660,6 +664,63 @@ let known_sub_arguments ~keeper_names word =
 
 let with_body body text =
   if String.equal body "" then text else text ^ "\n" ^ body
+
+type menu_state = Menu_idle | Menu_dismissed of string | Menu_selected of { draft : string; index : int }
+type menu_item = { completion : string; label : string; description : string }
+type menu = { items : menu_item list; selected : int }
+
+let menu ~keeper_names ~state text =
+  let dismissed = match state with
+    | Menu_dismissed draft -> String.equal draft text
+    | Menu_idle | Menu_selected _ -> false in
+  if dismissed || String.equal text "" || text.[0] <> slash then None
+  else
+    let first, body = split_first_line text in
+    let line = String.sub first 1 (String.length first - 1) in
+    let word, argument = split_word line in
+    let items =
+      if not (String.contains line ' ') then
+        if List.exists (fun entry -> String.equal entry.word word) spelled_catalog then []
+        else List.filter_map (fun entry ->
+          if String.starts_with ~prefix:word entry.word then
+            let suffix = if String.equal entry.args "" then "" else " " in
+            Some {completion = with_body body ("/" ^ entry.word ^ suffix);
+                  label = "/" ^ entry.word; description = entry.summary}
+          else None) spelled_catalog
+      else if not (String.equal argument "") && String.ends_with ~suffix:" " line then []
+      else match List.find_opt (fun entry -> String.equal entry.word word) spelled_catalog with
+      | None -> []
+      | Some entry ->
+        let options = known_sub_arguments ~keeper_names word in
+        if List.exists (String.equal argument) options then []
+        else List.filter_map (fun option ->
+          if String.starts_with ~prefix:argument option then
+            let label = "/" ^ word ^ " " ^ option in
+            Some {completion = with_body body label; label;
+                  description = entry.summary}
+          else None) options in
+    match items with
+    | [] -> None
+    | _ ->
+      let selected = match state with
+        | Menu_selected {draft; index} when String.equal draft text ->
+          max 0 (min (List.length items - 1) index)
+        | Menu_idle | Menu_dismissed _ | Menu_selected _ -> 0 in
+      Some {items; selected}
+
+let menu_step ~direction ~draft menu =
+  let length = List.length menu.items in
+  let delta = match direction with Next -> 1 | Prev -> length - 1 in
+  Menu_selected {draft; index = (menu.selected + delta) mod length}
+
+let menu_accept menu = (List.nth menu.items menu.selected).completion
+
+let menu_window ~max_rows menu =
+  let count = min (List.length menu.items) (max 0 max_rows) in
+  let first = max 0 (min (menu.selected - count / 2) (List.length menu.items - count)) in
+  menu.items |> List.mapi (fun index item -> index, item)
+  |> List.filter_map (fun (index, item) ->
+    if index >= first && index < first + count then Some (index = menu.selected, item) else None)
 
 let autocomplete ?(direction = Next) ?(keeper_names = []) text =
   if String.length text = 0 || text.[0] <> slash then None

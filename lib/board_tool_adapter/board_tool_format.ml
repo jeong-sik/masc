@@ -108,6 +108,26 @@ let viewer_vote_marker = function
   | Some Board.Down -> ", 내 투표: 👎"
 ;;
 
+(* task-1758/#39356 completion criterion 4: masc_board_post_get's actual
+   return path is this text formatter, not Board.post_to_yojson (a
+   different, JSON-only encoder used by the HTTP/dashboard surface) -- an
+   agent reading a closed post through the MCP tool must see that it is
+   closed and where the successor is, or the tool's own reader has no way
+   to know the thread ended. *)
+let format_closed_marker (p : Board.post) =
+  match p.closed with
+  | None -> ""
+  | Some c ->
+    let successor_str =
+      match c.successor_id with
+      | Some sid -> Printf.sprintf " → successor: %s" (Board.Post_id.to_string sid)
+      | None -> ""
+    in
+    Printf.sprintf " [🔒 closed by %s%s]"
+      (Board.Agent_id.to_string c.closed_by)
+      successor_str
+;;
+
 let format_post ?viewer_vote ~replies (p : Board.post) =
   let vis_str = Board.visibility_to_string p.visibility in
   let time_str = format_timestamp_absolute p.created_at in
@@ -123,12 +143,14 @@ let format_post ?viewer_vote ~replies (p : Board.post) =
     | Some t -> Printf.sprintf " [→ Thread: %s]" t
     | None -> ""
   in
+  let closed_str = format_closed_marker p in
   Printf.sprintf
-    "**%s** · %s [%s]%s (by %s, %s, expires: %s)\n%s\n[↑%d ↓%d = %+d%s] [%d replies]%s"
+    "**%s** · %s [%s]%s%s (by %s, %s, expires: %s)\n%s\n[↑%d ↓%d = %+d%s] [%d replies]%s"
     (Board.Post_id.to_string p.id)
     p.title
     vis_str
     hearth_str
+    closed_str
     (Board.Agent_id.to_string p.author)
     time_str
     ttl_str
@@ -151,11 +173,13 @@ let format_post_compact ~replies (p : Board.post) =
     | Some h -> Printf.sprintf " [%s]" h
     | None -> ""
   in
+  let closed_str = format_closed_marker p in
   Printf.sprintf
-    "%s · %s%s (by %s, %s, %+d, %d replies)"
+    "%s · %s%s%s (by %s, %s, %+d, %d replies)"
     (Board.Post_id.to_string p.id)
     p.title
     hearth_str
+    closed_str
     (Board.Agent_id.to_string p.author)
     time_str
     score

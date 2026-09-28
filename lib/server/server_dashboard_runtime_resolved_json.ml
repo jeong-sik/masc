@@ -49,7 +49,7 @@ let runtime_resolution_json ~scope_label (rt : Runtime.t) : Yojson.Safe.t =
          key. *)
     ; "provider_id", `String rt.provider.id
     ; "model", `String rt.model.api_name
-    ; "exact_slot_group", `String exact_slot_group
+    ; "exact_slot_group", string_opt_json exact_slot_group
     ; "effective_max_context", `Int effective_max_context
     ; "max_context_source", `String (Runtime.max_context_source_to_string source)
     ; "max_output_tokens", int_opt_json (Runtime.max_output_tokens_of_runtime_id rt.id)

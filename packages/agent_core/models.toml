@@ -3949,6 +3949,52 @@ supports_min_p = false
 supports_parallel_tool_calls = false
 supports_structured_output = false
 
+# OpenRouter free ids admitted by the synthetic provider probes in
+# evidence/task-openrouter-free-models/probe-results.json. Catalog limits and
+# flags come from the gateway snapshot through gen_rows.py. Only successful
+# basic and tool-call cases receive rows unless the endpoint is retiring;
+# none is enabled only when explicitly reported reasoning_tokens=0.
+# Lane placement remains operator configuration.
+
+[[models]]
+id_prefix = "cohere/north-mini-code:free"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 256000
+max_output_tokens = 64000
+input_per_million = 0.0
+output_per_million = 0.0
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+thinking_control_format = "reasoning_effort"
+supports_seed = true
+supports_parallel_tool_calls = false
+supports_response_format_json = false
+supports_structured_output = false
+supports_min_p = false
+supports_multimodal_inputs = false
+supports_image_input = false
+
+[[models]]
+id_prefix = "liquid/lfm-2.5-2.6b:free"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 65536
+max_output_tokens = 8192
+input_per_million = 0.0
+output_per_million = 0.0
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high", "xhigh", "max"]
+thinking_control_format = "reasoning_effort"
+supports_seed = true
+supports_parallel_tool_calls = false
+supports_multimodal_inputs = false
+supports_image_input = false
+
 # Z.AI coding plan. Window 1M (docs.z.ai). The 131072 output ceiling is the
 # value the endpoint named when it refused an out-of-range max_tokens with
 # code 1210. Reads images (probe PNG confirmed).

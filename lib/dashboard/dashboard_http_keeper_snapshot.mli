@@ -31,6 +31,11 @@ val keeper_config_json :
     both keys, so removing or renaming either changes what that panel can
     save.
 
+    A missing or unrenderable prompt leaves the full editable configuration
+    available, with [prompt.system_prompt] marked unavailable and no effective
+    or assembled text. Its reason is [prompt_unrenderable]; an unreadable
+    constitution retains [constitution_unreadable] and the ledger path.
+
     Reads only; it avoids [bootstrap_runtime] mutations to keep the HTTP
     request path off the keeper-meta mutex (#3335). *)
 

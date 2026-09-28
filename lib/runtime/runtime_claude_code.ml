@@ -188,6 +188,8 @@ type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
   { name : string
   ; description : string
   ; input_schema : Yojson.Safe.t
+  ; loading : Runtime_official_client_tool.loading
+  ; result_bound : Runtime_official_client_tool.result_bound
   ; call_effect : Yojson.Safe.t -> Agent_core.Tool.call_effect
   ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
   }
@@ -231,8 +233,6 @@ let emit_stream_event on_stream_event event =
          "Claude Code stream callback raised (error=%s)"
          (Printexc.to_string exn))
 ;;
-
-let dynamic_tool_bytes = Runtime_official_client_tool.dynamic_tool_bytes
 
 type error =
   | Invalid_config of string
@@ -522,12 +522,64 @@ let read_subscription ~mgr ~cwd config =
   | exn -> Error (Spawn_failed (Printexc.to_string exn))
 ;;
 
+(* Claude Code reads two keys from a tools/list entry's [_meta]
+   (code.claude.com/docs/en/mcp):
+
+   - ["anthropic/alwaysLoad"]: it keeps that one tool's definition in context
+     instead of behind tool search, whatever [ENABLE_TOOL_SEARCH] says. It is
+     written only for a tool whose declaration loads it upfront.
+   - ["anthropic/maxResultSizeChars"]: the result size above which Claude Code
+     writes the result to a file instead of passing it inline. It is written
+     only for a tool whose result MASC bounds ([Bounded_bytes]), with that
+     bound: UTF-8 characters never outnumber their bytes, so the byte
+     ceiling is a safe character count. An attached-service
+     result reaches the wire as the service returned it
+     ([Keeper_identity_tools.tool_result_of_call]), so it is [Unbounded] and
+     keeps the client's own threshold.
+
+   A tool with neither is sent as it was before, with no [_meta]. *)
+let dynamic_tool_meta (tool : dynamic_tool) =
+  let always_load =
+    match tool.loading with
+    | Runtime_official_client_tool.Upfront -> [ "anthropic/alwaysLoad", `Bool true ]
+    | Runtime_official_client_tool.On_demand -> []
+  in
+  let max_result_size =
+    match tool.result_bound with
+    | Runtime_official_client_tool.Bounded_bytes bytes ->
+      [ "anthropic/maxResultSizeChars", `Int bytes ]
+    | Runtime_official_client_tool.Unbounded -> []
+  in
+  match always_load @ max_result_size with
+  | [] -> None
+  | meta -> Some (`Assoc meta)
+;;
+
 let dynamic_tool_spec (tool : dynamic_tool) =
-  `Assoc
+  let fields =
     [ "name", `String tool.name
     ; "description", `String tool.description
     ; "inputSchema", tool.input_schema
     ]
+  in
+  match dynamic_tool_meta tool with
+  | None -> `Assoc fields
+  | Some meta -> `Assoc (fields @ [ "_meta", meta ])
+;;
+
+(* The name, description and schema sum is shared with Codex. Claude Code also
+   carries a per-tool [_meta] object that only some tools have, so its bytes
+   are added here: a surface size that leaves out part of what is sent cannot
+   be checked against the request window (#27427). *)
+let dynamic_tool_bytes tools =
+  Runtime_official_client_tool.dynamic_tool_bytes tools
+  + List.fold_left
+      (fun acc tool ->
+         match dynamic_tool_meta tool with
+         | None -> acc
+         | Some meta -> acc + String.length (Yojson.Safe.to_string meta))
+      0
+      tools
 ;;
 
 let find_dynamic_tool tools name =

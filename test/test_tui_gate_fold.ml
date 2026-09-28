@@ -59,7 +59,7 @@ let fold entries = describe (Types.project_gate_history ~visibility:Types.Tools_
 
 let test_one_approval_is_one_row () =
   check (list string) "the whole run says where the effect ended up"
-    [ "미뤘던 호출 적용됨 · 턴 이어서 진행 · Execute · 4 steps · Ctrl-D" ]
+    [ "미뤘던 호출 적용됨 · 턴 이어서 진행 · Execute · 4 steps · Ctrl-D×2" ]
     (fold
        [ step Approval_requested
        ; step Approval_resolved_approved
@@ -72,7 +72,7 @@ let test_the_summary_names_the_deferred_call () =
      line says what was gated even though the request row itself is gone. *)
   let summary = Some "git reflog --date=iso | head -30" in
   check (list string) "the folded line keeps the call's own words"
-    [ "미뤘던 호출 적용됨 · git reflog --date=iso | head -30 · 3 steps · Ctrl-D" ]
+    [ "미뤘던 호출 적용됨 · git reflog --date=iso | head -30 · 3 steps · Ctrl-D×2" ]
     (fold
        [ step ~tool:"tool_execute" ~summary Approval_requested
        ; step ~tool:"tool_execute" ~summary Approval_resolved_approved
@@ -105,7 +105,7 @@ let test_settled_steps_fold_across_prose () =
     step Approval_resolved_approved; step Approval_replay_applied] in
   let projected = Types.project_gate_history ~visibility:Types.Tools_compact entries in
   check (list string) "prose keeps its position before the settled outcome"
-    [prose.me_text; "미뤘던 호출 적용됨 · Execute · 3 steps · Ctrl-D"]
+    [prose.me_text; "미뤘던 호출 적용됨 · Execute · 3 steps · Ctrl-D×2"]
     (describe projected);
   check bool "original prose record is untouched" true (fst (List.hd projected) == prose)
 
@@ -114,6 +114,18 @@ let test_full_restores_every_original_row () =
     step Approval_resolved_approved; step Approval_replay_applied] in
   let projected = Types.project_gate_history ~visibility:Types.Tools_full entries in
   check bool "Full returns raw timeline, including identity and clocks" true (projected == entries)
+
+let test_results_keeps_gate_rows_folded () =
+  let entries = rows [step Approval_requested; step Approval_resolved_approved;
+    step Approval_replay_applied] in
+  check (list string) "short results keep the compact Gate history"
+    [ "미뤘던 호출 적용됨 · Execute · 3 steps · Ctrl-D" ]
+    (describe (Types.project_gate_history ~visibility:Types.Tools_results entries));
+  let opened = Types.toggle_tool_visibility Types.Tools_results in
+  check string "Ctrl-D opens Gate detail from results" "full"
+    (Types.tool_visibility_to_string opened);
+  check bool "the opened Gate history restores its rows" true
+    (Types.project_gate_history ~visibility:opened entries == entries)
 
 let test_identity_is_not_a_tool_name () =
   let entries = [step ~approval:"a" Approval_requested;
@@ -136,7 +148,7 @@ let test_wait_after_success_is_not_settled () =
 
 let test_two_approvals_stay_two_rows () =
   check (list string) "back to back approvals do not merge"
-    [ "미뤘던 호출 적용됨 · Execute · 2 steps · Ctrl-D"; "승인 거절 · Write" ]
+    [ "미뤘던 호출 적용됨 · Execute · 2 steps · Ctrl-D×2"; "승인 거절 · Write" ]
     (fold
        [ step ~approval:"appr_1" Approval_resolved_approved
        ; step ~approval:"appr_1" Approval_replay_applied
@@ -261,6 +273,8 @@ let () =
         ; test_case "unresolved approvals remain complete" `Quick test_unresolved_approval_remains_complete
         ; test_case "settled steps fold across prose" `Quick test_settled_steps_fold_across_prose
         ; test_case "Full restores every original row" `Quick test_full_restores_every_original_row
+        ; test_case "results keeps Gate history folded" `Quick
+            test_results_keeps_gate_rows_folded
         ; test_case "identity is not a tool name" `Quick test_identity_is_not_a_tool_name
         ; test_case "wait after success is unresolved" `Quick test_wait_after_success_is_not_settled
         ; test_case "two approvals stay two rows" `Quick

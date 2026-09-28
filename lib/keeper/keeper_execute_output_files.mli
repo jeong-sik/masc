@@ -13,6 +13,11 @@ type publication =
   }
 
 val publish :
+  inline_ceiling_bytes:int ->
+    (** Combined output up to this many bytes is returned inline; above it
+        the streams are stored as blobs. The caller passes the ceiling of the
+        projection its result crosses for the lane running the call, so the
+        bound is the one that lane declares ([maxResultSizeChars]). *)
   base_path:string ->
   redaction:Keeper_secret_redaction.t ->
   Process_output_capture.files ->

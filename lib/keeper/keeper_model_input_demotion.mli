@@ -1,11 +1,12 @@
 (** Keeper_model_input_demotion — replace aged tool-result bodies with their
     blob marker in the provider-bound copy (RFC-0363).
 
-    A tool result is externalized at creation only when it exceeds
-    [Tool_bridge.default_externalize_threshold_bytes] (65,536). Measured on a
-    live checkpoint on 2026-08-05: of 5,540 inline tool messages holding 20.0MB
-    — 71% of all message bytes — exactly one exceeded that threshold. The rest
-    ride in history and are re-serialized into every later request.
+    A tool result is externalized at creation only when it exceeds the inline
+    ceiling of the projection it crosses ({!Tool_output.inline_ceiling_bytes}):
+    {!Common.max_tool_result_wire_bytes} by default, and the lane's own ceiling
+    ({!Runtime_execution.tool_result_inline_ceiling_bytes}) where the lane
+    widens it. Every result below that ceiling rides in history and is
+    re-serialized into every later request.
 
     The caller selects the conversation range and verified completed boundary.
     Substitution reduces body bytes inside that range without adding or removing

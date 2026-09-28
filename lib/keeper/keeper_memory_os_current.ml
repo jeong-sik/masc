@@ -113,6 +113,7 @@ type librarian_failure_kind =
   | Exact_setup_failure
   | Exact_execution_failure
   | Domain_output_invalid
+  | Absorb_judgment_failure
   | Memory_snapshot_write_failure
   | Runtime_context_unavailable
   | Lane_cancelled
@@ -1259,6 +1260,7 @@ let librarian_failure_kind_to_string = function
   | Exact_setup_failure -> "exact_setup_failure"
   | Exact_execution_failure -> "exact_execution_failure"
   | Domain_output_invalid -> "domain_output_invalid"
+  | Absorb_judgment_failure -> "absorb_judgment_failure"
   | Memory_snapshot_write_failure -> "memory_snapshot_write_failure"
   | Runtime_context_unavailable -> "runtime_context_unavailable"
   | Lane_cancelled -> "lane_cancelled"
@@ -1271,6 +1273,7 @@ let librarian_failure_kind_of_string = function
   | "exact_setup_failure" -> Some Exact_setup_failure
   | "exact_execution_failure" -> Some Exact_execution_failure
   | "domain_output_invalid" -> Some Domain_output_invalid
+  | "absorb_judgment_failure" -> Some Absorb_judgment_failure
   | "memory_snapshot_write_failure" -> Some Memory_snapshot_write_failure
   | "runtime_context_unavailable" -> Some Runtime_context_unavailable
   | "lane_cancelled" -> Some Lane_cancelled

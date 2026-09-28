@@ -749,7 +749,7 @@ let native_posture_note = function
 
 let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~quota_scope ~keeper_name
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks
-    ~system_prompt ~tools ~initial_messages ~declared_max_prompt_bytes ~capacity_bytes ~project_history
+    ~system_prompt ~tools ~loading_plan ~initial_messages ~declared_max_prompt_bytes ~capacity_bytes ~project_history
     ~on_transmitted_model_input ~hooks
     ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
     ~observe_effect_attempted ~observe_successful_tool_completion ~observe_transport_uncertain
@@ -1070,17 +1070,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
       ; native = native_posture
       ; developer_instructions
       ; admission_timeout_s = config.timeout_s
-      ; (* A per-model [turn-timeout-s] overrides the stream-idle bound, and
-           [0] removes it: the deadline exists to notice a client that has gone
-           silent, not to cap how long legitimate work may take, so a
-           deployment is allowed to say the client decides. Absent leaves
-           [config.timeout_s] standing, which keeps an undeclared config on the
-           previous behaviour. *)
-        timeout_s =
-          (match Runtime_inference.resolve_turn_timeout_s ~runtime_id with
-           | None -> Some config.timeout_s
-           | Some seconds when seconds <= 0.0 -> None
-           | Some seconds -> Some seconds)
+      ; timeout_s = Runtime_inference.resolve_turn_timeout_s_or ~runtime_id ~default:config.timeout_s
       (* A keeper turn is a conversation, not a schema contract: nothing
          downstream parses its text against a domain schema. *)
       ; output_schema = None
@@ -1099,6 +1089,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         ~keeper_name
         ~turn_count
         ~tools:prepared.tools
+        ~loading_plan
         ~hooks
         ~event_bus
         ~context_injector
@@ -1185,6 +1176,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         ~keeper_name
         ~turn_count
         ~tools:prepared.tools
+        ~loading_plan
         ~hooks
         ~event_bus
         ~context_injector
@@ -1663,7 +1655,7 @@ let note_transport_uncertainty effect_disposition =
 ;;
 
 let run ?official_task_reference ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
-    ~system_prompt ~tools ~initial_messages ~model_input_projection
+    ~system_prompt ~tools ?(loading_plan = Keeper_official_client_host.All_on_demand) ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks
     ~context_injector ~context
     ?(terminal_effect_state = fun () -> Keeper_tools_agent_core.Terminal_effect_open)
@@ -1759,6 +1751,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
           ~goal_blocks
           ~system_prompt
           ~tools
+          ~loading_plan
           ~initial_messages
           ~declared_max_prompt_bytes
           ~capacity_bytes

@@ -160,7 +160,7 @@ let discard_superseded ~base_path ~published registry =
       | _ -> None)
   |> List.sort_uniq String.compare
   |> List.iter (fun id -> match Proposals.discard ~base_path ~id with
-    | Ok () -> ()
+    | Ok () -> Log.Server.info "workspace curator discarded superseded proposal %s" id
     | Error error -> Log.Server.error "workspace curator discard %s: %s" id (store_error error))
 
 type execution =

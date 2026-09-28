@@ -100,6 +100,8 @@ let test_text_run_single_turn () =
   in
   check string "session id" "0198f0aa-1111-7000-8000-0000000000aa" session.session_id;
   check (option string) "model" (Some "muse-large-2") session.model_id;
+  check bool "corpus effective approval mode" true
+    (session.approval_mode = Some Msp.Prompt_unmatched);
   let ack = ok_or_fail (Msp.parse_turn_start_result (response_result (Msp.Int_id 3) frames)) in
   check bool "turn started" true (ack.disposition = Msp.Started);
   let streamed = Buffer.create 64 in
@@ -435,6 +437,27 @@ let test_session_durability_follows_v1_wire_contract () =
   check bool "unrelated extension preserves known durability" true (parsed.session_durability = Msp.Durable)
 ;;
 
+let test_effective_approval_mode_wire_contract () =
+  let parse value = Msp.parse_session_result ~stage:"session/start"
+      (`Assoc ["session", `Assoc (["sessionId", `String "s"; "turnCount", `Int 0] @
+        (match value with None -> [] | Some value -> ["approvalMode", value]))]) in
+  List.iter (fun mode ->
+    let value = `Assoc ["mode", `String (Msp.approval_mode_to_string mode);
+      "source", `String "startup"; "lastCommandId", `Null; "futureField", `Bool true] in
+    let session = ok_or_fail (parse (Some value)) in
+    check bool "known effective session mode" true (session.approval_mode = Some mode);
+    let changed = ok_or_fail (Msp.parse_set_approval_mode_result
+      (`Assoc ["status", `String "accepted"; "effectiveMode", value])) in
+    check bool "known effective changed mode" true (changed = mode))
+    [Msp.Allow_all; Msp.Prompt_unmatched; Msp.On_request; Msp.Deny_unmatched];
+  check bool "missing session mode is no assertion" true
+    ((ok_or_fail (parse None)).approval_mode = None);
+  List.iter (fun value -> match parse (Some value) with
+    | Error _ -> () | Ok _ -> fail "malformed effective mode accepted")
+    [`Null; `String "allowAll"; `Assoc []; `Assoc ["mode", `String "future"];
+     `Assoc ["mode", `Int 1]]
+;;
+
 let () =
   run
     "runtime_muse_msp"
@@ -454,6 +477,7 @@ let () =
         ; test_case "usage read" `Quick test_usage_read
         ; test_case "session config carries bridge" `Quick test_session_config_carries_bridge
         ; test_case "reasoning effort round trip" `Quick test_reasoning_effort_round_trip
+        ; test_case "effective approval mode wire contract" `Quick test_effective_approval_mode_wire_contract
         ] )
     ]
 ;;

@@ -97,7 +97,9 @@ type encoded_json = private string
 
 val encode_json_pretty : Yojson.Safe.t -> encoded_json
 (** The same UTF-8 sanitization and pretty encoding as {!write_json_result},
-    retained for writing one document to more than one path. *)
+    retained for writing one document to more than one path. Formatting keeps
+    Yojson's Unicode scalar widths and default line breaks; ASCII prefixes do
+    not need UTF-8 decoding. Each encoding owns its formatter. *)
 
 val encode_json_compact : Yojson.Safe.t -> (encoded_json, string) result
 (** Compact encoding. [Error] when the document holds a float compact JSON has

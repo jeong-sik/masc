@@ -62,10 +62,14 @@ val write_backlog_result :
     [last_updated] becomes the commit time. A [max_int] input revision is
     rejected before either primary or recovery is written. Failures after a
     primary commit are returned in the corresponding [Ok] fields and logged
-    explicitly. *)
+    explicitly. The pure JSON projection and encoding use the shared CPU pool
+    when available; storage, mutation observers and [after_commit] remain on
+    the caller. The encoded bytes and primary commit boundary are unchanged. *)
 
 (** Repair primary mirrors and recovery copies with the current primary
-    snapshot without incrementing its revision. Caller holds the backlog lock. *)
+    snapshot without incrementing its revision. Caller holds the backlog lock.
+    Pure JSON projection and encoding use the shared CPU pool when available;
+    storage and mutation observers remain on the caller. *)
 val repair_backlog_copies_result :
   Workspace_utils_backend_setup.config -> Masc_domain.backlog -> (unit, string) result
 

@@ -2385,6 +2385,10 @@ type async_msg =
       (** provider id, then how many scopes were recorded *)
   | Account_login_event of Masc_tui_account_login.t * int * Masc_tui_account_login.event
   | Account_login_json of Masc_tui_account_login.t * int * Masc_tui_account_login.action * (Yojson.Safe.t, string) result
+  (* A removal's answer keeps what is known about its effect: removed, declined
+     by the server in its own words, or unknown. *)
+  | Account_login_removal of Masc_tui_account_login.t * int * Masc_tui_account_login.provider * string option
+      * Masc_tui_http.post_outcome
   | Github_login_lines of string * string list
   | Github_login_finished of string * (unit, string) result
   | Github_token_saved of string * (Yojson.Safe.t, string) result
@@ -4287,7 +4291,8 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
   let host = server_peer_host and port = state.port in
   (match action with
    | Login.Input _ | Nothing -> ()
-   | Inventory | Refresh_saved | Refresh_retry | Start _ | Cancel | Recover | Discover | Prepare _ | Save _ | Close ->
+   | Inventory | Refresh_saved | Refresh_retry | Start _ | Cancel | Recover | Discover | Prepare _ | Save _ | Close
+   | Preview_removal _ | Remove _ | Refresh_removed _ ->
      view.generation <- view.generation + 1;
      Option.iter (fun stop -> stop ()) view.cancel_stream;
      view.cancel_stream <- None);
@@ -4362,6 +4367,17 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
     view.phase<-Login.Saving;view.notice<-"모델의 응답과 도구 호출을 검증하고 있습니다.";
     let body=Login.save_body view model in
     start_job (fun () -> enqueue (post_setup "/api/v1/setup/connections" body))
+  | Preview_removal {provider; _} ->
+    view.phase<-Login.Loading; view.notice<-"지울 내용을 읽고 있습니다.";
+    start_job (fun () -> enqueue (post "/api/v1/setup/accounts/removal" (`Assoc ["integration_id",`String provider.id])))
+  | Remove {provider; revision; login_store} ->
+    view.phase<-Login.Saving; view.notice<-"계정을 지우고 있습니다.";
+    let body=`Assoc ["integration_id",`String provider.id;"revision",`String revision] |> Yojson.Safe.to_string in
+    start_job (fun () ->
+      let outcome=Masc_tui_http.post_json_outcome ~host ~port ~path:"/api/v1/setup/accounts/remove" ~body in
+      enqueue_async mailbox (Account_login_removal (view, generation, provider, login_store, outcome)))
+  | Refresh_removed _ ->
+    view.phase<-Login.Loading; start_job (fun () -> enqueue (Masc_tui_http.get_json ~host ~port ~path:"/api/v1/setup/inventory"))
 
 (* The device-flow login, streamed. gh prints the one-time code on its
    own output, which the server forwards redacted; every data line lands
@@ -14705,6 +14721,12 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                  launch_account_login_action state ~mailbox view Login.Refresh_saved; Ok ()
                | _ -> Error "설정 저장 결과를 확인하지 못했습니다.")
              | Input _ -> Ok ()
+             | Preview_removal {provider; refused} -> Login.removal_preview view provider ~refused json
+             | Refresh_removed notice ->
+               (match Login.inventory view json with
+                | Ok () -> restore_account_login state view; view.notice<-notice; Ok () | Error _ as error -> error)
+             (* A removal answers through [Account_login_removal]. *)
+             | Remove _ -> Ok ()
              | Start _ | Cancel | Close | Nothing -> Ok ()) in
          (match applied with
           | Ok () -> ()
@@ -14713,6 +14735,22 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              | Login.Save model -> Login.save_failed view model message
              | Login.Input _ -> view.notice<-message
              | _ -> view.recovery<-Login.Login_status; view.phase<-Login.Failed; view.notice<-message))
+       | Some _ | None -> ())
+  | Account_login_removal (view, generation, provider, login_store, outcome) ->
+      (match state.account_login with
+       | Some current when current == view && view.generation = generation ->
+         let module Login = Masc_tui_account_login in
+         (match outcome with
+          | Masc_tui_http.Post_answered _ ->
+            launch_account_login_action state ~mailbox view (Login.Refresh_removed (Login.removed_notice provider login_store))
+          (* The server's refusal is about the file as it is now -- it moved,
+             or the account can no longer go -- so the preview is read again
+             under it rather than left standing. *)
+          | Masc_tui_http.Post_refused message ->
+            launch_account_login_action state ~mailbox view (Login.Preview_removal {provider; refused = Some message})
+          | Masc_tui_http.Post_unanswered detail ->
+            view.recovery<-Login.Login_status; view.phase<-Login.Failed;
+            view.notice<-"계정을 지웠는지 확인하지 못했습니다. r로 목록을 다시 읽으세요. " ^ detail)
        | Some _ | None -> ())
   | Github_login_lines (keeper_name, lines) ->
       (* Append under the stamped view; a login for another keeper than the
@@ -17865,28 +17903,6 @@ let main
           | Ok summary -> report_action state "system" ("runtime.toml saved · " ^ summary)
           | Error message -> report_action state "error" message)))
   in
-  (* runtime.toml as the server holds it now. The account screens declare and
-     remove against this, not against the copy the pane drew when they
-     opened. *)
-  let runtime_toml_now () =
-    match
-      Masc_tui_http.fetch_runtime_config_raw ~host:server_peer_host ~port:state.port
-    with
-    | Error detail -> Error ("reading runtime.toml failed: " ^ detail)
-    | Ok json -> (
-        match Masc_tui_runtime_config_view.decode json with
-        | Ok reading -> Ok reading.Masc_tui_runtime_config_view.source_text
-        | Error detail -> Error ("reading runtime.toml failed: " ^ detail))
-  in
-  (* [D] on the runtime.toml pane opens the removal screen the same way. *)
-  let handle_runtime_account_removal_open () =
-    match state.runtime_config_view with
-    | None -> report_action state "error" "config not loaded yet; r to reload"
-    | Some { rcv_rows = rows; _ } -> (
-      match Masc_tui_runtime_account_removal.open_on (runtime_config_source rows) with
-      | Ok screen -> state.runtime_account_removal <- Some screen
-      | Error reason -> report_action state "error" reason)
-  in
   (* [a] on the runtime.toml pane opens the account form on the file as the
      pane shows it. *)
   let handle_runtime_account_open () =
@@ -19258,7 +19274,6 @@ and is loaded on demand through keeper_skill.
                   Option.map
                     (fun form -> Masc_tui_runtime_account_form.paste form text)
                     state.runtime_account_form
-            | Some Text_runtime_account_removal -> ()
             | Some Text_voice_wizard ->
                 Option.iter
                   (fun session ->
@@ -19961,7 +19976,17 @@ and is loaded on demand through keeper_skill.
                  report_action state "system"
                    "로그인 명령을 OSC 52로 보냈습니다 (터미널 지원은 확인 못 함)"
                | Masc_tui_runtime_account_form.Submitted form -> (
-                   let current = runtime_toml_now () in
+                   let current =
+                     match
+                       Masc_tui_http.fetch_runtime_config_raw ~host:server_peer_host
+                         ~port:state.port
+                     with
+                     | Error detail -> Error ("reading runtime.toml failed: " ^ detail)
+                     | Ok json -> (
+                         match Masc_tui_runtime_config_view.decode json with
+                         | Ok reading -> Ok reading.Masc_tui_runtime_config_view.source_text
+                         | Error detail -> Error ("reading runtime.toml failed: " ^ detail))
+                   in
                    let declared =
                      match current with
                      | Error message -> Error (Masc_tui_runtime_account_form.refused form message)
@@ -19995,39 +20020,6 @@ and is loaded on demand through keeper_skill.
                        | Error message ->
                          state.runtime_account_form <-
                            Some (Masc_tui_runtime_account_form.refused form message)))))
-       | Some k
-         when text_input_target state ~compact_viewport
-              = Some Text_runtime_account_removal -> (
-           match state.runtime_account_removal with
-           | None -> ()
-           | Some screen -> (
-               match Masc_tui_runtime_account_removal.key screen k with
-               | Masc_tui_runtime_account_removal.Choosing screen ->
-                 state.runtime_account_removal <- Some screen
-               | Masc_tui_runtime_account_removal.Cancelled ->
-                 state.runtime_account_removal <- None
-               | Masc_tui_runtime_account_removal.Submitted screen -> (
-                   let removed =
-                     match runtime_toml_now () with
-                     | Error message -> Error (Masc_tui_runtime_account_removal.refused screen message)
-                     | Ok current -> Masc_tui_runtime_account_removal.remove_on screen current
-                   in
-                   match removed with
-                   | Error screen -> state.runtime_account_removal <- Some screen
-                   | Ok { Runtime_account_removal.text; login_store; _ } -> (
-                       let id = Masc_tui_runtime_account_removal.chosen screen in
-                       match save_runtime_config_text text with
-                       | Ok summary ->
-                         state.runtime_account_removal <- None;
-                         report_action state "system"
-                           (Printf.sprintf "runtime.toml saved · %s · %s 를 지웠습니다" summary id);
-                         Option.iter
-                           (fun path ->
-                              add_event state "info" (id ^ " 로그인 정보는 남아 있습니다: " ^ path))
-                           login_store
-                       | Error message ->
-                         state.runtime_account_removal <-
-                           Some (Masc_tui_runtime_account_removal.refused screen message)))))
        | Some k
          when text_input_target state ~compact_viewport
               = Some Text_runtime_param ->
@@ -26039,12 +26031,6 @@ and is loaded on demand through keeper_skill.
          when state.view = Config && state.config_pane = Config_runtime
               && not state.runtime_config_status_open ->
            handle_runtime_account_open ()
-       (* [D] on the runtime.toml pane: remove one of those accounts and what
-          routes to it, capital like the lane removal on Lanes. *)
-       | Some "D"
-         when state.view = Config && state.config_pane = Config_runtime
-              && not state.runtime_config_status_open ->
-           handle_runtime_account_removal_open ()
        (* [a] on the voice pane: the keepers this workspace has on one axis and
           the voices the section's first endpoint answers to on the other. The
           revision the pane read is what the save carries, so a screen opened

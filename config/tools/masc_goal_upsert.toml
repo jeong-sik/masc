@@ -29,9 +29,11 @@ type = "string"
 name = "metric"
 type = "string"
 description = """
-What measures this goal, and where that measurement can be read: a file path, \
-a recorded command output, or a URL. The completion judge opens exactly what \
-this names — it cannot list directories or search, so a metric that names no \
+What measures this goal, and where the completion judge reads it: a public \
+http(s) URL, a board:<post-id> or fusion:<run-id> that request_complete \
+submits in evidence_refs, or a file on the host under .masc/playground (not \
+inside a Keeper's sandbox). The judge opens exactly what this names — it \
+cannot list directories, search, or run a command, so a metric that names no \
 observable is refused as unmeasurable rather than hunted for. Required \
 (non-blank) when the upsert creates a new goal (RFC-0387 B1); optional on \
 update."""

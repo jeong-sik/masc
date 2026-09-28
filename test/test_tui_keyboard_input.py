@@ -131,6 +131,7 @@ POSITION_RE = re.compile(rb"\x1b\[(\d+);(\d+)H")
 LEXED_LET = re.compile(rb"\x1b\[[0-9;]*m" + re.escape(b"let") + rb"\x1b\[0m")
 
 CSI_RE = re.compile(rb"\x1b\[[0-?]*[ -/]*[@-~]")
+OSC_RE = re.compile(rb"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
 
 # Masc_tui_scroll.window_text: where a scrolled window stands in its list,
 # "first-last/count". The Keeper detail pane draws it on its own row; the diff
@@ -5712,7 +5713,8 @@ def screen_rows(drawn: bytes, *, preserve_styles: bool = False) -> dict[int, byt
             if index + 1 < len(addresses)
             else len(drawn)
         )
-        text = drawn[address.end() : end]
+        # OSC changes terminal state (such as the title), not screen cells.
+        text = OSC_RE.sub(b"", drawn[address.end() : end])
         rows[int(address.group(1))] = text if preserve_styles else CSI_RE.sub(b"", text)
     return rows
 

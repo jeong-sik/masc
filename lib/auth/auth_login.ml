@@ -58,17 +58,12 @@ let read_persisted_token ~base_path ~agent_name =
        | token -> Some token)
   | exception Sys_error _ -> None
 
-let ensure_required_bearer_auth ~base_path ~agent_name ~role =
+let ensure_required_bearer_auth ~base_path ~bootstrap_agent_name =
   let cfg = Auth.load_auth_config base_path in
   if cfg.enabled && cfg.require_token then
     Ok Auth_already_required
   else if not cfg.enabled then
     let _workspace_secret, _bootstrap_token =
-      let bootstrap_agent_name =
-        match role with
-        | Admin -> agent_name
-        | Worker | Player -> ""
-      in
       Auth.enable_auth base_path ~require_token:true
         ~agent_name:bootstrap_agent_name
     in
@@ -99,17 +94,23 @@ let create_token_for_lifetime = function
 let mint ~base_path ~host ~port ~agent_name ~role ~token_env_var
     ~token_lifetime () =
   let base_path = normalize_base_path base_path in
-  match role with
+  match
+    match role with
   (* A Player credential is an invite to the shared machine: it is issued with
      an expiry through the invite flow (RFC play-link-for-the-shared-machine
-     §2.4), never as a login. Refused before the auth config is touched. *)
+     §2.4), never as a login. Refused before the auth config is touched.
+     Enabling auth names its bootstrap credential after an admin login only. *)
   | Player ->
       Error
         (Auth
            (Auth_error.Forbidden
               { agent = agent_name; action = "log in as a player; a player is invited" }))
-  | Admin | Worker ->
-  match ensure_required_bearer_auth ~base_path ~agent_name ~role with
+  | Admin -> Ok agent_name
+  | Worker -> Ok ""
+  with
+  | Error err -> Error err
+  | Ok bootstrap_agent_name ->
+  match ensure_required_bearer_auth ~base_path ~bootstrap_agent_name with
   | Error err -> Error err
   | Ok auth_change -> (
       let create_token = create_token_for_lifetime token_lifetime in

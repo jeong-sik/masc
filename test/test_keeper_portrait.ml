@@ -75,12 +75,15 @@ let test_same_name_same_bytes () =
   let again = draw ~equipment:(equipment_of_name name) (body_of_name name) 96 in
   Alcotest.(check bool) "pixels" true (String.equal once again)
 
+(* A roster the size of the live one. Two names are stand-ins: the live
+   Keepers they replace are listed in test/fixtures/concrete-keeper-identities.txt,
+   which OCaml source may not name (test_keeper_toml). *)
 let live_keepers =
   [
     "code-reviewer"; "context-reviewer"; "e-masc-the-leader"; "geek-scout"; "glossary-maniac"; "goo-yang-bong";
     "hole-finder"; "indie-geek-blue"; "jazz-developer"; "lane-smith"; "masc-pro-builder"; "msx-retro-mania";
-    "ocaml-agent-ic"; "polisher"; "pr-updater"; "rondo"; "rust-hwp-guy"; "sangsu"; "simplifyer"; "tui-developer";
-    "wkbl-data"; "wkbl-front"; "wkbl-growth"; "wkbl-web-leader"; "won-chik";
+    "ocaml-agent-ic"; "polisher"; "pr-updater"; "quill-tender"; "rust-hwp-guy"; "lamp-mender"; "simplifyer";
+    "tui-developer"; "wkbl-data"; "wkbl-front"; "wkbl-growth"; "wkbl-web-leader"; "won-chik";
   ]
 
 let test_live_keepers_differ () =

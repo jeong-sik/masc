@@ -23,8 +23,13 @@ def board_interaction(process, fd, _slave, output, _base):
             raise AssertionError(f"Board footer is at {footer}, expected 30: {screen!r}")
         if b"\xe2\x94\x82" in screen[30]:
             raise AssertionError(f"Activity extends into Board footer: {screen[30]!r}")
-        if b"\xe2\x94\x82" not in screen[29]:
-            raise AssertionError(f"Activity does not reach row above footer: {screen[29]!r}")
+        # Empty Activity rows intentionally have no vertical rule. Check its
+        # header to prove the pane is present, and the footer's final position
+        # to prove short drafts were padded before it.
+        pane_cell = h.acting_pane_header_cell(output)
+        expected = h.KEEPER_CHAT_PANE_COLUMNS - h.ACTING_PANE_NARROW_COLUMNS + 1
+        if pane_cell != expected:
+            raise AssertionError(f"Board Activity header at {pane_cell}, expected {expected}")
     h.send_and_wait(process, fd, output, b"\x1b", b"d:discard")
     h.send_and_wait(process, fd, output, b"d", b"MASC Board")
     h.write_all(fd, output, b"q")

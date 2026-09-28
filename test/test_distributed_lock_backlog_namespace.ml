@@ -265,24 +265,39 @@ let check_takeover_waits ~backend ~rival ~clock ~key ~while_held =
           Backend.FileSystem.commit_under_lease backend ~key ~owner:"holder-a"
             ~ttl_seconds:60 (fun () -> note "holder-a published"))
       in
-      Eio.Promise.await owner_read;
+      (* A stays stopped inside the fence, where cancellation cannot reach
+         it, until [resume] is resolved. Resolve it exactly once on every way
+         out of the observation, a failed check included, so a red run
+         releases A and fails instead of hanging the suite. *)
+      let release_holder () = ignore (Eio.Promise.try_resolve resume_r ()) in
       let takeover =
-        Eio.Fiber.fork_promise ~sw (fun () ->
-          let result =
-            Backend.FileSystem.acquire_lock rival ~key ~owner:"holder-b"
-              ~ttl_seconds:60
+        Fun.protect ~finally:release_holder (fun () ->
+          (match
+             Eio.Fiber.first
+               (fun () -> Eio.Promise.await owner_read; `Owner_read)
+               (fun () -> ignore (Eio.Promise.await commit); `Commit_done)
+           with
+           | `Owner_read -> ()
+           | `Commit_done ->
+               fail "the holder's commit ended before it read its owner");
+          let takeover =
+            Eio.Fiber.fork_promise ~sw (fun () ->
+              let result =
+                Backend.FileSystem.acquire_lock rival ~key ~owner:"holder-b"
+                  ~ttl_seconds:60
+              in
+              note "holder-b acquire returned";
+              result)
           in
-          note "holder-b acquire returned";
-          result)
+          for _ = 1 to 20 do Eio.Fiber.yield () done;
+          Eio.Time.sleep clock 0.1;
+          check bool
+            "the takeover waits while the holder is between its owner read \
+             and its renewal"
+            false (Eio.Promise.is_resolved takeover);
+          while_held ();
+          takeover)
       in
-      for _ = 1 to 20 do Eio.Fiber.yield () done;
-      Eio.Time.sleep clock 0.1;
-      check bool
-        "the takeover waits while the holder is between its owner read and \
-         its renewal"
-        false (Eio.Promise.is_resolved takeover);
-      while_held ();
-      Eio.Promise.resolve resume_r ();
       (match Eio.Promise.await_exn commit with
        | Ok (Ok ()) -> ()
        | Ok (Error _) -> fail "the holder's own lease was refused"

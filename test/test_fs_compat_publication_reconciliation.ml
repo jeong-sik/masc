@@ -1,6 +1,7 @@
 open Alcotest
 
 module Recovery = Fs_compat_test_support.Publication_recovery_for_testing
+module Core = Fs_compat_internal.Capability_recovery_obligation
 
 let with_tmp_dir f =
   let path = Filename.temp_file "masc_publication_reconcile_" ".tmp" in
@@ -344,6 +345,133 @@ let write_raw ~registry ~owner ~area ~record_name raw =
     ~record_name
     ~raw
   |> require_fixture
+;;
+
+let test_remaining_forensic_outcome_fields_stay_decodable () =
+  with_tmp_dir @@ fun temp_root ->
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let fs = Eio.Stdenv.fs env in
+  let allowed_root_path = Unix.realpath temp_root in
+  let root = Eio.Path.stat ~follow:false Eio.Path.(fs / allowed_root_path) in
+  let registry_root = Filename.concat temp_root "registry" in
+  Unix.mkdir registry_root 0o700;
+  let valid = function
+    | Ok value -> value
+    | Error error -> fail (Recovery.validation_error_to_string error)
+  in
+  let transitioned = function
+    | Ok value -> value
+    | Error error -> fail (Recovery.transition_error_to_string error)
+  in
+  let root_identity = valid (Core.identity ~dev:root.dev ~ino:root.ino) in
+  let stage_identity =
+    valid (Core.identity ~dev:root.dev ~ino:Int64.(add root.ino 1L))
+  in
+  let mismatch : Core.resource_mismatch =
+    { expected = root_identity; observed = Core.Absent }
+  in
+  let registry =
+    transitioned
+      (Core.open_registry ~sw ~registry_root:Eio.Path.(fs / registry_root))
+  in
+  let write_prepared outcome store prepared =
+    Core.record_forensic_prepared ~store ~prepared ~outcome
+  in
+  let write_bound outcome store prepared =
+    let bound = transitioned (Core.bind ~store ~prepared ~stage_identity) in
+    Core.record_forensic_bound ~store ~bound ~outcome
+  in
+  let cases =
+    [ ( "prepared-parent-mismatch"
+      , "prepared_parent_mismatch"
+      , [ "kind"; "mismatch" ]
+      , write_prepared (Core.Prepared_parent_mismatch mismatch) )
+    ; ( "preserved-unbound-stage"
+      , "preserved_unbound_stage"
+      , [ "kind"; "stage_identity"; "stage_kind" ]
+      , write_prepared
+          (Core.Preserved_unbound_stage
+             { kind = root.kind; identity = stage_identity }) )
+    ; ( "bound-stage-absent"
+      , "bound_stage_absent"
+      , [ "kind"; "observed_target" ]
+      , write_bound (Core.Bound_stage_absent { observed_target = Core.Absent }) )
+    ; ( "bound-root-mismatch"
+      , "bound_allowed_root_mismatch"
+      , [ "kind"; "mismatch" ]
+      , write_bound (Core.Bound_allowed_root_mismatch mismatch) )
+    ; ( "bound-parent-mismatch"
+      , "bound_parent_mismatch"
+      , [ "kind"; "mismatch" ]
+      , write_bound (Core.Bound_parent_mismatch mismatch) )
+    ; ( "bound-stage-mismatch"
+      , "bound_stage_mismatch"
+      , [ "kind"; "mismatch"; "observed_target" ]
+      , write_bound
+          (Core.Bound_stage_mismatch
+             { mismatch; observed_target = Core.Absent }) )
+    ]
+  in
+  List.iter
+    (fun (owner_name, expected_kind, expected_fields, write) ->
+       let owner = valid (Core.owner_of_string owner_name) in
+       let operation_id =
+         match
+           Core.with_store
+             ~registry
+             ~owner
+             ~on_release_failure:(fun _ -> ())
+             (fun store ->
+                let locator =
+                  valid
+                    (Core.locator
+                       ~allowed_root_path
+                       ~allowed_root:root_identity
+                       ~parent_components:[]
+                       ~parent:root_identity
+                       ~target_leaf:"target.json"
+                       ~initial_target:Core.Absent)
+                in
+                let permissions = valid (Core.permissions_of_int 0o600) in
+                let prepared = transitioned (Core.prepare ~store ~locator ~permissions) in
+                let forensic = transitioned (write store prepared) in
+                Core.forensic_operation_id forensic |> Core.operation_id_to_string)
+         with
+         | Ok (Core.Store_scope_released operation_id) -> operation_id
+         | Ok (Core.Store_scope_release_failed _)
+         | Error _ -> fail "writer store did not close cleanly"
+       in
+       let forensic_path =
+         Filename.concat
+           (owner_area_path ~registry_root ~owner:owner_name "forensic")
+           operation_id
+       in
+       let json = Fs_compat.load_file forensic_path |> Yojson.Safe.from_string in
+       let outcome = Yojson.Safe.Util.member "outcome" json in
+       let names =
+         match outcome with
+         | `Assoc fields -> List.map fst fields |> List.sort String.compare
+         | _ -> fail "forensic outcome was not an object"
+       in
+       check string "writer outcome kind" expected_kind
+         (Yojson.Safe.Util.member "kind" outcome
+          |> Yojson.Safe.Util.to_string);
+       check (list string) "version-1 outcome fields" expected_fields names;
+       let rows =
+         match
+           Core.with_existing_store
+             ~registry
+             ~owner
+             (fun store -> Core.inventory store)
+         with
+         | Ok (Core.Existing_store_scope_released (Ok rows)) -> rows
+         | _ -> fail "cold owner inventory failed"
+       in
+       match rows with
+       | [ Core.Forensic_record _ ] -> ()
+       | _ -> failf "cold inventory did not decode %s" expected_kind)
+    cases
 ;;
 
 let test_historical_prepared_record_fields_stay_decodable () =
@@ -1807,6 +1935,10 @@ let () =
             "allowed root identity mismatch is forensic"
             `Quick
             test_allowed_root_identity_mismatch_is_forensic
+        ; test_case
+            "remaining forensic outcome fields stay decodable"
+            `Quick
+            test_remaining_forensic_outcome_fields_stay_decodable
         ; test_case
             "historical prepared fields stay decodable"
             `Quick

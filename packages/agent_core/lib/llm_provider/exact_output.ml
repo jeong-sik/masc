@@ -1739,29 +1739,6 @@ let retry_after_of_api_error : Retry.api_error -> float option = function
   | Retry.Timeout _ -> None
 ;;
 
-(* The candidate-fault judgment projects onto the flow's collapsed refusal
-   vocabulary. [provider_refusal] folds [Retry.InvalidRequest]'s five reasons
-   to one [Invalid_request]; that collapsed refusal is the un-attributed one,
-   and [Refusal_body_not_received] is the unread one. A new [provider_refusal]
-   constructor stops compilation here, so the two walks stay on one judgment
-   (RFC-one-slot-fault-judgment-for-every-walk.md, #38472). *)
-let candidate_fault_of_provider_refusal : provider_refusal -> Candidate_fault.t = function
-  | Request_body_refused -> Binding Body_limit
-  | Refusal_body_not_received -> Binding Refusal_unread
-  | Rate_limited -> Binding Rate_limit
-  | Overloaded -> Binding Capacity
-  | Server_error -> Binding Server
-  | Auth_failed -> Binding Credential
-  | Authorization_refused -> Binding Account_access
-  | Payment_required -> Binding Account
-  | Invalid_request -> Unattributed
-  | Not_found -> Binding Model_absent
-  | Context_overflow -> Binding Window
-  | Input_capacity -> Binding Admission
-  | Network_error -> Unknown_after_dispatch
-  | Timeout -> Binding Deadline
-;;
-
 let execution_error_cause ~http_status ~dispatch = function
   | Exec.Clock_required_for_timeout -> Clock_required_for_timeout
   | Exec.Frozen_request_mismatch -> Frozen_request_mismatch
@@ -1908,170 +1885,52 @@ let execute_once_with_publication ~publish ~net ?clock (attempt : attempt) =
               })))
 ;;
 
-let execution_failure_may_advance (error : execution_error) =
-  match error.cause, receipt_phase error.receipt with
-  | Completion_failed _, Before_dispatch -> receipt_dispatch_count error.receipt = 0
-  (* The request went out and this binding did not answer within its own
-     deadline. How long a binding takes is a property of the binding, as its
-     quota is: the successor carries its own deadline and may serve the same
-     input. Exact requests have no tools and no domain validator ran, so the
-     one unanswered dispatch is the only thing left behind, and the receipt
-     keeps it as a fact. On the Librarian lane (2026-09-23) 51 of 85 failed
-     runs ended this way at the first slot, and their successors were never
-     tried. *)
-  | Completion_failed { error = Http_client.TimeoutError { phase; _ }; _ }, Dispatch_started ->
-    (match phase with
-     (* [post_sync_once] ends a sent request that has no response headers
-        with one of these two: the header deadline ([connect_timeout_s]) or
-        the total deadline ([body_timeout_s]) when it is the earlier one. *)
-     | Http_client.Http_operation | Http_client.Wall_clock ->
-       receipt_dispatch_count error.receipt = 1
-     (* The exact transport does not produce these after dispatch. One that
-        starts to needs its own argument that the successor may serve the
-        same input. *)
-     | Http_client.Queue
-     | Http_client.First_token
-     | Http_client.Capacity_backpressure
-     | Http_client.Non_streaming_body
-     | Http_client.Stream_body
-     | Http_client.Stream_idle _
-     | Http_client.Provider_step
-     | Http_client.Cli_stdout_idle
-     | Http_client.Unknown_timeout -> false)
-  (* The provider answered that this binding's account is out of quota: a
-     quota code the glm codec reads as [Hard_quota], the fact a 402 states.
-     The successor bills its own account, so the lane walks it as it walks a
-     402 or a 429. *)
-  | ( Completion_failed
-        { error = Http_client.ProviderFailure { kind = Http_client.Hard_quota _; _ }; _ }
-    , Response_received ) -> receipt_dispatch_count error.receipt = 1
-  | Response_body_deadline_exceeded, Response_received ->
-    (* No domain validator ran for this incomplete response. Advance through
-       the caller's existing settlement callback, retaining the dispatched
-       request and missing body as facts rather than claiming no effect. *)
-    receipt_dispatch_count error.receipt = 1
-    && Option.fold ~none:false ~some:Cohttp.Code.is_success
-         (receipt_http_status error.receipt)
-    && Option.is_none error.raw_response
-    && Option.is_none (receipt_provider_trace error.receipt)
-  (* A refusal admits the successor only when the response proves the refusal
-     belongs to THIS binding and not to the input itself — otherwise the
-     successor replays a request that is already known to fail. *)
-  | Provider_response_refused { refusal = Request_body_refused; _ }, Response_received ->
-    (* The response contract proves that the provider rejected this input before
-       generation. Keep the honest one-dispatch receipt, but allow the frozen
-       lane to try its predetermined successor. *)
-    receipt_dispatch_count error.receipt = 1
-  | Provider_response_refused { refusal = Rate_limited; _ }, Response_received ->
-    (* Quota is a property of the binding, not of the request: the successor
-       carries its own. This is what an ordered lane of candidates is for, and
-       until the refusal kind survived classification the lane could not reach
-       it — a 429 arrived here as [Completion_failed] and ended the flow. *)
-    receipt_dispatch_count error.receipt = 1
-  | Provider_response_refused { refusal = Payment_required; _ }, Response_received ->
-    (* A 402 is a refusal before any generation ran, and the successor bills a
-       different account, so the frozen lane walks its next candidate instead
-       of ending. It is not always the account alone: OpenRouter compares
-       [max_tokens] times price against the balance, so a smaller request
-       could pass on the same account — either way the successor is a fresh
-       chance. The one-dispatch receipt stays as
-       evidence. Same shape as [Rate_limited] — this promotion is what lets a
-       lane whose last HTTP slot is out of paid quota fall through to its CLI
-       tail instead of recording a permanent failure. *)
-    receipt_dispatch_count error.receipt = 1
-  | Provider_response_refused
-      { refusal = Overloaded | Server_error; _ }, Response_received ->
-    (* The provider returned a complete failure response. Exact requests have
-       no tools and this failure has not entered the domain validator, so the
-       declared successor may serve the same input. Keep the failed dispatch
-       and response as evidence; an interrupted/unknown dispatch is not this
-       case, and neither is a status whose refusal body was not received. *)
-    receipt_dispatch_count error.receipt = 1
-  | Provider_response_refused { refusal = Context_overflow; _ }, Response_received ->
-    (* The provider refused this input as larger than its window, before
-       generating: a typed overflow, or an empty answer stopped at the window.
-       A window is a property of the binding, as its quota and its deadline
-       are: the successor carries its own and may take the same input. When every candidate refuses, the walk ends on the last refusal
-       and the caller still reads the size from every advance it made. On the
-       Librarian lane (2026-09-22) 105 passes ended here at glm-5.3-flash
-       ("Prompt exceeds max length") and never reached the lane's declared
-       Claude CLI slot. *)
-    receipt_dispatch_count error.receipt = 1
-  | Invalid_json_output, (Response_received | Terminal) ->
-    receipt_dispatch_count error.receipt = 1
-  (* The response arrived and terminated, but this binding routed the whole
-     answer into a non-content field and left content empty. Where the answer
-     lands is a property of the binding's output dialect, the same way a quota
-     is a property of the binding: the successor carries its own dialect, so
-     the lane tries it instead of terminating. Measured on json_object-only
-     providers where thinking cannot be disabled on every dialect: 54 turns
-     on ollama.com and 36 on glm with the schema-complete answer sitting in
-     the reasoning field (2026-08-16/08-27). *)
-  | Missing_output, (Response_received | Terminal) ->
-    receipt_dispatch_count error.receipt = 1
-  (* One closed judgment decides whose affair a refusal is (Candidate_fault,
-     RFC-one-slot-fault-judgment-for-every-walk.md, #38472). §3.3: 401·403·404
-     are this binding's affair — the key, permission, or model is missing
-     here, not in the request — so the successor carries its own and may serve
-     the same input. §3.4: an un-attributed refusal (the collapsed
-     Invalid_request) is advanced too, since no response yet proves the input
-     itself is what failed. §2.1: Refusal_body_not_received is the unread
-     refusal. Exact requests have no tools, so advancing cannot double an
-     effect. *)
-  | Provider_response_refused { refusal; _ }, Response_received
-    when (match candidate_fault_of_provider_refusal refusal with
-          | Candidate_fault.Binding _ | Candidate_fault.Unattributed -> true
-          | Candidate_fault.Unknown_after_dispatch -> false) ->
-    receipt_dispatch_count error.receipt = 1
-  (* The remaining transport and non-advance refusals do not advance. *)
-  | ( Provider_response_refused
-        { refusal =
-            ( Auth_failed
-            | Authorization_refused
-            | Invalid_request
-            | Refusal_body_not_received
-            | Not_found
-            | Input_capacity
-            | Network_error
-            | Timeout )
-        ; _
-        }
-    , (Not_started | Before_dispatch | Dispatch_started | Terminal) )
-  | Completion_failed _, (Not_started | Dispatch_started | Response_received | Terminal)
-  | Response_body_deadline_exceeded,
-      (Not_started | Before_dispatch | Dispatch_started | Terminal)
-  | ( Provider_response_refused
-        { refusal =
-            ( Request_body_refused
-            | Rate_limited
-            | Overloaded
-            | Server_error
-            | Payment_required
-            | Context_overflow )
-        ; _
-        }
-    , (Not_started | Before_dispatch | Dispatch_started | Terminal) )
-  | Invalid_json_output, (Not_started | Before_dispatch | Dispatch_started)
-  | ( ( Attempt_already_started
-      | Clock_required_for_timeout
-      | Frozen_request_mismatch
-      | Incomplete_output
-      | Missing_output
-      | Ambiguous_output _
-      | Unexpected_output_content
-      | Internal_non_json_output )
-    , _ )
-  | ( Provider_response_refused _, _ ) -> false
-;;
+(* An exact walk stops only where masc itself failed; every other failure
+   hands the same input to the declared successor
+   (RFC-exact-lane-walks-one-slot-list.md §3.3, Q1). Exact requests carry no
+   tools, so a successor cannot double an effect. That holds when the result
+   is unknown too -- the request went out and no answer came back, or the
+   stream stopped part way: the provider may have billed that dispatch, and
+   the receipt keeps it as a fact. An answer the output parser cannot read
+   (incomplete, ambiguous, a tool call where text was asked for) is handed on
+   the way a domain rejection is.
 
-let candidate_rejection_may_advance (receipt : candidate_rejection_receipt) =
-  receipt.measurement.dispatch = No_measurement_dispatch
+   The causes that stop are masc's own bookkeeping and wiring: the attempt
+   was already started, the request no longer matches its frozen form, a
+   declared deadline has no clock to run it, the plan and its provenance
+   disagree about the output shape, or the transport wiring cannot accept the
+   request. None of them is about the binding, so walking on would only hide
+   them. Cancellation never arrives here: it propagates as an exception and
+   ends the walk. *)
+let execution_failure_may_advance (error : execution_error) =
+  match error.cause with
+  | Attempt_already_started
+  | Frozen_request_mismatch
+  | Clock_required_for_timeout
+  | Internal_non_json_output
+  | Completion_failed { error = Http_client.AcceptRejected _; dispatch = _ } -> false
+  | Completion_failed
+      { error =
+          ( Http_client.HttpError _
+          | Http_client.NetworkError _
+          | Http_client.TimeoutError _
+          | Http_client.ProviderTerminal _
+          | Http_client.ProviderFailure _ )
+      ; dispatch = _
+      }
+  | Response_body_deadline_exceeded
+  | Provider_response_refused _
+  | Incomplete_output
+  | Missing_output
+  | Ambiguous_output _
+  | Unexpected_output_content
+  | Invalid_json_output -> true
 ;;
 
 let flow_execution_terminal_kind = function
-  | Flow_candidates_exhausted { rejection; _ }
-    when candidate_rejection_may_advance rejection ->
-    Advanceable_candidates_exhausted
+  (* A rejected candidate hands the input on whether or not its count-tokens
+     measurement went out: measuring is not generating. *)
+  | Flow_candidates_exhausted _ -> Advanceable_candidates_exhausted
   | Flow_exact_execution_failed { cause; _ }
     when execution_failure_may_advance cause ->
     Advanceable_candidates_exhausted
@@ -2082,7 +1941,6 @@ let flow_execution_terminal_kind = function
   | Flow_measurement_terminal_callback_failed _
   | Flow_before_dispatch_callback_failed _
   | Flow_before_advance_callback_failed _
-  | Flow_candidates_exhausted _
   | Flow_exact_execution_failed _ ->
     Non_advanceable_terminal
 ;;
@@ -2273,10 +2131,7 @@ let execute_flow_candidate
 ;;
 
 let advanceable_flow_failure = function
-  | Flow_step_candidate_rejected receipt
-    when candidate_rejection_may_advance receipt ->
-    Some (Flow_candidate_rejected receipt)
-  | Flow_step_candidate_rejected _ -> None
+  | Flow_step_candidate_rejected receipt -> Some (Flow_candidate_rejected receipt)
   | Flow_step_execution_failed ({ cause; _ } as failure)
     when execution_failure_may_advance cause ->
     Some

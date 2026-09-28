@@ -5411,17 +5411,17 @@ type state = {
      there is nothing to say. [-1] is "not animating": the mark falls back
      to its still form rather than freezing on an arbitrary quarter. *)
   mutable activity_frame: int;
-  (* The turning imp's step. The main loop advances it only while the last
-     frame drew the imp turning (Masc_tui_emblem_screen.drawn) and puts it
-     back to [-1] when none did, so a screen without it stops repainting. *)
+  (* The candle's step. The main loop advances it only while the last frame
+     drew the candle (Masc_tui_emblem_screen.drawn) and puts it back to [-1]
+     when none did, so a screen without it stops repainting. *)
   mutable emblem_frame: int;
-  (* The startup splash: the imp stands where the Overview's sections will be
+  (* The startup splash: the candle stands where the Overview's sections will be
      until the first overview read answers, a refresh fails, or the operator
      sends any input ({!startup_emblem_visible} says when it steps aside).
      Only the TUI's own start sets it, so a state built anywhere else never
      draws it. *)
   mutable startup_emblem: bool;
-  (* /about: the imp over the surface, with the theme and the keeper count.
+  (* /about: the candle over the surface, with the theme and the keeper count.
      Modal, like the help sheet; Esc closes it. *)
   mutable about_open: bool;
   mutable keeper_detail_focus: pane_focus;
@@ -5737,6 +5737,9 @@ type state = {
   mutable http_refresh_started_ns: int64 option;
   mutable local_workspace: local_workspace_reading;
   mutable view: surface;
+  mutable opening_mode: Masc_tui_config.opening;
+  mutable opening_pending: bool;
+  mutable opening_notice: string option;
   (* Where Esc goes back to after following a reference, and what was open
      there. The surfaces print [masc://] references beside the thing they
      name -- a verdict says which task it judged -- and following one is only
@@ -6752,7 +6755,7 @@ let startup_emblem_visible (state : state) =
       | Connecting -> true
       (* A booting server answers no briefing yet, but the backlog on disk
          already has something to say: once it is read, the Overview draws
-         it rather than the imp. *)
+         it rather than the candle. *)
       | Booting -> (
           match state.task_reading with
           | Masc_tui_overview_tasks.Rows_unread -> true
@@ -7512,7 +7515,7 @@ let loading_notice ?elapsed_s what =
 let nanoseconds_per_second = 1_000_000_000L
 
 (* One step of every moving thing on a masc screen: the running-turn mark,
-   the roster marquee and the turning imp. Four steps turn the mark once
+   the roster marquee and the splash candle. Four steps turn the mark once
    every 600 ms -- fast enough to read as alive, slow enough not to strobe --
    and one pace for all three keeps them moving together. *)
 let motion_step_ns = 150_000_000L
@@ -8059,6 +8062,9 @@ let create_state
   http_refresh_started_ns = None;
   local_workspace = Local_workspace_unread;
   view = Overview;
+  opening_mode = Masc_tui_config.Overview;
+  opening_pending = false;
+  opening_notice = None;
   followed_from = None;
   keeper_cursor = 0;
   keeper_list_scroll = 0;

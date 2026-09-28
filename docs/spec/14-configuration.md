@@ -310,7 +310,13 @@ Codex and Claude expose an `authenticated` native observation. Muse reports
 validation. Antigravity reports `credential_captured`; this is not a network
 verification. All login receipts retain `invocation_verified:false`. The returned
 reference is used for model discovery and the existing response/tool verification
-before configuration publication. Antigravity reauthentication publishes a new
+before configuration publication. Every selected runtime is verified, including
+the current default and its fallbacks. A runtime whose provider declines the check
+for the account's usage (`quota_exhausted` or `rate_limited`) is still published:
+the save receipt reports `readiness: "usage_limited"` and lists those runtimes
+under `unverified` with their code. Any other verification failure refuses the
+save and publishes nothing. `masc setup` applies the same rule when it checks
+imp's runtime: a usage limit is reported and the step succeeds. Antigravity reauthentication publishes a new
 reference, preserving the previous configured reference until an explicit save.
 
 Cancellation and connection loss preserve already-written credentials and the

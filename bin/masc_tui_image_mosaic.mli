@@ -32,3 +32,20 @@ val render : cols:int -> rows:int -> string -> string list
     pixel (foreground) and its lower half the bottom pixel (background). Returns
     [] when [cols]/[rows] are non-positive, [rows] is odd, or [rgb] is shorter
     than [cols*rows*3], so a malformed decode never draws garbage or raises. *)
+
+val render_rgba :
+  project:(Masc_tui_terminal_palette.rgb -> Masc_tui_terminal_palette.projected_color option) ->
+  cols:int ->
+  rows:int ->
+  string ->
+  string list
+(** [render_rgba ~project ~cols ~rows rgba]: row-major straight-alpha RGBA
+    bytes ([cols*rows*4] long) as [rows/2] lines of [cols] cells, for a
+    picture with a transparent surround. A pixel under half opacity is not
+    drawn and the page shows there: a cell with one such half draws the other
+    as a half block on the page colour, one with both is a space. Colours go
+    through [project] -- {!Masc_tui_terminal_palette.best_color} outside
+    tests -- so a 256-colour terminal draws them too. Every line ends with
+    the terminal's own colours (SGR 39 and 49), never a full reset, so a row
+    that styles itself keeps its style. [] on the same malformed input as
+    {!render}. *)

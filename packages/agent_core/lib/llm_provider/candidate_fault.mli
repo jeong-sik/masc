@@ -1,13 +1,15 @@
 (** Closed judgment: is this failure this candidate's own affair?
 
-    Both walks (exact and Keeper) answer "may the next candidate serve the
-    same input?" from this single judgment. See
+    The Keeper walk answers "may the next candidate serve the same input?"
+    from this single judgment. See
     [RFC-one-slot-fault-judgment-for-every-walk](https://github.com/jeong-sik/masc/blob/main/docs/rfc/RFC-one-slot-fault-judgment-for-every-walk.md)
     and issue #38472.
 
     The judgment answers only whose affair the failure is. Whether to advance
-    is the walk's decision ([Exact_output.execution_failure_may_advance] and
-    the Keeper lane predicates).
+    is the walk's decision (the Keeper lane predicates). The exact walk does
+    not read it: it hands every failure but masc's own to the successor
+    ([Exact_output.flow_execution_terminal_kind],
+    RFC-exact-lane-walks-one-slot-list §3.3).
 
     @stability Internal
     @since 0.39.0 *)
@@ -70,9 +72,7 @@ type t =
       (** Dispatched, and the result is unknown. Whether re-sending is allowed
           is the walk's effect rule, not this judgment. *)
 
-(** Whether the request was dispatched. Exact_output lowers its
-    [generation_dispatch_fact] to this type; because Exact_output reads this
-    module, the fact it lowers lives below this type. *)
+(** Whether the request was dispatched. *)
 type dispatch =
   | Not_dispatched
   | Dispatched

@@ -503,6 +503,32 @@ let test_session_model_selection_wire_contract () =
      `Assoc ["commandId", `String "c"]; `Null]
 ;;
 
+(* The params of the session/tokenUsage frame Muse Code 1.4.0 sent for one
+   model call on 2026-09-28, cut to the members this codec reads. *)
+let test_model_usage_names_the_call_model () =
+  let params model = `Assoc (
+    [ "sessionId", `String "01a0e77a-e43c-73a0-965a-3d73185c4d38"
+    ; "turnId", `String "01a0e77a-ec2e-7efc-9421-03ec75fd1ca8"
+    ; "usage", `Assoc [ "inputTokens", `Int 18248; "outputTokens", `Int 27 ]
+    ; "promptTokens", `Int 18248
+    ; "totalTokens", `Int 18275
+    ] @ match model with None -> [] | Some model -> [ "modelId", model ]) in
+  let parse params = Msp.parse_notification ~method_:"session/tokenUsage" params in
+  (match ok_or_fail (parse (params (Some (`String "muse-spark-1.3")))) with
+   | Msp.Model_usage_reported { session_id; turn_id; model_id } ->
+     check string "session" "01a0e77a-e43c-73a0-965a-3d73185c4d38" session_id;
+     check string "turn" "01a0e77a-ec2e-7efc-9421-03ec75fd1ca8" turn_id;
+     check (option string) "model" (Some "muse-spark-1.3") model_id
+   | _ -> fail "session/tokenUsage was not read as model usage");
+  List.iter (fun model -> match ok_or_fail (parse (params model)) with
+    | Msp.Model_usage_reported { model_id = None; _ } -> ()
+    | _ -> fail "an unnamed model was not None")
+    [ None; Some `Null ];
+  match parse (`Assoc [ "sessionId", `String "s-1" ]) with
+  | Error _ -> ()
+  | Ok _ -> fail "a usage frame without its turn was accepted"
+;;
+
 let () =
   run
     "runtime_muse_msp"
@@ -526,6 +552,7 @@ let () =
         ; test_case "reasoning effort round trip" `Quick test_reasoning_effort_round_trip
         ; test_case "effective approval mode wire contract" `Quick test_effective_approval_mode_wire_contract
         ; test_case "session model selection wire contract" `Quick test_session_model_selection_wire_contract
+        ; test_case "model usage names the call model" `Quick test_model_usage_names_the_call_model
         ] )
     ]
 ;;

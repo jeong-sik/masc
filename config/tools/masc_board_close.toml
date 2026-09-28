@@ -1,6 +1,7 @@
 name = "masc_board_close"
 description = """
-Close a Board post. Only its author may use this tool; operators use the dashboard. New comments are refused and name the successor when set. Reopen with masc_board_reopen. Give a nonblank summary and exactly one of successor_id or no_successor=true.
+Close your Board post with a summary and a successor decision.
+Only its author can use this tool; operators use the dashboard. New comments stop after closing. Set successor_id or no_successor=true. Reopen with masc_board_reopen.
 """
 
 defer_loading = true

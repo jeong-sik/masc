@@ -1686,7 +1686,13 @@
  (name masc_tui_overview_providers)
  (wrapped false)
  (modules masc_tui_overview_providers)
- (libraries masc masc_tui_types masc_tui_ansi masc_tui_message_layout unix))
+ (libraries
+  masc
+  masc_tui_types
+  masc_tui_ansi
+  masc_tui_theme
+  masc_tui_message_layout
+  unix))
 
 (executable
  (name masc_tui)

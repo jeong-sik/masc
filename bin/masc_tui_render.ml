@@ -17048,7 +17048,10 @@ let render_account_login state view =
     ~hints:(Masc_tui_account_login.hints view)
     ~body:(fun ~budget c ->
       let lines = Masc_tui_account_login.visible_lines ~height:budget view
-        |> List.map Masc.Tui_decode.sanitize_terminal_text in
+        |> List.map (function
+          | Masc_tui_account_login.Text text -> Masc.Tui_decode.sanitize_terminal_text text
+          | Masc_tui_account_login.Terminal line ->
+            Masc_tui_sgr_text.render ~sanitize:Masc.Tui_decode.sanitize_terminal_text line) in
       List.iter (fun line -> c.push (fit_width line (framed_inner_width cols))) lines)
 
 

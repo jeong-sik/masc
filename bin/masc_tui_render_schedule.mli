@@ -253,30 +253,44 @@ val schedule_delivery_width : string list -> int
     was measured -- and never over {!schedule_maximum_delivery_width}, so one
     long word cannot take the recurrence's room. *)
 
-val schedule_recurrence_width :
+(** The list's columns, named so a narrow list can say which it gives up. *)
+type schedule_column =
+  | Schedule_status
+  | Schedule_due
+  | Schedule_target
+  | Schedule_wake
+  | Schedule_delivery
+  | Schedule_recurrence
+
+(** The columns the list draws and the widths it drew them at. Only
+    {!schedule_layout} makes one, so the header and every row are drawn from
+    the widths the columns were fitted with. *)
+type schedule_layout = private {
+  sl_columns : schedule_column Masc_tui_table.layout;
+  sl_target_width : int;
+  sl_wake_width : int;
+  sl_delivery_width : int;
+}
+
+val schedule_layout :
   inner_width:int ->
   target_width:int ->
   wake_width:int ->
   delivery_width:int ->
-  int
-(** Cells the recurrence may occupy: what the named columns leave, never below
-    {!schedule_minimum_recurrence_width}. *)
+  schedule_layout
+(** The columns the list draws in [inner_width], given the target, wake and
+    delivery widths measured from the page. When the row is narrow the
+    delivery goes first, then the wake and the state; the due time, the
+    target and the recurrence stay, and the recurrence takes what the others
+    leave, never below {!schedule_minimum_recurrence_width}. *)
 
-val schedule_header_row :
-  target_width:int ->
-  wake_width:int ->
-  delivery_width:int ->
-  recurrence_width:int ->
-  string
+val schedule_header_row : layout:schedule_layout -> string
 
 val schedule_row :
   ?status_style:string ->
   ?wake_style:string ->
   ?recurrence_style:string ->
-  target_width:int ->
-  wake_width:int ->
-  delivery_width:int ->
-  recurrence_width:int ->
+  layout:schedule_layout ->
   schedule_row_values ->
   string
 (** One schedule, on the same columns as {!schedule_header_row}. The list used
@@ -292,7 +306,6 @@ type lane_run_row_values = {
   lrow_status : string;
   lrow_elapsed : string;
   lrow_slot : string;
-  lrow_run_id : string;
 }
 
 (** The run list's columns, named so a narrow list can say which it spares. *)
@@ -302,13 +315,12 @@ type lane_run_column =
   | Lane_status
   | Lane_elapsed
   | Lane_slot
-  | Lane_run_id
 
 val lane_run_layout : inner_width:int -> lane_run_column Masc_tui_table.layout
-(** The columns the run list draws in [inner_width] and the run id's share of
-    it. When the row is narrow the slot goes first, then the elapsed time and
-    the start; the subject, the status and the run id stay, and the run id
-    takes what the others leave, never below its floor. *)
+(** The columns the run list draws in [inner_width] and the slot's share of
+    it. When the row is narrow the start goes first, then the elapsed time;
+    the subject, the status and the slot stay, and the slot takes what the
+    others leave, never below its floor. *)
 
 val lane_run_header_row :
   identity_header:string -> layout:lane_run_column Masc_tui_table.layout -> string
@@ -320,8 +332,8 @@ val lane_run_row :
   lane_run_row_values ->
   string
 (** One run, on the same columns as {!lane_run_header_row}. [identity_header]
-    names the second column, which reads differently for one keeper's runs and
-    for a fleet's. *)
+    names the subject column: the Verifier's runs are about a task or a goal,
+    every other lane's about who asked. *)
 
 (** {1 File change columns} *)
 

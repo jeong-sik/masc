@@ -32,8 +32,11 @@ def run(executable: str) -> None:
     fixtures[h.STANDALONE_LANES_PATH] = h.standalone_lanes_response()
     template = h.verifier_lane_runs_response()[1]["runs"][0]
 
+    # The list draws no run id, so each row is told apart on screen by the
+    # task it verified; the pages still turn on the run id.
     def row(index: int) -> dict:
-        return {**template, "run_id": f"run-{index:03d}", "started_at": 100.125}
+        return {**template, "run_id": f"run-{index:03d}",
+                "subject_id": f"task-{index:03d}", "started_at": 100.125}
 
     first = (200, {"runs": [row(i) for i in range(51, 1, -1)],
                    "has_more": True, "total": 51})
@@ -72,7 +75,7 @@ def run(executable: str) -> None:
         h.send_and_wait(process, master, output, b"\r", b"50 loaded / 51 retained")
         h.send_and_wait(process, master, output, b"]", b"older history temporarily unavailable")
         screen = h.screen_text(bytes(output))
-        if b"50 loaded / 51 retained" not in screen or b"run-051" not in screen:
+        if b"50 loaded / 51 retained" not in screen or b"task-051" not in screen:
             raise AssertionError(f"failed page hid retained rows: {screen!r}")
         fixtures[next_path] = next_page
         h.send_and_wait(process, master, output, b"]", b"51 loaded / 51 retained")
@@ -85,7 +88,7 @@ def run(executable: str) -> None:
             raise AssertionError("pagination resize did not redraw the terminal")
         h.wait_for_output(process, master, output, h.FRAME_END, start=redraw, timeout=3.0)
         screen = h.screen_text(bytes(output))
-        if b"run-001" not in screen or b"older history temporarily unavailable" in screen:
+        if b"task-001" not in screen or b"older history temporarily unavailable" in screen:
             raise AssertionError(f"older row or recovered page status is wrong: {screen!r}")
         captured = bytes(output)
         end = captured.rfind(h.FRAME_END) + len(h.FRAME_END)
@@ -103,9 +106,9 @@ def run(executable: str) -> None:
         fixtures[first_path] = (200, {"runs": [row(99)], "has_more": False, "total": 1})
         h.send_and_wait(process, master, output, b"r", b"1 loaded / 1 retained")
         h.resize_and_wait(process, master, output, rows=30, columns=150,
-                          needle=b"run-099", controls=(h.FULL_REDRAW,))
+                          needle=b"task-099", controls=(h.FULL_REDRAW,))
         screen = h.screen_text(bytes(output))
-        if b"run-001" in screen:
+        if b"task-001" in screen:
             raise AssertionError(f"refresh retained the old cursor page: {screen!r}")
         if page_calls != ["failed", "succeeded"]:
             raise AssertionError(f"unexpected page requests: {page_calls!r}")

@@ -19,7 +19,6 @@ let target =
       | Some Tui_types.Text_runtime_lane_name -> "runtime-lane-name"
       | Some Tui_types.Text_runtime_param -> "runtime-param"
       | Some Tui_types.Text_runtime_account_form -> "runtime-account-form"
-      | Some Tui_types.Text_runtime_account_removal -> "runtime-account-removal"
       | Some Tui_types.Text_voice_wizard -> "voice-wizard"
       | Some Tui_types.Text_palette -> "palette"
       | Some Tui_types.Text_row_search -> "row-search"
@@ -432,30 +431,6 @@ let test_the_account_form_claims_only_on_the_runtime_pane () =
   check target "another pane keeps its keys" None (resolved state)
 ;;
 
-(* The removal screen types nothing, but it holds the keys the same way and
-   on the same pane: [q] or [Tab] behind it would act on the pane. *)
-let test_the_account_removal_claims_only_on_the_runtime_pane () =
-  let state = fresh_state () in
-  let screen =
-    match
-      Masc_tui_runtime_account_removal.open_on
-        "[providers.codex]\nprotocol = \"codex-app-server\"\ncommand = \"codex\"\n\
-         is-non-interactive = true\n\n[models.m]\napi-name = \"m\"\n\
-         max-context = 1000\ntools-support = true\n\n[codex.m]\n"
-    with
-    | Ok screen -> screen
-    | Error reason -> Alcotest.fail reason
-  in
-  state.Tui_types.view <- Tui_types.Config;
-  state.Tui_types.config_pane <- Tui_types.Config_runtime;
-  state.Tui_types.runtime_account_removal <- Some screen;
-  check target "the removal screen holds the keys"
-    (Some Tui_types.Text_runtime_account_removal) (resolved state);
-  check target "a compact frame lets go" None (resolved ~compact_viewport:true state);
-  state.Tui_types.config_pane <- Tui_types.Config_prompts;
-  check target "another pane keeps its keys" None (resolved state)
-;;
-
 (* The form outlives nothing. The loop asks this every iteration rather than
    the places that move the surface: the Activity pane's mouse handler and
    the async [Task_dispatched] jump both change [view] without passing any
@@ -582,9 +557,7 @@ let () =
           test_case "the loop drops a launch form left on another surface" `Quick
             test_the_loop_drops_a_launch_form_left_on_another_surface;
           test_case "the account form claims only on the runtime pane" `Quick
-            test_the_account_form_claims_only_on_the_runtime_pane;
-          test_case "the account removal claims only on the runtime pane" `Quick
-            test_the_account_removal_claims_only_on_the_runtime_pane
+            test_the_account_form_claims_only_on_the_runtime_pane
         ] )
     ]
 ;;

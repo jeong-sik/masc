@@ -3971,15 +3971,13 @@ let render_schedule_list (state : state) =
                     Terminal_text.single_line (schedule_delivery_word row))
                   snapshot.scs_rows)
            in
-           let recurrence_width =
-             Render_schedule.schedule_recurrence_width
+           let layout =
+             Render_schedule.schedule_layout
                ~inner_width:(max 1 (framed_inner_width cols - 2))
                ~target_width:subject_width ~wake_width ~delivery_width
            in
            c.push_styled ~style:(Theme.recede ())
-             ("  "
-             ^ Render_schedule.schedule_header_row ~target_width:subject_width
-                 ~wake_width ~delivery_width ~recurrence_width);
+             ("  " ^ Render_schedule.schedule_header_row ~layout);
            c.push_divider ();
            (* The column names and the rule under them, the two rows every
               other list on this screen already spends to say what it draws. *)
@@ -4037,8 +4035,7 @@ let render_schedule_list (state : state) =
                let line =
                  Render_schedule.schedule_row ~status_style:status_color
                    ~wake_style:(schedule_status_color last_wake)
-                   ~recurrence_style:Ansi.dim ~target_width:subject_width
-                   ~wake_width ~delivery_width ~recurrence_width
+                   ~recurrence_style:Ansi.dim ~layout
                    { Render_schedule.srow_status =
                        bracketed ~max_cells:10 row.sch_status
                    ; srow_due = due
@@ -5944,8 +5941,7 @@ let render_lane_run_list (state : state) ~(lane : Standalone_lane.t) =
     | Standalone_lane.Workspace_curator
     | Standalone_lane.Browser_stagehand -> "ACTOR"
   in
-  (* The run id takes what the drawn columns leave; it used to run off the
-     header with no end while the row cut it at twelve. *)
+  (* The slot takes what the drawn columns leave. *)
   let run_layout =
     Render_schedule.lane_run_layout
       ~inner_width:(max 1 (framed_inner_width cols - 2))
@@ -6012,7 +6008,6 @@ let render_lane_run_list (state : state) ~(lane : Standalone_lane.t) =
                 ; lrow_slot =
                     Terminal_text.single_line_or ~default:Masc_tui_theme.Glyph.no_value
                       run.lrs_selected_slot
-                ; lrow_run_id = Terminal_text.single_line run.lrs_run_id
                 }
           in
           if index + scroll = state.lane_runs_cursor then
@@ -6596,11 +6591,15 @@ let render_lane_run_detail (state : state) ~run_id =
         Some (Inspection_lane detail)
     | Some _ | None -> None
   in
+  (* The id is what this heading names, so it is drawn whole; the connection
+     badge takes what the title and the id leave, and is what a narrow frame
+     cuts. Ids run to 54 cells (exact-board-attention- and 32 hex digits). *)
   let header =
-    Printf.sprintf "%s  %s  %s"
-      (screen_title (if measurement then " MASC Measurement" else " MASC Lane Run"))
-      (fit_width (Terminal_text.single_line run_id) 38)
-      (connection_badge state)
+    row_with_field ~cols
+      ~lead:
+        (screen_title (if measurement then " MASC Measurement" else " MASC Lane Run")
+        ^ "  " ^ Terminal_text.single_line run_id ^ "  ")
+      ~field:(connection_badge state) ~tail:""
   in
   box_top buf cols;
   box_line buf cols header;
@@ -7406,12 +7405,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
             | Some lane ->
                 let hops =
                   String.concat " \xe2\x86\x92 "
-                    (List.map
-                       (fun id ->
-                          match String.split_on_char '.' id with
-                          | [ _prov; m ] -> m
-                          | _ -> id)
-                       lane.rrl_runtime_ids)
+                    (List.map runtime_id_model_part lane.rrl_runtime_ids)
                 in
                 add_row "Candidate Chain:" hops;
                 (match lane.rrl_runtime_ids with
@@ -15951,8 +15945,6 @@ let render_config (state : state) =
          into it. It also named PgUp/PgDn, which the table did not have, so
          the two had drifted in both directions. *)
       (match state.runtime_account_form with
-       | None when Option.is_some state.runtime_account_removal ->
-         Masc_tui_keys.footer_hints_runtime_account_removal ()
        | Some form when Masc_tui_runtime_account_form.is_saved form ->
          Masc_tui_keys.footer_hints_runtime_account_saved ()
        | Some _ -> Masc_tui_keys.footer_hints_runtime_account_form ()
@@ -16034,11 +16026,6 @@ let render_config (state : state) =
              does. *)
           if Masc_tui_runtime_account_form.is_saved form then
             c.push ("  " ^ Masc_tui_keys.footer_hints_runtime_account_saved ())
-      | None ->
-      match state.runtime_account_removal with
-      | Some screen ->
-          List.iter c.push
-            (Masc_tui_runtime_account_removal.rows ~width:(framed_inner_width cols) screen)
       | None ->
       match state.runtime_config_view_error, state.runtime_config_view with
       | Some detail, _ ->

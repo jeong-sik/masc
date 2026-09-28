@@ -5561,9 +5561,6 @@ type state = {
      of a provider the file already declares. It holds the text it was opened
      on; the save goes through the pane's preview like [e]. *)
   mutable runtime_account_form: Masc_tui_runtime_account_form.t option;
-  (* The [D] screen on the same pane, which removes one of those accounts
-     and what routes to it. The save goes through the same preview. *)
-  mutable runtime_account_removal: Masc_tui_runtime_account_removal.t option;
   (* A source section requested by another surface while runtime.toml is
      loading. The jump is consumed only after the same server-owned source
      lands, so Lanes never needs a second config writer or a guessed path. *)
@@ -6704,7 +6701,6 @@ type text_input_target =
   | Text_runtime_lane_name
   | Text_runtime_param
   | Text_runtime_account_form
-  | Text_runtime_account_removal
   | Text_voice_wizard
   | Text_palette
   | Text_row_search
@@ -6745,12 +6741,6 @@ let text_input_target (state : state) ~compact_viewport =
     state.view = Config && state.config_pane = Config_runtime
     && Option.is_some state.runtime_account_form && not compact_viewport
   then Some Text_runtime_account_form
-  (* The removal screen types nothing, but it takes every key the same way:
-     [q], [e] and [Tab] would act on the pane behind it. *)
-  else if
-    state.view = Config && state.config_pane = Config_runtime
-    && Option.is_some state.runtime_account_removal && not compact_viewport
-  then Some Text_runtime_account_removal
   else if Option.is_some state.runtime_param_edit then Some Text_runtime_param
   (* A wizard is only ever open on its own pane and closing it clears this, so
      its presence is the whole condition -- except that the pane is not drawn at
@@ -6814,7 +6804,7 @@ let quit_key_allowed_for = function
   | Some
       ( Text_account_login | Text_browser_url | Text_ask_answer | Text_fusion_launch
       | Text_preset_name | Text_runtime_lane_name | Text_runtime_param
-      | Text_runtime_account_form | Text_runtime_account_removal
+      | Text_runtime_account_form
       | Text_voice_wizard | Text_palette | Text_row_search
       | Text_runtime_picker_filter | Text_keeper_runtime_picker_filter
       | Text_identity_app_form | Text_identity_filter | Text_github_token
@@ -7904,7 +7894,6 @@ let create_state
   runtime_config_status_open = false;
   runtime_config_status_scroll = 0;
   runtime_account_form = None;
-  runtime_account_removal = None;
   runtime_config_jump_section = None;
   config_models_rows = [];
   config_models_cursor = 0;
@@ -10195,6 +10184,13 @@ let runtime_pick_badge_cells =
     (Masc_tui_message_layout.display_width runtime_pick_lane_badge)
     (Masc_tui_message_layout.display_width runtime_pick_model_badge)
 
+(* A runtime id is [provider.model]. Only the first dot separates them: a
+   model id may hold more ([muse_6dc7c062.muse-spark-1.3_6dc7c062]). *)
+let runtime_id_model_part id =
+  match String.index_opt id '.' with
+  | Some at -> String.sub id (at + 1) (String.length id - at - 1)
+  | None -> id
+
 (* The words a picker row draws before its facts: the kind badge, the target
    and the route. The renderer draws these and the typed filter matches their
    join, so the operator filters by what they read. The facts are left out:
@@ -10213,12 +10209,7 @@ let runtime_pick_columns item =
          dropped: the target column already says it is a lane. *)
       let chain =
         String.concat " \xe2\x86\x92 "
-          (List.map
-             (fun id ->
-                match String.split_on_char '.' id with
-                | [ _prov; model ] -> model
-                | _ -> id)
-             lane.Tui_decode.rrl_runtime_ids)
+          (List.map runtime_id_model_part lane.Tui_decode.rrl_runtime_ids)
       in
       { rpc_badge = runtime_pick_lane_badge;
         rpc_target = single_line lane.Tui_decode.rrl_id;

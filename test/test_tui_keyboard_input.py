@@ -4147,9 +4147,11 @@ def assert_row_budgeted_surfaces(
     # on the key footer, and on the "post rows" line it writes because the
     # thread does not fit -- so the budget the thread is left with is the
     # smallest one this pane hands out. The box no longer spends a row on a
-    # list of keys the footer carries.
+    # list of keys the footer carries. Focus comments before testing their
+    # one-row scroll; the post body now has an independent window.
+    board = send_and_wait(process, master_fd, output, b"b", b"> Comments")
     for expected in (
-        BOARD_CELL_BODY.encode(), b"comment-1", b"comment-2", b"j/k:scroll"
+        BOARD_CELL_BODY.encode(), b"comment-1", b"comment-2", b"j/k:comments"
     ):
         if expected not in board:
             raise AssertionError(f"14-row Board omitted {expected!r}: {board!r}")
@@ -5386,7 +5388,7 @@ def board_selection_identity_interaction(fixtures: HttpFixtures) -> Interaction:
         send_and_wait(process, master_fd, output, b"\x1b[119;5u", "\u25b8 Board (3)".encode())
         send_and_wait(process, master_fd, output, b"j", b"detail-body-charlie")
         send_and_wait(process, master_fd, output, b"k", b"detail-body-bravo")
-        send_and_wait(process, master_fd, output, b"l", b"j/k:scroll")
+        send_and_wait(process, master_fd, output, b"l", b"j/k:body")
         send_and_wait(process, master_fd, output, b"\x1b[6~", b"bravo-25")
 
         board = send_and_wait(process, master_fd, output, b"\x1b", screen_header(b"MASC Board", b" (3)"))

@@ -51,6 +51,8 @@ module Viewport : sig
 end
 
 type overview_allocation = {
+  intro_rows : int;
+      (** Rows for a first-use explanation, paid before the usage accounts. *)
   attention_rows : int;
   goal_rows : int;
       (** Rows of the GOALS block, its headline included. The divider under
@@ -64,6 +66,9 @@ type overview_allocation = {
           positive. *)
   task_error_rows : int;
   task_rows : int;
+  spacing_rows : int;
+      (** At most two quiet rows, added one per viewport row after height 23,
+          so growing the terminal never takes a row from a content block. *)
   filler_rows : int;
       (** Blank rows the renderer draws between the task block and the bottom
           border. Without them a surface whose content is shorter than the
@@ -76,11 +81,11 @@ val overview_team_chrome_rows : int
     [team_rows] is positive. *)
 
 val overview_goal_chrome_rows : int
-(** The divider under the GOALS block, drawn only when [goal_rows] is
+(** The blank row under Goals, drawn only when [goal_rows] is
     positive. *)
 
 val overview_providers_chrome_rows : int
-(** The Providers section's title row and the divider under it, drawn only
+(** The Plan usage title and its blank row, drawn only
     when [providers_rows] is positive. *)
 
 val spend_spare_rows_on_team : overview_allocation -> extra:int -> overview_allocation
@@ -91,6 +96,7 @@ val spend_spare_rows_on_team : overview_allocation -> extra:int -> overview_allo
 
 val allocate_overview :
   terminal_rows:int ->
+  intro_count:int ->
   attention_count:int ->
   goal_count:int ->
   team_count:int ->
@@ -100,8 +106,9 @@ val allocate_overview :
   has_task_error:bool ->
   overview_allocation
 (** The blocks share the rows through {!Masc_tui_layout.allocate}, served in
-    the order Attention panel, GOALS, Providers, Team, Tasks. Each is first
-    paid what it cannot give up -- the panel's first row, the GOALS headline,
+    the order Attention panel, GOALS, first-use explanation, Providers, Team,
+    Tasks. Each is first paid what it cannot give up -- the panel's first row,
+    the GOALS headline,
     the first Team row when [team_stuck] says it is a stuck Keeper, the first
     held task and the backlog line -- and then each grows, in the same order,
     to what it wants. A block with no room for one row besides its chrome is
@@ -114,6 +121,11 @@ val keeper_marker_width : int
 val keeper_status_width : int
 val keeper_flags_width : int
 val keeper_last_turn_width : int
+
+val keeper_flags_minimum_inner_width : int
+(** The inner width from which the roster shows its flag columns. The
+    Activity pane opens only where a surface keeps this much inside its
+    frame. *)
 
 type keeper_columns = {
   kcol_show_flags : bool;
@@ -306,30 +318,44 @@ val schedule_delivery_width : string list -> int
     was measured -- and never over {!schedule_maximum_delivery_width}, so one
     long word cannot take the recurrence's room. *)
 
-val schedule_recurrence_width :
+(** The list's columns, named so a narrow list can say which it gives up. *)
+type schedule_column =
+  | Schedule_status
+  | Schedule_due
+  | Schedule_target
+  | Schedule_wake
+  | Schedule_delivery
+  | Schedule_recurrence
+
+(** The columns the list draws and the widths it drew them at. Only
+    {!schedule_layout} makes one, so the header and every row are drawn from
+    the widths the columns were fitted with. *)
+type schedule_layout = private {
+  sl_columns : schedule_column Masc_tui_table.layout;
+  sl_target_width : int;
+  sl_wake_width : int;
+  sl_delivery_width : int;
+}
+
+val schedule_layout :
   inner_width:int ->
   target_width:int ->
   wake_width:int ->
   delivery_width:int ->
-  int
-(** Cells the recurrence may occupy: what the named columns leave, never below
-    {!schedule_minimum_recurrence_width}. *)
+  schedule_layout
+(** The columns the list draws in [inner_width], given the target, wake and
+    delivery widths measured from the page. When the row is narrow the
+    delivery goes first, then the wake and the state; the due time, the
+    target and the recurrence stay, and the recurrence takes what the others
+    leave, never below {!schedule_minimum_recurrence_width}. *)
 
-val schedule_header_row :
-  target_width:int ->
-  wake_width:int ->
-  delivery_width:int ->
-  recurrence_width:int ->
-  string
+val schedule_header_row : layout:schedule_layout -> string
 
 val schedule_row :
   ?status_style:string ->
   ?wake_style:string ->
   ?recurrence_style:string ->
-  target_width:int ->
-  wake_width:int ->
-  delivery_width:int ->
-  recurrence_width:int ->
+  layout:schedule_layout ->
   schedule_row_values ->
   string
 (** One schedule, on the same columns as {!schedule_header_row}. The list used
@@ -345,24 +371,34 @@ type lane_run_row_values = {
   lrow_status : string;
   lrow_elapsed : string;
   lrow_slot : string;
-  lrow_run_id : string;
 }
 
-val lane_run_id_width : inner_width:int -> int
-(** Cells the run id may occupy: the remainder, never below
-    {!lane_minimum_run_id_width}. *)
+(** The run list's columns, named so a narrow list can say which it spares. *)
+type lane_run_column =
+  | Lane_started
+  | Lane_subject
+  | Lane_status
+  | Lane_elapsed
+  | Lane_slot
 
-val lane_run_header_row : identity_header:string -> run_id_width:int -> string
+val lane_run_layout : inner_width:int -> lane_run_column Masc_tui_table.layout
+(** The columns the run list draws in [inner_width] and the slot's share of
+    it. When the row is narrow the start goes first, then the elapsed time;
+    the subject, the status and the slot stay, and the slot takes what the
+    others leave, never below its floor. *)
+
+val lane_run_header_row :
+  identity_header:string -> layout:lane_run_column Masc_tui_table.layout -> string
 
 val lane_run_row :
   identity_header:string ->
   status_style:string ->
-  run_id_width:int ->
+  layout:lane_run_column Masc_tui_table.layout ->
   lane_run_row_values ->
   string
 (** One run, on the same columns as {!lane_run_header_row}. [identity_header]
-    names the second column, which reads differently for one keeper's runs and
-    for a fleet's. *)
+    names the subject column: the Verifier's runs are about a task or a goal,
+    every other lane's about who asked. *)
 
 (** {1 File change columns} *)
 
@@ -375,13 +411,28 @@ type change_row_values = {
   crow_summary : string;
 }
 
-val change_summary_width : inner_width:int -> int
-val change_header_row : summary_width:int -> string
+(** The change list's columns, named so a narrow list can say which it
+    spares. *)
+type change_column =
+  | Change_turn
+  | Change_task
+  | Change_op
+  | Change_result
+  | Change_file
+  | Change_summary
+
+val change_layout : inner_width:int -> change_column Masc_tui_table.layout
+(** The columns the change list draws in [inner_width] and the summary's share
+    of it. When the row is narrow the turn goes first, then the task, the
+    operation and the result; the file and the summary stay, and the summary
+    takes what the others leave, never below its floor. *)
+
+val change_header_row : layout:change_column Masc_tui_table.layout -> string
 
 val change_row :
   op_style:string ->
   result_style:string ->
-  summary_width:int ->
+  layout:change_column Masc_tui_table.layout ->
   change_row_values ->
   string
 (** One change, on the same columns as {!change_header_row}. The file cell is
@@ -468,12 +519,27 @@ type harness_row_values = {
   hrow_reason : string;
 }
 
-val harness_reason_width : inner_width:int -> int
-val harness_header_row : reason_width:int -> string
+(** The verdict list's columns, named so a narrow list can say which it
+    spares. *)
+type harness_column =
+  | Harness_time
+  | Harness_task
+  | Harness_gate
+  | Harness_verdict
+  | Harness_evaluator
+  | Harness_reason
+
+val harness_layout : inner_width:int -> harness_column Masc_tui_table.layout
+(** The columns the verdict list draws in [inner_width] and the reason's share
+    of it. When the row is narrow the evaluator goes first, then the time and
+    the gate; the task, the verdict and the reason stay, and the reason takes
+    what the others leave, never below its floor. *)
+
+val harness_header_row : layout:harness_column Masc_tui_table.layout -> string
 
 val harness_row :
   verdict_style:string ->
-  reason_width:int ->
+  layout:harness_column Masc_tui_table.layout ->
   harness_row_values ->
   string
 (** One verdict, on the same columns as {!harness_header_row}. The task and
@@ -502,19 +568,33 @@ type planning_row_values = {
   prow_due : string;
 }
 
-val planning_title_width : inner_width:int -> phase_width:int -> int
-(** What the title has after the named columns, never below a floor: a title
-    folded past that point identifies no goal, and the row is better off
-    running to the frame's edge than naming nothing. *)
+(** The goal list's columns, named so a narrow list can say which it spares. *)
+type planning_column =
+  | Planning_phase
+  | Planning_proof
+  | Planning_priority
+  | Planning_open
+  | Planning_title
+  | Planning_age
+  | Planning_due
 
-val planning_header_row : phase_width:int -> title_width:int -> string
+val planning_layout :
+  inner_width:int -> phase_width:int -> planning_column Masc_tui_table.layout
+(** The columns the goal list draws in [inner_width] and the title's share of
+    it. When the row is narrow the due date goes first, then the age, the
+    open-work tally and the judge's mark; the phase, the priority and the
+    title stay, and the title takes what the others leave, never below its
+    floor: a title folded past that point identifies no goal. *)
+
+val planning_header_row :
+  phase_width:int -> layout:planning_column Masc_tui_table.layout -> string
 
 val planning_row :
   ?priority_style:string ->
   ?open_style:string ->
   phase_style:string ->
   phase_width:int ->
-  title_width:int ->
+  layout:planning_column Masc_tui_table.layout ->
   planning_row_values ->
   string
 (** One goal, on the same columns as {!planning_header_row}. The judge's mark
@@ -569,12 +649,27 @@ val board_age_text : now:float -> float option -> string
     post carried no such time. Which time that is follows the sort, which
     {!Masc_tui_types.board_sort_time} answers. *)
 
-val board_title_width : inner_width:int -> int
-(** What the title has after the named columns, never below a floor. [inner_width]
-    is what the row has left of the frame, the four cells of lead ahead of the
-    mark already taken off. *)
+(** The list's columns, named so a narrow list can say which it spares. *)
+type board_column =
+  | Board_mark
+  | Board_id
+  | Board_hearth
+  | Board_author
+  | Board_title
+  | Board_age
+  | Board_score
+  | Board_replies
 
-val board_header_row : age_header:string -> title_width:int -> string
+val board_layout : inner_width:int -> board_column Masc_tui_table.layout
+(** The columns the list draws in [inner_width] and the title's share of it.
+    [inner_width] is what the row has left of the frame, the four cells of
+    lead ahead of the mark already taken off. When the row is narrow the id
+    goes first, then the hearth, the replies, the score and the author; the
+    mark, the title and the age stay, and the title takes what the others
+    leave, never below its floor. *)
+
+val board_header_row :
+  age_header:string -> layout:board_column Masc_tui_table.layout -> string
 (** [age_header] is the word over the age column, which names the time the
     column holds. *)
 
@@ -582,7 +677,7 @@ val board_row :
   ?close:string ->
   styles:board_row_styles ->
   age_header:string ->
-  title_width:int ->
+  layout:board_column Masc_tui_table.layout ->
   board_row_values ->
   string
 (** One post, on the same columns as {!board_header_row}. The kind mark carries

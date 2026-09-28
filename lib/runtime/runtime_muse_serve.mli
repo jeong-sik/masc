@@ -55,6 +55,9 @@ val login_environment : account_home:string -> string array
     every Muse child, it runs with [TBH_CREDENTIAL_BACKEND=file], so the token
     is written into that file instead of the macOS Keychain. *)
 
+val login_argv : cli_path:string -> string list
+(** The official client's sign-in command, run with {!login_environment}. *)
+
 type session_mode =
   | Start
   | Resume of { session_id : string; expected_turn_count : int }
@@ -183,6 +186,11 @@ type stream_event =
       (** Provider subscription observation, including notifications received
           before request acknowledgement. Consumers may record its reported
           exhaustion/reset in the selected account's quota scope. *)
+  | Compaction_observed of Runtime_muse_msp.compaction
+      (** A [compaction] item of this turn completed: the host rewrote what
+          the model sees. An automatic compaction of a single oversized input
+          reaches the model as a short summary, and the turn still
+          completes, so this event is the only trace of that loss. *)
   | Turn_terminal_received of Runtime_muse_msp.terminal
       (** The matching durable terminal has been decoded. Emitted
           before usage callbacks; [Turn_finished] still closes output afterward. *)

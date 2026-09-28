@@ -42,7 +42,7 @@ val run :
   ?required_native_posture:Runtime_native_tools.posture ->
   ?official_client_continuation:Keeper_semantic_execution.official_client_checkpoint ->
   runtime_id:string ->
-  max_prompt_bytes:int option ->
+  prompt_capacity:(int, Runtime_muse_prompt_capacity.error) result ->
   configured_reasoning_effort:Llm_provider.Reasoning_effort.t option ->
   turn_timeout_s:float option ->
   quota_scope:Runtime_quota_window.scope ->
@@ -102,9 +102,11 @@ val run :
     Native none is unsupported. This is not an MASC-only execution claim.
 
     Start carries canonical history; Resume reports the history held by the
-    vendor session and sends the current goal and context. A declared
-    max-prompt-bytes bounds the prepared input because MSP supplies no typed
-    oversized-input error. No top-level runtime routing is exposed here. *)
+    vendor session and sends the current goal and context. [prompt_capacity]
+    is the runtime's {!Runtime.muse_prompt_capacity}: it bounds the prepared
+    input, and an [Error] refuses the turn with its cause, because the host
+    rewrites an oversized input instead of refusing it. No top-level runtime routing is
+    exposed here. *)
 
 module For_testing : sig
   val usage_reports

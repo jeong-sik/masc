@@ -13,6 +13,7 @@ let runtime_toml
       ?(provider_extra = "")
       ?(account_home = Some "/synthetic/muse-home")
       ?(model_extra = "max-prompt-bytes = 1048576")
+      ?(max_context = Some 1007997)
       ()
   =
   Printf.sprintf
@@ -23,7 +24,7 @@ let runtime_toml
      %s\n\
      [models.muse-spark]\n\
      api-name = \"muse-spark-1.3\"\n\
-     max-context = 1007997\n\
+     %s\
      %s\n\
      \n\
      [muse_code.muse-spark]\n\
@@ -35,6 +36,9 @@ let runtime_toml
     non_interactive
     ((match account_home with None -> "" | Some home ->
         Printf.sprintf "account-home = %S\n" home) ^ provider_extra)
+    (match max_context with
+     | None -> ""
+     | Some tokens -> Printf.sprintf "max-context = %d\n" tokens)
     model_extra
     runtime_id
 ;;
@@ -132,8 +136,8 @@ let test_materializes_the_muse_serve_owner () =
       (Runtime_execution.supports_native_none default.execution)
 ;;
 
-(* The adapter windows a start to [max-prompt-bytes] and refuses a turn
-   without it, so a lane's byte budget counts the declaration. *)
+(* A declared [max-prompt-bytes] below the derived ceiling narrows it, so a
+   lane's byte budget counts the declaration. *)
 let test_a_lane_budget_counts_the_declared_prompt_bytes () =
   check bool "muse-serve reads max-prompt-bytes" true
     (Runtime_schema.api_format_reads_max_prompt_bytes Runtime_schema.Muse_serve_runtime);
@@ -150,14 +154,79 @@ let test_a_lane_budget_counts_the_declared_prompt_bytes () =
               (Runtime.smallest_max_prompt_bytes_of_runtime_ids [ runtime_id ]))))
 ;;
 
-let test_missing_prompt_budget_is_rejected_before_save () =
-  check bool "bound Muse model requires an operator byte budget" true
-    (List.mem "models.muse-spark.max-prompt-bytes"
-      (parse_error_paths (runtime_toml ~model_extra:"" ())));
+(* The operator never types a byte count: the ceiling comes from the window
+   the host reports, and a declared max-prompt-bytes can only narrow it. A
+   window too small for the host's own overhead leaves no ceiling and is
+   refused at load, declared value or not, rather than at the first turn. *)
+let test_prompt_ceiling_comes_from_the_window () =
   check (list string) "declared positive bytes admit the config" []
     (parse_error_paths (runtime_toml ()));
-  check (list string) "disabled provider does not require dormant input capacity" []
-    (parse_error_paths (runtime_toml ~provider_extra:"enabled = false" ~model_extra:"" ()))
+  check (list string) "max-context alone admits the config" []
+    (parse_error_paths (runtime_toml ~model_extra:"" ()));
+  without_an_installed_client (fun () ->
+    with_runtime_toml (runtime_toml ~model_extra:"" ~max_context:(Some 15000) ())
+      (fun config_path ->
+        match Runtime.load_list ~config_path with
+        | Error (Runtime.Muse_window_below_host_overhead { runtime_id = refused; max_context })
+          ->
+          check string "the refused runtime" runtime_id refused;
+          check int "the window it could not fit in" 15000 max_context
+        | Error failure ->
+          failf "expected the host-overhead refusal, got: %s"
+            (Runtime.to_diagnostic_text ~config_path failure)
+        | Ok _ -> fail "a window below the host overhead must be refused"));
+  without_an_installed_client (fun () ->
+    with_runtime_toml (runtime_toml ~max_context:(Some 15000) ()) (fun config_path ->
+      match Runtime.load_list ~config_path with
+      | Error (Runtime.Muse_window_below_host_overhead { runtime_id = refused; _ }) ->
+        check string "a declared value is refused on the same window" runtime_id refused
+      | Error failure ->
+        failf "expected the host-overhead refusal with a declared value, got: %s"
+          (Runtime.to_diagnostic_text ~config_path failure)
+      | Ok _ -> fail "a declared value must not hide a window below the host overhead"));
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore snapshot)
+    (fun () ->
+      without_an_installed_client (fun () ->
+        with_runtime_toml (runtime_toml ~model_extra:"" ()) (fun config_path ->
+          match Runtime.init_default ~config_path with
+          | Error detail -> failf "muse-serve did not initialize: %s" detail
+          | Ok () ->
+            (* 4 x (floor(75% of 1,007,997) - 11,946) = 4 x 744,051 *)
+            check (option int) "the lane budget counts the derived ceiling" (Some 2_976_204)
+              (Runtime.smallest_max_prompt_bytes_of_runtime_ids [ runtime_id ]))))
+;;
+
+let test_derived_ceiling_arithmetic () =
+  let module Capacity = Runtime_muse_prompt_capacity in
+  let bytes ~declared ~max_context =
+    match Capacity.start_prompt_bytes ~declared ~max_context with
+    | Ok bytes -> Some bytes
+    | Error _ -> None
+  in
+  check (option int) "a smaller declared value narrows the ceiling" (Some 45678)
+    (bytes ~declared:(Some 45678) ~max_context:(Some 1_000_000));
+  check (option int) "a larger declared value cannot widen it" (Some 552_216)
+    (bytes ~declared:(Some 1_048_576) ~max_context:(Some 200_000));
+  check (option int) "without a window the declared value is all there is" (Some 45678)
+    (bytes ~declared:(Some 45678) ~max_context:None);
+  (* 4 x (150,000 - 11,946) *)
+  check (option int) "a 200k window" (Some 552_216)
+    (bytes ~declared:None ~max_context:(Some 200_000));
+  (* 75% of 15,928 is 11,946: no room left *)
+  check (option int) "a window exactly at the overhead has no room" None
+    (bytes ~declared:None ~max_context:(Some 15_928));
+  check (option int) "a declared value does not make room the host lacks" None
+    (bytes ~declared:(Some 1_000) ~max_context:(Some 15_928));
+  check (option int) "no window, no bytes" None (bytes ~declared:None ~max_context:None);
+  (* 75 x this window overflows [int]; the split keeps it a positive line. *)
+  check bool "a window whose 75% product overflows still has room" true
+    (match bytes ~declared:None ~max_context:(Some 61_489_146_912_365_174) with
+     | Some bytes -> bytes > 0
+     | None -> false);
+  check (option int) "a window beyond int bytes saturates" (Some Int.max_int)
+    (bytes ~declared:None ~max_context:(Some Int.max_int))
 ;;
 
 let test_declared_credentials_are_refused () =
@@ -225,8 +294,9 @@ let () =
             test_materializes_the_muse_serve_owner
         ; test_case "a lane budget counts the declared prompt bytes" `Quick
             test_a_lane_budget_counts_the_declared_prompt_bytes
-        ; test_case "missing prompt budget is rejected before save" `Quick
-            test_missing_prompt_budget_is_rejected_before_save
+        ; test_case "the prompt ceiling comes from the window" `Quick
+            test_prompt_ceiling_comes_from_the_window
+        ; test_case "derived ceiling arithmetic" `Quick test_derived_ceiling_arithmetic
         ; test_case "declared credentials are refused" `Quick
             test_declared_credentials_are_refused
         ; test_case "an HTTP endpoint is refused" `Quick test_an_http_endpoint_is_refused

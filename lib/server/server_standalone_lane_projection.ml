@@ -719,10 +719,9 @@ let lane_json
     match configuration with
     | Registry_unavailable _ | Unconfigured _ -> "unavailable"
     | Configured { admitted_slots = []; cli_slots = []; _ } -> "degraded"
-    (* A lane that could not admit is not healthy while it runs. The workspace
-       curator with only cli tails admits slots and refuses them anyway, and
-       this word is where a reader learns that: the table beside it draws slot
-       names, not the sentence saying why. *)
+    (* A lane that could not admit is not healthy while it runs, and this word
+       is where a reader learns that: the table beside it draws slot names,
+       not the sentence saying why. *)
     | Configured { admission_error = Some _; _ } -> "degraded"
     | Configured _ when running_count > 0 -> "running"
     | Configured _ when runs = [] -> "no_retained_observation"
@@ -766,10 +765,6 @@ let lane_json
       , `List (List.map (fun slot -> `String slot) declared_slots) )
     ; ( "declared_cli_slots"
       , `List (List.map (fun slot -> `String slot) declared_cli_slots) )
-      (* Whether an append of an official-client slot can land here. The
-         writer refuses it for a lane that cannot walk a CLI tail, so the
-         editor reads the same rule rather than offering a pick that fails. *)
-    ; "supports_cli_tail", `Bool (Runtime.exact_lane_supports_cli_tail spec.lane)
     ; "admission_error", json_string_opt admission_error
     ; "status", `String status
     ; "retained_run_count", `Int (List.length runs)
@@ -937,21 +932,7 @@ let live_lane_configuration registry lane_id =
                   (String.concat
                      "; "
                      (List.map Runtime.verifier_slot_rejection_to_string rejections)))
-           | [], _ :: _ | _ :: _, [] | _ :: _, _ :: _ ->
-             (match typed_lane, admitted_cli_slots with
-              | Some Standalone_lane.Workspace_curator, _ :: _ ->
-                Some
-                  "Workspace curator requires admitted exact-output slots; CLI tails \
-                   are not supported"
-              | Some Standalone_lane.Workspace_curator, []
-              | Some
-                  ( Standalone_lane.Librarian
-                  | Standalone_lane.Hitl_auto_judge
-                  | Standalone_lane.Board_attention
-                  | Standalone_lane.Verifier
-                  | Standalone_lane.Browser_stagehand )
-                , _
-              | None, _ -> None)))
+           | [], _ :: _ | _ :: _, [] | _ :: _, _ :: _ -> None))
       }
   | Error (Runtime_exact_output_registry.Exact_lane_unconfigured _) ->
     Unconfigured

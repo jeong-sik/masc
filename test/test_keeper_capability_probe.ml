@@ -708,7 +708,7 @@ account-home = %S
 is-non-interactive = true
 [models.fixture]
 api-name = %S
-max-context = 4096
+max-context = 200000
 max-prompt-bytes = %d
 reasoning-effort = %S
 turn-timeout-s = 0
@@ -787,7 +787,7 @@ default = "muse.fixture"
          | Ok (Probe.Provider_rejected {detail}) ->
            check string "exact input-capacity diagnostic"
              (Runtime_muse_serve.error_to_string (Runtime_muse_serve.Invalid_config
-                (Printf.sprintf "Muse Code probe input is %d bytes, exceeding declared max-prompt-bytes %d"
+                (Printf.sprintf "Muse Code probe input is %d bytes, exceeding the prompt ceiling %d"
                    (String.length prompt) (String.length prompt - 1)))) detail
          | Ok result -> fail (Probe.invocation_to_string result)
          | Error error -> fail (Probe.invocation_error_to_string error));

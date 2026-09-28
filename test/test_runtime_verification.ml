@@ -1051,7 +1051,7 @@ account-home = %S
 is-non-interactive = true
 [models.fixture]
 api-name = "fixture-selected-model"
-max-context = 4096
+max-context = 1007997
 max-prompt-bytes = 1048576
 reasoning-effort = "high"
 tools-support = true
@@ -1127,7 +1127,7 @@ tools-support = true
       Unix.unlink script;
       check (list string) "input refusal creates no temporary storage" ["account"]
         (Sys.readdir directory |> Array.to_list |> List.sort String.compare))
-      [None; Some 1];
+      [Some 1];
     let result = Verify.verify ~secure_random:env#secure_random ~sw ~net:env#net
       ~mgr ~clock:env#clock ~cwd:Eio.Path.(env#fs / directory)
       ~cwd_path:directory ~timeout_s:15. (runtime (Filename.concat directory "not-started")) in

@@ -2385,6 +2385,10 @@ type async_msg =
       (** provider id, then how many scopes were recorded *)
   | Account_login_event of Masc_tui_account_login.t * int * Masc_tui_account_login.event
   | Account_login_json of Masc_tui_account_login.t * int * Masc_tui_account_login.action * (Yojson.Safe.t, string) result
+  (* A removal's answer keeps what is known about its effect: removed, declined
+     by the server in its own words, or unknown. *)
+  | Account_login_removal of Masc_tui_account_login.t * int * Masc_tui_account_login.provider * string option
+      * Masc_tui_http.post_outcome
   | Github_login_lines of string * string list
   | Github_login_finished of string * (unit, string) result
   | Github_token_saved of string * (Yojson.Safe.t, string) result
@@ -4287,7 +4291,8 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
   let host = server_peer_host and port = state.port in
   (match action with
    | Login.Input _ | Nothing -> ()
-   | Inventory | Refresh_saved | Refresh_retry | Start _ | Cancel | Recover | Discover | Prepare _ | Save _ | Close ->
+   | Inventory | Refresh_saved | Refresh_retry | Start _ | Cancel | Recover | Discover | Prepare _ | Save _ | Close
+   | Preview_removal _ | Remove _ | Refresh_removed _ ->
      view.generation <- view.generation + 1;
      Option.iter (fun stop -> stop ()) view.cancel_stream;
      view.cancel_stream <- None);
@@ -4358,10 +4363,21 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
     view.phase<-Login.Loading;
     let body=`Assoc ["source",Login.source view;"model",`String model.id;"load",`Bool false] in
     start_job (fun () -> enqueue (post_setup "/api/v1/setup/context" body))
-  | Save (model, bytes) ->
+  | Save model ->
     view.phase<-Login.Saving;view.notice<-"모델의 응답과 도구 호출을 검증하고 있습니다.";
-    let body=Login.save_body view model bytes in
+    let body=Login.save_body view model in
     start_job (fun () -> enqueue (post_setup "/api/v1/setup/connections" body))
+  | Preview_removal {provider; _} ->
+    view.phase<-Login.Loading; view.notice<-"지울 내용을 읽고 있습니다.";
+    start_job (fun () -> enqueue (post "/api/v1/setup/accounts/removal" (`Assoc ["integration_id",`String provider.id])))
+  | Remove {provider; revision; login_store} ->
+    view.phase<-Login.Saving; view.notice<-"계정을 지우고 있습니다.";
+    let body=`Assoc ["integration_id",`String provider.id;"revision",`String revision] |> Yojson.Safe.to_string in
+    start_job (fun () ->
+      let outcome=Masc_tui_http.post_json_outcome ~host ~port ~path:"/api/v1/setup/accounts/remove" ~body in
+      enqueue_async mailbox (Account_login_removal (view, generation, provider, login_store, outcome)))
+  | Refresh_removed _ ->
+    view.phase<-Login.Loading; start_job (fun () -> enqueue (Masc_tui_http.get_json ~host ~port ~path:"/api/v1/setup/inventory"))
 
 (* The device-flow login, streamed. gh prints the one-time code on its
    own output, which the server forwards redacted; every data line lands
@@ -7614,7 +7630,7 @@ let launch_runtime_lane_pick state ~mailbox ~(pick : Masc_tui_types.runtime_lane
     | Masc_tui_types.Pick_media_failover | Masc_tui_types.Pick_route_default ->
         Masc_tui_types.Runtime_surface_list
   in
-  match Masc_tui_types.runtime_pick_availability state pick runtime with
+  match Masc_tui_types.runtime_pick_availability pick runtime with
   | Masc_tui_types.Pick_refused refusal ->
     (* Drawn disabled in the picker; the writer would refuse it anyway. *)
     state.runtime_lane_notice <-
@@ -9433,12 +9449,12 @@ type acting_pane_hit =
   | Pane_miss
   | Pane_row of int  (** 0-based line within the pane *)
 
-let acting_pane_hit (state : state) ~row ~column =
+let acting_pane_hit (_state : state) ~row ~column =
   let pane_cols = Masc_tui_render.acting_pane_drawn_cols () in
   if pane_cols <= 0 then Pane_miss
   else
     let _terminal_rows, terminal_cols = Masc_tui_ansi.get_terminal_size () in
-    let body_rows = surface_rows state in
+    let body_rows = Masc_tui_render.acting_pane_row_count () in
     let first_col = terminal_cols - pane_cols + 1 in
     (* Row 1 is the surface strip; the body starts on row 2. *)
     let first_row = 2 in
@@ -14715,14 +14731,36 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                  launch_account_login_action state ~mailbox view Login.Refresh_saved; Ok ()
                | _ -> Error "설정 저장 결과를 확인하지 못했습니다.")
              | Input _ -> Ok ()
+             | Preview_removal {provider; refused} -> Login.removal_preview view provider ~refused json
+             | Refresh_removed notice ->
+               (match Login.inventory view json with
+                | Ok () -> restore_account_login state view; view.notice<-notice; Ok () | Error _ as error -> error)
+             (* A removal answers through [Account_login_removal]. *)
+             | Remove _ -> Ok ()
              | Start _ | Cancel | Close | Nothing -> Ok ()) in
          (match applied with
           | Ok () -> ()
           | Error message -> view.input_pending<-false; view.draft<-"";
             (match action with
-             | Login.Save (model, _) -> Login.save_failed view model message
+             | Login.Save model -> Login.save_failed view model message
              | Login.Input _ -> view.notice<-message
              | _ -> view.recovery<-Login.Login_status; view.phase<-Login.Failed; view.notice<-message))
+       | Some _ | None -> ())
+  | Account_login_removal (view, generation, provider, login_store, outcome) ->
+      (match state.account_login with
+       | Some current when current == view && view.generation = generation ->
+         let module Login = Masc_tui_account_login in
+         (match outcome with
+          | Masc_tui_http.Post_answered _ ->
+            launch_account_login_action state ~mailbox view (Login.Refresh_removed (Login.removed_notice provider login_store))
+          (* The server's refusal is about the file as it is now -- it moved,
+             or the account can no longer go -- so the preview is read again
+             under it rather than left standing. *)
+          | Masc_tui_http.Post_refused message ->
+            launch_account_login_action state ~mailbox view (Login.Preview_removal {provider; refused = Some message})
+          | Masc_tui_http.Post_unanswered detail ->
+            view.recovery<-Login.Login_status; view.phase<-Login.Failed;
+            view.notice<-"계정을 지웠는지 확인하지 못했습니다. r로 목록을 다시 읽으세요. " ^ detail)
        | Some _ | None -> ())
   | Github_login_lines (keeper_name, lines) ->
       (* Append under the stamped view; a login for another keeper than the

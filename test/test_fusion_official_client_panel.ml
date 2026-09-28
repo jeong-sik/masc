@@ -924,10 +924,9 @@ let test_muse_framed_prompt_capacity_before_spawning () =
           (Runtime_muse_serve.Invalid_config _)) -> ()
       | Error failure -> fail (Masc.Fusion_official_client.failure_detail
           ~runtime_id:runtime.Runtime.id failure)
-      | Ok _ -> fail "undeclared or oversized Muse input reached host" in
+      | Ok _ -> fail "oversized Muse input reached host" in
     refused runtime;
-    refused {runtime with model={runtime.model with max_prompt_bytes=None}};
-    check bool "over-budget and missing-budget inputs never spawn" false
+    check bool "an over-budget input never spawns" false
       (Sys.file_exists !marker));
   with_muse_runtime ~max_prompt_bytes:framed_bytes ~muse_cli:muse_panel_launcher
     (fun ~base_dir ->

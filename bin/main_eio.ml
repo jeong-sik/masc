@@ -3644,6 +3644,30 @@ let runtime_muse_models_cmd =
     ~doc:"List source-labelled Muse model metadata without a session or model turn; account availability is not verified.")
     Term.(const run $ cli $ account_home $ timeout)
 
+let runtime_account_login_cmd =
+  let client = Arg.(required & opt (some (enum
+      [ "codex", Runtime_account_email.Codex; "claude", Runtime_account_email.Claude_code;
+        "muse", Runtime_account_email.Muse_code ])) None
+    & info ["client"] ~docv:"CLIENT" ~doc:"The official client to sign in: codex, claude or muse.") in
+  let cli = Arg.(value & opt (some string) None & info ["cli-path"] ~docv:"EXECUTABLE"
+    ~doc:"The client's executable; its usual command name when omitted.") in
+  let account_home = Arg.(required & opt (some string) None & info ["account-home"]
+    ~docv:"DIRECTORY" ~doc:"Explicit account home runtime.toml declares; never inherited from the caller.") in
+  let run client cli_path account_home =
+    let install_client = match client with
+      | Runtime_account_email.Codex -> Runtime_official_cli_install.Codex
+      | Claude_code -> Runtime_official_cli_install.Claude
+      | Muse_code -> Runtime_official_cli_install.Muse in
+    let command = match cli_path with
+      | Some command -> command
+      | None -> Runtime_official_cli_install.name install_client in
+    Masc_cli_account_login.run ~client
+      ~cli_path:(Runtime_official_cli_install.spawn_path install_client ~command)
+      ~account_home in
+  Cmd.v (Cmd.info "runtime-account-login"
+    ~doc:"Run the official sign-in for a declared Codex, Claude Code or Muse Code account home with the environment /login gives that client, and record the account's email the way /login does.")
+    Term.(const run $ client $ cli $ account_home)
+
 let runtime_setup_render_cmd =
   let spec = Arg.(required & opt (some string) None & info ["spec"] ~doc:"Private setup JSON file.") in
   Cmd.v (Cmd.info "runtime-setup-render" ~doc:"Render a native runtime specification for local setup.")
@@ -4163,6 +4187,7 @@ let cmd =
     ; runtime_model_list_cmd
     ; runtime_codex_models_cmd
     ; runtime_muse_models_cmd
+    ; runtime_account_login_cmd
     ; runtime_setup_render_cmd
     ; runtime_setup_inventory_cmd
     ; runtime_setup_batch_cmd

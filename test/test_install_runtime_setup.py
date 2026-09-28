@@ -721,8 +721,7 @@ class SelectedNativeAccounts(unittest.TestCase):
                         env = {'HOME': home, 'CLAUDE_CONFIG_DIR': '', 'CODEX_HOME': ''}
                         if variable and override:
                             env[variable] = effective
-                        existing = dict(id='kept.binding', model='reported', max_context=8192,
-                                        max_prompt_bytes=12345, tools=True)
+                        existing = dict(id='kept.binding', model='reported', max_context=8192, tools=True)
                         source = dict(choice=choice, label=choice, rows=[existing])
                         observed = [dict(id='reported', label='Reported', context=8192)]
                         with patch.dict(os.environ, env), patch.object(SETUP, 'pick', return_value=[int(alternate)]), \
@@ -738,7 +737,7 @@ class SelectedNativeAccounts(unittest.TestCase):
                         else:
                             self.assertEqual(selected['account_home'], effective)
                             self.assertNotIn('credential_replaced', selected)
-                            self.assertEqual(models[0]['existing']['max_prompt_bytes'], 12345)
+                            self.assertEqual(models[0]['existing']['max_context'], 8192)
                             self.assertEqual(SETUP.resolve_model_spec(selected, models[0], 10),
                                              ('kept.binding', None))
                         self.assertEqual(source['rows'], [existing])
@@ -830,10 +829,11 @@ class SelectedNativeAccounts(unittest.TestCase):
         pick.assert_called_once()
         self.assertEqual(rows[0]['id'], 'reported')
         self.assertIn('not yet verified', origin)
-        self.assertEqual(run.call_args_list[1].args[0], ['/selected/muse', 'login'])
-        environment = run.call_args_list[1].kwargs['env']
-        self.assertEqual(environment['HOME'], '/selected/account')
-        self.assertEqual(environment['XDG_CONFIG_HOME'], '/selected/account/.config')
+        # masc runs the sign-in so the child gets the Muse login environment;
+        # the masc process itself keeps the caller's HOME.
+        self.assertEqual(run.call_args_list[1].args[0], ['/masc', 'runtime-account-login', '--client', 'muse',
+                                                         '--cli-path', '/selected/muse', '--account-home', '/selected/account'])
+        self.assertNotIn('env', run.call_args_list[1].kwargs)
         self.assertEqual(run.call_args_list[0].args, run.call_args_list[2].args)
 
     def test_muse_discovery_cancel_and_failed_signin_do_not_continue(self):
@@ -915,8 +915,8 @@ class SelectedNativeAccounts(unittest.TestCase):
                  patch.object(SETUP.sys, 'stdin', io.StringIO('1\n')), contextlib.redirect_stderr(io.StringIO()):
                 selected = SETUP.select_model('/masc', 'muse')
             locate.assert_called_once_with('/masc', 'muse', 'muse')
-            self.assertEqual(run.call_args_list[1].args[0], ['/vendor/bin/muse', 'login'])
-            self.assertEqual(run.call_args_list[1].kwargs['env']['HOME'], home)
+            self.assertEqual(run.call_args_list[1].args[0], ['/masc', 'runtime-account-login', '--client', 'muse',
+                                                             '--cli-path', '/vendor/bin/muse', '--account-home', home])
             self.assertEqual(selected, dict(model='reported', max_context=8192,
                                            account_home=home, command='/vendor/bin/muse'))
 
@@ -935,7 +935,8 @@ class SelectedNativeAccounts(unittest.TestCase):
              patch.object(SETUP.sys, 'stdin', io.StringIO('1\n')), contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(SETUP.select_model('/masc', 'muse')['account_home'], '/selected')
         self.assertEqual(run.call_args_list[0].args[0][3], '/owned/muse')
-        self.assertEqual(run.call_args_list[1].args[0], ['/owned/muse', 'login'])
+        self.assertEqual(run.call_args_list[1].args[0], ['/masc', 'runtime-account-login', '--client', 'muse',
+                                                         '--cli-path', '/owned/muse', '--account-home', '/selected'])
         with patch.object(SETUP, 'select_native_account', return_value=dict(source)), \
              patch.object(SETUP, 'official_client_path', return_value=None), \
              patch.object(SETUP.sys, 'stdin', io.StringIO('1\n')), contextlib.redirect_stderr(io.StringIO()):
@@ -993,8 +994,7 @@ class SelectedNativeAccounts(unittest.TestCase):
             for observed in [[], [dict(id='reported', label='Reported', context=None)],
                              [dict(id='reported', label='Reported', context=8192)]]:
                 with self.subTest(tools=tools, observed=observed):
-                    existing = dict(id='muse.existing', model='reported', tools=tools,
-                                    max_context=999999, max_prompt_bytes=32768)
+                    existing = dict(id='muse.existing', model='reported', tools=tools, max_context=999999)
                     source = dict(choice='muse', command='muse', account_home='/selected', rows=[existing])
                     with patch.object(SETUP, 'muse_models', return_value=(observed, 'providerCatalog')):
                         rows, _ = SETUP.source_models('/masc', source, 10)
@@ -1014,42 +1014,44 @@ class SelectedNativeAccounts(unittest.TestCase):
                             _, spec = SETUP.resolve_model_spec(source, rows[0], 10)
                             self.assertEqual(spec['max_context'], 8192)
 
-    def test_existing_muse_binding_requires_declared_byte_capacity(self):
+    def test_existing_muse_binding_is_reused_without_a_byte_capacity(self):
         source = dict(choice='muse')
-        existing = dict(id='muse.selected', tools=True, max_prompt_bytes=45678)
+        existing = dict(id='muse.selected', tools=True)
         with patch.object(SETUP, 'render', side_effect=AssertionError('preserve existing configuration')):
             self.assertEqual(SETUP.resolve_model_spec(source, dict(existing=existing), 10), ('muse.selected', None))
-            for invalid in [None, 0, -1, True, '45678']:
-                with self.subTest(capacity=invalid), self.assertRaises(SETUP.SetupError):
-                    SETUP.resolve_model_spec(source, dict(existing=dict(existing, max_prompt_bytes=invalid)), 10)
 
-    def test_muse_byte_budget_is_operator_input_and_unknown_context_refused(self):
+    def test_muse_asks_no_byte_budget_and_unknown_context_refused(self):
         source = dict(choice='muse', command='muse', account_home='/selected', rows=[])
-        with patch.object(SETUP, 'ask_text', return_value='45678') as ask, patch.object(SETUP, 'render', return_value=('runtime', 'toml')):
+        with patch.object(SETUP, 'ask_text', side_effect=AssertionError('no operator byte budget')), patch.object(SETUP, 'render', return_value=('runtime', 'toml')):
             _, spec = SETUP.resolve_model_spec(source, dict(id='selected', context=8192), 10)
-        ask.assert_called_once()
-        self.assertEqual(spec['max_prompt_bytes'], 45678)
+        self.assertNotIn('max_prompt_bytes', spec)
         self.assertEqual(spec['account_home'], '/selected')
         with patch.object(SETUP, 'ask_text', side_effect=AssertionError('no invented context')):
             with self.assertRaises(SETUP.SetupError):
                 SETUP.resolve_model_spec(source, dict(id='unknown', context=None), 10)
 
-    def test_native_sign_in_uses_selected_account_environment(self):
-        for protocol, variable, command in [('muse-serve', 'HOME', ['muse', 'login']),
-                ('codex-app-server', 'CODEX_HOME', ['codex', 'login', '--device-auth']),
-                ('claude-code', 'CLAUDE_CONFIG_DIR', ['claude', 'auth', 'login'])]:
+    def test_declared_account_sign_in_is_run_by_masc(self):
+        # runtime-account-login builds the child's environment and keeps the
+        # account's email record (test_setup_cli checks both); the wizard
+        # passes no environment of its own.
+        for protocol, client, command in [('codex-app-server', 'codex', 'codex'),
+                                          ('claude-code', 'claude', 'claude'),
+                                          ('muse-serve', 'muse', 'muse')]:
             with self.subTest(protocol=protocol):
                 inventory = dict(runtimes=[dict(id='selected', protocol=protocol,
-                    command=command[0], account_home='/selected/account')])
+                    command=command, account_home='/selected/account')])
+                self.assertEqual(SETUP.login_command('/masc', 'selected', [], inventory),
+                                 ['/masc', 'runtime-account-login', '--client', client, '--cli-path', command,
+                                  '--account-home', '/selected/account'])
+
+    def test_inherited_home_sign_in_runs_the_client_on_the_callers_home(self):
+        for protocol, command in [('codex-app-server', ['codex', 'login', '--device-auth']),
+                                  ('claude-code', ['claude', 'auth', 'login'])]:
+            with self.subTest(protocol=protocol):
+                inventory = dict(runtimes=[dict(id='selected', protocol=protocol, command=command[0])])
                 self.assertEqual(SETUP.login_command('/masc', 'selected', [], inventory), command)
-                with patch.dict(os.environ, {key: '/wrong-account' for key in ['HOME', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_CACHE_HOME', 'XDG_STATE_HOME', 'XDG_RUNTIME_DIR']}):
-                    environment = SETUP.login_environment('/masc', 'selected', [], inventory)
-                self.assertEqual(environment[variable], '/selected/account')
-                if protocol == 'muse-serve':
-                    for key, suffix in [('XDG_CONFIG_HOME', '.config'), ('XDG_DATA_HOME', '.local/share'),
-                                        ('XDG_CACHE_HOME', '.cache'), ('XDG_STATE_HOME', '.local/state'),
-                                        ('XDG_RUNTIME_DIR', '.local/run')]:
-                        self.assertEqual(environment[key], '/selected/account/' + suffix)
+        without_home = dict(runtimes=[dict(id='selected', protocol='muse-serve', command='muse')])
+        self.assertIsNone(SETUP.login_command('/masc', 'selected', [], without_home))
 
 
 class ModelReleaseSelection(unittest.TestCase):
@@ -1682,7 +1684,7 @@ class CompiledRuntimeSetup(unittest.TestCase):
                 elif choice == 'muse':
                     account = base / 'selected-muse-account'
                     account.mkdir(mode=0o700)
-                    selected.update(account_home=str(account), max_prompt_bytes=32768)
+                    selected.update(account_home=str(account))
                 env = {k: v for k, v in os.environ.items() if not k.startswith(('MASC_', 'AGENT_CORE_'))}
                 with patch.dict(os.environ, env, clear=True):
                     result = SETUP.configure(BINARY, base, selected)

@@ -49,6 +49,16 @@ let native_home ~runtime_root ~account_id ~client existing =
       Error "The selected account belongs to another client transport."
   in Ok (Native {client; account_home})
 
+let selected_native client ~account_home =
+  let client = match client with
+    | Runtime_account_email.Codex -> Codex_home
+    | Claude_code -> Claude_home
+    | Muse_code -> Muse_home in
+  filesystem (fun () ->
+    let* account_home = Runtime_account_home.of_string account_home in
+    let* () = directory ~private_:false (Unix.realpath account_home) in
+    Ok (Native {client; account_home}))
+
 let prepare ~runtime_root ~account_id ~client ~existing =
   match client with
   | Codex -> native_home ~runtime_root ~account_id ~client:Codex_home existing
@@ -76,10 +86,10 @@ let home_dir = function
 let argv ~cli_path = function
   | Native {client=Codex_home; _} -> [cli_path; "login"; "--device-auth"]
   | Native {client=Claude_home; _} -> [cli_path; "auth"; "login"]
-  | Native {client=Muse_home; _} -> [cli_path; "login"]
+  | Native {client=Muse_home; _} -> Runtime_muse_serve.login_argv ~cli_path
   | Antigravity_home _ -> [cli_path]
 
-let environment = function
+let child_environment = function
   | Native {client=Codex_home; account_home} ->
     Runtime_codex_app_server.client_environment (Some account_home)
     |> Result.map_error Runtime_codex_app_server.error_to_string
@@ -129,7 +139,8 @@ let account_email login =
   let read path parse = Result.bind (read_login_file path) parse in
   match login with
   | Native {client=Codex_home; account_home} ->
-    read (Filename.concat account_home "auth.json") Runtime_account_email.of_codex_auth
+    read (Runtime_verification_codex_home.auth_path ~codex_home:account_home)
+      Runtime_account_email.of_codex_auth
   | Native {client=Claude_home; account_home} ->
     read (Filename.concat account_home ".claude.json") Runtime_account_email.of_claude_account
   | Native {client=Muse_home; account_home} ->
@@ -139,6 +150,87 @@ let account_email login =
      | Ok (Runtime_schema.File path) -> read path Runtime_account_email.of_google_oauth
      | Ok (Runtime_schema.Env _ | Runtime_schema.Inline _) | Error _ ->
        Error Runtime_account_email.Source_unavailable)
+
+let native_email_account = function
+  | Native {client; account_home} ->
+    let client = match client with
+      | Codex_home -> Runtime_account_email.Codex
+      | Claude_home -> Claude_code
+      | Muse_home -> Muse_code in
+    Some (Runtime_account_email.Native_home {client; home = account_home})
+  | Antigravity_home _ -> None
+
+(* A native login's home is the exact path [publish] registers and [resolve]
+   returns, so its record is keyed from the login itself. *)
+let email_account ~workspace ~integration_id ~cli_path login reference =
+  match native_email_account login with
+  | Some account -> Ok account
+  | None ->
+    let* binding = Runtime_setup_accounts.resolve ~workspace ~integration_id ~cli_path reference
+      |> Result.map_error Runtime_setup_accounts.error_message in
+    (match binding with
+     | Runtime_setup_accounts.Antigravity_account {credential_file; _} ->
+       Ok (Runtime_account_email.Credential_file credential_file)
+     | Runtime_setup_accounts.Native_home _ ->
+       Error "The selected account belongs to another client transport.")
+
+type started = Started of t
+
+let account_kind = function
+  | Runtime_account_email.Native_home {client = Codex; _} -> "Codex"
+  | Native_home {client = Claude_code; _} -> "Claude Code"
+  | Native_home {client = Muse_code; _} -> "Muse Code"
+  | Credential_file _ -> "Antigravity"
+
+(* The email is display data: failing to record that a login started never
+   stops the login. Removing the earlier record keeps it from being shown as
+   current; if that fails too, a record directory set_email refuses already
+   reads as unreadable. *)
+let start login =
+  (match native_email_account login with
+   | None -> ()
+   | Some account ->
+     match Runtime_setup_accounts.set_email account Runtime_account_email.Login_unfinished with
+     | Ok () -> ()
+     | Error error ->
+       Log.Runtime.warn "Setup login could not record that a %s login started: %s"
+         (account_kind account) (Runtime_setup_accounts.error_message error);
+       (match Runtime_setup_accounts.forget_email account with
+        | Ok () -> ()
+        | Error error ->
+          Log.Runtime.warn "Setup login could not remove the earlier %s email record either: %s"
+            (account_kind account) (Runtime_setup_accounts.error_message error)));
+  Started login
+
+let login_of (Started login) = login
+
+let environment (Started login) = child_environment login
+
+let finish ~save_complete ~account (Started login) =
+  let* () = save_complete () in
+  (* After the Complete receipt, so a client disconnect here cannot turn a
+     finished login into Interrupted. *)
+  Eio.Cancel.protect (fun () ->
+    match account () with
+    | Error message ->
+      Log.Runtime.warn "Setup login account email was not recorded: %s" message
+    | Ok account ->
+      let outcome = match account_email login with
+        | Ok email -> Runtime_account_email.Email email
+        | Error missing -> Runtime_account_email.Not_read missing in
+      (match outcome with
+       | Runtime_account_email.Email _ -> ()
+       | Not_read missing ->
+         Log.Runtime.info "Setup login for %s recorded no account email: %s"
+           (account_kind account) (Runtime_account_email.missing_to_string missing));
+      match Runtime_setup_accounts.set_email account (Runtime_account_email.Completed outcome) with
+      | Ok () -> ()
+      | Error error ->
+        (* The Login_unfinished written by [start] stays: the row reads as
+           unfinished although this login completed. *)
+        Log.Runtime.warn "Setup login %s account email was not recorded: %s"
+          (account_kind account) (Runtime_setup_accounts.error_message error));
+  Ok ()
 
 let publish ~workspace ~integration_id ~cli_path = function
   | Native {account_home; _} ->

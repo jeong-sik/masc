@@ -49,7 +49,7 @@ it('shows each official client account once with its provider-reported usage', a
   await waitFor(() => expect(view.getByTestId('overview-client-usage-claude_one').textContent).toContain('5시간 67% 사용'))
   expect(view.getByTestId('overview-client-usage-codex_two').textContent).toContain('서버 시작 이후 미보고')
   expect(view.getByTestId('overview-client-usage-claude_alias').textContent).toContain('5시간 67% 사용')
-  expect(view.getByTestId('overview-client-usage-claude_one').textContent).toContain('공유 Client 홈: claude_one, claude_alias')
+  expect(view.getByTestId('overview-client-usage-claude_one').textContent).toContain('공유 Client 홈: Claude · one, Claude · alias')
   expect(view.getByText(/아래 토큰·지연 표는 모델명 기준 집계/)).toBeTruthy()
   vi.mocked(post).mockResolvedValue({
     schema: 'masc.dashboard.official-client-probe.v1',

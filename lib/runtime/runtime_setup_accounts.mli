@@ -30,17 +30,21 @@ val resolve : workspace:string -> integration_id:string -> cli_path:string ->
     reimport explicitly for new selections; already-saved global File credentials
     remain at their stable user-global paths. *)
 
-val account_of_binding : binding -> Runtime_account_email.account
-(** The account a resolved reference selects, spelled as runtime.toml records
-    it for the provider saved from that reference. *)
-
 val set_email :
-  Runtime_account_email.account -> Runtime_account_email.t option -> (unit, error) result
-(** Record the email a completed setup login read for this exact account, or
-    clear the record when that login reported none, so an account signed into
-    another identity never keeps showing the previous email. The record is
+  Runtime_account_email.account -> Runtime_account_email.record -> (unit, error) result
+(** Record what setup knows about the identity signed into this exact account.
+    Setup writes [Login_unfinished] before an official client may rewrite a
+    native home's login files, and replaces it only when that login completes.
+    The record describes the last setup login only: a sign-in made outside
+    setup and outside [masc runtime-account-login] is not seen. The record is
     private and user-global, beside the references, and is display data only. *)
+
+val forget_email : Runtime_account_email.account -> (unit, error) result
+(** Remove this account's record, so it reads as absent. A record that is
+    already absent is removed. *)
 
 val email : Runtime_account_email.account -> Runtime_account_email.recorded
 (** Reads only the record {!set_email} wrote, never an account's login files,
-    so setup inventory can call it for every declared account. *)
+    so setup inventory can call it for every declared account. A record
+    directory that {!set_email} would refuse to write to reads as
+    [Unreadable], so a record it could not replace is never shown as current. *)

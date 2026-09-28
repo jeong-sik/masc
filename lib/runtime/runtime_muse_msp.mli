@@ -211,6 +211,19 @@ val session_set_approval_mode_request
 (** [session/resume] carries no approval mode: a resumed session keeps the
     one it last had. This command selects the mode for the next action. *)
 
+val session_set_model_request
+  :  id:int
+  -> command_id:string
+  -> session_id:string
+  -> model_id:string
+  -> Yojson.Safe.t
+(** [session/resume] carries no model either. The host records this selection
+    durably, and it applies to the session's next model call. *)
+
+val session_read_request : id:int -> session_id:string -> Yojson.Safe.t
+(** A point-in-time read of the session's folded metadata, without its
+    history ([excludeItems]). *)
+
 val turn_start_request
   :  id:int
   -> session_id:string
@@ -281,11 +294,16 @@ type session =
   }
 
 val parse_session_result : stage:string -> Yojson.Safe.t -> (session, error) result
-(** The [session] member of a [session/start] or [session/resume] result. *)
+(** The [session] member of a [session/start], [session/resume] or
+    [session/read] result. *)
 
 val parse_set_approval_mode_result : Yojson.Safe.t -> (approval_mode, error) result
 (** Require an accepted [session/setApprovalMode] result and decode its
     [effectiveMode.mode]. Unknown, missing or malformed modes are refused. *)
+
+val parse_set_model_result : Yojson.Safe.t -> (unit, error) result
+(** Require an accepted [session/setModel] result. The ack carries no model;
+    a [session/read] shows the selection that landed. *)
 
 type turn_disposition =
   | Started
@@ -357,6 +375,37 @@ type item_status =
   | Item_timed_out
   | Unrecognized_item_status of string
 
+(** What started a compaction ([CompactionTrigger]); open on the wire. *)
+type compaction_trigger =
+  | Compaction_manual
+  | Compaction_auto
+  | Unrecognized_compaction_trigger of string
+
+val compaction_trigger_to_string : compaction_trigger -> string
+
+(** How a compaction ended ([CompactionOutcome]); open on the wire. *)
+type compaction_outcome =
+  | Compaction_compacted
+  | Compaction_noop
+  | Compaction_failed
+  | Compaction_cancelled
+  | Unrecognized_compaction_outcome of string
+
+val compaction_outcome_to_string : compaction_outcome -> string
+
+(** The members of a [compaction] item, each optional in the schema. A
+    [Compaction_auto] trigger with [Compaction_compacted] means the host
+    rewrote what the model will see: measured on host 1.4.0, an input larger
+    than the window reached the model as a summary of about 4 KB. *)
+type compaction =
+  { trigger : compaction_trigger option
+  ; outcome : compaction_outcome option
+  ; strategy_id : string option  (** The summarizer, as the host names it. *)
+  ; tokens_before : int option
+  ; tokens_after : int option
+  ; reason : string option  (** Display text only; never branched on. *)
+  }
+
 (** One transcript item at one revision. Only the members MASC projects are
     decoded; the schema keeps the rest open. [text] is the accumulated reply
     on an [Agent_message]. [tool], [call_id], [args] (the model's argument
@@ -372,6 +421,7 @@ type item =
   ; call_id : string option
   ; args : string option
   ; visible_output : string option
+  ; compaction : compaction option  (** [Some] on a [Compaction] item only. *)
   }
 
 (** The field an [item/delta] appends to. Absent on the wire means [text]. *)

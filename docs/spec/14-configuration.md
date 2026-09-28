@@ -77,8 +77,10 @@ sign-in with that selected `CLAUDE_CONFIG_DIR`, `CODEX_HOME` or `HOME`.
 Muse model discovery labels provider, bundled and configured catalog metadata;
 it does not prove account access or a successful invocation. Fake, unresolved
 and unknown catalog sources cannot admit a new setup connection. A selected Muse
-model needs a reported positive context and an operator-entered positive input
-limit in bytes (`max-prompt-bytes`); setup does not infer bytes from tokens.
+model needs a reported context large enough to hold the host's own overhead
+(75% of it above 11,946 tokens, so at least 15,930); MASC derives its
+start-prompt ceiling from that context (see the template below), so setup asks
+for no byte count.
 Saving a connection then requires the separate response and MCP tool challenge.
 
 
@@ -92,10 +94,20 @@ session generation. This does not establish a separate macOS Keychain identity.
 Source hooks, plugins and permission settings are not imported into the managed
 configuration.
 
-Sign in before assigning the runtime. This is the `muse login` invocation the
-setup flow executes, with the account HOME and XDG roots it sets for Muse
-(`native_account_environment` in `scripts/install-runtime-setup.py`; the serve
-path sets the same HOME and XDG roots from `account-home`):
+Sign in before assigning the runtime. The installer and the TUI (`/login muse`)
+both start the vendor's sign-in with the environment every Muse child gets
+(`Runtime_muse_serve.login_environment`): the account HOME and XDG roots, no
+ambient provider credentials or `TBH_*` overrides, and
+`TBH_CREDENTIAL_BACKEND=file`, which makes the client write the sign-in into
+`auth.json` instead of the macOS Keychain. From a shell, the same sign-in is:
+
+```sh
+masc runtime-account-login --client muse --account-home /absolute/path/to/muse-account
+```
+
+Running the vendor command by hand needs that environment. The vendor documents
+`TBH_CREDENTIAL_BACKEND` only in its SDK example harness (`isolatedHostEnv`);
+masc depends on it for every Muse child.
 
 ```sh
 HOME=/absolute/path/to/muse-account \
@@ -104,16 +116,27 @@ XDG_DATA_HOME=/absolute/path/to/muse-account/.local/share \
 XDG_CACHE_HOME=/absolute/path/to/muse-account/.cache \
 XDG_STATE_HOME=/absolute/path/to/muse-account/.local/state \
 XDG_RUNTIME_DIR=/absolute/path/to/muse-account/.local/run \
+TBH_CREDENTIAL_BACKEND=file \
+MUSE_NO_AUTO_UPDATE=1 \
 muse login
 ```
 
 The flow must leave `.config/muse/auth.json` under that HOME; MASC reads that
 file on first use (`Runtime_muse_home.prepare`). Owned account and
-credential-parent directories must not be group/other writable. Without the
-sign-in, Muse turn admission fails with a provider authentication error
-carrying `Muse account has no file-backed sign-in; sign in to the selected
-account home`. There is no login probe: a completed Muse model turn is the
-evidence that sign-in worked.
+credential-parent directories must not be group/other writable. Muse turn
+admission fails with a provider authentication error when:
+
+- the file is missing or has no Meta credentials: `Muse account has no
+  file-backed sign-in; sign in to the selected account home`;
+- the Meta slot is marked `storage: "keychain"` (a sign-in made without the
+  file backend on macOS): `Muse account keeps its sign-in in the macOS
+  Keychain, which masc cannot hand to a selected account; sign in again from
+  masc (/login muse in the TUI, or the installer's Muse sign-in)`;
+- the slot names any other `storage` value, which is refused the same way.
+
+A slot with no `storage` marker is read as holding its secrets inline; whether
+it really holds one is not checked until the client authenticates. There is no
+login probe: a completed Muse model turn is the evidence that sign-in worked.
 
 `masc runtime-muse-models --account-home /absolute/path/to/muse-account`
 queries the selected client's `model/list` without opening a session or making
@@ -127,9 +150,16 @@ preparation can outlast it if the selected account filesystem stalls.
 
 This template belongs in the selected base path's `.masc/config/runtime.toml`.
 Replace both uppercase placeholders with the selected vendor model's actual ID
-and documented context window before loading it. `max-prompt-bytes` is an
-operator input budget, not a measured model token limit. No runtime is assigned
-merely by adding a provider and binding.
+and documented context window before loading it. Leave `max-prompt-bytes` out:
+the Muse host rewrites an input larger than its window instead of refusing it,
+so MASC bounds the prompt it seeds a new session with at
+`4 × (⌊75% of max-context⌋ − 11,946)` bytes, from Muse Code 1.4.0's measured
+behaviour (its token estimate is UTF-8 bytes / 4, its own overhead is 11,946
+estimated tokens, and it compacts at 75% of the window). A declared
+`max-prompt-bytes` can only lower that ceiling; a larger value is not used,
+because the host compacts a larger prompt whatever the file says. A Muse model
+whose window leaves no room above the host's overhead is refused at load,
+declared value or not. No runtime is assigned merely by adding a provider and binding.
 
 ```toml
 [providers.muse_personal]
@@ -141,7 +171,6 @@ is-non-interactive = true
 [models.muse_selected]
 api-name = "VENDOR_MODEL_ID"
 max-context = CONTEXT_WINDOW_TOKENS
-max-prompt-bytes = 1048576
 tools-support = true
 streaming = true
 
@@ -252,7 +281,7 @@ In the TUI, `/login` opens the account panel; `/login codex`, `/login claude`,
 new account and `e` explicitly selects an existing account. Login codes stay
 masked in the panel and terminal keys are sent to that login process. Ctrl-C
 cancels; `r` retrieves the recovery receipt. After authentication, choose a model
-and press Enter to verify and save. Muse requires an explicit prompt byte limit.
+and press Enter to verify and save.
 The current default and its declared fallback order remain ahead of the added
 model. In dashboard runtime setup, the equivalent login panel retains the
 selected account through model discovery and save.

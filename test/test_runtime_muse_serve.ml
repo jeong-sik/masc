@@ -293,6 +293,39 @@ let test_turn_with_tool_and_approval () =
          check bool "deny choice" true (params_member "choiceId" decide = `String "deny"))
 ;;
 
+(* The host compacted the turn's input and still completed it: the event is
+   the only trace, so it must reach the stream with its members. Frame shape
+   from Muse Code 1.4.0 against a synthetic endpoint (2026-09-28). *)
+let compaction_completed =
+  {|{"jsonrpc":"2.0","method":"item/completed","params":{"sessionId":"s-1","viewCursor":"v:6","item":{"itemId":"c-1","kind":"compaction","turnId":"t-1","revision":2,"status":"completed","outcome":"compacted","trigger":"auto","strategyId":"summary-preserved-suffix/v1","tokensBefore":1761964,"tokensAfter":12941}}}|}
+;;
+
+let test_compaction_reaches_the_stream () =
+  let observed = ref [] in
+  run_scripted
+    ~on_stream_event:(function
+      | Serve.Compaction_observed compaction -> observed := compaction :: !observed
+      | _ -> ())
+    (handshake_and_session ~granted:[]
+     @ [ Write compaction_completed
+       ; Write agent_started
+       ; Write agent_completed
+       ; Write turn_completed
+       ])
+    (fun result _requests ->
+       match result, !observed with
+       | Error error, _ -> fail (Serve.error_to_string error)
+       | Ok turn, [ compaction ] ->
+         check string "the turn still completes" "MASC_MUSE_OK" turn.text;
+         check bool "automatic compaction" true
+           (compaction.Msp.trigger = Some Msp.Compaction_auto
+            && compaction.Msp.outcome = Some Msp.Compaction_compacted);
+         check (option int) "tokens before" (Some 1761964) compaction.Msp.tokens_before;
+         check (option int) "tokens after" (Some 12941) compaction.Msp.tokens_after
+       | Ok _, observed ->
+         failf "expected one compaction event, saw %d" (List.length observed))
+;;
+
 let test_auth_required () =
   run_scripted
     (handshake_and_session ~granted:[] @ [ Write turn_auth_failed ])
@@ -507,10 +540,15 @@ let test_session_identity_is_verified_before_admission () =
           check bool "identity mismatch never persists session" false !ready;
           check bool "identity mismatch never acknowledges a prompt" false !sent;
           check int "only initialize, initialized and session open are sent" 3 (List.length requests)))
-      [`String "wrong-model", `String "/requested-workspace", `Model (Some "wrong-model");
-       `Null, `String "/requested-workspace", `Model None;
-       `String "requested-model", `String "/wrong-workspace", `Workspace (Some "/wrong-workspace");
-       `String "requested-model", `Null, `Workspace None];
+      ((match session_mode with
+        (* A resumed session with another model is re-selected, see
+           test_resumed_session_model_is_selected_before_admission. *)
+        | Serve.Resume _ -> []
+        | Serve.Start ->
+          [`String "wrong-model", `String "/requested-workspace", `Model (Some "wrong-model");
+           `Null, `String "/requested-workspace", `Model None])
+       @ [`String "requested-model", `String "/wrong-workspace", `Workspace (Some "/wrong-workspace");
+          `String "requested-model", `Null, `Workspace None]);
     let ready = ref 0 in
     let resume_steps, turn_id = match session_mode with
       | Serve.Start -> [], 3
@@ -524,8 +562,105 @@ let test_session_identity_is_verified_before_admission () =
         (match result with Ok turn -> check string "matching session completes" "MASC_MUSE_OK" turn.text
          | Error error -> fail (Serve.error_to_string error));
         check int "matching identity persists once" 1 !ready;
+        check bool "matching model is not re-selected" false
+          (List.exists (fun json ->
+             Yojson.Safe.Util.member "method" json = `String "session/setModel") requests);
         ignore (request_with_method "turn/start" requests)))
     [Serve.Start; Serve.Resume {session_id="s-1"; expected_turn_count=0}]
+;;
+
+(* Frames shaped as Muse Code 1.4.0 answered them on 2026-09-28: a session
+   started on muse-spark-1.3 resumed as the account default
+   muse-spark-1.3-contributor, setModel was accepted with a bare ack after a
+   session/modelChanged notification, and session/read then reported
+   muse-spark-1.3. *)
+let test_resumed_session_model_is_selected_before_admission () =
+  let requested = "muse-spark-1.3" and host_default = "muse-spark-1.3-contributor" in
+  let session_frame ~id ?(session_id = "s-1") model = Yojson.Safe.to_string
+      (`Assoc ["jsonrpc", `String "2.0"; "id", `Int id;
+        "result", `Assoc ["session", `Assoc ["sessionId", `String session_id;
+          "status", `String "idle"; "turnCount", `Int 0; "modelId", `String model;
+          "providerId", `String "meta"; "workspaceRoot", `String "/w";
+          "approvalMode", effective_mode Msp.Prompt_unmatched];
+          "viewCursor", `String "v:2"]]) in
+  let set_model_ack ~status = Printf.sprintf
+      {|{"jsonrpc":"2.0","id":4,"result":{"commandId":"c-model","status":%S}}|} status in
+  let model_changed = Printf.sprintf
+      {|{"jsonrpc":"2.0","method":"session/modelChanged","params":{"sessionId":"s-1","viewCursor":"v:2","sourceRange":{"stream":{"kind":"session","id":"s-1"},"first":{"id":"r-13","sequence":13},"last":{"id":"r-13","sequence":13}},"modelId":%S,"providerId":"meta","source":"user"},"emittedAtMs":1790589987517}|}
+      requested in
+  let with_id id source = match Yojson.Safe.from_string source with
+    | `Assoc fields -> Yojson.Safe.to_string (`Assoc (("id", `Int id) :: List.remove_assoc "id" fields))
+    | _ -> fail "fixture response must be an object" in
+  let resumed = [Read; Write (init_frame ~granted:[]); Read; Read;
+                 Write (session_frame ~id:2 host_default);
+                 Read; Write (approval_mode_result ~id:3 Msp.Prompt_unmatched)] in
+  let run steps check_result =
+    let ready = ref 0 and sent = ref false in
+    run_scripted ~model:requested ~session_mode:(Serve.Resume {session_id="s-1"; expected_turn_count=0})
+      ~on_session_ready:(fun ~session_id:_ -> incr ready; Ok ())
+      ~on_prompt_sent:(fun () -> sent := true)
+      steps (fun result requests -> check_result result requests ~ready:!ready ~sent:!sent) in
+  let refused ~name ~request_count steps check_error =
+    run steps (fun result requests ~ready ~sent ->
+      (match result with
+       | Error error -> check_error error
+       | Ok _ -> failf "%s dispatched a turn" name);
+      check int (name ^ " never persists session") 0 ready;
+      check bool (name ^ " never sends a prompt") false sent;
+      check int (name ^ " request count") request_count (List.length requests)) in
+  (* The selection lands: the turn runs after setModel and a read-back. *)
+  run (resumed @ [Read; Write model_changed; Write (set_model_ack ~status:"accepted");
+                  Read; Write (session_frame ~id:5 requested);
+                  Read; Write (with_id 6 turn_ack); Write turn_started;
+                  Write agent_completed; Write turn_completed])
+    (fun result requests ~ready ~sent:_ ->
+      (match result with
+       | Ok turn -> check string "re-selected session completes" "MASC_MUSE_OK" turn.text
+       | Error error -> fail (Serve.error_to_string error));
+      check int "re-selected session persists once" 1 ready;
+      let set_model = request_with_method "session/setModel" requests in
+      let params = Yojson.Safe.Util.member "params" set_model in
+      check string "setModel names the resumed session" "s-1"
+        Yojson.Safe.Util.(params |> member "sessionId" |> to_string);
+      check string "setModel names the configured model" requested
+        Yojson.Safe.Util.(params |> member "model" |> member "modelId" |> to_string);
+      let read = Yojson.Safe.Util.member "params" (request_with_method "session/read" requests) in
+      check string "read names the resumed session" "s-1"
+        Yojson.Safe.Util.(read |> member "sessionId" |> to_string);
+      check bool "read excludes history" true
+        Yojson.Safe.Util.(read |> member "excludeItems" |> to_bool);
+      let methods = List.map (fun json ->
+        Yojson.Safe.Util.(json |> member "method" |> to_string_option)) requests in
+      check (list (option string)) "selection precedes the turn"
+        [Some "initialize"; Some "initialized"; Some "session/resume";
+         Some "session/setApprovalMode"; Some "session/setModel"; Some "session/read";
+         Some "turn/start"]
+        methods);
+  (* The read-back still reports the host default: refused before the turn. *)
+  refused ~name:"unlanded selection" ~request_count:6
+    (resumed @ [Read; Write (set_model_ack ~status:"accepted");
+                Read; Write (session_frame ~id:5 host_default)])
+    (function
+      | Serve.Session_model_mismatch {requested=asked; resumed} ->
+        check string "mismatch names the configured model" requested asked;
+        check (option string) "mismatch names the read-back model" (Some host_default) resumed
+      | error -> fail (Serve.error_to_string error));
+  refused ~name:"unaccepted selection" ~request_count:5
+    (resumed @ [Read; Write (set_model_ack ~status:"rejected")])
+    (function
+      | Serve.Protocol_error {stage="session/setModel"; _} -> ()
+      | error -> fail (Serve.error_to_string error));
+  refused ~name:"setModel rpc error" ~request_count:5
+    (resumed @ [Read; Write {|{"jsonrpc":"2.0","id":4,"error":{"code":-32602,"message":"unknown model"}}|}])
+    (function
+      | Serve.Rpc_error {method_="session/setModel"; code = -32602; _} -> ()
+      | error -> fail (Serve.error_to_string error));
+  refused ~name:"read of another session" ~request_count:6
+    (resumed @ [Read; Write (set_model_ack ~status:"accepted");
+                Read; Write (session_frame ~id:5 ~session_id:"s-2" requested)])
+    (function
+      | Serve.Protocol_error {stage="session/read"; _} -> ()
+      | error -> fail (Serve.error_to_string error))
 ;;
 
 let test_session_approval_mode_is_verified_before_admission () =
@@ -734,6 +869,7 @@ let () =
     [ ( "turn"
       , [ test_case "turn with tool and approval" `Quick test_turn_with_tool_and_approval
         ; test_case "auth required" `Quick test_auth_required
+        ; test_case "compaction reaches the stream" `Quick test_compaction_reaches_the_stream
         ; test_case "exit code is typed" `Quick test_exit_code_is_typed
         ; test_case "bridge needs sessionMcp" `Quick test_bridge_needs_session_mcp
         ; test_case "native none is config error" `Quick test_native_none_is_config_error
@@ -741,6 +877,8 @@ let () =
             test_selected_homes_do_not_inherit_other_account_roots
         ; test_case "valid images use shared official media contract" `Quick test_valid_image_inputs_use_shared_official_media_contract
         ; test_case "session identity is verified before admission" `Quick test_session_identity_is_verified_before_admission
+        ; test_case "resumed session model is selected before admission" `Quick
+            test_resumed_session_model_is_selected_before_admission
         ; test_case "effective approval mode is verified before admission" `Quick test_session_approval_mode_is_verified_before_admission
         ; test_case "prepared HOME matches selected account" `Quick test_prepared_home_is_bound_to_exact_selected_account
         ; test_case "invalid account home is refused" `Quick test_invalid_account_home_is_refused

@@ -171,10 +171,6 @@ let to_json ?(include_credential_references=false) (config : Runtime_schema.conf
                       , match model.max_context with
                         | None -> `Null
                         | Some n -> `Int n )
-                    ; ( "max_prompt_bytes"
-                      , match model.max_prompt_bytes with
-                        | None -> `Null
-                        | Some n -> `Int n )
                     ; "tools", `Bool model.tools_support
                     ; "streaming", `Bool model.streaming
                     ]

@@ -9679,40 +9679,23 @@ let lane_picker_existing_slots (state : state) = function
         | Some id -> [ id ]
         | None -> []))
 
-(* The standalone-lane observation's row for [lane], when it has been read. *)
-let standalone_lane_row (state : state) lane =
-  Option.bind state.standalone_lanes (fun snapshot ->
-    List.find_opt
-      (fun (row : Tui_decode.standalone_lane) ->
-         Standalone_lane.equal row.Tui_decode.sl_lane lane)
-      snapshot.Tui_decode.sls_lanes)
-
-(* Why a pick cannot land on its target. An exact lane that does not walk a
-   CLI tail -- the server projects [Runtime.exact_lane_supports_cli_tail] as
-   [sl_supports_cli_tail] -- has its official-client append refused by the
-   runtime writer, and a client with no output-schema channel fits no exact
-   lane. The picker draws such a candidate below every one that can land,
-   with the reason at the front of its row, and Enter on it sends nothing. A
-   lane row this TUI has not read leaves the verdict to the server, which
-   refuses with its own sentence. *)
+(* Why a pick cannot land on its target. A client with no output-schema
+   channel fits no exact lane: every exact-output call hands its client a JSON
+   Schema to answer to, and the runtime writer refuses it. The picker draws
+   such a candidate below every one that can land, with the reason at the
+   front of its row, and Enter on it sends nothing. *)
 type runtime_pick_refusal =
-  | Lane_walks_no_cli_tail of Standalone_lane.t
   | No_output_schema_channel
 
 type runtime_pick_availability =
   | Pick_available
   | Pick_refused of runtime_pick_refusal
 
-let runtime_pick_availability (state : state) pick (runtime : Tui_decode.runtime_option) =
+let runtime_pick_availability pick (runtime : Tui_decode.runtime_option) =
   match pick, runtime.Tui_decode.ro_exact_slot_group with
   | Pick_exact_lane _, Tui_decode.Exact_output_unsupported ->
     Pick_refused No_output_schema_channel
-  | Pick_exact_lane lane, Tui_decode.Exact_cli_slots ->
-    (match standalone_lane_row state lane with
-     | Some { Tui_decode.sl_supports_cli_tail = false; _ } ->
-       Pick_refused (Lane_walks_no_cli_tail lane)
-     | Some { Tui_decode.sl_supports_cli_tail = true; _ } | None -> Pick_available)
-  | Pick_exact_lane _, Tui_decode.Exact_http_slots
+  | Pick_exact_lane _, (Tui_decode.Exact_http_slots | Tui_decode.Exact_cli_slots)
   | ( ( Pick_conversation_lane _ | Pick_new_lane _ | Pick_media_failover
       | Pick_route_default )
     , (Tui_decode.Exact_http_slots | Tui_decode.Exact_cli_slots
@@ -9722,16 +9705,11 @@ let runtime_pick_availability (state : state) pick (runtime : Tui_decode.runtime
    a reason drawn after the runtime id was the part cut, so the row read like
    any other until Enter refused it. *)
 let runtime_pick_refusal_tag = function
-  | Lane_walks_no_cli_tail _ -> "CLI · lane takes HTTP only"
   | No_output_schema_channel -> "no output schema"
 
-(* The sentence Enter on a refused row draws. The fact leads for the same
-   reason as the tag; the runtime id, which the row already shows, ends it. *)
+(* The sentence Enter on a refused row draws. *)
 let runtime_pick_refusal_text refusal (runtime : Tui_decode.runtime_option) =
   match refusal with
-  | Lane_walks_no_cli_tail lane ->
-    Printf.sprintf "%s takes HTTP slots only; %s is a CLI runtime"
-      (Standalone_lane.to_id lane) runtime.Tui_decode.ro_id
   | No_output_schema_channel ->
     runtime.Tui_decode.ro_id ^ " has no output-schema channel"
 
@@ -9744,8 +9722,7 @@ let runtime_pick_refusal_text refusal (runtime : Tui_decode.runtime_option) =
    A candidate the target refuses goes below every one it takes. It stays in
    the list for the reason [rank_runtime_for_lane] keeps a blocked id: it is a
    fact about the workspace an operator may be looking for. Left in rank
-   order, every official client led the workspace curator's list, because
-   provider ids sort them first, and the cursor opened on a row it refuses. *)
+   order, a refused row could sit first and open under the cursor. *)
 let runtime_picker_rows (state : state) pick =
   let already = lane_picker_existing_slots state pick in
   let providers = already |> List.filter_map (fun id ->
@@ -9753,9 +9730,9 @@ let runtime_picker_rows (state : state) pick =
     |> List.find_opt (fun runtime -> String.equal runtime.Tui_decode.ro_id id)
     |> Option.map (fun runtime -> runtime.Tui_decode.ro_provider)) in
   let lands runtime =
-    match runtime_pick_availability state pick runtime with
+    match runtime_pick_availability pick runtime with
     | Pick_available -> true
-    | Pick_refused (Lane_walks_no_cli_tail _ | No_output_schema_channel) -> false
+    | Pick_refused No_output_schema_channel -> false
   in
   let landing, refused =
     List.partition lands
@@ -10324,6 +10301,13 @@ let runtime_pick_badge_cells =
     (Masc_tui_message_layout.display_width runtime_pick_lane_badge)
     (Masc_tui_message_layout.display_width runtime_pick_model_badge)
 
+(* A runtime id is [provider.model]. Only the first dot separates them: a
+   model id may hold more ([muse_6dc7c062.muse-spark-1.3_6dc7c062]). *)
+let runtime_id_model_part id =
+  match String.index_opt id '.' with
+  | Some at -> String.sub id (at + 1) (String.length id - at - 1)
+  | None -> id
+
 (* The words a picker row draws before its facts: the kind badge, the target
    and the route. The renderer draws these and the typed filter matches their
    join, so the operator filters by what they read. The facts are left out:
@@ -10342,12 +10326,7 @@ let runtime_pick_columns item =
          dropped: the target column already says it is a lane. *)
       let chain =
         String.concat " \xe2\x86\x92 "
-          (List.map
-             (fun id ->
-                match String.split_on_char '.' id with
-                | [ _prov; model ] -> model
-                | _ -> id)
-             lane.Tui_decode.rrl_runtime_ids)
+          (List.map runtime_id_model_part lane.Tui_decode.rrl_runtime_ids)
       in
       { rpc_badge = runtime_pick_lane_badge;
         rpc_target = single_line lane.Tui_decode.rrl_id;

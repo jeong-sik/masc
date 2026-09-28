@@ -361,18 +361,25 @@ the full backlog rows, not the active projection.
 The Providers section sits above the Team block, so the reason a Keeper there
 is stuck stays on screen with it. It reads
 `provider_usage_windows` from `GET /api/v1/runtime/resolved` and draws one
-strip per provider account: a meter per usage window, the value as a whole
-percent (a fraction is multiplied by 100 and floored), the reset time, and how long ago the provider said so.
+strip per provider account, named by its providers' `display-name`: a meter
+per usage window, the value as a whole percent (a fraction is multiplied by
+100 and floored), the reset time, and how long ago the provider said so. A
+meter takes 10 to 24 cells; when 10 do not fit beside the hearing age, the
+age is left out first.
 
 ```
  Providers  reported by the provider · since server start 22:39
- claude_code  5h ▕██████████▋     ▏  67%  ↻ 18:10 in 4h12m        heard 3m ago
-              7d ▕███████         ▏  44%  ↻ 09-29 13:00 in 5d23h
- codex        no report since server start
+ Claude Max  5h ▕██████████▋     ▏  67%  ↻ 18:10 in 4h12m        heard 3m00s ago
+             7d ▕███████         ▏  44%  ↻ 09-29 13:00 in 5d23h
+ Codex Pro   no report since server start
 ```
 
 A meter is drawn in the exhausted style only when the value reaches the full
-value of its own unit (`1.0` for a fraction, `100` for a percent). A reset time
+value of its own unit (`1.0` for a fraction, `100` for a percent) and the
+window gates model calls. A window the server classifies as counting
+something a model call does not need (Z.AI `TIME_LIMIT`, OpenRouter's
+free-model daily requests) is drawn dim whatever its value. A window with no
+reset time shows `—`. A reset time
 that has passed reads `reset time passed · no newer report`; the meter keeps
 the last reported value. An account whose runtime rows carry
 `quota_exhausted` wears `exhausted (observed)` with the catalogue's own reopen

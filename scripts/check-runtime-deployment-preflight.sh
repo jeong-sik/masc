@@ -881,8 +881,10 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   invalid_source_config_root="$fixture_root/runtime-config-invalid-source"
   write_schedules "$invalid_source_config_root" succeeded
   mkdir -p "$invalid_source_config_root/.masc/config"
-  cp "$REPO_ROOT/config/runtime.toml" \
-    "$invalid_source_config_root/.masc/config/runtime.toml"
+  # Dune exposes source dependencies read-only. Create an editable fixture
+  # instead of copying the source file's permissions before appending to it.
+  cat "$REPO_ROOT/config/runtime.toml" \
+    >"$invalid_source_config_root/.masc/config/runtime.toml"
   cat >>"$invalid_source_config_root/.masc/config/runtime.toml" <<'INVALID_SKILL_SOURCE'
 
 [[skills.sources]]

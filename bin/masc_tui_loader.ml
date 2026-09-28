@@ -1158,18 +1158,21 @@ let load_board_list ~(host : string) ~(port : int)
 (** Load board post detail from /api/v1/board/<postId> *)
 let load_board_post ~(host : string) ~(port : int) ~(post_id : string) :
     (board_post * board_comment list, string) result =
-  match fetch_board_post ~host ~port ~post_id with
+  match Masc_tui_frame_timing.time_stage ~name:"board.http_json"
+          (fun () -> fetch_board_post ~host ~port ~post_id) with
   | Error err -> Error err
   | Ok json ->
-      let post_json =
-        match Yojson.Safe.Util.member "post" json with
-        | `Null -> json
-        | value -> value
-      in
-      let* post = decode_board_post ~require_body:true post_json in
-      let* comments_json = optional_list_field json "comments" in
-      let* comments = decode_board_comments comments_json in
-      Ok (post, comments)
+      Masc_tui_frame_timing.time_stage ~name:"board.model_decode"
+        (fun () ->
+          let post_json =
+            match Yojson.Safe.Util.member "post" json with
+            | `Null -> json
+            | value -> value
+          in
+          let* post = decode_board_post ~require_body:true post_json in
+          let* comments_json = optional_list_field json "comments" in
+          let* comments = decode_board_comments comments_json in
+          Ok (post, comments))
 
 (** Load the actor-scoped pending confirmation envelope from the operator
     surface. Missing or malformed envelopes remain explicit errors. *)

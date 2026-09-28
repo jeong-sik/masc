@@ -52,6 +52,8 @@ let muse_capture_and_reference () = fixture (fun root env ->
   let child_env = Login.environment login |> ok in
   check (option string) "login cannot fork a detached launcher update" (Some "1")
     (value child_env "MUSE_NO_AUTO_UPDATE");
+  check (option string) "login keeps the sign-in in auth.json, not the Keychain" (Some "file")
+    (value child_env "TBH_CREDENTIAL_BACKEND");
   List.iter (fun (name, suffix) ->
     check (option string) "Muse owns every XDG root" (Some (Filename.concat home suffix))
       (value child_env name))
@@ -66,6 +68,9 @@ let muse_capture_and_reference () = fixture (fun root env ->
   let auth = Filename.concat home ".config/muse/auth.json" in
   Auth.save_private_text_file auth {|{"schema_version":1,"providers":{"meta":{}}}|};
   check bool "mere credential file is not login capture" true (Result.is_error (observe ()));
+  Auth.save_private_text_file auth
+    {|{"schema_version":1,"providers":{"meta":{"mechanism":"oauth","storage":"keychain"}}}|};
+  check bool "a sign-in left in the Keychain is not login capture" true (Result.is_error (observe ()));
   Auth.save_private_text_file auth
     {|{"schema_version":1,"providers":{"meta":{"api_key":"synthetic-selected-account"}}}|};
   (match observe () |> ok with

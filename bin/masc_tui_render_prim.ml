@@ -1139,6 +1139,7 @@ let paint_acting_pane_line ?(selected = false) ~ground
 
 
 let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
+  let body_started = Masc_tui_frame_timing.start_stage () in
   (* [surface_body_rows] removes the strip before either the frame or the
      typed scroll layout receives its body budget. Two readers of that one
      budget: the row the frame draws is the row the keypress stops short of. *)
@@ -1155,6 +1156,8 @@ let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
          be the one that disappears when a surface miscounts. *)
       List.filteri (fun index _ -> index < body_rows) drawn
   in
+  Masc_tui_frame_timing.finish_stage ~name:"surface.body" body_started;
+  let pane_started = Masc_tui_frame_timing.start_stage () in
   (* [cols] is what the surface laid out against: the terminal less the
      Activity pane when the pane shows. The body shares its rows with the
      pane; the agenda, the composer, and the strip span the whole terminal,
@@ -1195,13 +1198,18 @@ let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
           Buffer.add_char framed '\n')
        body
    end);
+  Masc_tui_frame_timing.finish_stage ~name:"surface.panes" pane_started;
+  let chrome_started = Masc_tui_frame_timing.start_stage () in
   (if agenda_rows > 0 then
      match agenda_line (Masc_tui_types.agenda state) ~cols:full_cols with
      | Some line -> Buffer.add_string framed (line ^ "\n")
      | None -> ());
   Buffer.add_string framed (composer_line state ~cols:full_cols ^ "\n");
-  finish_frame_with_strip state ?clamped ~surface_key
-    ~cursor:(composer_cursor state ~rows ~cols:full_cols) ~rows ~cols:full_cols framed
+  let cursor = composer_cursor state ~rows ~cols:full_cols in
+  Masc_tui_frame_timing.finish_stage ~name:"surface.chrome" chrome_started;
+  Masc_tui_frame_timing.time_stage ~name:"surface.strip_frame" (fun () ->
+    finish_frame_with_strip state ?clamped ~surface_key
+      ~cursor ~rows ~cols:full_cols framed)
 
 
 (* Exhaustive over [connection_status]: a new state is a compile error

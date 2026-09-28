@@ -2193,6 +2193,14 @@ let test_config_pane_footer_actions () =
       Alcotest.(check bool) ("the account form leaves out " ^ key) false
         (footer_has_key key form_row))
     [ "e"; "r"; "q"; "Tab" ];
+  (* After a save the form types nothing: [y] copies the sign-in command and
+     Enter or Esc closes. *)
+  let saved_row = Masc_tui_keys.footer_hints_runtime_account_saved () in
+  List.iter
+    (fun key ->
+      Alcotest.(check bool) ("the saved account form names " ^ key) true
+        (footer_has_key key saved_row))
+    [ "y"; "Enter"; "Esc" ];
   Alcotest.(check bool) "the runtime assets keep their way back at 120 columns" true
     (footer_has_key "o" (at_120 assets));
   List.iter

@@ -1027,7 +1027,7 @@ let test_historical_snapshot_fields_remain_readable () =
   with_temp_keepers @@ fun keepers_dir ->
   (* Historical snapshot bytes must remain readable if a writer field is removed. *)
   let historical =
-    {|{"revision":1,"updated_at":200.0,"source":{"kind":"librarian","trace_id":"trace"},"facts":[],"change":{"added":[],"removed":[],"retained":0,"invalidated":[]}}|}
+    {|{"revision":1,"updated_at":200.0,"source":{"kind":"librarian","trace_id":"trace"},"facts":[{"claim":"claim","category":"constraint","first_seen":100.0,"last_seen":100.0,"origin":{"kind":"authored","trace_id":"trace"},"basis":{"kind":"observed"}}],"change":{"added":[],"removed":[],"retained":1,"invalidated":[]}}|}
   in
   let path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
   Fs_compat.save_file path historical;
@@ -1048,6 +1048,20 @@ let test_historical_snapshot_fields_remain_readable () =
   check (list string) "source writer fields"
     [ "kind"; "trace_id" ]
     (field_names (Yojson.Safe.Util.member "source" encoded));
+  let encoded_fact =
+    match Yojson.Safe.Util.member "facts" encoded |> Yojson.Safe.Util.to_list with
+    | [ fact ] -> fact
+    | _ -> fail "historical snapshot must retain one fact"
+  in
+  check (list string) "fact writer fields"
+    [ "basis"; "category"; "claim"; "first_seen"; "last_seen"; "origin" ]
+    (field_names encoded_fact);
+  check (list string) "fact origin writer fields"
+    [ "kind"; "trace_id" ]
+    (field_names (Yojson.Safe.Util.member "origin" encoded_fact));
+  check (list string) "fact basis writer fields"
+    [ "kind" ]
+    (field_names (Yojson.Safe.Util.member "basis" encoded_fact));
   check (list string) "change writer fields"
     [ "added"; "invalidated"; "removed"; "retained" ]
     (field_names (Yojson.Safe.Util.member "change" encoded))

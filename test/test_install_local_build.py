@@ -358,6 +358,46 @@ class LocalBuildInstall(unittest.TestCase):
             self.assertIn("./bin/masc_browser_host.exe", result.stderr)
             self.assertTrue((root / "prefix/masc").is_file())
 
+    # #39224: the gate resolves its helper beside itself first, so a prefix
+    # that holds only the server runs whatever helper was installed last. The
+    # install must put the pair in the prefix with the server.
+    def test_the_preflight_pair_is_installed_with_the_server(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            build = root / "build"
+            build.mkdir()
+            binaries(build)
+            preflight_helper(build)
+            prefix = root / "prefix"
+            result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
+                                     "--prefix", str(prefix), "--manifest-dir", str(root / "absent"),
+                                     "--base-path", str(workspace(root))],
+                                    check=True, capture_output=True, text=True)
+            self.assertTrue((prefix / "masc-deployment-preflight-helper").is_file())
+            self.assertTrue((prefix / "masc-check-runtime-deployment-preflight").is_file())
+            # The installed gate must look for its helper beside itself, which
+            # is the line that makes the pair matter.
+            gate = (prefix / "masc-check-runtime-deployment-preflight").read_text()
+            self.assertIn('"$SCRIPT_DIR/masc-deployment-preflight-helper"', gate)
+            self.assertIn("masc-deployment-preflight-helper", result.stdout)
+
+    # Without a helper there is no pair to install: the WARN above already
+    # says why, and the server installs alone as before.
+    def test_no_helper_installs_the_server_without_a_half_pair(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            build = root / "build"
+            build.mkdir()
+            binaries(build)
+            prefix = root / "prefix"
+            result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
+                                     "--prefix", str(prefix), "--manifest-dir", str(root / "absent"),
+                                     "--base-path", str(workspace(root))],
+                                    check=True, capture_output=True, text=True)
+            self.assertTrue((prefix / "masc").is_file())
+            self.assertFalse((prefix / "masc-deployment-preflight-helper").exists())
+            self.assertFalse((prefix / "masc-check-runtime-deployment-preflight").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

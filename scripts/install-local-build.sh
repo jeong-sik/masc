@@ -141,10 +141,17 @@ install -m 755 "$build_dir/masc_browser_host.exe" "$prefix/masc-browser-host"
 # whatever helper was installed last: on 2026-09-26 the installed helper was
 # from 09-07 and its older decoder refused 23,767 rows the running server read
 # fine (#39224). Release install.sh already ships both (L1083, L1415-L1416);
-# this keeps a local build install on the same footing.
-install -m 755 "$build_dir/deployment_preflight_helper.exe" "$prefix/masc-deployment-preflight-helper"
-install -m 755 "$repo/scripts/check-runtime-deployment-preflight.sh" "$prefix/masc-check-runtime-deployment-preflight"
-echo "installed masc, masc-tui, masc-browser-host, masc-deployment-preflight-helper, masc-check-runtime-deployment-preflight into $prefix"
+# this keeps a local build install on the same footing. The pair is installed
+# together or not at all: a gate without its helper would fall back to whatever
+# it finds next, which is the mismatch this fixes. --skip-build without a
+# helper keeps the WARN above and installs the server alone, as before.
+if [ -x "$build_dir/deployment_preflight_helper.exe" ]; then
+  install -m 755 "$build_dir/deployment_preflight_helper.exe" "$prefix/masc-deployment-preflight-helper"
+  install -m 755 "$repo/scripts/check-runtime-deployment-preflight.sh" "$prefix/masc-check-runtime-deployment-preflight"
+  echo "installed masc, masc-tui, masc-browser-host, masc-deployment-preflight-helper, masc-check-runtime-deployment-preflight into $prefix"
+else
+  echo "installed masc, masc-tui, masc-browser-host into $prefix (no deployment preflight pair: $build_dir/deployment_preflight_helper.exe is missing)"
+fi
 
 exec python3 - "$repo/connectors/browser/install-host.sh" "$prefix/masc-browser-host" "$manifest_dir" <<'PY'
 import json

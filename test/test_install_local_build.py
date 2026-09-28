@@ -398,6 +398,34 @@ class LocalBuildInstall(unittest.TestCase):
             self.assertFalse((prefix / "masc-deployment-preflight-helper").exists())
             self.assertFalse((prefix / "masc-check-runtime-deployment-preflight").exists())
 
+    # A prefix that already holds an older pair from a previous install must
+    # not be left running that stale gate against an upgraded server: that is
+    # the exact mismatch #39224 reports, just reached through --skip-build.
+    def test_no_helper_with_a_pre_existing_pair_refuses_and_installs_nothing(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            build = root / "build"
+            build.mkdir()
+            binaries(build)
+            prefix = root / "prefix"
+            prefix.mkdir()
+            old_masc = executable(prefix / "masc", "old masc")
+            old_gate = executable(prefix / "masc-check-runtime-deployment-preflight", "old gate")
+            old_helper = executable(prefix / "masc-deployment-preflight-helper", "old helper")
+            before_masc, before_gate, before_helper = (
+                old_masc.read_text(), old_gate.read_text(), old_helper.read_text())
+            result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
+                                     "--prefix", str(prefix), "--manifest-dir", str(root / "absent"),
+                                     "--base-path", str(workspace(root))],
+                                    capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("already holds a deployment preflight pair", result.stderr)
+            self.assertIn(str(build / "deployment_preflight_helper.exe"), result.stderr)
+            self.assertEqual(old_gate.read_text(), before_gate, "stale gate was touched")
+            self.assertEqual(old_helper.read_text(), before_helper, "stale helper was touched")
+            self.assertEqual(old_masc.read_text(), before_masc,
+                              "server was upgraded while the stale pair stayed callable")
+
 
 if __name__ == "__main__":
     unittest.main()

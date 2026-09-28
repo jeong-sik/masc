@@ -131,10 +131,6 @@ else
   esac
 fi
 
-mkdir -p "$prefix"
-install -m 755 "$build_dir/main_eio.exe" "$prefix/masc"
-install -m 755 "$build_dir/masc_tui.exe" "$prefix/masc-tui"
-install -m 755 "$build_dir/masc_browser_host.exe" "$prefix/masc-browser-host"
 # The deployment preflight pair goes with the server, not behind it. The gate
 # resolves its helper beside itself first (check-runtime-deployment-preflight.sh
 # L95), so a prefix that holds only the server leaves the operator running
@@ -143,8 +139,24 @@ install -m 755 "$build_dir/masc_browser_host.exe" "$prefix/masc-browser-host"
 # fine (#39224). Release install.sh already ships both (L1083, L1415-L1416);
 # this keeps a local build install on the same footing. The pair is installed
 # together or not at all: a gate without its helper would fall back to whatever
-# it finds next, which is the mismatch this fixes. --skip-build without a
-# helper keeps the WARN above and installs the server alone, as before.
+# it finds next, which is the mismatch this fixes.
+#
+# --skip-build without a helper is not just "no pair to add": if the prefix
+# already holds an older pair from a previous install, upgrading the server
+# alone would leave that old gate callable, still reporting the old build's
+# verdict against the new server -- the exact stale state #39224 describes.
+# Refuse the whole install rather than leave that half-upgraded, the same way
+# a refused runtime.toml above leaves nothing installed.
+if [ ! -x "$build_dir/deployment_preflight_helper.exe" ] \
+   && { [ -e "$prefix/masc-check-runtime-deployment-preflight" ] || [ -e "$prefix/masc-deployment-preflight-helper" ]; }; then
+  echo "install-local-build: $prefix already holds a deployment preflight pair, but $build_dir/deployment_preflight_helper.exe is missing to replace it; nothing installed. Build the helper (drop --skip-build) or remove the stale pair yourself first." >&2
+  exit 1
+fi
+
+mkdir -p "$prefix"
+install -m 755 "$build_dir/main_eio.exe" "$prefix/masc"
+install -m 755 "$build_dir/masc_tui.exe" "$prefix/masc-tui"
+install -m 755 "$build_dir/masc_browser_host.exe" "$prefix/masc-browser-host"
 if [ -x "$build_dir/deployment_preflight_helper.exe" ]; then
   install -m 755 "$build_dir/deployment_preflight_helper.exe" "$prefix/masc-deployment-preflight-helper"
   install -m 755 "$repo/scripts/check-runtime-deployment-preflight.sh" "$prefix/masc-check-runtime-deployment-preflight"

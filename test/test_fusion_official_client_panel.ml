@@ -1132,7 +1132,10 @@ if mode == "claude":
     if "auth" in sys.argv:
         send({"loggedIn": True, "authMethod": "claude.ai", "apiProvider": "firstParty"})
         sys.exit(0)
-    sid = sys.argv[sys.argv.index("--session-id") + 1]
+    sid = next(arg.split("=", 1)[1] for arg in sys.argv if arg.startswith("--session-id="))
+    initialize = json.loads(sys.stdin.readline())
+    send({"type":"control_response", "response":{"subtype":"success",
+        "request_id":initialize["request_id"], "response":{}}})
     sys.stdin.readline()
     send({"type":"assistant", "session_id":sid, "uuid":"assistant-1", "message":{
         "role":"assistant", "model":"paid-fixture", "content":[{"type":"text", "text":"paid partial"}]}})

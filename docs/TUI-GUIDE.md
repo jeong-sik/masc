@@ -354,6 +354,34 @@ memory/Gate safety readings (`1`/`2`/`3` select those sections); `p` returns
 to quota and Keeper usage. Activity and the server log are reached from
 System when a detailed event timeline is needed.
 
+The provider section on Usage reads
+`provider_usage_windows` from `GET /api/v1/runtime/resolved` and draws one
+strip per quota scope, named by its providers' `display-name` and the scope identifier: a meter
+per usage window, the value as a whole percent (a fraction is multiplied by
+100 and floored), the reset time, and how long ago the provider said so. A
+meter takes 10 to 24 cells; when 10 do not fit beside the hearing age, the
+age is left out first.
+
+```
+ Providers  reported by the provider · since server start 22:39
+ Claude Max  5h ▕██████████▋     ▏  67%  ↻ 18:10 in 4h12m        heard 3m00s ago
+             7d ▕███████         ▏  44%  ↻ 09-29 13:00 in 5d23h
+ Codex Pro   no report since server start
+```
+
+A meter is drawn in the exhausted style only when the value reaches the full
+value of its own unit (`1.0` for a fraction, `100` for a percent) and the
+window gates model calls. A window the server classifies as counting
+something a model call does not need (Z.AI `TIME_LIMIT`, OpenRouter's
+free-model daily requests) is drawn dim whatever its value. A window with no
+reset time shows `—`. A reset time
+that has passed reads `reset time passed · no newer report`; the meter keeps
+the last reported value. An account whose runtime rows carry
+`quota_exhausted` wears `exhausted (observed)` with the catalogue's own reopen
+time, and is listed first. A failed read is one line,
+`providers unavailable: <reason>`.
+
+
 ### Activity
 
 Every keeper's actions as the runtime event feed delivers them, newest first:
@@ -543,6 +571,14 @@ ids. Blank values and duplicates are rejected. The lane tries admitted catalog
 slots in declaration order, then CLI runtimes in declaration order. The
 configuration is TOML; an individual run's Input and Output are retained JSON
 evidence, not another lane configuration format.
+
+`s` opens the selected lane's provider editor. `a`, there or on the matrix,
+picks a runtime, and the runtime's kind decides the list it joins: an HTTP
+runtime goes to `slots`, an official client to `cli_slots`. `j`/`k` stop on
+slots only, so an empty group has no row to move into; its title reads
+`a adds one`. The Workspace Curator walks HTTP slots only. Its editor says
+`HTTP only` and draws no CLI group, and its picker lists every official client
+below the HTTP runtimes, each row led by `CLI · lane takes HTTP only`.
 
 Board Attention, HITL Auto Judge, and Librarian are schema-constrained
 structured-output generation flows, not MASC tool loops. Their run evidence is

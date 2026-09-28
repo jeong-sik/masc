@@ -7607,9 +7607,12 @@ let launch_runtime_lane_pick state ~mailbox ~(pick : Masc_tui_types.runtime_lane
         Masc_tui_types.Runtime_surface_list
   in
   match Masc_tui_types.runtime_pick_availability state pick runtime with
-  | Masc_tui_types.Pick_refused detail ->
+  | Masc_tui_types.Pick_refused refusal ->
     (* Drawn disabled in the picker; the writer would refuse it anyway. *)
-    state.runtime_lane_notice <- Some (Masc_tui_types.Lane_write_refused detail)
+    state.runtime_lane_notice <-
+      Some
+        (Masc_tui_types.Lane_write_refused
+           (Masc_tui_types.runtime_pick_refusal_text refusal runtime))
   | Masc_tui_types.Pick_available ->
   if Masc_tui_types.runtime_lane_write_busy state then
     (* A conversation lane's write is [existing] plus the pick, and

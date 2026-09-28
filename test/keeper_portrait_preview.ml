@@ -2,11 +2,12 @@
 
    dune exec test/keeper_portrait_preview.exe -- --out portraits.png NAME...
    dune exec test/keeper_portrait_preview.exe -- --keepers-dir <base>/.masc/config/keepers
+   dune exec test/keeper_portrait_preview.exe -- --at 1.9 NAME...     (an animation frame)
 
    Portraits are drawn on the dark page most terminals use; five to a row. *)
 
 let usage =
-  "keeper_portrait_preview [--out FILE] [--size PX] [--keepers-dir DIR] [NAME...]\n\
+  "keeper_portrait_preview [--out FILE] [--size PX] [--at SECONDS] [--keepers-dir DIR] [NAME...]\n\
    Draws each keeper's portrait into one PNG sheet (default: keeper-portraits.png)."
 
 (* The dark page the sheet is laid on. *)
@@ -21,11 +22,13 @@ let keeper_names_in dir =
 
 let () =
   let out = ref "keeper-portraits.png" and edge = ref default_edge and dir = ref None and names = ref [] in
+  let at = ref None in
   Arg.parse
     [
       ("--out", Arg.Set_string out, "FILE  where to write the PNG");
       ("--size", Arg.Set_int edge, "PX  portrait edge in pixels");
       ("--keepers-dir", Arg.String (fun d -> dir := Some d), "DIR  draw every KEEPER.toml found here");
+      ("--at", Arg.Float (fun s -> at := Some s), "SECONDS  draw the animation pose at this moment");
     ]
     (fun n -> names := n :: !names)
     usage;
@@ -50,9 +53,12 @@ let () =
       done;
       List.iteri
         (fun n name ->
+          let pose =
+            match !at with Some seconds -> Keeper_portrait_draw.pose_at ~seconds | None -> Keeper_portrait_draw.still
+          in
           let img =
-            Keeper_portrait_draw.render (Keeper_portrait_look.body_of_name name)
-              (Keeper_portrait_look.equipment_of_name name) size
+            Keeper_portrait_draw.render_posed (Keeper_portrait_look.body_of_name name)
+              (Keeper_portrait_look.equipment_of_name name) pose size
           in
           let ox = n mod per_row * e and oy = n / per_row * e in
           for y = 0 to e - 1 do

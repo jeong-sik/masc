@@ -189,6 +189,73 @@ let test_face_sits_on_the_wax () =
         (D.For_testing.eye_centres body))
     live_keepers
 
+(* ---- motion ---------------------------------------------------------------- *)
+
+let posed ?(body = base_body) pose n = (D.render_posed body bare pose (size n)).D.rgba
+
+(* Pixels (x, y) where two renders of the same size differ. *)
+let changed_pixels n a b =
+  let out = ref [] in
+  for y = 0 to n - 1 do
+    for x = 0 to n - 1 do
+      let k = ((y * n) + x) * 4 in
+      if String.sub a k 4 <> String.sub b k 4 then out := (x, y) :: !out
+    done
+  done;
+  !out
+
+let inside_boxes n boxes (x, y) =
+  List.exists
+    (fun (l, t, r, b) ->
+      let x0, y0 = D.For_testing.pixel_of_point (size n) (l, t) in
+      let x1, y1 = D.For_testing.pixel_of_point (size n) (r, b) in
+      x >= x0 && x <= x1 && y >= y0 && y <= y1)
+    boxes
+
+let test_still_pose_is_the_portrait () =
+  Alcotest.(check bool) "render = render_posed still" true
+    (String.equal (draw base_body 96) (posed D.still 96))
+
+let test_flicker_moves_only_the_flame () =
+  let n = 160 in
+  List.iter
+    (fun (label, body) ->
+      let changed = changed_pixels n (posed ~body D.still n) (posed ~body { D.still with flicker = 1.0 } n) in
+      Alcotest.(check bool) (label ^ ": the flame moved") true (changed <> []);
+      Alcotest.(check (list (pair int int))) (label ^ ": nothing outside the flame moved") []
+        (List.filter (fun px -> not (inside_boxes n [ D.For_testing.flame_box body ] px)) changed))
+    [ ("one wick", base_body); ("twin wicks", { base_body with twin_flame = true }) ]
+
+let test_blink_closes_only_the_eyes () =
+  let n = 160 in
+  let changed = changed_pixels n (posed D.still n) (posed { D.still with blink = true } n) in
+  Alcotest.(check bool) "the eyes closed" true (changed <> []);
+  Alcotest.(check (list (pair int int))) "nothing outside the eyes changed" []
+    (List.filter (fun px -> not (inside_boxes n (D.For_testing.eye_boxes base_body) px)) changed)
+
+let test_bob_moves_the_candle_not_the_backdrop () =
+  let n = 160 in
+  let still = D.render_posed base_body bare D.still (size n) in
+  let risen = D.render_posed base_body bare { D.still with bob = 1.0 } (size n) in
+  Alcotest.(check bool) "the candle moved" false (String.equal still.D.rgba risen.D.rgba);
+  (* a backdrop pixel well clear of the candle, and the backdrop's edge *)
+  List.iter
+    (fun (x, y) -> Alcotest.(check bool) "backdrop unchanged" true (D.pixel still ~x ~y = D.pixel risen ~x ~y))
+    [ (12, n / 2); (n - 13, n / 2); (n / 2, 3); (n / 2, n - 4) ]
+
+let test_pose_at_is_a_pure_loop () =
+  let times = List.init 400 (fun i -> float_of_int i *. 0.05) in
+  List.iter
+    (fun t ->
+      let p = D.pose_at ~seconds:t in
+      Alcotest.(check bool) "same moment, same pose" true (p = D.pose_at ~seconds:t);
+      Alcotest.(check bool) "flicker in range" true (p.D.flicker >= -1.0 && p.D.flicker <= 1.0);
+      Alcotest.(check bool) "bob in range" true (p.D.bob >= -1.0 && p.D.bob <= 1.0))
+    times;
+  Alcotest.(check bool) "a loop opens on open eyes" false (D.pose_at ~seconds:0.0).D.blink;
+  let blinks = List.length (List.filter (fun t -> (D.pose_at ~seconds:t).D.blink) times) in
+  Alcotest.(check bool) "blinks now and then, not most of the time" true (blinks > 0 && blinks * 10 < List.length times)
+
 let () =
   Alcotest.run "keeper portrait"
     [
@@ -206,5 +273,13 @@ let () =
           Alcotest.test_case "outline rings the silhouette" `Quick test_outline_rings_the_silhouette;
           Alcotest.test_case "flame gives light" `Quick test_flame_gives_light;
           Alcotest.test_case "face sits on the wax" `Quick test_face_sits_on_the_wax;
+        ] );
+      ( "motion",
+        [
+          Alcotest.test_case "still pose is the portrait" `Quick test_still_pose_is_the_portrait;
+          Alcotest.test_case "flicker moves only the flame" `Quick test_flicker_moves_only_the_flame;
+          Alcotest.test_case "blink closes only the eyes" `Quick test_blink_closes_only_the_eyes;
+          Alcotest.test_case "bob moves the candle, not the backdrop" `Quick test_bob_moves_the_candle_not_the_backdrop;
+          Alcotest.test_case "pose_at is a pure loop" `Quick test_pose_at_is_a_pure_loop;
         ] );
     ]

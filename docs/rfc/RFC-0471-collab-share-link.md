@@ -158,7 +158,7 @@ MASC 에 맞게 둔다.
 
 1. `collab-core`: 링크·envelope 코덱·GCM seal/open + 테스트. (#39564)
 2. 릴레이 라우트 `/r/<roomId>` + in-memory 테스트 helper. (#39565)
-3. 호스트 tap + 스냅샷(`welcome`→chunks→live). (PR 예정)
+3. 호스트 tap + 스냅샷(`welcome`→chunks→live). (#39584)
 4. 게스트 주입 + 읽기 전용 강제 + Gate 규칙.
 5. TUI 호스트 `/collab` + QR 출력.
 6. TUI guest replica + 대시보드 web viewer 링크.

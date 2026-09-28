@@ -300,7 +300,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
       const protocol = config?.provider_protocols.find(item => item.protocol === provider.protocol)
       if (!protocol?.provider_fields.includes('account-home')) continue
       const home = provider.accountHome.trim()
-      if (protocol.required_provider_fields.includes('account-home') && home === '') {
+      if (provider.enabled && protocol.required_provider_fields.includes('account-home') && home === '') {
         setError(`${provider.id}: 사용할 계정 홈을 선택하세요`)
         return
       }

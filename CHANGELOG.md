@@ -2,6 +2,74 @@
 
 ## [Unreleased]
 
+## [0.46.0] - 2026-09-28
+
+### Upgrade notes
+
+- Schedule updates without `recurrence_kind` still work in this version, keep the stored kind, and log a warning. The next version rejects omission (#39511); clients should send `recurrence_kind` now. Explicit `one_shot` removes recurrence (#39451).
+
+### Added
+
+- Board posts stop accepting new comments once they reach 100 (configurable), with a message pointing at opening a successor post (#39491, part of #39356).
+- Deployment preflight can sweep kept vision files that remain unreferenced across two complete scans; symlinked store roots stop the sweep before deletion (#39507).
+- List every pending Keeper queue row in one flat `rows` array, with `total_row_count` and the fleet-wide oldest age, in the waiting inventory projection (#39514).
+- Add an admin-only fleet-wide event-queue bulk cancel at `POST /api/v1/keepers_bulk/event-queue`: dry-run by default, explicit confirm to execute, backup before mutation (#39514).
+
+### Fixed
+
+- The TUI agenda strip and Schedules list show the schedule's Keeper name from its dedicated field instead of parsing the encoded target (#39504).
+- A local build install puts the deployment preflight helper and gate in the
+  prefix with the server, so the preflight an operator runs there is the one
+  that build produced instead of the last helper installed (#39508).
+- Refuse a Task cancel from Todo without a stated reason, like a held cancel, so the author's wake never lacks its sentence (#39509).
+- The `ocaml` sandbox recipe builds with Apple's `container` again. Its
+  Dockerfile had grown past the size the CLI can hand to its builder (the
+  Dockerfile travels in a gRPC header, apple/container#735), so
+  `masc sandbox-image --recipe ocaml --runtime apple_container` ended with
+  "Stream unexpectedly closed." The long comments now live in
+  `sandbox-images/ocaml/README.md`; the instructions are unchanged (#39513).
+- Name unreadable history rows in the /copy notice instead of reporting a partial read as the latest reply (#39515).
+- Refuse blank-body skill stubs with a typed Body_blank instead of cataloging an instruction that teaches nothing (#39516).
+- Answer the landed skill kind and preview diagnostics in publish responses so a demoted composition is visible without a second call (#39517).
+- Match the playground path prefix against Common.masc_dirname instead of an inlined literal (#39520).
+- Keep wakes a running turn already took when a newer occurrence supersedes or retirement cancels, instead of breaking the turn's ACK (#39521).
+- Settle the deferred runtime lane empty when its cycle raises so slot and file agree no suffix is running (#39524).
+- Require an explicit resolution source instead of defaulting to Human_operator (#39525).
+- Log each superseded proposal the workspace curator discards instead of succeeding silently (#39528).
+- Attribute burnt token usage to exhausted panel seats instead of dropping it from totals and board meta (#39532).
+- Count /copy characters as grapheme clusters instead of UTF-8 scalars (#39534).
+- Spell the skill catalog config-state label once instead of re-deriving it per renderer (#39535).
+- The Execute tool description names the `intent` values the schema accepts
+  (`auto`, `request_effect`) instead of "Observe", which read like an intent
+  value and led Keepers to send `intent: observe` (#39542).
+- `masc_board_search` now says it searches titles, bodies, authors and hearths
+  but not comments, and `masc_web_fetch`'s `maxChars` names
+  `keeper_artifact_read` as the way to read the rest of a truncated page
+  (#39544).
+
+### Internal
+
+- MSX and DOS are named by one type, `Machine_lane.t`, across Lane Add-on
+  sources, the live route and the TUI; `Lane_addon_sources.live_reader`, the
+  route's `screen_source` and `Masc_tui_machine_live.source` are removed, and
+  the machine activity is `Machine_changed of Machine_lane.t`.
+  `Lane_addon_sources.offers` lists the source kinds each built-in lane offers
+  from the same match `parse` uses to refuse a Stagehand document source
+  (#39436).
+- Defines the reference-lifetime contract a future `store_kept` cap must consult before evicting a vision artifact, so a handle still reachable from a turn is never silently pruned (#39473).
+- Print response and body fingerprints when installed dashboard smoke detects a bundle mismatch (#39506).
+- Edited-test failure summaries retain the actual exit status and timeout
+  limit for linked suites and Python rules, including shared rule batches,
+  so a suite timeout is distinguishable from the step budget and other
+  failures (#39510).
+- Centralize the turn-timeout fallback rule (absent uses the default, non-positive disables) in `Runtime_inference` instead of repeating it at seven call sites (#39538).
+
+### Performance
+
+- Reuse parsed footer hint items and pin decisions while fitting a narrow TUI row, and skip parsing when the complete row fits without conflicts (#39371).
+- Run backlog JSON projection and pretty encoding through the shared CPU pool while keeping storage and commit callbacks on the caller, with inline and pooled byte-preservation coverage. (#39392)
+- Count ASCII prefixes without UTF-8 decoding when pretty-encoding workspace JSON, retaining the standard Unicode widths and per-call formatter ownership. The completed synthetic Linux comparison did not establish a consistent end-to-end latency improvement. #39424
+
 ## [0.45.0] - 2026-09-27
 
 ### Upgrade notes

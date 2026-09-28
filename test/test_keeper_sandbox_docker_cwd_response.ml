@@ -114,7 +114,7 @@ let test_container_path_translation_under_sandbox () =
         }
       in
       let raw =
-        Keeper_tool_execute_runtime.handle_tool_execute
+        Keeper_tool_execute_runtime.handle_tool_execute ~result_projection:Tool_output.default_model_projection
           ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
           ~turn_sandbox_factory:None
           ~config
@@ -194,7 +194,7 @@ let test_typed_execute_response_cwd_uses_container_path () =
         (Filename.concat visible_root "repos/masc/.worktrees/task-cwd-pin")
         response_cwd;
       let error_raw =
-        Keeper_tool_execute_runtime.handle_tool_execute
+        Keeper_tool_execute_runtime.handle_tool_execute ~result_projection:Tool_output.default_model_projection
           ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
           ~turn_sandbox_factory:(Some factory)
           ~config
@@ -224,7 +224,7 @@ let test_typed_execute_response_cwd_uses_container_path () =
         error_location_cwd;
       let missing_relative = "missing-relative" in
       let missing_raw =
-        Keeper_tool_execute_runtime.handle_tool_execute
+        Keeper_tool_execute_runtime.handle_tool_execute ~result_projection:Tool_output.default_model_projection
           ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
           ~turn_sandbox_factory:(Some factory)
           ~config
@@ -274,7 +274,7 @@ let test_typed_execute_response_cwd_uses_container_path () =
       let oc = open_out host_file in
       close_out oc;
       let not_directory_raw =
-        Keeper_tool_execute_runtime.handle_tool_execute
+        Keeper_tool_execute_runtime.handle_tool_execute ~result_projection:Tool_output.default_model_projection
           ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
           ~turn_sandbox_factory:(Some factory)
           ~config

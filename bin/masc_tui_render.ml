@@ -5742,15 +5742,6 @@ let render_exact_lane_provider_editor (state : state) editor =
   let entries = Masc_tui_types.slot_editor_rows state in
   let count = List.length entries in
   let selected_index = Masc_tui_types.slot_editor_cursor_index state in
-  (* Whether the lane walks a CLI tail, once its row has been read. *)
-  let walks_cli_tail =
-    match editor.Masc_tui_types.se_target with
-    | Masc_tui_types.Exact_lane_slots target ->
-      Option.map
-        (fun (row : Tui_decode.standalone_lane) -> row.Tui_decode.sl_supports_cli_tail)
-        (Masc_tui_types.standalone_lane_row state target)
-    | Masc_tui_types.Media_failover_slots -> None
-  in
   (* j/k stop on slots, never on a group's title, so an empty group has no
      row to move into. Its title says where a slot comes from instead: [a]
      picks one, and the runtime's kind decides the group it joins. *)
@@ -5768,33 +5759,17 @@ let render_exact_lane_provider_editor (state : state) editor =
     (None, heading)
     :: List.map (fun (index, row) -> Some index, row.Masc_tui_types.sr_slot) rows
   in
-  let declares_cli_slot =
-    List.exists
-      (fun row -> row.Masc_tui_types.sr_kind = Masc_tui_types.Official_client_slot)
-      entries
-  in
-  (* A lane without a CLI tail draws no CLI group: the writer refuses every
-     CLI slot there, so the group could only invite a pick that fails. A CLI
-     slot the file declares anyway is still drawn, so it can be dropped. *)
-  let cli_group =
-    match walks_cli_tail, declares_cli_slot with
-    | Some false, false -> []
-    | Some false, true | Some true, (true | false) | None, (true | false) ->
-      group_rows Masc_tui_types.Official_client_slot
-        "CLI slots · tried after every HTTP slot"
-  in
   let display_rows =
-    group_rows Masc_tui_types.Catalog_slot "HTTP slots · tried first" @ cli_group
+    group_rows Masc_tui_types.Catalog_slot "HTTP slots · tried first"
+    @ group_rows Masc_tui_types.Official_client_slot
+        "CLI slots · tried after every HTTP slot"
   in
   box_top buf cols;
   box_line buf cols (screen_title " MASC Lanes / Providers");
   box_divider buf cols;
   box_line_styled buf cols ~style:(Theme.info ())
-    (Printf.sprintf "  [runtime.exact_output_lanes.%s] · %s"
-       (Terminal_text.single_line lane)
-       (match walks_cli_tail with
-        | Some false -> "HTTP only"
-        | Some true | None -> "HTTP then CLI"));
+    (Printf.sprintf "  [runtime.exact_output_lanes.%s] · HTTP then CLI"
+       (Terminal_text.single_line lane));
   (match state.lanes_action_error with
    | None -> ()
    | Some detail ->
@@ -5840,7 +5815,7 @@ let render_exact_lane_provider_editor (state : state) editor =
                 note
             in
             match
-              Masc_tui_types.runtime_pick_availability state
+              Masc_tui_types.runtime_pick_availability
                 picker.Masc_tui_types.rlp_pick runtime
             with
             | Masc_tui_types.Pick_refused refusal ->
@@ -6150,7 +6125,7 @@ let render_lanes_overview (state : state) =
                  after the label is the first thing the frame cuts. *)
               let refusal_prefix, note =
                 match
-                  Masc_tui_types.runtime_pick_availability state
+                  Masc_tui_types.runtime_pick_availability
                     picker.Masc_tui_types.rlp_pick runtime
                 with
                 | Masc_tui_types.Pick_refused refusal ->

@@ -27,7 +27,7 @@ Codex 가 한도를 매기는 단위는 홈이 아니라 **ChatGPT 계정**이�
 제안은 이렇다.
 
 1. 계정은 Codex app-server 의 안정 계약인 `account/rateLimits/read` 응답의 `accountId` 로 안다.
-   같은 workspace 의 여러 seat 를 합치지 않도록 `account/read` 의 `email` 과 짝지어 쓸지는 운영자 결정 1 이다.
+   같은 workspace 의 여러 seat 를 합치지 않도록, 같은 프로세스의 `account/read` 가 답한 `email` 과 짝지어 쓴다 (결정 1).
 2. Codex turn 은 `account/read` 다음에 이 읽기를 **보내기만 하고** `thread/start` 로 간다. 답은 turn 이 도는 동안 받는다.
    읽기가 늦거나 실패해도 turn 은 기다리지 않는다.
 3. 그 turn 의 기록은 그 turn 의 읽기가 답한 계정에 붙인다. 답을 못 받았으면 그 홈에만 걸리는 별도 variant 에 둔다.
@@ -86,21 +86,21 @@ Codex 가 한도를 매기는 단위는 홈이 아니라 **ChatGPT 계정**이�
 |---|---|---|
 | `codex_subscription` | 지정 없음. 서버(pid 1087)에 `CODEX_HOME` 이 없어 `~/.codex` | 계정 B |
 | `codex_acct1` | `~/.codex-account1` | 계정 A |
-| `setup_codex_853c…` | `<base-path>/.masc/official-clients/codex/9594…` (setup 로그인이 만든 홈, 아래 "setup 마법사·로그인 계층과 겹치는 곳") | 계정 A |
+| `codex_853c5995` | `<base-path>/.masc/official-clients/codex/9594…` (setup 로그인이 만든 홈, 아래 "setup 마법사·로그인 계층과 겹치는 곳") | 계정 A |
 
 계정은 두 방법으로 비교했다. 원문 id 는 출력하지 않고 SHA-256 앞 8자리만 비교했다.
 
 - 각 홈 `auth.json` 의 `tokens.account_id`.
 - 각 홈으로 띄운 `codex app-server` 가 답한 `account/rateLimits/read.accountId`.
 
-두 방법 모두 `codex_acct1` 과 `setup_codex_853c…` 가 같은 계정이고, `~/.codex` 는 다른 계정이라고 답했다.
+두 방법 모두 `codex_acct1` 과 `codex_853c5995` 가 같은 계정이고, `~/.codex` 는 다른 계정이라고 답했다.
 세 계정 모두 `planType` 이 `pro` 인 개인 계정이다.
 
 코드로 따라가면 이렇게 된다.
 
 1. 서버 시작 때 scope 가 둘이므로 같은 계정을 두 번 읽고, 같은 숫자를 두 scope 에 적는다. Overview 에 두 줄이 나온다.
 2. `codex_acct1` 후보가 `usageLimitExceeded` 로 거절되면 `~/.codex-account1` scope 만 소진으로 적힌다.
-3. `setup_codex_853c…` 후보는 scope 가 달라서 뒤로 가지 않는다. 걷기가 그 후보에 닿으면 같은 계정이라 또 거절된다.
+3. `codex_853c5995` 후보는 scope 가 달라서 뒤로 가지 않는다. 걷기가 그 후보에 닿으면 같은 계정이라 또 거절된다.
    그다음에야 그 scope 도 소진으로 적힌다.
 4. 나중에 한 홈으로 호출이 통과해도 다른 홈의 기록은 남는다. 그 홈으로 통과할 때까지 뒤에 있다.
 
@@ -193,7 +193,7 @@ upstream `AuthManager` 는 인증 거절 복구와 토큰 갱신 때 자격 증�
 - `accountId` 는 ChatGPT **workspace 계정** id 다. Team·Business 처럼 한 workspace 에 seat 가 여럿이면 seat 들이 같은 값을 가질 수 있다.
   app-server 도 계정을 확인할 때 `account_id` 와 `user_id` 를 **둘 다** 비교한다 (위 1196-1202행).
   Codex 한도를 workspace 단위로 세는지 seat 단위로 세는지는 확인하지 못했다. **미검증**.
-  seat 단위라면 `accountId` 만으로 묶을 때 멀쩡한 seat 가 다른 seat 의 소진 때문에 뒤로 밀린다. 결정 1 이 이 위험을 다룬다.
+  seat 단위라면 `accountId` 만으로 묶을 때 멀쩡한 seat 가 다른 seat 의 소진 때문에 뒤로 밀린다. 그래서 키에 email 을 짝지운다 (결정 1).
   live 계정 셋은 모두 개인 `pro` 라서 이 PC 에서는 차이가 없다.
 - 읽기 시간은 이 PC 에서 `account/read` 0.4–5.4초, `account/rateLimits/read` 0.5–0.7초였다 (세 번).
   첫 시도 한 번은 두 요청이 30초 안에 끝나지 않았다. 원인은 확인하지 않았다. 그래서 설계는 이 읽기를 기다리지 않는다.
@@ -213,8 +213,8 @@ upstream `AuthManager` 는 인증 거절 복구와 토큰 갱신 때 자격 증�
 ```ocaml
 (* lib/runtime/runtime_codex_account.mli (새 모듈) *)
 type key
-(** 한도 주인으로 쓰는 계정 키. 결정 1 에 따라 [accountId] 하나, 또는
-    [accountId] 와 같은 프로세스의 [account/read] email 의 짝이다.
+(** 한도 주인으로 쓰는 계정 키. [accountId] 와 같은 프로세스의
+    [account/read] email 의 짝이다 (결정 1).
     표현은 문자열만 담는 불변 값이라 구조적 비교가 [equal] 과 같다.
     원문은 메모리 안에만 둔다. 밖으로 내보내는 함수는 [log_label] 하나다. *)
 
@@ -223,7 +223,7 @@ val log_label : key -> string   (* SHA-256 앞 8자리 *)
 
 type read =
   | Stated of key
-  | Not_stated                  (* 응답은 왔고 accountId 가 없거나 null 이다 *)
+  | Not_stated                  (* 응답은 왔고 accountId 나 email 이 없거나 null 이다 *)
   | Not_applicable              (* ChatGPT 로그인이 아니다: apiKey, amazonBedrock, provider 관리 *)
   | Read_failed of read_failure
 
@@ -314,14 +314,14 @@ val quota_scopes_of_runtime :
 | Codex turn 마다 (Keeper turn, Fusion 패널, one-shot) | `initialize` → `account/read` → `thread/start` (`lib/runtime/runtime_codex_app_server.ml:1703-1723`) | `account/read` 가 `Chatgpt _` 이면 `account/rateLimits/read` 를 보내고 **기다리지 않고** `thread/start` 로 간다 |
 | Codex 검증 | 설정에 없는 임시 홈 (`lib/runtime/runtime_verification.ml:787-800`) | 읽기는 같이 가지만 `observe` 하지 않는다 |
 | 한도 거절 뒤 백그라운드 읽기 | 창만 기록 | `observe` 도 한다 |
-| MASC 로그인 세션이 그 홈에서 끝났을 때 (#39533) | 인증만 확인하고 email 을 기록한다 (`lib/server/server_setup_account_login.ml:107`, `:162`) | 그 홈을 한 번 읽는다 (결정 3) |
+| MASC 로그인 세션이 그 홈에서 끝났을 때 (#39533) | 인증만 확인하고 email 을 기록한다 (`lib/server/server_setup_account_login.ml:104-109`, `:146-150`) | 그 홈을 한 번 읽는다 (결정 3) |
 | 운영자가 다시 읽기를 요청할 때 | 없음 | 그 홈을 한 번 읽는다 (결정 3) |
 
 ### turn 안의 읽기
 
-- 핸드셰이크는 admission 제한 시간 안에서 돈다 (`lib/runtime/runtime_codex_app_server.ml:72-80`, Keeper turn 은 `lib/keeper/keeper_codex_runtime.ml:1072`).
+- 핸드셰이크는 admission 제한 시간 안에서 돈다 (`lib/runtime/runtime_codex_app_server.ml:76-80`, `:2099-2102`, Keeper turn 은 `lib/keeper/keeper_codex_runtime.ml:1072`).
   이 안에서 읽기를 기다리면 멈춘 읽기 하나가 turn 을 Timeout 으로 실패시킨다. 그래서 기다리지 않는다.
-- 지금 `await_response` 는 기다리지 않은 id 의 응답을 protocol 오류로 처리한다 (`lib/runtime/runtime_codex_app_server.ml:765-775`).
+- 지금 `await_response` 는 기다리지 않은 id 의 응답을 protocol 오류로 처리한다 (`lib/runtime/runtime_codex_app_server.ml:765-776`).
   turn 마다 "답을 기다리는 곁 요청" 자리 하나를 두고, 그 id 의 응답이나 오류만 그 자리로 넘긴다. 다른 id 는 지금처럼 오류다.
   turn 이벤트 루프도 같은 자리를 본다.
 - turn 이 끝날 때까지 답이 없으면 `Read_failed No_answer_before_turn_end` 다. 답을 기다리려고 프로세스를 붙잡지 않는다.
@@ -394,7 +394,7 @@ let scopes_to_write = function
 - `/api/v1/runtime/resolved` 는 응답 하나를 만들 때 `Runtime_codex_home_account.snapshot` 을 **한 번** 뜨고, 묶음과 runtime 줄이 모두 그 스냅숏을 쓴다.
   지금은 묶음을 한 번 만들고 runtime 줄마다 scope 를 다시 구한다 (`:39`, `:295-305`). 가변 표를 읽으면서 이렇게 하면 사이에 `observe` 가 끼어 라벨을 못 찾고 `failwith` 로 500 이 난다.
 - 사용량 묶음의 키는 Codex runtime 이면 `Serves k` 일 때 `Codex_account k`, 아니면 `Codex_home_account_not_stated h` 다.
-  `codex_acct1` 과 `setup_codex_853c…` 는 한 줄이 된다.
+  `codex_acct1` 과 `codex_853c5995` 는 한 줄이 된다.
   계정을 확인한 홈이라도 미확인 scope 에 창이나 소진 기록이 있으면 그 scope 는 따로 한 줄을 갖는다. 계정 줄과 합치지 않는다.
 - 묶음마다 자기 scope 의 `exhausted`·`resets_at` 과 주인의 종류를 싣는다.
   주인의 종류는 닫힌 값이다. `vendor_account`, `account_home`(Claude Code·Muse), `codex_home_account_not_stated`, `credential`, `provider_row`.
@@ -460,7 +460,7 @@ MASC 규칙은 "새 상태·필드·Gate 는 없을 때 durable truth 가 손상
 3. 그 홈에서 `codex login --device-auth` 를 돌린다 (`:76-77`).
 4. 로그인 뒤 확인(`Client.observe`, `:94-103`)은 `probe_subscription`, 즉 `initialize` 와 `account/read` 다.
    인증됐는지만 보고 어느 계정인지는 보지 않는다.
-5. #39612 가 `auth.json` 의 email 을 표시용으로 기록한다 (`lib/server/server_setup_account_login.ml:111-127`, `:162`).
+5. #39612 가 `auth.json` 의 email 을 표시용으로 기록한다 (`lib/server/server_setup_account_login.ml:146-150`, `Client.finish` 의 `~account`).
 6. 로그인 세션의 잠금 키(`account_key`)는 기존 홈이면 그 경로를 `realpath` 로 정규화한 값이다 (`lib/server/server_setup_account_login.ml:38-40`, `:58-61`).
    이 RFC 의 표는 정규화하지 않은 표기를 키로 쓴다. 두 키는 쓰임이 다르다. 잠금 키는 같은 디렉터리에 로그인이 겹치지 않게 하고, 표의 키는 runtime 이 쓰는 표기를 따라간다.
 
@@ -473,7 +473,7 @@ live 사례가 실제로 이 순서였는지, 그때 마법사가 `~/.codex-acco
 
 ### 이 RFC 가 쓰는 자리
 
-- 로그인이 끝난 자리(`lib/server/server_setup_account_login.ml:162`, `record_account_email` 옆)는 결정 3 의 첫 연결 지점이다.
+- 로그인이 끝난 자리(`lib/server/server_setup_account_login.ml:146-150`, `Client.finish`)는 결정 3 의 첫 연결 지점이다.
   여기서 그 홈을 한 번 읽어 `observe` 하면, 새 홈이든 기존 홈이든 재로그인이든 로그인 직후에 계정이 확인된다.
   로그인이 쓴 홈 표기가 runtime.toml 의 표기와 다르면(별칭) 그 runtime 의 키는 자기 다음 읽기 때 확인된다.
 - 같은 자리에서 읽은 계정을 이미 다른 홈이 쓰고 있으면 setup 화면에 "이 계정은 `codex_acct1` 도 쓰고 있어요" 를 보여 줄 수 있다.
@@ -536,7 +536,7 @@ constitution 의 testing 절에 따라 기능 단위로 본다. 기존 가짜 ap
 
 배포 뒤 실측:
 
-- live resolved JSON 에서 `codex_acct1` 과 `setup_codex_853c…` 가 한 묶음인지 본다.
+- live resolved JSON 에서 `codex_acct1` 과 `codex_853c5995` 가 한 묶음인지 본다.
 - 로그에 홈마다 `codex-account:<8자리>` 확인 줄이 남는지 본다.
 - turn 시작부터 `thread/start` 답까지의 시간이 배포 전후로 달라지지 않았는지 본다 (위 미검증 항목).
 - TUI Overview 캡처와 dashboard 브라우저 캡처를 붙인다.
@@ -560,34 +560,50 @@ constitution 의 testing 절에 따라 기능 단위로 본다. 기존 가짜 ap
    glossary 의 "닫힌 quota 창"·"Provider Usage Window" 항목과 `docs/spec/14-configuration.md`. 시험: 식별자 노출, 경합, TUI 캡처.
 5. **재로그인 알아채기** (2 위, 결정 3 에 따라) — 로그인 세션 완료 때 읽기, 운영자 다시 읽기 요청, setup 화면의 "같은 계정" 표시.
 
-## 운영자 결정
+## 결정
 
-1. **계정 키**
-   - 출처는 `account/rateLimits/read.accountId` 로 정한다. 안정 계약이고 live 로 채워지는 것을 확인했다.
-     실험 필드 `workspaceRouting.chatgptAccountId` 와 auth.json 은 쓰지 않는다.
-   - (권장) 키를 `accountId` 와 같은 turn 프로세스의 `account/read` email 의 짝으로 한다.
-     seat 단위 한도일 때 seat 를 합치지 않는다. 틀려도 지금처럼 나뉘어 보이는 쪽으로 틀린다. email 이 null 이면 `Not_stated` 다.
-   - 키를 `accountId` 하나로 한다. 더 단순하지만, Team·Business seat 가 seat 단위 한도라면 멀쩡한 seat 가 뒤로 밀린다.
-2. **turn 안의 읽기를 기다리나**
-   - (권장) 기다리지 않는다. 멈춘 읽기가 turn 을 실패시키지 않는다. 답이 turn 끝까지 안 오면 그 turn 의 기록은 홈 미확인에 간다.
-   - 기다린다. 구현은 단순하지만 admission 제한 시간 안에 읽기가 들어가 turn 을 실패시킬 수 있다.
-   - 시작 때·거절 뒤에만 읽는다. turn 의 기록을 그 turn 의 계정에 붙이지 못한다.
-3. **그 홈으로 turn 이 가지 않을 때 재로그인을 어떻게 아나**
-   - (권장) MASC 로그인 세션(#39533)이 그 홈에서 끝나면 읽고, TUI Overview 와 admin API 에 "다시 읽기" 를 둔다. 타이머는 없다.
-   - Codex provider 에도 `refresh-s` 를 선언할 수 있게 한다. HTTP 의 `usage-read.refresh-s`(#39144)와 같은 방식이다.
-   - auth.json 변경 감시. 결정 1 과 같은 이유로 권하지 않는다.
-4. **계정을 확인하지 못한 증거**
-   - (권장) `Codex_home_account_not_stated` 에 남긴다. 그 홈에는 지금과 같은 동작이다.
-   - 버리고 로그만 남긴다. `failure_keeps_evidence` 와 어긋난다.
-5. **같은 계정을 쓰는 홈이 둘 이상일 때**
-   - (권장) Overview 가 한 줄로 합쳐 보여 주고, 막지 않는다.
-   - setup 이나 계정 추가 폼에서 거절한다. 로그인 전에는 계정을 모르므로 로그인 뒤에야 알 수 있고, gates 정책과도 맞지 않는다.
-6. **Claude Code·Antigravity·Muse**
-   - (권장) 이 RFC 에서는 Codex 만. 각 클라이언트의 계정 식별 수단을 확인한 뒤 따로 다룬다.
-7. **`sessionBudgetExceeded`**
-   - (권장) 이 RFC 는 지금 처리(홈 scope 소진)를 유지하고, 계정 한도로 읽는 것이 맞는지는 별도 이슈로 다룬다.
-     upstream 정의는 클라이언트 rollout 토큰 예산이다.
-   - 이 RFC 에서 사용량 소진 묶음에서 빼고 다른 경로로 보낸다. 범위가 커지고 근거를 더 모아야 한다.
+2026-09-28 에 아래 일곱 가지를 정했다.
+근거는 `origin/main` `59c99562db` 과 upstream `rust-v0.157.1`, 로컬 `codex app-server generate-json-schema`(0.157.1)에서 다시 확인했다.
+
+1. **계정 키는 `accountId` 와 email 의 짝이다.**
+   - `accountId` 는 `account/rateLimits/read` 에서, email 은 같은 turn 프로세스의 `account/read` 에서 받는다.
+   - app-server 도 "지금 로그인한 계정" 인지 볼 때 `account_id` 와 `user_id` 를 둘 다 비교한다
+     (upstream `codex-rs/app-server/src/request_processors/account_processor.rs` 1196-1201행).
+     안정 응답에는 `user_id` 가 없다. 사람마다 다른 안정 필드는 `account/read` 의 `email` 하나다
+     (0.157.1 스키마: `GetAccountResponse.account.email` 은 `string | null`, `GetAccountRateLimitsResponse` 에는 `userId` 가 없다).
+   - 짝으로 두면 한도가 seat 단위일 때 seat 를 합치지 않는다. 틀리더라도 지금처럼 나뉘어 보이는 쪽으로 틀린다.
+   - `accountId` 나 email 이 null 이면 `Not_stated` 다. MASC 는 이미 email 을 선택 값으로 읽는다 (`lib/runtime/runtime_codex_app_server.ml:805`).
+   - `accountId` 하나만 쓰는 안은 버렸다. 한도가 seat 단위라면 멀쩡한 seat 가 다른 seat 의 소진 때문에 뒤로 밀린다.
+2. **turn 안의 읽기는 기다리지 않는다.**
+   - 핸드셰이크는 `Awaiting_admission` 단계에서 돌고, 이 단계의 쉬는 한도는 `admission_timeout_s` 다
+     (`lib/runtime/runtime_codex_app_server.ml:76-80`, `:2099-2102`). 여기서 읽기를 기다리면 멈춘 읽기 하나가 turn 을 실패시킨다.
+     이 PC 에서 첫 읽기 한 번이 30초 안에 끝나지 않은 적이 있다 (위 "한계").
+   - `await_response` 는 기다리지 않은 id 의 응답을 protocol 오류로 처리한다 (`:765-776`). 그래서 PR1 이 "곁 요청" 자리를 만든다.
+   - 답이 turn 끝까지 오지 않으면 그 turn 의 기록은 홈 미확인 scope 에 간다.
+   - 시작 때와 거절 뒤에만 읽는 안은 버렸다. turn 의 기록을 그 turn 이 쓴 계정에 붙일 수 없다.
+3. **재로그인은 MASC 로그인이 끝날 때와 운영자의 "다시 읽기" 로 안다. 타이머는 두지 않는다.**
+   - MASC 로그인 세션이 끝나는 자리에서 그 홈을 한 번 읽는다 (`lib/server/server_setup_account_login.ml:146-150`, `Client.finish`).
+     TUI Overview 와 admin API 에 "다시 읽기" 를 둔다.
+   - 터미널에서 `codex login` 을 하면 MASC 는 알 수 없다. `account/updated` 는 로그인을 처리한 프로세스 안의 알림이다.
+     이때는 그 홈으로 turn 이 가거나, 그 홈이 거절된 뒤 읽거나, 운영자가 다시 읽기를 누를 때 안다.
+     그 전까지 그 홈 후보는 옛 계정 기록 때문에 뒤에 있을 수 있다. 이 틈은 받아들인다.
+   - Codex `refresh-s` 는 버렸다. 운영자가 근거 없이 골라야 하는 숫자가 하나 늘어난다.
+     지금 반복 읽기는 HTTP provider 만 한다 (`lib/runtime/runtime_provider_usage_read.ml:277-278`).
+   - auth.json 변경 감시는 결정 1 에서 auth.json 을 거절한 것과 같은 이유로 버렸다. keyring 모드에서는 파일이 없고, 파일 위치와 형식은 vendor 가 약속하지 않았다.
+4. **계정을 확인하지 못한 증거는 `Codex_home_account_not_stated` 에 남긴다.**
+   - constitution 의 `failure_keeps_evidence` 는 "실패는 증거를 남긴다" 이다 (`docs/constitution.xml:239-242`). 그 홈에는 지금과 같은 동작이다.
+   - 버리고 로그만 남기는 안은 이 불변식과 어긋나서 버렸다.
+5. **같은 계정을 쓰는 홈이 둘 이상이면 Overview 가 한 줄로 합쳐 보여 주고, 막지 않는다.**
+   - constitution `<gates>` 는 하드 게이트를 기본으로 두지 않는다 (`docs/constitution.xml:427-432`).
+     로그인이 끝나기 전에는 어느 계정이 들어올지 모르므로 setup 이나 계정 추가 폼에서 미리 막을 수도 없다.
+   - 로그인 직후 읽은 계정을 다른 홈이 이미 쓰고 있으면 setup 화면에 알려 준다. 저장은 막지 않는다.
+6. **이 RFC 는 Codex 만 다룬다.**
+   - Claude Code 의 `orgId` 가 한도 키인지, Muse·Antigravity 에 계정을 알아낼 안정 수단이 있는지는 확인하지 않았다 (위 "다른 공식 클라이언트").
+     확인하지 않은 키로 scope 를 바꾸지 않는다. 각 클라이언트는 식별 수단을 확인한 뒤 따로 다룬다.
+7. **`sessionBudgetExceeded` 는 지금처럼 홈 scope 소진으로 둔다.**
+   - 계정 scope 로 넓히지 않는다. upstream 정의는 계정 한도가 아니라 클라이언트 rollout 토큰 예산이다
+     (`codex-rs/protocol/src/error.rs` 87-88행, `rust-v0.157.1`). 지금은 두 오류를 한데 묶는다 (`lib/runtime/runtime_codex_app_server.ml:465`).
+   - 이 처리가 맞는지는 #39637 에서 따로 다룬다.
 
 ## 관련 PR·이슈
 
@@ -613,7 +629,8 @@ constitution 의 testing 절에 따라 기능 단위로 본다. 기존 가짜 ap
   `codex-rs/app-server-protocol/src/protocol/v2/account.rs`, `codex-rs/app-server/src/request_processors/account_processor.rs`,
   `codex-rs/login/src/auth/manager.rs`, `codex-rs/protocol/src/error.rs`, `codex-rs/core/src/agent/control/budget.rs`.
   로컬 `codex app-server generate-json-schema`(0.157.1). live 홈 셋의 auth.json 과 `account/rateLimits/read` 해시 비교.
-- **Timestamp**: 2026-09-28T08:36Z (코드 인용은 base `c424573c76` 기준으로 다시 맞춤)
+- **Timestamp**: 2026-09-28T08:36Z (코드 인용은 base `c424573c76` 기준으로 다시 맞춤).
+  결정 절과 그 절이 인용하는 줄은 2026-09-28T10:50Z 에 `origin/main` `59c99562db` 기준으로 다시 확인했다.
 - **Confidence**: 계정 id 출처와 필드 모양은 높음. `accountId` 가 채워진다는 것은 중간–높음 (홈 둘, 읽기 세 번).
   강등이 홈끼리 공유되지 않는다는 것은 높음 (코드). 도는 프로세스의 계정이 바뀌지 않는다는 것은 중간–높음.
   한도가 workspace 단위인지 seat 단위인지, app-server 가 두 요청을 동시에 처리하는지는 미검증. 재로그인 뒤 동작은 코드로만 확인.

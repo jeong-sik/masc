@@ -489,6 +489,7 @@ let schedule_form_row : schedule_row =
   ; sch_payload_support = "supported"
   ; sch_payload_dispatch_tool = Some "masc_keeper_wakeup"
   ; sch_payload_target = Some "keeper:edgar.a.poe"
+  ; sch_payload_keeper_name = Some "edgar.a.poe"
   ; sch_payload_summary = Some "daily inspection"
   ; sch_last_wake_status = None
   ; sch_last_wake_started_at_iso = None
@@ -515,6 +516,24 @@ let schedule_form_row : schedule_row =
   ; sch_reaction_quarantined = None
   ; sch_runner_hold = None
   }
+
+(* The wire carries both an encoded target and a display name. When the
+   latter is absent, an older server's target stays intact. *)
+let test_schedule_who_uses_the_named_field () =
+  let who row = Masc_tui_types.schedule_row_who row in
+  Alcotest.(check (option string)) "the bare name wins" (Some "edgar.a.poe")
+    (who schedule_form_row);
+  Alcotest.(check (option string)) "an older server leaves the target intact"
+    (Some "keeper:edgar.a.poe")
+    (who { schedule_form_row with sch_payload_keeper_name = None });
+  Alcotest.(check (option string)) "an unnamed non-Keeper target is not parsed"
+    (Some "board:sweep")
+    (who { schedule_form_row with sch_payload_keeper_name = None
+                                ; sch_payload_target = Some "board:sweep" });
+  Alcotest.(check (option string)) "an absent target remains absent" None
+    (who { schedule_form_row with sch_payload_keeper_name = None
+                                ; sch_payload_target = None })
+;;
 
 let test_schedule_create_form_names_the_canonical_required_fields () =
   let open Yojson.Safe.Util in
@@ -872,7 +891,7 @@ let test_board_read_footer_carries_the_post_keys () =
             (holds key read);
           Alcotest.(check bool) (Printf.sprintf "the Board list spells %s the same" key) true
             (holds key list))
-        [ "v / V:vote"; "c:reply"; "Y:copy link" ];
+        [ "v / V:up / down"; "c:reply"; "Y:copy link" ];
       Alcotest.(check bool) (Printf.sprintf "the pane keys follow the split (%b)" split) split
         (holds "Ctrl-W:switch" read))
     [ Masc_tui_types.Board_read_wide
@@ -3313,6 +3332,8 @@ let () =
             test_harness_footer_links_to_overview_task
         ; Alcotest.test_case "Schedules names write and read controls" `Quick
             test_schedules_footer_names_write_and_read_controls
+        ; Alcotest.test_case "schedule display name uses the named field" `Quick
+            test_schedule_who_uses_the_named_field
         ; Alcotest.test_case "schedule create form names required fields" `Quick
             test_schedule_create_form_names_the_canonical_required_fields
         ; Alcotest.test_case

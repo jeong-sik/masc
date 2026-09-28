@@ -20,6 +20,9 @@ let string_field a k =
 let list_field a k =
   match lookup k a with Some (_, `List l) -> Some l | _ -> None
 
+let int_field a k =
+  match lookup k a with Some (_, `Int n) -> Some n | _ -> None
+
 let assoc_of = function `Assoc a -> a | _ -> []
 
 let full_synthesis ?(decision = Answer "a") () : judge_synthesis =
@@ -138,7 +141,9 @@ let test_panel_meta_failure_keeps_raw_provider () =
   let o =
     Failed
       { failed_model = "skeptic (claude)"
-      ; reason = Provider_error "Provider 'claude': boom" }
+      ; reason = Provider_error "Provider 'claude': boom"
+      ; usage = zero_usage
+      }
   in
   let a = assoc_of (Masc.Fusion_sink.panel_meta o) in
   check (option string) "model field = panel identity" (Some "skeptic (claude)")
@@ -157,17 +162,29 @@ let test_panel_meta_answered_uses_identity () =
   check (option string) "status answered" (Some "answered") (string_field a "status")
 
 let test_panel_meta_timeout_text () =
-  let o = Failed { failed_model = "skeptic (claude)"; reason = Timeout } in
+  let o =
+    Failed
+      { failed_model = "skeptic (claude)"
+      ; reason = Timeout
+      ; usage = { input_tokens = 11; output_tokens = 7 }
+      }
+  in
   let a = assoc_of (Masc.Fusion_sink.panel_meta o) in
   check (option string) "timeout reason_detail" (Some "timeout")
     (string_field a "reason_detail");
   check (option string) "timeout reason_code" (Some "timeout")
-    (string_field a "reason_code")
+    (string_field a "reason_code");
+  check (option int) "failed tokens are attributed" (Some 11) (int_field a "input_tokens");
+  check (option int) "failed out-tokens are attributed" (Some 7) (int_field a "output_tokens")
 
 let test_panel_meta_empty_response_text () =
   let detail = "empty response (stop_reason=max_tokens)" in
   let o =
-    Failed { failed_model = "skeptic (claude)"; reason = Empty_response detail }
+    Failed
+      { failed_model = "skeptic (claude)"
+      ; reason = Empty_response detail
+      ; usage = zero_usage
+      }
   in
   let a = assoc_of (Masc.Fusion_sink.panel_meta o) in
   check (option string) "empty response reason_detail" (Some detail)
@@ -180,7 +197,10 @@ let test_panel_meta_empty_response_text () =
 let test_panel_meta_invalid_max_output_tokens_text () =
   let o =
     Failed
-      { failed_model = "skeptic (claude)"; reason = Invalid_max_output_tokens 0 }
+      { failed_model = "skeptic (claude)"
+      ; reason = Invalid_max_output_tokens 0
+      ; usage = zero_usage
+      }
   in
   let a = assoc_of (Masc.Fusion_sink.panel_meta o) in
   check (option string) "invalid max tokens reason_detail"
@@ -192,9 +212,6 @@ let test_panel_meta_invalid_max_output_tokens_text () =
    role(위상 의미) + identity(First는 panelist_id) + judge_meta와 동일한 5섹션 스키마
    공유 + 노드별 usage 를 핀한다. 값-핀(value-blind coverage 회피): role/identity가
    정확히 무엇인지 박아 First id가 role로 새거나 정체성이 누락되는 회귀를 잡는다. *)
-let int_field a k =
-  match lookup k a with Some (_, `Int n) -> Some n | _ -> None
-
 let bool_field a k =
   match lookup k a with Some (_, `Bool value) -> Some value | _ -> None
 

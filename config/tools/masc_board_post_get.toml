@@ -31,15 +31,17 @@ Zero-based comment offset. Omit it to read the newest comments; pass 0 to \
 read from the oldest. At the comment count: an empty end page; past it: \
 rejected."""
 
-# minimum/maximum/default and the numbers inside the description mirror
-# Board_types.Limits (default_comment_page_limit / max_comment_page_limit);
-# the parity test compares the published schema against those values.
+# No machine-readable [default] on comment_offset or comment_limit: both are
+# mutually exclusive with comment_tail and after_comment_id (Board_types
+# request_of_args), so a client that filled a declared default would send a
+# value that conflicts with the argument the caller actually chose. The
+# server applies the default itself (bounded_limit None), and the description
+# keeps it visible. minimum/maximum still mirror Board_types.Limits.
 [[params]]
 name = "comment_limit"
 type = "integer"
 minimum = 1
 maximum = 100
-default = 20
 description = """
 Max comments per page (default: 20, max: 100). A page also \
 ends when it fills the output budget."""

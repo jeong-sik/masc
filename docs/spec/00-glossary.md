@@ -2096,7 +2096,7 @@ status: reference
   `After_history`는 아무 Atom도 보내지 않은 요청이 제안된 History의 끝을 마지막 Atom digest로
   증명한 경계, `Empty_history`는 제안된 History가 비었거나 크기 축소가 이력 전체를 제외한
   요청을 기록한다. 후자의 경우에는 끝 digest가 없어 비어 있지 않은 History에서 위치의 증거로
-  재사용할 수 없다. 입력 관측 자체가 없다는 뜻은 바깥 model-input window의 부재로 남는다.
+  재사용할 수 없다. 입력 관측 자체가 없다는 뜻은 model-input window 기록의 부재로 남는다.
   후보별 usage 원장에서 읽되, 같은 Keeper turn의 거절이 더 뒤로 옮긴 위치가 있으면
   그 위치를 쓴다. 반 자르기와 묶음 비우기 모두 다음 후보로 이 위치를 전달한다.
   다른 History의 위치는 witness digest가 맞지 않으면 쓰지 않는다.

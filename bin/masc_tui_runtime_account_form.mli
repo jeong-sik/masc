@@ -7,7 +7,7 @@
     made by {!declare_on} against the file as the server holds it when the
     operator submits, so a change made while the form stood open is kept.
     Saving goes through the pane's own preview and save. Signing in is not
-    done here; the form shows the command that does it. *)
+    done here; the form shows how to do it. *)
 
 type field =
   | Base
@@ -43,8 +43,10 @@ type declared =
   { id : string
   ; text : string  (** The current runtime.toml with the new provider. *)
   ; sign_in : string option
-      (** The shell command that signs the new account in; none for
-          Antigravity, whose OAuth file already exists. *)
+      (** How to sign the new account in, as the operator reads it: a shell
+          command for Codex; for Claude Code, the command that starts the
+          client followed by the /login typed inside it. None for Antigravity,
+          whose OAuth file already exists. *)
   }
 
 val declare_on :

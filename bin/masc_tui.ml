@@ -17673,26 +17673,11 @@ let main
     with
     | Error detail -> Error ("preview failed: " ^ detail)
     | Ok preview -> (
-      let ok =
-        match preview with
-        | `Assoc fields -> (
-            match List.assoc_opt "validation" fields with
-            | Some (`Assoc v) -> (
-                match List.assoc_opt "ok" v with
-                | Some (`Bool value) -> Some value
-                | _ -> None)
-            | _ -> (
-                match List.assoc_opt "ok" fields with
-                | Some (`Bool value) -> Some value
-                | _ -> None))
-        | _ -> None
-      in
-      match ok with
-      | Some false ->
-        Error
-          ("preview rejected the edit: "
-           ^ Terminal_text.single_line (Yojson.Safe.to_string preview))
-      | Some true | None -> (
+      match Masc_tui_runtime_config_receipt.decode_preview preview with
+      | Error detail -> Error ("preview answer unreadable: " ^ detail)
+      | Ok (Masc_tui_runtime_config_receipt.Cannot_save reason) ->
+        Error ("preview rejected the edit: " ^ Terminal_text.single_line reason)
+      | Ok Masc_tui_runtime_config_receipt.Can_save -> (
         match
           Masc_tui_http.post_runtime_config_raw ~host ~port ~source_text:edited
         with

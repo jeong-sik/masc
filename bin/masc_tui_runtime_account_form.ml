@@ -117,9 +117,10 @@ let inherited_home = function
   | D.Antigravity -> None
 ;;
 
-(* The command that signs the chosen client in, with [home] as the shell
-   will read it. Antigravity has none -- its OAuth file exists before it can
-   be typed here. *)
+(* How to sign the chosen client in, with [home] as the shell will read it:
+   a shell command for Codex; for Claude Code, the command that starts the
+   client and the /login typed inside it. Antigravity has none -- its OAuth
+   file exists before it can be typed here. *)
 let command client home =
   match client with
   | D.Codex -> Some (Printf.sprintf "CODEX_HOME=%s codex login" home)
@@ -141,7 +142,9 @@ let sign_in_rows t =
   match client, command client home with
   | D.Codex, Some line ->
     [ "  로그인: " ^ line
-    ; "  (먼저 그 폴더의 config.toml 에 cli_auth_credentials_store = \"file\")"
+    ; Printf.sprintf "  (먼저 그 폴더의 config.toml 에 %s = \"%s\")"
+        Runtime_verification_codex_home.credentials_store_key
+        Runtime_verification_codex_home.credentials_store_file
     ]
   | D.Claude_code, Some line -> [ "  로그인: " ^ line ]
   | D.Antigravity, _ ->
@@ -207,8 +210,20 @@ let paste t text =
   edit t (fun value -> value ^ kept)
 ;;
 
-(* Cells of the widest label, "credentials.path", with two to spare. *)
-let label_cells = 18
+let base_label = "복사할 provider"
+let id_label = "새 provider id"
+
+(* Cells between the widest label and its value. *)
+let label_gap_cells = 2
+
+(* The label column fits the widest label any client can draw, so it stays
+   put while the operator cycles through bases. *)
+let label_cells =
+  label_gap_cells
+  + List.fold_left
+      (fun widest label -> max widest (Masc_tui_message_layout.display_width label))
+      0
+      (base_label :: id_label :: List.map D.location_label D.all_of_client)
 
 let rows t =
   let mark field = if t.field = field then ">" else " " in
@@ -220,10 +235,10 @@ let rows t =
   let base = t.ring.chosen in
   let count = List.length t.ring.before + 1 + List.length t.ring.after in
   [ "  계정 하나 더 · 고른 provider 를 복사하고 로그인 위치만 바꿉니다"
-  ; line Base "복사할 provider"
+  ; line Base base_label
       (Printf.sprintf "\xe2\x80\xb9 %s (%s) \xe2\x80\xba  %d/%d" base.display_name base.id
          (List.length t.ring.before + 1) count)
-  ; line Id "새 provider id" t.id
+  ; line Id id_label t.id
   ; line Location (D.location_label base.client) t.location
   ]
   @ List.map Terminal_text.single_line (sign_in_rows t)

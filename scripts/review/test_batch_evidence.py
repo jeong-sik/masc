@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Combined-tree evidence controls: real Git, fake GitHub, no builds/network."""
 import copy
-from contextlib import ExitStack
+from contextlib import ExitStack, redirect_stdout
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -240,7 +241,7 @@ print(value)
                 self.write_read_offsets.append(len(self.calls))
                 return '{"submitted": true}'
             return original_command(args)
-        def checks(_f, _gh, _repo, pr, _head, _git_dir):
+        def checks(_f, _gh, _repo, pr, _head, _git_dir, **_kwargs):
             self.assertFalse(self.get(f"pulls/{pr}")["merged"],
                              "closed prefix must not rerun the open-PR CI gate")
         with patch.dict(os.environ, {"GUARD_GH": str(self.fake)}), \
@@ -511,9 +512,9 @@ print(value)
         moved = self.change(self.base, "docs/late.md", "Late main change\n")
         actual_checks = B.current_checks
         roll_reads = 0
-        def check_then_move(f, gh, repo, pr, head, git_dir):
+        def check_then_move(f, gh, repo, pr, head, git_dir, **kwargs):
             nonlocal roll_reads
-            actual_checks(f, gh, repo, pr, head, git_dir)
+            actual_checks(f, gh, repo, pr, head, git_dir, **kwargs)
             if pr == 99:
                 roll_reads += 1
                 if roll_reads == 2:
@@ -603,6 +604,95 @@ print(value)
         with self.assertRaisesRegex(F.Unavailable, "^evidence_read_failed$"):
             self.run_landing()
         self.assertEqual(self.writes, [])
+
+    def cli(self, *, line=None):
+        batch = self.root / "cli-batch.txt"
+        batch.write_text(self.line + "\n" if line is None else line)
+        self.fixture.write_text(json.dumps(self.data))
+        # Override only the executable under test for the disposable mutation
+        # control. The fixture still runs the complete public shell entry.
+        entry = Path(os.environ.get("BATCH_TEST_LAND_SCRIPT", HERE / "land-batch.sh"))
+        result = subprocess.run(["bash", str(entry), "--repo", "o/r", "--batch", str(batch),
+                                 "--git-dir", str(self.repo), "--check-only"],
+                                env=dict(os.environ, GUARD_GH=str(self.fake)),
+                                capture_output=True, text=True, timeout=45)
+        receipt = json.loads(result.stdout)
+        requests = [json.loads(line) for line in (self.root / "requests.jsonl").read_text().splitlines()] \
+            if (self.root / "requests.jsonl").exists() else []
+        self.assertFalse(any(set(row) & {"-X", "--method", "-f", "-F", "--field", "--raw-field"}
+                             for row in requests), "CLI controls must not attempt writes")
+        return result.returncode, receipt
+
+    def test_cli_budget_exhausted_roll_refuses_even_with_supplemental_success(self):
+        self.approvals()
+        self.get("actions/runs/900")["conclusion"] = "failure"
+        jobs = self.get("actions/runs/900/jobs?per_page=100")["jobs"]
+        dev = next(job for job in jobs if job["name"] == "dune build @check")
+        dev.update(conclusion="failure", steps=[{
+            "name": "Run the tests this pull request edits", "status": "completed", "conclusion": "failure"}])
+        self.put(f"check-runs/{dev['id']}/annotations?per_page=100", [{
+            "annotation_level": "failure", "message": "not run: the step budget ran out"}])
+        # A successful diagnostic Test run cannot replace the red PR check.
+        diagnostic = copy.deepcopy(self.get("actions/runs/900"))
+        diagnostic.update(id=999, workflow_id=71, run_number=11, event="workflow_dispatch",
+                          path=".github/workflows/test.yml", status="completed", conclusion="success")
+        self.get(f"actions/runs?head_sha={self.roll}&per_page=100")["workflow_runs"].append(diagnostic)
+        code, receipt = self.cli()
+        self.assertEqual((code, receipt["status"]), (3, "unavailable"), receipt)
+        self.assertEqual(receipt["reason"], "batch_run_not_current_successful_exact_pr_check")
+
+    def test_cli_roll_job_failure_is_three_and_member_run_failure_is_six(self):
+        jobs = self.get("actions/runs/900/jobs?per_page=100")["jobs"]
+        jobs[0]["conclusion"] = "failure"
+        code, receipt = self.cli()
+        self.assertEqual((code, receipt["reason"]), (3, "batch_required_jobs_not_all_successful"))
+        jobs[0]["conclusion"] = "success"
+        self.get("actions/runs/901")["conclusion"] = "failure"
+        code, receipt = self.cli()
+        self.assertEqual((code, receipt["reason"]), (6, "batch_run_not_current_successful_exact_pr_check"))
+        self.get("actions/runs/901")["conclusion"] = "success"
+        self.get(f"actions/runs?head_sha={self.heads[1]}&event=pull_request&per_page=100")["workflow_runs"] = []
+        code, receipt = self.cli()
+        self.assertEqual((code, receipt["reason"]), (6, "pr_check_run_unavailable"))
+
+    def test_cli_wrong_landing_tree_is_four(self):
+        self.land(1, wrong=True)
+        code, receipt = self.cli()
+        self.assertEqual((code, receipt["reason"]), (4, "batch_member_landing_tree_mismatch"))
+
+    def test_cli_external_shared_input_is_five(self):
+        self.main = self.change(self.base, "config/runtime.toml", "external shared input\n")
+        self.put("commits/main", {"sha": self.main})
+        code, receipt = self.cli()
+        self.assertEqual((code, receipt["reason"]), (5, "batch_nonmember_main_change_invalidates_roll"))
+
+    def test_cli_moved_head_and_missing_bound_approval_are_six(self):
+        self.get("pulls/2")["head"]["sha"] = self.base
+        code, receipt = self.cli()
+        self.assertEqual((code, receipt["reason"]), (6, "batch_member_head_or_base_changed"))
+        self.get("pulls/2")["head"]["sha"] = self.heads[2]
+        self.approvals()
+        self.put("pulls/2/reviews?per_page=100", [])
+        code, receipt = self.cli()
+        self.assertEqual((code, receipt["reason"]), (6, "evidence_read_failed"))
+
+    def test_cli_invalid_input_and_infrastructure_are_distinct(self):
+        code, receipt = self.cli(line="not a batch line\n")
+        self.assertEqual((code, receipt["reason"]), (2, "invalid_evidence"))
+        del self.data[PREFIX + "/actions/runs/900"]
+        code, receipt = self.cli()
+        self.assertEqual((code, receipt["reason"]), (1, "evidence_read_failed"))
+
+    def test_cli_status_keeps_success_and_pending_distinct(self):
+        # The asynchronous pending transition itself uses the real-Git land
+        # control above; here hold its result fixed at the public CLI boundary.
+        for status, code in [("checked", 0), ("pending", 7), ("unexpected", 2)]:
+            with self.subTest(status=status), patch.object(sys, "argv", [
+                    "batch_evidence.py", "--repo", "o/r", "--batch", "unused",
+                    "--git-dir", str(self.repo)]), \
+                 patch.object(B, "land", return_value={"status": status}), redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(B.main(), code)
+                self.assertEqual(json.loads(output.getvalue())["status"], status)
 
 
 if __name__ == "__main__":

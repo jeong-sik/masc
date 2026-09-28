@@ -5,6 +5,7 @@ verdicts, reviews and the existing head-pinned write remain separate gates.
 Git merge-tree/commit-tree create objects, never edit a checkout or branch.
 """
 from dataclasses import dataclass
+from enum import IntEnum
 import os
 import argparse
 import importlib.util
@@ -13,6 +14,62 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+
+
+class ExitCode(IntEnum):
+    SUCCESS = 0
+    INFRASTRUCTURE = 1
+    INVALID = 2
+    ROLL = 3
+    LANDING = 4
+    MAIN_OVERLAP = 5
+    MEMBER = 6
+    PENDING = 7
+
+
+# Exact internal reasons, not substring or log-text classification. Shared
+# run/check readers attach their ROLL/member role at the refusal boundary.
+REASON_CODES = {
+    **dict.fromkeys(("batch_roll_pr_identity_unavailable", "batch_roll_review_refuses_evidence"), ExitCode.ROLL),
+    **dict.fromkeys(("batch_roll_tree_does_not_match_members", "batch_landed_out_of_order",
+                    "batch_member_landing_is_not_a_squash", "batch_main_member_order_mismatch",
+                    "batch_member_landing_tree_mismatch", "batch_member_merge_not_in_main_history",
+                    "batch_final_landing_tree_mismatch", "batch_main_changed_at_merge_write"), ExitCode.LANDING),
+    "batch_nonmember_main_change_invalidates_roll": ExitCode.MAIN_OVERLAP,
+    **dict.fromkeys(("candidate_not_in_batch", "batch_member_without_current_pass",
+                    "batch_landed_member_review_refuses_evidence", "batch_member_has_open_change_request",
+                    "batch_member_head_or_base_changed", "batch_member_verdict_names_another_run",
+                    "batch_member_closed_without_merge", "batch_candidate_already_merged",
+                    "batch_candidate_not_next_member", "batch_final_audit_has_unmerged_members",
+                    "batch_member_moved_during_check", "batch_publication_changed_during_check",
+                    "batch_member_verdict_changed_during_check"), ExitCode.MEMBER),
+    **dict.fromkeys(("batch_roll_pr_is_a_member", "batch_roll_has_no_changes",
+                    "batch_roll_or_main_moved_during_check"), ExitCode.INVALID),
+}
+
+
+def refuse(f, reason, code):
+    # Keep Unavailable and its existing wire reason compatible with freshness
+    # callers while carrying the typed CLI outcome instead of losing context.
+    error = f.Unavailable(reason)
+    error.batch_exit_code = code
+    raise error
+
+
+def failure_code(error):
+    code = getattr(error, "batch_exit_code", None)
+    if isinstance(code, ExitCode):
+        return code
+    return REASON_CODES.get(str(error), ExitCode.INFRASTRUCTURE)
+
+
+def guard_check(f, args, failure):
+    result = subprocess.run(args, text=True, capture_output=True)
+    if result.returncode:
+        # Existing read-only guards distinguish refusal (2) from API/infra
+        # errors (1). Do not mislabel unavailable GitHub evidence as red CI.
+        refuse(f, "evidence_read_failed",
+               failure if result.returncode == 2 else ExitCode.INFRASTRUCTURE)
 
 
 @dataclass(frozen=True)
@@ -80,7 +137,8 @@ class Trees:
         result = subprocess.run(self.git + ["merge-tree", "--write-tree", left, right],
                                 text=True, capture_output=True)
         if result.returncode:
-            raise self.f.Unavailable("batch_tree_merge_conflict_or_unavailable")
+            refuse(self.f, "batch_tree_merge_conflict_or_unavailable",
+                   ExitCode.LANDING if result.returncode == 1 else ExitCode.INFRASTRUCTURE)
         tree = self.f.sha(result.stdout.splitlines()[0])
         # Fixed metadata makes the synthetic graph reproducible. These objects
         # are only inputs to subsequent tree recomputation, never published.
@@ -96,7 +154,7 @@ class Trees:
         return self.f.sha(result.stdout.strip())
 
 
-def trusted_line(f, gh, prefix, pr, batch):
+def trusted_line(f, gh, prefix, pr, batch, *, failure=ExitCode.MEMBER):
     rows = [row for page in f.api_pages(
         gh, f"{prefix}/issues/{pr}/comments?per_page=100") for row in page]
     matches = [row for row in rows
@@ -104,17 +162,17 @@ def trusted_line(f, gh, prefix, pr, batch):
                and row.get("author_association") in {"OWNER", "MEMBER", "COLLABORATOR"}
                and row.get("user", {}).get("login") != batch.keeper]
     if not matches:
-        raise f.Unavailable("batch_line_not_published_by_trusted_participant")
+        refuse(f, "batch_line_not_published_by_trusted_participant", failure)
     return tuple(sorted((row["id"], row["body"], row["author_association"]) for row in matches))
 
 
-def current_checks(f, gh, repo, pr, head, git_dir):
+def current_checks(f, gh, repo, pr, head, git_dir, *, failure=ExitCode.MEMBER):
     """Use the very same live workflow/check gate as ordinary approval."""
     checks = Path(__file__).with_name("ci-checks.sh")
-    f.command(["bash", "-c",
+    guard_check(f, ["bash", "-c",
         'GH="$1"; repo="$2"; pr="$3"; head="$4"; gitdir="$5"; '
         'source "$6"; check_current_ci',
-        "batch-checks", gh, repo, str(pr), head, git_dir, str(checks)])
+        "batch-checks", gh, repo, str(pr), head, git_dir, str(checks)], failure)
 
 
 def decision(f, gh, repo, member):
@@ -137,7 +195,7 @@ def roll_review_state(f, gh, repo, member, run):
     value = decision(f, gh, repo, member)
     if value and (len(value) != 3 or value[0] != "PASS" or value[1] != str(run)):
         raise f.Unavailable("batch_roll_review_refuses_evidence")
-    review_state(f, gh, "repos/" + repo, member)
+    review_state(f, gh, "repos/" + repo, member, failure=ExitCode.ROLL)
 
 
 def landed_review_state(f, gh, repo, member):
@@ -149,7 +207,7 @@ def landed_review_state(f, gh, repo, member):
     review_state(f, gh, "repos/" + repo, member)
 
 
-def review_state(f, gh, prefix, member):
+def review_state(f, gh, prefix, member, *, failure=ExitCode.MEMBER):
     rows = [row for page in f.api_pages(
         gh, f"{prefix}/pulls/{member.pr}/reviews?per_page=100") for row in page]
     latest = {}
@@ -157,22 +215,28 @@ def review_state(f, gh, prefix, member):
         if row["state"] in {"APPROVED", "CHANGES_REQUESTED", "DISMISSED"}:
             latest[row["user"]["login"]] = row
     if any(row["state"] == "CHANGES_REQUESTED" for row in latest.values()):
-        raise f.Unavailable("batch_member_has_open_change_request")
+        refuse(f, "batch_member_has_open_change_request", failure)
 
 
-def exact_run(f, gh, prefix, pr, head, branch, run_id):
+def exact_run(f, gh, prefix, pr, head, branch, run_id, *, failure=ExitCode.MEMBER):
     run = f.api(gh, f"{prefix}/actions/runs/{run_id}")
+    try:
+        current = f.current_pr_check(gh, prefix, head, pr, branch)
+    except f.Unavailable as error:
+        if str(error) == "pr_check_run_unavailable":
+            refuse(f, str(error), failure)
+        raise
     if (run["id"] != run_id or run["head_sha"] != head
             or run["event"] != "pull_request" or run["path"] != ".github/workflows/pr-check.yml"
             or run["status"] != "completed" or run["conclusion"] != "success"
             or not f.run_names_candidate(run, pr, branch)
-            or f.current_pr_check(gh, prefix, head, pr, branch) != run_id):
-        raise f.Unavailable("batch_run_not_current_successful_exact_pr_check")
+            or current != run_id):
+        refuse(f, "batch_run_not_current_successful_exact_pr_check", failure)
     if not run["pull_requests"]:
         suite = f.api(gh, f"{prefix}/check-suites/{run['check_suite_id']}")
         if (suite["head_sha"] != head or suite.get("head_branch") != branch
                 or not any(row.get("number") == pr for row in suite.get("pull_requests", []))):
-            raise f.Unavailable("batch_run_suite_not_linked_to_pr")
+            refuse(f, "batch_run_suite_not_linked_to_pr", failure)
     jobs = [job for page in f.api_pages(
         gh, f"{prefix}/actions/runs/{run_id}/jobs?per_page=100") for job in page["jobs"]]
     required = {"lint suite", "dune build @check", "dune build --profile release @check",
@@ -183,7 +247,7 @@ def exact_run(f, gh, prefix, pr, head, branch, run_id):
     if not required <= latest.keys() or any(
             latest[name]["status"] != "completed" or latest[name]["conclusion"] != "success"
             for name in required):
-        raise f.Unavailable("batch_required_jobs_not_all_successful")
+        refuse(f, "batch_required_jobs_not_all_successful", failure)
     return run
 
 
@@ -212,10 +276,10 @@ def evaluate(f, *, line, repo, pr, head, run, git_dir, gh, landing=False):
     roll_pr, roll_pull = roll_prs[0]
     if roll_pr in {member.pr for member in batch.members}:
         raise f.Unavailable("batch_roll_pr_is_a_member")
-    exact_run(f, gh, prefix, roll_pr, batch.roll, roll_pull["head"]["ref"], batch.run)
-    current_checks(f, gh, repo, roll_pr, batch.roll, git_dir)
+    exact_run(f, gh, prefix, roll_pr, batch.roll, roll_pull["head"]["ref"], batch.run, failure=ExitCode.ROLL)
+    current_checks(f, gh, repo, roll_pr, batch.roll, git_dir, failure=ExitCode.ROLL)
     roll_review_state(f, gh, repo, Member(roll_pr, batch.roll), batch.run)
-    published = {roll_pr: trusted_line(f, gh, prefix, roll_pr, batch)}
+    published = {roll_pr: trusted_line(f, gh, prefix, roll_pr, batch, failure=ExitCode.ROLL)}
     main = f.sha(f.api(gh, f"{prefix}/commits/main")["sha"])
     for identity in (batch.base, batch.roll, main, *(member.head for member in batch.members)):
         trees.ensure(identity)
@@ -308,13 +372,13 @@ def evaluate(f, *, line, repo, pr, head, run, git_dir, gh, landing=False):
             exact_run(f, gh, prefix, member.pr, member.head,
                       pulls[member.pr]["head"]["ref"], member_runs[member.pr])
             current_checks(f, gh, repo, member.pr, member.head, git_dir)
-    current_checks(f, gh, repo, roll_pr, batch.roll, git_dir)
-    exact_run(f, gh, prefix, roll_pr, batch.roll, roll_pull["head"]["ref"], batch.run)
+    current_checks(f, gh, repo, roll_pr, batch.roll, git_dir, failure=ExitCode.ROLL)
+    exact_run(f, gh, prefix, roll_pr, batch.roll, roll_pull["head"]["ref"], batch.run, failure=ExitCode.ROLL)
     if landing:
         approval_guard = Path(__file__).with_name("approve-guard.sh")
         for member in batch.members[len(landed):]:
-            f.command(["bash", str(approval_guard), "--merge-check", "--repo", repo,
-                       "--pr", str(member.pr), "--head", member.head, "--git-dir", git_dir])
+            guard_check(f, ["bash", str(approval_guard), "--merge-check", "--repo", repo,
+                           "--pr", str(member.pr), "--head", member.head, "--git-dir", git_dir], ExitCode.MEMBER)
     # Re-read mutable evidence after recomputing trees and CI/approval reads.
     for member in batch.members:
         end = f.api(gh, f"{prefix}/pulls/{member.pr}")
@@ -334,7 +398,7 @@ def evaluate(f, *, line, repo, pr, head, run, git_dir, gh, landing=False):
     roll_review_state(f, gh, repo, Member(roll_pr, batch.roll), batch.run)
     if (end_roll["state"] != "open" or end_roll["draft"] or end_roll.get("merged")
             or end_roll["head"]["sha"] != batch.roll or end_roll["base"]["ref"] != "main"
-            or trusted_line(f, gh, prefix, roll_pr, batch) != published[roll_pr]
+            or trusted_line(f, gh, prefix, roll_pr, batch, failure=ExitCode.ROLL) != published[roll_pr]
             or f.sha(f.api(gh, f"{prefix}/commits/main")["sha"]) != main):
         raise f.Unavailable("batch_roll_or_main_moved_during_check")
     return {"status": "fresh", "kind": "batch", "head": head, "run": run, "main": main,
@@ -377,8 +441,8 @@ def land(f, *, batch_file, repo, git_dir, gh, check_only):
                     "--batch", str(frozen)]
             # One group CI/tree validation above plus actual approval checks
             # for every member. Do not repeat whole-batch preflight N times.
-            f.command(["bash", str(approval_guard), "--merge-check", "--repo", repo,
-                       "--pr", str(member.pr), "--head", member.head, "--git-dir", git_dir])
+            guard_check(f, ["bash", str(approval_guard), "--merge-check", "--repo", repo,
+                           "--pr", str(member.pr), "--head", member.head, "--git-dir", git_dir], ExitCode.MEMBER)
             commands.append((member, cited, args))
         if check_only:
             return {"status": "checked", "roll": batch.roll,
@@ -419,11 +483,19 @@ def main():
             raise ValueError("invalid_repository")
         result = land(f, batch_file=args.batch, repo=args.repo, git_dir=args.git_dir,
                       gh=os.environ.get("GUARD_GH", "gh"), check_only=args.check_only)
-    except (f.Unavailable, ValueError, KeyError, TypeError, OSError) as error:
-        result = {"status": "unavailable", "reason": str(error) if isinstance(error, f.Unavailable)
-                  else "invalid_evidence"}
+        code = {"fresh": ExitCode.SUCCESS, "checked": ExitCode.SUCCESS,
+                "pending": ExitCode.PENDING}.get(result["status"], ExitCode.INVALID)
+    except f.Unavailable as error:
+        result = {"status": "unavailable", "reason": str(error)}
+        code = failure_code(error)
+    except (ValueError, KeyError, TypeError) as error:
+        result = {"status": "unavailable", "reason": "invalid_evidence"}
+        code = ExitCode.INVALID
+    except OSError:
+        result = {"status": "unavailable", "reason": "evidence_read_failed"}
+        code = ExitCode.INFRASTRUCTURE
     print(json.dumps(result, sort_keys=True))
-    return 0 if result["status"] in {"fresh", "checked"} else 7 if result["status"] == "pending" else 2
+    return code
 
 
 if __name__ == "__main__":

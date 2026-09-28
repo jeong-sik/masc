@@ -577,10 +577,14 @@ def test_the_failover_arm_renders_every_model_and_a_lane_that_routes_the_keeper(
         assert model["capabilities"]["max-output-tokens"] == 16384
         assert runtime["openrouter"][binding]["disable-parallel-tool-use"] is False
     assert openrouter_lists == ["z-ai/glm-5.3", "deepseek/deepseek-v4-pro"]
-    # A lane cannot be an exact-output cli slot; those keep the head runtime.
+    # A lane cannot be an exact-output slot; those keep the head runtime.
+    # Slots, not cli_slots: cli_slots only admit official-client runtimes
+    # since #39020, and an HTTP runtime there fails the config at load.
     exact = runtime["runtime"]["exact_output_lanes"]
-    assert exact["hitl_auto_judge"]["cli_slots"] == [ids[0]]
-    assert exact["board_attention_exact"]["cli_slots"] == [ids[0]]
+    assert exact["hitl_auto_judge"]["slots"] == [ids[0]]
+    assert exact["board_attention_exact"]["slots"] == [ids[0]]
+    assert exact["hitl_auto_judge"]["cli_slots"] == []
+    assert exact["board_attention_exact"]["cli_slots"] == []
     # Arm e's treatments otherwise.
     assert (out / "keepers" / "bench-1.toml").read_text() == keeper_toml("e")
 

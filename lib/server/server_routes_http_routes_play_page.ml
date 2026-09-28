@@ -182,11 +182,18 @@ async function refreshSeat() {
   renderPassTargets(r.json.participants);
 }
 
+// Whether the frame was drawn; a frame that was not says why in the status.
 function draw(screen) {
-  if (!screen || screen.format !== 'rgb8') { setStatus('이 화면 형식은 아직 그릴 수 없어요'); return; }
+  if (!screen || screen.format !== 'rgb8') { setStatus('이 화면 형식은 아직 그릴 수 없어요'); return false; }
   const raw = atob(screen.rgb_base64);
   const width = screen.width;
   const height = screen.height;
+  // An rgb8 frame is width * height pixels of three bytes. A frame that says
+  // otherwise is not drawn, rather than drawn from missing bytes.
+  if (!(Number.isInteger(width) && width > 0 && Number.isInteger(height) && height > 0 && raw.length === width * height * 3)) {
+    setStatus('화면을 읽지 못했어요 (' + width + 'x' + height + ', ' + raw.length + ' bytes)');
+    return false;
+  }
   if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
   const image = ctx.createImageData(width, height);
   for (let pixel = 0, source = 0; pixel < width * height; pixel += 1, source += 3) {
@@ -197,6 +204,7 @@ function draw(screen) {
     image.data[target + 3] = 255;
   }
   ctx.putImageData(image, 0, 0);
+  return true;
 }
 
 function renderActivity(activity) {
@@ -209,13 +217,25 @@ function renderActivity(activity) {
   }
 }
 
+// One poll. Every way it can fail -- the network, the seat read, a frame
+// that will not decode -- is shown and the next poll is still scheduled, so
+// the page never freezes on an old frame without saying so.
 async function tick() {
+  try {
+    await poll();
+  } catch (_) {
+    setStatus('연결이 잠시 끊겼어요. 다시 시도하고 있어요.');
+  } finally {
+    if (!ended) setTimeout(tick, POLL_MS);
+  }
+}
+
+async function poll() {
   if (ended) return;
   const query = since === null ? '' : '&since=' + since.count + '&incarnation=' + encodeURIComponent(since.incarnation);
-  let r;
-  try { r = await api('GET', LIVE_PATH + query); } catch (_) { r = null; }
+  const r = await api('GET', LIVE_PATH + query);
   if (ended) return;
-  if (r === null || r.status !== 200 || !r.json) {
+  if (r.status !== 200 || !r.json) {
     setStatus('연결이 잠시 끊겼어요. 다시 시도하고 있어요.');
   } else {
     const live = r.json;
@@ -224,8 +244,7 @@ async function tick() {
       setStatus('지금 켜진 게임이 없어요.');
     } else if (live.state === 'changed') {
       since = { count: live.change_count, incarnation: live.incarnation };
-      draw(live.screen);
-      setStatus('');
+      if (draw(live.screen)) setStatus('');
     }
     const activity = live.activity || [];
     renderActivity(activity);
@@ -234,7 +253,6 @@ async function tick() {
     const key = activity.length === 0 ? '' : JSON.stringify(activity[0]) + '#' + activity.length;
     if (key !== lastActivityKey) { lastActivityKey = key; await refreshSeat(); }
   }
-  setTimeout(tick, POLL_MS);
 }
 
 function send(path, body) {
@@ -259,6 +277,10 @@ function keyName(event) {
 el('screen-wrap').addEventListener('keydown', (event) => {
   const name = keyName(event);
   if (name === null || ended) return;
+  // A held key repeats every few tens of milliseconds while one press can run
+  // the machine for about 170 ms, so repeats would queue without end. One
+  // press per key down.
+  if (event.repeat) { event.preventDefault(); return; }
   event.preventDefault();
   press(name);
 });
@@ -281,7 +303,7 @@ el('pass').addEventListener('click', () => {
 if (token === '') {
   end('링크에 초대 토큰이 없어요. 받은 링크를 그대로 열어 주세요.');
 } else {
-  refreshSeat().catch(() => setStatus('자리 정보를 읽지 못했어요. 다시 시도하고 있어요.')).then(tick);
+  refreshSeat().catch(() => setStatus('자리 정보를 읽지 못했어요. 다시 시도하고 있어요.')).finally(tick);
 }
 </script>
 </body>

@@ -1196,7 +1196,6 @@ let test_all_official_client_failed_usage () =
 protocol = %S
 command = %S
 is-non-interactive = true
-timeout-s = 5.0
 %s
 [models.fixture]
 api-name = "paid-fixture"
@@ -1205,7 +1204,9 @@ tools-support = true
 [paid.fixture]
 [runtime]
 default = "paid.fixture"
-|} protocol cli (if mode="agy" then Printf.sprintf "credentials = { type = \"file\", path = %S }" auth else ""));
+|} protocol cli (if mode="agy" then
+    Printf.sprintf "timeout-s = 5.0\ncredentials = { type = \"file\", path = %S }" auth
+  else ""));
       (match Runtime.init_default ~config_path with Ok () -> () | Error detail -> fail detail);
       let check_usage usage =
         check int (mode ^ " failed input") input_tokens usage.Fusion_types.input_tokens;

@@ -62,6 +62,37 @@ val cell_gap : int
 val used_width : cell list -> int
 (** Cells the row occupies, the gaps between columns included. *)
 
+type 'col layout = private {
+  shown : 'col list;  (** The columns drawn, in display order. *)
+  flex_width : int;  (** What the flexible column gets. *)
+}
+(** Which of a table's columns fit a width, and the flexible column's share.
+    Private so a layout comes only from {!fit}. *)
+
+val fit :
+  inner_width:int ->
+  width:('col -> int) ->
+  flex:'col ->
+  drop_order:'col list ->
+  'col list ->
+  'col layout
+(** [fit ~inner_width ~width ~flex ~drop_order columns] decides what a table
+    draws in [inner_width] cells. [columns] is every column in display order,
+    named by the table's own closed variant; [width] is each column's fixed
+    width, and for [flex] its floor. While the columns still shown need more
+    than [inner_width] -- gaps included, at {!cell_gap} -- the next column of
+    [drop_order] that is still shown goes. Columns [drop_order] does not name,
+    and [flex], never go. [flex] then takes every cell the others leave, never
+    below its floor: when all that may go has gone and the rest still does not
+    fit, the row is wider than [inner_width] and the frame cuts it, as before
+    a table named what it could spare.
+
+    Columns compare with structural equality, so ['col] must be a closed
+    variant of constant constructors. [flex] must appear in [columns] exactly
+    once.
+    @raise Invalid_argument when [flex] is absent from [columns] or listed
+    more than once. *)
+
 val header_row : cell list -> string
 (** The column names, laid out on the given cells. *)
 

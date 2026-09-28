@@ -45,29 +45,64 @@ let isolated_native_login () = fixture (fun root _ ->
     (Result.is_error (Login.prepare ~runtime_root:root ~account_id:"../escape"
       ~client:Login.Muse ~existing:None)))
 
-(* After a login, each native client's own file under the selected home names
-   the account; the reader must look where that client's environment points. *)
-let login_account_email_files () = fixture (fun root _ ->
+(* runtime.toml as setup saves it from a reference: the provider's
+   account-home is the reference's path. *)
+let saved_provider account_home =
+  match Runtime_toml.parse_string (Printf.sprintf {|
+[runtime]
+default = "claude-code.claude-sonnet-5"
+
+[providers.claude-code]
+protocol = "claude-code"
+command = "/usr/bin/true"
+is-non-interactive = true
+account-home = %S
+
+[models."claude-sonnet-5"]
+api-name = "claude-sonnet-5"
+max-context = 1000000
+tools-support = true
+streaming = true
+turn-timeout-s = 0
+
+[claude-code."claude-sonnet-5"]
+|} account_home) with
+  | Ok { Runtime_schema.providers = [ provider ]; _ } -> provider
+  | Ok _ -> fail "expected one provider"
+  | Error errors ->
+    fail (String.concat "; " (List.map (fun (e : Runtime_toml.parse_error) -> e.path ^ ": " ^ e.message) errors))
+
+(* A provider setup saves from a login's reference runs on the home that login
+   signed in to, so its email is read from the file the client wrote there.
+   These are the server's calls, in its order. *)
+let login_email_reaches_the_saved_provider () = fixture (fun root _ ->
   let id_token claims =
     let segment text = Base64.encode_string ~pad:false ~alphabet:Base64.uri_safe_alphabet text in
     segment {|{"alg":"none"}|} ^ "." ^ segment claims ^ ".fixture-signature" in
-  List.iter (fun (client, id, relative, body, expected) ->
-    let login = Login.prepare ~runtime_root:root ~account_id:id ~client ~existing:None |> ok in
+  let workspace = root and cli_path = "fixture-cli" in
+  List.iter (fun (client, integration_id, api_format, relative, body, expected) ->
+    let login = Login.prepare ~runtime_root:root ~account_id:integration_id ~client ~existing:None |> ok in
+    let reference = Login.publish ~workspace ~integration_id ~cli_path login |> ok in
+    let account_home = match Accounts.resolve ~workspace ~integration_id ~cli_path reference |> account_ok with
+      | Accounts.Native_home {account_home} -> account_home
+      | Accounts.Antigravity_account _ -> fail "expected a native home" in
+    let provider = { (saved_provider account_home) with Runtime_schema.id = integration_id; api_format } in
     check bool "nothing is read before the client signs in" true
-      (Login.account_email login = Error Runtime_account_email.Source_unavailable);
+      (Runtime_account_email.of_provider provider = Some (Error Runtime_account_email.Source_unavailable));
     let path = Filename.concat (Login.home_dir login) relative in
     Fs_compat.mkdir_p (Filename.dirname path);
     Auth.save_private_text_file path body;
-    match Login.account_email login with
-    | Ok email -> check string "email from the client's own login file" expected
-                    (Runtime_account_email.to_string email)
-    | Error missing -> fail (Runtime_account_email.missing_to_string missing))
-    [ Login.Codex, "codex-email", "auth.json",
+    match Runtime_account_email.of_provider provider with
+    | Some (Ok email) -> check string "the saved provider reads the login's own file" expected
+                           (Runtime_account_email.to_string email)
+    | Some (Error missing) -> fail (Runtime_account_email.missing_to_string missing)
+    | None -> fail "a native provider runs on an account")
+    [ Login.Codex, "codex-email", Runtime_schema.Codex_app_server_runtime, "auth.json",
       Printf.sprintf {|{"auth_mode":"chatgpt","tokens":{"id_token":%S}}|}
         (id_token {|{"email":"codex@example.com"}|}), "codex@example.com";
-      Login.Claude, "claude-email", ".claude.json",
+      Login.Claude, "claude-email", Runtime_schema.Claude_code_runtime, ".claude.json",
       {|{"oauthAccount":{"emailAddress":"claude@example.com"}}|}, "claude@example.com";
-      Login.Muse, "muse-email", ".config/muse/auth.json",
+      Login.Muse, "muse-email", Runtime_schema.Muse_serve_runtime, ".config/muse/auth.json",
       {|{"schema_version":1,"providers":{"meta":{"user_email":"muse@example.com"}}}|}, "muse@example.com" ])
 
 let muse_capture_and_reference () = fixture (fun root env ->
@@ -153,7 +188,7 @@ let native_authentication_observation () = fixture (fun root env ->
 
 let () = run "official login adapters" ["selected accounts", [
   test_case "native login isolation" `Quick isolated_native_login;
-  test_case "account email from the client's login file" `Quick login_account_email_files;
+  test_case "a login's email reaches the provider saved from it" `Quick login_email_reaches_the_saved_provider;
   test_case "native authentication without model calls" `Quick native_authentication_observation;
   test_case "Muse capture and durable account selection" `Quick muse_capture_and_reference;
   test_case "Claude reauthentication identity" `Quick claude_reference_spelling]]

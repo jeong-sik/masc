@@ -131,6 +131,7 @@ type stream_event =
       ; decision : Runtime_muse_msp.approval_decision
       }
   | Subscription_usage_observed of Runtime_muse_msp.subscription_usage
+  | Compaction_observed of Runtime_muse_msp.compaction
   | Turn_terminal_received of Runtime_muse_msp.terminal
   | Usage_reported of
       { session_id : string
@@ -918,6 +919,10 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
                  | Some text -> Some text
                  | None -> state.final_text)
             }
+        | Msp.Compaction ->
+          Option.iter (fun compaction -> emit (Compaction_observed compaction))
+            item.Msp.compaction;
+          continue { state with open_items }
         | _ -> continue { state with open_items })
      | Msp.Usage_changed usage ->
        emit (Subscription_usage_observed usage);
@@ -943,13 +948,46 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
      | Msp.Unhandled_notification _ -> continue state)
 ;;
 
-let validate_session_identity (config : config) ~workspace_root (session : Msp.session) =
-  let* () = match config.model with
-    | Some requested when session.model_id <> Some requested ->
-      Error (Session_model_mismatch {requested; resumed=session.model_id})
-    | Some _ | None -> Ok () in
+let validate_session_model (config : config) (session : Msp.session) =
+  match config.model with
+  | Some requested when session.model_id <> Some requested ->
+    Error (Session_model_mismatch {requested; resumed=session.model_id})
+  | Some _ | None -> Ok ()
+;;
+
+let validate_session_workspace ~workspace_root (session : Msp.session) =
   if session.workspace_root = Some workspace_root then Ok ()
   else Error (Session_workspace_mismatch {requested=workspace_root; reported=session.workspace_root})
+;;
+
+(* The model named on session/start is only the session's first selection.
+   Muse Code 1.4.0 writes its account default into the session metadata right
+   after the start and again when the host closes, and the session's [modelId]
+   is that metadata. So a resumed session reports the default
+   (muse-spark-1.3-contributor, whose content may be used for product
+   improvement) while the model the host runs is replayed from the session's
+   run and selection records: the requested model once a turn ran, the
+   default before any turn did. The reported model cannot tell these apart.
+   session/setModel is MSP's selection for the session's next model calls:
+   the host applies it, or answers noop when that model already runs, and a
+   noop leaves the metadata default in place. So every resume selects the
+   model, whatever the session reports, the way it re-applies the approval
+   mode. The accepted ack is the host's answer; a refused or failed selection
+   stops the turn before it starts. *)
+let select_session_model io (config : config) (session : Msp.session) =
+  match config.model with
+  | None -> Ok session
+  | Some requested ->
+    let* result =
+      request io ~method_:"session/setModel" (fun ~id ->
+        Msp.session_set_model_request
+          ~id
+          ~command_id:(new_command_id ())
+          ~session_id:session.session_id
+          ~model_id:requested)
+    in
+    let* () = lift (Msp.parse_set_model_result result) in
+    Ok { session with model_id = Some requested }
 ;;
 
 let validate_session_approval_mode ~requested reported =
@@ -971,7 +1009,8 @@ let open_session io (config : config) ~approval_mode ~session_mode ~workspace_ro
           ~config:session_config)
     in
     let* session = lift (Msp.parse_session_result ~stage:"session/start" result) in
-    let* () = validate_session_identity config ~workspace_root session in
+    let* () = validate_session_model config session in
+    let* () = validate_session_workspace ~workspace_root session in
     (* A started session must be empty: turns attached to a fresh claim mean
        the host confused the new session with an existing conversation. *)
     let* () =
@@ -1004,7 +1043,7 @@ let open_session io (config : config) ~approval_mode ~session_mode ~workspace_ro
              session_id
              session.Msp.session_id)
     in
-    let* () = validate_session_identity config ~workspace_root session in
+    let* () = validate_session_workspace ~workspace_root session in
     let* () =
       if session.Msp.turn_count = expected_turn_count
       then Ok ()
@@ -1012,6 +1051,9 @@ let open_session io (config : config) ~approval_mode ~session_mode ~workspace_ro
           (Printf.sprintf "retained session completed-turn count changed: expected %d, reported %d"
              expected_turn_count session.Msp.turn_count)
     in
+    (* The model first: the approval mode set after it is the session state
+       the host confirms last, so no other session command follows its check. *)
+    let* session = select_session_model io config session in
     let* result =
       request io ~method_:"session/setApprovalMode" (fun ~id ->
         Msp.session_set_approval_mode_request

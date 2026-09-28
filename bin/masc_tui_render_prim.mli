@@ -103,10 +103,10 @@ val frame_lines : Buffer.t -> string list
 val write_two_panes :
   Buffer.t -> left_cols:int -> left:Buffer.t -> right:Buffer.t -> unit
 
-val finish_frame :
-  ?clamped:Masc_tui_types.clamped_scroll ->
-  ?compact_frame:bool ->
-  surface_key:string ->
+(** The frame for a terminal too small for any surface: the notice alone,
+    with no strip and no Activity pane. Surfaces end through [finish_surface]
+    or [finish_frame_beside_acting_pane]. *)
+val finish_terminal_too_small_frame :
   cursor:Frame_presenter.cursor ->
   rows:int ->
   cols:int ->
@@ -152,15 +152,6 @@ val keeper_split_threshold_cols : int
 
 val keeper_roster_pane_cols : int
 
-val finish_frame_with_strip :
-  Masc_tui_types.state ->
-  ?clamped:Masc_tui_types.clamped_scroll ->
-  surface_key:string ->
-  cursor:Frame_presenter.cursor ->
-  rows:int ->
-  cols:int ->
-  Buffer.t -> Frame_presenter.frame * Masc_tui_types.clamped_scroll option
-
 val change_row_address : Masc.Tui_decode.file_change -> string
 
 val file_change_evidence_label :
@@ -176,6 +167,20 @@ val finish_surface :
   Masc_tui_types.state ->
   ?clamped:Masc_tui_types.clamped_scroll ->
   surface_key:string ->
+  rows:int ->
+  cols:int ->
+  Buffer.t -> Frame_presenter.frame * Masc_tui_types.clamped_scroll option
+
+(** The end of a surface that draws its own composer and footer instead of
+    taking the shared composer row. [cols] is the width it laid out against,
+    the terminal less the Activity pane; the pane is drawn in those columns
+    beside the rows the press test counts as the pane's, and the strip spans
+    the whole terminal. *)
+val finish_frame_beside_acting_pane :
+  Masc_tui_types.state ->
+  ?clamped:Masc_tui_types.clamped_scroll ->
+  surface_key:string ->
+  cursor:Frame_presenter.cursor ->
   rows:int ->
   cols:int ->
   Buffer.t -> Frame_presenter.frame * Masc_tui_types.clamped_scroll option
@@ -240,6 +245,18 @@ val surface_chrome :
   Frame_presenter.frame * Masc_tui_types.clamped_scroll option
 
 val connection_badge : Masc_tui_types.state -> string
+
+val lane_run_detail_title : string
+val measurement_detail_title : string
+(** The titles of the two screens that show one record by its id. *)
+
+val detail_heading : cols:int -> title:string -> id:string -> badge:string -> string
+(** [title], [id] and [badge] on one heading row of a frame [cols] wide. The
+    badge is drawn whole. The id takes what the title and the badge leave:
+    whole when it fits, folded in the middle when it does not, so both its
+    opening and its distinguishing tail stay; left out when nothing is left.
+    A frame too narrow for the title and the badge cuts the badge when the
+    row is drawn. *)
 
 val coordinator_status_row :
   Masc_tui_types.state -> style:string -> string -> string

@@ -146,7 +146,7 @@ let find_char text ~from char =
   | Some index -> Some index
   | None -> None
 
-let inline_segments text =
+let inline_segments_lexed text =
   let limit = String.length text in
   let out = ref [] in
   let pending = Buffer.create (String.length text) in
@@ -234,6 +234,16 @@ let inline_segments text =
   walk 0;
   flush_pending ();
   List.rev !out
+
+let inline_segments text =
+  (* Plain comments need one segment, without a byte-by-byte lexer walk. *)
+  if text = "" then []
+  else if
+    String.exists
+      (function '`' | '*' | '_' | '~' | '[' -> true | _ -> false)
+      text
+  then inline_segments_lexed text
+  else [ (text, kind_plain) ]
 
 (* {1 Wrapping styled segments} *)
 
@@ -1073,4 +1083,8 @@ let render_streaming ~palette ~width text =
     mutable_row_start;
   }
 
-let render ~palette ~width text = (render_streaming ~palette ~width text).rows
+let render ~palette ~width text =
+  (* A single non-fence line is one block; streaming adds no context to it. *)
+  if not (String.contains text '\n') && Option.is_none (fence_marker text) then
+    block_rows palette ~width:(max 1 width) text
+  else (render_streaming ~palette ~width text).rows

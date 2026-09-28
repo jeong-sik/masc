@@ -468,16 +468,17 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
       |> Result.map_error (fun detail -> Setup_failure detail)
     in
     let* () =
-      match runtime.model.max_prompt_bytes with
-      | None ->
+      match Runtime.muse_prompt_capacity runtime with
+      | Error error ->
         Error (Muse_failure (Runtime_muse_serve.Invalid_config
-          "Muse Code requires the model's declared max-prompt-bytes"))
-      | Some capacity_bytes when String.length prompt > capacity_bytes ->
+          ("Muse Code has no prompt ceiling: "
+           ^ Runtime_muse_prompt_capacity.error_to_string error)))
+      | Ok capacity_bytes when String.length prompt > capacity_bytes ->
         Error (Muse_failure (Runtime_muse_serve.Invalid_config
           (Printf.sprintf
-            "Muse Code framed input is %d bytes, exceeding declared max-prompt-bytes %d"
+            "Muse Code framed input is %d bytes, exceeding the prompt ceiling %d"
             (String.length prompt) capacity_bytes)))
-      | Some _ -> Ok ()
+      | Ok _ -> Ok ()
     in
     Eio.Switch.run
     @@ fun sw ->
@@ -517,6 +518,7 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
            | Runtime_muse_serve.Turn_started _ | Runtime_muse_serve.Text_delta _
            | Runtime_muse_serve.Text_completed _ | Runtime_muse_serve.Native_tool_started _
            | Runtime_muse_serve.Native_tool_finished _ | Runtime_muse_serve.Approval_decided _
+           | Runtime_muse_serve.Compaction_observed _
            | Runtime_muse_serve.Turn_terminal_received _ | Runtime_muse_serve.Turn_finished _ -> ())
          ~mgr
          ~clock

@@ -20,7 +20,7 @@
 
 (executable
  (name main_eio)
- (modules main_eio masc_cli_setup masc_cli_runtime_sample masc_cli_onboarding masc_cli_prerequisites masc_cli_inspect_file masc_cli_docker_session masc_cli_model_resume masc_cli_workspace_upgrade masc_cli_antigravity masc_cli_codex_models masc_cli_muse_models masc_cli_muse_login masc_cli_owner_upgrade masc_cli_runtime_setup masc_cli_client_path)
+ (modules main_eio masc_cli_setup masc_cli_runtime_sample masc_cli_onboarding masc_cli_prerequisites masc_cli_inspect_file masc_cli_docker_session masc_cli_model_resume masc_cli_workspace_upgrade masc_cli_antigravity masc_cli_codex_models masc_cli_muse_models masc_cli_account_login masc_cli_owner_upgrade masc_cli_runtime_setup masc_cli_client_path)
  (public_name masc)
  (package masc)
  (libraries
@@ -1011,6 +1011,10 @@
   masc_tui_observer
   masc_tui_message_layout
   masc_tui_roster_pane
+  ; the pane opens only where a surface keeps the Keepers list's flag
+  ; columns inside its frame; both are leaf layout facts below this library.
+  masc_tui_frame
+  masc_tui_render_schedule
   ; agent_core for the tool schedule contract a ledger call carries: batch
   ; size and execution mode decide the dispatch marks.
   agent_core))
@@ -1728,6 +1732,7 @@
  (libraries
   masc_tui_account_login
   masc_tui_sgr_text
+  masc_tui_emblem_screen
   masc_tui_hit
   masc_tui_press
   masc_tui_pick_list
@@ -1750,6 +1755,9 @@
   masc_tui_lane_subscriptions
   masc_tui_lane_declaration
   masc_tui_lane_table
+  ;; masc_tui_render lays out the Lanes, Changes, Harness and Planning
+  ;; tables through Masc_tui_table.fit (#39662).
+  masc_tui_table
   masc_tui_connector_state
   masc_tui_connector_unbind
   masc_tui_fleet_line
@@ -2034,6 +2042,35 @@
  (wrapped false)
  (modules masc_tui_image_mosaic)
  (libraries masc_tui_theme))
+
+;; The imp emblem: two flat marks as distance fields, and a renderer that
+;; turns them in Braille. Pure, so a test links it without the TUI.
+(library
+ (name masc_tui_imp_shape)
+ (wrapped false)
+ (modules masc_tui_imp_shape))
+
+(library
+ (name masc_tui_imp_emblem)
+ (wrapped false)
+ (modules masc_tui_imp_emblem)
+ (libraries
+  masc_tui_color
+  masc_tui_imp_shape
+  masc_tui_terminal_palette
+  masc_tui_theme))
+
+;; The imp laid out as a screen body under its caption, for the startup splash
+;; and /about. Apart from the renderer so its layout is tested without the TUI.
+(library
+ (name masc_tui_emblem_screen)
+ (wrapped false)
+ (modules masc_tui_emblem_screen)
+ (libraries
+  masc_tui_imp_emblem
+  masc_tui_message_layout
+  masc_tui_terminal_palette
+  masc_tui_theme))
 
 ;; Decides, by magic bytes, whether a downloaded body may sit in the preview
 ;; image cache, and what a curl or ffmpeg exit status means. Kept apart from

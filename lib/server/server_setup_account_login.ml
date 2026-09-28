@@ -33,6 +33,11 @@ let session_status = function
   | Cancelled | Transport_failed | Process_failed _ -> `Bad_gateway
 
 let receipt_failure = "The private login recovery record could not be saved."
+let account_failure = "The private login account could not be prepared."
+
+let canonical_account_key path =
+  try Ok (Fs_compat.realpath path) with
+  | Unix.Unix_error _ | Sys_error _ -> Error account_failure
 
 let start ~actor ~base_path ~body request reqd =
   let prepared =
@@ -51,17 +56,20 @@ let start ~actor ~base_path ~body request reqd =
   | Ok _, None -> respond ~status:`Service_unavailable ~request reqd "Login requires the server process environment."
   | Ok (integration_id, client, cli_path, spawn_path, reference, existing), Some env ->
     let account_key = match existing with
-      | None -> Auth.generate_token ()
-      | Some (Runtime_setup_accounts.Native_home {account_home}) -> Unix.realpath account_home
-      | Some (Runtime_setup_accounts.Antigravity_account {credential_file; _}) -> Unix.realpath credential_file in
-    let result = Session.with_session ~workspace:base_path ~actor ~account_key (fun session ->
+      | None -> Ok (Auth.generate_token ())
+      | Some (Runtime_setup_accounts.Native_home {account_home}) -> canonical_account_key account_home
+      | Some (Runtime_setup_accounts.Antigravity_account {credential_file; _}) -> canonical_account_key credential_file in
+    let result = match account_key with
+    | Error message -> respond ~status:`Service_unavailable ~request reqd message; Ok ()
+    | Ok account_key -> Session.with_session ~workspace:base_path ~actor ~account_key (fun session ->
       let prepared =
         let* home = Client.prepare ~runtime_root:(Common.masc_dir_from_base_path ~base_path)
           ~account_id:(Session.id session) ~client ~existing in
         let* () = match client, existing with
           | Client.Antigravity, Some _ -> Ok ()
           | (Codex | Claude | Muse | Antigravity), _ ->
-            Session.bind_account session ~account_key:(Unix.realpath (Client.home_dir home))
+            let* account_key = canonical_account_key (Client.home_dir home) in
+            Session.bind_account session ~account_key
             |> Result.map_error Session.error_message in
         let* child_env = Client.environment home in
         let* reference = match client with
@@ -74,8 +82,7 @@ let start ~actor ~base_path ~body request reqd =
           |> Result.map_error (fun _ -> receipt_failure) in
         Ok (home, child_env, receipt) in
       match prepared with
-      | Error _ -> respond ~status:`Service_unavailable ~request reqd
-          "The private login account could not be prepared."; Ok ()
+      | Error _ -> respond ~status:`Service_unavailable ~request reqd account_failure; Ok ()
       | Ok (home, child_env, initial_receipt) ->
         let receipt = ref initial_receipt in
         let headers = Httpun.Headers.of_list

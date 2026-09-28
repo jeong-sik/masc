@@ -24,6 +24,11 @@ type base =
   ; client : client
   }
 
+type declared =
+  { text : string  (** The whole text with the new provider appended. *)
+  ; location : string  (** The login store written, after [~/] expansion. *)
+  }
+
 type error =
   | Unparsable of string  (** The text is not TOML. *)
   | Unknown_base of string  (** No official-client provider has this id. *)
@@ -35,7 +40,12 @@ type error =
   | Location_taken of
       { location : string
       ; provider : string
-      }  (** Another provider of the same client already signs in there. *)
+      }
+      (** Another provider of the same client already signs in there,
+          spelled the same or differently. *)
+  | Unsupported_layout of string
+      (** The file is written so that an appended provider would not read
+          back as declared. The editor is the way to add it. *)
   | Rejected of Runtime_toml.parse_error list
       (** The loader refuses the text with the new provider in it. *)
 
@@ -56,17 +66,24 @@ val location_label : client -> string
     runtime.toml key uses. *)
 
 val declare :
-  ?home_dir:string -> t -> base:base -> id:string -> location:string ->
-  (string, error) result
+  ?home_dir:string ->
+  inherited_home:(client -> string option) ->
+  t -> base:base -> id:string -> location:string ->
+  (declared, error) result
 (** The text with provider [id] appended: the base's provider table with a new
     [display-name] and login store, and a copy of every binding table the base
-    declares. [location] is the login store:
+    declares. Copied values keep their exact value. [location] is the login
+    store:
 
     - Claude Code and Codex: [account-home], the directory given as
       [CLAUDE_CONFIG_DIR] or [CODEX_HOME] at sign-in.
     - Antigravity: the OAuth file [masc runtime-antigravity-account] reports,
       written as [credentials] of type [file].
 
-    A leading [~/] is expanded against [home_dir] when it is given. The result
-    has passed {!Runtime_toml.parse_string}. The server's own preview still
-    decides whether it can be saved. *)
+    A leading [~/] is expanded against [home_dir] when it is given.
+    [inherited_home] is the home a Claude Code or Codex provider without
+    [account-home] runs on; a location equal to it is refused like any other
+    login already in use, since the copy would share that login and its
+    quota. The result reads back with the login store in place and has passed
+    {!Runtime_toml.parse_string}. The server's own preview still decides
+    whether it can be saved. *)

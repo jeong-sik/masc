@@ -71,6 +71,7 @@ wizard-default = true
 
 [codex_subscription."gpt-5.6"]
 max-concurrent = 2
+price-input = 0.075
 
 [codex_acct1."gpt-5.6"]
 
@@ -83,6 +84,12 @@ max-concurrent = 2
 
 let home_dir = "/home/op"
 
+(* The fixture's providers without account-home run on these. *)
+let inherited_home = function
+  | D.Codex -> Some "/home/op/.codex"
+  | D.Claude_code -> Some "/home/op/.claude"
+  | D.Antigravity -> None
+
 let parsed text =
   match D.parse text with
   | Ok t -> t
@@ -94,8 +101,8 @@ let base_named t id =
   | None -> Alcotest.failf "no base %s" id
 
 let declared ?(home_dir = home_dir) t ~base ~id ~location =
-  match D.declare ~home_dir t ~base:(base_named t base) ~id ~location with
-  | Ok text -> text
+  match D.declare ~home_dir ~inherited_home t ~base:(base_named t base) ~id ~location with
+  | Ok declared -> declared.D.text
   | Error e -> Alcotest.failf "declare %s refused: %s" id (D.error_message e)
 
 let config_of text =
@@ -108,10 +115,13 @@ let bindings_of config provider =
     (fun (b : Runtime_schema.binding) -> b.provider_id = provider)
     config.Runtime_schema.bindings
 
-let toml_string text path =
+let toml_of text =
   match Otoml.Parser.from_string_result text with
   | Error detail -> Alcotest.failf "result is not TOML: %s" detail
-  | Ok toml -> Otoml.find_opt toml (fun value -> Otoml.get_string value) path
+  | Ok toml -> toml
+
+let toml_string text path =
+  Otoml.find_opt (toml_of text) (fun value -> Otoml.get_string value) path
 
 let test_bases_are_the_signed_in_clients () =
   let t = parsed fixture in
@@ -190,7 +200,7 @@ let test_antigravity_copy_reads_the_new_oauth_file () =
 let test_refusals () =
   let t = parsed fixture in
   let declare ?(home_dir = home_dir) base id location =
-    D.declare ~home_dir t ~base:(base_named t base) ~id ~location
+    D.declare ~home_dir ~inherited_home t ~base:(base_named t base) ~id ~location
   in
   (match declare "codex_subscription" "codex_acct1" "/home/op/.x" with
    | Error (D.Id_taken "codex_acct1") -> ()
@@ -207,6 +217,12 @@ let test_refusals () =
    with
    | Error (D.Location_taken { provider = "antigravity_subscription"; _ }) -> ()
    | _ -> Alcotest.fail "the base's ~/ OAuth file, written out, is refused");
+  (match declare "codex_subscription" "codex_3" "/home/op/.codex-account1/" with
+   | Error (D.Location_taken { provider = "codex_acct1"; _ }) -> ()
+   | _ -> Alcotest.fail "the same home with a trailing slash is refused");
+  (match declare "codex_subscription" "codex_3" "~/.codex" with
+   | Error (D.Location_taken { provider = "codex_subscription"; _ }) -> ()
+   | _ -> Alcotest.fail "the home a provider without account-home runs on is refused");
   (match declare "codex_subscription" "codex_3" "codex-home" with
    | Error (D.Invalid_location _) -> ()
    | _ -> Alcotest.fail "a relative home is refused");
@@ -217,12 +233,77 @@ let test_refusals () =
    | Error (D.Rejected (_ :: _)) -> ()
    | _ -> Alcotest.fail "the loader's own id rule refuses a dotted id");
   match
-    D.declare t
+    D.declare ~inherited_home t
       ~base:{ D.id = "ollama"; display_name = "Local Ollama"; client = D.Codex }
       ~id:"ollama_2" ~location:"/home/op/.o"
   with
   | Error (D.Unknown_base "ollama") -> ()
   | _ -> Alcotest.fail "an HTTP provider is not a base"
+
+(* Otoml's own printer writes floats to two places. A copied price or timeout
+   has to arrive as the base wrote it, and a whole-number float has to stay a
+   float. *)
+let test_copied_numbers_keep_their_value () =
+  let t = parsed fixture in
+  let codex =
+    toml_of (declared t ~base:"codex_subscription" ~id:"codex_2" ~location:"/home/op/.c2")
+  in
+  Alcotest.(check (option (float 0.))) "price-input is copied exactly" (Some 0.075)
+    (Otoml.find_opt codex (fun v -> Otoml.get_float ~strict:true v)
+       [ "codex_2"; "gpt-5.6"; "price-input" ]);
+  let agy =
+    toml_of
+      (declared t ~base:"antigravity_subscription" ~id:"agy_2" ~location:"/home/op/.a2")
+  in
+  Alcotest.(check (option (float 0.))) "timeout-s stays the float 180.0" (Some 180.0)
+    (Otoml.find_opt agy (fun v -> Otoml.get_float ~strict:true v)
+       [ "providers"; "agy_2"; "timeout-s" ])
+
+(* Layouts the append cannot carry. A [[table array]] under the base is
+   printed after the copy's own keys, not over them; a providers table
+   written inline cannot take a section after it, so that is refused rather
+   than written as TOML another reader rejects. *)
+let test_layouts_the_append_cannot_carry () =
+  let with_notes =
+    parsed
+      {|[providers.cc]
+protocol = "claude-code"
+command = "claude"
+is-non-interactive = true
+
+[[providers.cc.notes]]
+text = "first"
+
+[models.sonnet]
+api-name = "claude-sonnet-5"
+max-context = 1000000
+tools-support = true
+
+[cc.sonnet]
+|}
+  in
+  Alcotest.(check (option string)) "account-home is not swallowed by the table array"
+    (Some "/home/op/.cc2")
+    (toml_string (declared with_notes ~base:"cc" ~id:"cc_2" ~location:"/home/op/.cc2")
+       [ "providers"; "cc_2"; "account-home" ]);
+  let inline =
+    parsed
+      {|providers = { cc = { protocol = "claude-code", command = "claude", is-non-interactive = true } }
+
+[models.sonnet]
+api-name = "claude-sonnet-5"
+max-context = 1000000
+tools-support = true
+
+[cc.sonnet]
+|}
+  in
+  match
+    D.declare ~inherited_home inline ~base:(base_named inline "cc") ~id:"cc_2"
+      ~location:"/home/op/.cc2"
+  with
+  | Error (D.Unsupported_layout _) -> ()
+  | _ -> Alcotest.fail "an inline providers table is refused"
 
 (* The shipped seed is what a first account is copied from on a fresh
    install. Every client it declares has to take a second account. *)
@@ -239,11 +320,12 @@ let test_every_seed_client_takes_a_second_account () =
     (fun (base : D.base) ->
       let id = D.suggest_id t base in
       match
-        D.declare ~home_dir t ~base ~id ~location:("/home/op/.accounts/" ^ id)
+        D.declare ~home_dir ~inherited_home t ~base ~id
+          ~location:("/home/op/.accounts/" ^ id)
       with
-      | Ok text ->
+      | Ok declared ->
         Alcotest.(check bool) (id ^ " binds models") true
-          (bindings_of (config_of text) id <> [])
+          (bindings_of (config_of declared.D.text) id <> [])
       | Error e -> Alcotest.failf "%s refused: %s" id (D.error_message e))
     bases
 
@@ -259,6 +341,10 @@ let () =
         ; Alcotest.test_case "antigravity copy reads the new oauth file" `Quick
             test_antigravity_copy_reads_the_new_oauth_file
         ; Alcotest.test_case "refusals" `Quick test_refusals
+        ; Alcotest.test_case "copied numbers keep their value" `Quick
+            test_copied_numbers_keep_their_value
+        ; Alcotest.test_case "layouts the append cannot carry" `Quick
+            test_layouts_the_append_cannot_carry
         ; Alcotest.test_case "every seed client takes a second account" `Quick
             test_every_seed_client_takes_a_second_account
         ] )

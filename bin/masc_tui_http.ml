@@ -1672,9 +1672,9 @@ let fetch_runtime_resolved ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/runtime/resolved"
 
-let fetch_setup_inventory ~(host : string) ~(port : int) :
+let fetch_account_emails ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
-  get_json ~host ~port ~path:"/api/v1/setup/inventory"
+  get_json ~host ~port ~path:"/api/v1/setup/account-emails"
 
 (** GET /api/v1/dashboard/clients — everyone attached to this workspace:
     directory agents, state-backed sessions, runtime fibers. *)

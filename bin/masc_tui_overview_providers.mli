@@ -56,10 +56,12 @@ val section :
     a meter takes what the other columns leave, from 10 to 24 cells. When
     even 10 cells do not fit beside the hearing age, the age is left out.
 
-    An account whose providers have a read email draws it dim in the name
-    column under its name: on its second window row, or on a row of its own
-    when it draws only one. A failed email read adds one note,
-    ["account emails unread: <reason>"], after the runtime notes. *)
+    An account whose providers have a read email draws it dim under its name.
+    The name column is as wide as the widest account name: an email that fits
+    it goes on the account's second window row, and otherwise, or when the
+    account draws one row, on a row of its own. A failed email read adds one
+    note, ["account emails unread: <reason>"], after the runtime notes, and so
+    do rows this build cannot read. *)
 
 val utilization_text : Masc.Tui_decode.provider_usage_utilization -> string
 (** The value as a whole percent, so accounts read in one unit. A percent is

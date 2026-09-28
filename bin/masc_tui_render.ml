@@ -914,9 +914,9 @@ let render_overview (state : state) =
          let omitted =
            match visible.hidden_accounts, visible.hidden_notes with
            | accounts, 0 -> Printf.sprintf "  %d more accounts do not fit at this height." accounts
-           | 0, notes -> Printf.sprintf "  %d runtime notes do not fit at this height." notes
+           | 0, notes -> Printf.sprintf "  %d notes do not fit at this height." notes
            | accounts, notes ->
-               Printf.sprintf "  %d more accounts and %d runtime notes do not fit at this height."
+               Printf.sprintf "  %d more accounts and %d notes do not fit at this height."
                  accounts notes
          in
          box_line buf cols omitted;
@@ -10880,10 +10880,11 @@ let fusion_detail_pane (state : state) ~rows ~cols run_id buf =
         Some detail
     | Some _ | None -> None
   in
+  (* The badge is drawn whole; the id is whole when it fits and folded in the
+     middle when it does not ([detail_heading]). *)
   let header =
-    Printf.sprintf "%s  %s  %s" (screen_title " MASC Fusion")
-      (fit_width (Terminal_text.single_line run_id) 38)
-      (connection_badge state)
+    detail_heading ~cols ~title:fusion_detail_title ~id:run_id
+      ~badge:(connection_badge state)
   in
   box_top buf cols;
   box_line buf cols header;

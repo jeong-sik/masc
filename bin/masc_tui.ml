@@ -4342,10 +4342,11 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
              match result with
              | Ok () when complete () -> ()
              | Ok () | Error _ -> enqueue (Error "로그인 결과를 받지 못했습니다. r로 상태를 다시 확인하세요.")))
-  | Input json ->
+  | Input (_, json) ->
     (match view.login_id with None -> view.input_pending<-false
      | Some id -> start_job (fun () -> enqueue (post (login_path id ^ "/input") json)))
-  | Inventory | Refresh_saved -> view.phase<-Login.Loading; start_job (fun () -> enqueue (Masc_tui_http.get_json ~host ~port ~path:"/api/v1/setup/inventory"))
+  | Inventory | Refresh_saved ->
+    (match action with Inventory -> view.phase<-Login.Loading | _ -> ()); start_job (fun () -> enqueue (Masc_tui_http.get_json ~host ~port ~path:"/api/v1/setup/inventory"))
   | Recover -> (match view.login_id with
       | None -> view.notice<-"조회할 로그인 세션이 없습니다. n으로 새 로그인을 시작하세요."
       | Some id -> view.phase<-Login.Loading; start_job (fun () -> enqueue (Masc_tui_http.get_json ~host ~port ~path:(login_path id))))
@@ -14688,16 +14689,15 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       (match state.account_login with
        | Some current when current == view && view.generation = generation ->
          let module Login = Masc_tui_account_login in
-         let applied = match result with
-           | Error _ -> Error "요청 결과를 확인하지 못했습니다. r로 재확인하세요."
-           | Ok json -> (match action with
+         let applied = match action, result with
+           | Login.Input (sequence, _), result -> Login.input_response ~sequence view result; Ok ()
+           | Login.Refresh_saved, result -> Login.refresh_saved view result; Ok ()
+           | _, Error _ -> Error "요청 결과를 확인하지 못했습니다. r로 재확인하세요."
+           | _, Ok json -> (match action with
              | Login.Inventory ->
                (match Login.inventory view json with
                 | Ok () -> restore_account_login state view; Ok () | Error _ as error -> error)
-             | Refresh_saved ->
-               (match Login.inventory view json with
-                | Ok () -> view.phase<-Login.Finished; view.notice<-"모델의 응답과 도구 호출을 검증하고 저장했습니다."; Ok ()
-                | Error _ -> view.phase<-Login.Finished; view.notice<-"설정은 저장했지만 목록을 새로 읽지 못했습니다. 창을 다시 열어 확인하세요."; Ok ())
+             | Refresh_saved -> Login.refresh_saved view (Ok json); Ok ()
              | Discover -> Login.models view json
              | Prepare model -> Login.prepared view model json
              | Recover -> (match Login.receipt view json with

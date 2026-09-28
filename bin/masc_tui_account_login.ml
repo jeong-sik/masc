@@ -1,23 +1,23 @@
 type client = Codex | Claude | Antigravity | Muse
 type provider = { id : string; label : string; client : client }
 type model = { id : string; label : string; context : int option; tools : bool option }
-type phase = Loading | Providers | Logging | Models | Capacity of model | Saving | Finished | Failed
+type phase = Loading | Providers | Logging | Models | Capacity of model | Documented_context of model | Saving | Finished | Failed
 type t = {
   requested : string; mutable generation : int; mutable phase : phase; mutable providers : provider list;
   mutable provider : provider option; mutable models : model list; mutable cursor : int;
   mutable account_ref : string option; mutable login_id : string option;
-  mutable revision : string; mutable existing : string list; mutable draft : string;
-  mutable output : string; mutable notice : string; mutable input_pending : bool;
+  mutable revision : string; mutable existing : string list; mutable default_runtime_id : string option; mutable draft : string;
+  mutable output : string; mutable notice : string; mutable input_pending : bool; mutable input_sequence : int;
   mutable cancel_stream : (unit -> unit) option;
 }
 type authentication = Authenticated | Login_completed | Credential_captured
 type event = Started of string * string option | Output of string | Input_ready
   | Complete of string * authentication | Login_failed of string * string option | Login_error
-type action = Inventory | Refresh_saved | Start of bool | Input of Yojson.Safe.t | Cancel
+type action = Inventory | Refresh_saved | Start of bool | Input of int * Yojson.Safe.t | Cancel
   | Recover | Discover | Prepare of model | Save of model * int option | Close | Nothing
 let create requested = {requested; generation=0; phase=Loading; providers=[]; provider=None; models=[];
-  cursor=0; account_ref=None; login_id=None; revision=""; existing=[]; draft="";
-  output=""; notice="계정 목록을 읽고 있습니다."; input_pending=false; cancel_stream=None}
+  cursor=0; account_ref=None; login_id=None; revision=""; existing=[]; default_runtime_id=None; draft="";
+  output=""; notice="계정 목록을 읽고 있습니다."; input_pending=false; input_sequence=0; cancel_stream=None}
 let begin_attempt t provider ~existing =
   if t.provider <> Some provider then t.account_ref <- None;
   t.provider <- Some provider;
@@ -46,7 +46,8 @@ let inventory t json =
     let ids = List.filter_map (fun row -> string (field "id" row)) runtimes in
     let selected = List.map string selected in
     let existing = List.filter_map Fun.id selected in
-    if List.exists Option.is_none selected
+    if (field "default_runtime_id" json<>`Null && Option.is_none (string (field "default_runtime_id" json)))
+       || List.exists Option.is_none selected
        || List.length existing <> List.length (List.sort_uniq String.compare existing)
        || List.exists (fun id -> not (List.mem id ids)) existing
     then Error "기본 모델과 대체 연결의 설정 순서를 확인하지 못했습니다."
@@ -63,10 +64,22 @@ let inventory t json =
     if t.requested<>"" && Option.is_none selected then Error "요청한 공식 클라이언트를 찾지 못했습니다. /login으로 목록을 확인하세요."
     else (
       t.providers <- providers; t.revision <- revision;
-      t.existing <- existing;
+      t.existing <- existing; t.default_runtime_id <- string (field "default_runtime_id" json);
       t.cursor <- (match selected with Some i -> i | None -> 0);
       t.phase <- Providers; t.notice <- "Enter: 새 계정 로그인. 기존 계정은 e로 선택합니다."; Ok ())
   | _ -> Error "서버 계정 목록을 읽지 못했습니다."
+let refresh_saved t result =
+  let refreshed = match result with Ok json -> inventory t json | Error _ as error -> error in
+  t.phase <- Finished;
+  t.notice <- (match refreshed with
+    | Ok () -> "모델의 응답과 도구 호출을 검증하고 저장했습니다."
+    | Error _ -> "모델 검증과 저장은 완료했습니다. 목록을 새로 읽지 못했습니다. r로 다시 확인하세요.")
+let input_response ~sequence t result =
+  match result with
+  | Error _ when sequence=t.input_sequence && t.input_pending ->
+    t.input_pending <- false;
+    t.notice <- "입력 전달 결과를 확인하지 못했습니다. 로그인 안내를 확인하고 다시 시도하세요."
+  | Ok _ | Error _ -> ()
 let models t json =
   match field "models" json with
   | `List rows ->
@@ -115,11 +128,17 @@ let event ~generation t message =
     t.draft <- ""; t.input_pending <- false;
     t.notice <- "로그인 절차를 완료하지 못했습니다. r로 상태를 확인하거나 e로 다시 로그인하세요."; Nothing
   | Login_error -> t.phase <- Failed; t.draft <- ""; t.notice <- "로그인 절차를 완료하지 못했습니다. r로 상태를 확인하세요."; Nothing
+let append_draft t text =
+  let value = t.draft ^ text in
+  if String.is_valid_utf_8 value && String.length value <= 65536 then t.draft <- value
+  else t.notice <- "입력은 유효한 UTF-8이며 한 번에 64 KiB 이하여야 합니다."
 let paste t text = match t.phase with
-  | Logging | Capacity _ when not t.input_pending ->
-    let value = t.draft ^ String.trim text in
-    if String.length value <= 65536 then t.draft <- value else t.notice <- "한 번에 전달할 입력은 64 KiB 이하여야 합니다."
-  | Loading | Providers | Models | Saving | Finished | Failed | Logging | Capacity _ -> ()
+  | Logging | Capacity _ | Documented_context _ when not t.input_pending -> append_draft t (String.trim text)
+  | Loading | Providers | Models | Saving | Finished | Failed | Logging | Capacity _ | Documented_context _ -> ()
+let submit_input t json =
+  t.input_sequence <- t.input_sequence + 1;
+  t.input_pending <- true;
+  Input (t.input_sequence, json)
 let key t key =
   if key="esc" then Close else
   match t.phase with
@@ -130,44 +149,59 @@ let key t key =
       ["\r"; "\n"; "enter"; "up"; "down"; "tab"; "\t"; "ctrl-d"; "\004"] then (
       t.notice <- "로그인 세션을 준비하고 있습니다. 안내가 도착하면 입력을 전달하세요."; Nothing)
     else if key="\r" || key="\n" || key="enter" then (
-      let json = `Assoc ["kind",`String "text";"text",`String t.draft] in t.draft<-""; t.input_pending<-true; Input json)
+      let json = `Assoc ["kind",`String "text";"text",`String t.draft] in t.draft<-""; submit_input t json)
     else if List.mem key ["up";"down";"tab";"\t";"ctrl-d";"\004"] then (
-      t.input_pending<-true;
-      Input (`Assoc ["kind",`String "key";"key",`String (if key="ctrl-d" || key="\004" then "eof" else if key="\t" then "tab" else key)]))
-    else if key="backspace" || key="\127" then (if t.draft<>"" then t.draft<-String.sub t.draft 0 (String.length t.draft-1); Nothing)
-    else if String.length key=1 && Char.code key.[0]>=32 then (paste t key; Nothing)
+      submit_input t (`Assoc ["kind",`String "key";"key",`String (if key="ctrl-d" || key="\004" then "eof" else if key="\t" then "tab" else key)]))
+    else if key="backspace" || key="\127" then (t.draft<-Masc_tui_message_layout.drop_last_utf8_scalar t.draft; Nothing)
+    else if Masc_tui_message_layout.is_printable_utf8_scalar key then (append_draft t key; Nothing)
     else Nothing
-  | Capacity model ->
+  | (Capacity model | Documented_context model) as phase ->
     if key="\r" || key="\n" || key="enter" then
-      (match int_of_string_opt t.draft with Some n when n>0 -> t.draft<-""; Save (model,Some n)
-       | _ -> t.notice<-"양의 정수로 Muse 입력 한도(bytes)를 입력하세요."; Nothing)
-    else if key="backspace" || key="\127" then (if t.draft<>"" then t.draft<-String.sub t.draft 0 (String.length t.draft-1); Nothing)
+      (match int_of_string_opt t.draft with
+       | Some n when n>0 ->
+         t.draft<-"";
+         (match phase with
+          | Capacity _ -> Save (model,Some n)
+          | Documented_context _ -> Save ({model with context=Some n},None)
+          | Loading | Providers | Logging | Models | Saving | Finished | Failed -> Nothing)
+       | _ -> t.notice<-"확인한 한도를 양의 정수로 입력하세요."; Nothing)
+    else if key="backspace" || key="\127" then (t.draft<-Masc_tui_message_layout.drop_last_utf8_scalar t.draft; Nothing)
     else if String.length key=1 && key.[0]>='0' && key.[0]<='9' then (paste t key; Nothing) else Nothing
   | Loading | Saving -> Nothing
   | Providers | Models | Finished | Failed ->
     if key="up" || key="k" then (t.cursor<-max 0 (t.cursor-1); Nothing)
     else if key="down" || key="j" then (let count=if t.phase=Providers then List.length t.providers else List.length t.models in t.cursor<-min (max 0 (count-1)) (t.cursor+1); Nothing)
-    else if key="r" then (if t.phase=Models then Discover else if Option.is_some t.login_id then Recover else Inventory)
+    else if key="r" then (if t.phase=Models then Discover else if t.phase=Finished then Refresh_saved else if Option.is_some t.login_id then Recover else Inventory)
     else if key="n" || key="e" then Start (key="e")
     else if key="\r" || key="\n" || key="enter" then
       (match t.phase with
        | Providers -> Start false
        | Models -> (match List.nth_opt t.models t.cursor with
          | None -> Nothing | Some {tools=Some false;_} -> t.notice<-"이 모델은 도구 호출을 지원하지 않습니다."; Nothing
-         | Some ({context=None;_} as model) -> Prepare model
+         | Some ({context=None;_} as model) ->
+           (match t.provider with
+            | Some {client=Antigravity;_} -> Prepare model
+            | Some {client=(Codex | Claude);_} ->
+              t.phase<-Documented_context model; t.draft<-"";
+              t.notice<-"공식 문서나 CLI 설정에서 확인한 context 한도(tokens)를 입력하세요. 모르면 Esc로 닫으세요. 저장 전 응답·도구 검증을 수행합니다."; Nothing
+            | Some {client=Muse;_} ->
+              t.notice<-"Muse가 이 모델의 context를 보고하지 않았습니다. CLI 설정을 확인하고 r로 목록을 새로 읽으세요."; Nothing
+            | None -> Nothing)
          | Some model -> (match t.provider with Some {client=Muse;_} -> t.phase<-Capacity model; t.draft<-""; Nothing
            | Some _ | None -> Save (model,None)))
-       | Loading | Logging | Capacity _ | Saving | Finished | Failed -> Nothing)
+       | Loading | Logging | Capacity _ | Documented_context _ | Saving | Finished | Failed -> Nothing)
     else Nothing
 let save_body t model bytes =
   let existing=List.map (fun id -> `Assoc ["runtime_id",`String id]) t.existing in
   let model = `Assoc (["id",`String model.id;"context",(match model.context with Some n -> `Int n | None -> `Null);"streaming",`Bool true]
     @ (match bytes with Some n -> ["max_prompt_bytes",`Int n] | None -> [])) in
-  `Assoc ["revision",`String t.revision;"connections",`List [`Assoc ["source",source t;"models",`List [model]]];
+  `Assoc (["revision",`String t.revision;"connections",`List [`Assoc ["source",source t;"models",`List [model]]];
     "selection",`List (existing @ [`Assoc ["connection",`Int 0;"model",`Int 0]])]
+    @ (match t.default_runtime_id with None -> [] | Some id -> ["default_runtime_id",`String id]))
 let hints t = match t.phase with
   | Logging -> "Enter:코드 전달  ↑↓/Tab:선택  Ctrl-D:입력 종료  Ctrl-C:취소  Esc:닫기"
   | Capacity _ -> "Muse 입력 한도(bytes)  Enter:검증 후 추가  Esc:닫기"
+  | Documented_context _ -> "확인한 context 한도(tokens)  Enter:검증 후 추가  Esc:닫기"
   | Providers -> "↑↓:공급자  Enter/n:새 계정  e:기존 계정  Esc:닫기"
   | Models -> "↑↓:모델  Enter:검증 후 추가  r:목록 새로고침  e:재로그인  Esc:닫기"
   | Loading | Saving | Finished | Failed -> "r:상태 재확인  e:재로그인  n:새 계정  Esc:닫기"
@@ -177,6 +211,7 @@ let lines t =
     | Models -> List.mapi (fun i (m:model) -> (if i=t.cursor then "> " else "  ") ^ m.label ^ (match m.context with None->" · context 확인 필요" | Some _ -> "")) t.models
     | Logging -> String.split_on_char '\n' t.output @ ["로그인 코드: " ^ String.make (min 40 (String.length t.draft)) '*'; if t.input_pending then "입력 전달 중" else if Option.is_none t.login_id then "로그인 세션 준비 중" else "코드 입력 대기"]
     | Capacity _ -> ["Muse 입력 한도(bytes): " ^ t.draft]
+    | Documented_context _ -> ["문서 또는 설정의 context 한도(tokens): " ^ t.draft]
     | Loading | Saving | Finished | Failed -> [] in
   t.notice :: rows
 let visible_lines ~height t =
@@ -184,7 +219,7 @@ let visible_lines ~height t =
   let rows = lines t in
   let skip = match t.phase with
     | Providers | Models -> max 0 (t.cursor + 2 - height)
-    | Loading | Logging | Capacity _ | Saving | Finished | Failed -> max 0 (List.length rows - height) in
+    | Loading | Logging | Capacity _ | Documented_context _ | Saving | Finished | Failed -> max 0 (List.length rows - height) in
   List.filteri (fun index _ -> index >= skip && index < skip + height) rows
 let decoder ~integration_id on_event =
   let line=Buffer.create 256 and data=Buffer.create 256 in

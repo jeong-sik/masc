@@ -57,7 +57,7 @@ let input_and_epoch () =
   Login.paste t "private-code";
   check bool "render masks private input" false (List.exists (fun line -> line="private-code" || String.ends_with ~suffix:"private-code" line) (Login.lines t));
   (match Login.key t "\r" with
-   | Login.Input (`Assoc fields) -> check bool "input goes to dedicated endpoint payload" true (List.assoc_opt "text" fields=Some (`String "private-code"))
+   | Login.Input (_, `Assoc fields) -> check bool "input goes to dedicated endpoint payload" true (List.assoc_opt "text" fields=Some (`String "private-code"))
    | _ -> fail "code was not submitted");
   check string "submitted code cleared" "" t.draft;
   ignore (Login.event ~generation:1 t Login.Input_ready);
@@ -65,7 +65,7 @@ let input_and_epoch () =
   ignore (Login.event ~generation:1 t (Login.Complete(other,Login.Authenticated)));
   check bool "late account cannot replace current attempt" true (t.account_ref=None && t.phase=Login.Logging);
   ignore (Login.event ~generation:2 t Login.Input_ready);
-  check bool "actual terminal Tab forwarded" true (Login.key t "\t"=Login.Input (`Assoc ["kind",`String "key";"key",`String "tab"]));
+  check bool "actual terminal Tab forwarded" true (Login.key t "\t"=Login.Input (2, `Assoc ["kind",`String "key";"key",`String "tab"]));
   check bool "cancel available while input pending" true (Login.key t "\003"=Login.Cancel)
 let inventory_selection_contract () =
   let fields = match inventory with `Assoc fields -> List.remove_assoc "default_runtime_selection" fields | _ -> [] in
@@ -110,7 +110,7 @@ let retry_early_input () =
     ignore (Login.event ~generation:2 t (Login.Started (other, Some account)));
     check (option string) "input targets the new server session" (Some other) t.login_id;
     check bool "preserved draft submits once ready" true
-      (Login.key t "\r" = Login.Input (`Assoc ["kind", `String "text"; "text", `String "early-private-code"]));
+      (Login.key t "\r" = Login.Input (1, `Assoc ["kind", `String "text"; "text", `String "early-private-code"]));
     check string "submitted draft cleared" "" t.draft;
     check bool "submission waits for actual ACK" true t.input_pending)
     [true; false]
@@ -124,7 +124,65 @@ let viewport_and_receipt () =
     "status",`String "complete";"account_ref",`String other] in
   check bool "completion without auth observation rejected" true (Result.is_error (Login.receipt t receipt));
   check (option string) "bad receipt cannot replace selected account" (Some account) t.account_ref
+let unicode_and_late_input_response () =
+  let t=Login.create "codex" in t.phase<-Login.Logging;t.login_id<-Some session;
+  List.iter (fun scalar -> ignore (Login.key t scalar)) ["한";"😀";" ";"é"];
+  check string "typed scalar and space preserved" "한😀 é" t.draft;
+  ignore (Login.key t "\127");
+  check string "backspace removes a whole scalar" "한😀 " t.draft;
+  check bool "draft remains valid UTF8" true (String.is_valid_utf_8 t.draft);
+  let first=match Login.key t "\r" with Login.Input (sequence,_) -> sequence | _ -> fail "input" in
+  ignore (Login.event ~generation:0 t Login.Input_ready);
+  Login.paste t "new-draft";
+  Login.input_response ~sequence:first t (Error "late HTTP failure after native ACK");
+  check string "acknowledged input failure cannot erase current draft" "new-draft" t.draft;
+  let second=match Login.key t "\r" with Login.Input (sequence,_) -> sequence | _ -> fail "input" in
+  Login.input_response ~sequence:first t (Error "old HTTP failure after next submission");
+  check bool "old failure cannot release newer pending input" true t.input_pending;
+  Login.input_response ~sequence:second t (Error "current rejected input");
+  check bool "current failure allows correction" false t.input_pending
+let verified_save_refresh () =
+  let t=Login.create "codex" in ok (Login.inventory t inventory);t.phase<-Login.Finished;
+  Login.refresh_saved t (Error "network unavailable");
+  check bool "transport failure cannot revoke verified save" true (t.phase=Login.Finished);
+  check bool "retry refreshes inventory instead of old login receipt" true (Login.key t "r"=Login.Refresh_saved);
+  Login.refresh_saved t (Ok (`Assoc []));
+  check bool "bad inventory cannot revoke verified save" true (t.phase=Login.Finished);
+  Login.refresh_saved t (Ok inventory);
+  check bool "successful refresh retains saved screen" true (t.phase=Login.Finished)
+let missing_model_context () =
+  List.iter (fun client ->
+    let t=Login.create "" in let unknown={ (model 0) with context=None } in
+    t.provider<-Some {provider with client};t.phase<-Login.Models;t.models<-[unknown];
+    let action=Login.key t "\r" in
+    match client with
+    | Login.Antigravity -> check bool "native observation available" true (action=Login.Prepare unknown)
+    | Login.Muse ->
+      check bool "unreported Muse context is not invented" true (action=Login.Nothing && t.phase=Login.Models);
+      check bool "Muse can refresh native metadata" true (Login.key t "r"=Login.Discover)
+    | Login.Codex | Login.Claude ->
+      check bool "explicit documented limit requested" true (action=Login.Nothing && t.phase=Login.Documented_context unknown);
+      check bool "empty context cannot save" true (Login.key t "\r"=Login.Nothing);
+      Login.paste t "32768";
+      (match Login.key t "\r" with
+       | Login.Save (selected,None) -> check (option int) "operator documented value still goes through save verification" (Some 32768) selected.context
+       | _ -> fail "documented context did not reach verification"))
+    [Login.Codex;Login.Claude;Login.Antigravity;Login.Muse]
+let named_default_identity () =
+  let fields=match inventory with `Assoc fields -> List.remove_assoc "default_runtime_id" fields | _ -> [] in
+  let t=Login.create "codex" in
+  ok (Login.inventory t (`Assoc (("default_runtime_id",`String "named-lane") :: fields)));
+  t.provider<-Some provider;t.account_ref<-Some account;
+  let body=Login.save_body t (model 0) None in
+  let open Yojson.Safe.Util in
+  check string "named default remains an explicit lane identity" "named-lane" (body |> member "default_runtime_id" |> to_string);
+  check bool "lane identity is not submitted as a concrete candidate" false
+    (List.exists (fun row -> row |> member "runtime_id" = `String "named-lane") (body |> member "selection" |> to_list))
 let () = run "TUI account login" ["workflow",[
+  test_case "named default lane remains selected" `Quick named_default_identity;
+  test_case "Unicode and late input HTTP response" `Quick unicode_and_late_input_response;
+  test_case "verified save survives refresh failure" `Quick verified_save_refresh;
+  test_case "unknown context follows supported provider route" `Quick missing_model_context;
   test_case "fragmented remote login" `Quick decoder_fragments;
   test_case "malformed and unfinished streams" `Quick decoder_failures;
   test_case "explicit provider and preserved default" `Quick account_and_default;

@@ -40,7 +40,7 @@ class DashboardMismatchDiagnostics(unittest.TestCase):
                     "installed_release": {
                         "kind": "installed_release",
                         "status": "verified",
-                        "release_root": str(release),
+                        "release_root": str(release.resolve()),
                         "receipt_sha256": hashlib.sha256(receipt_bytes).hexdigest(),
                     }
                 },

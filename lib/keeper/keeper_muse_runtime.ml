@@ -1394,6 +1394,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
             mcp_servers_of_bridge bridge ~served:dynamic_tools
           ) with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn when Keeper_owner_signals.is_owner_cancel_reason exn -> raise exn
           | exn ->
             Llm_provider.Reserved_exn.reraise_if_reserved exn;
             (* This boundary cannot have entered Serve or dispatched provider

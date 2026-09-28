@@ -17270,7 +17270,7 @@ let render_account_login state view =
     ~surface_key:"account-login" ~title:(screen_title " MASC Account Login")
     ~hints:(Masc_tui_account_login.hints view)
     ~body:(fun ~budget c ->
-      let lines = Masc_tui_account_login.visible_lines ~height:budget view
+      let lines = Masc_tui_account_login.visible_lines ~height:budget ~width:(framed_inner_width cols) view
         |> List.map (function
           | Masc_tui_account_login.Text text -> Masc.Tui_decode.sanitize_terminal_text text
           | Masc_tui_account_login.Terminal line ->

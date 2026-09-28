@@ -117,9 +117,11 @@ let retry_early_input () =
     [true; false]
 let viewport_and_receipt () =
   let t=Login.create "codex" in t.phase<-Login.Models;t.models<-List.init 30 model;
-  List.iter (fun cursor -> t.cursor<-cursor;
+  (* 12 cells wrap the notice over several rows; the cursor row still shows. *)
+  List.iter (fun (width, cursor) -> t.cursor<-cursor;
     check bool "selected model visible in short viewport" true
-      (List.mem ("> model " ^ string_of_int cursor) (List.map Login.row_text (Login.visible_lines ~height:4 t)))) [0;15;29];
+      (List.mem ("> model " ^ string_of_int cursor) (List.map Login.row_text (Login.visible_lines ~height:6 ~width t))))
+    [80,0; 80,15; 80,29; 12,0; 12,15; 12,29];
   t.provider<-Some provider;t.login_id<-Some session;t.account_ref<-Some account;
   let receipt=`Assoc ["login_id",`String session;"integration_id",`String "codex";"invocation_verified",`Bool false;
     "status",`String "complete";"account_ref",`String other] in
@@ -438,6 +440,18 @@ let removable = removal_preview_json "removable"
 let rows t = List.map Login.row_text (Login.lines t)
 let mentions text t = List.exists (fun row ->
   let n=String.length text in let rec at i = i+n <= String.length row && (String.sub row i n = text || at (i+1)) in at 0) (rows t)
+(* A refused save's reason ends in the verification code and detail, the part
+   that says what to do; at 40 cells it is wrapped, not cut. *)
+let a_long_reason_is_read_whole () =
+  let t=Login.create "codex" in ok (Login.inventory t inventory);
+  t.provider<-Some provider; t.models<-[model 0]; t.phase<-Login.Saving;
+  Login.save_failed t (model 0)
+    "HTTP 502: Runtime \"codex.gpt\" did not pass response and tool verification (rate_limited)";
+  let drawn = List.map Login.row_text (Login.visible_lines ~height:12 ~width:40 t) in
+  check bool "every row fits" true
+    (List.for_all (fun row -> Masc_tui_message_layout.display_width row <= 40) drawn);
+  check bool "the code and the way back are on screen" true
+    (let joined = String.concat " " drawn in contains joined "(rate_limited)" && contains joined "다시 저장하세요.")
 let removal_from_the_list () =
   let t=Login.create "codex" in ok (Login.inventory t inventory);
   (match Login.key t "D" with
@@ -467,6 +481,7 @@ let refused_removal () =
 let () = run "TUI account login" ["workflow",[
   test_case "pasted credentials preserve bytes and reject controls" `Quick pasted_credential_bytes;
   test_case "failed save refreshes revision and retains model" `Quick failed_save_refresh;
+  test_case "a long reason is read whole" `Quick a_long_reason_is_read_whole;
   test_case "named default lane remains selected" `Quick named_default_identity;
   test_case "Unicode and late input HTTP response" `Quick unicode_and_late_input_response;
   test_case "verified save survives refresh failure" `Quick verified_save_refresh;

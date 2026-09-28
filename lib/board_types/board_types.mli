@@ -48,6 +48,9 @@ module Post_id : sig
   val to_string : t -> string
   val generate : unit -> t
   (** Cryptographic random id, prefix ["p-"]. *)
+  val json_schema_pattern : string
+  (** The [of_string] shape as a JSON Schema pattern. It mirrors the parser
+      exactly, so it never rejects an id [of_string] accepts. *)
 end
 
 module Comment_id : sig

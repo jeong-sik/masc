@@ -43,11 +43,18 @@ module Post_id : sig
   val of_string : string -> (t, board_error) result
   val to_string : t -> string
   val generate : unit -> t
+  val json_schema_pattern : string
 end = struct
   type t = string
 
   (* Only alphanumeric, dash, underscore. Max 64 chars. *)
   let valid_pattern = alphanumeric_id_re
+
+  (* The [of_string] shape as a JSON Schema pattern: the shared alphanumeric
+     body plus the length bound [of_string] enforces. It mirrors the parser
+     exactly, so a client that validates against it never sends an id the
+     parser would accept and the schema would reject. *)
+  let json_schema_pattern = "^[a-zA-Z0-9_-]{1,64}$"
 
   let of_string s =
     let s = String.trim s in

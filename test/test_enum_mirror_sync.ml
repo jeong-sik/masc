@@ -538,6 +538,17 @@ let test_article_id_pattern_mirror () =
     (declared_patterns_for_schemas (all_schemas ()) ~property:"article_id")
 ;;
 
+(* Board post id. [Masc.Board.Post_id] owns the shape; every board tool that
+   takes a post_id declares it. The parser accepts [a-zA-Z0-9_-]{1,64}, not
+   only the ["p-"] prefix [generate] mints, so the pattern mirrors the parser
+   and never rejects an id the parser accepts (#39448). *)
+let test_post_id_pattern_mirror () =
+  check (list string)
+    "post_id pattern matches Board.Post_id"
+    [ Masc.Board.Post_id.json_schema_pattern ]
+    (declared_patterns_for_schemas (all_schemas ()) ~property:"post_id")
+;;
+
 (* A guard that passes when the thing it guards is empty is not a guard. *)
 let test_owners_are_non_empty () =
   List.iter
@@ -563,6 +574,7 @@ let () =
         ; test_case "board sort order" `Quick test_sort_order_mirror
         ; test_case "board vote direction" `Quick test_vote_direction_mirror
         ; test_case "board comment id pattern" `Quick test_comment_id_pattern_mirror
+        ; test_case "board post id pattern" `Quick test_post_id_pattern_mirror
         ; test_case "constitution article id pattern" `Quick
             test_article_id_pattern_mirror
         ; test_case "schedule contract enums" `Quick test_schedule_contract_mirrors

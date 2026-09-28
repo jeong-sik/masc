@@ -259,8 +259,10 @@ let live_json source ~since : Yojson.Safe.t =
           | Machine_lane.Msx -> Eio_unix.run_in_systhread (msx_live source ~since)
           | Machine_lane.Dos -> Eio_unix.run_in_systhread (dos_live source ~since)))
 
+(* An invited Player holds CanPlayMachine and no CanReadState: it watches
+   the machine here and reads nothing else. Workers and Admins hold both. *)
 let get_live request reqd =
-  with_read_auth (fun _state _request reqd ->
+  with_permission_auth ~permission:Masc_domain.CanPlayMachine (fun _state _request reqd ->
     match decode_live_query (query_fields request) with
     | Error detail -> respond request reqd (Error detail)
     | Ok (source, since) ->

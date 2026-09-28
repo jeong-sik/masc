@@ -10,6 +10,7 @@ if (!url || !artifacts) throw new Error('SETUP_LOGIN_FIXTURE_URL and SETUP_LOGIN
 await mkdir(artifacts, { recursive: true })
 const browser = await chromium.launch({ headless: true })
 const results = []
+const productionRoute = !new URL(url).pathname.includes('/dev-fixtures/')
 try {
   for (const [client, width] of [['codex', 1280], ['claude', 1280], ['antigravity', 390], ['muse', 390]]) {
     const context = await browser.newContext({ viewport: { width, height: 1000 } })
@@ -23,9 +24,18 @@ try {
       const json = value => new Response(JSON.stringify(value), { status: 200, headers: { 'content-type': 'application/json' } })
       window.fetch = async (raw, options = {}) => {
         const path = new URL(typeof raw === 'string' ? raw : raw.url, location.href).pathname
+        if (path === '/health') return json({ status: 'ok', version: 'fixture', runtime_ready: true })
         if (!path.startsWith('/api/')) return original(raw, options)
         if (options.signal?.aborted) throw new DOMException('aborted', 'AbortError')
         const body = options.body ? JSON.parse(options.body) : {}
+        if (path === '/api/v1/dashboard/shell') return json({ counts: { agents: 0, keepers: 0, tasks: 0 } })
+        if (path === '/api/v1/setup/status') return json({ schema: 'masc.onboarding_status.v1', base_path: '/fixture/workspace',
+          selected_model: evidence.saves.length ? 'fixture-model' : null, selected_runtime: evidence.saves.length ? 'fixture.model' : null, checks: [{ id: 'runtime', condition: 'needs_setup', message: '모의 서버: 로그인할 계정과 모델을 선택하세요.', actions: [] }] })
+        if (path === '/api/v1/setup/inventory') return json({ source_revision: 'fixture-source', setup_revision: 'fixture-revision', runtimes: [], integrations: [
+          { id: 'codex', display_name: 'Codex', protocol: 'codex-app-server', setup_support: 'new_connection' },
+          { id: 'claude', display_name: 'Claude', protocol: 'claude-code', setup_support: 'new_connection' },
+          { id: 'antigravity', display_name: 'Antigravity', protocol: 'antigravity-cli', setup_support: 'new_connection' },
+          { id: 'muse', display_name: 'Muse', protocol: 'muse-serve', setup_support: 'new_connection' }] })
         if (path === '/api/v1/setup/accounts/login') {
           const login_id = (++evidence.sequence).toString(16).padStart(64, '0')
           const account_ref = (100 + evidence.sequence).toString(16).padStart(64, '0')
@@ -66,18 +76,21 @@ try {
           return json({ configured: true, readiness: 'verified', runtime_id: 'fixture.model', runtime_ids: ['fixture.model'] })
         }
         if (path === '/api/v1/runtime/setup/resume') return json({ runtime_ready: true, exact_output_authority_available: true, model_setup: { status: 'available' } })
-        throw new Error(`Unexpected fixture API: ${path}`)
+        return new Response(JSON.stringify({ error: 'Outside isolated login fixture scope' }), { status: 503, headers: { 'content-type': 'application/json' } })
       }
     })
     const page = await context.newPage()
     const errors = []
     page.on('pageerror', error => errors.push(error.message))
     await page.goto(url)
+    if (productionRoute) await page.getByRole('region', { name: '첫 대화 준비', exact: true }).waitFor()
     await page.getByLabel('공급자').selectOption(client)
     await page.getByText('새 계정 로그인', { exact: true }).click()
     await page.getByLabel('로그인 코드', { exact: true }).waitFor()
     assert.equal(await page.getByLabel('로그인 코드', { exact: true }).getAttribute('type'), 'password')
+    await page.getByRole('region', { name: '공식 클라이언트 로그인', exact: true }).scrollIntoViewIfNeeded()
     await page.screenshot({ path: `${artifacts}/${client}-${width}-login.png`, fullPage: true })
+    if (productionRoute) await page.getByRole('region', { name: '공식 클라이언트 로그인', exact: true }).screenshot({ path: `${artifacts}/${client}-${width}-login-panel.png` })
     if (client === 'antigravity') {
       await page.getByText('로그인 취소', { exact: true }).click()
       await page.getByText('로그인 상태 다시 확인', { exact: true }).click()
@@ -92,7 +105,8 @@ try {
     if (client === 'muse') await page.getByLabel('Muse 입력 한도 (bytes)').fill('32768')
     await page.getByText('선택한 모델 추가', { exact: true }).click()
     await page.getByText('검증 후 선택 저장', { exact: true }).click()
-    await page.getByText('테스트 설정 저장 확인', { exact: true }).waitFor()
+    if (productionRoute) await page.getByText(/선택한 모델의 응답·도구 호출을 확인하고 저장했습니다/).waitFor()
+    else await page.getByText('테스트 설정 저장 확인', { exact: true }).waitFor()
     await page.screenshot({ path: `${artifacts}/${client}-${width}-saved.png`, fullPage: true })
     const evidence = await page.evaluate(() => ({ ...window.__setupLoginEvidence,
       stored: Object.fromEntries(Object.entries(sessionStorage)), overflow: document.documentElement.scrollWidth > innerWidth }))
@@ -109,6 +123,6 @@ try {
     results.push({ client, viewport: width, ...evidence })
     await context.close()
   }
-  await writeFile(`${artifacts}/results.json`, JSON.stringify({ source_revision: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), scope: 'isolated UI fixture; no live provider authentication', results }, null, 2))
+  await writeFile(`${artifacts}/results.json`, JSON.stringify({ source_revision: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), route: url, scope: productionRoute ? 'production dashboard settings route with isolated browser API mocks; no live provider authentication' : 'isolated UI fixture; no live provider authentication', results }, null, 2))
   console.log(`PASS: four login/discovery/save flows, lost completion, cancellation, mobile layout; ${artifacts}`)
 } finally { await browser.close() }

@@ -4,7 +4,9 @@ import type { Inventory } from '../api/onboarding'
 import { discoverSetupModels, selectSetupAccount, importAntigravityAccount, prepareSetupModel, saveSetupSelections, type Model, type Selection, type Source } from '../api/runtime-setup'
 import { SetupAccountLogin } from './setup-account-login'
 import { resumeSavedModelSetup } from '../lib/model-setup-resume'
-export function RuntimeSetupPicker({ inventory, onSaved }: { inventory: Inventory; onSaved: () => void }) {
+export function RuntimeSetupPicker({ inventory, onSaved, disabled = false, onBusyChange }: {
+  inventory: Inventory; onSaved: () => void; disabled?: boolean; onBusyChange?: (busy: boolean) => void
+}) {
   const activeRequest = useRef<AbortController | null>(null)
   const alive = useRef(true)
   const loginPending = useRef(false)
@@ -29,6 +31,7 @@ export function RuntimeSetupPicker({ inventory, onSaved }: { inventory: Inventor
   const [busy, setBusy] = useState(false)
   const [loginBusy, setLoginBusy] = useState(false)
   const [notice, setNotice] = useState('')
+  useEffect(() => { onBusyChange?.(busy || loginBusy) }, [busy, loginBusy, onBusyChange])
   const integrations = inventory.integrations ?? []
   const integration = integrations.find(row => row.id === provider)
   const officialClient = integration && ['codex-app-server', 'claude-code', 'muse-serve', 'antigravity-cli'].includes(integration.protocol ?? '')
@@ -40,7 +43,7 @@ export function RuntimeSetupPicker({ inventory, onSaved }: { inventory: Inventor
   function editEndpoint(value: string) { setEndpoint(value); invalidateDiscovery() }
   function editKey(value: string) { setKey(value); invalidateDiscovery() }
   async function importAccount() {
-    if (busy || loginPending.current || activeRequest.current || integration?.protocol !== 'antigravity-cli') return
+    if (disabled || busy || loginPending.current || activeRequest.current || integration?.protocol !== 'antigravity-cli') return
     const revision = inventory.setup_revision ?? null
     const controller = beginRequest()
     setBusy(true); invalidateDiscovery(); setNotice('이 MASC 서버의 로그인된 계정을 가져오고 있습니다.')
@@ -53,7 +56,7 @@ export function RuntimeSetupPicker({ inventory, onSaved }: { inventory: Inventor
     finally { endRequest(controller) }
   }
   async function discover() {
-    if (busy || loginPending.current || activeRequest.current || !integration || (!http && !client)) return
+    if (disabled || busy || loginPending.current || activeRequest.current || !integration || (!http && !client)) return
     const controller = beginRequest()
     setBusy(true); setNotice('')
     const revision = inventory.setup_revision ?? null
@@ -109,7 +112,7 @@ export function RuntimeSetupPicker({ inventory, onSaved }: { inventory: Inventor
     setChoices(current => { const result = [...current]; const [choice] = result.splice(index, 1); if (choice) result.splice(to, 0, choice); return result })
   }
   async function prepare(model: Model) {
-    if (busy || loginPending.current || activeRequest.current || !source) return
+    if (disabled || busy || loginPending.current || activeRequest.current || !source) return
     const controller = beginRequest()
     setBusy(true); setNotice('선택한 모델의 실행 환경을 확인하고 있습니다.')
     try {
@@ -120,7 +123,7 @@ export function RuntimeSetupPicker({ inventory, onSaved }: { inventory: Inventor
     finally { endRequest(controller) }
   }
   async function save() {
-    if (busy || loginPending.current || activeRequest.current || !choices.length || !selectionRevision) return
+    if (disabled || busy || loginPending.current || activeRequest.current || !choices.length || !selectionRevision) return
     const controller = beginRequest()
     setBusy(true); setNotice('선택한 모델의 응답과 도구 호출을 검증하고 있습니다.')
     try { await saveSetupSelections(selectionRevision, choices, { signal: controller.signal }) }
@@ -131,8 +134,11 @@ export function RuntimeSetupPicker({ inventory, onSaved }: { inventory: Inventor
     if (!currentRequest(controller) || controller.signal.aborted) { endRequest(controller); return }
     setChoices([]); setSource(null); setKey(''); setModels([])
     try {
-      const activation = await resumeSavedModelSetup()
+      const activation = await resumeSavedModelSetup({ signal: controller.signal })
       if (!currentRequest(controller)) return
+      if (controller.signal.aborted) {
+        setNotice('모델 저장과 검증은 완료했습니다. 설정 적용 응답 대기를 취소했습니다. 준비 상태를 확인하거나 설정을 재개하세요.'); return
+      }
       setNotice(activation.kind === 'active'
         ? '선택한 모델의 응답·도구 호출을 확인하고 저장했습니다. sandbox 안의 imp 실행은 별도로 확인해야 합니다.'
         : '모델 저장과 응답·도구 검증은 완료했습니다. 서버 설정 재개가 필요합니다. 아래 설정 재개 버튼으로 다시 시도하세요.')
@@ -142,9 +148,9 @@ export function RuntimeSetupPicker({ inventory, onSaved }: { inventory: Inventor
   }
   return html`<section class="runtime-setup-picker" aria-label="모델 연결 선택">
     <h4>모델 연결 선택</h4><p class="set-hint">여러 모델을 선택하세요. 첫 모델을 imp 기본 모델로 사용하며, 다음 모델은 표시 순서대로 대체 연결이 됩니다.</p>
-    <fieldset disabled=${busy || loginBusy}><legend>기존 연결</legend>${inventory.runtimes.map(row => html`<label key=${row.id} class="v2-mobile-operator-target"><input type="checkbox"
+    <fieldset disabled=${disabled || busy || loginBusy}><legend>기존 연결</legend>${inventory.runtimes.map(row => html`<label key=${row.id} class="v2-mobile-operator-target"><input type="checkbox"
       checked=${choices.some(choice => choice.kind === 'existing' && choice.id === row.id)} onChange=${() => toggleExisting(row.id, `${row.display_name} · ${row.model}`)} />${row.display_name} · ${row.model}</label>`)}</fieldset>
-    <fieldset disabled=${busy || loginBusy}><legend>새 모델 추가</legend><label>공급자 <select value=${provider} onChange=${(event: Event) => chooseProvider((event.currentTarget as HTMLSelectElement).value)}>
+    <fieldset disabled=${disabled || busy || loginBusy}><legend>새 모델 추가</legend><label>공급자 <select value=${provider} onChange=${(event: Event) => chooseProvider((event.currentTarget as HTMLSelectElement).value)}>
       <option value="">공급자 선택</option>${integrations.map(row => html`<option key=${row.id} value=${row.id} disabled=${row.setup_support === 'unsupported'}>${row.display_name}${row.setup_support === 'unsupported' ? ' · 준비 중' : ''}</option>`)}</select></label>
       ${http ? html`${!integration?.endpoint ? html`<label>서버 API 주소 <input type="url" value=${endpoint} onInput=${(event: Event) => editEndpoint((event.currentTarget as HTMLInputElement).value)} /></label>` : null}
         <label>새 연결 API 키 <input type="password" autoComplete="off" value=${key} onInput=${(event: Event) => editKey((event.currentTarget as HTMLInputElement).value)} /></label>
@@ -159,12 +165,12 @@ export function RuntimeSetupPicker({ inventory, onSaved }: { inventory: Inventor
         ${model.context === null && model.tools !== false && integration?.protocol !== 'muse-serve' ? html`<button type="button" class="btn" onClick=${() => prepare(model)}>이 모델만 준비</button>` : null}</div>`)}
         ${integration?.protocol === 'muse-serve' ? html`<label>Muse 입력 한도 (bytes) <input type="number" min="1" step="1" value=${maxPromptBytes} onInput=${(event: Event) => setMaxPromptBytes((event.currentTarget as HTMLInputElement).value)} /></label><p class="set-hint">운영자가 사용할 입력 크기 한도를 직접 지정하세요. 모델 context에서 환산하지 않습니다.</p>` : null}
         <button type="button" class="btn" disabled=${!marked.length || (integration?.protocol === 'muse-serve' && (!Number.isSafeInteger(Number(maxPromptBytes)) || Number(maxPromptBytes) <= 0))} onClick=${addModels}>선택한 모델 추가</button></fieldset>` : null}</fieldset>
-    ${officialClient ? html`<${SetupAccountLogin} key=${integration.id} integrationId=${integration.id} selected=${selectedAccount} busy=${busy}
+    ${officialClient ? html`<${SetupAccountLogin} key=${integration.id} integrationId=${integration.id} selected=${selectedAccount} busy=${disabled || busy}
       onStart=${beginLogin} onBusy=${loginActivity} onAccount=${setSelectedAccount} onComplete=${loggedIn} />` : null}
     ${choices.length ? html`<ol aria-label="기본 모델과 대체 순서">${choices.map((choice, index) => html`<li key=${index}><strong>${index === 0 ? '기본' : `대체 ${index}`}</strong> · ${choice.label}
-      ${index > 0 ? html`<button type="button" disabled=${busy || loginBusy} onClick=${() => move(index, 0)}>기본으로 선택</button><button type="button" aria-label=${`${choice.label} 위로`} disabled=${busy || loginBusy} onClick=${() => move(index, index - 1)}>위로</button>` : null}
-      <button type="button" disabled=${busy || loginBusy} onClick=${() => setChoices(current => current.filter((_, position) => position !== index))}>제거</button></li>`)}</ol>` : null}
+      ${index > 0 ? html`<button type="button" disabled=${disabled || busy || loginBusy} onClick=${() => move(index, 0)}>기본으로 선택</button><button type="button" aria-label=${`${choice.label} 위로`} disabled=${disabled || busy || loginBusy} onClick=${() => move(index, index - 1)}>위로</button>` : null}
+      <button type="button" disabled=${disabled || busy || loginBusy} onClick=${() => setChoices(current => current.filter((_, position) => position !== index))}>제거</button></li>`)}</ol>` : null}
     ${busy && activeRequest.current ? html`<button type="button" class="btn" onClick=${() => activeRequest.current?.abort()}>요청 대기 취소</button><p class="set-hint">대기를 취소해도 이미 저장된 설정은 유지될 수 있습니다. 결과를 새로 확인하세요.</p>` : null}
-    <button type="button" class="btn" disabled=${busy || loginBusy || !choices.length || !inventory.setup_revision} onClick=${save}>검증 후 선택 저장</button>${notice ? html`<p role="status">${notice}</p>` : null}
+    <button type="button" class="btn" disabled=${disabled || busy || loginBusy || !choices.length || !inventory.setup_revision} onClick=${save}>검증 후 선택 저장</button>${notice ? html`<p role="status">${notice}</p>` : null}
   </section>`
 }

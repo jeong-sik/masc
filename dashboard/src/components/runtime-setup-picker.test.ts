@@ -215,3 +215,23 @@ it('requires an explicit Muse input byte budget and retains account reference th
       models: [{ id: 'muse-selected', context: 8192, streaming: true, max_prompt_bytes: 45678 }] }],
     selection: [{ connection: 0, model: 0 }] }))
 })
+
+it('cancels a pending resume after save without reporting activation or calling onSaved', async () => {
+  let resumeSignal: AbortSignal | undefined
+  vi.mocked(postControlPlane).mockImplementation((path, _body, _headers, options) => {
+    if (path.endsWith('/connections')) return Promise.resolve({ configured: true, readiness: 'verified', runtime_id: 'existing.model', runtime_ids: ['existing.model'] })
+    resumeSignal = options?.signal
+    return new Promise((_resolve, reject) => resumeSignal?.addEventListener('abort', () => reject(new DOMException('cancelled', 'AbortError')), { once: true }))
+  })
+  const saved = vi.fn()
+  const selected = { ...inventory, runtimes: [{ id: 'existing.model', provider_id: 'existing', display_name: 'Existing', model: 'Model', protocol: 'codex-app-server', endpoint: null }] }
+  render(html`<${RuntimeSetupPicker} inventory=${selected} onSaved=${saved} />`)
+  fireEvent.click(screen.getByLabelText('Existing · Model')); fireEvent.click(screen.getByText('검증 후 선택 저장'))
+  await waitFor(() => expect(resumeSignal).toBeDefined())
+  fireEvent.click(screen.getByText('요청 대기 취소'))
+  await screen.findByText(/설정 적용 응답 대기를 취소했습니다/)
+  expect(resumeSignal?.aborted).toBe(true)
+  expect(saved).not.toHaveBeenCalled()
+  expect(modelSetupResumeState.value.kind).toBe('idle')
+  expect(screen.queryByText(/선택한 모델의 응답·도구 호출을 확인하고 저장했습니다/)).toBeNull()
+})

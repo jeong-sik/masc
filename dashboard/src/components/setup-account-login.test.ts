@@ -4,7 +4,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { SetupAccountLogin } from './setup-account-login'
 import * as api from '../api/setup-login'
 vi.mock('../api/setup-login', () => ({ streamSetupLogin: vi.fn(), sendLoginInput: vi.fn(), cancelSetupLogin: vi.fn(), fetchLoginReceipt: vi.fn() }))
-afterEach(() => { cleanup(); vi.resetAllMocks(); sessionStorage.clear() })
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.resetAllMocks(); sessionStorage.clear() })
 const id = 'a'.repeat(64), account = 'b'.repeat(64), newer = 'c'.repeat(64)
 function props() { return { integrationId: 'codex', selected: null, busy: false, onStart: vi.fn(), onBusy: vi.fn(), onAccount: vi.fn(), onComplete: vi.fn() } }
 it('does not let a delayed cancel response abort a newer login', async () => {
@@ -21,6 +21,7 @@ it('does not let a delayed cancel response abort a newer login', async () => {
   render(html`<${SetupAccountLogin} ...${props()} />`)
   fireEvent.click(screen.getByText('새 계정 로그인')); await screen.findByLabelText('로그인 코드')
   fireEvent.click(screen.getByText('로그인 취소'))
+  expect(signals[0]?.aborted).toBe(true)
   emit({ event: 'complete', source: { integration_id: 'codex', account_ref: account }, authentication: 'authenticated' }); resolveFirst()
   await waitFor(() => expect((screen.getByText('새 계정 로그인') as HTMLButtonElement).disabled).toBe(false))
   fireEvent.click(screen.getByText('새 계정 로그인')); await waitFor(() => expect(signals).toHaveLength(2))
@@ -86,4 +87,20 @@ it('ignores a recovery response after unmount and aborts its request', async () 
   resolve({ login_id: id, integration_id: 'codex', status: 'complete', account_ref: account, authentication: 'authenticated', invocation_verified: false })
   await Promise.resolve()
   expect(callbacks.onComplete).not.toHaveBeenCalled()
+})
+
+it('keeps login usable when recovery storage reads, writes and removals are denied', async () => {
+  for (const method of ['getItem', 'setItem', 'removeItem'] as const) {
+    vi.spyOn(Storage.prototype, method).mockImplementation(() => { throw new DOMException('denied', 'SecurityError') })
+  }
+  const callbacks = props()
+  vi.mocked(api.streamSetupLogin).mockImplementation(async (_source, emit) => {
+    emit({ event: 'started', login_id: id, integration_id: 'codex', account_ref: account })
+    emit({ event: 'complete', source: { integration_id: 'codex', account_ref: account }, authentication: 'authenticated' })
+  })
+  render(html`<${SetupAccountLogin} ...${callbacks} />`)
+  fireEvent.click(screen.getByText('새 계정 로그인'))
+  await waitFor(() => expect(callbacks.onComplete).toHaveBeenCalledOnce())
+  expect(screen.getByText('로그인 상태 다시 확인')).toBeTruthy()
+  expect((screen.getByText('새 계정 로그인') as HTMLButtonElement).disabled).toBe(false)
 })

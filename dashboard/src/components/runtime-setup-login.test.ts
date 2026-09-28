@@ -87,3 +87,26 @@ it('recovering a different account removes earlier model selections before loadi
   expect(screen.queryByRole('list', { name: '기본 모델과 대체 순서' })).toBeNull()
   expect(api.discoverSetupModels).toHaveBeenLastCalledWith({ integration_id: 'codex', account_ref: account }, expect.anything())
 })
+
+it.each(['failed', 'running', 'complete'] as const)('checking a %s receipt for the selected account preserves choices', async status => {
+  sessionStorage.setItem('masc.setup.login.codex', id)
+  renderClient('codex', 'codex-app-server')
+  fireEvent.click(screen.getByText('서버 계정 선택 후 모델 목록 확인')); await screen.findByLabelText('Selected Model')
+  fireEvent.click(screen.getByLabelText('Selected Model')); fireEvent.click(screen.getByText('선택한 모델 추가'))
+  vi.mocked(login.fetchLoginReceipt).mockResolvedValue({ login_id: id, integration_id: 'codex', status,
+    account_ref: previous, ...(status === 'complete' ? { authentication: 'authenticated' as const } : {}), invocation_verified: false })
+  fireEvent.click(screen.getByText('로그인 상태 다시 확인'))
+  await waitFor(() => expect((screen.getByText('로그인 상태 다시 확인') as HTMLButtonElement).disabled).toBe(false))
+  expect(screen.getByRole('list', { name: '기본 모델과 대체 순서' })).toBeTruthy()
+  expect(api.discoverSetupModels).toHaveBeenCalledOnce()
+})
+it('a failed receipt request preserves the current choices', async () => {
+  sessionStorage.setItem('masc.setup.login.codex', id)
+  renderClient('codex', 'codex-app-server')
+  fireEvent.click(screen.getByText('서버 계정 선택 후 모델 목록 확인')); await screen.findByLabelText('Selected Model')
+  fireEvent.click(screen.getByLabelText('Selected Model')); fireEvent.click(screen.getByText('선택한 모델 추가'))
+  vi.mocked(login.fetchLoginReceipt).mockRejectedValue(new Error('unavailable'))
+  fireEvent.click(screen.getByText('로그인 상태 다시 확인'))
+  await screen.findByText(/로그인 결과를 확인하지 못했습니다/)
+  expect(screen.getByRole('list', { name: '기본 모델과 대체 순서' })).toBeTruthy()
+})

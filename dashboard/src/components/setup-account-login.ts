@@ -9,6 +9,14 @@ function terminalText(value: string): string {
   return value.replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, '').replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
     .replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '')
 }
+function recoveryStorage(key: string, action: 'read' | 'write' | 'remove', value?: string): string | null {
+  try {
+    if (action === 'read') return sessionStorage.getItem(key)
+    if (action === 'write' && value !== undefined) sessionStorage.setItem(key, value)
+    else if (action === 'remove') sessionStorage.removeItem(key)
+  } catch { /* Recovery remains available in memory when browser storage is denied. */ }
+  return null
+}
 type Operation = { controller: AbortController; stream: AbortController }
 export function SetupAccountLogin({ integrationId, selected, busy = false, onStart, onBusy, onAccount, onComplete }: {
   integrationId: string; selected: Source | null; busy?: boolean; onStart: () => void;
@@ -30,15 +38,15 @@ export function SetupAccountLogin({ integrationId, selected, busy = false, onSta
   const storageKey = `masc.setup.login.${integrationId}`
   useEffect(() => {
     alive.current = true
-    const previous = sessionStorage.getItem(storageKey)
+    const previous = recoveryStorage(storageKey, 'read')
     if (previous && /^[a-f0-9]{64}$/.test(previous)) { session.current = previous; setLoginId(previous) }
     return () => { alive.current = false; active.current?.stream.abort(); active.current?.controller.abort() }
   }, [storageKey])
   function current(operation: Operation) { return alive.current && active.current === operation }
-  function begin(): Operation | null {
+  function begin(invalidate: boolean): Operation | null {
     if (busy || active.current) return null
     const operation = { controller: new AbortController(), stream: new AbortController() }
-    active.current = operation; setWorking(true); onBusy(true); onStart()
+    active.current = operation; setWorking(true); onBusy(true); if (invalidate) onStart()
     return operation
   }
   function finish(operation: Operation) {
@@ -47,38 +55,40 @@ export function SetupAccountLogin({ integrationId, selected, busy = false, onSta
     setWorking(false); setRunning(false); setCode(''); setPending(false); onBusy(false)
   }
   function retain(source: Source) { setRecovered(source); onAccount(source) }
-  async function readReceipt(operation: Operation, id: string) {
+  async function readReceipt(operation: Operation, id: string, resumeLogin = false) {
     const receipt = await fetchLoginReceipt(id, integrationId, operation.controller.signal)
     if (!current(operation)) return
+    const changed = receipt.account_ref !== undefined && receipt.account_ref !== (selected ?? recovered)?.account_ref
+    if (changed && !resumeLogin) onStart()
     if (receipt.account_ref) retain({ integration_id: integrationId, account_ref: receipt.account_ref })
     if (receipt.status === 'complete' && receipt.account_ref) {
       setNotice('로그인 절차가 완료되었습니다. 모델의 응답과 도구 호출은 저장할 때 검증합니다.')
-      await onComplete({ integration_id: integrationId, account_ref: receipt.account_ref })
+      if (changed || resumeLogin) await onComplete({ integration_id: integrationId, account_ref: receipt.account_ref })
     } else setNotice(receipt.status === 'running' ? '로그인 종료 여부를 아직 확인하지 못했습니다. 잠시 후 상태를 다시 확인하세요.'
       : '로그인이 중단되었습니다. 저장된 계정이 있으면 이 계정으로 다시 로그인하거나 모델 목록을 확인할 수 있습니다.')
   }
   async function recover() {
     const id = session.current
     if (!id) return
-    const operation = begin()
+    const operation = begin(false)
     if (!operation) return
     try { await readReceipt(operation, id) }
     catch { if (current(operation)) setNotice('로그인 결과를 확인하지 못했습니다. 상태를 다시 확인하세요.') }
     finally { finish(operation) }
   }
   async function login(existing: Source | null) {
-    const operation = begin()
+    const operation = begin(true)
     if (!operation) return
     setOutput(''); setCode(''); setNotice('공식 클라이언트의 로그인 안내를 기다리고 있습니다.')
     setLoginId(null); session.current = null; setRecovered(null); setRunning(true); setPending(false)
-    sessionStorage.removeItem(storageKey)
+    recoveryStorage(storageKey, 'remove')
     let completed: Source | null = null
     try {
       await streamSetupLogin(existing ?? { integration_id: integrationId }, event => {
         if (!current(operation)) return
         if (event.event === 'started') {
           session.current = event.login_id; setLoginId(event.login_id)
-          sessionStorage.setItem(storageKey, event.login_id)
+          recoveryStorage(storageKey, 'write', event.login_id)
           if (event.account_ref) retain({ integration_id: integrationId, account_ref: event.account_ref })
         } else if (event.event === 'output') setOutput(value => (value + event.text).slice(-visibleTerminalCharacters))
         else if (event.event === 'input_ready') { inputPending.current = false; setPending(false) }
@@ -90,7 +100,7 @@ export function SetupAccountLogin({ integrationId, selected, busy = false, onSta
         } else {
           if (event.login_id) {
             session.current = event.login_id; setLoginId(event.login_id)
-            sessionStorage.setItem(storageKey, event.login_id)
+            recoveryStorage(storageKey, 'write', event.login_id)
           }
           if (event.source) retain(event.source)
           setRunning(false); setNotice('로그인 절차를 완료하지 못했습니다. 상태를 다시 확인하거나 재시도하세요.')
@@ -102,7 +112,7 @@ export function SetupAccountLogin({ integrationId, selected, busy = false, onSta
         setRunning(false)
         const id = session.current
         try {
-          if (id) await readReceipt(operation, id)
+          if (id) await readReceipt(operation, id, true)
           else setNotice('로그인을 시작하지 못했습니다. 설치와 서버 연결을 확인하고 다시 시도하세요.')
         } catch { if (current(operation)) setNotice('로그인 결과를 확인하지 못했습니다. 상태를 다시 확인하세요.') }
       }
@@ -123,9 +133,9 @@ export function SetupAccountLogin({ integrationId, selected, busy = false, onSta
     const operation = active.current
     const id = session.current
     if (!operation) return
+    operation.stream.abort()
     try { if (id) await cancelSetupLogin(id) }
     catch { if (current(operation)) setNotice('취소 결과를 확인하지 못했습니다. 로그인 상태를 다시 확인하세요.') }
-    finally { operation.stream.abort() }
   }
   const existing = selected ?? recovered
   const disabled = busy || working

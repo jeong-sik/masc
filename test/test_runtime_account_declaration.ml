@@ -223,6 +223,12 @@ let test_refusals () =
   (match declare "codex_subscription" "codex_3" "~/.codex" with
    | Error (D.Location_taken { provider = "codex_subscription"; _ }) -> ()
    | _ -> Alcotest.fail "the home a provider without account-home runs on is refused");
+  (match
+     D.declare ~inherited_home t ~base:(base_named t "codex_subscription") ~id:"codex_3"
+       ~location:"~/.codex-3"
+   with
+   | Error (D.Invalid_location _) -> ()
+   | _ -> Alcotest.fail "~/ without HOME is refused");
   (match declare "codex_subscription" "codex_3" "codex-home" with
    | Error (D.Invalid_location _) -> ()
    | _ -> Alcotest.fail "a relative home is refused");

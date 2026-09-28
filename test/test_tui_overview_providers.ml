@@ -212,7 +212,14 @@ let test_meter_width_is_bounded () =
   let _, narrow_cells = meter_of narrow in
   check int "a narrow terminal keeps a 10-cell meter" 10 narrow_cells;
   check bool "a narrow terminal drops the hearing age first" false
-    (contains ~affix:"heard" narrow)
+    (contains ~affix:"heard" narrow);
+  (* The box cuts a row from the right; the value must sit inside the cut. *)
+  let value_end =
+    match Astring.String.find_sub ~sub:"67%" narrow with
+    | Some i -> code_points (String.sub narrow 0 i) + String.length "67%"
+    | None -> fail "no value in the narrow row"
+  in
+  check bool "the value is inside a narrow row" true (value_end <= 100)
 
 (* Z.AI's TIME_LIMIT counts MCP and tool calls: at 100% it refuses no model
    call, so it is not drawn in the exhausted tone, while the account's token
@@ -263,6 +270,8 @@ let test_window_that_gates_nothing_is_not_an_alarm () =
         (contains ~affix:"TIME_LIMIT 1 x unit 5" (plain time_limit));
       check bool "a full MCP window is not drawn exhausted" false
         (contains ~affix:bad time_limit);
+      check bool "a full MCP window is drawn dim" true
+        (contains ~affix:(Masc_tui_ansi.Ansi.dim ^ meter_open) time_limit);
       check bool "a full token window is drawn exhausted" true
         (contains ~affix:bad tokens_limit);
       check bool "no reset time is the no-value mark" true

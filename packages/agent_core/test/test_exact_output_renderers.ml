@@ -88,10 +88,7 @@ let test_candidate_rejection_disposition () =
 
 let test_execution_error_cause () =
   let cases : (EO.execution_error_cause * string) list =
-    [ EO.Attempt_already_started, "attempt already started"
-    ; EO.Clock_required_for_timeout, "clock required for timeout"
-    ; EO.Frozen_request_mismatch, "frozen request mismatch"
-    ; ( EO.Completion_failed
+    [ ( EO.Completion_failed
           { error = Http.NetworkError { message = "resolve failed"; kind = Http.Dns_failure }
           ; dispatch = EO.No_generation_dispatch
           }
@@ -113,7 +110,6 @@ let test_execution_error_cause () =
     ; EO.Ambiguous_output 3, "ambiguous output (candidates=3)"
     ; EO.Unexpected_output_content, "unexpected output content"
     ; EO.Invalid_json_output, "invalid json output"
-    ; EO.Internal_non_json_output, "internal non-json output"
     ]
   in
   check_cases "execution error cause" EO.execution_error_cause_to_string cases
@@ -131,8 +127,6 @@ let test_start_errors () =
     EO.measurement_start_error_to_string
     [ ( EO.Measurement_operation_id_generation_failed "operation id unavailable"
       , "operation_id_generation_failed detail=\"operation id unavailable\"" )
-    ; ( EO.Measurement_clock_required_for_timeout
-      , "measurement_clock_required_for_timeout" )
     ]
 ;;
 

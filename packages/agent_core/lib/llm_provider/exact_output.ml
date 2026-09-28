@@ -122,9 +122,6 @@ type generation_dispatch_fact =
   | Generation_dispatch_started
 
 type execution_error_cause =
-  | Attempt_already_started
-  | Clock_required_for_timeout
-  | Frozen_request_mismatch
   | Completion_failed of
       { error : Http_client.http_error
       ; dispatch : generation_dispatch_fact
@@ -140,7 +137,6 @@ type execution_error_cause =
   | Ambiguous_output of int
   | Unexpected_output_content
   | Invalid_json_output
-  | Internal_non_json_output
 
 type execution_error =
   { call_id : call_id
@@ -270,9 +266,7 @@ type flow_snapshot_error =
 
 type start_attempt_error = Call_id_generation_failed of string
 
-type measurement_start_error =
-  | Measurement_operation_id_generation_failed of string
-  | Measurement_clock_required_for_timeout
+type measurement_start_error = Measurement_operation_id_generation_failed of string
 
 type flow_start_error = Flow_id_generation_failed of string
 
@@ -1234,9 +1228,6 @@ let evidence_transport_failure ~ordinal = function
   | Flow_advance_execution_failed { cause; _ } ->
     let detail =
       match cause with
-      | Attempt_already_started -> "attempt_already_started"
-      | Clock_required_for_timeout -> "clock_required_for_timeout"
-      | Frozen_request_mismatch -> "frozen_request_mismatch"
       | Completion_failed _ -> "completion_failed"
       | Response_body_deadline_exceeded -> "response_body_deadline_exceeded"
       | Provider_response_refused { http_status; refusal; _ } ->
@@ -1249,7 +1240,6 @@ let evidence_transport_failure ~ordinal = function
       | Ambiguous_output _ -> "ambiguous_output"
       | Unexpected_output_content -> "unexpected_output_content"
       | Invalid_json_output -> "invalid_json_output"
-      | Internal_non_json_output -> "internal_non_json_output"
     in
     Error (Evidence_unsupported_state { collection = "advance"; ordinal; detail })
 ;;
@@ -1740,8 +1730,6 @@ let retry_after_of_api_error : Retry.api_error -> float option = function
 ;;
 
 let execution_error_cause ~http_status ~dispatch = function
-  | Exec.Clock_required_for_timeout -> Clock_required_for_timeout
-  | Exec.Frozen_request_mismatch -> Frozen_request_mismatch
   | Exec.Response_body_deadline_exceeded -> Response_body_deadline_exceeded
   | Exec.Provider_error (Http_client.HttpError { code; body; retry_after_header }) ->
     let api_error = Retry.classify_refusal ~retry_after_header ~status:code ~body in
@@ -1789,150 +1777,80 @@ let execution_error_cause ~http_status ~dispatch = function
   | Exec.Output_normalization_failed (Exec.Invalid_json _) -> Invalid_json_output
 ;;
 
-let execute_once_with_publication ~publish ~net ?clock (attempt : attempt) =
+let execute_once_with_publication ~publish ~net ~clock (attempt : attempt) =
   let ready = attempt.ready in
   let receipt = attempt.receipt in
-  if not (Generation_receipt.try_start receipt)
-  then
+  Generation_receipt.start receipt;
+  publish ();
+  match
+    Exec.execute_once_with_evidence
+      ~net
+      ~clock
+      ~on_phase:(fun phase ->
+        observe_phase receipt phase;
+        publish ())
+      ready.plan
+  with
+  | Error
+      ({ receipt = complete_receipt; cause; raw_response = evidence } :
+        Exec.execute_once_error_with_evidence) ->
+    synchronize_receipt receipt complete_receipt;
+    publish ();
+    Option.iter
+      (fun response_evidence ->
+         response_evidence
+         |> Trace.of_evidence complete_receipt
+         |> record_provider_trace receipt)
+      evidence;
+    publish ();
     Error
       { call_id = receipt_call_id receipt
       ; receipt
-      ; cause = Attempt_already_started
-      ; raw_response = None
+      ; cause =
+          execution_error_cause
+            ~http_status:(receipt_http_status receipt)
+            ~dispatch:(generation_dispatch_fact_of_receipt receipt)
+            cause
+      ; raw_response = Option.map raw_response evidence
       }
-  else (
+  | Ok { outcome; raw_response = evidence } ->
+    synchronize_receipt receipt outcome.receipt;
     publish ();
-    match
-      Exec.execute_once_with_evidence
-        ~net
-        ?clock
-        ~on_phase:(fun phase ->
-          observe_phase receipt phase;
-          publish ())
-        ready.plan
-    with
-    | Error
-        ({ receipt = complete_receipt; cause; raw_response = evidence } :
-          Exec.execute_once_error_with_evidence) ->
-      synchronize_receipt receipt complete_receipt;
-      publish ();
-      Option.iter
-        (fun response_evidence ->
-           response_evidence
-           |> Trace.of_evidence complete_receipt
-           |> record_provider_trace receipt)
-        evidence;
-      publish ();
-      Error
-        { call_id = receipt_call_id receipt
-        ; receipt
-        ; cause =
-            execution_error_cause
-              ~http_status:(receipt_http_status receipt)
-              ~dispatch:(generation_dispatch_fact_of_receipt receipt)
-              cause
-        ; raw_response = Option.map raw_response evidence
-        }
-    | Ok { outcome; raw_response = evidence } ->
-      synchronize_receipt receipt outcome.receipt;
-      publish ();
-      let provider_trace =
-        Trace.of_evidence ~response:outcome.response outcome.receipt evidence
-      in
-      record_provider_trace receipt provider_trace;
-      publish ();
-      (* The wire's response parser already read the usage report when it
-         built [outcome.response], from the same parse that produced the
-         output; the body is not read a second time for it. *)
-      let usage = Types.usage_of_response outcome.response in
-      (match outcome.output with
-       | Exec.Json_output { value; _ } ->
-         Ok
-           { call_id = receipt_call_id receipt
-           ; receipt
-           ; output = value
-           ; provenance = ready.provenance
-           ; raw_response = raw_response evidence
-           ; usage
-           }
-       | Exec.Text_output text ->
-         (match ready.provenance.actual_assurance, Plan.response_format ready.plan with
-          | Json_syntax_only, Types.Off ->
-            (try
-               let value = Yojson.Safe.from_string text in
-               Ok
-                 { call_id = receipt_call_id receipt
-                 ; receipt
-                 ; output = value
-                 ; provenance = ready.provenance
-                 ; raw_response = raw_response evidence
-                 ; usage
-                 }
-             with
-             | Yojson.Json_error _ ->
-               Error
-                 { call_id = receipt_call_id receipt
-                 ; receipt
-                 ; cause = Invalid_json_output
-                 ; raw_response = Some (raw_response evidence)
-                 })
-          | (Json_syntax_only | Provider_schema_requested), _ ->
-            Error
-              { call_id = receipt_call_id receipt
-              ; receipt
-              ; cause = Internal_non_json_output
-              ; raw_response = Some (raw_response evidence)
-              })))
-;;
-
-(* An exact walk stops only where masc itself failed; every other failure
-   hands the same input to the declared successor
-   (RFC-exact-lane-walks-one-slot-list.md §3.3, Q1). Exact requests carry no
-   tools, so a successor cannot double an effect. That holds when the result
-   is unknown too -- the request went out and no answer came back, or the
-   stream stopped part way: the provider may have billed that dispatch, and
-   the receipt keeps it as a fact. An answer the output parser cannot read
-   (incomplete, ambiguous, a tool call where text was asked for) is handed on
-   the way a domain rejection is.
-
-   The causes that stop are masc's own bookkeeping and wiring: the attempt
-   was already started, the request no longer matches its frozen form, a
-   declared deadline has no clock to run it, the plan and its provenance
-   disagree about the output shape, or the transport wiring cannot accept the
-   request. None of them is about the binding, so walking on would only hide
-   them. Cancellation never arrives here: it propagates as an exception and
-   ends the walk. *)
-let execution_failure_may_advance (error : execution_error) =
-  match error.cause with
-  | Attempt_already_started
-  | Frozen_request_mismatch
-  | Clock_required_for_timeout
-  | Internal_non_json_output
-  | Completion_failed { error = Http_client.AcceptRejected _; dispatch = _ } -> false
-  | Completion_failed
-      { error =
-          ( Http_client.HttpError _
-          | Http_client.NetworkError _
-          | Http_client.TimeoutError _
-          | Http_client.ProviderTerminal _
-          | Http_client.ProviderFailure _ )
-      ; dispatch = _
+    let provider_trace =
+      Trace.of_evidence ~response:outcome.response outcome.receipt evidence
+    in
+    record_provider_trace receipt provider_trace;
+    publish ();
+    (* The wire's response parser already read the usage report when it
+       built [outcome.response], from the same parse that produced the
+       output; the body is not read a second time for it. *)
+    let usage = Types.usage_of_response outcome.response in
+    Ok
+      { call_id = receipt_call_id receipt
+      ; receipt
+      ; output = outcome.output.value
+      ; provenance = ready.provenance
+      ; raw_response = raw_response evidence
+      ; usage
       }
-  | Response_body_deadline_exceeded
-  | Provider_response_refused _
-  | Incomplete_output
-  | Missing_output
-  | Ambiguous_output _
-  | Unexpected_output_content
-  | Invalid_json_output -> true
 ;;
 
+(* An exact walk stops only where masc itself failed: its callbacks, a replay
+   of the flow, an identity it could not allocate, and cancellation, which
+   propagates as an exception (RFC-exact-lane-walks-one-slot-list.md §3.3,
+   Q1). Every execution failure is the binding's or its answer's, so it hands
+   the same input to the declared successor. Exact requests carry no tools, so
+   a successor cannot double an effect. That holds when the result is unknown
+   too -- the request went out and no answer came back, or the stream stopped
+   part way: the provider may have billed that dispatch, and the receipt keeps
+   it as a fact. A rejected candidate hands the input on whether or not its
+   count-tokens measurement went out: measuring is not generating.
+
+   masc's own wiring cannot fail an execution: the plan parses its URL and
+   headers when it is frozen, a clock is always passed, an attempt is started
+   once by the step that allocated it, and every normalized answer is JSON. *)
 let flow_execution_terminal_kind = function
-  (* A rejected candidate hands the input on whether or not its count-tokens
-     measurement went out: measuring is not generating. *)
-  | Flow_candidates_exhausted _ -> Advanceable_candidates_exhausted
-  | Flow_exact_execution_failed { cause; _ }
-    when execution_failure_may_advance cause ->
+  | Flow_candidates_exhausted _ | Flow_exact_execution_failed _ ->
     Advanceable_candidates_exhausted
   | Flow_attempt_already_started _
   | Flow_attempt_start_failed _
@@ -1940,9 +1858,7 @@ let flow_execution_terminal_kind = function
   | Flow_before_measurement_dispatch_callback_failed _
   | Flow_measurement_terminal_callback_failed _
   | Flow_before_dispatch_callback_failed _
-  | Flow_before_advance_callback_failed _
-  | Flow_exact_execution_failed _ ->
-    Non_advanceable_terminal
+  | Flow_before_advance_callback_failed _ -> Non_advanceable_terminal
 ;;
 
 type flow_binding_standing =
@@ -1999,16 +1915,12 @@ let execution_cause_is_binding_rest = function
           | Http_client.ProviderTerminal _ )
       ; dispatch = _
       } -> false
-  | Attempt_already_started
-  | Clock_required_for_timeout
-  | Frozen_request_mismatch
   | Response_body_deadline_exceeded
   | Incomplete_output
   | Missing_output
   | Ambiguous_output _
   | Unexpected_output_content
-  | Invalid_json_output
-  | Internal_non_json_output -> false
+  | Invalid_json_output -> false
 ;;
 
 let flow_execution_binding_standing error =
@@ -2050,7 +1962,7 @@ let record_candidate_rejection (flow : flow_attempt) visit cause measurement =
 
 let execute_flow_candidate
       ~net
-      ?clock
+      ~clock
       ~before_measurement_dispatch
       ~on_measurement_terminal
       ~before_dispatch
@@ -2074,7 +1986,7 @@ let execute_flow_candidate
     (match
        admit_candidate_request
          ~net
-         ?clock
+         ~clock
          ~on_measurement_receipt:(fun receipt ->
            let measurement = flow_measurement receipt in
            publish_measurement flow measurement)
@@ -2092,10 +2004,6 @@ let execute_flow_candidate
        Error
          (Flow_step_measurement_start_failed
             (candidate.visit, Measurement_operation_id_generation_failed detail))
-     | Error Flow_request_measurement_clock_required_for_timeout ->
-       Error
-         (Flow_step_measurement_start_failed
-            (candidate.visit, Measurement_clock_required_for_timeout))
      | Error (Flow_request_before_measurement_dispatch_failed (receipt, cause)) ->
        Error
          (Flow_step_before_measurement_dispatch_callback_failed
@@ -2121,7 +2029,7 @@ let execute_flow_candidate
                 execute_once_with_publication
                   ~publish:(fun () -> publish_attempt_snapshot flow candidate_receipt)
                   ~net
-                  ?clock
+                  ~clock
                   attempt
               with
               | Ok success -> Ok (candidate_receipt, success)
@@ -2132,12 +2040,8 @@ let execute_flow_candidate
 
 let advanceable_flow_failure = function
   | Flow_step_candidate_rejected receipt -> Some (Flow_candidate_rejected receipt)
-  | Flow_step_execution_failed ({ cause; _ } as failure)
-    when execution_failure_may_advance cause ->
-    Some
-      (Flow_candidate_execution_failed
-         { candidate = failure.candidate; cause = failure.cause })
-  | Flow_step_execution_failed _
+  | Flow_step_execution_failed { candidate; cause } ->
+    Some (Flow_candidate_execution_failed { candidate; cause })
   | Flow_step_attempt_start_failed _
   | Flow_step_measurement_start_failed _
   | Flow_step_before_measurement_dispatch_callback_failed _
@@ -2147,7 +2051,7 @@ let advanceable_flow_failure = function
 
 let execute_flow_once
       ~net
-      ?clock
+      ~clock
       ~before_measurement_dispatch
       ~on_measurement_terminal
       ~before_dispatch
@@ -2162,7 +2066,7 @@ let execute_flow_once
       ~execute:
         (execute_flow_candidate
            ~net
-           ?clock
+           ~clock
            ~before_measurement_dispatch
            ~on_measurement_terminal
            ~before_dispatch
@@ -2318,9 +2222,6 @@ let generation_dispatch_fact_to_string : generation_dispatch_fact -> string = fu
 ;;
 
 let execution_error_cause_to_string : execution_error_cause -> string = function
-  | Attempt_already_started -> "attempt already started"
-  | Clock_required_for_timeout -> "clock required for timeout"
-  | Frozen_request_mismatch -> "frozen request mismatch"
   | Completion_failed { error; dispatch } ->
     Printf.sprintf
       "completion failed (%s, %s)"
@@ -2338,7 +2239,6 @@ let execution_error_cause_to_string : execution_error_cause -> string = function
   | Ambiguous_output count -> Printf.sprintf "ambiguous output (candidates=%d)" count
   | Unexpected_output_content -> "unexpected output content"
   | Invalid_json_output -> "invalid json output"
-  | Internal_non_json_output -> "internal non-json output"
 ;;
 
 let start_attempt_error_to_string : start_attempt_error -> string = function
@@ -2349,7 +2249,6 @@ let start_attempt_error_to_string : start_attempt_error -> string = function
 let measurement_start_error_to_string : measurement_start_error -> string = function
   | Measurement_operation_id_generation_failed detail ->
     Printf.sprintf "operation_id_generation_failed detail=%S" detail
-  | Measurement_clock_required_for_timeout -> "measurement_clock_required_for_timeout"
 ;;
 
 let candidate_rejection_to_string (rejection : candidate_rejection_receipt) =

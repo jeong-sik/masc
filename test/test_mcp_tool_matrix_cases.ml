@@ -801,6 +801,10 @@ let tool_arguments fixture (schema : Masc_domain.tool_schema) =
              but the matrix fixture must supply a non-empty [content] or the
              handler rejects the edit. *)
           [ "content" ]
+      | "masc_board_comment" ->
+          (* The handler requires non-empty content even though the schema
+             keeps body/content as optional aliases for compatibility. *)
+          [ "content" ]
       | "masc_goal_transition" -> [ "note" ]
       | _ -> []
     in

@@ -1,0 +1,140 @@
+(* Invites to the shared machine (RFC play-link-for-the-shared-machine §2.4). *)
+
+let max_name_length = 32
+
+module Name = struct
+  type t = string
+
+  let is_lower c = c >= 'a' && c <= 'z'
+  let is_digit c = c >= '0' && c <= '9'
+
+  let of_string raw =
+    let length = String.length raw in
+    if length = 0 then Error "an invite name is empty"
+    else if length > max_name_length then
+      Error (Printf.sprintf "an invite name is at most %d characters" max_name_length)
+    else if not (is_lower raw.[0]) then
+      Error "an invite name starts with a lowercase letter (a-z)"
+    else if not (String.for_all (fun c -> is_lower c || is_digit c) raw) then
+      Error "an invite name holds only lowercase letters and digits (a-z, 0-9)"
+    else Ok raw
+
+  let to_string name = name
+end
+
+type readiness_gap =
+  | Auth_disabled
+  | Token_not_required
+  | No_public_base_url
+
+let readiness_gap_to_string = function
+  | Auth_disabled -> "auth_disabled"
+  | Token_not_required -> "token_not_required"
+  | No_public_base_url -> "no_public_base_url"
+
+type taken_by =
+  | Keeper
+  | Credential
+
+let taken_by_to_string = function
+  | Keeper -> "keeper"
+  | Credential -> "credential"
+
+type issue_error =
+  | Not_ready of readiness_gap list
+  | Name_taken of taken_by
+  | Keeper_names_unreadable of string
+  | Hours_out_of_range of int
+  | Credential_not_saved of Masc_domain.masc_error
+
+type issued =
+  { name : Name.t
+  ; expires_at : string
+  ; link : string
+  }
+
+let play_path = "/play"
+
+(* Every gap at once, so the operator fixes the setup in one pass. *)
+let readiness ~(auth_config : Masc_domain.auth_config) ~public_base_url =
+  let auth_gaps =
+    List.filter_map
+      (fun (gap, missing) -> if missing then Some gap else None)
+      [ Auth_disabled, not auth_config.enabled
+      ; Token_not_required, not auth_config.require_token
+      ]
+  in
+  match auth_gaps, public_base_url with
+  | [], Some base -> Ok base
+  | gaps, None -> Error (gaps @ [ No_public_base_url ])
+  | (_ :: _ as gaps), Some _ -> Error gaps
+
+(* The name's own credential file, not [Auth.load_credential]: that one skips
+   a file it cannot parse, and saving over it would hand an existing name to
+   the invitee. The name grammar keeps [Common.safe_filename] from changing it,
+   so this is the only path the name can own. *)
+let credential_exists ~base_path name = Sys.file_exists (Auth.credential_file base_path name)
+
+let issue ~base_path ~public_base_url ~keeper_names ~name ~hours =
+  let ( let* ) = Result.bind in
+  let* base =
+    readiness ~auth_config:(Auth.load_auth_config base_path) ~public_base_url
+    |> Result.map_error (fun gaps -> Not_ready gaps)
+  in
+  let* () =
+    if hours >= Masc_domain.min_token_expiry_hours && hours <= Masc_domain.max_token_expiry_hours
+    then Ok ()
+    else Error (Hours_out_of_range hours)
+  in
+  let* keepers = Result.map_error (fun detail -> Keeper_names_unreadable detail) keeper_names in
+  let* () =
+    if List.exists (String.equal name) keepers then Error (Name_taken Keeper)
+    else if credential_exists ~base_path name then Error (Name_taken Credential)
+    else Ok ()
+  in
+  match Auth.create_token_expiring_in base_path ~agent_name:name ~role:Masc_domain.Player ~hours with
+  | Error err -> Error (Credential_not_saved err)
+  | Ok (_, { Masc_domain.expires_at = None; _ }) ->
+    (* The record type allows no expiry, though [create_token_expiring_in]
+       always sets one. An invite that never ends is not handed out. *)
+    Auth.delete_credential base_path name;
+    Error
+      (Credential_not_saved
+         (Masc_domain.System
+            (Masc_domain.System_error.IoError "the invite credential was saved without an expiry")))
+  | Ok (raw_token, { Masc_domain.expires_at = Some expires_at; _ }) ->
+    Ok { name; expires_at; link = base ^ play_path ^ "#" ^ raw_token }
+
+type invite =
+  { invite_name : string
+  ; expires_at : string option
+  ; expired : bool
+  }
+
+let list ~base_path ~now =
+  let now_iso = Masc_domain.iso8601_of_unix_seconds now in
+  Auth.list_credentials base_path
+  |> List.filter_map (fun (cred : Masc_domain.agent_credential) ->
+    match cred.role with
+    | Masc_domain.Player ->
+      let expired =
+        match cred.expires_at with
+        | Some expires_at -> String.compare now_iso expires_at > 0
+        | None -> false
+      in
+      Some { invite_name = cred.agent_name; expires_at = cred.expires_at; expired }
+    | Masc_domain.Worker | Masc_domain.Admin -> None)
+  |> List.sort (fun a b -> String.compare a.invite_name b.invite_name)
+
+type revoke_error =
+  | No_such_invite
+  | Not_an_invite of Masc_domain.agent_role
+
+let revoke ~base_path ~name =
+  match Auth.load_credential base_path name with
+  | Some { Masc_domain.agent_name; role = Masc_domain.Player; _ } when String.equal agent_name name ->
+    Auth.delete_credential base_path name;
+    Ok ()
+  | Some { Masc_domain.agent_name; role; _ } when String.equal agent_name name ->
+    Error (Not_an_invite role)
+  | Some _ | None -> Error No_such_invite

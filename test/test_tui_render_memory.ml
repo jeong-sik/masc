@@ -1667,9 +1667,11 @@ let test_the_clock_and_the_badge_keep_a_fixed_tail () =
      which the clock and the badge take 33 -- which is why the sort, spelled
      here as well as on the row below, was what pushed them off the screen.
 
-     A filter long enough to pass that budget still cuts the tail, and the tail
-     is the badge. The title is not the one that has to carry the query: the body
-     draws it again under [Filter [/]:]. The remaining defect is #35575. *)
+     A filter long enough to pass that budget used to cut the tail, and the
+     tail is the badge. The title is not the one that has to carry the query:
+     the body draws it again under [Filter [/]:]. So the counts and the filters
+     are what the title cuts now, at their end, and the clock and the badge
+     stay (#35575, #39712 review). *)
   let tail = "  00:41:00  HTTP [refresh failed]" in
   check int "the clock and the badge cost the same whatever is read" 33
     (Masc_tui_message_layout.display_width tail);
@@ -1678,10 +1680,47 @@ let test_the_clock_and_the_badge_keep_a_fixed_tail () =
   in
   check int "a live fleet reading fits it" 0
     (max 0 (Masc_tui_message_layout.display_width (live_title ()) - room));
-  check bool "and a query long enough does not" true
-    (Masc_tui_message_layout.display_width
-       (live_title ~query_label:(" filter \"" ^ String.make room 'q' ^ "\"") ())
-     > room)
+  let long_query =
+    live_title ~query_label:(" filter \"" ^ String.make room 'q' ^ "\"") ()
+  in
+  check bool "a query long enough fits too" true
+    (Masc_tui_message_layout.display_width long_query <= room);
+  check bool "and keeps the clock and the badge last" true
+    (String.ends_with ~suffix:"  23:41:50  HTTP [refresh failed]"
+       (Masc_tui_theme.strip_sgr long_query));
+  check bool "and the keeper it is about" true (contains "all keepers" long_query)
+
+(* The title at the widths the Memory surface is read at, with a keeper whose
+   name is longer than the name's floor and a query long enough to fill any of
+   them. The name keeps twelve cells -- three of its opening and eight of its
+   tail around the cut mark -- the query is cut, and the clock and the badge
+   stay. At sixty columns that leaves the name thirteen: the screen and the
+   tail take the rest. *)
+let test_the_facts_title_keeps_the_keeper_at_every_width () =
+  let keeper = "kidsnote-slack-context-collector" in
+  List.iter
+    (fun cols ->
+      let title =
+        Render_memory.facts_title ~cols ~screen:" MASC Memory" ~keeper
+          ~reading:
+            (Render_memory.Facts_loaded
+               { total = 2316
+               ; filter_label = "All"
+               ; query_label = " \xc2\xb7 filter \"" ^ String.make 80 'q' ^ "\""
+               })
+          ~timestamp:"23:41:50" ~badge:"HTTP [connected]"
+      in
+      let where = Printf.sprintf "%d columns" cols in
+      check bool (where ^ ": the title fits the frame") true
+        (Masc_tui_message_layout.display_width title
+        <= Masc_tui_frame.inner_width ~cols);
+      check bool (where ^ ": the clock and the badge are last") true
+        (String.ends_with ~suffix:"  23:41:50  HTTP [connected]"
+           (Masc_tui_theme.strip_sgr title));
+      check bool (where ^ ": the keeper keeps its floor") true
+        (contains ("kid" ^ Masc_tui_message_layout.cut_mark ^ "ollector") title
+        || contains keeper title))
+    [ 60; 80; 100 ]
 
 let test_the_breakdown_and_the_sort_sit_on_one_row () =
   let state = three_kinds_state () in
@@ -2088,6 +2127,8 @@ let () =
             test_a_read_in_flight_says_so_and_keeps_the_clock
         ; test_case "the clock and the badge keep a fixed tail" `Quick
             test_the_clock_and_the_badge_keep_a_fixed_tail
+        ; test_case "the facts title keeps the keeper at every width" `Quick
+            test_the_facts_title_keeps_the_keeper_at_every_width
         ; test_case "the breakdown and the sort sit on one row" `Quick
             test_the_breakdown_and_the_sort_sit_on_one_row
         ; test_case "the breakdown counts the rows the screen lists" `Quick

@@ -35,7 +35,7 @@ type drip = {
   drip_width : float;  (** radius where it leaves the top edge *)
 }
 
-type body = {
+type body = private {
   wax : wax;
   half_width : float;  (** half the wax block's width, shape units *)
   half_height : float;  (** half the wax block's height, shape units *)
@@ -72,18 +72,91 @@ type equipment = {
 val bare : equipment
 (** Every slot empty. *)
 
+(** {2 Ranges}
+
+    Every body lies within these, whether it came from a name or from
+    {!body}. The renderer relies on them: its framing and the regions it skips
+    are sized for them. Closed at both ends except the hue, which wraps. *)
+
+val half_width_range : float * float
+val half_height_range : float * float
+val corner_range : float * float
+val max_drips : int
+
+val drip_edge_margin : float
+(** A drip's centre stays this far inside the wax's sides. *)
+
+val drip_length_range : float * float
+val drip_width_range : float * float
+val flame_size_range : float * float
+val flame_lean_range : float * float
+val horn_length_range : float * float
+
+val backdrop_hue_range : float * float
+(** [lo <= hue < hi]. *)
+
 val body_of_name : string -> body
 (** The keeper's candle, drawn from SHA-256 of a domain-separated key and the
     name. Total and deterministic: the same name always gives the same body,
     on every platform and compiler version (the generator is SplitMix64, not
     [Stdlib.Random]). *)
 
+type invalid_body =
+  | Half_width_out_of_range
+  | Half_height_out_of_range
+  | Corner_out_of_range
+  | Too_many_drips
+  | Drip_out_of_range  (** a drip's position, length or width *)
+  | Flame_size_out_of_range
+  | Flame_lean_out_of_range
+  | Horn_length_out_of_range
+  | Backdrop_hue_out_of_range
+
+val body :
+  wax:wax ->
+  half_width:float ->
+  half_height:float ->
+  corner:float ->
+  drips:drip list ->
+  flame:flame ->
+  flame_size:float ->
+  flame_lean:float ->
+  twin_flame:bool ->
+  horns:horn_style ->
+  horn_colour:horn_colour ->
+  horn_length:float ->
+  eyes:eyes ->
+  mouth:mouth ->
+  blush:bool ->
+  backdrop_hue:float ->
+  (body, invalid_body) result
+(** A body other than a name's, for items and tests. [Error] names the first
+    field outside its range (NaN and the infinities are always outside). *)
+
 val equipment_of_name : string -> equipment
 (** The keeper's starting items, from a hash separate from the body's, so
     changing which items are handed out never changes a keeper's body. *)
 
-(** Every constructor, in declaration order. Generation picks from these lists;
-    tests hold them against exhaustive matches. *)
+val mascot : body * equipment
+(** MASC's own candle: the one the TUI shows on its startup splash and on
+    [/about]. Chosen by hand rather than drawn from a name -- an ivory candle
+    with an ember flame, long crimson horns, bean eyes, a small "w" mouth and
+    a blush, standing on a gilt dish, wearing nothing. *)
+
+val flame_weight : flame -> int
+(** How often a name gets this flame, relative to the others. Every flame
+    has one, so a new flame is generated as soon as it has a weight. *)
+
+val starting_equipment : equipment list
+(** What {!equipment_of_name} picks from (before the dish, which is picked
+    from {!all_base_items} on its own): a few bare sets and one set per item a
+    face, neck, head or hand can hold. *)
+
+(** Every constructor, in declaration order, generated from the type
+    declarations by [ppx_enumerate], so a new constructor is listed without
+    being added by hand. Generation picks wax, horns, horn colours, eyes,
+    mouths and dishes from these lists directly; flames through
+    {!flame_weight}; worn items through {!starting_equipment}. *)
 
 val all_wax : wax list
 val all_flames : flame list

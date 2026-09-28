@@ -425,6 +425,19 @@ module Response = struct
              ~content_type:html_content_type status final_body)
           final_body
 
+  let bytes_cached ~etag ~cache_control ~request ~content_type body reqd =
+    let etag_value = "\"" ^ etag ^ "\"" in
+    let validator = [ ("etag", etag_value); ("cache-control", cache_control) ] in
+    match Httpun.Headers.get request.Httpun.Request.headers "if-none-match" with
+    | Some client_tag when client_tag_matches ~etag:etag_value ~client_tag ->
+      safe_respond_with_string reqd
+        (Httpun.Response.create ~headers:(Httpun.Headers.of_list validator) `Not_modified)
+        ""
+    | Some _ | None ->
+      safe_respond_with_string reqd
+        (response ~after_headers:validator ~content_type `OK body)
+        body
+
   let not_found reqd =
     let response, body = not_found_response in
     safe_respond_with_string reqd response body

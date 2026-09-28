@@ -108,6 +108,36 @@ let raw_bytes_per_pixel = function
   | Rgb -> 3
   | Rgba -> 4
 
+(* How a raw frame's bytes travel. [o=z] is RFC 1950 zlib, the one
+   compression the protocol names; the terminal inflates it back to the
+   [s * v] pixels the escape states. *)
+type compression =
+  | Uncompressed
+  | Zlib
+
+(* The same deflate Rgb_png writes its IDAT with, through decompress. *)
+let zlib data =
+  let input = De.bigstring_create De.io_buffer_size in
+  let output = De.bigstring_create De.io_buffer_size in
+  let w = De.Lz77.make_window ~bits:15 in
+  let q = De.Queue.create 0x1000 in
+  let encoded = Buffer.create (String.length data / 4) in
+  let consumed = ref 0 in
+  let refill buffer =
+    let len = min (Bigstringaf.length buffer) (String.length data - !consumed) in
+    Bigstringaf.blit_from_string data ~src_off:!consumed buffer ~dst_off:0 ~len;
+    consumed := !consumed + len;
+    len
+  in
+  let flush buffer len = Buffer.add_string encoded (Bigstringaf.substring buffer ~off:0 ~len) in
+  Zl.Higher.compress ~w ~q ~refill ~flush input output;
+  Buffer.contents encoded
+
+let payload_of compression data =
+  match compression with
+  | Uncompressed -> (data, "")
+  | Zlib -> (zlib data, ",o=z")
+
 (* Raw pixels, for a caller that holds a frame rather than a file. A raw
    format has no container, so the escape has to state the pixel dimensions
    the PNG header would otherwise carry -- [s=] and [v=] -- and the terminal
@@ -118,8 +148,9 @@ let raw_bytes_per_pixel = function
    bytes under [f=100], which is exactly the silent drop the comment above
    warns about. A caller holding a frame reaches for this one because it is
    the one that asks for the frame's dimensions. *)
-let encode_raw ~format ~identity ~data ~pixel_width ~pixel_height ~rows =
-  let encoded = Base64.encode_string data in
+let encode_raw ~format ~compression ~identity ~data ~pixel_width ~pixel_height ~rows =
+  let payload, compression_key = payload_of compression data in
+  let encoded = Base64.encode_string payload in
   let length = String.length encoded in
   let out = Buffer.create (length + (length / chunk_bytes * 32) + 64) in
   let rec emit offset =
@@ -129,8 +160,8 @@ let encode_raw ~format ~identity ~data ~pixel_width ~pixel_height ~rows =
     if offset = 0
     then
       Buffer.add_string out
-        (Printf.sprintf "%sf=%d,s=%d,v=%d,a=T%s,r=%d,q=2,m=%d;%s%s" apc
-           (raw_format_key format) (max 1 pixel_width) (max 1 pixel_height) identity
+        (Printf.sprintf "%sf=%d,s=%d,v=%d%s,a=T%s,r=%d,q=2,m=%d;%s%s" apc
+           (raw_format_key format) (max 1 pixel_width) (max 1 pixel_height) compression_key identity
            (max 1 rows) more
            (String.sub encoded offset size)
            st)
@@ -141,7 +172,7 @@ let encode_raw ~format ~identity ~data ~pixel_width ~pixel_height ~rows =
   in
   (* A frame whose bytes do not match its stated dimensions would be drawn as
      whatever the terminal makes of the mismatch, so refuse instead. *)
-  if length = 0
+  if String.length data = 0
      || String.length data <> pixel_width * pixel_height * raw_bytes_per_pixel format
   then ""
   else begin
@@ -150,16 +181,19 @@ let encode_raw ~format ~identity ~data ~pixel_width ~pixel_height ~rows =
   end
 ;;
 
-let place_rgb = encode_raw ~format:Rgb ~identity:""
+let place_rgb = encode_raw ~format:Rgb ~compression:Uncompressed ~identity:""
 
 let identity ~image_id ~placement_id =
   Printf.sprintf ",i=%d,p=%d,C=1" image_id placement_id
 
 let replace_rgb ~image_id ~placement_id =
-  encode_raw ~format:Rgb ~identity:(identity ~image_id ~placement_id)
+  encode_raw ~format:Rgb ~compression:Uncompressed ~identity:(identity ~image_id ~placement_id)
 
+(* A portrait is mostly a transparent surround and flat bands of shading: a
+   160 px candle's 102,400 bytes deflate to about 3 KB, and a stepping
+   splash sends one every 150 ms. *)
 let replace_rgba ~image_id ~placement_id =
-  encode_raw ~format:Rgba ~identity:(identity ~image_id ~placement_id)
+  encode_raw ~format:Rgba ~compression:Zlib ~identity:(identity ~image_id ~placement_id)
 
 let delete_image ~image_id =
   Printf.sprintf "%sa=d,d=I,i=%d,q=2%s" apc image_id st

@@ -200,6 +200,7 @@ def portrait_as_pixels(binary: str) -> None:
             f"the picture starts at column {placement[2].decode()}, not {PORTRAIT_COLUMN}"
         assert int(fields[b"r"]) == PIXEL_BAND_ROWS, "the picture is not the band's rows tall"
         assert fields.get(b"f") == b"32", "the portrait is not sent with its alpha"
+        assert fields.get(b"o") == b"z", "the portrait is not sent compressed"
         assert not portrait_rows(rows), "real pixels were drawn as a mosaic as well"
         assert row_of(rows, CURRENT_FAILURE) == identity + PIXEL_BAND_ROWS + 1, \
             "the facts did not leave the picture its rows"

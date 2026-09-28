@@ -17311,17 +17311,23 @@ let main
         ~invalidate_before:(damaged || authority_changed)
         ~write ~flush frame
     with
-    | Frame_presenter.Presented ->
+    | Frame_presenter.Presented repaint ->
         state.frames_presented <- state.frames_presented + 1;
         commit_presented_approval approval;
         presented_presses := presses;
         presented_reader := reader;
-        (* The frame's pictures go over it once it is on the terminal: a
-           repainted frame may have cleared them, so all are placed again. *)
-        Masc_tui_portrait_view.flush ~presented:true ~write:write_to_terminal
+        (* The frame's pictures go over it once it is on the terminal, and
+           again over any row the frame erased and wrote: a full redraw
+           cleared them all, a row it rewrote may have taken one's cells. *)
+        Masc_tui_portrait_view.flush
+          ~rewritten:
+            (match repaint with
+             | Frame_presenter.Whole_screen -> fun _ -> true
+             | Frame_presenter.Rows rows -> fun row -> List.mem row rows)
+          ~write:write_to_terminal
     | Frame_presenter.Unchanged ->
         (* Same text, but a picture may have moved on a step. *)
-        Masc_tui_portrait_view.flush ~presented:false ~write:write_to_terminal
+        Masc_tui_portrait_view.flush ~rewritten:(fun _ -> false) ~write:write_to_terminal
   in
   (* Bind the bearer to the workspace actually opened, before any request is
      built. Reported before the recovery load as well, so when neither source
@@ -26547,7 +26553,7 @@ and is loaded on demand through keeper_skill.
               again from that frame. *)
            Masc_tui_emblem_screen.begin_frame ();
            Masc_tui_portrait_view.begin_frame ();
-           Masc_tui_portrait_view.flush ~presented:false ~write:write_to_terminal
+           Masc_tui_portrait_view.flush ~rewritten:(fun _ -> false) ~write:write_to_terminal
        | Render_schedule.Render ->
            let frame, clamped, approval, presses =
              Masc_tui_frame_timing.time_tagged Masc_tui_frame_timing.Build

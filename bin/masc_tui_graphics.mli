@@ -100,8 +100,9 @@ val replace_rgba : image_id:int -> placement_id:int -> data:string
   -> pixel_width:int -> pixel_height:int -> rows:int -> string
 (** {!replace_rgb} for four bytes per pixel with straight alpha ([f=32]): the
     terminal blends the picture over the cells behind it, so a picture with a
-    transparent surround needs no guess at the page colour. [""] when [data]
-    is empty or not [pixel_width * pixel_height * 4] bytes long. *)
+    transparent surround needs no guess at the page colour. The pixels travel
+    zlib-compressed ([o=z]). [""] when [data] is empty or not
+    [pixel_width * pixel_height * 4] bytes long. *)
 
 val delete_image : image_id:int -> string
 (** Delete this image's placements and free its stored pixels. *)

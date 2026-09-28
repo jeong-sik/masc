@@ -98,6 +98,10 @@ val navigation_rows : int
 
 val get_terminal_size : unit -> int * int
 
+val lines_ended_since : Buffer.t -> start:int -> int
+(** How many lines the buffer ended after byte [start]: the row, counted from
+    there, that the next line written lands on. *)
+
 val frame_lines : Buffer.t -> string list
 
 val write_two_panes :
@@ -151,6 +155,11 @@ val footer_line :
 val keeper_split_threshold_cols : int
 
 val keeper_roster_pane_cols : int
+
+val strip_rows : int
+(** The lines the surface strip takes above every surface: a row a surface
+    counts in its own frame sits this many lines lower in the terminal's. A
+    picture placed over a surface's rows starts from there. *)
 
 val change_row_address : Masc.Tui_decode.file_change -> string
 

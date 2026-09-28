@@ -85,7 +85,6 @@ module For_testing : sig
     (Runtime_agent.cooperative_yield_decision, Agent_core.Error.t) result
   val official_client_tool_boundary :
     repetition_execution:Keeper_repetition_scope.Execution.t option ->
-    ?yield_requested:(unit -> (yield_request option, string) result) ->
     tool_calls:Keeper_agent_result.tool_call_detail list ->
     unit ->
     (Keeper_official_client_host.host_stop option, Agent_core.Error.t) result

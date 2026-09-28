@@ -1,0 +1,42 @@
+# task-618 Memory Health baseline
+
+Observed: 2026-09-28 14:02:59 UTC (generated_at=1790604179.490074)
+Source: http://127.0.0.1:8935/api/v1/dashboard/keeper-memory-health
+Read: BrowserGoto then BrowserRead lane=automation mode=text maxChars=100000; complete rendered text was 29,130 characters. Full browser result is preserved in memory-health-baseline-raw-20260928.json (source artifact sha256 72ac39f8096077282c9a04c37679de503bc92dc7cb81b7fe36a1de9476600c0e).
+Metric: server_dashboard_http_keeper_memory_health.ml:167-175,482 defines snapshot_bytes as rendered ordinary facts bytes, not on-disk snapshot size. Source-bound rendered bytes use lines 176-187,414. This is a single time-point, not a daily growth rate.
+
+28 keepers; ordinary facts 3,330; ordinary rendered facts bytes 3,431,182; source facts 43; source rendered bytes 70,895. Sum from extracted rows: 3431182.
+Distribution ordinary rendered bytes: min 0, median 63550, p90 311784, p95 315224, max 463265; above 64KiB 13, above 128KiB 11, above 256KiB 3.
+A 512KiB candidate leaves 61023 bytes above the current maximum (13.2%). It is only a candidate until ordinary and source-bound combined bytes, header/newline overhead, and current live writes are checked.
+
+## Extracted rows
+
+keeper_id	facts	rendered_ordinary_bytes	source_facts	rendered_source_bytes
+e-masc-the-leader	385	463265	1	1249
+wkbl-web-leader	223	315224	19	37178
+masc-pro-builder	326	311784	0	0
+tui-developer	177	253722	1	839
+rondo	279	244054	0	137
+goo-yang-bong	199	231532	1	1745
+pr-updater	173	175956	0	0
+ocaml-agent-ic	157	165551	0	261
+polisher	154	162821	0	650
+jazz-developer	137	138490	0	0
+code-reviewer	164	137752	0	0
+glossary-maniac	118	127520	1	613
+msx-retro-mania	93	124809	0	128
+won-chik	48	63550	15	21554
+hole-finder	63	64967	0	0
+context-reviewer	77	59739	0	107
+wkbl-front	82	58324	0	0
+indie-geek-blue	63	56975	0	0
+sangsu	106	52061	0	0
+simplifyer	55	48934	0	0
+lane-smith	47	43219	0	1362
+wkbl-growth	33	32796	2	2178
+taskmaster	72	31461	0	0
+lab-sangsu	43	20820	0	0
+wkbl-data	28	17892	0	0
+rust-hwp-guy	17	14306	2	2041
+geek-scout	11	13658	1	853
+microvm-probe-829	0	0	0	0

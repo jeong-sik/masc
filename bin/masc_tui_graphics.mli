@@ -31,15 +31,25 @@ val fit_rows : cell_pixels:(int * int) option -> image_pixels:(int * int) option
 (** Aspect-preserving rows that fit both terminal dimensions. Without measured
     pixel geometry, retain the requested rows rather than inventing cell shape. *)
 
+(** Every picture this process puts on a Kitty terminal. *)
+type image =
+  | Graphics_query  (** {!query}'s one-pixel probe, received but never drawn *)
+  | Msx_screen  (** the MSX spectator screen *)
+  | Mascot  (** MASC's candle on the startup splash and [/about] *)
+  | Keeper_portrait  (** a Keeper's own portrait at the head of its detail *)
+[@@deriving enumerate]
+
+val image_id : image -> int
+(** Each picture's own image id, so placing one never replaces another and
+    deleting one never takes another down. {!Graphics_query}'s is in the
+    terminal's reply, so a reply cannot be taken for an answer about a
+    picture actually being drawn. *)
+
 val query : string
 (** Ask the terminal whether it speaks the protocol. Sends a one-pixel image
-    it is asked to receive but not draw, under a distinctive id. A terminal
+    it is asked to receive but not draw, under {!Graphics_query}'s id. A terminal
     that implements the protocol answers; one that does not says nothing, so
     the caller needs its own deadline. *)
-
-val query_id : int
-(** The image id {!query} uses. Present in the reply, and chosen so a reply
-    cannot be confused with an answer about a picture actually being drawn. *)
 
 type query_reply =
   | Supported

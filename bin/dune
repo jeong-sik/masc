@@ -802,6 +802,8 @@
  (name masc_tui_graphics)
  (wrapped false)
  (modules masc_tui_graphics)
+ (preprocess
+  (pps ppx_enumerate))
  (libraries base64))
 
 (library
@@ -1713,6 +1715,7 @@
   masc_tui_account_login
   masc_tui_sgr_text
   masc_tui_emblem_screen
+  masc_tui_keeper_portrait
   masc_tui_portrait_view
   masc_tui_hit
   masc_tui_press
@@ -2043,7 +2046,21 @@
  (modules masc_tui_emblem_screen)
  (libraries
   masc.keeper_portrait
+  masc_tui_graphics
   masc_tui_message_layout
+  masc_tui_portrait_view
+  masc_tui_terminal_palette))
+
+;; A Keeper's own still portrait beside the Identity facts of its detail,
+;; with the cache that keeps a roster walk from re-rendering it. Apart from
+;; the TUI so its size rules and cache bound are tested without it.
+(library
+ (name masc_tui_keeper_portrait)
+ (wrapped false)
+ (modules masc_tui_keeper_portrait)
+ (libraries
+  masc.keeper_portrait
+  masc_tui_graphics
   masc_tui_portrait_view
   masc_tui_terminal_palette))
 

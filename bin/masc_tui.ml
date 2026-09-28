@@ -6504,7 +6504,10 @@ let reading_pane (state : state) : (int -> Masc_tui_types.clamped_scroll) option
   | Board ->
       (match state.board_mode with
        | Board_read _ when state.board_focus = Right_pane ->
-           pane (fun v -> Board_read v)
+           pane (fun v ->
+             if state.board_comments_focused then
+               Board_read (state.board_scroll, v)
+             else Board_read (v, state.board_comment_scroll))
        | Board_read _ | Board_list | Board_compose -> None)
   | Planning ->
       (match state.planning_mode with
@@ -10429,6 +10432,8 @@ let leave_board_detail state =
   state.board_mode <- Board_list;
   state.board_focus <- Right_pane;
   state.board_scroll <- 0;
+  state.board_comment_scroll <- 0;
+  state.board_comments_focused <- false;
   state.board_detail <- Board_detail.clear state.board_detail
 
 let apply_board_hearths_load state = function
@@ -11610,8 +11615,22 @@ let open_board_post state ~mailbox ~focus (post : board_post) =
   state.board_mode <- Board_read post.bp_id;
   state.board_focus <- focus;
   state.board_scroll <- 0;
+  state.board_comment_scroll <- 0;
+  state.board_comments_focused <- false;
   start_board_post_refresh state ~host:server_peer_host
     ~port:state.port ~post_id:post.bp_id ~mailbox
+
+let move_board_read_scroll state ~by =
+  let current =
+    if state.board_comments_focused then state.board_comment_scroll
+    else state.board_scroll
+  in
+  let next =
+    if by > 0 then Masc_tui_types.scroll_down_from current ~by
+    else max 0 (current + by)
+  in
+  if state.board_comments_focused then state.board_comment_scroll <- next
+  else state.board_scroll <- next
 
 let move_board_posts_pane state ~mailbox ~delta =
   let count = List.length state.board_posts in
@@ -21930,6 +21949,8 @@ and is loaded on demand through keeper_skill.
                 state.followed_from <- Some (state.view, None);
                 state.board_mode <- Board_read reference.fhe_post_id;
                 state.board_scroll <- 0;
+                state.board_comment_scroll <- 0;
+                state.board_comments_focused <- false;
                 state.board_focus <- Right_pane;
                 goto_surface state ~mailbox:async_messages Board;
                 start_board_post_refresh state ~host:server_peer_host ~port:state.port
@@ -21942,6 +21963,8 @@ and is loaded on demand through keeper_skill.
                 state.followed_from <- Some (state.view, None);
                 state.board_mode <- Board_read reference.fhe_post_id;
                 state.board_scroll <- 0;
+                state.board_comment_scroll <- 0;
+                state.board_comments_focused <- false;
                 state.board_focus <- Right_pane;
                 goto_surface state ~mailbox:async_messages Board;
                 start_board_post_refresh state ~host:server_peer_host ~port:state.port
@@ -21953,6 +21976,8 @@ and is loaded on demand through keeper_skill.
                      state.followed_from <- Some (state.view, Some id);
                      state.board_mode <- Board_read evidence.fe_post_id;
                      state.board_scroll <- 0;
+                     state.board_comment_scroll <- 0;
+                     state.board_comments_focused <- false;
                      state.board_focus <- Right_pane;
                      goto_surface state ~mailbox:async_messages Board;
                      start_board_post_refresh state ~host:server_peer_host ~port:state.port
@@ -22799,6 +22824,20 @@ and is loaded on demand through keeper_skill.
            state.palette_mode <- Palette_jump;
            state.palette_query <- "hearth ";
            state.palette_cursor <- 0
+       | Some "b" when state.view = Board ->
+           (match state.board_mode with
+            | Board_read post_id ->
+                if state.board_focus = Left_pane then begin
+                  state.board_focus <- Right_pane;
+                  state.board_comments_focused <- false
+                end else
+                  (match Board_detail.view_for state.board_detail ~post_id with
+                   | Board_detail.Ready (_, _ :: _) ->
+                       state.board_comments_focused <-
+                         not state.board_comments_focused
+                   | Board_detail.Absent | Board_detail.Loading
+                   | Board_detail.Ready (_, []) | Board_detail.Failed _ -> ())
+            | Board_list | Board_compose -> ())
        | Some ":" ->
            state.palette_open <- true;
            state.palette_mode <- Masc_tui_types.Palette_jump;
@@ -23308,10 +23347,7 @@ and is loaded on demand through keeper_skill.
                           move_board_posts_pane state ~mailbox:async_messages
                             ~delta:(direction * page)
                       | Right_pane ->
-                          state.board_scroll <-
-                            (if direction > 0 then
-                     Masc_tui_types.scroll_down_from state.board_scroll ~by:page
-                   else max 0 (state.board_scroll + (direction * page))))
+                          move_board_read_scroll state ~by:(direction * page))
                  | Board_compose -> ())
             | Fusion ->
                 (match state.fusion_mode with
@@ -24189,8 +24225,7 @@ and is loaded on demand through keeper_skill.
                       | Left_pane ->
                           move_board_posts_pane state ~mailbox:async_messages
                             ~delta:1
-                      | Right_pane ->
-                          state.board_scroll <- Masc_tui_types.scroll_down_from state.board_scroll ~by:1)
+                      | Right_pane -> move_board_read_scroll state ~by:1)
                  | Board_compose -> ())
             | Planning ->
                 (match state.planning_mode with
@@ -24547,9 +24582,7 @@ and is loaded on demand through keeper_skill.
                       | Left_pane ->
                           move_board_posts_pane state ~mailbox:async_messages
                             ~delta:(-1)
-                      | Right_pane ->
-                          if state.board_scroll > 0 then
-                            state.board_scroll <- state.board_scroll - 1)
+                      | Right_pane -> move_board_read_scroll state ~by:(-1))
                  | Board_compose -> ())
             | Planning ->
                 (match state.planning_mode with

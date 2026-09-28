@@ -7096,6 +7096,12 @@ type overview_goal_measurement =
 type overview_goal = {
   og_id : string;
   og_title : string;
+  og_owner : Goal_store.owner;
+  og_completion : string option;
+      (** The Goal's current completion state from the verification ledger
+          ([proof_refuted], [proof_proven], [proof_pending], [idle],
+          [stale_criterion], [ledger_error]). [None] when the payload carries
+          no verification member. *)
   og_phase : Goal_phase.t;
   og_priority : int;
   og_criterion_revision : string option;
@@ -7167,7 +7173,28 @@ let rec decode_overview_goal_node json =
   in
   let* og_id = malformed (required_string_field json "id") in
   let* og_title = malformed (required_string_field json "title") in
+  (* [owner] is optional so a payload written before #39571 still decodes;
+     an absent member reads as the explicit [Unknown_owner]. *)
+  let* og_owner =
+    malformed
+      (match Json_util.assoc_member_opt "owner" json with
+       | None | Some `Null -> Ok Goal_store.Unknown_owner
+       | Some owner_json -> Goal_store.owner_of_yojson owner_json)
+  in
   let* raw_phase = malformed (required_string_field json "phase") in
+  (* [verification.completion.state] is optional: a payload written before the
+     Overview carried the ledger, or one whose ledger could not be read, has no
+     usable state and reads as [None] rather than failing the whole decode. *)
+  let* og_completion =
+    malformed
+      (match Json_util.assoc_member_opt "verification" json with
+       | Some (`Assoc _ as verification) -> (
+           match Json_util.assoc_member_opt "completion" verification with
+           | Some (`Assoc _ as completion) ->
+               Ok (Json_util.get_string completion "state")
+           | _ -> Ok None)
+       | _ -> Ok None)
+  in
   let* og_phase =
     match Goal_phase.parse raw_phase with
     | Some phase -> Ok phase
@@ -7203,6 +7230,8 @@ let rec decode_overview_goal_node json =
   Ok
     ({ og_id
      ; og_title
+     ; og_owner
+     ; og_completion
      ; og_phase
      ; og_priority
      ; og_criterion_revision

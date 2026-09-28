@@ -101,6 +101,8 @@ type row =
 val lines : t -> row list
 val row_text : row -> string
 (** The row's characters without colour. *)
-val visible_lines : height:int -> t -> row list
+val visible_lines : height:int -> width:int -> t -> row list
+(** The rows that fit [height], the notice wrapped at [width] cells so a
+    server's reason is read whole. *)
 val hints : t -> string
 val decoder : integration_id:string -> (event -> unit) -> (string -> unit) * (unit -> bool)

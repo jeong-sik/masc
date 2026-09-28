@@ -16195,7 +16195,14 @@ let render_config (state : state) =
       match state.runtime_account_form with
       | Some form ->
           List.iter c.push
-            (Masc_tui_runtime_account_form.rows ~width:(framed_inner_width cols) form)
+            (Masc_tui_runtime_account_form.rows ~width:(framed_inner_width cols) form);
+          (* The saved form stays open for its copy key, and the footer can
+             lose it: the save notice leads that row and the fitter keeps only
+             the way out, so CI run 36397938379 drew "Enter / Esc:close"
+             without [y]. The card names its keys itself, as the link card
+             does. *)
+          if Masc_tui_runtime_account_form.is_saved form then
+            c.push ("  " ^ Masc_tui_keys.footer_hints_runtime_account_saved ())
       | None ->
       match state.runtime_config_view_error, state.runtime_config_view with
       | Some detail, _ ->

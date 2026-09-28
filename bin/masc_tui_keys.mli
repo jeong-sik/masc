@@ -67,9 +67,14 @@ val global : binding list
     printable key before its cross-surface fallback runs; each such binding's
     help text states that boundary. *)
 
+val keepers_jump : binding
+(** The shared Keepers jump. Its [key] is the one {!opens_keepers} matches and
+    the one the Dashboard's first-use steps name. *)
+
 val opens_keepers : message_mode:bool -> string -> bool
 (** Whether [key] is the shared Keepers jump after earlier input owners have
-    declined it. Message mode never treats printable [2] as this jump. *)
+    declined it. Message mode never treats the printable {!keepers_jump} key
+    as this jump. *)
 
 val cancels_two_press :
   input_seen:bool -> key:string option -> second_press:string list -> bool

@@ -117,14 +117,14 @@ def first_use_frames(executable: str) -> None:
             if left[attention + 1] or left[tasks - 1] or left[tasks + 1]:
                 raise AssertionError(f"{columns} columns lost approved section spacing: {visible!r}")
         narrow = keyboard.resize_and_wait(
-            process, fd, output, rows=19, columns=80,
+            process, fd, output, rows=20, columns=80,
             needle=b"Plan usage", controls=(keyboard.FULL_REDRAW,),
             final_cursor=b"\x1b[?25l",
         )
         narrow_text = keyboard.screen_text(narrow)
         if b"Start here (2 steps)" in narrow_text:
             raise AssertionError(f"a partial first-use guide was drawn: {narrow_text!r}")
-        if b"Plan usage" not in narrow_text:
+        if b"Plan usage" not in narrow_text or b"antigravity_subscription" not in narrow_text:
             raise AssertionError(f"suppressed guide did not free provider rows: {narrow_text!r}")
         os.write(fd, b"q")
 

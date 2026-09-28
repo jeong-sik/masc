@@ -16062,10 +16062,10 @@ let render_config (state : state) =
             | None -> ()
           done)
 
-(* The startup splash: the Overview's own frame and header -- title,
+(* The startup splash: the Dashboard's own frame and header -- title,
    workspace, clock, connection badge -- with the turning imp where its
-   sections will be once the first overview read answers. Keys are the
-   Overview's; the first one ends the splash and still does its job. *)
+   sections will be once the first briefing read answers. Keys are the
+   Dashboard's; the first one ends the splash and still does its job. *)
 let render_overview_startup (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   surface_chrome ~overflow:Fits state ~terminal_rows ~cols ~surface_key:"overview"

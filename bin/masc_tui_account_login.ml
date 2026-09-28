@@ -3,6 +3,7 @@ type provider = { id : string; label : string; client : client }
 type model = { id : string; label : string; context : int option; tools : bool option }
 type phase = Loading | Providers | Logging | Models | Capacity of model | Documented_context of model | Saving | Finished | Failed
 type recovery = Login_status | Refresh_configuration
+type account_email = Email of string | Not_recorded | Unreadable
 type t = {
   requested : string; mutable generation : int; mutable phase : phase; mutable providers : provider list;
   mutable provider : provider option; mutable models : model list; mutable cursor : int;
@@ -10,13 +11,14 @@ type t = {
   mutable revision : string; mutable existing : string list; mutable default_runtime_id : string option; mutable draft : string;
   mutable output : string; mutable notice : string; mutable input_pending : bool; mutable input_sequence : int;
   mutable cancel_stream : (unit -> unit) option; mutable recovery : recovery;
+  mutable account_emails : (string * account_email) list;
 }
 type authentication = Authenticated | Login_completed | Credential_captured
 type event = Started of string * string option | Output of string | Input_ready
   | Complete of string * authentication | Login_failed of string * string option | Login_error
 type action = Inventory | Refresh_saved | Refresh_retry | Start of bool | Input of int * Yojson.Safe.t | Cancel
   | Recover | Discover | Prepare of model | Save of model * int option | Close | Nothing
-let create requested = {requested; generation=0; phase=Loading; providers=[]; provider=None; models=[];
+let create requested = {requested; generation=0; phase=Loading; providers=[]; provider=None; models=[]; account_emails=[];
   cursor=0; account_ref=None; login_id=None; revision=""; existing=[]; default_runtime_id=None; draft="";
   output=""; notice="계정 목록을 읽고 있습니다."; input_pending=false; input_sequence=0; cancel_stream=None; recovery=Login_status}
 let begin_attempt t provider ~existing =
@@ -40,10 +42,20 @@ let authentication = function
   | `String "login_completed" -> Some Login_completed
   | `String "credential_captured" -> Some Credential_captured
   | _ -> None
+let account_email_of_row = function
+  | `Assoc fields as row ->
+    let keys = List.sort String.compare (List.map fst fields) in
+    (match string (field "integration_id" row), field "state" row, field "email" row with
+     | Some id, `String "recorded", `String email
+       when email <> "" && keys = ["email"; "integration_id"; "state"] -> Some (id, Email email)
+     | Some id, `String "absent", `Null when keys = ["integration_id"; "state"] -> Some (id, Not_recorded)
+     | Some id, `String "unreadable", `Null when keys = ["integration_id"; "state"] -> Some (id, Unreadable)
+     | _ -> None)
+  | _ -> None
 let inventory t json =
   match string (field "setup_revision" json), field "integrations" json, field "runtimes" json,
-        field "default_runtime_selection" json with
-  | Some revision, `List rows, `List runtimes, `List selected ->
+        field "default_runtime_selection" json, field "account_emails" json with
+  | Some revision, `List rows, `List runtimes, `List selected, `List account_rows ->
     let ids = List.filter_map (fun row -> string (field "id" row)) runtimes in
     let selected = List.map string selected in
     let existing = List.filter_map Fun.id selected in
@@ -52,6 +64,14 @@ let inventory t json =
        || List.length existing <> List.length (List.sort_uniq String.compare existing)
        || List.exists (fun id -> not (List.mem id ids)) existing
     then Error "기본 모델과 대체 연결의 설정 순서를 확인하지 못했습니다."
+    else
+    let account_emails = List.filter_map account_email_of_row account_rows in
+    let integration_ids = List.filter_map (fun row -> string (field "id" row)) rows in
+    let account_ids = List.map fst account_emails in
+    if List.length account_emails <> List.length account_rows
+       || List.length account_ids <> List.length (List.sort_uniq String.compare account_ids)
+       || List.exists (fun id -> not (List.mem id integration_ids)) account_ids
+    then Error "계정 이메일 목록을 확인하지 못했습니다."
     else
     let providers = List.filter_map (fun row -> match string (field "id" row), string (field "display_name" row), string (field "protocol" row) with
       | Some id, Some label, Some protocol -> Option.map (fun client -> {id;label;client}) (client_of_protocol protocol)
@@ -64,7 +84,7 @@ let inventory t json =
       | None -> List.find_index (fun (p:provider) -> Some p.client=requested_client) providers in
     if t.requested<>"" && Option.is_none selected then Error "요청한 공식 클라이언트를 찾지 못했습니다. /login으로 목록을 확인하세요."
     else (
-      t.providers <- providers; t.revision <- revision;
+      t.providers <- providers; t.revision <- revision; t.account_emails <- account_emails;
       t.existing <- existing; t.default_runtime_id <- string (field "default_runtime_id" json);
       t.cursor <- (match selected with Some i -> i | None -> 0);
       t.phase <- Providers; t.notice <- "Enter: 새 계정 로그인. 기존 계정은 e로 선택합니다."; Ok ())
@@ -236,9 +256,16 @@ let hints t = match t.phase with
   | Models -> "↑↓:모델  Enter:검증 후 추가  r:목록 새로고침  e:재로그인  Esc:닫기"
   | Loading | Saving | Finished | Failed -> "r:상태 재확인  e:재로그인  n:새 계정  Esc:닫기"
 type row = Text of string | Terminal of Masc_tui_sgr_text.line
+(* A row with no entry is not a selected account (a client prototype, or a
+   provider on the inherited home that setup login never records). *)
+let account_suffix t (p:provider) = match List.assoc_opt p.id t.account_emails with
+  | Some (Email email) -> " · " ^ email
+  | Some Not_recorded -> " · 이메일 기록 없음"
+  | Some Unreadable -> " · 이메일 기록을 읽지 못함"
+  | None -> ""
 let lines t =
   let rows = match t.phase with
-    | Providers -> List.mapi (fun i (p:provider) -> Text ((if i=t.cursor then "> " else "  ") ^ p.label)) t.providers
+    | Providers -> List.mapi (fun i (p:provider) -> Text ((if i=t.cursor then "> " else "  ") ^ p.label ^ account_suffix t p)) t.providers
     | Models -> List.mapi (fun i (m:model) -> Text ((if i=t.cursor then "> " else "  ") ^ m.label ^ (match m.context with None->" · context 확인 필요" | Some _ -> ""))) t.models
     | Logging -> List.map (fun line -> Terminal line) (Masc_tui_sgr_text.parse t.output)
       @ [Text ("로그인 코드: " ^ String.make (min 40 (String.length t.draft)) '*'); Text (if t.input_pending then "입력 전달 중" else if Option.is_none t.login_id then "로그인 세션 준비 중" else "코드 입력 대기")]

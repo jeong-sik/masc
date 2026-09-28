@@ -107,6 +107,10 @@ type decode_error =
 val decode_error_to_string : decode_error -> string
 val source_to_string : source -> string
 
+val window_role_to_string : window_role -> string
+(** The wire word for a role: ["gates_model_calls"], ["counts_other_use"]
+    or ["unclassified_limit"]. *)
+
 val decode_claude_rate_limit_event : Yojson.Safe.t -> (report, decode_error) result
 (** A whole stream-json [rate_limit_event] message.  Windows come from
     [rate_limit_info.unifiedWindows]; an event without that member reports no
@@ -147,7 +151,8 @@ val decode_zai_quota_limit : Yojson.Safe.t -> (report, decode_error) result
     {!Percent} its [percentage] (within [0..100]) and [resets_at] its
     [nextResetTime] in seconds.  [number] must be above 0.  [unit] 3 is
     hours, so [number] hours is mapped like a Codex
-    length; any other unit keeps "<type>, <number> x unit <unit>". *)
+    length; any other unit keeps "<number> x unit <unit>", the row's
+    [type] being its [limit_id] already. *)
 
 val decode_kimi_coding_usages : Yojson.Safe.t -> (report, decode_error) result
 (** Kimi [GET /coding/v1/usages].  Each [limits[]] row is one window whose
@@ -155,7 +160,8 @@ val decode_kimi_coding_usages : Yojson.Safe.t -> (report, decode_error) result
     above 0; its length maps like a Codex length.  [detail.used] and
     [detail.limit] are decimal strings read as integers, [used] within
     [0..limit].  The top-level [usage] is one more window labelled
-    "plan period".  [usages.*.used_ratio] is not read. *)
+    "usage (provider resetTime)": it states no length, only its
+    [resetTime].  [usages.*.used_ratio] is not read. *)
 
 val decode_ollama_usage : Yojson.Safe.t -> (report, decode_error) result
 (** Ollama [GET https://ollama.com/api/usage].  [limits] is required;

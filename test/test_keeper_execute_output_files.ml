@@ -5,6 +5,10 @@ module Redaction = Masc.Keeper_secret_redaction
 let stdout = "publisher stdout proof\n"
 let stderr = "publisher stderr proof\n"
 
+(* The ceiling a call gets when no lane widened its projection: the Execute
+   descriptor's own [Store_above] default. *)
+let default_ceiling = Tool_output.inline_ceiling_bytes Tool_output.default_model_projection
+
 let complete_path expected = function
   | Capture.Complete_file { path; byte_length } ->
     Alcotest.(check int) "EOF receipt counts the actual child bytes"
@@ -13,7 +17,7 @@ let complete_path expected = function
   | Capture.Incomplete_file _ -> Alcotest.fail "child stream did not reach EOF"
   | Capture.Capture_failed { message; _ } -> Alcotest.fail message
 
-let with_process_output f =
+let with_process_output ?(stdout = stdout) ?(stderr = stderr) f =
   let base_path = Filename.temp_dir "keeper-output-publication-" "" in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
     Eio_main.run (fun env ->
@@ -45,7 +49,7 @@ let with_process_output f =
 let test_changed_eof_source_is_not_published () =
   with_process_output (fun ~base_path ~redaction ~stdout_path ~stderr_path files ->
     Unix.truncate stdout_path 1;
-    (match Publish.publish ~base_path ~redaction files with
+    (match Publish.publish ~inline_ceiling_bytes:default_ceiling ~base_path ~redaction files with
      | Error (Publish.Persistence_failed _) -> ()
      | Error error -> Alcotest.fail (Publish.error_to_string error)
      | Ok _ -> Alcotest.fail "a stale EOF receipt became complete output");
@@ -61,7 +65,7 @@ let test_changed_eof_source_is_not_published () =
 let test_publication_retains_sources_until_release () =
   with_process_output (fun ~base_path ~redaction ~stdout_path ~stderr_path files ->
     let publication =
-      match Publish.publish ~base_path ~redaction files with
+      match Publish.publish ~inline_ceiling_bytes:default_ceiling ~base_path ~redaction files with
       | Ok publication -> publication
       | Error error -> Alcotest.fail (Publish.error_to_string error)
     in
@@ -79,6 +83,83 @@ let test_publication_retains_sources_until_release () =
     Alcotest.(check bool) "explicit release removes stderr" false
       (Sys.file_exists stderr_path))
 
+(* ── Lane ceiling ─────────────────────────────────────────────────── *)
+
+let claude_lane =
+  Runtime_execution.Claude_code
+    { cli_path = "claude"; account_home = None; model = None; timeout_s = 1.0 }
+
+let codex_lane =
+  Runtime_execution.Codex_app_server
+    { cli_path = "codex"; account_home = None; model = None; timeout_s = 1.0 }
+
+let antigravity_lane =
+  Runtime_execution.Antigravity_cli
+    { cli_path = "agy"
+    ; model = "fixture"
+    ; agent = None
+    ; effort = None
+    ; oauth_source = "fixture"
+    ; timeout_s = 1.0
+    ; add_dirs = []
+    }
+
+(* The ceiling of the projection the Keeper tool bundle builds for an
+   Official-client lane: [Store_above] at that lane's inline ceiling. *)
+let lane_ceiling lane =
+  Tool_output.inline_ceiling_bytes
+    (Tool_output.Store_above
+       { threshold_bytes = Runtime_execution.tool_result_inline_ceiling_bytes lane })
+
+let payload bytes =
+  let line = "execute lane ceiling fixture 0123456789abcdefghijklmnopqrstuvwxyz\n" in
+  String.init bytes (fun index -> line.[index mod String.length line])
+
+let publish_payload ~lane bytes check_fields =
+  let payload = payload bytes in
+  with_process_output ~stdout:payload ~stderr:"" (fun ~base_path ~redaction ~stdout_path:_ ~stderr_path:_ files ->
+    match Publish.publish ~inline_ceiling_bytes:(lane_ceiling lane) ~base_path ~redaction files with
+    | Error error -> Alcotest.fail (Publish.error_to_string error)
+    | Ok publication -> check_fields ~base_path ~payload publication.Publish.fields)
+
+let blob_bytes ~base_path field fields =
+  match List.assoc_opt field fields with
+  | None -> Alcotest.failf "%s is missing" field
+  | Some reference ->
+    let sha256 =
+      Yojson.Safe.Util.(reference |> member "_blob" |> member "sha256" |> to_string)
+    in
+    (match Tool_blob_store.fetch (Tool_blob_store.create ~base_path) ~sha256 with
+     | Ok (Some bytes) -> bytes
+     | Ok None -> Alcotest.failf "%s names a blob the store does not hold" field
+     | Error error -> Alcotest.fail (Tool_blob_store.fetch_error_to_string error))
+
+let test_claude_lane_returns_20000_bytes_inline () =
+  publish_payload ~lane:claude_lane 20_000 (fun ~base_path:_ ~payload fields ->
+    Alcotest.(check bool) "20,000 bytes come back inline on the Claude Code lane" true
+      (List.assoc_opt "output" fields = Some (`String payload));
+    Alcotest.(check bool) "nothing was stored as a blob" false
+      (List.mem_assoc "output_artifact" fields))
+
+let test_claude_lane_stores_40000_bytes_byte_identical () =
+  publish_payload ~lane:claude_lane 40_000 (fun ~base_path ~payload fields ->
+    Alcotest.(check bool) "40,000 bytes are not inlined" false
+      (List.mem_assoc "output" fields);
+    Alcotest.(check string) "the stored output blob is the child's bytes" payload
+      (blob_bytes ~base_path "output_artifact" fields);
+    Alcotest.(check string) "the stored stdout blob is the child's bytes" payload
+      (blob_bytes ~base_path "stdout_artifact" fields))
+
+let test_narrow_lanes_still_store_20000_bytes () =
+  List.iter
+    (fun (name, lane) ->
+      publish_payload ~lane 20_000 (fun ~base_path ~payload fields ->
+        Alcotest.(check bool) (name ^ " does not inline 20,000 bytes") false
+          (List.mem_assoc "output" fields);
+        Alcotest.(check string) (name ^ " stores the child's bytes") payload
+          (blob_bytes ~base_path "output_artifact" fields)))
+    [ "Codex", codex_lane; "Antigravity", antigravity_lane ]
+
 let () =
   Alcotest.run "Keeper Execute output publication"
     [ "actual child output",
@@ -86,5 +167,13 @@ let () =
           test_changed_eof_source_is_not_published
       ; Alcotest.test_case "publication waits for the caller to release sources" `Quick
           test_publication_retains_sources_until_release
+      ]
+    ; "lane ceiling",
+      [ Alcotest.test_case "Claude Code lane returns 20,000 bytes inline" `Quick
+          test_claude_lane_returns_20000_bytes_inline
+      ; Alcotest.test_case "Claude Code lane stores 40,000 bytes byte-identical" `Quick
+          test_claude_lane_stores_40000_bytes_byte_identical
+      ; Alcotest.test_case "Codex and Antigravity lanes still store 20,000 bytes" `Quick
+          test_narrow_lanes_still_store_20000_bytes
       ]
     ]

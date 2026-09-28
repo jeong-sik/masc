@@ -15,6 +15,7 @@ type client =
   | Claude_code
   | Codex
   | Antigravity
+[@@deriving enumerate]
 
 type base =
   { id : string
@@ -91,11 +92,23 @@ val declare :
     [inherited_home] is the home a Claude Code or Codex provider without
     [account-home] runs on; a location equal to it is refused like any other
     login already in use, since the copy would share that login and its
-    quota. Two locations are one login when they reach one directory on this
-    machine: the parts that exist are resolved by the filesystem ([..],
-    links, the letter case of a case-insensitive disk), and a part that does
-    not exist yet is compared as written. A part the filesystem refuses to
-    read is [Invalid_location]. The written location is kept as it is. The
-    result reads back with the login store in place and has passed
+    quota. Two locations are one login when they lead to one file or
+    directory on this machine. Each is walked one part at a time, the way the
+    kernel opens a path: [..] goes up from where the walk has reached, and a
+    link is followed even when what it names does not exist yet. What exists
+    is compared by device and inode, so a link, a hard link or the letter
+    case of a case-insensitive disk leads to the same login. What does not
+    exist yet is compared as the deepest directory that does plus the parts
+    below it, with ASCII letters in either case taken as equal, because a
+    case-insensitive disk opens [acct-new] and [ACCT-NEW] as one directory
+    once it is created. On a case-sensitive disk this refuses a name that
+    differs from one in use only in letter case. Past ASCII letter case,
+    those parts are compared byte for byte: non-ASCII case and Unicode
+    normalization are not folded. A part below a file, more than 40 links in
+    one path, or a part the filesystem refuses to read is [Invalid_location].
+    The disk is read once, when [declare] runs: a link, file or directory
+    created or changed afterwards is not seen, so two locations that only
+    become one later are both accepted. The written location is kept as it
+    is. The result reads back with the login store in place and has passed
     {!Runtime_toml.parse_string}. The server's own preview still decides
     whether it can be saved. *)

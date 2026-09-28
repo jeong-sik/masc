@@ -3,6 +3,7 @@ type provider = { id : string; label : string; client : client }
 type model = { id : string; label : string; context : int option; tools : bool option }
 type phase = Loading | Providers | Logging | Models | Capacity of model | Documented_context of model | Saving | Finished | Failed
 type recovery = Login_status | Refresh_configuration
+type account_email = Email of string | Not_recorded | Unreadable
 type t = {
   requested : string; mutable generation : int; mutable phase : phase; mutable providers : provider list;
   mutable provider : provider option; mutable models : model list; mutable cursor : int;
@@ -10,6 +11,7 @@ type t = {
   mutable revision : string; mutable existing : string list; mutable default_runtime_id : string option; mutable draft : string;
   mutable output : string; mutable notice : string; mutable input_pending : bool; mutable input_sequence : int;
   mutable cancel_stream : (unit -> unit) option; mutable recovery : recovery;
+  mutable account_emails : (string * account_email) list;
 }
 type authentication = Authenticated | Login_completed | Credential_captured
 type event = Started of string * string option | Output of string | Input_ready
@@ -37,7 +39,14 @@ val receipt : t -> Yojson.Safe.t -> (bool, string) result
 val event : generation:int -> t -> event -> action
 val source : t -> Yojson.Safe.t
 val save_body : t -> model -> int option -> Yojson.Safe.t
-val lines : t -> string list
-val visible_lines : height:int -> t -> string list
+type row =
+  | Text of string  (** Written by this pane or the server: drawn as plain text. *)
+  | Terminal of Masc_tui_sgr_text.line
+      (** What the official client printed during login, with the colours it
+          chose. *)
+val lines : t -> row list
+val row_text : row -> string
+(** The row's characters without colour. *)
+val visible_lines : height:int -> t -> row list
 val hints : t -> string
 val decoder : integration_id:string -> (event -> unit) -> (string -> unit) * (unit -> bool)

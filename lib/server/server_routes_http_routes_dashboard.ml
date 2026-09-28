@@ -1888,7 +1888,9 @@ let add_routes ~sw ~clock router =
               | Ok config -> Http.Response.json_value ~request:req
                   (match Runtime_wizard_inventory.to_json config with
                    | `Assoc fields -> `Assoc (("setup_revision",`String (Runtime_setup_batch.revision_to_string revision))
-                       ::("source_revision",`String (Runtime.config_source_revision_to_string observation.source_revision))::fields)
+                       ::("source_revision",`String (Runtime.config_source_revision_to_string observation.source_revision))
+                       ::("account_emails",Runtime_account_email.inventory_json
+                            ~lookup:Runtime_setup_accounts.email config)::fields)
                    | value -> value) reqd)
            | _ -> Http.Response.json_value ~status:`Service_unavailable ~request:req
                (`Assoc ["error", `String "Runtime configuration is unavailable."]) reqd) request reqd)

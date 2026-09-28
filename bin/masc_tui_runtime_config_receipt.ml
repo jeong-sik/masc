@@ -452,3 +452,48 @@ let summary receipt =
     lock_warnings
     exact_output_registry
 ;;
+
+type preview =
+  | Can_save
+  | Cannot_save of string
+
+(* Why the preview refused: the runtime parser's reason when it ran, else the
+   schema issues. The route answers can_save false only for one of the two,
+   so a refusal with neither is an answer this reader does not understand. *)
+let preview_refusal fields =
+  let open Result.Syntax in
+  match field "runtime_validation" fields with
+  | Ok (`String reason) when not (String.equal reason "") -> Ok reason
+  | Ok _ | Error _ ->
+    let* validation = field "validation" fields in
+    let* issues =
+      match validation with
+      | `Assoc validation -> field "issues" validation
+      | _ -> Error "invalid object field validation"
+    in
+    let detail = function
+      | `Assoc issue ->
+        (match field "detail" issue with
+         | Ok (`String detail) when not (String.equal detail "") -> Some detail
+         | Ok _ | Error _ -> None)
+      | _ -> None
+    in
+    (match issues with
+     | `List issues ->
+       (match List.filter_map detail issues with
+        | [] -> Error "runtime config preview refused without a reason"
+        | details -> Ok (String.concat "; " details))
+     | _ -> Error "invalid list field issues")
+;;
+
+let decode_preview = function
+  | `Assoc fields ->
+    let open Result.Syntax in
+    let* can_save = bool_field "can_save" fields in
+    if can_save
+    then Ok Can_save
+    else
+      let* reason = preview_refusal fields in
+      Ok (Cannot_save reason)
+  | _ -> Error "runtime config preview is not an object"
+;;

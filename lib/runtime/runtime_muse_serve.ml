@@ -411,11 +411,10 @@ let env_key entry =
   | None -> entry
 ;;
 
-(* The CLI reads its subscription login from its own home (a file on Linux,
-   the Keychain on macOS), so the child needs HOME and the XDG roots and
-   nothing that routes billing elsewhere. META_API_KEY is left out on
-   purpose: it selects the pay-as-you-go Model API instead of the
-   subscription this runtime exists to use. *)
+(* The CLI reads its subscription login from its own home, so the child
+   needs HOME and the XDG roots and nothing that routes billing elsewhere.
+   META_API_KEY is left out on purpose: it selects the pay-as-you-go Model
+   API instead of the subscription this runtime exists to use. *)
 let child_environment_key_allowed = function
   | "HOME"
   | "USER"
@@ -442,6 +441,15 @@ let child_environment_key_allowed = function
   | "NO_COLOR" -> true
   | _ -> false
 ;;
+
+(* On macOS the CLI otherwise moves its Meta sign-in into the login Keychain
+   and leaves auth.json with only [storage: "keychain"]. A selected account
+   HOME has no login keychain, so that save asks macOS for one in a dialog
+   ("'meta'을(를) 저장할 키체인을 찾을 수 없습니다") on a login or turn nobody
+   may be watching, and a managed generation copies auth.json alone. With the
+   file backend the token stays in XDG_CONFIG_HOME/muse/auth.json on every
+   platform, which is the only place Runtime_muse_home imports it from. *)
+let credential_backend_entry = "TBH_CREDENTIAL_BACKEND=file"
 
 let client_environment ?storage_root account_home prepared_home =
   (* The configured spelling binds admission and session identity. The prepared
@@ -489,7 +497,7 @@ let client_environment ?storage_root account_home prepared_home =
       List.map (fun (key, part) -> key ^ "=" ^ Filename.concat root part) roots
       @ List.filter (fun entry -> not (List.mem_assoc (env_key entry) roots)) selected
   in
-  Array.of_list selected
+  Array.of_list (credential_backend_entry :: selected)
 ;;
 
 let login_environment ~account_home =
@@ -497,6 +505,8 @@ let login_environment ~account_home =
      executing login. Setup owns one login process, not a shared installation
      update or its independent download-authentication flow. *)
   Array.append [|"MUSE_NO_AUTO_UPDATE=1"|] (client_environment (Some account_home) None)
+
+let login_argv ~cli_path = [ cli_path; "login" ]
 
 let client_argv config =
   [ config.cli_path; "serve" ]
@@ -962,6 +972,15 @@ let open_session io (config : config) ~approval_mode ~session_mode ~workspace_ro
     in
     let* session = lift (Msp.parse_session_result ~stage:"session/start" result) in
     let* () = validate_session_identity config ~workspace_root session in
+    (* A started session must be empty: turns attached to a fresh claim mean
+       the host confused the new session with an existing conversation. *)
+    let* () =
+      if session.Msp.turn_count = 0
+      then Ok ()
+      else protocol_error "session/start"
+          (Printf.sprintf "started session completed-turn count changed: expected 0, reported %d"
+             session.Msp.turn_count)
+    in
     let* () = validate_session_approval_mode ~requested:approval_mode session.approval_mode in
     Ok (session, false)
   | Resume { session_id; expected_turn_count } ->
@@ -1149,8 +1168,8 @@ let prepare_account_config config =
   | None, Some account_home ->
     (match Runtime_muse_home.prepare ~account_home with
      | Ok home -> Ok { config with prepared_home = Some home }
-     | Error Runtime_muse_home.Sign_in_required ->
-       Error (Auth_required (Runtime_muse_home.error_to_string Runtime_muse_home.Sign_in_required))
+     | Error (Runtime_muse_home.Sign_in_required _ as error) ->
+       Error (Auth_required (Runtime_muse_home.error_to_string error))
      | Error error -> Error (Invalid_config (Runtime_muse_home.error_to_string error)))
 ;;
 

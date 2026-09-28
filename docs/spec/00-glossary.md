@@ -38,6 +38,18 @@ status: reference
 : Claude Code, Codex, Antigravity 같은 공식 클라이언트가 자기 프로세스에서
   provider 요청을 보내고, MASC는 새 turn과 결과를 조율·관찰하는 실행 경로.
 
+**Official Client Tool Result Bound (공식 클라이언트 도구 결과 상한)**
+: 공식 클라이언트에 넘기는 동적 도구 하나의 모델 대상 결과에 MASC가 선언하는
+  바이트 상한이다(`Runtime_official_client_tool.result_bound` = `Bounded_bytes n`·
+  `Unbounded`). `Bounded_bytes n`은 결과가 `n`바이트를 넘지 않음을 뜻하고,
+  `Unbounded`는 MASC가 결과 크기를 제한하지 않아 상한을 선언하지 않음을 뜻한다.
+  Claude Code 전송은 `Bounded_bytes n`의 수치 `n`을 `tools/list` 항목의
+  `_meta["anthropic/maxResultSizeChars"]`에 문자 기준 인라인 한도로 싣는다.
+  UTF-8 문자 수는 바이트 수를 넘지 않으므로 `n`바이트로 제한된 결과는
+  이 문자 한도를 넘지 않는다. 이 값은 제공자 토큰 한도와 다르다.
+  → [Runtime_official_client_tool](../../lib/runtime/runtime_official_client_tool.mli),
+  [Runtime_claude_code](../../lib/runtime/runtime_claude_code.mli)
+
 **Clients (TUI 클라이언트 표)**
 : `GET /api/v1/dashboard/clients` 한 읽기를 그리는 TUI 표. 한 워크스페이스에 붙은
   모두를 한 번에 보여준다 — directory agent, state-backed session, runtime fiber.

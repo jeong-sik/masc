@@ -1,17 +1,18 @@
 # `ocaml` sandbox recipe
 
-`Dockerfile` builds the image Keepers run their Bash/Read/Edit tools in when
-they work on an OCaml project. `inputs` lists the repository files the recipe
-copies; they and the Dockerfile make up the image's input hash.
+`Dockerfile` builds the image Keepers run their tools in for MASC development:
+the compiler `masc.opam` pins and MASC's whole dependency set. `inputs` lists
+the repository files the recipe copies; they and the Dockerfile's own bytes
+make up the image's input hash.
 
 The Dockerfile keeps its comments to one or two lines and the reasons live
 here, because the file's size decides whether it builds. Apple's `container`
 CLI sends the Dockerfile to its builder in a gRPC header, whose default ceiling
-is 16 KiB (apple/container#735, open). The CLI refuses a file over 16,384 bytes
-itself; a file just under that still fails, with
+is 16 KiB (apple/container#735). The CLI refuses a file of 16,384 bytes or more
+itself; a file somewhat under that still fails, with
 `Error: unavailable: "Stream unexpectedly closed."`, before BuildKit starts.
-With container CLI 1.3.1 and builder 0.13.1 on 2026-09-28, this file started
-at 14,829 bytes and failed at 15,057 bytes (#39447).
+With container CLI 1.3.1 and builder 0.13.1 on 2026-09-28, a copy of this
+file cut to 14,829 bytes started and one cut to 15,057 bytes did not (#39447).
 
 ## Base image and compiler
 
@@ -40,12 +41,8 @@ a `--read-only` rootfs and `--cap-drop=ALL` (`keeper_sandbox_docker.ml`,
 `docker_run_argv`), so a Keeper cannot install anything at run time. Whatever
 a Keeper needs to build must already be in the image.
 
-Hardening notes:
-
-- When `docker_hardened` is enabled, override at run time:
-  `MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS=false`, `REQUIRE_USERNS=false`.
-- The host docker socket is typically mounted for DinD operations.
-- Keeper GitHub/SSH credential bundles are projected at `/tmp/keeper-creds`.
+`/tmp/keeper-creds` is a volume because masc projects each Keeper's GitHub and
+SSH credential bundle there (`keeper_sandbox_runtime_setup.ml`).
 
 ## Vendor apt repositories
 
@@ -57,8 +54,8 @@ signed-source shape. Ubuntu 24.04 ships nodejs 18.19, while
 `dashboard/package.json` declares `"engines": {"node": ">=22"}` and
 `"packageManager": "pnpm@10.31.0"`. Measured 2026-08-26: pnpm installed on top
 of apt's node 18 is on PATH and unusable -- `pnpm --version` answers "requires
-at least Node.js v22.13". The contract test asks whether a tool works, not only
-whether it exists.
+at least Node.js v22.13". The contract test cannot run the image, so it checks
+that the `node_22.x` source and the `pnpm@10.31.0` pin are both there.
 
 pnpm is pinned to the version the repository declares, so the image tracks the
 project rather than the registry's "latest".
@@ -112,10 +109,10 @@ Only the package metadata is copied. The dependency set belongs in the image;
 copying sources would pin the image to one commit of the repository a Keeper is
 about to clone itself.
 
-The pins are replayed explicitly. Seven dependencies (mcp_protocol,
-grpc-direct, grpc-direct-core, ws-direct-core/-eio/-gluten and a bisect_ppx
-fork) are absent from opam-repository, so `--deps-only` alone fails to solve,
-and opam does not apply the lock file's `pin-depends:` on its own here.
+The pins are replayed explicitly. The packages under `pin-depends:` in
+`masc.opam.locked` are absent from opam-repository, so `--deps-only` alone
+fails to solve, and opam does not apply the lock file's `pin-depends:` on its
+own here.
 `scripts/opam-pin-from-lock.sh` records what was tried and how each option
 failed.
 
@@ -124,8 +121,8 @@ so the cleanup at the end of the install step could not remove root-owned
 files.
 
 `--with-test` pulls alcotest, qcheck-* and bisect_ppx, which `masc.opam`
-declares under `{with-test}`. Without it `dune build @check` fails on 258 test
-stanzas: a Keeper that cannot run the suite cannot verify its own change.
+declares under `{with-test}`. Without it `dune build @check` fails on every
+test stanza: a Keeper that cannot run the suite cannot verify its own change.
 
 ## Switch environment
 

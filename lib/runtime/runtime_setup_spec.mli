@@ -14,9 +14,8 @@ val error_message : error -> string
 val of_json : ?home_dir:string -> Yojson.Safe.t -> (t, error) result
 (** [home_dir] resolves an explicit current-user [~/] Antigravity reference;
     ordinary HTTP File references must already be absolute. Claude Code,
-    Codex and Muse accept an absolute [account_home]. Muse requires both this
-    selection and an explicit positive [max_prompt_bytes]; no token-to-byte
-    estimate is made. Account paths retain their exact spelling in the connection
+    Codex and Muse accept an absolute [account_home]. Muse requires this
+    selection. Account paths retain their exact spelling in the connection
     identity and rendered provider. Omission keeps ambient selection for Claude
     Code and Codex. No files are read. *)
 type rendered = { runtime_id:string; runtime_toml:string }

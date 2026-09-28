@@ -156,6 +156,12 @@ let test_plain_link_keeps_a_printable_boundary () =
     (render ~width:11 ~palette:Markdown.plain_palette
        "[docs](https://x)")
 
+let test_plain_segments_keep_exact_spacing () =
+  Alcotest.(check segments_testable)
+    "plain Board comment"
+    [ (" Comment 000  body ", "plain") ]
+    (Markdown.inline_segments " Comment 000  body ")
+
 let test_inline_segments_names_each_marker () =
   Alcotest.(check segments_testable)
     "one of each"
@@ -772,6 +778,33 @@ let test_blank_lines_are_kept () =
     [ "one"; ""; "two" ]
     (render "one\n\ntwo")
 
+let test_single_line_render_matches_streaming () =
+  let cases =
+    [ "plain", "Comment 000 body";
+      "long word", "abcdefghij";
+      "inline", "a **bold** word with `code`";
+      "link", "[name](https://example.com)";
+      "heading", "# Heading";
+      "quote", "> quoted";
+      "bullet", "- item";
+      "ordered", "1. item";
+      "rule", "---";
+      "blank", "";
+      "fence", "```ocaml" ]
+  in
+  List.iter
+    (fun width ->
+       List.iter
+         (fun (label, source) ->
+            let streamed =
+              Markdown.render_streaming ~palette:tagged ~width source
+            in
+            check_rows
+              (Printf.sprintf "%s at %d cells" label width)
+              streamed.rows (render ~width source))
+         cases)
+    [ 0; 8; 40 ]
+
 let check_stream_boundary label ~source_start ~row_start source =
   let streamed = Markdown.render_streaming ~palette:tagged ~width:40 source in
   check_rows (label ^ " rows") (render source) streamed.rows;
@@ -843,6 +876,8 @@ let () =
             test_link_keeps_both_halves
         ; Alcotest.test_case "a plain link keeps its boundary" `Quick
             test_plain_link_keeps_a_printable_boundary
+        ; Alcotest.test_case "plain segments keep exact spacing" `Quick
+            test_plain_segments_keep_exact_spacing
         ; Alcotest.test_case "segments name each marker" `Quick
             test_inline_segments_names_each_marker
         ] )
@@ -875,6 +910,8 @@ let () =
             test_rule_fills_the_width
         ; Alcotest.test_case "blank lines are kept" `Quick
             test_blank_lines_are_kept
+        ; Alcotest.test_case "single-line rows match streaming" `Quick
+            test_single_line_render_matches_streaming
         ; Alcotest.test_case "streaming keeps only closed blocks" `Quick
             test_streaming_boundary_keeps_only_closed_blocks
         ] )

@@ -31,6 +31,25 @@ let write_file ~mode path contents =
   Unix.chmod path mode
 ;;
 
+let account_owner ~base_path =
+  Runtime_antigravity_home.keeper_owner_leaf ~keeper_name:"antigravity-fixture"
+    ~oauth_source:(Filename.concat base_path "operator-oauth-token")
+;;
+
+let account_store ~base_path =
+  Filename.concat (Common.masc_dir_from_base_path ~base_path) "official-clients/antigravity"
+  |> fun root -> Filename.concat root (account_owner ~base_path)
+;;
+
+let prepared_account_home ~base_path =
+  match Runtime_antigravity_home.prepare
+      ~runtime_root:(Common.masc_dir_from_base_path ~base_path)
+      ~owner_leaf:(account_owner ~base_path)
+      ~oauth_source:(Filename.concat base_path "operator-oauth-token") with
+  | Ok home -> home
+  | Error error -> fail (Runtime_antigravity_home.error_to_string error)
+;;
+
 let fixture_script ~base_path =
   let path = Filename.concat base_path "agy-fixture.sh" in
   let prompt_path = Filename.concat base_path "antigravity-prompt.txt" in
@@ -38,7 +57,8 @@ let fixture_script ~base_path =
     Printf.sprintf
       {|#!/bin/sh
 set -eu
-test "$HOME" = %s
+test "$(dirname "$HOME")" = %s
+printf '%%s\n' "$HOME" > %s
 test -f "$HOME/.gemini/antigravity-cli/antigravity-oauth-token"
 test -f "$HOME/.gemini/config/mcp_config.json"
 python3 - <<'POLICY'
@@ -130,11 +150,8 @@ printf '%%s\n' "$turns" > "$turn_counter"
 printf '{"event":"result","result":{"conversation_id":"%%s","status":"SUCCESS","response":"MASC_ANTIGRAVITY_KEEPER_OK","error":null,"num_turns":%%d,"usage":{"input_tokens":12,"output_tokens":4,"thinking_tokens":1,"cache_read_tokens":40,"total_tokens":16}}}\n' "$conversation" "$turns"
 |}
       (shell_quote
-         (Runtime_antigravity_home.home_path
-            ~runtime_root:(Filename.concat base_path ".masc")
-            ~owner_leaf:(Runtime_antigravity_home.keeper_owner_leaf
-              ~keeper_name:"antigravity-fixture"
-              ~oauth_source:(Filename.concat base_path "operator-oauth-token"))))
+         (account_store ~base_path))
+      (shell_quote (Filename.concat base_path "antigravity-selected-home"))
       (shell_quote prompt_path)
       (Yojson.Safe.to_string (`String (Env_config_core.strip_trailing_slashes
          (Filename.concat base_path
@@ -152,7 +169,7 @@ let blank_then_success_fixture_script ~base_path =
     Printf.sprintf
       {|#!/bin/sh
 set -eu
-test "$HOME" = %s
+test "$(dirname "$HOME")" = %s
 case " $* " in *" --new-project "*) ;; *) exit 96 ;; esac
 case " $* " in *" --conversation "*) exit 97 ;; esac
 cat >/dev/null
@@ -168,11 +185,7 @@ printf '{"event":"init","conversation_id":"%%s","init":{"model":"gemini-fixture"
 printf '{"event":"result","result":{"conversation_id":"%%s","status":"SUCCESS","response":"%%s","error":null,"num_turns":1,"usage":{"input_tokens":12,"output_tokens":4,"thinking_tokens":1,"cache_read_tokens":40,"total_tokens":16}}}\n' "$conversation" "$response"
 |}
       (shell_quote
-         (Runtime_antigravity_home.home_path
-            ~runtime_root:(Filename.concat base_path ".masc")
-            ~owner_leaf:(Runtime_antigravity_home.keeper_owner_leaf
-              ~keeper_name:"antigravity-fixture"
-              ~oauth_source:(Filename.concat base_path "operator-oauth-token"))))
+         (account_store ~base_path))
       (shell_quote invocation_path)
       (shell_quote invocation_path)
       (Yojson.Safe.to_string (`String (Env_config_core.strip_trailing_slashes
@@ -222,11 +235,7 @@ let seed_ambiguous_resumed_session ~base_path ~tool =
   let runtime_id = "antigravity.gemini" in
   let tool_surface_sha256 =
     Store.tool_surface_sha256
-      ~account_home:(Runtime_antigravity_home.home_path
-        ~runtime_root:(Filename.concat base_path ".masc")
-        ~owner_leaf:(Runtime_antigravity_home.keeper_owner_leaf
-          ~keeper_name:"antigravity-fixture"
-          ~oauth_source:(Filename.concat base_path "operator-oauth-token")))
+      ~account_home:(Runtime_antigravity_home.home_dir (prepared_account_home ~base_path))
       ~native_posture:Runtime_native_tools.antigravity_default
       [ tool ]
   in
@@ -316,7 +325,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
       Masc_test_deps.declare_fixture_keeper
         ~base_path ~sandbox_profile:(Some Keeper_types_profile_sandbox.Docker) "antigravity-fixture";
       let oauth_source = Filename.concat base_path "operator-oauth-token" in
-      write_file ~mode:0o600 oauth_source "operator-oauth-fixture";
+      write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "operator-oauth-fixture");
       let raw_trace_path = Filename.concat base_path "antigravity-raw-trace.jsonl" in
       let raw_trace =
         Agent_core.Raw_trace.create ~path:raw_trace_path ()
@@ -631,6 +640,35 @@ let test_keeper_projects_mcp_tool_and_settles () =
                           (run_context ~goal:"New goal must not run with stale context" changed))
                         ["changed core instructions", large_history;
                          "pre-dispatch fixture system prompt", large_history @ [Agent_core.Types.user_msg "new native correction"]];
+                      let unchanged_context =
+                        ("pre-dispatch fixture system prompt",
+                         large_history @ [Agent_core.Types.user_msg "new native correction"]) in
+                      let old_home = prepared_account_home ~base_path in
+                      write_file ~mode:0o600 (Runtime_antigravity_home.oauth_path old_home)
+                        (Masc_test_deps.antigravity_oauth_fixture ~revision:"native-refresh" "operator-oauth-fixture");
+                      check int "native refresh keeps the existing session" 73
+                        (run_context ~goal:"Unchanged source, native-refreshed token" unchanged_context);
+                      check string "native refresh is not overwritten" (Masc_test_deps.antigravity_oauth_fixture ~revision:"native-refresh" "operator-oauth-fixture")
+                        (Fs_compat.load_file (Runtime_antigravity_home.oauth_path old_home));
+                      write_file ~mode:0o600 oauth_source
+                        (Masc_test_deps.antigravity_oauth_fixture ~revision:"source-refresh" "operator-oauth-fixture");
+                      check int "ordinary source OAuth refresh resumes the existing session" 74
+                        (run_context ~goal:"Keep this account after OAuth refresh" unchanged_context);
+                      check string "source refresh retains native credential rotation"
+                        (Masc_test_deps.antigravity_oauth_fixture ~revision:"native-refresh" "operator-oauth-fixture")
+                        (Fs_compat.load_file (Runtime_antigravity_home.oauth_path old_home));
+                      write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "external-relogin-account");
+                      check int "same-path external login starts a fresh session" 1
+                        (run_context ~goal:"Use externally re-logged account" unchanged_context);
+                      let selected_home = String.trim (Fs_compat.load_file
+                        (Filename.concat base_path "antigravity-selected-home")) in
+                      check bool "actual spawned HOME is a new generation" true
+                        (selected_home <> Runtime_antigravity_home.home_dir old_home);
+                      check string "actual child used externally selected account" (Masc_test_deps.antigravity_oauth_fixture "external-relogin-account")
+                        (Fs_compat.load_file (Filename.concat selected_home
+                           ".gemini/antigravity-cli/antigravity-oauth-token"));
+                      check string "old in-flight generation is preserved" (Masc_test_deps.antigravity_oauth_fixture ~revision:"native-refresh" "operator-oauth-fixture")
+                        (Fs_compat.load_file (Runtime_antigravity_home.oauth_path old_home));
                       let unchanged = ("pre-dispatch fixture system prompt",
                         large_history @ [Agent_core.Types.user_msg "new native correction"]) in
                       let hook_ordinals = ref [] in
@@ -862,9 +900,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
       check int "next durable turn count" 74 next_plan.turn_count;
       let mcp_path =
         Filename.concat
-          (Runtime_antigravity_home.home_path ~runtime_root:mascot_root
-            ~owner_leaf:(Runtime_antigravity_home.keeper_owner_leaf
-              ~keeper_name:"antigravity-fixture" ~oauth_source))
+          (Runtime_antigravity_home.home_dir (prepared_account_home ~base_path))
           ".gemini/config/mcp_config.json"
       in
       check bool "turn capability cleared" false (Sys.file_exists mcp_path))
@@ -879,7 +915,7 @@ let test_blank_success_requires_fresh_conversation () =
       Masc_test_deps.declare_fixture_keeper
         ~base_path ~sandbox_profile:(Some Keeper_types_profile_sandbox.Docker) "antigravity-fixture";
       let oauth_source = Filename.concat base_path "operator-oauth-token" in
-      write_file ~mode:0o600 oauth_source "operator-oauth-fixture";
+      write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "operator-oauth-fixture");
       let cli_path = blank_then_success_fixture_script ~base_path in
       let runtime_path = Filename.concat base_path "runtime.toml" in
       write_file ~mode:0o600 runtime_path (runtime_toml ~cli_path ~oauth_source);
@@ -980,7 +1016,7 @@ let test_spawn_failure_is_pre_dispatch () =
       Masc_test_deps.declare_fixture_keeper
         ~base_path ~sandbox_profile:(Some Keeper_types_profile_sandbox.Docker) "antigravity-capacity-override";
       let oauth_source = Filename.concat base_path "operator-oauth-token" in
-      write_file ~mode:0o600 oauth_source "operator-oauth-fixture";
+      write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "operator-oauth-fixture");
       let missing_cli = Filename.concat base_path "missing-antigravity" in
       let runtime_path = Filename.concat base_path "runtime.toml" in
       write_file
@@ -1138,7 +1174,7 @@ let test_blank_system_prompt_is_refused_not_defaulted () =
       Masc_test_deps.declare_fixture_keeper
         ~base_path ~sandbox_profile:(Some Keeper_types_profile_sandbox.Docker) "antigravity-blank-prompt";
       let oauth_source = Filename.concat base_path "operator-oauth-token" in
-      write_file ~mode:0o600 oauth_source "operator-oauth-fixture";
+      write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "operator-oauth-fixture");
       let cli_path = fixture_script ~base_path in
       let runtime_path = Filename.concat base_path "runtime.toml" in
       write_file ~mode:0o600 runtime_path (runtime_toml ~cli_path ~oauth_source);
@@ -2014,7 +2050,7 @@ let test_losing_claim_cannot_publish_native_policy () =
     Masc_test_deps.declare_fixture_keeper ~base_path
       ~sandbox_profile:(Some Keeper_types_profile_sandbox.Docker) keeper_name;
     let oauth_source = Filename.concat base_path "operator-oauth-token" in
-    write_file ~mode:0o600 oauth_source "synthetic-policy-account";
+    write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "synthetic-policy-account");
     let marker = Filename.concat base_path "unexpected-spawn" in
     let cli_path = Filename.concat base_path "agy-never-spawn" in
     write_file ~mode:0o700 cli_path ("#!/bin/sh\ntouch " ^ shell_quote marker ^ "\nexit 0\n");
@@ -2028,9 +2064,7 @@ let test_losing_claim_cannot_publish_native_policy () =
           | Some {Runtime.execution=Runtime_execution.Antigravity_cli config; _} -> config
           | _ -> fail "Antigravity binding missing" in
         let owner_leaf = Runtime_antigravity_home.keeper_owner_leaf ~keeper_name ~oauth_source in
-        let home = Runtime_antigravity_home.prepare ~runtime_root ~owner_leaf ~oauth_source
-          |> Result.get_ok in
-        let _ = Runtime_antigravity_home.prepare_native_tools home
+        let home, _ = Runtime_antigravity_home.prepare_native ~runtime_root ~owner_leaf ~oauth_source
             ~posture:Runtime_native_tools.Native_full
             ~workspace:Runtime_antigravity_home.Private_workspace ~additional_workspaces:[]
           |> Result.get_ok in
@@ -2079,7 +2113,7 @@ let test_native_policy_failure_releases_claim () =
     Masc_test_deps.declare_fixture_keeper ~base_path
       ~sandbox_profile:(Some Keeper_types_profile_sandbox.Docker) keeper_name;
     let oauth_source = Filename.concat base_path "operator-oauth-token" in
-    write_file ~mode:0o600 oauth_source "synthetic-policy-account";
+    write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "synthetic-policy-account");
     let marker = Filename.concat base_path "unexpected-spawn" in
     let cli_path = Filename.concat base_path "agy-never-spawn" in
     write_file ~mode:0o700 cli_path ("#!/bin/sh\ntouch " ^ shell_quote marker ^ "\nexit 0\n");
@@ -2126,18 +2160,39 @@ let test_native_policy_failure_releases_claim () =
          | Error detail -> fail detail)))))
 ;;
 
+let test_every_declared_loading_is_eager_on_antigravity () =
+  let tool name loading : Keeper_official_client_host.dynamic_tool =
+    { name
+    ; description = name
+    ; input_schema = `Assoc [ "type", `String "object" ]
+    ; loading
+    ; result_bound = Runtime_official_client_tool.Unbounded
+    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
+    ; call = (fun ~call_id:_ _ -> Alcotest.fail "not called")
+    }
+  in
+  check (list string) "upfront and on-demand tools are both eager"
+    [ "upfront_tool"; "on_demand_tool" ]
+    (Keeper_antigravity_runtime.eager_tool_names
+       [ tool "upfront_tool" Runtime_official_client_tool.Upfront
+       ; tool "on_demand_tool" Runtime_official_client_tool.On_demand
+       ])
+;;
+
 let () =
   run
     "keeper_antigravity_runtime"
     [ ( "lifecycle"
         , [ test_case "native policy failure releases its claim" `Quick
             test_native_policy_failure_releases_claim
-          ; test_case "losing claim cannot publish native policy" `Quick
-            test_losing_claim_cannot_publish_native_policy
           ; test_case
             "projects MCP tool and settles"
             `Quick
             test_keeper_projects_mcp_tool_and_settles
+          ; test_case
+            "every declared loading is eager on Antigravity"
+            `Quick
+            test_every_declared_loading_is_eager_on_antigravity
           ; test_case
               "blank result starts fresh next turn"
               `Quick
@@ -2150,6 +2205,8 @@ let () =
               "blank system prompt is refused not defaulted"
               `Quick
               test_blank_system_prompt_is_refused_not_defaulted
+        ; test_case "losing claim cannot publish native policy" `Quick
+            test_losing_claim_cannot_publish_native_policy
         ] )
     ; ( "model input window"
         , [ test_case

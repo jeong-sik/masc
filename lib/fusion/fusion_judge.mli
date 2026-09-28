@@ -1,11 +1,12 @@
 (** Fusion — 심판. 패널 답들을 judge 모델에 넘겨 구조화 종합({!Fusion_types.judge_synthesis})을 받는다.
 
-    Judge 출력 계약은 **단일 tier**다. [apply_fusion_judge_output_contract]
-    (fusion_judge.ml:165-166)는 capability를 읽지 않고
-    [Keeper_structured_output_schema.without_response_format]를 무조건 적용한다 —
+    Judge 출력 계약은 **단일 tier**다. [apply_fusion_judge_output_contract]는
+    capability를 읽지 않고 [Keeper_structured_output_schema.without_response_format]를
+    무조건 적용한다 —
     [response_format = Off]. 계약은 프롬프트의
-    [config/prompts/fusion.judge.md] 의 [output] 슬롯 지시로만 나가고, 응답은
-    {!Fusion_judge_parse.of_string}의 strict 파싱을 통과해야 하며 위반은
+    [config/prompts/fusion.judge.md] [output] 슬롯 지시와
+    {!Fusion_judge_parse.output_schema}를 함께 싣고, 응답은 같은 typed field
+    정의에서 나온 {!Fusion_judge_parse.of_string}을 통과해야 하며 위반은
     [Parse_error]로 fail-loud한다.
 
     2026-07-26까지 이 문서는 "AGENT_CORE capability facts가 native structured output을
@@ -14,7 +15,7 @@
 
     실패 형태는 마크다운 펜스 자체가 아니다. {!Fusion_judge_parse.of_string}은
     Yojson 에 넘기기 전에 [strip_fences] 로 선두 ``` / ```json 펜스와 후행 펜스를
-    벗기므로(fusion_judge_parse.ml:177-190), 응답 전체가 펜스 블록 하나면 파싱은
+    벗기므로, 응답 전체가 펜스 블록 하나면 파싱은
     통과한다. 벗겨지지 않는 경우는 둘뿐이다 — 펜스 앞에 산문이 붙어 첫 3바이트가
     ``` 이 아니거나, 펜스 뒤에 개행이 없어 [String.index_opt s '\n'] 이 [None]
     이라 원문이 그대로 나가는 경우. 라이브 Keeper 관측(event-queue-v12.json
@@ -25,14 +26,14 @@
     설계 SSOT 와의 충돌은 미해결이 아니라 확인된 상태다:
     docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md §7.2 는 provider-native
     JSON schema 강제([Structured.extract], 미지원 provider fail-fast)를 요구한다.
-    구현은 그 요구를 의도적으로 철회했고 근거는 fusion_judge.ml:157-164 에 있다 —
+    구현은 그 요구를 의도적으로 철회했고 근거는 [apply_fusion_judge_output_contract] 앞에 있다 —
     (1) capability 사실이 거짓일 수 있다(ollama.com cloud 는 declared 인데
     json_schema 를 무시, 2026-07-02 probe), (2) #22768 "native schema or fail
     before HTTP" 가 미지원 preset 의 fusion 을 영구 불능으로 만들어 되돌려졌다.
     따라서 맞춰야 하는 쪽은 RFC 이며, §7.2 에 그 사실을 기재했다. *)
 
-(** 질문 + 패널 답들로 심판 프롬프트를 구성한다. JSON 지시는 등록된
-    [fusion.judge.output] asset에서 온다. *)
+(** 질문 + 패널 답들로 심판 프롬프트를 구성한다. JSON 지침은 등록된
+    [fusion.judge.output] asset, 필드·타입 schema는 {!Fusion_judge_parse.output_schema}에서 온다. *)
 val compose_prompt : question:string -> panel:Fusion_types.panel_outcome list -> string
 
 (** 심판 모델을 실행해 구조화 종합을 받는다.

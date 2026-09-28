@@ -148,7 +148,7 @@ let async_request_observation_lines (state : state) =
           Option.bind request.ar_elapsed_sec Masc_tui_message_layout.elapsed_text
         with
         | Some text -> text
-        | None -> "?s"
+        | None -> Masc_tui_theme.Glyph.no_value
       in
       tone, Printf.sprintf "   %s · %s · %s · %s · %s"
         (Terminal_text.single_line request.ar_request_id)
@@ -325,8 +325,9 @@ let skill_source_lines ~config ~(sources : Masc.Tui_decode.skill_catalog_source 
 let tools_pane_strip ~cols (state : state) =
   tab_strip
     ~width:(tab_strip_width ~cols ~before:" " ~after:"")
+    ~press:(fun pane text -> Masc_tui_press.(pressable (Press_tools_pane pane) text))
     (List.map
-       (fun (pane, label) -> (label, state.tools_pane = pane))
+       (fun (pane, label) -> (label, state.tools_pane = pane, pane))
        [ (Masc_tui_types.Tools_surface, "호출 범위")
        ; (Masc_tui_types.Tools_async, "비동기 작업")
        ; (Masc_tui_types.Tools_activations, "Skill 기록")
@@ -675,7 +676,7 @@ let tools_display_lines (state : state) =
                            match json_assoc_member_opt "duration_ms" result with
                            | Some (`Float value) -> Printf.sprintf "%.0fms" value
                            | Some (`Int value) -> Printf.sprintf "%dms" value
-                           | _ -> "?ms"
+                           | Some _ | None -> Masc_tui_theme.Glyph.no_value
                          in
                          let success =
                            match json_assoc_member_opt "disposition" result with
@@ -705,9 +706,9 @@ let tools_display_lines (state : state) =
                              success
                              duration
                              (Terminal_text.single_line
-                                (string_field "keeper" "?"))
+                                (string_field "keeper" Masc_tui_theme.Glyph.no_value))
                              (Terminal_text.single_line
-                                (string_field "composition_run_id" "?"))
+                                (string_field "composition_run_id" Masc_tui_theme.Glyph.no_value))
                              settlement_count
                          ; Ansi.dim, "       " ^ Terminal_text.single_line output
                          ]

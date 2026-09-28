@@ -161,6 +161,14 @@ let vote_key_target key =
 
 let sweep store =
   with_lock store (fun () ->
+    (* Best-effort loaded rows remain readable, but cannot authorize deletion
+       of a target and its dependents until all four sources loaded fully.
+       The loader retains the typed failures for diagnosis and healthy reload. *)
+    match store.posts_load_result, store.comments_load_result,
+          store.votes_load_result, store.reactions_load_result with
+    | Error _, _, _, _ | _, Error _, _, _
+    | _, _, Error _, _ | _, _, _, Error _ -> 0, 0
+    | Ok (), Ok (), Ok (), Ok () ->
     let now = Time_compat.now () in
     let removed_posts = ref 0 in
     let removed_comments = ref 0 in
@@ -178,15 +186,56 @@ let sweep store =
         store.posts
         []
     in
+    (* Both ordinary expiry and a partial post cascade must update the
+       surviving post's reply count and index before the next snapshot. *)
+    let remove_comment cid =
+      (match Hashtbl.find_opt store.comments cid with
+       | Some c ->
+         let post_key = Post_id.to_string c.post_id in
+         remove_from_list_index store.comments_by_post post_key cid;
+         (match Hashtbl.find_opt store.posts post_key with
+          | Some post ->
+            Hashtbl.replace store.posts post_key
+              { post with reply_count = post.reply_count - 1 };
+            mark_dirty_post store post_key
+          | None -> ())
+       | None -> ());
+      Hashtbl.remove store.comments cid;
+      mark_dirty_comment store cid
+    in
+    (* Drain each expired post's comments within the shared comment batch.
+       Keep the post until its last comment is removed, so even a cascade
+       larger than the batch converges without stranding replies. *)
+    let swept_posts = ref [] in
+    let cascaded_comment_ids = ref [] in
     List.iter
       (fun id ->
-         (match Hashtbl.find_opt store.posts id with
-          | Some p -> unindex_post_origin store p
-          | None -> ());
-         Hashtbl.remove store.posts id;
-         Hashtbl.remove store.comments_by_post id;
-         Stdlib.decr store.post_count;
-         mark_dirty_post store id)
+         let remaining_budget = Limits.sweeper_batch_size - !removed_comments in
+         let cascade_ids, cascade_count, comments_remain =
+           Hashtbl.fold
+             (fun key (c : comment) (ids, count, remain) ->
+                if not (String.equal (Post_id.to_string c.post_id) id) then
+                  ids, count, remain
+                else if count < remaining_budget then
+                  key :: ids, count + 1, remain
+                else ids, count, true)
+             store.comments
+             ([], 0, false)
+         in
+         List.iter remove_comment cascade_ids;
+         removed_comments := !removed_comments + cascade_count;
+         cascaded_comment_ids := cascade_ids @ !cascaded_comment_ids;
+         if comments_remain then
+           Stdlib.decr removed_posts
+         else (
+           (match Hashtbl.find_opt store.posts id with
+            | Some p -> unindex_post_origin store p
+            | None -> ());
+           Hashtbl.remove store.posts id;
+           Hashtbl.remove store.comments_by_post id;
+           swept_posts := id :: !swept_posts;
+           Stdlib.decr store.post_count;
+           mark_dirty_post store id))
       expired_posts;
     let expired_comments =
       Hashtbl.fold
@@ -208,24 +257,7 @@ let sweep store =
        read until the next restart. Each removal is marked dirty the way
        [add_comment] marks its write, so the next flush writes the snapshot
        without the expired rows instead of waiting for an unrelated edit. *)
-    List.iter
-      (fun cid ->
-         (match Hashtbl.find_opt store.comments cid with
-          | Some c ->
-            let post_key = Post_id.to_string c.post_id in
-            remove_from_list_index store.comments_by_post post_key cid;
-            (match Hashtbl.find_opt store.posts post_key with
-             | Some post ->
-               Hashtbl.replace
-                 store.posts
-                 post_key
-                 { post with reply_count = post.reply_count - 1 };
-               mark_dirty_post store post_key
-             | None -> ())
-          | None -> ());
-         Hashtbl.remove store.comments cid;
-         mark_dirty_comment store cid)
-      expired_comments;
+    List.iter remove_comment expired_comments;
     (* Dependent rows die with their target, at the moment the target dies:
        the expired ids are in hand right here. The previous pass instead
        scanned for rows whose target is missing from the in-memory tables,
@@ -235,10 +267,13 @@ let sweep store =
        [recalculate_vote_counts] never counts it, and the target may still
        arrive on the next load. *)
     let expired_targets = Hashtbl.create 16 in
-    List.iter (fun id -> Hashtbl.replace expired_targets (`Post, id) ()) expired_posts;
+    List.iter (fun id -> Hashtbl.replace expired_targets (`Post, id) ()) !swept_posts;
     List.iter
       (fun id -> Hashtbl.replace expired_targets (`Comment, id) ())
       expired_comments;
+    List.iter
+      (fun id -> Hashtbl.replace expired_targets (`Comment, id) ())
+      !cascaded_comment_ids;
     let removed_reactions, removed_votes =
       if Hashtbl.length expired_targets = 0
       then 0, 0
@@ -664,6 +699,7 @@ let create_post_with_audience
                 ; hearth
                 ; thread_id
                 ; origin
+                ; closed = None
                 })
       in
       match staged with

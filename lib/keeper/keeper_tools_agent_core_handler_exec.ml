@@ -48,6 +48,17 @@ let execute_with_observers_with_authority
   let parent_tool_use_id =
     Option.map Agent_core.Tool_contract.Invocation.tool_use_id agent_core_invocation
   in
+  (* The outer Keeper turn this call belongs to, the same number the tool-call
+     ledger files it under; tools that record per-turn evidence name their
+     turn with it. *)
+  let turn_ref =
+    Option.map
+      (fun absolute_turn ->
+         Ids.Turn_ref.make
+           ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+           ~absolute_turn)
+      keeper_turn_id
+  in
   let set_truncation_info ~original_bytes =
     Option.iter
       (fun invocation ->
@@ -76,6 +87,7 @@ let execute_with_observers_with_authority
             ?mcp_session_id
             ?continuation_channel
             ?gate_context
+            ?turn_ref
             ?gate_grant
             ?tool_use_id:parent_tool_use_id
             ?result_projection
@@ -97,6 +109,7 @@ let execute_with_observers_with_authority
             ?mcp_session_id
             ?continuation_channel
             ?gate_context
+            ?turn_ref
             ?gate_grant
             ?tool_use_id:parent_tool_use_id
             ?result_projection
@@ -117,6 +130,7 @@ let execute_with_observers_with_authority
             ?mcp_session_id
             ?continuation_channel
             ?gate_context
+            ?turn_ref
             ?gate_grant
             ?tool_use_id:parent_tool_use_id
             ?result_projection
@@ -137,6 +151,7 @@ let execute_with_observers_with_authority
             ?mcp_session_id
             ?continuation_channel
             ?gate_context
+            ?turn_ref
             ?gate_grant
             ?tool_use_id:parent_tool_use_id
             ?result_projection

@@ -6,12 +6,17 @@ val resolve_reasoning_effort :
 
 val resolve_turn_timeout_s : runtime_id:string -> float option
 
-val resolve_wall_clock_ceiling_s : runtime_id:string -> float option
-(** Per-model whole-turn ceiling override for {!Runtime_wall_clock}; [None]
-    keeps the runtime default ceiling. *)
 (** The per-model [turn-timeout-s] declared for [runtime_id], or [None] when
     the model leaves it unset. Streaming official-client adapters use it as
     their protocol-idle liveness window. *)
+
+val turn_timeout_s_of_declared : default:float -> float option -> float option
+(** Apply one declared value: [None] keeps [default]; a non-positive value
+    removes the bound ([None]); anything else stands. *)
+
+val resolve_turn_timeout_s_or : runtime_id:string -> default:float -> float option
+(** [turn_timeout_s_of_declared] applied to the model's declaration. The one
+    spelling every official-client boundary uses. *)
 
 val resolve_max_prompt_bytes : runtime_id:string -> int option
 (** Per-model ceiling, in bytes, on the history an official-client start turn

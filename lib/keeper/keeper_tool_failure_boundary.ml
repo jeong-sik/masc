@@ -55,6 +55,7 @@ let of_handler (handler : Keeper_tool_descriptor.runtime_handler) =
     | Keeper_tool_descriptor.Tool_workspace_memory_read
     | Keeper_tool_descriptor.Tool_memory_search
     | Keeper_tool_descriptor.Tool_constitution_write
+    | Keeper_tool_descriptor.Tool_constitution_read
     | Keeper_tool_descriptor.Tool_constitution_remove
     | Keeper_tool_descriptor.Tool_library_search
     | Keeper_tool_descriptor.Tool_library_read

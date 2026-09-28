@@ -57,6 +57,7 @@ let file_digest path = Digest.to_hex (Digest.file path)
 let goal_row ts =
   Goal_store.goal_to_yojson
     { Goal_store.id = "goal-before-the-hard-cut"
+    ; owner = Goal_store.Unknown_owner
     ; criterion_revision = "fixture-criterion"
     ; title = "Goal before the hard cut"
     ; metric = None

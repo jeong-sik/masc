@@ -321,6 +321,7 @@ let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result
             ?target_value
             ?due_date
             ?priority
+            ~owner:ctx.agent_name
             ()
         with
         | Error (Goal_store.Rejected msg) ->

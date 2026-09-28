@@ -30,8 +30,19 @@ val parse_goal_phase : string option -> Goal_phase.t option
 
 (** {1 Goal record} *)
 
+type owner =
+  | Owner of string
+  | Unknown_owner
+      (** Who owns a Goal (#39571). A row written before the owner field
+          existed decodes to [Unknown_owner] — an explicit value, never an
+          empty string. *)
+
+val owner_to_yojson : owner -> Yojson.Safe.t
+val owner_of_yojson : Yojson.Safe.t -> (owner, string) result
+
 type goal = {
   id : string;
+  owner : owner;
   criterion_revision : string;
   title : string;
   metric : string option;
@@ -253,6 +264,7 @@ val upsert_goal :
   ?target_value:string ->
   ?due_date:string ->
   ?priority:int ->
+  ?owner:string ->
   unit ->
   (goal * [ `created | `updated of Goal_phase.t ], write_error) result
 (** Creates a new goal when [id] is omitted (mints [goal-<ms>-<4 hex digits>]

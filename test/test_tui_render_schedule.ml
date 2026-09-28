@@ -1599,7 +1599,7 @@ let test_headers_fit_their_columns () =
             ~reason_width:(Schedule.harness_reason_width ~inner_width) )
       ; ( "board"
         , Schedule.board_header_row ~age_header:"AGE"
-            ~title_width:(Schedule.board_title_width ~inner_width) )
+            ~layout:(Schedule.board_layout ~inner_width) )
       ]
     in
     List.iter
@@ -2095,14 +2095,96 @@ let board_probe =
   ; brow_replies = "G"
   }
 
-let board_row_of ~title_width values =
-  Schedule.board_row ~styles:Schedule.board_no_styles ~age_header:"AGE" ~title_width values
+let board_row_of ~layout values =
+  Schedule.board_row ~styles:Schedule.board_no_styles ~age_header:"AGE" ~layout values
+
+(* Wide enough that nothing goes: the seven named columns take 59 cells, their
+   seven gaps 7 more, and the title's floor is 12, so 78 holds them all. *)
+let board_wide_inner_width = 120
+
+let board_header_width layout =
+  Masc_tui_message_layout.display_width
+    (Schedule.board_header_row ~age_header:"AGE" ~layout)
+
+(* Room for every column: nothing goes, and the title takes the slack. *)
+let test_a_wide_board_draws_every_column () =
+  let layout = Schedule.board_layout ~inner_width:board_wide_inner_width in
+  check bool "every column is drawn, in order" true
+    (layout.Masc_tui_table.shown
+    = Schedule.
+        [ Board_mark
+        ; Board_id
+        ; Board_hearth
+        ; Board_author
+        ; Board_title
+        ; Board_age
+        ; Board_score
+        ; Board_replies
+        ]);
+  (* 120 less the 59 named cells and the 7 gaps. *)
+  check int "the title takes what the others leave" 54
+    layout.Masc_tui_table.flex_width;
+  check int "the row fills the space" board_wide_inner_width
+    (board_header_width layout)
+
+(* An eighty-column terminal: 76 inside the frame, less the four cells of lead
+   ahead of the mark. Every column would need 78, so the id goes, and only the
+   id: without it the rest need 65. The title had its floor of 12 here and ran
+   the row past the frame; now it has the id's cells. *)
+let test_an_eighty_column_board_gives_the_id_to_the_title () =
+  let inner_width = 72 in
+  let layout = Schedule.board_layout ~inner_width in
+  check bool "the id goes and the hearth stays" true
+    (layout.Masc_tui_table.shown
+    = Schedule.
+        [ Board_mark
+        ; Board_hearth
+        ; Board_author
+        ; Board_title
+        ; Board_age
+        ; Board_score
+        ; Board_replies
+        ]);
+  (* 72 less the 47 cells of the six other columns and their 6 gaps. *)
+  check int "the title has 19 cells rather than its floor of 12" 19
+    layout.Masc_tui_table.flex_width;
+  check int "and the row ends at the frame" inner_width
+    (board_header_width layout)
+
+(* Narrower still: the hearth follows the id, then the replies and the score,
+   in the order the list declares. *)
+let test_a_narrow_board_gives_up_columns_in_its_order () =
+  let at inner_width =
+    (Schedule.board_layout ~inner_width).Masc_tui_table.shown
+  in
+  check bool "at 60 the hearth has gone too" true
+    (at 60
+    = Schedule.
+        [ Board_mark
+        ; Board_author
+        ; Board_title
+        ; Board_age
+        ; Board_score
+        ; Board_replies
+        ]);
+  check bool "at 40 the replies and then the score" true
+    (at 40 = Schedule.[ Board_mark; Board_author; Board_title; Board_age ]);
+  check bool "the mark, the title and the age never go" true
+    (at 20 = Schedule.[ Board_mark; Board_title; Board_age ])
+
+(* The narrowest: with everything that may go gone, the mark, the title at
+   its floor and the age still need 21 cells, and the row is that wide. *)
+let test_the_narrowest_board_keeps_the_title_floor () =
+  let layout = Schedule.board_layout ~inner_width:20 in
+  check int "the title stays at its floor" 12 layout.Masc_tui_table.flex_width;
+  check int "the row is wider than the space, as the frame's cut expects" 21
+    (board_header_width layout)
 
 let test_board_columns_hold_their_offsets () =
   for inner_width = 80 to 240 do
-    let title_width = Schedule.board_title_width ~inner_width in
-    let header = Schedule.board_header_row ~age_header:"AGE" ~title_width in
-    let row = board_row_of ~title_width board_probe in
+    let layout = Schedule.board_layout ~inner_width in
+    let header = Schedule.board_header_row ~age_header:"AGE" ~layout in
+    let row = board_row_of ~layout board_probe in
     check_left_cell "ID" "A" ~header ~row ~inner_width;
     check_left_cell "HEARTH" "B" ~header ~row ~inner_width;
     check_left_cell "AUTHOR" "C" ~header ~row ~inner_width;
@@ -2123,9 +2205,9 @@ let test_board_columns_with_styles_hold_their_offsets () =
     }
   in
   for inner_width = 80 to 240 do
-    let title_width = Schedule.board_title_width ~inner_width in
-    let header = Schedule.board_header_row ~age_header:"AGE" ~title_width in
-    let row = Schedule.board_row ~styles ~age_header:"AGE" ~title_width board_probe in
+    let layout = Schedule.board_layout ~inner_width in
+    let header = Schedule.board_header_row ~age_header:"AGE" ~layout in
+    let row = Schedule.board_row ~styles ~age_header:"AGE" ~layout board_probe in
     check_left_cell "ID" "A" ~header ~row ~inner_width;
     check_left_cell "HEARTH" "B" ~header ~row ~inner_width;
     check_left_cell "AUTHOR" "C" ~header ~row ~inner_width;
@@ -2144,8 +2226,11 @@ let test_a_title_gives_way_at_its_tail () =
     "Verify: run-exact-output-lane-board-attention-9e327af211400cba719b59128"
   in
   (* The pane the Board draws in beside the roster: 114 cells. *)
-  let title_width = Schedule.board_title_width ~inner_width:114 in
-  let board = board_row_of ~title_width { board_probe with brow_title = title } in
+  let board =
+    board_row_of
+      ~layout:(Schedule.board_layout ~inner_width:114)
+      { board_probe with brow_title = title }
+  in
   let planning =
     planning_row_of
       ~title_width:
@@ -2206,7 +2291,8 @@ let test_every_sentence_column_gives_way_at_its_tail () =
 (* The id beside it is the reading whose two ends say which run it is. *)
 let test_a_board_id_keeps_both_ends () =
   let row =
-    board_row_of ~title_width:40
+    board_row_of
+      ~layout:(Schedule.board_layout ~inner_width:board_wide_inner_width)
       { board_probe with brow_id = "p-6dc0a4e7eb813cc1" }
   in
   check bool "the head is drawn" true (Option.is_some (index_of row "p-6"));
@@ -2220,8 +2306,8 @@ let test_a_board_id_keeps_both_ends () =
 let test_a_board_row_is_as_wide_as_its_header () =
   List.iter
     (fun inner_width ->
-      let title_width = Schedule.board_title_width ~inner_width in
-      let header = Schedule.board_header_row ~age_header:"AGE" ~title_width in
+      let layout = Schedule.board_layout ~inner_width in
+      let header = Schedule.board_header_row ~age_header:"AGE" ~layout in
       let width text = Masc_tui_message_layout.display_width text in
       List.iter
         (fun (name, values) ->
@@ -2229,7 +2315,7 @@ let test_a_board_row_is_as_wide_as_its_header () =
             (Printf.sprintf "inner %d: %s stays on the header's width"
                inner_width name)
             (width header)
-            (width (board_row_of ~title_width values)))
+            (width (board_row_of ~layout values)))
         [ ( "empty"
           , { Schedule.brow_mark = ""
             ; brow_id = ""
@@ -2248,7 +2334,7 @@ let test_a_board_row_is_as_wide_as_its_header () =
         ; ( "an author past its column"
           , { board_probe with Schedule.brow_author = String.make 40 'x' } )
         ])
-    [ 80; 100; 120; 200 ]
+    [ 20; 60; 72; 80; 100; 120; 200 ]
 
 (* The gaps came back to one with the rest of the fleet. Board was spacing its
    columns two cells apart, which spent six cells of every title on being
@@ -2259,10 +2345,10 @@ let test_a_board_row_is_as_wide_as_its_header () =
    one space. *)
 let test_board_spaces_its_columns_like_every_other_table () =
   let inner_width = 120 in
-  let title_width = Schedule.board_title_width ~inner_width in
+  let layout = Schedule.board_layout ~inner_width in
   let fill char = String.make 60 char in
   let row =
-    board_row_of ~title_width
+    board_row_of ~layout
       { Schedule.brow_mark = "@"
       ; brow_id = fill 'a'
       ; brow_hearth = fill 'b'
@@ -2478,6 +2564,14 @@ let () =
             test_board_columns_hold_their_offsets
         ; test_case "board columns with styles hold their offsets" `Quick
             test_board_columns_with_styles_hold_their_offsets
+        ; test_case "a wide board draws every column" `Quick
+            test_a_wide_board_draws_every_column
+        ; test_case "an eighty-column board gives the id to the title" `Quick
+            test_an_eighty_column_board_gives_the_id_to_the_title
+        ; test_case "a narrow board gives up columns in its order" `Quick
+            test_a_narrow_board_gives_up_columns_in_its_order
+        ; test_case "the narrowest board keeps the title floor" `Quick
+            test_the_narrowest_board_keeps_the_title_floor
         ; test_case "a title gives way at its tail" `Quick
             test_a_title_gives_way_at_its_tail
         ; test_case "every sentence column gives way at its tail" `Quick

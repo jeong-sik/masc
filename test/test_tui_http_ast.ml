@@ -647,7 +647,7 @@ let test_keeper_chat_uses_current_async_contract () =
          >= 1))
     (* [Ansi.move_to] is gone from this binding on purpose: the renderer no
        longer writes a cursor escape inline. It hands the position to
-       [finish_frame_with_strip ~cursor:...], and the frame presenter emits the
+       [finish_frame_beside_acting_pane ~cursor:...], and the frame presenter emits the
        move when it paints. Asserting the old escape here
        would pin the pre-differential-frame renderer.
 
@@ -662,11 +662,11 @@ let test_keeper_chat_uses_current_async_contract () =
     ; "count_frame_lines"
     ; "Message_layout.input_cursor_column"
     ; "Message_layout.message_viewport_supported"
-      (* Renamed by #30141, which put a surface strip above every frame.  The
-         assertion is that the renderer still hands its rows to the frame
-         presenter rather than painting them itself, and that is what the new
-         name does. *)
-    ; "finish_frame_with_strip"
+      (* The assertion is that the renderer hands its rows to the frame
+         presenter rather than painting them itself, through the finisher
+         that also draws the Activity pane in the columns the chat left for
+         it (#39574). *)
+    ; "finish_frame_beside_acting_pane"
     ];
   check bool "message input uses the same viewport gate as rendering" true
     (Ast_grep.count_calls_in_value_binding ~module_path
@@ -2901,16 +2901,16 @@ let test_the_session_filter_reads_the_transcript () =
 
    The shared arithmetic became a shared column description. This pins that
    the surface draws its header and its rows from it rather than either one
-   spelling widths again: one title width, asked once, and the two rows built
-   from the description that width was measured against. *)
+   spelling widths again: one layout -- the columns a narrow list keeps and
+   the title's share -- asked once, and the two rows built from it. *)
 let test_the_board_header_and_rows_share_one_layout () =
   let module_path = "bin/masc_tui_render.ml" in
   let in_board callee =
     Ast_grep.count_calls_in_value_binding ~module_path
       ~binding_name:"render_board_list" ~callee
   in
-  check int "the title is sized once for the whole surface" 1
-    (in_board "board_title_width");
+  check int "the columns are laid out once for the whole surface" 1
+    (in_board "board_layout");
   check int "the header is drawn from the column description" 1
     (in_board "Render_schedule.board_header_row");
   check int "and so is every row" 1 (in_board "Render_schedule.board_row")

@@ -112,7 +112,7 @@ glossary 는 이 중 일부를 이미 나눴다. `[runtime.lanes.<이름>]` 은 
 - `Unconfigured` 는 다시 두 뜻이다. Workspace Curator 는 표를 지우는 것이 끄는 유일한 방법이다 (`lib/server/server_workspace_memory_curator.ml:307-313`). 다른 lane 에서는 "아무도 설정하지 않았다" 다.
 - `Registry_unavailable` 은 설정을 못 읽었다는 뜻이 아니다. registry 가 아직 publish 되지 않았거나(`Registry_not_published`), config commit 이 진행 중이다(`Publication_busy`) (`lib/runtime/runtime_exact_output_registry.mli:169-172`). 그래서 commit 이 도는 동안 모든 exact 행이 잠깐 "unavailable" 이 된다.
 - 결과적으로 "일부러 껐다", "설정을 잊었다", "commit 중이다" 가 같은 글자로 보인다. glossary 도 이 문제를 적었다 (`docs/spec/00-glossary.md:899-904`).
-- `"degraded"` 도 여러 원인을 합친다 (`server_standalone_lane_projection.ml:758-767`). 받아들인 slot 이 없음, 문자열로 합쳐진 admission 오류(모든 slot 거절, Curator 의 CLI slot, Stagehand slot drop 등, `:964-992`), 마지막 실행 실패다. 앞의 둘은 일을 받을 수 없는 상태이고, 마지막은 다음 일을 받을 수 있는 상태다.
+- `"degraded"` 도 여러 원인을 합친다 (`server_standalone_lane_projection.ml:758-767`). 받아들인 slot 이 없음, 문자열로 합쳐진 admission 오류(모든 slot 거절, Stagehand slot drop 등, `:964-992`), 마지막 실행 실패다. 앞의 둘은 일을 받을 수 없는 상태이고, 마지막은 다음 일을 받을 수 있는 상태다.
 
 **Browser 의 `Lane_absent` 도 세 원인을 합친다.** [사실] 운영자 브라우저 미연결(`live`), WebDriver 미설정이나 시작 실패(`automation`), backend 미설치(`stagehand`)다 (`lib/tool_misc_browser_lane.ml:52-61`). automation 의 시작 실패는 세 곳에서 로그만 남긴다 (`lib/server/server_browser_webdriver.ml:230`, `:235`, `:239`). main 에는 `install_stagehand_executor` 를 부르는 곳이 없다 (`lib/browser_lane/browser_lane.ml:413`, 호출자 0). 그런데 안내 문장은 "`[browser.stagehand]` 를 설정하라" 고 말한다. main 에서는 설정해도 바뀌는 것이 없다.
 

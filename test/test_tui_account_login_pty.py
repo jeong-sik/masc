@@ -90,10 +90,7 @@ def scenario(binary, client, protocol, *, delayed_save=False, conflict_save=Fals
         assert not supplied.is_set(), "rejected multiline credential was sent"
         h.send_and_wait(process, fd, output, b"\x1b[200~" + (secret + "\r\n").encode() + b"\x1b[201~\r", b"Selected account model")
         assert b"fixture-private-login-code" not in output, "secret echoed to terminal"
-        if client == "muse":
-            h.send_and_wait(process, fd, output, b"\r", "Muse 입력 한도(bytes):".encode())
-            h.send_and_wait(process, fd, output, b"65536\r", "검증하고 저장했습니다".encode())
-        elif conflict_save:
+        if conflict_save:
             h.send_and_wait(process, fd, output, b"\r", "설정을 새로 읽은 뒤 다시 저장".encode())
             assert len(save_attempts) == 1, "failed save retried without operator approval"
             h.send_and_wait(process, fd, output, b"r", "최신 설정을 읽었습니다".encode())

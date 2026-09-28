@@ -1222,15 +1222,6 @@ type exact_lane = Standalone_lane.t =
   | Verifier
   | Browser_stagehand
 
-(* [Server_workspace_memory_curator.execute] refuses a run whose lane declares
-   any CLI slot, so [false] here is that refusal read in advance. The two are
-   tied by these comments alone; making a CLI slot on such a lane unloadable
-   would leave one rule and let that refusal go. *)
-let exact_lane_supports_cli_tail = function
-  | Librarian | Hitl_auto_judge | Board_attention | Verifier | Browser_stagehand -> true
-  | Workspace_curator -> false
-;;
-
 (* One [runtime.exact_output_lanes.<lane>].<key> reference, named the way
    every reference-list builder in this file names one. *)
 let exact_lane_reference ~lane_id ~key id =
@@ -3790,7 +3781,7 @@ let warn_optional_exact_output_lane registry ~(lane : exact_lane) ~feature =
   let lane_id = Standalone_lane.to_id lane in
   match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
   | Ok { selected_slots = _ :: _; _ } -> ()
-  | Ok { cli_slots = _ :: _; _ } when exact_lane_supports_cli_tail lane -> ()
+  | Ok { cli_slots = _ :: _; _ } -> ()
   | Ok { selected_slots = []; _ }
   | Error (Runtime_exact_output_registry.No_admitted_lane_slots _) ->
     Log.Server.warn
@@ -4708,7 +4699,7 @@ let set_first_run_runtime ?runtime_config_path ?(fallback_runtime_ids = []) ?(bi
           | Verifier, Error _ ->
             judgeable_declared_verifier_slots, judgeable_declared_verifier_cli_slots
           | (Librarian | Hitl_auto_judge | Board_attention | Workspace_curator | Browser_stagehand), _ ->
-            slots, (if exact_lane_supports_cli_tail lane then cli_slots else [])
+            slots, cli_slots
         in
         let next =
           List.fold_left
@@ -5063,10 +5054,9 @@ let remove_runtime_lane ?runtime_config_path ~lane_id () =
                 lane_id)))
 ;;
 
-(* Exact-output lanes name their walk order in [slots] and, on a lane that
-   walks a CLI tail, in [cli_slots] after them; the routing API edits them the
-   same way conversation lanes edit [candidates]. Every exact lane id is a bare
-   key. *)
+(* Exact-output lanes name their walk order in [slots] and in [cli_slots]
+   after them; the routing API edits them the same way conversation lanes edit
+   [candidates]. Every exact lane id is a bare key. *)
 let exact_lane_table_path lane = "runtime.exact_output_lanes." ^ Standalone_lane.to_id lane
 
 let exact_lane_decl (config : Runtime_schema.config) lane =
@@ -5155,11 +5145,7 @@ let set_exact_output_lane_slots ?runtime_config_path ~lane ~slots () =
                 | Some Cli_slots ->
                   Some
                     (Printf.sprintf
-                       (if exact_lane_supports_cli_tail lane
-                        then "%s is an official client, so it can only be a CLI slot of %s"
-                        else
-                          "%s is an official client and %s does not walk a CLI tail, so \
-                           it has no list to go in")
+                       "%s is an official client, so it can only be a CLI slot of %s"
                        slot
                        lane_id)
                 | None -> Some (no_output_schema_channel_refusal ~slot ~lane_id))
@@ -5210,17 +5196,6 @@ let append_exact_output_lane_slot ?runtime_config_path ~lane ~slot () =
           Ok
             (Toml_line_editor.edit_table_multiline_array
                content ~path ~key:"slots" ~values:(slots @ [ slot ]))
-        | Some Cli_slots when not (exact_lane_supports_cli_tail lane) ->
-          (* [Server_workspace_memory_curator.execute] refuses a run whose lane
-             declares any CLI slot, so writing one here would stop the lane
-             instead of extending it. [set_first_run_runtime] drops CLI slots
-             on these lanes for the same reason. *)
-          Error
-            (Printf.sprintf
-               "%s is an official client and %s does not walk a CLI tail, so it has \
-                no list to go in"
-               slot
-               lane_id)
         | Some Cli_slots ->
           Ok
             (Toml_line_editor.edit_table_multiline_array

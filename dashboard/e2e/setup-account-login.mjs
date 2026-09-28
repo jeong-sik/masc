@@ -111,7 +111,6 @@ try {
     }
     await page.getByLabel('Fixture model', { exact: true }).waitFor()
     await page.getByLabel('Fixture model', { exact: true }).check()
-    if (client === 'muse') await page.getByLabel('Muse 입력 한도 (bytes)').fill('32768')
     await page.getByText('선택한 모델 추가', { exact: true }).click()
     await page.getByText('검증 후 선택 저장', { exact: true }).click()
     if (productionRoute) await page.getByText(/선택한 모델의 응답·도구 호출을 확인하고 저장했습니다/).waitFor()

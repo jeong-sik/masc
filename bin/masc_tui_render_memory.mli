@@ -30,16 +30,19 @@ type facts_reading =
       }
 
 val facts_title :
+  cols:int ->
   screen:string ->
   keeper:string ->
   reading:facts_reading ->
   timestamp:string ->
   badge:string ->
   string
-(** The facts title row. It carries the total and the filters; the breakdown and
-    the sort belong to the row under it, which this module also draws. The title
-    is the narrow line and the clock and the connection badge sit at its end, so
-    a fact spelled here and there goes off the right edge. *)
+(** The facts title row of a frame [cols] wide. It carries the total and the
+    filters; the breakdown and the sort belong to the row under it, which this
+    module also draws. The title is the narrow line and the clock and the
+    connection badge sit at its end, so a fact spelled here and there goes off
+    the right edge. The keeper's name takes what the rest leaves, folded in the
+    middle when it does not fit ({!Masc_tui_ansi.detail_heading}). *)
 
 val memory_fact_age_label : float -> string
 val memory_fact_row_line : ?is_fleet:bool -> cols:int -> memory_fact_row -> string

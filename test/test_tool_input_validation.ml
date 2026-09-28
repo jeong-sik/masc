@@ -818,6 +818,29 @@ let test_validate_args_edit_accepts_patch_args () =
       "expected patch args to pass validation, got %s"
       (Yojson.Safe.to_string (Tool_result.data result))
 
+(* Fleet evidence (tool_calls 2026-09-26/27/28): 25 Edit calls carried a [cwd]
+   Read would have honoured and Edit rejected. The closed schema declares it
+   now, symmetric with Read. *)
+let test_validate_args_edit_accepts_cwd () =
+  match
+    Tool_input_validation.validate_args
+      ~schema:keeper_model_edit_schema
+      ~name:"Edit"
+      ~args:
+        (`Assoc
+          [ "file_path", `String "src.ml"
+          ; "old_string", `String "let x = 1"
+          ; "new_string", `String "let x = 2"
+          ; "cwd", `String "lib"
+          ])
+      ()
+  with
+  | Ok _ -> ()
+  | Error result ->
+    Alcotest.failf
+      "expected an explicit cwd to pass validation, got %s"
+      (Yojson.Safe.to_string (Tool_result.data result))
+
 let test_registered_hook_masc_board_post_accepts_sources_array () =
   let blocked, forwarded =
     run_registered_hook
@@ -2661,6 +2684,8 @@ let () =
         test_validate_args_edit_rejects_content;
       Alcotest.test_case "direct Edit accepts patch args" `Quick
         test_validate_args_edit_accepts_patch_args;
+      Alcotest.test_case "direct Edit accepts an explicit cwd" `Quick
+        test_validate_args_edit_accepts_cwd;
       Alcotest.test_case "masc_transition rejects to/note aliases" `Quick
         test_registered_hook_transition_rejects_to_and_note;
       Alcotest.test_case "masc_transition canonical action value" `Quick

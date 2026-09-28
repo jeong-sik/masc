@@ -136,11 +136,11 @@ let test_task_backlog_original_bytes exe () = with_workspace (fun root _keepers 
       check bool ("diagnostic names the file: " ^ output) true
         (String_util.contains_substring (diagnostic_words output) (diagnostic_words path));
       check string "preflight does not rewrite task state" raw (read path))
-      [ {|,"intent":"complete"|}, true, "legacy intent submission(s): task-legacy"
-      ; {|,"intent":"cancel"|}, true, "legacy intent submission(s): task-legacy"
-      ; {|,"intent":"cancel","intent":"complete"|}, false, "duplicate intent"
-      ; {|,"intent":"unknown","intent":"complete"|}, false, "duplicate intent"
-      ; {|,"intent":"unknown"|}, false, "unknown legacy intent"
+      [ {|,"intent":"complete"|}, false, "does not accept intent"
+      ; {|,"intent":"cancel"|}, false, "does not accept intent"
+      ; {|,"intent":"cancel","intent":"complete"|}, false, "does not accept intent"
+      ; {|,"intent":"unknown","intent":"complete"|}, false, "does not accept intent"
+      ; {|,"intent":"unknown"|}, false, "does not accept intent"
       ]) ["backlog.json"; "backlog.json.last-good"])
 
 let () =

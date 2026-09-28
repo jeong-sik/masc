@@ -11,6 +11,15 @@
   unsupported storage value must sign in again with `/login muse`. Existing
   file-backed accounts (`storage: "file"` or no storage marker) do not need to
   sign in again solely because of this change (#39597).
+- Deployment preflight now refuses a `[skills] resource-read-max-bytes` key in
+  `runtime.toml`, a setting this binary ignores but the next runtime rejects.
+  Before restarting, delete that line from `[skills]` in `runtime.toml`; this
+  version already ignores the value. (#39498).
+- The one-version tolerance for old awaiting-verification rows is gone
+  (#39572). A row carrying any `intent` (including `complete` and `cancel`) is
+  refused again, and one such row makes the whole task backlog unreadable, so
+  the deployment preflight refuses before replacing the executable. Settle any
+  remaining old submissions on the build that made them.
 
 ### Added
 
@@ -56,16 +65,15 @@
   `[runtime].media_failover` and keeper assignments. It refuses when
   `[runtime].default` names one of those runtimes, when a lane would be left
   empty, or when a table it has to edit is written inline (#39634).
-- The turning imp now appears in two places. At startup the Overview keeps
-  its frame, its header and its "Overview briefing not read yet" line, and
-  shows the imp where its sections will be while it connects; it steps
-  aside when the first overview read answers, when a booting server's
-  backlog has been read from disk, when a refresh fails (so the "press r"
-  line shows), or on the first key the operator presses, which still does
-  its own job. `/about` (and `/splash`) opens a screen with the imp, the
-  colour scheme and the Keeper count; like the help sheet it owns every key
-  until Esc closes it. The imp turns only with colour on and a page the
-  terminal described, and is held still otherwise (#39658).
+- A startup splash and an `/about` screen. At startup the Overview keeps its
+  frame, its header and its "Overview briefing not read yet" line, and shows
+  MASC's picture where its sections will be while it connects; it steps
+  aside when the first overview read answers, when a booting server's backlog
+  has been read from disk, when a refresh fails (so the "press r" line
+  shows), or on the first key the operator presses, which still does its own
+  job. `/about` (and `/splash`) opens a screen with the picture, the colour
+  scheme and the Keeper count; like the help sheet it owns every key until
+  Esc closes it (#39658).
 - Every keeper has a portrait: a small candle imp whose wax, flame, horns and
   face come from the keeper's name, so the same name always draws the same
   candle and nothing is stored. Items sit in their own slots (face, neck,
@@ -95,6 +103,40 @@
   refuses a sign-in location another provider of the same client already uses,
   and saves through the usual preview. It does not sign in, and turns reach
   the new account only after a lane lists it as a candidate (#39518).
+- Add the `Player` role, whose only permission is `CanPlayMachine`: watch the shared machine through the live route and take a hotseat turn with `masc_dos_screen`, `masc_dos_press`, `masc_dos_type`, `masc_dos_step` and `masc_dos_pass`. `Worker` and `Admin` hold it too. A Player credential approves no OAuth grant, and `masc login` refuses the role; invites that issue it arrive in a later stage (RFC play-link-for-the-shared-machine). (#39707)
+- A Muse turn records what the host reported for its model calls, from
+  `session/tokenUsage`: the model each call ran on, or that a call named
+  none. The Keeper label, usage report and fusion record use the last call's
+  model, claim none when that call named none, and fall back to the session's
+  model only when no call was reported. A call on another model than the
+  selection logs a warning, and setup verification fails when a call ran on
+  another model or named none (#39711).
+- `GET /api/v1/keepers/:name/portrait.png?size=N` serves a keeper's candle
+  imp portrait as a transparent PNG (default 160, 16 to 512; any other size
+  is refused with 400, a name that is not a keeper with 404). It is
+  authorised like the keeper's other reads, carries a strong ETag with
+  `Cache-Control: no-cache`, and answers a matching `If-None-Match` with
+  304. `Rgb_png` gains `encode_rgba`. The dashboard's
+  keeper detail header shows the portrait when the keeper has no emoji and
+  falls back to its badge when the image cannot load (#39715).
+- Add invites to the shared DOS machine: `POST /api/v1/play/invites` issues a `Player` credential with an expiry and answers a `<MASC_HTTP_BASE_URL>/play#<token>` link, `GET` lists invites with whether each holds the DOS controller, and `DELETE /api/v1/play/invites/<name>` revokes one and frees the controller it holds. Issuing needs auth with `require_token` and a public base URL, and refuses a name a keeper or credential already has (RFC play-link-for-the-shared-machine). (#39721)
+- The startup splash and `/about` draw MASC's candle mascot, flickering and
+  blinking while the screen is open. A terminal that answers the Kitty
+  graphics query gets real pixels, placed over the frame and deleted when the
+  screen closes; a terminal that draws 256 colours or more gets a half-block
+  mosaic; under `NO_COLOR`, or where no colour can be drawn, the caption
+  shows alone (#39722).
+- Add `POST /api/v1/dos/press`, `/type`, `/step` and `/pass`: a person moves the shared DOS machine through the same tools a Keeper calls, under the credential's name, and waits for the controller like a Keeper. A body that does not match the tool's schema is a 400 and runs nothing (RFC play-link-for-the-shared-machine). (#39726)
+- TUI startup can open the last or a named Keeper chat through `[tui].opening`, with an Overview reason when the target cannot be opened (#39727).
+- Add the play page: an invite link `<base>/play#<token>` opens `GET /play`, which keeps the token in memory only, draws the shared DOS machine, shows whose turn it is, and sends keys, typed text and hand-offs. `GET /api/v1/play/seat` answers the bearer's name, the controller and the seats it can be handed to (RFC play-link-for-the-shared-machine). (#39739)
+- `Edit` accepts an optional `cwd` directory, symmetric with `Read`. Relative `file_path` resolves against it, absolute paths ignore it, and the translator joins it into `path` so containment and gates see exactly what a directly spelled path would show. `cwd` and `file_path` are each trimmed before the join, as `Read` trims them. #39754
+- A Goal records who owns it, set from the caller's identity on create and
+  returned by `masc_goal_list`; a row written before the field decodes to an
+  explicit `unknown` owner (#39758).
+- A Goal's owner gets one direct notice when its proof verdict is refuted or
+  its due date passes while it is still executing or verifying. Delivery is
+  idempotent per event, so a repeated scan, a retry or a restart sends nothing
+  twice; an ownerless Goal is skipped and stays `unknown` on screen (#39758).
 
 ### Changed
 
@@ -181,6 +223,21 @@
 - A resumed Muse session selects its model (`session/setModel`) before
   `session/setApprovalMode`, so the verified approval mode is the last
   session command before the turn (#39680).
+- Adding an account through `/login`, the dashboard setup picker or the
+  install wizard now saves a runtime whose provider declined the response
+  and tool check for the account's usage (`quota_exhausted` or
+  `rate_limited`). The save receipt reports `readiness: "usage_limited"`
+  and lists those runtimes under `unverified`; each surface names them
+  instead of calling the save verified. Every other verification failure
+  still refuses the save (#39717).
+- An exact-output lane now stops only on masc's own failures: a bookkeeping callback, a replayed attempt, a request that no longer matches its frozen form, a deadline with no clock, a plan whose output shape disagrees with its provenance, transport wiring that cannot accept the request, and cancellation. Every other failure hands the same input to the next declared slot, including a request whose result is unknown (the connection dropped after the request, a stream that stopped part way), an answer the output parser cannot read, and a candidate rejected after its count-tokens request went out. HITL auto-judge, Board attention and the Librarian therefore reach their CLI slots after these failures, as Stagehand and the workspace curator already did. A request whose result is unknown may be billed once more (RFC-exact-lane-walks-one-slot-list stage 1). (#39718)
+- `Keeper_portrait_look.body` and `Keeper_portrait_draw.pose` are private and
+  built through checked constructors, and `Keeper_portrait_draw.pose_at` takes
+  integer milliseconds, so a portrait is never drawn from out-of-range or NaN
+  values. Every keeper keeps its body and starting item. The preview's
+  `--at SECONDS` is now `--at-ms MS` (#39725).
+- An exact-output walk can no longer fail on masc's own wiring, so every execution failure now hands the input to the next declared slot and only masc's own records (callbacks, a replayed flow, an identity it could not allocate) and cancellation stop it. A plan parses its URL and headers when it is frozen, so a binding that cannot be sent is refused at admission and no attempt is allocated for it. `execute_flow_once` takes a required clock, and the HITL auto-judge worker refuses to start without an Eio clock, as it already did without a network. An `Off`-format answer is read as JSON by the plan, like a `JsonMode` answer. The execution causes `Attempt_already_started`, `Clock_required_for_timeout`, `Frozen_request_mismatch`, `Internal_non_json_output` and the measurement cause `Measurement_clock_required_for_timeout` are removed (RFC-exact-lane-walks-one-slot-list Q1). (#39740)
+- Keeper Memory OS now limits committed current facts to 512 KiB of rendered text per Keeper, including file-backed facts. Over-budget growth is rejected before persistence, while strict size reductions can commit for recovery. The Librarian sees the budget so it can retire lower-value facts explicitly. The limit is configurable with `MASC_KEEPER_MEMORY_OS_FACTS_MAX_BYTES`. (#39755)
 
 ### Removed
 
@@ -389,11 +446,12 @@
 - The world-state briefing budget no longer overflows on a saturated Muse
   ceiling, and a Muse turn without a start-prompt ceiling names
   `max_context` as the field to change (#39678).
-- The TUI Lane Run and Measurement detail headings keep the connection badge
-  whole. The run id or sha256 takes what the title and the badge leave, and
-  one that does not fit is folded in the middle so its opening and its hex
-  tail both stay; at 80 columns the badge had been cut to four cells beside
-  a 54-cell run id (#39684).
+- The TUI Lane Run and Measurement detail headings no longer shorten the
+  connection badge to make room for the id. The run id or sha256 takes what
+  the title and the badge leave, and one that does not fit is folded in the
+  middle so its opening and its hex tail both stay; at 80 columns the badge
+  had been cut to four cells beside a 54-cell run id. A frame too narrow for
+  the title and the badge alone still cuts the badge's end (#39684).
 - Every resumed Muse session selects the configured model with
   `session/setModel` and is admitted once the host accepts it, including a
   noop. The session's reported `modelId` is its metadata, which keeps naming
@@ -411,10 +469,73 @@
   such as which runtime failed response and tool verification, instead of
   a fixed "could not confirm the request" sentence. Other account login
   requests keep their own error too (#39695).
-- The TUI Fusion detail heading keeps the connection badge whole, as the
-  Lane Run and Measurement headings do since #39684: the run id takes what
-  the title and the badge leave and is folded in the middle when it does
-  not fit, where it had been cut at 38 cells (#39698).
+- The TUI Fusion detail heading lays out its run id the way the Lane Run and
+  Measurement headings do since #39684: the id takes what the title and the
+  connection badge leave and is folded in the middle when it does not fit,
+  where it had been cut at 38 cells. The heading never shortens the badge;
+  a frame too narrow for the title and the badge alone, such as 60 columns
+  with a workspace mismatch, cuts the badge's end (#39698).
+- #39434 New workspaces use an available Ollama Cloud Flash fallback for Keeper judgments and coding.
+- Keeper microVM preflight now reports when a sandbox image was built from a different opam lock, and labels new builds with that lock's SHA-256. Older images without the marker remain usable with a warning (#39453).
+- The shared Keeper prompt again says to leave a one-line reason when
+  removing a constitution article and when to read the history with
+  `keeper_constitution_read`, which #39649 had dropped (#39666).
+- `masc_goal_upsert`'s `metric` description no longer claims the Goal judge
+  cannot read inside a Keeper's sandbox, which was false for the Docker
+  profile. It tells a Keeper to name a public URL or a submitted board/fusion
+  reference, since a path as seen from its workspace is not one the judge
+  opens (#39666).
+- The Keeper workspace prompt says host absolute paths do not work inside
+  any sandbox, not only inside Docker; 23 of 24 active Keepers run in a
+  microVM (#39666).
+- `repair_backlog_copies_result` now protects its post-commit settlement from
+  cancellation, like `write_backlog_result` (#39685). A cancellation arriving
+  while the task mutation observer yielded was re-raised and the observer was
+  skipped even though the repair had committed.
+- Eight more TUI headings that put an id, a name or a path before the
+  connection badge lay it out the way the Lane Run, Measurement and Fusion
+  headings do: the Harness verdict detail, the runtime detail, a keeper's
+  calls, the Changes list and one change, Git Changes, the Git diff and the
+  Memory facts title. The id takes what the rest of the heading leaves and
+  is folded in the middle when it does not fit; at 80 columns a 50-cell
+  runtime label had pushed the badge off the frame (#39712).
+- A TUI heading that names one record no longer lets the readings after the
+  name push the name off the row or the badge off the frame. The clock and
+  the connection badge are kept whole; the name keeps at least twelve cells,
+  folded in the middle; the readings (a freshness verdict, a window count,
+  the Memory filters) are cut at their end before the name gets less; and
+  a title that cannot stand beside a workspace-mismatch badge is cut rather
+  than the badge. On a keeper's calls at 60 columns the name had no room at
+  all. The Harness verdict heading keeps its tab strip's current entry
+  before the task id folds (#39720).
+- Keeper portraits keep every part where it belongs: freckles sit on the wax
+  at every candle width, a scarf hangs below the mouth rather than across it,
+  the region the renderer skips ends below the lowest part actually worn so a
+  dish or scarf is never cut, and the tallest flame stays inside the image at
+  every pose. The ink line between parts is the same width at every size
+  (#39725).
+- A usage-limited account save now carries through: `masc setup` reports
+  a quota or rate limit on imp's runtime and succeeds, the install wizard
+  goes on to voice and the sandbox step, and `/login` shows each unmeasured
+  runtime on its own row. The save receipt's `unverified` rows carry
+  `runtime_id` and `code` (#39728).
+- The keeper portrait now loads under strict HTTP auth: the dashboard fetches
+  `GET /api/v1/keepers/:name/portrait.png` with its token and shows the bytes
+  through an object URL, where a bare `<img>` got 401. The image is
+  decorative (`alt=""`), a failed load is tried again when the keeper is
+  opened again, and a test fails when the dashboard's size bounds drift from
+  the renderer's (#39735).
+- The portrait's ETag is made from the running executable's digest, the name
+  and the size before anything is drawn, so a request that already holds it
+  gets 304 without a drawing; drawn PNGs are kept in a cache bounded to
+  8 MiB. The Keeper check only `lstat`s the metadata file and no longer
+  reads, repairs or rewrites it (#39735).
+- `If-None-Match` compares entity tags weakly (RFC 9110 section 13.1.2) on
+  every tagged response, so `W/"x"` and `"x"` match each other (#39735).
+- The startup splash draws its candle at most twelve rows tall, so a tall terminal no longer fills with it; `/about` still gives the candle the rows its caption leaves (#39746).
+- Edit calls carrying `cwd` (25 rejections across 2026-09-26/27/28, the top unsupported-field cell fleet-wide) now run instead of rejecting and forcing a retry that could resolve against a different root. #39754
+- Keep the Board post and comments at separate scroll positions, show which one the keys move, and widen the comment column on wider terminals (#39756).
+- Checkpoint history listing now runs its directory scan and sorting on the shared domain pool, keeping that work off the main Eio scheduler. #39761
 
 ### Documentation
 
@@ -426,6 +547,21 @@
   one region that takes keys has a heavy border, and every list selects one
   way; the operator's 2026-09-28 width decisions and decisions D11–D16 are
   recorded (#39581).
+- Clarify that Exact-output rate-limit rests preserve usable provider `Retry-After` hints and apply the configured fallback only when no usable hint is available (#39472).
+- Add an RFC for standalone exact lanes to declare one ordered slot list
+  whose entries resolve to an HTTP target or an official-client runtime at
+  load, walked by one shared walker with one resting-slot order (#39632).
+- RFC `codex-account-quota-scope` keys Codex usage and quota exhaustion by
+  the ChatGPT account a home currently serves (the `account/rateLimits/read`
+  `accountId` paired with the `account/read` email) instead of by the home
+  path, and records its seven design decisions (#39638).
+- The TUI operator workbench RFC records the operator's 2026-09-28 decisions
+  D11 (a heavy border marks the focused region), D12 (the Activity pane opens
+  by one width rule on every tab, with no per-tab list), D13 (the roster keeps
+  its 76-cell body floor), D14 (the body header drops `MASC <name>`) and D16
+  (side panes keep both the tint and the rule). §5.9 rule 7 and D13 name
+  where the pane and roster floors are computed on main, and §5.4 names the
+  Schedule PR (#39640).
 
 ### Internal
 
@@ -450,6 +586,18 @@
 - The `masc_tui` executable links `masc_tui_table` again, which the table
   layout change in #39662 needed; `dune build @check` failed without it
   (#39674).
+- The usage-limited `/login` PTY scenario counts its account-list reads in
+  the inventory fixture; the fixture server records POST bodies only, so
+  waiting for the GET in the request log never ended (#39724).
+- The Overview opening scenario waits for the end of the frame that shows
+  its needle and reads every row painted up to it, instead of that one frame
+  (#39743).
+- The first-use Overview scenario reads terminal output while waiting for the
+  held briefing request. The previous wait intermittently timed out before
+  observing that request (#39743).
+- `Exact_output_plan.request_body` is back as a read-only view of the frozen
+  body; `test_exact_output_runtime_reasoning` reads it, and main stopped
+  compiling when it was removed (#39748).
 
 ### Performance
 

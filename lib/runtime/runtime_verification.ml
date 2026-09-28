@@ -495,11 +495,10 @@ let initial_runtime_id ~default_runtime_id ~assignments ~lanes ~keeper_name =
      | candidate :: _ -> Some candidate)
 ;;
 
-(* A refused verification used to arrive as one [Provider_rejected] whatever
-   the cause, so an operator could not tell a 429 they only had to wait out
-   from a key the provider refused, and stopped the install to find out. The
-   cause is read from the typed error each transport already produces, never
-   from its wording. *)
+(* A refused verification names its cause: a 429 the operator only waits out,
+   a spent quota and a refused key need different answers. The cause is read
+   from the typed error each transport already produces, never from its
+   wording. *)
 let with_retry_after retry_after detail =
   match Keeper_runtime_failure_route.usable_retry_after retry_after with
   | None -> detail
@@ -603,14 +602,28 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
            ~quota_scope:(Runtime.quota_scope_of_runtime runtime) ~config
            ~prompt_capacity:(Runtime.muse_prompt_capacity runtime) ~reasoning_effort ~tool ~prompt with
          | Ok result ->
-           (match result.model with
-            | Some model when String.equal model execution.model ->
-              Ok {model; text=result.text}
-            | Some model ->
-              Error (Provider_rejected (Runtime_muse_serve.error_to_string
-                (Runtime_muse_serve.Session_model_mismatch
-                  {requested=execution.model; resumed=Some model})))
-            | None -> Error Model_unreported)
+           (* Every call the host reported for the verification turn must have
+              run on the configured model. One on another model fails, and so
+              does one whose model the host did not name. With no call
+              reported, the model the start reported is checked. *)
+           let ran = match result.call_models with
+             | [] -> List.map (fun model -> Runtime_muse_serve.Named model)
+                       (Option.to_list result.model)
+             | _ :: _ as calls -> calls in
+           let other = List.find_map (function
+             | Runtime_muse_serve.Named model when not (String.equal model execution.model) ->
+               Some model
+             | Runtime_muse_serve.Named _ | Runtime_muse_serve.Unnamed -> None) ran in
+           let unnamed = List.exists (function
+             | Runtime_muse_serve.Unnamed -> true
+             | Runtime_muse_serve.Named _ -> false) ran in
+           (match other, unnamed, ran with
+            | Some other, _, _ ->
+              Error (Provider_rejected (Printf.sprintf
+                "Muse Code ran the verification turn on %s, but the configured model is %s"
+                other execution.model))
+            | None, true, _ | None, false, [] -> Error Model_unreported
+            | None, false, _ :: _ -> Ok {model=execution.model; text=result.text})
          | Error (Runtime_verification_muse.Home_error (Runtime_muse_home.Sign_in_required _ as error)) ->
            Error (Unavailable (Client_not_authenticated (Runtime_muse_home.error_to_string error)))
          | Error (Home_error (Runtime_muse_home.Invalid_account_home detail)) ->

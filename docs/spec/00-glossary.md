@@ -1189,31 +1189,28 @@ status: reference
     `Json_syntax` 프롬프트 텍스트로 전달되고, 응답은 JSON 값·선언된 필수 객체 키·방문한
     primitive 모양만 검사한다. 전체 JSON Schema 검증은 하지 않으며, 그 밖의 요청 모양은
     provider 호출 전에 거절한다(#38708).
-  - **슬롯 전진 조건 (`execution_failure_may_advance`)**: 한 슬롯이 실패했을 때 패스를
-    끝내거나 범위를 줄이지 않고 선언된 다음 후보 슬롯으로 넘어가는 경우는 둘이다.
-    (1) 보내기 직전 단계(`Before_dispatch`)에서 실패했고 이 슬롯이 아무것도 보내지 않았다
-    (`receipt_dispatch_count = 0`). (2) 한 번 보낸 뒤(`receipt_dispatch_count = 1`) 이
-    바인딩의 사정으로 실패했다 — 헤더 기한(`connect_timeout_s`, `Http_operation`)이나 전체
-    기한(`body_timeout_s`, `Wall_clock`) 안에 응답 헤더가 오지 않음(#38437); 2xx 헤더는
-    왔지만 전체 기한 안에 본문이 끝나지 않음(`Response_body_deadline_exceeded`, 원문 응답과
-    provider trace가 남지 않았을 때); 응답으로 온 제공자 거절 가운데 Candidate Fault가
-    `Binding`이나 `Unattributed`로 읽는 것(413·429·402·529·5xx·창 초과(#38454)·401·403·
-    404·이유를 기계가 읽을 수 없는 거절·본문이 기한 안에 오지 않은 거절, #38913); 답이 JSON으로 읽히지 않음(`Invalid_json_output`); content가 비었음(답을 content
-    밖 필드에 둠, `Missing_output`). 그 밖에는 넘기지 않는다 — 보낸 뒤의 다른 기한 종류
-    (`Queue`·`First_token`·`Capacity_backpressure`·`Non_streaming_body`·`Stream_body`·
-    `Stream_idle`·`Provider_step`·`Cli_stdout_idle`·`Unknown_timeout`)와 보낸 뒤 결과를
-    모르는 실패가 그렇다. 바인딩의 기한·창·키·quota·출력 방언은 그 슬롯의 성질이라, 다음
-    후보는 자기 것을 들고 같은 입력을 받을 수 있다(예: 더 큰 창의 Claude CLI).
+  - **슬롯 전진 조건 (`flow_execution_terminal_kind`)**: 한 슬롯이 실패하면 선언된 다음
+    후보 슬롯으로 넘어간다. 실행 실패는 모두 넘긴다 — 제공자 거절, 보내기 전후의 기한 초과,
+    보낸 뒤 결과를 모르는 실패(응답 전에 끊긴 연결, 도중에 멈춘 stream), 읽을 수 없는 답
+    (`Incomplete_output`·`Ambiguous_output`·`Unexpected_output_content`·`Invalid_json_output`·
+    `Missing_output`), 입력 크기를 재는 요청(count-tokens)을 보낸 뒤의 후보 거절. 멈추는 것은
+    masc 자기 기록과 취소뿐이다 — 방문 전 bind·넘김 기록·측정 callback 실패, 같은 flow 를 다시
+    실행함, 식별자를 만들지 못함, 취소. masc 배선은 실행을 실패시킬 수 없다. 계획을 고정할 때
+    URL·헤더를 파싱해서 보낼 수 없는 바인딩은 입장에서 거절되고, flow 는 늘 clock 을 받고,
+    시도는 그것을 만든 단계가 한 번만 시작하고, 정규화한 답은 늘 JSON 이다. exact 요청에는
+    도구가 없어서 넘겨도 효과가 겹치지 않는다. 결과를 모르는 요청을 제공자가 이미 처리했다면
+    한 번 더 과금된다(RFC-exact-lane-walks-one-slot-list Q1).
   - **공유 rate-limit 휴식**: 한 Exact-output slot의 runtime이 `Rate_limited` 응답으로
     쉬는 동안 그 slot을 쉬지 않는 형제 뒤로 보낸다. Keeper turn walk와 Exact-output
-    route는 같은 runtime의 후보별 휴식 근거를 읽고 쓴다. 제공자의 `Retry-After`를 쓰고,
-    없으면 설정한 바닥 시간을 쓰며, 설정한 상한을 넘기지 않는다. 선언 순서 또는 운영자
-    선호 순서는 각 무리 안에서 유지한다. 이후 응답을 받으면 수락된 답과 의미 검증 거절
-    모두 휴식 근거를 지운다. CLI slot에는 적용하지 않는다(#39077).
+    route는 같은 runtime의 후보별 휴식 근거를 읽고 쓴다. 유효한 제공자 `Retry-After`는
+    그대로 보존하고, 쓸 수 있는 힌트가 없을 때만 설정된 바닥 시간을 fallback으로 쓰며
+    fallback 상한을 적용한다. 선언 순서 또는 운영자 선호 순서는 각 무리 안에서 유지한다.
+    이후 응답을 받으면 수락된 답과 의미 검증 거절 모두 휴식 근거를 지운다. CLI slot에는
+    적용하지 않는다(#39077).
   - **도메인 검증 결말**: `Invalid_json_output`은 응답을 JSON으로 읽지 못한 경우다.
     JSON 응답을 도메인 소비자가 거절하면 Board Attention exact flow는
     `Domain_output_invalid` 오류와 종단 결말 `Invalid_domain_output`을 기록한다. 이 결말은
-    `execution_failure_may_advance` 슬롯 전진 조건이 아니다(#38786).
+    슬롯 전진 조건이 다루는 실행 실패가 아니다(#38786).
   - **생성 발송 관측 권위 (`flow_evidence_generation_dispatch`)**: 걸음(walk)에 속한 어느
     후보라도 외부 완료 생성 요청(`generation dispatch`)을 시작했는지 여부를 불변
     증거(`Started`·`Not_started`)로 기록한다. 앞선 슬롯이 생성 요청을 보낸 뒤(예: 5xx

@@ -476,22 +476,22 @@ class RuntimeSetupAdapter(unittest.TestCase):
         self.assertIn('  claude auth status reported loggedIn=false', text)
         self.assertEqual(text.count('\n'), 2)
 
-    def test_verification_failure_says_whether_it_is_a_rate_limit(self):
-        # A 429 read the same as a refused key, and operators stopped the
-        # install to find out whether waiting would do.
+    def test_verification_failure_says_whether_it_is_temporary(self):
+        # A busy provider read the same as a refused key, and operators stopped
+        # the install to find out whether waiting would do.
         def shown(code):
             with patch.object(SETUP.sys, 'stderr', io.StringIO()) as stderr:
                 failure = dict(code=code, message='fixture message', detail='fixture detail')
                 SETUP.print_verification_reason(failure)
                 SETUP.print_verification_next_step(failure)
             return stderr.getvalue()
-        throttled = shown('rate_limited')
-        self.assertIn('[Rate limit (temporary)] rate_limited: fixture message', throttled)
-        self.assertIn('Retry the selected connections', throttled)
-        self.assertIn('not a rate limit', shown('provider_auth_refused'))
+        busy = shown('provider_overloaded')
+        self.assertIn('[Provider busy (temporary)] provider_overloaded: fixture message', busy)
+        self.assertIn('Retry shortly', busy)
+        self.assertIn('[Credential refused] provider_auth_refused:', shown('provider_auth_refused'))
         self.assertIn('[Model check failed] provider_rejected:', shown('provider_rejected'))
         # Captured output is not a terminal, so it carries no escape codes.
-        self.assertNotIn('\x1b[', throttled)
+        self.assertNotIn('\x1b[', busy)
 
     def test_color_follows_no_color(self):
         with patch.object(SETUP.sys.stderr, 'isatty', return_value=True), \
@@ -561,6 +561,30 @@ class RuntimeSetupAdapter(unittest.TestCase):
                 patch.object(SETUP, 'native_setup_command', return_value=dict(runtime_id='wrong.model', runtime_ids=['wrong.model'],
                     configured=True, validation='passed', readiness='verified')), self.assertRaises(SETUP.SetupError):
             SETUP.configure_many('/fixture/masc', self.base, [spec()], verify=True, expected_revision=self.revision)
+
+    def test_usage_limited_receipt_is_accepted_and_names_the_unmeasured_runtime(self):
+        # A spent quota or a rate limit publishes the runtime and the receipt
+        # names it, so a published configuration is not reported as
+        # unconfirmed.
+        receipt = dict(runtime_id='native.model', runtime_ids=['native.model'], configured=True, validation='passed',
+                       readiness='usage_limited',
+                       unverified=[dict(runtime_id='native.model', code='quota_exhausted')])
+        def configure(answer, verify=True):
+            with patch.object(SETUP, 'render', return_value=('native.model', b'', b'')), \
+                    patch.object(SETUP, 'native_setup_command', return_value=answer):
+                return SETUP.configure_many('/fixture/masc', self.base, [spec()], verify=verify,
+                                            expected_revision=self.revision)
+        with patch.object(SETUP.sys, 'stderr', io.StringIO()) as stderr:
+            self.assertEqual(configure(receipt)['readiness'], 'usage_limited')
+        self.assertIn('native.model (quota_exhausted)', stderr.getvalue())
+        for unreadable in (dict(receipt, unverified=[]),
+                           dict(receipt, unverified=[dict(runtime_id='other.model', code='quota_exhausted')]),
+                           dict(receipt, unverified=[dict(runtime_id='native.model')]),
+                           dict(receipt, readiness='verified')):
+            with self.assertRaises(SETUP.SetupError):
+                configure(unreadable)
+        with self.assertRaises(SETUP.SetupError):
+            configure(receipt, verify=False)
 
     def test_lost_commit_receipt_does_not_delete_selected_credentials(self):
         key = self.base / 'pending-key'
@@ -1683,7 +1707,9 @@ class CompiledRuntimeSetup(unittest.TestCase):
                 elif choice == 'muse':
                     account = base / 'selected-muse-account'
                     account.mkdir(mode=0o700)
-                    selected.update(account_home=str(account))
+                    # Muse reserves 11,946 tokens before the user's prompt;
+                    # the shared 8,192-token fixture cannot hold that host.
+                    selected.update(account_home=str(account), max_context=200_000)
                 env = {k: v for k, v in os.environ.items() if not k.startswith(('MASC_', 'AGENT_CORE_'))}
                 with patch.dict(os.environ, env, clear=True):
                     result = SETUP.configure(BINARY, base, selected)

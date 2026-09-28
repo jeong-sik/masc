@@ -13,6 +13,7 @@ module Runtime_request = Server_dashboard_runtime_request
 include Server_routes_http_routes_dashboard_setup
 
 module Keeper_chat_operations = Server_dashboard_http_keeper_chat_operations
+module Keeper_portrait = Server_dashboard_http_keeper_portrait
 module Keeper_event_queue_operator =
   Server_dashboard_http_keeper_event_queue_operator
 module Keeper_shutdown_reconciliation =
@@ -3626,6 +3627,12 @@ let add_routes ~sw ~clock router =
 
   (* Keeper GET sub-routes: /config, /chat/history, /trajectory *)
   |> Http.Router.prefix_get "/api/v1/keepers/" (fun request reqd ->
+       match Keeper_portrait.route (Http.Request.path request) with
+       | Some name ->
+         with_public_read
+           (fun state req reqd -> Keeper_portrait.handle_get state req reqd name)
+           request reqd
+       | None ->
        match Keeper_shutdown_reconciliation.route (Http.Request.path request) with
        | Some target ->
          with_token_permission_auth ~permission:Keeper_shutdown_reconciliation.permission

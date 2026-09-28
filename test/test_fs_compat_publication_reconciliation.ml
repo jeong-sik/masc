@@ -367,7 +367,7 @@ let test_historical_prepared_record_fields_stay_decodable () =
       ; "permissions", `Int 0o600
       ]
   in
-  Fs_compat.save_file record_path (Yojson.Safe.to_string historical);
+  Fs_compat.save_file record_path (Yojson.Safe.to_string historical ^ "\n");
   let owner = inventory_owner registry owner_name in
   let report = reconcile ~fs registry owner in
   check bool "historical prepared record remains readable" true

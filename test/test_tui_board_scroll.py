@@ -216,18 +216,17 @@ def run_independent_windows(executable: str) -> None:
     fixtures["/api/v1/board/post-independent?format=flat"] = (
         200, {"post": post, "comments": [comment]})
 
-    def comment_width(output: bytearray) -> int:
+    def comment_width(output: bytearray, columns: int) -> int:
         rows = h.screen_rows(bytes(output))
         row = h.screen_row_of(rows, b"Comments (1)")
         if row < 0:
             raise AssertionError("focused comment heading is absent")
         line = rows[row].decode("utf-8", "replace")
         at = line.index("Comments (1)")
-        left = line.rfind("│", 0, at)
-        right = line.find("│", at)
-        if left < 0 or right < 0:
-            raise AssertionError(f"comment column has no measured borders: {line!r}")
-        return right - left
+        # This pane is borderless on the right. The terminal edge, measured
+        # from the drawn heading, distinguishes a growing column from a fixed
+        # one: with a fixed comment width, the heading moves by every extra cell.
+        return columns - at
 
     def interact(process, fd, _slave, output, _base):
         h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
@@ -252,10 +251,10 @@ def run_independent_windows(executable: str) -> None:
             raise AssertionError("PageDown did not scroll the focused body")
         if re.findall(rb"Comment row \d{3}", body_screen) != visible_comments:
             raise AssertionError("scrolling the body moved the comment window")
-        narrow_width = comment_width(output)
+        narrow_width = comment_width(output, SIDE_COLUMNS)
         h.resize_and_wait(process, fd, output, rows=30, columns=SIDE_COLUMNS + 60,
                           needle=b"Comments (1)", controls=(h.FULL_REDRAW,))
-        wide_width = comment_width(output)
+        wide_width = comment_width(output, SIDE_COLUMNS + 60)
         if wide_width <= narrow_width:
             raise AssertionError(
                 f"comment column stayed fixed across widths: {narrow_width} -> {wide_width}")

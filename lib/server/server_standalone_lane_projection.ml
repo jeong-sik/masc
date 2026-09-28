@@ -67,46 +67,19 @@ type lane_spec =
   ; required : bool
   }
 
-(* Every lane's row, one arm each: a lane added to [Standalone_lane.t] does
-   not compile here until it has a label, a purpose and an obligation. *)
+(* Every lane's row. The label and purpose come from [Lane_manifest] and the
+   obligation from [Standalone_lane.obligation], the one place each is
+   written; both are exhaustive, so a lane added to [Standalone_lane.t] does
+   not compile there until it has them. *)
 let lane_spec (lane : Standalone_lane.t) =
-  match lane with
-  | Standalone_lane.Board_attention ->
-    { lane
-    ; label = "Board Attention"
-    ; purpose = "Judges one durable Board candidate for Keeper attention."
-    ; required = true
-    }
-  | Standalone_lane.Hitl_auto_judge ->
-    { lane
-    ; label = "HITL Auto Judge"
-    ; purpose = "Produces the structured judgment for one held approval."
-    ; required = true
-    }
-  | Standalone_lane.Librarian ->
-    { lane
-    ; label = "Librarian"
-    ; purpose = "Selects the next Memory OS snapshot from immutable Keeper history."
-    ; required = false
-    }
-  | Standalone_lane.Workspace_curator ->
-    { lane
-    ; label = "Workspace Curator"
-    ; purpose = "Synthesizes attributed proposals after committed workspace memory changes; semantic verification is not performed."
-    ; required = false
-    }
-  | Standalone_lane.Verifier ->
-    { lane
-    ; label = "Verifier"
-    ; purpose = "Reviews Task completion and Goal proof evidence."
-    ; required = false
-    }
-  | Standalone_lane.Browser_stagehand ->
-    { lane
-    ; label = "Browser Stagehand"
-    ; purpose = "Answers structured model requests from the Stagehand browser lane; run records are not retained yet."
-    ; required = false
-    }
+  { lane
+  ; label = Lane_manifest.label (Lane_id.Exact lane)
+  ; purpose = Lane_manifest.purpose (Lane_id.Exact lane)
+  ; required =
+      (match Standalone_lane.obligation lane with
+       | Standalone_lane.Required -> true
+       | Standalone_lane.Optional -> false)
+  }
 ;;
 
 (* The order the Lanes table draws: the two required lanes first. That is not

@@ -2054,7 +2054,12 @@ let test_post_get_comment_pages_carry_their_range () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
-  let post_id = create_post_with_comments ~count:105 in
+  (* 99, not 105: task-1758/#39356 scope extension caps a post at
+     [Board.Limits.comment_count_cap] (100) live comments, so this fixture
+     stays one comment under the cap while keeping the same shape -- two
+     full 50-item pages would overrun it, a small tail page past them,
+     and an explicit end-of-thread read past the last comment. *)
+  let post_id = create_post_with_comments ~count:99 in
   let read ~label args =
     read_page ~result_boundary:Tool_output.Sent_to_client ~label post_id args
   in
@@ -2064,47 +2069,47 @@ let test_post_get_comment_pages_carry_their_range () =
     default_page
     ~offset:0
     ~returned:50
-    ~total:105
+    ~total:99
     ~next_offset:(Some 50);
   Alcotest.(check bool)
     "header counts the thread it pages"
     true
-    (contains default_page.thread "[105 replies]");
+    (contains default_page.thread "[99 replies]");
   check_page
     ~label:"normal page advances"
     (read ~label:"normal page" [ "comment_offset", `Int 2; "comment_limit", `Int 2 ])
     ~offset:2
     ~returned:2
-    ~total:105
+    ~total:99
     ~next_offset:(Some 4);
   check_page
     ~label:"final page"
-    (read ~label:"final page" [ "comment_offset", `Int 100; "comment_limit", `Int 100 ])
-    ~offset:100
+    (read ~label:"final page" [ "comment_offset", `Int 94; "comment_limit", `Int 100 ])
+    ~offset:94
     ~returned:5
-    ~total:105
+    ~total:99
     ~next_offset:None;
   (* A reader that finished the thread asks at its end to learn whether
      anything new arrived. That is a page, not a failure: it names the
      thread's size, so it cannot read as a thread without comments. Past the
      end is still refused. *)
-  let end_page = read ~label:"end of the thread" [ "comment_offset", `Int 105 ] in
+  let end_page = read ~label:"end of the thread" [ "comment_offset", `Int 99 ] in
   check_page
     ~label:"the end of the thread"
     end_page
-    ~offset:105
+    ~offset:99
     ~returned:0
-    ~total:105
+    ~total:99
     ~next_offset:None;
   Alcotest.(check bool) "the end page names the thread's size" true
-    (contains end_page.body "[no comments from offset 105: the thread has 105 now.]");
+    (contains end_page.body "[no comments from offset 99: the thread has 99 now.]");
   Alcotest.(check bool) "the end page does not say the thread has no comments" false
     (contains end_page.body "No comments.");
   check_get_rejected
     ~label:"offset past the end"
     post_id
-    [ "comment_offset", `Int 106 ]
-    "the thread now has 105 comments, at offsets 0-104";
+    [ "comment_offset", `Int 100 ]
+    "the thread now has 99 comments, at offsets 0-98";
   check_get_rejected
     ~label:"negative offset"
     post_id

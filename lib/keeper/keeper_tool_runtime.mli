@@ -30,6 +30,10 @@ type context =
         lets async tools (masc_fusion) route completion wakes back. *)
   ; gate_context : (unit -> Keeper_gate.causal_context) option
     (** Exact outer-turn evidence forwarded opaquely to the Keeper Gate. *)
+  ; turn_ref : Ids.Turn_ref.t option
+    (** The outer Keeper turn this call belongs to, for tools that record
+        per-turn evidence. [None] on callers without turn context (tests,
+        direct dispatch). *)
   ; gate_grant : Keeper_gate.cycle_grant option
     (** Exact human decision delivered to this Keeper lane. Permission-capable
         handlers must match it against the normalized request before use. *)

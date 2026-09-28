@@ -3,9 +3,21 @@
     that HOME; only XDG_CONFIG_HOME points at the managed generation. *)
 type t
 
+(** Why the selected account has no sign-in masc can use. Each one is answered
+    by signing in again through [/login muse]. *)
+type sign_in_gap =
+  | No_file_sign_in
+      (** No auth.json, or one without Meta credentials. *)
+  | Keychain_sign_in
+      (** auth.json says the secrets live in the macOS Keychain
+          ([storage: "keychain"]). A managed generation copies files only, so
+          the child would find no token. *)
+  | Unsupported_credential_storage of string
+      (** A [storage] value masc does not know, kept as written. *)
+
 type error =
   | Invalid_account_home of string
-  | Sign_in_required
+  | Sign_in_required of sign_in_gap
   | State_unavailable of string
 
 val error_to_string : error -> string
@@ -13,7 +25,9 @@ val error_to_string : error -> string
 val prepare : account_home:string -> (t, error) result
 (** Import the selected account's [.config/muse/auth.json] on first use or
     when its exact source bytes change. Reuse an unchanged source's generation
-    without replacing credentials the vendor refreshed there. Publication of
+    without replacing credentials the vendor refreshed there. Only a sign-in
+    whose secrets are inside auth.json is admitted; a Keychain-held one is
+    [Sign_in_required Keychain_sign_in]. Publication of
     a new generation is atomic and serialized per selected account. No hooks,
     plugins or permission choices from source settings are imported. Owned
     account and credential-parent directories must not be group/other writable. *)

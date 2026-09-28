@@ -117,7 +117,10 @@ let python ~binary =
   else
     Option.bind (Env_config_core.raw_value_opt "PATH") (fun path ->
       String.split_on_char ':' path
-      |> List.filter (fun directory -> directory <> "")
+      (* The helper changes cwd to the Keeper workspace. A relative entry
+         would name a different executable there than the one checked here. *)
+      |> List.filter (fun directory ->
+        directory <> "" && not (Filename.is_relative directory))
       |> List.find_map (fun directory ->
         let candidate = Filename.concat directory "python3" in
         if executable candidate then Some candidate else None))

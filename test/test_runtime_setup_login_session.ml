@@ -94,9 +94,39 @@ let python_missing_without_bundled_or_path () = temporary (fun root ->
   with_path "" (fun () ->
     check (option string) "no interpreter anywhere" None
       (S.python ~binary:(Filename.concat bindir "masc"))))
+let python_ignores_relative_path_before_workspace_change () = temporary (fun root ->
+  let server = Filename.concat root "server" in
+  let workspace = Filename.concat root "workspace" in
+  let relative_bin = "relative-bin" in
+  List.iter (fun base ->
+    Fs_compat.mkdir_p (Filename.concat base relative_bin);
+    ignore (executable_file (Filename.concat base relative_bin) "python3");
+    ignore (executable_file base "python3")) [server; workspace];
+  let absolute_bin = Filename.concat root "absolute-bin" in
+  Fs_compat.mkdir_p absolute_bin;
+  let expected = executable_file absolute_bin "python3" in
+  let binary = Filename.concat server "masc" in
+  let original_cwd = Sys.getcwd () in
+  Fun.protect ~finally:(fun () -> Sys.chdir original_cwd) (fun () ->
+    Sys.chdir server;
+    with_path (":" ^ relative_bin ^ ":.") (fun () ->
+      check (option string) "relative-only PATH is not an interpreter" None
+        (S.python ~binary));
+    with_path (":" ^ relative_bin ^ ":.:" ^ absolute_bin) (fun () ->
+      let selected = S.python ~binary in
+      check (option string) "absolute interpreter wins over relative decoys"
+        (Some expected) selected;
+      Sys.chdir workspace;
+      match selected with
+      | None -> fail "absolute interpreter was not found"
+      | Some path ->
+        check string "selection keeps its identity from the child cwd"
+          (Unix.realpath expected) (Unix.realpath path))))
 let () = run "setup-login-session" ["ownership", [test_case "scope and physical account locks" `Quick isolated_scope];
   "process lifetime", [test_case "normal exit" `Quick normal_exit; test_case "cancel" `Quick explicit_cancel;
     test_case "disconnect" `Quick disconnect; test_case "pipe EOF" `Quick pipe_eof; test_case "server shutdown" `Quick server_shutdown];
   "interpreter", [test_case "bundled release preferred" `Quick python_prefers_the_bundled_release;
     test_case "PATH fallback" `Quick python_falls_back_to_path;
+    test_case "relative PATH cannot change with the workspace" `Quick
+      python_ignores_relative_path_before_workspace_change;
     test_case "missing without bundled or PATH" `Quick python_missing_without_bundled_or_path]]

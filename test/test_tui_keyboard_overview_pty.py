@@ -73,9 +73,6 @@ def first_use_frames(executable: str) -> None:
     fixtures["/api/v1/dashboard/briefing"] = briefing
 
     def interact(process, fd, _slave, output, _base):
-        if not requested.wait(10):
-            raise AssertionError("the TUI did not request the briefing")
-
         def capture(state: str, columns: int, needle: bytes) -> bytes:
             frame = keyboard.resize_and_wait(
                 process, fd, output, rows=32, columns=columns,
@@ -95,6 +92,16 @@ def first_use_frames(executable: str) -> None:
             return visible
 
         try:
+            # The splash candle keeps drawing while the briefing is held, so
+            # the wait reads the PTY; an unread one fills and stops the TUI.
+            if not keyboard.wait_for_fixture_event(
+                process, fd, output, requested, timeout=10
+            ):
+                if process.poll() is not None:
+                    raise AssertionError(
+                        f"the TUI exited before requesting the briefing: {bytes(output)!r}"
+                    )
+                raise AssertionError("the TUI did not request the briefing")
             for columns in (80, 140):
                 unread = capture(
                     "UNREAD", columns, b"Overview briefing not read yet"

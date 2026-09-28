@@ -5905,6 +5905,7 @@
 (include stanzas/test_keeper_connector_names.inc)
 (include stanzas/test_tui_image_cache.inc)
 (include stanzas/test_tui_image_ref.inc)
+(include stanzas/test_tui_imp_emblem.inc)
 (include stanzas/test_tui_link_label.inc)
 (include stanzas/test_tui_link_preview.inc)
 

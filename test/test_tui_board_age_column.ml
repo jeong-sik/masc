@@ -37,11 +37,11 @@ let test_the_two_times_are_not_spelled_the_same () =
    so a word that outgrew it would reach the screen shortened rather than
    refused. Both words are checked through the row the surface draws. *)
 let test_both_headers_reach_the_header_row_whole () =
-  let title_width = Schedule.board_title_width ~inner_width:100 in
+  let layout = Schedule.board_layout ~inner_width:100 in
   List.iter
     (fun time ->
       let word = board_age_header time in
-      let row = Schedule.board_header_row ~age_header:word ~title_width in
+      let row = Schedule.board_header_row ~age_header:word ~layout in
       Alcotest.(check bool)
         (Printf.sprintf "%S is drawn whole" word)
         true
@@ -52,9 +52,9 @@ let test_both_headers_reach_the_header_row_whole () =
    move that line: a wider word would push the title column and redraw every
    row at a different width the moment the reader changed the sort. *)
 let test_the_header_word_does_not_move_the_title_column () =
-  let title_width = Schedule.board_title_width ~inner_width:100 in
+  let layout = Schedule.board_layout ~inner_width:100 in
   let width_of word =
-    String.length (Schedule.board_header_row ~age_header:word ~title_width)
+    String.length (Schedule.board_header_row ~age_header:word ~layout)
   in
   Alcotest.(check int) "both headers draw the same row width"
     (width_of (board_age_header Board_time_posted))

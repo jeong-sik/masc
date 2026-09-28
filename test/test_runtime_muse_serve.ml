@@ -293,6 +293,39 @@ let test_turn_with_tool_and_approval () =
          check bool "deny choice" true (params_member "choiceId" decide = `String "deny"))
 ;;
 
+(* The host compacted the turn's input and still completed it: the event is
+   the only trace, so it must reach the stream with its members. Frame shape
+   from Muse Code 1.4.0 against a synthetic endpoint (2026-09-28). *)
+let compaction_completed =
+  {|{"jsonrpc":"2.0","method":"item/completed","params":{"sessionId":"s-1","viewCursor":"v:6","item":{"itemId":"c-1","kind":"compaction","turnId":"t-1","revision":2,"status":"completed","outcome":"compacted","trigger":"auto","strategyId":"summary-preserved-suffix/v1","tokensBefore":1761964,"tokensAfter":12941}}}|}
+;;
+
+let test_compaction_reaches_the_stream () =
+  let observed = ref [] in
+  run_scripted
+    ~on_stream_event:(function
+      | Serve.Compaction_observed compaction -> observed := compaction :: !observed
+      | _ -> ())
+    (handshake_and_session ~granted:[]
+     @ [ Write compaction_completed
+       ; Write agent_started
+       ; Write agent_completed
+       ; Write turn_completed
+       ])
+    (fun result _requests ->
+       match result, !observed with
+       | Error error, _ -> fail (Serve.error_to_string error)
+       | Ok turn, [ compaction ] ->
+         check string "the turn still completes" "MASC_MUSE_OK" turn.text;
+         check bool "automatic compaction" true
+           (compaction.Msp.trigger = Some Msp.Compaction_auto
+            && compaction.Msp.outcome = Some Msp.Compaction_compacted);
+         check (option int) "tokens before" (Some 1761964) compaction.Msp.tokens_before;
+         check (option int) "tokens after" (Some 12941) compaction.Msp.tokens_after
+       | Ok _, observed ->
+         failf "expected one compaction event, saw %d" (List.length observed))
+;;
+
 let test_auth_required () =
   run_scripted
     (handshake_and_session ~granted:[] @ [ Write turn_auth_failed ])
@@ -734,6 +767,7 @@ let () =
     [ ( "turn"
       , [ test_case "turn with tool and approval" `Quick test_turn_with_tool_and_approval
         ; test_case "auth required" `Quick test_auth_required
+        ; test_case "compaction reaches the stream" `Quick test_compaction_reaches_the_stream
         ; test_case "exit code is typed" `Quick test_exit_code_is_typed
         ; test_case "bridge needs sessionMcp" `Quick test_bridge_needs_session_mcp
         ; test_case "native none is config error" `Quick test_native_none_is_config_error

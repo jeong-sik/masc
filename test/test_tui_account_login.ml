@@ -3,7 +3,7 @@ module Login = Masc_tui_account_login
 let session = String.make 64 'a'
 let account = String.make 64 'b'
 let other = String.make 64 'c'
-let provider : Login.provider = {id="codex";label="Codex";client=Login.Codex}
+let provider : Login.provider = {id="codex";label="Codex";client=Login.Codex;origin=Login.Configured}
 let ok = function Ok value -> value | Error message -> fail message
 let model i : Login.model = {id=string_of_int i;label="model " ^ string_of_int i;context=Some 32768;tools=Some true}
 let frame name data = "event: " ^ name ^ "\r\ndata: " ^ Yojson.Safe.to_string data ^ "\r\n\r\n"
@@ -13,7 +13,7 @@ let complete = frame "complete" (`Assoc ["integration_id",`String "codex";"accou
 let inventory = `Assoc ["setup_revision",`String "revision";"default_runtime_selection", `List [`String "primary"; `String "fallback"];
   "account_emails",`List [];
   "runtimes",`List [`Assoc ["id",`String "unrelated"];`Assoc ["id",`String "fallback"];`Assoc ["id",`String "primary"]];
-  "integrations",`List (List.map (fun (id,protocol) -> `Assoc ["id",`String id;"display_name",`String id;"protocol",`String protocol])
+  "integrations",`List (List.map (fun (id,protocol) -> `Assoc ["id",`String id;"display_name",`String id;"protocol",`String protocol;"origin",`String "runtime_config"])
     ["codex","codex-app-server";"claude-code","claude-code";"muse-code","muse-serve";"antigravity","antigravity-cli"])]
 let decoder_fragments () =
   let events=ref [] in
@@ -40,7 +40,7 @@ let decoder_failures () =
 let account_and_default () =
   List.iter (fun (requested,client) ->
     let t=Login.create requested in ok (Login.inventory t inventory);
-    check bool "requested client selected" true ((List.nth t.providers t.cursor).client=client))
+    check bool "requested client selected" true (Login.focused_client t=Some client))
     ["codex",Login.Codex;"claude",Login.Claude;"muse",Login.Muse;"antigravity",Login.Antigravity];
   let unknown=Login.create "not-a-client" in
   check bool "unknown client refused" true (Result.is_error (Login.inventory unknown inventory));
@@ -327,41 +327,40 @@ let foreign_escapes_never_reach_the_terminal () =
      check (option (triple int int int)) "38;2 truecolor" (Some (10, 20, 30)) (channels (foreground z));
      check (option (triple int int int)) "colon sub-parameters" (Some (1, 2, 3)) (channels (foreground w))
    | runs -> fail (Printf.sprintf "%d runs" (List.length runs)))
-(* The server reads each account's email from its client's login file; the
-   provider list shows it so the operator can tell accounts apart. *)
+(* The server reads each account's email from its client's login file; each
+   client's account list leads every row with it so the operator can tell
+   accounts apart. *)
 let account_emails_beside_providers () =
   let with_emails rows =
     let fields = match inventory with `Assoc fields -> List.remove_assoc "account_emails" fields | _ -> [] in
     `Assoc (("account_emails", `List rows) :: fields) in
   let row id state extra = `Assoc (["integration_id", `String id; "state", `String state] @ extra) in
-  let t = Login.create "" in
-  ok (Login.inventory t (with_emails [
-    row "codex" "read" ["email", `String "operator@example.com"];
-    row "claude-code" "not_read" ["cause", `String "source_unavailable"];
-    row "muse-code" "not_read" ["cause", `String "source_unrecognized"];
-    row "antigravity" "not_read" ["cause", `String "invalid_email"] ]));
-  check (list string) "each account row names its email or why not"
-    [ "> codex · operator@example.com"; "  claude-code · 이메일 모름: 로그인 파일을 못 읽음";
-      "  muse-code · 이메일 모름: 로그인 파일 형식을 모름"; "  antigravity · 이메일 모름: 표시할 수 없는 값" ]
-    (List.map Login.row_text (List.tl (Login.lines t)));
-  let t = Login.create "" in
-  ok (Login.inventory t (with_emails [
-    row "claude-code" "not_read" ["cause", `String "environment_credential"];
-    row "muse-code" "not_read" ["cause", `String "not_reported"] ]));
-  check (list string) "a provider with no account row draws its name alone"
-    [ "> codex"; "  claude-code · 이메일 없음: 환경 변수의 인증 정보로 실행";
-      "  muse-code · 이메일 모름: 클라이언트가 알려 주지 않음"; "  antigravity" ]
-    (List.map Login.row_text (List.tl (Login.lines t)));
+  (* The one account row of each client's list. *)
+  let account_rows json =
+    List.map (fun requested ->
+      let t = Login.create requested in
+      ok (Login.inventory t json);
+      List.map Login.row_text (List.tl (Login.lines t)))
+      ["codex"; "claude"; "muse"; "antigravity"] in
+  check (list (list string)) "each account row leads with its email or why not"
+    [ ["> operator@example.com  (codex)"]; ["> 이메일 모름: 로그인 파일을 못 읽음  (claude-code)"];
+      ["> 이메일 모름: 로그인 파일 형식을 모름  (muse-code)"]; ["> 이메일 모름: 표시할 수 없는 값  (antigravity)"] ]
+    (account_rows (with_emails [
+      row "codex" "read" ["email", `String "operator@example.com"];
+      row "claude-code" "not_read" ["cause", `String "source_unavailable"];
+      row "muse-code" "not_read" ["cause", `String "source_unrecognized"];
+      row "antigravity" "not_read" ["cause", `String "invalid_email"] ]));
+  check (list (list string)) "an account with no email row draws its name alone"
+    [ ["> codex"]; ["> 이메일 없음: 환경 변수의 인증 정보로 실행  (claude-code)"];
+      ["> 이메일 모름: 클라이언트가 알려 주지 않음  (muse-code)"]; ["> antigravity"] ]
+    (account_rows (with_emails [
+      row "claude-code" "not_read" ["cause", `String "environment_credential"];
+      row "muse-code" "not_read" ["cause", `String "not_reported"] ]));
   (* The email is display data: a row this TUI cannot read is shown as that
-     row's own unreadable state, and the provider list is never refused. *)
-  let rows_for rows =
-    let t = Login.create "" in
-    ok (Login.inventory t (with_emails rows));
-    List.map Login.row_text (List.tl (Login.lines t)) in
+     row's own unreadable state, and the account list is never refused. *)
+  let codex_row rows = List.hd (account_rows (with_emails rows)) in
   List.iter (fun (name, rows) ->
-    check (list string) name
-      [ "> codex · 이메일 정보를 알아볼 수 없음"; "  claude-code"; "  muse-code"; "  antigravity" ]
-      (rows_for rows))
+    check (list string) name ["> 이메일 정보를 알아볼 수 없음  (codex)"] (codex_row rows))
     [ "an unknown state is that row's own", [ row "codex" "verified" [] ];
       "read without an email", [ row "codex" "read" [] ];
       "an email beside a cause",
@@ -371,22 +370,22 @@ let account_emails_beside_providers () =
       "one account listed twice has no single state",
       [ row "codex" "read" ["email", `String "x@example.com"];
         row "codex" "not_read" ["cause", `String "not_reported"] ] ];
-  check (list string) "a bad row leaves the other rows readable"
-    [ "> codex · 이메일 정보를 알아볼 수 없음"; "  claude-code · operator@example.com"; "  muse-code"; "  antigravity" ]
-    (rows_for [ row "codex" "verified" []; row "claude-code" "read" ["email", `String "operator@example.com"] ]);
+  check (list (list string)) "a bad row leaves the other rows readable"
+    [ ["> 이메일 정보를 알아볼 수 없음  (codex)"]; ["> operator@example.com  (claude-code)"]; ["> muse-code"]; ["> antigravity"] ]
+    (account_rows (with_emails [ row "codex" "verified" []; row "claude-code" "read" ["email", `String "operator@example.com"] ]));
   let t = Login.create "" in
   ok (Login.inventory t (with_emails [ row "missing" "not_read" ["cause", `String "not_reported"]; `String "not a row" ]));
-  check (list string) "rows for no listed integration are counted, not shown"
-    [ "Enter: 새 계정 로그인. 기존 계정은 e로 선택합니다. 어느 공급자 것인지 모르는 계정 이메일 2개는 보여 주지 않습니다.";
-      "> codex"; "  claude-code"; "  muse-code"; "  antigravity" ]
-    (List.map Login.row_text (Login.lines t));
+  check bool "rows for no listed integration are counted, not shown" true
+    (String.ends_with ~suffix:" 어느 공급자 것인지 모르는 계정 이메일 2개는 보여 주지 않습니다." t.notice);
+  check (list string) "the clients list each client once with its account count"
+    [ "> Codex · 계정 1"; "  Claude Code · 계정 1"; "  Antigravity · 계정 1"; "  Muse · 계정 1" ]
+    (List.map Login.row_text (List.tl (Login.lines t)));
   let fields = match inventory with `Assoc fields -> List.remove_assoc "account_emails" fields | _ -> [] in
   let t = Login.create "" in
   ok (Login.inventory t (`Assoc fields));
-  check (list string) "an inventory without a readable email list still lists the providers"
-    [ "Enter: 새 계정 로그인. 기존 계정은 e로 선택합니다. 계정 이메일 목록은 읽지 못했습니다.";
-      "> codex"; "  claude-code"; "  muse-code"; "  antigravity" ]
-    (List.map Login.row_text (Login.lines t))
+  check bool "an inventory without a readable email list still lists the clients" true
+    (String.ends_with ~suffix:" 계정 이메일 목록은 읽지 못했습니다." t.notice
+     && List.length (Login.lines t) = 5)
 
 (* The Overview draws only the emails that were read, by integration id, and
    counts the rows it cannot read; a document with no readable list is an
@@ -465,7 +464,49 @@ let removal_from_the_list () =
      check string "the account" "codex" p.id; check string "the revision the preview read" "rev-1" revision;
      check (option string) "the login store for the notice" (Some "/home/op/.codex-two") login_store
    | _ -> fail "Enter did not remove");
-  check bool "Esc goes back to the list" true (Login.key t "esc"=Login.Nothing && t.phase=Login.Providers)
+  check bool "Esc goes back to the account's list" true
+    (Login.key t "esc"=Login.Nothing && t.phase=Login.Providers (Login.Accounts Login.Codex))
+(* The list opens on the clients. Choosing one lists a row that adds an
+   account, then its accounts; Esc walks back out. A row whose origin this
+   TUI does not know is not listed. *)
+let clients_then_accounts () =
+  let row id protocol origin =
+    `Assoc ["id",`String id;"display_name",`String id;"protocol",`String protocol;"origin",`String origin] in
+  let fields = match inventory with `Assoc fields -> List.remove_assoc "integrations" fields | _ -> [] in
+  let json = `Assoc (("integrations",`List [
+      row "codex" "codex-app-server" "masc_integration";
+      row "codex_one" "codex-app-server" "runtime_config";
+      row "codex_two" "codex-app-server" "runtime_config";
+      row "claude-code" "claude-code" "masc_integration";
+      row "codex_mystery" "codex-app-server" "somewhere_else" ]) :: fields) in
+  let rows t = List.map Login.row_text (List.tl (Login.lines t)) in
+  let t = Login.create "" in ok (Login.inventory t json);
+  check (list string) "one row per client; a catalog entry is not an account"
+    ["> Codex · 계정 2"; "  Claude Code"] (rows t);
+  check bool "Enter opens the client's accounts" true (Login.key t "\r" = Login.Nothing);
+  check (list string) "a new-account row, then the accounts"
+    ["> + 새 계정"; "  codex_one"; "  codex_two"] (rows t);
+  (match Login.key t "\r" with
+   | Login.Start {provider; existing = false} -> check string "a new account goes through the catalog entry" "codex" provider.id
+   | _ -> fail "Enter on + 새 계정 did not start a new login");
+  ignore (Login.key t "j");
+  (match Login.key t "\r" with
+   | Login.Start {provider; existing = true} -> check string "an account logs in as itself" "codex_one" provider.id
+   | _ -> fail "Enter on an account did not start its login");
+  (match Login.key t "n" with
+   | Login.Start {provider; existing = false} -> check string "n adds a new account from any row" "codex" provider.id
+   | _ -> fail "n did not start a new login");
+  (match Login.key t "D" with
+   | Login.Preview_removal {provider; _} -> check string "D previews the account under the cursor" "codex_one" provider.id
+   | _ -> fail "D did not preview the account");
+  ignore (Login.key t "k");
+  check bool "the new-account row cannot be removed" true (Login.key t "D" = Login.Nothing);
+  check bool "Esc goes back to the clients, on the same client" true
+    (Login.key t "esc" = Login.Nothing && t.phase = Login.Providers Login.Clients && t.cursor = 0);
+  check bool "Esc on the clients closes" true (Login.key t "esc" = Login.Close);
+  let t = Login.create "codex_two" in ok (Login.inventory t json);
+  check (list string) "/login <account> opens its client on that account"
+    ["  + 새 계정"; "  codex_one"; "> codex_two"] (rows t)
 let refused_removal () =
   let t=Login.create "codex" in ok (Login.inventory t inventory);
   ok (Login.removal_preview t provider ~refused:(Some "runtime.toml changed")
@@ -493,6 +534,7 @@ let () = run "TUI account login" ["workflow",[
   test_case "private input and superseded attempt" `Quick input_and_epoch;
   test_case "declared fallback inventory contract" `Quick inventory_selection_contract;
   test_case "account emails beside provider rows" `Quick account_emails_beside_providers;
+  test_case "clients first, then a client's accounts" `Quick clients_then_accounts;
   test_case "emails for the overview" `Quick emails_for_the_overview;
   test_case "every server email row decodes" `Quick server_email_rows_round_trip;
   test_case "spawn failure retains recovery receipt" `Quick failed_before_started;

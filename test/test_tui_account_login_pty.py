@@ -45,7 +45,8 @@ def scenario(binary, client, protocol, *, delayed_save=False, conflict_save=Fals
             "default_runtime_id": "existing-lane" if refreshed else None,
             "runtimes": [{"id": "existing-runtime"}] if refreshed else [],
             "account_emails": [],
-            "integrations": [{"id": client, "display_name": client, "protocol": protocol}]}
+            "integrations": [{"id": client, "display_name": client, "protocol": protocol,
+                              "origin": "masc_integration"}]}
     fixtures["/api/v1/setup/inventory"] = inventory
 
     def chunks():
@@ -150,7 +151,8 @@ def retry_before_started(binary):
     fixtures["/api/v1/keepers/alpha/chat/history"] = (200, [])
     fixtures["/api/v1/setup/inventory"] = (200, {"setup_revision": "fixture-revision",
         "default_runtime_selection": [], "runtimes": [], "account_emails": [],
-        "integrations": [{"id": "codex", "display_name": "codex", "protocol": "codex-app-server"}]})
+        "integrations": [{"id": "codex", "display_name": "codex", "protocol": "codex-app-server",
+                          "origin": "masc_integration"}]})
 
     def first_chunks():
         receipt = {"login_id": SESSION, "integration_id": "codex", "account_ref": ACCOUNT,

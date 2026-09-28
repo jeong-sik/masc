@@ -37,9 +37,11 @@ def run(binary: str) -> None:
     fixtures["/api/v1/keepers/alpha/chat/history"] = (200, [])
 
     def inventory():
-        integrations = [{"id": "codex", "display_name": "codex", "protocol": "codex-app-server"}]
+        integrations = [{"id": "codex", "display_name": "codex", "protocol": "codex-app-server",
+                         "origin": "masc_integration"}]
         if len(removals) < 2:
-            integrations.append({"id": "codex_two", "display_name": "codex_two", "protocol": "codex-app-server"})
+            integrations.append({"id": "codex_two", "display_name": "codex_two", "protocol": "codex-app-server",
+                                 "origin": "runtime_config"})
         return 200, {"setup_revision": "fixture-revision", "default_runtime_selection": [],
                      "runtimes": [], "account_emails": [], "integrations": integrations}
 
@@ -70,9 +72,11 @@ def run(binary: str) -> None:
         h.select_keeper_row(process, fd, output, b"alpha")
         h.send_and_wait(process, fd, output, b"c", "Keepers ▸ alpha ▸ chat".encode())
         h.send_and_wait(process, fd, output, b"/login\r", b"MASC Account Login")
-        h.wait_for_output(process, fd, output, "새 계정 로그인".encode(), start=0, timeout=3.0)
+        h.wait_for_output(process, fd, output, "> Codex · 계정 1".encode(), start=0, timeout=3.0)
 
-        # The second account, then what removing it changes.
+        # Codex's accounts: the new-account row, then the account, then what
+        # removing it changes.
+        h.send_and_wait(process, fd, output, b"\r", "> + 새 계정".encode())
         h.send_and_wait(process, fd, output, b"j", b"> codex_two")
         h.send_and_wait(process, fd, output, b"D", b"keeper sangsu")
         if previews != [{"integration_id": "codex_two"}]:

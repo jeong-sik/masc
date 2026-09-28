@@ -25,6 +25,7 @@
 #                    [--replace-own-cr REVIEW_ID] [--git-dir DIR]
 #   approve-guard.sh --check --run PR_CHECK_ID ...
 #   approve-guard.sh --check ...   # evaluate only, never writes (safe probe)
+#   approve-guard.sh --merge-check --receipt-json ...  # verified approval IDs
 #   approve-guard.sh --merge-check --repo O/R --pr N --head SHA40
 #                                  # trusted non-author approvals bound to this head
 # Exit: 0 approved/skipped/would-approve, 2 refused (reasons on stderr), 1 infra error.
@@ -36,7 +37,7 @@
 set -u
 GH="${GUARD_GH:-gh}"
 here="$(cd "$(dirname "$0")" && pwd)"
-check_only=0; merge_check=0; repo=""; pr=""; head=""; body=""; replace_cr=""; cited_run=""; batch=""
+check_only=0; merge_check=0; receipt_json=0; repo=""; pr=""; head=""; body=""; replace_cr=""; cited_run=""; batch=""
 gitdir="${GUARD_REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}"
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -49,6 +50,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --check) check_only=1; shift ;;
     --merge-check) merge_check=1; shift ;;
+    --receipt-json) receipt_json=1; shift ;;
     --run) cited_run="${2-}"; shift 2 ;;
     --git-dir) gitdir="${2-}"; shift 2 ;;
     --repo) repo="${2-}"; shift 2 ;;
@@ -94,6 +96,9 @@ fi
 v_run=""; v_by=""
 if [ "$merge_check" -eq 1 ] && [ "$check_only" -eq 1 ]; then
   refuse "--merge-check and --check are separate read-only modes"
+fi
+if [ "$receipt_json" -eq 1 ] && [ "$merge_check" -ne 1 ]; then
+  refuse "--receipt-json requires --merge-check"
 fi
 if [ "$check_only" -eq 0 ] && [ "$merge_check" -eq 0 ]; then
   if [ -n "$body" ] && [ -s "$body" ]; then
@@ -157,7 +162,12 @@ if [ "$merge_check" -eq 1 ]; then
   [ -n "$approvals" ] || { refuse "no non-author APPROVED review has this head in its verdict and guard footer with trusted repository authority"; finish_refused; }
   latest_head="$(gh_json "repos/$repo/pulls/$pr" '.head.sha')" || exit 1
   [ "$latest_head" = "$head" ] || { refuse "head moved during merge check: PR head is $latest_head"; finish_refused; }
-  echo "MERGE-CHECK PASS #$pr head $head approvals:$approvals"
+  if [ "$receipt_json" -eq 1 ]; then
+    jq -cn --argjson pr "$pr" --arg head "$head" --arg approvals "$approvals" \
+      '{pr: $pr, head: $head, approval_ids: ($approvals | split(" ") | map(select(length > 0) | tonumber))}' || exit 1
+  else
+    echo "MERGE-CHECK PASS #$pr head $head approvals:$approvals"
+  fi
   exit 0
 fi
 

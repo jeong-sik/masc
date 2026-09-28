@@ -62,32 +62,7 @@ class BatchEvidenceTest(unittest.TestCase):
         self.calls = []
         self.run_ids = {1: 901, 2: 902, 99: 900}
         for pr, head in [*self.heads.items(), (99, self.roll)]:
-            branch = f"branch-{pr}"
-            self.put(f"pulls/{pr}", {
-                "number": pr, "state": "open", "draft": False, "merged": False,
-                "merge_commit_sha": None, "user": {"login": f"author-{pr}"},
-                "base": {"ref": "main"}, "head": {"sha": head, "ref": branch}})
-            run_id = self.run_ids[pr]
-            run = {"id": run_id, "run_number": 10, "workflow_id": 70,
-                   "name": "PR Check", "head_sha": head, "head_branch": branch,
-                   "event": "pull_request", "path": ".github/workflows/pr-check.yml",
-                   "status": "completed", "conclusion": "success",
-                   "check_suite_id": run_id + 1000, "pull_requests": [{"number": pr}]}
-            self.put(f"actions/runs/{run_id}", run)
-            self.put(f"actions/runs?head_sha={head}&event=pull_request&per_page=100",
-                     {"workflow_runs": [copy.deepcopy(run)]})
-            self.put(f"actions/runs?head_sha={head}&per_page=100",
-                     {"workflow_runs": [copy.deepcopy(run)]})
-            self.put(f"check-suites/{run_id + 1000}", {
-                "head_sha": head, "head_branch": branch, "pull_requests": [{"number": pr}]})
-            self.put(f"actions/runs/{run_id}/jobs?per_page=100", {"jobs": [
-                {"id": run_id * 10 + n, "name": name, "status": "completed", "conclusion": "success"}
-                for n, name in enumerate(REQUIRED)]})
-            self.put(f"commits/{head}/check-runs?per_page=100", {"check_runs": [
-                {"id": run_id * 10 + n, "name": name, "status": "completed",
-                 "conclusion": "success", "check_suite": {"id": run_id + 1000}}
-                for n, name in enumerate(REQUIRED)]})
-            self.put(f"pulls/{pr}/reviews?per_page=100", [])
+            self.install_pr(pr, head)
         self.set_line()
         self.put("commits/main", {"sha": self.main})
         self.fixture = self.root / "api.json"
@@ -114,6 +89,13 @@ if responses:
     Path(__file__).with_name('api.json').write_text(json.dumps(data))
 else:
     selected = data[endpoint]
+mutation = data.get('__after_reads', {}).get(endpoint)
+if mutation:
+    mutation['remaining'] -= 1
+    if mutation['remaining'] == 0:
+        data.update(mutation['values'])
+        del data['__after_reads'][endpoint]
+    Path(__file__).with_name('api.json').write_text(json.dumps(data))
 value = json.dumps(selected)
 if '--jq' in args:
     raise SystemExit(subprocess.run(['jq', '-r', args[args.index('--jq') + 1]],
@@ -121,6 +103,34 @@ if '--jq' in args:
 print(value)
 """)
         self.fake.chmod(0o755)
+
+    def install_pr(self, pr, head):
+        branch = f"branch-{pr}"
+        self.put(f"pulls/{pr}", {
+            "number": pr, "state": "open", "draft": False, "merged": False,
+            "merge_commit_sha": None, "user": {"login": f"author-{pr}"},
+            "base": {"ref": "main"}, "head": {"sha": head, "ref": branch}})
+        run_id = self.run_ids[pr]
+        run = {"id": run_id, "run_number": 10, "workflow_id": 70,
+               "name": "PR Check", "head_sha": head, "head_branch": branch,
+               "event": "pull_request", "path": ".github/workflows/pr-check.yml",
+               "status": "completed", "conclusion": "success",
+               "check_suite_id": run_id + 1000, "pull_requests": [{"number": pr}]}
+        self.put(f"actions/runs/{run_id}", run)
+        self.put(f"actions/runs?head_sha={head}&event=pull_request&per_page=100",
+                 {"workflow_runs": [copy.deepcopy(run)]})
+        self.put(f"actions/runs?head_sha={head}&per_page=100",
+                 {"workflow_runs": [copy.deepcopy(run)]})
+        self.put(f"check-suites/{run_id + 1000}", {
+            "head_sha": head, "head_branch": branch, "pull_requests": [{"number": pr}]})
+        self.put(f"actions/runs/{run_id}/jobs?per_page=100", {"jobs": [
+            {"id": run_id * 10 + n, "name": name, "status": "completed", "conclusion": "success"}
+            for n, name in enumerate(REQUIRED)]})
+        self.put(f"commits/{head}/check-runs?per_page=100", {"check_runs": [
+            {"id": run_id * 10 + n, "name": name, "status": "completed",
+             "conclusion": "success", "check_suite": {"id": run_id + 1000}}
+            for n, name in enumerate(REQUIRED)]})
+        self.put(f"pulls/{pr}/reviews?per_page=100", [])
 
     def git(self, *args, input=None):
         result = subprocess.run(["git", "-C", str(self.repo), *args], input=input,
@@ -162,15 +172,16 @@ print(value)
 
     def set_line(self, members=None):
         members = members or list(self.heads)
-        self.line = (f"batch: PASS roll: {self.roll} base: {self.base} run: 900 members: "
+        self.line = (f"batch: PASS landing: ROLL roll: {self.roll} base: {self.base} run: 900 members: "
                      + ",".join(f"{pr}@{self.heads[pr]}" for pr in members) + " by: keeper")
-        for pr in [1, 2, 99]:
+        for pr in [*self.heads, 99]:
             comments = [{"id": pr * 10, "body": self.line,
                          "author_association": "COLLABORATOR", "user": {"login": "publisher"},
                          "created_at": "2026-01-01T00:40:00Z"}]
-            if pr in self.heads:
+            if pr in {*self.heads, 99}:
+                head = self.roll if pr == 99 else self.heads[pr]
                 comments.append({"id": pr * 10 + 1,
-                    "body": f"verdict: PASS head: {self.heads[pr]} run: {self.run_ids[pr]} by: reviewer",
+                    "body": f"verdict: PASS head: {head} run: {self.run_ids[pr]} by: reviewer",
                     "author_association": "MEMBER", "user": {"login": "reviewer"},
                     "created_at": "2026-01-01T00:41:00Z"})
             self.put(f"issues/{pr}/comments?per_page=100", comments)
@@ -184,15 +195,15 @@ print(value)
             if not real_gates:
                 def checks(_f, _gh, _repo, checked_pr, _head, _git_dir, **_kwargs):
                     self.assertFalse(self.get(f"pulls/{checked_pr}")["merged"],
-                                     "closed prefix must not invoke open-PR CI gates")
+                                     "published batch must not invoke open-PR CI gates")
                 stack.enter_context(patch.object(B, "current_checks", side_effect=checks))
                 stack.enter_context(patch.object(B, "verdict", side_effect=lambda _f, _g, _r, m: self.run_ids[m.pr]))
-            return B.evaluate(F, line=self.line, repo="o/r", pr=pr, head=self.heads[pr],
+            return B.evaluate(F, line=self.line, repo="o/r", pr=pr, head=self.roll if pr == 99 else self.heads[pr],
                               run=self.run_ids[pr], git_dir=str(self.repo),
                               gh=str(self.fake), landing=landing)
 
     def approvals(self):
-        for pr, head in self.heads.items():
+        for pr, head in [*self.heads.items(), (99, self.roll)]:
             review = {"id": 100 + pr, "state": "APPROVED",
                       "user": {"login": "independent-reviewer"},
                       "author_association": "MEMBER", "commit_id": head,
@@ -206,24 +217,24 @@ print(value)
         with self.assertRaisesRegex(F.Unavailable, "^" + reason + "$"):
             self.evaluate(**kwargs)
 
-    def land(self, pr, parent=None, *, wrong=False):
+    def publish_roll(self, parent=None, *, wrong=False):
         parent = parent or self.main
         if wrong:
-            commit = self.change(parent, f"lib/{'one' if pr == 1 else 'two'}.ml", "wrong landing\n")
+            commit = self.change(parent, "lib/one.ml", "wrong landing\n")
         else:
-            tree = self.git("merge-tree", "--write-tree", parent, self.heads[pr]).splitlines()[0]
-            commit = self.git("commit-tree", tree, "-p", parent, input=f"Squash member {pr}\n")
-        self.get(f"pulls/{pr}").update(state="closed", merged=True, merge_commit_sha=commit)
+            tree = self.git("merge-tree", "--write-tree", parent, self.roll).splitlines()[0]
+            commit = self.git("commit-tree", tree, "-p", parent, input="Squash ROLL\n")
+        self.get("pulls/99").update(state="closed", merged=True, merge_commit_sha=commit)
         self.main = commit
         self.put("commits/main", {"sha": commit})
         return commit
 
     def run_landing(self, mode="success", *, check_only=False):
-        """Keep Git/evaluate/exact_run/approval real; stub CI and merge writes.
+        """Keep Git/evaluate/exact_run/approval real; stub CI and the single ROLL write.
 
-        The current_checks stub forbids closed-prefix CI calls. Actual CI gates
+        The current_checks stub forbids published-batch CI calls. Actual CI gates
         and --batch wrappers have separate subprocess controls. The mutating
-        merge-guard command becomes local Git/API-state changes, never an API
+        merge-guard command becomes local Git/API-state changes, never a live API
         write or a build.
         """
         self.fixture.write_text(json.dumps(self.data))
@@ -236,21 +247,22 @@ print(value)
             if len(args) > 1 and Path(args[1]).name == "merge-guard.sh":
                 self.assertNotIn("--check", args)
                 pr = int(args[args.index("--pr") + 1])
-                self.assertEqual(args[args.index("--head") + 1], self.heads[pr])
+                self.assertEqual(pr, 99, "only ROLL may be published")
+                self.assertEqual(args[args.index("--head") + 1], self.roll)
                 self.assertEqual(Path(args[args.index("--batch") + 1]).read_text().strip(), self.line)
                 self.writes.append(pr)
                 if mode != "pending":
                     parent = self.main
                     if mode == "wrong-parent":
                         parent = self.change(parent, "docs/racing.md", "Concurrent main arrival\n")
-                    self.land(pr, parent, wrong=mode == "wrong-tree")
+                    self.publish_roll(parent, wrong=mode == "wrong-tree")
                     self.fixture.write_text(json.dumps(self.data))
                 self.write_read_offsets.append(len(self.calls))
                 return '{"submitted": true}'
             return original_command(args)
         def checks(_f, _gh, _repo, pr, _head, _git_dir, **_kwargs):
             self.assertFalse(self.get(f"pulls/{pr}")["merged"],
-                             "closed prefix must not rerun the open-PR CI gate")
+                             "published batch must not rerun the open-PR CI gate")
         with patch.dict(os.environ, {"GUARD_GH": str(self.fake)}), \
              patch.object(F, "api", self.api), \
              patch.object(F, "api_pages", lambda gh, endpoint: [self.api(gh, endpoint)]), \
@@ -260,28 +272,174 @@ print(value)
             return B.land(F, batch_file=str(batch), repo="o/r", git_dir=str(self.repo),
                           gh=str(self.fake), check_only=check_only)
 
-    def test_combined_tree_and_two_member_landing_reuse_one_roll_run(self):
-        self.approvals()
-        first = self.evaluate(landing=True)
-        self.assertEqual((first["status"], first["landed"], first["roll_run"]), ("fresh", [], 900))
-        self.assertEqual(first["tree"], self.git("rev-parse", self.roll + "^{tree}"))
-        for path, content in [("lib/one.ml", "let one = 1"), ("lib/two.ml", "let two = 2")]:
-            self.assertEqual(self.git("show", first["tree"] + ":" + path), content)
-        self.land(1)
-        second = self.evaluate(pr=2, landing=True)
-        self.assertEqual((second["landed"], second["roll_run"], second["tree"]),
-                         ([1], 900, first["tree"]))
-        self.land(2)
-        self.assertEqual(self.git("rev-parse", self.main + "^{tree}"), first["tree"])
-        self.refusal("batch_candidate_already_merged", pr=2)
 
-    def test_non_next_member_cannot_land(self):
-        self.refusal("batch_candidate_not_next_member", pr=2, landing=True)
 
-    def test_landing_requires_second_members_real_bound_approval(self):
+
+    def test_three_members_publish_only_tested_complete_tree(self):
+        base = self.base
+        for flag in "abc":
+            base = self.change(base, f"flags/{flag}", "0\n")
+        self.base = base
+        self.heads = {n: self.change(base, f"flags/{flag}", "1\n")
+                      for n, flag in enumerate("abc", 1)}
+        self.run_ids[3] = 903
+        self.git("checkout", "-q", "--detach", base)
+        prefixes = []
+        for head in self.heads.values():
+            self.git("merge", "-q", "--no-ff", "--no-edit", head)
+            prefixes.append(self.git("rev-parse", "HEAD"))
+        self.roll = prefixes[-1]
+        self.main = base
+        self.put("commits/main", {"sha": base})
+        for pr, head in [*self.heads.items(), (99, self.roll)]:
+            self.install_pr(pr, head)
+        self.set_line()
         self.approvals()
-        self.put("pulls/2/reviews?per_page=100", [])
-        self.refusal("evidence_read_failed", landing=True)
+        def healthy(commit):
+            a, b, c = (self.git("show", f"{commit}:flags/{flag}") == "1" for flag in "abc")
+            return not (a and b and not c)
+        self.assertTrue(all(healthy(head) for head in self.heads.values()))
+        self.assertFalse(healthy(prefixes[1]), "A+B is an untested failing intermediate state")
+        self.assertTrue(healthy(self.roll))
+        result = self.run_landing()
+        self.assertEqual(self.writes, [99], "member prefixes must never be written to main")
+        self.assertEqual((result["status"], result["absorption_candidates"]), ("published", [1, 2, 3]))
+        self.assertEqual(result["tree"], self.git("rev-parse", self.roll + "^{tree}"))
+        self.assertEqual(self.git("show", "--no-patch", "--format=%P", result["merge_commit"]), base)
+        self.assertTrue(healthy(self.main))
+        self.assertTrue(all(self.get(f"pulls/{pr}")["state"] == "open" for pr in self.heads))
+
+    def test_pending_roll_resume_proves_arrival_before_absorption(self):
+        self.approvals()
+        result = self.run_landing("pending")
+        self.assertEqual((result["status"], result["pr"], self.writes), ("pending", 99, [99]))
+        observation = result["preflight_observation"]
+        self.assertEqual(observation["scope"], "preflight_before_merge_guard_not_write_boundary")
+        self.assertEqual([(row["pr"], row["approval_ids"]) for row in observation["approvals"]],
+                         [(1, [101]), (2, [102]), (99, [199])])
+        self.assertEqual(observation["members"],
+                         [{"pr": pr, "head": head, "run": self.run_ids[pr]} for pr, head in self.heads.items()])
+        self.assertNotIn("absorption_candidates", result)
+        self.assertEqual(self.calls[self.write_read_offsets[0]:], [PREFIX + "/pulls/99"])
+        self.assertEqual(self.main, self.base)
+        repeated = self.run_landing("pending")
+        self.assertEqual((repeated["status"], self.writes, self.main), ("pending", [99], self.base))
+        self.assertNotIn("absorption_candidates", repeated)
+        self.publish_roll()
+        result = self.run_landing()
+        self.assertEqual(self.writes, [], "resume must not submit another merge")
+        self.assertEqual(result["absorption_candidates"], [1, 2])
+        self.assertNotIn("preflight_observation", result)
+        self.assertEqual(result["historical_approval_mapping"], "unavailable_without_saved_preflight_receipt")
+        # Metadata closure is a separate Keeper action, not a code merge.
+        self.get("pulls/1")["state"] = "closed"
+        result = self.run_landing()
+        self.assertEqual((self.writes, result["absorption_candidates"]), ([], [2]))
+
+    def test_roll_arrival_rejects_wrong_parent_tree_and_missing_main_ancestry(self):
+        self.approvals()
+        original = copy.deepcopy(self.data)
+        for mode, reason in [("wrong-parent", "batch_main_changed_at_merge_write"),
+                             ("wrong-tree", "batch_roll_landing_tree_mismatch")]:
+            with self.subTest(mode=mode):
+                self.data = copy.deepcopy(original)
+                self.main = self.base
+                with self.assertRaisesRegex(F.Unavailable, "^" + reason + "$"):
+                    self.run_landing(mode)
+                self.assertEqual(self.writes, [99])
+        self.data = copy.deepcopy(original)
+        self.main = self.base
+        self.publish_roll()
+        self.put("commits/main", {"sha": self.base})
+        with self.assertRaisesRegex(F.Unavailable, "^batch_roll_merge_not_in_main_history$"):
+            self.run_landing()
+        self.assertEqual(self.writes, [])
+
+    def test_roll_resume_rejects_two_parent_merge_with_correct_tree(self):
+        tree = self.git("rev-parse", self.roll + "^{tree}")
+        merged = self.git("commit-tree", tree, "-p", self.base, "-p", self.roll, input="Not a squash\n")
+        self.get("pulls/99").update(state="closed", merged=True, merge_commit_sha=merged)
+        self.put("commits/main", {"sha": merged})
+        with self.assertRaisesRegex(F.Unavailable, "^batch_roll_landing_is_not_a_squash$"):
+            self.run_landing()
+        self.assertEqual(self.writes, [])
+
+    def test_direct_member_landing_and_implicit_manifest_refuse(self):
+        self.approvals()
+        self.refusal("batch_landing_requires_roll", landing=True)
+        with self.assertRaisesRegex(ValueError, "^invalid_batch_line$"):
+            B.parse(self.line.replace("landing: ROLL ", ""))
+
+    def test_roll_needs_own_pass_and_independent_bound_approval(self):
+        self.approvals()
+        original = copy.deepcopy(self.data)
+        self.put("issues/99/comments?per_page=100", self.get("issues/99/comments?per_page=100")[:1])
+        self.put("pulls/99/reviews?per_page=100", [])
+        self.refusal("batch_roll_review_refuses_evidence", pr=99, landing=True)
+        self.data = copy.deepcopy(original)
+        review = self.get("pulls/99/reviews?per_page=100")[0]
+        review["user"]["login"] = "author-99"
+        self.refusal("evidence_read_failed", pr=99, landing=True)
+
+    def test_cli_final_member_approval_dismissal_refuses_without_write(self):
+        self.approvals()
+        review = copy.deepcopy(self.get("pulls/2/reviews?per_page=100")[0])
+        review["state"] = "DISMISSED"
+        # The last main read follows all CI/tree/verdict snapshots. A later
+        # member loses its approval there, immediately before admission.
+        self.data["__after_reads"] = {PREFIX + "/commits/main": {
+            "remaining": 2, "values": {
+                PREFIX + "/pulls/2/reviews": [review],
+                PREFIX + "/pulls/2/reviews?per_page=100": [review],
+                PREFIX + f"/pulls/2/reviews/{review['id']}": review}}}
+        code, receipt = self.cli(check_only=False)
+        self.assertEqual((code, receipt["status"], receipt["reason"]),
+                         (6, "unavailable", "evidence_read_failed"))
+        saved = json.loads(self.fixture.read_text())
+        self.assertFalse(saved["__after_reads"], "dismissal must occur at the final boundary")
+
+    def test_approval_json_receipt_is_read_only_and_requires_merge_check(self):
+        self.approvals()
+        self.fixture.write_text(json.dumps(self.data))
+        args = ["bash", str(HERE / "approve-guard.sh"), "--repo", "o/r", "--pr", "1",
+                "--head", self.heads[1], "--git-dir", str(self.repo), "--receipt-json"]
+        for extra in [[], ["--check"], ["--check", "--merge-check"]]:
+            with self.subTest(extra=extra):
+                result = subprocess.run(args + extra, env=dict(os.environ, GUARD_GH=str(self.fake)),
+                                        capture_output=True, text=True, timeout=20)
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertFalse((self.root / "requests.jsonl").exists(), "invalid modes must stop before API reads")
+        result = subprocess.run(args + ["--merge-check"], env=dict(os.environ, GUARD_GH=str(self.fake)),
+                                capture_output=True, text=True, timeout=20)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(json.loads(result.stdout), {"pr": 1, "head": self.heads[1], "approval_ids": [101]})
+        requests = [json.loads(line) for line in (self.root / "requests.jsonl").read_text().splitlines()]
+        self.assertFalse(any(set(row) & {"-X", "--method", "-f", "-F", "--field", "--raw-field"}
+                             for row in requests))
+
+    def test_published_batch_member_freshness_refuses_in_json_and_ledger(self):
+        self.approvals()
+        self.publish_roll()
+        self.get("actions/runs/901")["created_at"] = "2026-01-01T00:30:00Z"
+        self.fixture.write_text(json.dumps(self.data))
+        batch = self.root / "arrived-batch.txt"
+        batch.write_text(self.line + "\n")
+        args = [sys.executable, str(HERE / "ci-freshness.py"), "--repo", "o/r", "--pr", "1",
+                "--head", self.heads[1], "--run", "901", "--git-dir", str(self.repo), "--batch", str(batch)]
+        for output in ["json", "ledger"]:
+            with self.subTest(output=output):
+                result = subprocess.run(args + ["--format", output],
+                                        env=dict(os.environ, GUARD_GH=str(self.fake)),
+                                        capture_output=True, text=True, timeout=20)
+                self.assertNotIn("Traceback", result.stderr)
+                if output == "json":
+                    self.assertEqual(result.returncode, 6, result.stdout + result.stderr)
+                    receipt = json.loads(result.stdout)
+                    self.assertEqual((receipt["status"], receipt["reason"]),
+                                     ("unavailable", "batch_roll_already_merged"))
+                    self.assertNotIn("absorption_candidates", receipt)
+                else:
+                    self.assertEqual((result.returncode, result.stdout.strip()), (0, "unknown:freshness\t?"))
 
     def test_red_roll_or_member_run_refuses(self):
         for run in [900, 901, 902]:
@@ -363,38 +521,6 @@ print(value)
                 self.data["__responses"] = {endpoint: [original, original + [refusal]]}
                 self.refusal("batch_roll_review_refuses_evidence")
 
-    def test_landed_head_current_and_late_refusals_stop_remaining_member(self):
-        self.land(1)
-        original = copy.deepcopy(self.data)
-        for state in ["CHANGES_REQUESTED", "FAIL", "HOLD"]:
-            for late in [False, True]:
-                with self.subTest(state=state, late=late):
-                    self.data = copy.deepcopy(original)
-                    self.responses.clear()
-                    self.calls.clear()
-                    if state == "CHANGES_REQUESTED":
-                        reviews = [{"id": 1003, "state": state, "user": {"login": "reviewer"}}]
-                        if late:
-                            self.later("pulls/1/reviews?per_page=100", reviews)
-                        else:
-                            self.put("pulls/1/reviews?per_page=100", reviews)
-                        reason = "batch_member_has_open_change_request"
-                    else:
-                        path = "issues/1/comments"
-                        comments = copy.deepcopy(self.get(path))
-                        refusal = {"id": 1004, "created_at": "2026-01-01T00:50:00Z",
-                                   "author_association": "MEMBER", "user": {"login": "reviewer"},
-                                   "body": f"verdict: {state} head: {self.heads[1]} run: 901 by: reviewer"}
-                        if late:
-                            self.data["__responses"] = {PREFIX + "/" + path: [comments, comments + [refusal]]}
-                        else:
-                            self.put(path + "?per_page=100", comments + [refusal])
-                        reason = "batch_landed_member_review_refuses_evidence"
-                    self.refusal(reason, pr=2)
-                    # Historical exact-run reads may validate a replacement
-                    # PASS; evaluate's current_checks stub rejects any attempt
-                    # to apply the open-PR CI gate to this closed prefix.
-                    self.assertNotIn(PREFIX + f"/commits/{self.heads[1]}/check-runs?per_page=100", self.calls)
 
     def test_external_shared_and_overlap_changes_refuse(self):
         for path in ["config/runtime.toml", "specs/auth/AuthIdentityFSM.tla", "lib/one.ml"]:
@@ -406,8 +532,7 @@ print(value)
         self.approvals()
         self.main = self.change(self.base, "docs/unrelated.md", "External note\n")
         self.put("commits/main", {"sha": self.main})
-        self.land(1)
-        result = self.evaluate(pr=2, landing=True)
+        result = self.evaluate(pr=99, landing=True)
         self.assertEqual(result["external_paths"], ["docs/unrelated.md"])
         self.assertEqual(self.git("show", result["tree"] + ":docs/unrelated.md"), "External note")
 
@@ -423,27 +548,8 @@ print(value)
         self.set_line()
         self.refusal("batch_roll_tree_does_not_match_members")
 
-    def test_out_of_order_or_wrong_squash_refuses(self):
-        self.land(2)
-        self.refusal("batch_landed_out_of_order")
-        self.get("pulls/2").update(state="open", merged=False, merge_commit_sha=None)
-        self.main = self.base
-        self.land(1, wrong=True)
-        self.refusal("batch_member_landing_tree_mismatch", pr=2)
 
-    def test_api_landing_must_exist_in_main_history(self):
-        self.land(1)
-        self.put("commits/main", {"sha": self.base})
-        self.refusal("batch_member_merge_not_in_main_history", pr=2)
 
-    def test_resumed_landing_rejects_two_parent_merge_with_correct_tree(self):
-        tree = self.git("merge-tree", "--write-tree", self.base, self.heads[1]).splitlines()[0]
-        merged = self.git("commit-tree", tree, "-p", self.base, "-p", self.heads[1],
-                          input="Normal merge, not the required squash\n")
-        self.get("pulls/1").update(state="closed", merged=True, merge_commit_sha=merged)
-        self.put("commits/main", {"sha": merged})
-        self.assertEqual(self.git("rev-parse", merged + "^{tree}"), tree)
-        self.refusal("batch_member_landing_is_not_a_squash", pr=2)
 
     def test_missing_history_refuses(self):
         self.main = self.change(self.base, "docs/unrelated.md", "External note\n")
@@ -561,8 +667,9 @@ print(value)
                             "author_association": "MEMBER", "user": {"login": "reviewer"}}])
                     self.fixture.write_text(json.dumps(self.data))
                     result = subprocess.run([
-                        "bash", str(HERE / script), "--check", "--repo", "o/r", "--pr", "1",
-                        "--head", self.heads[1], "--run", "901", "--git-dir", str(self.repo),
+                        "bash", str(HERE / script), "--check", "--repo", "o/r", "--pr", "99" if script == "merge-guard.sh" else "1",
+                        "--head", self.roll if script == "merge-guard.sh" else self.heads[1],
+                        "--run", "900" if script == "merge-guard.sh" else "901", "--git-dir", str(self.repo),
                         "--batch", str(batch)], env=dict(os.environ, GUARD_GH=str(self.fake)),
                         capture_output=True, text=True, timeout=120)
                     if state == "valid":
@@ -572,42 +679,16 @@ print(value)
                         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
                         reason = ("batch_roll_review_refuses_evidence" if state == "roll-fail"
                                   else "batch_member_has_open_change_request")
+                        if script == "merge-guard.sh" and state == "roll-cr":
+                            reason = "open CHANGES_REQUESTED"
                         self.assertIn(reason, result.stdout + result.stderr)
         requests = [json.loads(line) for line in (self.root / "requests.jsonl").read_text().splitlines()]
         self.assertTrue(requests)
         self.assertFalse(any(set(row) & {"-X", "--method", "-f", "-F", "--field", "--raw-field"}
                              for row in requests), "check wrappers must never attempt an API write")
 
-    def test_land_entry_proves_ordered_squashes_and_final_arrival(self):
-        self.approvals()
-        result = self.run_landing()
-        self.assertEqual(self.writes, [1, 2])
-        self.assertEqual((result["status"], result["landed"], result["roll_run"]),
-                         ("fresh", [1, 2], 900))
-        self.assertEqual(result["tree"], self.git("rev-parse", self.roll + "^{tree}"))
-        first = self.get("pulls/1")["merge_commit_sha"]
-        second = self.get("pulls/2")["merge_commit_sha"]
-        self.assertEqual(self.git("show", "--no-patch", "--format=%P", first), self.base)
-        self.assertEqual(self.git("show", "--no-patch", "--format=%P", second), first)
 
-    def test_land_entry_returns_pending_after_one_read_without_second_write(self):
-        self.approvals()
-        result = self.run_landing("pending")
-        self.assertEqual((result["status"], result["pr"], self.writes), ("pending", 1, [1]))
-        self.assertEqual(self.calls[self.write_read_offsets[0]:], [PREFIX + "/pulls/1"])
-        self.assertEqual(self.get("commits/main")["sha"], self.base)
 
-    def test_land_entry_stops_after_wrong_parent_or_tree(self):
-        self.approvals()
-        original = copy.deepcopy(self.data)
-        for mode, reason in [("wrong-parent", "batch_main_changed_at_merge_write"),
-                             ("wrong-tree", "batch_member_landing_tree_mismatch")]:
-            with self.subTest(mode=mode):
-                self.data = copy.deepcopy(original)
-                self.main = self.base
-                with self.assertRaisesRegex(F.Unavailable, "^" + reason + "$"):
-                    self.run_landing(mode)
-                self.assertEqual(self.writes, [1], "failed arrival must stop before member 2")
 
     def test_land_entry_missing_second_approval_refuses_before_any_write(self):
         self.approvals()
@@ -672,9 +753,9 @@ print(value)
         self.assertEqual((code, receipt["reason"]), (6, "pr_check_run_unavailable"))
 
     def test_cli_wrong_landing_tree_is_four(self):
-        self.land(1, wrong=True)
+        self.publish_roll(wrong=True)
         code, receipt = self.cli()
-        self.assertEqual((code, receipt["reason"]), (4, "batch_member_landing_tree_mismatch"))
+        self.assertEqual((code, receipt["reason"]), (4, "batch_roll_landing_tree_mismatch"))
 
     def test_cli_external_shared_input_is_five(self):
         self.main = self.change(self.base, "config/runtime.toml", "external shared input\n")
@@ -702,7 +783,7 @@ print(value)
     def test_cli_status_keeps_success_and_pending_distinct(self):
         # The asynchronous pending transition itself uses the real-Git land
         # control above; here hold its result fixed at the public CLI boundary.
-        for status, code in [("checked", 0), ("pending", 7), ("unexpected", 2)]:
+        for status, code in [("checked", 0), ("published", 0), ("pending", 7), ("unexpected", 2)]:
             with self.subTest(status=status), patch.object(sys, "argv", [
                     "batch_evidence.py", "--repo", "o/r", "--batch", "unused",
                     "--git-dir", str(self.repo)]), \
@@ -710,85 +791,7 @@ print(value)
                 self.assertEqual(B.main(), code)
                 self.assertEqual(json.loads(output.getvalue())["status"], status)
 
-    def test_cli_check_revalidates_later_member_pass_after_group_evidence(self):
-        self.approvals()
-        original = copy.deepcopy(self.data)
-        comments_path = PREFIX + "/issues/2/comments"
-        runs_path = PREFIX + f"/actions/runs?head_sha={self.heads[2]}&event=pull_request&per_page=100"
-        for state, expected in [("missing", 1), ("failed", 6), ("superseded", 6), ("valid", 0)]:
-            with self.subTest(state=state):
-                self.data = copy.deepcopy(original)
-                (self.root / "requests.jsonl").write_text("")
-                cited = 999 if state == "missing" else 903
-                old_comments = copy.deepcopy(self.data[comments_path])
-                new_comments = old_comments + [{
-                    "id": 2001, "created_at": "2026-01-01T00:51:00Z", "author_association": "MEMBER",
-                    "user": {"login": "reviewer"},
-                    "body": f"verdict: PASS head: {self.heads[2]} run: {cited} by: reviewer"}]
-                old_runs = copy.deepcopy(self.data[runs_path])
-                new_runs = copy.deepcopy(old_runs)
-                if state != "missing":
-                    replacement = copy.deepcopy(self.get("actions/runs/902"))
-                    replacement.update(id=903, run_number=11,
-                                       conclusion="failure" if state == "failed" else "success")
-                    self.put("actions/runs/903", replacement)
-                    self.put("actions/runs/903/jobs?per_page=100",
-                             copy.deepcopy(self.get("actions/runs/902/jobs?per_page=100")))
-                    new_runs["workflow_runs"].append(replacement)
-                    if state == "superseded":
-                        new_runs["workflow_runs"].append(dict(replacement, id=904, run_number=12))
-                # Member 2 is read at both group snapshots before land() reads
-                # its PASS again to prepare a command. Change only that later
-                # read, with the corresponding current-run snapshot.
-                self.data["__responses"] = {
-                    comments_path: [old_comments, old_comments, new_comments],
-                    runs_path: [old_runs, old_runs, new_runs]}
-                code, receipt = self.cli()
-                self.assertEqual(code, expected, receipt)
-                if state == "valid":
-                    self.assertEqual((receipt["status"], receipt["pending"]), ("checked", [1, 2]))
-                else:
-                    reason = ("evidence_read_failed" if state == "missing"
-                              else "batch_run_not_current_successful_exact_pr_check")
-                    self.assertEqual((receipt["status"], receipt["reason"]), ("unavailable", reason))
 
-    def test_cli_late_merge_guard_refusals_preserve_batch_exit_codes(self):
-        self.approvals()
-        original = copy.deepcopy(self.data)
-        for kind, expected in [("roll", 3), ("landing", 4), ("overlap", 5), ("member", 6)]:
-            with self.subTest(kind=kind):
-                self.data = copy.deepcopy(original)
-                self.main = self.base
-                (self.root / "requests.jsonl").write_text("")
-                if kind in {"roll", "member"}:
-                    # Member 2 now has one additional exact-run read when
-                    # land() binds its reread PASS before preparing commands.
-                    run_id, successful_reads = (900, 6) if kind == "roll" else (902, 5)
-                    endpoint = PREFIX + f"/actions/runs/{run_id}"
-                    good = copy.deepcopy(self.data[endpoint])
-                    bad = dict(good, conclusion="failure")
-                    self.data["__responses"] = {endpoint: [good] * successful_reads + [bad]}
-                elif kind == "overlap":
-                    moved = self.change(self.base, "config/runtime.toml", "late overlap\n")
-                    self.data["__responses"] = {PREFIX + "/commits/main":
-                                               [{"sha": self.base}] * 4 + [{"sha": moved}]}
-                else:
-                    # Resume at member2. The prefix is valid during both
-                    # group preflights, then its API-recorded squash changes.
-                    self.land(1)
-                    good_main = self.main
-                    wrong = self.change(self.base, "lib/one.ml", "wrong landed tree\n")
-                    good_pull = copy.deepcopy(self.get("pulls/1"))
-                    bad_pull = dict(good_pull, merge_commit_sha=wrong)
-                    self.data["__responses"] = {
-                        PREFIX + "/commits/main": [{"sha": good_main}] * 4 + [{"sha": wrong}],
-                        PREFIX + "/pulls/1": [good_pull] * 5 + [bad_pull]}
-                code, receipt = self.cli(check_only=False)
-                self.assertEqual((code, receipt["status"], receipt["reason"]),
-                                 (expected, "unavailable", "evidence_read_failed"), receipt)
-                requests = [json.loads(line) for line in (self.root / "requests.jsonl").read_text().splitlines()]
-                self.assertTrue(any("user" in row for row in requests),
-                                "refusal must follow entry into the actual merge-guard approval path")
 
     def test_ordinary_approval_check_refusal_keeps_exit_two(self):
         self.get(f"commits/{self.heads[1]}/check-runs?per_page=100")["check_runs"][0]["conclusion"] = "failure"
@@ -806,14 +809,16 @@ print(value)
         self.get("pulls/1")["changed_files"] = 1
         self.put("pulls/1/files?per_page=100", [{"filename": "lib/one.ml"}])
         self.get("actions/runs/901")["created_at"] = "2026-01-01T00:30:00Z"
+        self.get("actions/runs/900")["created_at"] = "2026-01-01T00:30:00Z"
         batch = self.root / "auth-batch.txt"
         batch.write_text(self.line + "\n")
         for use_batch, expected in [(True, 1), (False, 4)]:
             with self.subTest(batch=use_batch):
                 self.fixture.write_text(json.dumps(self.data))
                 (self.root / "requests.jsonl").write_text("")
-                args = ["bash", str(HERE / "merge-guard.sh"), "--repo", "o/r", "--pr", "1",
-                        "--head", self.heads[1], "--run", "901", "--git-dir", str(self.repo)]
+                args = ["bash", str(HERE / "merge-guard.sh"), "--repo", "o/r", "--pr", "99" if use_batch else "1",
+                        "--head", self.roll if use_batch else self.heads[1],
+                        "--run", "900" if use_batch else "901", "--git-dir", str(self.repo)]
                 if use_batch:
                     args.extend(["--batch", str(batch)])
                 result = subprocess.run(args, env=dict(os.environ, GUARD_GH=str(self.fake)),
@@ -822,30 +827,8 @@ print(value)
                 writes = [json.loads(line) for line in (self.root / "requests.jsonl").read_text().splitlines()
                           if '-X' in json.loads(line)]
                 self.assertEqual(len(writes), 1, "all guards must pass before the simulated API refusal")
-                self.assertIn(PREFIX + "/pulls/1/merge-async", writes[0])
+                self.assertIn(PREFIX + f"/pulls/{99 if use_batch else 1}/merge-async", writes[0])
 
-    def test_check_batch_enforces_next_member_and_all_pending_approvals(self):
-        self.approvals()
-        self.data["user"] = {"login": "operator"}
-        for run_id in self.run_ids.values():
-            self.get(f"actions/runs/{run_id}")["created_at"] = "2026-01-01T00:30:00Z"
-        batch = self.root / "check-gates.txt"
-        batch.write_text(self.line + "\n")
-        for pr, reason in [(2, "batch_candidate_not_next_member"), (1, "evidence_read_failed")]:
-            with self.subTest(pr=pr):
-                if pr == 1:
-                    self.put("pulls/2/reviews?per_page=100", [])
-                self.fixture.write_text(json.dumps(self.data))
-                result = subprocess.run([
-                    "bash", str(HERE / "merge-guard.sh"), "--check", "--batch", str(batch),
-                    "--repo", "o/r", "--pr", str(pr), "--head", self.heads[pr],
-                    "--run", str(self.run_ids[pr]), "--git-dir", str(self.repo)],
-                    env=dict(os.environ, GUARD_GH=str(self.fake)), capture_output=True, text=True, timeout=60)
-                self.assertEqual(result.returncode, 6, result.stdout + result.stderr)
-                self.assertIn(reason, result.stdout + result.stderr)
-                self.assertNotIn("WOULD MERGE", result.stdout)
-        requests = [json.loads(line) for line in (self.root / "requests.jsonl").read_text().splitlines()]
-        self.assertFalse(any('-X' in row for row in requests))
 
     def test_restored_member_path_still_blocks_external_main_change(self):
         content = "let a = 0\n" + "".join(f"let pad{i} = 0\n" for i in range(12)) + "let z = 0\n"
@@ -881,65 +864,7 @@ print(value)
                                                   content.replace("let z = 0", "let z = 1"))})
         self.refusal("batch_nonmember_main_change_invalidates_roll")
 
-    def test_landed_replacement_pass_requires_exact_successful_run(self):
-        self.land(1)
-        failed = copy.deepcopy(self.get("actions/runs/901"))
-        failed.update(id=904, run_number=11, conclusion="failure")
-        self.put("actions/runs/904", failed)
-        original = copy.deepcopy(self.data)
-        for run_id, reason in [(999, "evidence_read_failed"),
-                               (902, "batch_run_not_current_successful_exact_pr_check"),
-                               (904, "batch_run_not_current_successful_exact_pr_check")]:
-            for late in [False, True]:
-                with self.subTest(run=run_id, late=late):
-                    self.data = copy.deepcopy(original)
-                    self.responses.clear()
-                    if run_id == 904:
-                        run_path = f"actions/runs?head_sha={self.heads[1]}&event=pull_request&per_page=100"
-                        newer_runs = {"workflow_runs": [copy.deepcopy(self.get("actions/runs/901")), failed]}
-                        if late:
-                            self.later(run_path, newer_runs)
-                        else:
-                            self.put(run_path, newer_runs)
-                    comments = copy.deepcopy(self.get("issues/1/comments"))
-                    refusal = {"id": 1005, "created_at": "2026-01-01T00:50:00Z",
-                               "author_association": "MEMBER", "user": {"login": "reviewer"},
-                               "body": f"verdict: FAIL head: {self.heads[1]} run: 901 by: reviewer"}
-                    replacement = dict(refusal, id=1006, created_at="2026-01-01T00:51:00Z",
-                                       body=f"verdict: PASS head: {self.heads[1]} run: {run_id} by: reviewer")
-                    if late:
-                        self.data["__responses"] = {PREFIX + "/issues/1/comments":
-                                                   [comments, comments + [refusal, replacement]]}
-                    else:
-                        self.put("issues/1/comments?per_page=100", comments + [refusal, replacement])
-                    self.refusal(reason, pr=2)
 
-    def test_landed_replacement_pass_accepts_valid_exact_head_run(self):
-        self.land(1)
-        replacement = copy.deepcopy(self.get("actions/runs/901"))
-        replacement.update(id=903, run_number=11, check_suite_id=1903)
-        self.put("actions/runs/903", replacement)
-        self.put("actions/runs/903/jobs?per_page=100", copy.deepcopy(self.get("actions/runs/901/jobs?per_page=100")))
-        original = copy.deepcopy(self.data)
-        for late in [False, True]:
-            with self.subTest(late=late):
-                self.data = copy.deepcopy(original)
-                self.responses.clear()
-                comments = copy.deepcopy(self.get("issues/1/comments?per_page=100"))
-                reviewed = comments + [
-                    {"id": 1007, "created_at": "2026-01-01T00:50:00Z", "author_association": "MEMBER",
-                     "user": {"login": "reviewer"}, "body": f"verdict: HOLD head: {self.heads[1]} by: reviewer"},
-                    {"id": 1008, "created_at": "2026-01-01T00:51:00Z", "author_association": "MEMBER",
-                     "user": {"login": "reviewer"}, "body": f"verdict: PASS head: {self.heads[1]} run: 903 by: reviewer"}]
-                run_path = f"actions/runs?head_sha={self.heads[1]}&event=pull_request&per_page=100"
-                newer_runs = {"workflow_runs": [copy.deepcopy(self.get("actions/runs/901")), replacement]}
-                if late:
-                    self.data["__responses"] = {PREFIX + "/issues/1/comments": [comments, reviewed]}
-                    self.later(run_path, newer_runs)
-                else:
-                    self.put("issues/1/comments?per_page=100", reviewed)
-                    self.put(run_path, newer_runs)
-                self.assertEqual(self.evaluate(pr=2)["status"], "fresh")
 
 
 if __name__ == "__main__":

@@ -376,7 +376,7 @@ def main():
                         help="Cited run; omitted only for pre-review queue inspection")
     parser.add_argument("--format", choices=("json", "ledger"), default="json")
     parser.add_argument("--batch", help="File containing the published immutable batch line")
-    parser.add_argument("--landing", action="store_true", help="Require the next unmerged batch member")
+    parser.add_argument("--landing", action="store_true", help="Require the ROLL publication target and every bound approval")
     args = parser.parse_args()
     batch_code = None
     try:

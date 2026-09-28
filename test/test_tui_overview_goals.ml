@@ -445,12 +445,12 @@ let test_a_goal_without_children_is_refused () =
 
 let test_an_empty_tree_is_one_headline () =
   let empty = Types.Goals_read [] in
-  check int "an empty tree asks for three rows" 3
+  check int "an empty tree asks for one row" 1
     (Goals.wanted_rows ~now:captured_at ~localtime:Unix.gmtime
        ~inner_width:120 ~tasks:(Tasks.Rows_read live_tasks)
        ~status_of_id:(status_of_id live_tasks) empty);
   check (list string) "the empty section gives the next fact"
-    [ "Goals (0)"; ""; "No goal is executing or verifying." ]
+    [ "Goals (0)   No goal is executing or verifying." ]
     (draw empty)
 
 let test_an_unknown_phase_is_refused () =

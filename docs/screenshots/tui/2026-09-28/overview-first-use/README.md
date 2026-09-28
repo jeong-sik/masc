@@ -1,3 +1,8 @@
+> Historical evidence: these captures precede the review fixes that add the
+> current endpoint to the create command, keep empty Goals on one row, and
+> distinguish unread Attention. They do not verify the current PR head.
+> Current-head 80/140-column captures are pending the focused CI PTY run.
+
 # Overview first-use PTY frames
 
 These PNGs replay actual 80×32 and 140×32 PTY frames from [Test run 36384455321, job 108806799941](https://github.com/jeong-sik/masc/actions/runs/36384455321/job/108806799941). Run head: `81c14def69cbefbf613c672b2e7d557083467d38`. The targeted `test_tui_keyboard_overview_pty` suite passed. Text and cell positions come from the captured frames; DejaVu Sans Mono and monochrome colour are used for this image replay. The linked run's `suite-runner-log` artifact contains the raw ANSI frames as `OVERVIEW_FRAME_*_B64`.

@@ -82,6 +82,8 @@ def first_use_frames(executable: str) -> None:
                 unread = capture(
                     "UNREAD", columns, b"Overview briefing not read yet"
                 )
+                if b"Attention (0)" in unread:
+                    raise AssertionError("an unread briefing claimed zero attention")
                 if b"Start here (2 steps)" in unread:
                     raise AssertionError("an unread briefing claimed an empty fleet")
         finally:
@@ -94,7 +96,7 @@ def first_use_frames(executable: str) -> None:
             visible = capture("EMPTY", columns, b"Start here (2 steps)")
             for expected in (
                 b"Start here (2 steps)",
-                b"masc keeper-create --edit",
+                b"masc keeper-create --edit --host 127.0.0.1 --port ",
                 b"Goals (0)",
                 b"No goal is executing or verifying.",
                 b"Nothing needs attention.",
@@ -107,9 +109,9 @@ def first_use_frames(executable: str) -> None:
                         f"{columns} columns omitted {expected!r}: {visible!r}"
                     )
             count = re.search(rb"Plan usage \((\d+)/(\d+) accounts shown\)", visible)
-            if count is None or tuple(int(part) for part in count.groups()) != (4, 9):
-                raise AssertionError(f"{columns} columns did not show 4/9 accounts: {visible!r}")
-            if b"5 more accounts do not fit at this height." not in visible:
+            if count is None or tuple(int(part) for part in count.groups()) != (6, 9):
+                raise AssertionError(f"{columns} columns did not show 6/9 accounts: {visible!r}")
+            if b"3 more accounts do not fit at this height." not in visible:
                 raise AssertionError(f"{columns} columns hid the usage count: {visible!r}")
             left = [line.split(b"\xe2\x94\x82", 1)[0].strip() for line in visible.splitlines()]
             attention = next(i for i, line in enumerate(left) if b"Attention (0)" in line)
@@ -117,7 +119,7 @@ def first_use_frames(executable: str) -> None:
             if left[attention + 1] or left[tasks - 1] or left[tasks + 1]:
                 raise AssertionError(f"{columns} columns lost approved section spacing: {visible!r}")
         narrow = keyboard.resize_and_wait(
-            process, fd, output, rows=22, columns=80,
+            process, fd, output, rows=20, columns=80,
             needle=b"Plan usage", controls=(keyboard.FULL_REDRAW,),
             final_cursor=b"\x1b[?25l",
         )

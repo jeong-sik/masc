@@ -217,7 +217,7 @@ let wanted_rows ~now ~localtime ~inner_width ~tasks ~status_of_id
   | Types.Goals_failed _ -> 1
   | Types.Goals_read goals ->
       let goals = drawn_goals goals in
-      if goals = [] then 3
+      if goals = [] then 1
       else
         1
         + List.fold_left
@@ -280,7 +280,7 @@ let lines ~now ~localtime ~inner_width ~rows ~tasks ~status_of_id (reading : Typ
                 (Theme.warn ()) (Terminal_text.single_line reason) Ansi.reset cut
         in
         if goal_count = 0 then
-          [ title; ""; "No goal is executing or verifying." ]
+          [ title ^ "   No goal is executing or verifying." ]
         else headline :: shown_lines
   in
   take rows all

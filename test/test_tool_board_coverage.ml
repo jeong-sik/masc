@@ -159,8 +159,14 @@ let test_board_error_to_string () =
      arms rendered under one label would have passed both. *)
   let s = Board_tool.board_error_to_string (Board.Post_not_found "test-id") in
   Alcotest.(check string) "post_not_found renders its own label"
-    ("Post not found: test-id. Get the exact post_id from masc_board_list or "
-     ^ "masc_board_search, then use masc_board_post_get to read the current post.") s;
+    "Post not found: test-id. Use an id masc_board_list or masc_board_search \
+     returns; a guessed id fails here."
+    s;
+  (* The lookup miss is the first place a caller learns the address was made
+     up, so it names the recovery the way [Comment_not_found] does (#39448). *)
+  Alcotest.(check bool)
+    "post_not_found names a way to find the id again" true
+    (String_util.contains_substring s "masc_board_search");
   let s2 = Board_tool.board_error_to_string (Board.Validation_error "bad") in
   Alcotest.(check string) "validation_error renders its own label"
     "Validation error: bad" s2;
@@ -2954,8 +2960,8 @@ let test_post_get_not_found () =
   check_failure_class "wrong reference needs correction" (Some "workflow_rejection") result;
   Alcotest.(check string) "lookup miss does not invent deletion or expiry"
     ("Post not found: " ^ wrong_id
-     ^ ". Get the exact post_id from masc_board_list or masc_board_search, then "
-     ^ "use masc_board_post_get to read the current post.")
+     ^ ". Use an id masc_board_list or masc_board_search returns; a guessed id \
+        fails here.")
     (Tool_result.message result);
   let ok, _ = dispatch "masc_board_post_get"
     (make_args [("post_id", `String post_id)]) in
@@ -3080,6 +3086,39 @@ let test_comment_add_anonymous_author_rejected () =
   Alcotest.(check bool) "anonymous author rejected" false ok;
   Alcotest.(check bool) "error mentions author" true
     (String_util.contains_substring body "author")
+
+(* #39448: masc_board_post and masc_board_post_update already take [body] as an
+   alias for [content]; the comment handler took only [content], so a caller
+   that sent [body] was refused (38 ledger calls, 0 successes). The comment
+   handler now shares post's body/content rule. *)
+let test_comment_add_accepts_body () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let ok, created =
+    dispatch
+      "masc_board_post"
+      (make_args
+         [ "content", `String "comment body alias target"
+         ; "author", `String "post-author"
+         ])
+  in
+  Alcotest.(check bool) "target post created" true ok;
+  let post_id =
+    Yojson.Safe.Util.(parse_create_response_json created |> member "id" |> to_string)
+  in
+  let ok, body =
+    dispatch
+      "masc_board_comment"
+      (make_args
+         [ "post_id", `String post_id
+         ; "body", `String "sent as body, not content"
+         ; "author", `String "commenter"
+         ])
+  in
+  Alcotest.(check bool) "comment with body accepted" true ok;
+  Alcotest.(check bool) "comment body echoed" true
+    (String_util.contains_substring body "sent as body, not content")
 
 let test_comment_vote_missing () =
   with_eio @@ fun env ->
@@ -3514,6 +3553,8 @@ let () =
             test_comment_add_missing_author_rejected;
           Alcotest.test_case "comment anonymous author rejected" `Quick
             test_comment_add_anonymous_author_rejected;
+          Alcotest.test_case "comment accepts body alias" `Quick
+            test_comment_add_accepts_body;
           Alcotest.test_case "comment vote missing" `Quick test_comment_vote_missing;
           Alcotest.test_case "comment vote not found" `Quick
             test_comment_vote_not_found;

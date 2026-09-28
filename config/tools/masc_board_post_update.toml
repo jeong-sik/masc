@@ -20,8 +20,8 @@ identity_fields = ["author"]
 [[params]]
 name = "post_id"
 type = "string"
+pattern = "^[a-zA-Z0-9_-]{1,64}$"
 required = true
-pattern = "^[A-Za-z0-9_-]{1,64}$"
 description = """
 Exact post_id from masc_board_list or masc_board_post_get; do not guess. New IDs use p- plus 32 lowercase hex digits.
 """

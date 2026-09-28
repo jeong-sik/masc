@@ -136,6 +136,7 @@ let script_text ~capture steps =
           ; "XDG_RUNTIME_DIR", Filename.concat home ".local/run"
           ];
         line "[ -z \"${META_API_KEY+x}\" ] || exit 96";
+        line "[ \"$TBH_CREDENTIAL_BACKEND\" = file ] || exit 93";
         line (Printf.sprintf "case \"$XDG_CONFIG_HOME\" in %s/*) ;; *) exit 94 ;; esac"
           (shell_quote (Filename.concat (Unix.realpath home) ".local/state/masc/muse-config")));
         line "[ -r \"$XDG_CONFIG_HOME/muse/auth.json\" ] || exit 94";
@@ -366,6 +367,7 @@ let test_selected_homes_do_not_inherit_other_account_roots () =
     ; "XDG_STATE_HOME", "/synthetic/ambient-state"
     ; "XDG_RUNTIME_DIR", "/synthetic/ambient-run"
     ; "META_API_KEY", "synthetic-payg-key"
+    ; "TBH_CREDENTIAL_BACKEND", "keychain"
     ]
   in
   let previous = List.map (fun (key, _) -> key, Sys.getenv_opt key) injected in

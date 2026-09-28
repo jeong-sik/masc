@@ -55,18 +55,20 @@ let press form keys =
     (fun outcome key ->
       match outcome with
       | F.Editing form -> F.key form key
-      | F.Cancelled | F.Submitted _ -> outcome)
+      | F.Cancelled | F.Submitted _ | F.Copy _ -> outcome)
     (F.Editing form) keys
 
 let editing = function
   | F.Editing form -> form
   | F.Cancelled -> Alcotest.fail "the form closed"
   | F.Submitted _ -> Alcotest.fail "the form submitted"
+  | F.Copy _ -> Alcotest.fail "the form copied"
 
 let submitted = function
   | F.Submitted form -> form
   | F.Editing _ -> Alcotest.fail "enter on the last field did not submit"
   | F.Cancelled -> Alcotest.fail "the form closed"
+  | F.Copy _ -> Alcotest.fail "the form copied"
 
 (* Submit, then declare against [current] the way the key loop does. *)
 let declare ?(current = fixture) form keys =
@@ -76,16 +78,21 @@ let refusal = function
   | Error form -> form
   | Ok { F.id; _ } -> Alcotest.failf "%s was declared" id
 
-let row_with prefix form =
-  List.exists (fun row -> String.starts_with ~prefix row) (F.rows form)
+(* The body of an 80-column and of a 120-column pane, as the frame gives it. *)
+let width_80 = Masc_tui_frame.inner_width ~cols:80
+let width_120 = Masc_tui_frame.inner_width ~cols:120
 
-let row_mentions text form =
-  let contains row =
-    let n = String.length text in
-    let rec at i = i + n <= String.length row && (String.sub row i n = text || at (i + 1)) in
-    at 0
-  in
-  List.exists contains (F.rows form)
+let rows form = F.rows ~width:width_80 form
+
+let contains text row =
+  let n = String.length text in
+  let rec at i = i + n <= String.length row && (String.sub row i n = text || at (i + 1)) in
+  at 0
+
+let row_with prefix form =
+  List.exists (fun row -> String.starts_with ~prefix row) (rows form)
+
+let row_mentions text form = List.exists (contains text) (rows form)
 
 let account_home text id =
   match Otoml.Parser.from_string_result text with
@@ -123,7 +130,7 @@ is-non-interactive = true
 |}
   in
   match declare ~current (opened ()) keys with
-  | Error form -> Alcotest.failf "refused: %s" (String.concat " / " (F.rows form))
+  | Error form -> Alcotest.failf "refused: %s" (String.concat " / " (rows form))
   | Ok { F.id; text; sign_in } ->
     Alcotest.(check string) "the suggested id" "codex_subscription_2" id;
     Alcotest.(check bool) "the change made meanwhile is kept" true
@@ -139,17 +146,20 @@ is-non-interactive = true
               b.provider_id = "codex_subscription_2" && b.model_id = "gpt-5.6")
             config.Runtime_schema.bindings));
     Alcotest.(check (option string)) "the sign-in is a shell command for that home"
-      (Some "CODEX_HOME=/home/op/.codex-account2 codex login")
-      (Option.map (fun c -> String.concat "" (String.split_on_char '\'' c)) sign_in)
+      (Some "(export CODEX_HOME=/home/op/.codex-account2 && codex login)")
+      (Option.map
+         (fun s -> String.concat "" (String.split_on_char '\'' (F.command s)))
+         sign_in)
 
 let test_a_home_with_a_space_is_one_argument () =
   let keys = [ "\r"; "\r" ] @ typed "/home/op/My Codex" @ [ "\r" ] in
   match declare (opened ()) keys with
-  | Ok { F.sign_in = Some command; _ } ->
+  | Ok { F.sign_in = Some s; _ } ->
     Alcotest.(check string) "the home is quoted"
-      "CODEX_HOME='/home/op/My Codex' codex login" command
+      "(export CODEX_HOME='/home/op/My Codex' && codex login)" (F.command s);
+    Alcotest.(check (option string)) "codex logs in by itself" None (F.then_type s)
   | Ok { F.sign_in = None; _ } -> Alcotest.fail "no sign-in for Codex"
-  | Error form -> Alcotest.failf "refused: %s" (String.concat " / " (F.rows form))
+  | Error form -> Alcotest.failf "refused: %s" (String.concat " / " (rows form))
 
 let test_a_refusal_keeps_the_form_on_its_field () =
   let form =
@@ -184,7 +194,7 @@ let test_a_provider_gone_from_the_file_is_refused () =
 let test_esc_abandons () =
   match press (opened ()) (typed "x" @ [ "esc" ]) with
   | F.Cancelled -> ()
-  | F.Editing _ | F.Submitted _ -> Alcotest.fail "esc did not close the form"
+  | F.Editing _ | F.Submitted _ | F.Copy _ -> Alcotest.fail "esc did not close the form"
 
 let test_a_paste_is_one_line () =
   let form = editing (press (opened ()) [ "\r"; "\r" ]) in
@@ -197,10 +207,9 @@ let test_a_paste_is_one_line () =
       (Some "/home/op/.codex-pasted") (account_home text id)
   | Error _ -> Alcotest.fail "the pasted home did not declare"
 
-let test_antigravity_has_no_sign_in_after_the_save () =
-  let current =
-    fixture
-    ^ {|
+let with_antigravity =
+  fixture
+  ^ {|
 [providers.agy]
 protocol = "antigravity-cli"
 command = "agy"
@@ -218,22 +227,193 @@ tools-support = true
 
 [agy.flash]
 |}
-  in
-  let form =
-    match F.open_on ~home_dir:"/home/op" current with
-    | Ok form -> form
-    | Error reason -> Alcotest.fail reason
-  in
-  let form = editing (press form [ "left" ]) in
+
+(* The form on [with_antigravity] with its Antigravity provider chosen: left
+   from the first provider wraps to the last. *)
+let opened_on_antigravity () =
+  match F.open_on ~home_dir:"/home/op" with_antigravity with
+  | Ok form -> editing (press form [ "left" ])
+  | Error reason -> Alcotest.fail reason
+
+let test_antigravity_has_no_sign_in_after_the_save () =
+  let current = with_antigravity in
+  let form = opened_on_antigravity () in
   match F.declare_on ~inherited_home (submitted (press form ([ "\r"; "\r" ] @ typed "/home/op/.agy2/token" @ [ "\r" ]))) current with
   | Ok { F.sign_in; _ } ->
-    Alcotest.(check (option string)) "the OAuth file already exists" None sign_in
-  | Error form -> Alcotest.failf "refused: %s" (String.concat " / " (F.rows form))
+    Alcotest.(check bool) "the OAuth file already exists" true (Option.is_none sign_in)
+  | Error form -> Alcotest.failf "refused: %s" (String.concat " / " (rows form))
 
 let test_a_name_from_the_file_cannot_colour_the_pane () =
   let form = editing (press (opened ()) [ "left" ]) in
   Alcotest.(check bool) "the escape in the display name is not drawn" false
-    (List.exists (fun row -> String.contains row '\027') (F.rows form))
+    (List.exists (fun row -> String.contains row '\027') (rows form))
+
+(* Every row fits the pane except the focused field showing [field_value]: a
+   field keeps one row at any width, so a typed value longer than the pane is
+   still cut there. *)
+let fits ?(field_value = "") width form =
+  List.iter
+    (fun row ->
+      let focused_field =
+        field_value <> "" && String.starts_with ~prefix:"  > " row
+        && String.ends_with ~suffix:field_value row
+      in
+      if (not focused_field) && Masc_tui_message_layout.display_width row > width then
+        Alcotest.failf "a row is wider than the %d-cell pane, which cuts it: %S" width row)
+    (F.rows ~width form)
+
+(* A hint breaks at its spaces and each row starts with its indentation, so
+   spaces say nothing about what was drawn: [text] without them has to be in
+   the rows without them. *)
+let without_spaces text = String.concat "" (String.split_on_char ' ' text)
+
+let drawn_whole ~width text form =
+  contains (without_spaces text) (without_spaces (String.concat "" (F.rows ~width form)))
+
+let test_the_antigravity_hint_is_not_cut_at_80_columns () =
+  let form = opened_on_antigravity () in
+  fits width_80 form;
+  Alcotest.(check bool) "credential_file stays whole on one row" true
+    (row_mentions "credential_file" form);
+  let one_row rows = List.exists (fun row -> contains "OAuth" row && contains "credential_file" row) rows in
+  Alcotest.(check bool) "at 120 columns the hint still fits one row" true
+    (one_row (F.rows ~width:width_120 form))
+
+(* A home long enough to push the command past an 80-column row; one with
+   spaces in it; and one whose quoted path alone is wider than a row, which
+   can only be broken inside the path. *)
+let long_homes =
+  [ [], "/home/op/accounts/codex-second-login-for-the-review-team"
+  ; [ "left" ], "/home/op/Claude Accounts/second login for the review team"
+  ; ( []
+    , "/home/op/"
+      ^ String.concat "/" (List.init 5 (fun i -> Printf.sprintf "nested-directory-%d" i)) )
+  ]
+
+(* [bash -n] reads a command without running it, and answers 0 only when it
+   parses. *)
+let parses command =
+  Sys.command (Printf.sprintf "bash -n -c %s 2>/dev/null" (Filename.quote command)) = 0
+
+let command_label = "로그인: "
+
+(* The command rows as the pane draws them, cut at [width], and what an
+   operator copies off each: the row without its label and indentation. *)
+let copied_command ~width form =
+  let lead = "  " ^ command_label in
+  let under = String.make (Masc_tui_message_layout.display_width lead) ' ' in
+  let rec from = function
+    | row :: next :: _ when String.starts_with ~prefix:lead row && String.starts_with ~prefix:under next ->
+      [ row; next ]
+    | row :: _ when String.starts_with ~prefix:lead row -> [ row ]
+    | _ :: rest -> from rest
+    | [] -> []
+  in
+  List.map
+    (fun row ->
+      let text = String.trim (Masc_tui_message_layout.fit_width row width) in
+      if String.starts_with ~prefix:command_label text
+      then
+        String.trim
+          (String.sub text (String.length command_label)
+             (String.length text - String.length command_label))
+      else text)
+    (from (F.rows ~width form))
+
+(* The command rows of [form], judged against [command]. *)
+let check_command_rows ~drawn command form =
+  match copied_command ~width:width_80 form with
+  | [ one ] -> Alcotest.(check string) ("one row is the command: " ^ drawn) command one
+  | [ setup; run ] ->
+    Alcotest.(check bool) ("the first row alone does not parse: " ^ setup) false
+      (parses setup);
+    Alcotest.(check bool) ("the second row alone does not parse: " ^ run) false
+      (parses run);
+    let cut = String.ends_with ~suffix:"\xe2\x80\xa6" setup in
+    Alcotest.(check bool) ("the rows together parse unless cut: " ^ drawn) (not cut)
+      (parses (setup ^ "\n" ^ run));
+    if not cut
+    then Alcotest.(check string) "the rows are the command" command (setup ^ " " ^ run)
+  | rows -> Alcotest.failf "the command took %d rows: %s" (List.length rows) drawn
+
+(* A command copied off two rows that ran as two commands would sign the
+   client in on the default login. Split or cut, no row alone parses; the
+   rows together are the command the save prints, unless the pane cut the
+   first one. The saved form draws the same command the same way. *)
+let test_a_sign_in_command_runs_only_when_pasted_whole () =
+  List.iter
+    (fun (choose, home) ->
+      let form = editing (press (opened ()) (choose @ [ "\r"; "\r" ] @ typed home)) in
+      let submitted_form = submitted (F.key form "\r") in
+      match F.declare_on ~inherited_home submitted_form fixture with
+      | Ok { F.id; sign_in = Some s; _ } ->
+        check_command_rows ~drawn:("typing " ^ home) (F.command s) form;
+        check_command_rows ~drawn:("saved " ^ home) (F.command s)
+          (F.saved submitted_form ~id s)
+      | Ok { F.sign_in = None; _ } -> Alcotest.failf "no sign-in for %s" home
+      | Error form -> Alcotest.failf "refused: %s" (String.concat " / " (rows form)))
+    long_homes;
+  Alcotest.(check bool) "a short command still parses on its one row" true
+    (parses "(export CODEX_HOME='/home/op/.codex-2' && codex login)")
+
+(* Declares [home] on the provider [choose] picks and opens the form on the
+   save, the way the key loop does after the server saved it. *)
+let saved_on ?(choose = []) home =
+  let form = submitted (press (opened ()) (choose @ [ "\r"; "\r" ] @ typed home @ [ "\r" ])) in
+  match F.declare_on ~inherited_home form fixture with
+  | Ok { F.id; sign_in = Some s; _ } -> id, s, F.saved form ~id s
+  | Ok { F.sign_in = None; id; _ } -> Alcotest.failf "no sign-in for %s" id
+  | Error form -> Alcotest.failf "refused: %s" (String.concat " / " (rows form))
+
+(* After the save the form holds the command until it is closed: [y] hands
+   it over whole, and nothing typed changes what is shown. *)
+let test_a_saved_form_copies_its_command_until_closed () =
+  let id, s, form = saved_on "/home/op/.codex-account2" in
+  Alcotest.(check bool) "the form is saved" true (F.is_saved form);
+  Alcotest.(check bool) "the saved id is shown" true (row_mentions id form);
+  Alcotest.(check bool) "the fields are gone" false (row_mentions "새 provider id" form);
+  fits width_80 form;
+  List.iter
+    (fun key ->
+      match F.key form key with
+      | F.Copy (after, copied) ->
+        Alcotest.(check string) (key ^ " copies the command the save printed") (F.command s)
+          copied;
+        Alcotest.(check bool) (key ^ " leaves the form open") true (F.is_saved after)
+      | F.Editing _ | F.Cancelled | F.Submitted _ -> Alcotest.failf "%s did not copy" key)
+    [ "y"; "Y" ];
+  let before = rows form in
+  let after_typing = editing (press form (typed "abc" @ [ "left"; "tab"; "backspace" ])) in
+  Alcotest.(check (list string)) "typing changes nothing" before (rows after_typing);
+  List.iter
+    (fun key ->
+      match F.key form key with
+      | F.Cancelled -> ()
+      | F.Editing _ | F.Submitted _ | F.Copy _ -> Alcotest.failf "%s did not close" key)
+    [ "\r"; "esc" ]
+
+let test_a_saved_claude_code_form_says_what_to_type () =
+  let _, s, form = saved_on ~choose:[ "left" ] "/home/op/.claude-second" in
+  Alcotest.(check (option string)) "claude signs in from inside" (Some "/login") (F.then_type s);
+  Alcotest.(check bool) "the saved form says to type it" true (row_mentions "/login" form)
+
+let test_a_long_refusal_wraps_under_its_mark () =
+  let reason =
+    String.concat "; "
+      (List.init 3 (fun i ->
+         Printf.sprintf "providers.codex_subscription_%d.account-home: must be an absolute path" i))
+  in
+  let form = F.refused (opened ()) reason in
+  fits width_80 form;
+  Alcotest.(check bool) "the reason is drawn whole" true (drawn_whole ~width:width_80 reason form);
+  let rec after_mark = function
+    | row :: next :: _ when String.starts_with ~prefix:"  ! " row -> Some next
+    | _ :: rest -> after_mark rest
+    | [] -> None
+  in
+  Alcotest.(check (option bool)) "the next row continues under the reason, not the mark"
+    (Some true)
+    (Option.map (String.starts_with ~prefix:"    ") (after_mark (rows form)))
 
 let test_a_file_with_no_client_has_nothing_to_copy () =
   match
@@ -264,5 +444,19 @@ let () =
             test_a_name_from_the_file_cannot_colour_the_pane
         ; Alcotest.test_case "a file with no client has nothing to copy" `Quick
             test_a_file_with_no_client_has_nothing_to_copy
+        ] )
+    ; ( "rows"
+      , [ Alcotest.test_case "the antigravity hint is not cut at 80 columns" `Quick
+            test_the_antigravity_hint_is_not_cut_at_80_columns
+        ; Alcotest.test_case "a sign-in command runs only when pasted whole" `Quick
+            test_a_sign_in_command_runs_only_when_pasted_whole
+        ; Alcotest.test_case "a long refusal wraps under its mark" `Quick
+            test_a_long_refusal_wraps_under_its_mark
+        ] )
+    ; ( "saved"
+      , [ Alcotest.test_case "a saved form copies its command until closed" `Quick
+            test_a_saved_form_copies_its_command_until_closed
+        ; Alcotest.test_case "a saved claude code form says what to type" `Quick
+            test_a_saved_claude_code_form_says_what_to_type
         ] )
     ]

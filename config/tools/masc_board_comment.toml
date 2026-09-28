@@ -10,17 +10,21 @@ identity_fields = ["author"]
 [[params]]
 name = "post_id"
 type = "string"
+pattern = "^[a-zA-Z0-9_-]{1,64}$"
 required = true
-pattern = "^[A-Za-z0-9_-]{1,64}$"
 description = """
 Exact post_id from masc_board_list or masc_board_post_get; do not guess. New IDs use p- plus 32 lowercase hex digits.
 """
 
 [[params]]
+name = "body"
+type = "string"
+description = "Comment content (preferred alias for `content`)"
+
+[[params]]
 name = "content"
 type = "string"
-required = true
-description = "Comment text. Pass it in content, not body."
+description = "Comment content (alternative to `body`)"
 
 [[params]]
 name = "author"
@@ -54,8 +58,8 @@ additional_properties = false
 [[keeper_projection.params]]
 name = "post_id"
 type = "string"
+pattern = "^[a-zA-Z0-9_-]{1,64}$"
 required = true
-pattern = "^[A-Za-z0-9_-]{1,64}$"
 description = """
 Exact post_id from masc_board_list or masc_board_post_get; do not guess. New IDs use p- plus 32 lowercase hex digits.
 """

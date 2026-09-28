@@ -1204,7 +1204,9 @@ def select_native_account(source):
     except OSError as error:
         raise SetupError('Could not prepare the selected account directory for first login') from error
     source['account_home'] = account_home
-    if account_home != configured_home:
+    # An omitted account-home already uses this effective native default.
+    # Re-selecting it must retain the existing model bindings and settings.
+    if account_home != default:
         source['credential_replaced'] = True
     return source
 

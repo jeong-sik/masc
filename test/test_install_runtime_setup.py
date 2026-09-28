@@ -673,7 +673,40 @@ class SelectedNativeAccounts(unittest.TestCase):
                 selected = SETUP.select_native_account(dict(choice='muse', label='Muse'))
             pick.assert_called_once()
             self.assertEqual(selected['account_home'], home)
-            self.assertTrue(selected['credential_replaced'])
+            self.assertNotIn('credential_replaced', selected)
+
+    def test_effective_default_account_reuses_existing_model_settings(self):
+        for choice, variable, leaf in [('claude_code', 'CLAUDE_CONFIG_DIR', '.claude'),
+                                       ('codex', 'CODEX_HOME', '.codex'),
+                                       ('muse', None, '')]:
+            for override in [False, True] if variable else [False]:
+                for alternate in [False, True]:
+                    with self.subTest(choice=choice, override=override, alternate=alternate), tempfile.TemporaryDirectory() as home:
+                        effective = str(Path(home) / ('override' if override else leaf))
+                        env = {'HOME': home, 'CLAUDE_CONFIG_DIR': '', 'CODEX_HOME': ''}
+                        if variable and override:
+                            env[variable] = effective
+                        existing = dict(id='kept.binding', model='reported', max_context=8192,
+                                        max_prompt_bytes=12345, tools=True)
+                        source = dict(choice=choice, label=choice, rows=[existing])
+                        observed = [dict(id='reported', label='Reported', context=8192)]
+                        with patch.dict(os.environ, env), patch.object(SETUP, 'pick', return_value=[int(alternate)]), \
+                             patch.object(SETUP, 'ask_text', return_value=str(Path(home) / 'another')):
+                            selected = SETUP.select_native_account(source)
+                        with patch.object(SETUP, 'catalog_models', return_value=observed), \
+                             patch.object(SETUP, 'muse_models', return_value=(observed, 'native')):
+                            models, _ = SETUP.source_models('/masc', selected, 10)
+                        self.assertEqual(len(models), 1)
+                        if alternate:
+                            self.assertTrue(selected['credential_replaced'])
+                            self.assertIsNone(models[0]['existing'])
+                        else:
+                            self.assertEqual(selected['account_home'], effective)
+                            self.assertNotIn('credential_replaced', selected)
+                            self.assertEqual(models[0]['existing']['max_prompt_bytes'], 12345)
+                            self.assertEqual(SETUP.resolve_model_spec(selected, models[0], 10),
+                                             ('kept.binding', None))
+                        self.assertEqual(source['rows'], [existing])
 
     def test_first_login_prepares_private_selected_account_directories(self):
         for choice, variable, leaf in [('claude_code', 'CLAUDE_CONFIG_DIR', '.claude'),

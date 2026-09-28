@@ -192,16 +192,20 @@ RUNTIME_TAIL_TOML = """\
 
 # Boot gate (server_runtime_bootstrap.require_explicit_mandatory_exact_output_
 # lanes): hitl_auto_judge and board_attention_exact must be declared with
-# non-empty slots or cli_slots. cli_slots are admitted verbatim and are only
-# walked by the HITL-summary / board-attention lanes, which a bench episode
-# never triggers (autonomous orchestration is off).
+# non-empty slots or cli_slots. These name the head runtime in slots: cli_slots
+# only admit official-client runtimes since #39020, and an HTTP runtime there
+# fails the whole config at load (measured: keeper_up answered
+# KeeperUpFailed on every HTTP lane). The registry admits sibling-lane slots
+# against the catalog and keeps a rejected id as a soft drop, never a load
+# failure. A bench episode never walks these lanes anyway (autonomous
+# orchestration is off).
 [runtime.exact_output_lanes.hitl_auto_judge]
-slots = []
-cli_slots = ["{runtime_id}"]
+slots = ["{runtime_id}"]
+cli_slots = []
 
 [runtime.exact_output_lanes.board_attention_exact]
-slots = []
-cli_slots = ["{runtime_id}"]
+slots = ["{runtime_id}"]
+cli_slots = []
 
 [exec.ssh.endpoints.local]
 host = "127.0.0.1"
@@ -388,6 +392,17 @@ PROVIDERS = {
     "kimi_coding": dict(protocol="openai-compatible-http",
                         endpoint="https://api.kimi.com/coding/v1",
                         api_key_env="KIMI_API_KEY"),
+    # Ollama Cloud over its OpenAI-compatible wire: the shipped config points
+    # [providers.ollama_cloud] at the same endpoint (config/runtime.toml), and
+    # the provider catalog row carries the key env while the model rows carry
+    # tools/reasoning (e.g. deepseek-v4-pro, kimi-k2.7-code). No
+    # carries_effort: thinking is uncontrolled on this wire
+    # (reasoning-uncontrolled in the shipped bindings). No suppression
+    # contract either, so arms b/c/d refuse at render and ollama runs use e
+    # and later.
+    "ollama_cloud": dict(protocol="openai-compatible-http",
+                         endpoint="https://ollama.com/v1",
+                         api_key_env="OLLAMA_CLOUD_API_KEY"),
     # Claude Code subscription lane: `--model claude_code/claude-sonnet-5`
     # gives runtime_id claude_code.claude-sonnet-5; the alias doubles as the
     # CLI api-name. bootstrap.sh installs the unmodified CLI (native

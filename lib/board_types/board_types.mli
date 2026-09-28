@@ -256,7 +256,9 @@ type sub_board = {
 
 module Limits : sig
   val default_comment_page_limit : int
-  (** Default number of comments returned by [masc_board_post_get]. *)
+  (** Default number of comments returned by [masc_board_post_get] when the
+      caller names no page: the newest comments, since a reader that does not
+      know the thread yet wants its tail. *)
   val max_comment_page_limit : int
   (** Maximum comments returned by one [masc_board_post_get] page. *)
   val default_ttl_hours : int
@@ -298,7 +300,8 @@ module Comment_page : sig
     }
   (** Built only by {!request_of_args}: a [From_offset] is [>= 0] and
       [1 <= limit <= Limits.max_comment_page_limit]. For [Latest], [limit] is
-      the [comment_tail] count. *)
+      the [comment_tail] count, or {!Limits.default_comment_page_limit} when
+      the caller named no page at all. *)
 
   type argument =
     | Comment_offset
@@ -334,9 +337,12 @@ module Comment_page : sig
             [comment_tail] beside [comment_limit]. Neither wins. *)
 
   val request_of_args : Yojson.Safe.t -> (request, request_error) result
-  (** Reads [comment_offset] (absent: [0]), [comment_limit] (absent:
+  (** Reads [comment_offset], [comment_limit] (absent:
       {!Limits.default_comment_page_limit}), [comment_tail] and
-      [after_comment_id] from a tool call's arguments. A count or offset that
+      [after_comment_id] from a tool call's arguments. With none of the three
+      start arguments the page starts at the newest comment ([Latest]); an
+      explicit [comment_offset] (including [0]) starts at that offset, so the
+      head of a thread is read with [comment_offset=0]. A count or offset that
       is present but is not a JSON integer is refused, so [null], ["abc"],
       [true] and [2.9] never turn into a page; [after_comment_id] must be a
       string in the shape {!Comment_id} mints. [comment_tail] goes alone;
@@ -413,11 +419,11 @@ module Comment_page : sig
     (** Total decoder: [None] for anything this module did not write. *)
 
     val line : t -> string
-    (** The one line a text page carries, naming the range it holds and the
-        [comment_offset] that continues it. A page at the end of a non-empty
-        thread names the thread's size at the read. Every text rendering of a
-        page uses this printer, so the sentence cannot drift between
-        surfaces. *)
+    (** The one line a text page carries, naming its range, a forward
+        [comment_offset] when present, and the preceding non-overlapping
+        [comment_offset]/[comment_limit] when older comments exist. A page at
+        the end of a non-empty thread names the thread's size at the read.
+        Every text rendering of a page uses this printer. *)
 
     val metadata_key : string
     (** ["masc.comment_page"]. *)

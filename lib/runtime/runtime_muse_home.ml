@@ -1,4 +1,4 @@
-type t = { config_home : string; account_revision : string }
+type t = { config_home : string; account_revision : string; account_home : string; physical_home : string }
 
 type error =
   | Invalid_account_home of string
@@ -10,6 +10,8 @@ let error_to_string = function
   | Sign_in_required -> "Muse account has no file-backed sign-in; sign in to the selected account home"
   | State_unavailable detail -> "Muse managed configuration: " ^ detail
 
+let account_home t = t.account_home
+let physical_home t = t.physical_home
 let config_home t = t.config_home
 let private_tmpdir t = Filename.concat t.config_home "tmp"
 let account_revision t = t.account_revision
@@ -105,7 +107,7 @@ let validate_auth body =
   | _ -> unavailable "selected account has an invalid auth document"
   with Yojson.Json_error _ -> unavailable "selected account has an unreadable auth document"
 
-let prepare_locked ~sync_store ~account_home ~store ~source =
+let prepare_locked ~sync_store ~selected_account_home ~account_home ~store ~source =
   let* source_bytes = read_optional ~ownership_root:account_home source in
   match source_bytes with
   | None -> Error Sign_in_required
@@ -133,7 +135,7 @@ let prepare_locked ~sync_store ~account_home ~store ~source =
           (* A previous current.json rename may have become visible even when
              its parent fsync failed. Reconfirm that pointer before admission. *)
           sync_store store;
-          Ok { config_home = generation; account_revision = revision })
+          Ok { config_home = generation; account_revision = revision; account_home = selected_account_home; physical_home = account_home })
      | None | Some _ ->
        let revision = Random_id.uuid_v7 () in
        let* directory = directories store [ revision, true; "muse", true ] in
@@ -148,7 +150,7 @@ let prepare_locked ~sync_store ~account_home ~store ~source =
        (* The strict atomic writer creates its tempfile with mode 0600 and
           fsyncs both it and the parent directory; no post-publication chmod. *)
        let* () = Fs_compat.save_file_atomic_strict record_path record |> Result.map_error (fun _ -> State_unavailable "credential generation publication failed") in
-       Ok { config_home = generation; account_revision = revision })
+       Ok { config_home = generation; account_revision = revision; account_home = selected_account_home; physical_home = account_home })
 
 let protect operation =
   try operation () with
@@ -157,6 +159,7 @@ let protect operation =
 let prepare_with_store_sync ~sync_store ~account_home =
   let* account_home = Runtime_account_home.of_string account_home
     |> Result.map_error (fun detail -> Invalid_account_home detail) in
+  let selected_account_home = account_home in
   protect (fun () ->
     (* Configured spelling remains the caller's account/session identity. Resolve
        only the filesystem ownership boundary: an account HOME may itself be a
@@ -169,7 +172,7 @@ let prepare_with_store_sync ~sync_store ~account_home =
     let source = Filename.concat account_home ".config/muse/auth.json" in
     match File_lock_eio.with_durable_lock ~lock_path:(Filename.concat store "prepare.lock")
         (fun () -> Eio_guard.run_in_systhread ~label:"muse-managed-account-generation"
-            (fun () -> prepare_locked ~sync_store ~account_home ~store ~source)) with
+            (fun () -> prepare_locked ~sync_store ~selected_account_home ~account_home ~store ~source)) with
     | Ok result -> result
     | Error _ -> unavailable "credential generation lock failed")
 

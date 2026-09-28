@@ -320,6 +320,27 @@ def test_absent_provider_catalog_row_does_not_admit_parallel_suppression():
     assert provider_parallel_suppression_contract("openai-responses") is True
 
 
+def test_ollama_cloud_arm_renders_the_v1_wire():
+    out = render_arm("e", runtime_id="ollama_cloud.deepseek-v4-pro", effort="high")
+    rt = (out / "runtime.toml").read_text()
+    assert 'protocol = "openai-compatible-http"' in rt
+    assert 'endpoint = "https://ollama.com/v1"' in rt
+    assert 'key = "OLLAMA_CLOUD_API_KEY"' in rt
+    assert 'default = "ollama_cloud.deepseek-v4-pro"' in rt
+    assert 'api-name = "deepseek-v4-pro"' in rt
+    # Thinking is uncontrolled on this wire; the renderer must not emit an
+    # effort the provider never agreed to carry.
+    assert "reasoning-effort" not in rt
+
+
+def test_ollama_cloud_refuses_parallel_off_arms(tmp_path):
+    assert provider_parallel_suppression_contract("ollama_cloud") is False
+    with pytest.raises(ValueError, match="no catalog-declared suppression contract"):
+        render_arm("b", runtime_id="ollama_cloud.deepseek-v4-pro",
+                   effort="high", out_root=tmp_path)
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_a_slashed_wire_model_binds_by_slug_and_keeps_the_wire_name(openrouter_lists):
     # runtime_toml.ml refuses a model id outside [A-Za-z0-9._-]+, and the
     # OpenRouter wire id carries a vendor slash. Rendering it verbatim made
@@ -556,10 +577,14 @@ def test_the_failover_arm_renders_every_model_and_a_lane_that_routes_the_keeper(
         assert model["capabilities"]["max-output-tokens"] == 16384
         assert runtime["openrouter"][binding]["disable-parallel-tool-use"] is False
     assert openrouter_lists == ["z-ai/glm-5.3", "deepseek/deepseek-v4-pro"]
-    # A lane cannot be an exact-output cli slot; those keep the head runtime.
+    # A lane cannot be an exact-output slot; those keep the head runtime.
+    # Slots, not cli_slots: cli_slots only admit official-client runtimes
+    # since #39020, and an HTTP runtime there fails the config at load.
     exact = runtime["runtime"]["exact_output_lanes"]
-    assert exact["hitl_auto_judge"]["cli_slots"] == [ids[0]]
-    assert exact["board_attention_exact"]["cli_slots"] == [ids[0]]
+    assert exact["hitl_auto_judge"]["slots"] == [ids[0]]
+    assert exact["board_attention_exact"]["slots"] == [ids[0]]
+    assert exact["hitl_auto_judge"]["cli_slots"] == []
+    assert exact["board_attention_exact"]["cli_slots"] == []
     # Arm e's treatments otherwise.
     assert (out / "keepers" / "bench-1.toml").read_text() == keeper_toml("e")
 

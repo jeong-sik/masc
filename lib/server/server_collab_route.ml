@@ -234,6 +234,7 @@ let accept_guest ~upgrade reqd ~room ~peer =
               then (
                 (* F3: the room died between relay join and upgrade. Unwind
                    the join silently (never announced) and close below. *)
+                (* See remove_guest_locked: this unannounced join needs no departure notice. *)
                 ignore (remove_guest_locked ~room ~peer);
                 Reg_room_gone)
               else (
@@ -263,6 +264,7 @@ let accept_guest ~upgrade reqd ~room ~peer =
   with
   | Ok () -> ()
   | Error msg ->
+    (* See remove_guest: unwind an unannounced join regardless of prior removal. *)
     ignore (remove_guest ~room ~peer);
     respond_upgrade_error reqd msg
 ;;

@@ -388,6 +388,17 @@ PROVIDERS = {
     "kimi_coding": dict(protocol="openai-compatible-http",
                         endpoint="https://api.kimi.com/coding/v1",
                         api_key_env="KIMI_API_KEY"),
+    # Ollama Cloud over its OpenAI-compatible wire: the shipped config points
+    # [providers.ollama_cloud] at the same endpoint (config/runtime.toml), and
+    # the provider catalog row carries the key env while the model rows carry
+    # tools/reasoning (e.g. deepseek-v4-pro, kimi-k2.7-code). No
+    # carries_effort: thinking is uncontrolled on this wire
+    # (reasoning-uncontrolled in the shipped bindings). No suppression
+    # contract either, so arms b/c/d refuse at render and ollama runs use e
+    # and later.
+    "ollama_cloud": dict(protocol="openai-compatible-http",
+                         endpoint="https://ollama.com/v1",
+                         api_key_env="OLLAMA_CLOUD_API_KEY"),
     # Claude Code subscription lane: `--model claude_code/claude-sonnet-5`
     # gives runtime_id claude_code.claude-sonnet-5; the alias doubles as the
     # CLI api-name. bootstrap.sh installs the unmodified CLI (native

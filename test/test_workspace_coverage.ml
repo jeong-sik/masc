@@ -1605,6 +1605,7 @@ let test_transition_cancel_clears_reclaim_policy () =
          ~agent_name:"claude"
          ~task_id:"task-001"
          ~action:Masc_domain.Cancel
+         ~reason:"stale task cancelled before reclaim"
          ()
      with
      | Ok _ -> ()

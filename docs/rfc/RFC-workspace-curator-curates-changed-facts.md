@@ -3,7 +3,7 @@ rfc: "workspace-curator-curates-changed-facts"
 title: "workspace curator 는 바뀐 사실만 큐레이션한다"
 status: Draft
 created: 2026-09-28
-updated: 2026-09-28
+updated: 2026-09-29
 author: claude
 supersedes: []
 superseded_by: null
@@ -41,10 +41,20 @@ workspace curator(`workspace_curator_exact` lane)는 Keeper 들의 기억을 모
 
 ### 2.1 큐레이션 단위는 사실 하나다
 
-사실의 정체는 `(keeper_id, store, claim_sha256)` 다. `claim_sha256` 은 claim 바이트의 SHA-256 이다.
+사실의 정체(`fact_ref`)는 스토어가 사실 한 줄을 따로 두는 기준을 그대로 따른다. 그래서 스토어마다 모양이 다르다.
 
-- ordinary 스토어에서는 이 값이 `memory_id` 와 같다 (`Keeper_memory_os_types.memory_id` 는 `"sha256:" ^ SHA-256(claim)`). 같은 claim 을 다시 적으면 같은 정체다 (`Keeper_memory_os_current.upsert_fact`).
-- source_bound 스토어는 파일 경로마다 claim 하나를 두고, 파일이 바뀌면 claim 을 바꾼다 (`Keeper_memory_source_current`). claim 이 바뀌면 새 사실이 되고, 옛 claim 은 사라진 사실이 된다.
+```ocaml
+type fact_ref =
+  | Ordinary of { keeper_id : string; claim_sha256 : string }
+  | Source_bound of { keeper_id : string; path : string; claim_sha256 : string }
+```
+
+`claim_sha256` 은 claim 바이트의 SHA-256 이다.
+
+- **ordinary.** 이 값이 `memory_id` 와 같다 (`lib/keeper/keeper_memory_os_types.ml:717-719`, `"sha256:" ^ SHA-256(claim)`). 같은 claim 을 다시 적으면 새 줄을 만들지 않고 있던 줄을 다시 본 것으로 친다 (`lib/keeper/keeper_memory_os_current.ml:2643-2668` `insert_or_reobserve`). 한 스토어 안에 같은 claim 은 한 줄뿐이라, claim 해시로 충분하다.
+- **source_bound.** 이 스토어는 경로마다 사실 한 줄을 둔다. 같은 경로에 다시 쓰면 그 경로의 줄만 빼고 새 줄을 붙인다 (`lib/keeper/keeper_memory_source_current.ml:578-582`). 그래서 한 Keeper 의 두 파일이 같은 claim 을 가지면 스토어에는 두 줄이 있다. claim 해시만으로 정체를 정하면 이 두 줄이 하나로 합쳐진다. 그러면 한 파일만 바뀌거나 사라져도 같은 키가 남아 있어서, 원장에서 그 파일의 처분을 지울 수 없다. 그래서 `path` 를 정체에 넣는다.
+- `path` 는 스토어가 저장한 `source.path` 그대로다. `upsert_file_fact` 는 앞뒤 공백만 자르고 (`lib/keeper/keeper_memory_source_current.ml:531`), 줄을 바꿀지는 이 값의 `String.equal` 로 정한다 (`:580`, 같은 파일). 정체도 같은 비교를 쓴다. 스토어보다 더 정규화하면(예: `./a.md` 와 `a.md` 를 하나로) 스토어의 두 줄이 다시 한 키로 합쳐진다.
+- claim 이 바뀌면 새 사실이 되고, 옛 claim 은 사라진 사실이 된다. 파일 내용이 바뀌면 다음 재검증이 그 줄을 빼고 무효 기록을 남긴다 (`lib/keeper/keeper_memory_source_current.ml:720`).
 
 지금의 `s1`, `s2` 같은 인벤토리 안 번호는 실행마다 바뀌어서 쓰지 않는다.
 
@@ -63,11 +73,11 @@ curator 는 자기 결과를 원장 하나에 모은다 (`<base>/.masc/workspace
 할 일은 두 가지다.
 
 - **새 사실**: 지금 스토어에 있는데 원장에 처분이 없는 사실
-- **사라진 사실**: 원장이 멤버로 적었는데 지금 스토어에 없는 사실
+- **사라진 사실**: 원장에 처분이 있는데 지금 스토어에 없는 사실
 
-둘 다 현재 스토어와 원장을 비교해서 구한다. 커밋 알림이나 journal 을 거슬러 읽지 않는다. 알림을 놓쳐도 다음 실행이 같은 차이를 다시 구한다.
+둘 다 현재 스토어와 원장을 `fact_ref`(2.1) 끼리 비교해서 구한다. 커밋 알림이나 journal 을 거슬러 읽지 않는다. 알림을 놓쳐도 다음 실행이 같은 차이를 다시 구한다.
 
-사라진 사실은 모델 없이 처리한다. 멤버에서 빼고, 멤버가 하나도 남지 않은 주장·충돌은 지운다.
+사라진 사실은 모델 없이 처리한다. 처분을 지우고, 멤버였으면 멤버에서 뺀다. 멤버가 하나도 남지 않은 주장·충돌은 지운다. source_bound 에서는 같은 Keeper 의 다른 경로가 같은 claim 을 계속 가져도, 바뀐 경로의 사실만 사라진다.
 
 **할 일이 없으면 모델을 부르지 않는다.** 1장의 측정에서는 실행 대부분이 여기에 해당한다.
 
@@ -75,10 +85,17 @@ curator 는 자기 결과를 원장 하나에 모은다 (`<base>/.masc/workspace
 
 새 사실을 크기 한도 안에서 한 묶음으로 자르고, 사실마다 비교할 거리를 붙인다.
 
-- **이웃**: 다른 Keeper 의 현재 사실 가운데 이 사실과 가까운 K개. `Keeper_memory_search_index.rank` 로 찾는다. SQLite FTS5 trigram 의 BM25 순위라서 새 인프라가 필요 없고, 같은 입력에 같은 답을 준다 (`RFC-memory-search-beyond-substring.md` §3.1).
+- **이웃**: 다른 Keeper 의 현재 사실 가운데 이 사실과 가까운 K개. `Keeper_memory_search_index` 와 같은 SQLite FTS5 trigram 의 BM25 순위로 찾는다. 새 인프라가 필요 없고, 같은 입력에 같은 답을 준다 (`RFC-memory-search-beyond-substring.md` §3.1).
 - **관련 주장·충돌**: 이웃이 이미 멤버인 원장 항목
 
 요청 크기는 `묶음 크기 × (1 + K) × 사실 크기 + 관련 항목` 으로 위에서 막힌다. 작업공간이 커져도 늘지 않는다. 묶음 크기는 요청이 한도를 넘지 않게 정한다 (6장 Q2).
+
+이 한도는 모델에 보내는 바이트의 한도다. 이웃을 찾는 색인 비용은 따로 막는다.
+
+- 지금의 `Keeper_memory_search_index.rank` 는 부를 때마다 받은 텍스트 전부로 `:memory:` FTS5 표를 새로 만들고, 채우고, 닫는다 (`lib/keeper/keeper_memory_search_index.ml:111-131`). 새 사실마다 이 함수를 부르면 처음 채우기(2.6) 전체에서 3,366 × 3,366, 약 1,133만 행을 넣는다. 작업공간 크기의 제곱으로 는다.
+- 그래서 2단계는 같은 모듈에 "표를 한 번 만들고 질의를 여러 번 하는" 함수를 더한다. 실행 하나는 현재 사실 전부로 표 하나를 만든다. 묶음 안 새 사실마다 그 표에 질의하고, 같은 Keeper 의 사실을 뺀 앞의 K개를 쓴다.
+- 실행 하나의 색인 비용은 현재 사실 수에 비례한다. 라이브 기준으로 3,366행(3.1MB)을 한 번 넣는다. 할 일이 없는 실행(2.3)은 표를 만들지 않는다.
+- 지속 색인은 두지 않는다. 표는 실행이 끝나면 닫는다. 색인이 스토어와 어긋날 수 없게 한 지금 모듈의 결정을 그대로 따른다 (`lib/keeper/keeper_memory_search_index.mli:4-10`).
 
 ### 2.5 답의 모양
 
@@ -126,13 +143,13 @@ curator 는 자기 결과를 원장 하나에 모은다 (`<base>/.masc/workspace
 ## 5. 나눠 올리는 순서
 
 1. **원장과 할 일 계산.** 원장 저장소, 사실 정체, 집합 차이, 사라진 사실 처리. 모델을 부르지 않는다.
-2. **요청 만들기.** 묶음 자르기, 이웃 검색, 관련 항목 붙이기, 크기 한도.
+2. **요청 만들기.** 묶음 자르기, 실행마다 한 번 만드는 이웃 색인과 검색, 관련 항목 붙이기, 크기 한도.
 3. **답 적용과 lane 교체.** 새 출력 스키마, 결정론적 적용, 새 프롬프트, 게시와 읽기 도구. 옛 제안·인벤토리 코드는 이 단계에서 지운다.
 4. **다시 켜기.** 운영자가 라이브 `runtime.toml` 에 lane 구간을 되돌린다.
 
 ## 6. 정할 것
 
-- **Q1. 이웃 검색은?** 추천: 있는 lexical 검색(`Keeper_memory_search_index.rank`)으로 시작한다. embedding 검색은 새 인프라와 외부 호출이 필요하다.
+- **Q1. 이웃 검색은?** 추천: 있는 lexical 검색(`Keeper_memory_search_index` 의 FTS5 trigram BM25)으로 시작한다. 색인은 2.4 대로 실행마다 한 번 만든다. embedding 검색은 새 인프라와 외부 호출이 필요하다.
 - **Q2. 묶음 크기는 어떻게 정하나?** 후보: (a) 사실 개수로 고정, (b) lane 슬롯 가운데 가장 작은 입력 창에서 계산. (b) 는 창이 작은 슬롯이 끼어도 넘치지 않지만, 창 정보가 없는 슬롯을 따로 다뤄야 한다.
 - **Q3. 이웃 K 는?** 요청 크기와 놓친 관계 사이의 교환이다. 7장의 하네스로 정한다.
 - **Q4. source_bound 스토어도 넣나?** 추천: 넣는다. 지금도 두 스토어를 모두 읽는다.
@@ -140,9 +157,10 @@ curator 는 자기 결과를 원장 하나에 모은다 (`<base>/.masc/workspace
 
 ## 7. 검증
 
-- **크기 한도.** 사실 수를 10배로 늘린 fixture 에서도 요청 바이트가 한도 이하다 (속성 테스트).
-- **할 일 없음.** 사실은 그대로고 revision 만 오른 커밋에서 모델 호출이 0번이다.
-- **집합 차이.** 알림을 건너뛴 뒤의 실행이 빠진 사실을 모두 찾는다. 사라진 사실은 멤버에서 빠지고, 빈 항목은 지워진다.
+- **크기 한도.** 사실 수를 10배로 늘린 fixture 에서도 요청 바이트가 한도 이하다 (속성 테스트). 같은 fixture 에서 실행 하나가 색인 표를 한 번만 만들고, 넣은 행 수가 현재 사실 수와 같다.
+- **할 일 없음.** 사실은 그대로고 revision 만 오른 커밋에서 모델 호출도, 색인 구축도 0번이다.
+- **집합 차이.** 알림을 건너뛴 뒤의 실행이 빠진 사실을 모두 찾는다. 사라진 사실은 처분과 멤버에서 빠지고, 빈 항목은 지워진다.
+- **같은 claim, 두 경로.** 한 Keeper 의 source_bound 스토어에서 두 파일이 같은 claim 을 가진 fixture. 한 파일만 바꾸거나 지우면, 원장에서 그 경로의 처분과 멤버만 빠지고 다른 경로의 처분은 남는다.
 - **적용 거절.** 없는 id, 묶음 밖 사실, 중복 분류는 거절되어 다음 슬롯으로 넘어간다.
 - **처음 채우기.** 라이브 3,366개 규모의 fixture 가 묶음 단위로 끝까지 채워지고, 모든 사실이 처분을 가진다.
 - **이웃 검색 하네스.** 사람이 표시한 공유·충돌 쌍 표본에서 이웃 K개 안에 짝이 들어오는 비율을 잰다. Q1·Q3 의 근거다.

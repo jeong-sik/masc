@@ -85,6 +85,21 @@ MASC 에 맞게 둔다.
 - `welcome{header, state, entryCount, readOnly}` 후 512KB 단위
   `snapshot-chunk{entries, final}` 전송, 이후 live `entry`/`state`/`agents`.
 - `stop()` 은 `bye` 방송 후 방을 닫는다.
+- 스택 3 구현 기록 (`Server_collab_host`):
+  - tap 위치는 chat-stream route 의 `on_publish` (저널 append 직후,
+    journal-first — 스냅샷/drain join 이 이 순서에 의존).
+  - 스냅샷 op 선택: 부팅 이후 publish 를 본 keeper 는 hook 기록 exact id,
+    아니면 최근 수정(mtime, 동점은 이름순) 저널. 저널 8MB 초과분은 tail
+    window 만 스냅샷 (hello 한 방에 GB 를 읽지 않는다).
+  - `active` 는 live 스트림에서만 추적하고 스냅샷에서 seed 하지 않는다
+    (seed 레이스가 finish 를 영구히 삼키는 것보다, 다음 boundary 에서
+    자가치유되는 bounded lie 가 낫다).
+  - live 큐 4096, 초과분은 newest-drop + 경고 (overflow episode 당 1회).
+    느린 게스트가 keeper 턴을 막지 않는다.
+  - 게스트 envelope 의 sender 0·범위 밖은 drop (릴레이 rewrite 산출물만
+    신뢰 — 0 을 받으면 welcome 이 broadcast 로 나가는 버그 방지).
+  - 서버 종료 시 `Shutdown.register ~name:"collab_bye" ~priority:10
+    stop_all` 로 게스트에게 `bye` 를 먼저 보낸다 (state flush 20-30 보다 앞).
 
 ### 2.5 게스트 입력 주입
 
@@ -141,9 +156,9 @@ MASC 에 맞게 둔다.
 
 ## 6. 스택 분해 (각 1 stacked PR, constitution work_unit ≤20k tokens)
 
-1. `collab-core`: 링크·envelope 코덱·GCM seal/open + 테스트.
-2. 릴레이 라우트 `/r/<roomId>` + in-memory 테스트 helper.
-3. 호스트 tap + 스냅샷(`welcome`→chunks→live).
+1. `collab-core`: 링크·envelope 코덱·GCM seal/open + 테스트. (#39564)
+2. 릴레이 라우트 `/r/<roomId>` + in-memory 테스트 helper. (#39565)
+3. 호스트 tap + 스냅샷(`welcome`→chunks→live). (PR 예정)
 4. 게스트 주입 + 읽기 전용 강제 + Gate 규칙.
 5. TUI 호스트 `/collab` + QR 출력.
 6. TUI guest replica + 대시보드 web viewer 링크.

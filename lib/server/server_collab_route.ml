@@ -15,9 +15,19 @@ type connection = {
 type room_key = Collab_relay.room_id
 type guest_key = Collab_relay.room_id * Collab_relay.peer
 
+type local_host = {
+  on_frame : string -> unit;
+  on_peer_joined : Collab_relay.peer -> unit;
+  on_peer_left : Collab_relay.peer -> unit;
+}
+
+type host_endpoint =
+  | Socket of connection
+  | Local of local_host
+
 let relay = Collab_relay.create ()
 let relay_mutex = Stdlib.Mutex.create ()
-let host_conns : (room_key, connection) Hashtbl.t = Hashtbl.create 16
+let host_conns : (room_key, host_endpoint) Hashtbl.t = Hashtbl.create 16
 let guest_conns : (guest_key, connection) Hashtbl.t = Hashtbl.create 64
 
 let with_relay f = Stdlib.Mutex.protect relay_mutex f
@@ -53,6 +63,42 @@ let send_close conn ~code ~reason =
       Wsd.send_close wsd ~code ~reason ())
 ;;
 
+(* A raising host callback must not kill the guest fiber that triggered it.
+   Cancellation still propagates; anything else is logged and dropped. *)
+let run_host_callback label f =
+  match f () with
+  | () -> ()
+  | exception (Eio.Cancel.Cancelled _ as ex) -> raise ex
+  | exception ex ->
+    Log.Server.debug
+      "collab host callback %s failed: %s"
+      label
+      (Printexc.to_string ex)
+;;
+
+let host_send_binary host envelope =
+  match host with
+  | Socket conn -> send_binary conn envelope
+  | Local local ->
+    run_host_callback "on_frame" (fun () -> local.on_frame envelope)
+;;
+
+let host_peer_joined host peer =
+  match host with
+  | Socket conn ->
+    send_text conn (Collab_wire.control_json (Collab_wire.Peer_joined { peer }))
+  | Local local ->
+    run_host_callback "on_peer_joined" (fun () -> local.on_peer_joined peer)
+;;
+
+let host_peer_left host peer =
+  match host with
+  | Socket conn ->
+    send_text conn (Collab_wire.control_json (Collab_wire.Peer_left { peer }))
+  | Local local ->
+    run_host_callback "on_peer_left" (fun () -> local.on_peer_left peer)
+;;
+
 let drop_reason_label = function
   | Collab_relay.Malformed_envelope -> "malformed envelope"
   | Collab_relay.Route_no_such_room -> "unknown room"
@@ -62,7 +108,10 @@ let drop_reason_label = function
     Printf.sprintf "sender id %d out of range" peer
 ;;
 
-let teardown_host ~room =
+(* Shared teardown for socket hosts (their close) and local hosts
+   ({!host_leave_local}). Idempotent: a second call finds no room and no
+   guests. *)
+let close_room ~room =
   let guests =
     with_relay (fun () ->
         let peers = Collab_relay.host_left relay ~room in
@@ -114,11 +163,10 @@ let teardown_guest ~room ~peer =
     let host = with_relay (fun () -> Hashtbl.find_opt host_conns room) in
     match host with
     | None -> ()
-    | Some conn ->
-      send_text conn (Collab_wire.control_json (Collab_wire.Peer_left { peer })))
+    | Some host -> host_peer_left host peer)
 ;;
 
-let on_host_message ~room envelope =
+let host_send_local ~room envelope =
   let delivery =
     with_relay (fun () ->
         Collab_relay.route relay ~room ~sender:Collab_relay.Host ~envelope)
@@ -152,7 +200,7 @@ let on_guest_message ~room ~peer envelope =
     let host = with_relay (fun () -> Hashtbl.find_opt host_conns room) in
     (match host with
      | None -> Log.Server.debug "collab guest frame dropped: host gone"
-     | Some conn -> send_binary conn envelope)
+     | Some host -> host_send_binary host envelope)
   | Collab_relay.To_guests _ ->
     Log.Server.debug "collab guest frame routed to guests; dropping"
   | Collab_relay.Drop { reason } ->
@@ -175,12 +223,12 @@ let respond_upgrade_error reqd msg =
 let accept_host ~upgrade reqd ~room =
   let handlers =
     Endpoint.handlers
-      ~on_message:(on_binary_message (on_host_message ~room))
-      ~on_close:(fun ~code:_ ~reason:_ -> teardown_host ~room)
+      ~on_message:(on_binary_message (host_send_local ~room))
+      ~on_close:(fun ~code:_ ~reason:_ -> close_room ~room)
       ~on_error:(fun msg ->
         Log.Server.debug "collab host conn error: %s" msg;
-        teardown_host ~room)
-      ~on_eof:(fun () -> teardown_host ~room)
+        close_room ~room)
+      ~on_eof:(fun () -> close_room ~room)
       ()
   in
   match
@@ -191,14 +239,38 @@ let accept_host ~upgrade reqd ~room =
       ~max_frame:max_frame_bytes
       ~handler:(fun wsd ->
         let conn = { wsd; write_mutex = Stdlib.Mutex.create () } in
-        with_relay (fun () -> Hashtbl.replace host_conns room conn);
+        with_relay (fun () -> Hashtbl.replace host_conns room (Socket conn));
         handlers)
   with
   | Ok () -> ()
   | Error msg ->
-    teardown_host ~room;
+    close_room ~room;
     respond_upgrade_error reqd msg
 ;;
+
+let host_join_local ~room local =
+  with_relay (fun () ->
+      match Collab_relay.join relay ~room ~role:Collab_wire.Host with
+      | Error err -> Error err
+      | Ok Collab_relay.Host_accepted ->
+        Hashtbl.replace host_conns room (Local local);
+        Ok ()
+      | Ok (Collab_relay.Guest_accepted { peer }) ->
+        (* [join] answers a host role with [Host_accepted] by contract; a
+           guest outcome here would be a relay defect. Unwind it and refuse
+           loudly rather than registering half a room. *)
+        (match Collab_relay.guest_left relay ~room ~peer with
+         | Collab_relay.Guest_departed -> ()
+         | Collab_relay.Leave_no_such_room
+         | Collab_relay.Leave_no_such_guest ->
+           Log.Server.warn
+             "collab local join unwound a phantom guest (room %d bytes, peer %d)"
+             (String.length room)
+             peer);
+        Error Collab_relay.Host_already_connected)
+;;
+
+let host_leave_local ~room = close_room ~room
 
 (* Outcome of registering a guest socket inside the upgrade callback. The
    callback runs after the 101 flush, strictly after [respond_and_drive_upgrade]
@@ -207,7 +279,7 @@ let accept_host ~upgrade reqd ~room =
 type guest_registration =
   | Reg_room_gone
   | Reg_host_pending
-  | Reg_announce of connection
+  | Reg_announce of host_endpoint
 
 let accept_guest ~upgrade reqd ~room ~peer =
   let handlers =
@@ -255,10 +327,7 @@ let accept_guest ~upgrade reqd ~room ~peer =
            Log.Server.debug
              "collab guest %d registered before host socket; peer-joined skipped"
              peer
-         | Reg_announce host ->
-           send_text
-             host
-             (Collab_wire.control_json (Collab_wire.Peer_joined { peer })));
+         | Reg_announce host -> host_peer_joined host peer);
         handlers)
   with
   | Ok () -> ()

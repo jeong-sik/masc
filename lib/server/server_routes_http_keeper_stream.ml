@@ -2979,8 +2979,16 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
              | Ok first_seq ->
             let events = Keeper_chat_events.create ~first_seq
               ~on_publish:(fun ~seq ~ts event ->
-                List.iter (fun (operation_id, journal) -> Keeper_chat_event_log.append journal ~seq ~ts
-                  (Keeper_chat_operation_batch.event_for_member ~operation_id event)) journals)
+                (* Journal first, collab second: the host's snapshot/drain
+                   join rests on journaled-before-forwarded. The bus wraps
+                   this hook fail-open, and notify never suspends the
+                   publisher past a brief mutex hold. *)
+                List.iter (fun (operation_id, journal) ->
+                  let member_event = Keeper_chat_operation_batch.event_for_member ~operation_id event in
+                  Keeper_chat_event_log.append journal ~seq ~ts member_event;
+                  Server_collab_host.notify_published ~keeper:keeper_name
+                    ~operation:(Keeper_chat_operation.Operation_id.to_string operation_id)
+                    ~seq ~ts member_event) journals)
               () in
             let closed = ref false in
             let delivery, resolve_delivery = Eio.Promise.create () in

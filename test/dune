@@ -1657,7 +1657,29 @@
 (test
  (name test_collab_relay)
  (modules test_collab_relay)
+
  (libraries alcotest base64 fmt masc.collab))
+
+; RFC-0471 stack 3: sealed host frames + in-memory host session.
+(test
+ (name test_collab_frame)
+ (modules test_collab_frame)
+ (libraries alcotest fmt masc.collab yojson))
+
+(test
+ (name test_collab_host)
+ (modules test_collab_host)
+ (libraries
+  alcotest
+  base64
+  masc
+  masc.collab
+  masc.server
+  yojson
+  eio
+  eio_main
+  unix))
+
 
 
 (test

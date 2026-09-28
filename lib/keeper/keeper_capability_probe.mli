@@ -133,12 +133,14 @@ type invocation_error =
       (** {!probe_official_client_invocation} was asked about an Agent Core
           runtime. Use {!probe_invocation}. *)
   | Tools_only_via_mcp_bridge of string
-      (** {!probe_official_client_invocation} was asked about Antigravity,
+      (** {!probe_official_client_invocation} was asked about Antigravity or Muse,
           which declares no host-side tool list. Use
-          {!probe_antigravity_invocation}, which publishes the MCP bridge the
+          {!probe_antigravity_invocation} or {!probe_muse_invocation}, which publishes the MCP bridge the
           client actually reads. Answering from the descriptor table instead
           would report advertisement as consumption — the distinction F1 of the
           2026-08-12 audit turned on. *)
+  | Not_muse_lane of string
+  | Muse_home_unavailable of string
   | Not_antigravity_lane of string
       (** {!probe_antigravity_invocation} was asked about a lane that declares
           its tools directly. Use {!probe_invocation} or
@@ -199,7 +201,7 @@ val probe_official_client_invocation
     invocation, so a call is observed at the callback rather than inferred
     from response content.
 
-    Antigravity is refused with {!Tools_only_via_mcp_bridge}: its entry point
+    Antigravity and Muse are refused with {!Tools_only_via_mcp_bridge}: its entry point
     declares no tool list, so its surface exists only once the per-turn MCP
     bridge is up. Answering from MASC's descriptor table instead would repeat
     the 2026-08-12 mistake of reading advertisement as consumption. *)
@@ -233,3 +235,17 @@ val probe_antigravity_invocation
     because this lane's surface {i is} a local HTTP server — the one whose
     reply to an unknown notification killed every antigravity session in 32ms
     (masc#28431). Probing it exercises that server, not a description of it. *)
+
+val probe_muse_invocation
+  : net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> secure_random:Eio.Flow.source_ty Eio.Resource.t
+  -> mgr:_ Eio.Process.mgr -> clock:_ Eio.Time.clock -> fs:Eio.Fs.dir_ty Eio.Path.t
+  -> base_path:string -> now:(unit -> float) -> runtime_id:string
+  -> tool:string -> prompt:string -> unit -> (invocation, invocation_error) result
+(** Run a fresh Muse session using setup verification's selected-account,
+    private-workspace MCP runner with temporary native session storage. The
+    selected model's prompt byte capacity, reasoning effort and idle window
+    remain frozen across the probe. Only the requested model-visible descriptor
+    is served, with an inert callback that records actual invocation. No Keeper
+    session is claimed and no descriptor implementation performs its effects.
+    The caller supplies a foreground process manager owning descendants. *)

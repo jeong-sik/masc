@@ -363,6 +363,11 @@ type subscription_usage =
   ; weekly : usage_weekly
   }
 
+val exhausted_subscription_reset_ms : subscription_usage -> int option
+(** Latest provider reset among exhausted current/weekly windows. MSP reports
+    percentage integers (100 or above is exhausted) and epoch milliseconds;
+    nonexhausted or already-reset observations contribute no window. *)
+
 type notification =
   | Turn_started of
       { session_id : string

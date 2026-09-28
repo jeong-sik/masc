@@ -68,6 +68,9 @@ let run_adapter client_kind ~base_path ~keeper_name ~runtime_id ~cli_path =
       ; model = Some "synthetic-model"
       ; admission_timeout_s = 1.; timeout_s = Some 1. } in
     let outcome = Keeper_muse_runtime.run
+        ~max_prompt_bytes:None ~configured_reasoning_effort:None ~turn_timeout_s:None
+        ~quota_scope:(Runtime_quota_window.scope_of_muse_home
+          (Filename.concat base_path "absent-synthetic-account"))
         ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
         ~accepts_image_input:false ~runtime_id ~keeper_name
         ~pre_tool_rejects:(ref []) ~base_path ~workspace_root:base_path

@@ -368,6 +368,11 @@ type request_credential_standing =
       (** The internal keeper token with its keeper name header, or a bearer
           whose credential has the [Worker] role. The name is verified; the
           caller is not the operator. *)
+  | Player_credential
+      (** A bearer whose credential has the [Player] role: an invited
+          outsider who may play the shared machine and nothing else. The
+          name is verified; the caller is neither the operator nor a
+          keeper. *)
   | No_credential
       (** No bearer, or one that resolves to no credential: any name on the
           request is the caller's own claim. *)

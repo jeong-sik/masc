@@ -124,6 +124,8 @@ let client_of_provider table =
      | Ok Runtime_schema.Claude_code_runtime -> Some Claude_code
      | Ok Runtime_schema.Codex_app_server_runtime -> Some Codex
      | Ok Runtime_schema.Antigravity_cli_runtime -> Some Antigravity
+     (* The account-copy form has no Muse sign-in flow. *)
+     | Ok Runtime_schema.Muse_serve_runtime -> None
      | Ok
          ( Runtime_schema.Messages_api | Runtime_schema.Chat_completions_api
          | Runtime_schema.Ollama_api | Runtime_schema.Gemini_api

@@ -698,8 +698,10 @@ let render_overview (state : state) =
 
   (* Attention panel *)
   let attention_items, tasks_error, row_budget =
-    overview_layout state ~terminal_rows:rows
+    Masc_tui_frame_timing.time_stage ~name:"overview.layout"
+      (fun () -> overview_layout state ~terminal_rows:rows)
   in
+  let sections_started = Masc_tui_frame_timing.start_stage () in
   (* The rows reading, not [state.tasks]: before the first read that list is
      [] with no error, and counting it would draw "0 of 0" over a section that
      says it has not loaded. A note on rows that were read (backup recovery,
@@ -1016,6 +1018,8 @@ let render_overview (state : state) =
          (Masc_tui_keys.footer_hints_overview
             ~task_focus:(Overview_tasks.is_focused state.task_focus)));
 
+  Masc_tui_frame_timing.finish_stage ~name:"overview.sections_rows"
+    sections_started;
   finish_surface state ~surface_key:"overview" ~rows:terminal_rows ~cols buf
 
 (* One task's event history, appended after the detail body so it rides the
@@ -2326,6 +2330,9 @@ let render_board_compose (state : state) =
        box_line buf cols
          ("  " ^ fit_width line (cols - 8)))
     visible_lines;
+  for _ = List.length visible_lines to content_height - 1 do
+    box_line buf cols ""
+  done;
   box_bottom buf cols;
   let prompt =
     if state.board_compose_armed then
@@ -2347,8 +2354,8 @@ let render_board_compose (state : state) =
       in
       Frame_presenter.Visible_at { row = min (rows - 2) row; column }
   in
-  finish_frame_with_strip state ~surface_key:"board-compose" ~cursor ~rows
-    ~cols buf
+  finish_frame_beside_acting_pane state ~surface_key:"board-compose" ~cursor
+    ~rows ~cols buf
 
 
 (* A tail this heading can do without. The two rows above the board each end
@@ -2762,6 +2769,7 @@ let draw_board_read_side buf (state : state) document ~rows ~body_cols
    wide, footer excluded, so a caller can lay it beside the post list.
    Returns the scroll the frame used. *)
 let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
+  let prep_started = Masc_tui_frame_timing.start_stage () in
   let detail =
     Board_detail.view_for state.board_detail ~post_id:list_post.bp_id
   in
@@ -2884,6 +2892,7 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                  Masc_tui_theme.tone Masc_tui_theme.Accent ];
       table_frame = !table_frame_enabled }
   in
+  Masc_tui_frame_timing.finish_stage ~name:"board.pane_prep" prep_started;
   let document =
     Board_read_layout.get board_read_layout ~source ~render:(fun () ->
       (* Body lines *)
@@ -2895,11 +2904,13 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
          drawn as the source they were typed as. The chat pane has rendered them
          for a while; this surface reads the same kind of document. *)
       let body_lines =
-        Message_layout.wrap_body
-          ~markdown:board_document_markdown
-          ~max_cells:text_width
-          ~sanitize:Terminal_text.single_line
-          post.bp_body
+        Masc_tui_frame_timing.time_stage ~name:"board.post.wrap"
+          (fun () ->
+            Message_layout.wrap_body
+              ~markdown:board_document_markdown
+              ~max_cells:text_width
+              ~sanitize:Terminal_text.single_line
+              post.bp_body)
       in
       (* What this post points at, and who else points at the same thing.
          Read from the references the writer actually wrote -- [Link.scan] takes
@@ -2976,8 +2987,14 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                order, so a thread read as unrelated remarks. [parent_id] has been
                on the wire since comments existed -- 152 of this workspace's 1364
                comments carry one -- and the pane simply never decoded it. *)
-            Board_comment_thread.order comments
-            |> List.concat_map
+            let ordered =
+              Masc_tui_frame_timing.time_stage ~name:"board.thread.order"
+                (fun () -> Board_comment_thread.order comments)
+            in
+            Masc_tui_frame_timing.time_stage ~name:"board.thread.rows_wrap"
+              (fun () ->
+                ordered
+                |> List.concat_map
               (fun (depth, c) ->
                  let rail =
                    if depth <= 0 then ""
@@ -3055,10 +3072,11 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                        ~sanitize:Terminal_text.single_line c.bc_content
                    in
                    identity :: timestamp
-                   :: List.map (fun line -> content_prefix ^ line) lines)
+                   :: List.map (fun line -> content_prefix ^ line) lines))
       in
       (body_lines, detail_lines))
   in
+  let rows_started = Masc_tui_frame_timing.start_stage () in
   let total_lines = Board_read_layout.body_line_count document in
   let detail_line_count = Board_read_layout.comment_line_count document in
   let detail_comment_count =
@@ -3126,6 +3144,7 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                 detail_line_count
           else ""));
   box_bottom buf cols;
+  Masc_tui_frame_timing.finish_stage ~name:"board.frame_rows" rows_started;
   scroll.normalized_scroll
 
 (* The post list beside the read: position context with the open post
@@ -3161,6 +3180,7 @@ let board_list_pane (state : state) ~(open_post : board_post) ~rows ~cols buf =
     ~selected
 
 let render_board_read (state : state) (list_post : board_post) =
+  let prep_started = Masc_tui_frame_timing.start_stage () in
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface
      lays out fits above it. *)
@@ -3175,6 +3195,7 @@ let render_board_read (state : state) (list_post : board_post) =
         (Masc_tui_keys.footer_hints_board_read
            ~focus_posts:(state.board_focus = Left_pane) ~layout)
   in
+  Masc_tui_frame_timing.finish_stage ~name:"board.render_prep" prep_started;
   match layout with
   | Board_read_wide | Board_read_one_pane ->
     let scroll = board_read_pane state list_post ~rows ~cols buf in
@@ -5721,26 +5742,59 @@ let render_exact_lane_provider_editor (state : state) editor =
   let entries = Masc_tui_types.slot_editor_rows state in
   let count = List.length entries in
   let selected_index = Masc_tui_types.slot_editor_cursor_index state in
+  (* Whether the lane walks a CLI tail, once its row has been read. *)
+  let walks_cli_tail =
+    match editor.Masc_tui_types.se_target with
+    | Masc_tui_types.Exact_lane_slots target ->
+      Option.map
+        (fun (row : Tui_decode.standalone_lane) -> row.Tui_decode.sl_supports_cli_tail)
+        (Masc_tui_types.standalone_lane_row state target)
+    | Masc_tui_types.Media_failover_slots -> None
+  in
+  (* j/k stop on slots, never on a group's title, so an empty group has no
+     row to move into. Its title says where a slot comes from instead: [a]
+     picks one, and the runtime's kind decides the group it joins. *)
   let group_rows kind title =
     let rows =
       entries
       |> List.mapi (fun index row -> index, row)
       |> List.filter (fun (_, row) -> row.Masc_tui_types.sr_kind = kind)
     in
-    (None, Printf.sprintf "  %s (%d)" title (List.length rows))
+    let heading =
+      match rows with
+      | [] -> Printf.sprintf "  %s (0) · a adds one" title
+      | _ :: _ -> Printf.sprintf "  %s (%d)" title (List.length rows)
+    in
+    (None, heading)
     :: List.map (fun (index, row) -> Some index, row.Masc_tui_types.sr_slot) rows
   in
-  let display_rows =
-    group_rows Masc_tui_types.Catalog_slot "HTTP slots · tried first"
-    @ group_rows Masc_tui_types.Official_client_slot
+  let declares_cli_slot =
+    List.exists
+      (fun row -> row.Masc_tui_types.sr_kind = Masc_tui_types.Official_client_slot)
+      entries
+  in
+  (* A lane without a CLI tail draws no CLI group: the writer refuses every
+     CLI slot there, so the group could only invite a pick that fails. A CLI
+     slot the file declares anyway is still drawn, so it can be dropped. *)
+  let cli_group =
+    match walks_cli_tail, declares_cli_slot with
+    | Some false, false -> []
+    | Some false, true | Some true, (true | false) | None, (true | false) ->
+      group_rows Masc_tui_types.Official_client_slot
         "CLI slots · tried after every HTTP slot"
+  in
+  let display_rows =
+    group_rows Masc_tui_types.Catalog_slot "HTTP slots · tried first" @ cli_group
   in
   box_top buf cols;
   box_line buf cols (screen_title " MASC Lanes / Providers");
   box_divider buf cols;
   box_line_styled buf cols ~style:(Theme.info ())
-    (Printf.sprintf "  [runtime.exact_output_lanes.%s] · HTTP then CLI"
-       (Terminal_text.single_line lane));
+    (Printf.sprintf "  [runtime.exact_output_lanes.%s] · %s"
+       (Terminal_text.single_line lane)
+       (match walks_cli_tail with
+        | Some false -> "HTTP only"
+        | Some true | None -> "HTTP then CLI"));
   (match state.lanes_action_error with
    | None -> ()
    | Some detail ->
@@ -5775,11 +5829,11 @@ let render_exact_lane_provider_editor (state : state) editor =
               | Tui_decode.Exact_cli_slots -> "CLI tail"
               | Tui_decode.Exact_output_unsupported -> "no output schema"
             in
-            let line note =
+            let line bracket note =
               Printf.sprintf "  %s [%s] %s · %s / %s%s"
                 (if picker.Masc_tui_types.rlp_selected_row = Some offset
                  then ">" else " ")
-                destination
+                bracket
                 (Terminal_text.single_line runtime.ro_id)
                 (Terminal_text.single_line runtime.ro_provider)
                 (Terminal_text.single_line runtime.ro_model)
@@ -5789,12 +5843,14 @@ let render_exact_lane_provider_editor (state : state) editor =
               Masc_tui_types.runtime_pick_availability state
                 picker.Masc_tui_types.rlp_pick runtime
             with
-            | Masc_tui_types.Pick_refused reason ->
+            | Masc_tui_types.Pick_refused refusal ->
+              (* The bracket carries the refusal: a note after the model
+                 is the first thing the frame cuts. *)
               box_line_styled buf cols ~style:(Theme.recede ())
-                (line ("  (unavailable: " ^ Keeper_chat.terminal_safe_text reason ^ ")"))
+                (line (Masc_tui_types.runtime_pick_refusal_tag refusal) "")
             | Masc_tui_types.Pick_available ->
               box_line buf cols
-                (line
+                (line destination
                    (if List.mem runtime.ro_id picker.rlp_already
                     then "  (already declared)" else "")))
    | None ->
@@ -6090,19 +6146,24 @@ let render_lanes_overview (state : state) =
        else
          List.iteri
            (fun offset (runtime : Masc.Tui_decode.runtime_option) ->
-              let note =
+              (* A refusal leads the row, as in the provider editor: a note
+                 after the label is the first thing the frame cuts. *)
+              let refusal_prefix, note =
                 match
                   Masc_tui_types.runtime_pick_availability state
                     picker.Masc_tui_types.rlp_pick runtime
                 with
-                | Masc_tui_types.Pick_refused reason ->
-                  "  (unavailable: " ^ Keeper_chat.terminal_safe_text reason ^ ")"
+                | Masc_tui_types.Pick_refused refusal ->
+                  ( Ansi.dim ^ "[" ^ Masc_tui_types.runtime_pick_refusal_tag refusal
+                    ^ "] " ^ Ansi.reset
+                  , "" )
                 | Masc_tui_types.Pick_available ->
-                if List.exists (String.equal runtime.ro_id) picker.rlp_already
-                then "  (already a slot)"
-                else if List.exists (String.equal runtime.ro_provider) picker.rlp_providers
-                then "  (same provider as a current slot)"
-                else ""
+                  ( ""
+                  , if List.exists (String.equal runtime.ro_id) picker.rlp_already
+                    then "  (already a slot)"
+                    else if List.exists (String.equal runtime.ro_provider) picker.rlp_providers
+                    then "  (same provider as a current slot)"
+                    else "" )
               in
               let mark =
                 if picker.Masc_tui_types.rlp_selected_row = Some offset then ">" else " "
@@ -6113,8 +6174,8 @@ let render_lanes_overview (state : state) =
               in
               let def = if runtime.ro_is_default then " [default]" else "" in
               box_line buf cols
-                (Printf.sprintf "  %s %s%s%s%s"
-                   mark
+                (Printf.sprintf "  %s %s%s%s%s%s"
+                   mark refusal_prefix
                    (Masc_tui_types.runtime_picker_label runtime)
                    ctx def
                    (Ansi.dim ^ note ^ Ansi.reset)))
@@ -16087,6 +16148,8 @@ let render_config (state : state) =
          into it. It also named PgUp/PgDn, which the table did not have, so
          the two had drifted in both directions. *)
       (match state.runtime_account_form with
+       | Some form when Masc_tui_runtime_account_form.is_saved form ->
+         Masc_tui_keys.footer_hints_runtime_account_saved ()
        | Some _ -> Masc_tui_keys.footer_hints_runtime_account_form ()
        | None -> Masc_tui_keys.footer_hints_config ~pane:state.config_pane)
     ~body:(fun ~budget:_ c ->
@@ -16156,7 +16219,9 @@ let render_config (state : state) =
       (* The account form stands where the file is drawn: it is opened on that
          file, and what it saves is that file with one provider added. *)
       match state.runtime_account_form with
-      | Some form -> List.iter c.push (Masc_tui_runtime_account_form.rows form)
+      | Some form ->
+          List.iter c.push
+            (Masc_tui_runtime_account_form.rows ~width:(framed_inner_width cols) form)
       | None ->
       match state.runtime_config_view_error, state.runtime_config_view with
       | Some detail, _ ->
@@ -17035,8 +17100,8 @@ let render_terminal_too_small state ~rows ~cols =
           minimum_terminal_rows)
        cols);
   Buffer.add_char buf '\n';
-  finish_frame ~compact_frame:true ~surface_key:"terminal-too-small"
-    ~cursor:Frame_presenter.Hidden ~rows ~cols buf
+  finish_terminal_too_small_frame ~cursor:Frame_presenter.Hidden ~rows ~cols
+    buf
 
 (** Keep every high-chrome surface out of a viewport that cannot contain the
     largest declared fixed-row budget. Main ignores hidden surface input, and
@@ -17048,7 +17113,10 @@ let render_account_login state view =
     ~hints:(Masc_tui_account_login.hints view)
     ~body:(fun ~budget c ->
       let lines = Masc_tui_account_login.visible_lines ~height:budget view
-        |> List.map Masc.Tui_decode.sanitize_terminal_text in
+        |> List.map (function
+          | Masc_tui_account_login.Text text -> Masc.Tui_decode.sanitize_terminal_text text
+          | Masc_tui_account_login.Terminal line ->
+            Masc_tui_sgr_text.render ~sanitize:Masc.Tui_decode.sanitize_terminal_text line) in
       List.iter (fun line -> c.push (fit_width line (framed_inner_width cols))) lines)
 
 

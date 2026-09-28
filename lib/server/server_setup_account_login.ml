@@ -30,7 +30,7 @@ let session_status = function
   | Session.Already_running | Not_running | Input_pending -> `Conflict
   | Not_found -> `Not_found
   | Invalid_input -> `Bad_request
-  | Cancelled | Transport_failed | Process_failed _ -> `Bad_gateway
+  | Cancelled | Transport_failed | Process_failed _ | Interpreter_missing -> `Bad_gateway
 
 let receipt_failure = "The private login recovery record could not be saved."
 let account_failure = "The private login account could not be prepared."
@@ -106,6 +106,25 @@ let start ~actor ~base_path ~body request reqd =
             ~grace_seconds:Process_eio.child_exit_grace_seconds in
           Client.observe ~mgr ~clock
             ~cwd:Eio.Path.(Eio.Stdenv.fs env / Client.home_dir home) ~cli_path:spawn_path home in
+        (* Display data for setup's account list. The login already succeeded,
+           so a missing or unrecordable email is logged and never fails it. *)
+        let record_account_email reference =
+          let recorded =
+            let* binding = Runtime_setup_accounts.resolve ~workspace:base_path ~integration_id
+                ~cli_path reference |> Result.map_error Runtime_setup_accounts.error_message in
+            let email = match Client.account_email home with
+              | Ok email -> Some email
+              | Error missing ->
+                Log.Server.info "Setup login %s recorded no account email: %s"
+                  (Session.id session) (Runtime_account_email.missing_to_string missing);
+                None in
+            Runtime_setup_accounts.set_email (Runtime_setup_accounts.account_of_binding binding) email
+            |> Result.map_error Runtime_setup_accounts.error_message in
+          match recorded with
+          | Ok () -> ()
+          | Error message ->
+            Log.Server.warn "Setup login %s account email was not recorded: %s"
+              (Session.id session) message in
         let recover status =
           (* A cancelled CLI may already have saved its selected credential. Only
              Antigravity needs capture: native homes were published before spawn.
@@ -134,12 +153,13 @@ let start ~actor ~base_path ~body request reqd =
                     let status = match error with
                       | Session.Cancelled -> Receipt.Cancelled
                       | Already_running | Not_found | Not_running | Input_pending
-                      | Invalid_input | Transport_failed | Process_failed _ -> Receipt.Failed in
+                      | Invalid_input | Transport_failed | Process_failed _ | Interpreter_missing -> Receipt.Failed in
                     status, Session.error_message error) in
                 let* observed = observe () |> Result.map_error (fun _ ->
                   Receipt.Failed, "The official client did not confirm the selected account. Retry login or verify the account.") in
                 let* reference = Client.publish ~workspace:base_path ~integration_id ~cli_path home
                   |> Result.map_error (fun _ -> Receipt.Failed, "The selected account could not be published. Retry account recovery.") in
+                record_account_email reference;
                 save { !receipt with account_ref = Some reference; status = Receipt.Complete observed }
                 |> Result.map_error (fun message -> Receipt.Failed, message))
             with Eio.Cancel.Cancelled _ as exn ->

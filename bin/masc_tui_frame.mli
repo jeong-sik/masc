@@ -27,6 +27,12 @@ val inner_width : cols:int -> int
 (** Cells a row's content gets. Measure against this before handing a row to
     the frame, or the frame cuts what it did not know it had to fit. *)
 
+val outer_width : inner:int -> int
+(** The other way round: the columns a framed surface needs for its content
+    to get [inner] cells, so [inner_width ~cols:(outer_width ~inner)] is
+    [inner]. For a caller that knows what a table needs inside and has to
+    decide how wide the surface around it must be. *)
+
 val content_height : rows:int -> int
 (** Rows a framed panel's content gets. [max 1] rather than [max 0]: a panel
     drawn at all draws something. A caller that would rather show nothing than

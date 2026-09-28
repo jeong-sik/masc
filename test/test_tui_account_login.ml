@@ -11,6 +11,7 @@ let started = frame "started" (`Assoc ["integration_id",`String "codex";"login_i
 let complete = frame "complete" (`Assoc ["integration_id",`String "codex";"account_ref",`String account;
   "authentication",`String "authenticated";"invocation_verified",`Bool false])
 let inventory = `Assoc ["setup_revision",`String "revision";"default_runtime_selection", `List [`String "primary"; `String "fallback"];
+  "account_emails",`List [];
   "runtimes",`List [`Assoc ["id",`String "unrelated"];`Assoc ["id",`String "fallback"];`Assoc ["id",`String "primary"]];
   "integrations",`List (List.map (fun (id,protocol) -> `Assoc ["id",`String id;"display_name",`String id;"protocol",`String protocol])
     ["codex","codex-app-server";"claude-code","claude-code";"muse-code","muse-serve";"antigravity","antigravity-cli"])]
@@ -55,7 +56,7 @@ let account_and_default () =
 let input_and_epoch () =
   let t=Login.create "codex" in t.phase<-Login.Logging;t.generation<-2;t.login_id<-Some session;
   Login.paste t "private-code";
-  check bool "render masks private input" false (List.exists (fun line -> line="private-code" || String.ends_with ~suffix:"private-code" line) (Login.lines t));
+  check bool "render masks private input" false (List.exists (fun line -> line="private-code" || String.ends_with ~suffix:"private-code" line) (List.map Login.row_text (Login.lines t)));
   (match Login.key t "\r" with
    | Login.Input (_, `Assoc fields) -> check bool "input goes to dedicated endpoint payload" true (List.assoc_opt "text" fields=Some (`String "private-code"))
    | _ -> fail "code was not submitted");
@@ -118,7 +119,7 @@ let viewport_and_receipt () =
   let t=Login.create "codex" in t.phase<-Login.Models;t.models<-List.init 30 model;
   List.iter (fun cursor -> t.cursor<-cursor;
     check bool "selected model visible in short viewport" true
-      (List.mem ("> model " ^ string_of_int cursor) (Login.visible_lines ~height:4 t))) [0;15;29];
+      (List.mem ("> model " ^ string_of_int cursor) (List.map Login.row_text (Login.visible_lines ~height:4 t)))) [0;15;29];
   t.provider<-Some provider;t.login_id<-Some session;t.account_ref<-Some account;
   let receipt=`Assoc ["login_id",`String session;"integration_id",`String "codex";"invocation_verified",`Bool false;
     "status",`String "complete";"account_ref",`String other] in
@@ -222,6 +223,103 @@ let failed_save_refresh () =
     check string "retry uses same account" account
       (body |> member "connections" |> to_list |> List.hd |> member "source" |> member "account_ref" |> to_string)
   | _ -> fail "refreshed save was not offered"
+module Sgr_text = Masc_tui_sgr_text
+module Sgr = Masc_tui_theme.Sgr
+let contains text part =
+  let n = String.length part in
+  let rec at i = i + n <= String.length text && (String.sub text i n = part || at (i + 1)) in
+  n = 0 || at 0
+(* What the renderer draws for a row: the pane's own text sanitized, the
+   client's text drawn with its colours. *)
+let drawn row = match row with
+  | Login.Text text -> Masc.Tui_decode.sanitize_terminal_text text
+  | Login.Terminal line -> Sgr_text.render ~sanitize:Masc.Tui_decode.sanitize_terminal_text line
+let styled code text = if String.length code = 0 then text else code ^ text ^ Sgr.reset
+(* The Codex device login as it reached the pane on 2026-09-28 (the code is
+   made up). Split inside an escape, the way a stream chunk can end. *)
+let codex_device_login = String.concat "\n" [
+  "Welcome to Codex [v\027[90m0.157.1\027[0m]";
+  "\027[90mOpenAI's command-line coding agent\027[0m";
+  "";
+  "1. Open this link in your browser and sign in to your account";
+  "   \027[94mhttps://auth.openai.com/codex/device\027[0m";
+  "";
+  "2. Enter this one-time code \027[90m(expires in 15 minutes)\027[0m";
+  "   \027[94mABCD-EFGH\027[0m";
+  "" ]
+let official_client_colours () =
+  let t = Login.create "codex" in
+  ignore (Login.begin_attempt t provider ~existing:false);
+  let feed chunk = ignore (Login.event ~generation:t.generation t (Login.Output chunk)) in
+  let cut = String.length "Welcome to Codex [v\027[9" in
+  feed (String.sub codex_device_login 0 cut);
+  check bool "half an escape is not drawn while the rest is on its way" false
+    (contains (String.concat "\n" (List.map drawn (Login.lines t))) "\\x1B");
+  feed (String.sub codex_device_login cut (String.length codex_device_login - cut));
+  let rows = Login.lines t in
+  let screen = String.concat "\n" (List.map drawn rows) in
+  check bool "no escape is spelled out as text" false (contains screen "\\x1B");
+  check bool "the link keeps its words" true (List.mem "   https://auth.openai.com/codex/device" (List.map Login.row_text rows));
+  check bool "the link is drawn in the client's blue" true
+    (contains screen (styled Sgr.bright_blue "https://auth.openai.com/codex/device"));
+  check bool "the one-time code is drawn in the client's blue" true (contains screen (styled Sgr.bright_blue "ABCD-EFGH"));
+  check bool "the version is drawn in the client's grey" true (contains screen (styled Sgr.gray "0.157.1"));
+  check bool "the pane's own prompt is still there" true (List.mem "로그인 코드: " (List.map Login.row_text rows))
+let foreign_escapes_never_reach_the_terminal () =
+  let only line = match Sgr_text.parse line with [ runs ] -> runs | lines -> fail (Printf.sprintf "%d lines" (List.length lines)) in
+  let hostile = only "a\027[2J\027[5;5Hb\027]8;;https://evil.example/\027\\link\027]8;;\027\\c\027[?25ld\027(Be\027]0;title\007f\0277g" in
+  check string "cursor moves, hyperlinks, titles and charsets are dropped, their text kept" "ablinkcdefg" (Sgr_text.text hostile);
+  check bool "nothing the client wrote is sent as an escape" false
+    (String.contains (Sgr_text.render ~sanitize:Masc.Tui_decode.sanitize_terminal_text hostile) '\027');
+  check string "a sequence the stream ends inside waits for the rest" "x" (Sgr_text.text (only "x\027[9"));
+  check string "an ESC that starts nothing is shown, not sent" "a\\x1B\\x01b"
+    (Sgr_text.render ~sanitize:Masc.Tui_decode.sanitize_terminal_text (only "a\027\001b"));
+  (match Sgr_text.parse "\027[31mred\nstill red\027[0m plain" with
+   | [ _; [ carried; after ] ] ->
+     check bool "a colour carries over the line end" true Sgr_text.(carried.pen.foreground = Some (Palette Red));
+     check bool "reset ends it" true Sgr_text.(after.pen = plain)
+   | _ -> fail "two lines expected");
+  let channels = function
+    | Some (Sgr_text.Rgb colour) ->
+      Some Masc_tui_terminal_palette.(red colour, green colour, blue colour)
+    | Some (Sgr_text.Palette _ | Sgr_text.Bright _) | None -> None in
+  (match only "\027[38;5;196mX\027[48;5;1mY\027[38;2;10;20;30mZ\027[38:2::1:2:3mW" with
+   | [ x; y; z; w ] ->
+     let foreground (run : Sgr_text.run) = run.Sgr_text.pen.Sgr_text.foreground in
+     check (option (triple int int int)) "38;5 cube index" (Some (255, 0, 0)) (channels (foreground x));
+     check bool "a background's numbers are not read as codes" true
+       (y.Sgr_text.pen.Sgr_text.weight = Sgr_text.Regular && foreground y = foreground x);
+     check (option (triple int int int)) "38;2 truecolor" (Some (10, 20, 30)) (channels (foreground z));
+     check (option (triple int int int)) "colon sub-parameters" (Some (1, 2, 3)) (channels (foreground w))
+   | runs -> fail (Printf.sprintf "%d runs" (List.length runs)))
+(* The server names the email it recorded at each selected account's last
+   login; the provider list shows it so the operator can tell accounts apart. *)
+let account_emails_beside_providers () =
+  let with_emails rows =
+    let fields = match inventory with `Assoc fields -> List.remove_assoc "account_emails" fields | _ -> [] in
+    `Assoc (("account_emails", `List rows) :: fields) in
+  let row id state extra = `Assoc (["integration_id", `String id; "state", `String state] @ extra) in
+  let t = Login.create "" in
+  ok (Login.inventory t (with_emails [
+    row "codex" "recorded" ["email", `String "operator@example.com"];
+    row "claude-code" "absent" [];
+    row "antigravity" "unreadable" [] ]));
+  check (list string) "each selected account row names its email or why not"
+    [ "> codex · operator@example.com"; "  claude-code · 이메일 기록 없음";
+      "  muse-code"; "  antigravity · 이메일 기록을 읽지 못함" ]
+    (List.map Login.row_text (List.tl (Login.lines t)));
+  List.iter (fun (name, rows) ->
+    let t = Login.create "" in
+    check bool name true (Result.is_error (Login.inventory t (with_emails rows))))
+    [ "unknown state is refused", [ row "codex" "verified" [] ];
+      "recorded without an email is refused", [ row "codex" "recorded" [] ];
+      "an email on an absent record is refused", [ row "codex" "absent" ["email", `String "x@example.com"] ];
+      "one account listed twice is refused", [ row "codex" "absent" []; row "codex" "unreadable" [] ];
+      "an account for no listed integration is refused", [ row "missing" "absent" [] ] ];
+  let fields = match inventory with `Assoc fields -> List.remove_assoc "account_emails" fields | _ -> [] in
+  check bool "an inventory without account emails is refused" true
+    (Result.is_error (Login.inventory (Login.create "") (`Assoc fields)))
+
 let () = run "TUI account login" ["workflow",[
   test_case "pasted credentials preserve bytes and reject controls" `Quick pasted_credential_bytes;
   test_case "failed save refreshes revision and retains model" `Quick failed_save_refresh;
@@ -234,6 +332,9 @@ let () = run "TUI account login" ["workflow",[
   test_case "explicit provider and preserved default" `Quick account_and_default;
   test_case "private input and superseded attempt" `Quick input_and_epoch;
   test_case "declared fallback inventory contract" `Quick inventory_selection_contract;
+  test_case "account emails beside provider rows" `Quick account_emails_beside_providers;
   test_case "spawn failure retains recovery receipt" `Quick failed_before_started;
   test_case "retry preserves early input until a new session starts" `Quick retry_early_input;
-  test_case "visible cursor and recovery identity" `Quick viewport_and_receipt]]
+  test_case "visible cursor and recovery identity" `Quick viewport_and_receipt;
+  test_case "official client colours are drawn" `Quick official_client_colours;
+  test_case "foreign escapes never reach the terminal" `Quick foreign_escapes_never_reach_the_terminal]]

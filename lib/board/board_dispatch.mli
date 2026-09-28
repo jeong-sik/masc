@@ -263,13 +263,15 @@ val set_pinned :
 val set_closed :
   post_id:string ->
   closed_by:string ->
-  ?successor_id:string ->
-  ?summary:string ->
+  successor:Board.close_successor ->
+  summary:string ->
   unit ->
   (unit, Board.board_error) Result.t
 (** Records a typed close on a post (task-1758/#39356). Ungated here —
     author/operator/configured-moderator permission is checked by the
-    caller, the same boundary as [set_pinned]. *)
+    caller, the same boundary as [set_pinned]. [summary] must be non-empty
+    and [successor] must name a decision; both are enforced at the same
+    storage boundary the dashboard route shares. *)
 
 val reopen : post_id:string -> (unit, Board.board_error) Result.t
 (** Clears a post's [closed] state. Idempotent; ungated here, same

@@ -20,7 +20,7 @@
 
 (executable
  (name main_eio)
- (modules main_eio masc_cli_setup masc_cli_runtime_sample masc_cli_onboarding masc_cli_prerequisites masc_cli_inspect_file masc_cli_docker_session masc_cli_model_resume masc_cli_workspace_upgrade masc_cli_antigravity masc_cli_codex_models masc_cli_muse_models masc_cli_owner_upgrade masc_cli_runtime_setup masc_cli_client_path)
+ (modules main_eio masc_cli_setup masc_cli_runtime_sample masc_cli_onboarding masc_cli_prerequisites masc_cli_inspect_file masc_cli_docker_session masc_cli_model_resume masc_cli_workspace_upgrade masc_cli_antigravity masc_cli_codex_models masc_cli_muse_models masc_cli_muse_login masc_cli_owner_upgrade masc_cli_runtime_setup masc_cli_client_path)
  (public_name masc)
  (package masc)
  (libraries
@@ -1011,6 +1011,10 @@
   masc_tui_observer
   masc_tui_message_layout
   masc_tui_roster_pane
+  ; the pane opens only where a surface keeps the Keepers list's flag
+  ; columns inside its frame; both are leaf layout facts below this library.
+  masc_tui_frame
+  masc_tui_render_schedule
   ; agent_core for the tool schedule contract a ledger call carries: batch
   ; size and execution mode decide the dispatch marks.
   agent_core))
@@ -1189,7 +1193,7 @@
  (name masc_tui_board_read_layout)
  (wrapped false)
  (modules masc_tui_board_read_layout)
- (libraries masc_tui_types masc_tui_board_detail))
+ (libraries masc_tui_types masc_tui_board_detail masc_tui_frame_timing))
 
 (library
  (name masc_tui_browser_lane_layout)
@@ -1295,7 +1299,13 @@
  (name masc_tui_account_login)
  (wrapped false)
  (modules masc_tui_account_login)
- (libraries yojson masc_tui_message_layout))
+ (libraries yojson masc_tui_message_layout masc_tui_sgr_text))
+
+(library
+ (name masc_tui_sgr_text)
+ (wrapped false)
+ (modules masc_tui_sgr_text)
+ (libraries masc_tui_theme masc_tui_terminal_palette))
 
 (library
  (name masc_tui_types)
@@ -1554,6 +1564,7 @@
  (wrapped false)
  (modules masc_tui_render_prim)
  (libraries
+  masc_tui_frame_timing
   masc_tui_next_request_band
   masc_tui_hit
   masc_tui_press
@@ -1678,7 +1689,13 @@
  (name masc_tui_overview_providers)
  (wrapped false)
  (modules masc_tui_overview_providers)
- (libraries masc masc_tui_types masc_tui_ansi masc_tui_message_layout unix))
+ (libraries
+  masc
+  masc_tui_types
+  masc_tui_ansi
+  masc_tui_theme
+  masc_tui_message_layout
+  unix))
 
 ;; RFC-0465: the Overview's pull request reading, decoder and lines. A
 ;; library so a test can decode the server's own encoder output.
@@ -1714,6 +1731,7 @@
  (package masc)
  (libraries
   masc_tui_account_login
+  masc_tui_sgr_text
   masc_tui_hit
   masc_tui_press
   masc_tui_pick_list

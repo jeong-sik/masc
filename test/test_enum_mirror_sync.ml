@@ -538,6 +538,42 @@ let test_article_id_pattern_mirror () =
     (declared_patterns_for_schemas (all_schemas ()) ~property:"article_id")
 ;;
 
+(* Board post id. [Masc.Board.Post_id] owns the shape; every board tool that
+   takes a post_id declares it. The parser accepts [a-zA-Z0-9_-]{1,64}, not
+   only the ["p-"] prefix [generate] mints, so the pattern mirrors the parser
+   and never rejects an id the parser accepts (#39448). *)
+let test_post_id_pattern_mirror () =
+  check (list string)
+    "post_id pattern matches Board.Post_id"
+    [ Masc.Board.Post_id.json_schema_pattern ]
+    (declared_patterns_for_schemas (all_schemas ()) ~property:"post_id")
+;;
+
+(* The pattern and the parser are one shape: an id the parser accepts must
+   match the pattern, and one it refuses must not. Without this, a change to
+   [of_string]'s bound or character class leaves the schema advertising a
+   shape the parser no longer has (#39448). *)
+let test_post_id_pattern_agrees_with_the_parser () =
+  let pattern = Re.Pcre.re Masc.Board.Post_id.json_schema_pattern |> Re.compile in
+  let agrees id =
+    let parsed = Result.is_ok (Masc.Board.Post_id.of_string id) in
+    let matched = Re.execp pattern (String.trim id) in
+    check bool
+      (Printf.sprintf "post_id %S: parser=%b pattern=%b" id parsed matched)
+      parsed matched
+  in
+  List.iter agrees
+    [ "p-0123456789abcdef0123456789abcdef"
+    ; "p-1"
+    ; "keeper-ask:ask-1"
+    ; "has space"
+    ; ""
+    ; String.make 64 'a'
+    ; String.make 65 'a'
+    ; "bad!char"
+    ]
+;;
+
 (* A guard that passes when the thing it guards is empty is not a guard. *)
 let test_owners_are_non_empty () =
   List.iter
@@ -563,6 +599,9 @@ let () =
         ; test_case "board sort order" `Quick test_sort_order_mirror
         ; test_case "board vote direction" `Quick test_vote_direction_mirror
         ; test_case "board comment id pattern" `Quick test_comment_id_pattern_mirror
+        ; test_case "board post id pattern" `Quick test_post_id_pattern_mirror
+        ; test_case "board post id pattern agrees with the parser" `Quick
+            test_post_id_pattern_agrees_with_the_parser
         ; test_case "constitution article id pattern" `Quick
             test_article_id_pattern_mirror
         ; test_case "schedule contract enums" `Quick test_schedule_contract_mirrors

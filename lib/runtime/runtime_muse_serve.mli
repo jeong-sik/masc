@@ -165,9 +165,20 @@ type turn_result =
   ; usage : Runtime_muse_msp.token_usage option
   ; tool_calls : int
   ; approvals_decided : int
+  ; usage_models : string list
+    (** The models the host named for this turn's model calls
+        ([session/tokenUsage] [modelId]) in call order; a call on the same
+        model as the one before it adds nothing. Empty when the host named
+        none. [model] is what the session selected; these are what the calls
+        ran on. *)
   ; resumed : bool
   ; server_version : string
   }
+
+val ran_model : turn_result -> string option
+(** The model the turn's last call ran on, as the host named it. A host that
+    named none (older hosts send no [session/tokenUsage]) leaves the
+    session's selection, [model]. *)
 
 type stream_event =
   | Turn_started of
@@ -200,6 +211,14 @@ type stream_event =
   | Turn_terminal_received of Runtime_muse_msp.terminal
       (** The matching durable terminal has been decoded. Emitted
           before usage callbacks; [Turn_finished] still closes output afterward. *)
+  | Model_call_reported of
+      { session_id : string
+      ; turn_id : string
+      ; model : string
+      }
+      (** The host named [model] for one of this turn's model calls
+          ([session/tokenUsage]), and the call before it named another or
+          none. Emitted before [Usage_reported]. *)
   | Usage_reported of
       { session_id : string
       ; turn_id : string

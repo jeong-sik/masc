@@ -206,6 +206,23 @@ let test_usage_report_is_the_turn_total () =
   | reports -> failf "expected one report, got %d" (List.length reports)
 ;;
 
+(* The turn's usage belongs to the model the host named for its calls, not
+   the session's selection. *)
+let test_usage_report_names_the_model_the_calls_ran_on () =
+  match
+    Adapter.usage_reports
+      ~turn_count:4
+      ~position:Keeper_usage_resolution.Resumed
+      [ turn_started
+      ; Serve.Model_call_reported
+          { session_id; turn_id = "turn-1"; model = "muse-fixture-contributor" }
+      ; Serve.Usage_reported { session_id; turn_id = "turn-1"; usage }
+      ]
+  with
+  | [ report ] -> check string "model the calls ran on" "muse-fixture-contributor" report.model
+  | reports -> failf "expected one report, got %d" (List.length reports)
+;;
+
 (* ── Error mapping ───────────────────────────────────────────────────── *)
 
 let disposition error =
@@ -2107,6 +2124,8 @@ let () =
     ; ( "usage"
       , [ test_case "turn/completed usage is the turn total" `Quick
             test_usage_report_is_the_turn_total
+        ; test_case "usage names the model the calls ran on" `Quick
+            test_usage_report_names_the_model_the_calls_ran_on
         ] )
     ; ( "errors"
       , [ test_case "callback failure keeps persistence cause" `Quick test_persistence_cause_survives_callback_protocol_projection

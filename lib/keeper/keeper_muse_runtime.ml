@@ -745,6 +745,9 @@ let stream_projection ~quota_scope ~keeper_name ~runtime_id ~configured_model ~r
                 ~resets_at:(float_of_int reset_ms /. 1000.))
               (Msp.exhausted_subscription_reset_ms usage)) quota_scope
         | Serve.Turn_terminal_received _ -> ()
+        (* The usage this turn reports belongs to the model its calls ran
+           on, when the host names it, rather than the session's selection. *)
+        | Serve.Model_call_reported { model; _ } -> reported_model := Some model
         | Serve.Usage_reported { session_id; turn_id; usage } ->
           (* [turn/completed] usage is "the turn's aggregate token usage,
              summed across the turn's model completions" (msp.d.ts,
@@ -1479,7 +1482,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
                        | Serve.Turn_started _ | Serve.Text_delta _ | Serve.Text_completed _
                        | Serve.Native_tool_started _ | Serve.Native_tool_finished _
                        | Serve.Approval_decided _ | Serve.Subscription_usage_observed _
-                       | Serve.Compaction_observed _
+                       | Serve.Compaction_observed _ | Serve.Model_call_reported _
                        | Serve.Usage_reported _ | Serve.Turn_finished _ -> ());
                       stream.on_serve_event event)
                     ~mgr:process_mgr
@@ -1558,7 +1561,8 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
             | Some detail -> Error (internal_error detail)
           in
           let latency_ms = Int.of_float ((Time_compat.now () -. started_at) *. 1000.0) in
-          let model = model_label ~runtime_id ~configured_model:config.model turn.model in
+          let ran_model = Serve.ran_model turn in
+          let model = model_label ~runtime_id ~configured_model:config.model ran_model in
           let usage_scope =
             match turn.usage with
             | Some _ -> Runtime_usage_scope.Turn_total
@@ -1574,7 +1578,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
                 Some
                   { Agent_core.Types.default_inference_telemetry with
                     request_latency_ms = Some latency_ms
-                  ; canonical_model_id = turn.model
+                  ; canonical_model_id = ran_model
                   ; reasoning_tokens =
                       Option.map (fun (usage : Msp.token_usage) -> usage.reasoning_tokens) turn.usage
                   }

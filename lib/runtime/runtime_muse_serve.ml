@@ -111,6 +111,7 @@ type turn_result =
   ; usage : Runtime_muse_msp.token_usage option
   ; tool_calls : int
   ; approvals_decided : int
+  ; usage_models : string list
   ; resumed : bool
   ; server_version : string
   }
@@ -133,6 +134,11 @@ type stream_event =
   | Subscription_usage_observed of Runtime_muse_msp.subscription_usage
   | Compaction_observed of Runtime_muse_msp.compaction
   | Turn_terminal_received of Runtime_muse_msp.terminal
+  | Model_call_reported of
+      { session_id : string
+      ; turn_id : string
+      ; model : string
+      }
   | Usage_reported of
       { session_id : string
       ; turn_id : string
@@ -719,7 +725,8 @@ let rec await_response io ~id ~method_ =
     (match notification with
      | Msp.Usage_changed usage -> io.on_subscription_usage usage
      | Msp.Turn_started _ | Turn_completed _ | Item_started _ | Item_updated _
-     | Item_completed _ | Item_delta _ | Unhandled_notification _ -> ());
+     | Item_completed _ | Item_delta _ | Model_usage_reported _
+     | Unhandled_notification _ -> ());
     await_response io ~id ~method_
   | Msp.Server_request { id = request_id; method_ = requested; _ } ->
     send_best_effort
@@ -783,6 +790,9 @@ type turn_state =
   ; tool_calls : int
   ; approvals : int
   ; pending_decisions : int list
+  ; usage_models : string list
+    (** Newest first; a call on the same model as the one before it adds
+        nothing. *)
   }
 
 let observation (item : Msp.item) : Runtime_native_tools.observation =
@@ -927,6 +937,23 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
      | Msp.Usage_changed usage ->
        emit (Subscription_usage_observed usage);
        continue state
+     (* The session's selection is what MASC asked for; the model a call ran
+        on is what the host names here. They differ only when the host ran
+        another model, which is recorded and reported, not refused: the call
+        already happened. *)
+     | Msp.Model_usage_reported { session_id = sid; turn_id = reported; model_id = Some model }
+       when ours sid && String.equal reported turn_id ->
+       (match state.usage_models with
+        | previous :: _ when String.equal previous model -> continue state
+        | [] | _ :: _ ->
+         (match config.model with
+          | Some requested when not (String.equal requested model) ->
+            Log.Runtime_agent.warn
+              "Muse Code session %s turn %s ran a model call on %s, but the session selected %s"
+              session_id turn_id model requested
+          | Some _ | None -> ());
+         emit (Model_call_reported { session_id; turn_id; model });
+         continue { state with usage_models = model :: state.usage_models })
      | Msp.Turn_completed { session_id = sid; turn_id = completed; terminal; usage; _ }
        when ours sid && String.equal completed turn_id ->
        emit (Turn_terminal_received terminal);
@@ -945,6 +972,7 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
      | Msp.Item_updated _
      | Msp.Item_completed _
      | Msp.Item_delta _
+     | Msp.Model_usage_reported _
      | Msp.Unhandled_notification _ -> continue state)
 ;;
 
@@ -1170,6 +1198,7 @@ let run_protocol
         { open_items = []
         ; open_tool_items = 0
         ; final_text = None
+        ; usage_models = []
         ; tool_calls = 0
         ; approvals = 0
         ; pending_decisions = []
@@ -1191,9 +1220,16 @@ let run_protocol
     ; usage
     ; tool_calls = state.tool_calls
     ; approvals_decided = state.approvals
+    ; usage_models = List.rev state.usage_models
     ; resumed
     ; server_version = init.Msp.server_version
     }
+;;
+
+let ran_model (turn : turn_result) =
+  match List.rev turn.usage_models with
+  | last :: _ -> Some last
+  | [] -> turn.model
 ;;
 
 let guard_idle_timeout f =

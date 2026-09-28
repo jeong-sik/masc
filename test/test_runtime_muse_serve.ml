@@ -667,6 +667,51 @@ let test_resumed_session_model_is_selected_before_admission () =
       | error -> fail (Serve.error_to_string error))
 ;;
 
+(* The model each call ran on is what the host names in session/tokenUsage.
+   The turn keeps the session's selection in [model] and lists the named
+   models in call order in [usage_models], a repeat of the previous call's
+   model adding nothing; another session's frames and an unnamed model are
+   not the turn's. *)
+let test_turn_lists_the_models_its_calls_ran_on () =
+  let token_usage ?(session_id = "s-1") model = Yojson.Safe.to_string
+      (`Assoc ["jsonrpc", `String "2.0"; "method", `String "session/tokenUsage";
+        "params", `Assoc ["sessionId", `String session_id; "turnId", `String "t-1";
+          "viewCursor", `String "v:5"; "modelId", model;
+          "usage", `Assoc ["inputTokens", `Int 10; "outputTokens", `Int 2];
+          "promptTokens", `Int 10; "totalTokens", `Int 12]]) in
+  List.iter (fun (frames, expected) ->
+    let reported = ref [] in
+    run_scripted ~model:"muse-spark-1.3"
+      ~on_stream_event:(function
+        | Serve.Model_call_reported { model; _ } -> reported := model :: !reported
+        | _ -> ())
+      (handshake_and_session ~granted:[] @ List.map (fun frame -> Write frame) frames
+       @ [Write agent_completed; Write turn_completed])
+      (fun result _ ->
+        match result with
+        | Ok turn ->
+          check (option string) "the selection stays the session's"
+            (Some "muse-spark-1.3") turn.model;
+          check (list string) "models the calls ran on" expected turn.usage_models;
+          check (list string) "one event per model" expected (List.rev !reported);
+          check (option string) "the last call's model, else the selection"
+            (match List.rev expected with last :: _ -> Some last | [] -> Some "muse-spark-1.3")
+            (Serve.ran_model turn)
+        | Error error -> fail (Serve.error_to_string error)))
+    [ [], []
+    ; [token_usage (`String "muse-spark-1.3")], ["muse-spark-1.3"]
+    ; [ token_usage (`String "muse-spark-1.3-contributor")
+      ; token_usage ~session_id:"s-2" (`String "other-model")
+      ; token_usage `Null
+      ; token_usage (`String "muse-spark-1.3-contributor")
+      ; token_usage (`String "muse-spark-1.3") ],
+      ["muse-spark-1.3-contributor"; "muse-spark-1.3"]
+    ; [ token_usage (`String "muse-spark-1.3")
+      ; token_usage (`String "muse-spark-1.3-contributor")
+      ; token_usage (`String "muse-spark-1.3") ],
+      ["muse-spark-1.3"; "muse-spark-1.3-contributor"; "muse-spark-1.3"] ]
+;;
+
 let test_session_approval_mode_is_verified_before_admission () =
   let frame id result = Yojson.Safe.to_string
       (`Assoc ["jsonrpc", `String "2.0"; "id", `Int id; "result", result]) in
@@ -883,6 +928,8 @@ let () =
         ; test_case "session identity is verified before admission" `Quick test_session_identity_is_verified_before_admission
         ; test_case "resumed session model is selected before admission" `Quick
             test_resumed_session_model_is_selected_before_admission
+        ; test_case "turn lists the models its calls ran on" `Quick
+            test_turn_lists_the_models_its_calls_ran_on
         ; test_case "effective approval mode is verified before admission" `Quick test_session_approval_mode_is_verified_before_admission
         ; test_case "prepared HOME matches selected account" `Quick test_prepared_home_is_bound_to_exact_selected_account
         ; test_case "invalid account home is refused" `Quick test_invalid_account_home_is_refused

@@ -603,13 +603,15 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
            ~quota_scope:(Runtime.quota_scope_of_runtime runtime) ~config
            ~prompt_capacity:(Runtime.muse_prompt_capacity runtime) ~reasoning_effort ~tool ~prompt with
          | Ok result ->
-           (match result.model with
+           (* The model the verification call ran on, as the host named it;
+              a host that names none leaves the model the start reported. *)
+           (match Runtime_muse_serve.ran_model result with
             | Some model when String.equal model execution.model ->
               Ok {model; text=result.text}
             | Some model ->
-              Error (Provider_rejected (Runtime_muse_serve.error_to_string
-                (Runtime_muse_serve.Session_model_mismatch
-                  {requested=execution.model; resumed=Some model})))
+              Error (Provider_rejected (Printf.sprintf
+                "Muse Code ran the verification turn on %s, but the configured model is %s"
+                model execution.model))
             | None -> Error Model_unreported)
          | Error (Runtime_verification_muse.Home_error (Runtime_muse_home.Sign_in_required _ as error)) ->
            Error (Unavailable (Client_not_authenticated (Runtime_muse_home.error_to_string error)))

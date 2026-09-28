@@ -14,7 +14,9 @@ let render_instruction key vars =
   | Error detail -> invalid_arg (Printf.sprintf "missing or invalid prompt %s: %s" key detail)
 
 let output_contract () =
-  render_instruction Prompt_names.fusion_judge_output []
+  let guidance = render_instruction Prompt_names.fusion_judge_output [] in
+  guidance ^ "\n\nJSON schema for this answer:\n"
+  ^ Yojson.Safe.to_string Fusion_judge_parse.output_schema
 
 let compose_prompt ~question ~panel =
   let answers =
@@ -124,12 +126,10 @@ let failure_of_core_error ~runtime_id ~prefix (e : Agent_core.Error.t) :
       (prefix ^ Fusion_agent_core.provider_error_detail ~runtime_id (core_error_detail e))
 
 (* 심판 출력 계약은 프롬프트와 파서가 진다. 요청은 wire response format을 싣지
-   않는다: 계약은 프롬프트가 항상 싣고 다니는
-   [fusion.judge.output] prompt asset이 전달하고(객체 형태, 닫힌
-   [decision.kind] 합, 빈 배열 허용 규칙까지 전부 명시), 위반은
-   [Fusion_judge_parse.of_string]의 strict 파싱이 [Parse_error]로 fail-loud 한다.
-   프롬프트가 쓰는 필드명 상수는 schema builder가 쓰던 것과 동일한
-   [Fusion_judge_parse.wire_field_*]이므로 계약이 갈라질 수 없다.
+   않는다. [Fusion_judge_parse]의 typed field 정의가 parser와 JSON output schema를
+   함께 만들고, [fusion.judge.output]의 의미 지침 뒤에 그 schema를 붙인다.
+   위반은 [Fusion_judge_parse.of_string]의 strict 파싱이 [Parse_error]로
+   fail-loud 한다. 프롬프트가 파서의 schema를 포함하는지는 테스트로 확인한다.
 
    tier 선택을 걷어내는 근거는 이 파일이 이미 기록해둔 두 사실이다:
    (1) capability 사실이 거짓일 수 있다 — ollama.com cloud는 declared인데
@@ -173,8 +173,7 @@ let judge_failure_of_route_failure
    파서. 클라이언트의 schema 채널(--json-schema, outputSchema)은 쓰지 않는다 —
    HTTP 쪽이 wire response format 을 싣지 않는 것과 같은 한 가지 계약을 유지한다.
 
-   공식 클라이언트는 토큰 회계를 돌려주지 않으므로 usage 는 [zero_usage] 다(패널과
-   같은 규약). [max_tokens] 와 masc web 도구는 이 경로에 실을 곳이 없다. *)
+   공식 클라이언트가 보고한 사용량은 빈 응답과 파싱 실패에서도 유지한다. [max_tokens] 와 masc web 도구는 이 경로에 실을 곳이 없다. *)
 let attempt_official ~base_dir ?timeout_s ~judge_system_prompt ~runtime_id ~prompt () :
     ( Fusion_types.judge_synthesis * Fusion_types.usage
     , Fusion_types.judge_failure * Fusion_types.usage )
@@ -183,14 +182,14 @@ let attempt_official ~base_dir ?timeout_s ~judge_system_prompt ~runtime_id ~prom
     Fusion_official_client.run_panelist ~base_dir ~runtime_id
       ~system_prompt:judge_system_prompt ?timeout_s ~prompt ()
   with
-  | Error failure ->
-    Error (judge_failure_of_official_failure failure, Fusion_types.zero_usage)
-  | Ok text when String.length (String.trim text) = 0 ->
+  | Error (failure, usage) ->
+    Error (judge_failure_of_official_failure failure, usage)
+  | Ok (text, usage) when String.length (String.trim text) = 0 ->
     Error
       ( Fusion_types.Empty_response
           (Printf.sprintf "judge: %s: official client returned no text" runtime_id)
-      , Fusion_types.zero_usage )
-  | Ok text -> attach_usage (Fusion_judge_parse.of_string text) Fusion_types.zero_usage
+      , usage )
+  | Ok (text, usage) -> attach_usage (Fusion_judge_parse.of_string text) usage
 
 (* Agent_core 후보 한 번. 에러도 usage를 동반한다: 토큰을 태운 뒤 실패(빈 응답/파싱
    실패)는 소비분을, 토큰 소비 전 실패(빌드/실행/빈 결과/provider 에러)는

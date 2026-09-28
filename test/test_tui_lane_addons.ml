@@ -263,6 +263,13 @@ let guided_actions () =
   let compact = UI.lines ~width:100 {UI.initial with focus=UI.Instances; snapshot=Some snapshot} in
   check bool "first screen names installed package" true
     (List.exists (fun line -> String.starts_with ~prefix:"> Useful observer" line) compact);
+  let failed = {instance with title="MSX";phase=UI.Row.Failed (String.make 120 'x');
+    action_schema=None} in
+  let failed_lines = UI.lines ~width:76 {UI.initial with focus=UI.Instances;
+    snapshot=Some {snapshot with instances=[failed]}} in
+  check bool "failed row keeps retry and cleanup ahead of its long reason" true
+    (List.exists (String.starts_with
+      ~prefix:"> MSX · failed · o:retry observation  d:cleanup · ") failed_lines);
   check bool "technical action schema is folded by default" false
     (List.exists (fun line -> String.contains line '{') compact);
   let form_schema = match schema with
@@ -353,11 +360,35 @@ let context_flow_uses_declared_connections () =
       && List.mem "> project-metric · Project metric · attached" moved);
   check bool "flow names the actual configured dependency" true
     (List.mem "  project-observer -> project-metric" (UI.lines ~width:160 view));
+  let configured = {view with presentation=UI.Summary;focus=UI.Configurations;
+    configuration_cursor=0;instance_cursor=1} in
+  let configured_lines = UI.lines ~width:160 configured in
+  check (option string) "configuration action targets its selected declaration" (Some producer.id)
+    (Option.map (fun (i : UI.instance) -> i.id) (UI.selected_instance configured));
+  check bool "configuration worker rows do not advertise another action target" true
+    (List.mem "  Project observer · attached" configured_lines
+     && List.mem "  Project metric · attached" configured_lines
+     && List.mem "> project-observer · applied" configured_lines);
+  check bool "compact Tab hint does not claim the wrong next pane" true
+    (List.mem "Horizontal Lane timeline · Tab:next pane, j/k select, D opens original evidence" configured_lines);
+  let worker_lines = UI.lines ~width:160 {configured with focus=UI.Instances} in
+  check bool "worker controls follow the marked worker" true
+    (List.mem "> Project metric · attached · o:observe  d:remove" worker_lines);
   let partial = {snapshot with instances=[consumer];configuration=Some {configuration with complete=false}} in
-  let partial_view = {view with snapshot=Some partial;error=Some "network failure"} in
+  let partial_view = {view with snapshot=Some partial;snapshot_read_error=Some "network failure"} in
   let partial_lines = UI.lines ~width:160 partial_view in
   check bool "failed read remains visible in flow" true
-    (List.mem "Refresh failed; graph may be stale: network failure" partial_lines);
+    (List.mem "Read: network failure · previous graph retained" partial_lines);
+  let unread_lines = UI.lines ~width:160
+      {partial_view with snapshot=None} in
+  check bool "unread flow does not claim a graph is retained" true
+    (List.mem "Read: network failure" unread_lines
+     && not (List.mem "Read: network failure · previous graph retained" unread_lines));
+  let input_lines = UI.lines ~width:160
+      {partial_view with error=Some (UI.Input_failure "choose a worker")} in
+  check bool "input and earlier graph read failure remain distinct" true
+    (List.mem "Input: choose a worker" input_lines
+     && List.mem "Read: network failure · previous graph retained" input_lines);
   check bool "partial inventory cannot establish producer absence" true
     (List.mem "  project-observer -> project-metric · producer unresolved; inventory incomplete" partial_lines);
   check bool "missing producer stays visible" true
@@ -580,9 +611,9 @@ let refresh_preserves_operator_target () =
         else (Buffer.add_char buf line.[i]; walk (i + 1)) in
     walk 0;
     Buffer.contents buf in
-  let failed = {view with focus=UI.Timeline;error=Some "network failed"} in
+  let failed = {view with focus=UI.Timeline;snapshot_read_error=Some "network failed"} in
   check bool "stale snapshot exposes refresh failure" true
-    (List.exists (fun line -> String.starts_with ~prefix:"Error: network failed" (plain line))
+    (List.exists (fun line -> String.starts_with ~prefix:"Read: network failed" (plain line))
       (UI.lines ~height:24 ~width:120 failed))
 
 let () = run "TUI Lane package operations" ["operator scenarios",[

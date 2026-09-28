@@ -62,6 +62,7 @@ type error =
       ; bytes : int
       ; max_bytes : int
       }
+  | Body_blank of { skill : string }
 
 type rejected_document =
   { directory : string
@@ -181,14 +182,17 @@ let composition_of_block ~skill block =
 ;;
 
 (* [keeper_skill] returns an instruction body as one inline tool result, and a
-   body over that boundary is refused on every read. A composition body is not
-   read that way: its block becomes a tool. *)
+   body over that boundary is refused on every read. A blank body is refused
+   the same way: it would be offered and then teach nothing. A composition
+   body is not read that way: its block becomes a tool. *)
 let readable_instruction (skill : skill) =
   match skill.surface with
   | Composition _ -> Ok skill
   | Instruction ->
     let bytes = String.length skill.body in
-    if bytes > Common.max_tool_result_wire_bytes
+    if Agent_core.Skill_document.is_blank skill.body
+    then Error (Body_blank { skill = skill.name })
+    else if bytes > Common.max_tool_result_wire_bytes
     then
       Error
         (Body_too_large_to_read
@@ -332,7 +336,8 @@ let composition_projection_failed = function
   | Definition_rejected _
   | Composition_info_near_miss _
   | Duplicate_skill _
-  | Body_too_large_to_read _ ->
+  | Body_too_large_to_read _
+  | Body_blank _ ->
     false
 ;;
 
@@ -691,6 +696,7 @@ let error_code = function
   | Composition_info_near_miss _ -> "composition_info_near_miss"
   | Duplicate_skill _ -> "duplicate_skill"
   | Body_too_large_to_read _ -> "body_too_large_to_read"
+  | Body_blank _ -> "body_blank"
 ;;
 
 let error_to_string = function
@@ -744,6 +750,10 @@ let error_to_string = function
       skill
       bytes
       max_bytes
+  | Body_blank { skill } ->
+    Printf.sprintf
+      "skill %S: body is blank; keeper_skill returns the body as the instruction"
+      skill
 ;;
 
 (* A Task reference the snapshot holds whose entry [project_entry_or_fallback]

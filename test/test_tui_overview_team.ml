@@ -24,7 +24,6 @@ let awaiting assignee =
     { assignee
     ; started_at = "2026-09-23T00:00:00Z"
     ; submitted_at = "2026-09-23T00:10:00Z"
-    ; intent = Masc_domain.Complete_task
     ; verification_id = "v-1"
     }
 

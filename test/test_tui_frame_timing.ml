@@ -87,6 +87,171 @@ let test_ordinals_count_per_phase () =
   | [] -> Alcotest.fail "no worst lines"
 ;;
 
+let test_stages_keep_frame_and_outer_fetch_apart () =
+  let stages =
+    Timing.Stage_samples.empty
+    |> fun t -> Timing.Stage_samples.add t ~frame:None ~name:"board.http_json" ~ms:(Some 7.0)
+    |> fun t -> Timing.Stage_samples.add t ~frame:None ~name:"board.http_json" ~ms:(Some 13.0)
+    |> fun t -> Timing.Stage_samples.add t ~frame:None ~name:"board.http_json" ~ms:(Some 19.0)
+    |> fun t -> Timing.Stage_samples.add t ~frame:(Some 16)
+      ~name:"board.thread.wrap" ~ms:(Some 2.0)
+    |> fun t -> Timing.Stage_samples.add t ~frame:(Some 16)
+      ~name:"board.thread.wrap" ~ms:(Some 3.0)
+    |> fun t -> Timing.Stage_samples.add t ~frame:(Some 16)
+      ~name:"board.cache.cold" ~ms:None
+    |> fun t -> Timing.Stage_samples.add t ~frame:(Some 1)
+      ~name:"overview.layout" ~ms:(Some 5.0)
+    |> fun t -> Timing.Stage_samples.add t ~frame:(Some 2)
+      ~name:"board.thread.wrap" ~ms:(Some 2.0)
+    |> fun t -> Timing.Stage_samples.add t ~frame:(Some 3)
+      ~name:"board.thread.wrap" ~ms:(Some 10.0)
+  in
+  let lines = Timing.Stage_samples.summary_lines stages in
+  Alcotest.(check bool) "same-frame wrapping sums" true
+    (List.exists (fun line ->
+       contains line "frame=16 name=board.thread.wrap ms=5.000 calls=2") lines);
+  Alcotest.(check bool) "stage percentile uses frame sum" true
+    (List.exists (fun line ->
+       contains line "stage[board.thread.wrap] frames=3 p50=5.000ms p95=10.000") lines);
+  Alcotest.(check bool) "outside fetch counts calls, not frames" true
+    (List.exists (fun line ->
+       contains line "stage[board.http_json] calls=3 p50=13.000ms p95=19.000 max=19.000") lines);
+  Alcotest.(check bool) "fetch is outside Build" true
+    (List.exists (fun line ->
+       contains line "outside-build name=board.http_json ms=39.000 calls=3") lines);
+  Alcotest.(check bool) "cold is a note, not zero duration" true
+    (List.exists (fun line ->
+       contains line "frame=16 name=board.cache.cold note") lines);
+  let builds =
+    Timing.Samples.add Timing.Samples.empty Timing.Build
+      ~tag:(Some "board-read") ~ms:10.0
+  in
+  let residual = Timing.Stage_samples.residual_lines stages builds in
+  Alcotest.(check bool) "residual excludes outside-Build fetch" true
+    (List.exists (fun line ->
+       contains line "frame=1 name=unattributed ms=5.000") residual)
+;;
+
+let test_default_off_keeps_values_and_skips_names () =
+  Alcotest.(check bool) "timing is off without an output path" false Timing.enabled;
+  let named = ref false in
+  let name _ =
+    named := true;
+    "unexpected"
+  in
+  let value = Timing.time_tagged Timing.Build ~tag:name (fun () -> 42) in
+  let stage_value = Timing.time_stage_tagged ~name (fun () -> 17) in
+  Alcotest.(check int) "frame value is unchanged" 42 value;
+  Alcotest.(check int) "stage value is unchanged" 17 stage_value;
+  Alcotest.(check bool) "name callbacks were skipped" false !named;
+  Alcotest.(check bool) "no stage clock started" true
+    (Option.is_none (Timing.start_stage ()))
+;;
+
+let test_opt_in_report_is_bounded () =
+  Alcotest.(check int) "short-run frame limit" 512 Timing.max_frames_per_phase;
+  Alcotest.(check int) "short-run stage limit" 4096 Timing.max_stage_samples;
+  let builds =
+    List.init (Timing.max_frames_per_phase + 1) (fun _ -> ())
+    |> List.fold_left
+         (fun t () -> Timing.Samples.add t Timing.Build ~tag:None ~ms:1.0)
+         Timing.Samples.empty
+  in
+  let build_lines = Timing.Samples.summary_lines builds in
+  Alcotest.(check bool) "only the bounded prefix is summarized" true
+    (List.exists (fun line -> contains line "build frames=512") build_lines);
+  Alcotest.(check bool) "the omitted frame is disclosed" true
+    (List.exists (fun line -> contains line "build omitted=1") build_lines);
+  let stages =
+    List.init (Timing.max_stage_samples + 1) (fun _ -> ())
+    |> List.fold_left
+         (fun t () ->
+           Timing.Stage_samples.add t ~frame:(Some 1) ~name:"bounded"
+             ~ms:(Some 0.1))
+         Timing.Stage_samples.empty
+  in
+  let stage_lines = Timing.Stage_samples.summary_lines stages in
+  Alcotest.(check bool) "stage records stop at the cap" true
+    (List.exists (fun line -> contains line "name=bounded ms=409.600 calls=4096")
+       stage_lines);
+  Alcotest.(check bool) "omitted stage records are disclosed" true
+    (List.exists (fun line -> contains line "omitted=1 (caps: 4096 records, 512 Build frames)")
+       stage_lines);
+  Alcotest.(check (list string)) "partial residual is not reported" []
+    (Timing.Stage_samples.residual_lines stages builds);
+  let late_stage =
+    Timing.Stage_samples.add Timing.Stage_samples.empty
+      ~frame:(Some (Timing.max_frames_per_phase + 1)) ~name:"late" ~ms:(Some 1.0)
+  in
+  Alcotest.(check bool) "stage beyond the frame window is omitted" true
+    (List.exists
+       (fun line -> contains line "omitted=1 (caps: 4096 records, 512 Build frames)")
+       (Timing.Stage_samples.summary_lines late_stage))
+;;
+
+let test_output_stays_with_its_present () =
+  let t =
+    Timing.Samples.empty
+    |> fun t -> Timing.Samples.add t Timing.Build ~tag:None ~ms:200.0
+    |> fun t -> Timing.Samples.add_present t ~tag:"keeper-detail" ~ms:150.0
+         ~output:{ write_ms = 10.0; flush_ms = 135.0;
+                   bytes = 12345; writes = 1; flushes = 1 }
+    |> fun t -> Timing.Samples.add_present t ~tag:"unchanged" ~ms:0.1
+         ~output:{ write_ms = 0.0; flush_ms = 0.0;
+                   bytes = 0; writes = 0; flushes = 0 }
+    |> fun t -> Timing.Samples.add_present t ~tag:"keeper-list" ~ms:20.0
+         ~output:{ write_ms = 18.0; flush_ms = 1.0;
+                   bytes = 800; writes = 2; flushes = 1 }
+  in
+  let lines = Timing.Samples.summary_lines t in
+  let detail = List.find (fun l -> contains l "tag=keeper-detail") lines in
+  Alcotest.(check bool) "original present ordinal" true
+    (contains detail "frame=1 150.00ms");
+  Alcotest.(check bool) "same frame output breakdown" true
+    (contains detail
+       "write=10.000ms flush=135.000ms other=5.000ms bytes=12345 writes=1 flushes=1");
+  let unchanged = List.find (fun l -> contains l "tag=unchanged") lines in
+  Alcotest.(check bool) "unchanged has its own ordinal" true
+    (contains unchanged "frame=2 0.10ms");
+  Alcotest.(check bool) "unchanged does not reuse preceding output" true
+    (contains unchanged
+       "write=0.000ms flush=0.000ms other=0.100ms bytes=0 writes=0 flushes=0");
+  let list = List.find (fun l -> contains l "tag=keeper-list") lines in
+  Alcotest.(check bool) "third sample keeps its counts" true
+    (contains list "frame=3 20.00ms"
+     && contains list "bytes=800 writes=2 flushes=1")
+;;
+
+exception Output_failed
+
+let test_present_keeps_callback_semantics () =
+  Alcotest.(check bool) "stanza enables real recording path" true Timing.enabled;
+  let calls = ref [] in
+  let write text = calls := text :: !calls in
+  let flush () = calls := "flush" :: !calls in
+  let result = Timing.time_present ~tag:"callback-test" ~write ~flush
+    (fun ~write ~flush -> write "first"; write "second"; flush (); 42)
+  in
+  Alcotest.(check int) "result" 42 result;
+  Alcotest.(check (list string)) "write and flush order"
+    ["first"; "second"; "flush"] (List.rev !calls);
+  calls := [];
+  ignore (Timing.time_present ~tag:"unchanged-test" ~write ~flush
+    (fun ~write:_ ~flush:_ -> ()));
+  Alcotest.(check (list string)) "unchanged does no IO" [] !calls;
+  Alcotest.check_raises "original output failure" Output_failed (fun () ->
+    Timing.time_present ~tag:"failure-test"
+      ~write:(fun _ -> raise Output_failed) ~flush
+      (fun ~write ~flush -> write "fails"; flush ()));
+  Alcotest.(check (list string)) "failure does not flush" [] !calls;
+  Alcotest.check_raises "original flush failure" Output_failed (fun () ->
+    Timing.time_present ~tag:"flush-failure-test" ~write
+      ~flush:(fun () -> calls := "flush-fails" :: !calls; raise Output_failed)
+      (fun ~write ~flush -> write "written"; flush ()));
+  Alcotest.(check (list string)) "write precedes failing flush"
+    ["written"; "flush-fails"] (List.rev !calls)
+;;
+
 let () =
   Alcotest.run
     "tui frame timing"
@@ -100,7 +265,17 @@ let () =
           Alcotest.test_case "unsampled phase prints nothing" `Quick
             test_unsampled_phase_prints_nothing;
           Alcotest.test_case "ordinals count per phase" `Quick
-            test_ordinals_count_per_phase
+            test_ordinals_count_per_phase;
+          Alcotest.test_case "stages retain the Build frame" `Quick
+            test_stages_keep_frame_and_outer_fetch_apart;
+          Alcotest.test_case "default off keeps values and skips names" `Quick
+            test_default_off_keeps_values_and_skips_names;
+          Alcotest.test_case "opt-in report has a short-run cap" `Quick
+            test_opt_in_report_is_bounded;
+          Alcotest.test_case "output stays with its present" `Quick
+            test_output_stays_with_its_present;
+          Alcotest.test_case "presentation keeps callback semantics" `Quick
+            test_present_keeps_callback_semantics
         ] )
     ]
 ;;

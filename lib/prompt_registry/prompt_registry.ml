@@ -680,18 +680,10 @@ let override_default_moved (meta : prompt_meta) ~file_value
   body_moved
   || sorted_variables meta.template_variables <> entry.template_variables
 
-(* [expected = []] means the prompt is never rendered through
-   {!render}/{!render_prompt_template} — it is spliced raw via
-   [get_prompt] (e.g. [Keeper_prompt.system_prompt_body]) or otherwise has no
-   substitution points.  [List.mem variable []] is always [false], so
-   omitting an [expected = []] special case already treats every
-   [{{ident}}] found in [template] as unexpected for those prompts,
-   which is correct: nothing downstream will ever fill the
-   placeholder in, and a literal [{{...}}] (or a legacy instruction
-   gated behind one — masc#23929) would leak into the live prompt
-   unrendered. A prior version of this function short-circuited to
-   [[]] for [expected = []], which silently accepted any override
-   content for such prompts, including stale placeholder syntax. *)
+(* [expected = []] declares no substitution points, including for primary
+   prompts validated through {!render_prompt_template}. Every [{{ident}}]
+   is therefore unexpected: no caller may supply a value for it. Keep the
+   same check for zero-variable and parameterized prompt contracts. *)
 let unexpected_template_variables meta template =
   let expected = meta.template_variables in
   extract_variables template

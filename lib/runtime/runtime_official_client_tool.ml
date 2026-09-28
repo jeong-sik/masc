@@ -25,10 +25,20 @@ type dynamic_tool_result =
   ; abort_turn : host_stop option
   }
 
+type loading =
+  | Upfront
+  | On_demand
+
+type result_bound =
+  | Bounded_bytes of int
+  | Unbounded
+
 type dynamic_tool =
   { name : string
   ; description : string
   ; input_schema : Yojson.Safe.t
+  ; loading : loading
+  ; result_bound : result_bound
   ; call_effect : Yojson.Safe.t -> Agent_core.Tool.call_effect
   ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
   }

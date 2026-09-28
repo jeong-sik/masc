@@ -23,6 +23,7 @@ val run :
   goal_blocks:Agent_core.Types.content_block list option ->
   system_prompt:string ->
   tools:Agent_core.Tool.t list ->
+  ?loading_plan:Keeper_official_client_host.loading_plan ->
   initial_messages:Agent_core.Types.message list ->
   model_input_projection:Agent_core.Agent.model_input_projection option ->
   on_transmitted_model_input:
@@ -71,6 +72,13 @@ val run :
     bytes in the canonical encoding, before the declared window cuts it; the
     caller records it where the Agent Core lane records its own request
     ({!Keeper_official_client_host.continuity_observation_input}). *)
+
+val eager_tool_names : Keeper_official_client_host.dynamic_tool list -> string list
+(** The tools this lane marks [eager] in the Antigravity MCP config: all of
+    them, whatever their declared [loading]. A tool that is not eager gets no
+    schema unless the model reads a schema file, and a masc home denies
+    [read_file] ({!Runtime_official_client_mcp_http.mcp_config_json}), so a
+    declared on-demand tool is still eager here. *)
 
 module For_testing : sig
   val report_stream_usage

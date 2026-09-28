@@ -422,6 +422,8 @@ let measure ~runtime_id ~selected_model ~challenge ~run =
     ; description =
         "Return a fresh readiness challenge. This tool has no external effects."
     ; input_schema
+    ; loading = Runtime_official_client_tool.On_demand
+    ; result_bound = Runtime_official_client_tool.Unbounded
     ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ input ->
@@ -583,12 +585,62 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
     then Error (Unavailable Tools_not_declared)
     else (
       match runtime.execution with
+      | Runtime_execution.Muse_serve execution ->
+        let config = { (Runtime_muse_serve.default_config ()) with
+          cli_path = execution.cli_path; account_home = Some execution.account_home;
+          model = Some execution.model; native = Runtime_native_tools.Native_read;
+          admission_timeout_s = Float.min timeout_s execution.timeout_s;
+          timeout_s = Some timeout_s } in
+        let reasoning_effort =
+          Runtime_inference.clamp_reasoning_effort_to_catalog
+            ~model_id:(Some execution.model) ~requested:runtime.model.reasoning_effort
+          |> Option.map (function
+            | Llm_provider.Reasoning_effort.None_ -> Runtime_muse_msp.Effort_none
+            | Minimal -> Effort_minimal | Low -> Effort_low | Medium -> Effort_medium
+            | High -> Effort_high | XHigh -> Effort_xhigh | Max -> Effort_max) in
+        (match Runtime_verification_muse.run ~secure_random ~net ~mgr ~clock ~cwd
+           ~directory:cwd_path ~account_home:execution.account_home
+           ~quota_scope:(Runtime.quota_scope_of_runtime runtime) ~config
+           ~max_prompt_bytes:runtime.model.max_prompt_bytes ~reasoning_effort ~tool ~prompt with
+         | Ok result ->
+           (match result.model with
+            | Some model when String.equal model execution.model ->
+              Ok {model; text=result.text}
+            | Some model ->
+              Error (Provider_rejected (Runtime_muse_serve.error_to_string
+                (Runtime_muse_serve.Session_model_mismatch
+                  {requested=execution.model; resumed=Some model})))
+            | None -> Error Model_unreported)
+         | Error (Runtime_verification_muse.Home_error (Runtime_muse_home.Sign_in_required _ as error)) ->
+           Error (Unavailable (Client_not_authenticated (Runtime_muse_home.error_to_string error)))
+         | Error (Home_error (Runtime_muse_home.Invalid_account_home detail)) ->
+           Error (Unavailable (Invalid_configuration detail))
+         | Error (Home_error (Runtime_muse_home.State_unavailable _)) ->
+           Error (Unavailable (Invalid_configuration "Muse managed account state could not be prepared"))
+         | Error Private_workspace_unavailable ->
+           Error (Unavailable (Invalid_configuration "Muse private readiness workspace could not be prepared"))
+         | Error (Client_error (Runtime_muse_serve.Spawn_failed _)) ->
+           Error (Unavailable (Client_not_started "The Muse executable could not be started"))
+         | Error (Client_error (Runtime_muse_serve.Invalid_config detail)) ->
+           Error (Unavailable (Invalid_configuration detail))
+         | Error (Client_error (Runtime_muse_serve.Auth_required _
+             | Runtime_muse_serve.Turn_failed {kind=Runtime_muse_msp.Auth_required; _})) ->
+           Error (Unavailable (Client_not_authenticated "The selected Muse account requires sign-in"))
+         | Error (Client_error (Runtime_muse_serve.Process_exited
+             {status=Some (Runtime_muse_serve.Exit_usage
+                          | Runtime_muse_serve.Exit_sdk_surface_disabled); _} as error)) ->
+           Error (Unavailable (Invalid_configuration (Runtime_muse_serve.error_to_string error)))
+         | Error (Client_error (Runtime_muse_serve.Timeout _)) -> Error Timed_out
+         | Error (Client_error (Runtime_muse_serve.Turn_failed {retryable=true; _} as error)) ->
+           Error (Provider_overloaded (Runtime_muse_serve.error_to_string error))
+         | Error (Client_error error) ->
+           Error (Provider_rejected (Runtime_muse_serve.error_to_string error)))
       | Runtime_execution.Antigravity_cli execution ->
         let config = { (Runtime_antigravity.default_config ~cwd:cwd_path ~model:execution.model) with
           cli_path = execution.cli_path;
           effort = execution.effort;
           admission_timeout_s = Float.min timeout_s execution.timeout_s;
-          timeout_s = Some timeout_s; wall_clock_ceiling_s = Some timeout_s } in
+          timeout_s = Some timeout_s } in
         (match Runtime_verification_antigravity.run ~secure_random ~net ~mgr ~clock ~cwd
            ~directory:cwd_path ~oauth_source:execution.oauth_source ~config ~tool ~prompt with
          | Ok result -> Ok {model=result.model; text=result.text}
@@ -696,7 +748,6 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
           ; model = execution.model
           ; admission_timeout_s = Float.min timeout_s execution.timeout_s
           ; timeout_s = Some timeout_s
-          ; wall_clock_ceiling_s = Some timeout_s
           }
         in
         (match
@@ -747,7 +798,6 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
           ; model = execution.model
           ; admission_timeout_s = Float.min timeout_s execution.timeout_s
           ; timeout_s = Some timeout_s
-          ; wall_clock_ceiling_s = Some timeout_s
           }
         in
         (match
@@ -822,7 +872,8 @@ let verify_as_command ~env ~sw ~private_dir ~timeout_s runtime =
     ~secure_random:(Eio.Stdenv.secure_random env)
     ~sw
     ~net:(Eio.Stdenv.net env)
-    ~mgr:Posix_spawn_process_mgr.mgr
+    ~mgr:(Posix_spawn_process_mgr.foreground_mgr ~clock
+      ~grace_seconds:Process_eio.child_exit_grace_seconds)
     ~clock
     ~cwd:Eio.Path.(Eio.Stdenv.fs env / private_dir)
     ~cwd_path:private_dir

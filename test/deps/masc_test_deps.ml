@@ -700,3 +700,20 @@ let with_fixture_sandbox
   | Teardown_failed { keeper_name; body_failure; detail } ->
     Alcotest.fail (fixture_case_failure_message ~keeper_name ~body_failure ~detail)
 ;;
+
+(* Actual native credential shape, synthetic values only. The subject remains
+   stable when rotating access/refresh credentials and the OpenID timestamp. *)
+let antigravity_oauth_fixture ?(revision = "initial") subject =
+  let encode json = Base64.encode_string ~pad:false ~alphabet:Base64.uri_safe_alphabet
+      (Yojson.Safe.to_string json) in
+  let id_token = encode (`Assoc ["alg", `String "RS256"; "typ", `String "JWT"])
+    ^ "." ^ encode (`Assoc ["iss", `String "https://accounts.google.com";
+        "sub", `String subject; "aud", `String "synthetic-client";
+        "iat", `Int (if revision = "initial" then 1 else 2)])
+    ^ ".synthetic-signature" in
+  Yojson.Safe.to_string (`Assoc ["auth_method", `String "synthetic-oauth";
+    "token", `Assoc ["access_token", `String (subject ^ ":" ^ revision);
+      "token_type", `String "Bearer"; "refresh_token", `String ("refresh:" ^ revision);
+      "expiry", `String (if revision = "initial" then "2000-01-01T00:00:00Z" else "2000-01-02T00:00:00Z")];
+    "id_token", `String id_token])
+;;

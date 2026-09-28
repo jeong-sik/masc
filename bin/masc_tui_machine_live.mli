@@ -7,12 +7,10 @@
     own constructor or refuses the body. Nothing here does I/O: the executable
     layer sends {!path} and hands the decoded JSON back. *)
 
-type source = Msx | Dos
-
-val source_kind : source -> string
+val source_kind : Masc.Machine_lane.t -> string
 (** The [source_kind] query value: [msx_capture] or [dos_capture]. *)
 
-val source_label : source -> string
+val source_label : Masc.Machine_lane.t -> string
 (** How the screen names the machine: [MSX] or [DOS]. *)
 
 type mark = { count : int; incarnation : string }
@@ -37,7 +35,7 @@ type answer =
   | Unchanged of mark  (** [state: "unchanged"]: still the mark that was sent *)
   | Picture of picture  (** [state: "changed"] *)
 
-val path : source -> since:mark option -> string
+val path : Masc.Machine_lane.t -> since:mark option -> string
 (** The route with its query. [since] is the mark of the picture already
     drawn and is sent as [since] and [incarnation] together; without one the
     server always answers with a picture. *)
@@ -51,7 +49,7 @@ type activity =
   | No_activity_feed  (** MSX has no activity field. *)
   | Activity of activity_entry list  (** DOS has an activity array, possibly empty. *)
 
-val decode : source -> Yojson.Safe.t -> (answer * activity, string) result
+val decode : Masc.Machine_lane.t -> Yojson.Safe.t -> (answer * activity, string) result
 (** Parse the whole answer. It must name the requested source kind. A picture
     must carry [frame_number] for MSX and none for DOS, a [screen] of format
     [rgb8] with positive dimensions and exactly [width * height * 3] decoded

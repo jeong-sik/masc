@@ -71,7 +71,7 @@ let test_accounts_settings_and_native_workspaces_are_separate () = with_fixture 
 let test_missing_signin_and_changed_managed_policy_refuse () = with_fixture (fun root ->
   let selected = account root "missing" in
   (match Home.prepare ~account_home:selected with
-   | Error Home.Sign_in_required -> ()
+   | Error (Home.Sign_in_required Home.No_file_sign_in) -> ()
    | Error error -> fail (Home.error_to_string error)
    | Ok _ -> fail "missing selected account fell back to ambient credentials");
   write (auth selected) (synthetic_auth "synthetic-source");
@@ -81,6 +81,42 @@ let test_missing_signin_and_changed_managed_policy_refuse () = with_fixture (fun
   | Error (Home.State_unavailable _) -> ()
   | Error error -> fail (Home.error_to_string error)
   | Ok _ -> fail "changed managed permission settings admitted")
+
+let auth_with_storage storage = Yojson.Safe.to_string (`Assoc [ "schema_version", `Int 1;
+  "providers", `Assoc [ "meta", `Assoc [ "mechanism", `String "oauth"; "storage", storage ] ] ])
+
+let test_only_a_sign_in_held_in_auth_json_is_admitted () = with_fixture (fun root ->
+  let file_backed = account root "file-backed" in
+  write (auth file_backed) (auth_with_storage (`String "file"));
+  ignore (ok (Home.prepare ~account_home:file_backed));
+  let keychain = account root "keychain" in
+  write (auth keychain) (auth_with_storage (`String "keychain"));
+  (match Home.prepare ~account_home:keychain with
+   | Error (Home.Sign_in_required Home.Keychain_sign_in) -> ()
+   | Error error -> fail (Home.error_to_string error)
+   | Ok _ -> fail "a Keychain-held sign-in was imported as if auth.json held it");
+  check bool "a refused sign-in publishes no generation" false
+    (Sys.file_exists (Filename.concat keychain ".local/state/masc/muse-config/current.json"));
+  let unknown = account root "unknown" in
+  write (auth unknown) (auth_with_storage (`String "vault"));
+  (match Home.prepare ~account_home:unknown with
+   | Error (Home.Sign_in_required (Home.Unsupported_credential_storage "vault")) -> ()
+   | Error error -> fail (Home.error_to_string error)
+   | Ok _ -> fail "an unknown credential storage was admitted");
+  let malformed = account root "malformed" in
+  write (auth malformed) (auth_with_storage (`Int 1));
+  (match Home.prepare ~account_home:malformed with
+   | Error (Home.State_unavailable _) -> ()
+   | Error error -> fail (Home.error_to_string error)
+   | Ok _ -> fail "a non-string credential storage was admitted");
+  let relogin = account root "relogin" in
+  write (auth relogin) (synthetic_auth "synthetic-inline");
+  ignore (ok (Home.prepare ~account_home:relogin));
+  write (auth relogin) (auth_with_storage (`String "keychain"));
+  match Home.prepare ~account_home:relogin with
+  | Error (Home.Sign_in_required Home.Keychain_sign_in) -> ()
+  | Error error -> fail (Home.error_to_string error)
+  | Ok _ -> fail "a later Keychain sign-in kept the earlier file generation")
 
 let test_corrupt_auth_and_missing_generation_do_not_reimport () = with_fixture (fun root ->
   let selected = account root "selected" in
@@ -92,7 +128,7 @@ let test_corrupt_auth_and_missing_generation_do_not_reimport () = with_fixture (
   let first = ok (Home.prepare ~account_home:selected) in
   remove (Home.config_home first);
   (match Home.prepare ~account_home:selected with
-   | Error (Home.State_unavailable _) | Error Home.Sign_in_required -> ()
+   | Error (Home.State_unavailable _) | Error (Home.Sign_in_required _) -> ()
    | _ -> fail "missing generation silently reimported source credentials");
   check bool "missing generation is not recreated" false (Sys.file_exists (Home.config_home first));
   Sys.rename (auth selected) (auth selected ^ ".original");
@@ -145,11 +181,105 @@ let test_invalid_home_is_refused_before_filesystem_access () = with_fixture (fun
     [ "account\000suffix"; "account\255suffix" ];
   check int "invalid paths create no account state" 0 (Array.length (Sys.readdir root)))
 
+let test_foreign_ownership_is_refused () = with_fixture (fun root ->
+  let selected = account root "owned" in
+  write (auth selected) (synthetic_auth "synthetic-owned");
+  let stat = Unix.lstat (Filename.concat selected ".config") in
+  check bool "owned source parent admitted" true
+    (Result.is_ok (Home.For_testing.check_directory_stat ~private_:false stat));
+  let foreign_uid = if stat.Unix.st_uid = 0 then 1 else 0 in
+  check bool "readable foreign parent refused" true
+    (Result.is_error (Home.For_testing.check_directory_stat ~private_:false
+      {stat with Unix.st_uid = foreign_uid}));
+  check bool "owned but group/other-writable parent refused" true
+    (Result.is_error (Home.For_testing.check_directory_stat ~private_:false
+      {stat with Unix.st_perm = 0o777}));
+  Unix.chmod (Filename.concat selected ".config") 0o777;
+  (match Home.prepare ~account_home:selected with
+   | Error (Home.State_unavailable _) -> ()
+   | Error error -> fail (Home.error_to_string error)
+   | Ok _ -> fail "writable credential parent admitted");
+  Unix.chmod (Filename.concat selected ".config") 0o700;
+  let file = match Fs_compat.load_owned_regular_file_with_snapshot ~ownership_root:selected (auth selected) with
+    | Ok (Some file) -> file | _ -> fail "owned source fixture missing" in
+  check bool "owned private source admitted" true
+    (Result.is_ok (Home.For_testing.check_file_snapshot file.snapshot));
+  check bool "foreign 0600 credential refused" true
+    (Result.is_error (Home.For_testing.check_file_snapshot
+      {file.snapshot with owner_uid=foreign_uid})))
+
+let test_directory_creation_syncs_each_parent () = with_fixture (fun root ->
+  let synced = ref [] in
+  let sync path = synced := !synced @ [path] in
+  let _ = List.fold_left (fun parent leaf ->
+    let path = Filename.concat parent leaf in
+    ok (Home.For_testing.ensure_directory_with_sync ~sync ~private_:true path);
+    check (list string) "each new directory publishes its parent" [parent] !synced;
+    synced := [];
+    ok (Home.For_testing.ensure_directory_with_sync ~sync ~private_:true path);
+    check (list string) "existing directory publication is reconfirmed" [parent] !synced;
+    synced := [];
+    path) root [".local"; "state"; "masc"; "muse-config"; "generation"; "muse"] in
+  ())
+
+let test_parent_sync_failure_is_retried_on_existing_directory () = with_fixture (fun root ->
+  let path = Filename.concat root "interrupted-publication" in
+  let attempts = ref [] in
+  let sync parent =
+    attempts := parent :: !attempts;
+    if List.length !attempts = 1 then raise (Unix.Unix_error (Unix.EIO, "fsync", parent)) in
+  (match Home.For_testing.ensure_directory_with_sync ~sync ~private_:true path with
+   | exception Unix.Unix_error (Unix.EIO, "fsync", _) -> ()
+   | Ok () -> fail "failed parent sync was reported as successful publication"
+   | Error error -> fail (Home.error_to_string error));
+  check bool "interrupted attempt leaves a visible directory" true (Sys.is_directory path);
+  ok (Home.For_testing.ensure_directory_with_sync ~sync ~private_:true path);
+  check (list string) "retry confirms the parent despite EEXIST" [root; root] (List.rev !attempts))
+
+let test_visible_generation_pointer_requires_successful_store_sync () = with_fixture (fun root ->
+  let selected = account root "pointer-retry" in
+  write (auth selected) (synthetic_auth "synthetic-account-a");
+  let first = ok (Home.prepare ~account_home:selected) in
+  let store = Filename.dirname (Home.config_home first) in
+  let record_path = Filename.concat store "current.json" in
+  let old_record = Fs_compat.load_file record_path in
+  write (auth selected) (synthetic_auth "synthetic-account-b");
+  let second = ok (Home.prepare ~account_home:selected) in
+  let new_record = Fs_compat.load_file record_path in
+  let refreshed = synthetic_auth "synthetic-refreshed-b" in
+  write (managed_auth second) refreshed;
+  (match Fs_compat.save_file_atomic_strict record_path old_record with
+   | Ok () -> () | Error detail -> fail detail);
+  (match Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
+      ~sync_parent:(fun parent -> raise (Unix.Unix_error (Unix.EIO, "fsync", parent)))
+      record_path new_record with
+   | Error {stage=Fs_compat.After_rename; _} -> ()
+   | Error failure -> fail (Fs_compat.atomic_replace_failure_to_string failure)
+   | Ok () -> fail "injected pointer publication failure was ignored");
+  check string "failed pointer publication is still visible" new_record (Fs_compat.load_file record_path);
+  let attempts = ref [] in
+  (match Home.For_testing.prepare_with_store_sync ~account_home:selected
+      ~sync_store:(fun parent -> attempts := parent :: !attempts;
+        raise (Unix.Unix_error (Unix.EIO, "fsync", parent))) with
+   | Error (Home.State_unavailable _) -> ()
+   | Error error -> fail (Home.error_to_string error)
+   | Ok _ -> fail "visible pointer was admitted without a successful parent sync");
+  check (list string) "retry syncs the store, not only its parent" [store] !attempts;
+  let recovered = ok (Home.prepare ~account_home:selected) in
+  check string "successful retry retains the exact generation" (Home.account_revision second)
+    (Home.account_revision recovered);
+  check string "retry preserves native refresh" refreshed (Fs_compat.load_file (managed_auth recovered)))
+
 let () = run "Muse managed account home"
   [ "selected account", [
+      test_case "visible pointer requires a successful store sync" `Quick test_visible_generation_pointer_requires_successful_store_sync;
+      test_case "foreign file and parent ownership refuse" `Quick test_foreign_ownership_is_refused;
+      test_case "interrupted parent publication is retried" `Quick test_parent_sync_failure_is_retried_on_existing_directory;
+      test_case "every accepted directory syncs its parent" `Quick test_directory_creation_syncs_each_parent;
       test_case "vendor refresh and external re-login" `Quick test_refresh_survives_and_source_relogin_gets_a_new_identity;
       test_case "accounts, settings and workspaces" `Quick test_accounts_settings_and_native_workspaces_are_separate;
       test_case "missing auth and changed policy refuse" `Quick test_missing_signin_and_changed_managed_policy_refuse;
+      test_case "only a sign-in held in auth.json is admitted" `Quick test_only_a_sign_in_held_in_auth_json_is_admitted;
       test_case "corrupt auth and missing generation refuse" `Quick test_corrupt_auth_and_missing_generation_do_not_reimport;
       test_case "symlink HOME retains identity and descendant protection" `Quick test_symlink_home_preserves_identity_and_owned_descendant_checks;
       test_case "invalid home refuses before filesystem access" `Quick test_invalid_home_is_refused_before_filesystem_access ] ]

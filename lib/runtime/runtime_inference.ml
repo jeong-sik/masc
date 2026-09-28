@@ -1,3 +1,35 @@
+let clamp_reasoning_effort_to_catalog
+    ~(model_id : string option)
+    ~(requested : Llm_provider.Reasoning_effort.t option)
+    : Llm_provider.Reasoning_effort.t option =
+  match requested, model_id with
+  | None, _ | _, None -> requested
+  | Some effort, Some model ->
+    (match Llm_provider.Capabilities.for_model_id_catalog model with
+     | None -> requested
+     | Some caps ->
+       (match caps.Llm_provider.Capabilities.accepted_reasoning_efforts with
+        | None -> requested
+        | Some accepted when List.mem effort accepted -> requested
+        | Some [] -> requested
+        | Some (first :: rest as accepted) ->
+          let below =
+            List.filter
+              (fun candidate ->
+                 Llm_provider.Reasoning_effort.compare candidate effort < 0)
+              accepted
+          in
+          let pick_max a b =
+            if Llm_provider.Reasoning_effort.compare a b >= 0 then a else b
+          in
+          let pick_min a b =
+            if Llm_provider.Reasoning_effort.compare a b <= 0 then a else b
+          in
+          match below with
+          | [] -> Some (List.fold_left pick_min first rest)
+          | b_first :: b_rest -> Some (List.fold_left pick_max b_first b_rest)))
+;;
+
 (* Per-runtime sampling temperature. A model may declare a fixed [temperature]
    in runtime.toml ([models.<id>.temperature], read via
    [Runtime.temperature_of_runtime_id]); when set, that value is the request
@@ -22,8 +54,20 @@ let resolve_reasoning_effort ~runtime_id =
 
 let resolve_turn_timeout_s ~runtime_id = Runtime.turn_timeout_s_of_runtime_id runtime_id
 
-let resolve_wall_clock_ceiling_s ~runtime_id =
-  Runtime.wall_clock_ceiling_s_of_runtime_id runtime_id
+(* One spelling for the turn-timeout rule every official-client boundary
+   shares. Absent leaves the caller's default standing; a non-positive
+   declaration removes the bound — the deadline exists to notice a client
+   that has gone silent, not to cap how long legitimate work may take, so a
+   deployment is allowed to say the client decides. *)
+let turn_timeout_s_of_declared ~default = function
+  | None -> Some default
+  | Some seconds when seconds <= 0.0 -> None
+  | Some seconds -> Some seconds
+;;
+
+let resolve_turn_timeout_s_or ~runtime_id ~default =
+  turn_timeout_s_of_declared ~default (resolve_turn_timeout_s ~runtime_id)
+;;
 
 let resolve_max_prompt_bytes ~runtime_id =
   Runtime.max_prompt_bytes_of_runtime_id runtime_id

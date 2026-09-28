@@ -124,16 +124,17 @@ let make_keeper_tool_handler_with_authority
   fun ?agent_core_invocation ?result_projection raw_input ->
     let invocation_fields = agent_core_invocation_fields agent_core_invocation in
     let call_keeper_turn_id = keeper_turn_id () in
-    let handle_validation_error ~input validation_result =
+    let handle_validation_error ~input (validation_result : Tool_result.result) =
       let validation_result =
         match validation_result with
         | Tool_result.Failed
-            ({ Tool_result.metadata = None; data; _ } as failure) ->
+            ({ Tool_result.metadata = None; _ } as failure) ->
           (* The descriptor validator owns a typed failure before the runtime
              handler starts. Agent Core's bridge carries failure metadata, so
              mirror that already-typed object instead of degrading every
              schema rejection to its prose message. *)
-          Tool_result.Failed { failure with metadata = Some data }
+          Tool_result.Failed
+            { failure with metadata = Some (Tool_result.data validation_result) }
         | Tool_result.Failed { metadata = Some _; _ }
         | Tool_result.Completed _
         | Tool_result.Deferred _ ->

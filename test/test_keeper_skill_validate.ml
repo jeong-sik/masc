@@ -114,7 +114,7 @@ let with_fixture f =
         "[skills]\n[[skills.sources]]\nid = \"workspace\"\nanchor = \"base-path\"\npath = \"skills\"\naccess = \"read-write\"\n"
       in
       (match Service.refresh ~workspace ~user_home:None
-        ~read_config:(fun () -> Service.Config_text config_text) with
+        ~read_config:(fun () -> Service.Config_text { path = "/fixture/runtime.toml"; source_text = config_text }) with
        | Service.Published _ | Unchanged _ -> ()
        | Workspace_retired -> fail "fixture snapshot retired");
       let config = Workspace.default_config base_path in
@@ -129,7 +129,7 @@ let with_fixture f =
         ; ctx_work = Keeper_context_runtime.create ~eio:true ~system_prompt:"fixture"
         ; turn_sandbox_factory = None; sw = None; clock = None; proc_mgr = None
         ; net = None; mcp_session_id = None; continuation_channel = None
-        ; gate_context = None; gate_grant = None; tool_use_id = None; trace_id = None
+        ; gate_context = None; turn_ref = None; gate_grant = None; tool_use_id = None; trace_id = None
         ; result_projection = None
         ; capability_authority = Keeper_tool_runtime.Compatibility_meta }
       in

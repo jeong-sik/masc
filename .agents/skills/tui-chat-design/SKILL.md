@@ -136,6 +136,9 @@ Ctrl-F 는 `Origin_inline → Origin_row → Origin_bare → Origin_inline` 으�
   이상 모였을 때만. 둘 이하면 쪼개도 Full 이 그리는 두 줄이라 접지 않고, 실패도 헤더가
   `1 failed: web_fetch` 처럼 이름을 불러 한 줄이다 (`project_tool_block` Compact 팔,
   `bin/masc_tui_keeper_chat_transcript.ml`).
+- **Ctrl-D 는 `Tools_compact → Tools_results → Tools_full` 로 돈다.** `Tools_results` 는
+  호출 이름·받은 상태와 짧은 결과를 보여 준다. `↩` 는 결과를 받았다는 뜻이고 성공을 보장하지 않는다.
+  확정된 실패는 `✗` 로 남고, 결과 본문은 상태 색상 문법으로 해석하지 않는다.
 - **돌아가는 동안에도 같은 토글로 그린다.** 라이브 블록과 확정된 블록은 같은
   `project_tool_block` / `skill_rows` 를 지난다. 줄이 접히는 시점은 완료가 아니라
   Ctrl-D 토글이다.
@@ -152,6 +155,15 @@ Ctrl-F 는 `Origin_inline → Origin_row → Origin_bare → Origin_inline` 으�
 - 한국어는 한국 사람이 실제로 쓰는 말로 쓴다. 영어 라벨을 품사째 옮기지 않는다.
 - 한글 문구는 소스에 리터럴로 쓴다. 바이트 이스케이프(`\xeb\x83\xa8`)로 손으로 적지 않는다.
   손으로 맞추다 틀리기 쉽다.
+
+## 채팅 입력과 상태의 자리
+
+- 탐색 제목은 대화 위에, runtime·context 값은 입력 프레임 아래에 둔다. 상태줄은 roster와 대화 패널 아래 전체 폭을 쓰며, 현재 대화 대상 Keeper를 이름으로 표시한다. roster 커서가 움직여도 대화 대상이 바뀌기 전에는 상태줄의 대상이 바뀌지 않는다.
+- 슬래시 후보는 입력 위에서 명령 이름과 설명을 두 칸으로 보여 준다. 선택된 행만 강조한다.
+- 방향키는 선택만 바꾼다. Tab·Enter는 초안에 넣고, 그 뒤 Enter가 기존 명령을 실행한다.
+- Esc는 열린 메뉴를 먼저 닫는다. 메뉴가 보이지 않는 폭·높이에서는 입력을 가로채지 않는다.
+- 메뉴는 대화 최소 높이를 보존한다. 전체 후보를 자르지 않고 선택 주위의 페이지를 보여 준다.
+- 사용량은 관측된 값만 표시한다. 상한이 없으면 토큰 수만, 읽을 수 없으면 unavailable을 표시한다.
 
 ## 고치고 나면
 

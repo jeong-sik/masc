@@ -252,6 +252,25 @@ let test_idle_steady_stream_completes () =
   | Error (msg, _) ->
     Alcotest.fail (Printf.sprintf "expected Ok, got Error %s" msg)
 
+let test_stream_without_body_retention () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let chunk = String.make 4096 'x' in
+  let chunks = List.init 1024 (fun _ -> 0., chunk) in
+  let body, producer = mock_body_with_producer ~clock ~chunks in
+  Eio.Switch.run @@ fun sw ->
+  Eio.Fiber.fork ~sw producer;
+  let delivered = ref 0 in
+  let result = Masc_http_client.Pool.For_testing.read_body_with_idle
+    ~retain_body:false ~on_chunk:(fun text -> delivered := !delivered + String.length text)
+    ~clock ~start_sec:(Eio.Time.now clock) ~idle_timeout_sec:Float.infinity body in
+  match result with
+  | Ok (retained, progress) ->
+    Alcotest.(check string) "incremental protocol does not retain terminal output" "" retained;
+    Alcotest.(check int) "all bytes still delivered" (4096 * 1024) !delivered;
+    Alcotest.(check int) "progress remains observable" !delivered progress.bytes_received
+  | Error (message, _) -> Alcotest.fail message
+
 let test_idle_silent_from_start_cancels () =
   Eio_main.run @@ fun env ->
   let clock = Eio.Stdenv.clock env in
@@ -497,6 +516,8 @@ let () =
         ] );
       ( "RFC-0129 read_body_with_idle",
         [
+          Alcotest.test_case "unbounded login stream does not retain its body" `Quick
+            test_stream_without_body_retention;
           Alcotest.test_case "steady stream completes" `Quick
             test_idle_steady_stream_completes;
           Alcotest.test_case "silent-from-start cancels" `Quick

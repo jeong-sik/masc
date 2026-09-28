@@ -56,12 +56,6 @@ export interface Task {
   goal_id?: string | null
   status?: 'todo' | 'in_progress' | 'claimed' | 'awaiting_verification' | 'done' | 'cancelled' | 'blocked' | 'paused' | 'unknown'
   status_raw?: string | null
-  /** The question an `awaiting_verification` task asked: `complete` finishes,
-   *  `cancel` stops. It rides on the task status (types_core.ml) because an
-   *  approval must know which terminal state it authorises, and it is the
-   *  reliable stop signal — unlike a request's `cancellation_reason`, which a
-   *  stop submitted before the field was kept (2026-09-15) does not carry. */
-  verification_intent?: 'complete' | 'cancel' | null
   priority?: number
   assignee?: string
   description?: string
@@ -177,6 +171,18 @@ export interface BoardPostOrigin {
   fusion_run_id?: string | null
 }
 
+/**
+ * task-1758/#39356: typed close state on a board post. `closed_by` and
+ * `closed_at` are always present when a post is closed; `successor_id` and
+ * `summary` are optional. Absence of `closed` on the post means open.
+ */
+export interface BoardPostCloseState {
+  closed_by: string
+  closed_at: string
+  successor_id?: string | null
+  summary?: string | null
+}
+
 export interface BoardPost {
   id: string
   author: string
@@ -204,6 +210,7 @@ export interface BoardPost {
   reactions?: BoardReactionSummary[]
   supported_reaction_emojis?: string[]
   origin?: BoardPostOrigin | null
+  closed?: BoardPostCloseState | null
 }
 
 export interface BoardComment {
@@ -1503,6 +1510,7 @@ interface KeeperSupervisorDiagnostics {
 export type KeeperSystemPromptPreview =
   | { state: 'available'; effective: string; assembled: string }
   | { state: 'unavailable'; reason: 'constitution_unreadable'; path: string; detail: string }
+  | { state: 'unavailable'; reason: 'prompt_unrenderable'; detail: string }
   | { state: 'decode_failed'; detail: string }
 
 interface KeeperConfigPrompt {

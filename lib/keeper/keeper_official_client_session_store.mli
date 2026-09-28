@@ -9,6 +9,7 @@ type client_kind = Keeper_semantic_execution.official_client_kind =
   | Codex
   | Claude_code
   | Antigravity
+  | Muse
 
 type settlement =
   { session_id : string
@@ -33,6 +34,7 @@ type recovery_failure =
           claim can be released without an ambiguous effect recovery fence. *)
   | Transient_spawn_failed
   | Owner_stopped_turn
+  | Retryable_turn_failed
   | Transport_interrupted
   | Protocol_failed
   | Provider_rejected
@@ -210,7 +212,7 @@ val process_epoch : unit -> string
 val path : base_path:string -> keeper_name:string -> (string, string) result
 
 val tool_surface_sha256 :
-  ?account_home:string -> native_posture:Runtime_native_tools.posture -> Agent_core.Tool.t list -> string
+  ?account_home:string -> ?account_revision:string -> native_posture:Runtime_native_tools.posture -> Agent_core.Tool.t list -> string
 (** Stable digest of the exact typed dynamic-tool surface, the keeper's
     native-tool posture, and official-client context-message schema. Tool
     order, parameter order, and JSON object field order do not affect the
@@ -218,11 +220,37 @@ val tool_surface_sha256 :
     posture change therefore starts a fresh provider conversation instead of
     resuming a session that cannot receive the new surface. A selected account
     home also enters the digest, so changing it never resumes another home's
-    vendor session. *)
+    vendor session. An opaque account import revision also prevents reuse after
+    the selected account signs in again; no credential digest is persisted. *)
 
 val load : base_path:string -> keeper_name:string -> (t option, string) result
 (** Missing state is [Ok None]. Malformed, retired, or ambiguous state is an
     error and never degrades to a new session. *)
+
+type stored_binding =
+  { keeper_name : string
+  ; path : string
+  ; decoded : (t, string) result
+  }
+
+val stored_bindings : base_path:string -> (stored_binding list, string) result
+(** Every binding file under the keepers directory {!path} writes to, decoded
+    with {!load}'s decoder, in keeper-name order. Each entry is read the way
+    a claim reads it, a linked keeper directory included; a keeper without
+    the file is left out, and so is an entry whose name {!path} refuses,
+    because this store never writes there. [Ok []] when the keepers
+    directory does not exist; [Error] when it exists but cannot be inspected
+    or listed. Reads only. The deploy preflight and boot reconcile both read
+    the store through this. *)
+
+val move_aside :
+  base_path:string -> keeper_name:string -> rejected_path:string -> (unit, string) result
+(** Rename the keeper's binding to [rejected_path] while holding the store
+    lock every claim and transition takes. The binding is read again under
+    the lock; one that decodes now, or is gone, is left alone and the result
+    is [Error]. The keeper's next claim finds no binding and starts a new
+    vendor session. A rename that completed stays [Ok] even when releasing
+    the lock fails; that failure is logged. *)
 
 val clear_then :
   base_path:string -> keeper_name:string -> (unit -> 'a) -> ('a, string) result
@@ -423,7 +451,10 @@ val release_transient :
   released_at:float ->
   (t, string) result
 (** Release one exact incomplete claim only when [failure] is classified
-    [Transient]. The previous settlement, if any, is restored atomically. *)
+    [Transient]. The previous settlement, if any, is restored atomically.
+    [Retryable_turn_failed] instead retains the acknowledged failed terminal's
+    session and ordinal, with failure evidence in [last_transient_release].
+    It refuses a claim without an acknowledged turn identity. *)
 
 val reconcile_process_restart :
   base_path:string ->

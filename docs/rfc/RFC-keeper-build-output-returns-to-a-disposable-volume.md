@@ -60,8 +60,10 @@ The refusal is the guest's capabilities, not the disk. Measured 2026-09-26
 (`/sys/block/vdc/queue/discard_max_bytes` = 274877906944), and a keeper
 guest's capability set is empty (`CapBnd: 0000000000000000`), so `FITRIM`,
 which needs `CAP_SYS_ADMIN`, is refused even to uid 0. A one-shot container
-given that capability alone trims the same volume and the host image
-shrinks: `masc-keeper-work-pr-updater`, 39 GB used inside, `volume.img`
+that drops every capability and adds back `CAP_SYS_ADMIN` (`CapEff`
+0000000000200000; `--cap-add` without `--cap-drop ALL` keeps the default set,
+00000000a82425fb), with no network, a read-only root and `fstrim` as its
+entrypoint, trims the same volume and the host image shrinks: `masc-keeper-work-pr-updater`, 39 GB used inside, `volume.img`
 116 GB → 39 GB, `fstrim` reported 213.3 GiB trimmed. Apple's `--mount`
 takes `type, source, target, readonly` only, so a `discard` mount option has
 no spelling; the trim runs at boot instead (§ Work volume trim at boot).

@@ -4,12 +4,12 @@ module Msp = Runtime_muse_msp
 
 type config =
   { cli_path : string
+  ; prepared_home : Runtime_muse_home.t option
   ; account_home : string option
   ; model : string option
   ; native : Runtime_native_tools.posture
   ; admission_timeout_s : float
   ; timeout_s : float option
-  ; wall_clock_ceiling_s : float option
   }
 
 let default_timeout_s = 300.0
@@ -27,18 +27,24 @@ let client_name = "masc"
 
 let default_config () =
   { cli_path = "muse"
+  ; prepared_home = None
   ; account_home = None
   ; model = None
   ; native = Runtime_native_tools.Native_read
   ; admission_timeout_s = default_timeout_s
   ; timeout_s = Some default_timeout_s
-  ; wall_clock_ceiling_s = None
   }
 ;;
 
 type session_mode =
   | Start
-  | Resume of { session_id : string }
+  | Resume of { session_id : string; expected_turn_count : int }
+
+type mcp_server =
+  { name : string
+  ; server : Msp.mcp_server
+  ; tool_names : string list
+  }
 
 type image_input =
   { media_type : string
@@ -74,6 +80,14 @@ type error =
       { requested : string
       ; resumed : string option
       }
+  | Session_workspace_mismatch of
+      { requested : string
+      ; reported : string option
+      }
+  | Session_approval_mode_mismatch of
+      { requested : Runtime_muse_msp.approval_mode
+      ; reported : Runtime_muse_msp.approval_mode option
+      }
   | Auth_required of string
   | Turn_failed of Runtime_muse_msp.turn_error
   | Turn_cancelled
@@ -107,7 +121,8 @@ type stream_event =
       ; turn_id : string
       ; model : string option
       }
-  | Text_delta of string
+  | Text_delta of { item_id : string; text : string }
+  | Text_completed of { item_id : string; text : string }
   | Native_tool_started of Runtime_native_tools.observation
   | Native_tool_finished of Runtime_native_tools.observation
   | Approval_decided of
@@ -116,6 +131,7 @@ type stream_event =
       ; decision : Runtime_muse_msp.approval_decision
       }
   | Subscription_usage_observed of Runtime_muse_msp.subscription_usage
+  | Turn_terminal_received of Runtime_muse_msp.terminal
   | Usage_reported of
       { session_id : string
       ; turn_id : string
@@ -157,11 +173,19 @@ let error_to_string = function
     "Muse Code host uses ephemeral sessions; durable session storage is required"
   | Session_model_mismatch { requested; resumed } ->
     Printf.sprintf
-      "Muse Code resumed a session on %s, but the turn asks for %s"
+      "Muse Code returned a session on %s, but the turn asks for %s"
       (* DET-OK: display text for an absent model id; nothing branches on it. *)
       (Option.value resumed ~default:"the host default model")
       requested
+  | Session_workspace_mismatch { requested; reported } ->
+    Printf.sprintf "Muse Code returned session workspace %s, but the turn asks for %s"
+      (* DET-OK: display text for an absent workspace; admission uses typed equality. *)
+      (Option.value reported ~default:"<absent>") requested
   | Auth_required detail -> "Muse Code has no usable login: " ^ detail
+  | Session_approval_mode_mismatch { requested; reported } ->
+    Printf.sprintf "Muse Code returned approval mode %s, but the turn asks for %s"
+      (match reported with None -> "<absent>" | Some mode -> Msp.approval_mode_to_string mode)
+      (Msp.approval_mode_to_string requested)
   | Turn_failed { message; retryable; _ } ->
     Printf.sprintf
       "Muse Code turn failed%s: %s"
@@ -198,7 +222,7 @@ end)
 
 open Shared_json
 
-let bounded_tail = Runtime_official_client_json.bounded_tail
+module Stderr = Runtime_official_client_json.Stderr
 
 let emit_stream_event on_stream_event event =
   match on_stream_event with
@@ -225,7 +249,7 @@ let exit_status_of = function
 
 let approval_mode_of_posture = function
   | Runtime_native_tools.Native_full -> Ok Msp.Allow_all
-  | Runtime_native_tools.Native_read -> Ok Msp.Deny_unmatched
+  | Runtime_native_tools.Native_read -> Ok Msp.Prompt_unmatched
   | Runtime_native_tools.Native_none ->
     Error
       (Invalid_config
@@ -243,13 +267,27 @@ let approval_preferences = function
     [ Msp.Denied; Msp.Abort ]
 ;;
 
-let approval_choice posture (approval : Msp.approval_request) =
+let approval_choice posture ~mcp_servers (approval : Msp.approval_request) =
+  let attached_mcp = approval.Msp.subject_kind = Msp.Subject_tool
+    && Option.exists (String.equal approval.Msp.tool_name) approval.Msp.subject_tool_name
+    && List.exists (fun server ->
+      List.exists (fun name ->
+        String.equal approval.Msp.tool_name ("mcp__" ^ server.name ^ "__" ^ name))
+        server.tool_names) mcp_servers in
+  let preferences =
+    if attached_mcp then [Msp.Approved]
+    else match approval.Msp.subject_kind with
+      | Msp.Unrecognized_subject _ -> [Msp.Denied; Msp.Abort]
+      | Msp.Subject_shell | Msp.Subject_file_access | Msp.Subject_network
+      | Msp.Subject_unix_socket | Msp.Subject_process | Msp.Subject_tool ->
+        approval_preferences posture in
   List.find_map
     (fun wanted ->
        List.find_opt
-         (fun (choice : Msp.approval_choice) -> choice.Msp.decision = wanted)
+         (fun (choice : Msp.approval_choice) -> choice.Msp.decision = wanted
+           && (not attached_mcp || choice.Msp.scope = Msp.Once))
          approval.Msp.choices)
-    (approval_preferences posture)
+    preferences
 ;;
 
 (* MSP asks for UUIDv7 command ids and never mints one itself. A fresh
@@ -283,13 +321,9 @@ let validate_process_config config =
     match config.account_home with
     | None -> Ok ()
     | Some home ->
-      let* home =
-        Runtime_account_home.of_string home
-        |> Result.map_error (fun detail -> Invalid_config ("account_home: " ^ detail))
-      in
-      if String.contains home '\000'
-      then Error (Invalid_config "account_home contains a NUL byte")
-      else valid_utf8 "account_home" home
+      Runtime_account_home.of_string home
+      |> Result.map (fun _ -> ())
+      |> Result.map_error (fun detail -> Invalid_config ("account_home: " ^ detail))
   in
   let* () =
     if String.trim config.cli_path = ""
@@ -301,11 +335,6 @@ let validate_process_config config =
     match config.timeout_s with
     | None -> Ok ()
     | Some seconds -> positive_finite "timeout_s" seconds
-  in
-  let* () =
-    match config.wall_clock_ceiling_s with
-    | None -> Ok ()
-    | Some seconds -> positive_finite "wall_clock_ceiling_s" seconds
   in
   let* () =
     match config.model with
@@ -332,23 +361,36 @@ let validate_turn ?(session_mode = Start) config ~workspace_root ~prompt ~images
   let* () =
     if String.trim prompt = "" then Error (Invalid_config "prompt is empty") else Ok ()
   in
-  let* () =
-    if List.exists (fun (image : image_input) -> image.base64_data = "") images
-    then Error (Invalid_config "an image carries no data")
-    else Ok ()
-  in
+  let rec validate_images index = function
+    | [] -> Ok ()
+    | (image : image_input) :: rest ->
+      let where = Printf.sprintf "images[%d]" index in
+      let* () = valid_utf8 (where ^ ".media_type") image.media_type in
+      let* () = valid_utf8 (where ^ ".base64_data") image.base64_data in
+      let* () =
+        if List.mem image.media_type Runtime_official_client_tool.official_client_image_media_types
+        then Ok ()
+        else Error (Invalid_config (where ^ ".media_type is not supported by official clients")) in
+      let* () = Runtime_official_client_tool.validate_base64_image_data image.base64_data
+        |> Result.map_error (fun detail -> Invalid_config (where ^ ".base64_data " ^ detail)) in
+      validate_images (index + 1) rest in
+  let* () = validate_images 0 images in
   match session_mode with
-  | Resume { session_id } when String.trim session_id = "" ->
+  | Resume { session_id; _ } when String.trim session_id = "" ->
     Error (Invalid_config "resumed session id is empty")
-  | Resume { session_id } -> valid_utf8 "resumed session id" session_id
+  | Resume { expected_turn_count; _ } when expected_turn_count < 0 ->
+    Error (Invalid_config "resumed completed-turn count is negative")
+  | Resume { session_id; expected_turn_count = _ } -> valid_utf8 "resumed session id" session_id
   | Start -> Ok ()
 ;;
 
 let validate_mcp_servers servers =
   List.fold_left
-    (fun checked (name, Msp.Streamable_http { url; headers; required = _ }) ->
+    (fun checked { name; server = Msp.Streamable_http { url; headers; required = _ }; tool_names } ->
        let* () = checked in
        let* () = valid_utf8 "MCP server name" name in
+       let* () = List.fold_left (fun acc name ->
+         let* () = acc in valid_utf8 "MCP tool name" name) (Ok ()) tool_names in
        let* () = valid_utf8 "MCP server url" url in
        List.fold_left
          (fun checked (header, value) ->
@@ -369,11 +411,10 @@ let env_key entry =
   | None -> entry
 ;;
 
-(* The CLI reads its subscription login from its own home (a file on Linux,
-   the Keychain on macOS), so the child needs HOME and the XDG roots and
-   nothing that routes billing elsewhere. META_API_KEY is left out on
-   purpose: it selects the pay-as-you-go Model API instead of the
-   subscription this runtime exists to use. *)
+(* The CLI reads its subscription login from its own home, so the child
+   needs HOME and the XDG roots and nothing that routes billing elsewhere.
+   META_API_KEY is left out on purpose: it selects the pay-as-you-go Model
+   API instead of the subscription this runtime exists to use. *)
 let child_environment_key_allowed = function
   | "HOME"
   | "USER"
@@ -401,7 +442,22 @@ let child_environment_key_allowed = function
   | _ -> false
 ;;
 
-let client_environment account_home =
+(* On macOS the CLI otherwise moves its Meta sign-in into the login Keychain
+   and leaves auth.json with only [storage: "keychain"]. A selected account
+   HOME has no login keychain, so that save asks macOS for one in a dialog
+   ("'meta'을(를) 저장할 키체인을 찾을 수 없습니다") on a login or turn nobody
+   may be watching, and a managed generation copies auth.json alone. With the
+   file backend the token stays in XDG_CONFIG_HOME/muse/auth.json on every
+   platform, which is the only place Runtime_muse_home imports it from. *)
+let credential_backend_entry = "TBH_CREDENTIAL_BACKEND=file"
+
+let client_environment ?storage_root account_home prepared_home =
+  (* The configured spelling binds admission and session identity. The prepared
+     physical root binds every child storage path to that credential generation,
+     even if a configured HOME symlink is retargeted before spawn. *)
+  let account_home = match prepared_home with
+    | Some home -> Some (Runtime_muse_home.physical_home home)
+    | None -> account_home in
   let inherited =
     Unix.environment ()
     |> Array.to_list
@@ -423,8 +479,34 @@ let client_environment account_home =
       List.map (fun (key, value) -> key ^ "=" ^ value) roots
       @ List.filter (fun entry -> not (List.mem_assoc (env_key entry) roots)) inherited
   in
-  Array.of_list selected
+  let selected = match prepared_home with
+    | None -> selected
+    | Some home ->
+      ("XDG_CONFIG_HOME=" ^ Runtime_muse_home.config_home home)
+      :: ("TMPDIR=" ^ Runtime_muse_home.private_tmpdir home)
+      :: List.filter (fun entry ->
+           let key = env_key entry in
+           key <> "XDG_CONFIG_HOME" && key <> "TMPDIR") selected
+  in
+  let selected = match storage_root with
+    | None -> selected
+    | Some root ->
+      let roots = [ "XDG_DATA_HOME", "data"; "XDG_CACHE_HOME", "cache";
+                    "XDG_STATE_HOME", "state"; "XDG_RUNTIME_DIR", "run";
+                    "TMPDIR", "tmp" ] in
+      List.map (fun (key, part) -> key ^ "=" ^ Filename.concat root part) roots
+      @ List.filter (fun entry -> not (List.mem_assoc (env_key entry) roots)) selected
+  in
+  Array.of_list (credential_backend_entry :: selected)
 ;;
+
+let login_environment ~account_home =
+  (* The official launcher otherwise forks a detached install/update job before
+     executing login. Setup owns one login process, not a shared installation
+     update or its independent download-authentication flow. *)
+  Array.append [|"MUSE_NO_AUTO_UPDATE=1"|] (client_environment (Some account_home) None)
+
+let login_argv ~cli_path = [ cli_path; "login" ]
 
 let client_argv config =
   [ config.cli_path; "serve" ]
@@ -440,7 +522,7 @@ let drain_stderr flow tail =
     while true do
       let count = Eio.Flow.single_read flow chunk in
       let text = Cstruct.to_string (Cstruct.sub chunk 0 count) in
-      tail := bounded_tail ~limit:stderr_tail_bytes !tail text
+      Stderr.append tail text
     done
   with
   | End_of_file -> ()
@@ -491,7 +573,7 @@ let terminate_spawned_process ~clock proc stdin_w =
    client is being admitted. During the model turn a silent host is the
    fault the idle window notices. While a tool item the host started is open
    the host may write nothing until it completes, so that silence is not
-   measured and only the wall-clock ceiling bounds it. *)
+   measured; the owner can still cancel the turn. *)
 type receive_phase =
   | Awaiting_admission
   | Model_turn
@@ -508,9 +590,10 @@ type io =
   ; receive : unit -> (Msp.wire_message, error) result
   ; set_receive_phase : receive_phase -> unit
   ; next_id : unit -> int
+  ; on_subscription_usage : Msp.subscription_usage -> unit
   }
 
-let with_spawned_client ~mgr ~clock ~cwd config run =
+let with_spawned_client ?storage_root ?(on_subscription_usage = fun _ -> ()) ~mgr ~clock ~cwd config run =
   Eio.Switch.run (fun sw ->
     let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
     let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
@@ -520,7 +603,7 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
         ~sw
         mgr
         ~cwd
-        ~env:(client_environment config.account_home)
+        ~env:(client_environment ?storage_root config.account_home config.prepared_home)
         ~stdin:stdin_r
         ~stdout:stdout_w
         ~stderr:stderr_w
@@ -532,25 +615,19 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
       Eio.Flow.close stdin_r;
       Eio.Flow.close stdout_w;
       Eio.Flow.close stderr_w;
-      let stderr_tail = ref "" in
+      let stderr_tail = Stderr.create ~limit:stderr_tail_bytes in
       (* Diagnostics only, so a daemon: a grandchild the CLI leaves behind
          (an MCP server) can hold this pipe open after the turn is served. *)
       Eio.Fiber.fork_daemon ~sw (fun () ->
         drain_stderr stderr_r stderr_tail;
         `Stop_daemon);
       let reader = Eio.Buf_read.of_flow ~max_size:max_wire_line_bytes stdout_r in
-      let wall_clock =
-        Runtime_wall_clock.make
-          ?ceiling_s:config.wall_clock_ceiling_s
-          ~now:(fun () -> Eio.Time.now clock)
-          ()
-      in
       let receive_phase = ref Awaiting_admission in
       let last_id = ref 0 in
       let send json =
         with_idle_timeout
           clock
-          (Runtime_wall_clock.cap_window wall_clock (Some config.admission_timeout_s))
+          config.admission_timeout_s
           (fun () ->
              let payload = Yojson.Safe.to_string json in
              (* The host decodes stdin as UTF-8; refuse the write rather
@@ -569,23 +646,10 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
         | Error `Timeout -> None
       in
       let receive () =
-        if Runtime_wall_clock.expired wall_clock
-        then
-          Error
-            (Timeout
-               { seconds =
-                   Option.value
-                     config.wall_clock_ceiling_s
-                     ~default:Runtime_wall_clock.default_ceiling_s
-               ; turn_accepted = false
-               })
-        else (
           try
-            with_idle_timeout
+            with_optional_idle_timeout
               clock
-              (Runtime_wall_clock.cap_window
-                 wall_clock
-                 (window_for_phase config !receive_phase))
+              (window_for_phase config !receive_phase)
               (fun () -> Eio.Buf_read.line reader)
             |> Msp.parse_wire_line
             |> lift
@@ -595,7 +659,7 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
             then Error Runtime_shutting_down
             else (
               let status = exited () in
-              let detail = String.trim !stderr_tail in
+              let detail = String.trim (Stderr.contents stderr_tail) in
               Error
                 (Process_exited
                    { status
@@ -605,13 +669,14 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
           | Idle_timeout seconds -> Error (Timeout { seconds; turn_accepted = false })
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | Eio.Time.Timeout as exn -> raise exn
-          | exn -> protocol_error "stdout read" (Printexc.to_string exn))
+          | exn -> protocol_error "stdout read" (Printexc.to_string exn)
       in
       Fun.protect
         ~finally:(fun () -> terminate_spawned_process ~clock proc stdin_w)
         (fun () ->
            run
              { send
+             ; on_subscription_usage
              ; receive
              ; set_receive_phase = (fun phase -> receive_phase := phase)
              ; next_id =
@@ -635,9 +700,9 @@ let send_best_effort io ~what json =
     Log.Runtime_agent.debug "Muse Code %s write failed: %s" what (Printexc.to_string exn)
 ;;
 
-(* A reply to request [id]. Notifications that arrive first are session
-   projections this client does not read before the turn; a server request
-   before the turn exists is not one MASC answers. *)
+(* Subscription observations apply even before an acknowledgement or a
+   rejected turn. Other session projections are not consumed before the
+   turn; a server request before the turn exists is not one MASC answers. *)
 let rec await_response io ~id ~method_ =
   let* message = io.receive () in
   match message with
@@ -648,7 +713,13 @@ let rec await_response io ~id ~method_ =
     Error (Rpc_error { method_; code; message })
   | Msp.Response _ | Msp.Response_error _ ->
     protocol_error method_ "received a response to another request"
-  | Msp.Notification _ -> await_response io ~id ~method_
+  | Msp.Notification {method_=notification_method; params} ->
+    let* notification = lift (Msp.parse_notification ~method_:notification_method params) in
+    (match notification with
+     | Msp.Usage_changed usage -> io.on_subscription_usage usage
+     | Msp.Turn_started _ | Turn_completed _ | Item_started _ | Item_updated _
+     | Item_completed _ | Item_delta _ | Unhandled_notification _ -> ());
+    await_response io ~id ~method_
   | Msp.Server_request { id = request_id; method_ = requested; _ } ->
     send_best_effort
       io
@@ -666,7 +737,7 @@ let request io ~method_ build =
   await_response io ~id ~method_
 ;;
 
-let handshake io ~requested_capabilities =
+let handshake io ~requested_capabilities ~requires_durable_session =
   let* result =
     request io ~method_:"initialize" (fun ~id ->
       Msp.initialize_request
@@ -679,7 +750,7 @@ let handshake io ~requested_capabilities =
   let* () =
     match init.Msp.session_durability with
     | Msp.Durable -> Ok ()
-    | Msp.Ephemeral -> Error Session_not_durable
+    | Msp.Ephemeral -> if requires_durable_session then Error Session_not_durable else Ok ()
   in
   let* () =
     match
@@ -727,9 +798,9 @@ let item_in_turn ~turn_id (item : Msp.item) =
   | None -> false
 ;;
 
-let rec await_terminal io (config : config) ~session_id ~turn_id ~on_stream_event state =
+let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~on_stream_event state =
   let continue state =
-    await_terminal io config ~session_id ~turn_id ~on_stream_event state
+    await_terminal io config ~mcp_servers ~session_id ~turn_id ~on_stream_event state
   in
   let emit = emit_stream_event on_stream_event in
   let ours sid = String.equal sid session_id in
@@ -750,7 +821,10 @@ let rec await_terminal io (config : config) ~session_id ~turn_id ~on_stream_even
     let* request = lift (Msp.parse_server_request ~method_ params) in
     (match request with
      | Msp.Approval_request approval ->
-       (match approval_choice config.native approval with
+       if not (String.equal approval.Msp.session_id session_id
+               && String.equal approval.Msp.turn_id turn_id)
+       then protocol_error "approval/request" "approval belongs to another session or turn"
+       else (match approval_choice config.native ~mcp_servers approval with
         | None ->
           protocol_error
             "approval/request"
@@ -808,7 +882,7 @@ let rec await_terminal io (config : config) ~session_id ~turn_id ~on_stream_even
        when ours sid ->
        (match List.assoc_opt item_id state.open_items with
         | Some Msp.Agent_message ->
-          emit (Text_delta delta);
+          emit (Text_delta { item_id; text = delta });
           (* The model is speaking: its window applies again, whatever tool
              items are still open. *)
           io.set_receive_phase Model_turn;
@@ -835,6 +909,7 @@ let rec await_terminal io (config : config) ~session_id ~turn_id ~on_stream_even
             ; tool_calls = (if was_open then state.tool_calls else state.tool_calls + 1)
             }
         | Msp.Agent_message ->
+          Option.iter (fun text -> emit (Text_completed {item_id=item.Msp.item_id; text})) item.Msp.text;
           continue
             { state with
               open_items
@@ -849,6 +924,7 @@ let rec await_terminal io (config : config) ~session_id ~turn_id ~on_stream_even
        continue state
      | Msp.Turn_completed { session_id = sid; turn_id = completed; terminal; usage; _ }
        when ours sid && String.equal completed turn_id ->
+       emit (Turn_terminal_received terminal);
        Option.iter (fun usage -> emit (Usage_reported { session_id; turn_id; usage })) usage;
        (match terminal with
         | Msp.Terminal_completed -> Ok (state, usage)
@@ -867,6 +943,20 @@ let rec await_terminal io (config : config) ~session_id ~turn_id ~on_stream_even
      | Msp.Unhandled_notification _ -> continue state)
 ;;
 
+let validate_session_identity (config : config) ~workspace_root (session : Msp.session) =
+  let* () = match config.model with
+    | Some requested when session.model_id <> Some requested ->
+      Error (Session_model_mismatch {requested; resumed=session.model_id})
+    | Some _ | None -> Ok () in
+  if session.workspace_root = Some workspace_root then Ok ()
+  else Error (Session_workspace_mismatch {requested=workspace_root; reported=session.workspace_root})
+;;
+
+let validate_session_approval_mode ~requested reported =
+  if reported = Some requested then Ok ()
+  else Error (Session_approval_mode_mismatch {requested; reported})
+;;
+
 let open_session io (config : config) ~approval_mode ~session_mode ~workspace_root ~session_config =
   match session_mode with
   | Start ->
@@ -881,8 +971,19 @@ let open_session io (config : config) ~approval_mode ~session_mode ~workspace_ro
           ~config:session_config)
     in
     let* session = lift (Msp.parse_session_result ~stage:"session/start" result) in
+    let* () = validate_session_identity config ~workspace_root session in
+    (* A started session must be empty: turns attached to a fresh claim mean
+       the host confused the new session with an existing conversation. *)
+    let* () =
+      if session.Msp.turn_count = 0
+      then Ok ()
+      else protocol_error "session/start"
+          (Printf.sprintf "started session completed-turn count changed: expected 0, reported %d"
+             session.Msp.turn_count)
+    in
+    let* () = validate_session_approval_mode ~requested:approval_mode session.approval_mode in
     Ok (session, false)
-  | Resume { session_id } ->
+  | Resume { session_id; expected_turn_count } ->
     let* result =
       request io ~method_:"session/resume" (fun ~id ->
         Msp.session_resume_request
@@ -903,13 +1004,15 @@ let open_session io (config : config) ~approval_mode ~session_mode ~workspace_ro
              session_id
              session.Msp.session_id)
     in
+    let* () = validate_session_identity config ~workspace_root session in
     let* () =
-      match config.model with
-      | Some requested when session.Msp.model_id <> Some requested ->
-        Error (Session_model_mismatch { requested; resumed = session.Msp.model_id })
-      | Some _ | None -> Ok ()
+      if session.Msp.turn_count = expected_turn_count
+      then Ok ()
+      else protocol_error "session/resume"
+          (Printf.sprintf "retained session completed-turn count changed: expected %d, reported %d"
+             expected_turn_count session.Msp.turn_count)
     in
-    let* (_ : Yojson.Safe.t) =
+    let* result =
       request io ~method_:"session/setApprovalMode" (fun ~id ->
         Msp.session_set_approval_mode_request
           ~id
@@ -917,7 +1020,9 @@ let open_session io (config : config) ~approval_mode ~session_mode ~workspace_ro
           ~session_id
           approval_mode)
     in
-    Ok (session, true)
+    let* effective = lift (Msp.parse_set_approval_mode_result result) in
+    let* () = validate_session_approval_mode ~requested:approval_mode (Some effective) in
+    Ok ({session with approval_mode=Some effective}, true)
 ;;
 
 let run_protocol
@@ -940,7 +1045,7 @@ let run_protocol
     | [] -> []
     | _ :: _ -> [ Msp.Session_mcp ]
   in
-  let* init = handshake io ~requested_capabilities in
+  let* init = handshake io ~requested_capabilities ~requires_durable_session:true in
   let* session, resumed =
     open_session
       io
@@ -948,7 +1053,7 @@ let run_protocol
       ~approval_mode
       ~session_mode
       ~workspace_root
-      ~session_config:{ Msp.mcp_servers }
+      ~session_config:{ Msp.mcp_servers = List.map (fun server -> server.name, server.server) mcp_servers }
   in
   let session_id = session.Msp.session_id in
   let* () =
@@ -1016,6 +1121,7 @@ let run_protocol
       await_terminal
         io
         config
+        ~mcp_servers
         ~session_id
         ~turn_id
         ~on_stream_event
@@ -1053,7 +1159,22 @@ let guard_idle_timeout f =
   | Idle_timeout seconds -> Error (Timeout { seconds; turn_accepted = false })
 ;;
 
+let prepare_account_config config =
+  match config.prepared_home, config.account_home with
+  | Some home, Some selected when String.equal selected (Runtime_muse_home.account_home home) -> Ok config
+  | Some _, Some _ -> Error (Invalid_config "prepared_home does not match the selected account_home")
+  | None, None -> Ok config
+  | Some _, None -> Error (Invalid_config "prepared_home requires a selected account_home")
+  | None, Some account_home ->
+    (match Runtime_muse_home.prepare ~account_home with
+     | Ok home -> Ok { config with prepared_home = Some home }
+     | Error (Runtime_muse_home.Sign_in_required _ as error) ->
+       Error (Auth_required (Runtime_muse_home.error_to_string error))
+     | Error error -> Error (Invalid_config (Runtime_muse_home.error_to_string error)))
+;;
+
 let run_turn
+      ?storage_root
       ?(session_mode = Start)
       ?(mcp_servers = [])
       ?reasoning_effort
@@ -1068,11 +1189,21 @@ let run_turn
       ~prompt
       ~images
   =
+  let* () = match storage_root, session_mode with
+    | Some _, Resume _ -> Error (Invalid_config "isolated stateless storage cannot resume")
+    | Some root, Start when Filename.is_relative root ->
+      Error (Invalid_config "isolated storage root must be absolute")
+    | Some _, Start | None, _ -> Ok () in
   let* () = validate_turn ~session_mode config ~workspace_root ~prompt ~images in
   let* () = validate_mcp_servers mcp_servers in
+  let* config = prepare_account_config config in
   let* approval_mode = approval_mode_of_posture config.native in
   guard_idle_timeout (fun () ->
-    with_spawned_client ~mgr ~clock ~cwd config (fun io ->
+    with_spawned_client
+      ?storage_root
+      ~on_subscription_usage:(fun usage ->
+        emit_stream_event on_stream_event (Subscription_usage_observed usage))
+      ~mgr ~clock ~cwd config (fun io ->
       run_protocol
         io
         config
@@ -1091,9 +1222,21 @@ let run_turn
 
 let read_usage ~mgr ~clock ~cwd config =
   let* () = validate_process_config config in
+  let* config = prepare_account_config config in
   guard_idle_timeout (fun () ->
     with_spawned_client ~mgr ~clock ~cwd config (fun io ->
-      let* (_ : Msp.initialize_result) = handshake io ~requested_capabilities:[] in
+      let* (_ : Msp.initialize_result) = handshake io ~requested_capabilities:[] ~requires_durable_session:true in
       let* result = request io ~method_:"usage/read" (fun ~id -> Msp.usage_read_request ~id) in
       lift (Msp.parse_usage_read_result result)))
+;;
+
+let list_models ~mgr ~clock ~cwd config =
+  let* () = validate_process_config config in
+  let* config = prepare_account_config config in
+  guard_idle_timeout (fun () ->
+    with_spawned_client ~mgr ~clock ~cwd config (fun io ->
+      let* (_ : Msp.initialize_result) = handshake io ~requested_capabilities:[]
+          ~requires_durable_session:false in
+      let* result = request io ~method_:"model/list" Msp.model_list_request in
+      lift (Msp.parse_model_list_result result)))
 ;;

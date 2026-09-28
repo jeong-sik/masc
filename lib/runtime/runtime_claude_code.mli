@@ -57,13 +57,7 @@ type config =
         bounded by [admission_timeout_s]. Declared as [turn-timeout-s] in
         runtime config, where [0] selects [None]. *)
     (** Maximum silence between CLI stream messages. Each received message
-        resets the deadline; a progressing turn is bounded only by
-        [wall_clock_ceiling_s]. *)
-  ; wall_clock_ceiling_s : float option
-    (** Whole-turn wall-clock ceiling measured from spawn ([None] selects the
-        shared hours-scale default). The idle timeout above resets on every
-        received message, so this is the only bound a turn of continuous
-        thin progress cannot outlive (#31242). *)
+        resets the deadline; a progressing turn has no cumulative time limit. *)
   ; output_schema : Yojson.Safe.t option
     (** JSON Schema the CLI enforces on the turn's final answer
         ([--json-schema]). The mechanism is validation with a re-prompt, not
@@ -75,6 +69,8 @@ type config =
 
 val default_timeout_s : float
 val default_config : cwd:string -> config
+val client_environment : string option -> string array
+(** Selected-account child environment shared by execution and explicit login. *)
 val effective_account_home : string option -> string option
 (** The selected Claude Code configuration directory: explicit home,
     CLAUDE_CONFIG_DIR, or the CLI's HOME/.claude default. An inherited relative
@@ -183,6 +179,8 @@ type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
   { name : string
   ; description : string
   ; input_schema : Yojson.Safe.t
+  ; loading : Runtime_official_client_tool.loading
+  ; result_bound : Runtime_official_client_tool.result_bound
   ; call_effect : Yojson.Safe.t -> Agent_core.Tool.call_effect
   ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
   }
@@ -231,9 +229,20 @@ type stream_event =
           measured. *)
   | Turn_finished of { text : string }
 
+val dynamic_tool_spec : dynamic_tool -> Yojson.Safe.t
+(** One [tools/list] entry as the MCP server answers Claude Code
+    (code.claude.com/docs/en/mcp). Its [_meta] carries
+    ["anthropic/alwaysLoad": true] for an {!Runtime_official_client_tool.Upfront}
+    tool, which exempts it from Claude Code's tool search, and
+    ["anthropic/maxResultSizeChars": n] for a
+    {!Runtime_official_client_tool.Bounded_bytes} [n] tool. A tool with
+    neither carries no [_meta]. *)
+
 val dynamic_tool_bytes : dynamic_tool list -> int
-(** Bytes the tool declarations occupy in the request this process builds. Not
-    provider tokens: it bounds the request, it does not price it. *)
+(** Bytes the tool declarations occupy in the request this process builds: each
+    name, description and serialized input schema, plus the serialized [_meta]
+    object for a tool that carries one. Not provider tokens: it bounds the
+    request, it does not price it. *)
 
 type error =
   | Invalid_config of string

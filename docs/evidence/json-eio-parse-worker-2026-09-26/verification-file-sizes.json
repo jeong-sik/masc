@@ -1,0 +1,9 @@
+{
+  "files": 1864,
+  "total_bytes": 61519175,
+  "offload_threshold_bytes": 131072,
+  "at_or_above_threshold": 97,
+  "bytes_at_or_above_threshold": 38777582,
+  "largest_bytes": 1429161,
+  "median_bytes": 6184.0
+}

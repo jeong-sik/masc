@@ -28,6 +28,7 @@ type t =
   | Lane_addons of string
   | Open_metrics
       (** [/metrics] or [/telemetry] — display multicore engine telemetry, scheduler latency, and fleet metrics. *)
+  | Account_login of string
   | Open_settings
       (** [/settings] — open the type-aware Runtime parameters pane. *)
   | Open_diff
@@ -98,8 +99,8 @@ type t =
       (** [/thinking [hidden|folded|full]] — set or cycle reasoning visibility.
           Replaces the earlier [Toggle_thinking]: two states could not say
           "keep the count but not the text". *)
-  | Set_tools of [ `Toggle | `Compact | `Full ]
-      (** [/tools [compact|full]] — set or toggle tool-call detail. *)
+  | Set_tools of [ `Toggle | `Compact | `Results | `Full ]
+      (** [/tools [compact|results|full]] — set or cycle tool-call detail. *)
   | Cycle_memory
       (** [/memory] — cycle Librarian/Memory journal rows: summary, full,
           hidden. Ctrl-N walks the same cycle. *)
@@ -256,6 +257,17 @@ val task_message : task_id:string -> title:string -> body:string -> string
     and the operator's own words carry the request. *)
 
 type direction = Next | Prev
+
+type menu_state = Menu_idle | Menu_dismissed of string | Menu_selected of { draft : string; index : int }
+type menu_item = { completion : string; label : string; description : string }
+type menu = private { items : menu_item list; selected : int }
+val menu : keeper_names:string list -> state:menu_state -> string -> menu option
+(** Suggestions describe existing commands. Selection never changes the draft
+    or executes a command. A dismissed menu stays closed until the draft changes. *)
+val menu_step : direction:direction -> draft:string -> menu -> menu_state
+val menu_accept : menu -> string
+val menu_window : max_rows:int -> menu -> (bool * menu_item) list
+(** A contiguous window that always contains the selected row. *)
 (** Direction to step when cycling autocomplete candidates. *)
 
 val autocomplete :

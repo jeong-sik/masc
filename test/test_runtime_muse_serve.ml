@@ -15,6 +15,7 @@ type step =
   | Write of string  (** Write one frame. *)
   | Stderr of string
   | Exit_with of int
+  | Mark_spawned of string
   | Expect_launch of { home : string; native_read : bool }
 
 let init_frame ~granted =
@@ -23,8 +24,26 @@ let init_frame ~granted =
     (String.concat "," (List.map (Printf.sprintf "%S") granted))
 ;;
 
-let session_result =
-  {|{"jsonrpc":"2.0","id":2,"result":{"session":{"sessionId":"s-1","status":"idle","turnCount":0,"modelId":"muse-spark-1.3","workspaceRoot":"/w"},"viewCursor":"v:1"}}|}
+let effective_mode mode =
+  `Assoc ["mode", `String (Msp.approval_mode_to_string mode);
+          "source", `String "startup"; "lastCommandId", `Null]
+;;
+
+let session_result_for_mode mode =
+  Yojson.Safe.to_string (`Assoc ["jsonrpc", `String "2.0"; "id", `Int 2;
+    "result", `Assoc ["session", `Assoc ["sessionId", `String "s-1";
+      "status", `String "idle"; "turnCount", `Int 0; "modelId", `String "muse-spark-1.3";
+      "workspaceRoot", `String "/w"; "approvalMode", effective_mode mode];
+      "viewCursor", `String "v:1"]])
+;;
+
+let session_result = session_result_for_mode Msp.Prompt_unmatched
+;;
+
+let approval_mode_result ~id mode =
+  Yojson.Safe.to_string (`Assoc ["jsonrpc", `String "2.0"; "id", `Int id;
+    "result", `Assoc ["status", `String "accepted"; "commandId", `String "fixture-command";
+      "applyOutcome", `String "noop"; "effectiveMode", effective_mode mode]])
 ;;
 
 let turn_ack =
@@ -73,16 +92,20 @@ let turn_auth_failed =
   {|{"jsonrpc":"2.0","method":"turn/completed","params":{"sessionId":"s-1","turnId":"t-1","terminal":"failed","viewCursor":"v:9","error":{"kind":"authRequired","message":"run muse login","retryable":false}}}|}
 ;;
 
-let handshake_and_session ~granted =
+let handshake_and_session_with_mode ~granted ~approval_mode =
   [ Read
   ; Write (init_frame ~granted)
   ; Read (* initialized *)
   ; Read (* session/start *)
-  ; Write session_result
+  ; Write (session_result_for_mode approval_mode)
   ; Read (* turn/start *)
   ; Write turn_ack
   ; Write turn_started
   ]
+;;
+
+let handshake_and_session ~granted =
+  handshake_and_session_with_mode ~granted ~approval_mode:Msp.Prompt_unmatched
 ;;
 
 let script_text ~capture steps =
@@ -100,18 +123,26 @@ let script_text ~capture steps =
       | Write frame -> line (Printf.sprintf "printf '%%s\\n' %s" (shell_quote frame))
       | Stderr text -> line (Printf.sprintf "printf '%%s\\n' %s >&2" (shell_quote text))
       | Exit_with code -> line (Printf.sprintf "exit %d" code)
+      | Mark_spawned path -> line (Printf.sprintf "touch %s" (shell_quote path))
       | Expect_launch { home; native_read } ->
+        let home = Unix.realpath home in
         List.iter
           (fun (key, expected) ->
              line (Printf.sprintf "[ \"$%s\" = %s ] || exit 97" key (shell_quote expected)))
           [ "HOME", home
-          ; "XDG_CONFIG_HOME", Filename.concat home ".config"
           ; "XDG_DATA_HOME", Filename.concat home ".local/share"
           ; "XDG_CACHE_HOME", Filename.concat home ".cache"
           ; "XDG_STATE_HOME", Filename.concat home ".local/state"
           ; "XDG_RUNTIME_DIR", Filename.concat home ".local/run"
           ];
         line "[ -z \"${META_API_KEY+x}\" ] || exit 96";
+        line "[ \"$TBH_CREDENTIAL_BACKEND\" = file ] || exit 93";
+        line (Printf.sprintf "case \"$XDG_CONFIG_HOME\" in %s/*) ;; *) exit 94 ;; esac"
+          (shell_quote (Filename.concat (Unix.realpath home) ".local/state/masc/muse-config")));
+        line "[ -r \"$XDG_CONFIG_HOME/muse/auth.json\" ] || exit 94";
+        line "[ -r \"$XDG_CONFIG_HOME/muse/settings.json\" ] || exit 94";
+        line "[ \"$TMPDIR\" = \"$XDG_CONFIG_HOME/tmp\" ] || exit 94";
+        line "[ -d \"$TMPDIR\" ] || exit 94";
         if native_read then (
           line "[ \"$#\" = 2 ] || exit 95";
           line "[ \"$1\" = --disable-write ] || exit 95";
@@ -153,7 +184,7 @@ let config ?account_home ?(native = Runtime_native_tools.Native_read) () =
   }
 ;;
 
-let run_scripted ?session_mode ?account_home ?mcp_servers ?on_session_ready ?on_stream_event ?native steps check_result =
+let run_scripted ?model ?(workspace_root = "/w") ?session_mode ?account_home ?prepared_home ?mcp_servers ?on_session_ready ?on_prompt_sent ?on_stream_event ?native steps check_result =
   with_script steps (fun ~dir ~requests ->
     Eio_main.run (fun env ->
       let result =
@@ -161,12 +192,13 @@ let run_scripted ?session_mode ?account_home ?mcp_servers ?on_session_ready ?on_
           ?session_mode
           ?mcp_servers
           ?on_session_ready
+          ?on_prompt_sent
           ?on_stream_event
           ~mgr:(Eio.Stdenv.process_mgr env)
           ~clock:(Eio.Stdenv.clock env)
           ~cwd:Eio.Path.(Eio.Stdenv.fs env / dir)
-          (config ?account_home ?native ())
-          ~workspace_root:dir
+          {(config ?account_home ?native ()) with prepared_home; model}
+          ~workspace_root
           ~prompt:"say MASC_MUSE_OK"
           ~images:[]
       in
@@ -194,14 +226,18 @@ let test_turn_with_tool_and_approval () =
   let decisions = ref [] in
   let tools = ref 0 in
   let session_ready = ref None in
+  let terminal_events = ref [] in
   run_scripted
     ~on_session_ready:(fun ~session_id ->
       session_ready := Some session_id;
       Ok ())
     ~on_stream_event:(function
-      | Serve.Text_delta text -> Buffer.add_string deltas text
+      | Serve.Text_delta {text; _} -> Buffer.add_string deltas text
       | Serve.Approval_decided { decision; _ } -> decisions := decision :: !decisions
       | Serve.Native_tool_finished _ -> incr tools
+      | Serve.Turn_terminal_received Msp.Terminal_completed -> terminal_events := "receipt" :: !terminal_events
+      | Serve.Usage_reported _ -> terminal_events := "usage" :: !terminal_events
+      | Serve.Turn_finished _ -> terminal_events := "finish" :: !terminal_events
       | _ -> ())
     (handshake_and_session ~granted:[]
      @ [ Write agent_started
@@ -228,6 +264,8 @@ let test_turn_with_tool_and_approval () =
          check int "approvals" 1 turn.approvals_decided;
          check bool "denied" true (!decisions = [ Msp.Denied ]);
          check bool "resumed" false turn.resumed;
+         check (list string) "terminal receipt precedes usage and output finish"
+           ["receipt"; "usage"; "finish"] (List.rev !terminal_events);
          (match turn.usage with
           | Some usage -> check int "input tokens" 100 usage.input_tokens
           | None -> fail "usage missing");
@@ -242,9 +280,9 @@ let test_turn_with_tool_and_approval () =
          let start = request_with_method "session/start" requests in
          check
            bool
-           "read posture selects denyUnmatched"
+           "read posture selects promptUnmatched"
            true
-           (params_member "approvalMode" start = `String "denyUnmatched");
+           (params_member "approvalMode" start = `String "promptUnmatched");
          check bool "no bridge, no config" true (params_member "config" start = `Null);
          check
            bool
@@ -284,9 +322,9 @@ let test_exit_code_is_typed () =
 let test_bridge_needs_session_mcp () =
   run_scripted
     ~mcp_servers:
-      [ ( "masc_keeper"
-        , Msp.Streamable_http
-            { url = "http://127.0.0.1:1/mcp"; headers = []; required = true } )
+      [ { Serve.name = "masc_keeper"
+        ; server = Msp.Streamable_http
+            { url = "http://127.0.0.1:1/mcp"; headers = []; required = true }; tool_names = [] }
       ]
     [ Read; Write (init_frame ~granted:[]) ]
     (fun result requests ->
@@ -329,6 +367,7 @@ let test_selected_homes_do_not_inherit_other_account_roots () =
     ; "XDG_STATE_HOME", "/synthetic/ambient-state"
     ; "XDG_RUNTIME_DIR", "/synthetic/ambient-run"
     ; "META_API_KEY", "synthetic-payg-key"
+    ; "TBH_CREDENTIAL_BACKEND", "keychain"
     ]
   in
   let previous = List.map (fun (key, _) -> key, Sys.getenv_opt key) injected in
@@ -343,18 +382,79 @@ let test_selected_homes_do_not_inherit_other_account_roots () =
     (fun () ->
       List.iter (fun (key, value) -> Unix.putenv key value) injected;
       List.iter
-        (fun (home, native, native_read) ->
-           run_scripted ~account_home:home ~native
-             (Expect_launch { home; native_read }
-              :: handshake_and_session ~granted:[]
-              @ [ Write agent_completed; Write turn_completed ])
-             (fun result _ ->
-                match result with
-                | Ok turn -> check string "selected account turn completed" "MASC_MUSE_OK" turn.text
-                | Error error -> fail (Serve.error_to_string error)))
-        [ "/synthetic/account-one", Runtime_native_tools.Native_read, true
-        ; "/synthetic/account-two", Runtime_native_tools.Native_full, false
+        (fun (native, native_read) ->
+           let home = Filename.temp_dir "masc-muse-selected-account-" "" in
+           Fun.protect ~finally:(fun () -> Fs_compat.remove_tree home) (fun () ->
+             Fs_compat.mkdir_p (Filename.concat home ".config/muse");
+             let auth = Filename.concat home ".config/muse/auth.json" in
+             let channel = open_out_gen [Open_wronly; Open_creat; Open_excl] 0o600 auth in
+             Fun.protect ~finally:(fun () -> close_out_noerr channel) (fun () ->
+               output_string channel
+                 {|{"schema_version":1,"providers":{"meta":{"api_key":"SYNTHETIC-LOCAL-ONLY"}}}|});
+             run_scripted ~account_home:home ~native
+               (Expect_launch { home; native_read }
+                :: handshake_and_session_with_mode ~granted:[]
+                     ~approval_mode:(if native_read then Msp.Prompt_unmatched else Msp.Allow_all)
+                @ [ Write agent_completed; Write turn_completed ])
+               (fun result _ ->
+                  match result with
+                  | Ok turn -> check string "selected account turn completed" "MASC_MUSE_OK" turn.text
+                  | Error error -> fail (Serve.error_to_string error))))
+        [ Runtime_native_tools.Native_read, true
+        ; Runtime_native_tools.Native_full, false
         ])
+;;
+
+let test_prepared_home_is_bound_to_exact_selected_account () =
+  let root = Filename.temp_dir "muse-prepared-account-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
+    let account name =
+      let home = Filename.concat root name in
+      Fs_compat.mkdir_p (Filename.concat home ".config/muse");
+      let channel = open_out_gen [Open_wronly; Open_creat; Open_excl] 0o600
+        (Filename.concat home ".config/muse/auth.json") in
+      Fun.protect ~finally:(fun () -> close_out_noerr channel) (fun () ->
+        output_string channel {|{"schema_version":1,"providers":{"meta":{"api_key":"SYNTHETIC-ONLY"}}}|});
+      home in
+    let home_a = account "a" and home_b = account "b" in
+    let alias_a = Filename.concat root "alias-a" in
+    Unix.symlink home_a alias_a;
+    let prepare home = Eio_main.run (fun _ ->
+      match Runtime_muse_home.prepare ~account_home:home with
+      | Ok value -> value | Error error -> fail (Runtime_muse_home.error_to_string error)) in
+    let prepared = prepare home_a and prepared_alias = prepare alias_a in
+    check string "configured alias is retained separately" alias_a (Runtime_muse_home.account_home prepared_alias);
+    let spawn_marker = Filename.concat root "unexpected-spawn" in
+    List.iter (fun account_home ->
+      run_scripted ~account_home ~prepared_home:prepared [Mark_spawned spawn_marker] (fun result requests ->
+        (match result with
+         | Error (Serve.Invalid_config detail) -> check string "account mismatch is explicit"
+             "prepared_home does not match the selected account_home" detail
+         | Error error -> fail (Serve.error_to_string error)
+         | Ok _ -> fail "mixed-account configuration launched");
+        check int "mismatch sends no initialize or session request" 0 (List.length requests);
+        check bool "mismatch never starts the child process" false (Sys.file_exists spawn_marker)))
+      [home_b; alias_a];
+    List.iter (fun (home, prepared_home) ->
+      run_scripted ~account_home:home ~prepared_home
+        (Expect_launch {home; native_read=true} :: handshake_and_session ~granted:[]
+         @ [Write agent_completed; Write turn_completed])
+        (fun result _ -> match result with
+         | Ok turn -> check string "matching account completes" "MASC_MUSE_OK" turn.text
+         | Error error -> fail (Serve.error_to_string error)))
+      [home_a, prepared; alias_a, prepared_alias];
+    Unix.unlink alias_a;
+    Unix.symlink home_b alias_a;
+    check string "retargeted alias keeps configured identity" alias_a
+      (Runtime_muse_home.account_home prepared_alias);
+    check string "prepared generation keeps physical account" (Unix.realpath home_a)
+      (Runtime_muse_home.physical_home prepared_alias);
+    run_scripted ~account_home:alias_a ~prepared_home:prepared_alias
+      (Expect_launch {home=home_a; native_read=true} :: handshake_and_session ~granted:[]
+       @ [Write agent_completed; Write turn_completed])
+      (fun result _ -> match result with
+       | Ok turn -> check string "retarget cannot split child roots from auth" "MASC_MUSE_OK" turn.text
+       | Error error -> fail (Serve.error_to_string error)))
 ;;
 
 let test_invalid_account_home_is_refused () =
@@ -366,6 +466,142 @@ let test_invalid_account_home_is_refused () =
         | Ok _ -> fail "invalid account home reached the client");
        check int "nothing dispatched" 0 (List.length requests)))
     [ "relative-account"; "/absolute/account "; " /absolute/account" ]
+;;
+
+let test_valid_image_inputs_use_shared_official_media_contract () =
+  List.iter (fun media_type ->
+    let images = [{Serve.media_type; base64_data="aGVsbG8="}] in
+    match Serve.validate_turn (config ()) ~workspace_root:"/w" ~prompt:"Inspect image" ~images with
+    | Ok () -> ()
+    | Error error -> fail (Serve.error_to_string error))
+    Runtime_official_client_tool.official_client_image_media_types
+;;
+
+let test_session_identity_is_verified_before_admission () =
+  let frame ~model ~workspace =
+    Yojson.Safe.to_string (`Assoc ["jsonrpc", `String "2.0"; "id", `Int 2;
+      "result", `Assoc ["session", `Assoc ["sessionId", `String "s-1";
+        "turnCount", `Int 0; "modelId", model; "workspaceRoot", workspace;
+        "approvalMode", effective_mode Msp.Prompt_unmatched]]]) in
+  let with_id id source = match Yojson.Safe.from_string source with
+    | `Assoc fields -> Yojson.Safe.to_string (`Assoc (("id", `Int id) :: List.remove_assoc "id" fields))
+    | _ -> fail "fixture response must be an object" in
+  List.iter (fun session_mode ->
+    let prefix result = [Read; Write (init_frame ~granted:[]); Read; Read; Write result] in
+    List.iter (fun (model, workspace, expected) ->
+      let ready = ref false and sent = ref false in
+      run_scripted ~model:"requested-model" ~workspace_root:"/requested-workspace" ~session_mode
+        ~on_session_ready:(fun ~session_id:_ -> ready := true; Ok ())
+        ~on_prompt_sent:(fun () -> sent := true)
+        (prefix (frame ~model ~workspace))
+        (fun result requests ->
+          (match expected, result with
+           | `Model reported, Error (Serve.Session_model_mismatch {requested; resumed}) ->
+             check string "requested model" "requested-model" requested;
+             check (option string) "reported model" reported resumed
+           | `Workspace reported, Error (Serve.Session_workspace_mismatch {requested; reported=actual}) ->
+             check string "requested workspace" "/requested-workspace" requested;
+             check (option string) "reported workspace" reported actual
+           | _, Error error -> fail (Serve.error_to_string error)
+           | _, Ok _ -> fail "mismatched session dispatched a turn");
+          check bool "identity mismatch never persists session" false !ready;
+          check bool "identity mismatch never acknowledges a prompt" false !sent;
+          check int "only initialize, initialized and session open are sent" 3 (List.length requests)))
+      [`String "wrong-model", `String "/requested-workspace", `Model (Some "wrong-model");
+       `Null, `String "/requested-workspace", `Model None;
+       `String "requested-model", `String "/wrong-workspace", `Workspace (Some "/wrong-workspace");
+       `String "requested-model", `Null, `Workspace None];
+    let ready = ref 0 in
+    let resume_steps, turn_id = match session_mode with
+      | Serve.Start -> [], 3
+      | Serve.Resume _ -> [Read; Write (approval_mode_result ~id:3 Msp.Prompt_unmatched)], 4 in
+    run_scripted ~model:"requested-model" ~workspace_root:"/requested-workspace" ~session_mode
+      ~on_session_ready:(fun ~session_id:_ -> incr ready; Ok ())
+      (prefix (frame ~model:(`String "requested-model") ~workspace:(`String "/requested-workspace"))
+       @ resume_steps @ [Read; Write (with_id turn_id turn_ack); Write turn_started;
+                          Write agent_completed; Write turn_completed])
+      (fun result requests ->
+        (match result with Ok turn -> check string "matching session completes" "MASC_MUSE_OK" turn.text
+         | Error error -> fail (Serve.error_to_string error));
+        check int "matching identity persists once" 1 !ready;
+        ignore (request_with_method "turn/start" requests)))
+    [Serve.Start; Serve.Resume {session_id="s-1"; expected_turn_count=0}]
+;;
+
+let test_session_approval_mode_is_verified_before_admission () =
+  let frame id result = Yojson.Safe.to_string
+      (`Assoc ["jsonrpc", `String "2.0"; "id", `Int id; "result", result]) in
+  let session mode =
+    let fields = Yojson.Safe.Util.(Yojson.Safe.from_string session_result
+      |> member "result" |> member "session" |> to_assoc) |> List.remove_assoc "approvalMode" in
+    `Assoc ["session", `Assoc (match mode with
+      | None -> fields | Some value -> ("approvalMode", value) :: fields)] in
+  let prefix opened = [Read; Write (init_frame ~granted:[]); Read; Read; Write (frame 2 opened)] in
+  let malformed = [Some `Null; Some (`String "promptUnmatched"); Some (`Assoc []);
+    Some (`Assoc ["mode", `String "futureMode"]); Some (`Assoc ["mode", `Bool true])] in
+  List.iter (fun (native, requested, other) ->
+    let refused ~session_mode ~expected ~request_count steps =
+      let ready = ref false and sent = ref false in
+      run_scripted ~native ~session_mode
+        ~on_session_ready:(fun ~session_id:_ -> ready := true; Ok ())
+        ~on_prompt_sent:(fun () -> sent := true) steps (fun result requests ->
+          (match expected, result with
+           | `Mismatch reported, Error (Serve.Session_approval_mode_mismatch actual) ->
+             check bool "requested posture retained" true (actual.requested = requested);
+             check bool "returned mode retained" true (actual.reported = reported)
+           | `Protocol stage, Error (Serve.Protocol_error actual) ->
+             check string "invalid approval evidence is explicit" stage actual.stage
+           | _, Error error -> fail (Serve.error_to_string error)
+           | _, Ok _ -> fail "unverified approval mode admitted a turn");
+          check bool "unverified mode never persists session" false !ready;
+          check bool "unverified mode never dispatches prompt" false !sent;
+          check int "only admission requests sent" request_count (List.length requests)) in
+    List.iter (fun (mode, expected) ->
+      refused ~session_mode:Serve.Start ~expected ~request_count:3
+        (prefix (session mode)))
+      ((None, `Mismatch None) :: (Some (effective_mode other), `Mismatch (Some other))
+       :: List.map (fun mode -> mode, `Protocol "session/start") malformed);
+    let resumed = Serve.Resume {session_id="s-1"; expected_turn_count=0} in
+    List.iter (fun (result, expected) ->
+      refused ~session_mode:resumed ~expected ~request_count:4
+        (prefix (session (Some (effective_mode other))) @ [Read; Write (frame 3 result)]))
+      ((`Assoc ["status", `String "accepted"; "effectiveMode", effective_mode other],
+        `Mismatch (Some other))
+       :: (`Assoc ["status", `String "rejected"; "effectiveMode", effective_mode requested],
+           `Protocol "session/setApprovalMode")
+       :: List.map (fun mode ->
+           `Assoc (("status", `String "accepted") :: (match mode with
+             | None -> [] | Some value -> ["effectiveMode", value])),
+           `Protocol "session/setApprovalMode") (None :: malformed));
+    (* Resume can correct a prior mode, or establish one the snapshot omitted.
+       Only the accepted effective result permits persistence and turn/start. *)
+    List.iter (fun (session_mode, prior) ->
+      let ready = ref 0 and sent = ref 0 in
+      let suffix, turn_id = match session_mode with
+        | Serve.Start -> [], 3
+        | Serve.Resume _ -> [Read; Write (approval_mode_result ~id:3 requested)], 4 in
+      let ack = Yojson.Safe.Util.(Yojson.Safe.from_string turn_ack |> member "result") in
+      run_scripted ~native ~session_mode
+        ~on_session_ready:(fun ~session_id:_ -> incr ready; Ok ())
+        ~on_prompt_sent:(fun () -> incr sent)
+        (prefix (session prior) @ suffix @ [Read; Write (frame turn_id ack);
+          Write turn_started; Write agent_completed; Write turn_completed])
+        (fun result requests ->
+          (match result with
+           | Ok turn -> check string "verified mode completes" "MASC_MUSE_OK" turn.text
+           | Error error -> fail (Serve.error_to_string error));
+          check int "verified mode persists once" 1 !ready;
+          check int "verified mode dispatches once" 1 !sent;
+          (match session_mode with
+           | Serve.Start -> ()
+           | Serve.Resume _ ->
+             let change = request_with_method "session/setApprovalMode" requests in
+             check bool "resume requests the configured posture" true
+               (params_member "mode" change = `String (Msp.approval_mode_to_string requested)))))
+      [Serve.Start, Some (effective_mode requested);
+       resumed, Some (effective_mode other); resumed, None])
+    [Runtime_native_tools.Native_read, Msp.Prompt_unmatched, Msp.Allow_all;
+     Runtime_native_tools.Native_full, Msp.Allow_all, Msp.Prompt_unmatched]
 ;;
 
 let test_nondurable_handshake_never_begins_a_session () =
@@ -397,7 +633,81 @@ let test_nondurable_handshake_never_begins_a_session () =
                  check bool "session callback not reached" false !session_ready;
                  check int "initialize is the only dispatched request" 1 (List.length requests)))
          [ Some (`String "ephemeral"); Some `Null; Some (`String "future") ])
-    [ Serve.Start; Serve.Resume { session_id = "retained-session" } ]
+    [ Serve.Start; Serve.Resume { session_id = "retained-session"; expected_turn_count=0 } ]
+;;
+
+let test_resume_requires_the_retained_completed_turn_count () =
+  let frame count =
+    Yojson.Safe.to_string (`Assoc ["jsonrpc", `String "2.0"; "id", `Int 2;
+      "result", `Assoc ["session", `Assoc
+        (["sessionId", `String "s-1"; "workspaceRoot", `String "/w";
+          "approvalMode", effective_mode Msp.Prompt_unmatched]
+         @ (match count with None -> [] | Some count -> ["turnCount", count]))]]) in
+  let prefix count = [Read; Write (init_frame ~granted:[]); Read; Read; Write (frame count)] in
+  let session_mode = Serve.Resume {session_id="s-1"; expected_turn_count=1} in
+  List.iter (fun count ->
+    let ready = ref false and sent = ref false in
+    run_scripted ~session_mode
+      ~on_session_ready:(fun ~session_id:_ -> ready := true; Ok ())
+      ~on_prompt_sent:(fun () -> sent := true)
+      (prefix count)
+      (fun result requests ->
+        (match result with
+         | Error (Serve.Protocol_error {stage="session/resume"; _}) -> ()
+         | Error error -> fail (Serve.error_to_string error)
+         | Ok _ -> fail "unknown or changed retained history dispatched a turn");
+        check bool "unverified history never persists admission" false !ready;
+        check bool "unverified history never dispatches prompt" false !sent;
+        check (list string) "no approval mutation or turn after refused resume"
+          ["initialize"; "initialized"; "session/resume"]
+          (List.map (fun request -> Yojson.Safe.Util.(request |> member "method" |> to_string)) requests)))
+    [None; Some `Null; Some (`String "1"); Some (`Int (-1)); Some (`Int 0); Some (`Int 2)];
+  let acknowledged_turn = match Yojson.Safe.from_string turn_ack with
+    | `Assoc fields -> Yojson.Safe.to_string (`Assoc (("id", `Int 4) :: List.remove_assoc "id" fields))
+    | _ -> fail "fixture acknowledgement is not an object" in
+  run_scripted ~session_mode
+    (prefix (Some (`Int 1)) @ [Read; Write (approval_mode_result ~id:3 Msp.Prompt_unmatched);
+      Read; Write acknowledged_turn; Write turn_started; Write agent_completed; Write turn_completed])
+    (fun result requests ->
+      (match result with
+       | Ok turn -> check bool "matching retained history resumes" true turn.resumed
+       | Error error -> fail (Serve.error_to_string error));
+      ignore (request_with_method "turn/start" requests))
+;;
+
+let test_start_requires_an_empty_session () =
+  let frame count =
+    Yojson.Safe.to_string (`Assoc ["jsonrpc", `String "2.0"; "id", `Int 2;
+      "result", `Assoc ["session", `Assoc
+        (["sessionId", `String "s-1"; "workspaceRoot", `String "/w";
+          "approvalMode", effective_mode Msp.Prompt_unmatched]
+         @ (match count with None -> [] | Some count -> ["turnCount", count]))]]) in
+  let prefix count = [Read; Write (init_frame ~granted:[]); Read; Read; Write (frame count)] in
+  List.iter (fun count ->
+    let ready = ref false and sent = ref false in
+    run_scripted ~session_mode:Serve.Start
+      ~on_session_ready:(fun ~session_id:_ -> ready := true; Ok ())
+      ~on_prompt_sent:(fun () -> sent := true)
+      (prefix count)
+      (fun result requests ->
+        (match result with
+         | Error (Serve.Protocol_error {stage="session/start"; _}) -> ()
+         | Error error -> fail (Serve.error_to_string error)
+         | Ok _ -> fail "a non-empty start dispatched a turn");
+        check bool "unverified start never persists admission" false !ready;
+        check bool "unverified start never dispatches prompt" false !sent;
+        check (list string) "no turn after refused start"
+          ["initialize"; "initialized"; "session/start"]
+          (List.map (fun request -> Yojson.Safe.Util.(request |> member "method" |> to_string)) requests)))
+    [None; Some `Null; Some (`String "0"); Some (`Int (-1)); Some (`Int 1); Some (`Int 2)];
+  run_scripted ~session_mode:Serve.Start
+    (prefix (Some (`Int 0)) @ [Read; Write turn_ack; Write turn_started;
+      Write agent_completed; Write turn_completed])
+    (fun result requests ->
+      (match result with
+       | Ok turn -> check bool "empty start completes" false turn.resumed
+       | Error error -> fail (Serve.error_to_string error));
+      ignore (request_with_method "turn/start" requests))
 ;;
 
 let test_absent_durability_admits_the_v1_durable_host () =
@@ -429,11 +739,19 @@ let () =
         ; test_case "native none is config error" `Quick test_native_none_is_config_error
         ; test_case "selected account home isolates child roots and posture" `Quick
             test_selected_homes_do_not_inherit_other_account_roots
+        ; test_case "valid images use shared official media contract" `Quick test_valid_image_inputs_use_shared_official_media_contract
+        ; test_case "session identity is verified before admission" `Quick test_session_identity_is_verified_before_admission
+        ; test_case "effective approval mode is verified before admission" `Quick test_session_approval_mode_is_verified_before_admission
+        ; test_case "prepared HOME matches selected account" `Quick test_prepared_home_is_bound_to_exact_selected_account
         ; test_case "invalid account home is refused" `Quick test_invalid_account_home_is_refused
         ; test_case "non-durable host is refused before session admission" `Quick
             test_nondurable_handshake_never_begins_a_session
         ; test_case "absent durability admits the v1 durable host" `Quick
             test_absent_durability_admits_the_v1_durable_host
+        ; test_case "resume requires retained completed-turn count" `Quick
+            test_resume_requires_the_retained_completed_turn_count
+        ; test_case "start requires an empty session" `Quick
+            test_start_requires_an_empty_session
         ] )
     ]
 ;;

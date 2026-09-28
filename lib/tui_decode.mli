@@ -296,6 +296,27 @@ type keeper_call_disposition =
   | Keeper_call_deferred
   | Keeper_call_failed
 
+type keeper_call_log_health =
+  | Call_log_ok
+  | Call_log_empty
+  | Call_log_missing
+  | Call_log_stale
+  | Call_log_coverage_gap
+  | Call_log_unknown of string
+(** The server's freshness verdict on a call log snapshot. [Call_log_unknown]
+    carries an unrecognized wire word verbatim: a new word must not break the
+    snapshot decode, and readers treat it as an incomplete log, never as a
+    proof that a row is absent. *)
+
+val keeper_call_log_health_of_string : string -> keeper_call_log_health
+(** The wire [health] word as the variant. Total: unknown spellings become
+    {!Call_log_unknown}, so the vocabulary lives here alone and no reader
+    branches on a spelling. *)
+
+val keeper_call_log_health_to_string : keeper_call_log_health -> string
+(** The variant back to its wire word ([Call_log_unknown s] is [s]), for the
+    header that prints the server's verdict verbatim. *)
+
 val keeper_call_disposition_of_string :
   string -> (keeper_call_disposition, string) result
 (** The wire word of a call's disposition ([completed], [deferred],
@@ -338,7 +359,8 @@ type keeper_call = {
 type keeper_calls_snapshot = {
   kcs_keeper : string;
   kcs_entries : keeper_call list;  (** in the server's order, newest last *)
-  kcs_health : string;  (** the server's own freshness verdict, verbatim *)
+  kcs_health : keeper_call_log_health;
+      (** the server's own freshness verdict, typed at the decode boundary *)
   kcs_latest_age_s : float option;
   kcs_stale_reason : string option;
   kcs_mismatched : int;  (** rows naming another keeper, rejected *)
@@ -841,7 +863,7 @@ type runtime_context_source =
   | Runtime_context_capability
   | Runtime_context_clamped
 
-type exact_slot_group = Exact_http_slots | Exact_cli_slots
+type exact_slot_group = Exact_http_slots | Exact_cli_slots | Exact_output_unsupported
 
 type runtime_option = {
   ro_id : string;
@@ -1039,6 +1061,7 @@ type memory_librarian_failure_kind =
   | Failure_exact_setup
   | Failure_exact_execution
   | Failure_domain_output_invalid
+  | Failure_absorb_judgment
   | Failure_memory_snapshot_write
   | Failure_runtime_context_unavailable
   | Failure_lane_cancelled
@@ -1327,33 +1350,12 @@ type harness_snapshot = {
 }
 
 (** One task waiting on a verdict, as the verification surface lists it. *)
-type verification_ask =
-  | Asks_completion
-  | Asks_cancellation of string option
-      (** The case the producer made for stopping the Task, which is what an
-          operator decides on. [None] where the record kept no copy of it,
-          which is every stop submitted before the record did. *)
-  | Ask_unstated
-      (** The row's [intent] is [null]: the backlog join found nothing, so the
-          record does not say which verdict it waits on. A missing
-          [cancellation_reason] is not an answer to that question -- a stop
-          without its reason has none either -- so nothing is inferred. *)
-  | Unrecognised_ask of string
-      (** A word outside the pair, kept as itself. *)
-(** What a request asks the authority to answer. [intent] is the field that
-    says which, and the queue writes it on every row. *)
-
 type verification_request = {
   vr_request_id : string;
   vr_task_id : string;
   vr_task_title : string;
       (** What would move it forward, when the server can say. *)
   vr_submitted_by : string;
-  vr_ask : verification_ask;
-      (** Which verdict the row waits on: a completion, or a cancellation that
-          only an operator's verdict clears. [Ask_unstated] where the row's
-          [intent] is [null], which the history view's rows are, and drawn as
-          nothing rather than as either verdict. *)
   vr_created_at : string;
   vr_required_artifacts : string list;
   vr_submitted_evidence : string list;
@@ -2321,8 +2323,15 @@ type fleet_blocker =
   | Blocker of Keeper_fleet_blocker.t
   | Unrecognised_blocker of string
 
+(** How the fleet scan graded the fleet ({!Keeper_fleet_grade}).
+    [Unrecognised_fleet_status] keeps a word this build does not know as the
+    server wrote it. *)
+type fleet_status =
+  | Fleet_grade of Keeper_fleet_grade.t
+  | Unrecognised_fleet_status of string
+
 type fleet_safety = {
-  fs_status : string;
+  fs_status : fleet_status;
   fs_blocker : fleet_blocker option;
   fs_operator_action_required : bool;
   fs_bootable_count : int;
@@ -2645,7 +2654,6 @@ type lane_run_status =
   | Lane_run_not_reviewed
   | Lane_run_commit_failed
   | Lane_run_raised
-  | Lane_run_operator_routed
   | Lane_run_other of string
 
 val lane_run_status_label : lane_run_status -> string
@@ -2672,9 +2680,7 @@ type lane_run_decision =
 val lane_run_decision :
   run_kind:lane_run_kind -> status:lane_run_status -> lane_run_decision
 (** Separates a completed execution from a review decision. In particular,
-    an exact-output run that succeeded is still [Lane_run_not_a_decision], and
-    so is a task verification the lane handed to the operator
-    ([Lane_run_operator_routed]): the click that follows is the verdict. *)
+    an exact-output run that succeeded is still [Lane_run_not_a_decision]. *)
 
 type lane_run_tool_disposition =
   | Lane_run_tool_completed
@@ -2909,9 +2915,21 @@ type provider_usage_utilization =
   | Utilization_fraction of float  (** [0.67] is 67 %. *)
   | Utilization_percent of int
 
+(** What a window limits, as the server's decoder classified it from the
+    provider's own shape. *)
+type provider_usage_window_role =
+  | Role_gates_model_calls
+      (** Spending it refuses model calls on the account. *)
+  | Role_counts_other_use
+      (** It counts something a model call does not need, e.g. Z.AI's
+          TIME_LIMIT (MCP and tool calls). *)
+  | Role_unclassified_limit
+      (** A limit the server's decoder does not know. *)
+
 type provider_usage_window = {
   puw_limit_id : string option;
   puw_kind : provider_usage_window_kind;
+  puw_role : provider_usage_window_role;
   puw_utilization : provider_usage_utilization;
   puw_resets_at : float option;  (** Epoch seconds, as reported. *)
   puw_observed_at : float;  (** When the server heard this report. *)
@@ -2923,9 +2941,16 @@ type provider_usage_state =
   | Account_not_reported_since_start
   | Account_reported of provider_usage_window * provider_usage_window list
 
+(** A provider table that bills to the account. *)
+type provider_usage_provider = {
+  pup_id : string;  (** The [providers.<id>] key. *)
+  pup_display_name : string;
+      (** The table's [display-name]; the id when the table names none. *)
+}
+
 type provider_usage_account = {
   pua_scope : string;  (** The quota scope, as [quota_scope] on runtime rows. *)
-  pua_providers : string list;
+  pua_providers : provider_usage_provider list;
   pua_state : provider_usage_state;
 }
 
@@ -2938,8 +2963,9 @@ val decode_provider_usage_windows :
   Yojson.Safe.t -> (provider_usage_windows, string) result
 (** Strict decoder for the [provider_usage_windows_since] and
     [provider_usage_windows] members of [GET /api/v1/runtime/resolved]. An
-    unknown [state], window [kind] or utilization [unit] is an error, as is a
-    reported account without windows or an unreported one with windows. *)
+    unknown [state], window [kind], window [role] or utilization [unit] is an
+    error, as is a reported account without windows or an unreported one with
+    windows. *)
 
 val decode_runtime_surface_snapshot :
   probe_json:Yojson.Safe.t ->
@@ -3473,13 +3499,16 @@ type goal_timeline_event = {
   gt_severity : string;  (** producer emits ok | warn | bad; open for renderers *)
 }
 
-(** Goal detail timeline. [`Null] from the server means the approval-queue
-    store could not be read (the same discriminated failure the gate snapshot
-    carries), so it decodes to the explicit unavailable constructor, never an
-    empty list. *)
+(** Goal detail timeline. A Goal source failure retains its source type;
+    [`Null] with an unavailable approval queue retains the queue's detail.
+    Neither failure decodes to an empty event list. *)
 type goal_timeline =
   | Goal_timeline_ready of goal_timeline_event list
-  | Goal_timeline_unavailable of string
+  | Goal_timeline_unavailable of goal_timeline_unavailability
+
+and goal_timeline_unavailability =
+  | Goal_source_failure of goal_source_failure
+  | Approval_queue_failure of string
 
 val decode_goal_detail_timeline : Yojson.Safe.t -> (goal_timeline, string) result
 
@@ -3500,7 +3529,11 @@ val decode_task_history : Yojson.Safe.t -> (task_history_event list, string) res
 (** Operator evidence bundle for one awaiting-verification task. The item
     vocabulary is the producer's closed set, so an unknown kind fails the
     decode rather than rendering as an empty row; [Evidence_access_unavailable]
-    is the store-level failure the server states explicitly. *)
+    is the store-level failure the server states explicitly. An unreadable
+    artifact's [reason] is the producer's cause in one of its two wire shapes
+    only — a bare non-empty code string or an object carrying [code]. A
+    [read_error] object also carries a non-empty [detail], which is included
+    in the rendered cause. Malformed reasons fail the decode. *)
 type verification_evidence_item =
   | Ev_collaboration of { ev_reference : string; ev_content : string; ev_sha256 : string }
   | Ev_note of string

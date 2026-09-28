@@ -39,7 +39,7 @@ val fold_argument : cap:int -> string -> folded_argument
 
     A Gate row ends in the argument the gated call asked for and nothing caps
     it; one base64 argument took eight rows of the pane. Compact folds it,
-    Ctrl-D unfolds it -- so what is out of sight is still reachable, which a
+    cycling Ctrl-D to full unfolds it -- so what is out of sight is still reachable, which a
     truncation would not be.
 
     Cells, not rows, because how many rows this becomes is decided later, by

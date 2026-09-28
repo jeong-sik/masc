@@ -30,8 +30,8 @@ The operator surface is authenticated independently of the connector:
 | Endpoint | Request | Permission |
 |---|---|---|
 | POST `/api/v1/dashboard/browser-lane/read` | `lane`, optional `tabId` | Read state |
-| POST `/api/v1/dashboard/browser-lane/session` | `action`: open/close, optional `headless` | Operator admin token |
-| POST `/api/v1/dashboard/browser-lane/goto` | absolute HTTP(S) `url` | Operator admin token |
+| POST `/api/v1/dashboard/browser-lane/session` | `lane`: automation/stagehand, `action`: open/close, optional `headless` | Operator admin token |
+| POST `/api/v1/dashboard/browser-lane/goto` | `lane`: automation/stagehand, absolute HTTP(S) `url` | Operator admin token |
 
 Read replies contain `tabs`, the selected `page`, `source` and measured
 `elapsed_ms`. The page contains `tabId`, `url`, `title`, `text`, `chars` and

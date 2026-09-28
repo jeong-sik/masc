@@ -48,6 +48,9 @@ module Post_id : sig
   val to_string : t -> string
   val generate : unit -> t
   (** Cryptographic random id, prefix ["p-"]. *)
+  val json_schema_pattern : string
+  (** The [of_string] shape as a JSON Schema pattern. It mirrors the parser
+      exactly, so it never rejects an id [of_string] accepts. *)
 end
 
 module Comment_id : sig
@@ -124,6 +127,20 @@ val keeper_authored_origin :
     [source] names the producing channel; [turn_ref] is the turn-level join key
     and is [None] only when no mint-once-safe reference is reachable. *)
 
+type post_close_state = {
+  closed_by : Agent_id.t;
+  (** Who closed the post: the author, the operator, or a configured
+      moderator. Reopening replaces this with [None]; it does not mutate
+      the record in place. *)
+  closed_at : float;
+  successor_id : Post_id.t option;
+  (** The post that continues this thread, when the closer names one. A
+      reader following a closed thread lands here instead of a dead end. *)
+  summary : string option;
+  (** Why the thread closed / where it continues, for a reader who was not
+      there when it happened. *)
+}
+
 type post = {
   id : Post_id.t;
   author : Agent_id.t;
@@ -143,6 +160,11 @@ type post = {
   hearth : string option;
   thread_id : string option;
   origin : post_origin option;
+  closed : post_close_state option;
+  (** [None] means open (the default for every post minted before this
+      field existed, and for every open post since). A row stored without
+      this key decodes to [None]; the key is only ever written when the
+      post is actually closed. *)
 }
 
 type comment = {
@@ -234,13 +256,28 @@ type sub_board = {
 
 module Limits : sig
   val default_comment_page_limit : int
-  (** Default number of comments returned by [masc_board_post_get]. *)
+  (** Default number of comments returned by [masc_board_post_get] when the
+      caller names no page: the newest comments, since a reader that does not
+      know the thread yet wants its tail. *)
   val max_comment_page_limit : int
   (** Maximum comments returned by one [masc_board_post_get] page. *)
   val default_ttl_hours : int
   (** [0] — permanent (no expiry). *)
   val sweeper_interval_sec : int
   val sweeper_batch_size : int
+  val comment_count_cap : int
+  (** Once a post holds this many comments, the next comment is refused
+      with a successor hint ([#39356] scope extension). The count is the
+      live per-post comment list at the moment of the check, so expired
+      comments free slots again. [MASC_BOARD_COMMENT_COUNT_CAP] overrides
+      the default of 100. A value [<= 0] is an explicit opt-out: the cap
+      check is skipped and threads grow without limit. *)
+  val cap_warning_message : cap:int -> unit -> string option
+  (** [None] when [cap > 0]; otherwise [Some message] naming
+      [MASC_BOARD_COMMENT_COUNT_CAP] and the value read, so the opt-out is
+      recorded at load instead of silently doing nothing
+      (issuecomment-5858752752). Pure: takes the parsed value, touches
+      nothing else. *)
 end
 
 (** {1 Comment pages}
@@ -263,7 +300,8 @@ module Comment_page : sig
     }
   (** Built only by {!request_of_args}: a [From_offset] is [>= 0] and
       [1 <= limit <= Limits.max_comment_page_limit]. For [Latest], [limit] is
-      the [comment_tail] count. *)
+      the [comment_tail] count, or {!Limits.default_comment_page_limit} when
+      the caller named no page at all. *)
 
   type argument =
     | Comment_offset
@@ -299,9 +337,12 @@ module Comment_page : sig
             [comment_tail] beside [comment_limit]. Neither wins. *)
 
   val request_of_args : Yojson.Safe.t -> (request, request_error) result
-  (** Reads [comment_offset] (absent: [0]), [comment_limit] (absent:
+  (** Reads [comment_offset], [comment_limit] (absent:
       {!Limits.default_comment_page_limit}), [comment_tail] and
-      [after_comment_id] from a tool call's arguments. A count or offset that
+      [after_comment_id] from a tool call's arguments. With none of the three
+      start arguments the page starts at the newest comment ([Latest]); an
+      explicit [comment_offset] (including [0]) starts at that offset, so the
+      head of a thread is read with [comment_offset=0]. A count or offset that
       is present but is not a JSON integer is refused, so [null], ["abc"],
       [true] and [2.9] never turn into a page; [after_comment_id] must be a
       string in the shape {!Comment_id} mints. [comment_tail] goes alone;
@@ -378,11 +419,11 @@ module Comment_page : sig
     (** Total decoder: [None] for anything this module did not write. *)
 
     val line : t -> string
-    (** The one line a text page carries, naming the range it holds and the
-        [comment_offset] that continues it. A page at the end of a non-empty
-        thread names the thread's size at the read. Every text rendering of a
-        page uses this printer, so the sentence cannot drift between
-        surfaces. *)
+    (** The one line a text page carries, naming its range, a forward
+        [comment_offset] when present, and the preceding non-overlapping
+        [comment_offset]/[comment_limit] when older comments exist. A page at
+        the end of a non-empty thread names the thread's size at the read.
+        Every text rendering of a page uses this printer. *)
 
     val metadata_key : string
     (** ["masc.comment_page"]. *)

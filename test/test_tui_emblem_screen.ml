@@ -132,9 +132,9 @@ let test_elapsed_time_is_the_pose () =
   let size = (Option.get (View.fit pixels ~max_cols:cols ~max_rows:picture_rows)).View.size in
   let drawn pose = Draw.render_posed body equipment pose size in
   check bool "the pose at the elapsed time" true
-    (image_at 1.5 = drawn (Draw.pose_at ~seconds:1.5));
+    (image_at 1.5 = drawn (Draw.pose_at ~milliseconds:1500));
   check bool "before the start is the start" true
-    (image_at (-1.0) = drawn (Draw.pose_at ~seconds:0.0));
+    (image_at (-1.0) = drawn (Draw.pose_at ~milliseconds:0));
   check bool "a time that is not finite holds it still" true
     (image_at Float.nan = drawn Draw.still)
 

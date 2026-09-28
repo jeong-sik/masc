@@ -395,6 +395,13 @@ module Router : sig
       capability so it can drive the post-101 connection.  RFC-0281. *)
   val ws_get : string -> ws_handler -> t -> t
 
+  (** [ws_prefix_get prefix handler routes] matches any GET whose path
+      starts with [prefix] and upgrades the connection to WebSocket.  The
+      handler receives the Gluten {!upgrade} capability; the suffix (path
+      after the prefix, plus query) is available via the request target.
+      RFC-0471 (collab relay rooms under [/r/]). *)
+  val ws_prefix_get : string -> ws_handler -> t -> t
+
   (** [prefix_get prefix handler routes] matches any GET whose
       path starts with [prefix]. *)
   val prefix_get : string -> request_handler -> t -> t

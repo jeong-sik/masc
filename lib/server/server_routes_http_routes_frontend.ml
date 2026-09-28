@@ -174,6 +174,9 @@ let add_routes ?sw ?clock ~port router =
            reqd)
          request reqd)
   |> Http.Router.ws_get "/ws" (websocket_handler ?sw ?clock)
+  (* RFC-0471: collab relay rooms. The link secret is the credential — knowledge
+     of the room id alone only ever yields ciphertext — so no bearer gate. *)
+  |> Http.Router.ws_prefix_get "/r/" Server_collab_route.ws_handler
   (* RFC-0217 S4-2 — Otel_metric_store scrape endpoint removed; metrics now
      export via OTLP push (Otel_metrics observable). *)
   |> Http.Router.get "/ag-ui/events" handle_ag_ui_events

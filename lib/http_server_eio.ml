@@ -734,6 +734,9 @@ module Router = struct
   let ws_get path handler router =
     add_kind Exact ~path ~methods:[`GET] ~handler:(Ws handler) router
 
+  let ws_prefix_get prefix handler router =
+    add_kind Prefix ~path:prefix ~methods:[`GET] ~handler:(Ws handler) router
+
   (** Match by prefix: path field is treated as a prefix, not exact match.
       The suffix (path after the prefix) is available via [Request.path]. *)
   let prefix_get prefix handler routes =

@@ -21,6 +21,8 @@
   masc.fs_compat
   masc.masc_process
   masc.sse_wire
+  ;; RFC-0471 collab relay rooms: Server_collab_route drives /r/ sockets.
+  masc.collab
   masc.agent_observation
   masc.browser_lane
   masc.slack_lane

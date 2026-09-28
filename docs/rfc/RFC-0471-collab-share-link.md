@@ -142,6 +142,9 @@ MASC 에 맞게 둔다.
 4. 게스트 주입 + 읽기 전용 강제 + Gate 규칙.
 5. TUI 호스트 `/collab` + QR 출력.
 6. TUI guest replica + 대시보드 web viewer 링크.
+7. (스택 6 이후) 같은 `lib/collab` 을 쓰는 독립 Eio 릴레이 바이너리
+   (§5 래더 2단계. 릴레이 코어가 순수하고 드라이버가 얇게 분리돼 있어
+   바이너리는 소켓 수락+`Collab_relay` 호출 골격만 얹으면 된다).
 
 ## 7. 미결
 
@@ -151,4 +154,7 @@ MASC 에 맞게 둔다.
 - [ ] QR 인코더 dep 선택 (스택 5 에서).
 - [x] v1 에서 조종 게스트의 승인 settle 금지 확정 (2026-09-28 사용자 확정: 호스트만 승인).
 - [x] v1 릴레이 범위 확정 (2026-09-28 사용자 확정: 내장+자가, managed 공개 릴레이 deferred).
-- [ ] 릴레이 close-code 를 omp(`4001/4004/4009/4029`) 미러 여부 (스택 2 에서).
+- [x] 릴레이 close-code: omp 미러로 확정 (4001 room closed / 4004 no such
+  room / 4009 host conflict / 4029 room full, 문자열까지 동일). 브라우저
+  WebSocket 은 거부된 upgrade 의 HTTP 상태를 볼 수 없어 close 코드로만
+  진단되므로, join 거절도 upgrade 후 close 로 답한다.

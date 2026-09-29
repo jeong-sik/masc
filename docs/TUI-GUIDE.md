@@ -97,10 +97,11 @@ are revoked. Only one invite request runs at a time: a `/play invite` sent
 before the answer to the last one has come back is refused, not queued.
 
 The QR is drawn only when all of it fits. A smaller window shows the link and
-the size the QR needs, because a cut QR scans as nothing. A terminal without
-colour shows the link alone. A card taller than the window scrolls with `j`/`k`,
-the arrow keys or the mouse wheel, and `g`/`G` jump to its top and its end, so
-a long link can be read to its last byte.
+the size the QR needs, because a cut QR scans as nothing. With `NO_COLOR` or
+on a terminal with fewer than 256 colours the card shows the link alone. A card
+taller than the window scrolls with `j`/`k`, the arrow keys or the mouse wheel,
+and `g`/`G` jump to its top and its end, so a long link can be read to its last
+byte.
 
 If the issue request has no trustworthy answer, inspect the invite list and
 revoke that name before retrying because the original link cannot be recovered.

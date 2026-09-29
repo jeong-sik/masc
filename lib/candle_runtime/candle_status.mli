@@ -1,11 +1,17 @@
-(** Is Candle on right now (RFC-goal-candle-ledger 3.9)?
+(** Candle policy, appraiser availability and ledger recovery
+    (RFC-goal-candle-ledger 3.9).
 
     [configured] reads configuration and checks the appraiser without touching
-    the ledger. [current] additionally owns recovery: when configuration says
-    [Enabled] and the server appraiser check succeeds, the first call
-    for a base path in this process runs {!Candle_ledger.recover_at_start} on
-    the ledger: a tail left by an append that never finished is cut, and a
-    ledger that cannot be read makes the answer [Disabled] instead of blocking
+    the ledger. [current] adds ledger recovery to that availability check.
+    [for_recording] reads the same configuration and owns the same recovery
+    without checking the appraiser: its temporary absence cannot discard
+    Snapshot or PayoutOwed facts. Thus an availability-related [Disabled]
+    returned by [configured] or [current] does not disable those writers.
+
+    The first eligible recovery call for a base path in this process runs
+    {!Candle_ledger.recover_at_start}: a tail left by an append that never
+    finished is cut, and a ledger that cannot be read makes the answer
+    [Disabled] instead of blocking
     what asked. A failed recovery is not remembered, so the next call tries
     again and a repaired ledger clears the answer without a restart.
 
@@ -27,14 +33,21 @@ val configured : base_path:string -> Candle_config.t
 
 val current : base_path:string -> Candle_config.t
 
+val for_recording : base_path:string -> Candle_config.t
+(** Configuration and ledger recovery for the durable Snapshot and PayoutOwed
+    steps, without consulting appraiser availability. An unpublished, busy or
+    unavailable appraiser may postpone settlement, but must not let a Goal pass
+    or complete without these facts when its Candle policy is enabled.
+    Configuration and recovery failures retain the same Off/Disabled semantics
+    as {!current}; the ledger still arbitrates each following append. *)
+
 val report_at_start : base_path:string -> unit
-(** Reads [candle.toml], recovers the ledger when it says [Enabled], and logs
-    the answer in one line, so the server's boot log says whether Candle is off,
-    on, or disabled and why. It is the first read of the ledger in the process,
-    so a tail left by a write that never finished is cut here, before any Goal
-    moves. *)
+(** Reports {!current}, including the reason when unavailable. When the
+    appraiser is available, this performs recovery before Goal writers start.
+    Otherwise the first {!for_recording} call performs the same recovery
+    before appending a durable Goal fact. *)
 
 val install_appraiser_check : (unit -> (unit, string) result) -> unit
-(** Server-owned dynamic availability check, installed before any Goal lifecycle
-    writer starts. Without one, configured Candle is Disabled with an explicit
-    reason. Each read observes current lane configuration. *)
+(** Server-owned dynamic availability check for {!configured} and {!current}.
+    Without one, those queries report Disabled with an explicit reason.
+    {!for_recording} does not depend on hook installation or lane publication. *)

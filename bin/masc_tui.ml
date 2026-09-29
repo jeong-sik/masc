@@ -16989,6 +16989,12 @@ let main
    | Some name when Masc_tui_theme_choice.apply name ->
        state.theme_choice <- Some name
    | Some _ | None -> ());
+  (match tui_settings.candle with
+   | None -> ()
+   | Some value ->
+       (match Masc_tui_emblem_screen.style_of_string value with
+        | Some style -> Masc_tui_emblem_screen.set_style style
+        | None -> add_event state "error" ("Unknown saved candle: " ^ value)));
 
   (* Same file, same moment. Absent reads as on, which is what masc drew
      before the key existed -- a reader who never set it sees no change. *)
@@ -20701,12 +20707,24 @@ and is loaded on demand through keeper_skill.
        (* The help overlay is modal: it answers scrolling and closing, and
           swallows everything else so a surface binding cannot fire under a
           screen that is describing it. Quit stays global above. *)
-       (* /about is modal for the help sheet's reason: Esc closes it, and
-          everything else is swallowed so no surface binding fires under it.
-          Quit stays global above. *)
+       (* /about is modal for the help sheet's reason: Esc closes it, c turns
+          the candle to its other style, and everything else is swallowed so
+          no surface binding fires under it. Quit stays global above. *)
        | Some k when state.about_open ->
            (match k with
             | "esc" -> state.about_open <- false
+            | "c" ->
+                let style = Masc_tui_emblem_screen.next_style (Masc_tui_emblem_screen.style ()) in
+                Masc_tui_emblem_screen.set_style style;
+                (* The candle on screen already changed, so a write that
+                   failed is said out loud, or a restart would bring the old
+                   one back with nothing having told the reader. *)
+                (match
+                   Masc_tui_config.set_candle ~base_path
+                     (Masc_tui_emblem_screen.string_of_style style)
+                 with
+                 | Ok () -> ()
+                 | Error message -> report_action state "error" ("Candle not saved: " ^ message))
             | _ -> ())
        | Some k when state.keeper_deletions_open ->
            (match k with

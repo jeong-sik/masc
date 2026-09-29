@@ -16431,7 +16431,7 @@ let render_about (state : state) =
         Masc_tui_emblem_screen.Keepers_read (List.length state.keepers)
   in
   surface_chrome ~overflow:Fits ~frame:Chrome_overlay state ~terminal_rows ~cols
-    ~surface_key:"about" ~title:(screen_title " MASC") ~hints:"Esc:close"
+    ~surface_key:"about" ~title:(screen_title " MASC") ~hints:"c:candle  Esc:close"
     ~body:(fun ~budget c ->
       Masc_tui_emblem_screen.body ~screen:Masc_tui_emblem_screen.About
         ~cols:(framed_inner_width cols) ~rows:budget

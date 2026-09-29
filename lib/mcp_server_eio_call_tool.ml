@@ -19,6 +19,13 @@ type tool_profile = Mcp_server_eio_types.tool_profile =
    [Mcp_server_eio_helpers.mcp_exn_level_and_tag]. *)
 let log_mcp_exn = Mcp_server_eio_helpers.log_mcp_exn
 
+(* A result's model-visible blocks when it has them. [None] is a text-only
+   result, whose message is the whole content. *)
+let content_blocks_of_result : Tool_result.result -> Llm_provider.Types.content_block list option =
+  function
+  | Tool_result.Completed { content_blocks; _ } -> content_blocks
+  | Tool_result.Deferred _ | Tool_result.Failed _ -> None
+
 let status_of_result : Tool_result.result -> string = function
   | Tool_result.Completed _ -> "ok"
   | (Tool_result.Deferred _ as result) -> Tool_result.string_of_disposition result
@@ -805,19 +812,16 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
   let envelope =
     `Assoc [
       ("kind", `String "tool_call");
-      ("summary", `String message);
+      ("summary", `String (Llm_provider.Utf8_sanitize.sanitize message));
       ("status", `String status);
       ("tool", `String name);
     ]
   in
-  let content_items =
-    [
-      `Assoc
-        [
-          ("type", `String "text");
-          ("text", `String message);
-        ]
-    ]
+  (* The projection the official-client MCP bridge answers with, so both MCP
+     servers show a client the same items for the same result. *)
+  let content_items, is_error =
+    Runtime_official_client_tool.mcp_tool_result_content ~success ~content:message
+      ~content_blocks:(content_blocks_of_result result)
   in
   let structured_content = structured_content_of_result result in
   let meta_fields =
@@ -854,7 +858,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
   let result_fields =
     [
       ("content", `List content_items);
-      ("isError", `Bool (not success));
+      ("isError", `Bool is_error);
       ("_meta", `Assoc call_meta);
     ]
     @

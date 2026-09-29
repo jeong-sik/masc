@@ -308,8 +308,8 @@ type primary_failure =
 (* An existing-but-broken primary — unreadable, unparsable, blank, or not a
    state — surfaces as [Primary_unparseable] rather than being silently
    swallowed; only a primary that does not exist is [Primary_absent]. *)
-let load_primary config : (state, primary_failure) Result.t =
-  match Workspace_utils.read_json_doc config (schedules_path config) with
+let decode_primary config path : (state, primary_failure) Result.t =
+  match Workspace_utils.read_json_doc config path with
   | Ok None -> Error Primary_absent
   | Ok (Some json) ->
     (match state_of_yojson json with
@@ -317,6 +317,27 @@ let load_primary config : (state, primary_failure) Result.t =
      | Error parse_err -> Error (Primary_unparseable parse_err))
   | Error read_err ->
     Error (Primary_unparseable (Workspace_utils.json_doc_error_to_string read_err))
+;;
+
+(* The decoded primary, kept with the file version it was read from. The
+   ledger keeps terminal schedules until their retention passes and is
+   several megabytes, and it is read far more often than it is written -- every Keeper's world
+   observation, the dashboard and the schedule tools read all of it, a runner
+   commit writes it -- so a reader of an unchanged file takes the state the
+   last miss decoded. [write_state] forgets it after it writes. A miss reads,
+   parses and decodes as one job on the domain pool when one is installed. *)
+let decoded_primary : state File_version_cache.t = File_version_cache.create ()
+
+(* The Memory backend is authoritative over its local mirror. A mirror's
+   inode/mtime cannot version backend state, nor distinguish two independent
+   backend instances using the same workspace path. *)
+let load_primary config : (state, primary_failure) Result.t =
+  let path = schedules_path config in
+  let decode () =
+    Domain_pool_ref.submit_cpu_or_inline (fun () -> decode_primary config path) in
+  match config.Workspace_utils.backend with
+  | Workspace_utils.FileSystem _ -> File_version_cache.load decoded_primary path ~decode
+  | Workspace_utils.Memory _ -> decode ()
 ;;
 
 let primary_failure_message ~path = function
@@ -427,10 +448,12 @@ let write_state config state =
       Workspace_utils.encode_json_compact (state_to_yojson state))
     |> Result.map_error (fun msg -> Persistence_failed ("ledger encoding failed: " ^ msg))
   in
-  let* () =
+  let written =
     Workspace_utils.write_encoded_json_result config (schedules_path config) content
-    |> Result.map_error (fun msg -> Persistence_failed msg)
   in
+  (* Landed or not, the file may no longer be the version that was decoded. *)
+  File_version_cache.forget decoded_primary (schedules_path config);
+  let* () = written |> Result.map_error (fun msg -> Persistence_failed msg) in
   (match Workspace_utils.write_encoded_json_result config (recovery_path config) content with
    | Ok () -> ()
    | Error msg ->

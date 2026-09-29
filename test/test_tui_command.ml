@@ -8,6 +8,7 @@ let describe = function
   | Command.Task_for_keeper { title; body } -> Printf.sprintf "task:%s|%s" title body
   | Command.Task_missing_title -> "task-missing-title"
   | Command.Help -> "help"
+  | Command.Show_load_errors -> "show-load-errors"
   | Command.About -> "about"
   | Command.Open_settings -> "open-settings"
   | Command.Open_diff -> "open-diff"
@@ -37,6 +38,13 @@ let describe = function
   | Command.Scroll_acting_pane (`By rows) -> Printf.sprintf "acting-pane-scroll:%+d" rows
   | Command.Acting_pane_scroll_unknown word -> "acting-pane-scroll-unknown:" ^ word
   | Command.Lane_addons input -> "lane-addons:" ^ input
+  | Command.Play_invites -> "play-invites"
+  | Command.Play_link -> "play-link"
+  | Command.Play_qr -> "play-qr"
+  | Command.Play_invite { name; hours } ->
+      Printf.sprintf "play-invite:%s:%d" name hours
+  | Command.Play_revoke name -> "play-revoke:" ^ name
+  | Command.Play_invalid reason -> "play-invalid:" ^ reason
   | Command.Open_metrics -> "open-metrics"
   | Command.Account_login client -> "account-login:" ^ client
   | Command.Switch_keeper name -> "keeper:" ^ name
@@ -102,6 +110,17 @@ let test_measurement_command () =
     (describe (Command.parse ("/measurement " ^ sha ^ "\nextra")));
   check string "prefix is not a command" "unknown:measure"
     (describe (Command.parse ("/measure " ^ sha)))
+
+let test_play_commands_are_explicit () =
+  check (list string) "play list, issue and revoke are distinct"
+    [ "play-invites"; "play-invites"; "play-invite:guest1:24"; "play-link"; "play-qr"
+    ; "play-revoke:guest1" ]
+    (List.map (fun line -> describe (Command.parse line))
+       [ "/play"; "/play invites"; "/play invite guest1 24"; "/play link"; "/play qr"
+       ; "/play revoke guest1" ]);
+  check bool "a missing expiry never issues an invite" true
+    (String.starts_with ~prefix:"play-invalid:"
+       (describe (Command.parse "/play invite guest1")))
 
 let test_ref_command_parses_url_and_bare_id () =
   check (list string) "a whole http(s) URL and a bare id both stage as references"
@@ -970,6 +989,8 @@ let () =
         ; test_case "plain text is a message" `Quick test_plain_text_is_a_message
         ; test_case "ref command parses url and bare id" `Quick
             test_ref_command_parses_url_and_bare_id
+        ; test_case "play commands are explicit" `Quick
+            test_play_commands_are_explicit
         ; test_case "keeper names resolve by unique prefix" `Quick
             test_keeper_names_resolve_by_unique_prefix
         ; test_case "pane commands parse by word" `Quick

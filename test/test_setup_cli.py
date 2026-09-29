@@ -382,7 +382,7 @@ sys.exit(int(open(exit_code).read()) if os.path.exists(exit_code) else 0)
                 # Refused as usage: nothing was seeded on the way out.
                 self.assertFalse((base/'.masc').exists(), 'a usage error must not seed a workspace')
 
-    def scenario(self, foreign=False, missing_key=False, stale_token=False, linked_root=False, unsupported_sandbox=False, reject_resume=False):
+    def scenario(self, foreign=False, missing_key=False, stale_token=False, linked_root=False, unsupported_sandbox=False, reject_resume=False, imp_without_image=False):
         with tempfile.TemporaryDirectory(prefix='masc-setup-') as tmp:
             base = Path(tmp)
             commands = base / 'commands'
@@ -400,6 +400,8 @@ sys.exit(int(open(exit_code).read()) if os.path.exists(exit_code) else 0)
                                       env=env, text=True, capture_output=True, timeout=30)
             initialized = run('init')
             self.assertEqual(initialized.returncode, 0, initialized.stderr)
+            # `masc init` on its own still names every file it writes.
+            self.assertIn('wrote  ', initialized.stdout)
             if linked_root:
                 volume = base / 'deployment-volume'
                 (base / '.masc').rename(volume)
@@ -435,6 +437,14 @@ sys.exit(int(open(exit_code).read()) if os.path.exists(exit_code) else 0)
                     what='the inline credentials block this test swaps')
                 runtime.write_text(text)
             manifest = config / 'keepers/imp.toml'
+            if imp_without_image:
+                # The shape an older install left behind: a microVM keeper
+                # that names no sandbox_image. init keeps an existing file.
+                manifest.write_text(_swap_fixture(
+                    manifest.read_text(),
+                    'sandbox_profile = "docker"\nsandbox_image = "base"\n',
+                    'sandbox_profile = "microvm"\nmicrovm_backend = "apple_container"\n',
+                    what='the default imp sandbox profile and image lines'))
             original = manifest.read_bytes()
             if stale_token:
                 token = base / '.masc/auth/local-admin.token'
@@ -541,7 +551,13 @@ sys.exit(int(open(exit_code).read()) if os.path.exists(exit_code) else 0)
                     server.shutdown()
                     thread.join()
             self.assertEqual(manifest.read_bytes(), original)
-            if foreign or missing_key or unsupported_sandbox:
+            if imp_without_image:
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('sandbox_image is required', result.stderr)
+                # runtime-verify above made two model requests; setup made none.
+                self.assertEqual(len(model_requests), 2)
+                self.assertEqual(posted, [])
+            elif foreign or missing_key or unsupported_sandbox:
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual(posted, [])
                 self.assertFalse((base / '.masc/auth/local-admin.token').exists())
@@ -558,6 +574,14 @@ sys.exit(int(open(exit_code).read()) if os.path.exists(exit_code) else 0)
                 self.assertTrue(all(auth == 'Bearer ' + persisted for _, auth, _ in accepted_auth))
                 self.assertEqual(accepted_auth[0][2], 'local-admin')
                 self.assertIn('Model response and harmless tool roundtrip verified.', result.stdout)
+                # setup runs init as one step: routine per-file and per-Skill
+                # lines are folded into the closing count line.
+                self.assertNotIn('skip   ', result.stdout)
+                self.assertNotIn('is up to date', result.stdout)
+                self.assertRegex(result.stdout, r'init: \d+ written, \d+ skipped, \d+ failed')
+                self.assertIn('imp is started.', result.stdout)
+                self.assertNotIn('\x1b[', result.stdout)
+                self.assertNotIn('\U0001F56F', result.stdout)
                 self.assertEqual(len(model_requests),4)
                 self.assertTrue(all(request['model']=='setup-fixture-owned-model' for request in model_requests))
                 self.assertTrue(any(message['role']=='tool' for message in model_requests[-1]['messages']))
@@ -583,6 +607,9 @@ sys.exit(int(open(exit_code).read()) if os.path.exists(exit_code) else 0)
 
     def test_missing_model_key_has_actionable_error(self):
         self.scenario(missing_key=True)
+
+    def test_imp_without_sandbox_image_is_refused_before_the_model_is_called(self):
+        self.scenario(imp_without_image=True)
 
 
 if __name__ == '__main__':

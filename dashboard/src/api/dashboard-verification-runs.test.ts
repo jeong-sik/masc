@@ -3,6 +3,8 @@
 // than it is, and that each outcome's cause survives into the one column the
 // panel shows.
 
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const getMock = vi.hoisted(() => vi.fn())
@@ -33,6 +35,7 @@ afterEach(() => {
 })
 
 function row(overrides: Record<string, unknown> = {}) {
+  const status = overrides.status ?? 'approved'
   return {
     verification_id: 'vrf-24b43c36',
     task_id: 'task-136',
@@ -44,6 +47,7 @@ function row(overrides: Record<string, unknown> = {}) {
     elapsed_s: 2.5,
     tools: [],
     evaluator_runtime: 'judge-runtime',
+    ...(status === 'approved' || status === 'rejected' ? { reason: '' } : {}),
     ...overrides,
   }
 }
@@ -114,35 +118,32 @@ describe('parseVerificationRunsResponse', () => {
           status: 'not_reviewed',
           gate: 'evaluator_unavailable',
           detail: 'no runtime',
-          retryable: true,
         }),
       ],
     })
     expect(onlyRun(parsed).status).toBe('not_reviewed')
     expect(onlyRun(parsed).cause).toBe('no runtime')
     expect(onlyRun(parsed).gate).toBe('evaluator_unavailable')
-    expect(onlyRun(parsed).retryable).toBe(true)
+    expect(onlyRun(parsed)).not.toHaveProperty('retryable')
   })
 
-  // The completion authority stops scheduling its own retry when the same
-  // review is known to keep failing the same way (a single-atom review whose
-  // seed message alone exceeds the target's whole budget, for example) —
-  // `retryable: false` is how an operator tells that apart from an ordinary
-  // in-flight `not_reviewed` row that will resolve itself on the next pulse.
-  it('surfaces a non-retryable not_reviewed row distinctly from a retryable one', () => {
+  it('preserves a cancelled review as a terminal outcome with its cause', () => {
     const parsed = parseVerificationRunsResponse({
       generated_at: '2026-08-05T00:00:00Z',
       count: 1,
       runs: [
         row({
-          status: 'not_reviewed',
-          gate: 'evaluator_unavailable',
-          detail: 'newest conversation atom does not fit the model input budget',
-          retryable: false,
+          status: 'review_cancelled',
+          detail: 'review fiber cancelled: owner stopped',
         }),
       ],
     })
-    expect(onlyRun(parsed).retryable).toBe(false)
+    expect(onlyRun(parsed)).toMatchObject({
+      status: 'review_cancelled',
+      cause: 'review fiber cancelled: owner stopped',
+      elapsedSeconds: 2.5,
+      tools: [],
+    })
   })
 
   it('keeps the typed infrastructure stage without inventing a verdict', () => {
@@ -203,15 +204,52 @@ describe('parseVerificationRunsResponse', () => {
     expect(onlyRun(parsed).cause).toBe('ran the suite in the sandbox: 9355/9355')
   })
 
-  // Approvals written before the reviewer channel carried a reason have no
-  // such field. They still decode, with nothing to show.
-  it('decodes an approval that states no reason', () => {
+  it('preserves the empty approval reason emitted by the registry', () => {
     const parsed = parseVerificationRunsResponse({
       generated_at: '2026-08-05T00:00:00Z',
       count: 1,
       runs: [row()],
     })
-    expect(onlyRun(parsed).cause).toBeUndefined()
+    expect(onlyRun(parsed).cause).toBe('')
+  })
+
+  it('requires the approval reason field even when its value may be empty', () => {
+    const { reason: _reason, ...missingReason } = row()
+    expect(() => parseVerificationRunsResponse({
+      generated_at: '2026-08-05T00:00:00Z', count: 1, runs: [missingReason],
+    })).toThrow('missing=[reason]')
+  })
+
+  it.each([null, 12, false])('rejects a non-string approval reason: %s', reason => {
+    expect(() => parseVerificationRunsResponse({
+      generated_at: '2026-08-05T00:00:00Z', count: 1, runs: [row({ reason })],
+    })).toThrow('runs[0].reason must be a string')
+  })
+
+  it('decodes every terminal status emitted by Verification_run_registry', () => {
+    const source = readFileSync(resolve(__dirname, '../../../lib/verification_run_registry.ml'), 'utf8')
+    const labelBody = source.match(/let outcome_label = function\n([\s\S]*?)\n;;/)?.[1]
+    expect(labelBody).toBeDefined()
+    const labels = [...(labelBody ?? '').matchAll(/->\s*"([^"]+)"/g)].map(match => match[1])
+    // These payloads follow outcome_detail_fields, not replay/storage shapes.
+    const outcomes: Record<string, Record<string, unknown>> = {
+      approved: { reason: '' },
+      rejected: { reason: 'proof did not establish completion' },
+      infrastructure_unavailable: { stage: 'review_preparation', detail: 'repository unavailable' },
+      not_reviewed: { gate: 'evaluator_unavailable', detail: 'no runtime' },
+      commit_failed: { detail: 'commit refused' },
+      raised: { detail: 'unexpected evaluator error' },
+      review_cancelled: { detail: 'review fiber cancelled: owner stopped' },
+    }
+    expect(labels.sort()).toEqual(Object.keys(outcomes).sort())
+    for (const [status, fields] of Object.entries(outcomes)) {
+      const parsed = parseVerificationRunsResponse({
+        generated_at: '2026-08-05T00:00:00Z', count: 1,
+        runs: [row({ status, ...fields })],
+      })
+      expect(onlyRun(parsed).status).toBe(status)
+      expect(onlyRun(parsed).cause).toBe(fields.reason ?? fields.detail)
+    }
   })
 
   it('rejects outcome-specific fields on the wrong constructor', () => {

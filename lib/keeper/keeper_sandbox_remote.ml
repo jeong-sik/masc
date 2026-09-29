@@ -122,8 +122,12 @@ type shared_state =
 let shared_states : (string, shared_state) Hashtbl.t = Hashtbl.create 8
 let shared_states_mu = Stdlib.Mutex.create ()
 
+let shared_state_key ~base_path ~name ~max_concurrent_sessions =
+  Printf.sprintf "%s\x00%s\x00%d" base_path name max_concurrent_sessions
+;;
+
 let shared_state ~base_path ~name ~max_concurrent_sessions =
-  let key = Printf.sprintf "%s\x00%s\x00%d" base_path name max_concurrent_sessions in
+  let key = shared_state_key ~base_path ~name ~max_concurrent_sessions in
   Stdlib.Mutex.protect shared_states_mu (fun () ->
     match Hashtbl.find_opt shared_states key with
     | Some state -> state
@@ -603,21 +607,36 @@ let run_probe t =
   outcome
 ;;
 
-let report t =
+let report_shared ~lane ~endpoint (shared : shared_state) =
   let probe =
-    match Atomic.get t.shared.probe_answer with
+    match Atomic.get shared.probe_answer with
     | Some { major; capabilities; release; observed_at } ->
       Probe_answered { major; capabilities; release; observed_at }
     | None ->
-      (match Atomic.get t.shared.last_probe_failure with
+      (match Atomic.get shared.last_probe_failure with
        | Some (at, detail) -> Probe_failed { at; detail }
        | None -> Probe_not_asked)
   in
-  { lane = lane_prefix t.transport
-  ; endpoint = t.name
-  ; probe
-  ; last_dispatch = Atomic.get t.shared.last_dispatch
-  }
+  { lane; endpoint; probe; last_dispatch = Atomic.get shared.last_dispatch }
+;;
+
+let report t =
+  report_shared ~lane:(lane_prefix t.transport) ~endpoint:t.name t.shared
+;;
+
+let report_openssh ~base_path ~(endpoint : Exec_ssh_endpoint.t) =
+  let key =
+    shared_state_key ~base_path ~name:endpoint.name
+      ~max_concurrent_sessions:endpoint.max_concurrent_sessions
+  in
+  let shared =
+    Stdlib.Mutex.protect shared_states_mu (fun () -> Hashtbl.find_opt shared_states key)
+  in
+  match shared with
+  | Some shared -> report_shared ~lane:"remote_ssh" ~endpoint:endpoint.name shared
+  | None ->
+    { lane = "remote_ssh"; endpoint = endpoint.name
+    ; probe = Probe_not_asked; last_dispatch = None }
 ;;
 
 (* The protocol major this endpoint's shim speaks, asked once per endpoint

@@ -61,6 +61,20 @@ val save : base_path:string -> t -> (unit, string) result
     a failure after it can leave the new one in place, so an error does not
     say which ledger the next [load] reads. Cancellation propagates. *)
 
+type observation =
+  | Missing
+  | Unavailable of string
+  | Available of
+      { ledger_sha256 : string
+      ; claim_count : int
+      ; conflict_count : int
+      ; classified_count : int
+      }
+
+val observe : base_path:string -> observation
+(** Current durable ledger only. Old proposal files and publication descriptors
+    never count as an available ledger. A corrupt ledger is unavailable. *)
+
 (** A fact the stores hold that the ledger has no disposition for. *)
 type pending_fact =
   { fact : fact_ref
@@ -69,6 +83,8 @@ type pending_fact =
 
 type reconciliation =
   { ledger : t  (** the input ledger without the [vanished] facts *)
+  ; current_facts : pending_fact list
+        (** All readable current facts, in discovery and store order. *)
   ; new_facts : pending_fact list
         (** In the given Keeper order, ordinary store first, each store in
             its own row order. *)

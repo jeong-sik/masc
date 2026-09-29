@@ -420,7 +420,7 @@ open Alcotest
    its 128,595 base was not re-measured after #39454 trimmed four board
    descriptions (about 67 to 98 bytes by replay), so the surface sits that
    far under this ceiling rather than exactly at it. *)
-let ceiling_bytes = 128_988
+let ceiling_bytes = 129_200
 
 
 let schema_json (schema : Masc_domain.tool_schema) =
@@ -499,6 +499,7 @@ let all_surface_golden_names =
   ; "keeper_ide_annotate"
   ; "keeper_lane_status"
   ; "keeper_library_read"
+  ; "keeper_portrait_read"
   ; "keeper_library_search"
   ; "keeper_workspace_memory_read"
   ; "keeper_memory_search"

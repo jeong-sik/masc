@@ -1880,6 +1880,7 @@ let build_prompt_internal
                match row.Keeper_sandbox_control.row_freshness with
                | Keeper_sandbox_control.Freshness_unavailable _ -> false
                | Keeper_sandbox_control.Current _
+               | Keeper_sandbox_control.Stale_ref _
                | Keeper_sandbox_control.Ahead _
                | Keeper_sandbox_control.Behind _
                | Keeper_sandbox_control.Diverged _ -> true)
@@ -1890,8 +1891,9 @@ let build_prompt_internal
            | Keeper_sandbox_control.Diverged _ -> 0
            | Keeper_sandbox_control.Behind _ -> 1
            | Keeper_sandbox_control.Ahead _ -> 2
-           | Keeper_sandbox_control.Current _ -> 3
-           | Keeper_sandbox_control.Freshness_unavailable _ -> 4
+           | Keeper_sandbox_control.Stale_ref _ -> 3
+           | Keeper_sandbox_control.Current _ -> 4
+           | Keeper_sandbox_control.Freshness_unavailable _ -> 5
          in
          let measured =
            List.stable_sort
@@ -1914,10 +1916,26 @@ let build_prompt_internal
            in
            let standing =
              match row.Keeper_sandbox_control.row_freshness with
-             | Keeper_sandbox_control.Current { target_ref; _ } ->
+             | Keeper_sandbox_control.Current { target_ref; age_s; _ } ->
                render_fragment
                  Prompt_names.keeper_context_checkouts_standing_current
-                 [ "target", target_ref ]
+                 [ "target", target_ref; "age", string_of_int age_s ]
+             | Keeper_sandbox_control.Stale_ref { target_ref; last_observed_at_unix; age_s; _ } ->
+               let age = match age_s with
+                 | Some seconds -> Printf.sprintf "%ds ago" seconds
+                 | None -> "age unknown" in
+               let as_of =
+                 match last_observed_at_unix with
+                 | None -> "unknown time"
+                 | Some timestamp ->
+                   let tm = Unix.gmtime (float_of_int timestamp) in
+                   Printf.sprintf "%04d-%02d-%02d %02d:%02d:%02d UTC"
+                     (tm.Unix.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
+                     tm.tm_hour tm.tm_min tm.tm_sec
+               in
+               render_fragment
+                 Prompt_names.keeper_context_checkouts_standing_stale_ref
+                 [ "target", target_ref; "as_of", as_of; "age", age ]
              | Keeper_sandbox_control.Ahead { target_ref; ahead; _ } ->
                render_fragment
                  Prompt_names.keeper_context_checkouts_standing_ahead

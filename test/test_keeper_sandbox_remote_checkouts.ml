@@ -18,6 +18,7 @@ let test_parse_probe_json_complete () =
           "changed_files": 0,
           "target_ref": "origin/main",
           "upstream_head": "abcdef123456",
+          "target_ref_last_observed_at_unix": 1600000000,
           "ahead": 0,
           "behind": 0
         },
@@ -33,6 +34,7 @@ let test_parse_probe_json_complete () =
           "changed_files": 3,
           "target_ref": "origin/main",
           "upstream_head": "abcdef123456",
+          "target_ref_last_observed_at_unix": 1600000001,
           "ahead": 2,
           "behind": 1
         }
@@ -64,6 +66,8 @@ let test_parse_probe_json_complete () =
        check (result (pair bool int) string) "c1 dirty" (Ok (false, 0)) c1.dirty;
        check (option string) "c1 target_ref" (Some "origin/main") c1.target_ref;
        check (option string) "c1 upstream_head" (Some "abcdef123456") c1.upstream_head;
+       check (option int) "c1 last moved" (Some 1600000000)
+         c1.target_ref_last_observed_at_unix;
        check (option int) "c1 ahead" (Some 0) c1.ahead;
        check (option int) "c1 behind" (Some 0) c1.behind;
 
@@ -73,6 +77,8 @@ let test_parse_probe_json_complete () =
         | C.Git_pointer_file -> ()
         | C.Git_directory -> fail "expected Git_pointer_file");
        check (result (pair bool int) string) "c2 dirty" (Ok (true, 3)) c2.dirty;
+       check (option int) "c2 last moved" (Some 1600000001)
+         c2.target_ref_last_observed_at_unix;
        check (option int) "c2 ahead" (Some 2) c2.ahead;
        check (option int) "c2 behind" (Some 1) c2.behind
      | Ok (C.Partial _) -> fail "expected complete discovery")
@@ -254,12 +260,21 @@ let test_probe_tells_a_missing_origin_from_a_configured_one () =
            (Filename.quote with_origin));
       run
         (Printf.sprintf
+           "git -C %s -c user.name=Test -c user.email=test@example.com commit -q --allow-empty -m base"
+           (Filename.quote with_origin));
+      run
+        (Printf.sprintf
+           "git -C %s update-ref refs/remotes/origin/main HEAD"
+           (Filename.quote with_origin));
+      run
+        (Printf.sprintf
            "sh -c %s"
            (Filename.quote
               (Printf.sprintf
-                 "cd %s && python3 -c %s '[]' 32 8192 > %s"
+                 "cd %s && python3 -c %s %s 32 8192 > %s"
                  (Filename.quote tree)
                  (Filename.quote R.For_testing.probe_script)
+                 (Filename.quote {|[{"url":"https://github.com/jeong-sik/masc.git","default_branch":"main"}]|})
                  (Filename.quote out))));
       let raw = In_channel.with_open_bin out In_channel.input_all in
       match R.parse_probe_json ~root:tree raw with
@@ -276,7 +291,14 @@ let test_probe_tells_a_missing_origin_from_a_configured_one () =
           (list (pair string string))
           "origins"
           [ "no-origin", "not configured"; "with-origin", "url https://github.com/jeong-sik/masc.git" ]
-          (List.sort compare (List.map origin_of inspections)))
+          (List.sort compare (List.map origin_of inspections));
+        let with_origin =
+          List.find
+            (fun (ic : R.inspected_checkout) -> ic.checkout.relative_path = "with-origin")
+            inspections in
+        (match with_origin.target_ref_last_observed_at_unix with
+         | Some timestamp -> check bool "reflog timestamp read" true (timestamp > 0)
+         | None -> fail "target ref timestamp missing"))
 ;;
 
 let test_the_wrong_top_level_shapes_are_errors () =

@@ -13,13 +13,14 @@ type inspected_checkout =
   ; dirty : (bool * int, string) result
   ; target_ref : string option
   ; upstream_head : string option
+  ; target_ref_last_observed_at_unix : int option
   ; ahead : int option
   ; behind : int option
   }
 
 let probe_script =
   {|\
-import os, sys, json, subprocess
+import os, sys, json, subprocess, time
 
 # The three arguments are built by the OCaml side; a malformed one is its
 # defect and ends the probe with a traceback the caller reports.
@@ -86,6 +87,7 @@ def inspect_git(path):
     ahead = None
     behind = None
     target_ref = None
+    target_ref_last_observed_at_unix = None
 
     matched_repo = None
     if origin:
@@ -102,6 +104,39 @@ def inspect_git(path):
                 if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
                     behind = int(parts[0])
                     ahead = int(parts[1])
+            if behind == 0 and ahead == 0:
+                reflog = git('reflog', 'show', '-1', '--date=unix', '--format=%gd', target_ref)
+                if reflog and '@{' in reflog and reflog.endswith('}'):
+                    moved = reflog.rsplit('@{', 1)[1][:-1]
+                    if moved.isdigit():
+                        target_ref_last_observed_at_unix = int(moved)
+                if target_ref_last_observed_at_unix is None or \
+                   time.time() - target_ref_last_observed_at_unix > 900:
+                    common = git('rev-parse', '--git-common-dir')
+                    local_fetch = git('rev-parse', '--git-path', 'FETCH_HEAD')
+                    candidates = []
+                    if common:
+                        candidates.append(os.path.join(common, 'FETCH_HEAD'))
+                    if local_fetch:
+                        candidates.append(local_fetch)
+                    prefix = "branch '" + def_branch + "' of "
+                    for candidate in candidates:
+                        fetch_path = candidate if os.path.isabs(candidate) else os.path.join(path, candidate)
+                        try:
+                            with open(fetch_path, encoding='utf-8') as source:
+                                for line in source:
+                                    fields = line.rstrip('\n').split('\t')
+                                    if len(fields) != 3 or fields[0] != upstream_head:
+                                        continue
+                                    description = fields[2]
+                                    if description.startswith(prefix) and \
+                                       canon_url(description[len(prefix):]) == canon_url(origin):
+                                        observed = int(os.stat(fetch_path).st_mtime)
+                                        target_ref_last_observed_at_unix = max(
+                                            target_ref_last_observed_at_unix or 0, observed)
+                                        break
+                        except OSError:
+                            pass
 
     return {
         'origin': origin,
@@ -112,6 +147,7 @@ def inspect_git(path):
         'changed_files': changed_files,
         'target_ref': target_ref,
         'upstream_head': upstream_head,
+        'target_ref_last_observed_at_unix': target_ref_last_observed_at_unix,
         'ahead': ahead,
         'behind': behind
     }
@@ -296,6 +332,8 @@ let parse_checkout ~root json =
   in
   let* target_ref = optional_string_field "target_ref" fields in
   let* upstream_head = optional_string_field "upstream_head" fields in
+  let* target_ref_last_observed_at_unix =
+    optional_int_field "target_ref_last_observed_at_unix" fields in
   let* ahead = optional_int_field "ahead" fields in
   let* behind = optional_int_field "behind" fields in
   Ok
@@ -306,6 +344,7 @@ let parse_checkout ~root json =
     ; dirty
     ; target_ref
     ; upstream_head
+    ; target_ref_last_observed_at_unix
     ; ahead
     ; behind
     }

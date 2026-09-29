@@ -26,6 +26,7 @@ type inspected_checkout =
   ; dirty : (bool * int, string) result
   ; target_ref : string option
   ; upstream_head : string option
+  ; target_ref_last_observed_at_unix : int option
   ; ahead : int option
   ; behind : int option
   }

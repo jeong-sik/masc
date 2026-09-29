@@ -47,8 +47,8 @@ def run(binary):
     fixtures["/api/v1/keepers/beta/memory-journal?limit=20"] = (200, {"keeper": "beta", "entries": []})
 
     def interact(process, fd, _slave, output, _base):
-        h.resize_and_wait(process, fd, output, rows=48, columns=50, needle=b"MASC Overview")
-        h.send_and_wait(process, fd, output, b"2", b"alpha")
+        h.resize_and_wait(process, fd, output, rows=48, columns=50, needle=b"MASC Dashboard")
+        h.send_and_wait(process, fd, output, b"3", b"alpha")
         h.palette_go(process, fd, output, b"keeper alpha", b"History load failed")
         h.wait_for_output(process, fd, output, b"Memory load failed", start=0, timeout=3.0)
         rows, plain = snapshot(process, fd, output)

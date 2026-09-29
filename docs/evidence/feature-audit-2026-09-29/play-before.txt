@@ -1,0 +1,214 @@
+source_ref: 2e6c4e51f0
+✖ a failed seat read retries without a new move and restores playable controls (4.844875ms)
+✖ a frame rejected for wrong byte count is fetched again before acknowledging its mark (2.501ms)
+✖ a frame rejected for invalid base64 is fetched again before acknowledging its mark (0.924875ms)
+✖ a failed seat request after an input retries while the activity feed is unchanged (1.872458ms)
+✖ eject clears the last picture and the game pad (0.984333ms)
+✖ no_machine hides the old pad while seat is unavailable and a loaded game restores controls (0.827084ms)
+✖ a malformed frame does not prevent new activity from refreshing the controller (0.758583ms)
+✖ choosing a handoff discovers an invite added while the machine stays idle (0.7275ms)
+✔ revoked access keeps controls disabled and stops sending moves (0.735959ms)
+✖ an older seat response cannot overwrite a newer poll result (0.760292ms)
+✖ reopening a focused handoff selector refreshes new invites once per opening (0.66475ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 1
+ℹ fail 10
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 102.041875
+
+✖ failing tests:
+
+test at ../../../../../../../../private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-play-before-3uw18zl7/test/test_play_page_client.cjs:91:1
+✖ a failed seat read retries without a new move and restores playable controls (4.844875ms)
+  AssertionError [ERR_ASSERTION]: retry the same activity after the seat recovers
+
+  2 !== 3
+
+      at TestContext.<anonymous> (/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-play-before-3uw18zl7/test/test_play_page_client.cjs:103:10)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 2,
+    expected: 3,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../../../../../private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-play-before-3uw18zl7/test/test_play_page_client.cjs:119:3
+✖ a frame rejected for wrong byte count is fetched again before acknowledging its mark (2.501ms)
+  AssertionError [ERR_ASSERTION]: same frame is eventually drawn
+  + actual - expected
+
+  + []
+  - [
+  -   [
+  -     255,
+  -     0,
+  -     0,
+  -     255
+  -   ]
+  - ]
+
+      at TestContext.<anonymous> (/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-play-before-3uw18zl7/test/test_play_page_client.cjs:130:12)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: [],
+    expected: [ [ 255, 0, 0, 255 ] ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../../../../../private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-play-before-3uw18zl7/test/test_play_page_client.cjs:119:3
+✖ a frame rejected for invalid base64 is fetched again before acknowledging its mark (0.924875ms)
+  AssertionError [ERR_ASSERTION]: same frame is eventually drawn
+  + actual - expected
+
+  + []
+  - [
+  -   [
+  -     255,
+  -     0,
+  -     0,
+  -     255
+  -   ]
+  - ]
+
+      at TestContext.<anonymous> (/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-play-before-3uw18zl7/test/test_play_page_client.cjs:130:12)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: [],
+    expected: [ [ 255, 0, 0, 255 ] ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../../../../../private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-play-before-3uw18zl7/test/test_play_page_client.cjs:139:1
+✖ a failed seat request after an input retries while the activity feed is unchanged (1.872458ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /자리 정보를 읽지 못했어요/. Input:
+
+  '보내지 못했어요. 연결을 확인해 주세요.'
+
+      at TestContext.<anonymous> (/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-play-before-3uw18zl7/test/test_play_page_client.cjs:155:10)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '보내지 못했어요. 연결을 확인해 주세요.',
+    expected: /자리 정보를 읽지 못했어요/,
+    operator: 'match',
+    diff: 'simple'
+  }
+
+test at ../../../../../../../../private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-play-before-3uw18zl7/test/test_play_page_client.cjs:162:1
+✖ eject clears the last picture and the game pad (0.984333ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  0 !== 1
+
+      at TestContext.<anonymous> (/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-play-before-3uw18zl7/test/test_play_page_client.cjs:176:10)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../../../../../private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-play-before-3uw18zl7/test/test_play_page_client.cjs:183:1
+✖ no_machine hides the old pad while seat is unavailable and a loaded game restores controls (0.827084ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  0 !== 1
+
+      at TestContext.<anonymous> (/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-play-before-3uw18zl7/test/test_play_page_client.cjs:195:10)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../../../../../private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-play-before-3uw18zl7/test/test_play_page_client.cjs:210:1
+✖ a malformed frame does not prevent new activity from refreshing the controller (0.758583ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + '내 차례예요 (minsu)'
+  - 'operator 님 차례예요'
+
+      at TestContext.<anonymous> (/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-play-before-3uw18zl7/test/test_play_page_client.cjs:222:10)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '내 차례예요 (minsu)',
+    expected: 'operator 님 차례예요',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../../../../../private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-play-before-3uw18zl7/test/test_play_page_client.cjs:228:1
+✖ choosing a handoff discovers an invite added while the machine stays idle (0.7275ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  false !== true
+
+      at TestContext.<anonymous> (/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-play-before-3uw18zl7/test/test_play_page_client.cjs:246:10)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../../../../../private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-play-before-3uw18zl7/test/test_play_page_client.cjs:276:1
+✖ an older seat response cannot overwrite a newer poll result (0.760292ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  0 !== 2
+
+      at TestContext.<anonymous> (/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-play-before-3uw18zl7/test/test_play_page_client.cjs:290:10)
+      at runNextTicks (node:internal/process/task_queues:65:5)
+      at process.processImmediate (node:internal/timers:472:9)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 2,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../../../../../private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-play-before-3uw18zl7/test/test_play_page_client.cjs:302:1
+✖ reopening a focused handoff selector refreshes new invites once per opening (0.66475ms)
+  AssertionError [ERR_ASSERTION]: pointer plus focus share a read
+
+  2 !== 3
+
+      at TestContext.<anonymous> (/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-play-before-3uw18zl7/test/test_play_page_client.cjs:319:10)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 2,
+    expected: 3,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

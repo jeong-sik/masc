@@ -23,6 +23,19 @@ SOURCE_MODULES = (
 COMMENTS = 300
 
 
+def board_listing(count: int):
+    """The Board header once a list read has landed.
+
+    Enter opens the post under the cursor, so it has to wait for the list to
+    hold one. "Health: " no longer says the first read landed: the Dashboard
+    draws "Health: not observed" before any read
+    (RFC-tui-measured-operator-home keeps unknown values unknown), and a Board
+    opened then reads "(not loaded)" and Enter finds no row. The header count
+    is drawn only from a list read.
+    """
+    return h.screen_header(b"MASC Board", f" ({count})".encode())
+
+
 def run(executable: str) -> None:
     fixtures = h.overview_event_http_fixtures()
     post = h.board_selection_post("ends", "A thread with three hundred comments",
@@ -44,6 +57,7 @@ def run(executable: str) -> None:
     def interact(process, fd, _slave, output, _base):
         h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=15)
         h.palette_go(process, fd, output, b"go board", b"MASC Board")
+        h.wait_for_output(process, fd, output, board_listing(1), start=0, timeout=15)
         # The ordinary read contains only the newest twenty. This scenario
         # exercises the ends of the complete thread, requested explicitly.
         recent = h.send_and_wait(
@@ -98,6 +112,8 @@ def run_list_pane(executable: str) -> None:
     def interact(process, fd, _slave, output, _base):
         h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=15)
         h.palette_go(process, fd, output, b"go board", b"MASC Board")
+        h.wait_for_output(process, fd, output, board_listing(len(posts)), start=0,
+                          timeout=15)
         # Enter opens the first post with the detail focused.
         h.send_and_wait(process, fd, output, b"\r", b"Body of post 00")
         # The list pane beside the reading -- and Ctrl-W with it -- needs 110

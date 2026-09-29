@@ -71,9 +71,8 @@ let int_of_size n = n
    Shape units: the candle is designed in a square about 2 units wide, y
    growing downward, the wax's bottom edge at [wax_bottom]. *)
 
-(* Half the square the image shows. The tallest flame at full flicker and bob
-   (tip about -0.88) and the lowest part (a scarf's tail on the shortest,
-   widest candle, about 0.93 with the bob) both stay inside it. *)
+(* Half the default square; [frame_for] expands it when the scene needs more
+   room, including a low-hanging item or a whole pixel of clearance. *)
 let view_half = 0.95
 
 (* The candle's middle sits a touch below the square's centre. *)
@@ -144,6 +143,16 @@ let flame_core_rise = 0.12
 let flame_core_radius = 0.065
 let flame_blend = 0.06
 
+(* Horn heights and tip radii, shared by their fields and the frame bounds. *)
+let horn_base_drop = 0.04
+let nub_rise = 0.16
+let nub_tip_radius = 0.035
+let long_horn_rise = 0.30
+let one_horn_rise = 0.34
+let tall_horn_tip_radius = 0.02
+let ram_rise = 0.10
+let ram_knee_radius = 0.045
+
 (* An open eye: an oval this wide and tall, in face-scales. *)
 let eye_oval_rx = 0.062
 let eye_oval_ry = 0.095
@@ -166,6 +175,11 @@ let scarf_corner = 0.03
 let scarf_tail_drop = 0.08
 let scarf_tail_radius = 0.045
 let scarf_tail_end_radius = 0.035
+
+(* The medal's disc hangs below the neck band. Both its field and the bounds
+   used by culling and framing derive from these dimensions. *)
+let medal_drop = 0.185
+let medal_radius = 0.145
 
 (* ---- geometry, derived from the body, the items and the pose ------------- *)
 
@@ -213,7 +227,7 @@ let scarf_bottom g =
 (* A bow tie's wings and a medal's disc hang from the same band; the medal's
    disc reaches lowest. *)
 let bow_tie_bottom g = scarf_band_centre g +. 0.075
-let medal_bottom g = scarf_band_centre g +. 0.185 +. 0.145
+let medal_bottom g = scarf_band_centre g +. medal_drop +. medal_radius
 
 let neck_bottom g (e : equipment) =
   match e.neck with
@@ -258,6 +272,48 @@ let geometry_posed ~cull (b : body) (e : equipment) (p : pose) =
   { g with reach_bottom = bottom_reach g e +. neighbour_margin }
 
 let geometry b = geometry_posed ~cull:true b bare still
+
+type frame = { half : float; middle_y : float }
+
+(* The highest point over every pose. A smooth union can extend the two
+   flame fields by at most [flame_blend / 4]. Horn tips (the ram's knee) are
+   their highest caps. These tops also cover the drips and head items. *)
+let top_reach (b : body) g =
+  let fs = b.flame_size *. (1.0 +. flicker_growth) in
+  let flame =
+    Float.min
+      (g.top -. ((flame_base_rise +. flame_body_radius) *. fs))
+      (g.top -. ((flame_base_rise +. flame_tip_rise) *. fs) -. flame_tip_radius)
+    -. (flame_blend /. 4.0)
+  in
+  let horn =
+    match b.horns with
+    | Nub -> g.top +. horn_base_drop -. (nub_rise *. b.horn_length) -. nub_tip_radius
+    | Long -> g.top +. horn_base_drop -. (long_horn_rise *. b.horn_length) -. tall_horn_tip_radius
+    | One -> g.top +. horn_base_drop -. (one_horn_rise *. b.horn_length) -. tall_horn_tip_radius
+    | Ram -> g.top -. (ram_rise *. b.horn_length) -. ram_knee_radius
+  in
+  Float.min flame horn -. bob_reach
+
+(* Fit the whole scene, including the backdrop and full motion, inside the
+   interior [n - 2] rows and columns. The same scale on both axes preserves
+   proportions. Keep the default centre wherever its margins already fit;
+   otherwise move it into the interval that leaves a pixel at both ends.
+   Current flicker/bob do not affect these bounds, so the frame stays still. *)
+let frame_for b g e n =
+  let backdrop_r = backdrop_share *. view_half in
+  let top = Float.min (view_centre_y -. backdrop_r) (top_reach b g) in
+  let bottom = Float.max (view_centre_y +. backdrop_r) (bottom_reach g e +. bob_reach) in
+  let half_width = Float.max backdrop_r (Float.max (-.g.reach_left) g.reach_right) in
+  let extent = Float.max (2.0 *. half_width) (bottom -. top) in
+  let span = Float.max (2.0 *. view_half) (extent *. float_of_int n /. float_of_int (n - 2)) in
+  let half = span /. 2.0 in
+  let margin = span /. float_of_int n in
+  let middle_y =
+    Float.max (bottom +. margin -. half)
+      (Float.min (top -. margin +. half) view_centre_y)
+  in
+  { half; middle_y }
 
 (* ---- 2D distance fields (negative inside) -------------------------------- *)
 
@@ -341,18 +397,19 @@ let horns (b : body) g x y =
   if g.cull && y > g.top +. horn_reach_below then Float.infinity
   else
   let l = b.horn_length in
-  let bx = g.w *. 0.68 and by = g.top +. 0.04 in
+  let bx = g.w *. 0.68 and by = g.top +. horn_base_drop in
   match b.horns with
-  | Nub -> pair x y bx by (bx +. 0.04) (by -. (0.16 *. l)) 0.065 0.035
-  | Long -> pair x y bx by (bx +. 0.10) (by -. (0.30 *. l)) 0.065 0.02
-  | One -> taper x y (-.bx) by (-.bx -. 0.08) (by -. (0.34 *. l)) 0.075 0.02
+  | Nub -> pair x y bx by (bx +. 0.04) (by -. (nub_rise *. l)) 0.065 nub_tip_radius
+  | Long -> pair x y bx by (bx +. 0.10) (by -. (long_horn_rise *. l)) 0.065 tall_horn_tip_radius
+  | One -> taper x y (-.bx) by (-.bx -. 0.08) (by -. (one_horn_rise *. l)) 0.075 tall_horn_tip_radius
   | Ram ->
       (* a hook that leaves the top corner, curls outward and comes back down *)
       let hook m =
         let ax = m *. (g.w -. 0.04) and ay = g.top +. 0.03 in
-        let kx = m *. (g.w +. (0.09 *. l)) and ky = g.top -. (0.10 *. l) in
+        let kx = m *. (g.w +. (0.09 *. l)) and ky = g.top -. (ram_rise *. l) in
         let ex = m *. (g.w +. (0.13 *. l)) and ey = g.top +. 0.06 in
-        Float.min (taper x y ax ay kx ky 0.06 0.045) (taper x y kx ky ex ey 0.045 0.02)
+        Float.min (taper x y ax ay kx ky 0.06 ram_knee_radius)
+          (taper x y kx ky ex ey ram_knee_radius 0.02)
       in
       Float.min (hook (-1.0)) (hook 1.0)
 
@@ -408,7 +465,7 @@ let bow_tie_field g x y =
 
 let medal_disc_field g x y =
   let c = neck_band_centre g in
-  circle x y 0.0 (c +. 0.185) 0.145
+  circle x y 0.0 (c +. medal_drop) medal_radius
 
 let medal_ribbon_field g x y =
   let c = neck_band_centre g in
@@ -1055,14 +1112,15 @@ let shade c =
   let f v k = int_of_float (Float.round (float_of_int v *. k)) in
   rgb (f c.red kr) (f c.green kg) (f c.blue kb)
 
-let render_with ~cull (b : body) (e : equipment) (p : pose) (n : size) =
+let render_with ~cull ~frame_of (b : body) (e : equipment) (p : pose) (n : size) =
   let g = geometry_posed ~cull b e p in
+  let frame = frame_for b g frame_of n in
   let supersample = supersample_for n in
   let line_reach = line_reach_for supersample in
   let grid = n * supersample in
-  let cell = 2.0 *. view_half /. float_of_int grid in
-  let x_of i = -.view_half +. ((float_of_int i +. 0.5) *. cell) in
-  let y_of j = view_centre_y -. view_half +. ((float_of_int j +. 0.5) *. cell) in
+  let cell = 2.0 *. frame.half /. float_of_int grid in
+  let x_of i = -.frame.half +. ((float_of_int i +. 0.5) *. cell) in
+  let y_of j = frame.middle_y -. frame.half +. ((float_of_int j +. 0.5) *. cell) in
   (* the candle moves with the bob; the backdrop stays *)
   let lift = p.bob *. bob_reach in
   let dish = dish_paint e in
@@ -1078,7 +1136,7 @@ let render_with ~cull (b : body) (e : equipment) (p : pose) (n : size) =
   done;
   let at i j = paints.((max 0 (min (grid - 1) j) * grid) + max 0 (min (grid - 1) i)) in
   let dist i j = distance.((max 0 (min (grid - 1) j) * grid) + max 0 (min (grid - 1) i)) in
-  let outline = outline_pixels *. 2.0 *. view_half /. float_of_int n in
+  let outline = outline_pixels *. 2.0 *. frame.half /. float_of_int n in
   let backdrop_r = backdrop_share *. view_half in
   let backdrop = backdrop_colour b in
   let ink = ink_rgb b in
@@ -1143,7 +1201,7 @@ let render_with ~cull (b : body) (e : equipment) (p : pose) (n : size) =
   done;
   { edge = n; rgba = Bytes.unsafe_to_string out }
 
-let render_posed b e p n = render_with ~cull:true b e p n
+let render_posed b e p n = render_with ~cull:true ~frame_of:e b e p n
 let render b e n = render_posed b e still n
 
 let pixel img ~x ~y =
@@ -1153,7 +1211,9 @@ let pixel img ~x ~y =
   (rgb (byte 0) (byte 1) (byte 2), byte 3)
 
 module For_testing = struct
-  let render_unculled b e p n = render_with ~cull:false b e p n
+  let render_unculled b e p n = render_with ~cull:false ~frame_of:e b e p n
+
+  let render_in_frame_of b e ~frame_of p n = render_with ~cull:true ~frame_of b e p n
 
   let pixel_of_point n (x, y) =
     let to_px v = int_of_float (Float.floor ((v +. view_half) /. (2.0 *. view_half) *. float_of_int n)) in

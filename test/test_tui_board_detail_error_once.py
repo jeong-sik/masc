@@ -20,7 +20,7 @@ def run(executable: str) -> None:
     fixtures = h.overview_event_http_fixtures()
     post = h.board_selection_post("vocab", "Failure vocabulary", "List body")
     hide_list_post = threading.Event()
-    fixtures["/api/v1/board"] = lambda: (
+    fixtures["/api/v1/board?sort_by=hot"] = lambda: (
         200,
         {"posts": [] if hide_list_post.is_set() else [post]},
     )

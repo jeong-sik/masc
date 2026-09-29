@@ -60,8 +60,10 @@ type authentication = Authenticated | Login_completed | Credential_captured
 type event = Started of string * string option | Output of string | Input_ready
   | Complete of string * authentication | Login_failed of string * string option | Login_error
 type action = Inventory | Refresh_saved of saved | Refresh_retry
+  | Select_existing of provider
+      (** Open a configured account's remaining models without logging in again. *)
   | Start of { provider : provider; existing : bool }
-      (** Log in through [provider]: a new account, or the one it holds. *)
+      (** Log in through [provider]: a new account, or explicitly again. *)
   | Input of int * Yojson.Safe.t | Cancel
   | Recover | Discover | Prepare of model | Save of model list | Close | Nothing
   | Preview_removal of { provider : provider; refused : string option }
@@ -115,6 +117,8 @@ val refresh_saved : t -> saved -> (Yojson.Safe.t, string) result -> unit
 (** Re-read the list after a save, keeping what the save published on screen. *)
 val input_response : sequence:int -> t -> (Yojson.Safe.t, string) result -> unit
 val models : t -> Yojson.Safe.t -> (unit, string) result
+val selected_account : t -> provider -> Yojson.Safe.t -> (unit, string) result
+(** Accept an existing account selection's reference before discovering its models. *)
 val prepared : t -> model -> Yojson.Safe.t -> (unit, string) result
 val receipt : t -> Yojson.Safe.t -> (bool, string) result
 val event : generation:int -> t -> event -> action

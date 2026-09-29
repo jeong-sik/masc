@@ -164,6 +164,47 @@ def scenario(binary, client, protocol, *, delayed_save=False, conflict_save=Fals
                             interact=interact, http_fixtures=fixtures, http_requests=requests)
 
 
+def reopen_existing_without_login(binary):
+    requests = []
+    fixtures = h.keeper_runtime_http_fixtures()
+    fixtures["/api/v1/keepers/alpha/chat/history"] = (200, [])
+    fixtures["/api/v1/setup/inventory"] = (200, {
+        "setup_revision": "fixture-revision", "default_runtime_selection": ["bound-runtime"],
+        "runtimes": [{"id": "bound-runtime", "provider_id": "codex", "model": "bound-model"}],
+        "account_emails": [], "integrations": [{"id": "codex", "display_name": "Codex account",
+            "protocol": "codex-app-server", "origin": "runtime_config"}]})
+
+    def select(body):
+        assert json.loads(body) == {"integration_id": "codex"}
+        return 200, {"account_ref": ACCOUNT, "account_selected": True}
+
+    def models(body):
+        assert json.loads(body) == {"integration_id": "codex", "account_ref": ACCOUNT}
+        return 200, {"models": [
+            {"id": "bound-model", "label": "Bound account model", "context": 32768, "tools": True},
+            {"id": "new-model", "label": "New account model", "context": 65536, "tools": True}]}
+
+    fixtures["/api/v1/setup/accounts/select"] = h.RequestHttpResponse(select)
+    fixtures["/api/v1/setup/accounts/login"] = (500, {"error": "login must not start"})
+    fixtures["/api/v1/setup/models"] = h.RequestHttpResponse(models)
+
+    def interact(process, fd, _slave, output, _base_path):
+        h.send_and_wait(process, fd, output, b"2", b"MASC Keepers")
+        h.select_keeper_row(process, fd, output, b"alpha")
+        h.send_and_wait(process, fd, output, b"c", "Keepers ▸ alpha ▸ chat".encode())
+        h.send_and_wait(process, fd, output, b"/login codex\r", b"MASC Account Login")
+        h.send_and_wait(process, fd, output, b"j", b"> Codex account")
+        frame = h.send_and_wait(process, fd, output, b"\r", b"New account model")
+        plain = h.unwrapped(h.screen_text(frame))
+        assert b"Bound account model" not in plain, "a bound model was offered again"
+        assert b"[x] New account model" in plain, "the remaining model was not preselected"
+        assert not any(path == LOGIN for path, _ in requests), "opening an existing account started login"
+        leave_login_and_arm_quit(process, fd, output)
+
+    h.run_terminal_scenario(binary, description="existing account opens remaining models without login",
+                            interact=interact, http_fixtures=fixtures, http_requests=requests)
+
+
 def retry_before_started(binary):
     supplied = threading.Event()
     ready = threading.Event()
@@ -242,4 +283,5 @@ if __name__ == "__main__":
     scenario(str(Path(sys.argv[1]).resolve()), "codex", "codex-app-server", conflict_save=True)
     scenario(str(Path(sys.argv[1]).resolve()), "claude", "claude-code", usage_limited_save=True)
     scenario(str(Path(sys.argv[1]).resolve()), "codex", "codex-app-server", multi_models=True)
-    print("tui account login: PASS (9 scenarios)")
+    reopen_existing_without_login(str(Path(sys.argv[1]).resolve()))
+    print("tui account login: PASS (10 scenarios)")

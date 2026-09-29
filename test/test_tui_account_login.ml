@@ -533,8 +533,11 @@ let clients_then_accounts () =
    | _ -> fail "Enter on + 새 계정 did not start a new login");
   ignore (Login.key t "j");
   (match Login.key t "\r" with
-   | Login.Start {provider; existing = true} -> check string "an account logs in as itself" "codex_one" provider.id
-   | _ -> fail "Enter on an account did not start its login");
+   | Login.Select_existing provider -> check string "Enter opens the account without login" "codex_one" provider.id
+   | _ -> fail "Enter on an account did not select its existing credential");
+  (match Login.key t "e" with
+   | Login.Start {provider; existing = true} -> check string "e still explicitly reauthenticates" "codex_one" provider.id
+   | _ -> fail "e on an account did not start its login");
   (match Login.key t "n" with
    | Login.Start {provider; existing = false} -> check string "n adds a new account from any row" "codex" provider.id
    | _ -> fail "n did not start a new login");
@@ -659,7 +662,11 @@ let already_bound_model_is_not_offered () =
     `Assoc ["id",`String "bound-runtime";"provider_id",`String "codex";"model",`String "first"]] in
   let t=Login.create "codex" in
   ok (Login.inventory t (`Assoc (("runtimes",rows)::fields)));
-  t.provider<-Some provider;
+  check bool "invalid account selection is refused" true
+    (Result.is_error (Login.selected_account t provider (`Assoc ["account_ref",`String "bad"])));
+  ok (Login.selected_account t provider (`Assoc ["account_ref",`String account]));
+  check bool "selected account is reused without a login session" true
+    (t.account_ref=Some account && t.login_id=None && t.provider=Some provider);
   ok (Login.models t (`Assoc ["models",`List [
     `Assoc ["id",`String "first";"context",`Int 32768;"tools",`Bool true];
     `Assoc ["id",`String "second";"context",`Int 32768;"tools",`Bool true]]] ));

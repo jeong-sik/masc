@@ -50,7 +50,8 @@ type t = {
 type authentication = Authenticated | Login_completed | Credential_captured
 type event = Started of string * string option | Output of string | Input_ready
   | Complete of string * authentication | Login_failed of string * string option | Login_error
-type action = Inventory | Refresh_saved of saved | Refresh_retry | Start of { provider : provider; existing : bool }
+type action = Inventory | Refresh_saved of saved | Refresh_retry | Select_existing of provider
+  | Start of { provider : provider; existing : bool }
   | Input of int * Yojson.Safe.t | Cancel
   | Recover | Discover | Prepare of model | Save of model list | Close | Nothing
   | Preview_removal of { provider : provider; refused : string option }
@@ -329,6 +330,12 @@ let models t json =
       t.notice <- "붙일 수 있는 모델을 모두 골랐습니다. Space:선택  a:전체  Enter:검증 후 저장";
       Ok ())
   | _ -> Error "이 계정의 모델 목록을 읽지 못했습니다. r로 다시 확인하세요."
+let selected_account t provider json =
+  match reference (field "account_ref" json) with
+  | None -> Error "저장된 계정의 참조를 읽지 못했습니다."
+  | Some account_ref ->
+    t.provider <- Some provider; t.account_ref <- Some account_ref; t.login_id <- None;
+    t.models <- []; t.selected_models <- []; Ok ()
 let prepared t model json = match field "model" json, field "context" json with
   | `String id, `Int n when id=model.id && n>0 ->
     t.models <- List.map (fun m -> if m.id=id then {m with context=Some n} else m) t.models;
@@ -543,7 +550,7 @@ let key t key =
        | Providers (Accounts _) ->
          (match focused_row t with
           | Some (New_account provider) -> Start {provider; existing = false}
-          | Some (Account provider) -> Start {provider; existing = true}
+          | Some (Account provider) -> Select_existing provider
           | None -> Nothing)
        | Models ->
          (match selected_models t with

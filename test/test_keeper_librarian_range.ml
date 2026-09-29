@@ -126,6 +126,47 @@ let test_reading_continues_from_the_position () =
     (select ~progress:(progress_at ~seen:2 saved 2) ~lines saved)
 ;;
 
+(* The line an official-client turn leaves: it keeps no Agent-Core checkpoint,
+   so it ends with [No_atom_history], and states the saved history it started
+   from. *)
+let official_turn ?(turn = 1) ~started_from messages : Boundaries.record =
+  { Boundaries.recorded_at = 100.0
+  ; event =
+      Boundaries.Turn_ended
+        { turn_ref = Ids.Turn_ref.make ~trace_id:trace ~absolute_turn:turn
+        ; history_at_start =
+            Boundaries.Continued_history_from
+              { start_atom = started_from
+              ; start_atom_digest = digest_of messages (started_from - 1)
+              }
+        ; position = Boundaries.No_atom_history
+        }
+  }
+;;
+
+(* An Agent-Core candidate saved atoms 2..5 and then the turn failed, or an
+   official client answered it: no line ended at atom 6. The next official
+   turn started from 6, and that start state is where the saved atoms end.
+   pr-updater's Librarian stood at 15803 from 2026-09-28 while its turns
+   started from 15839, because only end lines were cut points. *)
+let test_atoms_saved_without_an_end_line_are_read_up_to_the_next_start () =
+  let saved = history 6 in
+  let lines =
+    numbered
+      [ restarted ()
+      ; turn_ended ~fresh:true (history 2)
+      ; official_turn ~turn:2 ~started_from:6 saved
+      ; official_turn ~turn:3 ~started_from:6 saved
+      ]
+  in
+  check string "the saved atoms end where the next turn started"
+    "read [2,6) seen=3"
+    (select ~progress:(progress_at ~seen:2 saved 2) ~lines saved);
+  check string "once read, an official turn that starts where reading stands is not atom work"
+    "nothing"
+    (select ~progress:(progress_at ~seen:4 saved 6) ~lines saved)
+;;
+
 (* Row 3c. The old position seems to match: the new history has the same text
    at the same index. The restart line came after the position last moved, so
    it wins, and the new history is read from zero. *)
@@ -659,6 +700,8 @@ let () =
       , [ test_case "a new trace is read from zero" `Quick test_a_new_trace_is_read_from_zero
         ; test_case "reading continues from the position" `Quick
             test_reading_continues_from_the_position
+        ; test_case "atoms saved without an end line are read up to the next start" `Quick
+            test_atoms_saved_without_an_end_line_are_read_up_to_the_next_start
         ; test_case "a restart line wins over a position that seems to match" `Quick
             test_a_restart_line_wins_over_a_position_that_seems_to_match
         ; test_case "a restart line already passed is not used again" `Quick

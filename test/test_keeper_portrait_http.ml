@@ -401,6 +401,19 @@ beanie = 200
     check string "refusal did not mutate ledger" initial (ledger_bytes ());
     let before = get ~router (path ~size:"96" keeper) in
     check int "starting portrait" 200 before.status;
+    let snapshot_computations = ref 0 in
+    let dashboard_portrait () =
+      let snapshot = Dashboard_projection_cache.get_or_compute_snapshot_json
+        ~config ~actor:(Some "portrait-fixture") (fun _ ->
+          incr snapshot_computations;
+          `Assoc ["keepers", `Assoc ["items", `List [`Assoc ["name", `String keeper]]]]) in
+      let rows = Yojson.Safe.Util.(snapshot |> member "keepers" |> member "items" |> to_list) in
+      match rows with
+      | [row] -> require_ok Fun.id (Keeper_portrait_equipment.reading_of_json
+          Yojson.Safe.Util.(member "portrait" row))
+      | _ -> fail "dashboard snapshot lost the Keeper row" in
+    check bool "operator snapshot supplies starting portrait" true
+      (dashboard_portrait () = Keeper_portrait_equipment.Ready starting);
     ignore (require_ok Candle_shop.error_to_string
       (Candle_shop.purchase ~now:(fun () -> 1790640000.) ~base_path ~keeper:owner ~item));
     check string "purchase alone does not equip" before.body (get ~router (path ~size:"96" keeper)).body;
@@ -409,23 +422,12 @@ beanie = 200
     check string "wrong-slot refusal does not append" purchased (ledger_bytes ());
     let equipped = accepted (call id) in
     check bool "first choice changed" true Yojson.Safe.Util.(equipped |> member "changed" |> to_bool);
+    check bool "cached operator metadata exposes fresh equipped portrait" true
+      (dashboard_portrait () = Keeper_portrait_equipment.Ready expected);
+    check int "equipment refresh did not recompute metadata" 1 !snapshot_computations;
     let after = get ~router ~if_none_match:(header before "etag") (path ~size:"96" keeper) in
     check int "old tag does not conceal equipped item" 200 after.status;
     check bool "actual HTTP PNG changed" false (before.body = after.body);
-    (match Sys.getenv_opt "RUNNER_TEMP" with
-     | None -> ()
-     | Some root ->
-       let evidence = Filename.concat root "candle-equipped-portrait" in
-       Fs_compat.mkdir_p evidence;
-       Fs_compat.save_file (Filename.concat evidence "before.png") before.body;
-       Fs_compat.save_file (Filename.concat evidence "equipped.png") after.body;
-       Fs_compat.save_file (Filename.concat evidence "manifest.json")
-         (Yojson.Safe.pretty_to_string (`Assoc ["keeper",`String keeper;
-           "before",Keeper_portrait_equipment.to_json starting;
-           "equipped",Keeper_portrait_equipment.to_json expected;
-           "before_etag",`String (header before "etag");"equipped_etag",`String (header after "etag");
-           "build",Build_identity.to_yojson (Build_identity.current ());
-           "scope",`String "real HTTP router fixture after purchase and equip; not live deployment"]))) ;
     let stable = ledger_bytes () in
     let same = accepted (call id) in
     check bool "same choice is a no-op" false Yojson.Safe.Util.(same |> member "changed" |> to_bool);
@@ -453,7 +455,28 @@ beanie = 200
     Fs_compat.append_file (Candle_ledger.path ~base_path) "{partial";
     let corrupt = ledger_bytes () in
     check int "unreadable ledger refuses a cached portrait" 503 (get ~router (path ~size:"96" keeper)).status;
-    check string "portrait read does not truncate damaged ledger" corrupt (ledger_bytes ()))
+    (match dashboard_portrait () with
+     | Keeper_portrait_equipment.Unavailable _ -> ()
+     | Keeper_portrait_equipment.Ready _ -> fail "dashboard hid unreadable authority with cached gear");
+    check string "portrait read does not truncate damaged ledger" corrupt (ledger_bytes ());
+    (match Sys.getenv_opt "RUNNER_TEMP" with
+     | None -> ()
+     | Some root ->
+       (* Only CI artifact export may write under the runner home. The
+          workspace and all product mutations retain the isolation guard. *)
+       Masc_test_deps.with_process_env "MASC_TEST_ALLOW_HOME_BASE_PATH" (Some "1")
+       @@ fun () ->
+       let evidence = Filename.concat root "candle-equipped-portrait" in
+       Fs_compat.mkdir_p evidence;
+       Fs_compat.save_file (Filename.concat evidence "before.png") before.body;
+       Fs_compat.save_file (Filename.concat evidence "equipped.png") after.body;
+       Fs_compat.save_file (Filename.concat evidence "manifest.json")
+         (Yojson.Safe.pretty_to_string (`Assoc ["keeper",`String keeper;
+           "before",Keeper_portrait_equipment.to_json starting;
+           "equipped",Keeper_portrait_equipment.to_json expected;
+           "before_etag",`String (header before "etag");"equipped_etag",`String (header after "etag");
+           "build",Build_identity.to_yojson (Build_identity.current ());
+           "scope",`String "real HTTP router fixture after purchase and equip; not live deployment"]))) )
 
 let () =
   run "Keeper portrait HTTP"

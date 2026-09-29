@@ -184,7 +184,8 @@ let dashboard_briefing_http_json ~state ~sw ~clock request =
         ~timeout_sec:dashboard_briefing_timeout_s
         (compute ?actor)
   in
-  full_json
+  Dashboard_projection_cache.with_current_keeper_portraits
+    ~config:(Mcp_server.workspace_config state) full_json
 ;;
 
 let dashboard_briefing_sections_http_json ~state ~sw ~clock request =

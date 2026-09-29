@@ -1419,12 +1419,12 @@ let test_workspace_memory_discovery_is_ephemeral () =
     ~workspace_memory
     ~current_task:Masc.Keeper_world_observation_inputs.No_current_task
     ~observation:base_observation () in
-  check bool "preview renders the same published read target" true
+  check bool "preview renders the same ledger read target" true
     (Astring.String.is_infix ~affix:ledger_sha256 preview.world_state);
   let later = build_prompt ~workspace_memory ~meta:minimal_meta base_observation in
   check string "repeated observation does not accumulate history" prompt.user_message later.user_message;
   let absent = build_prompt ~workspace_memory:Masc.Workspace_memory_ledger.Missing ~meta:minimal_meta base_observation in
-  check bool "missing publication does not invent a read target" false
+  check bool "missing ledger does not invent a read target" false
     (Astring.String.is_infix ~affix:ledger_sha256 absent.world_state))
 ;;
 
@@ -1539,7 +1539,7 @@ let () =
           test_case
             "prompt: incomplete approval authority forbids resolution inference"
             `Quick test_incomplete_approval_authority_forbids_resolution_inference;
-          test_case "workspace publication is a fresh context-only read affordance" `Quick test_workspace_memory_discovery_is_ephemeral;
+          test_case "workspace ledger is a fresh context-only read affordance" `Quick test_workspace_memory_discovery_is_ephemeral;
           test_case
             "invariant: world-state frame never enters the persisted user message"
             `Quick test_world_state_never_in_persisted_user_message;

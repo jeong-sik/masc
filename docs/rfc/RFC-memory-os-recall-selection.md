@@ -11,12 +11,12 @@ related: ["#36687", "#25052", "RFC-memory-os-bounded-context-and-librarian-curat
 
 ## §1 상태와 결정 범위
 
-현재 `Keeper_memory_os_recall.render_if_enabled`는 ordinary current snapshot의 모든 fact와 재검증된 source-bound fact를 매 턴 렌더한다(`lib/keeper/keeper_memory_os_recall.ml:95`). `lib/keeper/keeper_memory_os_recall.mli:6`은 절단·순위·부분 주입을 명시적으로 금지한다. ordinary store가 비어 있거나 읽기에 실패하면 모델은 둘 다 Recall 블록을 받지 않는다(`lib/keeper/keeper_memory_os_recall.ml:47`). 읽기 실패는 운영자 로그와 계측에만 남는다. source store 읽기 실패는 ordinary recall로 내려간다(`lib/keeper/keeper_memory_os_recall.ml:65`).
+현재 `Keeper_memory_os_recall.render_if_enabled`는 ordinary current snapshot의 모든 fact와 재검증된 source-bound fact를 매 턴 렌더한다(`lib/keeper/keeper_memory_os_recall.ml:95`). `lib/keeper/keeper_memory_os_recall.mli:6`은 절단·순위·부분 주입을 명시적으로 금지한다. source snapshot이 없으면 ordinary store가 비어 있거나 읽기에 실패할 때 모델은 Recall 블록을 받지 않는다(`lib/keeper/keeper_memory_os_recall.ml:47-58`). source snapshot이 있으면 ordinary 읽기 실패를 운영자 로그·계측에 남기고 ordinary fact만 비운 뒤, 검증된 source fact와 invalidation 행으로 source-only 블록을 만들 수 있다(`lib/keeper/keeper_memory_os_recall.ml:72-129`). source store 읽기 실패는 ordinary recall로 내려간다(`lib/keeper/keeper_memory_os_recall.ml:65`).
 
 ```text
-ordinary store empty      -> recall block absent
-ordinary store read error -> recall block absent + operator warning
-source store read error   -> ordinary recall only + operator warning
+source snapshot absent + ordinary empty/read error -> recall block absent (read error: operator warning)
+source snapshot present + ordinary read error      -> source-only block if source rows exist + operator warning
+source store read error                            -> ordinary recall only + operator warning
 ```
 
 이 RFC는 이 **전송 계약**을 바꾸는 제안이다. 저장된 기억의 삭제나 Librarian의 기억 채택 결정을 바꾸지 않는다.

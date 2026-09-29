@@ -1506,10 +1506,14 @@ let restored_phase previous_settlement =
    [previous_settlement] was acknowledged with: under [Canonical_source_guard]
    a claim keeps a previous settlement only when [reconcile_context] found the
    prepared snapshot equal to the acknowledged one, and every other claim
-   plans [previous_settlement = None]. *)
+   plans [previous_settlement = None]. The carried context hashes, however,
+   describe the proposed input, which may never have reached the host. Clear
+   them rather than turn that proposal into an acknowledged delivery receipt.
+   This also covers a host that compacted before its turn failed. *)
 let frontier_restored_to previous_settlement frontier =
   match frontier.delivery with
-  | Canonical_source_guard -> { frontier with acknowledged_turn = previous_settlement }
+  | Canonical_source_guard ->
+    { frontier with acknowledged_turn = previous_settlement; held_context = [] }
   | Prepared_start_context | Held_by_vendor_session -> frontier
 ;;
 

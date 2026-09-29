@@ -656,6 +656,18 @@ if SCENARIO == "stop_before_ack":
     acknowledge()
     drain()
 acknowledge()
+if "compaction_outcome" in FIXTURE:
+    compaction = {"itemId": "compaction-1", "kind": "compaction", "turnId": turn_id,
+                  "revision": 1, "status": "completed", "trigger": "auto"}
+    if FIXTURE["compaction_outcome"] is not None:
+        compaction["outcome"] = FIXTURE["compaction_outcome"]
+    item("item/completed", compaction)
+if SCENARIO == "host_stop":
+    # The wire approval response proves the client consumed the preceding
+    # compaction before the separate MCP fiber can request a host stop.
+    ask("mcp__masc__masc_probe", {"kind": "tool", "toolName": "mcp__masc__masc_probe"})
+    call_probe()
+    drain()
 if SCENARIO == "hang":
     drain()
 if SCENARIO == "later_unstreamed":
@@ -777,7 +789,7 @@ type observed_run =
 
 (* [on_stream_event] sees each Keeper stream event as it is emitted;
    [on_transmitted] sees the transmission report after it is recorded. *)
-let run_turn_with ?goal_blocks ?(accepts_image_input = false) ?model ?account_home ?workspace_root ?hooks ?tools ?on_official_client_tool_boundary
+let run_turn_with ?goal_blocks ?(accepts_image_input = false) ?model ?account_home ?workspace_root ?hooks ?composed_context ?tools ?on_official_client_tool_boundary
     ?(admission_timeout_s = 20.) ?(idle_timeout_s = 20.)
     ?(on_stream_event = fun (_ : Agent_core.Types.sse_event) -> ())
     ?(on_transmitted = fun (_ : Keeper_official_client_host.transmitted_model_input) -> ())
@@ -799,6 +811,7 @@ let run_turn_with ?goal_blocks ?(accepts_image_input = false) ?model ?account_ho
   in
   let outcome =
     Keeper_muse_runtime.run
+      ?composed_context
       ~prompt_capacity:
         (Option.to_result ~none:Runtime_muse_prompt_capacity.No_window_declared
            (Runtime_inference.resolve_max_prompt_bytes ~runtime_id))
@@ -1752,6 +1765,83 @@ let test_hook_nudges_bind_the_session_but_carried_context_does_not () =
        |> String.split_on_char '\n' |> List.filter (fun line -> line <> "")))
 ;;
 
+let test_settled_context_blocks_are_not_replayed () =
+  with_scripted_host ~fixture:(scenario "text_only") (fun ~base_path ->
+    let tool = masc_probe_tool (ref `Null) in
+    let observed_composition = ref None in
+    let run ~memory ~clock ~model ~mode ~expect_memory ~expect_clock =
+      observed_composition := None;
+      let hooks = { Agent_core.Hooks.empty with
+        before_turn_params = Some (fun _ ->
+          let blocks =
+            [ Prompt_block_id.Memory_os_recall, memory
+            ; Prompt_block_id.Temporal_summary, clock
+            ; Prompt_block_id.Operator_note, "OPERATOR_NOTE"
+            ] in
+          let carrier = String.concat "\n\n" (List.map snd blocks) in
+          observed_composition := Some
+            { Keeper_official_client_host.carrier_sha256 =
+                Digestif.SHA256.(digest_string carrier |> to_hex)
+            ; blocks };
+          Agent_core.Hooks.AdjustParams
+            { Agent_core.Hooks.default_turn_params with extra_system_context = Some carrier }) } in
+      let composed_context () =
+        check bool "composition is read after the hook" true
+          (Option.is_some !observed_composition);
+        !observed_composition in
+      let result = run_turn_with ~hooks ~composed_context ~model ~tools:[] ~base_path ~tool () in
+      (match result.outcome.result with
+       | Ok _ -> ()
+       | Error error -> fail (Agent_core.Error.to_string error));
+      let prompt = read_text (Filename.concat base_path (mode ^ "-prompt.txt")) in
+      check bool "memory is delivered only when needed" expect_memory
+        (String_util.contains_substring prompt memory);
+      check bool "clock is delivered only when needed" expect_clock
+        (String_util.contains_substring prompt clock);
+      check bool "operator note is delivered every turn" true
+        (String_util.contains_substring prompt "OPERATOR_NOTE");
+      match Store.load ~base_path ~keeper_name with
+      | Ok (Some { phase = Settled settled; context_frontier = Some frontier; _ }) ->
+        check bool "only the settled turn acknowledges the blocks" true
+          (frontier.acknowledged_turn = Some settled);
+        check int "memory and clock held, operator note not held" 2
+          (List.length frontier.held_context)
+      | Ok _ -> fail "missing settled context frontier"
+      | Error detail -> fail detail
+    in
+    run ~memory:"MEMORY_A" ~clock:"CLOCK_1" ~model:"muse-a" ~mode:"start"
+      ~expect_memory:true ~expect_clock:true;
+    run ~memory:"MEMORY_A" ~clock:"CLOCK_2" ~model:"muse-a" ~mode:"resume"
+      ~expect_memory:false ~expect_clock:true;
+    run ~memory:"MEMORY_B" ~clock:"CLOCK_2" ~model:"muse-a" ~mode:"resume"
+      ~expect_memory:true ~expect_clock:false;
+    run ~memory:"MEMORY_B" ~clock:"CLOCK_2" ~model:"muse-a" ~mode:"resume"
+      ~expect_memory:false ~expect_clock:false;
+    run ~memory:"MEMORY_B" ~clock:"CLOCK_2" ~model:"muse-b" ~mode:"start"
+      ~expect_memory:true ~expect_clock:true;
+    check (list string) "fresh model never inherits the previous session's held blocks"
+      [ "start"; "resume"; "resume"; "resume"; "start" ]
+      (read_text (Filename.concat base_path "sessions.log")
+       |> String.split_on_char '\n' |> List.filter (fun line -> line <> "")))
+;;
+
+let test_unchanged_whole_context_is_not_replayed () =
+  with_scripted_host ~fixture:(scenario "text_only") (fun ~base_path ->
+    let tool = masc_probe_tool (ref `Null) in
+    let hooks = { Agent_core.Hooks.empty with
+      before_turn_params = Some (fun _ -> Agent_core.Hooks.AdjustParams
+        { Agent_core.Hooks.default_turn_params with extra_system_context = Some "WHOLE_CONTEXT" }) } in
+    List.iter (fun () ->
+      match (run_turn_with ~hooks ~tools:[] ~base_path ~tool ()).outcome.result with
+      | Ok _ -> ()
+      | Error error -> fail (Agent_core.Error.to_string error)) [ (); () ];
+    check bool "start sends the whole carrier" true
+      (String_util.contains_substring
+         (read_text (Filename.concat base_path "start-prompt.txt")) "WHOLE_CONTEXT");
+    check string "unchanged carrier leaves only the current goal"
+      "Call masc_probe once" (read_text (Filename.concat base_path "resume-prompt.txt")))
+;;
+
 let test_text_only_session_does_not_require_session_mcp () =
   with_scripted_host ~fixture:(scenario "text_only") (fun ~base_path ->
     let tool = masc_probe_tool (ref `Null) in
@@ -1764,6 +1854,93 @@ let test_text_only_session_does_not_require_session_mcp () =
       ["start"; "resume"]
       (read_text (Filename.concat base_path "sessions.log")
        |> String.split_on_char '\n' |> List.filter (fun line -> line <> "")))
+;;
+
+let carried_context_hooks text =
+  { Agent_core.Hooks.empty with before_turn_params = Some (fun _ ->
+      Agent_core.Hooks.AdjustParams
+        { Agent_core.Hooks.default_turn_params with extra_system_context = Some text }) }
+;;
+
+let test_failed_context_proposal_is_sent_on_retry () =
+  List.iter (fun failure -> with_scripted_host (fun ~base_path ->
+    let tool = masc_probe_tool (ref `Null) in
+    let run text = run_turn_with ~hooks:(carried_context_hooks text) ~base_path ~tool () in
+    (match (run "DELIVERED_CONTEXT_A").outcome.result with
+     | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
+    let failed = match failure with
+      | `Bridge -> with_refusing_listener ~attempts:(ref 0) (fun () -> run "PROPOSED_CONTEXT_B")
+      | `Capability ->
+        write_fixture ~base_path (scenario "deny_capability");
+        run "PROPOSED_CONTEXT_B"
+      | `Recovery ->
+        write_fixture ~base_path (scenario "exit_mid_turn");
+        run "PROPOSED_CONTEXT_B"
+    in
+    check bool "attempt failed" true (Result.is_error failed.outcome.result);
+    (match failure with
+     | `Bridge | `Capability ->
+       check int "failed proposal was not dispatched" 0 (List.length failed.transmitted)
+     | `Recovery ->
+       let interrupted = Store.load ~base_path ~keeper_name |> Result.get_ok |> Option.get in
+       let recovery_id = match interrupted.phase with
+         | Store.Recovery_required { recovery_id; _ } -> recovery_id
+         | _ -> fail "missing interrupted-turn recovery" in
+       ignore (Store.resolve_recovery ~base_path ~keeper_name ~expected:interrupted
+         ~recovery_id ~resolution:Store.Retry_previous ~resolved_by:"fixture-operator"
+         ~resolved_at:(Time_compat.now ()) |> Result.get_ok));
+    write_fixture ~base_path [];
+    (match (run "PROPOSED_CONTEXT_B").outcome.result with
+     | Ok result -> check (option bool) "retry keeps the previous conversation" (Some true) result.session_resumed
+     | Error error -> fail (Agent_core.Error.to_string error));
+    check bool "proposal is delivered after failure rather than suppressed" true
+      (String_util.contains_substring
+         (read_text (Filename.concat base_path "resume-prompt.txt")) "PROPOSED_CONTEXT_B")))
+    [ `Bridge; `Capability; `Recovery ]
+;;
+
+let test_compacted_context_is_sent_on_resume () =
+  List.iter (fun (terminal, outcome, expect_resend) -> with_scripted_host (fun ~base_path ->
+    let tool = masc_probe_tool (ref `Null) in
+    let hooks = carried_context_hooks "COMPACTION_CONTEXT" in
+    let run ?on_official_client_tool_boundary () =
+      run_turn_with ~hooks ?on_official_client_tool_boundary ~base_path ~tool () in
+    (match (run ()).outcome.result with
+     | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
+    write_fixture ~base_path (scenario terminal @ [ "compaction_outcome", outcome ]);
+    let compacting = run
+      ~on_official_client_tool_boundary:(fun () ->
+        if terminal = "host_stop" then
+          Ok (Some (Keeper_official_client_host.Repeated_tool_call
+            { tool_name = "masc_probe"; repeated_count = 3 }))
+        else Ok None) () in
+    (match terminal, compacting.outcome.result with
+     | "turn_failed", Error _ -> ()
+     | "host_stop", Ok { Runtime_agent.stop_reason = Yielded_after_repeated_tool_call _; _ } -> ()
+     | "complete", Ok _ -> ()
+     | _, Error error -> fail (Agent_core.Error.to_string error)
+     | _, Ok _ -> fail "unexpected compaction turn result");
+    check bool "context was held before compaction" false
+      (String_util.contains_substring
+         (read_text (Filename.concat base_path "resume-prompt.txt")) "COMPACTION_CONTEXT");
+    if terminal = "host_stop" then
+      write_file ~mode:0o600 (Filename.concat base_path "host-turn-count.txt") "2";
+    write_fixture ~base_path [];
+    (match (run ()).outcome.result with
+     | Ok result -> check (option bool) "compacted session resumes" (Some true) result.session_resumed
+     | Error error -> fail (Agent_core.Error.to_string error));
+    check bool "compaction determines whether unchanged context is resent" expect_resend
+      (String_util.contains_substring
+         (read_text (Filename.concat base_path "resume-prompt.txt")) "COMPACTION_CONTEXT")))
+    [ "complete", `String "compacted", true
+    ; "host_stop", `String "compacted", true
+    ; "turn_failed", `String "compacted", true
+    ; "complete", `Null, true
+    ; "complete", `String "future-outcome", true
+    ; "complete", `String "noop", false
+    ; "complete", `String "failed", false
+    ; "complete", `String "cancelled", false
+    ]
 ;;
 
 let test_hook_tool_surface_controls_session_binding () =
@@ -2255,6 +2432,10 @@ let () =
       , [ test_case "account switch starts fresh" `Quick test_account_selection_starts_a_fresh_vendor_session
         ; test_case "source relogin starts fresh, refresh survives" `Quick test_source_relogin_starts_fresh_and_preserves_vendor_refresh
         ; test_case "hook nudge identity and carried context" `Quick test_hook_nudges_bind_the_session_but_carried_context_does_not
+        ; test_case "settled context blocks are not replayed" `Quick test_settled_context_blocks_are_not_replayed
+        ; test_case "unchanged whole context is not replayed" `Quick test_unchanged_whole_context_is_not_replayed
+        ; test_case "failed context proposal is delivered on retry" `Quick test_failed_context_proposal_is_sent_on_retry
+        ; test_case "compacted context is delivered on resume" `Quick test_compacted_context_is_sent_on_resume
         ; test_case "effective system override starts fresh" `Quick test_effective_system_override_starts_fresh
         ; test_case "missing selected auth requires sign-in before spawn" `Quick test_missing_selected_account_auth_requires_sign_in
         ; test_case "invalid goal media refuses before claim and spawn" `Quick test_invalid_goal_media_never_claims_or_spawns

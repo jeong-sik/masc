@@ -38,6 +38,7 @@ type attempt_outcome =
 
 val run :
   ?official_task_reference:Keeper_official_task_reference.t ->
+  ?composed_context:(unit -> Keeper_official_client_host.composed_context option) ->
   accepts_image_input:bool ->
   ?required_native_posture:Runtime_native_tools.posture ->
   ?official_client_continuation:Keeper_semantic_execution.official_client_checkpoint ->
@@ -102,7 +103,11 @@ val run :
     Native none is unsupported. This is not an MASC-only execution claim.
 
     Start carries canonical history; Resume reports the history held by the
-    vendor session and sends the current goal and context. [prompt_capacity]
+    vendor session and sends the current goal and changed context. Only a
+    settled, acknowledged frontier can suppress a previously delivered block.
+    [composed_context] is read after hooks and names the exact carrier's typed
+    blocks, so a changed clock does not resend unchanged memory. Operator
+    notes remain turn-local and are always sent. [prompt_capacity]
     is the runtime's {!Runtime.muse_prompt_capacity}: it bounds the prepared
     input, and an [Error] refuses the turn with its cause, because the host
     rewrites an oversized input instead of refusing it. No top-level runtime routing is

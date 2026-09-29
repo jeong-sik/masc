@@ -23,6 +23,55 @@ SOURCE_MODULES = (
 )
 
 
+def operator_menu_from_dashboard(executable: str) -> None:
+    # The link survives the short Dashboard's body cut, including an empty
+    # queue. Its key and its drawn click target reach the same surface.
+    for pending in (False, True):
+        fixtures = keyboard.overview_event_http_fixtures()
+        fixtures[keyboard.KEEPER_ASKS_PATH] = (
+            keyboard.keeper_asks_response() if pending
+            else (200, {"keeper": None, "open_count": 0, "asks": []})
+        )
+
+        def interact(process, fd, _slave, output, _base):
+            menu = b"p:Approvals / Questions"
+            for columns in (40, 80, 140):
+                frame = keyboard.resize_and_wait(
+                    process, fd, output, rows=16, columns=columns,
+                    needle=menu, controls=(keyboard.FULL_REDRAW,),
+                    final_cursor=b"\x1b[?25l",
+                )
+                visible = keyboard.screen_text(frame)
+                if menu not in visible:
+                    raise AssertionError(f"{columns}x16 hid the operator menu: {visible!r}")
+                print(f"OPERATOR_MENU_{int(pending)}_{columns}X16_B64="
+                      f"{base64.b64encode(frame).decode()}")
+            keyboard.resize_and_wait(
+                process, fd, output, rows=40, columns=80, needle=menu,
+                controls=(keyboard.FULL_REDRAW,), final_cursor=b"\x1b[?25l",
+            )
+            keyboard.send_and_wait(process, fd, output, b"p", b"MASC Approvals")
+            if pending:
+                keyboard.wait_for_output(
+                    process, fd, output, b"Questions waiting on you", start=0, timeout=10
+                )
+                keyboard.send_and_wait(process, fd, output, b"a", b"ship the cold-start")
+                keyboard.send_and_wait(process, fd, output, b"\x1b", b"MASC Approvals")
+            keyboard.send_and_wait(process, fd, output, b"1", b"MASC Dashboard")
+            keyboard.drain_until_quiet(process, fd, output)
+            rows = keyboard.screen_rows(bytes(output))
+            keyboard.press_label_on_screen(
+                process, fd, output, menu,
+                row=keyboard.screen_row_of(rows, menu), needle=b"MASC Approvals",
+            )
+            os.write(fd, b"q")
+
+        keyboard.run_terminal_scenario(
+            executable, description=f"Dashboard operator menu pending={pending}",
+            interact=interact, http_fixtures=fixtures,
+        )
+
+
 def first_use_frames(executable: str) -> None:
     fixtures = keyboard.overview_event_http_fixtures()
     status, empty = keyboard.empty_runtime_resolved_fixture()
@@ -295,6 +344,7 @@ if __name__ == "__main__":
     started = time.monotonic()
     executable = os.path.abspath(sys.argv[1])
     keyboard.run_keyboard_regression(executable, group=2)
+    operator_menu_from_dashboard(executable)
     first_use_frames(executable)
     unreadable_keeper_listing_has_no_first_use_guide(executable)
     opening_boot_frames(executable)

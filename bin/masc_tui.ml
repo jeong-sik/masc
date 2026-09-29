@@ -25631,7 +25631,7 @@ and is loaded on demand through keeper_skill.
                  state.task_detail_id <- None;
                  state.task_focus <-
                    Masc_tui_overview_tasks.focus_list state.tasks)
-        | Some ("p" | "P") when state.view = Planning ->
+        | Some ("p" | "P") when state.view = Overview || state.view = Planning ->
             goto_surface state ~mailbox:async_messages Approvals
         | Some "t" | Some "T" ->
            (* Focus Work's task list. The Goals pane owns j/k until the

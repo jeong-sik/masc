@@ -548,7 +548,7 @@ let render_overview (state : state) =
           | Page_unread | Page_failed -> "attention not observed")
     in
     let title =
-      Printf.sprintf " Needs you · %s · %s approvals (p in Work)" counted
+      Printf.sprintf " Needs you · %s · %s approvals / questions (p to open)" counted
         approval_count
     in
     let shown =
@@ -592,6 +592,10 @@ let render_overview (state : state) =
     in
     title :: List.map (fun line -> "   " ^ line) body
   in
+  let operator_menu =
+    " " ^ pressable (Press_surface Approvals)
+      (Ansi.bold ^ Theme.info () ^ "p:Approvals / Questions" ^ Ansi.reset)
+  in
   let summary =
     dashboard_goal_lines state
     @ [ "" ]
@@ -617,12 +621,12 @@ let render_overview (state : state) =
           let notice = dashboard_opening_notice_lines state in
           let guide = dashboard_first_use_lines state in
           let guide =
-            if List.length notice + 2 + List.length guide + List.length summary
+            if List.length notice + 3 + List.length guide + List.length summary
                <= budget
             then guide
             else []
           in
-          notice @ [ health; "" ] @ guide @ summary)
+          [ operator_menu ] @ notice @ [ health; "" ] @ guide @ summary)
       |> List.iter c.push)
 
 (* One task's event history, appended after the detail body so it rides the

@@ -371,7 +371,9 @@ let fusion_board_key = b Navigate "B" "Board evidence"
 
 let for_surface = function
   | Overview ->
-      [ b Navigate "m" "Usage" ~help:"account windows and Keeper usage"
+      [ b Navigate "p" "Approvals / Questions"
+          ~help:"open operator approvals and Keeper questions"
+      ; b Navigate "m" "Usage" ~help:"account windows and Keeper usage"
       ]
       @ listing_meta
   | Acting ->

@@ -1052,16 +1052,16 @@ let test_lanes_run_detail_footer_names_its_keys_alone () =
     Masc_tui_keys.footer_hints_lanes_run_detail
 
 (* Dashboard is a summary: Work owns the task list, so the footer offers no
-   task focus, no row movement and nothing to open, only the way to Usage and
-   the keys every listing shares. Work's task list draws its own row from the
+   task focus, no row movement and nothing to open, the ways to approvals, questions and Usage,
+   plus the keys every listing shares. Work's task list draws its own row from the
    table rather than from a string in the renderer. *)
 let test_dashboard_and_work_task_footers () =
   let items hints =
     String.split_on_char ' ' hints |> List.filter (fun item -> item <> "")
   in
   let dashboard = Masc_tui_keys.footer_hints Overview in
-  check str "Dashboard names Usage and the shared keys"
-    "m:Usage  r:refresh  Tab:next  q:quit" dashboard;
+  check str "Dashboard names operator decisions, Usage and the shared keys"
+    "p:Approvals / Questions  m:Usage  r:refresh  Tab:next  q:quit" dashboard;
   List.iter
     (fun item ->
       Alcotest.(check bool) ("Dashboard offers no task key " ^ item) false

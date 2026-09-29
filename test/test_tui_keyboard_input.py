@@ -8487,6 +8487,114 @@ def run_context_inspector_transport_error_regression(executable: str) -> None:
     )
 
 
+def next_request_forecast_fixture(*, with_continuity: bool) -> dict[str, object]:
+    origin: dict[str, object] = (
+        {"kind": "librarian_snapshot", "end_atom": 2698, "boundary_line": 2215}
+        if with_continuity
+        else {"kind": "ledger"}
+    )
+    return {
+        "schema": "masc.keeper.next-request-forecast.v5",
+        "keeper": "alpha",
+        "trace_id": "trace-next-request",
+        "checkpoint_messages": 5217,
+        "wake_line_bytes": 131,
+        "walk": {
+            "lane_id": "kimi_coding.kimi-for-coding",
+            "declared": ["kimi_coding.kimi-for-coding"],
+        },
+        "candidates": [
+            {
+                "runtime_id": "kimi_coding.kimi-for-coding",
+                "lane": {"agent_core": True},
+                "marks": {"high_water_tokens": 100000, "low_water_tokens": 70000},
+                "parts": {"error": "no completed turn on this runtime carried a composition in the newest 200 records"},
+                "history_atoms": 2718,
+                "carried": {
+                    "first_atom": 2698,
+                    "kept_atoms": 20,
+                    "transmitted_bytes": 237300,
+                    "preamble_bytes": None,
+                    "origin": origin,
+                    "counted_tokens": None if with_continuity else 71000,
+                },
+                "assembly": None,
+                "place": {"walks_at": 0, "declared_at": 0, "rest": {"kind": "serving"}},
+            }
+        ],
+    }
+
+
+def run_next_request_readability_regression(executable: str) -> None:
+    for with_continuity in (True, False):
+        for cols in (80, 140):
+            fixtures = context_inspector_fixtures()
+            fixtures["/api/v1/keepers/alpha/next-request"] = (
+                200,
+                next_request_forecast_fixture(with_continuity=with_continuity),
+            )
+
+            def interact(process, master_fd, _slave_fd, output, _base_path):
+                send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
+                select_keeper_row(process, master_fd, output, b"alpha")
+                send_and_wait(
+                    process, master_fd, output, b"\r",
+                    b"Keepers \xe2\x96\xb8 \x1b[1malpha",
+                )
+                send_and_wait(
+                    process, master_fd, output, b"m",
+                    b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
+                )
+                send_and_wait(
+                    process, master_fd, output, b"/context",
+                    composer_showing(b"/context"),
+                )
+                send_and_wait(process, master_fd, output, b"\r", b"HOW FAR BACK")
+                for _ in range(90):
+                    visible = screen_text(bytes(output))
+                    if (
+                        b"Config / Runtime:" in visible
+                        and b"model limit." in visible
+                        and b"History preview:" in visible
+                        and (
+                            (b"Librarian working state" in visible)
+                            if with_continuity
+                            else (b"front from this runtime's ledger" in visible)
+                        )
+                    ):
+                        break
+                    send_and_wait(process, master_fd, output, b"j", b"MASC Context")
+                else:
+                    raise AssertionError(
+                        f"Next Request meaning not visible at {cols} columns: "
+                        f"{screen_text(bytes(output))!r}"
+                    )
+                if b"100.0k / 70.0k" in visible:
+                    raise AssertionError("trim settings still look like a forecast figure")
+                print(
+                    f"NEXT_REQUEST_CAPTURE {'continuity' if with_continuity else 'ledger'} "
+                    f"{cols}x32\n{visible.decode(errors='replace')}"
+                )
+                send_and_wait(
+                    process, master_fd, output, b"\x1b",
+                    b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
+                )
+                escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
+                os.write(master_fd, b"q")
+
+            run_terminal_scenario(
+                executable,
+                description=(
+                    f"Next Request {'Librarian' if with_continuity else 'ledger'} "
+                    f"copy at {cols} columns"
+                ),
+                interact=interact,
+                terminal_cols=cols,
+                terminal_rows=32,
+                http_fixtures=fixtures,
+            )
+
+
 def context_inspector_interaction() -> Interaction:
     def interact(
         process: subprocess.Popen[bytes],

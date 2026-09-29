@@ -1004,6 +1004,10 @@ let instance_controls (instance : instance) = match instance.phase with
 let overview_hints view =
   if view.help_open then "Esc:close help"
   else match view.screen with
+  | Overview when view.presentation=Technical && view.focus=Configurations
+      && Option.is_none view.document_key ->
+      "?:help  Esc:back  j/k:installation  E:edit TOML"
+      ^ (if view.loading then "  Reading …" else "  r:refresh")
   | Overview ->
       "?:help  Esc:back  Tab:workers/installations  Enter:open  i:install  n:new  S:subs"
       ^ (if view.loading then "  Reading …" else "  r:refresh")

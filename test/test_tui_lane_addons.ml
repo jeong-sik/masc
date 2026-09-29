@@ -733,6 +733,9 @@ let mixed_installations_keep_navigation_order () =
   check bool "detail keeps the chosen installation in focus" true
     (List.exists (String.starts_with ~prefix:"Installation details · broken.toml")
       (UI.lines ~width:120 {broken with presentation=UI.Technical}));
+  check bool "detail footer names the same edit and return actions" true
+    (String.starts_with ~prefix:"?:help  Esc:back  j/k:installation  E:edit TOML"
+      (UI.overview_hints {broken with presentation=UI.Technical}));
   let stale = {view with snapshot_read_error=Some "read failed"} in
   check bool "retained counts are marked stale after a failed refresh" true
     (List.exists (fun line -> String.ends_with ~suffix:" · STALE" line)

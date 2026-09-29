@@ -16,6 +16,10 @@ type set_task_goal_error =
   | Backlog_read_failed of string
   | Unknown_task of string
   | Unknown_goal of string
+  | Task_finished of
+      { task_id : string
+      ; status : Masc_domain.task_status
+      }
   | Already_assigned of
       { task_id : string
       ; existing_goal_ids : string list
@@ -40,13 +44,17 @@ val set_task_goal :
     - [Error (Goal_lock_failed _)] — the Goal file lock was not taken; nothing
       was read.
     - [Error (Unknown_goal _)] — no goal with [goal_id] in the primary Goal store.
+    - [Error (Task_finished _)] — the task is [Done] or [Cancelled]. A link
+      carries no timestamp, so a task finished before it is linked could not
+      be told apart from work done for the goal.
     - [Error (Already_assigned _)] — the task already carries one or more
       goal links; reassignment/unlink is out of scope (RFC-0267 §4, which
       keeps Phase 2 strictly additive for goalless tasks).
     - [Error (Link_write_failed _)] — the task and goal are valid, but the
       registry update could not be durably written and verified.
-    - [Ok ()] — Goal membership, task existence and the goalless precondition
-      were held through the link write under Goal -> backlog -> links locks.
+    - [Ok ()] — Goal membership, task existence, the unfinished task and the
+      goalless precondition were held through the link write under
+      Goal -> backlog -> links locks.
 
     Neither an unknown task nor an unknown goal is silently tolerated: both
     are returned as typed errors rather than mapped to a permissive default. *)

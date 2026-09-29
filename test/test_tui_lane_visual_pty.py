@@ -90,9 +90,20 @@ def main(executable: str, captures: Path | None) -> None:
         print("TUI_CAPTURE lane-addons overview " + repr(first), flush=True)
         capture("01-overview-100", 30, 100)
 
-        narrow = terminal.resize_and_wait(process, master, output, rows=24, columns=80,
-            needle=b"Lane Add-ons", controls=(terminal.FULL_REDRAW,))
-        narrow_screen = terminal.screen_text(narrow)
+        heading = b"Lane Add-ons \xc2\xb7 2 installed"
+        resized = terminal.resize_and_wait(process, master, output, rows=24, columns=80,
+            needle=heading, controls=(terminal.FULL_REDRAW,))
+        resize_at = len(output) - len(resized)
+        needle_at = output.find(heading, resize_at)
+        needle_end = needle_at + len(heading)
+        terminal.wait_for_output(process, master, output, terminal.FRAME_END,
+            start=needle_end, timeout=3.0)
+        frame_end = output.find(terminal.FRAME_END, needle_end) + len(terminal.FRAME_END)
+        frame_at = output.rfind(terminal.FRAME_START, 0, needle_at)
+        if frame_at < 0:
+            raise AssertionError("80-column Lane frame start was not captured")
+        narrow_frame = terminal.frame_containing(bytes(output[frame_at:frame_end]), heading)
+        narrow_screen = terminal.screen_text(narrow_frame)
         if b"Enter:open" not in narrow_screen or b"D:full" not in narrow_screen:
             raise AssertionError("80-column overview lost navigation or full failure path")
         if b"sha256:" + b"4" * 64 not in narrow_screen:
@@ -121,6 +132,7 @@ def main(executable: str, captures: Path | None) -> None:
         records = key(b"4", b"Value derived")
         if b"Row " not in screen(records, b"Value derived"):
             raise AssertionError("Records omitted row identities")
+
         wide = terminal.resize_and_wait(process, master, output, rows=32, columns=140,
             needle=b"Value derived", controls=(terminal.FULL_REDRAW,))
         capture("04-records-140", 32, 140)

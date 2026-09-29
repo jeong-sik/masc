@@ -1,0 +1,30 @@
+ Overview  Activity  Keepers  Lanes  Memory  ▸Board  Planning  Fusion  Workspace  Config
+
+   MASC Board (4)  13:55:58  HTTP [connected]
+ ───────────────────────────────────────────────────────────────────────────────────────────────────────────
+    Sort [s]: net votes first; newer breaks ties · H:choose hearth
+    f/F:next/previous · none counted yet — f narrows once they are
+ ───────────────────────────────────────────────────────────────────────────────────────────────────────────
+        ID           HEARTH       AUTHOR           TITLE                                  AGE SCORE REPLIES
+ ───────────────────────────────────────────────────────────────────────────────────────────────────────────
+        post-r1                   board-author     Retry                                    — ▲+1   0
+        post-r2                   board-author     Rollout                                  — ▲+1   0
+        post-r3                   board-author     Prose                                    — ▲+1   0
+        post-r4                   board-author     Hostile                                  — ▲+1   0
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  j/k:move  s:sort  Ctrl-W:pane  Right / Enter:read  Left / Esc:back  v / V:up / down  q:quit  …?
+ › to alpha   (i to write)

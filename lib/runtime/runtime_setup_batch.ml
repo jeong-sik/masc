@@ -7,7 +7,11 @@ type error = Invalid_selection | Invalid_configuration | Changed_configuration
   | Verification_unreadable of { runtime_id : string; exit : Unix.process_status; stderr : string; reason : string }
   | Write_failed | Rollback_failed | Lock_unavailable
 type usage_limited = { runtime_id : string; code : string }
-type readiness = Not_probed | Verified | Usage_limited of usage_limited * usage_limited list
+type readiness =
+  | Not_probed
+  | Verified
+  | Usage_limited of usage_limited * usage_limited list
+  | Partly_checked of { limited : usage_limited list; not_rechecked : string list }
 type receipt = { runtime_id:string; runtime_ids:string list; models:string list;
                  readiness:readiness }
 let ( let* ) = Result.bind
@@ -253,8 +257,13 @@ let configure_locked ~pending_credentials ~default_lane_id ~binary ~base ~expect
           probes (match probe with Probe_verified -> limited | Probe_usage_limited row -> row :: limited) tail in
       let* readiness =
         if not verify then Ok Not_probed else
-        let* limited = probes [] (needs_probe ~existing ~previous_primary ~primary selected) in
-        Ok (match limited with [] -> Verified | first :: rest -> Usage_limited (first, rest)) in
+        let to_probe = needs_probe ~existing ~previous_primary ~primary selected in
+        let not_rechecked = List.filter (fun id -> not (List.mem id to_probe)) selected in
+        let* limited = probes [] to_probe in
+        Ok (match limited, not_rechecked with
+          | [], [] -> Verified
+          | first :: rest, [] -> Usage_limited (first, rest)
+          | _, _ :: _ -> Partly_checked { limited; not_rechecked }) in
       let* files = snapshot stage in Ok (content files, readiness)) in
   let* current = snapshot base in
   if not (same original current) then Error Changed_configuration else
@@ -291,6 +300,9 @@ let receipt_json receipt = `Assoc ([
   @ match receipt.readiness with
     | Verified -> ["readiness",`String "verified"]
     | Not_probed -> ["readiness",`String "not_probed"]
+    | Partly_checked { limited; not_rechecked } -> ["readiness",`String "partly_checked";
+        "unverified",`List (List.map usage_limited_json limited);
+        "not_rechecked",`List (List.map (fun id -> `String id) not_rechecked)]
     | Usage_limited (first, rest) -> ["readiness",`String "usage_limited";
         "unverified",`List (List.map usage_limited_json (first :: rest))])
 

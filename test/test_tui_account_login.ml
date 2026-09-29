@@ -264,6 +264,35 @@ let usage_limited_save () =
       "an unmeasured runtime the save did not select is unreadable", receipt ~selected:["other"] [row "codex_1a2b3c4d.gpt-6-sol_1a2b3c4d" "quota_exhausted"];
       "a verified receipt with an unmeasured list is unreadable",
         `Assoc ["configured",`Bool true;"readiness",`String "verified";"unverified",`List [row "x" "rate_limited"]] ]
+(* A save that left selected runtimes uncalled is neither verified nor
+   usage-limited. The screen names each one on its own row, and a receipt that
+   claims verified beside a not_rechecked list is unreadable rather than shown
+   as a full verification. *)
+let partly_checked_save () =
+  let t=Login.create "codex" in ok (Login.inventory t inventory);
+  let kept = "codex_1a2b3c4d.gpt-6-sol_1a2b3c4d" and added = "codex_1a2b3c4d.gpt-6-luna_1a2b3c4d" in
+  let receipt ?(readiness="partly_checked") ?(unverified=`List []) ?(rechecked=`List [`String kept]) () =
+    `Assoc ["configured",`Bool true;"readiness",`String readiness;
+      "runtime_ids",`List [`String added;`String kept];"unverified",unverified;"not_rechecked",rechecked] in
+  let saved = match Login.saved t (receipt ()) with
+    | Ok saved -> saved | Error message -> fail message in
+  let rows () = List.map Login.row_text (Login.lines t) in
+  check bool "the kept connection has its own row" true
+    (List.mem ("  " ^ kept ^ " (다시 확인하지 않음)") (rows ()));
+  check bool "the save is not reported as verified" false (contains t.notice "검증하고 저장했습니다");
+  check bool "the notice says the kept connection was not checked again" true (contains t.notice "다시 확인하지 않았습니다");
+  check bool "retry keeps what the save published" true (Login.key t "r"=Login.Refresh_saved saved);
+  let t2=Login.create "codex" in ok (Login.inventory t2 inventory);
+  ignore (Login.saved t2 (receipt ~unverified:(`List [`Assoc ["runtime_id",`String added;"code",`String "quota_exhausted"]]) ()));
+  check bool "an unmeasured runtime is listed after the kept ones" true
+    (let r = List.map Login.row_text (Login.lines t2) in
+     List.mem ("  " ^ added ^ " (quota_exhausted)") r && List.mem ("  " ^ kept ^ " (다시 확인하지 않음)") r);
+  List.iter (fun (name, json) ->
+    check bool name true (Result.is_error (Login.saved (Login.create "codex") json)))
+    [ "an empty not_rechecked list is unreadable", receipt ~rechecked:(`List []) ();
+      "a not_rechecked runtime the save did not select is unreadable", receipt ~rechecked:(`List [`String "other"]) ();
+      "a missing not_rechecked list is unreadable", receipt ~rechecked:`Null ();
+      "a verified receipt with a not_rechecked list is unreadable", receipt ~readiness:"verified" ~unverified:`Null () ]
 (* What the renderer draws for a row: the pane's own text sanitized, the
    client's text drawn with its colours. *)
 let drawn row = match row with
@@ -579,6 +608,7 @@ let () = run "TUI account login" ["workflow",[
   test_case "Unicode and late input HTTP response" `Quick unicode_and_late_input_response;
   test_case "verified save survives refresh failure" `Quick verified_save_refresh;
   test_case "a usage-limited save names what was not measured" `Quick usage_limited_save;
+  test_case "a partly checked save names what was not checked again" `Quick partly_checked_save;
   test_case "unknown context follows supported provider route" `Quick missing_model_context;
   test_case "fragmented remote login" `Quick decoder_fragments;
   test_case "malformed and unfinished streams" `Quick decoder_failures;

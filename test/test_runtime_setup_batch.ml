@@ -130,16 +130,32 @@ let test_probes_only_what_changes () = fixture (fun base _runtime binary spec _o
     |> List.map (fun line -> Yojson.Safe.from_string line |> Yojson.Safe.Util.to_string) in
   fake base binary "pass";
   let revision = get (Batch.observe ~base_path:base) in
-  ignore (get (apply base binary [added] [old_id; added_id] revision true));
+  let receipt = get (apply base binary [added] [old_id; added_id] revision true) in
   Alcotest.check (Alcotest.list Alcotest.string) "unchanged primary is not probed, the addition is" [added_id] (probed ());
+  Alcotest.check Alcotest.bool "a save that kept a bound runtime unchecked is not verified" true
+    (receipt.readiness = Batch.Partly_checked { limited = []; not_rechecked = [old_id] });
+  Alcotest.check Alcotest.string "the receipt names what was not checked again" "partly_checked"
+    Yojson.Safe.Util.(Batch.receipt_json receipt |> member "readiness" |> to_string);
+  Alcotest.check (Alcotest.list Alcotest.string) "the receipt lists it" [old_id]
+    Yojson.Safe.Util.(Batch.receipt_json receipt |> member "not_rechecked" |> to_list |> List.map to_string);
   Sys.remove (Filename.concat base "verified.jsonl");
   let promoted = Runtime_setup_spec.render (spec "promoted") in
   let saved = text (Filename.concat (Common.masc_dir_from_base_path ~base_path:base) "config/runtime.toml") in
   save (Filename.concat (Common.masc_dir_from_base_path ~base_path:base) "config/runtime.toml") (saved ^ "\n" ^ promoted.runtime_toml);
   let revision = get (Batch.observe ~base_path:base) in
-  ignore (get (apply base binary [] [promoted.runtime_id; old_id] revision true));
+  let receipt = get (apply base binary [] [promoted.runtime_id; old_id] revision true) in
   Alcotest.check (Alcotest.list Alcotest.string) "an existing runtime promoted to first call is probed alone"
-    [promoted.runtime_id] (probed ()))
+    [promoted.runtime_id] (probed ());
+  Alcotest.check Alcotest.bool "the runtime left behind is reported as not checked again" true
+    (receipt.readiness = Batch.Partly_checked { limited = []; not_rechecked = [old_id] });
+  (* Nothing selected needs a call: no probe runs, and the receipt must not
+     read as a verification. *)
+  Sys.remove (Filename.concat base "verified.jsonl");
+  let revision = get (Batch.observe ~base_path:base) in
+  let receipt = get (apply base binary [] [old_id] revision true) in
+  Alcotest.check (Alcotest.list Alcotest.string) "reselecting the bound default calls nothing" [] (probed ());
+  Alcotest.check Alcotest.bool "reselecting the bound default reports it as not checked again" true
+    (receipt.readiness = Batch.Partly_checked { limited = []; not_rechecked = [old_id] }))
 let test_cas () = fixture (fun base runtime binary spec original ->
   fake base binary "(base/'.masc/config/runtime.toml').write_text('operator concurrent update')";
   let specs=[spec "new"] in let ids=List.map (fun s -> (Runtime_setup_spec.render s).runtime_id) specs in

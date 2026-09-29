@@ -18,7 +18,10 @@ type removal =
 (* What a save published: every selected runtime verified, or some published
    unmeasured because the provider declined for the account's usage. *)
 type unverified = { runtime_id : string; code : string }
-type saved = Saved_verified | Saved_unverified of unverified * unverified list
+type saved =
+  | Saved_verified
+  | Saved_unverified of unverified * unverified list
+  | Saved_partly of { unverified : unverified list; not_rechecked : string list }
 (* The list opens on the clients; choosing one lists its accounts under a row
    that adds a new one. *)
 type list_view = Clients | Accounts of client
@@ -249,25 +252,39 @@ let refresh_retry t result =
 let saved_notice = function
   | Saved_verified -> "모델의 응답과 도구 호출을 검증하고 저장했습니다."
   | Saved_unverified _ -> "저장했습니다. 아래 런타임은 사용 한도에 걸려 응답·도구 검증을 못 했습니다."
+  | Saved_partly { unverified = []; _ } -> "저장했습니다. 아래 기존 연결은 이번에 다시 확인하지 않았습니다."
+  | Saved_partly { unverified = _ :: _; _ } ->
+    "저장했습니다. 아래 기존 연결은 다시 확인하지 않았고, 일부는 사용 한도에 걸려 검증을 못 했습니다."
 (* A runtime id is two hashes and a model name, longer than what a notice row
    has left at 100 columns, so each unmeasured runtime gets its own row. *)
 let saved_rows = function
   | Saved_verified -> []
   | Saved_unverified (first, rest) ->
     List.map (fun (row:unverified) -> "  " ^ row.runtime_id ^ " (" ^ row.code ^ ")") (first :: rest)
+  | Saved_partly { unverified; not_rechecked } ->
+    List.map (fun id -> "  " ^ id ^ " (다시 확인하지 않음)") not_rechecked
+    @ List.map (fun (row:unverified) -> "  " ^ row.runtime_id ^ " (" ^ row.code ^ ")") unverified
 let saved_of_json json =
   let selected = match field "runtime_ids" json with
     | `List ids -> List.filter_map string ids
     | _ -> [] in
-  match field "configured" json, field "readiness" json, field "unverified" json with
-  | `Bool true, `String "verified", `Null -> Some Saved_verified
-  | `Bool true, `String "usage_limited", `List rows ->
+  let unverified_rows rows =
     let parsed = List.map (fun row -> match string (field "runtime_id" row), string (field "code" row) with
       | Some runtime_id, Some code when List.mem runtime_id selected -> Some {runtime_id; code}
       | _ -> None) rows in
-    (match List.filter_map Fun.id parsed with
-     | first :: rest when List.for_all Option.is_some parsed -> Some (Saved_unverified (first, rest))
-     | _ -> None)
+    if List.for_all Option.is_some parsed then Some (List.filter_map Fun.id parsed) else None in
+  match field "configured" json, field "readiness" json, field "unverified" json, field "not_rechecked" json with
+  | `Bool true, `String "verified", `Null, `Null -> Some Saved_verified
+  | `Bool true, `String "usage_limited", `List rows, `Null ->
+    (match unverified_rows rows with
+     | Some (first :: rest) -> Some (Saved_unverified (first, rest))
+     | Some [] | None -> None)
+  | `Bool true, `String "partly_checked", `List rows, `List ids ->
+    let ids = List.filter_map string ids in
+    (match unverified_rows rows with
+     | Some unverified when ids <> [] && List.for_all (fun id -> List.mem id selected) ids ->
+       Some (Saved_partly { unverified; not_rechecked = ids })
+     | Some _ | None -> None)
   | _ -> None
 let saved t json =
   match saved_of_json json with

@@ -8,4 +8,5 @@
   masc.skill_config
   masc.skill_snapshot
   eio
-  eio_main))
+  eio_main
+  mirage-crypto-rng.unix))

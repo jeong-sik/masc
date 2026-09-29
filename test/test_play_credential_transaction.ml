@@ -200,6 +200,37 @@ let test_revoke_before_renewal_finishes_its_controller_effect () =
     check (option string) "the old revoke cannot release the later renewed turn"
       (Some "player") (controller ())) [ true; false ]
 
+let test_revoke_callback_holds_credential_admission () =
+  with_machine @@ fun config _ _ ->
+  let callback_entered, enter_callback = Eio.Promise.create () in
+  let writer_done, finish_writer = Eio.Promise.create () in
+  let revoked, finish_revoke = Eio.Promise.create () in
+  let name = match Play_invite.Name.of_string "player" with
+    | Ok name -> name | Error detail -> fail detail in
+  Eio.Switch.run (fun sw ->
+    Eio.Fiber.fork ~sw (fun () ->
+      let result = Play_invite.revoke ~base_path:config.base_path ~name
+          ~after_revoke:(fun status ->
+            check bool "deletion precedes the controller effect" true (status = Play_invite.Deleted);
+            check bool "old credential already removed" true
+              (Option.is_none (Auth.load_credential config.base_path "player"));
+            Eio.Promise.resolve enter_callback ();
+            await_waiter ~base_path:config.base_path writer_done;
+            check bool "renewal cannot publish during the callback" true
+              (Option.is_none (Eio.Promise.peek writer_done));
+            ignore (dos_ok (Dos_lane.release_left ~holder:"player" ~announce:ignore))) in
+      Eio.Promise.resolve finish_revoke result);
+    Eio.Promise.await callback_entered;
+    Eio.Fiber.fork ~sw (fun () ->
+      let fresh = renew_as_admin config in
+      ignore (dos_ok (Dos_lane.step ~who:"player" ~steps:1 ~until_ready:false));
+      Eio.Promise.resolve finish_writer fresh);
+    (match Eio.Promise.await revoked with
+     | Ok () -> () | Error _ -> fail "revoke failed");
+    ignore (Eio.Promise.await writer_done));
+  check (option string) "renewed turn follows the completed revoke effect"
+    (Some "player") (controller ())
+
 let test_revoke_preserves_a_credentialless_keeper () =
   with_machine @@ fun config _ _ ->
   Auth.delete_credential config.base_path "player";
@@ -307,6 +338,7 @@ let () =
       ; test_case "a cancelled delete releases admission" `Quick test_cancelled_delete_leaves_credential_and_releases_admission
       ; test_case "renewal before revoke preserves the current role" `Quick test_renewal_before_revoke_preserves_current_role
       ; test_case "revoke finishes before a renewed turn" `Quick test_revoke_before_renewal_finishes_its_controller_effect
+      ; test_case "revoke callback excludes renewal after deletion" `Quick test_revoke_callback_holds_credential_admission
       ; test_case "revoke preserves a credentialless Keeper" `Quick test_revoke_preserves_a_credentialless_keeper
       ; test_case "purge before renewal keeps alias and UUID together" `Quick test_purge_before_renewal_keeps_the_complete_new_credential
       ; test_case "renewal before purge leaves no orphan" `Quick test_renewal_before_purge_removes_the_complete_current_credential

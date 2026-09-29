@@ -16,9 +16,9 @@ let test_messages_are_direct_projections () =
     "sandbox_roots_normalized_empty: 2 entries provided, none resolved to a valid path"
     (R.rejection_to_user_message (R.Sandbox_roots_normalized_empty { count = 2 }));
   check string "outside roots"
-    "path_outside_sandbox: /tmp/x (not under your workspace root or a root \
-     declared for this Keeper; pass a path inside them — relative paths \
-     resolve against your workspace root)"
+    "path_outside_sandbox: /tmp/x (not under a permitted root for this Keeper; \
+     pass a path inside a permitted root — relative paths resolve against \
+     your workspace root)"
     (R.rejection_to_user_message (R.Outside_sandbox { raw = "/tmp/x" }))
 ;;
 

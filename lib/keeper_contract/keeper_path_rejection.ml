@@ -25,8 +25,8 @@ let rejection_to_user_message = function
        the tail names where the tool can reach, which the bare path did
        not say. *)
     Printf.sprintf
-      "path_outside_sandbox: %s (not under your workspace root or a root \
-       declared for this Keeper; pass a path inside them — relative paths \
-       resolve against your workspace root)"
+      "path_outside_sandbox: %s (not under a permitted root for this Keeper; \
+       pass a path inside a permitted root — relative paths resolve against \
+       your workspace root)"
       raw
 ;;

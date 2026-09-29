@@ -1752,9 +1752,9 @@ let set_runtime_lane_slots ~(host : string) ~(port : int) ~(lane : string)
     | _ -> Error "runtime config read did not supply source text" in
   let* config = Runtime_toml.parse_string source_text
     |> Result.map_error (function
-      | [] -> "runtime config read could not be parsed"
+      | [] -> "runtime.toml could not be parsed"
       | (first : Runtime_toml.parse_error) :: _ ->
-        Printf.sprintf "runtime config could not be parsed at %s: %s"
+        Printf.sprintf "runtime.toml parse error at %s: %s"
           first.path first.message
         |> Masc.Tui_decode.sanitize_terminal_text) in
   let* current = match List.find_opt

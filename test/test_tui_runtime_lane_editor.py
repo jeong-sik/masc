@@ -966,6 +966,41 @@ def run_concurrent_edit(executable: str) -> None:
                             http_requests=requests)
 
 
+def run_invalid_runtime_config(executable: str) -> None:
+    """A malformed file explains its path and never licenses a routing POST."""
+    store = LaneStore()
+    fixtures = h.overview_event_http_fixtures()
+    fixtures[h.RUNTIME_RESOLVED_PATH] = store.resolved
+    fixtures[h.RUNTIME_CONFIG_RAW_PATH] = (
+        200,
+        {"source_revision": "a" * 64,
+         "source_text": "[runtime.lanes.primary]\ncandidates = 42\n"},
+    )
+    fixtures[ROUTING_PATH] = h.RequestHttpResponse(store.route)
+    requests: h.HttpRequests = []
+
+    def interact(process, fd, _slave, output, _base):
+        h.tab_until(process, fd, output, b"MASC Config")
+        h.resize_and_wait(process, fd, output, rows=30, columns=131,
+                              needle=b"MASC Config", controls=(h.FULL_REDRAW,))
+        h.send_and_wait(process, fd, output, b"9", b"Runtime lanes (3 lanes, 4 slots)")
+        h.send_and_wait(process, fd, output, b"e",
+                        b"adding a candidate to the candidate order of primary")
+        h.send_and_wait(process, fd, output, b"\r",
+                        b"runtime.toml parse error at runtime.lanes.primary.candidates")
+        h.drain_until_quiet(process, fd, output)
+        if b"lane candidates must be an array" not in h.screen_text(bytes(output)):
+            raise AssertionError("runtime TOML parse reason was hidden from the operator")
+        if any(path == ROUTING_PATH for path, _ in requests):
+            raise AssertionError("a malformed runtime config authorized a lane write")
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(executable,
+                            description="Malformed runtime config explains lane refusal",
+                            interact=interact, http_fixtures=fixtures,
+                            http_requests=requests)
+
+
 def run_filter(executable: str) -> None:
     """The candidate picker is walked without holding an arrow key: End, Home
     and PgDn jump, [/] narrows the list to the typed text, and Esc drops the
@@ -1061,6 +1096,7 @@ if __name__ == "__main__":
     run_empty_cli_group(os.path.abspath(sys.argv[1]))
     run_curator_takes_cli(os.path.abspath(sys.argv[1]))
     run_concurrent_edit(os.path.abspath(sys.argv[1]))
+    run_invalid_runtime_config(os.path.abspath(sys.argv[1]))
     run_filter(os.path.abspath(sys.argv[1]))
     run_provider_jump(os.path.abspath(sys.argv[1]))
     run_cli_binding_jump(os.path.abspath(sys.argv[1]))

@@ -959,7 +959,7 @@ let read_body_with_idle
      | Keep_body ->
        let held = Buffer.create 16384 in
        Buffer.add_string held, (fun () -> Buffer.contents held)
-     | Discard_body -> ignore, (fun () -> ())
+     | Discard_body -> (fun (_chunk : string) -> ()), (fun () -> ())
       : (string -> unit) * (unit -> retained))
   in
   let progress =

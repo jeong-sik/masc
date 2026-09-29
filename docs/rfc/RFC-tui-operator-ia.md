@@ -12,6 +12,10 @@ related: ["RFC-tui-server-lifecycle"]
 
 # RFC: TUI operator IA (tui-operator-ia)
 
+2026-09-25 운영자 결정으로 §3.1의 최상위 메뉴와 첫 화면 구성은
+[RFC-tui-measured-operator-home](RFC-tui-measured-operator-home.md)이 대체한다.
+그 밖의 Keeper 상세와 데이터 출처 논의는 이 RFC에 남는다.
+
 ## 0. Summary
 
 TUI 는 2기 캠페인(docs/design/tui/TUI-ROADMAP.md)으로 대시보드의 모든 section 을

@@ -409,7 +409,8 @@ let context_flow_uses_declared_connections () =
       "installation_id":"project-observer","output_id":"events","selection":"latest_completed"}]}|}} in
   let declaration installation_id instance_id : UI.declaration =
     {source_path="/config/" ^ installation_id ^ ".toml";installation_id=Some installation_id;
-      instance_id=Some instance_id;desired=Some "1";applied=Some "1";issues=[]} in
+      instance_id=Some instance_id;desired=Some "1";applied=Some "1";issues=[];
+      origin=UI.Parsed_declaration} in
   let configuration : UI.configuration = {directory="/config";complete=true;
     declarations=[declaration "project-observer" producer.id;declaration "project-metric" consumer.id]} in
   let snapshot : UI.snapshot = {instances=[producer;consumer];configuration=Some configuration;
@@ -622,7 +623,7 @@ let refresh_preserves_operator_target () =
     display=Masc.Lane_addon_presentation.empty} in
   let declaration id : UI.declaration = {source_path=id ^ ".toml";
     installation_id=Some id;desired=Some "1";applied=Some "1";
-    instance_id=Some id;issues=[]} in
+    instance_id=Some id;issues=[];origin=UI.Parsed_declaration} in
   let snapshot : UI.snapshot = {instances=[worker "worker";worker "other"];
     output={rows=[row "chosen";row "other"];coverage=[]};complete=Some true;
     configuration=Some {directory="/config";complete=true;

@@ -1515,16 +1515,11 @@ let board_comment_request_of_query ~offset ~limit =
   let parsed =
     let* offset = integer_field "comment_offset" offset in
     let* limit = integer_field "comment_limit" limit in
-    let page_size =
-      match limit with
-      | Some value -> value
-      | None -> Board.Limits.default_comment_page_limit
-    in
     let fields =
-      match offset with
-      | None -> [ "comment_tail", `Int page_size ]
-      | Some value ->
-        [ "comment_offset", `Int value; "comment_limit", `Int page_size ]
+      List.filter_map Fun.id
+        [ Option.map (fun value -> "comment_offset", `Int value) offset
+        ; Option.map (fun value -> "comment_limit", `Int value) limit
+        ]
     in
     match Board.Comment_page.request_of_args (`Assoc fields) with
     | Ok request -> Ok request

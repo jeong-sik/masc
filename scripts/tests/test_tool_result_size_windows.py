@@ -30,7 +30,7 @@ def row(tool, ts, size, output, **extra):
         "lane": "claude_code",
         "runtime_profile": "claude_code.opus",
         "result_bytes": size,
-        "output_text": output,
+        "output": {"_blob": {"sha256": "a" * 64, "bytes": 900}} if output == MARKER else output,
         "input": {"command": SECRET},
     }
     fields.update(extra)

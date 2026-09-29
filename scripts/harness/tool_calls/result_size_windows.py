@@ -140,8 +140,11 @@ def count(directory: Path, windows: list[Window]) -> dict[tuple[str, str, str, s
                 lane = lane if isinstance(lane, str) and lane else "<missing>"
                 runtime = row.get("runtime_profile")
                 runtime = runtime if isinstance(runtime, str) and runtime else "<missing>"
-                output = row.get("output_text")
-                stored = isinstance(output, str) and output.startswith(BLOB_MARKER)
+                output = row.get("output")
+                stored = (
+                    isinstance(output, dict) and isinstance(output.get("_blob"), dict)
+                ) or (isinstance(output, str) and output.startswith(BLOB_MARKER))
+                inline = isinstance(output, str) and not stored
                 evidence = row.get("execution_evidence")
                 evidence = evidence if isinstance(evidence, dict) else {}
                 for window in windows:
@@ -149,12 +152,12 @@ def count(directory: Path, windows: list[Window]) -> dict[tuple[str, str, str, s
                         continue
                     cell = cells.setdefault((window.label, tool, lane, runtime), Cell())
                     cell.calls += 1
-                    if not isinstance(output, str):
-                        cell.missing_output += 1
-                    elif stored:
+                    if stored:
                         cell.server_stored += 1
-                    else:
+                    elif inline:
                         cell.inline += 1
+                    else:
+                        cell.missing_output += 1
                     if tool == "Execute":
                         size = nonnegative_int(evidence.get("compared_output_bytes"))
                         handler = evidence.get("handler_stored")

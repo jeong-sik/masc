@@ -2209,7 +2209,7 @@ let decode_planning_goal json =
   let* pg_title = required_string_field json "title" in
   let* pg_owner =
     match Json_util.assoc_member_opt "owner" json with
-    | None | Some `Null -> Ok Goal_store.Unknown_owner
+    | None -> Ok Goal_store.Unknown_owner
     | Some owner_json -> Goal_store.owner_of_yojson owner_json
   in
   let* raw_phase = required_string_field json "phase" in
@@ -7004,12 +7004,11 @@ let rec decode_overview_goal_node json =
   in
   let* og_id = malformed (required_string_field json "id") in
   let* og_title = malformed (required_string_field json "title") in
-  (* [owner] is optional so a payload written before #39571 still decodes;
-     an absent member reads as the explicit [Unknown_owner]. *)
+  (* An omitted owner is unassigned; present values use the store's codec. *)
   let* og_owner =
     malformed
       (match Json_util.assoc_member_opt "owner" json with
-       | None | Some `Null -> Ok Goal_store.Unknown_owner
+       | None -> Ok Goal_store.Unknown_owner
        | Some owner_json -> Goal_store.owner_of_yojson owner_json)
   in
   let* raw_phase = malformed (required_string_field json "phase") in

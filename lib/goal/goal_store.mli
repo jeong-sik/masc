@@ -33,12 +33,16 @@ val parse_goal_phase : string option -> Goal_phase.t option
 type owner =
   | Owner of string
   | Unknown_owner
-      (** Who owns a Goal (#39571). A row written before the owner field
-          existed decodes to [Unknown_owner] — an explicit value, never an
-          empty string. *)
+      (** No owner is recorded for this Goal. *)
 
 val owner_to_yojson : owner -> Yojson.Safe.t
+(** A recorded owner is [{"name": "<name>"}]; no owner is [null]. Names
+    are never used as absence markers. *)
+
 val owner_of_yojson : Yojson.Safe.t -> (owner, string) result
+(** Reads [null] as {!Unknown_owner} and an object containing only a non-blank
+    [name] as {!Owner}, preserving the name exactly. Bare strings, malformed
+    objects and other JSON types are errors. *)
 
 type goal = {
   id : string;

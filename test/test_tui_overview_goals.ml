@@ -463,6 +463,33 @@ let test_an_unknown_phase_is_refused () =
         (Tui_decode.overview_goals_error_to_string other)
   | Ok _ -> fail "an unknown phase decoded"
 
+let test_overview_preserves_owner_identity () =
+  List.iter (fun (owner, expected) ->
+    let json =
+      `Assoc [ "tree", `List
+        [ `Assoc
+            [ "id", `String "goal-owned"
+            ; "title", `String "Owned goal"
+            ; "owner", owner
+            ; "phase", `String "executing"
+            ; "priority", `Int 1
+            ; "task_count", `Int 0
+            ; "task_done_count", `Int 0
+            ; "stagnation_seconds", `Null
+            ; "tasks", `List []
+            ; "children", `List []
+            ] ] ]
+    in
+    match Tui_decode.decode_overview_goals json with
+    | Ok [ goal ] ->
+        check bool "the overview keeps the owner's identity" true
+          (goal.Tui_decode.og_owner = expected)
+    | Ok goals -> failf "expected one goal, got %d" (List.length goals)
+    | Error error -> fail (Tui_decode.overview_goals_error_to_string error))
+    [ `Assoc [ "name", `String "unknown" ], Goal_store.Owner "unknown"
+    ; `Null, Goal_store.Unknown_owner
+    ]
+
 let row_of_goal ?(now = captured_at) goal =
   let rows =
     Goals.lines ~now ~inner_width:120
@@ -619,5 +646,7 @@ let () =
             test_an_empty_tree_is_one_headline
         ; test_case "an unknown phase is refused" `Quick
             test_an_unknown_phase_is_refused
+        ; test_case "the overview preserves owner identity" `Quick
+            test_overview_preserves_owner_identity
         ] )
     ]

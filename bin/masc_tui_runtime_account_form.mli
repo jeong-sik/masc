@@ -1,5 +1,5 @@
 (** The Config > runtime.toml form that declares one more account of a
-    Claude Code, Codex or Antigravity provider the file already declares.
+    Claude Code, Codex, Antigravity or Muse provider the file already declares.
 
     It holds three fields: which provider to copy, the new provider id, and
     where the new account signs in. The file it was opened on only supplies
@@ -19,7 +19,7 @@ type t
 
 val open_on : ?home_dir:string -> string -> (t, string) result
 (** [Error] says why there is nothing to copy: the text does not parse, or it
-    declares no Claude Code, Codex or Antigravity provider. [home_dir]
+    declares no Claude Code, Codex, Antigravity or Muse provider. [home_dir]
     expands a location typed with [~/]. *)
 
 val field : t -> field
@@ -42,8 +42,8 @@ val key : t -> string -> outcome
     closes it, and every other key is ignored. *)
 
 val inherited_home : Runtime_account_declaration.client -> string option
-(** The home a Claude Code or Codex provider without [account-home] runs on,
-    read from this process's environment the way the runtime reads it. *)
+(** The home a Claude Code, Codex or Muse provider without [account-home] runs
+    on, read from this process's environment the way the runtime reads it. *)
 
 type sign_in
 

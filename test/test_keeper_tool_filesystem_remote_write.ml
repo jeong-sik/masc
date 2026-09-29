@@ -318,7 +318,11 @@ let test_patch_without_a_source_is_a_workflow_rejection () =
   in
   check bool "workflow rejection" true (failed_as Tool_result.Workflow_rejection result);
   check bool "names the fix" true
-    (Astring.String.is_infix ~affix:"mode=overwrite to create it" result.raw_output);
+    (Astring.String.is_infix ~affix:"call Write with its full content" result.raw_output);
+  (* Edit pins mode=patch and closes its schema, so a hint naming a mode
+     field would send the caller to a parameter it cannot send. *)
+  check bool "does not name a mode field" false
+    (Astring.String.is_infix ~affix:"mode=" result.raw_output);
   check bool "nothing was written" false (Sys.file_exists (f.frame_path ^ ".write"))
 ;;
 

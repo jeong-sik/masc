@@ -556,7 +556,7 @@ is-non-interactive = true
 # terminal; without this ceiling a keeper learned 524288 from that refusal one
 # 29-minute attempt at a time (2026-08-24).
 [models.claude-code-sonnet]
-api-name = "claude-sonnet-5"
+api-name = "claude-sonnet-5-5"
 max-context = 1000000
 max-prompt-bytes = 524288
 tools-support = true
@@ -591,13 +591,13 @@ turn-timeout-s = 600.0
 
 [claude_code.claude-code-opus-high]
 
-# The rest of the Claude Code ladder: Fable 5.1, Opus 5, Opus 5.5 and Sonnet 5
+# The rest of the Claude Code ladder: Fable 5.1, Opus 5, Opus 5.5 and Sonnet 5.5
 # at every level the CLI takes (low..max), and Haiku 4.5.
 # Haiku 4.5 carries no level, so the CLI picks; its window is 200K
 # (OpenRouter /models anthropic/claude-haiku-4.5, 2026-09-22), and it
 # answered `claude -p --model claude-haiku-4-5` the same day.
 [models.claude-code-sonnet-low]
-api-name = "claude-sonnet-5"
+api-name = "claude-sonnet-5-5"
 max-context = 1000000
 max-prompt-bytes = 524288
 tools-support = true
@@ -610,7 +610,7 @@ supports-image-input = true
 [claude_code.claude-code-sonnet-low]
 
 [models.claude-code-sonnet-medium]
-api-name = "claude-sonnet-5"
+api-name = "claude-sonnet-5-5"
 max-context = 1000000
 max-prompt-bytes = 524288
 tools-support = true
@@ -623,7 +623,7 @@ supports-image-input = true
 [claude_code.claude-code-sonnet-medium]
 
 [models.claude-code-sonnet-high]
-api-name = "claude-sonnet-5"
+api-name = "claude-sonnet-5-5"
 max-context = 1000000
 max-prompt-bytes = 524288
 tools-support = true
@@ -636,7 +636,7 @@ supports-image-input = true
 [claude_code.claude-code-sonnet-high]
 
 [models.claude-code-sonnet-xhigh]
-api-name = "claude-sonnet-5"
+api-name = "claude-sonnet-5-5"
 max-context = 1000000
 max-prompt-bytes = 524288
 tools-support = true
@@ -649,7 +649,7 @@ supports-image-input = true
 [claude_code.claude-code-sonnet-xhigh]
 
 [models.claude-code-sonnet-max]
-api-name = "claude-sonnet-5"
+api-name = "claude-sonnet-5-5"
 max-context = 1000000
 max-prompt-bytes = 524288
 tools-support = true
@@ -2531,15 +2531,6 @@ streaming = true
 reasoning-effort = "high"
 
 [openrouter.openrouter-claude-opus-5]
-
-[models.openrouter-claude-sonnet-5]
-api-name = "anthropic/claude-sonnet-5"
-tools-support = true
-thinking-support = true
-streaming = true
-reasoning-effort = "high"
-
-[openrouter.openrouter-claude-sonnet-5]
 
 [models.openrouter-gpt-5-5]
 api-name = "openai/gpt-5.5"

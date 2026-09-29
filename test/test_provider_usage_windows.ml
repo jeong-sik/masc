@@ -122,6 +122,58 @@ let window_summary row =
         (window |> member "source" |> to_string)))
 ;;
 
+let test_rate_limit_lifecycle_reaches_the_tui () =
+  with_runtimes @@ fun () ->
+  let runtime =
+    match Runtime.get_runtime_by_id "usage_claude.sonnet" with
+    | Some runtime -> runtime
+    | None -> fail "fixture runtime missing"
+  in
+  let candidate = runtime.Runtime.candidate_backpressure in
+  let project ~now =
+    let json =
+      Server_dashboard_runtime_resolved_json.build_at ~now
+        ~generated_at_iso:"2026-09-29T00:00:00Z"
+        ~config:(Workspace.default_config (Filename.get_temp_dir_name ()))
+    in
+    let default = Yojson.Safe.Util.member "default_runtime" json in
+    let row = runtime_row json runtime.id in
+    check string "default and catalog share the same observation time"
+      (Yojson.Safe.to_string default) (Yojson.Safe.to_string row);
+    match Tui_decode.decode_runtime_resolved json with
+    | Error detail -> fail detail
+    | Ok (rows, _) ->
+      List.find (fun (row : Tui_decode.runtime_option) -> String.equal row.ro_id runtime.id) rows
+  in
+  let assert_state label limited resets row =
+    check bool (label ^ " rate limited") limited row.Tui_decode.ro_rate_limited;
+    check (option (float 0.)) (label ^ " provider deadline") resets row.ro_rate_limit_resets_at
+  in
+  Runtime_candidate_backpressure.note_candidate_success ~candidate;
+  assert_state "clear" false None (project ~now:0.);
+  Runtime_candidate_backpressure.note_rate_limit ~candidate ~retry_after:(Some 60.);
+  let deadline =
+    match Runtime_candidate_backpressure.candidate_backpressure ~now:0. ~candidate with
+    | Some
+        { rate_limit =
+            Some (Runtime_candidate_backpressure.Unknown_scope_rate_limit
+                    { noted_at; retry_after = Some wait })
+        ; failed_attempt = _
+        } ->
+      noted_at +. wait
+    | Some _ | None -> fail "provider Retry-After was not retained"
+  in
+  assert_state "before deadline" true (Some deadline) (project ~now:(deadline -. 1.));
+  assert_state "at deadline without another answer" false None (project ~now:deadline);
+  Runtime_candidate_backpressure.note_rate_limit ~candidate ~retry_after:None;
+  assert_state "no stated wait remains observed" true None (project ~now:1e12);
+  Runtime_candidate_backpressure.note_candidate_success ~candidate;
+  assert_state "success clears unknown wait" false None (project ~now:1e12);
+  Runtime_candidate_backpressure.note_rate_limit ~candidate ~retry_after:(Some 60.);
+  Runtime_candidate_backpressure.note_candidate_success ~candidate;
+  assert_state "success clears a stated wait before expiry" false None (project ~now:0.)
+;;
+
 let test_reports_reach_the_resolved_document () =
   with_runtimes @@ fun () ->
   let claude_scope = scope_of "usage_claude.sonnet" in
@@ -783,6 +835,32 @@ let antigravity_exec : Runtime_execution.antigravity_cli =
 
 let no_antigravity ~scope:_ _ = fail "an Antigravity read was asked for"
 
+let test_failed_background_schedule_releases_scope () =
+  Eio_main.run (fun _env ->
+    let scope =
+      Runtime_quota_window.scope_of_credential
+        ~provider_id:"usage_read_fork_failure" None
+    in
+    let reads = ref 0 in
+    let read () = incr reads in
+    let closed_switch = Eio.Switch.run (fun sw -> sw) in
+    let failed =
+      Read.For_testing.start_background ~scope
+        ~fork:(Eio.Fiber.fork ~sw:closed_switch) ~read
+    in
+    check bool "closed root cannot schedule a read" true
+      (failed = Read.Scheduling_failed);
+    check int "failed fork started no read" 0 !reads;
+    let retried =
+      Eio.Switch.run (fun sw ->
+        Read.For_testing.start_background ~scope
+          ~fork:(Eio.Fiber.fork ~sw) ~read)
+    in
+    check bool "released account can schedule a later read" true
+      (retried = Read.Started);
+    check int "later read ran once" 1 !reads)
+;;
+
 (* One scope raising, over HTTP or through an official client, is logged
    and the scopes after it are still read. *)
 let test_a_raising_scope_does_not_stop_the_rest () =
@@ -983,7 +1061,9 @@ let () =
   run
     "provider_usage_windows"
     [ ( "resolved"
-      , [ test_case "reports reach the resolved document" `Quick
+      , [ test_case "rate-limit lifecycle reaches the TUI" `Quick
+            test_rate_limit_lifecycle_reaches_the_tui
+        ; test_case "reports reach the resolved document" `Quick
             test_reports_reach_the_resolved_document
         ; test_case "malformed window is a typed error" `Quick
             test_malformed_window_is_a_typed_error
@@ -1015,6 +1095,8 @@ let () =
     ; ( "reading scopes"
       , [ test_case "a raising scope does not stop the rest" `Quick
             test_a_raising_scope_does_not_stop_the_rest
+        ; test_case "failed background schedule releases the account" `Quick
+            test_failed_background_schedule_releases_scope
         ; test_case "an empty key sends no request" `Quick test_an_empty_key_sends_no_request
         ] )
     ; ( "repeating a read"

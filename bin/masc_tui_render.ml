@@ -3130,9 +3130,9 @@ let render_planning_list (state : state) =
    add one more when they are there, so the block is measured against them
    rather than against a constant that would push the footer off a full
    screen. *)
-(* One more than it was: the stage rail took the phase word's row and the
-   next-step sentence is a row of its own. Counted here, drawn below. *)
-let planning_detail_fixed_rows = 12
+(* The stage rail, owner, and next-step sentence each have their own row.
+   Count them here so the detail footer remains visible. *)
+let planning_detail_fixed_rows = 13
 
 let planning_measurement_lines (state : state) (goal : planning_goal) =
   let line tone text = { Planning_detail.tone; text } in
@@ -3201,6 +3201,11 @@ let planning_detail_pane (state : state)
     Ansi.bold
     (fit_width (Terminal_text.single_line goal.pg_title) (cols - 6))
     Ansi.reset);
+  box_line buf cols
+    ("  Owner:   "
+     ^ (match goal.pg_owner with
+        | Goal_store.Owner name -> Terminal_text.single_line name
+        | Goal_store.Unknown_owner -> "unknown"));
   let prio_color =
     match goal.pg_priority with
     | 1 -> (Theme.bad ()) ^ Ansi.bold
@@ -11637,9 +11642,12 @@ let runtime_overall_badge status =
   style ^ runtime_probe_status_to_string status ^ Ansi.reset
 
 let runtime_route_badge (runtime : Masc.Tui_decode.runtime_option) =
-  (match runtime_quota_badge runtime with
-     | Some badge -> badge
-     | None -> (Theme.info ()) ^ "ready" ^ Ansi.reset)
+  match
+    List.filter_map Fun.id
+      [ runtime_quota_badge runtime; runtime_rate_limit_badge runtime ]
+  with
+  | [] -> (Theme.info ()) ^ "ready" ^ Ansi.reset
+  | badges -> String.concat " " badges
 
 let runtime_probe_badge = function
   | None -> Ansi.dim ^ "unobserved" ^ Ansi.reset
@@ -11821,6 +11829,18 @@ let runtime_detail_lines state target ~width =
                   | None ->
                     Printf.sprintf "exhausted, no reset stated (%s)" scope))
       in
+      let rate_limit =
+        match runtime.ro_rate_limited, runtime.ro_rate_limit_resets_at with
+        | false, _ -> []
+        | true, Some resets_at ->
+          let tm = Unix.localtime resets_at in
+          runtime_detail_field ~width ~style:(Theme.warn ()) "Rate limit"
+            (Printf.sprintf "until %02d:%02d or the next successful answer"
+               tm.Unix.tm_hour tm.Unix.tm_min)
+        | true, None ->
+          runtime_detail_field ~width ~style:(Theme.warn ()) "Rate limit"
+            "no wait stated, cleared by the next successful answer"
+      in
       let probe_lines =
         match probe with
         | None -> [ Ansi.dim, "  Probe: unobserved" ]
@@ -11891,7 +11911,7 @@ let runtime_detail_lines state target ~width =
             runtime_detail_field ~width ~style:Ansi.reset "Bound keepers" names
             @ runtime_detail_field ~width ~style:Ansi.reset "Keeper telemetry" activity_str
       in
-      fields @ candidate @ quota @ keeper_lines @ probe_lines @ probe_limitations
+      fields @ candidate @ quota @ rate_limit @ keeper_lines @ probe_lines @ probe_limitations
 
 let render_runtime_detail (state : state) target =
   let terminal_rows, cols = get_terminal_size () in
@@ -15013,9 +15033,7 @@ let render_presets (state : state) =
              state.preset_detail
              ~key:m.Tui_decode.pm_name)
       ~report:state.preset_report
-    @ List.map
-        (fun (name, reason) -> Printf.sprintf "! %s — %s" name reason)
-        unreadable
+    @ Masc_tui_preset_text.unreadable_rows ~max_cells:(max 4 (cols - 6)) unreadable
   in
   let max_scroll = max 0 (List.length detail - detail_height) in
   let scroll = max 0 (min state.config_scroll max_scroll) in

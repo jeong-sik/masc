@@ -529,6 +529,8 @@ val render_repository_changes_diff :
 
 val runtime_quota_badge : Masc.Tui_decode.runtime_option -> string option
 
+val runtime_rate_limit_badge : Masc.Tui_decode.runtime_option -> string option
+
 (** The lanes that list a runtime among their candidates, in resolved order.
     Both doors into the runtime detail read it, so neither can answer with a
     shorter list than the other. *)

@@ -455,6 +455,35 @@ let test_an_argv_shaped_shell_normalises_to_the_command_form () =
     (argv_of via_costume)
 ;;
 
+(* #39692: an argv-shaped shell keeps every token the caller wrote. Rebuilding
+   it as [shell; "-c"; script] from the recognised costume dropped the options
+   before [-c], the positional arguments after the script, and the program's
+   directory, so [sh -n -c S] ran S instead of only checking it. *)
+let test_an_argv_shaped_shell_keeps_every_token () =
+  let argv_of input =
+    match Execute_input.to_shell_ir input with
+    | Ok (Masc_exec.Shell_ir.Simple simple) ->
+      Masc_exec.Exec_program.to_string simple.Masc_exec.Shell_ir.bin
+      :: List.map Masc_exec.Exec_dispatch.resolve_arg simple.Masc_exec.Shell_ir.args
+    | Ok _ -> Alcotest.fail "expected one Simple"
+    | Error e -> Alcotest.failf "%a" Execute_input.pp_validation_error e
+  in
+  let keeps argv =
+    Alcotest.(check (list string))
+      (String.concat " " argv)
+      argv
+      (argv_of (mk_argv argv))
+  in
+  (* the noexec flag the issue reported: the body must not run *)
+  keeps [ "sh"; "-n"; "-c"; "printf MASC_NOEXEC_PROBE" ];
+  (* a bundled flag *)
+  keeps [ "bash"; "-ec"; "echo hi" ];
+  (* positional arguments after the script *)
+  keeps [ "sh"; "-c"; "echo $0 $1"; "zero"; "one" ];
+  (* the program's directory *)
+  keeps [ "/bin/sh"; "-c"; "echo hi" ]
+;;
+
 (* An unknown shell is a program name, so the closed list is the answer. *)
 let test_an_unknown_shell_is_refused () =
   match
@@ -1247,6 +1276,10 @@ let suite =
           "an_argv_shaped_shell_normalises_to_the_command_form"
           `Quick
           test_an_argv_shaped_shell_normalises_to_the_command_form
+      ; Alcotest.test_case
+          "an_argv_shaped_shell_keeps_every_token"
+          `Quick
+          test_an_argv_shaped_shell_keeps_every_token
       ; Alcotest.test_case
           "an_unknown_shell_is_refused"
           `Quick

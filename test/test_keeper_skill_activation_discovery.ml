@@ -265,7 +265,7 @@ let test_unreadable_ledger_keeps_partial_coverage_explicit () =
   let ledger_path =
     Filename.concat
       (Keeper_fs.keeper_session_dir config "trace-corrupt")
-      "skill-activations.json"
+      "skill-activation-events.jsonl"
   in
   Fs_compat.save_file ledger_path "not-json";
   let result = Discovery.discover config (reference 'a') in

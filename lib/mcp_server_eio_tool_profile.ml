@@ -9,6 +9,7 @@ type tool_profile = Mcp_server_eio_types.tool_profile =
   | Full
   | Managed_agent
   | Operator_remote
+  | Seat
 
 let instruction key =
   let value = Prompt_registry.get_prompt key in
@@ -39,6 +40,20 @@ module StringSet = Set_util.StringSet
 
 let default_instructions () = instruction Prompt_names.mcp_full
 
+let seat_instructions () = instruction Prompt_names.mcp_seat
+
+(* The seat is every tool whose catalog permission is CanPlayMachine, read
+   from the catalog rather than listed here: a tool that gains or loses the
+   seat permission moves in or out of this profile with it. *)
+let is_seat_tool tool_name =
+  match Tool_catalog.registered_metadata tool_name with
+  | None -> false
+  | Some { Tool_catalog.required_permission; _ } ->
+    (match required_permission with
+     | Masc_domain.CanPlayMachine -> true
+     | Masc_domain.CanInit | CanReset | CanReadState | CanAddTask | CanClaimTask
+     | CanCompleteTask | CanBroadcast | CanVote | CanAdmin -> false)
+
 let tool_schemas_for_profile ?(include_hidden = false)
     _state profile =
   let schemas =
@@ -67,6 +82,9 @@ let tool_schemas_for_profile ?(include_hidden = false)
         in
         Agent_core_tool_contract.agent_core_tool_schemas @ passthrough
     | Operator_remote -> Tool_operator.remote_schemas ()
+    | Seat ->
+        Config.visible_tool_schemas ~include_hidden:true ()
+        |> List.filter (fun (schema : Masc_domain.tool_schema) -> is_seat_tool schema.name)
   in
   Config.validate_schemas schemas;
   schemas
@@ -89,6 +107,10 @@ let tool_allowed_in_profile state profile tool_name =
           |> List.exists (fun (schema : Masc_domain.tool_schema) ->
                  String.equal schema.name tool_name))
   | Operator_remote -> List.mem tool_name (Tool_operator.remote_tool_names ())
+  | Seat ->
+      tool_schemas_for_profile state Seat
+      |> List.exists (fun (schema : Masc_domain.tool_schema) ->
+             String.equal schema.name tool_name)
 
 let tool_annotations_for_profile _profile tool_name =
   let read_only =

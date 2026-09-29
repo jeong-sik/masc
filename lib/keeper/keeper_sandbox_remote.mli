@@ -173,6 +173,10 @@ type probe_report =
               the probe. [None] from a shim built before the field existed,
               which the server treats as a skew and says so once
               ([remote_shim_outdated], RFC-0427 B-3). *)
+      ; observed_at : float
+          (** Unix time this process got the probe's answer. The answer is
+              kept for the life of the process, so it is the shim as of this
+              moment and not necessarily the shim now. *)
       }
   | Probe_failed of
       { at : float
@@ -185,6 +189,10 @@ type lane_report =
   ; probe : probe_report
   ; last_dispatch : dispatch_record option
   }
+
+val report_openssh : base_path:string -> endpoint:Exec_ssh_endpoint.t -> lane_report
+(** Read the same endpoint-scoped observations as the runner without creating
+    a runner, an SSH control directory, a cache entry, or a remote probe. *)
 
 val report : t -> lane_report
 

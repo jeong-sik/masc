@@ -308,9 +308,8 @@ let state_to_yojson = function
       ]
 ;;
 
-let to_yojson partition =
-  `Assoc
-    [ "schema_version", `Int schema_version
+let partition_fields partition =
+  [ "schema_version", `Int schema_version
     ; "partition_id", `String partition.partition_id
     ; "keeper_name", `String partition.keeper_name
     ; "context_key", Candidate.Context_key.to_yojson partition.context_key
@@ -318,7 +317,34 @@ let to_yojson partition =
     ; "created_at", `Float partition.created_at
     ; "generation", Generation.to_yojson partition.generation
     ; "state", state_to_yojson partition.state
+  ]
+;;
+
+let to_yojson partition = `Assoc (partition_fields partition)
+;;
+
+type ready_confirmation =
+  { partition_id : string
+  ; generation : Generation.t
+  ; confirmed_at : float
+  ; runtime_instance_id : string
+  }
+
+let ready_confirmation_to_yojson confirmation =
+  `Assoc
+    [ "kind", `String "ready_confirmation"
+    ; "schema_version", `Int 1
+    ; "partition_id", `String confirmation.partition_id
+    ; "generation", Generation.to_yojson confirmation.generation
+    ; "confirmed_at", `Float confirmation.confirmed_at
+    ; "runtime_instance_id", `String confirmation.runtime_instance_id
     ]
+;;
+
+let confirmed_ready_to_yojson partition confirmation =
+  `Assoc
+    (partition_fields partition
+     @ [ "ready_confirmation", ready_confirmation_to_yojson confirmation ])
 ;;
 
 (* Structural decode helpers live in Candidate, which decodes the same
@@ -344,6 +370,46 @@ let nonnegative_int_json ~context = function
   | `Int value when value >= 0 -> Ok value
   | `Int _ -> Error (context ^ " must be nonnegative")
   | _ -> Error (context ^ " must be an integer")
+;;
+
+let ready_confirmation_of_yojson json =
+  let context = "Board attention Ready confirmation" in
+  let* fields = assoc ~context json in
+  let* () =
+    exact_fields
+      ~context
+      [ "kind"
+      ; "schema_version"
+      ; "partition_id"
+      ; "generation"
+      ; "confirmed_at"
+      ; "runtime_instance_id"
+      ]
+      fields
+  in
+  let* kind_json = field ~context "kind" fields in
+  let* () =
+    match kind_json with
+    | `String "ready_confirmation" -> Ok ()
+    | _ -> Error (context ^ ".kind must be ready_confirmation")
+  in
+  let* version_json = field ~context "schema_version" fields in
+  let* () =
+    match version_json with
+    | `Int 1 -> Ok ()
+    | _ -> Error (context ^ ".schema_version must be 1")
+  in
+  let* partition_json = field ~context "partition_id" fields in
+  let* partition_id = string_json ~context:(context ^ ".partition_id") partition_json in
+  let* generation_json = field ~context "generation" fields in
+  let* generation = Generation.of_yojson generation_json in
+  let* confirmed_json = field ~context "confirmed_at" fields in
+  let* confirmed_at = float_json ~context:(context ^ ".confirmed_at") confirmed_json in
+  let* runtime_json = field ~context "runtime_instance_id" fields in
+  let* runtime_instance_id =
+    string_json ~context:(context ^ ".runtime_instance_id") runtime_json
+  in
+  Ok { partition_id; generation; confirmed_at; runtime_instance_id }
 ;;
 
 let exact_provenance_of_yojson json =
@@ -716,23 +782,62 @@ let parse content =
   String.split_on_char '\n' content
   |> List.fold_left
        (fun result line ->
-          let* rows = result in
+          let* rows, confirmations = result in
           let line = String.trim line in
           if String.equal line ""
-          then Ok rows
+          then Ok (rows, confirmations)
           else
             match Yojson.Safe.from_string line with
             | json ->
-              let* row = of_yojson json in
-              Ok (row :: rows)
+              let* fields = assoc ~context:"Board attention ledger row" json in
+              (match List.assoc_opt "kind" fields with
+               | None ->
+                 let partition_fields, confirmation_fields =
+                   List.partition
+                     (fun (name, _) ->
+                        not (String.equal name "ready_confirmation"))
+                     fields
+                 in
+                 (match confirmation_fields with
+                  | [] ->
+                    let* row = of_yojson json in
+                    Ok (row :: rows, confirmations)
+                  | [ (_, confirmation_json) ] ->
+                    let* row = of_yojson (`Assoc partition_fields) in
+                    let* confirmation =
+                      ready_confirmation_of_yojson confirmation_json
+                    in
+                    let* () =
+                      if String.equal row.partition_id confirmation.partition_id
+                         && Generation.equal row.generation confirmation.generation
+                      then
+                        match row.state with
+                        | Ready -> Ok ()
+                        | Running _ | Completed _ | Settled _ | Abandoned _
+                        | Blocked _ ->
+                          Error "Ready confirmation belongs to a non-Ready row"
+                      else Error "Ready confirmation identity differs from its row"
+                    in
+                    Ok (row :: rows, confirmation :: confirmations)
+                  | _ -> Error "Ready confirmation field occurs more than once")
+               | Some _ ->
+                 let* confirmation = ready_confirmation_of_yojson json in
+                 Ok (rows, confirmation :: confirmations))
             | exception Yojson.Json_error detail -> Error ("invalid partition JSON: " ^ detail))
-       (Ok [])
-  |> Result.map List.rev
+       (Ok ([], []))
+  |> Result.map (fun (rows, confirmations) -> List.rev rows, List.rev confirmations)
 ;;
 
 let serialize rows =
   rows
   |> List.map (fun row -> Yojson.Safe.to_string (to_yojson row) ^ "\n")
+  |> String.concat ""
+;;
+
+let serialize_confirmations confirmations =
+  confirmations
+  |> List.map (fun confirmation ->
+    Yojson.Safe.to_string (ready_confirmation_to_yojson confirmation) ^ "\n")
   |> String.concat ""
 ;;
 
@@ -859,7 +964,7 @@ let add_partition_indexes view partition =
     }
 ;;
 
-let same_partition_identity left right =
+let same_partition_identity (left : t) (right : t) =
   String.equal left.partition_id right.partition_id
   && String.equal left.keeper_name right.keeper_name
   && Candidate.Context_key.equal left.context_key right.context_key
@@ -1048,7 +1153,7 @@ let read_view_blocking ledger_path =
     invalidate_cached entry observed;
     Error error
   | Ok snapshot ->
-    let* rows = parse snapshot.bytes in
+    let* rows, _confirmations = parse snapshot.bytes in
     let base =
       match observed with
       | Some view -> view
@@ -1115,7 +1220,7 @@ let update ~base_path ~keeper_name decide =
            Ok result)))
 ;;
 
-let update_exact ~base_path ~keeper_name decide =
+let update_exact ?ready_confirmation ~base_path ~keeper_name decide =
   let ledger_path = path ~base_path ~keeper_name in
   run_blocking "board-attention-partition-exact-update" (fun () ->
     let entry = cache_entry ledger_path in
@@ -1127,7 +1232,22 @@ let update_exact ~base_path ~keeper_name decide =
       | [] -> Error "exact partition update must append a cursor-fenced row"
       | _ :: _ ->
         let* updated = apply_rows view rows in
-        let suffix = serialize rows in
+        let* suffix =
+          match ready_confirmation, rows with
+          | None, _ -> Ok (serialize rows)
+          | Some partition, [ row ] when row = partition ->
+            let confirmation =
+              { partition_id = partition.partition_id
+              ; generation = partition.generation
+              ; confirmed_at = Time_compat.now ()
+              ; runtime_instance_id = Build_identity.runtime_instance_id
+              }
+            in
+            Ok
+              (Yojson.Safe.to_string (confirmed_ready_to_yojson row confirmation)
+               ^ "\n")
+          | Some _, _ -> Error "Ready confirmation must append its exact Ready row"
+        in
         (match
            Fs_compat.append_private_jsonl_durable_locked_at_cursor_result
              ledger_path
@@ -1497,7 +1617,7 @@ let recover_for_process_start ~now ~base_path ~keeper_name =
       with
       | Error error -> Error error
       | Ok snapshot ->
-        let* rows = parse snapshot.bytes in
+        let* rows, confirmations = parse snapshot.bytes in
         let* current = apply_rows (empty_view snapshot.cursor) rows in
         let* () = validate_keeper_identity ~keeper_name current in
         let* recovered, latest =
@@ -1521,7 +1641,7 @@ let recover_for_process_start ~now ~base_path ~keeper_name =
                (Ok (0, []))
         in
         let latest = List.rev latest in
-        let canonical = serialize latest in
+        let canonical = serialize latest ^ serialize_confirmations confirmations in
         if String.equal canonical snapshot.bytes
         then (
           Atomic.set entry.cached (Some current);
@@ -1929,7 +2049,11 @@ let confirm_ready ~base_path ~(partition : t) =
   match partition.state with
   | Ready ->
     let* (confirmed, changed), write_outcome =
-      update_exact ~base_path ~keeper_name:partition.keeper_name (fun view ->
+      update_exact
+        ~ready_confirmation:partition
+        ~base_path
+        ~keeper_name:partition.keeper_name
+        (fun view ->
         match Id_map.find_opt partition.partition_id view.by_id with
         | None ->
           Error ("Board attention partition not found: " ^ partition.partition_id)

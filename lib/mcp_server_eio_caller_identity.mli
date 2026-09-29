@@ -3,8 +3,9 @@ type owner_keeper_identity = string * string option
 type direct_call_authority =
   | Catalog_policy
   | Restricted_profile
-(** [Restricted_profile] means the call already passed an exact managed or
-    operator profile membership gate.  It does not weaken authentication. *)
+(** [Restricted_profile] means the call already passed an exact managed,
+    operator or seat profile membership gate.  It does not weaken
+    authentication. *)
 
 (** A resolved caller name tagged with the origin decided at mint time.
 

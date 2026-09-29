@@ -439,6 +439,41 @@ let test_terminal_text_is_idempotent_and_single_line () =
   Alcotest.(check string) "sanitization is idempotent" once
     (Tui_decode.sanitize_terminal_text once)
 
+(* Both sanitizers return an input they would copy byte for byte without
+   walking it: printable ASCII for the terminal text, any ASCII for the
+   invisible escape. Every ASCII byte is checked on both sides of that line,
+   inside a printable run and after a scalar that is not ASCII, so the short
+   cut can only ever answer what the full walk answers. *)
+let test_terminal_text_ascii_is_returned_whole () =
+  for code = 0 to 0x7F do
+    let byte = Char.chr code in
+    let label = Printf.sprintf "byte 0x%02X" code in
+    let text = Printf.sprintf "a%cb" byte in
+    let expected =
+      if code >= 0x20 && code <= 0x7E then text
+      else Printf.sprintf "a\\x%02Xb" code
+    in
+    Alcotest.(check string) (label ^ " in a printable run") expected
+      (Tui_decode.sanitize_terminal_text text);
+    Alcotest.(check string) (label ^ " after a non-ASCII scalar")
+      ("\xc3\xa9" ^ expected)
+      (Tui_decode.sanitize_terminal_text ("\xc3\xa9" ^ text));
+    Alcotest.(check string) (label ^ " is not invisible") text
+      (Tui_decode.escape_invisible text);
+    (* The same byte raw after a non-ASCII scalar goes through the walk, so
+       the walk and the short cut are held to one answer for it. *)
+    Alcotest.(check string) (label ^ " is not invisible to the walk")
+      ("\xc3\xa9" ^ text)
+      (Tui_decode.escape_invisible ("\xc3\xa9" ^ text))
+  done;
+  let printable = String.init 0x5F (fun index -> Char.chr (0x20 + index)) in
+  Alcotest.(check bool) "printable ASCII comes back without a copy" true
+    (Tui_decode.sanitize_terminal_text printable == printable);
+  let with_controls = "tab\there\x1b[0m" in
+  Alcotest.(check bool) "ASCII escape-invisible input comes back without a copy"
+    true
+    (Tui_decode.escape_invisible with_controls == with_controls)
+
 let test_terminal_text_escapes_invisible_codepoints () =
   (* #38445: a terminal draws bidi controls and zero-width characters as
      nothing, so the glyphs an operator reads can differ from the bytes an
@@ -1308,6 +1343,15 @@ let test_planning_goal_keeps_the_last_review_note () =
     (Some "blocked on the platform gap")
     (decoded_proof ~last_review_note:"blocked on the platform gap" ())
       .Tui_decode.pg_last_review_note
+;;
+
+let test_planning_goal_keeps_owner () =
+  let owned = decoded_proof ~extra:[ "owner", `String "keeper-z" ] () in
+  let unowned = decoded_proof () in
+  Alcotest.(check bool) "recorded owner is preserved" true
+    (owned.Tui_decode.pg_owner = Goal_store.Owner "keeper-z");
+  Alcotest.(check bool) "missing owner is explicitly unknown" true
+    (unowned.Tui_decode.pg_owner = Goal_store.Unknown_owner)
 ;;
 
 let test_planning_goal_keeps_the_server_timestamps () =
@@ -8315,6 +8359,8 @@ let picker_default_runtime =
     ; ("declared_reasoning_effort", `String "high")
     ; ("is_local", `Bool false)
     ; ("is_default", `Bool false)
+    ; ("rate_limited", `Bool false)
+    ; ("rate_limit_resets_at", `Null)
     ]
 
 let runtime_resolved_json =
@@ -8340,6 +8386,8 @@ let runtime_resolved_json =
               ; ("declared_reasoning_effort", `Null)
               ; ("is_local", `Bool true)
               ; ("is_default", `Bool false)
+              ; ("rate_limited", `Bool false)
+              ; ("rate_limit_resets_at", `Null)
               ]
           ] )
     ; ( "lanes"
@@ -8365,6 +8413,28 @@ let runtime_resolved_json =
               ]
           ] )
     ]
+
+let test_runtime_rate_limit_requires_an_observation () =
+  let row value =
+    match picker_default_runtime with
+    | `Assoc fields ->
+      let fields = List.remove_assoc "rate_limited" fields in
+      `Assoc (match value with None -> fields | Some value -> ("rate_limited", value) :: fields)
+    | _ -> Alcotest.fail "runtime fixture must be an object"
+  in
+  List.iter
+    (fun value ->
+       let json =
+         runtime_resolved_json
+         |> replace_assoc_field "default_runtime" (row value)
+         |> replace_assoc_field "runtimes" (`List [ row value ])
+       in
+       match Tui_decode.decode_runtime_resolved json with
+       | Ok _ -> Alcotest.fail "unknown rate-limit observation decoded as ready"
+       | Error detail ->
+         Alcotest.(check bool) "error names the unavailable observation" true
+           (Astring.String.is_infix ~affix:"rate_limited" detail))
+    [ None; Some `Null; Some (`String "false") ]
 
 let test_decode_runtime_resolved () =
   match Tui_decode.decode_runtime_resolved runtime_resolved_json with
@@ -8628,6 +8698,8 @@ let resolved_runtime id provider model =
     ; "declared_reasoning_effort", `Null
     ; "is_local", `Bool false
     ; "is_default", `Bool false
+    ; "rate_limited", `Bool false
+    ; "rate_limit_resets_at", `Null
     ]
 
 let runtime_lane ?(declared = true) id runtime_ids =
@@ -12085,7 +12157,9 @@ let () =
           test_runtime_surface_keeps_resolved_rows_without_a_probe
       ] );
     ( "decode_runtime_resolved",
-      [ Alcotest.test_case "carries runtimes and assignments" `Quick
+      [ Alcotest.test_case "requires a rate-limit observation" `Quick
+          test_runtime_rate_limit_requires_an_observation;
+        Alcotest.test_case "carries runtimes and assignments" `Quick
           test_decode_runtime_resolved;
         Alcotest.test_case "carries runtimes, lanes, and assignments" `Quick
           test_decode_runtime_resolved_full;
@@ -12447,6 +12521,8 @@ let () =
           test_planning_goal_without_the_verifier_field_is_refused;
         Alcotest.test_case "keeps the last review note" `Quick
           test_planning_goal_keeps_the_last_review_note;
+        Alcotest.test_case "planning goal owner" `Quick
+          test_planning_goal_keeps_owner;
         Alcotest.test_case "keeps the server timestamps" `Quick
           test_planning_goal_keeps_the_server_timestamps;
         Alcotest.test_case "tolerates missing timestamps" `Quick
@@ -12480,6 +12556,8 @@ let () =
           test_terminal_text_preserves_printable_utf8
       ; Alcotest.test_case "escapes malformed UTF-8 bytes" `Quick
           test_terminal_text_escapes_malformed_utf8_bytes
+      ; Alcotest.test_case "returns ASCII it would copy whole" `Quick
+          test_terminal_text_ascii_is_returned_whole
       ; Alcotest.test_case "escapes invisible codepoints" `Quick
           test_terminal_text_escapes_invisible_codepoints
       ; Alcotest.test_case "keeps the joiner inside an emoji" `Quick

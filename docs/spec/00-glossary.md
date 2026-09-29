@@ -381,7 +381,7 @@ status: reference
   - TUI 표시 및 복구:
     - Keeper Info 탭에 원인 카테고리별로 집계(건수, 최장 경과 시간, 파티션 ID, 재투입
       대기 수)되어 표시된다. 수백 건의 슬롯 소진 행이 화면을 덮지 않도록 카테고리당 한 줄로 묶는다.
-    - `Q` 키를 누르면 가장 오래 대기 중인 항목(`oldest_waiting`)부터 원장의
+    - `b` 키를 누르면 가장 오래 대기 중인 항목(`oldest_waiting`)부터 원장의
       `Requeue_requested`로 전이시키며 재투입을 요청한다.
     - `B` 키는 읽힌 대기 목록 전체를 오래된 순서로 별도 재투입 요청한다. 목록이 아직
       읽히지 않았거나 오래된 상태이면 일괄 재투입을 거절한다.
@@ -681,27 +681,31 @@ status: reference
   않는다. 클라이언트 턴 합계도 runtime 후보 순서를 포함한 Keeper turn 전체 합계는 아니다.
 
 **Provider Usage Window (제공자 사용량 창)**
-: Claude Code(`rate_limit_event`의 `unifiedWindows`)나 Codex app-server
-  (`account/rateLimits/updated`)가 턴 도중 wire로 통보한 제공자 자체의 사용량 한도 창
-  (`Runtime_provider_usage_window.t`). (quota scope, limit, window)별 최신 관측값과
-  수신 시각을 기록하며, `GET /api/v1/runtime/resolved`에 읽기 전용으로 노출된다(#38380).
+: 제공자가 보고한 계정 사용량 한도 창의 관측값(`Runtime_provider_usage_window.t`).
+  Claude Code의 `rate_limit_event`와 Codex app-server의 `account/rateLimits/updated`는
+  턴 중 wire로 보고한다. Codex·HTTP provider·Antigravity는 턴 밖 직접 읽기도 제공한다.
+  (quota scope, limit, window)별 최신 관측값과 수신 시각을 기록하며,
+  `GET /api/v1/runtime/resolved`에 읽기 전용으로 노출된다(#38380).
   - **관측 권위**: 이 표는 제공자 사용량 보고의 최신 관측값을 보존한다. 평상시 후보 순서가
     이 표를 조회하지는 않는다. 다만 HTTP 403 계정 거절(`Authorization_refused`) 뒤 provider가
     `usage-read`를 선언했으면 Keeper turn walk가 해당 endpoint를 한 번 읽는다(#38975).
     그 보고에서 모델 호출을 막는 창이 한도까지 소진된 경우에만 별도
     `Runtime_quota_window` 증거로 기록하고, 이후 후보 순서가 그 증거를 읽어 해당 scope를
-    뒤로 둔다. 소진율이나 리셋 시각만으로 일반 가용성을 추론하는 것은 아니다.
+    뒤로 둔다. Muse의 모델 오류 뒤 `usage/read`는 선택된 계정의 소진 창을 확인해
+    `Runtime_quota_window`에만 기록한다(#39810). 이 읽기는 사용량 관측값을 이 표에
+    추가하지 않고 실패한 turn도 재전송하지 않는다. 소진율이나 리셋 시각만으로 일반
+    가용성을 추론하는 것은 아니다.
   - **비영속·프로세스 로컬**: 프로세스 메모리에만 존재하며 저장소에 남지 않는다. 프로세스
     기동 후 통보가 한 번도 없었던 scope는 0이나 빈 창으로 꾸며내지 않고
     `Not_reported_since_start`로 명시한다.
   - **TTL 부재**: `resets_at` 시각이 지나도 자동으로 삭제되거나 만료되지 않으며, 더 새로운
     보고가 올 때까지 마지막 수신 기록을 유지한다.
-  - **직접 읽기**: 턴이 없어도 창을 알 수 있게, 서버는 시작할 때 계정마다 한 번 제공자에게
-    직접 묻는다. Codex 는 `account/rateLimits/read`(#38671), `usage-read` 를 선언한 HTTP
-    provider 는 그 URL 로 GET 한 번이다(#38706). `usage-read.refresh-s` 를 선언한 계정은
+  - **직접 읽기**: 턴이 없어도 창을 알 수 있게, 서버는 시작할 때 직접 읽기를 지원하는
+    계정마다 한 번 제공자에게 묻는다. Codex는 `account/rateLimits/read`(#38671),
+    `usage-read`를 선언한 HTTP provider는 그 URL로 GET 한 번이다(#38706). `usage-read.refresh-s` 를 선언한 계정은
     읽기가 끝날 때마다 그 초 뒤에 다시 묻는다(#39144).
   - **Usage Scope와의 구분**: 위의 Usage Scope(MASC가 집계하는 토큰 수의 범위)와 다른 축이다 —
-    이쪽은 모델 제공자가 wire로 알려준 자기 계정의 5시간·7일 한도 창이다.
+    이쪽은 제공자가 보고한 자기 계정의 사용량 한도 창이다.
   → [Runtime_provider_usage_window](../../lib/runtime/runtime_provider_usage_window.mli),
   [Runtime_provider_usage_read](../../lib/runtime/runtime_provider_usage_read.mli),
   [Runtime_quota_window](../../lib/runtime/runtime_quota_window.mli)
@@ -2357,9 +2361,9 @@ status: reference
   operator config의 Keeper 이름에 묶인다. cluster 사이에서 무엇을 같이 쓰는지는
   **Cluster** 항목에 적었다.
 
-**Workspace Memory Proposal (작업공간 기억 제안)**
-: Workspace memory curator가 캡처한 작업공간 인벤토리를 바탕으로 만든 모델 제안. 제안은 claim, conflict, exclusion을 원본 source ID에 연결하고 해당 인벤토리에 묶인다. 저장·제출은 참조 구조만 검증하며 의미상 참인지 판정하지 않고, 제안은 Keeper Memory OS를 변경하지 않는다. 게시된 proposal descriptor는 제안을 찾게 하는 기록이지 의미 검증이나 승격이 아니다.
-  → [workspace_memory_proposal](../../lib/workspace_memory/workspace_memory_proposal.mli) · [workspace_memory_context](../../lib/workspace_memory/workspace_memory_context.mli) · [workspace_memory_publication](../../lib/workspace_memory/workspace_memory_publication.mli)
+**Workspace Memory Ledger (작업공간 기억 원장)**
+: Workspace Curator가 변경된 Keeper 사실을 기존 주장·충돌에 합류시키거나 새 항목을 만들고, 제외 이유를 기록한 원장. 다른 Keeper의 가까운 사실은 판정 맥락이고 선택된 변경 사실만 분류한다. 원장은 Keeper Memory OS를 바꾸지 않으며, 모델 분류가 의미 검증이나 사실 승격을 뜻하지 않는다. Keeper는 주장·충돌 목록을 본 뒤 ID별로 현재 원문 상태를 읽는다. 스토어를 읽지 못한 사실은 사라진 사실로 단정하지 않는다.
+  → [workspace_memory_ledger](../../lib/workspace_memory/workspace_memory_ledger.mli) · [workspace_memory_request](../../lib/workspace_memory/workspace_memory_request.mli) · [workspace_memory_ledger_view](../../lib/workspace_memory/workspace_memory_ledger_view.mli)
 
 **Continuity Snapshot (하던 일 저장본)**
 : 이어서 할 일의 설명과, 그 설명이 대신하는 완료된 History 범위를 함께 담은

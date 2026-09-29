@@ -38,7 +38,7 @@ type backlog = {
 
 val backlog : Masc_domain.task list -> backlog
 (** Reads the full domain rows, because the Overview's own rows carry no
-    creation time. *)
+    creation time. A function of that list and nothing else. *)
 
 type line =
   | Task_row of { index : int; task : Masc.Tui_decode.task }

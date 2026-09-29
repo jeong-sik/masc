@@ -2627,8 +2627,9 @@ let test_a_closed_client_connection_is_typed () =
 
 (* #39768: an exception nothing in the runtime expected -- here the refused
    process-group signal that ended a finished turn -- is a masc internal
-   failure. As a protocol error it read "Parse error" and stopped the lane
-   walk as if no candidate could read the reply. *)
+   failure. As a protocol error it read "Parse error" although nothing was
+   misread. The lane walk stops on either; test_keeper_rotation_eligibility_census
+   pins that. *)
 let test_an_unhandled_runtime_exception_is_internal () =
   let exn_repr = "Unix.Unix_error(Unix.EPERM, \"kill\", \"\")" in
   let core =
@@ -2646,6 +2647,17 @@ let test_an_unhandled_runtime_exception_is_internal () =
     failf
       "an unhandled runtime exception must be a masc internal error, got %s"
       (Agent_core.Error.to_string core)
+;;
+
+(* No recovery kind names a host exception. It takes the one whose disposition
+   is Ambiguous -- what the client did is unknown -- so the next claim starts
+   a fresh session rather than resuming one of unknown state. *)
+let test_an_unhandled_runtime_exception_recovers_as_protocol_failed () =
+  let map = Keeper_claude_code_runtime.For_testing.recovery_failure_of_client_error in
+  check bool "the recovery kind"
+    (map (Runtime_claude_code.Unhandled_exception "Failure(\"boom\")")
+    = Keeper_official_client_session_store.Protocol_failed)
+    true
 ;;
 
 (* A start seed begins where the last completed turn's range did, whichever
@@ -3410,6 +3422,10 @@ let () =
             "an unhandled runtime exception is a masc internal error"
             `Quick
             test_an_unhandled_runtime_exception_is_internal
+        ; test_case
+            "an unhandled runtime exception recovers as protocol failed"
+            `Quick
+            test_an_unhandled_runtime_exception_recovers_as_protocol_failed
         ] )
     ; ( "start seed"
       , [ test_case

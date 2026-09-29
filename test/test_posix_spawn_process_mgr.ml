@@ -384,7 +384,14 @@ let test_group_without_its_owned_leader_is_not_ours () =
   check bool "members but no leader" false
     (no_live_member [ group_member 4243 Members.Zombie ]);
   check bool "a leader another process owns" false
-    (no_live_member [ group_member ~parent:1 snapshot_leader Members.Zombie ])
+    (no_live_member [ group_member ~parent:1 snapshot_leader Members.Zombie ]);
+  (* Ownership is read off the leader's own row: another member being our
+     child does not make the leader ours. *)
+  check bool "the leader pid and our child on different rows" false
+    (no_live_member
+       [ group_member ~parent:1 snapshot_leader Members.Zombie
+       ; group_member ~parent:snapshot_owner 4243 Members.Zombie
+       ])
 ;;
 
 let () =

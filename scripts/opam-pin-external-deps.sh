@@ -144,12 +144,18 @@ readonly OCAML_MSX_SHA="3143a555f803f728ae35fddd7d93a146bb6602b0"
 # module-list change moves the digest too.
 # d9e2cba = ocaml-dos #34: Dos_snapshot saves and restores the whole machine
 # (format 2), which masc_dos_save/masc_dos_restore write through.
+# 1d51834 = ocaml-dos #36-#38: EXEC of a truncated MZ child fails instead of
+# raising; an Unsupported instruction leaves IP on itself, so running again
+# faults again instead of executing the next byte; and separate opens of one
+# file share its bytes, so closing one handle no longer overwrites what another
+# wrote. #38 moved Dos_snapshot to format 3, which refuses format 2: checkpoints
+# written under d9e2cba are refused on restore, and a game starts fresh.
 # Bump Dos_lane.pinned_core_source_digest (lib/dos_lane/dos_lane.ml) with this
 # SHA. test_dos_tools names this file, so the PR that moves the SHA runs it, and
 # it fails with the new digest in its message until the two agree. A build that
 # says "Library ocaml-dos.core-identity not found" is linking an ocaml-dos older
 # than #32: re-run this script with --install, or vendor the pinned core.
-readonly OCAML_DOS_SHA="d9e2cba992292a8aa405d0f1034d5d027946236a"
+readonly OCAML_DOS_SHA="1d51834e0cdfc36c05b6afb38127d2c4534c4b0e"
 # cohttp-eio 6.2.1 + one line: Reader_flow.single_read continues a partial body
 # delivery from the position already delivered instead of offset 0. Without it
 # a chunk handed over in three or more single_read calls repeats its first

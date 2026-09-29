@@ -234,6 +234,39 @@ let test_stalled_projection_names_no_interval_for_a_shared_timer () =
     [ "retry scheduled in"; "60 s"; "no retry armed"; "Forward path"; "HITL" ]
 ;;
 
+let test_stalled_projection_names_last_runtime_and_next_attempt () =
+  let subject =
+    VP.Task_review
+      { task_id = "task-101"
+      ; verification_id = "vrf-101"
+      ; disposition = VP.Retry_scheduled { delay = VP.Full_interval { seconds = 60.0 } }
+      }
+  in
+  let content =
+    VP.For_testing.stalled_board_content_with_runtime
+      ~subject
+      ~gate:"evaluator_unavailable"
+      ~detail:"Rate limited: slow (retry_after: 120.000s)"
+      ~evaluator_runtime:(Some "glm-coding.glm-5-3")
+      ~now:0.0
+  in
+  check_names content
+    [ "last runtime: glm-coding.glm-5-3"
+    ; "retry_after: 120.000s"
+    ; "next attempt around 1970-01-01T00:01:00Z"
+    ];
+  let metadata =
+    VP.For_testing.stalled_metadata_with_runtime
+      ~authority:(Masc_domain.System_llm_agent { agent_run_id = "test-runtime" })
+      ~subject
+      ~gate:"evaluator_unavailable"
+      ~detail:"Rate limited: slow (retry_after: 120.000s)"
+      ~evaluator_runtime:(Some "glm-coding.glm-5-3")
+  in
+  Alcotest.(check string) "runtime in metadata" "glm-coding.glm-5-3"
+    (Yojson.Safe.Util.(metadata |> member "evaluator_runtime" |> to_string))
+;;
+
 let stall_authority_for_decoding =
   Masc_domain.System_llm_agent { agent_run_id = "agent_core-agent-run-decode" }
 ;;
@@ -4609,6 +4642,8 @@ let () =
         test_stalled_projection_says_retry_when_one_is_scheduled;
       Alcotest.test_case "stalled projection names no interval for a shared timer" `Quick
         test_stalled_projection_names_no_interval_for_a_shared_timer;
+      Alcotest.test_case "stalled projection names last runtime and next attempt" `Quick
+        test_stalled_projection_names_last_runtime_and_next_attempt;
       Alcotest.test_case "stalled metadata keeps typed authority" `Quick
         test_stalled_metadata_preserves_typed_authority;
       Alcotest.test_case "stall disposition metadata decodes strictly" `Quick

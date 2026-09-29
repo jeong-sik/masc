@@ -134,6 +134,8 @@ let batch_of_yojson = function
          | Error _ as error -> error)
     in
     decode [] 0 items
+  | `Assoc [ ("verdicts", _) ] ->
+    Error "board-attention batch verdict field verdicts must be a list"
   | `Assoc fields ->
     Error
       (Printf.sprintf

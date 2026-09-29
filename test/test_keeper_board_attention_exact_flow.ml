@@ -1987,7 +1987,22 @@ let test_batch_rejection_names_the_answer_shape () =
   in
   check_names "envelope" envelope [ "keys=[\"verdicts\"; \"note\"]" ];
   Alcotest.(check bool) "an envelope value stays out" false
-    (contains_substring ~needle:"SECRET-NOTE" envelope)
+    (contains_substring ~needle:"SECRET-NOTE" envelope);
+  (* The expected envelope key with the wrong value type must name that
+     type requirement, not claim its already-correct key is missing. None
+     of these answers may become accepted or reveal the rejected value. *)
+  List.iter
+    (fun value ->
+      let detail =
+        rejected "non-list verdicts" (`Assoc [ "verdicts", value ])
+      in
+      Alcotest.(check string) "wrong envelope value explains the list requirement"
+        "board-attention batch verdict field verdicts must be a list" detail)
+    [ `Null; `Bool false; `Int 1; `String "SECRET-VERDICTS-VALUE";
+      `Assoc [ "secret", `String "SECRET-OBJECT-VALUE" ] ];
+  (match Judgment.batch_of_yojson (`Assoc [ "verdicts", `List [] ]) with
+   | Ok [] -> ()
+   | Ok _ | Error _ -> Alcotest.fail "an empty verdict list must remain accepted")
 ;;
 
 let () =

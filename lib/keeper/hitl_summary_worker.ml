@@ -104,9 +104,11 @@ let outcome_sink_key : flow_outcome option ref Eio.Fiber.key = Eio.Fiber.create_
 let with_outcome_sink sink f = Eio.Fiber.with_binding outcome_sink_key sink f
 
 let next_observed_outcome previous outcome =
-  match outcome, previous with
-  | Source_resolved, Some earlier when earlier <> Source_resolved -> previous
-  | _ -> Some outcome
+  if outcome = Source_resolved
+     && Option.is_some previous
+     && previous <> Some Source_resolved
+  then previous
+  else Some outcome
 
 let record_outcome outcome =
   (match Eio.Fiber.get outcome_sink_key with

@@ -320,8 +320,8 @@ let decode_primary config path : (state, primary_failure) Result.t =
 ;;
 
 (* The decoded primary, kept with the file version it was read from. The
-   ledger keeps every terminal schedule and is several megabytes, and it is
-   read far more often than it is written -- every Keeper's world
+   ledger keeps terminal schedules until their retention passes and is
+   several megabytes, and it is read far more often than it is written -- every Keeper's world
    observation, the dashboard and the schedule tools read all of it, a runner
    commit writes it -- so a reader of an unchanged file takes the state the
    last miss decoded. [write_state] forgets it after it writes. A miss reads,

@@ -1515,6 +1515,11 @@ let test_a_mutation_encodes_the_ledger_once_on_the_pool () =
   Eio.Switch.on_release sw (fun () -> Masc_test_deps.cleanup_test_workspace dir);
   let config = Workspace_core.default_config dir in
   ignore (Workspace_core.init config ~agent_name:(Some "test"));
+  (* A read that misses decodes on the pool too. Commit one schedule and read
+     it back before the pool exists, so the insert below finds the ledger it
+     reads already decoded and the only job it submits is the encode. *)
+  ignore (insert_ok config (make_request ~schedule_id:"sched-seed" ()));
+  ignore (read_state config);
   let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
   let previous_pool = Domain_pool_ref.get () in
   Fun.protect
@@ -1555,7 +1560,7 @@ let test_a_mutation_encodes_the_ledger_once_on_the_pool () =
   check string "the ledger is compact JSON"
     (Yojson.Safe.to_string (Yojson.Safe.from_string primary))
     primary;
-  check int "and it holds the schedule" 1 (List.length (read_state config).schedules)
+  check int "and it holds both schedules" 2 (List.length (read_state config).schedules)
 ;;
 
 (* A reader of an unchanged ledger takes the state the last read decoded. A

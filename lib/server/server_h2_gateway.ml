@@ -184,7 +184,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
       | None -> [ "vary", "Origin" ]
     in
     (* [with_server_state] (#9793): HTTP-layer wrapper around
-       [get_server_state_result]. Returns a controlled 500 JSON error when
+       [get_server_state_result]. Returns a controlled 503 JSON response when
        server state is not initialized, instead of crashing the request
        fiber. Mirrors the pattern [handle_post_graphql] already uses. *)
     let with_server_state h2_reqd f =

@@ -552,6 +552,49 @@ let test_goal_due_date_and_priority_edits_are_recorded () =
   check int "an edit that changes neither field records nothing" 3 (List.length (edits ()))
 ;;
 
+(* The edit is stored before its row is appended. A row that cannot be appended
+   (here the events path is a directory) must not turn a stored edit into a
+   failure: the caller would retry, see no difference, and record nothing. *)
+let test_a_goal_edit_whose_row_cannot_be_appended_still_succeeds () =
+  with_workspace
+  @@ fun config ->
+  (* Made without the tool, so nothing has opened the events file yet and no
+     cached handle can hide the failure. *)
+  let goal, _ =
+    match
+      Goal_store.upsert_goal
+        config
+        ~title:"Dated later"
+        ~metric:"goals counted"
+        ~target_value:"1"
+        ()
+    with
+    | Ok created -> created
+    | Error error -> failf "%s" (Goal_store.write_error_to_string error)
+  in
+  let events_path =
+    Filename.concat
+      (Filename.dirname (Goal_store.goals_path config))
+      "goal_events.jsonl"
+  in
+  Unix.mkdir events_path 0o755;
+  match
+    Tool_workspace.dispatch
+      (workspace_ctx config)
+      ~name:"masc_goal_upsert"
+      ~args:(`Assoc [ "id", `String goal.id; "due_date", `String "2026-10-15" ])
+  with
+  | None -> fail "masc_goal_upsert not handled"
+  | Some result ->
+    let json = parse_json_result result in
+    check string "the edit is reported as stored" goal.id (get_string_field json "goal_id");
+    check
+      string
+      "with the new due date"
+      "2026-10-15"
+      (get_string_field (Yojson.Safe.Util.member "goal" json) "due_date")
+;;
+
 let test_goal_upsert_rejects_lifecycle_fields () =
   with_workspace
   @@ fun config ->
@@ -923,6 +966,10 @@ let () =
             "due date and priority edits are recorded"
             `Quick
             test_goal_due_date_and_priority_edits_are_recorded
+        ; test_case
+            "a goal edit whose row cannot be appended still succeeds"
+            `Quick
+            test_a_goal_edit_whose_row_cannot_be_appended_still_succeeds
         ; test_case
             "goal review removed from dispatch"
             `Quick

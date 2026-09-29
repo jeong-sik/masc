@@ -1549,13 +1549,6 @@ let min_body_cells = 4
    from the rows it was about to join. *)
 let chat_clock_column = 5
 
-let local_body_cells ~pane_cells ~inner_width =
-  let gutter =
-    turn_rail_cells + chat_clock_column + 1
-    + chat_role_label_width ~pane_cells
-  in
-  Int.max 0 (inner_width - 2 - gutter)
-
 let pad_clock text =
   let cells = display_width text in
   if cells >= chat_clock_column then text

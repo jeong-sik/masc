@@ -4600,11 +4600,6 @@
  (libraries alcotest base64 masc_tui_link))
 
 (test
- (name test_tui_play_qr)
- (modules test_tui_play_qr)
- (libraries alcotest masc_tui_play_qr masc_tui_message_layout))
-
-(test
  (name test_tui_planning_order)
  (modules test_tui_planning_order)
  (libraries alcotest masc.masc_goal masc_tui_types))

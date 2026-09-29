@@ -373,11 +373,12 @@ let checkpoint_messages = function
   | None -> []
   | Some (checkpoint : Agent_core.Checkpoint.t) -> checkpoint.messages
 
-(* The blocks a run's input modalities are read from: the checkpoint's
-   history, the run's initial messages and the goal. A message repeated
-   between the checkpoint and the initial messages adds no modality the first
-   copy did not, so the blocks are taken as they come, without comparing
-   messages against each other. *)
+(* The blocks a run's input modalities are read from, in this order: the run's
+   initial messages, the checkpoint's history, then the goal. Modalities are
+   reported in the order they first appear here. A message repeated between the
+   initial messages and the checkpoint adds no modality the first copy did not,
+   so the blocks are taken as they come, without comparing messages against
+   each other. *)
 let content_blocks_for_run_with_checkpoint
     ~(checkpoint_messages : Agent_core.Types.message list)
     ~(initial_messages : Agent_core.Types.message list)

@@ -10,8 +10,8 @@ let keeper_names config =
 let participants ~base_path ~keepers ~now =
   let seated (cred : Masc_domain.agent_credential) =
     match cred.role with
-    | Masc_domain.Admin -> Some cred.agent_name
-    | Masc_domain.Player -> if Play_invite.expired ~now cred then None else Some cred.agent_name
+    | Masc_domain.Admin | Masc_domain.Player ->
+      if Play_invite.expired ~now cred then None else Some cred.agent_name
     | Masc_domain.Worker -> None
   in
   List.sort_uniq String.compare

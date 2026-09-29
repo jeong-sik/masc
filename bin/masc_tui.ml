@@ -11496,6 +11496,10 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
   if not !refresh_inflight then begin
     refresh_inflight := true;
     state.http_refresh_started_ns <- Some (Mtime_clock.elapsed_ns ());
+    (* One generation of kept dashboard answers per full pass. A pass reads
+       its addresses one after another and can outlive several ticks, and an
+       answer read early in it is still kept when the next pass asks. *)
+    Masc_tui_http.start_read_generation ();
     let approval_ticket = dispatch_approvals_listing state in
     (* Read before the label below moves. While the last probe said the
        server is booting, only the probe goes out this tick: the side loads
@@ -26650,9 +26654,6 @@ and is loaded on demand through keeper_skill.
            disarms it when its token leaves the list, so clearing here only
            made the second press race a two-second clock. *)
         load_local_workspace_if_safe state base_path;
-        (* One generation of kept dashboard answers per tick, so what is kept
-           is what the cadence reads. *)
-        Masc_tui_http.start_read_generation ();
         let host = server_peer_host in
         let port = state.port in
         (* The retry a closed feed waits for. *)

@@ -4590,6 +4590,7 @@
   (alias runtest-test_tui_keyboard_rosters_pty)
   (alias runtest-test_tui_keyboard_board_terminal_pty)
   (alias runtest-test_tui_keyboard_input-http-badge-refresh)
+  (alias runtest-test_tui_keyboard_input-http-conditional-read)
 ))
 
 (alias
@@ -6609,6 +6610,17 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_keyboard_input-http-badge-refresh)))
+
+(rule
+ (alias runtest-test_tui_keyboard_input-http-conditional-read)
+ (deps test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe} http-conditional-read)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-http-conditional-read)))
 
 (rule
  (alias runtest-test_tui_keyboard_input-observer-reconnect)

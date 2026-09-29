@@ -48,7 +48,9 @@ fi
 case "$ep" in
   */check-runs/*/annotations*) f=annotations ;;
   */check-runs*) f=checkruns ;;
-  */actions/runs/*/jobs*) f=jobs ;;
+  */actions/runs/*/jobs*)
+    rid="${ep#*/actions/runs/}"; rid="${rid%%/*}"
+    if [ -f "$d/jobs-$rid.json" ]; then f="jobs-$rid"; else f=jobs; fi ;;
   */actions/runs*) f=actions ;;
   user) f=user ;;
   */reviews/*) f=reviewget ;;
@@ -64,9 +66,9 @@ case "$ep" in
 esac
 [ -f "$d/$f.json" ] || { echo "fake gh: missing $f.json" >&2; exit 1; }
 # gh api --paginate runs --jq once per response page and concatenates outputs.
-if [ "$f" = reviews ] && [ -f "$d/reviews-page2.json" ]; then
-  "$FAKE_JQ" -r "$jqf" "$d/reviews.json" || exit 1
-  "$FAKE_JQ" -r "$jqf" "$d/reviews-page2.json"
+if [ -f "$d/$f-page2.json" ]; then
+  "$FAKE_JQ" -r "$jqf" "$d/$f.json" || exit 1
+  "$FAKE_JQ" -r "$jqf" "$d/$f-page2.json"
 else
   "$FAKE_JQ" -r "$jqf" "$d/$f.json"
 fi
@@ -269,6 +271,101 @@ run_case workflow-all-cancelled-refuses 2 "run 902 is completed/cancelled" 0 "$d
 d="$work/wfnewerrunning"; setup "$d"; echo '{"workflow_runs":[{"workflow_id":1,"run_number":10,"name":"PR Check","status":"completed","conclusion":"success","id":900},{"workflow_id":1,"run_number":11,"name":"PR Check","status":"in_progress","conclusion":null,"id":902}]}' >"$d/actions.json"
 run_case workflow-newer-run-in-progress-refuses 2 "run 902 is in_progress/none" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
 
+
+# ---- Late Draft delivery must neither cancel nor shadow Ready evidence ----
+race_setup() {
+  setup "$1"
+  "$JQ" -n --arg h "$H" '{workflow_runs:[
+    {workflow_id:1,run_number:10,name:"PR check",status:"completed",conclusion:"success",id:900,check_suite_id:55,event:"pull_request",path:".github/workflows/pr-check.yml",head_sha:$h},
+    {workflow_id:1,run_number:11,name:"PR check",status:"completed",conclusion:"success",id:901,check_suite_id:66,event:"pull_request",path:".github/workflows/pr-check.yml",head_sha:$h}]}' >"$1/actions.json"
+  "$JQ" -n --arg h "$H" '
+    ["TLA model check","lint suite","dune build @check","dune build --profile release @check","dashboard typecheck","PR required success"] |
+    to_entries | {jobs:map({name:("Draft snapshot / "+.value),status:"completed",conclusion:"skipped",id:(200+.key),run_id:901,head_sha:$h})}' >"$1/jobs-901.json"
+  "$JQ" '{check_runs:([.jobs[] | {name:(.name|ltrimstr("Draft snapshot / ")),status:"completed",conclusion:"success",id:(.id-100),check_suite:{id:55}}] + [.jobs[] | {name,status,conclusion,id,check_suite:{id:66}}])}' "$1/jobs-901.json" >"$1/checkruns.json"
+}
+mutate() { "$JQ" "$2" "$1" >"$1.tmp" && mv "$1.tmp" "$1"; }
+race_case() { run_case "$1" "$2" "$3" 0 "$d" --check --repo o/r --pr 5 --head "$H"; }
+d="$work/race-late"; race_setup "$d"
+race_case late-draft-does-not-shadow-ready 0 'WOULD APPROVE'
+d="$work/race-early"; race_setup "$d"; mutate "$d/actions.json" '.workflow_runs[1].run_number=9'
+race_case early-draft-does-not-shadow-ready 0 'WOULD APPROVE'
+d="$work/race-skipped-run"; race_setup "$d"; mutate "$d/actions.json" '.workflow_runs[1].conclusion="skipped"'
+race_case complete-skipped-draft-run 0 'WOULD APPROVE'
+d="$work/race-current-draft"; race_setup "$d"; mutate "$d/pull.json" '.draft=true'
+race_case current-draft-still-refused 2 'PR is Draft'
+d="$work/race-cancelled"; race_setup "$d"; mutate "$d/actions.json" '.workflow_runs[1].conclusion="cancelled"'
+mutate "$d/checkruns.json" '.check_runs |= map(select(.check_suite.id != 66 or .id == 200))'
+race_case cancelled-incomplete-draft-loses-to-ready 0 'WOULD APPROVE'
+d="$work/race-only-cancelled"; race_setup "$d"; mutate "$d/actions.json" '.workflow_runs |= map(select(.id == 901) | .conclusion="cancelled")'
+race_case cancelled-draft-only-refused 2 'invalid Draft snapshot'
+for fault in missing duplicate extra success pending head run id; do
+  d="$work/race-jobs-$fault"; race_setup "$d"
+  case "$fault" in
+    missing) change='.jobs |= .[0:5]' ;;
+    duplicate) change='.jobs[5] = .jobs[0]' ;;
+    extra) change='.jobs += [(.jobs[0] | .id=999 | .name="unexpected")]' ;;
+    success) change='.jobs[0].conclusion="success"' ;;
+    pending) change='.jobs[0].status="queued"' ;;
+    head) change='.jobs[0].head_sha="wrong"' ;;
+    run) change='.jobs[0].run_id=999' ;;
+    id) change='.jobs[0].id=999' ;;
+  esac
+  mutate "$d/jobs-901.json" "$change"
+  race_case "draft-jobs-$fault-refused" 2 'Draft snapshot'
+done
+for fault in path event head suite missing-meta all-success; do
+  d="$work/race-binding-$fault"; race_setup "$d"
+  case "$fault" in
+    path) mutate "$d/actions.json" '.workflow_runs[1].path=".github/workflows/other.yml"' ;;
+    event) mutate "$d/actions.json" '.workflow_runs[1].event="workflow_dispatch"' ;;
+    head) mutate "$d/actions.json" '.workflow_runs[1].head_sha="wrong"' ;;
+    suite) mutate "$d/actions.json" '.workflow_runs[1].check_suite_id=0' ;;
+    missing-meta) mutate "$d/actions.json" '.workflow_runs |= .[0:1]' ;;
+    all-success)
+      mutate "$d/jobs-901.json" '.jobs[].conclusion="success"'
+      mutate "$d/checkruns.json" '.check_runs[].conclusion="success"' ;;
+  esac
+  race_case "draft-binding-$fault-refused" 2 'invalid Draft snapshot'
+done
+for fault in fail pending missing split other-workflow; do
+  d="$work/race-ready-$fault"; race_setup "$d"
+  case "$fault" in
+    fail) mutate "$d/checkruns.json" '.check_runs[0].conclusion="failure"' ;;
+    pending) mutate "$d/actions.json" '.workflow_runs += [(.workflow_runs[0] | .id=902 | .run_number=12 | .check_suite_id=77 | .status="in_progress" | .conclusion=null)]' ;;
+    missing) mutate "$d/checkruns.json" '.check_runs |= map(select(.id != 105))' ;;
+    split) mutate "$d/checkruns.json" '.check_runs[0].check_suite.id=77' ;;
+    other-workflow) mutate "$d/actions.json" '.workflow_runs[0].workflow_id=2 | .workflow_runs[0].path=".github/workflows/other.yml"' ;;
+  esac
+  race_case "ready-$fault-not-hidden-by-draft" 2 'requires six successful checks'
+done
+# Pagination must be aggregated before checking six: three + three is valid;
+# six + an extra seventh row is invalid, including a duplicate name.
+for page in split extra duplicate; do
+  d="$work/race-page-$page"; race_setup "$d"
+  case "$page" in
+    split)
+      "$JQ" '{jobs:.jobs[3:]}' "$d/jobs-901.json" >"$d/jobs-901-page2.json"
+      mutate "$d/jobs-901.json" '.jobs |= .[0:3]'
+      race_case paginated-draft-six-accepted 0 'WOULD APPROVE' ;;
+    extra|duplicate)
+      "$JQ" '{jobs:[.jobs[0]]}' "$d/jobs-901.json" >"$d/jobs-901-page2.json"
+      if [ "$page" = extra ]; then mutate "$d/jobs-901-page2.json" '.jobs[0].name="extra"'; fi
+      race_case "paginated-draft-$page-refused" 2 'invalid Draft snapshot' ;;
+  esac
+done
+# Ready check evidence follows the latest check row per name in the SAME suite,
+# including reruns; it must not synthesize a green set across different suites.
+d="$work/race-rerun"; race_setup "$d"
+mutate "$d/checkruns.json" '.check_runs += [(.check_runs[0] | .id=99 | .conclusion="failure")]'
+race_case earlier-failed-check-in-same-ready-suite 0 'WOULD APPROVE'
+d="$work/race-rerun-failed"; race_setup "$d"
+mutate "$d/checkruns.json" '.check_runs += [(.check_runs[0] | .id=999 | .conclusion="failure")]'
+race_case latest-failed-check-in-ready-suite 2 'requires six successful checks'
+d="$work/race-transport"; race_setup "$d"
+FAKE_FAIL='*/jobs*' race_case draft-jobs-transport-is-infra-error 1 'gh api repos/o/r/actions/runs/901/jobs'
+d="$work/race-nojq"; race_setup "$d"
+PATH="$work/nojq:$PATH" race_case draft-selection-needs-no-standalone-jq 0 'WOULD APPROVE'
+
 # ---- dispatch-only skipped job (#38873): workflow file decides, never the row alone ----
 # A job whose `if:` requires workflow_dispatch is skipped in every pull_request
 # run by design; the newest pull_request suite may still be green. The guard
@@ -352,6 +449,7 @@ done
 
 # Red control: removing the marker predicate must turn the negative fixture
 # into an approval, proving the fixture distinguishes the safety check.
+cp "$here/pr-check-run-contract.sh" "$work/pr-check-run-contract.sh"
 sed 's/\[ "$marker" = "1" \] || continue/: # red-control marker removed/' "$guard" >"$work/no-marker-guard.sh"
 d="$work/manual-release-unrelated-missing-marker"
 out="$(FAKE_DIR="$d" GUARD_GH="$work/gh" bash "$work/no-marker-guard.sh" --repo o/r --pr 5 --head "$H" --body "$d/body.md" 2>&1)"; rc=$?
@@ -403,6 +501,41 @@ d="$work/userfail"; setup "$d"
 FAKE_FAIL='user' run_case gh-user-fails-no-post 1 "gh api user failed" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
 d="$work/userempty"; setup "$d"; echo '{"login":""}' >"$d/user.json"
 run_case user-empty-no-post 1 "returned no login" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+
+
+# Workflow names/group are the scheduler half of the contract. Execute the
+# actual summary shell for each unsuccessful needs result, not a copied gate.
+workflow="$here/../../.github/workflows/pr-check.yml"
+expected_names="$work/workflow-names"
+: >"$expected_names"
+for check_name in 'TLA model check' 'lint suite' 'dune build @check' 'dune build --profile release @check' 'dashboard typecheck' 'PR required success'; do
+  printf "    name: \${{ github.event.pull_request.draft == true && 'Draft snapshot / %s' || '%s' }}\n" "$check_name" "$check_name" >>"$expected_names"
+done
+if diff -u <(LC_ALL=C sort "$expected_names") <(grep '^    name:' "$workflow" | LC_ALL=C sort) &&
+   grep -qFx "  group: pr-check-\${{ github.event.pull_request.number }}-\${{ github.event.pull_request.draft == true && 'draft' || 'ready' }}" "$workflow" &&
+   grep -qFx '  cancel-in-progress: true' "$workflow" &&
+   [ "$(grep -cFx '    if: github.event.pull_request.draft == false' "$workflow")" = 5 ] &&
+   grep -qFx '    if: ${{ always() && github.event.pull_request.draft == false }}' "$workflow" &&
+   grep -qFx '    needs: [tla, lint, check, release-check, dashboard-types]' "$workflow"; then
+  pass=$((pass+1)); echo 'ok   workflow-ready-names-and-draft-isolation'
+else fail=$((fail+1)); echo 'FAIL workflow-ready-names-and-draft-isolation'; fi
+sed -n '/^  required-success:/,$p' "$workflow" | sed -n '/^        run: |/,$p' | tail -n +2 | sed 's/^          //' >"$work/summary.sh"
+for field in PR_DRAFT TLA_RESULT LINT_RESULT CHECK_RESULT RELEASE_RESULT DASHBOARD_RESULT; do
+  for result in failure cancelled skipped pending ''; do
+    if env PR_DRAFT=false TLA_RESULT=success LINT_RESULT=success CHECK_RESULT=success RELEASE_RESULT=success DASHBOARD_RESULT=success \
+      "$field=$result" bash "$work/summary.sh" >"$work/summary.out" 2>&1; then
+      fail=$((fail+1)); echo "FAIL summary-accepted-$field-$result"
+    else pass=$((pass+1)); echo "ok   summary-refuses-$field-$result"; fi
+  done
+done
+if env PR_DRAFT=false TLA_RESULT=success LINT_RESULT=success CHECK_RESULT=success RELEASE_RESULT=success DASHBOARD_RESULT=success \
+  bash "$work/summary.sh" >"$work/summary.out" 2>&1; then
+  pass=$((pass+1)); echo 'ok   ready-summary-five-successes'
+else fail=$((fail+1)); echo 'FAIL ready-summary-five-successes'; fi
+if env PR_DRAFT=true TLA_RESULT=success LINT_RESULT=success CHECK_RESULT=success RELEASE_RESULT=success DASHBOARD_RESULT=success \
+  bash "$work/summary.sh" >"$work/summary.out" 2>&1; then
+  fail=$((fail+1)); echo 'FAIL summary-accepted-current-draft'
+else pass=$((pass+1)); echo 'ok   summary-refuses-current-draft'; fi
 
 echo "pass=$pass fail=$fail"
 [ "$fail" -eq 0 ]

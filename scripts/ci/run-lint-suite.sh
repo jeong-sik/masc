@@ -64,8 +64,11 @@ run_self_test_when_changed() {
 }
 
 blocking_lints() {
+  run_self_test_when_changed "PR check Draft/Ready approval contract" \
+    ".github/workflows/pr-check.yml scripts/review/approve-guard.sh scripts/review/approve-guard-selftest.sh scripts/review/pr-check-run-contract.sh" \
+    bash scripts/review/approve-guard-selftest.sh
   run_self_test_when_changed "Review queue ledger readiness" \
-    "scripts/review/queue-ledger.sh scripts/review/test_queue_ledger.py" \
+    "scripts/review/queue-ledger.sh scripts/review/test_queue_ledger.py scripts/review/pr-check-run-contract.sh" \
     python3 scripts/review/test_queue_ledger.py
   run_lint "Installer terminal wizard" python3 test/test_installer_wizard.py
   run_lint "Installer upgrade configuration" python3 test/test_installer_upgrade.py

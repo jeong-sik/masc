@@ -7,6 +7,8 @@
 #   3. the newest run of every GitHub Actions workflow for that SHA that is not
 #      a cancelled twin is completed+success
 #      (a queued workflow has no check-runs yet; this catches it)
+#      Verified namespaced Draft snapshots cannot shadow a Ready suite; their
+#      exclusion requires all six canonical checks in that Ready suite to pass.
 #   4. the check-run of every name from the newest check suite on that SHA is
 #      completed+success, ignoring suites of runs that lost in 3 (none -> refuse)
 #   5. the body file is non-empty (no evidence-free approvals), and its first
@@ -33,6 +35,7 @@
 # error stops the guard with exit 1 instead of turning into false refusals.
 set -u
 GH="${GUARD_GH:-gh}"
+source "$(cd "$(dirname "$0")" && pwd)/pr-check-run-contract.sh" || exit 1
 check_only=0; merge_check=0; repo=""; pr=""; head=""; body=""; replace_cr=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -147,7 +150,15 @@ fi
 # and then the guard refuses. A newer queued or in-progress run still outranks
 # an older finished one.
 # sort+awk rather than an associative array: lanes may run bash 3.2.
-wf_all="$(gh_json "repos/${repo}/actions/runs?head_sha=${head}&per_page=100" '.workflow_runs[] | [(.workflow_id|tostring), (if .conclusion == "cancelled" then "0" else "1" end), (.run_number|tostring), .name, .status, (.conclusion // "none"), (.id|tostring), ((.check_suite_id // 0)|tostring), (.event // "none"), (.path // ""), (.head_branch // "")] | @tsv')" || exit 1
+wf_all="$(gh_json "repos/${repo}/actions/runs?head_sha=${head}&per_page=100" "$PR_CHECK_WORKFLOWS_JQ")" || exit 1
+runs="$(gh_json "repos/${repo}/commits/${head}/check-runs?per_page=100" "$PR_CHECK_CHECKS_JQ")" || exit 1
+pr_check_classify "$repo" "$head" "$wf_all" "$runs" gh_json || exit 1
+[ -z "$PR_CHECK_INVALID" ] || refuse "$PR_CHECK_INVALID"
+if [ -n "$PR_CHECK_DRAFT_RUNS$PR_CHECK_CANCELLED_RUNS" ]; then
+  [ "$PR_CHECK_READY_OK" = yes ] || refuse "Draft snapshot exclusion requires six successful checks in the selected Ready PR-check suite"
+  wf_all="$(printf '%s\n' "$wf_all" | awk -F '\t' -v ignored="$PR_CHECK_DRAFT_RUNS $PR_CHECK_CANCELLED_RUNS" 'BEGIN {n=split(ignored,a," "); for(i=1;i<=n;i++) drop[a[i]]=1} NF && !($7 in drop)')"
+fi
+[ ${#reasons[@]} -eq 0 ] || finish_refused
 # A failed manual Release run is ignorable only when the validator itself
 # recorded the intended ref refusal. A runner/setup failure on the same ref
 # must remain a failed workflow. The four jobs are fixed by release.yml; any
@@ -195,9 +206,8 @@ done <<<"$wf"
 # success 108051995088, while its suite 97836272095 was older than 97836300496.
 # Within one suite (a re-run), the higher check-run id is the newer row.
 # sort+awk rather than an associative array: lanes may run bash 3.2.
-runs="$(gh_json "repos/${repo}/commits/${head}/check-runs?per_page=100" '.check_runs[] | [.name, .status, (.conclusion // "none"), (.id|tostring), ((.check_suite.id // 0)|tostring)] | @tsv')" || exit 1
 # Rows from a suite whose workflow run lost in section 3 never count.
-runs="$(printf '%s\n' "$runs" | awk -F '\t' -v lost="$lost_suites" -v ignored="$ignored_release_suites" 'BEGIN { n = split(lost, l, " "); for (i = 1; i <= n; i++) if (l[i] != "") drop[l[i]] = 1; n = split(ignored, x, " "); for (i = 1; i <= n; i++) if (x[i] != "") drop[x[i]] = 1 } NF && !($5 in drop)')"
+runs="$(printf '%s\n' "$runs" | awk -F '\t' -v lost="$lost_suites" -v ignored="$ignored_release_suites $PR_CHECK_DRAFT_SUITES $PR_CHECK_CANCELLED_SUITES" 'BEGIN { n = split(lost, l, " "); for (i = 1; i <= n; i++) if (l[i] != "") drop[l[i]] = 1; n = split(ignored, x, " "); for (i = 1; i <= n; i++) if (x[i] != "") drop[x[i]] = 1 } NF && !($5 in drop)')"
 runs="$(printf '%s\n' "$runs" | sort -t "$(printf '\t')" -k1,1 -k5,5nr -k4,4nr | awk -F '\t' 'NF && !seen[$1]++')"
 # A skipped row of the newest suite is a refusal, except when the job is one
 # the pull_request event never runs: its `if:` requires workflow_dispatch
@@ -210,7 +220,7 @@ runs="$(printf '%s\n' "$runs" | sort -t "$(printf '\t')" -k1,1 -k5,5nr -k4,4nr |
 # selftest points it at fixture trees.
 dispatch_skips=""
 n_runs=0; run_ids=()
-while IFS=$'\t' read -r name status concl id suite; do
+while IFS=$'\t' read -r name status concl id suite _started; do
   [ -n "${name:-}" ] || continue
   if [ "$status" = "completed" ] && [ "$concl" = "skipped" ]; then
     suite_event="$(printf '%s\n' "$suite_kinds" | awk -F '\t' -v s="$suite" '$1 == s { print $2; exit }')"
@@ -289,6 +299,8 @@ footer="$(printf '\n\n---\napprove-guard: head `%s` · %d check-runs completed+s
 [ -z "$replaced" ] || footer="${footer} · replaces own CHANGES_REQUESTED ${replaced}"
 [ -z "$(printf '%s' "$dispatch_skips" | tr -d ' ')" ] || footer="${footer} · dispatch-only skipped:${dispatch_skips}"
 [ -z "$ignored_release_run_suites" ] || footer="${footer} · ignored refused manual Release dispatch run/suite:${ignored_release_run_suites}"
+[ -z "$PR_CHECK_DRAFT_RUNS" ] || footer="${footer} · verified Draft snapshot runs:${PR_CHECK_DRAFT_RUNS}"
+[ -z "$PR_CHECK_CANCELLED_RUNS" ] || footer="${footer} · cancelled Draft snapshot twins:${PR_CHECK_CANCELLED_RUNS}"
 if [ "$check_only" -eq 1 ]; then
   echo "WOULD APPROVE #${pr} head ${head} (${n_runs} check-runs, workflow runs ${wf_ids[*]})"
   exit 0

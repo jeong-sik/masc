@@ -126,6 +126,11 @@
  (modules test_keeper_vision_official_client)
  (libraries masc_test_deps))
 
+(executable
+ (name vision_artifact_measure)
+ (modules vision_artifact_measure)
+ (libraries masc_test_deps))
+
 (test
  (name test_verifier_official_client)
  (modules test_verifier_official_client)

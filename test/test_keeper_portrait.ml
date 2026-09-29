@@ -188,7 +188,9 @@ let test_every_item_shows () =
   List.iter
     (fun face -> match face with Bare_face -> () | Glasses | Shades | Eye_patch | Plaster | Freckles | Beard -> worn "face item" { bare with face })
     all_face_items;
-  List.iter (fun neck -> match neck with Bare_neck -> () | Scarf -> worn "scarf" { bare with neck }) all_neck_items;
+  List.iter
+    (fun neck -> match neck with Bare_neck -> () | Scarf | Bow_tie | Medal -> worn "neck item" { bare with neck })
+    all_neck_items;
   List.iter
     (fun head -> match head with Bare_head -> () | Bow | Crown | Beanie -> worn "head item" { bare with head })
     all_head_items;
@@ -313,30 +315,36 @@ let test_every_freckle_shows_on_the_wax () =
         [ 64; 128 ])
     (corner_bodies ~eyes:Sparkle ())
 
-(* A scarf hangs under the mouth: every pixel that is mouth or tooth without
-   one is the same with one. *)
-let test_scarf_leaves_the_mouth () =
+(* A neck item hangs under the mouth: every pixel that is mouth or tooth
+   without one is the same with one. *)
+let test_neck_item_leaves_the_mouth () =
   let n = 256 in
   List.iter
-    (fun mouth ->
-      List.iter
-        (fun body ->
-          let plain = D.render body bare (size n) in
-          let scarfed = D.render body { bare with neck = Scarf } (size n) in
-          let marked = [ D.For_testing.mouth_rgb body; D.For_testing.tooth_rgb body ] in
-          let kept = ref 0 in
-          for y = 0 to n - 1 do
-            for x = 0 to n - 1 do
-              let c, a = D.pixel plain ~x ~y in
-              if a = 255 && List.mem c marked then begin
-                incr kept;
-                Alcotest.(check bool) "mouth pixel kept under a scarf" true (D.pixel scarfed ~x ~y = (c, a))
-              end
-            done
-          done;
-          Alcotest.(check bool) "the mouth was drawn" true (!kept > 0))
-        (corner_bodies ~mouth ()))
-    all_mouths
+    (fun neck ->
+      match neck with
+      | Bare_neck -> ()
+      | Scarf | Bow_tie | Medal ->
+        List.iter
+          (fun mouth ->
+            List.iter
+              (fun body ->
+                let plain = D.render body bare (size n) in
+                let worn = D.render body { bare with neck } (size n) in
+                let marked = [ D.For_testing.mouth_rgb body; D.For_testing.tooth_rgb body ] in
+                let kept = ref 0 in
+                for y = 0 to n - 1 do
+                  for x = 0 to n - 1 do
+                    let c, a = D.pixel plain ~x ~y in
+                    if a = 255 && List.mem c marked then begin
+                      incr kept;
+                      Alcotest.(check bool) "mouth pixel kept under a neck item" true (D.pixel worn ~x ~y = (c, a))
+                    end
+                  done
+                done;
+                Alcotest.(check bool) "the mouth was drawn" true (!kept > 0))
+              (corner_bodies ~mouth ()))
+          all_mouths)
+    all_neck_items
 
 (* A beard hangs below the mouth and its fang: every pixel that is mouth or
    tooth without one is the same with one. The old beard was a filled oval
@@ -410,7 +418,7 @@ let extreme_cases () =
           ()
       in
       let equipment =
-        { face; neck = Scarf; head = Bow; hand = List.nth all_hand_items (k mod List.length all_hand_items); base = Dish (List.nth dishes (k mod List.length dishes)) }
+        { face; neck = List.nth all_neck_items (k mod List.length all_neck_items); head = Bow; hand = List.nth all_hand_items (k mod List.length all_hand_items); base = Dish (List.nth dishes (k mod List.length dishes)) }
       in
       (body, equipment))
     all_face_items
@@ -580,7 +588,7 @@ let () =
           Alcotest.test_case "flame gives light" `Quick test_flame_gives_light;
           Alcotest.test_case "face sits on the wax" `Quick test_face_sits_on_the_wax;
           Alcotest.test_case "every freckle shows on the wax" `Quick test_every_freckle_shows_on_the_wax;
-          Alcotest.test_case "scarf leaves the mouth" `Quick test_scarf_leaves_the_mouth;
+          Alcotest.test_case "neck item leaves the mouth" `Quick test_neck_item_leaves_the_mouth;
           Alcotest.test_case "beard leaves the mouth" `Quick test_beard_leaves_the_mouth;
           Alcotest.test_case "beard is not the wax" `Quick test_beard_is_not_the_wax;
           Alcotest.test_case "culling changes nothing" `Quick test_culling_changes_nothing;

@@ -204,6 +204,11 @@
 |---|---|
 | #39983 | Codex host 종료를 실패 대신 종료로 적음(N-of-M 정리) |
 | #39991 | 웹 Gate 승인 대기 표시(TU-F01, P0) |
+| #39996 | 대시보드 decoder 셋: runtime-probe 상태 단어(TU-F02, P0), async-requests `request_context`(TU-F17), 채팅 delivery kind(TU-F18) |
+| #39998 | TUI Schedules·Agenda 다음 일정(TU-F04) |
+| #39997 | Codex 사용량 거절 뒤 리셋 시각까지 쉼(RT-R1). Fusion 경로는 남음 |
+| #40001 | facts 가 그대로인 Librarian pass 는 snapshot·revision 을 새로 쓰지 않음(MM-M1 근본) |
+| #40003 | Board 판정 reconcile 쌍을 한 분류로, 불일치는 그 구역만 Blocked(DM-BD-1) |
+| #40000 | RFC: 클라이언트 decoder 는 서버가 쓴 fixture 로 시험 |
 
 리뷰 코멘트: #39972(RT-C2), #39928(DM-CD-2), #39978(DM-CD-2·CD-3).
-

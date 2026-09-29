@@ -197,6 +197,47 @@ let emit_goal_event (ctx : context) ~goal_id ~event_type ~payload =
        ])
 ;;
 
+(* An edit to a goal's due date or priority moves no phase, so no other row
+   remembers the value it replaced, and a due date pushed back left no trace
+   (#39878). One row per edit holds only the fields that changed, each as
+   {from, to}. It records the edit and never refuses it. The edit is already
+   stored when the row is appended, so a row that cannot be appended does not
+   fail the edit: the error log carries the goal and the payload.
+
+   The row is appended after the store's lock is released, so the file does not
+   guarantee the order of two edits that overlap. *)
+let emit_goal_edit (ctx : context) ~(previous : Goal_store.goal) (goal : Goal_store.goal) =
+  let change field ~from_json ~to_json = field, `Assoc [ "from", from_json; "to", to_json ] in
+  let due_date =
+    if Option.equal String.equal previous.due_date goal.due_date
+    then []
+    else
+      [ change
+          "due_date"
+          ~from_json:(Json_util.string_opt_to_json previous.due_date)
+          ~to_json:(Json_util.string_opt_to_json goal.due_date)
+      ]
+  in
+  let priority =
+    if Int.equal previous.priority goal.priority
+    then []
+    else
+      [ change "priority" ~from_json:(`Int previous.priority) ~to_json:(`Int goal.priority) ]
+  in
+  match due_date @ priority with
+  | [] -> ()
+  | changes ->
+    let payload = `Assoc (("actor", `String ctx.agent_name) :: changes) in
+    (try emit_goal_event ctx ~goal_id:goal.id ~event_type:"goal_edited" ~payload with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Log.Misc.error
+         "goal edit not recorded after it was stored goal_id=%s payload=%s detail=%s"
+         goal.id
+         (Yojson.Safe.to_string payload)
+         (Printexc.to_string exn))
+;;
+
 (* RFC-0387 stage 2: wake the goal verifier lane after a durable
    [Proof_pending] request committed. The wake is
    scheduling only — the same discipline as the task-side
@@ -347,27 +388,29 @@ let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result
              had no answer (#35359). Phase transitions already emit; this closes
              the other end of the same ledger. The payload is the goal as created
              so its title outlives its row in the store. An update is not a second
-             beginning and emits no goal_created; only an update that moves the
-             phase records a goal_phase event. *)
+             beginning and emits no goal_created; an update that moves the phase
+             records a goal_phase event, and one that changes the due date or
+             priority records a goal_edited event. *)
           (match action with
            | `created ->
              emit_goal_event ctx ~goal_id:goal.id ~event_type:"goal_created"
                ~payload:(Goal_store.goal_to_yojson goal)
-           | `updated previous_phase ->
+           | `updated previous ->
              (* An edit to the success criterion takes a Verifying,
                 Awaiting_confirmation or Completed goal back to Executing
                 (Goal_store.upsert_goal). That is a phase move like any
                 other, so it enters the same ledger with the phase it left and
                 who moved it. *)
-             if previous_phase <> goal.phase then
+             if previous.phase <> goal.phase then
                emit_goal_event ctx ~goal_id:goal.id ~event_type:"goal_phase"
                  ~payload:
                    (`Assoc
                       [ "phase", Goal_phase.to_yojson goal.phase
-                      ; "previous_phase", Goal_phase.to_yojson previous_phase
+                      ; "previous_phase", Goal_phase.to_yojson previous.phase
                       ; "actor", `String ctx.agent_name
                       ; "cause", `String "criterion_edit"
-                      ]));
+                      ]);
+             emit_goal_edit ctx ~previous goal);
           ok_result
             ~tool_name
             ~start_time

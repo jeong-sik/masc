@@ -473,9 +473,14 @@ let same_disposition left right =
 (* A timer this stall armed fires after the full interval. A timer that was
    already running fires when it fires; the post promises no number it does
    not hold. *)
-let retry_delay_sentence = function
-  | Full_interval { seconds } -> Printf.sprintf "retry scheduled in %.0f s" seconds
-  | Shared_timer -> "retry scheduled when the shared retry timer fires"
+let retry_delay_sentence ~now = function
+  | Full_interval { seconds } ->
+    Printf.sprintf
+      "retry scheduled in %.0f s (next attempt around %s)"
+      seconds
+      (Time_codec.rfc3339_of_unix (now +. seconds))
+  | Shared_timer ->
+    "retry scheduled when the shared retry timer fires (next attempt time unknown)"
 
 type stalled_subject =
   | Task_review of
@@ -516,7 +521,20 @@ let subject_owner_id = function
    forward path a Goal has: a Keeper asking again with request_complete.
    Without new evidence that call keeps the same request, so a review that
    stops again for the same reason is not posted twice. *)
-let stalled_board_content ~subject ~gate ~detail =
+(* The gate as the post names it. A reviewed stop knows which evaluator
+   runtime it ended on: the last slot the lane tried, because a stop is only
+   reached once every slot has failed. A reader deciding whether to wait or
+   to change something needs that name, and a rate-limit detail alone does
+   not carry it. The runtime is evidence like the detail: it sits beside the
+   gate and is not part of what the repeat check compares. A stop that no
+   evaluator produced names none. *)
+let gate_clause ~gate ~evaluator_runtime =
+  match evaluator_runtime with
+  | None -> gate
+  | Some runtime -> Printf.sprintf "%s (last runtime: %s)" gate runtime
+
+let stalled_board_content_with_runtime ~subject ~gate ~detail ~evaluator_runtime ~now =
+  let gate = gate_clause ~gate ~evaluator_runtime in
   match subject with
   | Task_review { task_id; verification_id; disposition = Retry_scheduled { delay } } ->
     Printf.sprintf
@@ -525,7 +543,7 @@ let stalled_board_content ~subject ~gate ~detail =
        that review."
       task_id
       verification_id
-      (retry_delay_sentence delay)
+      (retry_delay_sentence ~now delay)
       gate
       detail
   | Task_review { task_id; verification_id; disposition = No_retry_armed } ->
@@ -550,11 +568,16 @@ let stalled_board_content ~subject ~gate ~detail =
       gate
       detail
 
-let stalled_metadata
+let stalled_board_content ~subject ~gate ~detail =
+  stalled_board_content_with_runtime
+    ~subject ~gate ~detail ~evaluator_runtime:None ~now:(Time_compat.now ())
+
+let stalled_metadata_with_runtime
       ~(authority : Masc_domain.completion_authority)
       ~subject
       ~gate
       ~detail
+      ~evaluator_runtime
   =
   `Assoc
     ([ ("type", `String "verification_stalled")
@@ -565,9 +588,16 @@ let stalled_metadata
      @ completion_authority_fields authority
      @ [ ("gate", `String gate)
        ; ("detail", `String detail)
-       ; ("disposition", stall_disposition_to_json (subject_disposition subject))
+       ]
+     @ (match evaluator_runtime with
+        | None -> []
+        | Some runtime -> [ ("evaluator_runtime", `String runtime) ])
+     @ [ ("disposition", stall_disposition_to_json (subject_disposition subject))
        ; ("timestamp", `Float (Time_compat.now ()))
        ])
+
+let stalled_metadata ~authority ~subject ~gate ~detail =
+  stalled_metadata_with_runtime ~authority ~subject ~gate ~detail ~evaluator_runtime:None
 
 (* How far back a stall looks for its own earlier post.
 
@@ -634,11 +664,12 @@ let latest_stall_disposition_on_the_board ~subject ~gate =
   | [] -> None
   | (_, latest) :: _ -> Some latest
 
-let notify_stalled_verification
+let notify_stalled_verification_with_runtime
       ~(authority : Masc_domain.completion_authority)
       ~subject
       ~gate
       ~detail
+      ~evaluator_runtime
   =
   let already_told =
     match latest_stall_disposition_on_the_board ~subject ~gate with
@@ -648,12 +679,14 @@ let notify_stalled_verification
   if already_told
   then ()
   else
+  let now = Time_compat.now () in
   match
     Board_dispatch.create_post
       ~author:(Masc_domain.completion_authority_actor authority)
-      ~content:(stalled_board_content ~subject ~gate ~detail)
+      ~content:(stalled_board_content_with_runtime ~subject ~gate ~detail ~evaluator_runtime ~now)
       ~post_kind:Board.System_post
-      ~meta_json:(stalled_metadata ~authority ~subject ~gate ~detail)
+      ~meta_json:
+        (stalled_metadata_with_runtime ~authority ~subject ~gate ~detail ~evaluator_runtime)
       ~visibility:Board.Internal
       ~hearth:"verification"
       ()
@@ -672,9 +705,15 @@ let notify_stalled_verification
       gate
       (Board_types.show_board_error e)
 
+let notify_stalled_verification ~authority ~subject ~gate ~detail =
+  notify_stalled_verification_with_runtime
+    ~authority ~subject ~gate ~detail ~evaluator_runtime:None
+
 module For_testing = struct
   let verdict_event_json = verdict_event_json
   let stalled_board_content = stalled_board_content
+  let stalled_board_content_with_runtime = stalled_board_content_with_runtime
   let stall_disposition_of_json = stall_disposition_of_json
   let stalled_metadata = stalled_metadata
+  let stalled_metadata_with_runtime = stalled_metadata_with_runtime
 end

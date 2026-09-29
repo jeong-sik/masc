@@ -1,0 +1,62 @@
+{
+  "as_of": "2026-09-29T05:35:49+00:00",
+  "goal_events": {
+    "by_type": {
+      "goal_created": 14,
+      "goal_phase": 35
+    },
+    "dropped_by_actor": {
+      "codex-mcp-client": 1,
+      "e-masc-the-leader": 6,
+      "indie-geek-blue": 1,
+      "masc-tui": 1
+    },
+    "verify_to_confirm_hours": {
+      "max": 35.16,
+      "median": 20.38,
+      "min": 7.89,
+      "n": 3
+    }
+  },
+  "goals": {
+    "by_phase": {
+      "completed": 3,
+      "dropped": 9,
+      "executing": 6
+    },
+    "due_date_is_date_only": 11,
+    "first_created": "2026-09-09T05:17:28+00:00",
+    "owner_known": 0,
+    "total": 18,
+    "with_due_date": 11
+  },
+  "tasks": {
+    "by_status": {
+      "awaiting_verification": 3,
+      "cancelled": 189,
+      "done": 139,
+      "in_progress": 19,
+      "todo": 515
+    },
+    "delegation": {
+      "codex-mcp-client": {
+        "created_and_done": 30,
+        "done_by_others": 29
+      },
+      "e-masc-the-leader": {
+        "created_and_done": 28,
+        "done_by_others": 25
+      },
+      "wkbl-web-leader": {
+        "created_and_done": 54,
+        "done_by_others": 18
+      }
+    },
+    "done_created_by_the_assignee": 54,
+    "done_created_by_the_assignee_share": 0.388,
+    "done_total": 139,
+    "goals_with_a_link": 9,
+    "linked_to_a_goal": 41,
+    "total": 865
+  }
+}

@@ -549,6 +549,40 @@ let post_json_outcome ~(host : string) ~(port : int) ~(path : string) ~(body : s
      | Ok json -> Post_answered json
      | Error message -> Post_unanswered message)
 
+let http_delete ~(host : string) ~(port : int) ~(path : string) =
+  let url = url_of ~host ~port ~path in
+  timed ~verb:"DELETE" ~path @@ fun () ->
+  with_credential_refresh @@ fun () ->
+  match Masc_http_client.delete_sync ?clock:(request_clock ())
+          ~timeout_sec:(request_timeout_sec ()) ~url ~headers:(auth_headers ()) () with
+  | Ok answer -> Ok answer
+  | Error detail ->
+      Error (Masc.Tui_decode.http_transport_error ~verb:"DELETE" ~url ~detail)
+
+let mutation_outcome = function
+  | Error detail -> Post_unanswered detail
+  | Ok (status_code, response) when status_code >= 400 && status_code < 500 ->
+      (match decode_json ~allow_empty:true ~status_code ~body:response with
+       | Error message -> Post_refused message
+       | Ok _ -> Post_refused (Printf.sprintf "HTTP %d" status_code))
+  | Ok (status_code, response) ->
+      (match decode_json ~allow_empty:false ~status_code ~body:response with
+       | Ok json -> Post_answered json
+       | Error message -> Post_unanswered message)
+
+let list_play_invites ~host ~port =
+  get_json ~host ~port ~path:"/api/v1/play/invites"
+
+let issue_play_invite ~host ~port ~name ~hours =
+  post_json_outcome ~host ~port ~path:"/api/v1/play/invites"
+    ~body:(Yojson.Safe.to_string
+      (`Assoc [ "name", `String name; "hours", `Int hours ]))
+
+let revoke_play_invite ~host ~port ~name =
+  http_delete ~host ~port
+    ~path:("/api/v1/play/invites/" ^ percent_encode_path_segment name)
+  |> mutation_outcome
+
 let post_json ~(host : string) ~(port : int) ~(path : string) ~(body : string) : (Yojson.Safe.t, string) result =
   match http_post ~headers:(auth_headers ()) ~host ~port ~path ~body with
   | Error e -> Error e

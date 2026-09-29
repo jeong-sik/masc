@@ -342,6 +342,11 @@ def test_http_endpoint(
             if requests is not None:
                 requests.append((self.path, body))
 
+        def do_DELETE(self) -> None:
+            self.respond()
+            if requests is not None:
+                requests.append((self.path, b""))
+
         def log_message(self, format: str, *args: object) -> None:
             del format, args
 

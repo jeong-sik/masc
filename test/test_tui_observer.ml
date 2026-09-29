@@ -357,6 +357,36 @@ let test_every_whole_projection_push_decodes_as_a_snapshot () =
           (List.map summary (decode_all [ frame ])))
     Masc.Dashboard_event_slices.entries
 
+(* A whole-projection push can run to megabytes after its type, and the feed
+   keeps only the name, so the frame is not read past the type: a body that
+   is not JSON still arrives as the snapshot it names. An event read from its
+   fields is still parsed whole and refused when it is not JSON, and a type
+   that is not the first member is found by the whole parse, even when the
+   first member is another string. *)
+let test_a_frame_its_type_decides_is_not_read_past_the_type () =
+  check (list string) "the snapshot is named without its body"
+    [ "snapshot:operator_snapshot" ]
+    (List.map summary
+       (decode_all [ "data: {\"type\":\"operator_snapshot\",\"payload\":not json\n\n" ]));
+  check (list string) "an untaught type is named the same way"
+    [ "other:some_new_push" ]
+    (List.map summary (decode_all [ "data: {\"type\":\"some_new_push\",oops\n\n" ]));
+  (match decode_all [ "data: {\"type\":\"keeper_heartbeat\",\"name\":oops}\n\n" ] with
+   | [ Observer.Undecodable _ ] -> ()
+   | decoded ->
+       fail
+         ("an event read from its fields was not parsed whole: "
+         ^ String.concat ", " (List.map summary decoded)));
+  check (list string) "a type that is not the first member is still found"
+    [ "snapshot:operator_snapshot" ]
+    (List.map summary
+       (decode_all [ "data: {\"ts_unix\":1.0,\"type\":\"operator_snapshot\"}\n\n" ]));
+  check (list string) "a first member that is another string is not the type"
+    [ "heartbeat(alpha,-,in_turn=-)" ]
+    (List.map summary
+       (decode_all
+          [ "data: {\"name\":\"alpha\",\"type\":\"keeper_heartbeat\",\"ts_unix\":1.0}\n\n" ]))
+
 (* A delta has a slice too, and reading the table for "does this have one"
    rather than "does it replace a projection" would swallow this one: the
    screen would drop a keeper change into the quiet class. It has its own arm
@@ -732,6 +762,8 @@ let () =
             `Quick test_the_chat_stream_and_waiting_queue_keep_their_keeper_and_clock
         ; test_case "every whole-projection push decodes as a snapshot" `Quick
             test_every_whole_projection_push_decodes_as_a_snapshot
+        ; test_case "a frame its type decides is not read past the type" `Quick
+            test_a_frame_its_type_decides_is_not_read_past_the_type
         ; test_case "a delta with a slice is not a snapshot" `Quick
             test_a_delta_with_a_slice_is_not_a_snapshot
         ; test_case "only a chat-appended event names a reload keeper" `Quick

@@ -218,6 +218,34 @@ describe('normalizeKeeperApprovalQueueItem', () => {
     expect(normalizeKeeperApprovalQueueItem({ id: '1', keeper_name: 'k' })).toBeNull()
   })
 
+  // The server writes exactly these members for a pending row without its
+  // input (Keeper_approval_queue.pending_entry_json_fields). A stale member
+  // left in the allowed list made every live row a violation.
+  const serverPendingRow = {
+    id: 'q-live',
+    keeper_name: 'janitor',
+    tool_name: 'shell_exec',
+    input_hash: 'c'.repeat(64),
+    sequence: 1,
+    requested_at: 1_776_427_200,
+    waiting_s: 4,
+    turn_id: 12,
+    task_id: null,
+    goal_id: null,
+    summary_status: 'not_requested',
+    exact_attempt: { state: 'unbound' },
+    summary_attempt_disposition: { code: 'ready' },
+    phase: 'queued',
+  }
+
+  it('accepts the pending row the server writes', () => {
+    expect(normalizeKeeperApprovalQueueItem(serverPendingRow)?.id).toBe('q-live')
+  })
+
+  it('refuses a pending row with a member the server does not write', () => {
+    expect(normalizeKeeperApprovalQueueItem({ ...serverPendingRow, goal_ids: [] })).toBeNull()
+  })
+
   it('extracts all fields', () => {
     const result = normalizeKeeperApprovalQueueItem({
       id: 'q-1',
@@ -230,7 +258,6 @@ describe('normalizeKeeperApprovalQueueItem', () => {
       turn_id: null,
       task_id: null,
       goal_id: null,
-      goal_ids: [],
       input: { cmd: 'ls' },
       input_preview: 'ls -la',
       phase: 'queued',
@@ -260,7 +287,6 @@ describe('normalizeKeeperApprovalQueueItem', () => {
       turn_id: null,
       task_id: null,
       goal_id: null,
-      goal_ids: [],
       summary_status: 'not_requested',
       exact_attempt: { state: 'unbound' },
       summary_attempt_disposition: { code: 'ready' },
@@ -285,7 +311,6 @@ describe('normalizeKeeperApprovalQueueItem', () => {
     turn_id: null,
     task_id: null,
     goal_id: null,
-    goal_ids: [],
     phase: 'queued' as const,
     exact_attempt: { state: 'unbound' },
     summary_attempt_disposition: { code: 'ready' },

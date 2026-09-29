@@ -604,10 +604,16 @@ for path in storage_paths:
     assert not path.is_relative_to(account_dir)
     (path / "fixture-session").write_text("synthetic native session")
 receipt = Path(sys.argv[0]).with_suffix(".json")
+# The client closes stdin and then sends SIGTERM at once; a SystemExit inside
+# record_exit would leave the receipt empty or missing (#39889). SIGTERM is
+# ignored once the exit has begun and the receipt is renamed into place.
 def record_exit():
-    receipt.write_text(json.dumps({"root": str(probe_root),
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    staged = receipt.with_suffix(".json.tmp")
+    staged.write_text(json.dumps({"root": str(probe_root),
         "native_state_at_exit": [(path / "fixture-session").is_file() for path in storage_paths],
         "workspace_at_exit": workspace.is_dir()}))
+    os.replace(staged, receipt)
 atexit.register(record_exit)
 signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
 
@@ -680,6 +686,7 @@ notify("turn/completed", turnId="t-readiness", terminal=terminal,
     error={"kind": "modelError", "message": "synthetic failure", "retryable": False} if terminal == "failed" else None)
 for line in sys.stdin:
     pass
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
 |}
 ;;
 

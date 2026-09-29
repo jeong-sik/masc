@@ -560,9 +560,17 @@ for path in storage_paths:
         handle.write("synthetic session state")
 with open(os.path.join(HERE, "native-storage.json"), "w") as handle:
     json.dump(storage_paths, handle)
+# The client closes stdin and then sends SIGTERM at once. Closing stdin ends
+# the loop at the bottom and starts the exit, so the handler's SystemExit could
+# land inside record_exit after open(..., "w") had emptied the file (#39889).
+# SIGTERM is ignored once the exit has begun, and the receipt is renamed into
+# place so a reader never sees it half written.
 def record_exit():
-    with open(os.path.join(HERE, "native-storage-at-exit.json"), "w") as handle:
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    receipt = os.path.join(HERE, "native-storage-at-exit.json")
+    with open(receipt + ".tmp", "w") as handle:
         json.dump([os.path.isfile(os.path.join(path, "fixture-native-state")) for path in storage_paths], handle)
+    os.replace(receipt + ".tmp", receipt)
 atexit.register(record_exit)
 signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
 control_path = os.path.join(HERE, "fixture-control.json")
@@ -612,6 +620,7 @@ notify("turn/completed", {"sessionId": "panel-session", "turnId": turn_id,
                           "usage": {"inputTokens": 11, "outputTokens": 7, "cachedTokens": 3, "reasoningTokens": 2}})
 for _ in sys.stdin:
     pass
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
 |}
 ;;
 

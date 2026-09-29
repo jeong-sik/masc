@@ -273,6 +273,19 @@ let config_invalid =
     (Agent_core.Error.InvalidConfig
        { field = "model"; detail = "unknown model id" })
 
+(* What the Claude Code and Antigravity runtimes type when an exception
+   reaches their boundary that nothing expected -- here the refused
+   process-group signal of #39768. It used to be filed as a provider parse
+   error; it is a masc internal error now, and the walk stops on it as it did
+   on the parse error. Only the label changed, not the rotation. *)
+let runtime_boundary_exception =
+  Keeper_internal_error.core_error_of_masc_internal_error
+    (Keeper_internal_error.Internal_unhandled_exception
+       { site = "claude_code.runtime_boundary"
+       ; exn_repr = "Unix.Unix_error(Unix.EPERM, \"kill\", \"\")"
+       ; transport_error_kind = None
+       })
+
 (* label, error, observed count of [keeper cycle FAILED] on 2026-08-11 *)
 let census_rows =
   [ "provider:hard_quota", provider_hard_quota, 103
@@ -283,6 +296,7 @@ let census_rows =
   ; "provider:reported_error", provider_reported_error, 14
   ; "api:context_overflow", api_context_overflow, 9
   ; "internal:remote_command_failed", internal_remote_command_failed, 4
+  ; "internal:runtime_boundary_exception", runtime_boundary_exception, 0
   ; "api:invalid_request", api_invalid_request_unknown_model, 2
   ; "api:not_found", api_not_found, 0
   ; "provider:not_found", provider_not_found, 0
@@ -364,6 +378,7 @@ let expected_rotation =
   ; "provider:reported_error", true
   ; "api:context_overflow", true
   ; "internal:remote_command_failed", false
+  ; "internal:runtime_boundary_exception", false
   ; "api:invalid_request", true
   ; "api:not_found", true
   ; "provider:not_found", true
@@ -504,7 +519,11 @@ let test_walk_rotates_where_the_route_says_it_does () =
         (Printf.sprintf "%s is routed as a stop" label)
         true
         (claims_of label = Walk_stops))
-    [ "provider:terminal"; "provider:parse_error"; "config:invalid" ];
+    [ "provider:terminal"
+    ; "provider:parse_error"
+    ; "config:invalid"
+    ; "internal:runtime_boundary_exception"
+    ];
   (* Every named difference names a census row, and that row's route makes a
      claim the walk can be compared with; otherwise the entry excuses
      nothing and stays in the list unnoticed. *)

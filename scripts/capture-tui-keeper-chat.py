@@ -1018,7 +1018,7 @@ def ttyd_session(
             "window.term && window.term.cols === 99 && window.term.rows === 30",
             timeout=10_000,
         )
-        wait_text(page, "MASC Overview")
+        wait_text(page, "MASC Dashboard")
         # ttyd briefly paints a centered terminal-size overlay after connect.
         page.wait_for_timeout(3_000)
         yield page, started

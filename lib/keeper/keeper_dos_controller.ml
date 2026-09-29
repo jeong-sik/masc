@@ -10,8 +10,10 @@
    - Running, Failing, Draining, Restarting, Crashed (whose only way out is
      an automatic restart) and Offline (launch pending) are on their way
      back and keep the controller.
-   - An expired Player credential cannot act again, so its controller is
-     freed on the next move.
+   - Where a request needs a token, a persisted credential that expired
+     cannot authenticate, so its controller is freed on the next move.
+     Workers can take a free controller directly, despite not being handoff
+     targets, and have the same expiry rule.
    - A name with no meta is not a Keeper. Where every request must carry a
      credential (auth on, token required) nothing else can move the machine,
      so a name whose credential file is gone (a revoked invite) has left
@@ -40,9 +42,11 @@ let auth_mode ~(config : Workspace.config) =
 
 let credential_departure ~(config : Workspace.config) ~now holder =
   match Auth.load_credential config.base_path holder with
-  | Some ({ Masc_domain.agent_name; role = Masc_domain.Player; _ } as credential)
+  | Some ({ Masc_domain.agent_name; _ } as credential)
     when String.equal agent_name holder && Play_invite.expired ~now credential ->
-    Some Tool_misc_dos_lane.Player_expired
+    (match auth_mode ~config with
+     | Enforced -> Some Tool_misc_dos_lane.Credential_expired
+     | Self_declared | Unreadable _ -> None)
   | Some _ -> None
   | None ->
     (match auth_mode ~config with
@@ -65,7 +69,7 @@ let holder_left ~(config : Workspace.config) ~now holder =
 ;;
 
 let before_move ~config ~who =
-  (* DET-OK: sample time once at the move boundary to classify invite expiry. *)
+  (* DET-OK: sample time once at the move boundary to classify credential expiry. *)
   let now = Unix.gettimeofday () in
   Tool_misc_dos_lane.free_left_controller ~holder_left:(holder_left ~config ~now) ~who
 ;;

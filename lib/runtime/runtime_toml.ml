@@ -2174,9 +2174,15 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
     Result.map (Option.value ~default) (typed_find kind path tbl key getter)
   in
   (* [max-concurrent] is an explicit operator override, not a required binding
-     property. Absence means "no static client-side cap"; provider pressure is
-     handled by the global provider HTTP gate, live health/backoff, and any
-     provider-reported throttling.
+     property. Absence means "no static client-side cap", and it also means no
+     endpoint admission at all: [Provider_admission] holds a FIFO permit only
+     for a binding that declares this key, so an undeclared binding dispatches
+     straight out. What remains for it is live health/backoff and whatever the
+     provider itself refuses with (e.g. HTTP 429): this side stops sending
+     only once the other side says no.
+
+     Whether HTTP bindings should be required to declare it is open; the
+     measurements are on #25401.
 
      An explicit non-positive value is a configuration error: 0 was historically
      used as an omission sentinel, and negative values are meaningless. Reject

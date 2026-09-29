@@ -66,7 +66,7 @@ module For_testing : sig
     current_task:Keeper_world_observation_inputs.current_task_observation ->
     held_task_skills:Keeper_world_observation_inputs.held_task_skills list ->
     task_skill_surfaces:(string * Keeper_skill_catalog.exact_surface list) list ->
-    workspace_memory:Workspace_memory_publication.observation ->
+    workspace_memory:Workspace_memory_ledger.observation ->
     lane_updates:(Yojson.Safe.t, string) result ->
     approval_authority_text:string ->
     recent_direct_conversation_text:string ->

@@ -29,7 +29,11 @@ let apply_patch ~old_string ~new_string ~replace_all text =
     in
     let occurrence_count = count_occurrences ~needle:old_string text in
     if occurrence_count = 0
-    then Error "old_string not found in file. Patch did not match anything."
+    then
+      Error
+        "old_string not found in file. Patch did not match anything. Re-Read \
+         the file and copy old_string from its current bytes instead of \
+         retrying the same string."
     else if (not replace_all) && occurrence_count > 1
     then
       Error

@@ -6,14 +6,21 @@ type t =
     }
   | Task_missing_title
   | Help
+  | Show_load_errors
   | About
   | Lane_addons of string
+  | Play_invites
+  | Play_link
+  | Play_qr
+  | Play_invite of { name : string; hours : int }
+  | Play_revoke of string
+  | Play_invalid of string
   | Open_metrics
   | Account_login of string
   | Open_settings
   | Open_diff
   | Open_patch_modal
-  | Toggle_cost
+  | Open_usage
   | Open_link_preview of string option
   | Open_links_list
   | Copy_latest_reply
@@ -93,6 +100,11 @@ let catalog =
     ; args = "[inspect|attach JSON|observe ID|detach ID|slice JSON|evidence JSON]"
     ; summary = "open optional cross-lane observations and package actions"
     }
+  ; { word = "play"
+    ; aliases = []
+    ; args = "[invites|invite <name> <hours>|link|qr|revoke <name>]"
+    ; summary = "list, issue or revoke shared DOS play links"
+    }
   ; { word = "settings"
     ; aliases = []
     ; args = ""
@@ -111,7 +123,7 @@ let catalog =
   ; { word = "cost"
     ; aliases = []
     ; args = ""
-    ; summary = "show or hide each Keeper's cost and tokens and the fleet total on the Overview Team block"
+    ; summary = "open Usage for provider quotas and Keeper usage"
     }
   ; { word = "changes"
     ; aliases = []
@@ -210,6 +222,11 @@ let catalog =
     ; summary = "list prompt presets; show what one holds; save the live state; restore one \
          (autosaves first)"
     }
+  ; { word = "errors"
+    ; aliases = []
+    ; args = ""
+    ; summary = "read current history and memory loading errors in full"
+    }
   ; { word = "help"
     ; aliases = []
     ; args = ""
@@ -223,7 +240,7 @@ let catalog =
   ; { word = "metrics"
     ; aliases = [ "telemetry" ]
     ; args = ""
-    ; summary = "display multicore engine telemetry, scheduler latency, and fleet health"
+    ; summary = "open Usage with provider quotas, Keeper reports, and telemetry"
     }
   ; { word = "activity"
     ; aliases = []
@@ -325,15 +342,35 @@ let parse text =
     match split_word line with
     | "task", "" -> Task_missing_title
     | "task", title -> Task_for_keeper { title; body }
+    | "errors", "" -> Show_load_errors
     | "help", _ -> Help
     | "about", _ | "splash", _ -> About
     | "addons", arg -> Lane_addons arg
+    | "play", "" | "play", "invites" -> Play_invites
+    | "play", "link" -> Play_link
+    | "play", "qr" -> Play_qr
+    | "play", arg -> (
+        match split_word arg with
+        | "invite", rest -> (
+            let name, hours_and_tail = split_word rest in
+            let raw_hours, tail = split_word hours_and_tail in
+            match name, raw_hours, tail with
+            | name, raw_hours, "" when name <> "" && raw_hours <> "" -> (
+                match int_of_string_opt raw_hours with
+                | Some hours -> Play_invite { name; hours }
+                | None -> Play_invalid "hours must be an integer")
+            | _ -> Play_invalid "use /play invite <name> <hours>")
+        | "revoke", rest -> (
+            match split_word rest with
+            | name, "" when name <> "" -> Play_revoke name
+            | _ -> Play_invalid "use /play revoke <name>")
+        | _ -> Play_invalid "use /play invites, /play invite <name> <hours>, /play link, /play qr, or /play revoke <name>")
     | "metrics", _ | "telemetry", _ -> Open_metrics
     | "login", client -> Account_login client
     | "settings", _ -> Open_settings
     | "diff", _ -> Open_diff
     | "patch", _ | "review", _ -> Open_patch_modal
-    | "cost", _ -> Toggle_cost
+    | "cost", _ -> Open_usage
     | "preview", arg ->
         let trimmed = String.trim arg in
         if String.equal trimmed "" then Open_link_preview None
@@ -834,4 +871,3 @@ let is_slash_navigable ?(keeper_names = []) text =
       else
         let rest = String.trim after_space in
         List.exists (fun opt -> String.starts_with ~prefix:rest opt) options
-

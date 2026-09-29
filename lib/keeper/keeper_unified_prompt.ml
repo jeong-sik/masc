@@ -1457,13 +1457,15 @@ let previous_turn_stop_lines (stop : Keeper_turn_checkpoint_reason.t option) :
       | Keeper_turn_checkpoint_reason.Durable_stimulus_arrived ) -> []
 
 let format_workspace_memory_observation = function
-  | Workspace_memory_publication.Missing -> None
-  | Workspace_memory_publication.Unavailable _ ->
+  | Workspace_memory_ledger.Missing -> None
+  | Workspace_memory_ledger.Unavailable _ ->
     Some (render_fragment Prompt_names.keeper_context_workspace_memory_unavailable [] ^ "\n\n")
-  | Workspace_memory_publication.Available descriptor ->
+  | Workspace_memory_ledger.Available descriptor ->
     Some (render_fragment Prompt_names.keeper_context_workspace_memory_available
-      [ "proposal_id", descriptor.proposal_id;
-        "context_sha256", descriptor.context_sha256 ] ^ "\n\n")
+      [ "ledger_sha256", descriptor.ledger_sha256;
+        "claim_count", string_of_int descriptor.claim_count;
+        "conflict_count", string_of_int descriptor.conflict_count;
+        "classified_count", string_of_int descriptor.classified_count ] ^ "\n\n")
 
 let build_prompt_internal
     ~(turn_decision : Keeper_world_observation.keeper_cycle_decision option)
@@ -1473,7 +1475,7 @@ let build_prompt_internal
         (string * Keeper_skill_catalog.exact_surface list) list = [])
     ?(active_goal_summaries : (goal_summary list, Goal_store.unavailable) result option)
     ?(lane_updates = Ok (`List []))
-    ?(workspace_memory = Workspace_memory_publication.Missing)
+    ?(workspace_memory = Workspace_memory_ledger.Missing)
     ?(repository_freshness : Keeper_sandbox_control.freshness_row list = [])
     ?(context_budget_bytes : int option)
     ~(observation : Keeper_world_observation.world_observation)
@@ -1880,6 +1882,7 @@ let build_prompt_internal
                match row.Keeper_sandbox_control.row_freshness with
                | Keeper_sandbox_control.Freshness_unavailable _ -> false
                | Keeper_sandbox_control.Current _
+               | Keeper_sandbox_control.Stale_ref _
                | Keeper_sandbox_control.Ahead _
                | Keeper_sandbox_control.Behind _
                | Keeper_sandbox_control.Diverged _ -> true)
@@ -1890,8 +1893,9 @@ let build_prompt_internal
            | Keeper_sandbox_control.Diverged _ -> 0
            | Keeper_sandbox_control.Behind _ -> 1
            | Keeper_sandbox_control.Ahead _ -> 2
-           | Keeper_sandbox_control.Current _ -> 3
-           | Keeper_sandbox_control.Freshness_unavailable _ -> 4
+           | Keeper_sandbox_control.Stale_ref _ -> 3
+           | Keeper_sandbox_control.Current _ -> 4
+           | Keeper_sandbox_control.Freshness_unavailable _ -> 5
          in
          let measured =
            List.stable_sort
@@ -1914,10 +1918,26 @@ let build_prompt_internal
            in
            let standing =
              match row.Keeper_sandbox_control.row_freshness with
-             | Keeper_sandbox_control.Current { target_ref; _ } ->
+             | Keeper_sandbox_control.Current { target_ref; age_s; _ } ->
                render_fragment
                  Prompt_names.keeper_context_checkouts_standing_current
-                 [ "target", target_ref ]
+                 [ "target", target_ref; "age", string_of_int age_s ]
+             | Keeper_sandbox_control.Stale_ref { target_ref; last_observed_at_unix; age_s; _ } ->
+               let age = match age_s with
+                 | Some seconds -> Printf.sprintf "%ds ago" seconds
+                 | None -> "age unknown" in
+               let as_of =
+                 match last_observed_at_unix with
+                 | None -> "unknown time"
+                 | Some timestamp ->
+                   let tm = Unix.gmtime (float_of_int timestamp) in
+                   Printf.sprintf "%04d-%02d-%02d %02d:%02d:%02d UTC"
+                     (tm.Unix.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
+                     tm.tm_hour tm.tm_min tm.tm_sec
+               in
+               render_fragment
+                 Prompt_names.keeper_context_checkouts_standing_stale_ref
+                 [ "target", target_ref; "as_of", as_of; "age", age ]
              | Keeper_sandbox_control.Ahead { target_ref; ahead; _ } ->
                render_fragment
                  Prompt_names.keeper_context_checkouts_standing_ahead

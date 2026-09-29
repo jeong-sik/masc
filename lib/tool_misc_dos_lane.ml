@@ -427,56 +427,70 @@ let after_announcing result =
 ;;
 
 (* A game can run for hours, and the Keeper holding the controller can stop
-   in that time. It will never pass, and every other caller would be refused
-   until a restart. [holder_left] says whether a holder can no longer act;
-   the Keeper boundary supplies it from Keeper state, which this tool surface
-   does not read (RFC-0194). Called before a call that needs the controller,
-   it frees a stopped holder's controller and tells the board.
+   in that time, or an invite holding it can run out or be revoked. Such a
+   holder will never pass, and every other caller would be refused until a
+   restart. [holder_left] says whether and why a holder can no longer act;
+   the Keeper boundary supplies it from Keeper and credential state, which this
+   tool surface does not read (RFC-0194). Called before a call that needs the
+   controller, it frees a departed holder's controller and tells the board.
 
-   The holder's state is read between two lane calls, not under the lane's
-   lock, so a holder resumed in those milliseconds still loses it and must
-   wait for a pass like any other player. And the name is
+   The caller holds the credential transaction through this read and release,
+   and flushes the queued announcement after that transaction. Keeper registry
+   state can still change between the two lane calls: a resumed Keeper must
+   wait for a pass like any other player. The name is
    the caller's own: an MCP client named like a stopped Keeper is let go as
    that Keeper would be. *)
 (* A revoked invite can never pass the controller its name holds (RFC
    play-link-for-the-shared-machine §2.4), so revoking lets it go and tells
    the board. [by] is the operator who revoked. The credential is deleted
    first: a request the invitee sent before that and that reaches the lane
-   after this can still take the freed controller, and revoking the name
-   again frees it. *)
+   after this can still take the freed controller. Where every request needs
+   a credential, the next move by anyone else lets it go again
+   ([No_credential]). The caller holds the Auth transaction until this release
+   completes, and flushes the Board announcement after leaving it. *)
 let release_revoked_invite ~holder ~by =
-  let released =
-    off_domain (fun () ->
-      Dos_lane.release_left ~holder
-        ~announce:
-          (announce ~author:by
-             (Printf.sprintf "%s 님의 초대가 회수되어 DOS 조종권이 풀렸어요" holder)))
-  in
-  (match released with
-   | Ok true -> flush_announcements ()
-   | Ok false | Error _ -> ());
-  released
+  off_domain (fun () ->
+    Dos_lane.release_left ~holder
+      ~announce:
+        (announce ~author:by
+           (Printf.sprintf "%s 님의 초대가 회수되어 DOS 조종권이 풀렸어요" holder)))
+;;
+
+type holder_departure =
+  | Keeper_stopped
+  | Credential_expired
+  | No_credential
+
+let departure_notice holder = function
+  | Keeper_stopped ->
+    Printf.sprintf "%s 님의 Keeper 가 멈춰서 DOS 조종권이 풀렸어요" holder
+  | Credential_expired ->
+    Printf.sprintf "%s 님의 접속 권한이 만료되어 DOS 조종권이 풀렸어요" holder
+  | No_credential ->
+    Printf.sprintf "%s 님은 접속 권한이 없어서 DOS 조종권이 풀렸어요" holder
 ;;
 
 let free_left_controller ~holder_left ~who =
   match off_domain Dos_lane.screen with
   | Ok { Dos_lane.controller = Some holder; _ }
-    when (not (String.equal holder who)) && holder_left holder ->
+    when not (String.equal holder who) ->
+    (match holder_left holder with
+     | None -> ()
+     | Some reason ->
     (match
        off_domain (fun () ->
          Dos_lane.release_left ~holder
            ~announce:
              (announce ~author:who
-                (Printf.sprintf
-                   "%s 님의 Keeper 가 멈춰서 DOS 조종권이 풀렸어요" holder)))
+                (departure_notice holder reason)))
      with
-     (* Posted now: the call that follows may be refused before it reaches
-        the lane, and would not post it. *)
-     | Ok true -> flush_announcements ()
+     (* The caller publishes the queued notice after its transaction, even
+        when the subsequent machine operation is refused. *)
+     | Ok true -> ()
      (* A hand-off that landed after the read above: that pass stands. *)
      | Ok false -> ()
      (* The machine went away; the call that follows reports it. *)
-     | Error _ -> ())
+     | Error _ -> ()))
   | Ok _ | Error _ -> ()
 ;;
 
@@ -535,29 +549,32 @@ let handle_eject ~tool_name ~start_time ~agent_name _args =
      | Error e -> reject ~tool_name ~start_time (Dos_lane.error_to_string e))
 ;;
 
-(* The hand-off is also the wake-up: the board post names the next holder
-   with @, which the board delivers to that Keeper as an explicit mention, so
-   the player whose turn it is does not have to poll the machine to find out.
-   A post is a message in their queue, not an obligation to answer. *)
 (* [to] is parsed with the board's own agent-id rule, so a name that could
    never be mentioned -- "@liu-bei", "liu bei", "유비" -- is refused here. The
    controller would otherwise go to a name no caller has, nobody could move or
    eject the machine again, and the post meant to wake the next player would
-   address no one. *)
+   address no one. [Keeper_dos_controller.before_call] reads the name here
+   too, so the check of who sits at the machine sees the name the pass
+   uses. *)
+let pass_target args =
+  match get_string_opt args "to" with
+  | None -> Ok None
+  | Some t when String.trim t = "" -> Ok None
+  | Some t ->
+    (match Board_types.Agent_id.parse (String.trim t) with
+     | Ok id -> Ok (Some (Board_types.Agent_id.to_string id))
+     | Error _ ->
+       Error
+         (Printf.sprintf
+            "to %S is not a Keeper name: give the name alone, without @ or spaces" t))
+;;
+
+(* The hand-off is also the wake-up: the board post names the next holder
+   with @, which the board delivers to that Keeper as an explicit mention, so
+   the player whose turn it is does not have to poll the machine to find out.
+   A post is a message in their queue, not an obligation to answer. *)
 let handle_pass ~tool_name ~start_time ~base_path ~agent_name args =
-  let to_ =
-    match get_string_opt args "to" with
-    | None -> Ok None
-    | Some t when String.trim t = "" -> Ok None
-    | Some t ->
-      (match Board_types.Agent_id.parse (String.trim t) with
-       | Ok id -> Ok (Some (Board_types.Agent_id.to_string id))
-       | Error _ ->
-         Error
-           (Printf.sprintf
-              "to %S is not a Keeper name: give the name alone, without @ or spaces" t))
-  in
-  match to_ with
+  match pass_target args with
   | Error message -> reject ~tool_name ~start_time message
   | Ok to_ ->
     let content =

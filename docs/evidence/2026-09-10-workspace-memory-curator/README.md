@@ -1,3 +1,5 @@
+> Historical evidence: the proposal workflow and the scripts shown below were retired in #39865. These commands do not apply to the ledger reader API. Current read-only installed discovery verification uses `scripts/verify-installed-workspace-memory-discovery.py`; there is no replacement proposal write endpoint.
+
 # Standalone local workspace memory curator
 
 `uv run scripts/curate-workspace-memory.py --context INPUT.json --endpoint LOCAL_OLLAMA_ORIGIN --model MODEL --output NEW_DIRECTORY`

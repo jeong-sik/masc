@@ -7,9 +7,11 @@ type instance = {
   source_path : string option; binding : Yojson.Safe.t; outputs : Row.output_ports;
   skills_directory : string option; incarnation : string; action_schema : Yojson.Safe.t option; binding_schema : Yojson.Safe.t option; display : Masc.Lane_addon_presentation.t;
 }
+type declaration_origin = Parsed_declaration | Issue_only
 type declaration = {
   source_path : string; installation_id : string option; desired : string option;
   applied : string option; instance_id : string option; issues : string list;
+  origin : declaration_origin;
 }
 type configuration = { directory : string; complete : bool; declarations : declaration list }
 type snapshot = { instances : instance list; output : Row.output; complete : bool option;
@@ -26,6 +28,7 @@ type action_menu = {
 }
 type focus = Timeline | Connections | Configurations | Instances | Rows
 type presentation = Summary | Technical | Flow
+type screen = Overview | Detail of string * string
 type diagnostic =
   | Detail_read_failure of string
   | Request_failure of string
@@ -40,7 +43,8 @@ type t = {
   installer : Masc_tui_lane_installer.t option;
   subscription_panel : Masc_tui_lane_subscriptions.t option;
   evidence_prompt : evidence_prompt option;
-  presentation : presentation; action_menu : action_menu option;
+  presentation : presentation; screen : screen; help_open : bool;
+  action_menu : action_menu option;
   snapshot : snapshot option; loading : bool; error : diagnostic option;
   snapshot_read_error : string option;
       (** The last failed inventory read. Input and request diagnostics do
@@ -50,16 +54,22 @@ type t = {
   draft : string option; naming : bool; configuration_cursor : int;
   documents : Document.session list; document_key : string option; editor_ready : bool; last_action : action_request option; action_receipt : Action.receipt option;
 }
-type installed_reading =
+type reading_freshness = Current | Stale of string
+type installation_reading =
   | Not_read
-  | Nothing_installed
-  | Installed of int
-(** What this view knows about installed Add-ons. [Not_read] is the state
-    before anything asked -- the Lanes surface loads standalone lanes and not
-    Add-ons -- and is not the same answer as [Nothing_installed]. [Installed]
-    carries at least one. *)
+  | Observed of {
+      declared : int;
+      active : int;
+      failed_workers : int;
+      configuration_issues : int;
+      complete : bool;
+      freshness : reading_freshness;
+    }
+(** What the last Add-on inventory actually observed. A declaration is not an
+    active worker: image inspection or reconciliation can fail while the TOML
+    remains. [Not_read] also covers a snapshot without a configuration read. *)
 
-val installed : t -> installed_reading
+val installation_reading : t -> installation_reading
 
 val initial : t
 val parse_request : string -> (request, string) result
@@ -69,6 +79,13 @@ val selected_declaration : t -> declaration option
 val selected_document : t -> Document.session option
 val put_document : t -> Document.session -> t
 val selected_instance : t -> instance option
+val open_selected_instance : t -> t
+(** Enter the selected worker or unresolved installation. A worker pins its
+    incarnation; an installation opens its existing TOML detail section. *)
+val overview_count : snapshot -> int
+(** Number of selectable workers and unresolved installations in the list. *)
+val move_record : t -> int -> t
+(** Move only among records belonging to the pinned detail incarnation. *)
 val selected_source_path : t -> string option
 val selected_row : t -> Row.row option
 val reconcile_snapshot : t -> snapshot -> t

@@ -578,6 +578,16 @@ let failure_of_codex_turn detail (info : Runtime_codex_app_server.Codex_error_in
   | None -> Provider_rejected detail
 ;;
 
+(* True only when a typed window is spent: one already observed during the
+   turn, or one a fresh [usage/read] reports. A failed read records nothing,
+   so the caller keeps the original failure. *)
+let muse_account_spent ~mgr ~clock ~cwd ~scope config =
+  let exhausted () = Runtime_quota_window.is_exhausted ~scope ~now:(Time_compat.now ()) in
+  exhausted ()
+  || (match Runtime_provider_usage_read.read_muse ~mgr ~clock ~cwd ~scope config with
+      | Ok () -> exhausted ()
+      | Error _ -> false)
+
 let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtime : Runtime.t) =
   let run (tool : Runtime_official_client_tool.dynamic_tool) ~prompt =
     if not runtime.model.tools_support
@@ -646,6 +656,15 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
          | Error (Client_error (Runtime_muse_serve.Timeout _)) -> Error Timed_out
          | Error (Client_error (Runtime_muse_serve.Turn_failed {retryable=true; _} as error)) ->
            Error (Provider_overloaded (Runtime_muse_serve.error_to_string error))
+         | Error (Client_error (Runtime_muse_serve.Turn_failed
+             {kind=Runtime_muse_msp.Model_error; retryable=false; _} as error)) ->
+           (* MSP's modelError carries free text only. The account's typed
+              usage/read says whether a subscription window is spent. *)
+           let detail = Runtime_muse_serve.error_to_string error in
+           if muse_account_spent ~mgr ~clock ~cwd
+                ~scope:(Runtime.quota_scope_of_runtime runtime) config
+           then Error (Quota_exhausted detail)
+           else Error (Provider_rejected detail)
          | Error (Client_error error) ->
            Error (Provider_rejected (Runtime_muse_serve.error_to_string error)))
       | Runtime_execution.Antigravity_cli execution ->

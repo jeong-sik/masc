@@ -228,8 +228,10 @@ let mcp_unauthorized ?(reason = Masc_domain.Auth_error.Generic) message =
   Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized { reason; message })
 ;;
 
-(** Verify Bearer token for MCP endpoints *)
-let verify_mcp_auth_unscoped ~base_path request =
+(** Verify Bearer token for MCP endpoints. [permission] is what the endpoint's
+    profile asks of the credential: [CanReadState] for /mcp and /mcp/managed,
+    [CanPlayMachine] for the seat door /mcp/play. *)
+let verify_mcp_auth_unscoped ~permission ~base_path request =
   let auth_config = Auth.load_auth_config base_path in
   let credential = request_auth_credential_from_request request in
   let* auth_config =
@@ -266,17 +268,24 @@ let verify_mcp_auth_unscoped ~base_path request =
                     "Bearer token did not resolve to a credential identity."))
         | Some agent_name ->
             Auth.check_permission base_path ~agent_name ~token:(Some token)
-              ~permission:Masc_domain.CanReadState
+              ~permission
             |> Result.map (fun () -> None))
 
 let verify_mcp_auth ~base_path request =
-  with_mcp_expected_resource (fun () -> verify_mcp_auth_unscoped ~base_path request)
+  with_mcp_expected_resource (fun () ->
+    verify_mcp_auth_unscoped ~permission:Masc_domain.CanReadState ~base_path request)
+;;
+
+let verify_seat_mcp_auth ~base_path request =
+  with_mcp_expected_resource (fun () ->
+    verify_mcp_auth_unscoped ~permission:Masc_domain.CanPlayMachine ~base_path request)
 ;;
 
 let verify_mcp_auth_for_authority ~base_path ~request_authority request =
   Auth_oauth.with_expected_resource
     (Server_oauth_metadata.resource request_authority)
-    (fun () -> verify_mcp_auth_unscoped ~base_path request)
+    (fun () ->
+      verify_mcp_auth_unscoped ~permission:Masc_domain.CanReadState ~base_path request)
 ;;
 
 let verify_mcp_observer_stream_auth_unscoped ~base_path request =
@@ -774,6 +783,10 @@ let current_server_state () = Atomic.get server_state
 let publish_server_state state = Atomic.set server_state (Some state)
 let clear_server_state () = Atomic.set server_state None
 
+let ready_server_state () =
+  if (Server_startup_state.snapshot ()).state_ready then current_server_state ()
+  else None
+
 (** CORS origin *)
 exception Invalid_origin_header
 
@@ -1181,25 +1194,34 @@ let authorize_optional_token_bound_permission_request
 let is_dashboard_bootstrap_path path =
   String.starts_with ~prefix:"/api/v1/dashboard/" path
 
+let not_initialized_status = `Service_unavailable
+let not_initialized_headers = [ "retry-after", "1" ]
+
 let not_initialized_response path =
   if is_dashboard_bootstrap_path path then
     {|{"status":"initializing","message":"Server is warming up"}|}
   else
     {|{"error":"not initialized"}|}
 
+let respond_not_initialized request reqd =
+  Http_server_eio.Response.json ~status:not_initialized_status
+    ~extra_headers:not_initialized_headers
+    (not_initialized_response (Http_server_eio.Request.path request)) reqd
+
 let rec with_public_read handler request reqd =
-  let strict = http_auth_strict_enabled () in
-  let path = Http_server_eio.Request.path request in
-  if strict && not (is_public_read_path path) then
-    with_read_auth handler request reqd
-  else
-    match current_server_state () with
-    | None -> Http_server_eio.Response.json (not_initialized_response path) reqd
-    | Some state -> handler state request reqd
+  match ready_server_state () with
+  | None -> respond_not_initialized request reqd
+  | Some state ->
+      let strict = http_auth_strict_enabled () in
+      let path = Http_server_eio.Request.path request in
+      if strict && not (is_public_read_path path) then
+        with_read_auth handler request reqd
+      else
+        handler state request reqd
 
 and with_read_auth handler request reqd =
   match current_server_state () with
-  | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
+  | None -> respond_not_initialized request reqd
   | Some state ->
       let base_path = (Mcp_server.workspace_config state).base_path in
       (match authorize_read_request ~base_path request with
@@ -1213,7 +1235,7 @@ and with_read_auth handler request reqd =
 
 and with_permission_auth ~permission handler request reqd =
   match current_server_state () with
-  | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
+  | None -> respond_not_initialized request reqd
   | Some state ->
       let base_path = (Mcp_server.workspace_config state).base_path in
       (match authorize_permission_request ~base_path ~permission request with
@@ -1231,7 +1253,7 @@ and with_permission_auth ~permission handler request reqd =
 
 and with_tool_auth ~tool_name handler request reqd =
   match current_server_state () with
-  | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
+  | None -> respond_not_initialized request reqd
   | Some state ->
       let base_path = (Mcp_server.workspace_config state).base_path in
       let request_authority = Server_request_authority.current_exn () in
@@ -1252,7 +1274,7 @@ and with_tool_auth ~tool_name handler request reqd =
 
 and with_tool_actor_auth ~tool_name handler request reqd =
   match current_server_state () with
-  | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
+  | None -> respond_not_initialized request reqd
   | Some state ->
     let base_path = (Mcp_server.workspace_config state).base_path in
     let request_authority = Server_request_authority.current_exn () in
@@ -1272,7 +1294,7 @@ and with_tool_actor_auth ~tool_name handler request reqd =
 
 and with_token_permission_auth ~permission handler request reqd =
   match current_server_state () with
-  | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
+  | None -> respond_not_initialized request reqd
   | Some state ->
       let base_path = (Mcp_server.workspace_config state).base_path in
       (match authorize_token_bound_permission_request ~base_path ~permission request with

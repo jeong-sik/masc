@@ -307,6 +307,9 @@ let chat_markdown_palette ~closing : Markdown.palette =
   ; emphasis = (Ansi.italic, Ansi.no_italic)
   ; strike = (Ansi.strike, Ansi.no_strike)
   ; code = (Theme.Syntax.code_span, closing)
+  (* QR contrast is functional, even under NO_COLOR. The source is sanitized
+     before Markdown creates these SGRs, so a guest cannot inject escapes. *)
+  ; code_qr = ("\027[30;47m", "\027[0m" ^ closing)
   (* Bold alone. [white] is a colour like any other -- on a light background
      it is the background -- so painting a heading with it hid the heading on
      exactly the terminals that read it as text. Bold already says heading. *)
@@ -1327,7 +1330,7 @@ let surface_window_height state ~terminal_rows ~count =
     ~chrome:surface_chrome_rows ~count ~preview_keep:None
     ~overflow_takes_row:true
 
-let surface_chrome ~overflow ?(frame = Chrome_screen) (state : state)
+let surface_chrome ~overflow ?(frame = Chrome_screen) ?status (state : state)
     ~terminal_rows ~cols ~surface_key ~title ~hints
     ~(body : budget:int -> chrome_body -> unit) =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -1419,7 +1422,7 @@ let surface_chrome ~overflow ?(frame = Chrome_screen) (state : state)
     empty buf cols
   done;
   bottom buf cols;
-  Buffer.add_string buf (footer_line state ~max_cells:cols ~hints);
+  Buffer.add_string buf (footer_line ?status state ~max_cells:cols ~hints);
   finish_surface state ?clamped ~surface_key ~rows:terminal_rows ~cols buf
 
 
@@ -1459,7 +1462,7 @@ let connection_badge (state : state) =
 let lane_run_detail_title = " MASC Lane Run"
 let measurement_detail_title = " MASC Measurement"
 let fusion_title = " MASC Fusion"
-let runtime_detail_title = " MASC Config / Runtime detail"
+let runtime_detail_title = " MASC System / Runtime detail"
 let keeper_calls_lead = " Keepers \xe2\x96\xb8 "
 
 (* The coordinator's badge beside a reading of the surface's own. The badge
@@ -2026,57 +2029,27 @@ let ask_block f =
 
 
 let question_hints (state : state) =
-    (* One name for the key in both modes. [ and ] call the same function
-       either way -- they walk the asks -- and the surface used to call that
-       "question" while browsing and "ask" while answering, which is the same
-       key asking the operator to learn it twice. Named once here so the two
-       footers cannot drift apart again.
-
-       The vocabulary is the repository's: [/] walks the container a surface
-       is a list of. Board says post, Changes says keeper, this says ask. *)
-    let walk_asks = "[/]:ask" in
-    match state.ask_answer_mode with
-    | Ask_browsing ->
-        Printf.sprintf
-          "j/k:move  y / n:decide  w:Workspace mode  e:Outside mode  %s  a:answer a question  \
-           r:refresh  Tab:next"
-          walk_asks
-    | Ask_answering { aam_ask_id } -> (
-        match state.ask_text_entry with
-        (* Typing owns the keyboard, so the footer stops offering the keys it
-           has taken: the digits are text here, not choices. *)
-        | Some _ -> "Enter:save  Esc:cancel"
-        | None ->
-            (* Say when the next Enter sends. The approval queue two panes up
-               already draws its armed state; this one announced itself only as
-               an event, on a surface that draws no events, so the first Enter
-               looked like a key that had not landed. *)
-            (match state.pending_ask_submit with
-             | Some armed when String.equal armed aam_ask_id ->
-                 "Press Enter again to send  |  s:skip  c:clear  Esc:back"
-             | Some _ | None ->
-                 (* Only the keys the selected question answers to. A question
-                    can arrive with no choices at all -- the server accepts one
-                    as long as it welcomes free text -- and there [1-9] does
-                    nothing, which reads as a pane that has stopped listening
-                    rather than as a key that was never for this question. *)
-                 let question = selected_ask_question state in
-                 let has_choices =
-                   match question with
-                   | Some (q : Masc.Tui_decode.ask_question) ->
-                       q.Masc.Tui_decode.aq_choices <> []
-                   | None -> false
-                 in
-                 let takes_text =
-                   match question with
-                   | Some _ -> true
-                   | None -> false
-                 in
-                 Printf.sprintf "Left/Right:question  PgUp/PgDn:scroll  %s  %s%ss:skip  c:clear  \
-                                 Enter:answer  Esc:back"
-                   walk_asks
-                   (if has_choices then "1-9:pick  " else "")
-                   (if takes_text then "t:write  " else "")))
+  let open Masc_tui_keys in
+  match state.ask_answer_mode with
+  | Ask_browsing -> footer_hints_approvals Approval_browsing
+  | Ask_answering { aam_ask_id } ->
+      (match state.ask_text_entry with
+       | Some _ -> footer_hints_approvals Approval_writing
+       | None ->
+           match state.pending_ask_submit with
+           | Some armed when String.equal armed aam_ask_id ->
+               footer_hints_approvals Approval_armed
+           | Some _ | None ->
+               let question = selected_ask_question state in
+               let has_choices =
+                 match question with
+                 | Some (q : Masc.Tui_decode.ask_question) ->
+                     q.Masc.Tui_decode.aq_choices <> []
+                 | None -> false
+               in
+               let takes_text = Option.is_some question in
+               footer_hints_approvals
+                 (Approval_answering { has_choices; takes_text }))
 let question_asks (state : state) =
   match state.asks_snapshot with
   | None -> []
@@ -2336,7 +2309,7 @@ let planning_rollup_row ~cols (rollup : planning_rollup) =
               if value = 0 then None else Some (counter phase glyph name value))
        |> String.concat "  ")
 
-(* The transport's own readings are on Metrics. The Overview keeps one item
+(* The transport's own readings are on Usage. The Dashboard keeps one item
    while the outbound queue is under pressure, since that delays what every
    other row there reports; a steady queue, or no reading, says nothing. *)
 let transport_attention_item (transport : Tui_decode.transport_health option) =
@@ -2344,7 +2317,7 @@ let transport_attention_item (transport : Tui_decode.transport_health option) =
     { ai_kind = "transport_queue_pressure"
     ; ai_severity = severity
     ; ai_summary =
-        Printf.sprintf "transport queue pressure %s (m: Metrics)" word
+        Printf.sprintf "transport queue pressure %s (m: Usage)" word
     ; ai_target =
         Masc_tui_types.Attention_other
           { target_type = "transport"; target_id = None }
@@ -2431,7 +2404,7 @@ type planning_tab = Render_schedule.planning_tab =
    whatever followed -- at a hundred columns this title lost its badge and
    half its clock. Callers build that tail once and hand the same value here
    and to the row, so the measurement and the drawing cannot disagree. *)
-let planning_workspace_lead = screen_title " MASC Planning" ^ "  "
+let planning_workspace_lead = screen_title " MASC Work" ^ "  "
 
 let planning_workspace_tabs (state : state) ~(tab : planning_tab) ~(window : string) =
   let review_count = Option.map (fun s -> s.vs_total) state.verification in

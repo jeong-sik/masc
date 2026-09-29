@@ -121,6 +121,9 @@ def main(executable: str, captures: Path | None) -> None:
         os.write(master, b"\t")
         if not terminal.drain_until_quiet(process, master, output):
             raise AssertionError("overview did not settle after Tab")
+        os.write(master, b"\t")
+        if not terminal.drain_until_quiet(process, master, output):
+            raise AssertionError("overview did not return to workers after Tab")
         detail = key(b"\r", b"1 Activity")
         activity = screen(detail, b"1 Activity")
         for needle in (b"World observer", b"DOM captured", b"Frame advanced"):

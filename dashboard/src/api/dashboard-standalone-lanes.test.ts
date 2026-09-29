@@ -5,6 +5,7 @@ function row(laneId: string, status = 'idle'): Record<string, unknown> {
   return {
     lane_id: laneId,
     label: laneId,
+    purpose: `Purpose of ${laneId}`,
     required: laneId === 'board_attention_exact' || laneId === 'hitl_auto_judge',
     observation_only: true,
     configured: true,
@@ -61,6 +62,7 @@ describe('standalone lane snapshot decoder', () => {
     expect(parsed.lanes[2]?.status).toBe('no_retained_observation')
     expect(parsed.lanes[5]?.laneId).toBe('browser_stagehand_exact')
     expect(parsed.lanes[5]?.retainedRunCount).toBe(0)
+    expect(parsed.lanes[5]?.purpose).toBe('Purpose of browser_stagehand_exact')
   })
 
   it('refuses a projection without the declared order used by the editor', () => {

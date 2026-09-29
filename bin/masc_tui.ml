@@ -9352,7 +9352,7 @@ let draw_browser_viewport state (shot : Browser_lane_view.screenshot) bytes =
         (match shot.source with
          | Browser_lane_view.Live -> "click: link   drag: requires automation"
          | Browser_lane_view.Automation -> "click: link   drag: move"
-         | Browser_lane_view.Stagehand -> "click/drag: not served on the stagehand lane")
+         | Browser_lane_view.Stagehand -> "click: control   drag: move")
     | _ -> "click/drag unavailable: terminal cell geometry unknown" in
   let wheel_hint = match !image_cell_pixels with
     | Some (width,height) when width > 0 && height > 0 -> "wheel:pane"
@@ -11254,7 +11254,7 @@ let open_lanes_standalone_selection state ~mailbox =
       open_lane_run_list state ~mailbox lane
   | None ->
       show_lanes_action_error state
-        "Cannot open runs: standalone lane observation is unavailable"
+        "Cannot open runs: lane observation is unavailable"
 
 (* A left press on the Lanes overview is the cursor keys by another hand: the
    first press lands the selection on the row under it (exactly where j/k
@@ -16067,7 +16067,15 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       (match state.browser_lane with
        | Some view ->
            (match view.Browser_lane_view.load with
-            | Browser_lane_view.Loading (current, (Open_session | Close_session | Goto _))
+            | Browser_lane_view.Loading (current, Close_session)
+              when generation = current ->
+                (match result with
+                 | Error detail ->
+                     state.browser_lane <- Some (Browser_lane_view.fail_action detail view)
+                 | Ok () ->
+                     let closed = Browser_lane_view.after_action view in
+                     state.browser_lane <- Some { closed with load = No_browser })
+            | Browser_lane_view.Loading (current, (Open_session | Goto _))
               when generation = current ->
                 (match result with
                  | Error detail ->
@@ -16981,6 +16989,12 @@ let main
    | Some name when Masc_tui_theme_choice.apply name ->
        state.theme_choice <- Some name
    | Some _ | None -> ());
+  (match tui_settings.candle with
+   | None -> ()
+   | Some value ->
+       (match Masc_tui_emblem_screen.style_of_string value with
+        | Some style -> Masc_tui_emblem_screen.set_style style
+        | None -> add_event state "error" ("Unknown saved candle: " ^ value)));
 
   (* Same file, same moment. Absent reads as on, which is what masc drew
      before the key existed -- a reader who never set it sees no change. *)
@@ -17921,8 +17935,8 @@ let main
      same two spellings the table parser accepts, kept together here so a
      name that parses cannot fail to be found. *)
   let config_models_source_line ~(row : Masc_tui_model_runtime_table.row) rows =
-    let bare = "[models." ^ row.Masc_tui_model_runtime_table.model ^ "]" in
-    let quoted = "[models.\"" ^ row.Masc_tui_model_runtime_table.model ^ "\"]" in
+    let bare = "[" ^ Runtime_toml_namespace.(path Models) row.Masc_tui_model_runtime_table.model ^ "]" in
+    let quoted = "[" ^ Runtime_toml_namespace.(path Models) ("\"" ^ row.Masc_tui_model_runtime_table.model ^ "\"") ^ "]" in
     let rec scan i = function
       | [] -> None
       | segments :: rest ->
@@ -18069,7 +18083,8 @@ let main
               (String.length sr_slot - boundary - 1)
           in
           (match kind with
-           | Masc_tui_types.Catalog_slot -> Some [ "providers"; provider_id ]
+           | Masc_tui_types.Catalog_slot ->
+             Some [ Runtime_toml_namespace.(key Providers); provider_id ]
            | Masc_tui_types.Official_client_slot -> Some [ provider_id; model_id ]
            | Masc_tui_types.Media_route_slot -> None)
         | Some _ | None -> None
@@ -20692,12 +20707,24 @@ and is loaded on demand through keeper_skill.
        (* The help overlay is modal: it answers scrolling and closing, and
           swallows everything else so a surface binding cannot fire under a
           screen that is describing it. Quit stays global above. *)
-       (* /about is modal for the help sheet's reason: Esc closes it, and
-          everything else is swallowed so no surface binding fires under it.
-          Quit stays global above. *)
+       (* /about is modal for the help sheet's reason: Esc closes it, c turns
+          the candle to its other style, and everything else is swallowed so
+          no surface binding fires under it. Quit stays global above. *)
        | Some k when state.about_open ->
            (match k with
             | "esc" -> state.about_open <- false
+            | "c" ->
+                let style = Masc_tui_emblem_screen.next_style (Masc_tui_emblem_screen.style ()) in
+                Masc_tui_emblem_screen.set_style style;
+                (* The candle on screen already changed, so a write that
+                   failed is said out loud, or a restart would bring the old
+                   one back with nothing having told the reader. *)
+                (match
+                   Masc_tui_config.set_candle ~base_path
+                     (Masc_tui_emblem_screen.string_of_style style)
+                 with
+                 | Ok () -> ()
+                 | Error message -> report_action state "error" ("Candle not saved: " ^ message))
             | _ -> ())
        | Some k when state.keeper_deletions_open ->
            (match k with
@@ -25735,7 +25762,7 @@ and is loaded on demand through keeper_skill.
                  | Lanes_run_list _ | Lanes_run_detail _ | Lanes_measurement_detail _ -> ()
                  | Lanes_overview ->
                      show_lanes_action_error state
-                       "Cannot open chat: Standalone lanes have no Keeper; use Keepers")
+                       "Cannot open chat: These lanes have no Keeper; use Keepers")
             | Keepers Keeper_list
               when Option.is_none state.keepers_error
                    && state.keeper_cursor < List.length state.keepers ->
@@ -26044,7 +26071,7 @@ and is loaded on demand through keeper_skill.
                 (match state.lanes_mode, selected_standalone_lane state with
                  | Lanes_overview, Some lane ->
                    let path =
-                     [ "runtime"; "exact_output_lanes"
+                     [ Runtime_toml_namespace.(key Runtime); "exact_output_lanes"
                      ; Standalone_lane.to_id lane.Tui_decode.sl_lane ]
                    in
                    let section = runtime_config_path_text path in

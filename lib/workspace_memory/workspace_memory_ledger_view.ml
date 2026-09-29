@@ -1,5 +1,6 @@
 module Ledger = Workspace_memory_ledger
 module Context = Workspace_memory_context
+module String_map = Map.Make (String)
 
 let ( let* ) = Result.bind
 
@@ -81,6 +82,32 @@ let member_refs facts ~kind ~id =
        | _ -> None)
     | _ -> None)
 
+let grouped_member_refs facts =
+  List.fold_left (fun (claims, conflicts) -> function
+    | `Assoc fields ->
+      let reference = `Assoc (List.filter (fun (key, _) -> key <> "disposition") fields) in
+      (match List.assoc_opt "disposition" fields with
+       | Some (`Assoc disposition) ->
+         (match List.assoc_opt "kind" disposition with
+          | Some (`String "claim") ->
+            (match List.assoc_opt "claim_id" disposition with
+             | Some (`String id) ->
+               let previous = match String_map.find_opt id claims with
+                 | Some members -> members | None -> [] in
+               String_map.add id (reference :: previous) claims, conflicts
+             | _ -> claims, conflicts)
+          | Some (`String "conflict") ->
+            (match List.assoc_opt "conflict_id" disposition with
+             | Some (`String id) ->
+               let previous = match String_map.find_opt id conflicts with
+                 | Some members -> members | None -> [] in
+               claims, String_map.add id (reference :: previous) conflicts
+             | _ -> claims, conflicts)
+          | _ -> claims, conflicts)
+       | _ -> claims, conflicts)
+    | _ -> claims, conflicts)
+    (String_map.empty, String_map.empty) facts
+
 let summary_with_load ~load ~base_path =
   match Ledger.observe ~base_path with
   | Ledger.Missing -> Ok (`Assoc ["status", `String "missing"])
@@ -90,14 +117,15 @@ let summary_with_load ~load ~base_path =
         ~ledger_sha256:descriptor.ledger_sha256 in
     let facts = Ledger.to_json ledger |> Yojson.Safe.Util.member "facts"
       |> Yojson.Safe.Util.to_list in
-    let rows kind entries = List.map (fun (id, text) ->
+    let claim_members, conflict_members = grouped_member_refs facts in
+    let rows members entries = List.map (fun (id, text) ->
       `Assoc ["id", `String id; "text", `String text;
-              "members", `List (member_refs facts ~kind ~id)]) entries in
+              "members", `List (List.rev (String_map.find id members))]) entries in
     Ok (`Assoc ["status", `String "available";
                 "semantic_verification", `String "not_performed";
                 "ledger_sha256", `String descriptor.ledger_sha256;
-                "claims", `List (rows "claim" (Ledger.claims ledger));
-                "conflicts", `List (rows "conflict" (Ledger.conflicts ledger));
+                "claims", `List (rows claim_members (Ledger.claims ledger));
+                "conflicts", `List (rows conflict_members (Ledger.conflicts ledger));
                 "classified_count", `Int descriptor.classified_count])
 
 let summary ~base_path = summary_with_load ~load:Ledger.load ~base_path

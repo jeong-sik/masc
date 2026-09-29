@@ -8,7 +8,7 @@ let ledger claims =
     { fact = Ledger.Ordinary { keeper_id = "writer";
         claim_sha256 = Digestif.SHA256.(digest_string claim |> to_hex) }; claim }) claims in
   let assignments : Ledger.assignment list = List.map (fun (row : Ledger.pending_fact) ->
-    { fact = row.fact; decision = Ledger.Create_claim row.claim }) selected in
+    { Ledger.fact = row.fact; decision = Ledger.Create_claim row.claim }) selected in
   match Ledger.apply Ledger.empty ~selected assignments with
   | Ok value -> value
   | Error error -> Alcotest.fail (Ledger.apply_error_to_string error)
@@ -29,7 +29,11 @@ let check_summary label expected response =
   Alcotest.(check (list string)) (label ^ " exposes that snapshot's claims")
     (List.map snd (Ledger.claims expected))
     (response |> member "claims" |> to_list
-     |> List.map (fun row -> row |> member "text" |> to_string))
+     |> List.map (fun row -> row |> member "text" |> to_string));
+  Alcotest.(check int) (label ^ " groups each member exactly once")
+    (List.length (Ledger.dispositions expected))
+    (response |> member "claims" |> to_list
+     |> List.fold_left (fun count row -> count + (row |> member "members" |> to_list |> List.length)) 0)
 
 let test_atomic_replacement_never_mixes_summary_versions () = with_base (fun base_path ->
   let before = ledger ["Original observation"] in

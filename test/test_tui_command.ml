@@ -8,6 +8,7 @@ let describe = function
   | Command.Task_for_keeper { title; body } -> Printf.sprintf "task:%s|%s" title body
   | Command.Task_missing_title -> "task-missing-title"
   | Command.Help -> "help"
+  | Command.Show_load_errors -> "show-load-errors"
   | Command.About -> "about"
   | Command.Open_settings -> "open-settings"
   | Command.Open_diff -> "open-diff"
@@ -39,6 +40,7 @@ let describe = function
   | Command.Lane_addons input -> "lane-addons:" ^ input
   | Command.Play_invites -> "play-invites"
   | Command.Play_link -> "play-link"
+  | Command.Play_qr -> "play-qr"
   | Command.Play_invite { name; hours } ->
       Printf.sprintf "play-invite:%s:%d" name hours
   | Command.Play_revoke name -> "play-revoke:" ^ name
@@ -111,10 +113,10 @@ let test_measurement_command () =
 
 let test_play_commands_are_explicit () =
   check (list string) "play list, issue and revoke are distinct"
-    [ "play-invites"; "play-invites"; "play-invite:guest1:24"; "play-link"
+    [ "play-invites"; "play-invites"; "play-invite:guest1:24"; "play-link"; "play-qr"
     ; "play-revoke:guest1" ]
     (List.map (fun line -> describe (Command.parse line))
-       [ "/play"; "/play invites"; "/play invite guest1 24"; "/play link"
+       [ "/play"; "/play invites"; "/play invite guest1 24"; "/play link"; "/play qr"
        ; "/play revoke guest1" ]);
   check bool "a missing expiry never issues an invite" true
     (String.starts_with ~prefix:"play-invalid:"

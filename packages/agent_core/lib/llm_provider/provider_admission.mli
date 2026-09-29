@@ -87,6 +87,16 @@ val with_admission_and_work_until
   -> (unit -> 'a)
   -> ('a, deadline_expiry) result
 
+(** Opens the shared permit-wait and work deadline [timeout_s] seconds from
+    now on the explicitly supplied [clock]. *)
+val with_admission_and_work_for
+  :  ?wait:permit_wait Atomic.t
+  -> clock:_ Eio.Time.clock
+  -> timeout_s:float
+  -> config:Provider_config.t
+  -> (unit -> 'a)
+  -> ('a, deadline_expiry) result
+
 (** Point-in-time scheduler snapshot for [config]'s endpoint identity, or
     [None] when no dispatch has declared admission for it yet.
     Diagnostics only. *)

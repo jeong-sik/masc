@@ -2940,8 +2940,8 @@ let test_a_text_laid_out_again_keeps_its_layout () =
 
 (* Where a layout's pieces came from shows in what it allocates: splitting a
    text allocates its pieces, and taking them from a frame's table does not.
-   On 2026-09-30 splitting this text allocated 93,848 bytes and taking its
-   pieces 240. *)
+   On 2026-09-30 splitting this text allocated 93,776 bytes and taking its
+   pieces 192. *)
 let test_a_text_is_split_again_after_a_frame_without_it () =
   let text = String.concat "" (List.init 400 (fun _ -> "\xed\x95\x9c")) in
   let allocated () =

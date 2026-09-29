@@ -14,6 +14,7 @@ SOURCE_MODULES = (
 )
 
 LINK = "https://play.example.test/play#fixture-secret"
+CHAT = "Keepers ▸ alpha ▸ chat".encode()
 
 
 def run(executable: str) -> None:
@@ -56,10 +57,19 @@ def run(executable: str) -> None:
             h.send_and_wait(process, master, output, line, h.composer_showing(line))
             h.send_and_wait(process, master, output, b"\r", answer)
 
+        def close_card() -> None:
+            h.send_and_wait(process, master, output, b"\x1b", CHAT)
+
+        # The link is on the card, and the card is the only place it is drawn.
         command(b"/play invite guest1 24", LINK.encode())
         h.wait_for_http_request(process, master, output, requests,
                                 path="/api/v1/play/invites")
-        command(b"/play link", b"Last play link issued")
+        close_card()
+        h.drain_until_quiet(process, master, output)
+        if LINK.encode() in h.screen_text(bytes(output)):
+            raise AssertionError("the invite link stayed on screen after its card closed")
+        command(b"/play link", b"MASC Play invite")
+        close_card()
         command(b"/play invites", b"old \xc2\xb7 expires not recorded")
         command(b"/play revoke guest1", b"retry /play revoke guest1")
         h.wait_for_http_request(process, master, output, requests,
@@ -68,6 +78,7 @@ def run(executable: str) -> None:
         command(b"/play revoke guest1", b"controller still busy")
         command(b"/play revoke guest1", b"controller released")
         command(b"/play invite guest1 24", LINK.encode())
+        close_card()
         command(b"/play revoke guest1", b"is absent; no controller held")
         command(b"/play link", b"No play link has been issued")
         paths = [path for path, _ in requests]

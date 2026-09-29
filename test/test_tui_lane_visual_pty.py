@@ -81,8 +81,8 @@ def main(executable: str, captures: Path | None) -> None:
         if b"MASC Lane Add-ons" in terminal.CSI_RE.sub(b"", palette):
             raise AssertionError("uppercase A intercepted palette input")
         key(b"\x1b", b"MASC Lanes")
-        overview = key(b"A", b"Lane Add-ons \xc2\xb7 2 installed")
-        first = screen(overview, b"Lane Add-ons \xc2\xb7 2 installed")
+        overview = key(b"A", b"Lane Add-ons \xc2\xb7 0 declared \xc2\xb7 1 active \xc2\xb7 1 failed workers")
+        first = screen(overview, b"Lane Add-ons \xc2\xb7 0 declared \xc2\xb7 1 active \xc2\xb7 1 failed workers")
         for needle in (b"> World observer", b"MSX", b"o:retry observation",
                        b"d:cleanup", b"D:full"):
             if needle not in first:
@@ -90,7 +90,7 @@ def main(executable: str, captures: Path | None) -> None:
         print("TUI_CAPTURE lane-addons overview " + repr(first), flush=True)
         capture("01-overview-100", 30, 100)
 
-        heading = b"Lane Add-ons \xc2\xb7 2 installed"
+        heading = b"Lane Add-ons \xc2\xb7 0 declared \xc2\xb7 1 active \xc2\xb7 1 failed workers"
         resized = terminal.resize_and_wait(process, master, output, rows=24, columns=80,
             needle=heading, controls=(terminal.FULL_REDRAW,))
         resize_at = len(output) - len(resized)
@@ -117,7 +117,7 @@ def main(executable: str, captures: Path | None) -> None:
                        b"4 Records", b"E edit", b"e export marked rows", b":act"):
             if needle not in help_screen:
                 raise AssertionError(f"Lane help omitted {needle!r}")
-        key(b"\x1b", b"Lane Add-ons \xc2\xb7 2 installed")
+        key(b"\x1b", b"Lane Add-ons \xc2\xb7 0 declared \xc2\xb7 1 active \xc2\xb7 1 failed workers")
         os.write(master, b"\t")
         if not terminal.drain_until_quiet(process, master, output):
             raise AssertionError("overview did not settle after Tab")
@@ -151,13 +151,13 @@ def main(executable: str, captures: Path | None) -> None:
             if needle not in plain:
                 raise AssertionError(f"Activity timeline omitted {needle!r}")
         capture("05-activity-timeline-140", 32, 140)
-        key(b"\x1b", b"Lane Add-ons \xc2\xb7 2 installed")
+        key(b"\x1b", b"Lane Add-ons \xc2\xb7 0 declared \xc2\xb7 1 active \xc2\xb7 1 failed workers")
         empty = snapshot()
         empty["instances"] = []
         empty["rows"] = []
         fixtures["/api/v1/lane-addons"] = (200, empty)
-        empty_output = key(b"r", b"Lane Add-ons \xc2\xb7 0 installed")
-        empty_screen = screen(empty_output, b"Lane Add-ons \xc2\xb7 0 installed")
+        empty_output = key(b"r", b"Lane Add-ons \xc2\xb7 0 declared \xc2\xb7 0 active \xc2\xb7 0 failed workers")
+        empty_screen = screen(empty_output, b"Lane Add-ons \xc2\xb7 0 declared \xc2\xb7 0 active \xc2\xb7 0 failed workers")
         if b"No Add-ons installed. i:install a package  n:new TOML" not in empty_screen:
             raise AssertionError("empty Add-on workspace lacks a next step")
         capture("06-empty-140", 32, 140)

@@ -238,7 +238,9 @@ let overview_entries snapshot =
          List.mapi (fun index (declaration : declaration) -> index, declaration) config.declarations
          |> List.filter_map (fun (index, declaration) ->
               let has_worker = Option.fold ~none:false ~some:(fun id ->
-                List.exists (fun (instance : instance) -> instance.id=id) snapshot.instances)
+                List.exists (fun (instance : instance) ->
+                  instance.id=id && instance.source_path=Some declaration.source_path)
+                  snapshot.instances)
                 declaration.instance_id in
               if has_worker then None else Some (`Declaration (index, declaration))))
 let overview_count snapshot = List.length (overview_entries snapshot)
@@ -287,10 +289,15 @@ let reconcile_snapshot view snapshot =
         then configuration_cursor else -1 in
       (* A vanished identity leaves no selection. Selecting a replacement is
          an explicit navigation action, never a side effect of a refresh. *)
-      {view with snapshot=Some snapshot;
-        row_cursor;
-        instance_cursor=anchor (fun (instance : instance) -> instance.id, instance.incarnation)
-          previous.instances snapshot.instances view.instance_cursor;
+      let previous_entries = overview_entries previous in
+      let entries = overview_entries snapshot in
+      let instance_cursor =
+        if previous_entries=[] && entries<>[] then 0
+        else anchor (function
+          | `Instance (instance : instance) -> `Instance (instance.id, instance.incarnation)
+          | `Declaration (_, declaration) -> `Declaration declaration.source_path)
+          previous_entries entries view.instance_cursor in
+      {view with snapshot=Some snapshot; row_cursor; instance_cursor;
         configuration_cursor}
 let selected_instance view = Option.bind view.snapshot (fun snapshot ->
   match view.screen with
@@ -388,12 +395,17 @@ let evidence_receipt_lines json =
 let selected_source_path view =
   Option.bind view.snapshot (fun snapshot ->
     Option.bind snapshot.configuration (fun config ->
-      let path = match view.focus with
-        | Configurations -> Option.map (fun (d : declaration) -> d.source_path) (selected_declaration view)
-        | Timeline | Connections | Instances | Rows -> Option.bind (selected_instance view) (fun instance ->
-            List.find_map (fun (d : declaration) ->
-              if d.instance_id=Some instance.id && Some d.source_path=instance.source_path
-              then Some d.source_path else None) config.declarations) in
+      let instance_path = Option.bind (selected_instance view) (fun instance ->
+        List.find_map (fun (d : declaration) ->
+          if d.instance_id=Some instance.id && Some d.source_path=instance.source_path
+          then Some d.source_path else None) config.declarations) in
+      let path = match view.focus, view.screen with
+        | Configurations, _ -> Option.map (fun (d : declaration) -> d.source_path) (selected_declaration view)
+        | Instances, Overview ->
+            (match at_cursor (overview_entries snapshot) view.instance_cursor with
+             | Some (`Declaration (_, declaration)) -> Some declaration.source_path
+             | Some (`Instance _) | None -> instance_path)
+        | (Timeline | Connections | Instances | Rows), _ -> instance_path in
       Option.bind path (fun path ->
         if Document.editable_source_path ~directory:config.directory path then Some path else None)))
 let subscription_targets view =
@@ -1083,10 +1095,26 @@ let overview_lines ~width view =
   let content = match view.snapshot with
     | None -> [unread_body_text ~failed_note:"Read failed · r:retry" view]
     | Some snapshot ->
-        let failed = List.fold_left (fun total (item : instance) ->
-          match item.phase with Row.Failed _ -> total + 1 | _ -> total) 0 snapshot.instances in
+        let active, failed = List.fold_left (fun (active, failed) (item : instance) ->
+          match item.phase with
+          | Row.Attached | Row.Observing -> active + 1, failed
+          | Row.Failed _ -> active, failed + 1
+          | Row.Detaching | Row.Detached -> active, failed)
+          (0, 0) snapshot.instances in
         let count = List.length snapshot.instances in
-        let heading = Printf.sprintf "Lane Add-ons · %d installed · %d failed" count failed in
+        let configuration_summary = match snapshot.configuration with
+          | None -> "TOML unknown"
+          | Some config ->
+              let declared = List.fold_left (fun total (declaration : declaration) ->
+                if Option.is_some declaration.desired then total + 1 else total)
+                0 config.declarations in
+              let issues = List.fold_left (fun total (declaration : declaration) ->
+                total + List.length declaration.issues) 0 config.declarations in
+              Printf.sprintf "%d declared%s%s" declared
+                (if issues=0 then "" else Printf.sprintf " · %d config issues" issues)
+                (if config.complete then "" else " · inventory partial") in
+        let heading = Printf.sprintf "Lane Add-ons · %s · %d active · %d failed workers"
+          configuration_summary active failed in
         let entries = overview_entries snapshot in
         let window = max 0 (view.instance_cursor - 4) in
         let items = List.mapi (fun index item -> index,item) entries
@@ -1097,15 +1125,19 @@ let overview_lines ~width view =
           | Some {complete=false;_} when entries=[] -> ["Installation inventory incomplete · r:refresh"]
           | None when entries=[] -> ["TOML installation status unknown · r:refresh"]
           | Some _ | None -> [] in
-        [heading; ""] @ action_lines view @ empty
+        [heading; ""] @ empty
         @ List.concat_map (fun (index,item) ->
             let marker = if index=view.instance_cursor then "> " else "  " in
             match item with
             | `Declaration (_, declaration) ->
                 let name = Option.value ~default:"unresolved installation" declaration.installation_id in
-                let status = if declaration.issues<>[] then "needs attention" else "pending" in
+                let status = if Option.is_none declaration.desired then "configuration issue"
+                  else if declaration.issues<>[] then "needs attention" else "pending" in
+                let edit = Option.bind snapshot.configuration (fun config ->
+                  if Document.editable_source_path ~directory:config.directory declaration.source_path
+                  then Some "  E:edit" else None) |> Option.value ~default:"" in
                 [marker ^ name ^ " · " ^ status ^ " · " ^ Filename.basename declaration.source_path;
-                 "    Enter:installation  E:edit"]
+                 "    Enter:installation" ^ edit]
             | `Instance item ->
                 let count_text = if item.observation_seq=0 then "no observations yet"
                   else Printf.sprintf "%d observations" item.observation_seq in
@@ -1122,7 +1154,7 @@ let overview_lines ~width view =
                 [lead; controls] @ detail) items
   in
   List.concat_map wrap ([ overview_hints view; "" ]
-    @ diagnostic_lines view @ action_lines view @ content)
+    @ diagnostic_lines view @ content @ action_lines view)
 
 let help_lines = [
   "Lane Add-ons keys · Esc:close";

@@ -189,7 +189,11 @@ def main(executable: str) -> None:
             reopened = key(b":go lane add-ons\r", b"TOML draft second.toml")
             if b"# second draft retained" not in terminal.CSI_RE.sub(b"", reopened):
                 raise AssertionError("late save or refresh discarded the second draft")
-            key(b"\x1b", b"Lane Add-ons \xc2\xb7 0 installed")
+            overview = key(b"\x1b", b"Lane Add-ons \xc2\xb7 1 declared")
+            if b"terminal-layer \xc2\xb7 pending" not in terminal.CSI_RE.sub(b"", overview):
+                raise AssertionError("saved TOML without a worker is missing from the Add-on list")
+            key(b"\r", b"TOML installations")
+            key(b"\x1b", b"Lane Add-ons \xc2\xb7 1 declared")
             key(b":act " + json.dumps(action_request).encode() + b"\r", b"state queued")
             key(b"t", b"state confirmed")
             key(b"q", b"MASC Overview")

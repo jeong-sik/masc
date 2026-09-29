@@ -114,6 +114,29 @@ let configuration_and_ports () =
     "rows":[],"coverage":[]
   }|} in
   let snapshot = UI.decode json |> ok in
+  let overview = {UI.initial with snapshot=Some snapshot} in
+  let empty = {snapshot with instances=[];
+    configuration=Some {directory="/config/lane-addons";complete=true;declarations=[]}} in
+  let first = {snapshot with instances=[];
+    configuration=Some {directory="/config/lane-addons";complete=true;
+      declarations=[List.hd (Option.get snapshot.configuration).declarations]}} in
+  let first = UI.reconcile_snapshot {overview with snapshot=Some empty} first in
+  check int "first saved TOML becomes the selected list row" 0 first.instance_cursor;
+  check int "Enter opens the first saved TOML" 0
+    (UI.open_selected_instance first).configuration_cursor;
+  let overview_lines = UI.lines ~width:120 overview in
+  check int "overview offers the worker and four configuration issues" 5
+    (UI.overview_count snapshot);
+  check bool "issue-only rows do not become declared installations" true
+    (List.mem "Lane Add-ons · 1 declared · 4 config issues · inventory partial · 1 active · 0 failed workers" overview_lines);
+  let issue = UI.open_selected_instance {overview with instance_cursor=1} in
+  check bool "Enter opens the exact broken installation" true
+    (issue.focus=UI.Configurations && issue.presentation=UI.Technical
+     && issue.configuration_cursor=1);
+  check bool "a configuration issue has no worker action" true
+    (Result.is_error (UI.open_actions ~request_id:"01901234-1234-7000-8000-000000000001" issue));
+  let refreshed = UI.reconcile_snapshot {overview with instance_cursor=1} snapshot in
+  check int "refresh keeps a selected issue row" 1 refreshed.instance_cursor;
   let view = {UI.initial with presentation=UI.Technical;focus=UI.Configurations;snapshot=Some snapshot;configuration_cursor=1} in
   check int "partial inventory cannot fabricate subscription choices" 0
     (List.length (UI.subscription_targets view));
@@ -139,6 +162,20 @@ let configuration_and_ports () =
   check (option string) "current instance can edit its declaration" (Some "/config/lane-addons/custom.toml")
     (UI.selected_source_path {view with focus=UI.Instances});
   let past = {snapshot with instances=List.map (fun (i : UI.instance) -> {i with id="past-worker"}) snapshot.instances} in
+  check int "unapplied parsed TOML remains selectable" 6 (UI.overview_count past);
+  let selected_unapplied = {overview with snapshot=Some past;instance_cursor=1} in
+  let unapplied = UI.open_selected_instance selected_unapplied in
+  check int "Enter opens the saved declaration without a worker" 0 unapplied.configuration_cursor;
+  check (option string) "E can edit the saved declaration from its list row"
+    (Some "/config/lane-addons/custom.toml")
+    (UI.selected_source_path selected_unapplied);
+  check bool "saved declaration is shown without claiming an active worker" true
+    (List.exists (String.starts_with ~prefix:"  custom · pending · custom.toml")
+       (UI.lines ~width:120 {overview with snapshot=Some past}));
+  let wrong_source = {snapshot with instances=List.map (fun (i : UI.instance) ->
+    {i with source_path=Some "/config/lane-addons/elsewhere.toml"}) snapshot.instances} in
+  check int "matching worker ID at another source cannot hide a declaration" 6
+    (UI.overview_count wrong_source);
   check (option string) "retained historical source does not authorize a new owner edit" None
     (UI.selected_source_path {view with focus=UI.Instances;snapshot=Some past});
   let lines = UI.lines ~width:100 view in

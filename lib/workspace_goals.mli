@@ -156,6 +156,10 @@ val scan_overdue_goal_notifications :
     key, so the owner's transcript gains exactly one row per event. A Goal with
     no recorded owner has no recipient and is skipped.
 
+    A recorded owner must resolve to a Keeper. An absent or unreadable
+    recipient fails delivery and leaves the marker unset, so a later scan can
+    deliver after the Keeper appears or its record is repaired.
+
     A Goal is past its due date once [now] is later than 23:59:59 UTC of that
     day ({!Goal_due}). The operator's time zone plays no part, and a value that
     is not a due date is never past. [now] is the wall clock unless given. *)
@@ -166,4 +170,5 @@ val scan_refuted_goal_notifications : Workspace_utils_backend_setup.config -> un
     periodic/restart scan is the retry: a send that failed left no marker, so
     the next scan re-sends, and a Goal whose owner changed after the verdict
     reaches the new owner because the delivery key carries the owner. A verdict
-    whose criterion no longer matches the Goal is stale and is not re-sent. *)
+    whose criterion no longer matches the Goal is stale and is not re-sent.
+    An absent or unreadable Keeper recipient also leaves delivery outstanding. *)

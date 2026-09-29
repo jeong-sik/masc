@@ -99,6 +99,14 @@ type stalled_subject =
       }
   | Goal_review of { goal_id : string; request_id : string }
 
+val notify_stalled_verification_with_runtime :
+  authority:Masc_domain.completion_authority ->
+  subject:stalled_subject ->
+  gate:string ->
+  detail:string ->
+  evaluator_runtime:string option ->
+  unit
+
 val notify_stalled_verification :
   authority:Masc_domain.completion_authority ->
   subject:stalled_subject ->
@@ -148,11 +156,27 @@ module For_testing : sig
     detail:string ->
     string
 
+  val stalled_board_content_with_runtime :
+    subject:stalled_subject ->
+    gate:string ->
+    detail:string ->
+    evaluator_runtime:string option ->
+    now:float ->
+    string
+
   val stalled_metadata :
     authority:Masc_domain.completion_authority ->
     subject:stalled_subject ->
     gate:string ->
     detail:string ->
+    Yojson.Safe.t
+
+  val stalled_metadata_with_runtime :
+    authority:Masc_domain.completion_authority ->
+    subject:stalled_subject ->
+    gate:string ->
+    detail:string ->
+    evaluator_runtime:string option ->
     Yojson.Safe.t
 
   val stall_disposition_of_json : Yojson.Safe.t -> stall_disposition option

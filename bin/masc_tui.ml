@@ -4331,7 +4331,7 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
   let host = server_peer_host and port = state.port in
   (match action with
    | Login.Input _ | Nothing -> ()
-   | Inventory | Refresh_saved _ | Refresh_retry | Start _ | Cancel | Recover | Discover | Prepare _ | Save _ | Close
+   | Inventory | Refresh_saved _ | Refresh_retry | Select_existing _ | Start _ | Cancel | Recover | Discover | Prepare _ | Save _ | Close
    | Preview_removal _ | Remove _ | Refresh_removed _ | Refresh_list _ ->
      view.generation <- view.generation + 1;
      Option.iter (fun stop -> stop ()) view.cancel_stream;
@@ -4363,6 +4363,10 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
   | Cancel ->
     Option.iter (fun stop -> stop ()) view.cancel_stream; view.cancel_stream<-None;
     view.draft<-""; view.phase<-Login.Failed; view.notice<-"로그인을 취소했습니다. r로 저장된 상태를 확인하세요."
+  | Select_existing provider ->
+    view.phase<-Login.Loading; view.notice<-"저장된 계정의 모델을 읽고 있습니다.";
+    let path = if provider.client=Login.Antigravity then "/api/v1/setup/accounts/antigravity" else "/api/v1/setup/accounts/select" in
+    start_job (fun () -> enqueue (post path (`Assoc ["integration_id",`String provider.id])))
   | Start {provider; existing} ->
     (
        let previous = Login.begin_attempt view provider ~existing in
@@ -4400,9 +4404,10 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
     view.phase<-Login.Loading;
     let body=`Assoc ["source",Login.source view;"model",`String model.id;"load",`Bool false] in
     start_job (fun () -> enqueue (post_setup "/api/v1/setup/context" body))
-  | Save model ->
-    view.phase<-Login.Saving;view.notice<-"모델의 응답과 도구 호출을 검증하고 있습니다.";
-    let body=Login.save_body view model in
+  | Save models ->
+    view.phase<-Login.Saving;
+    view.notice<-Printf.sprintf "모델 %d개 검증 중 · 응답과 도구 호출을 확인합니다." (List.length models);
+    let body=Login.save_body view models in
     start_job (fun () -> enqueue (post_setup "/api/v1/setup/connections" body))
   | Preview_removal {provider; _} ->
     view.phase<-Login.Loading; view.notice<-"지울 내용을 읽고 있습니다.";
@@ -14989,6 +14994,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                 | Ok () -> restore_account_login state view; Ok () | Error _ as error -> error)
              | Refresh_saved saved -> Login.refresh_saved view saved (Ok json); Ok ()
              | Refresh_retry -> Login.refresh_retry view (Ok json); Ok ()
+             | Select_existing provider ->
+               (match Login.selected_account view provider json with
+                | Ok () -> launch_account_login_action state ~mailbox view Discover; Ok ()
+                | Error _ as error -> error)
              | Discover -> Login.models view json
              | Prepare model -> Login.prepared view model json
              | Recover -> (match Login.receipt view json with
@@ -15012,7 +15021,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           | Ok () -> ()
           | Error message -> view.input_pending<-false; view.draft<-"";
             (match action with
-             | Login.Save model -> Login.save_failed view model message
+             | Login.Save _ -> Login.save_failed view message
              | Login.Input _ -> view.notice<-message
              | _ -> view.recovery<-Login.Login_status; view.phase<-Login.Failed; view.notice<-message))
        | Some _ | None -> ())
@@ -17566,17 +17575,6 @@ let main
   let refresh_interval_ns =
     Int64.of_float (max 0.0 refresh *. nanoseconds_per_second)
   in
-  (* A TUI key name to the lane's key vocabulary (RFC-0439 §3.3). The TUI sends
-     " " for space and single characters for letters; arrows come through by
-     name. [None] means "not a game key" -- esc is handled before this, and
-     deliberate non-key input ("") has no server key. *)
-  let msx_server_key = function
-    | " " -> Some "space"
-    | "up" | "down" | "left" | "right" as d -> Some d
-    | name when String.length name = 1 && Char.code name.[0] >= 33 && Char.code name.[0] < 127 ->
-        Some name
-    | _ -> None
-  in
   (* Spectator cadence (RFC-0439 §3.7): ~3 Hz. Fast enough that a keeper's play
      reads as motion, slow enough that the 147 KB frame poll stays cheap. *)
   let msx_spectator_poll_seconds = 0.3 in
@@ -19362,7 +19360,7 @@ and is loaded on demand through keeper_skill.
        | Some "esc", (Masc.Machine_lane.Msx | Masc.Machine_lane.Dos) ->
            invalidate_msx_poll ()
        | Some ("f6" | "f7" | "f8"), Masc.Machine_lane.Msx -> invalidate_msx_poll ()
-       | Some name, Masc.Machine_lane.Msx when Option.is_some (msx_server_key name) ->
+       | Some name, Masc.Machine_lane.Msx when Option.is_some (Masc_tui_msx.server_key name) ->
            invalidate_msx_poll ()
        | Some _, (Masc.Machine_lane.Msx | Masc.Machine_lane.Dos)
        | None, (Masc.Machine_lane.Msx | Masc.Machine_lane.Dos) -> ());
@@ -19459,7 +19457,7 @@ and is loaded on demand through keeper_skill.
              then re-fetch so the human sees the result of their own press
              without waiting for the next poll. A key with no server mapping
              (e.g. deliberate non-key input) just repaints the cache. *)
-          match msx_server_key name with
+          match Masc_tui_msx.server_key name with
           | Some server_key ->
               (match
                  Masc_tui_http.post_msx_press ~host:server_peer_host

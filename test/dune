@@ -2124,6 +2124,11 @@
  (deps %{workspace_root}/lib/otel_metric_store/otel_metric_store_core.ml)
  (libraries alcotest ast_grep otel_metric_store eio eio_main))
 
+(test
+ (name test_otel_metric_total)
+ (modules test_otel_metric_total)
+ (libraries alcotest otel_metric_store))
+
 ; Real local exact-output fixture shared by exact-output lane tests.
 (library
  (name exact_output_fixture)
@@ -2575,6 +2580,7 @@
 (include stanzas/test_msx_tools.inc)
 
 (include stanzas/test_dos_input_routes.inc)
+(include stanzas/test_play_credential_transaction.inc)
 (include stanzas/test_dos_tools.inc)
 
 (include stanzas/test_machine_checkpoint.inc)
@@ -6472,8 +6478,8 @@
 (test
  (name test_tui_msx_load)
  (modules test_tui_msx_load)
- (libraries alcotest unix masc masc_tui_types masc_tui_machine_live masc_tui_interactive
-   masc_tui_msx))
+ (libraries alcotest unix masc masc.msx_lane masc_tui_types masc_tui_machine_live
+   masc_tui_interactive masc_tui_msx))
 
 ; The spectator's typed read of GET /api/v1/lane-addons/live: every answer
 ; shape, the malformed ones, and what a read does to the drawn view.

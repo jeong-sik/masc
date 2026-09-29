@@ -102,6 +102,20 @@ type transition_result =
       ; detail : string
       }
 
+(** A turn terminal either commits (or replays) this attempt's receipt, or
+    finds that another transition already took the admitted entry out of the
+    pending queue, which leaves nothing to commit. *)
+type pending_turn_terminal_result =
+  | Turn_terminal_committed of transition_result
+  | Turn_selection_withdrawn
+
+(** A cancellation either commits (or replays) its receipt, or finds its
+    source already gone from the pending queue, which leaves nothing to
+    cancel. *)
+type pending_cancellation_result =
+  | Cancellation_committed of transition_result
+  | Cancellation_source_withdrawn
+
 type transfer_projection_result =
   | Transfer_projected
   | Transfer_already_projected
@@ -142,6 +156,14 @@ val validate_pending_selection_result :
   keeper_name:string ->
   selection:Keeper_event_queue_state.pending_selection ->
   (unit, string) result
+
+val admitted_selection_standing_result :
+  base_path:string ->
+  keeper_name:string ->
+  selection:Keeper_event_queue_state.pending_selection ->
+  (Keeper_event_queue_state.admitted_selection_standing, string) result
+(** {!Keeper_event_queue_state.admitted_selection_standing} over the durable
+    state. *)
 
 val ack_pending_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
@@ -359,6 +381,19 @@ val cancel_pending_accepted_result :
     checkpointing removal of the exact pending source. WAL replay can complete
     the transition from the pre-removal state after a crash. *)
 
+val cancel_pending_if_present_result :
+  ?after_commit:(Keeper_event_queue.t -> unit) ->
+  base_path:string ->
+  keeper_name:string ->
+  applied_at:float ->
+  cancellation:accepted_cancellation ->
+  unit ->
+  (pending_cancellation_result, string) result
+(** {!cancel_pending_accepted_result} for a caller that read the pending list
+    before taking the lock. A source another transition already removed
+    answers [Cancellation_source_withdrawn] under the same lock and nothing is
+    written ({!Keeper_event_queue_state.pending_cancellation_source_withdrawn}). *)
+
 val transfer_pending_accepted_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->
@@ -389,10 +424,13 @@ val terminalize_pending_turn_attempt_result :
   selection:Keeper_event_queue_state.pending_selection ->
   detail:string ->
   unit ->
-  (transition_result, string) result
+  (pending_turn_terminal_result, string) result
 (** Atomically construct and commit a source-bearing terminal receipt for one
     failed admitted turn. The selection carries the exact source incarnation;
-    no caller-provided prose or counter controls admission. *)
+    no caller-provided prose or counter controls admission. An entry another
+    transition removed while the turn ran answers [Turn_selection_withdrawn]
+    under the same lock, and nothing is written
+    ({!Keeper_event_queue_state.pending_turn_selection_withdrawn}). *)
 
 val terminalize_pending_turn_completed_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
@@ -401,9 +439,10 @@ val terminalize_pending_turn_completed_result :
   applied_at:float ->
   selection:Keeper_event_queue_state.pending_selection ->
   unit ->
-  (transition_result, string) result
+  (pending_turn_terminal_result, string) result
 (** Atomically construct and commit a source-bearing completion receipt for one
-    successful admitted turn. *)
+    successful admitted turn, or answer [Turn_selection_withdrawn] like
+    {!terminalize_pending_turn_attempt_result}. *)
 
 val project_transition_outbox_result :
   append_before_retire:(Keeper_event_queue_state.t -> outbox_entry -> (unit, string) result) ->

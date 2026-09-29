@@ -22,6 +22,9 @@ type config_error =
   | Toml_type_error of string
 [@@deriving show, eq]
 
+(* The [[fusion]] table of runtime.toml, spelled once (#39539). *)
+let fusion_table = Runtime_toml_namespace.(key Fusion)
+
 let config_error_message = function
   | Empty_presets -> "[fusion] is enabled but declares no preset"
   | No_panel_models preset -> Printf.sprintf "preset %s has no panel seat" preset
@@ -177,16 +180,16 @@ let parse_preset (name, tbl) : (Fusion_policy.Validated_preset.t, config_error) 
 
 (* [fusion] 존재 확정 후의 본 파싱. Otoml.Type_error는 of_toml이 감싼다. *)
 let parse_enabled (toml : Otoml.t) : (Fusion_policy.t, config_error list) result =
-  let enabled = Otoml.find_or ~default:false toml Otoml.get_boolean [ "fusion"; "enabled" ] in
+  let enabled = Otoml.find_or ~default:false toml Otoml.get_boolean [ fusion_table; "enabled" ] in
   let default_preset =
-    Otoml.find_or ~default:"" toml Otoml.get_string [ "fusion"; "default_preset" ]
+    Otoml.find_or ~default:"" toml Otoml.get_string [ fusion_table; "default_preset" ]
   in
   let staged_judge_group_size =
     Otoml.find_or ~default:Fusion_policy.default_staged_judge_group_size toml
-      Otoml.get_integer [ "fusion"; "staged_judge_group_size" ]
+      Otoml.get_integer [ fusion_table; "staged_judge_group_size" ]
   in
   let preset_entries =
-    match Otoml.find_opt toml Otoml.get_table [ "fusion"; "presets" ] with
+    match Otoml.find_opt toml Otoml.get_table [ fusion_table; "presets" ] with
     | Some entries -> entries
     | None -> []
   in
@@ -228,7 +231,7 @@ let parse_enabled (toml : Otoml.t) : (Fusion_policy.t, config_error list) result
       }
 
 let of_toml (toml : Otoml.t) : (Fusion_policy.t, config_error list) result =
-  match Otoml.find_opt toml Fun.id [ "fusion" ] with
+  match Otoml.find_opt toml Fun.id [ fusion_table ] with
   | None -> Ok disabled
   | Some _ ->
     (match parse_enabled toml with
@@ -258,7 +261,7 @@ let preset_seats (name, tbl) =
 
 let seat_routes_of_toml (toml : Otoml.t) =
   match
-    match Otoml.find_opt toml Otoml.get_table [ "fusion"; "presets" ] with
+    match Otoml.find_opt toml Otoml.get_table [ fusion_table; "presets" ] with
     | None -> []
     | Some entries -> List.concat_map preset_seats entries
   with

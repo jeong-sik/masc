@@ -67,6 +67,29 @@ val render_posed :
 val pixel : image -> x:int -> y:int -> rgb * int
 (** Colour and alpha of one pixel. [x] and [y] are clamped to the image. *)
 
+(** The colours a body's parts are painted in: the table this renderer paints
+    with, for one that draws the same candle another way
+    ({!Keeper_portrait_solid}). *)
+type palette = {
+  wax_rgb : rgb;
+  drip_rgb : rgb;
+  flame_rgb : rgb;  (** the flame's body *)
+  flame_core_rgb : rgb;  (** its hot centre *)
+  horn_rgb : rgb;
+  eye_rgb : rgb;
+  glint_rgb : rgb;  (** the sparkle in an eye *)
+  blush_rgb : rgb;
+  mouth_rgb : rgb;
+  ink_rgb : rgb;  (** outlines *)
+  backdrop_rgb : rgb;
+}
+
+val palette : Keeper_portrait_look.body -> palette
+
+val image_init : size -> (x:int -> y:int -> rgb * int) -> image
+(** An {!image} another renderer draws: the colour and alpha at each pixel,
+    [x] and [y] from 0 to the edge less one, channels clamped to 0-255. *)
+
 (** Geometry and colours the tests check the pixels against. *)
 module For_testing : sig
   val render_unculled :
@@ -106,5 +129,6 @@ module For_testing : sig
   val eye_rgb : Keeper_portrait_look.body -> rgb
   val mouth_rgb : Keeper_portrait_look.body -> rgb
   val tooth_rgb : Keeper_portrait_look.body -> rgb
+  val beard_rgb : Keeper_portrait_look.body -> rgb
   val backdrop_rgb : Keeper_portrait_look.body -> rgb
 end

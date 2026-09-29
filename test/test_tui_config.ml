@@ -364,7 +364,20 @@ let board_sort_cases =
            | Ok () -> () | Error message -> Alcotest.fail message);
           check_opt "stored order" (Some "discussed") (Config.load ~base_path).board_sort;
           store_or_fail ~base_path (Some "gruvbox-dark");
-          check_opt "theme update keeps order" (Some "discussed") (Config.load ~base_path).board_sort)) ]
+          check_opt "theme update keeps order" (Some "discussed") (Config.load ~base_path).board_sort))
+  ; Alcotest.test_case "the candle's style survives a new read beside the Board order" `Quick
+      (fun () ->
+        with_storable_base (fun ~base_path ->
+          (match Config.set_board_sort ~base_path "discussed" with
+           | Ok () -> () | Error message -> Alcotest.fail message);
+          (match Config.set_candle ~base_path "dotted" with
+           | Ok () -> () | Error message -> Alcotest.fail message);
+          let read = Config.load ~base_path in
+          check_opt "stored candle" (Some "dotted") read.candle;
+          check_opt "the Board order is kept" (Some "discussed") read.board_sort;
+          (match Config.set_candle ~base_path "painted" with
+           | Ok () -> () | Error message -> Alcotest.fail message);
+          check_opt "changed back" (Some "painted") (Config.load ~base_path).candle)) ]
 
 let opening_cases =
   let parsed text = Config.opening_of_doc (doc_of text) in

@@ -1,0 +1,24 @@
+ ▸Overview  Activity  Keepers  Lanes  Memory  Approvals  Board 4›
+
+   MASC Overview  [workspace\x1B]8;;https://attacker.invalid\x07owned]  01:25…
+ ──────────────────────────────────────────────────────────────────────────────
+    Connecting to workspace…
+ ──────────────────────────────────────────────────────────────────────────────
+    Overview briefing not read yet
+  Goals   No goal data read yet.
+
+  Attention
+  (not loaded yet — press r)
+
+ Tasks
+
+    (not loaded yet — press r)
+
+
+
+
+
+
+
+  m:telemetry  t:tasks  2:keepers  r:refresh  Tab:next  q:quit  | Port: 35569
+ › no keeper selected

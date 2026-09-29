@@ -20,10 +20,22 @@ type query_reply =
 let apc = "\x1b_G"
 let st = "\x1b\\"
 
-(* Chosen high so it cannot collide with an image this process places, and
-   fixed so a reply arriving late -- after the deadline, into the key stream --
-   is still recognisable as an answer rather than typed as text. *)
-let query_id = 31
+type image =
+  | Graphics_query
+  | Msx_screen
+  | Mascot
+  | Keeper_portrait
+[@@deriving enumerate]
+
+(* Fixed, so a query reply arriving late -- after the deadline, into the key
+   stream -- is still recognisable as an answer rather than typed as text. *)
+let image_id = function
+  | Graphics_query -> 31
+  | Msx_screen -> 32
+  | Mascot -> 41
+  | Keeper_portrait -> 42
+
+let query_id = image_id Graphics_query
 
 (* f=100 says the payload is a PNG file's bytes. The query sends the smallest
    PNG that exists rather than a made-up one: a terminal that decodes it
@@ -81,21 +93,6 @@ let chunk_bytes = 4096
    composer's already answers. *)
 let payload_media_type = "image/png"
 
-(* The raw formats the protocol names by their bytes per pixel: [f=24] is
-   RGB, [f=32] is RGBA with straight alpha, which the terminal blends over
-   whatever the cells behind the picture show. *)
-type raw_format =
-  | Rgb
-  | Rgba
-
-let raw_format_key = function
-  | Rgb -> 24
-  | Rgba -> 32
-
-let raw_bytes_per_pixel = function
-  | Rgb -> 3
-  | Rgba -> 4
-
 (* Raw pixels, for a caller that holds a frame rather than a file. A raw
    format has no container, so the escape has to state the pixel dimensions
    the PNG header would otherwise carry -- [s=] and [v=] -- and the terminal
@@ -106,7 +103,7 @@ let raw_bytes_per_pixel = function
    bytes under [f=100], which is exactly the silent drop the comment above
    warns about. A caller holding a frame reaches for this one because it is
    the one that asks for the frame's dimensions. *)
-let encode_raw ~format ~identity ~data ~pixel_width ~pixel_height ~rows =
+let encode_rgb ~identity ~data ~pixel_width ~pixel_height ~rows =
   let encoded = Base64.encode_string data in
   let length = String.length encoded in
   let out = Buffer.create (length + (length / chunk_bytes * 32) + 64) in
@@ -117,8 +114,8 @@ let encode_raw ~format ~identity ~data ~pixel_width ~pixel_height ~rows =
     if offset = 0
     then
       Buffer.add_string out
-        (Printf.sprintf "%sf=%d,s=%d,v=%d,a=T%s,r=%d,q=2,m=%d;%s%s" apc
-           (raw_format_key format) (max 1 pixel_width) (max 1 pixel_height) identity
+        (Printf.sprintf "%sf=24,s=%d,v=%d,a=T%s,r=%d,q=2,m=%d;%s%s" apc
+           (max 1 pixel_width) (max 1 pixel_height) identity
            (max 1 rows) more
            (String.sub encoded offset size)
            st)
@@ -129,8 +126,8 @@ let encode_raw ~format ~identity ~data ~pixel_width ~pixel_height ~rows =
   in
   (* A frame whose bytes do not match its stated dimensions would be drawn as
      whatever the terminal makes of the mismatch, so refuse instead. *)
-  if length = 0
-     || String.length data <> pixel_width * pixel_height * raw_bytes_per_pixel format
+  if String.length data = 0
+     || String.length data <> pixel_width * pixel_height * 3
   then ""
   else begin
     emit 0;
@@ -138,21 +135,18 @@ let encode_raw ~format ~identity ~data ~pixel_width ~pixel_height ~rows =
   end
 ;;
 
-let place_rgb = encode_raw ~format:Rgb ~identity:""
+let place_rgb = encode_rgb ~identity:""
 
 let identity ~image_id ~placement_id =
   Printf.sprintf ",i=%d,p=%d,C=1" image_id placement_id
 
 let replace_rgb ~image_id ~placement_id =
-  encode_raw ~format:Rgb ~identity:(identity ~image_id ~placement_id)
-
-let replace_rgba ~image_id ~placement_id =
-  encode_raw ~format:Rgba ~identity:(identity ~image_id ~placement_id)
+  encode_rgb ~identity:(identity ~image_id ~placement_id)
 
 let delete_image ~image_id =
   Printf.sprintf "%sa=d,d=I,i=%d,q=2%s" apc image_id st
 
-let place ~data ~rows =
+let place_png ~identity ~data ~rows =
   let encoded = Base64.encode_string data in
   let length = String.length encoded in
   let out = Buffer.create (length + (length / chunk_bytes * 32) + 64) in
@@ -165,7 +159,7 @@ let place ~data ~rows =
        complete and may be drawn. *)
     if offset = 0 then
       Buffer.add_string out
-        (Printf.sprintf "%sf=100,a=T,r=%d,q=2,m=%d;%s%s" apc
+        (Printf.sprintf "%sf=100,a=T%s,r=%d,q=2,m=%d;%s%s" apc identity
            (max 1 rows) more
            (String.sub encoded offset size)
            st)
@@ -180,6 +174,17 @@ let place ~data ~rows =
     emit 0;
     Buffer.contents out
   end
+
+let place = place_png ~identity:""
+
+(* Ghostty 1.3.1 crashes in its Kitty o=z inflater for portrait-sized data
+   (compress.flate.Decompress.streamInner -> Io.Writer.unreachableRebase).
+   PNG keeps alpha and compact transfers while using the terminal's PNG
+   decoder, the same path the capability query already exercised. *)
+let replace_rgba ~image_id ~placement_id ~data ~pixel_width ~pixel_height ~rows =
+  match Rgb_png.encode_rgba ~width:pixel_width ~height:pixel_height ~rgba:data with
+  | Error _ -> ""
+  | Ok png -> place_png ~identity:(identity ~image_id ~placement_id) ~data:png ~rows
 
 let delete_all = Printf.sprintf "%sa=d%s" apc st
 

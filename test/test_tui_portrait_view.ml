@@ -8,6 +8,8 @@ module Draw = Keeper_portrait_draw
 module Layout = Masc_tui_message_layout
 module Palette = Masc_tui_terminal_palette
 
+let mascot_id = Masc_tui_graphics.image_id Masc_tui_graphics.Mascot
+
 let project = Palette.For_testing.best_color_for_level ~level:Palette.True_color
 
 let contains ~sub s =
@@ -31,12 +33,13 @@ let test_colour_off_draws_no_picture () =
   check display "graphics draw real pixels at the reported cell"
     (View.Pixels { cell_width = 9; cell_height = 18 })
     (chosen ~kitty:true ~cell_pixels:(Some (9, 18)) ~colors_enabled:true ~projects_colour:false);
-  let default_width, default_height = View.default_cell in
-  let default_pixels = View.Pixels { cell_width = default_width; cell_height = default_height } in
-  check display "an unreported cell is the common one" default_pixels
+  (* A box counted in cells from a guessed size lands beside the text. *)
+  check display "graphics with an unreported cell draw the mosaic" View.Mosaic
     (chosen ~kitty:true ~cell_pixels:None ~colors_enabled:true ~projects_colour:true);
-  check display "a zero cell is not a cell" default_pixels
+  check display "a zero cell is not a cell" View.Mosaic
     (chosen ~kitty:true ~cell_pixels:(Some (0, 18)) ~colors_enabled:true ~projects_colour:true);
+  check display "and without colour to project, nothing" View.No_picture
+    (chosen ~kitty:true ~cell_pixels:None ~colors_enabled:true ~projects_colour:false);
   check display "no graphics, colour: the mosaic" View.Mosaic
     (chosen ~kitty:false ~cell_pixels:None ~colors_enabled:true ~projects_colour:true);
   check display "no graphics, no colour to project: nothing" View.No_picture
@@ -93,7 +96,7 @@ let test_lines_fill_the_box () =
 let placement ?(row = 4) ?(column = 7) size_rows =
   let pixels = View.Pixels { cell_width = 10; cell_height = 20 } in
   let box = Option.get (View.fit pixels ~max_cols:60 ~max_rows:size_rows) in
-  { View.image_id = View.mascot_image_id; row; column; box; image = mascot box.View.size }
+  { View.image_id = mascot_id; row; column; box; image = mascot box.View.size }
 
 let test_placement_bytes_leave_the_cursor_where_it_was () =
   let p = placement 6 in
@@ -102,40 +105,60 @@ let test_placement_bytes_leave_the_cursor_where_it_was () =
   check bool "restores it last" true (String.ends_with ~suffix:"\0278" bytes);
   check bool "moves to the 1-based corner" true (contains ~sub:"\027[5;8H" bytes);
   check bool "under the mascot's id" true
-    (contains ~sub:(Printf.sprintf "i=%d," View.mascot_image_id) bytes);
-  check bool "straight-alpha RGBA" true (contains ~sub:"f=32," bytes);
+    (contains ~sub:(Printf.sprintf "i=%d," mascot_id) bytes);
+  check bool "RGBA PNG" true (contains ~sub:"f=100," bytes);
   check bool "as many rows as the box" true
     (contains ~sub:(Printf.sprintf "r=%d," p.View.box.View.rows) bytes)
 
-let frame requests ~presented =
+(* What the frame erased and wrote again: nothing, every row, or some. *)
+let nothing _ = false
+let every_row _ = true
+
+let frame ?(rewritten = nothing) requests =
   View.begin_frame ();
   List.iter View.request requests;
   let written = Buffer.create 4096 in
-  View.flush ~presented ~write:(Buffer.add_string written);
+  View.flush ~rewritten ~write:(Buffer.add_string written);
   Buffer.contents written
 
-let deleted = Masc_tui_graphics.delete_image ~image_id:View.mascot_image_id
+let deleted = Masc_tui_graphics.delete_image ~image_id:mascot_id
 
 let test_flush_sends_only_what_changed () =
-  ignore (frame [] ~presented:false);
+  ignore (frame []);
   let p = placement 6 in
-  check string "a new picture is placed" (View.placement_bytes p) (frame [ p ] ~presented:false);
-  check string "the same picture on an unchanged frame is left alone" ""
-    (frame [ p ] ~presented:false);
-  check string "a repainted frame places it again" (View.placement_bytes p)
-    (frame [ p ] ~presented:true);
+  check string "a new picture is placed" (View.placement_bytes p) (frame [ p ]);
+  check string "the same picture on an unchanged frame is left alone" "" (frame [ p ]);
+  check string "a full redraw places it again" (View.placement_bytes p)
+    (frame ~rewritten:every_row [ p ]);
   let moved = { p with View.row = p.View.row + 1 } in
-  check string "a moved picture is placed again" (View.placement_bytes moved)
-    (frame [ moved ] ~presented:false);
-  check string "a frame that no longer asks deletes it" deleted (frame [] ~presented:false);
-  check string "and then there is nothing to delete" "" (frame [] ~presented:false)
+  check string "a moved picture is placed again" (View.placement_bytes moved) (frame [ moved ]);
+  check string "a frame that no longer asks deletes it" deleted (frame []);
+  check string "and then there is nothing to delete" "" (frame [])
+
+(* A differential frame writes only the rows whose text changed. A picture
+   those rows miss is still on the terminal; one they cross may have lost
+   the cells the erase took. *)
+let test_a_rewritten_row_places_again_only_the_picture_it_crosses () =
+  ignore (frame []);
+  let p = placement 6 in
+  let top = p.View.row and bottom = p.View.row + p.View.box.View.rows - 1 in
+  ignore (frame [ p ]);
+  check string "a row above the picture leaves it alone" ""
+    (frame ~rewritten:(fun row -> row = top - 1) [ p ]);
+  check string "a row below it leaves it alone" ""
+    (frame ~rewritten:(fun row -> row = bottom + 1) [ p ]);
+  check string "its top row places it again" (View.placement_bytes p)
+    (frame ~rewritten:(fun row -> row = top) [ p ]);
+  check string "its bottom row places it again" (View.placement_bytes p)
+    (frame ~rewritten:(fun row -> row = bottom) [ p ]);
+  ignore (frame [])
 
 let test_a_second_request_replaces_the_first () =
-  ignore (frame [] ~presented:false);
+  ignore (frame []);
   let first = placement 6 and second = placement ~row:9 6 in
   check string "one picture per id, the last asked" (View.placement_bytes second)
-    (frame [ first; second ] ~presented:false);
-  ignore (frame [] ~presented:false)
+    (frame [ first; second ]);
+  ignore (frame [])
 
 let () =
   run "tui_portrait_view"
@@ -151,6 +174,8 @@ let () =
       , [ test_case "placement bytes leave the cursor where it was" `Quick
             test_placement_bytes_leave_the_cursor_where_it_was
         ; test_case "flush sends only what changed" `Quick test_flush_sends_only_what_changed
+        ; test_case "a rewritten row places again only the picture it crosses" `Quick
+            test_a_rewritten_row_places_again_only_the_picture_it_crosses
         ; test_case "a second request replaces the first" `Quick
             test_a_second_request_replaces_the_first
         ] )

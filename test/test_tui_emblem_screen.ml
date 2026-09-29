@@ -1,5 +1,4 @@
-(* MASC's candle laid out as a screen body: the startup splash and /about
-   both draw these rows, so what is checked here is what both screens show. *)
+(* The /about candle laid out inside the available screen body. *)
 
 open Alcotest
 module Screen = Masc_tui_emblem_screen
@@ -24,18 +23,16 @@ let caption = [ "first caption"; "second caption" ]
 let cols = 80
 let rows = 24
 let origin = (3, 2)
-let pixels = View.Pixels { cell_width = 10; cell_height = 20 }
+let cell_height = 20
+let pixels = View.Pixels { cell_width = 10; cell_height }
 let project = Palette.For_testing.best_color_for_level ~level:Palette.True_color
 
-let laid_out ?(screen = Screen.About) ?(rows = rows) ?(elapsed = 0.0) display =
-  Screen.rows ~screen ~cols ~rows ~caption ~elapsed ~display ~project ~origin
+let laid_out ?(style = Screen.Painted) ?(rows = rows) ?(elapsed = 0.0) display =
+  Screen.rows ~style ~cols ~rows ~caption ~elapsed ~display ~project ~origin
 
 (* The rows the picture can have: the space less the caption and its gap. *)
 let picture_rows_in rows = rows - List.length caption - 1
 let picture_rows = picture_rows_in rows
-
-(* A terminal tall enough that the startup cap, not the space, decides. *)
-let tall_rows = 60
 
 let index_of row lines =
   let rec find index = function
@@ -46,8 +43,8 @@ let index_of row lines =
 
 let trimmed line = String.trim (Masc_tui_theme.strip_sgr line)
 
-let test_the_candle_stands_centred_over_its_caption screen () =
-  let out = laid_out ~screen View.Mosaic in
+let test_the_candle_stands_centred_over_its_caption () =
+  let out = laid_out View.Mosaic in
   check bool "drawn" true (out.Screen.drawn = Screen.Moving);
   check bool "a mosaic is in the rows, nothing is placed" true
     (Option.is_none out.Screen.placement);
@@ -80,12 +77,7 @@ let test_the_candle_stands_centred_over_its_caption screen () =
   check bool "centred top to bottom" true (abs (above - below) <= 1);
   (* Centred left to right: each row of the picture is its box behind a pad
      of plain spaces, and the pad leaves as much on the left as on the right. *)
-  let max_rows =
-    match screen with
-    | Screen.Startup -> Int.min Screen.startup_picture_rows picture_rows
-    | Screen.About -> picture_rows
-  in
-  let box = Option.get (View.fit View.Mosaic ~max_cols:cols ~max_rows) in
+  let box = Option.get (View.fit View.Mosaic ~max_cols:cols ~max_rows:picture_rows) in
   let left = (cols - box.View.cols) / 2 in
   check int "every picture row is drawn" box.View.rows
     (List.length (List.filteri (fun index _ -> index >= above && index < above + box.View.rows) lines));
@@ -106,7 +98,8 @@ let test_pixels_leave_blank_rows_and_place_the_picture_there () =
   let origin_row, origin_col = origin in
   let top = p.View.row - origin_row in
   let left = p.View.column - origin_col in
-  check int "the mascot's picture slot" View.mascot_image_id p.View.image_id;
+  check int "the mascot's picture slot" (Masc_tui_graphics.image_id Masc_tui_graphics.Mascot)
+    p.View.image_id;
   check bool "placed inside the body" true (top >= 0 && top + p.View.box.View.rows <= rows);
   check int "centred left to right" left ((cols - p.View.box.View.cols) / 2);
   List.iteri
@@ -135,30 +128,6 @@ let test_no_picture_draws_the_caption_alone () =
   alone View.Mosaic ~rows:4;
   alone pixels ~rows:4
 
-let test_the_startup_candle_stays_small () =
-  let block_rows screen =
-    List.length (List.filter has_block (laid_out ~screen ~rows:tall_rows View.Mosaic).Screen.lines)
-  in
-  check bool "the splash still draws a mosaic candle" true (block_rows Screen.Startup > 0);
-  check bool "no taller than the startup rows" true
-    (block_rows Screen.Startup <= Screen.startup_picture_rows);
-  check bool "/about lets it take the space" true
-    (block_rows Screen.About > Screen.startup_picture_rows);
-  let placed_rows screen ~rows =
-    (Option.get (laid_out ~screen ~rows pixels).Screen.placement).View.box.View.rows
-  in
-  check int "placed pixels stop at the startup rows" Screen.startup_picture_rows
-    (placed_rows Screen.Startup ~rows:tall_rows);
-  check bool "/about places a taller picture" true
-    (placed_rows Screen.About ~rows:tall_rows > Screen.startup_picture_rows);
-  (* The cap only lowers the ceiling: a space under it keeps its own size. *)
-  let short_rows = 12 in
-  check int "a short space is not stretched to the startup rows"
-    (placed_rows Screen.About ~rows:short_rows)
-    (placed_rows Screen.Startup ~rows:short_rows);
-  check bool "the short space is under the startup rows" true
-    (picture_rows_in short_rows < Screen.startup_picture_rows)
-
 let test_elapsed_time_is_the_pose () =
   let body, equipment = Keeper_portrait_look.mascot in
   let image_at elapsed = (Option.get (laid_out ~elapsed pixels).Screen.placement).View.image in
@@ -170,6 +139,37 @@ let test_elapsed_time_is_the_pose () =
     (image_at (-1.0) = drawn (Draw.pose_at ~milliseconds:0));
   check bool "a time that is not finite holds it still" true
     (image_at Float.nan = drawn Draw.still)
+
+(* The dotted candle is the solid mascot, drawn as many pixels tall as the
+   terminal shows it, so the terminal never scales its dots. *)
+let test_a_dotted_candle_is_drawn_at_the_size_it_is_shown () =
+  let placed ~elapsed =
+    Option.get (laid_out ~style:Screen.Dotted ~elapsed pixels).Screen.placement
+  in
+  let p = placed ~elapsed:1.5 in
+  let shown = Option.get (Draw.size_of_int (p.View.box.View.rows * cell_height)) in
+  check int "one pixel per pixel the terminal shows" (p.View.box.View.rows * cell_height)
+    p.View.image.Draw.edge;
+  check bool "the solid mascot at that moment of its sway" true
+    (String.equal p.View.image.Draw.rgba
+       (Keeper_portrait_solid.mascot ~milliseconds:1500 shown).Draw.rgba);
+  check bool "not the painted candle" false
+    (String.equal p.View.image.Draw.rgba (Option.get (laid_out pixels).Screen.placement).View.image.Draw.rgba);
+  check bool "held still, it faces front" true
+    (String.equal (placed ~elapsed:Float.nan).View.image.Draw.rgba
+       (Keeper_portrait_solid.mascot ~milliseconds:0 shown).Draw.rgba);
+  let mosaic = laid_out ~style:Screen.Dotted View.Mosaic in
+  check bool "a mosaic draws it too" true (List.exists has_block mosaic.Screen.lines)
+
+let test_the_style_is_stored_by_name () =
+  List.iter
+    (fun style ->
+      check bool "round trip" true
+        (Screen.style_of_string (Screen.string_of_style style) = Some style);
+      check bool "the other one and back" true
+        (Screen.next_style (Screen.next_style style) = style && Screen.next_style style <> style))
+    [ Screen.Painted; Screen.Dotted ];
+  check bool "an unknown name is none" true (Screen.style_of_string "sparkly" = None)
 
 let test_about_says_only_what_was_read () =
   check string "a read roster is counted"
@@ -190,10 +190,10 @@ let test_a_frame_records_only_what_it_drew () =
   View.set_display View.Mosaic;
   Screen.begin_frame ();
   check bool "a new frame has drawn no candle" true (Screen.drawn () = Screen.Absent);
-  ignore (Screen.body ~screen:Screen.About ~cols ~rows:4 ~caption ~elapsed:0.0 ~origin);
+  ignore (Screen.body ~cols ~rows:4 ~caption ~elapsed:0.0 ~origin);
   check bool "a frame too small for the candle records none" true
     (Screen.drawn () = Screen.Absent);
-  ignore (Screen.body ~screen:Screen.About ~cols ~rows ~caption ~elapsed:0.0 ~origin);
+  ignore (Screen.body ~cols ~rows ~caption ~elapsed:0.0 ~origin);
   check bool "a frame that drew it records it" true (Screen.drawn () = Screen.Moving);
   Screen.begin_frame ();
   check bool "the next frame starts empty again" true (Screen.drawn () = Screen.Absent);
@@ -203,14 +203,14 @@ let test_a_frame_records_only_what_it_drew () =
    thrown away. *)
 let retire () =
   View.begin_frame ();
-  View.flush ~presented:false ~write:ignore
+  View.flush ~rewritten:(fun _ -> false) ~write:ignore
 
 let test_a_body_asks_for_its_picture () =
   View.set_display pixels;
   retire ();
-  ignore (Screen.body ~screen:Screen.About ~cols ~rows ~caption ~elapsed:0.0 ~origin);
+  ignore (Screen.body ~cols ~rows ~caption ~elapsed:0.0 ~origin);
   let written = Buffer.create 4096 in
-  View.flush ~presented:true ~write:(Buffer.add_string written);
+  View.flush ~rewritten:(fun _ -> false) ~write:(Buffer.add_string written);
   let bytes = Buffer.contents written in
   let expected = Option.get (laid_out pixels).Screen.placement in
   check string "the laid-out placement, and only it, is sent"
@@ -222,11 +222,7 @@ let () =
   run "tui_emblem_screen"
     [ ( "layout"
       , [ test_case "the candle stands centred over its caption on /about" `Quick
-            (test_the_candle_stands_centred_over_its_caption Screen.About)
-        ; test_case "the candle stands centred over its caption on the splash" `Quick
-            (test_the_candle_stands_centred_over_its_caption Screen.Startup)
-        ; test_case "the startup candle stays small" `Quick
-            test_the_startup_candle_stays_small
+            test_the_candle_stands_centred_over_its_caption
         ; test_case "pixels leave blank rows and place the picture there" `Quick
             test_pixels_leave_blank_rows_and_place_the_picture_there
         ; test_case "no picture draws the caption alone" `Quick
@@ -237,6 +233,9 @@ let () =
         ; test_case "a frame records only what it drew" `Quick
             test_a_frame_records_only_what_it_drew
         ; test_case "a body asks for its picture" `Quick test_a_body_asks_for_its_picture
+        ; test_case "a dotted candle is drawn at the size it is shown" `Quick
+            test_a_dotted_candle_is_drawn_at_the_size_it_is_shown
+        ; test_case "the style is stored by name" `Quick test_the_style_is_stored_by_name
         ] )
     ; ( "about"
       , [ test_case "it says only what was read" `Quick

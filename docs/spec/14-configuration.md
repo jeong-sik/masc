@@ -276,9 +276,12 @@ and Muse from a TUI or browser connected to the server. Login runs in the
 selected account's environment. It never changes the server environment or sends
 operator input to a Keeper.
 
-In the TUI, `/login` opens the account panel; `/login codex`, `/login claude`,
-`/login antigravity`, and `/login muse` select a client directly. Enter starts a
-new account and `e` explicitly selects an existing account. Login codes stay
+In the TUI, `/login` opens the account panel on the four clients, each with its
+number of configured accounts; Enter lists that client's accounts, by email,
+under a `+ 새 계정` row. `/login codex`, `/login claude`, `/login antigravity`,
+and `/login muse` open a client's accounts directly. Enter on `+ 새 계정` (or
+`n`) starts a new account, Enter on an account signs in as that account, `D`
+previews removing it, and Esc goes back to the clients. Login codes stay
 masked in the panel and terminal keys are sent to that login process. Ctrl-C
 cancels; `r` retrieves the recovery receipt. After authentication, choose a model
 and press Enter to verify and save.

@@ -1,5 +1,9 @@
 type client = Codex | Claude | Antigravity | Muse
-type provider = { id : string; label : string; client : client }
+(* Whether a row of the server's list is an account: the runtime
+   configuration declares one per account, and a catalog entry is the client's
+   own way to add one. *)
+type origin = Configured | Catalog
+type provider = { id : string; label : string; client : client; origin : origin }
 type model = { id : string; label : string; context : int option; tools : bool option }
 (* What removing an account changes, as the setup API's removal preview lists it. *)
 type removal_change =
@@ -15,7 +19,10 @@ type removal =
    unmeasured because the provider declined for the account's usage. *)
 type unverified = { runtime_id : string; code : string }
 type saved = Saved_verified | Saved_unverified of unverified * unverified list
-type phase = Loading | Providers | Logging | Models | Documented_context of model | Saving
+(* The list opens on the clients; choosing one lists its accounts under a row
+   that adds a new one. *)
+type list_view = Clients | Accounts of client
+type phase = Loading | Providers of list_view | Logging | Models | Documented_context of model | Saving
   | Finished of { saved : saved; refresh_failed : bool } | Failed
   | Removal of { provider : provider; revision : string; removal : removal }
 type recovery = Login_status | Refresh_configuration
@@ -39,11 +46,13 @@ type t = {
 type authentication = Authenticated | Login_completed | Credential_captured
 type event = Started of string * string option | Output of string | Input_ready
   | Complete of string * authentication | Login_failed of string * string option | Login_error
-type action = Inventory | Refresh_saved of saved | Refresh_retry | Start of bool | Input of int * Yojson.Safe.t | Cancel
+type action = Inventory | Refresh_saved of saved | Refresh_retry | Start of { provider : provider; existing : bool }
+  | Input of int * Yojson.Safe.t | Cancel
   | Recover | Discover | Prepare of model | Save of model | Close | Nothing
   | Preview_removal of { provider : provider; refused : string option }
   | Remove of { provider : provider; revision : string; login_store : string option }
-  | Refresh_removed of string
+  | Refresh_removed of { client : client; notice : string }
+  | Refresh_list of list_view
 let create requested = {requested; generation=0; phase=Loading; providers=[]; provider=None; models=[]; account_emails=Email_rows {rows=[]; unattributed=0};
   cursor=0; account_ref=None; login_id=None; revision=""; existing=[]; default_runtime_id=None; draft="";
   output=""; notice="계정 목록을 읽고 있습니다."; input_pending=false; input_sequence=0; cancel_stream=None; recovery=Login_status}
@@ -63,6 +72,27 @@ let reference json = match string json with
 let client_of_protocol = function
   | "codex-app-server" -> Some Codex | "claude-code" -> Some Claude
   | "antigravity-cli" -> Some Antigravity | "muse-serve" -> Some Muse | _ -> None
+let origin_of_json = function
+  | `String "runtime_config" -> Some Configured
+  | `String "masc_integration" -> Some Catalog
+  | _ -> None
+let client_label = function
+  | Codex -> "Codex" | Claude -> "Claude Code" | Antigravity -> "Antigravity" | Muse -> "Muse"
+let client_order = [Codex; Claude; Antigravity; Muse]
+let clients t = List.filter (fun client -> List.exists (fun (p:provider) -> p.client = client) t.providers) client_order
+type account_row = New_account of provider | Account of provider
+let accounts t client = List.filter (fun (p:provider) -> p.client = client && p.origin = Configured) t.providers
+(* A login without an account reference adds a new account through any of the
+   client's rows. The catalog entry is the usual one; the server leaves it out
+   when runtime.toml declares a provider with the same id, and then one of the
+   client's accounts carries the new login. *)
+let new_account_provider t client =
+  match List.find_opt (fun (p:provider) -> p.client = client && p.origin = Catalog) t.providers with
+  | Some _ as catalog -> catalog
+  | None -> List.nth_opt (accounts t client) 0
+let account_rows t client =
+  (match new_account_provider t client with Some p -> [New_account p] | None -> [])
+  @ List.map (fun p -> Account p) (accounts t client)
 let authentication = function
   | `String "authenticated" -> Some Authenticated
   | `String "login_completed" -> Some Login_completed
@@ -127,8 +157,44 @@ let email_notice = function
   | Email_rows {unattributed; _} ->
     Printf.sprintf " 어느 공급자 것인지 모르는 계정 이메일 %d개는 보여 주지 않습니다." unattributed
   | Email_list_unrecognized -> " 계정 이메일 목록은 읽지 못했습니다."
-let providers_notice = "Enter: 새 계정 로그인. 기존 계정은 e로 선택합니다."
-let inventory t json =
+let clients_notice = "공급자를 고르세요. Enter로 그 공급자의 계정을 봅니다."
+let accounts_notice = "+ 새 계정: 새 계정 로그인. 계정을 고르면 그 계정으로 모델을 추가합니다."
+let index_of equal items = List.find_index equal items |> Option.value ~default:0
+let show_clients ?on t =
+  t.phase <- Providers Clients;
+  t.cursor <- (match on with Some client -> index_of (( = ) client) (clients t) | None -> 0);
+  t.notice <- clients_notice ^ email_notice t.account_emails
+let show_accounts ?on t client =
+  t.phase <- Providers (Accounts client);
+  (* The account row first: when a client has no catalog entry, its first
+     account also carries the new-account row. *)
+  let rows = account_rows t client in
+  t.cursor <- (match on with
+    | Some (target:provider) ->
+      (match List.find_index (function Account p -> p.id = target.id | New_account _ -> false) rows with
+       | Some index -> index
+       | None -> index_of (function New_account p -> p.id = target.id | Account _ -> false) rows)
+    | None -> 0);
+  t.notice <- accounts_notice ^ email_notice t.account_emails
+let focused_row t = match t.phase with
+  | Providers (Accounts client) -> List.nth_opt (account_rows t client) t.cursor
+  | Providers Clients | Loading | Logging | Models | Documented_context _ | Saving | Finished _ | Failed | Removal _ -> None
+let focused_client t = match t.phase with
+  | Providers Clients -> List.nth_opt (clients t) t.cursor
+  | Providers (Accounts client) -> Some client
+  | Loading | Logging | Models | Documented_context _ | Saving | Finished _ | Failed | Removal _ ->
+    Option.map (fun (p:provider) -> p.client) t.provider
+let requested_client = function
+  | "codex" -> Some Codex | "claude" -> Some Claude
+  | "antigravity" -> Some Antigravity | "muse" -> Some Muse | _ -> None
+(* Whether a pending login for [p] belongs to what [/login] asked for: any
+   row for a bare [/login], that row for [/login <id>], and the client's rows
+   for [/login <client>]. *)
+let requested_matches t (p:provider) =
+  t.requested = "" || String.equal t.requested p.id
+  || (not (List.exists (fun (row:provider) -> String.equal row.id t.requested) t.providers)
+      && requested_client t.requested = Some p.client)
+let inventory ?view t json =
   match string (field "setup_revision" json), field "integrations" json, field "runtimes" json,
         field "default_runtime_selection" json with
   | Some revision, `List rows, `List runtimes, `List selected ->
@@ -142,28 +208,35 @@ let inventory t json =
     then Error "기본 모델과 대체 연결의 설정 순서를 확인하지 못했습니다."
     else
     let account_emails = account_emails_of_inventory json in
-    let providers = List.filter_map (fun row -> match string (field "id" row), string (field "display_name" row), string (field "protocol" row) with
-      | Some id, Some label, Some protocol -> Option.map (fun client -> {id;label;client}) (client_of_protocol protocol)
+    let providers = List.filter_map (fun row ->
+      match string (field "id" row), string (field "display_name" row), string (field "protocol" row),
+            origin_of_json (field "origin" row) with
+      | Some id, Some label, Some protocol, Some origin ->
+        Option.map (fun client -> {id;label;client;origin}) (client_of_protocol protocol)
       | _ -> None) rows in
-    let requested_client = match t.requested with
-      | "codex" -> Some Codex | "claude" -> Some Claude
-      | "antigravity" -> Some Antigravity | "muse" -> Some Muse | _ -> None in
-    let selected = match List.find_index (fun (p:provider) -> p.id=t.requested) providers with
-      | Some _ as found -> found
-      | None -> List.find_index (fun (p:provider) -> Some p.client=requested_client) providers in
-    if t.requested<>"" && Option.is_none selected then Error "요청한 공식 클라이언트를 찾지 못했습니다. /login으로 목록을 확인하세요."
+    (* [/login <client>] opens that client's accounts; [/login <id>] opens its
+       client's accounts on that row. *)
+    let requested = match List.find_opt (fun (p:provider) -> p.id=t.requested) providers, requested_client t.requested with
+      | Some p, _ -> Some (p.client, Some p)
+      | None, Some client when List.exists (fun (p:provider) -> p.client=client) providers -> Some (client, None)
+      | None, (Some _ | None) -> None in
+    (* The request only decides where the list first opens. A later read
+       keeps its view even after the requested account was removed. *)
+    if Option.is_none view && t.requested<>"" && Option.is_none requested then
+      Error "요청한 공식 클라이언트를 찾지 못했습니다. /login으로 목록을 확인하세요."
     else (
       t.providers <- providers; t.revision <- revision; t.account_emails <- account_emails;
       t.existing <- existing; t.default_runtime_id <- string (field "default_runtime_id" json);
-      t.cursor <- (match selected with Some i -> i | None -> 0);
-      t.phase <- Providers;
-      t.notice <- providers_notice ^ email_notice account_emails; Ok ())
+      (match view, requested with
+       | Some Clients, _ | None, None -> show_clients t
+       | Some (Accounts client), _ -> show_accounts t client
+       | None, Some (client, on) -> show_accounts ?on t client);
+      Ok ())
   | _ -> Error "서버 계정 목록을 읽지 못했습니다."
 let save_failed t (model:model) message =
   t.models <- List.map (fun (existing:model) -> if existing.id=model.id then model else existing) t.models;
   t.recovery <- Refresh_configuration; t.phase <- Failed;
-  (* The reason leads: the row is cut at the pane width, and the key to press
-     is also in the hints. *)
+  (* The reason leads; the key to press is also in the hints. *)
   t.notice <- message ^ " · r로 설정을 새로 읽은 뒤 다시 저장하세요."
 let refresh_retry t result =
   let cursor = t.cursor in
@@ -314,7 +387,7 @@ let paste t text = match t.phase with
     (match pasted_line text with
      | Some text -> append_draft t text
      | None -> t.notice <- "여러 줄이나 제어 문자는 붙여넣을 수 없습니다. 한 줄을 확인해 다시 입력하세요.")
-  | Loading | Providers | Models | Saving | Finished _ | Failed | Logging | Documented_context _ | Removal _ -> ()
+  | Loading | Providers _ | Models | Saving | Finished _ | Failed | Logging | Documented_context _ | Removal _ -> ()
 let submit_input t json =
   t.input_sequence <- t.input_sequence + 1;
   t.input_pending <- true;
@@ -323,8 +396,10 @@ let key t key =
   if key="esc" then (match t.phase with
     (* Esc steps back to the list rather than closing /login: the removal is
        a question asked from it. *)
-    | Removal _ -> t.phase <- Providers; t.notice <- providers_notice ^ email_notice t.account_emails; Nothing
-    | Loading | Providers | Logging | Models | Documented_context _ | Saving | Finished _ | Failed -> Close) else
+    | Removal {provider; _} -> show_accounts ~on:provider t provider.client; Nothing
+    (* Esc from a client's accounts goes back to the clients. *)
+    | Providers (Accounts client) -> show_clients ~on:client t; Nothing
+    | Loading | Providers Clients | Logging | Models | Documented_context _ | Saving | Finished _ | Failed -> Close) else
   match t.phase with
   | Removal {provider; revision; removal = Removable {login_store; _}} ->
     if key="\r" || key="\n" || key="enter" then Remove {provider; revision; login_store} else Nothing
@@ -352,21 +427,56 @@ let key t key =
     else if key="backspace" || key="\127" then (t.draft<-Masc_tui_message_layout.drop_last_utf8_scalar t.draft; Nothing)
     else if String.length key=1 && key.[0]>='0' && key.[0]<='9' then (paste t key; Nothing) else Nothing
   | Loading | Saving -> Nothing
-  | Providers | Models | Finished _ | Failed ->
+  | Providers _ | Models | Finished _ | Failed ->
     if key="up" || key="k" then (t.cursor<-max 0 (t.cursor-1); Nothing)
-    else if key="down" || key="j" then (let count=if t.phase=Providers then List.length t.providers else List.length t.models in t.cursor<-min (max 0 (count-1)) (t.cursor+1); Nothing)
+    else if key="down" || key="j" then (
+      let count = match t.phase with
+        | Providers Clients -> List.length (clients t)
+        | Providers (Accounts client) -> List.length (account_rows t client)
+        | Models | Finished _ | Failed | Loading | Logging | Documented_context _ | Saving | Removal _ -> List.length t.models in
+      t.cursor<-min (max 0 (count-1)) (t.cursor+1); Nothing)
     else if key="r" then (match t.phase with
       | Models -> Discover
       | Finished {saved; _} -> Refresh_saved saved
       | Failed when t.recovery=Refresh_configuration -> Refresh_retry
-      | Providers | Failed | Loading | Logging | Documented_context _ | Saving | Removal _ ->
+      | Providers view when Option.is_none t.login_id -> Refresh_list view
+      | Providers _ | Failed | Loading | Logging | Documented_context _ | Saving | Removal _ ->
         if Option.is_some t.login_id then Recover else Inventory)
-    else if key="D" && t.phase=Providers then
-      (match List.nth_opt t.providers t.cursor with Some provider -> Preview_removal {provider; refused = None} | None -> Nothing)
-    else if key="n" || key="e" then Start (key="e")
+    else if key="D" then
+      (match focused_row t with
+       | Some (Account provider) -> Preview_removal {provider; refused = None}
+       | Some (New_account _) | None -> Nothing)
+    else if key="n" then
+      (match t.phase with
+       | Providers _ ->
+         (match Option.bind (focused_client t) (new_account_provider t) with
+          | Some provider -> Start {provider; existing = false}
+          | None -> Nothing)
+       | Models | Finished _ | Failed | Loading | Logging | Documented_context _ | Saving | Removal _ ->
+         (match t.provider with
+          | Some provider -> Start {provider; existing = false}
+          | None -> t.notice <- "r로 계정 목록을 다시 읽은 뒤 계정을 고르세요."; Nothing))
+    else if key="e" then
+      (match t.phase with
+       | Providers _ ->
+         (match focused_row t with
+          | Some (Account provider) -> Start {provider; existing = true}
+          | Some (New_account _) | None -> Nothing)
+       | Models | Finished _ | Failed | Loading | Logging | Documented_context _ | Saving | Removal _ ->
+         (match t.provider with
+          | Some provider -> Start {provider; existing = true}
+          | None -> t.notice <- "r로 계정 목록을 다시 읽은 뒤 계정을 고르세요."; Nothing))
     else if key="\r" || key="\n" || key="enter" then
       (match t.phase with
-       | Providers -> Start false
+       | Providers Clients ->
+         (match List.nth_opt (clients t) t.cursor with
+          | Some client -> show_accounts t client; Nothing
+          | None -> Nothing)
+       | Providers (Accounts _) ->
+         (match focused_row t with
+          | Some (New_account provider) -> Start {provider; existing = false}
+          | Some (Account provider) -> Start {provider; existing = true}
+          | None -> Nothing)
        | Models -> (match List.nth_opt t.models t.cursor with
          | None -> Nothing | Some {tools=Some false;_} -> t.notice<-"이 모델은 도구 호출을 지원하지 않습니다."; Nothing
          | Some ({context=None;_} as model) ->
@@ -390,7 +500,8 @@ let save_body t model =
 let hints t = match t.phase with
   | Logging -> "Enter:코드 전달  ↑↓/Tab:선택  Ctrl-D:입력 종료  Ctrl-C:취소  Esc:닫기"
   | Documented_context _ -> "확인한 context 한도(tokens)  Enter:검증 후 추가  Esc:닫기"
-  | Providers -> "↑↓:공급자  Enter/n:새 계정  e:기존 계정  D:지우기  Esc:닫기"
+  | Providers Clients -> "↑↓:공급자  Enter:계정 보기  n:새 계정  Esc:닫기"
+  | Providers (Accounts _) -> "↑↓:계정  Enter:선택  n:새 계정  D:지우기  Esc:공급자 목록"
   | Removal {removal = Removable _; _} -> "Enter:지우고 저장  Esc:목록으로"
   | Removal {removal = Unremovable _; _} -> "Esc:목록으로"
   | Models -> "↑↓:모델  Enter:검증 후 추가  r:목록 새로고침  e:재로그인  Esc:닫기"
@@ -398,45 +509,65 @@ let hints t = match t.phase with
 type row = Text of string | Terminal of Masc_tui_sgr_text.line
 (* A row with no entry runs on no account: a client prototype, an HTTP
    provider, or Antigravity without a credential file. *)
-let account_suffix t (p:provider) =
+let email_state t (p:provider) =
   let rows = match t.account_emails with Email_rows {rows; _} -> rows | Email_list_unrecognized -> [] in
   match List.assoc_opt p.id rows with
-  | Some (Email email) -> " · " ^ email
-  | Some (Not_read Login_file_unreadable) -> " · 이메일 모름: 로그인 파일을 못 읽음"
-  | Some (Not_read Login_file_unrecognized) -> " · 이메일 모름: 로그인 파일 형식을 모름"
-  | Some (Not_read Email_not_reported) -> " · 이메일 모름: 클라이언트가 알려 주지 않음"
-  | Some (Not_read Email_not_displayable) -> " · 이메일 모름: 표시할 수 없는 값"
-  | Some (Not_read Environment_credential) -> " · 이메일 없음: 환경 변수의 인증 정보로 실행"
-  | Some Unrecognized -> " · 이메일 정보를 알아볼 수 없음"
-  | None -> ""
+  | Some (Email email) -> Some email
+  | Some (Not_read Login_file_unreadable) -> Some "이메일 모름: 로그인 파일을 못 읽음"
+  | Some (Not_read Login_file_unrecognized) -> Some "이메일 모름: 로그인 파일 형식을 모름"
+  | Some (Not_read Email_not_reported) -> Some "이메일 모름: 클라이언트가 알려 주지 않음"
+  | Some (Not_read Email_not_displayable) -> Some "이메일 모름: 표시할 수 없는 값"
+  | Some (Not_read Environment_credential) -> Some "이메일 없음: 환경 변수의 인증 정보로 실행"
+  | Some Unrecognized -> Some "이메일 정보를 알아볼 수 없음"
+  | None -> None
+let account_suffix t p = match email_state t p with Some state -> " · " ^ state | None -> ""
+(* The email says which account a row is, so it leads; the label says which
+   provider entry holds it. *)
+let account_label t (p:provider) =
+  match email_state t p with
+  | Some state -> state ^ "  (" ^ p.label ^ ")"
+  | None -> p.label
 let describe_change = function
   | Removed_table path -> "[" ^ path ^ "]"
   | Left_lane {lane; runtime} -> "lane " ^ lane ^ " 후보에서 " ^ runtime ^ " 를 뺍니다"
   | Left_exact_lane {lane; runtime} -> "exact-output lane " ^ lane ^ " 에서 " ^ runtime ^ " 를 뺍니다"
   | Left_vision runtime -> "media_failover 에서 " ^ runtime ^ " 를 뺍니다"
   | Unassigned {keeper; runtime} -> "keeper " ^ keeper ^ " 는 " ^ runtime ^ " 대신 default 로 갑니다"
-let lines t =
-  let rows = match t.phase with
-    | Providers -> List.mapi (fun i (p:provider) -> Text ((if i=t.cursor then "> " else "  ") ^ p.label ^ account_suffix t p)) t.providers
-    | Models -> List.mapi (fun i (m:model) -> Text ((if i=t.cursor then "> " else "  ") ^ m.label ^ (match m.context with None->" · context 확인 필요" | Some _ -> ""))) t.models
-    | Logging -> List.map (fun line -> Terminal line) (Masc_tui_sgr_text.parse t.output)
-      @ [Text ("로그인 코드: " ^ String.make (min 40 (String.length t.draft)) '*'); Text (if t.input_pending then "입력 전달 중" else if Option.is_none t.login_id then "로그인 세션 준비 중" else "코드 입력 대기")]
-    | Documented_context _ -> [Text ("문서 또는 설정의 context 한도(tokens): " ^ t.draft)]
-    | Removal {provider; removal; _} -> Text ("지울 계정: " ^ provider.label ^ account_suffix t provider) ::
-      (match removal with
-       | Removable {changes; login_store} -> Text "지우거나 고치는 것:" :: List.map (fun change -> Text ("  " ^ describe_change change)) changes
-         @ (match login_store with Some path -> [Text ("로그인 정보는 지우지 않습니다: " ^ path)] | None -> [])
-       | Unremovable reason -> [Text ("지울 수 없습니다: " ^ reason)])
-    | Finished {saved; refresh_failed} -> List.map (fun row -> Text row) (saved_rows saved)
-      @ (if refresh_failed then [Text "목록을 새로 읽지 못했습니다. r로 다시 확인하세요."] else [])
-    | Loading | Saving | Failed -> [] in
-  Text t.notice :: rows
+(* Everything under the notice. *)
+let body_rows t =
+  match t.phase with
+  | Providers Clients -> List.mapi (fun i client ->
+      let count = List.length (accounts t client) in
+      Text ((if i=t.cursor then "> " else "  ") ^ client_label client
+            ^ (if count = 0 then "" else Printf.sprintf " · 계정 %d" count))) (clients t)
+  | Providers (Accounts client) -> List.mapi (fun i row ->
+      Text ((if i=t.cursor then "> " else "  ")
+            ^ (match row with New_account _ -> "+ 새 계정" | Account p -> account_label t p))) (account_rows t client)
+  | Models -> List.mapi (fun i (m:model) -> Text ((if i=t.cursor then "> " else "  ") ^ m.label ^ (match m.context with None->" · context 확인 필요" | Some _ -> ""))) t.models
+  | Logging -> List.map (fun line -> Terminal line) (Masc_tui_sgr_text.parse t.output)
+    @ [Text ("로그인 코드: " ^ String.make (min 40 (String.length t.draft)) '*'); Text (if t.input_pending then "입력 전달 중" else if Option.is_none t.login_id then "로그인 세션 준비 중" else "코드 입력 대기")]
+  | Documented_context _ -> [Text ("문서 또는 설정의 context 한도(tokens): " ^ t.draft)]
+  | Removal {provider; removal; _} -> Text ("지울 계정: " ^ provider.label ^ account_suffix t provider) ::
+    (match removal with
+     | Removable {changes; login_store} -> Text "지우거나 고치는 것:" :: List.map (fun change -> Text ("  " ^ describe_change change)) changes
+       @ (match login_store with Some path -> [Text ("로그인 정보는 지우지 않습니다: " ^ path)] | None -> [])
+     | Unremovable reason -> [Text ("지울 수 없습니다: " ^ reason)])
+  | Finished {saved; refresh_failed} -> List.map (fun row -> Text row) (saved_rows saved)
+    @ (if refresh_failed then [Text "목록을 새로 읽지 못했습니다. r로 다시 확인하세요."] else [])
+  | Loading | Saving | Failed -> []
+let lines t = Text t.notice :: body_rows t
 let row_text = function Text text -> text | Terminal line -> Masc_tui_sgr_text.text line
-let visible_lines ~height t =
+(* The notice wraps rather than being cut at the pane's edge: a refused
+   save's reason ends in the verification code and detail, the part that says
+   what to do. *)
+let visible_lines ~height ~width t =
   if height <= 0 then [] else
-  let rows = lines t in
+  let notice = match Masc_tui_message_layout.wrap_words ~max_cells:width t.notice with
+    | [] -> [Text ""]
+    | wrapped -> List.map (fun line -> Text line) wrapped in
+  let rows = notice @ body_rows t in
   let skip = match t.phase with
-    | Providers | Models -> max 0 (t.cursor + 2 - height)
+    | Providers _ | Models -> max 0 (t.cursor + List.length notice + 1 - height)
     (* The account and what goes with it read from the top. *)
     | Removal _ -> 0
     | Loading | Logging | Documented_context _ | Saving | Finished _ | Failed -> max 0 (List.length rows - height) in

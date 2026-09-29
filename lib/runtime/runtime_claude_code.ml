@@ -226,7 +226,6 @@ type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_
       }
 
 type host_stop = Runtime_official_client_tool.host_stop =
-  | Queued_chat_operation
   | Repeated_tool_call of
       { tool_name : string
       ; repeated_count : int
@@ -335,6 +334,7 @@ type error =
       { detail : string
       ; turn_admitted : bool
       }
+  | Unhandled_exception of string
   | Timeout of float
 
 exception Runtime_error of error
@@ -369,8 +369,6 @@ let error_to_string = function
       "Claude Code stopped after repeated tool call: tool=%s count=%d"
       tool_name
       repeated_count
-  | Stopped_by_host { stop = Queued_chat_operation; _ } ->
-    "Claude Code stopped for a queued chat operation"
   | Stopped_by_host { stop = Terminal_tool_boundary { tool_name; _ }; _ } ->
     Printf.sprintf "Claude Code stopped at terminal tool boundary: tool=%s" tool_name
   | Quota_blocked
@@ -393,6 +391,7 @@ let error_to_string = function
   | Process_exited { detail; turn_admitted } ->
     Printf.sprintf "Claude Code exited before terminal result (turn_admitted=%b): %s"
       turn_admitted detail
+  | Unhandled_exception detail -> "Claude Code runtime raised: " ^ detail
   | Timeout seconds ->
     Printf.sprintf "Claude Code stream was idle for %.3fs" seconds
 ;;
@@ -410,6 +409,7 @@ let error_kind = function
   | Stopped_by_host _ -> "stopped_by_host"
   | Quota_blocked _ -> "quota_blocked"
   | Process_exited _ -> "process_exited"
+  | Unhandled_exception _ -> "unhandled_exception"
   | Timeout _ -> "timeout"
 ;;
 
@@ -2054,10 +2054,7 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
     | Idle_timeout seconds -> Error (Timeout seconds)
     | Eio.Time.Timeout as exn -> raise exn
     | Runtime_error error -> Error error
-    | exn ->
-      Error
-        (Protocol_error
-           { stage = "runtime boundary"; detail = Printexc.to_string exn })
+    | exn -> Error (Unhandled_exception (Printexc.to_string exn))
   in
   (match result with
    | Ok turn ->
@@ -2079,8 +2076,7 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
    | Error
        (Stopped_by_host
           { stop =
-              ( Queued_chat_operation
-              | Repeated_tool_call _
+              ( Repeated_tool_call _
               | Terminal_tool_boundary
                   { outcome =
                       (Terminal_completed | Durable_stimulus_deferred)

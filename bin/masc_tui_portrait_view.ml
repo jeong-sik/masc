@@ -5,21 +5,18 @@ type display =
   | Mosaic
   | No_picture
 
-(* Most terminal fonts draw a cell twice as tall as it is wide. Only used to
-   size a picture's box when the terminal did not report its cell. *)
-let default_cell = (10, 20)
-
+(* A placed picture's box is counted in cells from the cell size, and the
+   terminal scales the picture into it. Without a size the box would be a
+   guess that lands the picture beside or over the text around it, so a
+   Kitty terminal that did not say draws the mosaic, which is laid out in
+   cells. *)
 let display_of ~kitty ~cell_pixels ~colors_enabled ~projects_colour =
   if not colors_enabled then No_picture
-  else if kitty then
-    let cell_width, cell_height =
-      match cell_pixels with
-      | Some (w, h) when w > 0 && h > 0 -> (w, h)
-      | Some _ | None -> default_cell
-    in
-    Pixels { cell_width; cell_height }
-  else if projects_colour then Mosaic
-  else No_picture
+  else
+    match kitty, cell_pixels with
+    | true, Some (cell_width, cell_height) when cell_width > 0 && cell_height > 0 ->
+        Pixels { cell_width; cell_height }
+    | true, (Some _ | None) | false, _ -> if projects_colour then Mosaic else No_picture
 
 type box = { cols : int; rows : int; size : Draw.size }
 
@@ -28,12 +25,12 @@ type box = { cols : int; rows : int; size : Draw.size }
 let min_pixel_rows = 4
 
 (* The renderer draws 160 px in about 17 ms and 240 px in about 34 ms
-   (#39704). The splash steps every 150 ms, and the terminal scales the
+   (#39704). The /about candle steps every 150 ms, and the terminal scales the
    picture into its box anyway, so 160 keeps a step's render small. *)
 let pixel_edge_cap = 160
 
 (* A mosaic draws one pixel per cell across, so its edge is also its width in
-   cells; 96 cells is wider than any splash leaves for it. *)
+   cells; 96 cells is wider than any portrait surface leaves for it. *)
 let mosaic_edge_cap = 96
 
 let clamp lo hi v = max lo (min hi v)
@@ -73,10 +70,6 @@ type placement = {
   image : Draw.image;
 }
 
-(* 31 is the graphics query's and 32 the MSX screen's (Masc_tui_graphics,
-   Masc_tui_msx). *)
-let mascot_image_id = 41
-
 (* One placement per image: a second transfer under the same pair replaces
    the picture instead of stacking a copy. *)
 let placement_id = 1
@@ -115,18 +108,37 @@ let same_picture a b =
   && a.image.Draw.edge = b.image.Draw.edge
   && String.equal a.image.Draw.rgba b.image.Draw.rgba
 
-let flush ~presented ~write =
+let covers_a_rewritten_row ~rewritten p =
+  List.exists rewritten (List.init p.box.rows (fun offset -> p.row + offset))
+
+let flush ~rewritten ~write =
   let wanted = !requested in
+  let shown_under image_id = List.find_opt (fun shown -> shown.image_id = image_id) !on_screen in
   List.iter
     (fun shown ->
       if not (List.exists (fun p -> p.image_id = shown.image_id) wanted) then
         write (Masc_tui_graphics.delete_image ~image_id:shown.image_id))
     !on_screen;
-  List.iter
-    (fun p ->
-      let unchanged =
-        List.exists (fun shown -> shown.image_id = p.image_id && same_picture shown p) !on_screen
-      in
-      if presented || not unchanged then write (placement_bytes p))
-    wanted;
-  on_screen := wanted
+  on_screen :=
+    List.filter_map
+      (fun p ->
+        let unchanged =
+          match shown_under p.image_id with
+          | Some shown -> same_picture shown p
+          | None -> false
+        in
+        if unchanged && not (covers_a_rewritten_row ~rewritten p) then Some p
+        else
+          match placement_bytes p with
+          | "" ->
+              (* Nothing of this picture reached the terminal. An older one
+                 under the same id would stand where this one is not, so it
+                 comes down, and the next frame tries this one again. *)
+              Option.iter
+                (fun shown -> write (Masc_tui_graphics.delete_image ~image_id:shown.image_id))
+                (shown_under p.image_id);
+              None
+          | bytes ->
+              write bytes;
+              Some p)
+      wanted

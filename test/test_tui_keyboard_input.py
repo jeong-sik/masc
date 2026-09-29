@@ -839,6 +839,9 @@ def copy_reference(
 # cycle so a reachable screen is always found, and it reports the screen it
 # never reached instead of leaving a bare needle timeout behind.
 TAB_CYCLE_BOUND = 24
+# How many j presses a walk down one Keeper detail may take. Info at the
+# harness height is under fifty lines, so a walk past this has lost its way.
+KEEPER_DETAIL_SCROLL_BOUND = 60
 
 
 def drain_until_quiet(
@@ -3408,16 +3411,42 @@ def keeper_selection_identity_interaction(
 
     keepers_path = Path(base_path) / ".masc" / "keepers"
     beta_metadata = keeper_metadata("beta")
-    # A value the keeper list draws, so pressing r below is observable. This
-    # used to ride on the keeper's generation counter, which the schema no
-    # longer has; the current task id is drawn in the list's Current Task
-    # column and serves the same purpose.
+    # A value only a fresh read can draw, so pressing r below is observable.
+    # This used to ride on the keeper's generation counter, which the schema
+    # no longer has. The current task id is drawn under Current Work in the
+    # detail's Info tab.
     beta_metadata["current_task_id"] = "task-29453"
     (keepers_path / "beta.json").write_text(json.dumps(beta_metadata), encoding="utf-8")
     (keepers_path / "aardvark.json").write_text(
         json.dumps(keeper_metadata("aardvark")), encoding="utf-8"
     )
-    send_and_wait(process, master_fd, output, b"r", b"29453")
+    read_available(master_fd, output)
+    refresh_start = len(output)
+    os.write(master_fd, b"r")
+    wait_for_output(
+        process, master_fd, output, FRAME_END, start=refresh_start, timeout=3.0
+    )
+    drain_until_quiet(process, master_fd, output)
+    # Since the portrait opens Info (#39750), Current Work sits below the
+    # first screen at the harness height, so the detail is walked down to it.
+    # Each j is judged once its frames stop arriving, as tab_until does. The
+    # value was written before r, so it appears only if r read it again.
+    for _ in range(KEEPER_DETAIL_SCROLL_BOUND):
+        if find_needle(output, b"29453", refresh_start) >= 0:
+            break
+        read_available(master_fd, output)
+        step_start = len(output)
+        os.write(master_fd, b"j")
+        wait_for_output(
+            process, master_fd, output, FRAME_END, start=step_start, timeout=3.0
+        )
+        drain_until_quiet(process, master_fd, output)
+    else:
+        raise AssertionError(
+            "r did not draw the refreshed current task within "
+            f"{KEEPER_DETAIL_SCROLL_BOUND} lines of the detail: "
+            f"{bytes(output[refresh_start:])[-4000:]!r}"
+        )
     send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 beta \xe2\x96\xb8 chat")
     escape_to_keeper_detail(process, master_fd, output, name=b"beta")
 
@@ -4148,9 +4177,7 @@ def assert_row_budgeted_surfaces(
     # thread does not fit -- so the budget the thread is left with is the
     # smallest one this pane hands out. The box no longer spends a row on a
     # list of keys the footer carries.
-    for expected in (
-        BOARD_CELL_BODY.encode(), b"comment-1", b"comment-2", b"j/k:scroll"
-    ):
+    for expected in (BOARD_CELL_BODY.encode(), b"comment-1", b"comment-2"):
         if expected not in board:
             raise AssertionError(f"14-row Board omitted {expected!r}: {board!r}")
     if b"**comment-1**" in board:
@@ -4158,6 +4185,12 @@ def assert_row_budgeted_surfaces(
     for hidden in (b"comment-3", b"comment-4", b"comment-5"):
         if hidden in board:
             raise AssertionError(f"14-row Board exceeded its row budget: {board!r}")
+
+    # Focus comments before testing their one-row scroll. The b repaint only
+    # changes the header and footer, so it need not resend the body rows.
+    focused = send_and_wait(process, master_fd, output, b"b", b"> Comments")
+    if b"j/k:comments" not in focused:
+        raise AssertionError(f"Board did not focus the comments: {focused!r}")
 
     # With two comment rows, each press moves the thread by one, and the whole
     # thread is still reachable.
@@ -5386,7 +5419,7 @@ def board_selection_identity_interaction(fixtures: HttpFixtures) -> Interaction:
         send_and_wait(process, master_fd, output, b"\x1b[119;5u", "\u25b8 Board (3)".encode())
         send_and_wait(process, master_fd, output, b"j", b"detail-body-charlie")
         send_and_wait(process, master_fd, output, b"k", b"detail-body-bravo")
-        send_and_wait(process, master_fd, output, b"l", b"j/k:scroll")
+        send_and_wait(process, master_fd, output, b"l", b"j/k:body")
         send_and_wait(process, master_fd, output, b"\x1b[6~", b"bravo-25")
 
         board = send_and_wait(process, master_fd, output, b"\x1b", screen_header(b"MASC Board", b" (3)"))
@@ -11538,7 +11571,7 @@ def keeper_lanes_ia_interaction(
             output,
             rows=30,
             columns=220,
-            needle=b"Standalone LLM lanes",
+            needle="Lanes · observed ".encode(),
             controls=(FULL_REDRAW,),
         )
         # The resize clears the screen and repaints the lane list -- ten rows
@@ -11548,7 +11581,7 @@ def keeper_lanes_ia_interaction(
         # screen.
         drain_until_quiet(process, master_fd, output)
         lanes_plain = screen_text(bytes(output)).decode("utf-8")
-        if "MASC Lanes · Standalone" not in lanes_plain:
+        if "MASC Lanes" not in lanes_plain:
             raise AssertionError(
                 f"Lanes did not name the standalone scope: {lanes_plain!r}"
             )
@@ -11806,7 +11839,7 @@ def keeper_lanes_ia_interaction(
             master_fd,
             output,
             b"c",
-            b"Standalone lanes have no Keeper; use Keepers",
+            b"These lanes have no Keeper; use Keepers",
         )
         config = send_and_wait(
             process,
@@ -13556,7 +13589,7 @@ def runtime_surface_interaction(
             all_list = screen_text(bytes(output))
             if b"runtime-a" not in all_list:
                 raise AssertionError("Runtime catalog did not keep the selected runtime")
-            if b"Lanes (3 lanes, 5 slots)" not in all_list:
+            if b"Runtime lanes (3 lanes, 5 slots)" not in all_list:
                 raise AssertionError("Runtime catalog counted runtimes as lane slots")
             if b"ready / reachable" not in all_list:
                 raise AssertionError("Runtime catalog omitted independent probe status")
@@ -13590,7 +13623,7 @@ def runtime_surface_interaction(
             # /api/v1/dashboard/standalone-lanes body. Walk the full circuit
             # so the return leg is what gets asserted.
             send_and_wait(process, master_fd, output, b"p", b"MASC Lanes")
-            send_and_wait(process, master_fd, output, b"p", b"Lanes (3 lanes, 5 slots)")
+            send_and_wait(process, master_fd, output, b"p", b"Runtime lanes (3 lanes, 5 slots)")
 
             # The overflow scroll hint is unreachable with this fixture: it
             # renders only when candidates exceed the listing height, but the
@@ -18880,7 +18913,7 @@ def lanes_press_selects_the_lane_under_the_pointer(
         output,
         rows=30,
         columns=220,
-        needle=b"Standalone LLM lanes",
+        needle="Lanes · observed ".encode(),
         controls=(FULL_REDRAW,),
     )
     drain_until_quiet(process, master_fd, output)

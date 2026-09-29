@@ -705,6 +705,7 @@
   masc.keeper_registry
   masc.keeper_toml
   masc.runtime
+  masc.runtime_toml_namespace
   masc.toml_line_editor
   masc.voice_config))
 
@@ -794,7 +795,9 @@
  (name masc_tui_graphics)
  (wrapped false)
  (modules masc_tui_graphics)
- (libraries base64))
+ (preprocess
+  (pps ppx_enumerate))
+ (libraries base64 masc.masc_compression))
 
 (library
  (name masc_tui_link)
@@ -1088,7 +1091,7 @@
 (library
  (name masc_tui_model_runtime_table)
  (wrapped false)
- (libraries masc_tui_message_layout)
+ (libraries masc_tui_message_layout masc.runtime_toml_namespace)
  (modules masc_tui_model_runtime_table))
 
 (library
@@ -1735,6 +1738,7 @@
   masc_tui_account_login
   masc_tui_sgr_text
   masc_tui_emblem_screen
+  masc_tui_keeper_portrait
   masc_tui_portrait_view
   masc_tui_hit
   masc_tui_press
@@ -1819,6 +1823,7 @@
   masc_tui_terminal_title
   masc_tui_runtime_config_receipt
   masc_tui_runtime_config_view
+  masc.runtime_toml_namespace
   masc_tui_runtime_account_form
   ;; The Lanes provider jump reads runtime.toml table headers by the TOML
   ;; grammar's key path rather than by spelling.
@@ -2059,15 +2064,29 @@
   masc_tui_image_mosaic
   masc_tui_terminal_palette))
 
-;; MASC's candle laid out as a screen body under its caption, for the startup
-;; splash and /about. Apart from the TUI so its layout is tested without it.
+;; MASC's candle laid out as a screen body under its caption for /about.
+;; Apart from the TUI so its layout is tested without it.
 (library
  (name masc_tui_emblem_screen)
  (wrapped false)
  (modules masc_tui_emblem_screen)
  (libraries
   masc.keeper_portrait
+  masc_tui_graphics
   masc_tui_message_layout
+  masc_tui_portrait_view
+  masc_tui_terminal_palette))
+
+;; A Keeper's own still portrait beside the Identity facts of its detail,
+;; with the cache that keeps a roster walk from re-rendering it. Apart from
+;; the TUI so its size rules and cache bound are tested without it.
+(library
+ (name masc_tui_keeper_portrait)
+ (wrapped false)
+ (modules masc_tui_keeper_portrait)
+ (libraries
+  masc.keeper_portrait
+  masc_tui_graphics
   masc_tui_portrait_view
   masc_tui_terminal_palette))
 

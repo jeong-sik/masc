@@ -52,6 +52,7 @@
   masc.config_dir_resolver
   masc.config_journal
   masc.skill_config
+  masc.runtime_toml_namespace
   masc.provider_tool_support
   masc.keeper_runtime
   masc.keeper_registry

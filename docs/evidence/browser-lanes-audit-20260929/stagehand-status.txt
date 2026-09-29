@@ -1,0 +1,5 @@
+retry: 3000
+
+event: message
+data: {"jsonrpc":"2.0","id":2,"result":{"_meta":{"io.modelcontextprotocol/serverInfo":{"name":"masc","title":"MASC MCP Server","version":"0.46.0"},"com.github.yousleepwhen.masc/call":{"envelope":{"kind":"tool_call","summary":"the stagehand lane has no browser: configure [browser.stagehand], or read the server log for why it did not start","status":"error","tool":"masc_browser_session"},"trace_id":"2","agent_id":"admin","tool":"masc_browser_session","duration_ms":1,"attempts":1,"timestamp":"2026-09-28T23:42:51Z","failure_class":"workflow_rejection"}},"resultType":"complete","content":[{"type":"text","text":"the stagehand lane has no browser: configure [browser.stagehand], or read the server log for why it did not start"}],"isError":true}}
+

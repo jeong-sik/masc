@@ -2,7 +2,21 @@
 # Self-test for approve-guard.sh with a fake gh. No network.
 # Each case builds fixtures, runs the guard, and checks exit code + a stderr/stdout needle
 # + whether a POST happened.
+# Native/Dune callers run API cases only. Lint explicitly adds workflow checks:
+#   approve-guard-selftest.sh --workflow .github/workflows/pr-check.yml
 set -u
+workflow=""
+if [ "$#" -ne 0 ]; then
+  if [ "$#" -ne 2 ] || [ "$1" != --workflow ]; then
+    echo "usage: approve-guard-selftest.sh [--workflow FILE]" >&2
+    exit 1
+  fi
+  workflow="$2"
+  if [ ! -f "$workflow" ]; then
+    echo "selftest: requested workflow file is missing: $workflow" >&2
+    exit 1
+  fi
+fi
 here="$(cd "$(dirname "$0")" && pwd)"
 guard="$here/approve-guard.sh"
 work="$(mktemp -d "${TMPDIR:-/tmp}/agtest.XXXXXX")"
@@ -78,6 +92,12 @@ chmod +x "$work/gh"
 H=0123456789abcdef0123456789abcdef01234567
 H2=fedcba9876543210fedcba9876543210fedcba98
 pass=0; fail=0
+
+# An explicitly requested workflow must never turn into an implicit skip.
+out="$(bash "$here/approve-guard-selftest.sh" --workflow "$work/missing.yml" 2>&1)"; rc=$?
+if [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF 'requested workflow file is missing'; then
+  pass=$((pass+1)); echo 'ok   missing-requested-workflow-refuses'
+else fail=$((fail+1)); echo 'FAIL missing-requested-workflow-refuses'; fi
 
 setup() { # setup <casedir>: default happy fixtures
   local d="$1"; mkdir -p "$d"
@@ -537,39 +557,40 @@ d="$work/userempty"; setup "$d"; echo '{"login":""}' >"$d/user.json"
 run_case user-empty-no-post 1 "returned no login" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
 
 
-# Workflow names/group are the scheduler half of the contract. Execute the
-# actual summary shell for each unsuccessful needs result, not a copied gate.
-workflow="$here/../../.github/workflows/pr-check.yml"
-expected_names="$work/workflow-names"
-: >"$expected_names"
-for check_name in 'TLA model check' 'lint suite' 'dune build @check' 'dune build --profile release @check' 'dashboard typecheck' 'PR required success'; do
-  printf "    name: \${{ github.event.pull_request.draft == true && 'Draft snapshot / %s' || '%s' }}\n" "$check_name" "$check_name" >>"$expected_names"
-done
-if diff -u <(LC_ALL=C sort "$expected_names") <(grep '^    name:' "$workflow" | LC_ALL=C sort) &&
-   grep -qFx "  group: pr-check-\${{ github.event.pull_request.number }}-\${{ github.event.pull_request.draft == true && 'draft' || 'ready' }}" "$workflow" &&
-   grep -qFx '  cancel-in-progress: true' "$workflow" &&
-   [ "$(grep -cFx '    if: github.event.pull_request.draft == false' "$workflow")" = 5 ] &&
-   grep -qFx '    if: ${{ always() && github.event.pull_request.draft == false }}' "$workflow" &&
-   grep -qFx '    needs: [tla, lint, check, release-check, dashboard-types]' "$workflow"; then
-  pass=$((pass+1)); echo 'ok   workflow-ready-names-and-draft-isolation'
-else fail=$((fail+1)); echo 'FAIL workflow-ready-names-and-draft-isolation'; fi
-sed -n '/^  required-success:/,$p' "$workflow" | sed -n '/^        run: |/,$p' | tail -n +2 | sed 's/^          //' >"$work/summary.sh"
-for field in PR_DRAFT TLA_RESULT LINT_RESULT CHECK_RESULT RELEASE_RESULT DASHBOARD_RESULT; do
-  for result in failure cancelled skipped pending ''; do
-    if env PR_DRAFT=false TLA_RESULT=success LINT_RESULT=success CHECK_RESULT=success RELEASE_RESULT=success DASHBOARD_RESULT=success \
-      "$field=$result" bash "$work/summary.sh" >"$work/summary.out" 2>&1; then
-      fail=$((fail+1)); echo "FAIL summary-accepted-$field-$result"
-    else pass=$((pass+1)); echo "ok   summary-refuses-$field-$result"; fi
+if [ -n "$workflow" ]; then
+  # Workflow names/group are the scheduler half of the contract. Execute the
+  # actual summary shell for each unsuccessful needs result, not a copied gate.
+  expected_names="$work/workflow-names"
+  : >"$expected_names"
+  for check_name in 'TLA model check' 'lint suite' 'dune build @check' 'dune build --profile release @check' 'dashboard typecheck' 'PR required success'; do
+    printf "    name: \${{ github.event.pull_request.draft == true && 'Draft snapshot / %s' || '%s' }}\n" "$check_name" "$check_name" >>"$expected_names"
   done
-done
-if env PR_DRAFT=false TLA_RESULT=success LINT_RESULT=success CHECK_RESULT=success RELEASE_RESULT=success DASHBOARD_RESULT=success \
-  bash "$work/summary.sh" >"$work/summary.out" 2>&1; then
-  pass=$((pass+1)); echo 'ok   ready-summary-five-successes'
-else fail=$((fail+1)); echo 'FAIL ready-summary-five-successes'; fi
-if env PR_DRAFT=true TLA_RESULT=success LINT_RESULT=success CHECK_RESULT=success RELEASE_RESULT=success DASHBOARD_RESULT=success \
-  bash "$work/summary.sh" >"$work/summary.out" 2>&1; then
-  fail=$((fail+1)); echo 'FAIL summary-accepted-current-draft'
-else pass=$((pass+1)); echo 'ok   summary-refuses-current-draft'; fi
+  if diff -u <(LC_ALL=C sort "$expected_names") <(grep '^    name:' "$workflow" | LC_ALL=C sort) &&
+     grep -qFx "  group: pr-check-\${{ github.event.pull_request.number }}-\${{ github.event.pull_request.draft == true && 'draft' || 'ready' }}" "$workflow" &&
+     grep -qFx '  cancel-in-progress: true' "$workflow" &&
+     [ "$(grep -cFx '    if: github.event.pull_request.draft == false' "$workflow")" = 5 ] &&
+     grep -qFx '    if: ${{ always() && github.event.pull_request.draft == false }}' "$workflow" &&
+     grep -qFx '    needs: [tla, lint, check, release-check, dashboard-types]' "$workflow"; then
+    pass=$((pass+1)); echo 'ok   workflow-ready-names-and-draft-isolation'
+  else fail=$((fail+1)); echo 'FAIL workflow-ready-names-and-draft-isolation'; fi
+  sed -n '/^  required-success:/,$p' "$workflow" | sed -n '/^        run: |/,$p' | tail -n +2 | sed 's/^          //' >"$work/summary.sh"
+  for field in PR_DRAFT TLA_RESULT LINT_RESULT CHECK_RESULT RELEASE_RESULT DASHBOARD_RESULT; do
+    for result in failure cancelled skipped pending ''; do
+      if env PR_DRAFT=false TLA_RESULT=success LINT_RESULT=success CHECK_RESULT=success RELEASE_RESULT=success DASHBOARD_RESULT=success \
+        "$field=$result" bash "$work/summary.sh" >"$work/summary.out" 2>&1; then
+        fail=$((fail+1)); echo "FAIL summary-accepted-$field-$result"
+      else pass=$((pass+1)); echo "ok   summary-refuses-$field-$result"; fi
+    done
+  done
+  if env PR_DRAFT=false TLA_RESULT=success LINT_RESULT=success CHECK_RESULT=success RELEASE_RESULT=success DASHBOARD_RESULT=success \
+    bash "$work/summary.sh" >"$work/summary.out" 2>&1; then
+    pass=$((pass+1)); echo 'ok   ready-summary-five-successes'
+  else fail=$((fail+1)); echo 'FAIL ready-summary-five-successes'; fi
+  if env PR_DRAFT=true TLA_RESULT=success LINT_RESULT=success CHECK_RESULT=success RELEASE_RESULT=success DASHBOARD_RESULT=success \
+    bash "$work/summary.sh" >"$work/summary.out" 2>&1; then
+    fail=$((fail+1)); echo 'FAIL summary-accepted-current-draft'
+  else pass=$((pass+1)); echo 'ok   summary-refuses-current-draft'; fi
+fi
 
 echo "pass=$pass fail=$fail"
 [ "$fail" -eq 0 ]

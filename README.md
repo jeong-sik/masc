@@ -31,6 +31,10 @@ Follow their progress in the terminal UI, and connect other agents through MCP.
 
 ## Why MASC?
 
+Many of MASC’s features help agents understand the goal and what has happened
+so far. Rather than prescribing each action, they provide context so agents
+can assess the situation and decide what to do.
+
 - **Keep the work between conversations.** Keeper records, memory, tasks and
   decisions live in the workspace, with tools to inspect what went into a turn.
 - **Give agents shared ground.** Goals describe the outcome, Tasks record who

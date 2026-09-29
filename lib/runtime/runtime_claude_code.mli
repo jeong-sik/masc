@@ -306,6 +306,10 @@ type error =
       (** [turn_admitted] is false when the client died before the turn was
           admitted, which means no turn was submitted and another candidate may
           still be tried. *)
+  | Unhandled_exception of string
+      (** An exception nothing in the runtime expected, caught as the turn
+          leaves it: a host-side failure such as a refused process signal,
+          not something the client sent. The string is the exception. *)
   | Timeout of float
 
 val error_to_string : error -> string

@@ -74,7 +74,9 @@ def run_runtime(executable: str) -> None:
         h.send_and_wait(process, fd, output, b"\r", b"Runtime ID: runtime-e")
         h.send_and_wait(process, fd, output, b"\x1b", b"All runtimes (5)")
         h.send_and_wait(process, fd, output, b"p", b"MASC Lanes")
-        h.send_and_wait(process, fd, output, b"p", b"Runtime lanes (3 lanes, 4 slots)")
+        # The tab strip may clip its count at this terminal width. Selection
+        # restoration is proved by the actual lane row and the detail it opens.
+        h.send_and_wait(process, fd, output, b"p", b"1/2 runtime-a")
         h.send_and_wait(process, fd, output, b"\r", b"Runtime ID: runtime-a")
         os.write(fd, b"q")
 

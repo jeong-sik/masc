@@ -11,6 +11,7 @@ type t = {
   opening : (opening, string) result;
   theme : string option;
   board_sort : string option;
+  candle : string option;
   lift_colours : bool option;
   table_frame : bool option;
   hints_visible : bool option;
@@ -183,6 +184,7 @@ let load ~base_path =
        | None -> Ok Overview);
     theme = read theme_of_doc;
     board_sort = read (fun doc -> Keeper_toml_loader.toml_string_opt doc (tui_table ^ ".board_sort"));
+    candle = read (fun doc -> Keeper_toml_loader.toml_string_opt doc (tui_table ^ ".candle"));
     lift_colours = read lift_colours_of_doc;
     table_frame = read table_frame_of_doc;
     hints_visible = read hints_visible_of_doc;
@@ -191,10 +193,13 @@ let load ~base_path =
     user_input_priority_next = read user_input_priority_next_of_doc;
   }
 
-let set_board_sort ~base_path sort =
+let set_tui_string ~base_path ~key value =
   match Runtime.edit_config_text
       ~runtime_config_path:(runtime_toml_path ~base_path)
       (fun content -> Toml_line_editor.edit_table_scalar content
-          ~path:tui_table ~key:"board_sort" ~value:(Some sort)) with
+          ~path:tui_table ~key ~value:(Some value)) with
   | Ok (_ : Runtime.config_commit_receipt) -> Ok ()
   | Error message -> Error message
+
+let set_board_sort ~base_path sort = set_tui_string ~base_path ~key:"board_sort" sort
+let set_candle ~base_path candle = set_tui_string ~base_path ~key:"candle" candle

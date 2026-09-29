@@ -11,29 +11,86 @@ type laid_out = {
   placement : View.placement option;
 }
 
+type style =
+  | Painted
+  | Dotted
+
+let style_of_string = function
+  | "painted" -> Some Painted
+  | "dotted" -> Some Dotted
+  | _ -> None
+
+let string_of_style = function
+  | Painted -> "painted"
+  | Dotted -> "dotted"
+
+let next_style = function
+  | Painted -> Dotted
+  | Dotted -> Painted
+
 let milliseconds_per_second = 1000.0
 
-let pose_at elapsed =
+(* Where on its loop the candle is drawn. A time that is not finite says
+   nothing about where that is, so the candle stands still. *)
+type moment =
+  | At of int
+  | Held
+
+let moment_of elapsed =
   if Float.is_finite elapsed then
     (* Past the int range (some 146 million years on screen) the moment is
        unspecified, but every int is a moment of the loop. *)
-    Draw.pose_at ~milliseconds:(Float.to_int (Float.round (Float.max 0.0 elapsed *. milliseconds_per_second)))
-  (* A time that is not finite says nothing about where in the loop the
-     candle is, so it stands still. *)
-  else Draw.still
+    At (Float.to_int (Float.round (Float.max 0.0 elapsed *. milliseconds_per_second)))
+  else Held
 
-(* The last picture rendered, by size and pose. A frame that is repainted
-   for something else -- the clock, a key -- asks for the pose it already
-   drew, and the renderer is the cost of a step. *)
-let last_render : (Draw.size * Draw.pose * Draw.image) option ref = ref None
+let pose_of = function
+  | At milliseconds -> Draw.pose_at ~milliseconds
+  | Held -> Draw.still
 
-let render size pose =
+(* A dotted candle held still faces front: the start of its sway. *)
+let sway_milliseconds_of = function
+  | At milliseconds -> milliseconds mod Keeper_portrait_solid.sway_period_ms
+  | Held -> 0
+
+(* A dotted candle is drawn as many pixels tall as the terminal shows it, so
+   the terminal never scales it and every dot stays a square. A mosaic draws
+   one pixel a cell, which is the box's own size. *)
+let dotted_size display (box : View.box) =
+  match display with
+  | View.Pixels { cell_height; cell_width = _ } -> (
+      let shown = Int.max Draw.min_size (Int.min Draw.max_size (box.View.rows * cell_height)) in
+      match Draw.size_of_int shown with
+      | Some size -> size
+      (* [shown] is inside the range size_of_int accepts. *)
+      | None -> box.View.size)
+  | View.Mosaic | View.No_picture -> box.View.size
+
+type picture_key =
+  | Painted_at of Draw.size * Draw.pose
+  | Dotted_at of Draw.size * int
+
+let key_of style display box moment =
+  match style with
+  | Painted -> Painted_at (box.View.size, pose_of moment)
+  | Dotted -> Dotted_at (dotted_size display box, sway_milliseconds_of moment)
+
+(* The last picture rendered. A frame that is repainted for something else
+   -- the clock, a key -- asks for the picture it already drew, and the
+   renderer is the cost of a step. *)
+let last_render : (picture_key * Draw.image) option ref = ref None
+
+let render key =
   match !last_render with
-  | Some (s, p, image) when s = size && p = pose -> image
+  | Some (drawn, image) when drawn = key -> image
   | Some _ | None ->
-      let body, equipment = Keeper_portrait_look.mascot in
-      let image = Draw.render_posed body equipment pose size in
-      last_render := Some (size, pose, image);
+      let image =
+        match key with
+        | Painted_at (size, pose) ->
+            let body, equipment = Keeper_portrait_look.mascot in
+            Draw.render_posed body equipment pose size
+        | Dotted_at (size, milliseconds) -> Keeper_portrait_solid.mascot ~milliseconds size
+      in
+      last_render := Some (key, image);
       image
 
 let centred ~cols line =
@@ -59,7 +116,7 @@ let picture_rows_for screen ~space =
   | Startup -> Int.min startup_picture_rows space
   | About -> space
 
-let rows ~screen ~cols ~rows ~caption ~elapsed ~display ~project ~origin:(origin_row, origin_col) =
+let rows ~screen ~style ~cols ~rows ~caption ~elapsed ~display ~project ~origin:(origin_row, origin_col) =
   let caption_rows = List.length caption in
   let picture_rows =
     picture_rows_for screen
@@ -72,7 +129,7 @@ let rows ~screen ~cols ~rows ~caption ~elapsed ~display ~project ~origin:(origin
     match View.fit display ~max_cols:cols ~max_rows:picture_rows with
     | None -> None
     | Some box ->
-        let image = render box.View.size (pose_at elapsed) in
+        let image = render (key_of style display box (moment_of elapsed)) in
         Some (box, image, View.lines ~project display box image)
   in
   let picture_lines, left =
@@ -126,11 +183,14 @@ let about_facts ~theme keepers =
 let last_drawn = ref Absent
 let begin_frame () = last_drawn := Absent
 let drawn () = !last_drawn
+let chosen_style = ref Painted
+let set_style style = chosen_style := style
+let style () = !chosen_style
 
 let body ~screen ~cols ~rows:height ~caption ~elapsed ~origin =
   let laid_out =
-    rows ~screen ~cols ~rows:height ~caption ~elapsed ~display:(View.current_display ())
-      ~project:Masc_tui_terminal_palette.best_color ~origin
+    rows ~screen ~style:!chosen_style ~cols ~rows:height ~caption ~elapsed
+      ~display:(View.current_display ()) ~project:Masc_tui_terminal_palette.best_color ~origin
   in
   last_drawn := laid_out.drawn;
   Option.iter View.request laid_out.placement;

@@ -550,7 +550,8 @@ STANZAS
     && [ -z "${module_suites}" ] && [ -z "${library_suites}" ] \
     && [ -z "${declared_suites}" ] && [ -z "${referencing_suites}" ] \
     && [ -z "${named_file_suites}" ] && [ -z "${exactpath_suites}" ] \
-    && [ -z "${stanza_suites}" ] && [ -z "${preflight_script_changed}" ]; then
+    && [ -z "${stanza_suites}" ] && [ -z "${preflight_script_changed}" ] \
+    && [ -z "${ocaml_sources_changed}" ]; then
     echo "no test source, config asset or named suite in this pull request"
       return 1
   fi
@@ -1156,6 +1157,23 @@ self_test() {
   # literal match pays for, and it is one extra suite, not a wrong verdict.
   check "a doc no suite names selects nothing" "" \
     "docs/no-suite-names-this.md"
+  # The tree-reading trigger is an input of the early return too (#39714).
+  # An OCaml source no suite names, links or declares left every other
+  # reason empty, so the function returned before adding test_keeper_toml --
+  # the one suite whose input is any source under these roots. bin/ and
+  # packages/ carry no library-module shortfall gate behind them, so the
+  # miss reached a green run. lib/ may gain stanza-linked suites as the tree
+  # grows; the tree guard is what it must never lose.
+  # Expected suite and probe path share a line on purpose: a probe path alone
+  # on its line reads as a scan-scope declaration to
+  # scripts/lint/guard-scan-targets-exist.sh, and these probes must not exist.
+  check "an unreferenced bin/ source still selects the tree-reading suite" \
+    "test/test_keeper_toml.ml" "bin/no_suite_names_this_probe.ml"
+  check "an unreferenced packages/ source still selects the tree-reading suite" \
+    "test/test_keeper_toml.ml" \
+    "packages/no_suite_names_this/lib/no_suite_names_this_probe.ml"
+  check_required "an unreferenced lib/ source still selects the tree-reading suite" \
+    "test/test_keeper_toml.ml" "lib/no_suite_names_this_probe.ml"
   # A guard can watch a document. Four do, among them the RFC-0086 namespace
   # invariant and this one, and before the declared mapping took every changed
   # path they were selected by nothing.

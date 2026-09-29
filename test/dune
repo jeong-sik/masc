@@ -3976,6 +3976,11 @@
  (libraries alcotest masc_tui_clipboard))
 
 (test
+ (name test_tui_sse_lines)
+ (modules test_tui_sse_lines)
+ (libraries alcotest masc_tui_sse_lines))
+
+(test
  (name test_tui_image_preview)
  (modules test_tui_image_preview)
  (libraries alcotest masc_tui_image_preview masc_tui_keeper_chat_projection masc.masc_tool_blob_store))

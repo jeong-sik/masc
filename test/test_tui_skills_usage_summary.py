@@ -43,7 +43,10 @@ def run(binary, columns, mode):
 
     def interact(process, fd, _slave, output, _base):
         h.resize_and_wait(process, fd, output, rows=48, columns=columns, needle=b'MASC Dashboard')
-        h.tab_until(process, fd, output, b'MASC System')
+        # At 68 and 80 columns the System pane drops its "MASC System" title
+        # so its sub-tabs fit (config_pane_title_head), so the walk reads the
+        # strip's selected token instead.
+        h.tab_until(process, fd, output, b'\xe2\x96\xb8System')
         h.send_and_wait(process, fd, output, b't', b'MASC System / Tools')
         h.send_and_wait(process, fd, output, b'p' * 3,
                         b'skills catalog load failed:' if mode == 'initial-error'
@@ -61,9 +64,15 @@ def run(binary, columns, mode):
             assert 'TRIGGERED 0' not in screen and 'Keepers 0' not in screen, screen
         else:
             for label in ('Keepers 2', 'TRIGGERED 19', 'DELIVERED 17', 'ACTIONS 12',
-                          'work-intake', 'long-skill-', '-tail', 'alpha', 'beta',
+                          'work-intake', 'alpha', 'beta',
                           'TRIGGERED 12', 'TRIGGERED 7'):
                 assert label in screen, (label, screen)
+            # The long name wraps inside its card, and where the break falls
+            # depends on the width (at 120 columns it lands after the last
+            # hyphen), so read the card rows joined rather than one row.
+            joined = ''.join(row.decode('utf-8').strip().strip('│').strip()
+                             for _, row in sorted(rows.items()))
+            assert LONG_NAME in joined, (LONG_NAME, screen)
             assert screen.count('┌') >= 3 and screen.count('└') >= 3, screen
             for row in rows.values():
                 text = row.decode('utf-8')

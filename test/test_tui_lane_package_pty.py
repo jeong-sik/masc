@@ -149,7 +149,7 @@ def main(executable: str) -> None:
             posted.clear()
             release.clear()
             os.write(master_fd, b"s")
-            if not posted.wait(5):
+            if not terminal.wait_for_fixture_event(process, master_fd, output, posted, timeout=5):
                 raise AssertionError("save request did not reach fixture")
             key(b"n", b"New TOML filename:")
             edit_text.write_text("# second draft retained")

@@ -82,6 +82,13 @@ let with_fixture mode test =
   Eio_context.with_test_env ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock ~sw @@ fun () ->
   Masc_test_deps.init_eio_clock ~sw env;
   Fs_compat.set_fs env#fs;
+  let previous_pool = Domain_pool_ref.get () in
+  Domain_pool_ref.set
+    (Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env));
+  Eio.Switch.on_release sw (fun () ->
+    match previous_pool with
+    | Some pool -> Domain_pool_ref.set pool
+    | None -> Domain_pool_ref.clear_for_tests ());
   let saved = Runtime.For_testing.snapshot () in
   let root = Filename.temp_file "vision-official-" "" in
   Unix.unlink root; Unix.mkdir root 0o700;
@@ -230,8 +237,25 @@ is-non-interactive = true
   check bool "fallback received actual turn" true
     (List.exists (fun row -> member "method" row = `String "turn/start") (records fallback_capture))
 
+let test_frame_store_in_pool () =
+  with_fixture "valid" @@
+  fun ~root:_ ~load:_ ~run:_ ~execute:_ ~capture:_ ~fallback_capture:_ ->
+  let bytes = Base64.decode_exn png in
+  let handle =
+    match V.store_frame ~keeper_name:"vision-fixture" bytes with
+    | Ok handle -> handle
+    | Error detail -> fail detail
+  in
+  let path =
+    Filename.concat (V.frames_dir ~keeper_name:"vision-fixture")
+      (Multimodal.Vision_artifact_store.to_string handle)
+  in
+  check bool "frame stored from Eio fiber through installed pool" true
+    (Sys.file_exists path)
+
 let () = run "Keeper standalone official-client vision"
-  [ "image and result", List.map (fun mode -> test_case mode `Quick (fun () -> test_response mode))
+  [ "artifact pool", [test_case "frame store" `Quick test_frame_store_in_pool]
+  ; "image and result", List.map (fun mode -> test_case mode `Quick (fun () -> test_response mode))
       ["valid"; "malformed"; "empty"; "wrong-type"]
   ; "selection", [test_case "explicit media membership and fallback" `Quick test_selection]
   ; "transport failure", List.map (fun mode -> test_case mode `Quick (fun () -> test_transport_failure mode))

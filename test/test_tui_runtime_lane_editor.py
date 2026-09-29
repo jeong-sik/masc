@@ -341,7 +341,7 @@ def run(executable: str) -> None:
         # will leave on runtime-a.
         arrived, release = store.hold_next_post()
         os.write(fd, b"J")
-        if not arrived.wait(timeout=5.0):
+        if not h.wait_for_fixture_event(process, fd, output, arrived, timeout=5.0):
             raise AssertionError("J posted nothing")
         h.send_and_wait(
             process, fd, output, b"x",
@@ -496,7 +496,7 @@ def run_exact(executable: str) -> None:
         # before the write below.
         arrived, release = store.hold_next_standalone_read()
         os.write(fd, b"r")
-        if not arrived.wait(timeout=5.0):
+        if not h.wait_for_fixture_event(process, fd, output, arrived, timeout=5.0):
             raise AssertionError("r read no standalone lanes")
         mark = mark_output(fd, output)
         h.send_and_wait(process, fd, output, b"a", picker)

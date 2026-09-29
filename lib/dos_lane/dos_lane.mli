@@ -63,6 +63,10 @@ type observation = {
           title screen, map and menus read here the way text programs read
           in [screen_text]. *)
   program : string option;  (** the loaded program's name *)
+  saves_name : string option;
+      (** the name the program's saves are kept under: the inventory name
+          [masc_dos_load] was given, where [program] is the file it booted.
+          Several games can boot the same launcher file. *)
   controller : string option;
       (** who may move this machine's time now; [None] until someone does.
           See {!pass}. *)
@@ -90,6 +94,9 @@ type error =
       (** {!restore} found no checkpoint by that name, or one it will not
           read: another machine's, another format's, or corrupt. Nothing
           changed. *)
+  | Other_program of { expected : string; loaded : string }
+      (** {!press_into} was asked for the program kept under [expected], and
+          the one loaded is kept under [loaded]; nothing was pressed. *)
 
 val error_to_string : error -> string
 
@@ -215,6 +222,10 @@ val release_left : holder:string -> announce:(unit -> unit) -> (bool, error) res
 
 val screen : unit -> (observation, error) result
 
+val check_key_name : string -> (unit, string) result
+(** Whether {!press} knows [name] ({!Dos_machine.key_of_string}), without a
+    machine: a layout that names keys is checked when it is read. *)
+
 type frame = { width : int; height : int; rgb : string }
 (** The frame as the display would show it: [width * height] pixels, three
     bytes each, rows top to bottom. *)
@@ -317,6 +328,14 @@ val press :
     insert, delete, enter, esc, space, tab, backspace, F1-F10, or one
     character. A name the machine has no key for is refused before anything
     is pressed. *)
+
+val press_into :
+  saves_name:string -> who:string -> keys:string list -> steps:int -> (observation * ran, error) result
+(** {!press}, only while the loaded program is the one kept under
+    [saves_name] ({!observation.saves_name}); another is [Other_program] and
+    nothing is pressed. The check is made under the machine's lock, where
+    the keys go in, so a program loaded after the caller read the screen is
+    refused rather than handed keys meant for the one before it. *)
 
 val click :
   who:string -> x:int -> y:int -> buttons:int -> steps:int ->

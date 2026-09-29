@@ -804,7 +804,7 @@
  (modules masc_tui_graphics)
  (preprocess
   (pps ppx_enumerate))
- (libraries base64))
+ (libraries base64 bigstringaf decompress.de decompress.zl))
 
 (library
  (name masc_tui_link)

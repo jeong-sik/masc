@@ -169,6 +169,7 @@ let test_the_seat () =
       check bool "the bearer's name" true (member "name" answer = Some (`String "minsu"));
       check bool "no machine" true (member "machine" answer = Some (`Bool false));
       check bool "nobody holds it" true (member "controller" answer = Some `Null);
+      check bool "no saves name without a machine" true (member "saves_name" answer = Some `Null);
       check bool "operators and invites, not agents' clients" true
         (member "participants" answer = Some (`List [ `String "minsu"; `String "operator" ]));
       let dir = Filename.temp_dir "play-seat-dos-" "" in
@@ -194,7 +195,9 @@ let test_the_seat () =
           let answer = read () in
           check bool "a machine" true (member "machine" answer = Some (`Bool true));
           check bool "the invite holds the controller" true
-            (member "controller" answer = Some (`String "minsu")))))
+            (member "controller" answer = Some (`String "minsu"));
+          check bool "the saves name the pad layout is found by" true
+            (member "saves_name" answer = Some (`String "saves")))))
 
 let test_an_expired_invite_is_not_a_seat () =
   with_dir "play-seat-expiry-" (fun base_path ->

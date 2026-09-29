@@ -5,6 +5,7 @@ graphics query, and not at all under NO_COLOR."""
 from __future__ import annotations
 
 import base64
+import zlib
 import os
 import re
 import sys
@@ -76,8 +77,8 @@ STEP_WAIT_SECONDS = 1.0
 # The first chunk of a transfer that places the candle.
 MASCOT_TRANSFER_HEAD = re.compile(rb"\x1b_G(?=[^;]*a=T)(?=[^;]*i=" + MASCOT_IMAGE_ID + rb"\b)[^;]*;")
 # Transfers the Kitty scenario reads before it says the candle does not step.
-# A repainted frame sends the picture it already had, so a step can come a few
-# transfers late.
+# A frame that rewrites a row under the candle sends the picture it already
+# had, so a step can come a few transfers late.
 STEP_TRANSFER_LIMIT = 8
 
 
@@ -120,7 +121,7 @@ def kitty_fields(control: bytes) -> dict[bytes, bytes]:
 
 def mascot_transfers(wire: bytes) -> list[tuple[dict[bytes, bytes], bytes]]:
     """Every whole transfer under the mascot's id: its first chunk's keys and
-    the decoded pixels."""
+    the pixels, inflated where the transfer says o=z."""
     transfers = []
     pending: tuple[dict[bytes, bytes], list[bytes]] | None = None
     for match in KITTY_CHUNK.finditer(wire):
@@ -131,7 +132,10 @@ def mascot_transfers(wire: bytes) -> list[tuple[dict[bytes, bytes], bytes]]:
         if pending is not None:
             pending[1].append(match[2])
             if fields.get(b"m", b"0") == b"0":
-                transfers.append((pending[0], base64.b64decode(b"".join(pending[1]), validate=True)))
+                payload = base64.b64decode(b"".join(pending[1]), validate=True)
+                if pending[0].get(b"o") == b"z":
+                    payload = zlib.decompress(payload)
+                transfers.append((pending[0], payload))
                 pending = None
     return transfers
 
@@ -263,12 +267,13 @@ def about_screen_with_graphics(binary: str) -> None:
         h.send_and_wait(process, fd, output, b"/about\r", ABOUT_CAPTION)
         h.wait_for_output(process, fd, output, PLACEMENT, start=start, timeout=5.0)
         # Keep reading while the candle steps. A sleep that reads nothing lets
-        # the terminal's buffer fill under a 137 KB transfer, the TUI then
+        # the terminal's buffer fill under a transfer, the TUI then
         # waits in write mid-picture, and one read afterwards sees a cut one.
         transfers = stepped_transfers(process, fd, output, start)
         wire = bytes(output[start:])
         fields, pixels = transfers[0]
         assert fields.get(b"f") == b"32", "the candle is not sent with its alpha"
+        assert fields.get(b"o") == b"z", "the candle is not sent compressed"
         edge = int(fields[b"s"])
         assert int(fields[b"v"]) == edge, "the candle's picture is not square"
         assert len(pixels) == edge * edge * 4, "the transfer is not the picture it declares"

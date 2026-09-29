@@ -77,8 +77,17 @@ related: ["0439", "machine-spectating-goes-through-lanes"]
   - `Player` 는 `CanPlayMachine` 만 참이다.
   - `Worker`·`Admin` 도 `CanPlayMachine` 을 가진다. keeper 와 운영자는 지금처럼 논다.
 - 컴파일러가 같이 고치게 만드는 자리: `permissions_for_role`, `agent_role_to_string`/`of_string`,
-  `all_agent_roles`, `multiplier_for_role`(→ `rate_limit_config.player_multiplier` 필드 추가),
+  `all_agent_roles`, `multiplier_for_role`,
   `Server_auth.request_credential_standing`(→ `Player_credential` 값 추가. 운영자도 keeper 도 아니다).
+- `multiplier_for_role` 은 `Player` 에게 `worker_multiplier` 를 준다. 지금 운영 코드에서 한도를 거는
+  곳은 `masc_broadcast` 하나다(`lib/mcp_tool_runtime_comm.ml:49` 가 `Session.check_rate_limit` 를 부른다).
+  그런데 이 wrapper 는 역할을 받지 않고 늘 `GeneralLimit` 와 `Worker` 를 넘긴다
+  (`lib/session.ml:411-412`). 요청 처리기는 그 `Worker` 로 `effective_limit` 를 부르고
+  (`lib/session.ml:245`), 이 함수는 `multiplier_for_role` 로 `worker_multiplier` 를 곱한다
+  (`lib/types/types_auth.ml:355-366`). 그래서 지금은 부른 쪽의 실제 역할로 배수를 고르지 않고, 늘
+  `Worker` 배수가 걸린다. `Player` 는 broadcast 권한도 없다. `Player` 에게 `worker_multiplier` 를 주는 이유는 `multiplier_for_role` 이 모든 역할에 값을
+  내야 하기 때문이다. 따로 설정 칸을 만들면 아무도 읽지 않는 값이 된다. DOS 입력에 역할별 한도를 걸 때,
+  그 호출이 실제 역할을 넘기게 바꾸고 그때 칸을 만든다.
 - **보안 경계는 credential 이다.** controller 는 차례를 정할 뿐이다. 무엇을 할 수 있는지는
   credential 이, 언제 할 수 있는지는 controller 가 정한다.
 
@@ -109,7 +118,12 @@ related: ["0439", "machine-spectating-goes-through-lanes"]
       `Admin` 으로, `require_token = false` 면 토큰 없는 요청이 `Worker` 로 풀린다
       (`Auth.resolve_role_with_auth_config`). 어느 쪽이든 `Player` 로 좁힌 의미가 없다.
   - 초대 이름이 이미 있는 keeper 이름이나 credential 이름과 같으면 거절한다. ledger 와 `pass` 에서
-    두 참가자가 같은 이름으로 보이면 누가 눌렀는지 가를 수 없다.
+    두 참가자가 같은 이름으로 보이면 누가 눌렀는지 가를 수 없다. keeper 이름은 저장된 keeper 와
+    TOML 에 선언된 keeper 를 합쳐 읽는다. 목록을 못 읽으면 충돌이 없다고 말할 수 없으니 거절한다.
+  - 초대 이름은 소문자로 시작하고 소문자·숫자만 쓴다(32자까지). `-` 를 받지 않는다. `-` 가 든
+    credential 이름은 생성된 별명이나 keeper 전송 별칭(`Auth_nickname`)으로 읽혀 다른 이름에
+    묶일 수 있다. 이 문법이면 `Common.safe_filename` 이 이름을 바꾸지 않아, 이름 하나가 credential
+    파일 하나에 대응한다.
   - 답: `{name, expires_at, link: "<base>/play#<raw token>"}`. TUI 는 링크와 QR 을 찍는다.
   - raw token 은 이 답에서 한 번만 나온다. 서버에는 SHA-256 만 남는다.
 - 회수는 `CanAdmin` 만 한다. `DELETE /api/v1/play/invites/<이름>` 와 TUI `/play revoke <이름>`.
@@ -117,6 +131,9 @@ related: ["0439", "machine-spectating-goes-through-lanes"]
   - 그 이름이 조종권을 쥐고 있으면 같이 비운다. `Dos_lane.release_left ~holder ~announce` 가 이미
     "holder 가 아직 쥐고 있으면 비운다"를 한다. 떠난 사람이 조종권을 쥔 채 사라지는 경우를
     푸는 길은 이것 하나다. 시간이 지나서 풀리는 규칙은 두지 않는다.
+  - credential 을 먼저 지우고 조종권을 푼다. 초대받은 사람이 지우기 전에 보낸 요청이 푼 뒤에 기계에
+    닿으면 빈 조종권을 다시 잡을 수 있다. 그 이름은 더 요청을 보내지 못하므로 조종권이 묶인다.
+    이 경우와 아래의 기한 지난 초대는 3단계의 "떠난 조종자" 규칙이 푼다(§2.8).
 - 목록: `GET /api/v1/play/invites` (`CanAdmin`). 이름, 기한, 지금 조종자인지.
 
 ### 2.5 DOS 사람 입력 라우트
@@ -146,6 +163,11 @@ related: ["0439", "machine-spectating-goes-through-lanes"]
 ### 2.7 외부 에이전트
 
 - 초대 credential 로 MCP 에 붙는다. `tools/list` 에는 이 credential 이 부를 수 있는 도구만 나온다.
+- 지금 `/mcp` 는 도구를 고르기 전에 전송 계층에서 `CanReadState` 를 요구한다
+  (`Server_auth.verify_mcp_auth`, observer stream 과 H2 게이트웨이도 같다). 1단계로 다섯 도구의
+  catalog 권한은 바뀌었지만, 이 문이 닫혀 있어 `Player` 는 아직 MCP 로 닿지 못한다
+  (`test_server_auth_dashboard_actor_resolution` 이 이 거절을 확인한다). 6단계는 이 문을
+  `Player` 에게 여는 방법부터 정한다. 도구마다 권한을 거는 뒷단 검사는 이미 있다.
 - `masc_dos_screen` 은 keeper 호출에만 PNG 를 붙인다(`lib/keeper/keeper_dos_screen.ml`). 초대 credential 호출에도 프레임 이미지를
   돌려준다. 삼국지3 메뉴는 그래픽 한글이라 이미지가 없으면 읽을 수 없다.
 - 외부 에이전트는 기계 입력 이름(`["down","return"]`)을 그대로 쓴다. 패드는 사람을 위한 층이다.
@@ -155,6 +177,10 @@ related: ["0439", "machine-spectating-goes-through-lanes"]
 - 차례는 `pass` 로만 바뀐다. 화면을 읽어 누구 차례인지 추측하지 않는다.
 - `masc_dos_pass` 의 `to` 는 keeper 이름과 초대 이름을 받는다. 둘 다 아닌 이름은 거절한다.
 - 비어 있는 조종권은 지금처럼 다음에 움직이는 쪽이 가져간다.
+- 기한이 지난 초대는 조종권을 쥐고 있어도 넘길 수 없다. 지금 "떠난 조종자"(`Keeper_dos_controller.holder_left`)는
+  멈춘 keeper 만 알아본다. 3단계에서 기한 지난 `Player` credential 을 떠난 조종자로 본다.
+  회수된 이름은 credential 이 지워져 초대였다는 흔적이 없다. "credential 이 없는 이름" 으로 가르면
+  인증이 꺼진 워크스페이스의 사람까지 떠난 것으로 보게 되므로, 회수 기록을 남길지 3단계에서 같이 정한다.
 
 ### 2.9 masc 패드
 
@@ -171,15 +197,22 @@ related: ["0439", "machine-spectating-goes-through-lanes"]
   읽을 이름. 예: `BTN_SOUTH = ["return"], "결정"`, `BTN_EAST = ["esc"], "취소"`.
   - 비어 있는 버튼을 누르면 거절하고 이유를 말한다. 기본값으로 무언가를 누르지 않는다.
   - 배치가 없는 프로그램에서는 패드가 열리지 않고 이유를 말한다. 키보드와 글자 입력 칸은 열린다.
-  - 배치는 `<.masc>/dos/pads/<프로그램 이름>.toml` 에 둔다. 체크포인트(`<.masc>/dos/checkpoints/`)와
+  - 배치는 `<.masc>/dos/pads/<saves 이름>.toml` 에 둔다. 체크포인트(`<.masc>/dos/checkpoints/`)와
     같은 층이다. 프로그램 디렉터리 안에는 두지 않는다. `masc_dos_load` 는 실행 파일 옆 파일을
     DOS 에 마운트하므로, 거기 두면 배치 파일이 게임 안에서 보인다.
+  - "프로그램 이름" 은 부팅한 파일이 아니라 saves 이름(`masc_dos_load` 에 준 인벤토리 이름)이다.
+    Koei 의 DOS 게임은 여러 편이 같은 `KOEI.COM` 으로 부팅한다. `Dos_lane.observation.saves_name` 이 이 이름이다.
+  - 워크스페이스 파일이 없으면 masc 에 들어 있는 기본 배치를 쓴다. 첫 기본 배치는 `samguk3` 하나다.
+    답은 어느 쪽 배치인지(`source: workspace | builtin`) 말한다. 워크스페이스 파일이 깨져 있으면
+    기본 배치로 넘어가지 않고 오류다.
   - 게임 지식(메뉴 순서, 저장 키)은 지금처럼 Skill 에 둔다. 배치는 버튼과 키의 짝만 담는다.
   - 배치 파일은 읽을 때 닫힌 타입으로 파싱한다. 모르는 버튼 이름이나 `Dos_machine.key_of_string`
     이 모르는 키 이름은 로드 오류다.
 - **패드로 안 되는 입력.** 삼국지3 은 병력·금 같은 숫자와 이름을 입력한다. 글자 입력 칸
   (화면 키패드 → `/api/v1/dos/type`)을 패드 옆에 둔다.
 - 폰이 주 무대다. QR 을 찍으면 화면과 터치 패드가 뜬다.
+- 실제 게임패드도 같은 버튼으로 읽는다. 브라우저 Gamepad API 의 표준 매핑(0 South, 1 East, 2 West,
+  3 North, 4·5 어깨, 8 Select, 9 Start, 12–15 십자키)만 읽고, 버튼을 누를 때 한 번 보낸다.
 
 ## 3. 범위
 
@@ -220,7 +253,8 @@ related: ["0439", "machine-spectating-goes-through-lanes"]
 3. **DOS 입력 라우트와 `pass` 대상.** §2.5, §2.8. 찾을 자리: `masc_dos_pass` 핸들러가 `to` 를 검사하는 곳.
 4. **masc 패드.** 버튼 타입, 배치 파서, 삼국지3 배치 하나.
 5. **플레이 페이지.** §2.6, TUI QR. 찾을 자리: 대시보드나 TUI 에 이미 있는 live 그리기 코드.
-6. **MCP.** §2.7. 찾을 자리: MCP `tools/list` 가 도구를 거르는 곳, `masc_dos_screen` 이 PNG 를 붙이는 조건.
+6. **MCP.** §2.7. 찾을 자리: `/mcp` 전송 계층 권한(`Server_auth.verify_mcp_auth`, H2 게이트웨이),
+   MCP `tools/list` 가 도구를 거르는 곳, `masc_dos_screen` 이 PNG 를 붙이는 조건.
 
 ## 7. 나중에 볼 것
 

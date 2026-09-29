@@ -255,6 +255,14 @@ blocking_lints() {
     "scripts/ci/check-workflow-skip-propagation.py" \
     python3 scripts/ci/check-workflow-skip-propagation.py --self-test
   run_lint "Workflow skip propagation" python3 scripts/ci/check-workflow-skip-propagation.py
+  # A PTY scenario that waits on a fixture event without reading the terminal
+  # lets the TUI's blocking frame write stop its HTTP fibers, so the awaited
+  # request never goes out (#39760). The PR checks run only the suites a change
+  # selects, so this reads every test file on every PR.
+  run_self_test_when_changed "PTY wait guard self-test" \
+    "scripts/ci/check-pty-waits-read-the-terminal.py" \
+    python3 scripts/ci/check-pty-waits-read-the-terminal.py --self-test
+  run_lint "PTY waits read the terminal" python3 scripts/ci/check-pty-waits-read-the-terminal.py
   run_lint "Board SLO extractor fixture" bash scripts/test-board-slo-extractor.sh
   run_lint "TUI graceful restart fixture" env TUI_GRACEFUL_RESTART_SELF_TEST=1 bash scripts/tui-graceful-restart.sh
   # The fixture above checks the pieces; this drives the whole script against a

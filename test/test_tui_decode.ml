@@ -1369,12 +1369,18 @@ let test_planning_goal_keeps_the_last_review_note () =
 ;;
 
 let test_planning_goal_keeps_owner () =
-  let owned = decoded_proof ~extra:[ "owner", `String "keeper-z" ] () in
-  let unowned = decoded_proof () in
-  Alcotest.(check bool) "recorded owner is preserved" true
-    (owned.Tui_decode.pg_owner = Goal_store.Owner "keeper-z");
-  Alcotest.(check bool) "missing owner is explicitly unknown" true
-    (unowned.Tui_decode.pg_owner = Goal_store.Unknown_owner)
+  List.iter (fun name ->
+    let owned =
+      decoded_proof ~extra:[ "owner", `Assoc [ "name", `String name ] ] ()
+    in
+    Alcotest.(check bool) "recorded owner is preserved" true
+      (owned.Tui_decode.pg_owner = Goal_store.Owner name))
+    [ "keeper-z"; "unknown" ];
+  List.iter (fun extra ->
+    let unowned = decoded_proof ~extra () in
+    Alcotest.(check bool) "absent owner is explicitly unknown" true
+      (unowned.Tui_decode.pg_owner = Goal_store.Unknown_owner))
+    [ []; [ "owner", `Null ] ]
 ;;
 
 let test_planning_goal_keeps_the_server_timestamps () =

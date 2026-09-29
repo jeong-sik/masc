@@ -364,6 +364,37 @@ let test_scan_overdue_restart_sends_nothing () =
     check int "restart adds nothing" 1
       (List.length (overdue_rows config "keeper-a")))
 
+(* The literal name "unknown" is an owner, not the absence of one. Follow
+   creation through a fresh store read to the owner's Pending Message. *)
+let test_owner_named_unknown_receives_overdue_notice_after_restart () =
+  with_workspace (fun config ->
+    let ctx : Tool_workspace.context =
+      { Tool_workspace.config; agent_name = "unknown" }
+    in
+    let created =
+      must_succeed "create goal"
+        (dispatch ctx ~name:"masc_goal_upsert"
+           [ "title", `String "Owned by unknown"
+           ; "metric", `String "accepted artifacts"
+           ; "target_value", `String "1"
+           ; "due_date", `String past_date
+           ])
+    in
+    let goal_id = json_state created "goal_id" in
+    let restarted = Workspace.default_config_uncached config.base_path in
+    check bool "restart preserves the owner's identity" true
+      ((goal_of restarted goal_id).owner = Goal_store.Owner "unknown");
+    Workspace_goals.scan_overdue_goal_notifications restarted;
+    Workspace_goals.scan_overdue_goal_notifications restarted;
+    check int "the owner receives the overdue notice exactly once" 1
+      (List.length (overdue_rows restarted "unknown"));
+    let pending =
+      Keeper_world_observation_message_scope.pending_messages_of_messages
+        ~targets:[ "unknown" ] (owner_rows restarted "unknown")
+    in
+    check int "the notice enters the owner's pending messages" 1
+      (List.length pending))
+
 (* The delivered row is a real Pending Message for the owner: the owner's own
    pending-message projection surfaces it as a mention, so the notice reaches
    the owner's turn rather than sitting unread in the transcript. *)
@@ -589,6 +620,8 @@ let () =
             test_scan_overdue_notifies_owner_once
         ; test_case "a restart sends nothing already delivered" `Quick
             test_scan_overdue_restart_sends_nothing
+        ; test_case "owner named unknown is notified after restart" `Quick
+            test_owner_named_unknown_receives_overdue_notice_after_restart
         ; test_case "the notice is a pending message for the owner" `Quick
             test_overdue_notice_is_a_pending_message_for_owner
         ; test_case "a changed owner is a new recipient" `Quick

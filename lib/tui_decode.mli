@@ -3087,8 +3087,8 @@ type overview_goal = {
   og_id : string;
   og_title : string;
   og_owner : Goal_store.owner;
-      (** Who owns the Goal (#39571). [Unknown_owner] when the payload carries
-          no owner member, as a response written before the field did. *)
+      (** Who owns the Goal. [Unknown_owner] when the member is null or absent;
+          a [{"name": "<name>"}] object records the owner. *)
   og_completion : string option;
       (** The Goal's current completion state from the verification ledger
           ([proof_refuted], [proof_proven], [proof_pending], [idle],

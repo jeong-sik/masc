@@ -13,23 +13,24 @@ let ( let* ) = Result.bind
 let clamp_priority p =
   max 1 (min 5 p)
 
-(* Who owns a Goal (#39571). A Goal recorded no owner before this, so a
-   legacy row decodes to [Unknown_owner] — an explicit value, never an empty
-   string a reader could mistake for a real name. *)
+(* A name identifies an owner. Absence has its own JSON value so no valid
+   name, including "unknown", can become ownerless after a store reload. *)
 type owner =
   | Owner of string
   | Unknown_owner
 
 let owner_to_yojson = function
-  | Owner name -> `String name
-  | Unknown_owner -> `String "unknown"
+  | Owner name -> `Assoc [ "name", `String name ]
+  | Unknown_owner -> `Null
 
 let owner_of_yojson = function
-  | `String name ->
-      let name = String.trim name in
-      if String.equal name "" || String.equal name "unknown" then Ok Unknown_owner
+  | `Null -> Ok Unknown_owner
+  | `Assoc [ "name", `String name ] ->
+      if String.equal (String.trim name) "" then Error "owner.name must not be blank"
       else Ok (Owner name)
-  | _ -> Error "owner must be a string"
+  | `Assoc _ -> Error "owner must contain exactly one non-blank string field: name"
+  | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+      Error "owner must be null or an object containing only a non-blank name"
 
 let owner_of_name = function
   | Some name when String.trim name <> "" -> Owner name
@@ -229,12 +230,11 @@ let goal_of_yojson : Yojson.Safe.t -> (goal, schema_rejection) result = function
                 rejected ~field:"priority"
                   (Printf.sprintf "goal %S: priority must be an int 1-5" id)
           in
-          (* [owner] is optional: a row written before #39571 has no member
-             and reads as [Unknown_owner]. A present but non-string value is
-             still a corrupt row and is rejected like any other member. *)
+          (* An omitted owner is unassigned. Present values all go through the
+             shared codec, including explicit null. *)
           let* owner =
             match Json_util.assoc_member_opt "owner" json with
-            | None | Some `Null -> Ok Unknown_owner
+            | None -> Ok Unknown_owner
             | Some owner_json ->
                 (match owner_of_yojson owner_json with
                  | Ok owner -> Ok owner

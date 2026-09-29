@@ -1003,23 +1003,25 @@ let test_first_write_creates_the_store () =
 (* #39571: a Goal records who owns it. The owner is set from the caller's
    identity on create and survives a re-read from disk. *)
 let test_owner_round_trips_through_the_store () =
+  List.iter (fun owner ->
   with_workspace @@ fun config ->
   let created =
     match
       Goal_store.upsert_goal config ~title:"owned" ~metric:"m"
-        ~target_value:"1" ~owner:"jazz-developer" ()
+        ~target_value:"1" ~owner ()
     with
     | Ok (goal, `created) -> goal
     | Ok (_, `updated _) -> fail "first write reported an update"
     | Error error -> fail (write_error_msg error)
   in
   check bool "created goal carries the caller as owner" true
-    (created.owner = Goal_store.Owner "jazz-developer");
-  (match Goal_store.list_goals_result config () with
+    (created.owner = Goal_store.Owner owner);
+  let restarted = Workspace.default_config_uncached config.base_path in
+  (match Goal_store.list_goals_result restarted () with
    | Error u -> fail (Goal_store.unavailable_to_string u)
    | Ok [ goal ] ->
        check bool "owner round-trips through goals.json" true
-         (goal.owner = Goal_store.Owner "jazz-developer")
+         (goal.owner = Goal_store.Owner owner)
    | Ok goals ->
        fail (Printf.sprintf "expected one goal, got %d" (List.length goals)));
   (* A later edit by a different caller keeps the original owner. *)
@@ -1029,20 +1031,65 @@ let test_owner_round_trips_through_the_store () =
   with
   | Ok (goal, `updated _) ->
       check bool "an edit does not steal ownership" true
-        (goal.owner = Goal_store.Owner "jazz-developer")
+        (goal.owner = Goal_store.Owner owner)
   | Ok (_, `created) -> fail "an update reported a create"
-  | Error error -> fail (write_error_msg error)
+  | Error error -> fail (write_error_msg error))
+    [ "jazz-developer"; "unknown" ]
 
-(* #39571: a row written before the owner field existed has no owner member.
-   It must still decode, and read as an explicit Unknown_owner — never an
-   empty string a reader could mistake for a real name. *)
-let test_legacy_row_decodes_to_unknown_owner () =
+let test_unassigned_owner_is_null_and_round_trips () =
+  with_workspace @@ fun config ->
+  let goal = make_goal "unassigned" "Unassigned goal" in
+  Goal_store.write_state config
+    { version = 1; updated_at = iso_now (); goals = [ goal ] };
+  let json = Yojson.Safe.from_file (Goal_store.goals_path config) in
+  let owner = Yojson.Safe.Util.(json |> member "goals" |> to_list |> List.hd |> member "owner") in
+  check bool "unassigned owner is persisted as null" true (owner = `Null);
+  let restarted = Workspace.default_config_uncached config.base_path in
+  match (available restarted).goals with
+  | [ goal ] ->
+      check bool "the reloaded goal stays unassigned" true
+        (goal.owner = Goal_store.Unknown_owner)
+  | goals -> failf "expected one goal, got %d" (List.length goals)
+
+let test_malformed_owner_refuses_the_store () =
+  List.iter (fun owner ->
+    with_workspace @@ fun config ->
+    let goal = make_goal "invalid-owner" "Invalid owner" in
+    let row =
+      match Goal_store.goal_to_yojson goal with
+      | `Assoc fields -> `Assoc (("owner", owner) :: List.remove_assoc "owner" fields)
+      | _ -> fail "goal serializer did not produce an object"
+    in
+    Workspace.write_json config (Goal_store.goals_path config)
+      (`Assoc
+         [ "version", `Int 1
+         ; "updated_at", `String (iso_now ())
+         ; "goals", `List [ row ]
+         ]);
+    let source = unavailable config in
+    check string "the failure names the authoritative file"
+      (Goal_store.goals_path config) source.file;
+    check bool "the failure identifies the owner field to repair" true
+      (source.reset_step = Goal_store.Repair_field "owner");
+    match source.reason with
+    | Goal_store.Schema_rejected { field = "owner"; _ } -> ()
+    | _ -> fail "invalid owner must reject the owner field")
+    [ `String "unknown"; `String "keeper-z"; `String ""; `Bool false; `Int 0
+    ; `List []; `Assoc []
+    ; `Assoc [ "name", `String "" ]
+    ; `Assoc [ "name", `String "  \n" ]
+    ; `Assoc [ "name", `Null ]
+    ; `Assoc [ "name", `String "keeper-z"; "extra", `Bool true ]
+    ; `Assoc [ "name", `String "keeper-z"; "name", `String "unknown" ]
+    ]
+
+let test_omitted_owner_is_unassigned () =
   with_workspace @@ fun config ->
   let row =
     `Assoc
-      [ ("id", `String "legacy")
+      [ ("id", `String "unassigned")
       ; ("criterion_revision", `String "fixture-revision")
-      ; ("title", `String "Legacy goal")
+      ; ("title", `String "Unassigned goal")
       ; ("metric", `Null)
       ; ("target_value", `Null)
       ; ("due_date", `Null)
@@ -1120,8 +1167,12 @@ let () =
       ( "owner",
         [ test_case "owner round-trips through the store" `Quick
             test_owner_round_trips_through_the_store;
-          test_case "legacy row decodes to unknown owner" `Quick
-            test_legacy_row_decodes_to_unknown_owner ] );
+          test_case "unassigned owner is null and round-trips" `Quick
+            test_unassigned_owner_is_null_and_round_trips;
+          test_case "malformed owner refuses the store" `Quick
+            test_malformed_owner_refuses_the_store;
+          test_case "omitted owner is unassigned" `Quick
+            test_omitted_owner_is_unassigned ] );
       ( "rfc-0444 source",
         [ test_case "uninitialized only when both files are absent" `Quick
             test_source_uninitialized_only_when_both_files_absent;

@@ -155,3 +155,39 @@ python3 render_screens.py log log/ci-run-tests.log screens
 ```
 
 Colours approximate a dark theme. Cell positions and widths are the TUI's own.
+
+## Refresh after Keeper portraits — 2026-09-29
+
+The original `screens/` and the table above preserve the pre-portrait
+measurement. The current expectation adds the intentional portrait from
+[#39750](https://github.com/jeong-sik/masc/pull/39750), commit
+`b7554bdf66`: `keeper_detail_pane` places the three Identity rows beside
+`Masc_tui_keeper_portrait.mosaic_band`, whose height is twelve rows. Its
+`beside` function keeps the longer side, adding nine content rows.
+The suite names `masc_tui_keeper_portrait.ml` and its interface in
+`SOURCE_MODULES` so a change to that geometry selects this baseline too.
+
+[PR run 36511020916, job 109222918530](https://github.com/jeong-sik/masc/actions/runs/36511020916/job/109222918530)
+on `b8be620e162c08a74252ae0017729758634450bf` captured all 34 screens before
+rejecting the old expectation. `portrait-refresh/` contains the eight affected
+ANSI frames decoded from that job's existing zlib/base64 log records. These
+are captures from the failed run, not a new native run or generated screenshots.
+
+| Screen | Widths | Old content | Current content | Geometry retained |
+|---|---|---|---|---|
+| Keeper detail | 80, 100, 109, 110, 157, 158 | 7 blank rows; `1-22/37` | 4 blank rows; `1-22/46` | title 3, rule 4, last 27, hints 29, composer 30 |
+| Keeper detail with roster | 110, 157 | `1-22/37` | `1-22/46` | borders 2–28, title 3, rules 4/28, last 28, no blank rows, hints 29 |
+
+The recorded first screen now draws the portrait at rows 5–16, Current
+failure at 18–19, Board attention at 21–22 and Gate at 24–26. The scroll
+viewport still shows 22 rows; only the content length and visible blank-row
+count changed. Replaying all 34 frames through the existing structural
+helpers gives the unchanged values for every other screen. The recorded
+chat press row remains 6, and its click assertions run before `check_all`.
+
+The later HTTP-handler error is teardown after that expectation failure:
+the exception leaves `test_http_endpoint` while the TUI still holds the
+observer stream, and `run_terminal_scenario` kills the process in its outer
+`finally`. The fixture cleanup check is retained. Geometry, missing-frame,
+unanswered-read, clipping and click assertions are unchanged. A new CI run
+must confirm the updated expectation and normal shutdown together.

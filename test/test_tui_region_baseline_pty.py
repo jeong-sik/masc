@@ -36,8 +36,8 @@ import tui_region_harness as region
 # a suite when a pull request changes a path the suite names: the frame's
 # count and its aliases (masc_tui_frame.ml, masc_tui_ansi.ml), the body's
 # rows (masc_tui_types.ml, surface_body_rows), the files holding the readers
-# measured here, the chat's row actions (masc_tui_message_layout.ml) and the
-# shared helpers.
+# measured here, the portrait band that sets the Info body's content height,
+# the chat's row actions (masc_tui_message_layout.ml) and the shared helpers.
 #
 # Kept out of the default keyboard walk, which already runs near the CI limit
 # (the PTY scenario guidance, #36343).
@@ -48,6 +48,8 @@ SOURCE_MODULES = (
     "bin/masc_tui_types.ml",
     "bin/masc_tui_render_prim.ml",
     "bin/masc_tui_render.ml",
+    "bin/masc_tui_keeper_portrait.ml",
+    "bin/masc_tui_keeper_portrait.mli",
     "bin/masc_tui_render_chat.ml",
     "bin/masc_tui_message_layout.ml",
     "test/tui_region_harness.py",
@@ -114,11 +116,14 @@ def layout(top, title, rules, bottom, last, blank, windows=(), **pinned):
 # key hints are the body's last row, 29 above the composer and 30 on the chat.
 # The Activity pane beside the body from 158 columns leaves the body's rows
 # where they were.
+# #39750 places the three Identity rows beside a twelve-row mosaic portrait.
+# The recorded CI frames from job 109222918530 retain the same 22-row viewport
+# and borders, with nine more content rows; see the evidence README's refresh.
 KEEPERS = layout("blank", 3, (4, 7, 28), None, 28, 17)
 BOARD = layout("blank", 3, (4, 7, 9), None, 13, 15)
 CONFIG = layout("blank", 3, (4, 9), None, 27, 1, last_source_line=18)
-DETAIL = layout("blank", 3, (4,), None, 27, 7, ("1-22/37",))
-DETAIL_BESIDE_ROSTER = layout("border", 3, (4, 28), 28, 28, 0, ("1-22/37",),
+DETAIL = layout("blank", 3, (4,), None, 27, 4, ("1-22/46",))
+DETAIL_BESIDE_ROSTER = layout("border", 3, (4, 28), 28, 28, 0, ("1-22/46",),
                               roster={"top": 2, "bottom": 28})
 CHAT_BESIDE_ROSTER = layout("blank", 3, (4, 26), None, 29, 19,
                             roster={"top": 2, "bottom": 27})

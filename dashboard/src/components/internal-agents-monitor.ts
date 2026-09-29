@@ -179,6 +179,7 @@ function tone(row: Row): StatusBadgeTone {
   if (value === 'succeeded' || value === 'completed' || value === 'approved') return 'ok'
   if (value === 'running') return 'warn'
   if (value === 'rejected') return 'info'
+  if (value === 'review_cancelled') return 'neutral'
   return 'bad'
 }
 
@@ -577,7 +578,7 @@ function Details({ row }: { row: Row }) {
             ${finishedAt(row) == null ? null : html` · 종료 <time dateTime=${new Date(finishedAt(row)! * 1000).toISOString()}>${formatDateTimeKo(finishedAt(row)!)}</time>`}
             ${row.run.evaluatorRuntime ? html` · runtime <code>${row.run.evaluatorRuntime}</code>` : null}
           </p>
-          ${row.run.cause ? html`<p class="ia-err">${row.run.gate ? `${row.run.gate}: ` : ''}${row.run.cause}</p>` : null}
+          ${row.run.cause ? html`<p class=${row.run.status === 'review_cancelled' ? 'ia-note' : 'ia-err'}>${row.run.gate ? `${row.run.gate}: ` : ''}${row.run.cause}</p>` : null}
           <p class="ia-note">Review 원문은 저장되지 않음 · 출력은 1,024B excerpt</p>
         </div>
         <div class="ia-evi">

@@ -51,6 +51,8 @@ export function verificationRunTone(status: VerificationRunStatusLabel): StatusB
       return 'ok'
     case 'rejected':
       return 'info'
+    case 'review_cancelled':
+      return 'neutral'
     case 'infrastructure_unavailable':
       return 'bad'
     case 'not_reviewed':
@@ -70,6 +72,8 @@ export function verificationRunLabel(status: VerificationRunStatusLabel): string
       return '승인'
     case 'rejected':
       return '거부'
+    case 'review_cancelled':
+      return '판정 취소'
     case 'infrastructure_unavailable':
       return '판정 기반시설 오류'
     case 'not_reviewed':
@@ -122,12 +126,6 @@ function VerificationRunRow({ row }: { row: VerificationRunRecord }) {
       <td class="py-2 text-[var(--color-fg-secondary)] break-words">
         ${row.gate ? html`<code class="mr-1">${row.gate}</code>` : null}
         ${row.infrastructureStage ? html`<code class="mr-1">${row.infrastructureStage}</code>` : null}
-        ${row.retryable === false
-          ? html`<span
-              class="mr-1 font-semibold text-destructive"
-              title="같은 이유로 계속 실패할 것으로 판단되어 자동 재시도가 멈췄습니다. 확인 후 조치가 필요합니다."
-            >[수동 확인 필요]</span>`
-          : null}
         ${row.cause ?? ''}
       </td>
     </tr>

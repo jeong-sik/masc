@@ -190,7 +190,19 @@ let unicode_trim value =
   loop 0 None 0
 ;;
 
-let is_blank value = String.equal (unicode_trim value) ""
+(* Stops at the first scalar that is not whitespace, or at a byte that does
+   not decode: either answers the question, and a skill body can be 16 KB. *)
+let is_blank value =
+  let rec blank_from index =
+    index = String.length value
+    ||
+    let decoded = String.get_utf_8_uchar value index in
+    Uchar.utf_decode_is_valid decoded
+    && python_whitespace (Uchar.utf_decode_uchar decoded)
+    && blank_from (index + Uchar.utf_decode_length decoded)
+  in
+  blank_from 0
+;;
 
 let optional_string fields standard_field key =
   match field fields key with

@@ -375,9 +375,9 @@ def about_turns_the_candle(binary: str) -> None:
         raise AssertionError(f"no {what} candle was sent after the key")
 
     def interact(process, fd, _slave, output, _base):
-        h.send_and_wait(process, fd, output, b"2", b"MASC Keepers")
+        h.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
         h.select_keeper_row(process, fd, output, b"alpha")
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Overview")
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
         h.send_and_wait(process, fd, output, b"i", h.COMPOSER_FOCUSED)
         start = len(output)
         h.send_and_wait(process, fd, output, b"/about\r", ABOUT_CAPTION)
@@ -395,7 +395,7 @@ def about_turns_the_candle(binary: str) -> None:
         start = len(output)
         h.write_all(fd, output, b"c")
         transfer_after(process, fd, output, start, is_painted, "painted")
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Overview")
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
         os.write(fd, b"q")
 
     h.run_terminal_scenario(

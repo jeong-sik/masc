@@ -201,17 +201,43 @@ let parse_request input =
       let* query = query fields in Ok (Slice query)
   | _ -> Error "Use inspect, attach {manifest_path,run_id,binding}, observe ID, detach ID, slice {run_id,since,until,lane_id}, evidence {instance_id,row_ids,keeper_name?}, act/action {instance_id,expected_incarnation,request_id,action}"
 let at_cursor items cursor = if cursor < 0 then None else List.nth_opt items cursor
+let detail_instance view snapshot =
+  match view.screen with
+  | Overview -> None
+  | Detail (id, incarnation) ->
+      List.find_opt (fun (instance : instance) ->
+        String.equal instance.id id && String.equal instance.incarnation incarnation)
+        snapshot.instances
+let row_owner instances (row : Row.row) =
+  List.find_opt (fun (instance : instance) ->
+    String.starts_with ~prefix:(instance.id ^ "/") row.lane_id) instances
+let rows_in_screen view snapshot =
+  let rows = List.mapi (fun index row -> index, row) snapshot.output.rows in
+  match view.screen with
+  | Overview -> rows
+  | Detail _ ->
+      (match detail_instance view snapshot with
+       | None -> []
+       | Some target -> List.filter (fun (_, row) ->
+           match row_owner snapshot.instances row with
+           | Some owner -> owner.id = target.id && owner.incarnation = target.incarnation
+           | None -> false) rows)
 let selected_declaration view = Option.bind view.snapshot (fun snapshot ->
-  Option.bind snapshot.configuration (fun configuration -> at_cursor configuration.declarations view.configuration_cursor))
+  Option.bind snapshot.configuration (fun configuration ->
+    match view.screen with
+    | Overview -> at_cursor configuration.declarations view.configuration_cursor
+    | Detail _ -> Option.bind (detail_instance view snapshot) (fun item ->
+        List.find_opt (fun (declaration : declaration) ->
+          declaration.instance_id = Some item.id
+          && Some declaration.source_path = item.source_path) configuration.declarations)))
 let selected_document view = Option.bind view.document_key (fun key ->
   List.find_opt (fun (s : Document.session) -> s.file_name = key) view.documents)
 let put_document view (document : Document.session) =
   {view with documents=document :: List.filter (fun (s : Document.session) -> s.file_name <> document.file_name) view.documents;
     document_key=Some document.file_name}
-let selected_row view = Option.bind view.snapshot (fun snapshot -> at_cursor snapshot.output.rows view.row_cursor)
-let row_owner instances (row : Row.row) =
-  List.find_opt (fun (instance : instance) ->
-    String.starts_with ~prefix:(instance.id ^ "/") row.lane_id) instances
+let selected_row view = Option.bind view.snapshot (fun snapshot ->
+  List.find_map (fun (index, row) -> if index = view.row_cursor then Some row else None)
+    (rows_in_screen view snapshot))
 let reconcile_snapshot view snapshot =
   let locate key items wanted =
     let rec loop index = function
@@ -266,6 +292,15 @@ let selected_instance view = Option.bind view.snapshot (fun snapshot ->
            Option.bind declaration.instance_id (fun id ->
              List.find_opt (fun (instance : instance) -> instance.id=id) snapshot.instances))
        | Connections | Instances -> at_cursor snapshot.instances view.instance_cursor))
+let open_selected_instance view =
+  match selected_instance view, view.snapshot with
+  | Some item, Some snapshot ->
+      let next = {view with screen=Detail (item.id,item.incarnation); focus=Timeline;
+        scroll=0; selected=[]; document_key=None} in
+      let row_cursor = match rows_in_screen next snapshot with
+        | (index, _) :: _ -> index | [] -> -1 in
+      {next with row_cursor}
+  | None, _ | Some _, None -> view
 let evidence_target view =
   let* snapshot = Option.to_result ~none:"Observation snapshot unavailable" view.snapshot in
   let* () = if view.selected=[] then Error "Select evidence rows first" else Ok () in
@@ -273,7 +308,8 @@ let evidence_target view =
     | [] -> Ok []
     | id::rest ->
         let* row = Option.to_result ~none:"Selected evidence is outside the current view; select again"
-          (List.find_opt (fun (row : Row.row) -> row.id=id) snapshot.output.rows) in
+          (List.find_map (fun (_, (row : Row.row)) -> if row.id=id then Some row else None)
+            (rows_in_screen view snapshot)) in
         let* owner = Option.to_result ~none:"Selected evidence owner unavailable"
           (row_owner snapshot.instances row) in
         let* rest=owners rest in Ok (owner::rest) in
@@ -451,8 +487,8 @@ type visual_line = { cells : (tone * string) list }
 let _next_focus = function
   | Timeline -> Connections | Connections -> Configurations
   | Configurations -> Instances | Instances -> Rows | Rows -> Timeline
-let ordered_rows snapshot =
-  List.mapi (fun index row -> index, row) snapshot.output.rows
+let ordered_rows view snapshot =
+  rows_in_screen view snapshot
   |> List.stable_sort (fun (_, (a : Row.row)) (_, (b : Row.row)) ->
     let time = Float.compare a.observed_at b.observed_at in
     if time=0 then String.compare a.id b.id else time)
@@ -460,7 +496,7 @@ let move_observation view delta =
   match view.snapshot with
   | None -> view
   | Some snapshot ->
-      let rows = ordered_rows snapshot in
+      let rows = ordered_rows view snapshot in
       let rec find position = function
         | [] -> -1
         | (index, _) :: rest -> if index=view.row_cursor then position else find (position+1) rest in
@@ -468,19 +504,31 @@ let move_observation view delta =
       match List.nth_opt rows position with
       | None -> view
       | Some (row_cursor, _) -> {view with row_cursor;scroll=0;document_key=None}
-let lane_ids snapshot = List.map (fun (row : Row.row) -> row.lane_id) snapshot.output.rows
-  |> List.sort_uniq String.compare
+let move_record view delta =
+  match view.snapshot with
+  | None -> view
+  | Some snapshot ->
+      let rows = rows_in_screen view snapshot in
+      let rec find position = function
+        | [] -> -1
+        | (index, _) :: rest -> if index=view.row_cursor then position else find (position+1) rest in
+      let position = max 0 (min (List.length rows-1) (find 0 rows + delta)) in
+      match List.nth_opt rows position with
+      | None -> view
+      | Some (row_cursor, _) -> {view with row_cursor;scroll=0;document_key=None}
 let move_lane view delta =
   match view.snapshot, selected_row view with
   | Some snapshot, Some row ->
-      let lanes = lane_ids snapshot in
+      let lanes = rows_in_screen view snapshot
+        |> List.map (fun (_, (row : Row.row)) -> row.lane_id)
+        |> List.sort_uniq String.compare in
       let rec find index = function [] -> 0 | lane :: rest ->
         if lane=row.lane_id then index else find (index+1) rest in
       let index = max 0 (min (List.length lanes-1) (find 0 lanes + delta)) in
       (match List.nth_opt lanes index with
        | None -> view
        | Some lane ->
-           let candidates = List.filter (fun (_, (candidate : Row.row)) -> candidate.lane_id=lane) (ordered_rows snapshot) in
+           let candidates = List.filter (fun (_, (candidate : Row.row)) -> candidate.lane_id=lane) (ordered_rows view snapshot) in
            let target = match List.find_opt (fun (_, (candidate : Row.row)) -> candidate.observed_at>=row.observed_at) candidates with
              | Some _ as target -> target
              | None -> List.nth_opt candidates (List.length candidates-1) in
@@ -589,8 +637,10 @@ let visual_lines ?(failed_note = "") ~height ~width view =
       | Some snapshot ->
         match view.focus with
         | Timeline ->
-            let rows = ordered_rows snapshot in
-            let lanes = lane_ids snapshot in
+            let rows = ordered_rows view snapshot in
+            let lanes = rows_in_screen view snapshot
+              |> List.map (fun (_, (row : Row.row)) -> row.lane_id)
+              |> List.sort_uniq String.compare in
             let selected = selected_row view in
             if rows=[] then
               [line "No observations recorded."; line ~tone:Dim "3:install a package  4:select worker and observe";
@@ -1064,8 +1114,7 @@ let detail_lines ~width view =
       let tabs = String.concat "  " [
         tab Timeline "1 Activity"; tab Connections "2 Links";
         tab Configurations "3 Installation"; tab Rows "4 Records"] in
-      let rows = List.filter (fun (row : Row.row) ->
-        String.starts_with ~prefix:(item.id ^ "/") row.lane_id) snapshot.output.rows in
+      let rows = List.map snd (rows_in_screen view snapshot) in
       let body = match view.focus with
       | Timeline | Instances ->
           if rows=[] then ["No observations yet. o:observe this Add-on."]
@@ -1110,7 +1159,10 @@ let detail_lines ~width view =
       | Rows ->
           if rows=[] then ["No observations yet."]
           else List.concat_map (fun (row : Row.row) ->
-            [row.title; "Row " ^ row.id;
+            [(if Option.fold ~none:false ~some:(fun (selected : Row.row) -> selected.id = row.id)
+                 (selected_row view) then "> " else "  ")
+             ^ (if List.mem row.id view.selected then "[selected] " else "") ^ row.title;
+             "Row " ^ row.id;
              Yojson.Safe.pretty_to_string (`Assoc row.fields)]
             @ List.map (fun (e : Row.evidence) ->
               "Evidence " ^ e.uri ^ " · sha256 " ^

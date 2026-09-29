@@ -19913,9 +19913,7 @@ and is loaded on demand through keeper_skill.
                      | "esc" | "q" when view.screen<>Addons.Overview -> update {view with screen=Addons.Overview;focus=Addons.Instances;scroll=0}
                      | "esc" | "q" -> state.lane_addons_cached <- view; state.lane_addons <- None
                      | ("\r" | "\n" | "enter") when view.screen=Addons.Overview ->
-                         (match Addons.selected_instance view with
-                          | None -> ()
-                          | Some item -> update {view with screen=Addons.Detail (item.id,item.incarnation);focus=Addons.Timeline;scroll=0})
+                         update (Addons.open_selected_instance view)
                      | "i" ->
                          if view.loading then update {view with error=lane_addons_input_failure "Wait for the current Lane request before opening installation."}
                          else (match Masc_tui_lane_installer.create () with
@@ -19998,13 +19996,9 @@ and is loaded on demand through keeper_skill.
                          (match view.snapshot, view.screen, view.focus with
                           | Some snapshot, Addons.Overview, _ ->
                               update {view with instance_cursor=max 0 (min (List.length snapshot.instances - 1) (view.instance_cursor + delta))}
-                          | Some snapshot, Addons.Detail _, Addons.Configurations ->
-                              let size = Option.fold ~none:0 ~some:(fun (c : Addons.configuration) -> List.length c.declarations) snapshot.configuration in
-                              update {view with configuration_cursor=max 0 (min (size - 1) (view.configuration_cursor + delta))}
-                          | Some snapshot, Addons.Detail _, (Addons.Instances | Addons.Connections) ->
-                              update {view with instance_cursor=max 0 (min (List.length snapshot.instances - 1) (view.instance_cursor + delta))}
-                          | Some snapshot, Addons.Detail _, Addons.Rows ->
-                              update {view with row_cursor=max 0 (min (List.length snapshot.output.rows - 1) (view.row_cursor + delta))}
+                          | Some _, Addons.Detail _, (Addons.Configurations | Addons.Instances | Addons.Connections) -> ()
+                          | Some _, Addons.Detail _, Addons.Rows ->
+                              update (Addons.move_record view delta)
                           | Some _, Addons.Detail _, Addons.Timeline -> update (Addons.move_observation view delta)
                           | None, _, _ -> ())
                      | " " ->

@@ -624,7 +624,65 @@ let refresh_preserves_operator_target () =
     (List.exists (fun line -> String.starts_with ~prefix:"Read: network failed" (plain line))
       (UI.lines ~height:24 ~width:120 failed))
 
+let detail_keeps_installation_ownership () =
+  let worker id : UI.instance = {id;incarnation=id ^ "-run";run_id="project";
+    addon_id="fixture";title=id;revision="1";phase=UI.Row.Attached;
+    observation_seq=1;rows_count=2;source_path=Some ("/config/" ^ id ^ ".toml");
+    binding=`Assoc ["sources",`List []];outputs=[];skills_directory=None;
+    action_schema=None;binding_schema=None;display=Masc.Lane_addon_presentation.empty} in
+  let declaration id : UI.declaration = {source_path="/config/" ^ id ^ ".toml";
+    installation_id=Some id;desired=Some "1";applied=Some "1";
+    instance_id=Some id;issues=[]} in
+  let row owner lane observed_at : UI.Row.row = {id=owner ^ "-" ^ lane;
+    lane_id=owner ^ "/" ^ lane;kind=UI.Row.Value;title=owner ^ " " ^ lane;
+    observed_at;subject_id="project";clock=None;actor=None;
+    fields=[];evidence=[];related_ids=[]} in
+  let snapshot : UI.snapshot = {instances=[worker "a";worker "b"];
+    output={rows=[row "a" "first" 1.;row "b" "first" 2.;
+      row "a" "last" 3.;row "b" "last" 4.];coverage=[]};complete=Some true;
+    configuration=Some {directory="/config";complete=true;
+      declarations=[declaration "a";declaration "b"]}} in
+  let overview = {UI.initial with snapshot=Some snapshot;focus=UI.Instances;
+    instance_cursor=1;configuration_cursor=0;row_cursor=0;selected=["a-first"]} in
+  let overview = UI.put_document overview (Draft.create "a.toml" |> ok) in
+  let detail = UI.open_selected_instance overview in
+  check bool "Enter pins the selected incarnation" true (detail.screen=UI.Detail ("b","b-run"));
+  check (list string) "opening detail clears another installation's evidence" [] detail.selected;
+  check bool "opening detail clears another installation's active document" true
+    (UI.selected_document detail=None);
+  check (option string) "Installation E targets the displayed TOML despite global cursor zero"
+    (Some "/config/b.toml") (UI.selected_source_path {detail with focus=UI.Configurations});
+  let selected_id view = Option.map (fun (r : UI.Row.row) -> r.id) (UI.selected_row view) in
+  check (option string) "Records starts at displayed installation" (Some "b-first") (selected_id detail);
+  let last = UI.move_record {detail with focus=UI.Rows} 1 in
+  check (option string) "Records next skips another installation's intervening row"
+    (Some "b-last") (selected_id last);
+  check (option string) "Records next stays within displayed installation"
+    (Some "b-last") (selected_id (UI.move_record last 1));
+  check (option string) "Activity next stays within displayed installation"
+    (Some "b-last") (selected_id (UI.move_observation detail 1));
+  check (option string) "Activity previous lane cannot select another installation"
+    (Some "b-first") (selected_id (UI.move_lane detail (-1)));
+  let selected = {last with selected=["b-last"]} in
+  (match UI.evidence_request selected |> ok with
+   | UI.Evidence evidence ->
+       check string "export belongs to the displayed installation" "b"
+         Yojson.Safe.Util.(evidence |> member "instance_id" |> to_string);
+       check (list string) "export contains the displayed record" ["b-last"]
+         Yojson.Safe.Util.(evidence |> member "row_ids" |> to_list |> List.map to_string)
+   | _ -> fail "expected evidence export");
+  check bool "invisible evidence cannot be exported from detail" true
+    (Result.is_error (UI.evidence_request {detail with selected=["a-first"]}));
+  let replacement = {snapshot with instances=[worker "a";{(worker "b") with incarnation="new-run"}]} in
+  let refreshed = UI.reconcile_snapshot selected replacement in
+  check bool "replacement cannot inherit old detail's edit or row selection" true
+    (UI.selected_instance refreshed=None && UI.selected_row refreshed=None
+     && UI.selected_source_path {refreshed with focus=UI.Configurations}=None);
+  check bool "replacement cannot inherit old detail's evidence export" true
+    (Result.is_error (UI.evidence_request refreshed))
+
 let () = run "TUI Lane package operations" ["operator scenarios",[
+  test_case "detail keeps installation ownership for edit, navigation and export" `Quick detail_keeps_installation_ownership;
   test_case "refresh retains exact operator targets and exposes failure" `Quick refresh_preserves_operator_target;
   test_case "evidence export chooses a Keeper by name" `Quick evidence_export_chooses_a_keeper_by_name;
   test_case "edit object array items through nested schema forms" `Quick object_array_fields;

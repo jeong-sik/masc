@@ -115,6 +115,31 @@ it('names a runtime saved without the check because of a usage limit', async () 
   expect(screen.queryByText(/응답·도구 검증은 완료했습니다/)).toBeNull()
   expect(screen.queryByText(/연결 저장 결과를 확인하지 못했습니다/)).toBeNull()
 })
+// A save that kept a bound runtime without calling it again is not a
+// verification of that runtime, and the notice must not say it was.
+it('names a bound runtime the save did not check again', async () => {
+  const initial = { ...inventory, runtimes: [{ id: 'old.id', provider_id: 'old', display_name: 'Existing', protocol: 'codex-app-server', model: 'Model', endpoint: null }] }
+  vi.mocked(post).mockImplementation(async path => {
+    if (path.endsWith('/connections')) return { configured: true, readiness: 'partly_checked', runtime_id: 'old.id', runtime_ids: ['old.id'],
+      unverified: [], not_rechecked: ['old.id'] }
+    throw new Error('activation unavailable')
+  })
+  render(html`<${RuntimeSetupPicker} inventory=${initial} onSaved=${vi.fn()} />`)
+  fireEvent.click(screen.getByLabelText('Existing · Model')); fireEvent.click(screen.getByText('검증 후 선택 저장'))
+  await screen.findByText(/기존 연결은 이번에 다시 확인하지 않았습니다: old\.id\./)
+  expect(screen.queryByText(/응답·도구 검증은 완료했습니다/)).toBeNull()
+  expect(screen.queryByText(/연결 저장 결과를 확인하지 못했습니다/)).toBeNull()
+})
+it('refuses a receipt that reports verified beside a not_rechecked list', async () => {
+  const initial = { ...inventory, runtimes: [{ id: 'old.id', provider_id: 'old', display_name: 'Existing', protocol: 'codex-app-server', model: 'Model', endpoint: null }] }
+  vi.mocked(post).mockImplementation(async path => {
+    if (path.endsWith('/connections')) return { configured: true, readiness: 'verified', runtime_id: 'old.id', runtime_ids: ['old.id'], not_rechecked: ['old.id'] }
+    throw new Error('activation unavailable')
+  })
+  render(html`<${RuntimeSetupPicker} inventory=${initial} onSaved=${vi.fn()} />`)
+  fireEvent.click(screen.getByLabelText('Existing · Model')); fireEvent.click(screen.getByText('검증 후 선택 저장'))
+  await screen.findByText(/연결 저장 결과를 확인하지 못했습니다/)
+})
 it('refuses a usage-limited receipt that does not name a saved runtime', async () => {
   const initial = { ...inventory, runtimes: [{ id: 'old.id', provider_id: 'old', display_name: 'Existing', protocol: 'codex-app-server', model: 'Model', endpoint: null }] }
   vi.mocked(post).mockImplementation(async path => {

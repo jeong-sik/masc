@@ -6283,6 +6283,9 @@ type state = {
   mutable memory_facts_category: memory_category_filter;
   mutable memory_facts_sort: memory_sort_order;
   mutable memory_overview_sort: memory_overview_sort;
+  (* #39831: [d] on the Memory table shows the selected keeper's ledger rows;
+     off, the block draws its state, last save and any action. *)
+  mutable memory_overview_detail: bool;
   mutable repository_changes_open: bool;
   mutable repository_changes_scope: Tui_decode.repository_change_scope option;
   mutable repository_changes: Tui_decode.repository_change_snapshot option;
@@ -8386,6 +8389,7 @@ let create_state
   memory_facts_category = Category_all;
   memory_facts_sort = Sort_recency;
   memory_overview_sort = Mem_overview_facts;
+  memory_overview_detail = false;
   repository_changes_open = false;
   repository_changes_scope = None;
   repository_changes = None;

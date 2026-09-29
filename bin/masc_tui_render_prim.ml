@@ -2029,57 +2029,27 @@ let ask_block f =
 
 
 let question_hints (state : state) =
-    (* One name for the key in both modes. [ and ] call the same function
-       either way -- they walk the asks -- and the surface used to call that
-       "question" while browsing and "ask" while answering, which is the same
-       key asking the operator to learn it twice. Named once here so the two
-       footers cannot drift apart again.
-
-       The vocabulary is the repository's: [/] walks the container a surface
-       is a list of. Board says post, Changes says keeper, this says ask. *)
-    let walk_asks = "[/]:ask" in
-    match state.ask_answer_mode with
-    | Ask_browsing ->
-        Printf.sprintf
-          "j/k:move  y / n:decide  w:Workspace mode  e:Outside mode  %s  a:answer a question  \
-           r:refresh  Tab:next"
-          walk_asks
-    | Ask_answering { aam_ask_id } -> (
-        match state.ask_text_entry with
-        (* Typing owns the keyboard, so the footer stops offering the keys it
-           has taken: the digits are text here, not choices. *)
-        | Some _ -> "Enter:save  Esc:cancel"
-        | None ->
-            (* Say when the next Enter sends. The approval queue two panes up
-               already draws its armed state; this one announced itself only as
-               an event, on a surface that draws no events, so the first Enter
-               looked like a key that had not landed. *)
-            (match state.pending_ask_submit with
-             | Some armed when String.equal armed aam_ask_id ->
-                 "Press Enter again to send  |  s:skip  c:clear  Esc:back"
-             | Some _ | None ->
-                 (* Only the keys the selected question answers to. A question
-                    can arrive with no choices at all -- the server accepts one
-                    as long as it welcomes free text -- and there [1-9] does
-                    nothing, which reads as a pane that has stopped listening
-                    rather than as a key that was never for this question. *)
-                 let question = selected_ask_question state in
-                 let has_choices =
-                   match question with
-                   | Some (q : Masc.Tui_decode.ask_question) ->
-                       q.Masc.Tui_decode.aq_choices <> []
-                   | None -> false
-                 in
-                 let takes_text =
-                   match question with
-                   | Some _ -> true
-                   | None -> false
-                 in
-                 Printf.sprintf "Left/Right:question  PgUp/PgDn:scroll  %s  %s%ss:skip  c:clear  \
-                                 Enter:answer  Esc:back"
-                   walk_asks
-                   (if has_choices then "1-9:pick  " else "")
-                   (if takes_text then "t:write  " else "")))
+  let open Masc_tui_keys in
+  match state.ask_answer_mode with
+  | Ask_browsing -> footer_hints_approvals Approval_browsing
+  | Ask_answering { aam_ask_id } ->
+      (match state.ask_text_entry with
+       | Some _ -> footer_hints_approvals Approval_writing
+       | None ->
+           match state.pending_ask_submit with
+           | Some armed when String.equal armed aam_ask_id ->
+               footer_hints_approvals Approval_armed
+           | Some _ | None ->
+               let question = selected_ask_question state in
+               let has_choices =
+                 match question with
+                 | Some (q : Masc.Tui_decode.ask_question) ->
+                     q.Masc.Tui_decode.aq_choices <> []
+                 | None -> false
+               in
+               let takes_text = Option.is_some question in
+               footer_hints_approvals
+                 (Approval_answering { has_choices; takes_text }))
 let question_asks (state : state) =
   match state.asks_snapshot with
   | None -> []

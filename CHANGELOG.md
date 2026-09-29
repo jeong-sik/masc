@@ -19,7 +19,7 @@
 - Keeper portraits can wear a crown or a beanie in the head slot, drawn in the band between the flame and the horns so neither is covered (#39765).
 - Add `GET /api/v1/play/screen.png`: an invite's bearer (`CanPlayMachine`) reads the shared DOS machine's current frame as a PNG, so an external agent with only a shell can see a game whose menus are drawn as pixels (RFC play-link-for-the-shared-machine). (#39769)
 - Keeper portraits can hold a book, a mug or a quill in the hand slot, drawn at the candle's lower right so they clear the flame, the horns and the face (#39773).
-- The startup splash and `/about` candle comes in two styles: `painted`, the 2D portrait, and `dotted`, a small ray-marched 3D figure in square dots that sways on its axis. `c` on `/about` turns the candle to the other style and stores it in `[tui].candle`. On a Kitty terminal the dotted candle is sent as many pixels as its rows show, so no dot is scaled (#39791).
+- The `/about` candle comes in two styles: `painted`, the 2D portrait, and `dotted`, a small ray-marched 3D figure in square dots that sways on its axis. `c` on `/about` turns the candle to the other style and stores it in `[tui].candle`. On a Kitty terminal the dotted candle is sent as many pixels as its rows show, so no dot is scaled (#39791).
 - Keeper portraits can wear a bow tie or a medal in the neck slot, hung from the same band the scarf uses so they clear the mouth (#39803).
 
 ### Changed
@@ -42,7 +42,7 @@
 - A non-default `github_host` without `graphql_url` is refused as an invalid declaration with the fix, instead of posting every repository to api.github.com where each would read as not visible. #39752
 - The pull-request reader compares a remote's host without case (RFC 4343) and reads `github_host` in lower case, so `https://GitHub.com/o/r` or `github_host = "GHE.EXAMPLE"` no longer reads as not GitHub. The `owner/repo` path keeps its case. #39752
 - A refused token is held per `graphql_url`: correcting the endpoint asks the new one with the same token instead of keeping the old endpoint's 401. #39752
-- On a Kitty terminal a placed portrait is sent again only when it is new, moved or changed, or when the frame rewrote a row it covers, and its pixels travel zlib-compressed (`o=z`): a 160 px candle frame fell from 136,536 to 4,084 bytes of base64. A Kitty terminal that does not report its cell size draws the mosaic instead of placing a box from a guessed 10x20 cell, and a placement the encoder refuses is no longer recorded as on screen (#39770).
+- On a Kitty terminal a placed portrait is sent again only when it is new, moved or changed, or when the frame rewrote a row it covers. A Kitty terminal that does not report its cell size draws the mosaic instead of placing a box from a guessed 10x20 cell, and a placement the encoder refuses is no longer recorded as on screen (#39770).
 - On macOS, a finished Claude Code, Codex or Muse turn no longer fails with
   `Parse error: runtime boundary: Unix.Unix_error(Unix.EPERM, "kill", "")`
   when a descendant of the client is still exiting as its process group is
@@ -73,6 +73,7 @@
 - The dashboard's agent monitor no longer shows 0 when a run source could not be read. It shows — until that source answers, and keeps the last good rows marked STALE (#39786).
 - Keepers resume Board work after an approved retry was deferred or interrupted by a restart. Before, the startup check refused that state and stopped the Board workers (#39784).
 - When a Keeper's sandbox cannot read a config or environment file, the error now says why: missing file, bad path, permission, or filesystem error. Before it said only "cannot read config file" (#39788).
+- Execute keeps every token of an argv-shaped shell call, so `sh -n -c S` checks the script instead of running it and a directory-qualified program keeps its path (#39839).
 
 ### Internal
 

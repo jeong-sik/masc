@@ -129,6 +129,25 @@ let test_missing_keeper_directory_preserves_existing_ledger () = with_base (fun 
       (Ledger.to_json ledger) (Ledger.to_json (Ledger.load ~base_path |> require));
     Worker.For_testing.stop ~base_path))
 
+let test_initial_inventory_drains_across_bounded_runs () = with_base (fun base_path clock ->
+  List.iter (fun index ->
+    commit ~keeper_id:("keeper-" ^ string_of_int index) base_path
+      ("Distinct initial observation number " ^ string_of_int index))
+    (List.init 12 Fun.id);
+  let calls = ref 0 in
+  let execute ~rendered_prompt ~selected ~ledger:_ =
+    incr calls;
+    Alcotest.(check bool) "whole prompt stays under the injected lane cap" true
+      (String.length rendered_prompt <= 2000);
+    Ok (answer selected, "test.slot") in
+  Eio.Switch.run (fun sw ->
+    Worker.For_testing.start ~sw ~base_path ~max_input_bytes:2000 ~execute;
+    await_idle ~clock ~base_path;
+    Alcotest.(check bool) "initial inventory required more than one model call" true (!calls > 1);
+    Alcotest.(check int) "all facts are classified" 12
+      (List.length (Ledger.dispositions (Ledger.load ~base_path |> require)));
+    Worker.For_testing.stop ~base_path))
+
 let () = Alcotest.run "workspace curator lane"
   [ "changed-fact ledger",
     [ Alcotest.test_case "changed facts persist; no work is silent" `Quick
@@ -139,4 +158,6 @@ let () = Alcotest.run "workspace curator lane"
         test_invalid_model_answer_is_not_saved
     ; Alcotest.test_case "missing Keeper directory preserves ledger" `Quick
         test_missing_keeper_directory_preserves_existing_ledger
+    ; Alcotest.test_case "initial inventory drains in bounded runs" `Quick
+        test_initial_inventory_drains_across_bounded_runs
     ; Alcotest.test_case "owner switch closes" `Quick test_owner_switch_liveness ] ]

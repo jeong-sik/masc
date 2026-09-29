@@ -124,7 +124,8 @@ class SkillUsageStatsTest(unittest.TestCase):
             self.assertEqual(beta.composition, 2)
             self.assertEqual(len(beta.sessions), 2)
 
-            installed = stats.installed_skill_names(base)
+            with tempfile.TemporaryDirectory() as home:
+                installed = stats.installed_skill_names(base, home)
             unused = installed - set(per_skill)
             self.assertEqual(unused, {"gamma"})
 

@@ -66,9 +66,8 @@ def load_activations(base_path: str) -> Iterator[tuple[str, dict[str, Any]]]:
             yield session_id, act
 
 
-def installed_skill_names(base_path):
-    """Names declared in SKILL.md frontmatter under the default source roots."""
-    home = os.path.expanduser("~")
+def installed_skill_names(base_path, home):
+    """Names declared in SKILL.md frontmatter under the workspace and home skill roots."""
     roots = [
         os.path.join(base_path, ".masc", "skills"),
         os.path.join(base_path, ".agents", "skills"),
@@ -130,7 +129,7 @@ def main(argv=None):
 
     base = os.path.abspath(os.path.expanduser(args.base_path))
     per_skill, total, sessions = rollup(base)
-    installed = installed_skill_names(base)
+    installed = installed_skill_names(base, os.path.expanduser("~"))
     used = set(per_skill)
     unused = sorted(installed - used)
 

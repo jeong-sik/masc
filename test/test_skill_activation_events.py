@@ -174,11 +174,16 @@ class SkillActivationEventsTest(unittest.TestCase):
 
         self.assertEqual(events.fold_event_log(raw), expected)
 
-    def test_a_log_without_a_complete_row_has_recorded_nothing(self):
+    def test_an_empty_log_has_recorded_nothing(self):
         self.assertIsNone(events.fold_event_log(b""))
-        self.assertIsNone(
+
+    # The server creates a log with its header and first event in one atomic
+    # step, so bytes with no newline at all are not a log it wrote.
+    def test_a_log_whose_first_row_has_no_newline_is_refused(self):
+        with self.assertRaises(events.SkillLedgerError) as caught:
             events.fold_event_log(b'{"schema":"masc.skill-activation-events/v1"')
-        )
+
+        self.assertIs(caught.exception.fault, Fault.UNTERMINATED_HEADER_ROW)
 
     def test_one_action_observed_for_two_activations_reaches_both(self):
         first = activation("call-a", 7)
@@ -421,6 +426,23 @@ class SkillActivationEventsTest(unittest.TestCase):
                     events.fold_event_log(raw)
                 self.assertIs(caught.exception.fault, fault)
                 self.assertEqual(caught.exception.row, row)
+
+    # Yojson escapes U+007F the way it escapes the C0 controls, so the
+    # revision hashes the escaped form.
+    def test_revision_escapes_del_as_the_server_does(self):
+        value = ledger()
+        value["activations"] = [{"skill_tool_use_id": "call-\x7f"}]
+        value["transition_rejections"] = []
+        canonical = (
+            '{"workspace_key":"' + value["workspace_key"] + '","session_id":"'
+            + value["session_id"] + '",'
+            '"activations":[{"skill_tool_use_id":"call-\\u007f"}],'
+            '"transition_rejections":[]}'
+        )
+
+        self.assertEqual(
+            events.ledger_revision(value), hashlib.sha256(canonical.encode()).hexdigest()
+        )
 
     def test_revision_of_a_ledger_without_its_identity_is_refused(self):
         value = ledger()

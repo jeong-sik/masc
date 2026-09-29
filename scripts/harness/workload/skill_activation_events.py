@@ -65,6 +65,7 @@ class SkillLedgerFault(Enum):
         "transition_rejection_activation_mismatch"
     )
     MALFORMED_LEDGER = "malformed_ledger"
+    UNTERMINATED_HEADER_ROW = "unterminated_header_row"
 
 
 class SkillLedgerError(RuntimeError):
@@ -523,7 +524,11 @@ def _revision(
         "activations": activations,
         "transition_rejections": transition_rejections,
     }
-    payload = json.dumps(canonical, ensure_ascii=False, separators=(",", ":"))
+    # Yojson escapes U+007F as it escapes the C0 controls; json.dumps writes
+    # it as is. A DEL can only sit inside a string here, so the swap is exact.
+    payload = json.dumps(canonical, ensure_ascii=False, separators=(",", ":")).replace(
+        "\x7f", "\\u007f"
+    )
     try:
         encoded = payload.encode()
     except UnicodeEncodeError as error:
@@ -542,8 +547,8 @@ def ledger_revision(ledger: Mapping[str, JsonValue]) -> str:
     It is the SHA-256 of the compact JSON object of the ledger's workspace
     key, session id, activations and transition rejections, in that order.
     ``json.dumps`` with ``ensure_ascii=False`` and no spaces writes what
-    Yojson's compact printer writes for these values, except U+007F, which
-    Yojson escapes and ``json.dumps`` writes as is.
+    Yojson's compact printer writes for these values once U+007F is escaped
+    the way Yojson escapes it.
     """
     workspace_key = ledger.get("workspace_key")
     session_id = ledger.get("session_id")
@@ -573,11 +578,18 @@ def ledger_revision(ledger: Mapping[str, JsonValue]) -> str:
 def fold_event_log(raw: bytes) -> JsonObject | None:
     """The ledger an event log records, in the Dashboard's v5 shape.
 
-    Returns None when the log has no complete row: the session has recorded
-    nothing. Activations keep the order they were recorded in and each keeps
+    Returns None when the log is empty: the session has recorded nothing.
+    Bytes with no newline at all are refused: the server creates a log with
+    its header and first event in one atomic step, so its first row is always
+    complete. Activations keep the order they were recorded in and each keeps
     the field order of its recorded row. Raises SkillLedgerError for a row the
     server's rules refuse, and for a ledger whose strings are not Unicode text.
     """
+    if raw != b"" and b"\n" not in raw:
+        raise SkillLedgerError(
+            SkillLedgerFault.UNTERMINATED_HEADER_ROW,
+            "the log's first row has no newline",
+        )
     rows = _complete_rows(raw)
     if rows == []:
         return None

@@ -397,7 +397,31 @@ let test_server_records_the_request_before_dispatch_and_retains_its_answer () =
   check bool "receipt keeps verifier identity outside model input" true
     Yojson.Safe.Util.(member "verification_run_id" input = `String identity.verification_run_id);
   check bool "exact grading input survives restart" true
-    Yojson.Safe.Util.(member "actual_input" input = A.input request)
+    Yojson.Safe.Util.(member "actual_input" input = A.input request);
+  let empty_prompts = Filename.concat config.base_path "empty-prompts" in
+  Fs_compat.mkdir_p empty_prompts;
+  Fun.protect ~finally:(fun () -> Prompt_registry.set_markdown_dir "../config/prompts")
+    (fun () ->
+      Prompt_registry.set_markdown_dir empty_prompts;
+      let dispatched = ref false in
+      let execute ~request:_ ~prompt:_ =
+        dispatched := true;
+        Ok (`Assoc ["grade",`String "medium"], "fixture.http") in
+      (match Server_candle_appraiser.For_testing.run ~base_path:config.base_path ~execute ~identity request with
+       | Error (A.Transport_unavailable _) -> ()
+       | Error (A.Invalid_response _) -> fail "missing prompt is a source failure"
+       | Ok _ -> fail "missing prompt was accepted");
+      check bool "missing prompt does not dispatch a provider" false !dispatched;
+      let failures = Runs.list_runs (Runs.replay path)
+        |> List.filter (fun run -> run.Runs.run_id <> answer.trace.run_id) in
+      match failures with
+      | [{Runs.status=Runs.Completed {outcome=Runs.Failed {code;_};selected_slot=None;output;_};input=Runs.Exact_input input;_}] ->
+        check string "render failure is recorded" "candle_appraisal_unavailable" code;
+        check bool "failed render invents no prompt" true
+          Yojson.Safe.Util.(member "rendered" (member "prompt" input) = `Null);
+        check bool "failed render dispatches no slot" true
+          Yojson.Safe.Util.(member "attempts" output = `List [])
+      | _ -> fail "missing prompt lost its failed run receipt")
 
 let () =
   run "candle_appraisal_flow"

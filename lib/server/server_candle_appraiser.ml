@@ -134,7 +134,8 @@ let run_with ~base_path ~execute ~identity request =
     "verification_run_id", `String identity.verification_run_id; "stage", `String (A.stage request);
     "actual_input", A.input request; "output_schema", A.schema request;
     "prompt", `Assoc ["key", `String key; "source", `String (Prompt_registry.prompt_source_to_string resolution.source);
-      "effective_template", `String resolution.effective; "rendered", `String prompt]] in
+      "effective_template", `String resolution.effective;
+      "rendered", (match prompt with Ok rendered -> `String rendered | Error _ -> `Null)]] in
   Runs.register_running registry ~run_id ~lane:Runs.Candle_appraiser ~actor:base_path ~started_at ~input:(Runs.Exact_input input);
   let attempts = ref [] in
   let selected = ref None in
@@ -157,7 +158,7 @@ let run_with ~base_path ~execute ~identity request =
     | Error receipt_error -> Error (A.Transport_unavailable (detail ^ "; run receipt: " ^ receipt_error)) in
   try
     let result =
-      let* () = if String.trim resolution.effective = "" then Error (A.Transport_unavailable ("appraiser prompt missing: " ^ key)) else Ok () in
+      let* prompt = prompt |> Result.map_error (fun detail -> A.Transport_unavailable detail) in
       let* raw, slot_id = execute ~observe ~request ~prompt in
       selected := Some slot_id;
       observe (Response {slot=slot_id;output=raw});

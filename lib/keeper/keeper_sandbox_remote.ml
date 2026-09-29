@@ -67,6 +67,7 @@ type probe_report =
       { major : Exec_ssh_protocol.major
       ; capabilities : string list
       ; release : string option
+      ; observed_at : float
       }
   | Probe_failed of
       { at : float

@@ -81,3 +81,33 @@ val reconcile : t -> Workspace_memory_context.keeper list -> reconciliation
     no file, or when its Keeper is not in the list. An [Unavailable] store
     adds no new facts and loses none. Removing a vanished member drops a
     claim or conflict left with no members. Makes no model call. *)
+
+(** One model decision for a changed fact. A new claim or conflict receives a
+    stable id derived from its text; existing ids must already be in [t]. *)
+type decision =
+  | Join_claim of string
+  | Create_claim of string
+  | Join_conflict of string
+  | Create_conflict of string
+  | Exclude of string
+
+type assignment = { fact : fact_ref; decision : decision }
+
+type apply_error =
+  | Duplicate_selected_fact
+  | Duplicate_assignment
+  | Unselected_fact
+  | Missing_assignment
+  | Already_disposed
+  | Unknown_claim of string
+  | Unknown_conflict of string
+  | Blank_value
+  | Id_collision
+  | Invalid_result of string
+
+val apply_error_to_string : apply_error -> string
+val apply : t -> selected:pending_fact list -> assignment list -> (t, apply_error) result
+(** Apply exactly one decision for each selected changed fact. No unselected
+    fact can be changed. Repeated or missing decisions, invalid references,
+    and a fact already assigned in the ledger are errors. The caller persists
+    the returned ledger atomically; [apply] itself has no effects. *)

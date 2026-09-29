@@ -392,3 +392,99 @@ let reconcile t keepers =
     |> List.rev
   in
   { ledger = remove vanished t; new_facts; vanished }
+
+type decision =
+  | Join_claim of string
+  | Create_claim of string
+  | Join_conflict of string
+  | Create_conflict of string
+  | Exclude of string
+
+type assignment = { fact : fact_ref; decision : decision }
+
+type apply_error =
+  | Duplicate_selected_fact
+  | Duplicate_assignment
+  | Unselected_fact
+  | Missing_assignment
+  | Already_disposed
+  | Unknown_claim of string
+  | Unknown_conflict of string
+  | Blank_value
+  | Id_collision
+  | Invalid_result of string
+
+let apply_error_to_string = function
+  | Duplicate_selected_fact -> "workspace curator selected one fact more than once"
+  | Duplicate_assignment -> "workspace curator assigned one fact more than once"
+  | Unselected_fact -> "workspace curator assigned a fact outside the selected batch"
+  | Missing_assignment -> "workspace curator did not assign every selected fact"
+  | Already_disposed -> "workspace curator tried to replace an existing disposition"
+  | Unknown_claim id -> "workspace curator named an unknown claim: " ^ id
+  | Unknown_conflict id -> "workspace curator named an unknown conflict: " ^ id
+  | Blank_value -> "workspace curator decision has a blank value"
+  | Id_collision -> "workspace curator result id collides with different text"
+  | Invalid_result detail -> "workspace curator ledger result: " ^ detail
+
+let id_of_text ~kind text =
+  kind ^ "-" ^ Digestif.SHA256.(digest_string text |> to_hex)
+
+let apply t ~selected assignments =
+  let selected_refs = List.map (fun (pending : pending_fact) -> pending.fact) selected in
+  let selected_set = List.fold_left (fun set fact -> Fact_map.add fact () set)
+    Fact_map.empty selected_refs in
+  if Fact_map.cardinal selected_set <> List.length selected_refs
+  then Error Duplicate_selected_fact
+  else if List.length assignments <> List.length selected_refs
+  then Error Missing_assignment
+  else
+    let rec add current seen = function
+      | [] ->
+        if Fact_map.cardinal seen <> Fact_map.cardinal selected_set
+        then Error Missing_assignment
+        else check_references current
+          |> Result.map_error (fun detail -> Invalid_result detail)
+          |> Result.map (fun () -> current)
+      | { fact; decision } :: rest ->
+        if not (Fact_map.mem fact selected_set) then Error Unselected_fact
+        else if Fact_map.mem fact seen then Error Duplicate_assignment
+        else if Fact_map.mem fact current.dispositions then Error Already_disposed
+        else
+          let ( let* ) = Result.bind in
+          let* next, disposition =
+            match decision with
+            | Join_claim id ->
+              if String_map.mem id t.claims
+              then Ok (current, Claim_member id)
+              else Error (Unknown_claim id)
+            | Join_conflict id ->
+              if String_map.mem id t.conflicts
+              then Ok (current, Conflict_member id)
+              else Error (Unknown_conflict id)
+            | Exclude reason ->
+              if String.trim reason = ""
+              then Error Blank_value
+              else Ok (current, Excluded reason)
+            | Create_claim claim ->
+              if String.trim claim = "" then Error Blank_value else
+              let id = id_of_text ~kind:"claim" claim in
+              (match String_map.find_opt id current.claims with
+               | Some other when not (String.equal other claim) -> Error Id_collision
+               | Some _ -> Ok (current, Claim_member id)
+               | None ->
+                 Ok ({ current with claims = String_map.add id claim current.claims },
+                     Claim_member id))
+            | Create_conflict description ->
+              if String.trim description = "" then Error Blank_value else
+              let id = id_of_text ~kind:"conflict" description in
+              (match String_map.find_opt id current.conflicts with
+               | Some other when not (String.equal other description) -> Error Id_collision
+               | Some _ -> Ok (current, Conflict_member id)
+               | None ->
+                 Ok ({ current with conflicts = String_map.add id description current.conflicts },
+                     Conflict_member id))
+          in
+          add { next with dispositions = Fact_map.add fact disposition next.dispositions }
+            (Fact_map.add fact () seen) rest
+    in
+    add t Fact_map.empty assignments

@@ -322,13 +322,13 @@ def run(executable: str) -> None:
     requests: h.HttpRequests = []
 
     def interact(process, fd, _slave, output, _base):
-        h.tab_until(process, fd, output, b"MASC Config")
+        h.tab_until(process, fd, output, b"MASC System")
         # 131 columns, as the Runtime scenario in test_tui_keyboard_input.py
         # uses: wide enough for the prompt rows, narrow enough to keep the
         # acting pane off the screen.
         h.resize_and_wait(
             process, fd, output, rows=30, columns=131,
-            needle=b"MASC Config", controls=(h.FULL_REDRAW,),
+            needle=b"MASC System", controls=(h.FULL_REDRAW,),
         )
         h.send_and_wait(process, fd, output, b"9", b"Runtime lanes (3 lanes, 4 slots)")
 
@@ -943,9 +943,9 @@ def run_concurrent_edit(executable: str) -> None:
     requests: h.HttpRequests = []
 
     def interact(process, fd, _slave, output, _base):
-        h.tab_until(process, fd, output, b"MASC Config")
+        h.tab_until(process, fd, output, b"MASC System")
         h.resize_and_wait(process, fd, output, rows=30, columns=131,
-                              needle=b"MASC Config", controls=(h.FULL_REDRAW,))
+                              needle=b"MASC System", controls=(h.FULL_REDRAW,))
         h.send_and_wait(process, fd, output, b"9", b"Runtime lanes (3 lanes, 4 slots)")
         # The screen has just read primary as [a, b]; another client writes
         # [b] before the operator presses Enter in the candidate picker.
@@ -980,9 +980,9 @@ def run_invalid_runtime_config(executable: str) -> None:
     requests: h.HttpRequests = []
 
     def interact(process, fd, _slave, output, _base):
-        h.tab_until(process, fd, output, b"MASC Config")
+        h.tab_until(process, fd, output, b"MASC System")
         h.resize_and_wait(process, fd, output, rows=30, columns=131,
-                              needle=b"MASC Config", controls=(h.FULL_REDRAW,))
+                              needle=b"MASC System", controls=(h.FULL_REDRAW,))
         h.send_and_wait(process, fd, output, b"9", b"Runtime lanes (3 lanes, 4 slots)")
         h.send_and_wait(process, fd, output, b"e",
                         b"adding a candidate to the candidate order of primary")
@@ -1017,10 +1017,10 @@ def run_filter(executable: str) -> None:
     picker = b"adding a candidate to the candidate order of primary"
 
     def interact(process, fd, _slave, output, _base):
-        h.tab_until(process, fd, output, b"MASC Config")
+        h.tab_until(process, fd, output, b"MASC System")
         h.resize_and_wait(
             process, fd, output, rows=30, columns=131,
-            needle=b"MASC Config", controls=(h.FULL_REDRAW,),
+            needle=b"MASC System", controls=(h.FULL_REDRAW,),
         )
         h.send_and_wait(process, fd, output, b"9", b"Runtime lanes (3 lanes, 4 slots)")
         # primary holds runtime-a and runtime-b, so the other three rank

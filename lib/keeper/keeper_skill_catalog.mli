@@ -196,13 +196,16 @@ val of_snapshot :
     that entry; neither failure rejects the snapshot or an unrelated Keeper
     turn. An instruction skill whose body carries a fence info near-miss also
     returns an advisory {!Composition_info_near_miss} diagnostic while staying
-    projected. *)
+    projected. Asked again for the snapshot it last projected, it returns that
+    projection without projecting again. *)
 
 val all_entries_of_snapshot :
   Skill_catalog_snapshot.t -> t * projection_diagnostic list
 (** Project every exact snapshot entry, including shadowed identities. This is
     the operator-surface projection. Executable turn catalogs start with
-    {!of_snapshot}, then {!project_turn} merges exact Task-selected shadows. *)
+    {!of_snapshot}, then {!project_turn} merges exact Task-selected shadows.
+    Like {!of_snapshot}, it projects the snapshot it last projected only
+    once. *)
 
 val project_entry_or_fallback :
   Skill_catalog_snapshot.t -> Skill_catalog_snapshot.entry -> entry_projection

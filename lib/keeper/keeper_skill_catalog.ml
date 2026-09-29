@@ -394,12 +394,40 @@ let project_entries snapshot entries =
   |> fun (catalog, diagnostics) -> List.rev catalog, List.rev diagnostics
 ;;
 
+(* A published snapshot is never changed: publishing replaces it with a new
+   value. Projecting reads only the snapshot and the fixed tool descriptor
+   table, so one snapshot always projects to the same catalog. Keeper turns
+   and the skills route project the current snapshot several times between
+   two publications, so each projection keeps the last snapshot it was asked
+   for with its answer. Composition plans are then shared by those callers;
+   a plan's outputs are bound to the run that produced them as well as to
+   the plan, so sharing one keeps runs apart. *)
+type projected =
+  { snapshot : Skill_catalog_snapshot.t
+  ; projection : t * projection_diagnostic list
+  }
+
+let project_once last entries_of snapshot =
+  match Atomic.get last with
+  | Some projected when projected.snapshot == snapshot -> projected.projection
+  | Some _ | None ->
+    let projection = project_entries snapshot (entries_of snapshot) in
+    Atomic.set last (Some { snapshot; projection });
+    projection
+;;
+
+let last_effective_projection : projected option Atomic.t = Atomic.make None
+let last_all_entries_projection : projected option Atomic.t = Atomic.make None
+
 let of_snapshot snapshot =
-  project_entries snapshot (Skill_catalog_snapshot.effective_entries snapshot)
+  project_once
+    last_effective_projection
+    Skill_catalog_snapshot.effective_entries
+    snapshot
 ;;
 
 let all_entries_of_snapshot snapshot =
-  project_entries snapshot (Skill_catalog_snapshot.entries snapshot)
+  project_once last_all_entries_projection Skill_catalog_snapshot.entries snapshot
 ;;
 
 let same_exact_reference (left : skill) (right : skill) =

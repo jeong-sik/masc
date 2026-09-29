@@ -890,6 +890,36 @@ let test_composition_skill_joins_projection () =
      && List.mem Catalog.cancel_tool_name expected_async)
 ;;
 
+(* One published snapshot is projected once. The same snapshot gives back the
+   catalog it gave before, a snapshot built again from the same document is
+   projected afresh, and two snapshots asked for in turn each get their own
+   catalog. *)
+let test_a_snapshot_is_projected_once () =
+  let document name =
+    Printf.sprintf "---\nname: %s\ndescription: Projected once.\n---\n\nRead me.\n" name
+  in
+  let names (catalog, _diagnostics) =
+    Skill_catalog.skills catalog
+    |> List.map (fun (skill : Skill_catalog.skill) -> skill.name)
+  in
+  let snapshot = snapshot_of_document ~directory:"once" (document "once") in
+  let first = Skill_catalog.of_snapshot snapshot in
+  check bool "the same snapshot gives back its catalog" true
+    (first == Skill_catalog.of_snapshot snapshot);
+  let operator = Skill_catalog.all_entries_of_snapshot snapshot in
+  check bool "so does the operator projection" true
+    (operator == Skill_catalog.all_entries_of_snapshot snapshot);
+  let rebuilt = snapshot_of_document ~directory:"once" (document "once") in
+  let fresh = Skill_catalog.of_snapshot rebuilt in
+  check bool "a snapshot built again is projected afresh" false (fresh == first);
+  check (list string) "into the same skills" (names first) (names fresh);
+  let other = snapshot_of_document ~directory:"other" (document "other") in
+  check (list string) "another snapshot gets its own catalog" [ "other" ]
+    (names (Skill_catalog.of_snapshot other));
+  check (list string) "and the first one its own again" [ "once" ]
+    (names (Skill_catalog.of_snapshot rebuilt))
+;;
+
 let () =
   run
     "keeper_skill_catalog"
@@ -939,6 +969,8 @@ let () =
             "operator projection keeps shadowed exact entries"
             `Quick
             test_operator_projection_keeps_shadowed_exact_entries
+        ; test_case "a snapshot is projected once" `Quick
+            test_a_snapshot_is_projected_once
         ; test_case
             "composition name must equal the skill name"
             `Quick

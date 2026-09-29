@@ -4439,55 +4439,43 @@ let launch_github_login state ~mailbox keeper_name =
         enqueue_async mailbox
           (Github_login_finished (keeper_name, Error "Eio clock is unavailable"))
     | Some clock ->
-        let pending = Buffer.create 256 in
-        let flush_lines () =
-          let text = Buffer.contents pending in
-          match String.rindex_opt text '\n' with
-          | None -> ()
-          | Some last ->
-              let complete = String.sub text 0 last in
-              let rest =
-                String.sub text (last + 1) (String.length text - last - 1)
-              in
-              Buffer.clear pending;
-              Buffer.add_string pending rest;
-              let lines =
-                String.split_on_char '\n' complete
-                |> List.filter_map (fun line ->
-                       let line = String.trim line in
-                       if String.length line > 6
-                          && String.sub line 0 6 = "data: "
-                       then
-                         let payload =
-                           String.sub line 6 (String.length line - 6)
-                         in
-                         match Yojson.Safe.from_string payload with
-                         | `Assoc fields -> (
-                             match List.assoc_opt "text" fields with
-                             | Some (`String text) ->
-                                 Some (String.split_on_char '\n' text)
-                             | _ -> (
-                                 match List.assoc_opt "message" fields with
-                                 | Some (`String message) ->
-                                     Some [ "error: " ^ message ]
-                                 | _ -> Some [ payload ]))
-                         | _ | (exception Yojson.Json_error _) ->
-                             Some [ payload ]
-                       else None)
-                |> List.concat
-                |> List.map Masc.Tui_decode.sanitize_terminal_text
-                |> List.filter (fun line -> String.trim line <> "")
-              in
-              if lines <> [] then
-                enqueue_async mailbox (Github_login_lines (keeper_name, lines))
+        let reader = Masc_tui_sse_lines.create () in
+        let flush_lines chunk =
+          let lines =
+            Masc_tui_sse_lines.feed reader chunk
+            |> List.filter_map (fun line ->
+                   let line = String.trim line in
+                   if String.length line > 6
+                      && String.sub line 0 6 = "data: "
+                   then
+                     let payload =
+                       String.sub line 6 (String.length line - 6)
+                     in
+                     match Yojson.Safe.from_string payload with
+                     | `Assoc fields -> (
+                         match List.assoc_opt "text" fields with
+                         | Some (`String text) ->
+                             Some (String.split_on_char '\n' text)
+                         | _ -> (
+                             match List.assoc_opt "message" fields with
+                             | Some (`String message) ->
+                                 Some [ "error: " ^ message ]
+                             | _ -> Some [ payload ]))
+                     | _ | (exception Yojson.Json_error _) ->
+                         Some [ payload ]
+                   else None)
+            |> List.concat
+            |> List.map Masc.Tui_decode.sanitize_terminal_text
+            |> List.filter (fun line -> String.trim line <> "")
+          in
+          if lines <> [] then
+            enqueue_async mailbox (Github_login_lines (keeper_name, lines))
         in
         let result =
           try
             Masc_tui_http.post_keeper_github_login_streaming ~clock ~host
               ~port ~keeper_name ~scopes
-              ~on_chunk:(fun chunk ->
-                Buffer.add_string pending chunk;
-                flush_lines ())
+              ~on_chunk:flush_lines
           with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn -> Error (Printexc.to_string exn)

@@ -2129,6 +2129,7 @@ def run_terminal_scenario(
     confirm_exit: bytes = b"q",
     refresh: float = 60.0,
     terminal_cols: int = 100,
+    terminal_rows: int = 30,
     workspace: str = WORKSPACE_PAYLOAD,
     http_fixtures: HttpFixtures | None = None,
     http_requests: HttpRequests | None = None,
@@ -2150,7 +2151,7 @@ def run_terminal_scenario(
     output = PtyOutput()
     process: subprocess.Popen[bytes] | None = None
     try:
-        fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, struct.pack("HHHH", 30, terminal_cols, 0, 0))
+        fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, struct.pack("HHHH", terminal_rows, terminal_cols, 0, 0))
         os.set_blocking(master_fd, False)
         with tempfile.TemporaryDirectory(prefix="masc-tui-keyboard-") as base_path:
             with test_http_endpoint(
@@ -19877,16 +19878,35 @@ def dos_flat_frame(rgb: bytes) -> dict[str, object]:
     }
 
 
+def assert_dos_spectator_posts_are_setup(posts: HttpRequests) -> None:
+    """Observer setup is allowed; every other POST violates spectating."""
+    for path, body in posts:
+        if path == "/mcp":
+            try:
+                message = json.loads(body)
+            except (json.JSONDecodeError, UnicodeDecodeError) as error:
+                raise AssertionError("DOS spectator emitted malformed MCP JSON") from error
+            if (
+                isinstance(message, dict)
+                and message.get("jsonrpc") == "2.0"
+                and message.get("method") in ("initialize", "notifications/initialized")
+            ):
+                continue
+        raise AssertionError(f"DOS spectator emitted a non-setup POST: {path!r} {body!r}")
+
+
 def run_dos_live_regression(executable: str) -> None:
     """Watch the DOS machine through the live route (RFC machine-spectating
     stage 3). The menu offers it, the picture is drawn in its own shape, an
-    unchanged machine redraws nothing, a key reaches no machine, and a
-    changed machine is drawn at its new counter."""
+    unchanged machine redraws nothing unless activity changes, a key reaches
+    no machine, and a changed machine is drawn at its new counter."""
     picture: dict[str, Any] = {"frame": dos_flat_frame(bytes([255, 0, 0])), "steps": 100}
+    activity: list[dict[str, object]] = []
     dos_reads: list[LiveMark | None] = []
     posts: HttpRequests = []
     held: dict[str, Any] = {"armed": False, "entered": threading.Event(),
                             "release": threading.Event()}
+    fail_reads = threading.Event()
     first_read = GatedHttpResponse(
         machine_live_answer("dos_capture", picture["frame"], None,
                             count=999, frame_number=None), hold_seconds=20.0)
@@ -19898,6 +19918,8 @@ def run_dos_live_regression(executable: str) -> None:
         if kind != "dos_capture":
             raise AssertionError(f"unexpected source kind: {kind}")
         dos_reads.append(since)
+        if fail_reads.is_set():
+            return 503, {"error": "DOS fixture unavailable"}
         if len(dos_reads) == 1:
             return first_read()
         if held["armed"]:
@@ -19905,10 +19927,14 @@ def run_dos_live_regression(executable: str) -> None:
             held["armed"] = False
             held["entered"].set()
             held["release"].wait(timeout=10.0)
-        return machine_live_answer(kind, picture["frame"], since,
-                                   count=int(picture["steps"]), frame_number=None)
+        status, answer = machine_live_answer(
+            kind, picture["frame"], since,
+            count=int(picture["steps"]), frame_number=None)
+        answer["activity"] = activity
+        return status, answer
 
     def interact(process, master, _slave, output, _base):
+        nonlocal activity
         def key(value, needle):
             start = len(output)
             os.write(master, value)
@@ -19974,6 +20000,22 @@ def run_dos_live_regression(executable: str) -> None:
             raise AssertionError(
                 f"an unchanged answer redrew the screen: {bytes(output[still_from:])[:200]!r}")
 
+        # A pass changes the sidebar without changing DOS pixels. The live
+        # answer remains `unchanged`, but the spectator must show the event.
+        activity = [{"at": 1790650000, "who": "guest", "action": "pass -> keeper"}]
+        activity_from = len(output)
+        wait_for_output(process, master, output, b"guest pass", start=activity_from,
+                        timeout=5.0)
+        wait_for_output(process, master, output, b"Esc: back", start=activity_from,
+                        timeout=5.0)
+        activity_drawn = bytes(output[activity_from:])
+        if b"change 100" not in activity_drawn:
+            raise AssertionError("activity-only repaint lost the current DOS picture")
+        still_from = len(output)
+        observe_for(0.8)
+        if bytes(output[still_from:]):
+            raise AssertionError("identical activity redrew an unchanged DOS screen")
+
         # A key is the spectator's, not a machine's: it repaints and posts nothing.
         key(b"x", b"Esc: back  +/-: 100%")
         pressed = [path for path, _ in posts if path.startswith("/api/v1/msx/")]
@@ -20021,6 +20063,30 @@ def run_dos_live_regression(executable: str) -> None:
             raise AssertionError(f"reads after the change did not ask at 200: {dos_reads[-4:]!r}")
 
         key(b"\x1b", b"MASC Overview")
+        # The palette must reach a fresh live answer, not only draw an empty
+        # spectator footer or reuse the picture from the MSX menu path.
+        picture["steps"] = 300
+        direct_from = key(b":go dos\r", b"DOS \xe2\x80\x94 change 300")
+        wait_for_output(process, master, output, b"Esc: back", start=direct_from,
+                        timeout=5.0)
+        direct = bytes(output[direct_from:])
+        if DOS_BLUE not in direct or b"MSX \xe2\x80\x94 pick a game" in direct:
+            raise AssertionError("go DOS did not draw its fresh live picture directly")
+        # Ordinary game input, Enter, and MSX save/restore/media keys must
+        # remain spectator input on this new entry path as well.
+        for spectator_key in (b"x", b"\r", b"\x1b[17~", b"\x1b[18~", b"\x1b[19~"):
+            key(spectator_key, b"Esc: back")
+        key(b"\x1b", b"MASC Overview")
+        # A failed re-entry read is not an empty activity feed. Keep the
+        # previously observed pass beside the explicit read failure.
+        fail_reads.set()
+        failed_from = key(b":go dos\r", b"could not read the machine")
+        failure_title = output.rfind(b"could not read the machine", failed_from)
+        wait_for_output(process, master, output, b"Esc: back", start=failure_title,
+                        timeout=5.0)
+        if b"guest pass" not in bytes(output[failure_title:]):
+            raise AssertionError("failed DOS re-entry discarded previously observed activity")
+        key(b"\x1b", b"MASC Overview")
         os.write(master, b"q")
         print(json.dumps({"dos_reads": len(dos_reads),
                           "unchanged_reads": len(still)}), flush=True)
@@ -20032,6 +20098,10 @@ def run_dos_live_regression(executable: str) -> None:
         http_fixtures={MACHINE_LIVE_PATH: PathHttpResponse(resolve)},
         http_requests=posts,
     )
+    # Check after fixture shutdown as well, so a completed POST cannot race
+    # the final terminal assertion. Startup may initialize the MCP observer,
+    # but neither tool calls nor machine input/control/invite POSTs are allowed.
+    assert_dos_spectator_posts_are_setup(posts)
 
 
 def run_msx_palette_regression(executable: str) -> None:

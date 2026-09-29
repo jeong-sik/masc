@@ -654,47 +654,30 @@ let notify_goal_refuted config ~(goal : Goal_store.goal)
   | Goal_store.Owner owner -> deliver_refuted_notice config ~goal ~owner verdict
 ;;
 
-(* [due_date] is a calendar date with no zone, so it is compared with the
-   operator's own calendar date — the day [localtime] puts [now] on — matching
-   the Overview's own overdue rule. Anything that is not a calendar date is not
-   overdue. *)
-let goal_due_date_passed ~today (goal : Goal_store.goal) =
-  match goal.Goal_store.due_date with
-  | None -> false
-  | Some raw ->
-    (match
-       Scanf.sscanf_opt (String.trim raw) "%4d-%2d-%2d%!" (fun y m d -> (y, m, d))
-     with
-     | None -> false
-     | Some date ->
-       (match Ptime.of_date date with
-        | None -> false
-        | Some due -> Ptime.compare due today < 0))
-;;
-
-let local_today () =
-  let tm = Unix.localtime (Time_compat.now ()) in
-  Ptime.of_date (tm.Unix.tm_year + 1900, tm.Unix.tm_mon + 1, tm.Unix.tm_mday)
-;;
-
 (* The overdue notice is judged by the server's periodic/restart scan, never as
    a side effect of a list query: a read must not send. The scan is idempotent
    — the marker skips an already-notified Goal, and the delivery key makes a
-   re-send a no-op — so it is safe to run on every maintenance tick. *)
-let scan_overdue_goal_notifications config =
-  match Goal_store.list_goals_result config () with
-  | Error _ -> ()
-  | Ok goals ->
-    (match local_today () with
-     | None -> ()
-     | Some today ->
+   re-send a no-op — so it is safe to run on every maintenance tick.
+
+   A Goal is overdue once [now] is past its due date in UTC ({!Goal_due}); the
+   operator's time zone plays no part. A value that is not a due date is not
+   overdue. [now] is the wall clock unless a caller passes one. *)
+let scan_overdue_goal_notifications ?now config =
+  let now =
+    match now with
+    | Some now -> Some now
+    | None -> Ptime.of_float_s (Time_compat.now ())
+  in
+  match Goal_store.list_goals_result config (), now with
+  | Error _, _ | Ok _, None -> ()
+  | Ok goals, Some now ->
     List.iter
       (fun (goal : Goal_store.goal) ->
          match goal.Goal_store.owner, goal.Goal_store.phase with
          | Goal_store.Unknown_owner, _ -> ()
          | Goal_store.Owner owner, (Goal_phase.Executing | Goal_phase.Verifying) ->
            (match goal.Goal_store.due_date with
-            | Some due_date when goal_due_date_passed ~today goal ->
+            | Some due_date when Goal_due.is_overdue ~now (Goal_due.read (Some due_date)) ->
               let event = "overdue:" ^ due_date in
               let key = goal_notice_key ~goal_id:goal.Goal_store.id ~owner ~event in
               if goal.Goal_store.notified_overdue_key = Some key
@@ -719,7 +702,7 @@ let scan_overdue_goal_notifications config =
                     detail)
             | _ -> ())
          | Goal_store.Owner _, _ -> ())
-      goals)
+      goals
 ;;
 
 (* A refuted verdict is delivered at commit time, but a failed send must not be
@@ -812,8 +795,26 @@ let goal_after_proof (goal : Goal_store.goal) phase note =
   ; last_review_at = Some (Masc_domain.now_iso ()) }
 ;;
 
-let commit_verifier_decision ~tool_name ~start_time config ~goal_id
-    ~verification_run_id ~request_id ~criterion ~decision ~evidence =
+type proof_step = Goal_store.goal -> Goal_verification.verdict -> (unit, string) result
+
+type confirmation_step =
+  Goal_store.goal
+  -> Goal_verification.verdict
+  -> Goal_verification.confirmation
+  -> (unit, string) result
+
+(* The caller's step runs for a passing verdict only: a refutation sends the
+   Goal back to Executing and is not a completion. *)
+let run_before_proof_commit step (goal : Goal_store.goal)
+    (verdict : Goal_verification.verdict) =
+  match step, verdict.Goal_verification.outcome with
+  | Some step, Goal_verification.Proven -> step goal verdict
+  | Some _, Goal_verification.Refuted _ -> Ok ()
+  | None, (Goal_verification.Proven | Goal_verification.Refuted _) -> Ok ()
+;;
+
+let commit_verifier_decision ?before_proof_commit ~tool_name ~start_time config
+    ~goal_id ~verification_run_id ~request_id ~criterion ~decision ~evidence =
   let ctx : context = { config; agent_name = Standalone_lane.to_id Standalone_lane.Verifier } in
   let action, verdict_outcome, note = verifier_decision_parts decision in
   match validate_verification_run_id verification_run_id,
@@ -827,6 +828,8 @@ let commit_verifier_decision ~tool_name ~start_time config ~goal_id
       else
         match Goal_phase.decide_transition ~phase:goal.phase ~action with
         | Ok (Goal_phase.Move_to phase) ->
+          let open Result.Syntax in
+          let* () = run_before_proof_commit before_proof_commit goal verdict in
           Result.map (fun record -> goal_after_proof goal phase note, (record, true))
             (Goal_verification.record_proof_verdict config ~goal_id verdict)
         | Error detail ->
@@ -1201,8 +1204,8 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
       ]
 ;;
 
-let confirm_completion config ~goal_id ~operator_id ~request_id
-    ~verification_run_id ~criterion_revision =
+let confirm_completion ?after_confirmation config ~goal_id ~operator_id
+    ~request_id ~verification_run_id ~criterion_revision =
   Goal_store.transact_goal config ~goal_id (fun goal ->
     let open Result.Syntax in
     let* record = Goal_verification.get_record_authoritative config ~goal_id in
@@ -1216,9 +1219,13 @@ let confirm_completion config ~goal_id ~operator_id ~request_id
       | _ -> Error "confirmation must name the current proven criterion, request and verifier run" in
     let* transition = Goal_phase.decide_transition ~phase:goal.phase ~action:Goal_phase.Confirm_completion in
     let* record = Goal_verification.record_human_confirmation config ~goal_id verdict ~operator_id in
-    let* confirming_operator = match record.Goal_verification.completion with
-      | Goal_verification.Human_confirmed (_, confirmation) -> Ok confirmation.operator_id
+    let* stored_verdict, confirmation = match record.Goal_verification.completion with
+      | Goal_verification.Human_confirmed (stored, confirmation) -> Ok (stored, confirmation)
       | _ -> Error "confirmation store did not retain operator authority" in
+    let confirming_operator = confirmation.Goal_verification.operator_id in
+    let* () = match after_confirmation with
+      | Some step -> step goal stored_verdict confirmation
+      | None -> Ok () in
     let updated = match transition with
       | Goal_phase.Move_to phase -> goal_after_proof goal phase goal.last_review_note
       | Goal_phase.Already _ -> goal in

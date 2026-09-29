@@ -1748,6 +1748,21 @@ let reconcile_quarantines ~now ~base_path ~keeper_name =
          let* () = quarantine_blocked_partition ~base_path partition in
          loop rest
        | ( Partition.Ready
+         , Candidate.Requeued_resumable
+             { quarantine = { quarantine; phase = Candidate.Requeued _ }; _ } )
+         when String.equal quarantine.partition_id partition.partition_id
+              && Partition.Generation.is_later
+                   ~previous:quarantine.partition_generation
+                   partition.generation ->
+         (* Authorization survives subsequent execution/deferral cycles. A
+            spent lane returns Running to Ready at a later generation, while
+            the candidate retains the original quarantine as evidence. *)
+         let* confirmation = Partition.confirm_ready ~base_path ~partition in
+         let* (_ : Partition.exact_transition) =
+           confirm_requeue_transition ~base_path confirmation
+         in
+         loop rest
+       | ( Partition.Ready
          , (Candidate.Suspended_quarantine state
            | Candidate.Requeued_resumable { quarantine = state; _ }) )
          when String.equal

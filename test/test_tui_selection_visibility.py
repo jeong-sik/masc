@@ -74,7 +74,7 @@ def run_runtime(executable: str) -> None:
         h.send_and_wait(process, fd, output, b"\r", b"Runtime ID: runtime-e")
         h.send_and_wait(process, fd, output, b"\x1b", b"All runtimes (5)")
         h.send_and_wait(process, fd, output, b"p", b"MASC Lanes")
-        h.send_and_wait(process, fd, output, b"p", b"Lanes (3 lanes, 4 slots)")
+        h.send_and_wait(process, fd, output, b"p", b"Runtime lanes (3 lanes, 4 slots)")
         h.send_and_wait(process, fd, output, b"\r", b"Runtime ID: runtime-a")
         os.write(fd, b"q")
 

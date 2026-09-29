@@ -187,6 +187,7 @@ describe('InternalAgentsMonitor', () => {
       return {
         laneId,
         label: 'Board Attention',
+        purpose: 'Judges durable Board candidates.',
         required: true,
         observationOnly: true,
         configured: true,
@@ -274,6 +275,45 @@ describe('InternalAgentsMonitor', () => {
     }
   })
 
+  it('marks retained lanes stale after failure and clears the warning only on recovery', async () => {
+    api.fetchExactLaneRuns.mockResolvedValue({ runs: [], count: 0, total: 0, hasMore: false, generatedAt: 'now' })
+    api.fetchFusionRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
+    api.fetchVerificationRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
+    const purpose = 'Answers structured model requests; run records are not retained yet.'
+    const snapshot = {
+      schema: 'masc.standalone_llm_lanes.v2', generatedAt: 'now', observedAtUnix: 20,
+      observationOnly: true, exactRunProjectionCount: 0, exactRunSourceTotal: 0,
+      exactRunProjectionTruncated: false,
+      lanes: [{
+        laneId: 'browser_stagehand_exact', label: 'Browser Stagehand', purpose,
+        required: false, observationOnly: true, configured: false,
+        configurationState: 'unconfigured', jev: null, admittedSlots: [],
+        cliSlots: [], droppedSlots: [], admissionError: 'model lane not configured',
+        status: 'unavailable', retainedRunCount: 0, runningCount: 0,
+        succeededCount: 0, failedCount: 0, cancelledCount: 0, lastStartedAt: null,
+        lastTerminalAt: null, lastOutcome: null, p50ElapsedSeconds: null, selectedSlots: [],
+      }],
+    }
+    api.fetchStandaloneLanes.mockResolvedValue(snapshot)
+    render(html`<${InternalAgentsMonitor} />`)
+    expect(await screen.findByText(purpose)).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'Lanes', exact: true })).toBeTruthy()
+    expect(screen.getByText('Config: unconfigured')).toBeTruthy()
+    expect(screen.getByText(/Observed ·/)).toBeTruthy()
+
+    api.fetchStandaloneLanes.mockRejectedValue(new Error('offline'))
+    sse.refresh?.()
+    const warning = await screen.findByRole('alert')
+    expect(warning.textContent).toContain('STALE')
+    expect(warning.textContent).toContain('offline')
+    expect(screen.getByText(purpose)).toBeTruthy()
+
+    api.fetchStandaloneLanes.mockResolvedValue({ ...snapshot, observedAtUnix: 30 })
+    sse.refresh?.()
+    await vi.waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
+    expect(screen.getByText(purpose)).toBeTruthy()
+  })
+
   it('does not let an older refresh overwrite the latest lane matrix', async () => {
     api.fetchExactLaneRuns.mockResolvedValue({ runs: [], count: 0, total: 0, hasMore: false, generatedAt: 'now' })
     api.fetchFusionRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
@@ -281,7 +321,7 @@ describe('InternalAgentsMonitor', () => {
     let resolveOlder!: (value: unknown) => void
     const older = new Promise(resolve => { resolveOlder = resolve })
     const lane = (label: string) => ({
-      laneId: 'board_attention_exact', label, required: true, observationOnly: true,
+      laneId: 'board_attention_exact', label, purpose: 'Judges durable Board candidates.', required: true, observationOnly: true,
       configured: true, configurationState: 'ready', jev: { state: 'off' as const }, admittedSlots: ['primary'], cliSlots: [], droppedSlots: [],
       admissionError: null, status: 'idle', retainedRunCount: 1, runningCount: 0,
       succeededCount: 1, failedCount: 0, cancelledCount: 0, lastStartedAt: 10,

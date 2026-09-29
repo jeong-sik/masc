@@ -27,8 +27,11 @@ let roomy_budget = 64 * 1024 * 1024
 
 (* A fresh cache per call, so every answer below draws unless it says otherwise. *)
 let answer ?(cache = Api.Cache.create ~byte_budget:roomy_budget) ?(build = a_build)
-    ?(holds_tag = holds_nothing) ~name ~size ~keeper_present () =
-  Api.answer ~cache ~build ~name ~size ~keeper_present ~holds_tag
+    ?(holds_tag = holds_nothing) ?equipment ~name ~size ~keeper_present () =
+  let equipment = match equipment with
+    | Some read -> read
+    | None -> (fun () -> Ok (Keeper_portrait_look.equipment_of_name name)) in
+  Api.answer ~cache ~build ~name ~size ~keeper_present ~equipment ~holds_tag
 
 let describe = function
   | Api.Png _ -> "Png"
@@ -137,6 +140,38 @@ let test_cache_keeps_drawings_within_its_budget () =
   let tiny = Api.Cache.create ~byte_budget:1 in
   ignore (expect_png (answer ~cache:tiny ~name:keeper ~size:(Some "64") ~keeper_present:present ()));
   check int "a picture larger than the budget is served, not kept" 0 (Api.Cache.length tiny)
+
+let test_equipment_wire_and_cache () =
+  let module Equipment = Keeper_portrait_equipment in
+  let module Item = Keeper_portrait_item in
+  let original = Keeper_portrait_look.bare in
+  let crown = match Item.of_id "crown" with Some value -> value | None -> fail "catalog crown missing" in
+  let equipped = Item.preview crown original in
+  let received = require_ok Fun.id (Equipment.of_json (Equipment.to_json equipped)) in
+  check bool "wire preserves complete rendered equipment" true (received = equipped);
+  let fields = match Equipment.to_json equipped with `Assoc fields -> fields | _ -> fail "equipment object" in
+  let rejects label json = match Equipment.of_json json with
+    | Error _ -> () | Ok _ -> fail label in
+  rejects "missing slot" (`Assoc (List.remove_assoc "head" fields));
+  rejects "duplicate slot" (`Assoc (("head", `String "crown") :: fields));
+  rejects "wrong slot" (`Assoc (("face", `String "crown") :: List.remove_assoc "face" fields));
+  rejects "unknown item" (`Assoc (("head", `String "unknown") :: List.remove_assoc "head" fields));
+  let cache = Api.Cache.create ~byte_budget:roomy_budget in
+  let get ?(holds_tag = holds_nothing) equipment =
+    answer ~cache ~holds_tag ~equipment:(fun () -> Ok equipment)
+      ~name:keeper ~size:(Some "96") ~keeper_present:present () in
+  let before_tag, before_png = expect_tagged_png (get original) in
+  let after_tag, after_png = expect_tagged_png (get ~holds_tag:(String.equal before_tag) received) in
+  check bool "new equipment invalidates old tag" false (before_tag = after_tag);
+  check bool "new equipment changes actual PNG" false (before_png = after_png);
+  check int "distinct equipment has distinct cache entries" 2 (Api.Cache.length cache);
+  let restored_tag, restored_png = expect_tagged_png (get original) in
+  check string "restore returns original bytes" before_png restored_png;
+  check string "restore returns original tag" before_tag restored_tag;
+  match answer ~cache ~holds_tag:(fun _ -> true) ~equipment:(fun () -> Error "ledger unavailable")
+    ~name:keeper ~size:(Some "96") ~keeper_present:present () with
+  | Api.Lookup_failed message -> check string "authority error kept" "ledger unavailable" message
+  | other -> fail ("authority failure must not serve stale cached portrait: " ^ describe other)
 
 (* ---- the real router, over an in-memory HTTP/1.1 connection ---- *)
 
@@ -307,7 +342,8 @@ let () =
       ; test_case "a held tag is answered without drawing" `Quick test_a_held_tag_is_answered_without_drawing
       ; test_case "tags follow build, name and size" `Quick test_tags_follow_build_name_and_size
       ; test_case "unscoped tags follow the bytes" `Quick test_unscoped_tags_follow_the_bytes
-      ; test_case "cache stays within its byte budget" `Quick test_cache_keeps_drawings_within_its_budget ]
+      ; test_case "cache stays within its byte budget" `Quick test_cache_keeps_drawings_within_its_budget
+      ; test_case "equipment wire changes actual PNG and cache identity" `Quick test_equipment_wire_and_cache ]
     ; "router",
       [ test_case "PNG with a strong tag and 304" `Quick test_router_serves_png_with_a_strong_tag
       ; test_case "400 and 404" `Quick test_router_refusals

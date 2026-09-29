@@ -1575,6 +1575,7 @@ let portrait_read_output_schema =
       ; "preview_item", `Assoc
           [ "type", `List [ `String "string"; `String "null" ] ]
       ; "starting_equipment", equipment
+      ; "current_equipment", equipment
       ; "equipment", equipment
       ; "catalog", `Assoc [ "type", `String "array"; "items", item ]
       ; "artifact", `Assoc [ "type", `String "string" ]
@@ -1583,7 +1584,7 @@ let portrait_read_output_schema =
       ; "height", `Assoc [ "type", `String "integer" ]
       ; "bytes", `Assoc [ "type", `String "integer" ]
       ]
-    ~required:[ "name"; "mode"; "preview_item"; "starting_equipment"; "equipment"
+    ~required:[ "name"; "mode"; "preview_item"; "starting_equipment"; "current_equipment"; "equipment"
               ; "catalog"; "artifact"; "media_type"; "width"; "height"; "bytes" ]
 ;;
 

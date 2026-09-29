@@ -1936,7 +1936,7 @@ let handle_masc_misc_with_outcome ~(config : Workspace.config) ~(meta : keeper_m
      Some (Keeper_msx_screen.handle ~keeper_name:meta.name
        ~tool_name:name ~start_time:(Tool_timing.start ()) args)
    | Some Tool_schemas_misc.Misc_portrait_read ->
-     Some (Keeper_portrait_read.handle ~keeper_name:meta.name ~tool_name:name
+     Some (Keeper_portrait_read.handle ~base_path:config.base_path ~keeper_name:meta.name ~tool_name:name
        ~start_time:(Tool_timing.start ()) ~args)
    | Some Tool_schemas_misc.Misc_dos_screen ->
      Some (Keeper_dos_screen.handle ~keeper_name:meta.name ~base_path:config.base_path

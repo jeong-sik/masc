@@ -4,14 +4,12 @@
     A plain read of the Keeper, authorised like its other plain reads: open
     on a loopback server, a [CanReadState] token once HTTP auth is strict.
     The dashboard fetches it with its token rather than through a bare
-    [<img>], which could not carry one. The picture is a pure function of the
-    name, but the route answers 404 for a name that is not a Keeper of this
+    [<img>], which could not carry one. The picture combines the name-derived body and current equipment, but the route answers 404 for a name that is not a Keeper of this
     workspace, so the URL does not draw portraits for anything a caller
     types. HTTP/1.1 only, like the Keeper's other GET routes: the HTTP/2
     gateway serves none of them.
 
-    The picture depends on nothing but the running binary, the name and the
-    size, so its strong entity tag is made from those three before anything
+    The picture depends on nothing but the running binary, the name, size and equipment, so its strong entity tag is made from those inputs before anything
     is drawn: a request that already holds the tag gets [304 Not Modified]
     without a drawing. [Cache-Control: no-cache] makes the browser keep the
     file and revalidate it. A new binary gives new tags, so a change to the
@@ -37,7 +35,7 @@ val current_build : unit -> build
 (** This process's {!build}, from {!Build_identity.current}, which hashes the
     executable once and keeps the digest. *)
 
-(** PNG bytes already drawn, by name and edge length. Bounded by the total
+(** PNG bytes already drawn, by name, edge length and equipment. Bounded by the total
     size of the bytes it holds; the oldest entries go first. *)
 module Cache : sig
   type t
@@ -67,10 +65,11 @@ val answer :
   name:string ->
   size:string option ->
   keeper_present:(unit -> (bool, string) result) ->
+  equipment:(unit -> (Keeper_portrait_look.equipment, string) result) ->
   holds_tag:(string -> bool) ->
   answer
 (** Decides the response. Checks run in this order: name syntax, size,
-    Keeper presence, the request's tag, drawing. [keeper_present] runs only
+    Keeper presence, current equipment, the request's tag, drawing. [keeper_present] runs only
     for a well-formed request; with an {!Executable} build, a request whose
     [holds_tag] accepts the tag is answered before any drawing or cache read. *)
 

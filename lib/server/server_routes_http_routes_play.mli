@@ -23,3 +23,9 @@
 val invites_path : string
 
 val add_routes : Http_server_eio.Router.t -> Http_server_eio.Router.t
+
+module For_testing : sig
+  val revoke_response :
+    config:Workspace.config -> by:string -> raw_name:string ->
+    Httpun.Status.t * Yojson.Safe.t
+end

@@ -13842,7 +13842,7 @@ def schedule_detail_http_fixtures() -> HttpFixtures:
             "schedule_store_read_error": None,
             "request_count": 1,
             "truncated": False,
-            "fsm": {"next_due_at_iso": "2026-08-25T10:30:00Z"},
+            "fsm": {"next_due_at": "2026-08-25T10:30:00Z"},
             # The runner's status word rides the list once, the word /health
             # reports. The loader requires it: a row's runner_hold is only
             # current while this reads ok.
@@ -17987,6 +17987,11 @@ def run_schedule_delivery_regression(executable: str) -> None:
             # nothing ran it. The suite selects by edited path, and a change
             # to the row's renderer does not select this file.
             b"succeeded consumed_ack",
+            # The summary line's next wake, from the fixture's fsm. The
+            # decoder once read fsm.next_due_at_iso while the server writes
+            # fsm.next_due_at, and the fixture carried the decoder's spelling,
+            # so the line was never drawn and nothing noticed.
+            b"Next due:",
         ):
             if needle not in plain:
                 raise AssertionError(

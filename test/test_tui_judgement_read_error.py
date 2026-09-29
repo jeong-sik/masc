@@ -31,7 +31,7 @@ def run(executable: str) -> None:
             if screen.count(cause) != 1 or screen.count(b"load failed") != 1:
                 raise AssertionError(f"{prefix!r} was repeated or lost: {screen!r}")
 
-        h.palette_go(process, fd, output, b"go planning", b"MASC Planning")
+        h.palette_go(process, fd, output, b"go work", b"MASC Work")
         h.send_and_wait(process, fd, output, b"v", b"\xe2\x96\xb8Task Review")
         check_cause(b"verification load failed", 160)
         h.send_and_wait(process, fd, output, b"v", b"\xe2\x96\xb8Task Verdicts")

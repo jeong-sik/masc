@@ -70,6 +70,26 @@ loaded. `Esc` returns. The directory starts empty;
 the [MSX cartridges runbook](operations/msx-carts-runbook.md) says what the
 machine accepts and where the images come from.
 
+## Shared DOS play invites
+
+Select a Keeper chat to use the TUI composer. `/play invites` lists invites, `/play invite <name>
+<hours>` issues one, `/play link` reopens the last link issued in this TUI
+session, and `/play revoke <name>` removes it. Issuance requires
+an admin operator credential, token-required authentication and
+`MASC_HTTP_BASE_URL`. The one-time link appears in a local TUI reply (it is
+not sent to the Keeper) and
+is sent through OSC 52 for copying; terminal clipboard support varies. The
+TUI keeps the last link only until it exits or that invite is revoked.
+If the issue request has no trustworthy answer, inspect the invite list and
+revoke that name before retrying because the original link cannot be recovered.
+If revocation reports a controller release failure or an unknown outcome,
+repeat `/play revoke <name>`: a second request can release a controller even
+after the invite credential was deleted.
+
+The invited person opens the link in a browser to watch and play the shared
+DOS machine. The TUI's existing `go MSX` menu also has `watch DOS machine`
+when a DOS machine is loaded; that view only watches the screen.
+
 ## Options
 
 | Option | Default | Effect |
@@ -344,6 +364,11 @@ The `Changes` tab lists the files this keeper's calls wrote, newest first.
 
 Workspace health, agent count, pending approvals, the Attention list, and
 active tasks.
+
+The Goals block uses one row per active Goal: title, attention state, linked
+task count, and due date. The task count describes linked work, not progress
+against the Goal's metric. Open Planning → Goals for the recorded owner,
+metric, proof, and activity; an unknown owner is shown explicitly there.
 
 ```
  MASC Overview  [me]  10:54:52  [connected]

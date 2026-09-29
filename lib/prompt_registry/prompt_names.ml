@@ -138,6 +138,7 @@ let eval_calibration_few_shot_rejected_label = "eval.calibration.few_shot.reject
 let keeper_context_checkouts_section = "keeper.context.checkouts.section"
 let keeper_context_checkouts_row = "keeper.context.checkouts.row"
 let keeper_context_checkouts_standing_current = "keeper.context.checkouts.standing.current"
+let keeper_context_checkouts_standing_stale_ref = "keeper.context.checkouts.standing.stale_ref"
 let keeper_context_checkouts_standing_ahead = "keeper.context.checkouts.standing.ahead"
 let keeper_context_checkouts_standing_behind = "keeper.context.checkouts.standing.behind"
 let keeper_context_checkouts_standing_diverged = "keeper.context.checkouts.standing.diverged"

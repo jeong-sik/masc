@@ -69,6 +69,33 @@ describe('RepositoryCheckoutsPanel', () => {
     expect(screen.getByText('behind 22 · ahead 0')).toBeInTheDocument()
   })
 
+  it('shows when a stale local target ref was last observed', () => {
+    keeperStatusDetails.value = {
+      sangsu: {
+        name: 'sangsu', history: [], rawText: '', loadedAt: '2026-07-13T00:00:00Z',
+        rawStatus: {
+          execution_context: {
+            repository_checkouts: { entries: [{
+              checkout_name: 'stale-directory', path: 'repos/stale-directory',
+              branch: 'main', head: 'abc123', dirty: false, inspection_state: 'available',
+              catalog: { state: 'registered', repository_id: 'masc' },
+              freshness: {
+                state: 'stale_ref', target_ref: 'origin/main',
+                target_ref_last_observed_at_unix: 1600000000, behind: 0, ahead: 0,
+              },
+            }] },
+          },
+        },
+      },
+    }
+
+    render(html`<${RepositoryCheckoutsPanel} keeperName="sangsu" />`)
+
+    expect(screen.getByText('stale_ref')).toBeInTheDocument()
+    expect(screen.getByText('origin/main as of 2020-09-13 12:26:40 UTC · not re-read')).toBeInTheDocument()
+    expect(screen.queryByText('behind 0 · ahead 0')).not.toBeInTheDocument()
+  })
+
   it('renders unsupported catalog and freshness states explicitly', () => {
     keeperStatusDetails.value = {
       sangsu: {

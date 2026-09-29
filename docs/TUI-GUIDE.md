@@ -368,6 +368,11 @@ The `Changes` tab lists the files this keeper's calls wrote, newest first.
 Workspace health, agent count, pending approvals, the Attention list, and
 active tasks.
 
+The Goals block uses one row per active Goal: title, attention state, linked
+task count, and due date. The task count describes linked work, not progress
+against the Goal's metric. Open Planning → Goals for the recorded owner,
+metric, proof, and activity; an unknown owner is shown explicitly there.
+
 ```
  MASC Overview  [me]  10:54:52  [connected]
    Health: bad  Keepers: 10  MCP agents: 2  Approvals: 0
@@ -1123,6 +1128,15 @@ provider accepted anything. `DIGEST ONLY` means a producer prompt-block digest
 is retained without same-turn exact text. `BYTES ONLY` means only the component
 byte count is available. The inspector never joins independent readings by
 label, position, or similar-looking content.
+
+#### Reading chat loading errors
+
+If saved history, older messages, or the memory journal cannot be loaded, a
+short warning above the input points to `/errors`. Run it in the open Keeper
+chat to put the current full details in the local conversation log, where
+lines wrap and you can scroll back through them. Hidden memory-journal errors
+are included. This reads the recorded failures without sending a message or
+retrying a request; no recorded error does not imply loading has finished.
 
 #### Copying a reply
 

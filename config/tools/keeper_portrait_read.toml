@@ -1,0 +1,18 @@
+name = "keeper_portrait_read"
+description = """
+Read the current Keeper's deterministic portrait and starting equipment.
+
+Returns a durable PNG artifact plus the equipment currently derived from the
+Keeper identity. This tool is read-only: it never changes equipment or stores
+an equip choice."""
+additional_properties = false
+
+defer_loading = true
+
+[[params]]
+name = "size"
+type = "integer"
+minimum = 48
+maximum = 512
+default = 160
+description = "Portrait edge in pixels."

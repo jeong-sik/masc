@@ -1243,6 +1243,20 @@ let open_message_for_keeper ?(return_to = Keeper_chat_return_detail) state
   (* Recall is a walk through one Keeper's messages. A Down on the new
      Keeper must not restore the previous Keeper's draft or image payload. *)
   forget_recall state;
+  if state.msg_target_keeper_name <> Some keeper_name then begin
+    (* These readings belong to one conversation. Clear them at the shared
+       target boundary before its replacement request can finish. *)
+    state.msg_loaded <- [];
+    state.msg_loaded_keeper <- None;
+    state.msg_loaded_error <- None;
+    state.msg_loaded_dropped <- 0;
+    state.msg_memory_error <- None;
+    state.msg_memory_dropped <- 0;
+    state.msg_older_cursor <- None;
+    state.msg_older_exist <- false;
+    state.msg_older_loading <- false;
+    state.msg_older_error <- None;
+  end;
   state.msg_target_keeper_name <- Some keeper_name;
   state.opening_notice <- None;
   (match state.opening_mode with
@@ -4425,55 +4439,43 @@ let launch_github_login state ~mailbox keeper_name =
         enqueue_async mailbox
           (Github_login_finished (keeper_name, Error "Eio clock is unavailable"))
     | Some clock ->
-        let pending = Buffer.create 256 in
-        let flush_lines () =
-          let text = Buffer.contents pending in
-          match String.rindex_opt text '\n' with
-          | None -> ()
-          | Some last ->
-              let complete = String.sub text 0 last in
-              let rest =
-                String.sub text (last + 1) (String.length text - last - 1)
-              in
-              Buffer.clear pending;
-              Buffer.add_string pending rest;
-              let lines =
-                String.split_on_char '\n' complete
-                |> List.filter_map (fun line ->
-                       let line = String.trim line in
-                       if String.length line > 6
-                          && String.sub line 0 6 = "data: "
-                       then
-                         let payload =
-                           String.sub line 6 (String.length line - 6)
-                         in
-                         match Yojson.Safe.from_string payload with
-                         | `Assoc fields -> (
-                             match List.assoc_opt "text" fields with
-                             | Some (`String text) ->
-                                 Some (String.split_on_char '\n' text)
-                             | _ -> (
-                                 match List.assoc_opt "message" fields with
-                                 | Some (`String message) ->
-                                     Some [ "error: " ^ message ]
-                                 | _ -> Some [ payload ]))
-                         | _ | (exception Yojson.Json_error _) ->
-                             Some [ payload ]
-                       else None)
-                |> List.concat
-                |> List.map Masc.Tui_decode.sanitize_terminal_text
-                |> List.filter (fun line -> String.trim line <> "")
-              in
-              if lines <> [] then
-                enqueue_async mailbox (Github_login_lines (keeper_name, lines))
+        let reader = Masc_tui_sse_lines.create () in
+        let flush_lines chunk =
+          let lines =
+            Masc_tui_sse_lines.feed reader chunk
+            |> List.filter_map (fun line ->
+                   let line = String.trim line in
+                   if String.length line > 6
+                      && String.sub line 0 6 = "data: "
+                   then
+                     let payload =
+                       String.sub line 6 (String.length line - 6)
+                     in
+                     match Yojson.Safe.from_string payload with
+                     | `Assoc fields -> (
+                         match List.assoc_opt "text" fields with
+                         | Some (`String text) ->
+                             Some (String.split_on_char '\n' text)
+                         | _ -> (
+                             match List.assoc_opt "message" fields with
+                             | Some (`String message) ->
+                                 Some [ "error: " ^ message ]
+                             | _ -> Some [ payload ]))
+                     | _ | (exception Yojson.Json_error _) ->
+                         Some [ payload ]
+                   else None)
+            |> List.concat
+            |> List.map Masc.Tui_decode.sanitize_terminal_text
+            |> List.filter (fun line -> String.trim line <> "")
+          in
+          if lines <> [] then
+            enqueue_async mailbox (Github_login_lines (keeper_name, lines))
         in
         let result =
           try
             Masc_tui_http.post_keeper_github_login_streaming ~clock ~host
               ~port ~keeper_name ~scopes
-              ~on_chunk:(fun chunk ->
-                Buffer.add_string pending chunk;
-                flush_lines ())
+              ~on_chunk:flush_lines
           with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn -> Error (Printexc.to_string exn)
@@ -6917,9 +6919,8 @@ let launch_keeper_history_load ?(load_file_changes = true) ?(force = false) stat
         | exn -> Error (Printexc.to_string exn)
       in
       let memory_result =
-        (* The subject, because the row that draws this one does not add it:
-           every other failure of this read names itself and an exception
-           string does not. *)
+        (* Keep the subject attached to exception details, as the other
+           failures of this read already do. *)
         try Masc_tui_http.fetch_keeper_memory_journal ~host ~port ~keeper_name with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error ("memory journal: " ^ Printexc.to_string exn)
@@ -7080,16 +7081,6 @@ let switch_to_next_keeper_message state ~mailbox ~drain_queue =
         ~drain_queue;
       state.keeper_cursor <- cursor;
       set_msg_scroll state 0;
-      state.msg_loaded <- [];
-      state.msg_loaded_keeper <- None;
-      state.msg_loaded_error <- None;
-      state.msg_loaded_dropped <- 0;
-      state.msg_memory_error <- None;
-      state.msg_memory_dropped <- 0;
-      state.msg_older_cursor <- None;
-      state.msg_older_exist <- false;
-      state.msg_older_loading <- false;
-      state.msg_older_error <- None;
       launch_keeper_history_load state ~mailbox ~keeper_name
 
 (* Rows this session wrote that the transcript now carries. Dropped so the same
@@ -7703,6 +7694,7 @@ let launch_runtime_lane_pick state ~mailbox ~(pick : Masc_tui_types.runtime_lane
             match pick with
             | Masc_tui_types.Pick_conversation_lane lane ->
                 Masc_tui_http.set_runtime_lane_slots ~host ~port ~lane
+                  ~expected_runtime_ids:existing
                   ~runtime_ids:(existing @ [ runtime_id ])
             | Masc_tui_types.Pick_exact_lane lane ->
                 (* Only the one slot is sent: the server appends it to the order
@@ -7782,6 +7774,7 @@ let handle_runtime_lane_edit state ~mailbox edit =
       state.runtime_lane_remove_armed <- Some lane;
       Masc_tui_types.dismiss_runtime_lane_notice state
   | Masc_tui_types.Send_lane_write { lane; request; cursor_after } ->
+      let expected_runtime_ids = Masc_tui_types.conversation_lane_candidates state lane in
       (match request with
        | Masc_tui_types.Write_lane_removal -> state.runtime_lane_remove_armed <- None
        | Masc_tui_types.Write_lane_order _ -> ());
@@ -7790,7 +7783,8 @@ let handle_runtime_lane_edit state ~mailbox edit =
         ~written:Masc_tui_types.Runtime_surface_list (fun ~host ~port ->
         match request with
         | Masc_tui_types.Write_lane_order runtime_ids ->
-            Masc_tui_http.set_runtime_lane_slots ~host ~port ~lane ~runtime_ids
+            Masc_tui_http.set_runtime_lane_slots ~host ~port ~lane
+              ~expected_runtime_ids ~runtime_ids
         | Masc_tui_types.Write_lane_removal ->
             Masc_tui_http.remove_runtime_lane ~host ~port ~lane)
   | Masc_tui_types.Refuse_lane_edit notice -> state.runtime_lane_notice <- Some notice
@@ -9767,6 +9761,28 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
                attachment.Masc_tui_keeper_chat_projection.mime_type
                attachment.Masc_tui_keeper_chat_projection.size
                (List.length state.msg_attachments)))
+  | Masc_tui_command.Show_load_errors ->
+      Buffer.clear state.msg_input;
+      if state.view <> Keepers Keeper_message
+         || Option.is_none target
+         || target <> state.msg_target_keeper_name then
+        notice ~kind:Notice_failure "Open a Keeper chat to inspect its loading errors"
+      else begin
+        let errors =
+          [ Option.map (fun detail -> "Saved history\n" ^ detail)
+              state.msg_loaded_error
+          ; Option.map (fun detail -> "Older messages\n" ^ detail) state.msg_older_error
+          ; Option.map (fun detail -> "Memory journal\n" ^ detail) state.msg_memory_error
+          ] |> List.filter_map Fun.id
+        in
+        set_msg_scroll state 0;
+        (* A local log entry wraps and scrolls. A failure toast would flatten
+           these details back into the one-line truncation being inspected. *)
+        notice ~kind:Notice_reply
+          (match errors with
+           | [] -> "No chat loading errors recorded."
+           | _ :: _ -> "Chat loading errors\n\n" ^ String.concat "\n\n" errors)
+      end
   | Masc_tui_command.Help ->
       Buffer.clear state.msg_input;
       notice ~kind:Notice_reply
@@ -13123,7 +13139,8 @@ let handle_composer_key state ~base_path ~mailbox key =
            end;
            state.view <- Keepers Keeper_message
        | Masc_tui_command.Task_for_keeper _ | Masc_tui_command.Task_missing_title
-       | Masc_tui_command.Help | Masc_tui_command.About | Masc_tui_command.Switch_keeper_missing_name
+       | Masc_tui_command.Help | Masc_tui_command.Show_load_errors
+       | Masc_tui_command.About | Masc_tui_command.Switch_keeper_missing_name
         | Masc_tui_command.Open_diff | Masc_tui_command.Open_patch_modal
         | Masc_tui_command.Toggle_cost | Masc_tui_command.Open_changes
         | Masc_tui_command.Toggle_acting_pane

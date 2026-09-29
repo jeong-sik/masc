@@ -175,6 +175,16 @@ status: reference
   → [Runtime_quota_window](../../lib/runtime/runtime_quota_window.ml),
   [Masc_tui_overview_team](../../bin/masc_tui_overview_team.mli)
 
+**Runtime Rate Limit (런타임 속도 제한 관측)**
+: 한 런타임 후보가 받은 429 또는 제공자 속도 제한을 그 후보의 프로세스 로컬 셀에
+  기록한 증거. 계정 단위의 **닫힌 quota 창**과 구분한다. 같은 자격 증명을 쓰는 다른
+  후보까지 소진으로 표시하지 않고 해당 후보만 순서 뒤로 보낸다. 유효한 `Retry-After`
+  기한이 지나거나 그 후보가 성공하면 해제되며, 기한이 없으면 성공 전까지 남는다.
+  런타임 카탈로그는 이를 `rate_limited`·`rate_limit_resets_at`으로 따로 싣고, TUI는
+  quota와 속도 제한 상태를 구분해 표시한다(#39815).
+  → [Runtime_candidate_backpressure](../../lib/runtime/runtime_candidate_backpressure.mli) ·
+  [runtime resolved projection](../../lib/server/server_dashboard_runtime_resolved_json.mli)
+
 **Server Push (서버가 밀어 보내는 사건)**
 : 서버가 클라이언트로 밀어 보내는 사건으로, Keeper가 한 일이 아니라 서버가 보고하는
   상태 변화. Activity 화면은 이런 사건을 `everything` scope 아래 조용한 회색 행으로
@@ -408,7 +418,7 @@ status: reference
   - TUI 표시 및 복구:
     - Keeper Info 탭에 원인 카테고리별로 집계(건수, 최장 경과 시간, 파티션 ID, 재투입
       대기 수)되어 표시된다. 수백 건의 슬롯 소진 행이 화면을 덮지 않도록 카테고리당 한 줄로 묶는다.
-    - `Q` 키를 누르면 가장 오래 대기 중인 항목(`oldest_waiting`)부터 원장의
+    - `b` 키를 누르면 가장 오래 대기 중인 항목(`oldest_waiting`)부터 원장의
       `Requeue_requested`로 전이시키며 재투입을 요청한다.
     - `B` 키는 읽힌 대기 목록 전체를 오래된 순서로 별도 재투입 요청한다. 목록이 아직
       읽히지 않았거나 오래된 상태이면 일괄 재투입을 거절한다.
@@ -2388,9 +2398,9 @@ status: reference
   operator config의 Keeper 이름에 묶인다. cluster 사이에서 무엇을 같이 쓰는지는
   **Cluster** 항목에 적었다.
 
-**Workspace Memory Proposal (작업공간 기억 제안)**
-: Workspace memory curator가 캡처한 작업공간 인벤토리를 바탕으로 만든 모델 제안. 제안은 claim, conflict, exclusion을 원본 source ID에 연결하고 해당 인벤토리에 묶인다. 저장·제출은 참조 구조만 검증하며 의미상 참인지 판정하지 않고, 제안은 Keeper Memory OS를 변경하지 않는다. 게시된 proposal descriptor는 제안을 찾게 하는 기록이지 의미 검증이나 승격이 아니다.
-  → [workspace_memory_proposal](../../lib/workspace_memory/workspace_memory_proposal.mli) · [workspace_memory_context](../../lib/workspace_memory/workspace_memory_context.mli) · [workspace_memory_publication](../../lib/workspace_memory/workspace_memory_publication.mli)
+**Workspace Memory Ledger (작업공간 기억 원장)**
+: Workspace Curator가 변경된 Keeper 사실을 기존 주장·충돌에 합류시키거나 새 항목을 만들고, 제외 이유를 기록한 원장. 다른 Keeper의 가까운 사실은 판정 맥락이고 선택된 변경 사실만 분류한다. 원장은 Keeper Memory OS를 바꾸지 않으며, 모델 분류가 의미 검증이나 사실 승격을 뜻하지 않는다. Keeper는 주장·충돌 목록을 본 뒤 ID별로 현재 원문 상태를 읽는다. 스토어를 읽지 못한 사실은 사라진 사실로 단정하지 않는다.
+  → [workspace_memory_ledger](../../lib/workspace_memory/workspace_memory_ledger.mli) · [workspace_memory_request](../../lib/workspace_memory/workspace_memory_request.mli) · [workspace_memory_ledger_view](../../lib/workspace_memory/workspace_memory_ledger_view.mli)
 
 **Continuity Snapshot (하던 일 저장본)**
 : 이어서 할 일의 설명과, 그 설명이 대신하는 완료된 History 범위를 함께 담은

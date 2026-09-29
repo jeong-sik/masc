@@ -8,6 +8,7 @@ let describe = function
   | Command.Task_for_keeper { title; body } -> Printf.sprintf "task:%s|%s" title body
   | Command.Task_missing_title -> "task-missing-title"
   | Command.Help -> "help"
+  | Command.Show_load_errors -> "show-load-errors"
   | Command.About -> "about"
   | Command.Open_settings -> "open-settings"
   | Command.Open_diff -> "open-diff"

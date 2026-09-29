@@ -210,11 +210,61 @@ let clone ~repository =
   | Ok _ -> Ok ()
   | Error msg -> Error msg
 
+(* FETCH_HEAD is used here only at the completion boundary of our own fetch.
+   A later unrelated fetch can change its mtime or append old lines, so readers
+   use the atomic receipt instead of treating FETCH_HEAD as a clock. *)
+let record_target_fetch ~repository =
+  let ( let* ) = Result.bind in
+  let cwd = repository.local_path in
+  let first args =
+    match run_git ~cwd args with
+    | Ok (line :: _) -> Ok line
+    | Ok [] -> Error ("git " ^ String.concat " " args ^ " returned no output")
+    | Error _ as error -> error
+  in
+  let* common_dir = first [ "rev-parse"; "--path-format=absolute"; "--git-common-dir" ] in
+  let* origin_url = first [ "remote"; "get-url"; "origin" ] in
+  let target_ref = "origin/" ^ repository.default_branch in
+  let* oid = first [ "rev-parse"; target_ref ] in
+  let fetch_head = Filename.concat common_dir "FETCH_HEAD" in
+  let prefix = "branch '" ^ repository.default_branch ^ "' of " in
+  let fetched =
+    try
+      In_channel.with_open_bin fetch_head (fun input ->
+        let rec scan () =
+          match input_line input with
+          | line ->
+            (match String.split_on_char '\t' line with
+             | [ fetched_oid; _; description ]
+               when String.equal fetched_oid oid
+                    && String.equal description (prefix ^ origin_url) -> true
+             | _ -> scan ())
+          | exception End_of_file -> false
+        in
+        scan ())
+    with Sys_error _ -> false
+  in
+  if not fetched then Ok ()
+  else
+    Repo_fetch_observation.write ~common_dir
+      { common_dir
+      ; origin_url
+      ; target_ref
+      ; oid
+        (* DET-OK: recorded once after the named ref's successful fetch. *)
+      ; observed_at_unix = int_of_float (Unix.gettimeofday ())
+      }
+;;
+
 let fetch ~repository : (string list, string) result =
   let env = non_interactive_git_env in
-  match run_git ~env ~cwd:repository.local_path ["fetch"; "--all"] with
+  match run_git ~env ~cwd:repository.local_path
+          [ "-c"; "fetch.append=false"; "fetch"; "--all" ] with
   | Error msg -> Error msg
   | Ok _ -> (
+      (match record_target_fetch ~repository with
+       | Ok () -> ()
+       | Error message -> Log.Misc.warn "repo target fetch receipt: %s" message);
       match
         run_git ~cwd:repository.local_path
           ["branch"; "-r"; "--format=%(refname:short)"]

@@ -98,6 +98,10 @@ val navigation_rows : int
 
 val get_terminal_size : unit -> int * int
 
+val lines_ended_since : Buffer.t -> start:int -> int
+(** How many lines the buffer ended after byte [start]: the row, counted from
+    there, that the next line written lands on. *)
+
 val frame_lines : Buffer.t -> string list
 
 val write_two_panes :
@@ -152,6 +156,11 @@ val keeper_split_threshold_cols : int
 
 val keeper_roster_pane_cols : int
 
+val strip_rows : int
+(** The lines the surface strip takes above every surface: a row a surface
+    counts in its own frame sits this many lines lower in the terminal's. A
+    picture placed over a surface's rows starts from there. *)
+
 val change_row_address : Masc.Tui_decode.file_change -> string
 
 val file_change_evidence_label :
@@ -191,6 +200,11 @@ type chrome_body = {
   push_selected : string -> unit;
   push_divider : unit -> unit;
   push_empty : unit -> unit;
+  next_origin : unit -> int * int;
+      (** The terminal frame's line and cell where the next pushed row's
+          content will start -- where a picture placed over body rows goes.
+          Holds while the body stays inside its budget, which a [Fits] body
+          does. *)
 }
 
 val surface_chrome_rows : int
@@ -248,15 +262,13 @@ val connection_badge : Masc_tui_types.state -> string
 
 val lane_run_detail_title : string
 val measurement_detail_title : string
-(** The titles of the two screens that show one record by its id. *)
-
-val detail_heading : cols:int -> title:string -> id:string -> badge:string -> string
-(** [title], [id] and [badge] on one heading row of a frame [cols] wide. The
-    badge is drawn whole. The id takes what the title and the badge leave:
-    whole when it fits, folded in the middle when it does not, so both its
-    opening and its distinguishing tail stay; left out when nothing is left.
-    A frame too narrow for the title and the badge cuts the badge when the
-    row is drawn. *)
+val fusion_title : string
+val runtime_detail_title : string
+val keeper_calls_lead : string
+(** What the headings laid out by {!Masc_tui_ansi.detail_heading} draw before
+    the id: a lane run, a measurement artifact, a Fusion run (its list and
+    launch form carry the same title), one runtime's detail, and one keeper's
+    calls. *)
 
 val coordinator_status_row :
   Masc_tui_types.state -> style:string -> string -> string
@@ -431,6 +443,13 @@ val planning_workspace_title :
 (** [after] is what the caller draws past this title on the same row. The strip
     inside leaves room for it; without it the strip took the row and the frame
     cut the clock and the badge off the end. *)
+
+val harness_detail_heading :
+  Masc_tui_types.state -> cols:int -> task_id:string -> tail:string -> string
+(** One verdict's heading in a frame [cols] wide: the Planning strip with
+    Verdicts current, the task id, and [tail] (the connection badge). The
+    strip never goes under the width that holds its current entry; the id
+    folds first ({!Masc_tui_ansi.detail_heading}). *)
 
 val planning_proof_mark : Masc_tui_types.Tui_decode.goal_proof -> string
 

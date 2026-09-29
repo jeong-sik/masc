@@ -2040,22 +2040,14 @@ type overview_providers_reading =
   | Providers_read of Tui_decode.provider_usage_windows
   | Providers_failed of string
 
-(** The Overview's reading of each account's email, [(provider id, email)] from
-    [account_emails] on [GET /api/v1/setup/inventory]. The route needs Admin,
-    so a failed read is kept apart and said, never drawn as accounts that have
-    no email. *)
+(** The Overview's reading of [GET /api/v1/setup/account-emails]: each
+    account's email by provider id, and how many rows this build could not
+    read. The route needs Admin, so a failed read is kept apart and said,
+    never drawn as accounts that have no email. *)
 type overview_account_emails_reading =
   | Account_emails_unread
-  | Account_emails_read of (string * string) list
+  | Account_emails_read of { emails : (string * string) list; unreadable_rows : int }
   | Account_emails_failed of string
-
-(* A read that succeeded is kept until the Overview is opened again: the
-   emails change only when someone signs in, and the inventory reads a login
-   file per account. A failed read is asked again on the next opening too, so
-   a token without Admin is not refused every tick. *)
-let account_emails_refresh_needed = function
-  | Account_emails_unread -> true
-  | Account_emails_read _ | Account_emails_failed _ -> false
 
 (** One open pull request as [GET /api/v1/repositories/pulls] reports it
     (RFC-0465). The check and review words are parsed at decode; a word this
@@ -3130,14 +3122,9 @@ let surface_needs_delta ~previous ~next =
 let surface_needs_any needs = needs <> nothing
 
 let full_refresh_needs ~scoped_refresh_inflight ~keeper_pane_drawn ~cost_shown
-    ~account_emails surface =
+    surface =
   if scoped_refresh_inflight then nothing
-  else
-    let needs = surface_needs ~keeper_pane_drawn ~cost_shown surface in
-    { needs with
-      needs_account_emails =
-        needs.needs_account_emails && account_emails_refresh_needed account_emails
-    }
+  else surface_needs ~keeper_pane_drawn ~cost_shown surface
 
 type full_refresh_intent = Cadence | Revalidate
 
@@ -5535,17 +5522,11 @@ type state = {
      there is nothing to say. [-1] is "not animating": the mark falls back
      to its still form rather than freezing on an arbitrary quarter. *)
   mutable activity_frame: int;
-  (* The turning imp's step. The main loop advances it only while the last
-     frame drew the imp turning (Masc_tui_emblem_screen.drawn) and puts it
-     back to [-1] when none did, so a screen without it stops repainting. *)
+  (* The candle's step. The main loop advances it only while the last frame
+     drew the candle (Masc_tui_emblem_screen.drawn) and puts it back to [-1]
+     when none did, so a screen without it stops repainting. *)
   mutable emblem_frame: int;
-  (* The startup splash: the imp stands where the Overview's sections will be
-     until the first overview read answers, a refresh fails, or the operator
-     sends any input ({!startup_emblem_visible} says when it steps aside).
-     Only the TUI's own start sets it, so a state built anywhere else never
-     draws it. *)
-  mutable startup_emblem: bool;
-  (* /about: the imp over the surface, with the theme and the keeper count.
+  (* /about: the candle over the surface, with the theme and the keeper count.
      Modal, like the help sheet; Esc closes it. *)
   mutable about_open: bool;
   mutable keeper_detail_focus: pane_focus;
@@ -5861,6 +5842,9 @@ type state = {
   mutable http_refresh_started_ns: int64 option;
   mutable local_workspace: local_workspace_reading;
   mutable view: surface;
+  mutable opening_mode: Masc_tui_config.opening;
+  mutable opening_pending: bool;
+  mutable opening_notice: string option;
   (* Where Esc goes back to after following a reference, and what was open
      there. The surfaces print [masc://] references beside the thing they
      name -- a verdict says which task it judged -- and following one is only
@@ -6057,6 +6041,8 @@ type state = {
           problem, and it carries the counts -- so [f] stops being a walk
           through names a reader cannot see the size of. *)
   mutable board_scroll: int;
+  mutable board_comment_scroll: int;
+  mutable board_comments_focused: bool;
   mutable board_mode: board_mode;
   mutable board_focus: pane_focus;
   (* Wide terminals normally keep the Board list beside the open post. [z]
@@ -6869,36 +6855,6 @@ type text_input_target =
   | Text_github_token
   | Text_board_draft
 
-(* The startup splash stands in for the Overview's sections while they have
-   nothing to show: on the Overview's list, before the first overview read
-   answers either way. A task detail open over the list is its own screen. *)
-let startup_emblem_visible (state : state) =
-  state.startup_emblem
-  && Option.is_none state.task_detail_id
-  && Option.is_none state.overview
-  && Option.is_none state.overview_error
-  && (match state.connection_status with
-      | Connecting -> true
-      (* A booting server answers no briefing yet, but the backlog on disk
-         already has something to say: once it is read, the Overview draws
-         it rather than the imp. *)
-      | Booting -> (
-          match state.task_reading with
-          | Masc_tui_overview_tasks.Rows_unread -> true
-          | Masc_tui_overview_tasks.Rows_read _
-          | Masc_tui_overview_tasks.Rows_unavailable _ ->
-              false)
-      (* The Overview's own words for these -- "no overview data, press r" --
-         are the ones the operator needs. *)
-      | Disconnected | Reconnecting | Degraded | Connected -> false)
-  &&
-  match state.view with
-  | Overview -> true
-  | Acting | Metrics | Keepers _ | Memory | Lanes | Clients | Board | Approvals
-  | Planning | Schedules | Verification | Harness | Fusion | Repositories | Code
-  | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs ->
-      false
-
 (* The order is the key dispatch's order, which is what an operator already
    experiences: a preset name being typed holds every letter, and the two
    identity fields come last because the surface under them reads letters as
@@ -7641,7 +7597,7 @@ let loading_notice ?elapsed_s what =
 let nanoseconds_per_second = 1_000_000_000L
 
 (* One step of every moving thing on a masc screen: the running-turn mark,
-   the roster marquee and the turning imp. Four steps turn the mark once
+   the roster marquee and the /about candle. Four steps turn the mark once
    every 600 ms -- fast enough to read as alive, slow enough not to strobe --
    and one pace for all three keeps them moving together. *)
 let motion_step_ns = 150_000_000L
@@ -8056,7 +8012,6 @@ let create_state
   roster_marquee_frame = 0;
   activity_frame = -1;
   emblem_frame = -1;
-  startup_emblem = false;
   about_open = false;
   keeper_detail_focus = Right_pane;
   keeper_message_focus = Right_pane;
@@ -8187,6 +8142,9 @@ let create_state
   http_refresh_started_ns = None;
   local_workspace = Local_workspace_unread;
   view = Overview;
+  opening_mode = Masc_tui_config.Overview;
+  opening_pending = false;
+  opening_notice = None;
   followed_from = None;
   keeper_cursor = 0;
   keeper_list_scroll = 0;
@@ -8279,6 +8237,8 @@ let create_state
   board_hearth = None;
   board_hearths = [];
   board_scroll = 0;
+  board_comment_scroll = 0;
+  board_comments_focused = false;
   board_mode = Board_list;
   board_focus = Right_pane;
   board_detail_wide = false;
@@ -8945,7 +8905,7 @@ let composer_extra_rows (state : state) =
     function of the state again, and every write lives on one side of it. *)
 type clamped_scroll =
   | Task_detail of int
-  | Board_read of int
+  | Board_read of (int * int)
   | Message_scroll of int
   | Schedule_detail_scroll of int
   | Keeper_detail of int
@@ -9038,7 +8998,9 @@ let scroll_down_from scroll ~by =
 
 let apply_clamped_scroll (state : state) = function
   | Task_detail value -> state.task_detail_scroll <- value
-  | Board_read value -> state.board_scroll <- value
+  | Board_read (body, comments) ->
+      state.board_scroll <- body;
+      state.board_comment_scroll <- comments
   | Message_scroll value -> set_msg_scroll state value
   | Schedule_detail_scroll value -> state.schedule_scroll <- value
   | Keeper_detail value -> state.detail_scroll <- value

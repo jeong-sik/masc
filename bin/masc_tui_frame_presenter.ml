@@ -14,8 +14,12 @@ type frame = {
   lines : string list;
 }
 
+type repaint =
+  | Whole_screen
+  | Rows of int list
+
 type present_result =
-  | Presented
+  | Presented of repaint
   | Unchanged
 
 type snapshot = {
@@ -285,16 +289,23 @@ let present presenter ~invalidate_before ~write ~flush (frame : frame) =
       Buffer.add_string buffer begin_synchronized_output;
     Buffer.add_string buffer disable_autowrap;
     if full_redraw then Buffer.add_string buffer clear_screen;
-    (match prev_screen with
-     | Some prev when not full_redraw ->
-         for row = 0 to terminal_rows - 1 do
-           if not (String.equal prev.(row) screen.(row)) then
-             append_row buffer row screen.(row)
-         done
-     | _ ->
-         for row = 0 to terminal_rows - 1 do
-           append_row buffer row screen.(row)
-         done);
+    let repaint =
+      match prev_screen with
+      | Some prev when not full_redraw ->
+          let rewritten = ref [] in
+          for row = 0 to terminal_rows - 1 do
+            if not (String.equal prev.(row) screen.(row)) then begin
+              append_row buffer row screen.(row);
+              rewritten := row :: !rewritten
+            end
+          done;
+          Rows (List.rev !rewritten)
+      | _ ->
+          for row = 0 to terminal_rows - 1 do
+            append_row buffer row screen.(row)
+          done;
+          Whole_screen
+    in
     append_cursor buffer ~terminal_rows ~terminal_cols frame.cursor;
     Buffer.add_string buffer enable_autowrap;
     if presenter.synchronized_output then
@@ -314,7 +325,7 @@ let present presenter ~invalidate_before ~write ~flush (frame : frame) =
        flush ();
        presenter.previous <- Some snapshot;
        presenter.invalidated <- false;
-       Presented
+       Presented repaint
      with exn ->
        presenter.invalidated <- true;
        raise exn)

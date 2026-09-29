@@ -665,7 +665,7 @@ let restore_instructions ~base_path instructions =
   |> finish
 ;;
 
-let lanes_table_prefix = "runtime.exact_output_lanes."
+let lanes_table_prefix = Runtime_toml_namespace.(path Runtime) "exact_output_lanes."
 
 let lane_holds ~current_lanes lane =
   match List.find_opt (fun current -> String.equal current.id lane.id) current_lanes with

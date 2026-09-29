@@ -667,6 +667,182 @@ let test_resumed_session_model_is_selected_before_admission () =
       | error -> fail (Serve.error_to_string error))
 ;;
 
+(* The model each call ran on is what the host names in session/tokenUsage.
+   The turn keeps the session's selection in [model] and lists what the host
+   reported for its calls in [call_models], in call order: a named model, or
+   [Unnamed] when a call's usage names none. A call like the one before it
+   adds nothing, and another session's frames are not the turn's. A last call
+   without a model leaves the turn's reported model unknown, not the model an
+   earlier call named. *)
+let test_call_usage_is_counted_once_in_its_turn () =
+  let usage_frame ~cursor ~session ~turn = Yojson.Safe.to_string
+      (`Assoc ["jsonrpc", `String "2.0"; "method", `String "session/tokenUsage";
+        "params", `Assoc
+          [ "sessionId", `String session; "turnId", `String turn
+          ; "viewCursor", `String cursor; "modelId", `String "muse-spark-1.3"
+          ; "promptTokens", `Int 150; "totalTokens", `Int 157
+          ; "usage", `Assoc
+              [ "inputTokens", `Int 100; "outputTokens", `Int 7
+              ; "cachedTokens", `Int 50; "reasoningTokens", `Int 3
+              ; "cacheReadTokens", `Int 40; "cacheWriteTokens", `Int 10 ] ] ]) in
+  let frame cursor = usage_frame ~cursor ~session:"s-1" ~turn:"t-1" in
+  let completion usage = Yojson.Safe.to_string
+      (`Assoc ["jsonrpc", `String "2.0"; "method", `String "turn/completed";
+        "params", `Assoc
+          (["sessionId", `String "s-1"; "turnId", `String "t-1";
+            "terminal", `String "completed"] @ usage)]) in
+  let terminal_sum = ["usage", `Assoc
+      [ "inputTokens", `Int 200; "outputTokens", `Int 14
+      ; "cachedTokens", `Int 100; "reasoningTokens", `Int 6 ]] in
+  List.iter (fun terminal ->
+    let reports = ref [] in
+    run_scripted ~on_stream_event:(function
+      | Serve.Usage_reported {usage; _} -> reports := usage :: !reports
+      | _ -> ())
+      (handshake_and_session ~granted:[] @
+       [ Write (frame "v:5"); Write (frame "v:5")
+       ; Write (usage_frame ~cursor:"v:6" ~session:"other" ~turn:"t-1")
+       ; Write (usage_frame ~cursor:"v:7" ~session:"s-1" ~turn:"previous")
+       ; Write (frame "v:8"); Write agent_completed; Write (completion terminal) ])
+      (fun result _ ->
+        match result with
+        | Ok {usage=Some usage; _} ->
+          check (option int) "counted-once prompt sum" (Some 300) usage.prompt_tokens;
+          check int "raw input retained separately" 200 usage.input_tokens;
+          check int "output never doubled by terminal aggregate" 14 usage.output_tokens;
+          check (option int) "explicit cache reads" (Some 80) usage.cache_read_tokens;
+          check int "one terminal observation" 1 (List.length !reports)
+        | Ok _ -> fail "missing per-call usage"
+        | Error error -> fail (Serve.error_to_string error))) [ []; terminal_sum ]
+;;
+
+let test_view_gap_does_not_fabricate_a_turn_total () =
+  let frame ?(turn_id = "t-1") cursor = Yojson.Safe.to_string (`Assoc
+    [ "jsonrpc", `String "2.0"; "method", `String "session/tokenUsage"
+    ; "params", `Assoc
+        [ "sessionId", `String "s-1"; "turnId", `String turn_id
+        ; "viewCursor", `String cursor; "promptTokens", `Int 150
+        ; "usage", `Assoc ["inputTokens", `Int 100; "outputTokens", `Int 7;
+                            "cachedTokens", `Int 50; "reasoningTokens", `Int 3] ] ]) in
+  let gap session = Yojson.Safe.to_string (`Assoc
+    [ "jsonrpc", `String "2.0"; "method", `String "view/gap"
+    ; "params", `Assoc (["after", `String "v:5"; "next", `String "v:8"]
+        @ match session with None -> [] | Some value -> ["sessionId", value]) ]) in
+  let completed aggregate = Yojson.Safe.to_string (`Assoc
+    [ "jsonrpc", `String "2.0"; "method", `String "turn/completed"
+    ; "params", `Assoc (["sessionId", `String "s-1"; "turnId", `String "t-1";
+                         "terminal", `String "completed"] @
+        if aggregate then ["usage", `Assoc ["inputTokens", `Int 200;
+          "outputTokens", `Int 14; "cachedTokens", `Int 100; "reasoningTokens", `Int 6]]
+        else []) ]) in
+  List.iter (fun (session, before_ack, aggregate, complete) ->
+    let reports = ref [] in
+    let handshake = handshake_and_session ~granted:[] in
+    let steps = if before_ack then
+        List.take 6 handshake @ [Write (gap session)] @ List.drop 6 handshake
+        @ [Write (frame "v:5"); Write (frame "v:8")]
+      else handshake @ [Write (frame "v:5"); Write (gap session); Write (frame "v:8")] in
+    run_scripted ~on_stream_event:(function
+      | Serve.Usage_reported {usage; _} -> reports := usage :: !reports
+      | _ -> ())
+      (steps @ [Write agent_completed; Write (completed aggregate)])
+      (fun result _ -> match result with
+        | Error error -> fail (Serve.error_to_string error)
+        | Ok turn ->
+          check bool "only proven turn totals are emitted" (aggregate || complete)
+            (Option.is_some turn.usage);
+          check int "usage stream matches turn result"
+            (if aggregate || complete then 1 else 0) (List.length !reports);
+          Option.iter (fun (usage : Msp.token_usage) ->
+            check int "terminal raw input is preserved" 200 usage.input_tokens;
+            check (option int) "gap never enriches terminal aggregate from partial calls"
+              (if complete then Some 300 else None) usage.prompt_tokens) turn.usage))
+    [ Some (`String "s-1"), false, false, false
+    ; None, false, false, false
+    ; Some `Null, false, false, false
+    ; Some (`String "s-1"), true, false, false
+    ; Some (`String "s-1"), false, true, false
+    ; None, true, true, false
+    ; Some (`String "another-session"), false, false, true
+    ; Some (`String "another-session"), true, true, true
+    ];
+  List.iter (fun (turn_id, aggregate, complete) ->
+    let reports = ref [] in
+    let handshake = handshake_and_session ~granted:[] in
+    run_scripted ~on_stream_event:(function
+      | Serve.Usage_reported {usage; _} -> reports := usage :: !reports
+      | _ -> ())
+      (List.take 6 handshake @ [Write (frame ~turn_id "v:3")]
+       @ List.drop 6 handshake
+       @ [Write (frame "v:5"); Write (frame "v:8");
+          Write agent_completed; Write (completed aggregate)])
+      (fun result _ -> match result with
+        | Error error -> fail (Serve.error_to_string error)
+        | Ok turn ->
+          check bool "discarded pre-ack usage never becomes a partial turn total"
+            (aggregate || complete) (Option.is_some turn.usage);
+          check int "no partial usage event escapes"
+            (if aggregate || complete then 1 else 0) (List.length !reports);
+          Option.iter (fun (usage : Msp.token_usage) ->
+            check int "authoritative raw terminal is retained" 200 usage.input_tokens;
+            check (option int) "discarded pre-ack usage prevents enrichment"
+              (if complete then Some 300 else None) usage.prompt_tokens) turn.usage))
+    [ "t-1", false, false; "t-1", true, false
+    ; "another-turn", false, true; "another-turn", true, true ]
+;;
+
+let test_turn_lists_the_models_its_calls_ran_on () =
+  let token_usage ?(session_id = "s-1") ?(cursor = "v:5") model = Yojson.Safe.to_string
+      (`Assoc ["jsonrpc", `String "2.0"; "method", `String "session/tokenUsage";
+        "params", `Assoc (["sessionId", `String session_id; "turnId", `String "t-1";
+          "viewCursor", `String cursor;
+          "usage", `Assoc ["inputTokens", `Int 10; "outputTokens", `Int 2;
+                            "cachedTokens", `Int 0; "reasoningTokens", `Int 0];
+          "promptTokens", `Int 10; "totalTokens", `Int 12]
+          @ match model with None -> [] | Some model -> ["modelId", model])]) in
+  let named ?cursor model = token_usage ?cursor (Some (`String model)) in
+  let shown = List.map (function Serve.Named model -> model | Serve.Unnamed -> "<unnamed>") in
+  List.iter (fun (frames, expected, reported) ->
+    let events = ref [] in
+    run_scripted ~model:"muse-spark-1.3"
+      ~on_stream_event:(function
+        | Serve.Model_call_reported { model; _ } -> events := model :: !events
+        | _ -> ())
+      (handshake_and_session ~granted:[] @ List.map (fun frame -> Write frame) frames
+       @ [Write agent_completed; Write turn_completed])
+      (fun result _ ->
+        match result with
+        | Ok turn ->
+          check (option string) "the selection stays the session's"
+            (Some "muse-spark-1.3") turn.model;
+          check (list string) "what the calls reported" expected (shown turn.call_models);
+          check (list string) "one event per change" expected
+            (List.rev_map (function Some model -> model | None -> "<unnamed>") !events);
+          check (option string) "the model the turn is named after" reported
+            (Serve.reported_model turn)
+        | Error error -> fail (Serve.error_to_string error)))
+    [ [], [], Some "muse-spark-1.3"
+    ; [named "muse-spark-1.3"], ["muse-spark-1.3"], Some "muse-spark-1.3"
+    ; [ named "muse-spark-1.3-contributor"
+      ; token_usage ~session_id:"s-2" ~cursor:"v:6" (Some (`String "other-model"))
+      ; named ~cursor:"v:7" "muse-spark-1.3-contributor"
+      ; named ~cursor:"v:8" "muse-spark-1.3" ],
+      ["muse-spark-1.3-contributor"; "muse-spark-1.3"], Some "muse-spark-1.3"
+    ; [named "muse-spark-1.3"; named ~cursor:"v:6" "muse-spark-1.3-contributor";
+       named ~cursor:"v:7" "muse-spark-1.3"],
+      ["muse-spark-1.3"; "muse-spark-1.3-contributor"; "muse-spark-1.3"], Some "muse-spark-1.3"
+    (* Replaying A after B neither adds counts nor rewinds the latest model. *)
+    ; [named "muse-spark-1.3"; named ~cursor:"v:6" "muse-spark-1.3-contributor";
+       named "muse-spark-1.3"],
+      ["muse-spark-1.3"; "muse-spark-1.3-contributor"], Some "muse-spark-1.3-contributor"
+    (* Named, then a call with no model, then the terminal. *)
+    ; [named "muse-spark-1.3-contributor"; token_usage ~cursor:"v:6" (Some `Null)],
+      ["muse-spark-1.3-contributor"; "<unnamed>"], None
+    ; [token_usage None; token_usage ~cursor:"v:6" (Some `Null)], ["<unnamed>"], None
+    ; [token_usage None; named ~cursor:"v:6" "muse-spark-1.3"], ["<unnamed>"; "muse-spark-1.3"],
+      Some "muse-spark-1.3" ]
+;;
+
 let test_session_approval_mode_is_verified_before_admission () =
   let frame id result = Yojson.Safe.to_string
       (`Assoc ["jsonrpc", `String "2.0"; "id", `Int id; "result", result]) in
@@ -883,6 +1059,10 @@ let () =
         ; test_case "session identity is verified before admission" `Quick test_session_identity_is_verified_before_admission
         ; test_case "resumed session model is selected before admission" `Quick
             test_resumed_session_model_is_selected_before_admission
+        ; test_case "turn lists the models its calls ran on" `Quick
+            test_turn_lists_the_models_its_calls_ran_on
+        ; test_case "call usage counted once in its turn" `Quick test_call_usage_is_counted_once_in_its_turn
+        ; test_case "view gap does not fabricate a turn total" `Quick test_view_gap_does_not_fabricate_a_turn_total
         ; test_case "effective approval mode is verified before admission" `Quick test_session_approval_mode_is_verified_before_admission
         ; test_case "prepared HOME matches selected account" `Quick test_prepared_home_is_bound_to_exact_selected_account
         ; test_case "invalid account home is refused" `Quick test_invalid_account_home_is_refused

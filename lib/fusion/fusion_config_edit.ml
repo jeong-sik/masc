@@ -222,8 +222,8 @@ let delete_checked contents name =
   | Error detail -> raise (Refused (Configuration_unavailable detail))
   | Ok toml ->
     (match
-       ( Otoml.find_result toml Otoml.get_boolean [ "fusion"; "enabled" ]
-       , Otoml.find_result toml Otoml.get_string [ "fusion"; "default_preset" ] )
+       ( Otoml.find_result toml Otoml.get_boolean [ Runtime_toml_namespace.(key Fusion); "enabled" ]
+       , Otoml.find_result toml Otoml.get_string [ Runtime_toml_namespace.(key Fusion); "default_preset" ] )
      with
      | Ok true, Ok default when String.equal default name ->
        raise (Refused (Default_preset_deleted name))

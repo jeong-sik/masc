@@ -323,6 +323,11 @@ type token_usage =
   ; output_tokens : int
   ; cached_tokens : int
   ; reasoning_tokens : int
+  ; prompt_tokens : int option
+      (** Counted-once prompt count from [session/tokenUsage]; absent on a
+          raw [turn/completed] aggregate. Never inferred from cache counters. *)
+  ; cache_read_tokens : int option
+  ; cache_write_tokens : int option
   }
 
 type turn_error_kind =
@@ -484,9 +489,28 @@ type notification =
       ; delta : string
       }
   | Usage_changed of subscription_usage
+  | View_gap of
+      { session_id : string option
+      ; after : string
+      ; next : string
+      }
+      (** Dropped view events between two opaque cursors. A missing session
+          identity cannot prove the gap belongs to another subscription. *)
+  | Model_usage_reported of
+      { session_id : string
+      ; turn_id : string
+      ; model_id : string option
+      ; view_cursor : string
+      ; usage : token_usage
+      }
+      (** [session/tokenUsage], one per model call: the model that produced
+          that usage ([modelId]), [None] when the host did not name it. The
+          counted-once prompt count and raw counters are retained even when
+          [turn/completed] omits its optional aggregate. [view_cursor] is the
+          opaque identity used to avoid counting a replay twice. *)
   | Unhandled_notification of { method_ : string }
       (** A method this codec does not project: [session/started] and the
-          other session projections, approval view events, [view/gap], and
+          other session projections, approval view events, and
           methods a later host adds. The schema requires clients to tolerate
           these. The method is kept so an observer can report it. *)
 

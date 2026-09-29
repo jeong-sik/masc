@@ -117,18 +117,25 @@ let vision_store_dir ~keeper_name =
 let frames_dir ~keeper_name =
   Store.frames_dir ~dir:(vision_store_dir ~keeper_name)
 
+let run_artifact_job ~label f =
+  match Domain_pool_ref.get () with
+  | None -> Eio_guard.run_in_systhread ~label f
+  | Some _ ->
+      Eio_guard.check_if_ready ();
+      Domain_pool_ref.submit_io_or_inline f
+
 let store_frame ~keeper_name bytes =
   let dir = frames_dir ~keeper_name in
-  Eio_guard.run_in_systhread ~label:"vision-artifact-store" (fun () ->
+  run_artifact_job ~label:"vision-artifact-store" (fun () ->
     Store.store ~auto_prune:true ~dir bytes)
 
 let store_kept ~keeper_name bytes =
   let dir = vision_store_dir ~keeper_name in
-  Eio_guard.run_in_systhread ~label:"vision-artifact-store" (fun () ->
+  run_artifact_job ~label:"vision-artifact-store" (fun () ->
     Store.store ~auto_prune:false ~dir bytes)
 
 let load_artifact ~dir handle =
-  Eio_guard.run_in_systhread ~label:"vision-artifact-load" (fun () -> Store.load ~dir handle)
+  run_artifact_job ~label:"vision-artifact-load" (fun () -> Store.load ~dir handle)
 
 let record_vision_analyze_result ~result ~reason =
   Otel_metric_store.inc_counter
@@ -510,7 +517,7 @@ let official_failure_can_advance : Fusion_official_client.failure -> bool = func
      | Invalid_config _ | Protocol_error _ | Unsupported_control_request _
      | Turn_transport_interrupted _ | Context_window_exceeded _ | Turn_failed _
      | Turn_failed_with_observation _ | Stopped_by_host _ | Quota_blocked _
-     | Process_exited { turn_admitted = true; _ } | Timeout _ -> false)
+     | Process_exited { turn_admitted = true; _ } | Unhandled_exception _ | Timeout _ -> false)
 ;;
 
 let outcome_of_official_failure ~runtime_id failure =

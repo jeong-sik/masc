@@ -339,25 +339,29 @@ let msp_reasoning_effort : Llm_provider.Reasoning_effort.t -> Msp.reasoning_effo
   | Llm_provider.Reasoning_effort.Max -> Msp.Effort_max
 ;;
 
-(* MSP's raw [TokenUsage] puts [cachedTokens] inside or beside
-   [inputTokens] depending on the provider's convention (msp.d.ts,
-   [TokenUsage.cachedTokens]). The counted-once prompt total is
-   [promptTokens] on [session/tokenUsage], which the serve client does not
-   decode, and [turn/completed] carries only the raw counters. So the cache
-   split is not claimed: [inputTokens] stands as the prompt count and both
-   cache slots stay zero, which never records more cache than prompt. *)
+(* Only the host's counted-once prompt count normalizes the provider's cache
+   convention. A terminal-only raw aggregate cannot establish that split. *)
 let api_usage_of_token_usage (usage : Msp.token_usage) : Agent_core.Types.api_usage =
-  { input_tokens = usage.input_tokens
+  let input_tokens, cache_read_input_tokens, cache_creation_input_tokens =
+    match usage.prompt_tokens with
+    | None -> usage.input_tokens, 0, 0
+    | Some prompt ->
+      let known = function Some count -> count | None -> 0 in
+      prompt, known usage.cache_read_tokens, known usage.cache_write_tokens in
+  { input_tokens
   ; output_tokens = usage.output_tokens
-  ; cache_creation_input_tokens = 0
-  ; cache_read_input_tokens = 0
+  ; cache_creation_input_tokens
+  ; cache_read_input_tokens
   ; cost_usd = None
   }
 ;;
 
-(* The model a Keeper row names. The host reports the session's model on
-   every [session/start] and [session/resume] result; the configured id and
-   then the runtime id name the row only when it does not. *)
+(* The model a Keeper row names. [reported] is the model the host named: the
+   one the turn's last reported call ran on ([session/tokenUsage]), and the
+   session's model from [session/start] or [session/resume] before any call
+   is reported. A last call reported without a model leaves it [None]. The
+   configured id and then the runtime id name the row only when it is
+   [None]. *)
 let model_label ~runtime_id ~configured_model reported =
   match reported, configured_model with
   | Some model, (Some _ | None) -> model
@@ -745,6 +749,9 @@ let stream_projection ~quota_scope ~keeper_name ~runtime_id ~configured_model ~r
                 ~resets_at:(float_of_int reset_ms /. 1000.))
               (Msp.exhausted_subscription_reset_ms usage)) quota_scope
         | Serve.Turn_terminal_received _ -> ()
+        (* The usage this turn reports belongs to the model its calls ran
+           on, when the host names it, rather than the session's selection. *)
+        | Serve.Model_call_reported { model; _ } -> reported_model := model
         | Serve.Usage_reported { session_id; turn_id; usage } ->
           (* [turn/completed] usage is "the turn's aggregate token usage,
              summed across the turn's model completions" (msp.d.ts,
@@ -1476,6 +1483,12 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
                     ~on_stream_event:(fun event ->
                       (match event with
                        | Serve.Turn_terminal_received terminal -> provider_terminal := Some terminal
+                       (* A host stop settles with the model the calls ran
+                          on, as a completed turn does. *)
+                       | Serve.Model_call_reported { model; _ } ->
+                         observed_turn := Option.map
+                             (fun (turn : observed_turn) -> { turn with model })
+                             !observed_turn
                        | Serve.Turn_started _ | Serve.Text_delta _ | Serve.Text_completed _
                        | Serve.Native_tool_started _ | Serve.Native_tool_finished _
                        | Serve.Approval_decided _ | Serve.Subscription_usage_observed _
@@ -1558,7 +1571,8 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
             | Some detail -> Error (internal_error detail)
           in
           let latency_ms = Int.of_float ((Time_compat.now () -. started_at) *. 1000.0) in
-          let model = model_label ~runtime_id ~configured_model:config.model turn.model in
+          let ran_model = Serve.reported_model turn in
+          let model = model_label ~runtime_id ~configured_model:config.model ran_model in
           let usage_scope =
             match turn.usage with
             | Some _ -> Runtime_usage_scope.Turn_total
@@ -1574,7 +1588,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
                 Some
                   { Agent_core.Types.default_inference_telemetry with
                     request_latency_ms = Some latency_ms
-                  ; canonical_model_id = turn.model
+                  ; canonical_model_id = ran_model
                   ; reasoning_tokens =
                       Option.map (fun (usage : Msp.token_usage) -> usage.reasoning_tokens) turn.usage
                   }

@@ -69,7 +69,7 @@ let run ~secure_random ~net ~mgr ~clock ~cwd ~directory ~account_home ~quota_sco
           | Runtime_muse_serve.Turn_started _ | Runtime_muse_serve.Text_delta _
           | Runtime_muse_serve.Text_completed _ | Runtime_muse_serve.Native_tool_started _
           | Runtime_muse_serve.Native_tool_finished _ | Runtime_muse_serve.Approval_decided _
-          | Runtime_muse_serve.Compaction_observed _
+          | Runtime_muse_serve.Compaction_observed _ | Runtime_muse_serve.Model_call_reported _
           | Runtime_muse_serve.Turn_terminal_received _ | Runtime_muse_serve.Usage_reported _
           | Runtime_muse_serve.Turn_finished _ -> ())
         ~storage_root ?reasoning_effort ~mcp_servers ~mgr ~clock

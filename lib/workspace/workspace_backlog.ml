@@ -36,17 +36,7 @@ let decode_backlog ~path json =
                  path
                  entry.dropped_task_id
                  detail
-           | Field_absent | Field_decoded -> ());
-          match entry.dropped_outcomes.legacy_intent_dropped with
-          | Some Legacy_complete ->
-              Log.Misc.warn
-                "[read_backlog] %s: task %s legacy intent=complete dropped; completion submission retained"
-                path entry.dropped_task_id
-          | Some Legacy_cancel ->
-              Log.Misc.warn
-                "[read_backlog] %s: task %s legacy intent=cancel dropped; task restored to in_progress"
-                path entry.dropped_task_id
-          | None -> ())
+           | Field_absent | Field_decoded -> ()))
         dropped;
       Ok backlog
   | Error msg ->
@@ -428,11 +418,18 @@ let repair_backlog_copies_result config backlog =
   with
   | Error _ as error -> error
   | Ok () ->
-      clear_backlog_cache_for primary_path;
-      clear_backlog_cache_for recovery_path;
-      try (Atomic.get Workspace_hooks.on_task_mutation_fn) (); Ok () with
-      | Eio.Cancel.Cancelled _ as error -> raise error
-      | error -> Error (Printexc.to_string error)
+      (* Same as in [write_backlog_result]: the primary is the commit point,
+         so once both copies are written a cancellation must not skip the
+         cache invalidation or the task mutation observer. Without this the
+         repair had a different cancellation contract from a normal commit:
+         a cancellation arriving while the observer yields was re-raised and
+         the observer was skipped even though the repair had committed. *)
+      protect_backlog_commit_settlement (fun () ->
+        clear_backlog_cache_for primary_path;
+        clear_backlog_cache_for recovery_path;
+        try (Atomic.get Workspace_hooks.on_task_mutation_fn) (); Ok () with
+        | Eio.Cancel.Cancelled _ as error -> raise error
+        | error -> Error (Printexc.to_string error))
 ;;
 
 (** [write_backlog ?after_commit config backlog] persists the primary SSOT,

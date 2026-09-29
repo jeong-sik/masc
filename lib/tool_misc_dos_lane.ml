@@ -166,7 +166,7 @@ let of_lane ?(extra = []) ~base_path ~tool_name ~start_time
       ()
   | Error Dos_lane.No_machine -> no_machine ~base_path ~tool_name ~start_time
   | Error
-      (( Dos_lane.Invalid_request _ | Dos_lane.Held_by _
+      (( Dos_lane.Invalid_request _ | Dos_lane.Held_by _ | Dos_lane.Other_program _
        | Dos_lane.Checkpoint_refused
            ( Machine_checkpoint.No_slot _ | Machine_checkpoint.Other_machine _
            | Machine_checkpoint.Other_format _ ) ) as e) ->
@@ -427,6 +427,26 @@ let after_announcing result =
    wait for a pass like any other player. And the name is
    the caller's own: an MCP client named like a stopped Keeper is let go as
    that Keeper would be. *)
+(* A revoked invite can never pass the controller its name holds (RFC
+   play-link-for-the-shared-machine §2.4), so revoking lets it go and tells
+   the board. [by] is the operator who revoked. The credential is deleted
+   first: a request the invitee sent before that and that reaches the lane
+   after this can still take the freed controller, and revoking the name
+   again frees it. *)
+let release_revoked_invite ~holder ~by =
+  let released =
+    off_domain (fun () ->
+      Dos_lane.release_left ~holder
+        ~announce:
+          (announce ~author:by
+             (Printf.sprintf "%s 님의 초대가 회수되어 DOS 조종권이 풀렸어요" holder)))
+  in
+  (match released with
+   | Ok true -> flush_announcements ()
+   | Ok false | Error _ -> ());
+  released
+;;
+
 let free_left_controller ~holder_left ~who =
   match off_domain Dos_lane.screen with
   | Ok { Dos_lane.controller = Some holder; _ }
@@ -564,6 +584,15 @@ let handle_press ~tool_name ~start_time ~base_path ~who args =
     (off_domain @@ fun () -> Dos_lane.press ~who
        ~keys:(get_string_list args "keys")
        ~steps:(get_int args "steps" default_steps))
+;;
+
+(* [masc_dos_press] for a caller that chose the keys from what one program
+   means by them (the masc pad): they go in only while that program is still
+   the one loaded. *)
+let press_into ~tool_name ~start_time ~base_path ~who ~saves_name ~keys =
+  after_announcing @@
+  of_lane_run ~base_path ~tool_name ~start_time
+    (off_domain @@ fun () -> Dos_lane.press_into ~saves_name ~who ~keys ~steps:default_steps)
 ;;
 
 let handle_click ~tool_name ~start_time ~base_path ~who args =

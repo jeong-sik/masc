@@ -22,6 +22,9 @@ type source =
   | Runtime_toml
   | Standalone_json of string
 
+(* The [[voice]] table of runtime.toml, spelled once (#39539). *)
+let voice_table = Runtime_toml_namespace.(key Voice)
+
 let error_message = function
   | Configuration_unavailable detail -> "runtime.toml could not be read: " ^ detail
   | Configuration_changed ->
@@ -45,13 +48,13 @@ exception Voice_invalid of string
 exception Standalone_active of string
 
 let endpoints_path = function
-  | Tts -> "voice.tts.endpoints"
-  | Stt -> "voice.stt.endpoints"
+  | Tts -> voice_table ^ ".tts.endpoints"
+  | Stt -> voice_table ^ ".stt.endpoints"
 ;;
 
 let section_table = function
-  | Tts -> "voice.tts"
-  | Stt -> "voice.stt"
+  | Tts -> voice_table ^ ".tts"
+  | Stt -> voice_table ^ ".stt"
 ;;
 
 let string_field key = function
@@ -125,19 +128,19 @@ let apply_change contents = function
   | Set_tts_default_voice voice ->
     Toml_line_editor.edit_table_scalar
       contents
-      ~path:"voice.tts"
+      ~path:(voice_table ^ ".tts")
       ~key:"default_voice"
       ~value:(Some voice)
   | Set_send_on_stop send ->
     Toml_line_editor.edit_table_bool
       contents
-      ~path:"voice.stt"
+      ~path:(voice_table ^ ".stt")
       ~key:"send_on_stop"
       ~value:send
   | Set_agent_voice (agent, voice) ->
     Toml_line_editor.edit_table_scalar
       contents
-      ~path:"voice.tts.agent_voices"
+      ~path:(voice_table ^ ".tts.agent_voices")
       ~key:agent
       ~value:voice
 ;;

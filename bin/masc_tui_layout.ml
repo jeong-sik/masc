@@ -88,26 +88,19 @@ let allocate_board_read ~terminal_rows ~body_line_count ~comment_line_count =
   else unpositioned
 
 type board_read_scroll = {
-  normalized_scroll : int;
   body_offset : int;
   comment_offset : int;
 }
 
 let project_board_read_scroll ~body_line_count ~body_rows ~comment_line_count
-    ~comment_rows scroll =
-  let body_line_count = max 0 body_line_count in
-  let body_rows = max 0 body_rows in
-  let comment_line_count = max 0 comment_line_count in
-  let comment_rows = max 0 comment_rows in
-  let maximum_body_offset = max 0 (body_line_count - body_rows) in
-  let maximum_comment_offset = max 0 (comment_line_count - comment_rows) in
-  let maximum_scroll = maximum_body_offset + maximum_comment_offset in
-  let normalized_scroll = max 0 (min scroll maximum_scroll) in
-  let body_offset = min normalized_scroll maximum_body_offset in
-  let comment_offset =
-    min maximum_comment_offset (normalized_scroll - body_offset)
+    ~comment_rows ~body_scroll ~comment_scroll =
+  let body_offset =
+    max 0 (min body_scroll (max 0 (body_line_count - body_rows)))
   in
-  { normalized_scroll; body_offset; comment_offset }
+  let comment_offset =
+    max 0 (min comment_scroll (max 0 (comment_line_count - comment_rows)))
+  in
+  { body_offset; comment_offset }
 
 let board_read_side_body_minimum_cols = 78
 let board_read_side_comment_cols = 40
@@ -120,9 +113,14 @@ let board_read_side_minimum_cols =
 let board_read_side_layout ~cols =
   if cols < board_read_side_minimum_cols then None
   else
-    Some
-      ( cols - board_read_side_comment_cols - board_read_side_gutter_cols
-      , board_read_side_comment_cols + board_read_side_gutter_cols )
+    (* Keep the old 78/40 minimum. Above it, give half of each extra pair
+       of cells to comments and the other half to the post. *)
+    let comment_cols =
+      board_read_side_comment_cols
+      + ((cols - board_read_side_minimum_cols) / 2)
+      + board_read_side_gutter_cols
+    in
+    Some (cols - comment_cols, comment_cols)
 
 type board_read_side_allocation = {
   body_rows : int;

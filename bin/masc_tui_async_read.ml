@@ -9,7 +9,7 @@ type source =
 
 let source_prefix = function
   | Keeper_turns -> "keeper turns load failed: "
-  | Standalone_lanes -> "standalone lanes load failed: "
+  | Standalone_lanes -> "lanes load failed: "
   | Connectors -> "connector load failed: "
   | Keeper_schedule -> "keeper schedule load failed: "
   | Resource_read -> "resource read: "

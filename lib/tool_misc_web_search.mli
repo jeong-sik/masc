@@ -6,8 +6,9 @@
     [Tavily] / [Exa] / [Bing_api] / [Ollama]) with response
     caching. Only
     providers whose credentials are present enter the chain; an
-    empty chain is an explicit configuration failure, never an
-    empty success. [Brave_llm_context] joins only through explicit
+    empty chain is an explicit configuration failure. A valid empty
+    response is returned if no later provider finds hits; provider failures
+    remain in [provider_errors] alongside the successful result. [Brave_llm_context] joins only through explicit
     provider config (never the default order) and answers with a
     grounded context envelope — [context_text] + [sources] — in
     place of result rows; its token budget is negotiated in the
@@ -43,12 +44,15 @@
     grounded provider (no client-side truncation, matching the
     request-negotiated budget of the real path); [`Empty]
     simulates a successful response with no hits; [`Error msg]
-    simulates a transport-layer failure. *)
+    simulates a transport-layer failure; [`Brave_body body] feeds
+    [body] as a Brave HTTP 200 response through the same parse path
+    as the real Brave provider. *)
 type simulated_provider_outcome =
   [ `Error of string
   | `Empty
   | `Hits of (string * string * string) list
   | `Grounded of (string * string * string list) list
+  | `Brave_body of string
   ]
 
 (** {1 Provider fallback plan} *)
@@ -97,41 +101,42 @@ val provider_error_to_string : provider_error -> string
 
 (** {1 Provider parsers}
 
-    Each parser returns [(title, url, snippet)] triples filtered
+    Each parser returns [Ok] with [(title, url, snippet)] triples filtered
     by {!valid_search_result_url} and non-empty title.  Used
     internally by {!handle}'s fetch pipeline; exposed for unit
     tests so per-provider payload parsing can be exercised
-    without an HTTP roundtrip. *)
+    without an HTTP roundtrip. Malformed JSON, missing result arrays and
+    nonempty arrays with no usable entries return [Error (Parse _)]. Only an
+    explicit empty array returns [Ok []]. *)
 
-val parse_searxng_json : string -> (string * string * string) list
+val parse_searxng_json : string -> ((string * string * string) list, provider_error) result
 (** Parse SearxNG JSON response from
     [{ "results": \[{title, url, content}, ...\] }]. *)
 
-val parse_brave_json : string -> (string * string * string) list
+val parse_brave_json : string -> ((string * string * string) list, provider_error) result
 (** Parse Brave Search JSON response from
     [{ "web": { "results": \[{title, url, description}, ...\] } }]. *)
 
-val parse_tavily_json : string -> (string * string * string) list
+val parse_tavily_json : string -> ((string * string * string) list, provider_error) result
 (** Parse Tavily JSON response from
     [{ "results": \[{title, url, content}, ...\] }]. *)
 
-val parse_exa_json : string -> (string * string * string) list
+val parse_exa_json : string -> ((string * string * string) list, provider_error) result
 (** Parse Exa JSON response from
     [{ "results": \[{title, url, snippet}, ...\] }]. *)
 
-val parse_bing_search_json : string -> (string * string * string) list
+val parse_bing_search_json : string -> ((string * string * string) list, provider_error) result
 (** Parse Bing Search API JSON response from
     [{ "webPages": { "value": \[{name, url, snippet}, ...\] } }]. *)
 
-val parse_ollama_search_json : string -> (string * string * string) list
+val parse_ollama_search_json : string -> ((string * string * string) list, provider_error) result
 (** Parse an Ollama web-search response from
     [{ "results": \[{title, url, content}, ...\] }]. *)
 
-val parse_brave_llm_context_json : string -> (string * string * string list) list
+val parse_brave_llm_context_json : string -> ((string * string * string list) list, provider_error) result
 (** Parse a Brave LLM Context response from
     [{ "grounding": { "generic": \[{url, title, snippets}, ...\] } }]
-    into (url, title, snippets) entries.  Total like its sibling
-    parsers: malformed JSON or an unexpected shape yields [[]].
+    into (url, title, snippets) entries.  Malformed JSON or an unexpected shape returns [Error (Parse _)].
     Entries without a valid http(s) url or with zero snippets are
     dropped; a missing title falls back to the url. *)
 
@@ -166,11 +171,9 @@ val handle : tool_name:string -> start_time:Tool_timing.started -> Yojson.Safe.t
 
     Failure classes (RFC-0189):
     - [Workflow_rejection]: empty query input.
-    - [Runtime_failure]:    aggregate "all web search providers
-      failed: ..." — provider fallback chain exhausted.
-      Per-provider transport/server distinction is collapsed in
-      the aggregate today; a future PR may lift fetch_provider
-      to typed variants. *)
+    - [Dependency_unavailable]: no configured provider.
+    - [Runtime_failure]: every provider failed. A valid empty result is
+      successful and keeps any failed providers in [provider_errors]. *)
 
 val simulate_for_test :
   query:string ->
@@ -181,8 +184,9 @@ val simulate_for_test :
     deterministic projection of {!handle}'s fallback chain for
     unit tests.  [outcomes] maps provider names to
     {!simulated_provider_outcome}; the simulator iterates in
-    list order, returns the first [`Hits] result that produces
-    non-empty hits, accumulates errors otherwise.
+    list order, returns the first nonempty result, or the first valid empty
+    response if no later provider finds hits. Provider errors remain visible
+    in the successful envelope; only an entirely failed chain is an error.
 
     Bypasses cache, rate-limit, and secret detection — those
     are tested separately at {!handle}.  Pinned in the .mli so

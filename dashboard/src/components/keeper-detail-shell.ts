@@ -6,6 +6,10 @@ import type { Keeper } from '../types'
 import { keepers } from '../store'
 import { KeeperPhaseAndStage } from './keeper-phase-indicator'
 import { KeeperBadge } from './keeper-badge'
+import { KeeperPortrait } from './keeper-portrait'
+
+// Inside the header's 36px (size-9) framed box, whose 1px border leaves 34px.
+const HEADER_PORTRAIT_PX = 32
 
 function SectionLabel({ children }: { children: unknown }) {
   return html`<div class="text-3xs font-semibold uppercase tracking-[var(--track-label)] text-[var(--color-fg-muted)]">${children}</div>`
@@ -75,7 +79,11 @@ export function KeeperDetailHeaderInfo({
       <div class="size-9 shrink-0 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] border border-[var(--color-border-default)] flex items-center justify-center text-lg">
         ${keeper.emoji
           ? html`<span aria-hidden="true">${keeper.emoji}</span>`
-          : html`<${KeeperBadge} id=${keeper.name} size="lg" variant="sigil" />`}
+          : html`<${KeeperPortrait}
+              name=${keeper.name}
+              sizePx=${HEADER_PORTRAIT_PX}
+              fallback=${html`<${KeeperBadge} id=${keeper.name} size="lg" variant="sigil" />`}
+            />`}
       </div>
       <div class="flex min-w-0 flex-1 flex-col gap-0.5">
         <div class="flex flex-wrap items-center gap-2.5">

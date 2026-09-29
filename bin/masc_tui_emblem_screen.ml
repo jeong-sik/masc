@@ -1,80 +1,153 @@
+module View = Masc_tui_portrait_view
+module Draw = Keeper_portrait_draw
+
 type drawn =
   | Moving
-  | Still
   | Absent
 
-let backdrop snapshot =
-  match Masc_tui_terminal_palette.snapshot_palette snapshot with
-  | Some palette -> Masc_tui_imp_emblem.Known palette
-  | None -> (
-      match Masc_tui_terminal_palette.snapshot_theme_mode snapshot with
-      | Some mode -> Masc_tui_imp_emblem.Page mode
-      | None -> Masc_tui_imp_emblem.Unknown)
+type laid_out = {
+  drawn : drawn;
+  lines : string list;
+  placement : View.placement option;
+}
 
-let moves ~colors_enabled (backdrop : Masc_tui_imp_emblem.backdrop) =
-  colors_enabled
-  &&
-  match backdrop with
-  | Known _ | Page _ -> true
-  | Unknown -> false
+type style =
+  | Painted
+  | Dotted
 
-let pose ~moving ~elapsed =
-  if not moving then Masc_tui_imp_emblem.settled
-  else
-    match
-      Masc_tui_imp_emblem.turning
-        (Float.max 0.0 elapsed /. Masc_tui_imp_emblem.loop_seconds)
-    with
-    | Some pose -> pose
-    (* [turning] refuses only a phase that is not finite, and the only way to
-       get one here is an elapsed time that is not: nothing to turn by, so
-       the imp is held. *)
-    | None -> Masc_tui_imp_emblem.settled
+let style_of_string = function
+  | "painted" -> Some Painted
+  | "dotted" -> Some Dotted
+  | _ -> None
 
-(* Stdlib.Lazy: forced only on the render path, which runs on the main loop's
-   one fiber, and from tests that run without Eio. *)
-let renderer = lazy (Masc_tui_imp_emblem.create ())
+let string_of_style = function
+  | Painted -> "painted"
+  | Dotted -> "dotted"
+
+let next_style = function
+  | Painted -> Dotted
+  | Dotted -> Painted
+
+let milliseconds_per_second = 1000.0
+
+(* Where on its loop the candle is drawn. A time that is not finite says
+   nothing about where that is, so the candle stands still. *)
+type moment =
+  | At of int
+  | Held
+
+let moment_of elapsed =
+  if Float.is_finite elapsed then
+    (* Past the int range (some 146 million years on screen) the moment is
+       unspecified, but every int is a moment of the loop. *)
+    At (Float.to_int (Float.round (Float.max 0.0 elapsed *. milliseconds_per_second)))
+  else Held
+
+let pose_of = function
+  | At milliseconds -> Draw.pose_at ~milliseconds
+  | Held -> Draw.still
+
+(* A dotted candle held still faces front: the start of its sway. *)
+let sway_milliseconds_of = function
+  | At milliseconds -> milliseconds mod Keeper_portrait_solid.sway_period_ms
+  | Held -> 0
+
+(* A dotted candle is drawn as many pixels tall as the terminal shows it, so
+   the terminal never scales it and every dot stays a square. A mosaic draws
+   one pixel a cell, which is the box's own size. *)
+let dotted_size display (box : View.box) =
+  match display with
+  | View.Pixels { cell_height; cell_width = _ } -> (
+      let shown = Int.max Draw.min_size (Int.min Draw.max_size (box.View.rows * cell_height)) in
+      match Draw.size_of_int shown with
+      | Some size -> size
+      (* [shown] is inside the range size_of_int accepts. *)
+      | None -> box.View.size)
+  | View.Mosaic | View.No_picture -> box.View.size
+
+type picture_key =
+  | Painted_at of Draw.size * Draw.pose
+  | Dotted_at of Draw.size * int
+
+let key_of style display box moment =
+  match style with
+  | Painted -> Painted_at (box.View.size, pose_of moment)
+  | Dotted -> Dotted_at (dotted_size display box, sway_milliseconds_of moment)
+
+(* The last picture rendered. A frame that is repainted for something else
+   -- the clock, a key -- asks for the picture it already drew, and the
+   renderer is the cost of a step. *)
+let last_render : (picture_key * Draw.image) option ref = ref None
+
+let render key =
+  match !last_render with
+  | Some (drawn, image) when drawn = key -> image
+  | Some _ | None ->
+      let image =
+        match key with
+        | Painted_at (size, pose) ->
+            let body, equipment = Keeper_portrait_look.mascot in
+            Draw.render_posed body equipment pose size
+        | Dotted_at (size, milliseconds) -> Keeper_portrait_solid.mascot ~milliseconds size
+      in
+      last_render := Some (key, image);
+      image
 
 let centred ~cols line =
   let width = Masc_tui_message_layout.display_width line in
   if width >= cols then Masc_tui_message_layout.fit_width line cols
   else String.make ((cols - width) / 2) ' ' ^ line
 
-(* The blank row between the imp and its caption. *)
+(* The blank row between the candle and its caption. *)
 let caption_gap_rows = 1
 
-let rows ~cols ~rows ~caption ~elapsed ~colors_enabled ~backdrop =
+let rows ~style ~cols ~rows ~caption ~elapsed ~display ~project ~origin:(origin_row, origin_col) =
   let caption_rows = List.length caption in
-  let emblem_rows =
+  let picture_rows =
     match caption with
     | [] -> rows
     | _ :: _ -> rows - caption_rows - caption_gap_rows
   in
-  let drawn, emblem =
-    match Masc_tui_imp_emblem.fit ~cols ~rows:emblem_rows with
-    | None -> (Absent, [])
-    | Some size ->
-        let moving = moves ~colors_enabled backdrop in
-        let frame =
-          Masc_tui_imp_emblem.frame (Lazy.force renderer) size
-            (pose ~moving ~elapsed)
-            (Masc_tui_imp_emblem.lighting backdrop)
-        in
-        ( (if moving then Moving else Still)
-        , List.map (centred ~cols)
-            (Masc_tui_imp_emblem.lines ~ink:Masc_tui_imp_emblem.stdout_ink frame) )
+  let picture =
+    match View.fit display ~max_cols:cols ~max_rows:picture_rows with
+    | None -> None
+    | Some box ->
+        let image = render (key_of style display box (moment_of elapsed)) in
+        Some (box, image, View.lines ~project display box image)
+  in
+  let picture_lines, left =
+    match picture with
+    | None -> ([], 0)
+    | Some (box, _, lines) ->
+        let left = (cols - box.View.cols) / 2 in
+        (List.map (fun line -> String.make left ' ' ^ line) lines, left)
   in
   let block =
-    match emblem, caption with
-    | [], _ | _, [] -> emblem @ List.map (centred ~cols) caption
+    match picture_lines, caption with
+    | [], _ | _, [] -> picture_lines @ List.map (centred ~cols) caption
     | _ :: _, _ :: _ ->
-        emblem
+        picture_lines
         @ List.init caption_gap_rows (fun _ -> "")
         @ List.map (centred ~cols) caption
   in
   let top = Int.max 0 ((rows - List.length block) / 2) in
-  let body = List.init top (fun _ -> "") @ block in
-  (drawn, List.filteri (fun index _ -> index < Int.max 0 rows) body)
+  let lines =
+    List.filteri (fun index _ -> index < Int.max 0 rows) (List.init top (fun _ -> "") @ block)
+  in
+  let placement =
+    match picture, display with
+    | Some (box, image, _), View.Pixels _ ->
+        Some
+          {
+            View.image_id = Masc_tui_graphics.image_id Masc_tui_graphics.Mascot;
+            row = origin_row + top;
+            column = origin_col + left;
+            box;
+            image;
+          }
+    | Some _, (View.Mosaic | View.No_picture) | None, _ -> None
+  in
+  { drawn = (match picture with Some _ -> Moving | None -> Absent); lines; placement }
 
 type keeper_count =
   | Keepers_read of int
@@ -93,12 +166,15 @@ let about_facts ~theme keepers =
 let last_drawn = ref Absent
 let begin_frame () = last_drawn := Absent
 let drawn () = !last_drawn
+let chosen_style = ref Painted
+let set_style style = chosen_style := style
+let style () = !chosen_style
 
-let body ~cols ~rows:height ~caption ~elapsed =
-  let drawn, lines =
-    rows ~cols ~rows:height ~caption ~elapsed
-      ~colors_enabled:Masc_tui_theme.colors_enabled
-      ~backdrop:(backdrop (Masc_tui_terminal_palette.snapshot ()))
+let body ~cols ~rows:height ~caption ~elapsed ~origin =
+  let laid_out =
+    rows ~style:!chosen_style ~cols ~rows:height ~caption ~elapsed
+      ~display:(View.current_display ()) ~project:Masc_tui_terminal_palette.best_color ~origin
   in
-  last_drawn := drawn;
-  lines
+  last_drawn := laid_out.drawn;
+  Option.iter View.request laid_out.placement;
+  laid_out.lines

@@ -605,6 +605,22 @@ let test_json_conditional_stale_tag_sends_the_body () =
     (Response.json_conditional ~status:`OK ~meth:`GET
        ~if_none_match:(Some stale) ~body:conditional_body)
 
+(* If-None-Match compares weakly (RFC 9110 section 13.1.2): the W/ prefix on
+   either side does not decide a match, the opaque part does. *)
+let test_client_tag_matches_weakly () =
+  let matches ~etag client_tag = Response.client_tag_matches ~etag ~client_tag in
+  let yes name etag client_tag = Alcotest.(check bool) name true (matches ~etag client_tag) in
+  let no name etag client_tag = Alcotest.(check bool) name false (matches ~etag client_tag) in
+  yes "strong against strong" {|"a1"|} {|"a1"|};
+  yes "weak client against a strong tag" {|"a1"|} {|W/"a1"|};
+  yes "strong client against a weak tag" {|W/"a1"|} {|"a1"|};
+  yes "weak against weak" {|W/"a1"|} {|W/"a1"|};
+  yes "any tag" {|"a1"|} "*";
+  yes "in a list with spaces" {|"a1"|} {| W/"old" ,  W/"a1" |};
+  no "another tag" {|"a1"|} {|"a2"|};
+  no "another weak tag" {|"a1"|} {|W/"a2"|};
+  no "the opaque part is compared whole" {|"a1"|} {|"a"|}
+
 let test_json_conditional_absent_header_sends_the_body () =
   check_outcome
     "a client that claims no copy always receives the body"
@@ -1221,6 +1237,9 @@ let response_tests =
   ; ( "absent If-None-Match sends the body"
     , `Quick
     , test_json_conditional_absent_header_sends_the_body )
+  ; ( "If-None-Match compares weakly"
+    , `Quick
+    , test_client_tag_matches_weakly )
   ; ( "error statuses carry no validator"
     , `Quick
     , test_json_conditional_error_status_carries_no_tag )

@@ -89,7 +89,7 @@ media_failover = ["ollama_cloud.ollama-cloud-gemma4-31b"]
 # itself address or specifically require the Keeper's role; general topic or
 # capability overlap is not relevant.
 # When on, board attention asks Jev first. A relevant answer is kept; a
-# not-relevant answer or a failed call is judged again by the
+# not-relevant answer, explicit uncertain answer or failed call is judged again by the
 # board_attention_exact slots below. So only a relevant answer saves an
 # LLM call, and every other candidate waits for Jev and then the LLM.
 #
@@ -115,29 +115,25 @@ media_failover = ["ollama_cloud.ollama-cloud-gemma4-31b"]
 # thinking is optional too: true or false sends that enable_thinking on every
 # HTTP slot of the lane; absent keeps each slot's catalog default (the model's
 # thinking-support). Every slot of the lane must be able to carry the setting,
-# or boot refuses the lane and names the slot: GLM can (thinking.type =
-# disabled); deepseek-v4-flash on ollama_cloud below cannot turn thinking off
-# (thinking-control-format = "none" with thinking-support), and neither can a
-# reasoning-effort ladder without none. So thinking = false fits only a lane
-# whose slots can all turn thinking off -- not the shipped Board Attention or
-# HITL lanes, whose second slot is that deepseek row. Turning it off is a
-# trade: no reasoning tokens and no answer stranded in the reasoning field,
-# against whatever judgment quality the reasoning bought.
+# or boot refuses the lane and names the slot. The shipped DeepSeek V4.1
+# Flash binding has a reasoning-effort ladder without none, so thinking = false
+# is not valid for a lane using it. Keep the lane's catalog default unless
+# every slot can carry the requested thinking setting.
 # thinking = false
 [runtime.exact_output_lanes.librarian_exact]
-slots = ["glm-coding.glm-5-3", "ollama_cloud.deepseek-v4-flash"]
+slots = ["glm-coding.glm-5-3", "ollama_cloud.ollama-cloud-deepseek-v4-1-flash"]
 max_output_tokens = 8192
 
 [runtime.exact_output_lanes.hitl_auto_judge]
-slots = ["glm-coding.glm-5-3", "ollama_cloud.deepseek-v4-flash"]
+slots = ["glm-coding.glm-5-3", "ollama_cloud.ollama-cloud-deepseek-v4-1-flash"]
 max_output_tokens = 8192
 
 [runtime.exact_output_lanes.board_attention_exact]
-slots = ["glm-coding.glm-5-3", "ollama_cloud.deepseek-v4-flash"]
+slots = ["glm-coding.glm-5-3", "ollama_cloud.ollama-cloud-deepseek-v4-1-flash"]
 max_output_tokens = 8192
 
 [runtime.exact_output_lanes.verifier_exact]
-slots = ["glm-coding.glm-5-3", "ollama_cloud.ollama-cloud-deepseek-v4-flash"]
+slots = ["glm-coding.glm-5-3", "ollama_cloud.ollama-cloud-deepseek-v4-1-flash"]
 max_output_tokens = 8192
 
 # Answers the Stagehand browser extension's llm.generate
@@ -147,7 +143,7 @@ max_output_tokens = 8192
 # official clients); they run as one-shots after the HTTP slots and answer
 # without usage, which Stagehand's protocol leaves optional.
 [runtime.exact_output_lanes.browser_stagehand_exact]
-slots = ["glm-coding.glm-5-3", "ollama_cloud.deepseek-v4-flash"]
+slots = ["glm-coding.glm-5-3", "ollama_cloud.ollama-cloud-deepseek-v4-1-flash"]
 max_output_tokens = 8192
 
 # SSH remote execution endpoint registry (Phase 1 SSH lane, spec §4.2 in
@@ -1592,8 +1588,6 @@ supports-multimodal-inputs = true
 
 [ollama.qwen3-8-27b]
 
-[ollama_cloud.deepseek-v4-flash]
-
 [deepseek.deepseek-v4-pro]
 
 [deepseek.deepseek-v4-flash]
@@ -1814,7 +1808,6 @@ supports-multimodal-inputs = true
 # reasoning on whenever the request carries no control value.
 [models.ollama-cloud-deepseek-v4-1-flash]
 api-name = "deepseek-v4.1-flash"
-max-context = 1048576
 tools-support = true
 thinking-support = true
 streaming = true
@@ -1858,44 +1851,6 @@ supports-multimodal-inputs = true
 
 # No wizard-default: opt-in binding for lanes and trials.
 [ollama_cloud.ollama-cloud-deepseek-v4-1-flash-none]
-
-[models.ollama-cloud-deepseek-v4-flash]
-reasoning-uncontrolled = true
-api-name = "deepseek-v4-flash"
-max-context = 1048576
-tools-support = true
-thinking-support = true
-streaming = true
-
-[models.ollama-cloud-deepseek-v4-flash.capabilities]
-thinking-control-format = "none"
-# ollama.com /v1 streams the reasoning delta under "reasoning" (probe, #26788).
-# thinking-control-format above is the request axis only; without this line the
-# response axis resolves to reading no field and the reasoning is discarded.
-reasoning-streaming-format = "delta:reasoning"
-supports-image-input = false
-supports-multimodal-inputs = false
-
-# No wizard-default: this binding is selectable without changing the fleet default.
-[ollama_cloud.ollama-cloud-deepseek-v4-flash]
-# 2026-08-25: this model collapses into single-token repetition and, with no
-# declared budget, runs the collapse to ollama.com's own 65536-token cap. Wire
-# capture for 2026-08-24..25 caught 11 such generations verbatim -- ~228,000
-# characters of one word ("cryptic", "crowded") after a normal opening sentence
-# -- and turn records put the wall-clock at a 252s median, 7.09h across one day.
-#
-# Output tokens over the same 1516 turns: 1392 at <= 2048, 38 in 2048..8192,
-# then 86 at exactly 65536. The 8192..65535 band is empty, so this budget sits
-# between the two populations: it cannot truncate anything healthy that was
-# observed, and it bounds a collapse to a quarter of its former length -- both
-# the wall-clock and the garbage that a truncated turn leaves in the history the
-# next turn replays.
-#
-# It bounds the damage; it does not stop the collapse. The model is the one
-# repeating, and ollama.com/v1 ignores repeat_penalty (probed 2026-08-25 at seed
-# 7: 65 completion tokens against a 63-token baseline).
-max-tokens = 16384
-
 [models.ollama-cloud-deepseek-v4-pro]
 reasoning-uncontrolled = true
 api-name = "deepseek-v4-pro"
@@ -2207,7 +2162,7 @@ max-concurrent = 1
 # names is never walked.
 [runtime.lanes.coding]
 candidates = [
-  "ollama_cloud.deepseek-v4-flash",
+  "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
   "deepseek.deepseek-v4-pro",
 ]
 
@@ -2251,10 +2206,15 @@ candidates = [
 # 서버가 등록된 GitHub 저장소의 열린 PR 을 60초마다 읽을 때 쓸 토큰의 주인
 # Keeper 다(RFC-0465). 그 Keeper 의 github-cli/hosts.yml 토큰을 읽을 때마다 새로
 # 읽는다. 적지 않으면 PR 을 읽지 않고, /api/v1/repositories/pulls 가 그 이유를
-# 말한다. 이 표에는 pr_reader 말고 다른 키를 쓸 수 없다.
+# 말한다. github_host 와 graphql_url 은 생략하면 github.com 기본값으로 읽고,
+# GitHub Enterprise 를 읽을 때만 두 키를 함께 적는다(호스트만 적으면 무효).
+# 토큰은 그 호스트 이름의 hosts.yml 칸에서 읽는다. 이 표에는 아래 세 키 말고
+# 다른 키를 쓸 수 없다.
 #
 # [repositories]
 # pr_reader = "<keeper>"
+# github_host = "github.example.com"
+# graphql_url = "https://github.example.com/api/graphql"
 
 # ═══ Connectors ══════════════════════════════════════════════════════
 # 어떤 인바운드 메시지가 턴을 시작하는지를 커넥터별로 정한다. 운영자가 적어두는
@@ -2278,6 +2238,11 @@ trigger_policy = "mention_or_thread"
 
 [slack]
 trigger_policy = "mention_or_thread"
+
+# Board 글 닫기·다시 열기: 작성자 외에 이 목록의 Keeper도 도구를 쓸 수 있다.
+# 운영자는 별도 Dashboard 관리자 권한으로 처리한다. 빈 배열은 moderator를 끈다.
+[board]
+moderators = ["e-masc-the-leader"]
 
 # ── Fusion 패널+심판 심의 (RFC-0252) ─────────────────────────────────
 # masc_fusion 도구의 out-of-band 심의 루프 설정. 개인 dev 카나리로 기본 ON.

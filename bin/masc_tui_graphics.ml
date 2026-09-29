@@ -93,51 +93,6 @@ let chunk_bytes = 4096
    composer's already answers. *)
 let payload_media_type = "image/png"
 
-(* The raw formats the protocol names by their bytes per pixel: [f=24] is
-   RGB, [f=32] is RGBA with straight alpha, which the terminal blends over
-   whatever the cells behind the picture show. *)
-type raw_format =
-  | Rgb
-  | Rgba
-
-let raw_format_key = function
-  | Rgb -> 24
-  | Rgba -> 32
-
-let raw_bytes_per_pixel = function
-  | Rgb -> 3
-  | Rgba -> 4
-
-(* How a raw frame's bytes travel. [o=z] is RFC 1950 zlib, the one
-   compression the protocol names; the terminal inflates it back to the
-   [s * v] pixels the escape states. *)
-type compression =
-  | Uncompressed
-  | Zlib
-
-(* The same deflate Rgb_png writes its IDAT with, through decompress. *)
-let zlib data =
-  let input = De.bigstring_create De.io_buffer_size in
-  let output = De.bigstring_create De.io_buffer_size in
-  let w = De.Lz77.make_window ~bits:15 in
-  let q = De.Queue.create 0x1000 in
-  let encoded = Buffer.create (String.length data / 4) in
-  let consumed = ref 0 in
-  let refill buffer =
-    let len = min (Bigstringaf.length buffer) (String.length data - !consumed) in
-    Bigstringaf.blit_from_string data ~src_off:!consumed buffer ~dst_off:0 ~len;
-    consumed := !consumed + len;
-    len
-  in
-  let flush buffer len = Buffer.add_string encoded (Bigstringaf.substring buffer ~off:0 ~len) in
-  Zl.Higher.compress ~w ~q ~refill ~flush input output;
-  Buffer.contents encoded
-
-let payload_of compression data =
-  match compression with
-  | Uncompressed -> (data, "")
-  | Zlib -> (zlib data, ",o=z")
-
 (* Raw pixels, for a caller that holds a frame rather than a file. A raw
    format has no container, so the escape has to state the pixel dimensions
    the PNG header would otherwise carry -- [s=] and [v=] -- and the terminal
@@ -148,9 +103,8 @@ let payload_of compression data =
    bytes under [f=100], which is exactly the silent drop the comment above
    warns about. A caller holding a frame reaches for this one because it is
    the one that asks for the frame's dimensions. *)
-let encode_raw ~format ~compression ~identity ~data ~pixel_width ~pixel_height ~rows =
-  let payload, compression_key = payload_of compression data in
-  let encoded = Base64.encode_string payload in
+let encode_rgb ~identity ~data ~pixel_width ~pixel_height ~rows =
+  let encoded = Base64.encode_string data in
   let length = String.length encoded in
   let out = Buffer.create (length + (length / chunk_bytes * 32) + 64) in
   let rec emit offset =
@@ -160,8 +114,8 @@ let encode_raw ~format ~compression ~identity ~data ~pixel_width ~pixel_height ~
     if offset = 0
     then
       Buffer.add_string out
-        (Printf.sprintf "%sf=%d,s=%d,v=%d%s,a=T%s,r=%d,q=2,m=%d;%s%s" apc
-           (raw_format_key format) (max 1 pixel_width) (max 1 pixel_height) compression_key identity
+        (Printf.sprintf "%sf=24,s=%d,v=%d,a=T%s,r=%d,q=2,m=%d;%s%s" apc
+           (max 1 pixel_width) (max 1 pixel_height) identity
            (max 1 rows) more
            (String.sub encoded offset size)
            st)
@@ -173,7 +127,7 @@ let encode_raw ~format ~compression ~identity ~data ~pixel_width ~pixel_height ~
   (* A frame whose bytes do not match its stated dimensions would be drawn as
      whatever the terminal makes of the mismatch, so refuse instead. *)
   if String.length data = 0
-     || String.length data <> pixel_width * pixel_height * raw_bytes_per_pixel format
+     || String.length data <> pixel_width * pixel_height * 3
   then ""
   else begin
     emit 0;
@@ -181,24 +135,18 @@ let encode_raw ~format ~compression ~identity ~data ~pixel_width ~pixel_height ~
   end
 ;;
 
-let place_rgb = encode_raw ~format:Rgb ~compression:Uncompressed ~identity:""
+let place_rgb = encode_rgb ~identity:""
 
 let identity ~image_id ~placement_id =
   Printf.sprintf ",i=%d,p=%d,C=1" image_id placement_id
 
 let replace_rgb ~image_id ~placement_id =
-  encode_raw ~format:Rgb ~compression:Uncompressed ~identity:(identity ~image_id ~placement_id)
-
-(* A portrait is mostly a transparent surround and flat bands of shading: a
-   160 px candle's 102,400 bytes deflate to about 3 KB, and a stepping
-   /about candle sends one every 150 ms. *)
-let replace_rgba ~image_id ~placement_id =
-  encode_raw ~format:Rgba ~compression:Zlib ~identity:(identity ~image_id ~placement_id)
+  encode_rgb ~identity:(identity ~image_id ~placement_id)
 
 let delete_image ~image_id =
   Printf.sprintf "%sa=d,d=I,i=%d,q=2%s" apc image_id st
 
-let place ~data ~rows =
+let place_png ~identity ~data ~rows =
   let encoded = Base64.encode_string data in
   let length = String.length encoded in
   let out = Buffer.create (length + (length / chunk_bytes * 32) + 64) in
@@ -211,7 +159,7 @@ let place ~data ~rows =
        complete and may be drawn. *)
     if offset = 0 then
       Buffer.add_string out
-        (Printf.sprintf "%sf=100,a=T,r=%d,q=2,m=%d;%s%s" apc
+        (Printf.sprintf "%sf=100,a=T%s,r=%d,q=2,m=%d;%s%s" apc identity
            (max 1 rows) more
            (String.sub encoded offset size)
            st)
@@ -226,6 +174,17 @@ let place ~data ~rows =
     emit 0;
     Buffer.contents out
   end
+
+let place = place_png ~identity:""
+
+(* Ghostty 1.3.1 crashes in its Kitty o=z inflater for portrait-sized data
+   (compress.flate.Decompress.streamInner -> Io.Writer.unreachableRebase).
+   PNG keeps alpha and compact transfers while using the terminal's PNG
+   decoder, the same path the capability query already exercised. *)
+let replace_rgba ~image_id ~placement_id ~data ~pixel_width ~pixel_height ~rows =
+  match Rgb_png.encode_rgba ~width:pixel_width ~height:pixel_height ~rgba:data with
+  | Error _ -> ""
+  | Ok png -> place_png ~identity:(identity ~image_id ~placement_id) ~data:png ~rows
 
 let delete_all = Printf.sprintf "%sa=d%s" apc st
 

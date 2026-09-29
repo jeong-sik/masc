@@ -270,22 +270,46 @@ let test_raw_rgb_refuses_a_frame_that_contradicts_itself () =
     (Masc_tui_graphics.place_rgb ~data:"" ~pixel_width:4 ~pixel_height:2 ~rows:5)
 ;;
 
+(* What a terminal does with an [o=z] payload: RFC 1950 inflate. *)
+let inflate data =
+  let input = De.bigstring_create De.io_buffer_size in
+  let output = De.bigstring_create De.io_buffer_size in
+  let decoded = Buffer.create (String.length data * 4) in
+  let consumed = ref 0 in
+  let refill buffer =
+    let len = min (Bigstringaf.length buffer) (String.length data - !consumed) in
+    Bigstringaf.blit_from_string data ~src_off:!consumed buffer ~dst_off:0 ~len;
+    consumed := !consumed + len;
+    len
+  in
+  let flush buffer len = Buffer.add_string decoded (Bigstringaf.substring buffer ~off:0 ~len) in
+  match
+    Zl.Higher.uncompress ~allocate:(fun bits -> De.make_window ~bits) ~refill ~flush input output
+  with
+  | Ok () -> Buffer.contents decoded
+  | Error (`Msg message) -> failf "the payload is not zlib: %s" message
+;;
+
 (* Straight-alpha pixels under a stable identity: the portrait's transparent
    surround is blended by the terminal, and a second transfer under the same
    ids replaces the first rather than stacking. *)
 let test_raw_rgba_replaces_under_its_identity () =
   let w = 3 and h = 2 in
   let data = String.init (w * h * 4) (fun index -> Char.chr (index mod 256)) in
-  let keys =
+  let keys, payload =
     match
       Masc_tui_graphics.replace_rgba ~image_id:41 ~placement_id:1 ~data
         ~pixel_width:w ~pixel_height:h ~rows:4
       |> bodies
     with
-    | first :: _ -> fst (keys_and_payload first)
+    | first :: rest ->
+        let keys, first_payload = keys_and_payload first in
+        (keys, String.concat "" (first_payload :: List.map (fun body -> snd (keys_and_payload body)) rest))
     | [] -> failf "raw RGBA placement produced no escape"
   in
   let says key = List.exists (String.equal key) keys in
+  check bool "the pixels travel zlib-compressed" true (says "o=z");
+  check string "and inflate back to the frame" data (inflate (Base64.decode_exn payload));
   check bool "the payload is RGBA" true (says "f=32");
   check bool "and says how wide it is" true (says "s=3");
   check bool "and how tall" true (says "v=2");

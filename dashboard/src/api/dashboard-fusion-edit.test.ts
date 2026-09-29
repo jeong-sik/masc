@@ -6,6 +6,7 @@
 // every save — and nothing on this side would notice until an operator did.
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { runtimeReservedProviderIdsFixture } from '../lib/runtime-config-receipt.test-fixture'
 
 const devTokenMock = vi.hoisted(() => ({
   ensureDevToken: vi.fn(() => Promise.resolve()),
@@ -109,6 +110,7 @@ function committedBody(): Record<string, unknown> {
     source_text: '[fusion]\nenabled = true\n',
     source_revision: sourceRevision,
     provider_protocols: providerProtocols,
+    reserved_provider_ids: [...runtimeReservedProviderIdsFixture],
     state: 'committed',
     commit: { source_revision: sourceRevision, order: '7', durability: 'durable', warnings: [] },
     application: {

@@ -5737,7 +5737,7 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
   in
   let last_run =
     match lane.sl_last_outcome, lane.sl_last_terminal_at with
-    | None, _ -> "no run has finished"
+    | None, _ -> "no retained terminal observation"
     | Some outcome, None -> "last run " ^ Terminal_text.single_line outcome
     | Some outcome, Some at ->
       Printf.sprintf "last run %s %s ago"
@@ -6052,24 +6052,24 @@ let render_lanes_overview (state : state) =
     match state.standalone_lanes with
     | None ->
         Printf.sprintf "%s  %s  %s  %s"
-          (screen_title " MASC Lanes \xc2\xb7 Standalone") (title_missing_reading ~error:state.standalone_lanes_error) timestamp
+          (screen_title " MASC Lanes") (title_missing_reading ~error:state.standalone_lanes_error) timestamp
           (connection_badge state)
     | Some _ ->
         Printf.sprintf "%s  %s  %s  %s"
-          (screen_title " MASC Lanes \xc2\xb7 Standalone")
+          (screen_title " MASC Lanes")
           (tab_strip
              ~width:
                (tab_strip_width ~cols
-                  ~before:(screen_title " MASC Lanes \xc2\xb7 Standalone" ^ tab_strip_gap)
+                  ~before:(screen_title " MASC Lanes" ^ tab_strip_gap)
                   ~after:("  " ^ timestamp ^ "  " ^ connection_badge state))
              ~press:pressable
-             [ ( tab_entry_label "Lanes" lane_reading
+             [ ( tab_entry_label "Runtime lanes" lane_reading
                , false
                , Press_runtime_mode Masc_tui_types.Runtime_lanes )
              ; ( tab_entry_label "All runtimes" all_reading
                , false
                , Press_runtime_mode Masc_tui_types.Runtime_all )
-             ; ( tab_entry_label "Standalone"
+             ; ( tab_entry_label "Lanes"
                    (Some
                       (Masc_tui_message_layout.count_noun standalone_count "lane"))
                , true
@@ -6091,11 +6091,11 @@ let render_lanes_overview (state : state) =
      answers does not get to push a reading off the row that carries it. *)
   let standalone_heading =
     match state.standalone_lanes with
-    | None -> "  Standalone LLM lanes"
+    | None -> "  Lanes"
     | Some snapshot ->
         let observed = Unix.localtime snapshot.sls_observed_at_unix in
         Printf.sprintf
-          "  Standalone LLM lanes · observed %02d:%02d:%02d"
+          "  Lanes · observed %02d:%02d:%02d"
           observed.Unix.tm_hour observed.Unix.tm_min observed.Unix.tm_sec
   in
   box_line_styled buf cols ~style:(Ansi.bold ^ (Masc_tui_theme.tone Masc_tui_theme.Accent)) standalone_heading;
@@ -6145,7 +6145,7 @@ let render_lanes_overview (state : state) =
          snapshot.Tui_decode.sls_lanes;
        if snapshot.sls_lanes = [] then
          box_line_styled buf cols ~style:(Theme.recede ())
-           "  (no standalone lane observations)";
+           "  (no lane observations)";
        if snapshot.sls_exact_run_projection_truncated then
          box_line buf cols
            (Printf.sprintf
@@ -6161,10 +6161,10 @@ let render_lanes_overview (state : state) =
    | None ->
        box_line buf cols
          (match state.standalone_lanes_error with
-          | None -> Ansi.dim ^ "  loading standalone lane observations…" ^ Ansi.reset
+          | None -> Ansi.dim ^ "  loading lane observations…" ^ Ansi.reset
           | Some detail ->
               (* The lane-read boundary already names the subject and verdict --
-                 "standalone lanes load failed: <reason>" -- so the sentence
+                 "lanes load failed: <reason>" -- so the sentence
                  that stood here said "standalone lane" a second time and
                  put an unavailable verdict beside the read error's own, and
                  pushed the reason
@@ -6682,7 +6682,7 @@ let lane_run_tool_summary = function
 let lane_run_skill_summary = function
   | Tui_decode.Lane_run_no_skills_by_contract ->
     Theme.muted (),
-    "SKILLS  none · standalone runs do not load Keeper Skill instructions"
+    "SKILLS  none · these runs do not load Keeper Skill instructions"
   | Tui_decode.Lane_run_skills_contract_unknown ->
     Theme.muted (), "SKILLS  unknown · this run kind has no typed Skill contract"
 
@@ -12002,9 +12002,9 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
              | Some browser -> "Reading " ^ browser ^ "…"
              | None -> "Reading…"), Theme.info ()
         | Loading (_, Read_refresh) -> "Refreshing browser text…", Theme.info ()
-        | Loading (_, Open_session) -> "Opening automation browser…", Theme.info ()
-        | Loading (_, Close_session) -> "Closing automation browser…", Theme.info ()
-        | Loading (_, Goto _) -> "Navigating automation browser…", Theme.info ()
+        | Loading (_, Open_session) -> "Opening " ^ source_name view.source ^ " browser…", Theme.info ()
+        | Loading (_, Close_session) -> "Closing " ^ source_name view.source ^ " browser…", Theme.info ()
+        | Loading (_, Goto _) -> "Navigating " ^ source_name view.source ^ " browser…", Theme.info ()
         | Loading (_, Scene_regions _) -> "Reading page regions…", Theme.info ()
         | Loading (_, Scene_scroll _) -> "Scrolling page and refreshing scene…", Theme.info ()
         | Loading (_, Scene_focus _) -> "Reading selected page region…", Theme.info ()
@@ -12025,7 +12025,10 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
               | Some _ -> " · followed destination pending · r:recheck"
               | None -> "" in
             "Cause: " ^ Terminal_text.single_line detail ^ retry, Theme.bad ()
-        | No_browser -> "Browser bridge not connected", Theme.recede ()
+        | No_browser ->
+            (match view.source with
+             | Live -> "Browser bridge not connected"
+             | Automation | Stagehand -> "Browser session closed • o:open"), Theme.recede ()
         | Idle when Option.is_some view.scene ->
             (match view.scene with
              | Some scene ->
@@ -12690,7 +12693,7 @@ let render_runtime (state : state) =
                     (Printf.sprintf "  %s%s  %s  %s" probe_status probe_read
                        timestamp (connection_badge state)))
              ~press:pressable
-             [ ( tab_entry_label "Lanes"
+             [ ( tab_entry_label "Runtime lanes"
                    (Some
                       (Printf.sprintf "%s, %s"
                          (Masc_tui_message_layout.count_noun lane_count "lane")
@@ -12701,7 +12704,7 @@ let render_runtime (state : state) =
              ; ( tab_entry_label "All runtimes" (Some (string_of_int all_count))
                , not lanes_active
                , Press_runtime_mode Masc_tui_types.Runtime_all )
-             ; ( tab_entry_label "Standalone" standalone_reading
+             ; ( tab_entry_label "Lanes" standalone_reading
                , false
                , Press_standalone_lanes )
              ])
@@ -16440,7 +16443,7 @@ let render_about (state : state) =
         Masc_tui_emblem_screen.Keepers_read (List.length state.keepers)
   in
   surface_chrome ~overflow:Fits ~frame:Chrome_overlay state ~terminal_rows ~cols
-    ~surface_key:"about" ~title:(screen_title " MASC") ~hints:"Esc:close"
+    ~surface_key:"about" ~title:(screen_title " MASC") ~hints:"c:candle  Esc:close"
     ~body:(fun ~budget c ->
       Masc_tui_emblem_screen.body ~screen:Masc_tui_emblem_screen.About
         ~cols:(framed_inner_width cols) ~rows:budget

@@ -417,6 +417,50 @@ let beanie_field g x y =
   let brim = rounded_box x y 0.0 (bottom_y -. (0.16 *. h)) (0.62 *. g.w) (0.16 *. h) (0.012 *. s) in
   Float.min dome brim
 
+(* Hand items are held at the candle's lower right, straddling the wax edge
+   so they read as held rather than floating. Each is one bold silhouette
+   with an inner detail the ink line separates: a book's spine and page edge,
+   a mug's handle and rim, a quill's nib. Anchored to the wax width so the
+   widest candle's item still stays inside the reach box the renderer skips
+   outside of. *)
+let hand_centre g = (g.w +. 0.05, g.centre_y +. (0.10 *. g.h))
+
+(* A ring of half width [hw] round an ellipse: the mug's handle. *)
+let ring x y cx cy rx ry hw = Float.abs (ellipse x y cx cy rx ry 0.0) -. hw
+
+let book_spine_field g x y =
+  let cx, cy = hand_centre g in
+  rounded_box x y (cx -. 0.10) cy 0.03 0.09 0.006
+
+let book_pages_field g x y =
+  let cx, cy = hand_centre g in
+  rounded_box x y (cx +. 0.10) cy 0.03 0.08 0.006
+
+let book_field g x y =
+  let cx, cy = hand_centre g in
+  let cover = rounded_box x y cx cy 0.15 0.11 0.012 in
+  Float.min cover (Float.min (book_spine_field g x y) (book_pages_field g x y))
+
+let mug_rim_field g x y =
+  let cx, cy = hand_centre g in
+  ellipse x y cx (cy -. 0.105) 0.08 0.022 0.0
+
+let mug_field g x y =
+  let cx, cy = hand_centre g in
+  let body = rounded_box x y cx cy 0.08 0.12 0.02 in
+  let handle = ring x y (cx +. 0.095) cy 0.05 0.055 0.016 in
+  Float.min body (Float.min handle (mug_rim_field g x y))
+
+let quill_nib_field g x y =
+  let cx, cy = hand_centre g in
+  taper x y (cx -. 0.02) (cy +. 0.15) (cx -. 0.05) (cy +. 0.22) 0.014 0.002
+
+let quill_field g x y =
+  let cx, cy = hand_centre g in
+  let feather = ellipse x y (cx +. 0.02) (cy -. 0.04) 0.08 0.17 0.32 in
+  let shaft = taper x y (cx -. 0.02) (cy +. 0.15) (cx +. 0.07) (cy -. 0.21) 0.014 0.006 in
+  Float.min feather (Float.min shaft (quill_nib_field g x y))
+
 (* A beard: strands hanging from the jaw, with a mustache above the mouth.
    Separate strokes, not one filled oval: a solid oval whose top edge sits on
    the mouth line covers the mouth and reads as a mask at the sizes the TUI
@@ -480,6 +524,13 @@ type paint =
   | Bow_ribbon
   | Crown_metal
   | Beanie_felt
+  | Book_cover
+  | Book_spine
+  | Book_pages
+  | Mug_ceramic
+  | Mug_rim
+  | Quill_feather
+  | Quill_nib
   | Plaster_strip
   | Patch
   | Freckle
@@ -504,35 +555,46 @@ let paint_index = function
   | Bow_ribbon -> 16
   | Crown_metal -> 17
   | Beanie_felt -> 18
-  | Plaster_strip -> 19
-  | Patch -> 20
-  | Freckle -> 21
+  | Book_cover -> 19
+  | Book_spine -> 20
+  | Book_pages -> 21
+  | Mug_ceramic -> 22
+  | Mug_rim -> 23
+  | Quill_feather -> 24
+  | Quill_nib -> 25
+  | Plaster_strip -> 26
+  | Patch -> 27
+  | Freckle -> 28
 
 (* Soft marks and highlights sit on a part without an ink line round them. *)
 let quiet = function
   | Glint | Blush | Freckle -> true
   | Outside | Wax | Wax_drip | Flame | Flame_core | Horn | Dish_metal _ | Eye | Mouth | Tooth | Frame | Lens
-  | Beard_hair | Scarf_cloth | Bow_ribbon | Crown_metal | Beanie_felt | Plaster_strip | Patch ->
+  | Beard_hair | Scarf_cloth | Bow_ribbon | Crown_metal | Beanie_felt | Book_cover | Book_spine | Book_pages | Mug_ceramic | Mug_rim
+  | Quill_feather | Quill_nib | Plaster_strip | Patch ->
       false
 
 (* Parts that give light keep their colour in the shade band. *)
 let emissive = function
   | Flame | Flame_core | Glint -> true
   | Outside | Wax | Wax_drip | Horn | Dish_metal _ | Eye | Blush | Mouth | Tooth | Frame | Lens | Beard_hair
-  | Scarf_cloth | Bow_ribbon | Crown_metal | Beanie_felt | Plaster_strip | Patch | Freckle ->
+  | Scarf_cloth | Bow_ribbon | Crown_metal | Beanie_felt | Book_cover | Book_spine | Book_pages | Mug_ceramic | Mug_rim | Quill_feather
+  | Quill_nib | Plaster_strip | Patch | Freckle ->
       false
 
 let outside = function
   | Outside -> true
   | Wax | Wax_drip | Flame | Flame_core | Horn | Dish_metal _ | Eye | Glint | Blush | Mouth | Tooth | Frame | Lens
-  | Beard_hair | Scarf_cloth | Bow_ribbon | Crown_metal | Beanie_felt | Plaster_strip | Patch | Freckle ->
+  | Beard_hair | Scarf_cloth | Bow_ribbon | Crown_metal | Beanie_felt | Book_cover | Book_spine | Book_pages | Mug_ceramic | Mug_rim
+  | Quill_feather | Quill_nib | Plaster_strip | Patch | Freckle ->
       false
 
 (* The flame and its core are one light; no line between them. *)
 let flame_part = function
   | Flame | Flame_core -> true
   | Outside | Wax | Wax_drip | Horn | Dish_metal _ | Eye | Glint | Blush | Mouth | Tooth | Frame | Lens | Beard_hair
-  | Scarf_cloth | Bow_ribbon | Crown_metal | Beanie_felt | Plaster_strip | Patch | Freckle ->
+  | Scarf_cloth | Bow_ribbon | Crown_metal | Beanie_felt | Book_cover | Book_spine | Book_pages | Mug_ceramic | Mug_rim | Quill_feather
+  | Quill_nib | Plaster_strip | Patch | Freckle ->
       false
 
 let eye_offset = 0.19
@@ -680,7 +742,24 @@ let base_field (e : equipment) g x y = match e.base with Dish _ -> dish_field g 
 
 (* The dish's paint, made once per render rather than once per sample. *)
 let dish_paint (e : equipment) = match e.base with Dish d -> Some (Dish_metal d) | No_dish -> None
-let hand_field (e : equipment) = match e.hand with Empty_hand -> Float.infinity
+let hand_field (e : equipment) g x y =
+  match e.hand with
+  | Empty_hand -> Float.infinity
+  | Book -> book_field g x y
+  | Mug -> mug_field g x y
+  | Quill -> quill_field g x y
+
+(* The paint for whatever is held. [Empty_hand] never reaches here: its field
+   is infinite, so no sample is inside it. *)
+let hand_paint (e : equipment) g x y =
+  match e.hand with
+  | Empty_hand -> Outside
+  | Book ->
+      if book_spine_field g x y < 0.0 then Book_spine
+      else if book_pages_field g x y < 0.0 then Book_pages
+      else Book_cover
+  | Mug -> if mug_rim_field g x y < 0.0 then Mug_rim else Mug_ceramic
+  | Quill -> if quill_nib_field g x y < 0.0 then Quill_nib else Quill_feather
 
 (* Samples outside the candle's reach are this far from it: any positive
    distance reads as backdrop, and no part is ever that close to the box. *)
@@ -730,7 +809,7 @@ let sample (b : body) (e : equipment) ~dish g x y =
     let head_d = head_field e g x y in
     let face_d = face_field e g x y in
     let base_d = base_field e g x y in
-    let hand_d = hand_field e in
+    let hand_d = hand_field e g x y in
     let silhouette =
       Float.min
         (Float.min (Float.min wax_d drip_d) (Float.min flame_d horn_d))
@@ -740,6 +819,7 @@ let sample (b : body) (e : equipment) ~dish g x y =
       if silhouette >= 0.0 then Outside
       else if flame_d < 0.0 then if flame_core b g x y < 0.0 then Flame_core else Flame
       else if head_d < 0.0 then head_paint e
+      else if hand_d < 0.0 then hand_paint e g x y
       else
         match face_overlay e g x y with
         | Some p -> p
@@ -840,9 +920,60 @@ let paint_colour (b : body) = function
   | Bow_ribbon -> rgb 236 110 150
   | Crown_metal -> rgb 240 200 70
   | Beanie_felt -> rgb 96 76 150
+  | Book_cover -> rgb 158 72 62
+  | Book_spine -> rgb 100 42 40
+  | Book_pages -> rgb 244 236 214
+  | Mug_ceramic -> rgb 88 142 168
+  | Mug_rim -> rgb 200 226 238
+  | Quill_feather -> rgb 232 226 206
+  | Quill_nib -> rgb 60 50 60
   | Plaster_strip -> rgb 246 220 180
   | Patch -> rgb 40 36 44
   | Freckle -> rgb 150 96 80
+
+type palette = {
+  wax_rgb : rgb;
+  drip_rgb : rgb;
+  flame_rgb : rgb;
+  flame_core_rgb : rgb;
+  horn_rgb : rgb;
+  eye_rgb : rgb;
+  glint_rgb : rgb;
+  blush_rgb : rgb;
+  mouth_rgb : rgb;
+  ink_rgb : rgb;
+  backdrop_rgb : rgb;
+}
+
+let palette (b : body) =
+  {
+    wax_rgb = paint_colour b Wax;
+    drip_rgb = paint_colour b Wax_drip;
+    flame_rgb = paint_colour b Flame;
+    flame_core_rgb = paint_colour b Flame_core;
+    horn_rgb = paint_colour b Horn;
+    eye_rgb = paint_colour b Eye;
+    glint_rgb = paint_colour b Glint;
+    blush_rgb = paint_colour b Blush;
+    mouth_rgb = paint_colour b Mouth;
+    ink_rgb = ink_rgb b;
+    backdrop_rgb = paint_colour b Outside;
+  }
+
+let image_init size pixel_at =
+  let rgba = Bytes.create (size * size * 4) in
+  for y = 0 to size - 1 do
+    for x = 0 to size - 1 do
+      let { red; green; blue }, alpha = pixel_at ~x ~y in
+      let at = ((y * size) + x) * 4 in
+      let byte v = Char.chr (max 0 (min 255 v)) in
+      Bytes.set rgba at (byte red);
+      Bytes.set rgba (at + 1) (byte green);
+      Bytes.set rgba (at + 2) (byte blue);
+      Bytes.set rgba (at + 3) (byte alpha)
+    done
+  done;
+  { edge = size; rgba = Bytes.unsafe_to_string rgba }
 
 (* ---- raster -------------------------------------------------------------- *)
 
@@ -894,7 +1025,8 @@ let render_with ~cull (b : body) (e : equipment) (p : pose) (n : size) =
         let x = x_of i and y = y_of j in
         if Float.hypot x (y -. view_centre_y) < backdrop_r then Some backdrop else None
     | Wax | Wax_drip | Flame | Flame_core | Horn | Dish_metal _ | Eye | Glint | Blush | Mouth | Tooth | Frame | Lens
-    | Beard_hair | Scarf_cloth | Bow_ribbon | Crown_metal | Beanie_felt | Plaster_strip | Patch | Freckle ->
+    | Beard_hair | Scarf_cloth | Bow_ribbon | Crown_metal | Beanie_felt | Book_cover | Book_spine | Book_pages | Mug_ceramic | Mug_rim
+    | Quill_feather | Quill_nib | Plaster_strip | Patch | Freckle ->
         let d = dist i j in
         if d > -.outline || boundary i j part then Some ink
         else

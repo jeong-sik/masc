@@ -342,9 +342,63 @@ let test_native_command_cancel_cleans_closed_pipe_descendant () =
     | None -> fail "command exited before cancellation fixture was ready")
 ;;
 
+(* Darwin's group kill answers EPERM when it signalled nobody; the member
+   snapshot decides whether nobody was left to signal. *)
+module Members = Process_group_members
+
+let snapshot_leader = 4242
+let snapshot_owner = 100
+
+let group_member ?(parent = snapshot_leader) pid state =
+  { Members.pid; parent; state }
+
+let no_live_member members =
+  Members.no_live_member ~leader:snapshot_leader ~owner:snapshot_owner members
+
+let owned_leader state = group_member ~parent:snapshot_owner snapshot_leader state
+
+let test_zombie_group_has_no_live_member () =
+  check bool "a zombie leader alone" true
+    (no_live_member [ owned_leader Members.Zombie ]);
+  check bool "a zombie leader and a zombie descendant" true
+    (no_live_member [ owned_leader Members.Zombie; group_member 4243 Members.Zombie ])
+;;
+
+let test_exiting_member_is_not_live () =
+  (* #39768: a Claude Code descendant still tearing down its exit when the
+     group SIGKILL went out. The kernel's group walk no longer sees it, so the
+     kill reached nobody; it is not a process left running. *)
+  check bool "a zombie leader and an exiting descendant" true
+    (no_live_member [ owned_leader Members.Zombie; group_member 4243 Members.Exiting ]);
+  check bool "an exiting leader" true (no_live_member [ owned_leader Members.Exiting ])
+;;
+
+let test_live_member_is_a_refusal () =
+  check bool "a live descendant" false
+    (no_live_member [ owned_leader Members.Zombie; group_member 4243 Members.Live ]);
+  check bool "a live leader" false (no_live_member [ owned_leader Members.Live ])
+;;
+
+let test_group_without_its_owned_leader_is_not_ours () =
+  check bool "no members" false (no_live_member []);
+  check bool "members but no leader" false
+    (no_live_member [ group_member 4243 Members.Zombie ]);
+  check bool "a leader another process owns" false
+    (no_live_member [ group_member ~parent:1 snapshot_leader Members.Zombie ])
+;;
+
 let () =
   run "posix_spawn_process_mgr"
-    [ ( "foreground group ownership",
+    [ ( "a group signal that reached nobody",
+        [ test_case "a zombie-only group has no live member" `Quick
+            test_zombie_group_has_no_live_member
+        ; test_case "an exiting member is not live" `Quick
+            test_exiting_member_is_not_live
+        ; test_case "a live member makes EPERM a refusal" `Quick
+            test_live_member_is_a_refusal
+        ; test_case "a group needs the leader this process owns" `Quick
+            test_group_without_its_owned_leader_is_not_ours ])
+    ; ( "foreground group ownership",
         [ test_case "TERM leader exits before closed-pipe descendant" `Quick
             (test_group_term_keeps_owner_after_leader_exit ~mode:"wait")
         ; test_case "TERM-ignoring leader still reaches group escalation" `Quick

@@ -5,6 +5,7 @@ graphics query, and not at all under NO_COLOR."""
 from __future__ import annotations
 
 import base64
+import zlib
 import os
 import re
 import sys
@@ -76,9 +77,13 @@ STEP_WAIT_SECONDS = 1.0
 # The first chunk of a transfer that places the candle.
 MASCOT_TRANSFER_HEAD = re.compile(rb"\x1b_G(?=[^;]*a=T)(?=[^;]*i=" + MASCOT_IMAGE_ID + rb"\b)[^;]*;")
 # Transfers the Kitty scenario reads before it says the candle does not step.
-# A repainted frame sends the picture it already had, so a step can come a few
-# transfers late.
+# A frame that rewrites a row under the candle sends the picture it already
+# had, so a step can come a few transfers late.
 STEP_TRANSFER_LIMIT = 8
+# The painted candle is rendered at most this many pixels square
+# (Masc_tui_portrait_view.pixel_edge_cap) and the terminal scales it; the
+# dotted one is rendered as many pixels as its rows show, so no dot is scaled.
+PAINTED_EDGE_CAP = 160
 
 
 def wait_for_whole_frame(process, fd, output: bytearray, needle: bytes,
@@ -120,7 +125,7 @@ def kitty_fields(control: bytes) -> dict[bytes, bytes]:
 
 def mascot_transfers(wire: bytes) -> list[tuple[dict[bytes, bytes], bytes]]:
     """Every whole transfer under the mascot's id: its first chunk's keys and
-    the decoded pixels."""
+    the pixels, inflated where the transfer says o=z."""
     transfers = []
     pending: tuple[dict[bytes, bytes], list[bytes]] | None = None
     for match in KITTY_CHUNK.finditer(wire):
@@ -131,7 +136,10 @@ def mascot_transfers(wire: bytes) -> list[tuple[dict[bytes, bytes], bytes]]:
         if pending is not None:
             pending[1].append(match[2])
             if fields.get(b"m", b"0") == b"0":
-                transfers.append((pending[0], base64.b64decode(b"".join(pending[1]), validate=True)))
+                payload = base64.b64decode(b"".join(pending[1]), validate=True)
+                if pending[0].get(b"o") == b"z":
+                    payload = zlib.decompress(payload)
+                transfers.append((pending[0], payload))
                 pending = None
     return transfers
 
@@ -263,12 +271,13 @@ def about_screen_with_graphics(binary: str) -> None:
         h.send_and_wait(process, fd, output, b"/about\r", ABOUT_CAPTION)
         h.wait_for_output(process, fd, output, PLACEMENT, start=start, timeout=5.0)
         # Keep reading while the candle steps. A sleep that reads nothing lets
-        # the terminal's buffer fill under a 137 KB transfer, the TUI then
+        # the terminal's buffer fill under a transfer, the TUI then
         # waits in write mid-picture, and one read afterwards sees a cut one.
         transfers = stepped_transfers(process, fd, output, start)
         wire = bytes(output[start:])
         fields, pixels = transfers[0]
         assert fields.get(b"f") == b"32", "the candle is not sent with its alpha"
+        assert fields.get(b"o") == b"z", "the candle is not sent compressed"
         edge = int(fields[b"s"])
         assert int(fields[b"v"]) == edge, "the candle's picture is not square"
         assert len(pixels) == edge * edge * 4, "the transfer is not the picture it declares"
@@ -342,6 +351,63 @@ def about_owns_the_keys(binary: str) -> None:
                             interact=interact, http_fixtures=fixtures, http_requests=requests)
 
 
+def about_turns_the_candle(binary: str) -> None:
+    fixtures = h.keeper_runtime_http_fixtures()
+
+    def is_painted(fields: dict[bytes, bytes]) -> bool:
+        return int(fields[b"s"]) <= PAINTED_EDGE_CAP
+
+    def is_dotted(fields: dict[bytes, bytes]) -> bool:
+        return int(fields[b"s"]) == int(fields[b"r"]) * CELL_HEIGHT
+
+    def transfer_after(process, fd, output: bytearray, start: int, wanted, what: str):
+        """The first whole mascot transfer since ``start`` that ``wanted``
+        accepts. Transfers already on their way when the key went in are
+        passed over."""
+        seen = start
+        for _ in range(STEP_TRANSFER_LIMIT):
+            h.wait_for_output(process, fd, output, MASCOT_TRANSFER_HEAD, start=seen,
+                              timeout=STEP_WAIT_SECONDS)
+            seen = MASCOT_TRANSFER_HEAD.search(bytes(output), seen).end()
+            for fields, pixels in mascot_transfers(bytes(output[start:])):
+                if wanted(fields):
+                    return fields, pixels
+        raise AssertionError(f"no {what} candle was sent after the key")
+
+    def interact(process, fd, _slave, output, _base):
+        h.send_and_wait(process, fd, output, b"2", b"MASC Keepers")
+        h.select_keeper_row(process, fd, output, b"alpha")
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Overview")
+        h.send_and_wait(process, fd, output, b"i", h.COMPOSER_FOCUSED)
+        start = len(output)
+        h.send_and_wait(process, fd, output, b"/about\r", ABOUT_CAPTION)
+        assert b"c:candle" in h.screen_text(bytes(output)), "/about does not say c turns the candle"
+        transfer_after(process, fd, output, start, is_painted, "painted")
+        # c turns it to the dotted figure, drawn as many pixels as it shows.
+        start = len(output)
+        h.write_all(fd, output, b"c")
+        fields, pixels = transfer_after(process, fd, output, start, is_dotted, "dotted")
+        edge = int(fields[b"s"])
+        assert edge > PAINTED_EDGE_CAP, "the dotted candle is no larger than the painted one"
+        assert len(pixels) == edge * edge * 4, "the transfer is not the picture it declares"
+        assert ABOUT_CAPTION in h.screen_text(bytes(output)), "c closed /about"
+        # And back again.
+        start = len(output)
+        h.write_all(fd, output, b"c")
+        transfer_after(process, fd, output, start, is_painted, "painted")
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Overview")
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(
+        binary,
+        description="c on /about turns the candle between painted and dotted",
+        interact=interact,
+        http_fixtures=fixtures,
+        terminal_cols=SPLASH_COLUMNS,
+        preload_input=KITTY_TERMINAL_REPLIES,
+    )
+
+
 if __name__ == "__main__":
     binary = str(Path(sys.argv[1]).resolve())
     startup_splash(binary)
@@ -350,4 +416,5 @@ if __name__ == "__main__":
     about_screen(binary, no_color=True)
     about_screen_with_graphics(binary)
     about_owns_the_keys(binary)
-    print("tui emblem screens: PASS (6 scenarios)")
+    about_turns_the_candle(binary)
+    print("tui emblem screens: PASS (7 scenarios)")

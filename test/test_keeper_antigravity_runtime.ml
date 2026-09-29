@@ -2179,6 +2179,28 @@ let test_every_declared_loading_is_eager_on_antigravity () =
        ])
 ;;
 
+(* #39768: the Antigravity runtime boundary catches unexpected exceptions the
+   same way as Claude Code's, and they are masc internal failures, not parse
+   errors of the CLI's reply. *)
+let test_an_unhandled_runtime_exception_is_internal () =
+  let exn_repr = "Unix.Unix_error(Unix.EPERM, \"kill\", \"\")" in
+  let core =
+    Keeper_antigravity_runtime.For_testing.runtime_error_to_core_error
+      (Runtime_antigravity.Unhandled_exception exn_repr)
+  in
+  match Keeper_internal_error.classify_masc_internal_error core with
+  | Some
+      (Keeper_internal_error.Internal_unhandled_exception
+         { site; exn_repr = recorded; transport_error_kind }) ->
+    check string "site" "antigravity.runtime_boundary" site;
+    check string "exception" exn_repr recorded;
+    check bool "not a transport failure" true (Option.is_none transport_error_kind)
+  | Some _ | None ->
+    fail
+      ("an unhandled runtime exception must be a masc internal error, got "
+       ^ Agent_core.Error.to_string core)
+;;
+
 let () =
   run
     "keeper_antigravity_runtime"
@@ -2189,6 +2211,10 @@ let () =
             "projects MCP tool and settles"
             `Quick
             test_keeper_projects_mcp_tool_and_settles
+          ; test_case
+            "an unhandled runtime exception is a masc internal error"
+            `Quick
+            test_an_unhandled_runtime_exception_is_internal
           ; test_case
             "every declared loading is eager on Antigravity"
             `Quick

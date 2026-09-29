@@ -166,7 +166,7 @@ let of_lane ?(extra = []) ~base_path ~tool_name ~start_time
       ()
   | Error Dos_lane.No_machine -> no_machine ~base_path ~tool_name ~start_time
   | Error
-      (( Dos_lane.Invalid_request _ | Dos_lane.Held_by _
+      (( Dos_lane.Invalid_request _ | Dos_lane.Held_by _ | Dos_lane.Other_program _
        | Dos_lane.Checkpoint_refused
            ( Machine_checkpoint.No_slot _ | Machine_checkpoint.Other_machine _
            | Machine_checkpoint.Other_format _ ) ) as e) ->
@@ -584,6 +584,15 @@ let handle_press ~tool_name ~start_time ~base_path ~who args =
     (off_domain @@ fun () -> Dos_lane.press ~who
        ~keys:(get_string_list args "keys")
        ~steps:(get_int args "steps" default_steps))
+;;
+
+(* [masc_dos_press] for a caller that chose the keys from what one program
+   means by them (the masc pad): they go in only while that program is still
+   the one loaded. *)
+let press_into ~tool_name ~start_time ~base_path ~who ~saves_name ~keys =
+  after_announcing @@
+  of_lane_run ~base_path ~tool_name ~start_time
+    (off_domain @@ fun () -> Dos_lane.press_into ~saves_name ~who ~keys ~steps:default_steps)
 ;;
 
 let handle_click ~tool_name ~start_time ~base_path ~who args =

@@ -846,6 +846,36 @@ let test_conversation_callback_failure_is_typed () =
     | Ok _ -> fail "callback exception was admitted as a successful turn")
 ;;
 
+(* #39768: an exception raised where the runtime expects none -- the spawn
+   observer here -- leaves [run_turn] as [Unhandled_exception]. As a protocol
+   error it read as a misread CLI reply. *)
+let test_unexpected_exception_is_unhandled () =
+  with_fixture [ init (); result () ] (fun path ->
+    match
+      run_fixture ~on_spawned:(fun () -> failwith "fixture spawn observer") path
+    with
+    | Error (Runtime_antigravity.Unhandled_exception detail) ->
+      check bool "names the exception" true
+        (String_util.contains_substring detail "fixture spawn observer")
+    | Error error -> fail (Runtime_antigravity.error_to_string error)
+    | Ok _ -> fail "an observer exception was admitted as a successful turn")
+;;
+
+(* #39824: the exceptions [Reserved_exn] names belong to the process, not to
+   the runtime to type. Raised where the test above raises its [Failure], they
+   reach the outermost catch-all, which re-raises them. *)
+let test_reserved_exceptions_leave_run_turn () =
+  List.iter
+    (fun exn ->
+       with_fixture [ init (); result () ] (fun path ->
+         check_raises
+           (Printexc.to_string exn ^ " leaves run_turn untyped")
+           exn
+           (fun () ->
+              ignore (run_fixture ~on_spawned:(fun () -> raise exn) path))))
+    [ Out_of_memory; Stack_overflow; Sys.Break ]
+;;
+
 let test_callback_timeout_origin_is_preserved_without_deadline () =
   with_fixture [ init (); result () ] (fun path ->
     check_raises
@@ -1593,6 +1623,14 @@ let () =
             "conversation callback failure"
             `Quick
             test_conversation_callback_failure_is_typed
+        ; test_case
+            "an unexpected exception is unhandled, not a protocol error"
+            `Quick
+            test_unexpected_exception_is_unhandled
+        ; test_case
+            "reserved exceptions leave run_turn untyped"
+            `Quick
+            test_reserved_exceptions_leave_run_turn
         ; test_case
             "callback timeout origin is preserved without deadline"
             `Quick

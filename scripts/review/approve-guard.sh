@@ -257,6 +257,8 @@ check_structured_verdict
 # too; the structured-verdict reader cannot enforce shared-account CR consent.
 check_open_change_requests
 [ ${#reasons[@]} -eq 0 ] || finish_refused
+[ -z "$PR_CHECK_DRAFT_RUNS" ] || footer="${footer} · verified Draft snapshot runs:${PR_CHECK_DRAFT_RUNS}"
+[ -z "$PR_CHECK_CANCELLED_RUNS" ] || footer="${footer} · cancelled Draft snapshot twins:${PR_CHECK_CANCELLED_RUNS}"
 if [ "$check_only" -eq 1 ]; then
   echo "WOULD APPROVE #${pr} head ${head} (${n_runs} check-runs, workflow runs ${wf_ids[*]})"
   exit 0

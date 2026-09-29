@@ -3,7 +3,7 @@ rfc: "cli-runtimes-as-lane-slots"
 title: "CLI runtimes as lane slots"
 status: Draft
 created: 2026-08-29
-updated: 2026-08-29
+updated: 2026-09-27
 author: vincent
 supersedes: []
 superseded_by: null
@@ -82,9 +82,10 @@ Add a masc-side lane runner for CLI slots, and keep `Exact_output` HTTP-pure:
   (librarian at every third turn per keeper).
 - Subscription quotas (kimi 5h, provider windows) apply to lane traffic too;
   lane declarations should keep an HTTP fallback slot after any CLI slot.
-- The wall-clock ceiling knob (#31368) applies to keeper turns; the lane
-  runner needs its own per-run bound from the start (the lane audit found no
-  lane-level timeout anywhere — W-series).
+- The cumulative wall-clock ceiling knob (#31368) was removed by #39377.
+  Keeper `turn-timeout-s` bounds silence between CLI stream messages; it is
+  not a total-duration cap. The lane runner still needs its own per-run bound
+  from the start (the lane audit found no lane-level timeout anywhere — W-series).
 
 ## 6. Verification sketch
 

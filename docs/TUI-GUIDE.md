@@ -87,12 +87,14 @@ varies, and `Ctrl-T` still hands the mouse back so the link can be selected
 from the card. `Esc` or `q` closes the card. Enter does not, so an Enter
 pressed while the answer was on its way cannot dismiss it. `/play link` opens
 the card again. The TUI keeps issued cards until it exits or their invites
-are revoked. Only one invite request runs at a time so answers arrive in order.
+are revoked. Only one invite request runs at a time: a `/play invite` sent
+before the answer to the last one has come back is refused, not queued.
 
-The QR is drawn only when all of it fits. `j`/`k` scroll the card so a long
-link can be read to its end. A smaller window shows the link and
+The QR is drawn only when all of it fits. A smaller window shows the link and
 the size the QR needs, because a cut QR scans as nothing. A terminal without
-colour shows the link alone.
+colour shows the link alone. A card taller than the window scrolls with `j`/`k`,
+the arrow keys or the mouse wheel, and `g`/`G` jump to its top and its end, so
+a long link can be read to its last byte.
 
 If the issue request has no trustworthy answer, inspect the invite list and
 revoke that name before retrying because the original link cannot be recovered.

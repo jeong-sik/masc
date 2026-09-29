@@ -37,6 +37,9 @@ let subscription_model_rows =
        at four times the real rate, which no lookup failure would announce. *)
   ; "claude-fable-5-1", "claude-fable-5-1"
   ; "claude-sonnet-5", "claude-sonnet-5"
+    (* Sonnet 5.5 refuses forced tool use where sonnet-5 takes it, and
+       "claude-sonnet-5" prefixes it, so it needs its own row. *)
+  ; "claude-sonnet-5-5", "claude-sonnet-5-5"
   ; "gpt-5.6-sol", "gpt-5.6-sol"
   ; "gpt-5.6-terra", "gpt-5.6-terra"
   ; "gpt-5.6-luna", "gpt-5.6"
@@ -103,6 +106,7 @@ let subscription_model_efforts =
        'xhigh', and 'max'". Opus 5.5's ladder is the platform model page's
        effort parameter set (checked 2026-09-23), as the other Claude rows. *)
   ; None, "claude-opus-5-5", [ "low"; "medium"; "high"; "xhigh"; "max" ]
+  ; None, "claude-sonnet-5-5", [ "low"; "medium"; "high"; "xhigh"; "max" ]
   ; None, "gpt-6-sol", [ "none"; "low"; "medium"; "high"; "xhigh"; "max" ]
   ; None, "gpt-6-luna", [ "none"; "low"; "medium"; "high"; "xhigh"; "max" ]
   ; None, "gemini-3.7-flash-high", [ "low"; "medium"; "high" ]
@@ -147,6 +151,7 @@ let anthropic_cache_pricing_rows =
   [ "claude-opus-5", 1.25, 0.1
   ; "claude-opus-5-5", 1.25, 0.05
   ; "claude-sonnet-5", 1.25, 0.1
+  ; "claude-sonnet-5-5", 1.25, 0.1
   ; "claude-fable-5", 1.25, 0.1
   ; "claude-fable-5-1", 1.25, 0.025
   ]

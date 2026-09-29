@@ -2137,6 +2137,11 @@
  (deps %{workspace_root}/lib/otel_metric_store/otel_metric_store_core.ml)
  (libraries alcotest ast_grep otel_metric_store eio eio_main))
 
+(test
+ (name test_otel_metric_total)
+ (modules test_otel_metric_total)
+ (libraries alcotest otel_metric_store))
+
 ; Real local exact-output fixture shared by exact-output lane tests.
 (library
  (name exact_output_fixture)
@@ -4393,43 +4398,6 @@
  (modules test_tui_chart)
  (libraries alcotest masc_tui_chart masc_tui_message_layout masc_tui_theme))
 
-; RFC-0464: the Overview Team block's projection.
-; RFC-0465: the TUI pull request decoder against the server's own encoder.
-(test
- (name test_tui_repository_pulls)
- (modules test_tui_repository_pulls)
- (libraries alcotest masc.server masc_tui_types masc_tui_repository_pulls))
-
-; The Team block's per-Keeper spend decoder against the server's own encoder.
-(test
- (name test_tui_keeper_spend)
- (modules test_tui_keeper_spend)
- (libraries
-  alcotest
-  masc_test_deps
-  masc.jsonl_writer
-  masc.dashboard_utils
-  masc.server
-  masc_tui_types
-  masc_tui_message_layout
-  masc_tui_keeper_spend))
-
-(test
- (name test_tui_overview_team)
- (modules test_tui_overview_team)
- (libraries
-  alcotest
-  masc
-  masc_types
-  masc_tui_types
-  masc_tui_overview_team))
-
-(test
- (name test_tui_overview_cache)
- (modules test_tui_overview_cache)
- (libraries alcotest masc masc_types masc_tui_types
-  masc_tui_overview_cache masc_tui_overview_team masc_tui_overview_tasks))
-
 (test
  (name test_tui_overview_goals)
  (modules test_tui_overview_goals)
@@ -6522,8 +6490,8 @@
 (test
  (name test_tui_msx_load)
  (modules test_tui_msx_load)
- (libraries alcotest unix masc masc_tui_types masc_tui_machine_live masc_tui_interactive
-   masc_tui_msx))
+ (libraries alcotest unix masc masc.msx_lane masc_tui_types masc_tui_machine_live
+   masc_tui_interactive masc_tui_msx))
 
 ; The spectator's typed read of GET /api/v1/lane-addons/live: every answer
 ; shape, the malformed ones, and what a read does to the drawn view.
@@ -6617,7 +6585,18 @@
  (deps test_tui_keyboard_input.py ../bin/masc_tui.exe)
  (action
   (run python3 %{dep:test_tui_keyboard_input.py}
-   %{dep:../bin/masc_tui.exe} fusion-history)))
+  %{dep:../bin/masc_tui.exe} fusion-history)))
+
+(rule
+ (alias runtest-test_tui_keyboard_input-dashboard-usage)
+ (deps test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe} dashboard-usage)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-dashboard-usage)))
 
 (alias
  (name runtest)

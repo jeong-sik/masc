@@ -19981,11 +19981,19 @@ def run_dos_live_regression(executable: str) -> None:
             raise AssertionError(f"reads after the change did not ask at 200: {dos_reads[-4:]!r}")
 
         key(b"\x1b", b"MASC Overview")
-        # The palette has a direct DOS door as well as the older MSX picker.
-        direct_from = key(b":go dos\r", b"Esc: back")
+        # The palette must reach a fresh live answer, not only draw an empty
+        # spectator footer or reuse the picture from the MSX menu path.
+        picture["steps"] = 300
+        direct_from = key(b":go dos\r", b"DOS \xe2\x80\x94 change 300")
+        wait_for_output(process, master, output, b"Esc: back", start=direct_from,
+                        timeout=5.0)
         direct = bytes(output[direct_from:])
-        if b"DOS \xe2\x80\x94" not in direct or b"MSX \xe2\x80\x94 pick a game" in direct:
-            raise AssertionError("go DOS did not open the DOS spectator directly")
+        if DOS_BLUE not in direct or b"MSX \xe2\x80\x94 pick a game" in direct:
+            raise AssertionError("go DOS did not draw its fresh live picture directly")
+        # Ordinary game input, Enter, and MSX save/restore/media keys must
+        # remain spectator input on this new entry path as well.
+        for spectator_key in (b"x", b"\r", b"\x1b[17~", b"\x1b[18~", b"\x1b[19~"):
+            key(spectator_key, b"Esc: back")
         key(b"\x1b", b"MASC Overview")
         os.write(master, b"q")
         print(json.dumps({"dos_reads": len(dos_reads),
@@ -19998,6 +20006,11 @@ def run_dos_live_regression(executable: str) -> None:
         http_fixtures={MACHINE_LIVE_PATH: PathHttpResponse(resolve)},
         http_requests=posts,
     )
+    # Check after fixture shutdown as well, so a completed POST cannot race
+    # the final terminal assertion. Every action above is observation-only:
+    # neither machine input nor DOS control/invite traffic is permitted.
+    if posts:
+        raise AssertionError(f"DOS spectator emitted mutation requests: {[path for path, _ in posts]!r}")
 
 
 def run_msx_palette_regression(executable: str) -> None:

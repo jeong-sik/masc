@@ -545,6 +545,10 @@ The [Glossary](spec/00-glossary.md#core) uses Lane for the fixed exact-output ex
 For TOML package installations, open `/addons` from the composer or choose
 `go Lane Add-ons` in the palette. The [Lane Add-on guide](guides/tui-lane-addons.md)
 covers configuration editing, connections, Skills, actions and cross-Lane evidence.
+These are three different customization surfaces: Config → Runtime edits named
+Keeper candidate orders; the six exact-output work purposes on this screen are
+fixed, although their runtime slots can be edited; Lane Add-ons load custom
+TOML packages and require a working image before a worker is active.
 
 Standalone execution lanes only. Keeper lifecycle and turn-cycle facts live on
 Keepers, so this surface no longer repeats a second Keeper table. It holds

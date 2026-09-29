@@ -25,17 +25,14 @@ export function useToolOutputLookup(executionId: string | null | undefined) {
   // A recent-tail cache cannot prove uniqueness across the complete ledger.
   // Only the exact endpoint may supply evidence, including a cached identity.
   const needsFetch = state.kind !== 'loaded'
-  // A bulk hydration that succeeds is new ledger evidence, so a row that could
-  // not read its output (failed) or did not find it yet (missing) asks again.
-  // Without this, one failed read stays failed for the life of the row:
-  // refreshing the conversation repairs the ledger while the row still reads
-  // as if the output were gone. Other states cannot change on new ledger
-  // evidence (admin-required follows authRevision), so they do not re-ask.
+  // A bulk hydration that succeeds is new ledger evidence, so a row that has
+  // not loaded asks again once per success; `needsFetch` already keeps a loaded
+  // row from re-reading. This value must not read `state`: the effect below
+  // writes `loading` itself, so a state-gated value would flip on every
+  // attempt and re-run the effect without end.
   // `coveredThroughMs` only grows on success, unlike `completedAtMs`, which
   // also moves on a failed hydration and on every tool call of a live turn.
-  const asksAgainOnHydration = state.kind === 'failed' || state.kind === 'missing'
-  const hydratedThrough = keeper && asksAgainOnHydration
-    ? toolCallOutputHydrationContract(keeper).coveredThroughMs : null
+  const hydratedThrough = keeper ? toolCallOutputHydrationContract(keeper).coveredThroughMs : null
   useEffect(() => {
     if (!keeper || !executionId || !inView || !needsFetch) return
     const controller = new AbortController()

@@ -7666,3 +7666,5 @@
 (include stanzas/test_candle_balance.inc)
 
 (include stanzas/test_candle_appraiser_transport.inc)
+
+(include stanzas/test_candle_purchase_flow.inc)

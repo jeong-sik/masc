@@ -199,6 +199,7 @@ type error =
   | State_callback_failed of string
   | Turn_failed of string
   | Process_exited of string
+  | Unhandled_exception of string
   | Timeout of float
 
 exception Runtime_error of error
@@ -211,6 +212,7 @@ let error_to_string = function
   | State_callback_failed detail -> "Antigravity conversation state callback failed: " ^ detail
   | Turn_failed detail -> "Antigravity turn failed: " ^ detail
   | Process_exited detail -> "Antigravity CLI exited before completion: " ^ detail
+  | Unhandled_exception detail -> "Antigravity runtime raised: " ^ detail
   | Timeout seconds -> Printf.sprintf "Antigravity stream was idle for %.3fs" seconds
 ;;
 
@@ -1057,10 +1059,7 @@ let run_turn ?(conversation_mode = Start) ?home_dir ?on_spawned ?on_prompt_sent 
     | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | Runtime_error error -> Error error
-    | exn ->
-      Error
-        (Protocol_error
-           { stage = "runtime boundary"; detail = Printexc.to_string exn })
+    | exn -> Error (Unhandled_exception (Printexc.to_string exn))
   in
   let* status, state, stderr = run_result in
   let wall_duration_s = max 0.0 (Eio.Time.now clock -. started_at) in

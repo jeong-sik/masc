@@ -39,7 +39,7 @@ jobs:
           set -euo pipefail
           mkdir -p proof dist
           git rev-parse HEAD > proof/SOURCE_COMMIT
-          # Direct .exe runs need the composition test's Python resources staged too.
+          # Build native candidates and stage the shipped package resources.
           opam exec -- dune build --profile release \
             bin/main_eio.exe bin/masc_tui.exe bin/masc_browser_host.exe \
             bin/deployment_preflight_helper.exe test/test_lane_addon.exe \
@@ -67,8 +67,10 @@ jobs:
             fi
             failed_tests+=("$name")
           }
+          # Direct executables read checked-in fixtures through DUNE_SOURCEROOT;
+          # building an .exe alone does not stage its (test) stanza's file deps.
           for test in test_lane_addon test_lane_addon_worker test_lane_addon_sources test_lane_addon_surface test_lane_addon_store_query test_lane_addon_resource_events test_lane_addon_config test_lane_addon_reconcile test_lane_addon_declaration test_keeper_tool_schema_bytes test_lane_addon_skills test_lane_addon_composition test_lane_addon_actions test_lane_addon_subscription test_tui_palette_matching test_tui_lane_addons test_tui_lane_subscriptions; do
-            run_proof_test "$test" "_build/default/test/$test.exe"
+            run_proof_test "$test" env DUNE_SOURCEROOT="$GITHUB_WORKSPACE" "_build/default/test/$test.exe"
           done
           run_proof_test tui-lane-package python3 test/test_tui_lane_package_pty.py _build/default/bin/masc_tui.exe
           run_proof_test tui-lane-visual python3 test/test_tui_lane_visual_pty.py _build/default/bin/masc_tui.exe --capture-dir proof/tui-lane-frames

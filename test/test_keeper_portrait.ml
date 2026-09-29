@@ -563,6 +563,76 @@ let test_mascot_is_a_drawable_candle () =
         (String.equal mascot_px (draw ~equipment:(equipment_of_name n) (body_of_name n) 96)))
     live_keepers
 
+
+(* ---- the dotted 3D mascot --------------------------------------------------- *)
+
+module S = Keeper_portrait_solid
+
+let solid ?(milliseconds = 0) n = S.mascot ~milliseconds (size n)
+
+let alpha_at (image : D.image) ~x ~y = snd (D.pixel image ~x ~y)
+
+(* The same table paints both renderers, so a keeper looks the same body in
+   either. *)
+let test_palette_is_the_paint_table () =
+  let body = fst mascot in
+  let p = D.palette body in
+  Alcotest.(check bool) "wax" true (p.D.wax_rgb = D.For_testing.wax_rgb body);
+  Alcotest.(check bool) "flame" true (p.D.flame_rgb = D.For_testing.flame_rgb body);
+  Alcotest.(check bool) "eyes" true (p.D.eye_rgb = D.For_testing.eye_rgb body);
+  Alcotest.(check bool) "mouth" true (p.D.mouth_rgb = D.For_testing.mouth_rgb body);
+  Alcotest.(check bool) "ink" true (p.D.ink_rgb = D.For_testing.ink body);
+  Alcotest.(check bool) "backdrop" true (p.D.backdrop_rgb = D.For_testing.backdrop_rgb body)
+
+let test_image_init_places_each_pixel () =
+  let image =
+    D.image_init (size 16) (fun ~x ~y -> ({ D.red = x; green = y; blue = 300 }, if x = y then 255 else 0))
+  in
+  Alcotest.(check int) "edge" 16 image.D.edge;
+  Alcotest.(check int) "four bytes a pixel" (16 * 16 * 4) (String.length image.D.rgba);
+  let colour, alpha = D.pixel image ~x:3 ~y:5 in
+  Alcotest.(check (list int)) "the pixel's own colour, clamped" [ 3; 5; 255 ]
+    [ colour.D.red; colour.D.green; colour.D.blue ];
+  Alcotest.(check int) "and alpha" 0 alpha;
+  Alcotest.(check int) "on the diagonal, opaque" 255 (alpha_at image ~x:7 ~y:7)
+
+let test_dotted_mascot_is_its_size_and_stands_on_its_backdrop () =
+  List.iter
+    (fun n ->
+      let image = solid n in
+      Alcotest.(check int) "edge" n image.D.edge;
+      Alcotest.(check int) "a corner is transparent" 0 (alpha_at image ~x:0 ~y:0);
+      Alcotest.(check int) "the centre is drawn" 255 (alpha_at image ~x:(n / 2) ~y:(n / 2)))
+    [ D.min_size; 24; 40; 96; 160; 240 ]
+
+(* Every dot is a square of whole pixels: inside the margin, each pixel is
+   the one at the top-left of its dot. *)
+let test_every_dot_is_a_square () =
+  List.iter
+    (fun n ->
+      let image = solid n in
+      let k = Int.max 1 ((n + (S.grid / 2)) / S.grid) in
+      let dots = n / k in
+      let margin = (n - (dots * k)) / 2 in
+      for y = margin to margin + (dots * k) - 1 do
+        for x = margin to margin + (dots * k) - 1 do
+          let corner = D.pixel image ~x:(margin + ((x - margin) / k * k)) ~y:(margin + ((y - margin) / k * k)) in
+          if D.pixel image ~x ~y <> corner then
+            Alcotest.failf "edge %d: pixel %d,%d is not its dot's colour" n x y
+        done
+      done)
+    [ 80; 160; 240 ]
+
+let test_dotted_mascot_sways_and_comes_back () =
+  let at milliseconds = (solid ~milliseconds 96).D.rgba in
+  Alcotest.(check bool) "the same moment is the same picture" true (String.equal (at 900) (at 900));
+  Alcotest.(check bool) "a quarter sway later it has turned" false
+    (String.equal (at 0) (at (S.sway_period_ms / 4)));
+  Alcotest.(check bool) "a whole sway later it is back" true
+    (String.equal (at 700) (at (700 + S.sway_period_ms)));
+  Alcotest.(check bool) "a moment before the start is on the loop too" true
+    (String.equal (at (-S.sway_period_ms)) (at 0))
+
 let () =
   Alcotest.run "keeper portrait"
     [
@@ -593,6 +663,16 @@ let () =
           Alcotest.test_case "beard is not the wax" `Quick test_beard_is_not_the_wax;
           Alcotest.test_case "culling changes nothing" `Quick test_culling_changes_nothing;
           Alcotest.test_case "nothing reaches the border" `Quick test_nothing_reaches_the_border;
+        ] );
+      ( "dotted",
+        [
+          Alcotest.test_case "palette is the paint table" `Quick test_palette_is_the_paint_table;
+          Alcotest.test_case "image_init places each pixel" `Quick test_image_init_places_each_pixel;
+          Alcotest.test_case "dotted mascot is its size and stands on its backdrop" `Quick
+            test_dotted_mascot_is_its_size_and_stands_on_its_backdrop;
+          Alcotest.test_case "every dot is a square" `Quick test_every_dot_is_a_square;
+          Alcotest.test_case "dotted mascot sways and comes back" `Quick
+            test_dotted_mascot_sways_and_comes_back;
         ] );
       ( "motion",
         [

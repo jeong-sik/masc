@@ -182,6 +182,7 @@ function tone(row: Row): StatusBadgeTone {
   if (value === 'running') return 'warn'
   if (value === 'cancelled') return 'info'
   if (value === 'rejected') return 'info'
+  if (value === 'review_cancelled') return 'neutral'
   return 'bad'
 }
 
@@ -586,7 +587,7 @@ function Details({ row }: { row: Row }) {
             ${finishedAt(row) == null ? null : html` · 종료 <time dateTime=${new Date(finishedAt(row)! * 1000).toISOString()}>${formatDateTimeKo(finishedAt(row)!)}</time>`}
             ${row.run.evaluatorRuntime ? html` · runtime <code>${row.run.evaluatorRuntime}</code>` : null}
           </p>
-          ${row.run.cause ? html`<p class="ia-err">${row.run.gate ? `${row.run.gate}: ` : ''}${row.run.cause}</p>` : null}
+          ${row.run.cause ? html`<p class=${row.run.status === 'review_cancelled' ? 'ia-note' : 'ia-err'}>${row.run.gate ? `${row.run.gate}: ` : ''}${row.run.cause}</p>` : null}
           <p class="ia-note">Review 원문은 저장되지 않음 · 출력은 1,024B excerpt</p>
         </div>
         <div class="ia-evi">
@@ -782,7 +783,7 @@ export function InternalAgentsMonitor() {
         <div class="flex flex-wrap items-end gap-2">
           <h3 id="standalone-lane-matrix-title" class="text-sm font-semibold text-[var(--color-fg-primary)]">Lanes</h3>
           <span class="rounded border border-[var(--color-accent)] px-1.5 py-0.5 text-3xs font-semibold text-[var(--color-accent)]">READ-ONLY OBSERVATION</span>
-          <span class="text-3xs text-[var(--color-fg-muted)]">설정됐지만 현재 retained 관측이 없는 lane도 표시합니다.</span>
+          <span class="text-3xs text-[var(--color-fg-muted)]">설정됐지만 현재 관측창에 실행이 없는 lane도 표시합니다.</span>
         </div>
         ${laneMatrixError === null ? null : html`<div role="alert" class="rounded border border-[var(--status-warn)] p-2 text-xs text-[var(--status-warn)]">${laneMatrix === null ? '관측 불가' : 'STALE · 마지막 성공 관측을 표시합니다.'} · ${laneMatrixError}</div>`}
         ${laneMatrix === null
@@ -799,9 +800,21 @@ export function InternalAgentsMonitor() {
                 </thead>
                 <tbody>
                   ${laneMatrix.lanes.map(lane => {
+                    const stagehandHasNoHistory = lane.laneId === 'browser_stagehand_exact'
+                    const exactWindowExcludesHistory = lane.laneId !== 'verifier_exact'
+                      && laneMatrix.exactRunProjectionTruncated
                     const statusLabel = lane.status === 'no_retained_observation'
-                      ? 'No retained observation'
+                      ? stagehandHasNoHistory
+                        ? 'Run history not retained'
+                        : exactWindowExcludesHistory
+                          ? 'No run in recent window'
+                          : 'No retained observation'
                       : lane.status.charAt(0).toUpperCase() + lane.status.slice(1)
+                    const noTerminalLabel = stagehandHasNoHistory
+                      ? '실행 기록 미보존'
+                      : exactWindowExcludesHistory
+                        ? '최근 완료 관측 없음'
+                        : '관측 기록 없음'
                     const statusClass = lane.status === 'degraded' || lane.status === 'unavailable'
                       ? 'text-[var(--color-danger)]'
                       : lane.status === 'running'
@@ -823,7 +836,7 @@ export function InternalAgentsMonitor() {
                         <td class="mono">${lane.admittedSlots.length === 0 ? '—' : lane.admittedSlots.join(', ')}${lane.cliSlots.length === 0 ? null : html`<br /><span class="text-3xs text-[var(--color-text-tertiary)]">cli: ${lane.cliSlots.join(', ')}</span>`}${lane.droppedSlots.length === 0 ? null : html`<br /><span class="text-3xs text-[var(--color-danger)]">dropped: ${lane.droppedSlots.join(', ')}</span>`}</td>
                         <td class="r mono">${lane.runningCount}</td>
                         <td class="r mono">${lane.retainedRunCount}</td>
-                        <td class="r mono">${lane.lastTerminalAt === null ? '관측 기록 없음' : `${lane.lastOutcome ?? 'terminal'} · ${formatDateTimeKo(lane.lastTerminalAt)}`}</td>
+                        <td class="r mono">${lane.lastTerminalAt === null ? noTerminalLabel : `${lane.lastOutcome ?? 'terminal'} · ${formatDateTimeKo(lane.lastTerminalAt)}`}</td>
                         <td class="r mono">${formatElapsed(lane.p50ElapsedSeconds ?? undefined)}</td>
                         <td class="mono">${lane.selectedSlots.length === 0 ? '—' : lane.selectedSlots.map(slot => `${slot.slotId} ×${slot.count}`).join(', ')}</td>
                       </tr>

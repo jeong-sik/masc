@@ -702,11 +702,11 @@ let error_detail : 'callback_error execution_error -> string = fun error ->
      | Some (Provenance_mismatch detail) ->
        "execution_provenance_mismatch: " ^ detail ^ "; cli tail: " ^ tail
      | Some _ | None -> "cli tail: " ^ tail)
+  | Provenance_mismatch detail -> "execution_provenance_mismatch: " ^ detail
+  | Domain_output_invalid detail -> "invalid_domain_output: " ^ detail
   | Flow_already_started _
   | Before_dispatch_persistence_failed _
-  | Before_advance_persistence_failed _
-  | Provenance_mismatch _
-  | Domain_output_invalid _ ->
+  | Before_advance_persistence_failed _ ->
     terminal_outcome_to_string (terminal_outcome (Error error))
 ;;
 

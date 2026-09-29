@@ -413,6 +413,10 @@ let test_a_preset_that_does_not_load_is_listed_as_unreadable () =
     in
     check bool "the reason names the schema it could not read" true
       (contains_substring reason "schema_version 1");
+    check bool "the reason names the schema this build reads" true
+      (contains_substring reason "reads only schema_version 2");
+    check bool "the reason says how to get the prompts back" true
+      (contains_substring reason "set its prompts again and save them as a new preset");
     let listing = Preset.list ~base_path in
     check (list string) "only the preset that opens is listed" [ "morning" ]
       (List.map (fun (m : Preset.manifest) -> m.Preset.preset_name) listing.Preset.presets);

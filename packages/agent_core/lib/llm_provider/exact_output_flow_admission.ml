@@ -199,6 +199,7 @@ let record_transport_stage receipt publish = function
 ;;
 
 let admit
+      ~(admission_config : Provider_config.t)
       ~net
       ~clock
       ~now_unix_s
@@ -267,12 +268,58 @@ let admit
                          advance_receipt receipt Wire_started;
                          on_measurement_receipt receipt)
                    in
-                   let measured =
+                   let dispatch () =
                      Count_tokens.measure_exact_completion_request
                        ~net
                        ~clock
                        ~dispatch_intent
                        measurement_request
+                   in
+                   let measured =
+                     match
+                       admission_config.max_concurrent_requests,
+                       Plan.preflight_body_timeout_s preflight
+                     with
+                     | None, _ -> dispatch ()
+                     | Some _, None ->
+                       Provider_admission.with_admission
+                         ~config:admission_config
+                         dispatch
+                     | Some _, Some timeout_s ->
+                       (match
+                          Provider_admission.with_admission_and_work_for
+                            ~clock
+                            ~timeout_s
+                            ~config:admission_config
+                            dispatch
+                        with
+                        | Ok result -> result
+                        | Error expiry ->
+                          let phase, stage, detail =
+                            match expiry with
+                            | Provider_admission.Permit_wait_expired ->
+                              ( Http_client.Queue
+                              , Count_tokens.Measurement_before_dispatch
+                              , "before a provider admission permit was granted" )
+                            | Provider_admission.Permit_granted_as_deadline_passed ->
+                              ( Http_client.Queue
+                              , Count_tokens.Measurement_before_dispatch
+                              , "as the provider admission permit was granted" )
+                            | Provider_admission.Work_expired ->
+                              ( Http_client.Wall_clock
+                              , Count_tokens.Measurement_dispatch_started
+                              , "during the provider count-tokens round trip" )
+                          in
+                          Error
+                            (Count_tokens.Completion_request_failed
+                               ( Count_tokens.Input_count_failed
+                                   (Input_token_count.Transport
+                                      (Http_client.TimeoutError
+                                         { message =
+                                             "exact body deadline exceeded " ^ detail
+                                         ; phase
+                                         }))
+                               , stage )))
                    in
                    let terminalize outcome_of_dispatch make_outcome =
                      match terminal_callback outcome_of_dispatch with

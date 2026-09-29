@@ -1,4 +1,4 @@
-"""Read-only installed publication, HTTP readback and Keeper preview check.
+"""Read-only installed ledger, HTTP readback and Keeper preview check.
 
 This does not call a model or prove actual Keeper dispatch, reading or adoption.
 An observation failure leaves a failed receipt; it never restarts a process.
@@ -39,7 +39,8 @@ def discovery_fragment(catalog, descriptor):
     row = rows[0]
     template = row['effective']
     require(isinstance(template, str) and template.strip(), 'Empty discovery prompt')
-    variables = {'proposal_id': descriptor['proposal_id'], 'context_sha256': descriptor['context_sha256']}
+    variables = {key: str(descriptor[key]) for key in
+                 ('ledger_sha256', 'claim_count', 'conflict_count', 'classified_count')}
     pattern = re.compile(r'\{\{([^}]+)\}\}')
     require({match.group(1).strip() for match in pattern.finditer(template)} == set(variables),
             'Discovery prompt has missing or unsupported variable bindings')
@@ -58,16 +59,16 @@ def validate_preview(value, keeper, descriptor, expected_fragment):
             'Keeper system prompt is not available: '
             + json.dumps({key: system_prompt.get(key) for key in ('state', 'reason', 'path', 'detail')}))
     assembled = system_prompt['assembled']
-    proposal_id = descriptor['proposal_id']
+    ledger_sha256 = descriptor['ledger_sha256']
     require(assembled.count(expected_fragment) == 1,
             'Preview does not contain exactly one complete resolved discovery fragment')
-    for marker in (proposal_id, descriptor['context_sha256'], 'keeper_workspace_memory_read',
-                   'model_proposed', 'not_performed', 'not_checked_against_current_memory'):
-        require(marker in assembled, 'Preview missing publication identity or uncertainty marker')
-    require(proposal_id not in prompt['unified_user_message_preview'],
-            'Publication discovery leaked into the persisted-message preview')
-    require(proposal_id not in system_prompt['effective'],
-            'Publication discovery leaked into the stable system prompt')
+    for marker in (ledger_sha256, 'keeper_workspace_memory_read',
+                   'model_classified', 'not_performed'):
+        require(marker in assembled, 'Preview missing ledger identity or uncertainty marker')
+    require(ledger_sha256 not in prompt['unified_user_message_preview'],
+            'Ledger discovery leaked into the persisted-message preview')
+    require(ledger_sha256 not in system_prompt['effective'],
+            'Ledger discovery leaked into the stable system prompt')
 
 
 def main():
@@ -90,7 +91,7 @@ def main():
     base = args.base_path.resolve(strict=True)
     args.output.mkdir(parents=True, exist_ok=False, mode=0o700)
     receipt = {'status': 'running', 'started_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
-               'scope': 'installed publication and HTTP Keeper preview only', 'runtime_mutation': False,
+               'scope': 'installed ledger and HTTP Keeper preview only', 'runtime_mutation': False,
                'semantic_verification': 'not_performed', 'actual_keeper_dispatch': 'not_measured',
                'keeper_adoption': 'not_measured', 'checks': []}
     opener = urllib.request.build_opener(NoRedirect(), urllib.request.ProxyHandler({}))
@@ -128,28 +129,43 @@ def main():
                 'Runtime memory root mismatch')
         receipt['build'] = build
         receipt['checks'].append('expected_runtime_identity')
-        publication_path = runtime_root / 'workspace-memory' / 'publication.json'
-        publication_bytes = read_regular(publication_path)
-        save('publication.json', publication_bytes)
-        descriptor = json.loads(publication_bytes)
-        require(set(descriptor) == {'schema', 'proposal_id', 'context_sha256'} and
-                descriptor['schema'] == 'workspace.memory.publication.v1', 'Publication schema mismatch')
-        proposal_id = descriptor['proposal_id']
-        require(isinstance(proposal_id, str) and len(proposal_id) == 64 and
-                all(c in '0123456789abcdef' for c in proposal_id), 'Invalid publication id')
-        proposal_path = runtime_root / 'workspace-memory' / 'proposals' / (proposal_id + '.json')
-        proposal_bytes = read_regular(proposal_path)
-        # Native Store.submit writes exactly the canonical bytes used by Store.id.
-        require(hashlib.sha256(proposal_bytes).hexdigest() == proposal_id,
-                'Native saved proposal bytes do not match publication id')
-        save('proposal.json', proposal_bytes)
-        proposal = json.loads(proposal_bytes)
-        require(proposal['context_sha256'] == descriptor['context_sha256'] and
-                proposal['status'] == 'model_proposed', 'Proposal binding or status mismatch')
-        readback = get('/api/v1/dashboard/workspace-memory-proposals?id=' + proposal_id, 'proposal-http')
-        require(readback['id'] == proposal_id and readback['proposal'] == proposal and
-                readback['semantic_verification'] == 'not_performed', 'HTTP proposal readback mismatch')
-        receipt['checks'].append('exact_native_proposal_and_http_readback')
+        ledger_path = runtime_root / 'workspace-memory' / 'ledger.json'
+        ledger_bytes = read_regular(ledger_path)
+        save('ledger.json', ledger_bytes)
+        ledger = json.loads(ledger_bytes)
+        require(set(ledger) == {'schema', 'claims', 'conflicts', 'facts'} and
+                ledger['schema'] == 'workspace.memory.ledger.v1', 'Ledger schema mismatch')
+        require(all(isinstance(ledger[key], list) for key in ('claims', 'conflicts', 'facts')),
+                'Ledger collections must be lists')
+        # Ledger.save writes the same canonical bytes Ledger.observe hashes.
+        # This probe checks a native durable artifact, not a re-encoded copy.
+        ledger_sha256 = hashlib.sha256(ledger_bytes).hexdigest()
+        descriptor = {'ledger_sha256': ledger_sha256,
+                      'claim_count': len(ledger['claims']),
+                      'conflict_count': len(ledger['conflicts']),
+                      'classified_count': len(ledger['facts'])}
+        readback = get('/api/v1/dashboard/workspace-memory-ledger', 'ledger-http')
+        require(readback['status'] == 'available' and
+                readback['ledger_sha256'] == ledger_sha256 and
+                readback['semantic_verification'] == 'not_performed',
+                'HTTP ledger identity or status mismatch')
+        observed = readback['ledger']
+        # The HTTP view enriches stored references with current source state.
+        # Compare the complete durable part while retaining all readback bytes.
+        require(isinstance(observed['facts'], list), 'HTTP ledger facts must be a list')
+        for fact in observed['facts']:
+            require(fact['source_state'] in ('present', 'absent', 'unavailable'),
+                    'HTTP ledger source state is unknown')
+            require((fact['source_state'] == 'present' and
+                     isinstance(fact['current_claim'], str) and bool(fact['current_claim'])) or
+                    (fact['source_state'] != 'present' and fact['current_claim'] is None),
+                    'HTTP ledger source state disagrees with its current claim')
+        durable = {**observed, 'facts': [
+            {key: value for key, value in fact.items()
+             if key not in ('current_claim', 'source_state')}
+            for fact in observed['facts']]}
+        require(durable == ledger, 'HTTP ledger content differs from native ledger')
+        receipt['checks'].append('exact_native_ledger_and_http_readback')
         prompt_row, fragment = discovery_fragment(get('/api/v1/prompts', 'prompts-before'), descriptor)
         save('resolved-discovery-fragment.txt', fragment.encode())
         save('resolved-discovery-prompt.json', json.dumps(prompt_row, ensure_ascii=False).encode())
@@ -168,10 +184,9 @@ def main():
         after_row, after_fragment = discovery_fragment(get('/api/v1/prompts', 'prompts-after'), descriptor)
         require(after_row == prompt_row and after_fragment == fragment,
                 'Resolved discovery prompt changed during observation')
-        require(read_regular(publication_path) == publication_bytes and
-                read_regular(proposal_path) == proposal_bytes, 'Publication changed during observation')
-        receipt.update(status='passed', proposal_id=proposal_id, keepers=args.keeper)
-        receipt['checks'].append('same_instance_and_publication_at_observation_boundaries')
+        require(read_regular(ledger_path) == ledger_bytes, 'Ledger changed during observation')
+        receipt.update(status='passed', ledger_sha256=ledger_sha256, keepers=args.keeper)
+        receipt['checks'].append('same_instance_and_ledger_at_observation_boundaries')
     except Exception as error:
         receipt.update(status='failed', error=str(error).replace(token, '[credential]'))
     finally:

@@ -25,7 +25,10 @@ CASES = {
     'base_changed': 'Runtime base or memory root changed during observation',
     'persistent_leak': 'leaked into the persisted-message preview',
     'identity_changed': 'Runtime identity changed during observation',
-    'missing_publication': 'publication.json',
+    'missing_ledger': 'ledger.json',
+    'http_digest_mismatch': 'HTTP ledger identity or status mismatch',
+    'http_content_mismatch': 'HTTP ledger content differs from native ledger',
+    'ledger_changed': 'Ledger changed during observation',
     'credential_echo': 'Credential echo withheld from evidence',
     'prompt_changed': 'Resolved discovery prompt changed during observation',
     'duplicate_fragment': 'exactly one complete resolved discovery fragment',
@@ -37,40 +40,35 @@ class InstalledDiscoveryProbeTests(unittest.TestCase):
     def run_case(self, case, expected_error):
         with tempfile.TemporaryDirectory(prefix='masc-discovery-probe-test-') as directory:
             base = Path(directory)
-            store = base / '.masc/workspace-memory/proposals'
+            store = base / '.masc/workspace-memory'
             store.mkdir(parents=True)
-            proposal = {
-                'context_sha256': 'c' * 64,
-                'status': 'model_proposed',
-                'sources': [],
-                'snapshots': [],
-                'gaps': [],
-                'proposal': {'shared_claims': [], 'conflicts': [], 'excluded': []},
+            ledger = {
+                'schema': 'workspace.memory.ledger.v1',
+                'claims': [{'claim_id': 'c-example', 'claim': 'Shared observation'}],
+                'conflicts': [],
+                'facts': [{'keeper_id': 'writer', 'store': 'ordinary',
+                           'claim_sha256': 'c' * 64,
+                           'disposition': {'kind': 'claim', 'claim_id': 'c-example'}}],
             }
-            raw = json.dumps(proposal, sort_keys=True, separators=(',', ':')).encode()
-            proposal_id = hashlib.sha256(raw).hexdigest()
-            (store / (proposal_id + '.json')).write_bytes(raw)
-            descriptor = {
-                'schema': 'workspace.memory.publication.v1',
-                'proposal_id': proposal_id,
-                'context_sha256': 'c' * 64,
-            }
-            if case != 'missing_publication':
-                (store.parent / 'publication.json').write_text(json.dumps(descriptor))
+            raw = json.dumps(ledger, separators=(',', ':')).encode()
+            ledger_sha256 = hashlib.sha256(raw).hexdigest()
+            if case != 'missing_ledger':
+                (store / 'ledger.json').write_bytes(raw)
+            descriptor = {'ledger_sha256': ledger_sha256, 'claim_count': 1,
+                          'conflict_count': 0, 'classified_count': 1}
             token_file = base / 'token.private'
             token_file.write_text(TOKEN)
             token_file.chmod(0o600)
 
             if case == 'valid_override':
-                template = 'Operator customized discovery: {{ proposal_id }} captured {{ context_sha256 }}\n'
+                template = 'Operator customized discovery: {{ ledger_sha256 }} classified {{ classified_count }} claims {{ claim_count }} conflicts {{ conflict_count }}\n'
             else:
-                template = 'Shared workspace proposal {{proposal_id}} with input {{context_sha256}}\n'
-            template += ('Read keeper_workspace_memory_read; model_proposed '
-                         'not_performed not_checked_against_current_memory.')
+                template = 'Shared workspace ledger {{ledger_sha256}} classified {{classified_count}} claims {{claim_count}} conflicts {{conflict_count}}\n'
+            template += 'Read keeper_workspace_memory_read; model_classified not_performed.'
             fragment = template
             for key, value in descriptor.items():
-                fragment = fragment.replace('{{' + key + '}}', value)
-                fragment = fragment.replace('{{ ' + key + ' }}', value)
+                fragment = fragment.replace('{{' + key + '}}', str(value))
+                fragment = fragment.replace('{{ ' + key + ' }}', str(value))
 
             paths = []
             authentication_errors = []
@@ -89,6 +87,8 @@ class InstalledDiscoveryProbeTests(unittest.TestCase):
                     if self.path == '/health?full=1':
                         counts['health'] += 1
                         after = counts['health'] > 1
+                        if case == 'ledger_changed' and after:
+                            (store / 'ledger.json').write_bytes(raw + b'\n')
                         instance = 'same-instance'
                         if case == 'null_instance':
                             instance = None
@@ -117,15 +117,23 @@ class InstalledDiscoveryProbeTests(unittest.TestCase):
                             'effective': effective,
                             'source': 'override' if case == 'valid_override' else 'default',
                         }]}
-                    elif self.path == '/api/v1/dashboard/workspace-memory-proposals?id=' + proposal_id:
-                        value = {'id': proposal_id, 'proposal': proposal,
-                                 'semantic_verification': 'not_performed'}
+                    elif self.path == '/api/v1/dashboard/workspace-memory-ledger':
+                        value = {'status': 'available', 'ledger_sha256': ledger_sha256,
+                                 'semantic_verification': 'not_performed',
+                                 'source_resolution': {'status': 'available'},
+                                 'ledger': {**ledger, 'facts': [
+                                     {**fact, 'current_claim': None, 'source_state': 'absent'}
+                                     for fact in ledger['facts']]}}
+                        if case == 'http_digest_mismatch':
+                            value['ledger_sha256'] = 'd' * 64
+                        elif case == 'http_content_mismatch':
+                            value['ledger'] = {**value['ledger'], 'claims': []}
                     elif self.path in ['/api/v1/keepers/' + name + '/config' for name in KEEPERS]:
                         assembled = 'other context\n' + fragment
                         if case == 'scattered_markers':
                             assembled = ' '.join([
-                                proposal_id, 'c' * 64, 'keeper_workspace_memory_read',
-                                'model_proposed', 'not_performed', 'not_checked_against_current_memory',
+                                ledger_sha256, 'keeper_workspace_memory_read',
+                                'model_classified', 'not_performed',
                             ])
                         elif case == 'duplicate_fragment':
                             assembled += '\n' + fragment
@@ -145,7 +153,7 @@ class InstalledDiscoveryProbeTests(unittest.TestCase):
                             'name': self.path.split('/')[4],
                             'prompt': {
                                 'system_prompt': system_prompt,
-                                'unified_user_message_preview': proposal_id
+                                'unified_user_message_preview': ledger_sha256
                                 if case == 'persistent_leak' else 'stable-user',
                             },
                         }

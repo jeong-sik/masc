@@ -2982,6 +2982,8 @@
 
 (include stanzas/test_mcp_server_eio_tool_profile_capability.inc)
 
+(include stanzas/test_tools_list_assignment_agent.inc)
+
 (include stanzas/test_mcp_seat_profile.inc)
 
 (include stanzas/test_mcp_dos_screen_image.inc)
@@ -4572,6 +4574,11 @@
  (name test_tui_link)
  (modules test_tui_link)
  (libraries alcotest base64 masc_tui_link))
+
+(test
+ (name test_tui_play_qr)
+ (modules test_tui_play_qr)
+ (libraries alcotest masc_tui_play_qr masc_tui_message_layout))
 
 (test
  (name test_tui_planning_order)

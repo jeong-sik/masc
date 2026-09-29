@@ -193,6 +193,20 @@ let a_damaged_middle_line_fails_the_read () =
   Alcotest.(check int) "read yields nothing rather than a shortened history" 0
     (Keeper_ask_store.open_ask_count ~base_path ~keeper_name:keeper)
 
+(* The decoded log is kept while the file is unchanged. A row another writer
+   appends, without going through this store, changes the file and is read
+   on the next load. *)
+let a_row_another_writer_appends_is_read () =
+  let base_path = temp_dir () in
+  record base_path "ask-1";
+  Alcotest.(check int) "one open question" 1
+    (Keeper_ask_store.open_ask_count ~base_path ~keeper_name:keeper);
+  append_raw base_path
+    (Yojson.Safe.to_string (Keeper_ask.event_to_json (Keeper_ask.Asked (an_ask ~ask_id:"ask-2")))
+     ^ "\n");
+  Alcotest.(check int) "the appended question is read" 2
+    (Keeper_ask_store.open_ask_count ~base_path ~keeper_name:keeper)
+
 let a_keeper_with_no_log_has_no_questions () =
   let base_path = temp_dir () in
   Alcotest.(check int) "no log, no questions" 0
@@ -232,6 +246,8 @@ let () =
         ] );
       ( "a damaged log",
         [
+          Alcotest.test_case "a row another writer appends is read" `Quick
+            a_row_another_writer_appends_is_read;
           Alcotest.test_case "a truncated final line keeps the history" `Quick
             a_truncated_final_line_does_not_erase_the_history;
           Alcotest.test_case "a damaged middle line fails the read" `Quick

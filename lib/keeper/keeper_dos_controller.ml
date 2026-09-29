@@ -18,11 +18,14 @@
 
 let expired_player ~base_path ~now holder =
   match Auth.load_credential base_path holder with
-  | Some ({ Masc_domain.agent_name; role = Masc_domain.Player; _ } as credential)
+  | Some { Masc_domain.agent_name; role = Masc_domain.Player; expires_at = Some stamp; _ }
     when String.equal agent_name holder ->
-    (match Auth_token_inventory.classify ~now credential with
-     | Auth_token_inventory.Expired_at _ -> Some Tool_misc_dos_lane.Player_expired
-     | Auth_token_inventory.Never | Auth_token_inventory.Valid_until _ -> None)
+    (* Static bearer validation compares whole-second UTC timestamps with a
+       strict [now > expiry]. During the expiry second its bearer still works,
+       so do not free its controller until the following second. *)
+    (match Time_codec.parse_rfc3339_opt stamp with
+     | Some expiry when expiry < Float.floor now -> Some Tool_misc_dos_lane.Player_expired
+     | Some _ | None -> None)
   | Some _ | None -> None
 ;;
 

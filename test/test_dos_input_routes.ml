@@ -220,6 +220,23 @@ let test_expired_invite_releases_controller_on_next_move () =
             | Some credential -> credential
             | None -> fail "the invite credential disappeared"
           in
+          let expiry = "2030-01-01T00:00:00Z" in
+          Auth.save_credential base_path { credential with expires_at = Some expiry };
+          let expiry_second =
+            match Time_codec.parse_rfc3339_opt expiry with
+            | Some at -> at
+            | None -> fail "the fixed expiry did not parse"
+          in
+          let holder_left ~now =
+            Masc.Keeper_dos_controller.holder_left
+              ~config:(Masc.Mcp_server.workspace_config state) ~now "minsu"
+          in
+          check bool "the invite is still eligible during its expiry second" true
+            (Option.is_none (holder_left ~now:(expiry_second +. 0.5)));
+          check bool "the invite has left once that second ends" true
+            (match holder_left ~now:(expiry_second +. 1.) with
+             | Some Masc.Tool_misc_dos_lane.Player_expired -> true
+             | Some Masc.Tool_misc_dos_lane.Keeper_stopped | None -> false);
           Auth.save_credential base_path
             { credential with expires_at = Some "2000-01-01T00:00:00Z" };
           check bool "the expired bearer cannot move" true

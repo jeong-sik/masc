@@ -1,0 +1,30 @@
+ Overview  Activity  ▸Keepers  Lanes  Memory  Board  Planning  Fusion  Workspace  Config
+
+   Keepers ▸ alpha ▸ chat
+ ──────────────────────────────────────────────────────────────────────────────────────────────────
+  ┄┄ 2026-08-21 · 21:00 ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+       21:41 ○ STATUS        │ 판정 중 · 이 호출은 미뤄짐 · GATE_CLICK long-argument long-argument
+                             │ ⌄ 205자
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ ──────────────────────────────────────────────────────────────────────────────────────────────────
+    >
+
+ alpha · ● healthy AUTO · gate: Auto Judge · running · conf…ude-opus-5  Context unavailable · Ctrl-X
+  Enter:send  Ctrl-J:NL  Ctrl-R:reasoning  Ctrl-D:tools  Ctrl-N:journal  Esc:list  …?

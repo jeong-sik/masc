@@ -1,0 +1,30 @@
+ Overview  Activity  ▸Keepers  Lanes  Memory  Board  Planning  Fusion 2›
+
+   Keepers ▸ alpha ▸ chat
+ ──────────────────────────────────────────────────────────────────────────────
+  ┄┄ 2026-08-21 · 21:00 ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+       21:41 ○ STATUS     │ 판정 중 · 이 호출은 미뤄짐 · GATE_CLICK
+                          │ long-argume ⌄ 222자
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ ──────────────────────────────────────────────────────────────────────────────
+    >
+
+ alpha · ● healthy AUTO · gate: Auto Judge · runn…  Context unavailable · Ctrl-X
+  Enter:send  Ctrl-J:NL  Ctrl-R:reasoning  Ctrl-D:tools  Esc:list  …?

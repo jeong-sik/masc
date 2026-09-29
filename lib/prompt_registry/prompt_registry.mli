@@ -158,6 +158,11 @@ val resolve_and_render_prompt_template :
     override supplied the bytes sent to the model. This avoids reporting a
     newer override beside a render produced from an older one. *)
 
+val render_resolved_prompt_template
+  :  string -> prompt_resolution -> (string * string) list -> (string, string) result
+(** Render a previously resolved snapshot, for callers that must measure
+    several candidate prompts against the very same template bytes. *)
+
 (** {1 Override lifecycle} *)
 
 val set_override : string -> string -> (unit, string) result

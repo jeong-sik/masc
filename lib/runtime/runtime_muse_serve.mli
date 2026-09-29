@@ -51,6 +51,11 @@ type config =
 
 val default_timeout_s : float
 val default_config : unit -> config
+val credential_backend_entry : string
+(** The explicit file-backed credential selection shared by runtime children
+    and operator sign-in commands. It keeps credentials in the selected
+    XDG config home instead of macOS Keychain. *)
+
 val login_environment : account_home:string -> string array
 (** Native login writes HOME/.config/muse/auth.json. All HOME/XDG roots are
     selected explicitly, with ambient provider API credentials excluded. Like

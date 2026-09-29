@@ -150,6 +150,80 @@ let fsynced label (transition : P.exact_transition) =
     Alcotest.failf "%s was visible without confirmed fsync: %s" label detail
 ;;
 
+let ready_confirmation_events ledger_path =
+  ledger_lines ledger_path
+  |> List.filter_map (fun line ->
+    match Yojson.Safe.from_string line with
+    | `Assoc fields as json ->
+      (match List.assoc_opt "kind" fields with
+       | Some (`String "ready_confirmation") -> Some json
+       | None -> List.assoc_opt "ready_confirmation" fields
+       | Some _ -> None)
+    | _ -> None)
+;;
+
+let confirm_ready_in_child base_path =
+  ignore
+    (ok
+       "child process-start recovery"
+       (P.recover_for_process_start ~now:10.0 ~base_path ~keeper_name:"alpha")
+     : int);
+  match ok "child loads Ready root" (P.load ~base_path ~keeper_name:"alpha") with
+  | [ ({ P.state = P.Ready; _ } as partition) ] ->
+    ignore
+      (P.confirm_ready ~base_path ~partition
+       |> ok "child confirms Ready"
+       |> fsynced "child confirms Ready"
+       : P.t)
+  | _ -> Alcotest.fail "child did not find one Ready root"
+;;
+
+(* After another boot compacts the ledger, the original process's cursor
+   deliberately cannot follow the new inode. Every post-restart mutation in
+   the multi-boot scenario therefore belongs to this fresh process. *)
+let defer_confirm_and_settle_in_child base_path =
+  ignore
+    (ok
+       "third child process-start recovery"
+       (P.recover_for_process_start ~now:10.0 ~base_path ~keeper_name:"alpha")
+     : int);
+  let owner = P.Worker_epoch.generate () in
+  let deferred =
+    let running = claim ~base_path ~worker_epoch:owner ~now:11.0 in
+    P.defer ~worker_epoch:owner ~base_path ~partition:running
+    |> ok "defer after two boots"
+    |> fsynced "defer after two boots"
+  in
+  (match deferred.state with
+   | P.Ready -> ()
+   | P.Running _ | P.Completed _ | P.Settled _ | P.Abandoned _ | P.Blocked _ ->
+     Alcotest.fail "deferral did not return to Ready");
+  ignore
+    (P.confirm_ready ~base_path ~partition:deferred
+     |> ok "third child confirms deferred Ready"
+     |> fsynced "third child confirms deferred Ready"
+     : P.t);
+  let running = claim ~base_path ~worker_epoch:owner ~now:12.0 in
+  let completed =
+    P.complete_existing_judgment
+      ~now:13.0
+      ~worker_epoch:owner
+      ~base_path
+      ~partition:running
+      ~item:{ candidate_id = running.candidate_id; judgment = judgment (provenance ()) }
+    |> ok "complete after multi-boot deferral"
+    |> fsynced "complete after multi-boot deferral"
+  in
+  ignore
+    (ok
+       "settle after multi-boot deferral"
+       (P.settle ~now:14.0 ~base_path ~partition:completed)
+     : P.t);
+  (match ok "load multi-boot settled root" (P.load ~base_path ~keeper_name:"alpha") with
+   | [ { P.state = P.Settled _; _ } ] -> ()
+   | _ -> Alcotest.fail "multi-boot Ready confirmation prevented settlement")
+;;
+
 let test_roots_are_singleton_deterministic_and_context_exact () =
   with_temp_base "board-attention-partition-roots" @@ fun base_path ->
   let first = candidate ~id:"candidate-first" ~recorded_at:1.0 () in
@@ -883,6 +957,226 @@ let test_runtime_transitions_append_then_startup_compacts () =
   | _ -> Alcotest.fail "startup ledger rewrite lost the Settled receipt"
 ;;
 
+let test_ready_confirmations_survive_requeue_deferral_and_restart () =
+  with_temp_base "board-attention-ready-confirmations" @@ fun base_path ->
+  let pending = candidate ~id:"candidate-confirmation" ~recorded_at:1.0 () in
+  ignore (roots ~base_path [ pending ] : P.t list);
+  let ledger_path = P.For_testing.path ~base_path ~keeper_name:"alpha" in
+  let owner = P.Worker_epoch.generate () in
+  let first_claim = claim ~base_path ~worker_epoch:owner ~now:2.0 in
+  let blocked =
+    P.block
+      ~now:3.0
+      ~worker_epoch:owner
+      ~base_path
+      ~partition:first_claim
+      (P.Unexpected_worker_failure { detail = "test failure"; progress = None })
+    |> ok "block before requeue"
+    |> fsynced "block before requeue"
+  in
+  let requeued =
+    match ok "requeue blocked" (P.requeue_blocked ~base_path ~partition:blocked) with
+    | P.Requeued transition -> fsynced "requeue blocked" transition
+    | P.Cursor_conflict detail | P.Generation_conflict detail ->
+      Alcotest.failf "requeue conflicted: %s" detail
+  in
+  let confirmed =
+    P.confirm_ready ~base_path ~partition:requeued
+    |> ok "confirm requeued Ready"
+    |> fsynced "confirm requeued Ready"
+  in
+  Alcotest.(check bool)
+    "confirmation keeps generation and state"
+    true
+    (confirmed = requeued);
+  let confirmations () = ready_confirmation_events ledger_path in
+  let assert_confirmations expected =
+    let events = confirmations () in
+    Alcotest.(check int) "durable confirmation count" expected (List.length events);
+    List.iter
+      (fun event ->
+         let open Yojson.Safe.Util in
+         Alcotest.(check string)
+           "confirmation is attached to the root"
+           requeued.partition_id
+           (event |> member "partition_id" |> to_string);
+         Alcotest.(check string)
+           "confirmation uses the live boot identity"
+           Masc.Build_identity.runtime_instance_id
+           (event |> member "runtime_instance_id" |> to_string);
+         Alcotest.(check bool)
+           "confirmation records a finite time"
+           true
+           (event |> member "confirmed_at" |> to_float |> Float.is_finite))
+      events
+  in
+  assert_confirmations 1;
+  let intact = Fs_compat.load_file ledger_path in
+  let tampered =
+    match List.rev (ledger_lines ledger_path) with
+    | last :: previous ->
+      (match Yojson.Safe.from_string last with
+       | `Assoc fields ->
+         (match List.assoc_opt "ready_confirmation" fields with
+          | Some confirmation ->
+            let duplicate =
+              Yojson.Safe.to_string
+                (`Assoc (("ready_confirmation", confirmation) :: fields))
+            in
+            String.concat "\n" (List.rev previous @ [ duplicate ]) ^ "\n"
+          | None -> Alcotest.fail "last row lacks Ready confirmation")
+       | _ -> Alcotest.fail "last row is not a JSON object")
+    | [] -> Alcotest.fail "confirmation ledger is empty"
+  in
+  ok "inject duplicate confirmation key" (Fs_compat.save_file_atomic ledger_path tampered);
+  expect_error
+    "duplicate Ready confirmation key is rejected"
+    (P.load ~base_path ~keeper_name:"alpha");
+  ok "restore intact ledger" (Fs_compat.save_file_atomic ledger_path intact);
+  Alcotest.(check int)
+    "first restart does not release Ready"
+    0
+    (ok
+       "first restart"
+       (P.recover_for_process_start ~now:4.0 ~base_path ~keeper_name:"alpha"));
+  assert_confirmations 1;
+  ignore
+    (P.confirm_ready ~base_path ~partition:requeued
+     |> ok "repeat same-generation Ready confirmation"
+     |> fsynced "repeat same-generation Ready confirmation"
+     : P.t);
+  ignore
+    (ok
+       "restart after repeated confirmation"
+       (P.recover_for_process_start ~now:4.5 ~base_path ~keeper_name:"alpha")
+     : int);
+  assert_confirmations 2;
+  let deferred =
+    let running = claim ~base_path ~worker_epoch:owner ~now:5.0 in
+    P.defer ~worker_epoch:owner ~base_path ~partition:running
+    |> ok "defer spent lane"
+    |> fsynced "defer spent lane"
+  in
+  ignore
+    (P.confirm_ready ~base_path ~partition:deferred
+     |> ok "confirm deferred Ready"
+     |> fsynced "confirm deferred Ready"
+     : P.t);
+  Alcotest.(check int)
+    "second restart does not release Ready"
+    0
+    (ok
+       "second restart"
+       (P.recover_for_process_start ~now:6.0 ~base_path ~keeper_name:"alpha"));
+  assert_confirmations 3;
+  (match confirmations () with
+   | [ first; second; third ] ->
+     let open Yojson.Safe.Util in
+     Alcotest.(check bool)
+       "repeat confirmation retains the Ready generation"
+       true
+       (first |> member "generation" = (second |> member "generation"));
+     Alcotest.(check bool)
+       "deferral advances the Ready generation"
+       false
+       (second |> member "generation" = (third |> member "generation"))
+   | _ -> Alcotest.fail "expected three durable Ready confirmations");
+  let running = claim ~base_path ~worker_epoch:owner ~now:7.0 in
+  let proof = provenance () in
+  let completed =
+    P.complete_existing_judgment
+      ~now:8.0
+      ~worker_epoch:owner
+      ~base_path
+      ~partition:running
+      ~item:{ candidate_id = pending.candidate_id; judgment = judgment proof }
+    |> ok "complete after deferral"
+    |> fsynced "complete after deferral"
+  in
+  ignore (ok "settle after deferral" (P.settle ~now:9.0 ~base_path ~partition:completed) : P.t);
+  ignore
+    (ok
+       "restart after settlement"
+       (P.recover_for_process_start ~now:10.0 ~base_path ~keeper_name:"alpha")
+     : int);
+  assert_confirmations 3;
+  (match ok "load settled root" (P.load ~base_path ~keeper_name:"alpha") with
+   | [ { P.state = P.Settled _; _ } ] -> ()
+   | _ -> Alcotest.fail "confirmation observations changed settlement")
+;;
+
+let test_ready_confirmations_identify_distinct_process_boots () =
+  with_temp_base "board-attention-ready-boot-ids" @@ fun base_path ->
+  let pending = candidate ~id:"candidate-multiple-boots" ~recorded_at:1.0 () in
+  ignore (roots ~base_path [ pending ] : P.t list);
+  let owner = P.Worker_epoch.generate () in
+  let running = claim ~base_path ~worker_epoch:owner ~now:2.0 in
+  let blocked =
+    P.block
+      ~now:3.0
+      ~worker_epoch:owner
+      ~base_path
+      ~partition:running
+      (P.Unexpected_worker_failure { detail = "test failure"; progress = None })
+    |> ok "block before multi-boot requeue"
+    |> fsynced "block before multi-boot requeue"
+  in
+  (match ok "multi-boot requeue" (P.requeue_blocked ~base_path ~partition:blocked) with
+   | P.Requeued transition ->
+     ignore (fsynced "multi-boot requeue" transition : P.t)
+   | P.Cursor_conflict detail | P.Generation_conflict detail ->
+     Alcotest.failf "multi-boot requeue conflicted: %s" detail);
+  let executable =
+    if Filename.is_relative Sys.executable_name
+    then Filename.concat (Sys.getcwd ()) Sys.executable_name
+    else Sys.executable_name
+  in
+  let run_child mode =
+    let pid =
+      Unix.create_process
+        executable
+        [| executable; mode; base_path |]
+        Unix.stdin
+        Unix.stdout
+        Unix.stderr
+    in
+    match Unix.waitpid [] pid with
+    | _, Unix.WEXITED 0 -> ()
+    | _, (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) ->
+      Alcotest.failf "Ready confirmation child process failed: %s" mode
+  in
+  run_child "--ready-confirm-child";
+  run_child "--ready-confirm-child";
+  let ledger_path = P.For_testing.path ~base_path ~keeper_name:"alpha" in
+  Alcotest.(check int)
+    "two boots confirmed the same Ready generation"
+    2
+    (List.length (ready_confirmation_events ledger_path));
+  run_child "--ready-defer-confirm-settle-child";
+  let events = ready_confirmation_events ledger_path in
+  let open Yojson.Safe.Util in
+  (match events with
+   | [ first; second; third ] ->
+     let boot_ids =
+       List.map
+         (fun event -> event |> member "runtime_instance_id" |> to_string)
+         events
+     in
+     Alcotest.(check int)
+       "each real process boot has a distinct identity"
+       3
+       (List.sort_uniq String.compare boot_ids |> List.length);
+     Alcotest.(check bool)
+       "first two observations keep the requeued generation"
+       true
+       (first |> member "generation" = (second |> member "generation"));
+     Alcotest.(check bool)
+       "deferral advances the Ready generation"
+       false
+       (second |> member "generation" = (third |> member "generation"))
+   | _ -> Alcotest.fail "three boots did not leave three confirmations")
+;;
+
 let test_restart_returns_every_running_root_to_ready () =
   with_temp_base "board-attention-partition-restart-ready" @@ fun base_path ->
   let unbound_candidate = candidate ~id:"candidate-unbound" ~recorded_at:1.0 () in
@@ -1402,7 +1696,12 @@ let test_a_judged_candidate_keeps_its_abandoned_root_closed () =
 ;;
 
 let () =
-  Alcotest.run
+  match Array.to_list Sys.argv with
+  | [ _; "--ready-confirm-child"; base_path ] -> confirm_ready_in_child base_path
+  | [ _; "--ready-defer-confirm-settle-child"; base_path ] ->
+    defer_confirm_and_settle_in_child base_path
+  | _ ->
+    Alcotest.run
     "keeper_board_attention_partition"
     [ ( "durable singleton exact FSM"
       , [ Alcotest.test_case
@@ -1449,6 +1748,14 @@ let () =
             "runtime transitions append then startup compacts"
             `Quick
             test_runtime_transitions_append_then_startup_compacts
+        ; Alcotest.test_case
+            "Ready confirmations survive requeue, deferral, and restarts"
+            `Quick
+            test_ready_confirmations_survive_requeue_deferral_and_restart
+        ; Alcotest.test_case
+            "Ready confirmations identify distinct process boots"
+            `Quick
+            test_ready_confirmations_identify_distinct_process_boots
         ; Alcotest.test_case
             "restart releases only Unbound and quarantines dispatchable"
             `Quick

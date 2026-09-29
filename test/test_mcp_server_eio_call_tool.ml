@@ -1003,6 +1003,73 @@ let test_canonical_keeper_retention ?(rebind = false) ~bearer ~fail_audit () =
         | Ok gc -> gc | Error error -> fail (Tool_blob_maintenance.error_to_string error) in
       check int "receipt is a durable GC root even after audit failure" 1 gc.live_references))
 
+(* A result's media reaches an MCP client after its text, through the same
+   projection the official-client bridge uses; media MCP cannot carry is named
+   as not sent, never dropped quietly. *)
+let content_types response =
+  U.(response |> member "result" |> member "content" |> to_list)
+  |> List.map U.(fun item -> item |> member "type" |> to_string)
+
+let is_error response = U.(response |> member "result" |> member "isError" |> to_bool)
+
+let png_1x1 =
+  "\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde"
+
+let result_with_blocks ?(message = "observed") blocks =
+  Tool_result.make_ok ~tool_name:"masc_status" ~start_time:(Tool_timing.start ())
+    ~data:(`String message) ~content_blocks:blocks ()
+
+let test_media_blocks_become_mcp_items () =
+  with_call_tool_state (fun env sw state ->
+    let response =
+      call_with_result ~env ~sw state
+        (result_with_blocks
+           [ Llm_provider.Types.Text "observed"
+           ; Llm_provider.Types.image_block ~media_type:"image/png"
+               ~data:(Base64.encode_exn png_1x1) ()
+           ])
+    in
+    check (list string) "text then image" [ "text"; "image" ] (content_types response);
+    check bool "not an error" false (is_error response);
+    check string "the image keeps its media type" "image/png"
+      U.(response |> member "result" |> member "content" |> index 1 |> member "mimeType" |> to_string))
+
+let test_media_mcp_cannot_carry_is_named () =
+  with_call_tool_state (fun env sw state ->
+    (* A tool may have completed with non-UTF8 process output. Rejecting its
+       media must not bypass the text sanitization used by the normal MCP
+       projection, or the client loses the explanatory fallback as well. *)
+    let raw_message = "observed\xff frame \xed\x95\x9c" in
+    check bool "fixture message contains invalid UTF-8" false
+      (String.is_valid_utf_8 raw_message);
+    let response =
+      call_with_result ~env ~sw state
+        (result_with_blocks ~message:raw_message
+           [ Llm_provider.Types.image_block ~source_type:Url ~media_type:"image/png"
+               ~data:"https://example.invalid/frame.png" ()
+           ])
+    in
+    check (list string) "what was not sent, then the message" [ "text"; "text" ]
+      (content_types response);
+    check bool "the call reads as failed" true (is_error response);
+    let content = U.(response |> member "result" |> member "content") in
+    check_json_strings_valid_utf8 "unsupported media content" content;
+    check string "the second item preserves the sanitized observation"
+      (Llm_provider.Utf8_sanitize.sanitize raw_message)
+      U.(content |> index 1 |> member "text" |> to_string);
+    let envelope = result_envelope response in
+    check_json_strings_valid_utf8 "unsupported media envelope" envelope;
+    check string "envelope summary preserves the same sanitized observation"
+      (Llm_provider.Utf8_sanitize.sanitize raw_message)
+      U.(envelope |> member "summary" |> to_string);
+    check bool "valid non-ASCII text survives the fallback" true
+      (String_util.contains_substring
+         U.(content |> index 1 |> member "text" |> to_string) "\xed\x95\x9c");
+    check bool "the first item names the media" true
+      (String_util.contains_substring
+         U.(content |> index 0 |> member "text" |> to_string)
+         "cannot deliver URL image content"))
+
 let () =
   run "mcp_server_eio_call_tool"
     [
@@ -1032,6 +1099,8 @@ let () =
             test_call_captures_admission_scope_across_workspace_switch;
           test_case "threads exact MCP invocation identity" `Quick
             test_threads_exact_mcp_invocation_identity;
+          test_case "media blocks become MCP items" `Quick test_media_blocks_become_mcp_items;
+          test_case "media MCP cannot carry is named" `Quick test_media_mcp_cannot_carry_is_named;
           test_case "activity payload sanitizes invalid UTF-8" `Quick
             test_activity_payload_sanitizes_invalid_utf8;
           test_case "failure observation follows typed failed payload" `Quick

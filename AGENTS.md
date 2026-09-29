@@ -12,3 +12,4 @@
 - `docs/constitution.xml` is a product and development contract, not a Keeper runtime system prompt.
 - The shared Keeper runtime prompt is `config/prompts/keeper.md`. Per-Keeper behavior also comes from the resolved `<base-path>/.masc/config/keepers/<name>.toml` `keeper.instructions`.
 - Edit the contract and runtime prompts independently; changing one does not implicitly change the other.
+- `<execution_protocol>` in `docs/constitution.xml` binds external coding-agent sessions, not Keeper lanes. A Keeper may build and test locally when its lane has a toolchain, but local results are never merge evidence: verdicts cite the current head's PR-check run, and targeted suites cite a `test.yml` targeted run.

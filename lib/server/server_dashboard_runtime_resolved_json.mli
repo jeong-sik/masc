@@ -7,6 +7,10 @@
     Settings surface consumes; it replaces the dashboard's divergent
     [/api/v1/dashboard/runtime-defaults] projections. *)
 
+val build_at : now:float -> generated_at_iso:string -> config:Workspace.config -> Yojson.Safe.t
+(** Render every runtime's quota and rate-limit state at the same observation
+    time, including the provider-declared Retry-After boundary. *)
+
 val build : generated_at_iso:string -> config:Workspace.config -> Yojson.Safe.t
 (** [build ~generated_at_iso ~config] renders the resolved document from the
     live [Runtime] singleton state. [config] supplies the full keeper name

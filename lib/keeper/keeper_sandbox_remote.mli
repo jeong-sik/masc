@@ -190,6 +190,10 @@ type lane_report =
   ; last_dispatch : dispatch_record option
   }
 
+val report_openssh : base_path:string -> endpoint:Exec_ssh_endpoint.t -> lane_report
+(** Read the same endpoint-scoped observations as the runner without creating
+    a runner, an SSH control directory, a cache entry, or a remote probe. *)
+
 val report : t -> lane_report
 
 type receipt_unavailable =

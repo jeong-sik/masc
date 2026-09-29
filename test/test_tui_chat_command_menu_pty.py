@@ -208,8 +208,30 @@ def run(executable):
         styled = styled_screen(output)
         for number in (draft, draft + 1):
             cells = styled_cells(styled[number])
-            assert all(cell[2] == (2, 30, 30, 30) for cell in cells[36:148]), "draft and bottom padding do not share the observed user-surface background"
-            assert len(cells[36:148]) == 112, "input ground did not fill the inner chat width"
+            inner = cells[36:148]
+            if len(inner) != 112 or any(cell[2] != (2, 30, 30, 30) for cell in inner):
+                # Preserve the actual failed cells before changing either the
+                # expected palette or renderer. A missing palette, indexed
+                # projection, reset inside the draft, and a wrong row slice
+                # need different fixes.
+                runs = []
+                for column, (char, reverse, background) in enumerate(cells):
+                    if runs and runs[-1]["reverse"] == reverse and runs[-1]["background"] == background:
+                        runs[-1]["text"] += char
+                    else:
+                        runs.append({"column": column, "reverse": reverse,
+                                     "background": background, "text": char})
+                diagnostic = {"row": number, "draft_row": draft, "context_row": context,
+                              "expected_background": (2, 30, 30, 30), "expected_inner_columns": [36, 148],
+                              "actual_cells": len(cells), "actual_inner_cells": len(inner),
+                              "raw_row": repr(styled[number]), "cell_runs": runs,
+                              "plain_rows": {key: value.decode("utf-8", "replace") for key, value in rows.items()},
+                              "osc10_query_emitted": b"\x1b]10;?" in output,
+                              "osc11_query_emitted": b"\x1b]11;?" in output,
+                              "background_sgrs": sorted({escape[0].decode("ascii") for escape in SGR.finditer(bytes(output))
+                                                          if escape[0].startswith(b"\x1b[48;")})}
+                print("CHAT_INPUT_SURFACE_DIAGNOSTIC " + json.dumps(diagnostic, ensure_ascii=False), flush=True)
+                raise AssertionError("draft and bottom padding do not share the observed user-surface background; see CHAT_INPUT_SURFACE_DIAGNOSTIC")
         assert not any(cell[2] is not None for cell in styled_cells(styled[context])), "input background leaked into operational status"
         h.write_all(fd, output, b"\x15")
         h.drain_until_quiet(process, fd, output)

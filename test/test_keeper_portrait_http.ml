@@ -5,6 +5,7 @@ module Http = Http_server_eio
 module Api = Server_dashboard_http_keeper_portrait
 
 let () = Mirage_crypto_rng_unix.use_default ()
+let () = Server_startup_state.mark_state_ready () |> Result.get_ok
 
 let keeper = "portrait-http-probe"
 let png_signature = "\137PNG\r\n\026\n"

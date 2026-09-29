@@ -4,18 +4,17 @@
 # Refuses unless ALL of these hold at call time (task-1718, goal-1790241464021):
 #   1. --head is a 40-hex SHA
 #   2. the PR is open, not draft, base == main, and its head is still that SHA
-#   3. the newest run of every GitHub Actions workflow for that SHA that is not
-#      a cancelled twin is completed+success
+#   3. the newest run of every GitHub Actions workflow/event for that SHA that
+#      is not a cancelled twin is completed+success; PR runs belong to this PR
 #      (a queued workflow has no check-runs yet; this catches it)
-#      Verified namespaced Draft snapshots cannot shadow a Ready suite; their
-#      exclusion requires all six canonical checks in that Ready suite to pass.
-#   4. the check-run of every name from the newest check suite on that SHA is
-#      completed+success, ignoring suites of runs that lost in 3 (none -> refuse)
+#   4. every check from each admitted workflow/event suite is completed+success,
+#      ignoring unrelated PR suites and runs that lost in 3 (none -> refuse)
 #   5. the body file is non-empty (no evidence-free approvals), and its first
 #      line is a literal R1 verdict line for this head:
 #        verdict: PASS head: <--head> run: <workflow run id on --head> by: <keeper>
 #      where <keeper> is not this account's login (#38975, 2026-09-26)
-#   6. no account has an open CHANGES_REQUESTED on the PR -- except this
+#   6. ci-freshness.py admits the exact PR-check against live main
+#   7. no account has an open CHANGES_REQUESTED on the PR -- except this
 #      account's own one when --replace-own-cr names exactly that review id
 # Skips (exit 0, no write) only if this account's APPROVED review body
 # names this SHA in both its verdict and approve-guard footer. GitHub may
@@ -23,24 +22,35 @@
 #
 # Usage:
 #   approve-guard.sh --repo O/R --pr N --head SHA40 --body FILE
-#                    [--replace-own-cr REVIEW_ID]
+#                    [--replace-own-cr REVIEW_ID] [--git-dir DIR]
+#   approve-guard.sh --check --run PR_CHECK_ID ...
 #   approve-guard.sh --check ...   # evaluate only, never writes (safe probe)
 #   approve-guard.sh --merge-check --repo O/R --pr N --head SHA40
-#                                  # count only approvals bound to this head
+#                                  # trusted non-author approvals bound to this head
 # Exit: 0 approved/skipped/would-approve, 2 refused (reasons on stderr), 1 infra error.
 # Env: GUARD_GH overrides the gh binary (tests use a fake).
-# Needs only bash + gh: every JSON read uses gh's built-in --jq and the POST uses
-# gh -f/-F fields, so a lane without a standalone jq binary can still approve.
+# Needs bash + gh + git + Python 3. JSON uses gh --jq or the Python standard
+# library; POST uses gh -f/-F, so no standalone jq is required.
 # gh_json runs inside $( ); every caller ends with `|| exit 1` so a transport
 # error stops the guard with exit 1 instead of turning into false refusals.
 set -u
 GH="${GUARD_GH:-gh}"
-source "$(cd "$(dirname "$0")" && pwd)/pr-check-run-contract.sh" || exit 1
-check_only=0; merge_check=0; repo=""; pr=""; head=""; body=""; replace_cr=""
+here="$(cd "$(dirname "$0")" && pwd)"
+check_only=0; merge_check=0; repo=""; pr=""; head=""; body=""; replace_cr=""; cited_run=""
+gitdir="${GUARD_REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}"
 while [ $# -gt 0 ]; do
+  case "$1" in
+    --run|--git-dir|--repo|--pr|--head|--body|--replace-own-cr)
+      if [ $# -lt 2 ] || [ -z "${2-}" ] || [[ "${2-}" == --* ]]; then
+        echo "approve-guard: $1 requires a value" >&2
+        exit 1
+      fi ;;
+  esac
   case "$1" in
     --check) check_only=1; shift ;;
     --merge-check) merge_check=1; shift ;;
+    --run) cited_run="${2-}"; shift 2 ;;
+    --git-dir) gitdir="${2-}"; shift 2 ;;
     --repo) repo="${2-}"; shift 2 ;;
     --pr) pr="${2-}"; shift 2 ;;
     --head) head="${2-}"; shift 2 ;;
@@ -104,18 +114,17 @@ fi
 footer_prefix="$(printf 'approve-guard: head \x60%s\x60 · ' "$head")"
 approval_head_jq="((.body // \"\" | split(\"\\n\") | first) | startswith(\"verdict: PASS head: ${head} run: \")) and ((.body // \"\" | split(\"\\n\") | map(select(length > 0)) | (last // \"\")) | startswith(\"${footer_prefix}\"))"
 
-# ---- 2. PR state ----
-pr_row="$(gh_json "repos/${repo}/pulls/${pr}" '[.state, (.draft|tostring), .base.ref, .head.sha, (.merged|tostring), .head.ref, (.user.login // "")] | @tsv')" || exit 1
-IFS=$'\t' read -r st draft base cur merged pr_head_ref author <<<"$pr_row"
-[ "$st" = "open" ] || refuse "PR state is '${st}' (merged=${merged})"
-[ "$draft" = "false" ] || refuse "PR is Draft"
-[ "$base" = "main" ] || refuse "base is '${base}', not main"
-[ "$cur" = "$head" ] || refuse "head moved: PR head is ${cur}"
-[ ${#reasons[@]} -eq 0 ] || finish_refused
-
 # Read-only merge approval check. A review's commit_id can follow a later push,
 # so only its verdict and guard footer can authorize the current head.
+# The approval/write path below revalidates PR identity inside ci-checks.sh.
 if [ "$merge_check" -eq 1 ]; then
+  pr_row="$(gh_json "repos/${repo}/pulls/${pr}" '[.state, (.draft|tostring), .base.ref, .head.sha, (.merged|tostring), .head.ref, (.user.login // "")] | @tsv')" || exit 1
+  IFS=$'\t' read -r st draft base cur merged pr_head_ref author <<<"$pr_row"
+  [ "$st" = "open" ] || refuse "PR state is '${st}' (merged=${merged})"
+  [ "$draft" = "false" ] || refuse "PR is Draft"
+  [ "$base" = "main" ] || refuse "base is '${base}', not main"
+  [ "$cur" = "$head" ] || refuse "head moved: PR head is ${cur}"
+  [ ${#reasons[@]} -eq 0 ] || finish_refused
   [ -n "$author" ] || { echo "approve-guard: PR author missing from API" >&2; exit 1; }
   review_rows="$(gh_json "repos/$repo/pulls/$pr/reviews?per_page=100" '.[] | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "DISMISSED") | [.user.login, (.id|tostring), .state] | @tsv')" || exit 1
   review_rows="$(printf '%s\n' "$review_rows" | sort -t "$(printf '\t')" -k1,1 -k2,2nr | awk -F '\t' 'NF && !seen[$1]++')"
@@ -127,122 +136,24 @@ if [ "$merge_check" -eq 1 ]; then
   approvals=""
   while IFS=$'\t' read -r who rid rstate; do
     [ -n "$who" ] && [ "$rstate" = "APPROVED" ] && [ "$who" != "$author" ] || continue
-    bound="$(gh_json "repos/$repo/pulls/$pr/reviews/$rid" "select(.state == \"APPROVED\" and ($approval_head_jq)) | .id")" || exit 1
+    # Authority and head binding must belong to this same latest review. A
+    # trusted footerless review cannot lend authority to an outsider's body.
+    bound="$(gh_json "repos/$repo/pulls/$pr/reviews/$rid" "select(.state == \"APPROVED\" and
+      (.author_association == \"OWNER\" or .author_association == \"MEMBER\" or .author_association == \"COLLABORATOR\") and
+      ($approval_head_jq)) | .id")" || exit 1
     [ -z "$bound" ] || approvals="$approvals $bound"
   done <<<"$review_rows"
-  [ -n "$approvals" ] || { refuse "no non-author APPROVED review has this head in its verdict and guard footer"; finish_refused; }
+  [ -n "$approvals" ] || { refuse "no non-author APPROVED review has this head in its verdict and guard footer with trusted repository authority"; finish_refused; }
   latest_head="$(gh_json "repos/$repo/pulls/$pr" '.head.sha')" || exit 1
   [ "$latest_head" = "$head" ] || { refuse "head moved during merge check: PR head is $latest_head"; finish_refused; }
   echo "MERGE-CHECK PASS #$pr head $head approvals:$approvals"
   exit 0
 fi
 
-# ---- 3. workflow runs on this exact SHA (catches queued workflows) ----
-# One SHA can carry several runs of one workflow: a run cancelled by a
-# concurrency group, or a failed run followed by a reopen or a dispatch that
-# passed. Only the newest run of each workflow says what that workflow thinks
-# of this SHA now -- the same rule section 4 applies per check name.
-# A cancelled run says nothing about the SHA; it lost a concurrency race. On
-# #39049 (2026-09-25) runs 14708 (success) and 14709 (cancelled) of one
-# workflow started in the same second, so the newest number was the cancelled
-# twin. A cancelled run is therefore ranked below every run that is not
-# cancelled; it decides only when every run of that workflow was cancelled,
-# and then the guard refuses. A newer queued or in-progress run still outranks
-# an older finished one.
-# sort+awk rather than an associative array: lanes may run bash 3.2.
-wf_all="$(gh_json "repos/${repo}/actions/runs?head_sha=${head}&per_page=100" "$PR_CHECK_WORKFLOWS_JQ")" || exit 1
-runs="$(gh_json "repos/${repo}/commits/${head}/check-runs?per_page=100" "$PR_CHECK_CHECKS_JQ")" || exit 1
-pr_check_classify "$repo" "$head" "$wf_all" "$runs" gh_json || exit 1
-[ -z "$PR_CHECK_INVALID" ] || refuse "$PR_CHECK_INVALID"
-if [ -n "$PR_CHECK_DRAFT_RUNS$PR_CHECK_CANCELLED_RUNS" ]; then
-  [ "$PR_CHECK_READY_OK" = yes ] || refuse "Draft snapshot exclusion requires six successful checks in the selected Ready PR-check suite"
-  wf_all="$(printf '%s\n' "$wf_all" | awk -F '\t' -v ignored="$PR_CHECK_DRAFT_RUNS $PR_CHECK_CANCELLED_RUNS" 'BEGIN {n=split(ignored,a," "); for(i=1;i<=n;i++) drop[a[i]]=1} NF && !($7 in drop)')"
-fi
-[ ${#reasons[@]} -eq 0 ] || finish_refused
-# A failed manual Release run is ignorable only when the validator itself
-# recorded the intended ref refusal. A runner/setup failure on the same ref
-# must remain a failed workflow. The four jobs are fixed by release.yml; any
-# missing, unexpected, or non-skipped downstream job fails closed.
-ignored_release_dispatches=""
-release_candidates="$(printf '%s\n' "$wf_all" | awk -F '\t' -v ref="$pr_head_ref" 'NF && $5 == "completed" && $6 != "success" && $9 == "workflow_dispatch" && $10 == ".github/workflows/release.yml" && $11 == ref && ref !~ /^release\/v/ { print $7 "\t" $8 }')"
-while IFS=$'\t' read -r release_run release_suite; do
-  [ -n "${release_run:-}" ] || continue
-  validator_id="$(gh_json "repos/${repo}/actions/runs/${release_run}/jobs?per_page=100" '.jobs as $jobs | if ([$jobs[] | .name] | sort) == (["Validate manual Release ref", "release-body", "build", "release"] | sort) and ([$jobs[] | select(.name == "Validate manual Release ref" and .status == "completed" and .conclusion == "failure" and ([.steps[]? | select(.name == "Refuse unsupported manual ref" and .status == "completed" and .conclusion == "failure")] | length) == 1)] | length) == 1 and ([$jobs[] | select(.name != "Validate manual Release ref" and (.status != "completed" or .conclusion != "skipped"))] | length) == 0 then $jobs[] | select(.name == "Validate manual Release ref") | .id else empty end')" || exit 1
-  [ -n "$validator_id" ] || continue
-  marker="$(gh_json "repos/${repo}/check-runs/${validator_id}/annotations?per_page=100" '[.[] | select(.annotation_level == "failure" and .title == "MASC_RELEASE_REF_REJECTED" and (.message | startswith("Manual Release is limited to tags and release/v* branches.")))] | length')" || exit 1
-  [ "$marker" = "1" ] || continue
-  ignored_release_dispatches="${ignored_release_dispatches}${release_run}"$'\t'"${release_suite}"$'\n'
-done <<<"$release_candidates"
-ignored_release_run_suites="$(printf '%s\n' "$ignored_release_dispatches" | awk -F '\t' 'NF { if (ids != "") ids = ids ","; ids = ids $1 "/" $2 } END { print ids }')"
-ignored_release_suites="$(printf '%s\n' "$ignored_release_dispatches" | awk -F '\t' 'NF && $2 != "0" { printf "%s ", $2 }')"
-wf_all="$(printf '%s\n' "$wf_all" | awk -F '\t' -v ignored="$ignored_release_run_suites" 'BEGIN { n=split(ignored, a, ","); for (i=1;i<=n;i++) { split(a[i], p, "/"); if (p[1] != "") drop[p[1]]=1 } } NF && !($7 in drop)')"
-wf_all="$(printf '%s\n' "$wf_all" | sort -t "$(printf '\t')" -k1,1 -k2,2nr -k3,3nr)"
-wf="$(printf '%s\n' "$wf_all" | awk -F '\t' 'NF && !seen[$1]++')"
-# Which suite belongs to which event and workflow file: section 4 needs it to
-# tell a by-design skipped dispatch job from a skipped one that should have run.
-suite_kinds="$(printf '%s\n' "$wf_all" | awk -F '\t' 'NF && $8 + 0 != 0 { print $8 "\t" $9 "\t" $10 }')"
-# The check suites of the runs that lost (older, or cancelled twins). Their
-# check-runs are dropped in section 4: #39049's cancelled twin run 14709 owned
-# the newest suite (97837801954) and all five of its check-runs were skipped.
-lost_suites="$(printf '%s\n' "$wf_all" | awk -F '\t' 'NF && seen[$1]++ && $8 != "0" {printf "%s ", $8}')"
-wf_ids=()
-while IFS=$'\t' read -r _wid _rank _num name status concl id _suite; do
-  [ -n "${name:-}" ] || continue
-  wf_ids+=("$id")
-  if [ "$status" != "completed" ] || [ "$concl" != "success" ]; then
-    refuse "workflow '${name}' run ${id} is ${status}/${concl}"
-  fi
-done <<<"$wf"
-[ ${#wf_ids[@]} -gt 0 ] || refuse "no workflow runs for ${head}"
-
-# ---- 4. check-runs on this exact SHA ----
-# One SHA can carry several check-runs of one name: a Draft-time suite whose
-# jobs were skipped, then the suite that ran after ready_for_review; or a
-# failed run followed by a re-run. The API returns every suite's rows, not one
-# per name, so only the row from the newest suite says what that check thinks
-# of this SHA now. The newest suite is the highest check_suite id, not the
-# highest check-run id: on #39046 (2026-09-25) the Draft-time skipped row of
-# 'dune build @check' had check-run id 108051996594, above the Ready-time
-# success 108051995088, while its suite 97836272095 was older than 97836300496.
-# Within one suite (a re-run), the higher check-run id is the newer row.
-# sort+awk rather than an associative array: lanes may run bash 3.2.
-# Rows from a suite whose workflow run lost in section 3 never count.
-runs="$(printf '%s\n' "$runs" | awk -F '\t' -v lost="$lost_suites" -v ignored="$ignored_release_suites $PR_CHECK_DRAFT_SUITES $PR_CHECK_CANCELLED_SUITES" 'BEGIN { n = split(lost, l, " "); for (i = 1; i <= n; i++) if (l[i] != "") drop[l[i]] = 1; n = split(ignored, x, " "); for (i = 1; i <= n; i++) if (x[i] != "") drop[x[i]] = 1 } NF && !($5 in drop)')"
-runs="$(printf '%s\n' "$runs" | sort -t "$(printf '\t')" -k1,1 -k5,5nr -k4,4nr | awk -F '\t' 'NF && !seen[$1]++')"
-# A skipped row of the newest suite is a refusal, except when the job is one
-# the pull_request event never runs: its `if:` requires workflow_dispatch
-# (#38873, 2026-09-25: compare-tui exists only to be dispatched, so every PR
-# run of that workflow carries it skipped). Narrow on purpose: a required job
-# whose `if:` misfires still refuses, so this cannot turn a broken check
-# green. The condition is read from the workflow file itself, and only for a
-# pull_request-event suite; a dispatch suite owns the job's real verdict.
-# GUARD_REPO_ROOT overrides where the workflow files are read from; the
-# selftest points it at fixture trees.
-dispatch_skips=""
-n_runs=0; run_ids=()
-while IFS=$'\t' read -r name status concl id suite _started; do
-  [ -n "${name:-}" ] || continue
-  if [ "$status" = "completed" ] && [ "$concl" = "skipped" ]; then
-    suite_event="$(printf '%s\n' "$suite_kinds" | awk -F '\t' -v s="$suite" '$1 == s { print $2; exit }')"
-    if [ "$suite_event" = "pull_request" ]; then
-      # The check-run does not name its workflow file; find it from the runs
-      # of this suite that section 3 already read.
-      suite_path="$(printf '%s\n' "$suite_kinds" | awk -F '\t' -v s="$suite" '$1 == s { print $3; exit }')"
-      wf_file="${GUARD_REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}/${suite_path:-}"
-      if [ -n "$suite_path" ] && [ -f "$wf_file" ] && \
-         sed -n "/^  ${name}:$/,/^  [^ ]/p" "$wf_file" 2>/dev/null | grep -q "workflow_dispatch"; then
-        dispatch_skips="$dispatch_skips $name"
-        continue
-      fi
-    fi
-  fi
-  n_runs=$((n_runs+1)); run_ids+=("$id")
-  if [ "$status" != "completed" ] || [ "$concl" != "success" ]; then
-    refuse "check '${name}' is ${status}/${concl} (check-run ${id})"
-  fi
-done <<<"$runs"
-[ "$n_runs" -gt 0 ] || refuse "no check-runs on ${head} (empty is not green)"
-[ ${#reasons[@]} -eq 0 ] || finish_refused
+# ---- 2–4. PR state and current CI ----
+# Both write entry points revalidate the same live PR and workflow/check state.
+source "$here/ci-checks.sh"
+check_current_ci || exit $?
 
 # ---- 5. open change requests ----
 me="$(gh_json user '.login')" || exit 1
@@ -257,6 +168,7 @@ me="$(gh_json user '.login')" || exit 1
 # the caller must name that review id with --replace-own-cr; knowing the id is
 # the proof the review was read, and the footer records it. A named id that is
 # not this account's open CR refuses too: the caller's view is out of date.
+check_open_change_requests() {
 revs="$(gh_json "repos/${repo}/pulls/${pr}/reviews?per_page=100" '.[] | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "DISMISSED") | [.user.login, (.id|tostring), .state] | @tsv')" || exit 1
 revs="$(printf '%s\n' "$revs" | sort -t "$(printf '\t')" -k1,1 -k2,2nr | awk -F '\t' 'NF && !seen[$1]++')"
 replaced=""
@@ -273,6 +185,8 @@ done <<<"$revs"
 if [ -n "$replace_cr" ] && [ "$replaced" != "$replace_cr" ]; then
   refuse "--replace-own-cr ${replace_cr} does not name an open CHANGES_REQUESTED from ${me}"
 fi
+}
+check_open_change_requests
 # The verdict's run must be a workflow run on this head (a PASS carried from an
 # older head names that head's run), and by: must name the Keeper that judged,
 # not the shared account: '${me}' says nothing about which lane read the diff.
@@ -283,6 +197,35 @@ if [ "$check_only" -eq 0 ]; then
   esac
   [ "$v_by" != "$me" ] || refuse "verdict line by: is the account login '${me}'; name the Keeper that judged"
 fi
+[ ${#reasons[@]} -eq 0 ] || finish_refused
+
+# A successful head is insufficient after main changes its build inputs.
+# --check callers may name a run; otherwise use the current PR-check run.
+if [ "$check_only" -eq 1 ]; then
+  v_run="$cited_run"
+  if [ -z "$v_run" ]; then
+    v_run="$(printf '%s\n' "$wf" | awk -F '\t' '$9=="pull_request" && $10==".github/workflows/pr-check.yml" { print $7; exit }')"
+  fi
+fi
+[[ "$v_run" =~ ^[1-9][0-9]*$ ]] || refuse "no explicit successful PR-check run for freshness"
+[ ${#reasons[@]} -eq 0 ] || finish_refused
+freshness=$(GUARD_GH="$GH" python3 "$here/ci-freshness.py" --repo "$repo" --pr "$pr" \
+  --head "$head" --run "$v_run" --git-dir "$gitdir")
+fresh_rc=$?
+if [ "$fresh_rc" -ne 0 ]; then
+  refuse "CI freshness: $freshness"
+  finish_refused
+fi
+
+check_structured_verdict() {
+source "$here/review-verdict.sh"
+latest_verdict=$(verdict_for "$pr" "$head") || exit 1
+read -r latest_state _latest_run _latest_by <<<"$latest_verdict"
+if [ -n "$latest_state" ] && [ "$latest_state" != PASS ]; then
+  refuse "latest structured verdict is ${latest_state}; publish an explicit trusted review response before approval"
+fi
+}
+check_structured_verdict
 [ ${#reasons[@]} -eq 0 ] || finish_refused
 
 # ---- 6. idempotence: already approved this SHA? ----
@@ -296,17 +239,30 @@ fi
 
 footer="$(printf '\n\n---\napprove-guard: head `%s` · %d check-runs completed+success · workflow runs %s' \
   "$head" "$n_runs" "$(IFS=,; echo "${wf_ids[*]}")")"
+footer="${footer} · freshness ${freshness}"
 [ -z "$replaced" ] || footer="${footer} · replaces own CHANGES_REQUESTED ${replaced}"
 [ -z "$(printf '%s' "$dispatch_skips" | tr -d ' ')" ] || footer="${footer} · dispatch-only skipped:${dispatch_skips}"
 [ -z "$ignored_release_run_suites" ] || footer="${footer} · ignored refused manual Release dispatch run/suite:${ignored_release_run_suites}"
+# ---- 7. revalidate shared-account CR authority before return or write ----
+check_open_change_requests
+check_structured_verdict
+[ ${#reasons[@]} -eq 0 ] || finish_refused
+# Freshness and review reads can race a same-head reopen/rerun, just as merge
+# reads can. Re-read decisions after that final CI gate as well: a HOLD/FAIL
+# may arrive while its workflow/check requests are in flight. These sequential
+# reads narrow the race; they cannot provide a server-side atomic decision.
+check_current_ci || exit $?
+check_structured_verdict
+# Formal requests may have plain bodies. Re-read them after the final CI read
+# too; the structured-verdict reader cannot enforce shared-account CR consent.
+check_open_change_requests
+[ ${#reasons[@]} -eq 0 ] || finish_refused
 [ -z "$PR_CHECK_DRAFT_RUNS" ] || footer="${footer} · verified Draft snapshot runs:${PR_CHECK_DRAFT_RUNS}"
 [ -z "$PR_CHECK_CANCELLED_RUNS" ] || footer="${footer} · cancelled Draft snapshot twins:${PR_CHECK_CANCELLED_RUNS}"
 if [ "$check_only" -eq 1 ]; then
   echo "WOULD APPROVE #${pr} head ${head} (${n_runs} check-runs, workflow runs ${wf_ids[*]})"
   exit 0
 fi
-
-# ---- 7. write, then read back ----
 if ! resp="$({ cat "$body"; printf '%s' "$footer"; } | "$GH" api -X POST "repos/${repo}/pulls/${pr}/reviews" \
     -f event=APPROVE -f "commit_id=${head}" -F body=@- \
     --jq '[(.id|tostring), .state, .commit_id] | @tsv' 2>&1)"; then

@@ -4193,8 +4193,11 @@ describe('fusion chat card', () => {
   it('reads panel entries through the shared Fusion panel reader', async () => {
     const meta = {
       source: 'fusion',
+      // `Fusion_sink.panel_meta` (lib/fusion/fusion_sink.ml) writes the token
+      // counts flat on the panel entry, not under a nested `usage` object, and
+      // the shared reader reads exactly those keys.
       panel: [
-        { model: 'm1', status: 'answered', answer: 'a', usage: { output_tokens: 1200 } },
+        { model: 'm1', status: 'answered', answer: 'a', output_tokens: 1200 },
         { model: 'm2', status: 'failed', reason_detail: "Provider 'unknown' timeout", reason: 'stale copy' },
       ],
       judge: { status: 'synthesized', decision: 'answer', resolved_answer: 'r' },

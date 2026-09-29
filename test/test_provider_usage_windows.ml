@@ -740,25 +740,29 @@ let antigravity_exec : Runtime_execution.antigravity_cli =
 let no_antigravity ~scope:_ _ = fail "an Antigravity read was asked for"
 
 let test_failed_background_schedule_releases_scope () =
-  let scope =
-    Runtime_quota_window.scope_of_credential
-      ~provider_id:"usage_read_fork_failure" None
-  in
-  let reads = ref 0 in
-  let read () = incr reads in
-  let failed =
-    Read.For_testing.start_background ~scope
-      ~fork:(fun _ -> raise (Invalid_argument "Switch finished!")) ~read
-  in
-  check bool "failed fork is an unanswered observation" true
-    (failed = Read.Scheduling_failed);
-  check int "failed fork started no read" 0 !reads;
-  let retried =
-    Read.For_testing.start_background ~scope ~fork:(fun child -> child ()) ~read
-  in
-  check bool "released account can schedule a later read" true
-    (retried = Read.Started);
-  check int "later read ran once" 1 !reads
+  Eio_main.run (fun _env ->
+    let scope =
+      Runtime_quota_window.scope_of_credential
+        ~provider_id:"usage_read_fork_failure" None
+    in
+    let reads = ref 0 in
+    let read () = incr reads in
+    let closed_switch = Eio.Switch.run (fun sw -> sw) in
+    let failed =
+      Read.For_testing.start_background ~scope
+        ~fork:(Eio.Fiber.fork ~sw:closed_switch) ~read
+    in
+    check bool "closed root cannot schedule a read" true
+      (failed = Read.Scheduling_failed);
+    check int "failed fork started no read" 0 !reads;
+    let retried =
+      Eio.Switch.run (fun sw ->
+        Read.For_testing.start_background ~scope
+          ~fork:(Eio.Fiber.fork ~sw) ~read)
+    in
+    check bool "released account can schedule a later read" true
+      (retried = Read.Started);
+    check int "later read ran once" 1 !reads)
 ;;
 
 (* One scope raising, over HTTP or through an official client, is logged

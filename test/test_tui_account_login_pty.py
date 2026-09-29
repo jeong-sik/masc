@@ -192,9 +192,9 @@ def reopen_existing_without_login(binary):
         h.send_and_wait(process, fd, output, b"2", b"MASC Keepers")
         h.select_keeper_row(process, fd, output, b"alpha")
         h.send_and_wait(process, fd, output, b"c", "Keepers ▸ alpha ▸ chat".encode())
-        h.send_and_wait(process, fd, output, b"/login codex\r", b"MASC Account Login")
-        h.wait_for_output(process, fd, output, "새 계정 로그인".encode(), start=0, timeout=3.0)
-        h.send_and_wait(process, fd, output, b"j", b"> Codex account")
+        account_frame = h.send_and_wait(
+            process, fd, output, b"/login codex\r", b"> Codex account")
+        assert "새 계정 로그인".encode() in h.unwrapped(h.screen_text(account_frame))
         frame = h.send_and_wait(process, fd, output, b"\r", b"New account model")
         plain = h.unwrapped(h.screen_text(frame))
         assert b"Bound account model" not in plain, "a bound model was offered again"

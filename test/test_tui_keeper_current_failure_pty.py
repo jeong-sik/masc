@@ -58,9 +58,9 @@ def run(executable: str) -> None:
         _base_path: str,
     ) -> None:
         h.resize_and_wait(
-            process, master_fd, output, rows=38, columns=100, needle=b"MASC Overview"
+            process, master_fd, output, rows=38, columns=100, needle=b"MASC Dashboard"
         )
-        h.send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        h.send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
         h.select_keeper_row(process, master_fd, output, b"alpha")
         h.send_and_wait(process, master_fd, output, b"\r", b"Current failure")
         h.drain_until_quiet(process, master_fd, output)

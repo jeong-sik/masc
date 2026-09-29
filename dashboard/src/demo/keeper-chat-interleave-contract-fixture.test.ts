@@ -1,7 +1,27 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
-import { fireEvent } from '@testing-library/preact'
-import { afterEach, describe, expect, it } from 'vitest'
+import { fireEvent, waitFor } from '@testing-library/preact'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
+// #35924: a joined trace step reads ok only after the exact per-execution
+// endpoint verifies the output; the recorded bulk outputs alone do not. This
+// registry stands in for that endpoint, keyed `${keeper}:${execution_id}`.
+const { exactToolCallLookup } = vi.hoisted(() => ({
+  exactToolCallLookup: new Map<string, { keeper: string; execution_id: string; entry: unknown }>(),
+}))
+
+vi.mock('../api/core', async importOriginal => ({
+  ...await importOriginal<typeof import('../api/core')>(),
+  get: vi.fn(async (path: string) => {
+    const [, keeper, executionId] = /^\/api\/v1\/keepers\/([^/]+)\/tool-calls\?execution_id=([^&]+)$/.exec(path) ?? []
+    const response = keeper !== undefined && executionId !== undefined
+      ? exactToolCallLookup.get(`${decodeURIComponent(keeper)}:${decodeURIComponent(executionId)}`)
+      : undefined
+    if (response) return response
+    throw new Error('Historical output not provided by this fixture')
+  }),
+}))
+
 import {
   INTERLEAVE_FIXTURE_COVERED_THROUGH_MS,
   INTERLEAVE_ORDER_SIGNATURE,
@@ -10,6 +30,7 @@ import {
   interleaveEntries,
   interleaveFixtureStatus,
   joinedToolCount,
+  joinedToolOutput,
   traceOnlyToolCount,
 } from './keeper-chat-interleave-contract-fixture'
 import { resetToolCallOutputs } from '../tool-call-output-store'
@@ -24,6 +45,7 @@ describe('Keeper Chat interleave contract fixture', () => {
       container = null
     }
     resetToolCallOutputs()
+    exactToolCallLookup.clear()
   })
 
   it('keeps deterministic fixture rows for joined and trace-only tool states', () => {
@@ -42,12 +64,46 @@ describe('Keeper Chat interleave contract fixture', () => {
     ])
   })
 
-  it('renders structural order and tool-output join state into durable DOM attributes', () => {
+  it('renders structural order and tool-output join state into durable DOM attributes', async () => {
     container = document.createElement('div')
     document.body.append(container)
+    // happy-dom defines IntersectionObserver but never reports an
+    // intersection, so the row's lazy lookup would never run. A browser
+    // observes the row once it is on screen; the fixture says so directly.
+    vi.stubGlobal('IntersectionObserver', class {
+      private readonly callback: IntersectionObserverCallback
+
+      constructor(callback: IntersectionObserverCallback) {
+        this.callback = callback
+      }
+
+      observe(target: Element) {
+        this.callback([{
+          target,
+          isIntersecting: true,
+          intersectionRatio: 1,
+        } as IntersectionObserverEntry], this as unknown as IntersectionObserver)
+      }
+
+      disconnect() {}
+    })
     installInterleaveFixtureToolOutputs()
+    const joinedExecutionId = joinedToolOutput.execution_id ?? ''
+    exactToolCallLookup.set(`${joinedToolOutput.keeper}:${joinedExecutionId}`, {
+      keeper: joinedToolOutput.keeper,
+      execution_id: joinedExecutionId,
+      entry: joinedToolOutput,
+    })
 
     render(html`<${InterleaveContractFixture} />`, container)
+
+    // The joined row reads its output through the exact per-execution
+    // endpoint, so the verified state lands a tick after the first paint.
+    await waitFor(() => {
+      expect(
+        document.querySelector('[data-chat-trace-tool-call-id="tc-context"][data-chat-trace-output-state="ok"]'),
+      ).not.toBeNull()
+    })
 
     expect(
       container.querySelector(

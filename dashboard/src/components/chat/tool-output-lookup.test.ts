@@ -7,7 +7,7 @@ import { get, ApiRequestError, clearStoredToken, setStoredToken } from '../../ap
 import { fetchToolBlob } from '../../api/tool-blob'
 import { ChatTranscript, _resetTraceCardOpenChoicesForTests } from './primitives'
 import { chatHistoryEntriesFromRest } from '../../keeper-state'
-import { lookupToolCallOutput, recordToolCallOutputs, resetToolCallOutputs } from '../../tool-call-output-store'
+import { lookupToolCallOutput, markToolCallOutputsHydrated, recordToolCallOutputs, resetToolCallOutputs } from '../../tool-call-output-store'
 vi.mock('../../api/core', async importOriginal => ({ ...await importOriginal<typeof import('../../api/core')>(), get: vi.fn() }))
 vi.mock('../../api/tool-blob', () => ({ fetchToolBlob: vi.fn() }))
 const id = 'old-execution/with+symbols'
@@ -250,6 +250,24 @@ describe('historical autonomous tool outputs', () => {
       expect(get).toHaveBeenCalledTimes(2)
     }
   })
+  it.each([[404, '찾지 못했습니다'], [503, '불러오지 못했습니다']])(
+    'asks once per successful hydration after HTTP %i, never in a loop', async (status, message) => {
+      // The row re-asks on new ledger evidence only. The effect writes `loading`
+      // itself, so a dependency value that reads the row's own state flips on
+      // every attempt and re-runs the effect without end; this counts requests
+      // across a real settling window so that loop cannot come back unseen.
+      const settle = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 50)) })
+      vi.mocked(get).mockRejectedValue(new ApiRequestError({ method: 'GET', path: '/tool-calls', status: status as number }))
+      const view = render(transcript()); openTurn(view)
+      await waitFor(() => expect(view.getByRole('alert').textContent).toContain(message as string))
+      await settle()
+      expect(get).toHaveBeenCalledTimes(1)
+      await act(async () => { markToolCallOutputsHydrated('writer', 2_000) })
+      await waitFor(() => expect(get).toHaveBeenCalledTimes(2))
+      await settle()
+      expect(get).toHaveBeenCalledTimes(2)
+    },
+  )
   it('rejects altered manifest bytes before presenting original-file controls', async () => {
     const manifest = await artifact('{"schema":"masc.tool-result-artifact-manifest.v1"}')
     const payload = response(); vi.mocked(get).mockResolvedValue({ ...payload, entry: { ...payload.entry, output: { _blob: { ...manifest, preview: '' } } } })

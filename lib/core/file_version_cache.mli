@@ -16,12 +16,15 @@ val load : 'a t -> string -> decode:(unit -> ('a, 'e) result) -> ('a, 'e) result
 (** [load cache path ~decode] returns the value kept for [path] when the
     file's current version is the one it was decoded from. Otherwise it runs
     [decode] and returns its result. The value is kept only when the file
-    had the same version before and after [decode] ran, so a write that lands
-    during a decode is never kept under the new version. An error is returned
-    as it is and not kept. A path that cannot be stat'ed is decoded every
-    time. *)
+    had the same version before and after [decode] ran and no {!forget} ran
+    on [cache] meanwhile, so a write that lands during a decode is never
+    kept, whether the version shows it or only the writer's [forget] does.
+    An error is returned as it is and not kept. A path that cannot be
+    stat'ed is decoded every time. *)
 
 val forget : 'a t -> string -> unit
-(** Drop what is kept for [path]. A writer calls it after it writes, so that
-    a write that keeps the inode and the size within one file-time tick is not
-    taken for the version already kept. *)
+(** Drop what is kept for [path], and stop every decode running on the cache
+    now from keeping its value. A writer calls it after it writes, so that a
+    write that keeps the inode and the size within one file-time tick is not
+    taken for the version already kept, even by a reader that was decoding
+    while it wrote. *)

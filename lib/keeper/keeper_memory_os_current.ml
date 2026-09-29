@@ -107,6 +107,10 @@ type t =
   ; change : change
   }
 
+type commit_effect =
+  | Rewritten
+  | Unchanged
+
 type librarian_failure_kind =
   | Prompt_render_failure
   | Execution_clock_unavailable
@@ -1926,6 +1930,15 @@ let find_removal ~keepers_dir ~keeper_id target =
     | Error error -> Journal_unreadable (Dated_jsonl.read_error_to_string error))
 ;;
 
+(* What a commit does when its facts equal the stored ones. A Librarian pass
+   keeps the stored snapshot. An explicit write still writes a revision: its
+   caller reads the returned [change] as what that write did, and the keeper
+   stamps [last_seen] with the write time, so an equal set does not arise
+   from it in practice. *)
+type equal_facts =
+  | Keep_stored
+  | Write_revision
+
 let update_locked_with_output
       ?on_committed
       ?clock
@@ -1934,6 +1947,7 @@ let update_locked_with_output
       ?durable_range_id
       ?official_range_id
       ?retraction_plan
+      ~equal_facts
       ~store_error
       ~keepers_dir
       ~keeper_id
@@ -2087,6 +2101,88 @@ let update_locked_with_output
              ~source_lines
            |> Result.map_error store_error
          in
+         let ranges =
+           Option.to_list (Option.map (fun range -> Atom_range range) durable_range_id)
+           @ Option.to_list (Option.map (fun range -> Official_range range) official_range_id)
+         in
+         let receipts_for make =
+           List.fold_left (fun receipts range_id ->
+             upsert_durable_range_receipt receipts (make range_id)) durable_range_receipts ranges
+         in
+         (* Locks and preparation remain cancellable. Once the pass starts to
+            settle, retain its result and publish its evidence before
+            cancellation can interrupt the journal/receipt writes for it. *)
+         let protected settle =
+           match Eio_guard.execution_context () with
+           | Eio_guard.Non_eio -> settle ()
+           | Eio_guard.Eio_fiber -> Eio.Cancel.protect settle
+         in
+         let log_invalidations ~revision =
+           List.iter
+             (fun invalidation ->
+                Log.Keeper.info
+                  "memory os support retracted keeper=%s revision=%d memory_id=%s missing_premise_ids=%s"
+                  keeper_id
+                  revision
+                  (memory_id invalidation.fact)
+                  (String.concat "," invalidation.missing_premise_ids))
+             next.change.invalidated
+         in
+         (* A Librarian pass whose facts serialize to the stored ones, in the
+            same order, changes nothing a reader of this store can see. Writing
+            it anyway minted a revision, printed and replaced the whole file and
+            woke every commit subscriber: on 2026-09-29, 1,600 of the 2,379
+            Librarian commits (67%) added and removed nothing. Such a pass keeps
+            the stored snapshot with its revision, bytes and [updated_at]. The
+            comparison runs on the pool for the reason the print below does. *)
+         let kept =
+           match equal_facts, snapshot with
+           | Write_revision, (Some _ | None) | Keep_stored, None -> None
+           | Keep_stored, Some (current, current_content) ->
+             let same_facts =
+               Domain_pool_ref.submit_cpu_or_inline (fun () ->
+                 List.equal
+                   (fun left right -> String.equal (fact_payload left) (fact_payload right))
+                   current.facts
+                   next.facts)
+             in
+             if same_facts then Some (current, current_content) else None
+         in
+         match kept with
+         | Some (current, current_content) ->
+           (* [before_replace] still runs: it records what the pass did with its
+              absorptions and claims, and with the same facts it has no row to
+              write. *)
+           let* () =
+             match before_replace with
+             | None -> Ok ()
+             | Some write -> write ~previous ~next
+           in
+           let snapshot_sha256 = sha256 current_content in
+           protected (fun () ->
+             let+ () =
+               match ranges with
+               | [] -> Ok ()
+               | _ :: _ ->
+                 write_durable_range_receipts ~keepers_dir ~keeper_id
+                   (receipts_for (fun range_id ->
+                      Committed
+                        { range_id; snapshot_revision = current.revision; snapshot_sha256 }))
+                 |> Result.map_error store_error
+             in
+             Option.iter (fun observe -> observe current Unchanged) on_committed;
+             (* The journal keeps one line per pass: the Librarian health view
+                reads its newest Librarian line as the last success. This line
+                names the revision that stays current. *)
+             append_journal_entry
+               ~keepers_dir
+               ~keeper_id
+               ~dropped_statements:
+                 (Option.map (dropped_by_commit ~previous ~next) dropped_statements)
+               { next with revision = current.revision };
+             log_invalidations ~revision:current.revision;
+             current, Unchanged, output)
+         | None ->
          (* The file is 150-330 KB per keeper and every commit reads it, parses
             it, prints it and replaces it. On the scheduler domain that was one
             11-24 ms run per commit (rtev, 2026-09-16), about 80 commits an
@@ -2141,14 +2237,6 @@ let update_locked_with_output
                   (store_error
                      "retraction plan requires one existing snapshot and non-empty exact reasons"))
          in
-         let ranges =
-           Option.to_list (Option.map (fun range -> Atom_range range) durable_range_id)
-           @ Option.to_list (Option.map (fun range -> Official_range range) official_range_id)
-         in
-         let receipts_for make =
-           List.fold_left (fun receipts range_id ->
-             upsert_durable_range_receipt receipts (make range_id)) durable_range_receipts ranges
-         in
          let* () =
            match ranges with
            | [] -> Ok ()
@@ -2158,9 +2246,6 @@ let update_locked_with_output
                   Prepared { range_id; snapshot_revision = next.revision; snapshot_sha256 }))
              |> Result.map_error store_error
          in
-         (* Locks and preparation remain cancellable. Once replacement starts,
-            retain its result and publish commit evidence before cancellation
-            can interrupt the journal/receipt writes for this snapshot. *)
          let commit () =
            match Fs_compat.save_file_atomic snapshot_path content with
            | Ok () ->
@@ -2170,7 +2255,7 @@ let update_locked_with_output
                ; store = Ordinary
                ; revision = next.revision
              };
-             Option.iter (fun observe -> observe next) on_committed;
+             Option.iter (fun observe -> observe next Rewritten) on_committed;
              let journal_result =
                match retraction_receipt, retraction_plan with
                | None, _ ->
@@ -2209,16 +2294,8 @@ let update_locked_with_output
                    Log.Keeper.warn ~keeper_name:keeper_id
                      "%s; prepared receipt remains recoverable" detail));
              let+ () = journal_result in
-             List.iter
-               (fun invalidation ->
-                  Log.Keeper.info
-                    "memory os support retracted keeper=%s revision=%d memory_id=%s missing_premise_ids=%s"
-                    keeper_id
-                    next.revision
-                    (memory_id invalidation.fact)
-                    (String.concat "," invalidation.missing_premise_ids))
-               next.change.invalidated;
-             next, output
+             log_invalidations ~revision:next.revision;
+             next, Rewritten, output
            | Error message ->
              Error
                (store_error
@@ -2227,9 +2304,7 @@ let update_locked_with_output
                      snapshot_path
                      message))
          in
-         match Eio_guard.execution_context () with
-         | Eio_guard.Non_eio -> commit ()
-         | Eio_guard.Eio_fiber -> Eio.Cancel.protect commit))
+         protected commit))
     in
     (* Dispatch only after BOTH locks have unwound. The marker is set at the
        snapshot commit, so a later journal failure/cancellation cannot suppress
@@ -2242,15 +2317,11 @@ let update_locked_with_output
       Printexc.raise_with_backtrace exn backtrace)
 ;;
 
-(* Ordinary updates need only the committed snapshot. Supersession also
-   carries the disposition decided from the same locked state through commit. *)
+(* Explicit writes always write a revision, so their effect is [Rewritten].
+   Supersession carries its own decision through the commit. *)
 let update_locked_with_error
-      ?on_committed
       ?clock
       ?dropped_statements
-      ?before_replace
-      ?durable_range_id
-      ?official_range_id
       ?retraction_plan
       ~store_error
       ~keepers_dir
@@ -2259,39 +2330,12 @@ let update_locked_with_error
       build
   =
   update_locked_with_output
-    ?on_committed ?clock ?dropped_statements ?before_replace
-    ?durable_range_id ?official_range_id ?retraction_plan
-    ~store_error ~keepers_dir ~keeper_id ~now
+    ?clock ?dropped_statements ?retraction_plan
+    ~equal_facts:Write_revision ~store_error ~keepers_dir ~keeper_id ~now
     (fun ~snapshot_content previous ->
        let+ next = build ~snapshot_content previous in
        next, ())
-  |> Result.map fst
-;;
-
-let update_locked
-      ?on_committed
-      ?clock
-      ?dropped_statements
-      ?before_replace
-      ?durable_range_id
-      ?official_range_id
-      ~keepers_dir
-      ~keeper_id
-      ~now
-      build
-  =
-  update_locked_with_error
-    ?on_committed
-    ?clock
-    ?dropped_statements
-    ?before_replace
-    ?durable_range_id
-    ?official_range_id
-    ~store_error:Fun.id
-    ~keepers_dir
-    ~keeper_id
-    ~now
-    build
+  |> Result.map (fun (snapshot, (_ : commit_effect), ()) -> snapshot)
 ;;
 
 let committed_range ~keepers_dir ~keeper_id select =
@@ -2412,6 +2456,7 @@ let make_snapshot
    not answer it. The keeper can state it again on its next turn. *)
 type disposition =
   { snapshot : t
+  ; commit : commit_effect
   ; absorbed_applied : Keeper_memory_os_types.absorbed_statement list
   ; absorbed_not_applied : Keeper_memory_os_types.absorbed_statement list
   ; claims_not_applied : Keeper_memory_os_types.fact list
@@ -2532,11 +2577,17 @@ let apply_disposition
      [before_replace] under the lock, which runs on every commit; read only
      after the commit succeeded. *)
   let outcome = ref (([], absorbed), [], []) in
-  let disposition_of snapshot =
+  let disposition_of snapshot commit =
     let (absorbed_applied, absorbed_not_applied), claims_not_applied, revisions_applied =
       !outcome
     in
-    { snapshot; absorbed_applied; absorbed_not_applied; claims_not_applied; revisions_applied }
+    { snapshot
+    ; commit
+    ; absorbed_applied
+    ; absorbed_not_applied
+    ; claims_not_applied
+    ; revisions_applied
+    }
   in
   (* RFC-0456 §4.2: an absorbed fact leaves the snapshot only with its row kept.
      The rows are the absorbed facts the locked snapshot held and the next one
@@ -2590,15 +2641,18 @@ let apply_disposition
     Keeper_memory_absorbed.append_all ~keepers_dir ~keeper_id rows
     |> Result.map_error Keeper_memory_absorbed.append_error_to_string
   in
-  update_locked
+  update_locked_with_output
     ?on_committed:
-      (Option.map (fun on_committed snapshot -> on_committed (disposition_of snapshot))
+      (Option.map
+         (fun on_committed snapshot commit -> on_committed (disposition_of snapshot commit))
          on_committed)
     ?clock
     ?dropped_statements
     ?durable_range_id
     ?official_range_id
     ~before_replace:write_absorbed_rows
+    ~equal_facts:Keep_stored
+    ~store_error:Fun.id
     ~keepers_dir
     ~keeper_id
     ~now
@@ -2630,8 +2684,9 @@ let apply_disposition
            ([], ids_of kept)
            plan.claims_accepted
        in
-       make_snapshot ~previous ~now ~source ~facts:(kept @ List.rev added) ())
-  |> Result.map disposition_of
+       let+ next = make_snapshot ~previous ~now ~source ~facts:(kept @ List.rev added) () in
+       next, ())
+  |> Result.map (fun (snapshot, commit, ()) -> disposition_of snapshot commit)
 ;;
 
 let replace
@@ -2645,9 +2700,10 @@ let replace
       ~facts
       ()
   =
-  update_locked
+  update_locked_with_error
     ?clock
     ?dropped_statements
+    ~store_error:Fun.id
     ~keepers_dir
     ~keeper_id
     ~now
@@ -2856,6 +2912,7 @@ let supersede_fact
           ; reason = "superseded_by " ^ incoming_identity
           }
         ]
+      ~equal_facts:Write_revision
       ~store_error:(fun detail -> Supersede_persistence_failed detail)
       ~keepers_dir
       ~keeper_id
@@ -2926,6 +2983,7 @@ let supersede_fact
           ()
         |> Result.map (fun next -> next, disposition)
         |> Result.map_error (fun detail -> Supersede_persistence_failed detail))
+    |> Result.map (fun (snapshot, (_ : commit_effect), disposition) -> snapshot, disposition)
 ;;
 
 let retract_facts

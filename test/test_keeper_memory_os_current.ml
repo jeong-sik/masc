@@ -1657,7 +1657,9 @@ let test_committed_range_receipt_rejects_snapshot_rollback () =
   ignore (replace ~keepers_dir ~facts:[ fact ~claim:"before" () ] () |> require_ok);
   let snapshot_path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
   let prior = Fs_compat.load_file snapshot_path in
-  ignore (apply_disposition ~keepers_dir ~durable_range_id () |> require_ok);
+  ignore
+    (apply_disposition ~keepers_dir ~durable_range_id ~new_claims:[ fact ~claim:"after" () ] ()
+     |> require_ok);
   Fs_compat.save_file snapshot_path prior;
   require_no_committed_range
     ~keepers_dir
@@ -1752,6 +1754,84 @@ let test_committed_range_receipts_are_scoped_per_runtime_cluster () =
     "cluster B has its own receipt"
     cluster_b.trace_id
     (read cluster_b.receipt_scope).trace_id
+;;
+
+(* A Librarian pass that changes no fact keeps the stored snapshot: the same
+   revision and bytes, no commit notification, and one journal line naming the
+   kept revision. Its range still commits, bound to the kept bytes, so the
+   durable consumer does not read that range again. A pass that changes a fact
+   writes a new revision as before. *)
+let test_unchanged_pass_keeps_snapshot_and_commits_range () =
+  let module Notifications = Masc.Keeper_memory_commit_notifications in
+  with_temp_keepers @@ fun keepers_dir ->
+  let physical_keepers_dir = Unix.realpath keepers_dir in
+  let notified = ref [] in
+  let stop = Notifications.subscribe (fun event ->
+    if String.equal event.Notifications.keepers_dir physical_keepers_dir then
+      notified := event.revision :: !notified)
+  in
+  Fun.protect ~finally:stop (fun () ->
+    let pass ?durable_range_id ?on_committed ~now ~new_claims () =
+      Current.apply_disposition ?on_committed ?durable_range_id ~absorbed:[] ~revisions:[]
+        ~keepers_dir ~keeper_id:"keeper" ~now
+        ~source:{ Current.kind = Current.Librarian; trace_id = Printf.sprintf "pass-%.0f" now }
+        ~new_claims ()
+      |> require_ok
+    in
+    let is_unchanged (disposition : Current.disposition) =
+      match disposition.commit with
+      | Current.Unchanged -> true
+      | Current.Rewritten -> false
+    in
+    let first = pass ~now:200.0 ~new_claims:[ fact ~claim:"kept claim" () ] () in
+    check bool "the first pass writes" false (is_unchanged first);
+    let snapshot_path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+    let stored = Fs_compat.load_file snapshot_path in
+    let journal_before = List.length (read_journal_lines ~keepers_dir) in
+    let observed = ref None in
+    let kept =
+      pass ~durable_range_id ~now:300.0
+        ~on_committed:(fun disposition -> observed := Some (is_unchanged disposition))
+        ~new_claims:[ fact ~claim:"kept claim" () ] ()
+    in
+    check bool "a pass that restates the facts is unchanged" true (is_unchanged kept);
+    check (option bool) "the pass still settles" (Some true) !observed;
+    check int "the revision stays" first.snapshot.revision kept.snapshot.revision;
+    check (float 0.0) "updated_at stays" 200.0 kept.snapshot.updated_at;
+    check string "the snapshot bytes stay" stored (Fs_compat.load_file snapshot_path);
+    check (list int) "only the writing pass notifies" [ first.snapshot.revision ] !notified;
+    let journal = read_journal_lines ~keepers_dir in
+    check int "the pass still gets its journal line" (journal_before + 1) (List.length journal);
+    let open Yojson.Safe.Util in
+    let line = List.nth journal (List.length journal - 1) in
+    check int "the line names the kept revision" kept.snapshot.revision
+      (line |> member "revision" |> to_int);
+    check string "the line is this pass's" "pass-300"
+      (line |> member "source" |> member "trace_id" |> to_string);
+    check int "the line adds nothing" 0
+      (line |> member "change" |> member "added" |> to_list |> List.length);
+    check int "the line removes nothing" 0
+      (line |> member "change" |> member "removed" |> to_list |> List.length);
+    let committed_range () =
+      Current.committed_durable_range ~keepers_dir ~keeper_id:"keeper"
+        ~receipt_scope:durable_range_id.receipt_scope
+    in
+    (match committed_range () with
+     | Ok (Some range) -> check bool "the range commits on the kept snapshot" true
+                            (range = durable_range_id)
+     | Ok None -> fail "an unchanged pass left its range uncommitted"
+     | Error detail -> fail detail);
+    let rewritten = pass ~now:400.0 ~new_claims:[ fact ~claim:"new claim" () ] () in
+    check bool "a pass that adds a fact rewrites" false (is_unchanged rewritten);
+    check int "and advances the revision" (kept.snapshot.revision + 1) rewritten.snapshot.revision;
+    check bool "and replaces the bytes" false
+      (String.equal stored (Fs_compat.load_file snapshot_path));
+    check (list int) "and notifies"
+      [ rewritten.snapshot.revision; first.snapshot.revision ] !notified;
+    match committed_range () with
+    | Ok (Some _) -> ()
+    | Ok None -> fail "a later rewrite dropped the committed range"
+    | Error detail -> fail detail)
 ;;
 
 let test_stale_replace_rejects_concurrent_explicit_write () =
@@ -2894,6 +2974,10 @@ let () =
             "range receipts are scoped per runtime cluster"
             `Quick
             test_committed_range_receipts_are_scoped_per_runtime_cluster
+        ; test_case
+            "unchanged pass keeps snapshot and commits range"
+            `Quick
+            test_unchanged_pass_keeps_snapshot_and_commits_range
         ; test_case
             "journal recreated after purge sequence"
             `Quick

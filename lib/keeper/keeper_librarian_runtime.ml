@@ -1082,6 +1082,17 @@ let completed_output
       (disposition : Keeper_memory_os_current.disposition)
   =
   let snapshot = disposition.snapshot in
+  (* A kept snapshot's own [change] is the earlier commit's; this pass changed
+     no fact, which is what [Unchanged] means. *)
+  let commit, added_count, removed_count, retained =
+    match disposition.commit with
+    | Keeper_memory_os_current.Rewritten ->
+      ( "rewritten"
+      , List.length snapshot.change.added
+      , List.length snapshot.change.removed
+      , snapshot.change.retained )
+    | Unchanged -> "unchanged", 0, 0, List.length snapshot.facts
+  in
   `Assoc
     [ "absorb_gate", Keeper_librarian_absorb_gate.run_result_to_yojson absorb_gate
     ; ( "absorption"
@@ -1098,14 +1109,15 @@ let completed_output
     ; "before", current_selection_registry_summary inp.current
     ; ( "after"
       , `Assoc
-          [ "revision", `Int snapshot.revision
+          [ "commit", `String commit
+          ; "revision", `Int snapshot.revision
           ; "updated_at", `Float snapshot.updated_at
           ; "fact_count", `Int (List.length snapshot.facts)
           ; ( "change"
             , `Assoc
-                [ "added_count", `Int (List.length snapshot.change.added)
-                ; "removed_count", `Int (List.length snapshot.change.removed)
-                ; "retained", `Int snapshot.change.retained
+                [ "added_count", `Int added_count
+                ; "removed_count", `Int removed_count
+                ; "retained", `Int retained
                 ] )
           ] )
     ]
@@ -1516,13 +1528,21 @@ let run_best_effort
                ~selected_slot
                Exact_lane_run_registry.Succeeded
                (completed_output ~inp ~exact_output ~absorb_gate disposition);
-             Log.Keeper.info
-               ~keeper_name:keeper_id
-               "memory os librarian committed current snapshot revision=%d facts=%d added=%d removed=%d"
-               snapshot.revision
-               (List.length snapshot.facts)
-               (List.length snapshot.change.added)
-               (List.length snapshot.change.removed);
+             (match disposition.commit with
+              | Keeper_memory_os_current.Rewritten ->
+                Log.Keeper.info
+                  ~keeper_name:keeper_id
+                  "memory os librarian committed current snapshot revision=%d facts=%d added=%d removed=%d"
+                  snapshot.revision
+                  (List.length snapshot.facts)
+                  (List.length snapshot.change.added)
+                  (List.length snapshot.change.removed)
+              | Unchanged ->
+                Log.Keeper.info
+                  ~keeper_name:keeper_id
+                  "memory os librarian kept current snapshot revision=%d facts=%d: the pass changed no fact"
+                  snapshot.revision
+                  (List.length snapshot.facts));
              (* A completion observer may request cancellation and return
                 normally. Propagate it here even when no later I/O yields. *)
              Eio.Fiber.check ()

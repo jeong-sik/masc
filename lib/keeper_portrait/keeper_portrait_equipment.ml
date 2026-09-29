@@ -27,10 +27,10 @@ let of_json (json : Yojson.Safe.t) =
           (match Item.of_id id with
            | Some item when Item.slot item = slot -> Ok (Item.preview item equipment)
            | Some _ | None -> Error ("invalid equipment item for " ^ Item.slot_id slot))
-        | Some (`Assoc _ | `List _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Tuple _ | `Variant _)
+        | Some (`Assoc _ | `List _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _)
         | None -> Error ("equipment slot must be an item id: " ^ Item.slot_id slot))
         (Ok Look.bare) Item.slots
-  | `List _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Tuple _ | `Variant _ ->
+  | `List _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ ->
     Error "equipment must be an object"
 
 let key equipment = Yojson.Safe.to_string (to_json equipment)
@@ -53,9 +53,9 @@ let reading_of_json (json : Yojson.Safe.t) =
      | Some (`String "unavailable") when keys = ["reason"; "state"] ->
        (match List.assoc_opt "reason" fields with
         | Some (`String reason) when String.trim reason <> "" -> Ok (Unavailable reason)
-        | Some (`String _ | `Assoc _ | `List _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Tuple _ | `Variant _)
+        | Some (`String _ | `Assoc _ | `List _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _)
         | None -> Error "unavailable portrait needs a nonempty reason")
-     | Some (`String _ | `Assoc _ | `List _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Tuple _ | `Variant _)
+     | Some (`String _ | `Assoc _ | `List _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _)
      | None -> Error "unknown or malformed portrait state")
-  | `List _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Tuple _ | `Variant _ ->
+  | `List _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ ->
     Error "portrait observation must be an object"

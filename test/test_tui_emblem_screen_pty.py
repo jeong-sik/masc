@@ -167,11 +167,12 @@ def mascot_transfers(wire: bytes) -> list[tuple[dict[bytes, bytes], bytes]]:
 
 def assert_working_overview(output: bytearray) -> bytes:
     screen = h.screen_text(bytes(output))
-    for label in (b"MASC Dashboard", b"Goals", b"Work", b"Usage", b"Needs you"):
+    for label in (b"MASC Dashboard", b"Work:", b"Continue", b"Choose a Keeper"):
         assert label in screen, f"working Dashboard omitted {label!r}: {screen!r}"
+    assert (b"Needs your decision" in screen
+            or b"No decision is waiting on you." in screen), screen
     assert STARTUP_CAPTION not in screen, "startup branding replaced the work"
-    # Work's sparkline uses lower blocks, including U+2584. The candle's
-    # mosaic also paints upper half blocks, which the chart never emits.
+    # Home must remain usable without the startup candle's upper half blocks.
     assert b"\xe2\x96\x80" not in output, "startup drew a mosaic candle"
     assert not MASCOT_TRANSFER_HEAD.search(bytes(output)), "startup placed a mascot image"
     return screen

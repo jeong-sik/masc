@@ -15,8 +15,8 @@ CHAT = "Keepers ▸ alpha ▸ chat".encode()
 
 
 def open_chat(process, fd, output):
-    h.resize_and_wait(process, fd, output, rows=38, columns=150, needle=b"MASC Overview")
-    h.send_and_wait(process, fd, output, b"2", b"MASC Keepers")
+    h.resize_and_wait(process, fd, output, rows=38, columns=150, needle=b"MASC Dashboard")
+    h.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
     h.select_keeper_row(process, fd, output, b"alpha")
     h.send_and_wait(process, fd, output, b"\r", "Keepers ▸ \x1b[1malpha".encode())
     h.send_and_wait(process, fd, output, b"m", CHAT)
@@ -130,7 +130,7 @@ def run(executable):
         rows = screen(process, fd, output)
         if h.screen_row_of(rows, CHAT) < 0 or len(requests) != baseline_posts:
             raise AssertionError("accepting a suggestion executed or submitted work")
-        h.send_and_wait(process, fd, output, b"\r", b"MASC Config")
+        h.send_and_wait(process, fd, output, b"\r", b"MASC System")
         if len(requests) != baseline_posts:
             raise AssertionError("local settings command sent a provider request")
         os.write(fd, b"q")

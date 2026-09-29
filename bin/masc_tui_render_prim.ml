@@ -1330,7 +1330,7 @@ let surface_window_height state ~terminal_rows ~count =
     ~chrome:surface_chrome_rows ~count ~preview_keep:None
     ~overflow_takes_row:true
 
-let surface_chrome ~overflow ?(frame = Chrome_screen) (state : state)
+let surface_chrome ~overflow ?(frame = Chrome_screen) ?status (state : state)
     ~terminal_rows ~cols ~surface_key ~title ~hints
     ~(body : budget:int -> chrome_body -> unit) =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -1422,7 +1422,7 @@ let surface_chrome ~overflow ?(frame = Chrome_screen) (state : state)
     empty buf cols
   done;
   bottom buf cols;
-  Buffer.add_string buf (footer_line state ~max_cells:cols ~hints);
+  Buffer.add_string buf (footer_line ?status state ~max_cells:cols ~hints);
   finish_surface state ?clamped ~surface_key ~rows:terminal_rows ~cols buf
 
 
@@ -1462,7 +1462,7 @@ let connection_badge (state : state) =
 let lane_run_detail_title = " MASC Lane Run"
 let measurement_detail_title = " MASC Measurement"
 let fusion_title = " MASC Fusion"
-let runtime_detail_title = " MASC Config / Runtime detail"
+let runtime_detail_title = " MASC System / Runtime detail"
 let keeper_calls_lead = " Keepers \xe2\x96\xb8 "
 
 (* The coordinator's badge beside a reading of the surface's own. The badge
@@ -2307,7 +2307,7 @@ let planning_rollup_row ~cols (rollup : planning_rollup) =
               if value = 0 then None else Some (counter phase glyph name value))
        |> String.concat "  ")
 
-(* The transport's own readings are on Metrics. The Overview keeps one item
+(* The transport's own readings are on Usage. The Dashboard keeps one item
    while the outbound queue is under pressure, since that delays what every
    other row there reports; a steady queue, or no reading, says nothing. *)
 let transport_attention_item (transport : Tui_decode.transport_health option) =
@@ -2315,7 +2315,7 @@ let transport_attention_item (transport : Tui_decode.transport_health option) =
     { ai_kind = "transport_queue_pressure"
     ; ai_severity = severity
     ; ai_summary =
-        Printf.sprintf "transport queue pressure %s (m: Metrics)" word
+        Printf.sprintf "transport queue pressure %s (m: Usage)" word
     ; ai_target =
         Masc_tui_types.Attention_other
           { target_type = "transport"; target_id = None }
@@ -2402,7 +2402,7 @@ type planning_tab = Render_schedule.planning_tab =
    whatever followed -- at a hundred columns this title lost its badge and
    half its clock. Callers build that tail once and hand the same value here
    and to the row, so the measurement and the drawing cannot disagree. *)
-let planning_workspace_lead = screen_title " MASC Planning" ^ "  "
+let planning_workspace_lead = screen_title " MASC Work" ^ "  "
 
 let planning_workspace_tabs (state : state) ~(tab : planning_tab) ~(window : string) =
   let review_count = Option.map (fun s -> s.vs_total) state.verification in

@@ -7,3 +7,12 @@
  (modules test_play_page)
  (action (run %{test}))
  (libraries masc_test_deps alcotest yojson bigstringaf unix eio eio_main masc.masc_core masc.dos_lane masc.server))
+
+(rule
+ (alias runtest-test_play_page_client)
+ (deps test_play_page_client.cjs ../lib/server/server_routes_http_routes_play_page.ml)
+ (action (run node --test %{dep:test_play_page_client.cjs})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_play_page_client)))

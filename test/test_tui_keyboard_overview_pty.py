@@ -214,15 +214,19 @@ def opening_boot_frames(executable: str) -> None:
 
         def interact(process, fd, _slave, output, base_path):
             chat = expected.startswith(b"Keepers ")
-            needle = expected if chat else b"Goals \xc2\xb7"
-            keyboard.wait_for_output(
-                process, fd, output, needle, start=0, timeout=10
-            )
+            # The Dashboard draws its Goals row from the loading frame, but a
+            # fallback reason is set only once the Keeper list is known. Wait
+            # for both before reading the frame, or the read lands too early.
+            needles = (expected,) if chat else (b"Goals \xc2\xb7", expected)
+            for needle in needles:
+                keyboard.wait_for_output(
+                    process, fd, output, needle, start=0, timeout=10
+                )
             # The needle can arrive before the rest of its frame, and that
             # frame rewrites only the rows that changed: the title can sit in
             # an earlier one. So wait for the frame's end and replay every row
             # painted up to it (screen_text starts at the last full redraw).
-            needle_end = keyboard.end_of_needle(output, needle, 0)
+            needle_end = max(keyboard.end_of_needle(output, needle, 0) for needle in needles)
             keyboard.wait_for_output(
                 process, fd, output, keyboard.FRAME_END, start=needle_end, timeout=3.0
             )

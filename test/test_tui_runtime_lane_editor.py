@@ -980,9 +980,9 @@ def run_invalid_runtime_config(executable: str) -> None:
     requests: h.HttpRequests = []
 
     def interact(process, fd, _slave, output, _base):
-        h.tab_until(process, fd, output, b"MASC Config")
+        h.tab_until(process, fd, output, b"MASC System")
         h.resize_and_wait(process, fd, output, rows=30, columns=131,
-                              needle=b"MASC Config", controls=(h.FULL_REDRAW,))
+                              needle=b"MASC System", controls=(h.FULL_REDRAW,))
         h.send_and_wait(process, fd, output, b"9", b"Runtime lanes (3 lanes, 4 slots)")
         h.send_and_wait(process, fd, output, b"e",
                         b"adding a candidate to the candidate order of primary")

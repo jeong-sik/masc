@@ -334,11 +334,19 @@ let test_each_mutation_appends_one_row () =
   in
   let _ = ok "second record" (Ledger.record ~config ~trace_id (activation ~revision:'b' ())) in
   let after_second = expect_one_more "an activation" after_first in
+  let _ = ok "repeat record" (Ledger.record ~config ~trace_id (activation ())) in
+  check string "an identical activation adds nothing" after_second (read_file file);
   let _ = ok "delivery" (deliver config trace_id [ "call-workspace-a" ]) in
   let after_delivery = expect_one_more "a delivery" after_second in
   let _ = ok "action" (act config trace_id ~call:"call-action" [ "call-workspace-a" ]) in
   let after_action = expect_one_more "an action" after_delivery in
-  let _ = ok "repeat record" (Ledger.record ~config ~trace_id (activation ())) in
+  (* Record compares every persisted field. The pristine activation is no
+     longer identical once delivery and action evidence have been added. *)
+  (match Ledger.record ~config ~trace_id (activation ()) with
+   | Error (Ledger.Invocation_id_collision "call-workspace-a") -> ()
+   | Error error -> fail ("wrong stale record error: " ^ Ledger.store_error_to_string error)
+   | Ok _ -> fail "a pristine record replaced an activation with evidence");
+  check string "a stale record leaves the log unchanged" after_action (read_file file);
   let _ = ok "repeat delivery" (deliver config trace_id [ "call-workspace-a" ]) in
   let _ = ok "repeat action" (act config trace_id ~call:"call-action" [ "call-workspace-a" ]) in
   check string "repeats add nothing" after_action (read_file file)

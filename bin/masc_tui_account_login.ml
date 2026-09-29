@@ -40,7 +40,7 @@ type account_emails =
 type t = {
   requested : string; mutable generation : int; mutable phase : phase; mutable providers : provider list;
   mutable provider : provider option; mutable models : model list; mutable selected_models : string list;
-  mutable bound_models : (string * string) list; mutable cursor : int;
+  mutable cursor : int;
   mutable account_ref : string option; mutable login_id : string option;
   mutable revision : string; mutable existing : string list; mutable default_runtime_id : string option; mutable draft : string;
   mutable output : string; mutable notice : string; mutable input_pending : bool; mutable input_sequence : int;
@@ -59,7 +59,7 @@ type action = Inventory | Refresh_saved of saved | Refresh_retry | Select_existi
   | Refresh_removed of { client : client; notice : string }
   | Refresh_list of list_view
 let create requested = {requested; generation=0; phase=Loading; providers=[]; provider=None; models=[];
-  selected_models=[]; bound_models=[]; account_emails=Email_rows {rows=[]; unattributed=0};
+  selected_models=[]; account_emails=Email_rows {rows=[]; unattributed=0};
   cursor=0; account_ref=None; login_id=None; revision=""; existing=[]; default_runtime_id=None; draft="";
   output=""; notice="계정 목록을 읽고 있습니다."; input_pending=false; input_sequence=0; cancel_stream=None; recovery=Login_status}
 let begin_attempt t provider ~existing =
@@ -206,10 +206,6 @@ let inventory ?view t json =
         field "default_runtime_selection" json with
   | Some revision, `List rows, `List runtimes, `List selected ->
     let ids = List.filter_map (fun row -> string (field "id" row)) runtimes in
-    let bound_models = List.filter_map (fun row ->
-      match string (field "provider_id" row), string (field "model" row) with
-      | Some provider_id, Some model_id -> Some (provider_id, model_id)
-      | _ -> None) runtimes in
     let selected = List.map string selected in
     let existing = List.filter_map Fun.id selected in
     if (field "default_runtime_id" json<>`Null && Option.is_none (string (field "default_runtime_id" json)))
@@ -237,7 +233,7 @@ let inventory ?view t json =
       Error "요청한 공식 클라이언트를 찾지 못했습니다. /login으로 목록을 확인하세요."
     else (
       t.providers <- providers; t.revision <- revision; t.account_emails <- account_emails;
-      t.bound_models <- bound_models; t.existing <- existing; t.default_runtime_id <- string (field "default_runtime_id" json);
+      t.existing <- existing; t.default_runtime_id <- string (field "default_runtime_id" json);
       (match view, requested with
        | Some Clients, _ | None, None -> show_clients t
        | Some (Accounts client), _ -> show_accounts t client
@@ -312,17 +308,16 @@ let input_response ~sequence t result =
 let models t json =
   match field "models" json with
   | `List rows ->
-    let parsed = List.map (fun row -> match string (field "id" row) with
-      | None -> None
-      | Some id -> Some {id; label=(match string (field "label" row) with Some x -> x | None -> id);
+    let parsed = List.map (fun row -> match string (field "id" row), field "bound" row with
+      | Some id, `Bool bound -> Some ({id; label=(match string (field "label" row) with Some x -> x | None -> id);
         context=(match field "context" row with `Int n when n>0 -> Some n | _ -> None);
-        tools=(match field "tools" row with `Bool b -> Some b | _ -> None)}) rows in
+        tools=(match field "tools" row with `Bool b -> Some b | _ -> None)}, bound)
+      | _ -> None) rows in
     if List.exists Option.is_none parsed then Error "모델 목록 형식이 올바르지 않습니다."
     else (
-      let available = List.filter (fun (model:model) ->
-        match t.provider with
-        | Some provider -> not (List.mem (provider.id, model.id) t.bound_models)
-        | None -> true) (List.filter_map Fun.id parsed) in
+      let available = List.filter_map (function
+        | Some (model, false) -> Some model
+        | Some (_, true) | None -> None) parsed in
       t.models <- available;
       t.selected_models <- List.filter_map (fun (model:model) ->
         if model.tools <> Some false && Option.is_some model.context then Some model.id else None) available;

@@ -66,11 +66,11 @@ def scenario(binary, client, protocol, *, delayed_save=False, conflict_save=Fals
 
     fixtures[LOGIN] = h.StreamingHttpResponse(chunks)
     fixtures[LOGIN + "/" + SESSION + "/input"] = h.RequestHttpResponse(accept)
-    catalog = [{"id": "test-model", "label": "Selected account model", "context": 32768, "tools": True}]
+    catalog = [{"id": "test-model", "label": "Selected account model", "context": 32768, "tools": True, "bound": False}]
     if multi_models:
         catalog = [catalog[0],
-            {"id": "unsupported-model", "label": "Unsupported account model", "context": 32768, "tools": False},
-            {"id": "second-model", "label": "Second account model", "context": 65536, "tools": True}]
+            {"id": "unsupported-model", "label": "Unsupported account model", "context": 32768, "tools": False, "bound": False},
+            {"id": "second-model", "label": "Second account model", "context": 65536, "tools": True, "bound": False}]
     fixtures["/api/v1/setup/models"] = (200, {"models": catalog})
     def verify(body):
         save_attempts.append(json.loads(body))
@@ -169,20 +169,26 @@ def reopen_existing_without_login(binary):
     fixtures = h.keeper_runtime_http_fixtures()
     fixtures["/api/v1/keepers/alpha/chat/history"] = (200, [])
     fixtures["/api/v1/setup/inventory"] = (200, {
-        "setup_revision": "fixture-revision", "default_runtime_selection": ["bound-runtime"],
-        "runtimes": [{"id": "bound-runtime", "provider_id": "codex", "model": "bound-model"}],
-        "account_emails": [], "integrations": [{"id": "codex", "display_name": "Codex account",
-            "protocol": "codex-app-server", "origin": "runtime_config"}]})
+        "setup_revision": "fixture-revision", "default_runtime_selection": ["runtime-a", "runtime-b"],
+        "runtimes": [
+            {"id": "runtime-a", "provider_id": "codex_hA", "model": "bound-a"},
+            {"id": "runtime-b", "provider_id": "codex_hB", "model": "bound-b"}],
+        "account_emails": [], "integrations": [
+            {"id": "codex_hA", "display_name": "Codex account A",
+             "protocol": "codex-app-server", "origin": "runtime_config"},
+            {"id": "codex_hB", "display_name": "Codex account B",
+             "protocol": "codex-app-server", "origin": "runtime_config"}]})
 
     def select(body):
-        assert json.loads(body) == {"integration_id": "codex"}
+        assert json.loads(body) == {"integration_id": "codex_hA"}
         return 200, {"account_ref": ACCOUNT, "account_selected": True}
 
     def models(body):
-        assert json.loads(body) == {"integration_id": "codex", "account_ref": ACCOUNT}
+        assert json.loads(body) == {"integration_id": "codex_hA", "account_ref": ACCOUNT}
         return 200, {"models": [
-            {"id": "bound-model", "label": "Bound account model", "context": 32768, "tools": True},
-            {"id": "new-model", "label": "New account model", "context": 65536, "tools": True}]}
+            {"id": "bound-a", "label": "Bound model A", "context": 32768, "tools": True, "bound": True},
+            {"id": "bound-b", "label": "Bound model B", "context": 32768, "tools": True, "bound": True},
+            {"id": "new-model", "label": "New account model", "context": 65536, "tools": True, "bound": False}]}
 
     fixtures["/api/v1/setup/accounts/select"] = h.RequestHttpResponse(select)
     fixtures["/api/v1/setup/accounts/login"] = (500, {"error": "login must not start"})
@@ -193,11 +199,12 @@ def reopen_existing_without_login(binary):
         h.select_keeper_row(process, fd, output, b"alpha")
         h.send_and_wait(process, fd, output, b"c", "Keepers ▸ alpha ▸ chat".encode())
         account_frame = h.send_and_wait(
-            process, fd, output, b"/login codex\r", b"> Codex account")
+            process, fd, output, b"/login codex\r", "> + 새 계정".encode())
         assert "새 계정 로그인".encode() in h.unwrapped(h.screen_text(account_frame))
+        h.send_and_wait(process, fd, output, b"j", b"> Codex account A")
         frame = h.send_and_wait(process, fd, output, b"\r", b"New account model")
         plain = h.unwrapped(h.screen_text(frame))
-        assert b"Bound account model" not in plain, "a bound model was offered again"
+        assert b"Bound model A" not in plain and b"Bound model B" not in plain, "a bound model was offered again"
         assert b"[x] New account model" in plain, "the remaining model was not preselected"
         assert not any(path == LOGIN for path, _ in requests), "opening an existing account started login"
         leave_login_and_arm_quit(process, fd, output)
@@ -245,7 +252,7 @@ def retry_before_started(binary):
     fixtures[LOGIN] = h.RequestHttpResponse(begin)
     fixtures[LOGIN + "/" + next_session + "/input"] = h.RequestHttpResponse(accept)
     fixtures[LOGIN + "/" + SESSION + "/input"] = (409, {"error": "old session must never receive input"})
-    fixtures["/api/v1/setup/models"] = (200, {"models": [{"id": "test-model", "label": "Retry selected model", "context": 32768, "tools": True}]})
+    fixtures["/api/v1/setup/models"] = (200, {"models": [{"id": "test-model", "label": "Retry selected model", "context": 32768, "tools": True, "bound": False}]})
 
     def interact(process, fd, _slave, output, _base_path):
         try:

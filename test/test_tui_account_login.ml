@@ -618,9 +618,9 @@ let multi_model_selection () =
   ok (Login.inventory t inventory);
   t.provider<-Some provider; t.account_ref<-Some account;
   let catalog=`Assoc ["models",`List [
-    `Assoc ["id",`String "first";"label",`String "First";"context",`Int 32768;"tools",`Bool true];
-    `Assoc ["id",`String "blocked";"label",`String "Blocked";"context",`Int 32768;"tools",`Bool false];
-    `Assoc ["id",`String "second";"label",`String "Second";"context",`Int 65536;"tools",`Bool true]]] in
+    `Assoc ["id",`String "first";"label",`String "First";"context",`Int 32768;"tools",`Bool true;"bound",`Bool false];
+    `Assoc ["id",`String "blocked";"label",`String "Blocked";"context",`Int 32768;"tools",`Bool false;"bound",`Bool false];
+    `Assoc ["id",`String "second";"label",`String "Second";"context",`Int 65536;"tools",`Bool true;"bound",`Bool false]]] in
   ok (Login.models t catalog);
   check (list string) "usable models start selected in catalog order"
     ["first";"second"] (List.map (fun (m:Login.model) -> m.id)
@@ -655,24 +655,33 @@ let multi_model_selection () =
     (t.selected_models=["second"])
 
 let already_bound_model_is_not_offered () =
-  let fields=match inventory with `Assoc fields -> List.remove_assoc "runtimes" fields | _ -> [] in
+  let fields=match inventory with `Assoc fields ->
+    List.remove_assoc "runtimes" (List.remove_assoc "integrations" fields) | _ -> [] in
+  let integration id = `Assoc ["id",`String id;"display_name",`String "Codex account";
+    "protocol",`String "codex-app-server";"origin",`String "runtime_config"] in
   let rows=`List [
     `Assoc ["id",`String "primary"];
     `Assoc ["id",`String "fallback"];
-    `Assoc ["id",`String "bound-runtime";"provider_id",`String "codex";"model",`String "first"]] in
-  let t=Login.create "codex" in
-  ok (Login.inventory t (`Assoc (("runtimes",rows)::fields)));
-  check bool "invalid account selection is refused" true
-    (Result.is_error (Login.selected_account t provider (`Assoc ["account_ref",`String "bad"])));
-  ok (Login.selected_account t provider (`Assoc ["account_ref",`String account]));
-  check bool "selected account is reused without a login session" true
-    (t.account_ref=Some account && t.login_id=None && t.provider=Some provider);
-  ok (Login.models t (`Assoc ["models",`List [
-    `Assoc ["id",`String "first";"context",`Int 32768;"tools",`Bool true];
-    `Assoc ["id",`String "second";"context",`Int 32768;"tools",`Bool true]]] ));
-  check (list string) "configured model is absent when reopening its account"
-    ["second"] (List.map (fun (m:Login.model) -> m.id) t.models);
-  check (list string) "new model is selected" ["second"] t.selected_models
+    `Assoc ["id",`String "runtime-a";"provider_id",`String "codex_hA";"model",`String "first"];
+    `Assoc ["id",`String "runtime-b";"provider_id",`String "codex_hB";"model",`String "second"]] in
+  let inventory=`Assoc (("runtimes",rows)::("integrations",`List [integration "codex_hA";integration "codex_hB"])::fields) in
+  List.iter (fun selected_provider ->
+    let t=Login.create "codex" in
+    ok (Login.inventory t inventory);
+    check bool "invalid account selection is refused" true
+      (Result.is_error (Login.selected_account t selected_provider (`Assoc ["account_ref",`String "bad"])));
+    ok (Login.selected_account t selected_provider (`Assoc ["account_ref",`String account]));
+    check bool "selected account is reused without login" true
+      (t.account_ref=Some account && t.login_id=None && t.provider=Some selected_provider);
+    let catalog=`Assoc ["models",`List [
+      `Assoc ["id",`String "first";"context",`Int 32768;"tools",`Bool true;"bound",`Bool true];
+      `Assoc ["id",`String "second";"context",`Int 32768;"tools",`Bool true;"bound",`Bool true];
+      `Assoc ["id",`String "third";"context",`Int 32768;"tools",`Bool true;"bound",`Bool false]]] in
+    ok (Login.models t catalog);
+    check (list string) ("both bound models stay hidden from " ^ selected_provider.id)
+      ["third"] (List.map (fun (m:Login.model) -> m.id) t.models);
+    check (list string) "only the new model is selected" ["third"] t.selected_models)
+    [{provider with id="codex_hA"};{provider with id="codex_hB"}]
 
 let () = run "TUI account login" ["workflow",[
   test_case "multi-model selection submits ordered models" `Quick multi_model_selection;

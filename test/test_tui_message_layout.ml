@@ -2897,9 +2897,43 @@ let test_no_rung_outgrows_its_column () =
     [ 0; 999; 1_000; 73_877; 999_949; 999_950; 1_048_576; 99_994_999
     ; 99_995_000; 999_949_999; 999_950_000 ]
 
+(* Laying out a text again, in the same frame or in a later one, gives what
+   laying it out the first time gave. Two texts of one byte length ("가a" and
+   "a" + U+0301 + "b"), or where one starts with the other, keep their own
+   widths. The widths are the ones the cluster fixtures above state. *)
+let test_a_text_laid_out_again_keeps_its_layout () =
+  let texts =
+    [ ("\xea\xb0\x80a", 3)
+    ; ("a\xcc\x81b", 2)
+    ; ("\xed\x95\x9c\xea\xb5\xad", 4)
+    ; ("\xed\x95\x9c\xea\xb5\xad\xec\x96\xb4", 6)
+    ; ("\027[31m\xed\x95\x9c\027[0m", 2)
+    ; ("A1\xef\xb8\x8f\xe2\x83\xa3Z", 4)
+    ]
+  in
+  let lay_out_all label =
+    List.iter
+      (fun (text, cells) ->
+        check int (label ^ ": width of " ^ String.escaped text) cells
+          (Layout.display_width text);
+        check int (label ^ ": fitted width of " ^ String.escaped text) (cells + 1)
+          (Layout.display_width (Layout.fit_width text (cells + 1))))
+      texts
+  in
+  lay_out_all "first frame";
+  lay_out_all "the same frame again";
+  Layout.begin_frame ();
+  lay_out_all "the next frame";
+  Layout.begin_frame ();
+  Layout.begin_frame ();
+  lay_out_all "two frames without them"
+
 let () =
   run "tui_message_layout"
     [
+      ( "layout across frames"
+      , [ test_case "a text laid out again keeps its layout" `Quick
+            test_a_text_laid_out_again_keeps_its_layout ] );
       ( "clause packing"
       , [ test_case "a row ends where a clause ends" `Quick
             test_a_row_ends_where_a_clause_ends

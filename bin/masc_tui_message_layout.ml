@@ -481,7 +481,7 @@ let grapheme_pieces text start_offset end_offset reversed =
     !pieces
   end
 
-let display_pieces text =
+let segment_display_pieces text =
   let length = String.length text in
   (* Only an escape can open a sequence, so the scan jumps to the next escape
      rather than asking at every byte of every rendered line. *)
@@ -511,6 +511,48 @@ let display_pieces text =
           :: reversed)
   in
   loop 0 []
+
+(* The pieces of each text laid out in this frame or the one before it.
+   Most of a frame is text the previous frame drew, and splitting non-ASCII
+   text into grapheme clusters is most of what laying it out costs: on
+   2026-09-30 a TUI with no input spent 14% of its busy samples in the
+   segmenter while it redrew every 150 ms for a running turn. Pieces depend on
+   the text alone, so a text drawn again takes the pieces it had last time.
+   [begin_frame] runs once per frame; a text that no frame laid out during two
+   frames is dropped. The mutex covers a caller on a system thread; nothing
+   inside it suspends. *)
+(* A sizing hint for one frame's texts, not a bound. *)
+let texts_per_frame = 1024
+let pieces_mutex = Mutex.create ()
+let pieces_this_frame : (string, display_piece list) Hashtbl.t ref =
+  ref (Hashtbl.create texts_per_frame)
+let pieces_last_frame : (string, display_piece list) Hashtbl.t ref =
+  ref (Hashtbl.create texts_per_frame)
+
+let begin_frame () =
+  Mutex.protect pieces_mutex (fun () ->
+      pieces_last_frame := !pieces_this_frame;
+      pieces_this_frame := Hashtbl.create texts_per_frame)
+
+let display_pieces text =
+  let known =
+    Mutex.protect pieces_mutex (fun () ->
+        match Hashtbl.find_opt !pieces_this_frame text with
+        | Some pieces -> Some pieces
+        | None -> (
+            match Hashtbl.find_opt !pieces_last_frame text with
+            | Some pieces ->
+                Hashtbl.replace !pieces_this_frame text pieces;
+                Some pieces
+            | None -> None))
+  in
+  match known with
+  | Some pieces -> pieces
+  | None ->
+      let pieces = segment_display_pieces text in
+      Mutex.protect pieces_mutex (fun () ->
+          Hashtbl.replace !pieces_this_frame text pieces);
+      pieces
 
 let pieces_width pieces =
   List.fold_left (fun width piece -> width + piece.cell_width) 0 pieces

@@ -42,13 +42,11 @@ def operator_menu_from_dashboard(executable: str) -> None:
                     final_cursor=b"\x1b[?25l",
                 )
                 rows = keyboard.screen_rows(frame)
-                # The footer repeats this label. Require its own body row,
-                # above the footer, so a surviving hint cannot satisfy this.
-                body_rows = [
-                    row for row, text in rows.items()
-                    if text.strip() == menu and row < max(rows)
-                ]
-                if len(body_rows) != 1:
+                # The first body row follows the title and its divider.
+                # Check that row, including its border and optional sidebar,
+                # so the footer's repeated label cannot satisfy this.
+                menu_row = keyboard.screen_row_of(rows, b"MASC Dashboard") + 2
+                if menu not in rows.get(menu_row, b""):
                     raise AssertionError(
                         f"{columns}x16 hid the operator menu body row: {rows!r}"
                     )
@@ -56,7 +54,7 @@ def operator_menu_from_dashboard(executable: str) -> None:
                       f"{base64.b64encode(frame).decode()}")
                 keyboard.press_label_on_screen(
                     process, fd, output, menu,
-                    row=body_rows[0], needle=b"MASC Approvals",
+                    row=menu_row, needle=b"MASC Approvals",
                 )
                 keyboard.send_and_wait(process, fd, output, b"1", b"MASC Dashboard")
             keyboard.resize_and_wait(

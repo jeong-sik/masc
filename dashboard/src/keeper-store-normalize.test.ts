@@ -1092,4 +1092,12 @@ describe('Keeper portrait projection', () => {
       expect(keeper?.portrait?.state).toBe('unavailable')
     }
   })
+
+  it('carries only a canonical Item account revision into the Keeper row', () => {
+    const revision = 'a'.repeat(64)
+    const [ready] = normalizeKeepers([{ name: 'imp', status: 'active', candle_balance_milli: '0', candle_account_revision: revision }])
+    expect(ready?.candle_account_revision).toBe(revision)
+    const [malformed] = normalizeKeepers([{ name: 'imp', status: 'active', candle_balance_milli: '0', candle_account_revision: 'changed' }])
+    expect(malformed?.candle_account_revision).toBeUndefined()
+  })
 })

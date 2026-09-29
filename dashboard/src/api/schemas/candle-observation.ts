@@ -4,6 +4,9 @@ export const CandleAmountSchema = Schema.String.pipe(
   Schema.filter(value => /^(0|[1-9][0-9]*)$/.test(value)),
 )
 export const CandleBalanceSchema = Schema.NullOr(CandleAmountSchema)
+export const CandleAccountRevisionSchema = Schema.NullOr(Schema.String.pipe(
+  Schema.filter(value => /^[0-9a-f]{64}$/.test(value)),
+))
 export const CandleObservationSchema = Schema.Union(
   Schema.Struct({ status: Schema.Literal('off') }),
   Schema.Struct({ status: Schema.Literal('disabled'), reason: Schema.String.pipe(Schema.filter(value => value.trim().length > 0)) }),
@@ -25,6 +28,11 @@ export function readCandleObservation(value: unknown): CandleReading {
 /** Undefined is malformed/missing; null is the server's explicit Off/Disabled balance. */
 export function readCandleBalance(value: unknown): string | null | undefined {
   const parsed = Schema.decodeUnknownEither(CandleBalanceSchema)(value)
+  return Either.isRight(parsed) ? parsed.right : undefined
+}
+
+export function readCandleAccountRevision(value: unknown): string | null | undefined {
+  const parsed = Schema.decodeUnknownEither(CandleAccountRevisionSchema)(value)
   return Either.isRight(parsed) ? parsed.right : undefined
 }
 

@@ -1,9 +1,9 @@
 (* What a streaming request returns of a successful body. Under [Keep_body]
    the caller gets the whole body at the end as well as every chunk on the
-   way; under [Discard_body] it gets the chunks and [()]. That the reader
-   holds no buffer under [Discard_body] is in its type, not observable here.
-   A refused request is read whole either way: its body is not in the
-   stream's protocol. *)
+   way; under [Discard_body] it gets the chunks and [()]: the reader keeps
+   nothing, and its type gives it no way to return a body. No test here can
+   see that no buffer is held. A refused request is read whole either way:
+   its body is not in the stream's protocol. *)
 
 module Pool = Masc_http_client.Pool
 

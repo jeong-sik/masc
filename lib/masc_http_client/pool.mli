@@ -153,10 +153,9 @@ val empty_body_progress : body_progress
 
 (** {2 Streaming request}
 
-    [request] and [read_body_with_idle] together already read a response body
-    chunk by chunk, but every chunk lands in a buffer the caller only sees once
-    the body ends. A caller rendering a live view of a server-sent event stream
-    needs the chunks as they arrive. *)
+    [request] reads a response body whole and hands it over once the body
+    ends. A caller rendering a live view of a server-sent event stream needs
+    the chunks as they arrive, which is what [request_streaming] gives it. *)
 
 (** Whether a successful stream's body is kept whole as well as handed to
     [on_chunk], and so what {!Streamed} carries as its body. *)

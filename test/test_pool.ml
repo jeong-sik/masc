@@ -520,7 +520,7 @@ let () =
         ] );
       ( "RFC-0129 read_body_with_idle",
         [
-          Alcotest.test_case "unbounded login stream does not retain its body" `Quick
+          Alcotest.test_case "Discard_body delivers every chunk and returns ()" `Quick
             test_stream_without_body_retention;
           Alcotest.test_case "steady stream completes" `Quick
             test_idle_steady_stream_completes;

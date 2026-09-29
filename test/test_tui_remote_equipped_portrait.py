@@ -122,13 +122,21 @@ def remote_portrait(binary: str, evidence: Path) -> None:
         }
         fixtures[path] = h.RawHttpResponse(200, json.dumps(health).encode(),
                                            content_type="application/json")
+        receipt = "health.json" if path == "/health" else "full-health.json"
+        (evidence / receipt).write_text(json.dumps(health, indent=2) + "\n")
 
     def interact(process, fd, _slave, output, local_base):
         try:
             assert Path(local_base).resolve() != Path(remote_base).resolve()
             assert not (Path(local_base) / ".masc/keepers" / f"{keeper}.json").exists()
-            h.wait_for_output(process, fd, output, b"[workspace mismatch]", start=0,
+            # The title's badge can be clipped after a long workspace name.
+            # The footer reserves its conflict notice; require the running
+            # TUI's typed mismatch and its canonical local workspace there.
+            mismatch = b"MISMATCH local " + str(Path(local_base).resolve()).encode()
+            h.wait_for_output(process, fd, output, mismatch, start=0,
                               timeout=WAIT_SECONDS)
+            mismatch_footer = next(line for line in h.screen_text(bytes(output)).splitlines()
+                                   if mismatch in line).decode(errors="replace")
             h.tab_until(process, fd, output, b"MASC Keepers")
             h.select_keeper_row(process, fd, output, keeper.encode())
             start = len(output)
@@ -162,6 +170,7 @@ def remote_portrait(binary: str, evidence: Path) -> None:
                 "keeper": keeper,
                 "local_base": local_base,
                 "remote_base": remote_base,
+                "workspace_mismatch_footer": mismatch_footer,
                 "tui_binary_sha256": hashlib.sha256(Path(binary).read_bytes()).hexdigest(),
                 "native_build": manifest["build"],
                 "roster_requests": roster.calls,

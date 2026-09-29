@@ -279,8 +279,8 @@ let config_invalid =
    error; it is a masc internal error now, and the walk stops on it as it did
    on the parse error. Only the label changed, not the rotation. *)
 let runtime_boundary_exception =
-  Masc.Keeper_internal_error.core_error_of_masc_internal_error
-    (Masc.Keeper_internal_error.Internal_unhandled_exception
+  Keeper_internal_error.core_error_of_masc_internal_error
+    (Keeper_internal_error.Internal_unhandled_exception
        { site = "claude_code.runtime_boundary"
        ; exn_repr = "Unix.Unix_error(Unix.EPERM, \"kill\", \"\")"
        ; transport_error_kind = None

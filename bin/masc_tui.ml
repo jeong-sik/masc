@@ -4552,12 +4552,6 @@ let launch_preset_call state ~mailbox ~call ~wrap =
       enqueue_async mailbox (wrap result))
     (fun () -> call ~host ~port)
 
-let launch_play_call state ~mailbox ~call ~wrap =
-  let host = server_peer_host and port = state.port in
-  Masc_tui_async_read.launch
-    ~deliver:(fun result -> enqueue_async mailbox (wrap result))
-    (fun () -> call ~host ~port)
-
 let launch_presets_load state ~mailbox =
   state.presets_error <- None;
   launch_preset_call state ~mailbox
@@ -10217,7 +10211,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       notice ~kind:Notice_failure reason
   | Masc_tui_command.Play_invites ->
       Buffer.clear state.msg_input;
-      launch_play_call state ~mailbox
+      launch_preset_call state ~mailbox
         ~call:Masc_tui_http.list_play_invites
         ~wrap:(fun result ->
           Play_invites_listed (target, Result.bind result Tui_decode.decode_play_invites))
@@ -10235,10 +10229,10 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       (match target with
        | None ->
            notice ~kind:Notice_failure
-             "Select a Keeper chat to receive the one-time play link before issuing it"
+             "Open a Keeper chat first: the one-time play link is shown there, in this TUI only, and is not sent to the Keeper"
        | Some _ ->
            Buffer.clear state.msg_input;
-           launch_play_call state ~mailbox
+           launch_preset_call state ~mailbox
              ~call:(fun ~host ~port ->
                Ok (Masc_tui_http.issue_play_invite ~host ~port ~name ~hours))
              ~wrap:(fun result ->
@@ -10249,7 +10243,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
                     | Error detail -> Masc_tui_http.Post_unanswered detail))))
   | Masc_tui_command.Play_revoke name ->
       Buffer.clear state.msg_input;
-      launch_play_call state ~mailbox
+      launch_preset_call state ~mailbox
         ~call:(fun ~host ~port ->
           Ok (Masc_tui_http.revoke_play_invite ~host ~port ~name))
         ~wrap:(fun result ->
@@ -14465,7 +14459,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            chat_notice state ~keeper_name:target ~kind:Notice_failure
              ("play invite outcome unknown (" ^ detail ^ "); list and revoke before retrying"))
   | Play_invite_revoked (target, requested_name, result) ->
-      let retry = "; retry /play revoke " ^ requested_name ^ " to release the controller" in
+      let retry reason =
+        Printf.sprintf "retry /play revoke %s — %s" requested_name reason
+      in
       (match result with
        | Play_revoke_absent ->
            (match state.play_invite_link with
@@ -14473,30 +14469,34 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                 state.play_invite_link <- None
             | Some _ | None -> ());
            chat_notice state ~keeper_name:target ~kind:Notice_reply
-             ("Play invite " ^ requested_name ^ " is absent; no controller held")
+             ("Play invite " ^ requested_name ^ " is absent (no invite has that name)")
        | Play_revoke_result (Play_answered (Ok revoked)) ->
            (match state.play_invite_link with
             | Some (held_name, _) when String.equal held_name revoked.Tui_decode.pir_name ->
                 state.play_invite_link <- None
             | Some _ | None -> ());
-           chat_notice state ~keeper_name:target
-             ~kind:(if Option.is_some revoked.pir_release_error then Notice_failure else Notice_reply)
-             (Printf.sprintf "Play invite %s: %s%s"
-                revoked.pir_name
-                (if revoked.pir_revoked then "revoked" else "already absent")
-                (match revoked.pir_release_error with
-                 | Some detail -> "; controller release failed: " ^ detail ^ retry
-                 | None ->
-                     if revoked.pir_released_controller then "; controller released" else ""))
+           (match revoked.pir_release_error with
+            | Some detail ->
+                chat_notice state ~keeper_name:target ~kind:Notice_failure
+                  (retry
+                     ((if revoked.pir_revoked then "invite revoked; "
+                       else "invite already absent; ")
+                      ^ "controller release failed: " ^ detail))
+            | None ->
+                chat_notice state ~keeper_name:target ~kind:Notice_reply
+                  (Printf.sprintf "Play invite %s: %s%s"
+                     revoked.pir_name
+                     (if revoked.pir_revoked then "revoked" else "already absent")
+                     (if revoked.pir_released_controller then "; controller released" else "")))
        | Play_revoke_result (Play_answered (Error detail)) ->
            chat_notice state ~keeper_name:target ~kind:Notice_failure
-             ("play revoke response unreadable (" ^ detail ^ ")" ^ retry)
+             (retry ("play revoke response unreadable (" ^ detail ^ ")"))
        | Play_revoke_result (Play_refused detail) ->
            chat_notice state ~keeper_name:target ~kind:Notice_failure
              ("play revoke refused: " ^ detail)
        | Play_revoke_result (Play_unanswered detail) ->
            chat_notice state ~keeper_name:target ~kind:Notice_failure
-             ("play revoke outcome unknown (" ^ detail ^ ")" ^ retry))
+             (retry ("play revoke outcome unknown (" ^ detail ^ ")")))
   | Librarian_input_loaded (prompt_key, result) ->
       let still_selected =
         match selected_prompt_for_state state with

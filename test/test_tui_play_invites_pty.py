@@ -68,7 +68,7 @@ def run(executable: str) -> None:
         command(b"/play revoke guest1", b"controller still busy")
         command(b"/play revoke guest1", b"controller released")
         command(b"/play invite guest1 24", LINK.encode())
-        command(b"/play revoke guest1", b"is absent; no controller held")
+        command(b"/play revoke guest1", b"is absent (no invite has that name)")
         command(b"/play link", b"No play link has been issued")
         paths = [path for path, _ in requests]
         if paths.count("/api/v1/play/invites") != 2 or revokes.served != 4:

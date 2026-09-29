@@ -31,6 +31,8 @@
 - Add a read-only Keeper portrait tool that returns the current equipment and PNG artifact without changing equip state (#39869).
 - Portrait rasterization and PNG encoding run off the calling Keeper fiber so other work remains responsive during a read (#39869).
 - Claude Sonnet 5.5 (`claude-sonnet-5-5`) is in the model catalog: 1M context window, 128K output, and the low, medium, high, xhigh and max effort levels. Forcing a tool choice is refused for this model (#39812).
+- `/play qr` displays the last issued shared DOS invite link as a terminal QR
+  when the Keeper chat pane can show it without wrapping (#39873).
 
 ### Changed
 
@@ -48,6 +50,7 @@
 - Chat loading warnings point to `/errors` for full scrollable details; switching Keepers clears the previous conversation's loading errors before the new read completes. (#39899)
 - New setups use Claude Sonnet 5.5 instead of Claude Sonnet 5: the Claude Code seed bindings and the quick-setup default model moved, and the OpenRouter Sonnet 5 seed binding was removed. An existing `runtime.toml` keeps its own bindings (#39812).
 - `masc setup` folds the routine per-file and per-Skill lines of its init step into the closing count line, and marks success lines with a green check and its first line with a candle on a terminal (not with `NO_COLOR`, `TERM=dumb` or piped output). `masc init` still prints every line (#39897).
+- A Goal's `due_date` is read in one place. It is `YYYY-MM-DD` for a day that exists and falls due at 23:59:59 UTC of that day, whatever the operator's time zone is. The overdue notice and the Overview countdown use it, and `masc_goal_upsert` refuses a value that is not such a date instead of storing it (#39923).
 
 ### Fixed
 
@@ -72,6 +75,12 @@
 - The MCP endpoint answers `keeper_portrait_read` with the typed keeper-internal refusal instead of "Unknown tool (registry inconsistency)", and the keeper tool matrix exercises the tool (#39906).
 - Exact-output generation and token measurement now share the provider concurrency limit with ordinary requests; permit waits respect the exact request deadline (#39879).
 - When the TUI refuses a runtime lane edit, the message now says the lane differs from the displayed order, or names the first runtime.toml parse error and where it is (#39913).
+- MCP `tools/list` records its tool assignment under the verified
+  credential's owner instead of the raw bearer, so tokens no longer land in
+  `<base>/data/tool-events` and `tools/call` finds the assignment by name.
+  Files written before this fix may still hold bearers (#39829).
+- `keeper_portrait_read` now refuses a portrait size below 48 or above 512, which is the range the tool declares. Before, it accepted sizes down to 16 and its error message said "between 16 and 512". (#39925)
+- Release installation checks wait for server readiness before verifying the installed dashboard, preventing startup JSON from being mistaken for broken packaged assets (#39936).
 
 ### Internal
 
@@ -88,6 +97,7 @@
 - The schedule store keeps the decoded `schedules.json` with the file version it was read from, so a reader of an unchanged ledger no longer reads, parses and decodes the whole multi-megabyte document; a miss decodes on the domain pool (#39870).
 - File-version caching applies only to filesystem-backed schedules; Memory backends retain their own authoritative ledger even when a local mirror shares the same path (#39870).
 - The TUI splits its server-sent event streams (the observer feed, the Keeper chat stream and the GitHub login stream) by scanning only the bytes each chunk adds, instead of copying and searching everything held since the last line ended. A 919KB `execution_snapshot` read in 16KB chunks took 35.6ms of the TUI's loop to split and now takes 1.2ms (#39909).
+- The TUI reads an observer frame's leading `type` member before parsing the frame, and a frame that type decides by itself (a whole dashboard projection, the internal agent runs push, or a type outside the event families this build reads) is delivered without the rest being parsed. A 722KB `operator_snapshot` took 8.9-10.3ms of the TUI's loop to parse and its type now takes about 15-20µs to read; the rest of such a frame is no longer checked, so it no longer reads as undecodable when it is not JSON (#39926).
 
 ## [0.47.0] - 2026-09-29
 

@@ -6,10 +6,12 @@ type t =
     }
   | Task_missing_title
   | Help
+  | Show_load_errors
   | About
   | Lane_addons of string
   | Play_invites
   | Play_link
+  | Play_qr
   | Play_invite of { name : string; hours : int }
   | Play_revoke of string
   | Play_invalid of string
@@ -100,7 +102,7 @@ let catalog =
     }
   ; { word = "play"
     ; aliases = []
-    ; args = "[invites|invite <name> <hours>|link|revoke <name>]"
+    ; args = "[invites|invite <name> <hours>|link|qr|revoke <name>]"
     ; summary = "list, issue or revoke shared DOS play links"
     }
   ; { word = "settings"
@@ -220,6 +222,11 @@ let catalog =
     ; summary = "list prompt presets; show what one holds; save the live state; restore one \
          (autosaves first)"
     }
+  ; { word = "errors"
+    ; aliases = []
+    ; args = ""
+    ; summary = "read current history and memory loading errors in full"
+    }
   ; { word = "help"
     ; aliases = []
     ; args = ""
@@ -335,11 +342,13 @@ let parse text =
     match split_word line with
     | "task", "" -> Task_missing_title
     | "task", title -> Task_for_keeper { title; body }
+    | "errors", "" -> Show_load_errors
     | "help", _ -> Help
     | "about", _ | "splash", _ -> About
     | "addons", arg -> Lane_addons arg
     | "play", "" | "play", "invites" -> Play_invites
     | "play", "link" -> Play_link
+    | "play", "qr" -> Play_qr
     | "play", arg -> (
         match split_word arg with
         | "invite", rest -> (
@@ -355,7 +364,7 @@ let parse text =
             match split_word rest with
             | name, "" when name <> "" -> Play_revoke name
             | _ -> Play_invalid "use /play revoke <name>")
-        | _ -> Play_invalid "use /play invites, /play invite <name> <hours>, or /play revoke <name>")
+        | _ -> Play_invalid "use /play invites, /play invite <name> <hours>, /play link, /play qr, or /play revoke <name>")
     | "metrics", _ | "telemetry", _ -> Open_metrics
     | "login", client -> Account_login client
     | "settings", _ -> Open_settings

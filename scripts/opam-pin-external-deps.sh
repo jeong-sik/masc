@@ -123,7 +123,10 @@ readonly WS_DIRECT_SHA="d812d6fec4153efc11235661e0d4b4d0d789c45b"
 # pc=e1dc); boot_disk now mounts the ROM at replay time (ocaml-msx #37).
 # 3143a55 moves the pin to ocaml-msx #43: ambiguous v1 checkpoint layouts
 # are rejected instead of restoring state with a guessed field boundary.
-readonly OCAML_MSX_SHA="3143a555f803f728ae35fddd7d93a146bb6602b0"
+# 052f50b reverts ocaml-msx #41 (#44): 0x0024 is BIOS ENASLT, not SNSMAT, and
+# serving it as an implicit CALSLT restored ppi_a after every slot switch, so
+# a Sangokushi II warm-boot drew only black from #41 through #43.
+readonly OCAML_MSX_SHA="052f50b4bc57b54632dbd19b33a9acb64ef73072"
 # DOS emulator core (8086 + BIOS/DOS interrupt surface + CGA/EGA/VGA video).
 # Path-pinned locally for core development; SHA-pinned here for CI.
 # d887e45 = ocaml-dos #11: keys have names, so lib/dos_lane can take "up" and
@@ -144,12 +147,25 @@ readonly OCAML_MSX_SHA="3143a555f803f728ae35fddd7d93a146bb6602b0"
 # module-list change moves the digest too.
 # d9e2cba = ocaml-dos #34: Dos_snapshot saves and restores the whole machine
 # (format 2), which masc_dos_save/masc_dos_restore write through.
+# 1d51834 = ocaml-dos #36-#38: EXEC of a truncated MZ child fails instead of
+# raising; an Unsupported instruction leaves IP on itself, so running again
+# faults again instead of executing the next byte; and separate opens of one
+# file share its bytes, so closing one handle no longer overwrites what another
+# wrote. #38 moved Dos_snapshot to format 3, which refuses format 2: checkpoints
+# written under d9e2cba are refused on restore, and a game starts fresh.
+# e570d41 = ocaml-dos #40-#41: ENTER with a nesting level frames its locals
+# below the display it pushed, and 186 shift counts use their low five bits
+# (#40); re-mapping the EMS page a window already shows keeps the window instead
+# of copying the never-saved page over it (#41). 삼국지3 re-maps its EMS page
+# all the time, so the old core wiped that page and a carried-over war came
+# back as one ruler against himself; the all-AI game then never asked for a key
+# again. The snapshot format stays 3, so checkpoints from 1d51834 restore.
 # Bump Dos_lane.pinned_core_source_digest (lib/dos_lane/dos_lane.ml) with this
 # SHA. test_dos_tools names this file, so the PR that moves the SHA runs it, and
 # it fails with the new digest in its message until the two agree. A build that
 # says "Library ocaml-dos.core-identity not found" is linking an ocaml-dos older
 # than #32: re-run this script with --install, or vendor the pinned core.
-readonly OCAML_DOS_SHA="d9e2cba992292a8aa405d0f1034d5d027946236a"
+readonly OCAML_DOS_SHA="e570d41f8e10447b0a188c401a0b687fee8ab9c5"
 # cohttp-eio 6.2.1 + one line: Reader_flow.single_read continues a partial body
 # delivery from the position already delivered instead of offset 0. Without it
 # a chunk handed over in three or more single_read calls repeats its first

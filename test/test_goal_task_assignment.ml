@@ -5,7 +5,10 @@
     - an unknown task or unknown goal is a typed error (never a silent no-op),
     - a goalless task links cleanly to an existing goal,
     - a task that already carries a link is rejected (reassignment is a
-      deliberate Non-Goal, RFC-0267 §4). *)
+      deliberate Non-Goal, RFC-0267 §4),
+    - a finished task ([Done] or [Cancelled]) is rejected, because a link
+      carries no timestamp and a task finished before it is linked could not
+      be told apart from work done for the goal. *)
 
 open Alcotest
 open Masc_domain
@@ -144,6 +147,150 @@ let test_rejects_reassignment () =
       check (list string) "reports the existing link" [ "goal-a" ] existing_goal_ids
     | Ok () -> fail "expected Already_assigned, got Ok (reassignment must be rejected)"
     | Error other -> failf "expected Already_assigned, got %s" (err_to_string other))
+;;
+
+(* Move a backlog task to [status] directly, the way the keeper task outcome
+   tests do: the claim and verification paths are not what these cases are
+   about. *)
+let set_task_status config ~task_id status =
+  let backlog = Workspace_backlog.read_backlog_r config |> Result.get_ok in
+  Workspace_backlog.write_backlog
+    config
+    { backlog with
+      tasks =
+        List.map
+          (fun (t : task) ->
+             if String.equal t.id task_id then { t with task_status = status } else t)
+          backlog.tasks
+    }
+;;
+
+let goal_has_task links ~goal_id ~task_id =
+  List.exists
+    (fun (gid, task_ids) -> String.equal gid goal_id && List.mem task_id task_ids)
+    links
+;;
+
+let finished_statuses =
+  [ ( "done"
+    , Done { assignee = "claude"; completed_at = "2026-09-01T00:00:00Z"; notes = None } )
+  ; ( "cancelled"
+    , Cancelled
+        { cancelled_by = "claude"; cancelled_at = "2026-09-01T00:00:00Z"; reason = Some "test" } )
+  ]
+;;
+
+let test_rejects_finished_task () =
+  List.iter
+    (fun (label, status) ->
+       with_test_env (fun config ->
+         make_goal config ~id:"goal-a";
+         let task_id = make_unassigned_task config ~title:"t" in
+         set_task_status config ~task_id status;
+         (match Goal_assignment.set_task_goal config ~task_id ~goal_id:"goal-a" with
+          | Error (Goal_assignment.Task_finished { task_id = t; status = s }) ->
+            check string (label ^ ": names the task") task_id t;
+            check string (label ^ ": names the status") label (task_status_to_string s)
+          | Ok () -> failf "a %s task was linked to a goal" label
+          | Error other -> failf "expected Task_finished, got %s" (err_to_string other));
+         check
+           bool
+           (label ^ ": no link was written")
+           false
+           (goal_has_task
+              (Workspace_goal_index.read_goal_task_links config)
+              ~goal_id:"goal-a"
+              ~task_id)))
+    finished_statuses
+;;
+
+(* The status check runs before the link is read, so a finished task that
+   already has a link is refused as finished. *)
+let test_finished_task_with_a_link_is_refused_as_finished () =
+  with_test_env (fun config ->
+    make_goal config ~id:"goal-a";
+    make_goal config ~id:"goal-b";
+    let task_id = make_unassigned_task config ~title:"t" in
+    (match Goal_assignment.set_task_goal config ~task_id ~goal_id:"goal-a" with
+     | Ok () -> ()
+     | Error e -> failf "first assign should succeed: %s" (err_to_string e));
+    set_task_status config ~task_id (List.assoc "done" finished_statuses);
+    match Goal_assignment.set_task_goal config ~task_id ~goal_id:"goal-b" with
+    | Error (Goal_assignment.Task_finished { task_id = t; _ }) ->
+      check string "names the task" task_id t
+    | Ok () -> fail "a finished task was linked to a second goal"
+    | Error other -> failf "expected Task_finished, got %s" (err_to_string other))
+;;
+
+let test_links_an_unfinished_task_in_every_open_status () =
+  let started_at = "2026-09-01T00:00:00Z" in
+  let open_statuses =
+    [ "claimed", Claimed { assignee = "claude"; claimed_at = started_at }
+    ; "in_progress", InProgress { assignee = "claude"; started_at }
+    ; ( "awaiting_verification"
+      , AwaitingVerification
+          { assignee = "claude"
+          ; started_at
+          ; submitted_at = "2026-09-01T01:00:00Z"
+          ; verification_id = "verification-1"
+          } )
+    ]
+  in
+  List.iter
+    (fun (label, status) ->
+       with_test_env (fun config ->
+         make_goal config ~id:"goal-a";
+         let task_id = make_unassigned_task config ~title:"t" in
+         set_task_status config ~task_id status;
+         match Goal_assignment.set_task_goal config ~task_id ~goal_id:"goal-a" with
+         | Ok () -> ()
+         | Error e -> failf "a %s task should link: %s" label (err_to_string e)))
+    open_statuses
+;;
+
+let contains ~affix s =
+  let n = String.length affix
+  and h = String.length s in
+  let rec scan i = i + n <= h && (String.equal (String.sub s i n) affix || scan (i + 1)) in
+  scan 0
+;;
+
+(* What a keeper sees: the tool answers a workflow rejection that names the
+   task and why, and nothing is linked. *)
+let test_set_goal_tool_rejects_a_finished_task () =
+  with_test_env (fun config ->
+    make_goal config ~id:"goal-a";
+    let task_id = make_unassigned_task config ~title:"t" in
+    set_task_status
+      config
+      ~task_id
+      (Done { assignee = "claude"; completed_at = "2026-09-01T00:00:00Z"; notes = None });
+    let ctx = { Task.Tool.config; agent_name = "claude"; sw = None } in
+    (match
+       Task.Tool.dispatch
+         ctx
+         ~name:"masc_task_set_goal"
+         ~args:(`Assoc [ "task_id", `String task_id; "goal_id", `String "goal-a" ])
+     with
+     | Some (Tool_result.Failed { class_ = Tool_result.Workflow_rejection; message; _ }) ->
+       check bool "the message names the task" true (contains ~affix:task_id message);
+       check bool "the message names the status" true (contains ~affix:"done" message)
+     | Some (Tool_result.Failed { class_; message; _ }) ->
+       failf
+         "expected Workflow_rejection, got %s: %s"
+         (Tool_result.tool_failure_class_to_string class_)
+         message
+     | Some (Tool_result.Completed _ | Tool_result.Deferred _) ->
+       fail "the tool linked a finished task"
+     | None -> fail "masc_task_set_goal was not dispatched");
+    check
+      bool
+      "no link was written"
+      false
+      (goal_has_task
+         (Workspace_goal_index.read_goal_task_links config)
+         ~goal_id:"goal-a"
+         ~task_id))
 ;;
 
 let test_assignment_reports_goal_link_write_failure () =
@@ -329,6 +476,19 @@ let () =
         ; test_case "unknown goal is rejected" `Quick test_unknown_goal
         ; test_case "goalless task links to goal" `Quick test_links_goalless_task
         ; test_case "reassignment is rejected" `Quick test_rejects_reassignment
+        ; test_case "a finished task is rejected" `Quick test_rejects_finished_task
+        ; test_case
+            "a finished task that has a link is refused as finished"
+            `Quick
+            test_finished_task_with_a_link_is_refused_as_finished
+        ; test_case
+            "an unfinished task links in every open status"
+            `Quick
+            test_links_an_unfinished_task_in_every_open_status
+        ; test_case
+            "the tool rejects a finished task with a workflow rejection"
+            `Quick
+            test_set_goal_tool_rejects_a_finished_task
         ; test_case
             "link write failure is reported"
             `Quick

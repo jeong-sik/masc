@@ -111,15 +111,15 @@ write_mcp_client_env() {
   log "wrote MCP client exports to $env_file"
 }
 
-# ---- health wait -------------------------------------------------------------
-wait_for_health() {
+# ---- readiness wait ----------------------------------------------------------
+wait_for_ready() {
   local port="$1" max="${2:-60}" waited=0
   while [ "$waited" -lt "$max" ]; do
-    if curl -fsS --max-time 2 "http://127.0.0.1:${port}/health" >/dev/null 2>&1; then
+    if curl -fsS --max-time 2 "http://127.0.0.1:${port}/health/ready" >/dev/null 2>&1; then
       return 0
     fi
     sleep 1; waited=$((waited + 1))
-    printf '%s   waiting for server health... (%ds/%ds)%s\r' "$c_dim" "$waited" "$max" "$c_off" >&2
+    printf '%s   waiting for server readiness... (%ds/%ds)%s\r' "$c_dim" "$waited" "$max" "$c_off" >&2
   done
   echo >&2
   return 1
@@ -189,12 +189,12 @@ run_quickstart() {
   disown "$SERVER_PID" 2>/dev/null || true
   log "server starting (pid $SERVER_PID, log: $MASC_LOG_FILE)"
 
-  if wait_for_health "$PORT" "${MASC_QUICKSTART_HEALTH_TIMEOUT:-180}"; then
+  if wait_for_ready "$PORT" "${MASC_QUICKSTART_HEALTH_TIMEOUT:-180}"; then
     write_mcp_client_env
     print_success
     open_browser
   else
-    warn "server did not report healthy in time; tail the log:"
+    warn "server did not become ready in time; tail the log:"
     warn "  tail -n 40 '$MASC_LOG_FILE'"
     exit 1
   fi

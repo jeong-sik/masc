@@ -5422,27 +5422,34 @@ let render_lanes_overview (state : state) =
   (* The standalone rows are drawn directly rather than through a row list
      because the selection band has to land on a lane row, not on the
      windowed/stale notes that follow them. *)
-  (* The row said "No Add-ons installed. Press A to inspect installed add-ons"
-     as a fixed string: it claimed a count it never read, named a second key
-     for the destination the heading above already names with [o], and
-     offered to inspect what it had just said was not there. Nothing on this
-     surface asks for Add-ons, so before the operator opens them the answer
-     is the one every other unread reading gives. *)
+  (* Declarations can remain when image inspection or reconciliation failed.
+     Their count is not the count of workers the operator can use. *)
   box_line_styled buf cols ~style:(Theme.recede ())
     ("  Lane Add-ons: "
     ^
     let view =
       Option.value ~default:state.lane_addons_cached state.lane_addons
     in
-    match Masc_tui_lane_addons.installed view with
+    match Masc_tui_lane_addons.installation_reading view with
     | Masc_tui_lane_addons.Not_read ->
         (* Behind "Lane Add-ons:", which is the label this pair of words
            would otherwise repeat in brackets. *)
         field_missing_reading
           ~error:view.Masc_tui_lane_addons.snapshot_read_error
-    | Masc_tui_lane_addons.Nothing_installed -> "none installed"
-    | Masc_tui_lane_addons.Installed count ->
-        Message_layout.count_noun count "installed");
+    | Masc_tui_lane_addons.Observed reading ->
+        let base =
+          Printf.sprintf "%d declared · %d active"
+            reading.declared reading.active in
+        let issues =
+          (if reading.configuration_issues = 0 then ""
+           else Printf.sprintf " · %d config issues" reading.configuration_issues)
+          ^ (if reading.failed_workers = 0 then ""
+             else Printf.sprintf " · %d failed workers" reading.failed_workers) in
+        (match reading.freshness with
+         | Masc_tui_lane_addons.Current -> ""
+         | Masc_tui_lane_addons.Stale _ -> "STALE · ")
+        ^ base ^ issues
+        ^ (if reading.complete then "" else " · inventory partial"));
   (match state.standalone_lanes with
    | Some snapshot ->
        let columns =

@@ -356,11 +356,6 @@ module For_testing : sig
     Agent_core.Types.content_block list -> string list
 
 
-  val messages_for_run_with_checkpoint :
-    checkpoint_messages:Agent_core.Types.message list ->
-    initial_messages:Agent_core.Types.message list ->
-    Agent_core.Types.message list
-
   val content_blocks_for_run :
     initial_messages:Agent_core.Types.message list ->
     goal_blocks:Agent_core.Types.content_block list ->

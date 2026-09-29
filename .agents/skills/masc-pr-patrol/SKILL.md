@@ -157,7 +157,8 @@ REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
 - 병합은 맡겨진 경우에만 한다. 경로는 비동기 병합 API 하나다. 검증한 head 에 고정한다.
 
   ```sh
-  gh api -X PUT "repos/$REPO/pulls/<N>/merge-async" -f merge_method=squash -f sha=<40자 sha>
+  bash scripts/review/merge-guard.sh --repo "$REPO" --pr <N> --head <40자 sha> \
+    --run <판정에 인용한 PR-check run id> --git-dir "$PWD"
   # 202 와 uuid 가 온다
   gh api "repos/$REPO/pulls/<N>/merge-async/<uuid>"
   ```
@@ -169,9 +170,10 @@ REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
   - `Stack needs to be rebased: ...` → 부모 브랜치를 자식 브랜치에 `git merge` 해 올리면 풀린다.
     force push 는 필요 없다. 아래 노드부터 한 칸씩 올린다.
 
-  merge-async 가 500·502·빈 본문을 연달아 주면, 같은 head 에 고정해 스택이 아닌 PR 은
-  `gh pr merge <N> --squash --match-head-commit <40자 sha>` 로 한 번 시도한다. 2026-09-13 에 이 길로
-  병합된 적이 있다. 짧은 sha 를 주면 `Head branch was modified` 로 거부된다.
+  guard 가 거절하거나 API 가 실패하면 원인을 확인한다. 직접 API·`gh pr merge` 우회는 하지 않는다.
+  guard 는 현재 reviews/comments, 체크, PR-check 생성 시각 이후 main 변경을 확인한다.
+  test/dune 의 단순 추가나 clean merge 도 freshness 면제가 아니다. `--check` 는 쓰기 없이 같은 검사를 한다.
+  서버 API 는 head 만 고정하므로 최종 읽기 직후 main 이 변하는 경합까지 원자적으로 막지는 못한다.
 - **병합 뒤 도착을 확인한다.** squash 는 커밋 신원을 지운다. `git cherry`·`git log`·메시지 검색은
   답을 틀린다. 내용으로 비교한다.
 

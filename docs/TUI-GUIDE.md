@@ -71,16 +71,25 @@ loaded. `Esc` returns. The directory starts empty;
 the [MSX cartridges runbook](operations/msx-carts-runbook.md) says what the
 machine accepts and where the images come from.
 
+## Shared DOS machine
+
+Open `:` then `go DOS` to watch the same live DOS screen an invited player
+sees at `/play`. The TUI view is a spectator: `Esc` returns and `+`/`-`
+resize it; game input and turn changes go through the server's controller.
+
 ## Shared DOS play invites
 
 Select a Keeper chat to use the TUI composer. `/play invites` lists invites, `/play invite <name>
 <hours>` issues one, `/play link` reopens the last link issued in this TUI
-session, and `/play revoke <name>` removes it. Issuance requires
+session, `/play qr` shows that link as a scannable terminal QR, and
+`/play revoke <name>` removes it. Issuance requires
 an admin operator credential, token-required authentication and
 `MASC_HTTP_BASE_URL`. The one-time link appears in a local TUI reply (it is
 not sent to the Keeper) and
 is sent through OSC 52 for copying; terminal clipboard support varies. The
 TUI keeps the last link only until it exits or that invite is revoked.
+The QR stays in this TUI process; if the chat pane is too small to display it
+without wrapping, the command asks for a wider or taller terminal.
 If the issue request has no trustworthy answer, inspect the invite list and
 revoke that name before retrying because the original link cannot be recovered.
 If revocation reports a controller release failure or an unknown outcome,
@@ -88,8 +97,8 @@ repeat `/play revoke <name>`: a second request can release a controller even
 after the invite credential was deleted.
 
 The invited person opens the link in a browser to watch and play the shared
-DOS machine. The TUI's existing `go MSX` menu also has `watch DOS machine`
-when a DOS machine is loaded; that view only watches the screen.
+DOS machine. The TUI can also watch through `go DOS` or the `go MSX` menu's
+`watch DOS machine` entry when a DOS machine is loaded.
 
 ## Options
 
@@ -570,6 +579,10 @@ The [Glossary](spec/00-glossary.md#core) uses Lane for the fixed exact-output ex
 For TOML package installations, open `/addons` from the composer or choose
 `go Lane Add-ons` in the palette. The [Lane Add-on guide](guides/tui-lane-addons.md)
 covers configuration editing, connections, Skills, actions and cross-Lane evidence.
+These are three different customization surfaces: Config → Runtime edits named
+Keeper candidate orders; the six exact-output work purposes on this screen are
+fixed, although their runtime slots can be edited; Lane Add-ons load custom
+TOML packages and require a working image before a worker is active.
 
 Standalone execution lanes only. Keeper lifecycle and turn-cycle facts live on
 Keepers, so this surface no longer repeats a second Keeper table. It hangs
@@ -601,8 +614,9 @@ the reading. This is a registry view, not a socket list - a leftover
 process holding a connection is still an `lsof` question.
 
 ```
- MASC Lanes · Standalone (4 lanes)  17:02:53  [connected]
-  Standalone LLM lanes · o:Lane Add-ons · a:append slot · observed 17:02:52
+ MASC Lanes (6 lanes)  17:02:53  [connected]
+  Lanes · observed 17:02:52
+  Lane Add-ons: 2 declared · 0 active · 2 config issues
     LANE       STATUS          ACTIVE  RUNS  OK/FAIL/CANCEL  P50     SLOTS            OBSERVED
  >◒ Librarian  running 12s          1    50  47/2/1          8.0s    librarian-exact  librarian-exact×50
 ```
@@ -616,11 +630,14 @@ a long name moves every row's columns together rather than one row's. The
 counts come before the slots because they are what a reader compares down
 the column; beside the Activity pane the slot column is the one cut, and the
 block under the list prints the selected lane's slots in full. This build
-projects four fixed consumers:
+projects six fixed consumers:
 `Board Attention` judges one durable Board attention candidate, `HITL Auto
 Judge` judges one held approval, `Librarian` selects the next Memory OS
 snapshot from immutable Keeper history, and `Verifier` reviews Task completion
-and Goal proof evidence.
+and Goal proof evidence. `Workspace Curator` classifies changed Keeper facts,
+and `Browser Stagehand` handles model-driven browser operations. The Add-on
+summary counts declared TOML files separately from active workers; a saved
+file can remain unapplied when its package image is unavailable.
 
 The selected row expands underneath the matrix instead of forcing its long
 identifiers through the clipped comparison row. It names the exact
@@ -1125,6 +1142,15 @@ provider accepted anything. `DIGEST ONLY` means a producer prompt-block digest
 is retained without same-turn exact text. `BYTES ONLY` means only the component
 byte count is available. The inspector never joins independent readings by
 label, position, or similar-looking content.
+
+#### Reading chat loading errors
+
+If saved history, older messages, or the memory journal cannot be loaded, a
+short warning above the input points to `/errors`. Run it in the open Keeper
+chat to put the current full details in the local conversation log, where
+lines wrap and you can scroll back through them. Hidden memory-journal errors
+are included. This reads the recorded failures without sending a message or
+retrying a request; no recorded error does not imply loading has finished.
 
 #### Copying a reply
 

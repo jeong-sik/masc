@@ -148,6 +148,26 @@ status: reference
   → [Runtime_quota_window](../../lib/runtime/runtime_quota_window.ml),
   [Masc_tui_overview_providers](../../bin/masc_tui_overview_providers.ml)
 
+**Runtime Rate Limit (런타임 속도 제한 관측)**
+: 한 런타임 후보가 받은 429 또는 제공자 속도 제한을 그 후보의 프로세스 로컬 셀에
+  기록한 증거. 계정 단위의 **닫힌 quota 창**과 구분한다. 같은 자격 증명을 쓰는 다른
+  후보까지 소진으로 표시하지 않고 해당 후보만 순서 뒤로 보낸다. 유효한 `Retry-After`
+  기한이 지나거나 그 후보가 성공하면 해제되며, 기한이 없으면 성공 전까지 남는다.
+  런타임 카탈로그는 이를 `rate_limited`·`rate_limit_resets_at`으로 따로 싣고, TUI는
+  quota와 속도 제한 상태를 구분해 표시한다(#39815).
+  → [Runtime_candidate_backpressure](../../lib/runtime/runtime_candidate_backpressure.mli) ·
+  [runtime resolved projection](../../lib/server/server_dashboard_runtime_resolved_json.mli)
+
+**Provider Admission (제공자 동시 요청 진입)**
+: 소비자가 `max_concurrent_requests`를 선언한 제공자 계정의 동시 완료 요청 수를
+  제한하는 Agent Core의 진입 절차. 같은 `kind`·`base_url`·API 키 식별자를 쓰는
+  Keeper turn과 Exact-output route의 발송이 프로세스 전체에서 허용량을 공유한다.
+  자리가 차면 FIFO 순서로 허가를 기다리고, 선언이 없으면 이 절차를 적용하지 않는다.
+  기다림은 제공자가 보낸 429 관측인 Runtime Rate Limit이나 후보 실패 분류의
+  `Binding Admission`과 다른 단계다.
+  → [Provider_admission](../../packages/agent_core/lib/llm_provider/provider_admission.mli) ·
+  [Provider_config](../../packages/agent_core/lib/llm_provider/provider_config.mli)
+
 **Server Push (서버가 밀어 보내는 사건)**
 : 서버가 클라이언트로 밀어 보내는 사건으로, Keeper가 한 일이 아니라 서버가 보고하는
   상태 변화. Activity 화면은 이런 사건을 `everything` scope 아래 조용한 회색 행으로
@@ -1000,14 +1020,27 @@ status: reference
   → [Dos_lane](../../lib/dos_lane/dos_lane.mli)
 
 **조종권 (Controller)**
-: DOS Lane 기계의 시간을 움직일 수 있는 한 사람. 핫시트 게임에서 여러 Keeper
-  가 한 키보드를 번갈아 쓰기 때문에 있다. 쥔 사람만 load·eject·step·press·click·
-  type 을 하고, 다른 사람은 거절되지만 화면은 볼 수 있다. `masc_dos_pass` 로
-  넘기면 보드 글이 다음 사람을 @멘션해 깨운다. 쥔 Keeper 가 일시정지되거나 정지하면
-  다음 Keeper 가 움직일 때 풀린다. 충돌 뒤 자동 재시작을 기다리거나 막 켜지는 중인
-  Keeper 는 그대로 쥔다. 이름은 부르는 쪽이 스스로 대는 값이라
-  권한 검사가 아니라 차례를 정하는 장치다.
-  → [Dos_lane.pass](../../lib/dos_lane/dos_lane.mli)
+: DOS Lane 기계의 시간을 움직일 수 있는 한 참가자의 차례. 참가자는 Keeper,
+  운영자(`Admin`), 유효한 공유 DOS 플레이 초대(`Player`)의 이름으로 구분된다.
+  쥔 참가자만 기계의 시간을 움직인다. 다른 참가자의 시간 이동 요청은 거절되지만
+  화면은 볼 수 있다.
+  `masc_dos_pass`로 Keeper에게 넘기면 보드 글이 그 Keeper를 @멘션해 깨운다.
+  쥔 Keeper가 일시정지되거나 정지하면 다음 움직임 전에 풀리고, 만료된 `Player`
+  초대의 조종권도 풀린다. 충돌 뒤 자동 재시작을 기다리거나 막 켜지는 중인 Keeper는
+  그대로 쥔다. 조종권의 이름은 차례 기록이며 권한 증명이 아니다. `Player` 권한은
+  별도 자격증명으로 검사한다.
+  → [Dos_lane.pass](../../lib/dos_lane/dos_lane.mli) ·
+  [Play_seat.participants](../../lib/play/play_seat.mli) ·
+  [Keeper_dos_controller.holder_left](../../lib/keeper/keeper_dos_controller.mli)
+
+**Shared DOS Play Invite (공유 DOS 플레이 초대)**
+: 운영자가 이름과 만료 시각을 붙여 발급하는 `Player` 자격증명. 링크를 받은 사람은
+  공유 DOS 기계를 보고 조작한다. 초대 이름은 입력과
+  조종권의 `who`로 기록되며 Keeper 이름과 겹칠 수 없다. 회수는 자격증명을 지우고
+  그 이름이 쥔 조종권의 해제를 시도한다. 해제에 실패하거나 결과가 불명확하면 같은
+  이름으로 다시 회수할 수 있다.
+  → [Play_invite](../../lib/play/play_invite.mli) ·
+  [TUI play invites](../TUI-GUIDE.md)
 
 **기계 체크포인트 (Machine Checkpoint)**
 : 공유 기계 하나를 통째로 이름 붙여 디스크에 남긴 파일. CPU·메모리·화면·열린 파일과

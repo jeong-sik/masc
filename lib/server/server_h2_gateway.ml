@@ -184,7 +184,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
       | None -> [ "vary", "Origin" ]
     in
     (* [with_server_state] (#9793): HTTP-layer wrapper around
-       [get_server_state_result]. Returns a controlled 500 JSON error when
+       [get_server_state_result]. Returns a controlled 503 JSON response when
        server state is not initialized, instead of crashing the request
        fiber. Mirrors the pattern [handle_post_graphql] already uses. *)
     let with_server_state h2_reqd f =
@@ -193,7 +193,8 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
       | Error message ->
           h2_respond_json h2_reqd
             (server_state_error_json message)
-            ~status:`Internal_server_error ~extra_headers:cors
+            ~status:(not_initialized_status :> H2.Status.t)
+            ~extra_headers:(not_initialized_headers @ cors)
     in
     let h2_respond_auth_error h2_reqd err =
       let status, body =
@@ -310,12 +311,13 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
     in
     let with_h2_public_read h2_reqd f =
       let with_initialized_state f =
-        match get_server_state_result () with
-        | Ok state -> f state
-        | Error _message ->
+        match ready_server_state () with
+        | Some state -> f state
+        | None ->
             h2_respond_json h2_reqd
               (not_initialized_response path)
-              ~extra_headers:cors
+              ~status:(not_initialized_status :> H2.Status.t)
+              ~extra_headers:(not_initialized_headers @ cors)
       in
       if http_auth_strict_enabled () && not (is_public_read_path path)
       then
@@ -462,7 +464,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
       | `GET, p when String.equal p Server_health_paths.readiness ->
           let current = Server_startup_state.snapshot () in
           let json, status =
-            if current.state_ready then
+            if Option.is_some (ready_server_state ()) then
               (`Assoc [
                  ("ready", `Bool true);
                  ("phase", `String (Server_startup_state.phase_to_string current.phase));
@@ -917,10 +919,10 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
          Dashboard
          ───────────────────────────────────────────────────────────────────── *)
       | `GET, "/dashboard" | `GET, "/dashboard/" ->
-          h2_respond_dashboard_index ()
+          with_h2_public_read h2_reqd (fun _state -> h2_respond_dashboard_index ())
 
       | `GET, p when is_dashboard_spa_deep_link p ->
-          h2_respond_dashboard_index ()
+          with_h2_public_read h2_reqd (fun _state -> h2_respond_dashboard_index ())
 
       (* ─────────────────────────────────────────────────────────────────────
          GraphQL

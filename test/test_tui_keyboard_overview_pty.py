@@ -201,15 +201,16 @@ def opening_boot_frames(executable: str) -> None:
             # Home actions exist while the initial Keeper read is still in
             # flight. A fallback must wait for that read's actual reason,
             # not the earlier loading frame that already says Continue.
-            needle = expected if chat or mode in ("last", "keeper") else b"Continue"
-            keyboard.wait_for_output(
-                process, fd, output, needle, start=0, timeout=10
-            )
+            needles = (expected,) if chat or mode in ("last", "keeper") else (b"Continue",)
+            for needle in needles:
+                keyboard.wait_for_output(
+                    process, fd, output, needle, start=0, timeout=10
+                )
             # The needle can arrive before the rest of its frame, and that
             # frame rewrites only the rows that changed: the title can sit in
             # an earlier one. So wait for the frame's end and replay every row
             # painted up to it (screen_text starts at the last full redraw).
-            needle_end = keyboard.end_of_needle(output, needle, 0)
+            needle_end = max(keyboard.end_of_needle(output, needle, 0) for needle in needles)
             keyboard.wait_for_output(
                 process, fd, output, keyboard.FRAME_END, start=needle_end, timeout=3.0
             )

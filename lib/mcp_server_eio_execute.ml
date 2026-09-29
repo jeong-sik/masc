@@ -427,15 +427,33 @@ let execute_tool_eio
                        ~args:coerced_args
                    in
                    (* Identity, profile membership and tool authorization have
-                      passed above. Match the Keeper/HTTP move boundary here:
-                      a stopped Keeper cannot pass its controller itself. *)
+                      passed above. The gate a Keeper's call and the play
+                      page's routes run comes next. *)
                    (match Tool_schemas_misc.misc_operation_of_tool_name name with
-                    | Some Tool_schemas_misc.(
-                        ( Misc_dos_load | Misc_dos_eject | Misc_dos_step | Misc_dos_pass
-                        | Misc_dos_press | Misc_dos_click | Misc_dos_type | Misc_dos_restore )) ->
-                      Keeper_dos_controller.before_move ~config ~who:agent_name;
-                      dispatch ()
-                    | _ -> dispatch ())
+                    (* Keeper-only, like spawn and code_query above: the
+                       portrait is the Keeper's own, drawn from its name, and
+                       this endpoint has no Keeper turn to name. The name is
+                       registered and this endpoint cannot run it, so it says
+                       that rather than answering "Unknown tool". *)
+                    | Some Tool_schemas_misc.Misc_portrait_read ->
+                      Some
+                        (Tool_result.error
+                           ~failure_class:Tool_result.Workflow_rejection
+                           ~tool_name:name
+                           ~start_time
+                           (Printf.sprintf
+                              "tool '%s' is keeper-internal; not available on this MCP endpoint \
+                               (a Keeper's portrait is drawn from its own name, which this \
+                               endpoint does not have)"
+                              name))
+                    | Some _ | None ->
+                      (match
+                         Keeper_dos_controller.before_call ~config ~who:agent_name ~name
+                           ~args:coerced_args
+                       with
+                       | Ok () -> dispatch ()
+                       | Error refusal ->
+                         Some (Keeper_dos_controller.refusal_result ~tool_name:name refusal)))
                  | Mod_library ->
                    Tool_library.dispatch
                      { Tool_library.base_path = config.base_path; agent_name }

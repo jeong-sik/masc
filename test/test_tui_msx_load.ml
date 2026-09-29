@@ -62,8 +62,8 @@ let test_empty_frame () =
   let out = captured (fun write ->
         Masc_tui_msx.render ~write ~connection:Masc_tui_types.Connected
         ~live:Masc_tui_machine_live.Unread None None) in
-  check bool "an empty frame says no machine is loaded" true
-    (contains out "no machine loaded");
+  check bool "an unread frame says the screen is pending" true
+    (contains out "waiting for live screen");
   check bool "and writes something" true (String.length out > 0)
 
 let test_real_frame () =
@@ -86,6 +86,33 @@ let test_spectator_close () =
   check bool "esc closes and returns false" false
     (Masc_tui_msx.consume ~write state "esc");
   check bool "the flag is cleared" false state.msx_open
+
+(* A disk game answers each numbered prompt with a number and Return, so Return
+   and Backspace have to reach the machine alongside the digits, whichever way
+   the terminal spells them; every name sent is one the MSX lane accepts. *)
+let test_game_keys () =
+  let sent input =
+    match Masc_tui_msx.server_key input with
+    | None -> None
+    | Some name ->
+        (match Msx_lane.key_of_string name with
+         | Ok _ -> ()
+         | Error message -> fail (Printf.sprintf "%S -> %S: %s" input name message));
+        Some name
+  in
+  let expect input want = check (option string) (Printf.sprintf "%S" input) want (sent input) in
+  expect "\r" (Some "return");
+  expect "enter" (Some "return");
+  expect "\127" (Some "backspace");
+  expect "\b" (Some "backspace");
+  expect "backspace" (Some "backspace");
+  expect " " (Some "space");
+  expect "up" (Some "up");
+  expect "7" (Some "7");
+  expect "y" (Some "y");
+  expect "" None;
+  expect "\t" None;
+  expect "f9" None
 
 (* --- The load menu ---------------------------------------------------- *)
 
@@ -276,6 +303,10 @@ let test_dos_render () =
   check bool "its footer offers no MSX keys" false (contains shown "F6");
   let empty = draw Masc_tui_machine_live.Not_loaded in
   check bool "no machine says so" true (contains empty "DOS \xe2\x80\x94 no machine loaded");
+  let unread = draw Masc_tui_machine_live.Unread in
+  check bool "before the read, machine absence is not asserted" true
+    (contains unread "waiting for live screen"
+     && not (contains unread "no machine loaded"));
   check bool "and names the DOS load tool" true (contains empty "masc_dos_load");
   let failed = draw (Masc_tui_machine_live.Failed "HTTP 401: denied") in
   check bool "a failed read is shown as its error" true
@@ -302,6 +333,7 @@ let () =
       , [ test_case "empty frame" `Quick test_empty_frame
         ; test_case "real frame" `Quick test_real_frame
         ; test_case "close on esc" `Quick test_spectator_close
+        ; test_case "game keys the machine receives" `Quick test_game_keys
         ] )
     ; ( "load menu"
       , [ test_case "disk replacement menu" `Quick test_change_disk_menu

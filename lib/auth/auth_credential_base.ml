@@ -349,6 +349,8 @@ let credential_cache_invalidator_ref
   ref (fun (_ : string) -> ())
 ;;
 
+type credential_transaction = Credential_transaction of string
+
 let with_credential_transaction config f =
   let lock_path =
     try
@@ -367,7 +369,8 @@ let with_credential_transaction config f =
   match lock_path with
   | Error _ as error -> error
   | Ok lock_path ->
-    match File_lock_eio.with_durable_lock_observed ~lock_path f with
+    match File_lock_eio.with_durable_lock_observed ~lock_path
+        (fun () -> f (Credential_transaction config)) with
     | File_lock_eio.Lock_not_acquired error ->
       Error (System (System_error.IoError (File_lock_eio.durable_lock_error_to_string error)))
     | File_lock_eio.Body_completed { value; release_error } ->
@@ -385,7 +388,7 @@ let with_credential_transaction config f =
     [{uuid}.json] and a redirect stub [{agent_name}.json] is written so
     legacy lookup paths still resolve. *)
 let save_credential config (cred : agent_credential) =
-  let saved = with_credential_transaction config (fun () ->
+  let saved = with_credential_transaction config (fun _transaction ->
   let json = agent_credential_to_yojson cred in
   let json_str = Yojson.Safe.pretty_to_string json in
   let stub_file = credential_file config cred.agent_name in
@@ -437,7 +440,7 @@ let save_credential config (cred : agent_credential) =
     require both sides to share the same UUID file. *)
 let ensure_credential_alias config ~canonical_name ~alias_name : (unit, masc_error) result
   =
-  let result = with_credential_transaction config (fun () ->
+  let result = with_credential_transaction config (fun _transaction ->
   if String.equal canonical_name alias_name
   then Ok ()
   else (
@@ -507,23 +510,38 @@ let persist_raw_token config ~agent_name raw_token =
   save_private_text_file (raw_token_file config agent_name) raw_token
 ;;
 
+(** Delete using the caller's admitted workspace. The public wrapper and
+    multi-effect transactions share this implementation. *)
+let delete_credential_in_transaction (Credential_transaction config) agent_name =
+  try
+    Fun.protect ~finally:(fun () -> !credential_cache_invalidator_ref config)
+      (fun () ->
+        let file = credential_file config agent_name in
+        let raw_token = raw_token_file config agent_name in
+        let redirect_target = load_redirect_target config file in
+        let credential_target =
+          match load_credential config agent_name with
+          | Some { id = Some cid; _ } -> Some (credential_uuid_file config cid)
+          | _ -> None
+        in
+        remove_file_if_exists file;
+        remove_file_if_exists raw_token;
+        Option.iter remove_file_if_exists redirect_target;
+        Option.iter remove_file_if_exists credential_target;
+        Ok ())
+  with
+  | Sys_error detail -> Error (System (System_error.IoError detail))
+  | Unix.Unix_error (error, operation, argument) ->
+    Error (System (System_error.IoError
+      (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error))))
+  | Eio.Io _ as exn -> Error (System (System_error.IoError (Printexc.to_string exn)))
+;;
+
 (** Delete agent credential *)
 let delete_credential config agent_name =
-  let deleted = with_credential_transaction config (fun () ->
-  let file = credential_file config agent_name in
-  let raw_token = raw_token_file config agent_name in
-  let redirect_target = load_redirect_target config file in
-  let credential_target =
-    match load_credential config agent_name with
-    | Some { id = Some cid; _ } -> Some (credential_uuid_file config cid)
-    | _ -> None
-  in
-  remove_file_if_exists file;
-  remove_file_if_exists raw_token;
-  Option.iter remove_file_if_exists redirect_target;
-  Option.iter remove_file_if_exists credential_target;
-  !credential_cache_invalidator_ref config) in
-  match deleted with
+  let deleted = with_credential_transaction config (fun transaction ->
+    delete_credential_in_transaction transaction agent_name) in
+  match Result.join deleted with
   | Ok () -> ()
   | Error error -> raise (Sys_error (masc_error_to_string error))
 ;;
@@ -672,7 +690,7 @@ let credential_token_index config
     Auth_metric_store.inc_counter
       Auth_metric_store.metric_auth_credential_index_cache_misses
       ();
-    with_credential_transaction config (fun () ->
+    with_credential_transaction config (fun _transaction ->
        let creds = list_credentials config in
        let by_token = build_token_index creds in
        with_credential_index_cache_lock (fun () ->

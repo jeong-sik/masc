@@ -138,7 +138,7 @@ let test_cold_index_cannot_restore_credentials_after_renewal () =
 
 let test_cancelled_delete_leaves_credential_and_releases_admission () =
   with_machine @@ fun config _ _ ->
-  let cancelled = auth_ok (Auth.with_credential_transaction config.base_path (fun () ->
+  let cancelled = auth_ok (Auth.with_credential_transaction config.base_path (fun _transaction ->
     Eio.Fiber.first
       (fun () -> Auth.delete_credential config.base_path "player"; false)
       (fun () ->
@@ -156,6 +156,129 @@ let test_cancelled_delete_leaves_credential_and_releases_admission () =
   recovered (recover config);
   check (option string) "a completed deletion still frees an absent holder" None (controller ())
 
+let revoke config =
+  Server_routes_http_routes_play.For_testing.revoke_response
+    ~config ~by:"operator" ~raw_name:"player"
+
+let check_status expected (actual, body) =
+  if actual <> expected then failf "unexpected HTTP result: %s" (Yojson.Safe.to_string body)
+
+let renew_as_admin config = auth_ok
+    (Auth.create_token_expiring_in config.Workspace.base_path
+       ~agent_name:"player" ~role:Masc_domain.Admin ~hours:1)
+
+let test_renewal_before_revoke_preserves_current_role () =
+  List.iter (fun initially_present ->
+    with_machine @@ fun config _ _ ->
+    if not initially_present then Auth.delete_credential config.base_path "player";
+    let (new_token, _), response = interleave config
+        (fun () -> renew_as_admin config) (fun () -> revoke config) in
+    check_status `Conflict response;
+    check string "the newly published Admin bearer survives the older revoke" "admin"
+      (Masc_domain.agent_role_to_string
+         (auth_ok (Auth.find_static_credential_by_token config.base_path ~token:new_token)).role);
+    check (option string) "neither an earlier Player nor absence read releases the renewed holder"
+      (Some "player") (controller ())) [ true; false ]
+
+let test_revoke_before_renewal_finishes_its_controller_effect () =
+  List.iter (fun initially_present ->
+    with_machine @@ fun config _ _ ->
+    if not initially_present then Auth.delete_credential config.base_path "player";
+    let response, (new_token, _) = interleave config
+        (fun () -> revoke config)
+        (fun () ->
+          let renewed = renew_as_admin config in
+          ignore (dos_ok (Dos_lane.step ~who:"player" ~steps:1 ~until_ready:false));
+          renewed) in
+    check_status `OK response;
+    let body = snd response in
+    check bool "the response distinguishes deletion from orphan recovery" initially_present
+      Yojson.Safe.Util.(member "revoked" body |> to_bool);
+    check bool "the old controller was released inside the revoke" true
+      Yojson.Safe.Util.(member "released_controller" body |> to_bool);
+    ignore (auth_ok (Auth.find_static_credential_by_token config.base_path ~token:new_token));
+    check (option string) "the old revoke cannot release the later renewed turn"
+      (Some "player") (controller ())) [ true; false ]
+
+let test_revoke_preserves_a_credentialless_keeper () =
+  with_machine @@ fun config _ _ ->
+  Auth.delete_credential config.base_path "player";
+  let meta = match Masc_test_deps.meta_of_json_fixture
+      (`Assoc [ "name", `String "player"; "trace_id", `String "keeper-turn" ]) with
+    | Ok meta -> meta
+    | Error detail -> fail detail in
+  (match Keeper_meta_store.replace_snapshot config meta with
+   | Ok () -> ()
+   | Error detail -> fail detail);
+  check_status `Not_found (revoke config);
+  check (option string) "a Keeper without a personal credential still owns its turn"
+    (Some "player") (controller ())
+
+let purge config =
+  Server_dashboard_http_delete_actions.For_testing.purge_agent_artifacts config [ "player" ]
+
+let purged = function Ok () -> () | Error detail -> fail detail
+
+let uuid_path config (credential : Masc_domain.agent_credential) =
+  match credential.id with
+  | None -> fail "the purge fixture must be UUID-backed"
+  | Some id -> Auth.credential_file config.Workspace.base_path (Masc_domain.Credential_id.to_string id)
+
+let fresh_uuid_credential (old : Masc_domain.agent_credential) =
+  let raw = Auth.generate_token () in
+  raw, { old with id = Some (Masc_domain.Credential_id.generate ()); token = Auth.sha256_hash raw }
+
+let test_purge_before_renewal_keeps_the_complete_new_credential () =
+  with_machine @@ fun config _ _ ->
+  let old_token, old = auth_ok (Auth.ensure_keeper_credential config.base_path ~agent_name:"player") in
+  ignore (auth_ok (Auth.find_static_credential_by_token config.base_path ~token:old_token));
+  let new_token, fresh = fresh_uuid_credential old in
+  let cleanup, () = interleave config (fun () -> purge config)
+      (fun () -> Auth.save_credential config.base_path fresh) in
+  purged cleanup;
+  check bool "the prior UUID is retired" false (Sys.file_exists (uuid_path config old));
+  check bool "the renewed UUID survives" true (Sys.file_exists (uuid_path config fresh));
+  check (option string) "the renewed alias points at the same bearer"
+    (Some fresh.token)
+    (Option.map (fun (c : Masc_domain.agent_credential) -> c.token)
+       (Auth.load_credential config.base_path "player"));
+  check (list string) "listing sees one complete renewed identity" [ fresh.token ]
+    (List.map (fun (c : Masc_domain.agent_credential) -> c.token) (Auth.list_credentials config.base_path));
+  check string "the renewed bearer is usable through the normal lookup" "player"
+    (auth_ok (Auth.find_static_credential_by_token config.base_path ~token:new_token)).agent_name;
+  check bool "the old cached bearer is retired" true
+    (Result.is_error (Auth.find_static_credential_by_token config.base_path ~token:old_token))
+
+let test_renewal_before_purge_removes_the_complete_current_credential () =
+  with_machine @@ fun config _ _ ->
+  let _, old = auth_ok (Auth.ensure_keeper_credential config.base_path ~agent_name:"player") in
+  let new_token, fresh = fresh_uuid_credential old in
+  let (), cleanup = interleave config
+      (fun () -> Auth.save_credential config.base_path fresh) (fun () -> purge config) in
+  purged cleanup;
+  check bool "the alias is absent" false
+    (Sys.file_exists (Auth.credential_file config.base_path "player"));
+  List.iter (fun credential -> check bool "no UUID is orphaned" false
+      (Sys.file_exists (uuid_path config credential))) [ old; fresh ];
+  check bool "the raw-token sidecar is removed" false
+    (Sys.file_exists (Auth.raw_token_file config.base_path "player"));
+  check int "the complete store is empty" 0 (List.length (Auth.list_credentials config.base_path));
+  check bool "the deleted renewal cannot authenticate" true
+    (Result.is_error (Auth.find_static_credential_by_token config.base_path ~token:new_token))
+
+let test_purge_revalidates_an_alias_after_admission () =
+  with_machine @@ fun config _ _ ->
+  let other_token, other = auth_ok
+      (Auth.ensure_keeper_credential config.base_path ~agent_name:"other") in
+  let alias_changed, cleanup = interleave config
+      (fun () -> Auth.ensure_credential_alias config.base_path ~canonical_name:"other" ~alias_name:"player")
+      (fun () -> purge config) in
+  auth_ok alias_changed;
+  check bool "the stale preflight cannot authorize another owner's deletion" true (Result.is_error cleanup);
+  check bool "the unrelated owner's UUID remains" true (Sys.file_exists (uuid_path config other));
+  check string "the unrelated bearer remains usable" "other"
+    (auth_ok (Auth.find_static_credential_by_token config.base_path ~token:other_token)).agent_name
+
 let test_failed_admission_moves_nothing () =
   with_machine @@ fun config _ _ ->
   let path = lock_path config.base_path in
@@ -170,6 +293,9 @@ let test_failed_admission_moves_nothing () =
       ~saves_name:"spin.com" ~keys:[ "x" ] in
   check bool "the pad route refuses an unavailable credential transaction" true
     (status = `Service_unavailable);
+  check_status `Service_unavailable (revoke config);
+  check bool "a refused revoke retains the credential" true
+    (Option.is_some (Auth.load_credential config.base_path "player"));
   check (option string) "the refused pad call cannot release ownership" (Some "player") (controller ())
 
 let () =
@@ -179,4 +305,10 @@ let () =
       ; test_case "recovery before renewal has one order" `Quick test_recovery_before_renewal_has_one_order
       ; test_case "cold index publication cannot undo renewal" `Quick test_cold_index_cannot_restore_credentials_after_renewal
       ; test_case "a cancelled delete releases admission" `Quick test_cancelled_delete_leaves_credential_and_releases_admission
+      ; test_case "renewal before revoke preserves the current role" `Quick test_renewal_before_revoke_preserves_current_role
+      ; test_case "revoke finishes before a renewed turn" `Quick test_revoke_before_renewal_finishes_its_controller_effect
+      ; test_case "revoke preserves a credentialless Keeper" `Quick test_revoke_preserves_a_credentialless_keeper
+      ; test_case "purge before renewal keeps alias and UUID together" `Quick test_purge_before_renewal_keeps_the_complete_new_credential
+      ; test_case "renewal before purge leaves no orphan" `Quick test_renewal_before_purge_removes_the_complete_current_credential
+      ; test_case "purge revalidates the current alias owner" `Quick test_purge_revalidates_an_alias_after_admission
       ; test_case "failed admission moves nothing" `Quick test_failed_admission_moves_nothing ] ]

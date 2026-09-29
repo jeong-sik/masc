@@ -446,19 +446,14 @@ let after_announcing result =
    first: a request the invitee sent before that and that reaches the lane
    after this can still take the freed controller. Where every request needs
    a credential, the next move by anyone else lets it go again
-   ([No_credential]). *)
+   ([No_credential]). The caller holds the Auth transaction until this release
+   completes, and flushes the Board announcement after leaving it. *)
 let release_revoked_invite ~holder ~by =
-  let released =
-    off_domain (fun () ->
-      Dos_lane.release_left ~holder
-        ~announce:
-          (announce ~author:by
-             (Printf.sprintf "%s 님의 초대가 회수되어 DOS 조종권이 풀렸어요" holder)))
-  in
-  (match released with
-   | Ok true -> flush_announcements ()
-   | Ok false | Error _ -> ());
-  released
+  off_domain (fun () ->
+    Dos_lane.release_left ~holder
+      ~announce:
+        (announce ~author:by
+           (Printf.sprintf "%s 님의 초대가 회수되어 DOS 조종권이 풀렸어요" holder)))
 ;;
 
 type holder_departure =

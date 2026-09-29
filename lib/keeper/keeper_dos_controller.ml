@@ -69,7 +69,7 @@ let holder_left ~(config : Workspace.config) ~now holder =
 ;;
 
 let before_move ~config ~who =
-  let released = Auth.with_credential_transaction config.Workspace.base_path (fun () ->
+  let released = Auth.with_credential_transaction config.Workspace.base_path (fun _transaction ->
     (* The credential is read without the token cache, under the same lock as
        all credential writers. Keep that lock until release_left commits. *)
     let now = Time_compat.now () in

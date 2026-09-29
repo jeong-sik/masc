@@ -220,27 +220,17 @@ let agent_purge_cleanup_result_to_json
     ]
 ;;
 
-type credential_plan =
-  { aliases : string list
-  ; credential_paths : string list
-  }
-;;
-
-let credential_plan config aliases =
+let validate_credentials config aliases =
   let owner_matches (credential : Masc_domain.agent_credential) =
     List.exists (String.equal credential.agent_name) aliases
   in
-  let rec collect credential_paths = function
-    | [] ->
-      Ok
-        { aliases
-        ; credential_paths = List.sort_uniq String.compare credential_paths
-        }
+  let rec validate = function
+    | [] -> Ok ()
     | alias :: rest ->
       let alias_path = Auth.credential_file config.Workspace.base_path alias in
       (match lstat_path alias_path with
        | Error _ as error -> error
-       | Ok None -> collect credential_paths rest
+       | Ok None -> validate rest
        | Ok (Some _) ->
          let loaded =
            try Ok (Auth.load_credential config.base_path alias) with
@@ -256,17 +246,7 @@ let credential_plan config aliases =
                  alias
                  alias_path)
           | Ok (Some credential) when owner_matches credential ->
-            let credential_paths =
-              match credential.id with
-              | None -> alias_path :: credential_paths
-              | Some credential_id ->
-                Auth.credential_file
-                  config.base_path
-                  (Masc_domain.Credential_id.to_string credential_id)
-                :: alias_path
-                :: credential_paths
-            in
-            collect credential_paths rest
+            validate rest
           | Ok (Some credential) ->
             Error
               (Printf.sprintf
@@ -275,30 +255,27 @@ let credential_plan config aliases =
                  credential.agent_name
                  alias_path)))
   in
-  collect [] aliases
+  validate aliases
 ;;
 
-let delete_credentials config ({ aliases; credential_paths } : credential_plan) =
-  let rec delete_aliases = function
-    | [] ->
-      (match Auth.with_credential_transaction config.Workspace.base_path
-          (fun () -> remove_paths_strict credential_paths) with
-       | Ok result -> result
-       | Error error -> Error (Masc_domain.masc_error_to_string error))
-    | alias :: rest ->
-      (try
-         Auth.delete_credential config.Workspace.base_path alias;
-         delete_aliases rest
-       with
-       | Eio.Cancel.Cancelled _ as exn -> raise exn
-       | exn ->
-         Error
-           (Printf.sprintf
-              "credential deletion failed for exact owner %s: %s"
-              alias
-              (Printexc.to_string exn)))
-  in
-  delete_aliases aliases
+let delete_credentials config aliases =
+  Auth.with_credential_transaction config.Workspace.base_path (fun transaction ->
+    (* Revalidate after admission: the earlier preflight preceded workspace
+       cleanup and must not authorize deleting a different credential. Auth
+       owns the complete alias/UUID/raw-token deletion; no stale paths remain. *)
+    Result.bind (validate_credentials config aliases) (fun () ->
+      let rec delete_aliases = function
+        | [] -> Ok ()
+        | alias :: rest ->
+          (match Auth.delete_credential_in_transaction transaction alias with
+           | Ok () -> delete_aliases rest
+           | Error error ->
+             Error (Printf.sprintf "credential deletion failed for exact owner %s: %s"
+               alias (Masc_domain.masc_error_to_string error)))
+      in
+      delete_aliases aliases))
+  |> Result.map_error Masc_domain.masc_error_to_string
+  |> Result.join
 ;;
 
 let unbind_exact_workspace_agents config aliases =
@@ -334,9 +311,9 @@ let purge_agent_filesystem_artifacts ~validate_alias config agent_names =
   match exact_agent_aliases ~validate_alias agent_names with
   | Error _ as error -> error
   | Ok aliases ->
-    (match credential_plan config aliases with
+    (match validate_credentials config aliases with
      | Error _ as error -> error
-     | Ok credential_plan ->
+     | Ok () ->
        (match unbind_exact_workspace_agents config aliases with
         | Error _ as error -> error
         | Ok unbound ->
@@ -360,7 +337,7 @@ let purge_agent_filesystem_artifacts ~validate_alias config agent_names =
           (match remove_paths_strict filesystem_paths with
            | Error _ as error -> error
            | Ok () ->
-             (match delete_credentials config credential_plan with
+             (match delete_credentials config aliases with
               | Error _ as error -> error
               | Ok () ->
                 List.iter
@@ -774,6 +751,9 @@ let handle_board_close_post ~agent_name req reqd body_str =
 ;;
 
 module For_testing = struct
+  let purge_agent_artifacts config agent_names =
+    purge_agent_filesystem_artifacts ~validate_alias:validate_agent_alias config agent_names
+    |> Result.map (fun _ -> ())
   let purge_keeper_artifacts = purge_keeper_artifacts
   let handle_board_close_post = handle_board_close_post
 end

@@ -59,12 +59,18 @@ val save_auth_config : string -> auth_config -> unit
 
 (** {1 Credentials} *)
 
-val with_credential_transaction : string -> (unit -> 'a) -> ('a, masc_error) result
+type credential_transaction
+(** An admitted transaction, bound to its workspace. Use it only in the
+    callback that received it; it must not escape or be shared with a fiber. *)
+
+val with_credential_transaction :
+  string -> (credential_transaction -> 'a) -> ('a, masc_error) result
 (** Serialize a credential-dependent effect with credential save, deletion and
     alias publication in this workspace, across fibers, threads and processes.
     The callback may use {!load_credential} and hold its decision through its
-    effect; it must not call a credential writer, token-index lookup (whose cold
-    publication also takes this lock), or recursively enter this transaction.
+    effect. It may delete through {!delete_credential_in_transaction}; other
+    credential writers, token-index lookup (whose cold publication also takes
+    this lock), and recursive entry would deadlock and must not be called.
     Admission is cancellable; an admitted callback and lock release are protected
     from cancellation. A failed admission runs no callback. A completed callback
     keeps its result if lock cleanup fails, with the cleanup failure logged.
@@ -160,6 +166,12 @@ val delete_credential : string -> string -> unit
 (** Retire [agent_name]: the credential, its redirect stub and UUID file, and
     the raw token file, then invalidate the credential cache. The bearer stops
     validating from the next request. Absent files are not an error. *)
+
+val delete_credential_in_transaction :
+  credential_transaction -> string -> (unit, masc_error) result
+(** The same deletion, using the workspace already admitted by
+    {!with_credential_transaction}. No second lock is acquired. Cache
+    invalidation also runs if a removal fails after a partial deletion. *)
 
 val list_credentials : string -> agent_credential list
 

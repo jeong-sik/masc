@@ -29,11 +29,21 @@ box then asked `[馬李袁]`, the typed code was wrong, and the loader printed
 the code is not known here — ask the operator rather than guessing, since a
 wrong code ends the program.
 
-## Keys that work on every prompt
+## Keys depend on the visible prompt
 
-- Every prompt ends in `(range)?`; type the number, then `enter`.
-- `enter` on an empty prompt goes back one menu. It closed the 군사 submenu,
-  the officer list, the gold prompt, and every battle submenu.
+Use the screen-specific steps below. A `(range)?` label alone does not tell
+whether a digit needs `enter` or what an empty `enter` will do.
+
+- Number then `enter` was observed for ending a ruler's month, the war
+  destination, officer and unit-type choices, gold and food amounts, the
+  officer carrying food, and the save-slot number. Follow their named steps.
+- Empty `enter` closed the 군사 submenu and gold prompt in the observed run.
+  In the war officer list it finishes selection and advances to gold; it
+  does not go back. At `어떻게 하겠습니까(1-3)` in the save menu, it returns
+  to the command prompt.
+- Battle-menu digits act immediately; a following `enter` backs out of the
+  menu just opened. During officer placement, `enter` does nothing and `0`
+  places the officer. Read those sections before sending another key.
 - `backspace` deletes the last typed digit (`55` became `5`).
 - `esc` does nothing. At eight prompts — command, submenu, officer list, gold,
   battle menu, move direction, attack type, attack target — the screen stayed
@@ -157,13 +167,18 @@ protection, then `2`.
 
 ## The ending
 
-When one ruler holds every city, the game ends and KOEI.COM runs `END.EXE`.
-`END.EXE` reads `ENDSTIL.DAT` first, and the `samguk3` program folder has no
-such file, so the screen turns to text with `END.EXE : file access failure.`
-and the machine exits. That is what a unification looked like on 2026-09-29,
-not a crash; until the file is added, the ending is that line. A game where
-every ruler's clan dies out ends on the KOEI copyright screen instead, and a
-key exits.
+In the observed unification on 2026-09-29, one ruler held every city and
+KOEI.COM entered the ending path by running `END.EXE`. That game-state end
+is separate from displaying the intended ending.
+
+`END.EXE` reads `ENDSTIL.DAT` first, and the observed `samguk3` program folder
+had no such file. The screen showed `END.EXE : file access failure.` and the
+machine exited. This was an ending-display failure; the intended ending was
+not shown and remains unverified. Report the unification and file-access
+failure separately.
+
+In the observed game where every ruler's clan died out, the KOEI copyright
+screen appeared and a key exited.
 
 ## Watching an all-AI game
 

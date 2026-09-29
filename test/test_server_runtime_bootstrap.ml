@@ -4540,10 +4540,44 @@ let test_startup_state_readiness_after_init () =
   Alcotest.(check string) "phase is ready" "ready"
     (Server_startup_state.phase_to_string current.phase)
 
+let startup_http_response router path =
+  let output = Buffer.create 512 in
+  let connection =
+    Httpun.Server_connection.create (fun reqd ->
+      Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) reqd)
+  in
+  let wire =
+    Printf.sprintf "GET %s HTTP/1.1\r\nHost: 127.0.0.1:8935\r\n\r\n" path
+  in
+  let input = Bigstringaf.of_string ~off:0 ~len:(String.length wire) wire in
+  ignore
+    (Httpun.Server_connection.read_eof connection input ~off:0
+       ~len:(Bigstringaf.length input));
+  let rec drain () =
+    match Httpun.Server_connection.next_write_operation connection with
+    | `Write iovecs ->
+        let bytes =
+          List.fold_left
+            (fun total (iov : Bigstringaf.t Httpun.IOVec.t) ->
+              Buffer.add_string output
+                (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len);
+              total + iov.len)
+            0 iovecs
+        in
+        Httpun.Server_connection.report_write_result connection (`Ok bytes);
+        drain ()
+    | `Yield | `Close _ -> ()
+  in
+  drain ();
+  Buffer.contents output
+
 let test_mcp_transport_requires_explicit_readiness () =
   let previous_state = Server_auth.For_testing.snapshot_server_state () in
+  let previous_startup = Server_startup_state.snapshot () in
   Fun.protect
-    ~finally:(fun () -> Server_auth.For_testing.restore_server_state @@ previous_state)
+    ~finally:(fun () ->
+      Server_auth.For_testing.restore_server_state previous_state;
+      Server_startup_state.For_testing.restore previous_startup)
     (fun () ->
        Server_startup_state.reset ();
        Server_startup_state.mark_blocking ();
@@ -4556,12 +4590,57 @@ let test_mcp_transport_requires_explicit_readiness () =
          "state publication alone does not admit MCP"
          false
          (deps.is_ready ());
+       Alcotest.(check bool)
+         "delayed owner readiness blocks public HTTP"
+         false
+         (Option.is_some (Server_auth.ready_server_state ()));
+       Alcotest.(check bool)
+         "state has been published before readiness"
+         true
+         (Result.is_ok (Server_routes_http_pages.get_server_state_result ()));
+       Alcotest.(check bool)
+         "unready response is not HTTP 200"
+         true
+         (Server_auth.not_initialized_status = `Service_unavailable);
+       Eio_main.run @@ fun _env ->
+       let authority =
+         match Server_request_authority.of_host_port ~host:"127.0.0.1" ~port:8935 with
+         | Ok authority -> authority
+         | Error `Malformed -> Alcotest.fail "fixture authority must be valid"
+       in
+       Server_request_authority.with_current authority @@ fun () ->
+       let router =
+         Server_routes_http_routes_frontend.add_routes ~port:8935
+           (Http_server_eio.Router.create ())
+       in
+       let health = startup_http_response router "/health" in
+       Alcotest.(check bool) "/health is live before readiness" true
+         (String.starts_with ~prefix:"HTTP/1.1 200" health);
+       Alcotest.(check bool) "/health reports ok before readiness" true
+         (String_util.contains_substring health "\"status\":\"ok\"");
+       let readiness = startup_http_response router "/health/ready" in
+       Alcotest.(check bool) "/health/ready rejects delayed owner" true
+         (String.starts_with ~prefix:"HTTP/1.1 503" readiness);
+       let dashboard = startup_http_response router "/dashboard" in
+       Alcotest.(check bool) "dashboard rejects delayed owner" true
+         (String.starts_with ~prefix:"HTTP/1.1 503" dashboard);
+       Alcotest.(check bool) "dashboard error body is explicit" true
+         (String_util.contains_substring dashboard "not initialized");
+       Alcotest.(check bool) "dashboard gives retry hint" true
+         (String_util.contains_substring (String.lowercase_ascii dashboard) "retry-after: 1");
        Server_startup_state.mark_state_ready ()
        |> Result.get_ok;
        Alcotest.(check bool)
          "explicit readiness admits MCP"
          true
-         (deps.is_ready ()))
+         (deps.is_ready ());
+       Alcotest.(check bool)
+         "public HTTP admits published ready state"
+         true
+         (Option.is_some (Server_auth.ready_server_state ()));
+       let readiness = startup_http_response router "/health/ready" in
+       Alcotest.(check bool) "/health/ready admits published owner" true
+         (String.starts_with ~prefix:"HTTP/1.1 200" readiness))
 
 let test_startup_state_lazy_inventory_does_not_publish_readiness () =
   Server_startup_state.reset ();

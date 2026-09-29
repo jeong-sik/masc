@@ -589,6 +589,9 @@ let refresh_preserves_operator_target () =
     (UI.selected_instance removed=None && UI.selected_row removed=None && UI.selected_declaration removed=None);
   let replaced = UI.reconcile_snapshot view {snapshot with instances=[{(worker "worker") with incarnation="replacement"}]} in
   check bool "new incarnation requires explicit selection" true (UI.selected_instance replaced=None);
+  let without_workers = UI.reconcile_snapshot view {snapshot with instances=[]} in
+  check bool "refresh focuses a declaration when the last worker disappears" true
+    (without_workers.focus=UI.Configurations && Option.is_some (UI.selected_declaration without_workers));
   check bool "timeline cannot act through a replaced row owner" true
     (UI.selected_instance {replaced with focus=UI.Timeline}=None);
   let draft = Draft.create "worker.toml" |> ok in
@@ -704,15 +707,41 @@ let directory_issue_is_not_an_editable_installation () =
   let lines = UI.lines ~width:110 view in
   check bool "directory issue is a problem, not a TOML installation" true
     (List.mem "Lane Add-ons · 0 declared · 0 active · 0 failed · 1 config issues" lines
-     && List.mem "Configuration problems" lines
-     && not (List.mem "Installations" lines)
-     && not (List.exists (fun line -> String_util.contains_substring line "E:edit") lines));
+     && List.mem "Installations and configuration problems" lines
+     && not (List.exists (fun line -> List.mem "E:edit" (String.split_on_char ' ' line)) lines));
   check bool "directory has no editable TOML source" true
     (UI.selected_source_path view=None)
+
+let mixed_installations_keep_navigation_order () =
+  let json = Yojson.Safe.from_string
+    {|{"instances":[],"rows":[],"coverage":[],"configuration":{"directory":"/config","complete":true,"declarations":[{"id":"good","source_path":"/config/good.toml","desired_revision":"r1","applied_revision":null,"instance_id":null}],"issues":[{"id":null,"source_path":"/config/broken.toml","message":"invalid TOML"}]}}|} in
+  let snapshot = UI.decode json |> ok in
+  let view = UI.reconcile_snapshot UI.initial snapshot in
+  let lines = UI.lines ~width:120 view in
+  let find prefix =
+    let rec loop index = function
+      | [] -> fail ("missing row: " ^ prefix)
+      | line :: rest -> if String.starts_with ~prefix line then index else loop (index + 1) rest in
+    loop 0 lines in
+  check bool "problem before installation follows the decoder's navigation order" true
+    (find "> good" < find "  broken");
+  let broken = {view with configuration_cursor=1} in
+  check (option string) "down selects the next visible problem"
+    (Some "/config/broken.toml") (UI.selected_source_path broken);
+  check bool "a malformed TOML row advertises its repair action" true
+    (List.mem "    Enter:details  E:edit" lines);
+  check bool "detail keeps the chosen installation in focus" true
+    (List.exists (String.starts_with ~prefix:"Installation details · broken.toml")
+      (UI.lines ~width:120 {broken with presentation=UI.Technical}));
+  let stale = {view with snapshot_read_error=Some "read failed"} in
+  check bool "retained counts are marked stale after a failed refresh" true
+    (List.exists (fun line -> String.ends_with ~suffix:" · STALE" line)
+      (UI.lines ~width:120 stale))
 
 let () = run "TUI Lane package operations" ["operator scenarios",[
   test_case "declaration without worker stays visible" `Quick declaration_without_worker_is_visible;
   test_case "directory issue is not an editable installation" `Quick directory_issue_is_not_an_editable_installation;
+  test_case "mixed installation rows navigate in screen order" `Quick mixed_installations_keep_navigation_order;
   test_case "detail keeps installation ownership for edit, navigation and export" `Quick detail_keeps_installation_ownership;
   test_case "refresh retains exact operator targets and exposes failure" `Quick refresh_preserves_operator_target;
   test_case "evidence export chooses a Keeper by name" `Quick evidence_export_chooses_a_keeper_by_name;

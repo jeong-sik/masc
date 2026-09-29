@@ -412,16 +412,23 @@ let test_server_records_the_request_before_dispatch_and_retains_its_answer () =
        | Error (A.Invalid_response _) -> fail "missing prompt is a source failure"
        | Ok _ -> fail "missing prompt was accepted");
       check bool "missing prompt does not dispatch a provider" false !dispatched;
-      let failures = Runs.list_runs (Runs.replay path)
+      let replayed = Runs.replay path in
+      let failures = Runs.list_runs replayed
         |> List.filter (fun run -> run.Runs.run_id <> answer.trace.run_id) in
-      match failures with
-      | [{Runs.status=Runs.Completed {outcome=Runs.Failed {code;_};selected_slot=None;output;_};input=Runs.Exact_input input;_}] ->
+      let failure = match failures with
+        | [summary] -> (match Runs.get replayed ~run_id:summary.run_id with
+            | Some full -> full
+            | None -> fail "missing prompt receipt cannot be loaded")
+        | _ -> fail "missing prompt lost its failed run receipt" in
+      let Runs.Exact_input input = failure.input in
+      match failure.status with
+      | Runs.Completed {outcome=Runs.Failed {code;_};selected_slot=None;output;_} ->
         check string "render failure is recorded" "candle_appraisal_unavailable" code;
         check bool "failed render invents no prompt" true
           Yojson.Safe.Util.(member "rendered" (member "prompt" input) = `Null);
         check bool "failed render dispatches no slot" true
           Yojson.Safe.Util.(member "attempts" output = `List [])
-      | _ -> fail "missing prompt lost its failed run receipt")
+      | _ -> fail "missing prompt lost its failed run outcome")
 
 let () =
   run "candle_appraisal_flow"

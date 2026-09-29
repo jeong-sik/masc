@@ -2,6 +2,8 @@ open Masc
 module Api = Server_dashboard_http_keeper_api
 open Yojson.Safe.Util
 
+let () = Server_startup_state.mark_state_ready () |> Result.get_ok
+
 let rec remove_tree path =
   if Sys.file_exists path then
     if Sys.is_directory path then (

@@ -5,8 +5,6 @@
    that never had a checkout. It is also why the recipe carries no COPY:
    `docker build -` reads it on stdin with no context. *)
 
-let default_tag = "masc-sandbox:general"
-
 (* What a Keeper turn needs from any image, read off the argv it is run as
    (keeper_sandbox_docker.ml): `<image> bash -l -s` with the tool script on
    stdin, `--user <host uid>:<gid>`, a read-only rootfs plus one tmpfs, and
@@ -22,14 +20,6 @@ let label_argv labels =
 
 let build_argv ?(labels = []) ~tag () =
   [ "build"; "-t"; tag ] @ label_argv labels @ [ "-" ]
-
-let write_recipe_into ~dir =
-  let path = Filename.concat dir "Dockerfile" in
-  let oc = open_out path in
-  Fun.protect
-    ~finally:(fun () -> close_out_noerr oc)
-    (fun () -> output_string oc dockerfile);
-  path
 
 let context_directory_build_argv ?(labels = []) ~tag ~dockerfile ~context () =
   [ "build"; "-t"; tag ] @ label_argv labels @ [ "-f"; dockerfile; context ]

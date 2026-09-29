@@ -21,7 +21,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 RELEASE_DIR="$REPO_DIR/releases"
 PROD_PORT=8945
-HEALTH_URL="http://127.0.0.1:$PROD_PORT/health"
+HEALTH_URL="http://127.0.0.1:$PROD_PORT/health/ready"
 default_base_path() {
     if [ -n "${MASC_BASE_PATH:-}" ]; then
         printf '%s\n' "$MASC_BASE_PATH"
@@ -271,9 +271,9 @@ done
 if [ "$HEALTH_OK" = true ]; then
     HANDOFF_ACTIVE=false
     trap - EXIT INT TERM
-    echo "    Prod healthy on :$PROD_PORT" >&2
+    echo "    Prod ready on :$PROD_PORT" >&2
 else
-    echo "Error: Prod failed health check on :$PROD_PORT" >&2
+    echo "Error: Prod failed readiness check on :$PROD_PORT" >&2
     echo "    Logs: $LOG_DIR/masc-prod.err.log" >&2
 
     echo "    Previous binary remains at $BACKUP_EXE; it was not restarted across the hard cut." >&2

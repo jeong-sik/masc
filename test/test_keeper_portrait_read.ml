@@ -11,6 +11,7 @@ open Masc
 module Read = Masc.Keeper_portrait_read
 module Look = Keeper_portrait_look
 module Store = Multimodal.Vision_artifact_store
+module Vision = Masc.Keeper_vision_tool
 
 let with_temp_base f =
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
@@ -92,10 +93,7 @@ let test_artifact_is_a_readable_png () =
   let bytes =
     match field "bytes" data with `Int value -> value | _ -> Alcotest.fail "bytes is not an int"
   in
-  let dir =
-    Store.frames_dir
-      ~dir:(Filename.concat (Config_dir_resolver.keepers_dir ()) (name ^ ".vision"))
-  in
+  let dir = Vision.vision_store_dir ~keeper_name:name in
   match Store.load ~dir (Store.of_string handle) with
   | Error error ->
     Alcotest.failf "the artifact did not load: %s" (Store.load_error_to_string error)
@@ -112,6 +110,44 @@ let test_artifact_is_a_readable_png () =
       (field "artifact" repeated = field "artifact" data);
     Alcotest.(check bool) "same identity retains equipment" true
       (field "equipment" repeated = field "equipment" data)
+;;
+
+(* A portrait handle can be used in a later turn. Rotate the same Keeper's
+   screen cache through a one-entry limit, then reload the exact returned
+   handle through the lookup used by keeper_analyze_image. *)
+let test_artifact_survives_frame_pressure () =
+  with_temp_base @@ fun () ->
+  let name = "portrait-retention" in
+  let data = call ~name ~args:(`Assoc [ "size", `Int 48 ]) |> completed_data in
+  let handle =
+    match field "artifact" data with
+    | `String value -> Store.of_string value
+    | _ -> Alcotest.fail "artifact is not a string"
+  in
+  let dir = Vision.vision_store_dir ~keeper_name:name in
+  let read_portrait () =
+    match Store.load ~dir handle with
+    | Ok bytes -> bytes
+    | Error error -> Alcotest.fail (Store.load_error_to_string error)
+  in
+  let before = read_portrait () in
+  let frames = Vision.frames_dir ~keeper_name:name in
+  let capture bytes =
+    match Store.store ~auto_prune:true ~max_entries:1 ~dir:frames bytes with
+    | Ok frame -> frame
+    | Error error -> Alcotest.fail error
+  in
+  let previous = capture "previous screen frame" in
+  let current_bytes = "current screen frame" in
+  let current = capture current_bytes in
+  (match Store.load ~dir:frames previous with
+   | Error (Store.Missing_artifact _) -> ()
+   | Error error -> Alcotest.fail (Store.load_error_to_string error)
+   | Ok _ -> Alcotest.fail "the frame cache did not rotate");
+  (match Store.load ~dir:frames current with
+   | Ok bytes -> Alcotest.(check string) "current frame is readable" current_bytes bytes
+   | Error error -> Alcotest.fail (Store.load_error_to_string error));
+  Alcotest.(check string) "the returned portrait survives frame rotation" before (read_portrait ())
 ;;
 
 (* A size outside the declared range is refused, not clamped. 16 and 47 are
@@ -138,8 +174,7 @@ let test_size_out_of_range_is_refused () =
     | Tool_result.Completed _ | Tool_result.Deferred _ ->
         Alcotest.failf "size %d is outside the declared range and succeeded" size)
     [ Keeper_portrait_draw.min_size; Read.minimum_size - 1; Read.maximum_size + 1 ];
-  let dir = Store.frames_dir
-    ~dir:(Filename.concat (Config_dir_resolver.keepers_dir ()) "invalid-portrait.vision") in
+  let dir = Vision.vision_store_dir ~keeper_name:"invalid-portrait" in
   Alcotest.(check bool) "rejected inputs create no artifacts" false (Sys.file_exists dir)
 ;;
 
@@ -173,6 +208,7 @@ let () =
       , [ Alcotest.test_case "equipment matches the name hash" `Quick
             test_equipment_matches_the_name_hash
         ; Alcotest.test_case "artifact is a readable PNG" `Quick test_artifact_is_a_readable_png
+        ; Alcotest.test_case "artifact survives frame pressure" `Quick test_artifact_survives_frame_pressure
         ; Alcotest.test_case "size out of range is refused" `Quick test_size_out_of_range_is_refused
         ; Alcotest.test_case "declared size matches the handler" `Quick
             test_declared_size_matches_the_handler

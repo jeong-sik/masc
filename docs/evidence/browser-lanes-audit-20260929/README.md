@@ -109,3 +109,12 @@ this coding session. A [focused TUI run](https://github.com/jeong-sik/masc/actio
 was dispatched on that exact merged SHA for browser lifecycle, lane heading,
 stale failure, async reads, decoding, and keyboard scenarios. Its result must
 be read separately; dispatch is not completion evidence.
+
+The completed PR check run 36502643643 on source
+`5e6519eaa08b85722c196b89fdd656ef0948ff09` passed dashboard typecheck, release
+build, lint and TLA. Its development check passed the Browser lifecycle PTY,
+lane heading and stale-failure PTYs, and all 344 decoder tests, then failed
+`test_tui_selection_visibility.py:77` waiting for the entire renamed Runtime
+tab label. The follow-up waits for the actual restored runtime row, followed
+by the existing Runtime ID assertion; a narrow tab strip does not guarantee
+that its entire count label fits. The failed aggregate is not called green.

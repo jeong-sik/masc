@@ -175,6 +175,16 @@ status: reference
   → [Runtime_quota_window](../../lib/runtime/runtime_quota_window.ml),
   [Masc_tui_overview_team](../../bin/masc_tui_overview_team.mli)
 
+**Runtime Rate Limit (런타임 속도 제한 관측)**
+: 한 런타임 후보가 받은 429 또는 제공자 속도 제한을 그 후보의 프로세스 로컬 셀에
+  기록한 증거. 계정 단위의 **닫힌 quota 창**과 구분한다. 같은 자격 증명을 쓰는 다른
+  후보까지 소진으로 표시하지 않고 해당 후보만 순서 뒤로 보낸다. 유효한 `Retry-After`
+  기한이 지나거나 그 후보가 성공하면 해제되며, 기한이 없으면 성공 전까지 남는다.
+  런타임 카탈로그는 이를 `rate_limited`·`rate_limit_resets_at`으로 따로 싣고, TUI는
+  quota와 속도 제한 상태를 구분해 표시한다(#39815).
+  → [Runtime_candidate_backpressure](../../lib/runtime/runtime_candidate_backpressure.mli) ·
+  [runtime resolved projection](../../lib/server/server_dashboard_runtime_resolved_json.mli)
+
 **Server Push (서버가 밀어 보내는 사건)**
 : 서버가 클라이언트로 밀어 보내는 사건으로, Keeper가 한 일이 아니라 서버가 보고하는
   상태 변화. Activity 화면은 이런 사건을 `everything` scope 아래 조용한 회색 행으로

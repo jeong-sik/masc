@@ -363,8 +363,7 @@ let clear_primary_cache_for path =
   Stdlib.Mutex.protect primary_cache_mu (fun () -> Hashtbl.remove primary_cache path)
 ;;
 
-let load_primary config : (state, primary_failure) Result.t =
-  let path = schedules_path config in
+let load_primary_file config path : (state, primary_failure) Result.t =
   let cached =
     match
       Stdlib.Mutex.protect primary_cache_mu (fun () -> Hashtbl.find_opt primary_cache path)
@@ -394,6 +393,17 @@ let load_primary config : (state, primary_failure) Result.t =
          Hashtbl.replace primary_cache path { decoded_from = after; state })
      | (Ok _ | Error _), (Some _ | None), (Some _ | None) -> ());
     decoded
+;;
+
+(* The Memory backend is authoritative over its local mirror. A mirror's
+   inode/mtime cannot version backend state, nor distinguish two independent
+   backend instances using the same workspace path. *)
+let load_primary config : (state, primary_failure) Result.t =
+  let path = schedules_path config in
+  match config.Workspace_utils.backend with
+  | Workspace_utils.FileSystem _ -> load_primary_file config path
+  | Workspace_utils.Memory _ ->
+      Domain_pool_ref.submit_cpu_or_inline (fun () -> decode_primary config path)
 ;;
 
 let primary_failure_message ~path = function

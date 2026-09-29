@@ -1577,6 +1577,30 @@ let test_an_unchanged_ledger_is_decoded_once () =
     (List.length (read_state config).schedules)
 ;;
 
+let test_primary_cache_respects_backend_authority () =
+  with_workspace
+  @@ fun config ->
+  ignore (insert_ok config (make_request ()));
+  let first = read_state config in
+  check int "filesystem ledger is populated and cached" 1 (List.length first.schedules);
+  let memory = {config with Workspace_utils.backend =
+    Workspace_utils.Memory (Backend.Memory.create ())} in
+  check int "empty backend does not inherit a cached local mirror" 0
+    (List.length (read_state memory).schedules);
+  ignore (insert_ok memory (make_request ~schedule_id:"memory-only" ()));
+  let memory_state = read_state memory in
+  check (list string) "backend mutation does not import filesystem schedules" ["memory-only"]
+    (List.map (fun (request : Schedule_domain.schedule_request) -> request.schedule_id)
+      memory_state.schedules);
+  let other_memory = {config with Workspace_utils.backend =
+    Workspace_utils.Memory (Backend.Memory.create ())} in
+  check int "independent backend cannot reuse another backend's cached mirror" 0
+    (List.length (read_state other_memory).schedules);
+  check (list string) "original backend retains its own ledger" ["memory-only"]
+    (List.map (fun (request : Schedule_domain.schedule_request) -> request.schedule_id)
+      (read_state memory).schedules)
+;;
+
 (* A read that misses decodes on the pool, as a write encodes there: while the
    pool's one worker is busy, the read waits for it. *)
 let test_a_read_that_misses_decodes_on_the_pool () =
@@ -1843,6 +1867,8 @@ let () =
             test_a_mutation_encodes_the_ledger_once_on_the_pool;
           test_case "an unchanged ledger is decoded once" `Quick
             test_an_unchanged_ledger_is_decoded_once;
+          test_case "primary cache respects backend authority" `Quick
+            test_primary_cache_respects_backend_authority;
           test_case "a read that misses decodes on the pool" `Quick
             test_a_read_that_misses_decodes_on_the_pool;
           test_case "a schedule time that is not finite is refused" `Quick

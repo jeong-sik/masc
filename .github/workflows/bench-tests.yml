@@ -24,8 +24,16 @@ on:
       - 'scripts/harness/perf/server_artifact_session.py'
       - 'scripts/harness/perf/compare_server_artifacts.py'
       - 'test/test_server_artifact_comparison.py'
+      - 'scripts/harness/perf/checkpoint_history_artifact_session.py'
+      - 'scripts/harness/perf/compare_checkpoint_history.py'
+      - 'test/test_checkpoint_history_comparison.py'
+      - 'tools/rtev_trace/**'
   workflow_dispatch:
     inputs:
+      compare_checkpoint_history:
+        description: Compare checkpoint inventories with scheduler and runtime-events evidence
+        type: boolean
+        default: false
       compare_tui:
         description: Compare two verified Linux x64 manual probe artifacts
         type: boolean
@@ -78,11 +86,11 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: bench-tests-${{ inputs.compare_server && 'compare-server' || inputs.compare_tui && 'compare-tui' || 'pytest' }}-${{ github.ref }}
+  group: bench-tests-${{ inputs.compare_checkpoint_history && 'compare-checkpoint-history' || inputs.compare_server && 'compare-server' || inputs.compare_tui && 'compare-tui' || 'pytest' }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   pytest:
-    if: ${{ !inputs.compare_tui && !inputs.compare_server }}
+    if: ${{ !inputs.compare_tui && !inputs.compare_server && !inputs.compare_checkpoint_history }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     defaults:
@@ -178,6 +186,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: python3 -m unittest discover -s test -p test_server_artifact_comparison.py -v
+      - run: python3 test/test_checkpoint_history_comparison.py
   compare-server:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.compare_server }}
     needs: server-harness-tests
@@ -226,4 +235,57 @@ jobs:
         with:
           name: server-artifact-comparison-${{ github.run_id }}-attempt-${{ github.run_attempt }}
           path: comparison-results/
+          if-no-files-found: warn
+
+  compare-checkpoint-history:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.compare_checkpoint_history }}
+    needs: server-harness-tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v7
+      - name: Require one comparison mode
+        env:
+          TUI: ${{ inputs.compare_tui }}
+          SERVER: ${{ inputs.compare_server }}
+        run: test "$TUI" != true && test "$SERVER" != true
+      - uses: ./.github/actions/setup-ocaml-toolchain
+      - name: Build only the runtime-events readers
+        run: |
+          opam install -y dune eio.1.3
+          mkdir -p "$RUNNER_TEMP/checkpoint-readers"
+          cp tools/rtev_trace/*.ml tools/rtev_trace/dune "$RUNNER_TEMP/checkpoint-readers/"
+          printf '(lang dune 3.17)\n' > "$RUNNER_TEMP/checkpoint-readers/dune-project"
+          opam exec -- dune build --root "$RUNNER_TEMP/checkpoint-readers" ./rtev_fibers.exe ./rtev_watch.exe
+      - name: Install Linux binary libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y -qq libffi8 libgmp10 libpq5 libssl3t64 libzstd1 zlib1g libncurses6 libtinfo6
+      - name: Compare checkpoint workload on this runner
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASELINE_RUN: ${{ inputs.baseline_run }}
+          BASELINE_ARTIFACT: ${{ inputs.baseline_artifact }}
+          BASELINE_COMMIT: ${{ inputs.baseline_commit }}
+          CANDIDATE_RUN: ${{ inputs.candidate_run }}
+          CANDIDATE_ARTIFACT: ${{ inputs.candidate_artifact }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          REPETITIONS: ${{ inputs.repetitions }}
+        run: |
+          python3 scripts/harness/perf/compare_checkpoint_history.py \
+            --repository "$GITHUB_REPOSITORY" --repository-id "$GITHUB_REPOSITORY_ID" \
+            --baseline-run "$BASELINE_RUN" --baseline-artifact "$BASELINE_ARTIFACT" \
+            --baseline-commit "$BASELINE_COMMIT" \
+            --candidate-run "$CANDIDATE_RUN" --candidate-artifact "$CANDIDATE_ARTIFACT" \
+            --candidate-commit "$CANDIDATE_COMMIT" --repetitions "$REPETITIONS" \
+            --tracers "$RUNNER_TEMP/checkpoint-readers/_build/default" --output checkpoint-results
+      - name: Retain raw measurements, including failed sessions
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: checkpoint-history-comparison-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          path: checkpoint-results/
           if-no-files-found: warn

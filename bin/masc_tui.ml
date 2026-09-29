@@ -10270,7 +10270,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
            let terminal_rows, terminal_cols = get_terminal_size () in
            let pane_cells =
              Masc_tui_roster_pane.content_cols
-               ~hidden:state.roster_pane_hidden ~cols:terminal_cols
+               ~hidden:(roster_pane_hidden state) ~cols:terminal_cols
            in
            let inner_width = framed_inner_width pane_cells in
            let available_cells =

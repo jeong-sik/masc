@@ -77,8 +77,8 @@ def run(executable: str) -> None:
             h.send_and_wait(process, master, output, b"\r", answer)
 
         # Navigating and accepting the picker only changes the draft.
-        h.send_and_wait(process, master, output, b"/play ", b"Commands  1/4")
-        h.send_and_wait(process, master, output, b"\x1b[B", b"Commands  2/4")
+        h.send_and_wait(process, master, output, b"/play ", b"Commands  1/5")
+        h.send_and_wait(process, master, output, b"\x1b[B", b"Commands  2/5")
         h.send_and_wait(process, master, output, b"\r", h.composer_showing(b"/play invite"))
         h.drain_until_quiet(process, master, output)
         assert not list_reads and not revoke_methods, "selecting a Play action called the admin API"

@@ -130,7 +130,7 @@ let test_play_menu_requires_explicit_execution () =
   in
   let choices = menu "/play " in
   check (list string) "all supported Play actions are discoverable"
-    ["/play invites"; "/play invite"; "/play link"; "/play revoke"]
+    ["/play invites"; "/play invite"; "/play link"; "/play qr"; "/play revoke"]
     (List.map (fun (item : Command.menu_item) -> item.label) choices.items);
   let draft = "/play " in
   let selecting = Command.menu_step ~direction:Command.Next ~draft choices in
@@ -149,7 +149,7 @@ let test_play_menu_requires_explicit_execution () =
   List.iter (fun draft ->
     check bool (draft ^ " is ready for execution, not another menu acceptance") true
       (Option.is_none (Command.menu ~keeper_names:[] ~state:Command.Menu_idle draft)))
-    ["/play invites"; "/play link"; "/play invite guest1 24"; "/play revoke guest1"]
+    ["/play invites"; "/play link"; "/play qr"; "/play invite guest1 24"; "/play revoke guest1"]
 
 
 let test_ref_command_parses_url_and_bare_id () =

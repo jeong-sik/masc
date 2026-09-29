@@ -173,6 +173,105 @@ let with_catalog ?(getenv = fun _ -> Ok None) entries f =
   | Ok snapshot -> f snapshot
 ;;
 
+let with_bound_targets ~base_url ~body_timeout_s f =
+  let binding key =
+    Provider_config.make
+      ~kind:Provider_config.OpenAI_compat
+      ~provider_id:"deepseek"
+      ~model_id:"deepseek-v4-pro"
+      ~base_url
+      ~api_key:key
+      ~request_path:"/chat/completions"
+      ~max_concurrent_requests:1
+      ()
+  in
+  let target id key : EO.declared_target =
+    { target_ref = id
+    ; binding = binding key
+    ; credential = EO.Credential_resolved (Secret.of_string key)
+    ; body_timeout_s = Some body_timeout_s
+    }
+  in
+  let io : EO.resolver_io = { getenv = fun _ -> Ok None } in
+  match
+    EO.load_resolver_snapshot
+      ~io
+      ~catalog:
+        (EO.Embedded_with_targets
+           [ target "bound-primary" "primary-test-key"
+           ; target "bound-successor" "successor-test-key"
+           ])
+      ()
+  with
+  | Ok snapshot -> f snapshot (binding "primary-test-key")
+  | Error _ -> fail "bound exact targets should resolve"
+;;
+
+let with_bound_anthropic ~base_url ~body_timeout_s f =
+  let serving_constraint =
+    match
+      Serving_constraint.make
+        ~source_kind:Serving_constraint.Declaration
+        ~source_ref:"exact admission test boundary"
+        ~checked_at_unix_s:1
+        ~confidence:Serving_constraint.High
+        ~accepted_through:8192
+        ()
+    with
+    | Ok value -> value
+    | Error _ -> fail "serving fixture should be valid"
+  in
+  let capabilities =
+    { Capabilities.default_capabilities with
+      max_context_tokens = Some 8192
+    ; max_output_tokens = Some 1024
+    ; supports_response_format_json = true
+    ; supports_structured_output = true
+    ; serving_constraint = Some serving_constraint
+    }
+  in
+  let config =
+    Provider_config.make
+      ~kind:Provider_config.Anthropic
+      ~provider_id:"deepseek-anthropic"
+      ~model_id:"deepseek-v4-pro"
+      ~base_url
+      ~api_key:"anthropic-test-key"
+      ~request_path:"/v1/messages"
+      ~model_capabilities_override:capabilities
+      ~max_concurrent_requests:1
+      ()
+  in
+  let target : EO.declared_target =
+    { target_ref = "bound-measured"
+    ; binding = config
+    ; credential =
+        EO.Credential_resolved (Secret.of_string "anthropic-test-key")
+    ; body_timeout_s = Some body_timeout_s
+    }
+  in
+  let io : EO.resolver_io = { getenv = fun _ -> Ok None } in
+  match
+    EO.load_resolver_snapshot
+      ~io
+      ~catalog:(EO.Embedded_with_targets [ target ])
+      ()
+  with
+  | Ok snapshot -> f snapshot config
+  | Error (EO.Target_catalog_invalid { detail; _ }) ->
+    failf "bound measured target rejected: %s" detail
+  | Error (EO.Target_binding_missing { target_ref; component }) ->
+    failf
+      "bound measured target %s has no catalog %s"
+      target_ref
+      (match component with
+       | EO.Target_provider -> "provider"
+       | EO.Target_model -> "model")
+  | Error (EO.Catalog_parse_failed { detail; _ }) ->
+    failf "bound measured catalog invalid: %s" detail
+  | Error _ -> fail "bound measured target should resolve"
+;;
+
 let admitted_target snapshot selector =
   match EO.admit_target_ref snapshot selector with
   | Error _ -> failf "target ref %s was not admitted" selector
@@ -4774,6 +4873,177 @@ let test_gemini_structural_sibling_rejects_before_outer_dispatch () =
   | Ok _ | Error _ -> fail "invalid Gemini schema lost typed candidate exhaustion"
 ;;
 
+let test_bound_exact_waits_for_shared_provider_permit () =
+  let (blocked, result, declared_limit), posts =
+    with_server ~response:(openai_response {|{"name":"accepted"}|})
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
+    with_bound_targets ~base_url ~body_timeout_s:2.0
+    @@ fun snapshot config ->
+    let flow =
+      start_flow
+        (frozen_candidates
+           [ flow_candidate_as snapshot ~id:"bound-primary" ~target_ref:"bound-primary" ])
+    in
+    let occupied, occupied_resolver = Eio.Promise.create () in
+    let release, release_resolver = Eio.Promise.create () in
+    let started = Atomic.make false in
+    let blocked = ref false in
+    let result = ref None in
+    Eio.Fiber.both
+      (fun () ->
+         Provider_admission.with_admission ~config (fun () ->
+           Eio.Promise.resolve occupied_resolver ();
+           Eio.Promise.await release))
+      (fun () ->
+         Eio.Promise.await occupied;
+         Eio.Fiber.both
+           (fun () ->
+              result :=
+                Some
+                  (execute_with_accepting_test_validator
+                     ~net
+                     ~clock
+                     ~on_measurement_terminal:(fun _ -> Ok ())
+                     ~before_measurement_dispatch:(fun _ -> Ok ())
+                     ~before_dispatch:(fun _ ->
+                       Atomic.set started true;
+                       Ok ())
+                     ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+                     flow))
+           (fun () ->
+              Eio.Time.sleep clock 0.03;
+              blocked := not (Atomic.get started);
+              Eio.Promise.resolve release_resolver ()));
+    let result =
+      match !result with
+      | Some result -> result
+      | None -> fail "bound exact result was not collected"
+    in
+    !blocked, result, config.max_concurrent_requests
+  in
+  check (option int) "binding retains declared limit" (Some 1) declared_limit;
+  check bool "exact callback waited behind shared permit" true blocked;
+  check int "exact generation sent once after release" 1 posts;
+  match result with
+  | Ok _ -> ()
+  | Error _ -> fail "bound exact generation should succeed after release"
+;;
+
+let test_bound_exact_queue_expiry_advances_without_post () =
+  let (result, evidence), posts =
+    with_server ~response:(openai_response {|{"name":"accepted"}|})
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
+    with_bound_targets ~base_url ~body_timeout_s:1.0
+    @@ fun snapshot config ->
+    let flow =
+      start_flow
+        (frozen_candidates
+           [ flow_candidate_as snapshot ~id:"bound-primary" ~target_ref:"bound-primary"
+           ; flow_candidate_as
+               snapshot
+               ~id:"bound-successor"
+               ~target_ref:"bound-successor"
+           ])
+    in
+    let occupied, occupied_resolver = Eio.Promise.create () in
+    let release, release_resolver = Eio.Promise.create () in
+    let result = ref None in
+    Eio.Fiber.both
+      (fun () ->
+         Provider_admission.with_admission ~config (fun () ->
+           Eio.Promise.resolve occupied_resolver ();
+           Eio.Promise.await release))
+      (fun () ->
+         Eio.Promise.await occupied;
+         result := Some (execute_ok ~net ~clock flow);
+         Eio.Promise.resolve release_resolver ());
+    let result =
+      match !result with
+      | Some result -> result
+      | None -> fail "queue expiry result was not collected"
+    in
+    result, EO.flow_attempt_evidence flow
+  in
+  check int "only successor POST reached provider" 1 posts;
+  let primary = (attempt_for evidence "bound-primary").receipt in
+  check
+    int
+    "expired wait records zero primary generation dispatches"
+    0
+    (EO.generation_receipt_snapshot_dispatch_count primary);
+  (match result with
+   | Ok success ->
+     check
+       string
+       "successor was selected after queue expiry"
+       "bound-successor"
+       (candidate_id (EO.flow_success_candidate success))
+   | Error _ -> fail "successor should run after primary permit wait expires")
+;;
+
+let test_bound_measurement_waits_for_shared_provider_permit () =
+  let response =
+    {|{"id":"msg-flow","type":"message","role":"assistant","model":"flow","content":[{"type":"text","text":"{\"name\":\"accepted\"}"}],"stop_reason":"end_turn","usage":{"input_tokens":2,"output_tokens":1}}|}
+  in
+  let (blocked, result), posts =
+    with_counted_server
+      ~measurement_reply:(Measurement_tokens 2)
+      ~response
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
+    with_bound_anthropic ~base_url ~body_timeout_s:2.0
+    @@ fun snapshot config ->
+    let flow = start_flow (frozen_flow snapshot [ "bound-measured" ]) in
+    let occupied, occupied_resolver = Eio.Promise.create () in
+    let release, release_resolver = Eio.Promise.create () in
+    let measurement_started = Atomic.make false in
+    let blocked = ref false in
+    let result = ref None in
+    Eio.Fiber.both
+      (fun () ->
+         Provider_admission.with_admission ~config (fun () ->
+           Eio.Promise.resolve occupied_resolver ();
+           Eio.Promise.await release))
+      (fun () ->
+         Eio.Promise.await occupied;
+         Eio.Fiber.both
+           (fun () ->
+              result :=
+                Some
+                  (execute_with_accepting_test_validator
+                     ~net
+                     ~clock
+                     ~on_measurement_terminal:(fun _ -> Ok ())
+                     ~before_measurement_dispatch:(fun _ ->
+                       Atomic.set measurement_started true;
+                       Ok ())
+                     ~before_dispatch:(fun _ -> Ok ())
+                     ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+                     flow))
+           (fun () ->
+              Eio.Time.sleep clock 0.03;
+              blocked := not (Atomic.get measurement_started);
+              Eio.Promise.resolve release_resolver ()));
+    let result =
+      match !result with
+      | Some result -> result
+      | None -> fail "bound measured result was not collected"
+    in
+    !blocked, result
+  in
+  (match result with
+   | Ok _ -> ()
+   | Error error ->
+     failf
+       "bound measured flow failed: %s"
+       (EO.flow_execution_error_to_string
+          ~callback_error_to_string:Fun.id
+          ~raw_response_to_string:EO.raw_response_sha256_to_string
+          error));
+  check bool "count-tokens callback waited behind shared permit" true blocked;
+  check int "one count-tokens POST after release" 1 posts.measurement_posts;
+  check int "one generation POST after measurement" 1 posts.generation_posts
+;;
+
 let test_concurrent_duplicate_flow_does_not_double_dispatch () =
   let (left, right), posts =
     with_server ~response_delay_s:0.1 ~response:(openai_response {|{"name":"accepted"}|})
@@ -5072,6 +5342,18 @@ let () =
             "Gemini structural sibling rejects before outer dispatch"
             `Quick
             test_gemini_structural_sibling_rejects_before_outer_dispatch
+        ; test_case
+            "bound exact waits for shared provider permit"
+            `Quick
+            test_bound_exact_waits_for_shared_provider_permit
+        ; test_case
+            "bound exact queue expiry advances without a POST"
+            `Quick
+            test_bound_exact_queue_expiry_advances_without_post
+        ; test_case
+            "bound count-tokens waits for shared provider permit"
+            `Quick
+            test_bound_measurement_waits_for_shared_provider_permit
         ; test_case
             "concurrent duplicate makes one dispatch"
             `Quick

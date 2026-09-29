@@ -1780,8 +1780,6 @@ let execution_error_cause ~http_status ~dispatch = function
 let execute_once_with_publication ~publish ~net ~clock (attempt : attempt) =
   let ready = attempt.ready in
   let receipt = attempt.receipt in
-  Generation_receipt.start receipt;
-  publish ();
   match
     Exec.execute_once_with_evidence
       ~net
@@ -2020,22 +2018,74 @@ let execute_flow_candidate
           let candidate_receipt : flow_attempt_receipt =
             { visit = candidate.visit; receipt = attempt_receipt attempt }
           in
-          publish_attempt_snapshot flow candidate_receipt;
-          (match before_dispatch candidate_receipt with
-           | Error cause ->
-             Error (Flow_step_before_dispatch_callback_failed (candidate_receipt, cause))
-           | Ok () ->
-             (match
-                execute_once_with_publication
-                  ~publish:(fun () -> publish_attempt_snapshot flow candidate_receipt)
-                  ~net
-                  ~clock
-                  attempt
-              with
-              | Ok success -> Ok (candidate_receipt, success)
-              | Error cause ->
-                Error
-                  (Flow_step_execution_failed { candidate = candidate_receipt; cause })))))
+          let publish () = publish_attempt_snapshot flow candidate_receipt in
+          let run () =
+            match before_dispatch candidate_receipt with
+            | Error cause ->
+              Error
+                (Flow_step_before_dispatch_callback_failed (candidate_receipt, cause))
+            | Ok () ->
+              Generation_receipt.start attempt.receipt;
+              publish ();
+              (match execute_once_with_publication ~publish ~net ~clock attempt with
+               | Ok success -> Ok (candidate_receipt, success)
+               | Error cause ->
+                 Error
+                   (Flow_step_execution_failed
+                      { candidate = candidate_receipt; cause }))
+          in
+          let timeout_failure ~phase stage =
+            (match Generation_receipt.phase attempt.receipt with
+             | Generation_receipt.Not_started ->
+               Generation_receipt.start attempt.receipt
+             | _ -> ());
+            publish ();
+            let cause =
+              { call_id = receipt_call_id attempt.receipt
+              ; receipt = attempt.receipt
+              ; cause =
+                  Completion_failed
+                    { error =
+                        Http_client.TimeoutError
+                          { message =
+                              Printf.sprintf
+                                "exact body deadline exceeded %s"
+                                stage
+                          ; phase
+                          }
+                    ; dispatch =
+                        generation_dispatch_fact_of_receipt attempt.receipt
+                    }
+              ; raw_response = None
+              }
+            in
+            Error
+              (Flow_step_execution_failed
+                 { candidate = candidate_receipt; cause })
+          in
+          publish ();
+          match target.config.max_concurrent_requests, target.body_timeout_s with
+          | None, _ -> run ()
+          | Some _, None -> Provider_admission.with_admission ~config:target.config run
+          | Some _, Some timeout_s ->
+            let deadline_at = Eio.Time.now clock +. timeout_s in
+            (match
+               Provider_admission.with_admission_and_work_until
+                 ~clock
+                 ~deadline_at
+                 ~config:target.config
+                 run
+             with
+             | Ok result -> result
+             | Error Provider_admission.Permit_wait_expired ->
+               timeout_failure ~phase:Http_client.Queue
+                 "before a provider admission permit was granted"
+             | Error Provider_admission.Permit_granted_as_deadline_passed ->
+               timeout_failure ~phase:Http_client.Queue
+                 "as the provider admission permit was granted"
+             | Error Provider_admission.Work_expired ->
+               timeout_failure ~phase:Http_client.Wall_clock
+                 "during the provider round trip")))
 ;;
 
 let advanceable_flow_failure = function

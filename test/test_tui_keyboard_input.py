@@ -9993,9 +9993,12 @@ def message_origin_badge_interaction(
     draft_frame = send_and_wait(
         process, master_fd, output, b"draft-neutral", b"draft-neutral"
     )
-    if b"\x1b[96m  > \x1b[0mdraft-neutral" not in draft_frame:
+    # Restore only the foreground after the accented prompt. A full reset
+    # would erase the input surface background; accepting arbitrary SGR here
+    # could instead leave the draft tinted or clear its background with 49m.
+    if b"\x1b[96m  > \x1b[39mdraft-neutral" not in draft_frame:
         raise AssertionError(
-            f"chat composer did not limit accent to its prompt: {draft_frame!r}"
+            f"chat composer did not restore default foreground while preserving its background: {draft_frame!r}"
         )
     escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
     os.write(master_fd, b"q")

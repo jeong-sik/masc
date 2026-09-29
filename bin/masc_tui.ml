@@ -1615,6 +1615,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     true
   | ("\t" | "\r") when Option.is_some command_menu ->
     (match command_menu with Some menu -> accept_command_menu menu | None -> false)
+  (* A visible menu consumes Esc before interrupting a turn or leaving chat. *)
   | "esc" when Option.is_some command_menu ->
     state.msg_command_menu <- Masc_tui_command.Menu_dismissed (Buffer.contents state.msg_input);
     true

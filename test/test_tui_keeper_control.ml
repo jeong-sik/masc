@@ -666,6 +666,7 @@ let test_a_row_without_a_sandbox_profile_is_rejected () =
       {|{"count":1,"total":1,"truncated":false,"keepers":[
          {"runtime_class":"keeper","name":"n","agent_name":"keeper-n-agent",
           "meta":{"name":"n","trace_id":"t","created_at":"c","updated_at":"u"},
+          "portrait":{"state":"ready","equipment":{"face":"bare_face","neck":"bare_neck","head":"bare_head","hand":"empty_hand","base":"no_dish"}},
           "health":"healthy","paused":false,"next_action":null,
           "phase":"running","keepalive_running":true,"activation_mode":"autonomous","runtime_id":"r",
           "created_at":"c","updated_at":"u"}]}|}

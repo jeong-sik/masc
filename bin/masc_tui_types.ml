@@ -6283,6 +6283,9 @@ type state = {
   mutable memory_facts_category: memory_category_filter;
   mutable memory_facts_sort: memory_sort_order;
   mutable memory_overview_sort: memory_overview_sort;
+  (* #39831: [d] on the Memory table shows the selected keeper's ledger rows;
+     off, the block draws its state, last save and any action. *)
+  mutable memory_overview_detail: bool;
   mutable repository_changes_open: bool;
   mutable repository_changes_scope: Tui_decode.repository_change_scope option;
   mutable repository_changes: Tui_decode.repository_change_snapshot option;
@@ -8386,6 +8389,7 @@ let create_state
   memory_facts_category = Category_all;
   memory_facts_sort = Sort_recency;
   memory_overview_sort = Mem_overview_facts;
+  memory_overview_detail = false;
   repository_changes_open = false;
   repository_changes_scope = None;
   repository_changes = None;
@@ -11929,6 +11933,7 @@ type palette_action =
      list and closes the lane to get there. *)
   | Palette_connectors
   | Palette_msx
+  | Palette_dos
   | Palette_lane_addons
   | Palette_goto of surface
   | Palette_config of config_pane
@@ -12052,6 +12057,7 @@ let palette_entries (state : state) =
      when there is no key path to it. *)
   @ [ "go Connectors", Palette_connectors ]
   @ [ "go MSX", Palette_msx ]
+  @ [ "go DOS", Palette_dos ]
   @ [ "go Lane Add-ons", Palette_lane_addons ]
   @ [ "go Logs", Palette_goto System_logs ]
   @ [ "go Metrics", Palette_goto Metrics ]
@@ -12119,7 +12125,7 @@ let palette_action_words = function
       | Repositories | Code | Changes | Connectors | Runtime | Config
       | Resources | Tools | System_logs )
   | Palette_browser_lane | Palette_hide_browser_lane | Palette_connectors
-  | Palette_msx
+  | Palette_msx | Palette_dos
   | Palette_lane_addons | Palette_config _ | Palette_gate_mode _
   | Palette_chat _ | Palette_task _ | Palette_board_hearth _
   | Palette_board_post _ | Palette_lsp _ ->

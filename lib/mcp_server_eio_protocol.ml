@@ -101,6 +101,15 @@ let with_required_auth ~base_path ~id ~requirement ?auth_token f =
   | Ok (auth_token, _cred) -> f auth_token
 ;;
 
+(* The credential the gate verified, [None] when the workspace runs without
+   auth. A handler that needs the caller's name reads it here; the bearer is a
+   secret and never names anyone. *)
+let with_required_credential ~base_path ~id ~requirement ?auth_token f =
+  match require_auth ~base_path ~requirement ~id ?auth_token () with
+  | Error e -> e
+  | Ok (_auth_token, credential) -> f credential
+;;
+
 let unavailable_tool_message name =
   Printf.sprintf "Tool '%s' is not available on this MCP endpoint." name
 ;;
@@ -986,12 +995,12 @@ let handle_request
                   ?auth_token
                   (fun _auth_token -> handle_get_prompt_eio state id req.params)
               | "tools/list" ->
-                with_required_auth
+                with_required_credential
                   ~base_path
                   ~id
                   ~requirement:Auth_requirement.Requires_auth
                   ?auth_token
-                  (fun auth_token ->
+                  (fun credential ->
                      match TP.requested_tool_list_params req.params with
                      | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_params msg
                      | Ok { include_usage = true; _ } when profile = Seat ->
@@ -1014,7 +1023,13 @@ let handle_request
                          ~include_hidden
                          ~include_usage
                          ?cursor
-                         ?agent_id:auth_token
+                         (* The same name tools/call looks the assignment
+                            up by. *)
+                         ?agent_id:
+                           (Option.map
+                              (fun (credential : Masc_domain.agent_credential) ->
+                                 credential.agent_name)
+                              credential)
                          state
                          id)
               | "tools/call" ->

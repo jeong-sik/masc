@@ -806,6 +806,12 @@
  (libraries base64 masc.masc_compression))
 
 (library
+ (name masc_tui_play_qr)
+ (wrapped false)
+ (modules masc_tui_play_qr)
+ (libraries qrc))
+
+(library
  (name masc_tui_link)
  (wrapped false)
  (modules masc_tui_link)
@@ -1747,6 +1753,7 @@
  (public_name masc-tui)
  (package masc)
  (libraries
+  masc_tui_play_qr
   masc_tui_account_login
   masc_tui_sgr_text
   masc_tui_emblem_screen

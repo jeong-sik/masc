@@ -42,6 +42,21 @@ in audit issue#39953: shared ownerless Goals, hard cut, and five explicit grades
   at26b0541d completed all four Python CLI cases through its Dune alias.
   Missing edit events are `not_observed`, not zero actual edits.
 
+## Remote roster defect and historical cache failures
+
+Cross27 run36595321621 at649adfa completed its targeted step with25/27
+successful suites. The real remote TUI passed the workspace-mismatch assertion
+but displayed no Keeper rows: the remote lifecycle roster did not populate the
+list that local metadata normally filled. This is an implementation defect,
+not successful remote PNG evidence. A fix must use authoritative remote data
+without inventing local configuration or re-enabling local reads on mismatch.
+
+The other failing suite was dashboard HTTP, with seven prepared-byte assertions.
+That older smoke fixture lacked portrait fields on its Keeper/continuity rows;
+the response overlay therefore changed its JSON. Equip parent9b304ffaf0 fixes
+those four fixture lines. Currency and f467 already contain them, and the
+currencyf86 dashboard suite passed all135cases. No cache assertion was weakened.
+
 ## Positive completion-to-payment coverage gap
 
 The inspected `test_candle_goal_flow` uses actual Goal tool creation,

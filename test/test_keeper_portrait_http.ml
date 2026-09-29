@@ -334,6 +334,28 @@ let test_router_leaves_keeper_metadata_untouched () =
 let test_purchase_equip_and_remote_portrait () =
   with_router (fun ~config router ->
     let base_path = config.Workspace.base_path in
+    let runtime_path = Filename.concat base_path "portrait-test-runtime.toml" in
+    Fs_compat.save_file runtime_path {|[runtime]
+default = "test_provider.test_model"
+[providers.test_provider]
+display-name = "Test Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+[test_provider.test_model]
+is-default = true
+max-concurrent = 1
+|};
+    require_ok Fun.id (Runtime.init_default ~config_path:runtime_path);
+    let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+    if not (String.starts_with ~prefix:(base_path ^ Filename.dir_sep) keepers_dir) then fail "Keeper fixture escaped workspace";
+    Fs_compat.mkdir_p keepers_dir;
+    Fs_compat.save_file (Filename.concat keepers_dir (keeper ^ ".toml"))
+      "[keeper]\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\ninstructions = \"portrait integration fixture\"\n";
     Candle_status.install_appraiser_check (fun () -> Ok ());
     let policy_path = Config_dir_resolver.candle_toml_path_for_base_path ~base_path in
     if not (String.starts_with ~prefix:base_path policy_path) then fail "policy escaped fixture";
@@ -390,6 +412,20 @@ beanie = 200
     let after = get ~router ~if_none_match:(header before "etag") (path ~size:"96" keeper) in
     check int "old tag does not conceal equipped item" 200 after.status;
     check bool "actual HTTP PNG changed" false (before.body = after.body);
+    (match Sys.getenv_opt "RUNNER_TEMP" with
+     | None -> ()
+     | Some root ->
+       let evidence = Filename.concat root "candle-equipped-portrait" in
+       Fs_compat.mkdir_p evidence;
+       Fs_compat.save_file (Filename.concat evidence "before.png") before.body;
+       Fs_compat.save_file (Filename.concat evidence "equipped.png") after.body;
+       Fs_compat.save_file (Filename.concat evidence "manifest.json")
+         (Yojson.Safe.pretty_to_string (`Assoc ["keeper",`String keeper;
+           "before",Keeper_portrait_equipment.to_json starting;
+           "equipped",Keeper_portrait_equipment.to_json expected;
+           "before_etag",`String (header before "etag");"equipped_etag",`String (header after "etag");
+           "build",Build_identity.to_yojson (Build_identity.current ());
+           "scope",`String "real HTTP router fixture after purchase and equip; not live deployment"]))) ;
     let stable = ledger_bytes () in
     let same = accepted (call id) in
     check bool "same choice is a no-op" false Yojson.Safe.Util.(same |> member "changed" |> to_bool);
@@ -400,10 +436,12 @@ beanie = 200
       ~name:"masc_keeper_list" ~args:(`Assoc ["detailed", `Bool true]) () with
       | Some result -> Yojson.Safe.from_string (Tool_result.message result)
       | None -> fail "public Keeper roster not registered" in
-    let row = match Yojson.Safe.Util.(roster |> member "keepers" |> to_list) with
-      | [row] -> row | _ -> fail "expected one Keeper roster row" in
-    let reading = require_ok Fun.id (Keeper_portrait_equipment.reading_of_json Yojson.Safe.Util.(member "portrait" row)) in
-    check bool "public roster supplies the equipped remote-renderer input" true
+    let runtime_rows, errors, _, _ = require_ok Fun.id (Tui_decode.decode_keeper_runtime_list roster) in
+    check int "public roster has no metadata error rows" 0 (List.length errors);
+    let reading = match runtime_rows with
+      | [row] -> row.Tui_decode.kr_portrait
+      | _ -> fail "expected one healthy decoded Keeper runtime row" in
+    check bool "public roster and real TUI decoder preserve equipped input" true
       (reading = Keeper_portrait_equipment.Ready expected);
     check bool "restart-style replay preserves current equipment" true
       (require_ok Fun.id (Candle_equipment.current ~base_path ~keeper) = expected);

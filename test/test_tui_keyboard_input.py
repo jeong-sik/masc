@@ -19816,6 +19816,23 @@ def dos_flat_frame(rgb: bytes) -> dict[str, object]:
     }
 
 
+def assert_dos_spectator_posts_are_setup(posts: HttpRequests) -> None:
+    """Observer setup is allowed; every other POST violates spectating."""
+    for path, body in posts:
+        if path == "/mcp":
+            try:
+                message = json.loads(body)
+            except (json.JSONDecodeError, UnicodeDecodeError) as error:
+                raise AssertionError("DOS spectator emitted malformed MCP JSON") from error
+            if (
+                isinstance(message, dict)
+                and message.get("jsonrpc") == "2.0"
+                and message.get("method") in ("initialize", "notifications/initialized")
+            ):
+                continue
+        raise AssertionError(f"DOS spectator emitted a non-setup POST: {path!r} {body!r}")
+
+
 def run_dos_live_regression(executable: str) -> None:
     """Watch the DOS machine through the live route (RFC machine-spectating
     stage 3). The menu offers it, the picture is drawn in its own shape, an
@@ -20007,10 +20024,9 @@ def run_dos_live_regression(executable: str) -> None:
         http_requests=posts,
     )
     # Check after fixture shutdown as well, so a completed POST cannot race
-    # the final terminal assertion. Every action above is observation-only:
-    # neither machine input nor DOS control/invite traffic is permitted.
-    if posts:
-        raise AssertionError(f"DOS spectator emitted mutation requests: {[path for path, _ in posts]!r}")
+    # the final terminal assertion. Startup may initialize the MCP observer,
+    # but neither tool calls nor machine input/control/invite POSTs are allowed.
+    assert_dos_spectator_posts_are_setup(posts)
 
 
 def run_msx_palette_regression(executable: str) -> None:

@@ -30,7 +30,7 @@
     whole dashboard projections and are identified but not retained here: a
     feed row has no use for a projection, and holding them would grow with
     every push. Nor are they read past their [type]: the server writes it as
-    the first member, and a projection can be a megabyte after it. *)
+    the first member, and a projection can run to megabytes after it. *)
 
 val initialize_request_body : client_version:string -> string
 (** The JSON-RPC [initialize] body the MCP transport needs before it will

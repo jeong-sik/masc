@@ -357,11 +357,12 @@ let test_every_whole_projection_push_decodes_as_a_snapshot () =
           (List.map summary (decode_all [ frame ])))
     Masc.Dashboard_event_slices.entries
 
-(* A whole-projection push is up to a megabyte after its type, and the feed
+(* A whole-projection push can run to megabytes after its type, and the feed
    keeps only the name, so the frame is not read past the type: a body that
    is not JSON still arrives as the snapshot it names. An event read from its
    fields is still parsed whole and refused when it is not JSON, and a type
-   that is not the first member is found by the whole parse. *)
+   that is not the first member is found by the whole parse, even when the
+   first member is another string. *)
 let test_a_frame_its_type_decides_is_not_read_past_the_type () =
   check (list string) "the snapshot is named without its body"
     [ "snapshot:operator_snapshot" ]
@@ -379,7 +380,12 @@ let test_a_frame_its_type_decides_is_not_read_past_the_type () =
   check (list string) "a type that is not the first member is still found"
     [ "snapshot:operator_snapshot" ]
     (List.map summary
-       (decode_all [ "data: {\"ts_unix\":1.0,\"type\":\"operator_snapshot\"}\n\n" ]))
+       (decode_all [ "data: {\"ts_unix\":1.0,\"type\":\"operator_snapshot\"}\n\n" ]));
+  check (list string) "a first member that is another string is not the type"
+    [ "heartbeat(alpha,-,in_turn=-)" ]
+    (List.map summary
+       (decode_all
+          [ "data: {\"name\":\"alpha\",\"type\":\"keeper_heartbeat\",\"ts_unix\":1.0}\n\n" ]))
 
 (* A delta has a slice too, and reading the table for "does this have one"
    rather than "does it replace a projection" would swallow this one: the

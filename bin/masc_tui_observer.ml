@@ -605,7 +605,7 @@ let leading_type payload =
   | exception (Yojson.Json_error _ | Yojson.End_of_object) -> None
 
 (* An event its type name decides is not read past the name: a
-   whole-projection push carries up to a megabyte after its type, and parsing
+   whole-projection push can carry megabytes after its type, and parsing
    it held the screen's only domain for about 10ms to keep the name alone.
    Such a frame is taken as the name says without the rest being checked.
    Every other event is parsed whole. *)

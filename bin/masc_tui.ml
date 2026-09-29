@@ -19827,8 +19827,9 @@ and is loaded on demand through keeper_skill.
                the compact fallback further down owns every remaining one, so
                yielding there would leave the operator on a terminal they
                cannot read with no way out but Ctrl-C. *)
-            (compact_viewport
-            || quit_key_allowed_for (text_input_target state ~compact_viewport))
+            (not state.about_open)
+            && (compact_viewport
+               || quit_key_allowed_for (text_input_target state ~compact_viewport))
             && Render_schedule.Input_shortcut.is_quit ~message_mode k
         | None -> false
       in
@@ -20928,7 +20929,7 @@ and is loaded on demand through keeper_skill.
           screen that is describing it. Quit stays global above. *)
        (* /about is modal for the help sheet's reason: Esc closes it, c turns
           the candle to its other style, and everything else is swallowed so
-          no surface binding fires under it. Quit stays global above. *)
+          no surface binding or global quit fires under it. *)
        | Some k when state.about_open ->
            (match k with
             | "esc" -> state.about_open <- false

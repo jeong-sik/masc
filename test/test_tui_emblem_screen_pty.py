@@ -364,6 +364,10 @@ def about_owns_the_keys(binary: str) -> None:
         h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
         h.send_and_wait(process, fd, output, b"i", h.COMPOSER_FOCUSED)
         h.send_and_wait(process, fd, output, b"/about\r", ABOUT_CAPTION)
+        h.write_all(fd, output, b"q")
+        h.wait_for_terminal_input_consumed(slave)
+        assert h.drain_until_quiet(process, fd, output, quiet=0.35, cap=1.5), \
+            "q did not settle the /about arrival"
         # i would focus the composer, the text would be its draft and Enter
         # would send it -- under /about none of that may happen.
         h.write_all(fd, output, b"i" + SWALLOWED_TEXT + b"\r")
@@ -414,13 +418,18 @@ def about_turns_the_candle(binary: str) -> None:
         h.send_and_wait(process, fd, output, b"/about\r", ABOUT_CAPTION)
         assert b"c:candle" in h.screen_text(bytes(output)), "/about does not say c turns the candle"
         transfer_after(process, fd, output, start, "painted")
-        # q skips the arrival and is consumed: it neither exits nor arms quit.
-        h.send_and_wait(process, fd, output, b"q", ABOUT_CAPTION)
-        assert process.poll() is None, "q quit instead of skipping /about motion"
-        assert h.drain_until_quiet(process, fd, output, quiet=0.35, cap=1.5), \
-            "skipping /about did not stop the animation clock"
+        assert h.drain_until_quiet(process, fd, output, quiet=0.35, cap=4.5), \
+            "/about did not reach its final frame"
+        # The settled overlay owns q too. Two presses would quit if the first
+        # had reached the global quit confirmation ahead of the modal handler.
+        h.write_all(fd, output, b"qq")
+        h.wait_for_terminal_input_consumed(_slave)
+        h.resize_and_wait(process, fd, output, rows=SCENARIO_ROWS,
+                          columns=RESIZED_COLUMNS, needle=ABOUT_CAPTION,
+                          controls=(h.FULL_REDRAW,))
+        assert process.poll() is None, "q quit from the settled /about screen"
         # The settled scene still answers c. Compare two full style cycles so
-        # a transfer already in flight before q cannot serve as the baseline.
+        # a transfer already in flight cannot serve as the baseline.
         start = len(output)
         h.write_all(fd, output, b"c")
         fields, dotted = transfer_after(process, fd, output, start, "dotted")

@@ -142,7 +142,9 @@ def mosaic_resizes(binary: str) -> None:
             caption = caption_row(rows, b"alpha")
             band = mosaic_rows(rows)
             assert len(band) >= 6 and all(caption < row <= caption + 12 for row in band), "mosaic escaped its reserved band"
-            assert caption >= 9, "portrait left fewer than eight rows for the roster"
+            # Row 1 is the tab strip; the roster starts at row 2. Its
+            # eight drawn rows leave four entries after its four chrome rows.
+            assert caption - 2 >= 8, "portrait left fewer than four selectable roster rows"
             assert_chat_intact(rows, b"alpha")
 
         visible()
@@ -175,7 +177,8 @@ def pixels_follow_conversation(binary: str) -> None:
         assert pictures, "chat sent no keeper portrait"
         row, column, alpha = pictures[-1]
         rows = screen(output)
-        assert row == caption_row(rows, b"alpha") + 1, "pixels are not below their caption"
+        caption = caption_row(rows, b"alpha")
+        assert row == caption + 1, f"pixels at row {row} are not below caption row {caption}"
         assert column == 10, "16-cell portrait is not centered in the 30-cell roster interior"
         assert row + 7 < h.screen_row_of(rows, b"Context"), "portrait crossed the full-width status row"
         assert not mosaic_rows(rows), "Kitty portrait also drew a mosaic"

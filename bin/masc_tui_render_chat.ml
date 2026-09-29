@@ -3707,12 +3707,15 @@ let render_keeper_message (state : state) =
       Option.iter (fun portrait ->
         box_line left_buf keeper_roster_pane_cols
           (Theme.recede () ^ " 대화 · " ^ display_keeper_name ^ Ansi.reset);
+        (* Anchor pixels to the actual caption, since the roster renderer can
+           emit fewer lines than its requested budget. *)
+        let picture_row = count_frame_lines left_buf in
         List.iter (box_line left_buf keeper_roster_pane_cols)
           portrait.Masc_tui_chat_portrait.picture_lines;
         box_bottom left_buf keeper_roster_pane_cols;
         Option.iter (fun (placement : Masc_tui_portrait_view.placement) ->
           Masc_tui_portrait_view.request
-            {placement with row = placement.row + strip_rows}) portrait.placement)
+            {placement with row = picture_row + strip_rows}) portrait.placement)
         portrait;
       write_two_panes buf ~left_cols:keeper_roster_pane_cols ~left:left_buf
         ~right:chat_buf

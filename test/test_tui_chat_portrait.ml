@@ -16,8 +16,8 @@ let test_space_and_identity () =
   let p = Option.get alpha.Chat.placement in
   check int "roster, caption, image and bottom use the existing left pane" 28
     (alpha.roster_rows + 1 + List.length alpha.picture_lines + 1);
-  check bool "at least four roster entries remain" true (alpha.roster_rows >= 8);
-  check int "pixels start below the chat-owner caption" (alpha.roster_rows + 1) p.row;
+  check bool "at least four roster entries remain" true (Masc_tui_frame.content_height ~rows:alpha.roster_rows >= 4);
+  check int "nominal placement reserves the caption row" (alpha.roster_rows + 1) p.row;
   check bool "pixels stay inside the roster border" true
     (p.column >= 2 && p.column + p.box.cols <= 32);
   check bool "pixels stay above the bottom border" true (p.row + p.box.rows < 28);
@@ -28,6 +28,18 @@ let test_space_and_identity () =
   check bool "changing the conversation changes the portrait" false
     (String.equal p.image.Keeper_portrait_draw.rgba
       (Option.get beta.placement).image.Keeper_portrait_draw.rgba)
+
+let test_four_selectable_roster_rows_are_the_boundary () =
+  let cache = Portrait.cache () in
+  List.iter (fun display ->
+    let band = Option.get (Portrait.band_size display) in
+    let minimum_rows = Masc_tui_frame.chrome_rows + 4 + band.rows + 2 in
+    check bool "one fewer row gives the space back to the roster" true
+      (Option.is_none (prepare cache ~display ~rows:(minimum_rows - 1) "alpha"));
+    let portrait = Option.get (prepare cache ~display ~rows:minimum_rows "alpha") in
+    check int "the first fitting portrait leaves four selectable rows" 4
+      (Masc_tui_frame.content_height ~rows:portrait.roster_rows))
+    [pixels; View.Mosaic]
 
 let test_small_and_colourless () =
   let cache = Portrait.cache () in
@@ -47,4 +59,5 @@ let test_small_and_colourless () =
 
 let () = run "chat portrait" ["conversation identity and layout", [
   test_case "owns its space and follows the conversation" `Quick test_space_and_identity;
+  test_case "reserves four selectable roster rows at the boundary" `Quick test_four_selectable_roster_rows_are_the_boundary;
   test_case "yields to space and colour preferences" `Quick test_small_and_colourless]]

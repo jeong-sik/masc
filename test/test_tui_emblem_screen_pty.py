@@ -469,7 +469,7 @@ def about_arrival_frames(binary: str, columns: int, *, reduced_motion: bool) -> 
             )
 
     def interact(process, fd, _slave, output, _base):
-        h.send_and_wait(process, fd, output, b"2", b"MASC Keepers")
+        h.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
         h.select_keeper_row(process, fd, output, b"alpha")
         h.send_and_wait(process, fd, output, b"c", CHAT_TITLE)
         start = len(output)

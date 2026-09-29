@@ -18,7 +18,7 @@ SOURCE_MODULES = (
 # wait searches from the start of the output, so it can match there and "r"
 # can go out before the first lane reading it is meant to refresh.
 LANES_OBSERVED = re.compile(
-    rb"Standalone LLM lanes \xc2\xb7 observed \d{2}:\d{2}:\d{2}"
+    rb"Lanes \xc2\xb7 observed \d{2}:\d{2}:\d{2}"
 )
 
 def run(executable: str) -> None:

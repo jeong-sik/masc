@@ -67,10 +67,6 @@ Codex 가 한도를 매기는 단위는 홈이 아니라 **ChatGPT 계정**이�
   이 결과는 운영자에게 보여 주는 사용량 표에 들어간다. 거절은 `limit_id`를 주지 않으므로
   읽기 결과의 버킷을 거절된 호출에 연결할 수 없다. 기존 `Observed`를 유지하고 리셋을 추론하지 않는다.
 
-||||||| c6238c3deb
-  이 결과는 운영자에게 보여 주는 사용량 표에 들어간다. 모델 호출을 막는 창이 다 찼고 리셋 시각이 아직 오지 않았으면,
-  403 뒤 읽기와 같은 규칙으로 같은 scope 를 그 시각까지 쉬게 한다 (`lib/runtime/runtime_provider_usage_read.ml`, `read_codex_after_spent_usage_refusal`).
-
 ### 사용량 창이 기록되고 보이는 길
 
 - 서버가 시작할 때 scope 마다 한 번 읽는다. 같은 scope 의 runtime 이 여럿이면 한 번만 읽는다

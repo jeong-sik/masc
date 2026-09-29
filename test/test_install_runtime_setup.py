@@ -586,6 +586,34 @@ class RuntimeSetupAdapter(unittest.TestCase):
         with self.assertRaises(SETUP.SetupError):
             configure(receipt, verify=False)
 
+    def test_partly_checked_receipt_names_what_was_not_checked_again(self):
+        # A save that left a bound runtime uncalled is neither verified nor
+        # usage-limited. The receipt says which, and a verified receipt that
+        # carries the same list is refused instead of read as a full check.
+        receipt = dict(runtime_id='native.model', runtime_ids=['native.model'], configured=True, validation='passed',
+                       readiness='partly_checked', unverified=[], not_rechecked=['native.model'])
+        def configure(answer, verify=True):
+            with patch.object(SETUP, 'render', return_value=('native.model', b'', b'')), \
+                    patch.object(SETUP, 'native_setup_command', return_value=answer):
+                return SETUP.configure_many('/fixture/masc', self.base, [spec()], verify=verify,
+                                            expected_revision=self.revision)
+        with patch.object(SETUP.sys, 'stderr', io.StringIO()) as stderr:
+            self.assertEqual(configure(receipt)['readiness'], 'partly_checked')
+        self.assertIn('Saved without checking these again: native.model', stderr.getvalue())
+        limited = dict(receipt, unverified=[dict(runtime_id='native.model', code='quota_exhausted')])
+        with patch.object(SETUP.sys, 'stderr', io.StringIO()) as stderr:
+            self.assertEqual(configure(limited)['readiness'], 'partly_checked')
+        self.assertIn('native.model (quota_exhausted)', stderr.getvalue())
+        for unreadable in (dict(receipt, not_rechecked=[]),
+                           dict(receipt, not_rechecked=['other.model']),
+                           dict(receipt, unverified=[dict(runtime_id='other.model', code='quota_exhausted')]),
+                           dict(receipt, readiness='verified'),
+                           dict(receipt, readiness='verified', unverified=None)):
+            with self.assertRaises(SETUP.SetupError):
+                configure(unreadable)
+        with self.assertRaises(SETUP.SetupError):
+            configure(receipt, verify=False)
+
     def test_lost_commit_receipt_does_not_delete_selected_credentials(self):
         key = self.base / 'pending-key'
         key.write_text('fixture-only-private-key')
@@ -1562,19 +1590,19 @@ class InstalledModelCatalog(unittest.TestCase):
         self.assertNotEqual(unknown.returncode,0)
         self.assertEqual(unknown.stdout,'')
 
-    def test_claude_list_includes_sonnet5_and_selects_without_context_question(self):
+    def test_claude_list_includes_sonnet5_5_and_selects_without_context_question(self):
         result=subprocess.run([BINARY,'runtime-model-list','claude-code'],check=True,capture_output=True,text=True)
         catalog=json.loads(result.stdout)
         self.assertIs(catalog['account_availability_verified'],False)
         models=catalog['models']
-        sonnet=next(row for row in models if row['id']=='claude-sonnet-5')
+        sonnet=next(row for row in models if row['id']=='claude-sonnet-5-5')
         self.assertEqual(sonnet['max_context'],1000000)
         self.assertTrue(all(row['id'].startswith('claude-') and row['max_context']>0 for row in models))
         self.assertNotIn('claude_code',{row['id'] for row in models})
         index=models.index(sonnet)+1
         with patch('sys.stdin',io.StringIO(str(index)+'\n')), contextlib.redirect_stderr(io.StringIO()) as terminal:
             selected=SETUP.select_model(BINARY,'claude_code')
-        self.assertEqual(selected,dict(model='claude-sonnet-5',max_context=1000000))
+        self.assertEqual(selected,dict(model='claude-sonnet-5-5',max_context=1000000))
         self.assertIn('No number to enter',terminal.getvalue())
         self.assertNotIn('Documented/configured context limit',terminal.getvalue())
 

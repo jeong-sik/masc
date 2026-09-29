@@ -693,8 +693,15 @@ let test_memory_footer_offers_the_fact_browser () =
      moving a cursor through it, and Esc clears that filter before it leaves,
      so both are named the way the fact browser names them. *)
   check str "the health table names the way into the facts"
-    "j/k:move  PgUp/PgDn:page  Home/End:top/bottom  Enter:facts  a / A:all fleet  s:sort  Esc:clear / back  /:filter  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:move  PgUp/PgDn:page  Home/End:top/bottom  Enter:facts  a / A:all fleet  s:sort  d:detail  Esc:clear / back  /:filter  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Memory);
+  (* #39831: the block under the selected keeper folds its ledger rows until
+     [d] asks for them, so the key has to be on the surface it toggles. *)
+  check Alcotest.bool "d toggles the keeper detail on the Memory table" true
+    (List.exists
+       (fun (binding : Masc_tui_keys.binding) ->
+          String.equal binding.Masc_tui_keys.key "d")
+       (Masc_tui_keys.for_surface Memory));
   check Alcotest.bool "the dead bracket hint is gone" false
     (List.exists
        (fun (binding : Masc_tui_keys.binding) ->
@@ -2659,6 +2666,7 @@ let test_board_without_posts_offers_nothing_to_search () =
 let planning_goal_row id title =
   { pg_id = id
   ; pg_title = title
+  ; pg_owner = Goal_store.Unknown_owner
   ; pg_phase = Goal_phase.Executing
   ; pg_priority = 1
   ; pg_due_date = None

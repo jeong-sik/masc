@@ -716,12 +716,96 @@ let test_operator_confirmation_binds_current_proof () =
   (match confirm () with Error _ -> () | Ok _ -> fail "changed criterion accepted stale proof")
 ;;
 
+
+(* {1 The caller's step after a confirmation is recorded} *)
+
+let goal_awaiting_confirmation config title =
+  let goal, _ = match Goal_store.upsert_goal config ~title
+    ~metric:"observed artifacts" ~target_value:"1" () with
+    | Ok value -> value | Error error -> fail (Goal_store.write_error_to_string error) in
+  ignore (request_complete config goal.id);
+  check string "the verifier proves it" "awaiting_confirmation"
+    (transition_phase (prove_complete config goal.id));
+  let verdict = match Goal_verification.get_record_authoritative config ~goal_id:goal.id with
+    | Ok (Some {completion = Goal_verification.Proof_proven verdict; _}) -> verdict
+    | _ -> fail "missing current proof" in
+  goal, verdict
+;;
+
+let confirm_with ?after_confirmation config (goal : Goal_store.goal)
+    (verdict : Goal_verification.verdict) =
+  Workspace_goals.confirm_completion ?after_confirmation config ~goal_id:goal.id
+    ~operator_id:"operator-a" ~criterion_revision:goal.criterion_revision
+    ~request_id:verdict.request_id ~verification_run_id:verdict.verification_run_id
+;;
+
+let phase_of_confirmation = function
+  | Ok json -> Yojson.Safe.Util.(member "goal" json |> member "phase" |> to_string)
+  | Error error -> fail (Goal_store.write_error_to_string error)
+;;
+
+let test_confirmation_step_runs_once_the_confirmation_is_recorded () =
+  with_workspace @@ fun config ->
+  let goal, verdict = goal_awaiting_confirmation config "Step after confirmation" in
+  let seen = ref [] in
+  let step (g : Goal_store.goal) (v : Goal_verification.verdict)
+      (c : Goal_verification.confirmation) =
+    let recorded = match Goal_verification.get_record_authoritative config ~goal_id:g.Goal_store.id with
+      | Ok (Some {completion = Goal_verification.Human_confirmed _; _}) -> true
+      | _ -> false in
+    seen := (g.Goal_store.id, v.Goal_verification.request_id,
+             c.Goal_verification.operator_id, recorded,
+             Goal_phase.to_string g.Goal_store.phase) :: !seen;
+    Ok () in
+  check string "the confirmation completes the goal" "completed"
+    (phase_of_confirmation (confirm_with ~after_confirmation:step config goal verdict));
+  (match !seen with
+   | [ (id, request_id, operator, recorded, phase) ] ->
+     check string "names the Goal" goal.id id;
+     check string "names the confirmed request" verdict.request_id request_id;
+     check string "names the operator" "operator-a" operator;
+     check bool "the confirmation is already in the ledger" true recorded;
+     check string "the phase is not written yet" "awaiting_confirmation" phase
+   | calls -> fail (Printf.sprintf "expected one call, got %d" (List.length calls)));
+  (* A repeated confirmation of a Completed Goal runs the step again. *)
+  check string "a repeat answers the same" "completed"
+    (phase_of_confirmation (confirm_with ~after_confirmation:step config goal verdict));
+  check int "the repeat ran the step again" 2 (List.length !seen)
+;;
+
+let test_a_refusing_confirmation_step_keeps_the_confirmation_retryable () =
+  with_workspace @@ fun config ->
+  let goal, verdict = goal_awaiting_confirmation config "Step refuses confirmation" in
+  (match confirm_with ~after_confirmation:(fun _ _ _ -> Error "candle ledger unavailable")
+           config goal verdict with
+   | Error (Goal_store.Rejected message) ->
+     check string "the refusal reaches the caller" "candle ledger unavailable" message
+   | Error other -> fail ("expected Rejected, got " ^ Goal_store.write_error_to_string other)
+   | Ok _ -> fail "a refusing step did not stop the confirmation");
+  (match Goal_store.find_goal config ~goal_id:goal.id with
+   | Goal_store.Goal_found stored ->
+     check string "the phase did not move" "awaiting_confirmation"
+       (Goal_phase.to_string stored.Goal_store.phase)
+   | Goal_store.Goal_absent | Goal_store.Store_unavailable _ -> fail "goal not readable");
+  (match Goal_verification.get_record_authoritative config ~goal_id:goal.id with
+   | Ok (Some {completion = Goal_verification.Human_confirmed (_, confirmation); _}) ->
+     check string "the confirmation stays recorded" "operator-a"
+       confirmation.Goal_verification.operator_id
+   | _ -> fail "the confirmation was not kept");
+  check string "confirming again completes it" "completed"
+    (phase_of_confirmation (confirm_with config goal verdict))
+;;
+
 let () =
   run
     "goal_tools"
     [ ( "tool_workspace"
       , [ test_case "confirmation requires token-bound operator" `Quick test_confirmation_uses_token_bound_operator
         ; test_case "operator confirms exact current proof" `Quick test_operator_confirmation_binds_current_proof
+        ; test_case "a confirmation step runs once the confirmation is recorded" `Quick
+            test_confirmation_step_runs_once_the_confirmation_is_recorded
+        ; test_case "a refusing confirmation step keeps the confirmation retryable" `Quick
+            test_a_refusing_confirmation_step_keeps_the_confirmation_retryable
         ; test_case "upsert and list" `Quick test_goal_upsert_and_list
         ; test_case "list preserves source failure" `Quick test_goal_list_preserves_source_failure
         ; test_case "list answers the Unavailable envelope on #34459 rows" `Quick

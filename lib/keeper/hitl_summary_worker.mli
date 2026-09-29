@@ -86,14 +86,16 @@ val spawn
     [Conclusive_terminalization] permits the caller to drain later owner work. *)
 
 module For_testing : sig
+  val next_observed_outcome : flow_outcome option -> flow_outcome -> flow_outcome option
+  (** Source resolution cannot erase an earlier execution or semantic failure. *)
+
   val run_outcome_of_observed_summary
     :  last_outcome:flow_outcome option
     -> Keeper_approval_queue_rules_types.hitl_context_summary option
     -> Exact_lane_run_registry.outcome * Yojson.Safe.t
-  (** [last_outcome] is the branch the flow last recorded. A flow that ends
-      with no summary reports that branch as the run's failure code, which is
-      the only thing distinguishing a candidate exhaustion from a provider
-      failure once the summary is absent. *)
+  (** [last_outcome] is the preserved terminal branch. A missing summary is a
+      failure except for source resolution with no prior failure, which is a
+      cancellation with an explicit unrecorded-judgment reason. *)
 
   val system_prompt : unit -> (string, string) result
 

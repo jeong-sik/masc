@@ -307,6 +307,9 @@ let chat_markdown_palette ~closing : Markdown.palette =
   ; emphasis = (Ansi.italic, Ansi.no_italic)
   ; strike = (Ansi.strike, Ansi.no_strike)
   ; code = (Theme.Syntax.code_span, closing)
+  (* QR contrast is functional, even under NO_COLOR. The source is sanitized
+     before Markdown creates these SGRs, so a guest cannot inject escapes. *)
+  ; code_qr = ("\027[30;47m", "\027[0m" ^ closing)
   (* Bold alone. [white] is a colour like any other -- on a light background
      it is the background -- so painting a heading with it hid the heading on
      exactly the terminals that read it as text. Bold already says heading. *)
@@ -2026,57 +2029,27 @@ let ask_block f =
 
 
 let question_hints (state : state) =
-    (* One name for the key in both modes. [ and ] call the same function
-       either way -- they walk the asks -- and the surface used to call that
-       "question" while browsing and "ask" while answering, which is the same
-       key asking the operator to learn it twice. Named once here so the two
-       footers cannot drift apart again.
-
-       The vocabulary is the repository's: [/] walks the container a surface
-       is a list of. Board says post, Changes says keeper, this says ask. *)
-    let walk_asks = "[/]:ask" in
-    match state.ask_answer_mode with
-    | Ask_browsing ->
-        Printf.sprintf
-          "j/k:move  y / n:decide  w:Workspace mode  e:Outside mode  %s  a:answer a question  \
-           r:refresh  Tab:next"
-          walk_asks
-    | Ask_answering { aam_ask_id } -> (
-        match state.ask_text_entry with
-        (* Typing owns the keyboard, so the footer stops offering the keys it
-           has taken: the digits are text here, not choices. *)
-        | Some _ -> "Enter:save  Esc:cancel"
-        | None ->
-            (* Say when the next Enter sends. The approval queue two panes up
-               already draws its armed state; this one announced itself only as
-               an event, on a surface that draws no events, so the first Enter
-               looked like a key that had not landed. *)
-            (match state.pending_ask_submit with
-             | Some armed when String.equal armed aam_ask_id ->
-                 "Press Enter again to send  |  s:skip  c:clear  Esc:back"
-             | Some _ | None ->
-                 (* Only the keys the selected question answers to. A question
-                    can arrive with no choices at all -- the server accepts one
-                    as long as it welcomes free text -- and there [1-9] does
-                    nothing, which reads as a pane that has stopped listening
-                    rather than as a key that was never for this question. *)
-                 let question = selected_ask_question state in
-                 let has_choices =
-                   match question with
-                   | Some (q : Masc.Tui_decode.ask_question) ->
-                       q.Masc.Tui_decode.aq_choices <> []
-                   | None -> false
-                 in
-                 let takes_text =
-                   match question with
-                   | Some _ -> true
-                   | None -> false
-                 in
-                 Printf.sprintf "Left/Right:question  PgUp/PgDn:scroll  %s  %s%ss:skip  c:clear  \
-                                 Enter:answer  Esc:back"
-                   walk_asks
-                   (if has_choices then "1-9:pick  " else "")
-                   (if takes_text then "t:write  " else "")))
+  let open Masc_tui_keys in
+  match state.ask_answer_mode with
+  | Ask_browsing -> footer_hints_approvals Approval_browsing
+  | Ask_answering { aam_ask_id } ->
+      (match state.ask_text_entry with
+       | Some _ -> footer_hints_approvals Approval_writing
+       | None ->
+           match state.pending_ask_submit with
+           | Some armed when String.equal armed aam_ask_id ->
+               footer_hints_approvals Approval_armed
+           | Some _ | None ->
+               let question = selected_ask_question state in
+               let has_choices =
+                 match question with
+                 | Some (q : Masc.Tui_decode.ask_question) ->
+                     q.Masc.Tui_decode.aq_choices <> []
+                 | None -> false
+               in
+               let takes_text = Option.is_some question in
+               footer_hints_approvals
+                 (Approval_answering { has_choices; takes_text }))
 let question_asks (state : state) =
   match state.asks_snapshot with
   | None -> []
@@ -3121,6 +3094,24 @@ let runtime_quota_badge (runtime : Masc.Tui_decode.runtime_option) =
              Printf.sprintf "quota exhausted (resets %02d:%02d)"
                tm.Unix.tm_hour tm.Unix.tm_min
            | None -> "quota exhausted (no reset stated)")
+        ^ Ansi.reset )
+
+(* The other half of "alive on paper": this process saw a 429 on the runtime
+   whose provider wait has not ended and no successful answer has cleared.
+   It is a different fact from the quota
+   window above, so a runtime can carry both. [resets_at] is the provider's
+   own Retry-After and is present only while it is still ahead. *)
+let runtime_rate_limit_badge (runtime : Masc.Tui_decode.runtime_option) =
+  if not runtime.ro_rate_limited then None
+  else
+    Some
+      ( (Theme.warn ())
+        ^ (match runtime.ro_rate_limit_resets_at with
+           | Some resets_at ->
+             let tm = Unix.localtime resets_at in
+             Printf.sprintf "rate limited (retry %02d:%02d)" tm.Unix.tm_hour
+               tm.Unix.tm_min
+           | None -> "rate limited")
         ^ Ansi.reset )
 
 

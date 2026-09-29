@@ -79,13 +79,13 @@ Check [GitHub Releases](https://github.com/jeong-sik/masc/releases) for binary a
 
 ### Published binaries
 
-Download the installer attached to [GitHub Releases](https://github.com/jeong-sik/masc/releases/tag/v0.47.0).
+Download the installer attached to [GitHub Releases](https://github.com/jeong-sik/masc/releases/tag/v0.48.0).
 It verifies and installs the assets for the selected release.
 
-> Installation target: v0.47.0 (check tag availability on GitHub Releases).
+> Installation target: v0.48.0 (check tag availability on GitHub Releases).
 
 ```bash
-TAG=v0.47.0
+TAG=v0.48.0
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
 bash /tmp/masc-install.sh --version "$TAG"
@@ -187,6 +187,8 @@ and then needs `OLLAMA_CLOUD_API_KEY` in the shell.
 | `masc-tui --base-path <dir>` | Opens the TUI by name |
 | `masc setup --base-path <dir>` | Prepares Docker, starts the existing `imp`, and opens the TUI |
 | `masc init --base-path <dir>` | Seeds `.masc/config/` from the assets embedded in the binary, including one Keeper, `imp`, with `activation_mode = "manual"` |
+
+To rebuild and restart **all** local TUI processes named `masc_tui.exe` or `masc-tui`, first inspect the target PIDs with `scripts/tui-graceful-restart.sh --dry-run`. If every listed session may be closed, run `scripts/tui-graceful-restart.sh --build`; it builds first, waits for each old process's graceful SIGTERM exit log, then starts one new TUI. The script searches system-wide, including other checkouts and installed copies; `--base-path` does not limit which processes it stops. See the [TUI guide](docs/TUI-GUIDE.md).
 
 `--base-path` is the directory that holds `.masc`, not `.masc` itself. Every
 command picks the workspace in one order: `--base-path`, then `MASC_BASE_PATH`,

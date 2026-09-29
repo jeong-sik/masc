@@ -701,18 +701,19 @@ let test_curator_inventory_canonical_owner_discovery () =
     write_keeper_config ~name:"actual" ~keepers_dir ~keeper_id:"alias" ();
     ignore (write_snapshot ~keepers_dir ~keeper_id:"actual" [fact "Keep canonical attribution"]);
     Fs_compat.save_file (Filename.concat keepers_dir "broken.toml") "[keeper\n";
-    let inventory = Inventory.collect ~base_path:base |> require_ok |> Inventory.to_json in
+    let inventory = Inventory.collect ~base_path:base |> require_ok |> Inventory.keepers in
     Alcotest.(check (list string)) "canonical owner is not duplicated under filename alias"
-      ["actual"] (list_field "snapshots" inventory |> List.map (string_field "keeper_id")
-        |> List.sort_uniq String.compare);
+      ["actual"; "broken"] (List.map (fun (row : Inventory.keeper) -> row.keeper_id) inventory);
     Alcotest.(check (list string)) "invalid config basename remains visible in missing-store gaps"
-      ["actual"; "broken"] (list_field "gaps" inventory |> List.map (string_field "keeper_id")
-        |> List.sort_uniq String.compare))
+      ["broken"] (inventory |> List.filter_map (fun (row : Inventory.keeper) ->
+        match row.ordinary, row.source_bound with
+        | Inventory.Missing, Inventory.Missing -> Some row.keeper_id
+        | _ -> None)))
 ;;
 
 let test_curator_inventory_binds_actual_commits () =
   let module Inventory = Masc.Workspace_memory_context in
-  let module Proposals = Masc.Workspace_memory_proposal in
+  let module Ledger = Masc.Workspace_memory_ledger in
   let base = fresh_dir "workspace-curator-inventory" in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base) (fun () ->
     let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
@@ -722,33 +723,21 @@ let test_curator_inventory_binds_actual_commits () =
     let unchanged = Inventory.collect ~base_path:base |> require_ok in
     Alcotest.(check string) "observation time does not trigger another model pass"
       (Inventory.fingerprint before) (Inventory.fingerprint unchanged);
-    let captured_input = Inventory.to_json before in
-    let source_ids = list_field "sources" captured_input |> List.map (string_field "source_id") in
-    let proposal = `Assoc ["shared_claims", `List []; "conflicts", `List [];
-      "excluded", `List (List.map (fun id -> `Assoc ["source_id", `String id;
-        "reason", `String "This test does not make a semantic decision"]) source_ids)] in
-    let bound = Inventory.proposal_json before proposal in
-    ignore (Proposals.decode bound |> require_ok);
+    let captured = Ledger.reconcile Ledger.empty (Inventory.keepers before) in
+    Alcotest.(check int) "both current facts are pending" 2 (List.length captured.new_facts);
     ignore (write_snapshot ~keepers_dir ~keeper_id:"writer" []);
     let changed = Inventory.collect ~base_path:base |> require_ok in
     Alcotest.(check bool) "actual retraction changes the inventory" true
       (Inventory.fingerprint before <> Inventory.fingerprint changed);
-    Alcotest.(check bool) "in-flight input remains immutable" true
-      (Yojson.Safe.equal captured_input (Inventory.to_json before));
-    let after_json = Inventory.to_json changed in
-    let snapshots = list_field "snapshots" after_json in
-    let writer = List.find (fun row -> string_field "keeper_id" row = "writer") snapshots in
-    let writer_id = string_field "snapshot_id" writer in
-    let evidence = list_field "sources" after_json |> List.filter (fun row ->
-      string_field "snapshot_id" row = writer_id) in
-    Alcotest.(check bool) "empty current facts retain retraction evidence" true
-      (List.exists (fun row -> Yojson.Safe.Util.member "evidence_path" row = `List [`String "change"]) evidence);
+    Alcotest.(check int) "in-flight facts stay captured" 2 (List.length captured.current_facts);
+    Alcotest.(check int) "writer retraction removes one current fact" 1
+      (List.length (Ledger.reconcile Ledger.empty (Inventory.keepers changed)).current_facts);
     Fs_compat.save_file (Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"reviewer") "{broken";
-    let unavailable = Inventory.collect ~base_path:base |> require_ok |> Inventory.to_json in
-    Alcotest.(check bool) "corruption stays a gap rather than an empty successful store" true
-      (list_field "gaps" unavailable |> List.exists (fun row ->
-        string_field "keeper_id" row = "reviewer" && string_field "store" row = "ordinary"
-        && string_field "status" (Yojson.Safe.Util.member "observation" row) = "unavailable")))
+    let unavailable = Inventory.collect ~base_path:base |> require_ok |> Inventory.keepers in
+    Alcotest.(check bool) "corruption remains an unavailable store" true
+      (List.exists (fun (row : Inventory.keeper) ->
+        row.keeper_id = "reviewer" && match row.ordinary with
+        | Inventory.Unavailable _ -> true | _ -> false) unavailable))
 ;;
 
 let test_context_cycle_separates_saved_and_prepared () =

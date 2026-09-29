@@ -75,6 +75,12 @@ val verify_mcp_auth :
   base_path:string -> Httpun.Request.t -> ('a option, Masc_domain.masc_error) result
 (** Bearer token check for the [/mcp] endpoint. *)
 
+val verify_seat_mcp_auth :
+  base_path:string -> Httpun.Request.t -> ('a option, Masc_domain.masc_error) result
+(** Bearer token check for the seat door [/mcp/play]: the same as
+    {!verify_mcp_auth} but asking [CanPlayMachine], which an invite's
+    [Player] credential holds (RFC play-link-for-the-shared-machine §2.7). *)
+
 val verify_mcp_auth_for_authority :
   base_path:string ->
   request_authority:Server_request_authority.authority ->
@@ -221,6 +227,10 @@ val http_status_of_auth_error :
 
 val current_server_state : unit -> Mcp_server.server_state option
 (** Return the currently published process-wide server state snapshot. *)
+
+val ready_server_state : unit -> Mcp_server.server_state option
+(** Return the published state only after the startup readiness barrier. Both
+    [/health/ready] and public HTTP admission use this same condition. *)
 
 val publish_server_state : Mcp_server.server_state -> unit
 (** Atomically publish the initialized process-wide server state. *)
@@ -400,9 +410,14 @@ val authorize_optional_token_bound_permission_request :
     return its canonical agent name. Malformed, empty, invalid, or
     underprivileged credentials are errors rather than anonymous fallbacks. *)
 
+val not_initialized_status : [ `Service_unavailable ]
+(** HTTP 503 until the startup readiness barrier and state publication agree. *)
+
+val not_initialized_headers : (string * string) list
+(** A short HTTP retry hint for an otherwise healthy listener. *)
+
 val not_initialized_response : string -> string
-(** JSON body returned when the server is up but [server_state] is
-    not yet hydrated. *)
+(** JSON body returned with {!not_initialized_status} while the server warms up. *)
 
 val with_public_read :
   (Mcp_server.server_state ->

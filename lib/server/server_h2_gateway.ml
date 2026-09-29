@@ -35,6 +35,7 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
     | Server_mcp_transport_http.Full -> Mcp_eio.Full
     | Server_mcp_transport_http.Managed_agent -> Mcp_eio.Managed_agent
     | Server_mcp_transport_http.Operator_remote -> Mcp_eio.Operator_remote
+    | Server_mcp_transport_http.Seat -> Mcp_eio.Seat
   in
   (* ═══════════════════════════════════════════════════════════════════════
      Route-local query helpers
@@ -138,7 +139,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
      | _ -> ())
   in
 
-  (* The route match below admits exactly four MCP paths; classifying them
+  (* The route match below admits exactly five MCP paths; classifying them
      here again must therefore never invent a profile for anything else. An
      unrouted path reaching this classifier is route-table drift, and a loud
      failure beats silently granting the widest (Full) surface (#8605
@@ -147,6 +148,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
     match path with
     | "/mcp/managed" -> Server_mcp_transport_http.Managed_agent
     | "/mcp/operator" -> Server_mcp_transport_http.Operator_remote
+    | "/mcp/play" -> Server_mcp_transport_http.Seat
     | "/mcp" | "/" -> Server_mcp_transport_http.Full
     | unrouted ->
       invalid_arg ("mcp profile requested for unrouted path: " ^ unrouted)
@@ -182,7 +184,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
       | None -> [ "vary", "Origin" ]
     in
     (* [with_server_state] (#9793): HTTP-layer wrapper around
-       [get_server_state_result]. Returns a controlled 500 JSON error when
+       [get_server_state_result]. Returns a controlled 503 JSON response when
        server state is not initialized, instead of crashing the request
        fiber. Mirrors the pattern [handle_post_graphql] already uses. *)
     let with_server_state h2_reqd f =
@@ -191,7 +193,8 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
       | Error message ->
           h2_respond_json h2_reqd
             (server_state_error_json message)
-            ~status:`Internal_server_error ~extra_headers:cors
+            ~status:(not_initialized_status :> H2.Status.t)
+            ~extra_headers:(not_initialized_headers @ cors)
     in
     let h2_respond_auth_error h2_reqd err =
       let status, body =
@@ -308,12 +311,13 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
     in
     let with_h2_public_read h2_reqd f =
       let with_initialized_state f =
-        match get_server_state_result () with
-        | Ok state -> f state
-        | Error _message ->
+        match ready_server_state () with
+        | Some state -> f state
+        | None ->
             h2_respond_json h2_reqd
               (not_initialized_response path)
-              ~extra_headers:cors
+              ~status:(not_initialized_status :> H2.Status.t)
+              ~extra_headers:(not_initialized_headers @ cors)
       in
       if http_auth_strict_enabled () && not (is_public_read_path path)
       then
@@ -460,7 +464,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
       | `GET, p when String.equal p Server_health_paths.readiness ->
           let current = Server_startup_state.snapshot () in
           let json, status =
-            if current.state_ready then
+            if Option.is_some (ready_server_state ()) then
               (`Assoc [
                  ("ready", `Bool true);
                  ("phase", `String (Server_startup_state.phase_to_string current.phase));
@@ -621,7 +625,8 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
       | `POST, "/mcp"
       | `POST, "/"
       | `POST, "/mcp/managed"
-      | `POST, "/mcp/operator" ->
+      | `POST, "/mcp/operator"
+      | `POST, "/mcp/play" ->
           let session_id = match session_id_opt with
             | Some id -> id
             | None -> Mcp_session.generate ()
@@ -653,6 +658,10 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                      Server_mcp_transport_http_types.auth_failure_of_masc_error
             | Server_mcp_transport_http.Operator_remote ->
                 verify_operator_mcp_auth ~base_path httpun_request
+                |> Result.map_error
+                     Server_mcp_transport_http_types.auth_failure_of_masc_error
+            | Server_mcp_transport_http.Seat ->
+                verify_seat_mcp_auth ~base_path httpun_request
                 |> Result.map_error
                      Server_mcp_transport_http_types.auth_failure_of_masc_error
           in
@@ -747,13 +756,15 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                                    ~extra_headers:(cors @ mcp_headers session_id protocol_version)
                              | Ok post_context ->
                                  with_server_state h2_reqd (fun state ->
+                                   let serves_listen =
+                                     Server_mcp_transport_http
+                                     .serves_subscriptions_listen ~profile
+                                       post_context.body_str
+                                   in
                                    let profile =
                                      mcp_eio_profile_of_transport_profile profile
                                    in
-                                   if
-                                     Server_mcp_transport_http
-                                     .body_is_subscriptions_listen
-                                       post_context.body_str
+                                   if serves_listen
                                    then
                                      serve_subscriptions_listen_h2 ~sw:request_sw ~clock
                                        ~cors ~body_str:post_context.body_str
@@ -822,7 +833,8 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
 
       | `DELETE, "/mcp"
       | `DELETE, "/mcp/managed"
-      | `DELETE, "/mcp/operator" ->
+      | `DELETE, "/mcp/operator"
+      | `DELETE, "/mcp/play" ->
           let profile = profile_for_mcp_path path in
           let base_path = match current_server_state () with
             | Some s -> (Mcp_server.workspace_config s).base_path
@@ -837,6 +849,10 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                      Server_mcp_transport_http_types.auth_failure_of_masc_error
             | Server_mcp_transport_http.Operator_remote ->
                 verify_operator_mcp_auth ~base_path httpun_request
+                |> Result.map_error
+                     Server_mcp_transport_http_types.auth_failure_of_masc_error
+            | Server_mcp_transport_http.Seat ->
+                verify_seat_mcp_auth ~base_path httpun_request
                 |> Result.map_error
                      Server_mcp_transport_http_types.auth_failure_of_masc_error
           in
@@ -903,10 +919,10 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
          Dashboard
          ───────────────────────────────────────────────────────────────────── *)
       | `GET, "/dashboard" | `GET, "/dashboard/" ->
-          h2_respond_dashboard_index ()
+          with_h2_public_read h2_reqd (fun _state -> h2_respond_dashboard_index ())
 
       | `GET, p when is_dashboard_spa_deep_link p ->
-          h2_respond_dashboard_index ()
+          with_h2_public_read h2_reqd (fun _state -> h2_respond_dashboard_index ())
 
       (* ─────────────────────────────────────────────────────────────────────
          GraphQL

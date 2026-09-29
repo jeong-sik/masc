@@ -571,7 +571,6 @@ let test_deployment_agent_core_model_catalog_preserve_axes_resolve () =
    check cannot see. *)
 let openrouter_seed_runtimes =
   [ "openrouter.openrouter-claude-opus-5", "anthropic/claude-opus-5"
-  ; "openrouter.openrouter-claude-sonnet-5", "anthropic/claude-sonnet-5"
   ; "openrouter.openrouter-gpt-5-5", "openai/gpt-5.5"
   ; "openrouter.openrouter-gpt-5-6-sol", "openai/gpt-5.6-sol"
   ; "openrouter.openrouter-gemini-3-8-flash", "google/gemini-3.8-flash"

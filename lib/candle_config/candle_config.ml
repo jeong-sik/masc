@@ -27,14 +27,22 @@ let of_toml_string text =
          })
 ;;
 
+(* [Sys.file_exists] answers false for every failed stat, not only for a file
+   that is not there, so an enabled Candle would turn off without a word when
+   the config directory stopped being searchable. Only ENOENT is absence. *)
 let load_file ~path =
-  if not (Sys.file_exists path)
-  then Off
-  else (
-    match In_channel.with_open_bin path In_channel.input_all with
-    | text -> of_toml_string text
-    | exception Sys_error detail ->
-      Disabled { reason = Printf.sprintf "candle.toml could not be read: %s" detail })
+  match Unix.stat path with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Off
+  | exception Unix.Unix_error (error, _, _) ->
+    Disabled
+      { reason =
+          Printf.sprintf "candle.toml could not be examined: %s" (Unix.error_message error)
+      }
+  | (_ : Unix.stats) ->
+    (match In_channel.with_open_bin path In_channel.input_all with
+     | text -> of_toml_string text
+     | exception Sys_error detail ->
+       Disabled { reason = Printf.sprintf "candle.toml could not be read: %s" detail })
 ;;
 
 let load ~base_path =

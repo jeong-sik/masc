@@ -79,6 +79,17 @@ let test_a_path_that_cannot_be_read_disables () =
         Alcotest.(check bool) "says it could not be read" true (contains ~affix:"could not be read" reason)))
 ;;
 
+(* A stat that fails for a reason other than the file not being there must not
+   read as "no file". A symlink that points at itself fails with ELOOP. *)
+let test_a_path_that_cannot_be_examined_disables () =
+  with_dir (fun dir ->
+    let path = Filename.concat dir "candle.toml" in
+    Unix.symlink "candle.toml" path;
+    let reason = disabled_reason (Candle_config.load_file ~path) in
+    Alcotest.(check bool) "says it could not be examined" true
+      (contains ~affix:"could not be examined" reason))
+;;
+
 let () =
   Alcotest.run
     "candle_config"
@@ -94,6 +105,8 @@ let () =
         ; Alcotest.test_case "the file is read every time" `Quick test_a_file_is_read_every_time
         ; Alcotest.test_case "a path that cannot be read disables" `Quick
             test_a_path_that_cannot_be_read_disables
+        ; Alcotest.test_case "a path that cannot be examined disables" `Quick
+            test_a_path_that_cannot_be_examined_disables
         ] )
     ]
 ;;

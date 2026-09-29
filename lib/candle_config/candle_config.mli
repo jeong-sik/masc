@@ -18,8 +18,9 @@ val of_toml_string : string -> t
 (** The content of a [candle.toml]. A file with no key at all is [Enabled]. *)
 
 val load_file : path:string -> t
-(** [Off] when [path] does not exist. Anything that exists at [path] but cannot
-    be read as a file, a directory for one, is [Disabled]. *)
+(** [Off] when [path] does not exist. Anything else that stops it from being
+    examined or read as a file is [Disabled]: a directory in its place, a
+    symlink that loops, a directory that cannot be searched. *)
 
 val load : base_path:string -> t
 (** {!load_file} on {!Config_dir_resolver.candle_toml_path_for_base_path}. *)

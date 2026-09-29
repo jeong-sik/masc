@@ -19844,6 +19844,7 @@ def run_dos_live_regression(executable: str) -> None:
     posts: HttpRequests = []
     held: dict[str, Any] = {"armed": False, "entered": threading.Event(),
                             "release": threading.Event()}
+    fail_reads = threading.Event()
     first_read = GatedHttpResponse(
         machine_live_answer("dos_capture", picture["frame"], None,
                             count=999, frame_number=None), hold_seconds=20.0)
@@ -19855,6 +19856,8 @@ def run_dos_live_regression(executable: str) -> None:
         if kind != "dos_capture":
             raise AssertionError(f"unexpected source kind: {kind}")
         dos_reads.append(since)
+        if fail_reads.is_set():
+            return 503, {"error": "DOS fixture unavailable"}
         if len(dos_reads) == 1:
             return first_read()
         if held["armed"]:
@@ -20011,6 +20014,16 @@ def run_dos_live_regression(executable: str) -> None:
         # remain spectator input on this new entry path as well.
         for spectator_key in (b"x", b"\r", b"\x1b[17~", b"\x1b[18~", b"\x1b[19~"):
             key(spectator_key, b"Esc: back")
+        key(b"\x1b", b"MASC Overview")
+        # A failed re-entry read is not an empty activity feed. Keep the
+        # previously observed pass beside the explicit read failure.
+        fail_reads.set()
+        failed_from = key(b":go dos\r", b"could not read the machine")
+        failure_title = output.rfind(b"could not read the machine", failed_from)
+        wait_for_output(process, master, output, b"Esc: back", start=failure_title,
+                        timeout=5.0)
+        if b"guest pass" not in bytes(output[failure_title:]):
+            raise AssertionError("failed DOS re-entry discarded previously observed activity")
         key(b"\x1b", b"MASC Overview")
         os.write(master, b"q")
         print(json.dumps({"dos_reads": len(dos_reads),

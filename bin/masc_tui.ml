@@ -8805,7 +8805,6 @@ let open_dos_screen (state : Masc_tui_types.state) ~mailbox =
   state.msx_open <- true;
   state.msx_menu_open <- false;
   state.dos_live <- Masc_tui_machine_live.Unread;
-  state.dos_activity <- [];
   state.msx_last_poll_ns <- 0L;
   render_spectator state;
   launch_dos_live_poll state ~mailbox

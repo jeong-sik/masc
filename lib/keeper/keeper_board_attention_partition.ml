@@ -964,7 +964,7 @@ let add_partition_indexes view partition =
     }
 ;;
 
-let same_partition_identity left right =
+let same_partition_identity (left : t) (right : t) =
   String.equal left.partition_id right.partition_id
   && String.equal left.keeper_name right.keeper_name
   && Candidate.Context_key.equal left.context_key right.context_key

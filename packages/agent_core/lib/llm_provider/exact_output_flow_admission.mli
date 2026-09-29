@@ -78,7 +78,8 @@ val receipt_phase : receipt_snapshot -> measurement_receipt_phase
 val receipt_outcome : receipt_snapshot -> measurement_outcome option
 
 val admit
-  :  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  :  admission_config:Provider_config.t
+  -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> clock:_ Eio.Time.clock
   -> now_unix_s:(unit -> int)
   -> on_measurement_receipt:(measurement_receipt -> unit)

@@ -9,7 +9,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts/harness/perf'))
 from compare_checkpoint_history import validate
-from checkpoint_history_artifact_session import seed
+from checkpoint_history_artifact_session import seed, checkpoint
 
 
 class Evidence(unittest.TestCase):
@@ -75,6 +75,11 @@ class Evidence(unittest.TestCase):
         self.put('cleanup.json', {'all_exited': False, 'errors': []})
         with self.assertRaisesRegex(ValueError, 'cleanup'):
             validate(self.root, self.identity, 1)
+
+    def test_checkpoint_uses_strict_float_fields(self):
+        value = json.loads(checkpoint(1))
+        self.assertIs(type(value['usage']['estimated_cost_usd']), float)
+        self.assertIs(type(value['created_at']), float)
 
     def test_fixture_bytes_match_across_roots(self):
         roots = [self.root / 'before', self.root / 'after']

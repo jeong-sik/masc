@@ -50,6 +50,7 @@ def checkpoint(n):
         'total_input_tokens total_output_tokens total_cache_creation_input_tokens '
         'total_cache_read_input_tokens api_calls estimated_cost_usd').split()}
     usage['pricing_gap'] = None
+    usage['estimated_cost_usd'] = 0.0
     value.update(version=11, session_id=TRACE, agent_name=NAME, model='test-model',
                  messages=[], usage=usage, turn_count=n, created_at=(1000000000000+n)/1000.,
                  tools=[], disable_parallel_tool_use=False, cache_system_prompt=False,

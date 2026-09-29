@@ -41,12 +41,12 @@ related: ["every-lane-is-one-row-in-one-registry", "0267", "0362", "0387", "0435
 |---|---|
 | 총액과 분배 | `Candle_appraiser` lane 하나가 정한다(3.4). 총액은 lane 이 고른 등급의 TOML 금액이다. |
 | 받는 쪽 | keeper 만 받는다. owner 와 운영자 평가는 쓰지 않는다. 1단계 분배 근거는 Goal 에 연결된 Task 의 담당자뿐이다. |
-| 지급 횟수 | Goal 당 한 번. 재오픈해도 추가 지급이나 회수가 없다. drop 하면 0. 연결된 Task 가 없으면 지급하지 않는다. |
+| 지급 횟수 | Goal 당 한 번. 재오픈해도 추가 지급이나 회수가 없다. 지급 전에 drop 한 Goal 은 지급하지 않는다(이미 지급한 뒤에 drop 해도 회수하지 않는다). 연결된 Task 가 없으면 지급하지 않는다. |
 | 자기 Goal | keeper 가 만든 Goal 로 받는 것도 1단계에서는 막지 않는다. 위험은 6장에 적는다. |
 | 기한 초과 | 초과 1시간마다 몫에서 1%씩 줄고, 바닥은 20%. 두 값은 TOML 로 정한다. 기준 시각은 검증 통과 시각이고, 날짜만 있는 기한은 그날 UTC 23:59:59 로 읽는다. 기한을 읽는 함수는 overdue 알림과 하나로 합친다. |
 | 잔액 | 시간이 지나면 지수적으로 줄어든다. 반감기는 TOML 로 정한다. 감소는 헌법 `no_wall_clock_death` 에 예외를 넣는 개정(5장 1번)이 들어간 뒤에 켜고, 처음 값은 `Off` 다. 시간 값은 지급이 쌓인 뒤 정한다(3.1.1). |
 | 쓰는 곳 | keeper 가 직접 Candle 을 내고 초상화 장신구를 산다. keeper 는 Candle 을 안다. |
-| 가격 | 아이템별 가격은 TOML 의 고정 가격이다. 유통량에 연동하는 물가 공식은 실제 지급 분포를 본 뒤에 더한다. 가격 계산은 함수 하나로 모아 나중에 바꿀 수 있게 한다. |
+| 가격 | 아이템별 가격은 TOML 의 고정 가격으로 시작한다. 유통량에 연동하는 물가 공식은 실제 지급 분포를 본 뒤에 더한다(7장의 확인 항목). 가격 계산은 함수 하나로 모아 나중에 바꿀 수 있게 한다. |
 | 범위 밖 | Tool·Skill·모델 구입, 현상금 Task. |
 
 ## 2. 지금 코드에서 확인한 것
@@ -72,13 +72,13 @@ related: ["every-lane-is-one-row-in-one-registry", "0267", "0362", "0387", "0435
   - 서버, TUI, 대시보드는 같은 PR 에 들어가야 한다(`docs/rfc/RFC-exact-lane-walks-one-slot-list.md:232`). 그 RFC 의 `cli_slots` 제거는 아직 main 에 없고(`runtime_toml.ml` 에 12곳), lane 표 모양이 바뀌는 중이다.
 - **[사실]** 헌법은 저장소에서 버전 관리되는 SSOT 다(`docs/constitution.xml:9-10`). 헌법의 규칙에 예외를 두려면 헌법을 고친다. RFC 가 예외를 선언해도 헌법은 그대로다.
 - **[사실]** Goal 전이는 `Goal_phase.decide_transition` 다음에 검증 원장에 기록하고, 그다음 phase 를 쓰고, 그다음 이벤트를 남긴다. 원장 기록이 실패하면 phase 쓰기를 막는다(`lib/workspace_goals.ml:409-416`). 사람이 확정하면 `confirmed_at` 이 같은 트랜잭션에서 검증 기록에 남는다(`lib/goal/goal_verification.mli:26`).
-- **[사실]** 검증기의 통과·반박 결과는 `Goal_store.transact_goal` 안에서 검증 원장에 먼저 커밋되고, phase 는 그 뒤에 쓰인다. 결과의 `recorded_at` 은 트랜잭션에 들어가기 전에 정해진다(`lib/workspace_goals.ml:482-495`, `:815-862`). 서버가 그 사이에 죽으면 `reconcile_committed_proof` 가 커밋된 결과로 phase 를 옮긴다(`:871`). 사람의 확정 `confirm_completion` 은 `request_id`, `verification_run_id`, `criterion_revision` 셋을 대조하고, 확정을 커밋한 뒤 이벤트를 남긴다(`:1204-1235`). Goal 의 criterion 은 `revision` 문자열을 가진다(`lib/goal/goal_store.mli:69-74`). 잠금 순서는 Goal, backlog, goal-task links 이고(`goal_store.mli:295-297`), 검증 원장 잠금은 Goal 잠금을 잡은 뒤에 잡는다(`lib/goal/goal_verification.mli:4-5`).
+- **[사실]** 검증기의 통과·반박 결과는 `Goal_store.transact_goal` 안에서 검증 원장에 먼저 커밋되고, phase 는 그 뒤에 쓰인다. 결과의 `recorded_at` 은 트랜잭션에 들어가기 전에 정해진다(`lib/workspace_goals.ml:482-495`, `:815-862`). 결과를 커밋하는 곳은 `Goal_verification.record_proof_verdict` 를 부르는 `commit_verifier_decision` 한 곳이다(`:831`). 이미 커밋된 결과로 phase 를 옮기는 경로가 둘 더 있다. 서버가 커밋과 phase 쓰기 사이에 죽었을 때 `reconcile_committed_proof`(`:871`)가, `Verifying` 에서 `request_complete` 를 다시 받았을 때 `answer_verifying_repeat`(`:1008`)가 그렇다. 이미 반영된 결과가 다시 오면 phase 를 옮기지 않고 그대로 돌려준다(`:832-846`). 사람의 확정 `confirm_completion` 은 `request_id`, `verification_run_id`, `criterion_revision` 셋을 대조하고, 확정을 커밋한 뒤 이벤트를 남긴다(`:1204-1235`). Goal 의 criterion 은 `revision` 문자열을 가진다(`lib/goal/goal_store.mli:69-74`). 잠금 순서는 Goal, backlog, goal-task links 이고(`goal_store.mli:295-297`), 검증 원장 잠금은 Goal 잠금을 잡은 뒤에 잡는다(`lib/goal/goal_verification.mli:4-5`).
 - **[사실]** `read_backlog_observation_r` 는 주 파일을 못 읽으면 `.last-good` 를 돌려준다. 복구용 사본을 섞지 않는 함수는 `read_backlog_r` 다(`lib/workspace/workspace_backlog.mli:8, 20-27`). Task 와 Goal 의 연결에는 `read_goal_task_links_authoritative_r` 가 있다(`lib/workspace/workspace_goal_index.mli:73`).
 - **[사실]** GC 는 끝난(`Done`·`Cancelled`) Task 를 `tasks-archive.json` 으로 옮긴다(`lib/workspace/workspace_gc.mli:41-56`). 지금 Goal 에 연결된 Task 41개 중 12개가 archive 에 있다. archive 의 Task 행을 읽는 함수는 없다. id 만 읽는 `read_archive_task_ids` 와 끝나지 않은 Task 만 읽는 `read_orphaned_nonterminal_tasks` 가 있다(`lib/workspace/workspace_task_id.mli`).
 - **[사실]** runtime.toml 의 lane 표는 모르는 키를 서버 로드 에러로 다룬다(`lib/runtime/runtime_toml.ml:2551-2552`). 모르는 lane 이름의 표도 로드 에러다(`:2783-2793`). 설정을 runtime.toml 에 두면 Candle 설정 오류가 서버 부팅을 막을 수 있다.
 - **[사실]** 도구의 `defer_loading = true` 는 모델이 이름을 부르기 전까지 요청에서 뺀다. 도구 112개가 그렇다(`config/tools/masc_goal_upsert.toml:11` 의 주석, `config/tools/` 에서 `defer_loading = true` 를 센 값).
 - **[사실]** Goal 검증기(`lib/goal_verification_agent.ml`)는 keeper 가 아니라 서버가 가진 모델 일꾼이다. 조건 변수로 깨우고, 서버를 시작할 때 한 번 훑는다. 실패한 항목은 durable 하게 남겨 두고 멈추며, 시계로 다시 시도하지도 만료시키지도 않는다(`lib/goal_verification_agent.mli:1-14`, `.ml:596-602`, `:684-691`). Goal 하나에 진행 중인 검토는 하나뿐이다(`:745-760`). 재시도는 keeper 가 `request_complete` 를 다시 부르는 것이다(`lib/goal/goal_phase.ml:164-168`).
-- **[사실]** `Exact_lane_run_registry` 는 모델 lane 의 호출마다 입력과 출력을 그대로 남긴다. 결과는 `Succeeded`, `Cancelled`, `Failed {code; detail}` 이다. 등록된 lane 은 지금 넷(`Librarian`, `Hitl_auto_judge`, `Board_attention`, `Workspace_curator`)이고, Verifier 는 별도 기록을 쓴다(`lib/exact_lane_run_registry.mli:1-16`).
+- **[사실]** `Exact_lane_run_registry` 는 모델 lane 의 호출마다 입력과 출력을 그대로 남긴다. 결과는 `Succeeded`, `Cancelled`, `Failed {code; detail}` 이고, 답한 슬롯도 적는다(`selected_slot`). 끝난 기록은 lane 마다 개수 상한까지만 남는다(`max_completed_retained`, `:112-117`). 등록된 lane 은 지금 넷(`Librarian`, `Hitl_auto_judge`, `Board_attention`, `Workspace_curator`)이고, Verifier 는 별도 기록을 쓴다(`lib/exact_lane_run_registry.mli:1-16`).
 
 ## 3. 설계
 
@@ -91,7 +91,7 @@ related: ["every-lane-is-one-row-in-one-registry", "0267", "0362", "0387", "0435
 | `Snapshot` | 검증기의 통과 결과를 검증 원장에 커밋하기 직전 | goal_id, 검증 요청 id, criterion revision, 검증 통과 시각, Goal 생성 시각, 그때의 기한(없음, 날짜, 읽을 수 없는 값 중 하나), 제목·metric·target, 그때 연결된 Task 의 id 목록 |
 | `PayoutOwed` | 사람이 확정한 뒤 일꾼이 처음 하는 일 | goal_id, 검증 요청 id, 검증 통과 시각, 연결된 Task 마다 id·제목·담당자·상태·끝난 시각(이 줄을 쓸 때의 값), 후보 keeper 목록 |
 | `PayoutFailed` | 다시 시도해도 결과가 같은 이유가 생겼을 때(지금은 기한을 읽을 수 없음 하나) | goal_id, 검증 요청 id, 이유 |
-| `Paid` | 지급할 때. 한 줄에 전부 적는다 | goal_id, 검증 요청 id, 등급, 총액, lane 슬롯(모델) id, keeper 별 몫·감액 계수·지급액, 감액에 쓴 값(시계, 기한, 감액률, 바닥) |
+| `Paid` | 지급할 때. 한 줄에 전부 적는다 | goal_id, 검증 요청 id, 등급, 총액, 답한 lane 슬롯(모델) id, keeper 별 가중치·몫·감액 계수·지급액, 감액에 쓴 값(시계, 기한, 감액률, 바닥) |
 | `Unattributed` | 받을 keeper 가 없어 지급 없이 끝낼 때 | goal_id, 이유(후보 없음, lane 이 기여자 없음으로 판정) |
 | `Purchased` | keeper 가 아이템을 살 때 | keeper, 아이템, 낸 금액 |
 | `Equipped` | keeper 가 착용을 바꿀 때 | keeper, 슬롯, 아이템 |
@@ -125,7 +125,7 @@ related: ["every-lane-is-one-row-in-one-registry", "0267", "0362", "0387", "0435
 
 - 줄어든 양은 원장에 적지 않는다. 잔액을 읽을 때 마지막 이벤트 시각부터 지금까지 줄어든 만큼을 계산해 반영한다. 원장에는 발행·구매 같은 사실만 남는다.
 - 처음에는 `Off` 로 시작한다. 지급이 쌓여야 반감기를 정할 수 있고, 지급이 쌓이려면 기능이 켜져 있어야 하기 때문이다. `Off` 는 기본값이 아니다. TOML 에 반드시 적어야 하고, 값이 없으면 Candle 이 `Disabled` 된다(3.9).
-- 반감기를 바꾸면 그 사실을 원장에 `HalfLifeSet` 으로 남긴다. `HalfLifeSet` 은 모든 keeper 의 구간을 나눈다. 잔액을 읽을 때 keeper 의 이벤트와 모든 `HalfLifeSet` 을 시각순으로 합쳐서, 구간마다 그 구간을 시작한 시점의 반감기로 계산한다. 그래서 반감기를 바꿔도 과거 잔액이 다시 계산되지 않고, 이미 한 구매 때문에 잔액이 마이너스가 되는 일이 없다. `Off` 인 동안 받은 잔액도 `Hours n` 이 켜지는 시각부터 줄기 시작한다. 이 두 가지는 함수 시험에 넣는다.
+- 반감기를 바꾸면 그 사실을 원장에 `HalfLifeSet` 으로 남긴다. `HalfLifeSet` 은 모든 keeper 의 구간을 나눈다. 잔액을 읽을 때 keeper 의 이벤트와 모든 `HalfLifeSet` 을 시각순으로 합쳐서, 구간마다 그 구간을 시작한 시점의 반감기로 계산한다. 그래서 반감기를 바꿔도 과거 잔액이 다시 계산되지 않고, 이미 한 구매 때문에 잔액이 마이너스가 되는 일이 없다. `Off` 인 동안 받은 잔액도 `Hours n` 이 켜지는 시각부터 줄기 시작한다. 이 두 가지는 함수 시험에 넣는다. `candle.toml` 의 반감기가 원장의 마지막 `HalfLifeSet` 과 다르면 새 `HalfLifeSet` 을 쓴다. 쓰지 못하면 Candle 을 `Disabled` 로 둔다. 잔액은 언제나 원장의 값으로 계산한다.
 - 지수 감소를 고른 이유: 잔액을 지급 시점별로 나눠 각각 깎으면 구매할 때 어느 지급분부터 쓸지 정해야 한다. 지수 감소는 잔액 하나에만 적용하고 구매 순서가 결과에 영향을 주지 않는다(정수 내림 때문에 이벤트마다 1 milli 이내의 차이는 생긴다). Goal 보상의 감액은 선형이다. 사람이 얼마나 깎였는지 바로 계산할 수 있어야 하기 때문이다.
 - 계산은 정수 연산이다. 부동소수 `exp` 를 쓰면 실행 환경마다 잔액이 달라질 수 있다. 고정소수점 자릿수와 내림 규칙은 구현 전에 정한다.
 - 효과: 장신구를 다 사도 Candle 이 계속 줄어서 잔액이 끝없이 쌓이지는 않는다. 유통 총량은 지급 속도와 줄어드는 속도가 맞는 지점으로 수렴한다. 3.5 에서 물가를 유통량에 연동하게 되면 이 총량이 그 입력이 된다.
@@ -136,7 +136,7 @@ related: ["every-lane-is-one-row-in-one-registry", "0267", "0362", "0387", "0435
 
 **[제안]** 지급은 세 시점에 걸친다. 검증을 통과할 때 입력을 고정하고, 사람이 확정하면 지급 의무를 남기고, 그 뒤에 지급한다.
 
-1. **검증 통과.** 검증기가 통과 결과를 내면 `Snapshot` 을 `candle-ledger.jsonl` 에 쓰고, 그다음 결과를 검증 원장에 커밋한다. `Snapshot` 을 먼저 쓰는 이유는 결과를 커밋한 뒤 phase 를 쓰기 전에 서버가 죽으면 `reconcile_committed_proof` 가 커밋된 결과로 phase 를 옮기기 때문이다(2장). 커밋한 뒤에 `Snapshot` 을 쓰면 이 경로로 `Awaiting_confirmation` 이 된 Goal 에 `Snapshot` 이 없다. 커밋하기 전에 쓰면 커밋된 결과에는 항상 `Snapshot` 이 있다. 반박 결과에는 쓰지 않는다.
+1. **검증 통과.** 검증기가 통과 결과를 내면 `Snapshot` 을 `candle-ledger.jsonl` 에 쓰고, 그다음 결과를 검증 원장에 커밋한다. `Snapshot` 을 먼저 쓰는 이유는 결과를 커밋한 뒤 phase 를 쓰기 전에 서버가 죽으면 `reconcile_committed_proof` 가 커밋된 결과로 phase 를 옮기기 때문이다(2장). 커밋한 뒤에 `Snapshot` 을 쓰면 이 경로로 `Awaiting_confirmation` 이 된 Goal 에 `Snapshot` 이 없다. 커밋하기 전에 쓰면 커밋된 결과에는 항상 `Snapshot` 이 있다. 결과를 커밋하는 곳이 한 곳이라 `Snapshot` 도 그 안에서 한 번만 쓴다(2장). phase 를 옮기는 전이에서 통과 결과일 때만 쓴다. 반박 결과와, 이미 반영된 결과가 다시 오는 경우(재전달)에는 쓰지 않는다.
    - `Snapshot` 을 쓰지 못하면 그 전이를 거절한다. 검증기는 거절된 커밋을 실패로 남겨 두고 멈춘다. Goal 전이가 원장 기록을 phase 쓰기보다 먼저 하고 그 실패가 phase 쓰기를 막는 기존 순서와 같다(`lib/workspace_goals.ml:409-416`). 이 거절은 Candle 이 켜져 있을 때만 일어난다.
    - `Snapshot` 에 넣는 Task 정보는 연결 파일의 id 목록뿐이다. 복구용 사본을 섞지 않는 함수(`read_goal_task_links_authoritative_r`)로 읽고, 읽지 못하면 쓰지 않고 전이를 거절한다.
    - 잠금 순서는 Goal, backlog, links 다음에 Candle 원장이다(2장). 원장 잠금은 덧붙이는 동안만 잡고 그 안에서 다른 잠금을 잡지 않는다.
@@ -191,11 +191,12 @@ Task 제목은 keeper 가 쓴 글이다. 등급 요청은 Task 를 보지 못해
 
 **총액.** lane 은 등급 하나를 고른다. 등급은 닫힌 variant 이고(예: `Trivial`, `Small`, `Medium`, `Large`, `Epic`), 등급별 금액은 TOML 표로 정한다. 모델이 만든 임의의 숫자가 발행되지 않는다. 등급의 이름과 개수는 구현 전에 정한다.
 
-**후보.** 후보는 `PayoutOwed` 에 적힌 Task 가운데 `done` 이고 끝난 시각이 Goal 생성 시각 이후인 것의 담당자다. 그 담당자에게 keeper 설정 파일(`Config_dir_resolver.keeper_toml_path_for_base_path` 가 가리키는 `<이름>.toml`)이 있어야 한다. 설정 폴더를 읽지 못한 것과 파일이 없는 것은 다른 결과다. 후보 keeper 목록은 `PayoutOwed` 를 쓸 때 정해서 함께 적는다. 대기 중에 설정 파일이 바뀌어도 후보는 그대로다. Goal 이 만들어지기 전에 끝난 옛 Task 를 나중에 붙여서 몫을 얻는 것을 막으려는 조건이다. 지금 Goal 에 연결된 done Task 9건은 모두 이 조건을 만족한다.
+**후보.** 후보는 `PayoutOwed` 에 적힌 Task 가운데 `done` 이고 끝난 시각이 Goal 생성 시각 이후인 것의 담당자다. 담당자 이름은 `Keeper_identity.Keeper_id.of_string` 으로 파싱하고(`lib/workspace_goals.ml:583` 이 같은 방식이다), 그 keeper 의 설정 파일(`Config_dir_resolver.keeper_toml_path_for_base_path` 가 가리키는 `<이름>.toml`)이 있어야 한다. backlog 와 archive 어디에도 없는 Task 는 후보가 아니다. 설정 폴더를 읽지 못한 것과 파일이 없는 것은 다른 결과다. 후보 keeper 목록은 `PayoutOwed` 를 쓸 때 정해서 함께 적는다. 대기 중에 설정 파일이 바뀌어도 후보는 그대로다. Goal 이 만들어지기 전에 끝난 옛 Task 를 나중에 붙여서 몫을 얻는 것을 막으려는 조건이다. 지금 Goal 에 연결된 done Task 9건은 모두 이 조건을 만족한다.
 
-**분배.** 배분 요청은 후보 Task 만 받는다. 연결된 Task 가운데 후보가 아닌 것(끝나지 않았거나, 취소됐거나, 담당자가 keeper 가 아닌 것)은 주지 않는다. lane 은 후보 keeper 마다 0 이상의 정수 가중치 하나를 낸다. 합이 1 이어야 하는 비율은 내게 하지 않는다. 모델이 `0.33` 세 개를 내면 합이 0.99 라서 거절되는 일이 반복되기 때문이다. 후보 Task 가 Goal 과 관계없다고 보면 가중치 대신 `No_contributor` 를 낸다. 모델이 "붙인 사람에게 준다"와 "계속 거절된다" 사이에서만 고를 수 있는 상황을 막으려는 것이다.
+**분배.** 배분 요청은 후보 Task 만 받는다. 연결된 Task 가운데 후보가 아닌 것(끝나지 않았거나, 취소됐거나, 담당자가 keeper 가 아닌 것)은 주지 않는다. lane 은 후보 keeper 마다 0 이상 `weight_max` 이하의 정수 가중치 하나를 낸다. `weight_max` 는 TOML 값이다. 합이 1 이어야 하는 비율은 내게 하지 않는다. 모델이 `0.33` 세 개를 내면 합이 0.99 라서 거절되는 일이 반복되기 때문이다. 후보 Task 가 Goal 과 관계없다고 보면 가중치 대신 `No_contributor` 를 낸다. 모델이 "붙인 사람에게 준다"와 "계속 거절된다" 사이에서만 고를 수 있는 상황을 막으려는 것이다.
 
-- 후보에 없는 이름이 있거나, 후보가 빠졌거나, 가중치가 정수가 아니거나, 합이 0 이면 응답을 거절한다. 거절된 응답은 결과로 치지 않는다.
+- 후보에 없는 이름이 있거나, 후보가 빠졌거나, 가중치가 정수가 아니거나 `weight_max` 를 넘거나, 합이 0 이면 응답을 거절한다. 거절된 응답은 결과로 치지 않는다.
+- 곱셈이 63비트 정수를 넘지 않게 한다. 몫은 총액 × 가중치 하나이고, 가중치의 합은 나누는 수로만 쓴다. 지급액은 몫 × 감액 계수다. 가장 큰 등급 금액에 `weight_max` 와 1000 을 각각 곱한 값이 63비트 정수를 넘으면 Candle 이 `Disabled` 된다(3.9). 경계 값은 함수 시험에 넣는다.
 - 몫 = 내림(총액 × 가중치 ÷ 가중치 합). 남는 milli 는 나머지가 큰 순서대로 1 milli 씩 나눠 준다. 나머지가 같으면 이름이 사전순으로 앞선 쪽이 먼저 받는다.
 - 후보가 없거나(연결된 Task 가 없거나, 조건을 만족하는 done Task 가 없거나, 담당자 가운데 keeper 가 없거나) lane 이 `No_contributor` 를 내면 발행하지 않고 원장에 `Unattributed` 한 줄만 남긴다. 후보가 없을 때는 lane 을 부르지 않는다. 받을 곳이 없는 Candle 을 발행하면 총량만 늘어난다. 나중에 Task 가 붙어도 다시 지급하지 않는다.
 
@@ -211,7 +212,7 @@ Task 제목은 keeper 가 쓴 글이다. 등급 요청은 Task 를 보지 못해
 
 **실패 처리(사람이 확인하지 않는 흐름).**
 
-- 모델을 부른 기록은 lane 실행 기록에 남는다. `Exact_lane_run_registry` 의 lane 에 `Candle_appraiser` 를 더하면 호출마다 입력과 출력, 실패(`Failed {code; detail}`)가 그대로 남는다. 원장에는 쓰지 않는다.
+- 모델을 부른 기록은 lane 실행 기록에 남는다. `Exact_lane_run_registry` 의 lane 에 `Candle_appraiser` 를 더하면 호출마다 입력과 출력, 답한 슬롯, 실패(`Failed {code; detail}`)가 그대로 남는다. 끝난 기록은 lane 마다 개수 상한까지만 남아서 오래된 것은 사라진다. 그래서 지급 근거(등급, 가중치, 답한 슬롯)는 `Paid` 에 적는다. 원장에는 호출 기록을 쓰지 않는다.
 - 호출이 실패하거나 응답이 거절되면 그 Goal 은 지급 대기로 남고 일꾼은 멈춘다. 시계로 다시 시도하지 않고, 일꾼이 다음에 깨어날 때(3.2) 다시 시도한다. Goal 검증기가 같은 방식이다(2장).
 - 다시 해도 결과가 같은 실패는 `PayoutFailed` 로 끝낸다. `기한을 읽을 수 없음` 이 그렇다(3.3).
 - lane 프롬프트는 다른 lane 처럼 `config/prompts/` 의 파일에 둔다. 저장소 파일이라 keeper 의 PR 로 바뀔 수 있다(6장). 프롬프트나 슬롯을 바꾸는 PR 은 5장 5번 시험 세트의 결과를 붙인다.
@@ -238,7 +239,7 @@ price : item -> milli_candle
 **[제안]** keeper 가 직접 사고 착용한다. 이를 위해 keeper 도구가 필요하다.
 
 - 소유는 `Purchased` 를 모아 계산한다. 이미 가진 아이템은 다시 살 수 없다.
-- 착용은 슬롯마다 마지막 `Equipped` 로 정한다. 소유한 아이템만 착용할 수 있다.
+- 착용은 슬롯마다 마지막 `Equipped` 로 정한다. 소유한 아이템만 착용할 수 있다. 이름에서 정한 기본 장신구로 되돌리는 것도 `Equipped`(아이템 자리에 `Default`)로 남긴다.
 - 초상화 렌더러는 이름에서 장신구를 정하는 호출부가 두 곳이다(2장). 두 곳 모두 서버가 정한 착용 상태를 받아 그리게 하고, 원장의 착용을 이름에서 정한 장신구보다 우선한다. 몸은 바꾸지 않는다. 장신구는 2D 초상화에만 그린다. 3D 렌더러는 마스코트만 그려서 바꾸지 않는다.
 - 서버의 응답 ETag 와 그림 캐시, TUI 의 그림 캐시는 이름과 크기만 키로 쓴다(2장). 착용 상태를 키에 넣지 않으면 구매한 뒤에도 옛 그림이 나간다. TUI 는 착용 상태를 서버가 주는 wire 필드로만 받는다. 로컬 파일을 읽는 경로(2장)와 원격 경로를 따로 두지 않는다. 이 필드는 엄격 디코더와 Python fixture 까지 같은 PR 에서 바꾼다.
 - 카탈로그가 18개라서 다 사면 쓸 곳이 없다. 이 점은 받아들이고 후속 RFC(현상금 Task, 모델 변경 요청)에서 다룬다.
@@ -280,7 +281,7 @@ price : item -> milli_candle
 Candle 은 `Enabled` 와 `Disabled { reason }` 둘 중 하나다.
 
 - `candle.toml` 이 없으면 기능이 꺼져 있다. `Snapshot`, 지급, 구매, 표시가 모두 없다.
-- 파일이 있는데 읽을 수 없거나 값이 틀리면 `Disabled { reason }` 이 되고 TUI 에 이유가 보인다. 빠진 키, 모르는 키, 등급 금액표에 빠진 등급, 카탈로그에 없는 아이템 가격이 그렇다. 서버는 정상으로 뜬다. 기본값으로 대신하지 않는다.
+- 파일이 있는데 읽을 수 없거나 값이 틀리면 `Disabled { reason }` 이 되고 TUI 에 이유가 보인다. 빠진 키, 모르는 키, 등급 금액표에 빠진 등급, 카탈로그에 없는 아이템 가격, 1 미만인 `Hours`, 음수 감액률, 1000 을 넘는 바닥, 1 미만인 `weight_max`, 곱셈이 63비트 정수를 넘는 등급 금액과 `weight_max`(3.4)가 그렇다. 서버는 정상으로 뜬다. 기본값으로 대신하지 않는다.
 - 아이템 가격이 빠지면 그 아이템만 `Unpriced` 다(3.5). Candle 전체는 켜져 있다.
 - `candle.toml` 이 있는데 lane 표가 없으면 `Disabled { reason: lane 없음 }` 이다.
 - 옛 binary 는 lane 표를 모르는 표로 봐서 로드 에러를 낸다(`lib/runtime/runtime_toml.ml:2783-2793`). binary 를 먼저 배포하고 그 뒤에 lane 표를 넣는다. `candle.toml` 은 언제 넣어도 된다.
@@ -341,7 +342,7 @@ Candle 을 켜면 keeper 행동이 바뀔 수 있다. 바뀌는지는 켜기 전
 | 7 | TUI·대시보드 표시. 발행, 소각, 유통 총량 요약을 함께 보인다 | 5, 6 | TUI 캡처, 대시보드 브라우저 스크린샷 |
 | 8 | 잔액 감소: `HalfLifeSet`, `Hours n`. 1번이 들어간 뒤에만. 켜기 전에 가격표를 최고점과 다시 맞춘다(3.1.1) | 3, 1 | 감소 전후 원장 계산 예, 반감기 변경 이벤트 |
 
-`candle.toml` 을 넣어 켜는 것은 2번부터 5번까지 들어간 뒤에 한다.
+`candle.toml` 을 넣어 켜는 것은 2번부터 5번까지 들어간 뒤에 한다. 켤 때 `Awaiting_confirmation` 인 Goal 은 `Snapshot` 이 없어서 지급 대상이 아니다. 켜기 전에 그런 Goal 이 있는지 본다.
 
 4번의 `Snapshot` 은 검증 원장에 기록하기 전에 쓴다(3.2). 전이가 그 뒤에 실패하면 쓸모없는 `Snapshot` 이 남지만, 지급은 `PayoutOwed` 가 가리키는 `Snapshot` 만 쓴다.
 
@@ -370,7 +371,7 @@ Candle 을 켜면 keeper 행동이 바뀔 수 있다. 바뀌는지는 켜기 전
 - **분배 입력이 Task 담당자뿐이라 쉬운 Task 를 잘게 쪼개면 유리하다.** 등급 요청은 Task 를 보지 못해서 총액은 늘지 않는다. 다른 keeper 몫을 줄이는 것만 가능하다.
 - **감액 규칙의 한계.** 시간당 감액률이 같아서 짧은 Goal 은 금방 바닥에 닿는다. 생성부터 기한까지 짧게는 23시간(기한 `2026-09-25` 인 릴리스 Goal), 길게는 858시간(기한 `2026-11-02`)인 Goal 이 같은 데이터에 있다(3.11). 바닥에 닿은 뒤에는 더 늦어도 손해가 없다. 기한은 만든 쪽이 정하는 값이라 적지 않거나 먼 날짜를 적으면 감액이 없다(3.3). 지금 Goal 18개 중 7개가 기한이 없다. 기한 없는 Goal 이 늘면 그런 Goal 에도 바닥 비율을 적용하는 것을 다시 본다.
 - **원장은 평문 파일이다.** 서명이나 해시 체인이 없어서, 호스트에서 이 파일에 쓸 수 있는 keeper 는 고칠 수 있다. keeper 샌드박스가 `.masc/` 에 닿는지는 확인하지 못했다(`docs/KEEPER-SANDBOX-BOUNDARY-POLICY.md`).
-- **규칙을 바꾸는 경로.** 가격표와 등급 금액표는 TOML(운영자 소유)이다. lane 프롬프트, 등급 파서, 후보 필터, 나머지 계산은 저장소 파일과 코드라서 keeper 의 PR 로 바뀔 수 있다. 이 RFC 는 그 경로를 막지 않는다. keeper 가 낸 PR 이 사람 리뷰 없이 머지되는 경로가 있는지는 확인하지 못했다.
+- **규칙을 바꾸는 경로.** 가격표와 등급 금액표는 TOML(운영자 소유)이다. lane 프롬프트, 등급 파서, 후보 필터, 나머지 계산은 저장소 파일과 코드다. 헌법은 병합과 auto-merge 를 keeper 가 한다고 적는다(`docs/constitution.xml:341`). 그래서 keeper 는 지급 규칙을 바꾸는 PR 을 내고 keeper 의 리뷰로 머지할 수 있다. 이 RFC 는 그 경로를 막지 않는다. 대신 `Paid` 에 답한 슬롯을 적고, 프롬프트나 슬롯을 바꾸는 PR 은 시험 세트의 결과를 붙이게 했다(3.4).
 - **원장이 고장 나면 검증 통과가 막힌다.** Candle 이 켜져 있을 때 `Snapshot` 을 쓰지 못하면 Goal 이 `Awaiting_confirmation` 으로 넘어가지 못하고, 검증기는 그 항목을 남겨 둔 채 멈춘다(3.2). 원장 파일을 못 쓰는 상황(디스크, 권한)에서 켜져 있는 동안만 그렇고, Candle 을 끄면 풀린다. 설정 오류는 Candle 을 `Disabled` 로 만들어 이 영향을 없앤다(3.9).
 - **지급이 밀리거나 놓칠 수 있다.** 원장 쓰기는 Goal 저장과 다른 파일이다. lane 호출이 실패하면 지급 대기가 일꾼이 다음에 깨어날 때까지 그대로 남는다. 시계로 다시 시도하지 않는다(3.2). 지급 대기 목록은 TUI 에서 보이고, 서버를 다시 시작하면 다시 시도한다. `PayoutOwed` 가 남은 뒤에는 서버가 죽어도 지급이 늦을 뿐 사라지지 않는다. 확정을 커밋하고 `PayoutOwed` 를 쓰기 전에 그 Goal 이 재오픈되면 놓친다(3.2). 같은 Goal 의 지급이 두 번 나가는 것은 `Paid` 한 줄, 끝 위치 조건 덧붙이기, Goal 별 일꾼 하나가 막는다(3.1, 3.2).
 - **워크어라운드 자가 점검.** 시그니처 3종과 체크리스트 7항목을 이렇게 봤다.
@@ -390,6 +391,7 @@ Candle 을 켜면 keeper 행동이 바뀔 수 있다. 바뀌는지는 켜기 전
 - 유통량에 연동하는 물가 공식 f 와 그 입력의 정의(3.5). 지급이 쌓인 뒤에 정한다.
 - 등급의 이름과 개수, 등급별 금액. 가장 낮은 등급의 금액이 0 인지도 정한다. 0 보다 크면 Goal 을 많이 만드는 것만으로 Candle 이 늘어난다.
 - 정수 감소 계산의 고정소수점 자릿수와 내림 규칙(3.1.1).
+- 가중치 상한 `weight_max`(3.4).
 - 5장 5번 시험 세트의 합격선과 기준 Goal 묶음.
 
 운영자 승인이 필요한 것:
@@ -397,6 +399,7 @@ Candle 을 켜면 keeper 행동이 바뀔 수 있다. 바뀌는지는 켜기 전
 - 헌법 개정 문안(8.1).
 - 끝난 Task 를 Goal 에 연결하지 못하게 하는 규칙(5장 2번 (나)).
 - 재오픈해서 다시 통과해도 감액 시계가 처음 통과 시각에 머무는 것(3.3). 앞서 정한 "감액 시계는 검증 통과 시각"을 좁히는 규칙이다.
+- 가격을 처음에 고정 가격표로 시작하고 유통량 연동 공식을 뒤로 미루는 것(3.5). 원래 대화는 결정론적 물가 공식이었다.
 
 후속 RFC 로 넘긴 것: 머지된 PR 작성자·board 논의·리뷰를 기여로 인정하는 것(PR 과 Goal 을 잇는 방법, board 글이 Goal 에 붙는 구조가 먼저 필요), Tool·Skill·모델 구입, 현상금 Task.
 
@@ -409,7 +412,7 @@ Candle 을 켜면 keeper 행동이 바뀔 수 있다. 바뀌는지는 켜기 전
 | `magic_number` | 흐름 제어에 숫자 비교를 쓰지 않는다. 감액률, 바닥, 가격, 등급별 금액, 반감기는 TOML 값이다. 5장 시험 세트의 합격선은 시험 기준이다. |
 | `gates` | 새 게이트를 만들지 않는다. 설정 오류는 Candle 만 `Disabled` 로 만들고 서버 부팅과 keeper 의 턴을 막지 않는다(3.9). 잔액 확인은 구매 한 곳뿐이다. 예외가 하나 있다. Candle 이 켜져 있을 때 `Snapshot` 을 쓰지 못하면 검증 통과 전이를 거절한다(3.2). 기존 전이가 원장 기록을 먼저 하는 순서를 따르는 것이고, 끄면 사라진다. |
 | `when_stuck` | 헌법은 "괴상한 비교문이나 결정론적 판단을 넣고 싶어지는 순간"에 lane 을 늘리라고 한다. 등급과 가중치는 lane 이 정하고 산술은 코드가 한다(3.4). 가격은 고정 가격표라서 이 조항이 걸리지 않는다. 물가 연동 공식을 더할 때 다시 본다(3.5). |
-| `persist_before_model_call` | 판단 대상(`Snapshot`, `PayoutOwed`)을 모델을 부르기 전에 남기고, 호출의 입력과 출력은 lane 실행 기록이 그대로 남긴다(3.1, 3.4). 지급 대기 중에 Goal 이 재오픈돼도 `PayoutOwed` 가 대상을 잃지 않게 한다(3.2). |
+| `persist_before_model_call` | 판단 대상(`Snapshot`, `PayoutOwed`)을 모델을 부르기 전에 남기고, 호출의 입력과 출력은 lane 실행 기록이 남긴다. 지급 근거는 `Paid` 에 적는다(3.1, 3.4). 지급 대기 중에 Goal 이 재오픈돼도 `PayoutOwed` 가 대상을 잃지 않게 한다(3.2). |
 | `authoritative_read_only` | 원장을 읽을 수 없으면 지급과 구매를 하지 않는다(3.1). `Snapshot` 은 복구용 사본을 섞지 않는 읽기 함수만 쓰고, 읽지 못하면 쓰지 않는다. Task 는 backlog 와 archive 를 함께 읽는다(3.2). |
 | `failure_keeps_evidence` | 모델 호출이 실패하면 lane 실행 기록에 `Failed` 가 남고 Goal 은 지급 대기로 남는다(3.4). 다시 해도 결과가 같은 실패만 `PayoutFailed` 로 끝낸다. 지급 의무는 `PayoutOwed` 로 남는다. |
 | `strict_parse_no_default`, `closed_sum_over_string` | 이벤트, 등급, 아이템, 반감기(`Off` 또는 시간), 실패 이유, 기한(없음·날짜·읽을 수 없음)은 닫힌 variant 다. 모르는 값, 읽을 수 없는 기한, 잘못된 가중치는 실패로 처리하고 기본값으로 바꾸지 않는다. 기한을 읽는 함수를 합치면 overdue 알림의 "날짜가 아니면 늦지 않음"도 같은 값으로 바뀐다. 알림 동작은 읽을 수 없는 값에서 지금과 같다(3.3). |
@@ -419,7 +422,7 @@ Candle 을 켜면 keeper 행동이 바뀔 수 있다. 바뀌는지는 켜기 전
 | `engineering`(research) | 선행 사례를 3.10 에 적었다. |
 | `feature_surface`, `domain` | Candle 이 헌법에 없다. 개정 문안을 8.1 에 두고 5장 1번으로 먼저 낸다. |
 | `string_matching`, `hardcoded_path`, `env_var_sprawl` | 후보는 keeper 설정 파일이 있는지로 가르고 기한은 형식 파서로 읽는다. 새 환경변수는 없다. 지급 일꾼은 시계 없이 조건 변수로 깨운다. 설정 폴더는 `Config_dir_resolver` 로 찾는다. |
-| `AGENTS.md` Keeper Runtime Boundary | 헌법은 keeper 런타임 프롬프트가 아니다. Candle 을 keeper 에게 알리는 방법은 keeper 쪽 파일에서 정한다. 이 RFC 는 도구 설명으로 알리는 안을 제안하고, 잔액 조회와 구매 도구는 `defer_loading = false` 로 둔다(3.7). |
+| `AGENTS.md` Keeper Runtime Boundary | 헌법은 keeper 런타임 프롬프트가 아니다. Candle 을 keeper 에게 알리는 방법은 keeper 쪽 파일에서 정한다. 이 RFC 는 잔액과 가격을 조회하는 도구로만 알리는 안을 제안하고, 그 도구는 `defer_loading = false` 로 둔다(3.7). |
 
 ### 8.1 헌법 개정 문안(5장 1번)
 

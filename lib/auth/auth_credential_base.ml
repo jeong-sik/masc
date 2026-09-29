@@ -57,6 +57,7 @@ let internal_keeper_token_holder : string option Atomic.t = Atomic.make None
 let internal_keeper_token () = Atomic.get internal_keeper_token_holder
 let run_blocking_io f = Eio_guard.run_in_systhread ~label:"auth-credential-io" f
 let file_exists path = run_blocking_io (fun () -> Sys.file_exists path)
+let stat_file path = run_blocking_io (fun () -> Unix.stat path)
 let read_text_file path = Fs_compat.load_file path
 let write_text_file path content = Fs_compat.save_file path content
 let chmod path perm = run_blocking_io (fun () -> Unix.chmod path perm)
@@ -170,11 +171,15 @@ let raise_auth_config_error ~file reason =
   raise (Auth_config_error { file; reason })
 ;;
 
+(* HIGH-RISK-UNREVIEWED: every authenticated request calls this. The stat runs
+   on a system thread, so a filesystem that takes seconds to answer holds the
+   calling fiber rather than the scheduler every other request shares. Which
+   answers load, default, or raise is the same as a stat on the fiber. *)
 (** Load auth config *)
 let load_auth_config config : auth_config =
   let file = auth_config_file config in
   match
-    try Some (Unix.stat file) with
+    try Some (stat_file file) with
     | Unix.Unix_error (Unix.ENOENT, _, _) -> None
     | Unix.Unix_error (error, function_name, argument) ->
       raise_auth_config_error

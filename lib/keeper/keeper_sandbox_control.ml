@@ -336,8 +336,9 @@ let dirty_state ~budget ~repository =
   | Error _ as error -> error
 
 (* Three nominal five-minute repository sync intervals allow normal scheduler
-   jitter while refusing an older local observation. *)
-let target_ref_stale_after_s = 900
+   jitter while refusing an older local observation. Both probe paths use
+   the same threshold even if a repository's sync interval is reconfigured. *)
+let target_ref_stale_after_s = Keeper_sandbox_remote_checkouts.target_ref_stale_after_s
 
 (* A tracking ref's reflog records when its local value last moved. A no-op
    fetch leaves that timestamp untouched, so also inspect a matching FETCH_HEAD

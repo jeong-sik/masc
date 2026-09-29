@@ -271,10 +271,11 @@ let test_probe_tells_a_missing_origin_from_a_configured_one () =
            "sh -c %s"
            (Filename.quote
               (Printf.sprintf
-                 "cd %s && python3 -c %s %s 32 8192 > %s"
+                 "cd %s && python3 -c %s %s 32 8192 %d > %s"
                  (Filename.quote tree)
                  (Filename.quote R.For_testing.probe_script)
                  (Filename.quote {|[{"url":"https://github.com/jeong-sik/masc.git","default_branch":"main"}]|})
+                 R.target_ref_stale_after_s
                  (Filename.quote out))));
       let raw = In_channel.with_open_bin out In_channel.input_all in
       match R.parse_probe_json ~root:tree raw with

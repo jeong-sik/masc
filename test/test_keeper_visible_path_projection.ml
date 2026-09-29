@@ -739,6 +739,8 @@ let test_equal_checkout_requires_recent_target_ref () =
   @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
   seed_masc_checkout_one_ahead ~config ~meta ~playground;
   let checkout = Filename.concat playground "repos/masc" in
+  let fetch_head = Filename.concat checkout ".git/FETCH_HEAD" in
+  if Sys.file_exists fetch_head then Sys.remove fetch_head;
   let old_update =
     Printf.sprintf
       "GIT_COMMITTER_DATE='@1600000000 +0000' git -C %s update-ref refs/remotes/origin/main HEAD"
@@ -778,7 +780,6 @@ let test_equal_checkout_requires_recent_target_ref () =
     match run_git_or_fail ~cwd:checkout [ "rev-parse"; "HEAD" ] with
     | head :: _ -> head
     | [] -> Alcotest.fail "HEAD unavailable" in
-  let fetch_head = Filename.concat checkout ".git/FETCH_HEAD" in
   write_file fetch_head
     (head ^ "\t\tbranch 'other' of https://example.invalid/masc.git\n");
   Alcotest.(check string) "unrelated fetch remains stale" "stale_ref"

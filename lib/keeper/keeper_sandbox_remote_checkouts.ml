@@ -1,5 +1,7 @@
 open Keeper_meta_contract
 
+let target_ref_stale_after_s = 900
+
 type remote_origin =
   | Origin_url of string
   | Origin_not_configured
@@ -27,6 +29,7 @@ import os, sys, json, subprocess, time
 catalog = json.loads(sys.argv[1])
 checkout_budget = int(sys.argv[2])
 entry_budget = int(sys.argv[3])
+target_ref_stale_after_s = int(sys.argv[4])
 
 def canon_url(u):
     if not u: return ''
@@ -111,7 +114,7 @@ def inspect_git(path):
                     if moved.isdigit():
                         target_ref_last_observed_at_unix = int(moved)
                 if target_ref_last_observed_at_unix is None or \
-                   time.time() - target_ref_last_observed_at_unix > 900:
+                   time.time() - target_ref_last_observed_at_unix > target_ref_stale_after_s:
                     common = git('rev-parse', '--git-common-dir')
                     local_fetch = git('rev-parse', '--git-path', 'FETCH_HEAD')
                     candidates = []
@@ -442,6 +445,7 @@ let discover_and_inspect
         ; catalog_arg
         ; string_of_int Keeper_playground_checkouts.max_reported_checkouts
         ; string_of_int Keeper_playground_checkouts.max_scanned_entries
+        ; string_of_int target_ref_stale_after_s
         ]
       in
       (* Matched rather than collapsed with [status_tuple]: that helper turns

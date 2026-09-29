@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Combined-tree evidence controls: real Git, fake GitHub, no builds/network."""
 import copy
-from contextlib import ExitStack, redirect_stdout
+import ast
+from contextlib import ExitStack, contextmanager, redirect_stdout
 import importlib.util
 import io
 import json
@@ -28,6 +29,7 @@ def load(name, path):
 
 F = load("batch_test_freshness", HERE / "ci-freshness.py")
 B = load("batch_test_evidence", HERE / "batch_evidence.py")
+E = B.ExitCode
 REQUIRED = ("lint suite", "dune build @check", "dune build --profile release @check",
             "dashboard typecheck", "TLA model check")
 PREFIX = "repos/o/r"
@@ -219,8 +221,15 @@ print(value)
             self.put(f"pulls/{pr}/reviews?per_page=100", [review])
             self.put(f"pulls/{pr}/reviews/{review['id']}", review)
 
-    def refusal(self, reason, **kwargs):
-        with self.assertRaisesRegex(F.Unavailable, "^" + reason + "$"):
+    @contextmanager
+    def refused(self, reason, code):
+        """Expect a batch Refusal with receipt token `reason` and exit `code`."""
+        with self.assertRaises(B.Refusal) as caught:
+            yield
+        self.assertEqual((caught.exception.reason, caught.exception.code), (B.Reason(reason), code))
+
+    def refusal(self, reason, code, **kwargs):
+        with self.refused(reason, code):
             self.evaluate(**kwargs)
 
     def publish_roll(self, parent=None, *, wrong=False):
@@ -273,7 +282,7 @@ print(value)
              patch.object(F, "api", self.api), \
              patch.object(F, "api_pages", lambda gh, endpoint: [self.api(gh, endpoint)]), \
              patch.object(F, "command", side_effect=command), \
-             patch.object(B, "merge_guard", side_effect=lambda _f, args: command(args)), \
+             patch.object(B, "merge_guard", side_effect=lambda args: command(args)), \
              patch.object(B, "current_checks", side_effect=checks):
             return B.land(F, batch_file=str(batch), repo="o/r", git_dir=str(self.repo),
                           gh=str(self.fake), check_only=check_only)
@@ -365,8 +374,7 @@ print(value)
         self.approvals()
         before = self.change(self.base, "lib/one.ml", "let one = 1\n")
         self.publish_roll(parent=before)
-        with self.assertRaisesRegex(F.Unavailable,
-                                    "^batch_nonmember_main_change_invalidates_roll$"):
+        with self.refused("batch_nonmember_main_change_invalidates_roll", E.MAIN_OVERLAP):
             self.run_landing()
         self.assertEqual(self.writes, [])
 
@@ -378,14 +386,14 @@ print(value)
             with self.subTest(mode=mode):
                 self.data = copy.deepcopy(original)
                 self.main = self.base
-                with self.assertRaisesRegex(F.Unavailable, "^" + reason + "$"):
+                with self.refused(reason, E.LANDING):
                     self.run_landing(mode)
                 self.assertEqual(self.writes, [99])
         self.data = copy.deepcopy(original)
         self.main = self.base
         self.publish_roll()
         self.put("commits/main", {"sha": self.base})
-        with self.assertRaisesRegex(F.Unavailable, "^batch_roll_merge_not_in_main_history$"):
+        with self.refused("batch_roll_merge_not_in_main_history", E.LANDING):
             self.run_landing()
         self.assertEqual(self.writes, [])
 
@@ -394,13 +402,13 @@ print(value)
         merged = self.git("commit-tree", tree, "-p", self.base, "-p", self.roll, input="Not a squash\n")
         self.get("pulls/99").update(state="closed", merged=True, merge_commit_sha=merged)
         self.put("commits/main", {"sha": merged})
-        with self.assertRaisesRegex(F.Unavailable, "^batch_roll_landing_is_not_a_squash$"):
+        with self.refused("batch_roll_landing_is_not_a_squash", E.LANDING):
             self.run_landing()
         self.assertEqual(self.writes, [])
 
     def test_direct_member_landing_and_implicit_manifest_refuse(self):
         self.approvals()
-        self.refusal("batch_landing_requires_roll", landing=True)
+        self.refusal("batch_landing_requires_roll", E.MEMBER, landing=True)
         with self.assertRaisesRegex(ValueError, "^invalid_batch_line$"):
             B.parse(self.line.replace("landing: ROLL ", ""))
 
@@ -409,11 +417,11 @@ print(value)
         original = copy.deepcopy(self.data)
         self.put("issues/99/comments?per_page=100", self.get("issues/99/comments?per_page=100")[:1])
         self.put("pulls/99/reviews?per_page=100", [])
-        self.refusal("batch_roll_review_refuses_evidence", pr=99, landing=True)
+        self.refusal("batch_roll_review_refuses_evidence", E.ROLL, pr=99, landing=True)
         self.data = copy.deepcopy(original)
         review = self.get("pulls/99/reviews?per_page=100")[0]
         review["user"]["login"] = "author-99"
-        self.refusal("evidence_read_failed", pr=99, landing=True)
+        self.refusal("evidence_read_failed", E.MEMBER, pr=99, landing=True)
 
     def test_cli_final_member_approval_dismissal_refuses_without_write(self):
         self.approvals()
@@ -501,7 +509,8 @@ print(value)
         for run in [900, 901, 902]:
             with self.subTest(run=run):
                 self.get(f"actions/runs/{run}")["conclusion"] = "failure"
-                self.refusal("batch_run_not_current_successful_exact_pr_check")
+                self.refusal("batch_run_not_current_successful_exact_pr_check",
+                             E.ROLL if run == 900 else E.MEMBER)
                 self.get(f"actions/runs/{run}")["conclusion"] = "success"
 
     def test_foreign_run_identity_refuses(self):
@@ -510,7 +519,7 @@ print(value)
                              ("head_branch", "foreign"), ("pull_requests", [{"number": 1}])]:
             with self.subTest(field=field):
                 self.get("actions/runs/900")[field] = value
-                with self.assertRaises(F.Unavailable):
+                with self.assertRaises(B.Refusal):
                     self.evaluate()
                 self.put("actions/runs/900", copy.deepcopy(original))
 
@@ -518,13 +527,13 @@ print(value)
         newer = copy.deepcopy(self.get("actions/runs/900"))
         newer.update(id=999, run_number=11, status="queued", conclusion=None)
         self.get(f"actions/runs?head_sha={self.roll}&event=pull_request&per_page=100")["workflow_runs"].append(newer)
-        self.refusal("batch_run_not_current_successful_exact_pr_check")
+        self.refusal("batch_run_not_current_successful_exact_pr_check", E.ROLL)
 
     def test_absent_run_association_requires_matching_suite(self):
         self.get("actions/runs/901")["pull_requests"] = []
         self.assertEqual(self.evaluate()["status"], "fresh")
         self.get("check-suites/1901")["pull_requests"] = [{"number": 7}]
-        self.refusal("batch_run_suite_not_linked_to_pr")
+        self.refusal("batch_run_suite_not_linked_to_pr", E.MEMBER)
 
     def test_empty_run_association_rejects_ambiguous_suite(self):
         run = self.get("actions/runs/900")
@@ -533,7 +542,7 @@ print(value)
             "head_sha": self.roll, "head_branch": "branch-99",
             "pull_requests": [{"number": 99}, {"number": 100}]})
         self.put("pulls/100", copy.deepcopy(self.get("pulls/1")))
-        self.refusal("batch_run_suite_not_linked_to_pr")
+        self.refusal("batch_run_suite_not_linked_to_pr", E.ROLL)
 
     def test_cancelled_newer_twin_does_not_replace_valid_run(self):
         cancelled = copy.deepcopy(self.get("actions/runs/900"))
@@ -544,34 +553,35 @@ print(value)
     def test_missing_or_skipped_required_job_refuses(self):
         jobs = self.get("actions/runs/900/jobs?per_page=100")["jobs"]
         missing = jobs.pop()
-        self.refusal("batch_required_jobs_not_all_successful")
+        self.refusal("batch_required_jobs_not_all_successful", E.ROLL)
         jobs.append(missing)
         jobs[-1]["conclusion"] = "skipped"
-        self.refusal("batch_required_jobs_not_all_successful")
+        self.refusal("batch_required_jobs_not_all_successful", E.ROLL)
 
     def test_member_head_move_refuses(self):
         self.get("pulls/2")["head"]["sha"] = self.base
-        self.refusal("batch_member_head_or_base_changed")
+        self.refusal("batch_member_head_or_base_changed", E.MEMBER)
 
     def test_outsider_publication_refuses(self):
         for pr in [1, 99]:
             with self.subTest(pr=pr):
                 self.get(f"issues/{pr}/comments?per_page=100")[0]["author_association"] = "NONE"
-                self.refusal("batch_line_not_published_by_trusted_participant")
+                self.refusal("batch_line_not_published_by_trusted_participant",
+                             E.ROLL if pr == 99 else E.MEMBER)
                 self.get(f"issues/{pr}/comments?per_page=100")[0]["author_association"] = "COLLABORATOR"
 
     def test_formal_change_request_refuses(self):
         self.put("pulls/2/reviews?per_page=100", [
             {"id": 1, "state": "CHANGES_REQUESTED", "user": {"login": "reviewer"}}])
-        self.refusal("batch_member_has_open_change_request")
+        self.refusal("batch_member_has_open_change_request", E.MEMBER)
 
     def test_roll_formal_change_request_refuses_initial_and_late(self):
         reviews = [{"id": 1, "state": "CHANGES_REQUESTED", "user": {"login": "reviewer"}}]
         self.put("pulls/99/reviews?per_page=100", reviews)
-        self.refusal("batch_member_has_open_change_request")
+        self.refusal("batch_member_has_open_change_request", E.ROLL)
         self.put("pulls/99/reviews?per_page=100", [])
         self.later("pulls/99/reviews?per_page=100", reviews)
-        self.refusal("batch_member_has_open_change_request")
+        self.refusal("batch_member_has_open_change_request", E.ROLL)
 
     def test_late_roll_structured_refusal_cannot_reuse_batch_publication(self):
         endpoint = PREFIX + "/issues/99/comments"
@@ -584,14 +594,14 @@ print(value)
                 # The batch line remains intact and trusted. Only the later
                 # review decision changes during the final evidence reads.
                 self.data["__responses"] = {endpoint: [original, original + [refusal]]}
-                self.refusal("batch_roll_review_refuses_evidence")
+                self.refusal("batch_roll_review_refuses_evidence", E.ROLL)
 
 
     def test_external_shared_and_overlap_changes_refuse(self):
         for path in ["config/runtime.toml", "specs/auth/AuthIdentityFSM.tla", "lib/one.ml"]:
             with self.subTest(path=path):
                 self.put("commits/main", {"sha": self.change(self.base, path, "external change\n")})
-                self.refusal("batch_nonmember_main_change_invalidates_roll")
+                self.refusal("batch_nonmember_main_change_invalidates_roll", E.MAIN_OVERLAP)
 
     def test_external_unrelated_document_is_retained(self):
         self.approvals()
@@ -611,7 +621,7 @@ print(value)
                  self.get(f"actions/runs?head_sha={old}&event=pull_request&per_page=100"))
         self.get(f"actions/runs?head_sha={forged}&event=pull_request&per_page=100")["workflow_runs"][0]["head_sha"] = forged
         self.set_line()
-        self.refusal("batch_roll_tree_does_not_match_members")
+        self.refusal("batch_roll_tree_does_not_match_members", E.LANDING)
 
 
 
@@ -620,30 +630,30 @@ print(value)
         self.main = self.change(self.base, "docs/unrelated.md", "External note\n")
         self.put("commits/main", {"sha": self.main})
         (self.repo / ".git/shallow").write_text(self.main + "\n")
-        self.refusal("batch_base_not_in_available_main_history")
+        self.refusal("batch_base_not_in_available_main_history", E.INFRASTRUCTURE)
 
     def test_late_member_and_main_state_changes_refuse(self):
         moved = copy.deepcopy(self.get("pulls/2"))
         moved["head"]["sha"] = self.base
         self.later("pulls/2", moved)
-        self.refusal("batch_member_moved_during_check")
+        self.refusal("batch_member_moved_during_check", E.MEMBER)
         self.responses.clear()
         self.later("commits/main", {"sha": self.roll})
-        self.refusal("batch_roll_or_main_moved_during_check")
+        self.refusal("batch_roll_or_main_moved_during_check", E.INVALID)
 
     def test_late_publication_or_change_request_refuses(self):
         self.later("issues/2/comments?per_page=100", [])
-        self.refusal("batch_line_not_published_by_trusted_participant")
+        self.refusal("batch_line_not_published_by_trusted_participant", E.MEMBER)
         self.responses.clear()
         self.later("pulls/2/reviews?per_page=100", [
             {"id": 2, "state": "CHANGES_REQUESTED", "user": {"login": "reviewer"}}])
-        self.refusal("batch_member_has_open_change_request")
+        self.refusal("batch_member_has_open_change_request", E.MEMBER)
 
     def test_late_roll_draft_change_refuses(self):
         moved = copy.deepcopy(self.get("pulls/99"))
         moved["draft"] = True
         self.later("pulls/99", moved)
-        self.refusal("batch_roll_or_main_moved_during_check")
+        self.refusal("batch_roll_or_main_moved_during_check", E.INVALID)
 
     def test_late_structured_verdict_run_change_refuses(self):
         counts = {1: 0, 2: 0}
@@ -652,14 +662,14 @@ print(value)
             return 999 if member.pr == 2 and counts[2] > 1 else self.run_ids[member.pr]
         # Supply this gate directly so evaluate does not replace our sequence.
         with patch.object(B, "current_checks"), patch.object(B, "verdict", side_effect=verdict):
-            self.refusal("batch_member_verdict_changed_during_check", real_gates=True)
+            self.refusal("batch_member_verdict_changed_during_check", E.MEMBER, real_gates=True)
 
     def test_late_newer_success_invalidates_cited_roll_run(self):
         endpoint = f"actions/runs?head_sha={self.roll}&event=pull_request&per_page=100"
         newer = copy.deepcopy(self.get("actions/runs/900"))
         newer.update(id=999, run_number=11)
         self.later(endpoint, {"workflow_runs": [newer]})
-        self.refusal("batch_run_not_current_successful_exact_pr_check")
+        self.refusal("batch_run_not_current_successful_exact_pr_check", E.ROLL)
 
     def test_real_shell_verdict_and_ci_gate_accept_complete_evidence(self):
         if not shutil.which("jq"):
@@ -670,13 +680,13 @@ print(value)
         if not shutil.which("jq"):
             self.skipTest("real shell gates require jq")
         self.get(f"commits/{self.heads[2]}/check-runs?per_page=100")["check_runs"][0]["conclusion"] = "failure"
-        self.refusal("evidence_read_failed", real_gates=True)
+        self.refusal("evidence_read_failed", E.MEMBER, real_gates=True)
 
     def test_real_shell_verdict_rejects_outsider_pass(self):
         if not shutil.which("jq"):
             self.skipTest("real shell gates require jq")
         self.get("issues/2/comments?per_page=100")[1]["author_association"] = "NONE"
-        self.refusal("batch_member_without_current_pass", real_gates=True)
+        self.refusal("batch_member_without_current_pass", E.MEMBER, real_gates=True)
 
     def test_real_shell_final_ci_gate_rejects_late_check_failure(self):
         if not shutil.which("jq"):
@@ -686,7 +696,7 @@ print(value)
         failed = copy.deepcopy(good)
         failed["check_runs"][0]["conclusion"] = "failure"
         self.data["__responses"] = {PREFIX + "/" + endpoint: [good, failed]}
-        self.refusal("evidence_read_failed", real_gates=True)
+        self.refusal("evidence_read_failed", E.MEMBER, real_gates=True)
 
     def test_main_move_during_final_roll_check_refuses(self):
         if not shutil.which("jq"):
@@ -702,7 +712,7 @@ print(value)
                 if roll_reads == 2:
                     self.put("commits/main", {"sha": moved})
         with patch.object(B, "current_checks", side_effect=check_then_move):
-            self.refusal("batch_roll_or_main_moved_during_check", real_gates=True)
+            self.refusal("batch_roll_or_main_moved_during_check", E.INVALID, real_gates=True)
         self.assertEqual(roll_reads, 2, "mutation must occur during the finishing CI read")
 
     def test_actual_batch_argument_wrappers_accept_and_reject_without_writes(self):
@@ -758,7 +768,7 @@ print(value)
     def test_land_entry_missing_second_approval_refuses_before_any_write(self):
         self.approvals()
         self.put("pulls/2/reviews?per_page=100", [])
-        with self.assertRaisesRegex(F.Unavailable, "^evidence_read_failed$"):
+        with self.refused("evidence_read_failed", E.MEMBER):
             self.run_landing()
         self.assertEqual(self.writes, [])
 
@@ -813,9 +823,14 @@ print(value)
         code, receipt = self.cli()
         self.assertEqual((code, receipt["reason"]), (6, "batch_run_not_current_successful_exact_pr_check"))
         self.get("actions/runs/901")["conclusion"] = "success"
-        self.get(f"actions/runs?head_sha={self.heads[1]}&event=pull_request&per_page=100")["workflow_runs"] = []
+        member_runs = self.get(f"actions/runs?head_sha={self.heads[1]}&event=pull_request&per_page=100")
+        listed, member_runs["workflow_runs"] = member_runs["workflow_runs"], []
         code, receipt = self.cli()
         self.assertEqual((code, receipt["reason"]), (6, "pr_check_run_unavailable"))
+        member_runs["workflow_runs"] = listed
+        self.get(f"actions/runs?head_sha={self.roll}&event=pull_request&per_page=100")["workflow_runs"] = []
+        code, receipt = self.cli()
+        self.assertEqual((code, receipt["reason"]), (3, "pr_check_run_unavailable"))
 
     def test_cli_wrong_landing_tree_is_four(self):
         self.publish_roll(wrong=True)
@@ -844,6 +859,108 @@ print(value)
         del self.data[PREFIX + "/actions/runs/900"]
         code, receipt = self.cli()
         self.assertEqual((code, receipt["reason"]), (1, "evidence_read_failed"))
+
+    # Exit codes each Reason may leave with. Two codes: a shared reader takes
+    # its caller's role. EVIDENCE_READ_FAILED follows the shell guard's status.
+    REASON_CODES_CONTRACT = {
+        "evidence_read_failed": {E.INFRASTRUCTURE, E.ROLL, E.MEMBER, E.LANDING, E.MAIN_OVERLAP},
+        "invalid_approval_receipt": {E.INFRASTRUCTURE},
+        "batch_line_not_published_by_trusted_participant": {E.ROLL, E.MEMBER},
+        "batch_member_without_current_pass": {E.MEMBER},
+        "batch_roll_review_refuses_evidence": {E.ROLL},
+        "batch_member_has_open_change_request": {E.ROLL, E.MEMBER},
+        "pr_check_run_unavailable": {E.ROLL, E.MEMBER},
+        "batch_run_not_current_successful_exact_pr_check": {E.ROLL, E.MEMBER},
+        "batch_run_suite_not_linked_to_pr": {E.ROLL, E.MEMBER},
+        "batch_required_jobs_not_all_successful": {E.ROLL, E.MEMBER},
+        "batch_roll_pr_identity_unavailable": {E.ROLL},
+        "batch_roll_pr_is_a_member": {E.INVALID},
+        "candidate_not_in_batch": {E.MEMBER},
+        "batch_landing_requires_roll": {E.MEMBER},
+        "batch_roll_already_merged": {E.MEMBER},
+        "batch_roll_not_yet_merged": {E.MEMBER},
+        "batch_member_verdict_names_another_run": {E.MEMBER},
+        "batch_member_head_or_base_changed": {E.MEMBER},
+        "batch_member_no_longer_open": {E.MEMBER},
+        "batch_tree_merge_conflict_or_unavailable": {E.LANDING, E.INFRASTRUCTURE},
+        "batch_tree_commit_unavailable": {E.INFRASTRUCTURE},
+        "batch_roll_tree_does_not_match_members": {E.LANDING},
+        "batch_roll_has_no_changes": {E.INVALID},
+        "batch_base_not_in_available_main_history": {E.INFRASTRUCTURE},
+        "batch_roll_landing_is_not_a_squash": {E.LANDING},
+        "batch_main_changed_at_merge_write": {E.LANDING},
+        "batch_roll_landing_tree_mismatch": {E.LANDING},
+        "batch_nonmember_main_change_invalidates_roll": {E.MAIN_OVERLAP},
+        "batch_roll_merge_not_in_main_history": {E.LANDING},
+        "batch_final_landing_tree_mismatch": {E.LANDING},
+        "batch_member_moved_during_check": {E.MEMBER},
+        "batch_publication_changed_during_check": {E.MEMBER},
+        "batch_member_verdict_changed_during_check": {E.MEMBER},
+        "batch_roll_or_main_moved_during_check": {E.INVALID},
+    }
+
+    def test_every_reason_is_raised_with_a_contract_code(self):
+        tree = ast.parse((HERE / "batch_evidence.py").read_text())
+        self.assertEqual(set(self.REASON_CODES_CONTRACT), {reason.value for reason in B.Reason})
+        for reason in B.Reason:
+            self.assertEqual(reason.name, reason.value.removeprefix("batch_").upper())
+        raised_calls, raised = set(), set()
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Raise) or node.exc is None:
+                continue
+            names = {sub.attr for sub in ast.walk(node.exc) if isinstance(sub, ast.Attribute)}
+            self.assertFalse(names & {"Unavailable", "NoPrCheckRun"}, ast.unparse(node))
+            call = node.exc
+            if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
+                    and call.func.id == "Refusal"):
+                continue
+            raised_calls.add(id(call))
+            with self.subTest(site=ast.unparse(node)):
+                self.assertEqual(len(call.args), 2)
+                first, code = call.args
+                self.assertTrue(isinstance(first, ast.Attribute) and isinstance(first.value, ast.Name)
+                                and first.value.id == "Reason")
+                raised.add(first.attr)
+                allowed = self.REASON_CODES_CONTRACT[B.Reason[first.attr].value]
+                # The values the code expression can take: ExitCode literals,
+                # or a variable (a role or guard status chosen at run time).
+                leaves, pending = [], [code]
+                while pending:
+                    expr = pending.pop()
+                    if isinstance(expr, ast.IfExp):
+                        pending.extend((expr.body, expr.orelse))
+                    else:
+                        leaves.append(expr)
+                for leaf in leaves:
+                    if isinstance(leaf, ast.Attribute) and ast.unparse(leaf.value) == "ExitCode":
+                        self.assertIn(E[leaf.attr], allowed)
+                    else:
+                        self.assertIsInstance(leaf, ast.Name)
+                        self.assertGreaterEqual(allowed, {E.ROLL, E.MEMBER})
+        self.assertEqual(raised, {reason.name for reason in B.Reason}, "every Reason needs a raise site")
+        bare = [ast.unparse(node) for node in ast.walk(tree) if isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name) and node.func.id == "Refusal"
+                and id(node) not in raised_calls]
+        self.assertEqual(bare, [], "a Refusal that is built but not raised refuses nothing")
+
+    def test_failure_code_follows_exception_type_never_reason_text(self):
+        for reason in B.Reason:
+            for code in (B.ExitCode.ROLL, B.ExitCode.MEMBER, B.ExitCode.LANDING):
+                with self.subTest(reason=reason, code=code):
+                    error = B.Refusal(reason, code)
+                    self.assertEqual(str(error), reason.value)
+                    self.assertIs(B.failure_code(F, error), code)
+            with self.subTest(parent=reason):
+                # The same token from a parent read is a read failure: the
+                # code follows the exception type, not its message.
+                self.assertIs(B.failure_code(F, F.Unavailable(reason.value)), B.ExitCode.INFRASTRUCTURE)
+        self.assertIs(B.failure_code(F, F.NoPrCheckRun()), B.ExitCode.INFRASTRUCTURE)
+        self.assertIs(B.failure_code(F, OSError("gone")), B.ExitCode.INFRASTRUCTURE)
+        for error in (ValueError("x"), KeyError("x"), TypeError("x")):
+            with self.subTest(error=type(error).__name__):
+                self.assertIs(B.failure_code(F, error), B.ExitCode.INVALID)
+        with self.assertRaisesRegex(TypeError, "^unclassified batch failure: RuntimeError$"):
+            B.failure_code(F, RuntimeError("unexpected"))
 
     def test_cli_status_keeps_success_and_pending_distinct(self):
         # The asynchronous pending transition itself uses the real-Git land
@@ -927,7 +1044,7 @@ print(value)
         self.assertEqual(self.evaluate()["status"], "fresh")
         self.put("commits/main", {"sha": self.change(self.base, "lib/base.ml",
                                                   content.replace("let z = 0", "let z = 1"))})
-        self.refusal("batch_nonmember_main_change_invalidates_roll")
+        self.refusal("batch_nonmember_main_change_invalidates_roll", E.MAIN_OVERLAP)
 
 
 

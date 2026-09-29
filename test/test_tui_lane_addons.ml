@@ -715,7 +715,10 @@ let directory_issue_is_not_an_editable_installation () =
   check bool "Lanes rollup and Add-on overview share the issue-only reading" true
     (UI.installation_reading view = UI.Observed {
       declared=0; active=0; failed_workers=0; configuration_issues=1;
-      complete=false; freshness=UI.Current })
+      complete=false; freshness=UI.Current });
+  check bool "directory detail does not promise an edit action" true
+    (not (List.exists (fun line -> List.mem "E:edit" (String.split_on_char ' ' line))
+      (UI.lines ~width:110 {view with presentation=UI.Technical})))
 
 let mixed_installations_keep_navigation_order () =
   let json = Yojson.Safe.from_string

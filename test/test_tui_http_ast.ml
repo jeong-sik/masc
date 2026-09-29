@@ -753,16 +753,13 @@ let test_recent_projection_is_prepared_inside_frame_build () =
     [["prepare"; "store"; "render"]] (List.rev !build_steps)
 ;;
 
-(* One Overview frame summarised the Todo backlog, projected the Team block
-   and searched the backlog for each goal link several times, and drew again
-   for every key. Each is now made once per input list, in one binding; a
-   second call site would make it once per frame again. *)
+(* Render must use the cache tested by test_tui_overview_cache. Counting
+   references also catches pipes and partial applications bypassing it. *)
 let test_overview_projections_are_made_once_per_input () =
   let open Parsetree in
   let render = "bin/masc_tui_render.ml" in
-  (* Any mention, not only an application: a pipe or a partial application
-     names the function without applying it at that spot. *)
-  let references name =
+  let cache = "bin/masc_tui_overview_cache.ml" in
+  let references path name =
     let count = ref 0 in
     let iter =
       { Ast_iterator.default_iterator with
@@ -774,35 +771,36 @@ let test_overview_projections_are_made_once_per_input () =
           Ast_iterator.default_iterator.expr self expression)
       }
     in
-    iter.structure iter (Ast_grep.parse_implementation_or_fail render);
+    iter.structure iter (Ast_grep.parse_implementation_or_fail path);
     !count
   in
-  (* A count inside a binding that no longer exists is zero, which would
-     read as a pass; the bindings are asked for first. *)
   List.iter
-    (fun name ->
-      check int ("binding exists: " ^ name) 1
-        (Ast_grep.count_value_bindings ~module_path:render ~name))
-    [ "overview_backlog"; "overview_team"; "overview_goal_status_of_id" ];
-  check int "the Todo backlog is summarised in one place" 1
-    (references "Overview_tasks.backlog");
-  check int "... the Overview backlog binding" 1
+    (fun (binding_name, callee) ->
+      check int ("binding exists: " ^ binding_name) 1
+        (Ast_grep.count_value_bindings ~module_path:render ~name:binding_name);
+      check int ("render uses tested cache: " ^ binding_name) 1
+        (Ast_grep.count_calls_in_value_binding ~module_path:render
+           ~binding_name ~callee))
+    [ "overview_backlog", "Masc_tui_overview_cache.backlog";
+      "overview_team", "Masc_tui_overview_cache.team";
+      "overview_goal_status_of_id", "Masc_tui_overview_cache.goal_status_of_id" ];
+  check int "renderer keeps one cache across frames" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render
-       ~binding_name:"overview_backlog" ~callee:"Overview_tasks.backlog");
-  check int "the Team block is projected in one place" 1
-    (references "Overview_team.project");
-  check int "... the Overview Team binding" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:render
-       ~binding_name:"overview_team" ~callee:"Overview_team.project");
-  check int "no call spells the modules out to get round the aliases" 0
-    (references "Masc_tui_overview_tasks.backlog"
-     + references "Masc_tui_overview_team.project");
-  check int "goal links resolve through the task-status index" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:render
-       ~binding_name:"overview_goal_status_of_id" ~callee:"Hashtbl.find_opt");
-  check int "... and not by searching the backlog" 0
-    (Ast_grep.count_calls_in_value_binding ~module_path:render
-       ~binding_name:"overview_goal_status_of_id" ~callee:"List.find_opt")
+       ~binding_name:"overview_cache" ~callee:"Masc_tui_overview_cache.create");
+  check int "renderer never constructs another cache" 1
+    (references render "Masc_tui_overview_cache.create");
+  List.iter
+    (fun name -> check int ("no render bypass: " ^ name) 0 (references render name))
+    [ "Overview_tasks.backlog"; "Overview_team.project";
+      "Masc_tui_overview_tasks.backlog"; "Masc_tui_overview_team.project" ];
+  check int "one Todo summary computation" 1 (references cache "Tasks.backlog");
+  check int "one Team projection computation" 1 (references cache "Team.project");
+  check int "goal links resolve through the index" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:cache
+       ~binding_name:"goal_status_of_id" ~callee:"Hashtbl.find_opt");
+  check int "goal links do not search the backlog" 0
+    (Ast_grep.count_calls_in_value_binding ~module_path:cache
+       ~binding_name:"goal_status_of_id" ~callee:"List.find_opt")
 ;;
 
 let test_user_message_background_has_one_render_snapshot () =

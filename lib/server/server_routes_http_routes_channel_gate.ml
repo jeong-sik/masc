@@ -531,6 +531,22 @@ let handle_gate_keeper_sandbox_logs state request reqd =
      | Error (Keeper_sandbox_control.Sandbox_logs_backend_failed detail) ->
        respond ~status:`Bad_gateway (Channel_gate.error_json detail))
 
+(** GET /api/v1/gate/keeper-shims
+
+    Every keeper's execution lane as this process last saw it: the shim's
+    release and protocol, when that was read, and the last dispatch. The
+    operator's view of what [keeper_lane_status] gives one keeper about itself.
+    Read-only; it starts no guest and asks no endpoint, so a lane nobody has
+    used since the server started reads as not asked. *)
+let handle_gate_keeper_shims state request reqd =
+  let config = Mcp_server.workspace_config state in
+  match Keeper_shim_fleet.json ~config with
+  | Ok json -> Http_server_eio.Response.json_value ~request json reqd
+  | Error error ->
+    Http_server_eio.Response.json_value ~status:`Service_unavailable ~request
+      (Channel_gate.error_json (Keeper_shim_fleet.error_detail error))
+      reqd
+
 (** Shared bind handler: parse body, validate keeper, dispatch to connector. *)
 let handle_bind_for_connector ~sw ~clock state request reqd ~connector_name
     ~(bind_fn :
@@ -742,6 +758,12 @@ let add_routes ~sw ~clock router =
        with_token_permission_auth ~permission:Masc_domain.CanReadState
          (fun state _agent_name _req reqd ->
            handle_gate_keeper_sandbox_logs state request reqd)
+         request reqd)
+
+  |> Http.Router.get "/api/v1/gate/keeper-shims" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanReadState
+         (fun state _agent_name _req reqd ->
+           handle_gate_keeper_shims state request reqd)
          request reqd)
 
   (* Generic connector routes — dispatch by ?name=<connector> *)

@@ -121,6 +121,14 @@ def assert_chat_intact(rows: dict[int, bytes], name: bytes) -> None:
     assert chat_title(name) in text, "portrait replaced the conversation heading"
     assert b"Context" in text, "portrait displaced the runtime/context status row"
     assert b"  > " in text, "portrait displaced the input row"
+    if any("KEEPERS" in left_text(row) for row in rows.values()):
+        # Even the blank row after the portrait must retain the left pane's
+        # width when zipped with the longer chat. A bare newline moves the
+        # composer into the portrait column while its cursor stays right.
+        composer = [row for row in rows.values() if b"  > " in row]
+        assert len(composer) == 1, f"expected one composer row: {composer!r}"
+        assert h.fixture_cell_width(composer[0].split(b">", 1)[0].decode()) == ROSTER_COLUMNS + 4, (
+            f"composer moved out of the right pane: {composer[0]!r}")
 
 
 def assert_hidden(rows: dict[int, bytes]) -> None:
@@ -183,7 +191,16 @@ def pixels_follow_conversation(binary: str) -> None:
         assert row + 7 < h.screen_row_of(rows, b"Context"), "portrait crossed the full-width status row"
         assert not mosaic_rows(rows), "Kitty portrait also drew a mosaic"
         assert_chat_intact(rows, b"alpha")
-        h.send_and_wait(process, fd, output, b"portrait-draft", h.composer_showing(b"portrait-draft"))
+        h.drain_until_quiet(process, fd, output)
+        typing_start = len(output)
+        draft = b"portrait10"
+        for count, key in enumerate(draft, 1):
+            h.send_and_wait(process, fd, output, bytes([key]), h.composer_showing(draft[:count]))
+        h.drain_until_quiet(process, fd, output)
+        typing_transfers = png_transfers(bytes(output[typing_start:]))
+        print(f"portrait PNG transfers during {len(draft)} typed characters: {len(typing_transfers)}")
+        assert not typing_transfers, "typing below the portrait retransmitted its PNG"
+        assert_chat_intact(screen(output), b"alpha")
         h.send_and_wait(process, fd, output, b"\x1b[D", b"Enter:open")
         cursor_start = len(output)
         h.send_and_wait(process, fd, output, b"\x1b[B", h.keeper_row_selected(b"beta"))
@@ -199,12 +216,12 @@ def pixels_follow_conversation(binary: str) -> None:
         rows = screen(output)
         assert beta[-1][0] == caption_row(rows, b"beta") + 1
         assert_chat_intact(rows, b"beta")
-        assert b"portrait-draft" not in b"\n".join(rows.values()), "alpha's draft leaked into beta's conversation"
+        assert draft not in b"\n".join(rows.values()), "alpha's draft leaked into beta's conversation"
         h.send_and_wait(process, fd, output, b"\x07", chat_title(b"alpha"))
         h.drain_until_quiet(process, fd, output)
         caption_row(screen(output), b"alpha")
         assert png_transfers(bytes(output))[-1][2] == alpha, "returning to alpha did not restore its portrait"
-        assert b"portrait-draft" in b"\n".join(screen(output).values()), "alpha's draft was not retained"
+        assert draft in b"\n".join(screen(output).values()), "alpha's draft was not retained"
         h.write_all(fd, output, b"\x15")
         h.drain_until_quiet(process, fd, output)
         start = len(output)

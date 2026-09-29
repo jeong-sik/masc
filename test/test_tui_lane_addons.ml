@@ -710,7 +710,10 @@ let directory_issue_is_not_an_editable_installation () =
      && List.mem "Installations and configuration problems" lines
      && not (List.exists (fun line -> List.mem "E:edit" (String.split_on_char ' ' line)) lines));
   check bool "directory has no editable TOML source" true
-    (UI.selected_source_path view=None)
+    (UI.selected_source_path view=None);
+  check bool "directory detail does not promise an edit action" true
+    (not (List.exists (fun line -> List.mem "E:edit" (String.split_on_char ' ' line))
+      (UI.lines ~width:110 {view with presentation=UI.Technical})))
 
 let mixed_installations_keep_navigation_order () =
   let json = Yojson.Safe.from_string

@@ -967,13 +967,14 @@ let technical_lines ?(height=24) ?(failed_note = "") ~width view =
 let installation_detail_lines ~width view =
   let wrap line = Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
       (Masc.Tui_decode.sanitize_terminal_text line) in
+  let edit_hint = if Option.is_some (selected_source_path view) then "  E:edit TOML" else "" in
   let body = match view.snapshot with
     | Some ({configuration=Some configuration;_} as snapshot) ->
         (match selected_declaration view with
          | Some declaration ->
              ["Installation details · " ^
                 Option.value ~default:(Filename.basename declaration.source_path) declaration.installation_id;
-              "Esc:back  j/k:choose installation  E:edit TOML  r:refresh"; ""]
+              "Esc:back  j/k:choose installation" ^ edit_hint ^ "  r:refresh"; ""]
              @ configuration_lines {view with configuration_cursor=0}
                  {snapshot with configuration=Some {configuration with declarations=[declaration]}}
          | None -> ["Installation selection changed · Esc:back  r:refresh"])
@@ -1006,7 +1007,8 @@ let overview_hints view =
   else match view.screen with
   | Overview when view.presentation=Technical && view.focus=Configurations
       && Option.is_none view.document_key ->
-      "?:help  Esc:back  j/k:installation  E:edit TOML"
+      "?:help  Esc:back  j/k:installation"
+      ^ (if Option.is_some (selected_source_path view) then "  E:edit TOML" else "")
       ^ (if view.loading then "  Reading …" else "  r:refresh")
   | Overview ->
       "?:help  Esc:back  Tab:workers/installations  Enter:open  i:install  n:new  S:subs"

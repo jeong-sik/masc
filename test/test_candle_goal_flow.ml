@@ -213,6 +213,8 @@ let test_a_confirmed_pass_leaves_a_payout_owed () =
    | ( { Candle_event.body = Candle_event.Payout_owed owed; _ } :: _
      , Ok (Some { Goal_verification.completion = Goal_verification.Human_confirmed (_, confirmation); _ })
      ) ->
+     check string "the obligation names the confirmed verifier run"
+       verdict.Goal_verification.verification_run_id owed.verification_run_id;
      check
        string
        "the pass time is the verdict's"
@@ -226,6 +228,75 @@ let test_a_confirmed_pass_leaves_a_payout_owed () =
    | _ -> fail "expected a PayoutOwed and a confirmation");
   confirmed config goal_id;
   check int "confirming again writes no second PayoutOwed" 1 (count_kind config "payout_owed")
+;;
+
+(* A failed proof commit can leave its Snapshot behind. Reproduce that residue
+   through the Snapshot producer using the actual committing verdict's second,
+   then finish a different run of the same request. The confirmation and
+   candidate pass must follow that run's linked Tasks. *)
+let test_same_second_retry_uses_the_confirmed_run_snapshot () =
+  with_workspace
+  @@ fun config ->
+  enable_candle config;
+  let goal_id = goal_in_verifying config in
+  (match Goal_store.transact_goal config ~goal_id (fun goal ->
+     Ok ({ goal with Goal_store.created_at = "2026-09-20T01:00:00Z" }, ())) with
+   | Ok _ -> ()
+   | Error error -> fail (Goal_store.write_error_to_string error));
+  let request_id, criterion =
+    match Goal_verification.get_record_authoritative config ~goal_id with
+    | Ok (Some { Goal_verification.completion = Goal_verification.Proof_pending pending; _ }) ->
+        pending.request_id, pending.criterion
+    | Ok _ | Error _ -> fail "missing pending request"
+  in
+  Workspace_goal_index.write_goal_task_links config [ goal_id, [ "task-orphan" ] ];
+  let before_proof_commit goal (verdict : Goal_verification.verdict) =
+    let ( let* ) = Result.bind in
+    let failed = { verdict with verification_run_id = "failed-verifier-run" } in
+    let* () = Candle_snapshot.before_proof_commit config goal failed in
+    Workspace_goal_index.write_goal_task_links config [ goal_id, [ "task-confirmed" ] ];
+    Candle_snapshot.before_proof_commit config goal verdict
+  in
+  let committed =
+    Workspace_goals.commit_verifier_decision ~before_proof_commit
+      ~tool_name:"goal_verifier_commit" ~start_time:(Tool_timing.start ()) config
+      ~goal_id ~request_id ~criterion ~verification_run_id:"confirmed-verifier-run"
+      ~decision:Workspace_goals.Proof_proven ~evidence:"the successful retry's proof"
+  in
+  if not (Tool_result.is_success committed) then fail (Tool_result.message committed);
+  (match ledger_events config with
+   | [ { Candle_event.body = Candle_event.Snapshot first; _ }
+     ; { Candle_event.body = Candle_event.Snapshot second; _ } ] ->
+       check bool "both runs occupy the same second" true
+         (Candle_time.equal first.passed_at second.passed_at);
+       check string "the first Snapshot is the orphan run" "failed-verifier-run" first.verification_run_id;
+       check string "the second Snapshot is the committed run" "confirmed-verifier-run" second.verification_run_id
+   | _ -> fail "expected both run Snapshots before confirmation");
+  confirmed config goal_id;
+  let completed_at =
+    match Candle_time.of_rfc3339 "2026-09-25T00:00:00Z" with
+    | Ok time -> time
+    | Error detail -> fail detail
+  in
+  let sources : Candle_candidates.sources =
+    { task_lookups = (fun ~goal_id:_ ids ->
+        Ok (List.map (fun id -> id, Candle_event.Found
+          { title = id; assignee = Some "keeper-a"; status = Candle_event.Done { completed_at } }) ids))
+    ; is_keeper = (fun () -> Ok (String.equal "keeper-a"))
+    }
+  in
+  (match Candle_candidates.drain_with ~sources ~now:Time_compat.now ~base_path:config.base_path with
+   | Ok [ Candle_candidates.Wrote_candidates _ ] -> ()
+   | Ok _ -> fail "the confirmed contribution was not prepared"
+   | Error detail -> fail detail);
+  (match List.rev (ledger_events config) with
+   | { Candle_event.body = Candle_event.Candidates candidates; _ }
+     :: { Candle_event.body = Candle_event.Payout_owed owed; _ } :: _ ->
+       check string "PayoutOwed keeps the production verifier run" "confirmed-verifier-run" owed.verification_run_id;
+       check string "Candidates keeps the production verifier run" "confirmed-verifier-run" candidates.verification_run_id;
+       check (list string) "only the successful run's Tasks are candidates"
+         [ "task-confirmed" ] candidates.candidate_task_ids
+   | _ -> fail "expected the obligation followed by its Candidates")
 ;;
 
 let test_without_a_candle_toml_a_confirmation_writes_nothing () =
@@ -425,7 +496,9 @@ let () =
   run
     "candle_goal_flow"
     [ ( "confirmation"
-      , [ test_case "a confirmed pass leaves a payout owed" `Quick test_a_confirmed_pass_leaves_a_payout_owed
+      , [ test_case "same-second retry uses the confirmed run Snapshot" `Quick
+            test_same_second_retry_uses_the_confirmed_run_snapshot
+        ; test_case "a confirmed pass leaves a payout owed" `Quick test_a_confirmed_pass_leaves_a_payout_owed
         ; test_case
             "without a candle.toml a confirmation writes nothing"
             `Quick

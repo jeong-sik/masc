@@ -127,12 +127,14 @@ let enable_candle (config : Workspace.config) =
    operator confirmed on 2026-09-29. *)
 let seed_payout ?(linked_task_ids = []) (config : Workspace.config) ~goal_id =
   let request_id = "req-" ^ goal_id in
+  let verification_run_id = "run-" ^ goal_id in
   let rows : E.t list =
     [ { at = at "2026-09-28T06:32:01Z"
       ; body =
           E.Snapshot
             { goal_id
             ; request_id
+            ; verification_run_id
             ; criterion_revision = "rev-1"
             ; passed_at = at "2026-09-28T06:32:00Z"
             ; goal_created_at = at "2026-09-20T01:00:00Z"
@@ -148,6 +150,7 @@ let seed_payout ?(linked_task_ids = []) (config : Workspace.config) ~goal_id =
           E.Payout_owed
             { goal_id
             ; request_id
+            ; verification_run_id
             ; passed_at = at "2026-09-28T06:32:00Z"
             ; confirmed_at = at "2026-09-29T05:00:00Z"
             }

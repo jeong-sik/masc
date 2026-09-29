@@ -3079,23 +3079,85 @@ let test_seed_of_thinking_support_gate_contract () =
 ;;
 
 let test_max_output_tokens_accessor_projects_catalog () =
+  let max_output_tokens id =
+    Option.bind (Runtime.get_runtime_by_id id) Runtime.max_output_tokens_of_runtime
+  in
   with_runtime_thinking (fun () ->
     Alcotest.(check (option int))
       "explicitly declared catalog ceiling is projected verbatim"
       (Some 200000)
-      (Runtime.max_output_tokens_of_runtime_id "ollama_cloud.bigout");
+      (max_output_tokens "ollama_cloud.bigout");
     Alcotest.(check (option int))
       "catalog row projects its declared max_output_tokens"
       (Some 65536)
-      (Runtime.max_output_tokens_of_runtime_id "ollama_cloud.thinkdefault");
+      (max_output_tokens "ollama_cloud.thinkdefault");
     Alcotest.(check (option int))
       "reasoning runtime whose model is absent from the catalog projects None"
       None
-      (Runtime.max_output_tokens_of_runtime_id "ollama_cloud.think");
+      (max_output_tokens "ollama_cloud.think");
     Alcotest.(check (option int))
       "unknown runtime id projects None (no capability record)"
       None
-      (Runtime.max_output_tokens_of_runtime_id "bogus.binding"))
+      (max_output_tokens "bogus.binding"))
+;;
+
+(* One more binding of the catalog's reasoning model, declaring an effort, so
+   that rows differ in both the ceiling and the effort. *)
+let runtime_config_effortful =
+  {|
+[models.effortful]
+api-name = "qwen36-35b-a3b-mtp"
+max-context = 128000
+tools-support = true
+thinking-support = true
+reasoning-effort = "high"
+streaming = true
+
+[ollama_cloud.effortful]
+max-concurrent = 1
+|}
+;;
+
+let test_resolved_rows_carry_their_own_binding () =
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  with_temp_dir "runtime-resolved-rows" @@ fun dir ->
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
+    (fun () ->
+      with_model_catalog_content runtime_thinking_model_catalog @@ fun () ->
+      let path = Filename.concat dir "runtime.toml" in
+      write_file path (runtime_config_thinking ^ runtime_config_effortful);
+      (match Runtime.init_default ~config_path:path with
+       | Ok () -> ()
+       | Error msg -> Alcotest.failf "runtime init_default failed: %s" msg);
+      let json =
+        Server_dashboard_runtime_resolved_json.build
+          ~generated_at_iso:"2026-09-30T00:00:00Z"
+          ~config:(Workspace.default_config dir)
+      in
+      let row id =
+        match
+          List.find_opt
+            (fun row -> String.equal (row |> J.member "id" |> J.to_string) id)
+            (json |> J.member "runtimes" |> J.to_list)
+        with
+        | Some row -> row
+        | None -> Alcotest.failf "no resolved row for %s" id
+      in
+      let fields id =
+        let row = row id in
+        ( id
+        , Yojson.Safe.to_string (J.member "max_output_tokens" row)
+        , Yojson.Safe.to_string (J.member "declared_reasoning_effort" row) )
+      in
+      Alcotest.(check (list (triple string string string)))
+        "each row's ceiling and declared effort come from its own binding"
+        [ "ollama_cloud.effortful", "65536", {|"high"|}
+        ; "ollama_cloud.bigout", "200000", "null"
+        ; "ollama_cloud.think", "null", "null"
+        ]
+        (List.map fields
+           [ "ollama_cloud.effortful"; "ollama_cloud.bigout"; "ollama_cloud.think" ]))
 ;;
 
 let test_max_context_accessor_clamps_to_provider_cap () =
@@ -4028,9 +4090,13 @@ let () =
         ] )
     ; ( "runtime token capacity projection"
       , [ Alcotest.test_case
-            "max_output_tokens_of_runtime_id projects catalog ceiling"
+            "max_output_tokens_of_runtime projects catalog ceiling"
             `Quick
             test_max_output_tokens_accessor_projects_catalog
+        ; Alcotest.test_case
+            "resolved rows carry their own binding"
+            `Quick
+            test_resolved_rows_carry_their_own_binding
         ; Alcotest.test_case
             "max_context_of_runtime_id clamps runtime TOML to provider cap"
             `Quick

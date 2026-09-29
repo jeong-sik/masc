@@ -888,12 +888,11 @@ val max_context_of_runtime_id : string -> int option
     is clamped to [min runtime.toml max-context provider cap] so MASC cannot
     admit a prompt larger than the provider-owned window. *)
 
-val max_output_tokens_of_runtime_id : string -> int option
+val max_output_tokens_of_runtime : t -> int option
 (** Declared max output tokens (AGENT_CORE capability catalog) for the model bound to
-    runtime [id], or [None] when the id is not configured or the catalog leaves
-    it unset. This is an observable capability ceiling only; AGENT_CORE owns request
-    validation and clamp policy, and MASC never turns it into a request
-    default. *)
+    [rt], or [None] when the catalog leaves it unset. This is an observable
+    capability ceiling only; AGENT_CORE owns request validation and clamp
+    policy, and MASC never turns it into a request default. *)
 
 val thinking_support_of_runtime_id : string -> bool option
 (** Explicit [thinking-support] policy for the runtime's model. [None] means

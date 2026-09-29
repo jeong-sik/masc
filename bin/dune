@@ -510,7 +510,7 @@
  (name masc_tui_preset_text)
  (wrapped false)
  (modules masc_tui_preset_text)
- (libraries masc masc_tui_fetched))
+ (libraries masc masc_tui_fetched masc_tui_message_layout))
 
 ;; The card an issued play invite is drawn as: pure, so a test reads the exact
 ;; rows an operator sees. The QR is drawn by the portraits' half-block mosaic in

@@ -1,5 +1,7 @@
 open Keeper_meta_contract
 
+let target_ref_stale_after_s = 900
+
 type remote_origin =
   | Origin_url of string
   | Origin_not_configured
@@ -13,19 +15,21 @@ type inspected_checkout =
   ; dirty : (bool * int, string) result
   ; target_ref : string option
   ; upstream_head : string option
+  ; target_ref_last_observed_at_unix : int option
   ; ahead : int option
   ; behind : int option
   }
 
 let probe_script =
   {|\
-import os, sys, json, subprocess
+import os, sys, json, subprocess, time
 
-# The three arguments are built by the OCaml side; a malformed one is its
+# The four arguments are built by the OCaml side; a malformed one is its
 # defect and ends the probe with a traceback the caller reports.
 catalog = json.loads(sys.argv[1])
 checkout_budget = int(sys.argv[2])
 entry_budget = int(sys.argv[3])
+target_ref_stale_after_s = int(sys.argv[4])
 
 def canon_url(u):
     if not u: return ''
@@ -86,6 +90,7 @@ def inspect_git(path):
     ahead = None
     behind = None
     target_ref = None
+    target_ref_last_observed_at_unix = None
 
     matched_repo = None
     if origin:
@@ -102,6 +107,31 @@ def inspect_git(path):
                 if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
                     behind = int(parts[0])
                     ahead = int(parts[1])
+            if behind == 0 and ahead == 0:
+                reflog = git('reflog', 'show', '-1', '--date=unix', '--format=%gd', target_ref)
+                if reflog and '@{' in reflog and reflog.endswith('}'):
+                    moved = reflog.rsplit('@{', 1)[1][:-1]
+                    if moved.isdigit():
+                        target_ref_last_observed_at_unix = int(moved)
+                if target_ref_last_observed_at_unix is None or \
+                   time.time() - target_ref_last_observed_at_unix > target_ref_stale_after_s:
+                    common = git('rev-parse', '--path-format=absolute', '--git-common-dir')
+                    if common:
+                        common = os.path.realpath(common)
+                        receipt_path = os.path.join(common, 'masc-target-ref-observation.json')
+                        try:
+                            with open(receipt_path, encoding='utf-8') as source:
+                                receipt = json.load(source)
+                            observed = receipt.get('observed_at_unix')
+                            if receipt.get('common_dir') == common and \
+                               receipt.get('target_ref') == target_ref and \
+                               receipt.get('oid') == upstream_head and \
+                               canon_url(receipt.get('origin_url')) == canon_url(origin) and \
+                               type(observed) is int and observed > 0:
+                                target_ref_last_observed_at_unix = max(
+                                    target_ref_last_observed_at_unix or 0, observed)
+                        except (OSError, ValueError, AttributeError):
+                            pass
 
     return {
         'origin': origin,
@@ -112,6 +142,7 @@ def inspect_git(path):
         'changed_files': changed_files,
         'target_ref': target_ref,
         'upstream_head': upstream_head,
+        'target_ref_last_observed_at_unix': target_ref_last_observed_at_unix,
         'ahead': ahead,
         'behind': behind
     }
@@ -296,6 +327,8 @@ let parse_checkout ~root json =
   in
   let* target_ref = optional_string_field "target_ref" fields in
   let* upstream_head = optional_string_field "upstream_head" fields in
+  let* target_ref_last_observed_at_unix =
+    optional_int_field "target_ref_last_observed_at_unix" fields in
   let* ahead = optional_int_field "ahead" fields in
   let* behind = optional_int_field "behind" fields in
   Ok
@@ -306,6 +339,7 @@ let parse_checkout ~root json =
     ; dirty
     ; target_ref
     ; upstream_head
+    ; target_ref_last_observed_at_unix
     ; ahead
     ; behind
     }
@@ -403,6 +437,7 @@ let discover_and_inspect
         ; catalog_arg
         ; string_of_int Keeper_playground_checkouts.max_reported_checkouts
         ; string_of_int Keeper_playground_checkouts.max_scanned_entries
+        ; string_of_int target_ref_stale_after_s
         ]
       in
       (* Matched rather than collapsed with [status_tuple]: that helper turns

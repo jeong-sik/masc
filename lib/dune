@@ -109,6 +109,7 @@
   masc.keeper_runtime
   masc.keeper_toml
   masc.keeper_tooling
+  masc.keeper_portrait
   masc.keeper_metrics
   masc.keeper_failure_taxonomy
   masc.keeper_paste_naming

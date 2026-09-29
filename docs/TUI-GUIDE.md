@@ -381,6 +381,11 @@ The `Changes` tab lists the files this keeper's calls wrote, newest first.
 Workspace health, agent count, pending approvals, the Attention list, and
 active tasks.
 
+The Goals block uses one row per active Goal: title, attention state, linked
+task count, and due date. The task count describes linked work, not progress
+against the Goal's metric. Open Planning → Goals for the recorded owner,
+metric, proof, and activity; an unknown owner is shown explicitly there.
+
 ```
  MASC Overview  [me]  10:54:52  [connected]
    Health: bad  Keepers: 10  MCP agents: 2  Approvals: 0

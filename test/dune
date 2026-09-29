@@ -4299,6 +4299,7 @@
  (modules test_tui_keeper_control)
  (libraries
   alcotest
+  masc.keeper_portrait
   masc
   masc.string_util
   masc_tui_credential

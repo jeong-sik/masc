@@ -331,6 +331,92 @@ let test_router_leaves_keeper_metadata_untouched () =
       (get ~router (path ~size:"64" unreadable)).status;
     check bool "and is not rewritten" true (garbled_before = file_state garbled))
 
+let test_purchase_equip_and_remote_portrait () =
+  with_router (fun ~config router ->
+    let base_path = config.Workspace.base_path in
+    Candle_status.install_appraiser_check (fun () -> Ok ());
+    let policy_path = Config_dir_resolver.candle_toml_path_for_base_path ~base_path in
+    if not (String.starts_with ~prefix:base_path policy_path) then fail "policy escaped fixture";
+    Fs_compat.mkdir_p (Filename.dirname policy_path);
+    Fs_compat.save_file policy_path {|[payout]
+weight_max = 1
+deduction_rate = 0
+deduction_floor = 1000
+[payout.grades_milli]
+trivial = 1000
+small = 1000
+medium = 1000
+large = 1000
+epic = 1000
+[shop.prices_milli]
+crown = 200
+beanie = 200
+|};
+    let owner = require_ok Fun.id (Keeper_id.Keeper_name.of_string keeper) in
+    let at = require_ok Fun.id (Candle_time.of_rfc3339 "2026-09-29T00:00:00Z") in
+    let payment = require_ok Fun.id (Candle_payment.make
+      ~identity:{goal_id="portrait-goal";request_id="proof-request";verification_run_id="proof-run"}
+      ~grade:Candle_grade.Trivial ~total_milli:1000
+      ~grade_trace:{run_id="grade";slot_id="appraiser"}
+      ~relations:[{task_id="task";relation=Candle_appraisal.Related;trace={run_id="relation";slot_id="appraiser"}}]
+      ~weights_trace:{run_id="weights";slot_id="appraiser"}
+      ~weight_max:1 ~deduction_rate:0 ~deduction_floor:1000 ~overdue_hours:0 ~weights:[keeper,1]) in
+    require_ok (Candle_ledger.update_error_to_string Fun.id)
+      (Candle_ledger.update ~base_path (fun _ -> Ok ([{Candle_event.at;body=Candle_event.Paid payment}], ())));
+    let starting = Keeper_portrait_look.equipment_of_name keeper in
+    let id = match starting.head with Keeper_portrait_look.Crown -> "beanie"
+      | Keeper_portrait_look.Bare_head | Keeper_portrait_look.Bow | Keeper_portrait_look.Beanie -> "crown" in
+    let item = match Keeper_portrait_item.of_id id with Some item -> item | None -> fail "catalog item missing" in
+    let expected = Keeper_portrait_item.preview item starting in
+    let call ?(slot="head") item = Keeper_candle_tools.handle ~operation:Keeper_candle_tools.Equip
+      ~base_path ~keeper_name:keeper ~tool_name:"keeper_candle_equip" ~start_time:(Tool_timing.start ())
+      ~args:(`Assoc ["slot", `String slot;"item",`String item]) in
+    let accepted = function Tool_result.Completed output -> output.data
+      | other -> fail (Tool_result.message other) in
+    let ledger_bytes () = Fs_compat.load_file (Candle_ledger.path ~base_path) in
+    let initial = ledger_bytes () in
+    (match call id with Tool_result.Completed _ -> fail "equipped without purchase" | _ -> ());
+    check string "refusal did not mutate ledger" initial (ledger_bytes ());
+    let before = get ~router (path ~size:"96" keeper) in
+    check int "starting portrait" 200 before.status;
+    ignore (require_ok Candle_shop.error_to_string
+      (Candle_shop.purchase ~now:(fun () -> 1790640000.) ~base_path ~keeper:owner ~item));
+    check string "purchase alone does not equip" before.body (get ~router (path ~size:"96" keeper)).body;
+    let purchased = ledger_bytes () in
+    (match call ~slot:"face" id with Tool_result.Completed _ -> fail "head item equipped into face slot" | _ -> ());
+    check string "wrong-slot refusal does not append" purchased (ledger_bytes ());
+    let equipped = accepted (call id) in
+    check bool "first choice changed" true Yojson.Safe.Util.(equipped |> member "changed" |> to_bool);
+    let after = get ~router ~if_none_match:(header before "etag") (path ~size:"96" keeper) in
+    check int "old tag does not conceal equipped item" 200 after.status;
+    check bool "actual HTTP PNG changed" false (before.body = after.body);
+    let stable = ledger_bytes () in
+    let same = accepted (call id) in
+    check bool "same choice is a no-op" false Yojson.Safe.Util.(same |> member "changed" |> to_bool);
+    check string "same choice does not append" stable (ledger_bytes ());
+    Keeper_tool_surface.For_testing.reset_keeper_list_cache ();
+    let roster = match !Keeper_dispatch_ref.dispatch ~config ~agent_name:"observer"
+      ~publication_recovery_provider:Masc_test_deps.non_runtime_publication_recovery_provider
+      ~name:"masc_keeper_list" ~args:(`Assoc ["detailed", `Bool true]) () with
+      | Some result -> Yojson.Safe.from_string (Tool_result.message result)
+      | None -> fail "public Keeper roster not registered" in
+    let row = match Yojson.Safe.Util.(roster |> member "keepers" |> to_list) with
+      | [row] -> row | _ -> fail "expected one Keeper roster row" in
+    let reading = require_ok Fun.id (Keeper_portrait_equipment.reading_of_json Yojson.Safe.Util.(member "portrait" row)) in
+    check bool "public roster supplies the equipped remote-renderer input" true
+      (reading = Keeper_portrait_equipment.Ready expected);
+    check bool "restart-style replay preserves current equipment" true
+      (require_ok Fun.id (Candle_equipment.current ~base_path ~keeper) = expected);
+    ignore (accepted (call "default"));
+    check string "Default restores exact starting PNG" before.body (get ~router (path ~size:"96" keeper)).body;
+    let account = require_ok Candle_shop.error_to_string (Candle_shop.account ~base_path ~keeper:owner) in
+    check int "equipping spends no Candle" 800 account.balance_milli;
+    check bool "reset preserves purchase ownership" true (List.mem item account.owned_items);
+    Fs_compat.append_file (Candle_ledger.path ~base_path) "{partial";
+    let corrupt = ledger_bytes () in
+    check int "unreadable ledger refuses a cached portrait" 503 (get ~router (path ~size:"96" keeper)).status;
+    check string "portrait read does not truncate damaged ledger" corrupt (ledger_bytes ()))
+
 let () =
   run "Keeper portrait HTTP"
     [ "answer",
@@ -348,4 +434,5 @@ let () =
       [ test_case "PNG with a strong tag and 304" `Quick test_router_serves_png_with_a_strong_tag
       ; test_case "400 and 404" `Quick test_router_refusals
       ; test_case "strict auth needs a read token" `Quick test_router_strict_auth_needs_a_read_token
-      ; test_case "GET leaves keeper metadata untouched" `Quick test_router_leaves_keeper_metadata_untouched ] ]
+      ; test_case "GET leaves keeper metadata untouched" `Quick test_router_leaves_keeper_metadata_untouched
+      ; test_case "purchase equip reset and remote portrait share one ledger" `Quick test_purchase_equip_and_remote_portrait ] ]

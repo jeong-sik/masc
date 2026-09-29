@@ -93,7 +93,7 @@ let rows config =
        | Candle_event.Payout_failed { goal_id; request_id; _ } ->
          Candle_event.kind event.body, goal_id, request_id
        | Candle_event.Paid p -> Candle_event.kind event.body, p.identity.goal_id, p.identity.request_id
-       | Candle_event.Purchased _ -> Alcotest.fail "a purchase has no verification request")
+       | Candle_event.Equipped _ | Candle_event.Purchased _ -> Alcotest.fail "a purchase has no verification request")
     (ledger_events config)
 ;;
 

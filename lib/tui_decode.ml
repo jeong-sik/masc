@@ -87,8 +87,13 @@ let keeper_phase_band : keeper_phase -> keeper_phase_band = function
 
 type keeper_activation_mode = Activation_manual | Activation_on_demand | Activation_autonomous
 
+type keeper_portrait = Keeper_portrait_equipment.reading =
+  | Ready of Keeper_portrait_look.equipment
+  | Unavailable of string
+
 type keeper_runtime = {
   kr_name : string;
+  kr_portrait : keeper_portrait;
   kr_health : keeper_health;
   kr_paused : bool;
   kr_next_action : Keeper_status_runtime.keeper_next_action_path option;
@@ -2206,6 +2211,7 @@ let decode_verifier_unreconciled json =
 let decode_planning_goal json =
   let* pg_id = required_string_field json "id" in
   let* pg_title = required_string_field json "title" in
+  let* kr_portrait = Keeper_portrait_equipment.reading_of_json (member "portrait" json) in
   let* raw_phase = required_string_field json "phase" in
   let* pg_phase =
     match Goal_phase.parse raw_phase with
@@ -7131,6 +7137,7 @@ let decode_keeper_runtime json =
   in
   Ok
     { kr_name
+    ; kr_portrait
     ; kr_health
     ; kr_paused
     ; kr_next_action

@@ -15,6 +15,7 @@ const currentWire = {
   count: 1,
   keepers: [{
     runtime_class: 'keeper',
+    portrait: { state: 'ready', equipment: { face: 'bare_face', neck: 'bare_neck', head: 'bare_head', hand: 'empty_hand', base: 'no_dish' } },
     name: 'planner',
     meta: {
       name: 'planner',

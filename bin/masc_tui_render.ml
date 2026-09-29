@@ -7613,10 +7613,17 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
     (* The Keeper's own portrait opens Info, its Identity facts beside it,
        where the pane is tall and wide enough to keep its facts in sight.
        The name only picks the drawing; it is never drawn as text. *)
+    let portrait_reading = match (keeper_reading state k).Keeper_control.liveness with
+      | Keeper_control.Present runtime -> runtime.kr_portrait
+      | Keeper_control.Unobserved -> Tui_decode.Unavailable "not yet read"
+      | Keeper_control.Absent -> Tui_decode.Unavailable "absent from live roster"
+      | Keeper_control.Invalid detail -> Tui_decode.Unavailable detail in
     let portrait =
       if state.detail_tab = Detail_info then
-        Masc_tui_keeper_portrait.shown ~name:k.k_name ~content_rows:base_height
-          ~content_cols:inner
+        match portrait_reading with
+        | Tui_decode.Ready equipment ->
+          Masc_tui_keeper_portrait.shown ~name:k.k_name ~equipment ~content_rows:base_height ~content_cols:inner
+        | Tui_decode.Unavailable _ -> None
       else None
     in
 
@@ -7650,6 +7657,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
         (match portrait with
          | Some band -> Masc_tui_keeper_portrait.beside band identity
          | None -> identity);
+      (match portrait_reading with
+       | Tui_decode.Ready _ -> ()
+       | Tui_decode.Unavailable reason -> add_row "Portrait:" ("unavailable: " ^ Terminal_text.single_line reason));
       add_empty ();
 
       (* The live roster owns this reading, including its absence after a

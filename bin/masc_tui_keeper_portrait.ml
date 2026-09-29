@@ -39,7 +39,7 @@ let min_content_cols size = String.length indent + size.cols + min_fact_cols
    cache is about 3 MB -- and holds a roster walked end to end. *)
 let cache_capacity = 32
 
-type entry = { name : string; edge : int; picture : Draw.image }
+type entry = { name : string; equipment_key : string; edge : int; picture : Draw.image }
 
 (* Newest first. *)
 type cache = { mutable entries : entry list }
@@ -47,14 +47,15 @@ type cache = { mutable entries : entry list }
 let cache () = { entries = [] }
 let cached c = List.length c.entries
 
-let image c ~name size =
+let image c ~name ~equipment size =
+  let equipment_key = Keeper_portrait_equipment.key equipment in
   let edge = Draw.int_of_size size in
-  let same entry = String.equal entry.name name && entry.edge = edge in
+  let same entry = String.equal entry.name name && String.equal entry.equipment_key equipment_key && entry.edge = edge in
   let rest = List.filter (fun entry -> not (same entry)) c.entries in
   let entry =
     match List.find_opt same c.entries with
     | Some entry -> entry
-    | None -> { name; edge; picture = Draw.render (Look.body_of_name name) (Look.equipment_of_name name) size }
+    | None -> { name; equipment_key; edge; picture = Draw.render (Look.body_of_name name) equipment size }
   in
   c.entries <- List.filteri (fun index _ -> index < cache_capacity) (entry :: rest);
   entry.picture
@@ -66,7 +67,7 @@ type band = {
   lines : string list;
 }
 
-let band c ~display ~project ~name ~content_rows ~content_cols =
+let band c ~display ~project ~name ~equipment ~content_rows ~content_cols =
   match band_size display with
   | None -> None
   | Some size when content_rows < min_content_rows size || content_cols < min_content_cols size ->
@@ -74,7 +75,7 @@ let band c ~display ~project ~name ~content_rows ~content_cols =
   | Some size ->
       View.fit display ~max_cols:size.cols ~max_rows:size.rows
       |> Option.map (fun box ->
-             let image = image c ~name box.View.size in
+             let image = image c ~name ~equipment box.View.size in
              { display; box; image; lines = View.lines ~project display box image })
 
 let beside band facts =
@@ -103,6 +104,6 @@ let placement band ~scroll ~visible_rows ~origin:(row, column) =
 
 let session_cache = cache ()
 
-let shown ~name ~content_rows ~content_cols =
+let shown ~name ~equipment ~content_rows ~content_cols =
   band session_cache ~display:(View.current_display ())
-    ~project:Masc_tui_terminal_palette.best_color ~name ~content_rows ~content_cols
+    ~project:Masc_tui_terminal_palette.best_color ~name ~equipment ~content_rows ~content_cols

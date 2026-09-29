@@ -192,6 +192,15 @@ let publish_using ~(write:string -> int -> string -> (unit,Fs_compat.atomic_repl
         if restore written then Error Write_failed else Error Rollback_failed in
   (* Cancellation cannot interrupt the two replacements or their rollback. *)
   Eio.Cancel.protect (fun () -> commit [] changes)
+(* A runtime already bound in runtime.toml is not called again just because it
+   sits in the selected chain: its result would not change what this save
+   writes. Two kinds are probed: runtimes this save adds, and the runtime that
+   becomes the chain's first call when it was not the first call before. *)
+let needs_probe ~existing ~previous_primary ~primary selected =
+  List.filter (fun id ->
+    not (List.mem id existing)
+    || (String.equal id primary && previous_primary <> Some id)) selected
+
 let configure_locked ~pending_credentials ~default_lane_id ~binary ~base ~expected_revision ~specs ~selected ~verify =
   let* original = snapshot base in
   if revision original <> expected_revision then Error Changed_configuration else
@@ -205,6 +214,12 @@ let configure_locked ~pending_credentials ~default_lane_id ~binary ~base ~expect
          && List.exists (fun (lane:Runtime_schema.lane_decl) -> String.equal lane.id lane_id) parsed.lane_decls
       then Ok () else Error Invalid_selection in
   let existing = List.map Runtime.id_of_binding parsed.Runtime_schema.bindings in
+  let previous_primary = match default_lane_id with
+    | None -> parsed.Runtime_schema.default_runtime_id
+    | Some lane_id ->
+      List.find_map (fun (lane:Runtime_schema.lane_decl) ->
+        if String.equal lane.id lane_id then List.nth_opt lane.candidate_ids 0 else None)
+        parsed.lane_decls in
   let rendered = List.map Runtime_setup_spec.render specs in
   let additions = List.fold_left (fun acc (row:Runtime_setup_spec.rendered) ->
     if List.mem row.runtime_id existing || List.exists (fun (r:Runtime_setup_spec.rendered) -> r.runtime_id=row.runtime_id) acc
@@ -238,7 +253,7 @@ let configure_locked ~pending_credentials ~default_lane_id ~binary ~base ~expect
           probes (match probe with Probe_verified -> limited | Probe_usage_limited row -> row :: limited) tail in
       let* readiness =
         if not verify then Ok Not_probed else
-        let* limited = probes [] selected in
+        let* limited = probes [] (needs_probe ~existing ~previous_primary ~primary selected) in
         Ok (match limited with [] -> Verified | first :: rest -> Usage_limited (first, rest)) in
       let* files = snapshot stage in Ok (content files, readiness)) in
   let* current = snapshot base in

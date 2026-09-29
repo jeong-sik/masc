@@ -103,9 +103,16 @@ let outcome_sink_key : flow_outcome option ref Eio.Fiber.key = Eio.Fiber.create_
 
 let with_outcome_sink sink f = Eio.Fiber.with_binding outcome_sink_key sink f
 
+let next_observed_outcome previous outcome =
+  if outcome = Source_resolved
+     && Option.is_some previous
+     && previous <> Some Source_resolved
+  then previous
+  else Some outcome
+
 let record_outcome outcome =
   (match Eio.Fiber.get outcome_sink_key with
-   | Some sink -> sink := Some outcome
+   | Some sink -> sink := next_observed_outcome !sink outcome
    | None -> ());
   Otel_metric_store.inc_counter
     Keeper_metrics.(to_string HitlSummaryOutcomes)
@@ -1069,11 +1076,18 @@ let last_semantic_rejection
 (* The outcome a finished exact run earns, decided by whether a summary was
    observed. Named rather than inline because both arms are load-bearing: a
    summary reaches [on_summary] only after domain validation, provenance
-   verification and fsync (see the .mli), so its absence is the failure, not a
-   shape to synthesise an output for. *)
+   verification and fsync (see the .mli). Its absence is a failure unless the
+   source resolved without an earlier recorded failure. *)
 let run_outcome_of_observed_summary ~last_outcome = function
   | Some summary ->
     Exact_lane_run_registry.Succeeded, hitl_context_summary_to_yojson summary
+  | None when last_outcome = Some Source_resolved ->
+    (* The approval disappeared or reached another terminal state before this
+       attempt could commit a judgment. Earlier failures retain their code in
+       [next_observed_outcome]; only a source-resolution-only path reaches here. *)
+    Exact_lane_run_registry.Cancelled,
+    `Assoc ["reason", `String "source_resolved_without_recorded_judgment";
+            "judgment_recorded", `Bool false]
   | None ->
     let code, detail =
       match last_outcome with
@@ -1898,8 +1912,8 @@ let spawn_with
          synthesised output made a run that judged nothing indistinguishable
          from one that did, and the .mli already says a summary reaches
          [on_summary] only after validation, provenance and fsync. So the
-         absence of one is the failure, and the outcome type has a variant for
-         it.
+         absence of one is a failure except when only the source resolved,
+         and the outcome type has a variant for that ending.
 
          [on_finish] is unchanged: whether an exhausted flow should still
          permit draining later owner work is a separate contract question. *)
@@ -1972,6 +1986,7 @@ let spawn ~sw ~entry ~on_summary ~on_finish () =
 
 module For_testing = struct
   let with_outcome_sink = with_outcome_sink
+  let next_observed_outcome = next_observed_outcome
   let run_outcome_of_observed_summary = run_outcome_of_observed_summary
 
   type nonrec prepared_flow = prepared_flow

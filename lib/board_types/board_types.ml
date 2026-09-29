@@ -452,7 +452,9 @@ module Comment_page = struct
        | Some _, None, Some _, _ -> conflict Comment_tail Comment_offset
        | Some _, None, None, Some _ -> conflict Comment_tail Comment_limit
        | Some count, None, None, None ->
-         if count < 1 || count > Limits.max_comment_page_limit
+         (* 0 asks for the post body with no comments: the [Latest] page is
+            then empty and the body still travels (task-1820 D2 rows). *)
+         if count < 0 || count > Limits.max_comment_page_limit
          then Error (Tail_out_of_bounds count)
          else Ok { start = Latest; limit = count }
        | None, Some _, Some _, _ -> conflict After_comment_id Comment_offset
@@ -494,7 +496,7 @@ module Comment_page = struct
         limit
     | Tail_out_of_bounds count ->
       Printf.sprintf
-        "comment_tail must be between 1 and %d (got %d)"
+        "comment_tail must be between 0 and %d (got %d)"
         Limits.max_comment_page_limit
         count
     | Conflicting_arguments { given; conflicts_with } ->

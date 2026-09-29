@@ -2472,6 +2472,14 @@ let test_post_get_reads_the_newest_comments () =
     ~returned:12
     ~total:12
     ~next_offset:None;
+  (* comment_tail=0 reads the post body alone: 21 of 43 rejected
+     masc_board_post_get calls on 2026-09-28 sent it (task-1820). *)
+  let body_only = read ~label:"body only" [ "comment_tail", `Int 0 ] in
+  check_page ~label:"body only" body_only ~offset:12 ~returned:0 ~total:12 ~next_offset:None;
+  Alcotest.(check bool) "body only carries the post body" true
+    (contains body_only.body "[12 replies]");
+  Alcotest.(check bool) "body only carries no comment" false
+    (List.exists (contains body_only.body) ids);
   let empty_post_id = create_post_with_comments ~count:0 in
   let empty =
     read_page
@@ -2484,8 +2492,8 @@ let test_post_get_reads_the_newest_comments () =
   Alcotest.(check bool) "an empty thread says so" true (contains empty.body "No comments.");
   List.iter
     (fun (label, args, expected) -> check_get_rejected ~label post_id args expected)
-    [ "zero", [ "comment_tail", `Int 0 ], "comment_tail must be between 1 and 100 (got 0)"
-    ; "over the page cap", [ "comment_tail", `Int 101 ], "comment_tail must be between 1 and 100 (got 101)"
+    [ "negative", [ "comment_tail", `Int (-1) ], "comment_tail must be between 0 and 100 (got -1)"
+    ; "over the page cap", [ "comment_tail", `Int 101 ], "comment_tail must be between 0 and 100 (got 101)"
     ; ( "beside a default offset"
       , [ "comment_tail", `Int 3; "comment_offset", `Int 0 ]
       , "comment_tail cannot be sent with comment_offset" )

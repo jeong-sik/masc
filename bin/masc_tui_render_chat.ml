@@ -3712,7 +3712,10 @@ let render_keeper_message (state : state) =
         let picture_row = count_frame_lines left_buf in
         List.iter (box_line left_buf keeper_roster_pane_cols)
           portrait.Masc_tui_chat_portrait.picture_lines;
-        box_bottom left_buf keeper_roster_pane_cols;
+        (* A present left-pane row must retain its width: [box_bottom] is
+           a bare newline for full-screen surfaces and would pull the
+           right-pane composer into the portrait column. *)
+        box_line left_buf keeper_roster_pane_cols "";
         Option.iter (fun (placement : Masc_tui_portrait_view.placement) ->
           Masc_tui_portrait_view.request
             {placement with row = picture_row + strip_rows}) portrait.placement)

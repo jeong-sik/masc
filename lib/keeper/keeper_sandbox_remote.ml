@@ -573,6 +573,8 @@ let run_probe t =
                { major
                ; capabilities = probe.capabilities
                ; release = probe.release
+               (* NDT-OK: record when this external answer arrived; the timestamp
+                  is observation metadata, never a branch or retry deadline. *)
                ; observed_at = Unix.gettimeofday ()
                });
           warn_on_release_skew t probe.release;

@@ -167,12 +167,48 @@ let clause_rows ~cols clauses =
     [ indent ^ first; fold ^ last ]
   | rows -> List.map (fun row -> indent ^ row) rows
 
+(* #39831: what the block under the selected keeper draws before the operator
+   asks for detail. The operator's first question is whether this keeper's
+   memory can be used now and whether there is something to do; the ledger
+   coordinates (revision, atoms, trace, recall size, source-bound snapshot,
+   the context cycle) answer a developer's question and wait behind [d].
+   A reading that did not come back is an action, never a zero: an unread lag
+   and a read error stay on the default view. *)
+type memory_row_kind =
+  | Row_state
+  | Row_last_saved
+  | Row_ledger
+  | Row_lag of int option
+  | Row_librarian_failures of int
+  | Row_vision_errors of int
+  | Row_stalled
+  | Row_cause
+  | Row_read_error
+  | Row_alert
+
+type memory_row_visibility =
+  | Shown_by_default
+  | Detail_only
+
+let memory_row_visibility = function
+  | Row_state | Row_last_saved | Row_stalled | Row_cause | Row_read_error | Row_alert ->
+    Shown_by_default
+  | Row_lag None -> Shown_by_default
+  | Row_lag (Some behind) -> if behind > 0 then Shown_by_default else Detail_only
+  | Row_librarian_failures failed -> if failed > 0 then Shown_by_default else Detail_only
+  | Row_ledger | Row_vision_errors _ -> Detail_only
+
+let shown_by_default kind =
+  match memory_row_visibility kind with
+  | Shown_by_default -> true
+  | Detail_only -> false
+
 type memory_context_projection =
   { rows : string list
   ; stalled_row : (int * string) option
   }
 
-let memory_context_lines ~cols (k : memory_keeper_health) =
+let memory_context_lines ~cols ~detail (k : memory_keeper_health) =
   let current_line =
     Printf.sprintf "  %s · %s · snapshot r%d · recall %s tok · updated %s"
       k.mkh_keeper_id (memory_state_label (memory_state k)) k.mkh_revision
@@ -188,21 +224,34 @@ let memory_context_lines ~cols (k : memory_keeper_health) =
   (* RFC librarian-lifecycle §4.9: how far behind, when that was counted,
      and what the journal last said. A count the durable drain could not take prints
      as "unread ?" rather than as zero. *)
+  let librarian = k.mkh_librarian in
+  let unread_lag =
+    match librarian.mlh_unread_atom_turns, librarian.mlh_unread_official_turns with
+    | Some atoms, Some official -> Some (atoms + official)
+    | Some _, None | None, Some _ | None, None -> None
+  in
+  let unread =
+    match unread_lag with
+    | Some behind -> Printf.sprintf "unread %d" behind
+    | None -> "unread ?"
+  in
+  (* The two rounds fall behind separately, so the continuity lag prints
+     beside the drain's count rather than folded into it. "?" is its own
+     reading: no snapshot, an unreadable one, or one from another trace. *)
+  let continuity =
+    match librarian.mlh_continuity_unread_atoms with
+    | Some atoms -> Printf.sprintf "continuity behind %d" atoms
+    | None -> "continuity behind ?"
+  in
+  let memory_saved = "Memory saved " ^ memory_updated_text librarian.mlh_last_success_at in
+  let last_failure =
+    "last failure "
+    ^ (match librarian.mlh_last_failure_kind with
+       | Some kind -> librarian_failure_words kind
+       | None -> Masc_tui_theme.Glyph.no_value)
+  in
+  let failed = Printf.sprintf "failed %d since server start" k.mkh_librarian_failures in
   let librarian_clauses =
-    let librarian = k.mkh_librarian in
-    let unread =
-      match librarian.mlh_unread_atom_turns, librarian.mlh_unread_official_turns with
-      | Some atoms, Some official -> Printf.sprintf "unread %d" (atoms + official)
-      | Some _, None | None, Some _ | None, None -> "unread ?"
-    in
-    (* The two rounds fall behind separately, so the continuity lag prints
-       beside the drain's count rather than folded into it. "?" is its own
-       reading: no snapshot, an unreadable one, or one from another trace. *)
-    let continuity =
-      match librarian.mlh_continuity_unread_atoms with
-      | Some atoms -> Printf.sprintf "continuity behind %d" atoms
-      | None -> "continuity behind ?"
-    in
     [ "Librarian"
     ; (match librarian.mlh_state with
        | Some state -> librarian_pass_end_words state
@@ -210,12 +259,9 @@ let memory_context_lines ~cols (k : memory_keeper_health) =
     ; unread
     ; continuity
     ; "measured " ^ memory_updated_text librarian.mlh_measured_at
-    ; "Memory saved " ^ memory_updated_text librarian.mlh_last_success_at
-    ; "last failure "
-      ^ (match librarian.mlh_last_failure_kind with
-         | Some kind -> librarian_failure_words kind
-         | None -> Masc_tui_theme.Glyph.no_value)
-    ; Printf.sprintf "failed %d since server start" k.mkh_librarian_failures
+    ; memory_saved
+    ; last_failure
+    ; failed
     ]
   in
   (* RFC librarian-lifecycle §4.10: the atoms requests skip while the
@@ -367,17 +413,51 @@ let memory_context_lines ~cols (k : memory_keeper_health) =
      costs a value rather than the meaning of the ones before it, and
      breaking every row would double the block at the widths a terminal is
      likely to have. *)
-  let librarian_rows = clause_rows ~cols librarian_clauses in
-  { rows =
+  let alert_rows =
+    List.concat_map (fun sentence -> clause_rows ~cols [ sentence ]) alert_lines
+  in
+  let rows =
+    if detail
+    then
       [ current_line; facts_line; source_line ]
-      @ librarian_rows
+      @ clause_rows ~cols librarian_clauses
       @ librarian_stalled_lines
       @ librarian_cause_lines @ context_lines
       @ (vision_line :: read_error_lines)
-      @ List.concat_map (fun sentence -> clause_rows ~cols [ sentence ]) alert_lines
+      @ alert_rows
+    else begin
+      (* One status row: the keeper, its state word, and when memory was last
+         saved -- the Librarian's success time, not the snapshot file's, which
+         changes without a save succeeding. The action rows follow only when
+         [memory_row_visibility] lets them through. *)
+      let status_row =
+        Printf.sprintf "  %s · %s · %s" k.mkh_keeper_id
+          (memory_state_label (memory_state k)) memory_saved
+      in
+      let when_shown kind clauses = if shown_by_default kind then clauses else [] in
+      let librarian_action_rows =
+        match
+          when_shown (Row_lag unread_lag) [ unread ]
+          @ when_shown (Row_lag librarian.mlh_continuity_unread_atoms) [ continuity ]
+          @ when_shown (Row_librarian_failures k.mkh_librarian_failures)
+              [ last_failure; failed ]
+        with
+        | [] -> []
+        | clauses -> clause_rows ~cols ("Librarian" :: clauses)
+      in
+      [ status_row ]
+      @ librarian_action_rows
+      @ librarian_stalled_lines
+      @ librarian_cause_lines
+      @ read_error_lines
+      @ alert_rows
+    end
+  in
+  { rows
   ; stalled_row =
       (match librarian_stalled_lines with
-       | row :: _ -> Some (3 + List.length librarian_rows, row)
+       | row :: _ ->
+         Option.map (fun index -> index, row) (List.find_index (String.equal row) rows)
        | [] -> None)
   }
 
@@ -932,7 +1012,8 @@ let memory_overview_rows ~cols ~budget ?cursor (state : state) =
   let context =
     match List.nth_opt keepers (max 0 (min cursor (List.length keepers - 1))) with
     | None -> { rows = []; stalled_row = None }
-    | Some keeper -> memory_context_lines ~cols keeper
+    | Some keeper ->
+      memory_context_lines ~cols ~detail:state.memory_overview_detail keeper
   in
   let all_refused = memory_refused_keeper_lines state in
   let base = memory_overview_scrolled ~header_rows:0 ~refused_rows:0 ~context_rows:0 state in

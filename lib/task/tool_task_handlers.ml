@@ -488,6 +488,7 @@ let handle_set_goal ~tool_name ~start_time ctx args =
         Tool_result.error
           ~failure_class:(match err with
             | Task_goal_assignment.Unknown_task _ | Task_goal_assignment.Unknown_goal _
+            | Task_goal_assignment.Task_finished _
             | Task_goal_assignment.Already_assigned _ -> Tool_result.Workflow_rejection
             | Task_goal_assignment.Goal_source_unavailable _
             | Task_goal_assignment.Goal_lock_failed _

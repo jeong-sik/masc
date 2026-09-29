@@ -27,9 +27,21 @@ type usage_limited = { runtime_id : string; code : string }
 (** A runtime whose provider declined the verification for the account's
     usage: a spent quota or a rate limit. It is published without a
     response and tool measurement; [code] is the report's failure code. *)
-type readiness = Not_probed | Verified | Usage_limited of usage_limited * usage_limited list
-(** [Usage_limited] lists the selected runtimes that were published
-    unmeasured; every other selected runtime was verified. *)
+type readiness =
+  | Not_probed
+  | Verified
+  | Usage_limited of usage_limited * usage_limited list
+  | Partly_checked of { limited : usage_limited list; not_rechecked : string list }
+(** [Verified] means every selected runtime answered a real check in this
+    save. [Usage_limited] lists the selected runtimes that were published
+    unmeasured; every other selected runtime was verified.
+
+    [Partly_checked] is any save that left a selected runtime it did not
+    call: one already bound and not first in the chain, or every selected
+    runtime already bound. [not_rechecked] names those, in selection order,
+    and says nothing about whether they ever passed a check. [limited] lists
+    what was called and published unmeasured, and may be empty. A caller
+    must not report the save as verified. *)
 type receipt = { runtime_id:string; runtime_ids:string list; models:string list;
                  readiness:readiness }
 val error_message : error -> string

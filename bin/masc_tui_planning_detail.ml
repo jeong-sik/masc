@@ -73,6 +73,11 @@ let decode_confirmation ~goal_id json =
   let* verdict =
     match phase, completion with
     | Goal_phase.Awaiting_confirmation, Goal_verification.Proof_proven verdict
+    (* The server records a confirmation before it runs the caller's step and
+       saves the phase. When that step refuses, or the phase cannot be saved,
+       the goal stays here with the confirmation recorded, and confirming again
+       is how the operator finishes it. *)
+    | Goal_phase.Awaiting_confirmation, Goal_verification.Human_confirmed (verdict, _)
     | Goal_phase.Completed, Goal_verification.Human_confirmed (verdict, _) -> Ok verdict
     | _ -> Error "goal confirmation: no current proven completion to confirm"
   in

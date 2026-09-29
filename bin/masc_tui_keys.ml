@@ -129,7 +129,7 @@ type runtime_key =
   | Reading_walk
 
 let runtime_reading_walk_help =
-  "walk the three substrate readings; the third is the standalone Lanes surface"
+  "walk the three substrate readings; the third is the Lanes surface"
 
 let runtime_keys =
   [ Every_reading (b Navigate "j/k" "move / scroll")
@@ -517,7 +517,7 @@ let for_surface = function
       ; b Navigate "o / A" "Lane Add-ons"
           ~help:"inspect Lane Add-on declarations, instances and observations"
       ; b Act "Right / Enter" "runs"
-          ~help:"open the standalone lane's exact runs"
+          ~help:"open this lane's exact runs"
       ; b Act "a" "append slot"
           ~help:"add a candidate to this lane's walk order"
       ; b Act "s" "providers"
@@ -538,7 +538,7 @@ let for_surface = function
           ~help:"open the Runtime surface"
       ; b Act "Esc" "dashboard" ~help:"back to Dashboard"
       ; b Search "/" "find"
-          ~help:"jump the cursor to a matching standalone lane; the run list \
+          ~help:"jump the cursor to a matching lane; the run list \
                  and a run's detail carry no searchable rows"
       ; b Search "n / N" "next / previous match"
       ]

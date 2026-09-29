@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { runtimeReservedProviderIdsFixture } from '../lib/runtime-config-receipt.test-fixture'
 
 const devTokenMock = vi.hoisted(() => ({
   ensureDevToken: vi.fn(() => Promise.resolve()),
@@ -4146,6 +4147,7 @@ describe('runtime.toml raw config API', () => {
           consumers: ['Keeper_memory_os'],
         }],
         provider_protocols: providerProtocols,
+        reserved_provider_ids: [...runtimeReservedProviderIdsFixture],
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -4170,6 +4172,32 @@ describe('runtime.toml raw config API', () => {
       effective_error: 'expected a boolean',
     })
     expect(result.provider_protocols).toEqual(providerProtocols)
+    expect(result.reserved_provider_ids).toEqual(runtimeReservedProviderIdsFixture)
+  })
+
+  it.each([
+    ['missing list', undefined],
+    ['empty list', []],
+    ['non-string id', ['voice', 7]],
+    ['empty id', ['voice', '']],
+    ['duplicate id', ['voice', 'voice']],
+  ])('rejects %s of reserved provider ids', async (_label, reserved) => {
+    const payload: Record<string, unknown> = {
+      ok: true,
+      path: '/tmp/.masc/config/runtime.toml',
+      file_name: 'runtime.toml',
+      source_text: '[runtime]\n',
+      source_revision: 'a'.repeat(64),
+      reloaded: false,
+      provider_protocols: providerProtocols,
+    }
+    if (reserved !== undefined) payload.reserved_provider_ids = reserved
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(payload), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })))
+
+    await expect(fetchRuntimeTomlConfig()).rejects.toThrow(/reserved provider id/)
   })
 
   it.each([
@@ -4224,6 +4252,7 @@ describe('runtime.toml raw config API', () => {
           },
         },
         provider_protocols: providerProtocols,
+        reserved_provider_ids: [...runtimeReservedProviderIdsFixture],
       })), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -4267,6 +4296,7 @@ describe('runtime.toml raw config API', () => {
       source_text: '[runtime]\n',
       source_revision: 'a'.repeat(64),
       provider_protocols: providerProtocols,
+      reserved_provider_ids: [...runtimeReservedProviderIdsFixture],
       commit: {
         source_revision: 'runtime-source-revision',
         order: '8',
@@ -4310,6 +4340,7 @@ describe('runtime.toml raw config API', () => {
         file_name: 'runtime.toml',
         source_text: '[runtime]\n',
         provider_protocols: providerProtocols,
+        reserved_provider_ids: [...runtimeReservedProviderIdsFixture],
         application: { exact_output_registry: exactOutputRegistry },
       })
       vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(payload), {
@@ -4335,6 +4366,7 @@ describe('runtime.toml raw config API', () => {
         file_name: 'runtime.toml',
         source_text: '[runtime]\n',
         provider_protocols: providerProtocols,
+        reserved_provider_ids: [...runtimeReservedProviderIdsFixture],
       })
       const application = applicationRecord(payload)
       delete application[missingField]
@@ -4383,6 +4415,7 @@ describe('runtime.toml raw config API', () => {
       file_name: 'runtime.toml',
       source_text: '[runtime]\n',
       provider_protocols: providerProtocols,
+      reserved_provider_ids: [...runtimeReservedProviderIdsFixture],
     })
     const application = applicationRecord(payload)
     application.skills = skills
@@ -4437,6 +4470,7 @@ describe('runtime.toml raw config API', () => {
         source_text: sourceText,
         reloaded: true,
         provider_protocols: providerProtocols,
+        reserved_provider_ids: [...runtimeReservedProviderIdsFixture],
       })), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -4467,6 +4501,7 @@ describe('runtime.toml raw config API', () => {
         source_text: sourceText,
         reloaded: true,
         provider_protocols: providerProtocols,
+        reserved_provider_ids: [...runtimeReservedProviderIdsFixture],
       })), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -4497,6 +4532,7 @@ describe('runtime.toml raw config API', () => {
         source_text: sourceText,
         reloaded: true,
         provider_protocols: providerProtocols,
+        reserved_provider_ids: [...runtimeReservedProviderIdsFixture],
       })), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -4531,6 +4567,7 @@ describe('runtime.toml raw config API', () => {
       source_text: sourceText,
       reloaded: true,
       provider_protocols: providerProtocols,
+      reserved_provider_ids: [...runtimeReservedProviderIdsFixture],
     })), { status: 200, headers: { 'Content-Type': 'application/json' } }))
     vi.stubGlobal('fetch', fetchMock)
 
@@ -4558,6 +4595,7 @@ describe('runtime.toml raw config API', () => {
         source_text: sourceText,
         reloaded: true,
         provider_protocols: providerProtocols,
+        reserved_provider_ids: [...runtimeReservedProviderIdsFixture],
       })), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },

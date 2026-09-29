@@ -509,16 +509,23 @@ let test_model_usage_names_the_call_model () =
   let params model = `Assoc (
     [ "sessionId", `String "01a0e77a-e43c-73a0-965a-3d73185c4d38"
     ; "turnId", `String "01a0e77a-ec2e-7efc-9421-03ec75fd1ca8"
-    ; "usage", `Assoc [ "inputTokens", `Int 18248; "outputTokens", `Int 27 ]
+    ; "usage", `Assoc [ "inputTokens", `Int 18248; "outputTokens", `Int 27;
+                         "cachedTokens", `Int 10000; "reasoningTokens", `Int 5;
+                         "cacheReadTokens", `Int 10000 ]
+    ; "viewCursor", `String "v:5"
     ; "promptTokens", `Int 18248
     ; "totalTokens", `Int 18275
     ] @ match model with None -> [] | Some model -> [ "modelId", model ]) in
   let parse params = Msp.parse_notification ~method_:"session/tokenUsage" params in
   (match ok_or_fail (parse (params (Some (`String "muse-spark-1.3")))) with
-   | Msp.Model_usage_reported { session_id; turn_id; model_id } ->
+   | Msp.Model_usage_reported { session_id; turn_id; model_id; usage; view_cursor } ->
      check string "session" "01a0e77a-e43c-73a0-965a-3d73185c4d38" session_id;
      check string "turn" "01a0e77a-ec2e-7efc-9421-03ec75fd1ca8" turn_id;
-     check (option string) "model" (Some "muse-spark-1.3") model_id
+     check (option string) "model" (Some "muse-spark-1.3") model_id;
+     check string "replay identity" "v:5" view_cursor;
+     check (option int) "counted-once prompt" (Some 18248) usage.prompt_tokens;
+     check (option int) "explicit cache reads" (Some 10000) usage.cache_read_tokens;
+     check (option int) "missing cache writes stay unknown" None usage.cache_write_tokens
    | _ -> fail "session/tokenUsage was not read as model usage");
   List.iter (fun model -> match ok_or_fail (parse (params model)) with
     | Msp.Model_usage_reported { model_id = None; _ } -> ()
@@ -527,6 +534,22 @@ let test_model_usage_names_the_call_model () =
   match parse (`Assoc [ "sessionId", `String "s-1" ]) with
   | Error _ -> ()
   | Ok _ -> fail "a usage frame without its turn was accepted"
+;;
+
+let test_view_gap_preserves_subscription_identity () =
+  List.iter (fun session ->
+    let params = `Assoc (["after", `String "opaque-before"; "next", `String "opaque-after"]
+      @ match session with None -> [] | Some value -> ["sessionId", value]) in
+    match ok_or_fail (Msp.parse_notification ~method_:"view/gap" params) with
+    | Msp.View_gap { session_id; after; next } ->
+      check (option string) "gap session" (match session with
+        | Some (`String value) -> Some value | _ -> None) session_id;
+      check string "lower cursor stays opaque" "opaque-before" after;
+      check string "upper cursor stays opaque" "opaque-after" next
+    | _ -> fail "view/gap was ignored") [ Some (`String "s-1"); None; Some `Null ];
+  check bool "malformed gap is refused" true
+    (Result.is_error (Msp.parse_notification ~method_:"view/gap"
+       (`Assoc ["sessionId", `String "s-1"; "after", `String "v:1"])))
 ;;
 
 let () =
@@ -553,6 +576,7 @@ let () =
         ; test_case "effective approval mode wire contract" `Quick test_effective_approval_mode_wire_contract
         ; test_case "session model selection wire contract" `Quick test_session_model_selection_wire_contract
         ; test_case "model usage names the call model" `Quick test_model_usage_names_the_call_model
+        ; test_case "view gap preserves subscription identity" `Quick test_view_gap_preserves_subscription_identity
         ] )
     ]
 ;;

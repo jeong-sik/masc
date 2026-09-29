@@ -339,19 +339,19 @@ let msp_reasoning_effort : Llm_provider.Reasoning_effort.t -> Msp.reasoning_effo
   | Llm_provider.Reasoning_effort.Max -> Msp.Effort_max
 ;;
 
-(* MSP's raw [TokenUsage] puts [cachedTokens] inside or beside
-   [inputTokens] depending on the provider's convention (msp.d.ts,
-   [TokenUsage.cachedTokens]). The counted-once prompt total is
-   [promptTokens] on [session/tokenUsage], which the serve client reads only
-   for the model it names, and [turn/completed] carries only the raw
-   counters. So the cache
-   split is not claimed: [inputTokens] stands as the prompt count and both
-   cache slots stay zero, which never records more cache than prompt. *)
+(* Only the host's counted-once prompt count normalizes the provider's cache
+   convention. A terminal-only raw aggregate cannot establish that split. *)
 let api_usage_of_token_usage (usage : Msp.token_usage) : Agent_core.Types.api_usage =
-  { input_tokens = usage.input_tokens
+  let input_tokens, cache_read_input_tokens, cache_creation_input_tokens =
+    match usage.prompt_tokens with
+    | None -> usage.input_tokens, 0, 0
+    | Some prompt ->
+      let known = function Some count -> count | None -> 0 in
+      prompt, known usage.cache_read_tokens, known usage.cache_write_tokens in
+  { input_tokens
   ; output_tokens = usage.output_tokens
-  ; cache_creation_input_tokens = 0
-  ; cache_read_input_tokens = 0
+  ; cache_creation_input_tokens
+  ; cache_read_input_tokens
   ; cost_usd = None
   }
 ;;

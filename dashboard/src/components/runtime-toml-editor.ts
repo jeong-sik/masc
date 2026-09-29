@@ -293,9 +293,9 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
 
   async function handleSave(sourceText?: string) {
     const nextSourceText = typeof sourceText === 'string' ? sourceText : textareaRef.current?.value ?? draft
-    const nextDirty = config !== null && nextSourceText !== config.source_text
-    if (!nextDirty || saving || loadState === 'loading') return
-    const nextEnvironment = parseRuntimeTomlEnvironment(nextSourceText)
+    if (config === null || saving || loadState === 'loading') return
+    if (nextSourceText === config.source_text) return
+    const nextEnvironment = parseRuntimeTomlEnvironment(nextSourceText, config.reserved_provider_ids)
     for (const provider of nextEnvironment.providers) {
       const protocol = config?.provider_protocols.find(item => item.protocol === provider.protocol)
       if (!protocol?.provider_fields.includes('account-home')) continue
@@ -343,7 +343,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
     setError(null)
     setNotice(null)
     try {
-      const environment = parseRuntimeTomlEnvironment(config.source_text)
+      const environment = parseRuntimeTomlEnvironment(config.source_text, config.reserved_provider_ids)
       if (environment.parseError !== null) throw new Error(environment.parseError)
       const currentRuntimeId = environment.assignments[keeperName]
       const expectedAssignmentRevision = {
@@ -479,8 +479,9 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
   }
 
   function handleDeleteProvider(providerId: string) {
-    if (saving || loadState !== 'loaded') return
-    editDraft(current => cascadeDeleteProvider(current, providerId))
+    if (saving || loadState !== 'loaded' || !config) return
+    const reservedProviderIds = config.reserved_provider_ids
+    editDraft(current => cascadeDeleteProvider(current, providerId, reservedProviderIds))
   }
 
   function handleProviderTransportChange(
@@ -584,12 +585,20 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
     [stats.lineCount],
   )
   const impact = useMemo(
-    () => (config !== null && dirty ? runtimeTomlImpactSummary(config.source_text, draft) : null),
+    () => (config !== null && dirty
+      ? runtimeTomlImpactSummary(config.source_text, draft, config.reserved_provider_ids)
+      : null),
     [config, dirty, draft],
   )
-  const environment = useMemo(() => parseRuntimeTomlEnvironment(draft), [draft])
-  const runtimeCount = environment.parseError === null ? enabledRuntimeIds(environment).length : '—'
-  const providerCount = environment.parseError === null ? environment.providers.length : '—'
+  // Bindings are read with the server's reserved list, so there is no
+  // environment before the config that carries it has loaded.
+  const environment = useMemo(
+    () => (config === null ? null : parseRuntimeTomlEnvironment(draft, config.reserved_provider_ids)),
+    [config, draft],
+  )
+  const parseError = environment === null ? null : environment.parseError
+  const runtimeCount = environment !== null && parseError === null ? enabledRuntimeIds(environment).length : '—'
+  const providerCount = environment !== null && parseError === null ? environment.providers.length : '—'
   const keeperSettings = config?.keeper_settings ?? []
   const keeperPendingCount = keeperSettings.filter(setting =>
     setting.application_status === 'pending_restart'
@@ -680,7 +689,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
         <span>${stats.charCount} chars</span>
         <span>${dirty ? 'unsaved' : 'synced'}</span>
       </div>
-      ${environment.parseError !== null ? html`<p role="alert" data-testid="runtime-toml-parse-error">${environment.parseError}</p>` : null}
+      ${parseError !== null ? html`<p role="alert" data-testid="runtime-toml-parse-error">${parseError}</p>` : null}
       ${impact ? html`<${RuntimeTomlImpactPreview} impact=${impact} />` : null}
     </div>
   `
@@ -815,8 +824,9 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
               ${config ? html`<${RuntimeEnvironmentEditor}
                 sourceText=${draft}
                 providerProtocols=${config.provider_protocols}
+                reservedProviderIds=${config.reserved_provider_ids}
                 section=${structuredSection}
-                disabled=${loadState !== 'loaded' || environment.parseError !== null}
+                disabled=${loadState !== 'loaded' || parseError !== null}
                 draftDirty=${dirty}
                 saving=${saving}
                 onRoutingChange=${(lane: RuntimeRoutingLane, runtimeId: string | null) => {
@@ -839,7 +849,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
 
             <div class=${section === 'lanes' ? '' : 'hidden'} data-testid="runtime-toml-lanes">
               ${exactLaneError ? html`<p role="alert">Lane 투영을 읽지 못했습니다: ${exactLaneError}</p>` : null}
-              ${environment.parseError !== null ? html`<p role="alert">${environment.parseError}</p>` : exactLanes && laneRuntimes ? html`<${RuntimeExactLaneEditor}
+              ${parseError !== null ? html`<p role="alert">${parseError}</p>` : exactLanes && laneRuntimes ? html`<${RuntimeExactLaneEditor}
                 sourceText=${draft} lanes=${exactLanes} runtimes=${laneRuntimes}
                 slotsDisabled=${saving || loadState !== 'loaded' || dirty}
                 deadlineDisabled=${saving || loadState !== 'loaded'}

@@ -13,7 +13,7 @@ SOURCE_MODULES = (
     "bin/masc_tui_keys.ml",
 )
 
-HEADING = b"Standalone LLM lanes"
+HEADING = "Lanes · observed ".encode()
 # The row's own reading: when the standalone snapshot was read. Nothing else
 # on the screen says it.
 OWN = b"observed "

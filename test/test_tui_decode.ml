@@ -6201,7 +6201,7 @@ let test_a_lane_configuration_clause_carries_its_own_subject () =
   List.iter
     (fun state ->
       let line =
-        Printf.sprintf "Required lane %s no run has finished" (clause state)
+        Printf.sprintf "Required lane %s no retained terminal observation" (clause state)
       in
       List.iter
         (fun stutter ->

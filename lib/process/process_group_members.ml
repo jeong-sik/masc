@@ -26,5 +26,7 @@ let group_has_no_live_member pgid =
   match snapshot pgid with
   | None -> false
   | Some rows ->
+    (* NDT-OK: Read our PID at the OS snapshot boundary. The pure check below
+       uses it to reject a reused group id whose leader belongs to another parent. *)
     no_live_member ~leader:pgid ~owner:(Unix.getpid ())
       (Array.to_list (Array.map member_of_row rows))

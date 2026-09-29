@@ -5,7 +5,7 @@ import { ApiRequestError, currentStoredTokenRevision } from '../../api/core'
 import { storedTokenRevision } from '../../api/token-revision'
 import { ADMIN_REQUIRED_MESSAGE, isAdminRequired } from '../../api/admin-required'
 import { fetchKeeperToolCall, type ToolCallEntry } from '../../api/dashboard-keeper-tool-calls'
-import { recordToolCallOutputs } from '../../tool-call-output-store'
+import { recordToolCallOutputs, toolCallOutputHydrationContract } from '../../tool-call-output-store'
 import { useInViewOnce } from '../common/use-in-view'
 
 // Scope comes from the selected Keeper, never its mutable display label.
@@ -25,6 +25,14 @@ export function useToolOutputLookup(executionId: string | null | undefined) {
   // A recent-tail cache cannot prove uniqueness across the complete ledger.
   // Only the exact endpoint may supply evidence, including a cached identity.
   const needsFetch = state.kind !== 'loaded'
+  // A bulk hydration that succeeds is new ledger evidence, so a row that has
+  // not loaded asks again once per success; `needsFetch` already keeps a loaded
+  // row from re-reading. This value must not read `state`: the effect below
+  // writes `loading` itself, so a state-gated value would flip on every
+  // attempt and re-run the effect without end.
+  // `coveredThroughMs` only grows on success, unlike `completedAtMs`, which
+  // also moves on a failed hydration and on every tool call of a live turn.
+  const hydratedThrough = keeper ? toolCallOutputHydrationContract(keeper).coveredThroughMs : null
   useEffect(() => {
     if (!keeper || !executionId || !inView || !needsFetch) return
     const controller = new AbortController()
@@ -44,7 +52,7 @@ export function useToolOutputLookup(executionId: string | null | undefined) {
       else set({ kind: 'failed' })
     })
     return () => controller.abort()
-  }, [keeper, executionId, inView, needsFetch, attempt, authRevision])
+  }, [keeper, executionId, inView, needsFetch, attempt, authRevision, hydratedThrough])
   return { ref, output: state.kind === 'loaded' ? state.entry : null,
     state,
     retry: () => retry(value => value + 1) }

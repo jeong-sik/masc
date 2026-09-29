@@ -50,6 +50,21 @@ Final evidence:
 dashboard exposes that limitation; successful live act/extract receipts do not
 establish a retained Stagehand run history.
 
+## Usage interpretation — 2026-09-29 02:49 UTC
+
+The [authenticated usage snapshot](live-activation/usage-observed.json) shows
+active Board Attention, Librarian and Verifier work. The Lanes matrix projects
+the latest 2,000 of 4,182 exact runs, so its zero for HITL Auto Judge is not
+an all-time zero: the lane-filtered history retains 16 runs, most recently on
+September 23. Workspace Curator has 134 historical failed runs, most recently
+on September 28, but is currently unconfigured. The Stagehand exact-run history
+is empty because that path does not retain its model calls; the live fixture
+receipts above prove our own use, not any other user's use.
+
+The table now labels an empty bounded exact window as **No run in recent
+window** and Stagehand as **Run history not retained**. It no longer invites
+the reader to treat both states as proof that a lane has never run.
+
 ## Initial finding — 2026-09-28 23:41 UTC
 
 The running MASC instance could not serve Stagehand. At 2026-09-28 23:41 UTC

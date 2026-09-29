@@ -274,6 +274,24 @@ describe('InternalAgentsMonitor', () => {
       expect(await within(matrix).findByText(label)).toBeTruthy()
       expect(within(matrix).queryByText('JEV CONFIGURED · jev-next')).toBeNull()
     }
+
+    // HITL can have older retained runs even when the global exact window
+    // contains none. Stagehand does not retain its model calls at all.
+    api.fetchStandaloneLanes.mockResolvedValue({
+      ...laneSnapshot,
+      exactRunProjectionCount: 4,
+      exactRunSourceTotal: 20,
+      exactRunProjectionTruncated: true,
+      lanes: [
+        lane({ laneId: 'hitl_auto_judge', label: 'HITL Auto Judge', status: 'no_retained_observation', retainedRunCount: 0, lastTerminalAt: null }),
+        lane({ laneId: 'browser_stagehand_exact', label: 'Browser Stagehand', status: 'no_retained_observation', retainedRunCount: 0, lastTerminalAt: null }),
+      ],
+    })
+    sse.refresh?.()
+    expect(await within(matrix).findByText('No run in recent window')).toBeTruthy()
+    expect(within(matrix).getByText('Run history not retained')).toBeTruthy()
+    expect(within(matrix).getByText('최근 관측창에 없음')).toBeTruthy()
+    expect(within(matrix).getByText('실행 기록 미보존')).toBeTruthy()
   })
 
   it('marks retained lanes stale after failure and clears the warning only on recovery', async () => {

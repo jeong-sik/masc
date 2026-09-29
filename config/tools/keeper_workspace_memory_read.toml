@@ -1,8 +1,8 @@
 name = "keeper_workspace_memory_read"
 description = """
-Read the workspace's durable shared memory proposals from its curator.
+Read the current shared workspace memory ledger from its curator.
 
-Without id, list saved proposal IDs, attributed claims, disagreements and source counts. With id, retrieve the full proposal including original owners, source facts, snapshot metadata and unavailable-store gaps. These are model-proposed interpretations, not verified truths: preserve disagreements and attribution when using them, and inspect the full sources before relying on a claim. This read does not promote claims or modify any Keeper's memory."""
+Without id, list claim and conflict summaries with member references. With a claim or conflict id, resolve only that entry's member facts against current Keeper memory. An unavailable current claim is a read gap, not proof that the fact vanished. These are model classifications, not verified truths. This read does not promote claims or modify Keeper memory."""
 additional_properties = false
 
 defer_loading = true
@@ -10,4 +10,4 @@ defer_loading = true
 [[params]]
 name = "id"
 type = "string"
-description = "Exact proposal ID returned by this tool's list. Omit to discover saved proposals."
+description = "Claim or conflict id from the summary. Omit to list bounded summaries."

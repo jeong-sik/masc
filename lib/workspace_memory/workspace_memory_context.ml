@@ -1,4 +1,3 @@
-type store = Ordinary | Source_bound
 type 'snapshot observation = Missing | Unavailable of string | Available of 'snapshot
 type keeper =
   { keeper_id : string
@@ -8,15 +7,10 @@ type keeper =
 type t =
   { observed_at : float
   ; keepers : keeper list
-  ; input : Yojson.Safe.t
   ; identity : string
-  ; sources : Yojson.Safe.t list
-  ; gaps : Yojson.Safe.t list
-  ; snapshots : Yojson.Safe.t list
   }
 
 let ( let* ) = Result.bind
-let store_name = function Ordinary -> "ordinary" | Source_bound -> "source_bound"
 
 let rec canonical = function
   | `Assoc fields -> `Assoc (List.map (fun (key, value) -> key, canonical value) fields
@@ -99,80 +93,15 @@ let read_keeper ~keepers_dir keeper_id =
       (fun () -> Keeper_memory_source_current.read_for_keepers_dir ~keepers_dir ~keeper_id)
   }
 
-(* Preserve original fact positions and metadata evidence, using the same
-   proposal contract as the standalone importer. IDs are inventory-local. *)
-let project keepers =
-  let sources = ref [] and gaps = ref [] and snapshots = ref [] in
-  let source_count = ref 0 and snapshot_count = ref 0 in
-  let add_source fields =
-    incr source_count;
-    sources := `Assoc (("source_id", `String ("s" ^ string_of_int !source_count)) :: fields) :: !sources
-  in
-  let add_store keeper_id store snapshot_json observation =
-    let store = store_name store in
-    match observation with
-    | Missing | Unavailable _ ->
-      gaps := `Assoc ["keeper_id", `String keeper_id; "store", `String store;
-        "observation", observation_json snapshot_json observation] :: !gaps;
-      Ok ()
-    | Available snapshot ->
-      let raw = snapshot_json snapshot in
-      let* fields, facts, revision = match raw with
-        | `Assoc fields ->
-          (match List.assoc_opt "facts" fields, List.assoc_opt "revision" fields with
-           | Some (`List facts), Some (`Int revision) when revision > 0 -> Ok (fields, facts, revision)
-           | _ -> Error "Memory snapshot serialization has invalid facts or revision")
-        | _ -> Error "Memory snapshot serialization is not an object"
-      in
-      incr snapshot_count;
-      let sid = "snapshot" ^ string_of_int !snapshot_count in
-      let digest = hash raw in
-      snapshots := `Assoc ["snapshot_id", `String sid; "keeper_id", `String keeper_id;
-        "store", `String store; "snapshot_sha256", `String digest;
-        "metadata", `Assoc (List.filter (fun (key, _) -> key <> "facts") fields)] :: !snapshots;
-      List.iteri (fun index fact -> add_source
-        ["snapshot_id", `String sid; "keeper_id", `String keeper_id; "store", `String store;
-         "revision", `Int revision; "snapshot_sha256", `String digest;
-         "fact_index", `Int index; "fact", fact]) facts;
-      (match List.assoc_opt "change" fields with
-       | Some (`Assoc change) when List.exists (fun key -> match List.assoc_opt key change with
-           | Some (`List (_ :: _)) -> true | _ -> false) ["added"; "removed"; "invalidated"] ->
-         add_source ["snapshot_id", `String sid; "evidence_path", `List [`String "change"]]
-       | _ -> ());
-      (match List.assoc_opt "invalidations" fields with
-       | Some (`List values) -> List.iteri (fun index _ -> add_source
-           ["snapshot_id", `String sid; "evidence_path", `List [`String "invalidations"; `Int index]]) values
-       | _ -> ());
-      Ok ()
-  in
-  let rec loop = function
-    | [] -> Ok (List.rev !sources, List.rev !gaps, List.rev !snapshots)
-    | keeper :: rest ->
-      let* () = add_store keeper.keeper_id Ordinary Keeper_memory_os_current.to_json keeper.ordinary in
-      let* () = add_store keeper.keeper_id Source_bound Keeper_memory_source_current.to_json
-          keeper.source_bound in
-      loop rest
-  in
-  loop keepers
-
 let collect ~base_path =
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   let* ids = discover ~keepers_dir in
   let keepers = List.map (read_keeper ~keepers_dir) ids in
-  let* sources, gaps, snapshots = project keepers in
-  let input = `Assoc ["sources", `List sources; "gaps", `List gaps; "snapshots", `List snapshots] in
-  Ok { observed_at = Time_compat.now (); keepers; input; sources; gaps; snapshots;
+  Ok { observed_at = Time_compat.now (); keepers;
        identity = hash (`List (List.map keeper_json keepers)) }
 
 let keepers t = t.keepers
 let fingerprint t = t.identity
-let source_count t = List.length t.sources
-let to_json t = t.input
-let proposal_json t proposal = `Assoc
-  ["status", `String "model_proposed"; "context_sha256", `String t.identity;
-   "sources", `List t.sources; "gaps", `List t.gaps; "snapshots", `List t.snapshots;
-   "proposal", proposal]
-
 let http_json ~base_path =
   let captured = collect ~base_path in
   let observed_at = match captured with Ok t -> t.observed_at | Error _ -> Time_compat.now () in

@@ -689,7 +689,13 @@ let page_titles (page : Yojson.Safe.t) =
   | _ -> fail "the page is not an object"
 ;;
 
-let test_board_list_page_is_kept_until_a_board_write () =
+(* The route and the projection share one kept page. The prepared-payload hook
+   fires each time the cache serializes a page, so it tells a read that sent
+   the kept bytes (no new count) from one that serialized again. The route
+   reads as the token's agent, so the projection is asked for the same
+   reaction actor. This fixture clears the board event hook, so the write is
+   followed by the invalidation that hook performs. *)
+let test_board_list_route_and_projection_share_the_kept_page () =
   with_authenticated_activity_router
     ~prefix:"board-list-kept-"
     ~agent_name:"list-reader"
@@ -708,28 +714,48 @@ let test_board_list_page_is_kept_until_a_board_write () =
     check int ("post accepted: " ^ title) 201 status
   in
   let path = "/api/v1/board?sort_by=recent" in
-  let page () =
-    Server_board_list_http.payload ~config ~reaction_actor:None
-      (Httpun.Request.create `GET path)
+  let page ?(reaction_actor = Some "list-reader") ?(target = path) () =
+    Server_board_list_http.payload ~config ~reaction_actor
+      (Httpun.Request.create `GET target)
+  in
+  let route_titles () =
+    let status, json =
+      dispatch_json ~meth:"GET" ~router ~token ~path ~extra_headers:[] ~body:"" ()
+    in
+    check int "the route answers" 200 status;
+    page_titles json
+  in
+  let prepared = ref 0 in
+  let counting f =
+    Dashboard_cache.For_testing.with_payload_prepared_hook (fun _ -> incr prepared) f
   in
   post "the first post";
-  let first = page () in
-  check (list string) "the page shows the post" [ "the first post" ]
-    (page_titles first.Dashboard_cache.json);
+  Dashboard_cache.invalidate_all ();
+  check (list string) "a blank hearth is no filter" [ "the first post" ]
+    (page_titles (page ~target:(path ^ "&hearth=") ()).Dashboard_cache.json);
+  Dashboard_cache.invalidate_all ();
+  let titles = counting route_titles in
+  check (list string) "the route shows the post" [ "the first post" ] titles;
+  check int "the route serializes the page it keeps" 1 !prepared;
+  let kept = counting (fun () -> page ()) in
+  check int "the projection answers from the route's entry" 1 !prepared;
+  check (list string) "the projection holds the route's page" titles
+    (page_titles kept.Dashboard_cache.json);
+  ignore (counting route_titles);
+  check int "a second route read serializes nothing" 1 !prepared;
   check bool "an unchanged board answers from the kept bytes" true
-    (first.Dashboard_cache.raw_json == (page ()).Dashboard_cache.raw_json);
+    (kept.Dashboard_cache.raw_json == (page ()).Dashboard_cache.raw_json);
+  check bool "another reaction actor has its own entry" false
+    (kept.Dashboard_cache.raw_json
+     == (page ~reaction_actor:None ()).Dashboard_cache.raw_json);
+  check bool "another voter has its own entry" false
+    (kept.Dashboard_cache.raw_json
+     == (page ~target:(path ^ "&voter=someone-else") ()).Dashboard_cache.raw_json);
   post "the second post";
   Server_dashboard_http_core_cache.invalidate_board_projections ();
-  let after_write = page () in
-  check (list string) "the read after the write hook shows the write"
+  check (list string) "the read after the invalidation shows the write"
     [ "the first post"; "the second post" ]
-    (page_titles after_write.Dashboard_cache.json);
-  let status, json =
-    dispatch_json ~meth:"GET" ~router ~token ~path ~extra_headers:[] ~body:"" ()
-  in
-  check int "the route answers" 200 status;
-  check (list string) "the route sends the same page"
-    (page_titles after_write.Dashboard_cache.json) (page_titles json)
+    (page_titles (page ()).Dashboard_cache.json)
 ;;
 
 let test_board_http_typed_attachments () =
@@ -1363,8 +1389,8 @@ let () =
             test_goal_transition_uses_authenticated_actor
         ; test_case "board write actors come from auth" `Quick
             test_board_write_routes_use_authenticated_actor
-        ; test_case "the Board list page is kept until a board write" `Quick
-            test_board_list_page_is_kept_until_a_board_write
+        ; test_case "the Board list route and projection share the kept page" `Quick
+            test_board_list_route_and_projection_share_the_kept_page
         ; test_case "HTTP Board attachments use typed input" `Quick
             test_board_http_typed_attachments
         ; test_case "sub-board owner comes from auth" `Quick

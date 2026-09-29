@@ -63,7 +63,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read
         Server_board_list_http.payload ?config ~reaction_actor
           httpun_request
       in
-      h2_respond_json h2_reqd payload.raw_json ~extra_headers:cors));
+      h2_respond_cached_payload h2_reqd payload ~extra_headers:cors));
       true
 
   | `GET, "/api/v1/board/curation" ->

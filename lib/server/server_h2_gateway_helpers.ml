@@ -68,6 +68,17 @@ let h2_respond_json_string ?status ?extra_headers ?(compress = true) h2_reqd bod
 let h2_respond_json ?status ?extra_headers ?compress h2_reqd body =
   h2_respond_json_string ?status ?extra_headers ?compress h2_reqd body
 
+(* The payload's [origin] says whether its bytes are a page or the cache's
+   timeout envelope; nothing else on this transport would tell them apart. *)
+let h2_respond_cached_payload ?extra_headers h2_reqd
+    (payload : Dashboard_cache.cached_payload) =
+  let status =
+    match payload.origin with
+    | Dashboard_cache.Timeout -> `Gateway_timeout
+    | Dashboard_cache.Computed | Dashboard_cache.Seeded -> `OK
+  in
+  h2_respond_json_string ~status ?extra_headers h2_reqd payload.raw_json
+
 let h2_respond_json_value ?status ?extra_headers ?compress h2_reqd json =
   h2_respond_json_string ?status ?extra_headers ?compress h2_reqd
     (Yojson.Safe.to_string json)

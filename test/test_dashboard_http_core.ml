@@ -4183,6 +4183,34 @@ let tools_h2_wire_response ~handler ~headers target =
   | Some (status, headers) -> status, headers, Buffer.contents body
   | None -> fail "tools H2 route omitted response headers"
 
+(* On HTTP/2 a cached payload's status comes from its origin: the gateway has
+   nothing else that tells the cache's timeout envelope from a page. *)
+let test_h2_cached_payload_status_comes_from_the_origin () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config:_ ->
+  let payload origin json =
+    { Dashboard_cache.json
+    ; raw_json = Yojson.Safe.to_string json
+    ; etag = "W/\"fixture\""
+    ; origin
+    ; encoded = None
+    }
+  in
+  let read payload =
+    tools_h2_wire_response
+      ~handler:(fun reqd ->
+        Server_h2_gateway_helpers.h2_respond_cached_payload reqd payload)
+      ~headers:[] "/cached"
+  in
+  let envelope =
+    payload Dashboard_cache.Timeout (`Assoc [ "error", `String "computation_timeout" ])
+  in
+  let status, _, _ = read envelope in
+  check int "a timeout envelope is 504" 504 status;
+  let page = payload Dashboard_cache.Computed (`Assoc [ "posts", `List [] ]) in
+  let status, _, body = read page in
+  check int "a page is 200" 200 status;
+  check string "a page sends its kept bytes" page.raw_json body
+
 let tools_gunzip payload =
   let input = De.bigstring_create De.io_buffer_size in
   let output = De.bigstring_create De.io_buffer_size in
@@ -6993,6 +7021,8 @@ let () =
             test_project_snapshot_wire_returns_snapshot_when_populated;
           test_case "telemetry n default is bounded (freeze guard)" `Quick
             test_telemetry_n_default_is_bounded;
+          test_case "an HTTP/2 cached payload's status comes from its origin" `Quick
+            test_h2_cached_payload_status_comes_from_the_origin;
           test_case "fleet-composite envelope is cached across polls" `Quick
             test_dashboard_fleet_composite_envelope_is_cached;
           test_case "state diagram runtime projection stays empty without meta" `Quick

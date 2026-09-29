@@ -104,7 +104,6 @@ let test_stale_while_revalidate () =
       Eio.Switch.run (fun sw ->
         Eio_context.set_switch sw;
         invalidate ();
-        Unix.putenv "MASC_OPERATOR_CACHE_BACKGROUND_REVALIDATE" "true";
         let v1 = get_or_compute "stale-key" ~ttl compute in
         Alcotest.(check int) "first compute" 1 !compute_count;
         Alcotest.(check yojson) "fresh value" (`Assoc [ ("count", `Int 1) ]) v1;

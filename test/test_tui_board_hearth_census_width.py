@@ -162,7 +162,7 @@ def run(executable: str) -> None:
                 raise AssertionError(
                     f"at {inner} inner cells the row dropped a hearth without "
                     f"saying {note!r}: {span!r}")
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Overview")
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
         os.write(fd, b"q")
 
     h.run_terminal_scenario(executable, description="board hearth census width",

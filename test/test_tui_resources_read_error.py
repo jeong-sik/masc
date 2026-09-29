@@ -60,7 +60,7 @@ def run_case(executable: str, kind: str, prefix: bytes, expected: bytes) -> None
     fixtures["/mcp"] = h.RequestHttpResponse(answer)
 
     def interact(process, fd, _slave, output, _base):
-        h.tab_until(process, fd, output, b"MASC Config")
+        h.tab_until(process, fd, output, b"MASC System")
         h.send_and_wait(process, fd, output, b"s", b"Event Log (JSON)")
         h.send_and_wait(process, fd, output, b"\r", prefix)
         h.resize_and_wait(

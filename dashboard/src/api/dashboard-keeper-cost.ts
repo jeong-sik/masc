@@ -69,11 +69,10 @@ export interface KeeperCostMetric {
   sample_count: number
 }
 
-export interface KeeperCostMetricsResponse {
-  window_minutes?: number
-  keepers: KeeperCostMetric[]
-  generated_at?: number | null
-}
+export type KeeperCostMetricsResponse =
+  | { state: 'pending'; window_minutes: number }
+  | { state: 'failed'; message: string }
+  | { state: 'ready'; window_minutes?: number; keepers: KeeperCostMetric[]; generated_at?: number | null }
 
 // A sum is a number exactly when some sample reported the value, and `null`
 // when none did. `undefined` marks a pair the producer cannot write.
@@ -126,7 +125,20 @@ function decodeKeeperCostMetric(raw: unknown): KeeperCostMetric | null {
 
 function decodeKeeperCostMetricsResponse(raw: unknown): KeeperCostMetricsResponse | null {
   if (!isRecord(raw)) return null
+  if (raw.state === 'loading') {
+    const cache = isRecord(raw.cache) ? raw.cache : null
+    const window = asInt(raw.window_minutes)
+    if (cache?.state !== 'warming' || window === undefined || window <= 0) return null
+    if (cache.last_error != null) {
+      return typeof cache.last_error === 'string'
+        ? { state: 'failed', message: cache.last_error }
+        : null
+    }
+    return { state: 'pending', window_minutes: window }
+  }
+  if (raw.state !== undefined || !Array.isArray(raw.keepers)) return null
   return {
+    state: 'ready',
     window_minutes: asNumber(raw.window_minutes),
     keepers: asRecordArray(raw.keepers)
       .map(decodeKeeperCostMetric)

@@ -18,7 +18,7 @@ SOURCE_MODULES = (
 
 def run(executable: str) -> None:
     def interact(process, master_fd, _slave_fd, output, _base_path):
-        h.send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        h.send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
         h.select_keeper_row(process, master_fd, output, b"beta")
         h.select_keeper_row(process, master_fd, output, b"alpha")
         os.write(master_fd, b"q")

@@ -87,6 +87,33 @@ let test_spectator_close () =
     (Masc_tui_msx.consume ~write state "esc");
   check bool "the flag is cleared" false state.msx_open
 
+(* A disk game answers each numbered prompt with a number and Return, so Return
+   and Backspace have to reach the machine alongside the digits, whichever way
+   the terminal spells them; every name sent is one the MSX lane accepts. *)
+let test_game_keys () =
+  let sent input =
+    match Masc_tui_msx.server_key input with
+    | None -> None
+    | Some name ->
+        (match Msx_lane.key_of_string name with
+         | Ok _ -> ()
+         | Error message -> fail (Printf.sprintf "%S -> %S: %s" input name message));
+        Some name
+  in
+  let expect input want = check (option string) (Printf.sprintf "%S" input) want (sent input) in
+  expect "\r" (Some "return");
+  expect "enter" (Some "return");
+  expect "\127" (Some "backspace");
+  expect "\b" (Some "backspace");
+  expect "backspace" (Some "backspace");
+  expect " " (Some "space");
+  expect "up" (Some "up");
+  expect "7" (Some "7");
+  expect "y" (Some "y");
+  expect "" None;
+  expect "\t" None;
+  expect "f9" None
+
 (* --- The load menu ---------------------------------------------------- *)
 
 let is_load name = function Masc_tui_msx.Load n -> String.equal n name | _ -> false
@@ -306,6 +333,7 @@ let () =
       , [ test_case "empty frame" `Quick test_empty_frame
         ; test_case "real frame" `Quick test_real_frame
         ; test_case "close on esc" `Quick test_spectator_close
+        ; test_case "game keys the machine receives" `Quick test_game_keys
         ] )
     ; ( "load menu"
       , [ test_case "disk replacement menu" `Quick test_change_disk_menu

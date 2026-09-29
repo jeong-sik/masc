@@ -1,5 +1,28 @@
 open Masc
 
+let test_play_invite_responses_preserve_recovery_facts () =
+  let json = Yojson.Safe.from_string in
+  (match Tui_decode.decode_play_invites
+           (json {|{"invites":[{"name":"old","expires_at":null,"expired":false,"holds_controller":true}]}|}) with
+   | Ok [{ pi_name = "old"; pi_expires_at = None; pi_expired = false;
+           pi_holds_controller = true }] -> ()
+   | _ -> Alcotest.fail "invite list lost null expiry or controller holder");
+  (match Tui_decode.decode_play_invite_revoked
+           (json {|{"name":"old","revoked":true,"released_controller":false,"release_error":"disk fault"}|}) with
+   | Ok { pir_name = "old"; pir_revoked = true; pir_released_controller = false;
+          pir_release_error = Some "disk fault" } -> ()
+   | _ -> Alcotest.fail "partial revoke lost its release error");
+  Alcotest.(check bool) "bad release_error is rejected" true
+    (Result.is_error (Tui_decode.decode_play_invite_revoked
+      (json {|{"name":"old","revoked":true,"released_controller":false,"release_error":null}|})));
+  Alcotest.(check bool) "issued link is required" true
+    (Result.is_error (Tui_decode.decode_play_invite_issued
+      (json {|{"name":"old","expires_at":"tomorrow"}|})));
+  Alcotest.(check bool) "authoritative absence" true
+    (Tui_decode.play_invite_absent_body {|{"error":"no_such_invite"}|});
+  Alcotest.(check bool) "another refusal is not absence" false
+    (Tui_decode.play_invite_absent_body {|{"error":"not_an_invite"}|})
+
 (* The saved-app reply's scope count picks the TUI notice: 0 says the
    service's own list will be asked for. A reply without [scopes] used to
    count as 0 and so told the operator something the server never said. *)
@@ -12088,8 +12111,24 @@ let test_keeper_usage_cache_failures_remain_visible () =
   Alcotest.(check bool) "unknown cache is rejected" true
     (Result.is_error (decode {|{"generated_at":1,"window_minutes":1440,"keepers":[],"cache":{"state":"future"}}|}))
 
+let test_play_revoke_failure_detail () =
+  Alcotest.(check string) "500 preserves actual controller failure"
+    "controller busy (HTTP 500: controller release failed)"
+    (Tui_decode.play_revoke_http_error ~status_code:500
+      ~body:{|{"error":"release_failed","name":"guest1","released_controller":false,"release_error":"controller busy"}|});
+  Alcotest.(check string) "other failures retain their own reason" "HTTP 503: keepers_unreadable"
+    (Tui_decode.play_revoke_http_error ~status_code:503 ~body:{|{"error":"keepers_unreadable"}|});
+  List.iter (fun body ->
+    Alcotest.(check string) "malformed release details use ordinary HTTP error projection"
+      (Tui_decode.http_status_error ~status_code:500 ~body)
+      (Tui_decode.play_revoke_http_error ~status_code:500 ~body))
+    [{|{"error":"release_failed","released_controller":false,"release_error":42}|};
+     {|{"error":"release_failed","released_controller":true,"release_error":"busy"}|};
+     {|{"error":"release_failed","released_controller":false}|}; "not JSON"; "[]"; "null"; "42"]
+
 let () =
   Alcotest.run "tui_decode" [
+    ("play revoke failure", [Alcotest.test_case "preserves controller failure detail" `Quick test_play_revoke_failure_detail]);
     ( "decode_oauth_client_saved",
       [ Alcotest.test_case "reads scopes and refuses their absence" `Quick
           test_decode_oauth_client_saved_reads_scopes_and_refuses_their_absence
@@ -12907,6 +12946,9 @@ let () =
     ( "keeper usage cache"
     , [ Alcotest.test_case "compute and refresh failures remain visible" `Quick
           test_keeper_usage_cache_failures_remain_visible ] );
+    ( "play invites"
+    , [ Alcotest.test_case "preserves partial revoke and rejects unreadable links"
+          `Quick test_play_invite_responses_preserve_recovery_facts ] );
     ( "file change"
     , [ Alcotest.test_case "reads an insert" `Quick test_decode_file_change_reads_an_insert
       ; Alcotest.test_case "reads a materialize" `Quick

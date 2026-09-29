@@ -2299,6 +2299,13 @@ let commit_event_locked session_dir (log : session_log) event =
     Ok ledger
 ;;
 
+(* What an activation records when it is made. Its delivery and actions
+   arrive later, by their own events, so whether a repeated recording is the
+   same invocation is judged on this part alone. *)
+let recorded_part (activation : activation) =
+  { activation with delivery = None; actions = [] }
+;;
+
 let record ~config ~trace_id (activation : activation) =
   with_lock ~config ~trace_id (fun ~ownership_root session_dir ->
     let* () =
@@ -2314,8 +2321,8 @@ let record ~config ~trace_id (activation : activation) =
     match List.find_opt (exact_key_equal activation) current.activations with
     | Some existing
       when Yojson.Safe.equal
-             (activation_to_yojson existing)
-             (activation_to_yojson activation) ->
+             (activation_to_yojson (recorded_part existing))
+             (activation_to_yojson (recorded_part activation)) ->
       Ok (current, Already_recorded existing)
     | Some _ -> Error (Invocation_id_collision activation.skill_tool_use_id)
     | None ->

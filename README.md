@@ -3,8 +3,7 @@
 </p>
 
 <h1 align="center">MASC</h1>
-<p align="center"><strong>Little candles, each with a personality. A shared space to solve problems together.</strong></p>
-<p align="center"><sub>Inspired by childhood memories of Bullfrog’s Dungeon Keeper and the warmth of candlelight, MASC gives agents personality and a sense of play.</sub></p>
+<p align="center"><strong>A workspace for solving problems together with agents that have personality.</strong></p>
 <p align="center">
   <a href="README.ko.md">한국어</a> ·
   <a href="#start-here">Get started</a> ·

@@ -1187,6 +1187,51 @@ let test_primary_replacement_cannot_poison_cache () =
       (In_channel.with_open_bin primary In_channel.input_all))
 ;;
 
+(* With a CPU pool installed the snapshot is parsed and decoded there, off the
+   domain that asked. The same stores read inline and through a one-domain
+   pool give the same answer: the state, and for bytes that are not JSON the
+   same error, so the parser's exception came back across the domain to the
+   handler that names the file. *)
+let test_snapshot_reads_the_same_through_the_cpu_pool () =
+  with_temp_dir "keeper-snapshot-cpu-pool" (fun base_path ->
+    let seeded = "pool-seeded" and broken = "pool-broken" in
+    Persistence.update_result ~base_path ~keeper_name:seeded (fun q ->
+      Queue.enqueue (Queue.enqueue q (stimulus "first" 1.0)) (stimulus "second" 2.0))
+    |> require_ok "seed snapshot";
+    Persistence.update_result ~base_path ~keeper_name:broken (fun q ->
+      Queue.enqueue q (stimulus "overwritten" 1.0))
+    |> require_ok "seed the snapshot the test breaks";
+    let primary =
+      Filename.concat
+        (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) broken)
+        Persistence.snapshot_filename
+    in
+    Out_channel.with_open_bin primary (fun oc -> output_string oc {|{"schema":|});
+    let read keeper_name =
+      Persistence.For_testing.reset_snapshot_cache_for_testing ();
+      match Persistence.load_state_result ~base_path ~keeper_name with
+      | Ok state ->
+        "ok:" ^ String.concat "," (List.sort String.compare (post_ids (State.pending state)))
+      | Error message -> "error:" ^ message
+    in
+    let inline = List.map read [ seeded; broken ] in
+    let pooled =
+      Eio_main.run @@ fun env ->
+      Eio.Switch.run @@ fun sw ->
+      Domain_pool_ref.set
+        (Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env));
+      Fun.protect ~finally:Domain_pool_ref.clear_for_tests (fun () ->
+        List.map read [ seeded; broken ])
+    in
+    Alcotest.(check (list string)) "the pool reads what the caller reads" inline pooled;
+    match inline with
+    | [ seeded_answer; broken_answer ] ->
+      Alcotest.(check string) "the seeded queue comes back" "ok:first,second" seeded_answer;
+      Alcotest.(check bool) "the broken snapshot is an error" true
+        (String.starts_with ~prefix:"error:" broken_answer)
+    | _ -> Alcotest.fail "two keepers were read")
+;;
+
 let test_dangling_primary_is_not_absence () =
   with_temp_dir "keeper-primary-dangling" (fun base_path ->
     let keeper_name = "dangling-primary" in
@@ -2031,6 +2076,8 @@ let () =
         ; Alcotest.test_case "exact ack preserves distinct source" `Quick test_exact_ack_removes_only_selected_identity
         ; Alcotest.test_case "an unchanged snapshot is not reparsed" `Quick
             test_unchanged_snapshot_is_not_reparsed
+        ; Alcotest.test_case "a snapshot reads the same through the CPU pool" `Quick
+            test_snapshot_reads_the_same_through_the_cpu_pool
         ; Alcotest.test_case
             "unaged Low still loses to fresh Normal"
             `Quick

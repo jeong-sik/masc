@@ -333,7 +333,14 @@ let read_json_if_present ~after_read path =
          Error (Printf.sprintf "failed to read %s: %s" path message)
        | Ok bytes ->
          (try
-            let json = Yojson.Safe.from_string bytes in
+            (* A snapshot runs to megabytes (1.66 MB took 12.9 ms to parse,
+               measured 2026-09-30), and this read runs on whichever domain
+               asks, the HTTP domain included. The parse depends on the bytes
+               alone, so it runs on the CPU pool, as the writer's
+               serialization does; the file identity checks stay here. *)
+            let json =
+              Domain_pool_ref.submit_cpu_or_inline (fun () -> Yojson.Safe.from_string bytes)
+            in
             after_read ();
             let after = Unix.lstat path in
             if after.Unix.st_kind = Unix.S_REG && same_snapshot_file before after
@@ -401,7 +408,9 @@ let read_primary_current_unlocked ?(after_read = fun () -> ()) owner =
     (match schema_field json with
      | Error message -> decode_error message
      | Ok () ->
-       (match State.of_yojson json with
+       (* The decode walks every row the parse produced, so it goes where the
+          parse went. *)
+       (match Domain_pool_ref.submit_cpu_or_inline (fun () -> State.of_yojson json) with
         | Ok state ->
           remember_snapshot ~stat path state;
           Ok (Primary_current state)

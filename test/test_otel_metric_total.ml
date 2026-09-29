@@ -3,10 +3,10 @@
     series for every label set of every metric, so a total reads only its own
     name's series.
 
-    The store keeps its series behind a signature whose only insert files a
-    series under both its key and its name. These cases pin what a total
-    counts: every series of its name, whichever call created it, and no series
-    of another name. *)
+    The store keeps its series behind a signature whose writes file a series
+    under both its key and its name, and only when no series holds that key.
+    These cases pin what a total counts: every series of its name, whichever
+    call created it, and no series of another name. *)
 
 open Alcotest
 module Store = Otel_metric_store_core
@@ -99,6 +99,25 @@ let test_a_series_already_held_is_not_filed_again () =
     (Store.get_metric_value histogram ~labels:lane ())
 ;;
 
+(* Observing a histogram again moves the series the first observation filed:
+   its sum, its count and every bucket the value falls in. *)
+let test_a_second_observation_moves_the_same_series () =
+  let lane = [ "lane", "a" ] in
+  let histogram = "masc_test_metric_total_observed_twice_seconds" in
+  Store.register_histogram_buckets histogram [ 1.0 ];
+  Store.observe_histogram histogram ~labels:lane 0.5;
+  Store.observe_histogram histogram ~labels:lane 0.25;
+  check near "its sum" 0.75 (Store.metric_total histogram);
+  check
+    (option near)
+    "held in one sum series"
+    (Some 0.75)
+    (Store.get_metric_value histogram ~labels:lane ());
+  check near "its count" 2.0 (Store.metric_total (Store.histogram_count_name histogram));
+  (* Both values land in le=1 and +Inf. *)
+  check near "its buckets" 4.0 (Store.metric_total (histogram ^ "_bucket"))
+;;
+
 let test_a_name_never_written_totals_zero () =
   check near "no series" 0.0 (Store.metric_total "masc_test_metric_total_never_written")
 ;;
@@ -119,6 +138,10 @@ let () =
             "a series already held is not filed again"
             `Quick
             test_a_series_already_held_is_not_filed_again
+        ; test_case
+            "a second observation moves the same series"
+            `Quick
+            test_a_second_observation_moves_the_same_series
         ; test_case
             "a name never written totals zero"
             `Quick

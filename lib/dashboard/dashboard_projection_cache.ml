@@ -59,7 +59,7 @@ let with_current_keeper_portraits ~(config : Workspace_utils.config) snapshot =
   match snapshot with
   | `Assoc fields -> `Assoc (List.map (function
       | "keepers", `Assoc fields -> "keepers", `Assoc (section fields)
-      | ("keepers" | "keeper_briefs") as key, `List rows -> key, `List (List.map row rows)
+      | ("keepers" | "keeper_briefs" | "continuity_briefs") as key, `List rows -> key, `List (List.map row rows)
       | "operator_targets", `Assoc fields ->
         "operator_targets", `Assoc (List.map (function
           | "keepers", `List rows -> "keepers", `List (List.map row rows)

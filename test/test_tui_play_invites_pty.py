@@ -51,7 +51,7 @@ def run(executable: str) -> None:
         ]}
 
     def interact(process, master, _slave, output, _base):
-        h.send_and_wait(process, master, output, b"2", b"MASC Keepers")
+        h.send_and_wait(process, master, output, b"3", b"MASC Keepers")
         h.select_keeper_row(process, master, output, b"alpha")
         h.send_and_wait(process, master, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
         h.send_and_wait(process, master, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")

@@ -19,7 +19,7 @@ type t =
   | Open_settings
   | Open_diff
   | Open_patch_modal
-  | Toggle_cost
+  | Open_usage
   | Open_link_preview of string option
   | Open_links_list
   | Copy_latest_reply
@@ -122,7 +122,7 @@ let catalog =
   ; { word = "cost"
     ; aliases = []
     ; args = ""
-    ; summary = "show or hide each Keeper's cost and tokens and the fleet total on the Overview Team block"
+    ; summary = "open Usage for provider quotas and Keeper usage"
     }
   ; { word = "changes"
     ; aliases = []
@@ -239,7 +239,7 @@ let catalog =
   ; { word = "metrics"
     ; aliases = [ "telemetry" ]
     ; args = ""
-    ; summary = "display multicore engine telemetry, scheduler latency, and fleet health"
+    ; summary = "open Usage with provider quotas, Keeper reports, and telemetry"
     }
   ; { word = "activity"
     ; aliases = []
@@ -372,7 +372,7 @@ let parse text =
     | "settings", _ -> Open_settings
     | "diff", _ -> Open_diff
     | "patch", _ | "review", _ -> Open_patch_modal
-    | "cost", _ -> Toggle_cost
+    | "cost", _ -> Open_usage
     | "preview", arg ->
         let trimmed = String.trim arg in
         if String.equal trimmed "" then Open_link_preview None

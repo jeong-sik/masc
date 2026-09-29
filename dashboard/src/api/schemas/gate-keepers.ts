@@ -16,6 +16,9 @@ const KeeperMetaWireSchema = Schema.Struct({
 const GateKeeperWireSchema = Schema.Struct({
   runtime_class: Schema.Literal('keeper'),
   portrait: KeeperPortraitSchema,
+  // Monetary observations do not determine Keeper lifecycle actions. The
+  // execution consumer validates them together with their Candle envelope.
+  candle_balance_milli: Schema.Unknown,
   name: Schema.NonEmptyString,
   meta: KeeperMetaWireSchema,
   status: Schema.NonEmptyString,
@@ -44,6 +47,7 @@ const GateKeeperIssueBaseWireSchema = Schema.Struct({
   status: Schema.Literal('error'),
   runtime_class: Schema.Literal('keeper'),
   portrait: KeeperPortraitSchema,
+  candle_balance_milli: Schema.Unknown,
   name: Schema.NonEmptyString,
   keepalive_running: Schema.Boolean,
   effective_meta_error: GateKeeperDirectoryIssueWireSchema,
@@ -75,6 +79,7 @@ const GateKeeperEntryWireSchema = Schema.Union(
 )
 
 const GateKeepersWireSchema = Schema.Struct({
+  candle: Schema.Unknown,
   count: Schema.NonNegativeInt,
   keepers: Schema.Array(GateKeeperEntryWireSchema),
   // Listing truth: `total` counts keepers known before `limit` was applied, so

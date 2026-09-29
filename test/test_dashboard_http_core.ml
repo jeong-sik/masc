@@ -104,6 +104,17 @@ let with_cached_surface_success
       Server_dashboard_http_cache.mark_cached_surface_success surface json;
       f ())
 
+let with_mission_cache_success json f =
+  let module Core = Server_dashboard_http_core in
+  let surface = Core.mission_cache in
+  let saved = Core.snapshot surface in
+  let saved_payload = surface.Core.memoized_payload in
+  Fun.protect
+    ~finally:(fun () ->
+      surface.Core.current <- saved;
+      surface.Core.memoized_payload <- saved_payload)
+    (fun () -> Core.mark_cached_surface_success surface json; f ())
+
 let with_env key value f =
   let old = Sys.getenv_opt key in
   Unix.putenv key value;
@@ -3107,6 +3118,7 @@ let test_execution_default_response_reuses_prepared_bytes () =
   with_cached_surface_success
     Server_dashboard_http_execution_surfaces.execution_cache
     (`Assoc [ "default_marker", `String "last-success";
+              "candle", Candle_observation.to_json Candle_observation.Off;
               "data", `String (String.make 4000 'x') ]) @@ fun () ->
   let module Surface = Server_dashboard_http_execution_surfaces in
   let context = Surface.execution_http_request ~state
@@ -3218,16 +3230,21 @@ beanie = 0
   (* Preserve the real builder's name-before-portrait order: an unchanged
      authority must not defeat the prepared-byte path by reordering fields. *)
   let row = `Assoc ["name", `String keeper;
-    "portrait", Portrait.reading_to_json (Portrait.Ready starting)] in
+    "portrait", Portrait.reading_to_json (Portrait.Ready starting);
+    "candle_balance_milli", `String "0"] in
+  let ready_candle = Candle_observation.Ready (Candle_balance.supply Candle_balance.empty) in
+  let candle_json = Candle_observation.to_json ready_candle in
   let execution_seed = `Assoc ["cache_marker", `String "retained-metadata";
-    "keepers", `List [row]; "keeper_briefs", `List [row]] in
+    "candle", candle_json;
+    "keepers", `List [row]; "continuity_briefs", `List [row]] in
   let mission_seed = `Assoc ["cache_marker", `String "retained-metadata";
+    "candle", candle_json;
     "keeper_briefs", `List [row];
     "operator_targets", `Assoc ["keepers", `List [row]]] in
   Surface.invalidate_execution_cache ();
   Eio_guard.protect ~finally:Surface.invalidate_execution_cache @@ fun () ->
   with_cached_surface_success Surface.execution_cache execution_seed @@ fun () ->
-  with_cached_surface_success Server_dashboard_http_core.mission_cache mission_seed @@ fun () ->
+  with_mission_cache_success mission_seed @@ fun () ->
   let state = Lib.Mcp_server_eio.For_testing.create_state ~base_path () in
   let clock = Eio.Stdenv.clock env in
   let req = request_with_headers "/api/v1/dashboard/execution"
@@ -3236,22 +3253,30 @@ beanie = 0
   let read_execution () = Surface.dashboard_execution_http_json ~state ~sw ~clock req in
   let read_mission () = Server_dashboard_http_core.dashboard_briefing_http_json
       ~state ~sw ~clock (request "/api/v1/dashboard/briefing") in
-  let portraits path json =
+  let observations path json =
     let rows = List.fold_left (fun json key -> Yojson.Safe.Util.member key json) json path
       |> Yojson.Safe.Util.to_list in
-    List.map (fun row -> ok Fun.id (Portrait.reading_of_json
-      Yojson.Safe.Util.(member "portrait" row))) rows in
-  let assert_surfaces label expected =
+    List.map (fun row ->
+      ok Fun.id (Portrait.reading_of_json Yojson.Safe.Util.(member "portrait" row)),
+      ok Fun.id (Candle_observation.balance_of_json
+        Yojson.Safe.Util.(member "candle_balance_milli" row))) rows in
+  let assert_surfaces label ~expected_portrait ~expected_candle ~expected_balance =
     let execution = read_execution () in
     let mission = read_mission () in
     List.iter (fun (json, paths) ->
       check string (label ^ " preserves metadata") "retained-metadata"
         Yojson.Safe.Util.(json |> member "cache_marker" |> to_string);
+      let candle = ok Fun.id (Candle_observation.of_json
+        Yojson.Safe.Util.(member "candle" json)) in
+      check bool (label ^ " Candle supply") true (expected_candle candle);
       List.iter (fun path ->
-        match portraits path json with
-        | [reading] -> check bool (label ^ " " ^ String.concat "." path) true (expected reading)
+        match observations path json with
+        | [reading, balance] ->
+          check bool (label ^ " " ^ String.concat "." path) true (expected_portrait reading);
+          check (option string) (label ^ " balance " ^ String.concat "." path)
+            expected_balance balance
         | _ -> fail "cached surface lost or duplicated its Keeper") paths)
-      [execution, [["keepers"]; ["keeper_briefs"]];
+      [execution, [["keepers"]; ["continuity_briefs"]];
        mission, [["keeper_briefs"]; ["operator_targets"; "keepers"]]] in
   let first = execution_payload ~state ~sw ~clock req in
   (match Surface.dashboard_execution_cached_http_representation (context ()) with
@@ -3259,7 +3284,9 @@ beanie = 0
      check bool "unchanged portrait retains prepared identity bytes" true (body == first.raw_json);
      check string "unchanged portrait retains its ETag" first.etag etag
    | None -> fail "unchanged authority discarded prepared execution bytes");
-  assert_surfaces "starting" (fun reading -> reading = Portrait.Ready starting);
+  assert_surfaces "starting"
+    ~expected_portrait:(fun reading -> reading = Portrait.Ready starting)
+    ~expected_candle:(fun candle -> candle = ready_candle) ~expected_balance:(Some "0");
   ignore (ok Candle_shop.error_to_string
     (Candle_shop.purchase ~now:(fun () -> 1790640000.) ~base_path ~keeper:owner ~item));
   (match Keeper_candle_tools.handle ~operation:Keeper_candle_tools.Equip
@@ -3270,17 +3297,24 @@ beanie = 0
    | result -> fail (Tool_result.message result));
   check bool "equipped authority refuses old prepared HTTP bytes" true
     (Option.is_none (Surface.dashboard_execution_cached_http_representation (context ())));
-  assert_surfaces "equipped" (fun reading -> reading = Portrait.Ready expected);
+  assert_surfaces "equipped"
+    ~expected_portrait:(fun reading -> reading = Portrait.Ready expected)
+    ~expected_candle:(fun candle -> candle = ready_candle) ~expected_balance:(Some "0");
   check bool "equipment refresh does not rebuild cached execution metadata" true
     ((Server_dashboard_http_cache.snapshot Surface.execution_cache).json = execution_seed);
   check bool "equipment refresh does not rebuild cached mission metadata" true
-    ((Server_dashboard_http_cache.snapshot Server_dashboard_http_core.mission_cache).json = mission_seed);
+    ((Server_dashboard_http_core.snapshot Server_dashboard_http_core.mission_cache).json = mission_seed);
   let ledger = Candle_ledger.path ~base_path in
   Fs_compat.append_file ledger "{partial";
   let corrupt = Fs_compat.load_file ledger in
   check bool "unreadable authority refuses prepared HTTP bytes" true
     (Option.is_none (Surface.dashboard_execution_cached_http_representation (context ())));
-  assert_surfaces "unreadable" (function Portrait.Unavailable _ -> true | Portrait.Ready _ -> false);
+  assert_surfaces "unreadable"
+    ~expected_portrait:(function Portrait.Unavailable _ -> true | Portrait.Ready _ -> false)
+    ~expected_candle:(function
+      | Candle_observation.Disabled {reason} -> String.trim reason <> ""
+      | Candle_observation.Off | Candle_observation.Ready _ -> false)
+    ~expected_balance:None;
   check string "warm HTTP reads never repair the damaged ledger" corrupt (Fs_compat.load_file ledger)
 
 let test_execution_parameterized_payload_reuses_decorated_bytes () =

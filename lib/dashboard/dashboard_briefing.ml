@@ -233,6 +233,7 @@ let json ?actor ~config ~sw ~clock ~proc_mgr
     [
       ("generated_at", `String projection.generated_at);
       ("summary", summary_json);
+      ("candle", member_assoc "candle" (member_assoc "keepers" projection.snapshot_json));
       ("incidents", `List projection.incidents);
       ("recommended_actions", `List projection.recommended_actions);
       ("command_focus", command_focus_json);

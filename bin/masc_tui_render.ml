@@ -591,6 +591,12 @@ let overview_intro_lines (state : state) =
   | Some reason -> ("  " ^ Terminal_text.single_line reason) :: usual
   | None -> usual
 
+let overview_candle_lines (state : state) ~cols =
+  Masc_tui_candle.summary_lines state.candle_observation
+  |> List.concat_map (fun line -> Message_layout.wrap_words ~max_cells:(max 1 (cols - 4))
+       (Terminal_text.single_line line))
+  |> List.map (fun line -> "  " ^ line)
+
 (** Project the shared Overview row budget and its sanitized variable inputs. *)
 let overview_layout (state : state) ~terminal_rows ~cols =
   let intro_lines = overview_intro_lines state in
@@ -610,7 +616,8 @@ let overview_layout (state : state) ~terminal_rows ~cols =
   in
   let allocate attention_items =
     let with_intro intro_count =
-      Render_schedule.allocate_overview ~terminal_rows
+      Render_schedule.allocate_overview
+        ~terminal_rows:(max 0 (terminal_rows - List.length (overview_candle_lines state ~cols)))
         ~intro_count ~attention_count:(List.length attention_items)
         ~goal_count:
           (Overview_goals.wanted_rows state.overview_goals)
@@ -762,6 +769,7 @@ let render_overview (state : state) =
           o.ov_mcp_agents approval_count pulse_suffix
   in
   box_line buf cols summary_line;
+  List.iter (box_line buf cols) (overview_candle_lines state ~cols);
 
   box_divider buf cols;
 
@@ -7652,6 +7660,12 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
             (if k.k_paused then (Theme.warn ()) ^ "yes" ^ Ansi.reset
              else Ansi.dim ^ "no" ^ Ansi.reset)
         ]
+        @ (let amount = match (keeper_reading state k).Keeper_control.liveness with
+            | Keeper_control.Present runtime -> runtime.kr_candle_balance_milli
+            | Keeper_control.Unobserved | Keeper_control.Absent | Keeper_control.Invalid _ -> None in
+           match Masc_tui_candle.balance_text state.candle_observation amount with
+           | None -> []
+           | Some value -> [row_line "Candle balance:" (Terminal_text.single_line value)])
       in
       List.iter add_line
         (match portrait with

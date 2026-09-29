@@ -1942,11 +1942,10 @@ type http_scoped_surface_results = {
   http_planning: (planning_snapshot, string) result option;
   http_system_logs: (system_log_snapshot, string) result option;
   http_fleet_safety: (Tui_decode.fleet_safety_reading, string) result option;
-  (* [None] on surfaces that do not show it: the roster costs a request and
-     only the Keepers surface reads it, so leaving it out keeps whatever the
-     last Keepers refresh observed rather than dropping it. *)
+  (* [None] on surfaces that do not read the roster or its Candle summary;
+     leaving it out keeps the observation until a relevant refresh. *)
   http_keeper_roster:
-    (Keeper_control.roster, Keeper_control.roster_failure) result option;
+    (Keeper_control.roster * (Candle_observation.t, string) result, Keeper_control.roster_failure) result option;
   (* [None] off the Overview, the one surface that draws the provider usage
      windows. One fetch, two readings: the runtime rows and the windows. *)
   http_runtime_quota:
@@ -10703,7 +10702,8 @@ let apply_overview_goals_load state = function
   | Error err -> state.overview_goals <- Goals_failed err
 
 let apply_keeper_roster_load state = function
-  | Ok roster ->
+  | Ok (roster, candle) ->
+      state.candle_observation <- Some candle;
       state.keeper_roster <- roster;
       state.keeper_roster_error <- None
   | Error failure ->
@@ -10713,6 +10713,8 @@ let apply_keeper_roster_load state = function
          back to unobserved withdraws the actions instead of offering the
          wrong one. *)
       state.keeper_roster <- Keeper_control.Roster_unobserved;
+      state.candle_observation <- Some (Error (Keeper_control.roster_failure_message
+        ~credential_sent:(Masc_tui_http.operator_token_present ()) failure));
       remember_surface_error state ~surface:"keeper roster"
         ~current_error:state.keeper_roster_error
         ~set_error:(fun value -> state.keeper_roster_error <- value)

@@ -6,6 +6,7 @@ module Types = Masc_domain
 let runner_tick_sec = 1.0
 
 let () = Mirage_crypto_rng_unix.use_default ()
+let () = Masc.Server_startup_state.mark_state_ready () |> Result.get_ok
 
 module Lib = Masc
 module Auth = Auth

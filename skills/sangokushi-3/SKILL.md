@@ -157,10 +157,13 @@ protection, then `2`.
 
 ## The ending
 
-KOEI.COM runs `END.EXE` when the game ends with a winner. `END.EXE` reads
-`ENDSTIL.DAT`, and the `samguk3` program folder has no such file: run on its
-own, `END.EXE` stopped and the loader printed `END.EXE : file access
-failure.` Until the file is added, expect that line instead of the ending.
+When one ruler holds every city, the game ends and KOEI.COM runs `END.EXE`.
+`END.EXE` reads `ENDSTIL.DAT` first, and the `samguk3` program folder has no
+such file, so the screen turns to text with `END.EXE : file access failure.`
+and the machine exits. That is what a unification looked like on 2026-09-29,
+not a crash; until the file is added, the ending is that line. A game where
+every ruler's clan dies out ends on the KOEI copyright screen instead, and a
+key exits.
 
 ## Watching an all-AI game
 

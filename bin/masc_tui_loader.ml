@@ -1025,16 +1025,21 @@ let decode_schedule_snapshot json =
           (Printf.sprintf "schedules truncated must be a boolean: %s"
              (Yojson.Safe.to_string other))
   in
+  (* The summary spells it [next_due_at] (Server_dashboard_schedule_projection,
+     the [fsm] object), unlike a row's [next_due_at_iso]. The server always
+     writes the member, null when nothing is due, so an absent member is a
+     wire change and not "nothing due". *)
   let* scs_next_due_iso =
     match Yojson.Safe.Util.member "fsm" json with
     | `Assoc fields ->
-        (match List.assoc_opt "next_due_at_iso" fields with
+        (match List.assoc_opt "next_due_at" fields with
          | Some (`String value) -> Ok (Some value)
-         | Some `Null | None -> Ok None
+         | Some `Null -> Ok None
+         | None -> Error "schedules fsm is missing next_due_at"
          | Some other ->
              Error
                (Printf.sprintf
-                  "schedules fsm next_due_at_iso must be a string: %s"
+                  "schedules fsm next_due_at must be a string or null: %s"
                   (Yojson.Safe.to_string other)))
     | other ->
         Error

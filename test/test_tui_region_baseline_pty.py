@@ -193,7 +193,7 @@ def fixtures() -> region.ServedFixtures:
     served[h.SCHEDULES_PATH] = (200, {
         "status": "ok", "schedule_runner": h.SCHEDULE_RUNNER_OK,
         "schedule_store_read_error": None, "request_count": 0,
-        "truncated": False, "fsm": {"next_due_at_iso": None}, "requests": [],
+        "truncated": False, "fsm": {"next_due_at": None}, "requests": [],
     })
     served[h.KEEPER_LANES_PATH] = h.keeper_lanes_response([])
     served["/api/v1/keepers/turns"] = (200, {

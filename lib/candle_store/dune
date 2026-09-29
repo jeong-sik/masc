@@ -1,0 +1,14 @@
+(include_subdirs no)
+
+;; Candle ledger file (RFC-goal-candle-ledger 3.1): the append-only JSONL file
+;; the reward currency's events live in. This library does the file work, so
+;; the event types and their codec stay pure in masc_candle. Nothing here reads
+;; Goal, Task or keeper stores.
+
+(library
+ (name masc_candle_store)
+ (public_name masc.masc_candle_store)
+ (wrapped false)
+ (flags
+  (:standard -w +4 -w +33 -w +37))
+ (libraries masc_candle masc_workspace fs_compat masc_log eio eio.unix))

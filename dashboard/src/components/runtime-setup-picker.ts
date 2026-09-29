@@ -1,7 +1,7 @@
 import { html } from 'htm/preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import type { Inventory } from '../api/onboarding'
-import { discoverSetupModels, selectSetupAccount, importAntigravityAccount, prepareSetupModel, saveSetupSelections, type Model, type Selection, type Source, type Unverified } from '../api/runtime-setup'
+import { discoverSetupModels, selectSetupAccount, importAntigravityAccount, prepareSetupModel, saveSetupSelections, type Model, type Selection, type Source, type SaveOutcome } from '../api/runtime-setup'
 import { SetupAccountLogin } from './setup-account-login'
 import { resumeSavedModelSetup } from '../lib/model-setup-resume'
 function ModelContextEntry({ model, onApply }: { model: Model; onApply: (context: number) => void }) {
@@ -138,8 +138,8 @@ export function RuntimeSetupPicker({ inventory, onSaved, disabled = false, onBus
     if (disabled || busy || loginPending.current || activeRequest.current || !choices.length || !selectionRevision) return
     const controller = beginRequest()
     setBusy(true); setNotice('선택한 모델의 응답과 도구 호출을 검증하고 있습니다.')
-    let unverified: Unverified[]
-    try { unverified = await saveSetupSelections(selectionRevision, choices, { signal: controller.signal }) }
+    let outcome: SaveOutcome
+    try { outcome = await saveSetupSelections(selectionRevision, choices, { signal: controller.signal }) }
     catch {
       if (!currentRequest(controller)) return
       setNotice('연결 저장 결과를 확인하지 못했습니다. 준비 상태와 모델 목록을 새로고침하고 확인하세요.'); endRequest(controller); return
@@ -148,8 +148,13 @@ export function RuntimeSetupPicker({ inventory, onSaved, disabled = false, onBus
     setChoices([]); setSource(null); setKey(''); setModels([])
     // A save whose provider declined the check for the account's usage is
     // published unmeasured; every notice below says so instead of "verified".
-    const unmeasured = unverified.length === 0 ? null
-      : `모델은 저장했습니다. 사용 한도에 걸려 응답·도구 검증은 못 했습니다: ${unverified.map(row => `${row.runtime_id} (${row.code})`).join(', ')}.`
+    // A save that left selected runtimes uncalled says so too: they were kept
+    // as they were, not verified again.
+    const caveats = [
+      ...outcome.notRechecked.length === 0 ? [] : [`기존 연결은 이번에 다시 확인하지 않았습니다: ${outcome.notRechecked.join(', ')}.`],
+      ...outcome.unverified.length === 0 ? [] : [`사용 한도에 걸려 응답·도구 검증은 못 했습니다: ${outcome.unverified.map(row => `${row.runtime_id} (${row.code})`).join(', ')}.`],
+    ]
+    const unmeasured = caveats.length === 0 ? null : `모델은 저장했습니다. ${caveats.join(' ')}`
     try {
       const activation = await resumeSavedModelSetup({ signal: controller.signal })
       if (!currentRequest(controller)) return

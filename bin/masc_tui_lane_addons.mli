@@ -26,6 +26,7 @@ type action_menu = {
 }
 type focus = Timeline | Connections | Configurations | Instances | Rows
 type presentation = Summary | Technical | Flow
+type screen = Overview | Detail of string * string
 type diagnostic =
   | Detail_read_failure of string
   | Request_failure of string
@@ -40,7 +41,8 @@ type t = {
   installer : Masc_tui_lane_installer.t option;
   subscription_panel : Masc_tui_lane_subscriptions.t option;
   evidence_prompt : evidence_prompt option;
-  presentation : presentation; action_menu : action_menu option;
+  presentation : presentation; screen : screen; help_open : bool;
+  action_menu : action_menu option;
   snapshot : snapshot option; loading : bool; error : diagnostic option;
   snapshot_read_error : string option;
       (** The last failed inventory read. Input and request diagnostics do
@@ -69,6 +71,13 @@ val selected_declaration : t -> declaration option
 val selected_document : t -> Document.session option
 val put_document : t -> Document.session -> t
 val selected_instance : t -> instance option
+val open_selected_instance : t -> t
+(** Enter the selected worker or unresolved installation. A worker pins its
+    incarnation; an installation opens its existing TOML detail section. *)
+val overview_count : snapshot -> int
+(** Number of selectable workers and unresolved installations in the list. *)
+val move_record : t -> int -> t
+(** Move only among records belonging to the pinned detail incarnation. *)
 val selected_source_path : t -> string option
 val selected_row : t -> Row.row option
 val reconcile_snapshot : t -> snapshot -> t

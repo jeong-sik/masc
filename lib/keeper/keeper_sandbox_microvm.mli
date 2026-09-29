@@ -98,11 +98,17 @@ val network_args_for :
     be a guess at how open the guest is. *)
 
 val image_present_for :
-  Keeper_microvm_backend.t -> image:string -> timeout_sec:float -> (unit, string) result
+  Keeper_microvm_backend.t ->
+  name:string option ->
+  image:string ->
+  timeout_sec:float ->
+  (unit, string) result
 (** Gate the run on the image already being in this runtime's own store.
     None of the three has a [--pull=never]: without this, a missing image is
     fetched from a registry rather than refused. The refusal names the CLI
-    that was asked, so an [msb] keeper is not told to install Apple's. *)
+    that was asked, so an [msb] keeper is not told to install Apple's.
+    Never builds an image. The same inspect response supplies the presence
+    result and lock-marker warning; an absent marker does not block admission. *)
 
 type image_probe_phase =
   | Image_inspect
@@ -121,6 +127,18 @@ type image_probe_outcome =
   | Image_missing
   | Image_cli_unavailable
   | Image_probe_failed of image_probe_failure
+
+val image_present_result_for :
+  Keeper_microvm_backend.t ->
+  name:string option ->
+  image:string ->
+  image_probe_outcome ->
+  (unit, string) result
+(** The gate's answer for one probe outcome. [name] is the Keeper's catalog
+    name, when declared. A missing image gives the recovery steps the
+    selected backend supports: [masc sandbox-image] builds into [container]'s
+    and [nerdctl]'s store, a build reaches [msb]'s through [msb load], and on
+    every backend [masc sandbox-image promote] records a tag that store has. *)
 
 type json_shape =
   | Json_array
@@ -373,10 +391,14 @@ type shim_provenance =
 
 val verify_shim_sidecar : dir:string -> (shim_provenance, string) result
 (** Reads [dir/masc-exec-shim.sha256] if present and compares it with the
-    digest of [dir/masc-exec-shim]. [Error] names the case:
-    [microvm_shim_hash_mismatch] (both digests in the text),
-    [microvm_shim_sidecar_invalid], [microvm_shim_sidecar_unreadable],
-    [microvm_shim_unreadable]. Never raises. *)
+    digest of [dir/masc-exec-shim], reading its current bytes on every call.
+    File metadata is not an integrity identity: an in-place writer can keep
+    the size and restore the modification time. The boot caller runs this
+    read-only verification on the shared executor when installed.
+    [Error] names the case: [microvm_shim_hash_mismatch] (both
+    digests in the text), [microvm_shim_sidecar_invalid],
+    [microvm_shim_sidecar_unreadable], [microvm_shim_unreadable]. Never
+    raises. *)
 val shim_guest_path : string
 val shim_config_guest_path : string
 val shim_mount_args : host_dir:string -> string list

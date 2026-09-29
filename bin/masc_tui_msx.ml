@@ -132,7 +132,15 @@ let empty_title ~(connection : Masc_tui_types.connection_status) source
   match live with
   | Live.Failed detail ->
       Printf.sprintf " %s — could not read the machine: %s" label detail
-  | Live.Not_loaded | Live.Unread | Live.Showing _ -> (
+  | Live.Unread -> (
+    match connection with
+    | Masc_tui_types.Connected | Masc_tui_types.Degraded ->
+        Printf.sprintf " %s — waiting for live screen…" label
+    | (Masc_tui_types.Disconnected | Masc_tui_types.Connecting
+      | Masc_tui_types.Booting | Masc_tui_types.Reconnecting) as status ->
+        Printf.sprintf " %s — no frame: the server is %s." label
+          (Masc_tui_types.connection_status_label status))
+  | Live.Not_loaded | Live.Showing _ -> (
     match connection with
     | Masc_tui_types.Connected | Masc_tui_types.Degraded ->
       Printf.sprintf " %s — no machine loaded. A keeper loads one with %s." label

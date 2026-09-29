@@ -169,6 +169,11 @@ let test_a_person_plays_in_turn () =
             ; "/api/v1/dos/step", {|{"until_ready":"yes"}|}, "a text until_ready is a 400"
             ; "/api/v1/dos/press", {|not json|}, "a body that is not JSON is a 400"
             ];
+          let stray = post ~token:operator "/api/v1/dos/pass" {|{"to":"nobody"}|} in
+          check int "a pass to a name not at the machine is a 400" 400 (status_of stray);
+          check bool "and says so" true (contains ~sub:"not at the DOS machine" (message_of stray));
+          check (option string) "and the operator keeps the controller" (Some "operator")
+            (controller ());
           check int "the operator passes to the invite" 200
             (status_of (post ~token:operator "/api/v1/dos/pass" {|{"to":"minsu"}|}));
           check (option string) "the invite holds the controller" (Some "minsu") (controller ());
@@ -236,7 +241,8 @@ let test_expired_invite_releases_controller_on_next_move () =
           check bool "the invite has left once that second ends" true
             (match holder_left ~now:(expiry_second +. 1.) with
              | Some Masc.Tool_misc_dos_lane.Player_expired -> true
-             | Some Masc.Tool_misc_dos_lane.Keeper_stopped | None -> false);
+             | Some (Masc.Tool_misc_dos_lane.Keeper_stopped | Masc.Tool_misc_dos_lane.No_credential)
+             | None -> false);
           Auth.save_credential base_path
             { credential with expires_at = Some "2000-01-01T00:00:00Z" };
           check bool "the expired bearer cannot move" true

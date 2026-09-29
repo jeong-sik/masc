@@ -110,13 +110,52 @@ let test_named_default_lane () = fixture (fun base runtime binary spec original 
   Alcotest.check Alcotest.bool "exact-output lanes retained" true (before.exact_output_lane_decls=after.exact_output_lane_decls);
   let probes = text (Filename.concat base "verified.jsonl") |> String.split_on_char '\n'
     |> List.filter (fun line -> line<>"") |> List.map (fun line -> Yojson.Safe.from_string line |> Yojson.Safe.Util.to_string) in
-  Alcotest.check (Alcotest.list Alcotest.string) "verification probes concrete candidates, never route ID" selected probes;
+  Alcotest.check (Alcotest.list Alcotest.string) "verification probes only the added candidate, never route ID or an existing one" [added_id] probes;
   let saved = text runtime in
   let revision = get (Batch.observe ~base_path:base) in
   Alcotest.check Alcotest.bool "preserve cannot silently switch to an unrelated lane" true
     (Batch.configure ~default_lane_id:"other-lane" ~binary ~base_path:base ~expected_revision:revision
       ~specs:[] ~runtime_ids:selected ~default_runtime_id:second.runtime_id ~verify:false () = Error Batch.Invalid_selection);
   Alcotest.check Alcotest.string "refused lane switch leaves bytes unchanged" saved (text runtime))
+(* Verification calls what the save adds, plus the runtime that becomes the
+   first call. A runtime already bound stays unprobed when the chain merely
+   contains it, so one exhausted old account cannot block adding another. *)
+let test_probes_only_what_changes () = fixture (fun base _runtime binary spec _original ->
+  let old_id = (Runtime_setup_spec.render (spec "old-model")).runtime_id in
+  let added = spec "added-model" in
+  let added_id = (Runtime_setup_spec.render added).runtime_id in
+  let probed () = let path = Filename.concat base "verified.jsonl" in
+    if not (Sys.file_exists path) then [] else
+    text path |> String.split_on_char '\n' |> List.filter (fun line -> line<>"")
+    |> List.map (fun line -> Yojson.Safe.from_string line |> Yojson.Safe.Util.to_string) in
+  fake base binary "pass";
+  let revision = get (Batch.observe ~base_path:base) in
+  let receipt = get (apply base binary [added] [old_id; added_id] revision true) in
+  Alcotest.check (Alcotest.list Alcotest.string) "unchanged primary is not probed, the addition is" [added_id] (probed ());
+  Alcotest.check Alcotest.bool "a save that kept a bound runtime unchecked is not verified" true
+    (receipt.readiness = Batch.Partly_checked { limited = []; not_rechecked = [old_id] });
+  Alcotest.check Alcotest.string "the receipt names what was not checked again" "partly_checked"
+    Yojson.Safe.Util.(Batch.receipt_json receipt |> member "readiness" |> to_string);
+  Alcotest.check (Alcotest.list Alcotest.string) "the receipt lists it" [old_id]
+    Yojson.Safe.Util.(Batch.receipt_json receipt |> member "not_rechecked" |> to_list |> List.map to_string);
+  Sys.remove (Filename.concat base "verified.jsonl");
+  let promoted = Runtime_setup_spec.render (spec "promoted") in
+  let saved = text (Filename.concat (Common.masc_dir_from_base_path ~base_path:base) "config/runtime.toml") in
+  save (Filename.concat (Common.masc_dir_from_base_path ~base_path:base) "config/runtime.toml") (saved ^ "\n" ^ promoted.runtime_toml);
+  let revision = get (Batch.observe ~base_path:base) in
+  let receipt = get (apply base binary [] [promoted.runtime_id; old_id] revision true) in
+  Alcotest.check (Alcotest.list Alcotest.string) "an existing runtime promoted to first call is probed alone"
+    [promoted.runtime_id] (probed ());
+  Alcotest.check Alcotest.bool "the runtime left behind is reported as not checked again" true
+    (receipt.readiness = Batch.Partly_checked { limited = []; not_rechecked = [old_id] });
+  (* Nothing selected needs a call: no probe runs, and the receipt must not
+     read as a verification. *)
+  Sys.remove (Filename.concat base "verified.jsonl");
+  let revision = get (Batch.observe ~base_path:base) in
+  let receipt = get (apply base binary [] [old_id] revision true) in
+  Alcotest.check (Alcotest.list Alcotest.string) "reselecting the bound default calls nothing" [] (probed ());
+  Alcotest.check Alcotest.bool "reselecting the bound default reports it as not checked again" true
+    (receipt.readiness = Batch.Partly_checked { limited = []; not_rechecked = [old_id] }))
 let test_cas () = fixture (fun base runtime binary spec original ->
   fake base binary "(base/'.masc/config/runtime.toml').write_text('operator concurrent update')";
   let specs=[spec "new"] in let ids=List.map (fun s -> (Runtime_setup_spec.render s).runtime_id) specs in
@@ -212,6 +251,9 @@ let test_usage_limit_publishes () = fixture (fun base runtime binary spec origin
     "l=%s; print(report(a[3],status='failed',failure=({'code':'quota_exhausted','message':'m','detail':'fixture quota'} if a[3]==l else {'code':'provider_rejected','message':'refused','detail':'HTTP 400 from fixture'}))); sys.exit(1)"
     limited in
   fake ~verify base binary "pass";
+  (* The passes above published both runtimes; restore the original so this
+     case adds them again and both are probed. *)
+  save runtime original;
   let before = text runtime in
   let revision=get (Batch.observe ~base_path:base) in
   Alcotest.check Alcotest.bool "a later non-usage failure still refuses the save" true
@@ -301,5 +343,6 @@ let () = Alcotest.run "runtime setup batch" ["workspace",[
   Alcotest.test_case "native refusal publishes nothing" `Quick test_refusal;
   Alcotest.test_case "verification report is read back typed" `Quick test_verification_report;
   Alcotest.test_case "a usage limit publishes the runtime unmeasured" `Quick test_usage_limit_publishes;
+  Alcotest.test_case "verification probes only what the save changes" `Quick test_probes_only_what_changes;
   Alcotest.test_case "before and after rename failures restore pair" `Quick test_rollback;
   Alcotest.test_case "credential lifetime joins commit" `Quick test_credential_commit_join]]

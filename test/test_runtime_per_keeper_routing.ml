@@ -3101,10 +3101,19 @@ let test_max_output_tokens_accessor_projects_catalog () =
       (max_output_tokens "bogus.binding"))
 ;;
 
-(* One more binding of the catalog's reasoning model, declaring an effort, so
-   that rows differ in both the ceiling and the effort. *)
-let runtime_config_effortful =
+(* Three bindings of the fixture catalog's provider that differ in output
+   ceiling and declared effort. The default declares both, so its row is
+   checked against values that are not null. *)
+let runtime_config_resolved_rows =
   {|
+[runtime]
+default = "ollama_cloud.effortful"
+
+[providers.ollama_cloud]
+display-name = "Ollama Cloud"
+protocol = "openai-compatible-http"
+endpoint = "https://ollama.example/v1"
+
 [models.effortful]
 api-name = "qwen36-35b-a3b-mtp"
 max-context = 128000
@@ -3113,7 +3122,28 @@ thinking-support = true
 reasoning-effort = "high"
 streaming = true
 
+[models.bigout]
+api-name = "reasoning-big-out"
+max-context = 1000000
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.think]
+api-name = "think"
+max-context = 128000
+tools-support = true
+thinking-support = true
+streaming = true
+
 [ollama_cloud.effortful]
+is-default = true
+max-concurrent = 1
+
+[ollama_cloud.bigout]
+max-concurrent = 1
+
+[ollama_cloud.think]
 max-concurrent = 1
 |}
 ;;
@@ -3121,12 +3151,19 @@ max-concurrent = 1
 let test_resolved_rows_carry_their_own_binding () =
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   with_temp_dir "runtime-resolved-rows" @@ fun dir ->
+  (* [Workspace.default_config] points the process at [dir], and the config
+     directory resolver keeps what it found there. Both go back after this
+     case, because [dir] is removed. *)
+  Masc_test_deps.with_process_env Env_config_core.base_path_env_key (Some dir)
+  @@ fun () ->
   Fun.protect
-    ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
+    ~finally:(fun () ->
+      Runtime.For_testing.restore runtime_snapshot;
+      Config_dir_resolver.reset ())
     (fun () ->
       with_model_catalog_content runtime_thinking_model_catalog @@ fun () ->
       let path = Filename.concat dir "runtime.toml" in
-      write_file path (runtime_config_thinking ^ runtime_config_effortful);
+      write_file path runtime_config_resolved_rows;
       (match Runtime.init_default ~config_path:path with
        | Ok () -> ()
        | Error msg -> Alcotest.failf "runtime init_default failed: %s" msg);
@@ -3144,10 +3181,8 @@ let test_resolved_rows_carry_their_own_binding () =
         | Some row -> row
         | None -> Alcotest.failf "no resolved row for %s" id
       in
-      let fields id =
-        let row = row id in
-        ( id
-        , Yojson.Safe.to_string (J.member "max_output_tokens" row)
+      let fields row =
+        ( Yojson.Safe.to_string (J.member "max_output_tokens" row)
         , Yojson.Safe.to_string (J.member "declared_reasoning_effort" row) )
       in
       Alcotest.(check (list (triple string string string)))
@@ -3156,8 +3191,15 @@ let test_resolved_rows_carry_their_own_binding () =
         ; "ollama_cloud.bigout", "200000", "null"
         ; "ollama_cloud.think", "null", "null"
         ]
-        (List.map fields
-           [ "ollama_cloud.effortful"; "ollama_cloud.bigout"; "ollama_cloud.think" ]))
+        (List.map
+           (fun id ->
+              let ceiling, effort = fields (row id) in
+              id, ceiling, effort)
+           [ "ollama_cloud.effortful"; "ollama_cloud.bigout"; "ollama_cloud.think" ]);
+      Alcotest.(check (pair string string))
+        "the default runtime's row carries its own binding"
+        ("65536", {|"high"|})
+        (fields (J.member "default_runtime" json)))
 ;;
 
 let test_max_context_accessor_clamps_to_provider_cap () =

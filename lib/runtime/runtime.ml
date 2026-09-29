@@ -2820,8 +2820,9 @@ let max_context_of_runtime_id (id : string) : int option =
   | None -> None
 ;;
 
-(* The model's declared max output tokens (AGENT_CORE capability catalog SSOT), or
-   [None] when the catalog row leaves it unset.
+(* The model's declared max output tokens (AGENT_CORE capability catalog SSOT).
+   [None] for an official-client runtime, for a model with no catalog row, and
+   for a row that leaves it unset.
    Mirrors [max_context_of_runtime] but projects the AGENT_CORE-typed capability
    rather than the runtime.toml [model] record, because max output is owned by
    the provider/model catalog, not the per-binding runtime config. This is an

@@ -981,8 +981,14 @@ assert request["params"]["reasoningEffort"] == "high"
 reply(request, {"commandId": request["params"]["commandId"], "status": "accepted", "turnId": "t-readiness",
     "startedNewTurn": True, "disposition": "started"})
 notify("turn/started", turnId="t-readiness", commandId=request["params"]["commandId"])
+# Each model call is its own view event: the runtime drops a report whose
+# viewCursor it has already seen as a replay, so every call carries a new one.
+usage_reports = 0
 def report_model_usage(model_id):
+    global usage_reports
+    usage_reports += 1
     notify("session/tokenUsage", turnId="t-readiness", modelId=model_id,
+        viewCursor="v:usage-%d" % usage_reports,
         promptTokens=1, usage={"inputTokens": 1, "outputTokens": 1,
             "cachedTokens": 0, "reasoningTokens": 0})
 if mode == "muse-ran-other-model":

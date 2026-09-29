@@ -2683,7 +2683,6 @@ describe('fetchDashboardGate', () => {
       turn_id: null,
       task_id: null,
       goal_id: null,
-      goal_ids: [],
       phase: 'queued',
       summary_status: 'not_requested',
       exact_attempt: { state: 'unbound' },

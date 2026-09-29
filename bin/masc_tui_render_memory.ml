@@ -32,6 +32,7 @@ let librarian_failure_words = function
   | Failure_exact_setup -> "model call could not be set up"
   | Failure_exact_execution -> "model call failed"
   | Failure_domain_output_invalid -> "model answer was not usable"
+  | Failure_absorb_judgment -> "copy check failed; nothing saved"
   | Failure_memory_snapshot_write -> "Memory could not be saved"
   | Failure_runtime_context_unavailable -> "no runtime context"
   | Failure_lane_cancelled -> "cancelled before saving"
@@ -65,22 +66,29 @@ type facts_reading =
    there goes off the right edge.
 
    [screen] and [badge] arrive rendered because colour and the connection
-   reading belong to the caller. *)
-let facts_title ~screen ~keeper ~reading ~timestamp ~badge =
-  match reading with
-  | Facts_unread { reading } ->
-    Printf.sprintf "%s \xe2\x96\xb8 %s  %s  %s  %s" screen keeper reading
-      timestamp badge
-  | Facts_loaded { total; filter_label; query_label } ->
-    Printf.sprintf "%s \xe2\x96\xb8 %s (%s \xc2\xb7 %s%s)  %s  %s" screen
-      keeper (Masc_tui_message_layout.count_noun total "fact") filter_label query_label timestamp badge
+   reading belong to the caller. The clock and the badge are the heading's
+   tail and are never shortened; when the row is narrow the keeper's name
+   folds to its floor, the counts and filters are cut at their end, and only
+   then the name goes further ([detail_heading]). *)
+let facts_title ~cols ~screen ~keeper ~reading ~timestamp ~badge =
+  let after =
+    match reading with
+    | Facts_unread { reading } -> "  " ^ reading
+    | Facts_loaded { total; filter_label; query_label } ->
+      Printf.sprintf " (%s \xc2\xb7 %s%s)"
+        (Masc_tui_message_layout.count_noun total "fact") filter_label
+        query_label
+  in
+  detail_heading ~cols ~lead:(Lead_text (screen ^ " \xe2\x96\xb8 ")) ~id:keeper
+    ~after ~tail:(timestamp ^ "  " ^ badge)
 
 (* The row under the facts title. The title says the total and the filter; this
    says how that total breaks down and which sort produced the order, so each
    fact is written in one place. The split runs in this direction because the
-   title is the line with no room to spare: at 140 columns the Activity pane
-   takes 56 of the 136 inner cells, leaving the title 80 for the screen name,
-   the keeper, the total, both filters, the clock and the badge.
+   title is the line with no room to spare: beside the Activity pane at the
+   width it opens from, the title keeps only the pane's surface floor, less
+   the frame, for the screen name, the keeper, the total, both filters, the
+   clock and the badge.
 
    [grand_total] is not passed in because it is not drawn here. *)
 let facts_stats_row ~ordinary ~source ~dropped ~sort_label =
@@ -772,14 +780,13 @@ let memory_fact_detail_lines ~cols row =
    the list's height is worked out from these same rows ([memory_overview_scrolled])
    rather than from a fixed count of header lines. *)
 let memory_fleet_header_rows ~cols (state : state) : string list =
-  (* What to say where the numbers would go. They are missing for two reasons
-     and the line has to name the one that holds: nothing has arrived yet, or
-     the load failed. The table below already draws the server's own reason in
-     red, so a header that says "waiting" after a failure puts two answers to
-     the same question on one screen -- and this one is on top, so it is the
-     one that gets read. *)
+  (* A failed first read has no counts. The error row below owns the cause;
+     keep these two labelled values unavailable without repeating its verdict.
+     An unread first visit still says what it is waiting for. *)
   let missing_reading waiting =
-    if Option.is_some state.memory_health_error then field_failed else waiting
+    if Option.is_some state.memory_health_error
+    then Masc_tui_theme.Glyph.no_value
+    else waiting
   in
   (* Every reading in this header is a labelled row that asks the frame for its
      width. The row that carried the Ordinary and Librarian readings together
@@ -1109,7 +1116,7 @@ let memory_facts_layout ~cols ~budget ~cursor (state : state) rows =
     Option.fold ~none:0 ~some:fact_detail_line_count detail
   in
   let store_error_rows =
-    match state.memory_facts with
+    match memory_facts_snapshot state with
     | None -> 0
     | Some snapshot ->
         (match snapshot.mfs_ordinary with
@@ -1127,10 +1134,10 @@ let memory_facts_layout ~cols ~budget ~cursor (state : state) rows =
      [memory_search_query], the same value the renderer draws it from. *)
   let chrome_rows =
     4
-    + (if Option.is_some state.memory_facts then 1 else 0)
+    + (if Option.is_some (memory_facts_snapshot state) then 1 else 0)
     + (if String.trim (memory_search_query state) <> "" then 1 else 0)
     + store_error_rows
-    + (if Option.is_some state.memory_facts_error then 2 else 0)
+    + (if Option.is_some (memory_facts_failure state) then 2 else 0)
   in
   (* The detail is as tall as the fact under the cursor, and a fact can be
      any length. On the live store at thirty rows one fact filled fifteen of
@@ -1209,10 +1216,15 @@ let render_memory_facts_body ~cols ~budget (state : state)
         | Memory_row_invalidation _ -> (ordinary, source, dropped + 1))
       (0, 0, 0) rows
   in
+  (* The row says what the listing below it says: a failed read drew
+     "(loading facts…)" here over a body reading "(load failed; …)", because
+     this row looked only at whether facts were held. *)
   let stats_line, pills_line =
-    match state.memory_facts with
-    | None -> ("  (loading facts\xe2\x80\xa6)", "")
-    | Some snapshot ->
+    match memory_facts_view state with
+    | Masc_tui_fetched.Loading -> ("  (loading facts\xe2\x80\xa6)", "")
+    | Masc_tui_fetched.Absent -> ("  " ^ title_unread, "")
+    | Masc_tui_fetched.Failed _ -> ("  " ^ title_failed, "")
+    | Masc_tui_fetched.Ready (snapshot, _) | Masc_tui_fetched.Stale ((snapshot, _), _) ->
         let store_ordinary, store_ordinary_facts =
           match snapshot.mfs_ordinary with
           | Memory_store_present store ->
@@ -1252,11 +1264,14 @@ let render_memory_facts_body ~cols ~budget (state : state)
           Ansi.dim ^ keys ^ Ansi.reset
           ^ tab_strip
               ~width:(tab_strip_width ~cols ~before:keys ~after:"")
+              ~press:(fun filt text ->
+                Masc_tui_press.(pressable (Press_memory_category filt) text))
               (List.map
                  (fun filt ->
                    ( Printf.sprintf "%s %d" (memory_category_filter_label filt)
                        (count_of filt)
-                   , state.memory_facts_category = filt ))
+                   , state.memory_facts_category = filt
+                   , filt ))
                  (Category_all :: all_categories))
         in
         (stats, pills)
@@ -1279,13 +1294,13 @@ let render_memory_facts_body ~cols ~budget (state : state)
   in
   if search_banner <> "" then push search_banner;
   push_divider ();
-  (match state.memory_facts_error with
+  (match memory_facts_failure state with
    | None -> ()
    | Some detail ->
        push_styled ~style:(Theme.bad ())
          ("  " ^ Terminal_text.single_line detail);
        push_divider ());
-  (match state.memory_facts with
+  (match memory_facts_snapshot state with
    | None -> ()
    | Some snapshot ->
        (match snapshot.mfs_ordinary with
@@ -1317,7 +1332,7 @@ let render_memory_facts_body ~cols ~budget (state : state)
   if total = 0 then
     (let empty =
        match
-         empty_page_of ~snapshot:state.memory_facts ~error:state.memory_facts_error,
+         empty_page_of ~snapshot:(memory_facts_snapshot state) ~error:(memory_facts_failure state),
          state.memory_facts_category
        with
        | Page_failed, _ -> page_failed_note

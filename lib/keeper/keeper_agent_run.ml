@@ -339,7 +339,7 @@ let repeated_tool_call_input ~threshold tool_calls =
    scope contributes only its latched observation failure; it is not what
    makes the boundary exist (#34083). *)
 let official_client_tool_boundary
-      ~repetition_execution ?yield_requested ~tool_calls () =
+      ~repetition_execution ~tool_calls () =
   match Option.bind repetition_execution Keeper_repetition_scope.Execution.failure with
   | Some error ->
     Error (Agent_core.Error.Internal (Keeper_repetition_snapshot.error_to_string error))
@@ -356,17 +356,12 @@ let official_client_tool_boundary
       Ok (Option.map (fun (tool_name, repeated_count) ->
         Keeper_official_client_host.Repeated_tool_call { tool_name; repeated_count }) repeated)
     in
-    (match yield_requested with
-     | None -> repetition_stop ()
-     | Some requested ->
-       (match requested () with
-        | Ok (Some { reason = Operation_queued }) ->
-          Ok (Some Keeper_official_client_host.Queued_chat_operation)
-        | Ok (Some { reason = Durable_stimulus_waiting _ }) | Ok None ->
-          repetition_stop ()
-        | Error detail ->
-          Error (Agent_core.Error.Internal
-            ("keeper cooperative-yield snapshot failed: " ^ detail))))
+    (* Official clients own their conversation history. A returned tool
+       result is not yet a durable resume checkpoint, so queued chat alone
+       cannot stop this turn here. Existing repetition stops still apply;
+       their cold-resume result retention needs separate proof. No queue
+       snapshot is needed here. *)
+    repetition_stop ()
 ;;
 
 let assistant_text_is_blank text =
@@ -951,7 +946,10 @@ let run_turn
       | Keeper_run_context.Constitution_unreadable
           (World_constitution_store.Unreadable { path; detail }) ->
         Agent_core.Error.Io
-          (FileOpFailed { op = "load constitution ledger"; path; detail }))
+          (FileOpFailed { op = "load constitution ledger"; path; detail })
+      | Keeper_run_context.Prompt_unrenderable detail ->
+        Agent_core.Error.Config
+          (Agent_core.Error.InvalidConfig { field = "keeper.prompt"; detail }))
   with
   | Error e ->
     Keeper_agent_result.not_dispatched e
@@ -1322,6 +1320,12 @@ let run_turn
        one. *)
     let built_tools = s.Keeper_run_tools.tools in
     let agent_core_tools = s.Keeper_run_tools.agent_core_tools in
+    let loading_plan =
+      Keeper_official_client_host.Declared
+        { on_demand = s.Keeper_run_tools.on_demand_tool_names
+        ; result_bounds = s.Keeper_run_tools.result_bounds
+        }
+    in
     let hooks = s.Keeper_run_tools.hooks in
     let acc = s.Keeper_run_tools.acc in
     (* The same cell the turn's tools captured when they were built: an
@@ -1516,7 +1520,6 @@ let run_turn
          let on_official_client_tool_boundary () =
            match
              official_client_tool_boundary ~repetition_execution
-               ?yield_requested
                ~tool_calls:(Keeper_run_tools_hook_accumulator.tool_calls_for_repetition s.acc)
                ()
            with
@@ -1649,6 +1652,7 @@ let run_turn
                       ?raw_trace
                       ~system_prompt:turn_system_prompt
                       ~tools:built_tools
+                      ~loading_plan
                       ~agent_core_tools
                       ~checkpoint_sink
                       ~initial_messages

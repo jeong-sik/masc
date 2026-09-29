@@ -174,10 +174,10 @@ let test_a_held_log_completed_in_place_is_seen () =
   in
   (* The cut: the stream delivered a start and some text, then went away;
      the settle committed what it had. *)
-  Tui_types.turn_log_add_journaled log
+  let _ = Tui_types.turn_log_add_journaled log
     [ line 0 3.0 (E.Run_started { run_id = "r"; thread_id = "keeper:alpha" })
     ; line 1 3.1 (E.Text_delta "row at 3")
-    ];
+    ] in
   Masc_tui_keeper_chat_log.commit log.Tui_types.tl_log;
   Tui_types.hold_settled_log state log;
   let partial = Tui_types.chat_rows_for state "alpha" in
@@ -187,7 +187,7 @@ let test_a_held_log_completed_in_place_is_seen () =
     [ "row at 1"; "row at 2"; "row at 3" ] (texts partial);
   (* The journal read: the rest of the turn joins the same log, which is
      committed and held again, as the reload handler does. *)
-  Tui_types.turn_log_add_journaled log
+  let _ = Tui_types.turn_log_add_journaled log
     [ line 2 3.2
         (E.Reply_details
            { reply = "row at 3"
@@ -195,7 +195,7 @@ let test_a_held_log_completed_in_place_is_seen () =
            ; turn_ref = Ids.Turn_ref.make ~trace_id:"trace-1" ~absolute_turn:1
            })
     ; line 3 3.3 (E.Run_finished { run_id = "r" })
-    ];
+    ] in
   Masc_tui_keeper_chat_log.commit log.Tui_types.tl_log;
   Tui_types.hold_settled_log state log;
   Alcotest.(check bool) "the log now stands for the turn" true

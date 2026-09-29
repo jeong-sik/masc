@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import threading
 import unittest
@@ -34,6 +35,201 @@ BINARY = None
 
 @unittest.skipUnless(BINARY, 'pass --binary for native setup checks')
 class Setup(unittest.TestCase):
+    def test_muse_empty_account_reports_signin_before_spawning(self):
+        assert BINARY is not None
+        with tempfile.TemporaryDirectory(prefix='masc-muse-signin-') as tmp:
+            home = Path(tmp) / 'selected'
+            home.mkdir(mode=0o700)
+            client = Path(tmp) / 'muse'
+            client.write_text('#!/bin/sh\nexit 97\n')
+            client.chmod(0o700)
+            result = subprocess.run([BINARY, 'runtime-muse-models', '--account-home', str(home),
+                                     '--cli-path', str(client)], capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 3, result.stderr)
+            self.assertFalse((home / '.config/muse/auth.json').exists())
+
+    def test_muse_vendor_install_discovery_and_config_exit(self):
+        assert BINARY is not None
+        for config_exit in (False, True):
+            with self.subTest(config_exit=config_exit), tempfile.TemporaryDirectory(prefix='masc-muse-vendor-') as tmp:
+                home = Path(tmp)
+                auth = home / '.config/muse/auth.json'
+                auth.parent.mkdir(parents=True, mode=0o700)
+                auth.write_text(json.dumps({'schema_version': 1, 'providers': {
+                    'meta': {'api_key': 'SYNTHETIC-LOCAL-ONLY'}}}))
+                auth.chmod(0o600)
+                client = home / '.local/bin/muse'
+                client.parent.mkdir(parents=True, mode=0o700)
+                client.write_text('#!' + sys.executable + '\n' + ("""
+import sys
+sys.stdin.readline()
+sys.stderr.write('fixture invalid configuration\\n')
+sys.exit(3)
+""" if config_exit else """
+import json, sys
+def read():
+    return json.loads(sys.stdin.readline())
+def reply(request, result):
+    print(json.dumps({'jsonrpc': '2.0', 'id': request['id'], 'result': result}), flush=True)
+request = read()
+assert request['method'] == 'initialize'
+reply(request, {'serverInfo': {'name': 'fixture', 'version': '1.4.0'},
+    'userAgent': 'fixture', 'museHome': 'fixture', 'sessionDurability': 'ephemeral',
+    'schema': {'version': 1, 'fingerprint': 'fixture'}, 'grantedCapabilities': []})
+assert read()['method'] == 'initialized'
+request = read()
+assert request['method'] == 'model/list'
+reply(request, {'source': 'fakeCatalog', 'providerId': 'meta', 'profileId': None, 'models': []})
+for line in sys.stdin:
+    pass
+"""))
+                client.chmod(0o700)
+                env = {'PATH': '/usr/bin:/bin', 'HOME': str(home)}
+                result = subprocess.run([BINARY, 'runtime-muse-models', '--account-home', str(home),
+                                         '--cli-path', 'muse'], env=env,
+                                        capture_output=True, text=True, timeout=30)
+                self.assertEqual(result.returncode, 1 if config_exit else 0, result.stderr)
+                if config_exit:
+                    self.assertIn('exit 3 (config or credential)', result.stderr)
+                else:
+                    self.assertEqual(json.loads(result.stdout)['source'], 'fakeCatalog')
+                    self.assertFalse(json.loads(result.stdout)['invocation_verified'])
+
+    def test_account_login_runs_the_client_with_the_login_environment(self):
+        # The installer's sign-in for a declared account home: the child gets
+        # the environment /login gives that client, and its exit code is the
+        # command's.
+        assert BINARY is not None
+        # The child's environment keeps none of the test's own variables, so the
+        # fake client finds the test root beside itself and reads its exit code
+        # there.
+        client_source = '#!' + sys.executable + '\n' + """
+import json, os, sys
+root = os.path.dirname(os.path.realpath(sys.argv[0]))
+with open(os.path.join(root, 'login-receipt.json'), 'w') as out:
+    json.dump({'argv': sys.argv[1:], 'env': dict(os.environ)}, out)
+exit_code = os.path.join(root, 'exit-code')
+sys.exit(int(open(exit_code).read()) if os.path.exists(exit_code) else 0)
+"""
+
+        with tempfile.TemporaryDirectory(prefix='masc-account-login-') as tmp:
+            root = Path(tmp).resolve()
+            home = root / 'selected'
+            home.mkdir(mode=0o700)
+            client = root / 'muse'
+            client.write_text(client_source)
+            client.chmod(0o700)
+            (root / 'exit-code').write_text('5')
+            env = {'PATH': '/usr/bin:/bin', 'HOME': str(root), 'META_API_KEY': 'ambient-billing',
+                   'TBH_CREDENTIAL_BACKEND': 'keychain', 'TBH_DISABLE_TELEMETRY': '0'}
+            command = [BINARY, 'runtime-account-login', '--client', 'muse', '--account-home', str(home),
+                       '--cli-path', str(client)]
+            result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 5, result.stderr)
+            receipt = json.loads((root / 'login-receipt.json').read_text())
+            self.assertEqual(receipt['argv'], ['login'])
+            child = receipt['env']
+            self.assertEqual(child['HOME'], str(home))
+            self.assertEqual(child['XDG_CONFIG_HOME'], str(home / '.config'))
+            self.assertEqual(child['TBH_CREDENTIAL_BACKEND'], 'file')
+            self.assertNotIn('META_API_KEY', child)
+            self.assertEqual(sorted(key for key in child if key.startswith('TBH_')), ['TBH_CREDENTIAL_BACKEND'])
+            (root / 'exit-code').write_text('0')
+            result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stderr)
+        with tempfile.TemporaryDirectory(prefix='masc-account-login-claude-') as tmp:
+            root = Path(tmp).resolve()
+            home = root / 'selected'
+            home.mkdir(mode=0o700)
+            client = root / 'claude'
+            client.write_text(client_source)
+            client.chmod(0o700)
+            env = {'PATH': '/usr/bin:/bin', 'HOME': str(root), 'ANTHROPIC_API_KEY': 'ambient-billing'}
+            result = subprocess.run([BINARY, 'runtime-account-login', '--client', 'claude', '--account-home',
+                                     str(home), '--cli-path', str(client)],
+                                    env=env, capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            receipt = json.loads((root / 'login-receipt.json').read_text())
+            self.assertEqual(receipt['argv'], ['auth', 'login'])
+            self.assertEqual(receipt['env']['CLAUDE_CONFIG_DIR'], str(home))
+            self.assertNotIn('ANTHROPIC_API_KEY', receipt['env'])
+        with tempfile.TemporaryDirectory(prefix='masc-account-login-relative-') as tmp:
+            result = subprocess.run([BINARY, 'runtime-account-login', '--client', 'muse',
+                                     '--account-home', 'relative/home',
+                                     '--cli-path', str(Path(tmp) / 'must-not-spawn')],
+                                    capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 1)
+            self.assertEqual(list(Path(tmp).iterdir()), [])
+
+    def test_muse_metadata_deadline_cli_boundary(self):
+        assert BINARY is not None
+        help_result = subprocess.run(
+            [BINARY, 'runtime-muse-models', '--help=plain'],
+            capture_output=True, text=True, timeout=30)
+        self.assertEqual(help_result.returncode, 0, help_result.stderr)
+        self.assertIn('--timeout-s', help_result.stdout)
+        with tempfile.TemporaryDirectory(prefix='masc-muse-deadline-cli-') as tmp:
+            for timeout in ('0', '-1', 'nan', 'inf'):
+                with self.subTest(timeout=timeout):
+                    result = subprocess.run(
+                        [BINARY, 'runtime-muse-models', '--account-home', tmp,
+                         '--cli-path', str(Path(tmp) / 'must-not-spawn'),
+                         '--timeout-s=' + timeout],
+                        capture_output=True, text=True, timeout=30)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn('finite and positive', result.stderr)
+                    self.assertEqual(list(Path(tmp).iterdir()), [])
+
+    def test_runtime_probe_uses_declared_account_instead_of_ambient_login(self):
+        assert BINARY is not None
+        for protocol, home_key in [('claude-code', 'CLAUDE_CONFIG_DIR'),
+                                   ('codex-app-server', 'CODEX_HOME')]:
+            with self.subTest(protocol=protocol), tempfile.TemporaryDirectory() as tmp:
+                base = Path(tmp)
+                config = base / '.masc/config'
+                config.mkdir(parents=True)
+                selected = base / 'selected-account'
+                selected.mkdir()
+                ambient = base / 'ambient-account'
+                ambient.mkdir()
+                receipt = base / 'observed-home'
+                client = base / 'client'
+                client.write_text(
+                    f'#!{sys.executable}\n'
+                    'import json, os, sys\n'
+                    f'open({str(receipt)!r}, "w").write(os.environ.get({home_key!r}, ""))\n'
+                    'if "auth" in sys.argv:\n'
+                    ' print(json.dumps(dict(loggedIn=True, authMethod="claude.ai", '
+                    'apiProvider="firstParty")))\n'
+                    'else:\n'
+                    ' for line in sys.stdin:\n'
+                    '  request = json.loads(line)\n'
+                    '  if "id" not in request: continue\n'
+                    '  result = ({"userAgent":"fixture"} if request["method"] == "initialize" '
+                    'else {"account":{"type":"chatgpt","planType":"plus"}})\n'
+                    '  print(json.dumps({"id":request["id"], "result":result}), flush=True)\n')
+                client.chmod(0o755)
+                (config / 'runtime.toml').write_text(
+                    '[runtime]\ndefault = "probe_fixture.probe_fixture"\n'
+                    '[providers.probe_fixture]\n'
+                    'display-name = "Probe fixture"\n'
+                    f'protocol = {json.dumps(protocol)}\n'
+                    f'command = {json.dumps(str(client))}\n'
+                    f'account-home = {json.dumps(str(selected))}\n'
+                    'is-non-interactive = true\n'
+                    '[models.probe_fixture]\napi-name = "fixture-model"\n'
+                    'max-context = 32768\ntools-support = true\nstreaming = true\n'
+                    '[probe_fixture.probe_fixture]\n')
+                env = {'PATH': os.environ['PATH'], 'HOME': str(ambient),
+                       'XDG_CONFIG_HOME': str(base / 'xdg'), home_key: str(ambient)}
+                result = subprocess.run(
+                    [BINARY, 'runtime-probe', '--base-path', str(base),
+                     'probe_fixture.probe_fixture'], env=env,
+                    capture_output=True, text=True, timeout=30)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn('configured authentication=', result.stdout)
+                self.assertEqual(receipt.read_text(), str(selected))
+
     def test_recorded_workspace_survives_a_different_working_directory(self):
         assert BINARY is not None
         for spelling in ('.', 'workspace', 'workspace-link'):

@@ -25,12 +25,18 @@ type ('k, 'a) status =
   | Status_absent
   | Status_loading of 'k request
   | Status_ready of 'k request * 'a
-  | Status_refreshing of 'k request * 'a
+  | Status_refreshing of 'k request * 'a * string option
       (** A revalidation of what is already on screen: the request is in
           flight and ['a] is the last good value, which keeps rendering until
           the completion lands. Without this state every periodic refresh
           flips Ready back to Loading and the pane collapses to its
-          placeholder for a frame. *)
+          placeholder for a frame. The string is the failure of the
+          revalidation before this one, when that one failed: a retry does
+          not make the value fresh, so it keeps reading as stale. *)
+  | Status_stale of 'k request * 'a * string
+      (** A revalidation failed. ['a] is the last good value and stays on
+          screen with the reason beside it, rather than a failed refresh
+          reading as a pane with nothing in it. *)
   | Status_failed of 'k request * string
 
 type ('k, 'a) t =
@@ -42,7 +48,14 @@ type 'a view =
   | Absent  (** Never asked. *)
   | Loading  (** Asked, no answer yet, nothing to show meanwhile. *)
   | Ready of 'a
-  | Failed of string
+  | Stale of 'a * string
+      (** The last good value, and why the refresh after it failed. *)
+  | Failed of string  (** Failed with nothing read before it. *)
+
+let value = function
+  | Ready value | Stale (value, _) -> Some value
+  | Absent | Loading | Failed _ -> None
+;;
 
 type ('k, 'a) start_result =
   | Already_loading
@@ -58,8 +71,8 @@ let same_request ~equal left right =
 let is_current ~equal state request =
   match state.status with
   | Status_loading current -> same_request ~equal current request
-  | Status_refreshing (current, _) -> same_request ~equal current request
-  | Status_absent | Status_ready _ | Status_failed _ -> false
+  | Status_refreshing (current, _, _) -> same_request ~equal current request
+  | Status_absent | Status_ready _ | Status_stale _ | Status_failed _ -> false
 ;;
 
 let start ~equal state ~key =
@@ -70,15 +83,18 @@ let start ~equal state ~key =
   in
   match state.status with
   | Status_loading request when equal request.key key -> Already_loading
-  | Status_refreshing (request, _) when equal request.key key -> Already_loading
+  | Status_refreshing (request, _, _) when equal request.key key -> Already_loading
   | Status_ready (current, value) when equal current.key key ->
     (* Revalidating what is already shown: keep the last good value on screen
        under a fresh generation. *)
-    fresh (fun request -> Status_refreshing (request, value))
+    fresh (fun request -> Status_refreshing (request, value, None))
+  | Status_stale (current, value, error) when equal current.key key ->
+    fresh (fun request -> Status_refreshing (request, value, Some error))
   | Status_absent
   | Status_loading _
   | Status_ready _
   | Status_refreshing _
+  | Status_stale _
   | Status_failed _ -> fresh (fun request -> Status_loading request)
 ;;
 
@@ -92,9 +108,11 @@ let complete ~equal state request result =
     state
   else (
     let status =
-      match result with
-      | Ok value -> Status_ready (request, value)
-      | Error error -> Status_failed (request, error)
+      match result, state.status with
+      | Ok value, _ -> Status_ready (request, value)
+      | Error error, Status_refreshing (_, value, _) -> Status_stale (request, value, error)
+      | Error error, (Status_absent | Status_loading _ | Status_ready _ | Status_stale _ | Status_failed _)
+        -> Status_failed (request, error)
     in
     { state with status })
 ;;
@@ -109,7 +127,9 @@ let current state =
   | Status_absent -> None
   | Status_loading request -> about request Loading
   | Status_ready (request, value) -> about request (Ready value)
-  | Status_refreshing (request, value) -> about request (Ready value)
+  | Status_refreshing (request, value, None) -> about request (Ready value)
+  | Status_refreshing (request, value, Some error) | Status_stale (request, value, error) ->
+    about request (Stale (value, error))
   | Status_failed (request, error) -> about request (Failed error)
 ;;
 
@@ -120,14 +140,17 @@ let view_for ~equal state ~key =
   match state.status with
   | Status_loading request when matches request -> Loading
   | Status_ready (request, value) when matches request -> Ready value
-  | Status_refreshing (request, value) when matches request ->
+  | Status_refreshing (request, value, None) when matches request ->
     (* The revalidation is in flight; the reader keeps the last good value
        until the completion swaps it. *)
     Ready value
+  | Status_refreshing (request, value, Some error) when matches request -> Stale (value, error)
+  | Status_stale (request, value, error) when matches request -> Stale (value, error)
   | Status_failed (request, error) when matches request -> Failed error
   | Status_absent
   | Status_loading _
   | Status_ready _
   | Status_refreshing _
+  | Status_stale _
   | Status_failed _ -> Absent
 ;;

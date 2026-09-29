@@ -1,5 +1,12 @@
 (** Words for the Keepers fleet header. *)
 
+val status_text : Masc.Tui_decode.fleet_status -> string
+(** The grade's wire name. A word this build does not know is drawn as the
+    server spelled it, on one line. *)
+
+val status_is_ok : Masc.Tui_decode.fleet_status -> bool
+(** Whether the fleet header draws in the healthy colour: only [ok] does. *)
+
 val blocker_text : Masc.Tui_decode.fleet_safety -> string option
 (** The first reason the fleet scan names, in the words the counts line below
     uses for the same Keepers. The line below carries the numbers, so this
@@ -15,13 +22,20 @@ val not_measured_text : status:string -> string
     health snapshot is rebuilt, so an unmeasured fleet is not drawn as an idle
     one. *)
 
+val stale_reason_text : string -> string
+(** The server's word for why a health snapshot went stale, in words. The
+    three the /health contract defines ([last_good_refresh_timeout],
+    [last_good_refresh_error], [ttl_expired]) are said in words; a word this
+    build does not know is drawn as the server spelled it, on one line. *)
+
 val freshness_text :
   now:float -> Masc.Tui_decode.fleet_reading_freshness -> string option
 (** [None] for a reading the latest refresh measured. For the last good
     reading a stale snapshot still serves, [stale · measured <age> ago
-    (<reason>)], the age counted from [now] and the reason as the server
-    spelled it; without the age when [now] is behind the server's clock. For
-    a snapshot status this build does not know, [health snapshot <word>]. *)
+    (<reason>)], the age counted from [now] and the reason in words
+    ([stale_reason_text]); without the age when [now] is behind the server's
+    clock. For a snapshot status this build does not know, [health snapshot
+    <word>]. *)
 
 val owner_scan_text : Masc.Tui_decode.fleet_safety -> string option
 (** [task owner without fiber N], and how many sources the scan could not read

@@ -31,12 +31,13 @@ type run_context =
   ; runtime_config_path : string option
   }
 
-(* Why a turn could not be prepared. Both are reads that failed before
-   anything was dispatched; the caller turns either into the same
-   not-dispatched settlement. *)
+(* Why a turn could not be prepared. All three failed before anything was
+   dispatched; the caller turns each into the same not-dispatched
+   settlement. *)
 type prepare_error =
   | Checkpoint_unread of Keeper_checkpoint_store.checkpoint_load_error
   | Constitution_unreadable of World_constitution_store.read_error
+  | Prompt_unrenderable of string
 
 let build_base_system_prompt
       ~(config : Workspace.config)
@@ -117,8 +118,12 @@ let prepare_run_context
   in
   let runtime_config_path = Runtime.config_path () in
   let* base_system_prompt =
-    build_base_system_prompt ~config ~profile_defaults ~meta
-    |> Result.map_error (fun error -> Constitution_unreadable error)
+    (* Prompt rendering raises [Invalid_argument] when a slot is missing or
+       fails to render; that is a typed refusal here, not a crashed cycle. *)
+    (try
+       build_base_system_prompt ~config ~profile_defaults ~meta
+       |> Result.map_error (fun error -> Constitution_unreadable error)
+     with Invalid_argument detail -> Error (Prompt_unrenderable detail))
   in
   (* 4. Create or restore working context, re-apply current prompt *)
   let base_ctx =

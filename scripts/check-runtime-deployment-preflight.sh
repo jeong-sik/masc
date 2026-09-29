@@ -4,6 +4,7 @@
 # Usage:
 #   scripts/check-runtime-deployment-preflight.sh --base-path /path/to/workspace
 #   scripts/check-runtime-deployment-preflight.sh --base-path /path/to/new-workspace --allow-empty-workspace
+#   scripts/check-runtime-deployment-preflight.sh --base-path /path/to/workspace --runtime-config-only
 #   scripts/check-runtime-deployment-preflight.sh --self-test
 
 set -euo pipefail
@@ -12,6 +13,7 @@ BASE_PATH="${MASC_BASE_PATH:-$(pwd)}"
 ALLOW_EMPTY_WORKSPACE=0
 RUNTIME_ABSENT_BEFORE_LEASE=0
 SELF_TEST=0
+RUNTIME_CONFIG_ONLY=0
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PREFLIGHT_HELPER="${MASC_DEPLOYMENT_PREFLIGHT_HELPER:-}"
@@ -20,6 +22,11 @@ PREFLIGHT_HELPER_COMMIT=""
 # The gate's own keeper-meta verdict prefix. The self-test asserts this exact
 # literal, so the gate and its test cannot drift apart.
 KEEPER_META_REJECTED='current keeper meta is invalid'
+# Same contract for the runtime.toml verdict, and for what the operator can do
+# next from each place the check runs.
+RUNTIME_CONFIG_REJECTED='runtime.toml is not one this build accepts'
+RUNTIME_CONFIG_NEXT_BEFORE_STOP='nothing was stopped or installed: change the value (through the runtime config editor while a server runs on this workspace, in the file otherwise), then deploy again'
+RUNTIME_CONFIG_NEXT_UNDER_LEASE='no server runs on this workspace while this gate holds its writer lease (scripts/deploy.sh stopped the previous prod and does not restart it), and nothing was installed: change the value in the file, then deploy again'
 # Keep aligned with Keeper_board_attention_candidate.schema_version.
 BOARD_ATTENTION_SCHEMA_VERSION=7
 
@@ -62,6 +69,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --allow-empty-workspace)
       ALLOW_EMPTY_WORKSPACE=1
+      shift
+      ;;
+    --runtime-config-only)
+      RUNTIME_CONFIG_ONLY=1
       shift
       ;;
     --runtime-absent-before-lease)
@@ -116,6 +127,21 @@ done < <("$PREFLIGHT_HELPER" durable-filenames)
 [[ -n "$QUEUE_SNAPSHOT_FILENAME" && -n "$QUEUE_WAL_FILENAME" ]] \
   || fail "preflight helper did not report both durable event-queue filenames"
 
+# A build that narrows a runtime.toml key refuses the live file on boot, and
+# the part that key belongs to goes empty: #39040 left every Keeper without
+# Skills (#39311). The helper judges the file this workspace's server reads
+# the way a raw save and boot do; its verdict above the FAIL line names the
+# key and the file. [$1] is what the operator can do next from where it ran.
+check_runtime_config() {
+  local next_step="$1"
+  local args=(validate-runtime-config --base-path "$BASE_PATH")
+  if [[ "$ALLOW_EMPTY_WORKSPACE" -eq 1 ]]; then
+    args+=(--allow-empty-workspace)
+  fi
+  "$PREFLIGHT_HELPER" "${args[@]}" \
+    || fail "$RUNTIME_CONFIG_REJECTED (the helper verdict above names the key and the file); $next_step"
+}
+
 run_gate() {
   local runtime_root="$BASE_PATH/.masc"
   local keepers_root="$runtime_root/keepers"
@@ -127,10 +153,7 @@ run_gate() {
   local signal_row_count=0
   local signal_path
   local rows_in_file
-  local current_owner_count=0
   local keeper_meta_count=0
-  local queue_path
-  local keeper_name
   local in_progress_count_total=0
 
   [[ -d "$BASE_PATH" && ! -L "$BASE_PATH" ]] \
@@ -172,34 +195,6 @@ run_gate() {
         || fail "$KEEPER_META_REJECTED (the helper verdict above names the class and the fix): $meta_path"
       keeper_meta_count=$((keeper_meta_count + 1))
     done < <(find "$keepers_root" -mindepth 1 -maxdepth 1 -name '*.json' -print0)
-
-    while IFS= read -r -d '' queue_path; do
-      [[ -f "$queue_path" && ! -L "$queue_path" ]] \
-        || fail "current queue snapshot is not an exact regular file: $queue_path"
-      keeper_name="${queue_path%/*}"
-      keeper_name="${keeper_name##*/}"
-      "$PREFLIGHT_HELPER" validate-current-queue \
-        --base-path "$BASE_PATH" \
-        --keeper-name "$keeper_name" \
-        || fail "current queue snapshot or transition WAL is invalid: $queue_path"
-      current_owner_count=$((current_owner_count + 1))
-    done < <(find "$keepers_root" -mindepth 2 -maxdepth 2 -name "$QUEUE_SNAPSHOT_FILENAME" -print0)
-
-    while IFS= read -r -d '' queue_path; do
-      [[ -f "$queue_path" && ! -L "$queue_path" ]] \
-        || fail "current transition WAL is not an exact regular file: $queue_path"
-      if [[ -e "$(dirname "$queue_path")/${QUEUE_SNAPSHOT_FILENAME}" \
-            || -L "$(dirname "$queue_path")/${QUEUE_SNAPSHOT_FILENAME}" ]]; then
-        continue
-      fi
-      keeper_name="${queue_path%/*}"
-      keeper_name="${keeper_name##*/}"
-      "$PREFLIGHT_HELPER" validate-current-wal \
-        --base-path "$BASE_PATH" \
-        --keeper-name "$keeper_name" \
-        || fail "current transition WAL is invalid: $queue_path"
-      current_owner_count=$((current_owner_count + 1))
-    done < <(find "$keepers_root" -mindepth 2 -maxdepth 2 -name "$QUEUE_WAL_FILENAME" -print0)
   fi
 
   for schedules_path in \
@@ -238,6 +233,8 @@ run_gate() {
   if ! "$PREFLIGHT_HELPER" validate-stores --base-path "$BASE_PATH"; then
     fail "durable store validation rejected current runtime state"
   fi
+
+  check_runtime_config "$RUNTIME_CONFIG_NEXT_UNDER_LEASE"
 
   # The runtime reader rejects a whole ledger on an unsupported schema or torn
   # row. Check the current version before restart without changing runtime data.
@@ -280,9 +277,22 @@ run_gate() {
     done < <(find "$candidates_root" -name '*.jsonl' -print0)
   fi
 
-  printf '[runtime-deployment-preflight] OK: base_path=%s schedule_ledgers=%d signal_files=%d signal_rows=%d current_owners=%d keeper_meta=%d in_progress=%d%s\n' \
+  # For this one-version bridge, complete/cancel are read and written without
+  # the legacy field. The production decoder retains duplicate JSON members,
+  # so unsupported/duplicate intents cannot be hidden by jq's last value.
+  # Inspect both primary and recovery before replacing the executable.
+  local backlog_path
+  for backlog_path in "$runtime_root/tasks/backlog.json" "$runtime_root/tasks/backlog.json.last-good"; do
+    [[ -e "$backlog_path" || -L "$backlog_path" ]] || continue
+    [[ -f "$backlog_path" && ! -L "$backlog_path" ]] \
+      || fail "task backlog is not an exact regular file: $backlog_path"
+    "$PREFLIGHT_HELPER" validate-task-backlog "$backlog_path" \
+      || fail "task backlog contract is invalid: $backlog_path"
+  done
+
+  printf '[runtime-deployment-preflight] OK: base_path=%s schedule_ledgers=%d signal_files=%d signal_rows=%d keeper_meta=%d in_progress=%d%s\n' \
     "$BASE_PATH" "$schedule_ledger_count" "$signal_file_count" \
-    "$signal_row_count" "$current_owner_count" "$keeper_meta_count" \
+    "$signal_row_count" "$keeper_meta_count" \
     "$in_progress_count_total" "$(helper_identity)"
 }
 
@@ -293,6 +303,13 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
     || fail "Board attention preflight schema differs from the OCaml writer: gate=$BOARD_ATTENTION_SCHEMA_VERSION source=$candidate_source_version"
   fixture_root="$(mktemp -d "${TMPDIR:-/tmp}/runtime-deployment-preflight.XXXXXX")"
   trap 'if [[ -n "${handoff_pid:-}" ]]; then kill "$handoff_pid" 2>/dev/null || true; fi; if [[ -n "${cancel_handoff_pid:-}" ]]; then kill "$cancel_handoff_pid" 2>/dev/null || true; fi; rm -rf "$fixture_root"' EXIT
+
+  # Every fixture resolves its own <base>/.masc/config, the config root boot
+  # reads for it, and judges its runtime.toml against the embedded model
+  # catalog. A fixture without one passes that check, because boot writes the
+  # seed there, so the other cases fail for the state they plant. The
+  # runtime.toml cases set these variables where they need them.
+  unset MASC_CONFIG_DIR MASC_CONFIG_BOOTSTRAP AGENT_CORE_MODEL_CATALOG
 
   write_schedules() {
     local target_root="$1"
@@ -415,6 +432,9 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
     if output="$("$0" --base-path "$target_root" 2>&1)"; then
       fail "self-test expected failure: $case_name"
     fi
+    # Cmdliner wraps error prose at formatter breaks. Compare its words while
+    # retaining the nonzero exit and each required cause/path assertion.
+    output="$(printf '%s' "$output" | tr '\r\n\t' '   ' | tr -s ' ')"
     for expected_text in "$@"; do
       [[ "$output" == *"$expected_text"* ]] \
         || fail "self-test failure omitted expected detail for $case_name: $expected_text"
@@ -504,6 +524,66 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
     "$unattributed_requeue_root" "has 2 requeue_requested/requeued row(s) without requested_by" \
     "fixture.jsonl"
 
+  # Any intent on an awaiting row is refused: this version reads a submission
+  # as completion only, so a row carrying another intent must not be
+  # reinterpreted on a direct server start. Both primary and recovery refuse.
+  write_task_backlog() {
+    jq -n --argjson tasks "$2" '
+      {tasks: ($tasks | map({title: "preflight fixture", description: "",
+         priority: 1, files: [], created_at: "2026-07-12T23:59:00Z",
+         assignee: "producer", started_at: "2026-07-12T23:59:00Z",
+         submitted_at: "2026-07-13T00:00:00Z", verification_id: "fixture"} + .)),
+       last_updated: "2026-07-13T00:00:00Z", version: 1}' > "$1"
+  }
+  pending_stop_root="$fixture_root/backlog-pending-stop"
+  write_schedules "$pending_stop_root" running
+  mkdir -p "$pending_stop_root/.masc/tasks"
+  write_task_backlog "$pending_stop_root/.masc/tasks/backlog.json" '[
+      {"id": "task-7", "status": "awaiting_verification", "intent": "cancel"},
+      {"id": "task-8", "status": "awaiting_verification", "intent": "complete"},
+      {"id": "task-9", "status": "cancelled", "cancelled_by": "operator",
+       "cancelled_at": "2026-07-13T00:00:00Z", "reason": null}]'
+  expect_failure_contains legacy_intent_primary "$pending_stop_root" \
+    "does not accept intent" "backlog.json"
+
+  # A legacy cancellation in the recovery snapshot is refused too.
+  pending_stop_snapshot_root="$fixture_root/backlog-pending-stop-snapshot"
+  write_schedules "$pending_stop_snapshot_root" running
+  mkdir -p "$pending_stop_snapshot_root/.masc/tasks"
+  write_task_backlog "$pending_stop_snapshot_root/.masc/tasks/backlog.json" '[]'
+  write_task_backlog "$pending_stop_snapshot_root/.masc/tasks/backlog.json.last-good" \
+    '[{"id":"task-recovery","status":"awaiting_verification","intent":"cancel"}]'
+  expect_failure_contains legacy_intent_recovery "$pending_stop_snapshot_root" \
+    "does not accept intent" "backlog.json.last-good"
+
+  write_task_backlog "$pending_stop_snapshot_root/.masc/tasks/backlog.json" \
+    '[{"id":"task-10","status":"awaiting_verification","intent":"unknown"}]'
+  expect_failure_contains unsupported_legacy_intent "$pending_stop_snapshot_root" \
+    "does not accept intent" "backlog.json"
+
+  # Write duplicate fields into the raw file, never through jq's object model.
+  # Both copies must refuse even when the final intent is a supported value.
+  for duplicate_file in backlog.json backlog.json.last-good; do
+    duplicate_root="$fixture_root/duplicate-$duplicate_file"
+    write_schedules "$duplicate_root" running
+    mkdir -p "$duplicate_root/.masc/tasks"
+    write_task_backlog "$duplicate_root/.masc/tasks/backlog.json" '[]'
+    write_task_backlog "$duplicate_root/.masc/tasks/$duplicate_file" \
+      '[{"id":"duplicate","status":"awaiting_verification","intent":"complete"}]'
+    sed 's/"intent": "complete"/"intent": "cancel", "intent": "complete"/' \
+      "$duplicate_root/.masc/tasks/$duplicate_file" > "$duplicate_root/raw.json"
+    mv "$duplicate_root/raw.json" "$duplicate_root/.masc/tasks/$duplicate_file"
+    expect_failure_contains "duplicate_legacy_intent_$duplicate_file" "$duplicate_root" \
+      "does not accept intent" "$duplicate_file"
+  done
+
+  pending_completion_root="$fixture_root/backlog-pending-completion"
+  write_schedules "$pending_completion_root" running
+  mkdir -p "$pending_completion_root/.masc/tasks"
+  write_task_backlog "$pending_completion_root/.masc/tasks/backlog.json" \
+    '[{"id":"task-8","status":"awaiting_verification"}]'
+  "$0" --base-path "$pending_completion_root" >/dev/null
+
   attributed_requeue_root="$fixture_root/candidate-attributed-requeue"
   write_schedules "$attributed_requeue_root" running
   mkdir -p "$attributed_requeue_root/.masc/board_attention_candidates"
@@ -580,14 +660,22 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   mkdir -p "$malformed_current_root/.masc/keepers/fixture"
   printf '{not-json\n' \
     >"$malformed_current_root/.masc/keepers/fixture/${QUEUE_SNAPSHOT_FILENAME}"
-  expect_failure malformed_current_queue "$malformed_current_root"
+  expect_failure_contains \
+    malformed_current_queue \
+    "$malformed_current_root" \
+    "keeper event queue rows=1 refused=1" \
+    "durable store validation rejected current runtime state"
 
   malformed_current_wal_root="$fixture_root/malformed-current-wal"
   write_schedules "$malformed_current_wal_root" running
   write_current_queue "$malformed_current_wal_root"
   printf '{not-json\n' \
     >"$malformed_current_wal_root/.masc/keepers/fixture/${QUEUE_WAL_FILENAME}"
-  expect_failure malformed_current_wal "$malformed_current_wal_root"
+  expect_failure_contains \
+    malformed_current_wal \
+    "$malformed_current_wal_root" \
+    "keeper event queue rows=1 refused=1" \
+    "durable store validation rejected current runtime state"
 
   # Each keeper-meta rejection asserts the gate's own verdict prefix (printed
   # by this script, never re-wrapped) plus single tokens from the helper's
@@ -653,7 +741,11 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   mkdir -p "$malformed_wal_only_root/.masc/keepers/fixture"
   printf '{not-json\n' \
     >"$malformed_wal_only_root/.masc/keepers/fixture/${QUEUE_WAL_FILENAME}"
-  expect_failure malformed_wal_without_snapshot "$malformed_wal_only_root"
+  expect_failure_contains \
+    malformed_wal_without_snapshot \
+    "$malformed_wal_only_root" \
+    "keeper event queue rows=1 refused=1" \
+    "durable store validation rejected current runtime state"
 
   malformed_root="$fixture_root/malformed"
   mkdir -p "$malformed_root/.masc"
@@ -732,6 +824,122 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   signal_row="$(cat "$signal_fixture")"
   printf '%s %s\n' "$signal_row" "$signal_row" >"$signal_fixture"
   expect_failure multiple_values_on_one_signal_line "$multi_value_signal_root"
+
+  # runtime.toml, from both places the check runs: before the stop step
+  # (--runtime-config-only, no lease) and in the full gate under the lease.
+  seed_config_root="$fixture_root/runtime-config-seed"
+  write_schedules "$seed_config_root" succeeded
+  mkdir -p "$seed_config_root/.masc/config"
+  cp "$REPO_ROOT/config/runtime.toml" "$seed_config_root/.masc/config/runtime.toml"
+  "$0" --base-path "$seed_config_root" >/dev/null \
+    || fail "self-test expected success: runtime_config_seed"
+
+  retired_resource_key_root="$fixture_root/runtime-config-retired-resource-key"
+  write_schedules "$retired_resource_key_root" succeeded
+  mkdir -p "$retired_resource_key_root/.masc/config"
+  awk '
+    { print }
+    $0 == "[skills]" && !inserted {
+      print "resource-read-max-bytes = 65536"
+      inserted = 1
+    }
+    END { if (!inserted) exit 1 }
+  ' "$REPO_ROOT/config/runtime.toml" \
+    >"$retired_resource_key_root/.masc/config/runtime.toml" \
+    || fail "self-test could not build the retired Skill resource key fixture"
+  expect_failure_contains \
+    runtime_config_retired_resource_key \
+    "$retired_resource_key_root" \
+    "$RUNTIME_CONFIG_REJECTED" \
+    "$RUNTIME_CONFIG_NEXT_UNDER_LEASE" \
+    "[skills] resource-read-max-bytes"
+
+  # Prove this same config slips through if the full-gate call is absent.
+  red_gate_script="$SCRIPT_DIR/.check-runtime-deployment-preflight-red.$$.sh"
+  trap 'if [[ -n "${handoff_pid:-}" ]]; then kill "$handoff_pid" 2>/dev/null || true; fi; if [[ -n "${cancel_handoff_pid:-}" ]]; then kill "$cancel_handoff_pid" 2>/dev/null || true; fi; rm -f "${red_gate_script:-}"; rm -rf "$fixture_root"' EXIT
+  sed '/^  check_runtime_config "\$RUNTIME_CONFIG_NEXT_UNDER_LEASE"$/d' "$0" >"$red_gate_script"
+  chmod 700 "$red_gate_script"
+  MASC_DEPLOYMENT_PREFLIGHT_HELPER="$PREFLIGHT_HELPER" \
+    "$red_gate_script" --base-path "$retired_resource_key_root" >/dev/null \
+    || fail "self-test expected the retired resource key to pass without the runtime-config gate"
+
+  # lease-run stands in for the server that holds the lease before the stop.
+  "$PREFLIGHT_HELPER" \
+    lease-run \
+    --base-path "$seed_config_root" \
+    -- \
+    env -u MASC_DEPLOYMENT_LEASE_OWNER_PID \
+    "$0" --base-path "$seed_config_root" --runtime-config-only \
+    >/dev/null \
+    || fail "self-test expected success: runtime_config_seed_before_stop"
+
+  # Refusal remains meaningful when the Skill read bound is derived: the
+  # source cannot escape its anchor, regardless of the old key's policy.
+  invalid_source_config_root="$fixture_root/runtime-config-invalid-source"
+  write_schedules "$invalid_source_config_root" succeeded
+  mkdir -p "$invalid_source_config_root/.masc/config"
+  # Dune exposes source dependencies read-only. Create an editable fixture
+  # instead of copying the source file's permissions before appending to it.
+  cat "$REPO_ROOT/config/runtime.toml" \
+    >"$invalid_source_config_root/.masc/config/runtime.toml"
+  cat >>"$invalid_source_config_root/.masc/config/runtime.toml" <<'INVALID_SKILL_SOURCE'
+
+[[skills.sources]]
+id = "preflight-invalid"
+anchor = "base-path"
+path = "../escape"
+access = "read-only"
+INVALID_SKILL_SOURCE
+  expect_failure_contains \
+    runtime_config_invalid_source \
+    "$invalid_source_config_root" \
+    "$RUNTIME_CONFIG_REJECTED" \
+    "$RUNTIME_CONFIG_NEXT_UNDER_LEASE" \
+    ".path contains a parent-directory component" \
+    ".masc/config/runtime.toml"
+  if runtime_config_output="$("$PREFLIGHT_HELPER" \
+      lease-run \
+      --base-path "$invalid_source_config_root" \
+      -- \
+      env -u MASC_DEPLOYMENT_LEASE_OWNER_PID \
+      "$0" --base-path "$invalid_source_config_root" --runtime-config-only \
+      2>&1)"
+  then
+    fail "self-test expected failure: runtime_config_invalid_source_before_stop"
+  fi
+  for expected_text in \
+    "$RUNTIME_CONFIG_REJECTED" \
+    "$RUNTIME_CONFIG_NEXT_BEFORE_STOP" \
+    ".path contains a parent-directory component"; do
+    [[ "$runtime_config_output" == *"$expected_text"* ]] \
+      || fail "self-test failure omitted expected detail for runtime_config_invalid_source_before_stop: $expected_text"
+  done
+
+  # A missing runtime.toml is one boot writes, unless seeding is off.
+  absent_config_root="$fixture_root/runtime-config-absent"
+  write_schedules "$absent_config_root" succeeded
+  "$0" --base-path "$absent_config_root" >/dev/null \
+    || fail "self-test expected success: runtime_config_absent_seeded"
+  (
+    export MASC_CONFIG_BOOTSTRAP=skip
+    expect_failure_contains \
+      runtime_config_absent_unseeded \
+      "$absent_config_root" \
+      "$RUNTIME_CONFIG_REJECTED" \
+      "MASC_CONFIG_BOOTSTRAP=skip" \
+      "--allow-empty-workspace"
+  )
+  MASC_CONFIG_BOOTSTRAP=skip "$0" \
+    --base-path "$absent_config_root" \
+    --allow-empty-workspace \
+    >/dev/null \
+    || fail "self-test expected success: runtime_config_absent_empty_workspace"
+  # scripts/deploy.sh names MASC_CONFIG_DIR itself, and boot creates it.
+  MASC_CONFIG_DIR="$fixture_root/config-not-created" "$0" \
+    --base-path "$absent_config_root" \
+    --allow-empty-workspace \
+    >/dev/null \
+    || fail "self-test expected success: runtime_config_dir_not_created_empty_workspace"
 
   missing_runtime_root="$fixture_root/missing-runtime"
   mkdir -p "$missing_runtime_root"
@@ -886,6 +1094,19 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   handoff_pid=""
 
   printf '[runtime-deployment-preflight] self-test OK\n'
+  exit 0
+fi
+
+# Before the stop step the previous server still holds the writer lease, so
+# this reads runtime.toml alone and takes no lease. A refusal here stops
+# nothing. The full gate checks the file again under the lease, because it can
+# change in between.
+if [[ "$RUNTIME_CONFIG_ONLY" -eq 1 ]]; then
+  [[ -d "$BASE_PATH" && ! -L "$BASE_PATH" ]] \
+    || fail "base path is not an exact directory: $BASE_PATH"
+  check_runtime_config "$RUNTIME_CONFIG_NEXT_BEFORE_STOP"
+  printf '[runtime-deployment-preflight] OK: base_path=%s runtime_config_only=1%s\n' \
+    "$BASE_PATH" "$(helper_identity)"
   exit 0
 fi
 

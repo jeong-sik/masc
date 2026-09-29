@@ -165,6 +165,7 @@ module Sgr = struct
   let strike = style "\027[9m"
   let no_strike = style "\027[29m"
 
+  let black = style "\027[30m"
   let red = style "\027[31m"
   let green = style "\027[32m"
   let yellow = style "\027[33m"
@@ -174,6 +175,7 @@ module Sgr = struct
   let white = style "\027[37m"
 
   let default_fg = style "\027[39m"
+  let default_bg = style "\027[49m"
   let gray = style "\027[90m"
 
   (* Terminal-native bright slots keep the user's own light/dark palette in
@@ -186,8 +188,10 @@ module Sgr = struct
   let bright_blue = style "\027[94m"
   let bright_magenta = style "\027[95m"
   let bright_cyan = style "\027[96m"
+  let bright_white = style "\027[97m"
 
   let background = projected_background ~colors_enabled
+  let foreground = projected_foreground ~colors_enabled
 
   (* Pixels, not theme. An image mosaic and a link preview swatch carry colour
      that came from the picture, so there is no palette to project it through

@@ -120,7 +120,7 @@ let source_id_of_string id =
   else Error (Printf.sprintf "invalid Skill source id %S" id)
 ;;
 
-let top_level_namespace = "skills"
+let top_level_namespace = Runtime_toml_namespace.(key Skills)
 
 let anchor_to_string = function
   | Base_path -> "base-path"

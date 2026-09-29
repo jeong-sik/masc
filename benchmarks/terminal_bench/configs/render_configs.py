@@ -192,16 +192,20 @@ RUNTIME_TAIL_TOML = """\
 
 # Boot gate (server_runtime_bootstrap.require_explicit_mandatory_exact_output_
 # lanes): hitl_auto_judge and board_attention_exact must be declared with
-# non-empty slots or cli_slots. cli_slots are admitted verbatim and are only
-# walked by the HITL-summary / board-attention lanes, which a bench episode
-# never triggers (autonomous orchestration is off).
+# non-empty slots or cli_slots. These name the head runtime in slots: cli_slots
+# only admit official-client runtimes since #39020, and an HTTP runtime there
+# fails the whole config at load (measured: keeper_up answered
+# KeeperUpFailed on every HTTP lane). The registry admits sibling-lane slots
+# against the catalog and keeps a rejected id as a soft drop, never a load
+# failure. A bench episode never walks these lanes anyway (autonomous
+# orchestration is off).
 [runtime.exact_output_lanes.hitl_auto_judge]
-slots = []
-cli_slots = ["{runtime_id}"]
+slots = ["{runtime_id}"]
+cli_slots = []
 
 [runtime.exact_output_lanes.board_attention_exact]
-slots = []
-cli_slots = ["{runtime_id}"]
+slots = ["{runtime_id}"]
+cli_slots = []
 
 [exec.ssh.endpoints.local]
 host = "127.0.0.1"
@@ -245,7 +249,6 @@ tools-support = true
 streaming = true
 reasoning-effort = "{effort}"
 turn-timeout-s = {turn_timeout_s}
-wall-clock-ceiling-s = {wall_clock_ceiling_s}
 
 [{provider}."{binding_id}"]
 max-concurrent = {max_concurrent}
@@ -275,12 +278,6 @@ enabled = {fusion}
 # (a build, a test suite) is silent for its whole duration, so any value here
 # would cut real work short. 0 removes it (keeper_claude_code_runtime.ml).
 OFFICIAL_CLIENT_TURN_TIMEOUT_S = 0.0
-# The whole-turn ceiling cannot be removed (runtime_toml.ml
-# wall_clock_ceiling_opt_field) and defaults to 14400s
-# (Runtime_wall_clock.default_ceiling_s), half of the 28800s agent timeout
-# every Terminal-Bench 4.0.0 task declares. Set to that timeout, a single turn
-# is bounded by the task's own time and nothing shorter.
-OFFICIAL_CLIENT_WALL_CLOCK_CEILING_S = 28800.0
 CLAUDE_CODE_EFFORTS = ("low", "medium", "high", "xhigh", "max")
 
 OPENROUTER_ENDPOINTS_URL = "https://openrouter.ai/api/v1/models/{model}/endpoints"
@@ -395,6 +392,29 @@ PROVIDERS = {
     "kimi_coding": dict(protocol="openai-compatible-http",
                         endpoint="https://api.kimi.com/coding/v1",
                         api_key_env="KIMI_API_KEY"),
+    # Ollama Cloud over its OpenAI-compatible wire: the shipped config points
+    # [providers.ollama_cloud] at the same endpoint (config/runtime.toml), and
+    # the provider catalog row carries the key env while the model rows carry
+    # tools/reasoning (e.g. deepseek-v4-pro, kimi-k2.7-code). The default
+    # binding rides the provider default out loud (reasoning-uncontrolled in
+    # the shipped bindings); without that line the first turn is refused as
+    # Reasoning_undeclared_on_auto_enabling_wire. thinking-control-format
+    # "none" is the request axis the shipped deepseek binding carries: without
+    # it the resolved reasoning_effort dialect cannot encode enable_thinking
+    # on this path and the turn is refused again. Models in effort_by_model
+    # instead take a categorical effort, mirroring the shipped binding that
+    # carries it: deepseek-v4.1-flash runs effort low there, and on the bench
+    # the uncontrolled default collapsed in reasoning on 6 of 6 trials while
+    # low passed the same task (react-lead-form, reward 1.0). Extend only with
+    # a shipped binding plus a measured trial behind the value. No suppression
+    # contract either, so arms b/c/d refuse at render and ollama runs use e
+    # and later.
+    "ollama_cloud": dict(protocol="openai-compatible-http",
+                         endpoint="https://ollama.com/v1",
+                         api_key_env="OLLAMA_CLOUD_API_KEY",
+                         reasoning_uncontrolled=True,
+                         thinking_control_line='thinking-control-format = "none"\n',
+                         effort_by_model={"deepseek-v4.1-flash": "low"}),
     # Claude Code subscription lane: `--model claude_code/claude-sonnet-5`
     # gives runtime_id claude_code.claude-sonnet-5; the alias doubles as the
     # CLI api-name. bootstrap.sh installs the unmodified CLI (native
@@ -708,7 +728,6 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
             binding_id=binding_id,
             protocol=pcfg["protocol"], command=pcfg["command"], effort=effort,
             turn_timeout_s=OFFICIAL_CLIENT_TURN_TIMEOUT_S,
-            wall_clock_ceiling_s=OFFICIAL_CLIENT_WALL_CLOCK_CEILING_S,
             fusion=str(spec["fusion"]).lower(),
             max_concurrent=4 if spec["parallel"] else 1,
             remote_root=REMOTE_ROOT)
@@ -738,18 +757,32 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
         max_output = pcfg.get("max_output_tokens")
         if max_output is None and limits is not None:
             max_output = limits.max_output
+        # A per-model categorical effort wins over the provider default: the
+        # value rides the reasoning-effort dialect, which is what encodes a
+        # named level on this wire.
+        model_effort = (pcfg.get("effort_by_model") or {}).get(alias)
+        if model_effort is not None:
+            effort_lines = (
+                f'reasoning-effort = "{model_effort}"\nthinking-support = true\n')
+            thinking_control_block = 'thinking-control-format = "reasoning-effort"\n'
+        else:
+            effort_lines = (
+                f'reasoning-effort = "{effort}"\nthinking-support = true\n'
+                if pcfg.get("carries_effort") else ""
+            ) + (
+                "reasoning-uncontrolled = true\nthinking-support = true\n"
+                if pcfg.get("reasoning_uncontrolled") else "")
+            thinking_control_block = thinking_control
         return RUNTIME_MODEL_TOML.format(
             provider=runtime_provider, model_alias=alias,
             binding_id=model_binding_id(alias),
             max_concurrent=4 if spec["parallel"] else 1,
-            effort_lines=(
-                f'reasoning-effort = "{effort}"\nthinking-support = true\n'
-                if pcfg.get("carries_effort") else ""),
+            effort_lines=effort_lines,
             max_context_line=(
                 f"max-context = {limits.max_context}\n" if limits else ""),
             max_output_lines=(
                 f"max-output-tokens = {max_output}\n" if max_output is not None else ""),
-            thinking_control=thinking_control,
+            thinking_control=thinking_control_block,
             disable_parallel=str(not spec["parallel"]).lower())
 
     candidate_ids = [f"{runtime_provider}.{model_binding_id(a)}" for a in aliases]

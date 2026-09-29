@@ -2515,7 +2515,6 @@ let test_planning_counts_a_task_awaiting_verification_on_its_own () =
                { assignee = "a"
                ; started_at = stamp
                ; submitted_at = stamp
-               ; intent = Masc_domain.Complete_task
                ; verification_id = "v-1"
                })
         ; task
@@ -3102,23 +3101,83 @@ let test_execution_request_resolves_actor_once () =
 let execution_payload_key (payload : Dashboard_cache.cached_payload) =
   Yojson.Safe.Util.(payload.json |> member "cache" |> member "request_cache_key" |> to_string)
 
-let test_execution_default_response_remains_json () =
+let test_execution_default_response_reuses_prepared_bytes () =
   with_execution_payload_env @@ fun ~env ~sw ~state ->
   with_cached_surface_success
     Server_dashboard_http_execution_surfaces.execution_cache
-    (`Assoc [ "default_marker", `String "last-success" ]) @@ fun () ->
-  match Server_dashboard_http_execution_surfaces.dashboard_execution_http_response
+    (`Assoc [ "default_marker", `String "last-success";
+              "data", `String (String.make 4000 'x') ]) @@ fun () ->
+  let module Surface = Server_dashboard_http_execution_surfaces in
+  let context = Surface.execution_http_request ~state
+      (request_with_headers "/api/v1/dashboard/execution"
+         ["accept-encoding", "gzip"]) in
+  check bool "selected snapshot has no prepared bytes before first response" true
+    (Option.is_none (Surface.dashboard_execution_cached_http_representation context));
+  match Surface.dashboard_execution_http_response
       ~sw ~clock:(Eio.Stdenv.clock env)
-      (Server_dashboard_http_execution_surfaces.execution_http_request ~state
-         (request "/api/v1/dashboard/execution")) with
-  | Server_dashboard_http_execution_surfaces.Execution_payload _ ->
-    fail "the default light route must return its cached-surface JSON"
-  | Server_dashboard_http_execution_surfaces.Execution_json json ->
+      context with
+  | Surface.Execution_json _ ->
+    fail "the first default response discarded its prepared bytes"
+  | Surface.Execution_payload payload ->
+    let json = payload.json in
     let open Yojson.Safe.Util in
     check string "default snapshot retained" "last-success"
       (json |> member "default_marker" |> to_string);
     check bool "default-light query retained" true
-      (json |> member "query" |> member "default_light_request" |> to_bool)
+      (json |> member "query" |> member "default_light_request" |> to_bool);
+    check bool "identity bytes describe the same JSON" true
+      (Yojson.Safe.from_string payload.raw_json = json);
+    let gzip, headers = Dashboard_cache.select_http_representation
+        ~accept_encoding:(Some "gzip") payload in
+    check (option string) "first response can use gzip" (Some "gzip")
+      (List.assoc_opt "content-encoding" headers);
+    check bool "first compressed response is smaller" true
+      (String.length gzip < String.length payload.raw_json);
+    (match Surface.dashboard_execution_cached_http_representation context with
+     | None -> fail "first response did not leave prepared cache bytes"
+     | Some (warm, etag, warm_headers) ->
+       check bool "first and warm responses share gzip bytes" true (gzip == warm);
+       check string "same ETag" payload.etag etag;
+       check (list (pair string string)) "same representation headers" headers warm_headers);
+    let identity = Surface.execution_http_request ~state
+        (request_with_headers "/api/v1/dashboard/execution"
+           ["accept-encoding", "identity"]) in
+    (match Surface.dashboard_execution_cached_http_representation identity with
+     | None -> fail "identity bytes were not prepared"
+     | Some (warm, _, _) ->
+       check bool "identity bytes are reused without serialization" true
+         (payload.raw_json == warm))
+
+let test_execution_first_compute_reuses_prepared_bytes () =
+  with_execution_payload_env @@ fun ~env ~sw ~state ->
+  let module Surface = Server_dashboard_http_execution_surfaces in
+  Surface.invalidate_execution_cache ();
+  Eio_guard.protect ~finally:Surface.invalidate_execution_cache (fun () ->
+    check bool "no successful projection before first compute" true
+      (Option.is_none (Server_dashboard_http_cache.snapshot Surface.execution_cache)
+                        .last_success_unix);
+    let context = Surface.execution_http_request ~state
+        (request_with_headers "/api/v1/dashboard/execution"
+           ["accept-encoding", "identity"]) in
+    let response = Surface.dashboard_execution_http_response
+        ~sw ~clock:(Eio.Stdenv.clock env) context in
+    match response with
+    | Surface.Execution_json _ -> fail "first successful compute discarded prepared bytes"
+    | Surface.Execution_payload payload ->
+      check bool "first compute published a successful projection" true
+        (Option.is_some (Server_dashboard_http_cache.snapshot Surface.execution_cache)
+                          .last_success_unix);
+      let open Yojson.Safe.Util in
+      check bool "default query retained" true
+        (payload.json |> member "query" |> member "default_light_request" |> to_bool);
+      check bool "computed identity bytes match JSON" true
+        (Yojson.Safe.equal payload.json (Yojson.Safe.from_string payload.raw_json));
+      match Surface.dashboard_execution_cached_http_representation context with
+      | None -> fail "first compute did not leave prepared bytes"
+      | Some (warm, etag, _) ->
+        check bool "first compute and warm read reuse identity bytes" true
+          (payload.raw_json == warm);
+        check string "first compute and warm read retain ETag" payload.etag etag)
 
 let test_execution_parameterized_payload_reuses_decorated_bytes () =
   with_execution_payload_env @@ fun ~env ~sw ~state ->
@@ -5446,6 +5505,62 @@ let expect_http_status label status raw =
   if not (String.starts_with ~prefix raw)
   then failf "%s: expected %s, got %s" label prefix raw
 
+let test_board_close_route_rejects_wrong_typed_decisions_without_closing () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  with_env "MASC_BASE_PATH" config.base_path @@ fun () ->
+  Lib.Board.reset_global_for_test ();
+  Lib.Board_dispatch.reset_for_test ();
+  Lib.Board_dispatch.init_jsonl ();
+  Fun.protect
+    ~finally:(fun () ->
+      Lib.Board.reset_global_for_test ();
+      Lib.Board_dispatch.reset_for_test ())
+    (fun () ->
+      let create content =
+        match Lib.Board_dispatch.create_post
+                ~author:"close-route-test" ~content
+                ~post_kind:Lib.Board.Human_post () with
+        | Ok post -> Lib.Board.Post_id.to_string post.id
+        | Error error -> fail (Lib.Board.show_board_error error)
+      in
+      let post_id = create "thread" in
+      let successor_id = create "successor" in
+      let check_open label =
+        match Lib.Board_dispatch.get_post ~post_id with
+        | Ok post -> check bool (label ^ " leaves post open") true
+                       (Option.is_none post.closed)
+        | Error error -> fail (Lib.Board.show_board_error error)
+      in
+      let attempt label decision_fields bad_field =
+        let body = Yojson.Safe.to_string
+            (`Assoc
+               (("post_id", `String post_id)
+                :: ("summary", `String "done") :: decision_fields))
+        in
+        let raw, json =
+          post_to_handler ~target:"/api/v1/dashboard/board/close"
+            (fun request reqd body ->
+              Server_dashboard_http_delete_actions.For_testing.handle_board_close_post
+                ~agent_name:"operator" request reqd body)
+            body
+        in
+        expect_http_status label 400 raw;
+        let error = Safe_ops.json_string_opt "error" json in
+        check bool (label ^ " names malformed field") true
+          (match error with
+           | Some error -> String_util.contains_substring error bad_field
+           | None -> false);
+        check_open label
+      in
+      attempt "wrong successor_id"
+        ["successor_id", `Int 123; "no_successor", `Bool true]
+        "successor_id";
+      attempt "wrong no_successor"
+        ["successor_id", `String successor_id;
+         "no_successor", `String "true"]
+        "no_successor")
+;;
+
 (* The PAT route's hostname picks the login lane the token is written to.
    One that is written but unreadable is refused before any Keeper is read;
    falling back to the query or github.com would store the token under a host
@@ -6808,8 +6923,10 @@ let () =
             test_execution_actor_for_request_canonicalizes_token_owner;
           test_case "execution request resolves actor once" `Quick
             test_execution_request_resolves_actor_once;
-          test_case "execution default response remains JSON" `Quick
-            test_execution_default_response_remains_json;
+          test_case "execution default response reuses prepared bytes" `Quick
+            test_execution_default_response_reuses_prepared_bytes;
+          test_case "execution first compute reuses prepared bytes" `Quick
+            test_execution_first_compute_reuses_prepared_bytes;
           test_case "execution parameterized response reuses decorated bytes" `Quick
             test_execution_parameterized_payload_reuses_decorated_bytes;
           test_case "execution parameterized responses separate queries" `Quick
@@ -6886,7 +7003,9 @@ let () =
             test_composite_blocked_uses_terminal_contract_not_observational_metadata;
         ] );
       ( "dashboard behavior contracts",
-        [ test_case "Skill evidence joins activation and composition" `Quick
+        [ test_case "board close route rejects wrong typed decisions" `Quick
+            test_board_close_route_rejects_wrong_typed_decisions_without_closing;
+          test_case "Skill evidence joins activation and composition" `Quick
             test_skill_evidence_joins_activation_and_composition;
           test_case "GitHub login stream includes CORS" `Quick
             test_keeper_github_login_stream_headers_include_cors;

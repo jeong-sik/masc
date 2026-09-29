@@ -76,13 +76,13 @@ masc setup --base-path "$HOME/masc-workspace"
 
 ### 공개 바이너리
 
-[GitHub Releases](https://github.com/jeong-sik/masc/releases/tag/v0.41.0)에
+[GitHub Releases](https://github.com/jeong-sik/masc/releases/tag/v0.46.0)에
 첨부된 설치 스크립트를 받습니다. 선택한 릴리스의 자산을 검증하고 설치합니다.
 
-> Installation target: v0.41.0 (check tag availability on GitHub Releases).
+> Installation target: v0.46.0 (check tag availability on GitHub Releases).
 
 ```bash
-TAG=v0.41.0
+TAG=v0.46.0
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
 bash /tmp/masc-install.sh --version "$TAG"
@@ -90,12 +90,12 @@ bash /tmp/masc-install.sh --version "$TAG"
 
 선택 사항: 실행 전에 스크립트를 읽으려면 `less /tmp/masc-install.sh`를 실행하세요. `q`를 눌러 나간 다음 위의 `bash` 설치 명령을 실행합니다.
 
-모델 확인이 실패하면 마법사가 원인을 표시합니다. 노란색 **Rate limit (temporary)** 또는 **Provider busy**는 잠시 기다린 뒤 *Retry*를 고르세요. **No answer in time**은 한 번 재시도하고, 계속 시간 초과가 나면 엔드포인트를 확인하거나 더 작은 모델을 고르세요. 빨간색 원인(credential refused, quota used up, not signed in)은 표시된 조치가 필요합니다. 해당 연결만 제외하고 계속하거나 *Configure later*를 고른 뒤 나중에 `masc setup`을 실행할 수 있습니다. 확인 중에는 경과 시간(초)이 표시되므로 느린 프로바이더를 멈춘 설치로 오해하지 않아도 됩니다. `NO_COLOR=1`이면 색 없이 출력합니다.
+모델 확인이 실패하면 마법사가 원인을 표시합니다. 노란색 **Provider busy**는 잠시 기다린 뒤 *Retry*를 고르세요. **No answer in time**은 한 번 재시도하고, 계속 시간 초과가 나면 엔드포인트를 확인하거나 더 작은 모델을 고르세요. 빨간색 원인(credential refused, not signed in)은 표시된 조치가 필요합니다. 공급자가 계정의 사용 한도나 속도 제한 때문에 확인을 거절하면 모델은 그대로 저장되고, 마법사가 확인 없이 저장한 모델로 알려 줍니다. 해당 연결만 제외하고 계속하거나 *Configure later*를 고른 뒤 나중에 `masc setup`을 실행할 수 있습니다. 확인 중에는 경과 시간(초)이 표시되므로 느린 프로바이더를 멈춘 설치로 오해하지 않아도 됩니다. `NO_COLOR=1`이면 색 없이 출력합니다.
 
 재설치할 때 `--force`나 `--wizard`는 `bash /tmp/masc-install.sh` 명령 끝에 붙입니다.
 
 설치 스크립트는 기본으로 `~/.local/bin`에 설치하고 셸 `PATH`에 추가할지 묻습니다.
-그 질문을 걸어다면 `export PATH="$HOME/.local/bin:$PATH"`를 실행하세요
+그 질문을 건너뛰었다면 `export PATH="$HOME/.local/bin:$PATH"`를 실행하세요
 (이 명령에는 설치 옵션을 붙이지 않습니다).
 
 설치 스크립트는 `SHA256SUMS`를 필수로 검증하고 릴리스 실행 파일을 설치한 뒤, 처음 한 번 설정 마법사를 돌립니다(`--no-wizard`로 건너뜁니다).

@@ -111,6 +111,10 @@ let schedule_caller ~state ~agent_name request =
   match Server_auth.request_credential_standing ~base_path request with
   | Server_auth.Operator_credential -> Tool_schedule.Operator_caller agent_name
   | Server_auth.Agent_credential -> Tool_schedule.Named_caller agent_name
+  (* The schedule tools need CanReadState or CanBroadcast, which a Player
+     does not hold, so [with_tool_actor_auth] refuses it before this runs.
+     Were one admitted, it is a named caller who is not the operator. *)
+  | Server_auth.Player_credential -> Tool_schedule.Named_caller agent_name
   | Server_auth.No_credential -> Tool_schedule.Unnamed_caller
 ;;
 
@@ -1612,7 +1616,7 @@ let add_routes ~sw ~clock router =
                [ ("schema", `String "masc.skill-snapshot/v1")
                ; ("state", `String "uninitialized")
                ]
-           | Ok (Ready snapshot) ->
+           | Ok (Ready { snapshot; config_path = _ }) ->
              let catalog, diagnostics =
                Keeper_skill_catalog.all_entries_of_snapshot snapshot
              in

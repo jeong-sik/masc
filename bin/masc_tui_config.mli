@@ -1,8 +1,12 @@
 (* TUI settings read from the [tui] table of runtime.toml. See the .ml. *)
 
+type opening = Overview | Last of Keeper_id.Keeper_name.t option | Keeper of Keeper_id.Keeper_name.t
+
 type t = private {
+  opening : (opening, string) result;
   theme : string option;
   board_sort : string option;
+  candle : string option;
   lift_colours : bool option;
   table_frame : bool option;
   hints_visible : bool option;
@@ -11,11 +15,19 @@ type t = private {
   user_input_priority_next : bool option;
 }
 
+val opening_keeper_of_doc :
+  Keeper_toml_loader.toml_doc -> (Keeper_id.Keeper_name.t option, string) result
+val opening_of_doc : Keeper_toml_loader.toml_doc -> (opening, string) result
+
+val set_opening_keeper :
+  base_path:string -> Keeper_id.Keeper_name.t -> (unit, string) result
+(** Remember the last chat target under the runtime.toml config write lock. *)
+
 val load : base_path:string -> t
 (** Resolve and parse runtime.toml once, then extract an immutable snapshot of
     all TUI settings. A later call reads current disk state; no process cache.
-    Missing, unreadable or unparseable files leave every field [None], retaining
-    the caller's existing default policy. Explicit [false] stays [Some false]. *)
+    Missing, unreadable or unparseable files leave optional settings [None]
+    and [opening] at [Ok Overview]. Explicit [false] stays [Some false]. *)
 
 (* [tui].theme, given an already-parsed runtime.toml document. [None] when the
    key (or the [tui] table) is absent. Pure, so the caller's file read stays
@@ -76,15 +88,19 @@ val send_on_stop_of_text : string -> bool option
 val coalesce_queued_input_of_doc : Keeper_toml_loader.toml_doc -> bool option
 (** [tui].coalesce_queued_input: whether a new line joins the line already
     waiting for the same Keeper instead of queueing behind it. [None] where
-    the file, the table or the key is absent -- reads as "yes".
+    the file, the table or the key is absent -- reads as "no".
 
     Only a next-turn line waiting for that same Keeper is joined. A steer
     keeps its own entry: it was created to replace one exact operation, and
     folding another line into it would move that causal parent. *)
 
 val user_input_priority_next_of_doc : Keeper_toml_loader.toml_doc -> bool option
-(** [tui].user_input_priority_next: whether user chat messages submitted
-    while a turn is running are automatically prioritized to run next.
-    [None] where absent -- defaults to [true]. *)
+(** [tui].user_input_priority_next: whether a newly queued user chat message
+    requests first place after the server confirms its admission.
+    [None] where absent -- defaults to [false]. *)
 
 val set_board_sort : base_path:string -> string -> (unit, string) result
+
+val set_candle : base_path:string -> string -> (unit, string) result
+(** Store how /about and the splash draw the candle, [\[tui\].candle], under
+    the same lock and in the same file as {!set_board_sort}. *)

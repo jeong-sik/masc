@@ -22,6 +22,15 @@ module Chat_operation = Keeper_chat_operation
 module Chat_operation_store = Keeper_chat_operation_store
 module Operation_id = Chat_operation.Operation_id
 
+type runtime_retry_revalidation =
+  | Keep_retry_wait
+  | Update_retry_wait of
+      { replacement : Keeper_semantic_execution.runtime_retry
+      ; next_wait : runtime_retry_wait
+      }
+and runtime_retry_wait = now:float -> observed:Keeper_semantic_execution.runtime_retry ->
+  (runtime_retry_revalidation, string) result
+
 type operation_projection =
   { queued_count : int
   ; has_claimable_queued : bool
@@ -30,10 +39,6 @@ type operation_projection =
   ; terminal_count : int
   ; interrupted_count : int
   ; store_unavailable : bool
-  ; autonomous_owed_slot : bool
-        (* Owner-fiber-local debt, stamped at publish time: the slot the
-           deferral debt cap holds open for the autonomous lane. Not a
-           count. Store queries cannot know it, so it rides the projection. *)
   }
 
 type operation_interrupt_result =
@@ -184,7 +189,7 @@ type _ command =
       (Keeper_semantic_execution.runtime_retry option, error) result command
   | Defer_direct_runtime_retry :
       { operation_id : Operation_id.t; execution_digest : string;
-        continuation : Keeper_semantic_execution.runtime_retry } ->
+        continuation : Keeper_semantic_execution.runtime_retry; retry_wait : runtime_retry_wait option } ->
       (Chat_operation.t, error) result command
   | Resume_direct_runtime_retry :
       { operation_id : Operation_id.t; observed : Keeper_semantic_execution.runtime_retry } ->
@@ -206,7 +211,8 @@ type _ command =
   | Resume_direct_gate : {operation_id:Operation_id.t; waiting:Keeper_semantic_execution.gate_wait;
       resolution:Keeper_semantic_execution.gate_resolution} -> (unit, error) result command
   | Pause_and_interrupt : {target : interrupt_target; expected_control_token : string option} -> (pause_result * string, error) result command
-  | Run_next_operation : { operation_id : Operation_id.t; observed : interrupt_target option } ->
+  | Run_next_operation : { operation_id : Operation_id.t; observed : interrupt_target option;
+      priority_predecessors : Operation_id.t list option } ->
       (run_next_result, error) result command
   | Interrupt_running_operation :
       Operation_id.t -> (operation_interrupt_result, error) result command
@@ -250,6 +256,7 @@ type _ command =
       ; outcome_ref : string option
       }
       -> (Chat_operation.t, error) result command
+  | Observe_runtime_retry_waits : (unit, error) result command
   | Wake_operation_drain : (unit, error) result command
   | Run_if_idle :
       { lane : turn_lane
@@ -402,7 +409,6 @@ let operation_projection_equal
   && Int.equal left.terminal_count right.terminal_count
   && Int.equal left.interrupted_count right.interrupted_count
   && Bool.equal left.store_unavailable right.store_unavailable
-  && Bool.equal left.autonomous_owed_slot right.autonomous_owed_slot
 ;;
 
 let turn_in_flight_equal (left : turn_in_flight option) (right : turn_in_flight option) =
@@ -422,7 +428,7 @@ let shutdown_operation_id_equal =
 (* RFC-0373 direction 2: consecutive losses of the turn slot to the chat lane
    become a value the next admission decision reads. The debt counts releases
    the autonomous lane asked for and did not get while a chat turn held the
-   slot, resets to zero the moment an autonomous turn is admitted, and at
+   slot, resets to zero when an admitted autonomous turn settles, and at
    [autonomous_deferral_debt_cap] the admission stops handing a freed slot to
    the queued chat first: the handoff leaves the slot free, which is the owed
    release signal the autonomous lane needs to take it. The cap is 3 -- one
@@ -434,11 +440,6 @@ let autonomous_deferral_debt_cap = 3
 
 let publish_operation_projection t next =
   let previous = Atomic.get t.operation_projection in
-  (* The debt mark is owner-fiber-local and lives here, not in the store, so
-     every published snapshot is stamped with the state at its own publish
-     moment. A later publish without the mark therefore also clears it, and
-     readers can never see a stale admission promise. *)
-  let next = { next with autonomous_owed_slot = !(t.autonomous_deferral_debt) >= autonomous_deferral_debt_cap } in
   if not (operation_projection_equal previous next)
   then (
     Atomic.set t.operation_projection next;
@@ -597,7 +598,7 @@ let answer : type response. response command -> answer = function
   | Claim_next_operation -> In_its_drain_step
   | Succeed_running_operation _ -> In_its_drain_step
   | Fail_running_operation _ -> In_its_drain_step
-  | Wake_operation_drain -> In_its_drain_step
+  | Observe_runtime_retry_waits | Wake_operation_drain -> In_its_drain_step
   | Run_if_idle _ -> Possibly_when_the_child_finishes
   | Begin_shutdown _ -> In_its_drain_step
   | Rollback_shutdown _ -> In_its_drain_step
@@ -767,9 +768,6 @@ let operation_projection_of_inventory ~has_claimable_queued ~next_runtime_retry_
   ; terminal_count = inventory.terminal_count
   ; interrupted_count = inventory.interrupted_count
   ; store_unavailable = false
-  ; (* The debt mark is not a store fact: publish_operation_projection
-       stamps each published snapshot with the owner-fiber-local state. *)
-    autonomous_owed_slot = false
   }
 ;;
 
@@ -1078,44 +1076,86 @@ let start
     if not (Atomic.exchange t.closed true)
     then Eio.Promise.resolve resolve_closed ()
   in
-  (* A cooling retry's wake rides the pool switch and dies with the process,
-     and the Owner never polls: after a restart, a persisted future
-     [not_before] would sit until an unrelated mailbox event. Wakes are
-     therefore re-armed at start and after every drain wake — a keeper can
-     hold more than one cooling retry (a cooling op is Queued, so another op
-     can claim, defer, and cool behind it), and each wake re-arms the next
-     earliest one. *)
-  let rearm_cooling_retry_wake () =
-    match (Atomic.get t.operation_projection).next_runtime_retry_wake with
-    | None -> ()
-    | Some not_before ->
+  (* Live witnesses are owned by this actor and tied to the exact durable
+     retry. Restart loses the witness, never treating lost provider evidence
+     as recovery; the persisted deadline still schedules its wake. *)
+  let retry_waits = ref [] in
+  let cooling_wake_armed = ref false in
+  let revalidate_retry_waits () =
+    let changed_any = ref false in
+    let rec loop retained pending =
+      retry_waits := List.rev_append retained pending;
+      match pending with
+      | [] -> Ok !changed_any
+      | ((operation_id, observed, revalidate) as witness) :: rest ->
+        let ( let* ) = Result.bind in
+        let* current = run_operation_read t ~label:"read direct retry wait witness"
+          (fun () -> Chat_operation_store.direct_runtime_retry t.operation_store ~operation_id) in
+        (match current with
+         | Some current when current = observed ->
+           (match revalidate ~now:(t.now ()) ~observed with
+            | Error detail ->
+              Log.Keeper.warn "keeper_owner: retry wait revalidation failed keeper=%s error=%s"
+                keeper_name detail;
+              loop (witness :: retained) rest
+            | Ok Keep_retry_wait -> loop (witness :: retained) rest
+            | Ok (Update_retry_wait {replacement; next_wait}) ->
+              let* changed, _ = run_operation_command t ~label:"update direct retry dependency wait"
+                (fun () -> Chat_operation_store.update_direct_runtime_retry_wait
+                  t.operation_store ~now:(t.now ()) ~operation_id ~observed ~replacement) in
+              changed_any := !changed_any || changed;
+              let retained = if changed && Option.is_some replacement.Keeper_semantic_execution.not_before
+                then (operation_id, replacement, next_wait) :: retained else retained in
+              loop retained rest)
+         | Some _ | None -> loop retained rest)
+    in
+    loop [] !retry_waits
+  in
+  (* One armed wake per owner. Use the existing Keeper observation interval
+     to recheck live dispatch/rest dependencies while a retry is cooling.
+     This observes evidence only; the store still enforces not_before unless
+     an exact witness authorizes a durable release. *)
+  let schedule_cooling_retry_wake ~delay =
+    if !cooling_wake_armed then ()
+    else
       (match Eio_context.get_clock_opt () with
        | None ->
-         Log.Keeper.warn
-           "keeper_owner: no clock to re-arm cooling retry wake keeper=%s"
-           keeper_name
+         Log.Keeper.warn "keeper_owner: no clock to re-arm cooling retry wake keeper=%s" keeper_name
        | Some clock ->
+         cooling_wake_armed := true;
          (try
             Eio.Fiber.fork_daemon ~sw (fun () ->
               (try
-                 Eio.Time.sleep clock (Float.max 0.0 (not_before -. t.now ()));
-                 (* fire-and-forget: the sleeper exists only to deliver the wake; if the owner has closed by then there is nothing to wake. *)
-                 notify t Wake_operation_drain
+                 Eio.Time.sleep clock delay;
+                 cooling_wake_armed := false;
+                 notify t Observe_runtime_retry_waits
                with
                | Eio.Cancel.Cancelled _ as cancelled -> raise cancelled
                | exn ->
-                 Log.Keeper.warn
-                   "keeper_owner: cooling retry wake fiber failed keeper=%s error=%s"
-                   keeper_name
-                   (Printexc.to_string exn));
+                 cooling_wake_armed := false;
+                 Log.Keeper.warn "keeper_owner: cooling retry wake fiber failed keeper=%s error=%s"
+                   keeper_name (Printexc.to_string exn));
               `Stop_daemon)
           with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn ->
-            Log.Keeper.warn
-              "keeper_owner: cooling retry wake not scheduled keeper=%s error=%s"
-              keeper_name
-              (Printexc.to_string exn)))
+            cooling_wake_armed := false;
+            Log.Keeper.warn "keeper_owner: cooling retry wake not scheduled keeper=%s error=%s"
+              keeper_name (Printexc.to_string exn)))
+  in
+  let rearm_cooling_retry_wake () =
+    match (Atomic.get t.operation_projection).next_runtime_retry_wake with
+    | None -> ()
+    | Some not_before ->
+      schedule_cooling_retry_wake
+        ~delay:(Float.min Env_config_keeper.KeeperKeepalive.sleep_chunk_sec
+          (Float.max 0.0 (not_before -. t.now ())))
+  in
+  let retry_cooling_observation () =
+    (* The cached deadline may already have passed, or a failed projection
+       may have lost it. A failed observation retains a positive retry wake
+       without interpreting either condition as dispatch permission. *)
+    schedule_cooling_retry_wake ~delay:Env_config_keeper.KeeperKeepalive.sleep_chunk_sec
   in
   (* A transient (non-throttle) failure defers with no cooling time: the
      continuation is immediately claimable again, but the Owner never polls
@@ -1492,10 +1532,21 @@ let start
             Chat_operation_store.direct_runtime_retry t.operation_store ~operation_id) in
           Eio.Promise.resolve resolve response;
           loop state shutdown_operation_id
-        | Command (Defer_direct_runtime_retry {operation_id; execution_digest; continuation}, resolve) ->
+        | Command (Defer_direct_runtime_retry {operation_id; execution_digest; continuation; retry_wait}, resolve) ->
           let response = run_operation_command t ~label:"defer direct runtime continuation" (fun () ->
             Chat_operation_store.defer_direct_runtime_retry t.operation_store ~now:(t.now ())
               ~operation_id ~execution_digest ~continuation) |> Result.map fst in
+          (match response, retry_wait with
+           | Ok _, Some revalidate ->
+             (* An idempotent defer may retain an older timestamp. Only bind
+                a witness when this exact durable continuation was installed. *)
+             (match run_operation_read t ~label:"bind direct retry wait witness"
+                 (fun () -> Chat_operation_store.direct_runtime_retry t.operation_store ~operation_id) with
+              | Ok (Some current) when current = continuation ->
+                retry_waits := (operation_id, continuation, revalidate) ::
+                  List.filter (fun (id, _, _) -> not (Operation_id.equal id operation_id)) !retry_waits
+              | Ok (Some _) | Ok None | Error _ -> ())
+           | Ok _, None | Error _, _ -> ());
           (* A defer with no [not_before] is immediately claimable, and
              without this wake it waits for the next ambient event — the
              minutes-long stall this sleeper exists to remove. The cooling
@@ -1606,15 +1657,19 @@ let start
                     | exn -> Operation_interrupt_failed (Printexc.to_string exn)) in
              Eio.Promise.resolve resolve (Ok (result, chat_control_token t));
              loop state shutdown_operation_id)
-        | Command (Run_next_operation { operation_id; observed }, resolve) ->
+        | Command (Run_next_operation { operation_id; observed; priority_predecessors }, resolve) ->
           if not (turn_admission_open state) then (
             Eio.Promise.resolve resolve (Ok Run_next_paused);
             loop state shutdown_operation_id)
           else
           let prioritized = reject_if_shutdown shutdown_operation_id (fun () ->
             reject_if_stopping state (fun () ->
-              run_operation_command t ~label:"prioritize explicit next Keeper operation" (fun () ->
-                Chat_operation_store.move_queued_to_front t.operation_store ~now:(t.now ()) ~operation_id)
+              run_operation_command t ~label:"prioritize next Keeper operation" (fun () ->
+                match priority_predecessors with
+                | None -> Chat_operation_store.move_queued_to_front
+                    t.operation_store ~now:(t.now ()) ~operation_id
+                | Some predecessors -> Chat_operation_store.move_queued_priority_cohort_to_front
+                    t.operation_store ~now:(t.now ()) ~operation_id ~predecessors)
                 |> Result.map (fun _ -> ()))) in
           (match prioritized with
            | Error error -> Eio.Promise.resolve resolve (Error error); loop state shutdown_operation_id
@@ -1669,7 +1724,6 @@ let start
             reject_if_stopping state (fun () ->
               run_operation_command t ~label:"admit interactive Keeper message" (fun () ->
                 Chat_operation_store.submit
-                  ?priority:(if permitted then Some Keeper_chat_operation_batch.select_priority else None)
                   t.operation_store ~now:(t.now ()) ~operation_id ~source ~input))) in
           (match result with
            | Error error -> Eio.Promise.resolve resolve (Error error); loop state shutdown_operation_id
@@ -1793,6 +1847,24 @@ let start
           in
           Eio.Promise.resolve resolve response;
           loop state shutdown_operation_id
+        | Command (Observe_runtime_retry_waits, resolve) ->
+          let response =
+            let ( let* ) = Result.bind in
+            let* () = recover_operation_availability t in
+            revalidate_retry_waits () in
+          (match response with
+           | Error _ -> retry_cooling_observation ()
+           | Ok changed ->
+             let projection = Atomic.get t.operation_projection in
+             let due = match projection.next_runtime_retry_wake with
+               | Some deadline -> deadline <= t.now ()
+               | None -> false in
+             (* Recovery can publish an already-claimable retry and remove its
+                expired deadline from the next-wake projection. *)
+             if changed || due || projection.has_claimable_queued then notify t Wake_operation_drain
+             else rearm_cooling_retry_wake ());
+          Eio.Promise.resolve resolve (Result.map (fun _ -> ()) response);
+          loop state shutdown_operation_id
         | Command (Wake_operation_drain, resolve) ->
           (* Retry deadlines change readiness without a store mutation. Publish
              before attempting a claim, even while an autonomous turn owns the
@@ -1800,6 +1872,7 @@ let start
           let response =
             let ( let* ) = Result.bind in
             let* () = recover_operation_availability t in
+            let* _ = revalidate_retry_waits () in
             run_operation_command t ~label:"refresh Keeper operation readiness"
               (fun () -> Ok ())
             |> Result.map (fun _ -> ())
@@ -1811,7 +1884,7 @@ let start
              A failed refresh must not re-arm an expired cached deadline. *)
           (match response with
            | Ok () -> rearm_cooling_retry_wake ()
-           | Error _ -> ());
+           | Error _ -> retry_cooling_observation ());
           loop state shutdown_operation_id
         | Command (Begin_shutdown { operation_id }, resolve) ->
           (match shutdown_operation_id with
@@ -1921,12 +1994,10 @@ let start
                  | None ->
                    let run_admitted_turn () =
                      (* The turn the debt existed for is running now. The
-                        debt stays at the cap while it runs -- that is what
-                        keeps [autonomous_owed_slot] true on every publish
-                        during the turn, so later consults keep the slot
-                        too (a chat queued behind the cap must not take it
-                        back at a second tool boundary). It clears at this
-                        turn's settle. *)
+                        Owner keeps its slot until the turn settles. A chat
+                        can be admitted only after a settled tool boundary
+                        cooperatively ends this turn or the turn completes.
+                        The debt clears at settlement. *)
                      t.child_active := true;
                      publish_turn_in_flight
                        t
@@ -2095,8 +2166,8 @@ let resume_direct_checkpoint t ~operation_id ~observed =
   request t (Resume_direct_checkpoint {operation_id; observed})
 
 let direct_runtime_retry t ~operation_id = request t (Direct_runtime_retry operation_id)
-let defer_direct_runtime_retry t ~operation_id ~execution_digest ~continuation =
-  request t (Defer_direct_runtime_retry {operation_id; execution_digest; continuation})
+let defer_direct_runtime_retry ?retry_wait t ~operation_id ~execution_digest ~continuation =
+  request t (Defer_direct_runtime_retry {operation_id; execution_digest; continuation; retry_wait})
 let resume_direct_runtime_retry t ~operation_id ~observed =
   request t (Resume_direct_runtime_retry {operation_id; observed})
 
@@ -2106,7 +2177,8 @@ let has_newer_original_queued t ~operation_id =
 let restart_interrupted_operations t = t.restart_interrupted
 let pause_and_interrupt ?expected_control_token t target = request t (Pause_and_interrupt {target; expected_control_token})
 let interrupt_turn = pause_and_interrupt
-let run_next_operation t ~operation_id ~observed = request t (Run_next_operation { operation_id; observed })
+let run_next_operation ?priority_predecessors t ~operation_id ~observed =
+  request t (Run_next_operation { operation_id; observed; priority_predecessors })
 
 let interrupt_running_operation t operation_id =
   request t (Interrupt_running_operation operation_id)

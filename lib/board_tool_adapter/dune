@@ -49,6 +49,9 @@
   ; binary-embedded config tree.
   masc.embedded_config
   masc.config
+  masc.config_dir_resolver
+  otoml
+  unix
   masc.fs_compat
   masc.masc_core
   masc.masc_log

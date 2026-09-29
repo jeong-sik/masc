@@ -93,11 +93,13 @@ let config_bindings =
       Some [ Config_presets ]
   ; b Act "i" "input"
       ~help:"on prompts, the input this prompt was last given", Some [ Config_prompts ]
-  ; b Act "a" "fragments / keeper voice"
+  ; b Act "a" "fragments / voice / account"
       ~help:"on prompts, show or hide the internal pieces the main prompts \
              are built from, though not on the runtime assets reading; on \
-             voice, give the selected keeper its own voice",
-      Some [ Config_prompts; Config_voice ]
+             voice, give the selected keeper its own voice; on runtime.toml, \
+             declare one more Claude Code, Codex or Antigravity account by \
+             copying a provider the file declares",
+      Some [ Config_runtime; Config_prompts; Config_voice ]
   ; b Act "o" "assets"
       ~help:"on prompts, switch between the read-only runtime assets and \
              the registry you can override",
@@ -119,7 +121,7 @@ type runtime_key =
   | Reading_walk
 
 let runtime_reading_walk_help =
-  "walk the three substrate readings; the third is the standalone Lanes surface"
+  "walk the three substrate readings; the third is the Lanes surface"
 
 let runtime_keys =
   [ Every_reading (b Navigate "j/k" "move / scroll")
@@ -306,9 +308,12 @@ let approval_retry =
    "[c] Reply   [v/V] Vote (+/-)   [Y] Copy Link   [Esc] Back" -- above a
    footer that spelled c, Y and Esc again and had no vote key at all, so that
    row was the only place on the screen that said v votes. *)
-let board_vote_key = b Act "v / V" "vote" ~help:"vote the post up or down"
+let board_vote_key = b Act "v / V" "up / down" ~help:"v votes up; V votes down"
 let board_reply_key = b Act "c" "reply" ~help:"reply (while reading)"
 let board_copy_key = b Act "Y" "copy link" ~help:"copy the selected post reference"
+let board_read_focus_key =
+  b Navigate "b" "post / comments" ~detail:Detail_only
+    ~help:"switch the focused reading window"
 
 let fusion_caller_key = b Navigate "K" "calling Keeper"
 let fusion_board_key = b Navigate "B" "Board evidence"
@@ -445,7 +450,7 @@ let for_surface = function
           ~help:"inspect and manage waiting turns"
       ; b Navigate "PgUp/PgDn" "history" ~help:"scroll history by a page"
       ; b Act "Ctrl-R" "reasoning" ~help:"cycle reasoning hidden / folded / full"
-      ; b Act "Ctrl-D" "tool detail" ~help:"toggle compact / full tool-call detail"
+      ; b Act "Ctrl-D" "tool detail" ~help:"cycle compact / results / full tool detail"
       ; b Act expand_turn_label "turn detail"
           ~help:
             "unfold the running turn's status rows, or fold them back to the \
@@ -459,6 +464,8 @@ let for_surface = function
       ; b Act "Ctrl-F" "message metadata"
           ~help:"cycle no clock / inline clock / full timestamp and request id"
       ; b Act "/approve /deny" "approval" ~help:"type a command and Enter to answer a tool approval"
+      ; b Act "/copy" "copy reply"
+          ~help:"send the selected Keeper's latest completed reply to the terminal clipboard via OSC 52"
       ; b Act "Ctrl-Q" "leave"
           ~help:"leave with a turn running, without interrupting it"
       ; (* One key, two focuses, listed once for the reason [Up / Down] above
@@ -506,14 +513,14 @@ let for_surface = function
       ; b Navigate "o / A" "Lane Add-ons"
           ~help:"inspect Lane Add-on declarations, instances and observations"
       ; b Act "Right / Enter" "runs"
-          ~help:"open the standalone lane's exact runs"
+          ~help:"open this lane's exact runs"
       ; b Act "a" "append slot"
           ~help:"add a candidate to this lane's walk order"
       ; b Act "s" "providers"
           ~help:"edit declared HTTP and CLI provider slots: a adds, x drops, \
-                 J/K reorders within each group, d opens the selected HTTP \
-                 slot's provider table where exact-body-timeout-s lives, Esc \
-                 closes; HTTP runs before CLI"
+                 J/K reorders within each group, Enter/d opens the selected \
+                 slot's config table, e opens the lane table, Esc closes; \
+                 HTTP runs before CLI"
         (* The lane detail spent four rows on the file's shape and on this
            key, the same two sentences under every lane. They are here, where
            the key is. *)
@@ -527,7 +534,7 @@ let for_surface = function
           ~help:"open the Runtime surface"
       ; b Act "Esc" "overview" ~help:"back to Overview"
       ; b Search "/" "find"
-          ~help:"jump the cursor to a matching standalone lane; the run list \
+          ~help:"jump the cursor to a matching lane; the run list \
                  and a run's detail carry no searchable rows"
       ; b Search "n / N" "next / previous match"
       ]
@@ -567,6 +574,7 @@ let for_surface = function
       ; b Search "H" "choose hearth" ~help:"search hearth names and choose directly"
       ; b Navigate "z" "wide detail" ~detail:Detail_only
           ~help:"hide or show the post list while reading"
+      ; board_read_focus_key
       ; board_copy_key
       ; b Navigate "Ctrl-W" "pane"
           ~help:"cycle the post list, the detail pane, and the Activity pane when it is drawn"
@@ -574,10 +582,8 @@ let for_surface = function
           ~help:"focus the post list or detail pane"
         (* Beside [f], not instead of it: [f] narrows the list to one hearth,
            this jumps the cursor to a post without changing what is listed. *)
-      ; b Navigate "PgUp/PgDn" "detail page"
-        (* The global page dispatcher already scrolls the open post body and
-           its comment thread by a window; it answers in the detail pane, so
-           the help owed it a line. *)
+      ; b Navigate "PgUp/PgDn" "page"
+          ~help:"page through the focused post list, body, or comments"
       ; b Search "/" "find" ~help:"jump the cursor to a matching post id, author or title"
       ; b Search "n / N" "next / previous match"
       ]
@@ -798,7 +804,7 @@ let for_surface = function
       @ row_list_jumps @ listing_meta
   | Connectors ->
       [ b Navigate "B" "Browser Lane"
-          ~help:"read browser tabs and page text; select live / automation inside Browser"
+          ~help:"read browser tabs and page text; select live / automation / stagehand inside Browser"
       ; b Act "Ctrl-O" "Browser screenshot"
           ~help:"inside Browser Lane: preview the selected tab; any key returns"
       ; b Navigate "j/k" "scroll"
@@ -1062,6 +1068,32 @@ let voice_agent_bindings =
 
 let footer_hints_voice_agent () = hints_of_bindings voice_agent_bindings
 
+(* The account form on runtime.toml takes every key while it is open, so the
+   pane's row -- [e], [r], [Tab], [q] -- would name keys that now type into a
+   field. The form's row names only what the form reads. *)
+let runtime_account_form_bindings =
+  [ b Navigate "\xe2\x86\x90/\xe2\x86\x92" "provider"
+      ~help:"on the provider field, the next or previous provider to copy"
+  ; b Navigate "\xe2\x86\x91/\xe2\x86\x93" "field"
+  ; b Act "Enter" "next / save"
+      ~help:"move to the next field; on the last one, declare the account and save"
+  ; b Act "Esc" "cancel" ~help:"close the form; nothing is written"
+  ]
+
+let footer_hints_runtime_account_form () =
+  hints_of_bindings runtime_account_form_bindings
+
+(* After a save the form shows the sign-in command and types nothing, so
+   [y] copies it as it does in the link and browser views. *)
+let runtime_account_saved_bindings =
+  [ b Act "y" "copy sign-in"
+      ~help:"send the sign-in command to the terminal clipboard (OSC 52)"
+  ; b Act "Enter / Esc" "close"
+  ]
+
+let footer_hints_runtime_account_saved () =
+  hints_of_bindings runtime_account_saved_bindings
+
 (* The prompts pane's read-only half. [o] swaps the registry for the assets
    shipped with the binary, and there [a], [i], [e] and [x] answer with a
    notice rather than acting (masc_tui.ml), so the row leaves them out and
@@ -1197,7 +1229,8 @@ let cancels_two_press ~input_seen ~key ~second_press =
    [K] and [B] answer in the detail as they do on the list (masc_tui.ml
    matches them under [Fusion_detail]); the footer left them out, and a body
    row said "K Keeper · B Board" in its own notation instead. *)
-let footer_hints_board_read ~focus_posts ~(layout : board_read_layout) =
+let footer_hints_board_read ~focus_posts ~focus_comments
+    ~(layout : board_read_layout) =
   let pane_keys =
     match layout with
     | Board_read_split -> [ b Navigate "h/l" "pane"; b Navigate "Ctrl-W" "switch" ]
@@ -1214,7 +1247,10 @@ let footer_hints_board_read ~focus_posts ~(layout : board_read_layout) =
     | Board_read_one_pane -> []
   in
   hints_of_bindings
-    ([ b Navigate "j/k" (if focus_posts then "posts" else "scroll")
+    ([ b Navigate "j/k"
+         (if focus_posts then "posts"
+          else if focus_comments then "comments" else "body")
+     ; board_read_focus_key
      ; b Navigate "[/]" "post"
      ; b Navigate "PgUp/PgDn" "page"
      ]
@@ -1226,6 +1262,14 @@ let footer_hints_board_read ~focus_posts ~(layout : board_read_layout) =
        ; b Meta "r" "refresh"
        ; b Meta "Tab" "next"
        ])
+
+(* A missing post has no read pane or copy target. Keep only the Board
+   bindings that still act while loading or after a failed read. *)
+let footer_hints_board_pending =
+  for_surface Board
+  |> List.filter (fun binding ->
+         List.exists (String.equal binding.key) [ "r"; "Left / Esc"; "Tab" ])
+  |> hints_of_bindings
 
 (* The scroll position is not here. It is not a key and it cannot be looked
    up, so it travels to the footer as its own argument
@@ -1458,6 +1502,10 @@ let keeper_detail_tab_bindings (tab : Masc_tui_types.keeper_detail_tab) =
           ~help:
             "requeue the oldest blocked Board-attention partition; \
              its judgment call may run a second time"
+      ; b Act "B" "requeue all board"
+          ~help:
+            "requeue every waiting Board-attention partition in order, with \
+             a separate audited CAS for each; judgment calls may run again"
       ]
   | Detail_secrets | Detail_automation | Detail_runs -> []
 
@@ -1602,7 +1650,7 @@ let help_sections ?current () =
 let footer_hints_browser_lane =
   hints_of_bindings
     [ b Navigate "b" "browser"
-    ; b Navigate "l / a" "live / automation"
+    ; b Navigate "l / a / c" "live / automation / stagehand"
     ; b Navigate "[ / ]" "tab"
     ; b Navigate "j/k" "text"
     ; b Act "Ctrl-O" "screenshot"

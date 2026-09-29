@@ -257,7 +257,7 @@ let all =
         ; "Keeper_heartbeat_loop"
         ]
       ~category:"heartbeat"
-      "Longest rest of a provider path after a refusal, in seconds"
+      "Fallback cap for provider rests without usable reset hints, in seconds; provider hints are preserved"
   ; setting
       ~effective:(Reader (fun () -> display_bool (Env_config_keeper.KeeperWireCapture.enabled ())))
       ~env_name:"MASC_KEEPER_WIRE_CAPTURE"
@@ -505,6 +505,17 @@ let all =
       ~consumers:[ "Env_config_keeper.KeeperMemoryOs"; "Keeper memory recall" ]
       ~category:"memory"
       "Enable memory recall prompt injection"
+  ; setting
+      ~range:(int_range ~min:1 ())
+      ~reload_class:Next_turn
+      ~effective:(Reader (fun () -> display_int (Env_config_keeper.KeeperMemoryOs.facts_max_bytes ())))
+      ~env_name:Env_config_keeper.KeeperMemoryOs.facts_max_bytes_env_key
+      ~exposure:Env_only
+      ~value_kind:Integer
+      ~default:"524288"
+      ~consumers:[ "Env_config_keeper.KeeperMemoryOs"; "Keeper memory commits" ]
+      ~category:"memory"
+      "Maximum rendered current facts bytes per Keeper"
   ; setting
       ~reload_class:Next_turn
       ~effective:

@@ -29,7 +29,7 @@ let observed_at = 1_790_000_000.
 let every_state : Server.snapshot =
   { reader = Server.Reader_ready { keeper = "pr-updater" }
   ; repositories_error = None
-  ; rejected_token_digest = None
+  ; rejected_token = None
   ; keepers = Server.Keepers_listed [ "k-author"; "k-idle" ]
   ; repositories =
       [ entry "masc"

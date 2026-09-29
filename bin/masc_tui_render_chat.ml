@@ -267,7 +267,7 @@ let folded_thinking_summary body =
 let tool_projection_mode (state : state) =
   match state.msg_tool_visibility with
   | Tools_compact -> Keeper_chat_transcript.Compact
-  | Tools_full -> Keeper_chat_transcript.Full
+  | Tools_results | Tools_full -> Keeper_chat_transcript.Full
 
 
 let is_all_digits s =
@@ -331,7 +331,7 @@ let contains_sub s sub =
 ;;
 
 let extract_tool_marker s =
-  let markers = [ "✓"; "✗"; "×"; "√"; "▶"; "◌"; "!"; "?" ] in
+  let markers = [ "✓"; "✗"; "×"; "√"; Keeper_chat_transcript.received_marker; "▶"; "◌"; "○"; "!"; "?" ] in
   List.find_opt (fun m -> String.starts_with ~prefix:m s) markers
 
 ;;
@@ -352,8 +352,8 @@ let tool_reopen = Ansi.reset ^ Ansi.dim
 let tool_marker_color = function
   | "✓" | "√" -> Theme.ok ()
   | "✗" | "×" | "!" -> Ansi.reset ^ Ansi.bold ^ Theme.bad ()
-  | "▶" | "?" -> Theme.warn ()
-  | "◌" -> Theme.info ()
+  | "▶" | "○" | "?" -> Theme.warn ()
+  | "↩" | "◌" -> Theme.info ()
   | _ -> tool_reopen
 
 ;;
@@ -383,7 +383,9 @@ let dress_tool_clause (clause : string) : string =
     else if (String.ends_with ~suffix:"ms" c || String.ends_with ~suffix:"s" c)
             && (match split_last_space c with None -> true | Some (_, _) -> false) then
       Printf.sprintf "%s%s%s" (Theme.recede () ^ Ansi.dim) c tool_reopen
-    else if contains_sub c "returned" || contains_sub c "failed" || contains_sub c "awaiting" || contains_sub c "running" then
+    else if contains_sub c "returned" || contains_sub c "failed"
+            || contains_sub c "awaiting" || contains_sub c "running"
+            || contains_sub c "result not seen" then
       if contains_sub c ", " then
         let parts = String.split_on_char ',' c in
         let dressed =
@@ -392,8 +394,10 @@ let dress_tool_clause (clause : string) : string =
               let p = String.trim p in
               if String.ends_with ~suffix:"returned" p then
                 Printf.sprintf "%s%s%s" (Theme.ok ()) p tool_reopen
-              else if contains_sub p "failed" || contains_sub p "never returned" then
+              else if contains_sub p "failed" then
                 Printf.sprintf "%s%s%s" (Ansi.reset ^ Ansi.bold ^ Theme.bad ()) p tool_reopen
+              else if contains_sub p "result not seen" then
+                Printf.sprintf "%s%s%s" (Theme.warn ()) p tool_reopen
               else if contains_sub p "awaiting" then
                 Printf.sprintf "%s%s%s" (Theme.warn ()) p tool_reopen
               else if contains_sub p "running" then
@@ -404,8 +408,10 @@ let dress_tool_clause (clause : string) : string =
         String.concat ", " dressed
       else if String.ends_with ~suffix:"returned" c then
         Printf.sprintf "%s%s%s" (Theme.ok ()) c tool_reopen
-      else if contains_sub c "failed" || contains_sub c "never returned" then
+      else if contains_sub c "failed" then
         Printf.sprintf "%s%s%s" (Ansi.reset ^ Ansi.bold ^ Theme.bad ()) c tool_reopen
+      else if contains_sub c "result not seen" then
+        Printf.sprintf "%s%s%s" (Theme.warn ()) c tool_reopen
       else if contains_sub c "awaiting" then
         Printf.sprintf "%s%s%s" (Theme.warn ()) c tool_reopen
       else if contains_sub c "running" then
@@ -494,7 +500,7 @@ let origin_heading buf cols ~plain ~styled ~clock =
   in
   box_line buf cols (lead ^ rule ^ tail)
 
-let render_chat_row ~theme buf cols (row : Message_layout.row) =
+let render_chat_row ~theme ~tool_visibility buf cols (row : Message_layout.row) =
   match row.kind with
   | Message_layout.Viewport_gap { hidden_rows = _ } ->
       (* The glyph survives NO_COLOR; the adaptive recede keeps the separator
@@ -510,7 +516,7 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
       let context = Chat_theme.body_context theme row.style in
       let is_tool = match row.style with Message_layout.Tool -> true | _ -> false in
       let dress rest =
-        if is_tool then
+        if is_tool && tool_visibility <> Tools_results then
           dress_tool_summary rest
         else
           Masc_tui_message_layout.dress_bare_links
@@ -874,6 +880,7 @@ type keeper_call_association =
   | Call_log_unavailable of string
   | Call_execution_unrecorded
   | Call_execution_missing
+  | Call_execution_coverage_gap of string
   | Call_execution_ambiguous of int
   | Call_execution_exact of Tui_decode.keeper_call
 
@@ -895,12 +902,12 @@ let keeper_call_association state ~keeper_name
       then Call_log_loading
       else
       match state.keeper_calls_error, state.keeper_calls with
-      | Some detail, _ -> Call_log_unavailable detail
+      | Some detail, None -> Call_log_unavailable detail
       | None, None -> Call_log_not_loaded
-      | None, Some snapshot
+      | _, Some snapshot
         when not (String.equal snapshot.Tui_decode.kcs_keeper keeper_name) ->
           Call_log_not_loaded
-      | None, Some snapshot ->
+      | _, Some snapshot ->
           let matches =
             List.filter
               (fun (call : Tui_decode.keeper_call) ->
@@ -909,7 +916,39 @@ let keeper_call_association state ~keeper_name
               snapshot.kcs_entries
           in
           match matches with
-          | [] -> Call_execution_missing
+          | [] ->
+              (match state.keeper_calls_error with
+               | Some detail -> Call_log_unavailable detail
+               | None when snapshot.Tui_decode.kcs_mismatched > 0 ->
+                   (* Filtered foreign rows never join. One of them may carry
+                      the queried execution id, so a nonzero mismatch count
+                      means this absence is unproven even when health says ok. *)
+                   Call_execution_coverage_gap
+                     (Printf.sprintf "%d row(s) named another keeper and were not drawn"
+                        snapshot.Tui_decode.kcs_mismatched)
+               | None -> (
+                   (* No match is only proof of absence against a log known
+                      complete: [ok], or [empty]/[missing] with nothing in it.
+                      Any other verdict -- a coverage gap, a stale read, a word
+                      this build does not know -- means the row may exist past
+                      what the snapshot covers, so the association says the log
+                      is incomplete instead of the row missing. *)
+                   match snapshot.Tui_decode.kcs_health with
+                   | Tui_decode.Call_log_ok -> Call_execution_missing
+                   | (Tui_decode.Call_log_empty | Tui_decode.Call_log_missing)
+                     when snapshot.Tui_decode.kcs_entries = [] ->
+                       Call_execution_missing
+                   | (Tui_decode.Call_log_empty | Tui_decode.Call_log_missing
+                     | Tui_decode.Call_log_stale
+                     | Tui_decode.Call_log_coverage_gap
+                     | Tui_decode.Call_log_unknown _) as health ->
+                       let reason =
+                         match snapshot.Tui_decode.kcs_stale_reason with
+                         | Some reason -> reason
+                         | None ->
+                             Tui_decode.keeper_call_log_health_to_string health
+                       in
+                       Call_execution_coverage_gap reason))
           | [ call ] -> Call_execution_exact call
           | rows -> Call_execution_ambiguous (List.length rows))
 
@@ -952,8 +991,8 @@ let tool_outcome_tone : Keeper_chat_transcript.tool_outcome -> string = function
   | Keeper_chat_transcript.Started | Keeper_chat_transcript.Awaiting_result ->
       Theme.info ()
   | Keeper_chat_transcript.Returned -> Theme.ok ()
-  | Keeper_chat_transcript.Failed | Keeper_chat_transcript.Never_returned ->
-      Theme.bad ()
+  | Keeper_chat_transcript.Failed -> Theme.bad ()
+  | Keeper_chat_transcript.Never_returned
   | Keeper_chat_transcript.Outcome_unrecorded -> Theme.warn ()
 
 
@@ -962,8 +1001,31 @@ let tool_outcome_label : Keeper_chat_transcript.tool_outcome -> string = functio
   | Keeper_chat_transcript.Awaiting_result -> "WAITING FOR RESULT"
   | Keeper_chat_transcript.Returned -> "RETURNED"
   | Keeper_chat_transcript.Failed -> "FAILED"
-  | Keeper_chat_transcript.Never_returned -> "NEVER RETURNED"
+  | Keeper_chat_transcript.Never_returned -> "RESULT NOT SEEN HERE"
   | Keeper_chat_transcript.Outcome_unrecorded -> "OUTCOME UNRECORDED"
+
+
+let durable_call_failed = function
+  | Call_execution_exact call ->
+      call.kc_outcome = Tool_result.Recorded_failed
+      || call.kc_disposition = Some Tui_decode.Keeper_call_failed
+  | Call_log_not_loaded | Call_log_loading | Call_log_unavailable _
+  | Call_execution_unrecorded | Call_execution_missing
+  | Call_execution_coverage_gap _ | Call_execution_ambiguous _ -> false
+
+
+let tool_outcome_label_with_call outcome association =
+  if durable_call_failed association then "FAILED · CALL LOG"
+  else match outcome, association with
+  | Keeper_chat_transcript.Never_returned, Call_execution_exact call
+    when Option.is_some call.kc_output ->
+      "RESULT IN CALL LOG · NOT SEEN IN TURN"
+  | _ -> tool_outcome_label outcome
+
+
+let tool_outcome_tone_with_call outcome association =
+  if durable_call_failed association then Theme.bad ()
+  else tool_outcome_tone outcome
 
 
 let keeper_call_schedule_label (schedule : Tui_decode.keeper_call_schedule) =
@@ -1049,6 +1111,9 @@ let keeper_message_tool_activity_details state ~keeper_name
         "execution id not recorded", None, activity.args, None, None
     | Call_execution_missing ->
         "no durable row for this execution id", None, activity.args, None, None
+    | Call_execution_coverage_gap reason ->
+        "call log incomplete · " ^ Terminal_text.single_line reason,
+        None, activity.args, None, None
     | Call_execution_ambiguous count ->
         Printf.sprintf "%d durable rows share this execution id" count,
         None, activity.args, None, None
@@ -1061,7 +1126,7 @@ let keeper_message_tool_activity_details state ~keeper_name
          | None -> activity.call_id)
     | Call_log_not_loaded | Call_log_loading | Call_log_unavailable _
     | Call_execution_unrecorded | Call_execution_missing
-    | Call_execution_ambiguous _ ->
+    | Call_execution_coverage_gap _ | Call_execution_ambiguous _ ->
         activity.call_id
   in
   let identity =
@@ -1091,8 +1156,8 @@ let keeper_message_tool_activity_details state ~keeper_name
   let fields =
     [ Some
         (said "state"
-           (tool_outcome_label activity.outcome)
-           (tool_outcome_tone activity.outcome))
+           (tool_outcome_label_with_call activity.outcome association)
+           (tool_outcome_tone_with_call activity.outcome association))
     ; Option.map
         (fun (label, value, tone) -> said label value tone)
         disposition_field
@@ -1157,6 +1222,125 @@ let chat_body_line_cells ~chat_cols ~role_label_column =
   max 24 (min 120 (chat_cols - role_label_column - 8))
 
 
+let clip_tool_result ~max_cells text =
+  let text = Masc_tui_keeper_chat_projection.terminal_safe_text text |> String.trim in
+  if Message_layout.display_width text <= max_cells then text
+  else
+    match Message_layout.split_cells ~max_cells:(max 1 (max_cells - 1)) text with
+    | [] -> "…"
+    | prefix :: _ -> prefix ^ "…"
+
+
+let tool_result_preview (activity : Keeper_chat_transcript.tool_activity) value =
+  match Keeper_chat_transcript.descriptor_of_tool_name activity.Keeper_chat_transcript.tool_name with
+  | Some descriptor
+    when descriptor.runtime_handler = Masc.Keeper_tool_descriptor.Tool_execute ->
+      (match Masc_tui_execute_result.of_result value with
+       | Some result ->
+           let output =
+             match result.output with
+             | Some (Masc_tui_execute_result.Printed text) -> text
+             | Some (Masc_tui_execute_result.Stored reference) ->
+                 Masc_tui_execute_result.stored_text reference
+             | None -> ""
+           in
+           String.concat " · "
+             (List.filter (fun text -> String.trim text <> "")
+                [ Masc_tui_execute_result.status_text result; output ])
+       | None -> value)
+  | Some _ | None -> value
+
+
+let tool_result_rows state ~keeper_name ~max_cells projection =
+  let rows =
+    List.concat_map
+      (fun (activity : Keeper_chat_transcript.tool_activity) ->
+        let association = keeper_call_association state ~keeper_name activity in
+        (* Exact durable failure wins over a transcript that has not been
+           enriched yet. Receipt otherwise makes no success claim. *)
+        let durable_failure = durable_call_failed association in
+        let marker, status =
+          if durable_failure then
+            Keeper_chat_transcript.marker_of_outcome Keeper_chat_transcript.Failed,
+            "failed"
+          else
+            match activity.outcome, association with
+            | ( Keeper_chat_transcript.Never_returned
+              | Keeper_chat_transcript.Started
+              | Keeper_chat_transcript.Awaiting_result )
+              , Call_execution_exact call
+              when Option.is_some call.kc_output ->
+                (* A recorded output is already evidence, even when the
+                   transcript has not folded its completion event yet. *)
+                Keeper_chat_transcript.received_marker, "in call log"
+            | Keeper_chat_transcript.Returned, _ ->
+                Keeper_chat_transcript.received_marker, "received"
+            | outcome, _ ->
+                Keeper_chat_transcript.marker_of_outcome outcome,
+                (match outcome with
+                 | Keeper_chat_transcript.Started -> "starting"
+                 | Keeper_chat_transcript.Awaiting_result -> "waiting"
+                 | Keeper_chat_transcript.Failed -> "failed"
+                 | Keeper_chat_transcript.Never_returned -> "not seen"
+                 | Keeper_chat_transcript.Outcome_unrecorded -> "unknown"
+                 | Keeper_chat_transcript.Returned -> "received")
+        in
+        let fixed_cells = Message_layout.display_width (marker ^ "  · " ^ status) in
+        let detail_on_next_line = max_cells < 80 in
+        let name_cells =
+          max 4
+            (min 48
+               (max_cells - fixed_cells
+                - (if detail_on_next_line then 0 else 12)))
+        in
+        let name = clip_tool_result ~max_cells:name_cells activity.tool_name in
+        let prefix = Printf.sprintf "%s %s · %s" marker name status in
+        let preview, unavailable =
+          match association with
+          | Call_execution_exact call ->
+              Option.map (tool_result_preview activity) call.kc_output,
+              "result text not recorded"
+          | Call_log_not_loaded -> None, "result preview not loaded"
+          | Call_log_loading -> None, "loading result preview"
+          | Call_log_unavailable _ -> None, "result preview unavailable"
+          | Call_execution_unrecorded -> None, "no execution id"
+          | Call_execution_missing -> None, "no call-log row"
+          | Call_execution_coverage_gap _ -> None, "call log incomplete"
+          | Call_execution_ambiguous _ -> None, "duplicate execution id"
+        in
+        let detail =
+          match preview with
+          | Some value when String.trim value <> "" -> Some value
+          | Some _ -> Some "(empty result)"
+          | None ->
+              (match activity.outcome with
+               | Keeper_chat_transcript.Started
+               | Keeper_chat_transcript.Awaiting_result -> None
+               | Keeper_chat_transcript.Returned
+               | Keeper_chat_transcript.Failed
+               | Keeper_chat_transcript.Never_returned
+               | Keeper_chat_transcript.Outcome_unrecorded ->
+                   Some unavailable)
+        in
+        (* Only generated status text is dressed. Payload stays terminal-safe
+           plain text, including words or glyphs that resemble a failure. *)
+        let prefix = clip_tool_result ~max_cells prefix in
+        let styled_prefix = dress_tool_summary prefix in
+        match detail with
+        | None -> [styled_prefix]
+        | Some detail when detail_on_next_line ->
+            [ styled_prefix
+            ; "  " ^ clip_tool_result ~max_cells:(max_cells - 2) detail
+            ]
+        | Some detail ->
+            let room = max_cells - Message_layout.display_width prefix - 3 in
+            [styled_prefix ^ " · " ^ clip_tool_result ~max_cells:room detail])
+      projection.Keeper_chat_transcript.activities
+  in
+  if projection.omitted_steps = 0 then rows
+  else rows @ [Printf.sprintf "(%d tool steps omitted from transcript)" projection.omitted_steps]
+
+
 (* One reading of a Gate row's fold, for the two questions that need it: what
    the row draws, and whether pressing it opens anything. Folded twice, the
    text could say it is holding something on a frame where the press says it
@@ -1178,12 +1362,15 @@ let keeper_message_tool_rows (state : state) ~keeper_name ~chat_cols projection 
     else Keeper_chat_diff.empty
   in
   let mode = tool_projection_mode state in
+  let max_line_cells = chat_body_line_cells ~chat_cols ~role_label_column in
   let rows =
-    Keeper_chat_diff.rows
-    ~mode
-    ~max_line_cells:(chat_body_line_cells ~chat_cols ~role_label_column)
-    ~activity_details:(keeper_message_tool_activity_details state ~keeper_name)
-    file_change_index projection
+    match state.msg_tool_visibility with
+    | Tools_results ->
+        tool_result_rows state ~keeper_name ~max_cells:max_line_cells projection
+    | Tools_compact | Tools_full ->
+        Keeper_chat_diff.rows ~mode ~max_line_cells
+          ~activity_details:(keeper_message_tool_activity_details state ~keeper_name)
+          file_change_index projection
   in
   (* The fold says how many rows it is holding; the key that opens them is in
      the footer, on every frame, next to the other five. Repeating it on the
@@ -1191,9 +1378,9 @@ let keeper_message_tool_rows (state : state) ~keeper_name ~chat_cols projection 
      with four tool blocks carried the same sentence four times -- which is
      what pushed the tool names onto a second line and broke the read of the
      conversation they sit inside. *)
-  match projection.Keeper_chat_transcript.header with
-  | None -> rows
-  | Some header ->
+  match state.msg_tool_visibility, projection.Keeper_chat_transcript.header with
+  | Tools_results, _ | _, None -> rows
+  | (Tools_compact | Tools_full), Some header ->
       (* The rollup is the block's first line and the calls hang under it,
          one step in. The projection knows which line is the header; how far
          the calls sit from it is this pane's decision, so the indent is
@@ -1517,7 +1704,7 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
               | [] -> message.me_text
               (* One row per skill the turn triggered, counted, is the fact
                  this row exists for. Each invocation's state, actions,
-                 proof line and detail ride the tool toggle: Ctrl-D opens
+                 proof line and detail ride the tool cycle: full opens
                  them, the resting pane stays one line per skill. *)
               | activities ->
                   Keeper_chat_transcript.skill_rows
@@ -1557,9 +1744,9 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
              call asked for, while a status row without one is a sentence the
              server composed and has nothing to fold away. *)
           | Message_status when message.me_gate <> None -> (
-              match tool_projection_mode state with
-              | Keeper_chat_transcript.Full -> message.me_text
-              | Keeper_chat_transcript.Compact ->
+              match state.msg_tool_visibility with
+              | Tools_full -> message.me_text
+              | Tools_compact | Tools_results ->
                   (gate_fold ~chat_cols ~role_label_column message)
                     .Masc_tui_gate_text.fa_text)
           | Message_thinking | Message_user _ | Message_keeper
@@ -1605,8 +1792,8 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
                 would take a press and do nothing visible, which reads as the
                 pane ignoring the click. *)
              action =
-               (match message.me_role, tool_projection_mode state with
-                | Masc_tui_types.Message_status, Keeper_chat_transcript.Compact
+               (match message.me_role, state.msg_tool_visibility with
+                | Masc_tui_types.Message_status, (Tools_compact | Tools_results)
                   when message.me_gate <> None
                        && (gate_fold ~chat_cols ~role_label_column message)
                             .Masc_tui_gate_text.fa_held_cells
@@ -2077,6 +2264,13 @@ type settled_block_memo = {
   sbm_messages : Masc_tui_types.msg_entry list;
   sbm_reasoning : reasoning_visibility;
   sbm_tools : tool_visibility;
+  sbm_calls_keeper : string option;
+  sbm_calls_loading : bool;
+  sbm_calls_error : string option;
+  sbm_calls : keeper_calls_snapshot option;
+  sbm_file_changes_keeper : string option;
+  sbm_file_change_index : Keeper_chat_diff.index;
+  sbm_palette_generation : int;
   sbm_chat_cols : int;
   sbm_block : log_block;
 }
@@ -2098,15 +2292,16 @@ let merged_blocks_memo : merged_blocks_memo option ref = ref None
 
 
 let render_keeper_message (state : state) =
-  (* The chat surface draws its own composer, so it keeps the whole terminal
-     rather than reserving the shared row for a second one. *)
+  (* The chat draws its own composer and footer instead of taking the shared
+     composer row. Its columns are every surface's: the terminal less the
+     Activity pane, which [finish_frame_beside_acting_pane] draws beside it. *)
   let rows, cols = get_terminal_size () in
   let buf = Buffer.create 4096 in
 
   match state.msg_target_keeper_name with
   | None ->
     Buffer.add_string buf "No keeper selected.\n";
-    finish_frame_with_strip state ~surface_key:"keeper-message" ~cursor:Frame_presenter.Hidden
+    finish_frame_beside_acting_pane state ~surface_key:"keeper-message" ~cursor:Frame_presenter.Hidden
       ~rows ~cols buf
   | Some keeper_name ->
     let chat_theme = Chat_theme.snapshot () in
@@ -2114,7 +2309,9 @@ let render_keeper_message (state : state) =
     let target_registered =
       keeper_available_for_new_message state keeper_name
     in
-    let status_rows = keeper_message_status_rows state in
+    let command_window = keeper_message_command_window state ~terminal_rows:rows ~terminal_cols:cols in
+    let command_rows = match command_window with None -> 0 | Some (_, entries) -> 2 + List.length entries in
+    let status_rows = keeper_message_status_rows state + command_rows in
     let support_status_rows =
       keeper_message_support_status_rows state ~status_rows
     in
@@ -2164,7 +2361,7 @@ let render_keeper_message (state : state) =
              | gaps -> " partial · " ^ String.concat " · " gaps)
         in
         match state.msg_tool_visibility with
-        | Tools_compact -> ""
+        | Tools_compact | Tools_results -> ""
         | Tools_full ->
             if
               not
@@ -2181,8 +2378,18 @@ let render_keeper_message (state : state) =
               | None, Some snapshot -> snapshot_status ~stale:false snapshot
               | None, None -> "diffs pending"
       in
+      let call_status =
+        match state.msg_tool_visibility, state.keeper_calls_error with
+        | (Tools_results | Tools_full), Some _
+          when state.keeper_calls_keeper = Some keeper_name ->
+            (match state.keeper_calls with
+             | Some snapshot when String.equal snapshot.kcs_keeper keeper_name ->
+                 "results stale · refresh failed"
+             | Some _ | None -> "results unavailable")
+        | (Tools_compact | Tools_results | Tools_full), _ -> ""
+      in
       let modes =
-        [ modes; diff_status ]
+        [ modes; diff_status; call_status ]
         |> List.filter (fun item -> not (String.equal item ""))
         |> String.concat " · "
       in
@@ -2197,11 +2404,16 @@ let render_keeper_message (state : state) =
       title, mode_suffix
     in
     let inner_cells = framed_inner_width chat_cols in
-    (* Title and projection are navigation facts. Runtime/gate/context are
-       operational facts. Putting all of them on one row made an ordinary
-       provider id consume the rest of the header and silently lose whatever
-       followed it. Two fixed rows make the hierarchy visible and let the
-       opaque runtime id be the only item that yields width. *)
+    (* Navigation stays above the conversation. The selected Keeper's status
+       spans the full surface below both panes; the roster must not consume
+       the width needed to identify the runtime the composer will address. *)
+    let telemetry_cells = max 0 (cols - 1) in
+    let telemetry_keeper =
+      fit_runtime_id (telemetry_cells / 3) display_keeper_name ^ " · "
+    in
+    let telemetry_identity_cells =
+      max 0 (telemetry_cells - Message_layout.display_width telemetry_keeper)
+    in
     let title_row =
       Message_layout.chat_title_row ~inner_cells ~title ~mode_suffix
     in
@@ -2214,9 +2426,10 @@ let render_keeper_message (state : state) =
         with
         | Some { observation = Some observation; error = None } ->
             Observation_layout.context_header_item
-              ~max_cells:(min 32 (max 0 (inner_cells / 3)))
+              ~max_cells:(min 48 (telemetry_identity_cells / 2))
               ~inspect_key:Masc_tui_keys.context_inspector_label observation
-        | Some _ | None -> None
+        | Some {error = Some _; _} -> Some "Context unavailable"
+        | Some _ | None -> Some "Context —"
     in
     let context_cells =
       match context_item with
@@ -2236,7 +2449,7 @@ let render_keeper_message (state : state) =
           fit_width
             (Masc_tui_types.librarian_failing_text
                ~since:(keeper_message_clock failing.lf_since) failing)
-            (max 0 ((inner_cells - context_cells) / 2)))
+            (max 0 ((telemetry_identity_cells - context_cells) / 2)))
         (Masc_tui_types.librarian_failing (chat_rows_for state keeper_name))
     in
     let librarian_cells =
@@ -2248,12 +2461,12 @@ let render_keeper_message (state : state) =
     in
     let identity =
       keeper_message_identity
-        ~max_cells:(max 0 (inner_cells - context_cells - librarian_cells))
+        ~max_cells:(max 0 (telemetry_identity_cells - context_cells - librarian_cells))
         state keeper_name
     in
     let identity_row =
       String.concat ""
-        (identity
+        ((telemetry_keeper ^ identity)
          :: List.filter_map Fun.id
               [ Option.map
                   (fun item ->
@@ -2274,19 +2487,18 @@ let render_keeper_message (state : state) =
       in
       Buffer.add_string buf
         (Message_layout.fit_width notice (max 1 (cols - 1)));
-      finish_frame_with_strip state ~surface_key:"keeper-message"
+      finish_frame_beside_acting_pane state ~surface_key:"keeper-message"
         ~cursor:Frame_presenter.Hidden ~rows ~cols buf
     end else begin
     let chat_buf = if split then Buffer.create 4096 else buf in
     (* Header *)
     box_top chat_buf chat_cols;
     box_line chat_buf chat_cols title_row;
-    box_line chat_buf chat_cols identity_row;
     box_divider chat_buf chat_cols;
 
-    (* Message history. The fixed chrome is 8 rows — box top, two header rows,
-       their divider, the input divider, the composer's first line, box bottom
-       and the footer — and every variable row (status, sending, queue, errors,
+    (* Message history. The fixed chrome is 8 rows — box top, navigation row,
+       its divider, the input divider, composer's first line, box bottom,
+       runtime/context row and key footer — and every variable row (status, sending, queue, errors,
        composer growth) is in [status_rows]. The old constant 10 reserved
        two rows nothing drew, so the pane stopped two short of the
        terminal's bottom edge. [message_viewport_supported] requires the same
@@ -2539,6 +2751,10 @@ let render_keeper_message (state : state) =
         , Masc_tui_types.turn_log_request_id turn_log )
       in
       let revision = Keeper_chat_transcript.revision turn_log.tl_transcript in
+      let palette_generation =
+        Masc_tui_terminal_palette.snapshot_generation
+          (Masc_tui_terminal_palette.snapshot ())
+      in
       match Hashtbl.find_opt settled_block_memo key with
       | Some memo
         when memo.sbm_log == turn_log
@@ -2548,6 +2764,13 @@ let render_keeper_message (state : state) =
              && memo.sbm_messages == committed_timeline_messages
              && memo.sbm_reasoning = state.msg_reasoning_visibility
              && memo.sbm_tools = state.msg_tool_visibility
+             && memo.sbm_calls_keeper = state.keeper_calls_keeper
+             && memo.sbm_calls_loading = state.keeper_calls_loading
+             && memo.sbm_calls_error = state.keeper_calls_error
+             && memo.sbm_calls == state.keeper_calls
+             && memo.sbm_file_changes_keeper = state.msg_file_changes_keeper
+             && memo.sbm_file_change_index == state.msg_file_change_index
+             && memo.sbm_palette_generation = palette_generation
              && memo.sbm_chat_cols = chat_cols ->
           memo.sbm_block
       | Some _ | None ->
@@ -2560,6 +2783,13 @@ let render_keeper_message (state : state) =
               sbm_messages = committed_timeline_messages;
               sbm_reasoning = state.msg_reasoning_visibility;
               sbm_tools = state.msg_tool_visibility;
+              sbm_calls_keeper = state.keeper_calls_keeper;
+              sbm_calls_loading = state.keeper_calls_loading;
+              sbm_calls_error = state.keeper_calls_error;
+              sbm_calls = state.keeper_calls;
+              sbm_file_changes_keeper = state.msg_file_changes_keeper;
+              sbm_file_change_index = state.msg_file_change_index;
+              sbm_palette_generation = palette_generation;
               sbm_chat_cols = chat_cols;
               sbm_block = block;
             };
@@ -2819,9 +3049,10 @@ let render_keeper_message (state : state) =
         ~requested:(state.msg_scroll + rows_since_pin) layout_entries
     in
 
-    (* Recorded before the rows are written, so the count is the lines above
-       the history rather than including them. One-based: terminal rows are. *)
-    chat_history_first_row := count_frame_lines chat_buf + 1;
+    (* The chat buffer starts below the one-row tab strip, which is added by
+       [finish_frame_beside_acting_pane]. Mouse reports count from the terminal's
+       first row, so include that strip and the one-based row conversion. *)
+    chat_history_first_row := count_frame_lines chat_buf + 2;
     chat_history_actions :=
       Array.of_list
         (List.map
@@ -2836,7 +3067,8 @@ let render_keeper_message (state : state) =
       done
     end else begin
       List.iter
-        (render_chat_row ~theme:chat_theme chat_buf chat_cols)
+        (render_chat_row ~theme:chat_theme ~tool_visibility:state.msg_tool_visibility
+           chat_buf chat_cols)
         visible_rows;
       (* Fill remaining space *)
       for _ = List.length visible_rows to history_height - 1 do
@@ -3199,7 +3431,7 @@ let render_keeper_message (state : state) =
                    let age =
                      match row.gp_waiting_s with
                      | Some seconds -> Masc_tui_answering.duration_text seconds
-                     | None -> "?"
+                     | None -> Masc_tui_theme.Glyph.no_value
                    in
                    Printf.sprintf "%s %s %s"
                      (Keeper_chat.terminal_safe_text row.gp_display_tool)
@@ -3224,6 +3456,21 @@ let render_keeper_message (state : state) =
       in
       box_line_styled chat_buf chat_cols ~style:(Theme.bad ()) unavailable_message
     end;
+    (match command_window with
+     | None -> ()
+     | Some (menu, entries) ->
+       box_line_styled chat_buf chat_cols ~style:(Theme.recede ())
+         (Printf.sprintf "  Commands  %d/%d" (menu.selected + 1) (List.length menu.items));
+       let label_cells = min 26 (max 8 ((framed_inner_width chat_cols - 5) / 3)) in
+       List.iter (fun (selected, (item : Masc_tui_command.menu_item)) ->
+         let label = fit_width (Terminal_text.single_line item.label) label_cells in
+         let marker = if selected then "› " else "  " in
+         let style = if selected then Masc_tui_theme.tone Masc_tui_theme.Accent ^ Ansi.bold else Theme.recede () in
+         box_line chat_buf chat_cols
+           ("  " ^ style ^ marker ^ label ^ "  "
+            ^ (if selected then Ansi.reset else Theme.recede ())
+            ^ Terminal_text.single_line item.description ^ Ansi.reset)) entries;
+       box_divider chat_buf chat_cols);
     let input = Buffer.contents state.msg_input in
     let composer =
       Message_layout.composer_lines
@@ -3260,7 +3507,6 @@ let render_keeper_message (state : state) =
     in
 
     box_bottom chat_buf chat_cols;
-
     (* Footer *)
     let disposition = send_disposition state ~keeper_name in
     let pending_count =
@@ -3365,7 +3611,9 @@ let render_keeper_message (state : state) =
        actually pressed, which is what tells them how far along the word they
        are. *)
     let slash_hint =
-      slash_hint_text ~restore:Ansi.default_fg (Buffer.contents state.msg_input)
+      match command_window with
+      | Some _ -> Some "↑/↓:select  Tab/Enter:insert  Esc:close"
+      | None -> slash_hint_text ~restore:Ansi.default_fg (Buffer.contents state.msg_input)
     in
     let footer_hints =
       match slash_hint with
@@ -3433,10 +3681,6 @@ let render_keeper_message (state : state) =
         Masc_tui_footer.chat_hints ~enter_hint ~scroll_hint ~switch_hint
           ~escape_hint ~leave_hint
     in
-    Buffer.add_string chat_buf
-      (footer_line state ~max_cells:chat_cols ?position:scroll_position
-         ~hints:footer_hints);
-
     let input_column =
       Message_layout.input_cursor_column ~terminal_cols:chat_cols
         ~input:visible_input
@@ -3448,11 +3692,16 @@ let render_keeper_message (state : state) =
       let left_buf = Buffer.create 1024 in
       keeper_roster_pane
         ~focused:(state.keeper_message_focus = Left_pane)
-        state ~rows ~cols:keeper_roster_pane_cols left_buf;
+        state ~rows:(count_frame_lines chat_buf) ~cols:keeper_roster_pane_cols left_buf;
       write_two_panes buf ~left_cols:keeper_roster_pane_cols ~left:left_buf
         ~right:chat_buf
     end;
-    finish_frame_with_strip state ~surface_key:"keeper-message"
+    (* History already reserves these two fixed rows. Append them once after
+       composing the panes, with the same full width in split and plain chat. *)
+    Buffer.add_string buf (" " ^ fit_width identity_row telemetry_cells ^ "\n");
+    Buffer.add_string buf
+      (footer_line state ~max_cells:cols ?position:scroll_position ~hints:footer_hints);
+    finish_frame_beside_acting_pane state ~surface_key:"keeper-message"
       ~clamped:(Message_scroll scroll)
       ~cursor:
         (if state.keeper_message_focus = Left_pane then

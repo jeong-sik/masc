@@ -52,7 +52,7 @@ let test_first_frame_and_identical_frame () =
   let captured = sink () in
   let initial = frame [ "top"; "middle"; "bottom" ] in
   (match present_result presenter captured initial with
-   | Presenter.Presented -> ()
+   | Presenter.Presented _ -> ()
    | Presenter.Unchanged -> fail "first frame was reported unchanged");
   check int "first frame writes once" 1 (List.length captured.writes);
   check int "first frame flushes once" 1 captured.flushes;
@@ -67,9 +67,35 @@ let test_first_frame_and_identical_frame () =
   reset_sink captured;
   (match present_result presenter captured initial with
    | Presenter.Unchanged -> ()
-   | Presenter.Presented -> fail "identical frame was reported presented");
+   | Presenter.Presented _ -> fail "identical frame was reported presented");
   check int "identical frame writes nothing" 0 (List.length captured.writes);
   check int "identical frame does not flush" 0 captured.flushes
+
+(* A picture placed over the frame is sent again only where the frame took
+   its cells, so the presenter says which rows it wrote. *)
+let test_a_frame_says_which_rows_it_wrote () =
+  let presenter = Presenter.create ~synchronized_output:false () in
+  let captured = sink () in
+  let repaint lines =
+    match present_result presenter captured (frame lines) with
+    | Presenter.Presented repaint -> Some repaint
+    | Presenter.Unchanged -> None
+  in
+  check bool "the first frame is a full redraw" true
+    (repaint [ "top"; "middle"; "bottom" ] = Some Presenter.Whole_screen);
+  check bool "a changed row is the only one written" true
+    (repaint [ "top"; "moved"; "bottom" ] = Some (Presenter.Rows [ 1 ]));
+  check bool "rows come top first" true
+    (repaint [ "new top"; "moved"; "new bottom" ] = Some (Presenter.Rows [ 0; 2 ]));
+  check bool "an identical frame writes none" true
+    (repaint [ "new top"; "moved"; "new bottom" ] = None);
+  check bool "an invalidated frame is a full redraw again" true
+    (match
+       present_result ~invalidate_before:true presenter captured
+         (frame [ "new top"; "moved"; "new bottom" ])
+     with
+     | Presenter.Presented repaint -> repaint = Presenter.Whole_screen
+     | Presenter.Unchanged -> false)
 
 let test_input_gate_follows_the_last_presented_frame () =
   let presenter = Presenter.create ~synchronized_output:false () in
@@ -451,14 +477,14 @@ let test_repeated_identical_frames_retain_zero_alloc_unchanged () =
   let captured = sink () in
   let f = frame ~rows:300 [ "row 1"; "row 2"; "row 3" ] in
   (match present_result presenter captured f with
-   | Presenter.Presented -> ()
+   | Presenter.Presented _ -> ()
    | Presenter.Unchanged -> fail "first frame must be presented");
   check int "first frame writes once" 1 (List.length captured.writes);
   for _ = 1 to 10 do
     reset_sink captured;
     (match present_result presenter captured f with
      | Presenter.Unchanged -> ()
-     | Presenter.Presented -> fail "identical frame must return Unchanged");
+     | Presenter.Presented _ -> fail "identical frame must return Unchanged");
     check int "repeated frame writes 0" 0 (List.length captured.writes);
     check int "repeated frame flushes 0" 0 captured.flushes
   done;
@@ -469,7 +495,7 @@ let test_repeated_identical_frames_retain_zero_alloc_unchanged () =
   reset_sink captured;
   let f_large = frame ~rows:300 changed_rows in
   (match present_result presenter captured f_large with
-   | Presenter.Presented -> ()
+   | Presenter.Presented _ -> ()
    | Presenter.Unchanged -> fail "changed large frame must be presented");
   let out = output captured in
   check bool "large row index uses absolute addressing" true
@@ -481,26 +507,26 @@ let test_frame_lines_growing_and_shrinking_detected () =
   let captured = sink () in
   let f_base = frame ~rows:4 [ "a"; "b" ] in
   (match present_result presenter captured f_base with
-   | Presenter.Presented -> ()
+   | Presenter.Presented _ -> ()
    | Presenter.Unchanged -> fail "first frame must be presented");
   (* Growing frame: adding "c" must be detected as change *)
   reset_sink captured;
   let f_grown = frame ~rows:4 [ "a"; "b"; "c" ] in
   (match present_result presenter captured f_grown with
-   | Presenter.Presented -> ()
+   | Presenter.Presented _ -> ()
    | Presenter.Unchanged -> fail "grown frame must be presented");
   check int "grown frame writes" 1 (List.length captured.writes);
   (* Shrinking frame: removing "c" must be detected as change *)
   reset_sink captured;
   (match present_result presenter captured f_base with
-   | Presenter.Presented -> ()
+   | Presenter.Presented _ -> ()
    | Presenter.Unchanged -> fail "shrunk frame must be presented");
   check int "shrunk frame writes" 1 (List.length captured.writes);
   (* Identical frame must be unchanged *)
   reset_sink captured;
   (match present_result presenter captured f_base with
    | Presenter.Unchanged -> ()
-   | Presenter.Presented -> fail "identical frame must be unchanged");
+   | Presenter.Presented _ -> fail "identical frame must be unchanged");
   check int "identical frame writes 0" 0 (List.length captured.writes)
 ;;
 
@@ -509,14 +535,14 @@ let test_offscreen_lines_variation_retains_unchanged () =
   let captured = sink () in
   let f1 = frame ~rows:2 [ "visible 1"; "visible 2"; "offscreen 1" ] in
   (match present_result presenter captured f1 with
-   | Presenter.Presented -> ()
+   | Presenter.Presented _ -> ()
    | Presenter.Unchanged -> fail "first frame must be presented");
   (* Variation only in offscreen row (row >= terminal_rows) produces identical visible screen *)
   reset_sink captured;
   let f2 = frame ~rows:2 [ "visible 1"; "visible 2"; "offscreen 2" ] in
   (match present_result presenter captured f2 with
    | Presenter.Unchanged -> ()
-   | Presenter.Presented -> fail "offscreen variation must remain Unchanged");
+   | Presenter.Presented _ -> fail "offscreen variation must remain Unchanged");
   check int "offscreen variation writes 0" 0 (List.length captured.writes)
 ;;
 
@@ -527,6 +553,8 @@ let () =
             test_first_frame_and_identical_frame
         ; test_case "repeated identical frames zero-alloc" `Quick
             test_repeated_identical_frames_retain_zero_alloc_unchanged
+        ; test_case "a frame says which rows it wrote" `Quick
+            test_a_frame_says_which_rows_it_wrote
         ; test_case "frame lines growing and shrinking" `Quick
             test_frame_lines_growing_and_shrinking_detected
         ; test_case "offscreen lines variation unchanged" `Quick

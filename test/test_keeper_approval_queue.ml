@@ -39,7 +39,7 @@ module World_observation = Masc.Keeper_world_observation
    reproduces its unit projection over [resolve_with_policy] so these
    assertions keep exercising the production resolution path. *)
 let aq_resolve ~base_path ~id ~decision =
-  match AQ.resolve_with_policy ~base_path ~id ~decision () with
+  match AQ.resolve_with_policy ~base_path ~id ~decision ~source:Rule_types.Human_operator () with
   | Ok _ -> Ok ()
   | Error _ as error -> error
 ;;
@@ -552,6 +552,7 @@ let test_retry_folds_onto_unconsumed_grant_until_consumed () =
             ~base_path
             ~id:first.approval_id
             ~decision:Rule_types.Decision.Approve
+            ~source:Rule_types.Human_operator
             ()
         with
         | Ok _ -> ()
@@ -1593,6 +1594,7 @@ let test_resolution_is_durable_and_origin_scoped () =
            ~base_path
            ~id
            ~decision:Rule_types.Decision.Approve
+           ~source:Rule_types.Human_operator
            ~remember_rule:true
            ~created_by:"operator"
            ()
@@ -1884,6 +1886,7 @@ let test_remembered_rule_carries_requested_expiry () =
            ~base_path
            ~id
            ~decision:Rule_types.Decision.Approve
+           ~source:Rule_types.Human_operator
            ~remember_rule:true
            ~rule_expires_at:expires_at
            ~created_by:"operator"
@@ -1904,6 +1907,7 @@ let test_remembered_rule_carries_requested_expiry () =
             ~base_path
             ~id
             ~decision:Rule_types.Decision.Approve
+            ~source:Rule_types.Human_operator
             ~remember_rule:true
             ~rule_expires_at:expires_at
             ~created_by:"operator"
@@ -3327,6 +3331,7 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
             ~base_path
             ~id:resolved_id
             ~decision:Rule_types.Decision.Approve
+            ~source:Rule_types.Human_operator
             ()
         with
         | Ok _ -> ()
@@ -3385,6 +3390,7 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
               ~base_path
               ~id:resolved_id
               ~decision:Rule_types.Decision.Approve
+              ~source:Rule_types.Human_operator
               ()
           with
           | Error (AQ.Persistence_failed _) -> ()
@@ -5859,6 +5865,7 @@ let test_audit_append_failure_keeps_resolution_rule_and_grant_committed () =
              ~base_path
              ~id:approval_id
              ~decision:Rule_types.Decision.Approve
+             ~source:Rule_types.Human_operator
              ~remember_rule:true
              ~created_by:"test-operator"
              ()

@@ -330,23 +330,32 @@ let tab_entry_label name = function
   | None -> name
   | Some reading -> Printf.sprintf "%s (%s)" name reading
 
+(* The entry a strip is on: the first one marked current, or the first entry
+   when none is. *)
+let current_tab entries =
+  let n = Array.length entries in
+  let rec find i =
+    if i >= n then 0
+    else
+      let _, current, _ = entries.(i) in
+      if current then i else find (i + 1)
+  in
+  find 0
+
 (* The cells this strip needs to keep its promise: the current entry whole,
    with the cut marks its position calls for. Below this the window cannot
    grow past the current entry and [fit_width] cuts into the entry itself --
    a row would read "@p@" where it means "prompts", which names nothing. A
    row that draws a strip asks for this before it spends the width on
    anything that can give way. *)
-let tab_strip_min_width (tabs : (string * bool) list) =
+let tab_strip_min_width (tabs : (string * bool * 'target) list) =
   let cells text = Masc_tui_message_layout.display_width text in
   let entries = Array.of_list tabs in
   let n = Array.length entries in
   if n = 0 then 0
   else begin
-    let current =
-      let rec find i = if i >= n then 0 else if snd entries.(i) then i else find (i + 1) in
-      find 0
-    in
-    let label, _ = entries.(current) in
+    let current = current_tab entries in
+    let label, _, _ = entries.(current) in
     (* The window a strip cannot shrink past holds the current entry alone,
        so the counts the marks would carry are exactly the entries on either
        side of it. *)
@@ -360,13 +369,19 @@ let tab_strip_min_width (tabs : (string * bool) list) =
        else 0)
   end
 
-let tab_strip ~width (tabs : (string * bool) list) =
-  let draw (label, current) =
-    if current then
-      Ansi.bold ^ Theme.info () ^ Masc_tui_theme.Glyph.current_entry ^ label
-      ^ Ansi.reset
-    else Ansi.dim ^ label ^ Ansi.reset
+(* Each entry names where a press on it leads, and [press] is how the caller
+   marks drawn text as leading there. A cut mark leads to the nearest entry it
+   hides, the one a step of the strip's own key would bring into the window. *)
+let tab_strip ~width ~(press : 'target -> string -> string)
+    (tabs : (string * bool * 'target) list) =
+  let draw press (label, current, target) =
+    press target
+      (if current then
+         Ansi.bold ^ Theme.info () ^ Masc_tui_theme.Glyph.current_entry ^ label
+         ^ Ansi.reset
+       else Ansi.dim ^ label ^ Ansi.reset)
   in
+  let target_of (_, _, target) = target in
   let cells text = Masc_tui_message_layout.display_width text in
   let entries = Array.of_list tabs in
   let n = Array.length entries in
@@ -374,7 +389,7 @@ let tab_strip ~width (tabs : (string * bool) list) =
   else begin
     let widths =
       Array.map
-        (fun (label, current) ->
+        (fun (label, current, _) ->
           (if current then cells Masc_tui_theme.Glyph.current_entry else 0)
           + cells label)
         entries
@@ -387,7 +402,8 @@ let tab_strip ~width (tabs : (string * bool) list) =
       done;
       !sum + (gap * (hi - lo))
     in
-    if span 0 (n - 1) <= width then String.concat tab_strip_gap (List.map draw tabs)
+    if span 0 (n - 1) <= width then
+      String.concat tab_strip_gap (List.map (draw press) tabs)
     else begin
       (* Each mark is measured with the count it would draw. Growing the
          window on one side lowers that side's count, so a window that fits
@@ -397,12 +413,7 @@ let tab_strip ~width (tabs : (string * bool) list) =
         if hi < n - 1 then gap + cells (hidden_after_mark (n - 1 - hi)) else 0
       in
       let fits lo hi = span lo hi + cut_before lo + cut_after hi <= width in
-      let current =
-        let rec find i =
-          if i >= n then 0 else if snd entries.(i) then i else find (i + 1)
-        in
-        find 0
-      in
+      let current = current_tab entries in
       let lo = ref current and hi = ref current in
       (* Grown a neighbour at a time, the side alternating, so a current
          entry in the middle keeps both its neighbours before either side
@@ -419,19 +430,25 @@ let tab_strip ~width (tabs : (string * bool) list) =
         let grew = if !prefer_right then right () || left () else left () || right () in
         if grew then prefer_right := not !prefer_right else growing := false
       done;
-      let shown =
-        List.init (!hi - !lo + 1) (fun i -> draw entries.(!lo + i))
-        |> String.concat tab_strip_gap
-      in
       let mark text = Ansi.dim ^ text ^ Ansi.reset in
-      let drawn =
-        (if !lo > 0 then mark (hidden_before_mark !lo) ^ tab_strip_gap else "")
+      let compose press =
+        let shown =
+          List.init (!hi - !lo + 1) (fun i -> draw press entries.(!lo + i))
+          |> String.concat tab_strip_gap
+        in
+        (if !lo > 0 then
+           press (target_of entries.(!lo - 1)) (mark (hidden_before_mark !lo))
+           ^ tab_strip_gap
+         else "")
         ^ shown
         ^
         if !hi < n - 1 then
-          tab_strip_gap ^ mark (hidden_after_mark (n - 1 - !hi))
+          tab_strip_gap
+          ^ press (target_of entries.(!hi + 1))
+              (mark (hidden_after_mark (n - 1 - !hi)))
         else ""
       in
+      let drawn = compose press in
       (* The window is seeded with the current entry and only grows under
          [fits], so an entry wider than the whole budget is drawn anyway. At a
          hundred columns the Config row had two cells left for its strip and
@@ -445,9 +462,16 @@ let tab_strip ~width (tabs : (string * bool) list) =
          So the strip keeps its promise here rather than leaving the frame to
          enforce it on whatever sits furthest right. [fit_width] pads a short
          string, which would push that tail out by hand, so it is asked only
-         when the strip is actually over. *)
+         when the strip is actually over.
+
+         Cut there, the strip is drawn without marks. [fit_width] drops what
+         follows its cut, a mark's close included, and an unclosed mark runs
+         to the end of the row (#39238): a cut count's press would cover the
+         clock, the badge and the Activity pane beside it. Over its width the
+         window holds the current entry alone, which a press would not move,
+         so nothing a reader could press is lost. *)
       if Masc_tui_message_layout.display_width drawn > width then
-        Masc_tui_message_layout.fit_width drawn width
+        Masc_tui_message_layout.fit_width (compose (fun _ text -> text)) width
       else drawn
     end
   end
@@ -834,6 +858,11 @@ let box_line buf cols content =
   let inner = framed_inner_width cols in
   Buffer.add_string buf (Printf.sprintf "  %s  \n" (fit_width content inner))
 
+(* Where a body row's content starts, in cells from the terminal's left edge:
+   [box_line] pads two spaces before it and [framed_line] draws the border and
+   one space. A picture placed over body rows starts from here. *)
+let framed_content_column = 2
+
 let box_line_styled buf cols ~style content =
   let inner = framed_inner_width cols in
   let content = fit_width content inner in
@@ -858,6 +887,94 @@ let row_with_field ~cols ~lead ~field ~tail =
   lead
   ^ fit_width field (max 1 (framed_inner_width cols - cells lead - cells tail))
   ^ tail
+
+(* What a heading draws before the record's id. [Lead_text] is drawn as
+   given. [Lead_strip] is drawn in the width it is handed and needs [floor]
+   at least: a tab strip, which drops entries and marks the cut down to the
+   width that holds the current entry alone, and loses its press marks below
+   that. *)
+type heading_lead =
+  | Lead_text of string
+  | Lead_strip of { floor : int; draw : int -> string }
+
+(* The fewest cells a folded id keeps while anything else on its heading can
+   still give way: [fit_middle] spends them as three of the opening, the cut
+   mark and eight of the tail. Eight hex digits tell two run ids of one lane
+   apart the way a short commit hash does, and three letters keep a name's
+   family. An id no longer than this is drawn whole. *)
+let heading_id_floor = 12
+
+(* A heading that names one record: [lead], the record's id, [after], and
+   [tail] last -- the connection badge, with the clock before it where the
+   screen draws one. The tail says whether the reading is live and whether the
+   server shares this workspace, and has no way of saying it was shortened, so
+   it is never shortened here. What gives way, first to last:
+   - the id down to [heading_id_floor], folded in the middle so its opening
+     and its distinguishing tail both stay;
+   - [after], the readings about the record (a count, a freshness verdict, a
+     filter), cut at its end with the cut mark, and dropped when nothing is
+     left for it;
+   - the id below its floor, down to the cut mark alone, and then the id;
+   - the lead, cut at its end. A lead and a tail that do not fit side by side
+     are the one case where the lead is cut: the badge carries the workspace
+     mismatch, which nothing else on the screen says.
+   The frame then never has to cut the row, so it never cuts the badge.
+   Room the id and [after] leave goes to a [Lead_strip], which draws more of
+   its entries in it.
+
+   The headings that put an id, a name or a path before the badge are laid
+   out here; test_tui_row_wiring names each one. Written by hand, the id was
+   drawn before the badge at whatever width it had: a 54-cell run id left the
+   badge four cells at eighty columns. Two rows keep their own layout: a
+   Config pane's title ([Masc_tui_render_prim.config_pane_title]), whose pane
+   reading and pane name give way in an order of their own before its file
+   path does, and the Overview's, whose workspace name every PTY scenario
+   waits to see whole when it starts. *)
+let detail_heading ~cols ~lead ~id ~after ~tail =
+  let cells text =
+    Masc_tui_message_layout.display_width (Masc_tui_theme.strip_sgr text)
+  in
+  let styled text = String.contains text '\027' in
+  let tail = "  " ^ tail in
+  let id = Terminal_text.single_line id in
+  let id_cells = cells id and after_cells = cells after in
+  let lead_floor =
+    match lead with
+    | Lead_text text -> cells text
+    | Lead_strip { floor; _ } -> floor
+  in
+  (* Taken in the order above out of what the frame has left over the lead's
+     floor and the tail. Once it runs out every later part gets nothing. *)
+  let take wanted room =
+    let got = max 0 (min wanted room) in
+    (got, room - got)
+  in
+  let room = framed_inner_width cols - cells tail - lead_floor in
+  let id_floor_drawn, room = take (min id_cells heading_id_floor) room in
+  let after_drawn, room = take after_cells room in
+  let id_extra, room = take (id_cells - id_floor_drawn) room in
+  let id_drawn = id_floor_drawn + id_extra in
+  let id =
+    if id_drawn >= id_cells then id
+    else if id_drawn = 0 then ""
+    else Masc_tui_message_layout.fit_middle id_drawn id
+  in
+  (* A cut or dropped [after] may have been what closed a style the lead
+     opened, so the reset it carried is put back. *)
+  let after =
+    if after_drawn >= after_cells then after
+    else
+      (if after_drawn = 0 then "" else fit_width after after_drawn)
+      ^ if styled after then Ansi.reset else ""
+  in
+  let lead =
+    match lead with
+    | Lead_text text when room >= 0 -> text
+    | Lead_strip { floor; draw } when room >= 0 -> draw (floor + room)
+    | Lead_text text -> fit_width text (max 0 (lead_floor + room))
+    | Lead_strip { floor; draw } -> fit_width (draw floor) (max 0 (floor + room))
+  in
+  lead ^ id ^ after ^ tail
 
 (* The selected row of a borderless list: one reverse-video band across the
    full row, box_line's geometry (two margin cells each side, content width

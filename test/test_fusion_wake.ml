@@ -442,6 +442,7 @@ let test_emit_success_projects_board_chat_and_registry () =
     let question = "Which implementation should ship?" in
     let resolved_answer = "Ship the typed-origin path." in
     let panel_usage = { Fusion_types.input_tokens = 11; output_tokens = 13 } in
+    let failed_usage = { Fusion_types.input_tokens = 5; output_tokens = 7 } in
     let judge_usage = { Fusion_types.input_tokens = 17; output_tokens = 19 } in
     let synthesis = judge_synthesis resolved_answer in
     let panel =
@@ -450,6 +451,8 @@ let test_emit_success_projects_board_chat_and_registry () =
           ; answer = "typed origin keeps the dashboard honest"
           ; usage = panel_usage
           }
+      ; Fusion_types.Failed
+          { failed_model = "paid failed seat"; reason = Fusion_types.Timeout; usage = failed_usage }
       ]
     in
     let judges =
@@ -500,13 +503,18 @@ let test_emit_success_projects_board_chat_and_registry () =
     check (float 0.000001) "meta.started_at" 2.0
       (number_field "board.meta" meta "started_at");
     (match list_field "board.meta" meta "panel" with
-     | [ panel_json ] ->
+     | [ panel_json; failed_json ] ->
        let p = assoc_fields "board.meta.panel[0]" panel_json in
        check string "panel model" "skeptic (claude)"
          (string_field "board.meta.panel[0]" p "model");
        check string "panel status" "answered"
-         (string_field "board.meta.panel[0]" p "status")
-     | other -> fail (Printf.sprintf "expected exactly one panel row, got %d" (List.length other)));
+         (string_field "board.meta.panel[0]" p "status");
+       let failed = assoc_fields "board.meta.panel[1]" failed_json in
+       check int "failed panel paid input survives board wire" failed_usage.input_tokens
+         (int_field "board.meta.panel[1]" failed "input_tokens");
+       check int "failed panel paid output survives board wire" failed_usage.output_tokens
+         (int_field "board.meta.panel[1]" failed "output_tokens")
+     | other -> fail (Printf.sprintf "expected exactly two panel rows, got %d" (List.length other)));
     (match list_field "board.meta" meta "seat_routes" with
      | [ route_json ] ->
        let r = assoc_fields "board.meta.seat_routes[0]" route_json in
@@ -541,9 +549,9 @@ let test_emit_success_projects_board_chat_and_registry () =
     let observed_usage =
       assoc_fields "board.meta.observed_usage" (field "board.meta" meta "observed_usage")
     in
-    check int "observed input tokens" (panel_usage.input_tokens + judge_usage.input_tokens)
+    check int "observed input tokens" (panel_usage.input_tokens + failed_usage.input_tokens + judge_usage.input_tokens)
       (int_field "board.meta.observed_usage" observed_usage "input_tokens");
-    check int "observed output tokens" (panel_usage.output_tokens + judge_usage.output_tokens)
+    check int "observed output tokens" (panel_usage.output_tokens + failed_usage.output_tokens + judge_usage.output_tokens)
       (int_field "board.meta.observed_usage" observed_usage "output_tokens");
     let tool_trace_meta =
       assoc_fields "board.meta.tool_trace" (field "board.meta" meta "tool_trace")

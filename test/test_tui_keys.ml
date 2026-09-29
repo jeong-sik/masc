@@ -489,6 +489,7 @@ let schedule_form_row : schedule_row =
   ; sch_payload_support = "supported"
   ; sch_payload_dispatch_tool = Some "masc_keeper_wakeup"
   ; sch_payload_target = Some "keeper:edgar.a.poe"
+  ; sch_payload_keeper_name = Some "edgar.a.poe"
   ; sch_payload_summary = Some "daily inspection"
   ; sch_last_wake_status = None
   ; sch_last_wake_started_at_iso = None
@@ -515,6 +516,24 @@ let schedule_form_row : schedule_row =
   ; sch_reaction_quarantined = None
   ; sch_runner_hold = None
   }
+
+(* The wire carries both an encoded target and a display name. When the
+   latter is absent, an older server's target stays intact. *)
+let test_schedule_who_uses_the_named_field () =
+  let who row = Masc_tui_types.schedule_row_who row in
+  Alcotest.(check (option string)) "the bare name wins" (Some "edgar.a.poe")
+    (who schedule_form_row);
+  Alcotest.(check (option string)) "an older server leaves the target intact"
+    (Some "keeper:edgar.a.poe")
+    (who { schedule_form_row with sch_payload_keeper_name = None });
+  Alcotest.(check (option string)) "an unnamed non-Keeper target is not parsed"
+    (Some "board:sweep")
+    (who { schedule_form_row with sch_payload_keeper_name = None
+                                ; sch_payload_target = Some "board:sweep" });
+  Alcotest.(check (option string)) "an absent target remains absent" None
+    (who { schedule_form_row with sch_payload_keeper_name = None
+                                ; sch_payload_target = None })
+;;
 
 let test_schedule_create_form_names_the_canonical_required_fields () =
   let open Yojson.Safe.Util in
@@ -697,11 +716,22 @@ let sample_memory_fact ~category ~claim : Tui_decode.memory_fact =
   ; mf_events = Tui_decode.no_memory_fact_events
   }
 
+(* The browser open on the snapshot's keeper, with its facts answered the way
+   the answer handler settles them. *)
+let answer_memory_facts (state : Masc_tui_types.state) (snapshot : Tui_decode.memory_fact_snapshot) =
+  let keeper = snapshot.Tui_decode.mfs_keeper in
+  state.Masc_tui_types.memory_facts_keeper <- Some keeper;
+  match Masc_tui_fetched.start ~equal:String.equal state.Masc_tui_types.memory_facts ~key:keeper with
+  | Masc_tui_fetched.Already_loading -> Alcotest.fail "fixture already loading"
+  | Masc_tui_fetched.Started (next, request) ->
+      state.Masc_tui_types.memory_facts <-
+        Masc_tui_fetched.complete ~equal:String.equal next request (Ok (snapshot, None))
+;;
+
 let memory_state_with_facts () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
   state.memory_facts_keeper <- Some "alpha";
-  state.memory_facts <-
-    Some
+  answer_memory_facts state
       { Tui_decode.mfs_keeper = "alpha"
       ; mfs_ordinary =
           Tui_decode.Memory_store_present
@@ -853,7 +883,7 @@ let test_board_read_footer_carries_the_post_keys () =
     (fun (layout : Masc_tui_types.board_read_layout) ->
       let split = layout = Masc_tui_types.Board_read_split in
       let read =
-        Masc_tui_keys.footer_hints_board_read ~focus_posts:false ~layout
+        Masc_tui_keys.footer_hints_board_read ~focus_posts:false ~focus_comments:false ~layout
       in
       List.iter
         (fun key ->
@@ -861,7 +891,7 @@ let test_board_read_footer_carries_the_post_keys () =
             (holds key read);
           Alcotest.(check bool) (Printf.sprintf "the Board list spells %s the same" key) true
             (holds key list))
-        [ "v / V:vote"; "c:reply"; "Y:copy link" ];
+        [ "v / V:up / down"; "c:reply"; "Y:copy link" ];
       Alcotest.(check bool) (Printf.sprintf "the pane keys follow the split (%b)" split) split
         (holds "Ctrl-W:switch" read))
     [ Masc_tui_types.Board_read_wide
@@ -870,8 +900,20 @@ let test_board_read_footer_carries_the_post_keys () =
     ];
   Alcotest.(check bool) "j/k names what it moves" true
     (holds "j/k:posts"
-       (Masc_tui_keys.footer_hints_board_read ~focus_posts:true
-          ~layout:Masc_tui_types.Board_read_split))
+       (Masc_tui_keys.footer_hints_board_read ~focus_posts:true ~focus_comments:false
+          ~layout:Masc_tui_types.Board_read_split));
+  let focused =
+    Masc_tui_keys.footer_hints_board_read ~focus_posts:false
+      ~focus_comments:true ~layout:Masc_tui_types.Board_read_wide
+  in
+  Alcotest.(check bool) "b names the reading focus switch" true
+    (holds "b:post / comments" focused);
+  Alcotest.(check bool) "j/k names the focused thread" true
+    (holds "j/k:comments" focused);
+  Alcotest.(check bool) "j/k names the post body" true
+    (holds "j/k:body"
+       (Masc_tui_keys.footer_hints_board_read ~focus_posts:false ~focus_comments:false
+          ~layout:Masc_tui_types.Board_read_wide))
 
 (* [z] goes both ways, so its label is where it goes. Drawn as "wide" in either
    state it named the screen the operator was already on: live at two hundred
@@ -885,7 +927,7 @@ let test_the_wide_key_names_where_it_goes () =
     scan 0
   in
   let hints layout =
-    Masc_tui_keys.footer_hints_board_read ~focus_posts:false ~layout
+    Masc_tui_keys.footer_hints_board_read ~focus_posts:false ~focus_comments:false ~layout
   in
   let split = hints Masc_tui_types.Board_read_split in
   let wide = hints Masc_tui_types.Board_read_wide in
@@ -904,6 +946,13 @@ let test_the_wide_key_names_where_it_goes () =
   Alcotest.(check bool) "one pane offers no pane keys" false (holds "Ctrl-W" one_pane);
   Alcotest.(check bool) "one pane still reads the post" true (holds "[/]:post" one_pane)
 
+(* The list answering, as the answer handler settles it: asked, then answered. *)
+let answer_fusion_runs state snapshot =
+  match Masc_tui_fetched.start ~equal:Unit.equal state.fusion_runs ~key:() with
+  | Masc_tui_fetched.Already_loading -> Alcotest.fail "fixture already loading"
+  | Masc_tui_fetched.Started (next, request) ->
+      state.fusion_runs <- Masc_tui_fetched.complete ~equal:Unit.equal next request (Ok snapshot)
+
 let test_fusion_historical_evidence_is_a_selectable_board_reference () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
   let response = `Assoc
@@ -918,7 +967,7 @@ let test_fusion_historical_evidence_is_a_selectable_board_reference () =
     ] in
   (match Tui_decode.decode_fusion_snapshot response with
    | Error detail -> Alcotest.fail detail
-   | Ok snapshot -> state.fusion_runs <- Some snapshot);
+   | Ok snapshot -> answer_fusion_runs state snapshot);
   check Alcotest.int "history remains in the selectable list with no retained runs"
     1 (List.length (fusion_list_entries state));
   (match selected_fusion_entry state with
@@ -950,7 +999,7 @@ let test_keeper_runs_selection_survives_a_shorter_list () =
       ; "replay", `Assoc ["status", `String "not_replayed"]
       ; "historical_evidence", `List []
       ; "count", `Int (List.length runs); "runs", `List runs ]) with
-    | Ok snapshot -> state.fusion_runs <- Some snapshot
+    | Ok snapshot -> answer_fusion_runs state snapshot
     | Error detail -> Alcotest.fail detail
   in
   let selected () =
@@ -1950,7 +1999,7 @@ let test_config_footer_names_child_hops () =
      meets, and [test_every_config_pane_answers_once] is what holds them to
      one answer each. *)
   check str "Config names its three off-ring children"
-    "j/k:select / scroll  p:next pane  PgUp/PgDn:page  v:read status  9:Runtime  s:resources  t:tools  e:edit  e / Enter:edit  E:advanced JSON  Enter:use  x:default / clear  f:filter  n:new  u:restore  i:input  a:fragments / keeper voice  o:assets  Esc:overview  r:reload  Tab:next  q:quit"
+    "j/k:select / scroll  p:next pane  PgUp/PgDn:page  v:read status  9:Runtime  s:resources  t:tools  e:edit  e / Enter:edit  E:advanced JSON  Enter:use  x:default / clear  f:filter  n:new  u:restore  i:input  a:fragments / voice / account  o:assets  Esc:overview  r:reload  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Config);
   let hints = Masc_tui_keys.footer_hints Config in
   List.iter
@@ -2074,9 +2123,9 @@ let test_config_pane_footer_actions () =
          [ Config_runtime; Config_models; Config_params; Config_prompts; Config_voice ]);
     List.iter (fun key -> enabled key (pane = Config_presets)) [ "n"; "u" ];
     List.iter (fun key -> enabled key (pane = Config_prompts)) [ "i"; "o" ];
-    (* [a] answers on two panes now: the prompt fragments, and the keeper-voice
-       screen the voice pane opens. *)
-    enabled "a" (List.mem pane [ Config_prompts; Config_voice ]);
+    (* [a] answers on three panes: the prompt fragments, the keeper-voice
+       screen the voice pane opens, and the account form on runtime.toml. *)
+    enabled "a" (List.mem pane [ Config_runtime; Config_prompts; Config_voice ]);
     List.iter (fun key -> enabled key true) [ "j/k"; "p"; "9"; "s"; "t"; "Esc"; "q" ])
     panes;
   (* The prompts pane's read-only assets: the registry's edit keys only answer
@@ -2101,6 +2150,33 @@ let test_config_pane_footer_actions () =
       Alcotest.(check bool) ("presets keeps " ^ key ^ " at 120 columns") true
         (footer_has_key key (at_120 (Masc_tui_keys.footer_hints_config ~pane:Config_presets))))
     [ "n"; "u"; "PgUp/PgDn" ];
+  (* The account form's door, at the width the other panes promise their own
+     writes. Narrower rows keep the pane's first keys and drop [e] and [a]
+     alike; the ? sheet names both there. *)
+  Alcotest.(check bool) "runtime.toml keeps a at 120 columns" true
+    (footer_has_key "a"
+       (at_120 (Masc_tui_keys.footer_hints_config ~pane:Config_runtime)));
+  (* While the account form is open it takes every key as typing, so its row
+     names the form's keys and none of the pane's. *)
+  let form_row = Masc_tui_keys.footer_hints_runtime_account_form () in
+  List.iter
+    (fun key ->
+      Alcotest.(check bool) ("the account form names " ^ key) true
+        (footer_has_key key form_row))
+    [ "Enter"; "Esc" ];
+  List.iter
+    (fun key ->
+      Alcotest.(check bool) ("the account form leaves out " ^ key) false
+        (footer_has_key key form_row))
+    [ "e"; "r"; "q"; "Tab" ];
+  (* After a save the form types nothing: [y] copies the sign-in command and
+     Enter or Esc closes. *)
+  let saved_row = Masc_tui_keys.footer_hints_runtime_account_saved () in
+  List.iter
+    (fun key ->
+      Alcotest.(check bool) ("the saved account form names " ^ key) true
+        (footer_has_key key saved_row))
+    [ "y"; "Enter"; "Esc" ];
   Alcotest.(check bool) "the runtime assets keep their way back at 120 columns" true
     (footer_has_key "o" (at_120 assets));
   List.iter
@@ -2401,7 +2477,6 @@ let standalone_lane ~(lane : Standalone_lane.t) ~label : Tui_decode.standalone_l
   ; sl_dropped_slots = []
   ; sl_declared_slots = []
   ; sl_declared_cli_slots = []
-  ; sl_supports_cli_tail = true
   ; sl_admission_error = None
   ; sl_retained_run_count = 0
   ; sl_running_count = 0
@@ -2545,6 +2620,7 @@ let board_post ?(author = "alpha") id title =
   ; bp_created_at_unix = None; bp_updated_at = None
   ; bp_hearth = None
   ; bp_kind = None
+  ; bp_closed = None
   }
 
 let board_state () =
@@ -2725,10 +2801,10 @@ let test_detail_tab_hint_projects_the_table () =
    as the drift they were written to close. This list is the contract:
    changing it is a decision, not a slip. Sources are the guarded arms in
    masc_tui.ml (T/A// at Detail_identity, R at Detail_identity, L/P and one
-   digit per login scope on the GitHub tab, e for the settings form, Q for
+   digit per login scope on the GitHub tab, e for the settings form, Q/B for
    the Board requeue on Info). *)
 let live_tab_keys : (Masc_tui_types.keeper_detail_tab * string list) list =
-  [ Detail_info, [ "Q" ]
+  [ Detail_info, [ "Q"; "B" ]
   ; Detail_sandbox, [ "o"; "d/m/s"; "PgUp/PgDn"; "R" ]
   ; Detail_instructions, [ "e" ]
   ; Detail_secrets, []
@@ -2767,7 +2843,7 @@ let test_key_atoms_read_the_table_notation () =
     (List.mem "e" (Masc_tui_keys.keeper_detail_tab_taken_keys Detail_channels));
   Alcotest.(check bool) "Channels takes U for unbind all" true
     (List.mem "U" (Masc_tui_keys.keeper_detail_tab_taken_keys Detail_channels));
-  Alcotest.(check (list string)) "Info takes only the Board requeue key" [ "Q" ]
+  Alcotest.(check (list string)) "Info takes both Board requeue keys" [ "Q"; "B" ]
     (Masc_tui_keys.keeper_detail_tab_taken_keys Detail_info)
 
 let test_detail_tab_bindings_cover_the_live_keys () =
@@ -3294,6 +3370,8 @@ let () =
             test_harness_footer_links_to_overview_task
         ; Alcotest.test_case "Schedules names write and read controls" `Quick
             test_schedules_footer_names_write_and_read_controls
+        ; Alcotest.test_case "schedule display name uses the named field" `Quick
+            test_schedule_who_uses_the_named_field
         ; Alcotest.test_case "schedule create form names required fields" `Quick
             test_schedule_create_form_names_the_canonical_required_fields
         ; Alcotest.test_case

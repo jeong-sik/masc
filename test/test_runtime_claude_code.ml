@@ -604,6 +604,8 @@ let test_dynamic_tool_bytes_counts_every_field () =
     { Runtime_claude_code.name = "ab"
     ; description = "cde"
     ; input_schema = `Assoc [ "f", `String "g" ]
+    ; loading = Runtime_official_client_tool.On_demand
+    ; result_bound = Runtime_official_client_tool.Unbounded
     ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
@@ -618,6 +620,46 @@ let test_dynamic_tool_bytes_counts_every_field () =
   check int "two tools sum"
     (2 * (2 + 3 + schema_bytes))
     (Runtime_claude_code.dynamic_tool_bytes [ tool; tool ])
+;;
+
+(* A tool whose declaration carries [_meta] sends those bytes too, so the
+   surface size has to count them (#39471 review P3). *)
+let test_dynamic_tool_bytes_counts_meta () =
+  let tool loading result_bound =
+    { Runtime_claude_code.name = "ab"
+    ; description = "cde"
+    ; input_schema = `Assoc [ "f", `String "g" ]
+    ; loading
+    ; result_bound
+    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
+    ; call =
+        (fun ~call_id:_ _ ->
+          { Runtime_claude_code.success = true; content = ""; content_blocks = None; abort_turn = None })
+    }
+  in
+  let bare = tool Runtime_official_client_tool.On_demand Runtime_official_client_tool.Unbounded in
+  let declared =
+    tool Runtime_official_client_tool.Upfront (Runtime_official_client_tool.Bounded_bytes 32768)
+  in
+  let meta_bytes =
+    String.length
+      (Yojson.Safe.to_string
+         (`Assoc
+            [ "anthropic/alwaysLoad", `Bool true
+            ; "anthropic/maxResultSizeChars", `Int 32768
+            ]))
+  in
+  check int "_meta bytes are added to a declared tool"
+    (Runtime_claude_code.dynamic_tool_bytes [ bare ] + meta_bytes)
+    (Runtime_claude_code.dynamic_tool_bytes [ declared ]);
+  let spec_meta =
+    match Runtime_claude_code.dynamic_tool_spec declared with
+    | `Assoc fields -> List.assoc_opt "_meta" fields
+    | _ -> None
+  in
+  check int "counted _meta is the one the declaration sends"
+    meta_bytes
+    (Option.fold ~none:0 ~some:(fun m -> String.length (Yojson.Safe.to_string m)) spec_meta)
 ;;
 
 (* A result-only aggregate is the turn's spend. No assistant frame reported
@@ -1086,6 +1128,8 @@ let probe_tool call_count : Runtime_claude_code.dynamic_tool =
   { name = "masc_probe"
   ; description = "Return a fixture marker"
   ; input_schema = `Assoc [ "type", `String "object" ]
+  ; loading = Runtime_official_client_tool.On_demand
+  ; result_bound = Runtime_official_client_tool.Unbounded
   ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
       (fun ~call_id:_ _ ->
@@ -1435,11 +1479,113 @@ let test_context_overflow_after_empty_assistant_remains_retry_safe () =
     | Ok _ -> fail "empty assistant frame made context overflow complete")
 ;;
 
+(* #39445, task-1779: [_meta] carries what the Keeper declared and nothing
+   else (code.claude.com/docs/en/mcp). An upfront tool asks to be always
+   loaded; a tool whose result MASC bounds declares that bound as
+   [maxResultSizeChars]; a tool with neither is sent with no [_meta]. *)
+let test_dynamic_tool_meta_follows_declared_loading () =
+  let declare ?(result_bound = Runtime_official_client_tool.Unbounded) loading name
+    : Runtime_claude_code.dynamic_tool
+    =
+    { name
+    ; description = "Return a deterministic fixture marker"
+    ; input_schema = `Assoc [ "type", `String "object" ]
+    ; loading
+    ; result_bound
+    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
+    ; call =
+        (fun ~call_id:_ _ ->
+          { success = true; content = "unused"; content_blocks = None; abort_turn = None })
+    }
+  in
+  let meta tool =
+    Runtime_claude_code.dynamic_tool_spec tool |> Yojson.Safe.Util.member "_meta"
+  in
+  let upfront = meta (declare Runtime_official_client_tool.Upfront "masc_upfront") in
+  let on_demand = meta (declare Runtime_official_client_tool.On_demand "masc_on_demand") in
+  check
+    bool
+    "an upfront tool asks to be always loaded"
+    true
+    (Yojson.Safe.Util.member "anthropic/alwaysLoad" upfront = `Bool true);
+  check
+    bool
+    "an upfront tool declares no result-size bound"
+    true
+    (Yojson.Safe.Util.member "anthropic/maxResultSizeChars" upfront = `Null);
+  check
+    bool
+    "an on-demand tool is sent without _meta"
+    true
+    (on_demand = `Null);
+  let bounded =
+    meta
+      (declare
+         ~result_bound:(Runtime_official_client_tool.Bounded_bytes 16384)
+         Runtime_official_client_tool.On_demand
+         "masc_bounded")
+  in
+  check
+    bool
+    "a bounded tool declares its bound as maxResultSizeChars"
+    true
+    (Yojson.Safe.Util.member "anthropic/maxResultSizeChars" bounded = `Int 16384);
+  check
+    bool
+    "a bounded on-demand tool does not ask to be always loaded"
+    true
+    (Yojson.Safe.Util.member "anthropic/alwaysLoad" bounded = `Null);
+  let bounded_upfront =
+    meta
+      (declare
+         ~result_bound:(Runtime_official_client_tool.Bounded_bytes 16384)
+         Runtime_official_client_tool.Upfront
+         "masc_bounded_upfront")
+  in
+  check
+    bool
+    "a bounded upfront tool carries both keys"
+    true
+    (Yojson.Safe.Util.member "anthropic/alwaysLoad" bounded_upfront = `Bool true
+     && Yojson.Safe.Util.member "anthropic/maxResultSizeChars" bounded_upfront
+        = `Int 16384)
+;;
+
+let test_tool_result_inline_ceiling_is_lane_specific () =
+  let open Runtime_execution in
+  let claude =
+    Claude_code { cli_path = "claude"; account_home = None; model = None; timeout_s = 1.0 }
+  in
+  let codex =
+    Codex_app_server
+      { cli_path = "codex"; account_home = None; model = None; timeout_s = 1.0 }
+  in
+  let antigravity =
+    Antigravity_cli
+      { cli_path = "agy"
+      ; model = "fixture"
+      ; agent = None
+      ; effort = None
+      ; oauth_source = "fixture"
+      ; timeout_s = 1.0
+      ; add_dirs = []
+      }
+  in
+  check int "Claude Code uses the declared ceiling" claude_code_inline_result_bytes
+    (tool_result_inline_ceiling_bytes claude);
+  check int "Codex keeps the existing ceiling" Common.max_tool_result_wire_bytes
+    (tool_result_inline_ceiling_bytes codex);
+  check int "Antigravity keeps the existing ceiling" Common.max_tool_result_wire_bytes
+    (tool_result_inline_ceiling_bytes antigravity)
+;;
+
 let test_dynamic_tool_abort_stops_the_provider_loop () =
   let tool : Runtime_claude_code.dynamic_tool =
     { name = "masc_probe"
     ; description = "Abort a repeated provider loop"
     ; input_schema = `Assoc [ "type", `String "object" ]
+    ; loading = Runtime_official_client_tool.On_demand
+    ; result_bound = Runtime_official_client_tool.Unbounded
     ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
@@ -1480,6 +1626,8 @@ let test_host_stop_carries_the_newest_request_input () =
     { name = "masc_probe"
     ; description = "Abort a repeated provider loop"
     ; input_schema = `Assoc [ "type", `String "object" ]
+    ; loading = Runtime_official_client_tool.On_demand
+    ; result_bound = Runtime_official_client_tool.Unbounded
     ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
@@ -1529,6 +1677,8 @@ let test_dynamic_tool_callback () =
           [ "type", `String "object"
           ; "properties", `Assoc [ "marker", `Assoc [ "type", `String "string" ] ]
           ]
+    ; loading = Runtime_official_client_tool.On_demand
+    ; result_bound = Runtime_official_client_tool.Unbounded
     ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id input ->
@@ -1563,6 +1713,8 @@ let test_stream_events_preserve_text_and_tool_identity () =
     { name = "masc_probe"
     ; description = "Return a fixture marker"
     ; input_schema = `Assoc [ "type", `String "object" ]
+    ; loading = Runtime_official_client_tool.On_demand
+    ; result_bound = Runtime_official_client_tool.Unbounded
     ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
@@ -2034,6 +2186,8 @@ let test_dynamic_tool_tokenizer_chars_are_validated () =
     { name = "bad,tool"
     ; description = "invalid fixture"
     ; input_schema = `Assoc []
+    ; loading = Runtime_official_client_tool.On_demand
+    ; result_bound = Runtime_official_client_tool.Unbounded
     ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
@@ -2121,6 +2275,8 @@ let stub_dynamic_tool =
   { Runtime_claude_code.name = "masc_status"
   ; description = "fixture"
   ; input_schema = `Assoc []
+  ; loading = Runtime_official_client_tool.On_demand
+  ; result_bound = Runtime_official_client_tool.Unbounded
   ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
       (fun ~call_id:_ _ ->
@@ -2409,6 +2565,10 @@ let () =
             `Quick
             test_dynamic_tool_bytes_counts_every_field
         ; test_case
+            "dynamic tool bytes counts _meta"
+            `Quick
+            test_dynamic_tool_bytes_counts_meta
+        ; test_case
             "partial usage does not fail the turn"
             `Quick
             test_partial_result_usage_does_not_fail_the_turn
@@ -2489,6 +2649,14 @@ let () =
             "dynamic tool abort stops provider loop"
             `Quick
             test_dynamic_tool_abort_stops_the_provider_loop
+        ; test_case
+            "dynamic tool meta follows declared loading"
+            `Quick
+            test_dynamic_tool_meta_follows_declared_loading
+        ; test_case
+            "tool result ceiling belongs to the execution lane"
+            `Quick
+            test_tool_result_inline_ceiling_is_lane_specific
         ; test_case "host stop carries the newest request input" `Quick
             test_host_stop_carries_the_newest_request_input
         ; test_case

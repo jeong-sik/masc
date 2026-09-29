@@ -139,6 +139,7 @@ type commit_fault =
   | Fail_after_commit
 
 let next_commit_fault : commit_fault option Atomic.t = Atomic.make None
+let next_runtime_retry_read_fault = Atomic.make false
 
 let error_to_string = function
   | Invalid_input detail -> "invalid Keeper chat operation: " ^ detail
@@ -1161,8 +1162,8 @@ let blocked_queued_scopes db ~now =
         | Semantic.Recovering {origin=Semantic.Gate_binding _; _} -> Some execution.id
         (* A deferred runtime retry whose provider-throttle backoff is still
            running is not claimable: claiming it would re-issue the very call
-           the provider just rejected, in a tight loop. The scheduled wake in
-           [Keeper_owner_registry] re-offers it once [not_before] passes. *)
+           the provider just rejected, in a tight loop. The owner re-offers it once [not_before] passes or an exact
+           live dependency witness commits a replacement wait. *)
         | Semantic.Recovering {origin=Semantic.Runtime_retry {Semantic.not_before=Some not_before; _}; _}
           when not_before > now -> Some execution.id
         | Semantic.Preparing | Semantic.Ready | Semantic.Running | Semantic.Resuming_runtime_retry _
@@ -1587,6 +1588,89 @@ let move_queued_to_front store ~now ~operation_id =
   project_batch_with_db store.db operation
 ;;
 
+let move_queued_priority_cohort_to_front store ~now ~operation_id ~predecessors =
+  let* () = ensure_open store in
+  let* () = with_transaction store (fun () ->
+    let* target = operation_or_unknown store.db operation_id in
+    let* target = match target.batch_membership with
+      | Some member when not (Id.equal member.execution_id operation_id) ->
+        operation_or_unknown store.db member.execution_id
+      | Some _ | None -> Ok target in
+    let operation_id = target.Operation.operation_id in
+    let* () = match target.state with
+      | Operation.Queued -> Ok ()
+      | Operation.Running _ | Operation.Succeeded _ | Operation.Failed _
+      | Operation.Cancelled _ -> Error (Not_queued operation_id) in
+    let* blocked = blocked_queued_scopes store.db ~now in
+    let* () =
+      if List.exists
+           (Keeper_execution_scope_id.equal
+              (Keeper_execution_scope_id.direct_operation operation_id))
+           blocked
+      then Error (Invalid_input
+        "message is waiting for approval, reconciliation, or provider retry; priority cannot make it runnable")
+      else Ok () in
+    let* () =
+      if List.exists (Id.equal operation_id) predecessors
+      then Error (Invalid_input "priority predecessors include the target operation")
+      else Ok () in
+    let* queued = with_statement store.db ~operation:"read queue order"
+      ("SELECT " ^ select_columns ^ " FROM operations WHERE state = 'queued' AND NOT EXISTS (SELECT 1 FROM operation_batch_members b WHERE b.operation_id = operations.operation_id AND b.execution_id <> b.operation_id) ORDER BY sequence")
+      (fun stmt ->
+        let rec read rows =
+          let rc = Sqlite3.step stmt in
+          if rc = Sqlite3.Rc.DONE then Ok (List.rev rows)
+          else if rc = Sqlite3.Rc.ROW then
+            let* row = decode_operation stmt in read (row :: rows)
+          else Error (Store_unavailable (sqlite_error store.db "read queue order" rc)) in
+        read []) in
+    let* () =
+      if List.exists (fun (row : Operation.t) ->
+           Id.equal row.operation_id operation_id) queued
+      then Ok ()
+      else Error (Integrity_error "queued priority target is absent from queue order") in
+    let rec cohort reversed = function
+      | [] -> Ok (List.rev (target :: reversed))
+      | predecessor :: rest ->
+        (match List.find_opt (fun (row : Operation.t) ->
+           Id.equal row.operation_id predecessor) queued with
+         | None -> cohort reversed rest
+         | Some row when row.source <> target.source ->
+           Error (Invalid_input "priority predecessor has a different source")
+         | Some row when List.exists
+             (Keeper_execution_scope_id.equal
+                (Keeper_execution_scope_id.direct_operation row.operation_id))
+             blocked -> cohort reversed rest
+         | Some row when List.exists (fun (held : Operation.t) ->
+             Id.equal held.operation_id row.operation_id) reversed ->
+           Error (Invalid_input "priority predecessor appears twice")
+         | Some row -> cohort (row :: reversed) rest) in
+    let* cohort = cohort [] predecessors in
+    let desired = cohort @ List.filter (fun (row : Operation.t) ->
+      not (List.exists (fun (member : Operation.t) ->
+        Id.equal member.operation_id row.operation_id) cohort)) queued in
+    let same_order = List.for_all2 (fun (left : Operation.t) (right : Operation.t) ->
+      Id.equal left.operation_id right.operation_id) queued desired in
+    if same_order then Ok () else
+    let rec move = function
+      | [] -> Ok ()
+      | (row : Operation.t) :: rest ->
+        let* sequence = next_sequence store.db in
+        let* () = with_statement store.db ~operation:"prioritize queued cohort"
+          "UPDATE operations SET sequence = ? WHERE operation_id = ? AND state = 'queued'"
+          (fun stmt ->
+            let* () = bind_int64 store.db stmt ~operation:"bind sequence" 1 sequence in
+            let* () = bind_text store.db stmt ~operation:"bind operation" 2
+              (Id.to_string row.operation_id) in
+            let* () = expect_done store.db stmt ~operation:"move queue position" in
+            if Sqlite3.changes store.db = 1 then Ok ()
+            else Error (Not_queued row.operation_id)) in
+        move rest in
+    move desired) in
+  let* operation = operation_or_unknown store.db operation_id in
+  project_batch_with_db store.db operation
+;;
+
 type semantic_error =
   | Semantic_store_error of error
   | Unknown_execution of Keeper_execution_scope_id.t
@@ -1752,6 +1836,8 @@ let direct_checkpoint store ~operation_id =
 ;;
 
 let direct_runtime_retry store ~operation_id =
+  let* () = if Atomic.exchange next_runtime_retry_read_fault false
+    then Error (Store_unavailable "injected direct runtime retry read failure") else Ok () in
   let* () = ensure_open store in
   let* operation = operation_or_unknown store.db operation_id in
   let* execution = direct_execution_with_db store.db operation in
@@ -1817,6 +1903,23 @@ let defer_direct_runtime_retry store ~now ~operation_id ~execution_digest ~conti
     (match read_existing () with Ok operation -> Ok operation | Error _ -> Error error)
   | Error (Invalid_input _ | Unknown_operation _ | Not_queued _ | Not_running _
       | Idempotency_conflict _ | Integrity_error _) as error -> error
+;;
+
+let update_direct_runtime_retry_wait store ~now ~operation_id ~observed ~replacement =
+  let* () = ensure_open store in
+  with_transaction store (fun () ->
+    let* operation = operation_or_unknown store.db operation_id in
+    match operation.state with
+    | Operation.Running _ | Operation.Succeeded _ | Operation.Failed _ | Operation.Cancelled _ -> Ok false
+    | Operation.Queued ->
+      let* execution = direct_execution_with_db store.db operation in
+      match execution, pending_retry execution with
+      | Some expected, Some retry when retry = observed ->
+        let* next = semantic_transition ~now
+          (Semantic.Update_runtime_retry_wait {observed; replacement}) expected in
+        let* () = update_semantic store.db ~expected next in
+        Ok true
+      | Some _, Some _ | Some _, None | None, Some _ | None, None -> Ok false)
 ;;
 
 let resume_direct_runtime_retry store ~now ~operation_id ~observed =
@@ -2345,6 +2448,8 @@ module For_testing = struct
 
   let fail_next_commit fault = Atomic.set next_commit_fault (Some fault)
   let clear_commit_fault () = Atomic.set next_commit_fault None
+  let fail_next_runtime_retry_read () = Atomic.set next_runtime_retry_read_fault true
+  let clear_runtime_retry_read_fault () = Atomic.set next_runtime_retry_read_fault false
   let database_file = database_file
   let database_application_id = database_application_id
   let table_column_counts = table_column_counts

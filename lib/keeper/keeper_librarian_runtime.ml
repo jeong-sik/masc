@@ -74,6 +74,7 @@ type extraction_error =
       }
   | No_transport_declared
   | Domain_output_invalid of string
+  | Absorb_judgment_failed of { reason : string; selected_slot : string }
   | Memory_snapshot_write_failed of
       { detail : string
       ; selected_slot : string
@@ -94,6 +95,7 @@ let rec extraction_error_kind : extraction_error -> Keeper_memory_os_current.lib
     Exact_execution_failure
   | No_transport_declared -> Exact_setup_failure
   | Domain_output_invalid _ -> Domain_output_invalid
+  | Absorb_judgment_failed _ -> Absorb_judgment_failure
   | Memory_snapshot_write_failed _ -> Memory_snapshot_write_failure
 ;;
 
@@ -128,11 +130,11 @@ let exact_setup_error_to_string = function
 let rec extraction_error_to_string = function
   | Prompt_render_failed detail -> detail
   | Execution_clock_unavailable ->
-    "memory os librarian execution clock unavailable"
+    "execution clock unavailable"
   | Exact_setup_failed error -> exact_setup_error_to_string error
   | Exact_execution_failed { outward_effect; detail; _ } ->
     Printf.sprintf
-      "librarian exact execution failed outward_effect=%s cause=%s"
+      "exact execution failed outward_effect=%s cause=%s"
       (match outward_effect with
        | No_outward_effect -> "none"
        | Outward_effect_started -> "started")
@@ -157,14 +159,17 @@ let rec extraction_error_to_string = function
      | None -> cli_detail
      | Some error -> extraction_error_to_string error ^ "; " ^ cli_detail)
   | No_transport_declared ->
-    "librarian lane declares no API or official-client slots"
+    "lane declares no API or official-client slots"
   | Domain_output_invalid detail ->
-    "librarian domain output invalid: " ^ detail
+    "domain output invalid: " ^ detail
+  | Absorb_judgment_failed { reason; selected_slot = _ } ->
+    "absorb judgment failed; current memory unchanged: " ^ reason
   | Memory_snapshot_write_failed { detail; selected_slot = _ } ->
-    "memory os current snapshot write failed: " ^ detail
+    "current snapshot write failed: " ^ detail
 ;;
 
 let selected_slot_of_extraction_error = function
+  | Absorb_judgment_failed { selected_slot; _ }
   | Memory_snapshot_write_failed { selected_slot; _ } -> Some selected_slot
   | Prompt_render_failed _
   | Execution_clock_unavailable
@@ -512,12 +517,9 @@ let cause_shows_size (cause : Exact_output.execution_error_cause) =
   (* An answer that came back unusable is a refused output, which §4.3 counts
      among the failures reading less answers. *)
   | Incomplete_output | Missing_output | Ambiguous_output _
-  | Unexpected_output_content | Invalid_json_output | Internal_non_json_output
+  | Unexpected_output_content | Invalid_json_output
   | Response_body_deadline_exceeded -> true
   | Completion_failed { error; dispatch } -> completion_failure_shows_size ~dispatch error
-  (* Nothing was judged: this process could not start, time, or match the
-     attempt it held. *)
-  | Attempt_already_started | Clock_required_for_timeout | Frozen_request_mismatch -> false
 ;;
 
 (* A candidate the flow turned away before dispatch. One reason is about the
@@ -616,7 +618,7 @@ let rec extraction_shows_size = function
   | Cli_prompt_unavailable { prior_error = Some error } -> extraction_shows_size error
   | Cli_prompt_unavailable { prior_error = None } -> false
   | Prompt_render_failed _ | Execution_clock_unavailable | Exact_setup_failed _
-  | No_transport_declared | Memory_snapshot_write_failed _ -> false
+  | No_transport_declared | Absorb_judgment_failed _ | Memory_snapshot_write_failed _ -> false
 ;;
 
 (* Only a CLI slot reports a limit this process can fit against: its refusal
@@ -632,7 +634,7 @@ let extraction_cli_input_limit = function
   | Exact_execution_failed _
   | Prompt_render_failed _ | Execution_clock_unavailable | Exact_setup_failed _
   | Cli_prompt_unavailable _ | No_transport_declared
-  | Domain_output_invalid _ | Memory_snapshot_write_failed _ -> None
+  | Domain_output_invalid _ | Absorb_judgment_failed _ | Memory_snapshot_write_failed _ -> None
 ;;
 
 let fit_continuity ~capacity ~base_path ~keeper_id ~input_for prepared =
@@ -901,7 +903,7 @@ let execute_answer
            (exact_execution_error ~semantic_rejections:prior_rejections cause))
     in
     (* The CLI tail follows the same advancement rule as HTTP successors;
-       input-specific and infrastructure failures keep their terminal. *)
+       only masc's own failures keep their terminal. *)
     (match Exact_output.flow_execution_terminal_kind cause with
      | Exact_output.Advanceable_candidates_exhausted ->
        (match
@@ -1409,10 +1411,11 @@ let run_best_effort
                 gate only narrows the list. A gate switched off, or an
                 excluded Keeper, leaves the answer unchanged; a gate that is
                 on but cannot be asked absorbs nothing; a failed judgment
-                retains unconfirmed originals. A new claim that absorbed
-                nothing, and whose every statement the memories it named
-                (still current) convey, is a copy of them and is not applied
-                (RFC-0463 section 2.8); any other claim applies as before. *)
+                retains unconfirmed originals. A failed judgment leaves the
+                entire Memory range pending, including its proposed claims.
+                On a completed judgment, a new claim that absorbed nothing
+                and only repeats its current sources is a copy and is not
+                applied (RFC-0463 section 2.8). *)
              let absorb_gate =
                Keeper_librarian_absorb_gate.run
                  ~observe:(fun observation -> observed_absorb_gate := Some observation)
@@ -1428,6 +1431,18 @@ let run_best_effort
                       selection.revisions)
                  ~absorbed:selection.absorbed
                  ()
+             in
+             (* A failed judgment has no complete decision for this Memory
+                range. Keep both the sources and its proposed claims pending;
+                the caller retries the same range after the judge recovers. *)
+             let* () =
+               match
+                 Keeper_librarian_absorb_gate.failure_detail
+                   ~absorbed:selection.absorbed
+                   absorb_gate
+               with
+               | Some reason -> Error (Absorb_judgment_failed { reason; selected_slot })
+               | None -> Ok ()
              in
              let applied_absorbed = Keeper_librarian_absorb_gate.absorbed_of_run absorb_gate in
              let+ disposition =
@@ -1551,7 +1566,7 @@ let run_best_effort
                ~kind:(extraction_error_kind error)
                ~detail:
                  (Printf.sprintf
-                    "memory os librarian failed lane=%s: %s"
+                    "memory os librarian lane=%s: %s"
                     exact_lane_id
                     detail);
              Eio.Fiber.check ()
@@ -1656,7 +1671,7 @@ let run_best_effort
         ~kind:Keeper_memory_os_current.Unhandled_exception
         ~detail:
           (Printf.sprintf
-             "memory os librarian failed lane=%s: %s"
+             "memory os librarian lane=%s: %s"
              exact_lane_id
              (Printexc.to_string exn))
 ;;

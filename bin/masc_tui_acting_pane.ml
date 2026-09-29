@@ -25,11 +25,19 @@ let gap_cells = 1
 let reading_cells = 36
 let pane_cols = border_cells + mark_cells + name_cells + gap_cells + reading_cells
 
-(* What the roster pane leaves a surface is the least a surface lays out
-   against anywhere in the TUI. Sharing that floor means a screen wide
-   enough for both panes gives the surface no less than the roster alone. *)
+(* What a surface keeps beside this pane: the width the Keepers list needs to
+   show its flag columns inside the frame every surface draws. The tables
+   beside the pane lay out against what it leaves, so a smaller floor opens
+   the pane where a table can no longer hold its columns. The Keepers RUNTIME
+   column needs more ([Masc_tui_render_schedule]'s runtime minimum) and still
+   drops beside the pane: the floor is the flag columns, not every column of
+   every table. One floor holds on every surface, so moving between surfaces
+   never opens or closes the pane (operator, 2026-09-28). The roster keeps
+   its own floor ([Masc_tui_roster_pane.threshold_cols]): it stands beside
+   the chat, whose prose reads in less. *)
 let surface_floor_cols =
-  Masc_tui_roster_pane.threshold_cols - Masc_tui_roster_pane.pane_cols
+  Masc_tui_frame.outer_width
+    ~inner:Masc_tui_render_schedule.keeper_flags_minimum_inner_width
 
 let threshold_cols = pane_cols + surface_floor_cols
 
@@ -39,8 +47,9 @@ let threshold_cols = pane_cols + surface_floor_cols
    (kidsnote-slack-context-collector, 32 of 34); the calls' own column is
    the call row's remaining width, so the tool names gain the rest.
 
-   What it costs: every reader needs a 150-column terminal for the wide
-   pane, and fourteen of the eighteen are for that one name -- the next
+   What it costs: the wide pane opens eighteen columns later than the
+   narrow one ([wide_threshold_cols]), and fourteen of the eighteen are for
+   that one name -- the next
    longest, kidsnote-spec-mania, is 19, and a longer name still reads,
    folded in the middle by [Layout.fit_middle]. The floor is seven: the age
    and its gap take seven cells of any extra, and fewer would leave the
@@ -151,6 +160,7 @@ type changes =
       calls : int;
       over_budget : int;
       malformed : int;
+      refresh_failed : string option;
     }
 
 type scope =
@@ -1502,7 +1512,13 @@ let changes_status_lines ~cols input =
           one [ { text = "no writes in " ^ calls_text r.calls; tone = Dim } ]
         else []
       in
-      head @ dropped @ empty
+      let refresh_failed =
+        match r.refresh_failed with
+        | Some why ->
+            one [ { text = "refresh failed" ^ middle_dot ^ why; tone = Bad } ]
+        | None -> []
+      in
+      head @ refresh_failed @ dropped @ empty
 
 let changes_lines ~cols ~below ~scroll input =
   let files =

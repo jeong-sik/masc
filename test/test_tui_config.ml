@@ -160,8 +160,8 @@ let hints_cases =
 
 
 (* Whether a queued line absorbs the next one, [tui].coalesce_queued_input.
-   Absence must read as "yes" so a reader who never touched the key gets the
-   joining behaviour, and an explicit false must survive as false. *)
+   Absence leaves the caller's default (off) in place, and an explicit true
+   opts into joining locally waiting lines. *)
 let coalesce_of s = Config.coalesce_queued_input_of_doc (doc_of s)
 
 let check_coalesce label expected actual =
@@ -174,7 +174,7 @@ let coalesce_cases =
   ; Alcotest.test_case "true stays true" `Quick (fun () ->
         check_coalesce "true" (Some true)
           (coalesce_of "[tui]\ncoalesce_queued_input = true\n"))
-  ; Alcotest.test_case "absent key -> None (caller joins by default)" `Quick
+  ; Alcotest.test_case "absent key -> None (caller keeps sends separate)" `Quick
       (fun () -> check_coalesce "none" None (coalesce_of "[tui]\ntheme = \"x\"\n"))
   ; Alcotest.test_case "wrong type -> None, not a crash" `Quick (fun () ->
         check_coalesce "string" None
@@ -364,11 +364,80 @@ let board_sort_cases =
            | Ok () -> () | Error message -> Alcotest.fail message);
           check_opt "stored order" (Some "discussed") (Config.load ~base_path).board_sort;
           store_or_fail ~base_path (Some "gruvbox-dark");
-          check_opt "theme update keeps order" (Some "discussed") (Config.load ~base_path).board_sort)) ]
+          check_opt "theme update keeps order" (Some "discussed") (Config.load ~base_path).board_sort))
+  ; Alcotest.test_case "the candle's style survives a new read beside the Board order" `Quick
+      (fun () ->
+        with_storable_base (fun ~base_path ->
+          (match Config.set_board_sort ~base_path "discussed" with
+           | Ok () -> () | Error message -> Alcotest.fail message);
+          (match Config.set_candle ~base_path "dotted" with
+           | Ok () -> () | Error message -> Alcotest.fail message);
+          let read = Config.load ~base_path in
+          check_opt "stored candle" (Some "dotted") read.candle;
+          check_opt "the Board order is kept" (Some "discussed") read.board_sort;
+          (match Config.set_candle ~base_path "painted" with
+           | Ok () -> () | Error message -> Alcotest.fail message);
+          check_opt "changed back" (Some "painted") (Config.load ~base_path).candle)) ]
+
+let opening_cases =
+  let parsed text = Config.opening_of_doc (doc_of text) in
+  let name = Keeper_id.Keeper_name.to_string in
+  [ Alcotest.test_case "absent opening keeps Overview" `Quick (fun () ->
+        match parsed "" with
+        | Ok Config.Overview -> ()
+        | _ -> Alcotest.fail "absent opening did not select Overview")
+  ; Alcotest.test_case "overview ignores an unrelated Keeper name" `Quick (fun () ->
+        match parsed "[tui]\nopening = \"overview\"\nopening_keeper = \"last\"\n" with
+        | Ok Config.Overview -> ()
+        | _ -> Alcotest.fail "overview did not stay Overview")
+  ; Alcotest.test_case "last reads the saved Keeper name" `Quick (fun () ->
+        match parsed "[tui]\nopening = \"last\"\nopening_keeper = \"last\"\n" with
+        | Ok (Config.Last (Some keeper)) ->
+            Alcotest.(check string) "legal Keeper named last" "last" (name keeper)
+        | _ -> Alcotest.fail "last did not read its saved target")
+  ; Alcotest.test_case "last without a saved target stays unresolved" `Quick (fun () ->
+        match parsed "[tui]\nopening = \"last\"\n" with
+        | Ok (Config.Last None) -> ()
+        | _ -> Alcotest.fail "missing last target was not retained")
+  ; Alcotest.test_case "keeper needs a name" `Quick (fun () ->
+        match parsed "[tui]\nopening = \"keeper\"\n" with
+        | Error _ -> ()
+        | _ -> Alcotest.fail "keeper without a name was accepted")
+  ; Alcotest.test_case "keeper parses a named target" `Quick (fun () ->
+        match parsed "[tui]\nopening = \"keeper\"\nopening_keeper = \"harbor-lamp\"\n" with
+        | Ok (Config.Keeper keeper) ->
+            Alcotest.(check string) "target" "harbor-lamp" (name keeper)
+        | _ -> Alcotest.fail "keeper target did not parse")
+  ; Alcotest.test_case "last target survives the config write" `Quick (fun () ->
+        with_storable_base (fun ~base_path ->
+          let path = Filename.concat base_path ".masc/config/runtime.toml" in
+          write path (storable_runtime ^ "\n[tui]\nopening = \"last\"\n");
+          let target =
+            match Keeper_id.Keeper_name.of_string "alpha" with
+            | Ok target -> target
+            | Error reason -> Alcotest.fail reason
+          in
+          (match Config.set_opening_keeper ~base_path target with
+           | Ok () -> ()
+           | Error reason -> Alcotest.fail reason);
+          (match (Config.load ~base_path).opening with
+           | Ok (Config.Last (Some saved)) ->
+               Alcotest.(check string) "saved target" "alpha" (name saved)
+           | _ -> Alcotest.fail "saved target was not read");
+          check_opt "runtime default survives" (Some "local.sample")
+            (Toml.toml_string_opt
+               (doc_of (In_channel.with_open_bin path In_channel.input_all))
+               "runtime.default")))
+  ; Alcotest.test_case "unknown opening is an error" `Quick (fun () ->
+        match parsed "[tui]\nopening = \"something-else\"\n" with
+        | Error _ -> ()
+        | _ -> Alcotest.fail "unknown opening was silently ignored")
+  ]
 
 let () =
   Alcotest.run "tui_config"
     [ ("board_sort", board_sort_cases)
+    ; ("opening", opening_cases)
     ; ("theme_of_doc", cases)
     ; ("table_frame_of_doc", frame_cases)
     ; ( "lift_colours", lift_cases )

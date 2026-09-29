@@ -131,7 +131,8 @@ let is_agent_core runtime_id =
      | Runtime_execution.Agent_core _ -> true
      | Runtime_execution.Codex_app_server _
      | Runtime_execution.Antigravity_cli _
-     | Runtime_execution.Claude_code _ -> false)
+     | Runtime_execution.Claude_code _
+     | Runtime_execution.Muse_serve _ -> false)
 ;;
 
 let verdict_json (verdict : Probe.verdict) =
@@ -186,6 +187,10 @@ let invocation_error_json (err : Probe.invocation_error) =
     `Assoc [ "kind", `String "not_official_client_lane"; "lane", `String lane ]
   | Probe.Tools_only_via_mcp_bridge lane ->
     `Assoc [ "kind", `String "tools_only_via_mcp_bridge"; "lane", `String lane ]
+  | Probe.Not_muse_lane lane ->
+    `Assoc [ "kind", `String "not_muse_lane"; "lane", `String lane ]
+  | Probe.Muse_home_unavailable detail ->
+    `Assoc [ "kind", `String "muse_home_unavailable"; "detail", `String detail ]
   | Probe.Not_antigravity_lane lane ->
     `Assoc [ "kind", `String "not_antigravity_lane"; "lane", `String lane ]
   | Probe.Antigravity_home_unavailable detail ->
@@ -233,6 +238,10 @@ let probe_for_lane ~sw ~net ~secure_random ~clock ~mgr ~fs ~base_path ~runtime_i
   then
     Probe.probe_antigravity_invocation ~sw ~net ~secure_random ~mgr ~clock ~fs
       ~base_path ~now:Unix.gettimeofday ~runtime_id ~tool ~prompt ()
+  else if (match Runtime.get_runtime_by_id runtime_id with
+    | Some {execution=Runtime_execution.Muse_serve _; _} -> true | _ -> false)
+  then Probe.probe_muse_invocation ~net ~secure_random ~mgr ~clock ~fs ~base_path
+    ~now:Unix.gettimeofday ~runtime_id ~tool ~prompt ()
   else
     Probe.probe_official_client_invocation ~mgr ~clock ~fs ~base_path
       ~now:Unix.gettimeofday ~runtime_id ~tool ~prompt ()
@@ -444,6 +453,7 @@ let () =
       projected
       cfg.repeat;
     run_invocation_pass ~sw ~net ~secure_random:(Eio.Stdenv.secure_random env)
-      ~clock ~mgr:(Eio.Stdenv.process_mgr env) ~fs:(Eio.Stdenv.fs env) ~base_path
+      ~clock ~mgr:(Posix_spawn_process_mgr.foreground_mgr ~clock
+        ~grace_seconds:Process_eio.child_exit_grace_seconds) ~fs:(Eio.Stdenv.fs env) ~base_path
       ~cfg ~surface)
 ;;

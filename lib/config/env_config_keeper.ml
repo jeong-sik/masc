@@ -320,13 +320,28 @@ module KeeperMemoryOs = struct
 
   let recall_enabled_default = true
   let librarian_enabled_default = true
+  (* The 2026-09-28 live distribution peaked at 464,514 rendered bytes
+     including source-bound facts. 512 KiB is the next fixed bound above it. *)
+  let facts_max_bytes_default = 512 * 1024
 
-  (* Env-key SSOT: the config-introspection registry
-     (env_config_snapshot.ml memory_entries) and the tests reference these
-     constants instead of re-spelling the literals, so a knob rename breaks
-     compilation instead of silently drifting into a phantom registry entry. *)
+  (* Env-key SSOT: config-introspection and tests reference these constants
+     instead of re-spelling the literals, so a knob rename breaks compilation
+     instead of silently drifting into a phantom registry entry. *)
   let recall_env_key = "MASC_KEEPER_MEMORY_OS_RECALL"
   let librarian_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN"
+  let facts_max_bytes_env_key = "MASC_KEEPER_MEMORY_OS_FACTS_MAX_BYTES"
+
+  let facts_max_bytes () =
+    match Env_config_memory.env_opt facts_max_bytes_env_key with
+    | None -> facts_max_bytes_default
+    | Some raw ->
+      (match int_of_string_opt raw with
+       | Some value when value > 0 -> value
+       | Some _ | None ->
+         raise
+           (Env_config_core.Config_error
+              (facts_max_bytes_env_key ^ " must be a positive integer")))
+  ;;
 
   let get_bool_logged ?(invalid = Env_config_memory.Default) name ~default =
     Env_config_memory.get_bool_logged
@@ -598,16 +613,16 @@ module KeeperKeepalive = struct
   ;;
 
   (* How long a path rests after a throttle that stated no usable
-     [Retry-After] (absent, zero, negative, NaN): a path that keeps answering
+     [Retry-After] (absent, zero, negative, infinite, NaN): a path that keeps answering
      429 is tried once a minute (RFC-provider-path-rest §3.3). The cap's lower
      clamp is this same value so an env override can never set the cap below
      it. Not env-configurable. *)
   let rate_limit_backoff_floor_sec = 60.0
 
-  (** The longest a path rests after a provider refusal, so a misread
-      [Retry-After] header (or a stale env override) cannot rest a path longer
-      than this, and the rest of a hard quota that stated no end
-      (RFC-provider-path-rest §3.3). A keeper waits only while the path it
+  (** Fallback rest for a hard quota that stated no usable end, and the
+      upper bound of other unhinted rests (RFC-provider-path-rest §3.3).
+      Usable provider [Retry-After] hints are preserved even above this value.
+      A keeper waits only while the path it
       would send next rests; a rate-limit or quota wait serves queued stimuli
       when it ends (#34653), a capacity wait still wakes within
       [sleep_chunk_sec]. Default: 900 (15 min).

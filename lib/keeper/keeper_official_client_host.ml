@@ -16,7 +16,6 @@ type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_
       }
 
 type host_stop = Runtime_official_client_tool.host_stop =
-  | Queued_chat_operation
   | Repeated_tool_call of
       { tool_name : string
       ; repeated_count : int
@@ -412,36 +411,7 @@ let with_run_lifecycle_events ~event_bus ~keeper_name run =
    same operator-declared effort was clamped on Codex but failed the whole
    turn on Claude Code ([reasoning_args] rejects [Minimal]), so which lane a
    keeper ran on decided whether a config value was survivable. *)
-let clamp_reasoning_effort_to_catalog
-    ~(model_id : string option)
-    ~(requested : Llm_provider.Reasoning_effort.t option)
-    : Llm_provider.Reasoning_effort.t option =
-  match requested, model_id with
-  | None, _ | _, None -> requested
-  | Some effort, Some model ->
-    (match Llm_provider.Capabilities.for_model_id_catalog model with
-     | None -> requested
-     | Some caps ->
-       (match caps.Llm_provider.Capabilities.accepted_reasoning_efforts with
-        | None -> requested
-        | Some accepted when List.mem effort accepted -> requested
-        | Some [] -> requested
-        | Some (first :: rest as accepted) ->
-          let below =
-            List.filter
-              (fun candidate ->
-                 Llm_provider.Reasoning_effort.compare candidate effort < 0)
-              accepted
-          in
-          let pick_max a b =
-            if Llm_provider.Reasoning_effort.compare a b >= 0 then a else b
-          in
-          let pick_min a b =
-            if Llm_provider.Reasoning_effort.compare a b <= 0 then a else b
-          in
-          match below with
-          | [] -> Some (List.fold_left pick_min first rest)
-          | b_first :: b_rest -> Some (List.fold_left pick_max b_first b_rest)))
+let clamp_reasoning_effort_to_catalog = Runtime_inference.clamp_reasoning_effort_to_catalog
 ;;
 
 let effective_reasoning_effort
@@ -479,8 +449,7 @@ let host_stop_result
       (Keeper_internal_error.core_error_of_masc_internal_error
          (Keeper_internal_error.Terminal_effect_failed
             { failure_class; effect_disposition; detail }))
-  | ( Queued_chat_operation
-    | Repeated_tool_call _
+  | ( Repeated_tool_call _
     | Terminal_tool_boundary
         { outcome =
             (Terminal_completed | Durable_stimulus_deferred)
@@ -501,8 +470,6 @@ let host_stop_result
     in
     let stop_reason =
       match stop with
-      | Queued_chat_operation ->
-        Runtime_agent.Yielded_to_operation_queued { turns_used }
       | Repeated_tool_call { tool_name; repeated_count } ->
         Runtime_agent.Yielded_after_repeated_tool_call
           { turns_used; tool_name; repeated_count }
@@ -1356,9 +1323,36 @@ type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
   { name : string
   ; description : string
   ; input_schema : Yojson.Safe.t
+  ; loading : Runtime_official_client_tool.loading
+  ; result_bound : Runtime_official_client_tool.result_bound
   ; call_effect : Yojson.Safe.t -> Agent_core.Tool.call_effect
   ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
   }
+
+type loading_plan =
+  | All_on_demand
+  | Declared of
+      { on_demand : string list
+      ; result_bounds : (string * int) list
+      }
+
+let loading_of_plan plan name : Runtime_official_client_tool.loading =
+  match plan with
+  | All_on_demand -> Runtime_official_client_tool.On_demand
+  | Declared { on_demand; result_bounds = _ } ->
+    if List.mem name on_demand
+    then Runtime_official_client_tool.On_demand
+    else Runtime_official_client_tool.Upfront
+;;
+
+let result_bound_of_plan plan name : Runtime_official_client_tool.result_bound =
+  match plan with
+  | All_on_demand -> Runtime_official_client_tool.Unbounded
+  | Declared { on_demand = _; result_bounds } ->
+    (match List.assoc_opt name result_bounds with
+     | Some bytes -> Runtime_official_client_tool.Bounded_bytes bytes
+     | None -> Runtime_official_client_tool.Unbounded)
+;;
 
 (* One pre_tool_use rejection the model must be able to repair from
    (masc#28885). The official-client CLI owns the live conversation, so
@@ -1733,7 +1727,7 @@ let boundary_observation_cause error =
 
 let dynamic_tool_of_agent_core ~content_transport ~accepts_image_input ~tool_approval
     ~runtime_label ~keeper_name
-    ~turn_count ~context ~tools
+    ~turn_count ~context ~tools ~loading_plan
     ~(hooks : Agent_core.Hooks.hooks) ~event_bus ~context_injector
     ~terminal_effect_state ~terminal_error ~pre_tool_rejects ~raw_trace_run
     ~next_dynamic_invocation_index ~repeated_call_state ~on_tool_boundary ~on_result_handoff
@@ -1741,6 +1735,8 @@ let dynamic_tool_of_agent_core ~content_transport ~accepts_image_input ~tool_app
   { name = tool.schema.name
   ; description = tool.schema.description
   ; input_schema = Yojson.Safe.Util.member "input_schema" (Agent_core.Tool.schema_to_json tool)
+  ; loading = loading_of_plan loading_plan tool.schema.name
+  ; result_bound = result_bound_of_plan loading_plan tool.schema.name
   ; call_effect = Agent_core.Tool.call_effect tool
   ; call =
       (fun ~call_id input ->
@@ -2059,7 +2055,7 @@ let dynamic_tool_of_agent_core ~content_transport ~accepts_image_input ~tool_app
 ;;
 
 let dynamic_tools ~content_transport ~accepts_image_input ~tool_approval ~runtime_label
-    ~keeper_name ~turn_count ~tools
+    ~keeper_name ~turn_count ~tools ~loading_plan
     ~hooks ~event_bus ~context_injector ~context ~terminal_effect_state
     ~terminal_error ~pre_tool_rejects
     ?on_tool_boundary
@@ -2085,6 +2081,7 @@ let dynamic_tools ~content_transport ~accepts_image_input ~tool_approval ~runtim
             ~turn_count
             ~context
             ~tools
+            ~loading_plan
             ~hooks
             ~event_bus
             ~context_injector

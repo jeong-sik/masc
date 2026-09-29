@@ -48,7 +48,11 @@ val runtime_suffix : assignment_id:string -> failed_runtime_id:string -> next_ru
 type session_scope
 val session_scope : string list -> (session_scope, string) result
 val session_scope_components : session_scope -> string list
-type official_client_kind = Codex | Claude_code | Antigravity
+type official_client_kind = Codex | Claude_code | Antigravity | Muse
+val official_client_kind_to_string : official_client_kind -> string
+(** The wire spelling every store and projection writes for a kind. *)
+val official_client_kind_of_string : string -> official_client_kind option
+(** [None] for any spelling {!official_client_kind_to_string} does not emit. *)
 type official_client_checkpoint =
   { client_kind : official_client_kind; runtime_id : string; session_id : string;
     turn_id : string; tool_surface_sha256 : string; frame : Keeper_repetition_snapshot.t }
@@ -125,6 +129,7 @@ type action =
   | Suspend_official_checkpoint of official_client_checkpoint
   | Suspend_runtime_retry of runtime_retry
   | Resume_runtime_retry of runtime_retry
+  | Update_runtime_retry_wait of { observed : runtime_retry; replacement : runtime_retry }
   | Suspend_gate_reconciliation of gate_binding * string
   | Suspend_gate of gate_wait
   | Reconcile_gate_binding of gate_binding * gate_wait

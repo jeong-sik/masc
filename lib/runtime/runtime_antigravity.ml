@@ -25,7 +25,6 @@ type config =
   ; disable_slash_commands : bool
   ; admission_timeout_s : float
   ; timeout_s : float option
-  ; wall_clock_ceiling_s : float option
   ; output_schema : Yojson.Safe.t option
   }
 
@@ -61,49 +60,6 @@ let empty_success_stderr_bytes = 200
    boundary before projection. The shared structural patterns preserve useful
    diagnostics while masking credentials, including standalone token values. *)
 let redact_stderr_tail = Secret_patterns.redact_text
-
-type stderr_line_start = Complete | Truncated
-
-type stderr_tail =
-  { text : string
-  ; leading_line : stderr_line_start
-  }
-
-let empty_stderr_tail = { text = ""; leading_line = Complete }
-
-let append_stderr tail addition =
-  let combined = tail.text ^ addition in
-  let length = String.length combined in
-  if length <= stderr_tail_bytes then { tail with text = combined }
-  else
-    let first = length - stderr_tail_bytes in
-    { text = String.sub combined first stderr_tail_bytes
-    ; leading_line =
-        if Char.equal combined.[first - 1] '\n' then Complete else Truncated
-    }
-;;
-
-let stderr_for_projection tail =
-  (* A byte suffix can retain a credential's value after dropping [token=].
-     Only a known line beginning can be passed to the structural masker.
-     Keep the bound while reading; a line longer than it is omitted until a
-     newline provides a fresh boundary, even across arbitrary pipe chunks. *)
-  let text =
-    match tail.leading_line with
-    | Complete -> tail.text
-    | Truncated ->
-      (match String.index_opt tail.text '\n' with
-       | None -> ""
-       | Some index ->
-         String.sub tail.text (index + 1) (String.length tail.text - index - 1))
-  in
-  redact_stderr_tail text
-;;
-
-module For_testing = struct
-  let stderr_from_chunks chunks =
-    List.fold_left append_stderr empty_stderr_tail chunks |> stderr_for_projection
-end
 
 let empty_success_detail ~model ~tool_steps stderr =
   let trimmed = String.trim stderr in
@@ -142,7 +98,6 @@ let default_config ~cwd ~model =
   ; disable_slash_commands = true
   ; admission_timeout_s = default_timeout_s
   ; timeout_s = Some default_timeout_s
-  ; wall_clock_ceiling_s = None
   ; output_schema = None
   }
 ;;
@@ -152,9 +107,8 @@ let default_config ~cwd ~model =
    while a tool step runs: the step's output arrives in its DONE (or ERROR)
    update. Silence inside a tool step is the protocol, not a client that has
    gone away, and an idle deadline there would measure how long the tool took,
-   which [timeout_s] must not cap. The wall-clock ceiling still bounds that
-   phase: [Runtime_wall_clock.cap_window] makes [None] the remaining
-   budget, so the window handed to the read is always a number. *)
+   which [timeout_s] must not cap. The owner retains cancellation authority
+   while this phase has no idle timer. *)
 type read_phase =
   | Awaiting_admission
   | Model_turn
@@ -245,6 +199,7 @@ type error =
   | State_callback_failed of string
   | Turn_failed of string
   | Process_exited of string
+  | Unhandled_exception of string
   | Timeout of float
 
 exception Runtime_error of error
@@ -257,6 +212,7 @@ let error_to_string = function
   | State_callback_failed detail -> "Antigravity conversation state callback failed: " ^ detail
   | Turn_failed detail -> "Antigravity turn failed: " ^ detail
   | Process_exited detail -> "Antigravity CLI exited before completion: " ^ detail
+  | Unhandled_exception detail -> "Antigravity runtime raised: " ^ detail
   | Timeout seconds -> Printf.sprintf "Antigravity stream was idle for %.3fs" seconds
 ;;
 
@@ -274,6 +230,8 @@ module Shared_json = Runtime_official_client_json.Make (struct
 end)
 
 open Shared_json
+
+module Stderr = Runtime_official_client_json.Stderr
 
 let required_string ?(nonempty = true) stage name fields =
   match List.assoc_opt name fields with
@@ -662,7 +620,7 @@ let drain_stderr flow tail =
   try
     while true do
       let count = Eio.Flow.single_read flow chunk in
-      tail := append_stderr !tail (Cstruct.to_string (Cstruct.sub chunk 0 count))
+      Stderr.append tail (Cstruct.to_string (Cstruct.sub chunk 0 count))
     done
   with
   | End_of_file -> ()
@@ -928,7 +886,7 @@ let run_spawned ?home_dir ?on_spawned ?on_prompt_sent ~mgr ~clock ~cwd config ~c
     let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
     let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
     let stderr_r, stderr_w = Eio.Process.pipe ~sw mgr in
-    let stderr_tail = ref empty_stderr_tail in
+    let stderr_tail = Stderr.create ~limit:stderr_tail_bytes in
     let proc =
       try
         Eio.Process.spawn
@@ -949,9 +907,6 @@ let run_spawned ?home_dir ?on_spawned ?on_prompt_sent ~mgr ~clock ~cwd config ~c
     Eio.Flow.close stdin_r;
     Eio.Flow.close stdout_w;
     Eio.Flow.close stderr_w;
-    let wall_clock =
-      Runtime_wall_clock.make ?ceiling_s:config.wall_clock_ceiling_s ~now:(fun () -> Eio.Time.now clock) ()
-    in
     (* A prompt longer than the pipe buffer stops until the CLI reads it, and
        a CLI that answers without draining stdin never does. [Switch.run]
        joins an ordinary fiber on the way out of a body that returned a
@@ -959,11 +914,9 @@ let run_spawned ?home_dir ?on_spawned ?on_prompt_sent ~mgr ~clock ~cwd config ~c
        with nothing left to end it. The window is the one the first read
        uses. *)
     Eio.Fiber.fork ~sw (fun () ->
-      with_idle_timeout
+      with_optional_idle_timeout
         clock
-        (Runtime_wall_clock.cap_window
-           wall_clock
-           (timeout_s_for_phase config Awaiting_admission))
+        (timeout_s_for_phase config Awaiting_admission)
         (fun () -> Eio.Flow.copy_string prompt stdin_w);
       (* A successful prompt write must deliver EOF to the CLI. If the copy
          raises, the failed fiber cancels [sw] and the pipe's switch-owned
@@ -1004,15 +957,9 @@ let run_spawned ?home_dir ?on_spawned ?on_prompt_sent ~mgr ~clock ~cwd config ~c
           hang while a child process keeps stdout open (#28912), which
           turned already-served turns into idle timeouts. *)
        while Option.is_none !state.result do
-         if Runtime_wall_clock.expired wall_clock then
-           abort_with_runtime_error
-             (Timeout
-                (Option.value config.wall_clock_ceiling_s
-                   ~default:Runtime_wall_clock.default_ceiling_s));
          let phase = read_phase !state in
          let read_timeout_s =
            timeout_s_for_phase config phase
-           |> Runtime_wall_clock.cap_window wall_clock
          in
          (* Applying an event runs MASC's own callbacks (admission, stream
             observers). The tool-step exemption is about the CLI's silence,
@@ -1023,17 +970,16 @@ let run_spawned ?home_dir ?on_spawned ?on_prompt_sent ~mgr ~clock ~cwd config ~c
              (match phase with
               | Awaiting_admission -> Awaiting_admission
               | Model_turn | Tool_step_running -> Model_turn)
-           |> Runtime_wall_clock.cap_window wall_clock
          in
          let line =
-           with_idle_timeout clock read_timeout_s (fun () ->
+           with_optional_idle_timeout clock read_timeout_s (fun () ->
              Eio.Buf_read.line reader)
          in
          match parse_wire_line line with
          | Error error -> abort_with_runtime_error error
          | Ok event ->
            (match
-              with_idle_timeout clock callback_timeout_s (fun () ->
+              with_optional_idle_timeout clock callback_timeout_s (fun () ->
                 apply_event
                   config
                   ~conversation_mode
@@ -1077,7 +1023,7 @@ let run_spawned ?home_dir ?on_spawned ?on_prompt_sent ~mgr ~clock ~cwd config ~c
         Eio.Process.await proc
     in
     process_settled := true;
-    status, !state, String.trim (stderr_for_projection !stderr_tail))
+    status, !state, String.trim (Stderr.contents stderr_tail))
 ;;
 
 let run_turn ?(conversation_mode = Start) ?home_dir ?on_spawned ?on_prompt_sent ~mgr ~clock ~cwd
@@ -1113,10 +1059,7 @@ let run_turn ?(conversation_mode = Start) ?home_dir ?on_spawned ?on_prompt_sent 
     | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | Runtime_error error -> Error error
-    | exn ->
-      Error
-        (Protocol_error
-           { stage = "runtime boundary"; detail = Printexc.to_string exn })
+    | exn -> Error (Unhandled_exception (Printexc.to_string exn))
   in
   let* status, state, stderr = run_result in
   let wall_duration_s = max 0.0 (Eio.Time.now clock -. started_at) in

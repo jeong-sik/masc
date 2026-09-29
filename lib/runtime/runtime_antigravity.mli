@@ -33,19 +33,12 @@ type config =
         turn is running. It is not a total turn-duration bound, and it is not
         armed while the last step the CLI reported is a running tool step: the
         CLI writes nothing between a tool step's [ACTIVE] update and its
-        [DONE] or [ERROR] update, so that silence is the protocol and only
-        [wall_clock_ceiling_s] bounds it.
+        [DONE] or [ERROR] update, so that silence has no idle timer.
         [None] removes the deadline after the first valid [init] event and its
         admission callback: the spawned client decides when its own turn ends.
         The post-spawn pre-init phase remains bounded by [admission_timeout_s].
         Declared as [turn-timeout-s] in runtime config, where [0] selects
         [None]. *)
-  ; wall_clock_ceiling_s : float option
-    (** Whole-turn wall-clock ceiling measured from spawn ([None] selects the
-        shared hours-scale default). The idle timeout above resets on every
-        emitted line and is off inside a tool step, so this is the only bound
-        that a turn of continuous thin progress (#31242) or a tool step that
-        never ends cannot outlive. *)
   ; output_schema : Yojson.Safe.t option
     (** JSON Schema the CLI enforces on the turn's final answer
         ([--json-schema]). Validation with a re-prompt, not constrained
@@ -150,19 +143,19 @@ type error =
   | State_callback_failed of string
   | Turn_failed of string
   | Process_exited of string
+  | Unhandled_exception of string
+      (** An exception nothing in the runtime expected, caught as the turn
+          leaves it: a host-side failure, not something the CLI sent. The
+          string is the exception. *)
   | Timeout of float
 
 val error_to_string : error -> string
 
 val redact_stderr_tail : string -> string
-(** Shared structural secret masking. The stderr reader drops an incomplete
-    leading line before this boundary; display truncation follows masking. *)
-
-module For_testing : sig
-  val stderr_from_chunks : string list -> string
-  (** The production bounded stderr reader's retention and masking boundary,
-      with deterministic input chunks instead of a process pipe. *)
-end
+(** Shared structural secret masking. The shared stderr capture masks complete
+    retained input before display truncation. Once the raw byte bound is
+    exceeded the entire diagnostic is omitted, including later lines, so a
+    multiline credential cannot survive a dropped identifying prefix. *)
 
 val validate_turn :
   ?conversation_mode:conversation_mode ->

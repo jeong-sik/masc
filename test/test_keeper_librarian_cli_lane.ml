@@ -337,7 +337,7 @@ let test_domain_failure_kind_survives_failed_cli_slot () =
       true
       (Runtime.For_testing.classified_error_kind error = Current.Domain_output_invalid);
     check_detail
-      ~api_failure:"librarian domain output invalid"
+      ~api_failure:"domain output invalid"
       ~cli_failure:
         (Cli.Execution_failed
            { runtime_id = Fixture.cli_primary_runtime
@@ -346,7 +346,10 @@ let test_domain_failure_kind_survives_failed_cli_slot () =
       (Runtime.For_testing.classified_error_detail error)
 ;;
 
-let test_invalid_provider_response_does_not_run_cli ?(requires_token_measurement = false) () =
+(* An unreadable provider body, or a count-tokens request that went out and
+   failed, is the provider's failure, not masc's, so the pass walks on to the
+   declared CLI slot (RFC-exact-lane-walks-one-slot-list Q1). *)
+let test_invalid_provider_response_runs_cli ?(requires_token_measurement = false) () =
   with_eio @@ fun ~sw ~net ~clock ~base_path ->
   Fixture.with_official_client_runtimes @@ fun () ->
   let server =
@@ -359,7 +362,7 @@ let test_invalid_provider_response_does_not_run_cli ?(requires_token_measurement
        ~slot_ids:[ "librarian-invalid-provider-response" ]
        (Fixture.resolver_snapshot
           ~requires_token_measurement
-          ~source:"librarian non-advanceable terminal"
+          ~source:"librarian invalid provider response"
           [ { Fixture.id = "librarian-invalid-provider-response"
             ; base_url = server.base_url
             } ])
@@ -374,12 +377,21 @@ let test_invalid_provider_response_does_not_run_cli ?(requires_token_measurement
   if requires_token_measurement then
     check (list string) "only token measurement reached HTTP; generation did not start"
       [ "/v1/messages/count_tokens" ] (Fixture.request_paths server);
-  check int "a non-advanceable terminal does not run CLI" 0 !cli_calls;
+  check int "the CLI slot runs once" 1 !cli_calls;
   match result with
-  | Ok _ -> fail "a CLI answer must not replace the invalid provider response"
   | Error error ->
-    check bool "the original execution failure is preserved" true
-      (Runtime.For_testing.classified_error_kind error = Current.Exact_execution_failure)
+    failf
+      "the cli slot must answer: %s"
+      (Runtime.For_testing.classified_error_detail error)
+  | Ok ((_selection, output), selected_slot) ->
+    check served_slot
+      "the answering slot is the cli runtime id"
+      (Runtime.Cli_slot Fixture.cli_primary_runtime)
+      selected_slot;
+    check bool
+      "the accepted output is the cli answer"
+      true
+      (Yojson.Safe.equal output valid_selection_json)
 ;;
 
 (* The first slot sends its request and is refused with a 5xx, which advances
@@ -679,13 +691,13 @@ let () =
               ~kind:Current.Exact_setup_failure ~calls:1 ())
         ; test_case "API domain failure kind survives failed CLI fallback" `Quick
             test_domain_failure_kind_survives_failed_cli_slot
-        ; test_case "an invalid provider response does not run CLI" `Quick
-            (fun () -> test_invalid_provider_response_does_not_run_cli ())
+        ; test_case "an invalid provider response runs the CLI slot" `Quick
+            (fun () -> test_invalid_provider_response_runs_cli ())
         ; test_case "a walk that sent before it failed reports the send" `Quick
             test_a_walk_that_sent_before_it_failed_reports_the_send
-        ; test_case "a dispatched measurement failure does not run CLI" `Quick
+        ; test_case "a dispatched measurement failure runs the CLI slot" `Quick
             (fun () ->
-              test_invalid_provider_response_does_not_run_cli
+              test_invalid_provider_response_runs_cli
                 ~requires_token_measurement:true ())
         ; test_case "CLI execution failure reaches journal and exact-run projection" `Quick
             (test_failure_reaches_journal ~cli_only:false

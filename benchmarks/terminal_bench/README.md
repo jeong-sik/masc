@@ -72,8 +72,9 @@ CPU 24개가 필요하다. CPU 가 16개인 Mac 에서는 로컬 docker 로 동�
     artifact 를 내려받기 때문이다.
   - 그 순간의 delegate 상태와 토큰·도구 호출 수를 `result.json` 에 쓴다
     (`interrupted: true`, `keepers_stopped`).
-- claude_code 레인은 `turn-timeout-s = 0`(무응답 제한 없음),
-  `wall-clock-ceiling-s = 28800.0` 으로 렌더한다. 런타임 기본 턴 상한은 14400s 다.
+- claude_code 레인은 `turn-timeout-s = 0`(무응답 제한 없음)으로 렌더한다.
+  런타임에는 누적 턴 시간 상한이 없고, 28800s 에이전트 제한에 도달하면 harbor 가
+  `run()` 을 취소한다.
 - `--agent-setup-timeout-multiplier 5` 는 설치 단계용이다. harbor 기본 설치 타임아웃은
   360s 이고 에이전트 작업 시간에 들어가지 않는다.
 
@@ -145,6 +146,7 @@ Anthropic 요청에서는 `tool_choice.disable_parallel_tool_use`, OpenAI 요청
 | `anthropic` | `ANTHROPIC_API_KEY` | 이 호스트는 `ANTHROPIC_API_KEY` 가 무효라 `ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY_MASC"` 로 넘긴다 |
 | `openrouter` | `OPENROUTER_API_KEY` | 와이어 id 의 슬래시는 runtime.toml model id 로 못 쓴다. 렌더러가 바인딩을 슬러그로 만든다(`openrouter/z-ai/glm-4.7-flash` → `openrouter.z-ai-glm-4.7-flash`) |
 | `kimi_coding` | `KIMI_API_KEY` | arm A 의 kimi-cli 에는 `kimi/<model>` 로 넘어간다 |
+| `ollama_cloud` | `OLLAMA_CLOUD_API_KEY` | OpenAI-compatible wire(`https://ollama.com/v1`). arm A 스킵(같은 모델 harbor 에이전트 없음), b·c·d 거절(suppression 계약 없음) — `./run_matrix.sh e,f,h` 로 돌린다. 예: `-m ollama_cloud/deepseek-v4-pro`. `deepseek-v4.1-flash` 는 uncontrolled 대신 effort low 로 렌더한다(기본값은 reasoning 반복 붕괴 6/6, low 는 통과 실측) |
 | `openai` | `OPENAI_API_KEY` | 2026-09-10 기준 키에 크레딧이 없어 요청 생성 이후는 확인하지 못했다 |
 | `claude_code` | `CLAUDE_CODE_OAUTH_TOKEN` | 아래 구독 레인 |
 

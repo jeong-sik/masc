@@ -80,6 +80,13 @@ val backend_release_lock :
   config -> key:string -> owner:string ->
   (bool, Backend_types.error) result
 
+(** Run [publish] inside [key]'s lease fence when [owner] still holds the
+    lease, renewing it first; see {!Backend.FileSystem.commit_under_lease}.
+    The Memory backend has no lease and runs [publish] directly. *)
+val backend_commit_under_lease :
+  config -> key:string -> ttl_seconds:int -> owner:string -> (unit -> 'a) ->
+  (('a, Backend.FileSystem.lease_lost) result, Backend_types.error) result
+
 (** Returns [Ok n] where [n] is the number of subscribers notified
     (forwarded from [Pubsub_mem.publish]). *)
 val backend_publish :

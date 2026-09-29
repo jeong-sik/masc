@@ -5,9 +5,13 @@
    The path is resolved the same way
    keeper_runtime_config resolves it, so both processes read one file. *)
 
+type opening = Overview | Last of Keeper_id.Keeper_name.t option | Keeper of Keeper_id.Keeper_name.t
+
 type t = {
+  opening : (opening, string) result;
   theme : string option;
   board_sort : string option;
+  candle : string option;
   lift_colours : bool option;
   table_frame : bool option;
   hints_visible : bool option;
@@ -28,23 +32,51 @@ let runtime_toml_path ~base_path =
    a parsed doc without a file: every absence -- file gone, table missing, key
    missing -- reads the same as "no stored choice", and the caller then follows
    the terminal exactly as it did before this key existed. *)
-let theme_of_doc doc = Keeper_toml_loader.toml_string_opt doc "tui.theme"
+(* The [[tui]] table of runtime.toml, spelled once (#39539). *)
+let tui_table = Runtime_toml_namespace.(key Tui)
 
-(* The writer for the one key above that changes while masc runs. The other
-   settings in this file are read once at boot and never moved from inside
-   the TUI, so they have nothing to store; the theme is picked on a pane, and
-   a pick that does not survive a restart is not a setting.
+let theme_of_doc doc = Keeper_toml_loader.toml_string_opt doc (tui_table ^ ".theme")
 
-   [None] withdraws the choice: the key is removed rather than set to a name
-   meaning "the terminal's", because absence is the state the reader is going
-   back to -- the same absence [load] reads as "no stored choice".
+let opening_keeper_of_doc doc =
+  match List.assoc_opt (tui_table ^ ".opening_keeper") doc with
+  | None -> Ok None
+  | Some (Keeper_toml_loader.Toml_string name) ->
+    (match Keeper_id.Keeper_name.of_string name with
+     | Ok name -> Ok (Some name)
+     | Error reason -> Error ("Invalid [tui].opening_keeper: " ^ reason))
+  | Some _ -> Error "[tui].opening_keeper must be a Keeper name string"
 
-   Pure, and deliberately spelled in the editor's table-and-key form while
-   [theme_of_doc] reads the loader's dotted form. The two grammars are not
-   the same, so nothing can be shared between them; what proves they meet is
-   the round trip in test_tui_config.ml. *)
+let opening_of_doc doc =
+  match List.assoc_opt (tui_table ^ ".opening") doc with
+  | None | Some (Keeper_toml_loader.Toml_string "overview") -> Ok Overview
+  | Some (Keeper_toml_loader.Toml_string "last") ->
+    Result.map (fun name -> Last name) (opening_keeper_of_doc doc)
+  | Some (Keeper_toml_loader.Toml_string "keeper") ->
+    (match opening_keeper_of_doc doc with
+     | Ok (Some name) -> Ok (Keeper name)
+     | Ok None -> Error "[tui].opening = keeper needs opening_keeper"
+     | Error reason -> Error reason)
+  | Some (Keeper_toml_loader.Toml_string value) ->
+    Error ("Unknown [tui].opening: " ^ value)
+  | Some _ -> Error "[tui].opening must be overview, last, or keeper"
+
+(* Remember a chat target only when [opening] is [Last] and the target
+   changes. The edit shares Runtime's config write lock with other settings. *)
+let text_with_opening_keeper content ~keeper =
+  Toml_line_editor.edit_table_scalar content ~path:tui_table ~key:"opening_keeper"
+    ~value:(Some (Keeper_id.Keeper_name.to_string keeper))
+
+let set_opening_keeper ~base_path keeper =
+  match
+    Runtime.edit_config_text
+      ~runtime_config_path:(runtime_toml_path ~base_path)
+      (fun content -> text_with_opening_keeper content ~keeper)
+  with
+  | Ok (_ : Runtime.config_commit_receipt) -> Ok ()
+  | Error message -> Error message
+
 let text_with_theme content ~theme =
-  Toml_line_editor.edit_table_scalar content ~path:"tui" ~key:"theme" ~value:theme
+  Toml_line_editor.edit_table_scalar content ~path:tui_table ~key:"theme" ~value:theme
 
 (* Store [theme] in the same runtime.toml [load] reads. Runtime does the
    load, the edit and the write under one lock, so the keeper assignment an
@@ -77,13 +109,13 @@ let set_theme ~base_path theme =
    Off has a cost worth naming: masc says some things with colour alone, and
    on a scheme that leaves those colours dim they stop being read. That is the
    reader's call to make, which is the point of the key. *)
-let lift_colours_of_doc doc = Keeper_toml_loader.toml_bool_opt doc "tui.lift_colours"
+let lift_colours_of_doc doc = Keeper_toml_loader.toml_bool_opt doc (tui_table ^ ".lift_colours")
 
 (* Whether tables draw their outer box, [tui].table_frame. Absent reads as
    "no", which is what the pane drew before the key existed: the box is paid
    for out of the columns, and taking a cell of content from a reader who did
    not ask is the change that needs the stronger reason. *)
-let table_frame_of_doc doc = Keeper_toml_loader.toml_bool_opt doc "tui.table_frame"
+let table_frame_of_doc doc = Keeper_toml_loader.toml_bool_opt doc (tui_table ^ ".table_frame")
 
 (* Whether footers spell their key hints, [tui].hints_visible. Absent reads
    as "yes" -- the hints predate the key, and a reader who never set it must
@@ -92,25 +124,21 @@ let table_frame_of_doc doc = Keeper_toml_loader.toml_bool_opt doc "tui.table_fra
    long hint list stops being cell-truncated. "?:help" stays, because the
    reader who turned hints off still needs the door back. *)
 let hints_visible_of_doc doc =
-  Keeper_toml_loader.toml_bool_opt doc "tui.hints_visible"
+  Keeper_toml_loader.toml_bool_opt doc (tui_table ^ ".hints_visible")
 
 (* Whether a line typed while an earlier one is still waiting joins that line
    instead of queueing behind it, [tui].coalesce_queued_input. Absent reads as
-   "yes".
+   "no" so separate sends retain their identities.
 
    A queued line has not been sent yet -- dispatch takes it out of the queue --
    so joining two of them changes what one turn receives, not what a turn in
-   flight sees. The reader who types a thought, then its correction, then the
-   part they forgot, means one message; queueing them separately spends a turn
-   on each and lets the Keeper answer the first before the rest arrive.
-
-   Off keeps every line its own turn, which is what a reader wants when the
-   lines really are separate errands. *)
+   flight sees. An operator who wants several separate Enter sends treated as
+   one message can opt in; otherwise each send retains its own request id. *)
 let coalesce_queued_input_of_doc doc =
-  Keeper_toml_loader.toml_bool_opt doc "tui.coalesce_queued_input"
+  Keeper_toml_loader.toml_bool_opt doc (tui_table ^ ".coalesce_queued_input")
 
 let user_input_priority_next_of_doc doc =
-  Keeper_toml_loader.toml_bool_opt doc "tui.user_input_priority_next"
+  Keeper_toml_loader.toml_bool_opt doc (tui_table ^ ".user_input_priority_next")
 
 (* Whether ^Y ending a capture also sends what was heard,
    [voice.stt].send_on_stop. Absent reads as off, unlike its siblings here:
@@ -150,8 +178,13 @@ let load ~base_path =
     | Error _ -> None)
   in
   let read extract = Option.bind doc extract in
-  { theme = read theme_of_doc;
-    board_sort = read (fun doc -> Keeper_toml_loader.toml_string_opt doc "tui.board_sort");
+  { opening =
+      (match doc with
+       | Some doc -> opening_of_doc doc
+       | None -> Ok Overview);
+    theme = read theme_of_doc;
+    board_sort = read (fun doc -> Keeper_toml_loader.toml_string_opt doc (tui_table ^ ".board_sort"));
+    candle = read (fun doc -> Keeper_toml_loader.toml_string_opt doc (tui_table ^ ".candle"));
     lift_colours = read lift_colours_of_doc;
     table_frame = read table_frame_of_doc;
     hints_visible = read hints_visible_of_doc;
@@ -160,10 +193,13 @@ let load ~base_path =
     user_input_priority_next = read user_input_priority_next_of_doc;
   }
 
-let set_board_sort ~base_path sort =
+let set_tui_string ~base_path ~key value =
   match Runtime.edit_config_text
       ~runtime_config_path:(runtime_toml_path ~base_path)
       (fun content -> Toml_line_editor.edit_table_scalar content
-          ~path:"tui" ~key:"board_sort" ~value:(Some sort)) with
+          ~path:tui_table ~key ~value:(Some value)) with
   | Ok (_ : Runtime.config_commit_receipt) -> Ok ()
   | Error message -> Error message
+
+let set_board_sort ~base_path sort = set_tui_string ~base_path ~key:"board_sort" sort
+let set_candle ~base_path candle = set_tui_string ~base_path ~key:"candle" candle

@@ -29,14 +29,14 @@ let decode_backlog ~path json =
                  entry.dropped_task_id
                  detail
            | Field_absent | Field_decoded -> ());
-          match entry.dropped_outcomes.reclaim_policy_outcome with
-          | Field_unreadable detail ->
-              Log.Misc.warn
-                "[read_backlog] %s: task %s reclaim_policy unreadable, dropped: %s"
-                path
-                entry.dropped_task_id
-                detail
-          | Field_absent | Field_decoded -> ())
+          (match entry.dropped_outcomes.reclaim_policy_outcome with
+           | Field_unreadable detail ->
+               Log.Misc.warn
+                 "[read_backlog] %s: task %s reclaim_policy unreadable, dropped: %s"
+                 path
+                 entry.dropped_task_id
+                 detail
+           | Field_absent | Field_decoded -> ()))
         dropped;
       Ok backlog
   | Error msg ->
@@ -219,6 +219,29 @@ type write_backlog_outcome =
   ; post_commit_error : string option
   }
 
+(* The encode can wait behind other jobs on the shared CPU pool while the
+   caller holds the backlog lock, and on the FileSystem backend that lock is
+   a lease that may run out during the wait. The primary write therefore
+   runs as the protected step of the caller's own lease: inside the lock
+   key's fence the owner is checked, the lease renewed and the write made
+   before any competing acquisition can take the lease. When another
+   acquisition holds it by then, it may already have committed a newer
+   revision, so nothing is written. *)
+(* Test seam: runs inside the fence between the primary write and the
+   recovery copy write. Production never sets it. *)
+let between_backlog_copy_writes_hook : (unit -> unit) Atomic.t =
+  Atomic.make (fun () -> ())
+
+let publish_under_backlog_lease config ~action publish =
+  match commit_under_held_lease config (backlog_lock_path config) publish with
+  | Ok published -> published
+  | Error refusal ->
+    let detail = lease_commit_refusal_to_string refusal in
+    Log.TaskState.error "backlog %s refused, nothing written: %s" action detail;
+    Error
+      (Printf.sprintf "[write_backlog] %s refused, nothing written: %s" action
+         detail)
+
 (** Result-returning variant with the primary backlog as the commit point.
     Once the primary write succeeds, recovery-copy failure is returned as an
     explicit committed outcome rather than a false mutation failure.
@@ -235,16 +258,70 @@ let write_backlog_result ?after_commit config backlog =
          "[write_backlog] revision exhausted at %d; refusing to wrap"
          backlog.version)
   else
-  let backlog =
-    { backlog with version = backlog.version + 1; last_updated = now_iso () }
-  in
-  let json = backlog_to_yojson backlog in
+  let committed_revision = backlog.version + 1 in
   let primary_path = backlog_path config in
   let recovery_path = backlog_recovery_path config in
-  let encoded = encode_json_pretty json in
-  match write_encoded_json_commit_result config primary_path encoded with
+  (* [last_updated] is stamped inside the job, after any wait for a pool
+     worker, so the stamp is taken next to the primary write rather than
+     when the job was queued. *)
+  let encoded =
+    Domain_pool_ref.submit_cpu_or_inline (fun () ->
+      encode_json_pretty
+        (backlog_to_yojson
+           { backlog with version = committed_revision; last_updated = now_iso () }))
+  in
+  (* The recovery copy is written inside the same fence as the primary. A
+     recovery write made after the fence is released could land after a
+     writer that took the lease over has committed a newer primary and
+     recovery copy, and would put this older snapshot back into the recovery
+     copy, which a reader falls back to when the primary cannot be read.
+     The primary stays the commit point: once it is written, a failed
+     recovery write is reported in the outcome and does not undo the
+     commit. *)
+  let write_recovery_copy () =
+    match write_encoded_json_commit_result config recovery_path encoded with
+    | Ok { mirror_error = None } -> None
+    | Ok { mirror_error = Some message } ->
+      Log.TaskState.error
+        "backlog primary and recovery backend committed but recovery local \
+         mirror write failed path=%s error=%s"
+        recovery_path
+        message;
+      Some message
+    | Error message ->
+      Log.TaskState.error
+        "backlog primary committed but recovery copy write failed path=%s error=%s"
+        recovery_path
+        message;
+      Some message
+    | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+    | exception exn ->
+      let message = Printexc.to_string exn in
+      Log.TaskState.error
+        "backlog primary committed but recovery copy write raised path=%s error=%s"
+        recovery_path
+        message;
+      Some message
+  in
+  match
+    publish_under_backlog_lease config
+      ~action:(Printf.sprintf "commit of revision %d" committed_revision)
+      (fun () ->
+         match write_encoded_json_commit_result config primary_path encoded with
+         | Error _ as error -> error
+         | Ok primary_commit ->
+           (* The primary is the commit point, so from here on a
+              cancellation must not skip the recovery copy, the observer or
+              [after_commit]. The fenced FileSystem path already runs
+              [publish] protected, but the Memory backend and a write
+              without a held lease call [publish] directly, and the
+              recovery write yields. *)
+           protect_backlog_commit_settlement (fun () ->
+             (Atomic.get between_backlog_copy_writes_hook) ();
+             Ok (primary_commit, write_recovery_copy ())))
+  with
   | Error msg -> Error msg
-  | Ok primary_commit ->
+  | Ok (primary_commit, recovery_error) ->
     protect_backlog_commit_settlement (fun () ->
     Option.iter
       (fun message ->
@@ -253,23 +330,6 @@ let write_backlog_result ?after_commit config backlog =
            primary_path
            message)
       primary_commit.mirror_error;
-    let recovery_error =
-      match write_encoded_json_commit_result config recovery_path encoded with
-      | Ok { mirror_error = None } -> None
-      | Ok { mirror_error = Some message } ->
-        Log.TaskState.error
-          "backlog primary and recovery backend committed but recovery local \
-           mirror write failed path=%s error=%s"
-          recovery_path
-          message;
-        Some message
-      | Error message ->
-        Log.TaskState.error
-          "backlog primary committed but recovery copy write failed path=%s error=%s"
-          recovery_path
-          message;
-        Some message
-    in
     clear_backlog_cache_for primary_path;
     clear_backlog_cache_for recovery_path;
     let mutation_observer_error =
@@ -317,7 +377,7 @@ let write_backlog_result ?after_commit config backlog =
              caller_error)
     in
     Ok
-      { committed_revision = backlog.version
+      { committed_revision
       ; primary_mirror_error = primary_commit.mirror_error
       ; recovery_error
       ; post_commit_error
@@ -328,25 +388,48 @@ let write_backlog_result ?after_commit config backlog =
     primary read. This repairs copies after a committed deletion's failed
     settlement, including on an already-absent Task retry. *)
 let repair_backlog_copies_result config backlog =
-  let json = backlog_to_yojson backlog in
   let primary_path = backlog_path config in
   let recovery_path = backlog_recovery_path config in
-  let encoded = encode_json_pretty json in
+  let encoded =
+    Domain_pool_ref.submit_cpu_or_inline (fun () ->
+      encode_json_pretty (backlog_to_yojson backlog))
+  in
   let write path = match write_encoded_json_commit_result config path encoded with
     | Error message -> Error message
     | Ok {mirror_error=Some message} -> Error message
     | Ok {mirror_error=None} -> Ok () in
-  match write primary_path with
+  (* Both copies are written inside the lease's fence, for the same reason
+     as in [write_backlog_result]: a recovery write after the fence could
+     overwrite the recovery copy of a newer revision committed by a writer
+     that took the lease over. *)
+  match
+    publish_under_backlog_lease config
+      ~action:(Printf.sprintf "repair of revision %d" backlog.version)
+      (fun () ->
+         match write primary_path with
+         | Error _ as error -> error
+         | Ok () ->
+           (* Same as in [write_backlog_result]: once the primary is
+              rewritten, a cancellation must not leave the recovery copy
+              behind it on any backend. *)
+           protect_backlog_commit_settlement (fun () ->
+             (Atomic.get between_backlog_copy_writes_hook) ();
+             write recovery_path))
+  with
   | Error _ as error -> error
   | Ok () ->
-    match write recovery_path with
-    | Error _ as error -> error
-    | Ok () ->
-      clear_backlog_cache_for primary_path;
-      clear_backlog_cache_for recovery_path;
-      try (Atomic.get Workspace_hooks.on_task_mutation_fn) (); Ok () with
-      | Eio.Cancel.Cancelled _ as error -> raise error
-      | error -> Error (Printexc.to_string error)
+      (* Same as in [write_backlog_result]: the primary is the commit point,
+         so once both copies are written a cancellation must not skip the
+         cache invalidation or the task mutation observer. Without this the
+         repair had a different cancellation contract from a normal commit:
+         a cancellation arriving while the observer yields was re-raised and
+         the observer was skipped even though the repair had committed. *)
+      protect_backlog_commit_settlement (fun () ->
+        clear_backlog_cache_for primary_path;
+        clear_backlog_cache_for recovery_path;
+        try (Atomic.get Workspace_hooks.on_task_mutation_fn) (); Ok () with
+        | Eio.Cancel.Cancelled _ as error -> raise error
+        | error -> Error (Printexc.to_string error))
 ;;
 
 (** [write_backlog ?after_commit config backlog] persists the primary SSOT,

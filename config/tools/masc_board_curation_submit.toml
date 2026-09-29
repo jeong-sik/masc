@@ -48,6 +48,7 @@ type = "object"
 [[params.items.params]]
 name = "post_id"
 type = "string"
+pattern = "^[a-zA-Z0-9_-]{1,64}$"
 required = true
 
 [[params.items.params]]
@@ -132,6 +133,7 @@ type = "object"
 [[keeper_projection.params.items.params]]
 name = "post_id"
 type = "string"
+pattern = "^[a-zA-Z0-9_-]{1,64}$"
 required = true
 
 [[keeper_projection.params.items.params]]

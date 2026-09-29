@@ -57,9 +57,9 @@ class CaptureTuiLaneRunsTest(unittest.TestCase):
     def test_exact_run_index_does_not_require_a_retired_box_border(self):
         screen = "\n".join(
             [
-                "STARTED SUBJECT STATUS ELAPSED SLOT RUN ID",
-                "09-01 10:00:00 actor running — slot run-new",
-                "09-01 09:59:00 actor succeeded 1.0s slot run-done",
+                "STARTED SUBJECT STATUS ELAPSED SLOT",
+                "09-01 10:00:00 actor running — slot",
+                "09-01 09:59:00 actor succeeded 1.0s slot",
             ]
         )
         self.assertEqual(capture.first_succeeded_row_index(screen), 1)
@@ -67,9 +67,9 @@ class CaptureTuiLaneRunsTest(unittest.TestCase):
     def test_verifier_status_recovers_a_truncated_typed_label(self):
         screen = "\n".join(
             [
-                "STARTED SUBJECT STATUS ELAPSED SLOT RUN ID",
-                "09-01 10:00:00 task-1 running — slot run-new",
-                "09-01 09:59:00 task-2 infrastruc… 1.0s slot run-done",
+                "STARTED SUBJECT STATUS ELAPSED SLOT",
+                "09-01 10:00:00 task-1 running — slot",
+                "09-01 09:59:00 task-2 infrastruc… 1.0s slot",
             ]
         )
         self.assertEqual(

@@ -96,6 +96,7 @@ let claude_failure_status = function
   | Subscription_required _ -> "login_required"
   | Timeout _ -> "timeout"
   | Protocol_error _ | Unsupported_control_request _ -> "protocol_error"
+  | Unhandled_exception _ -> "runtime_exception"
   | Turn_transport_interrupted _
   | Context_window_exceeded _
   | Turn_failed _
@@ -123,7 +124,7 @@ let probe_codex ~mgr ~clock ~process_cwd ~runtime_id ~model
          undeclared turn bound therefore falls back to the probe ceiling rather
          than to no ceiling. *)
       timeout_s = Some (Float.min max_probe_timeout_s config.timeout_s)
-      ; wall_clock_ceiling_s = None
+
       (* A subscription probe asks whether the client answers at all; it has
          no domain schema to hold the answer to. *)
       ; output_schema = None
@@ -190,7 +191,7 @@ let probe_claude ~mgr ~clock ~cwd ~process_cwd ~runtime_id ~model
          undeclared turn bound therefore falls back to the probe ceiling rather
          than to no ceiling. *)
       timeout_s = Some (Float.min max_probe_timeout_s config.timeout_s)
-      ; wall_clock_ceiling_s = None
+
       (* A subscription probe asks whether the client answers at all; it has no
          domain schema to hold the answer to. *)
       ; output_schema = None
@@ -251,7 +252,8 @@ let probe_body ~base_path ~body =
         "eio_context_unavailable"
         "official-client probe requires the initialized Eio runtime"
   in
-  let mgr = Posix_spawn_process_mgr.mgr in
+  let mgr = (Posix_spawn_process_mgr.foreground_mgr ~clock
+      ~grace_seconds:Process_eio.child_exit_grace_seconds) in
   let process_cwd = Eio.Path.(Eio.Stdenv.fs env / base_path) in
   let model = Runtime_execution.model_id runtime.execution in
   match runtime.execution with
@@ -274,7 +276,7 @@ let probe_body ~base_path ~body =
          ~runtime_id
          ~model
          config)
-  | Runtime_execution.Antigravity_cli _ ->
+  | Runtime_execution.Antigravity_cli _ | Runtime_execution.Muse_serve _ ->
     error
       Bad_request
       "login_probe_unsupported"

@@ -367,7 +367,7 @@ build_preflight_report() {
                 + emit(object_value($projection);
                        "keeper_waiting_inventory projection must be an object")
                 + if object_value($projection) then
-                    emit(($projection.schema == "masc.dashboard.keeper_waiting_inventory.v3");
+                    emit(($projection.schema == "masc.dashboard.keeper_waiting_inventory.v4");
                          "keeper_waiting_inventory schema mismatch")
                     + emit(($projection.source == "server_keeper_waiting_inventory");
                            "keeper_waiting_inventory source mismatch")

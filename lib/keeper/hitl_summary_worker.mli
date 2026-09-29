@@ -121,7 +121,7 @@ module For_testing : sig
 
   val execute_prepared_flow
     :  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
-    -> ?clock:_ Eio.Time.clock
+    -> clock:_ Eio.Time.clock
     -> on_summary:(Keeper_approval_queue_rules_types.hitl_context_summary -> unit)
     -> prepared_flow
     -> execution_boundary
@@ -179,7 +179,7 @@ module For_testing : sig
     :  queue_ops:exact_queue_ops
     -> ?cli_runner:Keeper_lane_cli_oneshot.runner
     -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
-    -> ?clock:_ Eio.Time.clock
+    -> clock:_ Eio.Time.clock
     -> on_summary:(Keeper_approval_queue_rules_types.hitl_context_summary -> unit)
     -> prepared_flow
     -> execution_boundary

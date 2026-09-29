@@ -241,6 +241,7 @@ type reasoning_visibility =
 
 type tool_visibility =
   | Tools_compact
+  | Tools_results
   | Tools_full
 
 (* How much of the Librarian/Memory journal the chat pane draws. Summary is
@@ -259,6 +260,7 @@ let reasoning_visibility_to_string = function
 
 let tool_visibility_to_string = function
   | Tools_compact -> "compact"
+  | Tools_results -> "results"
   | Tools_full -> "full"
 ;;
 
@@ -335,6 +337,7 @@ let chat_visibility_summary ~memory ~reasoning ~tools ~origin =
              Some ("reasoning:" ^ reasoning_visibility_to_string mode))
       ; (match tools with
          | Tools_compact -> None
+         | Tools_results -> Some "tools:results"
          | Tools_full -> Some "tools:full")
       ]
   in
@@ -359,7 +362,8 @@ let next_origin_display = function
 ;;
 
 let toggle_tool_visibility = function
-  | Tools_compact -> Tools_full
+  | Tools_compact -> Tools_results
+  | Tools_results -> Tools_full
   | Tools_full -> Tools_compact
 ;;
 
@@ -601,7 +605,10 @@ let librarian_failing_text ~since failing =
 let project_gate_history ~visibility entries =
   match visibility with
   | Tools_full -> entries
-  | Tools_compact ->
+  | Tools_compact | Tools_results ->
+      let expand_hint =
+        if visibility = Tools_compact then "Ctrl-D×2" else "Ctrl-D"
+      in
       let module Approvals = Map.Make (struct
         type t = string * string
         let compare = Stdlib.compare
@@ -644,7 +651,9 @@ let project_gate_history ~visibility entries =
           Some Keeper_approval_lifecycle.Approval_replay_applied ->
             let summary = List.find_map (fun (_, gate) -> gate.gs_summary) reversed in
             Option.map (fun text ->
-              last_index, Printf.sprintf "%s · %d steps · Ctrl-D" text (List.length steps))
+              last_index,
+              Printf.sprintf "%s · %d steps · %s" text (List.length steps)
+                expand_hint)
               (Masc_tui_gate_text.fold_line ~phases ~tool:newest.gs_tool ~summary)
         | _ -> None) groups
       in
@@ -1278,6 +1287,17 @@ type board_post_kind =
           one of the others, so a new kind shows as unfamiliar instead of
           quietly becoming "system". *)
 
+(** task-1758/#39356: typed close state on a board post (light projection).
+    [bpc_closed_at] is [None] when the wire carried no numeric [closed_at] --
+    same "the row did not say" reading as the rest of this projection's
+    optional fields, not folded into [0.]. *)
+type board_post_close_state = {
+  bpc_closed_by: string;
+  bpc_closed_at: float option;
+  bpc_successor_id: string option;
+  bpc_summary: string option;
+}
+
 (** Board post (light projection for list view) *)
 type board_post = {
   bp_id: string;
@@ -1304,6 +1324,9 @@ type board_post = {
       (** [None] when the row did not say. Not folded into a kind: "the post
           did not state one" and "the post is a system post" are different
           facts, and only one of them is a claim about who wrote it. *)
+  bp_closed: board_post_close_state option;
+      (** task-1758/#39356: [None] means open, same reading as the absent
+          JSON key it comes from. *)
 }
 
 (** Board comment *)
@@ -1342,6 +1365,7 @@ type schedule_row = {
   sch_payload_support: string;
   sch_payload_dispatch_tool: string option;
   sch_payload_target: string option;
+  sch_payload_keeper_name: string option;
   sch_payload_summary: string option;
   sch_last_wake_status: Schedule_contract_values.wake_status option;
   sch_last_wake_started_at_iso: string option;
@@ -1384,6 +1408,14 @@ type schedule_row = {
           target Keeper has not taken the previous one yet. A held occurrence
           has no wake, so none of the fields above can say it (#38205). *)
 }
+
+(* The server supplies the Keeper name separately from the encoded target.
+   Older servers omit it; keep their target unchanged on screen. *)
+let schedule_row_who row =
+  match row.sch_payload_keeper_name with
+  | Some keeper_name -> Some keeper_name
+  | None -> row.sch_payload_target
+;;
 
 let schedule_json_string field = function
   | `Assoc fields ->
@@ -2008,6 +2040,15 @@ type overview_providers_reading =
   | Providers_read of Tui_decode.provider_usage_windows
   | Providers_failed of string
 
+(** The Overview's reading of [GET /api/v1/setup/account-emails]: each
+    account's email by provider id, and how many rows this build could not
+    read. The route needs Admin, so a failed read is kept apart and said,
+    never drawn as accounts that have no email. *)
+type overview_account_emails_reading =
+  | Account_emails_unread
+  | Account_emails_read of { emails : (string * string) list; unreadable_rows : int }
+  | Account_emails_failed of string
+
 (** One open pull request as [GET /api/v1/repositories/pulls] reports it
     (RFC-0465). The check and review words are parsed at decode; a word this
     build cannot name makes the row undecodable rather than a default. *)
@@ -2199,9 +2240,13 @@ type fleet_blocker = Tui_decode.fleet_blocker =
   | Blocker of Masc.Keeper_fleet_blocker.t
   | Unrecognised_blocker of string
 
+type fleet_status = Tui_decode.fleet_status =
+  | Fleet_grade of Masc.Keeper_fleet_grade.t
+  | Unrecognised_fleet_status of string
+
 type fleet_safety = Tui_decode.fleet_safety
   = {
-  fs_status: string;
+  fs_status: fleet_status;
   fs_blocker: fleet_blocker option;
   fs_operator_action_required: bool;
   fs_bootable_count: int;
@@ -2949,6 +2994,7 @@ type surface_needs = {
   needs_repository_pulls : bool;
   needs_keeper_spend : bool;
   needs_overview_goals : bool;
+  needs_account_emails : bool;
 }
 
 let nothing =
@@ -2965,6 +3011,7 @@ let nothing =
     needs_repository_pulls = false;
     needs_keeper_spend = false;
     needs_overview_goals = false;
+    needs_account_emails = false;
   }
 
 (* Each datum is read by the surfaces that draw it, so a refresh spends a
@@ -3001,6 +3048,7 @@ and surface_needs_of_surface : surface -> surface_needs = function
       ; needs_repository_pulls = true
       ; needs_keeper_spend = true
       ; needs_overview_goals = true
+      ; needs_account_emails = true
       }
   (* Its rows come from the acting store and the keeper list, neither of which
      is fetched here. *)
@@ -3067,6 +3115,8 @@ let surface_needs_delta ~previous ~next =
       next.needs_keeper_spend && not previous.needs_keeper_spend
   ; needs_overview_goals =
       next.needs_overview_goals && not previous.needs_overview_goals
+  ; needs_account_emails =
+      next.needs_account_emails && not previous.needs_account_emails
   }
 
 let surface_needs_any needs = needs <> nothing
@@ -3233,13 +3283,16 @@ let turn_log_add ~now turn_log ~seq (delta : Masc_tui_keeper_chat_live.delta) =
    and the transcript follows exactly those, each at the line's own journal
    time, so a tool call in a reloaded turn keeps the start time it really
    had. A live frame goes through {!turn_log_add} instead, with the arrival
-   clock in place of the journal's. *)
+   clock in place of the journal's. Returns the accepted lines and deltas so
+   dependent reads follow the same seq dedup as the transcript. *)
 let turn_log_add_journaled turn_log
     (lines : Masc.Keeper_chat_event_log.journaled_event list) =
+  let accepted = Masc_tui_keeper_chat_log.add_journaled turn_log.tl_log lines in
   List.iter
     (fun ((line : Masc.Keeper_chat_event_log.journaled_event), delta) ->
       Masc_tui_keeper_chat_transcript.apply ~now:line.ts turn_log.tl_transcript delta)
-    (Masc_tui_keeper_chat_log.add_journaled turn_log.tl_log lines)
+    accepted;
+  accepted
 ;;
 
 let turn_log_keeper_name turn_log = Masc_tui_keeper_chat_log.keeper_name turn_log.tl_log
@@ -4188,10 +4241,8 @@ module Browser_lane_view = struct
 
      Read_failed used to read "Read/action failed", which did two things. It
      left the HTTP family its four siblings belong to, so the badge changed
-     shape rather than value when a read failed. And the status line three
-     rows down already opens "Read/action failed: " and then gives the
-     detail, so the operator read the same phrase twice and only the second
-     one told them anything. *)
+     shape rather than value when a read failed. The status line below now
+     gives the cause without repeating this failed verdict. *)
   let read_status_label = function
     | Unread -> "HTTP unread"
     | Reading -> "HTTP reading"
@@ -5154,7 +5205,7 @@ type msx_menu_mode = Boot_game | Change_disk
    follows an asynchronous read), and a position would then name whatever row
    moved into it -- a cartridge load in place of a watch. *)
 type msx_menu_entry =
-  | Menu_watch of Masc_tui_machine_live.source
+  | Menu_watch of Masc.Machine_lane.t
   | Menu_load of string
   | Menu_swap_disk of string
 
@@ -5229,12 +5280,18 @@ type slot_editor_target =
   | Exact_lane_slots of Standalone_lane.t
   | Media_failover_slots
 
-(* The slot editor: what it was opened on, and where its cursor sits in that
-   list. The list itself is read from the surface each time, so a write
-   followed by a re-read moves the editor with it. *)
+type slot_editor_row_kind = Catalog_slot | Official_client_slot | Media_route_slot
+
+type slot_editor_identity =
+  { si_kind : slot_editor_row_kind
+  ; si_slot : string
+  }
+
+(* The target lane and row identity survive asynchronous insertion/reordering.
+   A removed selection stays empty until explicit navigation. *)
 type slot_editor =
   { se_target : slot_editor_target
-  ; se_cursor : int
+  ; se_selection : slot_editor_identity option
   }
 
 let slot_editor_target_name = function
@@ -5273,6 +5330,15 @@ let lane_name_entry_with_draft entry draft =
   | Renaming_lane { lane; _ } -> Renaming_lane { lane; draft }
 ;;
 
+module Verification_evidence_read = struct
+  type failure =
+    | Transport of string
+    | Http_error of string
+    | Invalid_json of string
+    | Invalid_payload of string
+    | Launch_failure of string
+end
+
 type state = {
   mutable metrics_scroll: int;
   mutable metrics_section: metrics_section;
@@ -5288,6 +5354,10 @@ type state = {
      the first load answers: an empty list is a fact about the workspace and
      "not looked yet" is not. *)
   mutable operator_stalled: Masc_tui_agenda.stalled list option;
+  (* Goals the verifier proved and only the operator's confirmation closes,
+     read from the goal store on the same load as the tasks, so the agenda
+     names them on every surface rather than only on Planning. *)
+  mutable goals_to_confirm: Masc_tui_agenda.goal_to_confirm Masc_tui_agenda.reading;
   (* Whether the Overview task list owns j/k and which task it has chosen,
      by id. An index into the rows would name another task after a poll
      drops a finished one. *)
@@ -5311,10 +5381,11 @@ type state = {
      the scroll survives only while it is open. *)
   mutable agenda_open: bool;
   mutable agenda_scroll: int;
-  (* The row Enter acts on. Held apart from the scroll because the two move
-     for different reasons: the scroll follows the cursor, and a panel whose
-     rows are mostly prose has a cursor that skips most of them. *)
-  mutable agenda_cursor: int;
+  (* The identity Enter opens, retained across refreshes. Its row is derived
+     from the current projection, so an inserted/reordered Goal cannot take
+     the selection of another Goal or a Task. A removed identity opens nothing
+     until an explicit navigation key selects another target. *)
+  mutable agenda_selected: Masc_tui_agenda.destination;
   (* The [@] answering overlay: the footer badge says that keepers are
      mid-turn, and this says which ones, on which lane, for how long. Modal
      like the agenda sheet, and like it the scroll survives only while it
@@ -5334,10 +5405,15 @@ type state = {
   mutable keeper_chat_control_pending : (string * int64) list;
   mutable keeper_interactive_waiting : (string * string * local_intervention) list;
   mutable keeper_queue_inflight : string list;
-  (* A promoted message waiting for the server to admit it as Queued, after
-     which run-next asks for first place. Run-next never carries an interrupt
-     token, so nothing about the running turn is kept here. *)
-  mutable keeper_run_next_pending : Masc_tui_keeper_chat_projection.request option;
+  (* Exact requests awaiting admission and accepted requests awaiting their
+     ordered run-next call. No priority intent is inferred from queue text. *)
+  mutable keeper_run_next_pending : Masc_tui_keeper_chat_projection.request list;
+  mutable keeper_run_next_ready : Masc_tui_keeper_chat_projection.request list;
+  mutable keeper_auto_priority_pending : (string * string) list;
+  (* Accepted automatic priority requests still owned by this session, in
+     Enter order per Keeper. The server uses these exact IDs as predecessors
+     when it moves the next accepted request within the priority cohort. *)
+  mutable keeper_auto_priority_requests : (string * string list) list;
   (* Whether ^Y ending a voice capture also sends what was heard
      ([tui].voice_send_on_stop at boot). Off by default: the transcript lands
      in the draft either way, and that draft is also where a spoken
@@ -5365,6 +5441,7 @@ type state = {
      Keeper's current head" from whichever Keeper surface raised the question.
      The reading is stamped with the requested Keeper and generation so a late
      response cannot replace a newer inspection. *)
+  mutable account_login: Masc_tui_account_login.t option;
   mutable context_inspector_open: bool;
   mutable context_inspector_keeper: string option;
   mutable context_inspector_loading: bool;
@@ -5445,6 +5522,13 @@ type state = {
      there is nothing to say. [-1] is "not animating": the mark falls back
      to its still form rather than freezing on an arbitrary quarter. *)
   mutable activity_frame: int;
+  (* The candle's step. The main loop advances it only while the last frame
+     drew the candle (Masc_tui_emblem_screen.drawn) and puts it back to [-1]
+     when none did, so a screen without it stops repainting. *)
+  mutable emblem_frame: int;
+  (* /about: the candle over the surface, with the theme and the keeper count.
+     Modal, like the help sheet; Esc closes it. *)
+  mutable about_open: bool;
   mutable keeper_detail_focus: pane_focus;
   mutable keeper_message_focus: pane_focus;
   (* Current successful /health identity. Every HTTP refresh revalidates it so
@@ -5478,7 +5562,7 @@ type state = {
   mutable msx_frame: msx_frame option;
   mutable msx_last_poll_ns: int64;
   (* Which machine the spectator shows. The menu picks it. *)
-  mutable machine_source: Masc_tui_machine_live.source;
+  mutable machine_source: Masc.Machine_lane.t;
   (* The last live read of each machine. [msx_live] is [Showing] the picture
      [msx_frame] holds, with its change mark, whether a live read or a tick
      answer drew it: the tick returns its picture and mark from one snapshot,
@@ -5606,6 +5690,10 @@ type state = {
   mutable runtime_config_view: runtime_config_reading option;
   mutable runtime_config_status_open: bool;
   mutable runtime_config_status_scroll: int;
+  (* The [a] form on the runtime.toml pane, which declares one more account
+     of a provider the file already declares. It holds the text it was opened
+     on; the save goes through the pane's preview like [e]. *)
+  mutable runtime_account_form: Masc_tui_runtime_account_form.t option;
   (* A source section requested by another surface while runtime.toml is
      loading. The jump is consumed only after the same server-owned source
      lands, so Lanes never needs a second config writer or a guessed path. *)
@@ -5648,9 +5736,8 @@ type state = {
   mutable github_identity_view: (string * string list) option;
   mutable github_identity_view_error: string option;
   (* The Info tab's Board-attention rows, keyed by the Keeper they were read
-     for. [requeue_board_quarantine_inflight] holds the partition a requeue
-     press is waiting on, so a second press before the answer is not a second
-     request against the same quarantine. *)
+     for. [board_quarantine_requeue_inflight] names the partition or batch
+     whose answer is pending, so a second press cannot race that recovery. *)
   mutable keeper_board_quarantines:
     (string, Masc_tui_board_quarantine.t) Masc_tui_fetched.t;
   mutable board_quarantine_requeue_inflight: string option;
@@ -5752,8 +5839,12 @@ type state = {
   mutable fleet_safety: Tui_decode.fleet_safety_reading option;
   mutable fleet_safety_error: string option;
   mutable connection_status: connection_status;
+  mutable http_refresh_started_ns: int64 option;
   mutable local_workspace: local_workspace_reading;
   mutable view: surface;
+  mutable opening_mode: Masc_tui_config.opening;
+  mutable opening_pending: bool;
+  mutable opening_notice: string option;
   (* Where Esc goes back to after following a reference, and what was open
      there. The surfaces print [masc://] references beside the thing they
      name -- a verdict says which task it judged -- and following one is only
@@ -5765,6 +5856,10 @@ type state = {
      screen showing it would be state nobody can see. *)
   mutable followed_from: (surface * string option) option;
   mutable keeper_cursor: int;
+  (* The first Keepers list row on screen, as the last frame drew it
+     ([Keeper_list_scroll]). A cursor move to a row already on screen leaves
+     the window where it is. *)
+  mutable keeper_list_scroll: int;
   (* The runtime picker: the keeper it is choosing for, its cursor and typed
      filter over the declared lanes and the dispatchable catalogue, and the
      catalogue itself with where every keeper points today. Loaded when the
@@ -5777,6 +5872,7 @@ type state = {
      the rows under an open picker's cursor. *)
   mutable overview_quota: overview_quota_reading;
   mutable overview_providers: overview_providers_reading;
+  mutable overview_account_emails: overview_account_emails_reading;
   mutable overview_pulls: overview_pulls_reading;
   mutable overview_spend: overview_spend_reading;
   mutable overview_goals: overview_goals_reading;
@@ -5791,7 +5887,7 @@ type state = {
   mutable task_history:
     (string * (Tui_decode.task_history_event list, string) result) option;
   mutable verification_evidence:
-    (string * (Tui_decode.verification_evidence, string) result) option;
+    (string * (Tui_decode.verification_evidence, Verification_evidence_read.failure) result) option;
   (* One cache is shared by the calls surface and chat full-detail mode. The
      scope and generation are the authority: cursor position is not, because
      palette/Answering can open a chat without moving the roster cursor. *)
@@ -5851,7 +5947,7 @@ type state = {
   mutable keeper_turns_error: string option;
   mutable keeper_turns_inflight: bool;
   mutable keeper_observed_interrupts: observed_interrupt list;
-  mutable keeper_run_next_inflight: string option;
+  mutable keeper_run_next_inflight: Masc_tui_keeper_chat_projection.request list;
   (* The durable Gate: approvals that survive nobody watching (external
      service writes among them), plus both lane modes. Refreshed with the
      same surface; answered through the dashboard resolve route. *)
@@ -5945,6 +6041,8 @@ type state = {
           problem, and it carries the counts -- so [f] stops being a walk
           through names a reader cannot see the size of. *)
   mutable board_scroll: int;
+  mutable board_comment_scroll: int;
+  mutable board_comments_focused: bool;
   mutable board_mode: board_mode;
   mutable board_focus: pane_focus;
   (* Wide terminals normally keep the Board list beside the open post. [z]
@@ -6165,8 +6263,11 @@ type state = {
      it -- filtering is equality against the loaded rows, never a
      classification this side invents. *)
   mutable memory_facts_keeper: string option;
-  mutable memory_facts: Tui_decode.memory_fact_snapshot option;
-  mutable memory_facts_error: string option;
+  (* Keyed by [memory_facts_keeper] ("*" for every keeper). The answer
+     carries the keepers the fleet merge could not read beside the facts it
+     could; a single keeper's answer has none. *)
+  mutable memory_facts:
+    (string, Tui_decode.memory_fact_snapshot * string option) Masc_tui_fetched.t;
   mutable memory_facts_cursor: int;
   mutable memory_facts_scroll: int;
   (* One selected claim's wrapped rows. The cursor and renderer ask for the
@@ -6337,13 +6438,16 @@ type state = {
      with it. *)
   mutable harness_detail: (string * float) option;
   mutable harness_detail_scroll: int;
-  mutable fusion_runs: Tui_decode.fusion_snapshot option;
-  mutable fusion_error: string option;
+  (* The retained-run list. A failed refresh keeps the rows it had and says
+     why beside them ([Masc_tui_fetched.Stale]), rather than a registry that
+     could not be read drawing as an empty one. *)
+  mutable fusion_runs: (unit, Tui_decode.fusion_snapshot) Masc_tui_fetched.t;
+  (* Why the launch form could not open. Not a reading of the run list, so it
+     is not folded into that list's failure; the next list answer clears it. *)
+  mutable fusion_launch_error: string option;
   mutable fusion_cursor: int;
   mutable fusion_scroll: int;
   mutable fusion_mode: fusion_mode;
-  mutable fusion_runs_generation: int;
-  mutable fusion_runs_inflight: int option;
   mutable fusion_detail: Tui_decode.fusion_detail option;
   mutable fusion_detail_error: string option;
   (* A detail GET captures this generation. A late response for a run the
@@ -6423,6 +6527,7 @@ type state = {
   mutable system_logs_detail_seq: int option;
   mutable system_logs_detail_scroll: int;
   msg_input: Buffer.t;
+  mutable msg_command_menu: Masc_tui_command.menu_state;
   (* A draft restored from an unterminated terminal paste needs explicit
      confirmation before any chat send. Keep its owner across pane changes. *)
   mutable msg_recovered_paste_keepers: string list;
@@ -6493,6 +6598,7 @@ type state = {
      arrive after the second alpha request and still name the visible Keeper. *)
   mutable msg_history_load_generation: int;
   mutable msg_history_inflight: (int * string) option;
+  mutable msg_copy_generation: int;
   (* The newest row [msg_scroll] counts back from, by causal row identity, while the
      operator is reading back. Counting from whatever is newest right now made
      the count mean something different every time a reply landed: the new rows
@@ -6731,12 +6837,14 @@ let reconcile_fusion_launch (state : state) =
   state.view <> Fusion && abandon_fusion_launch state
 
 type text_input_target =
+  | Text_account_login
   | Text_browser_url
   | Text_ask_answer
   | Text_fusion_launch
   | Text_preset_name
   | Text_runtime_lane_name
   | Text_runtime_param
+  | Text_runtime_account_form
   | Text_voice_wizard
   | Text_palette
   | Text_row_search
@@ -6762,7 +6870,8 @@ let text_input_target (state : state) ~compact_viewport =
     && state.detail_tab = Detail_github
     && not compact_viewport
   in
-  if state.keeper_deletions_open then None
+  if Option.is_some state.account_login && not compact_viewport then Some Text_account_login
+  else if state.keeper_deletions_open then None
   else if
     state.view = Config
     && state.config_pane = Config_presets
@@ -6770,6 +6879,12 @@ let text_input_target (state : state) ~compact_viewport =
   then Some Text_preset_name
   else if state.view = Runtime && Option.is_some state.runtime_lane_name_draft then
     Some Text_runtime_lane_name
+  (* The account form draws on the runtime.toml pane only, and not on a
+     viewport too small to draw that pane, the rule the voice wizard keeps. *)
+  else if
+    state.view = Config && state.config_pane = Config_runtime
+    && Option.is_some state.runtime_account_form && not compact_viewport
+  then Some Text_runtime_account_form
   else if Option.is_some state.runtime_param_edit then Some Text_runtime_param
   (* A wizard is only ever open on its own pane and closing it clears this, so
      its presence is the whole condition -- except that the pane is not drawn at
@@ -6831,8 +6946,9 @@ let text_input_target (state : state) ~compact_viewport =
    function exists to stop. *)
 let quit_key_allowed_for = function
   | Some
-      ( Text_browser_url | Text_ask_answer | Text_fusion_launch
+      ( Text_account_login | Text_browser_url | Text_ask_answer | Text_fusion_launch
       | Text_preset_name | Text_runtime_lane_name | Text_runtime_param
+      | Text_runtime_account_form
       | Text_voice_wizard | Text_palette | Text_row_search
       | Text_runtime_picker_filter | Text_keeper_runtime_picker_filter
       | Text_identity_app_form | Text_identity_filter | Text_github_token
@@ -7378,6 +7494,17 @@ let begin_keeper_chat_control state keeper_name =
   let generation = advance_keeper_chat_control state keeper_name in
   state.keeper_chat_control_pending <- (keeper_name, Mtime_clock.elapsed_ns ()) :: List.remove_assoc keeper_name state.keeper_chat_control_pending;
   state.keeper_chat_control_tokens <- List.remove_assoc keeper_name state.keeper_chat_control_tokens;
+  state.keeper_run_next_pending <- List.filter
+    (fun (request : Masc_tui_keeper_chat_projection.request) ->
+       not (String.equal request.keeper_name keeper_name))
+    state.keeper_run_next_pending;
+  state.keeper_run_next_ready <- List.filter
+    (fun (request : Masc_tui_keeper_chat_projection.request) ->
+       not (String.equal request.keeper_name keeper_name))
+    state.keeper_run_next_ready;
+  state.keeper_auto_priority_pending <- List.filter
+    (fun (name, _) -> not (String.equal name keeper_name))
+    state.keeper_auto_priority_pending;
   state.keeper_interactive_waiting <- List.map (fun (name, id, intervention) ->
     name, id, (if name = keeper_name then Retained_after_stop else intervention))
     state.keeper_interactive_waiting;
@@ -7469,6 +7596,18 @@ let loading_notice ?elapsed_s what =
 
 let nanoseconds_per_second = 1_000_000_000L
 
+(* One step of every moving thing on a masc screen: the running-turn mark,
+   the roster marquee and the /about candle. Four steps turn the mark once
+   every 600 ms -- fast enough to read as alive, slow enough not to strobe --
+   and one pace for all three keeps them moving together. *)
+let motion_step_ns = 150_000_000L
+
+(* How far the moving marks have gone after [frame] steps; a negative frame
+   is one that has not started. *)
+let motion_elapsed_seconds frame =
+  Int64.to_float (Int64.mul (Int64.of_int (Int.max 0 frame)) motion_step_ns)
+  /. Int64.to_float nanoseconds_per_second
+
 (* How long a read has been pending, in whole seconds. [now_ns] is an argument
    so the answer is the same every time it is asked with the same reading, and
    the stamp is the read's own rather than the state's: the Sandbox tab's status
@@ -7540,8 +7679,18 @@ let fusion_snapshot_entries (snapshot : Tui_decode.fusion_snapshot) =
   @ List.map (fun evidence -> Tui_decode.Fusion_historical_evidence evidence)
       snapshot.fus_historical_evidence
 
+let fusion_runs_view (state : state) =
+  Masc_tui_fetched.view_for ~equal:Unit.equal state.fusion_runs ~key:()
+
+(* The retained runs on screen: the last answer, also when the refresh after
+   it failed -- that failure is drawn beside them, not instead of them. *)
+let fusion_snapshot (state : state) =
+  match fusion_runs_view state with
+  | Masc_tui_fetched.Ready snapshot | Masc_tui_fetched.Stale (snapshot, _) -> Some snapshot
+  | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _ -> None
+
 let fusion_list_entries (state : state) =
-  match state.fusion_runs with
+  match fusion_snapshot state with
   | None -> []
   | Some snapshot -> fusion_snapshot_entries snapshot
 
@@ -7564,7 +7713,7 @@ let fusion_detail_entry_index state =
       | _ -> false)
 
 let selected_keeper_runs (state : state) =
-  match selected_keeper state, state.fusion_runs with
+  match selected_keeper state, fusion_snapshot state with
   | Some keeper, Some snapshot ->
       List.filter (fun (run : Tui_decode.fusion_run) ->
           String.equal run.fur_keeper keeper.k_name) snapshot.fus_runs
@@ -7575,18 +7724,15 @@ let selected_keeper_run (state : state) =
   let cursor = max 0 (min state.keeper_run_cursor (List.length runs - 1)) in
   Option.map (fun run -> cursor, run) (List.nth_opt runs cursor)
 
-(* What the Keeper Runs tab knows about the retained runs. The tab matched on
-   the snapshot alone and drew "Loading Fusion runs..." for [None], so a read
-   that failed left it there for good: the failure went to [fusion_error],
-   which only the Fusion surface drew. Rows already held stay on a failed
-   refresh, as they do on the Fusion surface, and the failure comes with them
-   so they read as stale. A retry in flight is loading, not the old failure. *)
+(* What the Keeper Runs tab knows about the retained runs: the Fusion list's
+   own reading, narrowed to the selected Keeper. *)
 let keeper_runs_view (state : state) =
-  match state.fusion_runs, state.fusion_error, state.fusion_runs_inflight with
-  | Some _, stale, _ -> Masc_tui_fetched.Ready (selected_keeper_runs state, stale)
-  | None, _, Some _ -> Masc_tui_fetched.Loading
-  | None, Some detail, None -> Masc_tui_fetched.Failed detail
-  | None, None, None -> Masc_tui_fetched.Absent
+  match fusion_runs_view state with
+  | Masc_tui_fetched.Ready _ -> Masc_tui_fetched.Ready (selected_keeper_runs state)
+  | Masc_tui_fetched.Stale (_, detail) -> Masc_tui_fetched.Stale (selected_keeper_runs state, detail)
+  | Masc_tui_fetched.Absent -> Masc_tui_fetched.Absent
+  | Masc_tui_fetched.Loading -> Masc_tui_fetched.Loading
+  | Masc_tui_fetched.Failed detail -> Masc_tui_fetched.Failed detail
 
 (** The standalone lane row under the cursor, when the cursor is in the
     standalone section. *)
@@ -7594,9 +7740,11 @@ let workspace_activity_rows (state : state) =
   match state.workspace_activity_repo with
   | None -> []
   | Some repo_id ->
-      match Masc_tui_fetched.view_for ~equal:String.equal state.workspace_activity ~key:repo_id with
-      | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _ -> []
-      | Masc_tui_fetched.Ready reading ->
+      (* The last good reading also after a failed refresh, which the pane
+         draws above these rows rather than instead of them. *)
+      match Masc_tui_fetched.value (Masc_tui_fetched.view_for ~equal:String.equal state.workspace_activity ~key:repo_id) with
+      | None -> []
+      | Some reading ->
           List.concat_map (fun (_, result) -> match result with
             | Error _ -> []
             | Ok (snapshot : Tui_decode.file_change_snapshot) ->
@@ -7746,6 +7894,40 @@ let supersede_context_inspector_load state stop =
   state.context_inspector_cancel <- stop
 ;;
 
+(* The overlays that take every key while they are open. Each answers its own
+   keys and swallows the rest in its dispatch arm, so nothing drawn under it --
+   the composer, a surface binding, a press on a row -- may act first. Every
+   place that has to stand aside for them asks this one question, so an
+   overlay added later is added here once rather than to each list. *)
+let modal_owns_keys (state : state) =
+  state.help_open || state.keeper_deletions_open || state.agenda_open
+  || state.context_inspector_open || state.about_open
+
+let close_context_inspector (state : state) =
+  state.context_inspector_open <- false;
+  supersede_context_inspector_load state None;
+  state.context_inspector_exact <- None;
+  state.context_inspector_scroll <- 0;
+  state.context_inspector_detail_scroll <- 0;
+  state.context_inspector_focus <- Left_pane;
+  state.context_inspector_turn_back <- 0
+
+let close_agenda (state : state) =
+  state.agenda_open <- false;
+  state.agenda_scroll <- 0;
+  state.agenda_selected <- Masc_tui_agenda.Nowhere
+
+(* Every overlay [modal_owns_keys] names, closed the way its own Esc closes
+   it. The inspector and the agenda are only closed when open: closing stops
+   an inspector read in flight, and there is none to stop otherwise. *)
+let close_key_modals (state : state) =
+  state.help_open <- false;
+  state.help_scroll <- 0;
+  state.about_open <- false;
+  state.keeper_deletions_open <- false;
+  if state.agenda_open then close_agenda state;
+  if state.context_inspector_open then close_context_inspector state
+
 let create_state
     ?(reasoning_visibility = Reasoning_hidden)
     ?(tool_visibility = Tools_compact)
@@ -7763,6 +7945,7 @@ let create_state
   tasks_domain = [];
   task_flow = None;
   operator_stalled = None;
+  goals_to_confirm = Masc_tui_agenda.Not_read;
   task_focus = Masc_tui_overview_tasks.No_task_focus;
   task_reading = Masc_tui_overview_tasks.Rows_unread;
   help_open = false;
@@ -7774,16 +7957,19 @@ let create_state
   keeper_deletions = None;
   agenda_open = false;
   agenda_scroll = 0;
-  agenda_cursor = 0;
+  agenda_selected = Masc_tui_agenda.Nowhere;
   hints_visible = true;
-  coalesce_queued_input = true;
-  user_input_priority_next = true;
+  coalesce_queued_input = false;
+  user_input_priority_next = false;
   keeper_chat_control_generations = [];
   keeper_chat_control_tokens = [];
   keeper_chat_control_pending = [];
   keeper_interactive_waiting = [];
   keeper_queue_inflight = [];
-  keeper_run_next_pending = None;
+  keeper_run_next_pending = [];
+  keeper_run_next_ready = [];
+  keeper_auto_priority_pending = [];
+  keeper_auto_priority_requests = [];
   voice_send_on_stop = false;
   answering_open = false;
   answering_scroll = 0;
@@ -7792,6 +7978,7 @@ let create_state
   memory_fact_detail_scroll = 0;
   keeper_turn_finishes = [];
   keeper_turns_observed_at = None;
+  account_login = None;
   context_inspector_open = false;
   context_inspector_keeper = None;
   context_inspector_loading = false;
@@ -7824,6 +8011,8 @@ let create_state
   acting_pane_changes_at = None;
   roster_marquee_frame = 0;
   activity_frame = -1;
+  emblem_frame = -1;
+  about_open = false;
   keeper_detail_focus = Right_pane;
   keeper_message_focus = Right_pane;
   server_identity = None;
@@ -7839,7 +8028,7 @@ let create_state
   msx_open = false;
   msx_frame = None;
   msx_last_poll_ns = 0L;
-  machine_source = Masc_tui_machine_live.Msx;
+  machine_source = Masc.Machine_lane.Msx;
   msx_live = Masc_tui_machine_live.Unread;
   dos_live = Masc_tui_machine_live.Unread;
   dos_live_in_flight = None;
@@ -7895,6 +8084,7 @@ let create_state
   runtime_config_view = None;
   runtime_config_status_open = false;
   runtime_config_status_scroll = 0;
+  runtime_account_form = None;
   runtime_config_jump_section = None;
   config_models_rows = [];
   config_models_cursor = 0;
@@ -7949,15 +8139,21 @@ let create_state
   fleet_safety = None;
   fleet_safety_error = None;
   connection_status = Disconnected;
+  http_refresh_started_ns = None;
   local_workspace = Local_workspace_unread;
   view = Overview;
+  opening_mode = Masc_tui_config.Overview;
+  opening_pending = false;
+  opening_notice = None;
   followed_from = None;
   keeper_cursor = 0;
+  keeper_list_scroll = 0;
   runtime_pick_keeper = None;
   runtime_pick_list = Masc_tui_pick_list.closed;
   runtime_catalog = [];
   overview_quota = Quota_unread;
   overview_providers = Providers_unread;
+  overview_account_emails = Account_emails_unread;
   overview_pulls = Overview_pulls_unread;
   overview_spend = Overview_spend_unread;
   overview_goals = Goals_unread;
@@ -8002,7 +8198,7 @@ let create_state
   keeper_turns_error = None;
   keeper_turns_inflight = false;
   keeper_observed_interrupts = [];
-  keeper_run_next_inflight = None;
+  keeper_run_next_inflight = [];
   gate_pending = [];
   gate_modes = None;
   gate_queue_unavailable = None;
@@ -8041,6 +8237,8 @@ let create_state
   board_hearth = None;
   board_hearths = [];
   board_scroll = 0;
+  board_comment_scroll = 0;
+  board_comments_focused = false;
   board_mode = Board_list;
   board_focus = Right_pane;
   board_detail_wide = false;
@@ -8175,8 +8373,7 @@ let create_state
   memory_health_scroll = 0;
   memory_health_cursor = 0;
   memory_facts_keeper = None;
-  memory_facts = None;
-  memory_facts_error = None;
+  memory_facts = Masc_tui_fetched.initial;
   memory_facts_cursor = 0;
   memory_facts_scroll = 0;
   memory_fact_claim_wrap = None;
@@ -8248,13 +8445,11 @@ let create_state
   harness_cursor = 0;
   harness_detail = None;
   harness_detail_scroll = 0;
-  fusion_runs = None;
-  fusion_error = None;
+  fusion_runs = Masc_tui_fetched.initial;
+  fusion_launch_error = None;
   fusion_cursor = 0;
   fusion_scroll = 0;
   fusion_mode = Fusion_list;
-  fusion_runs_generation = 0;
-  fusion_runs_inflight = None;
   fusion_detail = None;
   fusion_detail_error = None;
   fusion_detail_generation = 0;
@@ -8296,6 +8491,7 @@ let create_state
   system_logs_detail_seq = None;
   system_logs_detail_scroll = 0;
   msg_input = Buffer.create 256;
+  msg_command_menu = Masc_tui_command.Menu_idle;
   msg_recovered_paste_keepers = [];
   msg_attachments = [];
   msg_references = [];
@@ -8324,6 +8520,7 @@ let create_state
   msg_memory_dropped = 0;
   msg_history_load_generation = 0;
   msg_history_inflight = None;
+  msg_copy_generation = 0;
   msg_scroll = 0;
   msg_scroll_pin = None;
   msg_older_cursor = None;
@@ -8471,10 +8668,12 @@ let activity_title_reading ~observer ~shown ~held =
 
 (* The same answer for a pane whose reading is a [Masc_tui_fetched] view: the
    count once it has answered, and otherwise which of the two it is. Asked and
-   still waiting reads as not loaded, the way a title before any request does. *)
+   still waiting reads as not loaded, the way a title before any request does.
+   A failed refresh keeps counting the rows it still draws; the pane's status
+   row is what says they are stale. *)
 let title_count_of_view view ~count =
   match view with
-  | Masc_tui_fetched.Ready value -> count value
+  | Masc_tui_fetched.Ready value | Masc_tui_fetched.Stale (value, _) -> count value
   | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading -> title_unread
   | Masc_tui_fetched.Failed _ -> title_failed
 
@@ -8489,8 +8688,8 @@ type empty_page =
   | Page_empty
 
 (* The Code pane's listing for the scope and directory open now. A listing
-   answered for another key, one still loading, and one that failed hold no
-   rows for this key. *)
+   answered for another key, one still loading, and a first read that failed
+   hold no rows for this key; a failed refresh keeps the rows it read last. *)
 let code_listing_key (state : state) = (state.code_scope, state.code_dir)
 
 let code_listing_view (state : state) =
@@ -8498,10 +8697,7 @@ let code_listing_view (state : state) =
     ~key:(code_listing_key state)
 
 let code_entries (state : state) =
-  match code_listing_view state with
-  | Masc_tui_fetched.Ready rows -> rows
-  | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
-  | Masc_tui_fetched.Failed _ -> []
+  Option.value ~default:[] (Masc_tui_fetched.value (code_listing_view state))
 
 let empty_page_of ~snapshot ~error =
   match (snapshot, error) with
@@ -8709,7 +8905,7 @@ let composer_extra_rows (state : state) =
     function of the state again, and every write lives on one side of it. *)
 type clamped_scroll =
   | Task_detail of int
-  | Board_read of int
+  | Board_read of (int * int)
   | Message_scroll of int
   | Schedule_detail_scroll of int
   | Keeper_detail of int
@@ -8763,6 +8959,11 @@ type clamped_scroll =
      it -- later endpoints, the probe's last rows, the footer -- could not be
      reached. *)
   | Voice_scroll of int
+  (* The Keepers list window, which the frame keeps still while the cursor
+     is on it. Worked out from the cursor alone, the cursor sat on the bottom
+     row once the list scrolled, and choosing a row above it moved the whole
+     window: a second press at the same place named another Keeper. *)
+  | Keeper_list_scroll of int
   (* The context inspector's plain shapes are lines the frame lays out of the
      reading it holds, and the frame windows them. The keypress bounds the
      scroll against the same window, but a reading that lands shorter leaves
@@ -8797,7 +8998,9 @@ let scroll_down_from scroll ~by =
 
 let apply_clamped_scroll (state : state) = function
   | Task_detail value -> state.task_detail_scroll <- value
-  | Board_read value -> state.board_scroll <- value
+  | Board_read (body, comments) ->
+      state.board_scroll <- body;
+      state.board_comment_scroll <- comments
   | Message_scroll value -> set_msg_scroll state value
   | Schedule_detail_scroll value -> state.schedule_scroll <- value
   | Keeper_detail value -> state.detail_scroll <- value
@@ -8825,6 +9028,7 @@ let apply_clamped_scroll (state : state) = function
   | Patch_modal_scroll value -> state.patch_modal_scroll <- value
   | Link_modal_scroll value -> state.link_modal_scroll <- value
   | Voice_scroll value -> state.config_scroll <- value
+  | Keeper_list_scroll value -> state.keeper_list_scroll <- value
   | Context_inspector_scroll value -> state.context_inspector_scroll <- value
 
 (* Changes draws a preview under its list, so the rows the list can use are
@@ -8882,7 +9086,7 @@ let agenda (state : state) : Masc_tui_agenda.t =
                 Some
                   { Masc_tui_agenda.at_iso
                   ; standing = Masc_tui_agenda.standing_of_wire row.sch_status
-                  ; who = Option.value row.sch_payload_target ~default:""
+                  ; who = Option.value (schedule_row_who row) ~default:""
                   ; what = Option.value row.sch_payload_summary ~default:""
                   ; recurrence = row.sch_recurrence_summary
                   })
@@ -8898,6 +9102,7 @@ let agenda (state : state) : Masc_tui_agenda.t =
         (List.map
            (fun (held : Tui_decode.keeper_tool_approval) ->
               { Masc_tui_agenda.asked_by = held.kta_keeper
+              ; tool_call_id = held.kta_tool_call_id
               ; question = held.kta_tool
               ; asked_at = held.kta_asked_at
               ; timeout_sec = held.kta_timeout_sec
@@ -8911,7 +9116,8 @@ let agenda (state : state) : Masc_tui_agenda.t =
     | None, None -> Masc_tui_agenda.Not_read
     | Some rows, _ -> Masc_tui_agenda.Read rows
   in
-  Masc_tui_agenda.project ~scheduled ~awaiting ~stalled
+  Masc_tui_agenda.project ~scheduled ~awaiting
+    ~confirming:state.goals_to_confirm ~stalled
 ;;
 
 (* Rows the agenda strip takes from every surface. Added once, here, rather
@@ -9136,8 +9342,7 @@ let memory_back (state : state) =
            dropped with it: facts are cheap to re-ask and a kept copy would
            redraw stale rows on reopen. *)
         state.memory_facts_keeper <- None;
-        state.memory_facts <- None;
-        state.memory_facts_error <- None;
+        state.memory_facts <- Masc_tui_fetched.clear state.memory_facts;
         state.memory_facts_cursor <- 0;
         state.memory_facts_scroll <- 0;
         state.memory_fact_claim_wrap <- None;
@@ -9236,13 +9441,35 @@ let memory_overview_scrolled ~header_rows ~refused_rows ~context_rows (state : s
   ; sc_preview_keep = None
   }
 
+(* What the fact browser knows about the keeper it is open on. *)
+let memory_facts_view (state : state) =
+  match state.memory_facts_keeper with
+  | None -> Masc_tui_fetched.Absent
+  | Some keeper -> Masc_tui_fetched.view_for ~equal:String.equal state.memory_facts ~key:keeper
+
+(* The facts on screen: the last answer, also when the refresh after it
+   failed -- that failure is drawn beside them, not instead of them. *)
+let memory_facts_snapshot (state : state) =
+  match memory_facts_view state with
+  | Masc_tui_fetched.Ready (snapshot, _) | Masc_tui_fetched.Stale ((snapshot, _), _) ->
+      Some snapshot
+  | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _ -> None
+
+(* The failure line over the listing: the read that failed, or the keepers
+   the fleet merge could not read. *)
+let memory_facts_failure (state : state) =
+  match memory_facts_view state with
+  | Masc_tui_fetched.Stale (_, detail) | Masc_tui_fetched.Failed detail -> Some detail
+  | Masc_tui_fetched.Ready (_, unread) -> unread
+  | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading -> None
+
 (* The flat row list the browser's cursor, scroll, and search all read. The
    category filter narrows only ordinary facts: source-bound rows carry no
    category, and hiding them under a category filter would read as the store
    losing them. A store that failed to read or has no snapshot contributes
    no rows here; the render names that state in its section header. *)
 let memory_fact_rows (state : state) : memory_fact_row list =
-  match state.memory_facts with
+  match memory_facts_snapshot state with
   | None -> []
   | Some snapshot ->
       let ordinary =
@@ -9384,7 +9611,7 @@ let memory_fact_rows (state : state) : memory_fact_row list =
    these. Read from the rows rather than [all_categories], so the strip names
    only the categories this keeper has written. *)
 let memory_fact_categories (state : state) : memory_category_filter list =
-  match state.memory_facts with
+  match memory_facts_snapshot state with
   | None -> []
   | Some snapshot ->
       let ordinary_cats =
@@ -9535,19 +9762,66 @@ let lane_picker_existing_slots (state : state) = function
         | Some id -> [ id ]
         | None -> []))
 
+(* Why a pick cannot land on its target. A client with no output-schema
+   channel fits no exact lane: every exact-output call hands its client a JSON
+   Schema to answer to, and the runtime writer refuses it. The picker draws
+   such a candidate below every one that can land, with the reason at the
+   front of its row, and Enter on it sends nothing. *)
+type runtime_pick_refusal =
+  | No_output_schema_channel
+
+type runtime_pick_availability =
+  | Pick_available
+  | Pick_refused of runtime_pick_refusal
+
+let runtime_pick_availability pick (runtime : Tui_decode.runtime_option) =
+  match pick, runtime.Tui_decode.ro_exact_slot_group with
+  | Pick_exact_lane _, Tui_decode.Exact_output_unsupported ->
+    Pick_refused No_output_schema_channel
+  | Pick_exact_lane _, (Tui_decode.Exact_http_slots | Tui_decode.Exact_cli_slots)
+  | ( ( Pick_conversation_lane _ | Pick_new_lane _ | Pick_media_failover
+      | Pick_route_default )
+    , (Tui_decode.Exact_http_slots | Tui_decode.Exact_cli_slots
+      | Tui_decode.Exact_output_unsupported) ) -> Pick_available
+
+(* The words a refused row leads with. The frame cuts a row from its tail, and
+   a reason drawn after the runtime id was the part cut, so the row read like
+   any other until Enter refused it. *)
+let runtime_pick_refusal_tag = function
+  | No_output_schema_channel -> "no output schema"
+
+(* The sentence Enter on a refused row draws. *)
+let runtime_pick_refusal_text refusal (runtime : Tui_decode.runtime_option) =
+  match refusal with
+  | No_output_schema_channel ->
+    runtime.Tui_decode.ro_id ^ " has no output-schema channel"
+
 (* The picker's whole list, ordered so the candidate a lane actually needs is
    at the top, with the ids it already holds. Computed in both the key handler
    and the renderer from the same snapshot rather than stored: a cached order
    and a re-read snapshot drift, and the cursor would then point at a
-   different runtime than the one drawn. *)
+   different runtime than the one drawn.
+
+   A candidate the target refuses goes below every one it takes. It stays in
+   the list for the reason [rank_runtime_for_lane] keeps a blocked id: it is a
+   fact about the workspace an operator may be looking for. Left in rank
+   order, a refused row could sit first and open under the cursor. *)
 let runtime_picker_rows (state : state) pick =
   let already = lane_picker_existing_slots state pick in
   let providers = already |> List.filter_map (fun id ->
     state.runtime_catalog
     |> List.find_opt (fun runtime -> String.equal runtime.Tui_decode.ro_id id)
     |> Option.map (fun runtime -> runtime.Tui_decode.ro_provider)) in
-  ( already, providers,
-    runtimes_for_lane_picker ~lane_providers:providers ~already state.runtime_catalog )
+  let lands runtime =
+    match runtime_pick_availability pick runtime with
+    | Pick_available -> true
+    | Pick_refused No_output_schema_channel -> false
+  in
+  let landing, refused =
+    List.partition lands
+      (runtimes_for_lane_picker ~lane_providers:providers ~already state.runtime_catalog)
+  in
+  ( already, providers, landing @ refused )
 
 (* The one row the picker draws when it has no rows: the catalogue is unread,
    or it is read and the filter keeps none of it. The two need different
@@ -9578,38 +9852,6 @@ let runtime_picker_projection (state : state) =
       rlp_summary = Masc_tui_pick_list.summary view;
       rlp_filter = view.Masc_tui_pick_list.filter })
     state.runtime_lane_pick
-
-(* Whether a pick can land on its target. An exact lane that does not walk a
-   CLI tail -- the server projects [Runtime.exact_lane_supports_cli_tail] as
-   [sl_supports_cli_tail] -- has its official-client append refused by the
-   runtime writer, so the picker draws that candidate disabled and Enter on it
-   sends nothing. A lane row this TUI has not read leaves the verdict to the
-   server, which refuses with its own sentence. *)
-type runtime_pick_availability =
-  | Pick_available
-  | Pick_refused of string
-
-let runtime_pick_availability (state : state) pick (runtime : Tui_decode.runtime_option) =
-  match pick, runtime.Tui_decode.ro_exact_slot_group with
-  | Pick_exact_lane lane, Tui_decode.Exact_cli_slots ->
-    let row =
-      Option.bind state.standalone_lanes (fun snapshot ->
-        List.find_opt
-          (fun (row : Tui_decode.standalone_lane) ->
-             Standalone_lane.equal row.Tui_decode.sl_lane lane)
-          snapshot.Tui_decode.sls_lanes)
-    in
-    (match row with
-     | Some { Tui_decode.sl_supports_cli_tail = false; _ } ->
-       Pick_refused
-         (Printf.sprintf
-            "%s walks HTTP slots only; %s is an official client (CLI tail)"
-            (Standalone_lane.to_id lane) runtime.Tui_decode.ro_id)
-     | Some { Tui_decode.sl_supports_cli_tail = true; _ } | None -> Pick_available)
-  | Pick_exact_lane _, Tui_decode.Exact_http_slots
-  | ( ( Pick_conversation_lane _ | Pick_new_lane _ | Pick_media_failover
-      | Pick_route_default )
-    , (Tui_decode.Exact_http_slots | Tui_decode.Exact_cli_slots) ) -> Pick_available
 
 (* The one-line prompt the lane editor puts above the Runtime rows: a name
    being typed for a new lane or for a rename, or the lane a second [D] would
@@ -9803,7 +10045,6 @@ type slot_editor_row =
   ; sr_kind : slot_editor_row_kind
   }
 
-and slot_editor_row_kind = Catalog_slot | Official_client_slot | Media_route_slot
 
 let slot_editor_rows (state : state) =
   match state.slot_editor with
@@ -9850,10 +10091,60 @@ let slot_editor_rows (state : state) =
          snapshot.Tui_decode.rss_resolved.Tui_decode.rrs_media_failover_declared)
 ;;
 
-let slot_editor_cursor_row (state : state) =
+(* Every action and renderer resolves the same identity against current rows. *)
+let slot_editor_selection (state : state) =
   match state.slot_editor with
-  | None -> None
-  | Some editor -> List.nth_opt (slot_editor_rows state) editor.se_cursor
+  | None | Some { se_selection = None; _ } -> None
+  | Some { se_selection = Some selected; _ } ->
+    slot_editor_rows state
+    |> List.find_mapi (fun index row ->
+         if row.sr_kind = selected.si_kind && String.equal row.sr_slot selected.si_slot
+         then Some (index, row)
+         else None)
+;;
+
+let slot_editor_cursor_index state =
+  Option.map fst (slot_editor_selection state)
+;;
+
+let slot_editor_cursor_row state =
+  Option.map snd (slot_editor_selection state)
+;;
+
+let select_slot_editor_row state index =
+  match state.slot_editor with
+  | None -> ()
+  | Some editor ->
+    let se_selection =
+      List.nth_opt (slot_editor_rows state) index
+      |> Option.map (fun row -> { si_kind = row.sr_kind; si_slot = row.sr_slot })
+    in
+    state.slot_editor <- Some { editor with se_selection }
+;;
+
+let open_slot_editor state target =
+  state.slot_editor <- Some { se_target = target; se_selection = None };
+  select_slot_editor_row state 0
+;;
+
+let reconcile_slot_editor_selection state =
+  match state.slot_editor, slot_editor_selection state with
+  | Some editor, None ->
+    state.slot_editor <- Some { editor with se_selection = None }
+  | None, _ | Some _, Some _ -> ()
+;;
+
+let navigate_slot_editor state move =
+  let count = List.length (slot_editor_rows state) in
+  if count > 0 then
+    let index =
+      match slot_editor_cursor_index state, move with
+      | None, Move_down -> 0
+      | None, Move_up -> count - 1
+      | Some index, Move_down -> min (count - 1) (index + 1)
+      | Some index, Move_up -> max 0 (index - 1)
+    in
+    select_slot_editor_row state index
 ;;
 
 type slot_edit =
@@ -9884,7 +10175,6 @@ type slot_edit_plan =
       { target : slot_editor_target
       ; slot : string
       ; request : slot_write_request
-      ; cursor_after : int option
       }
   | Refuse_slot_edit of runtime_lane_notice
 
@@ -9895,17 +10185,12 @@ let plan_slot_edit (state : state) edit =
     let rows = slot_editor_rows state in
     let count = List.length rows in
     let order = List.map (fun row -> row.sr_slot) rows in
-    (match List.nth_opt rows editor.se_cursor with
+    (match slot_editor_selection state with
      | None -> Refuse_slot_edit (Lane_write_refused "no slot is under the cursor")
-     | Some row ->
+     | Some (cursor, row) ->
        let target = editor.se_target in
        let name = slot_editor_target_name target in
        let slot = row.sr_slot in
-       let cursor_after_drop =
-         if editor.se_cursor = count - 1 && editor.se_cursor > 0
-         then Some (editor.se_cursor - 1)
-         else None
-       in
        if runtime_lane_write_busy state
        then Refuse_slot_edit Lane_write_pending
        else (
@@ -9932,7 +10217,7 @@ let plan_slot_edit (state : state) edit =
                    name))
          | Exact_lane_slots _, Drop_slot ->
            Send_slot_write
-             { target; slot; request = Drop_declared_slot; cursor_after = cursor_after_drop }
+             { target; slot; request = Drop_declared_slot }
          | Media_failover_slots, Drop_slot ->
            (* An empty route is a configuration, not a broken one: it means no
               vision runtimes. So the last entry may go. *)
@@ -9941,12 +10226,11 @@ let plan_slot_edit (state : state) edit =
              ; slot
              ; request =
                  Write_route_order
-                   (List.filteri (fun index _ -> index <> editor.se_cursor) order)
-             ; cursor_after = cursor_after_drop
+                   (List.filteri (fun index _ -> index <> cursor) order)
              }
          | _, Move_slot move ->
            let by, edge = match move with Move_down -> 1, "last" | Move_up -> -1, "first" in
-           let moved_to = editor.se_cursor + by in
+           let moved_to = cursor + by in
            if moved_to < 0 || moved_to >= count
            then
              Refuse_slot_edit
@@ -9965,14 +10249,14 @@ let plan_slot_edit (state : state) edit =
                  Write_route_order
                    (List.mapi
                       (fun index id ->
-                         if index = editor.se_cursor
+                         if index = cursor
                          then List.nth order moved_to
                          else if index = moved_to
                          then slot
                          else id)
                       order)
              in
-             Send_slot_write { target; slot; request; cursor_after = Some moved_to })))
+             Send_slot_write { target; slot; request })))
 ;;
 
 (* What a Runtime row says about the position it holds in its lane. The
@@ -10100,6 +10384,13 @@ let runtime_pick_badge_cells =
     (Masc_tui_message_layout.display_width runtime_pick_lane_badge)
     (Masc_tui_message_layout.display_width runtime_pick_model_badge)
 
+(* A runtime id is [provider.model]. Only the first dot separates them: a
+   model id may hold more ([muse_6dc7c062.muse-spark-1.3_6dc7c062]). *)
+let runtime_id_model_part id =
+  match String.index_opt id '.' with
+  | Some at -> String.sub id (at + 1) (String.length id - at - 1)
+  | None -> id
+
 (* The words a picker row draws before its facts: the kind badge, the target
    and the route. The renderer draws these and the typed filter matches their
    join, so the operator filters by what they read. The facts are left out:
@@ -10118,12 +10409,7 @@ let runtime_pick_columns item =
          dropped: the target column already says it is a lane. *)
       let chain =
         String.concat " \xe2\x86\x92 "
-          (List.map
-             (fun id ->
-                match String.split_on_char '.' id with
-                | [ _prov; model ] -> model
-                | _ -> id)
-             lane.Tui_decode.rrl_runtime_ids)
+          (List.map runtime_id_model_part lane.Tui_decode.rrl_runtime_ids)
       in
       { rpc_badge = runtime_pick_lane_badge;
         rpc_target = single_line lane.Tui_decode.rrl_id;
@@ -10491,7 +10777,7 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
            | Some s -> List.length s.Tui_decode.rs_repositories)
   | Memory ->
       if Option.is_some state.memory_facts_keeper then
-        listing ~error:state.memory_facts_error
+        listing ~error:(memory_facts_failure state)
           (List.length (memory_fact_rows state))
       else
         (* The overview's header rows are wrapped to the terminal width, which
@@ -10991,7 +11277,7 @@ let surface_row_texts (state : state) : surface -> string list option =
              (* The exact filter projection, including field order: a phrase
                 crossing a field boundary must remain countable and reachable. *)
              List.map memory_fact_search_text rows)
-          state.memory_facts
+          (memory_facts_snapshot state)
       else
         Option.map
           (* Keeper id and the state label, which is the pair
@@ -11054,7 +11340,7 @@ let surface_row_texts (state : state) : surface -> string list option =
                    rows))
          (* Nothing to search through while the file is still being read, and
             nothing to search through if it failed. *)
-         | Some (_, (Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _))
+         | Some (_, (Masc_tui_fetched.Loading | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _))
          | Some (_, Masc_tui_fetched.Absent)
          | None -> None)
       else
@@ -11190,7 +11476,7 @@ let surface_search_count (state : state) surface ~query =
       (match Masc_tui_fetched.current state.code_file with
        | Some (_, Masc_tui_fetched.Ready rows) ->
            Some (if String.equal query "" then 0 else code_file_search_count ~query rows)
-       | Some (_, (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _))
+       | Some (_, (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _))
        | None -> None)
   | _ ->
       Option.map
@@ -11545,6 +11831,28 @@ let keeper_message_status_rows (state : state) =
   + (if keeper_message_reading_back state then 1 else 0)
   + composer_extra_rows state
 
+let keeper_message_command_window state ~terminal_rows ~terminal_cols =
+  match state.view, state.keeper_message_focus, state.voice_capture,
+        state.msg_recall_replaces with
+  | Keepers Keeper_message, Right_pane, None, None when state.msg_scroll = 0 ->
+    let keeper_names = List.map (fun (keeper : keeper) -> keeper.k_name) state.keepers in
+    (match Masc_tui_command.menu ~keeper_names ~state:state.msg_command_menu
+        (Buffer.contents state.msg_input) with
+     | None -> None
+     | Some menu ->
+       let status_rows = keeper_message_status_rows state + 1 in
+       let chat_cols = Masc_tui_roster_pane.content_cols
+           ~hidden:state.roster_pane_hidden ~cols:terminal_cols in
+       let history_rows = Masc_tui_message_layout.message_history_height
+           ~terminal_rows ~status_rows in
+       (* Keep three conversation rows plus a heading and input separator.
+          Eight candidates is the menu's visible page, not a result limit. *)
+       let max_rows = min 8 (max 0 (history_rows - 5)) in
+       if max_rows = 0 || not (Masc_tui_message_layout.message_viewport_supported
+           ~terminal_rows ~terminal_cols:chat_cols ~status_rows) then None
+       else Some (menu, Masc_tui_command.menu_window ~max_rows menu))
+  | _ -> None
+
 (* Support cannot disappear merely because PgUp adds the reading-back notice.
    At the live edge, reserve that possible row only for the support threshold;
    once reading back, it is already part of [keeper_message_status_rows]. The
@@ -11639,7 +11947,7 @@ let code_cursor_line_symbols (state : state) =
             segments;
           List.rev !names)
   (* No open file, still reading, or the read failed: nothing to name. *)
-  | Some (_, (Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _))
+  | Some (_, (Masc_tui_fetched.Loading | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _))
   | Some (_, Masc_tui_fetched.Absent)
   | None -> []
 

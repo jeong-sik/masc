@@ -130,6 +130,15 @@ val footer_hints_voice_agent : unit -> string
     write and the way out. Its keys are not the Config pane's, so the row is
     the screen's rather than the pane's. *)
 
+val footer_hints_runtime_account_form : unit -> string
+(** The runtime.toml account form's row: the provider axis, the fields, the
+    save and the way out. The form takes every other key as typing, so the
+    pane's row would name keys that no longer do what it says. *)
+
+val footer_hints_runtime_account_saved : unit -> string
+(** The account form's row after a save: the copy of the sign-in command
+    and the way out. *)
+
 val footer_hints_prompt_assets : string
 (** The prompts pane while it shows the read-only runtime assets: its keys
     without the ones that edit the registry, and [o] named for the way back. *)
@@ -163,15 +172,23 @@ val footer_hints_resources : detail_focus:bool -> string
     other keys still project from {!for_surface}. *)
 
 val footer_hints_board_read :
-  focus_posts:bool -> layout:Masc_tui_types.board_read_layout -> string
+  focus_posts:bool ->
+  focus_comments:bool ->
+  layout:Masc_tui_types.board_read_layout ->
+  string
 (** The Board read footer. [focus_posts] is whether j/k moves the post list
-    beside the open post rather than scrolling it. [layout] is the one the
+    beside the open post; [focus_comments] chooses the thread instead of the
+    post within the detail pane. [layout] is the one the
     frame drew ({!Masc_tui_types.board_read_layout}): the split is when h/l
     and Ctrl-W have a pane to reach, and [z] crosses between the split and the
     wide detail, its label naming where it goes -- "wide" from a split one,
     "list" from a wide one. On one pane there is nowhere to go and the key is
     not drawn. The vote, reply and copy keys are the Board surface list's own
     bindings. *)
+
+val footer_hints_board_pending : string
+(** Board read controls while the post is loading, missing, or failed.
+    Projects the live [r], [Left / Esc], and [Tab] bindings. *)
 
 val footer_hints_fusion_detail : string
 (** The Fusion detail footer. Separate from {!footer_hints} because the

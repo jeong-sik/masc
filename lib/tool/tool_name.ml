@@ -63,6 +63,8 @@ module Board_name = struct
     | Board_curation_submit
     | Board_delete
     | Board_cleanup
+    | Board_close
+    | Board_reopen
     | Board_sub_board_create
     | Board_sub_board_list
     | Board_sub_board_get
@@ -72,6 +74,7 @@ module Board_name = struct
 
   let operation_name = function
     | Board_cleanup -> "cleanup"
+    | Board_close -> "close"
     | Board_comment -> "comment"
     | Board_comment_vote -> "comment_vote"
     | Board_curation_read -> "curation_read"
@@ -84,6 +87,7 @@ module Board_name = struct
     | Board_post_update -> "post_update"
     | Board_profile -> "profile"
     | Board_reaction -> "reaction"
+    | Board_reopen -> "reopen"
     | Board_search -> "search"
     | Board_stats -> "stats"
     | Board_sub_board_create -> "sub_board_create"
@@ -102,6 +106,7 @@ module Board_name = struct
 
   let is_resource_write = function
     | Board_cleanup
+    | Board_close
     | Board_comment
     | Board_comment_vote
     | Board_curation_submit
@@ -109,6 +114,7 @@ module Board_name = struct
     | Board_post
     | Board_post_update
     | Board_reaction
+    | Board_reopen
     | Board_sub_board_create
     | Board_sub_board_delete
     | Board_sub_board_update

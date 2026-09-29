@@ -1024,6 +1024,9 @@ export interface RuntimeTomlConfig {
   source_text: string
   source_revision: string
   provider_protocols: RuntimeTomlEditorProtocol[]
+  // Names no provider may take: each is a top-level table another reader
+  // owns (lib/runtime/runtime_toml.ml reserved_provider_ids).
+  reserved_provider_ids: string[]
   application?: RuntimeConfigApplication
   validation?: RuntimeConfigValidation
   keeper_setting_schema?: unknown
@@ -1228,6 +1231,28 @@ const RUNTIME_TOML_EDITOR_PROTOCOL_KEYS = [
   'transport',
 ] as const
 
+// Strict like the protocol inventory: the server always sends this list and
+// it is never empty (the variant alone names sixteen tables). A missing or
+// empty list means a server this dashboard does not match, and an empty
+// fallback would let the forms accept names the server refuses. That
+// mismatch fails this config read with an error the editor shows; an older
+// dashboard ignores the extra field.
+function parseReservedProviderIds(raw: unknown): string[] {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    throw new Error('유효하지 않은 runtime reserved provider id 목록')
+  }
+  const ids = raw.map((id) => {
+    if (typeof id !== 'string' || id === '') {
+      throw new Error('유효하지 않은 runtime reserved provider id')
+    }
+    return id
+  })
+  if (new Set(ids).size !== ids.length) {
+    throw new Error('runtime reserved provider id가 중복됩니다')
+  }
+  return ids
+}
+
 function parseRuntimeTomlEditorProtocols(raw: unknown): RuntimeTomlEditorProtocol[] {
   if (!Array.isArray(raw) || raw.length === 0) {
     throw new Error('유효하지 않은 runtime provider protocol inventory')
@@ -1297,13 +1322,14 @@ export type DashboardOfficialClientRecoveryFailure =
   | 'transport_interrupted'
   | 'protocol_failed'
   | 'provider_rejected'
+  | 'retryable_turn_failed'
   | 'host_hook_failed'
   | 'state_persistence_failed'
   | 'process_restarted'
   | 'vendor_session_full_no_activity'
   | 'vendor_session_full_after_activity'
 
-export type DashboardOfficialClientKind = 'codex' | 'claude_code' | 'antigravity'
+export type DashboardOfficialClientKind = 'codex' | 'claude_code' | 'antigravity' | 'muse'
 
 export interface DashboardOfficialClientSettlement {
   session_id: string
@@ -1356,7 +1382,7 @@ export interface DashboardOfficialClientRecoveryResolutionRecord {
 }
 
 export interface DashboardOfficialClientTransientReleaseRecord {
-  failure: 'pre_dispatch_failed' | 'transient_spawn_failed'
+  failure: 'pre_dispatch_failed' | 'transient_spawn_failed' | 'owner_stopped_turn' | 'retryable_turn_failed'
   owner_epoch: string
   released_at: number
 }
@@ -1403,6 +1429,7 @@ export type DashboardOfficialClientLoginStatus =
   | 'login_required'
   | 'timeout'
   | 'protocol_error'
+  | 'runtime_exception'
   | 'probe_contract_error'
 
 export interface DashboardOfficialClientProbeResponse {
@@ -1437,6 +1464,7 @@ const OFFICIAL_CLIENT_RECOVERY_FAILURES = new Set<DashboardOfficialClientRecover
   'transport_interrupted',
   'protocol_failed',
   'provider_rejected',
+  'retryable_turn_failed',
   'host_hook_failed',
   'state_persistence_failed',
   'process_restarted',
@@ -1448,6 +1476,7 @@ const OFFICIAL_CLIENT_KINDS = new Set<DashboardOfficialClientKind>([
   'codex',
   'claude_code',
   'antigravity',
+  'muse',
 ])
 
 const OFFICIAL_CLIENT_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -1480,6 +1509,7 @@ const OFFICIAL_CLIENT_LOGIN_STATUSES = new Set<DashboardOfficialClientLoginStatu
   'login_required',
   'timeout',
   'protocol_error',
+  'runtime_exception',
   'probe_contract_error',
 ])
 
@@ -1594,7 +1624,7 @@ function decodeOfficialClientTransientRelease(raw: unknown): DashboardOfficialCl
   const failure = typeof raw.failure === 'string' ? raw.failure : null
   const owner_epoch = decodeOfficialClientUuid(raw.owner_epoch)
   const released_at = asNumber(raw.released_at)
-  if ((failure !== 'transient_spawn_failed' && failure !== 'pre_dispatch_failed') || !owner_epoch || released_at == null) return null
+  if ((failure !== 'pre_dispatch_failed' && failure !== 'transient_spawn_failed' && failure !== 'owner_stopped_turn' && failure !== 'retryable_turn_failed') || !owner_epoch || released_at == null) return null
   return { failure, owner_epoch, released_at }
 }
 
@@ -1833,6 +1863,7 @@ function normalizeRuntimeTomlConfig(raw: unknown): RuntimeTomlConfig {
     source_text: asString(record.source_text, ''),
     source_revision: sourceRevision,
     provider_protocols: parseRuntimeTomlEditorProtocols(record.provider_protocols),
+    reserved_provider_ids: parseReservedProviderIds(record.reserved_provider_ids),
     application: normalizeRuntimeConfigApplication(record.application),
     validation: normalizeRuntimeConfigValidation(record.validation),
     keeper_setting_schema: record.keeper_setting_schema,

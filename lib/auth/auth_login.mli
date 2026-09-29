@@ -113,6 +113,9 @@ val mint :
 (** [mint ~base_path ~host ~port ~agent_name ~role ~token_env_var
         ~token_lifetime ()] runs the full login lifecycle.
 
+    A [Player] role is refused with [Auth_error.Forbidden] before anything
+    changes: a player credential is an invite, not a login.
+
     {2 Required arguments}
     - [~token_env_var] is the operator's chosen env var name (e.g.
       ["MASC_TOKEN"] or any operator-chosen variant). The server

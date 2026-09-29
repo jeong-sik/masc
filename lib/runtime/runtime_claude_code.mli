@@ -57,13 +57,7 @@ type config =
         bounded by [admission_timeout_s]. Declared as [turn-timeout-s] in
         runtime config, where [0] selects [None]. *)
     (** Maximum silence between CLI stream messages. Each received message
-        resets the deadline; a progressing turn is bounded only by
-        [wall_clock_ceiling_s]. *)
-  ; wall_clock_ceiling_s : float option
-    (** Whole-turn wall-clock ceiling measured from spawn ([None] selects the
-        shared hours-scale default). The idle timeout above resets on every
-        received message, so this is the only bound a turn of continuous
-        thin progress cannot outlive (#31242). *)
+        resets the deadline; a progressing turn has no cumulative time limit. *)
   ; output_schema : Yojson.Safe.t option
     (** JSON Schema the CLI enforces on the turn's final answer
         ([--json-schema]). The mechanism is validation with a re-prompt, not
@@ -75,12 +69,30 @@ type config =
 
 val default_timeout_s : float
 val default_config : cwd:string -> config
+val client_environment : string option -> string array
+(** Selected-account child environment shared by execution and explicit login. *)
 val effective_account_home : string option -> string option
 (** The selected Claude Code configuration directory: explicit home,
     CLAUDE_CONFIG_DIR, or the CLI's HOME/.claude default. An inherited relative
     CLAUDE_CONFIG_DIR is resolved against the process cwd and passed to the
     child; other inherited authentication variables are preserved. Explicit
     paths keep their literal spelling for the client's credential identity. *)
+val account_file : string option -> string option
+(** The global config file that names the account signed in to a selected
+    home, or with none to the inherited one: the legacy [.config.json] in the
+    config directory while it exists, else [.claude.json] inside
+    CLAUDE_CONFIG_DIR when set, otherwise in HOME. A selected home runs as
+    CLAUDE_CONFIG_DIR. [None] when the environment names neither. *)
+val environment_credential_names : string list
+(** The variables {!runs_on_environment_credential} reads: the cloud provider
+    switches, then ANTHROPIC_AUTH_TOKEN, ANTHROPIC_API_KEY and
+    CLAUDE_CODE_OAUTH_TOKEN. *)
+val runs_on_environment_credential : string option -> bool
+(** Whether a child on this home is given a credential Claude Code uses before
+    its /login account: a cloud provider switch that Claude Code reads as on
+    ("1", "true", "yes" or "on"), or a non-empty ANTHROPIC_AUTH_TOKEN,
+    ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN. Only the inherited home
+    ([None]) passes them. *)
 
 (** One image attached to a turn's user message. [base64_data] is the raw
     base64 payload with no data-URL prefix and no newlines, the shape the
@@ -162,7 +174,6 @@ type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_
       }
 
 type host_stop = Runtime_official_client_tool.host_stop =
-  | Queued_chat_operation
   | Repeated_tool_call of
       { tool_name : string
       ; repeated_count : int
@@ -183,6 +194,8 @@ type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
   { name : string
   ; description : string
   ; input_schema : Yojson.Safe.t
+  ; loading : Runtime_official_client_tool.loading
+  ; result_bound : Runtime_official_client_tool.result_bound
   ; call_effect : Yojson.Safe.t -> Agent_core.Tool.call_effect
   ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
   }
@@ -231,9 +244,20 @@ type stream_event =
           measured. *)
   | Turn_finished of { text : string }
 
+val dynamic_tool_spec : dynamic_tool -> Yojson.Safe.t
+(** One [tools/list] entry as the MCP server answers Claude Code
+    (code.claude.com/docs/en/mcp). Its [_meta] carries
+    ["anthropic/alwaysLoad": true] for an {!Runtime_official_client_tool.Upfront}
+    tool, which exempts it from Claude Code's tool search, and
+    ["anthropic/maxResultSizeChars": n] for a
+    {!Runtime_official_client_tool.Bounded_bytes} [n] tool. A tool with
+    neither carries no [_meta]. *)
+
 val dynamic_tool_bytes : dynamic_tool list -> int
-(** Bytes the tool declarations occupy in the request this process builds. Not
-    provider tokens: it bounds the request, it does not price it. *)
+(** Bytes the tool declarations occupy in the request this process builds: each
+    name, description and serialized input schema, plus the serialized [_meta]
+    object for a tool that carries one. Not provider tokens: it bounds the
+    request, it does not price it. *)
 
 type error =
   | Invalid_config of string
@@ -282,6 +306,10 @@ type error =
       (** [turn_admitted] is false when the client died before the turn was
           admitted, which means no turn was submitted and another candidate may
           still be tried. *)
+  | Unhandled_exception of string
+      (** An exception nothing in the runtime expected, caught as the turn
+          leaves it: a host-side failure such as a refused process signal,
+          not something the client sent. The string is the exception. *)
   | Timeout of float
 
 val error_to_string : error -> string

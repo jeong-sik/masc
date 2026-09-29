@@ -599,7 +599,8 @@ let test_provider_for_vision_uses_runtime_temperature () =
          (match runtime.Runtime.execution with
           | Runtime_execution.Codex_app_server _
           | Runtime_execution.Claude_code _
-          | Runtime_execution.Antigravity_cli _ ->
+          | Runtime_execution.Antigravity_cli _
+          | Runtime_execution.Muse_serve _ ->
             failwith "selected vision runtime should be agent_core"
           | Runtime_execution.Agent_core provider_config ->
             let configured = Vt.provider_for_vision provider_config in
@@ -1836,7 +1837,7 @@ let test_delegates_media_follows_lane_capability () =
 let test_delegates_media_matches_antigravity_transport () =
   with_temp_base (fun base_path ->
     let oauth_source = Filename.concat base_path "vision-oauth.json" in
-    write_file oauth_source "{}";
+    write_file oauth_source (Masc_test_deps.antigravity_oauth_fixture "vision-fixture");
     let config =
       Printf.sprintf
         {|[runtime]

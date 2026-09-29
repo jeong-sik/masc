@@ -205,48 +205,65 @@ let test_ollama_cloud_deepseek_cloud_suffix_resolves () =
     ~expected_id_prefix:"deepseek-v4.1-flash:cloud"
 ;;
 
-(* [equality_key] is what [equal] and [equal_id_prefix] compare, so a table
-   keyed by it finds exactly the rows they would. *)
-let test_equality_key_agrees_with_equal () =
+(* Two identifiers have equal keys exactly when their bytes are equal once
+   ASCII letters are folded to lower case and nothing else is changed: the
+   rule [equal] states, spelled here with the standard library.  A row id and
+   a requested model id compare by the same rule, and a key reads as the
+   folded bytes. *)
+let test_equality_key_folds_ascii_case_only () =
   let cases =
     [ "claude-opus-5"; "CLAUDE-OPUS-5"; "Claude-Opus-5"; "gpt-5.6-terra"
     ; "GPT-5.6-TERRA"; "Qwen/Qwen3-Coder-480B"; "qwen/qwen3-coder-480b"
     ; "deepseek-v4.1-flash:cloud"; "\xc3\x84bc"; "\xc3\xa4bc" ]
   in
+  let folded_equal a b =
+    String.equal (String.lowercase_ascii a) (String.lowercase_ascii b)
+  in
   List.iter
     (fun a ->
+       let model_a = Model_identifiers.Model_id.of_string_exn a in
+       Alcotest.(check string)
+         (Printf.sprintf "the key of %S reads as its folded bytes" a)
+         (String.lowercase_ascii a)
+         (Model_identifiers.Model_id.equality_key model_a :> string);
        List.iter
          (fun b ->
-            let model_a = Model_identifiers.Model_id.of_string_exn a in
             let model_b = Model_identifiers.Model_id.of_string_exn b in
+            let expected = folded_equal a b in
             Alcotest.(check bool)
-              (Printf.sprintf "model ids %S and %S" a b)
-              (Model_identifiers.Model_id.equal model_a model_b)
-              (String.equal
+              (Printf.sprintf "model ids %S and %S have one key" a b)
+              expected
+              (Model_identifiers.Equality_key.equal
                  (Model_identifiers.Model_id.equality_key model_a)
                  (Model_identifiers.Model_id.equality_key model_b));
-            let row = prefix_of a in
             Alcotest.(check bool)
-              (Printf.sprintf "row %S and model id %S" a b)
-              (Model_identifiers.Model_id.equal_id_prefix ~prefix:row model_b)
-              (String.equal
-                 (Model_identifiers.Id_prefix.equality_key row)
+              (Printf.sprintf "model ids %S and %S are equal" a b)
+              expected
+              (Model_identifiers.Model_id.equal model_a model_b);
+            Alcotest.(check bool)
+              (Printf.sprintf "row %S and model id %S have one key" a b)
+              expected
+              (Model_identifiers.Equality_key.equal
+                 (Model_identifiers.Id_prefix.equality_key (prefix_of a))
                  (Model_identifiers.Model_id.equality_key model_b)))
          cases)
     cases
 ;;
 
 (* What the provider-scoped lookup answered before it had an index: the first
-   row, in catalog order, that names the provider and the model id. *)
+   row, in catalog order, whose provider label and id equal the query's once
+   ASCII case is folded on both sides and the labels are trimmed. *)
 let scan_scoped_rows rows ~provider_name ~model_id =
   let label value = String.lowercase_ascii (String.trim value) in
-  let model_id = Model_identifiers.Model_id.of_string_exn model_id in
   List.find_opt
     (fun (entry : Model_catalog.model_entry) ->
        match entry.provider_name with
        | Some declared ->
          String.equal (label declared) (label provider_name)
-         && Model_identifiers.Model_id.equal_id_prefix ~prefix:entry.id_prefix model_id
+         && String.equal
+              (String.lowercase_ascii
+                 (Model_identifiers.Id_prefix.to_string entry.id_prefix))
+              (String.lowercase_ascii model_id)
        | None -> false)
     rows
 ;;
@@ -334,6 +351,101 @@ let test_scoped_lookup_answers_with_the_first_of_equal_rows () =
       (answer [ spelled ] == spelled)
 ;;
 
+(* A catalog of the given TOML, or the test fails with the loader's message. *)
+let catalog_of_toml ~source toml =
+  match Model_catalog.of_toml_string ~source toml with
+  | Ok catalog -> catalog
+  | Error message -> Alcotest.failf "%s: %s" source message
+;;
+
+(* Which row a provider-scoped lookup answers with: [Ok] with the row's
+   provider label and [max_context_tokens], or the miss. *)
+let scoped_answer catalog ~provider_name ~model_id =
+  match Model_catalog.lookup_for_provider_result catalog ~provider_name ~model_id with
+  | Ok (entry : Model_catalog.model_entry) -> Ok (entry.provider_name, entry.max_context_tokens)
+  | Error Model_catalog.No_such_row -> Error "no such row"
+  | Error (Model_catalog.Malformed_model_id detail) -> Error detail
+;;
+
+let scoped_answer_t =
+  Alcotest.(result (pair (option string) (option int)) string)
+;;
+
+(* A row id declared with upper-case letters is found by a query in any case,
+   and a row answers only for the provider it names, whatever rows other
+   providers declare. *)
+let test_scoped_lookup_folds_row_ids_and_keeps_providers_apart () =
+  let catalog =
+    catalog_of_toml ~source:"scoped lookup row ids"
+      "[[models]]\n\
+       id_prefix = \"Fixture-Model-ID\"\n\
+       provider_name = \"provider-a\"\n\
+       max_context_tokens = 1\n\
+       \n\
+       [[models]]\n\
+       id_prefix = \"other-model\"\n\
+       provider_name = \"provider-b\"\n\
+       max_context_tokens = 2\n"
+  in
+  let check label ~provider_name ~model_id expected =
+    Alcotest.check scoped_answer_t label expected
+      (scoped_answer catalog ~provider_name ~model_id)
+  in
+  check "a lower-case query finds an upper-case row id" ~provider_name:"provider-a"
+    ~model_id:"fixture-model-id" (Ok (Some "provider-a", Some 1));
+  check "the row's own spelling finds it" ~provider_name:"provider-a"
+    ~model_id:"Fixture-Model-ID" (Ok (Some "provider-a", Some 1));
+  check "an id only another provider declares misses" ~provider_name:"provider-b"
+    ~model_id:"fixture-model-id" (Error "no such row");
+  check "the other provider's id misses the first" ~provider_name:"provider-a"
+    ~model_id:"other-model" (Error "no such row")
+;;
+
+(* A label no row names is retried under the provider it is an alias of, and
+   only then: a row declared under the alias label itself answers first. *)
+let test_scoped_lookup_retries_under_the_canonical_provider () =
+  let catalog =
+    catalog_of_toml ~source:"scoped lookup provider alias"
+      "[[providers]]\n\
+       id = \"alias-fixture\"\n\
+       aliases = [\"alias-fixture-old\"]\n\
+       kind = \"openai_compat\"\n\
+       base_url = \"https://alias.example\"\n\
+       request_path = \"/v1/chat/completions\"\n\
+       api_key_env = \"\"\n\
+       \n\
+       [[models]]\n\
+       id_prefix = \"alias-model\"\n\
+       provider_name = \"alias-fixture\"\n\
+       max_context_tokens = 1\n\
+       \n\
+       [[models]]\n\
+       id_prefix = \"verbatim-model\"\n\
+       provider_name = \"alias-fixture\"\n\
+       max_context_tokens = 2\n\
+       \n\
+       [[models]]\n\
+       id_prefix = \"verbatim-model\"\n\
+       provider_name = \"alias-fixture-old\"\n\
+       max_context_tokens = 3\n"
+  in
+  let check label ~provider_name ~model_id expected =
+    Alcotest.check scoped_answer_t label expected
+      (scoped_answer catalog ~provider_name ~model_id)
+  in
+  check "the alias finds the canonical provider's row" ~provider_name:"alias-fixture-old"
+    ~model_id:"alias-model" (Ok (Some "alias-fixture", Some 1));
+  check "the alias is folded like any label" ~provider_name:" Alias-Fixture-Old "
+    ~model_id:"ALIAS-MODEL" (Ok (Some "alias-fixture", Some 1));
+  check "a row under the alias label answers before the retry"
+    ~provider_name:"alias-fixture-old" ~model_id:"verbatim-model"
+    (Ok (Some "alias-fixture-old", Some 3));
+  check "the canonical label keeps its own row" ~provider_name:"alias-fixture"
+    ~model_id:"verbatim-model" (Ok (Some "alias-fixture", Some 2));
+  check "an id neither label declares misses" ~provider_name:"alias-fixture-old"
+    ~model_id:"no-row-declares-this-model" (Error "no such row")
+;;
+
 let () =
   Alcotest.run "model_identifiers"
     [ ( "Id_prefix.starts_with"
@@ -349,9 +461,13 @@ let () =
         ; Alcotest.test_case "ollama_cloud_deepseek_cloud_suffix_resolves" `Quick
             test_ollama_cloud_deepseek_cloud_suffix_resolves ] )
     ; ( "Model_catalog provider-scoped index"
-      , [ Alcotest.test_case "equality_key_agrees_with_equal" `Quick
-            test_equality_key_agrees_with_equal
+      , [ Alcotest.test_case "equality_key_folds_ascii_case_only" `Quick
+            test_equality_key_folds_ascii_case_only
         ; Alcotest.test_case "scoped_lookup_matches_a_scan_of_the_rows" `Quick
             test_scoped_lookup_matches_a_scan_of_the_rows
         ; Alcotest.test_case "scoped_lookup_answers_with_the_first_of_equal_rows" `Quick
-            test_scoped_lookup_answers_with_the_first_of_equal_rows ] ) ]
+            test_scoped_lookup_answers_with_the_first_of_equal_rows
+        ; Alcotest.test_case "scoped_lookup_folds_row_ids_and_keeps_providers_apart" `Quick
+            test_scoped_lookup_folds_row_ids_and_keeps_providers_apart
+        ; Alcotest.test_case "scoped_lookup_retries_under_the_canonical_provider" `Quick
+            test_scoped_lookup_retries_under_the_canonical_provider ] ) ]

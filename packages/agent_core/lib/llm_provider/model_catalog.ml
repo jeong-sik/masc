@@ -77,11 +77,12 @@ type provider_entry = Model_provider_catalog.entry =
   }
 
 module String_map = Map.Make (String)
+module Row_key_map = Map.Make (Model_identifiers.Equality_key)
 
 type t =
   { models : model_entry list
   ; providers : provider_entry list
-  ; scoped_rows : model_entry String_map.t String_map.t
+  ; scoped_rows : model_entry Row_key_map.t String_map.t
     (* The rows that name a provider, by the provider's normalized label and
        then by the row's [Id_prefix.equality_key], each to the first such row
        in [models]: the row [lookup_for_provider_result] answers with, found
@@ -103,11 +104,11 @@ let index_scoped_rows models =
          let rows =
            match String_map.find_opt label index with
            | Some rows -> rows
-           | None -> String_map.empty
+           | None -> Row_key_map.empty
          in
-         if String_map.mem key rows
+         if Row_key_map.mem key rows
          then index
-         else String_map.add label (String_map.add key entry rows) index)
+         else String_map.add label (Row_key_map.add key entry rows) index)
     String_map.empty
     models
 ;;
@@ -795,9 +796,11 @@ let parse_table_array toml key parse =
            results)
 ;;
 
+(* The id is folded by the key the provider-scoped index files rows under,
+   so no two rows this check lets through share an index slot. *)
 let model_row_key (entry : model_entry) =
   Option.map normalize_label entry.provider_name,
-  normalize_label (Model_identifiers.Id_prefix.to_string entry.id_prefix)
+  Model_identifiers.Id_prefix.equality_key entry.id_prefix
 ;;
 
 let provider_entry_key (entry : provider_entry) = normalize_label entry.id
@@ -971,7 +974,7 @@ let lookup_for_provider_result t ~provider_name ~model_id =
     let key = Model_identifiers.Model_id.equality_key model_id in
     let find_exact label =
       match String_map.find_opt label t.scoped_rows with
-      | Some rows -> String_map.find_opt key rows
+      | Some rows -> Row_key_map.find_opt key rows
       | None -> None
     in
     let requested = normalize_label provider_name in

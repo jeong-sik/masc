@@ -116,7 +116,7 @@ related: ["every-lane-is-one-row-in-one-registry", "exact-lane-walks-one-slot-li
 - 원장을 읽을 수 없으면 지급과 구매를 하지 않는다. 복구용 사본(`.last-good`)을 읽어서 쓰기를 허가하지도 않는다.
 - 원장은 `Fs_compat` 의 private JSONL 함수 가운데 cursor 묶음 하나로만 읽고 쓴다(`lib/fs_compat/fs_compat.mli`). 그 파일은 같은 경로에 쓰는 쪽이 모두 같은 묶음을 써야 잠금이 서로를 막는다고 적고 있다. 그래서 원장을 읽은 뒤 파일 끝이 그대로일 때만 덧붙이는 함수나 조건 없는 덧붙이기를 섞지 않고, fsync 를 하지 않는 `append_jsonl` 도 쓰지 않는다.
   - 읽기는 `read_private_jsonl_durable_locked_result` 이고, 읽은 지점(cursor)을 함께 돌려준다.
-  - 덧붙이기는 `append_private_jsonl_durable_locked_at_cursor_result` 다. 읽은 뒤 파일이 그대로일 때만 쓰고 fsync 한다. 다른 쓰기와 겹쳐서 실패하면(`Stable_lock_contended`, `Cursor_mismatch`) 아무것도 쓰지 않는다. 이것은 다른 쓰기가 끝나기를 기다리는 것이라서 호출한 쪽이 다시 읽어서 처음부터 판단하고, 횟수나 시간 제한은 두지 않는다. 그 밖의 실패(입출력 오류 등)는 다시 하지 않고 그대로 돌려준다.
+  - 덧붙이기는 `append_private_jsonl_durable_locked_at_cursor_result` 다. 읽은 뒤 파일이 그대로일 때만 쓰고 fsync 한다. 읽은 뒤 다른 쓰기가 먼저 끝났으면(`Cursor_mismatch`) 아무것도 쓰지 않고, 호출한 쪽이 다시 읽어서 처음부터 판단한다. 실패한 판은 다른 쓰기가 끝났다는 뜻이라서 횟수나 시간 제한은 두지 않는다. 다른 프로세스가 잠금을 쥐고 있으면(`Stable_lock_contended`) 기다리지 않는다. 그 프로세스가 언제 놓을지 알 수 없어서, 반복하면 답 없이 돌기 때문이다. 읽기에서는 `Locked`, 읽은 뒤 덧붙이기 전에 잠금이 잡혔으면 `Write_locked` 를 바로 돌려주고, 다시 할 때는 호출한 쪽이 정한다. 검증기는 요청을 pending 으로 두고, 확정은 거절하고, 일꾼은 다음 깨움 때 다시 한다. 그 밖의 실패(입출력 오류 등)는 다시 하지 않고 그대로 돌려준다.
   - 그래서 같은 Goal 에 두 번 지급하지 않고, 동시에 산 두 건이 잔액을 마이너스로 만들지 못한다. 지급은 다시 읽어서 지급 대기가 그대로일 때만 덧붙이고 모델은 다시 부르지 않는다. 구매는 다시 읽고 잔액을 확인한다.
   - 서버를 시작할 때 `recover_private_jsonl_durable_locked_result` 로 원장을 한 번 읽는다. 서버가 쓰다 죽어서 끝에 남은 잘린 줄은 이때 잘려 나간다. 이 읽기가 다른 이유로 실패하면 Candle 은 `Disabled { reason }` 상태가 된다(3.9).
   - 같은 묶음을 이미 쓰는 곳이 있다(`keeper_board_attention_partition.ml:1211, 1615`, `keeper_approval_queue.ml:899, 1810`).

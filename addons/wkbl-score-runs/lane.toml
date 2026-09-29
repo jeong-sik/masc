@@ -1,0 +1,40 @@
+id = "wkbl-score-runs"
+revision = "0.1.0"
+title = "WKBL unanswered scoring runs"
+contributions = ["derive"]
+image = "masc-lane-wkbl-score-runs:0.1.0"
+command = ["python3", "server.py"]
+
+[world.outputs.runs]
+lanes = ["wkbl/score-runs"]
+
+[resources]
+cpus = 0.5
+memory_bytes = 134217728
+pids = 16
+max_reply_bytes = 4194304
+
+[interface]
+refresh_policy = "source_changes"
+binding_schema = '''
+{
+  "type": "object",
+  "properties": {
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "properties": {
+          "source_id": {"type": "string", "minLength": 1},
+          "kind": {"type": "string", "const": "snapshot_file"},
+          "path": {"type": "string", "minLength": 1}
+        },
+        "required": ["source_id", "kind", "path"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["sources"],
+  "additionalProperties": false
+}'''

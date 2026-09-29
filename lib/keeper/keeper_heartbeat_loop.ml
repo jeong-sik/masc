@@ -1169,18 +1169,37 @@ let run_keepalive_unified_turn
           Cycle.meta cycle_outcome)
         else meta_after_triage
       in
-      let record_terminal_selection_result ~label = function
+      let record_terminal_selection_result
+            ~label
+            ~(selection : Keeper_event_queue_state.pending_selection)
+        = function
         | Error message ->
           record_event_queue_failure message;
           false
-        | Ok
-            ( Keeper_registry_event_queue.Acked _
-            | Keeper_registry_event_queue.Already_acked _ ) ->
+        | Ok Keeper_registry_event_queue.Turn_selection_withdrawn ->
+          (* Another transition (a schedule cancel or supersede, a transfer,
+             another terminal receipt) took the entry out of the queue while
+             this turn ran. That transition's receipt is the entry's
+             terminal, so nothing is left to settle and nothing re-delivers
+             it. *)
+          Log.Keeper.info
+            ~keeper_name:meta_after_triage.name
+            "%s found its admitted source withdrawn from the queue post_id=%s kind=%s"
+            label
+            selection.source.post_id
+            (Keeper_event_queue.payload_kind_label selection.source.payload);
           selection_acked := true;
           true
         | Ok
-            (Keeper_registry_event_queue.Ack_committed_followup_failed
-               { stage; detail = followup_detail; _ }) ->
+            (Keeper_registry_event_queue.Turn_source_acked
+               ( Keeper_registry_event_queue.Acked _
+               | Keeper_registry_event_queue.Already_acked _ )) ->
+          selection_acked := true;
+          true
+        | Ok
+            (Keeper_registry_event_queue.Turn_source_acked
+               (Keeper_registry_event_queue.Ack_committed_followup_failed
+                  { stage; detail = followup_detail; _ })) ->
           selection_acked := true;
           let stage =
             match stage with
@@ -1203,7 +1222,7 @@ let run_keepalive_unified_turn
           meta_after_triage.name
           ~applied_at:(Time_compat.now ())
           ~selection
-        |> record_terminal_selection_result ~label:"turn completion"
+        |> record_terminal_selection_result ~label:"turn completion" ~selection
       in
       let disposition =
         batch_disposition_of_cycle_outcome !cycle_outcome_ref

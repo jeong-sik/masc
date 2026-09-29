@@ -83,6 +83,10 @@ type transition_result =
       ; detail : string
       }
 
+type pending_turn_terminal_result =
+  | Turn_terminal_committed of transition_result
+  | Turn_selection_withdrawn
+
 type transfer_projection_result = State.transfer_projection_result =
   | Transfer_projected
   | Transfer_already_projected
@@ -1517,6 +1521,7 @@ let terminalize_pending_turn_result
       ?(after_commit = fun _ -> ())
       ~base_path
       ~keeper_name
+      ~selection
       ~transition
       ()
   =
@@ -1527,13 +1532,15 @@ let terminalize_pending_turn_result
        Owner_lock.with_durable_lock owner (fun () ->
          match load_state_unlocked owner with
          | Error _ as error -> error
+         | Ok state when State.pending_turn_selection_withdrawn ~selection state ->
+           Ok Turn_selection_withdrawn
          | Ok state ->
            commit_transition_unlocked
              owner
              ~after_commit
              transition
              state
-           |> Result.map fst)
+           |> Result.map (fun (result, _pending) -> Turn_terminal_committed result))
      with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn ->
@@ -1557,6 +1564,7 @@ let terminalize_pending_turn_attempt_result
     ?after_commit
     ~base_path
     ~keeper_name
+    ~selection
     ~transition:
       (State.terminalize_pending_turn_attempt
          ~applied_at
@@ -1577,6 +1585,7 @@ let terminalize_pending_turn_completed_result
     ?after_commit
     ~base_path
     ~keeper_name
+    ~selection
     ~transition:
       (State.terminalize_pending_turn_completed
          ~applied_at

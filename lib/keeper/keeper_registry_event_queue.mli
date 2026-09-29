@@ -67,6 +67,14 @@ type source_ack_result =
       ; detail : string
       }
 
+(** How one admitted turn's terminal settled its entry. [Turn_selection_withdrawn]
+    means another transition (a schedule withdrawal, a transfer, another
+    terminal receipt) took the entry out of the pending queue while the turn
+    ran, so nothing was written and nothing is left to settle. *)
+type turn_ack_result =
+  | Turn_source_acked of source_ack_result
+  | Turn_selection_withdrawn
+
 
 val peek_when_result :
   base_path:string ->
@@ -134,21 +142,9 @@ val cancel_scheduled_wakes_result :
     the keeper's next turn ack are not refused. Returns the number of pending
     entries removed. This is the cancel-propagation half of task-370: a
     cancelled schedule's enqueued utterances leave the durable queue at the
-    cancel boundary instead of riding the wake path. *)
-
-val cancel_untaken_scheduled_wakes_result :
-  base_path:string ->
-  string ->
-  applied_at:float ->
-  schedule_ids:string list ->
-  reason:string ->
-  (int, string) result
-(** [cancel_scheduled_wakes_result], except that an entry a turn has already
-    started (a turn-start reaction for its exact source is on the reaction
-    ledger) is left for that turn to ACK. Used by [masc_schedule_cancel], which
-    may run inside the very turn the schedule woke. A ledger read error fails
-    the call before anything is cancelled. Returns the number of pending
-    entries removed. *)
+    cancel boundary instead of riding the wake path. An entry a running turn
+    was given is cancelled too, and that turn's terminal answers
+    [Turn_selection_withdrawn]. *)
 
 val drain_owner_absent_pending_result :
   base_path:string ->
@@ -192,20 +188,22 @@ val terminalize_pending_turn_attempt_result :
   applied_at:float ->
   selection:Keeper_event_queue_state.pending_selection ->
   detail:string ->
-  (source_ack_result, string) result
+  (turn_ack_result, string) result
 (** Commit a source-bearing terminal receipt for one failed admitted turn,
     publish the post-commit pending projection, and project its durable reaction
-    evidence before another source can settle. *)
+    evidence before another source can settle. An entry already withdrawn
+    answers [Turn_selection_withdrawn]. *)
 
 val terminalize_pending_turn_completed_result :
   base_path:string ->
   string ->
   applied_at:float ->
   selection:Keeper_event_queue_state.pending_selection ->
-  (source_ack_result, string) result
+  (turn_ack_result, string) result
 (** Commit a source-bearing completion receipt for one successful admitted
     turn, publish the post-commit pending projection, and project its durable
-    reaction evidence before another source can settle. *)
+    reaction evidence before another source can settle. An entry already
+    withdrawn answers [Turn_selection_withdrawn]. *)
 
 (** Enqueue a stimulus on the keeper's event queue. An owner not registered yet
     may receive durable work so a later lane can replay it. A surrounding

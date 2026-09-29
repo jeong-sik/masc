@@ -871,7 +871,7 @@ let test_checkpoint_retention_preserves_unsettled_sources () =
     let selected = List.find
       (fun (s : Keeper_event_queue_state.pending_selection) -> s.source.post_id = first.post_id)
       retained in
-    let (_ : Keeper_registry_event_queue.source_ack_result) =
+    let (_ : Keeper_registry_event_queue.turn_ack_result) =
       Keeper_registry_event_queue.terminalize_pending_turn_completed_result
         ~base_path keeper_name ~applied_at:1000.0 ~selection:selected
       |> require "explicit completion settles the exact source" in
@@ -1000,7 +1000,7 @@ let test_exact_mixed_bindings_reach_dispatch_and_settlement () =
     check bool "dispatch validates the same complete exact batch" true
       (List.rev !checked = expected);
     List.iter (fun selection ->
-      let (_ : Keeper_registry_event_queue.source_ack_result) =
+      let (_ : Keeper_registry_event_queue.turn_ack_result) =
         Keeper_registry_event_queue.terminalize_pending_turn_completed_result
           ~base_path keeper_name ~applied_at:1000. ~selection
         |> require "settle exact source" in

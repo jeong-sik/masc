@@ -102,6 +102,13 @@ type transition_result =
       ; detail : string
       }
 
+(** A turn terminal either commits (or replays) this attempt's receipt, or
+    finds that another transition already took the admitted entry out of the
+    pending queue, which leaves nothing to commit. *)
+type pending_turn_terminal_result =
+  | Turn_terminal_committed of transition_result
+  | Turn_selection_withdrawn
+
 type transfer_projection_result =
   | Transfer_projected
   | Transfer_already_projected
@@ -389,10 +396,13 @@ val terminalize_pending_turn_attempt_result :
   selection:Keeper_event_queue_state.pending_selection ->
   detail:string ->
   unit ->
-  (transition_result, string) result
+  (pending_turn_terminal_result, string) result
 (** Atomically construct and commit a source-bearing terminal receipt for one
     failed admitted turn. The selection carries the exact source incarnation;
-    no caller-provided prose or counter controls admission. *)
+    no caller-provided prose or counter controls admission. An entry another
+    transition removed while the turn ran answers [Turn_selection_withdrawn]
+    under the same lock, and nothing is written
+    ({!Keeper_event_queue_state.pending_turn_selection_withdrawn}). *)
 
 val terminalize_pending_turn_completed_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
@@ -401,9 +411,10 @@ val terminalize_pending_turn_completed_result :
   applied_at:float ->
   selection:Keeper_event_queue_state.pending_selection ->
   unit ->
-  (transition_result, string) result
+  (pending_turn_terminal_result, string) result
 (** Atomically construct and commit a source-bearing completion receipt for one
-    successful admitted turn. *)
+    successful admitted turn, or answer [Turn_selection_withdrawn] like
+    {!terminalize_pending_turn_attempt_result}. *)
 
 val project_transition_outbox_result :
   append_before_retire:(Keeper_event_queue_state.t -> outbox_entry -> (unit, string) result) ->

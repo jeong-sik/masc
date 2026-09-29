@@ -1201,6 +1201,26 @@ let terminalize_pending_turn_completed
     state
 ;;
 
+(* A turn leaves its batch pending until its terminal receipt, and a
+   schedule withdrawal, a transfer or another source's terminal may remove an
+   entry of that batch meanwhile. This attempt's own receipt answers first,
+   so a replayed terminal still reads as a replay; only an attempt with no
+   receipt whose source identity is gone from the pending entries has
+   nothing left to settle. *)
+let pending_turn_selection_withdrawn ~(selection : pending_selection) state =
+  let operator_operation_id =
+    turn_attempt_terminal_operation_id
+      ~admitted_revision:selection.admitted_revision
+      selection.source
+  in
+  Option.is_none (prior_disposition_by_operation_id operator_operation_id state)
+  && not
+       (List.exists
+          (fun entry ->
+             Keeper_event_queue.stimulus_identity_equal selection.source entry.source)
+          state.pending_entries)
+;;
+
 let restore_pending_transition entry state apply =
   let* replayed, result = apply state in
   let actual_receipt =

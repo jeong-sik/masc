@@ -84,6 +84,10 @@ type source_ack_result =
       ; detail : string
       }
 
+type turn_ack_result =
+  | Turn_source_acked of source_ack_result
+  | Turn_selection_withdrawn
+
 (* A source has not settled while its exact reaction evidence is still waiting
    in the transition outbox: the next terminal ACK is deliberately rejected in
    that state. Complete the existing handoff on the owner-facing path instead
@@ -125,6 +129,15 @@ let project_source_ack_result ~base_path ~keeper_name result =
       (fun receipt -> Already_acked receipt)
   | Ok (Transition_committed_followup_failed { receipt; stage; detail }) ->
     Ok (Ack_committed_followup_failed { receipt; stage; detail })
+;;
+
+let project_turn_terminal_result ~base_path ~keeper_name = function
+  | Error _ as error -> error
+  | Ok Keeper_event_queue_persistence.Turn_selection_withdrawn ->
+    Ok Turn_selection_withdrawn
+  | Ok (Keeper_event_queue_persistence.Turn_terminal_committed result) ->
+    project_source_ack_result ~base_path ~keeper_name (Ok result)
+    |> Result.map (fun ack -> Turn_source_acked ack)
 ;;
 
 let enqueue_if_missing queue stimulus =
@@ -725,6 +738,7 @@ let commit_and_project_accepted_cancellation ~base_path name ~applied_at cancell
         ~keeper_name:name
         ~applied_at
         ~cancellation
+        ~after_commit:(publish_pending ~base_path name)
         ()
     with
     | Error detail -> Error detail
@@ -768,7 +782,7 @@ let commit_and_project_accepted_cancellation ~base_path name ~applied_at cancell
       ~expected_transition_id:receipt.transition_id
 ;;
 
-let cancel_scheduled_wakes_keeping ~keep ~base_path name ~applied_at ~schedule_ids ~reason =
+let cancel_scheduled_wakes_result ~base_path name ~applied_at ~schedule_ids ~reason =
   (* Cancel propagation (task-370): a cancelled schedule's already-enqueued
      utterances must leave the durable queue at the cancel boundary, not ride
      the wake path of an owner who will never be woken for them again. Each
@@ -777,7 +791,10 @@ let cancel_scheduled_wakes_keeping ~keep ~base_path name ~applied_at ~schedule_i
      republishes when the owner lane is live. Reads the durable state through
      persistence directly: a schedule can outlive its keeper's registry
      registration (the purge path cancels exactly such schedules), and the
-     queue directory remains the authority for pending stimuli either way. *)
+     queue directory remains the authority for pending stimuli either way.
+     An entry a running turn was given is withdrawn like any other; that
+     turn's terminal then answers [Turn_selection_withdrawn] instead of
+     committing a receipt. *)
   let schedule_ids = Array.of_list schedule_ids in
   let matching (stimulus : Keeper_event_queue.stimulus) =
     match stimulus.payload with
@@ -794,23 +811,6 @@ let cancel_scheduled_wakes_keeping ~keep ~base_path name ~applied_at ~schedule_i
   with
   | Error _ as error -> error
   | Ok selections ->
-    let kept_or_error =
-      List.fold_left
-        (fun acc (selection : Keeper_event_queue_state.pending_selection) ->
-           match acc with
-           | Error _ as error -> error
-           | Ok withdrawn when not (matching selection.source) -> Ok withdrawn
-           | Ok withdrawn ->
-             (match keep selection with
-              | Error _ as error -> error
-              | Ok true -> Ok withdrawn
-              | Ok false -> Ok (selection :: withdrawn)))
-        (Ok [])
-        selections
-    in
-    match kept_or_error with
-    | Error _ as error -> error
-    | Ok withdrawn ->
     let cancelled =
       List.filter_map
         (fun (selection : Keeper_event_queue_state.pending_selection) ->
@@ -837,7 +837,7 @@ let cancel_scheduled_wakes_keeping ~keep ~base_path name ~applied_at ~schedule_i
                ; reason
                }
            else None)
-        (List.rev withdrawn)
+        selections
     in
     List.fold_left
       (fun acc cancellation ->
@@ -855,30 +855,6 @@ let cancel_scheduled_wakes_keeping ~keep ~base_path name ~applied_at ~schedule_i
             | Error detail -> Error detail))
       (Ok 0)
       cancelled
-;;
-
-let cancel_scheduled_wakes_result =
-  cancel_scheduled_wakes_keeping ~keep:(fun _selection -> Ok false)
-;;
-
-(* A running turn records its start on the reaction ledger before it takes
-   its batch and leaves each entry pending until the turn-end ACK
-   ([record_replay_owned_turn_started_reactions] in the heartbeat loop). Such
-   an entry belongs to that turn: cancelling it underneath makes the turn's
-   own ACK fail with "event queue pending selection is no longer present".
-   An unreadable ledger cannot say whether a turn took the entry, so the
-   whole call fails and nothing is withdrawn. *)
-let cancel_untaken_scheduled_wakes_result ~base_path name =
-  let keep (selection : Keeper_event_queue_state.pending_selection) =
-    Keeper_reaction_ledger.event_queue_turn_started_seen_for_source_result
-      ~base_path
-      ~keeper_name:name
-      ~post_id:selection.source.post_id
-      ~stimulus_kind:Keeper_reaction_ledger.Schedule_due
-    |> Result.map_error
-         Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string
-  in
-  cancel_scheduled_wakes_keeping ~keep ~base_path name
 ;;
 
 let drain_owner_absent_pending_result ~base_path name ~applied_at ~reason =
@@ -1006,7 +982,7 @@ let terminalize_pending_turn_attempt_result
     ~detail
     ~after_commit:(publish_pending ~base_path name)
     ()
-  |> project_source_ack_result ~base_path ~keeper_name:name
+  |> project_turn_terminal_result ~base_path ~keeper_name:name
 ;;
 
 let terminalize_pending_turn_completed_result
@@ -1022,5 +998,5 @@ let terminalize_pending_turn_completed_result
     ~selection
     ~after_commit:(publish_pending ~base_path name)
     ()
-  |> project_source_ack_result ~base_path ~keeper_name:name
+  |> project_turn_terminal_result ~base_path ~keeper_name:name
 ;;

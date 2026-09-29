@@ -313,6 +313,14 @@ val terminalize_pending_turn_completed :
     contradictory settlement fails closed instead of replacing the first
     durable outcome. *)
 
+val pending_turn_selection_withdrawn : selection:pending_selection -> t -> bool
+(** [true] when the entry an admitted turn was given left the pending queue
+    through another transition while the turn ran (a schedule withdrawal, a
+    transfer, another terminal receipt) and this attempt has no receipt of its
+    own. Nothing is left for that turn to settle. An entry still pending under
+    the same identity, or one this attempt already settled, answers [false],
+    and the turn terminal applies, replays or refuses as before. *)
+
 val accepted_pending_cancellation_replay :
   accepted_cancellation ->
   t ->

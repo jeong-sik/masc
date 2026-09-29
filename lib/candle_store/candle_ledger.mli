@@ -28,6 +28,8 @@ type read_error =
       ; line_number : int  (** From 1. *)
       ; detail : string
       }
+  | Locked of { path : string }
+      (** Another process holds the ledger's lock. The read did not wait for it. *)
 
 val read_error_to_string : read_error -> string
 
@@ -49,6 +51,9 @@ type 'error update_error =
       { path : string
       ; detail : string
       }
+  | Write_locked of { path : string }
+      (** Another process took the ledger's lock between the read and the
+          append. Nothing was written. *)
 
 val update_error_to_string : ('error -> string) -> 'error update_error -> string
 
@@ -60,8 +65,12 @@ val update :
     and appends them if the file is still as it was read. If another writer
     appended first, nothing is written and [update] reads again and asks
     [decide] again, so [decide] must give an answer that depends only on the
-    view it is given. There is no count or time limit: a failed round means
-    another writer finished one.
+    view it is given. There is no count or time limit: a round that fails this
+    way means another writer finished one.
+
+    A lock that another process holds is not waited for. [update] returns
+    [Read_failed (Locked _)] or [Write_locked _] at once, and the caller decides
+    whether to ask again later.
 
     An empty event list writes nothing. Any other failure, an unreadable file
     or a write that failed, is returned and not retried. *)

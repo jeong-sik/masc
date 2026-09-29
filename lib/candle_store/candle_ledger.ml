@@ -25,12 +25,14 @@ type read_error =
       ; line_number : int
       ; detail : string
       }
+  | Locked of { path : string }
 
 let read_error_to_string = function
   | Store_failed { path; detail } ->
     Printf.sprintf "candle ledger %s could not be read: %s" path detail
   | Row_rejected { path; line_number; detail } ->
     Printf.sprintf "candle ledger %s row %d does not read: %s" path line_number detail
+  | Locked { path } -> Printf.sprintf "candle ledger %s is locked by another process" path
 ;;
 
 type 'error update_error =
@@ -41,6 +43,7 @@ type 'error update_error =
       { path : string
       ; detail : string
       }
+  | Write_locked of { path : string }
 
 let update_error_to_string refusal_to_string = function
   | Read_failed error -> read_error_to_string error
@@ -49,6 +52,7 @@ let update_error_to_string refusal_to_string = function
     Printf.sprintf "candle ledger event would not read back: %s" detail
   | Write_failed { path; detail } ->
     Printf.sprintf "candle ledger %s could not be written: %s" path detail
+  | Write_locked { path } -> Printf.sprintf "candle ledger %s is locked by another process" path
 ;;
 
 (* The blocking file work runs in a system thread when there is an Eio fiber to
@@ -61,12 +65,19 @@ let run_blocking label operation =
 
 let store_error = Fs_compat.private_jsonl_transaction_error_to_string
 
-(* True for the two failures that mean another writer was in the way: it holds
-   the lock, or it appended after the position that was read. Every other
-   failure is named here so that a new one in [Fs_compat] fails to compile until
-   it is placed. *)
-let another_writer_was_first : Fs_compat.private_jsonl_transaction_error -> bool = function
-  | Fs_compat.Stable_lock_contended _ | Fs_compat.Cursor_mismatch _ -> true
+(* How a failure of the cursor family bears on a writer. Every failure is named
+   here so that a new one in [Fs_compat] fails to compile until it is placed.
+   A lock that another process holds is not a round that another writer
+   finished: it can last as long as that process wants, so it is reported and
+   never retried in a loop. *)
+type contention =
+  | Lock_held_by_another_process
+  | Appended_meanwhile
+  | Other_failure
+
+let contention : Fs_compat.private_jsonl_transaction_error -> contention = function
+  | Fs_compat.Stable_lock_contended _ -> Lock_held_by_another_process
+  | Fs_compat.Cursor_mismatch _ -> Appended_meanwhile
   | Fs_compat.Unexpected_stable_lock_permissions _
   | Fs_compat.Invalid_stable_lock_state _
   | Fs_compat.Unexpected_transaction_file_kind _
@@ -78,7 +89,7 @@ let another_writer_was_first : Fs_compat.private_jsonl_transaction_error -> bool
   | Fs_compat.Rewrite_stage_failed _
   | Fs_compat.Rewrite_published_durability_unknown _
   | Fs_compat.Transaction_settlement_failed _
-  | Fs_compat.Transaction_append_failed _ -> false
+  | Fs_compat.Transaction_append_failed _ -> Other_failure
 ;;
 
 let observe_settlement ~path error =
@@ -103,15 +114,15 @@ let parse_rows ~path bytes =
 
 type snapshot_outcome =
   | Snapshot_read of Fs_compat.private_jsonl_snapshot
-  | Another_writer_held_it
+  | Snapshot_locked
   | Snapshot_failed of string
 
 let snapshot_outcome ~path result =
   match Fs_compat.private_jsonl_snapshot_success_receipt result with
   | Error error ->
-    if another_writer_was_first error
-    then Another_writer_held_it
-    else Snapshot_failed (store_error error)
+    (match contention error with
+     | Lock_held_by_another_process -> Snapshot_locked
+     | Appended_meanwhile | Other_failure -> Snapshot_failed (store_error error))
   | Ok { Fs_compat.value; settlement_error } ->
     Option.iter (observe_settlement ~path) settlement_error;
     Snapshot_read value
@@ -125,8 +136,7 @@ let view_of_snapshot ~path (snapshot : Fs_compat.private_jsonl_snapshot) =
 
 let view_of_outcome ~path = function
   | Snapshot_read snapshot -> view_of_snapshot ~path snapshot
-  | Another_writer_held_it ->
-    Error (Store_failed { path; detail = "another writer holds the ledger lock" })
+  | Snapshot_locked -> Error (Locked { path })
   | Snapshot_failed detail -> Error (Store_failed { path; detail })
 ;;
 
@@ -153,6 +163,7 @@ let recover_at_start ~base_path =
 type append_outcome =
   | Appended
   | Appended_after_another_writer
+  | Append_locked
   | Append_failed of string
 
 let append ~path cursor suffix =
@@ -168,9 +179,10 @@ let append ~path cursor suffix =
       Option.iter (observe_settlement ~path) settlement_error;
       Appended
     | Error error ->
-      if another_writer_was_first error
-      then Appended_after_another_writer
-      else Append_failed (store_error error))
+      (match contention error with
+       | Appended_meanwhile -> Appended_after_another_writer
+       | Lock_held_by_another_process -> Append_locked
+       | Other_failure -> Append_failed (store_error error)))
 ;;
 
 let encode events =
@@ -186,21 +198,19 @@ let encode events =
 
 let rec update ~base_path decide =
   let path = path ~base_path in
-  match read_outcome ~path with
-  | Another_writer_held_it -> update ~base_path decide
-  | (Snapshot_read _ | Snapshot_failed _) as outcome ->
-    (match view_of_outcome ~path outcome with
-     | Error error -> Error (Read_failed error)
-     | Ok view ->
-       (match decide view with
-        | Error error -> Error (Refused error)
-        | Ok ([], result) -> Ok result
-        | Ok ((_ :: _ as events), result) ->
-          (match encode events with
-           | Error detail -> Error (Event_unwritable detail)
-           | Ok suffix ->
-             (match append ~path view.cursor suffix with
-              | Appended -> Ok result
-              | Appended_after_another_writer -> update ~base_path decide
-              | Append_failed detail -> Error (Write_failed { path; detail })))))
+  match view_of_outcome ~path (read_outcome ~path) with
+  | Error error -> Error (Read_failed error)
+  | Ok view ->
+    (match decide view with
+     | Error error -> Error (Refused error)
+     | Ok ([], result) -> Ok result
+     | Ok ((_ :: _ as events), result) ->
+       (match encode events with
+        | Error detail -> Error (Event_unwritable detail)
+        | Ok suffix ->
+          (match append ~path view.cursor suffix with
+           | Appended -> Ok result
+           | Appended_after_another_writer -> update ~base_path decide
+           | Append_locked -> Error (Write_locked { path })
+           | Append_failed detail -> Error (Write_failed { path; detail }))))
 ;;

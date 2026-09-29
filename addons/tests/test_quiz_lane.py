@@ -13,6 +13,7 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+import tomllib
 import unittest
 
 ADDONS = Path(__file__).resolve().parents[1]
@@ -78,18 +79,23 @@ def retained_output(output, instance_id, sequence):
 
 
 def as_lane_output(questions_output):
+    producer = {"installation_id": "quiz-questions", "instance_id": "questioner-1",
+                "run_id": "quiz-test", "configuration_revision": "config-1",
+                "package_revision": "0.1.0", "observation_seq": 1,
+                "output_id": "questions", "output_selection": {"lanes": ["quiz/questions"]},
+                "coverage_scope": "whole_producer"}
+    output = retained_output(questions_output, "questioner-1", 1)
+    retained_bytes = json.dumps({"producer": producer, "output": output},
+                                ensure_ascii=False, separators=(",", ":")).encode()
+    digest = hashlib.sha256(retained_bytes).hexdigest()
+    reference = {"uri": "lane-evidence:" + digest, "sha256": digest}
     return {"source_id": "questions", "incarnation": "questioner-1", "cursor": "1",
             "complete": True, "detail": None, "observations": [{
                 "id": "questioner-1/output/1", "kind": "lane_output", "observed_at": 1790175100,
-                "actor": None, "evidence": [HOST_COPY],
-                "producer": {"installation_id": "quiz-questions", "instance_id": "questioner-1",
-                             "run_id": "quiz-test", "configuration_revision": "config-1",
-                             "package_revision": "0.1.0", "observation_seq": 1,
-                             "output_id": "questions", "output_selection": {"lanes": ["quiz/questions"]},
-                             "coverage_scope": "whole_producer"},
+                "actor": None, "evidence": [reference], "producer": producer,
                 "producer_status": {"source_id": "questioner-1", "incarnation": "questioner-1",
                                     "cursor": "1", "complete": True, "detail": None},
-                "output": retained_output(questions_output, "questioner-1", 1)}]}
+                "output": output}]}
 
 
 class Questioner(unittest.TestCase):
@@ -205,18 +211,55 @@ class Grader(unittest.TestCase):
     def test_question_provenance_survives_both_worker_namespaces(self):
         result = run("quiz-grader", [self.observe(),
                                     self.answer("r1", "f-live-path", "lane-smith")])[1]["structuredContent"]
-        upstream = as_lane_output(self.questions)["observations"][0]["output"]
-        question = next(row for row in upstream["rows"] if row["subject_id"] == "f-live-path")
+        upstream = as_lane_output(self.questions)["observations"][0]
+        question = next(row for row in upstream["output"]["rows"] if row["subject_id"] == "f-live-path")
         retained = retained_output(result["output"], CONTEXT["instance_id"], 2)
         grade = next(row for row in retained["rows"] if row["lane_id"] == "grader-1/quiz/grades")
         score = next(row for row in retained["rows"] if row["lane_id"] == "grader-1/quiz/score")
         self.assertEqual(grade["related_ids"], [])
-        self.assertEqual(grade["fields"]["question_row"], question)
+        self.assertEqual(grade["fields"]["question_row"], {
+            "id": question["id"], "lane_id": question["lane_id"],
+            "producer": upstream["producer"], "evidence": upstream["evidence"],
+        })
         self.assertTrue(question["id"].startswith("questioner-1/1/"))
         self.assertEqual(score["related_ids"], [grade["id"]])
         row_ids = {row["id"] for row in retained["rows"]}
         self.assertNotIn(question["id"], row_ids)
         self.assertTrue(all(ident in row_ids for row in retained["rows"] for ident in row["related_ids"]))
+
+    def test_large_question_provenance_stays_compact_for_multiple_answerers(self):
+        with (ADDONS / "quiz-grader/lane.toml").open("rb") as stream:
+            max_reply_bytes = tomllib.load(stream)["resources"]["max_reply_bytes"]
+        large = copy.deepcopy(self.questions)
+        question = next(row for row in large["rows"] if row["subject_id"] == "f-live-path")
+        # One supplied question fits the ingress contract. Copying its 1 MiB
+        # choice into each of five grades would exceed the 4 MiB reply contract.
+        question["fields"]["choices"].append("x" * (max_reply_bytes // 4))
+        self.assertLess(len(json.dumps(as_lane_output(large)).encode()), max_reply_bytes)
+
+        def answer_many(questions):
+            observed = ("lane_observe", {"context": CONTEXT, "binding": {},
+                        "sources": [as_lane_output(questions), deck_source(DECK)]})
+            calls = [observed] + [self.answer(f"r{index}", "f-live-path", "lane-smith",
+                                             answerer=f"player-{index}") for index in range(5)]
+            replies = run("quiz-grader", calls)[1:]
+            for reply in replies:
+                self.assertEqual(reply["structuredContent"]["status"], "confirmed")
+                self.assertLess(len(json.dumps(reply, ensure_ascii=False).encode()), max_reply_bytes)
+            return [row for row in replies[-1]["structuredContent"]["output"]["rows"]
+                    if row["lane_id"] == "quiz/grades"]
+
+        small_grades, large_grades = answer_many(self.questions), answer_many(large)
+        self.assertEqual(len(large_grades), 5)
+        upstream = as_lane_output(large)["observations"][0]
+        for small_grade, large_grade in zip(small_grades, large_grades):
+            small_ref, large_ref = (grade["fields"]["question_row"] for grade in (small_grade, large_grade))
+            self.assertEqual(len(json.dumps(small_ref)), len(json.dumps(large_ref)),
+                             "growing the question body does not grow grade provenance")
+            self.assertEqual(large_ref["evidence"], upstream["evidence"])
+            self.assertEqual(large_ref["producer"], upstream["producer"])
+            self.assertNotIn("fields", large_ref)
+            self.assertEqual(large_grade["related_ids"], [])
 
     def test_repeated_request_returns_the_same_grade_once(self):
         results = run("quiz-grader", [self.observe(),

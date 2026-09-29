@@ -56,7 +56,7 @@ def exact(value, keys, label, optional=()):
 class Grader:
     def __init__(self):
         self.context = None
-        self.questions: dict[str, dict] = {}
+        self.questions: dict[str, tuple[dict, dict]] = {}
         self.deck: dict[str, dict] = {}
         self.deck_incarnation = None
         self.coverage: list[dict] = []
@@ -113,10 +113,17 @@ class Grader:
             for item in source.observations:
                 kind = item.get("kind")
                 if kind == "lane_output":
+                    producer = object_value(item.get("producer"), "producer")
+                    retained = evidence(item.get("evidence"))
                     for upstream in object_value(item.get("output"), "output").get("rows", []):
                         fields = upstream.get("fields", {})
                         if "question_id" in fields and "choices" in fields:
-                            questions[fields["question_id"]] = upstream
+                            # The host retains the complete upstream output. Keep its
+                            # coordinates and evidence, not another question body per grade.
+                            reference = {"id": string(upstream.get("id"), "question.id"),
+                                         "lane_id": string(upstream.get("lane_id"), "question.lane_id"),
+                                         "producer": producer, "evidence": retained}
+                            questions[fields["question_id"]] = upstream, reference
                             seen += 1
                 elif kind == "fact":
                     record, = evidence([object_value(item.get("record"), "fact.record")])
@@ -151,9 +158,10 @@ class Grader:
             return self.results[request_id]
         if action["kind"] != "answer":
             return self.refuse(request_id, "only kind=answer is supported")
-        question = self.questions.get(action["question_id"])
-        if question is None:
+        observed = self.questions.get(action["question_id"])
+        if observed is None:
             return self.refuse(request_id, "question_id is not in the latest observed questions")
+        question, question_reference = observed
         if action["choice"] not in question["fields"]["choices"]:
             return self.refuse(request_id, "choice is not one of the question's choices")
         fact_id = question["fields"].get("source_event_id") or question["subject_id"]
@@ -189,7 +197,7 @@ class Grader:
                  "observed_at": time.time(), "subject_id": action["question_id"],
                  "clock": None, "actor": None,
                  "fields": {"question_id": action["question_id"], "choice": action["choice"],
-                            "question_row": question,
+                            "question_row": question_reference,
                             "correct": correct, "answer": fact["answer"], "fact_id": fact_id,
                             "deck_incarnation": self.deck_incarnation,
                             "answerer_claimed": answerer, "about_answerer": about_answerer,
@@ -227,7 +235,7 @@ def main():
             method, params = request.get("method"), object_value(request.get("params", {}), "params")
             if method == "initialize":
                 result = {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}},
-                          "serverInfo": {"name": "masc-quiz-grader", "version": "0.1.0"}}
+                          "serverInfo": {"name": "masc-quiz-grader", "version": "0.1.1"}}
             elif method == "ping":
                 result = {}
             elif method == "tools/list":

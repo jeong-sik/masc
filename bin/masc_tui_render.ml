@@ -12522,11 +12522,11 @@ let runtime_detail_lines state target ~width =
         | true, Some resets_at ->
           let tm = Unix.localtime resets_at in
           runtime_detail_field ~width ~style:(Theme.warn ()) "Rate limit"
-            (Printf.sprintf "retry after %02d:%02d, cleared by the next answer"
+            (Printf.sprintf "until %02d:%02d or the next successful answer"
                tm.Unix.tm_hour tm.Unix.tm_min)
         | true, None ->
           runtime_detail_field ~width ~style:(Theme.warn ()) "Rate limit"
-            "no wait stated, cleared by the next answer"
+            "no wait stated, cleared by the next successful answer"
       in
       let probe_lines =
         match probe with

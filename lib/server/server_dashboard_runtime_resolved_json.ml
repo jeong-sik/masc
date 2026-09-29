@@ -38,7 +38,7 @@ let runtime_rate_limit ~now (rt : Runtime.t) : bool * float option =
     false, None
 ;;
 
-let runtime_resolution_json ~scope_label (rt : Runtime.t) : Yojson.Safe.t =
+let runtime_resolution_json ~now ~scope_label (rt : Runtime.t) : Yojson.Safe.t =
   let exact_slot_group =
     Runtime.exact_slot_list_key_of_api_format rt.provider.api_format
   in
@@ -59,15 +59,13 @@ let runtime_resolution_json ~scope_label (rt : Runtime.t) : Yojson.Safe.t =
      it. A numeric "remaining" is not honest: providers do not expose it,
      and the window's own contract is these two facts. *)
   let quota_scope = Runtime.quota_scope_of_runtime rt in
-  let now = Time_compat.now () in
   let quota_exhausted = Runtime_quota_window.is_exhausted ~scope:quota_scope ~now in
   let quota_resets_at = Runtime_quota_window.active_until ~scope:quota_scope ~now in
   let quota_scope_label = scope_label quota_scope in
   (* A rate limit is a separate fact from the quota window: it is this
-     process's own observation of a 429 on this runtime, and it stays until the
-     runtime answers. [rate_limit_resets_at] exists only while the provider's
-     stated wait is still ahead; a limit with no stated wait, or one whose wait
-     has passed without an answer since, says [rate_limited] alone. *)
+     process's own observation of a 429 on this runtime. The provider's stated
+     Retry-After deadline or a successful answer clears it. A limit without a
+     stated wait stays until success and has no [rate_limit_resets_at]. *)
   let rate_limited, rate_limit_resets_at = runtime_rate_limit ~now rt in
   `Assoc
     [ "id", `String rt.id
@@ -311,7 +309,7 @@ let usage_scope_json ~scope_label (scope, providers) : Yojson.Safe.t =
     ]
 ;;
 
-let build ~generated_at_iso ~(config : Workspace.config) : Yojson.Safe.t =
+let build_at ~now ~generated_at_iso ~(config : Workspace.config) : Yojson.Safe.t =
   (* One read of the loaded state: a reload between two reads could pair a
      default runtime with a list that no longer holds it, and its scope with
      no label. The default is grouped too; [usage_scopes] adds a provider to a
@@ -341,9 +339,9 @@ let build ~generated_at_iso ~(config : Workspace.config) : Yojson.Safe.t =
     ; "config_path", string_opt_json (Runtime.config_path ())
     ; ( "default_runtime"
       , match default with
-        | Some rt -> runtime_resolution_json ~scope_label rt
+        | Some rt -> runtime_resolution_json ~now ~scope_label rt
         | None -> `Null )
-    ; "runtimes", `List (List.map (runtime_resolution_json ~scope_label) runtimes)
+    ; "runtimes", `List (List.map (runtime_resolution_json ~now ~scope_label) runtimes)
       (* [\[runtime\].media_failover] is a route, not a lane: no keeper turn
          dispatches to it, and it has no table of its own. Keep both the active
          fleet and the file's declaration so an operator can distinguish a
@@ -358,4 +356,8 @@ let build ~generated_at_iso ~(config : Workspace.config) : Yojson.Safe.t =
     ; ( "provider_usage_windows"
       , `List (List.map (usage_scope_json ~scope_label) scopes) )
     ]
+;;
+
+let build ~generated_at_iso ~config =
+  build_at ~now:(Time_compat.now ()) ~generated_at_iso ~config
 ;;

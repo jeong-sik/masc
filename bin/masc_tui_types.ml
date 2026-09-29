@@ -10349,7 +10349,7 @@ type runtime_pick_fact =
   }
 
 (* A runtime whose provider is refusing work right now: its quota window is
-   exhausted or this process holds an unanswered rate limit. *)
+   exhausted or this process holds an active rate limit. *)
 let runtime_option_refusing (option : Tui_decode.runtime_option) =
   option.Tui_decode.ro_quota_exhausted || option.Tui_decode.ro_rate_limited
 
@@ -10394,17 +10394,14 @@ let runtime_pick_facts = function
       | None -> []
     in
     let default = if option.Tui_decode.ro_is_default then [ fact "[default]" ] else [] in
-    let quota =
-      if option.Tui_decode.ro_quota_exhausted
-      then [ { rpf_text = "[quota exhausted]"; rpf_warn = true } ]
-      else []
+    let refusal =
+      match option.Tui_decode.ro_quota_exhausted, option.Tui_decode.ro_rate_limited with
+      | false, false -> []
+      | true, false -> [ { rpf_text = "[quota exhausted]"; rpf_warn = true } ]
+      | false, true -> [ { rpf_text = "[rate limited]"; rpf_warn = true } ]
+      | true, true -> [ { rpf_text = "[quota + rate]"; rpf_warn = true } ]
     in
-    let rate_limit =
-      if option.Tui_decode.ro_rate_limited
-      then [ { rpf_text = "[rate limited]"; rpf_warn = true } ]
-      else []
-    in
-    (context :: effort) @ default @ quota @ rate_limit
+    (context :: effort) @ default @ refusal
 
 (* One space between facts, the way the renderer joins them. *)
 let runtime_pick_facts_width facts =

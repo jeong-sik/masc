@@ -3124,7 +3124,8 @@ let runtime_quota_badge (runtime : Masc.Tui_decode.runtime_option) =
         ^ Ansi.reset )
 
 (* The other half of "alive on paper": this process saw a 429 on the runtime
-   and nothing has answered since. It is a different fact from the quota
+   whose provider wait has not ended and no successful answer has cleared.
+   It is a different fact from the quota
    window above, so a runtime can carry both. [resets_at] is the provider's
    own Retry-After and is present only while it is still ahead. *)
 let runtime_rate_limit_badge (runtime : Masc.Tui_decode.runtime_option) =

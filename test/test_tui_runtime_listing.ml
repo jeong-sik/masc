@@ -559,6 +559,11 @@ let test_rate_limit_is_said_on_model_and_lane_rows () =
     (texts (Pick_model limited));
   Alcotest.(check (list string)) "a clear model row says neither"
     [ "[200k ctx]" ] (texts (Pick_model clear));
+  let both = { limited with ro_quota_exhausted = true } in
+  Alcotest.(check (list string)) "80 columns retain both refusals"
+    [ "[quota + rate]" ]
+    (runtime_pick_visible_facts ~cols:80 (Pick_model both)
+     |> List.map (fun (fact : runtime_pick_fact) -> fact.rpf_text));
   let lane candidates =
     Pick_lane
       ( { rrl_id = "coding"; rrl_runtime_ids = List.map (fun (o : Masc.Tui_decode.runtime_option) -> o.ro_id) candidates;

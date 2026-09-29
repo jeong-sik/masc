@@ -3074,6 +3074,43 @@ let test_drain_blocks_a_claimed_partition_whose_candidate_is_quarantined () =
   expect_judged ~base_path "the sibling drains" sibling.candidate_id
 ;;
 
+let test_late_quarantine_preserves_newer_generation () =
+  with_temp_base "board-attention-worker-late-quarantine" @@ fun base_path ->
+  let original = record ~base_path (candidate ~id:"candidate-late" ()) in
+  quarantine_through_failed_run ~base_path;
+  let held = quarantine_of ~base_path original.candidate_id in
+  let stale = candidate_by_id ~base_path original.candidate_id in
+  let generation =
+    ok "advance quarantine generation"
+      (P.Generation.next held.quarantine.partition_generation)
+  in
+  let write ~partition_generation ~quarantined_at =
+    A.quarantine ~base_path ~candidate:stale
+      ~partition_id:held.quarantine.partition_id ~partition_generation
+      ~failure_category:held.quarantine.failure_category
+      ~attempt_provenance:held.quarantine.attempt_provenance ~quarantined_at
+  in
+  ignore (ok "record newer quarantine"
+    (write ~partition_generation:generation ~quarantined_at:60.0) : A.candidate);
+  List.iter
+    (fun requested ->
+      if requested then request_requeue ~base_path original.candidate_id;
+      let before = candidate_by_id ~base_path original.candidate_id in
+      List.iter
+        (fun partition_generation ->
+          (match write ~partition_generation ~quarantined_at:61.0 with
+           | Error _ -> ()
+           | Ok _ -> Alcotest.fail "late or same-generation write replaced quarantine");
+          Alcotest.(check bool) "durable quarantine and operator phase preserved"
+            true (before = candidate_by_id ~base_path original.candidate_id))
+        [ held.quarantine.partition_generation; generation ];
+      ignore (ok "identical quarantine retry remains idempotent"
+        (write ~partition_generation:generation ~quarantined_at:60.0) : A.candidate);
+      Alcotest.(check bool) "identical retry preserves operator phase"
+        true (before = candidate_by_id ~base_path original.candidate_id))
+    [ false; true ]
+;;
+
 let test_stale_quarantine_generation_is_rejected () =
   with_temp_base "board-attention-worker-stale-quarantine" @@ fun base_path ->
   let persisted = record ~base_path (candidate ~id:"candidate-stale-generation" ()) in
@@ -3939,6 +3976,10 @@ let () =
             "drain blocks only a claimed row whose candidate is quarantined"
             `Quick
             test_drain_blocks_a_claimed_partition_whose_candidate_is_quarantined
+        ; Alcotest.test_case
+            "late quarantine preserves newer generation and operator request"
+            `Quick
+            test_late_quarantine_preserves_newer_generation
         ; Alcotest.test_case
             "stale quarantine generation is rejected"
             `Quick

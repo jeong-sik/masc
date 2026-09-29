@@ -3846,14 +3846,14 @@ let render_planning_list (state : state) =
       ~cols buf
 
 (** Render the Planning surface (detail view). *)
-(* Border, header, divider, title, phase, due, metric, blank, divider,
+(* Border, header, divider, title, owner, phase, due, metric, blank, divider,
    border, footer: the eleven rows the detail draws whatever the goal says.
    A lifecycle arm, a refused request, and each present goal timestamp each
    add one more when they are there, so the block is measured against them
    rather than against a constant that would push the footer off a full
    screen. *)
-(* One more than it was: the stage rail took the phase word's row and the
-   next-step sentence is a row of its own. Counted here, drawn below. *)
+(* The owner and next-step rows are part of this fixed block. Counted here,
+   drawn below, so scrolling never hides the footer unexpectedly. *)
 let planning_detail_fixed_rows = 13
 
 let planning_detail_pane (state : state)

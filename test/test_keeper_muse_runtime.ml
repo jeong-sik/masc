@@ -1271,66 +1271,6 @@ let test_muse_usage_read_rests_only_the_selected_account () =
       Runtime_quota_window.reset_for_testing ())
 ;;
 
-let test_failed_muse_turn_reads_typed_usage_without_replay () =
-  List.iter (fun used_percent ->
-    let now = Time_compat.now () in
-    let resets_at_ms = int_of_float ((now +. 3600.) *. 1000.) in
-    let usage = `Assoc
-      [ "observedAtMs", `Int (int_of_float (now *. 1000.))
-      ; "tier", `String "fixture"
-      ; "window", `Assoc
-          [ "usedPercent", `Int 20
-          ; "resetsAtMs", `Int resets_at_ms
-          ; "windowDurationMins", `Int 300 ]
-      ; "weekly", `Assoc
-          [ "usedPercent", `Int used_percent
-          ; "resetsAtMs", `Int resets_at_ms ]
-      ]
-    in
-    Runtime_quota_window.reset_for_testing ();
-    with_scripted_host
-      ~fixture:[ "scenario", `String "turn_failed"
-               ; "usage_read_only", `Bool true
-               ; "suppress_turn_usage_notification", `Bool true
-               ; "subscription_usage", usage ]
-      ~after:(fun ~base_path ->
-        let scope = Runtime_quota_window.scope_of_muse_home
-          (Filename.concat base_path "account-home") in
-        let other = Runtime_quota_window.scope_of_muse_home
-          (Filename.concat base_path "other-account") in
-        let expected =
-          if used_percent >= 100
-          then Some (float_of_int resets_at_ms /. 1000.)
-          else None
-        in
-        check (option (float 0.001)) "typed read controls selected account only"
-          expected (Runtime_quota_window.active_until ~scope ~now);
-        check bool "different account remains available" false
-          (Runtime_quota_window.is_exhausted ~scope:other ~now);
-        check string "one independent usage/read" "usage/read\n"
-          (read_text (Filename.concat base_path "usage-read.log"));
-        check string "failed model turn was not replayed" "start\n"
-          (read_text (Filename.concat base_path "sessions.log"));
-        check string "one turn/start reached the host" "1"
-          (read_text (Filename.concat base_path "host-turn-count.txt")))
-      (fun ~base_path ->
-        let run = run_turn ~base_path ~tool:(masc_probe_tool (ref `Null)) in
-        check bool "model failure stays failed" true
-          (Result.is_error run.outcome.result);
-        check_effect "original uncertainty stays fenced"
-          Keeper_provider_attempt_effect.Observation_unavailable run.outcome;
-        (match Store.load ~base_path ~keeper_name with
-         | Ok (Some { phase = Store.Settled settled
-                    ; last_transient_release = Some release; _ }) ->
-           check_failure "original recovery stays retryable"
-             Store.Retryable_turn_failed release.failure;
-           check string "original turn identity is retained"
-             (started_turn_id ~base_path) settled.turn_id
-         | _ -> fail "failed turn lost its durable session"));
-    Runtime_quota_window.reset_for_testing ())
-    [101; 20]
-;;
-
 (* Fail the actual MCP listener edge while retaining real process/filesystem
    resources. No runtime hook or public injection flag can bypass admission. *)
 module Refusing_listen_net = struct
@@ -1405,6 +1345,67 @@ let check_effect label expected (outcome : Keeper_muse_runtime.attempt_outcome) 
 ;;
 
 let started_turn_id ~base_path = read_text (Filename.concat base_path "start-turn-id.txt")
+
+let test_failed_muse_turn_reads_typed_usage_without_replay () =
+  List.iter (fun used_percent ->
+    let now = Time_compat.now () in
+    let resets_at_ms = int_of_float ((now +. 3600.) *. 1000.) in
+    let usage = `Assoc
+      [ "observedAtMs", `Int (int_of_float (now *. 1000.))
+      ; "tier", `String "fixture"
+      ; "window", `Assoc
+          [ "usedPercent", `Int 20
+          ; "resetsAtMs", `Int resets_at_ms
+          ; "windowDurationMins", `Int 300 ]
+      ; "weekly", `Assoc
+          [ "usedPercent", `Int used_percent
+          ; "resetsAtMs", `Int resets_at_ms ]
+      ]
+    in
+    Runtime_quota_window.reset_for_testing ();
+    with_scripted_host
+      ~fixture:[ "scenario", `String "turn_failed"
+               ; "usage_read_only", `Bool true
+               ; "suppress_turn_usage_notification", `Bool true
+               ; "subscription_usage", usage ]
+      ~after:(fun ~base_path ->
+        let scope = Runtime_quota_window.scope_of_muse_home
+          (Filename.concat base_path "account-home") in
+        let other = Runtime_quota_window.scope_of_muse_home
+          (Filename.concat base_path "other-account") in
+        let expected =
+          if used_percent >= 100
+          then Some (float_of_int resets_at_ms /. 1000.)
+          else None
+        in
+        check (option (float 0.001)) "typed read controls selected account only"
+          expected (Runtime_quota_window.active_until ~scope ~now);
+        check bool "different account remains available" false
+          (Runtime_quota_window.is_exhausted ~scope:other ~now);
+        check string "one independent usage/read" "usage/read\n"
+          (read_text (Filename.concat base_path "usage-read.log"));
+        check string "failed model turn was not replayed" "start\n"
+          (read_text (Filename.concat base_path "sessions.log"));
+        check string "one turn/start reached the host" "1"
+          (read_text (Filename.concat base_path "host-turn-count.txt")))
+      (fun ~base_path ->
+        let run = run_turn ~base_path ~tool:(masc_probe_tool (ref `Null)) in
+        check bool "model failure stays failed" true
+          (Result.is_error run.outcome.result);
+        check_effect "original uncertainty stays fenced"
+          Keeper_provider_attempt_effect.Observation_unavailable run.outcome;
+        (match Store.load ~base_path ~keeper_name with
+         | Ok (Some { phase = Store.Settled settled
+                    ; last_transient_release = Some release; _ }) ->
+           check_failure "original recovery stays retryable"
+             Store.Retryable_turn_failed release.failure;
+           check string "original turn identity is retained"
+             (started_turn_id ~base_path) settled.turn_id
+         | _ -> fail "failed turn lost its durable session"));
+    Runtime_quota_window.reset_for_testing ())
+    [101; 20]
+;;
+
 
 (* The host exits after it started a built-in write. The recovery row names
    the turn the host acknowledged, and the attempt cannot claim it was

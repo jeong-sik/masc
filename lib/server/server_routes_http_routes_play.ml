@@ -138,13 +138,8 @@ let revoke_response ~config ~by ~raw_name =
   | Ok name ->
     let holder = Play_invite.Name.to_string name in
     let no_such_invite () = `Not_found, error_json "no_such_invite" ("no invite is named " ^ raw_name) in
-    (match Play_invite.revoke ~base_path:config.Workspace.base_path ~name with
-     | Error (Play_invite.Not_an_invite role) ->
-       ( `Conflict
-       , error_json "not_an_invite"
-           (Printf.sprintf "%s is a %s credential, not an invite" raw_name
-              (Masc_domain.agent_role_to_string role)) )
-     | Ok Play_invite.Deleted ->
+    let after_revoke = function
+     | Play_invite.Deleted ->
        ( `OK
        , `Assoc
            (("name", `String holder) :: ("revoked", `Bool true)
@@ -154,7 +149,7 @@ let revoke_response ~config ~by ~raw_name =
         fail; revoking again frees it then. A keeper's name is left alone:
         its controller is the keeper's, and [Keeper_dos_controller] decides
         when that one is let go. *)
-     | Ok Play_invite.Already_gone ->
+     | Play_invite.Already_gone ->
        (match Play_seat.keeper_names config with
         | Error detail -> `Service_unavailable, error_json "keepers_unreadable" detail
         | Ok keepers when Play_invite.is_keeper_name ~keepers name -> no_such_invite ()
@@ -169,7 +164,26 @@ let revoke_response ~config ~by ~raw_name =
              ( `Internal_server_error
              , `Assoc
                  (("error", `String "release_failed") :: ("name", `String holder)
-                  :: release_fields failed) ))))
+                  :: release_fields failed) )))
+    in
+    let revoked =
+      Play_invite.revoke ~base_path:config.Workspace.base_path ~name ~after_revoke
+      |> Tool_misc_dos_lane.after_announcing
+    in
+    (match revoked with
+     | Ok response -> response
+     | Error (Play_invite.Not_an_invite role) ->
+       ( `Conflict
+       , error_json "not_an_invite"
+           (Printf.sprintf "%s is a %s credential, not an invite" raw_name
+              (Masc_domain.agent_role_to_string role)) )
+     | Error (Play_invite.Credential_not_deleted error) ->
+       `Service_unavailable,
+       error_json "not_deleted" (Masc_domain.masc_error_to_string error))
+
+module For_testing = struct
+  let revoke_response = revoke_response
+end
 
 (* One issue or revoke at a time. The name check and the credential write are
    separate file operations that yield, so two requests for one name could

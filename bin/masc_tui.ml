@@ -17921,8 +17921,8 @@ let main
      same two spellings the table parser accepts, kept together here so a
      name that parses cannot fail to be found. *)
   let config_models_source_line ~(row : Masc_tui_model_runtime_table.row) rows =
-    let bare = "[models." ^ row.Masc_tui_model_runtime_table.model ^ "]" in
-    let quoted = "[models.\"" ^ row.Masc_tui_model_runtime_table.model ^ "\"]" in
+    let bare = "[" ^ Runtime_toml_namespace.(path Models) row.Masc_tui_model_runtime_table.model ^ "]" in
+    let quoted = "[" ^ Runtime_toml_namespace.(path Models) ("\"" ^ row.Masc_tui_model_runtime_table.model ^ "\"") ^ "]" in
     let rec scan i = function
       | [] -> None
       | segments :: rest ->
@@ -18069,7 +18069,8 @@ let main
               (String.length sr_slot - boundary - 1)
           in
           (match kind with
-           | Masc_tui_types.Catalog_slot -> Some [ "providers"; provider_id ]
+           | Masc_tui_types.Catalog_slot ->
+             Some [ Runtime_toml_namespace.(key Providers); provider_id ]
            | Masc_tui_types.Official_client_slot -> Some [ provider_id; model_id ]
            | Masc_tui_types.Media_route_slot -> None)
         | Some _ | None -> None
@@ -26044,7 +26045,7 @@ and is loaded on demand through keeper_skill.
                 (match state.lanes_mode, selected_standalone_lane state with
                  | Lanes_overview, Some lane ->
                    let path =
-                     [ "runtime"; "exact_output_lanes"
+                     [ Runtime_toml_namespace.(key Runtime); "exact_output_lanes"
                      ; Standalone_lane.to_id lane.Tui_decode.sl_lane ]
                    in
                    let section = runtime_config_path_text path in

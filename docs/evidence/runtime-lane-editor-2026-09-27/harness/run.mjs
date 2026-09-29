@@ -46,7 +46,7 @@ try {
   if(u.pathname==='/api/v1/dashboard/runtime-defaults')body=fixtures.defaults;
   else if(u.pathname==='/api/v1/runtime/resolved')body=fixtures.resolved;
   else if(u.pathname==='/api/v1/providers')body=fixtures.providers;
-  else if(u.pathname==='/api/v1/runtime/config/raw')body={ok:true,path:'fixture/config/runtime.toml',file_name:'runtime.toml',source_revision:revision,source_text:'[runtime]\ndefault = "rt-a"\n[runtime.lanes.coding]\ncandidates = '+JSON.stringify(order)+'\n',reloaded:false,provider_protocols:[{protocol:'openai-compatible-http',transport:'endpoint',semantics:'http_provider',credential_policy:'optional',requires_non_interactive:false,provider_fields:[],required_provider_fields:[]}]};
+  else if(u.pathname==='/api/v1/runtime/config/raw')body={ok:true,path:'fixture/config/runtime.toml',file_name:'runtime.toml',source_revision:revision,source_text:'[runtime]\ndefault = "rt-a"\n[runtime.lanes.coding]\ncandidates = '+JSON.stringify(order)+'\n',reloaded:false,provider_protocols:[{protocol:'openai-compatible-http',transport:'endpoint',semantics:'http_provider',credential_policy:'optional',requires_non_interactive:false,provider_fields:[],required_provider_fields:[]}],reserved_provider_ids:['providers','models','runtime']};
   else if(u.pathname==='/api/v1/runtime/config/routing'){status=409;body={error:'runtime.toml changed since the lane candidates were read (synthetic fixture conflict); reload before editing'};}
   else {status=503;body={error:'synthetic fixture: unrelated surface unavailable'};}
   return route.fulfill({status,contentType:'application/json',body:JSON.stringify(body)});

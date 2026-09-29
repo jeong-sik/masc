@@ -341,6 +341,9 @@ def about_screen_with_graphics(binary: str) -> None:
         assert h.drain_until_quiet(process, fd, output), "the screen kept moving after /about closed"
         after = bytes(output[output.find(MASCOT_DELETE, start):])
         assert not mascot_transfers(after), "the candle was placed again after /about closed"
+        h.send_and_wait(process, fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
         os.write(fd, b"q")
 
     h.run_terminal_scenario(binary, description="/about places the candle as real pixels on a Kitty terminal",
@@ -380,6 +383,9 @@ def about_owns_the_keys(binary: str) -> None:
         assert SWALLOWED_TEXT not in screen, "the swallowed text surfaced after /about closed"
         assert not any(CHAT_SEND_PATH in path for path, _ in requests), \
             "a message was sent while /about was open"
+        h.send_and_wait(process, fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
         os.write(fd, b"q")
 
     h.run_terminal_scenario(binary, description="/about owns the keys until Esc",
@@ -431,6 +437,9 @@ def about_turns_the_candle(binary: str) -> None:
         h.write_all(fd, output, b"c")
         transfer_after(process, fd, output, start, is_painted, "painted")
         h.send_and_wait(process, fd, output, b"\x1b", CHAT_TITLE)
+        h.send_and_wait(process, fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
         os.write(fd, b"q")
 
     h.run_terminal_scenario(

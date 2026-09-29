@@ -439,6 +439,23 @@ let test_a_ledger_that_fails_after_recovery_refuses_the_step () =
   is_refused "ledger path is a directory" (record config)
 ;;
 
+(* The ledger reads and cannot be appended to: its file is read-only. The test
+   before this one fails at the read. This one reaches the append, so it covers the
+   step's answer to a row that cannot be written. A user with root rights opens a
+   read-only file anyway. *)
+let test_a_ledger_that_reads_and_cannot_be_written_refuses_the_step () =
+  if Unix.geteuid () = 0 then skip ();
+  with_workspace
+  @@ fun config ->
+  enable_candle config;
+  is_ok "first snapshot" (record config);
+  Unix.chmod (ledger_path config) 0o444;
+  Fun.protect
+    ~finally:(fun () -> Unix.chmod (ledger_path config) 0o600)
+    (fun () -> is_refused "read-only ledger" (record config));
+  check (list string) "only the first" [ "goal-1" ] (goal_ids (ledger_events config))
+;;
+
 (* Another process is appending to the ledger when a Goal passes, and this process
    has not recovered the ledger yet. Candle is not disabled for that. Disabling it
    would let the Goal pass with no Snapshot, and no later step can add one. The
@@ -580,6 +597,10 @@ let () =
             "a ledger that fails after recovery refuses the step"
             `Quick
             test_a_ledger_that_fails_after_recovery_refuses_the_step
+        ; test_case
+            "a ledger that reads and cannot be written refuses the step"
+            `Quick
+            test_a_ledger_that_reads_and_cannot_be_written_refuses_the_step
         ; test_case
             "a pass while another process holds the ledger lock is refused"
             `Quick

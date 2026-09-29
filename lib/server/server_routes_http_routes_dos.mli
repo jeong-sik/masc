@@ -13,11 +13,12 @@ val press_into :
   who:string ->
   saves_name:string ->
   keys:string list ->
-  [> `OK | `Bad_request ] * Yojson.Safe.t
+  [> `OK | `Bad_request | `Service_unavailable ] * Yojson.Safe.t
 (** [POST /api/v1/dos/press] for a caller that chose [keys] from the layout
     of the program kept under [saves_name]: the same release, answer and
     wake, and the keys go in only while that program is loaded
     ({!Dos_lane.press_into}). Another program loaded by then is a 400 and
-    nothing is pressed. *)
+    nothing is pressed. Credential transaction admission failure is a 503; no
+    input is sent and no controller state is changed. *)
 
 val add_routes : Http_server_eio.Router.t -> Http_server_eio.Router.t

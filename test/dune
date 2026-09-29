@@ -2981,6 +2981,8 @@
 
 (include stanzas/test_mcp_server_eio_tool_profile_capability.inc)
 
+(include stanzas/test_tools_list_assignment_agent.inc)
+
 (include stanzas/test_mcp_tool_matrix.inc)
 
 

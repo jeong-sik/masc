@@ -7,9 +7,11 @@ type instance = {
   source_path : string option; binding : Yojson.Safe.t; outputs : Row.output_ports;
   skills_directory : string option; incarnation : string; action_schema : Yojson.Safe.t option; binding_schema : Yojson.Safe.t option; display : Masc.Lane_addon_presentation.t;
 }
+type declaration_origin = Parsed_declaration | Issue_only
 type declaration = {
   source_path : string; installation_id : string option; desired : string option;
   applied : string option; instance_id : string option; issues : string list;
+  origin : declaration_origin;
 }
 type configuration = { directory : string; complete : bool; declarations : declaration list }
 type snapshot = { instances : instance list; output : Row.output; complete : bool option;
@@ -50,6 +52,7 @@ type t = {
   draft : string option; naming : bool; configuration_cursor : int;
   documents : Document.session list; document_key : string option; editor_ready : bool; last_action : action_request option; action_receipt : Action.receipt option;
 }
+type reading_freshness = Current | Stale of string
 type installation_reading =
   | Not_read
   | Observed of {
@@ -58,6 +61,7 @@ type installation_reading =
       failed_workers : int;
       configuration_issues : int;
       complete : bool;
+      freshness : reading_freshness;
     }
 (** What the last Add-on inventory actually observed. A declaration is not an
     active worker: image inspection or reconciliation can fail while the TOML

@@ -7,9 +7,11 @@ type instance = {
   source_path : string option; binding : Yojson.Safe.t; outputs : Row.output_ports;
   skills_directory : string option; incarnation : string; action_schema : Yojson.Safe.t option; binding_schema : Yojson.Safe.t option; display : Masc.Lane_addon_presentation.t;
 }
+type declaration_origin = Parsed_declaration | Issue_only
 type declaration = {
   source_path : string; installation_id : string option; desired : string option;
   applied : string option; instance_id : string option; issues : string list;
+  origin : declaration_origin;
 }
 type configuration = { directory : string; complete : bool; declarations : declaration list }
 type snapshot = { instances : instance list; output : Row.output; complete : bool option;
@@ -91,7 +93,7 @@ let configuration = function
         let* desired = get text "desired_revision" json in
         let* applied = optional "applied_revision" text json in
         let* instance_id = optional "instance_id" text json in
-        Ok {source_path;installation_id=Some installation_id;desired=Some desired;applied;instance_id;issues=[]})) "declarations" json in
+        Ok {source_path;installation_id=Some installation_id;desired=Some desired;applied;instance_id;issues=[];origin=Parsed_declaration})) "declarations" json in
       let* issues = get (array (fun json ->
         let* source_path = get text "source_path" json in
         let* installation_id = optional "id" text json in
@@ -99,7 +101,7 @@ let configuration = function
       let declarations = List.fold_left (fun declarations (path, id, message) ->
         if List.exists (fun (d : declaration) -> d.source_path = path) declarations
         then List.map (fun (d : declaration) -> if d.source_path = path then {d with issues=d.issues @ [message]} else d) declarations
-        else declarations @ [{source_path=path;installation_id=id;desired=None;applied=None;instance_id=None;issues=[message]}]) declarations issues in
+        else declarations @ [{source_path=path;installation_id=id;desired=None;applied=None;instance_id=None;issues=[message];origin=Issue_only}]) declarations issues in
       Ok (Some {directory;complete;declarations})
 let phase json =
   let* kind = get text "kind" json in
@@ -1181,6 +1183,7 @@ let lines ?(height=24) ?(failed_note = "") ~width view =
 
 (* A TOML declaration may exist while no worker can run. Keep the file count,
    live worker count, and failures separate on the Lanes surface. *)
+type reading_freshness = Current | Stale of string
 type installation_reading =
   | Not_read
   | Observed of {
@@ -1189,6 +1192,7 @@ type installation_reading =
       failed_workers : int;
       configuration_issues : int;
       complete : bool;
+      freshness : reading_freshness;
     }
 
 let installation_reading view =
@@ -1206,11 +1210,20 @@ let installation_reading view =
            | Row.Detaching | Row.Detached -> active, failed)
            (0, 0) snapshot.instances in
        Observed {
-         declared = List.length configuration.declarations;
+         (* Decoder also appends issue-only paths here when a TOML file could
+            not be parsed. Those are problems to show, not declarations. *)
+         declared = List.fold_left (fun count (declaration : declaration) ->
+           match declaration.origin with
+           | Parsed_declaration -> count + 1
+           | Issue_only -> count)
+           0 configuration.declarations;
          active;
          failed_workers;
-         configuration_issues = List.fold_left (fun count declaration ->
-           if declaration.issues = [] then count else count + 1)
+         configuration_issues = List.fold_left (fun count (declaration : declaration) ->
+           count + List.length declaration.issues)
            0 configuration.declarations;
          complete = configuration.complete;
+         freshness = (match view.snapshot_read_error with
+           | None -> Current
+           | Some detail -> Stale detail);
        })

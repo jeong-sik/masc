@@ -77,7 +77,7 @@ def run(executable: str) -> None:
 def run_unapplied_installations(executable: str) -> None:
     fixtures = h.keeper_runtime_http_fixtures()
     fixtures[h.STANDALONE_LANES_PATH] = h.standalone_lanes_response()
-    fixtures["/api/v1/lane-addons"] = (200, {
+    inventory = {
         "instances": [], "rows": [], "coverage": [],
         "configuration": {
             "directory": "/fixture/lane-addons", "complete": True,
@@ -92,7 +92,15 @@ def run_unapplied_installations(executable: str) -> None:
                 for name in ("dos-counter", "dos-output-statistics")
             ],
         },
-    })
+    }
+    reads = 0
+
+    def add_ons():
+        nonlocal reads
+        reads += 1
+        return (200, inventory) if reads == 1 else (503, {"error": "inventory unavailable"})
+
+    fixtures["/api/v1/lane-addons"] = add_ons
 
     def interact(process, fd, _slave, output, _base_path):
         h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
@@ -102,6 +110,10 @@ def run_unapplied_installations(executable: str) -> None:
         reading = b"Lane Add-ons: 2 declared \xc2\xb7 0 active \xc2\xb7 2 config issues"
         if reading not in h.screen_text(frame):
             raise AssertionError("unapplied TOML was counted as an installed worker")
+        h.send_and_wait(process, fd, output, b"A", b"HTTP 503")
+        stale = h.send_and_wait(process, fd, output, b"\x1b", b"STALE")
+        if b"Lane Add-ons: STALE \xc2\xb7 2 declared" not in h.screen_text(stale):
+            raise AssertionError("failed Add-on reread was shown as a current count")
         os.write(fd, b"q")
 
     h.run_terminal_scenario(executable,

@@ -10,10 +10,11 @@ let configuration : UI.configuration =
 let declaration : UI.declaration =
   { source_path = "/addons/one.toml"
   ; installation_id = None
-  ; desired = None
+  ; desired = Some "r1"
   ; applied = None
   ; instance_id = None
   ; issues = []
+  ; origin = UI.Parsed_declaration
   }
 
 let snapshot_of declarations : UI.snapshot =
@@ -38,18 +39,32 @@ let test_a_snapshot_without_a_configuration_has_not_read_either () =
 let test_a_read_that_found_none_says_so () =
   check bool "empty is its own answer" true
     (UI.installation_reading (view_of []) = UI.Observed {
-       declared=0; active=0; failed_workers=0; configuration_issues=0; complete=true })
+       declared=0; active=0; failed_workers=0; configuration_issues=0;
+       complete=true; freshness=UI.Current })
 
 let test_unapplied_declarations_are_not_active_workers () =
   let broken = { declaration with issues = ["Docker image missing"] } in
   check bool "two broken declarations, no active worker" true
     (UI.installation_reading (view_of [ broken; broken ]) = UI.Observed {
-       declared=2; active=0; failed_workers=0; configuration_issues=2; complete=true });
+       declared=2; active=0; failed_workers=0; configuration_issues=2;
+       complete=true; freshness=UI.Current });
   let partial = { (snapshot_of [broken]) with
     configuration=Some { configuration with complete=false; declarations=[broken] } } in
   check bool "partial inventory stays partial" true
     (UI.installation_reading { UI.initial with snapshot=Some partial } = UI.Observed {
-       declared=1; active=0; failed_workers=0; configuration_issues=1; complete=false })
+       declared=1; active=0; failed_workers=0; configuration_issues=1;
+       complete=false; freshness=UI.Current });
+  let unreadable = { broken with desired=None; installation_id=None;
+      issues=["Invalid TOML"; "Cannot resolve package"]; origin=UI.Issue_only } in
+  check bool "an issue-only path is not a parsed declaration" true
+    (UI.installation_reading (view_of [unreadable]) = UI.Observed {
+       declared=0; active=0; failed_workers=0; configuration_issues=2;
+       complete=true; freshness=UI.Current });
+  check bool "failed reread preserves the old count with stale provenance" true
+    (UI.installation_reading { (view_of [broken]) with snapshot_read_error=Some "HTTP 503" }
+     = UI.Observed { declared=1; active=0; failed_workers=0;
+                     configuration_issues=1; complete=true;
+                     freshness=UI.Stale "HTTP 503" })
 
 (* The status row's reading of the view. Measured on the live server at 150
    columns: pressing [o] drew

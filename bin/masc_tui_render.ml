@@ -6136,7 +6136,11 @@ let render_lanes_overview (state : state) =
            else Printf.sprintf " · %d config issues" reading.configuration_issues)
           ^ (if reading.failed_workers = 0 then ""
              else Printf.sprintf " · %d failed workers" reading.failed_workers) in
-        base ^ issues ^ (if reading.complete then "" else " · inventory partial"));
+        (match reading.freshness with
+         | Masc_tui_lane_addons.Current -> ""
+         | Masc_tui_lane_addons.Stale _ -> "STALE · ")
+        ^ base ^ issues
+        ^ (if reading.complete then "" else " · inventory partial"));
   (match state.standalone_lanes with
    | Some snapshot ->
        let columns =

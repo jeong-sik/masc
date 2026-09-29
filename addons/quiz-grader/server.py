@@ -127,9 +127,18 @@ class Grader:
                             seen += 1
                 elif kind == "fact":
                     record, = evidence([object_value(item.get("record"), "fact.record")])
-                    deck[string(item.get("id"), "fact.id")] = {
+                    fact_id = string(item.get("id"), "fact.id")
+                    retained = evidence(item.get("evidence"))
+                    if not retained:
+                        raise InvalidInput("fact is missing retained snapshot evidence")
+                    # snapshot_file prepends its own immutable deck copy. That
+                    # reference locates the exact answer without republishing it.
+                    reference = {"source_id": source.source_id, "incarnation": source.incarnation,
+                                 "cursor": source.cursor, "id": fact_id, "evidence": [retained[0]]}
+                    deck[fact_id] = {
                         "field": string(item.get("field"), "fact.field"),
-                        "answer": string(item.get("answer"), "fact.answer"), "record": record}
+                        "answer": string(item.get("answer"), "fact.answer"),
+                        "record": record, "reference": reference}
                     deck_incarnation = source.incarnation
                     seen += 1
                 else:
@@ -193,12 +202,13 @@ class Grader:
         # also stay in fields: related_ids are local to this worker's output.
         grade = {"id": stable_id(self.context["incarnation"], "grade", request_id),
                  "lane_id": "quiz/grades", "kind": "event",
-                 "title": ("정답 ✓ — " if correct else "오답 ✗ — ") + question["title"],
+                 "title": ("정답 ✓ — 질문 " if correct else "오답 ✗ — 질문 ") + action["question_id"],
                  "observed_at": time.time(), "subject_id": action["question_id"],
                  "clock": None, "actor": None,
-                 "fields": {"question_id": action["question_id"], "choice": action["choice"],
+                 "fields": {"question_id": action["question_id"],
+                            "choice_index": question["fields"]["choices"].index(action["choice"]),
                             "question_row": question_reference,
-                            "correct": correct, "answer": fact["answer"], "fact_id": fact_id,
+                            "correct": correct, "answer_fact": fact["reference"], "fact_id": fact_id,
                             "deck_incarnation": self.deck_incarnation,
                             "answerer_claimed": answerer, "about_answerer": about_answerer,
                             "request_id": request_id},

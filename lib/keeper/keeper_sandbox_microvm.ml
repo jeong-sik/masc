@@ -1190,10 +1190,12 @@ type shim_provenance =
   | Shim_verified of { sha256 : string }
   | Shim_unverified
 
+(* Integrity follows current bytes, not metadata that an in-place writer
+   can preserve. The boot edge offloads this read and hash to its executor. *)
 let sha256_of_file path =
-  In_channel.with_open_bin path In_channel.input_all
-  |> Digestif.SHA256.digest_string
-  |> Digestif.SHA256.to_hex
+  match In_channel.with_open_bin path In_channel.input_all with
+  | contents -> Ok Digestif.SHA256.(digest_string contents |> to_hex)
+  | exception Sys_error detail -> Error detail
 ;;
 
 let verify_shim_sidecar ~dir =
@@ -1219,10 +1221,10 @@ let verify_shim_sidecar ~dir =
              sidecar)
       else
         match sha256_of_file binary with
-        | exception Sys_error detail ->
+        | Error detail ->
           Error (Printf.sprintf "microvm_shim_unreadable: %s: %s" binary detail)
-        | got when String.equal got want -> Ok (Shim_verified { sha256 = got })
-        | got ->
+        | Ok got when String.equal got want -> Ok (Shim_verified { sha256 = got })
+        | Ok got ->
           Error
             (Printf.sprintf
                "microvm_shim_hash_mismatch: %s is %s but %s says %s; reinstall both with scripts/install.sh, or remove the sidecar to run a hand-built shim unverified"

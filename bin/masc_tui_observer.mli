@@ -29,7 +29,8 @@
     family carries the keeper name and its own fields. Snapshot events carry
     whole dashboard projections and are identified but not retained here: a
     feed row has no use for a projection, and holding them would grow with
-    every push. *)
+    every push. Nor are they read past their [type]: the server writes it as
+    the first member, and a projection can run to megabytes after it. *)
 
 val initialize_request_body : client_version:string -> string
 (** The JSON-RPC [initialize] body the MCP transport needs before it will
@@ -251,4 +252,10 @@ val feed : t -> string -> delivery list
 (** Hand the reader the next chunk. Returns the frames completed by it, in
     order. Both a cut line and an unterminated frame remain pending. A replay
     cursor travels only with its completed data frame; an ID-only frame does
-    not acknowledge an event. *)
+    not acknowledge an event.
+
+    A frame whose first member is a [type] that decides the event by itself
+    -- a {!Snapshot}, {!Internal_agent_runs_changed} or {!Other} -- is
+    delivered as that event without the rest of the frame being read, so the
+    rest is not checked either. Every other frame is parsed whole, and one
+    that is not JSON is {!Undecodable}. *)

@@ -1010,14 +1010,27 @@ status: reference
   → [Dos_lane](../../lib/dos_lane/dos_lane.mli)
 
 **조종권 (Controller)**
-: DOS Lane 기계의 시간을 움직일 수 있는 한 사람. 핫시트 게임에서 여러 Keeper
-  가 한 키보드를 번갈아 쓰기 때문에 있다. 쥔 사람만 load·eject·step·press·click·
-  type 을 하고, 다른 사람은 거절되지만 화면은 볼 수 있다. `masc_dos_pass` 로
-  넘기면 보드 글이 다음 사람을 @멘션해 깨운다. 쥔 Keeper 가 일시정지되거나 정지하면
-  다음 Keeper 가 움직일 때 풀린다. 충돌 뒤 자동 재시작을 기다리거나 막 켜지는 중인
-  Keeper 는 그대로 쥔다. 이름은 부르는 쪽이 스스로 대는 값이라
-  권한 검사가 아니라 차례를 정하는 장치다.
-  → [Dos_lane.pass](../../lib/dos_lane/dos_lane.mli)
+: DOS Lane 기계의 시간을 움직일 수 있는 한 참가자의 차례. 참가자는 Keeper,
+  운영자(`Admin`), 유효한 공유 DOS 플레이 초대(`Player`)의 이름으로 구분된다.
+  쥔 참가자만 기계의 시간을 움직인다. 다른 참가자의 시간 이동 요청은 거절되지만
+  화면은 볼 수 있다.
+  `masc_dos_pass`로 Keeper에게 넘기면 보드 글이 그 Keeper를 @멘션해 깨운다.
+  쥔 Keeper가 일시정지되거나 정지하면 다음 움직임 전에 풀리고, 만료된 `Player`
+  초대의 조종권도 풀린다. 충돌 뒤 자동 재시작을 기다리거나 막 켜지는 중인 Keeper는
+  그대로 쥔다. 조종권의 이름은 차례 기록이며 권한 증명이 아니다. `Player` 권한은
+  별도 자격증명으로 검사한다.
+  → [Dos_lane.pass](../../lib/dos_lane/dos_lane.mli) ·
+  [Play_seat.participants](../../lib/play/play_seat.mli) ·
+  [Keeper_dos_controller.holder_left](../../lib/keeper/keeper_dos_controller.mli)
+
+**Shared DOS Play Invite (공유 DOS 플레이 초대)**
+: 운영자가 이름과 만료 시각을 붙여 발급하는 `Player` 자격증명. 링크를 받은 사람은
+  공유 DOS 기계를 보고 조작한다. 초대 이름은 입력과
+  조종권의 `who`로 기록되며 Keeper 이름과 겹칠 수 없다. 회수는 자격증명을 지우고
+  그 이름이 쥔 조종권의 해제를 시도한다. 해제에 실패하거나 결과가 불명확하면 같은
+  이름으로 다시 회수할 수 있다.
+  → [Play_invite](../../lib/play/play_invite.mli) ·
+  [TUI play invites](../TUI-GUIDE.md)
 
 **기계 체크포인트 (Machine Checkpoint)**
 : 공유 기계 하나를 통째로 이름 붙여 디스크에 남긴 파일. CPU·메모리·화면·열린 파일과

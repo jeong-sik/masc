@@ -71,6 +71,12 @@ loaded. `Esc` returns. The directory starts empty;
 the [MSX cartridges runbook](operations/msx-carts-runbook.md) says what the
 machine accepts and where the images come from.
 
+## Shared DOS machine
+
+Open `:` then `go DOS` to watch the same live DOS screen an invited player
+sees at `/play`. The TUI view is a spectator: `Esc` returns and `+`/`-`
+resize it; game input and turn changes go through the server's controller.
+
 ## Shared DOS play invites
 
 Select a Keeper chat to use the TUI composer. `/play invites` lists invites, `/play invite <name>
@@ -91,8 +97,8 @@ repeat `/play revoke <name>`: a second request can release a controller even
 after the invite credential was deleted.
 
 The invited person opens the link in a browser to watch and play the shared
-DOS machine. The TUI's existing `go MSX` menu also has `watch DOS machine`
-when a DOS machine is loaded; that view only watches the screen.
+DOS machine. The TUI can also watch through `go DOS` or the `go MSX` menu's
+`watch DOS machine` entry when a DOS machine is loaded.
 
 ## Options
 

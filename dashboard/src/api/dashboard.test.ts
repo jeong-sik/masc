@@ -61,6 +61,7 @@ import {
   deleteGateApprovalRule,
 } from './dashboard'
 import { fetchDashboardShell as fetchDashboardShellHot } from './dashboard-hot'
+import { parseDashboardRuntimeProbeResponse } from './schemas/runtime-probe'
 import { keeperRuntimeBlockerLabel } from '../lib/keeper-runtime-display'
 
 afterEach(() => {
@@ -2683,7 +2684,6 @@ describe('fetchDashboardGate', () => {
       turn_id: null,
       task_id: null,
       goal_id: null,
-      goal_ids: [],
       phase: 'queued',
       summary_status: 'not_requested',
       exact_attempt: { state: 'unbound' },
@@ -3945,7 +3945,7 @@ describe('dashboard runtime probe API', () => {
       refresh_state: 'fresh',
       probe: {
         source: 'runtime.toml',
-        status: 'reachable',
+        status: 'ok',
         probe_ok: true,
         checked_at: '2026-06-10T12:00:00Z',
         summary: {
@@ -4036,6 +4036,104 @@ describe('dashboard runtime probe API', () => {
     ))
 
     await expect(fetchDashboardRuntimeProbe()).rejects.toThrow(
+      'runtime_probe schema drift',
+    )
+  })
+
+  // dashboard_runtime_probe_payload_json_of_runtimes
+  // (lib/server/server_dashboard_http_runtime_info.ml:1191) picks the status
+  // from the counts: no failure and something probed is Ok, no failure and
+  // nothing probed is Idle, some reachable is Degraded, none reachable is
+  // Unavailable. The payload carries Health_status.to_string of that value.
+  function probedWire(status: string, reachable: number, failed: number) {
+    const wire = runtimeProbeWire()
+    const template = wire.probe.providers[0]
+    if (!template) throw new Error('runtime probe fixture has no provider')
+    const providers = [
+      ...Array.from({ length: reachable }, (_, index) => ({
+        ...template,
+        runtime_id: `up-${index}.qwen`,
+      })),
+      ...Array.from({ length: failed }, (_, index) => ({
+        ...template,
+        runtime_id: `down-${index}.qwen`,
+        status: 'network_error',
+        reachable: false,
+        http_status: null,
+        latency_ms: null,
+        model_count: null,
+        content_type: null,
+        downloaded_bytes: null,
+        error: 'connection refused',
+      })),
+    ]
+    return {
+      ...wire,
+      probe: {
+        ...wire.probe,
+        status,
+        probe_ok: failed === 0,
+        summary: {
+          ...wire.probe.summary,
+          runtimes: providers.length,
+          probed: providers.length,
+          reachable,
+          failed,
+        },
+        providers,
+      },
+    }
+  }
+
+  // dashboard_runtime_probe_degraded_envelope
+  // (lib/server/server_dashboard_http_runtime_info.ml:1251): every count is
+  // zero, probe_ok is false, and the status is the envelope's own word.
+  function envelopeWire(status: string) {
+    return {
+      generated_at: '2026-06-10T12:00:00Z',
+      refreshed_at_unix: null,
+      cache_ttl_sec: 30,
+      cache_age_sec: null,
+      cache_hit: false,
+      refresh_state: 'warming_up',
+      probe: {
+        source: 'runtime.toml',
+        status,
+        probe_ok: false,
+        checked_at: '2026-06-10T12:00:00Z',
+        summary: {
+          runtimes: 0,
+          probed: 0,
+          reachable: 0,
+          failed: 0,
+          skipped: 0,
+          default_runtime_id: null,
+        },
+        providers: [],
+        errors: ['background probe in progress'],
+        observations: ['Runtime probe is running in the background after a cold start or cache expiry; the next poll returns the refreshed value.'],
+        limitations: ['First response with no prior cache value returns this placeholder until the background probe completes.'],
+      },
+    }
+  }
+
+  it.each([
+    ['ok', 1, 0],
+    ['idle', 0, 0],
+    ['degraded', 1, 1],
+    ['unavailable', 0, 1],
+  ] as const)('accepts the %s status the server publishes for %i reachable and %i failed', (status, reachable, failed) => {
+    const decoded = parseDashboardRuntimeProbeResponse(probedWire(status, reachable, failed))
+    expect(decoded.probe.status).toBe(status)
+    expect(decoded.probe.summary.failed).toBe(failed)
+  })
+
+  it.each(['unreachable', 'warming_up'])('accepts the zero-count %s envelope', (status) => {
+    expect(parseDashboardRuntimeProbeResponse(envelopeWire(status)).probe.status).toBe(status)
+  })
+
+  it.each(['reachable', 'no_http_runtimes', 'healthy'])('refuses the %s payload status the server does not publish', (status) => {
+    expect(() => parseDashboardRuntimeProbeResponse(probedWire(status, 1, 0))).toThrow(
       'runtime_probe schema drift',
     )
   })

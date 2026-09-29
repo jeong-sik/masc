@@ -154,6 +154,10 @@ let unlisted_goal_history_of_rows ~listed ~rows ~malformed_lines =
             { current with
               gh_last_phase = Json_util.get_string payload "phase";
               gh_last_phase_at = ts }
+          | Some "goal_edited" ->
+            (* A due date or priority edit changes neither when the goal opened
+               nor the phase it reached. *)
+            current
           | Some other ->
             note_unrecognised other;
             current

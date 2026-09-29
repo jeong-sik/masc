@@ -19,6 +19,7 @@ val validate_for_append : t -> (unit, string) result
 (** Require the current payout arithmetic for a new [Paid] row. The ledger
     writer calls this before its atomic append. Never use it to replay stored
     rows: their recorded allocations, not today's calculation, are facts. *)
+
 val to_fields : t -> (string * Yojson.Safe.t) list
 val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result

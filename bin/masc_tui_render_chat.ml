@@ -3188,12 +3188,9 @@ let render_keeper_message (state : state) =
     List.iter (fun text -> box_line_styled chat_buf chat_cols ~style:(Theme.warn ()) ("  " ^ text))
       (Masc_tui_types.keeper_observed_interrupt_rows state);
     (match state.msg_loaded_error with
-     | Some detail ->
-         (* Cause first. The consequence -- this session only -- is the same
-            sentence every time and cost 66 cells before the reader reached the
-            part that differs, which the box then cut. *)
+     | Some _ ->
          box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
-           ("  " ^ detail ^ " \xe2\x80\x94 showing this session only")
+           "  History load failed · /errors"
      | None -> ());
     (if state.msg_loaded_dropped > 0 then
        box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
@@ -3203,17 +3200,9 @@ let render_keeper_message (state : state) =
     (match state.msg_memory_visibility, state.msg_memory_error with
      | Memory_hidden, _ -> ()
      | (Memory_summary | Memory_full), None -> ()
-     | (Memory_summary | Memory_full), Some detail ->
-         (* No prefix, the way the history row two above draws its own: every
-            memory-journal failure names its subject already -- the refusal
-            opens "memory journal:", the decode "memory journal response ...",
-            and the transport carries the ...\x2fmemory-journal URL -- so the
-            row read "memory journal unavailable: memory journal: HTTP 503:
-            ...", which spends thirty cells saying the subject a second time
-            before the part that differs. Same rule the gate lanes row is
-            written to. *)
+     | (Memory_summary | Memory_full), Some _ ->
          box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
-           ("  " ^ detail));
+           "  Memory load failed · /errors");
     (if state.msg_memory_visibility <> Memory_hidden
         && state.msg_memory_dropped > 0 then
        box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
@@ -3253,9 +3242,9 @@ let render_keeper_message (state : state) =
          "  (loading older messages\xe2\x80\xa6)"
      else
        match state.msg_older_error with
-       | Some detail ->
+       | Some _ ->
            box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
-             ("  older messages could not be loaded: " ^ detail)
+             "  Older load failed · /errors"
        | None -> ());
     (match state.msg_live with
      | Some live

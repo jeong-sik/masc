@@ -415,10 +415,16 @@
   base64))
 
 (library
+ (name masc_tui_sse_lines)
+ (wrapped false)
+ (modules masc_tui_sse_lines))
+
+(library
  (name masc_tui_keeper_chat_live)
  (wrapped false)
  (modules masc_tui_keeper_chat_live)
- (libraries masc masc.masc_types masc_tui_keeper_chat_projection yojson))
+ (libraries masc masc.masc_types masc_tui_keeper_chat_projection
+  masc_tui_sse_lines yojson))
 
 (library
  (name masc_tui_keeper_chat_log)
@@ -442,7 +448,7 @@
  ; masc.sse_event for the agent lifecycle payloads, read with the generated
  ; readers of the contract the bridge writes them with (RFC-0004).
  (libraries masc masc.sse_event atdgen-runtime agent_core
-  masc_tui_keeper_chat_projection yojson))
+  masc_tui_keeper_chat_projection masc_tui_sse_lines yojson))
 
 (library
  (name masc_tui_lane_declaration)
@@ -1878,6 +1884,7 @@
   masc_tui_keeper_chat_projection
   masc_tui_keeper_chat_queue
   masc_tui_observer
+  masc_tui_sse_lines
   masc_tui_acting
   masc_tui_command
   masc_tui_gate_text

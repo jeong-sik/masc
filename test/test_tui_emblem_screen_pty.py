@@ -533,14 +533,18 @@ def about_exit_stops_clock(binary: str) -> None:
     fixtures = h.keeper_runtime_http_fixtures()
 
     def interact(process, fd, _slave, output, _base):
-        h.send_and_wait(process, fd, output, b"i", h.COMPOSER_FOCUSED)
+        h.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
+        h.select_keeper_row(process, fd, output, b"alpha")
+        h.send_and_wait(process, fd, output, b"c", CHAT_TITLE)
         h.send_and_wait(process, fd, output, b"/about\r", ABOUT_CAPTION)
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
+        h.send_and_wait(process, fd, output, b"\x1b", CHAT_TITLE)
         after_close = len(output)
         assert h.drain_until_quiet(process, fd, output, quiet=0.7, cap=1.2), \
             "the closed /about screen kept repainting"
         assert ABOUT_CAPTION not in bytes(output[after_close:]), \
             "a closed /about drew again during four animation ticks"
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
         os.write(fd, b"q")
 
     h.run_terminal_scenario(

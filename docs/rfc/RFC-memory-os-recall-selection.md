@@ -46,17 +46,21 @@ source store read error   -> ordinary recall only + operator warning
 제안 결과 타입은 다음처럼 닫는다.
 
 ```text
-Selected { body; included_ids; omitted_count; warnings; receipt_id }
+Selected { body; included_ids; omitted_count; issues; receipt_id }
 Empty_store
-Ordinary_read_failed { receipt_id }
-Source_revalidation_failed { source_ids; receipt_id }
-Selection_failed { reason; receipt_id }
-Budget_overrun { required_bytes; available_bytes; receipt_id }
+Unavailable { issues; receipt_id }
+Budget_overrun { required_bytes; available_bytes; issues; receipt_id }
 
-warnings = Source_revalidation_failed of source_ids | Validity_unknown of memory_ids
+issues = Ordinary_read_failed
+       | Source_revalidation_failed of source_ids
+       | Unknown_context of { task: bool; goal: bool }
+       | Selection_failed of reason
+       | Validity_unknown of memory_ids
 ```
 
-source 일부만 실패하고 다른 fact가 정상이면 `Selected.warnings`에 실패 ID를 두고, 검증된 본문과 함께 모델에 실패 코드·건수를 표시한다. source 전체가 실패하면 `Source_revalidation_failed`다. ordinary 읽기 실패는 `Empty_store`와 구별해 본문 없는 실패 결과가 된다. 어떤 오류도 `None`/빈 문자열 하나로 합치지 않는다. 기밀 경로나 원문은 상태 머리줄에 넣지 않는다.
+독립적으로 읽고 검증한 fact는 다른 축이 실패해도 살린다. ordinary 읽기 실패·source 재검증 실패·Task/Goal 조회 실패가 함께 일어나면 `issues`에 **모두** 기록한다. 안전하게 보낼 본문이 있으면 `Selected`에 그 본문과 실패 코드를 함께 싣고, 없으면 `Unavailable`에 실패 코드들을 싣는다. `Empty_store`는 모든 저장소 읽기와 문맥 조회가 성공했고 사실이 실제로 0건일 때만 쓴다. 선택 계산 자체가 실패하면 `Unavailable`에 `Selection_failed`와 선행 실패를 모두 남기며, 부분 선택을 성공으로 보내지 않는다. 예산 초과도 부분 묶음을 보내지 않는 `Budget_overrun`에 선행 `issues`를 보존한다. 서로 다른 실패 사이에 한 가지 원인만 남기는 우선순위는 두지 않는다.
+
+Task/Goal 조회가 실패하면 해당 링크 후보는 보류하고 검증된 `Standing`과 다른 정상 링크만 보낸다. 모델에는 `issues`의 코드·건수와 조회 수단을 표시하고, 운영자 영수증에는 실패한 축·ID와 살아남은 fact ID를 함께 남긴다. source-bound 본문은 그 claim의 소스가 재검증된 경우에만 보낸다. 기밀 경로나 원문은 상태 머리줄에 넣지 않는다.
 
 ## §4 유효 조건과 저장 경계
 
@@ -70,7 +74,7 @@ source 일부만 실패하고 다른 fact가 정상이면 `Selected.warnings`에
 
 평가는 운영 원본 기억을 복제하지 않은 격리 fact 스냅숏과 고정 턴 자극으로 현재 전량 주입과 후보 선택을 같은 입력에 shadow 재생한다. `test/test_keeper_memory_os_current.ml`의 `with_temp_keepers`/typed fact/replace가 픽스처 시작점이며, 테스트 파일의 존재 자체를 실행 성공으로 세지 않는다. 필수 질문은 현재 Task 권한, Goal 상태, 뒤집힌 PR 상태, 만료된 HOLD, source 변경·불독가, ordinary 읽기 오류, 선택 오류, 예산 초과, 근거 없을 때 기권을 포함한다.
 
-판정표에는 조립 바이트, 실제 요청 토큰(획득 시), 캐시 적중, 선택 지연, 필수 사실 회수, 옛 상태 오답, 만료 제약 재사용, 기권, 검색 호출률을 분리한다. 같은 Keeper·같은 턴 종류·같은 snapshot으로 짝 비교한다. 같은 입력의 전량 기준선 대비 30% 절감은 비용 목표이며(9/28 관측치는 추세 참고로만 사용), **필수 사실 회수 저하나 옛 상태 오답 증가를 허용하는 면제 조건이 아니다**. Shadow 결과와 실제 provider 요청 영수증 없이는 배포 효과나 완료를 선언하지 않는다.
+판정표에는 조립 바이트, 실제 요청 토큰(획득 시), 캐시 적중, 선택 지연, 필수 사실 회수, 옛 상태 오답, 만료 제약 재사용, 기권, 검색 호출률을 분리한다. `Unavailable`의 안전한 기권과 실패 때문에 잃은 검증 가능 정보도 별도 계수한다. 격리 픽스처는 ordinary만 살아남는 경우, source-bound만 살아남는 경우, Task/Goal 조회 실패, 링크 없는 사실을 실제 `keeper_memory_search`로 찾는 경우, Task/Goal 없이 `Standing`을 회수하는 경우를 포함한다. 같은 Keeper·같은 턴 종류·같은 snapshot으로 짝 비교한다. 같은 입력의 전량 기준선 대비 30% 절감은 비용 목표이며(9/28 관측치는 추세 참고로만 사용), **필수 사실 회수 저하나 옛 상태 오답 증가를 허용하는 면제 조건이 아니다**. Shadow 결과와 실제 provider 요청 영수증 없이는 배포 효과나 완료를 선언하지 않는다.
 
 ## §6 이행 순서와 열린 결정
 

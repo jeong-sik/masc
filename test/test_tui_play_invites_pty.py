@@ -17,6 +17,14 @@ LINK = "https://play.example.test/play#fixture-secret"
 
 def run(executable: str) -> None:
     requests: h.HttpRequests = []
+    revokes = h.SequencedHttpResponse([
+        (200, {"name": "guest1", "revoked": True,
+               "released_controller": False, "release_error": "disk fault"}),
+        (500, {"error": "release_failed", "name": "guest1",
+               "released_controller": False, "release_error": "disk fault"}),
+        (200, {"name": "guest1", "revoked": False,
+               "released_controller": True}),
+    ])
 
     def invites(body: bytes) -> h.HttpResponse:
         if body:
@@ -53,7 +61,7 @@ def run(executable: str) -> None:
         command(b"/play revoke guest1", b"retry /play revoke guest1")
         command(b"/play revoke guest1", b"controller released")
         paths = [path for path, _ in requests]
-        if paths.count("/api/v1/play/invites") != 1 or paths.count("/api/v1/play/invites/guest1") != 3:
+        if paths.count("/api/v1/play/invites") != 1 or revokes.served != 3:
             raise AssertionError(f"the TUI did not issue and revoke through the play API: {paths!r}")
         h.send_and_wait(process, master, output, b"\x1b", b"MASC Keepers")
         os.write(master, b"q")
@@ -64,15 +72,7 @@ def run(executable: str) -> None:
         interact=interact,
         http_fixtures={
             "/api/v1/play/invites": h.RequestHttpResponse(invites),
-            "/api/v1/play/invites/guest1":
-                h.SequencedHttpResponse([
-                    (200, {"name": "guest1", "revoked": True,
-                           "released_controller": False, "release_error": "disk fault"}),
-                    (500, {"error": "release_failed", "name": "guest1",
-                           "released_controller": False, "release_error": "disk fault"}),
-                    (200, {"name": "guest1", "revoked": False,
-                           "released_controller": True}),
-                ]),
+            "/api/v1/play/invites/guest1": revokes,
         },
         http_requests=requests,
     )

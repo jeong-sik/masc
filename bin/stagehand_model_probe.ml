@@ -136,6 +136,7 @@ let injected_slot ~sw ~net ~timeout_s ~primary_id =
     | `Tcp (_, port) -> port | _ -> reject "injection_listener_invalid"
   in
   let callback _conn _request body =
+    (* See [injected_slot]: drain the request before the fixed 503; its body is not evidence. *)
     ignore (Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all));
     incr requests;
     Cohttp_eio.Server.respond_string ~status:`Service_unavailable

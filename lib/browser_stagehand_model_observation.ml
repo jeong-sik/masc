@@ -36,10 +36,7 @@ let transport = function
   | ProviderFailure { kind; _ } -> cause "provider_failure" ["kind", `String (provider_failure kind)]
 
 let execution = function
-  | Exact.Attempt_already_started -> simple "attempt_already_started"
-  | Clock_required_for_timeout -> simple "clock_required_for_timeout"
-  | Frozen_request_mismatch -> simple "frozen_request_mismatch"
-  | Completion_failed { error; dispatch } ->
+  | Exact.Completion_failed { error; dispatch } ->
     cause "completion_failed"
       [ "transport", transport error
       ; "dispatch_started", `Bool (match dispatch with
@@ -53,7 +50,6 @@ let execution = function
   | Ambiguous_output count -> cause "ambiguous_output" ["count", `Int count]
   | Unexpected_output_content -> simple "unexpected_output_content"
   | Invalid_json_output -> simple "invalid_json_output"
-  | Internal_non_json_output -> simple "internal_non_json_output"
 
 let measurement = function
   | Exact.Measurement_not_required -> "not_required"

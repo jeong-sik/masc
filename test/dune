@@ -7054,6 +7054,16 @@
  (libraries alcotest digestif yojson masc))
 
 (test
+ (name test_keeper_memory_search_index)
+ (modules test_keeper_memory_search_index)
+ (libraries alcotest masc))
+
+(test
+ (name test_workspace_memory_request)
+ (modules test_workspace_memory_request)
+ (libraries alcotest digestif yojson masc))
+
+(test
  (name test_keeper_direct_runtime_resume)
  (modules test_keeper_direct_runtime_resume)
  (libraries alcotest masc_test_deps masc.keeper_checkpoint_ref eio_main unix))

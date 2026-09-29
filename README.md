@@ -14,15 +14,14 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="MIT license"></a>
 </p>
 
-MASC (**Multi-Agent Shared Context**) lets you set goals and direction, then
-assemble a team of agents with their own roles and personalities. These agents,
-called **Keepers**, carry the context of the work forward, divide tasks, discuss
-their decisions, and verify results. You provide the environment, follow their
-progress, and contribute direction or judgement when needed.
+MASC (**Multi-Agent Shared Context**) is a project for assembling a team of agents
+with their own roles and personalities, and watching them work toward a goal.
+These **Keepers** carry context forward, divide tasks, discuss their decisions,
+and verify results. You set the overall direction and guide the team, stepping
+in from time to time.
 
-Inspired by childhood memories of Bullfrog’s *Dungeon Keeper*, MASC brings some
-of the enjoyment of assigning work to characters with distinct roles and
-personalities, then watching what unfolds, to working with agents.
+Inspired by Bullfrog’s *Dungeon Keeper*, MASC aims to capture the fun of giving
+work to a varied cast of characters and watching unexpected things unfold.
 
 Follow their progress in the terminal UI or a browser, and connect other agents
 through MCP.

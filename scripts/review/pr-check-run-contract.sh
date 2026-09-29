@@ -39,11 +39,11 @@ pr_check_classify() { # repo head workflow-TSV check-TSV gh_json_callback
   local repo="$1" head="$2" workflows="$3" checks="$4" api="$5"
   local suites suite meta count wid rank num name status conclusion run event path branch sha created
   local jobs rows expected actual pairs check_pairs draft_wid="" ready
-  expected=$(pr_check_draft_names | LC_ALL=C sort)
-  suites=$(awk -F '\t' '
-    NR == FNR {draft[$0]=1; next}
-    $1 in draft {print $5}' <(pr_check_draft_names) <(printf '%s\n' "$checks") | sort -u)
+  # A reserved marker only selects candidates for strict validation. A
+  # malformed wrapper/condition must not disappear as an older lost suite.
+  suites=$(printf '%s\n' "$checks" | awk -F '\t' 'index($1,"Draft snapshot / ")>0 {print $5}' | sort -u)
   [ -n "$suites" ] || return 0
+  expected=$(pr_check_draft_names | LC_ALL=C sort)
   for suite in $suites; do
     meta=$(printf '%s\n' "$workflows" | awk -F '\t' -v suite="$suite" '$8 == suite')
     count=$(printf '%s\n' "$meta" | awk 'NF {n++} END {print n+0}')

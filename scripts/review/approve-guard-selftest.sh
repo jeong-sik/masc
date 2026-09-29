@@ -278,18 +278,12 @@ race_setup() {
   "$JQ" -n --arg h "$H" '{workflow_runs:[
     {workflow_id:1,run_number:10,name:"PR check",status:"completed",conclusion:"success",id:900,check_suite_id:55,event:"pull_request",path:".github/workflows/pr-check.yml",head_sha:$h},
     {workflow_id:1,run_number:11,name:"PR check",status:"completed",conclusion:"success",id:901,check_suite_id:66,event:"pull_request",path:".github/workflows/pr-check.yml",head_sha:$h}]}' >"$1/actions.json"
-  "$JQ" -n --arg h "$H" '
-    ["TLA model check","lint suite","dune build @check","dune build --profile release @check","dashboard typecheck","PR required success"] |
-    to_entries | {jobs:map({name:.value,status:"completed",conclusion:"skipped",id:(200+.key),run_id:901,head_sha:$h})}' >"$1/jobs-901.json"
-  "$JQ" '{check_runs:([.jobs[] | {name:.name,status:"completed",conclusion:"success",id:(.id-100),check_suite:{id:55}}] + [.jobs[] | {name,status,conclusion,id,check_suite:{id:66}}])}' "$1/jobs-901.json" >"$1/checkruns.json"
-  # GitHub run 36514675023 emitted the unevaluated expression body for
-  # skipped jobs. Build Ready names independently, then use those wire names
-  # for both Draft jobs and checks (not the hypothetical evaluated branch).
-  local draft_name='"github.event.pull_request.draft == true && \u0027Draft snapshot / " + . + "\u0027 || \u0027" + . + "\u0027"'
-  "$JQ" ".jobs[].name |= ($draft_name)" "$1/jobs-901.json" >"$1/jobs.tmp"
-  mv "$1/jobs.tmp" "$1/jobs-901.json"
-  "$JQ" "(.check_runs[] | select(.check_suite.id == 66) | .name) |= ($draft_name)" "$1/checkruns.json" >"$1/checks.tmp"
-  mv "$1/checks.tmp" "$1/checkruns.json"
+  # Keep the captured job names/statuses, rebinding only IDs/head for the
+  # synthetic race variants below. A separate case replays the unmodified jobs.
+  "$JQ" --arg h "$H" '.jobs |= (to_entries | map(.value + {id:(200+.key),run_id:901,head_sha:$h}))' \
+    "$here/fixtures/pr-check-draft-jobs-39834.json" >"$1/jobs-901.json"
+  "$JQ" '{check_runs:(
+    ["TLA model check","lint suite","dune build @check","dune build --profile release @check","dashboard typecheck","PR required success"] | to_entries | map({name:.value,status:"completed",conclusion:"success",id:(100+.key),check_suite:{id:55}})) + [.jobs[] | {name,status,conclusion,id,check_suite:{id:66}}]}' "$1/jobs-901.json" >"$1/checkruns.json"
 }
 mutate() { "$JQ" "$2" "$1" >"$1.tmp" && mv "$1.tmp" "$1"; }
 race_case() { run_case "$1" "$2" "$3" 0 "$d" --check --repo o/r --pr 5 --head "$H"; }
@@ -374,6 +368,37 @@ d="$work/race-transport"; race_setup "$d"
 FAKE_FAIL='*/jobs*' race_case draft-jobs-transport-is-infra-error 1 'gh api repos/o/r/actions/runs/901/jobs'
 d="$work/race-nojq"; race_setup "$d"
 PATH="$work/nojq:$PATH" race_case draft-selection-needs-no-standalone-jq 0 'WOULD APPROVE'
+
+
+# Exact captured API jobs: no name, job ID, run ID, head or status rewrite.
+# The accompanying green Ready run is synthetic, not live qualification proof.
+d="$work/race-captured"; race_setup "$d"
+captured="$here/fixtures/pr-check-draft-jobs-39834.json"
+captured_head=$("$JQ" -r '.jobs[0].head_sha' "$captured")
+captured_run=$("$JQ" -r '.jobs[0].run_id' "$captured")
+cp "$captured" "$d/jobs-$captured_run.json"
+"$JQ" --arg h "$captured_head" '.head.sha=$h' "$d/pull.json" >"$d/p" && mv "$d/p" "$d/pull.json"
+"$JQ" --arg h "$captured_head" --argjson run "$captured_run" '.workflow_runs[].head_sha=$h | .workflow_runs[1].id=$run | .workflow_runs[1].conclusion="skipped"' "$d/actions.json" >"$d/p" && mv "$d/p" "$d/actions.json"
+"$JQ" --slurpfile captured "$captured" '.check_runs |= (map(select(.check_suite.id==55)) + [$captured[0].jobs[] | {name,status,conclusion,id,check_suite:{id:66}}])' "$d/checkruns.json" >"$d/p" && mv "$d/p" "$d/checkruns.json"
+run_case captured-api-draft-with-synthetic-ready 0 'WOULD APPROVE' 0 "$d" --check --repo o/r --pr 5 --head "$captured_head"
+mutate "$d/actions.json" '.workflow_runs |= .[1:]'
+run_case captured-api-draft-alone-not-green 2 'requires six successful checks' 0 "$d" --check --repo o/r --pr 5 --head "$captured_head"
+# Even an older noncancelled malformed expression must refuse before generic
+# lost-suite filtering, including all-success markers and a changed else arm.
+for expression_fault in else-arm condition all-success wrapped wrapped-success; do
+  d="$work/race-expression-$expression_fault"; race_setup "$d"
+  mutate "$d/actions.json" '.workflow_runs[1].run_number=9'
+  case "$expression_fault" in
+    else-arm) change='.jobs[0].name += " tampered"' ;;
+    condition) change='.jobs[0].name |= sub("== true";"== false")' ;;
+    all-success) change='.jobs[].conclusion="success"' ;;
+    wrapped) change='.jobs[].name |= ("${{ " + . + " }}")' ;;
+    wrapped-success) change='.jobs[].name |= ("${{ " + . + " }}") | .jobs[].conclusion="success"' ;;
+  esac
+  mutate "$d/jobs-901.json" "$change"
+  "$JQ" --slurpfile jobs "$d/jobs-901.json" '.check_runs |= (map(select(.check_suite.id==55)) + [$jobs[0].jobs[] | {name,status,conclusion,id,check_suite:{id:66}}])' "$d/checkruns.json" >"$d/p" && mv "$d/p" "$d/checkruns.json"
+  race_case "older-malformed-expression-$expression_fault" 2 'invalid Draft snapshot'
+done
 
 # ---- dispatch-only skipped job (#38873): workflow file decides, never the row alone ----
 # A job whose `if:` requires workflow_dispatch is skipped in every pull_request

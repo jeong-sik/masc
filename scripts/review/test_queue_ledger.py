@@ -18,6 +18,11 @@ PR_CHECK_NAMES = (
     "dune build --profile release @check", "dashboard typecheck",
     "PR required success",
 )
+# Skipped jobs retain their unevaluated name expression in the GitHub API.
+# Use the observed strings, independently of the classifier's expected names.
+DRAFT_CAPTURE = ROOT / "scripts/review/fixtures/pr-check-draft-jobs-39834.json"
+DRAFT_JOBS = json.loads(DRAFT_CAPTURE.read_text())["jobs"]
+DRAFT_CHECK_NAMES = tuple(job["name"] for job in DRAFT_JOBS)
 
 
 class QueueLedgerTest(unittest.TestCase):
@@ -230,22 +235,19 @@ for page in pages if pages is not None else [fixtures[key]]:
                     "path": ".github/workflows/pr-check.yml", "event": "pull_request",
                     "status": "completed", "conclusion": "success", "created_at": created}
 
-        def jobs(run_id, suite, draft, conclusion, first_id, started):
+        def jobs(run_id, suite, names, conclusion, first_id, started):
             return [{"id": first_id + index, "run_id": run_id, "run_attempt": 1,
-                     "head_sha": self.head,
-                     # Observed skipped-job wire names in run 36514675023.
-                     "name": (f"github.event.pull_request.draft == true && 'Draft snapshot / {name}' || '{name}'"
-                              if draft else name),
+                     "head_sha": self.head, "name": name,
                      "status": "completed", "conclusion": conclusion,
                      "started_at": started, "completed_at": started,
                      "check_run_url": f"https://api.github.com/repos/o/r/check-runs/{first_id + index}",
                      "check_suite": {"id": suite}}
-                    for index, name in enumerate(PR_CHECK_NAMES)]
+                    for index, name in enumerate(names)]
 
         ready = run(900, 10, 55, RUN_TIME)
         draft = run(901, 11, 56, "2026-01-01T00:05:00Z")
-        ready_jobs = jobs(900, 55, False, "success", 100, RUN_TIME)
-        draft_jobs = jobs(901, 56, True, "skipped", 200, draft["created_at"])
+        ready_jobs = jobs(900, 55, PR_CHECK_NAMES, "success", 100, RUN_TIME)
+        draft_jobs = jobs(901, 56, DRAFT_CHECK_NAMES, "skipped", 200, draft["created_at"])
         data.update({"runs": {"workflow_runs": [ready, draft]},
                      "run": ready, "run:900": ready, "run:901": draft,
                      "jobs:900": {"jobs": ready_jobs}, "jobs:901": {"jobs": draft_jobs},
@@ -262,6 +264,26 @@ for page in pages if pages is not None else [fixtures[key]]:
 
     def test_late_draft_does_not_hide_successful_ready(self):
         row = self.ledger(change=self.draft_race)
+        self.assertEqual((row["checks"], row["waits_on"]), ("ok", "merge"))
+
+    def test_captured_draft_jobs_preserve_complete_ready(self):
+        def change(data):
+            self.draft_race(data)
+            # Replay every captured job field. Only the Git head is rebound to
+            # this test's real repository; CheckRun suite identity is supplied
+            # separately because the jobs API has no check_suite field.
+            jobs = [dict(job, head_sha=self.head) for job in DRAFT_JOBS]
+            first = jobs[0]
+            draft = data.pop("run:901")
+            draft.update(id=first["run_id"], head_branch=first["head_branch"],
+                         run_attempt=first["run_attempt"], created_at=first["created_at"])
+            del data["jobs:901"]
+            data[f"run:{draft['id']}"] = draft
+            data[f"jobs:{draft['id']}"] = {"total_count": len(jobs), "jobs": jobs}
+            data["checkruns"]["check_runs"] = data["jobs:900"]["jobs"] + [
+                dict(job, check_suite={"id": draft["check_suite_id"]}) for job in jobs]
+            self.sync_rollup(data)
+        row = self.ledger(change=change)
         self.assertEqual((row["checks"], row["waits_on"]), ("ok", "merge"))
 
     def test_draft_timestamp_does_not_make_ready_evidence_stale(self):
@@ -344,6 +366,26 @@ for page in pages if pages is not None else [fixtures[key]]:
                 row = self.ledger(change=change)
                 self.assertNotEqual(row["checks"], "ok")
                 self.assertNotEqual(row["waits_on"], "merge")
+
+    def test_draft_expression_lookalikes_are_never_excluded(self):
+        for fault in ("wrong_expression", "friendly_lookalike", "wrapped_expression"):
+            for conclusion in ("skipped", "success"):
+                with self.subTest(fault=fault, conclusion=conclusion):
+                    def change(data):
+                        self.draft_race(data)
+                        jobs = data["jobs:901"]["jobs"]
+                        for job, name in zip(jobs, PR_CHECK_NAMES):
+                            if fault == "wrong_expression":
+                                job["name"] = job["name"].replace("== true", "!= true")
+                            elif fault == "friendly_lookalike":
+                                job["name"] = "Draft snapshot / " + name
+                            else:
+                                job["name"] = "${{ " + job["name"] + " }}"
+                            job["conclusion"] = conclusion
+                        self.sync_rollup(data)
+                    row = self.ledger(change=change)
+                    self.assertNotEqual(row["checks"], "ok")
+                    self.assertNotEqual(row["waits_on"], "merge")
 
     def test_ready_checks_cannot_be_combined_across_suites(self):
         def change(data):

@@ -9,8 +9,9 @@ let text = Yojson.Safe.Util.to_string
 let items = Yojson.Safe.Util.to_list
 let require = function Ok value -> value | Error detail -> fail detail
 
-let fixture root ~reject_context ~overflow_resume ~hold_first_resume ~compact_resume =
+let fixture root ~reject_context ~overflow_resume ~hold_first_resume ~compact_resume ~compact_item =
   let capture = Filename.concat root "requests.jsonl" in
+  write capture "";
   let command = Filename.concat root "codex-fixture" in
   write command (Printf.sprintf {|#!/usr/bin/env python3
 import json, sys, os
@@ -21,6 +22,7 @@ reject_context = %s
 overflow_resume = %s
 hold_first_resume = %s
 compact_resume = %s
+compact_item = %s
 turn_id = 'fresh-turn'
 def emit(value):
     print(json.dumps(value), flush=True)
@@ -60,7 +62,10 @@ for line in sys.stdin:
                 out.write('compaction followed by another model response')
             request_usage = {'inputTokens':100,'cachedInputTokens':0,'outputTokens':10,'reasoningOutputTokens':0,'totalTokens':110}
             estimate = {'inputTokens':0,'cachedInputTokens':0,'outputTokens':0,'reasoningOutputTokens':0,'totalTokens':50}
-            for last in (estimate, request_usage):
+            if compact_item:
+                emit({'method':'item/completed','params':{'threadId':'context-thread','turnId':turn_id,
+                     'item':{'type':'contextCompaction','id':'compact-1'}}})
+            for last in ((request_usage,) if compact_item else (estimate, request_usage)):
                 emit({'method':'thread/tokenUsage/updated','params':{'threadId':'context-thread','turnId':turn_id,
                      'tokenUsage':{'last':last,'total':request_usage,'modelContextWindow':400000}}})
         item = {'type':'agentMessage','id':'answer','text':'CONTEXT_RECEIVED','phase':'final_answer'}
@@ -69,11 +74,12 @@ for line in sys.stdin:
 |} capture (if reject_context then "True" else "False")
     (if overflow_resume then "True" else "False")
     (if hold_first_resume then "True" else "False")
-    (if compact_resume then "True" else "False"));
+    (if compact_resume then "True" else "False")
+    (if compact_item then "True" else "False"));
   Unix.chmod command 0o700;
   command, capture
 
-let with_fixture ?(worker_pool = false) ?(reject_context = false) ?(overflow_resume = false) ?(hold_first_resume = false) ?(compact_resume = false) ?max_prompt_bytes test =
+let with_fixture ?(worker_pool = false) ?(reject_context = false) ?(overflow_resume = false) ?(hold_first_resume = false) ?(compact_resume = false) ?(compact_item = false) ?max_prompt_bytes test =
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
   let previous_pool = Domain_pool_ref.get () in
   Eio.Switch.on_release sw (fun () ->
@@ -96,7 +102,7 @@ let with_fixture ?(worker_pool = false) ?(reject_context = false) ?(overflow_res
     ~base_path:root ~sandbox_profile:None "context-fixture";
   let saved = Runtime.For_testing.snapshot () in
   Eio.Switch.on_release sw (fun () -> Runtime.For_testing.restore saved; Fs_compat.remove_tree root);
-  let command, capture = fixture root ~reject_context ~overflow_resume ~hold_first_resume ~compact_resume in
+  let command, capture = fixture root ~reject_context ~overflow_resume ~hold_first_resume ~compact_resume ~compact_item in
   let config_path = Filename.concat root "runtime.toml" in
   write config_path (Printf.sprintf {|
 [providers.codex]
@@ -379,8 +385,8 @@ let test_context_blocks_survive_fresh_retry () =
   check bool "settled replacement remembers the recall" false
     (String_util.contains_substring (turn_text (send "WORLD_3")) "RECALL_RETRY")
 
-let test_compaction_receipt_survives_later_request_usage () =
-  with_fixture ~compact_resume:true @@ fun ~run ~capture ~reports:_ ->
+let check_compaction_receipt_survives_later_request_usage ~compact_item () =
+  with_fixture ~compact_resume:true ~compact_item @@ fun ~run ~capture ~reports:_ ->
   List.iteri (fun index recall_expected ->
     let prompt_blocks =
       [ Prompt_block_id.Memory_os_recall, "RECALL_AFTER_COMPACTION"
@@ -396,6 +402,12 @@ let test_compaction_receipt_survives_later_request_usage () =
       check int "compaction does not require a new thread" 1
         (List.length (List.filter (fun row -> member "method" row = `String "thread/resume") rows)))
     [true; false; true; false]
+
+let test_compaction_receipt_survives_later_request_usage () =
+  check_compaction_receipt_survives_later_request_usage ~compact_item:false ()
+
+let test_compaction_item_invalidates_recall_without_usage_estimate () =
+  check_compaction_receipt_survives_later_request_usage ~compact_item:true ()
 
 let test_recall_lifecycle_across_native_ticks () =
   with_fixture @@ fun ~run ~capture ~reports:_ ->
@@ -981,6 +993,7 @@ let test_declared_limit_above_history_changes_nothing () =
 
 
 let () = run "Keeper current Codex context" ["native requests",[
+  test_case "compaction item invalidates recall without usage estimate" `Quick test_compaction_item_invalidates_recall_without_usage_estimate;
   test_case "compaction invalidates recall despite later request usage" `Quick test_compaction_receipt_survives_later_request_usage;
   test_case "resume delivers only changed blocks and pending operator note" `Quick test_resume_deduplicates_context_blocks;
   test_case "fresh overflow retry receives and remembers recall" `Quick test_context_blocks_survive_fresh_retry;

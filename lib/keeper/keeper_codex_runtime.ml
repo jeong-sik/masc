@@ -385,7 +385,7 @@ let codex_stream_callback ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~
           report_usage ~thread_id ~turn_id ~model frame
         | Turn_started _ | Text_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
         | Native_tool_started _ | Native_tool_finished _ | Elicitation_cancelled _
-        | Turn_finished _ -> ())
+        | Compaction_observed | Turn_finished _ -> ())
   | _ ->
     let emit event = Option.iter (fun callback -> callback event) on_event in
     let next_tool_index = ref 1 in
@@ -482,6 +482,8 @@ let codex_stream_callback ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~
           record_usage_windows ~quota_scope report
         | Runtime_codex_app_server.Usage_reported { thread_id; turn_id; model; frame } ->
           report_usage ~thread_id ~turn_id ~model frame
+        | Runtime_codex_app_server.Compaction_observed ->
+          Log.Keeper.info ~keeper_name "Codex context compaction completed"
         | Runtime_codex_app_server.Turn_finished { text } ->
           Option.iter
             emit_text
@@ -1381,6 +1383,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
           (match event with
            | Runtime_codex_app_server.Native_tool_started _
            | Native_tool_finished _ -> observe_effect_attempted ()
+           | Compaction_observed -> settled_held_context := []
            | Usage_reported { frame; _ } ->
              (* The final usage keeps only the newest request. A compaction
                 earlier in this turn still invalidates its context receipts. *)

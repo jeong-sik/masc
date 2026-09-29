@@ -52,10 +52,12 @@ hook, record delivered block digests on a fresh session, and compare against
 the acknowledged frontier on resume. Unchanged blocks stay out; changed blocks
 are sent in full. Operator notes retain their explicit repeat-delivery
 semantics. A replacement session still receives its context.
-Codex retains invalidation from every typed usage event for the whole attempt:
+Codex observes completed `contextCompaction` items directly and retains
+invalidation from typed usage estimates for the whole attempt:
 an observed compaction followed by a normal request must not restore the old
 held digests merely because the final usage describes that later request.
-The four-tick regression verifies initial delivery, compaction on resume,
+Separate four-tick regressions cover a direct compaction item without an
+estimate and an estimate followed by ordinary request usage. They verify initial delivery, compaction on resume,
 redelivery on the next resume, and suppression once that delivery settles.
 
 Muse and Antigravity retain their canonical-history guard. When an incomplete
@@ -138,3 +140,11 @@ The first PR check and targeted run at `aa6e1a1d92` failed compilation because
 the TUI block-label match did not include `Librarian_working_context`. The
 missing arm was added with the cycle changes. This failure did not execute
 the behavioral cases and is not a behavioral PASS.
+
+The targeted run `36569639435` at `08bc66b08d` executed all ten selected
+suites. Muse, Antigravity, Claude, session-store, turn-record, ordinary-memory,
+memory-write, Librarian recall and TUI context-inspector suites passed. The
+three new Codex cases failed before their first native request because the
+fixture read `requests.jsonl` before creating it. Fixture setup now creates
+the empty capture file before a test counts prior requests. These older-head
+results are diagnostic evidence, not validation of later commits.

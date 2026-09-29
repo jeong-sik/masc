@@ -529,7 +529,7 @@ let controller_json () =
 let seat_response ~config ~name =
   match Play_seat.hand_to config ~now:(Time_compat.now ()) with
   | Error detail ->
-    `Service_unavailable, `Assoc [ ("error", `String "keepers_unreadable"); ("message", `String detail) ]
+    `Service_unavailable, Server_refusal.json ~code:"keepers_unreadable" detail
   | Ok participants ->
     ( `OK
     , `Assoc

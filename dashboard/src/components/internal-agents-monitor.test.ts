@@ -34,6 +34,7 @@ import {
 import { keepers, shellRuntimeResolution } from '../store'
 import { ApiRequestError } from '../api/core'
 import { parseExactLaneRunResponse } from '../api/dashboard-exact-lane-runs'
+import { parseVerificationRunsResponse } from '../api/dashboard-verification-runs'
 
 const journalFact = (claim: string, category: 'fact' | 'blocker', firstSeen: number) => ({
   claim,
@@ -319,6 +320,24 @@ describe('InternalAgentsMonitor', () => {
       expect(await within(matrix).findByText(label)).toBeTruthy()
       expect(within(matrix).queryByText('JEV CONFIGURED · jev-next')).toBeNull()
     }
+
+    // HITL can have older retained runs even when the global exact window
+    // contains none. Stagehand does not retain its model calls at all.
+    api.fetchStandaloneLanes.mockResolvedValue({
+      ...laneSnapshot,
+      exactRunProjectionCount: 4,
+      exactRunSourceTotal: 20,
+      exactRunProjectionTruncated: true,
+      lanes: [
+        lane({ laneId: 'hitl_auto_judge', label: 'HITL Auto Judge', status: 'no_retained_observation', retainedRunCount: 0, lastTerminalAt: null }),
+        lane({ laneId: 'browser_stagehand_exact', label: 'Browser Stagehand', status: 'no_retained_observation', retainedRunCount: 0, lastTerminalAt: null }),
+      ],
+    })
+    sse.refresh?.()
+    expect(await within(matrix).findByText('No run in recent window')).toBeTruthy()
+    expect(within(matrix).getByText('Run history not retained')).toBeTruthy()
+    expect(within(matrix).getByText('최근 완료 관측 없음')).toBeTruthy()
+    expect(within(matrix).getByText('실행 기록 미보존')).toBeTruthy()
   })
 
   it('marks retained lanes stale after failure and clears the warning only on recovery', async () => {
@@ -445,6 +464,28 @@ describe('InternalAgentsMonitor', () => {
     const filters = screen.getByRole('group', { name: 'Internal agent filters' })
     fireEvent.click(within(filters).getByRole('button', { name: 'Auto Judge 0' }))
     expect(screen.queryByText('report_review_verdict')).toBeNull()
+  })
+
+  it('retains a cancelled verification review and displays its cause without an error verdict', async () => {
+    api.fetchExactLaneRuns.mockResolvedValue({ runs: [], count: 0, total: 0, hasMore: false, generatedAt: 'now' })
+    api.fetchFusionRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
+    api.fetchVerificationRuns.mockResolvedValue(parseVerificationRunsResponse({
+      generated_at: '2026-09-29T00:00:00Z', count: 1,
+      runs: [{
+        verification_id: 'vrf-cancelled', task_id: 'task-cancelled', producer: 'keeper-a',
+        authority_kind: 'system_llm_agent', authority_actor: 'judge-a', started_at: 1786000000,
+        status: 'review_cancelled', elapsed_s: 1, tools: [],
+        detail: 'review fiber cancelled: owner stopped',
+      }],
+    }))
+
+    render(html`<${InternalAgentsMonitor} />`)
+    const run = await screen.findByRole('button', { name: /review_cancelled Verification task-cancelled/i })
+    expect(run.querySelector('.ia-badge')?.getAttribute('data-tone')).toBe('neutral')
+    fireEvent.click(run)
+    const detail = await screen.findByText('review fiber cancelled: owner stopped')
+    expect(detail.className).toBe('ia-note')
+    expect(screen.queryByText('Run observations unavailable for this filter.')).toBeNull()
   })
 
   it('keeps Auto Judge and Board Attention as separate exact execution kinds', async () => {

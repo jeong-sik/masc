@@ -284,9 +284,10 @@ def run_full_width_comments(executable: str) -> None:
     korean = "댓글 본문은 넓은 영역을 사용합니다"
     code = "document.documentElement.scrollWidth"
     comments = [
-        h.board_detail_comment("width-root", f"{paragraph}\n{paragraph}"),
+        dict(h.board_detail_comment("width-root", f"{paragraph}\n{paragraph}"),
+             author="wkbl-layout-reviewer-with-long-name"),
         dict(h.board_detail_comment("width-child", f"{korean}\n```js\n{code}\n```"),
-             parent_id="width-root"),
+             parent_id="width-root", author="wkbl-layout-reviewer-with-long-name"),
         h.board_detail_comment("width-short", "OK"),
     ]
     post["comment_count"] = len(comments)

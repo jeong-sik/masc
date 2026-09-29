@@ -18,9 +18,11 @@ type metric =
   }
 
 (* Every series, by its key and by its name. The tables are reachable only
-   through this signature, so a series cannot enter one without the other: a
-   total over one name reads that name's series and sees all of them. Both
-   tables hold the same mutable records, so a total reads values as they are
+   through this signature, and its only insert files a series under both, so
+   a total over one name reads that name's series and sees all of them. The
+   exception is an allocation failure while [add] grows the key table: the
+   series is then keyed but not named, and totals leave it out. Both tables
+   hold the same mutable records, so a total reads values as they are
    updated, and nothing removes a series. Every operation runs with
    [metrics_mutex] held. *)
 module Series : sig

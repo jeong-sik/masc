@@ -14479,9 +14479,11 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             | Some detail ->
                 chat_notice state ~keeper_name:target ~kind:Notice_failure
                   (retry
-                     ((if revoked.pir_revoked then "invite revoked; "
-                       else "invite already absent; ")
-                      ^ "controller release failed: " ^ detail))
+                     (detail
+                      ^ (if revoked.pir_revoked then
+                           " (invite revoked; controller release failed)"
+                         else
+                           " (invite already absent; controller release failed)")))
             | None ->
                 chat_notice state ~keeper_name:target ~kind:Notice_reply
                   (Printf.sprintf "Play invite %s: %s%s"
@@ -14490,13 +14492,13 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                      (if revoked.pir_released_controller then "; controller released" else "")))
        | Play_revoke_result (Play_answered (Error detail)) ->
            chat_notice state ~keeper_name:target ~kind:Notice_failure
-             (retry ("play revoke response unreadable (" ^ detail ^ ")"))
+             (retry (detail ^ " (play revoke response unreadable)"))
        | Play_revoke_result (Play_refused detail) ->
            chat_notice state ~keeper_name:target ~kind:Notice_failure
              ("play revoke refused: " ^ detail)
        | Play_revoke_result (Play_unanswered detail) ->
            chat_notice state ~keeper_name:target ~kind:Notice_failure
-             (retry ("play revoke outcome unknown (" ^ detail ^ ")")))
+             (retry (detail ^ " (play revoke outcome unknown)")))
   | Librarian_input_loaded (prompt_key, result) ->
       let still_selected =
         match selected_prompt_for_state state with

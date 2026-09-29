@@ -62,6 +62,7 @@ def run(executable: str) -> None:
         command(b"/play link", b"Last play link issued")
         command(b"/play invites", b"old \xc2\xb7 expires not recorded")
         command(b"/play revoke guest1", b"retry /play revoke guest1")
+        h.wait_for_output(process, master, output, b"disk fault")
         h.wait_for_http_request(process, master, output, requests,
                                 path="/api/v1/play/invites/guest1")
         command(b"/play link", b"No play link has been issued")

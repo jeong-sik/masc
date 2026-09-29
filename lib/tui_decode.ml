@@ -12487,6 +12487,6 @@ let play_revoke_http_error ~status_code ~body =
         then Ok detail else Error "not a controller release failure"
     | exception Yojson.Json_error detail -> Error detail in
   match failure with
-  | Ok detail -> Printf.sprintf "HTTP %d: controller release failed: %s"
-      status_code (sanitize_terminal_text detail)
+  | Ok detail -> Printf.sprintf "%s (HTTP %d: controller release failed)"
+      (sanitize_terminal_text detail) status_code
   | Error _ -> http_status_error ~status_code ~body

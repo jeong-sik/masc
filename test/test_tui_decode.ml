@@ -12061,7 +12061,7 @@ let test_tool_approval_mode_unknown_word_fails () =
 
 let test_play_revoke_failure_detail () =
   Alcotest.(check string) "500 preserves actual controller failure"
-    "HTTP 500: controller release failed: controller busy"
+    "controller busy (HTTP 500: controller release failed)"
     (Tui_decode.play_revoke_http_error ~status_code:500
       ~body:{|{"error":"release_failed","name":"guest1","released_controller":false,"release_error":"controller busy"}|});
   Alcotest.(check string) "other failures retain their own reason" "HTTP 503: keepers_unreadable"

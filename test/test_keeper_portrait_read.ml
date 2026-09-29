@@ -45,7 +45,7 @@ let call ~name ~args =
     ~args
 ;;
 
-let completed_data result =
+let completed_data (result : Tool_result.result) =
   match result with
   | Tool_result.Completed output -> output.data
   | Tool_result.Failed error -> Alcotest.fail error.message

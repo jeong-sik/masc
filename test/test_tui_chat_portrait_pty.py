@@ -3,6 +3,8 @@
 No model calls: two fixture Keepers let selection and the open chat disagree.
 The Kitty case decodes complete PNG transfers, including identity changes;
 other cases check the colour fallback and the space returned on small screens.
+The running-turn case holds a fixture turn open and counts what the portrait
+costs the wire while the rows beside it keep changing.
 """
 from __future__ import annotations
 
@@ -10,14 +12,21 @@ import base64
 import json
 import os
 import re
+import select
 import struct
 import sys
+import threading
+import time
 import zlib
+from collections.abc import Iterator
 from pathlib import Path
 
 import test_tui_keyboard_input as h
 
 SOURCE_MODULES = (
+    # The running turn's progress row and the mark that steps on it.
+    "bin/masc_tui_answering.ml",
+    "bin/masc_tui_keeper_chat_transcript.ml",
     "bin/masc_tui_chat_portrait.ml",
     "bin/masc_tui_keeper_portrait.ml",
     "bin/masc_tui_portrait_view.ml",
@@ -40,7 +49,20 @@ DELETE = b"\x1b_Ga=d,d=I,i=42,q=2\x1b\\"
 KITTY_REPLIES = b"\x1b[6;20;10t" + h.GRAPHICS_SUPPORTED_REPLY
 PLACED = re.compile(rb"\x1b7\x1b\[(\d+);(\d+)H(.*?)\x1b8", re.S)
 CHUNK = re.compile(rb"\x1b_G([^;]*);([^\x1b]*)\x1b\\")
+# A put names pixels the terminal already holds: no payload, no format.
+PUT = re.compile(rb"\x1b_Ga=p,([^;\x1b]*)\x1b\\")
+PUT_KEYS = {b"i": IMAGE_ID, b"p": b"1", b"C": b"1", b"r": b"8", b"q": b"2"}
 HALF_BLOCKS = "▀▄"
+PORTRAIT_ROWS = 8  # png_transfers validates r=8.
+ROW_WRITE = re.compile(rb"\x1b\[(\d+);1H\x1b\[0m\x1b\[2K")  # Frame_presenter.append_row
+CHAT = "/api/v1/keepers/chat/stream"
+PROGRESS = b"IN PROGRESS"
+RUNNING_MARKS = tuple(mark.encode() for mark in "◐◓◑◒")  # Masc_tui_answering.running_frames
+# Motion steps (150 ms each) the running turn is watched for, and the least
+# number of frames that must rewrite a row beside the portrait for the count
+# to say anything about it.
+MOTION_STEPS = 8
+STREAMED_LINES = 12
 
 
 def chat_title(name: bytes) -> bytes:
@@ -112,44 +134,96 @@ def png_transfers(output: bytes) -> list[tuple[int, int, bytes]]:
     return pictures
 
 
-def assert_typing_repaints(output: bytes, *, row: int, column: int, image: bytes) -> None:
-    """Attribute each transfer to its immediately preceding text presentation.
+def portrait_put(placement: re.Match[bytes]) -> tuple[int, int] | None:
+    """Where a put of the keeper portrait stands, or None for anything else."""
+    put = PUT.fullmatch(placement[3])
+    if put is None:
+        return None
+    fields = dict(item.split(b"=", 1) for item in put[1].split(b",") if b"=" in item)
+    if fields.get(b"i") != IMAGE_ID:
+        return None
+    assert fields == PUT_KEYS, f"portrait put is not the transferred placement: {fields!r}"
+    return int(placement[1]), int(placement[2])
 
-    The interval includes asynchronous updates, so proximity to a keypress
-    alone is not causation. Match actual frame bytes, using the full-row erase
-    prefix emitted by Frame_presenter.append_row, not ordinary cursor moves.
-    Each repaint can explain only one transfer of this unchanged portrait.
+
+def portrait_resends(output: bytes, *, row: int, column: int, image: bytes,
+                     what: str) -> tuple[list[dict[str, object]], int, int]:
+    """Transfers of the unchanged portrait that nothing but a clear explains.
+
+    A clear (ESC [2J) takes every image, and Kitty and Ghostty free the pixels
+    with it, so only a transfer brings the picture back -- one transfer for
+    each clear, the first after it. Nothing else a frame writes is a reason to
+    send the pixels again. A put of the held pixels is counted but allowed: it
+    is a few dozen bytes. Returns the evidence for each unexplained transfer,
+    the transfers a clear explains, and the puts.
     """
+    unexplained: list[dict[str, object]] = []
+    after_clear = puts = 0
     previous_transfer_end = 0
-    image_rows = set(range(row, row + 8))  # png_transfers validates r=8.
-    row_write = re.compile(rb"\x1b\[(\d+);1H\x1b\[0m\x1b\[2K")
     for placement in PLACED.finditer(output):
+        put = portrait_put(placement)
+        if put is not None:
+            assert put == (row, column), f"{what} moved the portrait"
+            puts += 1
+            continue
         pictures = png_transfers(placement[0])
         if not pictures:
             continue
+        for sent_row, sent_column, sent_image in pictures:
+            assert (sent_row, sent_column) == (row, column), f"{what} moved the portrait"
+            assert sent_image == image, f"{what} changed the conversation's portrait"
         frame_start = output.rfind(h.FRAME_START, 0, placement.start())
-        frame_end = output.find(h.FRAME_END, frame_start, placement.start()) if frame_start >= 0 else -1
-        complete = frame_end >= 0
-        frame = output[frame_start:frame_end + len(h.FRAME_END)] if complete else b""
+        frame = output[frame_start:placement.start()] if frame_start >= 0 else b""
+        # A clear that already explained a transfer explains no second one.
         fresh = frame_start >= previous_transfer_end
-        rewritten = sorted({int(match[1]) for match in row_write.finditer(frame)})
-        overlap = sorted(image_rows.intersection(rewritten))
-        full_clear = h.FULL_REDRAW in frame
-        evidence = {
-            "transfer_offset": placement.start(), "frame_offset": frame_start,
-            "complete_frame": complete, "fresh_frame": fresh,
-            "full_clear": full_clear, "rewritten_rows": rewritten,
-            "portrait_rows": sorted(image_rows), "overlap_rows": overlap,
-        }
-        # No image payload or full terminal dump: one bounded row summary per
-        # transfer, including the evidence for a rejected unexplained repeat.
-        print("portrait typing-interval repaint: " + json.dumps(evidence, sort_keys=True), flush=True)
-        for typed_row, typed_column, typed_image in pictures:
-            assert (typed_row, typed_column) == (row, column), "typing moved the portrait"
-            assert typed_image == image, "typing changed the conversation's portrait"
-        assert complete and fresh, f"portrait transfer has no new complete presentation: {evidence}"
-        assert full_clear or overlap, f"portrait retransmit has no overlapping repaint: {evidence}"
         previous_transfer_end = placement.end()
+        if fresh and h.FULL_REDRAW in frame:
+            after_clear += 1
+            continue
+        # A bounded row summary per transfer, no image payload or screen dump.
+        unexplained.append({
+            "transfer_offset": placement.start(), "frame_offset": frame_start, "fresh_frame": fresh,
+            "rewritten_rows": sorted({int(match[1]) for match in ROW_WRITE.finditer(frame)}),
+            "portrait_rows": list(range(row, row + PORTRAIT_ROWS)),
+        })
+    return unexplained, after_clear, puts
+
+
+def presentations(output: bytes) -> list[bytes]:
+    """Every complete text frame in ``output``, a partial first one left out."""
+    frames = []
+    start = output.find(h.FRAME_START)
+    while start >= 0:
+        end = output.find(h.FRAME_END, start)
+        if end < 0:
+            break
+        frames.append(output[start:end + len(h.FRAME_END)])
+        start = output.find(h.FRAME_START, end)
+    return frames
+
+
+def written_rows(frame: bytes) -> dict[int, bytes]:
+    """The 1-based rows a frame erased and wrote again, with what it wrote."""
+    matches = list(ROW_WRITE.finditer(frame))
+    return {int(match[1]): frame[match.end():matches[index + 1].start() if index + 1 < len(matches) else len(frame)]
+            for index, match in enumerate(matches)}
+
+
+def motion_steps(output: bytes) -> list[int]:
+    """The row of every frame that moved the running turn's mark on a step."""
+    steps, last = [], None
+    for frame in presentations(output):
+        for row, text in written_rows(frame).items():
+            mark = next((mark for mark in RUNNING_MARKS if mark in text), None)
+            if PROGRESS in text and mark is not None and mark != last:
+                steps.append(row)
+                last = mark
+    return steps
+
+
+def frames_beside(output: bytes, portrait_rows: set[int]) -> int:
+    """Frames that rewrote at least one row the portrait stands on."""
+    return sum(1 for frame in presentations(output) if portrait_rows.intersection(written_rows(frame)))
 
 
 def open_chat(process, fd, output) -> None:
@@ -242,10 +316,12 @@ def pixels_follow_conversation(binary: str) -> None:
             h.send_and_wait(process, fd, output, bytes([key]), h.composer_showing(draft[:count]))
         assert h.drain_until_quiet(process, fd, output), "chat did not settle after typing measurement"
         typing_output = bytes(output[typing_start:])
-        typing_transfers = png_transfers(typing_output)
-        print(f"portrait PNG transfers during {len(draft)} typed characters: {len(typing_transfers)}; "
-              f"full redraw: {h.FULL_REDRAW in typing_output}")
-        assert_typing_repaints(typing_output, row=row, column=column, image=alpha)
+        resent, after_clear, puts = portrait_resends(typing_output, row=row, column=column, image=alpha,
+                                                     what="typing")
+        print(f"portrait during {len(draft)} typed characters: {len(resent)} PNG transfers without a clear, "
+              f"{after_clear} after one, {puts} puts; "
+              f"frames beside it: {frames_beside(typing_output, set(range(row, row + PORTRAIT_ROWS)))}", flush=True)
+        assert not resent, f"typing sent the unchanged portrait's pixels again: {resent[:3]}"
         assert_chat_intact(screen(output), b"alpha")
         h.send_and_wait(process, fd, output, b"\x1b[D", b"Enter:open")
         cursor_start = len(output)
@@ -275,11 +351,109 @@ def pixels_follow_conversation(binary: str) -> None:
         h.wait_for_output(process, fd, output, DELETE, start=start, timeout=3.0)
         h.drain_until_quiet(process, fd, output)
         assert_hidden(screen(output))
-        assert not png_transfers(bytes(output[output.index(DELETE, start):])), "hidden portrait was placed again"
+        hidden = bytes(output[output.index(DELETE, start):])
+        assert not png_transfers(hidden), "hidden portrait was placed again"
+        assert not any(portrait_put(placement) for placement in PLACED.finditer(hidden)), "hidden portrait was put back"
         close_chat(process, fd, output)
 
     h.run_terminal_scenario(binary, description="chat PNG portrait follows the open Keeper instead of the roster cursor",
                             interact=interact, http_fixtures=h.keeper_runtime_http_fixtures(),
+                            terminal_cols=COLUMNS, preload_input=KITTY_REPLIES)
+
+
+def running_turn_keeps_the_portrait(binary: str) -> None:
+    """A turn stays running beside the portrait: its mark steps every 150 ms,
+    then its reply streams in line by line. The picture itself never changes,
+    so none of that may send its pixels again."""
+    streaming = threading.Event()
+    streamed = threading.Event()
+    finishing = threading.Event()
+    lines = [f"streamed-{index:02d}" for index in range(1, STREAMED_LINES + 1)]
+
+    def respond(body: bytes) -> h.StreamingHttpResponse:
+        events = [json.loads(block.removeprefix(b"data: "))
+                  for block in h.keeper_chat_succeeded_response(body).body.split(b"\n\n") if block]
+        kinds = [event["type"] for event in events]
+        started, content = kinds.index("RUN_STARTED"), kinds.index("TEXT_MESSAGE_CONTENT")
+        reply = "\n".join(lines)
+        for event in events:
+            if event.get("name") == "KEEPER_REPLY_DETAILS":
+                event["value"]["reply"] = reply
+
+        def sse(batch: list[dict[str, object]]) -> bytes:
+            return b"".join(b"data: " + json.dumps(event).encode() + b"\n\n" for event in batch)
+
+        def chunks() -> Iterator[bytes]:
+            yield sse(events[:started + 1])
+            if not streaming.wait(timeout=30):
+                return
+            yield sse(events[started + 1:content])
+            for index, line in enumerate(lines):
+                yield sse([{**events[content], "delta": ("\n" if index else "") + line}])
+                time.sleep(0.15)
+            streamed.set()
+            if finishing.wait(timeout=30):
+                yield sse(events[content + 1:])
+
+        return h.StreamingHttpResponse(chunks)
+
+    def read_until(process, fd, output, done, what: str, timeout: float = 10.0) -> None:
+        deadline = time.monotonic() + timeout
+        while not done():
+            assert process.poll() is None, f"TUI exited while {what}"
+            assert time.monotonic() < deadline, f"timed out while {what}"
+            select.select([fd], [], [], 0.05)
+            h.read_available(fd, output)
+
+    def interact(process, fd, _slave, output, _base):
+        try:
+            open_chat(process, fd, output)
+            pictures = png_transfers(bytes(output))
+            assert pictures, "chat sent no keeper portrait"
+            row, column, alpha = pictures[-1]
+            portrait_rows = set(range(row, row + PORTRAIT_ROWS))
+            h.send_and_wait(process, fd, output, b"steady", h.composer_showing(b"steady"))
+            start = len(output)
+            h.send_and_wait(process, fd, output, b"\r", PROGRESS)
+            read_until(process, fd, output, lambda: len(motion_steps(bytes(output[start:]))) >= MOTION_STEPS,
+                       f"watching {MOTION_STEPS} motion steps of the running turn")
+            spinning = bytes(output[start:])
+            streaming.set()
+            read_until(process, fd, output, streamed.is_set, "streaming the reply")
+            finishing.set()
+            # The mark steps every 150 ms while the turn runs, so quiet is
+            # the turn having finished.
+            assert h.drain_until_quiet(process, fd, output), "the finished turn kept the screen moving"
+            assert PROGRESS not in b"\n".join(screen(output).values()), "the turn is still drawn as running"
+            window = bytes(output[start:])
+            assert lines[-1].encode() in window, "the streamed reply never reached the screen"
+            steps = motion_steps(spinning)
+            evidence = {
+                "motion_steps": len(steps), "progress_rows": sorted(set(steps)),
+                "portrait_rows": sorted(portrait_rows),
+                "frames_beside_while_spinning": frames_beside(spinning, portrait_rows),
+                "frames_beside_in_turn": frames_beside(window, portrait_rows),
+                "full_redraw": h.FULL_REDRAW in window,
+            }
+            resent, after_clear, puts = portrait_resends(window, row=row, column=column, image=alpha,
+                                                         what="running turn")
+            evidence.update(resent_without_clear=len(resent), transfers_after_clear=after_clear, puts=puts)
+            print("portrait during a running turn: " + json.dumps(evidence, sort_keys=True), flush=True)
+            # Without rows beside the picture changing, a zero would say
+            # nothing about the picture. The whole turn counts: where the
+            # progress row lands is the layout's choice, so its rows are
+            # recorded above rather than required beside the picture.
+            assert evidence["frames_beside_in_turn"] >= MOTION_STEPS, f"the turn barely touched the portrait's rows: {evidence}"
+            assert not resent, f"the running turn sent the unchanged portrait's pixels again: {resent[:3]}"
+            assert_chat_intact(screen(output), b"alpha")
+            close_chat(process, fd, output)
+        finally:
+            streaming.set()
+            finishing.set()
+
+    h.run_terminal_scenario(binary, description="a running turn beside the chat portrait never resends its pixels",
+                            interact=interact,
+                            http_fixtures={**h.keeper_runtime_http_fixtures(), CHAT: h.RequestHttpResponse(respond)},
                             terminal_cols=COLUMNS, preload_input=KITTY_REPLIES)
 
 
@@ -354,7 +528,8 @@ if __name__ == "__main__":
     binary = str(Path(sys.argv[1]).resolve())
     mosaic_resizes(binary)
     pixels_follow_conversation(binary)
+    running_turn_keeps_the_portrait(binary)
     no_colour(binary)
     hidden_roster_releases_focus(binary, resize=True)
     hidden_roster_releases_focus(binary, resize=False)
-    print("tui chat portrait: PASS (5 scenarios)")
+    print("tui chat portrait: PASS (6 scenarios)")

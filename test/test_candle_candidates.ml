@@ -355,6 +355,37 @@ let test_a_source_that_raises_does_not_stop_the_other_payouts () =
   | _ -> fail "expected goal-1 to wait and goal-2 to be prepared"
 ;;
 
+(* A cancellation is not one payout's failure. It ends the pass, so the payouts
+   after it are not prepared while the server is stopping. *)
+let test_a_cancellation_from_a_source_ends_the_pass () =
+  with_base_path
+  @@ fun base_path ->
+  enable base_path;
+  seed
+    base_path
+    [ snapshot ~goal_id:"goal-1" [ "task-1" ]
+    ; owed ~goal_id:"goal-1" ()
+    ; snapshot ~goal_id:"goal-2" ~request_id:"req-2" [ "task-2" ]
+    ; owed ~goal_id:"goal-2" ~request_id:"req-2" ()
+    ];
+  let cancelled =
+    sources
+      ~lookups:(fun ~goal_id task_ids ->
+        if String.equal goal_id "goal-1"
+        then raise (Eio.Cancel.Cancelled (Failure "the switch ended"))
+        else Ok (List.map (fun id -> id, done_by "keeper-a") task_ids))
+      ()
+  in
+  (match drain ~sources:cancelled base_path with
+   | exception Eio.Cancel.Cancelled _ -> ()
+   | Ok _ | Error _ -> fail "the cancellation was taken for one payout's failure");
+  check
+    (list string)
+    "goal-2 was not prepared"
+    [ "snapshot"; "payout_owed"; "snapshot"; "payout_owed" ]
+    (kinds base_path)
+;;
+
 (* The Tasks are read outside the ledger's lock. If the payout closes meanwhile,
    the rows are not written. *)
 let test_a_payout_that_closed_while_the_tasks_were_read_is_left_alone () =
@@ -616,6 +647,10 @@ let () =
             "a source that raises does not stop the other payouts"
             `Quick
             test_a_source_that_raises_does_not_stop_the_other_payouts
+        ; test_case
+            "a cancellation from a source ends the pass"
+            `Quick
+            test_a_cancellation_from_a_source_ends_the_pass
         ; test_case
             "a payout that closed while the tasks were read is left alone"
             `Quick

@@ -17,11 +17,14 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 import copy
+import calendar
+from datetime import date
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from hashlib import sha256
 import json
 import re
+import unicodedata
 from typing import TypeAlias, Union, assert_never
 
 
@@ -280,91 +283,284 @@ def _read_header(value: JsonValue) -> tuple[str, str]:
             row=1,
         )
     session_id = value["session_id"]
-    if not (isinstance(session_id, str) and session_id != ""):
+    if not (isinstance(session_id, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,64}", session_id) is not None):
         raise SkillLedgerError(
             SkillLedgerFault.MALFORMED_HEADER,
-            "the header session_id is not a non-empty string",
+            "the header session_id is not a valid Trace_id",
             row=1,
         )
     return workspace_key, session_id
 
 
-def _parse_activation(event: JsonObject, row: int) -> _ActivationRecorded:
-    activation = _object(event["activation"], "activation", row)
-    if "delivery" not in activation:
-        raise _malformed("activation has no delivery field", row)
-    actions = activation.get("actions")
+# Wire validation mirrors Keeper_skill_activation_ledger.decode_* and the
+# referenced identifier/path contracts. Validate before applying any evidence.
+_OCAML_INT_MAX = (1 << 62) - 1
+_TRIM = " \t\r\n\f"
+
+
+def _nonblank(value: JsonObject, name: str, what: str, row: int) -> str:
+    text = _string(value, name, what, row)
+    if not text.strip(_TRIM):
+        raise _malformed(f"{what}.{name} is blank", row)
+    return text
+
+
+def _natural(value: JsonObject, name: str, what: str, row: int) -> int:
+    number = _integer(value, name, what, row)
+    if not 0 <= number <= _OCAML_INT_MAX:
+        raise _malformed(f"{what}.{name} is not a nonnegative OCaml integer", row)
+    return number
+
+
+def _digest(value: JsonObject, name: str, what: str, row: int) -> None:
+    if _WORKSPACE_KEY_RE.fullmatch(_string(value, name, what, row)) is None:
+        raise _malformed(f"{what}.{name} is not a lowercase SHA-256 digest", row)
+
+
+def _portable(value: JsonObject, name: str, what: str, row: int) -> None:
+    text = _string(value, name, what, row)
+    if text in (".", "..") or re.fullmatch(r"[A-Za-z0-9._-]+", text) is None:
+        raise _malformed(f"{what}.{name} is not a portable name", row)
+
+
+def _timestamp(value: JsonObject, name: str, what: str, row: int) -> None:
+    text = _string(value, name, what, row)
+    match = re.fullmatch(
+        r"([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):"
+        r"([0-9]{2})(?:\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})", text
+    )
+    if match is None:
+        raise _malformed(f"{what}.{name} is not strict RFC3339", row)
+    year, month, day, hour, minute, second = map(int, match.groups()[:6])
+    zone = match[7]
+    zh, zm = (0, 0) if zone == "Z" else (int(zone[1:3]), int(zone[4:6]))
+    # Ptime accepts year zero and leap seconds, and bounds the UTC result to
+    # years 0000..9999. datetime.fromisoformat alone has a different contract.
+    if (not 1 <= month <= 12 or not 1 <= day <= calendar.monthrange(year, month)[1]
+            or hour > 23 or minute > 59 or second > 60 or zh > 23 or zm > 59):
+        raise _malformed(f"{what}.{name} is not a valid RFC3339 date/time", row)
+    ordinal = (date(year, month, day).toordinal() if year else
+               date(400, month, day).toordinal() - date(400, 1, 1).toordinal() - 365)
+    offset = (zh * 60 + zm) * 60 * (-1 if zone.startswith("-") else 1)
+    utc = ordinal * 86400 + hour * 3600 + minute * 60 + second - offset
+    if not -365 * 86400 <= utc < (date.max.toordinal() + 1) * 86400:
+        raise _malformed(f"{what}.{name} is outside the RFC3339 timestamp range", row)
+
+
+def _turn_ref(value: JsonObject, name: str, session: str, row: int,
+              *, positive: bool = False) -> None:
+    text = _string(value, name, "turn reference", row)
+    trace, separator, suffix = text.rpartition("#")
+    # Ids.Turn_ref uses OCaml int_of_string, including base prefixes and '_'.
+    match = re.fullmatch(r"([+-]?)([0-9][0-9_]*|0[xX][0-9a-fA-F][0-9a-fA-F_]*|"
+                         r"0[oO][0-7][0-7_]*|0[bB][01][01_]*)", suffix)
+    if not separator or not trace or match is None:
+        raise _malformed(f"{name} is not a turn reference", row)
+    digits = match[2].replace("_", "")
+    try:
+        number = int(digits, 0 if len(digits) > 1 and digits[1] in "xXoObB" else 10)
+    except ValueError as error:
+        raise _malformed(f"{name} has an invalid absolute turn", row) from error
+    if match[1] == "-":
+        number = -number
+    if not -(1 << 62) <= number <= _OCAML_INT_MAX or (positive and number <= 0):
+        raise _malformed(f"{name} has an invalid absolute turn", row)
+    if trace != session:
+        raise _malformed(f"{name} belongs to another session", row)
+    value[name] = f"{trace}#{number}"
+
+
+def _identity(value: JsonValue, row: int) -> None:
+    identity = _exact_object(value, frozenset({"source_id", "package_id", "name"}),
+                             "identity", row)
+    _portable(identity, "source_id", "identity", row)
+    package = _string(identity, "package_id", "identity", row)
+    if package in (".", "..") or any(c in package for c in "/\\\0"):
+        raise _malformed("identity.package_id is not a directory component", row)
+    name = _string(identity, "name", "identity", row)
+    if (unicodedata.normalize("NFKC", name.strip()) != name or len(name) > 64
+            or name.lower() != name or name.startswith("-") or name.endswith("-")
+            or "--" in name or any(c != "-" and unicodedata.category(c)[0] not in "LN"
+                                    for c in name)):
+        raise _malformed("identity.name is not a canonical Skill name", row)
+
+
+def _invocation(value: JsonValue, row: int) -> None:
+    invocation = _object(value, "invocation", row)
+    kind = invocation.get("kind")
+    if kind not in ("instruction", "composition"):
+        raise _malformed("unknown invocation kind", row)
+    payload = "served_content" if kind == "instruction" else "tool_name"
+    _exact_object(invocation, frozenset({"kind", "origin", payload}), "invocation", row)
+    origin = _object(invocation["origin"], "origin", row)
+    if origin.get("kind") == f"session_{kind}":
+        _exact_object(origin, frozenset({"kind"}), "origin", row)
+    elif origin.get("kind") == f"task_{kind}":
+        _exact_object(origin, frozenset({"kind", "task_ids"}), "origin", row)
+        ids = origin["task_ids"]
+        if (not isinstance(ids, list) or not ids
+                or any(not isinstance(task, str) or len(task) > 128
+                       or re.fullmatch(r"[A-Za-z0-9_:-]+", task) is None for task in ids)
+                or len(set(ids)) != len(ids)):
+            raise _malformed("origin.task_ids is not a nonempty unique Task id set", row)
+    else:
+        raise _malformed("origin kind does not match invocation", row)
+    if kind == "composition":
+        _portable(invocation, "tool_name", "invocation", row)
+        return
+    served = _object(invocation["served_content"], "served_content", row)
+    match served.get("kind"):
+        case "skill_body":
+            fields = {"kind", "bytes", "sha256"}
+        case "skill_resource":
+            fields = {"kind", "relative_path", "bytes", "sha256"}
+            path = _string(served, "relative_path", "served_content", row)
+            if ("\\" in path or "\0" in path
+                    or any(part in ("", ".", "..") for part in path.split("/"))):
+                raise _malformed("served_content.relative_path is not a Skill resource path", row)
+        case _:
+            raise _malformed("unknown served_content kind", row)
+    _exact_object(served, frozenset(fields), "served_content", row)
+    _natural(served, "bytes", "served_content", row)
+    _digest(served, "sha256", "served_content", row)
+
+
+def _delivery(value: JsonValue, row: int) -> tuple[JsonObject, _BoundaryKind, int]:
+    delivery = _exact_object(value, frozenset({"boundary", "runtime_id", "delivered_at",
+                                             "content_bytes", "content_sha256"}), "delivery", row)
+    boundary = _exact_object(delivery["boundary"], frozenset({"kind", "agent_core_turn"}),
+                             "delivery.boundary", row)
+    try:
+        kind = _BoundaryKind(boundary["kind"])
+    except (ValueError, TypeError) as error:
+        raise _malformed("unknown delivery boundary", row) from error
+    turn = _natural(boundary, "agent_core_turn", "delivery.boundary", row)
+    _nonblank(delivery, "runtime_id", "delivery", row)
+    _timestamp(delivery, "delivered_at", "delivery", row)
+    _natural(delivery, "content_bytes", "delivery", row)
+    _digest(delivery, "content_sha256", "delivery", row)
+    return delivery, kind, turn
+
+
+def _action_identity(value: JsonValue, row: int) -> JsonObject:
+    identity = _object(value, "action.identity", row)
+    match identity.get("kind"):
+        case "call_id":
+            _exact_object(identity, frozenset({"kind", "call_id"}), "action.identity", row)
+            _nonblank(identity, "call_id", "action.identity", row)
+        case "provider_step":
+            _exact_object(identity, frozenset({"kind", "conversation_id", "step_index"}),
+                          "action.identity", row)
+            _nonblank(identity, "conversation_id", "action.identity", row)
+            _natural(identity, "step_index", "action.identity", row)
+        case _:
+            raise _malformed("unknown action identity", row)
+    return identity
+
+
+def _action(value: JsonValue, row: int) -> JsonObject:
+    action = _exact_object(value, frozenset({"identity", "tool_name", "runtime_id",
+                                           "agent_core_turn", "observed_at"}), "action", row)
+    _action_identity(action["identity"], row)
+    _portable(action, "tool_name", "action", row)
+    _nonblank(action, "runtime_id", "action", row)
+    _natural(action, "agent_core_turn", "action", row)
+    _timestamp(action, "observed_at", "action", row)
+    return action
+
+
+def _parse_activation(event: JsonObject, row: int, session: str) -> _ActivationRecorded:
+    activation = _exact_object(event["activation"], frozenset({
+        "identity", "content_revision", "snapshot_revision", "turn_ref", "runtime_id",
+        "skill_tool_use_id", "agent_core_turn", "invocation", "delivery", "actions",
+        "activated_at"}), "activation", row)
+    _identity(activation["identity"], row)
+    _digest(activation, "content_revision", "activation", row)
+    _digest(activation, "snapshot_revision", "activation", row)
+    _turn_ref(activation, "turn_ref", session, row, positive=True)
+    _nonblank(activation, "runtime_id", "activation", row)
+    tool_id = _nonblank(activation, "skill_tool_use_id", "activation", row)
+    turn = _natural(activation, "agent_core_turn", "activation", row)
+    _invocation(activation["invocation"], row)
+    _timestamp(activation, "activated_at", "activation", row)
+    actions = activation["actions"]
     if not isinstance(actions, list):
         raise _malformed("activation.actions is not an array", row)
-    return _ActivationRecorded(
-        skill_tool_use_id=_string(activation, "skill_tool_use_id", "activation", row),
-        turn_ref=_string(activation, "turn_ref", "activation", row),
-        agent_core_turn=_integer(activation, "agent_core_turn", "activation", row),
-        carries_evidence=activation["delivery"] is not None or actions != [],
-        activation=activation,
-        actions=actions,
-    )
+    identities = []
+    for value in actions:
+        identity = _action(value, row)["identity"]
+        if identity in identities:
+            raise SkillLedgerError(SkillLedgerFault.DUPLICATE_ACTION_IDENTITY,
+                                   "activation repeats an action identity", row=row)
+        identities.append(identity)
+    if activation["delivery"] is not None:
+        _, boundary, delivery_turn = _delivery(activation["delivery"], row)
+        if _delivery_precedes_activation(boundary, delivery_turn, turn):
+            raise SkillLedgerError(SkillLedgerFault.INVALID_DELIVERY_AGENT_CORE_TURN,
+                                   "delivery precedes activation", row=row)
+        if any(action["agent_core_turn"] < delivery_turn for action in actions):
+            raise SkillLedgerError(SkillLedgerFault.INVALID_ACTION_AGENT_CORE_TURN,
+                                   "action precedes delivery", row=row)
+    elif actions:
+        raise SkillLedgerError(SkillLedgerFault.INVALID_DELIVERY_AGENT_CORE_TURN,
+                               "actions have no delivery", row=row)
+    return _ActivationRecorded(tool_id, activation["turn_ref"], turn,
+                               activation["delivery"] is not None or actions != [],
+                               activation, actions)
 
 
 def _parse_delivery(value: JsonValue, row: int) -> _DeliveryObserved:
-    entry = _exact_object(
-        value,
-        frozenset({"skill_tool_use_id", "delivery"}),
-        "delivery observation",
-        row,
-    )
-    delivery = _object(entry["delivery"], "delivery", row)
-    boundary = _object(delivery.get("boundary"), "delivery.boundary", row)
-    kind = boundary.get("kind")
-    if not isinstance(kind, str):
-        raise _malformed("delivery.boundary.kind is not a string", row)
-    try:
-        boundary_kind = _BoundaryKind(kind)
-    except ValueError as error:
-        raise _malformed(f"delivery boundary kind {kind!r} is unknown", row) from error
+    entry = _exact_object(value, frozenset({"skill_tool_use_id", "delivery"}),
+                          "delivery observation", row)
+    delivery, boundary, turn = _delivery(entry["delivery"], row)
     return _DeliveryObserved(
-        skill_tool_use_id=_reference(
-            entry["skill_tool_use_id"], "delivery observation.skill_tool_use_id", row
-        ),
-        boundary=boundary_kind,
-        boundary_turn=_integer(boundary, "agent_core_turn", "delivery.boundary", row),
-        delivery=delivery,
-    )
+        _reference(entry["skill_tool_use_id"], "delivery observation.skill_tool_use_id", row),
+        boundary, turn, delivery)
 
 
 def _parse_action(event: JsonObject, row: int) -> _ActionObserved:
     targets = event["skill_tool_use_ids"]
     if not isinstance(targets, list):
         raise _malformed("action_observed.skill_tool_use_ids is not an array", row)
-    action = _object(event["action"], "action", row)
+    action = _action(event["action"], row)
     return _ActionObserved(
-        skill_tool_use_ids=tuple(
-            _reference(target, "action_observed.skill_tool_use_ids[]", row)
-            for target in targets
-        ),
-        identity=_object(action.get("identity"), "action.identity", row),
-        agent_core_turn=_integer(action, "agent_core_turn", "action", row),
-        action=action,
-    )
+        tuple(_reference(target, "action_observed.skill_tool_use_ids[]", row) for target in targets),
+        action["identity"], action["agent_core_turn"], action)
 
 
-def _parse_rejection(event: JsonObject, row: int) -> _TransitionRejected:
+def _parse_rejection(event: JsonObject, row: int, session: str) -> _TransitionRejected:
     rejection = _object(event["rejection"], "rejection", row)
-    return _TransitionRejected(
-        skill_tool_use_id=_string(rejection, "skill_tool_use_id", "rejection", row),
-        activation_turn_ref=_string(rejection, "activation_turn_ref", "rejection", row),
-        rejection=rejection,
-    )
+    fields = {"kind", "skill_tool_use_id", "activation_turn_ref", "observed_turn_ref",
+              "observed_agent_core_turn", "observed_at"}
+    match rejection.get("kind"):
+        case "delivery_order":
+            fields.add("activation_agent_core_turn")
+            _natural(rejection, "activation_agent_core_turn", "rejection", row)
+        case "delivery_conflict":
+            pass
+        case "action_before_delivery":
+            fields.update({"action_identity", "tool_name"})
+            _action_identity(rejection.get("action_identity"), row)
+            _portable(rejection, "tool_name", "rejection", row)
+        case _:
+            raise _malformed("unknown rejection kind", row)
+    _exact_object(rejection, frozenset(fields), "rejection", row)
+    tool_id = _nonblank(rejection, "skill_tool_use_id", "rejection", row)
+    _turn_ref(rejection, "activation_turn_ref", session, row)
+    _turn_ref(rejection, "observed_turn_ref", session, row)
+    _natural(rejection, "observed_agent_core_turn", "rejection", row)
+    _timestamp(rejection, "observed_at", "rejection", row)
+    return _TransitionRejected(tool_id, rejection["activation_turn_ref"], rejection)
 
 
-def _parse_event(value: JsonValue, row: int) -> _Event:
+def _parse_event(value: JsonValue, row: int, session: str) -> _Event:
     """The event one row after the header records."""
     event = _object(value, "event", row)
     kind = event.get("kind")
     match kind:
         case "activation_recorded":
             fields = frozenset({"kind", "activation"})
-            return _parse_activation(_exact_object(event, fields, kind, row), row)
+            return _parse_activation(_exact_object(event, fields, kind, row), row, session)
         case "deliveries_observed":
             fields = frozenset({"kind", "deliveries"})
             entries = _exact_object(event, fields, kind, row)["deliveries"]
@@ -378,7 +574,7 @@ def _parse_event(value: JsonValue, row: int) -> _Event:
             return _parse_action(_exact_object(event, fields, kind, row), row)
         case "transition_rejected":
             fields = frozenset({"kind", "rejection"})
-            return _parse_rejection(_exact_object(event, fields, kind, row), row)
+            return _parse_rejection(_exact_object(event, fields, kind, row), row, session)
         case _:
             raise SkillLedgerError(
                 SkillLedgerFault.INVALID_EVENT_KIND,
@@ -558,7 +754,7 @@ def ledger_revision(ledger: Mapping[str, JsonValue]) -> str:
         raise SkillLedgerError(
             SkillLedgerFault.MALFORMED_LEDGER, "skill ledger.workspace_key is empty"
         )
-    if not (isinstance(session_id, str) and session_id != ""):
+    if not (isinstance(session_id, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,64}", session_id) is not None):
         raise SkillLedgerError(
             SkillLedgerFault.MALFORMED_LEDGER, "skill ledger.session_id is empty"
         )
@@ -596,7 +792,7 @@ def fold_event_log(raw: bytes) -> JsonObject | None:
     workspace_key, session_id = _read_header(_parse_row(rows[0], 1))
     fold = _Fold()
     for number, row in enumerate(rows[1:], start=2):
-        _apply(fold, _parse_event(_parse_row(row, number), number), number)
+        _apply(fold, _parse_event(_parse_row(row, number), number, session_id), number)
     return {
         "schema": LEDGER_SCHEMA,
         "workspace_key": workspace_key,

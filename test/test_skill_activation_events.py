@@ -153,7 +153,7 @@ class SkillActivationEventsTest(unittest.TestCase):
         self.assertEqual(folded["revision"], events.ledger_revision(folded))
 
     def test_a_header_alone_is_an_empty_ledger_hashed_as_compact_utf8(self):
-        session = "trace-é"
+        session = "trace-ascii"
         raw = log_fixture.encode_rows([log_fixture.header_row(WORKSPACE, session)])
 
         folded = events.fold_event_log(raw)
@@ -443,6 +443,198 @@ class SkillActivationEventsTest(unittest.TestCase):
         self.assertEqual(
             events.ledger_revision(value), hashlib.sha256(canonical.encode()).hexdigest()
         )
+
+    def test_complete_rows_cannot_omit_any_evidence_field(self):
+        # All rows are newline-terminated: these are corrupt evidence, not a
+        # writer's partial tail. Exercise the public reader used by proof tools.
+        recorded = log_fixture.recorded_row(activation("call-a", 7))
+        delivered = log_fixture.delivery_row("call-a", delivery("model_response", 8))
+        acted = log_fixture.action_row(["call-a"], action(CALL_ONE, 8))
+        rejected = log_fixture.rejection_row(ledger()["transition_rejections"][0])
+        cases = [
+            ([header()], recorded, ("activation",)),
+            ([header()], recorded, ("activation", "identity")),
+            ([header()], recorded, ("activation", "invocation")),
+            ([header()], recorded, ("activation", "invocation", "origin")),
+            ([header()], recorded, ("activation", "invocation", "served_content")),
+            ([header(), recorded], delivered, ("deliveries", 0, "delivery")),
+            ([header(), recorded], delivered, ("deliveries", 0, "delivery", "boundary")),
+            ([header(), recorded, delivered], acted, ("action",)),
+            ([header(), recorded, delivered], acted, ("action", "identity")),
+            ([header(), recorded], rejected, ("rejection",)),
+        ]
+        for prefix, event, path in cases:
+            obj = event
+            for key in path:
+                obj = obj[key]
+            for field in (*obj, "unexpected"):
+                changed = copy.deepcopy(event)
+                target = changed
+                for key in path:
+                    target = target[key]
+                if field == "unexpected":
+                    target[field] = None
+                else:
+                    del target[field]
+                with self.subTest(path=path, field=field):
+                    with self.assertRaises(events.SkillLedgerError) as caught:
+                        events.fold_event_log(log_fixture.encode_rows(prefix + [changed]))
+                    self.assertIs(caught.exception.fault, Fault.MALFORMED_EVENT)
+                    self.assertEqual(caught.exception.row, len(prefix) + 1)
+
+    def test_nested_invalid_evidence_is_refused_before_projection(self):
+        recorded = log_fixture.recorded_row(activation("call-a", 7))
+        delivered = log_fixture.delivery_row("call-a", delivery("model_response", 8))
+        acted = log_fixture.action_row(["call-a"], action(CALL_ONE, 8))
+        rejected = log_fixture.rejection_row(ledger()["transition_rejections"][0])
+        cases = [
+            (recorded, ("activation", "identity", "source_id"), ["..", "bad/name", 1]),
+            (recorded, ("activation", "identity", "package_id"), ["", ".", "a/b", "a\\b", "a\0b"]),
+            (recorded, ("activation", "identity", "name"), ["Review", " bad", "a_b", "a--b", "-a", "a-", "a" * 65]),
+            (recorded, ("activation", "content_revision"), ["d" * 63, "D" * 64, None]),
+            (recorded, ("activation", "snapshot_revision"), ["f" * 65, "g" * 64]),
+            (recorded, ("activation", "runtime_id"), [" ", None]),
+            (recorded, ("activation", "skill_tool_use_id"), ["\t", 12]),
+            (recorded, ("activation", "agent_core_turn"), [-1, True, 7.0, 1 << 62]),
+            (recorded, ("activation", "turn_ref"), ["other#7", SESSION + "#0", SESSION + "#bad", SESSION + "#-1"]),
+            (recorded, ("activation", "activated_at"), ["today", "2026-02-30T00:00:00Z", "2026-09-29t00:00:00z", "2026-09-29T24:00:00Z", "2026-09-29T00:00:00+24:00"]),
+            (recorded, ("activation", "invocation", "kind"), ["unknown", "composition"]),
+            (recorded, ("activation", "invocation", "origin"), [
+                {"kind": "session_composition"},
+                {"kind": "task_instruction", "task_ids": []},
+                {"kind": "task_instruction", "task_ids": ["task-1", "task-1"]},
+                {"kind": "task_instruction", "task_ids": ["bad/id"]},
+                {"kind": "task_instruction", "task_ids": [None]},
+            ]),
+            (recorded, ("activation", "invocation", "served_content", "bytes"), [-1, False, 1.5]),
+            (recorded, ("activation", "invocation", "served_content", "sha256"), ["not-a-hash"]),
+            (recorded, ("activation", "invocation", "served_content"), [
+                {"kind": "skill_resource", "relative_path": path, "bytes": 1, "sha256": "e" * 64}
+                for path in ("/abs", "../escape", "a//b", "a/./b", "a\\b", "a\0b")
+            ]),
+            (delivered, ("deliveries", 0, "delivery", "boundary", "kind"), ["unknown", None]),
+            (delivered, ("deliveries", 0, "delivery", "boundary", "agent_core_turn"), [-1, True]),
+            (delivered, ("deliveries", 0, "delivery", "runtime_id"), [" "]),
+            (delivered, ("deliveries", 0, "delivery", "content_bytes"), [-1, True]),
+            (delivered, ("deliveries", 0, "delivery", "content_sha256"), ["E" * 64]),
+            (delivered, ("deliveries", 0, "delivery", "delivered_at"), ["not-time"]),
+            (acted, ("action", "identity"), [
+                {}, {"kind": "call_id", "call_id": " "},
+                {"kind": "provider_step", "conversation_id": "c", "step_index": -1},
+                {"kind": "provider_step", "conversation_id": "c", "step_index": True},
+                {"kind": "provider_step", "conversation_id": " ", "step_index": 0},
+            ]),
+            (acted, ("action", "tool_name"), ["bad/tool", ".."]),
+            (acted, ("action", "runtime_id"), [" "]),
+            (acted, ("action", "agent_core_turn"), [-1, True]),
+            (acted, ("action", "observed_at"), ["not-time"]),
+            (rejected, ("rejection", "kind"), ["unknown"]),
+            (rejected, ("rejection", "skill_tool_use_id"), [" "]),
+            (rejected, ("rejection", "activation_turn_ref"), ["other#7", "broken"]),
+            (rejected, ("rejection", "observed_turn_ref"), ["other#8", "broken"]),
+            (rejected, ("rejection", "observed_agent_core_turn"), [-1, True]),
+            (rejected, ("rejection", "observed_at"), ["not-time"]),
+        ]
+        for event, path, values in cases:
+            prefix = [header()] if event is recorded else [header(), recorded]
+            if event is acted:
+                prefix.append(delivered)
+            for value in values:
+                changed = copy.deepcopy(event)
+                target = changed
+                for key in path[:-1]:
+                    target = target[key]
+                target[path[-1]] = value
+                with self.subTest(path=path, value=value):
+                    with self.assertRaises(events.SkillLedgerError) as caught:
+                        events.fold_event_log(log_fixture.encode_rows(prefix + [changed]))
+                    self.assertIs(caught.exception.fault, Fault.MALFORMED_EVENT)
+                    self.assertEqual(caught.exception.row, len(prefix) + 1)
+
+    def test_all_invocation_and_rejection_variants_preserve_valid_evidence(self):
+        for kind in ("instruction", "composition"):
+            for scope in ("session", "task"):
+                recorded = activation("call-a", 7)
+                origin = {"kind": f"{scope}_{kind}"}
+                if scope == "task":
+                    origin["task_ids"] = ["task-1", "ns:task_2"]
+                invocation = {"kind": kind, "origin": origin}
+                if kind == "instruction":
+                    invocation["served_content"] = {
+                        "kind": "skill_resource", "relative_path": "docs/한글.md",
+                        "bytes": 0, "sha256": "e" * 64,
+                    }
+                else:
+                    invocation["tool_name"] = "keeper_status"
+                recorded["invocation"] = invocation
+                recorded["identity"]["name"] = "한글-é"
+                recorded["identity"]["package_id"] = "Review package"
+                rejections = []
+                for rejection_kind in ("delivery_order", "delivery_conflict", "action_before_delivery"):
+                    rejection = copy.deepcopy(ledger()["transition_rejections"][0])
+                    rejection["kind"] = rejection_kind
+                    if rejection_kind == "delivery_order":
+                        rejection["activation_agent_core_turn"] = 7
+                    if rejection_kind == "action_before_delivery":
+                        rejection.update(action_identity=STEP_ZERO, tool_name="keeper_status")
+                    rejections.append(rejection)
+                rows = [header(), log_fixture.recorded_row(recorded)]
+                rows.extend(log_fixture.rejection_row(r) for r in rejections)
+                with self.subTest(kind=kind, scope=scope):
+                    folded = events.fold_event_log(log_fixture.encode_rows(rows))
+                    self.assertEqual(folded["activations"], [recorded])
+                    self.assertEqual(folded["transition_rejections"], rejections)
+
+    def test_variant_specific_evidence_fields_are_validated(self):
+        recorded = log_fixture.recorded_row(activation("call-a", 7))
+        order = copy.deepcopy(ledger()["transition_rejections"][0])
+        order.update(kind="delivery_order", activation_agent_core_turn=7)
+        before = copy.deepcopy(ledger()["transition_rejections"][0])
+        before.update(kind="action_before_delivery", action_identity=STEP_ZERO,
+                      tool_name="keeper_status")
+        composition = copy.deepcopy(recorded)
+        composition["activation"]["invocation"] = {
+            "kind": "composition", "origin": {"kind": "session_composition"},
+            "tool_name": "keeper_status"}
+        cases = [
+            (log_fixture.rejection_row(order), ("rejection", "activation_agent_core_turn"), -1),
+            (log_fixture.rejection_row(before), ("rejection", "action_identity", "step_index"), -1),
+            (log_fixture.rejection_row(before), ("rejection", "tool_name"), "bad/tool"),
+            (composition, ("activation", "invocation", "tool_name"), "bad/tool"),
+        ]
+        for event, path, invalid in cases:
+            for missing in (False, True):
+                changed = copy.deepcopy(event)
+                target = changed
+                for key in path[:-1]:
+                    target = target[key]
+                if missing:
+                    del target[path[-1]]
+                else:
+                    target[path[-1]] = invalid
+                prefix = [header()] if event is composition else [header(), recorded]
+                with self.subTest(path=path, missing=missing):
+                    with self.assertRaises(events.SkillLedgerError):
+                        events.fold_event_log(log_fixture.encode_rows(prefix + [changed]))
+
+    def test_server_timestamp_forms_remain_readable(self):
+        for stamp in ("0000-01-01T00:00:00Z", "9999-12-31T23:59:59Z",
+                      "2026-08-27T00:00:60Z", "2026-08-27T00:00:01.1234567890123+09:00",
+                      "2026-08-27T00:00:00-00:00"):
+            recorded = activation("call-a", 7)
+            recorded["activated_at"] = stamp
+            with self.subTest(stamp=stamp):
+                folded = events.fold_event_log(log_fixture.encode_rows([
+                    header(), log_fixture.recorded_row(recorded)]))
+                self.assertEqual(folded["activations"][0]["activated_at"], stamp)
+
+    def test_invalid_trace_ids_cannot_start_a_ledger(self):
+        for session in ("trace-é", "a" * 65, ".", "a/b", "", 1):
+            with self.subTest(session=session):
+                with self.assertRaises(events.SkillLedgerError) as caught:
+                    events.fold_event_log(log_fixture.encode_rows([
+                        log_fixture.header_row(WORKSPACE, session)]))
+                self.assertIs(caught.exception.fault, Fault.MALFORMED_HEADER)
 
     def test_revision_of_a_ledger_without_its_identity_is_refused(self):
         value = ledger()

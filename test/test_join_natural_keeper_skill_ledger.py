@@ -833,7 +833,7 @@ class NaturalKeeperSkillLedgerJoinTest(unittest.TestCase):
         durable = ledger([activation("call-skill-1")])
         before = dashboard(durable)
         advanced = ledger(
-            [activation("call-skill-1"), activation("call-skill-2", "trace-two#1")]
+            [activation("call-skill-1"), activation("call-skill-2", "trace-one#2")]
         )
 
         with self.assertRaisesRegex(joiner.JoinError, "differs from durable"):
@@ -859,7 +859,7 @@ class NaturalKeeperSkillLedgerJoinTest(unittest.TestCase):
         producer, raw = receipt()
         durable = ledger([activation("call-skill-1")])
         advanced = ledger(
-            [activation("call-skill-1"), activation("call-skill-2", "trace-two#1")]
+            [activation("call-skill-1"), activation("call-skill-2", "trace-one#2")]
         )
         projected = dashboard(durable)
 

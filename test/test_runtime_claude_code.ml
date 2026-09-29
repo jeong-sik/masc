@@ -189,7 +189,7 @@ let window_outlasting_process_start_s = 5.0
 let run_fixture ?(dynamic_tools = []) ?session_mode ?(timeout_s = 2.0)
     ?account_home
     ?admission_timeout_s ?(no_turn_deadline = false) ?on_session_ready_delay_s
-    ?on_turn_started_delay_s ?on_stream_event ?on_prompt_sent
+    ?on_turn_started_delay_s ?on_stream_event ?on_prompt_sent ?on_spawned
     ?(prompt = "Return the fixture marker") ?(images = []) path =
   Eio_main.run (fun env ->
     let clock = Eio.Stdenv.clock env in
@@ -225,6 +225,7 @@ let run_fixture ?(dynamic_tools = []) ?session_mode ?(timeout_s = 2.0)
       ?on_turn_started
       ?on_stream_event
       ?on_prompt_sent
+      ?on_spawned
       config
       ~prompt
       ~images)
@@ -442,6 +443,21 @@ let test_stream_idle_timeout_is_typed () =
       check (float 0.001) "exact idle timeout" 0.05 seconds
     | Error error -> fail (Runtime_claude_code.error_to_string error)
     | Ok _ -> fail "silent Claude stream ignored its idle timeout")
+;;
+
+(* #39768: an exception raised where the runtime expects none -- the spawn
+   observer here -- leaves [run_turn] as [Unhandled_exception]. As a protocol
+   error it read as a misread client reply. *)
+let test_unexpected_exception_is_unhandled () =
+  with_fixture [ Emit assistant; Emit result ] (fun path ->
+    match
+      run_fixture ~on_spawned:(fun () -> failwith "fixture spawn observer") path
+    with
+    | Error (Runtime_claude_code.Unhandled_exception detail) ->
+      check bool "names the exception" true
+        (String_util.contains_substring detail "fixture spawn observer")
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok _ -> fail "an observer exception was admitted as a successful turn")
 ;;
 
 let test_no_deadline_keeps_initialize_bounded () =
@@ -2486,6 +2502,10 @@ let () =
             "stream idle timeout is typed"
             `Quick
             test_stream_idle_timeout_is_typed
+        ; test_case
+            "an unexpected exception is unhandled, not a protocol error"
+            `Quick
+            test_unexpected_exception_is_unhandled
         ; test_case
             "no deadline keeps initialize bounded"
             `Quick

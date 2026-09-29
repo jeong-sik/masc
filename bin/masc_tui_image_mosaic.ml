@@ -117,22 +117,33 @@ let render_rgba ~project ~cols ~rows (rgba : string) : string list =
                 ~green:(Char.code rgba.[i + 1]) ~blue:(Char.code rgba.[i + 2])))
       else None
     in
+    (* A colour [project] cannot draw is drawn in the terminal's own, said
+       out loud: an empty escape would leave the cell in the colour of the
+       one before it. *)
+    let foreground = function
+      | Some _ as colour -> Sgr.foreground colour
+      | None -> Sgr.default_fg
+    in
+    let background = function
+      | Some _ as colour -> Sgr.background colour
+      | None -> Sgr.default_bg
+    in
     let buf = Buffer.create (cols * 32) in
     let line cy =
       Buffer.clear buf;
       for x = 0 to cols - 1 do
         match px x (2 * cy), px x ((2 * cy) + 1) with
         | Some top, Some bottom ->
-            Buffer.add_string buf (Sgr.foreground top);
-            Buffer.add_string buf (Sgr.background bottom);
+            Buffer.add_string buf (foreground top);
+            Buffer.add_string buf (background bottom);
             Buffer.add_string buf upper_half_block
         | Some top, None ->
             Buffer.add_string buf Sgr.default_bg;
-            Buffer.add_string buf (Sgr.foreground top);
+            Buffer.add_string buf (foreground top);
             Buffer.add_string buf upper_half_block
         | None, Some bottom ->
             Buffer.add_string buf Sgr.default_bg;
-            Buffer.add_string buf (Sgr.foreground bottom);
+            Buffer.add_string buf (foreground bottom);
             Buffer.add_string buf lower_half_block
         | None, None ->
             Buffer.add_string buf Sgr.default_bg;

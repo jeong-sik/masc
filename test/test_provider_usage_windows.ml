@@ -739,6 +739,32 @@ let antigravity_exec : Runtime_execution.antigravity_cli =
 
 let no_antigravity ~scope:_ _ = fail "an Antigravity read was asked for"
 
+let test_failed_background_schedule_releases_scope () =
+  Eio_main.run (fun _env ->
+    let scope =
+      Runtime_quota_window.scope_of_credential
+        ~provider_id:"usage_read_fork_failure" None
+    in
+    let reads = ref 0 in
+    let read () = incr reads in
+    let closed_switch = Eio.Switch.run (fun sw -> sw) in
+    let failed =
+      Read.For_testing.start_background ~scope
+        ~fork:(Eio.Fiber.fork ~sw:closed_switch) ~read
+    in
+    check bool "closed root cannot schedule a read" true
+      (failed = Read.Scheduling_failed);
+    check int "failed fork started no read" 0 !reads;
+    let retried =
+      Eio.Switch.run (fun sw ->
+        Read.For_testing.start_background ~scope
+          ~fork:(Eio.Fiber.fork ~sw) ~read)
+    in
+    check bool "released account can schedule a later read" true
+      (retried = Read.Started);
+    check int "later read ran once" 1 !reads)
+;;
+
 (* One scope raising, over HTTP or through an official client, is logged
    and the scopes after it are still read. *)
 let test_a_raising_scope_does_not_stop_the_rest () =
@@ -967,6 +993,8 @@ let () =
     ; ( "reading scopes"
       , [ test_case "a raising scope does not stop the rest" `Quick
             test_a_raising_scope_does_not_stop_the_rest
+        ; test_case "failed background schedule releases the account" `Quick
+            test_failed_background_schedule_releases_scope
         ; test_case "an empty key sends no request" `Quick test_an_empty_key_sends_no_request
         ] )
     ; ( "repeating a read"

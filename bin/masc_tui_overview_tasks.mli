@@ -27,7 +27,10 @@ type backlog = {
 
 val backlog : Masc_domain.task list -> backlog
 (** Reads the full domain rows, because the Overview's own rows carry no
-    creation time. *)
+    creation time. A function of that list and nothing else: the Overview
+    keeps the summary for as long as the same list is current
+    ([Masc_tui_overview_cache.backlog]), so a new input has to join that
+    key or the backlog line is drawn stale. *)
 
 type line =
   | Task_row of { index : int; task : Masc.Tui_decode.task }

@@ -1,0 +1,20 @@
+{
+  "head": "93cb21097cb56e4757914db21287d335f5f57e5e",
+  "run_id": 36604111016,
+  "test_step": "failure",
+  "raw_log_sha256": "ff5607e3f136c31dbdf0cc5e942af91d2b602b09c5b22b8e7785af117b9b35b0",
+  "selected_suites": 46,
+  "passed_aliases": {
+    "test_lane_quiz_packages": 23,
+    "test_candle_baseline_collector": 4
+  },
+  "failed_aliases": [
+    "test_tui_keeper_portrait_pty",
+    "test_tui_remote_equipped_portrait",
+    "test_tui_candle_currency_pty",
+    "test_tui_remote_workspace_history_pty",
+    "test_tui_lane_heading_keeps_its_reading"
+  ],
+  "failure": "bin/masc_tui.ml:10710 assigns string to Metrics_tail.load_error; subsequent executable build aborts",
+  "feature_assertions_reached_in_failed_aliases": false
+}

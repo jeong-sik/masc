@@ -69,7 +69,8 @@ and prepared Candidates. Both are useful, but neither alone proves that the
 actual successful Goal path reaches Paid.
 
 PR#40047 implements the missing scenario below. Its targeted run36600485412
-atd0bc9de53a is pending; implementation alone does not close the evidence gap.
+atd0bc9de53a passed all10 cases, including this positive path. That fixture injects
+model decisions and does not establish real-provider semantic accuracy.
 The new integrated source includes the scenario and verifies these boundaries:
 
 1. A persisted Goal and linked completed Task belonging to a configured Keeper.
@@ -113,3 +114,12 @@ live shared-Goal hard cut. These remain independent completion requirements.
   They have not yet passed native execution. The older failed runs are retained.
 - Nine frontend files/411 tests and full TypeScript check pass after composing
   current main;87 changed OCaml files parse. These are not native TUI proof.
+
+## Integration build failure at93cb
+
+[Retained raw evidence](../evidence/2026-09-30-candle-integration-93cb/README.md)
+records the Test-step failure in run36604111016. Five TUI aliases failed before
+scenario execution because remote metrics unavailability was assigned as a string
+to the existing typed `Metrics_tail.load_error` field. The executable build then
+aborted. Quiz23 and collector4 cases passed; the46 selected suites did not all run.
+The previous source reviews and parser checks missed this type mismatch.

@@ -5,7 +5,7 @@ let require = function Ok value -> value | Error detail -> Alcotest.fail detail
 
 let ledger claims =
   let selected : Ledger.pending_fact list = List.map (fun claim ->
-    { fact = Ledger.Ordinary { keeper_id = "writer";
+    { Ledger.fact = Ledger.Ordinary { keeper_id = "writer";
         claim_sha256 = Digestif.SHA256.(digest_string claim |> to_hex) }; claim }) claims in
   let assignments : Ledger.assignment list = List.map (fun (row : Ledger.pending_fact) ->
     { Ledger.fact = row.fact; decision = Ledger.Create_claim row.claim }) selected in

@@ -10,6 +10,7 @@ type t =
   | Lane_addons of string
   | Play_invites
   | Play_link
+  | Play_qr
   | Play_invite of { name : string; hours : int }
   | Play_revoke of string
   | Play_invalid of string
@@ -100,7 +101,7 @@ let catalog =
     }
   ; { word = "play"
     ; aliases = []
-    ; args = "[invites|invite <name> <hours>|link|revoke <name>]"
+    ; args = "[invites|invite <name> <hours>|link|qr|revoke <name>]"
     ; summary = "list, issue or revoke shared DOS play links"
     }
   ; { word = "settings"
@@ -340,6 +341,7 @@ let parse text =
     | "addons", arg -> Lane_addons arg
     | "play", "" | "play", "invites" -> Play_invites
     | "play", "link" -> Play_link
+    | "play", "qr" -> Play_qr
     | "play", arg -> (
         match split_word arg with
         | "invite", rest -> (
@@ -355,7 +357,7 @@ let parse text =
             match split_word rest with
             | name, "" when name <> "" -> Play_revoke name
             | _ -> Play_invalid "use /play revoke <name>")
-        | _ -> Play_invalid "use /play invites, /play invite <name> <hours>, or /play revoke <name>")
+        | _ -> Play_invalid "use /play invites, /play invite <name> <hours>, /play link, /play qr, or /play revoke <name>")
     | "metrics", _ | "telemetry", _ -> Open_metrics
     | "login", client -> Account_login client
     | "settings", _ -> Open_settings

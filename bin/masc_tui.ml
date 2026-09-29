@@ -10225,6 +10225,43 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
            notice ~kind:Notice_reply
              ("Last play link issued in this TUI session for " ^ name
               ^ " (copied via OSC 52; current validity not checked): " ^ link))
+  | Masc_tui_command.Play_qr ->
+      Buffer.clear state.msg_input;
+      (match state.play_invite_link with
+       | None -> notice ~kind:Notice_reply "No play link has been issued in this TUI session"
+       | Some (name, link) ->
+           let terminal_rows, terminal_cols = get_terminal_size () in
+           let pane_cells =
+             Masc_tui_roster_pane.content_cols
+               ~hidden:state.roster_pane_hidden ~cols:terminal_cols
+           in
+           let inner_width = framed_inner_width pane_cells in
+           let available_cells =
+             Masc_tui_message_layout.local_body_cells ~pane_cells ~inner_width
+             - 2 (* fenced-code gutter *)
+           in
+           (match Masc_tui_play_qr.render ~available_cells link with
+            | Error Masc_tui_play_qr.Too_large ->
+                notice ~kind:Notice_failure "Play link is too long to encode as a QR code"
+            | Error (Masc_tui_play_qr.Pane_too_narrow { required_cells; available_cells }) ->
+                notice ~kind:Notice_failure
+                  (Printf.sprintf "Play QR needs %d body columns; this pane has %d. Widen the terminal or hide the roster"
+                     required_cells available_cells)
+            | Ok qr ->
+                let status_rows = keeper_message_status_rows state in
+                let visible_rows =
+                  Masc_tui_message_layout.message_history_height
+                    ~terminal_rows ~status_rows
+                in
+                let qr_rows = List.length (String.split_on_char '\n' qr) in
+                if qr_rows + 4 > visible_rows then
+                  notice ~kind:Notice_failure
+                    (Printf.sprintf "Play QR needs %d chat rows; this pane has %d. Make the terminal taller"
+                       (qr_rows + 4) visible_rows)
+                else
+                  chat_notice state ~keeper_name:target ~kind:Notice_reply
+                    ("Play QR for " ^ name ^ " (current validity not checked):\n```text\n"
+                     ^ qr ^ "\n```")))
   | Masc_tui_command.Play_invite { name; hours } ->
       (match target with
        | None ->
@@ -13068,6 +13105,7 @@ let handle_composer_key state ~base_path ~mailbox key =
           it does for a message. *)
        | Masc_tui_command.Queue _
        | Masc_tui_command.Play_invites | Masc_tui_command.Play_link
+       | Masc_tui_command.Play_qr
        | Masc_tui_command.Play_invite _
        | Masc_tui_command.Play_revoke _ | Masc_tui_command.Play_invalid _
        | Masc_tui_command.Preset_list | Masc_tui_command.Preset_save _

@@ -11,6 +11,7 @@ SOURCE_MODULES = (
     "bin/masc_tui_command.ml",
     "bin/masc_tui_http.ml",
     "lib/tui_decode.ml",
+    "bin/masc_tui_play_qr.ml",
 )
 
 LINK = "https://play.example.test/play#fixture-secret"
@@ -60,6 +61,8 @@ def run(executable: str) -> None:
         h.wait_for_http_request(process, master, output, requests,
                                 path="/api/v1/play/invites")
         command(b"/play link", b"Last play link issued")
+        command(b"/play qr", b"Play QR for guest1")
+        h.wait_for_output(process, master, output, b"\xe2\x96\x88")
         command(b"/play invites", b"old \xc2\xb7 expires not recorded")
         command(b"/play revoke guest1", b"retry /play revoke guest1")
         h.wait_for_output(process, master, output, b"disk fault")
@@ -88,6 +91,8 @@ def run(executable: str) -> None:
             "/api/v1/play/invites/guest1": h.MethodHttpResponse(revoke),
         },
         http_requests=requests,
+        terminal_cols=180,
+        terminal_rows=70,
     )
     print("tui play invites: PASS")
 

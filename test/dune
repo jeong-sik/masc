@@ -7621,3 +7621,5 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_chat_load_errors_pty)))
+
+(include stanzas/test_candle_baseline_collector.inc)

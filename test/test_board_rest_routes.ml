@@ -690,11 +690,12 @@ let page_titles (page : Yojson.Safe.t) =
 ;;
 
 (* The route and the projection share one kept page. The prepared-payload hook
-   fires each time the cache serializes a page, so it tells a read that sent
-   the kept bytes (no new count) from one that serialized again. The route
-   reads as the token's agent, so the projection is asked for the same
-   reaction actor. This fixture clears the board event hook, so the write is
-   followed by the invalidation that hook performs. *)
+   fires each time the cache fills an entry with serialized bytes, so the route
+   read counts one only when it fills the kept entry, and a later read that
+   reuses the entry counts none. Serializing again inside a response would not
+   reach the hook. The route reads as the token's agent, so the projection is
+   asked for the same reaction actor. This fixture clears the board event hook,
+   so the write is followed by the invalidation that hook performs. *)
 let test_board_list_route_and_projection_share_the_kept_page () =
   with_authenticated_activity_router
     ~prefix:"board-list-kept-"

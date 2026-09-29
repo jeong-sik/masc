@@ -15,12 +15,13 @@ let filter_param request name =
 (* It is kept in the dashboard cache together with its serialized body and
    entity tag, so a read of an unchanged page sends the kept bytes rather than
    serializing and hashing every post again. The key holds the query and the
-   reaction actor, each value quoted so that no two queries share a key. A
-   board write that raises a board event (a post, a comment, a vote, a
-   reaction) drops every [board:list:] entry
-   ([Server_dashboard_http_core_cache.invalidate_board_projections]); an edit,
-   pin, close, reopen or delete raises none, so the page shows it once the
-   entry expires. *)
+   reaction actor, each value prefixed with its length, so two different pages
+   never share a key. A board write that raises a board event (a post, a
+   comment, a vote, a reaction) drops every [board:list:] entry
+   ([Server_dashboard_http_core_cache.invalidate_board_projections]). An edit,
+   pin, close, reopen, delete or thread change raises none: the entry keeps its
+   page for the realtime TTL, and the first read after that still gets it while
+   the cache computes the new one. *)
 let payload ?config ~reaction_actor request
   : Dashboard_cache.cached_payload
   =
@@ -37,7 +38,7 @@ let payload ?config ~reaction_actor request
   let base_fetch = board_fetch_limit ~exclude_system ~exclude_automation ~limit ~offset in
   let voter = board_voter_query request in
   let key_part = function
-    | Some value -> Printf.sprintf "%S" value
+    | Some value -> Printf.sprintf "%d:%s" (String.length value) value
     | None -> "-"
   in
   let base_path =

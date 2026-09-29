@@ -1049,14 +1049,14 @@ let test_media_mcp_cannot_carry_is_named () =
                ~data:"https://example.invalid/frame.png" ()
            ])
     in
-    check (list string) "the message, then what was not sent" [ "text"; "text" ]
+    check (list string) "what was not sent, then the message" [ "text"; "text" ]
       (content_types response);
     check bool "the call reads as failed" true (is_error response);
     let content = U.(response |> member "result" |> member "content") in
     check_json_strings_valid_utf8 "unsupported media content" content;
-    check string "first item preserves the sanitized observation"
+    check string "the second item preserves the sanitized observation"
       (Llm_provider.Utf8_sanitize.sanitize raw_message)
-      U.(content |> index 0 |> member "text" |> to_string);
+      U.(content |> index 1 |> member "text" |> to_string);
     let envelope = result_envelope response in
     check_json_strings_valid_utf8 "unsupported media envelope" envelope;
     check string "envelope summary preserves the same sanitized observation"
@@ -1064,11 +1064,11 @@ let test_media_mcp_cannot_carry_is_named () =
       U.(envelope |> member "summary" |> to_string);
     check bool "valid non-ASCII text survives the fallback" true
       (String_util.contains_substring
-         U.(content |> index 0 |> member "text" |> to_string) "\xed\x95\x9c");
-    check bool "the second item names the media" true
+         U.(content |> index 1 |> member "text" |> to_string) "\xed\x95\x9c");
+    check bool "the first item names the media" true
       (String_util.contains_substring
-         U.(response |> member "result" |> member "content" |> index 1 |> member "text" |> to_string)
-         "media was not sent"))
+         U.(content |> index 0 |> member "text" |> to_string)
+         "cannot deliver URL image content"))
 
 let () =
   run "mcp_server_eio_call_tool"

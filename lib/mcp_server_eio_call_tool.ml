@@ -816,25 +816,11 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
       ("tool", `String name);
     ]
   in
-  (* The same projection the official-client MCP bridge uses: text and
-     base64 images in its media types become items, and a block MCP cannot
-     carry fails the projection rather than disappearing. The tool has already
-     run, so that failure keeps the message and says what was not sent. *)
-  let content_items, media_delivered =
-    match
-      Runtime_official_client_tool.mcp_content ~content:message
-        ~content_blocks:(content_blocks_of_result result)
-    with
-    | Ok items -> items, true
-    | Error detail ->
-      let message = Llm_provider.Utf8_sanitize.sanitize message in
-      ( [ `Assoc [ ("type", `String "text"); ("text", `String message) ]
-        ; `Assoc
-            [ ("type", `String "text")
-            ; ("text", `String ("This result's media was not sent: " ^ detail))
-            ]
-        ]
-      , false )
+  (* The projection the official-client MCP bridge answers with, so both MCP
+     servers show a client the same items for the same result. *)
+  let content_items, is_error =
+    Runtime_official_client_tool.mcp_tool_result_content ~success ~content:message
+      ~content_blocks:(content_blocks_of_result result)
   in
   let structured_content = structured_content_of_result result in
   let meta_fields =
@@ -871,7 +857,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
   let result_fields =
     [
       ("content", `List content_items);
-      ("isError", `Bool (not (success && media_delivered)));
+      ("isError", `Bool is_error);
       ("_meta", `Assoc call_meta);
     ]
     @

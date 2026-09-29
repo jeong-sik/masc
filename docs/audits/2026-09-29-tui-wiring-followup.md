@@ -1,8 +1,9 @@
 # TUI wiring follow-up — 2026-09-29
 
 Scope: the portrait (#39883), chat input/slash menu (#39890), and loading-error
-inspection (#39899) candidates integrated with main
-`cbe8e58d6676bc8dda1f83c64b16c4f33e7884fb`. This is a bounded source/interaction
+inspection (#39899) candidates initially audited against main
+`cbe8e58d6676bc8dda1f83c64b16c4f33e7884fb`, then integrated with main
+`3cbca7f56e` after #39899 and the stream-line scanner #39909 landed. This is a bounded source/interaction
 audit, not a claim about every repository feature or the installed Ghostty binary.
 
 ## Findings
@@ -36,9 +37,10 @@ audit, not a claim about every repository feature or the installed Ghostty binar
 | Preset read errors | `unreadable_rows` -> existing scrollable preset detail pane | Connected after wrapping change. |
 | Goal owner moved off Overview | typed Goal data -> Planning detail owner row; fixed row budget updated | Owner display retained in Planning. Overview's removed progress/metadata rows are not dangling callbacks. |
 
-The apparent deletion of `/errors` or portrait files in a direct PR-head vs
-main comparison is not a removal: main has not received those PR additions.
-The audit uses common-ancestor diffs and checks the integrated candidate.
+At the initial audit, a direct PR-head vs main comparison made PR-only
+`/errors` and portrait files appear deleted. Common-ancestor diffs showed
+these were additions absent from main, not removals. #39899 has since merged;
+the remaining candidates include that integration.
 Home #39817 is a separate pending change; its navigation/default assumptions
 must be checked again when it is integrated.
 

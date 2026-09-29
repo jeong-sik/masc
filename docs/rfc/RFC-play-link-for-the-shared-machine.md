@@ -185,6 +185,9 @@ related: ["0439", "machine-spectating-goes-through-lanes"]
 - 비어 있는 조종권은 지금처럼 다음에 움직이는 쪽이 가져간다.
 - "떠난 조종자"(`Keeper_dos_controller.holder_left`)는 다음 움직임 전에 풀린다.
   - 멈춘 keeper.
+    - 영구히 지운 keeper(meta 삭제: `remove_meta` 종료, supervisor 정리, purge)는 다음 움직임이 알아보지 못한다.
+      Keeper 자기 credential 은 만료가 없어서, meta 가 없으면 돌아올 에이전트처럼 보인다.
+      그래서 그 keeper 를 지우는 종료 마무리(`Keeper_shutdown_finalize`)가 조종권을 바로 푼다(`Keeper_dos_controller.release_retired`).
   - 기한이 지난 초대. 기한은 토큰 검사와 같은 규칙(`Play_invite.expired`: 초 단위, 지금 > 기한)으로 판단해서,
     기한이 끝나는 그 초 동안은 아직 움직일 수 있는 것으로 본다.
   - 인증이 켜지고 토큰이 필수인 워크스페이스에서, keeper 가 아닌 이름 중 credential 파일이 없는 이름(회수된 초대).

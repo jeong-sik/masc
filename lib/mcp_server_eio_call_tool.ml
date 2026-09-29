@@ -811,7 +811,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
   let envelope =
     `Assoc [
       ("kind", `String "tool_call");
-      ("summary", `String message);
+      ("summary", `String (Llm_provider.Utf8_sanitize.sanitize message));
       ("status", `String status);
       ("tool", `String name);
     ]
@@ -827,6 +827,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
     with
     | Ok items -> items, true
     | Error detail ->
+      let message = Llm_provider.Utf8_sanitize.sanitize message in
       ( [ `Assoc [ ("type", `String "text"); ("text", `String message) ]
         ; `Assoc
             [ ("type", `String "text")

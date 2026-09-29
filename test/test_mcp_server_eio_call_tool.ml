@@ -1015,9 +1015,9 @@ let is_error response = U.(response |> member "result" |> member "isError" |> to
 let png_1x1 =
   "\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde"
 
-let result_with_blocks blocks =
+let result_with_blocks ?(message = "observed") blocks =
   Tool_result.make_ok ~tool_name:"masc_status" ~start_time:(Tool_timing.start ())
-    ~data:(`String "observed") ~content_blocks:blocks ()
+    ~data:(`String message) ~content_blocks:blocks ()
 
 let test_media_blocks_become_mcp_items () =
   with_call_tool_state (fun env sw state ->
@@ -1036,9 +1036,15 @@ let test_media_blocks_become_mcp_items () =
 
 let test_media_mcp_cannot_carry_is_named () =
   with_call_tool_state (fun env sw state ->
+    (* A tool may have completed with non-UTF8 process output. Rejecting its
+       media must not bypass the text sanitization used by the normal MCP
+       projection, or the client loses the explanatory fallback as well. *)
+    let raw_message = "observed\xff frame \xed\x95\x9c" in
+    check bool "fixture message contains invalid UTF-8" false
+      (String.is_valid_utf_8 raw_message);
     let response =
       call_with_result ~env ~sw state
-        (result_with_blocks
+        (result_with_blocks ~message:raw_message
            [ Llm_provider.Types.image_block ~source_type:Url ~media_type:"image/png"
                ~data:"https://example.invalid/frame.png" ()
            ])
@@ -1046,6 +1052,19 @@ let test_media_mcp_cannot_carry_is_named () =
     check (list string) "the message, then what was not sent" [ "text"; "text" ]
       (content_types response);
     check bool "the call reads as failed" true (is_error response);
+    let content = U.(response |> member "result" |> member "content") in
+    check_json_strings_valid_utf8 "unsupported media content" content;
+    check string "first item preserves the sanitized observation"
+      (Llm_provider.Utf8_sanitize.sanitize raw_message)
+      U.(content |> index 0 |> member "text" |> to_string);
+    let envelope = result_envelope response in
+    check_json_strings_valid_utf8 "unsupported media envelope" envelope;
+    check string "envelope summary preserves the same sanitized observation"
+      (Llm_provider.Utf8_sanitize.sanitize raw_message)
+      U.(envelope |> member "summary" |> to_string);
+    check bool "valid non-ASCII text survives the fallback" true
+      (String_util.contains_substring
+         U.(content |> index 0 |> member "text" |> to_string) "\xed\x95\x9c");
     check bool "the second item names the media" true
       (String_util.contains_substring
          U.(response |> member "result" |> member "content" |> index 1 |> member "text" |> to_string)

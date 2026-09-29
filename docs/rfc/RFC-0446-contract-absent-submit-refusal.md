@@ -145,7 +145,7 @@ and contract_refusal = Refused_absent | Refused_invalid of contract_defect
 
 ### 2.5 revision 묶기와 재제출
 
-- 요청 파일의 `contract_revision` 은 필수 필드다. 없는 파일은 `Verification.list_requests` 의 `unreadable` 로 분류된다(기존 경로, 판정되지 않고 목록에 남는다).
+- 요청 파일의 `contract_revision` 은 필수 필드다. 없는 파일은 `Verification.list_projected` 의 `unreadable` 로 분류된다(기존 경로, 판정되지 않고 목록에 남는다).
 - `commit_verdict` 는 `parse (task.contract)` 를 다시 계산한다. `Present { revision }` 이 요청의 값과 같을 때만 확정한다. 다르거나 `Absent`/`Invalid` 면 `Stale_contract_revision` 으로 거절하고 요청 파일을 남긴다.
 - `task_contract` 는 코드 안에 생성 뒤 쓰는 곳이 없다(`rg "contract = " lib/workspace lib/task` 는 생성 시 normalize 와 읽기뿐). 이 묶기는 손으로 편집된 `tasks.json` 을 막는다.
 - 재제출을 위해 `Absent → Present` 한 번의 쓰기를 허용한다. 소유자가 `InProgress` 상태에서 `masc_transition(action = set_contract, contract = {…})` 로 쓴다. `Present` 를 다시 쓰는 것은 거절한다. 계약은 여전히 한 번만 쓰인다 — 그 한 번이 생성 시점이 아니어도 된다. `Invalid` 는 이 경로로 고치지 않는다. 취소하고 다시 만든다.
@@ -161,7 +161,7 @@ and contract_refusal = Refused_absent | Refused_invalid of contract_defect
 - **P3** 계약 없는 Task 에 `cancel` + `reason` → `AwaitingVerification { intent = Cancel_task }`, 요청 파일 1개, 계약 관련 로그 0줄.
 - **P4** `masc_add_task` 에 `contract = { completion_contract = [] }` → 생성 거절. `contract` 생략 → 생성 성공, `Absent`.
 - **P5** `rg -n "has no contract|warn_contract_gap" lib/` 0건. `rg -n 'None \| Some \[\] -> Ok ""' lib/task/anti_rationalization.ml` 0건. `rg -n "hasContract" dashboard/src` 0건.
-- **P6** 커밋 뒤 만들어진 요청 파일 전부에 `contract_revision` 이 있다. 필드를 지운 파일 하나를 넣고 `list_requests` 를 부르면 `unreadable` 에 1건, `readable` 은 나머지 전부.
+- **P6** 커밋 뒤 만들어진 요청 파일 전부에 `contract_revision` 이 있다. 필드를 지운 파일 하나를 넣고 `Verification.list_projected` 로 읽으면 `unreadable` 에 1건, `readable` 은 나머지 전부.
 - **P7** 대기 중 `tasks.json` 의 계약 항목을 바꾼 뒤 판정 확정 → `Stale_contract_revision`, 요청 파일 유지, Task 상태 그대로, ERROR 1줄.
 - **P8** 하루치 로그에서 `completion authority committed … verdict=APPROVE` 줄의 task 중 그 시각에 `contract_revision` 없는 요청으로 판정된 것 0건. 감사의 집계 스크립트를 `scripts/` 에 넣어 같은 질문을 되묻는다.
 - **P9** `Absent` Task 에 `set_contract` 1회 성공, 2회째 거절. `Present` Task 에 `set_contract` 거절.

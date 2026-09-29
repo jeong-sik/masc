@@ -16,8 +16,7 @@ def run(executable: str) -> None:
     fixtures[LOGS_PATH] = (503, {"error": "fixture logs unavailable"})
 
     def interact(process, fd, _slave, output, _base):
-        h.tab_until(process, fd, output, b"MASC Activity")
-        h.send_and_wait(process, fd, output, b"2", b"\xe2\x96\xb8Logs")
+        h.palette_go(process, fd, output, b"go logs", b"\xe2\x96\xb8Logs")
         h.wait_for_output(process, fd, output, ERROR, start=0, timeout=10)
         h.resize_and_wait(
             process, fd, output, rows=30, columns=140,

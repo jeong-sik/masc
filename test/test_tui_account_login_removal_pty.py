@@ -68,7 +68,7 @@ def run(binary: str) -> None:
     fixtures[REMOVE] = h.RequestHttpResponse(remove)
 
     def interact(process, fd, _slave, output, _base_path):
-        h.send_and_wait(process, fd, output, b"2", b"MASC Keepers")
+        h.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
         h.select_keeper_row(process, fd, output, b"alpha")
         h.send_and_wait(process, fd, output, b"c", "Keepers ▸ alpha ▸ chat".encode())
         h.send_and_wait(process, fd, output, b"/login\r", b"MASC Account Login")

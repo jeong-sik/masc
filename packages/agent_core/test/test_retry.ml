@@ -121,7 +121,7 @@ let test_classify_error_402_payment_required () =
   check
     string
     "402 error_message rendering"
-    "Payment required: Insufficient Balance"
+    "Payment required: Insufficient Balance (retry_after: none)"
     (Retry.error_message err)
 ;;
 

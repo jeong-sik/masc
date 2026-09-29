@@ -1903,10 +1903,103 @@ let test_jev_adapter_sends_the_decisions_and_reads_not_relevant () =
         Alcotest.failf "expected one request to Jev, saw %d" (List.length bodies)))
 ;;
 
+(* A rejected batch answer must say which keys it carried. The 53 quarantines
+   of 2026-09-29 all read "fields must be exactly ..." and nothing durable
+   separates a missing field from an extra one from a repeated one. The parser
+   stays as strict as before; only the message names the shape, and a value
+   never appears in it. *)
+let test_batch_rejection_names_the_answer_shape () =
+  let one_item fields = `Assoc [ "verdicts", `List [ `Assoc fields ] ] in
+  let valid =
+    [ "candidate_id", `String "c-1"
+    ; "decision", `String "relevant"
+    ; "rationale", `String "SECRET-RATIONALE-VALUE"
+    ]
+  in
+  let rejected label answer =
+    match Judgment.batch_of_yojson answer with
+    | Ok _ -> Alcotest.failf "%s: the answer must stay rejected" label
+    | Error detail -> detail
+  in
+  let check_names label detail needles =
+    List.iter
+      (fun needle ->
+        Alcotest.(check bool)
+          (Printf.sprintf "%s names %s" label needle)
+          true
+          (contains_substring ~needle detail))
+      needles
+  in
+  (match Judgment.batch_of_yojson (one_item valid) with
+   | Ok [ _ ] -> ()
+   | Ok _ | Error _ -> Alcotest.fail "the exact three fields must still be accepted");
+  let extra =
+    rejected "extra" (one_item (valid @ [ "confidence", `String "SECRET-EXTRA-VALUE" ]))
+  in
+  check_names "extra" extra [ "item=0"; "missing=[]"; "extra=[\"confidence\"]"; "repeated=[]" ];
+  Alcotest.(check bool) "an extra field's value stays out" false
+    (contains_substring ~needle:"SECRET-EXTRA-VALUE" extra);
+  Alcotest.(check bool) "a field's value stays out" false
+    (contains_substring ~needle:"SECRET-RATIONALE-VALUE" extra);
+  let missing =
+    rejected "missing" (one_item [ "candidate_id", `String "c-1"; "decision", `String "relevant" ])
+  in
+  check_names "missing" missing [ "missing=[\"rationale\"]"; "extra=[]" ];
+  let alias =
+    rejected
+      "alias"
+      (one_item
+         [ "candidate_id", `String "c-1"
+         ; "decision", `String "relevant"
+         ; "reason", `String "x"
+         ])
+  in
+  check_names "alias" alias [ "missing=[\"rationale\"]"; "extra=[\"reason\"]" ];
+  let repeated =
+    rejected
+      "repeated"
+      (one_item
+         [ "candidate_id", `String "c-1"
+         ; "candidate_id", `String "c-2"
+         ; "decision", `String "relevant"
+         ; "rationale", `String "x"
+         ])
+  in
+  check_names "repeated" repeated [ "missing=[]"; "extra=[]"; "repeated=[\"candidate_id\"]" ];
+  let long_key = String.make 40 'k' in
+  let clipped = rejected "long key" (one_item (valid @ [ long_key, `Null ])) in
+  Alcotest.(check bool) "a long key is clipped" false
+    (contains_substring ~needle:long_key clipped);
+  let second_item =
+    rejected
+      "second item"
+      (`Assoc
+          [ ( "verdicts"
+            , `List
+                [ `Assoc valid
+                ; `Assoc [ "candidate_id", `String "c-2"; "decision", `String "relevant" ]
+                ] )
+          ])
+  in
+  check_names "second item" second_item [ "item=1"; "missing=[\"rationale\"]" ];
+  let envelope =
+    rejected "envelope" (`Assoc [ "verdicts", `List []; "note", `String "SECRET-NOTE" ])
+  in
+  check_names "envelope" envelope [ "keys=[\"verdicts\"; \"note\"]" ];
+  Alcotest.(check bool) "an envelope value stays out" false
+    (contains_substring ~needle:"SECRET-NOTE" envelope)
+;;
+
 let () =
   Alcotest.run
     "Keeper Board-attention exact flow"
-    [ ( "production adapter"
+    [ ( "parse boundary"
+      , [ Alcotest.test_case
+            "a rejected batch answer names its shape, never its values"
+            `Quick
+            test_batch_rejection_names_the_answer_shape
+        ] )
+    ; ( "production adapter"
       , [ Alcotest.test_case "CLI-only Board judgments need no HTTP attempt" `Quick
             test_cli_only_executes_without_http_provenance
         ; Alcotest.test_case

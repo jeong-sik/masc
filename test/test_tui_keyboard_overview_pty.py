@@ -240,6 +240,15 @@ def opening_boot_frames(executable: str) -> None:
                 keyboard.wait_for_output(
                     process, fd, output, b":settings", start=start, timeout=3
                 )
+            if mode == "keeper" and target == "alpha":
+                home = keyboard.palette_go(
+                    process, fd, output, b"go dashboard", b"Choose a Keeper"
+                )
+                visible_home = keyboard.screen_text(home)
+                if b"Continue with alpha" in visible_home:
+                    raise AssertionError(
+                        f"fixed startup Keeper was remembered as a chat: {visible_home!r}"
+                    )
             if mode == "last" and target == "alpha":
                 keyboard.select_keeper_row(process, fd, output, b"beta")
                 keyboard.send_and_wait(

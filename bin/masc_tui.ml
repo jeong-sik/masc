@@ -1226,7 +1226,8 @@ let forget_recall (state : state) =
   state.msg_recall_at <- None;
   state.msg_recall_draft <- ("", [], [], None)
 
-let open_message_for_keeper ?(return_to = Keeper_chat_return_detail) state
+let open_message_for_keeper ?(return_to = Keeper_chat_return_detail)
+    ?(remember_home_chat = true) state
     keeper_name ~drain_queue =
   (* The paste goes back into the draft before the draft is put away. A spill
      lives with the composer; a saved draft has to stand on its own, and a
@@ -1244,7 +1245,7 @@ let open_message_for_keeper ?(return_to = Keeper_chat_return_detail) state
      Keeper must not restore the previous Keeper's draft or image payload. *)
   forget_recall state;
   state.msg_target_keeper_name <- Some keeper_name;
-  state.home_last_chat <- Some keeper_name;
+  if remember_home_chat then state.home_last_chat <- Some keeper_name;
   state.opening_notice <- None;
   (match state.opening_mode with
    | Masc_tui_config.Last previous ->
@@ -13582,6 +13583,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                     ^ " (Keeper not found). Showing Dashboard.")
                else (
                  open_message_for_keeper
+                   ~remember_home_chat:(match state.opening_mode with
+                     | Masc_tui_config.Keeper _ -> false
+                     | Masc_tui_config.Overview | Masc_tui_config.Last _ -> true)
                    ~return_to:Keeper_chat_return_list state keeper_name
                    ~drain_queue:(fun () ->
                      drain_queued_message state ~base_path ~mailbox);

@@ -1,1 +1,0 @@
-- Codex: support GPT-6.1 Sol reasoning levels through `ultra`, preserving the selected effort on the app-server wire.

@@ -164,7 +164,7 @@ let test_worker_pays_once_with_isolated_inputs_and_integer_evidence () =
     ["paid-once:2";"paid-once:3";"paid-once:4"]
     (List.map (fun (r : A.task_relation) -> r.trace.run_id) p.relations);
   let decoded = Candle_payment.of_yojson (Candle_payment.to_yojson p) |> ok in
-  check bool "ledger decode replays the same integer calculation" true (decoded = p)
+  check bool "ledger decode retains the issued payment and its evidence" true (decoded = p)
 
 let test_invalid_weights_wait_for_an_event_not_a_pulse () =
   with_workspace @@ fun env config ->

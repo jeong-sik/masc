@@ -64,14 +64,33 @@ val verifier_authority : Masc_domain.completion_authority
     and every stalled-review notice it posts carries this value. It is built
     inside the application boundary and is never read from a caller. *)
 
+(** A step a caller of a Goal transition supplies. It runs under the Goal lock
+    after the transition was checked and before anything is written for it.
+    [Error] refuses the transition: nothing is written and the caller gets the
+    message. This module does not know what a step does. *)
+type proof_step = Goal_store.goal -> Goal_verification.verdict -> (unit, string) result
+
+type confirmation_step =
+  Goal_store.goal
+  -> Goal_verification.verdict
+  -> Goal_verification.confirmation
+  -> (unit, string) result
+
 (** Commit one verdict from the application-owned Goal verifier. The fixed
     [verifier_exact] authority is constructed inside this boundary; callers
     cannot supply or impersonate it. The ledger commit precedes any phase
     write, and a stale/non-pending verdict is refused. An exact replay after
     the target phase committed returns success without rewriting state or
-    repeating phase events and announcements. *)
+    repeating phase events and announcements.
+
+    [before_proof_commit] runs for a [Proof_proven] verdict that moves the
+    Goal, after the criterion and phase checks and before the verdict reaches
+    the ledger. It does not run for a refutation, for a refused verdict, or
+    for the replay of a verdict that is already stored. When it refuses, the
+    request stays pending and the Goal stays in [Verifying]. *)
 val commit_verifier_decision
-  :  tool_name:string
+  :  ?before_proof_commit:proof_step
+  -> tool_name:string
   -> start_time:Tool_timing.started
   -> Workspace_utils_backend_setup.config
   -> goal_id:string
@@ -113,13 +132,20 @@ val recover_current_proof : Workspace_utils_backend_setup.config -> goal_id:stri
     [Ok false] means a concurrent phase change needs no recovery; no request is
     created and no other Goal in the scan is blocked. *)
 
-val confirm_completion : Workspace_utils_backend_setup.config -> goal_id:string ->
+val confirm_completion : ?after_confirmation:confirmation_step ->
+  Workspace_utils_backend_setup.config -> goal_id:string ->
   operator_id:string -> request_id:string -> verification_run_id:string ->
   criterion_revision:string -> (Yojson.Safe.t, Goal_store.write_error) result
 (** HTTP-only operator authority. Identity comes from token-bound CanAdmin,
     never the request body or agent tool surface. Exact current proof
     required; a binding that does not name it is [Rejected], and a store
-    this build cannot read is [Store_unavailable] with its own value. *)
+    this build cannot read is [Store_unavailable] with its own value.
+
+    [after_confirmation] runs after the confirmation reached the verification
+    ledger and before the phase is written. It also runs when the confirmation
+    is repeated for a Goal that is already [Completed], so it must give the
+    same answer the second time. When it refuses, the confirmation stays
+    recorded, the phase does not move, and confirming again runs it again. *)
 
 val scan_overdue_goal_notifications :
   ?now:Ptime.t -> Workspace_utils_backend_setup.config -> unit

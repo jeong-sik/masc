@@ -58,12 +58,13 @@ let cache_rank = function
   | Skill_compositions -> 1
   (* The split retains their prior assembly position: ordinary facts first,
      then the independently versioned Librarian index. *)
-  | Memory_os_recall | Librarian_working_context -> 2
-  | Dynamic_context -> 3
-  | Temporal_summary -> 4
+  | Memory_os_recall -> 2
+  | Librarian_working_context -> 3
+  | Dynamic_context -> 4
+  | Temporal_summary -> 5
   (* An operator speaking mid-turn is the newest thing in the assembly and the
      only block that rides a post-tool round; it stays last on both counts. *)
-  | Operator_note -> 5
+  | Operator_note -> 6
 ;;
 
 (* See the mli. [Keeper_instructions] never enters the extra-context

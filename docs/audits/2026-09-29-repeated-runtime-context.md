@@ -75,8 +75,8 @@ on each resume.
 Ordinary Recall and the Librarian index now have separate typed block
 identities. On lanes with held-context suppression, a Librarian-only revision
 sends its updated reference without replaying unchanged ordinary Recall.
-The assembly uses `List.stable_sort` in `keeper_run_tools_hooks.ml`, preserving
-ordinary Recall before the Librarian reference at their shared rank.
+The assembly assigns separate ranks to ordinary Recall and the Librarian
+reference, preserving that order independently of insertion order.
 Both remain first-round context; the
 Dashboard decodes and labels the new `librarian_working_context` identity.
 
@@ -148,3 +148,10 @@ three new Codex cases failed before their first native request because the
 fixture read `requests.jsonl` before creating it. Fixture setup now creates
 the empty capture file before a test counts prior requests. These older-head
 results are diagnostic evidence, not validation of later commits.
+
+At `6770a82319`, targeted run `36572762990` passed 10/11 suites, including
+the 27-tick Codex cycle and both compaction sequences. Two production-wire
+assertions still assumed dynamic instructions were the carrier prefix; they
+now verify the exact section occurs once after explicit memory status blocks.
+The PR gate additionally caught duplicate cache ranks; Librarian now has its
+own rank between ordinary Recall and dynamic context. New-head CI is required.

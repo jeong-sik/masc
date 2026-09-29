@@ -6264,23 +6264,12 @@ let test_production_dynamic_context_reaches_codex_instruction_wire ~project () =
          |> member "text"
          |> to_string
        in
-       (* The production assembly appends the temporal summary into the same
-          envelope after the turn instructions, so the instructions are the
-          prefix of the wire text rather than the whole of it. *)
-       if
-         String.length wire_text < String.length expected_dynamic_context
-         || String.sub wire_text 0 (String.length expected_dynamic_context)
-            <> expected_dynamic_context
-       then
-         check string
-           "production turn instructions stay exact on the wire"
-           expected_dynamic_context
-           wire_text
-       else
-         check string
-           "production turn instructions stay exact on the wire"
-           expected_dynamic_context
-           (String.sub wire_text 0 (String.length expected_dynamic_context));
+       (* Stable memory availability precedes dynamic instructions. Assert the
+          complete instruction section survives exactly once, without assuming
+          it is the first section of the assembled carrier. *)
+       let sections = Astring.String.cuts ~sep:"\n\n" wire_text in
+       check int "production turn instructions stay exact and occur once"
+         1 (List.length (List.filter (String.equal expected_dynamic_context) sections));
        (match
           context_message
           |> member "metadata"

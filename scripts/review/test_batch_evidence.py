@@ -30,6 +30,7 @@ def load(name, path):
 F = load("batch_test_freshness", HERE / "ci-freshness.py")
 B = load("batch_test_evidence", HERE / "batch_evidence.py")
 E = B.ExitCode
+R = B.Reason
 REQUIRED = ("lint suite", "dune build @check", "dune build --profile release @check",
             "dashboard typecheck", "TLA model check")
 PREFIX = "repos/o/r"
@@ -860,48 +861,48 @@ print(value)
         code, receipt = self.cli()
         self.assertEqual((code, receipt["reason"]), (1, "evidence_read_failed"))
 
-    # Exit codes each Reason may leave with. Two codes: a shared reader takes
-    # its caller's role. EVIDENCE_READ_FAILED follows the shell guard's status.
-    REASON_CODES_CONTRACT = {
-        "evidence_read_failed": {E.INFRASTRUCTURE, E.ROLL, E.MEMBER, E.LANDING, E.MAIN_OVERLAP},
-        "invalid_approval_receipt": {E.INFRASTRUCTURE},
-        "batch_line_not_published_by_trusted_participant": {E.ROLL, E.MEMBER},
-        "batch_member_without_current_pass": {E.MEMBER},
-        "batch_roll_review_refuses_evidence": {E.ROLL},
-        "batch_member_has_open_change_request": {E.ROLL, E.MEMBER},
-        "pr_check_run_unavailable": {E.ROLL, E.MEMBER},
-        "batch_run_not_current_successful_exact_pr_check": {E.ROLL, E.MEMBER},
-        "batch_run_suite_not_linked_to_pr": {E.ROLL, E.MEMBER},
-        "batch_required_jobs_not_all_successful": {E.ROLL, E.MEMBER},
-        "batch_roll_pr_identity_unavailable": {E.ROLL},
-        "batch_roll_pr_is_a_member": {E.INVALID},
-        "candidate_not_in_batch": {E.MEMBER},
-        "batch_landing_requires_roll": {E.MEMBER},
-        "batch_roll_already_merged": {E.MEMBER},
-        "batch_roll_not_yet_merged": {E.MEMBER},
-        "batch_member_verdict_names_another_run": {E.MEMBER},
-        "batch_member_head_or_base_changed": {E.MEMBER},
-        "batch_member_no_longer_open": {E.MEMBER},
-        "batch_tree_merge_conflict_or_unavailable": {E.LANDING, E.INFRASTRUCTURE},
-        "batch_tree_commit_unavailable": {E.INFRASTRUCTURE},
-        "batch_roll_tree_does_not_match_members": {E.LANDING},
-        "batch_roll_has_no_changes": {E.INVALID},
-        "batch_base_not_in_available_main_history": {E.INFRASTRUCTURE},
-        "batch_roll_landing_is_not_a_squash": {E.LANDING},
-        "batch_main_changed_at_merge_write": {E.LANDING},
-        "batch_roll_landing_tree_mismatch": {E.LANDING},
-        "batch_nonmember_main_change_invalidates_roll": {E.MAIN_OVERLAP},
-        "batch_roll_merge_not_in_main_history": {E.LANDING},
-        "batch_final_landing_tree_mismatch": {E.LANDING},
-        "batch_member_moved_during_check": {E.MEMBER},
-        "batch_publication_changed_during_check": {E.MEMBER},
-        "batch_member_verdict_changed_during_check": {E.MEMBER},
-        "batch_roll_or_main_moved_during_check": {E.INVALID},
+    # Exit codes each Reason may leave with. A shared ROLL/member reader takes
+    # its caller's role; a failing git or shell step can give INFRASTRUCTURE.
+    ALLOWED_CODES = {
+        R.EVIDENCE_READ_FAILED: {E.INFRASTRUCTURE, E.ROLL, E.MEMBER, E.LANDING, E.MAIN_OVERLAP},
+        R.INVALID_APPROVAL_RECEIPT: {E.INFRASTRUCTURE},
+        R.LINE_NOT_PUBLISHED_BY_TRUSTED_PARTICIPANT: {E.ROLL, E.MEMBER},
+        R.MEMBER_WITHOUT_CURRENT_PASS: {E.MEMBER},
+        R.ROLL_REVIEW_REFUSES_EVIDENCE: {E.ROLL},
+        R.MEMBER_HAS_OPEN_CHANGE_REQUEST: {E.ROLL, E.MEMBER},
+        R.PR_CHECK_RUN_UNAVAILABLE: {E.ROLL, E.MEMBER},
+        R.RUN_NOT_CURRENT_SUCCESSFUL_EXACT_PR_CHECK: {E.ROLL, E.MEMBER},
+        R.RUN_SUITE_NOT_LINKED_TO_PR: {E.ROLL, E.MEMBER},
+        R.REQUIRED_JOBS_NOT_ALL_SUCCESSFUL: {E.ROLL, E.MEMBER},
+        R.ROLL_PR_IDENTITY_UNAVAILABLE: {E.ROLL},
+        R.ROLL_PR_IS_A_MEMBER: {E.INVALID},
+        R.CANDIDATE_NOT_IN_BATCH: {E.MEMBER},
+        R.LANDING_REQUIRES_ROLL: {E.MEMBER},
+        R.ROLL_ALREADY_MERGED: {E.MEMBER},
+        R.ROLL_NOT_YET_MERGED: {E.MEMBER},
+        R.MEMBER_VERDICT_NAMES_ANOTHER_RUN: {E.MEMBER},
+        R.MEMBER_HEAD_OR_BASE_CHANGED: {E.MEMBER},
+        R.MEMBER_NO_LONGER_OPEN: {E.MEMBER},
+        R.TREE_MERGE_CONFLICT_OR_UNAVAILABLE: {E.LANDING, E.INFRASTRUCTURE},
+        R.TREE_COMMIT_UNAVAILABLE: {E.INFRASTRUCTURE},
+        R.ROLL_TREE_DOES_NOT_MATCH_MEMBERS: {E.LANDING},
+        R.ROLL_HAS_NO_CHANGES: {E.INVALID},
+        R.BASE_NOT_IN_AVAILABLE_MAIN_HISTORY: {E.INFRASTRUCTURE},
+        R.ROLL_LANDING_IS_NOT_A_SQUASH: {E.LANDING},
+        R.MAIN_CHANGED_AT_MERGE_WRITE: {E.LANDING},
+        R.ROLL_LANDING_TREE_MISMATCH: {E.LANDING},
+        R.NONMEMBER_MAIN_CHANGE_INVALIDATES_ROLL: {E.MAIN_OVERLAP},
+        R.ROLL_MERGE_NOT_IN_MAIN_HISTORY: {E.LANDING},
+        R.FINAL_LANDING_TREE_MISMATCH: {E.LANDING},
+        R.MEMBER_MOVED_DURING_CHECK: {E.MEMBER},
+        R.PUBLICATION_CHANGED_DURING_CHECK: {E.MEMBER},
+        R.MEMBER_VERDICT_CHANGED_DURING_CHECK: {E.MEMBER},
+        R.ROLL_OR_MAIN_MOVED_DURING_CHECK: {E.INVALID},
     }
 
     def test_every_reason_is_raised_with_a_contract_code(self):
         tree = ast.parse((HERE / "batch_evidence.py").read_text())
-        self.assertEqual(set(self.REASON_CODES_CONTRACT), {reason.value for reason in B.Reason})
+        self.assertEqual(set(self.ALLOWED_CODES), set(B.Reason))
         for reason in B.Reason:
             self.assertEqual(reason.name, reason.value.removeprefix("batch_").upper())
         raised_calls, raised = set(), set()
@@ -921,7 +922,7 @@ print(value)
                 self.assertTrue(isinstance(first, ast.Attribute) and isinstance(first.value, ast.Name)
                                 and first.value.id == "Reason")
                 raised.add(first.attr)
-                allowed = self.REASON_CODES_CONTRACT[B.Reason[first.attr].value]
+                allowed = self.ALLOWED_CODES[B.Reason[first.attr]]
                 # The values the code expression can take: ExitCode literals,
                 # or a variable (a role or guard status chosen at run time).
                 leaves, pending = [], [code]

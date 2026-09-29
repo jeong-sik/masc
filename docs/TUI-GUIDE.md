@@ -75,8 +75,26 @@ machine accepts and where the images come from.
 Open `:` then `go DOS` to watch the same live DOS screen an invited player
 sees at `/play`. The TUI view is a spectator: `Esc` returns and `+`/`-`
 resize it; game input and turn changes go through the server's controller.
-Invites are currently issued and revoked through the admin play-invites API,
-not from the TUI.
+
+## Shared DOS play invites
+
+Select a Keeper chat to use the TUI composer. `/play invites` lists invites, `/play invite <name>
+<hours>` issues one, `/play link` reopens the last link issued in this TUI
+session, and `/play revoke <name>` removes it. Issuance requires
+an admin operator credential, token-required authentication and
+`MASC_HTTP_BASE_URL`. The one-time link appears in a local TUI reply (it is
+not sent to the Keeper) and
+is sent through OSC 52 for copying; terminal clipboard support varies. The
+TUI keeps the last link only until it exits or that invite is revoked.
+If the issue request has no trustworthy answer, inspect the invite list and
+revoke that name before retrying because the original link cannot be recovered.
+If revocation reports a controller release failure or an unknown outcome,
+repeat `/play revoke <name>`: a second request can release a controller even
+after the invite credential was deleted.
+
+The invited person opens the link in a browser to watch and play the shared
+DOS machine. The TUI can also watch through `go DOS` or the `go MSX` menu's
+`watch DOS machine` entry when a DOS machine is loaded.
 
 ## Options
 

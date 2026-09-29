@@ -4,6 +4,7 @@ let ( let* ) = Result.bind
 
 type error =
   | Negative_total
+  | Negative_share of int
   | No_weight
   | Negative_weight of string
   | Duplicate_name of string
@@ -13,12 +14,13 @@ type error =
 
 let error_to_string = function
   | Negative_total -> "the total is negative"
+  | Negative_share share -> Printf.sprintf "the share %d is negative" share
   | No_weight -> "there is no weight to share by"
   | Negative_weight name -> Printf.sprintf "the weight of %s is negative" name
   | Duplicate_name name -> Printf.sprintf "%s is named twice" name
   | Rate_out_of_range value -> Printf.sprintf "%d is outside 0..1000" value
   | Negative_hours hours -> Printf.sprintf "%d hours is negative" hours
-  | Overflow -> "the product does not fit in 63 bits"
+  | Overflow -> "the arithmetic does not fit in 63 bits"
 ;;
 
 let thousand = 1000
@@ -128,6 +130,8 @@ let split ~total weights =
 
 let deduct ~coefficient share =
   let* () = check_thousandths coefficient in
-  let* deducted, (_ : int) = scaled ~a:share ~b:coefficient ~c:thousand in
-  Ok deducted
+  if share < 0 then Error (Negative_share share)
+  else
+    let* deducted, (_ : int) = scaled ~a:share ~b:coefficient ~c:thousand in
+    Ok deducted
 ;;

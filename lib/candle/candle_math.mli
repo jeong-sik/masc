@@ -7,12 +7,13 @@
 
 type error =
   | Negative_total
+  | Negative_share of int
   | No_weight  (** No weights, or they sum to zero. *)
   | Negative_weight of string
   | Duplicate_name of string
   | Rate_out_of_range of int  (** A rate or floor outside [0, 1000]. *)
   | Negative_hours of int
-  | Overflow  (** The product would not fit in an [int]. *)
+  | Overflow  (** An intermediate sum or product would not fit in an [int]. *)
 
 val error_to_string : error -> string
 
@@ -36,4 +37,5 @@ val split : total:int -> (string * int) list -> ((string * int) list, error) res
 
 val deduct : coefficient:int -> int -> (int, error) result
 (** [deduct ~coefficient share] is [share * coefficient / 1000], rounded down.
-    [coefficient] must lie in [0, 1000]. *)
+    [coefficient] must lie in [0, 1000]. A negative share is refused before any
+    multiplication, including when the coefficient is zero. *)

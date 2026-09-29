@@ -191,6 +191,18 @@ let test_a_deduction_that_cannot_be_made_is_refused () =
   is_error "share times coefficient overflows" Candle_math.Overflow (Candle_math.deduct ~coefficient:1000 max_int)
 ;;
 
+let test_negative_shares_never_become_payments () =
+  List.iter
+    (fun share ->
+       List.iter
+         (fun coefficient ->
+            is_error "a negative input cannot mint or destroy a payment"
+              (Candle_math.Negative_share share)
+              (Candle_math.deduct ~coefficient share))
+         [ 0; 1; 500; 999; 1000 ])
+    [ -1; -1000; min_int; min_int + 1 ]
+;;
+
 let () =
   Alcotest.run
     "candle_math"
@@ -224,6 +236,8 @@ let () =
         ] )
     ; ( "deduct"
       , [ Alcotest.test_case "a deduction rounds down" `Quick test_a_deduction_rounds_down
+        ; Alcotest.test_case "negative shares never become payments" `Quick
+            test_negative_shares_never_become_payments
         ; Alcotest.test_case "a deduction that cannot be made is refused" `Quick
             test_a_deduction_that_cannot_be_made_is_refused
         ] )

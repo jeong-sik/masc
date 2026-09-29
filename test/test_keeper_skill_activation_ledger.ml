@@ -45,6 +45,22 @@ let with_session f =
     (fun () -> f config trace_id session_dir)
 ;;
 
+let events_file session_dir = Filename.concat session_dir "skill-activation-events.jsonl"
+
+let read_file path =
+  let input = open_in_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr input)
+    (fun () -> really_input_string input (in_channel_length input))
+;;
+
+let write_file path contents =
+  let output = open_out_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr output)
+    (fun () -> output_string output contents)
+;;
+
 let copy_file ~source ~target =
   let input = open_in_bin source in
   let output = open_out_bin target in
@@ -185,53 +201,366 @@ let test_empty_record_and_idempotent_readback () =
     (Ledger.ledger_revision_to_string (Ledger.revision second))
 ;;
 
-(* [record] returns the ledger it wrote instead of reading the file back to
-   compare revisions, because that readback decoded the whole document a second
-   time on the caller's domain under the session lock. What it was checking is
-   that the codec reads back what it writes, so that property is checked here:
-   several activations are recorded, and the ledger loaded from the file must
-   equal the one [record] returned — revision, activations and all. *)
-let test_a_recorded_ledger_loads_back_as_it_was_returned () =
+let ok label = function
+  | Ok value -> value
+  | Error error -> fail (label ^ ": " ^ Ledger.store_error_to_string error)
+;;
+
+let first_turn = Ids.Turn_ref.make ~trace_id:"trace-one" ~absolute_turn:1
+
+let deliver config trace_id ids =
+  Ledger.observe_delivery
+    ~config
+    ~trace_id
+    ~turn_ref:first_turn
+    ~tool_results:(List.map (fun id -> receipt id) ids)
+    ~boundary:(Ledger.Model_response { agent_core_turn = 1 })
+    ~runtime_id:"runtime-delivery"
+    ~delivered_at:"2026-08-26T00:00:01Z"
+;;
+
+let act config trace_id ~call ids =
+  Ledger.observe_action
+    ~config
+    ~trace_id
+    ~turn_ref:first_turn
+    ~active_skill_tool_use_ids:ids
+    ~action_identity:(Ledger.Call_id call)
+    ~tool_name:"keeper_lane_status"
+    ~runtime_id:"runtime-action"
+    ~agent_core_turn:2
+    ~observed_at:"2026-08-26T00:00:02Z"
+;;
+
+let replayed_from_file config trace_id =
+  match Ledger.load_existing ~config ~trace_id with
+  | Ok (Some ledger) -> ledger
+  | Ok None -> fail "the session's event log was not found"
+  | Error error -> fail ("replay failed: " ^ Ledger.store_error_to_string error)
+;;
+
+let ledger_json ledger = Yojson.Safe.to_string (Ledger.to_yojson ledger)
+
+(* What this process holds of a session and what a reader with no memory of
+   it rebuilds from the file must be the same ledger, revision and all. *)
+let check_the_file_replays_the_held_ledger config trace_id =
+  let held = ok "load" (Ledger.load ~config ~trace_id) in
+  check string "the file replays to the ledger this process holds"
+    (ledger_json held)
+    (ledger_json (replayed_from_file config trace_id))
+
+(* A mutation returns the ledger it appended to, and a reader with no memory
+   of the session rebuilds the ledger from the file's rows. After every kind
+   of event -- activations, deliveries, actions, a rejected transition --
+   the two must be the same ledger, revision and all. *)
+let test_the_held_ledger_is_the_one_the_file_replays () =
   with_session @@ fun config trace_id _session_dir ->
-  let recorded =
-    List.fold_left
-      (fun _ candidate ->
-         match Ledger.record ~config ~trace_id candidate with
-         | Ok (ledger, Ledger.Recorded _) -> ledger
-         | Ok (_, Ledger.Already_recorded _) -> fail "a distinct activation was a repeat"
-         | Error error -> fail ("record failed: " ^ Ledger.store_error_to_string error))
-      (Ledger.empty ~workspace_root:"" ~trace_id)
-      [ activation ()
-      ; activation ~source:"user" ()
-      ; activation ~revision:'b' ()
-      ; (* The default id spells call-<source>-<revision>, so a fixture that
-           varies only [name] must say its id: the record key compares
-           skill_tool_use_id alone, and two activations sharing one with
-           different identities are an Invocation_id_collision, not a
-           repeat. *)
-        activation ~name:"polish" ~skill_tool_use_id:"call-polish" ()
-      ]
+  List.iter
+    (fun candidate ->
+       match Ledger.record ~config ~trace_id candidate with
+       | Ok (_, Ledger.Recorded _) -> ()
+       | Ok (_, Ledger.Already_recorded _) -> fail "a distinct activation was a repeat"
+       | Error error -> fail ("record failed: " ^ Ledger.store_error_to_string error))
+    [ activation ()
+    ; activation ~source:"user" ()
+    ; activation ~revision:'b' ()
+    ; (* The default id spells call-<source>-<revision>, so a fixture that
+         varies only [name] must say its id: the record key compares
+         skill_tool_use_id alone, and two activations sharing one with
+         different identities are an Invocation_id_collision, not a
+         repeat. *)
+      activation ~name:"polish" ~skill_tool_use_id:"call-polish" ()
+    ; activation
+        ~skill_tool_use_id:"call-resource"
+        ~invocation:
+          (Ledger.Instruction_invocation
+             { origin = Ledger.Session_instruction
+             ; served_content =
+                 Ledger.Skill_resource
+                   { relative_path = "references/checklist.md"
+                   ; bytes = String.length "skill body"
+                   ; sha256 = Digestif.SHA256.(digest_string "skill body" |> to_hex)
+                   }
+             })
+        ()
+    ; activation ~skill_tool_use_id:"call-late" ~agent_core_turn:5 ()
+    ];
+  (match deliver config trace_id [ "call-late" ] with
+   | Error (Ledger.Invalid_delivery_order { skill_tool_use_id = "call-late"; _ }) -> ()
+   | Error error -> fail (Ledger.store_error_to_string error)
+   | Ok _ -> fail "a delivery before its activation was accepted");
+  let _, delivered =
+    ok
+      "delivery"
+      (deliver config trace_id [ "call-workspace-a"; "call-user-a"; "call-resource" ])
   in
-  let loaded =
-    match Ledger.load ~config ~trace_id with
-    | Ok ledger -> ledger
-    | Error error -> fail ("load failed: " ^ Ledger.store_error_to_string error)
+  check (list string) "the results delivered"
+    [ "call-workspace-a"; "call-user-a"; "call-resource" ]
+    delivered;
+  let _, acted =
+    ok "action" (act config trace_id ~call:"call-action" [ "call-workspace-a"; "call-user-a" ])
   in
-  check string "the revision the write returned is the one on disk"
-    (Ledger.ledger_revision_to_string (Ledger.revision recorded))
-    (Ledger.ledger_revision_to_string (Ledger.revision loaded));
-  check int "every activation survived the round trip"
-    (List.length (Ledger.activations recorded))
-    (List.length (Ledger.activations loaded));
-  check bool "and each one came back identical" true
-    (List.length (Ledger.activations recorded) = List.length (Ledger.activations loaded)
-     && List.for_all2
-          (fun left right ->
-             Yojson.Safe.equal
-               (Ledger.activation_to_yojson left)
-               (Ledger.activation_to_yojson right))
-          (Ledger.activations recorded)
-          (Ledger.activations loaded))
+  check int "one action on each delivered Skill" 2 acted;
+  (match act config trace_id ~call:"call-too-early" [ "call-workspace-b" ] with
+   | Error (Ledger.Action_before_delivery "call-workspace-b") -> ()
+   | Error error -> fail (Ledger.store_error_to_string error)
+   | Ok _ -> fail "an action before delivery was accepted");
+  let held = ok "load" (Ledger.load ~config ~trace_id) in
+  let summary = Ledger.summarize held in
+  check int "every activation is held" 6 (List.length (Ledger.activations held));
+  check int "the deliveries are held" 3 summary.instruction_provider_deliveries;
+  check int "both rejections are held" 2 summary.invalid_transitions;
+  check_the_file_replays_the_held_ledger config trace_id
+;;
+
+let line_count contents =
+  List.length (String.split_on_char '\n' contents) - 1
+;;
+
+(* A mutation adds one row to the end of the file and leaves what was there
+   untouched; a repeat that changes nothing adds nothing. *)
+let test_each_mutation_appends_one_row () =
+  with_session @@ fun config trace_id session_dir ->
+  let file = events_file session_dir in
+  let _ = ok "first record" (Ledger.record ~config ~trace_id (activation ())) in
+  let after_first = read_file file in
+  check int "the header and the first activation" 2 (line_count after_first);
+  let expect_one_more label previous =
+    let current = read_file file in
+    check int (label ^ " adds one row") (line_count previous + 1) (line_count current);
+    check bool (label ^ " keeps the earlier rows") true
+      (String.starts_with ~prefix:previous current);
+    current
+  in
+  let _ = ok "second record" (Ledger.record ~config ~trace_id (activation ~revision:'b' ())) in
+  let after_second = expect_one_more "an activation" after_first in
+  let _ = ok "repeat record" (Ledger.record ~config ~trace_id (activation ())) in
+  check string "an identical activation adds nothing" after_second (read_file file);
+  let _ = ok "delivery" (deliver config trace_id [ "call-workspace-a" ]) in
+  let after_delivery = expect_one_more "a delivery" after_second in
+  let _ = ok "action" (act config trace_id ~call:"call-action" [ "call-workspace-a" ]) in
+  let after_action = expect_one_more "an action" after_delivery in
+  (* A repeated recording is judged on what the activation recorded when it
+     was made. The delivery and action that followed do not make it another
+     invocation, and the stored activation keeps them. *)
+  (match Ledger.record ~config ~trace_id (activation ()) with
+   | Ok (_, Ledger.Already_recorded (existing : Ledger.activation)) ->
+     check bool "the stored activation keeps its delivery" true
+       (Option.is_some existing.delivery);
+     check int "and its action" 1 (List.length existing.actions)
+   | Ok (_, Ledger.Recorded _) -> fail "a repeated recording was recorded again"
+   | Error error -> fail ("a repeated recording was refused: " ^ Ledger.store_error_to_string error));
+  check string "a repeat after evidence adds nothing" after_action (read_file file);
+  let _ = ok "repeat delivery" (deliver config trace_id [ "call-workspace-a" ]) in
+  let _ = ok "repeat action" (act config trace_id ~call:"call-action" [ "call-workspace-a" ]) in
+  check string "repeats add nothing" after_action (read_file file)
+;;
+
+let header_row config trace_id =
+  let workspace_root = Keeper_fs.session_base_dir config |> Unix.realpath in
+  Yojson.Safe.to_string
+    (`Assoc
+        [ "schema", `String "masc.skill-activation-events/v1"
+        ; "kind", `String "opened"
+        ; ( "workspace_key"
+          , `String (Ledger.workspace_key (Ledger.empty ~workspace_root ~trace_id)) )
+        ; "session_id", `String (Keeper_id.Trace_id.to_string trace_id)
+        ])
+;;
+
+let activation_row value =
+  Yojson.Safe.to_string
+    (`Assoc
+        [ "kind", `String "activation_recorded"
+        ; "activation", Ledger.activation_to_yojson value
+        ])
+;;
+
+(* A crash while appending leaves the last row without its newline. A reader
+   without the lock leaves that row out; the first locked read in a process
+   cuts it off the file before replaying, and writing carries on after it. *)
+let test_a_torn_last_row_is_cut_on_first_read () =
+  with_session @@ fun config trace_id session_dir ->
+  let file = events_file session_dir in
+  let committed = header_row config trace_id ^ "\n" ^ activation_row (activation ()) ^ "\n" in
+  write_file file (committed ^ "{\"kind\":\"activation_rec");
+  let observed = replayed_from_file config trace_id in
+  check int "an unlocked read leaves the torn row out" 1
+    (List.length (Ledger.activations observed));
+  let loaded = ok "first locked read" (Ledger.load ~config ~trace_id) in
+  check int "the committed activation is kept" 1 (List.length (Ledger.activations loaded));
+  check string "the torn row is cut off the file" committed (read_file file);
+  let _ = ok "record after recovery" (Ledger.record ~config ~trace_id (activation ~revision:'b' ())) in
+  check int "writing carries on after the cut" 2
+    (List.length (Ledger.activations (replayed_from_file config trace_id)))
+;;
+
+(* An event that names an activation the log never recorded is a row this
+   store's writer cannot have produced. *)
+let test_an_event_for_an_unrecorded_activation_is_typed () =
+  with_session @@ fun config trace_id session_dir ->
+  let delivery_row =
+    Yojson.Safe.to_string
+      (`Assoc
+          [ "kind", `String "deliveries_observed"
+          ; ( "deliveries"
+            , `List
+                [ `Assoc
+                    [ "skill_tool_use_id", `String "call-missing"
+                    ; ( "delivery"
+                      , `Assoc
+                          [ ( "boundary"
+                            , `Assoc
+                                [ "kind", `String "model_response"
+                                ; "agent_core_turn", `Int 1
+                                ] )
+                          ; "runtime_id", `String "runtime-delivery"
+                          ; "delivered_at", `String "2026-08-26T00:00:01Z"
+                          ; "content_bytes", `Int 10
+                          ; "content_sha256", `String (String.make 64 'a')
+                          ] )
+                    ]
+                ] )
+          ])
+  in
+  write_file
+    (events_file session_dir)
+    (String.concat "\n" [ header_row config trace_id; activation_row (activation ()); delivery_row ]
+     ^ "\n");
+  match Ledger.load ~config ~trace_id with
+  | Error (Ledger.Decode_failed (Ledger.Unknown_event_activation "call-missing")) -> ()
+  | Error error -> fail ("wrong typed error: " ^ Ledger.store_error_to_string error)
+  | Ok _ -> fail "a delivery for an unrecorded activation was replayed"
+;;
+
+let append_to_file path contents =
+  let output = open_out_gen [ Open_wronly; Open_append; Open_binary ] 0o600 path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr output)
+    (fun () -> output_string output contents)
+;;
+
+let activation_count ledger = List.length (Ledger.activations ledger)
+
+(* A file whose very first row has no newline is not one this writer made: it
+   creates the file with its first rows in one atomic step. The locked read
+   refuses it and leaves it as it is, rather than cutting it as a crash would
+   have left it; the unlocked read refuses it too. *)
+let test_an_unterminated_first_row_is_refused_and_kept () =
+  with_session @@ fun config trace_id session_dir ->
+  let file = events_file session_dir in
+  write_file file "not-json";
+  (match Ledger.load ~config ~trace_id with
+   | Error (Ledger.Decode_failed Ledger.Unterminated_header_row) -> ()
+   | Error error -> fail ("wrong typed error: " ^ Ledger.store_error_to_string error)
+   | Ok _ -> fail "an unterminated first row was read as an empty session");
+  check string "the refused file is left as it was" "not-json" (read_file file);
+  match Ledger.load_existing ~config ~trace_id with
+  | Error (Ledger.Decode_failed Ledger.Unterminated_header_row) -> ()
+  | Error error -> fail ("wrong typed error: " ^ Ledger.store_error_to_string error)
+  | Ok _ -> fail "an unlocked read accepted an unterminated first row"
+;;
+
+(* Rows another writer appends after this process last read the store are
+   applied on the next read, after the cursor, and writing carries on after
+   them. *)
+let test_rows_another_writer_appends_are_read_after_the_cursor () =
+  with_session @@ fun config trace_id session_dir ->
+  let _ = ok "record" (Ledger.record ~config ~trace_id (activation ())) in
+  append_to_file (events_file session_dir) (activation_row (activation ~revision:'b' ()) ^ "\n");
+  check int "the appended row is read" 2
+    (activation_count (ok "load" (Ledger.load ~config ~trace_id)));
+  let _ = ok "record after" (Ledger.record ~config ~trace_id (activation ~revision:'c' ())) in
+  check int "writing carries on after it" 3
+    (activation_count (ok "load" (Ledger.load ~config ~trace_id)));
+  check_the_file_replays_the_held_ledger config trace_id
+;;
+
+(* A store replaced behind this process's cursor -- a different file at the
+   same path -- is replayed from its first byte. *)
+let test_a_replaced_store_is_replayed_from_its_first_byte () =
+  with_session @@ fun config trace_id session_dir ->
+  let _ = ok "record" (Ledger.record ~config ~trace_id (activation ())) in
+  let file = events_file session_dir in
+  let replacement = file ^ ".replacement" in
+  write_file
+    replacement
+    (read_file file ^ activation_row (activation ~revision:'b' ()) ^ "\n");
+  Unix.rename replacement file;
+  check int "the replaced store is read whole" 2
+    (activation_count (ok "load" (Ledger.load ~config ~trace_id)));
+  check_the_file_replays_the_held_ledger config trace_id
+;;
+
+(* A torn last row that appears after this process has read the store --
+   another writer died mid-append -- is cut on the next locked read, which
+   replays the store instead of failing until a restart. *)
+let test_a_torn_tail_after_a_warm_read_is_cut () =
+  with_session @@ fun config trace_id session_dir ->
+  let _ = ok "record" (Ledger.record ~config ~trace_id (activation ())) in
+  let file = events_file session_dir in
+  let committed = read_file file in
+  append_to_file file "{\"kind\":\"activation_rec";
+  check int "the committed activation is kept" 1
+    (activation_count (ok "load" (Ledger.load ~config ~trace_id)));
+  check string "the torn row is cut off the file" committed (read_file file);
+  let _ = ok "record after" (Ledger.record ~config ~trace_id (activation ~revision:'b' ())) in
+  check_the_file_replays_the_held_ledger config trace_id
+;;
+
+(* The replay holds each row to what the writer produces: an activation
+   recorded twice, or an event with a field the writer never writes, is a
+   typed decode failure. *)
+let test_the_replay_holds_rows_to_the_writers_shapes () =
+  with_session @@ fun config trace_id session_dir ->
+  let file = events_file session_dir in
+  let row = activation_row (activation ()) in
+  write_file file (String.concat "\n" [ header_row config trace_id; row; row ] ^ "\n");
+  (match Ledger.load ~config ~trace_id with
+   | Error (Ledger.Decode_failed Ledger.Duplicate_skill_tool_use_id) -> ()
+   | Error error -> fail ("wrong typed error: " ^ Ledger.store_error_to_string error)
+   | Ok _ -> fail "an activation recorded twice was replayed");
+  let extra =
+    Yojson.Safe.to_string
+      (`Assoc
+          [ "kind", `String "activation_recorded"
+          ; "activation", Ledger.activation_to_yojson (activation ())
+          ; "extra", `Int 1
+          ])
+  in
+  write_file file (header_row config trace_id ^ "\n" ^ extra ^ "\n");
+  match Ledger.load ~config ~trace_id with
+  | Error
+      (Ledger.Decode_failed
+         (Ledger.Unexpected_field { object_name = "event"; field = "extra" })) -> ()
+  | Error error -> fail ("wrong typed error: " ^ Ledger.store_error_to_string error)
+  | Ok _ -> fail "an event with an unknown field was replayed"
+;;
+
+(* A mutation whose row a replay could not read is refused before anything
+   is written. A delivery observed at a negative turn would record a
+   rejection the decoder refuses, which would fail every later replay of the
+   session. *)
+let test_a_row_the_replay_could_not_read_is_never_written () =
+  with_session @@ fun config trace_id session_dir ->
+  let _ = ok "record" (Ledger.record ~config ~trace_id (activation ())) in
+  let file = events_file session_dir in
+  let before = read_file file in
+  (match
+     Ledger.observe_delivery
+       ~config
+       ~trace_id
+       ~turn_ref:first_turn
+       ~tool_results:[ receipt "call-workspace-a" ]
+       ~boundary:(Ledger.Model_response { agent_core_turn = -1 })
+       ~runtime_id:"runtime-delivery"
+       ~delivered_at:"2026-08-26T00:00:01Z"
+   with
+   | Error (Ledger.Decode_failed _) -> ()
+   | Error error -> fail ("wrong typed error: " ^ Ledger.store_error_to_string error)
+   | Ok _ -> fail "a delivery at a negative turn was accepted");
+  check string "nothing was written" before (read_file file);
+  check_the_file_replays_the_held_ledger config trace_id
 ;;
 
 let test_same_name_different_identity_or_revision_is_distinct () =
@@ -305,7 +634,8 @@ let test_session_origins_roundtrip () =
        ; Ledger.Composition_invocation
            { origin = Ledger.Session_composition; tool_name }
        ] ->
-       check string "composition tool" "keeper_compose_review" tool_name
+       check string "composition tool" "keeper_compose_review" tool_name;
+       check_the_file_replays_the_held_ledger config trace_id
      | _ -> fail "session origins did not survive durable roundtrip")
 ;;
 
@@ -417,7 +747,8 @@ let test_delivery_and_later_action_form_one_exact_chain () =
     | Ok value -> value
     | Error error -> fail (Ledger.store_error_to_string error)
   in
-  check int "repeated action observation is idempotent" 0 repeated
+  check int "repeated action observation is idempotent" 0 repeated;
+  check_the_file_replays_the_held_ledger config trace_id
 ;;
 
 let test_demoted_skill_result_is_not_delivery_or_invalid_transition () =
@@ -523,7 +854,8 @@ let test_official_client_handoff_delivers_in_invocation_turn () =
        check string "provider step conversation" "conversation-antigravity"
          step.conversation_id;
        check int "provider step index" 7 step.step_index
-     | _ -> fail "provider step action identity was not durable")
+     | _ -> fail "provider step action identity was not durable");
+    check_the_file_replays_the_held_ledger config trace_id
 ;;
 
 let test_cross_turn_tool_result_replay_is_not_delivery_or_rejection () =
@@ -594,6 +926,7 @@ let test_conflicting_delivery_is_durable_transition_evidence () =
   in
   check int "persisted invalid transition" 1
     (Ledger.summarize persisted).invalid_transitions;
+  check_the_file_replays_the_held_ledger config trace_id;
   match Ledger.transition_rejections persisted with
   | [ Ledger.Delivery_conflict_rejected
         { skill_tool_use_id = "call-conflict"
@@ -632,6 +965,7 @@ let test_action_before_delivery_is_durable_transition_evidence () =
   in
   check int "persisted invalid transition" 1
     (Ledger.summarize persisted).invalid_transitions;
+  check_the_file_replays_the_held_ledger config trace_id;
   match Ledger.transition_rejections persisted with
   | [ Ledger.Action_before_delivery_rejected
         { skill_tool_use_id = "call-undelivered"
@@ -725,10 +1059,7 @@ let test_scoped_summaries_do_not_mix_runtime_or_exact_reference () =
 
 let test_corrupt_ledger_is_typed () =
   with_session @@ fun config trace_id session_dir ->
-  let path = Filename.concat session_dir "skill-activations.json" in
-  let channel = open_out_bin path in
-  output_string channel "not-json";
-  close_out channel;
+  write_file (events_file session_dir) "not-json\n";
   match Ledger.load ~config ~trace_id with
   | Error (Ledger.Decode_failed _ as error) ->
     check string "typed cause code" "decode_failed.expected_object"
@@ -747,9 +1078,7 @@ let test_copied_ledger_is_rejected_by_session_identity () =
   let trace_two = trace_id "trace-two" in
   let session_two = Keeper_fs.keeper_session_dir config "trace-two" in
   Unix.mkdir session_two 0o700;
-  let source = Filename.concat session_one "skill-activations.json" in
-  let target = Filename.concat session_two "skill-activations.json" in
-  copy_file ~source ~target;
+  copy_file ~source:(events_file session_one) ~target:(events_file session_two);
   match Ledger.load ~config ~trace_id:trace_two with
   | Error (Ledger.Decode_failed Ledger.Session_id_mismatch) -> ()
   | Error error ->
@@ -795,13 +1124,7 @@ let test_duplicate_exact_key_is_rejected_during_decode () =
       ; "transition_rejections", `List []
       ]
   in
-  let workspace_root = Keeper_fs.session_base_dir config |> Unix.realpath in
-  match
-    Ledger.of_yojson
-      ~expected_workspace_root:workspace_root
-      ~expected_trace_id:trace
-      json
-  with
+  match Ledger.of_projection_yojson json with
   | Error Ledger.Duplicate_skill_tool_use_id -> ()
   | Error _ -> fail "duplicate exact key returned wrong decoder error"
   | Ok _ -> fail "duplicate exact key was accepted"
@@ -821,9 +1144,7 @@ let test_cross_workspace_copy_is_rejected () =
        let target_config = Workspace.default_config target_root in
        let target_session = Keeper_fs.keeper_session_dir target_config "trace-one" in
        Unix.mkdir target_session 0o700;
-       copy_file
-         ~source:(Filename.concat source_session "skill-activations.json")
-         ~target:(Filename.concat target_session "skill-activations.json");
+       copy_file ~source:(events_file source_session) ~target:(events_file target_session);
        match Ledger.load ~config:target_config ~trace_id:trace with
        | Error (Ledger.Decode_failed Ledger.Workspace_key_mismatch) -> ()
        | Error error ->
@@ -847,12 +1168,7 @@ let test_duplicate_json_field_is_rejected () =
       `Assoc (("session_id", `String (Keeper_id.Trace_id.to_string trace)) :: fields)
     | _ -> fail "empty ledger projection invalid"
   in
-  match
-    Ledger.of_yojson
-      ~expected_workspace_root:workspace_root
-      ~expected_trace_id:trace
-      json
-  with
+  match Ledger.of_projection_yojson json with
   | Error (Ledger.Duplicate_field { object_name = "ledger"; field = "session_id" }) ->
     ()
   | Error _ -> fail "duplicate JSON field returned wrong decoder error"
@@ -970,9 +1286,9 @@ let test_receipt_projection_revision_binds_full_unicode_id () =
   check bool "full identifier changes digest" true (not (String.equal left right))
 ;;
 
-(* The ledger write path is read-modify-write: one undecodable row fails
-   every later write for the session, so the human string must name the
-   decode shape that poisoned it (previously a bare "decode failed"). *)
+(* A write reads the session's rows before it appends: one undecodable row
+   fails every later write for the session, so the human string must name the
+   decode shape that poisoned it. *)
 let test_store_error_decode_detail_is_kept () =
   check string "decode category is part of the message"
     "decode failed: missing_string"
@@ -1031,8 +1347,26 @@ let () =
             test_receipt_projection_revision_binds_full_unicode_id
         ; test_case "store error string keeps decode detail" `Quick
             test_store_error_decode_detail_is_kept
-        ; test_case "a recorded ledger loads back as it was returned" `Quick
-            test_a_recorded_ledger_loads_back_as_it_was_returned
+        ; test_case "the held ledger is the one the file replays" `Quick
+            test_the_held_ledger_is_the_one_the_file_replays
+        ; test_case "each mutation appends one row" `Quick
+            test_each_mutation_appends_one_row
+        ; test_case "a torn last row is cut on the first read" `Quick
+            test_a_torn_last_row_is_cut_on_first_read
+        ; test_case "an event for an unrecorded activation is typed" `Quick
+            test_an_event_for_an_unrecorded_activation_is_typed
+        ; test_case "an unterminated first row is refused and kept" `Quick
+            test_an_unterminated_first_row_is_refused_and_kept
+        ; test_case "rows another writer appends are read after the cursor" `Quick
+            test_rows_another_writer_appends_are_read_after_the_cursor
+        ; test_case "a replaced store is replayed from its first byte" `Quick
+            test_a_replaced_store_is_replayed_from_its_first_byte
+        ; test_case "a torn tail after a warm read is cut" `Quick
+            test_a_torn_tail_after_a_warm_read_is_cut
+        ; test_case "the replay holds rows to the writer's shapes" `Quick
+            test_the_replay_holds_rows_to_the_writers_shapes
+        ; test_case "a row the replay could not read is never written" `Quick
+            test_a_row_the_replay_could_not_read_is_never_written
         ] )
     ]
 ;;

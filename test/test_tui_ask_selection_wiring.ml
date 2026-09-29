@@ -48,26 +48,27 @@ let test_the_ask_list_can_be_walked_before_answering () =
    Pinning the sentences would have frozen that; naming it once is what makes
    the two unable to disagree. *)
 let test_the_two_modes_give_the_walk_one_name () =
-  Alcotest.(check int) "the browsing footer and the answering one share a name"
-    1
-    (Ast_grep.count_exact_string_literals_in_value_binding ~module_path:render_prim
-       ~binding_name:"question_hints" ~needle:"[/]:ask");
-  Alcotest.(check int)
-    "and no second spelling survives beside it" 0
-    (Ast_grep.count_exact_string_literals_in_value_binding ~module_path:render_prim
-       ~binding_name:"question_hints" ~needle:"[/]:question")
+  Alcotest.(check bool) "both modes call the key-table footer" true
+    (Ast_grep.count_calls ~module_path:render_prim
+       ~callee:"footer_hints_approvals" >= 2);
+  Alcotest.(check int) "the renderer owns no approval footer words" 0
+    (List.length
+       (Ast_grep.string_literals_in_value_binding ~module_path:render_prim
+          ~binding_name:"question_hints"))
 ;;
 
 (* [ and ] name the container a surface walks: asks, keepers, posts, or
    retained browser observations. Count the declared vocabulary so a new
    reader does not look like a second spelling of an existing container. *)
 let test_the_bracket_keys_keep_one_vocabulary () =
-  let names = [ "[/]:ask"; "[/]:observation" ] in
+  let names = [ "[/]:observation" ] in
   List.iter
     (fun name ->
        Alcotest.(check int) (name ^ " is the name one surface uses") 1
          (literals_in_the_drawing ~needle:name))
     names;
+  Alcotest.(check int) "the ask walk left the renderer for the key table" 0
+    (literals_in_the_drawing ~needle:"[/]:ask");
   (* Changes walks keepers, and its footer reads the key table now, so the
      container is named there as a key and a label rather than inside a
      renderer literal -- the same move the Board read footer made below.
@@ -201,12 +202,13 @@ let test_typing_outranks_the_choice_digits () =
 (* The footer names the text key for the selected question; digit choice keys
    are only offered when that question has choices. *)
 let test_the_footer_names_the_editor_key () =
-  Alcotest.(check int) "the write key is named once" 1
-    (Ast_grep.count_exact_string_literals_in_value_binding ~module_path:render_prim
-       ~binding_name:"question_hints" ~needle:"t:write  ");
-  Alcotest.(check int) "and the digits keep their own label" 1
-    (Ast_grep.count_exact_string_literals_in_value_binding ~module_path:render_prim
-       ~binding_name:"question_hints" ~needle:"1-9:pick  ")
+  List.iter
+    (fun key ->
+      Alcotest.(check int) (key ^ " is selected by the key-table footer") 1
+        (Ast_grep.count_exact_string_literals_in_value_binding
+           ~module_path:"bin/masc_tui_keys.ml"
+           ~binding_name:"footer_hints_approvals" ~needle:key))
+    [ "t"; "1-9" ]
 ;;
 
 (* The panel is the last block the Approvals surface writes, and

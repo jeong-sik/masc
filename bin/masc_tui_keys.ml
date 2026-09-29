@@ -604,11 +604,11 @@ let for_surface = function
            opens as its own mode rather than as a key on the row. *)
       ; b Act "a" "answer a question"
           ~help:"open the selected Keeper question in its own mode; Esc leaves it"
-      ; b Navigate "[ / ]" "previous / next"
-          ~help:"while a detail is open, step to the row before or after it"
-      ; b Act "w" "Workspace Gate mode"
+      ; b Navigate "[ / ]" "ask"
+          ~help:"while browsing or answering a question, move to the previous or next ask"
+      ; b Act "w" "Workspace mode"
           ~help:"choose manual, Auto Judge or allow-all; Enter applies, Esc cancels"
-      ; b Act "e" "external Gate lane"
+      ; b Act "e" "Outside mode"
           ~help:"choose how calls into outside services are reviewed; Enter applies"
         (* The answering mode's own keys. It opens with [a] and rewrites the
            footer entirely, so the sheet was the only place left to learn
@@ -970,6 +970,41 @@ let answers_in_state ?detail_open binding =
 let footer_hints ?detail_open surface =
   hints_of_bindings
     (List.filter (answers_in_state ?detail_open) (for_surface surface))
+
+type approvals_footer =
+  | Approval_browsing
+  | Approval_writing
+  | Approval_armed
+  | Approval_answering of { has_choices : bool; takes_text : bool }
+
+(* The approval queue and its question reader use the same binding records as
+   Help. Their modes need a deliberate order and, for Enter, a mode-specific
+   verb; the dispatcher gives that key a different action in each mode. *)
+let footer_hints_approvals mode =
+  let bindings = for_surface Approvals in
+  let item ?label key =
+    let binding =
+      List.find (fun (binding : binding) -> String.equal binding.key key) bindings
+    in
+    key ^ ":" ^ (match label with Some word -> word | None -> binding.label)
+  in
+  let row items = String.concat "  " items in
+  match mode with
+  | Approval_browsing ->
+      row
+        [ item "j/k"; item "y / n"; item "w"; item "e"; item "[ / ]"
+        ; item "a"; item "r"; item "Tab"
+        ]
+  | Approval_writing -> row [ item ~label:"save" "Enter"; item ~label:"cancel" "Esc" ]
+  | Approval_armed ->
+      "Press Enter again to send  |  "
+      ^ row [ item "s"; item "c"; item "Esc" ]
+  | Approval_answering { has_choices; takes_text } ->
+      row
+        ([ item "Left/Right"; item "PgUp/PgDn"; item "[ / ]" ]
+        @ (if has_choices then [ item "1-9" ] else [])
+        @ (if takes_text then [ item "t" ] else [])
+        @ [ item "s"; item "c"; item ~label:"answer" "Enter"; item "Esc" ])
 
 (* Whether this surface's table scopes any binding to one of the two states.
    A surface this answers [true] for owes [footer_hints] a [~detail_open] from

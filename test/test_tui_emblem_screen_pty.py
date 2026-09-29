@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import base64
 import zlib
+import struct
 import os
 import re
 import sys
@@ -123,9 +124,35 @@ def kitty_fields(control: bytes) -> dict[bytes, bytes]:
     return dict(field.split(b"=", 1) for field in control.split(b",") if b"=" in field)
 
 
+def rgba_png(payload: bytes) -> tuple[int, int, bytes]:
+    """Decode the lossless RGBA PNG contract using independent stdlib codecs."""
+    assert payload[:8] == b"\x89PNG\r\n\x1a\n", "not a PNG"
+    offset, compressed = 8, bytearray()
+    width = height = 0
+    while offset < len(payload):
+        size = struct.unpack_from(">I", payload, offset)[0]
+        kind = payload[offset + 4:offset + 8]
+        data = payload[offset + 8:offset + 8 + size]
+        crc = struct.unpack_from(">I", payload, offset + 8 + size)[0]
+        assert zlib.crc32(kind + data) == crc, "invalid PNG CRC"
+        if kind == b"IHDR":
+            width, height, depth, color, compression, filtering, interlace = struct.unpack(">IIBBBBB", data)
+            assert (depth, color, compression, filtering, interlace) == (8, 6, 0, 0, 0)
+        elif kind == b"IDAT":
+            compressed.extend(data)
+        elif kind == b"IEND":
+            break
+        offset += size + 12
+    scanlines = zlib.decompress(compressed)
+    stride = width * 4 + 1
+    assert len(scanlines) == stride * height
+    assert all(scanlines[row * stride] == 0 for row in range(height)), "unexpected PNG filter"
+    return width, height, b"".join(scanlines[row * stride + 1:(row + 1) * stride] for row in range(height))
+
+
 def mascot_transfers(wire: bytes) -> list[tuple[dict[bytes, bytes], bytes]]:
     """Every whole transfer under the mascot's id: its first chunk's keys and
-    the pixels, inflated where the transfer says o=z."""
+    the pixels decoded from the PNG, without invoking Kitty transport inflation."""
     transfers = []
     pending: tuple[dict[bytes, bytes], list[bytes]] | None = None
     for match in KITTY_CHUNK.finditer(wire):
@@ -137,9 +164,13 @@ def mascot_transfers(wire: bytes) -> list[tuple[dict[bytes, bytes], bytes]]:
             pending[1].append(match[2])
             if fields.get(b"m", b"0") == b"0":
                 payload = base64.b64decode(b"".join(pending[1]), validate=True)
-                if pending[0].get(b"o") == b"z":
-                    payload = zlib.decompress(payload)
-                transfers.append((pending[0], payload))
+                assert pending[0].get(b"f") == b"100", "portrait must use PNG"
+                assert b"o" not in pending[0], "portrait must bypass Kitty transport inflation"
+                width, height, pixels = rgba_png(payload)
+                # Geometry assertions below read the PNG's authoritative dimensions.
+                pending[0][b"s"] = str(width).encode()
+                pending[0][b"v"] = str(height).encode()
+                transfers.append((pending[0], pixels))
                 pending = None
     return transfers
 
@@ -276,8 +307,8 @@ def about_screen_with_graphics(binary: str) -> None:
         transfers = stepped_transfers(process, fd, output, start)
         wire = bytes(output[start:])
         fields, pixels = transfers[0]
-        assert fields.get(b"f") == b"32", "the candle is not sent with its alpha"
-        assert fields.get(b"o") == b"z", "the candle is not sent compressed"
+        assert fields.get(b"f") == b"100", "the candle is not sent as PNG"
+        assert b"o" not in fields, "the candle requests Kitty transport inflation"
         edge = int(fields[b"s"])
         assert int(fields[b"v"]) == edge, "the candle's picture is not square"
         assert len(pixels) == edge * edge * 4, "the transfer is not the picture it declares"

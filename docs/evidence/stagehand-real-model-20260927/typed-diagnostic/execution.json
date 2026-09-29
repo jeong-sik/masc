@@ -1,0 +1,19 @@
+{
+  "source_commit": "fedd7dbabfcbdd14eab3480531abe7323f0148d9",
+  "binary_sha256": "14fd2a8678d1b9b54cc0c0baf5cfbade9050de61cc539b56577be1bb3eadf8d6",
+  "started_at_unix": 1790465526.410401,
+  "repetitions": 3,
+  "injection_timeout_s": 30,
+  "exit_code": 1,
+  "elapsed_s": 13.17539668083191,
+  "result_rows": 37,
+  "started_at_utc": "2026-09-26T23:32:06.410401+00:00",
+  "artifact_run": 36266258730,
+  "targeted_test_run": 36266256510,
+  "results_sha256": "c85783a3bbbd959db7cad88901ecec0824b10d30280cfb60722ff0130e317621",
+  "host_offline_controls": {
+    "fixtures": 0,
+    "publication": 0
+  },
+  "live_runtime_changed": false
+}

@@ -741,6 +741,7 @@ status: reference
     뒤로 둔다. Codex turn 이 사용량 소진(`usageLimitExceeded`)으로 거절되면 같은 계정의
     `account/rateLimits/read` 를 한 번 읽고, 403 읽기와 같은 규칙으로 소진된 창의 리셋 시각까지
     `Runtime_quota_window` 에 기록한다(#39997). 리셋 시각이 없거나 답이 온 시각보다 늦지 않으면 거절이 남긴 증거를 그대로 둔다.
+    소진된 창이 둘 이상의 limit(`rateLimitsByLimitId` 의 bucket)에 걸쳐 있어도 그대로 둔다. 거절은 어느 limit 이 막았는지 말하지 않아서, 한 시간 뒤 풀리는 bucket 의 호출을 일주일 뒤 풀리는 bucket 이 붙잡으면 안 된다.
     이 과거 리셋 규칙은 403 뒤 읽기에도 같다.
     Muse의 모델 오류 뒤 `usage/read`는 선택된 계정의 소진 창을 확인해
     `Runtime_quota_window`에만 기록한다(#39810). 이 읽기는 사용량 관측값을 이 표에

@@ -66,6 +66,7 @@ Codex 가 한도를 매기는 단위는 홈이 아니라 **ChatGPT 계정**이�
 - 거절 뒤에는 같은 홈으로 `account/rateLimits/read` 를 백그라운드에서 한 번 읽는다 (`lib/keeper/keeper_codex_runtime.ml:296-308`, `:1436-1441`).
   이 결과는 운영자에게 보여 주는 사용량 표에 들어간다. 모델 호출을 막는 창이 다 찼고 리셋 시각이 아직 오지 않았으면,
   403 뒤 읽기와 같은 규칙으로 같은 scope 를 그 시각까지 쉬게 한다 (`lib/runtime/runtime_provider_usage_read.ml`, `read_codex_after_spent_usage_refusal`).
+  소진된 창이 여러 limit 에 걸쳐 있으면 거절한 limit 을 알 수 없으므로 쉬는 시각을 정하지 않고 `Observed` 로 둔다.
 
 ### 사용량 창이 기록되고 보이는 길
 

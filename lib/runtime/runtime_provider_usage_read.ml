@@ -463,6 +463,7 @@ end
 type account_refusal_read =
   | Spent_until of float
   | Spent_without_reset
+  | Spent_in_several_limits of string option list
   | No_window_spent
 
 (* [used] reached [limit]. Count windows are decoded as [used / limit]
@@ -484,24 +485,55 @@ let gates_model_calls (window : Runtime_provider_usage_window.window) =
 (* The latest stated reset among the spent gating windows: every one of them
    refuses calls until it resets. A spent gating window that states no reset
    keeps the scope resting until its next success, whatever the others say. *)
+(* The spent gating windows of one limit. Codex reads every metered limit
+   ([rateLimitsByLimitId]) and a spent-usage refusal does not name the limit
+   that refused the call, so spent windows of two limits cannot say how long
+   the refused call stays refused: one bucket may reset in an hour and another
+   in a week. Only a single spent limit names the rest; within it the latest
+   reset is when every spent window of that limit has room again. *)
 let account_refusal_read_of_report (report : Runtime_provider_usage_window.report) =
-  List.fold_left
-    (fun acc (window : Runtime_provider_usage_window.window) ->
-      if not (gates_model_calls window && window_spent window)
-      then acc
-      else (
-        match acc, window.resets_at with
-        | Spent_without_reset, (Some _ | None) | (No_window_spent | Spent_until _), None ->
-          Spent_without_reset
-        | No_window_spent, Some resets_at -> Spent_until (Float.of_int resets_at)
-        | Spent_until held, Some resets_at -> Spent_until (Float.max held (Float.of_int resets_at))))
-    No_window_spent
-    report.windows
+  let spent =
+    List.filter
+      (fun (window : Runtime_provider_usage_window.window) ->
+         gates_model_calls window && window_spent window)
+      report.windows
+  in
+  match
+    List.sort_uniq
+      (Option.compare String.compare)
+      (List.map (fun (window : Runtime_provider_usage_window.window) -> window.limit_id) spent)
+  with
+  | [] -> No_window_spent
+  | _ :: _ :: _ as limit_ids -> Spent_in_several_limits limit_ids
+  | [ _ ] ->
+    List.fold_left
+      (fun acc (window : Runtime_provider_usage_window.window) ->
+         match acc, window.resets_at with
+         | Spent_without_reset, (Some _ | None)
+         | (No_window_spent | Spent_until _ | Spent_in_several_limits _), None ->
+           Spent_without_reset
+         | (No_window_spent | Spent_in_several_limits _), Some resets_at ->
+           Spent_until (Float.of_int resets_at)
+         | Spent_until held, Some resets_at ->
+           Spent_until (Float.max held (Float.of_int resets_at)))
+      No_window_spent
+      spent
 ;;
 
 let account_refusal_read_to_string = function
   | Spent_until resets_at -> Printf.sprintf "a gating window is spent until %.0f" resets_at
   | Spent_without_reset -> "a gating window is spent and states no reset"
+  | Spent_in_several_limits limit_ids ->
+    Printf.sprintf
+      "gating windows of %d limits are spent (%s) and the refusal names none of them"
+      (List.length limit_ids)
+      (String.concat
+         ", "
+         (List.map
+            (function
+              | Some limit_id -> limit_id
+              | None -> "a window without a limit id")
+            limit_ids))
   | No_window_spent -> "no gating window is spent"
 ;;
 
@@ -532,11 +564,18 @@ let rest_on_account_refusal_read ~scope ~observed_at read =
         resets_at
         observed_at;
       Spent_without_reset
-    | Spent_until _ | Spent_without_reset | No_window_spent -> read
+    | Spent_until _ | Spent_without_reset | Spent_in_several_limits _ | No_window_spent ->
+      read
   in
   (match read with
    | Spent_until resets_at -> Runtime_quota_window.note_exhausted ~scope ~resets_at
    | Spent_without_reset -> Runtime_quota_window.note_observed_exhausted ~scope
+   | Spent_in_several_limits _ ->
+     Log.Runtime_agent.info
+       "provider usage read for %s: %s; the scope rests until its next success"
+       (Runtime_quota_window.scope_to_string scope)
+       (account_refusal_read_to_string read);
+     Runtime_quota_window.note_observed_exhausted ~scope
    | No_window_spent -> ());
   read
 ;;

@@ -6432,7 +6432,7 @@
 (test
  (name test_keeper_sandbox_remote_checkouts)
  (modules test_keeper_sandbox_remote_checkouts)
- (libraries alcotest masc unix yojson))
+ (libraries alcotest masc masc.repo_manager unix yojson))
 
 (test
  (name test_tui_image_mosaic)

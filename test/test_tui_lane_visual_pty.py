@@ -81,8 +81,8 @@ def main(executable: str, captures: Path | None) -> None:
         if b"MASC Lane Add-ons" in terminal.CSI_RE.sub(b"", palette):
             raise AssertionError("uppercase A intercepted palette input")
         key(b"\x1b", b"MASC Lanes")
-        overview = key(b"A", b"Lane Add-ons \xc2\xb7 2 installed")
-        first = screen(overview, b"Lane Add-ons \xc2\xb7 2 installed")
+        overview = key(b"A", b"Lane Add-ons \xc2\xb7 0 declared \xc2\xb7 1 active \xc2\xb7 1 failed")
+        first = screen(overview, b"Lane Add-ons \xc2\xb7 0 declared \xc2\xb7 1 active \xc2\xb7 1 failed")
         for needle in (b"> World observer", b"MSX", b"o:retry observation",
                        b"d:cleanup", b"D:full"):
             if needle not in first:
@@ -90,7 +90,7 @@ def main(executable: str, captures: Path | None) -> None:
         print("TUI_CAPTURE lane-addons overview " + repr(first), flush=True)
         capture("01-overview-100", 30, 100)
 
-        heading = b"Lane Add-ons \xc2\xb7 2 installed"
+        heading = b"Lane Add-ons \xc2\xb7 0 declared \xc2\xb7 1 active \xc2\xb7 1 failed"
         resized = terminal.resize_and_wait(process, master, output, rows=24, columns=80,
             needle=heading, controls=(terminal.FULL_REDRAW,))
         resize_at = len(output) - len(resized)
@@ -117,7 +117,7 @@ def main(executable: str, captures: Path | None) -> None:
                        b"4 Records", b"E edit", b"e export marked rows", b":act"):
             if needle not in help_screen:
                 raise AssertionError(f"Lane help omitted {needle!r}")
-        key(b"\x1b", b"Lane Add-ons \xc2\xb7 2 installed")
+        key(b"\x1b", b"Lane Add-ons \xc2\xb7 0 declared \xc2\xb7 1 active \xc2\xb7 1 failed")
         os.write(master, b"\t")
         if not terminal.drain_until_quiet(process, master, output):
             raise AssertionError("overview did not settle after Tab")
@@ -151,14 +151,14 @@ def main(executable: str, captures: Path | None) -> None:
             if needle not in plain:
                 raise AssertionError(f"Activity timeline omitted {needle!r}")
         capture("05-activity-timeline-140", 32, 140)
-        key(b"\x1b", b"Lane Add-ons \xc2\xb7 2 installed")
+        key(b"\x1b", b"Lane Add-ons \xc2\xb7 0 declared \xc2\xb7 1 active \xc2\xb7 1 failed")
         empty = snapshot()
         empty["instances"] = []
         empty["rows"] = []
         fixtures["/api/v1/lane-addons"] = (200, empty)
-        empty_output = key(b"r", b"Lane Add-ons \xc2\xb7 0 installed")
-        empty_screen = screen(empty_output, b"Lane Add-ons \xc2\xb7 0 installed")
-        if b"No Add-ons installed. i:install a package  n:new TOML" not in empty_screen:
+        empty_output = key(b"r", b"Lane Add-ons \xc2\xb7 0 declared \xc2\xb7 0 active \xc2\xb7 0 failed")
+        empty_screen = screen(empty_output, b"Lane Add-ons \xc2\xb7 0 declared \xc2\xb7 0 active \xc2\xb7 0 failed")
+        if b"No Add-ons declared or active. i:install a package  n:new TOML" not in empty_screen:
             raise AssertionError("empty Add-on workspace lacks a next step")
         capture("06-empty-140", 32, 140)
         os.write(master, b"d")
@@ -175,9 +175,45 @@ def main(executable: str, captures: Path | None) -> None:
     print("Lane timeline / clocks / marks / relations / links / resize: PASS")
 
 
+def run_declaration_without_worker(executable: str) -> None:
+    fixtures = terminal.overview_event_http_fixtures()
+    fixtures["/api/v1/lane-addons"] = (200, {
+        "instances": [], "rows": [], "coverage": [],
+        "configuration": {
+            "directory": "/fixture/lane-addons", "complete": False,
+            "declarations": [{"id": "broken", "source_path": "/fixture/lane-addons/broken.toml",
+                              "desired_revision": "r1", "applied_revision": None,
+                              "instance_id": None}],
+            "issues": [{"id": "broken", "source_path": "/fixture/lane-addons/broken.toml",
+                        "message": "Docker image missing"}],
+        },
+    })
+    requests: terminal.HttpRequests = []
+
+    def interact(process, master, _slave, output, _base):
+        terminal.wait_for_output(process, master, output, b"Health: ", start=0, timeout=10)
+        overview = terminal.send_and_wait(process, master, output, b":go lane add-ons\r",
+                                          b"1 declared \xc2\xb7 0 active")
+        shown = terminal.screen_text(overview)
+        for needle in (b"> broken", b"needs attention", b"Installation inventory partial"):
+            if needle not in shown:
+                raise AssertionError(f"unapplied declaration is hidden: {needle!r}")
+        terminal.send_and_wait(process, master, output, b"a", b"no available worker")
+        terminal.send_and_wait(process, master, output, b"\r", b"Installation details")
+        terminal.send_and_wait(process, master, output, b"\x1b", b"> broken")
+        os.write(master, b"q")
+
+    terminal.run_terminal_scenario(executable,
+        description="unapplied declaration opens Installation and refuses worker action",
+        interact=interact, http_fixtures=fixtures, http_requests=requests)
+    if any(path.startswith("/api/v1/lane-addons") for path, _ in requests):
+        raise AssertionError("browse-only declaration scenario sent a write")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("executable")
     parser.add_argument("--capture-dir", type=Path)
     args = parser.parse_args()
     main(os.path.abspath(args.executable), args.capture_dir)
+    run_declaration_without_worker(os.path.abspath(args.executable))

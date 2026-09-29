@@ -251,7 +251,11 @@ let reconcile_snapshot view snapshot =
     | None -> -1
     | Some item -> locate key new_items (key item) in
   match view.snapshot with
-  | None -> {view with snapshot=Some snapshot;scroll=0}
+  | None ->
+      let focus = match snapshot.instances, snapshot.configuration with
+        | [], Some {declarations=_ :: _;_} when view.screen=Overview -> Configurations
+        | _ -> view.focus in
+      {view with snapshot=Some snapshot;focus;scroll=0}
   | Some previous ->
       let row_cursor = anchor (fun (row : Row.row) -> row.id)
           previous.output.rows snapshot.output.rows view.row_cursor in
@@ -842,11 +846,6 @@ let visual_text_lines ?(height=24) ?(failed_note = "") ?(visual=true) ~width vie
                 snapshot.output.rows
             else []
         | Configurations ->
-            (* "No Add-ons installed." only when the read says so: a complete
-               inventory with no declaration in it. It stood before this match
-               unconditionally, so a screen listing installations opened by
-               saying there were none, and a partial read -- which has not
-               finished looking -- said the same. *)
             (match snapshot.configuration with
              | None -> ["TOML configuration status unknown · r:refresh"]
              | Some config ->
@@ -854,11 +853,10 @@ let visual_text_lines ?(height=24) ?(failed_note = "") ?(visual=true) ~width vie
                    Option.value ~default:"unresolved installation" d.installation_id ^ " · " ^
                    (if d.issues <> [] then "needs attention" else if d.applied = d.desired then "applied" else "pending") ^
                    " · " ^ Filename.basename d.source_path) config.declarations
-                 (* Names both routes in. The old line repeated "No
-                    installations." and named only [n], leaving out the
-                    guided installer on [i]. The opening words stay put:
-                    three PTY walks wait for "No Add-ons installed.". *)
-                 @ (if config.declarations=[] then ["No Add-ons installed. Press i to install one, or n to write a TOML declaration."] else [])
+                 @ (if config.declarations=[] && config.complete
+                    then ["No TOML declarations. Press i to install one, or n to write a TOML declaration."]
+                    else if config.declarations=[] then ["Installation inventory partial · r:refresh"]
+                    else [])
                  @ [""; "Installation details"]
                  @ configuration_lines {view with configuration_cursor=0}
                      {snapshot with configuration=Some {config with declarations=Option.to_list (selected_declaration view)}}
@@ -877,11 +875,9 @@ let visual_text_lines ?(height=24) ?(failed_note = "") ?(visual=true) ~width vie
             window view.instance_cursor (fun (item : instance) ->
               item.title ^ " · " ^ phase_label item.phase ^ Printf.sprintf " · %d rows" item.rows_count) snapshot.instances
             @ (match selected_instance view with
-               (* The read carries the instances; an empty list is "none
-                  installed", and a cursor past the end is not. *)
                | None ->
                    [(if snapshot.instances=[]
-                     then "No Add-ons installed. No instances. Tab to Installations to create or repair a declaration."
+                     then "No workers observed. Tab to Installations to create or repair a declaration."
                      else "No instance selected. j/k picks one.");
                     "Manual attachment: :attach {manifest_path,run_id,binding}"]
                | Some item -> [""; "Instance details"]
@@ -981,7 +977,7 @@ let overview_hints view =
   if view.help_open then "Esc:close help"
   else match view.screen with
   | Overview ->
-      "?:help  Esc:back  Enter:open  i:install  n:new  S:subs"
+      "?:help  Esc:back  Tab:workers/installations  Enter:open  i:install  n:new  S:subs"
       ^ (if view.loading then "  Reading …" else "  r:refresh")
   | Detail _ ->
       "?:help  Esc:back  1-4:section  Tab:next section  j/k:move  " ^
@@ -1065,21 +1061,49 @@ let overview_lines ~width view =
   let content = match view.snapshot with
     | None -> [unread_body_text ~failed_note:"Read failed · r:retry" view]
     | Some snapshot ->
-        let failed = List.fold_left (fun total (item : instance) ->
-          match item.phase with Row.Failed _ -> total + 1 | _ -> total) 0 snapshot.instances in
-        let count = List.length snapshot.instances in
-        let heading = Printf.sprintf "Lane Add-ons · %d installed · %d failed" count failed in
-        if count=0 then
-          [heading; ""; "No Add-ons installed. i:install a package  n:new TOML"]
-        else
+        let active, failed = List.fold_left (fun (active, failed) (item : instance) ->
+          match item.phase with
+          | Row.Attached | Row.Observing -> active + 1, failed
+          | Row.Failed _ -> active, failed + 1
+          | Row.Detaching | Row.Detached -> active, failed)
+          (0, 0) snapshot.instances in
+        let declared, issue_count, declarations = match snapshot.configuration with
+          | None -> None, 0, []
+          | Some config ->
+              let declared = List.fold_left (fun count (d : declaration) ->
+                if Option.is_some d.desired then count + 1 else count)
+                0 config.declarations in
+              let issues = List.fold_left (fun count (d : declaration) ->
+                count + List.length d.issues) 0 config.declarations in
+              Some declared, issues, config.declarations in
+        let heading = Printf.sprintf "Lane Add-ons · %s declared · %d active · %d failed"
+          (Option.fold ~none:"?" ~some:string_of_int declared) active failed in
+        let heading = heading ^ (if issue_count=0 then "" else Printf.sprintf " · %d config issues" issue_count) in
+        let inventory_note = match snapshot.configuration with
+          | None -> ["Installation inventory unread · r:refresh"]
+          | Some config when not config.complete -> ["Installation inventory partial · r:refresh"]
+          | Some _ -> [] in
+        let declaration_rows =
+          let window = max 0 (view.configuration_cursor - 4) in
+          List.mapi (fun index (d : declaration) -> index,d) declarations
+          |> List.filter (fun (index,_) -> index >= window && index < window + 9)
+          |> List.concat_map (fun (index,d) ->
+            let name = Option.value ~default:(Filename.basename d.source_path) d.installation_id in
+            let status =
+              if d.issues<>[] then "needs attention"
+              else if d.applied=d.desired then "applied" else "pending" in
+            [ (if view.focus=Configurations && index=view.configuration_cursor then "> " else "  ")
+              ^ name ^ " · " ^ status ^ " · " ^ Filename.basename d.source_path
+            ; "    Enter:Installation  E:edit"
+            ] @ List.map (fun issue -> "    Issue: " ^ issue) d.issues) in
+        let instance_rows =
           let window = max 0 (view.instance_cursor - 4) in
           let items = List.mapi (fun index (item : instance) -> index,item) snapshot.instances
             |> List.filter (fun (index,_) -> index >= window && index < window + 9) in
-          [heading; ""]
-          @ List.concat_map (fun (index,item) ->
+          List.concat_map (fun (index,item) ->
               let count_text = if item.observation_seq=0 then "no observations yet"
                 else Printf.sprintf "%d observations" item.observation_seq in
-              let lead = (if index=view.instance_cursor then "> " else "  ") ^
+              let lead = (if view.focus=Instances && index=view.instance_cursor then "> " else "  ") ^
                 item.title ^ " · " ^ (match item.phase with Row.Failed _ -> "failed" | _ -> phase_label item.phase) ^ " · " ^ count_text in
               let controls = "    Enter:open  " ^ instance_controls item in
               let detail = match item.phase with
@@ -1088,7 +1112,14 @@ let overview_lines ~width view =
                       ("D:full · " ^ detail)
                     |> List.map (fun line -> "    " ^ line)
                 | _ -> [] in
-              [lead; controls] @ detail) items
+              [lead; controls] @ detail) items in
+        [heading; ""] @ inventory_note
+        @ (if declarations=[] then [] else ["Installations"] @ declaration_rows @ [""])
+        @ (if snapshot.instances=[] then [] else ["Workers"] @ instance_rows)
+        @ (if declarations=[] && snapshot.instances=[]
+              && Option.fold ~none:false ~some:(fun (c : configuration) -> c.complete) snapshot.configuration
+           then ["No Add-ons declared or active. i:install a package  n:new TOML"]
+           else [])
   in
   List.concat_map wrap ([ overview_hints view; "" ]
     @ diagnostic_lines view @ action_lines view @ content)

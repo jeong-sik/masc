@@ -681,7 +681,23 @@ let detail_keeps_installation_ownership () =
   check bool "replacement cannot inherit old detail's evidence export" true
     (Result.is_error (UI.evidence_request refreshed))
 
+let declaration_without_worker_is_visible () =
+  let json = Yojson.Safe.from_string
+    {|{"instances":[],"rows":[],"coverage":[],"configuration":{"directory":"/config","complete":false,"declarations":[{"id":"broken","source_path":"/config/broken.toml","desired_revision":"r1","applied_revision":null,"instance_id":null}],"issues":[{"id":"broken","source_path":"/config/broken.toml","message":"Docker image missing"}]}}|} in
+  let snapshot = UI.decode json |> ok in
+  let view = UI.reconcile_snapshot UI.initial snapshot in
+  let lines = UI.lines ~width:110 view in
+  check bool "the only selectable row is the declaration" true
+    (view.focus=UI.Configurations && Option.is_some (UI.selected_declaration view));
+  check bool "broken declaration and partial reading are visible" true
+    (List.mem "Lane Add-ons · 1 declared · 0 active · 0 failed · 1 config issues" lines
+     && List.exists (String.starts_with ~prefix:"> broken · needs attention") lines
+     && List.exists (String.starts_with ~prefix:"Installation inventory partial") lines);
+  check bool "a declaration without worker cannot advertise an action" true
+    (Result.is_error (UI.open_actions ~request_id:"test-action" view))
+
 let () = run "TUI Lane package operations" ["operator scenarios",[
+  test_case "declaration without worker stays visible" `Quick declaration_without_worker_is_visible;
   test_case "detail keeps installation ownership for edit, navigation and export" `Quick detail_keeps_installation_ownership;
   test_case "refresh retains exact operator targets and exposes failure" `Quick refresh_preserves_operator_target;
   test_case "evidence export chooses a Keeper by name" `Quick evidence_export_chooses_a_keeper_by_name;

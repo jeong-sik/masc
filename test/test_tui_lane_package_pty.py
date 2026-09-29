@@ -104,7 +104,7 @@ def main(executable: str) -> None:
                 return terminal.send_and_wait(process, master_fd, output, value, needle)
 
             key(b":go lanes\r", b"MASC Lanes")
-            key(b"A", b"No Add-ons installed. i:install a package")
+            key(b"A", b"No Add-ons declared or active. i:install a package")
             key(b"q", b"MASC Lanes")
             key(b"\x1b", b"MASC Overview")
             key(b":go lane add-ons\r", b"MASC Lane Add-ons")
@@ -189,7 +189,7 @@ def main(executable: str) -> None:
             reopened = key(b":go lane add-ons\r", b"TOML draft second.toml")
             if b"# second draft retained" not in terminal.CSI_RE.sub(b"", reopened):
                 raise AssertionError("late save or refresh discarded the second draft")
-            key(b"\x1b", b"Lane Add-ons \xc2\xb7 0 installed")
+            key(b"\x1b", b"Lane Add-ons \xc2\xb7 1 declared \xc2\xb7 0 active")
             key(b":act " + json.dumps(action_request).encode() + b"\r", b"state queued")
             key(b"t", b"state confirmed")
             key(b"q", b"MASC Overview")

@@ -19916,7 +19916,10 @@ and is loaded on demand through keeper_skill.
                      | "esc" | "q" when view.screen<>Addons.Overview -> update {view with screen=Addons.Overview;focus=Addons.Instances;scroll=0}
                      | "esc" | "q" -> state.lane_addons_cached <- view; state.lane_addons <- None
                      | ("\r" | "\n" | "enter") when view.screen=Addons.Overview ->
-                         update (Addons.open_selected_instance view)
+                         (match view.focus, Addons.selected_declaration view with
+                          | Addons.Configurations, Some _ ->
+                              update {view with presentation=Addons.Technical;scroll=0}
+                          | _ -> update (Addons.open_selected_instance view))
                      | "i" ->
                          if view.loading then update {view with error=lane_addons_input_failure "Wait for the current Lane request before opening installation."}
                          else (match Masc_tui_lane_installer.create () with
@@ -19959,7 +19962,7 @@ and is loaded on demand through keeper_skill.
                            launch_lane_subscriptions state ~mailbox:async_messages Masc_tui_lane_subscriptions.Inspect)
                      | "D" -> update {view with
                          presentation=(if view.presentation=Addons.Technical then Addons.Summary else Addons.Technical);
-                         focus=(if view.screen=Addons.Overview then Addons.Instances else view.focus);scroll=0}
+                         scroll=0}
                      | "f" -> update {view with presentation=(if view.presentation=Addons.Flow then Addons.Summary else Addons.Flow);document_key=None;scroll=0}
                      | "a" ->
                          if view.loading || Option.is_some (Addons.pending_action view)
@@ -19980,6 +19983,8 @@ and is loaded on demand through keeper_skill.
                      | "3" when view.screen<>Addons.Overview -> update {view with focus=Addons.Configurations;scroll=0}
                      | "4" when view.screen<>Addons.Overview -> update {view with focus=Addons.Rows;scroll=0}
                      | "5" when view.screen<>Addons.Overview -> update {view with focus=Addons.Rows;scroll=0}
+                     | "\t" | "tab" when view.screen=Addons.Overview ->
+                         update {view with scroll=0;focus=(if view.focus=Addons.Configurations then Addons.Instances else Addons.Configurations)}
                      | "\t" | "tab" when view.screen<>Addons.Overview ->
                          update {view with scroll=0;focus = (match view.focus with
                            | Addons.Timeline | Addons.Instances -> Addons.Connections
@@ -19997,6 +20002,8 @@ and is loaded on demand through keeper_skill.
                      | "j" | "down" | "k" | "up" ->
                          let delta = if key = "j" || key = "down" then 1 else -1 in
                          (match view.snapshot, view.screen, view.focus with
+                          | Some {configuration=Some config;_}, Addons.Overview, Addons.Configurations ->
+                              update {view with configuration_cursor=max 0 (min (List.length config.declarations - 1) (view.configuration_cursor + delta))}
                           | Some snapshot, Addons.Overview, _ ->
                               update {view with instance_cursor=max 0 (min (List.length snapshot.instances - 1) (view.instance_cursor + delta))}
                           | Some _, Addons.Detail _, (Addons.Configurations | Addons.Instances | Addons.Connections) -> ()

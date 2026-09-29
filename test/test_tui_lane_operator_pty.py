@@ -88,7 +88,7 @@ def main(executable: str, captures: Path | None) -> None:
         def key(value: bytes, needle: bytes) -> bytes:
             return terminal.send_and_wait(process, master, output, value, needle)
 
-        key(b':go lane add-ons\r', b'Lane Add-ons \xc2\xb7 2 installed')
+        key(b':go lane add-ons\r', b'Lane Add-ons \xc2\xb7 1 declared \xc2\xb7 2 active')
         key(b'j', b'Second producer')
         key(b'\r', b'Selected second producer')
         key(b'4', b'Selected second producer')
@@ -117,7 +117,7 @@ def main(executable: str, captures: Path | None) -> None:
         key(b'D', b'Selected second producer')
         # The detail screen contains only this worker's rows. Opening another
         # worker clears the mark, so a later export cannot mix owners.
-        key(b'q', b'Lane Add-ons \xc2\xb7 2 installed')
+        key(b'q', b'Lane Add-ons \xc2\xb7 1 declared \xc2\xb7 2 active')
         key(b'k', first['title'].encode())
         key(b'\r', b'Other producer event')
         key(b'4', b'Other producer event')
@@ -134,7 +134,7 @@ def main(executable: str, captures: Path | None) -> None:
             captures.mkdir(parents=True, exist_ok=True)
             (captures / 'target-identity.pty').write_bytes(bytes(output))
             (captures / 'requests.json').write_text(json.dumps(accepted, indent=2))
-        key(b'q', b'Lane Add-ons \xc2\xb7 2 installed')
+        key(b'q', b'Lane Add-ons \xc2\xb7 1 declared \xc2\xb7 2 active')
         key(b'q', b'MASC Overview')
         os.write(master, b'q')
 

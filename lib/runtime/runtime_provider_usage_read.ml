@@ -80,7 +80,7 @@ let read_codex ~mgr ~clock ~cwd ~scope codex =
   | Error error -> Error (Runtime_codex_app_server.error_to_string error)
 ;;
 
-let read_muse ~mgr ~clock ~cwd ~scope config =
+let read_muse ~mgr ~clock ~cwd ~scope (config : Runtime_muse_serve.config) =
   let config =
     { config with
       Runtime_muse_serve.admission_timeout_s =

@@ -42,6 +42,14 @@ on:
         description: Compare two existing Linux x64 manual probe artifacts
         type: boolean
         default: false
+      checkpoint_histories:
+        type: string
+        description: Matching checkpoint history files for the checkpoint comparison
+        default: '128'
+      checkpoint_noise:
+        type: string
+        description: Nonmatching directory entries for the checkpoint comparison
+        default: '8192'
       baseline_run:
         type: string
         description: Baseline Linux probe workflow run ID
@@ -255,7 +263,17 @@ jobs:
       - uses: ./.github/actions/setup-ocaml-toolchain
       - name: Build only the runtime-events readers
         run: |
-          opam install -y dune eio.1.3
+          # Resolve the reader dependency from the repository's dependency lock.
+          reader_eio_version="$(python3 - <<'PYVERSION'
+          import pathlib, re
+          locked = pathlib.Path('masc.opam.locked').read_text()
+          versions = re.findall(r'^\s*"eio"\s*\{=\s*"([0-9.]+)"\}\s*$', locked, re.M)
+          if len(versions) != 1:
+              raise SystemExit('expected one exact numeric eio version in masc.opam.locked')
+          print(versions[0])
+          PYVERSION
+          )"
+          opam install -y dune "eio.$reader_eio_version"
           mkdir -p "$RUNNER_TEMP/checkpoint-readers"
           cp tools/rtev_trace/*.ml tools/rtev_trace/dune "$RUNNER_TEMP/checkpoint-readers/"
           printf '(lang dune 3.17)\n' > "$RUNNER_TEMP/checkpoint-readers/dune-project"
@@ -267,6 +285,8 @@ jobs:
       - name: Compare checkpoint workload on this runner
         env:
           GH_TOKEN: ${{ github.token }}
+          CHECKPOINT_HISTORIES: ${{ inputs.checkpoint_histories }}
+          CHECKPOINT_NOISE: ${{ inputs.checkpoint_noise }}
           BASELINE_RUN: ${{ inputs.baseline_run }}
           BASELINE_ARTIFACT: ${{ inputs.baseline_artifact }}
           BASELINE_COMMIT: ${{ inputs.baseline_commit }}
@@ -281,6 +301,7 @@ jobs:
             --baseline-commit "$BASELINE_COMMIT" \
             --candidate-run "$CANDIDATE_RUN" --candidate-artifact "$CANDIDATE_ARTIFACT" \
             --candidate-commit "$CANDIDATE_COMMIT" --repetitions "$REPETITIONS" \
+            --histories "$CHECKPOINT_HISTORIES" --noise "$CHECKPOINT_NOISE" \
             --tracers "$RUNNER_TEMP/checkpoint-readers/_build/default" --output checkpoint-results
       - name: Retain raw measurements, including failed sessions
         if: always()

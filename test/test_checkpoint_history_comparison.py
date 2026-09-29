@@ -8,7 +8,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts/harness/perf'))
-from compare_checkpoint_history import validate
+from compare_checkpoint_history import render_summary, validate
 from checkpoint_history_artifact_session import seed, checkpoint
 
 
@@ -19,7 +19,7 @@ class Evidence(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.identity = {'source': 'a'*40, 'sha256': {'main_eio.exe': 'b'*64}}
         self.put('identity.json', {**self.identity, 'pid': 42, 'histories': 1,
-                                 'interval_s': 90, 'load_before': [0, 0, 0]})
+                                 'noise': 7, 'cycles': 1, 'interval_s': 90, 'load_before': [0, 0, 0]})
         self.put('completed.json', {'cycles': 1, 'fixture_sha256': 'c'*64, 'load_after': [0, 0, 0]})
         self.put('cleanup.json', {'all_exited': True, 'errors': []})
         self.put('health-after.json', {'scheduler': {'samples': 60, 'p99_ms': 1, 'max_ms': 2}})
@@ -43,38 +43,61 @@ class Evidence(unittest.TestCase):
         (self.root / 'requests.jsonl').write_text('\n'.join(map(json.dumps, [self.inventory, self.health]))+'\n')
 
     def test_complete_capture(self):
-        self.assertEqual(validate(self.root, self.identity, 1)['inventory']['n'], 1)
+        self.assertEqual(validate(self.root, self.identity, 1, 1, 7)['inventory']['n'], 1)
+
+    def test_summary_uses_observed_fixture_dimensions(self):
+        result = validate(self.root, self.identity, 1, 1, 7)
+        report = render_summary([{'pair': 1, 'role': 'baseline', **result},
+                                 {'pair': 1, 'role': 'candidate', **result}])
+        self.assertIn('1 valid v11 histories and 7 nonmatching entries', report)
+        self.assertIn('Inventory samples per session: 1.', report)
+        self.assertIn('p95/p99 use nearest rank', report)
+
+    def test_summary_rejects_mismatched_workload(self):
+        result = validate(self.root, self.identity, 1, 1, 7)
+        baseline = {'pair': 1, 'role': 'baseline', **result}
+        candidate = {'pair': 1, 'role': 'candidate', **result}
+        for field in ('histories', 'noise', 'cycles', 'interval_s'):
+            with self.subTest(field=field):
+                with self.assertRaisesRegex(ValueError, f'comparison {field} differs'):
+                    render_summary([baseline, {**candidate, field: candidate[field] + 1}])
+
+    def test_session_rejects_unrequested_fixture_dimensions(self):
+        for histories, noise in ((2, 7), (1, 8)):
+            with self.subTest(histories=histories, noise=noise):
+                with self.assertRaisesRegex(ValueError, 'fixture dimensions differ'):
+                    validate(self.root, self.identity, 1, histories, noise)
 
     def test_missing_request(self):
         with self.assertRaisesRegex(ValueError, 'incomplete workload'):
-            validate(self.root, self.identity, 2)
+            validate(self.root, self.identity, 2, 1, 7)
 
     def test_invalid_checkpoint(self):
         self.inventory['body'] = json.dumps({'history_errors': [{'error_kind': 'parse_error'}], 'history': []})
         self.requests()
         with self.assertRaisesRegex(ValueError, 'invalid inventory'):
-            validate(self.root, self.identity, 1)
+            validate(self.root, self.identity, 1, 1, 7)
 
     def test_workload_outside_trace(self):
         self.inventory['start_unix'] = 99
         self.requests()
         with self.assertRaisesRegex(ValueError, 'outside runtime-events'):
-            validate(self.root, self.identity, 1)
+            validate(self.root, self.identity, 1, 1, 7)
 
     def test_lost_events(self):
         p = self.root / 'rtev_fibers.txt'
         p.write_text(p.read_text().replace('lost=0', 'lost=1'))
         with self.assertRaisesRegex(ValueError, 'lossy'):
-            validate(self.root, self.identity, 1)
+            validate(self.root, self.identity, 1, 1, 7)
 
     def test_wrong_binary(self):
         with self.assertRaisesRegex(ValueError, 'identity differs'):
-            validate(self.root, {**self.identity, 'source': 'd'*40}, 1)
+            validate(self.root, {**self.identity, 'source': 'd'*40}, 1, 1, 7)
 
     def test_failed_cleanup(self):
         self.put('cleanup.json', {'all_exited': False, 'errors': []})
         with self.assertRaisesRegex(ValueError, 'cleanup'):
-            validate(self.root, self.identity, 1)
+            validate(self.root, self.identity, 1, 1, 7)
 
     def test_checkpoint_uses_strict_float_fields(self):
         value = json.loads(checkpoint(1))

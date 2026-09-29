@@ -4,6 +4,10 @@ The `bench-tests.yml` manual input `compare_checkpoint_history=true` runs the
 same valid checkpoint fixture against two verified `linux-x64-probe.yml`
 artifacts on one Ubuntu runner. Supply the existing baseline/candidate run,
 artifact and full commit inputs. Set other comparison modes to false.
+`checkpoint_histories` and `checkpoint_noise` select the fixture sizes; each
+requested size must match the session identity and every compared session.
+The summary renders those recorded sizes. The runtime-events readers use the
+Eio version pinned in `masc.opam.locked`.
 
 For the first task-611 slice (#39761), the source pair is:
 
@@ -43,6 +47,11 @@ runtime-events validation determine whether the experiment is complete.
 loads, JSON decoding, response encoding and transport. Scheduler percentiles
 come from overlapping windows and are not pooled. No performance threshold or
 improvement claim is imposed; report regressions or an inconclusive difference.
+P95/p99 use nearest rank; with 90 observations, p99 equals the maximum.
+The summary states the observation count so that equality is explicit.
+Larger fixtures are separate experiments. Choose and record workload sizes
+before comparing outcomes; changing inputs cannot retroactively establish an
+improvement in the retained 128/8192 experiment.
 
 ## Completion scope
 

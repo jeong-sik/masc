@@ -25,16 +25,18 @@ def stats(values):
             'p99_ms': values[math.ceil(len(values)*.99)-1], 'max_ms': max(values)}
 
 
-def validate(directory, identity, cycles):
+def validate(directory, identity, cycles, histories, noise):
     complete = json.loads((directory / 'completed.json').read_text())
     cleanup = json.loads((directory / 'cleanup.json').read_text())
     observed = json.loads((directory / 'identity.json').read_text())
     require(cleanup['all_exited'] and not cleanup['errors'], 'incomplete cleanup')
     require(observed['source'] == identity['source'] and observed['sha256'] == identity['sha256'],
             'session identity differs from verified artifact')
+    require(observed['histories'] == histories and observed['noise'] == noise,
+            'session fixture dimensions differ from requested workload')
     rows = [json.loads(line) for line in (directory / 'requests.jsonl').read_text().splitlines()]
     inventory = [row for row in rows if row['path'].endswith('/checkpoints')]
-    require(len(inventory) == complete['cycles'] == cycles, 'incomplete workload')
+    require(len(inventory) == complete['cycles'] == observed['cycles'] == cycles, 'incomplete workload')
     for row in inventory:
         body = json.loads(row['body'])
         require(row['status'] == 200 and not body['history_errors']
@@ -53,6 +55,8 @@ def validate(directory, identity, cycles):
     scheduler = after['scheduler']
     require(scheduler['samples'] > 0, 'scheduler probe has no observations')
     return {'fixture_sha256': complete['fixture_sha256'], 'source': identity['source'],
+            'histories': observed['histories'], 'noise': observed['noise'],
+            'cycles': observed['cycles'], 'interval_s': observed['interval_s'],
             'inventory': stats([row['elapsed_ms'] for row in inventory]),
             'health': stats([row['elapsed_ms'] for row in rows if row['path'] == '/health']),
             'scheduler': scheduler,
@@ -69,12 +73,15 @@ def main():
     p.add_argument('--output', type=Path, required=True)
     p.add_argument('--repetitions', type=int, default=3)
     p.add_argument('--cycles', type=int, default=90)
+    p.add_argument('--histories', type=int, default=128)
+    p.add_argument('--noise', type=int, default=8192)
     for role in ('baseline', 'candidate'):
         p.add_argument('--'+role+'-run', type=int, required=True)
         p.add_argument('--'+role+'-artifact', type=int, required=True)
         p.add_argument('--'+role+'-commit', required=True)
     args = p.parse_args()
     require(args.repetitions > 0 and args.cycles > 0, 'invalid measurement length')
+    require(args.histories > 0 and args.noise >= 0, 'invalid fixture dimensions')
     args.output.mkdir(parents=True, exist_ok=False)
     repo = Path(__file__).resolve().parents[3]
     write_json(args.output / 'plan.json', {**vars(args), 'tracers': str(args.tracers),
@@ -95,14 +102,28 @@ def main():
                 directory = args.output / f'{pair+1}-{role}'
                 command = [sys.executable, str(repo / 'scripts/harness/perf/checkpoint_history_artifact_session.py'),
                     '--artifact', str(Path(temporary)/role), '--repo', str(repo), '--tracers', str(args.tracers),
-                    '--cycles', str(args.cycles), '--output', str(directory)]
+                    '--cycles', str(args.cycles), '--histories', str(args.histories),
+                    '--noise', str(args.noise), '--output', str(directory)]
                 write_json(args.output / f'{pair+1}-{role}-command.json', command)
                 run_child(command, args.output, f'{pair+1}-{role}-driver')
-                results.append({'pair': pair+1, 'role': role, **validate(directory, identities[role], args.cycles)})
-                require(len({r['fixture_sha256'] for r in results}) == 1, 'fixtures differ')
+                results.append({'pair': pair+1, 'role': role, **validate(directory, identities[role], args.cycles, args.histories, args.noise)})
+                validate_comparison(results)
     write_json(args.output / 'summary.json', results)
+    (args.output / 'summary.md').write_text(render_summary(results))
+
+
+def validate_comparison(results):
+    require(bool(results), 'no comparison results')
+    for field in ('fixture_sha256', 'histories', 'noise', 'cycles', 'interval_s'):
+        require(all(row[field] == results[0][field] for row in results),
+                f'comparison {field} differs')
+
+
+def render_summary(results):
+    validate_comparison(results)
     lines = ['# Checkpoint inventory comparison', '',
-             'Synthetic fixture: 128 valid v11 histories and 8192 nonmatching entries; identical bytes.',
+             f"Synthetic fixture: {results[0]['histories']} valid v11 histories and {results[0]['noise']} nonmatching entries; identical bytes.",
+             f"Inventory samples per session: {results[0]['inventory']['n']}. HTTP p50 is the median; p95/p99 use nearest rank (ceil(n * quantile)). For 90 samples, p99 equals the maximum.",
              'HTTP times include scan, checkpoint decoding, response encoding and transport.',
              'Concurrent client starts do not prove overlap with directory sorting. Scheduler windows overlap; their percentiles are not pooled. Runtime-events domain 0 is the main domain.',
              'This experiment does not close task-611 or #25893.', '',
@@ -118,7 +139,7 @@ def main():
         lines.append(f"pair {row['pair']} {row['role']}: {row['domain_0']}")
     lines += ['```', '', 'Full per-domain GC/STW distributions and trace-loss counts are in each rtev_watch.txt.',
               'Raw responses, commands, hashes, host loads and cleanup receipts accompany each session.']
-    (args.output / 'summary.md').write_text('\n'.join(lines)+'\n')
+    return '\n'.join(lines)+'\n'
 
 
 if __name__ == '__main__':

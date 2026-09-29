@@ -230,6 +230,18 @@ let selected_declaration view = Option.bind view.snapshot (fun snapshot ->
         List.find_opt (fun (declaration : declaration) ->
           declaration.instance_id = Some item.id
           && Some declaration.source_path = item.source_path) configuration.declarations)))
+let overview_entries snapshot =
+  List.map (fun (instance : instance) -> `Instance instance) snapshot.instances
+  @ (match snapshot.configuration with
+     | None -> []
+     | Some config ->
+         List.mapi (fun index (declaration : declaration) -> index, declaration) config.declarations
+         |> List.filter_map (fun (index, declaration) ->
+              let has_worker = Option.fold ~none:false ~some:(fun id ->
+                List.exists (fun (instance : instance) -> instance.id=id) snapshot.instances)
+                declaration.instance_id in
+              if has_worker then None else Some (`Declaration (index, declaration))))
+let overview_count snapshot = List.length (overview_entries snapshot)
 let selected_document view = Option.bind view.document_key (fun key ->
   List.find_opt (fun (s : Document.session) -> s.file_name = key) view.documents)
 let put_document view (document : Document.session) =
@@ -293,14 +305,20 @@ let selected_instance view = Option.bind view.snapshot (fun snapshot ->
              List.find_opt (fun (instance : instance) -> instance.id=id) snapshot.instances))
        | Connections | Instances -> at_cursor snapshot.instances view.instance_cursor))
 let open_selected_instance view =
-  match selected_instance view, view.snapshot with
-  | Some item, Some snapshot ->
-      let next = {view with screen=Detail (item.id,item.incarnation); focus=Timeline;
-        scroll=0; selected=[]; document_key=None} in
-      let row_cursor = match rows_in_screen next snapshot with
-        | (index, _) :: _ -> index | [] -> -1 in
-      {next with row_cursor}
-  | None, _ | Some _, None -> view
+  match view.snapshot with
+  | None -> view
+  | Some snapshot ->
+      match at_cursor (overview_entries snapshot) view.instance_cursor with
+      | Some (`Declaration (index, _)) ->
+          {view with focus=Configurations; configuration_cursor=index;
+            presentation=Technical; scroll=0; selected=[]; document_key=None}
+      | Some (`Instance item) ->
+          let next = {view with screen=Detail (item.id,item.incarnation); focus=Timeline;
+            scroll=0; selected=[]; document_key=None} in
+          let row_cursor = match rows_in_screen next snapshot with
+            | (index, _) :: _ -> index | [] -> -1 in
+          {next with row_cursor}
+      | None -> view
 let evidence_target view =
   let* snapshot = Option.to_result ~none:"Observation snapshot unavailable" view.snapshot in
   let* () = if view.selected=[] then Error "Select evidence rows first" else Ok () in
@@ -1069,26 +1087,39 @@ let overview_lines ~width view =
           match item.phase with Row.Failed _ -> total + 1 | _ -> total) 0 snapshot.instances in
         let count = List.length snapshot.instances in
         let heading = Printf.sprintf "Lane Add-ons · %d installed · %d failed" count failed in
-        if count=0 then
-          [heading; ""; "No Add-ons installed. i:install a package  n:new TOML"]
-        else
-          let window = max 0 (view.instance_cursor - 4) in
-          let items = List.mapi (fun index (item : instance) -> index,item) snapshot.instances
-            |> List.filter (fun (index,_) -> index >= window && index < window + 9) in
-          [heading; ""]
-          @ List.concat_map (fun (index,item) ->
-              let count_text = if item.observation_seq=0 then "no observations yet"
-                else Printf.sprintf "%d observations" item.observation_seq in
-              let lead = (if index=view.instance_cursor then "> " else "  ") ^
-                item.title ^ " · " ^ (match item.phase with Row.Failed _ -> "failed" | _ -> phase_label item.phase) ^ " · " ^ count_text in
-              let controls = "    Enter:open  " ^ instance_controls item in
-              let detail = match item.phase with
-                | Row.Failed detail ->
-                    Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (width - 4))
-                      ("D:full · " ^ detail)
-                    |> List.map (fun line -> "    " ^ line)
-                | _ -> [] in
-              [lead; controls] @ detail) items
+        let entries = overview_entries snapshot in
+        let window = max 0 (view.instance_cursor - 4) in
+        let items = List.mapi (fun index item -> index,item) entries
+          |> List.filter (fun (index,_) -> index >= window && index < window + 9) in
+        let empty = match snapshot.configuration with
+          | Some {complete=true;declarations=[];_} when count=0 ->
+              ["No Add-ons installed. i:install a package  n:new TOML"]
+          | Some {complete=false;_} when entries=[] -> ["Installation inventory incomplete · r:refresh"]
+          | None when entries=[] -> ["TOML installation status unknown · r:refresh"]
+          | Some _ | None -> [] in
+        [heading; ""] @ action_lines view @ empty
+        @ List.concat_map (fun (index,item) ->
+            let marker = if index=view.instance_cursor then "> " else "  " in
+            match item with
+            | `Declaration (_, declaration) ->
+                let name = Option.value ~default:"unresolved installation" declaration.installation_id in
+                let status = if declaration.issues<>[] then "needs attention" else "pending" in
+                [marker ^ name ^ " · " ^ status ^ " · " ^ Filename.basename declaration.source_path;
+                 "    Enter:installation  E:edit"]
+            | `Instance item ->
+                let count_text = if item.observation_seq=0 then "no observations yet"
+                  else Printf.sprintf "%d observations" item.observation_seq in
+                let lead = marker ^ item.title ^ " · " ^
+                  (match item.phase with Row.Failed _ -> "failed" | _ -> phase_label item.phase) ^
+                  " · " ^ count_text in
+                let controls = "    Enter:open  " ^ instance_controls item in
+                let detail = match item.phase with
+                  | Row.Failed detail ->
+                      Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (width - 4))
+                        ("D:full · " ^ detail)
+                      |> List.map (fun line -> "    " ^ line)
+                  | _ -> [] in
+                [lead; controls] @ detail) items
   in
   List.concat_map wrap ([ overview_hints view; "" ]
     @ diagnostic_lines view @ action_lines view @ content)

@@ -72,8 +72,10 @@ val selected_document : t -> Document.session option
 val put_document : t -> Document.session -> t
 val selected_instance : t -> instance option
 val open_selected_instance : t -> t
-(** Pin the detail to the selected incarnation and select its first row,
-    clearing document and evidence selection from the previous screen. *)
+(** Enter the selected worker or unresolved installation. A worker pins its
+    incarnation; an installation opens its existing TOML detail section. *)
+val overview_count : snapshot -> int
+(** Number of selectable workers and unresolved installations in the list. *)
 val move_record : t -> int -> t
 (** Move only among records belonging to the pinned detail incarnation. *)
 val selected_source_path : t -> string option

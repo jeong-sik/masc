@@ -19912,7 +19912,8 @@ and is loaded on demand through keeper_skill.
                      | "?" -> update {view with help_open=not view.help_open;scroll=0}
                      | _ when view.help_open -> ()
                      | "esc" when Option.is_some view.document_key -> update {view with document_key=None;scroll=0}
-                     | "esc" when view.presentation<>Addons.Summary -> update {view with presentation=Addons.Summary;scroll=0}
+                     | "esc" when view.presentation<>Addons.Summary -> update {view with presentation=Addons.Summary;
+                         focus=(if view.screen=Addons.Overview then Addons.Instances else view.focus);scroll=0}
                      | "esc" | "q" when view.screen<>Addons.Overview -> update {view with screen=Addons.Overview;focus=Addons.Instances;scroll=0}
                      | "esc" | "q" -> state.lane_addons_cached <- view; state.lane_addons <- None
                      | ("\r" | "\n" | "enter") when view.screen=Addons.Overview ->
@@ -19997,8 +19998,13 @@ and is loaded on demand through keeper_skill.
                      | "j" | "down" | "k" | "up" ->
                          let delta = if key = "j" || key = "down" then 1 else -1 in
                          (match view.snapshot, view.screen, view.focus with
+                          | Some snapshot, Addons.Overview, Addons.Configurations ->
+                              (match snapshot.configuration with
+                               | None -> ()
+                               | Some configuration -> update {view with configuration_cursor=max 0
+                                   (min (List.length configuration.declarations - 1) (view.configuration_cursor + delta))})
                           | Some snapshot, Addons.Overview, _ ->
-                              update {view with instance_cursor=max 0 (min (List.length snapshot.instances - 1) (view.instance_cursor + delta))}
+                              update {view with instance_cursor=max 0 (min (Addons.overview_count snapshot - 1) (view.instance_cursor + delta))}
                           | Some _, Addons.Detail _, (Addons.Configurations | Addons.Instances | Addons.Connections) -> ()
                           | Some _, Addons.Detail _, Addons.Rows ->
                               update (Addons.move_record view delta)

@@ -467,6 +467,81 @@ let test_goal_creation_emits_an_event () =
   check int "editing a goal is not a second beginning" 1 (List.length (events ()))
 ;;
 
+(* A due date or priority edit moves no phase, so it records a row of its own
+   with the value it replaced (#39878). Only the fields that changed are in it. *)
+let test_goal_due_date_and_priority_edits_are_recorded () =
+  with_workspace
+  @@ fun config ->
+  let events_path =
+    Filename.concat
+      (Filename.dirname (Goal_store.goals_path config))
+      "goal_events.jsonl"
+  in
+  let edits () =
+    if Sys.file_exists events_path
+    then
+      Fs_compat.load_file events_path
+      |> String.split_on_char '\n'
+      |> List.filter (fun line -> String.trim line <> "")
+      |> List.map Yojson.Safe.from_string
+      |> List.filter (fun event ->
+        String.equal (get_string_field event "event_type") "goal_edited")
+    else []
+  in
+  let upsert args =
+    match
+      Tool_workspace.dispatch
+        (workspace_ctx config)
+        ~name:"masc_goal_upsert"
+        ~args:(`Assoc args)
+    with
+    | Some result -> parse_json_result result
+    | None -> fail "masc_goal_upsert not handled"
+  in
+  let created =
+    upsert
+      [ "title", `String "Dated later"
+      ; "metric", `String "goals counted"
+      ; "target_value", `String "1"
+      ]
+  in
+  let goal_id = get_string_field created "goal_id" in
+  let edit_of = function
+    | [ event ] -> Yojson.Safe.Util.member "payload" event
+    | events -> fail (Printf.sprintf "expected one new edit, got %d" (List.length events))
+  in
+  let newest_edit ~already =
+    edit_of (List.filteri (fun index _ -> index >= already) (edits ()))
+  in
+  let change payload field =
+    let change = Yojson.Safe.Util.member field payload in
+    Yojson.Safe.Util.member "from" change, Yojson.Safe.Util.member "to" change
+  in
+  let json = testable Yojson.Safe.pp Yojson.Safe.equal in
+  let json_pair = pair json json in
+  check int "creating a goal records no edit" 0 (List.length (edits ()));
+  (* A due date that was not set comes from null. *)
+  ignore (upsert [ "id", `String goal_id; "due_date", `String "2026-10-15" ]);
+  let first = newest_edit ~already:0 in
+  check json_pair "due date set" (`Null, `String "2026-10-15") (change first "due_date");
+  check json "the priority did not change" `Null (Yojson.Safe.Util.member "priority" first);
+  check string "the editor is named" "planner" (get_string_field first "actor");
+  ignore (upsert [ "id", `String goal_id; "priority", `Int 1 ]);
+  let second = newest_edit ~already:1 in
+  check json_pair "priority moved" (`Int 3, `Int 1) (change second "priority");
+  check json "the due date did not change" `Null (Yojson.Safe.Util.member "due_date" second);
+  ignore
+    (upsert [ "id", `String goal_id; "due_date", `String "2026-11-01"; "priority", `Int 5 ]);
+  let third = newest_edit ~already:2 in
+  check json_pair "due date moved" (`String "2026-10-15", `String "2026-11-01") (change third "due_date");
+  check json_pair "priority moved again" (`Int 1, `Int 5) (change third "priority");
+  (* The same values again, and an edit to something else, record nothing. *)
+  ignore
+    (upsert [ "id", `String goal_id; "due_date", `String "2026-11-01"; "priority", `Int 5 ]);
+  ignore (upsert [ "id", `String goal_id; "title", `String "Renamed" ]);
+  check int "an edit that changes neither field records nothing" 3 (List.length (edits ()))
+;;
+
 let test_goal_upsert_rejects_lifecycle_fields () =
   with_workspace
   @@ fun config ->
@@ -834,6 +909,10 @@ let () =
             "creating a goal emits an event"
             `Quick
             test_goal_creation_emits_an_event
+        ; test_case
+            "due date and priority edits are recorded"
+            `Quick
+            test_goal_due_date_and_priority_edits_are_recorded
         ; test_case
             "goal review removed from dispatch"
             `Quick

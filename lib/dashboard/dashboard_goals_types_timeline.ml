@@ -280,6 +280,38 @@ let goal_event_timeline_json event =
           | None -> "warn"
         in
         ("Goal Phase", Printf.sprintf "phase=%s by %s" phase actor, severity)
+    | "goal_edited" ->
+        (* The payload holds only the fields the edit changed, each as
+           {from, to}. A due date that was not set is JSON null. A field that
+           is present but unreadable shows as a bracketed marker, the way the
+           [goal_phase] row marks a missing field. *)
+        let edit_value field change key =
+          match Json_util.assoc_member_opt key change with
+          | Some `Null -> "(none)"
+          | Some (`String text) -> text
+          | Some (`Int number) -> string_of_int number
+          | Some _ | None -> Printf.sprintf "<missing payload.%s.%s>" field key
+        in
+        let edit field =
+          match payload_field field with
+          | `Assoc _ as change ->
+              Some
+                (Printf.sprintf "%s %s -> %s" field
+                   (edit_value field change "from")
+                   (edit_value field change "to"))
+          | _ -> None
+        in
+        let edits =
+          match List.filter_map edit [ "due_date"; "priority" ] with
+          | [] -> "<missing payload.due_date and payload.priority>"
+          | changed -> String.concat ", " changed
+        in
+        let actor =
+          match payload_field "actor" |> json_to_string_opt with
+          | Some actor -> actor
+          | None -> "<missing payload.actor>"
+        in
+        ("Goal Edit", Printf.sprintf "%s by %s" edits actor, "ok")
     | _ ->
         ("Goal Event", event_type, "ok")
   in

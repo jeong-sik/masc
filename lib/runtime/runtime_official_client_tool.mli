@@ -115,3 +115,12 @@ val mcp_content :
   (Yojson.Safe.t list, string) result
 (** MCP image content carries base64 bytes and mimeType. URL/file-id images
     require a separate resolver and are refused here rather than fetched. *)
+
+val mcp_tool_result_content :
+  success:bool -> content:string ->
+  content_blocks:Agent_core.Types.content_block list option ->
+  Yojson.Safe.t list * bool
+(** An MCP [tools/call] result's [content] items and its [isError]. When
+    {!mcp_content} refuses a block the tool has already run, so the result
+    carries the reason, then the sanitized [content], and reads as an error.
+    Every MCP [tools/call] answer this server writes goes through here. *)

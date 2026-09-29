@@ -113,7 +113,7 @@ function WorkspaceCuratorRuntimeContract({ prompt, onOpen }: {
         <div class="min-w-0">
           <h3 class="m-0 text-sm font-semibold">공유 메모리 합성 · Workspace Curator</h3>
           <p class="my-1 text-xs leading-relaxed text-[var(--color-fg-muted)]">
-            여러 Keeper가 저장한 기억을 출처가 있는 공유 제안으로 합성합니다. <code>workspace_curator_exact</code>가 해소된 원문과 입력을 하나의 user message로 받습니다.
+            여러 Keeper의 변경된 기억을 공유 원장에 분류합니다. <code>workspace_curator_exact</code>가 크기를 제한한 변경 묶음을 하나의 user message로 받습니다.
           </p>
         </div>
         ${prompt
@@ -126,11 +126,11 @@ function WorkspaceCuratorRuntimeContract({ prompt, onOpen }: {
         </div>
       ` : null}
       <div class="text-xs leading-relaxed text-[var(--color-fg-muted)]">
-        <p class="my-1"><code>workspace_memory_inventory</code>: <code>sources</code>의 Keeper별 원문과 근거 참조, <code>snapshots</code>의 저장 버전·변경·철회 기록, <code>gaps</code>의 누락·읽기 실패를 함께 전달합니다.</p>
-        <p class="my-1">레인을 설정하면 기억 변경·서버 시작 시 입력을 확인하고, 같은 성공 입력은 기존 제안을 재사용합니다.
-          실행 중에는 해당 입력을 유지합니다. 이 화면에서 저장·해제하면 활성 curator에 재확인을 요청하며, 진행 중인 실행 다음에 변경 내용을 사용합니다.
+        <p class="my-1"><code>workspace_memory_changes</code>: 새 사실과 다른 Keeper의 가까운 사실, 관련 원장 항목만 전달합니다. 현재 사실 전체는 모델에 보내지 않습니다.</p>
+        <p class="my-1">레인을 설정하면 기억 변경·서버 시작 시 원장과 현재 스토어를 비교하고, 바뀐 사실이 없으면 모델을 호출하지 않습니다.
+          한 실행은 한 묶음만 처리합니다. 이 화면에서 저장·해제하면 활성 curator에 재확인을 요청하며, 진행 중인 실행 다음에 변경 내용을 사용합니다.
           모델은 <code class="break-all">runtime.exact_output_lanes.workspace_curator_exact.slots</code>에서 지정합니다.</p>
-        <p class="my-1">결과는 검증 전 제안(<code>model_proposed</code>)입니다. Keeper에게는 제안 ID를 알려주며, 실제 원문은 <code>keeper_workspace_memory_read</code>로 확인합니다.</p>
+        <p class="my-1">결과는 의미 검증 전 분류 원장입니다. Keeper는 <code>keeper_workspace_memory_read</code>로 현재 원장과 출처 상태를 확인합니다.</p>
         <p class="my-1">실행별 실제 입력과 선택된 실행 대상(slot)은 Internal Agents → Workspace Curator에서 확인합니다.</p>
       </div>
     </section>

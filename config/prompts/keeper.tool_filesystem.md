@@ -61,4 +61,4 @@ path is required. Good: path='lib/foo.ml'. Bad: path=''.
 mode=patch requires non-empty old_string. Good: old_string='let x = 1'.
 
 ### patch_target_missing
-patch target file does not exist. Use mode=overwrite to create it.
+patch target file does not exist. Check the path; to create a new file, call Write with its full content instead of patching.

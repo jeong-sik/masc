@@ -75,6 +75,12 @@ val verify_mcp_auth :
   base_path:string -> Httpun.Request.t -> ('a option, Masc_domain.masc_error) result
 (** Bearer token check for the [/mcp] endpoint. *)
 
+val verify_seat_mcp_auth :
+  base_path:string -> Httpun.Request.t -> ('a option, Masc_domain.masc_error) result
+(** Bearer token check for the seat door [/mcp/play]: the same as
+    {!verify_mcp_auth} but asking [CanPlayMachine], which an invite's
+    [Player] credential holds (RFC play-link-for-the-shared-machine §2.7). *)
+
 val verify_mcp_auth_for_authority :
   base_path:string ->
   request_authority:Server_request_authority.authority ->

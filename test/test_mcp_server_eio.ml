@@ -2839,13 +2839,11 @@ let test_handle_request_resources_list_paginates () =
    mcp_server_eio_resource.ml are two files; a renamed reader arm would leave
    a listed URI reading as not-found. Pin the join: every listed uri, and
    every uri_template with concrete values substituted, parses to an id the
-   dispatch handles. [worktrees.json] is reader-only and deliberately
-   unlisted, so it is not in the handled set. *)
+   dispatch handles. *)
 let handled_resource_id id =
   match id with
   | "tool-help-index" | "status" | "status.json" | "tasks" | "tasks.json"
-  | "who" | "who.json" | "agents" | "agents.json" | "messages"
-  | "messages/recent" | "messages.json" | "messages.json/recent" | "events"
+  | "who" | "who.json" | "messages" | "messages.json" | "events"
   | "events.json" | "library" | "library.json" ->
       true
   | _ ->
@@ -3006,10 +3004,8 @@ Alpha body
       ("masc://status.json", "application/json", "\"base_path\"");
       ("masc://tasks.json", "application/json", "\"tasks\"");
       ("masc://who.json", "application/json", "[");
-      ("masc://agents.json", "application/json", "{");
       ("masc://messages.json", "application/json", "[");
       ("masc://events.json", "application/json", "[");
-      ("masc://worktrees.json", "application/json", "{");
       ("masc://library", "text/markdown", "`masc://library/alpha` (research)");
       ("masc://library.json", "application/json", "\"source\":\"research\"");
       ("masc://library/alpha", "text/markdown", "Alpha body");

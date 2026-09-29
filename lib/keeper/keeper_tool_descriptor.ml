@@ -1551,6 +1551,20 @@ let msx_screen_output_schema =
       ; "media_type"; "width"; "height"; "bytes" ]
 ;;
 
+let portrait_read_output_schema =
+  object_output_schema
+    ~properties:
+      [ "name", `Assoc [ "type", `String "string" ]
+      ; "equipment", `Assoc [ "type", `String "object" ]
+      ; "artifact", `Assoc [ "type", `String "string" ]
+      ; "media_type", `Assoc [ "type", `String "string" ]
+      ; "width", `Assoc [ "type", `String "integer" ]
+      ; "height", `Assoc [ "type", `String "integer" ]
+      ; "bytes", `Assoc [ "type", `String "integer" ]
+      ]
+    ~required:[ "name"; "equipment"; "artifact"; "media_type"; "width"; "height"; "bytes" ]
+;;
+
 (* Producer: Keeper_tool_lane_status.handle. [lane], [endpoint] and
    [operator_action] are null when unknown; [probe] and [last_dispatch] are
    the typed report's variants spelled out. Docker adds [note]; an unattached
@@ -2960,6 +2974,9 @@ let internal_descriptors : t list =
   ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent "lane_slice" "masc_lane_slice" ~readonly:true
   ; masc_misc_descriptor "lane_detach" "masc_lane_detach" ~readonly:false
   ; masc_misc_descriptor "lane_evidence" "masc_lane_evidence" ~readonly:false
+  ; (masc_misc_descriptor ~ordinary_execution_mode:Concurrent
+       "portrait_read" "keeper_portrait_read" ~readonly:true
+       |> with_composable_output (Json_output { schema = portrait_read_output_schema }))
   (* MSX lane (RFC-0439 §3.5): the shared machine is one piece of state, so
      none of these opts into concurrent batches. *)
   ; masc_misc_descriptor "msx_load" "masc_msx_load" ~readonly:false

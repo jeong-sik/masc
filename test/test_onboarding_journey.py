@@ -1381,7 +1381,7 @@ class QuickSetup(unittest.TestCase):
         with patch.object(SETUP, 'official_client_path', return_value='/bin/claude'), \
                 patch.object(SETUP, 'sandbox_catalog', return_value=catalog):
             plan = SETUP.quick_plan('masc', '/workspace')
-        self.assertEqual(plan, dict(model='claude-sonnet-5', sandbox='apple_container', sandbox_ready=False))
+        self.assertEqual(plan, dict(model='claude-sonnet-5-5', sandbox='apple_container', sandbox_ready=False))
 
     def test_elsewhere_the_plan_takes_a_running_docker_or_leaves_the_sandbox_to_step_4(self):
         unsupported = sandbox_row('apple_container', 'unsupported_host')

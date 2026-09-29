@@ -51,7 +51,7 @@ Not with comment_tail.
 [[params]]
 name = "comment_tail"
 type = "integer"
-minimum = 1
+minimum = 0
 maximum = 100
 description = """
 Newest N comments plus post body. Not with comment_offset, comment_limit,

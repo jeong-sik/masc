@@ -62,6 +62,23 @@ let ok label = function
   | Error detail -> Alcotest.failf "%s: %s" label detail
 ;;
 
+let ready_confirmation_events ~base_path =
+  P.For_testing.path ~base_path ~keeper_name:"alpha"
+  |> Fs_compat.load_file
+  |> String.split_on_char '\n'
+  |> List.filter_map (fun line ->
+    if String.equal line ""
+    then None
+    else
+      match Yojson.Safe.from_string line with
+      | `Assoc fields as json ->
+        (match List.assoc_opt "kind" fields with
+         | Some (`String "ready_confirmation") -> Some json
+         | None -> List.assoc_opt "ready_confirmation" fields
+         | Some _ -> None)
+      | _ -> None)
+;;
+
 (* Every direct A.apply_judgment_and_deliver call in this file targets a
    candidate the test just persisted, so Candidate_absent here is a fixture
    bug, not the case under test — test_settle_completed_snapshot_terminalizes_a_
@@ -2653,6 +2670,19 @@ let test_manual_quarantine_requeue_is_unclaimable_until_authorized_and_settles (
     (W.For_testing.reconcile_quarantines ~now:34.0 ~base_path ~keeper_name:"alpha");
   ok "repeat process-start reconciliation"
     (W.For_testing.reconcile_quarantines ~now:35.0 ~base_path ~keeper_name:"alpha");
+  let confirmations = ready_confirmation_events ~base_path in
+  Alcotest.(check int)
+    "each authorized Ready reconciliation is durable"
+    2
+    (List.length confirmations);
+  List.iter
+    (fun event ->
+       Alcotest.(check bool)
+         "reconciled confirmations retain the deferred generation"
+         true
+         (Yojson.Safe.Util.member "generation" event
+          = P.Generation.to_yojson deferred.generation))
+    confirmations;
   Alcotest.(check bool) "reconciliation retains the deferred generation" true
     (P.Generation.equal deferred.generation (load_one_partition ~base_path).generation);
   (match (load_one_candidate ~base_path).status with
@@ -2672,6 +2702,19 @@ let test_manual_quarantine_requeue_is_unclaimable_until_authorized_and_settles (
        (P.recover_for_process_start ~now:37.0 ~base_path ~keeper_name:"alpha"));
   ok "reconcile authorized requeue after interrupted run"
     (W.For_testing.reconcile_quarantines ~now:38.0 ~base_path ~keeper_name:"alpha");
+  let confirmations = ready_confirmation_events ~base_path in
+  Alcotest.(check int)
+    "recovery of the cut run confirms a later Ready generation"
+    3
+    (List.length confirmations);
+  (match List.rev confirmations with
+   | latest :: _ ->
+     Alcotest.(check bool)
+       "cut run recovery advanced Ready generation"
+       false
+       (Yojson.Safe.Util.member "generation" latest
+        = P.Generation.to_yojson deferred.generation)
+   | [] -> Alcotest.fail "cut run recovery lost Ready confirmation");
   let execute ~before_dispatch ~before_advance:_ _candidate =
     ok "bind manual requeue attempt" (before_dispatch exact);
     (* Relevant, not Not_relevant: task-1666 makes the worker settle a
@@ -2712,6 +2755,10 @@ let test_manual_quarantine_requeue_is_unclaimable_until_authorized_and_settles (
   (match (load_one_candidate ~base_path).status, (load_one_partition ~base_path).state with
    | A.Consumed { delivery = A.Enqueued_to_keeper_lane; _ }, P.Settled _ -> ()
    | _ -> Alcotest.fail "manual requeue did not normalize, consume, and settle");
+  Alcotest.(check int)
+    "owner settlement preserves Ready confirmations"
+    3
+    (List.length (ready_confirmation_events ~base_path));
   (match (Q.inventory ~base_path ~keeper_names:[ "alpha" ]).items with
    | [] -> ()
    | _ -> Alcotest.fail "settled candidate remained in quarantine inventory")

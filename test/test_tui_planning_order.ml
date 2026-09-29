@@ -4,6 +4,7 @@ open Masc_tui_types
 let goal ?due ?updated id phase priority =
   { pg_id = id
   ; pg_title = id
+  ; pg_owner = Goal_store.Unknown_owner
   ; pg_phase = phase
   ; pg_priority = priority
   ; pg_due_date = due

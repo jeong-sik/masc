@@ -7918,7 +7918,10 @@ let play_card_shown (state : state) =
       (fun card -> String.equal (Masc_tui_play_card.name card) name)
       state.play_invite.cards
 
-let play_invite_latest (state : state) = List.hd_opt state.play_invite.cards
+let play_invite_latest (state : state) =
+  match state.play_invite.cards with
+  | [] -> None
+  | card :: _ -> Some card
 
 let play_invite_find (state : state) name =
   List.find_opt

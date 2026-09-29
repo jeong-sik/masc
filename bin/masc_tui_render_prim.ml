@@ -124,6 +124,7 @@ let clamped_scroll_now (state : state) = function
   | Approval_detail_scroll _ -> Approval_detail_scroll state.approval_detail_scroll
   | Patch_modal_scroll _ -> Patch_modal_scroll state.patch_modal_scroll
   | Link_modal_scroll _ -> Link_modal_scroll state.link_modal_scroll
+  | Play_invite_scroll _ -> Play_invite_scroll state.play_invite_scroll
   | Voice_scroll _ -> Voice_scroll state.config_scroll
   | Keeper_list_scroll _ -> Keeper_list_scroll state.keeper_list_scroll
   | Context_inspector_scroll _ ->
@@ -166,6 +167,7 @@ let reader_after_wheel (reader : clamped_scroll)
   | Approval_detail_scroll value -> Some (Approval_detail_scroll (step value))
   | Patch_modal_scroll value -> Some (Patch_modal_scroll (step value))
   | Link_modal_scroll value -> Some (Link_modal_scroll (step value))
+  | Play_invite_scroll value -> Some (Play_invite_scroll (step value))
   | Voice_scroll value -> Some (Voice_scroll (step value))
   | Context_inspector_scroll value ->
       Some (Context_inspector_scroll (step value))

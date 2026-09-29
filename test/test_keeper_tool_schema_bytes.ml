@@ -420,7 +420,13 @@ open Alcotest
    its 128,595 base was not re-measured after #39454 trimmed four board
    descriptions (about 67 to 98 bytes by replay), so the surface sits that
    far under this ceiling rather than exactly at it. *)
-let ceiling_bytes = 129_200
+(* 2026-09-30: capability discovery now explains exact Skill arguments,
+   deferred loading and async result retrieval, with executable FTS examples.
+   JSON-serialized description deltas are +851 bytes against f077ca17de;
+   this is a source replay, not a native inventory measurement. The dynamic
+   keeper_tool_search loader is outside model_visible_schemas. Retain the
+   existing headroom; exact-head CI measures the resulting inventory. *)
+let ceiling_bytes = 130_051
 
 
 let schema_json (schema : Masc_domain.tool_schema) =

@@ -15,21 +15,21 @@ name_suffix = " Help"
 uri = "masc://status"
 name = "MASC Status"
 title = "Project Status"
-description = "Current project status snapshot (same as masc_status)"
+description = "Workspace status view of agents, tasks, and cumulative message count"
 mime_type = "text/markdown"
 
 [[resources]]
 uri = "masc://status.json"
 name = "MASC Status (JSON)"
 title = "Project Status (JSON)"
-description = "Current project status snapshot as JSON (for data collection)"
+description = "Raw workspace state, backlog, and connected sessions as JSON"
 mime_type = "application/json"
 
 [[resources]]
 uri = "masc://tasks"
 name = "Quest Board"
 title = "Task Board"
-description = "Task board snapshot (defaults to active tasks; same as masc_tasks)"
+description = "Task board view (active tasks by default)"
 mime_type = "text/markdown"
 
 [[resources]]
@@ -54,24 +54,10 @@ description = "In-memory agent/session status as JSON"
 mime_type = "application/json"
 
 [[resources]]
-uri = "masc://agents"
-name = "Agents (Metadata)"
-title = "Agent Registry"
-description = "Agent registry snapshot (capabilities, tasks, last_seen)"
-mime_type = "text/markdown"
-
-[[resources]]
-uri = "masc://agents.json"
-name = "Agents (Metadata, JSON)"
-title = "Agent Registry (JSON)"
-description = "Agent registry snapshot as JSON"
-mime_type = "application/json"
-
-[[resources]]
 uri = "masc://messages?since_seq=0&limit=10"
 name = "Recent Messages"
 title = "Recent Messages"
-description = "Recent messages snapshot (same as masc_messages)"
+description = "Recent workspace messages"
 mime_type = "text/markdown"
 
 [[resources]]
@@ -85,14 +71,14 @@ mime_type = "application/json"
 uri = "masc://events?limit=50"
 name = "Recent Events"
 title = "Event Log"
-description = "Recent event log snapshot (task/agent transitions)"
+description = "Recent workspace event log lines"
 mime_type = "text/markdown"
 
 [[resources]]
 uri = "masc://events.json?limit=50"
 name = "Recent Events (JSON)"
 title = "Event Log (JSON)"
-description = "Recent event log snapshot as JSON"
+description = "Recent valid JSON workspace event log entries"
 mime_type = "application/json"
 
 # Library - documents in <base_path>/docs/library

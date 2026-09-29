@@ -134,11 +134,14 @@ let thinking_config_for_config wire (config : Provider_config.t) =
      | Some true, Capabilities.Anthropic_always_adaptive -> None
      | ( Some true
        , ( Capabilities.Anthropic_adaptive_default
+         | Capabilities.Anthropic_adaptive_between_tools
          | Capabilities.Anthropic_adaptive_only
          | Capabilities.Anthropic_adaptive_preferred ) ) ->
        Some (`Assoc [ "type", `String "adaptive" ])
      | Some false, Capabilities.Anthropic_adaptive_default ->
        Some (`Assoc [ "type", `String "disabled" ])
+     | Some false, Capabilities.Anthropic_adaptive_between_tools ->
+       Some (`Assoc [ "type", `String "between_tools" ])
      | Some false, _ | None, _ -> None)
 ;;
 
@@ -156,6 +159,18 @@ let validate_thinking_controls wire (config : Provider_config.t) =
      | None -> Provider_config.validate_reasoning_effort_request config)
   | Anthropic_control mode ->
   match mode, config.enable_thinking, config.reasoning_effort with
+  (* Sonnet 5.5's lowest mode still thinks between tools. Its API accepts
+     only low/medium/high here; an omitted effort uses its high default.
+     https://platform.claude.com/docs/en/build-with-claude/effort *)
+  | Capabilities.Anthropic_adaptive_between_tools, Some false,
+    (None | Some (Reasoning_effort.Low | Medium | High)) ->
+    Provider_config.validate_reasoning_effort_request config
+  | Capabilities.Anthropic_adaptive_between_tools, Some false,
+    Some (Reasoning_effort.None_ | Minimal | XHigh | Max) ->
+    Error
+      (Printf.sprintf
+         "model %S between_tools thinking accepts only low, medium or high effort"
+         config.model_id)
   | _, Some false, Some effort ->
     Error
       (Printf.sprintf

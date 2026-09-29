@@ -990,17 +990,18 @@ let installation_detail_lines ~width view =
   let wrap line = Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
       (Masc.Tui_decode.sanitize_terminal_text line) in
   let edit_hint = if Option.is_some (selected_source_path view) then "  E:edit TOML" else "" in
+  let refresh_hint = if view.loading then "  Reading …" else "  r:refresh" in
   let body = match view.snapshot with
     | Some ({configuration=Some configuration;_} as snapshot) ->
         (match selected_declaration view with
          | Some declaration ->
              ["Installation details · " ^
                 Option.value ~default:(Filename.basename declaration.source_path) declaration.installation_id;
-              "Esc:back" ^ edit_hint ^ "  r:refresh"; ""]
+              "Esc:back" ^ edit_hint ^ refresh_hint; ""]
              @ configuration_lines {view with configuration_cursor=0}
                  {snapshot with configuration=Some {configuration with declarations=[declaration]}}
-         | None -> ["Installation selection changed · Esc:back  r:refresh"])
-    | _ -> ["Installation inventory unread · Esc:back  r:refresh"] in
+         | None -> ["Installation selection changed · Esc:back" ^ refresh_hint])
+    | _ -> ["Installation inventory unread · Esc:back" ^ refresh_hint] in
   List.concat_map wrap (diagnostic_lines view @ body)
 
 let pending_action view =

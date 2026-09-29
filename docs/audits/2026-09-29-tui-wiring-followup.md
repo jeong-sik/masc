@@ -52,7 +52,7 @@ wiring fixes have syntax/source checks and dedicated regression scenarios;
 their integrated native/PTY results must be recorded before calling them
 runtime-verified. No local native build or installed-TUI restart was performed.
 
-PNG retransmission is also being inspected by its actual preceding frame:
-complete-frame boundaries, rewritten rows, full redraw, image-band overlap,
-and exact portrait/placement. A typing interval alone cannot establish that
-its keypress caused every asynchronous repaint in that interval.
+PNG retransmission is measured in `test_tui_chat_portrait_pty`: while
+typing, and through a held running turn (motion steps, then a streamed
+reply), no unchanged portrait pixels may travel unless the frame cleared the
+screen. A put by image id (`a=p`) over a rewritten row is counted and allowed.

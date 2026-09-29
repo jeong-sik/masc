@@ -17551,23 +17551,19 @@ let main
         ~invalidate_before:(damaged || authority_changed)
         ~write ~flush frame
     with
-    | Frame_presenter.Presented repaint ->
+    | Frame_presenter.Presented _ as presented ->
         state.frames_presented <- state.frames_presented + 1;
         commit_presented_approval approval;
         presented_presses := presses;
         presented_reader := reader;
-        (* The frame's pictures go over it once it is on the terminal, and
-           again over any row the frame erased and wrote: a full redraw
-           cleared them all, a row it rewrote may have taken one's cells. *)
-        Masc_tui_portrait_view.flush
-          ~rewritten:
-            (match repaint with
-             | Frame_presenter.Whole_screen -> fun _ -> true
-             | Frame_presenter.Rows rows -> fun row -> List.mem row rows)
-          ~write:write_to_terminal
-    | Frame_presenter.Unchanged ->
+        (* The frame's pictures go over it once it is on the terminal: sent
+           again after a full redraw, whose clear took them, and put back
+           from the pixels the terminal holds over a row the frame erased
+           and wrote. *)
+        Masc_tui_portrait_view.flush presented ~write:write_to_terminal
+    | Frame_presenter.Unchanged as unchanged ->
         (* Same text, but a picture may have moved on a step. *)
-        Masc_tui_portrait_view.flush ~rewritten:(fun _ -> false) ~write:write_to_terminal
+        Masc_tui_portrait_view.flush unchanged ~write:write_to_terminal
   in
   (* Bind the bearer to the workspace actually opened, before any request is
      built. Reported before the recovery load as well, so when neither source
@@ -26826,7 +26822,7 @@ and is loaded on demand through keeper_skill.
               again from that frame. *)
            Masc_tui_emblem_screen.begin_frame ();
            Masc_tui_portrait_view.begin_frame ();
-           Masc_tui_portrait_view.flush ~rewritten:(fun _ -> false) ~write:write_to_terminal
+           Masc_tui_portrait_view.flush Frame_presenter.Unchanged ~write:write_to_terminal
        | Render_schedule.Render ->
            (* Keys and async updates can change the pane reservation after
               the interaction snapshot. Store the focus the next frame shows. *)

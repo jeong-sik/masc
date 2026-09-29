@@ -1243,6 +1243,20 @@ let open_message_for_keeper ?(return_to = Keeper_chat_return_detail) state
   (* Recall is a walk through one Keeper's messages. A Down on the new
      Keeper must not restore the previous Keeper's draft or image payload. *)
   forget_recall state;
+  if state.msg_target_keeper_name <> Some keeper_name then begin
+    (* These readings belong to one conversation. Clear them at the shared
+       target boundary before its replacement request can finish. *)
+    state.msg_loaded <- [];
+    state.msg_loaded_keeper <- None;
+    state.msg_loaded_error <- None;
+    state.msg_loaded_dropped <- 0;
+    state.msg_memory_error <- None;
+    state.msg_memory_dropped <- 0;
+    state.msg_older_cursor <- None;
+    state.msg_older_exist <- false;
+    state.msg_older_loading <- false;
+    state.msg_older_error <- None;
+  end;
   state.msg_target_keeper_name <- Some keeper_name;
   state.opening_notice <- None;
   (match state.opening_mode with
@@ -4425,55 +4439,43 @@ let launch_github_login state ~mailbox keeper_name =
         enqueue_async mailbox
           (Github_login_finished (keeper_name, Error "Eio clock is unavailable"))
     | Some clock ->
-        let pending = Buffer.create 256 in
-        let flush_lines () =
-          let text = Buffer.contents pending in
-          match String.rindex_opt text '\n' with
-          | None -> ()
-          | Some last ->
-              let complete = String.sub text 0 last in
-              let rest =
-                String.sub text (last + 1) (String.length text - last - 1)
-              in
-              Buffer.clear pending;
-              Buffer.add_string pending rest;
-              let lines =
-                String.split_on_char '\n' complete
-                |> List.filter_map (fun line ->
-                       let line = String.trim line in
-                       if String.length line > 6
-                          && String.sub line 0 6 = "data: "
-                       then
-                         let payload =
-                           String.sub line 6 (String.length line - 6)
-                         in
-                         match Yojson.Safe.from_string payload with
-                         | `Assoc fields -> (
-                             match List.assoc_opt "text" fields with
-                             | Some (`String text) ->
-                                 Some (String.split_on_char '\n' text)
-                             | _ -> (
-                                 match List.assoc_opt "message" fields with
-                                 | Some (`String message) ->
-                                     Some [ "error: " ^ message ]
-                                 | _ -> Some [ payload ]))
-                         | _ | (exception Yojson.Json_error _) ->
-                             Some [ payload ]
-                       else None)
-                |> List.concat
-                |> List.map Masc.Tui_decode.sanitize_terminal_text
-                |> List.filter (fun line -> String.trim line <> "")
-              in
-              if lines <> [] then
-                enqueue_async mailbox (Github_login_lines (keeper_name, lines))
+        let reader = Masc_tui_sse_lines.create () in
+        let flush_lines chunk =
+          let lines =
+            Masc_tui_sse_lines.feed reader chunk
+            |> List.filter_map (fun line ->
+                   let line = String.trim line in
+                   if String.length line > 6
+                      && String.sub line 0 6 = "data: "
+                   then
+                     let payload =
+                       String.sub line 6 (String.length line - 6)
+                     in
+                     match Yojson.Safe.from_string payload with
+                     | `Assoc fields -> (
+                         match List.assoc_opt "text" fields with
+                         | Some (`String text) ->
+                             Some (String.split_on_char '\n' text)
+                         | _ -> (
+                             match List.assoc_opt "message" fields with
+                             | Some (`String message) ->
+                                 Some [ "error: " ^ message ]
+                             | _ -> Some [ payload ]))
+                     | _ | (exception Yojson.Json_error _) ->
+                         Some [ payload ]
+                   else None)
+            |> List.concat
+            |> List.map Masc.Tui_decode.sanitize_terminal_text
+            |> List.filter (fun line -> String.trim line <> "")
+          in
+          if lines <> [] then
+            enqueue_async mailbox (Github_login_lines (keeper_name, lines))
         in
         let result =
           try
             Masc_tui_http.post_keeper_github_login_streaming ~clock ~host
               ~port ~keeper_name ~scopes
-              ~on_chunk:(fun chunk ->
-                Buffer.add_string pending chunk;
-                flush_lines ())
+              ~on_chunk:flush_lines
           with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn -> Error (Printexc.to_string exn)
@@ -6925,9 +6927,8 @@ let launch_keeper_history_load ?(load_file_changes = true) ?(force = false) stat
         | exn -> Error (Printexc.to_string exn)
       in
       let memory_result =
-        (* The subject, because the row that draws this one does not add it:
-           every other failure of this read names itself and an exception
-           string does not. *)
+        (* Keep the subject attached to exception details, as the other
+           failures of this read already do. *)
         try Masc_tui_http.fetch_keeper_memory_journal ~host ~port ~keeper_name with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error ("memory journal: " ^ Printexc.to_string exn)
@@ -7088,16 +7089,6 @@ let switch_to_next_keeper_message state ~mailbox ~drain_queue =
         ~drain_queue;
       state.keeper_cursor <- cursor;
       set_msg_scroll state 0;
-      state.msg_loaded <- [];
-      state.msg_loaded_keeper <- None;
-      state.msg_loaded_error <- None;
-      state.msg_loaded_dropped <- 0;
-      state.msg_memory_error <- None;
-      state.msg_memory_dropped <- 0;
-      state.msg_older_cursor <- None;
-      state.msg_older_exist <- false;
-      state.msg_older_loading <- false;
-      state.msg_older_error <- None;
       launch_keeper_history_load state ~mailbox ~keeper_name
 
 (* Rows this session wrote that the transcript now carries. Dropped so the same
@@ -8817,6 +8808,26 @@ let open_msx_screen (state : Masc_tui_types.state) ~mailbox =
      the read is in flight, and redraw its watch row when it arrives. *)
   launch_dos_live_poll state ~mailbox
 
+(* DOS has a spectator of its own. Enter it directly from the palette; the
+   MSX media picker is only for choosing MSX media. No key from this view is
+   forwarded to DOS, whose input and controller remain server-owned. *)
+let open_dos_screen (state : Masc_tui_types.state) ~mailbox =
+  invalidate_msx_poll ();
+  state.image_request_generation <- state.image_request_generation + 1;
+  state.browser_viewport <- None;
+  if state.image_open then begin
+    Masc_tui_msx.invalidate ();
+    write_to_terminal Masc_tui_graphics.delete_all;
+    state.image_open <- false
+  end;
+  state.machine_source <- Masc.Machine_lane.Dos;
+  state.msx_open <- true;
+  state.msx_menu_open <- false;
+  state.dos_live <- Masc_tui_machine_live.Unread;
+  state.msx_last_poll_ns <- 0L;
+  render_spectator state;
+  launch_dos_live_poll state ~mailbox
+
 (* Where a reference lands, and what it opens when it gets there.
 
    The surfaces already print [masc://] references beside what they name and
@@ -9778,6 +9789,28 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
                attachment.Masc_tui_keeper_chat_projection.mime_type
                attachment.Masc_tui_keeper_chat_projection.size
                (List.length state.msg_attachments)))
+  | Masc_tui_command.Show_load_errors ->
+      Buffer.clear state.msg_input;
+      if state.view <> Keepers Keeper_message
+         || Option.is_none target
+         || target <> state.msg_target_keeper_name then
+        notice ~kind:Notice_failure "Open a Keeper chat to inspect its loading errors"
+      else begin
+        let errors =
+          [ Option.map (fun detail -> "Saved history\n" ^ detail)
+              state.msg_loaded_error
+          ; Option.map (fun detail -> "Older messages\n" ^ detail) state.msg_older_error
+          ; Option.map (fun detail -> "Memory journal\n" ^ detail) state.msg_memory_error
+          ] |> List.filter_map Fun.id
+        in
+        set_msg_scroll state 0;
+        (* A local log entry wraps and scrolls. A failure toast would flatten
+           these details back into the one-line truncation being inspected. *)
+        notice ~kind:Notice_reply
+          (match errors with
+           | [] -> "No chat loading errors recorded."
+           | _ :: _ -> "Chat loading errors\n\n" ^ String.concat "\n\n" errors)
+      end
   | Masc_tui_command.Help ->
       Buffer.clear state.msg_input;
       notice ~kind:Notice_reply
@@ -13110,7 +13143,8 @@ let handle_composer_key state ~base_path ~mailbox key =
            end;
            state.view <- Keepers Keeper_message
        | Masc_tui_command.Task_for_keeper _ | Masc_tui_command.Task_missing_title
-       | Masc_tui_command.Help | Masc_tui_command.About | Masc_tui_command.Switch_keeper_missing_name
+       | Masc_tui_command.Help | Masc_tui_command.Show_load_errors
+       | Masc_tui_command.About | Masc_tui_command.Switch_keeper_missing_name
         | Masc_tui_command.Open_diff | Masc_tui_command.Open_patch_modal
         | Masc_tui_command.Toggle_cost | Masc_tui_command.Open_changes
         | Masc_tui_command.Toggle_acting_pane
@@ -15490,13 +15524,22 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              (* A failed read leaves [dos_activity] as it was -- the sidebar
                 keeps showing the last activity it had rather than flashing
                 empty on a read that did not answer at all. *)
-             (match result with
-              | Ok (_, activity) -> state.dos_activity <- activity
-              | Error _ -> ());
-             (* An unchanged answer draws nothing and decodes no pixels. The
-                read also discovers the DOS watch row while the menu is open. *)
+             let activity_changed =
+               match result with
+               | Ok (_, activity) ->
+                   let changed = activity <> state.dos_activity in
+                   state.dos_activity <- activity;
+                   changed
+               | Error _ -> false
+             in
+             (* An unchanged picture decodes no pixels. A changed activity
+                feed still repaints the spectator sidebar; an identical feed
+                remains silent. The read also discovers the DOS watch row
+                while the menu is open. *)
              (match Masc_tui_machine_live.advance state.dos_live (Result.map fst result) with
-              | None -> ()
+              | None ->
+                  if activity_changed && not state.msx_menu_open then
+                    render_spectator state
               | Some view ->
                   state.dos_live <- view;
                   if state.msx_menu_open then
@@ -20119,8 +20162,16 @@ and is loaded on demand through keeper_skill.
                       | _ -> ())
                  | None,None, None ->
                      match key with
+                     | "esc" when view.help_open -> update {view with help_open=false;scroll=0}
+                     | "?" -> update {view with help_open=not view.help_open;scroll=0}
+                     | _ when view.help_open -> ()
                      | "esc" when Option.is_some view.document_key -> update {view with document_key=None;scroll=0}
+                     | "esc" when view.presentation<>Addons.Summary -> update {view with presentation=Addons.Summary;
+                         focus=(if view.screen=Addons.Overview then Addons.Instances else view.focus);scroll=0}
+                     | "esc" | "q" when view.screen<>Addons.Overview -> update {view with screen=Addons.Overview;focus=Addons.Instances;scroll=0}
                      | "esc" | "q" -> state.lane_addons_cached <- view; state.lane_addons <- None
+                     | ("\r" | "\n" | "enter") when view.screen=Addons.Overview ->
+                         update (Addons.open_selected_instance view)
                      | "i" ->
                          if view.loading then update {view with error=lane_addons_input_failure "Wait for the current Lane request before opening installation."}
                          else (match Masc_tui_lane_installer.create () with
@@ -20161,7 +20212,9 @@ and is loaded on demand through keeper_skill.
                              ~targets:(Addons.subscription_targets view) in
                            update {view with subscription_panel=Some panel;document_key=None;scroll=0};
                            launch_lane_subscriptions state ~mailbox:async_messages Masc_tui_lane_subscriptions.Inspect)
-                     | "D" -> update {view with presentation=(if view.presentation=Addons.Technical then Addons.Summary else Addons.Technical);scroll=0}
+                     | "D" -> update {view with
+                         presentation=(if view.presentation=Addons.Technical then Addons.Summary else Addons.Technical);
+                         focus=(if view.screen=Addons.Overview then Addons.Instances else view.focus);scroll=0}
                      | "f" -> update {view with presentation=(if view.presentation=Addons.Flow then Addons.Summary else Addons.Flow);document_key=None;scroll=0}
                      | "a" ->
                          if view.loading || Option.is_some (Addons.pending_action view)
@@ -20177,12 +20230,17 @@ and is loaded on demand through keeper_skill.
                           | Some instance when Addons.can_observe instance -> selected (fun id -> Addons.Observe id)
                           | Some _ | None -> update {view with error=lane_addons_input_failure "Select an active worker to observe; D shows retained state."})
                      | "d" -> selected (fun id -> Addons.Detach id)
-                     | "1" -> update {view with focus=Addons.Timeline;scroll=0}
-                     | "2" -> update {view with focus=Addons.Connections;scroll=0}
-                     | "3" -> update {view with focus=Addons.Configurations;scroll=0}
-                     | "4" -> update {view with focus=Addons.Instances;scroll=0}
-                     | "5" -> update {view with focus=Addons.Rows;scroll=0}
-                     | "\t" | "tab" -> update { view with scroll=0;focus = (match view.focus with Addons.Timeline -> Addons.Connections | Addons.Connections -> Addons.Configurations | Addons.Configurations -> Addons.Instances | Addons.Instances -> Addons.Rows | Addons.Rows -> Addons.Timeline) }
+                     | "1" when view.screen<>Addons.Overview -> update {view with focus=Addons.Timeline;scroll=0}
+                     | "2" when view.screen<>Addons.Overview -> update {view with focus=Addons.Connections;scroll=0}
+                     | "3" when view.screen<>Addons.Overview -> update {view with focus=Addons.Configurations;scroll=0}
+                     | "4" when view.screen<>Addons.Overview -> update {view with focus=Addons.Rows;scroll=0}
+                     | "5" when view.screen<>Addons.Overview -> update {view with focus=Addons.Rows;scroll=0}
+                     | "\t" | "tab" when view.screen<>Addons.Overview ->
+                         update {view with scroll=0;focus = (match view.focus with
+                           | Addons.Timeline | Addons.Instances -> Addons.Connections
+                           | Addons.Connections -> Addons.Configurations
+                           | Addons.Configurations -> Addons.Rows
+                           | Addons.Rows -> Addons.Timeline) }
                      | "J" | "K" ->
                          let _, cols = get_terminal_size () in
                          let width = framed_inner_width cols in
@@ -20193,14 +20251,19 @@ and is loaded on demand through keeper_skill.
                          update (Addons.move_lane view delta)
                      | "j" | "down" | "k" | "up" ->
                          let delta = if key = "j" || key = "down" then 1 else -1 in
-                         (match view.snapshot, view.focus with
-                          | Some snapshot, Addons.Configurations ->
-                              let size = Option.fold ~none:0 ~some:(fun (c : Addons.configuration) -> List.length c.declarations) snapshot.configuration in
-                              update {view with configuration_cursor=max 0 (min (size - 1) (view.configuration_cursor + delta))}
-                          | Some snapshot, (Addons.Instances | Addons.Connections) -> update { view with instance_cursor = max 0 (min (List.length snapshot.instances - 1) (view.instance_cursor + delta)) }
-                          | Some snapshot, Addons.Rows -> update { view with row_cursor = max 0 (min (List.length snapshot.output.rows - 1) (view.row_cursor + delta)) }
-                          | Some _, Addons.Timeline -> update (Addons.move_observation view delta)
-                          | None, _ -> ())
+                         (match view.snapshot, view.screen, view.focus with
+                          | Some snapshot, Addons.Overview, Addons.Configurations ->
+                              (match snapshot.configuration with
+                               | None -> ()
+                               | Some configuration -> update {view with configuration_cursor=max 0
+                                   (min (List.length configuration.declarations - 1) (view.configuration_cursor + delta))})
+                          | Some snapshot, Addons.Overview, _ ->
+                              update {view with instance_cursor=max 0 (min (Addons.overview_count snapshot - 1) (view.instance_cursor + delta))}
+                          | Some _, Addons.Detail _, (Addons.Configurations | Addons.Instances | Addons.Connections) -> ()
+                          | Some _, Addons.Detail _, Addons.Rows ->
+                              update (Addons.move_record view delta)
+                          | Some _, Addons.Detail _, Addons.Timeline -> update (Addons.move_observation view delta)
+                          | None, _, _ -> ())
                      | " " ->
                          (match Addons.selected_row view with None -> () | Some row ->
                            update { view with selected = if List.mem row.id view.selected then List.filter ((<>) row.id) view.selected else row.id :: view.selected })
@@ -21366,6 +21429,8 @@ and is loaded on demand through keeper_skill.
                      hide_browser_lane state
                  | Some (_, Masc_tui_types.Palette_msx) ->
                      open_msx_screen state ~mailbox:async_messages
+                 | Some (_, Masc_tui_types.Palette_dos) ->
+                     open_dos_screen state ~mailbox:async_messages
                  | Some (_, Masc_tui_types.Palette_lane_addons) ->
                      launch_lane_addons state ~mailbox:async_messages
                        Masc_tui_lane_addons.Inspect
@@ -22690,6 +22755,10 @@ and is loaded on demand through keeper_skill.
              Masc_tui_types.next_memory_overview_sort state.memory_overview_sort;
            state.memory_health_cursor <- 0;
            state.memory_health_scroll <- 0
+       | Some ("d" | "D")
+         when state.view = Memory
+              && Option.is_none state.memory_facts_keeper ->
+           state.memory_overview_detail <- not state.memory_overview_detail
        | Some ("a" | "A") when state.view = Memory ->
            open_all_fleet_memory state ~mailbox:async_messages
        (* Resources and Tools hang off Config the way Connectors hangs off

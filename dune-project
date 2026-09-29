@@ -3,7 +3,7 @@
 (using menhir 3.0)
 
 (name masc)
-(version 0.47.0)
+(version 0.48.0)
 
 ; Local-sandbox-only: vendor/ocaml-msx carries a copy of the pinned
 ; ocaml-msx package so sandboxes whose opam switch lacks the pin can still
@@ -72,6 +72,7 @@
   ; Standard dependencies
   (re (>= 1.10))
   (ptime (>= 1.2))
+  (qrc (= 0.2.0))
   ; Upper bound, not just a floor. yojson 3.0 landed through a floor-only
   ; constraint on a cache miss and broke every build on main (#28327); the
   ; repair raised the floor and left 3 -> 4 open (#28543). --locked pins the
@@ -129,9 +130,6 @@
   (cstruct (>= 6.0))
   (digestif (>= 1.1))
   (eqaf (>= 0.10))
-  ; /play invite draws a QR of the invite link in the TUI; pure OCaml, no C
-  ; bindings.
-  (qrc (>= 0.2.0))
   optint
   (ocaml-protoc-plugin (>= 4.0))
   (pbrt (and (>= 3.0) (< 4.0)))

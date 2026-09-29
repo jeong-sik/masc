@@ -6,6 +6,7 @@ type t =
     }
   | Task_missing_title
   | Help
+  | Show_load_errors
   | About
   | Lane_addons of string
   | Play_invites
@@ -220,6 +221,11 @@ let catalog =
     ; summary = "list prompt presets; show what one holds; save the live state; restore one \
          (autosaves first)"
     }
+  ; { word = "errors"
+    ; aliases = []
+    ; args = ""
+    ; summary = "read current history and memory loading errors in full"
+    }
   ; { word = "help"
     ; aliases = []
     ; args = ""
@@ -335,6 +341,7 @@ let parse text =
     match split_word line with
     | "task", "" -> Task_missing_title
     | "task", title -> Task_for_keeper { title; body }
+    | "errors", "" -> Show_load_errors
     | "help", _ -> Help
     | "about", _ | "splash", _ -> About
     | "addons", arg -> Lane_addons arg

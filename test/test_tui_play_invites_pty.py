@@ -14,6 +14,7 @@ SOURCE_MODULES = (
     "bin/masc_tui_render.ml",
     "bin/masc_tui_types.ml",
     "lib/tui_decode.ml",
+    "bin/masc_tui_play_qr.ml",
 )
 
 LINK = "https://play.example.test/play#fixture-secret"
@@ -104,6 +105,8 @@ def run(executable: str) -> None:
             "/api/v1/play/invites/guest1": h.MethodHttpResponse(revoke),
         },
         http_requests=requests,
+        terminal_cols=180,
+        terminal_rows=70,
     )
     print("tui play invites: PASS")
 

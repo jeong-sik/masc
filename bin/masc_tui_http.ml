@@ -1798,14 +1798,19 @@ let set_runtime_lane_slots ~(host : string) ~(port : int) ~(lane : string)
     | Some (`String text) -> Ok text
     | _ -> Error "runtime config read did not supply source text" in
   let* config = Runtime_toml.parse_string source_text
-    |> Result.map_error (fun _ -> "runtime config read could not be parsed") in
+    |> Result.map_error (function
+      | [] -> "runtime.toml could not be parsed"
+      | (first : Runtime_toml.parse_error) :: _ ->
+        Printf.sprintf "runtime.toml parse error at %s: %s"
+          first.path first.message
+        |> Masc.Tui_decode.sanitize_terminal_text) in
   let* current = match List.find_opt
       (fun (decl : Runtime_schema.lane_decl) -> String.equal decl.id lane)
       config.Runtime_schema.lane_decls with
     | Some decl -> Ok decl.Runtime_schema.candidate_ids
     | None -> Error ("runtime lane " ^ lane ^ " is no longer present") in
-  if current <> expected_runtime_ids then
-    Error ("runtime lane " ^ lane ^ " changed since this view was read; refresh before editing")
+  if not (List.equal String.equal current expected_runtime_ids) then
+    Error ("runtime lane " ^ lane ^ " differs from the displayed order; refresh before editing")
   else
     let body = Yojson.Safe.to_string (`Assoc
       [ "lane", `String lane

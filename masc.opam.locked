@@ -165,9 +165,9 @@ depends: [
   "prettym" {= "0.0.5"}
   "psq" {= "0.2.1"}
   "ptime" {= "1.2.0"}
+  "qrc" {= "0.2.0"}
   "qcheck-alcotest" {= "0.91" & with-test}
   "qcheck-core" {= "0.91" & with-test}
-  "qrc" {= "0.2.0"}
   "re" {= "1.14.0"}
   "rresult" {= "0.7.0"}
   "sedlex" {= "3.7"}
@@ -242,11 +242,11 @@ pin-depends: [
   ]
   [
     "ocaml-dos.dev"
-    "git+https://github.com/jeong-sik/ocaml-dos.git#d9e2cba992292a8aa405d0f1034d5d027946236a"
+    "git+https://github.com/jeong-sik/ocaml-dos.git#1d51834e0cdfc36c05b6afb38127d2c4534c4b0e"
   ]
   [
     "ocaml-msx.dev"
-    "git+https://github.com/jeong-sik/ocaml-msx.git#3143a555f803f728ae35fddd7d93a146bb6602b0"
+    "git+https://github.com/jeong-sik/ocaml-msx.git#052f50b4bc57b54632dbd19b33a9acb64ef73072"
   ]
   [
     "ocaml-protoc-plugin.6.2.0"

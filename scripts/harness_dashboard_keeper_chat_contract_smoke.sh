@@ -209,8 +209,8 @@ fi
 SERVER_PID=$!
 log "server_pid=$SERVER_PID log=$SERVER_LOG"
 
-if ! wait_for_http "http://${HOST}:${PORT}/health" "$SERVER_WAIT_SEC"; then
-  echo "MASC server did not become healthy. See $SERVER_LOG" >&2
+if ! wait_for_http "http://${HOST}:${PORT}/health/ready" "$SERVER_WAIT_SEC"; then
+  echo "MASC server did not become ready. See $SERVER_LOG" >&2
   exit 1
 fi
 

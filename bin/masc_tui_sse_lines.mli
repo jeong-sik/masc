@@ -3,9 +3,10 @@
 
     A line ends at ['\n'] and is returned without it; a ['\r'] before the
     newline stays in the line. Bytes after a chunk's last newline are held
-    until a later chunk ends their line. Each chunk is scanned once and each
-    line is copied once, so a line that arrives over many chunks costs its own
-    length rather than its length times the number of chunks. *)
+    until a later chunk ends their line. Each chunk is scanned once, and the
+    bytes of a held line are copied into the reader and out again when it
+    ends, so the cost of a line grows with its own length. Each reader holds
+    its own unfinished line. *)
 
 type t
 

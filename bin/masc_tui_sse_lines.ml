@@ -1,8 +1,10 @@
 (* See .mli. *)
 
-(* [held] is the start of a line an earlier chunk did not end. Its capacity
-   stays at the longest line seen, so a stream that repeats a large line does
-   not grow the buffer again for each one. *)
+(* [held] is the start of a line an earlier chunk did not end. A line that
+   ends inside the chunk it started in never enters it. Its capacity stays at
+   least as large as the longest line that crossed a chunk boundary, so a
+   stream that repeats such a line does not grow the buffer again for each
+   one. *)
 type t = { held : Buffer.t }
 
 let create () = { held = Buffer.create 4096 }

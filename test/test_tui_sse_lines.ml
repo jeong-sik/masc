@@ -29,6 +29,26 @@ let test_empty_lines_and_carriage_returns_are_kept () =
     (Masc_tui_sse_lines.feed reader "a\n\nb\r\n\r\n")
 ;;
 
+(* A socket read may return no bytes. An empty chunk ends nothing, and the
+   line held before it continues with the next chunk. *)
+let test_an_empty_chunk_keeps_the_held_line_open () =
+  let reader = Masc_tui_sse_lines.create () in
+  Alcotest.check lines "the start is held" [] (Masc_tui_sse_lines.feed reader "ab");
+  Alcotest.check lines "an empty chunk ends nothing" [] (Masc_tui_sse_lines.feed reader "");
+  Alcotest.check lines "the line continues" [ "abc" ] (Masc_tui_sse_lines.feed reader "c\n")
+;;
+
+(* The TUI reads several streams at once, one reader each. A line one reader
+   holds is not part of another's. *)
+let test_two_readers_hold_their_own_lines () =
+  let observer = Masc_tui_sse_lines.create () in
+  let chat = Masc_tui_sse_lines.create () in
+  Alcotest.check lines "the observer holds its start" [] (Masc_tui_sse_lines.feed observer "da");
+  Alcotest.check lines "the chat holds its start" [] (Masc_tui_sse_lines.feed chat "id");
+  Alcotest.check lines "the observer's line" [ "data" ] (Masc_tui_sse_lines.feed observer "ta\n");
+  Alcotest.check lines "the chat's line" [ "id: 7" ] (Masc_tui_sse_lines.feed chat ": 7\n")
+;;
+
 (* Every way of cutting [text] into chunks: [cuts] is a bit mask over the
    positions between bytes. *)
 let chunkings text =
@@ -95,6 +115,10 @@ let () =
             test_lines_in_one_chunk_keep_their_order_and_the_tail_waits
         ; Alcotest.test_case "empty lines and carriage returns are kept" `Quick
             test_empty_lines_and_carriage_returns_are_kept
+        ; Alcotest.test_case "an empty chunk keeps the held line open" `Quick
+            test_an_empty_chunk_keeps_the_held_line_open
+        ; Alcotest.test_case "two readers hold their own lines" `Quick
+            test_two_readers_hold_their_own_lines
         ; Alcotest.test_case "any chunking gives the same lines" `Quick
             test_any_chunking_gives_the_same_lines
         ; Alcotest.test_case "a long line in small pieces comes back once" `Quick

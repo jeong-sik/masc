@@ -23,8 +23,7 @@ in from time to time.
 Inspired by Bullfrog’s *Dungeon Keeper*, MASC aims to capture the fun of giving
 work to a varied cast of characters and watching unexpected things unfold.
 
-Follow their progress in the terminal UI or a browser, and connect other agents
-through MCP.
+Follow their progress in the terminal UI, and connect other agents through MCP.
 
 > **Pre-1.0.** Built for local, trusted workspaces. APIs and configuration can
 > change. See [Limits](#limits) before running unattended or exposing a server.
@@ -55,6 +54,8 @@ Binary releases target macOS (Apple Silicon and Intel) and Linux (x86_64 and
 ARM64). You do not need an OCaml or Node.js toolchain for a binary install.
 Check the [platform requirements](docs/INSTALL.md#platforms-and-prerequisites)
 and [available release assets](https://github.com/jeong-sik/masc/releases).
+Model access is separate: bring a supported CLI login, an API credential, or a
+reachable local model server. For the default Keeper sandbox, install Docker.
 
 > Installation target: v0.48.0 (check tag availability on GitHub Releases).
 
@@ -81,12 +82,14 @@ sandbox; setup offers help with missing sandbox prerequisites.
 If setup did not open after installation, run:
 
 ```bash
-"$HOME/.local/bin/masc" setup --base-path "$HOME/masc-workspace"
+"$HOME/.local/bin/masc" setup
 ```
 
-Use your chosen install directory if you changed the prefix. Setup prepares the
-sandbox, starts the workspace server and `imp`, and opens the TUI. Try a small,
-observable request:
+Use your chosen install directory if you changed the prefix. Setup uses the
+resolved workspace; the installer records your selected workspace as the default.
+To select it explicitly, add `--base-path /path/to/your/workspace`. Use the same
+directory you chose during installation. Setup prepares the sandbox, starts the
+workspace server and `imp`, and opens the TUI. Try a small, observable request:
 
 > Introduce yourself, list your sandbox directory, and create a Board post
 > describing one task we could work on together.
@@ -96,15 +99,17 @@ The [first-conversation guide](docs/INSTALL.md#first-conversation-with-imp)
 walks through Tasks and web access too. On macOS, you can also
 [talk to imp by voice](docs/INSTALL.md#talking-to-imp-by-voice-macos).
 
-For upgrades, model-check errors, sandbox choices and uninstalling, use the
-[installation guide](docs/INSTALL.md).
+If setup stops, run `masc doctor` for a readiness report on the same workspace.
+If a Keeper is waiting for your answer or approval, check the TUI
+[approval queue](docs/TUI-GUIDE.md#approvals). For upgrades, model-check errors,
+sandbox choices and uninstalling, use the [installation guide](docs/INSTALL.md).
 
 <details>
 <summary>Building from source</summary>
 
 ### From source
 
-Install Git, opam, a native C toolchain, Node.js 22, Corepack and the native
+Install Git, opam, a native C toolchain, Python 3, Node.js 22, Corepack and the native
 libraries first:
 
 - Debian/Ubuntu: `pkg-config m4 libgmp-dev libssl-dev libzstd-dev
@@ -160,7 +165,8 @@ processes those workspaces started; the extension reconnects to the new copy.
 `./quickstart.sh` seeds a workspace under `~/masc-quickstart`, starts the
 server, and writes an MCP bearer to `.masc/config/mcp-client.env`. It starts
 no Keeper and needs no provider key. `--team classic` seeds a Keeper preset
-and then needs `OLLAMA_CLOUD_API_KEY` in the shell.
+that uses the configured default runtime and needs that runtime’s credentials.
+The fresh quickstart configuration uses `OLLAMA_CLOUD_API_KEY`.
 
 
 </details>
@@ -176,10 +182,14 @@ and then needs `OLLAMA_CLOUD_API_KEY` in the shell.
 | **Memory** | Keeper context and stored knowledge that you can inspect while following its work |
 | **Gate** | An approval workflow for specific actions, with model judgement or a person's decision |
 
-A typical collaboration starts with a request to a Keeper. Work is recorded as
-Tasks, Keepers claim their parts, and discussion stays on the Board. A finished
-Task is submitted with evidence for verification. A Goal has its own completion
-check and final human confirmation. Claims record ownership; they do not lock files.
+Start with a concrete outcome: what should exist when the work is finished, and
+how it can be checked. Ask a Keeper to record it as a Goal with a metric and
+target, and break the work into Tasks. Follow the Goal and its linked Tasks in
+**Work**, conversations in **Keepers**, and shared discussion on the **Board**.
+
+A finished Task is submitted with evidence for verification. A Goal has its own
+completion check and final human confirmation; completed Tasks alone do not
+prove it. Claims record ownership; they do not lock files.
 
 ## Terminal UI
 
@@ -215,16 +225,23 @@ voice controls and troubleshooting.
 
 ## MCP client setup
 
-Connect an existing agent to the same workspace. With the server running,
-generate an authenticated configuration for your client:
+Connect an existing agent to the same workspace. Generate the configuration
+for the client you use; give different clients different agent identities:
 
 ```bash
-masc mcp-config --base-path "$HOME/masc-workspace" --client codex
-masc mcp-config --base-path "$HOME/masc-workspace" --client claude-desktop
+masc mcp-config --agent codex-client --client codex
+masc mcp-config --agent claude-desktop-client --client claude-desktop
 ```
 
-Each command mints a bearer and prints the client configuration. The default
-endpoint is `http://127.0.0.1:8935/mcp`; a URL without authentication gets `401`.
+The command writes a bearer locally and prints configuration; it does not edit
+your client’s settings. Copy the printed configuration into that client. For
+Codex, also run the printed token export in the shell that launches it.
+Rerunning with the same `--agent` replaces that identity’s previous token.
+
+Use `--base-path /path/to/your/workspace` if you need to select another workspace.
+Token creation does not need a running server, but the client connection does.
+The default endpoint is `http://127.0.0.1:8935/mcp`; use `--port` when your server
+uses another port. A URL without authentication gets `401`.
 An MCP client can join, claim Tasks, post to the Board and submit evidence.
 Use the tool inventory returned by your session as the authoritative list.
 
@@ -244,16 +261,34 @@ One Keeper's instructions and operational settings live in
 sandbox before you start it. Additional Keepers can have their own roles,
 Board interests, schedules and model assignments.
 
+To grow the team, use `masc keeper-create --help` for the creation options.
+Give each Keeper a concrete role in `instructions`, choose its sandbox and
+network access, and assign a model or lane in `runtime.toml`. Creating a Keeper
+starts it immediately; using an existing name reconfigures that Keeper.
+`manual` activation requires an explicit start, while `autonomous` enables
+periodic turns. Board mentions use `mention_targets`; `board_interests` routes
+unaddressed posts for relevance judgement. An empty interest list still allows
+explicit mentions and replies in threads the Keeper has joined.
+
 | Location under `<base-path>/.masc/` | Purpose |
 |---|---|
 | `config/runtime.toml` | Providers, model assignments, runtime lanes and TUI settings |
 | `config/keepers/<name>.toml` | Keeper instructions, activation, sandbox and tool settings |
-| `config/sandbox-images.toml` | Named sandbox images and their promoted builds |
+| `config/sandbox-image-builds.toml` | Promoted sandbox builds on this host, managed by `masc sandbox-image` |
 | `config/repositories.toml` | Repositories shown in Workspace |
 | `skills/<name>/SKILL.md` | Procedures a Keeper can use by name |
 
+These are the default locations. `MASC_CONFIG_DIR` can select another root for
+runtime and Keeper configuration. Image names are shipped with the binary;
+the host build file records which local build each name uses.
+
 Keepers execute in Docker, a supported microVM backend or a configured remote
 SSH endpoint. Network access is explicit: `none`, `inherit` or `policy`.
+The shipped `imp` defaults to Docker, image `base`, and `network_mode = "inherit"`;
+setup can select another sandbox backend.
+New sandbox workspaces start empty: a repository listed in the TUI is not
+automatically mounted into a Keeper’s sandbox. See the
+[Keeper playground](docs/KEEPER-USER-MANUAL.md#the-work-surface-playground).
 Approval queues can require your response before work continues.
 The [Keeper manual](docs/KEEPER-USER-MANUAL.md) and
 [file contract](docs/KEEPER-FILE-MODEL.md) explain these settings.
@@ -280,18 +315,14 @@ Use MASC's tools to change tasks, records and approval state.
 | `masc doctor --base-path <dir>` | Check workspace and `imp` readiness without starting them |
 | `masc --help` | List commands; use `<command> --help` for details |
 
-The TUI can start a server when nothing answers the port. It stops the child
-server it started when it exits; it leaves an already running server alone.
-
-## Dashboard
-
-Open `/dashboard/` on the workspace server for browser access to the same state.
-The release installer includes the matching TypeScript/Preact bundle. Operator
-features are developed in the TUI first. See the [dashboard guide](docs/DASHBOARD-INTEGRATION.md)
-and [access setup](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md).
+The TUI starts a background server when nothing answers the port. Closing the
+TUI leaves the server running, so Keepers can continue working. To pause a
+Keeper, use its lifecycle controls in the Keepers view before closing the UI.
 
 ## Limits
 
+- **The browser dashboard is experimental and incomplete.** Use the TUI for
+  day-to-day operation; some TUI features are unavailable in the browser.
 - **Local and trusted.** Gate approvals and sandboxes constrain specific actions;
   they do not make unattended operation safe in every situation. Loopback defaults
   are not a remote deployment policy.

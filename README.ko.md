@@ -22,7 +22,7 @@ MASC(**Multi-Agent Shared Context**)는 각자의 역할과 개성을 가진 에
 Bullfrog의 *Dungeon Keeper*처럼, 서로 다른 구성원들에게 일을 맡기고 예상하지
 못한 전개를 지켜보는 재미를 담고 싶었습니다.
 
-터미널 UI나 브라우저에서 진행 상황을 살펴보고, MCP로 다른 에이전트를 연결할 수 있습니다.
+터미널 UI에서 진행 상황을 살펴보고, MCP로 다른 에이전트를 연결할 수 있습니다.
 
 > **1.0 이전 버전입니다.** 신뢰할 수 있는 로컬 작업 공간을 전제로 개발하고 있으며,
 > API와 설정은 바뀔 수 있습니다. 무인 실행이나 서버 공개 전에는 [한계](#한계)를
@@ -51,6 +51,8 @@ Bullfrog의 *Dungeon Keeper*처럼, 서로 다른 구성원들에게 일을 맡�
 합니다. 바이너리를 설치할 때는 OCaml이나 Node.js 개발 도구가 필요하지 않습니다.
 [플랫폼 요구사항](docs/INSTALL.md#platforms-and-prerequisites)과
 [배포된 파일](https://github.com/jeong-sik/masc/releases)을 확인하세요.
+모델 연결은 별도로 준비합니다. 지원하는 CLI 로그인, API 인증 정보 또는 접속 가능한
+로컬 모델 서버가 필요합니다. 기본 Keeper 샌드박스에는 Docker를 설치하세요.
 
 > Installation target: v0.48.0 (check tag availability on GitHub Releases).
 
@@ -76,12 +78,14 @@ PATH 추가 안내를 수락하거나 셸의 PATH에 직접 넣으세요. 스크
 설치 뒤 설정 화면이 열리지 않았다면 다음을 실행하세요.
 
 ```bash
-"$HOME/.local/bin/masc" setup --base-path "$HOME/masc-workspace"
+"$HOME/.local/bin/masc" setup
 ```
 
-설치 경로를 바꿨다면 그 경로를 사용하세요. 설정을 마치면 샌드박스를 준비하고 작업
-공간 서버와 첫 Keeper인 `imp`를 시작한 뒤 TUI를 엽니다. 결과를 바로 확인할 수 있는
-작은 부탁부터 해 보세요.
+설치 경로를 바꿨다면 그 경로를 사용하세요. setup은 해석된 작업 공간을 사용하며,
+설치 스크립트는 선택한 작업 공간을 기본값으로 기록합니다. 명시적으로 고르려면
+`--base-path /path/to/your/workspace`에 설치 때 선택한 디렉터리를 지정하세요.
+설정을 마치면 샌드박스를 준비하고 작업 공간 서버와 첫 Keeper인 `imp`를 시작한 뒤
+TUI를 엽니다. 결과를 바로 확인할 수 있는 작은 부탁부터 해 보세요.
 
 > 자기소개하고, 네 샌드박스 디렉터리를 보여 줘.
 > 함께 할 만한 작업 하나를 Board에 글로 올려 줘.
@@ -90,14 +94,17 @@ Keeper 대화에서 답변과 도구 결과를 읽고, Board에서 글을 찾아
 [첫 대화 가이드](docs/INSTALL.md#first-conversation-with-imp)에는 Task와 웹 접근을
 확인하는 순서도 있습니다. macOS에서는 [음성으로 imp와 대화](docs/INSTALL.md#talking-to-imp-by-voice-macos)할 수도 있습니다.
 
-업그레이드, 모델 검사 오류, 샌드박스 선택과 삭제 방법은 [설치 가이드](docs/INSTALL.ko.md)를 참고하세요.
+설정 도중 멈추면 같은 작업 공간에서 `masc doctor`로 준비 상태를 확인하세요.
+Keeper가 답변이나 승인을 기다리고 있다면 TUI의 [승인 대기열](docs/TUI-GUIDE.md#approvals)을
+확인하세요. 업그레이드, 모델 검사 오류, 샌드박스 선택과 삭제 방법은
+[설치 가이드](docs/INSTALL.ko.md)를 참고하세요.
 
 <details>
 <summary>소스에서 빌드하기</summary>
 
 ### 소스에서
 
-Git, opam, C 개발 도구, Node.js 22, Corepack과 native 라이브러리를 먼저 설치합니다.
+Git, opam, C 개발 도구, Python 3, Node.js 22, Corepack과 native 라이브러리를 먼저 설치합니다.
 
 - Debian/Ubuntu: `pkg-config m4 libgmp-dev libssl-dev libzstd-dev
   libsqlite3-dev libpq-dev libev-dev libffi-dev zlib1g-dev libncurses-dev
@@ -148,8 +155,9 @@ Firefox browser-lane host도 새 빌드로 다시 설치하고, 그 작업 공�
 
 `./quickstart.sh`는 `~/masc-quickstart` 아래에 작업 공간을 만들고, 서버를
 띄우고, MCP bearer를 `.masc/config/mcp-client.env`에 씁니다. Keeper는 띄우지
-않고 프로바이더 키도 필요 없습니다. `--team classic`을 주면 Keeper 프리셋을
-만들고, 그때는 셸에 `OLLAMA_CLOUD_API_KEY`가 있어야 합니다.
+않고 프로바이더 키도 필요 없습니다. `--team classic`으로 만드는 Keeper 프리셋은
+설정된 기본 런타임을 사용하므로 해당 런타임의 인증 정보가 필요합니다.
+새 quickstart 기본 설정은 `OLLAMA_CLOUD_API_KEY`를 사용합니다.
 
 
 </details>
@@ -165,9 +173,13 @@ Firefox browser-lane host도 새 빌드로 다시 설치하고, 그 작업 공�
 | **Memory** | 작업을 따라가며 살펴볼 수 있는 Keeper의 맥락과 저장된 지식 |
 | **Gate** | 특정 행동을 모델의 판단이나 사람의 결정에 맡기는 승인 흐름 |
 
-보통 Keeper에게 부탁하는 것으로 협업을 시작합니다. 할 일을 Task로 기록하고,
-Keeper들이 자기 몫을 맡고, Board에 논의를 남깁니다. 작업을 마치면 증거와 함께
-검증에 제출합니다. Goal에는 별도의 완료 검증과 사람의 최종 확인이 있습니다.
+무엇이 완성되어야 하는지, 어떻게 확인할 수 있는지부터 정해 보세요. Keeper에게
+측정 지표와 목표값을 가진 Goal로 기록하고, 할 일을 Task로 나누도록 요청합니다.
+**Work**에서 Goal과 연결된 Task를, **Keepers**에서 대화를, **Board**에서 공동 논의를
+살펴볼 수 있습니다.
+
+작업을 마치면 증거와 함께 검증에 제출합니다. Goal에는 별도의 완료 검증과 사람의
+최종 확인이 있으며, Task가 끝났다는 사실만으로 Goal을 달성했다고 보지는 않습니다.
 작업을 맡는 claim은 담당을 기록하며 파일을 잠그지는 않습니다.
 
 ## 터미널 UI
@@ -202,16 +214,23 @@ Keeper들이 자기 몫을 맡고, Board에 논의를 남깁니다. 작업을 �
 
 ## MCP 클라이언트 연결
 
-이미 쓰는 에이전트를 같은 작업 공간에 연결할 수 있습니다. 서버가 실행 중일 때
-클라이언트용 인증 설정을 만드세요.
+이미 쓰는 에이전트를 같은 작업 공간에 연결할 수 있습니다. 사용하는 클라이언트의
+설정을 만들되, 서로 다른 클라이언트에는 다른 에이전트 이름을 지정하세요.
 
 ```bash
-masc mcp-config --base-path "$HOME/masc-workspace" --client codex
-masc mcp-config --base-path "$HOME/masc-workspace" --client claude-desktop
+masc mcp-config --agent codex-client --client codex
+masc mcp-config --agent claude-desktop-client --client claude-desktop
 ```
 
-각 명령은 bearer를 발급하고 클라이언트 설정을 출력합니다. 기본 접속 주소는
-`http://127.0.0.1:8935/mcp`이며 인증 없이 URL만 연결하면 `401`을 받습니다.
+명령은 로컬에 bearer를 저장하고 설정을 출력하며, 클라이언트 설정 파일을 직접
+수정하지는 않습니다. 출력된 설정을 클라이언트에 복사하세요. Codex는 클라이언트를
+시작할 셸에서 출력된 토큰 export도 실행해야 합니다. 같은 `--agent`로 다시 실행하면
+그 이름의 이전 토큰이 교체됩니다.
+
+다른 작업 공간을 선택하려면 `--base-path /path/to/your/workspace`를 지정하세요.
+토큰 생성에는 실행 중인 서버가 필요 없지만, 클라이언트 연결에는 필요합니다.
+기본 접속 주소는 `http://127.0.0.1:8935/mcp`입니다. 서버가 다른 포트를 사용한다면
+`--port`를 지정하세요. 인증 없이 URL만 연결하면 `401`을 받습니다.
 MCP 클라이언트도 들어와 Task를 맡고 Board에 글을 쓰고 증거를 제출할 수 있습니다.
 실제 사용 가능한 도구 목록은 연결한 세션이 반환하는 목록을 기준으로 보세요.
 
@@ -230,16 +249,31 @@ Keeper 하나의 지침과 운영 설정은 `.masc/config/keepers/<name>.toml`�
 활성화 상태이며, 모델과 샌드박스를 설정한 뒤 시작합니다. Keeper를 더 만들면
 각자 역할, Board 관심사, 일정과 모델 연결을 가질 수 있습니다.
 
+팀을 늘리려면 `masc keeper-create --help`에서 생성 옵션을 확인하세요.
+`instructions`에 구체적인 역할을 적고, 샌드박스와 네트워크 접근을 선택하고,
+`runtime.toml`에서 모델이나 레인을 연결합니다. 생성하면 바로 시작하며, 이미 있는
+이름을 지정하면 해당 Keeper의 설정을 바꿉니다. `manual`은 명시적으로 시작하고,
+`autonomous`는 주기적으로 턴을 돕니다. Board의 직접 멘션은 `mention_targets`로,
+수신자가 지정되지 않은 글의 관련성 판단은 `board_interests`로 설정합니다. 관심사
+목록이 비어 있어도 직접 멘션과 이미 참여한 대화의 답글은 받을 수 있습니다.
+
 | `<base-path>/.masc/` 아래 위치 | 용도 |
 |---|---|
 | `config/runtime.toml` | 제공자, 모델 연결, 실행 레인과 TUI 설정 |
 | `config/keepers/<name>.toml` | Keeper 지침, 활성화, 샌드박스와 도구 설정 |
-| `config/sandbox-images.toml` | 이름별 샌드박스 이미지와 사용할 빌드 |
+| `config/sandbox-image-builds.toml` | 이 호스트에서 사용할 샌드박스 빌드. `masc sandbox-image`로 관리 |
 | `config/repositories.toml` | Workspace에 표시할 저장소 |
 | `skills/<name>/SKILL.md` | Keeper가 이름으로 사용할 수 있는 절차 |
 
+표는 기본 위치이며, `MASC_CONFIG_DIR`로 런타임과 Keeper 설정의 루트를 바꿀 수 있습니다.
+이미지 이름은 바이너리에 포함되고, 호스트 빌드 파일은 각 이름으로 사용할 로컬 빌드를 기록합니다.
+
 Keeper는 Docker, 지원되는 microVM 백엔드 또는 설정된 원격 SSH 환경에서 실행됩니다.
 네트워크는 `none`, `inherit`, `policy` 중에서 명시적으로 설정합니다.
+배포되는 `imp`의 기본값은 Docker, 이미지 `base`, `network_mode = "inherit"`입니다.
+설정 과정에서 다른 샌드박스 백엔드를 선택할 수 있습니다.
+새 샌드박스의 작업 공간은 비어 있습니다. TUI에 등록한 저장소가 Keeper의 샌드박스에
+자동으로 마운트되지는 않습니다. [Keeper 작업 디렉터리](docs/KEEPER-USER-MANUAL.md#the-work-surface-playground)를 참고하세요.
 승인 대기열에서 사람의 답을 기다리는 동안 작업이 진행되지 않을 수 있습니다.
 [Keeper 매뉴얼](docs/KEEPER-USER-MANUAL.md)과 [파일 계약](docs/KEEPER-FILE-MODEL.md)에
 설정 방법이 있습니다.
@@ -266,18 +300,14 @@ curl -fsS 'http://127.0.0.1:8935/health?full=1' \
 | `masc doctor --base-path <dir>` | 실행하지 않고 작업 공간과 `imp` 준비 상태 확인 |
 | `masc --help` | 명령 목록. 자세한 옵션은 `<command> --help` |
 
-포트에 응답하는 서버가 없으면 TUI가 서버를 시작할 수 있습니다. TUI가 시작한 자식
-서버는 TUI 종료 시 함께 멈춥니다. 이미 실행 중이던 서버는 그대로 둡니다.
-
-## 대시보드
-
-작업 공간 서버의 `/dashboard/`를 열면 같은 상태를 브라우저에서 볼 수 있습니다.
-릴리스 설치 스크립트에 같은 버전의 TypeScript/Preact 번들이 포함됩니다.
-운영자용 기능은 TUI에 먼저 개발합니다. [대시보드 가이드](docs/DASHBOARD-INTEGRATION.md)와
-[접근 설정](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md)을 참고하세요.
+포트에 응답하는 서버가 없으면 TUI가 백그라운드 서버를 시작합니다. TUI를 닫아도
+서버는 계속 실행되므로 Keeper가 작업을 이어갈 수 있습니다. Keeper를 멈추려면
+UI를 닫기 전에 Keepers 화면의 실행 제어에서 일시 정지하세요.
 
 ## 한계
 
+- **브라우저 대시보드는 기능이 덜 갖춰진 실험적 화면입니다.** 일상적인 운영에는
+  TUI를 사용하세요. TUI의 일부 기능은 브라우저에서 사용할 수 없습니다.
 - **신뢰할 수 있는 로컬 환경이 전제입니다.** Gate와 샌드박스는 특정 행동을 제한합니다.
   모든 상황에서 무인 실행의 안전을 보장하지 않습니다. 루프백 기본값으로 원격 운영까지 보장하지 않습니다.
 - **동시 편집은 충돌할 수 있습니다.** 공유하는 담당 정보와 기록이 저장소 쓰기를

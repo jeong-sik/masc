@@ -798,6 +798,7 @@ let test_awaiting_view_without_a_readable_backlog_carries_the_reason () =
    reported unreadable. Writing the request replaces the file, and the next
    listing reads the new one. *)
 let test_an_unchanged_request_file_is_not_read_again () =
+  if Unix.geteuid () = 0 then Alcotest.skip ();
   with_temp_base_path (fun base_path ->
     let titled title =
       `Assoc
@@ -836,6 +837,30 @@ let test_an_unchanged_request_file_is_not_read_again () =
     ignore (create "second" : V.verification_request);
     Alcotest.(check (pair (list string) int)) "a written file is read again"
       ([ "second" ], 0) (listing ()))
+
+(* A row is built for every readable request, not only those on a page, so a
+   request whose row cannot be built -- a creation time [Unix.gmtime] cannot
+   represent -- is reported unreadable with the reason, and the listing and
+   the summary still answer for the requests beside it. *)
+let test_a_request_whose_row_cannot_be_built_is_reported_unreadable () =
+  with_temp_base_path (fun base_path ->
+    let shown =
+      create_pending_request ~base_path ~task_id:"task-shown" ~worker:"keeper-alpha"
+        ~criteria:[ "shown" ] ~evidence:[]
+    in
+    let far =
+      { shown with V.id = "vrf-far"; V.task_id = "task-far"; V.created_at = 1e18 }
+    in
+    Yojson.Safe.to_file
+      (Workspace_verification_store.request_path base_path far.V.id)
+      (V.request_to_yojson far);
+    let listing = D.requests_json ~base_path () in
+    Alcotest.(check (list string)) "the request beside it still lists"
+      [ shown.V.id ] (request_ids listing);
+    Alcotest.(check int) "the one without a row is unreadable" 1
+      (int_field "unreadable_total" listing);
+    Alcotest.(check int) "the summary still counts the other" 1
+      (int_field "total" (D.summary_json ~base_path ())))
 
 let test_offset_pages_the_history_without_overlap () =
   with_temp_base_path (fun base_path ->
@@ -1020,6 +1045,8 @@ let () =
         test_offset_pages_the_history_without_overlap;
       Alcotest.test_case "an unchanged request file is not read again" `Quick
         test_an_unchanged_request_file_is_not_read_again;
+      Alcotest.test_case "a request whose row cannot be built is unreadable" `Quick
+        test_a_request_whose_row_cannot_be_built_is_reported_unreadable;
     ];
     "queue_view", [
       Alcotest.test_case "awaiting tasks name the request they wait on" `Quick

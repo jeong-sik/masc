@@ -158,6 +158,27 @@ let verification_directory dir =
          dir
          (Printexc.to_string exn))
 
+(* A listing's projections, kept per file version. File_version_cache asks a
+   writer to drop the entry for the file it wrote, so every listing made here
+   is registered, and [save_request] and [delete_request] drop the path they
+   wrote from all of them. *)
+type 'a listing = 'a File_version_cache.t
+
+let listing_forgets : (string -> unit) list Atomic.t = Atomic.make []
+
+let listing () =
+  let cache = File_version_cache.create () in
+  let forget path = File_version_cache.forget cache path in
+  let rec register () =
+    let registered = Atomic.get listing_forgets in
+    if not (Atomic.compare_and_set listing_forgets registered (forget :: registered))
+    then register ()
+  in
+  register ();
+  cache
+
+let forget_listed path = List.iter (fun forget -> forget path) (Atomic.get listing_forgets)
+
 let save_request base_path req =
   try
     let json = request_to_yojson req in
@@ -166,6 +187,7 @@ let save_request base_path req =
     Fs_compat.mkdir_p dir;
     let path = request_path base_path req.id in
     let* () = Fs_compat.save_file_atomic path (Yojson.Safe.pretty_to_string json) in
+    forget_listed path;
     Ok req.id
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -184,6 +206,7 @@ let delete_request base_path req_id =
   try
     let path = request_path base_path req_id in
     if Sys.file_exists path then Sys.remove path;
+    forget_listed path;
     Ok ()
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -260,16 +283,16 @@ let scan_present_directory base_path ~load =
   | Ok Present_directory -> scan_directory base_path ~load
 
 (* Public entry: read the current directory and every current-schema request.
-   Content identity is not inferred from filesystem timestamps. *)
+   Every call reads every file. *)
 let list_requests base_path =
   scan_present_directory base_path ~load:(load_request base_path)
 
-(* [save_request] replaces a request file atomically, so a written file is a
-   new inode and never the version a projection was kept for. *)
-let list_projected cache ~project base_path =
+(* A request whose projection fails is reported unreadable with the reason, as
+   one the schema cannot read is; neither is kept. *)
+let list_projected listing ~project base_path =
   scan_present_directory base_path ~load:(fun id ->
-    File_version_cache.load cache (request_path base_path id) ~decode:(fun () ->
-      Result.map project (load_request base_path id)))
+    File_version_cache.load listing (request_path base_path id) ~decode:(fun () ->
+      Result.bind (load_request base_path id) project))
 
 (** High-level API *)
 

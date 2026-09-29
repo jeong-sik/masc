@@ -69,16 +69,28 @@ val list_requests : string -> (request_scan, string) result
     at read time, so the metric keeps meaning "this many records did not make
     it into the projection". *)
 
+type 'a listing
+(** The projections one reader keeps from the request files, each for the
+    version of the file (device, inode, size, modification time) it came from.
+    {!save_request} and {!delete_request} drop the entry for the file they
+    write from every listing. *)
+
+val listing : unit -> 'a listing
+(** A new, empty listing. A reader makes one and keeps it. *)
+
 val list_projected :
-  'a File_version_cache.t ->
-  project:(verification_request -> 'a) ->
+  'a listing ->
+  project:(verification_request -> ('a, string) result) ->
   string ->
   ('a scan, string) result
-(** [list_projected cache ~project base_path] is {!list_requests} with each
-    readable request passed through [project], and the projection kept in
-    [cache] for the version of the file it came from. A file unchanged since
-    the last pass is stat'ed, not read or parsed. An unreadable file is read
-    again on every pass and reported the same way. *)
+(** [list_projected listing ~project base_path] walks the directory as
+    {!list_requests} does and passes each readable request through [project].
+    A projection is kept in [listing] for the version of the file it came from,
+    so a file unchanged since the last pass is stat'ed, not read or parsed.
+    That includes a file that became unreadable without changing (a
+    permission change, a disk error): it keeps its projection until it
+    changes. A file the schema cannot read, or whose projection fails, lands
+    in [unreadable] with the reason and is read again on every pass. *)
 
 (** {1 High-level API} *)
 

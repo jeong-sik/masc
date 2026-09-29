@@ -229,7 +229,12 @@ let request_to_json (req : V.verification_request) : Yojson.Safe.t =
    orders the whole store by, and the row a page shows. [request_to_json]
    reads nothing but the request, so a row stays right for as long as its file
    is the version it was built from, and a listing parses only the files that
-   changed since the last one. *)
+   changed since the last one.
+
+   The row is built for every readable request, not only those on a page, so a
+   request whose row cannot be built is reported unreadable rather than
+   failing the listing: [created_at] is shown through [Unix.gmtime], which
+   refuses a time outside the range it can represent. *)
 type listed = {
   listed_id : string;
   listed_task_id : string;
@@ -238,13 +243,23 @@ type listed = {
 }
 
 let listed_of_request (req : V.verification_request) =
-  { listed_id = req.V.id
-  ; listed_task_id = req.V.task_id
-  ; listed_created_at = req.V.created_at
-  ; row = request_to_json req
-  }
+  match request_to_json req with
+  | row ->
+    Ok
+      { listed_id = req.V.id
+      ; listed_task_id = req.V.task_id
+      ; listed_created_at = req.V.created_at
+      ; row
+      }
+  | exception Unix.Unix_error (error, call, _) ->
+    Error
+      (Printf.sprintf
+         "verification %s cannot be shown: %s: %s"
+         req.V.id
+         call
+         (Unix.error_message error))
 
-let listed_requests : listed File_version_cache.t = File_version_cache.create ()
+let listed_requests : listed V.listing = V.listing ()
 
 (** Load the request scan from the supplied MASC base_path.
 

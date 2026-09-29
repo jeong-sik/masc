@@ -1,0 +1,14 @@
+{
+  "head": "966089bc60284af38933d75ac822a46fe013c606",
+  "run_id": 36609262218,
+  "job_id": 109546197503,
+  "test_step": "success",
+  "whole_workflow_completion_inspected": false,
+  "raw_log_sha256": "406d3121bccb41978eca447676e3319a93e8440c93cf5d7c4d7d9798366d4a1e",
+  "suites": {
+    "test_candle_appraiser_transport": 8,
+    "test_candle_appraisal_flow": 11,
+    "test_candle_payout_worker": 8
+  },
+  "excluded_change": "deferred event retention in48b5bae848"
+}

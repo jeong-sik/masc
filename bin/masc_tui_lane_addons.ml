@@ -1113,6 +1113,16 @@ let reading_summary fields =
         Some (key ^ "=" ^ Yojson.Safe.to_string value)
     | _ -> None) |> String.concat " · "
 
+let configuration_counts (configuration : configuration) =
+  (* Decoder also appends issue-only paths. They need a row and an issue
+     count, but they are not parsed TOML declarations. *)
+  List.fold_left (fun (declared, issues) (declaration : declaration) ->
+    let declared = match declaration.origin with
+      | Parsed_declaration -> declared + 1
+      | Issue_only -> declared in
+    declared, issues + List.length declaration.issues)
+    (0, 0) configuration.declarations
+
 let overview_lines ~width view =
   let wrap text = Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
     (Masc.Tui_decode.sanitize_terminal_text text) in
@@ -1129,11 +1139,7 @@ let overview_lines ~width view =
         let configuration_summary = match snapshot.configuration with
           | None -> "TOML unknown"
           | Some config ->
-              let declared = List.fold_left (fun total (declaration : declaration) ->
-                if Option.is_some declaration.desired then total + 1 else total)
-                0 config.declarations in
-              let issues = List.fold_left (fun total (declaration : declaration) ->
-                total + List.length declaration.issues) 0 config.declarations in
+              let declared, issues = configuration_counts config in
               Printf.sprintf "%d declared%s%s" declared
                 (if issues=0 then "" else Printf.sprintf " · %d config issues" issues)
                 (if config.complete then "" else " · inventory partial") in
@@ -1156,7 +1162,7 @@ let overview_lines ~width view =
             match item with
             | `Declaration (_, declaration) ->
                 let name = Option.value ~default:"unresolved installation" declaration.installation_id in
-                let status = if Option.is_none declaration.desired then "configuration issue"
+                let status = if declaration.origin=Issue_only then "configuration issue"
                   else if declaration.issues<>[] then "needs attention" else "pending" in
                 let edit = Option.bind snapshot.configuration (fun config ->
                   if Document.editable_source_path ~directory:config.directory declaration.source_path
@@ -1385,19 +1391,12 @@ let installation_reading view =
            | Row.Failed _ -> active, failed + 1
            | Row.Detaching | Row.Detached -> active, failed)
            (0, 0) snapshot.instances in
+       let declared, configuration_issues = configuration_counts configuration in
        Observed {
-         (* Decoder also appends issue-only paths here when a TOML file could
-            not be parsed. Those are problems to show, not declarations. *)
-         declared = List.fold_left (fun count (declaration : declaration) ->
-           match declaration.origin with
-           | Parsed_declaration -> count + 1
-           | Issue_only -> count)
-           0 configuration.declarations;
+         declared;
          active;
          failed_workers;
-         configuration_issues = List.fold_left (fun count (declaration : declaration) ->
-           count + List.length declaration.issues)
-           0 configuration.declarations;
+         configuration_issues;
          complete = configuration.complete;
          freshness = (match view.snapshot_read_error with
            | None -> Current

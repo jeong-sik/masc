@@ -145,6 +145,17 @@ let configuration_and_ports () =
   check bool "failed refresh labels retained Add-on counts stale" true
     (List.exists (String.ends_with ~suffix:" · STALE")
       (UI.lines ~width:120 {overview with snapshot_read_error=Some "read failed"}));
+  let issue_only = {snapshot with instances=[];
+    configuration=Option.map (fun (config : UI.configuration) ->
+      {config with declarations=List.filter (fun (declaration : UI.declaration) ->
+        declaration.origin=UI.Issue_only) config.declarations}) snapshot.configuration} in
+  let issue_only_view = {UI.initial with snapshot=Some issue_only} in
+  check bool "Lanes and Add-on Overview both exclude issue-only rows from declared" true
+    (match UI.installation_reading issue_only_view with
+     | UI.Observed {declared=0;configuration_issues=4;_} ->
+         List.exists (String.starts_with ~prefix:"Lane Add-ons · 0 declared · 4 config issues")
+           (UI.lines ~width:120 issue_only_view)
+     | UI.Not_read | UI.Observed _ -> false);
   check bool "a configuration issue has no worker action" true
     (Result.is_error (UI.open_actions ~request_id:"01901234-1234-7000-8000-000000000001" issue));
   let refreshed = UI.reconcile_snapshot {overview with instance_cursor=1} snapshot in

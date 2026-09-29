@@ -297,13 +297,22 @@ race_setup() {
   setup "$1"
   "$JQ" -n --arg h "$H" '{workflow_runs:[
     {workflow_id:1,run_number:10,name:"PR check",status:"completed",conclusion:"success",id:900,check_suite_id:55,event:"pull_request",path:".github/workflows/pr-check.yml",head_sha:$h},
-    {workflow_id:1,run_number:11,name:"PR check",status:"completed",conclusion:"success",id:901,check_suite_id:66,event:"pull_request",path:".github/workflows/pr-check.yml",head_sha:$h}]}' >"$1/actions.json"
+    {workflow_id:1,run_number:11,name:"PR check",status:"completed",conclusion:"success",id:901,check_suite_id:66,event:"pull_request",path:".github/workflows/pr-check.yml",head_sha:$h}]}' >"$1/actions.json" || {
+    echo "selftest: fixture jq failed" >&2
+    exit 1
+  }
   # Keep the captured job names/statuses, rebinding only IDs/head for the
   # synthetic race variants below. A separate case replays the unmodified jobs.
   "$JQ" --arg h "$H" '.jobs |= (to_entries | map(.value + {id:(200+.key),run_id:901,head_sha:$h}))' \
-    "$here/fixtures/pr-check-draft-jobs-39834.json" >"$1/jobs-901.json"
-  "$JQ" '{check_runs:(
-    ["TLA model check","lint suite","dune build @check","dune build --profile release @check","dashboard typecheck","PR required success"] | to_entries | map({name:.value,status:"completed",conclusion:"success",id:(100+.key),check_suite:{id:55}})) + [.jobs[] | {name,status,conclusion,id,check_suite:{id:66}}]}' "$1/jobs-901.json" >"$1/checkruns.json"
+    "$here/fixtures/pr-check-draft-jobs-39834.json" >"$1/jobs-901.json" || {
+    echo "selftest: fixture jq failed" >&2
+    exit 1
+  }
+  "$JQ" '{check_runs:((
+    ["TLA model check","lint suite","dune build @check","dune build --profile release @check","dashboard typecheck","PR required success"] | to_entries | map({name:.value,status:"completed",conclusion:"success",id:(100+.key),check_suite:{id:55}})) + [.jobs[] | {name,status,conclusion,id,check_suite:{id:66}}])}' "$1/jobs-901.json" >"$1/checkruns.json" || {
+    echo "selftest: fixture jq failed" >&2
+    exit 1
+  }
 }
 mutate() { "$JQ" "$2" "$1" >"$1.tmp" && mv "$1.tmp" "$1"; }
 race_case() { run_case "$1" "$2" "$3" 0 "$d" --check --repo o/r --pr 5 --head "$H"; }

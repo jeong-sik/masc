@@ -664,7 +664,7 @@ let test_edited_prompt_with_an_override_is_preserved () =
         Prompt_override_persistence.
           { key = "curator"
           ; value = "Saved earlier from {{memory}}."
-          ; authored_against = "0"
+          ; authored_against = Some "0"
           ; template_variables = [ "memory" ]
           }
       in

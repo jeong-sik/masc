@@ -706,9 +706,9 @@ let () =
               | Error message -> fail message);
               match Prompt_registry.override_entries () with
               | [ entry ] ->
-                  check string "authored against the current default body"
-                    (Prompt_override_persistence.default_revision
-                       ~body:(fixture "test.templated"))
+                  check (option string) "authored against the current default body"
+                    (Some (Prompt_override_persistence.default_revision
+                       ~body:(fixture "test.templated")))
                     entry.Prompt_override_persistence.authored_against;
                   check (list string) "with the variables the prompt declared"
                     [ "facts_json" ]
@@ -932,6 +932,9 @@ let () =
                   );
                   ( "non-string template variable",
                     {|{"schema_version":2,"overrides":[{"key":"keeper.reply_guidelines","value":"x","authored_against":"r","template_variables":[1]}]}|}
+                  );
+                  ( "null persistence binding is not a schema-2 string",
+                    {|{"schema_version":2,"overrides":[{"key":"keeper.reply_guidelines","value":"x","authored_against":null,"template_variables":[]}]}|}
                   );
                   ( "unknown entry field",
                     {|{"schema_version":2,"overrides":[{"key":"keeper.reply_guidelines","value":"x","pinned_to":"r"}]}|}

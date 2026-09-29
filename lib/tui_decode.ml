@@ -9394,6 +9394,12 @@ type prompt_source =
   | Prompt_file
   | Prompt_missing
 
+type prompt_override_comparison =
+  | No_prompt_override
+  | Prompt_default_current
+  | Prompt_default_changed
+  | Prompt_default_unknown
+
 type prompt_row = {
   pr_key : string;
   pr_category : string;
@@ -9403,7 +9409,7 @@ type prompt_row = {
   pr_file_path : string;
   pr_source : prompt_source;
   pr_template_variables : string list;
-  pr_override_default_moved : bool;
+  pr_override_comparison : prompt_override_comparison;
 }
 
 type runtime_prompt_asset = {
@@ -9473,13 +9479,18 @@ let decode_prompt_row json =
     | `Null -> Error (Printf.sprintf "missing required field '%s'" "source")
     | value -> field_type_error "source" "a string" value
   in
-  (* Absent reads as false: a row with no override has nothing to have
-     moved, and the server sends the field for every row. *)
-  let* pr_override_default_moved =
+  let* pr_override_comparison =
     match member "override_default_moved" json with
-    | `Null -> Ok false
-    | `Bool moved -> Ok moved
-    | value -> field_type_error "override_default_moved" "a boolean" value
+    | `Null ->
+        Ok (match pr_source with
+          | Prompt_override -> Prompt_default_unknown
+          | Prompt_file | Prompt_missing -> No_prompt_override)
+    | `Bool true -> Ok Prompt_default_changed
+    | `Bool false ->
+        Ok (match pr_source with
+          | Prompt_override -> Prompt_default_current
+          | Prompt_file | Prompt_missing -> No_prompt_override)
+    | value -> field_type_error "override_default_moved" "a boolean or null" value
   in
   Ok
     { pr_key
@@ -9490,7 +9501,7 @@ let decode_prompt_row json =
     ; pr_file_path = string_or "file_path"
     ; pr_source
     ; pr_template_variables
-    ; pr_override_default_moved
+    ; pr_override_comparison
     }
 ;;
 

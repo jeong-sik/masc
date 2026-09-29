@@ -213,7 +213,7 @@ let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
                  [ "key", `String e.key
                  ; "value", `String e.value
                  ; "bytes", `Int (String.length e.value)
-                 ; "authored_against", `String e.authored_against
+                 ; "authored_against", Json_util.string_opt_to_json e.authored_against
                  ; "template_variables", strings e.template_variables
                  ])
              s.prompt_overrides) )

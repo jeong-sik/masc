@@ -46,6 +46,20 @@ let rec mkdir_p path =
 
 let prompt_key = "test.preset"
 
+let override_default_moved key =
+  let open Yojson.Safe.Util in
+  match
+    List.find_opt
+      (fun item -> String.equal (member "key" item |> to_string) key)
+      (Prompt_registry.list_prompts ())
+  with
+  | Some item -> (match member "override_default_moved" item with
+      | `Null -> None
+      | `Bool moved -> Some moved
+      | _ -> Alcotest.fail "default comparison is neither boolean nor null")
+  | None -> Alcotest.fail ("prompt not listed: " ^ key)
+;;
+
 let prompt_fixture =
   {|---
 description: a prompt the preset test overrides
@@ -322,13 +336,15 @@ let test_override_written_against_an_older_default_still_restores () =
   let open Alcotest in
   with_base (fun ~base_path ~keepers:_ ~config:_ ->
     set_override ~base_path "Morning override.";
+    check (option bool) "known current binding has not moved" (Some false)
+      (override_default_moved prompt_key);
     let morning = or_fail (Preset.capture ~base_path ~name:"morning" ~description:"") in
     let older =
       { morning with
         Preset.name = "older"
       ; prompt_overrides =
           List.map
-            (fun (e : Override.entry) -> { e with Override.authored_against = "0000" })
+            (fun (e : Override.entry) -> { e with Override.authored_against = Some "0000" })
             morning.Preset.prompt_overrides
       }
     in
@@ -341,7 +357,9 @@ let test_override_written_against_an_older_default_still_restores () =
       (List.map fst report.Preset.prompt_overrides_result.Preset.skipped);
     check string "a turn gets the restored text" "Morning override."
       (Prompt_registry.get_prompt prompt_key);
-    check (list string) "and it still says what it was written against" [ "0000" ]
+    check (option bool) "known mismatched binding is a changed default" (Some true)
+      (override_default_moved prompt_key);
+    check (list (option string)) "and it still says what it was written against" [ Some "0000" ]
       (List.map
          (fun (e : Override.entry) -> e.Override.authored_against)
          (Prompt_registry.override_entries ())))
@@ -420,17 +438,6 @@ let test_a_preset_that_does_not_load_is_listed_as_unreadable () =
       [ ("evening", reason) ] listing.Preset.unreadable)
 ;;
 
-let override_default_moved key =
-  let open Yojson.Safe.Util in
-  match
-    List.find_opt
-      (fun item -> String.equal (member "key" item |> to_string) key)
-      (Prompt_registry.list_prompts ())
-  with
-  | Some item -> member "override_default_moved" item |> to_bool
-  | None -> Alcotest.fail ("prompt not listed: " ^ key)
-;;
-
 let v1_overrides value =
   Printf.sprintf
     {|{"schema_version":1,"overrides":[{"key":%S,"value":%S,"contract_revision":"digest-from-before-2026-09-08"}]}|}
@@ -439,9 +446,8 @@ let v1_overrides value =
 
 (* Presets saved before 2026-09-08 carry the schema 1 overrides envelope.
    They open, list and restore; what each override was written against is
-   unknown, so the restored override reads as written against a default that
-   has since moved (the Prompts pane's warning line). The file is not
-   rewritten. *)
+   unknown, so neither restore nor a later reload claims the default changed.
+   The original preset file is not rewritten. *)
 let test_a_preset_saved_before_schema_2_restores_its_overrides () =
   let open Alcotest in
   with_base (fun ~base_path ~keepers:_ ~config:_ ->
@@ -454,8 +460,8 @@ let test_a_preset_saved_before_schema_2_restores_its_overrides () =
     write_file overrides_path v1_text;
     set_override ~base_path "Afternoon override.";
     let loaded = or_fail (Preset.load ~base_path "old") in
-    check (list (triple string string string)) "key and value are kept, binding unknown"
-      [ prompt_key, "Morning override.", "" ]
+    check (list (triple string string (option string))) "key and value are kept, binding unknown"
+      [ prompt_key, "Morning override.", None ]
       (List.map
          (fun (e : Override.entry) -> e.Override.key, e.Override.value, e.Override.authored_against)
          loaded.Preset.prompt_overrides);
@@ -470,8 +476,25 @@ let test_a_preset_saved_before_schema_2_restores_its_overrides () =
       report.Preset.prompt_overrides_result.Preset.applied;
     check string "a turn gets the restored text" "Morning override."
       (Prompt_registry.get_prompt prompt_key);
-    check bool "the Prompts pane warns that the default moved" true
+    check (option bool) "unknown history does not establish a moved default" None
       (override_default_moved prompt_key);
+    let catalog = `Assoc ["prompts", `List (Prompt_registry.list_prompts ())] in
+    (match Masc.Tui_decode.decode_prompts catalog with
+     | Ok snapshot ->
+         let row = List.find
+             (fun row -> String.equal row.Masc.Tui_decode.pr_key prompt_key)
+             snapshot.Masc.Tui_decode.ps_rows in
+         check bool "the Prompts pane receives the explicit unknown state" true
+           (row.Masc.Tui_decode.pr_override_comparison = Masc.Tui_decode.Prompt_default_unknown)
+     | Error detail -> fail detail);
+    (* Restoring writes the live schema-2 envelope, not the preset. Clearing
+       only memory and reading that envelope must retain unknown provenance. *)
+    Prompt_registry.clear_prompt_override prompt_key;
+    Prompt_registry.restore_overrides base_path;
+    check (option bool) "unknown provenance survives a live-table reload" None
+      (override_default_moved prompt_key);
+    check string "the reloaded override remains applied" "Morning override."
+      (Prompt_registry.get_prompt prompt_key);
     check string "the preset file is not rewritten" v1_text
       (In_channel.with_open_text overrides_path In_channel.input_all))
 ;;

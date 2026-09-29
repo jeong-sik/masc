@@ -15185,7 +15185,9 @@ let render_prompt_registry (state : state) =
     | None -> 0
     | Some row ->
         (if Option.is_some (held_back_for row.Tui_decode.pr_key) then 3 else 0)
-        + (if row.pr_override_default_moved then 1 else 0)
+        + (match row.pr_override_comparison with
+           | Tui_decode.Prompt_default_changed | Tui_decode.Prompt_default_unknown -> 1
+           | Tui_decode.No_prompt_override | Tui_decode.Prompt_default_current -> 0)
   in
   let combined_height = max 2 (rows - 9 - error_rows - notice_rows) in
   let list_height = min 8 (max 1 (combined_height / 3)) in
@@ -15282,13 +15284,16 @@ let render_prompt_registry (state : state) =
             ("  " ^ Terminal_text.single_line entry.Tui_decode.hbo_reason);
           box_line_styled buf cols ~style:(Theme.recede ())
             "  그 변수를 빼고 같은 키를 다시 저장하면 적용됩니다");
-       (* The override applies. This line says only that the shipped text it
-          replaced has changed since it was written, so the reader knows to
-          compare the two once rather than discovering a new default months
-          later. *)
-       if row.Tui_decode.pr_override_default_moved then
-         box_line_styled buf cols ~style:(Theme.warn ())
-           "  \xe2\x96\xb3 기본 프롬프트가 이 오버라이드를 쓴 뒤에 바뀌었습니다 \xc2\xb7 오버라이드는 그대로 적용 중이니 현재 기본값과 한 번 대조하세요";
+       (* Changed and unknown history require comparison for different reasons;
+          neither changes whether the override is applied. *)
+       (match row.Tui_decode.pr_override_comparison with
+        | Tui_decode.No_prompt_override | Tui_decode.Prompt_default_current -> ()
+        | Tui_decode.Prompt_default_changed ->
+          box_line_styled buf cols ~style:(Theme.warn ())
+            "  \xe2\x96\xb3 기본 프롬프트가 이 오버라이드를 쓴 뒤에 바뀌었습니다 \xc2\xb7 오버라이드는 그대로 적용 중이니 현재 기본값과 한 번 대조하세요"
+        | Tui_decode.Prompt_default_unknown ->
+          box_line_styled buf cols ~style:(Theme.warn ())
+            "  \xe2\x96\xb3 이 오버라이드를 쓸 때의 기본값과 비교할 수 없습니다 \xc2\xb7 오버라이드는 그대로 적용 중이니 현재 기본값과 한 번 대조하세요");
        let input_contract =
          if String.equal row.pr_category "librarian" then
            "입력: Keeper 지침 | 현재 기억 | 제한된 대화 | 상대 관측 | 사실 최대 바이트"

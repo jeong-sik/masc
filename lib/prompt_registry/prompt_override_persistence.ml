@@ -1,7 +1,7 @@
 type entry = {
   key : string;
   value : string;
-  authored_against : string;
+  authored_against : string option;
   template_variables : string list;
 }
 
@@ -133,7 +133,9 @@ let decode_entry index json =
                         {
                           key;
                           value;
-                          authored_against;
+                          authored_against =
+                            (if String.equal authored_against "" then None
+                             else Some authored_against);
                           template_variables = sorted_variables template_variables;
                         }))))
 
@@ -142,9 +144,8 @@ let decode_entry index json =
    ([contract_revision]), so neither half of the current binding can be
    recovered from it. A v1 entry keeps what the operator wrote -- its key
    and value -- and states that what it was written against is unknown:
-   an empty [authored_against] and no variables. Those never equal a real
-   binding, so the registry reports the default as moved, which is the
-   honest answer. *)
+   [authored_against = None] and no variables. The registry reports unknown
+   history rather than asserting a change it cannot establish. *)
 let legacy_v1_schema_version = 1
 
 let decode_legacy_v1_entry index json =
@@ -165,7 +166,7 @@ let decode_legacy_v1_entry index json =
               match string_field ~location "contract_revision" fields with
               | Error _ as error -> error
               | Ok (_ : string) ->
-                  Ok { key; value; authored_against = ""; template_variables = [] })))
+                  Ok { key; value; authored_against = None; template_variables = [] })))
 
 let decode_overrides ~decode_entry fields =
   match List.assoc "overrides" fields with
@@ -212,7 +213,8 @@ let entry_to_yojson entry =
     [
       ("key", `String entry.key);
       ("value", `String entry.value);
-      ("authored_against", `String entry.authored_against);
+      ("authored_against", `String (match entry.authored_against with
+        | None -> "" | Some revision -> revision));
       ( "template_variables",
         `List
           (List.map

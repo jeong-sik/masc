@@ -9289,27 +9289,32 @@ let test_decode_prompts_reads_held_back () =
     Alcotest.(check string) "why it is not in force"
       "Unknown template variables: facts_json" entry.Tui_decode.hbo_reason
 
-(* An override in force whose default moved is an ordinary override row with
-   one more fact on it. The row without the field is a row nothing moved
-   under. *)
+(* A missing historical binding is not evidence of a changed default. The
+   same wire field retains true/false for a known comparison and null for
+   unknown; an omitted field cannot claim known history either. *)
 let test_decode_prompts_reads_a_moved_default () =
-  let row ~moved =
-    `Assoc
-      ([ ("key", `String "keeper")
-       ; ("effective", `String "the operator's prompt")
-       ; ("source", `String "override")
-       ]
-       @ match moved with None -> [] | Some moved -> [ ("override_default_moved", `Bool moved) ])
+  let row ~source fields =
+    `Assoc ([ "key", `String "keeper"; "source", `String source ] @ fields)
   in
   let decode rows =
-    match Tui_decode.decode_prompts (`Assoc [ ("prompts", `List rows) ]) with
+    match Tui_decode.decode_prompts (`Assoc [ "prompts", `List rows ]) with
     | Error detail -> Alcotest.fail detail
-    | Ok snapshot -> List.map (fun r -> r.Tui_decode.pr_override_default_moved) snapshot.Tui_decode.ps_rows
+    | Ok snapshot -> List.map (fun r -> r.Tui_decode.pr_override_comparison) snapshot.Tui_decode.ps_rows
   in
-  Alcotest.(check (list bool)) "true, false, and absent" [ true; false; false ]
-    (decode [ row ~moved:(Some true); row ~moved:(Some false); row ~moved:None ]);
-  match Tui_decode.decode_prompts (`Assoc [ ("prompts", `List [ `Assoc [ ("key", `String "keeper"); ("source", `String "file"); ("override_default_moved", `String "yes") ] ]) ]) with
-  | Ok _ -> Alcotest.fail "a string where the wire promises a boolean decoded"
+  let open Tui_decode in
+  Alcotest.(check bool) "changed, current, unknown, omitted, and no override stay distinct"
+    true
+    (decode
+       [ row ~source:"override" ["override_default_moved", `Bool true];
+         row ~source:"override" ["override_default_moved", `Bool false];
+         row ~source:"override" ["override_default_moved", `Null];
+         row ~source:"override" [];
+         row ~source:"file" [] ]
+     = [Prompt_default_changed; Prompt_default_current; Prompt_default_unknown;
+        Prompt_default_unknown; No_prompt_override]);
+  match Tui_decode.decode_prompts (`Assoc [ "prompts", `List
+      [row ~source:"override" ["override_default_moved", `String "yes"]] ]) with
+  | Ok _ -> Alcotest.fail "a non-boolean, non-null comparison decoded"
   | Error _ -> ()
 
 (* A server with nothing quarantined omits the field, and so does one that

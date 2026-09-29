@@ -2481,6 +2481,12 @@ type prompt_source =
   | Prompt_file
   | Prompt_missing
 
+type prompt_override_comparison =
+  | No_prompt_override
+  | Prompt_default_current
+  | Prompt_default_changed
+  | Prompt_default_unknown
+
 type prompt_row = {
   pr_key : string;
   pr_category : string;
@@ -2492,11 +2498,11 @@ type prompt_row = {
   pr_file_path : string;
   pr_source : prompt_source;
   pr_template_variables : string list;
-  pr_override_default_moved : bool;
-      (** The override in force was written against a default that has since
-          changed -- its body, or the variables it declares. The override
-          still applies; the text it replaced is not the text it replaced
-          then. False for a row without an override. *)
+  pr_override_comparison : prompt_override_comparison;
+      (** Known unchanged and changed bindings are distinct from unavailable
+          history. Unknown never claims that a default changed. No override
+          has no comparison to display. The wire's [override_default_moved]
+          is true/false for a known comparison and null for unknown. *)
 }
 
 type runtime_prompt_asset = {
@@ -2517,7 +2523,7 @@ type held_back_override = {
 
     A default body that changed since the override was written is not a
     reason: the override applies and the row reads as
-    [pr_override_default_moved]. What holds one back is a contract it cannot
+    [pr_override_comparison]. What holds one back is a contract it cannot
     render under. The override is kept rather than deleted -- writing the key
     again, without the stale variable, puts it back in force. *)
 

@@ -662,23 +662,24 @@ let resolved_of_snapshot (s : prompt_snapshot) =
 
 let sorted_variables variables = List.sort_uniq String.compare variables
 
-(* Whether the default has moved since the override was written: the body
-   the operator replaced no longer reads the same, or the prompt declares a
-   different variable set than it did then. Neither stops the override from
-   applying; both are worth a look, since the operator's text was a
-   replacement for something that has since changed. *)
-let override_default_moved (meta : prompt_meta) ~file_value
+(* Comparison is evidence, never an admission gate. An absent historical
+   binding or unread current body cannot establish that anything changed. *)
+type override_default_comparison = Default_unknown | Default_current | Default_changed
+
+let override_default_comparison (meta : prompt_meta) ~file_value
     (entry : Prompt_override_persistence.entry) =
-  let body_moved =
-    match file_value with
-    | None -> true
-    | Some body ->
-        not
-          (String.equal entry.authored_against
-             (Prompt_override_persistence.default_revision ~body))
-  in
-  body_moved
-  || sorted_variables meta.template_variables <> entry.template_variables
+  match entry.authored_against, file_value with
+  | None, _ | Some _, None -> Default_unknown
+  | Some revision, Some body ->
+      if String.equal revision (Prompt_override_persistence.default_revision ~body)
+         && sorted_variables meta.template_variables = entry.template_variables
+      then Default_current
+      else Default_changed
+
+let override_default_moved_json = function
+  | Default_unknown -> `Null
+  | Default_current -> `Bool false
+  | Default_changed -> `Bool true
 
 (* [expected = []] declares no substitution points, including for primary
    prompts validated through {!render_prompt_template}. Every [{{ident}}]
@@ -691,15 +692,16 @@ let unexpected_template_variables meta template =
 
 (* Variant that takes a pre-computed [resolved] record.  Used by the
    batch listing paths that read files outside the mutex. *)
-let prompt_item_json_of_resolved ~override_default_moved key (meta : prompt_meta)
+let prompt_item_json_of_resolved ~comparison key (meta : prompt_meta)
     resolved =
   `Assoc
     [
       ("key", `String key);
       (* True only with an override in force whose default has changed since
          it was written. The override still applies; this says the text it
-         replaced is not the text it replaced then. *)
-      ("override_default_moved", `Bool override_default_moved);
+         replaced is not the text it replaced then. Null means the binding
+         cannot be compared, not that a change occurred. *)
+      ("override_default_moved", override_default_moved_json comparison);
       ("category", `String meta.category);
       ( "operator_surface",
         `String (Types.operator_surface_to_string meta.operator_surface) );
@@ -831,7 +833,7 @@ let validated_override key value =
         {
           key;
           value = trimmed;
-          authored_against = default_revision ~body;
+          authored_against = Some (default_revision ~body);
           template_variables = sorted_variables meta.template_variables;
         })
 
@@ -849,11 +851,11 @@ let admitted_persisted_entry (entry : Prompt_override_persistence.entry) =
 
 (* The listing needs the same answer for an entry in force, read outside the
    mutex because the default body comes from disk. *)
-let override_default_moved_now (entry : Prompt_override_persistence.entry) =
+let override_default_comparison_now (entry : Prompt_override_persistence.entry) =
   let file_value = file_value_of_key entry.key in
   match with_mutex (fun () -> Hashtbl.find_opt meta_tbl entry.key) with
-  | None -> true
-  | Some meta -> override_default_moved meta ~file_value entry
+  | None -> Default_unknown
+  | Some meta -> override_default_comparison meta ~file_value entry
 
 (** Set an override for a prompt *)
 let set_override key value =
@@ -943,13 +945,13 @@ let list_prompts () =
   snapshots
   |> List.map (fun s ->
     let resolved = resolved_of_snapshot s in
-    let override_default_moved =
+    let comparison =
       match s.snap_override with
-      | None -> false
+      | None -> Default_current
       | Some entry ->
-          override_default_moved s.snap_meta ~file_value:resolved.file_value entry
+          override_default_comparison s.snap_meta ~file_value:resolved.file_value entry
     in
-    prompt_item_json_of_resolved ~override_default_moved s.snap_key s.snap_meta
+    prompt_item_json_of_resolved ~comparison s.snap_key s.snap_meta
       resolved)
   |> List.sort compare_prompt_items
 
@@ -1132,15 +1134,20 @@ let restore_overrides base_path =
                 "prompt override restore: %s cannot render under the current contract, falling back to file value: %s"
                 key reason)
         failures;
-      (* In force, and written against a default that has since changed.
-         One line per key: the catalog carries the same fact, but the boot
-         log is where an operator looks when a release changed a prompt. *)
+      (* One line per key requiring comparison: the catalog distinguishes
+         changed from unknown history, and the boot log must do so too. *)
       List.iter
         (fun (entry : Prompt_override_persistence.entry) ->
-          if override_default_moved_now entry then
-            Log.Misc.warn
-              "prompt override %s applies over a default that changed since it was written"
-              entry.key)
+          match override_default_comparison_now entry with
+          | Default_current -> ()
+          | Default_unknown ->
+              Log.Misc.warn
+                "prompt override %s applies; its default binding cannot be compared, so review it against the current default"
+                entry.key
+          | Default_changed ->
+              Log.Misc.warn
+                "prompt override %s applies over a default that changed since it was written"
+                entry.key)
         candidate)
 
 type file_edit_promotion =
@@ -1223,7 +1230,7 @@ let promote_file_edit ~base_path ~file ~embedded ~edited =
                                 key;
                                 value;
                                 authored_against =
-                                  default_revision ~body:embedded_body;
+                                  Some (default_revision ~body:embedded_body);
                                 template_variables =
                                   sorted_variables meta.template_variables;
                               }

@@ -1,0 +1,38 @@
+ Overview  Activity  ▸Keepers  Lanes  Memory  Approvals  Board  Planning  Fusion  Workspace  Config
+
+   Keepers ▸ alpha  ▸Info  Sandbox  Settings  Secrets  GitHub  Identity  Channels  Automation  Runs                     
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+             ▄▄▄▄▄▄           Identity                                                                                  
+         ▄▀▀▀▀▀▀▀▀▀▀▀▀▄       Name:                  alpha                                                              
+       ▄▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▄     Paused:                no                                                                 
+      ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀    Candle balance:        unavailable: keepers[0]: Candle amount must be a canonical nonne…  
+     ▄▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▄                                                                                             
+     ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                                                                                             
+     ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                                                                                             
+     ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                                                                                             
+      ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                                                                                              
+       ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                                                                                               
+         ▀▀▀▀▀▀▀▀▀▀▀▀▀▀                                                                                                 
+             ▀▀▀▀▀▀                                                                                                     
+                                                                                                                        
+    Current failure                                                                                                     
+    none                                                                                                                
+                                                                                                                        
+    Board attention                                                                                                     
+    could not read: board quarantines: HTTP 503: fixture endpoint unavailable                                           
+                                                                                                                        
+    Gate                                                                                                                
+    Tool calls:            auto · per Gate policy                                                                       
+    Effects (Gate mode):   workspace                                                                                    
+    Lane first:            lane order                                                                                   
+    Gate settings:         unread · keeper Gate settings load failed: HTTP 503: fixture endpoint unavailable            
+                                                                                                                        
+    Current Work                                                                                                        
+    Task:                  —                                                                                            
+                                                                                                                        
+    Live Context                                                                                                        
+    Context:               measurement missing                                                                          
+  1-30/47                                                                                                               
+
+  alpha pause accepted  [ ]:tab  b:requeue board  B:requeue all board  j/k:move  p:pause  Left / Esc:back  q:quit  …?
+ › to alpha   (i to write)                                                                                              

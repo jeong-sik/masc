@@ -114,9 +114,14 @@ let test_artifact_is_a_readable_png () =
       (field "equipment" repeated = field "equipment" data)
 ;;
 
-(* A size outside the renderer's range is refused, not clamped. *)
+(* A size outside the declared range is refused, not clamped. 16 and 47 are
+   inside the renderer's range but below the tool's declared minimum. A size
+   refusal names the declared range. *)
 let test_size_out_of_range_is_refused () =
   with_temp_base @@ fun () ->
+  let declared =
+    Printf.sprintf "size must be between %d and %d" Read.minimum_size Read.maximum_size
+  in
   List.iter (fun args ->
     match call ~name:"invalid-portrait" ~args with
     | Tool_result.Failed error ->
@@ -125,9 +130,40 @@ let test_size_out_of_range_is_refused () =
     | Tool_result.Completed _ | Tool_result.Deferred _ ->
         Alcotest.fail "invalid portrait input succeeded")
     [`Null; `Assoc ["size", `String "48"]; `Assoc ["size", `Int 8]; `Assoc ["size", `Int 513]];
+  List.iter (fun size ->
+    match call ~name:"invalid-portrait" ~args:(`Assoc ["size", `Int size]) with
+    | Tool_result.Failed error ->
+        Alcotest.(check string) (Printf.sprintf "size %d names the declared range" size)
+          declared error.message
+    | Tool_result.Completed _ | Tool_result.Deferred _ ->
+        Alcotest.failf "size %d is outside the declared range and succeeded" size)
+    [ Keeper_portrait_draw.min_size; Read.minimum_size - 1; Read.maximum_size + 1 ];
   let dir = Store.frames_dir
     ~dir:(Filename.concat (Config_dir_resolver.keepers_dir ()) "invalid-portrait.vision") in
   Alcotest.(check bool) "rejected inputs create no artifacts" false (Sys.file_exists dir)
+;;
+
+(* The tool file states the size bounds and default as literals; this module
+   owns them. A change to either side fails here. *)
+let test_declared_size_matches_the_handler () =
+  let schema = Tool_schemas_misc_toml.portrait_read in
+  let field key =
+    match schema.Masc_domain.input_schema with
+    | `Assoc fields ->
+      (match List.assoc_opt "properties" fields with
+       | Some (`Assoc props) ->
+         (match List.assoc_opt "size" props with
+          | Some (`Assoc p) ->
+            (match List.assoc_opt key p with
+             | Some (`Int v) -> v
+             | _ -> Alcotest.failf "size.%s is absent or not an integer" key)
+          | _ -> Alcotest.fail "size is absent")
+       | _ -> Alcotest.fail "no properties")
+    | _ -> Alcotest.fail "input_schema is not an object"
+  in
+  Alcotest.(check int) "size minimum" Read.minimum_size (field "minimum");
+  Alcotest.(check int) "size maximum" Read.maximum_size (field "maximum");
+  Alcotest.(check int) "size default" Read.default_size (field "default")
 ;;
 
 let () =
@@ -138,6 +174,8 @@ let () =
             test_equipment_matches_the_name_hash
         ; Alcotest.test_case "artifact is a readable PNG" `Quick test_artifact_is_a_readable_png
         ; Alcotest.test_case "size out of range is refused" `Quick test_size_out_of_range_is_refused
+        ; Alcotest.test_case "declared size matches the handler" `Quick
+            test_declared_size_matches_the_handler
         ] )
     ]
 ;;

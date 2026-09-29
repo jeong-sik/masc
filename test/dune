@@ -1601,7 +1601,15 @@
 (test
  (name test_goal_owner_notification)
  (modules test_goal_owner_notification)
- (libraries masc_test_deps))
+ (libraries masc_test_deps ptime))
+
+; Goal_due: the one reading of a Goal's due date (the day it names, the UTC
+; instant it falls due, the UTC days left).
+
+(test
+ (name test_goal_due)
+ (modules test_goal_due)
+ (libraries alcotest masc.masc_goal ptime))
 
 ; RFC-0267 Phase 2: validated task->goal assignment
 ; (Task.Goal_assignment.set_task_goal).
@@ -2981,6 +2989,8 @@
 (include stanzas/test_mcp_post_sse_e2e.inc)
 
 (include stanzas/test_mcp_server_eio_tool_profile_capability.inc)
+
+(include stanzas/test_tools_list_assignment_agent.inc)
 
 (include stanzas/test_mcp_seat_profile.inc)
 
@@ -4572,6 +4582,11 @@
  (name test_tui_link)
  (modules test_tui_link)
  (libraries alcotest base64 masc_tui_link))
+
+(test
+ (name test_tui_play_qr)
+ (modules test_tui_play_qr)
+ (libraries alcotest masc_tui_play_qr masc_tui_message_layout))
 
 (test
  (name test_tui_planning_order)

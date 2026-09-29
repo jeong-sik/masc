@@ -31,6 +31,7 @@ type t =
   | Lane_addons of string
   | Play_invites
   | Play_link
+  | Play_qr
   | Play_invite of { name : string; hours : int }
   | Play_revoke of string
   | Play_invalid of string

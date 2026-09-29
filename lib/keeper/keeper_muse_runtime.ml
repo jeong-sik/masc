@@ -1524,7 +1524,10 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
                 | Runtime_provider_usage_read.Already_reading -> ()
                 | Runtime_provider_usage_read.No_root_switch ->
                   Log.Keeper.warn ~keeper_name
-                    "Muse usage not read after model error: no server root switch")
+                    "Muse usage not read after model error: no server root switch"
+                | Runtime_provider_usage_read.Scheduling_failed ->
+                  Log.Keeper.warn ~keeper_name
+                    "Muse usage not read after model error: background scheduling failed")
              | Serve.Turn_failed _
              | Serve.Invalid_config _ | Serve.Spawn_failed _
              | Serve.Turn_input_write_failed _ | Serve.Protocol_error _

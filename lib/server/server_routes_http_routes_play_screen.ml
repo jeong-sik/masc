@@ -24,7 +24,8 @@ let screen_response () =
   | Error Dos_lane.No_machine -> Error (`Conflict, error_json "no_machine" "no DOS program is loaded")
   | Error
       (( Dos_lane.Invalid_request _ | Dos_lane.Unreadable _ | Dos_lane.Held_by _
-       | Dos_lane.Guest_fault _ | Dos_lane.Unsaveable _ | Dos_lane.Checkpoint_refused _ ) as err) ->
+       | Dos_lane.Guest_fault _ | Dos_lane.Unsaveable _ | Dos_lane.Checkpoint_refused _
+       | Dos_lane.Other_program _ ) as err) ->
     Error (`Internal_server_error, error_json "capture_failed" (Dos_lane.error_to_string err))
   | Ok (_observation, { Dos_lane.width; height; rgb }) ->
     (match

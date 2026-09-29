@@ -1132,10 +1132,13 @@ let test_transition_wal_commit_observer_exactly_once () =
            |> require_ok "commit observed transition WAL"
          in
          (match first with
-          | Persistence.Transition_applied _ -> ()
-          | Persistence.Transition_already_applied _
-          | Persistence.Transition_committed_followup_failed _ ->
-            Alcotest.fail "first terminal transition did not apply cleanly");
+          | Persistence.Turn_terminal_committed (Persistence.Transition_applied _) -> ()
+          | Persistence.Turn_terminal_committed
+              ( Persistence.Transition_already_applied _
+              | Persistence.Transition_committed_followup_failed _ ) ->
+            Alcotest.fail "first terminal transition did not apply cleanly"
+          | Persistence.Turn_selection_withdrawn ->
+            Alcotest.fail "turn terminal unexpectedly found its selection withdrawn");
          Alcotest.(check int) "WAL commit notifies once" 1 !notifications;
          let replay =
            Persistence.terminalize_pending_turn_completed_result
@@ -1147,10 +1150,13 @@ let test_transition_wal_commit_observer_exactly_once () =
            |> require_ok "replay observed transition WAL"
          in
          (match replay with
-          | Persistence.Transition_already_applied _ -> ()
-          | Persistence.Transition_applied _
-          | Persistence.Transition_committed_followup_failed _ ->
-            Alcotest.fail "transition WAL replay committed again");
+          | Persistence.Turn_terminal_committed (Persistence.Transition_already_applied _) -> ()
+          | Persistence.Turn_terminal_committed
+              ( Persistence.Transition_applied _
+              | Persistence.Transition_committed_followup_failed _ ) ->
+            Alcotest.fail "transition WAL replay committed again"
+          | Persistence.Turn_selection_withdrawn ->
+            Alcotest.fail "turn terminal unexpectedly found its selection withdrawn");
          Alcotest.(check int) "WAL replay does not notify" 1 !notifications))
 ;;
 
@@ -1259,9 +1265,12 @@ let test_undecodable_primary_retains_wal_and_absence_recovers () =
       ~base_path ~keeper_name ~applied_at:6.0 ~selection ()
       |> require_ok "completion replay after WAL-only recovery" in
     (match replay with
-     | Persistence.Transition_already_applied _ -> ()
-     | Persistence.Transition_applied _ | Persistence.Transition_committed_followup_failed _ ->
-         Alcotest.fail "completion replay lost its disposition evidence");
+     | Persistence.Turn_terminal_committed (Persistence.Transition_already_applied _) -> ()
+     | Persistence.Turn_terminal_committed
+         (Persistence.Transition_applied _ | Persistence.Transition_committed_followup_failed _) ->
+         Alcotest.fail "completion replay lost its disposition evidence"
+     | Persistence.Turn_selection_withdrawn ->
+         Alcotest.fail "turn terminal unexpectedly found its selection withdrawn");
     Alcotest.(check string) "unprojected recovery keeps WAL" wal_bytes (read wal))
 ;;
 
@@ -1523,10 +1532,13 @@ let test_durable_turn_attempt_terminal_restart () =
          ()
        |> require_ok "replay projected failed turn after restart"
      with
-     | Persistence.Transition_already_applied _ -> ()
-     | Persistence.Transition_applied _
-     | Persistence.Transition_committed_followup_failed _ ->
-       Alcotest.fail "projected failed turn replay committed twice");
+     | Persistence.Turn_terminal_committed (Persistence.Transition_already_applied _) -> ()
+     | Persistence.Turn_terminal_committed
+         ( Persistence.Transition_applied _
+         | Persistence.Transition_committed_followup_failed _ ) ->
+       Alcotest.fail "projected failed turn replay committed twice"
+     | Persistence.Turn_selection_withdrawn ->
+       Alcotest.fail "turn terminal unexpectedly found its selection withdrawn");
     Persistence.update_result ~base_path ~keeper_name (fun pending ->
       Queue.enqueue pending selection.source)
     |> require_ok "re-enqueue identical source";
@@ -1549,12 +1561,16 @@ let test_durable_turn_attempt_terminal_restart () =
          ~detail:"stale in-flight attempt"
          ()
      with
-     | Ok (Persistence.Transition_already_applied _) -> ()
+     | Ok (Persistence.Turn_terminal_committed (Persistence.Transition_already_applied _)) ->
+       ()
      | Ok
-         ( Persistence.Transition_applied _
-         | Persistence.Transition_committed_followup_failed _ )
+         (Persistence.Turn_terminal_committed
+            ( Persistence.Transition_applied _
+            | Persistence.Transition_committed_followup_failed _ ))
      | Error _ ->
-       Alcotest.fail "projected replay did not return its original receipt");
+       Alcotest.fail "projected replay did not return its original receipt"
+     | Ok Persistence.Turn_selection_withdrawn ->
+       Alcotest.fail "turn terminal unexpectedly found its selection withdrawn");
     let later_selection =
       Persistence.select_when_result
         ~base_path
@@ -1574,10 +1590,13 @@ let test_durable_turn_attempt_terminal_restart () =
          ()
        |> require_ok "terminalize later identical source"
      with
-     | Persistence.Transition_applied _ -> ()
-     | Persistence.Transition_already_applied _
-     | Persistence.Transition_committed_followup_failed _ ->
-       Alcotest.fail "later identical source did not commit a new terminal receipt");
+     | Persistence.Turn_terminal_committed (Persistence.Transition_applied _) -> ()
+     | Persistence.Turn_terminal_committed
+         ( Persistence.Transition_already_applied _
+         | Persistence.Transition_committed_followup_failed _ ) ->
+       Alcotest.fail "later identical source did not commit a new terminal receipt"
+     | Persistence.Turn_selection_withdrawn ->
+       Alcotest.fail "turn terminal unexpectedly found its selection withdrawn");
     let final_pending =
       Persistence.load_pending_result ~base_path ~keeper_name
       |> require_ok "reload after later identical source"
@@ -1673,11 +1692,15 @@ let test_durable_completed_turn_projects_reaction_ack () =
           ()
         |> require_ok "commit completed turn receipt"
       with
-      | Persistence.Transition_applied receipt
-      | Persistence.Transition_already_applied receipt ->
+      | Persistence.Turn_terminal_committed
+          ( Persistence.Transition_applied receipt
+          | Persistence.Transition_already_applied receipt ) ->
         receipt
-      | Persistence.Transition_committed_followup_failed { detail; _ } ->
+      | Persistence.Turn_terminal_committed
+          (Persistence.Transition_committed_followup_failed { detail; _ }) ->
         Alcotest.fail detail
+      | Persistence.Turn_selection_withdrawn ->
+        Alcotest.fail "turn terminal unexpectedly found its selection withdrawn"
     in
     Keeper_reaction_ledger.project_event_queue_transition_outbox_result
       ~base_path
@@ -1745,12 +1768,17 @@ let test_owner_terminalizes_consecutive_turns_without_projection_gap () =
           ~applied_at
           ~selection
       with
-      | Ok (Registry_event_queue.Acked _)
-      | Ok (Registry_event_queue.Already_acked _) -> ()
       | Ok
-          (Registry_event_queue.Ack_committed_followup_failed
-             { detail; _ }) ->
+          (Registry_event_queue.Turn_source_acked
+             (Registry_event_queue.Acked _ | Registry_event_queue.Already_acked _))
+        -> ()
+      | Ok
+          (Registry_event_queue.Turn_source_acked
+             (Registry_event_queue.Ack_committed_followup_failed
+                { detail; _ })) ->
         Alcotest.fail detail
+      | Ok Registry_event_queue.Turn_selection_withdrawn ->
+        Alcotest.fail "turn terminal unexpectedly found its selection withdrawn"
       | Error detail -> Alcotest.fail detail
     in
     terminalize 3.0;

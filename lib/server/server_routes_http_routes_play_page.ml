@@ -155,6 +155,8 @@ let controller = null;
 let machine = false;
 let since = null;
 let lastActivityKey = null;
+let latestSeatRequest = null;
+let handoffRead = null;
 let ended = false;
 let sending = Promise.resolve();
 // The saves name the seat last reported (null: nothing loaded), and the one
@@ -237,15 +239,23 @@ async function refreshSeat() {
   // Only a successful read may acknowledge the activity that prompted it.
   // A failed read after sending a move must be retried by the poll as well.
   lastActivityKey = null;
+  const request = {};
+  latestSeatRequest = request;
   let r;
   try {
     r = await api('GET', SEAT_PATH);
   } catch (_) {
+    if (ended || latestSeatRequest !== request) return false;
     setStatus('seat', '자리 정보를 읽지 못했어요. 다시 시도하고 있어요.');
     return false;
   }
-  if (ended) return false;
-  if (r.status !== 200 || !r.json || typeof r.json.machine !== 'boolean') {
+  if (ended || latestSeatRequest !== request) return false;
+  if (r.status !== 200 || !r.json || typeof r.json.machine !== 'boolean'
+      || typeof r.json.name !== 'string'
+      || !(r.json.controller === null || typeof r.json.controller === 'string')
+      || !(r.json.saves_name === null || typeof r.json.saves_name === 'string')
+      || !Array.isArray(r.json.participants)
+      || !r.json.participants.every(name => typeof name === 'string')) {
     setStatus('seat', '자리 정보를 읽지 못했어요 (' + r.status + ')');
     return false;
   }
@@ -254,9 +264,16 @@ async function refreshSeat() {
   machine = r.json.machine;
   renderTurn();
   renderPassTargets(r.json.participants);
-  seatSavesName = r.json.saves_name === undefined ? null : r.json.saves_name;
+  seatSavesName = r.json.saves_name;
   setStatus('seat', '');
   return true;
+}
+
+// A pointer opening also focuses the select. Those events share one read;
+// a later reopening still asks again even if the select never lost focus.
+function refreshHandoffTargets() {
+  if (ended || handoffRead !== null) return;
+  handoffRead = refreshSeat().finally(() => { handoffRead = null; });
 }
 
 function showPad(savesName, buttons) {
@@ -378,6 +395,7 @@ async function poll() {
     const live = r.json;
     if (live.state === 'no_machine') {
       since = null;
+      latestSeatRequest = null;
       machine = false;
       controller = null;
       seatSavesName = null;
@@ -393,8 +411,8 @@ async function poll() {
     }
     const activity = live.activity || [];
     renderActivity(activity);
-    // The feed moves on every press, pass and load; the seat is read again
-    // only then, instead of on every poll.
+    // Machine activity prompts a seat read; failed reads remain pending.
+    // Opening the handoff selector refreshes participants independently.
     const key = activity.length === 0 ? '' : JSON.stringify(activity[0]) + '#' + activity.length;
     if (key !== lastActivityKey && await refreshSeat()) lastActivityKey = key;
     await syncPad();
@@ -452,8 +470,14 @@ el('send-text').addEventListener('click', () => {
 el('text').addEventListener('keydown', (event) => { if (event.key === 'Enter') el('send-text').click(); });
 // Invites and Keeper seats can change while the machine is idle. Refresh
 // when choosing a handoff target; machine activity does not version this list.
-el('pass-to').addEventListener('focus', () => {
-  if (!ended) refreshSeat().catch(() => setStatus('seat', '자리 정보를 읽지 못했어요. 다시 시도하고 있어요.'));
+el('pass-to').addEventListener('focus', refreshHandoffTargets);
+el('pass-to').addEventListener('pointerdown', refreshHandoffTargets);
+el('pass-to').addEventListener('keydown', event => {
+  switch (event.key) {
+    case 'ArrowDown': case 'ArrowUp': case 'Enter': case ' ': case 'F4':
+      refreshHandoffTargets();
+      break;
+  }
 });
 el('pass').addEventListener('click', () => {
   const to = el('pass-to').value;

@@ -22,7 +22,7 @@ async function main() {
   await mkdir(output, { recursive: true });
   const browser = await chromium.launch({ headless: true });
   const requests = [], errors = [];
-  let seatReads = 0, frameReads = 0, passed = false, ejected = false;
+  let seatReads = 0, frameReads = 0, passed = false, ejected = false, padPressed = false, invited = false;
   try {
     const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
     page.on('pageerror', error => errors.push(error.message));
@@ -36,8 +36,12 @@ async function main() {
         seatReads += 1;
         if (seatReads <= 2) return route.fulfill({ status: 503, json: { error: 'fixture-unavailable' } });
         json = { name: 'minsu', machine: !ejected, controller: ejected ? null : passed ? 'operator' : 'minsu',
-          saves_name: ejected ? null : 'game', participants: ['minsu', 'operator'] };
+          saves_name: ejected ? null : 'game', participants: invited ? ['minsu', 'operator', 'newplayer'] : ['minsu', 'operator'] };
       } else if (url.pathname === '/api/v1/play/pad') {
+        if (request.method() === 'POST') {
+          assert.deepEqual(request.postDataJSON(), { button: 'BTN_SOUTH', saves_name: 'game' });
+          padPressed = true;
+        }
         json = request.method() === 'GET'
           ? { saves_name: 'game', buttons: [{ button: 'BTN_SOUTH', label: '결정', keys: ['return'] }] }
           : { ok: true };
@@ -69,6 +73,11 @@ async function main() {
     await page.screenshot({ path: resolve(output, 'play-recovered-mobile.png'), fullPage: true });
     await page.locator('#pad [data-button="BTN_SOUTH"]').click();
     await page.waitForFunction(() => document.getElementById('status').textContent === '');
+    await page.locator('#pass-to').focus();
+    invited = true;
+    await page.locator('#pass-to').click();
+    await page.waitForFunction(() => [...document.getElementById('pass-to').options].some(option => option.value === 'newplayer'));
+    await page.keyboard.press('Escape');
     await page.locator('#pass-to').selectOption('operator');
     await page.locator('#pass').click();
     await page.waitForFunction(() => document.getElementById('turn').textContent === 'operator 님 차례예요');
@@ -78,11 +87,12 @@ async function main() {
     assert.deepEqual(await pixel(), [0, 0, 0, 0]);
     await page.screenshot({ path: resolve(output, 'play-ejected-mobile.png'), fullPage: true });
     assert.deepEqual(errors, []);
+    assert.equal(padPressed, true);
     const receipt = { scope: 'Actual shipped page in Chromium with fixture API responses; no deployed binary or DOS emulator validation.',
       source_sha256: createHash('sha256').update(source).digest('hex'),
       browser_version: browser.version(), seat_reads: seatReads, frame_reads: frameReads,
       checks: ['seat recovers without machine activity', 'failed frame is fetched again',
-        'pad click sends input', 'pass updates controller', 'eject clears pixels'],
+        'pad click sends input', 'reopening focused selector discovers idle invite', 'pass updates controller', 'eject clears pixels'],
       requests, errors };
     await writeFile(resolve(output, 'play-browser.json'), JSON.stringify(receipt, null, 2) + '\n');
     console.log(JSON.stringify({ result: 'PASS', output, checks: receipt.checks }));

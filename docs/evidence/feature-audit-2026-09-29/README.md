@@ -1,6 +1,6 @@
 # Play recovery evidence
 
-The baseline is commit `2e6c4e51f0`. `play-before.txt` runs the same nine client scenarios against that revision's shipped page: one passes and eight fail. `play-after.txt` runs them against this correction: nine pass.
+The baseline is commit `2e6c4e51f0`. `play-before.txt` runs the same eleven client scenarios against that revision's shipped page: one passes and ten fail. `play-after.txt` runs them against this correction: eleven pass.
 
 ```sh
 node --test test/test_play_page_client.cjs
@@ -16,3 +16,5 @@ The scenarios cover failed seat reads without new activity, failed frame decodin
 The frame handling follows the browser APIs' failure behavior: [atob can reject malformed input](https://developer.mozilla.org/en-US/docs/Web/API/Window/atob), and [putImageData paints the supplied image data](https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/putImageData). A frame is acknowledged only after these operations succeed.
 
 PR-check and targeted OCaml CI are separate evidence and are linked from the PR. No local Dune build was run.
+
+`play-review-before.txt` runs the same eleven cases against the first correction (`0ef4249370`): nine pass and the two concurrent/reopened-selector cases fail. The follow-up ignores superseded seat responses and refreshes pointer/keyboard reopenings while coalescing one opening's events. The Node rule is also included in root runtest.

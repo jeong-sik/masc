@@ -1,13 +1,14 @@
 {
   "scope": "Actual shipped page in Chromium with fixture API responses; no deployed binary or DOS emulator validation.",
-  "source_sha256": "82b3df8bef6be56d063c2c5f1d4029b3ccb356e707f3df899bc582733354c7c2",
+  "source_sha256": "6ad016b1c6cf4988a50d602b8c8f2356ae9910396cb8619c5a2f19237b3810f0",
   "browser_version": "149.0.7827.55",
-  "seat_reads": 6,
+  "seat_reads": 8,
   "frame_reads": 3,
   "checks": [
     "seat recovers without machine activity",
     "failed frame is fetched again",
     "pad click sends input",
+    "reopening focused selector discovers idle invite",
     "pass updates controller",
     "eject clears pixels"
   ],
@@ -50,6 +51,16 @@
     {
       "method": "POST",
       "path": "/api/v1/play/pad",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
       "query": ""
     },
     {

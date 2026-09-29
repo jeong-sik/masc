@@ -12,3 +12,7 @@
  (alias runtest-test_play_page_client)
  (deps test_play_page_client.cjs ../lib/server/server_routes_http_routes_play_page.ml)
  (action (run node --test %{dep:test_play_page_client.cjs})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_play_page_client)))

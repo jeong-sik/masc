@@ -272,3 +272,57 @@ test('revoked access keeps controls disabled and stops sending moves', async () 
   await page.settle();
   assert.equal(page.requests.some(request => request.method === 'POST'), false);
 });
+
+test('an older seat response cannot overwrite a newer poll result', async () => {
+  let defer = false;
+  const pending = [];
+  const page = fixture(({ url }) => {
+    if (url === '/api/v1/play/seat') return defer
+      ? new Promise(resolve => pending.push(resolve)) : response(seat);
+    if (url === '/api/v1/play/pad') return response(layout);
+    return response(url.includes('since=') ? { ...frame, state: 'unchanged' } : frame);
+  });
+  await page.settle();
+  defer = true;
+  page.get('pass-to').handlers.focus?.();
+  const poll = page.poll();
+  await page.settle();
+  assert.equal(pending.length, 2);
+  pending[1](response({ ...seat, controller: 'operator' }));
+  await poll;
+  pending[0](response({ ...seat, machine: false, controller: null, saves_name: null }));
+  await page.settle();
+  assert.equal(page.get('turn').textContent, 'operator 님 차례예요');
+  assert.equal(page.get('pass').disabled, false);
+  defer = false;
+  await page.poll();
+  assert.equal(page.get('turn').textContent, 'operator 님 차례예요');
+});
+
+test('reopening a focused handoff selector refreshes new invites once per opening', async () => {
+  let invited = false;
+  let seatReads = 0;
+  const page = fixture(({ url }) => {
+    if (url === '/api/v1/play/seat') {
+      seatReads += 1;
+      return response(invited ? { ...seat, participants: [...seat.participants, 'newplayer'] } : seat);
+    }
+    if (url === '/api/v1/play/pad') return response(layout);
+    return response(frame);
+  });
+  await page.settle();
+  const select = page.get('pass-to');
+  const before = seatReads;
+  select.handlers.pointerdown?.();
+  select.handlers.focus?.();
+  await page.settle();
+  assert.equal(seatReads, before + 1, 'pointer plus focus share a read');
+  invited = true;
+  select.handlers.pointerdown?.();
+  await page.settle();
+  assert.equal(select.options.some(option => option.value === 'newplayer'), true);
+  const reopened = seatReads;
+  select.handlers.keydown?.({ key: 'ArrowDown' });
+  await page.settle();
+  assert.equal(seatReads, reopened + 1, 'keyboard reopening refreshes too');
+});

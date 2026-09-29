@@ -86,6 +86,10 @@ def main(executable: str, captures: Path | None) -> None:
         print("TUI_CAPTURE lane-addons Workers compact " + repr(worker_screen), flush=True)
         terminal.resize_and_wait(process, master, output, rows=24, columns=80,
             needle=b"Installed Add-ons", controls=(terminal.FULL_REDRAW,))
+        # The needle is drawn before the rows and the frame end that follow it,
+        # and frame_containing needs that end.
+        terminal.wait_for_output(process, master, output, terminal.FRAME_END,
+            start=output.rfind(b"Installed Add-ons"), timeout=3.0)
         narrow_output = bytes(output)
         needle_at = narrow_output.rfind(b"Installed Add-ons")
         frame_at = narrow_output.rfind(terminal.FRAME_START, 0, needle_at)

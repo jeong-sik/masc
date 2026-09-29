@@ -174,6 +174,14 @@ let masc_workspace_tool =
     (default_metadata ~required_permission:Masc_domain.CanBroadcast)
 
 let read_state_tool = readonly_tool
+
+(* The shared machine's seat (RFC-play-link-for-the-shared-machine §2.3): an
+   invited Player holds only CanPlayMachine. Loading, ejecting, restoring and
+   saving change the game itself, and peek reads what the screen hides, so
+   those keep the permissions above. *)
+let play_machine_read_tool =
+  with_required_permission Masc_domain.CanPlayMachine read_state_tool
+let play_machine_tool = with_required_permission Masc_domain.CanPlayMachine mutating_tool
 let broadcast_tool = masc_workspace_tool
 let add_task_tool = with_required_permission Masc_domain.CanAddTask masc_workspace_tool
 let claim_task_tool = with_required_permission Masc_domain.CanClaimTask masc_workspace_tool
@@ -248,17 +256,17 @@ let explicit_metadata : (string * metadata) list =
     ("masc_msx_step_until_change", mutating_tool);
     ("masc_msx_peek", read_state_tool);
     ("masc_msx_ram_diff", read_state_tool);
-    ("masc_dos_screen", read_state_tool);
+    ("masc_dos_screen", play_machine_read_tool);
     ("masc_dos_peek", read_state_tool);
     ("masc_dos_load", mutating_tool);
-    ("masc_dos_pass", mutating_tool);
+    ("masc_dos_pass", play_machine_tool);
     ("masc_dos_save", mutating_tool);
     ("masc_dos_restore", mutating_tool);
     ("masc_dos_eject", mutating_tool);
-    ("masc_dos_step", mutating_tool);
-    ("masc_dos_press", mutating_tool);
+    ("masc_dos_step", play_machine_tool);
+    ("masc_dos_press", play_machine_tool);
     ("masc_dos_click", mutating_tool);
-    ("masc_dos_type", mutating_tool);
+    ("masc_dos_type", play_machine_tool);
     ("masc_agent_card", read_state_tool);
     ("masc_dashboard", read_state_tool);
     ("masc_board_list", read_state_tool);
@@ -403,6 +411,12 @@ let explicit_metadata : (string * metadata) list =
     ("masc_board_sub_board_delete", broadcast_tool);
     ("masc_board_cleanup", admin_tool);
     ("masc_board_delete", admin_tool);
+    (* task-1758/#39356: author self-service tier, same [require_post_author]
+       handler gate as sub_board_delete above -- reversible state, not the
+       permanent post-plus-comments-plus-votes removal [masc_board_delete]
+       does, so it stays at the ordinary keeper tier rather than admin_tool. *)
+    ("masc_board_close", broadcast_tool);
+    ("masc_board_reopen", broadcast_tool);
     ("masc_gc", admin_tool);
     (* POST /api/v1/prompts. An override replaces a prompt for every keeper the
        runtime serves, so it carries the same admin permission as the other

@@ -31,7 +31,10 @@ import { route } from '../router'
 import { dashboardWsConnected } from '../dashboard-ws-state'
 import { tweaksDensity } from './tweaks-panel'
 import { notificationDeliveryError, notifyRules } from '../notifications'
-import { committedRuntimeTomlConfigFixture } from '../lib/runtime-config-receipt.test-fixture'
+import {
+  committedRuntimeTomlConfigFixture,
+  runtimeReservedProviderIdsFixture,
+} from '../lib/runtime-config-receipt.test-fixture'
 
 const MOCK_RUNTIME_PATH = 'fixture/config/runtime.toml'
 const runtimeProviderProtocols = [
@@ -1086,6 +1089,7 @@ describe('SettingsSurface', () => {
           source_text: '[runtime]\ndefault = "rt-a"\n',
           reloaded: false,
           provider_protocols: runtimeProviderProtocols,
+          reserved_provider_ids: [...runtimeReservedProviderIdsFixture],
         }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
@@ -1977,6 +1981,7 @@ describe('SettingsSurface', () => {
       source_text: '[runtime]\ndefault = "runpod_mtp.qwen"\n',
       reloaded: false,
       provider_protocols: runtimeProviderProtocols,
+      reserved_provider_ids: [...runtimeReservedProviderIdsFixture],
     }
     apiMock.fetchRuntimeTomlConfig.mockResolvedValueOnce(runtimeConfig)
 

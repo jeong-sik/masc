@@ -14,6 +14,9 @@ let runtime_label = "Antigravity"
 let config_error = Keeper_official_client_host.config_error
 let internal_error = Keeper_official_client_host.internal_error
 
+(* Where an unexpected exception left the Antigravity runtime. *)
+let runtime_boundary_site = "antigravity.runtime_boundary"
+
 let runtime_error_to_core_error = function
   | Runtime_antigravity.Invalid_config detail ->
     config_error ~field:"antigravity_cli" detail
@@ -39,6 +42,12 @@ let runtime_error_to_core_error = function
     Agent_core.Error.Provider
       (Llm_provider.Error.ParseError
          { detail = Printf.sprintf "%s: %s" stage detail })
+  (* A host-side failure, not the CLI's reply; see the Claude Code runtime
+     for why it is not a parse error (#39768). *)
+  | Runtime_antigravity.Unhandled_exception exn_repr ->
+    Keeper_internal_error.core_error_of_masc_internal_error
+      (Keeper_internal_error.Internal_unhandled_exception
+         { site = runtime_boundary_site; exn_repr; transport_error_kind = None })
   | Runtime_antigravity.State_callback_failed detail -> internal_error detail
 ;;
 
@@ -49,6 +58,9 @@ let recovery_failure_of_runtime_error = function
   | Runtime_antigravity.Invalid_config _
   | Runtime_antigravity.Protocol_error _ ->
     Session_store.Protocol_failed
+  (* No recovery kind names a host exception; Protocol_failed carries its
+     Ambiguous disposition, and the record's detail names the exception. *)
+  | Runtime_antigravity.Unhandled_exception _ -> Session_store.Protocol_failed
   | Runtime_antigravity.State_callback_failed _ ->
     Session_store.State_persistence_failed
   | Runtime_antigravity.Turn_failed _ -> Session_store.Provider_rejected
@@ -825,17 +837,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
       ; sandbox = true
       ; disable_slash_commands = true
       ; admission_timeout_s = config.timeout_s
-      ; (* A per-model [turn-timeout-s] overrides the stream-idle bound, and
-           [0] removes it: the deadline exists to notice a client that has gone
-           silent, not to cap how long legitimate work may take, so a
-           deployment is allowed to say the client decides. Absent leaves
-           [config.timeout_s] standing, which keeps an undeclared config on the
-           previous behaviour. *)
-        timeout_s =
-          (match Runtime_inference.resolve_turn_timeout_s ~runtime_id with
-           | None -> Some config.timeout_s
-           | Some seconds when seconds <= 0.0 -> None
-           | Some seconds -> Some seconds)
+      ; timeout_s = Runtime_inference.resolve_turn_timeout_s_or ~runtime_id ~default:config.timeout_s
       (* A keeper turn is a conversation, not a schema contract: nothing
          downstream parses its text against a domain schema. *)
       ; output_schema = None
@@ -1384,6 +1386,8 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
 ;;
 
 module For_testing = struct
+  let runtime_error_to_core_error = runtime_error_to_core_error
+
   let report_stream_usage ~turn_count ~position ~report event =
     (stream_projection
        ~keeper_name:"test"

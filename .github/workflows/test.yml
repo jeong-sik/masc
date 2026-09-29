@@ -122,7 +122,7 @@ concurrency:
 jobs:
   test:
     name: test suite
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # This cap counts from job start, not from the Test step. On an opam
     # cache miss the setup steps can consume 40-75 minutes (compiler
     # bootstrap plus up to three 20-minute install attempts), so 180 =
@@ -140,7 +140,7 @@ jobs:
     steps:
       - name: Free disk space
         # Same cleanup as ci.yml: linking the test executables is
-        # disk-heavy, and ubuntu-latest preinstalls the Android SDK,
+        # disk-heavy, and ubuntu-24.04 preinstalls the Android SDK,
         # .NET, GHC and the CodeQL bundle this build never uses.
         # See: https://github.com/jeong-sik/masc/issues/22954
         run: |

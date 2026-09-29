@@ -770,12 +770,31 @@ let test_keeper_calls_keep_the_reason_beside_the_verdict () =
          (Some "telemetry gap at 2026-09-06T02:00Z")
          decoded.Tui_decode.kcs_stale_reason;
        Alcotest.(check string) "and the verdict beside it" "coverage_gap"
-         decoded.Tui_decode.kcs_health);
+         (Tui_decode.keeper_call_log_health_to_string
+            decoded.Tui_decode.kcs_health));
   match snapshot "ok" with
   | Error detail -> Alcotest.failf "an ok snapshot must decode: %s" detail
   | Ok decoded ->
       Alcotest.(check (option string)) "a healthy log claims no reason" None
         decoded.Tui_decode.kcs_stale_reason
+
+(* A word the server adds later must not break the snapshot decode. Readers
+   fail it closed to an incomplete log; the header still prints it verbatim. *)
+let test_keeper_calls_unknown_health_word_still_decodes () =
+  match
+    Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"largo"
+      (`Assoc
+         [ "keeper", `String "largo"
+         ; "count", `Int 0
+         ; "health", `String "degraded"
+         ; "entries", `List []
+         ])
+  with
+  | Error detail -> Alcotest.failf "an unknown verdict must decode: %s" detail
+  | Ok decoded ->
+      Alcotest.(check string) "the word survives verbatim" "degraded"
+        (Tui_decode.keeper_call_log_health_to_string
+           decoded.Tui_decode.kcs_health)
 
 let test_keeper_calls_reject_partial_or_unknown_schedule () =
   let decode row =
@@ -842,11 +861,12 @@ let test_keeper_calls_reject_rows_naming_another_keeper () =
       Alcotest.(check (option string)) "a fresh stale_reason is no reason" None
         snapshot.Tui_decode.kcs_stale_reason;
       Alcotest.(check string) "health verbatim" "ok"
-        snapshot.Tui_decode.kcs_health
+        (Tui_decode.keeper_call_log_health_to_string
+           snapshot.Tui_decode.kcs_health)
 
 (* The envelope has always carried what a call answered; the row did not read
-   it, so a call that failed said so without saying why. Absent and empty stay
-   absent: a row that carried no result is not a call that answered "". *)
+   it, so a call that failed said so without saying why. Empty and whitespace
+   answers remain present; null means that no output was recorded. *)
 let test_keeper_calls_carry_what_the_call_answered () =
   let row ~output =
     `Assoc
@@ -878,11 +898,12 @@ let test_keeper_calls_carry_what_the_call_answered () =
           snapshot.Tui_decode.kcs_entries
   in
   Alcotest.(check (list (option string)))
-    "text kept, absent and blank stay absent, a non-string is serialised"
-    [ Some "a.ml  b.ml"; None; None; Some {|{"code":0}|} ]
+    "text and empty output stay present, null is absent, non-string is serialised"
+    [ Some "a.ml  b.ml"; None; Some ""; Some "   "; Some {|{"code":0}|} ]
     (outputs
        [ row ~output:(`String "a.ml  b.ml")
        ; row ~output:`Null
+       ; row ~output:(`String "")
        ; row ~output:(`String "   ")
        ; row ~output:(`Assoc [ "code", `Int 0 ])
        ])
@@ -6065,7 +6086,6 @@ let standalone_lane_json ?purpose ?(status = "idle") ?(retained = 3)
     ; "dropped_slots", `List []
     ; "declared_slots", `List [ `String "qwen-primary" ]
     ; "declared_cli_slots", `List []
-    ; "supports_cli_tail", `Bool true
     ; "admission_error", `Null
     ; "status", `String status
     ; "retained_run_count", `Int retained
@@ -6181,7 +6201,7 @@ let test_a_lane_configuration_clause_carries_its_own_subject () =
   List.iter
     (fun state ->
       let line =
-        Printf.sprintf "Required lane %s no run has finished" (clause state)
+        Printf.sprintf "Required lane %s no retained terminal observation" (clause state)
       in
       List.iter
         (fun stutter ->
@@ -8406,7 +8426,7 @@ let test_exact_slot_group_is_typed () =
       `Assoc
         (List.map
            (fun (key, value) ->
-              if String.equal key "exact_slot_group" then key, `String group
+              if String.equal key "exact_slot_group" then key, group
               else key, value)
            fields)
     | value -> value
@@ -8424,16 +8444,23 @@ let test_exact_slot_group_is_typed () =
     | value -> value
   in
   (match Tui_decode.decode_runtime_resolved
-           (change_second_runtime "cli_slots" runtime_resolved_json) with
+           (change_second_runtime (`String "cli_slots") runtime_resolved_json) with
    | Ok ([ _; cli ], _) ->
      Alcotest.(check bool) "official client appends to CLI tail" true
        (cli.ro_exact_slot_group = Tui_decode.Exact_cli_slots)
    | Ok _ -> Alcotest.fail "expected two runtimes"
    | Error detail -> Alcotest.fail detail);
+  (match Tui_decode.decode_runtime_resolved
+           (change_second_runtime `Null runtime_resolved_json) with
+   | Ok ([ _; unsupported ], _) ->
+     Alcotest.(check bool) "schema-less client remains a regular runtime" true
+       (unsupported.ro_exact_slot_group = Tui_decode.Exact_output_unsupported)
+   | Ok _ -> Alcotest.fail "expected two runtimes"
+   | Error detail -> Alcotest.fail detail);
   Alcotest.(check bool) "unknown destination refuses the catalog" true
     (Result.is_error
        (Tui_decode.decode_runtime_resolved
-          (change_second_runtime "other" runtime_resolved_json)))
+          (change_second_runtime (`String "other") runtime_resolved_json)))
 
 (* [declared] tells a lane a table declares from the single candidate an
    assignment naming a runtime rests on. The two are the same shape otherwise,
@@ -12461,6 +12488,8 @@ let () =
           test_keeper_calls_reject_partial_or_unknown_schedule
       ; Alcotest.test_case "keeps the reason beside the verdict" `Quick
           test_keeper_calls_keep_the_reason_beside_the_verdict
+      ; Alcotest.test_case "an unknown health word still decodes" `Quick
+          test_keeper_calls_unknown_health_word_still_decodes
       ; Alcotest.test_case "rejects rows naming another keeper" `Quick
           test_keeper_calls_reject_rows_naming_another_keeper
       ; Alcotest.test_case "requires the envelope" `Quick

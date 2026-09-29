@@ -641,6 +641,31 @@ let decode_board_post ?(require_body = false) json =
     | `Int value -> Some (Float.of_int value)
     | _ -> None
   in
+  (* task-1758/#39356: [closed] is absent on an open post (or one minted
+     before this field existed), an object on a closed one. Only closed_by
+     is required inside it; closed_at/successor_id/summary each degrade to
+     [None] independently rather than failing the whole post read, the same
+     shape [decode_schedule_actor]'s nested reads already use elsewhere in
+     this file. *)
+  let* bp_closed =
+    match Yojson.Safe.Util.member "closed" json with
+    | `Null -> Ok None
+    | `Assoc _ as nested ->
+        let* bpc_closed_by = required_string_field nested "closed_by" in
+        let* bpc_successor_id = optional_string_field nested "successor_id" in
+        let* bpc_summary = optional_string_field nested "summary" in
+        let bpc_closed_at =
+          match Yojson.Safe.Util.member "closed_at" nested with
+          | `Float value -> Some value
+          | `Int value -> Some (Float.of_int value)
+          | _ -> None
+        in
+        Ok (Some { bpc_closed_by; bpc_closed_at; bpc_successor_id; bpc_summary })
+    | value ->
+        Error
+          (Printf.sprintf "board post closed must be an object or null: %s"
+             (Yojson.Safe.to_string value))
+  in
   let* bp_hearth = optional_string_field json "hearth" in
   let* raw_kind = optional_string_field json "post_kind" in
   (* Optional, and an unknown value is carried rather than rejected: the list
@@ -670,6 +695,7 @@ let decode_board_post ?(require_body = false) json =
          | None -> created_at_epoch);
       bp_hearth;
       bp_kind;
+      bp_closed;
     }
 
 (* The board's own hearth census: name and post count, over the whole board.
@@ -827,6 +853,9 @@ let decode_schedule_row json =
     optional_string_field json "payload_dispatch_tool"
   in
   let* sch_payload_target = optional_string_field json "payload_target" in
+  let* sch_payload_keeper_name =
+    optional_string_field json "payload_keeper_name"
+  in
   let* sch_payload_summary = optional_string_field json "payload_summary" in
   let* sch_last_wake_status =
     (* The server writes this from [wake_status_to_string], so a word the
@@ -941,6 +970,7 @@ let decode_schedule_row json =
     ; sch_payload_support
     ; sch_payload_dispatch_tool
     ; sch_payload_target
+    ; sch_payload_keeper_name
     ; sch_payload_summary
     ; sch_last_wake_status
     ; sch_last_wake_started_at_iso
@@ -1129,18 +1159,21 @@ let load_board_list ~(host : string) ~(port : int)
 (** Load board post detail from /api/v1/board/<postId> *)
 let load_board_post ~(host : string) ~(port : int) ~(post_id : string) :
     (board_post * board_comment list, string) result =
-  match fetch_board_post ~host ~port ~post_id with
+  match Masc_tui_frame_timing.time_stage ~name:"board.http_json"
+          (fun () -> fetch_board_post ~host ~port ~post_id) with
   | Error err -> Error err
   | Ok json ->
-      let post_json =
-        match Yojson.Safe.Util.member "post" json with
-        | `Null -> json
-        | value -> value
-      in
-      let* post = decode_board_post ~require_body:true post_json in
-      let* comments_json = optional_list_field json "comments" in
-      let* comments = decode_board_comments comments_json in
-      Ok (post, comments)
+      Masc_tui_frame_timing.time_stage ~name:"board.model_decode"
+        (fun () ->
+          let post_json =
+            match Yojson.Safe.Util.member "post" json with
+            | `Null -> json
+            | value -> value
+          in
+          let* post = decode_board_post ~require_body:true post_json in
+          let* comments_json = optional_list_field json "comments" in
+          let* comments = decode_board_comments comments_json in
+          Ok (post, comments))
 
 (** Load the actor-scoped pending confirmation envelope from the operator
     surface. Missing or malformed envelopes remain explicit errors. *)
@@ -1351,6 +1384,16 @@ let load_keeper_spend ~(host : string) ~(port : int) :
   match Masc_tui_http.fetch_keeper_costs ~host ~port with
   | Error err -> Error err
   | Ok json -> Masc_tui_keeper_spend.decode_reading json
+
+(* The Overview's Plan usage section names each account's email. The route
+   needs Admin, and a read that fails is said beside the section rather than
+   drawn as accounts without an email. The section names the failure, so the
+   reason is passed on as the transport gave it. *)
+let load_account_emails ~(host : string) ~(port : int) :
+    ((string * string) list * int, string) result =
+  match Masc_tui_http.fetch_account_emails ~host ~port with
+  | Error err -> Error err
+  | Ok json -> Masc_tui_account_login.emails_of_document json
 
 (* The Overview's GOALS section. A phase this build does not know refuses the
    whole reading: a goal dropped from the list, or drawn under a phase it is

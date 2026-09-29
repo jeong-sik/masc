@@ -24,7 +24,7 @@ name: PR check
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
 
 permissions:
   contents: read
@@ -37,7 +37,7 @@ jobs:
   tla:
     if: github.event.pull_request.draft == false
     name: TLA model check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - name: Checkout
@@ -89,7 +89,7 @@ jobs:
   lint:
     if: github.event.pull_request.draft == false
     name: lint suite
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - name: Checkout
@@ -192,7 +192,7 @@ jobs:
   check:
     if: github.event.pull_request.draft == false
     name: dune build @check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Run 36009641291 selected 268 linked suites after a 5m40s PTY rule;
     # 151 selected suites were still unrun at the former 18-minute budget.
     # The job's setup and build took about nine minutes before this step.
@@ -436,7 +436,7 @@ jobs:
   release-check:
     if: github.event.pull_request.draft == false
     name: dune build --profile release @check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       contents: read
@@ -495,7 +495,7 @@ jobs:
   dashboard-types:
     if: github.event.pull_request.draft == false
     name: dashboard typecheck
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Checkout
@@ -571,3 +571,32 @@ jobs:
           path: assets/dashboard/
           include-hidden-files: true
           if-no-files-found: error
+
+  required-success:
+    # GitHub treats a skipped required job as successful. Keep one job running
+    # even when the five checks above skip on a Draft PR.
+    if: always()
+    name: PR required success
+    needs: [tla, lint, check, release-check, dashboard-types]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require Ready and five successful jobs
+        env:
+          PR_DRAFT: ${{ github.event.pull_request.draft }}
+          TLA_RESULT: ${{ needs.tla.result }}
+          LINT_RESULT: ${{ needs.lint.result }}
+          CHECK_RESULT: ${{ needs.check.result }}
+          RELEASE_RESULT: ${{ needs['release-check'].result }}
+          DASHBOARD_RESULT: ${{ needs['dashboard-types'].result }}
+        run: |
+          set -euo pipefail
+          printf 'draft=%s tla=%s lint=%s check=%s release=%s dashboard=%s\n' \
+            "$PR_DRAFT" "$TLA_RESULT" "$LINT_RESULT" "$CHECK_RESULT" \
+            "$RELEASE_RESULT" "$DASHBOARD_RESULT"
+          test "$PR_DRAFT" = false
+          test "$TLA_RESULT" = success
+          test "$LINT_RESULT" = success
+          test "$CHECK_RESULT" = success
+          test "$RELEASE_RESULT" = success
+          test "$DASHBOARD_RESULT" = success

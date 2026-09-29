@@ -74,6 +74,7 @@ let make_post ~id ~author =
     hearth = None;
     thread_id = None;
     origin = None;
+    closed = None;
   }
 
 let check_bad_request label expected = function

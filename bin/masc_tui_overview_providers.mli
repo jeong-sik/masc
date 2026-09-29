@@ -1,4 +1,4 @@
-(** The Overview's Providers section: one strip per provider account, the way
+(** The Overview's Plan usage section: one strip per provider account, the way
     a mixer shows one channel strip per input. Each strip says how full the
     account's usage windows are, when they reset, and how long ago the
     provider said so.
@@ -6,7 +6,9 @@
     Every value is the provider's own report, as
     [GET /api/v1/runtime/resolved] carries it. Nothing here guesses a
     threshold: a meter is drawn in the exhausted style only when the reported
-    value is at or past the full value of its own unit. The one other fact
+    value is at or past the full value of its own unit and the server did not
+    classify the window as counting something a model call does not need;
+    such a window is drawn dim whatever its value. The one other fact
     drawn is the runtime catalogue's [quota_exhausted], as an
     [exhausted (observed)] tag on the account whose quota scope it names.
 
@@ -18,18 +20,48 @@ type section = {
       (** The section's rows in draw order: reported accounts first, then by
           account name. A budget shorter than this list cuts from the
           bottom. *)
+  account_count : int;
+      (** Accounts represented by those rows. One account can have several
+          usage windows, so this can be smaller than [List.length lines]. *)
+  account_row_counts : int list;
+      (** Row count per account, in display order. *)
+  note_lines : string list;
+      (** Runtime catalogue errors, then a failed email read, after the
+          account rows. *)
 }
+
+type visible = {
+  lines : string list;
+  shown_accounts : int;
+  hidden_accounts : int;
+  hidden_notes : int;
+}
+
+val visible_rows : section -> rows:int -> visible
+(** Only complete account groups fit. One row is reserved to say what was
+    omitted when the section is taller than its budget. *)
 
 val section :
   providers:Masc_tui_types.overview_providers_reading ->
   runtimes:Masc_tui_types.overview_quota_reading ->
+  account_emails:Masc_tui_types.overview_account_emails_reading ->
   now:float ->
   width:int ->
   section option
-(** [None] before the first read and when the catalogue names no provider
-    account. A failed read is one line,
-    ["providers unavailable: <reason>"]. [width] is the cells a row may use;
-    the meters take what the other columns leave. *)
+(** [None] before the first read. An account that has not reported since the
+    server started draws no row unless the runtime catalogue observed its
+    quota exhausted; then it draws one ["no usage data"] row with that tag. A
+    read with no row to draw says ["no usage data"]. A failed read is one line,
+    ["usage data unavailable: <reason>"]. [width] is the cells a row may use;
+    a meter takes what the other columns leave, from 10 to 24 cells. When
+    even 10 cells do not fit beside the hearing age, the age is left out.
+
+    An account whose providers have a read email draws it dim under its name.
+    The name column is as wide as the widest account name: an email that fits
+    it goes on the account's second window row, and otherwise, or when the
+    account draws one row, on a row of its own. A failed email read adds one
+    note, ["account emails unread: <reason>"], after the runtime notes, and so
+    do rows this build cannot read. *)
 
 val utilization_text : Masc.Tui_decode.provider_usage_utilization -> string
 (** The value as a whole percent, so accounts read in one unit. A percent is

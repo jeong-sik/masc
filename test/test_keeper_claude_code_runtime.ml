@@ -2625,6 +2625,29 @@ let test_a_closed_client_connection_is_typed () =
       (Agent_core.Error.to_string other)
 ;;
 
+(* #39768: an exception nothing in the runtime expected -- here the refused
+   process-group signal that ended a finished turn -- is a masc internal
+   failure. As a protocol error it read "Parse error" and stopped the lane
+   walk as if no candidate could read the reply. *)
+let test_an_unhandled_runtime_exception_is_internal () =
+  let exn_repr = "Unix.Unix_error(Unix.EPERM, \"kill\", \"\")" in
+  let core =
+    Keeper_claude_code_runtime.For_testing.claude_error_to_core_error
+      (Runtime_claude_code.Unhandled_exception exn_repr)
+  in
+  match Keeper_internal_error.classify_masc_internal_error core with
+  | Some
+      (Keeper_internal_error.Internal_unhandled_exception
+         { site; exn_repr = recorded; transport_error_kind }) ->
+    check string "site" "claude_code.runtime_boundary" site;
+    check string "exception" exn_repr recorded;
+    check bool "not a transport failure" true (Option.is_none transport_error_kind)
+  | Some _ | None ->
+    failf
+      "an unhandled runtime exception must be a masc internal error, got %s"
+      (Agent_core.Error.to_string core)
+;;
+
 (* A start seed begins where the last completed turn's range did, whichever
    runtime measured it: this lane cuts from the keeper's checkpoint history
    like every Agent Core candidate, so the same position names the same atoms
@@ -3383,6 +3406,10 @@ let () =
             "a closed client connection is typed"
             `Quick
             test_a_closed_client_connection_is_typed
+        ; test_case
+            "an unhandled runtime exception is a masc internal error"
+            `Quick
+            test_an_unhandled_runtime_exception_is_internal
         ] )
     ; ( "start seed"
       , [ test_case

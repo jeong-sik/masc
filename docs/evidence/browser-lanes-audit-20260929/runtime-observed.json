@@ -1,0 +1,21 @@
+{
+  "observed_at": "2026-09-28T23:41:31Z",
+  "server": {
+    "binary_version": "0.46.0",
+    "binary_commit": "c183bd896cdc4b7ad4b3a2addd4865ef643220cd",
+    "executable_sha256": "2172e2e8e8f74254cc12c7e2f3fe10bedf9878cd724c1c5e36e230650f8cd9af",
+    "started_at": "2026-09-28T23:33:51Z"
+  },
+  "overall_status": "degraded",
+  "dashboard": {
+    "status": "unknown",
+    "source_provenance": "unknown",
+    "index_sha256": "8e3b1f76c3619a1ea72494125e462bd1b3b4c49d72ba8fd5cf5c0870b35adb61",
+    "build_source_commit": null,
+    "recovery": {
+      "kind": "install_matching_ci_artifacts",
+      "reason": "unbound_identity_unavailable",
+      "restart_required": false
+    }
+  }
+}

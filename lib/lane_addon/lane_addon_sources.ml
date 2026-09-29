@@ -39,6 +39,40 @@ let kind_of_string = function
   | "browser_document" -> Some Browser_document_kind
   | _ -> None
 
+(* Which Browser Lane backend can be read as a [browser_document] source, and
+   how. [offers] and [parse] both read this one match. *)
+type document_observer =
+  | Operator_client_observer
+  | Automation_observer
+  | No_idle_document_observer
+
+let document_observer = function
+  | Browser_lane.Lane_name.Live -> Operator_client_observer
+  | Browser_lane.Lane_name.Automation -> Automation_observer
+  (* The Stagehand backend has no idle document observer; the optional source
+     is unavailable there, as it is for a busy browser. *)
+  | Browser_lane.Lane_name.Stagehand -> No_idle_document_observer
+
+let kind_of_machine = function
+  | Machine_lane.Msx -> Msx_capture_kind
+  | Machine_lane.Dos -> Dos_capture_kind
+
+let offers : Lane_id.builtin -> kind list = function
+  | Lane_id.Exact
+      ( Standalone_lane.Librarian | Standalone_lane.Hitl_auto_judge
+      | Standalone_lane.Board_attention | Standalone_lane.Workspace_curator
+      | Standalone_lane.Verifier | Standalone_lane.Browser_stagehand ) -> []
+  | Lane_id.Browser lane ->
+    (match document_observer lane with
+     | Operator_client_observer | Automation_observer -> [ Browser_document_kind ]
+     | No_idle_document_observer -> [])
+  | Lane_id.Machine machine -> [ kind_of_machine machine ]
+
+let observable_browser_lanes =
+  List.filter
+    (fun lane -> List.mem Browser_document_kind (offers (Lane_id.Browser lane)))
+    Browser_lane.Lane_name.all
+
 let text fields key = match List.assoc_opt key fields with
   | Some (`String value) when String.trim value <> "" -> Ok value
   | _ -> Error (key ^ " requires a non-blank string")
@@ -77,17 +111,20 @@ let parse_source = function
            let lane = match List.assoc_opt "lane" fields with
              | Some (`String raw) -> Browser_lane.Lane_name.of_wire raw
              | Some _ | None -> None in
-           let* selection = match lane, client_id with
-             | Some Browser_lane.Lane_name.Live, Some client -> Ok (Live client)
-             | Some Browser_lane.Lane_name.Live, None -> Error "live browser observation requires an explicit client_id"
-             | Some Browser_lane.Lane_name.Automation, None -> Ok Automation
-             | Some Browser_lane.Lane_name.Automation, Some _ -> Error "automation does not use a live client_id"
-             | Some Browser_lane.Lane_name.Stagehand, _ ->
-               Error "a lane addon cannot observe the stagehand lane: it has no idle document observer"
-             | None, _ ->
+           let* selection = match lane with
+             | None ->
                Error ("browser source requires "
-                      ^ String.concat " or " (List.map Browser_lane.Lane_name.to_wire Browser_lane.Lane_name.[ Live; Automation ])
-                      ^ " lane") in
+                      ^ String.concat " or " (List.map Browser_lane.Lane_name.to_wire observable_browser_lanes)
+                      ^ " lane")
+             | Some lane ->
+               (match document_observer lane, client_id with
+                | Operator_client_observer, Some client -> Ok (Live client)
+                | Operator_client_observer, None -> Error "live browser observation requires an explicit client_id"
+                | Automation_observer, None -> Ok Automation
+                | Automation_observer, Some _ -> Error "automation does not use a live client_id"
+                | No_idle_document_observer, _ ->
+                  Error ("a lane addon cannot observe the " ^ Browser_lane.Lane_name.to_wire lane
+                         ^ " lane: it has no idle document observer")) in
            let* tab_id = match List.assoc_opt "tab_id" fields with
              | Some (`Int value) when value >= 0 -> Ok value
              | _ -> Error "tab_id requires a nonnegative integer" in
@@ -108,24 +145,18 @@ let parse = function
   | _ -> Error "binding requires an object"
 let source_id = function Snapshot_file {id;_} | Msx_capture {id} | Dos_capture {id}
   | Lane_output {id;_} | Browser_document {id;_} -> id
-type live_reader = Msx_screen | Dos_screen
-
-let kind_of_live_reader = function
-  | Msx_screen -> Msx_capture_kind
-  | Dos_screen -> Dos_capture_kind
-
-let live_screen_of_kind = function
-  | Msx_capture_kind -> Some Msx_screen
-  | Dos_capture_kind -> Some Dos_screen
+let machine_of_kind = function
+  | Msx_capture_kind -> Some Machine_lane.Msx
+  | Dos_capture_kind -> Some Machine_lane.Dos
   | Snapshot_file_kind | Lane_output_kind | Browser_document_kind -> None
 
-type activity = Tool_completed | Msx_changed | Dos_changed | Browser_changed
+type activity = Tool_completed | Machine_changed of Machine_lane.t | Browser_changed
 type refresh_interest = source list
 let refresh_interest = parse
 let interested sources activity = List.exists (function
   | Snapshot_file _ -> true
-  | Msx_capture _ -> activity=Msx_changed
-  | Dos_capture _ -> activity=Dos_changed
+  | Msx_capture _ -> activity=Machine_changed Machine_lane.Msx
+  | Dos_capture _ -> activity=Machine_changed Machine_lane.Dos
   | Browser_document _ -> activity=Browser_changed
   | Lane_output _ -> false) sources
 (* Which typed activity a finished misc tool stands for, named beside the
@@ -135,14 +166,14 @@ let interested sources activity = List.exists (function
    (screen, peek, ram_diff, tabs, read) do not move a source. *)
 let activity_of_misc_operation : Tool_schemas_misc.misc_operation -> activity = function
   | Misc_msx_load | Misc_msx_eject | Misc_msx_restore | Misc_msx_change_disk
-  | Misc_msx_press | Misc_msx_step | Misc_msx_step_until_change -> Msx_changed
+  | Misc_msx_press | Misc_msx_step | Misc_msx_step_until_change -> Machine_changed Machine_lane.Msx
   | Misc_dos_load | Misc_dos_eject | Misc_dos_step | Misc_dos_press
   | Misc_dos_click | Misc_dos_type
   (* Handing the controller on changes no pixel, but the capture carries the
      holder, so a watcher would keep showing the old one. *)
   | Misc_dos_pass
   (* A restore replaces the machine a watcher shows. *)
-  | Misc_dos_restore -> Dos_changed
+  | Misc_dos_restore -> Machine_changed Machine_lane.Dos
   | Misc_browser_session | Misc_browser_goto | Misc_browser_act
   | Misc_browser_interact -> Browser_changed
   (* BrowserInstruct acts only on the stagehand lane, which no lane addon

@@ -129,7 +129,10 @@ module Response : sig
   (** Weak ETag value formatted as [W/"<hash>"] derived from the body string. *)
 
   val client_tag_matches : etag:string -> client_tag:string -> bool
-  (** Shared conditional-request matching for H1 and H2 cached responses. *)
+  (** Shared conditional-request matching for H1 and H2 cached responses.
+      [client_tag] is an If-None-Match value: ["*"], or a comma-separated
+      list of tags. Comparison is weak (RFC 9110 section 13.1.2): [W/"x"] and
+      ["x"] match each other. *)
 
   val json_revalidate_cache_control : string
   (** Cache policy for JSON carrying a response validator. *)
@@ -230,6 +233,31 @@ module Response : sig
     :  ?status:Httpun.Status.t
     -> etag:string
     -> request:Httpun.Request.t
+    -> string
+    -> Httpun.Reqd.t
+    -> unit
+
+  (** Whether the request's [If-None-Match] names the strong tag
+      ["\"<etag>\""] (or is ["*"]), compared as {!client_tag_matches} does.
+      For a caller that can name the tag before it has the body, so a
+      revalidation is answered without producing the body at all. *)
+  val request_holds_tag : etag:string -> Httpun.Request.t -> bool
+
+  (** [`Not_modified] with the strong [ETag] ["\"<etag>\""] and the given
+      [Cache-Control], and no body: the answer {!bytes_cached} gives a request
+      that already holds the tag. *)
+  val bytes_not_modified :
+    etag:string -> cache_control:string -> Httpun.Reqd.t -> unit
+
+  (** A [`OK] body under a strong [ETag] of ["\"<etag>\""] and the given
+      [Cache-Control], or {!bytes_not_modified} when the request already
+      holds that tag ({!request_holds_tag}). The body is sent as it is;
+      formats that are already compressed gain nothing from a second pass. *)
+  val bytes_cached
+    :  etag:string
+    -> cache_control:string
+    -> request:Httpun.Request.t
+    -> content_type:string
     -> string
     -> Httpun.Reqd.t
     -> unit

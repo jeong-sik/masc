@@ -32,11 +32,11 @@ it('shows each official client account once with its provider-reported usage', a
     config_path: null, default_runtime: null, runtimes: [], lanes: [], assignments: [],
     provider_usage_windows_since: 1_000,
     provider_usage_windows: [
-      { scope: 'account:1', providers: ['claude_one', 'claude_alias'], state: 'reported', windows: [{
+      { scope: 'account:1', providers: [{ id: 'claude_one', display_name: 'Claude · one' }, { id: 'claude_alias', display_name: 'Claude · alias' }], state: 'reported', windows: [{
         limit_id: null, window: { kind: 'five_hour' }, utilization: { unit: 'fraction', value: 0.67 },
-        resets_at: null, observed_at: 1_100, source: 'claude_code.rate_limit_event',
+        resets_at: null, observed_at: 1_100, source: 'claude_code.rate_limit_event', role: 'gates_model_calls',
       }] },
-      { scope: 'provider:codex_two', providers: ['codex_two'], state: 'not_reported_since_start', windows: [] },
+      { scope: 'provider:codex_two', providers: [{ id: 'codex_two', display_name: 'Codex · two' }], state: 'not_reported_since_start', windows: [] },
     ],
   } : response)
   const view = render(html`<${OverviewRuntimeStats} />`)
@@ -49,7 +49,7 @@ it('shows each official client account once with its provider-reported usage', a
   await waitFor(() => expect(view.getByTestId('overview-client-usage-claude_one').textContent).toContain('5시간 67% 사용'))
   expect(view.getByTestId('overview-client-usage-codex_two').textContent).toContain('서버 시작 이후 미보고')
   expect(view.getByTestId('overview-client-usage-claude_alias').textContent).toContain('5시간 67% 사용')
-  expect(view.getByTestId('overview-client-usage-claude_one').textContent).toContain('공유 Client 홈: claude_one, claude_alias')
+  expect(view.getByTestId('overview-client-usage-claude_one').textContent).toContain('공유 Client 홈: Claude · one, Claude · alias')
   expect(view.getByText(/아래 토큰·지연 표는 모델명 기준 집계/)).toBeTruthy()
   vi.mocked(post).mockResolvedValue({
     schema: 'masc.dashboard.official-client-probe.v1',

@@ -346,16 +346,44 @@ let translate_read_file input =
    inferring overwrite from its presence turned a mistaken key into a silent
    whole-file overwrite (masc#31573). Translation is closed to match: only the
    declared patch fields reach the runtime, so even a validation-bypassing
-   caller cannot smuggle extra members through this path. *)
+   caller cannot smuggle extra members through this path.
+   [cwd] joins here, syntactically, the way Read resolves it: a relative
+   [file_path] reads against [cwd] and an absolute one ignores it. The joined
+   string faces the runtime's containment and gates exactly as a directly
+   spelled path, so no new expressiveness reaches the write path; [cwd]
+   itself never leaves the translator.
+   Both parts are trimmed before the join, as Read trims each of them
+   (keeper_tool_filesystem_runtime.resolve_read_file_target). The runtime
+   trims only the whole path, so an untrimmed join would turn [cwd = "lib "]
+   into "lib /src.ml" and [file_path = " /abs"] into a relative name under
+   [cwd]: a different file than Read opens for the same arguments. A blank
+   [file_path] stays blank so the runtime still refuses it as missing. *)
 let translate_edit_file input =
   match input with
   | `Assoc fields ->
     let out = ref [ "mode", `String "patch" ] in
+    let cwd =
+      match List.assoc_opt "cwd" fields with
+      | Some (`String raw) ->
+        let cwd = String.trim raw in
+        if cwd = "" then None else Some cwd
+      | Some _ | None -> None
+    in
+    let join_cwd path =
+      match path, cwd with
+      | `String raw, Some cwd ->
+        let file = String.trim raw in
+        if file <> "" && Filename.is_relative file
+        then `String (Filename.concat cwd file)
+        else `String file
+      | path, _ -> path
+    in
     List.iter
       (fun (k, v) ->
          match k with
-         | "file_path" -> out := ("path", v) :: !out
+         | "file_path" -> out := ("path", join_cwd v) :: !out
          | "old_string" | "new_string" | "replace_all" -> out := (k, v) :: !out
+         | "cwd" -> ()
          | _ -> ())
       fields;
     `Assoc (List.rev !out)
@@ -1886,6 +1914,7 @@ let masc_board_descriptor board_name =
     | Board_sub_board_get
     | Board_sub_board_list -> Concurrent
     | ( Board_cleanup
+      | Board_close
       | Board_comment
       | Board_comment_vote
       | Board_curation_submit
@@ -1893,6 +1922,7 @@ let masc_board_descriptor board_name =
       | Board_post
       | Board_post_update
       | Board_reaction
+      | Board_reopen
       | Board_sub_board_create
       | Board_sub_board_delete
       | Board_sub_board_update
@@ -1945,6 +1975,7 @@ let masc_board_descriptor board_name =
     descriptor
     |> with_composable_output (Json_output { schema = board_list_output_schema })
   | ( Board_cleanup
+    | Board_close
     | Board_comment
     | Board_comment_vote
     | Board_curation_read
@@ -1956,6 +1987,7 @@ let masc_board_descriptor board_name =
     | Board_post_update
     | Board_profile
     | Board_reaction
+    | Board_reopen
     | Board_search
     | Board_sub_board_create
     | Board_sub_board_delete

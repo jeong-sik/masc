@@ -131,7 +131,7 @@ let toml_of_endpoint (endpoint : t) : Otoml.t =
 let to_toml (endpoint : t) : string =
   Otoml.Printer.to_string
     (Otoml.TomlTable
-       [ ( "exec"
+       [ ( Runtime_toml_namespace.(key Exec)
          , Otoml.TomlTable
              [ ( "ssh"
                , Otoml.TomlTable

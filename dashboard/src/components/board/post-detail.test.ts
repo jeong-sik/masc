@@ -505,6 +505,58 @@ describe('PostDetail', () => {
     expect(screen.getByText('직접')).toBeInTheDocument()
   })
 
+  // task-1758/#39356 completion criterion 4: the post detail view must
+  // show closed state and successor, not just the wire JSON carrying it.
+  it('renders the closed badge, successor link, and summary when the post is closed', () => {
+    const post = {
+      id: 'post-1',
+      author: 'sleepers',
+      title: 'Post',
+      body: 'Body',
+      content: 'Body',
+      created_at: '2026-04-02T00:00:00Z',
+      updated_at: '2026-04-02T00:00:00Z',
+      votes: 0,
+      comment_count: 0,
+      post_kind: 'direct',
+      closed: {
+        closed_by: 'thread-owner',
+        closed_at: '2026-04-02T01:00:00Z',
+        successor_id: 'p-successor000000000000000000000',
+        summary: 'moved to the successor',
+      },
+      comments: [],
+    } as any
+
+    render(h(PostDetail, { post }))
+
+    expect(screen.getByText('🔒 닫힘')).toBeInTheDocument()
+    expect(screen.getByTitle('thread-owner님이 닫음')).toBeInTheDocument()
+    expect(screen.getByText('p-successor000000000000000000000')).toBeInTheDocument()
+    expect(screen.getByText(/닫힘 요약:/)).toBeInTheDocument()
+    expect(screen.getByText(/moved to the successor/)).toBeInTheDocument()
+  })
+
+  it('omits the closed badge for an open post', () => {
+    const post = {
+      id: 'post-1',
+      author: 'sleepers',
+      title: 'Post',
+      body: 'Body',
+      content: 'Body',
+      created_at: '2026-04-02T00:00:00Z',
+      updated_at: '2026-04-02T00:00:00Z',
+      votes: 0,
+      comment_count: 0,
+      post_kind: 'direct',
+      comments: [],
+    } as any
+
+    render(h(PostDetail, { post }))
+
+    expect(screen.queryByText('🔒 닫힘')).not.toBeInTheDocument()
+  })
+
   it('marks the current post vote as pressed', async () => {
     const post = {
       id: 'post-1',

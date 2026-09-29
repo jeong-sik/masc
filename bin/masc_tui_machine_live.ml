@@ -1,10 +1,11 @@
 (* The live route's three answers, parsed once into a closed type. The screen
    draws from [view]; it never looks at the JSON again. *)
 
-type source = Msx | Dos
+module Machine_lane = Masc.Machine_lane
 
-let source_kind = function Msx -> "msx_capture" | Dos -> "dos_capture"
-let source_label = function Msx -> "MSX" | Dos -> "DOS"
+let source_kind machine =
+  Masc.Lane_addon_sources.(kind_to_string (kind_of_machine machine))
+let source_label machine = Masc.Lane_manifest.label (Masc.Lane_id.Machine machine)
 
 type mark = { count : int; incarnation : string }
 type time = Frame of int | Untimed
@@ -66,10 +67,10 @@ let mark_of fields =
    server answering for the wrong machine, so it is refused, not ignored. *)
 let time_of source fields =
   match source, List.assoc_opt "frame_number" fields with
-  | Msx, Some (`Int frame) when frame >= 0 -> Ok (Frame frame)
-  | Dos, None -> Ok Untimed
-  | Msx, _ -> Error "live: an MSX picture carries a nonnegative frame_number"
-  | Dos, Some _ -> Error "live: a DOS picture carries no frame_number"
+  | Machine_lane.Msx, Some (`Int frame) when frame >= 0 -> Ok (Frame frame)
+  | Machine_lane.Dos, None -> Ok Untimed
+  | Machine_lane.Msx, _ -> Error "live: an MSX picture carries a nonnegative frame_number"
+  | Machine_lane.Dos, Some _ -> Error "live: a DOS picture carries no frame_number"
 
 let screen_of = function
   | Some (`Assoc fields) when has_duplicates fields -> Error "live: duplicate screen fields"
@@ -115,9 +116,9 @@ let activity_entry_of index = function
 
 let activity_of source fields =
   match source, List.assoc_opt "activity" fields with
-  | Msx, None -> Ok No_activity_feed
-  | Msx, Some _ -> Error "live: an MSX answer carries no activity field"
-  | Dos, Some (`List items) ->
+  | Machine_lane.Msx, None -> Ok No_activity_feed
+  | Machine_lane.Msx, Some _ -> Error "live: an MSX answer carries no activity field"
+  | Machine_lane.Dos, Some (`List items) ->
       let rec entries index acc = function
         | [] -> Ok (Activity (List.rev acc))
         | item :: rest ->
@@ -125,7 +126,7 @@ let activity_of source fields =
             entries (index + 1) (entry :: acc) rest
       in
       entries 0 [] items
-  | Dos, (Some _ | None) -> Error "live: a DOS answer carries an activity array"
+  | Machine_lane.Dos, (Some _ | None) -> Error "live: a DOS answer carries an activity array"
 
 let decode source json =
   match json with

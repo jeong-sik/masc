@@ -2,6 +2,10 @@
     executable supplied by the composition root, never an HTTP input. Native
     stage validation runs in a child, without publishing its catalog globally. *)
 type revision
+val usage_limit : Runtime_verification.failure -> bool
+(** A spent quota or a rate limit: the provider answered for the account and
+    declined for its usage. Setup publishes such a runtime unmeasured and
+    [masc setup] accepts it; every other failure refuses both. *)
 type error = Invalid_selection | Invalid_configuration | Changed_configuration
   | Configuration_unavailable
   | Child_not_started of Process_eio.spawn_refusal
@@ -11,14 +15,21 @@ type error = Invalid_selection | Invalid_configuration | Changed_configuration
       (** The native stage validator ran and did not exit 0. Carries how it
           ended and what it wrote to stderr. *)
   | Verification_failed of { runtime_id : string; code : string; message : string; detail : string option }
-      (** The runtime's own verification report says it is not verified.
+      (** The runtime's own verification report says it is not verified, for
+          a reason other than a spent quota or a rate limit ({!Usage_limited}).
           [code], [message] and [detail] are the report's failure, read back
           through {!Runtime_verification.of_json}. *)
   | Verification_unreadable of { runtime_id : string; exit : Unix.process_status; stderr : string; reason : string }
       (** The verification child produced no report this module can read, or
           a verified report with a failing exit. *)
   | Write_failed | Rollback_failed | Lock_unavailable
-type readiness = Not_probed | Verified
+type usage_limited = { runtime_id : string; code : string }
+(** A runtime whose provider declined the verification for the account's
+    usage: a spent quota or a rate limit. It is published without a
+    response and tool measurement; [code] is the report's failure code. *)
+type readiness = Not_probed | Verified | Usage_limited of usage_limited * usage_limited list
+(** [Usage_limited] lists the selected runtimes that were published
+    unmeasured; every other selected runtime was verified. *)
 type receipt = { runtime_id:string; runtime_ids:string list; models:string list;
                  readiness:readiness }
 val error_message : error -> string
@@ -34,10 +45,14 @@ val observe_inventory : base_path:string -> (revision * Runtime.config_observati
 (** One paired-file observation supplies both the private runtime text and its
     setup revision, so a menu cannot join stale rows to a newer revision. *)
 (** Must run inside an Eio scope, like the server and native setup CLI. *)
-val configure : ?pending_credentials:Runtime_setup_credentials.pending list -> binary:string -> base_path:string -> expected_revision:revision ->
+val configure : ?pending_credentials:Runtime_setup_credentials.pending list -> ?default_lane_id:string -> binary:string -> base_path:string -> expected_revision:revision ->
   specs:Runtime_setup_spec.t list -> runtime_ids:string list ->
   default_runtime_id:string -> verify:bool -> unit -> (receipt,error) result
-(** The selected default is placed first. Existing provider and unrelated
+(** The selected concrete default is placed first. [default_lane_id] preserves
+    the current declared default lane, replacing only its ordered candidates;
+    unrelated lanes and Keeper assignments remain unchanged. The receipt names
+    that lane as [runtime_id], with concrete candidates in [runtime_ids].
+    Existing provider and unrelated
     settings bytes are retained. Both files are compared again after stage
     validation under the existing runtime writer lock. Publication replaces the
     overlay dependency before runtime.toml; each replacement is atomic, the pair

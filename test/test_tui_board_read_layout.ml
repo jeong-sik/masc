@@ -6,7 +6,7 @@ let post =
   { bp_id = "post"; bp_author = "author"; bp_title = "Thread";
     bp_body = "Body"; bp_votes = 0; bp_comment_count = 128;
     bp_created_at = "2026-09-08"; bp_created_at_unix = None; bp_updated_at = None;
-    bp_hearth = None; bp_kind = None }
+    bp_hearth = None; bp_kind = None; bp_closed = None }
 
 let comments = List.init 128 (fun index ->
   { bc_id = string_of_int index; bc_parent_id = None; bc_author = "keeper";

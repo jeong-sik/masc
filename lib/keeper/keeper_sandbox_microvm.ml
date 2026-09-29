@@ -567,6 +567,22 @@ let parse_nerdctl_native_images raw =
   | exception Yojson.Json_error detail -> Error ("invalid native image JSON: " ^ detail)
 ;;
 
+let image_lock_marker_from_inspect raw =
+  let key = "masc.sandbox.opam_lock_sha256" in
+  let rec find = function
+    | `Assoc fields ->
+      (match List.find_opt (fun (name, _) -> String.equal name key) fields with
+       | Some (_, `String digest) -> Some digest
+       | Some _ -> None
+       | None -> List.find_map (fun (_, value) -> find value) fields)
+    | `List values -> List.find_map find values
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ -> None
+  in
+  match Yojson.Safe.from_string raw with
+  | json -> find json
+  | exception Yojson.Json_error _ -> None
+;;
+
 let classify_image_probe_for backend ~image ~inspect ~listing =
   match backend, inspect with
   | Backend.Nerdctl_kata, (Unix.WEXITED 0 as status, stdout, stderr) ->
@@ -595,7 +611,7 @@ let classify_image_probe_for backend ~image ~inspect ~listing =
       ~inspect ~listing
 ;;
 
-let image_probe_for backend ~image ~timeout_sec =
+let image_probe_with_inspect_for backend ~image ~timeout_sec =
   let inspect =
     Process_eio.run_argv_with_status_split
       ~timeout_sec
@@ -610,7 +626,20 @@ let image_probe_for backend ~image ~timeout_sec =
            (image_listing_argv_for backend))
     | _ -> None
   in
-  classify_image_probe_for backend ~image ~inspect ~listing
+  classify_image_probe_for backend ~image ~inspect ~listing, inspect
+;;
+
+let image_probe_for backend ~image ~timeout_sec =
+  fst (image_probe_with_inspect_for backend ~image ~timeout_sec)
+;;
+
+(* Presence and the build marker come from the same store observation.
+   Missing metadata warns but never blocks boot. *)
+let warn_if_lock_marker ~image (_, stdout, _) =
+  Keeper_sandbox_image_version.lock_warning
+    ~image
+    ~built_lock_sha256:(image_lock_marker_from_inspect stdout)
+  |> Option.iter (fun warning -> Log.Keeper.warn "%s" warning)
 ;;
 
 (* The gate refuses a missing image rather than letting the runtime fetch
@@ -621,8 +650,11 @@ let image_probe_for backend ~image ~timeout_sec =
    is the build the host catalog has promoted, and only
    [masc sandbox-image] builds and promotes. *)
 let image_present_for backend ~name ~image ~timeout_sec =
-  image_probe_for backend ~image ~timeout_sec
-  |> image_present_result_for backend ~name ~image
+  let outcome, inspect = image_probe_with_inspect_for backend ~image ~timeout_sec in
+  (match outcome with
+   | Image_present -> warn_if_lock_marker ~image inspect
+   | Image_missing | Image_cli_unavailable | Image_probe_failed _ -> ());
+  image_present_result_for backend ~name ~image outcome
 ;;
 
 (* ── Turn-container argv ─────────────────────────────────────────────

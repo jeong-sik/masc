@@ -3,8 +3,6 @@ external spawnp :
   (int * Unix.file_descr) list -> int = "masc_posix_spawnp"
 
 external exited_without_reaping : int -> bool = "masc_process_exited_without_reaping"
-external group_only_owned_zombies : int -> bool =
-  "masc_process_group_only_owned_zombies"
 
 type state = Unstarted | Owned | Reaped of Unix.process_status | Lost
 
@@ -45,7 +43,8 @@ let finish t pid =
   ignore (observe t pid : bool);
   (try Unix.kill (-pid) Sys.sigkill with
    | Unix.Unix_error (Unix.ESRCH, _, _) -> ()
-   | Unix.Unix_error (Unix.EPERM, _, _) when group_only_owned_zombies pid -> ());
+   | Unix.Unix_error (Unix.EPERM, _, _)
+     when Process_group_members.group_has_no_live_member pid -> ());
   match wait pid with
   | status -> t.state <- Reaped status; status
   | exception (Unix.Unix_error (Unix.ECHILD, _, _) as exn) ->

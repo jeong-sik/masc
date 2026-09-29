@@ -162,7 +162,6 @@ type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_
       }
 
 type host_stop = Runtime_official_client_tool.host_stop =
-  | Queued_chat_operation
   | Repeated_tool_call of
       { tool_name : string
       ; repeated_count : int
@@ -358,6 +357,8 @@ val input_capacity_refusal : error -> input_capacity option
     remain ordinary RPC errors. Counts come from the server, never a local cap. *)
 
 val error_to_string : error -> string
+val client_environment : string option -> (string array, error) result
+(** Selected-account child environment shared by execution and explicit login. *)
 
 val refused_for_spent_usage : error -> bool
 (** [true] when the account refused the turn because its usage is spent: the

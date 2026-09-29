@@ -106,7 +106,9 @@ val image_present_for :
 (** Gate the run on the image already being in this runtime's own store.
     None of the three has a [--pull=never]: without this, a missing image is
     fetched from a registry rather than refused. The refusal names the CLI
-    that was asked, so an [msb] keeper is not told to install Apple's. *)
+    that was asked, so an [msb] keeper is not told to install Apple's.
+    Never builds an image. The same inspect response supplies the presence
+    result and lock-marker warning; an absent marker does not block admission. *)
 
 type image_probe_phase =
   | Image_inspect
@@ -183,6 +185,10 @@ val classify_image_probe :
     only when a subsequent image listing also succeeds in [listing_shape],
     proving that the runtime and its image store were readable. Every
     unavailable or malformed observation fails closed. *)
+
+val image_lock_marker_from_inspect : string -> string option
+(** Find the sandbox lock digest label in a runtime's JSON image-inspect
+    response. [None] means the image has no marker. *)
 
 val classify_image_probe_for :
   Keeper_microvm_backend.t ->

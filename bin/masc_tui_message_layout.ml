@@ -561,6 +561,13 @@ let display_width text =
   | Some cells -> cells
   | None -> pieces_width (display_pieces text)
 
+let grapheme_count text =
+  List.fold_left
+    (fun count (piece : display_piece) -> if piece.ansi then count else count + 1)
+    0
+    (display_pieces text)
+;;
+
 let cell_prefix text max_cells =
   cell_prefix_of_pieces text (display_pieces text) max_cells
 

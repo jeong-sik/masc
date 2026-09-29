@@ -32,17 +32,20 @@ runs:
     # glob, and a lock bump used to restore a switch built from the previous
     # one (#28543). The OS is spelled out because the two switches are built
     # for different kernels and must never restore across; "linux" keeps the
-    # key every Linux entry already has.
+    # key every Linux entry already has. ImageOS and ImageVersion keep a switch
+    # from being restored onto a different hosted runner image revision.
     - name: Name the toolchain cache
       id: opam-toolchain-key
       shell: bash
       env:
-        CACHE_KEY: opam-${{ runner.os == 'Linux' && 'linux' || 'macos' }}-${{ runner.arch }}-${{ inputs.cache-prefix }}-${{ inputs.ocaml-compiler }}-${{ hashFiles('*.opam', 'masc.opam.locked', 'dune-project', 'scripts/opam-pin-external-deps.sh') }}-v3
+        CACHE_DEPENDENCY_HASH: ${{ hashFiles('*.opam', 'masc.opam.locked', 'dune-project', 'scripts/opam-pin-external-deps.sh') }}
         CACHE_PREFIX: opam-${{ runner.os == 'Linux' && 'linux' || 'macos' }}-${{ runner.arch }}-${{ inputs.cache-prefix }}-${{ inputs.ocaml-compiler }}-
       run: |
+        : "${ImageOS:?GitHub-hosted ImageOS is required for cache isolation}"
+        : "${ImageVersion:?GitHub-hosted ImageVersion is required for cache isolation}"
         {
-          echo "key=${CACHE_KEY}"
-          echo "prefix=${CACHE_PREFIX}"
+          echo "key=${CACHE_PREFIX}${ImageOS}-${ImageVersion}-${CACHE_DEPENDENCY_HASH}-v4"
+          echo "prefix=${CACHE_PREFIX}${ImageOS}-${ImageVersion}-"
         } >> "${GITHUB_OUTPUT}"
 
     # The switch is cached after the whole job, so the pins and the opam

@@ -16,7 +16,6 @@ type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_
       }
 
 type host_stop = Runtime_official_client_tool.host_stop =
-  | Queued_chat_operation
   | Repeated_tool_call of
       { tool_name : string
       ; repeated_count : int
@@ -412,36 +411,7 @@ let with_run_lifecycle_events ~event_bus ~keeper_name run =
    same operator-declared effort was clamped on Codex but failed the whole
    turn on Claude Code ([reasoning_args] rejects [Minimal]), so which lane a
    keeper ran on decided whether a config value was survivable. *)
-let clamp_reasoning_effort_to_catalog
-    ~(model_id : string option)
-    ~(requested : Llm_provider.Reasoning_effort.t option)
-    : Llm_provider.Reasoning_effort.t option =
-  match requested, model_id with
-  | None, _ | _, None -> requested
-  | Some effort, Some model ->
-    (match Llm_provider.Capabilities.for_model_id_catalog model with
-     | None -> requested
-     | Some caps ->
-       (match caps.Llm_provider.Capabilities.accepted_reasoning_efforts with
-        | None -> requested
-        | Some accepted when List.mem effort accepted -> requested
-        | Some [] -> requested
-        | Some (first :: rest as accepted) ->
-          let below =
-            List.filter
-              (fun candidate ->
-                 Llm_provider.Reasoning_effort.compare candidate effort < 0)
-              accepted
-          in
-          let pick_max a b =
-            if Llm_provider.Reasoning_effort.compare a b >= 0 then a else b
-          in
-          let pick_min a b =
-            if Llm_provider.Reasoning_effort.compare a b <= 0 then a else b
-          in
-          match below with
-          | [] -> Some (List.fold_left pick_min first rest)
-          | b_first :: b_rest -> Some (List.fold_left pick_max b_first b_rest)))
+let clamp_reasoning_effort_to_catalog = Runtime_inference.clamp_reasoning_effort_to_catalog
 ;;
 
 let effective_reasoning_effort
@@ -479,8 +449,7 @@ let host_stop_result
       (Keeper_internal_error.core_error_of_masc_internal_error
          (Keeper_internal_error.Terminal_effect_failed
             { failure_class; effect_disposition; detail }))
-  | ( Queued_chat_operation
-    | Repeated_tool_call _
+  | ( Repeated_tool_call _
     | Terminal_tool_boundary
         { outcome =
             (Terminal_completed | Durable_stimulus_deferred)
@@ -501,8 +470,6 @@ let host_stop_result
     in
     let stop_reason =
       match stop with
-      | Queued_chat_operation ->
-        Runtime_agent.Yielded_to_operation_queued { turns_used }
       | Repeated_tool_call { tool_name; repeated_count } ->
         Runtime_agent.Yielded_after_repeated_tool_call
           { turns_used; tool_name; repeated_count }

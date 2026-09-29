@@ -40,6 +40,8 @@ let published_order =
   ; Tool_name.Board_name.Board_curation_submit
   ; Tool_name.Board_name.Board_delete
   ; Tool_name.Board_name.Board_cleanup
+  ; Tool_name.Board_name.Board_close
+  ; Tool_name.Board_name.Board_reopen
   ; Tool_name.Board_name.Board_sub_board_create
   ; Tool_name.Board_name.Board_sub_board_list
   ; Tool_name.Board_name.Board_sub_board_get
@@ -112,6 +114,8 @@ let declared_identity_fields : Tool_name.Board_name.t -> string list = function
   | Tool_name.Board_name.Board_curation_submit -> [ "submitted_by" ]
   | Tool_name.Board_name.Board_delete -> [ "author" ]
   | Tool_name.Board_name.Board_cleanup -> []
+  | Tool_name.Board_name.Board_close -> [ "closed_by" ]
+  | Tool_name.Board_name.Board_reopen -> [ "reopened_by" ]
   | Tool_name.Board_name.Board_sub_board_create -> [ "owner" ]
   | Tool_name.Board_name.Board_sub_board_list -> []
   | Tool_name.Board_name.Board_sub_board_get -> []
@@ -120,7 +124,7 @@ let declared_identity_fields : Tool_name.Board_name.t -> string list = function
 ;;
 
 let test_identity_fields_are_the_declared_literals () =
-  check int "every board tool is pinned" 21 (List.length Tool_name.Board_name.all);
+  check int "every board tool is pinned" 23 (List.length Tool_name.Board_name.all);
   List.iter
     (fun board ->
       check

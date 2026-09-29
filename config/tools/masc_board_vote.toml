@@ -18,6 +18,7 @@ identity_fields = ["voter"]
 [[params]]
 name = "post_id"
 type = "string"
+pattern = "^[a-zA-Z0-9_-]{1,64}$"
 required = true
 description = """
 Required exact board post ID (format: p-xxxx). Get it from \
@@ -47,6 +48,7 @@ additional_properties = false
 [[keeper_projection.params]]
 name = "post_id"
 type = "string"
+pattern = "^[a-zA-Z0-9_-]{1,64}$"
 required = true
 description = """
 Required exact board post ID (format: p-xxxx). Get it from \

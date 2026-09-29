@@ -95,7 +95,11 @@ let vision_runtime_candidates ~now =
        | Runtime_execution.Agent_core config -> Some (rt.id, rt, Api config)
        | Runtime_execution.Codex_app_server _
        | Runtime_execution.Claude_code _ -> Some (rt.id, rt, Official_client)
-       | Runtime_execution.Antigravity_cli _ -> None)
+       | Runtime_execution.Antigravity_cli _ -> None
+       (* The official-client read holds its answer to an output schema, and
+          [muse serve] has no channel for one: Fusion_official_client refuses
+          the request, so the runtime is no candidate. *)
+       | Runtime_execution.Muse_serve _ -> None)
 
 let vision_runtime_ids ~now : string list =
   List.map (fun (runtime_id, _, _) -> runtime_id) (vision_runtime_candidates ~now)
@@ -113,18 +117,25 @@ let vision_store_dir ~keeper_name =
 let frames_dir ~keeper_name =
   Store.frames_dir ~dir:(vision_store_dir ~keeper_name)
 
+let run_artifact_job ~label f =
+  match Domain_pool_ref.get () with
+  | None -> Eio_guard.run_in_systhread ~label f
+  | Some _ ->
+      Eio_guard.check_if_ready ();
+      Domain_pool_ref.submit_io_or_inline f
+
 let store_frame ~keeper_name bytes =
   let dir = frames_dir ~keeper_name in
-  Eio_guard.run_in_systhread ~label:"vision-artifact-store" (fun () ->
+  run_artifact_job ~label:"vision-artifact-store" (fun () ->
     Store.store ~auto_prune:true ~dir bytes)
 
 let store_kept ~keeper_name bytes =
   let dir = vision_store_dir ~keeper_name in
-  Eio_guard.run_in_systhread ~label:"vision-artifact-store" (fun () ->
+  run_artifact_job ~label:"vision-artifact-store" (fun () ->
     Store.store ~auto_prune:false ~dir bytes)
 
 let load_artifact ~dir handle =
-  Eio_guard.run_in_systhread ~label:"vision-artifact-load" (fun () -> Store.load ~dir handle)
+  run_artifact_job ~label:"vision-artifact-load" (fun () -> Store.load ~dir handle)
 
 let record_vision_analyze_result ~result ~reason =
   Otel_metric_store.inc_counter
@@ -475,7 +486,7 @@ type candidate_failure =
    admission and effect observations. An accepted-but-unobserved timeout is
    not evidence that another candidate may safely replace the turn. *)
 let official_failure_can_advance : Fusion_official_client.failure -> bool = function
-  | Setup_failure _ | Antigravity_failure _ -> false
+  | Setup_failure _ | Antigravity_failure _ | Muse_failure _ -> false
   | Claude_admission_failure (Invalid_config _) -> false
   | Claude_admission_failure _ -> true
   | Codex_failure error ->
@@ -506,7 +517,7 @@ let official_failure_can_advance : Fusion_official_client.failure -> bool = func
      | Invalid_config _ | Protocol_error _ | Unsupported_control_request _
      | Turn_transport_interrupted _ | Context_window_exceeded _ | Turn_failed _
      | Turn_failed_with_observation _ | Stopped_by_host _ | Quota_blocked _
-     | Process_exited { turn_admitted = true; _ } | Timeout _ -> false)
+     | Process_exited { turn_admitted = true; _ } | Unhandled_exception _ | Timeout _ -> false)
 ;;
 
 let outcome_of_official_failure ~runtime_id failure =
@@ -525,7 +536,8 @@ let official_failure_effect : Fusion_official_client.failure -> Tool_result.fail
       | Quota_blocked { tool_effect_attempted = false; response_emitted = false; _ }
       | Context_window_exceeded { tool_effect_attempted = false; response_emitted = false; _ }
       | Turn_failed_with_observation { tool_effect_attempted = false; response_emitted = false; _ }) -> Proven_pre_effect
-  | Codex_failure _ | Claude_failure _ | Antigravity_failure _ -> Effect_outcome_unknown
+  | Codex_failure _ | Claude_failure _ | Antigravity_failure _ | Muse_failure _ ->
+    Effect_outcome_unknown
 ;;
 
 (* A 402 states the binding's account cannot pay. The keeper walk records the

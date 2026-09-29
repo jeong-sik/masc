@@ -92,7 +92,8 @@ let acting_pane_scroll_max = ref 0
    and the frame's own reading is behind all of them. *)
 let clamped_scroll_now (state : state) = function
   | Task_detail _ -> Task_detail state.task_detail_scroll
-  | Board_read _ -> Board_read state.board_scroll
+  | Board_read _ ->
+      Board_read (state.board_scroll, state.board_comment_scroll)
   | Message_scroll _ -> Message_scroll state.msg_scroll
   | Schedule_detail_scroll _ -> Schedule_detail_scroll state.schedule_scroll
   | Keeper_detail _ -> Keeper_detail state.detail_scroll
@@ -124,6 +125,7 @@ let clamped_scroll_now (state : state) = function
   | Patch_modal_scroll _ -> Patch_modal_scroll state.patch_modal_scroll
   | Link_modal_scroll _ -> Link_modal_scroll state.link_modal_scroll
   | Voice_scroll _ -> Voice_scroll state.config_scroll
+  | Keeper_list_scroll _ -> Keeper_list_scroll state.keeper_list_scroll
   | Context_inspector_scroll _ ->
       Context_inspector_scroll state.context_inspector_scroll
 
@@ -177,7 +179,7 @@ let reader_after_wheel (reader : clamped_scroll)
      notch keeps reaching them as that key. *)
   | Keeper_detail _ | Keeper_calls _ -> None
   (* List scrolls: the notch moves the list's cursor as the arrow does. *)
-  | Acting _ | Acting_selection _ -> None
+  | Acting _ | Acting_selection _ | Keeper_list_scroll _ -> None
   (* Resources has panes of its own that [h] and [l] move between. *)
   | Resource_scroll _ -> None
 
@@ -189,6 +191,16 @@ let get_terminal_size () =
   let rows, cols = Masc_tui_ansi.get_terminal_size () in
   (max 1 (rows - navigation_rows), max 1 (cols - !acting_pane_reserved_cols))
 
+
+(* The lines a buffer has ended since [start]: how far down a frame the next
+   row lands, counted from what was drawn rather than by hand, for a picture
+   placed over the rows drawn after it. *)
+let lines_ended_since buf ~start =
+  let ended = ref 0 in
+  for index = start to Buffer.length buf - 1 do
+    if Buffer.nth buf index = '\n' then incr ended
+  done;
+  !ended
 
 let frame_lines buf =
   let str = Buffer.contents buf in
@@ -265,6 +277,14 @@ let finish_frame ?clamped ?(compact_frame = false) ~surface_key ~cursor ~rows
   , clamped )
 
 ;;
+
+(* The one frame drawn without the strip and the Activity pane: a terminal too
+   small for any surface holds the notice alone. Surfaces end through
+   [finish_surface] or [finish_frame_beside_acting_pane], so a surface cannot
+   reserve the pane's columns and then skip drawing it. *)
+let finish_terminal_too_small_frame ~cursor ~rows ~cols buf =
+  finish_frame ~compact_frame:true ~surface_key:"terminal-too-small" ~cursor
+    ~rows ~cols buf
 
 (* Whether tables are drawn with an outer box, read once from [tui].table_frame
    at start-up. Held here rather than threaded through every caller of
@@ -855,6 +875,10 @@ let keeper_split_threshold_cols = Masc_tui_roster_pane.threshold_cols
 let keeper_roster_pane_cols = Masc_tui_roster_pane.pane_cols
 
 
+(* The line [surface_strip] draws above every surface. A row a surface counts
+   in its own frame sits this many lines lower in the terminal's. *)
+let strip_rows = 1
+
 (* Finish a frame with the strip on top. Surfaces measured cursor rows inside
    their own frame, so a visible cursor shifts down with the prepend, and the
    declared height grows back to the terminal's real row count. *)
@@ -864,13 +888,13 @@ let finish_frame_with_strip (state : state) ?clamped ~surface_key ~cursor ~rows
     match cursor with
     | Frame_presenter.Hidden -> Frame_presenter.Hidden
     | Frame_presenter.Visible_at { row; column } ->
-      Frame_presenter.Visible_at { row = row + 1; column }
+      Frame_presenter.Visible_at { row = row + strip_rows; column }
   in
   let framed = Buffer.create (Buffer.length buf + 160) in
   Buffer.add_string framed (surface_strip state ~cols);
   Buffer.add_char framed '\n';
   Buffer.add_buffer framed buf;
-  finish_frame ?clamped ~surface_key ~cursor ~rows:(rows + 1) ~cols framed
+  finish_frame ?clamped ~surface_key ~cursor ~rows:(rows + strip_rows) ~cols framed
 
 
 (* The agenda strip: one row above the composer, on every surface.
@@ -1137,7 +1161,51 @@ let paint_acting_pane_line ?(selected = false) ~ground
   ^ close
 
 
+(* A surface's rows with the Activity pane beside the first [pane_rows] of
+   them, when the pane shows. [cols] is what the surface laid out against:
+   the terminal less the pane. Rows past [pane_rows] draw alone. The pane's
+   press targets and scroll bound are this frame's either way -- a frame that
+   reserved the pane's columns without drawing it left the last surface's
+   targets under a press on the empty columns. *)
+let add_rows_beside_acting_pane (state : state) framed ~cols ~pane_rows lines =
+  let pane_cols = !acting_pane_reserved_cols in
+  if pane_cols > 0 then begin
+    let left = Buffer.create 4096 in
+    List.iter
+      (fun line ->
+         Buffer.add_string left (Message_layout.fit_width line cols);
+         Buffer.add_char left '\n')
+      lines;
+    let rendering =
+      Masc_tui_acting_pane.lines ~rows:pane_rows ~cols:pane_cols
+        ~scroll:state.acting_pane_scroll (acting_pane_input state)
+    in
+    acting_pane_row_targets := Array.of_list rendering.Masc_tui_acting_pane.targets;
+    acting_pane_scroll_max := rendering.Masc_tui_acting_pane.scroll_max;
+    let ground = Theme.side_pane_background () in
+    let right = Buffer.create 4096 in
+    let cursor = Option.value state.acting_pane_cursor ~default:(-1) in
+    List.iteri
+      (fun index line ->
+         Buffer.add_string right
+           (paint_acting_pane_line ~selected:(index = cursor) ~ground line);
+         Buffer.add_char right '\n')
+      rendering.Masc_tui_acting_pane.rows;
+    write_two_panes framed ~left_cols:cols ~left ~right
+  end
+  else begin
+    acting_pane_row_targets := [||];
+    acting_pane_scroll_max := 0;
+    List.iter
+      (fun line ->
+         Buffer.add_string framed line;
+         Buffer.add_char framed '\n')
+      lines
+  end
+
+
 let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
+  let body_started = Masc_tui_frame_timing.start_stage () in
   (* [surface_body_rows] removes the strip before either the frame or the
      typed scroll layout receives its body budget. Two readers of that one
      budget: the row the frame draws is the row the keypress stops short of. *)
@@ -1154,6 +1222,8 @@ let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
          be the one that disappears when a surface miscounts. *)
       List.filteri (fun index _ -> index < body_rows) drawn
   in
+  Masc_tui_frame_timing.finish_stage ~name:"surface.body" body_started;
+  let pane_started = Masc_tui_frame_timing.start_stage () in
   (* [cols] is what the surface laid out against: the terminal less the
      Activity pane when the pane shows. The body shares its rows with the
      pane; the agenda, the composer, and the strip span the whole terminal,
@@ -1161,46 +1231,37 @@ let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
   let pane_cols = !acting_pane_reserved_cols in
   let full_cols = cols + pane_cols in
   let framed = Buffer.create (Buffer.length buf + 256) in
-  (if pane_cols > 0 then begin
-     let left = Buffer.create (Buffer.length buf + 256) in
-     List.iter
-       (fun line ->
-          Buffer.add_string left (Message_layout.fit_width line cols);
-          Buffer.add_char left '\n')
-       body;
-     let rendering =
-       Masc_tui_acting_pane.lines ~rows:body_rows ~cols:pane_cols
-         ~scroll:state.acting_pane_scroll (acting_pane_input state)
-     in
-     acting_pane_row_targets := Array.of_list rendering.Masc_tui_acting_pane.targets;
-     acting_pane_scroll_max := rendering.Masc_tui_acting_pane.scroll_max;
-     let ground = Theme.side_pane_background () in
-     let right = Buffer.create 4096 in
-     let cursor = Option.value state.acting_pane_cursor ~default:(-1) in
-     List.iteri
-       (fun index line ->
-          Buffer.add_string right
-            (paint_acting_pane_line ~selected:(index = cursor) ~ground line);
-          Buffer.add_char right '\n')
-       rendering.Masc_tui_acting_pane.rows;
-     write_two_panes framed ~left_cols:cols ~left ~right
-   end
-   else begin
-     acting_pane_row_targets := [||];
-     acting_pane_scroll_max := 0;
-     List.iter
-       (fun line ->
-          Buffer.add_string framed line;
-          Buffer.add_char framed '\n')
-       body
-   end);
+  add_rows_beside_acting_pane state framed ~cols ~pane_rows:body_rows body;
+  Masc_tui_frame_timing.finish_stage ~name:"surface.panes" pane_started;
+  let chrome_started = Masc_tui_frame_timing.start_stage () in
   (if agenda_rows > 0 then
      match agenda_line (Masc_tui_types.agenda state) ~cols:full_cols with
      | Some line -> Buffer.add_string framed (line ^ "\n")
      | None -> ());
   Buffer.add_string framed (composer_line state ~cols:full_cols ^ "\n");
-  finish_frame_with_strip state ?clamped ~surface_key
-    ~cursor:(composer_cursor state ~rows ~cols:full_cols) ~rows ~cols:full_cols framed
+  let cursor = composer_cursor state ~rows ~cols:full_cols in
+  Masc_tui_frame_timing.finish_stage ~name:"surface.chrome" chrome_started;
+  Masc_tui_frame_timing.time_stage ~name:"surface.strip_frame" (fun () ->
+    finish_frame_with_strip state ?clamped ~surface_key
+      ~cursor ~rows ~cols:full_cols framed)
+
+
+(* The end of a surface that draws its own composer and footer -- the Keeper
+   chat, the Board composer -- instead of taking the shared composer row. It
+   laid out against the same [cols] every surface does, the terminal less the
+   Activity pane, so the pane is drawn in those columns here too, beside the
+   rows above its own footer. The strip
+   spans the whole terminal. *)
+let finish_frame_beside_acting_pane (state : state) ?clamped ~surface_key
+    ~cursor ~rows ~cols buf =
+  let framed = Buffer.create (Buffer.length buf + 4096) in
+  let lines = frame_lines buf in
+  (* These frames draw neither the shared composer nor the agenda. Only
+     their final footer stays below the pane; use the actual drawn height. *)
+  let pane_rows = max 0 (min (rows - 1) (List.length lines - 1)) in
+  add_rows_beside_acting_pane state framed ~cols ~pane_rows lines;
+  finish_frame_with_strip state ?clamped ~surface_key ~cursor ~rows
+    ~cols:(cols + !acting_pane_reserved_cols) framed
 
 
 (* Exhaustive over [connection_status]: a new state is a compile error
@@ -1221,6 +1282,11 @@ type chrome_body = {
   push_selected : string -> unit;
   push_divider : unit -> unit;
   push_empty : unit -> unit;
+  next_origin : unit -> int * int;
+      (** The terminal frame's line and cell where the next pushed row's
+          content will start -- where a picture placed over body rows goes.
+          Holds while the body stays inside its budget, which a [Fits] body
+          does. *)
 }
 
 (* top + title + divider + bottom + footer: the rows [surface_chrome] draws
@@ -1284,6 +1350,9 @@ let surface_chrome ~overflow ?(frame = Chrome_screen) (state : state)
   top buf cols;
   line buf cols title;
   divider buf cols;
+  (* The lines drawn above the body, counted from what was drawn rather than
+     by hand, and the strip [finish_surface] puts above them. *)
+  let body_top = strip_rows + lines_ended_since buf ~start:0 in
   let budget = max 1 (rows - surface_chrome_rows) in
   (* The body's rows are held until it has finished, because only then is
      their count known: which of them the budget shows, and what the row that
@@ -1297,6 +1366,8 @@ let surface_chrome ~overflow ?(frame = Chrome_screen) (state : state)
     ; push_selected = (fun text -> hold (fun () -> line_selected buf cols text))
     ; push_divider = (fun () -> hold (fun () -> divider buf cols))
     ; push_empty = (fun () -> hold (fun () -> empty buf cols))
+    ; next_origin =
+        (fun () -> (body_top + List.length !pushed, Masc_tui_ansi.framed_content_column))
     }
   in
   body ~budget body_pushers;
@@ -1380,6 +1451,16 @@ let connection_badge (state : state) =
       connection ^ " " ^ (Theme.bad ()) ^ "[workspace mismatch]" ^ Ansi.reset
   | Masc_tui_types.Workspace_identity_unread
   | Masc_tui_types.Workspace_identity_match -> connection
+
+(* What the headings laid out by [detail_heading] draw before the id: a lane
+   run, a measurement artifact named by its sha256, a Fusion run (whose list
+   and launch form carry the same title), one runtime's detail, and one
+   keeper's calls. *)
+let lane_run_detail_title = " MASC Lane Run"
+let measurement_detail_title = " MASC Measurement"
+let fusion_title = " MASC Fusion"
+let runtime_detail_title = " MASC Config / Runtime detail"
+let keeper_calls_lead = " Keepers \xe2\x96\xb8 "
 
 (* The coordinator's badge beside a reading of the surface's own. The badge
    brings its colour and its reset, so a style laid over the whole row painted
@@ -2350,7 +2431,9 @@ type planning_tab = Render_schedule.planning_tab =
    whatever followed -- at a hundred columns this title lost its badge and
    half its clock. Callers build that tail once and hand the same value here
    and to the row, so the measurement and the drawing cannot disagree. *)
-let planning_workspace_title (state : state) ~cols ~(tab : planning_tab) ~(window : string) ~(after : string) =
+let planning_workspace_lead = screen_title " MASC Planning" ^ "  "
+
+let planning_workspace_tabs (state : state) ~(tab : planning_tab) ~(window : string) =
   let review_count = Option.map (fun s -> s.vs_total) state.verification in
   let verifying_count =
     Option.map
@@ -2367,15 +2450,44 @@ let planning_workspace_title (state : state) ~cols ~(tab : planning_tab) ~(windo
     | Planning_task_review -> Verification
     | Planning_verdicts -> Harness
   in
-  screen_title " MASC Planning" ^ "  "
-  ^ tab_strip
-      ~width:
-        (tab_strip_width ~cols
-           ~before:(screen_title " MASC Planning" ^ "  ") ~after)
-      ~press:(fun surface text -> pressable (Press_surface surface) text)
-      (List.map
-         (fun (stop, label) -> (label, stop = tab, surface_of_stop stop))
-         stops)
+  List.map
+    (fun (stop, label) -> (label, stop = tab, surface_of_stop stop))
+    stops
+
+let planning_workspace_strip ~width tabs =
+  tab_strip ~width
+    ~press:(fun surface text -> pressable (Press_surface surface) text)
+    tabs
+
+let planning_workspace_title (state : state) ~cols ~(tab : planning_tab) ~(window : string) ~(after : string) =
+  planning_workspace_lead
+  ^ planning_workspace_strip
+      ~width:(tab_strip_width ~cols ~before:planning_workspace_lead ~after)
+      (planning_workspace_tabs state ~tab ~window)
+
+(* One verdict's heading: the Planning strip with Verdicts current, then the
+   task the verdict is about, then the badge. The strip keeps the width that
+   holds its current entry: below that it drops that entry too and the marks a
+   press lands on, so the task id folds before the strip goes under it. Above
+   it, the strip takes what the id leaves (#39712 review). *)
+let harness_detail_heading (state : state) ~cols ~task_id ~tail =
+  let cells text =
+    Masc_tui_message_layout.display_width (Masc_tui_theme.strip_sgr text)
+  in
+  let tabs = planning_workspace_tabs state ~tab:Planning_verdicts ~window:"" in
+  let mark = " \xe2\x96\xb8 verdict  " in
+  let around = cells planning_workspace_lead + cells mark in
+  detail_heading ~cols
+    ~lead:
+      (Lead_strip
+         { floor = around + tab_strip_min_width tabs
+         ; draw =
+             (fun width ->
+               planning_workspace_lead
+               ^ planning_workspace_strip ~width:(width - around) tabs
+               ^ mark)
+         })
+    ~id:task_id ~after:"" ~tail
 
 
 (* Where the goal stands with the completion judge, in one column. The phase
@@ -2903,8 +3015,8 @@ let render_diff_surface (state : state) (ds : diff_surface) =
   in
   let total = List.length diff_rows in
   let header =
-    Printf.sprintf "%s %s  vs HEAD  %s" (screen_title ds.ds_title) ds.ds_address
-      (connection_badge state)
+    detail_heading ~cols ~lead:(Lead_text (screen_title ds.ds_title ^ " "))
+      ~id:ds.ds_address ~after:"  vs HEAD" ~tail:(connection_badge state)
   in
   box_top buf cols;
   box_line buf cols header;

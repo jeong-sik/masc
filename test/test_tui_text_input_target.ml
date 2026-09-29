@@ -14,9 +14,11 @@ let target =
   testable
     (Fmt.of_to_string (function
       | None -> "none"
+      | Some Tui_types.Text_account_login -> "account-login"
       | Some Tui_types.Text_preset_name -> "preset-name"
       | Some Tui_types.Text_runtime_lane_name -> "runtime-lane-name"
       | Some Tui_types.Text_runtime_param -> "runtime-param"
+      | Some Tui_types.Text_runtime_account_form -> "runtime-account-form"
       | Some Tui_types.Text_voice_wizard -> "voice-wizard"
       | Some Tui_types.Text_palette -> "palette"
       | Some Tui_types.Text_row_search -> "row-search"
@@ -404,6 +406,31 @@ let test_github_token_claims_input_when_active () =
   check target "no input when not editing token" None (resolved state)
 ;;
 
+(* The account form stands on the runtime.toml pane. Left open behind
+   another pane it must not take that pane's keys, and on a frame too small
+   to draw the pane it lets go the way the other forms do. *)
+let test_the_account_form_claims_only_on_the_runtime_pane () =
+  let state = fresh_state () in
+  let form =
+    match
+      Masc_tui_runtime_account_form.open_on
+        "[providers.codex]\nprotocol = \"codex-app-server\"\ncommand = \"codex\"\n\
+         is-non-interactive = true\n\n[models.m]\napi-name = \"m\"\n\
+         max-context = 1000\ntools-support = true\n\n[codex.m]\n"
+    with
+    | Ok form -> form
+    | Error reason -> Alcotest.fail reason
+  in
+  state.Tui_types.view <- Tui_types.Config;
+  state.Tui_types.config_pane <- Tui_types.Config_runtime;
+  state.Tui_types.runtime_account_form <- Some form;
+  check target "the account form owns typing"
+    (Some Tui_types.Text_runtime_account_form) (resolved state);
+  check target "a compact frame lets go" None (resolved ~compact_viewport:true state);
+  state.Tui_types.config_pane <- Tui_types.Config_prompts;
+  check target "another pane keeps its keys" None (resolved state)
+;;
+
 (* The form outlives nothing. The loop asks this every iteration rather than
    the places that move the surface: the Activity pane's mouse handler and
    the async [Task_dispatched] jump both change [view] without passing any
@@ -528,7 +555,9 @@ let () =
           test_case "the Fusion launch form claims while open" `Quick
             test_the_fusion_launch_form_claims_while_open;
           test_case "the loop drops a launch form left on another surface" `Quick
-            test_the_loop_drops_a_launch_form_left_on_another_surface
+            test_the_loop_drops_a_launch_form_left_on_another_surface;
+          test_case "the account form claims only on the runtime pane" `Quick
+            test_the_account_form_claims_only_on_the_runtime_pane
         ] )
     ]
 ;;

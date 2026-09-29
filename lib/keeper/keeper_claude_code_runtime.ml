@@ -296,6 +296,10 @@ let retry_after_of_rate_limit = function
     Some (Float.max 0.0 (Float.of_int timestamp -. Time_compat.now ()))
 ;;
 
+(* Where an unexpected exception left the Claude Code runtime; the internal
+   error names it so an operator can tell it from the Agent Core runner. *)
+let runtime_boundary_site = "claude_code.runtime_boundary"
+
 let claude_error_to_core_error = function
   | Runtime_claude_code.Invalid_config detail ->
     config_error ~field:"claude_code" detail
@@ -332,6 +336,13 @@ let claude_error_to_core_error = function
     Keeper_internal_error.core_error_of_masc_internal_error
       (Keeper_internal_error.Runtime_connection_closed
          { runtime_id = "claude_code"; detail; turn_accepted = turn_admitted })
+  (* A host-side failure, not the client's reply: Protocol_error would file
+     it as a provider parse error and stop the lane walk on a reading no
+     candidate made (#39768). *)
+  | Runtime_claude_code.Unhandled_exception exn_repr ->
+    Keeper_internal_error.core_error_of_masc_internal_error
+      (Keeper_internal_error.Internal_unhandled_exception
+         { site = runtime_boundary_site; exn_repr; transport_error_kind = None })
   | Runtime_claude_code.Turn_transport_interrupted _ as error ->
     Agent_core.Error.Provider
       (Llm_provider.Error.ProviderUnavailable
@@ -372,6 +383,10 @@ let recovery_failure_of_client_error = function
   | Runtime_claude_code.Protocol_error _
   | Runtime_claude_code.Unsupported_control_request _ ->
     Session_store.Protocol_failed
+  (* No recovery kind names a host exception. Its disposition is the one
+     Protocol_failed carries -- Ambiguous: what the client did is unknown --
+     and the record's detail names the exception. *)
+  | Runtime_claude_code.Unhandled_exception _ -> Session_store.Protocol_failed
   | Runtime_claude_code.Subscription_required _
   | Runtime_claude_code.Turn_failed _
   | Runtime_claude_code.Turn_failed_with_observation _
@@ -760,17 +775,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
       ; setting_sources
       ; system_prompt
       ; admission_timeout_s = config.timeout_s
-      ; (* A per-model [turn-timeout-s] overrides the stream-idle bound, and
-           [0] removes it: the deadline exists to notice a client that has gone
-           silent, not to cap how long legitimate work may take, so a
-           deployment is allowed to say the client decides. Absent leaves
-           [config.timeout_s] standing, which keeps an undeclared config on the
-           previous behaviour. *)
-        timeout_s =
-          (match Runtime_inference.resolve_turn_timeout_s ~runtime_id with
-           | None -> Some config.timeout_s
-           | Some seconds when seconds <= 0.0 -> None
-           | Some seconds -> Some seconds)
+      ; timeout_s = Runtime_inference.resolve_turn_timeout_s_or ~runtime_id ~default:config.timeout_s
         (* A keeper turn is a conversation, not a schema contract: nothing
            downstream parses its text against a domain schema. *)
       ; output_schema = None
@@ -1237,6 +1242,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
             | Runtime_claude_code.Turn_failed _
             | Runtime_claude_code.Stopped_by_host _
             | Runtime_claude_code.Process_exited _
+            | Runtime_claude_code.Unhandled_exception _
             | Runtime_claude_code.Timeout _ -> ());
            if not !state_persistence_failed
            then

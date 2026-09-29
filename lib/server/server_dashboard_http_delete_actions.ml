@@ -698,8 +698,80 @@ let handle_keeper_lifecycle_completion config operation = function
     Keeper_supervisor_cleanup.handle_completion config operation action
 ;;
 
+let close_optional_string json field =
+  match json with
+  | `Assoc fields ->
+    (match List.assoc_opt field fields with
+     | None -> Ok None
+     | Some (`String value) -> Ok (Some value)
+     | Some _ -> Error (invalid_request field))
+  | _ -> Error (invalid_request field)
+;;
+
+let close_optional_bool json field =
+  match json with
+  | `Assoc fields ->
+    (match List.assoc_opt field fields with
+     | None -> Ok None
+     | Some (`Bool value) -> Ok (Some value)
+     | Some _ -> Error (invalid_request field))
+  | _ -> Error (invalid_request field)
+;;
+
+let parse_board_close_request json =
+  let ( let* ) = Result.bind in
+  let* post_id =
+    match Safe_ops.json_string_opt "post_id" json with
+    | Some post_id -> Ok post_id
+    | None -> Error (invalid_request "post_id")
+  in
+  let* successor_id = close_optional_string json "successor_id" in
+  let* no_successor = close_optional_bool json "no_successor" in
+  let* summary =
+    match Safe_ops.json_string_opt "summary" json with
+    | Some summary -> Ok summary
+    | None -> Error (invalid_request "summary")
+  in
+  let* successor =
+    match successor_id, no_successor with
+    | Some _, Some _ -> Error "give successor_id or no_successor, not both"
+    | Some id, None -> Ok (Board.Successor id)
+    | None, Some true -> Ok Board.No_successor
+    | None, Some false ->
+      Error
+        "no_successor=false is not a decision; pass successor_id or \
+         no_successor=true"
+    | None, None -> Error "close requires successor_id or no_successor=true"
+  in
+  Ok (post_id, successor, summary)
+;;
+
+let handle_board_close_post ~agent_name req reqd body_str =
+  try
+    let json = Yojson.Safe.from_string body_str in
+    match parse_board_close_request json with
+    | Error msg -> respond_error ~request:req reqd msg
+    | Ok (post_id, successor, summary) ->
+      (match
+         Board_dispatch.set_closed
+           ~post_id ~closed_by:agent_name ~successor ~summary ()
+       with
+       | Ok () -> respond_ok ~request:req reqd
+       | Error err ->
+         let status =
+           match err with
+           | Board.Validation_error _ -> `Bad_request
+           | _ -> `Not_found
+         in
+         respond_error ~status ~request:req reqd
+           (Board_tool.board_error_to_string err))
+  with Yojson.Json_error _ ->
+    respond_error ~request:req reqd (invalid_request "post_id")
+;;
+
 module For_testing = struct
   let purge_keeper_artifacts = purge_keeper_artifacts
+  let handle_board_close_post = handle_board_close_post
 end
 
 let keeper_purge_resolve_status = function
@@ -934,6 +1006,42 @@ let add_delete_action_routes router =
              | Error () -> respond_error ~request:req reqd (invalid_request "pinned")
              | Ok pinned ->
              match Board_dispatch.set_pinned ~post_id ~pinned with
+             | Ok () -> respond_ok ~request:req reqd
+             | Error err ->
+                 respond_error ~status:`Not_found ~request:req reqd
+                   (Board_tool.board_error_to_string err)
+           with Yojson.Json_error _ ->
+             respond_error ~request:req reqd (invalid_request "post_id")
+         )
+       ) request reqd)
+
+  (* Close is the operator tier of the three-tier close permission model
+     (task-1758/#39356): author self-service and configured-moderator are
+     separate, not-yet-added surfaces (an agent-facing MCP tool and a config
+     concept that does not exist yet, respectively) — tracked as follow-up
+     scope on #39356, not folded in here. [closed_by] is the operator's own
+     bound agent_name from the CanAdmin token, same identity source
+     [with_token_permission_auth] already resolves for every other route in
+     this file, not a client-supplied field (a client could otherwise claim
+     to be anyone). *)
+  |> Http.Router.post "/api/v1/dashboard/board/close" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun _state agent_name req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           handle_board_close_post ~agent_name req reqd body_str
+         )
+       ) request reqd)
+
+  |> Http.Router.post "/api/v1/dashboard/board/reopen" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun _state _agent_name req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let json = Yojson.Safe.from_string body_str in
+             match Safe_ops.json_string_opt "post_id" json with
+             | None -> respond_error ~request:req reqd (invalid_request "post_id")
+             | Some post_id ->
+             match Board_dispatch.reopen ~post_id with
              | Ok () -> respond_ok ~request:req reqd
              | Error err ->
                  respond_error ~status:`Not_found ~request:req reqd

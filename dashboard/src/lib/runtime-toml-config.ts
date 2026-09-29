@@ -20,12 +20,17 @@ export interface RuntimeTomlProvider {
   agent: string
   effort: string
   timeoutS: number | null
+  // Declared by its own [providers.<id>] table. False when keys under
+  // [providers] or at the top level declare it; the structured editor writes
+  // tables and cannot edit that layout.
+  ownTable: boolean
 }
 
 export interface RuntimeTomlModel {
   id: string
   apiName: string
   maxContext: number | null
+  maxPromptBytes: number | null
   toolsSupport: boolean
   thinkingSupport: boolean
   // Capability fields below mirror [models.<id>.capabilities] (SSOT:
@@ -96,31 +101,14 @@ interface TomlDocument {
   readonly source: string
   readonly lines: string[]
   readonly sections: TomlSection[]
+  // Every key under [providers], whatever shape declares it, as the server's
+  // loader reads them (declared_provider_ids).
+  readonly declaredProviderIds: ReadonlySet<string>
+  // Key/value lines before the first table header.
+  readonly rootEntries: readonly AST.TOMLKeyValue[]
 }
 
 type TomlScalar = string | number | boolean | null
-
-// Mirrors the backend's reserved_namespaces (lib/runtime/runtime_toml.ml).
-// A *provider* id equal to one of these would collide with a top-level TOML
-// namespace once used as a binding pin's first segment (`[<providerId>.<modelId>]`,
-// e.g. `[models.foo]` could no longer be told apart from a model definition
-// section). Model ids never occupy that first-segment position, but are
-// checked against the same set here too for naming consistency across the
-// two entity types, not because they carry the same collision risk.
-const RESERVED_TOP_LEVEL = new Set([
-  'providers',
-  'models',
-  'runtime',
-  'system',
-  'routes',
-  'profiles',
-  'web_search',
-  'exec',
-  'egress',
-  'skills',
-  'voice',
-  'vision',
-])
 
 // Parse the complete document so quoted/escaped keys, dotted-key whitespace
 // and apparent table headers inside multiline strings have TOML semantics.
@@ -140,7 +128,46 @@ function parseDocument(sourceText: string): TomlDocument {
       end: nextTable ? nextTable.loc.start.line - 1 : lines.length,
     }
   })
-  return { source: sourceText, lines, sections }
+  const rootEntries = ast.body[0].body.filter((node): node is AST.TOMLKeyValue => node.type === 'TOMLKeyValue')
+  return {
+    source: sourceText,
+    lines,
+    sections,
+    declaredProviderIds: declaredKeysUnder(rootEntries, sections, ['providers']),
+    rootEntries,
+  }
+}
+
+// The keys directly under [path], in every shape the server's loader
+// accepts: a header at or below it ([providers.<id>], [runtime.lanes.<id>]),
+// keys inside a table above it, dotted keys, and inline tables at any depth.
+// Read from key nodes rather than from a built object, which would drop an id
+// such as __proto__.
+function declaredKeysUnder(
+  rootEntries: readonly AST.TOMLKeyValue[],
+  sections: readonly TomlSection[],
+  path: readonly string[],
+): ReadonlySet<string> {
+  const keys = new Set<string>()
+  const reach = (full: readonly string[], below: () => void) => {
+    if (full.length > path.length) {
+      if (samePath(full.slice(0, path.length), path)) keys.add(full[path.length]!)
+    } else if (samePath(full, path.slice(0, full.length))) {
+      below()
+    }
+  }
+  const visit = (base: readonly string[], entries: readonly AST.TOMLKeyValue[]) => {
+    for (const entry of entries) {
+      const full = [...base, ...getStaticTOMLValue(entry.key)]
+      const value = entry.value
+      reach(full, () => { if (value.type === 'TOMLInlineTable') visit(full, value.body) })
+    }
+  }
+  visit([], rootEntries)
+  for (const section of sections) {
+    reach(section.path, () => visit(section.path, section.entries))
+  }
+  return keys
 }
 
 function tablePath(name: string): readonly string[] {
@@ -205,8 +232,40 @@ function tableIds(document: TomlDocument, owner: string): string[] {
   })
 }
 
+// Every declared provider, in the shape the server's loader accepts, so the
+// provider list and the bindings read the same set.
 function providerIds(document: TomlDocument): string[] {
-  return tableIds(document, 'providers')
+  return [...document.declaredProviderIds]
+}
+
+// The scalar keys of the table at [path], however the text declares them:
+// its own [header], dotted keys under a parent table or at the top level, or
+// an inline table. Built without a prototype, so any key name is kept.
+function tableValues(document: TomlDocument, path: readonly string[]): Record<string, TomlScalar> {
+  const values: Record<string, TomlScalar> = Object.create(null)
+  const visit = (base: readonly string[], entries: readonly AST.TOMLKeyValue[]) => {
+    for (const entry of entries) {
+      const full = [...base, ...getStaticTOMLValue(entry.key)]
+      const key = full[full.length - 1]
+      if (full.length === path.length + 1 && key !== undefined && samePath(full.slice(0, -1), path)) {
+        const value = getStaticTOMLValue(entry.value)
+        if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+          values[key] = value
+        }
+      } else if (
+        entry.value.type === 'TOMLInlineTable'
+        && full.length <= path.length
+        && samePath(full, path.slice(0, full.length))
+      ) {
+        visit(full, entry.value.body)
+      }
+    }
+  }
+  visit([], document.rootEntries)
+  for (const section of document.sections) {
+    if (section.kind === 'standard') visit(section.path, section.entries)
+  }
+  return values
 }
 
 function modelIds(document: TomlDocument): string[] {
@@ -255,17 +314,31 @@ export function declaredRuntimeLaneIds(sourceText: string): string[] {
   return [...declaredRuntimeLanes(sourceText).keys()]
 }
 
-function bindingSections(document: TomlDocument): Array<{ providerId: string; modelId: string; section: string }> {
+// A binding is a [<provider>.<model>] table whose provider is declared and is
+// not a name another reader owns, the rule the server's loader uses. Every
+// other two-segment table ([fusion.presets], [voice.tts],
+// [runtime.assignments]) belongs to another reader.
+function bindingSections(
+  document: TomlDocument,
+  reservedProviderIds: readonly string[],
+): Array<{ providerId: string; modelId: string; section: string }> {
   return document.sections.flatMap(section => {
     const [providerId, modelId] = section.path
-    if (section.kind !== 'standard' || section.path.length !== 2 || providerId === undefined || modelId === undefined || RESERVED_TOP_LEVEL.has(providerId)) return []
+    if (
+      section.kind !== 'standard'
+      || section.path.length !== 2
+      || providerId === undefined
+      || modelId === undefined
+      || !document.declaredProviderIds.has(providerId)
+      || reservedProviderIds.includes(providerId)
+    ) return []
     return [{ providerId, modelId, section: section.name }]
   })
 }
 
 function providerFromDocument(document: TomlDocument, id: string): RuntimeTomlProvider {
-  const values = sectionValues(document, `providers.${serializeTomlKey(id)}`)
-  const credentials = sectionValues(document, `providers.${serializeTomlKey(id)}.credentials`)
+  const values = tableValues(document, ['providers', id])
+  const credentials = tableValues(document, ['providers', id, 'credentials'])
   const endpoint = asString(values.endpoint)
   const command = asString(values.command)
   const credentialType = asString(credentials.type) as RuntimeTomlCredentialType
@@ -288,6 +361,8 @@ function providerFromDocument(document: TomlDocument, id: string): RuntimeTomlPr
     agent: asString(values.agent),
     effort: asString(values.effort),
     timeoutS: asNumber(values['timeout-s']),
+    ownTable: document.sections.some(section =>
+      section.kind === 'standard' && samePath(section.path, ['providers', id])),
   }
 }
 
@@ -318,6 +393,7 @@ function modelFromDocument(document: TomlDocument, id: string): RuntimeTomlModel
     id,
     apiName: asString(values['api-name'], asString(values['model-name'], id)),
     maxContext: asNumber(values['max-context']),
+    maxPromptBytes: asNumber(values['max-prompt-bytes']),
     toolsSupport: asBoolean(values['tools-support']),
     thinkingSupport: asBoolean(values['thinking-support']),
     jsonSupport: capBoolean(caps['supports-response-format-json']),
@@ -351,7 +427,11 @@ function bindingFromDocument(
   }
 }
 
-export function parseRuntimeTomlEnvironment(sourceText: string): RuntimeTomlEnvironment {
+// [reservedProviderIds] is the server's list (RuntimeTomlConfig.reserved_provider_ids).
+export function parseRuntimeTomlEnvironment(
+  sourceText: string,
+  reservedProviderIds: readonly string[],
+): RuntimeTomlEnvironment {
   let document: TomlDocument
   try {
     document = parseDocument(sourceText)
@@ -368,7 +448,7 @@ export function parseRuntimeTomlEnvironment(sourceText: string): RuntimeTomlEnvi
   )
   const providers = providerIds(document).map(id => providerFromDocument(document, id))
   const models = modelIds(document).map(id => modelFromDocument(document, id))
-  const bindings = bindingSections(document).map(entry => bindingFromDocument(document, entry))
+  const bindings = bindingSections(document, reservedProviderIds).map(entry => bindingFromDocument(document, entry))
   const warnings: string[] = []
   if (providers.length === 0) warnings.push('providers.* section not found')
   if (models.length === 0) warnings.push('models.* section not found')
@@ -411,9 +491,10 @@ function runtimeAssignmentsSignature(document: TomlDocument): string {
 export function runtimeTomlImpactSummary(
   beforeSourceText: string,
   afterSourceText: string,
+  reservedProviderIds: readonly string[],
 ): RuntimeTomlImpactSummary | null {
-  const beforeEnvironment = parseRuntimeTomlEnvironment(beforeSourceText)
-  const afterEnvironment = parseRuntimeTomlEnvironment(afterSourceText)
+  const beforeEnvironment = parseRuntimeTomlEnvironment(beforeSourceText, reservedProviderIds)
+  const afterEnvironment = parseRuntimeTomlEnvironment(afterSourceText, reservedProviderIds)
   if (beforeEnvironment.parseError !== null || afterEnvironment.parseError !== null) return null
   const beforeDocument = parseDocument(beforeSourceText)
   const afterDocument = parseDocument(afterSourceText)
@@ -513,10 +594,16 @@ export function deleteRuntimeTomlSection(sourceText: string, sectionName: string
   return joinLines(lines)
 }
 
-export function cascadeDeleteProvider(sourceText: string, providerId: string): string {
+// [reservedProviderIds] is the server's list. A provider declared under one
+// of those names shares its table with another reader, so only its
+// [providers.<id>] tables go.
+export function cascadeDeleteProvider(
+  sourceText: string,
+  providerId: string,
+  reservedProviderIds: readonly string[],
+): string {
   const document = parseDocument(sourceText)
-  const env = parseRuntimeTomlEnvironment(sourceText)
-  const canDeleteBindingNamespace = !isReservedRuntimeTomlId(providerId)
+  const canDeleteBindingNamespace = !reservedProviderIds.includes(providerId)
   const sectionsToDelete = document.sections.filter(section =>
     (section.path[0] === 'providers' && section.path[1] === providerId)
     || (canDeleteBindingNamespace && section.path[0] === providerId),
@@ -530,10 +617,16 @@ export function cascadeDeleteProvider(sourceText: string, providerId: string): s
   // Also remove from runtime defaults/assignments if they reference this provider
   const nextDocument = parseDocument(next)
   const runtimeValues = sectionValues(nextDocument, 'runtime')
-  const toDeleteBindings = new Set(env.bindings.filter(b => b.providerId === providerId).map(b => b.id))
-  const remainingBindings = parseRuntimeTomlEnvironment(next).bindings.map(binding => binding.id)
+  // A route names its provider before the first dot. It is cleared by that
+  // name, not by the bindings read, since a reserved provider has none read.
+  // A lane id can start the same way, so a lane declared in any shape keeps
+  // its routes.
+  const declaredLanes = declaredKeysUnder(nextDocument.rootEntries, nextDocument.sections, ['runtime', 'lanes'])
+  const routesToDeleted = (runtimeId: string) => !declaredLanes.has(runtimeId)
+    && splitRuntimeId(runtimeId)?.providerId === providerId
+  const remainingBindings = parseRuntimeTomlEnvironment(next, reservedProviderIds).bindings.map(binding => binding.id)
   
-  if (typeof runtimeValues.default === 'string' && toDeleteBindings.has(runtimeValues.default)) {
+  if (typeof runtimeValues.default === 'string' && routesToDeleted(runtimeValues.default)) {
     const fallback = remainingBindings[0]
     next = fallback
       ? setRuntimeTomlKey(next, 'runtime', 'default', fallback)
@@ -543,7 +636,7 @@ export function cascadeDeleteProvider(sourceText: string, providerId: string): s
   // Clean up assignments
   const assignments = sectionValues(nextDocument, 'runtime.assignments')
   for (const [key, value] of Object.entries(assignments)) {
-    if (typeof value === 'string' && toDeleteBindings.has(value)) {
+    if (typeof value === 'string' && routesToDeleted(value)) {
       next = deleteRuntimeTomlKey(next, 'runtime.assignments', key)
     }
   }
@@ -605,7 +698,7 @@ export function setRuntimeTomlProviderCredential(
 export function setRuntimeTomlModelField(
   sourceText: string,
   modelId: string,
-  field: 'api-name' | 'max-context' | 'tools-support' | 'thinking-support' | 'json-support' | 'streaming',
+  field: 'api-name' | 'max-context' | 'max-prompt-bytes' | 'tools-support' | 'thinking-support' | 'json-support' | 'streaming',
   value: string | number | boolean | null,
 ): string {
   // The JSON capability is stored in the nested [models.<id>.capabilities]
@@ -623,17 +716,23 @@ export function setRuntimeTomlModelField(
   return setRuntimeTomlKey(sourceText, `models.${serializeTomlKey(modelId)}`, field, value)
 }
 
+// Runtime identifiers separate a bare provider id from the model id at the
+// first dot; a model id may itself contain dots and must remain one key.
+function splitRuntimeId(runtimeId: string): { providerId: string; modelId: string } | null {
+  const boundary = runtimeId.indexOf('.')
+  if (boundary <= 0 || boundary === runtimeId.length - 1) return null
+  return { providerId: runtimeId.slice(0, boundary), modelId: runtimeId.slice(boundary + 1) }
+}
+
 export function setRuntimeTomlBindingField(
   sourceText: string,
   runtimeId: string,
   field: 'enabled' | 'is-default' | 'max-concurrent' | 'keep-alive' | 'num-ctx',
   value: string | number | boolean | null,
 ): string {
-  // Runtime identifiers separate a bare provider id from the model id at
-  // the first dot; a model id may itself contain dots and must remain one key.
-  const boundary = runtimeId.indexOf('.')
-  if (boundary <= 0 || boundary === runtimeId.length - 1) throw new Error('Invalid runtime identifier')
-  const table = `${serializeTomlKey(runtimeId.slice(0, boundary))}.${serializeTomlKey(runtimeId.slice(boundary + 1))}`
+  const parts = splitRuntimeId(runtimeId)
+  if (parts === null) throw new Error('Invalid runtime identifier')
+  const table = `${serializeTomlKey(parts.providerId)}.${serializeTomlKey(parts.modelId)}`
   if (value === null) return deleteRuntimeTomlKey(sourceText, table, field)
   return setRuntimeTomlKey(sourceText, table, field, value)
 }
@@ -644,10 +743,6 @@ const RUNTIME_TOML_ID_PATTERN = /^[A-Za-z0-9_-]+$/
 
 export function isValidRuntimeTomlIdFormat(id: string): boolean {
   return RUNTIME_TOML_ID_PATTERN.test(id)
-}
-
-export function isReservedRuntimeTomlId(id: string): boolean {
-  return RESERVED_TOP_LEVEL.has(id)
 }
 
 // Ensures the provider x model pin section exists (e.g. `[ollama_cloud.new-model]`)

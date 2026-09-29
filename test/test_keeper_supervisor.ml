@@ -41,7 +41,7 @@ module Librarian_progress = Masc.Keeper_librarian_progress
 (* Test-local shim for the excised [Keeper_approval_queue.resolve] wrapper:
    unit projection over [resolve_with_policy] (production resolution path). *)
 let aq_resolve ~base_path ~id ~decision =
-  match AQ.resolve_with_policy ~base_path ~id ~decision () with
+  match AQ.resolve_with_policy ~base_path ~id ~decision ~source:AQT.Human_operator () with
   | Ok _ -> Ok ()
   | Error _ as error -> error
 ;;

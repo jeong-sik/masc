@@ -14,9 +14,11 @@
     value.
 
     [masc_schedule_update] was added after the migration. It deliberately
-    shares the create field set and makes [schedule_id] mandatory; a separate
-    structural assertion below pins that relationship instead of pretending
-    it has pre-migration bytes.
+    shares the create field set and requires [schedule_id] in the schema.
+    [recurrence_kind] is optional for this version's update migration: an
+    omission preserves the stored recurrence and warns. The structural
+    assertion below pins the published schema instead of pretending it has
+    pre-migration bytes.
 
     The descriptions and schemas this suite also pinned were literals read off
     the same published values before the declarations moved into
@@ -72,7 +74,7 @@ let test_update_reuses_create_fields_and_requires_identity () =
   check (list string) "same editable fields"
     (object_fields "properties" create)
     (object_fields "properties" update);
-  check (list string) "update additionally requires the stable id"
+  check (list string) "update schema requires identity"
     [ "schedule_id"; "keeper_name"; "message" ]
     (required_fields update)
 ;;

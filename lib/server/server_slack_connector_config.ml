@@ -20,7 +20,7 @@ let load ~path =
        (match Otoml.Parser.from_string_result contents with
         | Error _ -> Error (Invalid_toml path)
         | Ok toml ->
-          (match Field_resolution.resolve_bool toml [ "slack"; "enabled" ] with
+          (match Field_resolution.resolve_bool toml [ Runtime_toml_namespace.(key Slack); "enabled" ] with
            | Field_resolution.Missing | Field_resolution.Present true ->
              Ok Env_config_slack.Enabled
            | Field_resolution.Present false -> Ok Env_config_slack.Disabled

@@ -771,35 +771,46 @@ let test_mixed_advanceable_final_failure_walks_cli_tail () =
       check_cli_run_selected ~before ~slot_id:Fixture.cli_primary_runtime)))
 ;;
 
-let test_mixed_non_advanceable_terminal_stops_before_cli () =
+(* A request that went out and got no answer hands the partition to the CLI
+   tail like any other provider failure (RFC-exact-lane-walks-one-slot-list
+   Q1): the exact request carries no tools, so the CLI slot cannot double an
+   effect. *)
+let test_mixed_unknown_result_walks_cli_tail () =
   Fixture.with_official_client_runtimes (fun () ->
   with_prompt_registry (fun () ->
     run_eio (fun ~sw ~net ~clock ->
-      let candidate = candidate "board-attention-mixed-terminal" in
+      let candidate = candidate "board-attention-mixed-unknown-result" in
       let aborted = Fixture.start_server ~sw ~net ~clock Fixture.Abort_after_request in
       publish_lane
         ~cli_slot_ids:[ Fixture.cli_primary_runtime ]
-        [ target "board-attention-terminal-http" aborted.base_url ];
+        [ target "board-attention-unknown-result-http" aborted.base_url ];
       let prepared =
         match prepare_exact ~net:(Some net) candidate with
         | Ok prepared -> prepared
-        | Error _ -> Alcotest.fail "mixed terminal lane did not prepare"
+        | Error _ -> Alcotest.fail "mixed unknown-result lane did not prepare"
       in
+      let before = board_attention_run_ids () in
       let cli_calls = ref 0 in
-      match
-        Exact_flow.execute
-          ~cli_runner:(cli_success_runner candidate cli_calls)
-          ~clock
-          ~callback_error_to_string:Fun.id
-          ~before_dispatch:(fun _ -> Ok ())
-          ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
-          prepared
-      with
-      | Error (Exact_flow.Providers_exhausted { attempts; _ }) ->
-        Alcotest.(check int) "terminal keeps one HTTP receipt" 1 (List.length attempts);
-        Alcotest.(check int) "non-advanceable failure does not dispatch CLI" 0 !cli_calls
-      | Error _ -> Alcotest.fail "non-advanceable execution failure changed category"
-      | Ok _ -> Alcotest.fail "non-advanceable HTTP failure must remain terminal")))
+      (match
+         Exact_flow.execute
+           ~cli_runner:(cli_success_runner candidate cli_calls)
+           ~clock
+           ~callback_error_to_string:Fun.id
+           ~before_dispatch:(fun _ -> Ok ())
+           ~before_advance:(fun ~failed:_ ~next:_ ->
+             Alcotest.fail "the aborted final HTTP candidate has no HTTP successor")
+           prepared
+       with
+       | Ok judgment ->
+         Alcotest.(check string)
+           "CLI answered after the unanswered HTTP request"
+           Fixture.cli_primary_runtime
+           judgment.Candidate.slot_id
+       | Error _ -> Alcotest.fail "an unanswered HTTP request did not reach the CLI tail");
+      Alcotest.(check int) "aborted HTTP candidate dispatched once" 1
+        (Fixture.post_count aborted);
+      Alcotest.(check int) "CLI candidate dispatched once" 1 !cli_calls;
+      check_cli_run_selected ~before ~slot_id:Fixture.cli_primary_runtime)))
 ;;
 
 let test_mixed_before_advance_failure_stops_before_cli () =
@@ -1404,7 +1415,10 @@ let run_eio_with_http_pool f =
 ;;
 
 (* Jev is on for [f] and asks the server at [endpoint]. *)
-let with_jev ~endpoint f =
+let with_jev
+      ~endpoint
+      f
+  =
   Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" (Some "test-typesafeai-key") (fun () ->
     Masc_test_deps.with_typesafeai_policy
       { Runtime_schema.default_typesafeai with
@@ -1415,8 +1429,13 @@ let with_jev ~endpoint f =
       f)
 ;;
 
-(* A System One answer to the adapter's one question, [relevance]. *)
-let jev_response ~choice =
+(* A System One answer to the adapter's relevance question. *)
+let jev_response
+      ?(confidence = 0.6)
+      ?(probabilities = [ "relevant", 0.2; "not_relevant", 0.8 ])
+      ~choice
+      ()
+  =
   Yojson.Safe.to_string
     (`Assoc
         [ "model", `String "jev-latest"
@@ -1427,8 +1446,11 @@ let jev_response ~choice =
                     [ "type", `String "choice"
                     ; "choice", `String choice
                     ; ( "probabilities"
-                      , `Assoc [ "relevant", `Float 0.2; "not_relevant", `Float 0.8 ] )
-                    ; "confidence", `Float 0.6
+                      , `Assoc
+                          (List.map
+                             (fun (label, probability) -> label, `Float probability)
+                             probabilities) )
+                    ; "confidence", `Float confidence
                     ] )
               ] )
         ])
@@ -1479,12 +1501,27 @@ type jev_run =
 
 (* Runs the exact flow with Jev switched on and answering [jev_choice], in
    front of one LLM slot that answers relevant. *)
-let execute_behind_jev ~name ~jev_choice =
+let execute_behind_jev
+      ?(jev_confidence = 0.6)
+      ?(jev_probabilities = [ "relevant", 0.2; "not_relevant", 0.8 ])
+      ~name
+      ~jev_choice
+      ()
+  =
   with_prompt_registry (fun () ->
     run_eio_with_http_pool (fun ~sw ~net ~clock ->
       let candidate = candidate name in
       let jev =
-        Fixture.start_server ~sw ~net ~clock (Fixture.Reply (jev_response ~choice:jev_choice))
+        Fixture.start_server
+          ~sw
+          ~net
+          ~clock
+          (Fixture.Reply
+             (jev_response
+                ~confidence:jev_confidence
+                ~probabilities:jev_probabilities
+                ~choice:jev_choice
+                ()))
       in
       let llm =
         Fixture.start_server
@@ -1581,7 +1618,14 @@ let check_terminal_provenance label run provenance =
 ;;
 
 let test_jev_relevant_is_kept () =
-  let run = execute_behind_jev ~name:"board-attention-jev-relevant" ~jev_choice:"relevant" in
+  let run =
+    execute_behind_jev
+      ~name:"board-attention-jev-relevant"
+      ~jev_choice:"relevant"
+      ~jev_confidence:0.9
+      ~jev_probabilities:[ "relevant", 0.95; "not_relevant", 0.05 ]
+      ()
+  in
   check_terminal_jev "relevant" ~answer:"relevant" ~rejudged:None run;
   match run.result with
   | Ok judgment ->
@@ -1636,11 +1680,51 @@ let check_judged_by_the_llm_lane label run =
    and one LLM call, but only the first had an answer from Jev. *)
 let test_jev_not_relevant_is_judged_again () =
   let run =
-    execute_behind_jev ~name:"board-attention-jev-not-relevant" ~jev_choice:"not_relevant"
+    execute_behind_jev ~name:"board-attention-jev-not-relevant" ~jev_choice:"not_relevant" ()
   in
   check_judged_by_the_llm_lane "not_relevant" run;
   check_terminal_jev "not_relevant" ~answer:"not_relevant" ~rejudged:(Some "relevant") run;
   check_terminal_provenance "not_relevant" run (expected_jev_provenance run)
+;;
+
+(* An explicit uncertain answer delegates to the full judgment lane. *)
+let test_jev_uncertain_is_judged_again () =
+  let run =
+    execute_behind_jev
+      ~name:"board-attention-jev-uncertain"
+      ~jev_choice:"uncertain"
+      ~jev_confidence:0.26
+      ~jev_probabilities:[ "relevant", 0.2; "not_relevant", 0.2; "uncertain", 0.6 ]
+      ()
+  in
+  check_judged_by_the_llm_lane "uncertain" run;
+  check_terminal_jev "uncertain" ~answer:"uncertain" ~rejudged:(Some "relevant") run;
+  check_terminal_provenance "uncertain" run (expected_jev_provenance run);
+  (match run.terminal_jev with
+   | [ jev ] ->
+     (match json_field "confidence" jev with
+      | Some (`Float confidence) ->
+        Alcotest.(check (float 0.000001))
+          "the terminal entry retains confidence as observation"
+          0.26
+          confidence
+      | Some _ | None -> Alcotest.fail "uncertain: terminal entry has no numeric confidence")
+   | _ -> Alcotest.fail "uncertain: terminal evidence is missing")
+;;
+
+let test_jev_confidence_does_not_route () =
+  let run = execute_behind_jev ~name:"board-attention-jev-low-confidence"
+      ~jev_choice:"relevant" ~jev_confidence:0.0 () in
+  check_terminal_jev "confidence is observation" ~answer:"relevant" ~rejudged:None run
+;;
+
+let test_jev_invalid_confidence_is_judged_again () =
+  List.iter (fun confidence ->
+    let run = execute_behind_jev ~name:"board-attention-jev-invalid-confidence"
+        ~jev_choice:"relevant" ~jev_confidence:confidence () in
+    check_judged_by_the_llm_lane "invalid confidence" run;
+    check_terminal_jev "invalid confidence" ~answer:"failed" ~rejudged:None run)
+    [-0.1; 1.5]
 ;;
 
 let test_jev_not_relevant_cli_fallback_is_in_the_terminal_entry () =
@@ -1653,7 +1737,7 @@ let test_jev_not_relevant_cli_fallback_is_in_the_terminal_entry () =
           ~sw
           ~net
           ~clock
-          (Fixture.Reply (jev_response ~choice:"not_relevant"))
+          (Fixture.Reply (jev_response ~choice:"not_relevant" ()))
       in
       publish_lane
         ~cli_slot_ids:[ Fixture.cli_primary_runtime ]
@@ -1713,7 +1797,7 @@ let test_jev_not_relevant_cli_fallback_is_in_the_terminal_entry () =
 ;;
 
 let test_jev_choice_outside_the_question_is_judged_again () =
-  let run = execute_behind_jev ~name:"board-attention-jev-unknown-choice" ~jev_choice:"maybe" in
+  let run = execute_behind_jev ~name:"board-attention-jev-unknown-choice" ~jev_choice:"maybe" () in
   check_judged_by_the_llm_lane "unknown choice" run;
   check_terminal_jev "unknown choice" ~answer:"failed" ~rejudged:None run
 ;;
@@ -1725,7 +1809,7 @@ let test_jev_adapter_sends_the_decisions_and_reads_not_relevant () =
   run_eio_with_http_pool (fun ~sw ~net ~clock ->
     let candidate = candidate "board-attention-jev-adapter" in
     let jev =
-      Fixture.start_server ~sw ~net ~clock (Fixture.Reply (jev_response ~choice:"not_relevant"))
+      Fixture.start_server ~sw ~net ~clock (Fixture.Reply (jev_response ~choice:"not_relevant" ()))
     in
     with_jev ~endpoint:jev.base_url (fun () ->
       let judged =
@@ -1753,9 +1837,15 @@ let test_jev_adapter_sends_the_decisions_and_reads_not_relevant () =
         "the model Jev's response named"
         "jev-latest"
         judged.provenance.answering_model_id;
-      (match judged.verdict.Judgment.decision with
-       | Judgment.Not_relevant -> ()
-       | Judgment.Relevant -> Alcotest.fail "a not_relevant answer decoded as Relevant");
+      (match judged.assessment with
+       | Typesafeai_board_attention.Decided { Judgment.decision = Judgment.Not_relevant; _ } -> ()
+       | Typesafeai_board_attention.Decided { Judgment.decision = Judgment.Relevant; _ }
+       | Typesafeai_board_attention.Needs_review _ ->
+         Alcotest.fail "a not_relevant answer decoded as another assessment");
+      Alcotest.(check (float 0.0))
+        "the adapter retains Jev's confidence as observation"
+        0.6
+        judged.confidence;
       match Fixture.request_bodies jev with
       | [ body ] ->
         Alcotest.(check string)
@@ -1791,7 +1881,7 @@ let test_jev_adapter_sends_the_decisions_and_reads_not_relevant () =
             | Some (`Assoc criteria) ->
               Alcotest.(check (list string))
                 "the request offers every decision under its label"
-                Judgment.decision_tokens
+                (Judgment.decision_tokens @ ["uncertain"])
                 (List.map fst criteria);
               Alcotest.(check (option string))
                 "relevant requires the current signal, not capability overlap"
@@ -1861,9 +1951,9 @@ let () =
             `Quick
             test_mixed_advanceable_final_failure_walks_cli_tail
         ; Alcotest.test_case
-            "mixed non-advanceable terminal stops before CLI"
+            "mixed unanswered HTTP request walks the CLI tail"
             `Quick
-            test_mixed_non_advanceable_terminal_stops_before_cli
+            test_mixed_unknown_result_walks_cli_tail
         ; Alcotest.test_case
             "mixed persistence failure stops before CLI"
             `Quick
@@ -1910,6 +2000,16 @@ let () =
             "a not-relevant Jev answer is judged again by the LLM lane"
             `Quick
             test_jev_not_relevant_is_judged_again
+        ; Alcotest.test_case
+            "an explicit uncertain Jev answer is judged again by the LLM lane"
+            `Quick
+            test_jev_uncertain_is_judged_again
+        ; Alcotest.test_case
+            "confidence does not route a relevant answer"
+            `Quick
+            test_jev_confidence_does_not_route
+        ; Alcotest.test_case "invalid confidence delegates to the LLM lane" `Quick
+            test_jev_invalid_confidence_is_judged_again
         ; Alcotest.test_case
             "a not-relevant Jev terminal entry includes the CLI fallback"
             `Quick

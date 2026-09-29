@@ -4,7 +4,10 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { fireEvent, waitFor } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { committedRuntimeTomlConfigFixture } from '../lib/runtime-config-receipt.test-fixture'
+import {
+  committedRuntimeTomlConfigFixture,
+  runtimeReservedProviderIdsFixture,
+} from '../lib/runtime-config-receipt.test-fixture'
 import { getRuntimeTomlKey } from '../lib/runtime-toml-config'
 
 const apiMocks = vi.hoisted(() => ({
@@ -96,6 +99,15 @@ const providerProtocols = [
     provider_fields: ['agent', 'effort', 'timeout-s'],
     required_provider_fields: ['timeout-s'],
   },
+  {
+    protocol: 'muse-serve',
+    transport: 'command',
+    semantics: 'official_client',
+    credential_policy: 'forbidden',
+    requires_non_interactive: true,
+    provider_fields: ['account-home'],
+    required_provider_fields: ['account-home'],
+  },
 ] as const
 
 const baseConfig = {
@@ -106,6 +118,7 @@ const baseConfig = {
   source_revision: 'a'.repeat(64),
   reloaded: false,
   provider_protocols: providerProtocols,
+  reserved_provider_ids: [...runtimeReservedProviderIdsFixture],
 }
 
 const richSourceText = `[runtime]
@@ -1136,6 +1149,7 @@ describe('RuntimeTomlEditor', () => {
       'codex-app-server',
       'claude-code',
       'antigravity-cli',
+      'muse-serve',
     ])
     expect(protocolOptions).not.toContain('messages-cli')
     expect(protocolOptions).not.toContain('openai-compatible-cli')
@@ -1198,6 +1212,37 @@ describe('RuntimeTomlEditor', () => {
     })
   })
 
+  it('requires and persists an explicit Muse account home without an API key', async () => {
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
+    render(html`<${RuntimeTomlEditor} />`, container)
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-toml-nav-providers"]')).not.toBeNull()
+    })
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-providers"]') as HTMLButtonElement)
+    fireEvent.click(container.querySelector('[data-testid="runtime-add-provider-toggle"]') as HTMLButtonElement)
+    fireEvent.input(container.querySelector('[data-testid="runtime-add-provider-id"]') as HTMLInputElement,
+      { target: { value: 'selected_muse' } })
+    fireEvent.change(container.querySelector('[aria-label="새 provider protocol"]') as HTMLSelectElement,
+      { target: { value: 'muse-serve' } })
+    fireEvent.input(container.querySelector('[aria-label="새 provider transport 값"]') as HTMLInputElement,
+      { target: { value: '/synthetic/bin/muse' } })
+    const credential = container.querySelector('[aria-label="새 provider credential 종류"]') as HTMLSelectElement
+    expect(credential.value).toBe('none')
+    expect(credential.disabled).toBe(true)
+    fireEvent.click(container.querySelector('[data-testid="runtime-add-provider-submit"]') as HTMLButtonElement)
+    expect(container.textContent).toContain('사용할 계정 홈을 선택하세요')
+    fireEvent.input(container.querySelector('[data-testid="runtime-add-provider-account-home"]') as HTMLInputElement,
+      { target: { value: '/synthetic/accounts/muse-one' } })
+    fireEvent.click(container.querySelector('[data-testid="runtime-add-provider-submit"]') as HTMLButtonElement)
+    await waitFor(() => {
+      const source = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
+      expect(source).toContain('[providers.selected_muse]')
+      expect(source).toContain('protocol = "muse-serve"')
+      expect(source).toContain('account-home = "/synthetic/accounts/muse-one"')
+      expect(source).not.toContain('[providers.selected_muse.credentials]')
+    })
+  })
+
   it('materializes every required Antigravity provider field', async () => {
     apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
     render(html`<${RuntimeTomlEditor} />`, container)
@@ -1248,6 +1293,33 @@ describe('RuntimeTomlEditor', () => {
     })
   })
 
+  it.each(['wire_capture', 'board'])('refuses server-reserved provider id %s', async reservedId => {
+    // The form reads the response's list and keeps no copy of its own.
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce({ ...richConfig, reserved_provider_ids: [reservedId] })
+    render(html`<${RuntimeTomlEditor} />`, container)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-toml-nav-providers"]')).not.toBeNull()
+    })
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-providers"]') as HTMLButtonElement)
+    fireEvent.click(container.querySelector('[data-testid="runtime-add-provider-toggle"]') as HTMLButtonElement)
+
+    fireEvent.input(container.querySelector('[data-testid="runtime-add-provider-id"]') as HTMLInputElement, {
+      target: { value: reservedId },
+    })
+    fireEvent.input(container.querySelector('[aria-label="새 provider transport 값"]') as HTMLInputElement, {
+      target: { value: 'https://irrelevant.example/v1' },
+    })
+    fireEvent.click(container.querySelector('[data-testid="runtime-add-provider-submit"]') as HTMLButtonElement)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-add-provider-error"]')?.textContent)
+        .toContain('예약된 이름')
+    })
+    expect(container.querySelector('[data-testid="runtime-toml-status"]')?.textContent).not.toContain('modified')
+    expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
+  })
+
   it('adds a new model through the form', async () => {
     apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
     render(html`<${RuntimeTomlEditor} />`, container)
@@ -1264,12 +1336,40 @@ describe('RuntimeTomlEditor', () => {
     fireEvent.input(container.querySelector('[data-testid="runtime-add-model-max-context"]') as HTMLInputElement, {
       target: { value: '50000' },
     })
+    fireEvent.input(container.querySelector('[data-testid="runtime-add-model-max-prompt-bytes"]') as HTMLInputElement, { target: { value: '45678' } })
     fireEvent.click(container.querySelector('[data-testid="runtime-add-model-submit"]') as HTMLButtonElement)
 
     await waitFor(() => {
       const source = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
       expect(source).toContain('[models.brandnewmodel]')
       expect(source).toContain('max-context = 50000')
+      expect(source).toContain('max-prompt-bytes = 45678')
+    })
+  })
+
+  it('adds a model whose id is on the reserved provider list', async () => {
+    // Only a provider id becomes a top-level table. A model id sits under
+    // [models], so the list does not apply to it.
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce({ ...richConfig, reserved_provider_ids: ['turn'] })
+    render(html`<${RuntimeTomlEditor} />`, container)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-toml-nav-models"]')).not.toBeNull()
+    })
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-models"]') as HTMLButtonElement)
+    fireEvent.click(container.querySelector('[data-testid="runtime-add-model-toggle"]') as HTMLButtonElement)
+
+    fireEvent.input(container.querySelector('[data-testid="runtime-add-model-id"]') as HTMLInputElement, {
+      target: { value: 'turn' },
+    })
+    fireEvent.input(container.querySelector('[data-testid="runtime-add-model-max-context"]') as HTMLInputElement, {
+      target: { value: '50000' },
+    })
+    fireEvent.click(container.querySelector('[data-testid="runtime-add-model-submit"]') as HTMLButtonElement)
+
+    await waitFor(() => {
+      const source = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
+      expect(source).toContain('[models.turn]')
     })
   })
 
@@ -1318,14 +1418,110 @@ describe('RuntimeTomlEditor', () => {
     })
   })
 
+  it('saves unrelated edits with a dormant Muse provider and requires its account home when enabled', async () => {
+    const source = `${richConfig.source_text}
+[providers.muse_fixture]
+protocol = "muse-serve"
+command = "muse"
+enabled = false
+is-non-interactive = true
+`
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce({ ...richConfig, source_text: source })
+    render(html`<${RuntimeTomlEditor} />`, container)
+    await waitFor(() => expect(container.querySelector('textarea')?.value).toBe(source))
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement
+    const save = container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement
+    const edited = `${source}\n# An unrelated operator note\n`
+    fireEvent.input(textarea, { target: { value: edited } })
+    fireEvent.click(save)
+    await waitFor(() => {
+      expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledOnce()
+      expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledWith(edited)
+      expect(container.querySelector('[data-testid="runtime-toml-status"]')?.textContent).toContain('saved')
+    })
+
+    fireEvent.input(textarea, { target: { value: edited.replace('enabled = false', 'enabled = true') } })
+    fireEvent.click(save)
+    await waitFor(() => expect(container.textContent).toContain('사용할 계정 홈을 선택하세요'))
+    expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['', '   ', 'relative/account'])('refuses an invalid existing Muse account home before saving (%j)', async home => {
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce({ ...richConfig,
+      source_text: `${richConfig.source_text}
+[providers.muse_fixture]
+protocol = "muse-serve"
+command = "muse"
+account-home = "/synthetic/muse"
+is-non-interactive = true
+` })
+    render(html`<${RuntimeTomlEditor} />`, container)
+    await waitFor(() => expect(container.querySelector('[data-testid="runtime-toml-nav-providers"]')).not.toBeNull())
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-providers"]') as HTMLButtonElement)
+    const account = container.querySelector('[data-testid="runtime-provider-muse_fixture-account-home"]') as HTMLInputElement
+    expect(account.required).toBe(true)
+    expect(account.placeholder).not.toContain('비우면 기본 로그인')
+    fireEvent.input(account, { target: { value: home } })
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement)
+    await waitFor(() => expect(container.textContent).toContain(home.trim() === ''
+      ? '사용할 계정 홈을 선택하세요' : '계정 홈은 절대 경로여야 합니다'))
+    expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
+    fireEvent.input(account, { target: { value: '/synthetic/another' } })
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement)
+    await waitFor(() => expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledOnce())
+    expect(apiMocks.saveRuntimeTomlConfig.mock.calls[0]?.[0]).toContain('account-home = "/synthetic/another"')
+  })
+
+  it.each(['claude-code', 'codex-app-server'])('keeps default-account edits available for %s', async protocol => {
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce({ ...richConfig,
+      source_text: `${richConfig.source_text}
+[providers.native_fixture]
+protocol = "${protocol}"
+command = "native-fixture"
+account-home = "/synthetic/native"
+is-non-interactive = true
+` })
+    render(html`<${RuntimeTomlEditor} />`, container)
+    await waitFor(() => expect(container.querySelector('[data-testid="runtime-toml-nav-providers"]')).not.toBeNull())
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-providers"]') as HTMLButtonElement)
+    const account = container.querySelector('[data-testid="runtime-provider-native_fixture-account-home"]') as HTMLInputElement
+    expect(account.required).toBe(false)
+    fireEvent.input(account, { target: { value: '' } })
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement)
+    await waitFor(() => expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledOnce())
+    expect(apiMocks.saveRuntimeTomlConfig.mock.calls[0]?.[0]).not.toContain('account-home = "/synthetic/native"')
+  })
+
+  it.each([false, true])('adds a Muse binding whether or not the model declares a byte budget (declared=%s)', async declared => {
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce({ ...richConfig,
+      source_text: `${richConfig.source_text}
+[providers.muse_fixture]
+protocol = "muse-serve"
+command = "muse"
+account-home = "/synthetic/muse"
+is-non-interactive = true
+[models.muse_fixture]
+api-name = "synthetic-model"
+max-context = 200000
+${declared ? 'max-prompt-bytes = 45678' : ''}
+` })
+    render(html`<${RuntimeTomlEditor} />`, container)
+    await waitFor(() => expect(container.querySelector('[data-testid="runtime-toml-nav-bindings"]')).not.toBeNull())
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-bindings"]') as HTMLButtonElement)
+    fireEvent.change(container.querySelector('[data-testid="runtime-add-binding-provider"]') as HTMLSelectElement, { target: { value: 'muse_fixture' } })
+    fireEvent.change(container.querySelector('[data-testid="runtime-add-binding-model"]') as HTMLSelectElement, { target: { value: 'muse_fixture' } })
+    fireEvent.click(container.querySelector('[data-testid="runtime-add-binding-submit"]') as HTMLButtonElement)
+    await waitFor(() => {
+      const source = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
+      expect(source).toContain('[muse_fixture.muse_fixture]')
+    })
+  })
+
   it('rejects a binding whose provider id is a reserved top-level namespace', async () => {
-    // Legacy/hand-edited data: a provider table literally named "models" is
-    // parseable (providerIds() has no reserved check on read), so it can show
-    // up in the binding form's provider dropdown even though a *new* provider
-    // could never be created with this id (runtimeTomlIdError blocks it).
-    // bindingSections() excludes RESERVED_TOP_LEVEL first segments on read,
-    // so a binding pinned to it would be silently unreadable -- or collide
-    // with a real [models.<id>] model definition outright.
+    // Hand-edited text can declare a provider named "models", so it shows up
+    // in the binding form's provider list although the add-provider form
+    // refuses the name. The server refuses it too (reserved_provider_ids), so
+    // the binding form stops a binding pinned to it before any save.
     const configWithReservedProvider = {
       ...richConfig,
       source_text: `${richConfig.source_text}

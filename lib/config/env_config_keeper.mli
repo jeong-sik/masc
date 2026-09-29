@@ -128,7 +128,12 @@ module KeeperMemoryOs : sig
       knob rename breaks compilation instead of silently drifting. *)
 
   val librarian_env_key : string
+  val facts_max_bytes_env_key : string
 
+  val facts_max_bytes : unit -> int
+  (** Fixed upper bound on the rendered current facts of one Keeper, ordinary
+      plus source-bound. The live 2026-09-28 maximum was 464,514 bytes; the
+      default is 512 KiB. A malformed explicit value raises Config_error. *)
 
   val librarian_config_state : unit -> librarian_config_state
   (** Typed projection of the effective librarian toggle. Blank or absent

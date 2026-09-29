@@ -126,6 +126,7 @@
   masc.voice_runtime_overlay
   masc.runtime_model
   masc.runtime
+  masc.runtime_toml_namespace
   masc.model_inference_metrics
   masc.auth
   masc.json_field
@@ -174,6 +175,7 @@
   masc_gate
   masc_pulse
   masc_compression
+  masc.keeper_portrait
   masc_eio_context
   masc_cancel_safe
   masc_backend

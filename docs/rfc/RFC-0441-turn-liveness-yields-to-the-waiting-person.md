@@ -3,7 +3,7 @@ rfc: "0441"
 title: "A running turn must not misread or outrank the person waiting on it"
 status: Draft
 created: 2026-09-10
-updated: 2026-09-10
+updated: 2026-09-27
 author: goo-yang-bong
 related: ["0345"]
 ---
@@ -30,7 +30,7 @@ The cluster was filed before three layers landed; a reviewer must know what is a
 - **Wall-clock ceiling** (#29230 / task-596): a turn that cannot progress escapes; hang-duration distribution is in-tree.
 - **Stream-idle fail-safe floor** (RFC-0345): a hung provider stream cannot freeze the chat lane; 600 s floor when unset. This already covers the *genuine* dead-transport case the dashboard heuristic guesses at.
 
-## 2. The two remaining gaps
+## 2. Remaining gaps
 
 ### 2.1 Gap A — ambient connector conversations had no mid-turn preemption
 
@@ -54,6 +54,14 @@ The hydrate path (post-reload, `hydrateTrackedKeeperChatOperation`) already mark
 
 **Fix (this RFC):** liveness marking must not depend on which path owns the request. While the live-send stream is open and the operation is not yet streaming a reply, the client polls the operation (it already has the poll machinery and cadence from the hydrate path) and marks the stream signal from the operation's `queued`/`running` state — the same evidence the hydrate path uses. The runner's tool activity (last tool call time, count) is the deeper display the issue asked for; the poll-marked signal is the minimal honest fix that stops the death misread, and the display lands on top of the same poll data.
 
+### 2.3 Gap C — a debt-cap turn could ignore every later chat boundary
+
+RFC-0373 lets the autonomous lane take one slot after repeated chat-lane deferrals. That admission must survive until the autonomous turn can do work. The Owner previously published a debt-cap marker for the entire turn, and `chat_yield_request` ignored claimable chats at every tool boundary while the marker stayed set. A long autonomous turn could therefore complete many tools while the person's queued chat waited for the whole turn.
+
+**Fix:** the debt cap decides who enters the freed Owner slot. Once the admitted autonomous turn reaches a settled AGENT_CORE tool-result boundary, the ordinary chat-yield request applies. Official clients own their conversation history: sending a tool response to them does not prove that a cold resume will retain it. A queued chat alone therefore does not stop their admitted turn at a tool boundary; the chat waits until that turn ends. This changes no turn-count or time budget.
+
+**Remaining continuity risk:** official-client repetition detection can still stop a turn at a dynamic-tool boundary after a result was returned, before model-visible cold-resume retention has been proved. This existing loop guard remains necessary to stop repeated calls, including the measured identical-input loop with moving outputs. This change does not make that stop a proven resumable boundary. A safe early official-client handoff needs a runtime-specific result-retention and replay contract, tested by stopping and cold-resuming the vendor client after the exact tool result.
+
 ## 3. Policy, stated once
 
 A running turn owes the person waiting on it at each proven resumable boundary:
@@ -61,11 +69,14 @@ A running turn owes the person waiting on it at each proven resumable boundary:
 1. **Yield order** (highest first): claimed owner operations → approved HITL resolutions → pending `Connector_attention`. A nonempty-`Woken` turn yields to none of its own wake payloads.
    If the provider has not reached a proven resumable boundary, the admitted turn keeps
    running. #39309 removes queue-triggered cancellation before its first response
-   event. AGENT_CORE can yield at its checkpointed post-tool boundary. An
-   official-client tool-completed event does not by itself prove a replayable
-   result handoff, so this RFC does not claim the same mid-turn guarantee for
-   official clients. Normal completion and configured no-progress timeouts
-   also release the lane independently of the queued message.
+   event. AGENT_CORE can yield at its checkpointed post-tool boundary. A
+   debt-cap admission protects entry into the autonomous slot; it does not
+   suppress later chat yield requests after that boundary. An official-client
+   tool-completed event does not by itself prove a replayable result handoff,
+   so queued chats alone do not stop those clients at a tool boundary. Existing
+   repetition and terminal-effect stops can still end a turn there, with the
+   repetition stop's resume safety still unproved. Configured
+   no-progress timeouts release a stalled lane independently of queued input.
 2. **Honest liveness**: anyone waiting on the turn sees the turn's actual activity (tool calls, queue state), never an inference of death from their own feed's silence.
 3. **Duration is not this policy's axis**: a turn that is *progressing* may run long; a turn that *cannot* progress is #29230's ceiling. Priority and observability here, duration there.
 
@@ -80,4 +91,5 @@ A running turn owes the person waiting on it at each proven resumable boundary:
 
 - Gap A: `test_keeper_turn_outcome` / `test_mid_turn_resume` (yield-and-resume still passes; probe chain extension adds a case); `dune build @check` clean. The 17-min symptom's class (ambient conversation held behind a `Woken` turn) has an in-tree fixture through the event queue's connector payload.
 - Gap B: the dashboard composer fixture (`primitives.test.ts`, `data-chat-stall-hint`) gains the queued-poll marking case; vitest runs it without a browser.
+- Gap C: the Owner debt-cap fixture admits the autonomous lane over a claimable chat, settles a local dynamic-tool result, checks the AGENT_CORE yield decision directly, keeps an official-client host turn running, and observes the chat claim after completion. Its direct AGENT_CORE decision probe does not execute or persist an Agent-core checkpoint, and its local dynamic-tool result does not prove vendor model-visible retention. A later official-client tool-boundary yield requires proof that a cold-resumed vendor conversation retains the exact tool result once; a local host callback or item-completed event alone does not establish that proof.
 - Post-merge: #25898 closes with before/after of one measured hold (issue text has the 17-min baseline from 2026-06-11).

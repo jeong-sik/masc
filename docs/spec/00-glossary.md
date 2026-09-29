@@ -1139,6 +1139,21 @@ status: reference
   [Masc_tui_machine_live.activity_of](../../bin/masc_tui_machine_live.mli),
   [Masc_tui_msx.shows_sidebar](../../bin/masc_tui_msx.mli)
 
+**Agent Core Hook**
+: Agent 실행의 정해진 시점에 호스트가 등록한 동기 판단 콜백. `hook_event`
+  (BeforeTurn·BeforeTurnParams·AfterTurn·PreToolUse·PostToolUse·PostToolUseFailure·
+  OnStop·OnError·OnToolError) 하나를 받아 `hook_decision`
+  (Continue·AdjustParams·ElicitInput·ElicitToolApproval·Nudge·HookFailed·Block)을
+  돌려주는 함수다(`type hook = hook_event -> hook_decision`). `Block`은
+  PreToolUse에서만 정당하고, 호스트는 그 도구를 실행하지 않고 `is_error=true`
+  결과를 낸다. Hook은 **호스트 프로세스 안의 호출 지점**일 뿐이라 설치·격리
+  worker가 아니고, 출력 행·근거 보존·`lane_output` 연결 같은 Add-on 계약을 갖지
+  않는다. 판단 하나를 사건 시점에 부르는 것만 보면 Lane Add-on의 판단 모듈과 같은
+  메커니즘이므로, 'Hook과 다르다'는 주장은 그런 계약이 필요해지는 지점부터만
+  성립한다. **Keeper hook**(매 turn 턴별 문맥을 조립해 얹는 관행)과는 다른 층의
+  용어다.
+  → [Hooks_agent_core](../../packages/agent_core/lib/base/hooks.mli)
+
 **Lane Add-on**
 : 기존 MASC 원장과 실행 환경 위에 붙는 선택적 관측·관계 레이어. MSX Lane의 머신,
   DOS Lane의 머신, Browser Lane의 세션, Keeper의 도구와 턴 소유권을 재사용한다. 패키지 하나가 여러

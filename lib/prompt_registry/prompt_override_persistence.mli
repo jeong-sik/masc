@@ -31,6 +31,15 @@ val load : path:string -> (entry list, error) result
     schema versions, malformed field types, duplicate JSON fields, and
     duplicate override keys are rejected as typed errors. *)
 
+val load_preset : path:string -> (entry list, error) result
+(** {!load} for a saved preset, which also reads the schema 1 envelope that
+    presets written before 2026-09-08 carry. A schema 1 entry keeps its key
+    and value; what it was written against is unknown, so [authored_against]
+    is empty and [template_variables] is [[]]. That binding never matches a
+    live default, so a restored entry is reported as written against a
+    default that has since moved. The file is only read, never rewritten.
+    The live override table keeps {!load}: only schema 2 is its format. *)
+
 val save : path:string -> entry list -> (unit, error) result
 (** Atomically replace [path] with the canonical versioned envelope. *)
 

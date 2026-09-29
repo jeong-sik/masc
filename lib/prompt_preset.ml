@@ -539,7 +539,10 @@ let load ~base_path name =
                m.stored_name name)
       in
       let* prompt_overrides =
-        Override.load ~path:(Filename.concat dir overrides_file)
+        (* A preset saved before 2026-09-08 carries the schema 1 envelope.
+           Read it without rewriting it; restore then admits each entry under
+           the prompt's current contract, as for any other preset. *)
+        Override.load_preset ~path:(Filename.concat dir overrides_file)
         |> Result.map_error Override.error_to_string
       in
       let* assignments, lanes =

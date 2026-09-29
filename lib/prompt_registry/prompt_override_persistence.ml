@@ -31,8 +31,9 @@ type error =
     }
   | Duplicate_override_key of string
 
-(* One envelope version is readable: the one this module writes. Any other
-   is refused whole, and the operator saves each override once more. *)
+(* The live override table reads one envelope version: the one this module
+   writes. Any other is refused whole, and the operator saves each override
+   once more. A saved preset also reads schema 1 ({!load_preset}). *)
 let schema_version = 2
 
 let error_to_string = function
@@ -136,7 +137,56 @@ let decode_entry index json =
                           template_variables = sorted_variables template_variables;
                         }))))
 
-let decode json =
+(* The envelope presets saved before #34314 carry. Its entries bound the
+   override to one digest of the default body and variable list together
+   ([contract_revision]), so neither half of the current binding can be
+   recovered from it. A v1 entry keeps what the operator wrote -- its key
+   and value -- and states that what it was written against is unknown:
+   an empty [authored_against] and no variables. Those never equal a real
+   binding, so the registry reports the default as moved, which is the
+   honest answer. *)
+let legacy_v1_schema_version = 1
+
+let decode_legacy_v1_entry index json =
+  let location = Printf.sprintf "overrides[%d]" index in
+  match
+    strict_object ~location
+      ~fields:[ "key"; "value"; "contract_revision" ]
+      json
+  with
+  | Error _ as error -> error
+  | Ok fields -> (
+      match string_field ~location "key" fields with
+      | Error _ as error -> error
+      | Ok key -> (
+          match string_field ~location "value" fields with
+          | Error _ as error -> error
+          | Ok value -> (
+              match string_field ~location "contract_revision" fields with
+              | Error _ as error -> error
+              | Ok (_ : string) ->
+                  Ok { key; value; authored_against = ""; template_variables = [] })))
+
+let decode_overrides ~decode_entry fields =
+  match List.assoc "overrides" fields with
+  | `List items ->
+      let rec loop index seen acc = function
+        | [] -> Ok (List.rev acc)
+        | item :: rest -> (
+            match decode_entry index item with
+            | Error _ as error -> error
+            | Ok entry ->
+                if String_set.mem entry.key seen then
+                  Error (Duplicate_override_key entry.key)
+                else
+                  loop (index + 1)
+                    (String_set.add entry.key seen)
+                    (entry :: acc) rest)
+      in
+      loop 0 String_set.empty [] items
+  | _ -> Error (Expected_list "top-level.overrides")
+
+let decode ~accept_legacy_v1 json =
   match
     strict_object ~location:"top-level"
       ~fields:[ "schema_version"; "overrides" ]
@@ -145,28 +195,14 @@ let decode json =
   | Error _ as error -> error
   | Ok fields -> (
       match List.assoc "schema_version" fields with
-      | `Int actual when actual <> schema_version ->
+      | `Int actual when actual = schema_version ->
+          decode_overrides ~decode_entry fields
+      | `Int actual when accept_legacy_v1 && actual = legacy_v1_schema_version ->
+          decode_overrides ~decode_entry:decode_legacy_v1_entry fields
+      | `Int actual ->
           Error
             (Unsupported_schema_version
                { expected = schema_version; actual })
-      | `Int _ -> (
-          match List.assoc "overrides" fields with
-          | `List items ->
-              let rec loop index seen acc = function
-                | [] -> Ok (List.rev acc)
-                | item :: rest -> (
-                    match decode_entry index item with
-                    | Error _ as error -> error
-                    | Ok entry ->
-                        if String_set.mem entry.key seen then
-                          Error (Duplicate_override_key entry.key)
-                        else
-                          loop (index + 1)
-                            (String_set.add entry.key seen)
-                            (entry :: acc) rest)
-              in
-              loop 0 String_set.empty [] items
-          | _ -> Error (Expected_list "top-level.overrides"))
       | _ -> Error (Expected_integer "top-level.schema_version"))
 
 let default_revision ~body = Digestif.SHA256.(digest_string body |> to_hex)
@@ -204,10 +240,10 @@ let encode entries =
             ("overrides", `List (List.map entry_to_yojson entries));
           ])
 
-let load ~path =
+let load_with ~accept_legacy_v1 ~path =
   try
     let content = In_channel.with_open_text path In_channel.input_all in
-    try Yojson.Safe.from_string content |> decode
+    try Yojson.Safe.from_string content |> decode ~accept_legacy_v1
     with Yojson.Json_error message -> Error (Invalid_json message)
   with
   | Sys_error message -> Error (Read_failed message)
@@ -216,6 +252,9 @@ let load ~path =
         (Read_failed
            (Printf.sprintf "%s(%s): %s" operation argument
               (Unix.error_message error)))
+
+let load ~path = load_with ~accept_legacy_v1:false ~path
+let load_preset ~path = load_with ~accept_legacy_v1:true ~path
 
 let save ~path entries =
   match encode entries with

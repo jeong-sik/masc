@@ -405,19 +405,99 @@ let test_a_preset_that_does_not_load_is_listed_as_unreadable () =
     or_fail (Preset.save ~base_path evening);
     write_file
       (Filename.concat (Preset.source_directory ~base_path evening) "prompt_overrides.json")
-      {|{"schema_version":1,"overrides":[]}|};
+      {|{"schema_version":3,"overrides":[]}|};
     let reason =
       match Preset.load ~base_path "evening" with
       | Ok _ -> fail "an overrides file of another schema loaded"
       | Error reason -> reason
     in
     check bool "the reason names the schema it could not read" true
-      (contains_substring reason "schema_version 1");
+      (contains_substring reason "schema_version 3");
     let listing = Preset.list ~base_path in
     check (list string) "only the preset that opens is listed" [ "morning" ]
       (List.map (fun (m : Preset.manifest) -> m.Preset.preset_name) listing.Preset.presets);
     check (list (pair string string)) "the other is unreadable, for the reason load gives"
       [ ("evening", reason) ] listing.Preset.unreadable)
+;;
+
+let override_default_moved key =
+  let open Yojson.Safe.Util in
+  match
+    List.find_opt
+      (fun item -> String.equal (member "key" item |> to_string) key)
+      (Prompt_registry.list_prompts ())
+  with
+  | Some item -> member "override_default_moved" item |> to_bool
+  | None -> Alcotest.fail ("prompt not listed: " ^ key)
+;;
+
+let v1_overrides value =
+  Printf.sprintf
+    {|{"schema_version":1,"overrides":[{"key":%S,"value":%S,"contract_revision":"digest-from-before-2026-09-08"}]}|}
+    prompt_key value
+;;
+
+(* Presets saved before 2026-09-08 carry the schema 1 overrides envelope.
+   They open, list and restore; what each override was written against is
+   unknown, so the restored override reads as written against a default that
+   has since moved (the Prompts pane's warning line). The file is not
+   rewritten. *)
+let test_a_preset_saved_before_schema_2_restores_its_overrides () =
+  let open Alcotest in
+  with_base (fun ~base_path ~keepers:_ ~config:_ ->
+    let old = or_fail (Preset.capture ~base_path ~name:"old" ~description:"") in
+    or_fail (Preset.save ~base_path old);
+    let overrides_path =
+      Filename.concat (Preset.source_directory ~base_path old) "prompt_overrides.json"
+    in
+    let v1_text = v1_overrides "Morning override." in
+    write_file overrides_path v1_text;
+    set_override ~base_path "Afternoon override.";
+    let loaded = or_fail (Preset.load ~base_path "old") in
+    check (list (triple string string string)) "key and value are kept, binding unknown"
+      [ prompt_key, "Morning override.", "" ]
+      (List.map
+         (fun (e : Override.entry) -> e.Override.key, e.Override.value, e.Override.authored_against)
+         loaded.Preset.prompt_overrides);
+    let listing = Preset.list ~base_path in
+    check bool "it is listed" true
+      (List.exists
+         (fun (m : Preset.manifest) -> String.equal m.Preset.preset_name "old")
+         listing.Preset.presets);
+    check (list string) "nothing is unreadable" [] (List.map fst listing.Preset.unreadable);
+    let report = or_fail (Preset.restore ~base_path "old") in
+    check (list string) "the override is applied" [ prompt_key ]
+      report.Preset.prompt_overrides_result.Preset.applied;
+    check string "a turn gets the restored text" "Morning override."
+      (Prompt_registry.get_prompt prompt_key);
+    check bool "the Prompts pane warns that the default moved" true
+      (override_default_moved prompt_key);
+    check string "the preset file is not rewritten" v1_text
+      (In_channel.with_open_text overrides_path In_channel.input_all))
+;;
+
+(* A schema 1 override is admitted under the prompt's current contract like
+   any other preset entry: one that no longer renders is held back with the
+   reason, and the live override stays. *)
+let test_a_schema_1_override_that_cannot_render_is_skipped () =
+  let open Alcotest in
+  with_base (fun ~base_path ~keepers:_ ~config:_ ->
+    let old = or_fail (Preset.capture ~base_path ~name:"old" ~description:"") in
+    or_fail (Preset.save ~base_path old);
+    write_file
+      (Filename.concat (Preset.source_directory ~base_path old) "prompt_overrides.json")
+      (v1_overrides "Facts {{facts_json}}");
+    set_override ~base_path "Afternoon override.";
+    let report = or_fail (Preset.restore ~base_path "old") in
+    check (list string) "nothing is applied" []
+      report.Preset.prompt_overrides_result.Preset.applied;
+    (match report.Preset.prompt_overrides_result.Preset.skipped with
+     | [ (key, reason) ] ->
+       check string "skipped under its key" prompt_key key;
+       check bool "with the variable named" true (contains_substring reason "facts_json")
+     | skipped -> fail (Printf.sprintf "expected one skip, found %d" (List.length skipped)));
+    check string "the live override is untouched" "Afternoon override."
+      (Prompt_registry.get_prompt prompt_key))
 ;;
 
 (* A preset is opened, listed and restored by its directory's name. A
@@ -519,6 +599,10 @@ let () =
             test_override_that_cannot_render_is_skipped_with_the_reason
         ; Alcotest.test_case "two restores keep two autosaves" `Quick
             test_two_restores_keep_two_autosaves
+        ; Alcotest.test_case "a preset saved before schema 2 restores its overrides" `Quick
+            test_a_preset_saved_before_schema_2_restores_its_overrides
+        ; Alcotest.test_case "a schema 1 override that cannot render is skipped" `Quick
+            test_a_schema_1_override_that_cannot_render_is_skipped
         ] )
     ]
 ;;

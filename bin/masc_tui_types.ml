@@ -7457,7 +7457,7 @@ let keeper_reading (state : state) (keeper : keeper) :
   ; liveness =
       (match keeper.k_origin with
        | Tui_decode.Declared_keeper _ -> Masc_tui_keeper_control.Absent
-       | Persisted_keeper ->
+       | Persisted_keeper | Remote_keeper ->
          Masc_tui_keeper_control.liveness_of_roster state.keeper_roster keeper.k_name)
   }
 
@@ -7718,15 +7718,18 @@ let goal_action_armed_for (state : state) (goal_id : string) =
       Some armed_action
   | Some _ | None -> None
 
-(** New Keeper messages require a complete roster observation. [state.keepers]
-    may intentionally retain the previous complete roster while a detail or log
-    view survives a transient metadata read failure, so membership alone is not
-    authorization for an external effect. *)
+(** Local metadata may retain old rows during a failed read. Remote rows are
+    available to HTTP observation and lifecycle controls; chat submission still
+    requires the shared workspace for attachments and spilled paste files. *)
 let keeper_available_for_new_message (state : state) keeper_name =
-  Option.is_none state.keepers_error
-  && List.exists
-       (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name)
-       state.keepers
+  match List.find_opt
+    (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name) state.keepers with
+  | None -> false
+  | Some { k_origin = Tui_decode.Persisted_keeper | Declared_keeper _; _ } ->
+    state.workspace_identity = Workspace_identity_match
+    && Option.is_none state.keepers_error
+  | Some { k_origin = Tui_decode.Remote_keeper; _ } ->
+    false
 
 (* The composer is where the operator's keys go: the chat pane, whichever
    half of it has the cursor, or the composer row on another surface once it
@@ -7766,7 +7769,8 @@ let next_keeper_message_target (state : state) =
     | Some current -> Option.is_some (inflight_for_keeper state current)
   in
   if
-    Option.is_some state.keepers_error
+    not (List.exists (fun (keeper : keeper) ->
+      keeper_available_for_new_message state keeper.k_name) state.keepers)
     || Option.is_some state.msg_live
     || this_pane_has_a_request_in_flight
   then
@@ -8618,6 +8622,17 @@ let local_rows_page (state : state) ~error =
       (match state.local_workspace with
        | Local_workspace_unread -> None
        | Local_workspace_read -> Some ())
+
+(* A remote roster is its own observation, never evidence of a local read. *)
+let keeper_rows_page (state : state) ~error =
+  match state.workspace_identity with
+  | Workspace_identity_match -> local_rows_page state ~error
+  | Workspace_identity_unread -> empty_page_of ~error ~snapshot:None
+  | Workspace_identity_mismatch _ ->
+    empty_page_of ~error ~snapshot:
+      (match state.keeper_roster with
+       | Masc_tui_keeper_control.Roster_unobserved -> None
+       | Roster_complete _ | Roster_partial _ | Roster_invalid _ -> Some ())
 
 (* What the Resources pane says under its header when no error is showing and
    there is no row to draw, and [None] when there is one. The pane flattened
@@ -10483,22 +10498,21 @@ let runtime_pick_column_widths ~cols items =
    link it, and this is the first of those screens whose row count a test
    reads. *)
 let aggregate_keeper_stats (keepers : Tui_decode.keeper list) =
-  let turns =
-    List.fold_left
-      (fun acc (k : Tui_decode.keeper) -> acc + k.Tui_decode.k_total_turns)
-      0 keepers
-  in
-  let tokens =
-    List.fold_left
-      (fun acc (k : Tui_decode.keeper) -> acc + k.Tui_decode.k_total_tokens)
-      0 keepers
-  in
-  let cost =
-    List.fold_left
-      (fun acc (k : Tui_decode.keeper) -> acc +. k.Tui_decode.k_total_cost_usd)
-      0.0 keepers
-  in
-  turns, tokens, cost
+  List.fold_left
+    (fun totals (keeper : Tui_decode.keeper) ->
+      match totals, keeper.k_activity with
+      | Some (turns, tokens, cost), Some activity ->
+        Some (turns + activity.k_total_turns, tokens + activity.k_total_tokens,
+              cost +. activity.k_total_cost_usd)
+      | None, _ | _, None -> None)
+    (Some (0, 0, 0.)) keepers
+
+let keeper_assignment_activity keepers =
+  match aggregate_keeper_stats keepers with
+  | None -> " (activity not observed)"
+  | Some (turns, _, cost) when turns > 0 ->
+    Printf.sprintf " (%d turns, $%.2f)" turns cost
+  | Some _ -> ""
 
 (* The authority line under the Runtime title: where every reading on this
    screen comes from, and what the last probe found. It is one sentence of
@@ -10557,11 +10571,14 @@ let runtime_authority_rows ~cols (state : state) : string list =
           match state.keepers with
           | [] -> []
           | keepers ->
-              let turns, tokens, cost = aggregate_keeper_stats keepers in
-              [ Printf.sprintf
-                  "fleet: %d keepers \xc2\xb7 %d turns \xc2\xb7 %s tok \xc2\xb7 $%.2f"
-                  (List.length keepers) turns (format_context_tokens tokens) cost
-              ]
+              let summary = match aggregate_keeper_stats keepers with
+                | None -> "activity not observed"
+                | Some (turns, tokens, cost) ->
+                  Printf.sprintf "%d turns · %s tok · $%.2f"
+                    turns (format_context_tokens tokens) cost
+              in
+              [ Printf.sprintf "fleet: %d keepers · %s"
+                  (List.length keepers) summary ]
         in
         [ "SSOT: runtime.toml"; "projections: resolved + probe"; summary_text ]
         @ fleet_note @ [ config ] @ probe_only_note @ probe_note

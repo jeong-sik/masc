@@ -1038,7 +1038,8 @@ let acting_pane_changes (state : state) : Masc_tui_acting_pane.changes =
 
 let recent_chunk_projection (state : state) =
   let traces =
-    List.map (fun (keeper : keeper) -> keeper.k_name, keeper.k_trace_id) state.keepers
+    List.filter_map (fun (keeper : keeper) ->
+      Option.map (fun trace -> keeper.k_name, trace) (Tui_decode.keeper_trace_id keeper)) state.keepers
   in
   Masc_tui_acting.refresh_projection
     ~previous:state.acting_chunk_projection ~traces state.acting
@@ -2774,7 +2775,8 @@ let resolve_change_context (state : state) ~(path_opt : string option) : change_
     | Some fc when Option.is_some fc.Masc.Tui_decode.fc_task_id -> fc.Masc.Tui_decode.fc_task_id
     | _ ->
         (match keeper_record with
-         | Some k -> k.Masc.Tui_decode.k_current_task_id
+         | Some k -> Option.bind k.Masc.Tui_decode.k_activity
+             (fun activity -> activity.Masc.Tui_decode.k_current_task_id)
          | None -> None)
   in
   let turn =

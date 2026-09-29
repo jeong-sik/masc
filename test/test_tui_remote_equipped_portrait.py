@@ -78,7 +78,16 @@ def wait_for_picture(process, fd, output, *, start: int, expected: bytes) -> byt
 
 class Roster:
     def __init__(self, before: bytes, equipped: bytes):
-        self.snapshots = {"before": before, "equipped": equipped}
+        empty = json.loads(equipped)
+        empty.update(keepers=[], count=0, total=0, truncated=False)
+        missing_identity = json.loads(equipped)
+        del missing_identity["keepers"][0]["meta"]["trace_id"]
+        self.snapshots = {
+            "before": (200, before), "equipped": (200, equipped),
+            "empty": (200, json.dumps(empty).encode()),
+            "missing-identity": (200, json.dumps(missing_identity).encode()),
+            "failed": (503, b'{"error":"remote roster unavailable"}'),
+        }
         self.phase = "before"
         self.calls: list[str] = []
         self.lock = threading.Lock()
@@ -86,16 +95,35 @@ class Roster:
     def __call__(self):
         with self.lock:
             self.calls.append(self.phase)
-            body = self.snapshots[self.phase]
-        return h.RawHttpResponse(200, body, content_type="application/json")
+            status, body = self.snapshots[self.phase]
+        return h.RawHttpResponse(status, body, content_type="application/json")
 
-    def equip(self):
+    def publish(self, phase):
         with self.lock:
-            self.phase = "equipped"
+            self.phase = phase
 
     def count(self):
         with self.lock:
             return len(self.calls)
+
+
+class RemoteIdentity:
+    def __init__(self, base: str):
+        self.base = base
+        self.lock = threading.Lock()
+
+    def publish(self, base: str):
+        with self.lock:
+            self.base = base
+
+    def __call__(self):
+        with self.lock:
+            base = self.base
+        _, health = h.fleet_safety_fixture()
+        health["paths"] = {"effective_base_path": base,
+                           "effective_masc_root": str(Path(base) / ".masc")}
+        return h.RawHttpResponse(200, json.dumps(health).encode(),
+                                 content_type="application/json")
 
 
 def remote_portrait(binary: str, evidence: Path) -> None:
@@ -110,22 +138,29 @@ def remote_portrait(binary: str, evidence: Path) -> None:
                     (evidence / "equipped-roster.json").read_bytes())
     fixtures = h.keeper_runtime_http_fixtures()
     fixtures[ROSTER_PATH] = roster
+    requests: h.HttpRequests = []
+    boot_path = f"/api/v1/keepers/{keeper}/boot"
+    fixtures[boot_path] = (200, {"ok": True})
     # Raw health answers deliberately bypass both harness identity fillers.
     # No native state exists here; this distinct path identifies the remote
     # server whose recorded wire is being replayed.
     remote_base = str(evidence / "remote-server-workspace")
+    remote_identity = RemoteIdentity(remote_base)
     for path in ("/health", "/health?full=1"):
         _, health = h.fleet_safety_fixture()
         health["paths"] = {
             "effective_base_path": remote_base,
             "effective_masc_root": str(Path(remote_base) / ".masc"),
         }
-        fixtures[path] = h.RawHttpResponse(200, json.dumps(health).encode(),
-                                           content_type="application/json")
+        fixtures[path] = remote_identity
         receipt = "health.json" if path == "/health" else "full-health.json"
         (evidence / receipt).write_text(json.dumps(health, indent=2) + "\n")
 
     def interact(process, fd, _slave, output, local_base):
+        def screen_is(predicate, label):
+            assert h.wait_for_fixture_state(process, fd, output,
+                lambda: predicate(h.screen_text(bytes(output))), timeout=WAIT_SECONDS), label
+
         try:
             assert Path(local_base).resolve() != Path(remote_base).resolve()
             assert not (Path(local_base) / ".masc/keepers" / f"{keeper}.json").exists()
@@ -147,7 +182,7 @@ def remote_portrait(binary: str, evidence: Path) -> None:
             # The name and body stay fixed. Only the actual server roster
             # receipt switches to the purchased/equipped state.
             start = len(output)
-            roster.equip()
+            roster.publish("equipped")
             os.write(fd, b"r")
             changed = wait_for_picture(process, fd, output, start=start, expected=equipped)
             (evidence / "tui-equipped.png").write_bytes(changed)
@@ -165,6 +200,49 @@ def remote_portrait(binary: str, evidence: Path) -> None:
             (evidence / "tui-refreshed.png").write_bytes(stable)
             assert all(rgba_png(image) == rgba_png(equipped)
                        for image in portrait_pngs(bytes(output[start:]))), "refresh restored stale gear"
+
+            # Presentation metadata can fail independently of lifecycle.
+            # The same real native row still offers its observed boot action.
+            roster.publish("missing-identity")
+            calls = roster.count()
+            os.write(fd, b"r")
+            assert h.wait_for_fixture_state(process, fd, output,
+                lambda: roster.count() > calls, timeout=WAIT_SECONDS)
+            h.resize_and_wait(process, fd, output, rows=70, columns=99, needle=b"Metadata:")
+            screen_is(lambda text: b"Metadata:" in text and b"trace_id" in text,
+                      "brief identity failure was not visible")
+            h.send_and_wait(process, fd, output, b"p", f"{keeper} boot accepted".encode())
+            assert [json.loads(body) for path, body in requests if path == boot_path] == [{}]
+            assert not (Path(local_base) / ".masc/keepers" / f"{keeper}.json").exists()
+
+            roster.publish("failed")
+            os.write(fd, b"r")
+            screen_is(lambda text: b"no Keeper selected" in text
+                      and b"remote roster unavailable" in text, "failed roster retained selection")
+            roster.publish("empty")
+            os.write(fd, b"r")
+            screen_is(lambda text: b"server Keeper roster is empty" in text
+                      and b"not loaded" not in text, "empty remote roster was not observed")
+            roster.publish("equipped")
+            os.write(fd, b"r")
+            h.select_keeper_row(process, fd, output, keeper.encode())
+            start = len(output)
+            h.send_and_wait(process, fd, output, b"\r", INFO_TAB)
+            recovered = wait_for_picture(process, fd, output, start=start, expected=equipped)
+            (evidence / "tui-recovered.png").write_bytes(recovered)
+            h.send_and_wait(process, fd, output, b"c", b"Chat requires a matching workspace")
+
+            # The automatic refresh (no cancelling input) changes authority
+            # while Delete is armed. The same name in the new workspace
+            # requires a fresh first press, never the old confirmation.
+            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+            armed = f"press x again to delete {keeper}".encode()
+            h.send_and_wait(process, fd, output, b"x", armed)
+            remote_identity.publish(str(evidence / "another-remote-workspace"))
+            screen_is(lambda text: armed not in text, "delete arm crossed remote workspace identity")
+            h.select_keeper_row(process, fd, output, keeper.encode())
+            h.send_and_wait(process, fd, output, b"x", armed)
+            assert not any(path == "/api/v1/dashboard/agents/purge" for path, _ in requests), requests
             proof = {
                 "scope": "native purchase/equip HTTP receipts replayed through a remote-identity real TUI PTY",
                 "keeper": keeper,
@@ -178,6 +256,10 @@ def remote_portrait(binary: str, evidence: Path) -> None:
                 "before_rgba_sha256": hashlib.sha256(rgba_png(first)[2]).hexdigest(),
                 "equipped_rgba_sha256": hashlib.sha256(rgba_png(changed)[2]).hexdigest(),
                 "fresh_refresh_matches": rgba_png(stable) == rgba_png(equipped),
+                "failure_empty_recovery_matches": rgba_png(recovered) == rgba_png(equipped),
+                "metadata_failure_preserves_lifecycle": True,
+                "workspace_switch_withdraws_delete_confirmation": True,
+                "posts": [{"path": path, "body": json.loads(body)} for path, body in requests],
             }
             (evidence / "tui-manifest.json").write_text(json.dumps(proof, indent=2) + "\n")
             os.write(fd, b"q")
@@ -186,7 +268,8 @@ def remote_portrait(binary: str, evidence: Path) -> None:
 
     h.run_terminal_scenario(binary,
         description="remote Keeper equipment changes actual terminal PNG pixels",
-        interact=interact, http_fixtures=fixtures, preload_input=KITTY_REPLIES)
+        interact=interact, http_fixtures=fixtures, http_requests=requests,
+        refresh=0.5, preload_input=KITTY_REPLIES)
 
 
 def main() -> None:

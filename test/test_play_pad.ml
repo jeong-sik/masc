@@ -99,9 +99,20 @@ let test_load () =
   with_workspace (fun base_path ->
     (match Pad.load ~base_path ~saves_name:"samguk3" with
      | Ok (Some (Pad.Builtin, layout)) ->
-       check int "the builtin 삼국지3 layout binds ten buttons" 10 (List.length (Pad.bindings layout));
-       check (option (list string)) "select asks to end the month" (Some [ "0"; "return" ])
-         (Option.map (fun { Pad.keys; _ } -> keys) (Pad.binding layout Pad.Select))
+       check int "the builtin 삼국지3 layout binds every button" 12 (List.length (Pad.bindings layout));
+       let keys button = Option.map (fun { Pad.keys; _ } -> keys) (Pad.binding layout button) in
+       (* The battle map's hex cursor moves on digits only; arrow keys, 4 and
+          6 do nothing there, and 0 places an officer. *)
+       List.iter
+         (fun (button, expected, what) -> check (option (list string)) what (Some expected) (keys button))
+         [ Pad.Dpad_up, [ "8" ], "up is 8"
+         ; Pad.Dpad_down, [ "2" ], "down is 2"
+         ; Pad.Dpad_left, [ "7" ], "left is 7, up-left"
+         ; Pad.Dpad_right, [ "9" ], "right is 9, up-right"
+         ; Pad.Tl, [ "1" ], "the left shoulder is 1, down-left"
+         ; Pad.Tr, [ "3" ], "the right shoulder is 3, down-right"
+         ; Pad.Select, [ "0" ], "select is 0 alone, which places an officer"
+         ]
      | Ok (Some (Pad.Workspace, _)) -> fail "no workspace file was written"
      | Ok None -> fail "no builtin layout for samguk3"
      | Error message -> fail message);

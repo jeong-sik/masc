@@ -203,7 +203,7 @@ def run_installation_detail(executable: str) -> None:
         returned = terminal.send_and_wait(process, master, output, b"\x1b", b"> broken")
         if b"1 declared" not in terminal.screen_text(returned):
             raise AssertionError("Esc did not return to the same Installation list")
-        terminal.send_and_wait(process, master, output, b"q", b"MASC Overview")
+        terminal.send_and_wait(process, master, output, b"q", b"MASC Dashboard")
         os.write(master, b"q")
 
     terminal.run_terminal_scenario(executable,

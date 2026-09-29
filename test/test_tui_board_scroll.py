@@ -276,7 +276,53 @@ def run_independent_windows(executable: str) -> None:
         interact=interact, http_fixtures=fixtures)
 
 
+def run_full_width_comments(executable: str) -> None:
+    """Metadata must not determine paragraph, Korean or code-block width."""
+    fixtures = h.overview_event_http_fixtures()
+    post = h.board_selection_post("width", "Comment body width", "Body beside thread")
+    paragraph = "Full width continuation stays readable"
+    korean = "댓글 본문은 넓은 영역을 사용합니다"
+    code = "document.documentElement.scrollWidth"
+    comments = [
+        h.board_detail_comment("width-root", f"{paragraph}\n{paragraph}"),
+        dict(h.board_detail_comment("width-child", f"{korean}\n```js\n{code}\n```"),
+             parent_id="width-root"),
+        h.board_detail_comment("width-short", "OK"),
+    ]
+    post["comment_count"] = len(comments)
+    fixtures["/api/v1/board?sort_by=hot"] = (200, {"posts": [post]})
+    fixtures["/api/v1/board/post-width?format=flat"] = (
+        200, {"post": post, "comments": comments})
+
+    def interact(process, fd, _slave, output, _base):
+        h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
+        h.palette_go(process, fd, output, b"go board", b"MASC Board")
+        h.wait_for_output(process, fd, output, ONE_POST_LISTED, start=0, timeout=10)
+        h.send_and_wait(process, fd, output, b"\r", paragraph.encode())
+        for columns in (240, 270, 100):
+            h.resize_and_wait(process, fd, output, rows=48, columns=columns,
+                              needle=paragraph.encode(), controls=(h.FULL_REDRAW,))
+            screen = h.screen_text(bytes(output))
+            for expected in (paragraph, korean, code):
+                if expected.encode() not in screen:
+                    raise AssertionError(
+                        f"{columns} columns: comment body wrapped to metadata remainder: "
+                        + screen.decode("utf-8", "replace"))
+            if columns == 270:
+                rows = h.screen_rows(bytes(output))
+                short_row = h.screen_row_of(rows, b"OK")
+                if short_row < 0 or b"@detail-author" not in rows[short_row]:
+                    raise AssertionError("a short reply no longer joins its metadata")
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(
+        executable, description="Board paragraphs use the full comment column",
+        interact=interact, http_fixtures=fixtures)
+
+
 if __name__ == "__main__":
+    run_full_width_comments(os.path.abspath(sys.argv[1]))
+    print("Board full width comments: PASS")
     run_independent_windows(os.path.abspath(sys.argv[1]))
     print("Board independent windows: PASS")
     run(os.path.abspath(sys.argv[1]))

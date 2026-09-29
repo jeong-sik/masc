@@ -9,3 +9,11 @@ val summary : base_path:string -> (Yojson.Safe.t, string) result
 
 val detail : base_path:string -> id:string -> (Yojson.Safe.t, string) result
 (** Resolve one claim or conflict and its current member facts. *)
+
+module For_testing : sig
+  val summary_with_load :
+    load:(base_path:string -> (Workspace_memory_ledger.t, string) result) ->
+    base_path:string -> (Yojson.Safe.t, string) result
+  (** Exercise an atomic replacement between descriptor observation and the
+      content read. Production uses [Workspace_memory_ledger.load]. *)
+end

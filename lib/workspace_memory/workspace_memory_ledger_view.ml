@@ -3,6 +3,16 @@ module Context = Workspace_memory_context
 
 let ( let* ) = Result.bind
 
+(* Both the full view and the summary must bind their payload to the observed
+   descriptor. An atomic writer may replace the file between these reads. *)
+let load_observed ~load ~base_path ~ledger_sha256 =
+  let* ledger = load ~base_path in
+  let loaded_sha256 = Digestif.SHA256.(digest_string
+    (Yojson.Safe.to_string (Ledger.to_json ledger)) |> to_hex) in
+  if loaded_sha256 <> ledger_sha256
+  then Error "workspace ledger changed during the read"
+  else Ok ledger
+
 let current_facts ~base_path ledger =
   match Context.collect ~base_path with
   | Error detail -> Error detail
@@ -26,12 +36,8 @@ let read ~base_path =
   | Ledger.Missing -> Ok (`Assoc ["status", `String "missing"])
   | Ledger.Unavailable detail -> Error detail
   | Ledger.Available descriptor ->
-    let* ledger = Ledger.load ~base_path in
-    let loaded_sha256 = Digestif.SHA256.(digest_string
-      (Yojson.Safe.to_string (Ledger.to_json ledger)) |> to_hex) in
-    if loaded_sha256 <> descriptor.ledger_sha256
-    then Error "workspace ledger changed during the read"
-    else
+    let* ledger = load_observed ~load:Ledger.load ~base_path
+        ~ledger_sha256:descriptor.ledger_sha256 in
     let current = current_facts ~base_path ledger in
     let current_by_ref = Hashtbl.create (List.length (Ledger.dispositions ledger)) in
     (match current with
@@ -75,12 +81,13 @@ let member_refs facts ~kind ~id =
        | _ -> None)
     | _ -> None)
 
-let summary ~base_path =
+let summary_with_load ~load ~base_path =
   match Ledger.observe ~base_path with
   | Ledger.Missing -> Ok (`Assoc ["status", `String "missing"])
   | Ledger.Unavailable detail -> Error detail
   | Ledger.Available descriptor ->
-    let* ledger = Ledger.load ~base_path in
+    let* ledger = load_observed ~load ~base_path
+        ~ledger_sha256:descriptor.ledger_sha256 in
     let facts = Ledger.to_json ledger |> Yojson.Safe.Util.member "facts"
       |> Yojson.Safe.Util.to_list in
     let rows kind entries = List.map (fun (id, text) ->
@@ -92,6 +99,12 @@ let summary ~base_path =
                 "claims", `List (rows "claim" (Ledger.claims ledger));
                 "conflicts", `List (rows "conflict" (Ledger.conflicts ledger));
                 "classified_count", `Int descriptor.classified_count])
+
+let summary ~base_path = summary_with_load ~load:Ledger.load ~base_path
+
+module For_testing = struct
+  let summary_with_load = summary_with_load
+end
 
 let detail ~base_path ~id =
   let* full = read ~base_path in

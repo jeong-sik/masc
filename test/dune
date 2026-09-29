@@ -7043,6 +7043,11 @@
  (deps (alias runtest-test_install_local_build)))
 
 (test
+ (name test_workspace_memory_ledger_view)
+ (modules test_workspace_memory_ledger_view)
+ (libraries alcotest digestif yojson masc))
+
+(test
  (name test_workspace_memory_ledger)
  (modules test_workspace_memory_ledger)
  (libraries alcotest digestif yojson masc))

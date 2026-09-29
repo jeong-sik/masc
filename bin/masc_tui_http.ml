@@ -27,7 +27,7 @@ let report_err prefix msg = Printf.sprintf "(%s: %s)" prefix msg
 let slow_report_ns = 1_000_000_000L
 let ms_of_ns ns = Int64.to_float ns /. 1e6
 
-let timed ~verb ~path (run : unit -> (int * string, string) result) =
+let timed_with ~status ~verb ~path run =
   let started_ns = Mtime_clock.elapsed_ns () and started_cpu = Sys.time () in
   let result = run () in
   let elapsed_ns = Int64.sub (Mtime_clock.elapsed_ns ()) started_ns in
@@ -36,9 +36,12 @@ let timed ~verb ~path (run : unit -> (int * string, string) result) =
       path (ms_of_ns elapsed_ns)
       ((Sys.time () -. started_cpu) *. 1000.)
       (match result with
-       | Ok (status, _) -> Printf.sprintf "status %d" status
+       | Ok answer -> Printf.sprintf "status %d" (status answer)
        | Error detail -> detail);
   result
+
+let timed ~verb ~path (run : unit -> (int * string, string) result) =
+  timed_with ~status:fst ~verb ~path run
 let default_timeout_sec = 10.0
 let request_timeout_sec () = default_timeout_sec
 let keeper_chat_timeout_sec = 180.0
@@ -484,11 +487,53 @@ let decode_json ~allow_empty ~status_code ~body =
    length, and for a 401 the auth JSON [refusal] exists to replace. *)
 let named_refusal what ~status ~body = what ^ ": " ^ refusal ~status_code:status ~body
 
-(** GET a JSON response from a dashboard endpoint. *)
+(* Dashboard answers kept with their entity tags ([Masc_tui_kept_reads]). The
+   refresh cadence reads most dashboard paths again every tick and most answers
+   have not changed since the last one: on 2026-09-30 the board (289 KB),
+   keepers/composite (183 KB), goals, briefing and planning changed at most once
+   in five two-second polls, and parsing the bodies took about a fifth of this
+   process's CPU. *)
+let kept_reads : Yojson.Safe.t Masc_tui_kept_reads.t = Masc_tui_kept_reads.create ()
+
+(** Starts a new generation of kept dashboard answers. The refresh loop calls
+    it once per tick; an answer no read asked for in two ticks is dropped. *)
+let start_read_generation () = Masc_tui_kept_reads.start_generation kept_reads
+
+(* [http_get] with request headers of the caller's and the response headers. *)
+let http_get_response ~(host : string) ~(port : int) ~(path : string) ~headers :
+    (Masc_http_client.response, string) result =
+  let url = url_of ~host ~port ~path in
+  timed_with
+    ~status:(fun { Masc_http_client.status; _ } -> status)
+    ~verb:"GET" ~path
+  @@ fun () ->
+  with_credential_refresh_on
+    ~refused:(function
+      | Ok { Masc_http_client.status = 401; _ } -> true
+      | Ok _ | Error _ -> false)
+  @@ fun () ->
+  match
+    Masc_http_client.get_response_sync ?clock:(request_clock ())
+      ~timeout_sec:(request_timeout_sec ()) ~url
+      ~headers:(headers @ auth_headers ()) ()
+  with
+  | Ok response -> Ok response
+  | Error e -> Error (Masc.Tui_decode.http_transport_error ~verb:"GET" ~url ~detail:e)
+
+(** GET a JSON response from a dashboard endpoint. The answer kept from the
+    last read of the same address goes out as [If-None-Match], and a 304
+    answers with the value decoded from it. *)
 let get_json ~(host : string) ~(port : int) ~(path : string) : (Yojson.Safe.t, string) result =
-  match http_get ~host ~port ~path with
+  let address = url_of ~host ~port ~path in
+  let sent = Masc_tui_kept_reads.find kept_reads ~address in
+  match
+    http_get_response ~host ~port ~path
+      ~headers:(Masc_tui_kept_reads.request_headers sent)
+  with
   | Error e -> Error e
-  | Ok (status_code, body) -> decode_json ~allow_empty:false ~status_code ~body
+  | Ok { Masc_http_client.status; headers; body } ->
+      Masc_tui_kept_reads.settle kept_reads ~address ~sent ~status ~headers
+        ~decode:(fun () -> decode_json ~allow_empty:false ~status_code:status ~body)
 
 (* One live read of a workspace machine's screen (RFC machine-spectating-
    goes-through-lanes §2.1). A transport error, a refusal and a body that does

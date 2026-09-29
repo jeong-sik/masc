@@ -2901,6 +2901,7 @@
 (include stanzas/test_provider_usage_windows.inc)
 
 (include stanzas/test_tui_overview_providers.inc)
+(include stanzas/test_tui_kept_reads.inc)
 
 (include stanzas/test_keeper_surface_status.inc)
 

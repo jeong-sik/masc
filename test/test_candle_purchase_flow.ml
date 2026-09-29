@@ -46,9 +46,12 @@ let with_workspace f =
     (fun () ->
        Masc_test_deps.with_process_env Env_config_core.base_path_env_key (Some base_path)
        @@ fun () ->
+       (* Fresh test executables strip inherited config-directory overrides.
+          Both processes must read the policy written under the explicit
+          workspace base, not depend on the parent's post-startup override. *)
        Masc_test_deps.with_process_env
          Env_config_core.config_dir_env_key
-         (Some (Filename.concat base_path "config"))
+         None
        @@ fun () ->
        Eio_main.run
        @@ fun env ->

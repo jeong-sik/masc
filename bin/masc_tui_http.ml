@@ -1737,19 +1737,40 @@ let post_runtime_assignment ~(host : string) ~(port : int)
     "committed"; ...}]) — decoded here so a 2xx body of any other shape is an
     error rather than a guessed success, matching [tool_envelope_outcome]. *)
 let set_runtime_lane_slots ~(host : string) ~(port : int) ~(lane : string)
-      ~(runtime_ids : string list) : (unit, string) result =
-  let body =
-    Yojson.Safe.to_string
-      (`Assoc
-         [ "lane", `String lane
-         ; "runtime_ids", `List (List.map (fun id -> `String id) runtime_ids)
-         ])
-  in
-  match
-    post_json ~host ~port ~path:"/api/v1/runtime/config/routing" ~body
-  with
-  | Error detail -> Error detail
-  | Ok json ->
+      ~(expected_runtime_ids : string list) ~(runtime_ids : string list) :
+      (unit, string) result =
+  let ( let* ) = Result.bind in
+  (* Read the file revision before the resolved lane. A change between either
+     read and the write is then caught by the server's compare-and-set. *)
+  let* raw = get_json ~host ~port ~path:"/api/v1/runtime/config/raw" in
+  let* revision = match Json_util.assoc_member_opt "source_revision" raw with
+    | Some (`String value) when String_util.is_lowercase_sha256_hex value -> Ok value
+    | _ -> Error "runtime config read did not supply a source revision" in
+  let* resolved = get_json ~host ~port ~path:"/api/v1/runtime/resolved" in
+  let* current = match Json_util.assoc_member_opt "lanes" resolved with
+    | Some (`List lanes) ->
+      (match List.find_opt (fun row ->
+         Json_util.assoc_member_opt "id" row = Some (`String lane)) lanes with
+       | Some row ->
+         (match Json_util.assoc_member_opt "runtime_ids" row with
+          | Some (`List ids) ->
+            let rec strings = function
+              | [] -> Ok []
+              | `String id :: rest ->
+                let* rest = strings rest in Ok (id :: rest)
+              | _ -> Error "runtime lane read has invalid candidates" in
+            strings ids
+          | _ -> Error "runtime lane read has no candidate order")
+       | None -> Error ("runtime lane " ^ lane ^ " is no longer present"))
+    | _ -> Error "runtime lane read has no lane list" in
+  if current <> expected_runtime_ids then
+    Error ("runtime lane " ^ lane ^ " changed since this view was read; refresh before editing")
+  else
+    let body = Yojson.Safe.to_string (`Assoc
+      [ "lane", `String lane
+      ; "runtime_ids", `List (List.map (fun id -> `String id) runtime_ids)
+      ; "expected_source_revision", `String revision ]) in
+    let* json = post_json ~host ~port ~path:"/api/v1/runtime/config/routing" ~body in
     decode_runtime_config_commit_receipt json
     |> Result.map (fun (_receipt : runtime_config_commit_receipt) -> ())
 

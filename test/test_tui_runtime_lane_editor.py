@@ -953,7 +953,7 @@ def run_concurrent_edit(executable: str) -> None:
         h.send_and_wait(process, fd, output, b"e",
                         b"adding a candidate to the candidate order of primary")
         h.send_and_wait(process, fd, output, b"\r",
-                        b"changed since this view was read")
+                        b"differs from the displayed order")
         if store.lane_candidates("primary") != ["runtime-b"]:
             raise AssertionError("the TUI overwrote another client's lane edit")
         if any(path == ROUTING_PATH for path, _ in requests):

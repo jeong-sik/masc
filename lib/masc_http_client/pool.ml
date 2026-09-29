@@ -997,19 +997,38 @@ let read_body_with_idle
 
 (* ── Streaming request ────────────────────────────── *)
 
+(* Whether a successful stream's body is also kept whole, and so what
+   [Streamed] carries as its body. A caller that only reads [on_chunk] gets
+   [()] rather than an empty string it could mistake for an empty body, and a
+   subscription left open for hours holds none of what it has handed on. *)
+type _ body_retention =
+  | Keep_body : string body_retention
+  | Discard_body : unit body_retention
+
 (* What a streaming request produced. The two cases are separate because a
    caller that streams a wire protocol (SSE) cannot interpret an error body
    in that protocol: a 401 carries a JSON object, not events. Handing it to
    the caller's chunk consumer would surface as a protocol error rather than
    as the status it is. [Buffered] therefore reports a non-success response
    whole and leaves [on_chunk] uncalled. *)
-type stream_outcome =
+type 'body stream_outcome =
   | Streamed of
-      { response : response
-            (** Complete body by default, empty when retention is disabled. *)
+      { status : int
+      ; headers : (string * string) list
+      ; body : 'body
       ; progress : body_progress
       }
   | Buffered of response
+
+let holds_body (type body) (retention : body body_retention) =
+  match retention with
+  | Keep_body -> true
+  | Discard_body -> false
+
+let retained_body (type body) (retention : body body_retention) (held : string) : body =
+  match retention with
+  | Keep_body -> held
+  | Discard_body -> ()
 
 (* The HTTP definition of a successful status, not a shared setting: other
    modules spelling out the same range are implementing the same spec rather
@@ -1021,8 +1040,9 @@ let status_is_success status = status >= 200 && status <= 299
    [clock] measures progress and protocol-specific idle periods. Human-driven
    sessions can leave idle lifetime to cancellation with an infinite window. *)
 let do_request_streaming
-    ?(retain_body = true)
+    (type body)
     t
+    ~(retention : body body_retention)
     ~(clock : [> float Eio.Time.clock_ty ] Eio.Resource.t)
     ~(idle_timeout_sec : float)
     ?headers
@@ -1031,7 +1051,7 @@ let do_request_streaming
     ~method_
     ~(on_chunk : string -> unit)
     uri
-  : (stream_outcome, string) result =
+  : (body stream_outcome, string) result =
   let key = Host_key.of_uri uri in
   let host_origin = Uri.with_uri ~path:(Some "") ~query:None uri in
   let acquired =
@@ -1085,7 +1105,8 @@ let do_request_streaming
           in
           (match
              with_client_scope client ~on_error:exn_message (fun () ->
-               read_body_with_idle ~retain_body:(retain_body || not (status_is_success status))
+               read_body_with_idle
+                 ~retain_body:(holds_body retention || not (status_is_success status))
                  ?on_chunk ~clock ~start_sec ~idle_timeout_sec
                  (Piaf.Response.body resp)
                |> Result.map_error fst)
@@ -1093,17 +1114,22 @@ let do_request_streaming
            | Error detail ->
              release_once ~close_only:true;
              Error detail
-           | Ok (body_str, progress) ->
+           | Ok (held, progress) ->
              release_once ~close_only:false;
-             let response =
-               { status; headers = headers_list; body = body_str }
-             in
-             if status_is_success status then Ok (Streamed { response; progress })
-             else Ok (Buffered response)))
+             if status_is_success status
+             then
+               Ok
+                 (Streamed
+                    { status
+                    ; headers = headers_list
+                    ; body = retained_body retention held
+                    ; progress
+                    })
+             else Ok (Buffered { status; headers = headers_list; body = held })))
 
 let request_streaming
-    ?retain_body
     t
+    ~retention
     ~(clock : [> float Eio.Time.clock_ty ] Eio.Resource.t)
     ~idle_timeout_sec
     ~method_
@@ -1114,7 +1140,7 @@ let request_streaming
     ~on_chunk
     () =
   let uri = Uri.of_string url in
-  do_request_streaming ?retain_body t ~clock ~idle_timeout_sec ?headers ?body ~method_
+  do_request_streaming t ~retention ~clock ~idle_timeout_sec ?headers ?body ~method_
     ?on_response ~on_chunk uri
 
 (* ── Stats ─────────────────────────────────────────────────────── *)

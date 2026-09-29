@@ -718,7 +718,7 @@ let post_keeper_chat_streaming ?(admission_intent = Masc_tui_keeper_chat_project
   in
   match
     with_credential_refresh_on ~refused:stream_refused @@ fun () ->
-    Masc_http_client.post_stream ~clock
+    Masc_http_client.post_stream ~retention:Masc_http_client.Pool.Keep_body ~clock
       ~idle_timeout_sec:keeper_chat_timeout_sec ~url
       ~headers:(json_headers (("Accept", "text/event-stream") :: auth_headers ()))
       ~body ~on_chunk ()
@@ -727,9 +727,9 @@ let post_keeper_chat_streaming ?(admission_intent = Masc_tui_keeper_chat_project
       Error (Masc_tui_keeper_chat_projection.Transport_error detail)
   | Ok (Masc_http_client.Pool.Buffered { status; body; _ }) ->
       Error (Masc_tui_keeper_chat_projection.Http_error { status; body })
-  | Ok (Masc_http_client.Pool.Streamed { response; _ }) ->
+  | Ok (Masc_http_client.Pool.Streamed { body; _ }) ->
       Masc_tui_keeper_chat_projection.decode_response_with_provenance ~request
-        response.Masc_http_client.Pool.body
+        body
       |> Result.map_error (fun error ->
              Masc_tui_keeper_chat_projection.Protocol_error error)
 
@@ -3053,7 +3053,8 @@ let post_keeper_github_login_streaming ~clock ~(host : string) ~(port : int)
   in
   match
     with_credential_refresh_on ~refused:stream_refused @@ fun () ->
-    Masc_http_client.post_stream ~clock ~idle_timeout_sec:900.0 ~url
+    Masc_http_client.post_stream ~retention:Masc_http_client.Pool.Discard_body ~clock
+      ~idle_timeout_sec:900.0 ~url
       ~headers:(json_headers (("Accept", "text/event-stream") :: auth_headers ()))
       ~body:"{}" ~on_chunk ()
   with
@@ -3324,7 +3325,8 @@ let browser_lane_action ~host ~port ~source operation =
 let post_setup_login_streaming ~clock ~host ~port ~body ~on_chunk =
   let url = url_of ~host ~port ~path:"/api/v1/setup/accounts/login" in
   match with_credential_refresh_on ~refused:stream_refused @@ fun () ->
-    Masc_http_client.post_stream ~retain_body:false ~clock ~idle_timeout_sec:Float.infinity ~url
+    Masc_http_client.post_stream ~retention:Masc_http_client.Pool.Discard_body ~clock
+      ~idle_timeout_sec:Float.infinity ~url
       ~headers:(json_headers (("Accept", "text/event-stream") :: auth_headers ()))
       ~body ~on_chunk () with
   | Error _ -> Error "Login stream unavailable; recheck the login status."

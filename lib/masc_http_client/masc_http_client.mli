@@ -111,7 +111,7 @@ val get_sync :
     that only care about status + body. *)
 
 val post_stream :
-  ?retain_body:bool ->
+  retention:'body Pool.body_retention ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   idle_timeout_sec:float ->
   url:string ->
@@ -119,19 +119,18 @@ val post_stream :
   body:string ->
   on_chunk:(string -> unit) ->
   unit ->
-  (Pool.stream_outcome, string) result
-(** [post_stream ~clock ~idle_timeout_sec ~url ~headers ~body ~on_chunk ()]
-    [idle_timeout_sec = Float.infinity] leaves idle lifetime to the request
-    owner (for example, human-driven login). Disconnect/cancellation still closes it.
-    POSTs and calls [on_chunk] with each response body chunk as it arrives,
-    for callers rendering a live view of a server-sent event stream.
+  ('body Pool.stream_outcome, string) result
+(** [post_stream ~retention ~clock ~idle_timeout_sec ~url ~headers ~body
+    ~on_chunk ()] POSTs and calls [on_chunk] with each response body chunk as
+    it arrives, for callers rendering a live view of a server-sent event
+    stream. [idle_timeout_sec = Float.infinity] leaves idle lifetime to the
+    request owner (for example, human-driven login). Disconnect/cancellation
+    still closes it.
 
-    Set [retain_body=false] when [on_chunk] owns protocol decoding; successful
-    response bodies then remain empty instead of accumulating in memory.
-
-    By default, on the [Streamed] branch the complete body is returned as well, so a
-    caller can render from the chunks and still run an authoritative
-    whole-body decode at the end. On a non-success status the body comes back
+    [retention] says whether the [Streamed] branch also carries the whole
+    body: [Keep_body] for a caller that renders from the chunks and still runs
+    an authoritative whole-body decode at the end, [Discard_body] for one whose
+    [on_chunk] owns the protocol. On a non-success status the body comes back
     as [Buffered] and [on_chunk] is never called — see {!Pool.stream_outcome}.
 
     There is no wall-clock cap: one would cancel a stream that is still
@@ -147,13 +146,15 @@ val get_stream :
   ?on_response:(status:int -> headers:(string * string) list -> unit) ->
   on_chunk:(string -> unit) ->
   unit ->
-  (Pool.stream_outcome, string) result
+  (unit Pool.stream_outcome, string) result
 (** [get_stream ~clock ~idle_timeout_sec ~url ~headers ~on_chunk ()] is
     {!post_stream} for a GET: one request whose body is a server-sent event
-    stream the caller reads chunk by chunk for as long as it delivers. The
-    observer feed at [GET /mcp?sse_kind=observer] is the case. The same
-    rules apply: no total cap, silence bounded by [idle_timeout_sec], a
-    non-success status comes back [Buffered] with [on_chunk] never called. *)
+    stream the caller subscribes to and reads chunk by chunk for as long as it
+    delivers. The observer feed at [GET /mcp?sse_kind=observer] is the case.
+    [on_chunk] is the body's only reader and the body is not kept, because a
+    subscription stays open for hours. The same rules apply: no total cap,
+    silence bounded by [idle_timeout_sec], a non-success status comes back
+    [Buffered] with [on_chunk] never called. *)
 
 (** {1 Typed pool surface}
 

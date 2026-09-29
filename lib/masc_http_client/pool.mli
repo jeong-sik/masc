@@ -158,16 +158,27 @@ val empty_body_progress : body_progress
     the body ends. A caller rendering a live view of a server-sent event stream
     needs the chunks as they arrive. *)
 
+(** Whether a successful stream's body is kept whole as well as handed to
+    [on_chunk], and so what {!Streamed} carries as its body. *)
+type _ body_retention =
+  | Keep_body : string body_retention
+      (** The caller decodes the whole body once the stream ends. *)
+  | Discard_body : unit body_retention
+      (** [on_chunk] is the body's only reader. A subscription that stays open
+          for hours holds none of what it has handed on. *)
+
 (** What a streaming request produced.
 
     The cases are separate because a caller that streams a wire protocol
     cannot interpret an error body in that protocol: a 401 carries a JSON
     object, not events. Feeding it to the caller's chunk consumer would
     surface as a protocol error rather than as the status it is. *)
-type stream_outcome =
+type 'body stream_outcome =
   | Streamed of
-      { response : response
-            (** Complete body by default, empty when retention is disabled. *)
+      { status : int
+      ; headers : (string * string) list
+      ; body : 'body
+            (** The whole body under [Keep_body], [()] under [Discard_body]. *)
       ; progress : body_progress
       }
   | Buffered of response
@@ -175,8 +186,8 @@ type stream_outcome =
           never called. *)
 
 val request_streaming :
-  ?retain_body:bool ->
   t ->
+  retention:'body body_retention ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   idle_timeout_sec:float ->
   method_:http_method ->
@@ -186,11 +197,11 @@ val request_streaming :
   ?on_response:(status:int -> headers:(string * string) list -> unit) ->
   on_chunk:(string -> unit) ->
   unit ->
-  (stream_outcome, string) result
-(** [request_streaming t ~clock ~idle_timeout_sec ~method_ ~url ~on_chunk ()]
-    issues one request and calls [on_chunk] with each body chunk as it arrives.
-    [retain_body=false] avoids buffering successful streams decoded by their
-    callback. Non-success bodies remain buffered for status/error handling.
+  ('body stream_outcome, string) result
+(** [request_streaming t ~retention ~clock ~idle_timeout_sec ~method_ ~url
+    ~on_chunk ()] issues one request and calls [on_chunk] with each body chunk
+    as it arrives. [retention] decides whether a successful body is also kept
+    whole. A non-success body is always kept, for {!Buffered}.
 
     [on_response], when supplied, runs once after response headers arrive and
     before any body chunk is delivered, including for non-success statuses.

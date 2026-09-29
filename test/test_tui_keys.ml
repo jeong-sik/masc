@@ -2838,10 +2838,10 @@ let test_detail_tab_hint_projects_the_table () =
    as the drift they were written to close. This list is the contract:
    changing it is a decision, not a slip. Sources are the guarded arms in
    masc_tui.ml (T/A// at Detail_identity, R at Detail_identity, L/P and one
-   digit per login scope on the GitHub tab, e for the settings form, Q/B for
+   digit per login scope on the GitHub tab, e for the settings form, b/B for
    the Board requeue on Info). *)
 let live_tab_keys : (Masc_tui_types.keeper_detail_tab * string list) list =
-  [ Detail_info, [ "Q"; "B" ]
+  [ Detail_info, [ "b"; "B" ]
   ; Detail_sandbox, [ "o"; "d/m/s"; "PgUp/PgDn"; "R" ]
   ; Detail_instructions, [ "e" ]
   ; Detail_secrets, []
@@ -2880,8 +2880,23 @@ let test_key_atoms_read_the_table_notation () =
     (List.mem "e" (Masc_tui_keys.keeper_detail_tab_taken_keys Detail_channels));
   Alcotest.(check bool) "Channels takes U for unbind all" true
     (List.mem "U" (Masc_tui_keys.keeper_detail_tab_taken_keys Detail_channels));
-  Alcotest.(check (list string)) "Info takes both Board requeue keys" [ "Q"; "B" ]
+  Alcotest.(check (list string)) "Info takes both Board requeue keys" [ "b"; "B" ]
     (Masc_tui_keys.keeper_detail_tab_taken_keys Detail_info)
+
+(* The global quit arm runs before every detail tab's own arm, so a tab key
+   the quit test also accepts never reaches the tab: Info's [Q] requeue
+   armed the exit instead. No tab may offer a key that quits. *)
+let test_detail_tab_keys_are_not_quit_keys () =
+  List.iter
+    (fun tab ->
+       List.iter
+         (fun key ->
+            if Masc_tui_render_schedule.Input_shortcut.is_quit ~message_mode:false key
+            then
+              Alcotest.failf "%s tab offers %S, which the global quit arm takes first"
+                (keeper_detail_tab_label tab) key)
+         (Masc_tui_keys.keeper_detail_tab_taken_keys tab))
+    Masc_tui_types.keeper_detail_tabs
 
 let test_detail_tab_bindings_cover_the_live_keys () =
   List.iter
@@ -3320,6 +3335,8 @@ let () =
             test_the_wide_key_names_where_it_goes
         ; Alcotest.test_case "key atoms read the table notation" `Quick
             test_key_atoms_read_the_table_notation
+        ; Alcotest.test_case "no detail tab key is a quit key" `Quick
+            test_detail_tab_keys_are_not_quit_keys
         ; Alcotest.test_case "detail tab strip projects the table" `Quick
             test_detail_tab_hint_projects_the_table
         ; Alcotest.test_case "detail tab keys reach the help sheet" `Quick

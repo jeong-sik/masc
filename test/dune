@@ -4186,6 +4186,7 @@
    (run %{test}))))
 
 (include stanzas/test_tui_present_timing_pty.inc)
+(include stanzas/test_tui_region_baseline_pty.inc)
 
 (test
  (name test_tui_lru)

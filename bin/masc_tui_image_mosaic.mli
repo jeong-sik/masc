@@ -45,7 +45,9 @@ val render_rgba :
     drawn and the page shows there: a cell with one such half draws the other
     as a half block on the page colour, one with both is a space. Colours go
     through [project] -- {!Masc_tui_terminal_palette.best_color} outside
-    tests -- so a 256-colour terminal draws them too. Every line ends with
+    tests -- so a 256-colour terminal draws them too; one [project] cannot
+    draw is the terminal's own foreground or background (SGR 39 or 49), not
+    the colour of the cell before it. Every line ends with
     the terminal's own colours (SGR 39 and 49), never a full reset, so a row
     that styles itself keeps its style. [] on the same malformed input as
     {!render}. *)

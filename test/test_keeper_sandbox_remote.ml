@@ -528,7 +528,14 @@ let test_the_lane_report_is_what_the_last_dispatch_said () =
    | { probe = Probe_answered _ | Probe_failed _; _ } -> fail "probed before anything asked"
    | { last_dispatch = Some _; _ } -> fail "a dispatch recorded before any ran"
    | { lane; _ } -> fail ("lane label " ^ lane));
+  let before = Unix.gettimeofday () in
   let _ = run_request (Keeper_sandbox_remote.runner ~timeout_sec:2.0 state) ~cwd:None () in
+  let after = Unix.gettimeofday () in
+  (match Keeper_sandbox_remote.report state with
+   | { probe = Probe_answered { observed_at; _ }; _ } ->
+     check bool "the answer is stamped when this process got it" true
+       (observed_at >= before && observed_at <= after)
+   | { probe = Probe_not_asked | Probe_failed _; _ } -> fail "the first dispatch probes");
   (match Keeper_sandbox_remote.report state with
    | { probe = Probe_answered { major = Exec_ssh_protocol.V3; _ }
      ; last_dispatch = Some (Payload_finished { status = Unix.WEXITED 3; _ })
@@ -576,7 +583,7 @@ let test_the_lane_status_names_a_shim_from_another_release () =
   let answered release =
     report
       (Keeper_sandbox_remote.Probe_answered
-         { major = Exec_ssh_protocol.V3; capabilities = []; release })
+         { major = Exec_ssh_protocol.V3; capabilities = []; release; observed_at = 100.0 })
   in
   let same = answered (Some Build_version.current) in
   check bool "a shim from this release asks nothing" true
@@ -585,6 +592,8 @@ let test_the_lane_status_names_a_shim_from_another_release () =
     (Yojson.Safe.Util.to_string (field "shim_release" (field "probe" same)));
   check string "and the server's own" Build_version.current
     (Yojson.Safe.Util.to_string (field "server_release" (field "probe" same)));
+  check (float 0.0) "and when it answered, so an old reading reads as old" 100.0
+    (Yojson.Safe.Util.to_float (field "observed_at_unix" (field "probe" same)));
   let older = answered (Some "0.1.0") in
   check bool "another release is the operator's" true
     (contains "different release"
@@ -610,7 +619,7 @@ let test_the_lane_status_names_who_acts () =
             { at; failure = Transport_failed
             ; detail = "remote_ssh_version_error: trailer carries v=2, this build speaks v3" }))
       (Keeper_sandbox_remote.Probe_answered
-         { major = Exec_ssh_protocol.V3; capabilities = []; release = None })
+         { major = Exec_ssh_protocol.V3; capabilities = []; release = None; observed_at = 100.0 })
   in
   check string "failure class" "transport_failed"
     (Yojson.Safe.Util.to_string (field "failure" (field "last_dispatch" version_skew)));

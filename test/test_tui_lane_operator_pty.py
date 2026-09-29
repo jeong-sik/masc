@@ -97,14 +97,24 @@ def main(executable: str, captures: Path | None) -> None:
         # reference to a named Keeper) rather than submitting; Enter takes the
         # default, which sends no keeper_name and is what `preserve` asserts.
         key(b'e', b'Preserve 1 marked row from Second producer')
-        frame = key(b'\r', b'operator-evidence-receipt')
-        plain = b''.join(terminal.screen_text(frame).split())
-        if b'Read:' not in plain or b'follow-upinventoryunavailable' not in plain:
+        read_frame = key(b'\r', b'Read:')
+        read_plain = b''.join(terminal.screen_text(read_frame).split())
+        if b'Read:' not in read_plain or b'follow-upinventoryunavailable' not in read_plain:
             raise AssertionError('Failed follow-up inventory read was hidden behind the action receipt')
-        if b'Request:' in plain or b'Action receipt:' in plain:
+        if b'Request:' in read_plain or b'Action receipt:' in read_plain:
             raise AssertionError('Successful evidence preservation was reported as a request failure')
+        # Raw detail puts the complete receipt after the records; scroll to
+        # it rather than assuming it fits on the first terminal page.
+        key(b'D', b'Rows')
+        start = len(output)
+        os.write(master, b'J' * 80)
+        if not terminal.drain_until_quiet(process, master, output):
+            raise AssertionError('Raw detail did not settle after scrolling to the receipt')
+        if b'operator-evidence-receipt' not in terminal.CSI_RE.sub(b'', bytes(output[start:])):
+            raise AssertionError('Preserved evidence receipt is missing from raw detail')
         if len(accepted) != 1:
             raise AssertionError('Expected one explicit evidence preservation')
+        key(b'D', b'Selected second producer')
         # The detail screen contains only this worker's rows. Opening another
         # worker clears the mark, so a later export cannot mix owners.
         key(b'q', b'Lane Add-ons \xc2\xb7 2 installed')

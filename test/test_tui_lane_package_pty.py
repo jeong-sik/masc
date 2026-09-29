@@ -108,7 +108,6 @@ def main(executable: str) -> None:
             key(b"q", b"MASC Lanes")
             key(b"\x1b", b"MASC Overview")
             key(b":go lane add-ons\r", b"MASC Lane Add-ons")
-            key(b"D", b"TOML installations")
             key(b"n", b"New TOML filename:")
             key(b"terminal.toml\r", b"Draft edited; s saves")
             if requests:
@@ -190,7 +189,7 @@ def main(executable: str) -> None:
             reopened = key(b":go lane add-ons\r", b"TOML draft second.toml")
             if b"# second draft retained" not in terminal.CSI_RE.sub(b"", reopened):
                 raise AssertionError("late save or refresh discarded the second draft")
-            key(b"\x1b", b"TOML installations")
+            key(b"\x1b", b"Lane Add-ons \xc2\xb7 0 installed")
             key(b":act " + json.dumps(action_request).encode() + b"\r", b"state queued")
             key(b"t", b"state confirmed")
             key(b"q", b"MASC Overview")

@@ -4696,8 +4696,11 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
   in
   let task =
     fit_width
-      (Terminal_text.single_line_or ~default:Masc_tui_theme.Glyph.no_value
-         keeper.k_current_task_id)
+      (match keeper.k_activity with
+       | None -> "not observed"
+       | Some activity ->
+         Terminal_text.single_line_or ~default:Masc_tui_theme.Glyph.no_value
+           activity.k_current_task_id)
       columns.kcol_task
   in
   String.concat ""
@@ -4723,7 +4726,8 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
        let turn_color, turn_age =
          match
            Masc_tui_keeper_mark.turn_clock ~turn
-             ~last_turn_at:(Masc_domain.parse_iso8601_opt keeper.k_last_turn_ts)
+             ~last_turn_at:(Option.bind keeper.k_activity (fun activity ->
+               Masc_domain.parse_iso8601_opt activity.k_last_turn_ts))
          with
          | Masc_tui_keeper_mark.Open_turn_started started_at ->
              (status_color, Masc_tui_answering.elapsed_text ~now started_at)
@@ -4923,7 +4927,7 @@ let render_keeper_list (state : state) =
   let heading =
     screen_title
       (Printf.sprintf " MASC Keepers %s"
-         (match state.keepers, local_rows_page state ~error:keepers_error with
+         (match state.keepers, keeper_rows_page state ~error:keepers_error with
           | _ :: _, _ | [], Page_empty ->
               Printf.sprintf "(%d)" (List.length state.keepers)
           | [], (Page_unread | Page_failed) ->
@@ -5104,8 +5108,11 @@ let render_keeper_list (state : state) =
     (* A roster that was never read is as empty as one that holds no files;
        only the second is "no keeper metadata". *)
     let note =
-      match local_rows_page state ~error:keepers_error with
-      | Page_empty -> Some "   no keeper metadata under .masc/keepers/"
+      match keeper_rows_page state ~error:keepers_error with
+      | Page_empty -> Some (match state.workspace_identity with
+          | Workspace_identity_mismatch _ -> "   server Keeper roster is empty"
+          | Workspace_identity_match | Workspace_identity_unread ->
+            "   no keeper metadata under .masc/keepers/")
       | Page_unread -> Some page_unread_note
       | Page_failed -> None
     in
@@ -7385,7 +7392,10 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       (* Current work section *)
       add_section "Current Work";
       add_row "Task:"
-        (Terminal_text.single_line_or ~default:Masc_tui_theme.Glyph.no_value k.k_current_task_id);
+        (match k.k_activity with
+         | None -> "not observed"
+         | Some activity -> Terminal_text.single_line_or
+             ~default:Masc_tui_theme.Glyph.no_value activity.k_current_task_id);
       add_empty ();
 
       (* Live Context section (Phase 2) *)
@@ -7521,19 +7531,23 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
             | None -> ()));
       (match k.k_origin with
        | Tui_decode.Persisted_keeper -> ()
+       | Remote_keeper -> add_row "Source:" "server roster"
        | Declared_keeper requirements ->
          add_row "Preparation:" (String.concat " · "
            (List.map Masc.Keeper_declared_roster.requirement_label requirements)));
-      add_row "Total Turns:" (string_of_int k.k_total_turns);
+      (match k.k_activity with
+       | None -> add_row "Activity:" "not observed"
+       | Some activity ->
+      add_row "Total Turns:" (string_of_int activity.k_total_turns);
       (* Read at a glance, the way the Acting pane's block already reads its
          token figures. A live roster drew "75111274" here: eight digits a
          reader counts rather than reads. Turns and tool calls keep their
          digits -- three or four of them, and a count of things done rather
          than a size. *)
       add_row "Total Tokens:"
-        (Masc_tui_message_layout.compact_count k.k_total_tokens);
-      add_row "Total Cost:" (Printf.sprintf "$%.4f" k.k_total_cost_usd);
-      add_row "Last Turn:" (Terminal_text.short_timestamp k.k_last_turn_ts);
+        (Masc_tui_message_layout.compact_count activity.k_total_tokens);
+      add_row "Total Cost:" (Printf.sprintf "$%.4f" activity.k_total_cost_usd);
+      add_row "Last Turn:" (Terminal_text.short_timestamp activity.k_last_turn_ts));
       add_empty ();
 
       (* Recent activity, folded from the metrics rows already read for this
@@ -7589,15 +7603,21 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
 
       add_section "Autonomy";
       add_row "Last Outcome:"
-        (match k.k_last_proactive_outcome with
-         | Some outcome -> proactive_outcome_word outcome
-         | None -> Masc_tui_theme.Glyph.no_value);
+        (match k.k_activity with
+         | None -> "not observed"
+         | Some activity ->
+           (match activity.k_last_proactive_outcome with
+            | Some outcome -> proactive_outcome_word outcome
+            | None -> Masc_tui_theme.Glyph.no_value));
       add_empty ();
 
       (* Timestamps section *)
       add_section "Timestamps";
-      add_row "Created:" (Terminal_text.short_timestamp k.k_created_at);
-      add_row "Updated:" (Terminal_text.short_timestamp k.k_updated_at);
+      (match k.k_identity with
+       | Ok identity ->
+         add_row "Created:" (Terminal_text.short_timestamp identity.k_created_at);
+         add_row "Updated:" (Terminal_text.short_timestamp identity.k_updated_at)
+       | Error reason -> add_row "Metadata:" (Terminal_text.single_line reason));
 
       List.rev !lines
     in
@@ -12200,10 +12220,11 @@ let runtime_detail_lines state target ~width =
             runtime_detail_field ~width ~style:Ansi.dim "Bound keepers" "none"
         | ks ->
             let names = String.concat ", " (List.map (fun (k : Tui_decode.keeper) -> k.k_name) ks) in
-            let turns, tokens, cost = aggregate_keeper_stats ks in
-            let activity_str =
-              Printf.sprintf "%d turns \xc2\xb7 %s tokens \xc2\xb7 $%.4f" turns
-                (format_context_tokens tokens) cost
+            let activity_str = match aggregate_keeper_stats ks with
+              | None -> "activity not observed"
+              | Some (turns, tokens, cost) ->
+                Printf.sprintf "%d turns · %s tokens · $%.4f" turns
+                  (format_context_tokens tokens) cost
             in
             runtime_detail_field ~width ~style:Ansi.reset "Bound keepers" names
             @ runtime_detail_field ~width ~style:Ansi.reset "Keeper telemetry" activity_str
@@ -12613,12 +12634,10 @@ let render_runtime (state : state) =
                  match bound_keepers with
                  | [] -> [ (Theme.recede ()) ^ "[no keepers]" ^ Ansi.reset ]
                  | [ one ] ->
-                     let turns, _, cost = aggregate_keeper_stats bound_keepers in
-                     let stats = if turns > 0 then Printf.sprintf " (%d turns, $%.2f)" turns cost else "" in
+                     let stats = keeper_assignment_activity bound_keepers in
                      [ (Theme.info ()) ^ Printf.sprintf "[assigned: %s%s]" one.k_name stats ^ Ansi.reset ]
                  | many ->
-                     let turns, _, cost = aggregate_keeper_stats bound_keepers in
-                     let stats = if turns > 0 then Printf.sprintf " (%d turns, $%.2f)" turns cost else "" in
+                     let stats = keeper_assignment_activity bound_keepers in
                      let names = String.concat ", " (List.map (fun (k : Tui_decode.keeper) -> k.k_name) many) in
                      [ (Theme.info ()) ^ Printf.sprintf "[assigned: %s%s]" names stats ^ Ansi.reset ]
                in
@@ -12686,12 +12705,10 @@ let render_runtime (state : state) =
               match lane_keepers with
               | [] -> [ (Theme.recede ()) ^ "[unassigned]" ^ Ansi.reset ]
               | [ one ] ->
-                  let turns, _, cost = aggregate_keeper_stats lane_keepers in
-                  let stats = if turns > 0 then Printf.sprintf " (%d turns, $%.2f)" turns cost else "" in
+                  let stats = keeper_assignment_activity lane_keepers in
                   [ (Theme.info ()) ^ Printf.sprintf "[assigned: %s%s]" one.k_name stats ^ Ansi.reset ]
               | many ->
-                  let turns, _, cost = aggregate_keeper_stats lane_keepers in
-                  let stats = if turns > 0 then Printf.sprintf " (%d turns, $%.2f)" turns cost else "" in
+                  let stats = keeper_assignment_activity lane_keepers in
                   let names = String.concat ", " (List.map (fun (k : Tui_decode.keeper) -> k.k_name) many) in
                   [ (Theme.info ()) ^ Printf.sprintf "[assigned: %s%s]" names stats ^ Ansi.reset ]
             else []
@@ -13135,7 +13152,8 @@ let render_acting (state : state) =
   (* The agent_core family names its runtime lane, not the keeper; the
      keeper is the one whose trace the event's correlation id carries. *)
   let traces =
-    List.map (fun keeper -> (keeper.k_name, keeper.k_trace_id)) state.keepers
+    List.filter_map (fun keeper ->
+      Option.map (fun trace -> keeper.k_name, trace) (Tui_decode.keeper_trace_id keeper)) state.keepers
   in
   (* Visible entries, newest first, paired with the events older than each
      -- in a newest-first list, the tail after it -- so a completed call on

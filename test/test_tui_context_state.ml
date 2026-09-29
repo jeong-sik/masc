@@ -5,18 +5,12 @@ module Context_state = Masc_tui_context_state
 
 let keeper =
   Decode.
-    { k_origin = Masc.Tui_decode.Persisted_keeper; k_name = "keeper-main";
-      k_trace_id = "trace-current";
-      k_paused = false;
-      k_current_task_id = None;
-      k_total_turns = 0;
-      k_total_tokens = 0;
-      k_total_cost_usd = 0.0;
-      k_last_turn_ts = "";
-      k_last_proactive_outcome = None;
-      k_created_at = "2026-08-21T00:00:00Z";
-      k_updated_at = "2026-08-21T00:00:00Z";
-    }
+    { k_origin = Masc.Tui_decode.Persisted_keeper
+  ; k_name = "keeper-main"
+  ; k_paused = false
+  ; k_identity = Ok { k_trace_id = "trace-current"; k_created_at = "2026-08-21T00:00:00Z"; k_updated_at = "2026-08-21T00:00:00Z" }
+  ; k_activity = Some { k_current_task_id = None; k_total_turns = 0; k_total_tokens = 0; k_total_cost_usd = 0.0; k_last_turn_ts = ""; k_last_proactive_outcome = None }
+  }
 
 let observed_fields ~trace_id =
   [ "context_ratio", `Float 0.5

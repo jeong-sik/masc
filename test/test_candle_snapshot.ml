@@ -28,15 +28,21 @@ let () =
 
    Everything that names a real Goal, verdict or workspace type is here. *)
 
-let make_goal ?(created_at = "2026-09-20T01:00:00Z") ?(due_date = Some "2026-09-26") ()
+let make_goal
+      ?(created_at = "2026-09-20T01:00:00Z")
+      ?updated_at
+      ?(due_date = Some "2026-09-26")
+      ?(metric = Some "tests")
+      ?(target_value = Some "10")
+      ()
   : Goal_store.goal
   =
   { Goal_store.id = "goal-1"
   ; owner = Goal_store.Unknown_owner
   ; criterion_revision = "rev-1"
   ; title = "Ship the ledger"
-  ; metric = Some "tests"
-  ; target_value = Some "10"
+  ; metric
+  ; target_value
   ; due_date
   ; priority = 3
   ; phase = Goal_phase.Verifying
@@ -45,7 +51,7 @@ let make_goal ?(created_at = "2026-09-20T01:00:00Z") ?(due_date = Some "2026-09-
   ; notified_refuted_key = None
   ; notified_overdue_key = None
   ; created_at
-  ; updated_at = created_at
+  ; updated_at = Option.value updated_at ~default:created_at
   }
 ;;
 
@@ -127,6 +133,10 @@ let candle_toml config =
 let ledger_path config = Candle_ledger.path ~base_path:(base_path_of config)
 let enable_candle config = write_file (candle_toml config) ""
 let clock = 1_790_000_000.
+
+(* How far the real clock may sit outside the two readings taken around a call. It
+   covers a wall-clock step between the readings, not the call's own duration. *)
+let real_clock_slack_s = 2.
 
 let ledger_events config =
   match Candle_ledger.read ~base_path:(base_path_of config) with
@@ -256,6 +266,68 @@ let test_a_due_date_that_is_not_a_date_is_kept_as_written () =
   | [ { Candle_event.body = Candle_event.Snapshot s; _ } ] ->
     check (option string) "kept" (Some "TBD") s.due_date;
     check (list string) "a Goal with no links has no linked Tasks" [] s.linked_task_ids
+  | events -> failf "expected one Snapshot, got %d rows" (List.length events)
+;;
+
+(* [Goal_store.transact_goal] rewrites [updated_at] on every change, so a Goal that
+   was edited before it passed has an [updated_at] later than its [created_at]. The
+   Snapshot holds the creation time. *)
+let test_the_snapshot_holds_when_the_goal_was_created_not_when_it_was_last_edited () =
+  with_workspace
+  @@ fun config ->
+  enable_candle config;
+  let goal = make_goal ~updated_at:"2026-09-27T09:15:00Z" () in
+  is_ok "record" (record ~goal config);
+  match ledger_events config with
+  | [ { Candle_event.body = Candle_event.Snapshot s; _ } ] ->
+    check
+      string
+      "goal_created_at"
+      "2026-09-20T01:00:00Z"
+      (Candle_time.to_rfc3339 s.goal_created_at)
+  | events -> failf "expected one Snapshot, got %d rows" (List.length events)
+;;
+
+(* A Goal can have no due date, metric or target. The Snapshot keeps them absent
+   and does not write an empty string in their place. *)
+let test_a_goal_with_no_due_date_metric_or_target_keeps_them_absent () =
+  with_workspace
+  @@ fun config ->
+  enable_candle config;
+  let goal = make_goal ~due_date:None ~metric:None ~target_value:None () in
+  is_ok "record" (record ~goal config);
+  match ledger_events config with
+  | [ { Candle_event.body = Candle_event.Snapshot s; _ } ] ->
+    check (option string) "due date" None s.due_date;
+    check (option string) "metric" None s.metric;
+    check (option string) "target" None s.target_value
+  | events -> failf "expected one Snapshot, got %d rows" (List.length events)
+;;
+
+(* [before_proof_commit] is the step the verifier calls: [record] with the real
+   clock. Every other test gives [record] a fixed clock, so this is the one that
+   reaches the real clock. *)
+let test_the_verifier_step_stamps_the_row_with_the_clock_of_that_moment () =
+  with_workspace
+  @@ fun config ->
+  enable_candle config;
+  let before = Time_compat.now () in
+  is_ok
+    "before_proof_commit"
+    (Candle_snapshot.before_proof_commit config (make_goal ()) (make_verdict ()));
+  let after = Time_compat.now () in
+  match ledger_events config with
+  | [ { Candle_event.at; body = Candle_event.Snapshot _ } ] ->
+    let instant seconds = Candle_time.of_ptime (Option.get (Ptime.of_float_s seconds)) in
+    let earliest = instant (before -. real_clock_slack_s) in
+    let latest = instant (after +. real_clock_slack_s) in
+    if Candle_time.compare at earliest < 0 || Candle_time.compare at latest > 0
+    then
+      failf
+        "at %s is outside %s .. %s"
+        (Candle_time.to_rfc3339 at)
+        (Candle_time.to_rfc3339 earliest)
+        (Candle_time.to_rfc3339 latest)
   | events -> failf "expected one Snapshot, got %d rows" (List.length events)
 ;;
 
@@ -480,6 +552,18 @@ let () =
             "a due date that is not a date is kept as written"
             `Quick
             test_a_due_date_that_is_not_a_date_is_kept_as_written
+        ; test_case
+            "the snapshot holds when the Goal was created, not when it was last edited"
+            `Quick
+            test_the_snapshot_holds_when_the_goal_was_created_not_when_it_was_last_edited
+        ; test_case
+            "a Goal with no due date, metric or target keeps them absent"
+            `Quick
+            test_a_goal_with_no_due_date_metric_or_target_keeps_them_absent
+        ; test_case
+            "the verifier step stamps the row with the clock of that moment"
+            `Quick
+            test_the_verifier_step_stamps_the_row_with_the_clock_of_that_moment
         ; test_case
             "links that cannot be read refuse the step"
             `Quick

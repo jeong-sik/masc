@@ -3,8 +3,9 @@
 #
 # Stages the release binaries as a local file:// release, installs them
 # through the real installer (detect_asset + SHA256SUMS verification +
-# placement), then boots the installed server and asserts /health. This
-# guards the installer's asset-name and checksum contract that a release
+# placement), then boots the installed server and checks liveness, readiness,
+# and the installed dashboard. This guards the installer's asset-name and
+# checksum contract that a release
 # depends on -- the contract that broke silently when nothing exercised the
 # download path end to end -- without any network access.
 #

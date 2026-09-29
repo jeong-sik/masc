@@ -87,7 +87,11 @@ do not establish spontaneous discovery and selection.
   failed during compilation: `Skill_reference` was not visible to the test.
   Its direct `masc.skill_reference` dependency is now declared. The remaining
   new modules were checked against direct dependencies and `masc_test_deps`
-  re-exports; the corrected candidate has not yet passed native CI.
+  re-exports. The next native run [36601156316](https://github.com/jeong-sik/masc/actions/runs/36601156316)
+  compiled the fixture, then rejected its TOML because `compositions.0.params.0`
+  lacked the required `description`. That description is now supplied, and
+  the complete fixture was checked against the catalog parser's required and
+  allowed fields. The newly corrected candidate remains pending native CI.
   No joined execution pass is claimed.
 - Current production execution: not established by this audit.
 - Unprompted model selection and independently checked task outcome: not measured.

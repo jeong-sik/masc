@@ -493,6 +493,7 @@ defer_loading = true
 [[compositions.params]]
 name = "query"
 type = "string"
+description = "FTS5 query used by the first real capability-search node."
 [[compositions.nodes]]
 id = "probe"
 tool = "keeper_capability_search"

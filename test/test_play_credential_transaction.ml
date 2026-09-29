@@ -3,6 +3,8 @@
 open Alcotest
 open Masc
 
+let () = Mirage_crypto_rng_unix.use_default ()
+
 let auth_ok = function
   | Ok value -> value
   | Error error -> fail (Masc_domain.masc_error_to_string error)

@@ -160,7 +160,7 @@ let test_atoms_saved_without_an_end_line_are_read_up_to_the_next_start () =
       ]
   in
   check string "the saved atoms end where the next turn started"
-    "read [2,6) seen=3"
+    "read [2,6) seen=4"
     (select ~progress:(progress_at ~seen:2 saved 2) ~lines saved);
   check string "once read, an official turn that starts where reading stands is not atom work"
     "nothing"

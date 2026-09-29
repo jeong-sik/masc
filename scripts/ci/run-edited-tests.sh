@@ -37,6 +37,7 @@ fi
 scope_tool="${repo_root}/scripts/ci/dune_suite_scope.py"
 stanza_reader="${repo_root}/scripts/ci/stanza_env.py"
 reference_tool="${repo_root}/scripts/ci/referencing_suites.py"
+linked_library_tool="${repo_root}/scripts/ci/linked_library_suites.py"
 
 python_suite_is_runnable() {
   local stem candidate_dir
@@ -649,6 +650,34 @@ STANZAS
     printf '%s\n' "${stanza_suites}" | sed 's/^/  /'
     sources=$(printf '%s\n%s\n' "${sources}" "${stanza_suites}" \
       | grep -v '^[[:space:]]*$' | sort -u)
+  fi
+
+  # A selected test/*.ml can be a library module, not an executable. Follow
+  # its (modules ...) owner to the (test)/(tests) stanzas that link that
+  # library, including stanzas loaded from .inc files. Keep directly edited
+  # modules in the direct execution class after replacing them.
+  if ! linked_map=$(printf '%s\n' "${sources}" | python3 "${linked_library_tool}"); then
+    echo "linked_library_suites.py failed" >&2
+    exit 1
+  fi
+  if [ -n "${linked_map}" ]; then
+    expand_linked_sources() {
+      local source targets expanded=""
+      while IFS= read -r source; do
+        [ -n "${source}" ] || continue
+        targets=$(printf '%s\n' "${linked_map}" \
+          | awk -F "$(printf '\t')" -v path="${source}" '$1 == path { print $2 }')
+        [ -n "${targets}" ] || targets="${source}"
+        expanded=$(printf '%s\n%s\n' "${expanded}" "${targets}")
+      done <<LINK_SOURCES
+$1
+LINK_SOURCES
+      printf '%s\n' "${expanded}" | awk 'NF' | sort -u
+    }
+    echo "test library modules select linked executables:"
+    printf '%s\n' "${linked_map}" | cut -f 2 | sort -u | sed 's/^/  /'
+    sources=$(expand_linked_sources "${sources}")
+    direct_sources=$(expand_linked_sources "${direct_sources}")
   fi
 
   # Return no selection only when no input mapped to a runnable suite.
@@ -1311,6 +1340,9 @@ self_test() {
   check_direct "an edited suite stays direct before attribution expands selection" \
     "test/test_tui_keyboard_input.py" \
     "test/test_tui_keyboard_input.py"
+  check_direct "an edited test library module selects its linked executables" \
+    "test/test_keeper_tool_matrix.ml test/test_mcp_tool_matrix.ml test/test_mcp_tool_runtime_workspace_path.ml" \
+    "test/test_keeper_tool_matrix_cases.ml"
   # tui_browser names five suites, over the per-module cap, so the name
   # mapping attributes nothing to this interface. What is left is the
   # scenario that declares the path and the one suite whose stanza links the

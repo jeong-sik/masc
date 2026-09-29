@@ -293,12 +293,19 @@ let add_routes ?sw ?clock ~port router =
        (handle_post_mcp ~profile:Server_mcp_transport_http.Managed_agent)
   |> Http.Router.post "/mcp/operator"
        (handle_post_mcp ~profile:Server_mcp_transport_http.Operator_remote)
+  (* No GET: the agent stream carries workspace task events a player must not
+     see, so the router answers 405, which the MCP transport spec defines as
+     "this endpoint offers no SSE stream". *)
+  |> Http.Router.post "/mcp/play"
+       (handle_post_mcp ~profile:Server_mcp_transport_http.Seat)
   |> Http.Router.add ~path:"/mcp" ~methods:[`DELETE]
        ~handler:handle_delete_mcp
   |> Http.Router.add ~path:"/mcp/managed" ~methods:[`DELETE]
        ~handler:(handle_delete_mcp ~profile:Server_mcp_transport_http.Managed_agent)
   |> Http.Router.add ~path:"/mcp/operator" ~methods:[`DELETE]
        ~handler:(handle_delete_mcp ~profile:Server_mcp_transport_http.Operator_remote)
+  |> Http.Router.add ~path:"/mcp/play" ~methods:[`DELETE]
+       ~handler:(handle_delete_mcp ~profile:Server_mcp_transport_http.Seat)
   |> Http.Router.add ~path:"/graphql" ~methods:[`GET; `POST]
        ~handler:(fun request reqd ->
          with_read_auth (fun _state req reqd -> handle_graphql req reqd) request reqd)

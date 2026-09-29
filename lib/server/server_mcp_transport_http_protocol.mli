@@ -52,6 +52,8 @@ type deps = Server_mcp_transport_http_types.deps = {
     base_path:string -> Httpun.Request.t -> (unit, auth_failure) result;
   verify_operator_mcp_auth :
     base_path:string -> Httpun.Request.t -> (unit, auth_failure) result;
+  verify_seat_mcp_auth :
+    base_path:string -> Httpun.Request.t -> (unit, auth_failure) result;
 }
 (** Transparent alias of {!Server_mcp_transport_http_types.deps}.
     Re-declared here so runtime consumers see the record fields

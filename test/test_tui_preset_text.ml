@@ -33,6 +33,35 @@ let test_listing_names_counts_and_unreadable () =
     (Text.listing_lines
        { D.pss_presets = []; pss_unreadable = [ "torn", "manifest.json missing" ] })
 
+(* The Config → Presets pane gives each detail row [cols - 6] cells. The
+   older-format reason ends in what to do, so the pane must fold it rather
+   than cut it: at 100 and 140 columns every row fits and the whole reason,
+   recovery step included, is still on screen. *)
+let test_unreadable_reason_is_folded_not_cut () =
+  let name = "_autosave-20260905T073152Z" in
+  let reason =
+    "prompt_overrides.json has schema_version 1 and this build reads only schema_version 2, so \
+     this preset cannot be restored; set its prompts again and save them as a new preset"
+  in
+  let words s = String.split_on_char ' ' s |> List.filter (fun w -> w <> "") in
+  List.iter
+    (fun cols ->
+      let max_cells = cols - 6 in
+      let rows = Text.unreadable_rows ~max_cells [ name, reason ] in
+      check bool (Printf.sprintf "%d cols: more than one row" cols) true (List.length rows > 1);
+      List.iter
+        (fun row ->
+          check string
+            (Printf.sprintf "%d cols: row fits in %d cells" cols max_cells)
+            row
+            (Masc_tui_message_layout.take_cells row max_cells))
+        rows;
+      check (list string)
+        (Printf.sprintf "%d cols: every word of the reason is shown" cols)
+        (words (Printf.sprintf "! %s — %s" name reason))
+        (List.concat_map words rows))
+    [ 100; 140 ]
+
 let test_saved_line_carries_the_counts () =
   check string "saved" "saved preset morning — overrides 1 · keepers 2 · assignments 12 · lanes 4"
     (Text.saved_line morning)
@@ -235,6 +264,8 @@ let () =
     [ ( "preset text"
       , [ test_case "listing names counts and unreadable rows" `Quick
             test_listing_names_counts_and_unreadable
+        ; test_case "an unreadable reason is folded, not cut" `Quick
+            test_unreadable_reason_is_folded_not_cut
         ; test_case "saved line carries the counts" `Quick test_saved_line_carries_the_counts
         ; test_case "restore lines show skips and the runtime outcome" `Quick
             test_restore_lines_show_skips_and_the_runtime_outcome

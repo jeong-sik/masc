@@ -4,6 +4,7 @@ type tool_profile = Server_mcp_transport_http_types.tool_profile =
   | Full
   | Managed_agent
   | Operator_remote
+  | Seat
 
 type runtime = Server_mcp_transport_http_types.runtime = {
   base_path : string;
@@ -180,6 +181,18 @@ let body_is_subscriptions_listen body_str =
   | Some ("subscriptions/listen", true) -> true
   | _ -> false
 
+(* The seat opens no server stream. Both kinds carry the workspace: the GET
+   agent stream receives task events through [Sse.broadcast], and a listen
+   stream carries resources/updated for workspace resources. *)
+let profile_opens_server_stream = function
+  | Full | Managed_agent | Operator_remote -> true
+  | Seat -> false
+
+(* A listen body on an endpoint without a stream is not intercepted: it goes to
+   the dispatcher like any other method, and the seat's dispatcher refuses it. *)
+let serves_subscriptions_listen ~profile body_str =
+  profile_opens_server_stream profile && body_is_subscriptions_listen body_str
+
 let body_jsonrpc_params body_str =
   match Yojson.Safe.from_string body_str with
   | `Assoc fields -> List.assoc_opt "params" fields
@@ -305,6 +318,8 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
         deps.verify_mcp_auth ~base_path request
     | Operator_remote ->
         deps.verify_operator_mcp_auth ~base_path request
+    | Seat ->
+        deps.verify_seat_mcp_auth ~base_path request
   in
   let auth_ms =
     Int64.to_float (Int64.sub (Mtime_clock.elapsed_ns ()) auth_started) /. 1e6
@@ -468,7 +483,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                               should_stream_post_tools_call request body_str
                                 accept_mode
                             in
-                            if body_is_subscriptions_listen body_str then
+                            if serves_subscriptions_listen ~profile body_str then
                               serve_subscriptions_listen ~deps ~origin
                                 ~session_id
                                 ~protocol_version:response_protocol_version ~sw
@@ -659,6 +674,14 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
              deps.verify_mcp_auth ~base_path request)
     | Operator_remote ->
         deps.verify_operator_mcp_auth ~base_path request
+    (* No route reaches this arm: /mcp/play registers no GET, since
+       [profile_opens_server_stream Seat] is false. *)
+    | Seat ->
+        Error
+          { Server_mcp_transport_http_types.message =
+              "the seat endpoint offers no server stream"
+          ; auth_error_code = None
+          }
   in
   let last_event_id = Server_mcp_transport_http_headers.get_last_event_id request in
   match validate_mcp_session_profile ~profile session_id with
@@ -905,6 +928,8 @@ let handle_delete_mcp ~deps ?(profile = Full) request reqd =
         deps.verify_mcp_auth ~base_path request
     | Operator_remote ->
         deps.verify_operator_mcp_auth ~base_path request
+    | Seat ->
+        deps.verify_seat_mcp_auth ~base_path request
   in
   match auth_result with
   | Error failure ->

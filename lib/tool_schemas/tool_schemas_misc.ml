@@ -100,6 +100,7 @@ let lane_addon_schemas : tool_schema list =
 
 let schemas : tool_schema list =
   lane_addon_schemas @ msx_schemas @ dos_schemas
+  @ [ Tool_schemas_misc_toml.portrait_read ]
   @ Tool_schemas_operator_surface.schemas
 
 type mcp_runtime_operation =
@@ -190,6 +191,7 @@ type misc_operation =
   | Misc_msx_step_until_change
   | Misc_msx_peek
   | Misc_msx_ram_diff
+  | Misc_portrait_read
   | Misc_dos_load
   | Misc_dos_eject
   | Misc_dos_screen
@@ -245,6 +247,7 @@ let misc_tool_name = function
   | Misc_msx_step_until_change -> "masc_msx_step_until_change"
   | Misc_msx_peek -> "masc_msx_peek"
   | Misc_msx_ram_diff -> "masc_msx_ram_diff"
+  | Misc_portrait_read -> "keeper_portrait_read"
   | Misc_dos_load -> "masc_dos_load"
   | Misc_dos_eject -> "masc_dos_eject"
   | Misc_dos_screen -> "masc_dos_screen"
@@ -298,6 +301,7 @@ let misc_registered_schema operation : tool_schema option =
   | Misc_msx_step_until_change
   | Misc_msx_peek
   | Misc_msx_ram_diff
+  | Misc_portrait_read
   | Misc_dos_load
   | Misc_dos_eject
   | Misc_dos_screen

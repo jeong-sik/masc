@@ -3273,7 +3273,7 @@ beanie = 0
   assert_surfaces "starting" (fun reading -> reading = Portrait.Ready starting);
   ignore (ok Candle_shop.error_to_string
     (Candle_shop.purchase ~now:(fun () -> 1790640000.) ~base_path ~keeper:owner ~item));
-  (match Keeper_candle_tools.handle ~operation:Keeper_candle_tools.Equip
+  (match Lib.Keeper_candle_tools.handle ~operation:Lib.Keeper_candle_tools.Equip
       ~base_path ~keeper_name:keeper ~tool_name:"keeper_candle_equip"
       ~start_time:(Tool_timing.start ())
       ~args:(`Assoc ["slot", `String "head"; "item", `String item_id]) with

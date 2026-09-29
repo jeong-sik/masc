@@ -483,30 +483,39 @@ let decode_named_keeper_event ~event fields make =
   let* at = required float_field fields "ts_unix" ~event in
   Ok (make ~keeper ~at)
 
-let event_of_json (json : Yojson.Safe.t) =
-  match json with
-  | `Assoc fields -> (
-      match string_field fields "type" with
-      | None -> Error "event carries no type"
-      | Some type_name when String.starts_with ~prefix:agent_core_prefix type_name
-        -> (
+(* What an event's type name says before its other members are read. Most
+   events are read from their fields; a whole-projection push, the run
+   registry's change and a type this decoder does not know carry nothing the
+   screen keeps beyond what the name already says. *)
+type reading =
+  | From_fields of ((string * Yojson.Safe.t) list -> (event, string) result)
+  | Named of event
+
+let reading_of_type type_name =
+  match type_name with
+  | type_name when String.starts_with ~prefix:agent_core_prefix type_name ->
+      From_fields
+        (fun fields ->
           match
             Option.bind (string_field fields "event_type") lane_resource_lifecycle
           with
           | Some lifecycle -> decode_lane_resource ~type_name ~lifecycle fields
           | None -> decode_agent_core ~type_name fields)
-      | Some "keeper_heartbeat" -> decode_keeper_heartbeat fields
-      | Some "keeper_tool_call" -> decode_keeper_tool_call fields
-      | Some "keeper_turn_complete" -> decode_keeper_turn_complete fields
-      | Some "keeper_turn_observation" -> decode_keeper_turn_observation fields
-      | Some ("keeper_composite_changed" as event) ->
+  | "keeper_heartbeat" -> From_fields decode_keeper_heartbeat
+  | "keeper_tool_call" -> From_fields decode_keeper_tool_call
+  | "keeper_turn_complete" -> From_fields decode_keeper_turn_complete
+  | "keeper_turn_observation" -> From_fields decode_keeper_turn_observation
+  | "keeper_composite_changed" as event ->
+      From_fields
+        (fun fields ->
           decode_named_keeper_event ~event fields (fun ~keeper ~at ->
-              Keeper_composite_changed { keeper; at })
-      | Some "keeper_chat_operation_event" ->
-          decode_keeper_chat_operation_event fields
-      | Some "keeper_waiting_inventory_changed" ->
-          decode_keeper_waiting_inventory_changed fields
-      | Some "fusion_run_status" -> (
+              Keeper_composite_changed { keeper; at }))
+  | "keeper_chat_operation_event" -> From_fields decode_keeper_chat_operation_event
+  | "keeper_waiting_inventory_changed" ->
+      From_fields decode_keeper_waiting_inventory_changed
+  | "fusion_run_status" ->
+      From_fields
+        (fun fields ->
           (* The frame carries no [ts_unix]; reception time is the timestamp
              the Acting row wants. The run object is the same shape the HTTP
              list serves, but only its identity strings are read -- the Fusion
@@ -527,32 +536,41 @@ let event_of_json (json : Yojson.Safe.t) =
               | Error detail, _, _ | _, Error detail, _ | _, _, Error detail ->
                   Error detail)
           | None -> Error "fusion_run_status carries no run object")
-      | Some type_name
-        when String.equal type_name Masc.Internal_agent_runs_event.event_type ->
-          Ok Internal_agent_runs_changed
-      | Some ("keeper_chat_appended" as event) ->
+  | type_name when String.equal type_name Masc.Internal_agent_runs_event.event_type ->
+      Named Internal_agent_runs_changed
+  | "keeper_chat_appended" as event ->
+      From_fields
+        (fun fields ->
           decode_named_keeper_event ~event fields (fun ~keeper ~at ->
               Keeper_chat_appended
-                { keeper; connector = string_field fields "connector"; at })
-      | Some other -> (
-          (* Which event types are whole-projection pushes is the wire's
-             business, not this decoder's. Three were named here and the
-             server routes five: the two that were missing --
-             [operator_digest] and [transport_health_snapshot] -- arrived as
-             untaught types, and an untaught type counts as an action, so the
-             Acting filter that exists to show what a keeper did filled with
-             server pushes instead. Both were on screen when this was found.
+                { keeper; connector = string_field fields "connector"; at }))
+  | other -> (
+      (* Which event types are whole-projection pushes is the wire's
+         business, not this decoder's. Three were named here and the
+         server routes five: the two that were missing --
+         [operator_digest] and [transport_health_snapshot] -- arrived as
+         untaught types, and an untaught type counts as an action, so the
+         Acting filter that exists to show what a keeper did filled with
+         server pushes instead. Both were on screen when this was found.
 
-             [Dashboard_event_slices] is that table, read here and by the
-             server that routes with it. The table says which types replace a
-             projection outright, so a delta is not mistaken for one -- and
-             the keeper events, including the one delta with a slice, are
-             matched above and never reach here anyway. *)
-          match
-            Masc.Dashboard_event_slices.carries_whole_projection other
-          with
-          | true -> Ok (Snapshot other)
-          | false -> Ok (Other other)))
+         [Dashboard_event_slices] is that table, read here and by the
+         server that routes with it. The table says which types replace a
+         projection outright, so a delta is not mistaken for one -- and
+         the keeper events, including the one delta with a slice, are
+         matched above and never reach here anyway. *)
+      match Masc.Dashboard_event_slices.carries_whole_projection other with
+      | true -> Named (Snapshot other)
+      | false -> Named (Other other))
+
+let event_of_json (json : Yojson.Safe.t) =
+  match json with
+  | `Assoc fields -> (
+      match string_field fields "type" with
+      | None -> Error "event carries no type"
+      | Some type_name -> (
+          match reading_of_type type_name with
+          | From_fields decode -> decode fields
+          | Named event -> Ok event))
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
       Error "event is not a JSON object"
 
@@ -566,14 +584,42 @@ type t = {
 let create () =
   { lines = Masc_tui_sse_lines.create (); frame_cursor = Ok None; frame_data = []; frame_error = None }
 
+(* The event's first member when it is its "type", read without lexing the
+   members after it. The server writes the type first. *)
+let leading_type payload =
+  let state = Yojson.init_lexer () in
+  let lexbuf = Lexing.from_string payload in
+  match
+    Yojson.Safe.read_space state lexbuf;
+    Yojson.Safe.read_lcurl state lexbuf;
+    Yojson.Safe.read_space state lexbuf;
+    Yojson.Safe.read_object_end lexbuf;
+    let member = Yojson.Safe.read_ident state lexbuf in
+    Yojson.Safe.read_space state lexbuf;
+    Yojson.Safe.read_colon state lexbuf;
+    Yojson.Safe.read_space state lexbuf;
+    (member, Yojson.Safe.read_string state lexbuf)
+  with
+  | "type", type_name -> Some type_name
+  | _, _ -> None
+  | exception (Yojson.Json_error _ | Yojson.End_of_object) -> None
+
+(* An event its type name decides is not read past the name: a
+   whole-projection push can carry megabytes after its type, and parsing
+   it held the screen's only domain for about 10ms to keep the name alone.
+   Such a frame is taken as the name says without the rest being checked.
+   Every other event is parsed whole. *)
 let decode_payload payload =
-  match Yojson.Safe.from_string payload with
-  | json -> (
-      match event_of_json json with
-      | Ok event -> Event event
-      | Error detail -> Undecodable detail)
-  | exception Yojson.Json_error detail ->
-      Undecodable ("invalid JSON: " ^ detail)
+  match Option.map reading_of_type (leading_type payload) with
+  | Some (Named event) -> Event event
+  | Some (From_fields _) | None -> (
+      match Yojson.Safe.from_string payload with
+      | json -> (
+          match event_of_json json with
+          | Ok event -> Event event
+          | Error detail -> Undecodable detail)
+      | exception Yojson.Json_error detail ->
+          Undecodable ("invalid JSON: " ^ detail))
 
 let finish_frame t =
   let decoded =

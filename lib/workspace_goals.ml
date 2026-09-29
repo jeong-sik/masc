@@ -654,47 +654,30 @@ let notify_goal_refuted config ~(goal : Goal_store.goal)
   | Goal_store.Owner owner -> deliver_refuted_notice config ~goal ~owner verdict
 ;;
 
-(* [due_date] is a calendar date with no zone, so it is compared with the
-   operator's own calendar date — the day [localtime] puts [now] on — matching
-   the Overview's own overdue rule. Anything that is not a calendar date is not
-   overdue. *)
-let goal_due_date_passed ~today (goal : Goal_store.goal) =
-  match goal.Goal_store.due_date with
-  | None -> false
-  | Some raw ->
-    (match
-       Scanf.sscanf_opt (String.trim raw) "%4d-%2d-%2d%!" (fun y m d -> (y, m, d))
-     with
-     | None -> false
-     | Some date ->
-       (match Ptime.of_date date with
-        | None -> false
-        | Some due -> Ptime.compare due today < 0))
-;;
-
-let local_today () =
-  let tm = Unix.localtime (Time_compat.now ()) in
-  Ptime.of_date (tm.Unix.tm_year + 1900, tm.Unix.tm_mon + 1, tm.Unix.tm_mday)
-;;
-
 (* The overdue notice is judged by the server's periodic/restart scan, never as
    a side effect of a list query: a read must not send. The scan is idempotent
    — the marker skips an already-notified Goal, and the delivery key makes a
-   re-send a no-op — so it is safe to run on every maintenance tick. *)
-let scan_overdue_goal_notifications config =
-  match Goal_store.list_goals_result config () with
-  | Error _ -> ()
-  | Ok goals ->
-    (match local_today () with
-     | None -> ()
-     | Some today ->
+   re-send a no-op — so it is safe to run on every maintenance tick.
+
+   A Goal is overdue once [now] is past its due date in UTC ({!Goal_due}); the
+   operator's time zone plays no part. A value that is not a due date is not
+   overdue. [now] is the wall clock unless a caller passes one. *)
+let scan_overdue_goal_notifications ?now config =
+  let now =
+    match now with
+    | Some now -> Some now
+    | None -> Ptime.of_float_s (Time_compat.now ())
+  in
+  match Goal_store.list_goals_result config (), now with
+  | Error _, _ | Ok _, None -> ()
+  | Ok goals, Some now ->
     List.iter
       (fun (goal : Goal_store.goal) ->
          match goal.Goal_store.owner, goal.Goal_store.phase with
          | Goal_store.Unknown_owner, _ -> ()
          | Goal_store.Owner owner, (Goal_phase.Executing | Goal_phase.Verifying) ->
            (match goal.Goal_store.due_date with
-            | Some due_date when goal_due_date_passed ~today goal ->
+            | Some due_date when Goal_due.is_overdue ~now (Goal_due.read (Some due_date)) ->
               let event = "overdue:" ^ due_date in
               let key = goal_notice_key ~goal_id:goal.Goal_store.id ~owner ~event in
               if goal.Goal_store.notified_overdue_key = Some key
@@ -719,7 +702,7 @@ let scan_overdue_goal_notifications config =
                     detail)
             | _ -> ())
          | Goal_store.Owner _, _ -> ())
-      goals)
+      goals
 ;;
 
 (* A refuted verdict is delivered at commit time, but a failed send must not be

@@ -33,7 +33,6 @@ val wanted_rows : Masc_tui_types.overview_goals_reading -> int
 
 val lines :
   now:float ->
-  localtime:(float -> Unix.tm) ->
   inner_width:int ->
   rows:int ->
   tasks:Masc_tui_overview_tasks.rows_reading ->
@@ -41,17 +40,17 @@ val lines :
   string list
 (** At most [rows] lines, headline first. Goals past the budget are cut from
     the bottom and the headline says how many are drawn. [now] is the Unix
-    time the due-date countdown counts from; [localtime] puts it on the
-    operator's calendar, since a due date carries no zone. [tasks] is the
-    backlog the headline counts. Only rows that were read are counted; an
-    unread or unavailable backlog is said instead. *)
+    time the due-date countdown counts from. A due date falls due at 23:59:59
+    UTC of its day ({!Goal_due}), so the countdown counts UTC days whatever
+    the operator's time zone is. [tasks] is the backlog the headline counts.
+    Only rows that were read are counted; an unread or unavailable backlog is
+    said instead. *)
 
 val draw :
   Buffer.t ->
   cols:int ->
   rows:int ->
   now:float ->
-  localtime:(float -> Unix.tm) ->
   tasks:Masc_tui_overview_tasks.rows_reading ->
   Masc_tui_types.overview_goals_reading ->
   unit

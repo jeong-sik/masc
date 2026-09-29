@@ -543,7 +543,13 @@ let test_wkbl_snapshot_and_post_tool_use_agree () =
       "manifest_path",`String (manifest root);
       "run_id",`String "wkbl-comparison";
       "binding",`Assoc ["sources",sources]] |> text "instance_id" in
-    await clock (fun () -> member "observation_seq" (instance config id) = `Int 1);
+    await clock (fun () ->
+      let current = instance config id in
+      member "observation_seq" current = `Int 1
+      || text "kind" (member "phase" current) = "failed");
+    let current = instance config id in
+    if member "observation_seq" current <> `Int 1 then
+      failf "WKBL observation did not commit: %s" (Yojson.Safe.to_string current);
     let lane_row = inspect config |> list "rows" |> List.find (fun row ->
       text "lane_id" row = id ^ "/wkbl/score-runs") in
     check string "same run answer after both trigger paths"
@@ -558,7 +564,10 @@ let test_wkbl_snapshot_and_post_tool_use_agree () =
         sha256=Some (text "sha256" reference)}));
     check string "both paths identify the same source cursor"
       (text "cursor" source)
-      (member "fields" lane_row |> text "source_cursor"))
+      (member "fields" lane_row |> text "source_cursor");
+    ignore (dispatch config Runtime.Detach ["instance_id",`String id]);
+    await clock (fun () ->
+      text "kind" (member "phase" (instance config id)) = "detached"))
 
 let () = run "TOML cross-Lane composition" ["world inputs",[
   test_case "WKBL snapshot and PostToolUse agree on one supplied period" `Quick

@@ -216,7 +216,7 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
         )
         self.assertEqual(
             page.wait_for_function.call_args_list[1].kwargs["arg"],
-            "MASC Overview",
+            "MASC Dashboard",
         )
         self.assertEqual(
             page.wait_for_function.call_args_list[1].kwargs["timeout"], 3000
@@ -390,22 +390,20 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
             )
         )
 
-    def test_tools_navigation_walks_to_config_and_hops(self):
-        # Tools is off the Tab ring: the walk stops at Config and presses
+    def test_tools_navigation_walks_to_system_and_hops(self):
+        # Tools is off the Tab ring: the walk stops at System and presses
         # [t], and arrival is the Tools screen text, not a strip token.
         class Page:
             def wait_for_timeout(self, _milliseconds):
                 pass
 
-        screens = iter(
-            [
-                "▸Overview Activity Config\n  MASC Overview",
-                "▸Overview Activity Config\n  MASC Overview",
-                "Overview ▸Activity Config\n  MASC Activity",
-                "Overview ▸Activity Config\n  MASC Activity",
-                "Overview Activity ▸Config\n  MASC Config",
-            ]
-        )
+        ring = ("Dashboard", "Work", "Keepers", "Usage", "Board", "Workspace", "System")
+        def frame(selected):
+            return " ".join(("▸" if item == selected else "") + item for item in ring)
+        frames = [frame(ring[0])]
+        for previous, next_surface in zip(ring, ring[1:]):
+            frames.extend((frame(previous), frame(next_surface)))
+        screens = iter(frames)
         with (
             mock.patch.object(capture, "screen_text", side_effect=screens),
             mock.patch.object(capture, "press") as press,
@@ -414,7 +412,7 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
             capture.goto_tools(Page(), 1.0)
 
         self.assertEqual(
-            [call.args[1] for call in press.call_args_list], ["Tab", "Tab", "t"]
+            [call.args[1] for call in press.call_args_list], ["Tab"] * 6 + ["t"]
         )
         wait_screen.assert_called_once()
 
@@ -425,9 +423,9 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
 
         screens = iter(
             [
-                "▸Overview Activity Board",
-                "Overview ▸Activity Board",
-                "▸Overview Activity Board",
+                "▸Dashboard Work Board",
+                "Dashboard ▸Work Board",
+                "▸Dashboard Work Board",
             ]
         )
         with (
@@ -444,9 +442,9 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
 
         screens = iter(
             [
-                "MASC Config / Tools  ▸surface | async | activations | usage | catalog",
-                "MASC Config / Tools   surface |▸async | activations | usage | catalog",
-                "MASC Config / Tools   surface | async |▸activations | usage | catalog",
+                "MASC System / Tools  ▸surface | async | activations | usage | catalog",
+                "MASC System / Tools   surface |▸async | activations | usage | catalog",
+                "MASC System / Tools   surface | async |▸activations | usage | catalog",
             ]
         )
         with (
@@ -465,9 +463,9 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
 
         screens = iter(
             [
-                "MASC Config / Tools  ▸surface | async | activations | usage | catalog",
-                "MASC Config / Tools   surface |▸async | activations | usage | catalog",
-                "MASC Config / Tools  ▸surface | async | activations | usage | catalog",
+                "MASC System / Tools  ▸surface | async | activations | usage | catalog",
+                "MASC System / Tools   surface |▸async | activations | usage | catalog",
+                "MASC System / Tools  ▸surface | async | activations | usage | catalog",
             ]
         )
         with (
@@ -480,7 +478,7 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
     def test_tools_pane_parser_keeps_an_unfamiliar_observed_pane(self):
         self.assertEqual(
             capture.selected_tools_pane_from_screen(
-                "MASC Config / Tools   surface |▸future | activations"
+                "MASC System / Tools   surface |▸future | activations"
             ),
             "future",
         )
@@ -525,13 +523,13 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
 
         top = "\n".join(
             [
-                "MASC Config / Tools 14:10:47 [connected]",
+                "MASC System / Tools 14:10:47 [connected]",
                 "Skill Use — keeper-one (8 receipts)",
                 "session=trace-one  ledger=abcdef0123456789",
                 "invoked=8 actions=8 invalid=0",
             ]
         )
-        middle = "MASC Config / Tools 14:10:47 [connected]\nolder receipts"
+        middle = "MASC System / Tools 14:10:47 [connected]\nolder receipts"
         activation = {
             "identity": {
                 "source_id": "source",
@@ -574,7 +572,7 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
         )
         receipt = "\n".join(
             [
-                "MASC Config / Tools 14:10:47 [connected]",
+                "MASC System / Tools 14:10:47 [connected]",
                 f"receipt_sha256={receipt_sha256}",
             ]
         )
@@ -616,13 +614,13 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
         )
         receipt = "\n".join(
             [
-                "MASC Config / Tools 14:10:47 [connected]",
+                "MASC System / Tools 14:10:47 [connected]",
                 f"receipt_sha256={receipt_sha256}",
             ]
         )
         top = "\n".join(
             [
-                "MASC Config / Tools 14:10:48 [connected]",
+                "MASC System / Tools 14:10:48 [connected]",
                 "Skill Use — keeper-one (8 receipts)",
                 f"session=trace-one  ledger={revision}",
             ]
@@ -662,10 +660,10 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
 
     def test_tools_surface_connection_rejects_disconnected(self):
         self.assertTrue(
-            capture.tools_surface_is_connected("MASC Config / Tools 14:10:47 [connected]")
+            capture.tools_surface_is_connected("MASC System / Tools 14:10:47 [connected]")
         )
         self.assertFalse(
-            capture.tools_surface_is_connected("MASC Config / Tools 14:10:48 [disconnected]")
+            capture.tools_surface_is_connected("MASC System / Tools 14:10:48 [disconnected]")
         )
 
     def test_tools_surface_waits_through_reconnecting(self):
@@ -675,8 +673,8 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
 
         screens = iter(
             [
-                "MASC Config / Tools 14:10:47 [reconnecting]",
-                "MASC Config / Tools 14:10:48 [connected]",
+                "MASC System / Tools 14:10:47 [reconnecting]",
+                "MASC System / Tools 14:10:48 [connected]",
             ]
         )
         with mock.patch.object(capture, "screen_text", side_effect=screens):

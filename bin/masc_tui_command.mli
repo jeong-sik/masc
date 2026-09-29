@@ -23,12 +23,15 @@ type t =
     }
   | Task_missing_title  (** [/task] with nothing after it on the line. *)
   | Help  (** [/help] — draw the command list into the pane. *)
+  | Show_load_errors
+      (** [/errors] — put current chat loading failures in the scrollable local log. *)
   | About
       (** [/about] or [/splash] — the turning MASC imp over the surface, with
           the theme and the keeper count. *)
   | Lane_addons of string
   | Play_invites
   | Play_link
+  | Play_qr
   | Play_invite of { name : string; hours : int }
   | Play_revoke of string
   | Play_invalid of string

@@ -121,13 +121,18 @@ val confirm_completion : Workspace_utils_backend_setup.config -> goal_id:string 
     required; a binding that does not name it is [Rejected], and a store
     this build cannot read is [Store_unavailable] with its own value. *)
 
-val scan_overdue_goal_notifications : Workspace_utils_backend_setup.config -> unit
+val scan_overdue_goal_notifications :
+  ?now:Ptime.t -> Workspace_utils_backend_setup.config -> unit
 (** Send the one owner notice owed to each Goal past its [due_date] while still
     executing or verifying (#39571). Judged by the server's periodic/restart
     scan, never as a side effect of a list query. Idempotent: an already
     notified Goal is skipped by its marker, and a re-send reuses the delivery
     key, so the owner's transcript gains exactly one row per event. A Goal with
-    no recorded owner has no recipient and is skipped. *)
+    no recorded owner has no recipient and is skipped.
+
+    A Goal is past its due date once [now] is later than 23:59:59 UTC of that
+    day ({!Goal_due}). The operator's time zone plays no part, and a value that
+    is not a due date is never past. [now] is the wall clock unless given. *)
 
 val scan_refuted_goal_notifications : Workspace_utils_backend_setup.config -> unit
 (** Reconcile the one owner notice owed for each Goal whose current ledger

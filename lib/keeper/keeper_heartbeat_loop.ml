@@ -548,6 +548,47 @@ let handle_cycle_exception ~registry_entry ~(meta : keeper_meta) exn =
 
 
 
+type turn_terminal_settlement =
+  { settled : bool
+  ; queue_failure : string option
+  }
+
+(* How one admitted entry's turn-end terminal leaves the batch. A withdrawn
+   entry is no longer pending under its identity and this attempt has no
+   receipt: something removed it while the turn ran (a schedule cancel or
+   supersede, a transfer, another terminal, or a removal that writes no
+   receipt). Nothing is left for this turn to settle, nothing re-delivers it
+   because it is not pending, and it is not a queue failure. *)
+let turn_terminal_settlement ~label = function
+  | Error message -> { settled = false; queue_failure = Some message }
+  | Ok Keeper_registry_event_queue.Turn_selection_withdrawn ->
+    { settled = true; queue_failure = None }
+  | Ok
+      (Keeper_registry_event_queue.Turn_source_acked
+         ( Keeper_registry_event_queue.Acked _
+         | Keeper_registry_event_queue.Already_acked _ )) ->
+    { settled = true; queue_failure = None }
+  | Ok
+      (Keeper_registry_event_queue.Turn_source_acked
+         (Keeper_registry_event_queue.Ack_committed_followup_failed
+            { stage; detail; _ })) ->
+    let stage =
+      match stage with
+      | `Checkpoint -> "checkpoint"
+      | `Wal_compaction -> "wal_compaction"
+      | `Projection -> "projection"
+    in
+    { settled = true
+    ; queue_failure =
+        Some
+          (Printf.sprintf
+             "%s receipt committed but %s follow-up failed: %s"
+             label
+             stage
+             detail)
+    }
+;;
+
 (* The queue records attention that a Keeper must observe, not provider health.
    A source normally leaves only after a completed turn has observed the
    admitted batch. Every typed checkpoint is the other case: attention-only
@@ -913,14 +954,33 @@ let run_keepalive_unified_turn
         | Ok (Some current) when current.paused ->
           Error "keeper paused before dispatch"
         | Ok (Some _) ->
-          Keeper_heartbeat_source_batch.validate
-            ~diagnostic:!diagnostic_selection
-            ~validate_selection:(fun selection ->
-              Keeper_registry_event_queue.validate_pending_selection_result
-                ~base_path:ctx.config.base_path
-                meta_after_triage.name
-                ~selection)
-            !source_batch
+          (match
+             Keeper_heartbeat_source_batch.validate
+               ~diagnostic:!diagnostic_selection
+               ~standing:(fun selection ->
+                 Keeper_registry_event_queue.admitted_selection_standing_result
+                   ~base_path:ctx.config.base_path
+                   meta_after_triage.name
+                   ~selection)
+               !source_batch
+           with
+           | Error _ as error -> error
+           | Ok (admitted, withdrawn) ->
+             (* These entries stopped being pending after intake: a schedule
+                cancel or supersede, a transfer, another terminal, or a removal
+                that writes no receipt. The turn still runs on the prompt it
+                was given; they only leave the batch it settles at turn end,
+                so the rest of the batch is not failed with them. *)
+             List.iter
+               (fun (selection : Keeper_event_queue_state.pending_selection) ->
+                  Log.Keeper.info
+                    ~keeper_name:meta_after_triage.name
+                    "provider dispatch found a source withdrawn after intake post_id=%s kind=%s"
+                    selection.source.post_id
+                    (Keeper_event_queue.payload_kind_label selection.source.payload))
+               withdrawn;
+             source_batch := admitted;
+             Ok ())
       in
       (match
          Keeper_turn_dispatch_authority.install
@@ -1084,10 +1144,14 @@ let run_keepalive_unified_turn
              admitted. The four prior inline pressure gates here were removed: they
              ran AFTER intake had already consumed the stimulus, forcing a
              consume/requeue churn loop, and logged only at DEBUG (a silent skip). *)
+          (* Captured before dispatch: a source withdrawn after intake leaves
+             [source_batch] there, and its turn-entry reaction still gets its
+             closing half below. *)
+          let turn_stimuli = Keeper_heartbeat_source_batch.stimuli !source_batch in
           record_replay_owned_turn_started_reactions
             ~ctx
             ~keeper_name:meta_after_triage.name
-            (Keeper_heartbeat_source_batch.stimuli !source_batch);
+            turn_stimuli;
           let event_bus = Event_bus_slots.get_keeper () in
           (* Preserve the typed resolution as input to the originating
              Keeper's external-effect Gate. It is not an AGENT_CORE approval. *)
@@ -1165,37 +1229,28 @@ let run_keepalive_unified_turn
             ~ctx
             ~keeper_name:meta_after_triage.name
             ~disposition:(Cycle.disposition_token cycle_outcome)
-            (Keeper_heartbeat_source_batch.stimuli !source_batch);
+            turn_stimuli;
           Cycle.meta cycle_outcome)
         else meta_after_triage
       in
-      let record_terminal_selection_result ~label = function
-        | Error message ->
-          record_event_queue_failure message;
-          false
-        | Ok
-            ( Keeper_registry_event_queue.Acked _
-            | Keeper_registry_event_queue.Already_acked _ ) ->
-          selection_acked := true;
-          true
-        | Ok
-            (Keeper_registry_event_queue.Ack_committed_followup_failed
-               { stage; detail = followup_detail; _ }) ->
-          selection_acked := true;
-          let stage =
-            match stage with
-            | `Checkpoint -> "checkpoint"
-            | `Wal_compaction -> "wal_compaction"
-            | `Projection -> "projection"
-          in
-          record_event_queue_failure
-            (Printf.sprintf
-               "%s receipt committed but %s follow-up \
-                failed: %s"
-               label
-               stage
-               followup_detail);
-          true
+      let record_terminal_selection_result
+            ~label
+            ~(selection : Keeper_event_queue_state.pending_selection)
+            result
+        =
+        (match result with
+         | Ok Keeper_registry_event_queue.Turn_selection_withdrawn ->
+           Log.Keeper.info
+             ~keeper_name:meta_after_triage.name
+             "%s found its admitted source withdrawn from the queue post_id=%s kind=%s"
+             label
+             selection.source.post_id
+             (Keeper_event_queue.payload_kind_label selection.source.payload)
+         | Ok (Keeper_registry_event_queue.Turn_source_acked _) | Error _ -> ());
+        let settlement = turn_terminal_settlement ~label result in
+        Option.iter record_event_queue_failure settlement.queue_failure;
+        if settlement.settled then selection_acked := true;
+        settlement.settled
       in
       let terminalize_completed_selection ~selection =
         Keeper_registry_event_queue.terminalize_pending_turn_completed_result
@@ -1203,7 +1258,7 @@ let run_keepalive_unified_turn
           meta_after_triage.name
           ~applied_at:(Time_compat.now ())
           ~selection
-        |> record_terminal_selection_result ~label:"turn completion"
+        |> record_terminal_selection_result ~label:"turn completion" ~selection
       in
       let disposition =
         batch_disposition_of_cycle_outcome !cycle_outcome_ref

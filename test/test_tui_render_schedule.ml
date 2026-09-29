@@ -872,10 +872,11 @@ let workspace_overflowing =
    was allocated for rather than falling short of it or spilling past it. *)
 let test_workspace_path_takes_the_remainder () =
   for inner_width = 20 to 300 do
-    let path_width = Schedule.workspace_path_width ~inner_width in
+    let layout = Schedule.workspace_layout ~inner_width in
+    let path_width = layout.Masc_tui_table.flex_width in
     let drawn =
       Masc_tui_message_layout.display_width
-        (Schedule.workspace_header_row ~path_width)
+        (Schedule.workspace_header_row ~layout)
     in
     if path_width > Schedule.workspace_minimum_path_width then
       check int
@@ -890,15 +891,18 @@ let test_workspace_path_takes_the_remainder () =
 
 (* The defect that stood here: a header and a row carrying the same widths in
    two format strings. *)
+
 let test_workspace_header_and_row_share_their_offsets () =
   for inner_width = 60 to 240 do
-    let path_width = Schedule.workspace_path_width ~inner_width in
-    let header = Schedule.workspace_header_row ~path_width in
-    let row = Schedule.workspace_row ~path_width workspace_probe in
+    let layout = Schedule.workspace_layout ~inner_width in
+    let header = Schedule.workspace_header_row ~layout in
+    let row = Schedule.workspace_row ~layout workspace_probe in
     check_left_cell "NAME" "N" ~header ~row ~inner_width;
-    check_left_cell "BRANCH" "B" ~header ~row ~inner_width;
+    (if List.mem Schedule.Workspace_branch layout.Masc_tui_table.shown then
+       check_left_cell "BRANCH" "B" ~header ~row ~inner_width);
     check_left_cell "STATUS" "S" ~header ~row ~inner_width;
-    check_left_cell "SYNC" "Y" ~header ~row ~inner_width;
+    (if List.mem Schedule.Workspace_sync layout.Masc_tui_table.shown then
+       check_left_cell "SYNC" "Y" ~header ~row ~inner_width);
     check_left_cell "PATH" "P" ~header ~row ~inner_width
   done
 
@@ -906,17 +910,17 @@ let test_workspace_header_and_row_share_their_offsets () =
    longer than the frame: none of it may move a column. *)
 let test_workspace_row_width_does_not_depend_on_its_readings () =
   for inner_width = 60 to 240 do
-    let path_width = Schedule.workspace_path_width ~inner_width in
+    let layout = Schedule.workspace_layout ~inner_width in
     let width text = Masc_tui_message_layout.display_width text in
-    let header = width (Schedule.workspace_header_row ~path_width) in
+    let header = width (Schedule.workspace_header_row ~layout) in
     check int
       (Printf.sprintf "inner %d: a short row" inner_width)
       header
-      (width (Schedule.workspace_row ~path_width workspace_probe));
+      (width (Schedule.workspace_row ~layout workspace_probe));
     check int
       (Printf.sprintf "inner %d: an overflowing row" inner_width)
       header
-      (width (Schedule.workspace_row ~path_width workspace_overflowing))
+      (width (Schedule.workspace_row ~layout workspace_overflowing))
   done
 
 (* System log columns.
@@ -1288,15 +1292,15 @@ let test_schedule_columns_hold_their_offsets () =
    column. *)
 let test_system_log_colour_costs_no_cells () =
   for inner_width = 60 to 240 do
-    let message_width = Schedule.system_log_message_width ~inner_width in
+    let layout = Schedule.system_log_layout ~inner_width in
     let width text = Masc_tui_message_layout.display_width text in
-    let header = width (Schedule.system_log_header_row ~message_width) in
+    let header = width (Schedule.system_log_header_row ~layout) in
     let plain =
-      Schedule.system_log_row ~message_width ~level_style:""
+      Schedule.system_log_row ~layout ~level_style:""
         ~styles:Schedule.system_log_plain_styles system_log_probe
     in
     let dressed =
-      Schedule.system_log_row ~message_width ~level_style:"\027[33m"
+      Schedule.system_log_row ~layout ~level_style:"\027[33m"
         ~styles:system_log_dressed system_log_probe
     in
     check int
@@ -1309,7 +1313,7 @@ let test_system_log_colour_costs_no_cells () =
       (Printf.sprintf "inner %d: an overflowing dressed row" inner_width)
       header
       (width
-         (Schedule.system_log_row ~message_width ~level_style:"\027[31m"
+         (Schedule.system_log_row ~layout ~level_style:"\027[31m"
             ~styles:system_log_dressed system_log_overflowing))
   done
 
@@ -1317,10 +1321,11 @@ let test_system_log_colour_costs_no_cells () =
    says nothing worth the row it costs. *)
 let test_system_log_message_takes_the_remainder () =
   for inner_width = 20 to 300 do
-    let message_width = Schedule.system_log_message_width ~inner_width in
+    let layout = Schedule.system_log_layout ~inner_width in
+    let message_width = layout.Masc_tui_table.flex_width in
     let drawn =
       Masc_tui_message_layout.display_width
-        (Schedule.system_log_header_row ~message_width)
+        (Schedule.system_log_header_row ~layout)
     in
     if message_width > Schedule.system_log_minimum_message_width then
       check int
@@ -1336,19 +1341,49 @@ let test_system_log_message_takes_the_remainder () =
 (* The offsets the two format strings could disagree about. *)
 let test_system_log_header_and_row_share_their_offsets () =
   for inner_width = 60 to 240 do
-    let message_width = Schedule.system_log_message_width ~inner_width in
-    let header = Schedule.system_log_header_row ~message_width in
+    let layout = Schedule.system_log_layout ~inner_width in
+    let header = Schedule.system_log_header_row ~layout in
     let row =
-      Schedule.system_log_row ~message_width ~level_style:""
+      Schedule.system_log_row ~layout ~level_style:""
         ~styles:Schedule.system_log_plain_styles system_log_probe
     in
     check_left_cell "TIME" "T" ~header ~row ~inner_width;
     check_left_cell "LEVEL" "L" ~header ~row ~inner_width;
-    check_left_cell "MODULE" "M" ~header ~row ~inner_width;
-    check_left_cell "KEEPER" "K" ~header ~row ~inner_width;
-    check_left_cell "CATEGORY" "C" ~header ~row ~inner_width;
+    (if List.mem Schedule.Log_module layout.Masc_tui_table.shown then
+       check_left_cell "MODULE" "M" ~header ~row ~inner_width);
+    (if List.mem Schedule.Log_keeper layout.Masc_tui_table.shown then
+       check_left_cell "KEEPER" "K" ~header ~row ~inner_width);
+    (if List.mem Schedule.Log_category layout.Masc_tui_table.shown then
+       check_left_cell "CATEGORY" "C" ~header ~row ~inner_width);
     check_left_cell "MESSAGE" "G" ~header ~row ~inner_width
   done
+
+let test_narrow_repository_and_log_tables () =
+  List.iter
+    (fun inner_width ->
+      let workspace = Schedule.workspace_layout ~inner_width in
+      let logs = Schedule.system_log_layout ~inner_width in
+      let repository = Schedule.workspace_row ~layout:workspace
+          { workspace_probe with wrow_path = "/repo/example" } in
+      let entry = Schedule.system_log_row ~layout:logs ~level_style:""
+          ~styles:Schedule.system_log_plain_styles
+          { system_log_probe with slog_message = "failure details" } in
+      let width = Masc_tui_message_layout.display_width in
+      check int "repository fits the viewport" inner_width (width repository);
+      check int "log entry fits the viewport" inner_width (width entry);
+      List.iter
+        (fun column -> check bool "repository context stays visible" true
+            (List.mem column workspace.Masc_tui_table.shown))
+        Schedule.[ Workspace_name; Workspace_status; Workspace_path ];
+      List.iter
+        (fun column -> check bool "log context stays visible" true
+            (List.mem column logs.Masc_tui_table.shown))
+        Schedule.[ Log_time; Log_level; Log_message ];
+      check bool "repository path reaches the screen" true
+        (holds "/repo" repository);
+      check bool "log message reaches the screen" true
+        (holds "failure" entry))
+    [ 40; 56; 74; 100; 160 ]
 
 (* Lane run and file change columns.
 
@@ -1543,10 +1578,10 @@ let test_headers_fit_their_columns () =
             (Schedule.allocate_memory_columns ~inner_width) )
       ; ( "workspace"
         , Schedule.workspace_header_row
-            ~path_width:(Schedule.workspace_path_width ~inner_width) )
+            ~layout:(Schedule.workspace_layout ~inner_width) )
       ; ( "system log"
         , Schedule.system_log_header_row
-            ~message_width:(Schedule.system_log_message_width ~inner_width) )
+            ~layout:(Schedule.system_log_layout ~inner_width) )
       ; ( "lane run"
         , Schedule.lane_run_header_row ~identity_header:"ACTOR"
             ~layout:(Schedule.lane_run_layout ~inner_width) )
@@ -2355,7 +2390,7 @@ let test_every_sentence_column_gives_way_at_its_tail () =
     harness_layout.Masc_tui_table.flex_width;
   let rows =
     [ ( "system log"
-      , Schedule.system_log_row ~message_width:prose_width ~level_style:""
+      , Schedule.system_log_row ~layout:(Schedule.system_log_layout ~inner_width:(prose_width + 57)) ~level_style:""
           ~styles:Schedule.system_log_plain_styles
           { system_log_probe with slog_message = sentence } )
     ; ( "verification"
@@ -2599,6 +2634,8 @@ let () =
             test_memory_columns_drop_from_the_right
         ; test_case "memory name width never shrinks" `Quick
             test_memory_name_width_never_shrinks_as_the_terminal_grows
+        ; test_case "narrow repositories and logs keep their primary text" `Quick
+            test_narrow_repository_and_log_tables
         ; test_case "workspace path takes the remainder" `Quick
             test_workspace_path_takes_the_remainder
         ; test_case "workspace header and row share their offsets" `Quick

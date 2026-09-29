@@ -73,9 +73,12 @@ type about_laid_out = {
   visible_keepers : int;
 }
 
+val about_cached_frames : unit -> int
+(** At most 16 rendered candle frames, shared between visits to [/about]. *)
+
 val about_rows :
   style:style -> cols:int -> rows:int -> caption:string list ->
-  frame:int -> elapsed:float -> keepers:string list ->
+  frame:int -> keepers:string list ->
   display:Masc_tui_portrait_view.display ->
   project:(Masc_tui_terminal_palette.rgb -> Masc_tui_terminal_palette.projected_color option) ->
   origin:int * int -> about_laid_out
@@ -84,7 +87,7 @@ val about_rows :
     appear in the +N count. The answer is still after [final_frame]. *)
 
 val about_body :
-  cols:int -> rows:int -> caption:string list -> frame:int -> elapsed:float ->
+  cols:int -> rows:int -> caption:string list -> frame:int ->
   keepers:string list -> origin:int * int -> string list
 (** {!about_rows} using the current terminal display and portrait placements. *)
 

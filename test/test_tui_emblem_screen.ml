@@ -220,8 +220,7 @@ let test_a_body_asks_for_its_picture () =
 
 let about ~cols ~frame display =
   Screen.about_rows ~style:Screen.Painted ~cols ~rows:24 ~caption
-    ~frame ~elapsed:(float_of_int frame *. 0.15)
-    ~keepers:["rondo"; "sangsu"; "indie-geek-blue"; "jazz-developer"; "extra"]
+    ~frame ~keepers:["rondo"; "sangsu"; "indie-geek-blue"; "jazz-developer"; "extra"]
     ~display ~project ~origin
 
 let test_the_arrival_gathers_then_stops () =
@@ -300,6 +299,26 @@ let test_every_arrival_frame_fits_its_terminal () =
         [pixels; View.Mosaic])
     [76; 136]
 
+let test_about_candle_frames_are_reused_with_a_bound () =
+  let mascot_image scene =
+    scene.Screen.placements
+    |> List.find (fun p ->
+         p.View.image_id = Masc_tui_graphics.image_id Masc_tui_graphics.Mascot)
+    |> fun placement -> placement.View.image
+  in
+  let first = mascot_image (about ~cols:76 ~frame:4 pixels) in
+  ignore (about ~cols:76 ~frame:7 pixels);
+  let repeated = mascot_image (about ~cols:76 ~frame:4 pixels) in
+  check bool "returning to a candle frame reuses its image" true (first == repeated);
+  List.iter
+    (fun display ->
+      List.iter
+        (fun frame -> ignore (about ~cols:76 ~frame display))
+        (List.init (Screen.final_frame + 1) Fun.id))
+    [pixels; View.Mosaic];
+  check bool "the frame cache stays at sixteen images" true
+    (Screen.about_cached_frames () <= 16)
+
 let () =
   run "tui_emblem_screen"
     [ ( "layout"
@@ -330,5 +349,7 @@ let () =
             test_no_picture_keeps_the_count
         ; test_case "every arrival frame fits the terminal" `Quick
             test_every_arrival_frame_fits_its_terminal
+        ; test_case "candle frames are reused within a bound" `Quick
+            test_about_candle_frames_are_reused_with_a_bound
         ] )
     ]

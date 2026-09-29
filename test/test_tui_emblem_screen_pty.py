@@ -8,6 +8,7 @@ import hashlib
 import json
 import zlib
 import struct
+import tempfile
 import os
 import re
 import sys
@@ -498,15 +499,42 @@ def about_arrival_frames(binary: str, columns: int, *, reduced_motion: bool) -> 
         h.send_and_wait(process, fd, output, b"\x1b", CHAT_TITLE)
         os.write(fd, b"q")
 
+    with tempfile.TemporaryDirectory(prefix="masc-about-timing-") as timing_dir:
+        timing = Path(timing_dir, "frames.txt")
+        h.run_terminal_scenario(
+            binary,
+            description=f"/about finite arrival at {columns}x32" +
+                        (" with reduced motion" if reduced_motion else ""),
+            interact=interact,
+            http_fixtures=fixtures,
+            prepare_workspace=prepare,
+            terminal_cols=columns,
+            terminal_rows=32,
+            extra_env={"MASC_TUI_FRAME_TIMING": str(timing)},
+        )
+        assert timing.is_file(), "/about frame timing report was not written at exit"
+        print(json.dumps({"phase": f"about-{columns}x32-timing",
+                          "report": timing.read_text(encoding="utf-8")},
+                         ensure_ascii=False), flush=True)
+
+
+def about_exit_stops_clock(binary: str) -> None:
+    fixtures = h.keeper_runtime_http_fixtures()
+
+    def interact(process, fd, _slave, output, _base):
+        h.send_and_wait(process, fd, output, b"i", h.COMPOSER_FOCUSED)
+        h.send_and_wait(process, fd, output, b"/about\r", ABOUT_CAPTION)
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
+        after_close = len(output)
+        assert h.drain_until_quiet(process, fd, output, quiet=0.7, cap=1.2), \
+            "the closed /about screen kept repainting"
+        assert ABOUT_CAPTION not in bytes(output[after_close:]), \
+            "a closed /about drew again during four animation ticks"
+        os.write(fd, b"q")
+
     h.run_terminal_scenario(
-        binary,
-        description=f"/about finite arrival at {columns}x32" +
-                    (" with reduced motion" if reduced_motion else ""),
-        interact=interact,
-        http_fixtures=fixtures,
-        prepare_workspace=prepare,
-        terminal_cols=columns,
-        terminal_rows=32,
+        binary, description="leaving /about stops its frame clock",
+        interact=interact, http_fixtures=fixtures,
     )
 
 
@@ -526,4 +554,5 @@ if __name__ == "__main__":
     about_arrival_frames(binary, 80, reduced_motion=False)
     about_arrival_frames(binary, 140, reduced_motion=False)
     about_arrival_frames(binary, 80, reduced_motion=True)
-    print("tui emblem screens: PASS (14 scenarios)")
+    about_exit_stops_clock(binary)
+    print("tui emblem screens: PASS (15 scenarios)")

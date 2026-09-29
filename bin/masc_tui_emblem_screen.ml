@@ -154,6 +154,24 @@ let rows ~style ~cols ~rows ~caption ~elapsed ~display ~project ~origin:(origin_
    2.1 seconds. It is a terminal state: no later frame asks for a repaint. *)
 let final_frame = 14
 
+(* Only the candle changes pose during the arrival. Keeper portraits already
+   use their 32-entry still-image cache; these sixteen entries cap the candle
+   at 16 * 512 * 512 * 4 = 16,777,216 RGBA bytes in the largest dotted mode.
+   The ordinary candle renderer still keeps only its last picture. *)
+let about_frame_capacity = 16
+let about_frame_cache : (picture_key * Draw.image) list ref = ref []
+let about_cached_frames () = List.length !about_frame_cache
+
+let render_about key =
+  match List.assoc_opt key !about_frame_cache with
+  | Some image -> image
+  | None ->
+      let image = render key in
+      about_frame_cache :=
+        (key, image) :: !about_frame_cache
+        |> List.filteri (fun index _ -> index < about_frame_capacity);
+      image
+
 type about_laid_out = {
   drawn : drawn;
   lines : string list;
@@ -180,7 +198,7 @@ let about_keeper_image_id = function
    bytes. The scene does not cache a frame for every animation tick. *)
 let about_portraits = Masc_tui_keeper_portrait.cache ()
 
-let about_rows ~style ~cols ~rows ~caption ~frame ~elapsed ~keepers
+let about_rows ~style ~cols ~rows ~caption ~frame ~keepers
     ~display ~project ~origin:(origin_row, origin_col) =
   let picture_box =
     View.fit display ~max_cols:16 ~max_rows:(min 8 (max 0 (rows - List.length caption - 2)))
@@ -222,8 +240,8 @@ let about_rows ~style ~cols ~rows ~caption ~frame ~elapsed ~keepers
           { left = centre;
             image_id = Masc_tui_graphics.image_id Masc_tui_graphics.Mascot;
             box;
-            image = render (key_of style display box
-              (if frame = final_frame then Held else moment_of elapsed));
+            image = render_about (key_of style display box
+              (if frame = final_frame then Held else At (frame * 150)));
             lines = [] }
         in
         let spread, gathered =
@@ -332,9 +350,9 @@ let body ~cols ~rows:height ~caption ~elapsed ~origin =
   Option.iter View.request laid_out.placement;
   laid_out.lines
 
-let about_body ~cols ~rows:height ~caption ~frame ~elapsed ~keepers ~origin =
+let about_body ~cols ~rows:height ~caption ~frame ~keepers ~origin =
   let laid_out =
-    about_rows ~style:!chosen_style ~cols ~rows:height ~caption ~frame ~elapsed
+    about_rows ~style:!chosen_style ~cols ~rows:height ~caption ~frame
       ~keepers ~display:(View.current_display ())
       ~project:Masc_tui_terminal_palette.best_color ~origin
   in

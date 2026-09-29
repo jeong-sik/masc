@@ -1209,14 +1209,15 @@ let respond_not_initialized request reqd =
     (not_initialized_response (Http_server_eio.Request.path request)) reqd
 
 let rec with_public_read handler request reqd =
-  let strict = http_auth_strict_enabled () in
-  let path = Http_server_eio.Request.path request in
-  if strict && not (is_public_read_path path) then
-    with_read_auth handler request reqd
-  else
-    match ready_server_state () with
-    | None -> respond_not_initialized request reqd
-    | Some state -> handler state request reqd
+  match ready_server_state () with
+  | None -> respond_not_initialized request reqd
+  | Some state ->
+      let strict = http_auth_strict_enabled () in
+      let path = Http_server_eio.Request.path request in
+      if strict && not (is_public_read_path path) then
+        with_read_auth handler request reqd
+      else
+        handler state request reqd
 
 and with_read_auth handler request reqd =
   match current_server_state () with

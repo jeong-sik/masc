@@ -1,9 +1,9 @@
 {
-  "as_of": "2026-09-29T05:35:49+00:00",
+  "as_of": "2026-09-29T05:59:36+00:00",
   "goal_events": {
     "by_type": {
       "goal_created": 14,
-      "goal_phase": 35
+      "goal_phase": 36
     },
     "dropped_by_actor": {
       "codex-mcp-client": 1,
@@ -22,41 +22,114 @@
     "by_phase": {
       "completed": 3,
       "dropped": 9,
-      "executing": 6
+      "executing": 5,
+      "verifying": 1
     },
     "due_date_is_date_only": 11,
     "first_created": "2026-09-09T05:17:28+00:00",
+    "hours_from_created_to_due": {
+      "max": 857.51,
+      "median": 134.7,
+      "min": 23.36,
+      "n": 11
+    },
     "owner_known": 0,
     "total": 18,
     "with_due_date": 11
   },
+  "payout_basis": {
+    "goals_by_phase": {
+      "completed": {
+        "total": 3,
+        "with_candidate": 1,
+        "without_candidate": 2
+      },
+      "dropped": {
+        "total": 9,
+        "with_candidate": 2,
+        "without_candidate": 7
+      },
+      "executing": {
+        "total": 5,
+        "with_candidate": 1,
+        "without_candidate": 4
+      },
+      "verifying": {
+        "total": 1,
+        "without_candidate": 1
+      }
+    },
+    "linked_done_after_goal_created": 9,
+    "linked_done_assignees_without_keeper_config": 0,
+    "linked_done_tasks": 9,
+    "linked_tasks_not_found": 0
+  },
   "tasks": {
+    "archived": 769,
     "by_status": {
-      "awaiting_verification": 3,
-      "cancelled": 189,
-      "done": 139,
-      "in_progress": 19,
-      "todo": 515
+      "awaiting_verification": 4,
+      "cancelled": 383,
+      "done": 715,
+      "in_progress": 18,
+      "todo": 514
     },
     "delegation": {
+      "analyst": {
+        "created_and_done": 17,
+        "done_by_others": 15
+      },
+      "code-reviewer": {
+        "created_and_done": 111,
+        "done_by_others": 97
+      },
       "codex-mcp-client": {
-        "created_and_done": 30,
-        "done_by_others": 29
+        "created_and_done": 104,
+        "done_by_others": 97
       },
       "e-masc-the-leader": {
+        "created_and_done": 29,
+        "done_by_others": 26
+      },
+      "goo-yang-bong": {
+        "created_and_done": 11,
+        "done_by_others": 3
+      },
+      "kidsnote": {
+        "created_and_done": 84,
+        "done_by_others": 84
+      },
+      "lane-smith": {
+        "created_and_done": 31,
+        "done_by_others": 22
+      },
+      "polisher": {
         "created_and_done": 28,
-        "done_by_others": 25
+        "done_by_others": 1
+      },
+      "rondo": {
+        "created_and_done": 136,
+        "done_by_others": 12
+      },
+      "sangsu": {
+        "created_and_done": 25,
+        "done_by_others": 14
+      },
+      "taskmaster": {
+        "created_and_done": 23,
+        "done_by_others": 23
       },
       "wkbl-web-leader": {
         "created_and_done": 54,
         "done_by_others": 18
       }
     },
-    "done_created_by_the_assignee": 54,
-    "done_created_by_the_assignee_share": 0.388,
-    "done_total": 139,
+    "done_created_by_the_assignee": 259,
+    "done_created_by_the_assignee_share": 0.362,
+    "done_total": 715,
     "goals_with_a_link": 9,
+    "linked_in_archive": 12,
     "linked_to_a_goal": 41,
-    "total": 865
+    "live": 865,
+    "total": 1634
   }
 }

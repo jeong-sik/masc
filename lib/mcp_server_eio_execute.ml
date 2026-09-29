@@ -63,7 +63,7 @@ let execute_tool_eio
     match profile with
     | Mcp_server_eio_tool_profile.Full ->
       Mcp_server_eio_caller_identity.Catalog_policy
-    | Managed_agent | Operator_remote ->
+    | Managed_agent | Operator_remote | Seat ->
       if
         Mcp_server_eio_tool_profile.tool_allowed_in_profile state
           profile
@@ -170,7 +170,9 @@ let execute_tool_eio
               ~agent_name
               ~token
               ~permission:Masc_domain.CanAdmin
-          | Full | Managed_agent ->
+          (* A seat tool asks for CanPlayMachine through the same catalog check
+             every other tool uses; the profile already refused anything else. *)
+          | Full | Managed_agent | Seat ->
             Auth.authorize_tool_v2
               config.base_path
               ~agent_name
@@ -415,13 +417,25 @@ let execute_tool_eio
                      ~name
                      ~args:coerced_args
                  | Mod_misc ->
-                   Tool_misc.dispatch
-                     { Tool_misc.config
-                     ; agent_name
-                     ; help_schemas = Config.raw_all_tool_schemas
-                     }
-                     ~name
-                     ~args:coerced_args
+                   let dispatch () =
+                     Tool_misc.dispatch
+                       { Tool_misc.config
+                       ; agent_name
+                       ; help_schemas = Config.raw_all_tool_schemas
+                       }
+                       ~name
+                       ~args:coerced_args
+                   in
+                   (* Identity, profile membership and tool authorization have
+                      passed above. Match the Keeper/HTTP move boundary here:
+                      a stopped Keeper cannot pass its controller itself. *)
+                   (match Tool_schemas_misc.misc_operation_of_tool_name name with
+                    | Some Tool_schemas_misc.(
+                        ( Misc_dos_load | Misc_dos_eject | Misc_dos_step | Misc_dos_pass
+                        | Misc_dos_press | Misc_dos_click | Misc_dos_type | Misc_dos_restore )) ->
+                      Keeper_dos_controller.before_move ~config ~who:agent_name;
+                      dispatch ()
+                    | _ -> dispatch ())
                  | Mod_library ->
                    Tool_library.dispatch
                      { Tool_library.base_path = config.base_path; agent_name }

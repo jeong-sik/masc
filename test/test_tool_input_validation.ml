@@ -929,6 +929,7 @@ let test_validate_args_masc_board_post_get_accepts_comment_cursor () =
           label
           (Yojson.Safe.to_string (Tool_result.data result)))
     [ "comment_tail", [ "comment_tail", `Int 5 ]
+    ; "comment_tail 0 (body only)", [ "comment_tail", `Int 0 ]
     ; ( "after_comment_id"
       , [ "after_comment_id", `String ("c-" ^ String.make 32 'a'); "comment_limit", `Int 10 ] )
     ];
@@ -941,7 +942,7 @@ let test_validate_args_masc_board_post_get_accepts_comment_cursor () =
           (label ^ " is refused as an argument out of range")
           true
           (Tool_result.failure_class result = Some Tool_result.Policy_rejection))
-    [ "comment_tail 0", [ "comment_tail", `Int 0 ]
+    [ "comment_tail -1", [ "comment_tail", `Int (-1) ]
     ; "comment_tail 101", [ "comment_tail", `Int 101 ]
     ]
 

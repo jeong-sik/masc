@@ -170,12 +170,13 @@ related: ["0439", "machine-spectating-goes-through-lanes"]
 
 ### 2.7 외부 에이전트
 
-- 초대 credential 로 MCP 에 붙는다. `tools/list` 에는 이 credential 이 부를 수 있는 도구만 나온다.
-- 지금 `/mcp` 는 도구를 고르기 전에 전송 계층에서 `CanReadState` 를 요구한다
-  (`Server_auth.verify_mcp_auth`, observer stream 과 H2 게이트웨이도 같다). 1단계로 다섯 도구의
-  catalog 권한은 바뀌었지만, 이 문이 닫혀 있어 `Player` 는 아직 MCP 로 닿지 못한다
-  (`test_server_auth_dashboard_actor_resolution` 이 이 거절을 확인한다). 6단계는 이 문을
-  `Player` 에게 여는 방법부터 정한다. 도구마다 권한을 거는 뒷단 검사는 이미 있다.
+- 초대 credential 은 `/mcp/play` 로 MCP 에 붙는다. 이 문은 `CanPlayMachine` 을 요구한다.
+  `/mcp` 는 계속 `CanReadState` 를 요구하므로 초대 credential 로는 열리지 않는다.
+- `/mcp/play` 는 catalog 권한이 `CanPlayMachine` 인 도구만 `tools/list` 에 보여 주고, 보여 준 도구만 부를 수 있다.
+- `/mcp/play` 는 `initialize`, `server/discover`, `ping`, `tools/list`, `tools/call` 만 받는다.
+  다른 메서드는 유효한 credential 이면 누구나, 또는 credential 없이도 받는 것이라 이 문에서는 거절한다.
+- `/mcp/play` 는 서버 스트림을 열지 않는다. GET agent stream 과 `subscriptions/listen` 은
+  작업공간 전체의 이벤트를 나른다.
 - `masc_dos_screen` 은 keeper 호출에만 PNG 를 붙인다(`lib/keeper/keeper_dos_screen.ml`). 초대 credential 호출에도 프레임 이미지를
   돌려준다. 삼국지3 메뉴는 그래픽 한글이라 이미지가 없으면 읽을 수 없다.
 - 외부 에이전트는 기계 입력 이름(`["down","return"]`)을 그대로 쓴다. 패드는 사람을 위한 층이다.
@@ -261,8 +262,7 @@ related: ["0439", "machine-spectating-goes-through-lanes"]
 3. **DOS 입력 라우트와 `pass` 대상.** §2.5, §2.8. 찾을 자리: `masc_dos_pass` 핸들러가 `to` 를 검사하는 곳.
 4. **masc 패드.** 버튼 타입, 배치 파서, 삼국지3 배치 하나.
 5. **플레이 페이지.** §2.6, TUI QR. 찾을 자리: 대시보드나 TUI 에 이미 있는 live 그리기 코드.
-6. **MCP.** §2.7. 찾을 자리: `/mcp` 전송 계층 권한(`Server_auth.verify_mcp_auth`, H2 게이트웨이),
-   MCP `tools/list` 가 도구를 거르는 곳, `masc_dos_screen` 이 PNG 를 붙이는 조건.
+6. **MCP.** §2.7. `/mcp/play` 문(프로필 `Seat`)과 `masc_dos_screen` 이 PNG 를 붙이는 조건.
 
 ## 7. 나중에 볼 것
 

@@ -10311,7 +10311,10 @@ let runtime_lane_fact_of_row (row : Tui_decode.runtime_candidate_row) =
 ;;
 
 type runtime_pick_item =
-  | Pick_lane of Tui_decode.runtime_resolved_lane
+  | Pick_lane of Tui_decode.runtime_resolved_lane * Tui_decode.runtime_option list
+      (* The lane and the catalog rows of its candidates, in lane order. A
+         candidate the catalog does not list is left out, so the count the row
+         reports over the rows never claims a runtime nobody can read. *)
   | Pick_model of Tui_decode.runtime_option
 
 let runtime_picker_items (state : state) : runtime_pick_item list =
@@ -10324,7 +10327,17 @@ let runtime_picker_items (state : state) : runtime_pick_item list =
     state.runtime_lanes
     |> List.filter (fun (lane : Tui_decode.runtime_resolved_lane) ->
          lane.Tui_decode.rrl_declared)
-    |> List.map (fun lane -> Pick_lane lane)
+    |> List.map (fun lane ->
+         let candidates =
+           List.filter_map
+             (fun id ->
+               List.find_opt
+                 (fun (option : Tui_decode.runtime_option) ->
+                   String.equal option.Tui_decode.ro_id id)
+                 state.runtime_catalog)
+             lane.Tui_decode.rrl_runtime_ids
+         in
+         Pick_lane (lane, candidates))
   in
   let models =
     state.runtime_catalog
@@ -10333,7 +10346,7 @@ let runtime_picker_items (state : state) : runtime_pick_item list =
   lanes @ models
 
 let runtime_pick_item_id = function
-  | Pick_lane lane -> lane.Tui_decode.rrl_id
+  | Pick_lane (lane, _) -> lane.Tui_decode.rrl_id
   | Pick_model model -> model.Tui_decode.ro_id
 
 (* Target and route column widths for the runtime picker. Bindings of one
@@ -10364,13 +10377,35 @@ type runtime_pick_fact =
   ; rpf_warn : bool
   }
 
+(* A runtime whose provider is refusing work right now: its quota window is
+   exhausted or this process holds an active rate limit. *)
+let runtime_option_refusing (option : Tui_decode.runtime_option) =
+  option.Tui_decode.ro_quota_exhausted || option.Tui_decode.ro_rate_limited
+
 let runtime_pick_facts = function
-  | Pick_lane lane ->
-    [ { rpf_text =
+  | Pick_lane (lane, candidates) ->
+    let hops =
+      { rpf_text =
           Printf.sprintf "(%d hops)" (List.length lane.Tui_decode.rrl_runtime_ids)
       ; rpf_warn = false
       }
-    ]
+    in
+    (* Which candidates the provider is refusing right now, by quota or by a
+       rate limit. A lane is assigned as a whole, so this is where an operator
+       choosing one needs to see that its head or a fallback is not answering;
+       the model rows below say which refusal it is. *)
+    let limited =
+      List.length (List.filter runtime_option_refusing candidates)
+    in
+    if limited = 0
+    then [ hops ]
+    else
+      [ hops
+      ; { rpf_text =
+            Printf.sprintf "[%d of %d limited]" limited (List.length candidates)
+        ; rpf_warn = true
+        }
+      ]
   | Pick_model option ->
     let fact text = { rpf_text = text; rpf_warn = false } in
     let context =
@@ -10388,12 +10423,14 @@ let runtime_pick_facts = function
       | None -> []
     in
     let default = if option.Tui_decode.ro_is_default then [ fact "[default]" ] else [] in
-    let quota =
-      if option.Tui_decode.ro_quota_exhausted
-      then [ { rpf_text = "[quota exhausted]"; rpf_warn = true } ]
-      else []
+    let refusal =
+      match option.Tui_decode.ro_quota_exhausted, option.Tui_decode.ro_rate_limited with
+      | false, false -> []
+      | true, false -> [ { rpf_text = "[quota exhausted]"; rpf_warn = true } ]
+      | false, true -> [ { rpf_text = "[rate limited]"; rpf_warn = true } ]
+      | true, true -> [ { rpf_text = "[quota + rate]"; rpf_warn = true } ]
     in
-    (context :: effort) @ default @ quota
+    (context :: effort) @ default @ refusal
 
 (* One space between facts, the way the renderer joins them. *)
 let runtime_pick_facts_width facts =
@@ -10433,7 +10470,7 @@ type runtime_pick_columns = {
 let runtime_pick_columns item =
   let single_line = Tui_decode.sanitize_terminal_text in
   match item with
-  | Pick_lane lane ->
+  | Pick_lane (lane, _) ->
       (* A lane's route is its candidates by model, the provider prefix
          dropped: the target column already says it is a lane. *)
       let chain =

@@ -393,7 +393,7 @@ beanie = 200
     let call ?(slot="head") item = Keeper_candle_tools.handle ~operation:Keeper_candle_tools.Equip
       ~base_path ~keeper_name:keeper ~tool_name:"keeper_candle_equip" ~start_time:(Tool_timing.start ())
       ~args:(`Assoc ["slot", `String slot;"item",`String item]) in
-    let accepted = function Tool_result.Completed output -> output.data
+    let accepted = function Tool_result.Completed _ as result -> Tool_result.data result
       | other -> fail (Tool_result.message other) in
     let ledger_bytes () = Fs_compat.load_file (Candle_ledger.path ~base_path) in
     let initial = ledger_bytes () in

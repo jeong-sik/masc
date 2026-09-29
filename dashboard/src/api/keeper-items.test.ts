@@ -1,0 +1,29 @@
+import { describe, expect, it } from 'vitest'
+import { EQUIPMENT_IDS } from './schemas/keeper-portrait'
+import { parseKeeperItems } from './keeper-items'
+
+const catalog = Object.entries(EQUIPMENT_IDS).flatMap(([slot, ids]) =>
+  ids.slice(1).map(id => ({ id, slot, price_status: id === 'crown' ? 'priced' : 'unpriced', ...(id === 'crown' ? { price_milli: 200 } : {}) })),
+)
+const ready = { status: 'ready', keeper: 'rondo', balance_milli: 800, owned_items: ['crown'], catalog }
+
+describe('Keeper Item account wire', () => {
+  it('decodes all three states and keeps unpriced separate from zero', () => {
+    expect(parseKeeperItems({ status: 'off', keeper: 'rondo' }, 'rondo').status).toBe('off')
+    expect(parseKeeperItems({ status: 'disabled', keeper: 'rondo', reason: 'bad policy' }, 'rondo').status).toBe('disabled')
+    const parsed = parseKeeperItems(ready, 'rondo')
+    expect(parsed.status).toBe('ready')
+    if (parsed.status !== 'ready') throw new Error('Expected ready account')
+    expect(parsed.balanceMilli).toBe(800)
+    expect(parsed.catalog.find(item => item.id === 'crown')?.priceMilli).toBe(200)
+    expect(parsed.catalog.find(item => item.id === 'book')?.priceMilli).toBeNull()
+  })
+
+  it('rejects a different Keeper, incomplete catalog, duplicate ownership and malformed price', () => {
+    expect(() => parseKeeperItems(ready, 'geek-scout')).toThrow()
+    expect(() => parseKeeperItems({ ...ready, catalog: catalog.slice(1) }, 'rondo')).toThrow()
+    expect(() => parseKeeperItems({ ...ready, owned_items: ['crown', 'crown'] }, 'rondo')).toThrow()
+    expect(() => parseKeeperItems({ ...ready, catalog: catalog.map(item => item.id === 'crown' ? { ...item, price_milli: -1 } : item) }, 'rondo')).toThrow()
+    expect(() => parseKeeperItems({ ...ready, extra: true }, 'rondo')).toThrow()
+  })
+})

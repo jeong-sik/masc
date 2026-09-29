@@ -118,6 +118,25 @@ let with_profile ~(meta : keeper_meta) fields =
      :: fields)
 ;;
 
+let with_remote_report ~(meta : keeper_meta) = function
+  | Ok report ->
+    (match json_of_report report with
+     | `Assoc fields -> with_profile ~meta fields
+     | other -> other)
+  | Error detail ->
+    with_profile ~meta
+      [ "lane", `Null
+      ; "endpoint", `Null
+      ; "probe", `Null
+      ; "last_dispatch", `Null
+      ; "unreachable", `String detail
+      ; ( "operator_action"
+        , `String
+            "The lane endpoint cannot be named from its declarations. Correcting \
+             the keeper's runtime or endpoint declaration is the operator's." )
+      ]
+;;
+
 let handle ~(config : Workspace.config) ~(meta : keeper_meta) ~args:_ : Yojson.Safe.t =
   match meta.sandbox_profile with
   | Keeper_types_profile_sandbox.Docker ->
@@ -133,25 +152,14 @@ let handle ~(config : Workspace.config) ~(meta : keeper_meta) ~args:_ : Yojson.S
              and no remote lane, so an Execute failure is the container's or the \
              payload's" )
       ]
-  | Keeper_types_profile_sandbox.Micro_vm | Keeper_types_profile_sandbox.Remote_ssh ->
-    (match Keeper_sandbox_remote_lane.attached_guest_endpoint ~config ~meta () with
-     | Ok endpoint ->
-       (match json_of_report (Keeper_sandbox_remote.report endpoint) with
-        | `Assoc fields -> with_profile ~meta fields
-        | other -> other)
-     | Error detail ->
-       (* No endpoint value at all: the guest is not running, or the endpoint
-          is not declared. That is itself the lane's state. *)
-       with_profile ~meta
-         [ "lane", `Null
-         ; "endpoint", `Null
-         ; "probe", `Null
-         ; "last_dispatch", `Null
-         ; "unreachable", `String detail
-         ; ( "operator_action"
-           , `String
-               "The lane has no endpoint to ask right now: the guest is down or the \
-                endpoint is undeclared. Starting a guest or declaring an endpoint is \
-                the operator's; your turn cannot do either." )
-         ])
+  | Keeper_types_profile_sandbox.Remote_ssh ->
+    Keeper_sandbox_ssh.resolve_endpoint
+      ~base_path:config.base_path ~keeper_name:meta.name
+    |> Result.map (fun endpoint ->
+      Keeper_sandbox_remote.report_openssh ~base_path:config.base_path ~endpoint)
+    |> with_remote_report ~meta
+  | Keeper_types_profile_sandbox.Micro_vm ->
+    Keeper_turn_sandbox_runtime.microvm_attached_endpoint ~config ~meta ()
+    |> Result.map Keeper_sandbox_remote.report
+    |> with_remote_report ~meta
 ;;

@@ -102,6 +102,7 @@ val fusion_judge_output : string
 val mcp_full : string
 val mcp_managed_agent : string
 val mcp_operator_remote : string
+val mcp_seat : string
 
 (** MCP [tool_help] prompt body pieces, rendered at [prompts/get] time.
     One slot per assembly piece in [config/prompts/mcp.tool_help.md];

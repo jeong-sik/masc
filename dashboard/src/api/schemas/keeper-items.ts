@@ -33,7 +33,8 @@ const ReadySchema = Schema.Struct({
 
 export const KeeperItemsSchema = Schema.Union(
   Schema.Struct({ status: Schema.Literal('off'), keeper: Schema.NonEmptyString }),
-  Schema.Struct({ status: Schema.Literal('disabled'), keeper: Schema.NonEmptyString, reason: Schema.NonEmptyString }),
+  Schema.Struct({ status: Schema.Literal('disabled'), keeper: Schema.NonEmptyString,
+    reason: Schema.String.pipe(Schema.filter(value => value.trim().length > 0 || 'disabled reason is empty')) }),
   ReadySchema,
 )
 export type KeeperItemsReading = Schema.Schema.Type<typeof KeeperItemsSchema>

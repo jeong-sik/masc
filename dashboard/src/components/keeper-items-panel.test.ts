@@ -66,4 +66,15 @@ describe('Keeper Item tab', () => {
     expect(await screen.findByText('0.600 Candle')).toBeTruthy()
     expect(fetchKeeperItems).toHaveBeenCalledTimes(2)
   })
+
+  it('rereads purchases when the server-observed wallet changes', async () => {
+    fetchKeeperItems.mockResolvedValueOnce({ status: 'ready', keeper: 'rondo', balance_milli: '800', owned_items: [], catalog })
+      .mockResolvedValueOnce({ status: 'ready', keeper: 'rondo', balance_milli: '600', owned_items: ['crown'], catalog })
+    const view = render(html`<${KeeperItemsPanel} keeper=${{ ...keeper('rondo'), candle_balance_milli: '800' }} />`)
+    expect(await screen.findByText('0.800 Candle')).toBeTruthy()
+    view.rerender(html`<${KeeperItemsPanel} keeper=${{ ...keeper('rondo'), candle_balance_milli: '600' }} />`)
+    expect(await screen.findByText('0.600 Candle')).toBeTruthy()
+    expect(screen.getByText('보유 1 / 18개')).toBeTruthy()
+    expect(fetchKeeperItems).toHaveBeenCalledTimes(2)
+  })
 })

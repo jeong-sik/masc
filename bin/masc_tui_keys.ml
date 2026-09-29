@@ -257,7 +257,10 @@ let global =
   ]
 
 (* The plain-listing tail every converted footer shares. *)
-let listing_meta = [ b Meta "r" "refresh"; b Meta "Tab" "next"; b Meta "q" "quit" ]
+let listing_refresh = b Meta "r" "refresh"
+let listing_next = b Meta "Tab" "next"
+let listing_quit = b Meta "q" "quit"
+let listing_meta = [ listing_refresh; listing_next; listing_quit ]
 
 let keeper_actions =
   [ b Act "c" "chat" ~help:"chat with the keeper"
@@ -279,8 +282,9 @@ let keeper_actions =
    retyped per surface: they answer wherever [row_list] in masc_tui.ml finds a
    list, and that is one decision, so the table should not be able to claim
    them for one listing and forget them on the next. *)
+let row_list_page = b Navigate "PgUp/PgDn" "page"
 let row_list_jumps =
-  [ b Navigate "PgUp/PgDn" "page"
+  [ row_list_page
   ; b Navigate "Home/End" "top/bottom"
   ]
 
@@ -299,6 +303,45 @@ let approval_decide =
 let approval_retry =
   b Act "R" "retry Auto Judge"
     ~help:"only when the blocked row is safely rearmable"
+
+let approval_move = b Navigate "j/k" "move"
+let approval_read =
+  b Act "Enter" "read the whole ask"
+    ~help:"the reader takes its own keys: j/k and the page keys scroll it, \
+           Home/End reach its ends, [ / ] step asks, Esc goes back"
+let approval_answer =
+  b Act "a" "answer a question"
+    ~help:"open the selected Keeper question in its own mode; Esc leaves it"
+let approval_walk =
+  b Navigate "[ / ]" "ask"
+    ~help:"while browsing or answering a question, move to the previous or next ask; \
+           with an approval detail open, move to the previous or next approval"
+let approval_workspace =
+  b Act "w" "Workspace mode"
+    ~help:"choose manual, Auto Judge or allow-all; Enter applies, Esc cancels"
+let approval_outside =
+  b Act "e" "Outside mode"
+    ~help:"choose how calls into outside services are reviewed; Enter applies"
+let approval_question =
+  b Navigate "Left/Right" "question"
+    ~help:"while answering, step through the open ask's questions; \
+           j/k and the arrows do the same"
+let approval_pick =
+  b Act "1-9" "pick"
+    ~help:"while answering, choose by the position the server listed"
+let approval_write =
+  b Act "t" "write"
+    ~help:"while answering, open the free-text editor; Enter saves it, \
+           Esc drops it"
+let approval_skip =
+  b Act "s" "skip"
+    ~help:"while answering, leave this question unanswered"
+let approval_clear =
+  b Act "c" "clear"
+    ~help:"while answering, drop what is drafted for this question"
+let approval_back =
+  b Act "Esc" "back"
+    ~help:"leave the answering mode; with the editor open it drops the draft first"
 
 (* Where a Fusion run's caller and its Board evidence are, on the list and
    in the detail alike: one binding each, so the two footers cannot name the
@@ -589,12 +632,10 @@ let for_surface = function
       ]
       @ row_list_edges @ listing_meta
   | Approvals ->
-      [ b Navigate "j/k" "move"
+      [ approval_move
         (* The list draws each ask on one row. Enter is where a multi-line
            argument is readable before y answers it. *)
-      ; b Act "Enter" "read the whole ask"
-          ~help:"the reader takes its own keys: j/k and the page keys scroll it, \
-                 Home/End reach its ends, [ / ] step asks, Esc goes back"
+      ; approval_read
       ; approval_decide
       ; approval_retry
         (* The footer names this key and the sheet did not, so an operator who
@@ -602,34 +643,21 @@ let for_surface = function
            every other key on the surface and not that one. The approval queue
            owns this surface's arrows and its y/n, which is why answering
            opens as its own mode rather than as a key on the row. *)
-      ; b Act "a" "answer a question"
-          ~help:"open the selected Keeper question in its own mode; Esc leaves it"
-      ; b Navigate "[ / ]" "previous / next"
-          ~help:"while a detail is open, step to the row before or after it"
-      ; b Act "w" "Workspace Gate mode"
-          ~help:"choose manual, Auto Judge or allow-all; Enter applies, Esc cancels"
-      ; b Act "e" "external Gate lane"
-          ~help:"choose how calls into outside services are reviewed; Enter applies"
+      ; approval_answer
+      ; approval_walk
+      ; approval_workspace
+      ; approval_outside
         (* The answering mode's own keys. It opens with [a] and rewrites the
            footer entirely, so the sheet was the only place left to learn
            them -- and it named none: [?] on this surface found every
            browsing key and nothing about answering a question. Each help
            says when the key answers, the way [[ / ]] above does. *)
-      ; b Navigate "Left/Right" "question"
-          ~help:"while answering, step through the open ask's questions; \
-                 j/k and the arrows do the same"
-      ; b Act "1-9" "pick"
-          ~help:"while answering, choose by the position the server listed"
-      ; b Act "t" "write"
-          ~help:"while answering, open the free-text editor; Enter saves it, \
-                 Esc drops it"
-      ; b Act "s" "skip"
-          ~help:"while answering, leave this question unanswered"
-      ; b Act "c" "clear"
-          ~help:"while answering, drop what is drafted for this question"
-      ; b Act "Esc" "back"
-          ~help:"leave the answering mode; with the editor open it drops the \
-                 draft first"
+      ; approval_question
+      ; approval_pick
+      ; approval_write
+      ; approval_skip
+      ; approval_clear
+      ; approval_back
       ]
       @ row_list_jumps @ listing_meta
   | Planning ->
@@ -973,6 +1001,41 @@ let answers_in_state ?detail_open binding =
 let footer_hints ?detail_open surface =
   hints_of_bindings
     (List.filter (answers_in_state ?detail_open) (for_surface surface))
+
+type approvals_footer =
+  | Approval_browsing
+  | Approval_writing
+  | Approval_armed
+  | Approval_answering of { has_choices : bool; takes_text : bool }
+
+(* The approval queue and its question reader use the same binding records as
+   Help. Their modes need a deliberate order and, for Enter, a mode-specific
+   verb; the dispatcher gives that key a different action in each mode. *)
+let footer_hints_approvals mode =
+  let hint ?label (binding : binding) =
+    binding.key ^ ":" ^ (match label with Some word -> word | None -> binding.label)
+  in
+  let row items = String.concat "  " items in
+  match mode with
+  | Approval_browsing ->
+      row
+        [ hint approval_move; hint approval_decide; hint approval_workspace
+        ; hint approval_outside; hint approval_walk; hint approval_answer
+        ; hint listing_refresh; hint listing_next
+        ]
+  | Approval_writing ->
+      row [ hint ~label:"save" approval_read; hint ~label:"cancel" approval_back ]
+  | Approval_armed ->
+      "Press Enter again to send  |  "
+      ^ row [ hint approval_skip; hint approval_clear; hint approval_back ]
+  | Approval_answering { has_choices; takes_text } ->
+      row
+        ([ hint approval_question; hint row_list_page; hint approval_walk ]
+        @ (if has_choices then [ hint approval_pick ] else [])
+        @ (if takes_text then [ hint approval_write ] else [])
+        @ [ hint approval_skip; hint approval_clear
+          ; hint ~label:"answer" approval_read; hint approval_back
+          ])
 
 (* Whether this surface's table scopes any binding to one of the two states.
    A surface this answers [true] for owes [footer_hints] a [~detail_open] from

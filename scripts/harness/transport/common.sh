@@ -76,7 +76,15 @@ cleanup_transport_server() {
 
 ensure_server() {
   if curl -fsS --max-time 2 "${MASC_HTTP_BASE_URL}/health" >/dev/null 2>&1; then
-    return 0
+    local ready_deadline=$(( $(date +%s) + 25 ))
+    while [[ "$(date +%s)" -lt "$ready_deadline" ]]; do
+      if curl -fsS --max-time 2 "${MASC_HTTP_BASE_URL}/health/ready" >/dev/null 2>&1; then
+        return 0
+      fi
+      sleep 1
+    done
+    echo "ERROR: MASC server did not become ready on ${MASC_HTTP_BASE_URL}" >&2
+    exit 1
   fi
   if [[ "${MASC_TRANSPORT_AUTOSTART:-1}" != "1" ]]; then
     echo "ERROR: MASC server not running on ${MASC_HTTP_BASE_URL}" >&2

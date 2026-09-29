@@ -238,6 +238,7 @@ let test_idle_steady_stream_completes () =
   Eio.Fiber.fork ~sw producer;
   let result =
     Masc_http_client.Pool.For_testing.read_body_with_idle
+      ~retention:Masc_http_client.Pool.Keep_body
       ~clock ~start_sec:(Eio.Time.now clock)
       ~idle_timeout_sec:0.5
       body
@@ -262,11 +263,11 @@ let test_stream_without_body_retention () =
   Eio.Fiber.fork ~sw producer;
   let delivered = ref 0 in
   let result = Masc_http_client.Pool.For_testing.read_body_with_idle
-    ~retain_body:false ~on_chunk:(fun text -> delivered := !delivered + String.length text)
+    ~retention:Masc_http_client.Pool.Discard_body
+    ~on_chunk:(fun text -> delivered := !delivered + String.length text)
     ~clock ~start_sec:(Eio.Time.now clock) ~idle_timeout_sec:Float.infinity body in
   match result with
-  | Ok (retained, progress) ->
-    Alcotest.(check string) "incremental protocol does not retain terminal output" "" retained;
+  | Ok ((), progress) ->
     Alcotest.(check int) "all bytes still delivered" (4096 * 1024) !delivered;
     Alcotest.(check int) "progress remains observable" !delivered progress.bytes_received
   | Error (message, _) -> Alcotest.fail message
@@ -283,6 +284,7 @@ let test_idle_silent_from_start_cancels () =
   Eio.Fiber.fork ~sw producer;
   let result =
     Masc_http_client.Pool.For_testing.read_body_with_idle
+      ~retention:Masc_http_client.Pool.Keep_body
       ~clock ~start_sec:(Eio.Time.now clock)
       ~idle_timeout_sec:0.2
       body
@@ -311,6 +313,7 @@ let test_idle_mid_stream_silence_cancels () =
   Eio.Fiber.fork ~sw producer;
   let result =
     Masc_http_client.Pool.For_testing.read_body_with_idle
+      ~retention:Masc_http_client.Pool.Keep_body
       ~clock ~start_sec:(Eio.Time.now clock)
       ~idle_timeout_sec:0.2
       body
@@ -337,6 +340,7 @@ let test_total_timeout_reports_progress_snapshot () =
     Eio.Fiber.first
       (fun () ->
          Masc_http_client.Pool.For_testing.read_body_with_idle
+           ~retention:Masc_http_client.Pool.Keep_body
            ~progress_ref
            ~clock
            ~start_sec:(Eio.Time.now clock)

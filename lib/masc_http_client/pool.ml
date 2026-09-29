@@ -929,6 +929,13 @@ let empty_body_progress = {
   bytes_received    = 0;
 }
 
+(* Whether a body's chunks are also kept whole, and so what a read returns
+   as the body: the joined chunks, or [()] with no buffer at all, which is
+   what a subscription left open for hours needs. *)
+type _ body_retention =
+  | Keep_body : string body_retention
+  | Discard_body : unit body_retention
+
 (* Read [body] chunk-by-chunk, tracking progress, with a watchdog fiber
    that cancels when no chunk has arrived for [idle_timeout_sec].
 
@@ -938,15 +945,23 @@ let empty_body_progress = {
    but only the body fiber writes it (Eio is single-domain, no atomic
    needed). *)
 let read_body_with_idle
-    ?(retain_body = true)
+    (type retained)
+    ~(retention : retained body_retention)
     ?progress_ref
     ?on_chunk
     ~(clock : [> float Eio.Time.clock_ty ] Eio.Resource.t)
     ~(start_sec : float)
     ~(idle_timeout_sec : float)
     (body : Piaf.Body.t)
-  : (string * body_progress, string * body_progress) result =
-  let buf = Buffer.create 16384 in
+  : (retained * body_progress, string * body_progress) result =
+  let keep, kept =
+    (match retention with
+     | Keep_body ->
+       let held = Buffer.create 16384 in
+       Buffer.add_string held, (fun () -> Buffer.contents held)
+     | Discard_body -> ignore, (fun () -> ())
+      : (string -> unit) * (unit -> retained))
+  in
   let progress =
     match progress_ref with
     | Some progress -> progress
@@ -954,9 +969,7 @@ let read_body_with_idle
   in
   let now () = Eio.Time.now clock in
   let observe chunk =
-    (* Protocol owners that decode incrementally can decline body retention.
-       Other callers retain the authoritative complete body by default. *)
-    if retain_body then Buffer.add_string buf chunk;
+    keep chunk;
     (match on_chunk with
      | None -> ()
      | Some f -> f chunk);
@@ -975,7 +988,7 @@ let read_body_with_idle
   Watched_work.run
     (fun () ->
        match Piaf.Body.iter_string ~f:observe body with
-       | Ok () -> Ok (Buffer.contents buf, !progress)
+       | Ok () -> Ok (kept (), !progress)
        | Error err ->
          Error (piaf_error_message (err :> Piaf.Error.t), !progress))
     ~watcher:(fun () ->
@@ -997,14 +1010,6 @@ let read_body_with_idle
 
 (* ── Streaming request ────────────────────────────── *)
 
-(* Whether a successful stream's body is also kept whole, and so what
-   [Streamed] carries as its body. A caller that only reads [on_chunk] gets
-   [()] rather than an empty string it could mistake for an empty body, and a
-   subscription left open for hours holds none of what it has handed on. *)
-type _ body_retention =
-  | Keep_body : string body_retention
-  | Discard_body : unit body_retention
-
 (* What a streaming request produced. The two cases are separate because a
    caller that streams a wire protocol (SSE) cannot interpret an error body
    in that protocol: a 401 carries a JSON object, not events. Handing it to
@@ -1019,16 +1024,6 @@ type 'body stream_outcome =
       ; progress : body_progress
       }
   | Buffered of response
-
-let holds_body (type body) (retention : body body_retention) =
-  match retention with
-  | Keep_body -> true
-  | Discard_body -> false
-
-let retained_body (type body) (retention : body body_retention) (held : string) : body =
-  match retention with
-  | Keep_body -> held
-  | Discard_body -> ()
 
 (* The HTTP definition of a successful status, not a shared setting: other
    modules spelling out the same range are implementing the same spec rather
@@ -1100,32 +1095,34 @@ let do_request_streaming
           Option.iter (fun notify -> notify ~status ~headers:headers_list)
             on_response;
           let start_sec = Eio.Time.now clock in
-          let on_chunk =
-            if status_is_success status then Some on_chunk else None
+          let read (type retained) (retention : retained body_retention) on_chunk
+            : (retained * body_progress, string) result
+            =
+            with_client_scope client ~on_error:exn_message (fun () ->
+              read_body_with_idle ~retention ?on_chunk ~clock ~start_sec
+                ~idle_timeout_sec (Piaf.Response.body resp)
+              |> Result.map_error fst)
           in
-          (match
-             with_client_scope client ~on_error:exn_message (fun () ->
-               read_body_with_idle
-                 ~retain_body:(holds_body retention || not (status_is_success status))
-                 ?on_chunk ~clock ~start_sec ~idle_timeout_sec
-                 (Piaf.Response.body resp)
-               |> Result.map_error fst)
-           with
-           | Error detail ->
-             release_once ~close_only:true;
-             Error detail
-           | Ok (held, progress) ->
-             release_once ~close_only:false;
-             if status_is_success status
-             then
-               Ok
-                 (Streamed
-                    { status
-                    ; headers = headers_list
-                    ; body = retained_body retention held
-                    ; progress
-                    })
-             else Ok (Buffered { status; headers = headers_list; body = held })))
+          let settle outcome_of = function
+            | Error detail ->
+              release_once ~close_only:true;
+              Error detail
+            | Ok (held, progress) ->
+              release_once ~close_only:false;
+              Ok (outcome_of held progress)
+          in
+          (* A non-success body is read whole whatever the caller asked for,
+             and never reaches [on_chunk]: it is not in the stream's
+             protocol. *)
+          if status_is_success status
+          then
+            read retention (Some on_chunk)
+            |> settle (fun body progress ->
+              Streamed { status; headers = headers_list; body; progress })
+          else
+            read Keep_body None
+            |> settle (fun body _progress ->
+              Buffered { status; headers = headers_list; body }))
 
 let request_streaming
     t

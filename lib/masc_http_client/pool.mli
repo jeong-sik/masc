@@ -292,14 +292,14 @@ module For_testing : sig
       mock [Piaf.Body.t] built from [Piaf_stream.create], without
       standing up a real HTTP server. *)
   val read_body_with_idle :
-    ?retain_body:bool ->
+    retention:'retained body_retention ->
     ?progress_ref:body_progress ref ->
     ?on_chunk:(string -> unit) ->
     clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
     start_sec:float ->
     idle_timeout_sec:float ->
     Piaf.Body.t ->
-    (string * body_progress, string * body_progress) result
+    ('retained * body_progress, string * body_progress) result
 
   (** The idle-queue decision, separated from the resource so it can be
       driven with plain values: given (client, last_used) in park order,

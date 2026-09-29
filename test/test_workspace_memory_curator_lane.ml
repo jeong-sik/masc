@@ -101,7 +101,8 @@ let test_owner_switch_liveness () = with_base (fun base_path clock ->
   match Eio.Time.with_timeout clock 5. (fun () ->
     Eio.Switch.run (fun sw ->
       Worker.For_testing.start ~sw ~base_path ~max_input_bytes:8192 ~execute;
-      await_idle ~clock ~base_path)) with
+      await_idle ~clock ~base_path);
+    Ok ()) with
   | Ok () -> ()
   | Error `Timeout -> Alcotest.fail "curator owner held its switch open")
 

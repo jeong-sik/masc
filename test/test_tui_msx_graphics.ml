@@ -42,7 +42,7 @@ let drawn ?(f = frame ()) ?(surface = surface_of ()) ?notice () =
   Buffer.contents buf
 ;;
 
-let drawn_empty ?(live = Masc_tui_machine_live.Unread) ~connection =
+let drawn_empty ~live ~connection =
   let buf = Buffer.create 4096 in
   Msx.render ~live ~write:(Buffer.add_string buf) ~connection None None;
   Buffer.contents buf
@@ -65,7 +65,8 @@ let test_a_connected_server_with_no_machine_says_so () =
     (mentions ~needle:"the server is" text)
 
 let test_a_connected_server_waiting_for_a_read_does_not_suggest_loading () =
-  let text = drawn_empty ~connection:Masc_tui_types.Connected in
+  let text = drawn_empty ~live:Masc_tui_machine_live.Unread
+      ~connection:Masc_tui_types.Connected in
   check bool "names the pending read" true
     (mentions ~needle:"waiting for live screen" text);
   check bool "does not claim the machine is absent" false
@@ -74,7 +75,7 @@ let test_a_connected_server_waiting_for_a_read_does_not_suggest_loading () =
 let test_an_unreachable_server_is_not_a_missing_machine () =
   List.iter
     (fun (connection, label) ->
-      let text = drawn_empty ~connection in
+      let text = drawn_empty ~live:Masc_tui_machine_live.Unread ~connection in
       check bool
         (label ^ ": says the server could not be asked")
         true
@@ -309,7 +310,8 @@ let test_failed_write_and_layout () =
       let resized = drawn () in
       check bool "size change retires old placement" true (mentions ~needle:"d=I,i=32" resized);
       check bool "size change transmits" true (mentions ~needle:"f=24" resized));
-    let empty = drawn_empty ~connection:Types.Connected in
+    let empty = drawn_empty ~live:Masc_tui_machine_live.Unread
+        ~connection:Types.Connected in
     check bool "empty frame removes old image" true (mentions ~needle:"d=I,i=32" empty))
 
 let test_surface_lifecycle () =

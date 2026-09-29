@@ -1740,29 +1740,23 @@ let set_runtime_lane_slots ~(host : string) ~(port : int) ~(lane : string)
       ~(expected_runtime_ids : string list) ~(runtime_ids : string list) :
       (unit, string) result =
   let ( let* ) = Result.bind in
-  (* Read the file revision before the resolved lane. A change between either
-     read and the write is then caught by the server's compare-and-set. *)
+  (* The candidate order and revision must come from the same file read.
+     /runtime/resolved is a separately published in-process snapshot and can
+     lag a freshly committed runtime.toml. *)
   let* raw = get_json ~host ~port ~path:"/api/v1/runtime/config/raw" in
   let* revision = match Json_util.assoc_member_opt "source_revision" raw with
     | Some (`String value) when String_util.is_lowercase_sha256_hex value -> Ok value
     | _ -> Error "runtime config read did not supply a source revision" in
-  let* resolved = get_json ~host ~port ~path:"/api/v1/runtime/resolved" in
-  let* current = match Json_util.assoc_member_opt "lanes" resolved with
-    | Some (`List lanes) ->
-      (match List.find_opt (fun row ->
-         Json_util.assoc_member_opt "id" row = Some (`String lane)) lanes with
-       | Some row ->
-         (match Json_util.assoc_member_opt "runtime_ids" row with
-          | Some (`List ids) ->
-            let rec strings = function
-              | [] -> Ok []
-              | `String id :: rest ->
-                let* rest = strings rest in Ok (id :: rest)
-              | _ -> Error "runtime lane read has invalid candidates" in
-            strings ids
-          | _ -> Error "runtime lane read has no candidate order")
-       | None -> Error ("runtime lane " ^ lane ^ " is no longer present"))
-    | _ -> Error "runtime lane read has no lane list" in
+  let* source_text = match Json_util.assoc_member_opt "source_text" raw with
+    | Some (`String text) -> Ok text
+    | _ -> Error "runtime config read did not supply source text" in
+  let* config = Runtime_toml.parse_string source_text
+    |> Result.map_error (fun _ -> "runtime config read could not be parsed") in
+  let* current = match List.find_opt
+      (fun (decl : Runtime_schema.lane_decl) -> String.equal decl.id lane)
+      config.Runtime_schema.lane_decls with
+    | Some decl -> Ok decl.Runtime_schema.candidate_ids
+    | None -> Error ("runtime lane " ^ lane ^ " is no longer present") in
   if current <> expected_runtime_ids then
     Error ("runtime lane " ^ lane ^ " changed since this view was read; refresh before editing")
   else

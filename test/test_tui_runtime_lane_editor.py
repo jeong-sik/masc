@@ -156,7 +156,13 @@ class LaneStore:
 
     def raw(self) -> h.HttpResponse:
         with self.lock:
-            return 200, {"source_revision": f"{self.revision:064x}"}
+            source = "\n".join(
+                f'[runtime.lanes.{lane["id"]}]\n'
+                f'candidates = {json.dumps(lane["runtime_ids"])}\n'
+                for lane in self.lanes
+            )
+            return 200, {"source_revision": f"{self.revision:064x}",
+                         "source_text": source}
 
     def standalone_lanes(self) -> h.HttpResponse:
         """The standalone lanes as they stand when the read arrives. A held
@@ -929,7 +935,9 @@ def run_concurrent_edit(executable: str) -> None:
     """A successful screen read must not license a later whole-order overwrite."""
     store = LaneStore()
     fixtures = h.overview_event_http_fixtures()
-    fixtures[h.RUNTIME_RESOLVED_PATH] = store.resolved
+    # Keep the in-process resolved projection at R1 after the file moves to
+    # R2. The writer must compare with raw source_text, not this stale read.
+    fixtures[h.RUNTIME_RESOLVED_PATH] = store.resolved()
     fixtures[h.RUNTIME_CONFIG_RAW_PATH] = store.raw
     fixtures[ROUTING_PATH] = h.RequestHttpResponse(store.route)
     requests: h.HttpRequests = []

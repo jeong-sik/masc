@@ -33,6 +33,66 @@ let test_ring_keeps_only_the_window () =
     check int "stalls" 0 s.stalls
 ;;
 
+(* What the summary must report, computed the plain way: sort a copy and read
+   the nearest ranks off it. *)
+let sorted_reference lags =
+  let xs = Array.of_list lags in
+  Array.sort Float.compare xs;
+  let n = Array.length xs in
+  let at p =
+    let rank = int_of_float (Float.ceil (p *. Float.of_int n)) in
+    xs.(Int.max 0 (Int.min (n - 1) (rank - 1)))
+  in
+  at 0.50, at 0.95, at 0.99, xs.(n - 1)
+;;
+
+(* Sample sets shaped like a ring can hold: sizes around the ranks' rounding
+   edges and the default window, heavy duplicates, runs already in order or
+   reversed, and a tail of stalls. *)
+let reference_cases () =
+  let state = Random.State.make [| 20260929 |] in
+  let random_lags n ~distinct =
+    List.init n (fun _ ->
+      if Random.State.int state 100 < 3
+      then 1.0 +. Random.State.float state 4.0
+      else Float.of_int (Random.State.int state distinct) *. 0.0005)
+  in
+  let sizes = [ 1; 2; 3; 4; 5; 19; 20; 21; 99; 100; 101; 599; 600 ] in
+  let shaped n =
+    let lags = random_lags n ~distinct:1000 in
+    [ lags
+    ; random_lags n ~distinct:3
+    ; List.init n (fun _ -> 0.002)
+    ; List.sort Float.compare lags
+    ; List.rev (List.sort Float.compare lags)
+    ]
+  in
+  List.concat_map shaped sizes
+  @ List.init 200 (fun _ ->
+    random_lags (1 + Random.State.int state 600) ~distinct:(1 + Random.State.int state 50))
+;;
+
+let test_percentiles_match_a_full_sort () =
+  List.iteri
+    (fun case lags ->
+       let n = List.length lags in
+       let t = Scheduler_lag.create ~interval_s:0.1 ~window:n () in
+       record_all t lags;
+       let p50, p95, p99, largest = sorted_reference lags in
+       let ms seconds = seconds *. 1000.0 in
+       match Scheduler_lag.summarize t with
+       | None -> fail (Printf.sprintf "case %d: %d samples were recorded" case n)
+       | Some s ->
+         let exact label expected actual =
+           check (float 0.0) (Printf.sprintf "case %d (n=%d) %s" case n label) expected actual
+         in
+         exact "p50" (ms p50) s.p50_ms;
+         exact "p95" (ms p95) s.p95_ms;
+         exact "p99" (ms p99) s.p99_ms;
+         exact "max" (ms largest) s.max_ms)
+    (reference_cases ())
+;;
+
 let test_empty_ring_has_no_percentiles () =
   let t = Scheduler_lag.create () in
   let fields = Scheduler_lag.to_fields t in
@@ -101,6 +161,7 @@ let () =
     [ ( "ring"
       , [ test_case "percentiles" `Quick test_percentiles_over_recorded_samples
         ; test_case "window" `Quick test_ring_keeps_only_the_window
+        ; test_case "same ranks as a full sort" `Quick test_percentiles_match_a_full_sort
         ; test_case "empty" `Quick test_empty_ring_has_no_percentiles
         ; test_case "shape" `Quick test_invalid_shape_is_refused
         ] )

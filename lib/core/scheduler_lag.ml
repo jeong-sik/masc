@@ -59,12 +59,43 @@ type summary =
   ; stalls : int
   }
 
-(* Nearest-rank percentile: the smallest value such that [p] of the samples
-   are at or below it. [sorted] is ascending and non-empty. *)
-let nearest_rank sorted p =
-  let n = Array.length sorted in
+(* Nearest rank: the index an ascending sort of [n] samples would give the
+   smallest value such that [p] of the samples are at or below it. *)
+let nearest_rank_index n p =
   let rank = int_of_float (Float.ceil (p *. Float.of_int n)) in
-  sorted.(Int.max 0 (Int.min (n - 1) (rank - 1)))
+  Int.max 0 (Int.min (n - 1) (rank - 1))
+;;
+
+(* [select xs lo hi k] puts at [xs.(k)] the value an ascending sort by
+   [Float.compare] would put there, and leaves every value in [lo, k) at or
+   below it and every value in (k, hi] at or above it. It reorders only
+   [xs.(lo..hi)], which must contain [k]. Each step partitions around the
+   middle value and keeps the side that holds [k]. *)
+let rec select xs lo hi k =
+  if lo < hi
+  then begin
+    let pivot = xs.(lo + ((hi - lo) / 2)) in
+    let i = ref lo in
+    let j = ref hi in
+    while !i <= !j do
+      while Float.compare xs.(!i) pivot < 0 do
+        incr i
+      done;
+      while Float.compare xs.(!j) pivot > 0 do
+        decr j
+      done;
+      if !i <= !j
+      then begin
+        let v = xs.(!i) in
+        xs.(!i) <- xs.(!j);
+        xs.(!j) <- v;
+        incr i;
+        decr j
+      end
+    done;
+    (* Every index between [!j] and [!i] holds the pivot, already in place. *)
+    if k <= !j then select xs lo !j k else if k >= !i then select xs !i hi k
+  end
 ;;
 
 let milliseconds_per_second = 1000.0
@@ -76,7 +107,6 @@ let summarize t =
   if n = 0
   then None
   else begin
-    Array.sort Float.compare xs;
     let ms seconds = seconds *. milliseconds_per_second in
     let sum = Array.fold_left ( +. ) 0.0 xs in
     let stalls =
@@ -85,12 +115,29 @@ let summarize t =
         0
         xs
     in
+    let largest =
+      Array.fold_left
+        (fun acc x -> if Float.compare x acc > 0 then x else acc)
+        xs.(0)
+        xs
+    in
+    (* The three ranks ascend, and after each selection every sample above
+       the chosen index is at or above the chosen value, so the next rank is
+       looked for only there. The ring is never fully sorted. *)
+    let at_rank ~above p =
+      let k = nearest_rank_index n p in
+      select xs above (n - 1) k;
+      k, xs.(k)
+    in
+    let k50, p50 = at_rank ~above:0 0.50 in
+    let k95, p95 = at_rank ~above:k50 0.95 in
+    let _, p99 = at_rank ~above:k95 0.99 in
     Some
       { samples = n
-      ; p50_ms = ms (nearest_rank xs 0.50)
-      ; p95_ms = ms (nearest_rank xs 0.95)
-      ; p99_ms = ms (nearest_rank xs 0.99)
-      ; max_ms = ms xs.(n - 1)
+      ; p50_ms = ms p50
+      ; p95_ms = ms p95
+      ; p99_ms = ms p99
+      ; max_ms = ms largest
       ; mean_ms = ms (sum /. Float.of_int n)
       ; stalls
       }

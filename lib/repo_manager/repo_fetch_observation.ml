@@ -16,7 +16,7 @@ let is_oid value =
 
 let read ~common_dir =
   try
-    let common_dir = Filename.realpath common_dir in
+    let common_dir = Unix.realpath common_dir in
     let path = Filename.concat common_dir filename in
     match Yojson.Safe.from_file path with
     | `Assoc fields ->
@@ -38,7 +38,7 @@ let read ~common_dir =
 
 let write ~common_dir observation =
   try
-    let common_dir = Filename.realpath common_dir in
+    let common_dir = Unix.realpath common_dir in
     let path = Filename.concat common_dir filename in
     let temporary = Filename.temp_file ~temp_dir:common_dir ".masc-target-ref-" ".tmp" in
     let payload =

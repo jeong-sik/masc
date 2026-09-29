@@ -24,6 +24,7 @@ let snapshot
     (E.Snapshot
        { goal_id
        ; request_id = "req-1"
+       ; verification_run_id = "run-1"
        ; criterion_revision = "rev-1"
        ; passed_at = at "2026-09-28T06:32:00Z"
        ; goal_created_at = at "2026-09-20T01:00:00Z"
@@ -40,6 +41,7 @@ let payout_owed ?(goal_id = "goal-1") () =
     (E.Payout_owed
        { goal_id
        ; request_id = "req-1"
+       ; verification_run_id = "run-1"
        ; passed_at = at "2026-09-28T06:32:00Z"
        ; confirmed_at = at "2026-09-29T05:00:00Z"
        })
@@ -69,6 +71,7 @@ let candidates ?(tasks = None) () =
     (E.Candidates
        { goal_id = "goal-1"
        ; request_id = "req-1"
+       ; verification_run_id = "run-1"
        ; tasks
        ; candidate_task_ids = [ "task-1" ]
        ; candidate_keepers = [ "keeper-a" ]
@@ -87,7 +90,7 @@ let every_status =
 ;;
 
 let unattributed () =
-  event (E.Unattributed { goal_id = "goal-1"; request_id = "req-1"; reason = E.No_candidates })
+  event (E.Unattributed { goal_id = "goal-1"; request_id = "req-1"; verification_run_id = "run-1"; reason = E.No_candidates })
 ;;
 
 let event_testable =
@@ -102,19 +105,19 @@ let line_of row = ok_or_fail (E.to_line row)
 let test_the_row_format () =
   Alcotest.(check string)
     "snapshot"
-    ({|{"kind":"snapshot","at":"2026-09-29T06:00:00Z","goal_id":"goal-1","request_id":"req-1",|}
+    ({|{"kind":"snapshot","at":"2026-09-29T06:00:00Z","goal_id":"goal-1","request_id":"req-1","verification_run_id":"run-1",|}
      ^ {|"criterion_revision":"rev-1","passed_at":"2026-09-28T06:32:00Z","goal_created_at":"2026-09-20T01:00:00Z",|}
      ^ {|"due_date":"2026-09-26","title":"Ship the ledger","metric":"tests","target_value":null,|}
      ^ {|"linked_task_ids":["task-1","task-2"]}|})
     (line_of (snapshot ()));
   Alcotest.(check string)
     "payout_owed"
-    ({|{"kind":"payout_owed","at":"2026-09-29T06:00:00Z","goal_id":"goal-1","request_id":"req-1",|}
+    ({|{"kind":"payout_owed","at":"2026-09-29T06:00:00Z","goal_id":"goal-1","request_id":"req-1","verification_run_id":"run-1",|}
      ^ {|"passed_at":"2026-09-28T06:32:00Z","confirmed_at":"2026-09-29T05:00:00Z"}|})
     (line_of (payout_owed ()));
   Alcotest.(check string)
     "candidates"
-    ({|{"kind":"candidates","at":"2026-09-29T06:00:00Z","goal_id":"goal-1","request_id":"req-1",|}
+    ({|{"kind":"candidates","at":"2026-09-29T06:00:00Z","goal_id":"goal-1","request_id":"req-1","verification_run_id":"run-1",|}
      ^ {|"tasks":[{"task_id":"task-1","state":"found","title":"Write the ledger","assignee":"keeper-a",|}
      ^ {|"status":"done","completed_at":"2026-09-25T00:00:00Z"},{"task_id":"task-2","state":"deleted"},|}
      ^ {|{"task_id":"task-3","state":"found","title":"Still going","assignee":null,"status":"todo",|}
@@ -122,7 +125,7 @@ let test_the_row_format () =
     (line_of (candidates ()));
   Alcotest.(check string)
     "unattributed"
-    ({|{"kind":"unattributed","at":"2026-09-29T06:00:00Z","goal_id":"goal-1","request_id":"req-1",|}
+    ({|{"kind":"unattributed","at":"2026-09-29T06:00:00Z","goal_id":"goal-1","request_id":"req-1","verification_run_id":"run-1",|}
      ^ {|"reason":"no_candidates"}|})
     (line_of (unattributed ()))
 ;;
@@ -132,7 +135,7 @@ let test_the_row_format () =
 let test_a_status_is_spelled_as_the_backlog_spells_it () =
   Alcotest.(check string)
     "every status"
-    ({|{"kind":"candidates","at":"2026-09-29T06:00:00Z","goal_id":"goal-1","request_id":"req-1",|}
+    ({|{"kind":"candidates","at":"2026-09-29T06:00:00Z","goal_id":"goal-1","request_id":"req-1","verification_run_id":"run-1",|}
      ^ {|"tasks":[|}
      ^ {|{"task_id":"task-1","state":"found","title":"todo","assignee":null,"status":"todo","completed_at":null},|}
      ^ {|{"task_id":"task-2","state":"found","title":"claimed","assignee":null,"status":"claimed","completed_at":null},|}
@@ -208,6 +211,19 @@ let test_the_valid_line_used_below_does_read () =
   Alcotest.(check bool) "valid payout_owed" true (Result.is_ok (E.of_line valid_owed));
   Alcotest.(check bool) "valid candidates" true (Result.is_ok (E.of_line valid_candidates));
   Alcotest.(check bool) "valid unattributed" true (Result.is_ok (E.of_line valid_unattributed))
+;;
+
+let test_every_row_requires_its_verifier_run () =
+  List.iter
+    (fun row ->
+       let fields = Yojson.Safe.Util.to_assoc (E.to_yojson row) in
+       let without_run = List.remove_assoc "verification_run_id" fields in
+       List.iter
+         (fun damaged ->
+            Alcotest.(check bool) "missing or blank run is unreadable" true
+              (Result.is_error (E.of_yojson (`Assoc damaged))))
+         [ without_run; ("verification_run_id", `String " ") :: without_run ])
+    [ snapshot (); payout_owed (); candidates (); unattributed () ]
 ;;
 
 let test_a_row_that_is_not_exactly_the_schema_is_refused () =
@@ -321,7 +337,9 @@ let () =
             test_a_status_is_spelled_as_the_backlog_spells_it
         ] )
     ; ( "strict reading"
-      , [ Alcotest.test_case
+      , [ Alcotest.test_case "every row requires its verifier run" `Quick
+            test_every_row_requires_its_verifier_run
+        ; Alcotest.test_case
             "the valid line used below does read"
             `Quick
             test_the_valid_line_used_below_does_read

@@ -99,7 +99,7 @@ let rows ~screen ~cols ~rows ~caption ~elapsed ~display ~project ~origin:(origin
     | Some (box, image, _), View.Pixels _ ->
         Some
           {
-            View.image_id = View.mascot_image_id;
+            View.image_id = Masc_tui_graphics.image_id Masc_tui_graphics.Mascot;
             row = origin_row + top;
             column = origin_col + left;
             box;

@@ -106,5 +106,6 @@ module For_testing : sig
   val eye_rgb : Keeper_portrait_look.body -> rgb
   val mouth_rgb : Keeper_portrait_look.body -> rgb
   val tooth_rgb : Keeper_portrait_look.body -> rgb
+  val beard_rgb : Keeper_portrait_look.body -> rgb
   val backdrop_rgb : Keeper_portrait_look.body -> rgb
 end

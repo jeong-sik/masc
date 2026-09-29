@@ -2017,6 +2017,56 @@ let test_history_link_keeps_transaction_until_cancelled_job_finishes () =
   check int "history remains a hardlink to committed bytes"
     (Unix.stat canonical).Unix.st_ino (Unix.stat history).Unix.st_ino
 
+(* A busy one-domain pool holds the directory scan until its worker is free.
+   This exercises the store entry point rather than only the pool wrapper. *)
+let test_history_listing_waits_for_the_shared_pool () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+  let previous = Domain_pool_ref.get () in
+  Fun.protect ~finally:(fun () ->
+    match previous with
+    | None -> Domain_pool_ref.clear_for_tests ()
+    | Some pool -> Domain_pool_ref.set pool) @@ fun () ->
+  Domain_pool_ref.set pool;
+  Eio_guard.enable ();
+  Fun.protect ~finally:Eio_guard.disable @@ fun () ->
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
+  let clock = Eio.Stdenv.clock env in
+  let gate = Mutex.create () in
+  Mutex.lock gate;
+  let released = ref false in
+  let release () =
+    if not !released then (released := true; Mutex.unlock gate)
+  in
+  Fun.protect ~finally:release @@ fun () ->
+  let worker_entered = Atomic.make false in
+  let busy_done, busy_done_u = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    Domain_pool.submit_cpu pool (fun () ->
+      Atomic.set worker_entered true;
+      Mutex.lock gate;
+      Mutex.unlock gate);
+    Eio.Promise.resolve busy_done_u ());
+  Eio.Time.with_timeout_exn clock 2. (fun () ->
+    while not (Atomic.get worker_entered) do Eio.Time.sleep clock 0.001 done);
+  let listing_started, listing_started_u = Eio.Promise.create () in
+  let listing_done, listing_done_u = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    Eio.Promise.resolve listing_started_u ();
+    let files = Keeper_checkpoint_store.list_agent_core_history_files ~session_dir in
+    Eio.Promise.resolve listing_done_u files);
+  Eio.Promise.await listing_started;
+  Eio.Time.sleep clock 0.1;
+  check bool "history scan waits for the occupied shared pool" false
+    (Eio.Promise.is_resolved listing_done);
+  release ();
+  Eio.Promise.await busy_done;
+  check (list string) "empty session has no history" []
+    (Eio.Time.with_timeout_exn clock 2. (fun () -> Eio.Promise.await listing_done))
+
 let test_history_retention_after_syscall_offload () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -2095,6 +2145,8 @@ let () =
         [
           test_case "history syscall retains transaction through cancellation" `Quick
             test_history_link_keeps_transaction_until_cancelled_job_finishes;
+          test_case "history listing waits for the shared pool" `Quick
+            test_history_listing_waits_for_the_shared_pool;
           test_case "history syscall retains exact rolling window" `Quick
             test_history_retention_after_syscall_offload;
           test_case "history window follows the runtime setting" `Quick

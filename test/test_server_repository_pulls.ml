@@ -274,12 +274,12 @@ let test_unknown_key_is_refused () =
    repository is registered. *)
 let reader_keeper = "pr-reader"
 
-let write_reader_token base_path token =
+let write_reader_token ?(host = "github.com") base_path token =
   match Masc.Keeper_github_identity.secret_files_of_base_path ~base_path ~keeper_name:reader_keeper with
   | [ hosts ] ->
     write_file
       hosts
-      (Printf.sprintf "github.com:\n  user: reader\n  oauth_token: %s\n" token);
+      (Printf.sprintf "%s:\n  user: reader\n  oauth_token: %s\n" host token);
     Unix.chmod hosts 0o600
   | _ -> failf "expected one hosts.yml path for the reader"
 
@@ -316,6 +316,188 @@ let masc_pulls snapshot =
   match pulls_by_id snapshot with
   | [ ("masc", pulls) ] -> pulls
   | _ -> failf "expected the one registered repository"
+
+(* A workspace whose [repositories] table names a GitHub Enterprise endpoint:
+   the reader token is read from the hosts.yml section for that host. *)
+let enterprise_host = "ghe.example"
+let enterprise_graphql_url = "https://ghe.example/api/graphql"
+
+let enterprise_base_path ~token =
+  let base_path = temp_base_path () in
+  (match
+     Repo_store.save_all
+       ~base_path
+       [ repository ~id:"ghe" ~url:"https://ghe.example/o/r.git"
+       ; repository ~id:"masc" ~url:"https://github.com/jeong-sik/masc.git"
+       ]
+   with
+   | Ok () -> ()
+   | Error message -> failf "save_all: %s" message);
+  write_file
+    (Config_dir_resolver.runtime_toml_path_for_base_path ~base_path)
+    (Printf.sprintf
+       "[repositories]\npr_reader = %S\ngithub_host = %S\ngraphql_url = %S\n"
+       reader_keeper
+       enterprise_host
+       enterprise_graphql_url);
+  write_file
+    (Config_dir_resolver.keeper_toml_path_for_base_path ~base_path reader_keeper)
+    "[keeper]\n";
+  write_reader_token ~host:enterprise_host base_path token;
+  base_path
+
+(* Answers every call with [answer] and records the URL each call was posted to. *)
+let url_recording_stub answer =
+  let urls = ref [] in
+  let http_post ~url ~token:_ ~body:_ =
+    urls := url :: !urls;
+    answer
+  in
+  http_post, urls
+
+let test_configured_endpoint_reads_its_own_host () =
+  let base_path = enterprise_base_path ~token:"ghe_reader_token" in
+  let http_post, urls =
+    url_recording_stub (ok_response (page ~has_next:false ~cursor:None []))
+  in
+  let snapshot =
+    Pulls.refresh ~now ~http_post ~config:(Masc.Workspace.default_config base_path) ~previous:Pulls.initial
+  in
+  (match snapshot.reader with
+   | Pulls.Reader_ready { keeper } -> Alcotest.(check string) "reader" reader_keeper keeper
+   | _ -> failf "a declared Keeper with a hosts.yml token for the host must be ready");
+  Alcotest.(check (list string))
+    "every page goes to the configured endpoint"
+    [ enterprise_graphql_url ]
+    !urls;
+  match pulls_by_id snapshot with
+  | [ ("ghe", Pulls.Pulls_read { pulls = []; _ }); ("masc", Pulls.Pulls_not_github) ] -> ()
+  | _ -> failf "the enterprise remote is read and the github.com one is not this endpoint's"
+
+(* DNS names are case-insensitive (RFC 4343): a host declared in other case
+   than the remote, or than the lower-case hosts.yml section gh writes, is
+   still the same host. The [owner/repo] path keeps the remote's case. *)
+let test_host_case_does_not_hide_the_remote () =
+  let base_path = enterprise_base_path ~token:"ghe_reader_token" in
+  (match
+     Repo_store.save_all
+       ~base_path
+       [ repository ~id:"ghe" ~url:"https://Ghe.Example/Owner/Repo.git" ]
+   with
+   | Ok () -> ()
+   | Error message -> failf "save_all: %s" message);
+  write_file
+    (Config_dir_resolver.runtime_toml_path_for_base_path ~base_path)
+    (Printf.sprintf
+       "[repositories]\npr_reader = %S\ngithub_host = \"GHE.EXAMPLE\"\ngraphql_url = %S\n"
+       reader_keeper
+       enterprise_graphql_url);
+  let http_post, urls =
+    url_recording_stub (ok_response (page ~has_next:false ~cursor:None []))
+  in
+  let snapshot =
+    Pulls.refresh ~now ~http_post ~config:(Masc.Workspace.default_config base_path) ~previous:Pulls.initial
+  in
+  (match snapshot.reader with
+   | Pulls.Reader_ready _ -> ()
+   | _ -> failf "an upper-case host must find gh's lower-case hosts.yml section");
+  Alcotest.(check (list string)) "the remote is read" [ enterprise_graphql_url ] !urls;
+  match snapshot.repositories with
+  | [ { Pulls.repository_id = "ghe"; slug; pulls = Pulls.Pulls_read _; _ } ] ->
+    Alcotest.(check (option string)) "the path keeps its case" (Some "Owner/Repo") slug
+  | _ -> failf "a remote whose host differs only in case must be read"
+
+let test_absent_endpoint_keys_keep_the_github_defaults () =
+  Alcotest.(check string) "default host" "github.com" Pulls.default_github_host;
+  Alcotest.(check string)
+    "default endpoint"
+    "https://api.github.com/graphql"
+    Pulls.default_graphql_url;
+  let base_path = ready_base_path ~token:"[REDACTED]" in
+  let http_post, urls =
+    url_recording_stub (ok_response (page ~has_next:false ~cursor:None []))
+  in
+  let snapshot =
+    Pulls.refresh ~now ~http_post ~config:(Masc.Workspace.default_config base_path) ~previous:Pulls.initial
+  in
+  Alcotest.(check (list string))
+    "an undeclared endpoint posts to the default"
+    [ Pulls.default_graphql_url ]
+    !urls;
+  match masc_pulls snapshot with
+  | Pulls.Pulls_read _ -> ()
+  | _ -> failf "the default endpoint reads the github.com remote"
+
+let test_explicit_default_host_needs_no_endpoint () =
+  let base_path = ready_base_path ~token:"[REDACTED]" in
+  write_file
+    (Config_dir_resolver.runtime_toml_path_for_base_path ~base_path)
+    (Printf.sprintf "[repositories]\npr_reader = %S\ngithub_host = \"github.com\"\n" reader_keeper);
+  let http_post, urls =
+    url_recording_stub (ok_response (page ~has_next:false ~cursor:None []))
+  in
+  let snapshot =
+    Pulls.refresh ~now ~http_post ~config:(Masc.Workspace.default_config base_path) ~previous:Pulls.initial
+  in
+  (match snapshot.reader with
+   | Pulls.Reader_ready _ -> ()
+   | _ -> failf "naming the default host explicitly must still resolve");
+  Alcotest.(check (list string))
+    "the default host posts to the default endpoint"
+    [ Pulls.default_graphql_url ]
+    !urls
+
+let test_lone_endpoint_is_a_proxy_for_the_default_host () =
+  let proxy_url = "https://proxy.example/github-graphql" in
+  let base_path = ready_base_path ~token:"[REDACTED]" in
+  write_file
+    (Config_dir_resolver.runtime_toml_path_for_base_path ~base_path)
+    (Printf.sprintf "[repositories]\npr_reader = %S\ngraphql_url = %S\n" reader_keeper proxy_url);
+  let http_post, urls =
+    url_recording_stub (ok_response (page ~has_next:false ~cursor:None []))
+  in
+  let snapshot =
+    Pulls.refresh ~now ~http_post ~config:(Masc.Workspace.default_config base_path) ~previous:Pulls.initial
+  in
+  (match snapshot.reader with
+   | Pulls.Reader_ready _ -> ()
+   | _ -> failf "a lone endpoint must resolve as a proxy for the default host");
+  Alcotest.(check (list string)) "pages go to the lone endpoint" [ proxy_url ] !urls;
+  match masc_pulls snapshot with
+  | Pulls.Pulls_read _ -> ()
+  | _ -> failf "the proxied read still parses the github.com remote"
+
+let test_bad_endpoint_keys_are_invalid () =
+  let cases =
+    [ "github_host = \"https://ghe.example\"", "a scheme is not a bare hostname"
+    ; "github_host = \"ghe.example/o\"", "a path is not a bare hostname"
+    ; "github_host = \"ghe.example:8080\"", "a port is not a bare hostname"
+    ; "github_host = \"\"", "an empty host names nothing"
+    ; "github_host = 42", "a non-string host is not a hostname"
+    ; "github_host = \"ghe.example\"", "a non-default host without its endpoint has no valid reading"
+    ; "graphql_url = \"http://ghe.example/api/graphql\"", "a plaintext endpoint would publish the token"
+    ; "graphql_url = \"ghe.example/api/graphql\"", "a schemeless endpoint is not a URL"
+    ; "graphql_url = \"https://\"", "a bare scheme names no endpoint"
+    ; "graphql_url = 42", "a non-string endpoint is not a URL"
+    ]
+  in
+  List.iter
+    (fun (declaration, why) ->
+      let base_path = temp_base_path () in
+      write_file
+        (Config_dir_resolver.runtime_toml_path_for_base_path ~base_path)
+        (Printf.sprintf "[repositories]\npr_reader = \"edgar\"\n%s\n" declaration);
+      let snapshot =
+        Pulls.refresh
+          ~now
+          ~http_post:never_called
+          ~config:(Masc.Workspace.default_config base_path)
+          ~previous:Pulls.initial
+      in
+      match snapshot.reader with
+      | Pulls.Reader_declaration_invalid _ -> ()
+      | _ -> failf "%s: %s" declaration why)
+    cases
 
 let test_reader_ready_reads_with_the_keeper_token () =
   let base_path = ready_base_path ~token:"gho_from_hosts" in
@@ -425,13 +607,53 @@ let test_rejected_token_is_not_sent_again () =
    | Pulls.Pulls_failed { failure = Pulls.Token_rejected; observed_at } ->
      Alcotest.(check (float 0.)) "the first refusal's time stands" (now ()) observed_at
    | _ -> failf "the refusal must stay on screen while the token is unchanged");
-  (match second.rejected_token_digest with
-   | Some digest ->
-     Alcotest.(check bool) "the digest is not the token" false (String.equal digest "gho_revoked")
+  (match second.rejected_token with
+   | Some { Pulls.token_digest; graphql_url } ->
+     Alcotest.(check bool) "the digest is not the token" false (String.equal token_digest "gho_revoked");
+     Alcotest.(check string) "the refusing endpoint is kept" Pulls.default_graphql_url graphql_url
    | None -> failf "the refused token's digest must be kept");
   write_reader_token base_path "gho_new_login";
   let _third = Pulls.refresh ~now:later ~http_post ~config:(Masc.Workspace.default_config base_path) ~previous:second in
   Alcotest.(check int) "a new token is asked about" 2 !calls
+
+(* A refusal is one endpoint's answer about the token. Correcting
+   [graphql_url] while the token stays the same must ask the new endpoint,
+   not keep showing the old endpoint's 401. *)
+let test_a_new_endpoint_asks_about_a_refused_token () =
+  let refusing_url = "https://wrong.example/graphql" in
+  let base_path = ready_base_path ~token:"gho_reader" in
+  let declare graphql_url =
+    write_file
+      (Config_dir_resolver.runtime_toml_path_for_base_path ~base_path)
+      (Printf.sprintf "[repositories]\npr_reader = %S\ngraphql_url = %S\n" reader_keeper graphql_url)
+  in
+  let urls = ref [] in
+  let http_post ~url ~token:_ ~body:_ =
+    urls := url :: !urls;
+    if String.equal url refusing_url
+    then
+      Ok { Pulls.status = 401; body = "{}"; rate_limit_remaining = None; rate_limit_reset = None; retry_after_s = None }
+    else ok_response (page ~has_next:false ~cursor:None [])
+  in
+  let config = Masc.Workspace.default_config base_path in
+  declare refusing_url;
+  let first = Pulls.refresh ~now ~http_post ~config ~previous:Pulls.initial in
+  (match masc_pulls first with
+   | Pulls.Pulls_failed { failure = Pulls.Token_rejected; _ } -> ()
+   | _ -> failf "the refusing endpoint's 401 must read as a rejected token");
+  declare Pulls.default_graphql_url;
+  let later () = now () +. 60. in
+  let second = Pulls.refresh ~now:later ~http_post ~config ~previous:first in
+  Alcotest.(check (list string))
+    "the corrected endpoint is asked with the same token"
+    [ refusing_url; Pulls.default_graphql_url ]
+    (List.rev !urls);
+  (match masc_pulls second with
+   | Pulls.Pulls_read _ -> ()
+   | _ -> failf "the corrected endpoint's answer must replace the old refusal");
+  match second.rejected_token with
+  | None -> ()
+  | Some _ -> failf "no refusal is held once the new endpoint answers"
 
 (* GitHub's secondary rate limit: 403 with [retry-after] while the primary
    quota still has requests left. Reading it as a plain 403 would ask again
@@ -906,15 +1128,31 @@ let test_persisted_keeper_is_joined () =
     (List.map (fun row -> Yojson.Safe.to_string (Yojson.Safe.Util.member "keeper" row)) rows)
 
 let test_github_slug () =
+  let github = Pulls.default_github_host in
   List.iter
-    (fun (remote, expected) ->
-      Alcotest.(check (option string)) remote expected (Pulls.github_slug_of_remote remote))
-    [ "https://github.com/jeong-sik/masc.git", Some "jeong-sik/masc"
-    ; "git@github.com:jeong-sik/wkbl.git", Some "jeong-sik/wkbl"
-    ; "ssh://git@github.com/jeong-sik/figma-mcp", Some "jeong-sik/figma-mcp"
-    ; "https://gitlab.example/o/r.git", None
-    ; "https://github.com/only-owner", None
-    ]
+    (fun (host, remote, expected) ->
+      let label = Printf.sprintf "%s @@ %s" remote host in
+      Alcotest.(check (option string)) label expected (Pulls.github_slug_of_remote ~host remote))
+    [ github, "https://github.com/jeong-sik/masc.git", Some "jeong-sik/masc"
+    ; github, "git@github.com:jeong-sik/wkbl.git", Some "jeong-sik/wkbl"
+    ; github, "ssh://git@github.com/jeong-sik/figma-mcp", Some "jeong-sik/figma-mcp"
+    ; github, "https://gitlab.example/o/r.git", None
+    ; github, "https://github.com/only-owner", None
+    ; enterprise_host, "https://ghe.example/o/r.git", Some "o/r"
+    ; enterprise_host, "git@ghe.example:o/r.git", Some "o/r"
+    ; enterprise_host, "ssh://git@ghe.example/o/r.git", Some "o/r"
+    ; enterprise_host, "https://github.com/jeong-sik/masc.git", None
+    ; github, "https://ghe.example/o/r.git", None
+    ; github, "https://GitHub.com/jeong-sik/masc.git", Some "jeong-sik/masc"
+    ; "GHE.EXAMPLE", "git@ghe.example:o/r.git", Some "o/r"
+    ; enterprise_host, "ssh://git@GHE.example/Owner/Repo.git", Some "Owner/Repo"
+    ; enterprise_host, "https://ghe.example.evil/o/r.git", None
+    ; enterprise_host, "https://ghe.exampl/o/r.git", None
+    ];
+  Alcotest.(check (option string))
+    "the default host is github.com"
+    (Some "jeong-sik/masc")
+    (Pulls.github_slug_of_remote "https://github.com/jeong-sik/masc.git")
 
 let () =
   Alcotest.run
@@ -944,6 +1182,30 @@ let () =
             test_reader_not_declared_reads_nothing
         ; Alcotest.test_case "keeper missing" `Quick test_reader_keeper_missing
         ; Alcotest.test_case "unknown key refused" `Quick test_unknown_key_is_refused
+        ; Alcotest.test_case
+            "configured endpoint reads its own host"
+            `Quick
+            test_configured_endpoint_reads_its_own_host
+        ; Alcotest.test_case
+            "absent endpoint keys keep the github defaults"
+            `Quick
+            test_absent_endpoint_keys_keep_the_github_defaults
+        ; Alcotest.test_case
+            "bad endpoint keys are invalid"
+            `Quick
+            test_bad_endpoint_keys_are_invalid
+        ; Alcotest.test_case
+            "explicit default host needs no endpoint"
+            `Quick
+            test_explicit_default_host_needs_no_endpoint
+        ; Alcotest.test_case
+            "lone endpoint is a proxy for the default host"
+            `Quick
+            test_lone_endpoint_is_a_proxy_for_the_default_host
+        ; Alcotest.test_case
+            "host case does not hide the remote"
+            `Quick
+            test_host_case_does_not_hide_the_remote
         ; Alcotest.test_case "github slug" `Quick test_github_slug
         ; Alcotest.test_case
             "ready reader reads with the keeper token"
@@ -963,6 +1225,10 @@ let () =
             "rejected token is not sent again"
             `Quick
             test_rejected_token_is_not_sent_again
+        ; Alcotest.test_case
+            "a new endpoint asks about a refused token"
+            `Quick
+            test_a_new_endpoint_asks_about_a_refused_token
         ; Alcotest.test_case "rate limit waits for reset" `Quick test_rate_limit_waits_for_reset
         ; Alcotest.test_case
             "secondary limit waits for retry-after"

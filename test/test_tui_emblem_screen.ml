@@ -106,7 +106,8 @@ let test_pixels_leave_blank_rows_and_place_the_picture_there () =
   let origin_row, origin_col = origin in
   let top = p.View.row - origin_row in
   let left = p.View.column - origin_col in
-  check int "the mascot's picture slot" View.mascot_image_id p.View.image_id;
+  check int "the mascot's picture slot" (Masc_tui_graphics.image_id Masc_tui_graphics.Mascot)
+    p.View.image_id;
   check bool "placed inside the body" true (top >= 0 && top + p.View.box.View.rows <= rows);
   check int "centred left to right" left ((cols - p.View.box.View.cols) / 2);
   List.iteri

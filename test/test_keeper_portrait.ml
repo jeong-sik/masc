@@ -142,8 +142,8 @@ let test_pinned_name () =
       ~backdrop_hue:0.47156321624094832 ()
   in
   Alcotest.(check bool) "body" true (body_of_name name = expected);
-  Alcotest.(check bool) "equipment" true (equipment_of_name name = { bare with face = Freckles; base = Dish Gilt });
-  Alcotest.(check string) "pixels at 64" "4859244cb3011725145adb8bf50f53ec"
+  Alcotest.(check bool) "equipment" true (equipment_of_name name = { bare with head = Beanie; base = Dish Gilt });
+  Alcotest.(check string) "pixels at 64" "141b647cb851d95662c0bc1fd7ef80ff"
     (Digest.to_hex (Digest.string (draw ~equipment:(equipment_of_name name) (body_of_name name) 64)))
 
 (* A roster the size of the live one. Two names are stand-ins: the live
@@ -189,7 +189,9 @@ let test_every_item_shows () =
     (fun face -> match face with Bare_face -> () | Glasses | Shades | Eye_patch | Plaster | Freckles | Beard -> worn "face item" { bare with face })
     all_face_items;
   List.iter (fun neck -> match neck with Bare_neck -> () | Scarf -> worn "scarf" { bare with neck }) all_neck_items;
-  List.iter (fun head -> match head with Bare_head -> () | Bow -> worn "bow" { bare with head }) all_head_items;
+  List.iter
+    (fun head -> match head with Bare_head -> () | Bow | Crown | Beanie -> worn "head item" { bare with head })
+    all_head_items;
   List.iter
     (fun base -> match base with No_dish -> () | Dish _ -> worn "dish" { bare with base })
     all_base_items;
@@ -332,6 +334,54 @@ let test_scarf_leaves_the_mouth () =
           Alcotest.(check bool) "the mouth was drawn" true (!kept > 0))
         (corner_bodies ~mouth ()))
     all_mouths
+
+(* A beard hangs below the mouth and its fang: every pixel that is mouth or
+   tooth without one is the same with one. The old beard was a filled oval
+   whose top edge sat on the mouth line, so it covered the mouth and read as a
+   mask at small sizes. *)
+let test_beard_leaves_the_mouth () =
+  let n = 256 in
+  List.iter
+    (fun mouth ->
+      List.iter
+        (fun body ->
+          let plain = D.render body bare (size n) in
+          let bearded = D.render body { bare with face = Beard } (size n) in
+          let marked = [ D.For_testing.mouth_rgb body; D.For_testing.tooth_rgb body ] in
+          let kept = ref 0 in
+          for y = 0 to n - 1 do
+            for x = 0 to n - 1 do
+              let c, a = D.pixel plain ~x ~y in
+              if a = 255 && List.mem c marked then begin
+                incr kept;
+                Alcotest.(check bool) "mouth pixel kept under a beard" true (D.pixel bearded ~x ~y = (c, a))
+              end
+            done
+          done;
+          Alcotest.(check bool) "the mouth was drawn" true (!kept > 0))
+        (corner_bodies ~mouth ()))
+    all_mouths
+
+(* The beard is hair, not a pale fill: its colour is its own, so it cannot
+   read as a white mask over the face. *)
+let test_beard_is_not_the_wax () =
+  let n = 96 in
+  List.iter
+    (fun wax ->
+      let body = make ~wax () in
+      let bearded = D.render body { bare with face = Beard } (size n) in
+      let beard_rgb = D.For_testing.beard_rgb body in
+      let wax_rgb = D.For_testing.wax_rgb body in
+      Alcotest.(check bool) "the beard has its own colour" false (beard_rgb = wax_rgb);
+      let painted = ref 0 in
+      for y = 0 to n - 1 do
+        for x = 0 to n - 1 do
+          let c, a = D.pixel bearded ~x ~y in
+          if a = 255 && c = beard_rgb then incr painted
+        done
+      done;
+      Alcotest.(check bool) "the beard is drawn" true (!painted > 0))
+    all_wax
 
 (* Everything a part can reach: a body at the ranges' ends wearing an item in
    every slot, in the poses that stretch it most. *)
@@ -528,6 +578,8 @@ let () =
           Alcotest.test_case "face sits on the wax" `Quick test_face_sits_on_the_wax;
           Alcotest.test_case "every freckle shows on the wax" `Quick test_every_freckle_shows_on_the_wax;
           Alcotest.test_case "scarf leaves the mouth" `Quick test_scarf_leaves_the_mouth;
+          Alcotest.test_case "beard leaves the mouth" `Quick test_beard_leaves_the_mouth;
+          Alcotest.test_case "beard is not the wax" `Quick test_beard_is_not_the_wax;
           Alcotest.test_case "culling changes nothing" `Quick test_culling_changes_nothing;
           Alcotest.test_case "nothing reaches the border" `Quick test_nothing_reaches_the_border;
         ] );

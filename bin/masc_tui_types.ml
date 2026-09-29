@@ -5937,6 +5937,8 @@ type state = {
           problem, and it carries the counts -- so [f] stops being a walk
           through names a reader cannot see the size of. *)
   mutable board_scroll: int;
+  mutable board_comment_scroll: int;
+  mutable board_comments_focused: bool;
   mutable board_mode: board_mode;
   mutable board_focus: pane_focus;
   (* Wide terminals normally keep the Board list beside the open post. [z]
@@ -8158,6 +8160,8 @@ let create_state
   board_hearth = None;
   board_hearths = [];
   board_scroll = 0;
+  board_comment_scroll = 0;
+  board_comments_focused = false;
   board_mode = Board_list;
   board_focus = Right_pane;
   board_detail_wide = false;
@@ -8822,7 +8826,7 @@ let composer_extra_rows (state : state) =
     function of the state again, and every write lives on one side of it. *)
 type clamped_scroll =
   | Task_detail of int
-  | Board_read of int
+  | Board_read of (int * int)
   | Message_scroll of int
   | Schedule_detail_scroll of int
   | Keeper_detail of int
@@ -8915,7 +8919,9 @@ let scroll_down_from scroll ~by =
 
 let apply_clamped_scroll (state : state) = function
   | Task_detail value -> state.task_detail_scroll <- value
-  | Board_read value -> state.board_scroll <- value
+  | Board_read (body, comments) ->
+      state.board_scroll <- body;
+      state.board_comment_scroll <- comments
   | Message_scroll value -> set_msg_scroll state value
   | Schedule_detail_scroll value -> state.schedule_scroll <- value
   | Keeper_detail value -> state.detail_scroll <- value

@@ -81,7 +81,7 @@ let test_parameters_keep_their_order_and_requirement () =
        check (list string) (name ^ " required, in order") required (required_names name))
     [ "Read", [ "file_path"; "cwd"; "offset"; "limit" ], [ "file_path" ]
     ; ( "Edit"
-      , [ "file_path"; "old_string"; "new_string"; "replace_all" ]
+      , [ "file_path"; "cwd"; "old_string"; "new_string"; "replace_all" ]
       , [ "file_path"; "old_string"; "new_string" ] )
     ; "Write", [ "file_path"; "content" ], [ "file_path"; "content" ]
     ; "Grep", [ "pattern"; "path"; "glob"; "type"; "-i" ], [ "pattern" ]

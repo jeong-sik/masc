@@ -14,8 +14,9 @@ const slotNames: Record<ItemSlot, string> = {
   face: '얼굴', neck: '목', head: '머리', hand: '손', base: '받침',
 }
 
-function candle(milli: number): string {
-  return `${(milli / 1000).toLocaleString('en-US', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} Candle`
+function candle(milli: string): string {
+  const padded = milli.padStart(4, '0')
+  return `${BigInt(padded.slice(0, -3)).toLocaleString('en-US')}.${padded.slice(-3)} Candle`
 }
 
 export function KeeperItemsPanel({ keeper }: { keeper: Keeper }) {

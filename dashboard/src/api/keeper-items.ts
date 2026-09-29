@@ -3,11 +3,11 @@ import { DEFAULT_GET_TIMEOUT_MS } from '../config/constants'
 import { EQUIPMENT_IDS, type KeeperEquipment } from './schemas/keeper-portrait'
 
 export type ItemSlot = keyof KeeperEquipment
-export type KeeperItem = { id: string; slot: ItemSlot; priceMilli: number | null }
+export type KeeperItem = { id: string; slot: ItemSlot; priceMilli: string | null }
 export type KeeperItemsReading =
   | { status: 'off'; keeper: string }
   | { status: 'disabled'; keeper: string; reason: string }
-  | { status: 'ready'; keeper: string; balanceMilli: number; ownedItems: string[]; catalog: KeeperItem[] }
+  | { status: 'ready'; keeper: string; balanceMilli: string; ownedItems: string[]; catalog: KeeperItem[] }
 
 const slots: ItemSlot[] = ['face', 'neck', 'head', 'hand', 'base']
 const itemSlot = new Map<string, ItemSlot>(
@@ -21,8 +21,8 @@ function record(value: unknown, keys: string[]): Record<string, unknown> {
   return fields
 }
 
-function nonnegativeInteger(value: unknown): number {
-  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) throw new Error('Invalid Item amount')
+function canonicalAmount(value: unknown): string {
+  if (typeof value !== 'string' || !/^(0|[1-9][0-9]*)$/.test(value)) throw new Error('Invalid Item amount')
   return value
 }
 
@@ -33,7 +33,7 @@ function catalogEntry(value: unknown): KeeperItem {
   const slot = itemSlot.get(String(entry.id))
   if (slot === undefined || entry.slot !== slot) throw new Error('Invalid Item catalog entry')
   if (entry.price_status !== 'priced' && entry.price_status !== 'unpriced') throw new Error('Invalid Item price status')
-  return { id: entry.id as string, slot, priceMilli: priced ? nonnegativeInteger(entry.price_milli) : null }
+  return { id: entry.id as string, slot, priceMilli: priced ? canonicalAmount(entry.price_milli) : null }
 }
 
 export function parseKeeperItems(value: unknown, keeper: string): KeeperItemsReading {
@@ -60,7 +60,7 @@ export function parseKeeperItems(value: unknown, keeper: string): KeeperItemsRea
   const ownedItems = fields.owned_items
   if (ownedItems.some(id => typeof id !== 'string' || !itemSlot.has(id)) ||
       new Set(ownedItems).size !== ownedItems.length) throw new Error('Invalid owned Items')
-  return { status, keeper, balanceMilli: nonnegativeInteger(fields.balance_milli), ownedItems, catalog }
+  return { status, keeper, balanceMilli: canonicalAmount(fields.balance_milli), ownedItems, catalog }
 }
 
 export async function fetchKeeperItems(keeper: string, signal?: AbortSignal): Promise<KeeperItemsReading> {

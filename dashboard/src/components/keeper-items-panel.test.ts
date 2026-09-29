@@ -15,20 +15,26 @@ const keeper = (name: string) => ({ name, portrait: { state: 'ready', equipment:
   face: 'bare_face', neck: 'bare_neck', head: 'crown', hand: 'empty_hand', base: 'no_dish',
 } } }) as Keeper
 const catalog = Object.entries(EQUIPMENT_IDS).flatMap(([slot, ids]) =>
-  ids.slice(1).map(id => ({ id, slot, priceMilli: id === 'crown' ? 200 : null })),
+  ids.slice(1).map(id => ({ id, slot, priceMilli: id === 'crown' ? '200' : null })),
 )
 
 afterEach(() => { cleanup(); vi.resetAllMocks() })
 
 describe('Keeper Item tab', () => {
   it('shows observed balance, prices, ownership and equipment', async () => {
-    fetchKeeperItems.mockResolvedValue({ status: 'ready', keeper: 'rondo', balanceMilli: 800, ownedItems: ['crown'], catalog })
+    fetchKeeperItems.mockResolvedValue({ status: 'ready', keeper: 'rondo', balanceMilli: '800', ownedItems: ['crown'], catalog })
     render(html`<${KeeperItemsPanel} keeper=${keeper('rondo')} />`)
     expect(await screen.findByText('0.800 Candle')).toBeTruthy()
     expect(screen.getByText('보유 1 / 18개')).toBeTruthy()
     expect(screen.getByText('착용 중')).toBeTruthy()
     expect(screen.getAllByText('가격 미설정').length).toBe(17)
     expect(screen.getByTestId('portrait')).toBeTruthy()
+  })
+
+  it('prints wallets beyond JavaScript safe integers exactly', async () => {
+    fetchKeeperItems.mockResolvedValue({ status: 'ready', keeper: 'rondo', balanceMilli: '9007199254740993', ownedItems: [], catalog })
+    render(html`<${KeeperItemsPanel} keeper=${keeper('rondo')} />`)
+    expect(await screen.findByText('9,007,199,254,740.993 Candle')).toBeTruthy()
   })
 
   it('shows disabled and unreadable states without inventing an account', async () => {
@@ -42,7 +48,7 @@ describe('Keeper Item tab', () => {
   })
 
   it('does not show the previous Keeper account after switching', async () => {
-    fetchKeeperItems.mockResolvedValueOnce({ status: 'ready', keeper: 'rondo', balanceMilli: 800, ownedItems: [], catalog })
+    fetchKeeperItems.mockResolvedValueOnce({ status: 'ready', keeper: 'rondo', balanceMilli: '800', ownedItems: [], catalog })
       .mockResolvedValueOnce({ status: 'off', keeper: 'geek-scout' })
     const view = render(html`<${KeeperItemsPanel} keeper=${keeper('rondo')} />`)
     expect(await screen.findByText('0.800 Candle')).toBeTruthy()

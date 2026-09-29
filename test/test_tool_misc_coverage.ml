@@ -289,7 +289,7 @@ let () = test "parse_searxng_json_basic" (fun () ->
         {"title": "Example", "url": "https://example.com/", "content": "A page."}
       ]}|}
   in
-  let items = Tool_misc.parse_searxng_json payload in
+  let items = Result.get_ok (Tool_misc.parse_searxng_json payload) in
   assert (List.length items = 2);
   match items with
   | (title1, url1, _) :: (title2, url2, _) :: _ ->
@@ -302,11 +302,11 @@ let () = test "parse_searxng_json_basic" (fun () ->
 
 let () = test "parse_searxng_json_empty_results" (fun () ->
   let payload = {|{"results": []}|} in
-  assert (Tool_misc.parse_searxng_json payload = [])
+  assert (Tool_misc.parse_searxng_json payload = Ok [])
 )
 
 let () = test "parse_searxng_json_malformed" (fun () ->
-  assert (Tool_misc.parse_searxng_json "not json" = [])
+  assert (Result.is_error (Tool_misc.parse_searxng_json "not json"))
 )
 
 let () = test "web_search_provider_plan_includes_searxng_when_configured" (fun () ->
@@ -373,11 +373,9 @@ let () = test "web_search_provider_plan_empty_without_credentials" (fun () ->
                       (str_contains
                          (Tool_result.message result)
                          "no web search provider is configured");
-                    (* The real dispatch path must hit search_impl's own
-                       empty-chain branch — the simulator above is a twin
-                       loop, not the production one. With an empty plan
-                       the loop terminates before any HTTP call and
-                       failures are never cached. *)
+                    (* Exercise the dispatch boundary as well as the shared
+                       provider chain. With an empty plan the chain ends
+                       before any HTTP call and failures are never cached. *)
                     let ctx = make_test_ctx () in
                     (match
                        Tool_misc.dispatch ctx ~name:"masc_web_search"
@@ -427,16 +425,14 @@ let () = test "parse_brave_llm_context_json" (fun () ->
       "sources":{"https://example.com/effects":{"title":"Effect Handlers","hostname":"example.com"}}}|}
   in
   match Tool_misc.parse_brave_llm_context_json payload with
-  | [ (url1, title1, snippets1); (url2, title2, snippets2) ] ->
+  | Ok [ (url1, title1, snippets1); (url2, title2, snippets2) ] ->
       assert (url1 = "https://example.com/effects");
       assert (title1 = "Effect Handlers");
       assert (snippets1 = [ "OCaml 5 introduces effect handlers."; "| Table row | data |" ]);
       assert (url2 = "https://example.com/untitled");
       assert (title2 = "https://example.com/untitled");
       assert (snippets2 = [ "Title falls back to the url." ])
-  | entries ->
-      failwith
-        (Printf.sprintf "expected two grounded entries, got %d" (List.length entries))
+  | _ -> failwith "expected two grounded entries"
 )
 
 let () = test "parse_ollama_search_json" (fun () ->
@@ -448,8 +444,8 @@ let () = test "parse_ollama_search_json" (fun () ->
   in
   assert
     (Tool_misc.parse_ollama_search_json payload
-     = [ ("Effect Handlers", "https://example.com/effects", "OCaml 5 effects.") ]);
-  assert (Tool_misc.parse_ollama_search_json "not json" = [])
+     = Ok [ ("Effect Handlers", "https://example.com/effects", "OCaml 5 effects.") ]);
+  assert (Result.is_error (Tool_misc.parse_ollama_search_json "not json"))
 )
 
 let () = test "web_search_provider_plan_admits_ollama_with_key" (fun () ->
@@ -468,8 +464,8 @@ let () = test "web_search_provider_plan_admits_ollama_with_key" (fun () ->
 )
 
 let () = test "parse_brave_llm_context_json_malformed" (fun () ->
-  assert (Tool_misc.parse_brave_llm_context_json "not json" = []);
-  assert (Tool_misc.parse_brave_llm_context_json {|{"grounding":{}}|} = [])
+  assert (Result.is_error (Tool_misc.parse_brave_llm_context_json "not json"));
+  assert (Result.is_error (Tool_misc.parse_brave_llm_context_json {|{"grounding":{}}|}))
 )
 
 let () = test "web_search_provider_plan_admits_brave_llm_context_only_explicitly" (fun () ->
@@ -604,13 +600,151 @@ let () = test "web_search_snippet_is_a_bounded_preview" (fun () ->
 let () = test "web_search_simulate_for_test_reports_all_failures" (fun () ->
   let result =
     Tool_misc.web_search_simulate_for_test ~query:"ocaml eio" ~limit:3
-      [ ("brave", `Empty); ("exa", `Error "provider unavailable") ]
+      [ ("brave", `Error "invalid JSON"); ("exa", `Error "provider unavailable") ]
   in
   assert (not (Tool_result.is_success result));
   assert (Tool_result.failure_class result = Some Tool_result.Runtime_failure);
   assert
     (str_contains (Tool_result.message result) "exa: provider unavailable");
   assert_call_span result
+)
+
+(* Exercise the valid-empty case hidden by the observed no-results error
+   after a searxng transport failure. The shared production chain
+   must return an answer, retaining the failed provider as evidence. *)
+let () = test "web_search_empty_answer_survives_failed_fallbacks" (fun () ->
+  List.iter (fun outcomes ->
+    let result =
+      Tool_misc.web_search_simulate_for_test ~query:"rare exact phrase" ~limit:3 outcomes
+    in
+    assert (Tool_result.is_success result);
+    assert (Tool_result.failure_class result = None);
+    let data = Tool_result.data result in
+    let open Yojson.Safe.Util in
+    assert (data |> member "result" |> member "engine" |> to_string = "ollama");
+    assert (data |> member "result" |> member "result_count" |> to_int = 0);
+    assert (data |> member "result" |> member "results" |> to_list = []);
+    assert (data |> member "provider_errors" |> to_list = [`String "searxng: unavailable"]))
+    [ ["searxng", `Error "unavailable"; "ollama", `Empty]
+    ; ["ollama", `Empty; "searxng", `Error "unavailable"] ];
+  let empty = Tool_misc.web_search_simulate_for_test ~query:"none" ~limit:3
+      ["ollama", `Empty] in
+  assert (Tool_result.is_success empty)
+)
+
+let () = test "web_search_empty_answer_still_tries_next_provider" (fun () ->
+  let result = Tool_misc.web_search_simulate_for_test ~query:"ocaml" ~limit:3
+      ["brave", `Grounded []; "ollama", `Empty;
+       "exa", `Hits ["OCaml", "https://ocaml.org", "Language"]] in
+  assert (Tool_result.is_success result);
+  let open Yojson.Safe.Util in
+  assert (Tool_result.data result |> member "result" |> member "engine"
+          |> to_string = "exa")
+)
+
+(* A failed query can recover to a grounded empty answer. Repeating that
+   query retains both the empty envelope and failure evidence from cache,
+   even if the provider would now fail. Only the provider calls are replaced. *)
+let () = test "dispatch_web_search_grounded_empty_answer_is_cached" (fun () ->
+  with_boot_override "MASC_WEB_SEARCH_CACHE_TTL_SEC" None (fun () ->
+  with_env "MASC_WEB_SEARCH_CACHE_TTL_SEC" (Some "900") (fun () ->
+    let ctx = make_test_ctx () in
+    let args = `Assoc ["query", `String "grounded empty cache recovery contract"] in
+    let dispatch outcomes =
+      Tool_misc.with_web_search_simulation_for_test ~outcomes (fun () ->
+        match Tool_misc.dispatch ctx ~name:"masc_web_search" ~args with
+        | Some result -> result
+        | None -> failwith "masc_web_search was not dispatched")
+    in
+    let failure = dispatch ["searxng", `Error "search engines unavailable"] in
+    assert (Tool_result.failure_class failure = Some Tool_result.Runtime_failure);
+    let recovered = dispatch
+        ["searxng", `Error "search engines unavailable";
+         "brave_llm_context", `Grounded []] in
+    assert (Tool_result.is_success recovered);
+    let data = Tool_result.data recovered in
+    let open Yojson.Safe.Util in
+    let result = data |> member "result" in
+    assert (result |> member "grounded" |> to_bool);
+    assert (result |> member "engine" |> to_string = "brave_llm_context");
+    assert (result |> member "result_count" |> to_int = 0);
+    assert (result |> member "sources" |> to_list = []);
+    assert (result |> member "results" = `Null);
+    assert (data |> member "provider_errors" |> to_list
+            = [`String "searxng: search engines unavailable"]);
+    let cached = dispatch ["brave_llm_context", `Error "provider now unavailable"] in
+    assert (Tool_result.is_success cached);
+    assert (Tool_result.data cached = data))))
+
+let () = test "web_search_empty_array_is_distinct_from_invalid_response" (fun () ->
+  List.iter (fun (parse, empty) ->
+    assert (parse empty = Ok []);
+    List.iter (fun malformed ->
+      match parse malformed with
+      | Error (Tool_misc_web_search.Parse _) -> ()
+      | _ -> failwith "invalid provider response must not become an empty answer")
+      ["not json"; "{}"; "null"; {|{"results":null}|};
+       {|{"results":[{"title":"bad","url":"ftp://example.com"}]}|}])
+    [ Tool_misc.parse_searxng_json, {|{"results":[]}|}
+    ; Tool_misc.parse_ollama_search_json, {|{"results":[]}|}
+    ; Tool_misc.parse_tavily_json, {|{"results":[]}|}
+    ; Tool_misc.parse_exa_json, {|{"results":[]}|}
+    ; Tool_misc.parse_brave_json, {|{"web":{"results":[]}}|}
+    ; Tool_misc.parse_bing_search_json, {|{"webPages":{"value":[]}}|} ]
+)
+
+(* task-1823: Brave's 200 schema makes [web] a nullable object. A search
+   envelope with [web] null or absent is a real no-hit answer; an envelope we
+   cannot read stays a Parse failure (#39802 rule). *)
+let () = test "web_search_brave_null_or_absent_web_is_an_empty_answer" (fun () ->
+  List.iter (fun body -> assert (Tool_misc.parse_brave_json body = Ok []))
+    [ {|{"type":"search","query":{"original":"rare phrase"},"web":null}|}
+    ; {|{"type":"search","query":{"original":"rare phrase"}}|} ];
+  List.iter (fun body ->
+    match Tool_misc.parse_brave_json body with
+    | Error (Tool_misc_web_search.Parse _) -> ()
+    | _ -> failwith ("Brave body must stay a Parse failure: " ^ body))
+    [ {|{"type":"search","web":{}}|}
+    ; {|{"type":"search","web":{"results":null}}|}
+    ; {|{"type":"search","web":"x"}|}
+    ; {|{"type":"search","web":[]}|}
+    ; {|{"web":null}|}
+    ; {|{"type":"other","web":null}|}
+    ; {|[]|}
+    ; {|"search"|} ]
+)
+
+let () = test "web_search_brave_only_null_web_answers_with_zero_results" (fun () ->
+  let null_web = {|{"type":"search","query":{"original":"rare phrase"},"web":null}|} in
+  let result =
+    Tool_misc.web_search_simulate_for_test ~query:"rare phrase" ~limit:3
+      [ ("brave", `Brave_body null_web) ]
+  in
+  assert (Tool_result.is_success result);
+  assert (Tool_result.failure_class result = None);
+  let open Yojson.Safe.Util in
+  let data = Tool_result.data result in
+  assert (data |> member "result" |> member "engine" |> to_string = "brave");
+  assert (data |> member "result" |> member "result_count" |> to_int = 0);
+  assert (data |> member "result" |> member "results" |> to_list = []);
+  assert (data |> member "provider_errors" = `Null);
+  let broken =
+    Tool_misc.web_search_simulate_for_test ~query:"rare phrase" ~limit:3
+      [ ("brave", `Brave_body {|{"type":"search","web":{}}|}) ]
+  in
+  assert (not (Tool_result.is_success broken));
+  assert (Tool_result.failure_class broken = Some Tool_result.Runtime_failure);
+  assert (str_contains (Tool_result.message broken) "brave: parse:")
+)
+
+let () = test "web_search_searxng_engine_outage_is_not_an_empty_answer" (fun () ->
+  assert (Tool_misc.parse_searxng_json
+      {|{"results":[],"unresponsive_engines":[["google","timeout"]]}|}
+      = Error (Tool_misc_web_search.Server "search engines unavailable"));
+  assert (Tool_misc.parse_searxng_json
+      {|{"results":[],"unresponsive_engines":[]}|} = Ok []);
+  assert (Result.is_error (Tool_misc.parse_searxng_json
+      {|{"results":[],"unresponsive_engines":false}|}))
 )
 
 let () = test "web_search_provider_error_to_string_renders_typed_variants" (fun () ->
@@ -787,17 +921,17 @@ let () = test "parse_official_provider_json_payloads" (fun () ->
     Tool_misc.parse_bing_search_json
       {|{"webPages":{"value":[{"name":"Bing title","url":"https://example.com/bing","snippet":"Bing snippet"}]}}|}
   in
-  assert (brave = [ ("Brave title", "https://example.com/brave", "Brave snippet") ]);
-  assert (tavily = [ ("Tavily title", "https://example.com/tavily", "Tavily snippet") ]);
-  assert (exa = [ ("Exa title", "https://example.com/exa", "Exa snippet") ]);
-  assert (bing = [ ("Bing title", "https://example.com/bing", "Bing snippet") ])
+  assert (brave = Ok [ ("Brave title", "https://example.com/brave", "Brave snippet") ]);
+  assert (tavily = Ok [ ("Tavily title", "https://example.com/tavily", "Tavily snippet") ]);
+  assert (exa = Ok [ ("Exa title", "https://example.com/exa", "Exa snippet") ]);
+  assert (bing = Ok [ ("Bing title", "https://example.com/bing", "Bing snippet") ])
 )
 
 let () = test "parse_official_provider_json_payloads_tolerate_malformed_json" (fun () ->
-  assert (Tool_misc.parse_brave_json {|{"web":|} = []);
-  assert (Tool_misc.parse_tavily_json {|{"results": "oops"}|} = []);
-  assert (Tool_misc.parse_exa_json {|{"results": [}|} = []);
-  assert (Tool_misc.parse_bing_search_json {|{"webPages": "oops"}|} = [])
+  assert (Result.is_error (Tool_misc.parse_brave_json {|{"web":|}));
+  assert (Result.is_error (Tool_misc.parse_tavily_json {|{"results": "oops"}|}));
+  assert (Result.is_error (Tool_misc.parse_exa_json {|{"results": [}|}));
+  assert (Result.is_error (Tool_misc.parse_bing_search_json {|{"webPages": "oops"}|}))
 )
 
 let () = test "redact_transport_error_detail" (fun () ->

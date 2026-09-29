@@ -4,7 +4,7 @@ let osc_bell body = "\x1b]" ^ body ^ "\x07"
 let osc_st body = "\x1b]" ^ body ^ "\x1b\\"
 
 let graphics_reply status =
-  Printf.sprintf "\x1b_Gi=%d;%s\x1b\\" Masc_tui_graphics.query_id status
+  Printf.sprintf "\x1b_Gi=%d;%s\x1b\\" (Masc_tui_graphics.image_id Masc_tui_graphics.Graphics_query) status
 ;;
 
 let foreground = osc_bell "10;rgb:12/ab/00"

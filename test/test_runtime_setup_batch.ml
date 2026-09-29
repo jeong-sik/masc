@@ -170,6 +170,55 @@ let test_verification_report () = fixture (fun base _runtime binary spec _origin
     (unreadable "d=json.loads(report(a[3])); d['extra']='x'; print(json.dumps(d))");
   Alcotest.check Alcotest.bool "a report naming another runtime is refused" true
     (unreadable "print(report('other.runtime'))"))
+let contains text part =
+  let n = String.length part in
+  let rec at i = i + n <= String.length text && (String.sub text i n = part || at (i + 1)) in
+  at 0
+(* A spent quota or a rate limit is the provider declining for the account's
+   usage, not a wrong selection: the runtime is published and named as
+   unmeasured while the other selected runtime is still verified. Each code
+   starts from the original file, so each pass proves its own publication. A
+   different failure later in the same batch still refuses the save and
+   publishes nothing. *)
+let test_usage_limit_publishes () = fixture (fun base runtime binary spec original ->
+  let specs=[spec "verified";spec "limited"] in
+  let verified_id, limited_id = match List.map (fun s -> (Runtime_setup_spec.render s).runtime_id) specs with
+    | [v; l] -> v, l | _ -> Alcotest.fail "two fixture specs" in
+  let limited = Yojson.Safe.to_string (`String limited_id) in
+  List.iter (fun code ->
+    let verify = Printf.sprintf
+      "l=%s; print(report(a[3],status='failed',failure={'code':'%s','message':'m','detail':'fixture %s'}) if a[3]==l else report(a[3])); sys.exit(1 if a[3]==l else 0)"
+      limited code code in
+    fake ~verify base binary "pass";
+    save runtime original;
+    let revision=get (Batch.observe ~base_path:base) in
+    match apply base binary specs [verified_id; limited_id] revision true with
+    | Ok ({ Batch.readiness = Batch.Usage_limited ({ Batch.runtime_id; code = reported }, []); _ } as receipt) ->
+      Alcotest.check Alcotest.string (code ^ ": the limited runtime is named") limited_id runtime_id;
+      let json = Batch.receipt_json receipt in
+      Alcotest.check Alcotest.string (code ^ ": the receipt says usage_limited") "usage_limited"
+        Yojson.Safe.Util.(json |> member "readiness" |> to_string);
+      Alcotest.check (Alcotest.list (Alcotest.pair Alcotest.string Alcotest.string)) (code ^ ": the receipt lists what was not measured")
+        [limited_id, code]
+        Yojson.Safe.Util.(json |> member "unverified" |> to_list
+          |> List.map (fun row -> (row |> member "runtime_id" |> to_string), (row |> member "code" |> to_string)));
+      Alcotest.check Alcotest.string (code ^ ": the report's code is kept") code reported;
+      Alcotest.check Alcotest.bool (code ^ ": the limited runtime is published") true
+        (contains (text runtime) (Runtime_setup_spec.render (spec "limited")).runtime_toml)
+    | Ok _ -> Alcotest.fail (code ^ ": the usage limit was not reported")
+    | Error error -> Alcotest.fail (code ^ ": " ^ Batch.error_message error))
+    ["quota_exhausted"; "rate_limited"];
+  let verify = Printf.sprintf
+    "l=%s; print(report(a[3],status='failed',failure=({'code':'quota_exhausted','message':'m','detail':'fixture quota'} if a[3]==l else {'code':'provider_rejected','message':'refused','detail':'HTTP 400 from fixture'}))); sys.exit(1)"
+    limited in
+  fake ~verify base binary "pass";
+  let before = text runtime in
+  let revision=get (Batch.observe ~base_path:base) in
+  Alcotest.check Alcotest.bool "a later non-usage failure still refuses the save" true
+    (match apply base binary specs [limited_id; verified_id] revision true with
+     | Error (Batch.Verification_failed { runtime_id; code = "provider_rejected"; _ }) -> runtime_id = verified_id
+     | Ok _ | Error _ -> false);
+  Alcotest.check Alcotest.string "a refused save publishes nothing" before (text runtime))
 let test_rollback () = fixture (fun _base runtime _binary _spec original ->
   let sibling = Filename.concat (Filename.dirname runtime) "sibling.toml" in
   let real path mode contents = Fs_compat.write_file_atomic_strict_staged path ~write:(fun out ->
@@ -251,5 +300,6 @@ let () = Alcotest.run "runtime setup batch" ["workspace",[
   Alcotest.test_case "runtime compare-and-swap" `Quick test_cas;
   Alcotest.test_case "native refusal publishes nothing" `Quick test_refusal;
   Alcotest.test_case "verification report is read back typed" `Quick test_verification_report;
+  Alcotest.test_case "a usage limit publishes the runtime unmeasured" `Quick test_usage_limit_publishes;
   Alcotest.test_case "before and after rename failures restore pair" `Quick test_rollback;
   Alcotest.test_case "credential lifetime joins commit" `Quick test_credential_commit_join]]

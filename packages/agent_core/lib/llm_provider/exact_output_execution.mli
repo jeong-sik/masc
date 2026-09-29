@@ -8,11 +8,9 @@ type output_normalization_error = Exact_output_plan.output_normalization_error =
   | Invalid_json of string
 
 type normalized_output = Exact_output_plan.normalized_output =
-  | Text_output of string
-  | Json_output of
-      { value : Yojson.Safe.t
-      ; validation : Exact_output_plan.json_validation_provenance
-      }
+  { value : Yojson.Safe.t
+  ; validation : Exact_output_plan.json_validation_provenance
+  }
 
 type effect_phase =
   | Before_dispatch
@@ -37,8 +35,6 @@ type one_dispatch_receipt =
   | Terminal_receipt of response_receipt
 
 type execute_once_error_cause =
-  | Clock_required_for_timeout
-  | Frozen_request_mismatch
   | Response_body_deadline_exceeded
   | Provider_error of Http_client.http_error
   | Output_normalization_failed of output_normalization_error
@@ -77,7 +73,7 @@ val receipt_request_body_sha256 : one_dispatch_receipt -> string
 
 val execute_once_with_evidence
   :  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
-  -> ?clock:_ Eio.Time.clock
+  -> clock:_ Eio.Time.clock
   -> ?on_phase:(Http_client_phase_observer.phase -> unit)
   -> Exact_output_plan.t
   -> (normalized_outcome_with_evidence, execute_once_error_with_evidence) result

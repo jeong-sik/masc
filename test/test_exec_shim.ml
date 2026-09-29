@@ -622,6 +622,35 @@ let test_read_config_file_refuses_a_file_others_may_write () =
         check string "a file only its owner may write is read" root config.Exec_shim.remote_root
       | Error e -> fail e)
 
+let test_endpoint_file_io_errors_retain_the_os_cause () =
+  with_tmp_tree (fun root ->
+      let regular = Filename.concat root "regular" in
+      write_endpoint_file regular "not a directory\n";
+      let readers =
+        [ "config file", (fun path -> Exec_shim.read_config_file path |> Result.map ignore)
+        ; "env_file", (fun path -> Exec_shim.read_env_file (Some path) |> Result.map ignore)
+        ]
+      in
+      List.iter
+        (fun (path, cause) ->
+           List.iter
+             (fun (label, read) ->
+                match read path with
+                | Ok () -> fail (label ^ " unexpectedly loaded")
+                | Error error ->
+                  check bool (label ^ " retains error classification") true
+                    (is_config_error error);
+                  check bool (label ^ " names the inaccessible path") true
+                    (contains path error);
+                  check bool (label ^ " identifies the failing operation") true
+                    (contains ": open: " error);
+                  check bool (label ^ " preserves the OS cause") true
+                    (contains (Unix.error_message cause) error))
+             readers)
+        [ Filename.concat root "absent", Unix.ENOENT
+        ; Filename.concat regular "child", Unix.ENOTDIR
+        ])
+
 (* Every way out of the reader closes the descriptor it opened: a refused mode,
    a path that is not a regular file, a missing file, and a read. Counted from
    the descriptor table, since a leak returns no error. *)
@@ -1019,6 +1048,8 @@ let () =
                       test_read_config_file_refuses_a_file_others_may_write
                   ; test_case "reads leave no descriptor open" `Quick
                       test_endpoint_file_reads_leave_no_descriptor_open
+                  ; test_case "I/O errors retain the OS cause" `Quick
+                      test_endpoint_file_io_errors_retain_the_os_cause
                   ; test_case "payload env reads the configured file" `Quick
                       test_payload_env_reads_the_configured_file
                   ; test_case "a boxed run's scratch is laid over it" `Quick

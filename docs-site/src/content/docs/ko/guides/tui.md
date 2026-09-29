@@ -67,7 +67,7 @@ dune build bin/masc_tui.exe
 `Enter`로 들어가면 `[`/`]`로 아홉 개 탭을 순회합니다: Info · Sandbox · Settings · Secrets · GitHub · Identity · Channels · Automation · Runs.
 
 - **Sandbox** 탭에서 `d`/`m`/`s`는 각각 Docker, MicroVM, Remote SSH로 즉시 전환합니다. 설정 파일을 고치지 않고 전환 즉시 반영됩니다.
-- 목록에서 `c` 대화, `l` 로그, `t` 도구 호출, `u` 런타임 레인 선택, `g` 승인 모드(yolo/auto) 전환, `p`/`w` 일시정지·깨우기, `s` 종료입니다.
+- 목록에서 `c` 대화, `l` 로그, `t` 도구 호출, `u` 런타임 레인 선택, `g` 승인 모드(yolo/auto) 전환, `p`/`w` 일시정지·깨우기, `s` 종료입니다. Keeper 행을 클릭하면 선택되고, 선택된 행을 다시 클릭하면 `Enter`처럼 상세 화면이 열립니다.
 
 ### Planning과 Fusion
 Planning의 `v`는 세 탭을 순회합니다: Goals, Task Review, Task Verdicts. Goals는 목표 수명주기이고 뒤의 둘은 Task 판정의 앞뒤 절반이라, 순서가 아니라 서로 다른 주제입니다. 심의(Fusion)는 별도의 링 항목이며, 실행 목록에서 `Enter`로 상세를 엽니다. 실행 중인 행의 `STATE`는 현재 단계를 그대로 보여 줍니다: `accepted`, `panel(N)`, `judge(A/F)`, `computed(A/F)`, `recording(A/F)`.

@@ -41,12 +41,12 @@ type json_validation_provenance =
   | Json_syntax_validated
   | Provider_schema_requested_client_validation_required
 
+(** Every exact plan asks for JSON, so every normalized answer is a JSON
+    value. Under [Off] the prompt asked for it and it is read locally. *)
 type normalized_output =
-  | Text_output of string
-  | Json_output of
-      { value : Yojson.Safe.t
-      ; validation : json_validation_provenance
-      }
+  { value : Yojson.Safe.t
+  ; validation : json_validation_provenance
+  }
 
 type output_normalization_error =
   | Incomplete_structured_response of Types.stop_reason
@@ -119,14 +119,17 @@ val finalize_measured
 val fingerprint : t -> fingerprint
 val response_format : t -> Types.response_format
 val request_body_sha256 : t -> string
-val request_url : t -> string
-val request_headers : t -> (string * string) list
+(** The request parsed when the plan was frozen. A binding whose URL or
+    headers cannot be sent is refused as [Provider_request_rejected] before it
+    becomes a plan. *)
+val dispatch_request : t -> Http_client.validated_sync_request
+(** The frozen body bytes, whose digest is {!request_body_sha256}. Dispatch
+    sends {!dispatch_request}; this is what a reader inspects. *)
 val request_body : t -> string
 val response_codec : t -> Provider_http_codec.t
 val provider_kind : t -> Provider_config.provider_kind
 val connect_timeout_s : t -> float option
 val body_timeout_s : t -> float option
-val verify_frozen_request : t -> bool
 
 (** Decode and normalize the provider response against the frozen output
     contract. Fails via {!output_normalization_error} — {!Invalid_json} when

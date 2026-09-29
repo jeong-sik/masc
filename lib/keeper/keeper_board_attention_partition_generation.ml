@@ -2,6 +2,7 @@ type t = int
 
 let initial = 0
 let equal = Int.equal
+let is_later ~previous generation = Int.compare generation previous > 0
 
 let next generation =
   if Int.equal generation Int.max_int

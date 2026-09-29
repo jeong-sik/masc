@@ -13,8 +13,31 @@ let ( let* ) = Result.bind
 let clamp_priority p =
   max 1 (min 5 p)
 
+(* Who owns a Goal (#39571). A Goal recorded no owner before this, so a
+   legacy row decodes to [Unknown_owner] — an explicit value, never an empty
+   string a reader could mistake for a real name. *)
+type owner =
+  | Owner of string
+  | Unknown_owner
+
+let owner_to_yojson = function
+  | Owner name -> `String name
+  | Unknown_owner -> `String "unknown"
+
+let owner_of_yojson = function
+  | `String name ->
+      let name = String.trim name in
+      if String.equal name "" || String.equal name "unknown" then Ok Unknown_owner
+      else Ok (Owner name)
+  | _ -> Error "owner must be a string"
+
+let owner_of_name = function
+  | Some name when String.trim name <> "" -> Owner name
+  | _ -> Unknown_owner
+
 type goal = {
   id : string;
+  owner : owner;
   criterion_revision : string;
   title : string;
   metric : string option;
@@ -24,6 +47,8 @@ type goal = {
   phase : Goal_phase.t;
   last_review_note : string option;
   last_review_at : string option;
+  notified_refuted_key : string option;
+  notified_overdue_key : string option;
   created_at : string;
   updated_at : string;
 }
@@ -84,6 +109,7 @@ let goal_to_yojson (goal : goal) =
   `Assoc
     [
       ("id", `String goal.id);
+      ("owner", owner_to_yojson goal.owner);
       ("criterion_revision", `String goal.criterion_revision);
       ("title", `String goal.title);
       ("metric", Json_util.string_opt_to_json goal.metric);
@@ -93,6 +119,8 @@ let goal_to_yojson (goal : goal) =
       ("phase", Goal_phase.to_yojson goal.phase);
       ("last_review_note", Json_util.string_opt_to_json goal.last_review_note);
       ("last_review_at", Json_util.string_opt_to_json goal.last_review_at);
+      ("notified_refuted_key", Json_util.string_opt_to_json goal.notified_refuted_key);
+      ("notified_overdue_key", Json_util.string_opt_to_json goal.notified_overdue_key);
       ("created_at", `String goal.created_at);
       ("updated_at", `String goal.updated_at);
     ]
@@ -122,6 +150,7 @@ let rejected ~field detail : ('a, schema_rejection) result =
 
 let accepted_goal_fields =
   [ "id"
+  ; "owner"
   ; "criterion_revision"
   ; "title"
   ; "metric"
@@ -131,6 +160,8 @@ let accepted_goal_fields =
   ; "phase"
   ; "last_review_note"
   ; "last_review_at"
+  ; "notified_refuted_key"
+  ; "notified_overdue_key"
   ; "created_at"
   ; "updated_at"
   ]
@@ -198,9 +229,23 @@ let goal_of_yojson : Yojson.Safe.t -> (goal, schema_rejection) result = function
                 rejected ~field:"priority"
                   (Printf.sprintf "goal %S: priority must be an int 1-5" id)
           in
+          (* [owner] is optional: a row written before #39571 has no member
+             and reads as [Unknown_owner]. A present but non-string value is
+             still a corrupt row and is rejected like any other member. *)
+          let* owner =
+            match Json_util.assoc_member_opt "owner" json with
+            | None | Some `Null -> Ok Unknown_owner
+            | Some owner_json ->
+                (match owner_of_yojson owner_json with
+                 | Ok owner -> Ok owner
+                 | Error detail ->
+                     rejected ~field:"owner"
+                       (Printf.sprintf "goal %S: %s" id detail))
+          in
           Ok
             {
               id;
+              owner;
               criterion_revision;
               title;
               metric = Json_util.get_string json "metric";
@@ -210,6 +255,8 @@ let goal_of_yojson : Yojson.Safe.t -> (goal, schema_rejection) result = function
               phase;
               last_review_note = Json_util.get_string json "last_review_note";
               last_review_at = Json_util.get_string json "last_review_at";
+              notified_refuted_key = Json_util.get_string json "notified_refuted_key";
+              notified_overdue_key = Json_util.get_string json "notified_overdue_key";
               created_at;
               updated_at;
             }
@@ -669,7 +716,7 @@ let blank_opt = function
   | Some raw -> String.trim raw = ""
 
 let upsert_goal config ?id ?title ?metric ?target_value ?due_date
-    ?priority () =
+    ?priority ?owner () =
   let is_new_goal = id = None in
   if is_new_goal && (title = None || title = Some "") then
     Error (Rejected "title required for new goal")
@@ -746,6 +793,7 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
                   let new_goal =
                       {
                         id = resolved_id;
+                        owner = owner_of_name owner;
                         criterion_revision = Random_id.hex ~bytes:16;
                         title = Option.value title ~default:"Untitled goal";
                         metric;
@@ -755,6 +803,8 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
                         phase = Goal_phase.Executing;
                         last_review_note = None;
                         last_review_at = None;
+                        notified_refuted_key = None;
+                        notified_overdue_key = None;
                         created_at = now;
                         updated_at = now;
                       }

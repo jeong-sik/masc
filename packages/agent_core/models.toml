@@ -721,6 +721,9 @@ supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
 
+# Legacy catalog row for persisted runtime.toml bindings. Ollama's
+# /v1/models did not list this id on 2026-09-26; the seed uses
+# deepseek-v4.1-flash instead. Remove this row only after live bindings migrate.
 [[models]]
 id_prefix = "deepseek-v4-flash"
 provider_name = "ollama_cloud"
@@ -4023,6 +4026,7 @@ id_prefix = "glm-5.3-flash"
 provider_name = "ollama_cloud"
 max_context_tokens = 1048576
 
+# Ollama GET /v1/models listed deepseek-v4.1-flash on 2026-09-26.
 # ollama.com serves this model under both the bare name and a ":cloud" suffix.
 # Earlier comment here claimed "a prefix match covers the pair from one row" --
 # false for the provider-scoped path a runtime binding actually resolves

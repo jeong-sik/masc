@@ -1018,6 +1018,7 @@ let handle_tool_execute_typed
                   ~base_path:config.base_path ~stdout ~stderr ~output
                 |> Result.map (fun fields ->
                   ( { Keeper_execute_output_files.fields
+                    ; compared_output_bytes = String.length output
                     ; release_sources = (fun () -> ())
                     }
                     (* Published files mark themselves "complete" in the
@@ -1051,6 +1052,7 @@ let handle_tool_execute_typed
                        "Execute ran, but its complete output could not be preserved. The exit status and captured preview are retained; do not repeat the command to recover its output."))
              | Ok (publication, completeness_evidence) ->
                let output_fields = publication.Keeper_execute_output_files.fields in
+               let handler_stored = List.mem_assoc "output_artifact" output_fields in
                let timeout_fields =
                  exit_report.Keeper_tool_execute_exit_report.timeout_fields
                in
@@ -1078,7 +1080,10 @@ let handle_tool_execute_typed
                   provider request (#39035). *)
                let execution_evidence =
                  Keeper_tool_call_log.execution_evidence_metadata
-                   ([ "shim_execution_evidence", shim_execution_evidence_json receipts ]
+                   ([ "shim_execution_evidence", shim_execution_evidence_json receipts
+                    ; "compared_output_bytes", `Int publication.compared_output_bytes
+                    ; "handler_stored", `Bool handler_stored
+                    ]
                     @ completeness_evidence
                     @ sandbox_extra_fields)
                in

@@ -100,23 +100,33 @@ let account_file account_home =
    ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN before the /login account, and
    a non-interactive session always uses ANTHROPIC_API_KEY when it is set
    (code.claude.com/docs/en/iam, "Authentication precedence", read
-   2026-09-28). [client_environment] passes all of them to a child on the
+   2026-09-28). [client_environment] passes all of these to a child on the
    inherited home and none to a selected home. *)
-let credentials_over_login =
+let provider_switches =
   [ "CLAUDE_CODE_USE_BEDROCK"; "CLAUDE_CODE_USE_VERTEX"; "CLAUDE_CODE_USE_FOUNDRY"
-  ; "CLAUDE_CODE_USE_MANTLE"; "ANTHROPIC_AUTH_TOKEN"; "ANTHROPIC_API_KEY"
-  ; "CLAUDE_CODE_OAUTH_TOKEN"
+  ; "CLAUDE_CODE_USE_MANTLE"
   ]
+
+let credentials_before_login =
+  [ "ANTHROPIC_AUTH_TOKEN"; "ANTHROPIC_API_KEY"; "CLAUDE_CODE_OAUTH_TOKEN" ]
+
+let environment_credential_names = provider_switches @ credentials_before_login
+
+(* The 2.1.283 bundle reads a provider switch as on only for "1", "true",
+   "yes" or "on", ignoring case and surrounding space. *)
+let switch_on value =
+  List.mem (String.lowercase_ascii (String.trim value)) [ "1"; "true"; "yes"; "on" ]
 
 let runs_on_environment_credential = function
   | Some _ -> false
   | None ->
-    List.exists
-      (fun name ->
-        match Env_config_core.raw_value_opt name with
-        | Some value -> value <> ""
-        | None -> false)
-      credentials_over_login
+    let set test name =
+      match Env_config_core.raw_value_opt name with
+      | Some value -> test value
+      | None -> false
+    in
+    List.exists (set switch_on) provider_switches
+    || List.exists (set (fun value -> value <> "")) credentials_before_login
 ;;
 
 let timeout_s_for_phase config ~turn_admitted =
@@ -216,7 +226,6 @@ type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_
       }
 
 type host_stop = Runtime_official_client_tool.host_stop =
-  | Queued_chat_operation
   | Repeated_tool_call of
       { tool_name : string
       ; repeated_count : int
@@ -325,6 +334,7 @@ type error =
       { detail : string
       ; turn_admitted : bool
       }
+  | Unhandled_exception of string
   | Timeout of float
 
 exception Runtime_error of error
@@ -359,8 +369,6 @@ let error_to_string = function
       "Claude Code stopped after repeated tool call: tool=%s count=%d"
       tool_name
       repeated_count
-  | Stopped_by_host { stop = Queued_chat_operation; _ } ->
-    "Claude Code stopped for a queued chat operation"
   | Stopped_by_host { stop = Terminal_tool_boundary { tool_name; _ }; _ } ->
     Printf.sprintf "Claude Code stopped at terminal tool boundary: tool=%s" tool_name
   | Quota_blocked
@@ -383,6 +391,7 @@ let error_to_string = function
   | Process_exited { detail; turn_admitted } ->
     Printf.sprintf "Claude Code exited before terminal result (turn_admitted=%b): %s"
       turn_admitted detail
+  | Unhandled_exception detail -> "Claude Code runtime raised: " ^ detail
   | Timeout seconds ->
     Printf.sprintf "Claude Code stream was idle for %.3fs" seconds
 ;;
@@ -400,6 +409,7 @@ let error_kind = function
   | Stopped_by_host _ -> "stopped_by_host"
   | Quota_blocked _ -> "quota_blocked"
   | Process_exited _ -> "process_exited"
+  | Unhandled_exception _ -> "unhandled_exception"
   | Timeout _ -> "timeout"
 ;;
 
@@ -2044,10 +2054,7 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
     | Idle_timeout seconds -> Error (Timeout seconds)
     | Eio.Time.Timeout as exn -> raise exn
     | Runtime_error error -> Error error
-    | exn ->
-      Error
-        (Protocol_error
-           { stage = "runtime boundary"; detail = Printexc.to_string exn })
+    | exn -> Error (Unhandled_exception (Printexc.to_string exn))
   in
   (match result with
    | Ok turn ->
@@ -2069,8 +2076,7 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
    | Error
        (Stopped_by_host
           { stop =
-              ( Queued_chat_operation
-              | Repeated_tool_call _
+              ( Repeated_tool_call _
               | Terminal_tool_boundary
                   { outcome =
                       (Terminal_completed | Durable_stimulus_deferred)

@@ -517,12 +517,9 @@ let cause_shows_size (cause : Exact_output.execution_error_cause) =
   (* An answer that came back unusable is a refused output, which §4.3 counts
      among the failures reading less answers. *)
   | Incomplete_output | Missing_output | Ambiguous_output _
-  | Unexpected_output_content | Invalid_json_output | Internal_non_json_output
+  | Unexpected_output_content | Invalid_json_output
   | Response_body_deadline_exceeded -> true
   | Completion_failed { error; dispatch } -> completion_failure_shows_size ~dispatch error
-  (* Nothing was judged: this process could not start, time, or match the
-     attempt it held. *)
-  | Attempt_already_started | Clock_required_for_timeout | Frozen_request_mismatch -> false
 ;;
 
 (* A candidate the flow turned away before dispatch. One reason is about the
@@ -906,7 +903,7 @@ let execute_answer
            (exact_execution_error ~semantic_rejections:prior_rejections cause))
     in
     (* The CLI tail follows the same advancement rule as HTTP successors;
-       input-specific and infrastructure failures keep their terminal. *)
+       only masc's own failures keep their terminal. *)
     (match Exact_output.flow_execution_terminal_kind cause with
      | Exact_output.Advanceable_candidates_exhausted ->
        (match

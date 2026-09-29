@@ -46,16 +46,19 @@ type verification_request = {
   created_at: float;
 }
 
-(** What one pass over the request directory found.
+(** What one pass over the request directory found, each readable request
+    as the reader keeps it.
 
     Both fields are reported. Returning only [readable] would drop the rest
     silently; returning an error for the whole scan lets one file decide for
     every other. The directory being unenumerable is still an error, because
     then neither list is known. *)
-type request_scan = {
-  readable: verification_request list;
+type 'a scan = {
+  readable: 'a list;
   unreadable: unreadable_request list;
 }
+
+type request_scan = verification_request scan
 
 (** Serialization *)
 
@@ -205,7 +208,10 @@ let unreadable_to_yojson { unreadable_path; unreadable_detail } =
       ("detail", `String unreadable_detail);
     ]
 
-let list_requests_uncached base_path =
+(* [load] reads the request a file id names; the directory walk, the drop
+   report and the split into readable and unreadable are the same for every
+   reader. *)
+let scan_directory base_path ~load =
   let surface = "verification" in
   let observe_drop ~reason =
     Otel_metric_store.inc_counter Otel_metric_store.metric_persistence_read_drops
@@ -227,35 +233,43 @@ let list_requests_uncached base_path =
     Error (Printf.sprintf "verification request directory unreadable: %s" detail)
   | Ok files ->
     let files = List.filter (fun f -> Filename.check_suffix f ".json") files in
-    let rec load readable unreadable = function
+    let rec scan readable unreadable = function
       | [] -> Ok { readable = List.rev readable; unreadable = List.rev unreadable }
       | file :: rest ->
         let id = Filename.chop_suffix file ".json" in
-        (match load_request base_path id with
-         | Ok request -> load (request :: readable) unreadable rest
+        (match load id with
+         | Ok kept -> scan (kept :: readable) unreadable rest
          | Error detail ->
            let path = Filename.concat dir file in
            report_drop
              ~reason:Read_drop_reason.Entry_load_error
              ~path
              ~detail;
-           load
+           scan
              readable
              ({ unreadable_path = path; unreadable_detail = detail } :: unreadable)
              rest)
     in
-    load [] [] files
+    scan [] [] files
 
-let empty_scan = { readable = []; unreadable = [] }
+let scan_present_directory base_path ~load =
+  let dir = verifications_dir base_path in
+  match verification_directory dir with
+  | Error detail -> Error detail
+  | Ok Missing_directory -> Ok { readable = []; unreadable = [] }
+  | Ok Present_directory -> scan_directory base_path ~load
 
 (* Public entry: read the current directory and every current-schema request.
    Content identity is not inferred from filesystem timestamps. *)
 let list_requests base_path =
-  let dir = verifications_dir base_path in
-  match verification_directory dir with
-  | Error detail -> Error detail
-  | Ok Missing_directory -> Ok empty_scan
-  | Ok Present_directory -> list_requests_uncached base_path
+  scan_present_directory base_path ~load:(load_request base_path)
+
+(* [save_request] replaces a request file atomically, so a written file is a
+   new inode and never the version a projection was kept for. *)
+let list_projected cache ~project base_path =
+  scan_present_directory base_path ~load:(fun id ->
+    File_version_cache.load cache (request_path base_path id) ~decode:(fun () ->
+      Result.map project (load_request base_path id)))
 
 (** High-level API *)
 

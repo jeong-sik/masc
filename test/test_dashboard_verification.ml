@@ -792,6 +792,51 @@ let test_awaiting_view_without_a_readable_backlog_carries_the_reason () =
        | `String s -> s
        | _ -> Alcotest.fail "backlog_error is not a string"))
 
+(* A listing keeps each request's row for the version of its file, so a file
+   unchanged since the last listing is not read again: with its bytes made
+   unreadable to this process, the row still comes back and nothing is
+   reported unreadable. Writing the request replaces the file, and the next
+   listing reads the new one. *)
+let test_an_unchanged_request_file_is_not_read_again () =
+  with_temp_base_path (fun base_path ->
+    let titled title =
+      `Assoc
+        [ ("required_artifacts", `List [])
+        ; ("submitted_evidence", `List [])
+        ; ("task_title", `String title)
+        ]
+    in
+    let create title =
+      match
+        V.create_request ~base_path ~task_id:"task-kept" ~output:(titled title)
+          ~criteria:[ "kept" ] ~worker:"keeper-alpha"
+          ~request_id:"vrf-kept" ()
+      with
+      | Ok req -> req
+      | Error e -> Alcotest.fail (Printf.sprintf "create_request failed: %s" e)
+    in
+    let listing () =
+      let j = D.requests_json ~base_path () in
+      let titles =
+        match member "requests" j with
+        | `List rows -> List.map (string_field "task_title") rows
+        | _ -> Alcotest.fail "requests is not a list"
+      in
+      titles, int_field "unreadable_total" j
+    in
+    let req = create "first" in
+    Alcotest.(check (pair (list string) int)) "the first listing reads the file"
+      ([ "first" ], 0) (listing ());
+    let path = Workspace_verification_store.request_path base_path req.V.id in
+    Unix.chmod path 0o000;
+    Fun.protect ~finally:(fun () -> Unix.chmod path 0o600) (fun () ->
+      Alcotest.(check (pair (list string) int))
+        "an unchanged file is neither read again nor reported unreadable"
+        ([ "first" ], 0) (listing ()));
+    ignore (create "second" : V.verification_request);
+    Alcotest.(check (pair (list string) int)) "a written file is read again"
+      ([ "second" ], 0) (listing ()))
+
 let test_offset_pages_the_history_without_overlap () =
   with_temp_base_path (fun base_path ->
     let made =
@@ -973,6 +1018,8 @@ let () =
         test_projection_survives_an_unreadable_record;
       Alcotest.test_case "offset pages the history without overlap" `Quick
         test_offset_pages_the_history_without_overlap;
+      Alcotest.test_case "an unchanged request file is not read again" `Quick
+        test_an_unchanged_request_file_is_not_read_again;
     ];
     "queue_view", [
       Alcotest.test_case "awaiting tasks name the request they wait on" `Quick

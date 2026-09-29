@@ -32,13 +32,16 @@ type verification_request = {
   created_at: float;
 }
 
-(** What one pass over the request directory found. Callers report both fields:
-    [readable] alone is a silent drop, and failing the scan over one entry in
-    [unreadable] loses every readable request with it. *)
-type request_scan = {
-  readable: verification_request list;
+(** What one pass over the request directory found, each readable request as
+    the reader keeps it. Callers report both fields: [readable] alone is a
+    silent drop, and failing the scan over one entry in [unreadable] loses
+    every readable request with it. *)
+type 'a scan = {
+  readable: 'a list;
   unreadable: unreadable_request list;
 }
+
+type request_scan = verification_request scan
 
 (** {1 Serialization} *)
 
@@ -65,6 +68,17 @@ val list_requests : string -> (request_scan, string) result
     Each unreadable entry still increments the [persistence_read_drops] counter
     at read time, so the metric keeps meaning "this many records did not make
     it into the projection". *)
+
+val list_projected :
+  'a File_version_cache.t ->
+  project:(verification_request -> 'a) ->
+  string ->
+  ('a scan, string) result
+(** [list_projected cache ~project base_path] is {!list_requests} with each
+    readable request passed through [project], and the projection kept in
+    [cache] for the version of the file it came from. A file unchanged since
+    the last pass is stat'ed, not read or parsed. An unreadable file is read
+    again on every pass and reported the same way. *)
 
 (** {1 High-level API} *)
 

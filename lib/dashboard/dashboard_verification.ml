@@ -1,8 +1,8 @@
 (** Dashboard projection for verification requests.
 
-    Reads [<base_path>/.masc/verifications/*.json] via {!Verification.list_requests}
-    and emits the Mission detail table row structure. No mutation, no
-    network. *)
+    Reads [<base_path>/.masc/verifications/*.json] via
+    {!Verification.list_projected} and emits the Mission detail table row
+    structure. No mutation, no network. *)
 
 module V = Verification
 
@@ -225,6 +225,27 @@ let request_to_json (req : V.verification_request) : Yojson.Safe.t =
 
 (* ── Snapshot assembly ──────────────────────────────── *)
 
+(* What a listing keeps from a request: the fields it filters, joins and
+   orders the whole store by, and the row a page shows. [request_to_json]
+   reads nothing but the request, so a row stays right for as long as its file
+   is the version it was built from, and a listing parses only the files that
+   changed since the last one. *)
+type listed = {
+  listed_id : string;
+  listed_task_id : string;
+  listed_created_at : float;
+  row : Yojson.Safe.t;
+}
+
+let listed_of_request (req : V.verification_request) =
+  { listed_id = req.V.id
+  ; listed_task_id = req.V.task_id
+  ; listed_created_at = req.V.created_at
+  ; row = request_to_json req
+  }
+
+let listed_requests : listed File_version_cache.t = File_version_cache.create ()
+
 (** Load the request scan from the supplied MASC base_path.
 
     [failwith] is kept for the directory-level error, where the scan produced
@@ -233,15 +254,15 @@ let request_to_json (req : V.verification_request) : Yojson.Safe.t =
     reported alongside the requests that did read. Before this, one such file
     raised here and the whole endpoint answered 500, which named a single path
     while hiding how many records the reader had actually rejected. *)
-let load_scan ~base_path () : V.request_scan =
-  match V.list_requests base_path with
+let load_scan ~base_path () : listed V.scan =
+  match V.list_projected listed_requests ~project:listed_of_request base_path with
   | Ok scan -> scan
   | Error detail -> failwith detail
 
 (* Operator-facing shape for the files the reader could not parse. Emitted on
    every projection that reads the store, so an unreadable record is visible
    without having to correlate a counter against a log line. *)
-let unreadable_fields (scan : V.request_scan) =
+let unreadable_fields (scan : _ V.scan) =
   [ ("unreadable_total", `Int (List.length scan.V.unreadable))
   ; ( "unreadable"
     , `List (List.map V.unreadable_to_yojson scan.V.unreadable) )
@@ -249,19 +270,18 @@ let unreadable_fields (scan : V.request_scan) =
 
 (** Filter by task_id when the caller requested a specific task. Empty
     string is treated as "no filter" to match the HTTP contract. *)
-let filter_by_task_id (requests : V.verification_request list)
-    (task_id : string option) : V.verification_request list =
+let filter_by_task_id (requests : listed list)
+    (task_id : string option) : listed list =
   match task_id with
   | None -> requests
   | Some "" -> requests
   | Some id ->
-      List.filter (fun (r : V.verification_request) ->
-        String.equal r.V.task_id id) requests
+      List.filter (fun (r : listed) ->
+        String.equal r.listed_task_id id) requests
 
-let sort_desc (requests : V.verification_request list)
-  : V.verification_request list =
-  List.sort (fun (a : V.verification_request) b ->
-    compare b.V.created_at a.V.created_at) requests
+let sort_desc (requests : listed list) : listed list =
+  List.sort (fun (a : listed) b ->
+    compare b.listed_created_at a.listed_created_at) requests
 
 let take = List.take
 
@@ -270,10 +290,10 @@ let fd_pressure_fields () = Keeper_fd_pressure.projection_fields ()
 (* Compute the request-listing projection from an already-loaded list.
    Factored out so [proof_compose] can share the disk scan between
    summary and request listing. *)
-let id_set (requests : V.verification_request list) =
+let id_set (requests : listed list) =
   let seen = Hashtbl.create (List.length requests) in
   List.iter
-    (fun (r : V.verification_request) -> Hashtbl.replace seen r.V.id ())
+    (fun (r : listed) -> Hashtbl.replace seen r.listed_id ())
     requests;
   seen
 
@@ -309,9 +329,9 @@ let awaiting_fields ~limit ~backlog_error ~backlog_recovery ~unresolved =
     against a task-filtered list reported every *other* task's live id as
     missing. *)
 let filter_by_view ~limit (view : queue_view)
-    ~(store : V.verification_request list)
-    (requests : V.verification_request list)
-  : V.verification_request list * (string * Yojson.Safe.t) list =
+    ~(store : listed list)
+    (requests : listed list)
+  : listed list * (string * Yojson.Safe.t) list =
   let join ~recovery (live : awaiting_task list) =
     let wanted = Hashtbl.create (List.length live) in
     List.iter
@@ -319,7 +339,7 @@ let filter_by_view ~limit (view : queue_view)
       live;
     let kept =
       List.filter
-        (fun (r : V.verification_request) -> Hashtbl.mem wanted r.V.id)
+        (fun (r : listed) -> Hashtbl.mem wanted r.listed_id)
         requests
     in
     let present = id_set store in
@@ -344,7 +364,7 @@ let filter_by_view ~limit (view : queue_view)
     join ~recovery:(Some detail) live
 
 let requests_json_of_requests ?task_id ~limit ~offset ~view
-    (scan : V.request_scan) : Yojson.Safe.t =
+    (scan : listed V.scan) : Yojson.Safe.t =
   let filtered = filter_by_task_id scan.V.readable task_id in
   let in_view, view_fields =
     filter_by_view ~limit view ~store:scan.V.readable filtered
@@ -363,7 +383,7 @@ let requests_json_of_requests ?task_id ~limit ~offset ~view
      ; ("truncated", `Bool (total > offset + List.length page))
      ; ( "requests"
        , `List
-           (List.map request_to_json page) )
+           (List.map (fun (listed : listed) -> listed.row) page) )
      ]
      @ view_fields
      @ unreadable_fields scan

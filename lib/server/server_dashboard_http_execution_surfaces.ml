@@ -1352,7 +1352,7 @@ let execution_cached_http_representation ~(config : Workspace.config)
   let { fixture; actor; full_mode; force } = parameters in
   match fixture, actor, full_mode, force with
   | None, None, false, false ->
-    with_execution_publication_lock (fun () ->
+    let selected = with_execution_publication_lock (fun () ->
       match !execution_default_light_http with
       | Ready payload
         when execution_surface_has_fresh_success_unlocked ()
@@ -1361,8 +1361,13 @@ let execution_cached_http_representation ~(config : Workspace.config)
           Http_response_payload.select_prepared payload.encoded
             ~accept_encoding:(Httpun.Headers.get request.headers "accept-encoding")
         in
-        Some (body, payload.etag, headers)
-      | Empty | Preparing _ | Ready _ -> None)
+        Some (payload.response_json, (body, payload.etag, headers))
+      | Empty | Preparing _ | Ready _ -> None) in
+    (match selected with
+     | Some (json, representation)
+       when Dashboard_projection_cache.with_current_keeper_portraits ~config json = json ->
+       Some representation
+     | Some _ | None -> None)
   | _ -> None
 ;;
 
@@ -1487,7 +1492,7 @@ type execution_http_response =
   | Execution_json of Yojson.Safe.t
   | Execution_payload of Dashboard_cache.cached_payload
 
-let dashboard_execution_http_response ~sw ~clock context =
+let cached_dashboard_execution_http_response ~sw ~clock context =
   let state = context.state in
   let config = context.config in
   let net = state.Mcp_server.net in
@@ -1660,6 +1665,19 @@ let dashboard_execution_http_response ~sw ~clock context =
       Execution_json
         (with_execution_metadata ~config ~cache_key ~query payload.json)
     else Execution_payload payload
+;;
+
+let dashboard_execution_http_response ~sw ~clock context =
+  let response = cached_dashboard_execution_http_response ~sw ~clock context in
+  match context.parameters.fixture with
+  | Some _ -> response
+  | None ->
+    let refresh = Dashboard_projection_cache.with_current_keeper_portraits ~config:context.config in
+    match response with
+    | Execution_json json -> Execution_json (refresh json)
+    | Execution_payload payload ->
+      let json = refresh payload.json in
+      if json = payload.json then response else Execution_json json
 ;;
 
 let dashboard_execution_http_json ~state ~sw ~clock request =

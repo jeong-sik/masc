@@ -2124,13 +2124,10 @@
  (deps %{workspace_root}/lib/otel_metric_store/otel_metric_store_core.ml)
  (libraries alcotest ast_grep otel_metric_store eio eio_main))
 
-; The source-structure case reads the store's source, so it is a dep here too.
-
 (test
  (name test_otel_metric_total)
  (modules test_otel_metric_total)
- (deps %{workspace_root}/lib/otel_metric_store/otel_metric_store_core.ml)
- (libraries alcotest ast_grep otel_metric_store))
+ (libraries alcotest otel_metric_store))
 
 ; Real local exact-output fixture shared by exact-output lane tests.
 (library

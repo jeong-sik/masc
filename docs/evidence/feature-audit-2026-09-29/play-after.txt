@@ -1,0 +1,17 @@
+✔ a failed seat read retries without a new move and restores playable controls (5.401417ms)
+✔ a frame rejected for wrong byte count is fetched again before acknowledging its mark (1.808083ms)
+✔ a frame rejected for invalid base64 is fetched again before acknowledging its mark (1.215625ms)
+✔ a failed seat request after an input retries while the activity feed is unchanged (1.874833ms)
+✔ eject clears the last picture and the game pad (1.883333ms)
+✔ no_machine hides the old pad while seat is unavailable and a loaded game restores controls (1.075292ms)
+✔ a malformed frame does not prevent new activity from refreshing the controller (0.828875ms)
+✔ choosing a handoff discovers an invite added while the machine stays idle (1.256ms)
+✔ revoked access keeps controls disabled and stops sending moves (0.922583ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 9
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 103.49225

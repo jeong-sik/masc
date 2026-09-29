@@ -1,0 +1,82 @@
+{
+  "scope": "Actual shipped page in Chromium with fixture API responses; no deployed binary or DOS emulator validation.",
+  "source_sha256": "82b3df8bef6be56d063c2c5f1d4029b3ccb356e707f3df899bc582733354c7c2",
+  "browser_version": "149.0.7827.55",
+  "seat_reads": 6,
+  "frame_reads": 3,
+  "checks": [
+    "seat recovers without machine activity",
+    "failed frame is fetched again",
+    "pad click sends input",
+    "pass updates controller",
+    "eject clears pixels"
+  ],
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/play",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/pad",
+      "query": ""
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/play/pad",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/dos/pass",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    }
+  ],
+  "errors": []
+}

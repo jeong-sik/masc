@@ -13,7 +13,7 @@
 
     Each call first runs the gate a Keeper's own call runs
     ([Keeper_dos_controller.before_call]): before a move, a controller whose
-    Keeper stopped or whose Player invite expired or is gone is let go, and a
+    Keeper stopped or whose credential expired or is gone is let go, and a
     pass to a name not at the machine is a 400 (a 503 when who sits there
     cannot be read) and nothing runs. *)
 

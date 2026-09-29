@@ -33,6 +33,144 @@ let test_ring_keeps_only_the_window () =
     check int "stalls" 0 s.stalls
 ;;
 
+(* What the summary must report, computed the plain way: sort a copy and read
+   the nearest ranks off it. *)
+let sorted_reference lags =
+  let xs = Array.of_list lags in
+  Array.sort Float.compare xs;
+  let n = Array.length xs in
+  let at p =
+    let rank = int_of_float (Float.ceil (p *. Float.of_int n)) in
+    xs.(Int.max 0 (Int.min (n - 1) (rank - 1)))
+  in
+  at 0.50, at 0.95, at 0.99, xs.(n - 1)
+;;
+
+(* Sample sets shaped like a ring can hold: sizes around the ranks' rounding
+   edges and the default window, heavy duplicates, runs already in order or
+   reversed, and a tail of stalls. *)
+let reference_cases () =
+  let state = Random.State.make [| 20260929 |] in
+  let random_lags n ~distinct =
+    List.init n (fun _ ->
+      if Random.State.int state 100 < 3
+      then 1.0 +. Random.State.float state 4.0
+      else Float.of_int (Random.State.int state distinct) *. 0.0005)
+  in
+  let sizes = [ 1; 2; 3; 4; 5; 19; 20; 21; 99; 100; 101; 599; 600 ] in
+  let shaped n =
+    let lags = random_lags n ~distinct:1000 in
+    [ lags
+    ; random_lags n ~distinct:3
+    ; List.init n (fun _ -> 0.002)
+    ; List.sort Float.compare lags
+    ; List.rev (List.sort Float.compare lags)
+    ]
+  in
+  (* The probe never records nan, but both ways order by [Float.compare], which
+     puts nan below every number, so they must agree on it too. *)
+  let with_nan n =
+    random_lags n ~distinct:1000
+    |> List.mapi (fun i x -> if i mod 7 = 0 then Float.nan else x)
+  in
+  List.concat_map shaped sizes
+  @ [ with_nan 50; with_nan 600 ]
+  @ List.init 200 (fun _ ->
+    random_lags (1 + Random.State.int state 600) ~distinct:(1 + Random.State.int state 50))
+;;
+
+(* Lags that climb smoothly from a fifth of a millisecond, to 20 ms at the
+   top. *)
+let climb ~steps step = 0.0002 +. (0.02 *. Float.of_int step /. Float.of_int steps)
+
+(* A lag that rises and falls within the window, and one that climbs twice. *)
+let rise_and_fall n = Array.init n (fun i -> climb ~steps:(n / 2) (Int.min i (n - 1 - i)))
+let two_climbs n = Array.init n (fun i -> climb ~steps:(n / 2) (i mod (n / 2)))
+
+(* The samples of [shape] as a ring holds them when recording started
+   [offset] samples into it. *)
+let from_offset shape offset =
+  let n = Array.length shape in
+  List.init n (fun i -> shape.((i + offset) mod n))
+;;
+
+(* Both shapes from every offset in the default window. Some offsets keep an
+   extreme value at the middle index, where each selection round takes its
+   pivot from, so the selection spends its rounds and sorts what is left. *)
+let smooth_cases () =
+  let n = 600 in
+  List.concat_map
+    (fun shape -> List.init n (from_offset shape))
+    [ rise_and_fall n; two_climbs n ]
+;;
+
+let test_percentiles_match_a_full_sort () =
+  List.iteri
+    (fun case lags ->
+       let n = List.length lags in
+       let t = Scheduler_lag.create ~interval_s:0.1 ~window:n () in
+       record_all t lags;
+       let p50, p95, p99, largest = sorted_reference lags in
+       let ms seconds = seconds *. 1000.0 in
+       match Scheduler_lag.summarize t with
+       | None -> fail (Printf.sprintf "case %d: %d samples were recorded" case n)
+       | Some s ->
+         let exact label expected actual =
+           check (float 0.0) (Printf.sprintf "case %d (n=%d) %s" case n label) expected actual
+         in
+         exact "p50" (ms p50) s.p50_ms;
+         exact "p95" (ms p95) s.p95_ms;
+         exact "p99" (ms p99) s.p99_ms;
+         exact "max" (ms largest) s.max_ms;
+         (* The ring holds the samples in the order they were recorded here,
+            and the mean adds them in that order. *)
+         exact "mean" (ms (List.fold_left ( +. ) 0.0 lags /. Float.of_int n)) s.mean_ms)
+    (reference_cases () @ smooth_cases ())
+;;
+
+(* How many sorts of its samples a summary may cost. A selection that spent
+   its rounds sorts only what is left, so a ring that keeps an extreme at the
+   middle index costs about one sort; a round per sample would cost dozens of
+   sorts at [large_window]. *)
+let summary_cost_in_sorts = 10.0
+let large_window = 60_000
+
+let test_a_smooth_rise_and_fall_costs_about_one_sort () =
+  Eio_main.run
+  @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  (* Recording started just past the top, so the samples fall to the bottom
+     at the middle index and climb back. *)
+  let lags = from_offset (rise_and_fall large_window) ((large_window / 2) + 1) in
+  let t = Scheduler_lag.create ~interval_s:0.1 ~window:large_window () in
+  record_all t lags;
+  (* The fastest of three runs: a loaded runner only ever adds time. *)
+  let fastest_of_three run =
+    let once () =
+      let started = Eio.Time.now clock in
+      run ();
+      Eio.Time.now clock -. started
+    in
+    Float.min (once ()) (Float.min (once ()) (once ()))
+  in
+  let sort_s =
+    fastest_of_three (fun () -> Array.sort Float.compare (Array.of_list lags))
+  in
+  let summary_s =
+    fastest_of_three (fun () ->
+      ignore (Scheduler_lag.summarize t : Scheduler_lag.summary option))
+  in
+  check
+    bool
+    (Printf.sprintf
+       "summary %.1f ms within %.0f sorts of %.1f ms"
+       (summary_s *. 1000.0)
+       summary_cost_in_sorts
+       (sort_s *. 1000.0))
+    true
+    (summary_s <= summary_cost_in_sorts *. sort_s)
+;;
+
 let test_empty_ring_has_no_percentiles () =
   let t = Scheduler_lag.create () in
   let fields = Scheduler_lag.to_fields t in
@@ -101,6 +239,11 @@ let () =
     [ ( "ring"
       , [ test_case "percentiles" `Quick test_percentiles_over_recorded_samples
         ; test_case "window" `Quick test_ring_keeps_only_the_window
+        ; test_case "same ranks as a full sort" `Quick test_percentiles_match_a_full_sort
+        ; test_case
+            "a smooth rise and fall costs about one sort"
+            `Quick
+            test_a_smooth_rise_and_fall_costs_about_one_sort
         ; test_case "empty" `Quick test_empty_ring_has_no_percentiles
         ; test_case "shape" `Quick test_invalid_shape_is_refused
         ] )

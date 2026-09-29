@@ -890,34 +890,65 @@ let test_composition_skill_joins_projection () =
      && List.mem Catalog.cancel_tool_name expected_async)
 ;;
 
-(* One published snapshot is projected once. The same snapshot gives back the
-   catalog it gave before, a snapshot built again from the same document is
-   projected afresh, and two snapshots asked for in turn each get their own
-   catalog. *)
+(* The entries of one published snapshot are projected once, and every
+   projection of that snapshot gets the same projected skills: the effective
+   catalog, the operator catalog, and an entry resolved on its own as a
+   task's skill or an inventory row is. A snapshot built again from the same
+   document is projected afresh, and two snapshots asked about in turn each
+   get their own skills. *)
 let test_a_snapshot_is_projected_once () =
   let document name =
     Printf.sprintf "---\nname: %s\ndescription: Projected once.\n---\n\nRead me.\n" name
   in
-  let names (catalog, _diagnostics) =
-    Skill_catalog.skills catalog
-    |> List.map (fun (skill : Skill_catalog.skill) -> skill.name)
+  let skills (catalog, _diagnostics) = Skill_catalog.skills catalog in
+  let names projection =
+    List.map (fun (skill : Skill_catalog.skill) -> skill.name) (skills projection)
+  in
+  let same_skills left right =
+    List.length left = List.length right && List.for_all2 ( == ) left right
   in
   let snapshot = snapshot_of_document ~directory:"once" (document "once") in
-  let first = Skill_catalog.of_snapshot snapshot in
-  check bool "the same snapshot gives back its catalog" true
-    (first == Skill_catalog.of_snapshot snapshot);
-  let operator = Skill_catalog.all_entries_of_snapshot snapshot in
-  check bool "so does the operator projection" true
-    (operator == Skill_catalog.all_entries_of_snapshot snapshot);
+  let first = skills (Skill_catalog.of_snapshot snapshot) in
+  check bool "the same snapshot gives back its projected skills" true
+    (same_skills first (skills (Skill_catalog.of_snapshot snapshot)));
+  check bool "the operator catalog shares them" true
+    (same_skills first (skills (Skill_catalog.all_entries_of_snapshot snapshot)));
+  (match Snapshot.entries snapshot with
+   | [ entry ] ->
+     (match Skill_catalog.project_entry_or_fallback snapshot entry with
+      | Skill_catalog.Projected skill ->
+        check bool "an entry resolved on its own shares it" true (same_skills first [ skill ])
+      | Skill_catalog.Frozen_instruction _ | Skill_catalog.Entry_unavailable _ ->
+        fail "the fixture entry did not project")
+   | _ -> fail "the fixture snapshot does not hold one entry");
   let rebuilt = snapshot_of_document ~directory:"once" (document "once") in
-  let fresh = Skill_catalog.of_snapshot rebuilt in
-  check bool "a snapshot built again is projected afresh" false (fresh == first);
-  check (list string) "into the same skills" (names first) (names fresh);
+  let fresh = skills (Skill_catalog.of_snapshot rebuilt) in
+  check bool "a snapshot built again is projected afresh" false (same_skills first fresh);
+  check (list string) "into the same skills" [ "once" ]
+    (names (Skill_catalog.of_snapshot rebuilt));
   let other = snapshot_of_document ~directory:"other" (document "other") in
-  check (list string) "another snapshot gets its own catalog" [ "other" ]
+  check (list string) "another snapshot gets its own skills" [ "other" ]
     (names (Skill_catalog.of_snapshot other));
   check (list string) "and the first one its own again" [ "once" ]
     (names (Skill_catalog.of_snapshot rebuilt))
+;;
+
+(* Each entry resolved on its own gets its own projection, a shadowed one
+   included. *)
+let test_each_entry_gets_its_own_projection () =
+  let snapshot = shadowed_snapshot () in
+  List.iter
+    (fun (entry : Snapshot.entry) ->
+       match Skill_catalog.project_entry_or_fallback snapshot entry with
+       | Skill_catalog.Projected { reference = Some reference; _ } ->
+         check bool
+           ("the projection names its own entry: " ^ entry.directory)
+           true
+           (Skill_reference.equal reference (Snapshot.entry_reference entry))
+       | Skill_catalog.Projected { reference = None; _ }
+       | Skill_catalog.Frozen_instruction _
+       | Skill_catalog.Entry_unavailable _ -> fail "a shadowed fixture entry did not project")
+    (Snapshot.entries snapshot)
 ;;
 
 let () =
@@ -971,6 +1002,8 @@ let () =
             test_operator_projection_keeps_shadowed_exact_entries
         ; test_case "a snapshot is projected once" `Quick
             test_a_snapshot_is_projected_once
+        ; test_case "each entry gets its own projection" `Quick
+            test_each_entry_gets_its_own_projection
         ; test_case
             "composition name must equal the skill name"
             `Quick

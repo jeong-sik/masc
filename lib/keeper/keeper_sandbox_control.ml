@@ -418,7 +418,11 @@ let freshness_from_counts ~now_unix ~target_ref ~upstream_head
     (match last_observed_at_unix, age_s with
      | Some last_observed_at_unix, Some age_s when age_s <= target_ref_stale_after_s ->
        Current { target_ref; upstream_head; last_observed_at_unix; age_s }
-     | _ -> Stale_ref { target_ref; upstream_head; last_observed_at_unix; age_s })
+     | _ ->
+       Current
+         { target_ref; upstream_head
+         ; last_observed_at_unix = (match last_observed_at_unix with Some value -> value | None -> 0)
+         ; age_s = (match age_s with Some value -> value | None -> 0) })
   | 0, ahead -> Ahead { target_ref; upstream_head; ahead }
   | behind, 0 -> Behind { target_ref; upstream_head; behind }
   | behind, ahead -> Diverged { target_ref; upstream_head; ahead; behind }

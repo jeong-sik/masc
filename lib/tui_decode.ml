@@ -12452,3 +12452,12 @@ let decode_play_invite_revoked json =
     | Some _ -> Error "release_error must be a string"
   in
   Ok { pir_name; pir_revoked; pir_released_controller; pir_release_error }
+
+let play_invite_absent_body body =
+  match Yojson.Safe.from_string body with
+  | `Assoc fields ->
+      (match List.assoc_opt "error" fields with
+       | Some (`String "no_such_invite") -> true
+       | _ -> false)
+  | _ -> false
+  | exception Yojson.Json_error _ -> false

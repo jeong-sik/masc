@@ -17,7 +17,11 @@ let test_play_invite_responses_preserve_recovery_facts () =
       (json {|{"name":"old","revoked":true,"released_controller":false,"release_error":null}|})));
   Alcotest.(check bool) "issued link is required" true
     (Result.is_error (Tui_decode.decode_play_invite_issued
-      (json {|{"name":"old","expires_at":"tomorrow"}|})))
+      (json {|{"name":"old","expires_at":"tomorrow"}|})));
+  Alcotest.(check bool) "authoritative absence" true
+    (Tui_decode.play_invite_absent_body {|{"error":"no_such_invite"}|});
+  Alcotest.(check bool) "another refusal is not absence" false
+    (Tui_decode.play_invite_absent_body {|{"error":"not_an_invite"}|})
 
 (* The saved-app reply's scope count picks the TUI notice: 0 says the
    service's own list will be asked for. A reply without [scopes] used to

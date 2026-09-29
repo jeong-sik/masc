@@ -2009,6 +2009,10 @@ type 'a play_mutation =
   | Play_refused of string
   | Play_unanswered of string
 
+type play_revoke =
+  | Play_revoke_absent
+  | Play_revoke_result of Tui_decode.play_invite_revoked play_mutation
+
 let decode_play_mutation decode = function
   | Masc_tui_http.Post_answered json -> Play_answered (decode json)
   | Masc_tui_http.Post_refused detail -> Play_refused detail
@@ -2368,7 +2372,7 @@ type async_msg =
   | Preset_restored of preset_sink * (Tui_decode.preset_restore_report, string) result
   | Play_invites_listed of string option * (Tui_decode.play_invite_row list, string) result
   | Play_invite_issued of string option * Tui_decode.play_invite_issued play_mutation
-  | Play_invite_revoked of string option * string * Tui_decode.play_invite_revoked play_mutation
+  | Play_invite_revoked of string option * string * play_revoke
   | Librarian_input_loaded of string * (string list, string) result
   | Resources_listed of (Masc_tui_mcp.resource list, string) result
   (* The scope travels with the directory. Without it a reply names a
@@ -10250,10 +10254,12 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
           Ok (Masc_tui_http.revoke_play_invite ~host ~port ~name))
         ~wrap:(fun result ->
           Play_invite_revoked (target, name,
-            decode_play_mutation Tui_decode.decode_play_invite_revoked
-              (match result with
-               | Ok outcome -> outcome
-               | Error detail -> Masc_tui_http.Post_unanswered detail)))
+            match result with
+            | Ok Masc_tui_http.Revoke_absent -> Play_revoke_absent
+            | Ok (Masc_tui_http.Revoke_other outcome) ->
+                Play_revoke_result
+                  (decode_play_mutation Tui_decode.decode_play_invite_revoked outcome)
+            | Error detail -> Play_revoke_result (Play_unanswered detail)))
   | Masc_tui_command.Unknown word ->
       report_action state "error"
         (Printf.sprintf
@@ -14461,7 +14467,14 @@ let apply_async_message state ~base_path ~http_refresh_inflight
   | Play_invite_revoked (target, requested_name, result) ->
       let retry = "; retry /play revoke " ^ requested_name ^ " to release the controller" in
       (match result with
-       | Play_answered (Ok revoked) ->
+       | Play_revoke_absent ->
+           (match state.play_invite_link with
+            | Some (held_name, _) when String.equal held_name requested_name ->
+                state.play_invite_link <- None
+            | Some _ | None -> ());
+           chat_notice state ~keeper_name:target ~kind:Notice_reply
+             ("Play invite " ^ requested_name ^ " is absent; no controller held")
+       | Play_revoke_result (Play_answered (Ok revoked)) ->
            (match state.play_invite_link with
             | Some (held_name, _) when String.equal held_name revoked.Tui_decode.pir_name ->
                 state.play_invite_link <- None
@@ -14475,13 +14488,13 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                  | Some detail -> "; controller release failed: " ^ detail ^ retry
                  | None ->
                      if revoked.pir_released_controller then "; controller released" else ""))
-       | Play_answered (Error detail) ->
+       | Play_revoke_result (Play_answered (Error detail)) ->
            chat_notice state ~keeper_name:target ~kind:Notice_failure
              ("play revoke response unreadable (" ^ detail ^ ")" ^ retry)
-       | Play_refused detail ->
+       | Play_revoke_result (Play_refused detail) ->
            chat_notice state ~keeper_name:target ~kind:Notice_failure
              ("play revoke refused: " ^ detail)
-       | Play_unanswered detail ->
+       | Play_revoke_result (Play_unanswered detail) ->
            chat_notice state ~keeper_name:target ~kind:Notice_failure
              ("play revoke outcome unknown (" ^ detail ^ ")" ^ retry))
   | Librarian_input_loaded (prompt_key, result) ->

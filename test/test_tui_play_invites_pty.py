@@ -17,6 +17,7 @@ LINK = "https://play.example.test/play#fixture-secret"
 
 def run(executable: str) -> None:
     requests: h.HttpRequests = []
+    revoke_methods: list[str] = []
     revokes = h.SequencedHttpResponse([
         (200, {"name": "guest1", "revoked": True,
                "released_controller": False, "release_error": "disk fault"}),
@@ -24,7 +25,12 @@ def run(executable: str) -> None:
                "released_controller": False, "release_error": "disk fault"}),
         (200, {"name": "guest1", "revoked": False,
                "released_controller": True}),
+        (404, {"error": "no_such_invite", "message": "no invite is named guest1"}),
     ])
+
+    def revoke(method: str) -> h.HttpResponse:
+        revoke_methods.append(method)
+        return revokes()
 
     def invites(body: bytes) -> h.HttpResponse:
         if body:
@@ -60,9 +66,14 @@ def run(executable: str) -> None:
         command(b"/play link", b"No play link has been issued")
         command(b"/play revoke guest1", b"retry /play revoke guest1")
         command(b"/play revoke guest1", b"controller released")
+        command(b"/play invite guest1 24", LINK.encode())
+        command(b"/play revoke guest1", b"is absent; no controller held")
+        command(b"/play link", b"No play link has been issued")
         paths = [path for path, _ in requests]
-        if paths.count("/api/v1/play/invites") != 1 or revokes.served != 3:
+        if paths.count("/api/v1/play/invites") != 2 or revokes.served != 4:
             raise AssertionError(f"the TUI did not issue and revoke through the play API: {paths!r}")
+        if revoke_methods != ["DELETE"] * 4:
+            raise AssertionError(f"play revokes used the wrong HTTP methods: {revoke_methods!r}")
         h.send_and_wait(process, master, output, b"\x1b", b"MASC Keepers")
         os.write(master, b"q")
 
@@ -72,7 +83,7 @@ def run(executable: str) -> None:
         interact=interact,
         http_fixtures={
             "/api/v1/play/invites": h.RequestHttpResponse(invites),
-            "/api/v1/play/invites/guest1": revokes,
+            "/api/v1/play/invites/guest1": h.MethodHttpResponse(revoke),
         },
         http_requests=requests,
     )

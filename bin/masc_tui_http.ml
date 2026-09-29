@@ -570,10 +570,17 @@ let issue_play_invite ~host ~port ~name ~hours =
     ~body:(Yojson.Safe.to_string
       (`Assoc [ "name", `String name; "hours", `Int hours ]))
 
+type revoke_outcome = Revoke_absent | Revoke_other of post_outcome
+
 let revoke_play_invite ~host ~port ~name =
-  http_delete ~host ~port
-    ~path:("/api/v1/play/invites/" ^ percent_encode_path_segment name)
-  |> mutation_outcome
+  let response =
+    http_delete ~host ~port
+      ~path:("/api/v1/play/invites/" ^ percent_encode_path_segment name)
+  in
+  match response with
+  | Ok (404, body) when Masc.Tui_decode.play_invite_absent_body body ->
+      Revoke_absent
+  | answer -> Revoke_other (mutation_outcome answer)
 
 let post_json ~(host : string) ~(port : int) ~(path : string) ~(body : string) : (Yojson.Safe.t, string) result =
   match http_post ~headers:(auth_headers ()) ~host ~port ~path ~body with

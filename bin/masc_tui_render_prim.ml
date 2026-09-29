@@ -307,6 +307,9 @@ let chat_markdown_palette ~closing : Markdown.palette =
   ; emphasis = (Ansi.italic, Ansi.no_italic)
   ; strike = (Ansi.strike, Ansi.no_strike)
   ; code = (Theme.Syntax.code_span, closing)
+  (* QR contrast is functional, even under NO_COLOR. The source is sanitized
+     before Markdown creates these SGRs, so a guest cannot inject escapes. *)
+  ; code_qr = ("\027[30;47m", "\027[0m" ^ closing)
   (* Bold alone. [white] is a colour like any other -- on a light background
      it is the background -- so painting a heading with it hid the heading on
      exactly the terminals that read it as text. Bold already says heading. *)

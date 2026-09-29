@@ -10238,7 +10238,6 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
            let inner_width = framed_inner_width pane_cells in
            let available_cells =
              Masc_tui_message_layout.local_body_cells ~pane_cells ~inner_width
-             - 2 (* fenced-code gutter *)
            in
            (match Masc_tui_play_qr.render ~available_cells link with
             | Error Masc_tui_play_qr.Too_large ->
@@ -10260,7 +10259,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
                        (qr_rows + 4) visible_rows)
                 else
                   chat_notice state ~keeper_name:target ~kind:Notice_reply
-                    ("Play QR for " ^ name ^ " (current validity not checked):\n```text\n"
+                    ("Play QR for " ^ name ^ " (current validity not checked):\n```qr\n"
                      ^ qr ^ "\n```")))
   | Masc_tui_command.Play_invite { name; hours } ->
       (match target with

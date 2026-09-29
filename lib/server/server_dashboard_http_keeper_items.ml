@@ -20,7 +20,7 @@ let catalog_entry_json (entry : Candle_shop.catalog_entry) =
     match entry.price with
     | Candle_config.Unpriced -> [ "price_status", `String "unpriced" ]
     | Candle_config.Priced amount ->
-      [ "price_status", `String "priced"; "price_milli", `Int amount ]
+      [ "price_status", `String "priced"; "price_milli", `String (string_of_int amount) ]
   in
   `Assoc
     ([ "id", `String (Item.id entry.item)
@@ -32,7 +32,7 @@ let ready_json (account : Candle_shop.account) catalog =
   `Assoc
     [ "status", `String "ready"
     ; "keeper", `String account.keeper
-    ; "balance_milli", `Int account.balance_milli
+    ; "balance_milli", `String (string_of_int account.balance_milli)
     ; "owned_items", `List (List.map (fun item -> `String (Item.id item)) account.owned_items)
     ; "catalog", `List (List.map catalog_entry_json catalog)
     ]

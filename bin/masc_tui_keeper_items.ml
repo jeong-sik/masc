@@ -30,11 +30,17 @@ let string key fields =
   | `String value -> Ok value
   | _ -> Error ("Item field " ^ key ^ " must be a string")
 
-let nonnegative_int key fields =
+let nonnegative_amount key fields =
   let* value = field key fields in
   match value with
-  | `Int value when value >= 0 -> Ok value
-  | _ -> Error ("Item field " ^ key ^ " must be a nonnegative integer")
+  | `String amount
+    when amount <> ""
+         && (String.length amount = 1 || amount.[0] <> '0')
+         && String.for_all (function '0' .. '9' -> true | _ -> false) amount ->
+    (match int_of_string_opt amount with
+     | Some value when value >= 0 -> Ok value
+     | _ -> Error ("Item field " ^ key ^ " is too large"))
+  | _ -> Error ("Item field " ^ key ^ " must be a canonical decimal amount")
 
 let item_of_id id =
   match Item.of_id id with
@@ -71,7 +77,7 @@ let decode_entry json =
       | "priced" ->
         let* _ = object_fields ~context:"Item catalog entry"
           ~keys:[ "id"; "slot"; "price_status"; "price_milli" ] json in
-        let* amount = nonnegative_int "price_milli" fields in
+        let* amount = nonnegative_amount "price_milli" fields in
         Ok (Priced amount)
       | _ -> Error ("unknown Item price status " ^ status)
     in
@@ -114,7 +120,7 @@ let decode ~keeper_name json =
       let* reason = string "reason" fields in
       Ok (Disabled reason)
     | "ready" ->
-      let* balance_milli = nonnegative_int "balance_milli" fields in
+      let* balance_milli = nonnegative_amount "balance_milli" fields in
       let* owned_json = field "owned_items" fields in
       let* owned_items = decode_list ~context:"owned_items" decode_owned owned_json in
       let* () = unique_items ~context:"owned_items" owned_items in

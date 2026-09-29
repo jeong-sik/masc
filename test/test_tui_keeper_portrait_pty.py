@@ -239,10 +239,10 @@ def item_tab_previews_accessories(binary: str) -> None:
     fixtures["/api/v1/keepers/alpha/items"] = (
         200,
         {
-            "status": "ready", "keeper": "alpha", "balance_milli": 12500,
+            "status": "ready", "keeper": "alpha", "balance_milli": "12500",
             "owned_items": ["glasses"],
             "catalog": [
-                {"id": item, "slot": slot, "price_status": "priced", "price_milli": 1000}
+                {"id": item, "slot": slot, "price_status": "priced", "price_milli": "1000"}
                 for item, slot in catalog
             ],
         },

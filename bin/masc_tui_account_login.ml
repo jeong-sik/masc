@@ -280,10 +280,12 @@ let saved_of_json json =
      | Some (first :: rest) -> Some (Saved_unverified (first, rest))
      | Some [] | None -> None)
   | `Bool true, `String "partly_checked", `List rows, `List ids ->
-    let ids = List.filter_map string ids in
+    let ids = List.map string ids in
     (match unverified_rows rows with
-     | Some unverified when ids <> [] && List.for_all (fun id -> List.mem id selected) ids ->
-       Some (Saved_partly { unverified; not_rechecked = ids })
+     | Some unverified when ids <> [] && List.for_all (function
+         | Some id -> List.mem id selected
+         | None -> false) ids ->
+       Some (Saved_partly { unverified; not_rechecked = List.filter_map Fun.id ids })
      | Some _ | None -> None)
   | _ -> None
 let saved t json =

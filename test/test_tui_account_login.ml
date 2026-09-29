@@ -292,7 +292,15 @@ let partly_checked_save () =
     [ "an empty not_rechecked list is unreadable", receipt ~rechecked:(`List []) ();
       "a not_rechecked runtime the save did not select is unreadable", receipt ~rechecked:(`List [`String "other"]) ();
       "a missing not_rechecked list is unreadable", receipt ~rechecked:`Null ();
-      "a verified receipt with a not_rechecked list is unreadable", receipt ~readiness:"verified" ~unverified:`Null () ]
+      "a verified receipt with a not_rechecked list is unreadable", receipt ~readiness:"verified" ~unverified:`Null () ];
+  List.iter (fun invalid ->
+    let waiting=Login.create "codex" in
+    let phase=waiting.phase and notice=waiting.notice in
+    check bool "a malformed row beside a valid kept runtime rejects the entire receipt" true
+      (Result.is_error (Login.saved waiting (receipt ~rechecked:(`List [`String kept; invalid]) ())));
+    check bool "a rejected receipt cannot finish the save" true (waiting.phase=phase);
+    check string "a rejected receipt cannot announce a saved configuration" notice waiting.notice)
+    [`Int 17; `Null; `String ""; `Bool true; `Assoc []; `List []]
 (* What the renderer draws for a row: the pane's own text sanitized, the
    client's text drawn with its colours. *)
 let drawn row = match row with

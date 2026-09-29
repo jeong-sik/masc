@@ -4115,8 +4115,9 @@ def assert_row_budgeted_surfaces(
     output: bytearray,
     _base_path: str,
 ) -> None:
-    # The title appears before the body; wait for the Home entry points.
-    wait_for_output(process, master_fd, output, b"Continue", start=0, timeout=10.0)
+    # Home is interactive while connecting. This fixture's health reading,
+    # rather than its early entry points, proves the briefing arrived.
+    wait_for_output(process, master_fd, output, b"Health: ok", start=0, timeout=10.0)
 
     overview = resize_and_wait(
         process,

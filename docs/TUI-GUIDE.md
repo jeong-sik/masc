@@ -205,10 +205,10 @@ named Keeper's chat; it needs `opening_keeper`. `last` opens the most recent
 chat target and updates `opening_keeper` when a different Keeper's chat is
 opened. The choice and the name are separate, so a Keeper named `last` can
 be selected. If the target is unavailable, the TUI starts on the Dashboard
-and shows the reason on its first row. An invalid opening setting also starts
+and shows the reason near the top. An invalid opening setting also starts
 on the Dashboard with a reason.
 
-The candle on the startup splash and `/about` comes in two styles. `painted`
+The candle on `/about` comes in two styles. `painted`
 is the 2D portrait, with smooth shading, a flickering flame and blinking
 eyes. `dotted` is a small 3D figure in square dots that sways on its axis.
 On a Kitty terminal it is sent as many pixels as its rows show, so the

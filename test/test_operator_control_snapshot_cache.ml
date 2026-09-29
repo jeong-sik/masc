@@ -71,26 +71,12 @@ let test_singleflight () =
 ;;
 
 let test_stale_while_revalidate () =
-  (* An inline refresh would block on [finish_refresh] before serving stale.
-     The mock backend reports that deadlock instead of waiting on a timer. *)
-  Eio_mock.Backend.run @@ fun () ->
-  Eio_guard.enable ();
   let previous_context = Eio_context.snapshot_state () in
   (* This suite installs both clock registries together in [with_test_eio],
      so its saved Eio clock is also the Time_compat clock to restore. *)
   let previous_clock = Eio_context.get_clock_opt () in
-  let clock = Eio_mock.Clock.make () in
-  let compute_count = ref 0 in
-  let refreshing, mark_refreshing = Eio.Promise.create () in
-  let finish_refresh, release_refresh = Eio.Promise.create () in
-  let compute () =
-    incr compute_count;
-    if !compute_count = 2 then (
-      Eio.Promise.resolve mark_refreshing ();
-      Eio.Promise.await finish_refresh);
-    `Assoc [ ("count", `Int !compute_count) ]
-  in
-  let ttl = 0.2 in
+  (* Protect the backend itself: it raises [Deadlock_detected] outside the
+     callback if an inline refresh blocks before returning the stale value. *)
   Fun.protect
     ~finally:(fun () ->
       Eio_context.restore_state previous_context;
@@ -98,6 +84,20 @@ let test_stale_while_revalidate () =
       | Some clock -> Time_compat.set_clock clock
       | None -> Time_compat.clear_clock ())
     (fun () ->
+      Eio_mock.Backend.run @@ fun () ->
+      Eio_guard.enable ();
+      let clock = Eio_mock.Clock.make () in
+      let compute_count = ref 0 in
+      let refreshing, mark_refreshing = Eio.Promise.create () in
+      let finish_refresh, release_refresh = Eio.Promise.create () in
+      let compute () =
+        incr compute_count;
+        if !compute_count = 2 then (
+          Eio.Promise.resolve mark_refreshing ();
+          Eio.Promise.await finish_refresh);
+        `Assoc [ ("count", `Int !compute_count) ]
+      in
+      let ttl = 0.2 in
       let cache_clock = (clock :> float Eio.Time.clock_ty Eio.Resource.t) in
       Time_compat.set_clock cache_clock;
       Eio_context.set_clock cache_clock;

@@ -135,12 +135,14 @@ let normalize raw = String.lowercase_ascii (String.trim raw)
     shape it accepts before a thinking-enabled request is built. *)
 type anthropic_thinking_control =
   | Adaptive_default
+  | Adaptive_between_tools
   | Adaptive_preferred
   | Adaptive_only
   | Always_adaptive
 
 let anthropic_thinking_control_table =
   [ "adaptive_default", Adaptive_default
+  ; "adaptive_between_tools", Adaptive_between_tools
   ; "adaptive_preferred", Adaptive_preferred
   ; "adaptive_only", Adaptive_only
   ; "always_adaptive", Always_adaptive

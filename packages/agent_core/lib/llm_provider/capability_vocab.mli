@@ -97,6 +97,9 @@ type task =
 
 type anthropic_thinking_control =
   | Adaptive_default
+  | Adaptive_between_tools
+      (** Adaptive by default; disabling up-front thinking uses [between_tools],
+          which still thinks between tool calls and permits low/medium/high effort. *)
   | Adaptive_preferred
   | Adaptive_only
   | Always_adaptive

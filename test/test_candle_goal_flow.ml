@@ -56,7 +56,17 @@ let enable_candle (config : Workspace.config) =
   if not (String.starts_with ~prefix:config.base_path path)
   then failf "the candle.toml path %s is outside the test workspace" path;
   mkdir_p (Filename.dirname path);
-  Out_channel.with_open_bin path (fun oc -> Out_channel.output_string oc "")
+  Out_channel.with_open_bin path (fun oc -> Out_channel.output_string oc {|[payout]
+weight_max = 10
+deduction_rate = 10
+deduction_floor = 200
+[payout.grades_milli]
+trivial = 1000
+small = 2000
+medium = 3000
+large = 4000
+epic = 5000
+|})
 ;;
 
 let ledger_path (config : Workspace.config) = Candle_ledger.path ~base_path:config.base_path

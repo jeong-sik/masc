@@ -115,6 +115,10 @@ let test_the_palette_lists_tasks_and_posts () =
     ["go MSX"]
     (List.filter_map (function label, Palette_msx -> Some label | _ -> None)
        (palette_entries state));
+  Alcotest.(check (list string)) "one DOS spectator destination"
+    ["go DOS"]
+    (List.filter_map (function label, Palette_dos -> Some label | _ -> None)
+       (palette_entries state));
   check_bool "Slack is not a separate destination" false (List.mem "go Slack Lane" labels);
   check_bool "settings is a direct entry" true
     (List.exists
@@ -373,6 +377,16 @@ let test_msx_is_reached_by_its_name () =
    | _ -> Alcotest.fail "the label spelled out must lead its own matches")
 ;;
 
+let test_dos_is_reached_by_its_name () =
+  let state =
+    create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  state.palette_query <- "dos";
+  (match palette_matches state with
+   | ("go DOS", Palette_dos) :: _ -> ()
+   | _ -> Alcotest.fail "typing dos must offer the DOS spectator")
+;;
+
 (* One row per destination. Metrics was five rows that all jumped to it; its
    other names still find it, from the one row. *)
 let test_metrics_is_one_row_that_answers_its_other_names () =
@@ -492,6 +506,8 @@ let () =
             test_the_palette_goes_to_both_halves_of_task_review
         ; Alcotest.test_case "msx is reached by its name" `Quick
             test_msx_is_reached_by_its_name
+        ; Alcotest.test_case "dos is reached by its name" `Quick
+            test_dos_is_reached_by_its_name
         ; Alcotest.test_case "Metrics is one row that answers its other names"
             `Quick test_metrics_is_one_row_that_answers_its_other_names
         ; Alcotest.test_case "Add-ons do not require a Keeper" `Quick

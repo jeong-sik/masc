@@ -70,6 +70,14 @@ loaded. `Esc` returns. The directory starts empty;
 the [MSX cartridges runbook](operations/msx-carts-runbook.md) says what the
 machine accepts and where the images come from.
 
+## Shared DOS machine
+
+Open `:` then `go DOS` to watch the same live DOS screen an invited player
+sees at `/play`. The TUI view is a spectator: `Esc` returns and `+`/`-`
+resize it; game input and turn changes go through the server's controller.
+Invites are currently issued and revoked through the admin play-invites API,
+not from the TUI.
+
 ## Options
 
 | Option | Default | Effect |

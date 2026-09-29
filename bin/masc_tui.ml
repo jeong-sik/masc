@@ -8789,6 +8789,27 @@ let open_msx_screen (state : Masc_tui_types.state) ~mailbox =
      the read is in flight, and redraw its watch row when it arrives. *)
   launch_dos_live_poll state ~mailbox
 
+(* DOS has a spectator of its own. Enter it directly from the palette; the
+   MSX media picker is only for choosing MSX media. No key from this view is
+   forwarded to DOS, whose input and controller remain server-owned. *)
+let open_dos_screen (state : Masc_tui_types.state) ~mailbox =
+  invalidate_msx_poll ();
+  state.image_request_generation <- state.image_request_generation + 1;
+  state.browser_viewport <- None;
+  if state.image_open then begin
+    Masc_tui_msx.invalidate ();
+    write_to_terminal Masc_tui_graphics.delete_all;
+    state.image_open <- false
+  end;
+  state.machine_source <- Masc.Machine_lane.Dos;
+  state.msx_open <- true;
+  state.msx_menu_open <- false;
+  state.dos_live <- Masc_tui_machine_live.Unread;
+  state.dos_activity <- [];
+  state.msx_last_poll_ns <- 0L;
+  render_spectator state;
+  launch_dos_live_poll state ~mailbox
+
 (* Where a reference lands, and what it opens when it gets there.
 
    The surfaces already print [masc://] references beside what they name and
@@ -21152,6 +21173,8 @@ and is loaded on demand through keeper_skill.
                      hide_browser_lane state
                  | Some (_, Masc_tui_types.Palette_msx) ->
                      open_msx_screen state ~mailbox:async_messages
+                 | Some (_, Masc_tui_types.Palette_dos) ->
+                     open_dos_screen state ~mailbox:async_messages
                  | Some (_, Masc_tui_types.Palette_lane_addons) ->
                      launch_lane_addons state ~mailbox:async_messages
                        Masc_tui_lane_addons.Inspect

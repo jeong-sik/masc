@@ -11886,6 +11886,7 @@ type palette_action =
      list and closes the lane to get there. *)
   | Palette_connectors
   | Palette_msx
+  | Palette_dos
   | Palette_lane_addons
   | Palette_goto of surface
   | Palette_config of config_pane
@@ -12009,6 +12010,7 @@ let palette_entries (state : state) =
      when there is no key path to it. *)
   @ [ "go Connectors", Palette_connectors ]
   @ [ "go MSX", Palette_msx ]
+  @ [ "go DOS", Palette_dos ]
   @ [ "go Lane Add-ons", Palette_lane_addons ]
   @ [ "go Logs", Palette_goto System_logs ]
   @ [ "go Metrics", Palette_goto Metrics ]
@@ -12076,7 +12078,7 @@ let palette_action_words = function
       | Repositories | Code | Changes | Connectors | Runtime | Config
       | Resources | Tools | System_logs )
   | Palette_browser_lane | Palette_hide_browser_lane | Palette_connectors
-  | Palette_msx
+  | Palette_msx | Palette_dos
   | Palette_lane_addons | Palette_config _ | Palette_gate_mode _
   | Palette_chat _ | Palette_task _ | Palette_board_hearth _
   | Palette_board_post _ | Palette_lsp _ ->

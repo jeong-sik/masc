@@ -9,7 +9,7 @@ let candidate_tasks (w : Candle_payout.waiting) events =
     | E.Candidates c when c.goal_id = w.goal_id && c.request_id = w.request_id
         && c.verification_run_id = w.verification_run_id -> Some c.tasks
     | E.Candidates _ | E.Snapshot _ | E.Payout_owed _ | E.Unattributed _ | E.Paid _ | E.Equipped _ | E.Purchased _ | E.Payout_failed _ -> None) events
-let call ~appraise ~identity request =
+let call ~(appraise : A.runner) ~identity request =
   let* answer = appraise ~identity request in
   let* decision = A.decode request (A.decision_json answer.decision) |> Result.map_error (fun detail -> A.Invalid_response detail) in
   let* trace = A.trace_of_json (A.trace_json answer.trace) |> Result.map_error (fun detail -> A.Invalid_response detail) in

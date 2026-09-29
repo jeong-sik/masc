@@ -30,13 +30,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: pr-check-${{ github.event.pull_request.number }}
+  group: pr-check-${{ github.event.pull_request.number }}-${{ github.event.pull_request.draft == true && 'draft' || 'ready' }}
   cancel-in-progress: true
 
 jobs:
   tla:
     if: github.event.pull_request.draft == false
-    name: TLA model check
+    name: ${{ github.event.pull_request.draft == true && 'Draft snapshot / TLA model check' || 'TLA model check' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -88,7 +88,7 @@ jobs:
   # fetch-depth: 0.
   lint:
     if: github.event.pull_request.draft == false
-    name: lint suite
+    name: ${{ github.event.pull_request.draft == true && 'Draft snapshot / lint suite' || 'lint suite' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -191,7 +191,7 @@ jobs:
 
   check:
     if: github.event.pull_request.draft == false
-    name: dune build @check
+    name: ${{ github.event.pull_request.draft == true && 'Draft snapshot / dune build @check' || 'dune build @check' }}
     runs-on: ubuntu-24.04
     # Run 36009641291 selected 268 linked suites after a 5m40s PTY rule;
     # 151 selected suites were still unrun at the former 18-minute budget.
@@ -435,7 +435,7 @@ jobs:
   # composite actions, so the duplication is five lines.
   release-check:
     if: github.event.pull_request.draft == false
-    name: dune build --profile release @check
+    name: ${{ github.event.pull_request.draft == true && 'Draft snapshot / dune build --profile release @check' || 'dune build --profile release @check' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -494,7 +494,7 @@ jobs:
   # The type-check does not need to wait for it.
   dashboard-types:
     if: github.event.pull_request.draft == false
-    name: dashboard typecheck
+    name: ${{ github.event.pull_request.draft == true && 'Draft snapshot / dashboard typecheck' || 'dashboard typecheck' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -573,10 +573,10 @@ jobs:
           if-no-files-found: error
 
   required-success:
-    # GitHub treats a skipped required job as successful. Keep one job running
-    # even when the five checks above skip on a Draft PR.
-    if: always()
-    name: PR required success
+    # Draft snapshots have separate names and cannot publish a required context.
+    # A Ready summary always runs, including when a required job fails or skips.
+    if: ${{ always() && github.event.pull_request.draft == false }}
+    name: ${{ github.event.pull_request.draft == true && 'Draft snapshot / PR required success' || 'PR required success' }}
     needs: [tla, lint, check, release-check, dashboard-types]
     runs-on: ubuntu-24.04
     timeout-minutes: 5

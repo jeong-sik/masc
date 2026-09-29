@@ -2409,7 +2409,8 @@ let render_keeper_message (state : state) =
        the width needed to identify the runtime the composer will address. *)
     let telemetry_cells = max 0 (cols - 1) in
     let telemetry_keeper =
-      fit_runtime_id (telemetry_cells / 3) display_keeper_name ^ " · "
+      Masc_tui_theme.tone Masc_tui_theme.Accent
+      ^ fit_runtime_id (telemetry_cells / 3) display_keeper_name ^ Ansi.reset ^ " · "
     in
     let telemetry_identity_cells =
       max 0 (telemetry_cells - Message_layout.display_width telemetry_keeper)
@@ -2473,7 +2474,7 @@ let render_keeper_message (state : state) =
                     context_separator ^ Theme.warn () ^ item ^ Ansi.reset)
                   librarian_item
               ; Option.map
-                  (fun item -> context_separator ^ Ansi.dim ^ item ^ Ansi.reset)
+                  (fun item -> context_separator ^ item ^ Ansi.reset)
                   context_item
               ])
     in
@@ -3465,11 +3466,10 @@ let render_keeper_message (state : state) =
        List.iter (fun (selected, (item : Masc_tui_command.menu_item)) ->
          let label = fit_width (Terminal_text.single_line item.label) label_cells in
          let marker = if selected then "› " else "  " in
-         let style = if selected then Masc_tui_theme.tone Masc_tui_theme.Accent ^ Ansi.bold else Theme.recede () in
-         box_line chat_buf chat_cols
-           ("  " ^ style ^ marker ^ label ^ "  "
-            ^ (if selected then Ansi.reset else Theme.recede ())
-            ^ Terminal_text.single_line item.description ^ Ansi.reset)) entries;
+         let content = "  " ^ marker ^ label ^ "  "
+           ^ Terminal_text.single_line item.description in
+         if selected then box_line_selected chat_buf chat_cols content
+         else box_line_styled chat_buf chat_cols ~style:(Theme.recede ()) content) entries;
        box_divider chat_buf chat_cols);
     let input = Buffer.contents state.msg_input in
     let composer =
@@ -3498,15 +3498,20 @@ let render_keeper_message (state : state) =
         let prefix =
           if index = 0 then Message_layout.chat_input_prompt_prefix else "    "
         in
-        box_line chat_buf chat_cols
-          ((Masc_tui_theme.tone Masc_tui_theme.Accent) ^ prefix ^ Ansi.reset ^ line))
+        (* The input owns a calm background distinct from the conversation.
+           Foreground-only restore keeps that ground through the prompt. The
+           already viewport-fitted draft leaves room for this exact prefix. *)
+        box_line_styled chat_buf chat_cols ~style:chat_theme.Chat_theme.user_background
+          ((Masc_tui_theme.tone Masc_tui_theme.Accent) ^ prefix ^ Ansi.default_fg ^ line))
       composer;
 
     let input_row =
       min (max 1 rows) (rows_above_composer + max 1 (List.length composer))
     in
 
-    box_bottom chat_buf chat_cols;
+    (* Reuse the existing bottom spacer as input padding: the input has a
+       clear surface without taking another row from conversation history. *)
+    box_line_styled chat_buf chat_cols ~style:chat_theme.Chat_theme.user_background "";
     (* Footer *)
     let disposition = send_disposition state ~keeper_name in
     let pending_count =

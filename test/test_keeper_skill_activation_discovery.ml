@@ -265,9 +265,9 @@ let test_unreadable_ledger_keeps_partial_coverage_explicit () =
   let ledger_path =
     Filename.concat
       (Keeper_fs.keeper_session_dir config "trace-corrupt")
-      "skill-activations.json"
+      "skill-activation-events.jsonl"
   in
-  Fs_compat.save_file ledger_path "not-json";
+  Fs_compat.save_file ledger_path "not-json\n";
   let result = Discovery.discover config (reference 'a') in
   check int "corrupt session was inspected" 1 result.sessions_inspected;
   check int "corrupt ledger was not counted as loaded" 0 result.ledgers_loaded;

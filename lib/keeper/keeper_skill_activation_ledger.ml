@@ -112,12 +112,17 @@ type activation =
   ; activated_at : string
   }
 
+(* The revision is the SHA-256 of the whole canonical ledger, so computing it
+   costs a serialisation of every activation. A mutation does not need it --
+   only a reader that projects or verifies the ledger does -- so it is computed
+   on the first read and kept with the value. The fields it covers are
+   immutable, so two readers that race to fill it write the same string. *)
 type t =
   { workspace_key : workspace_key
   ; session_id : Keeper_id.Trace_id.t
   ; activations : activation list
   ; transition_rejections : transition_rejection list
-  ; revision : ledger_revision
+  ; mutable revision_memo : ledger_revision option
   }
 
 type summary =
@@ -208,6 +213,12 @@ type decode_error =
   | Workspace_key_mismatch
   | Invalid_ledger_revision of Skill_catalog_snapshot.revision_error
   | Ledger_revision_mismatch
+  | Invalid_event_kind of string
+  | Blank_event_row
+  | Activation_recorded_with_evidence of string
+  | Unknown_event_activation of string
+  | Delivery_already_observed of string
+  | Action_target_not_delivered of string
 
 type store_error =
   | Lock_failed of string
@@ -230,7 +241,7 @@ type store_error =
   | Invalid_action_tool_name of string
   | Invalid_action_turn of int
   | Invalid_action_observed_at of string
-  | Write_failed of Keeper_fs.durable_write_error
+  | Event_log_failed of Fs_compat.private_jsonl_transaction_error
 
 let decode_error_code = function
   | Expected_object _ -> "expected_object"
@@ -277,6 +288,12 @@ let decode_error_code = function
   | Workspace_key_mismatch -> "workspace_key_mismatch"
   | Invalid_ledger_revision _ -> "invalid_ledger_revision"
   | Ledger_revision_mismatch -> "ledger_revision_mismatch"
+  | Invalid_event_kind _ -> "invalid_event_kind"
+  | Blank_event_row -> "blank_event_row"
+  | Activation_recorded_with_evidence _ -> "activation_recorded_with_evidence"
+  | Unknown_event_activation _ -> "unknown_event_activation"
+  | Delivery_already_observed _ -> "delivery_already_observed"
+  | Action_target_not_delivered _ -> "action_target_not_delivered"
 ;;
 
 let store_error_code = function
@@ -293,7 +310,7 @@ let store_error_code = function
   | Invalid_action_tool_name _ -> "invalid_action_tool_name"
   | Invalid_action_turn _ -> "invalid_action_turn"
   | Invalid_action_observed_at _ -> "invalid_action_observed_at"
-  | Write_failed _ -> "write_failed"
+  | Event_log_failed _ -> "event_log_failed"
 ;;
 
 let store_error_to_string = function
@@ -305,9 +322,9 @@ let store_error_to_string = function
       (Unix.error_message cause)
   | Read_failed error ->
     "read failed: " ^ Fs_compat.owned_regular_file_read_error_to_string error
-  (* Keep the category in the human string too: the ledger write path is
-     read-modify-write, so one undecodable row fails every later write for
-     the session — the code is what identifies the poison row's shape. *)
+  (* Keep the category in the human string too: a write reads the session's
+     rows before it appends, so one undecodable row fails every later write
+     for the session — the code is what identifies the poison row's shape. *)
   | Decode_failed error -> "decode failed: " ^ decode_error_code error
   | Invocation_id_collision tool_use_id ->
     "Skill invocation id collision: " ^ tool_use_id
@@ -329,31 +346,14 @@ let store_error_to_string = function
     Printf.sprintf "Skill action Agent Core turn is invalid: %d" turn
   | Invalid_action_observed_at value ->
     "Skill action observation time is invalid: " ^ value
-  | Write_failed error ->
-    "write failed: " ^ Keeper_fs.durable_write_error_to_string error
+  | Event_log_failed error ->
+    "event log failed: " ^ Fs_compat.private_jsonl_transaction_error_to_string error
 ;;
 
 let schema = "masc.skill-activations/v5"
-let filename = "skill-activations.json"
 let activations ledger = ledger.activations
 let transition_rejections ledger = ledger.transition_rejections
-let revision ledger = ledger.revision
 let ledger_revision_to_string revision = revision
-
-let receipt_projection_revision ledger ~skill_tool_use_id =
-  let buffer = Buffer.create 160 in
-  let add field value =
-    Buffer.add_string buffer (string_of_int (String.length field));
-    Buffer.add_char buffer ':';
-    Buffer.add_string buffer field;
-    Buffer.add_string buffer (string_of_int (String.length value));
-    Buffer.add_char buffer ':';
-    Buffer.add_string buffer value
-  in
-  add "ledger_revision" ledger.revision;
-  add "skill_tool_use_id" skill_tool_use_id;
-  Digestif.SHA256.(digest_string (Buffer.contents buffer) |> to_hex)
-;;
 let workspace_key ledger = ledger.workspace_key
 let session_id ledger = ledger.session_id
 
@@ -929,17 +929,37 @@ let revision_of_ledger ~workspace_key ~session_id ~activations ~transition_rejec
 ;;
 
 let make ~workspace_key ~session_id ~activations ~transition_rejections =
-  { workspace_key
-  ; session_id
-  ; activations
-  ; transition_rejections
-  ; revision =
+  { workspace_key; session_id; activations; transition_rejections; revision_memo = None }
+;;
+
+let revision ledger =
+  match ledger.revision_memo with
+  | Some revision -> revision
+  | None ->
+    let revision =
       revision_of_ledger
-        ~workspace_key
-        ~session_id
-        ~activations
-        ~transition_rejections
-  }
+        ~workspace_key:ledger.workspace_key
+        ~session_id:ledger.session_id
+        ~activations:ledger.activations
+        ~transition_rejections:ledger.transition_rejections
+    in
+    ledger.revision_memo <- Some revision;
+    revision
+;;
+
+let receipt_projection_revision ledger ~skill_tool_use_id =
+  let buffer = Buffer.create 160 in
+  let add field value =
+    Buffer.add_string buffer (string_of_int (String.length field));
+    Buffer.add_char buffer ':';
+    Buffer.add_string buffer field;
+    Buffer.add_string buffer (string_of_int (String.length value));
+    Buffer.add_char buffer ':';
+    Buffer.add_string buffer value
+  in
+  add "ledger_revision" (revision ledger);
+  add "skill_tool_use_id" skill_tool_use_id;
+  Digestif.SHA256.(digest_string (Buffer.contents buffer) |> to_hex)
 ;;
 
 let empty ~workspace_root ~trace_id =
@@ -955,7 +975,7 @@ let to_yojson ledger =
     [ "schema", `String schema
     ; "workspace_key", `String ledger.workspace_key
     ; "session_id", `String (Keeper_id.Trace_id.to_string ledger.session_id)
-    ; "revision", `String ledger.revision
+    ; "revision", `String (revision ledger)
     ; "activations", `List (List.map activation_to_yojson ledger.activations)
     ; ( "transition_rejections"
       , `List
@@ -1683,51 +1703,473 @@ let of_projection_yojson json =
       ~activations
       ~transition_rejections
   in
-  if String.equal ledger.revision declared_revision
+  if String.equal (revision ledger) declared_revision
   then Ok ledger
   else Error Ledger_revision_mismatch
 ;;
 
-let of_yojson ~expected_workspace_root ~expected_trace_id json =
-  let* ledger = of_projection_yojson json in
+(* ── Durable event log ──────────────────────────────────────────────
+
+   A session's ledger is an append-only JSONL file. Its first row names the
+   workspace and the session; every later row is one change -- an activation
+   recorded, deliveries observed, an action observed, or a transition
+   rejected. The ledger a reader sees is those rows applied in order, and a
+   mutation is the event it appends applied to the ledger it read, so what a
+   process holds and what a replay of the file rebuilds are one function of
+   the same rows.
+
+   A mutation appends one row. This process keeps each session's applied
+   ledger with the file cursor it was read to, and the next read under the
+   session lock takes only the rows written after that cursor. *)
+
+let events_schema = "masc.skill-activation-events/v1"
+let events_filename = "skill-activation-events.jsonl"
+let events_path session_dir = Filename.concat session_dir events_filename
+
+type event =
+  | Activation_recorded of activation
+  | Deliveries_observed of (string * delivery) list
+  | Action_observed of
+      { skill_tool_use_ids : string list
+      ; action : action
+      }
+  | Transition_rejected of transition_rejection
+
+let header_to_yojson ~workspace_key ~session_id =
+  `Assoc
+    [ "schema", `String events_schema
+    ; "kind", `String "opened"
+    ; "workspace_key", `String workspace_key
+    ; "session_id", `String (Keeper_id.Trace_id.to_string session_id)
+    ]
+;;
+
+let event_to_yojson = function
+  | Activation_recorded activation ->
+    `Assoc
+      [ "kind", `String "activation_recorded"
+      ; "activation", activation_to_yojson activation
+      ]
+  | Deliveries_observed deliveries ->
+    `Assoc
+      [ "kind", `String "deliveries_observed"
+      ; ( "deliveries"
+        , `List
+            (List.map
+               (fun (skill_tool_use_id, delivery) ->
+                  `Assoc
+                    [ "skill_tool_use_id", `String skill_tool_use_id
+                    ; "delivery", delivery_to_yojson delivery
+                    ])
+               deliveries) )
+      ]
+  | Action_observed { skill_tool_use_ids; action } ->
+    `Assoc
+      [ "kind", `String "action_observed"
+      ; ( "skill_tool_use_ids"
+        , `List (List.map (fun id -> `String id) skill_tool_use_ids) )
+      ; "action", action_to_yojson action
+      ]
+  | Transition_rejected rejection ->
+    `Assoc
+      [ "kind", `String "transition_rejected"
+      ; "rejection", transition_rejection_to_yojson rejection
+      ]
+;;
+
+let event_row json = Yojson.Safe.to_string json ^ "\n"
+
+let required_field ~field fields =
+  match List.assoc_opt field fields with
+  | Some value -> Ok value
+  | None -> Error (Expected_object { field })
+;;
+
+let decode_header ~expected_workspace_key ~expected_trace_id json =
+  let* fields = object_field "events_header" json in
   let* () =
-    if Keeper_id.Trace_id.equal ledger.session_id expected_trace_id
+    exact_fields
+      ~object_name:"events_header"
+      ~allowed:[ "schema"; "kind"; "workspace_key"; "session_id" ]
+      fields
+  in
+  let* observed_schema = string_field "schema" fields in
+  let* () =
+    if String.equal observed_schema events_schema
+    then Ok ()
+    else Error (Unsupported_schema observed_schema)
+  in
+  let* kind = string_field "kind" fields in
+  let* () =
+    if String.equal kind "opened" then Ok () else Error (Invalid_event_kind kind)
+  in
+  let* session_id = string_field "session_id" fields in
+  let* session_id =
+    Keeper_id.Trace_id.of_string session_id
+    |> Result.map_error (fun _ -> Invalid_session_id session_id)
+  in
+  let* () =
+    if Keeper_id.Trace_id.equal session_id expected_trace_id
     then Ok ()
     else Error Session_id_mismatch
   in
-  let expected_workspace_key = workspace_key_of_root expected_workspace_root in
-  if String.equal ledger.workspace_key expected_workspace_key
-  then Ok ledger
+  let* workspace_key = string_field "workspace_key" fields in
+  if String.equal workspace_key expected_workspace_key
+  then Ok ()
   else Error Workspace_key_mismatch
 ;;
 
-let ledger_path session_dir = Filename.concat session_dir filename
-
-let read_existing_locked ~ownership_root ~expected_trace_id session_dir =
-  let path = ledger_path session_dir in
-  match Fs_compat.load_owned_regular_file ~ownership_root path with
-  | Error error -> Error (Read_failed error)
-  | Ok None -> Ok None
-  | Ok (Some contents) ->
-    (match Yojson.Safe.from_string contents with
-     | json ->
-       of_yojson
-         ~expected_workspace_root:ownership_root
-         ~expected_trace_id
-         json
-       |> Result.map Option.some
-       |> Result.map_error (fun error -> Decode_failed error)
-     | exception Yojson.Json_error _ ->
-       Error (Decode_failed (Expected_object { field = "ledger" })))
+let decode_event ~expected_trace_id json =
+  let* fields = object_field "event" json in
+  let* kind = string_field "kind" fields in
+  match kind with
+  | "activation_recorded" ->
+    let* () =
+      exact_fields ~object_name:"event" ~allowed:[ "kind"; "activation" ] fields
+    in
+    let* activation = required_field ~field:"activation" fields in
+    let* activation = decode_activation ~expected_trace_id activation in
+    Ok (Activation_recorded activation)
+  | "deliveries_observed" ->
+    let* () =
+      exact_fields ~object_name:"event" ~allowed:[ "kind"; "deliveries" ] fields
+    in
+    (match List.assoc_opt "deliveries" fields with
+     | Some (`List values) ->
+       let* reversed =
+         List.fold_left
+           (fun result value ->
+              let* reversed = result in
+              let* entry = object_field "delivery_observation" value in
+              let* () =
+                exact_fields
+                  ~object_name:"delivery_observation"
+                  ~allowed:[ "skill_tool_use_id"; "delivery" ]
+                  entry
+              in
+              let* skill_tool_use_id = string_field "skill_tool_use_id" entry in
+              let* delivery = required_field ~field:"delivery" entry in
+              let* delivery = decode_delivery delivery in
+              match delivery with
+              | Some delivery -> Ok ((skill_tool_use_id, delivery) :: reversed)
+              | None -> Error (Expected_object { field = "delivery" }))
+           (Ok [])
+           values
+       in
+       Ok (Deliveries_observed (List.rev reversed))
+     | Some _ | None -> Error (Expected_object { field = "deliveries" }))
+  | "action_observed" ->
+    let* () =
+      exact_fields
+        ~object_name:"event"
+        ~allowed:[ "kind"; "skill_tool_use_ids"; "action" ]
+        fields
+    in
+    let* skill_tool_use_ids =
+      match List.assoc_opt "skill_tool_use_ids" fields with
+      | Some (`List values) ->
+        List.fold_left
+          (fun result value ->
+             let* reversed = result in
+             match value with
+             | `String id -> Ok (id :: reversed)
+             | _ -> Error (Missing_string { field = "skill_tool_use_ids" }))
+          (Ok [])
+          values
+        |> Result.map List.rev
+      | Some _ | None -> Error (Expected_object { field = "skill_tool_use_ids" })
+    in
+    let* action = required_field ~field:"action" fields in
+    let* action = decode_action action in
+    Ok (Action_observed { skill_tool_use_ids; action })
+  | "transition_rejected" ->
+    let* () =
+      exact_fields ~object_name:"event" ~allowed:[ "kind"; "rejection" ] fields
+    in
+    let* rejection = required_field ~field:"rejection" fields in
+    let* rejection = decode_transition_rejection ~expected_trace_id rejection in
+    Ok (Transition_rejected rejection)
+  | kind -> Error (Invalid_event_kind kind)
 ;;
 
-let read_locked ~ownership_root ~expected_trace_id session_dir =
-  let* existing =
-    read_existing_locked ~ownership_root ~expected_trace_id session_dir
+(* The ledger while rows are applied to it. Each activation sits in a cell
+   an event updates in place, so applying a row costs the same however many
+   activations came before it. A builder serves one batch of rows and is
+   dropped when any of them fails. *)
+type builder =
+  { builder_workspace_key : workspace_key
+  ; builder_session_id : Keeper_id.Trace_id.t
+  ; cells : (string, activation ref) Hashtbl.t
+  ; mutable cells_newest_first : activation ref list
+  ; mutable rejections_newest_first : transition_rejection list
+  }
+
+let builder_of_ledger (ledger : t) =
+  let cells = Hashtbl.create (List.length ledger.activations) in
+  let cells_newest_first =
+    List.fold_left
+      (fun newest_first (activation : activation) ->
+         let cell = ref activation in
+         Hashtbl.replace cells activation.skill_tool_use_id cell;
+         cell :: newest_first)
+      []
+      ledger.activations
   in
-  Ok
-    (Option.value existing
-       ~default:(empty ~workspace_root:ownership_root ~trace_id:expected_trace_id))
+  { builder_workspace_key = ledger.workspace_key
+  ; builder_session_id = ledger.session_id
+  ; cells
+  ; cells_newest_first
+  ; rejections_newest_first = List.rev ledger.transition_rejections
+  }
+;;
+
+let ledger_of_builder builder =
+  make
+    ~workspace_key:builder.builder_workspace_key
+    ~session_id:builder.builder_session_id
+    ~activations:(List.rev_map (fun cell -> !cell) builder.cells_newest_first)
+    ~transition_rejections:(List.rev builder.rejections_newest_first)
+;;
+
+let update_cell builder skill_tool_use_id update =
+  match Hashtbl.find_opt builder.cells skill_tool_use_id with
+  | None -> Error (Unknown_event_activation skill_tool_use_id)
+  | Some cell ->
+    let* updated = update !cell in
+    cell := updated;
+    Ok ()
+;;
+
+let update_cells builder updates =
+  List.fold_left
+    (fun result (skill_tool_use_id, update) ->
+       let* () = result in
+       update_cell builder skill_tool_use_id update)
+    (Ok ())
+    updates
+;;
+
+(* Apply one event, holding it to what the decoder requires of a whole
+   activation: a unique invocation id, a delivery only after the activation's
+   turn and only once, actions only after the delivery's turn and never
+   twice, and a rejection only for the activation of its own turn. *)
+let apply_event builder = function
+  | Activation_recorded activation ->
+    if Hashtbl.mem builder.cells activation.skill_tool_use_id
+    then Error Duplicate_skill_tool_use_id
+    else if Option.is_some activation.delivery || activation.actions <> []
+    then Error (Activation_recorded_with_evidence activation.skill_tool_use_id)
+    else (
+      let cell = ref activation in
+      Hashtbl.replace builder.cells activation.skill_tool_use_id cell;
+      builder.cells_newest_first <- cell :: builder.cells_newest_first;
+      Ok ())
+  | Deliveries_observed deliveries ->
+    update_cells
+      builder
+      (List.map
+         (fun (skill_tool_use_id, (delivery : delivery)) ->
+            ( skill_tool_use_id
+            , fun (activation : activation) ->
+                match activation.delivery with
+                | Some _ -> Error (Delivery_already_observed skill_tool_use_id)
+                | None ->
+                  let delivery_turn = delivery_boundary_turn delivery.boundary in
+                  let before_activation =
+                    match delivery.boundary with
+                    | Model_response _ -> delivery_turn <= activation.agent_core_turn
+                    | Official_client_result_handoff _ ->
+                      delivery_turn < activation.agent_core_turn
+                  in
+                  if before_activation
+                  then Error (Invalid_delivery_agent_core_turn delivery_turn)
+                  else Ok { activation with delivery = Some delivery } ))
+         deliveries)
+  | Action_observed { skill_tool_use_ids; action } ->
+    update_cells
+      builder
+      (List.map
+         (fun skill_tool_use_id ->
+            ( skill_tool_use_id
+            , fun (activation : activation) ->
+                match activation.delivery with
+                | None -> Error (Action_target_not_delivered skill_tool_use_id)
+                | Some delivery ->
+                  if action.agent_core_turn < delivery_boundary_turn delivery.boundary
+                  then Error (Invalid_action_agent_core_turn action.agent_core_turn)
+                  else if
+                    List.exists
+                      (fun (known : action) -> known.identity = action.identity)
+                      activation.actions
+                  then Error Duplicate_action_identity
+                  else Ok { activation with actions = activation.actions @ [ action ] }
+            ))
+         skill_tool_use_ids)
+  | Transition_rejected rejection ->
+    let skill_tool_use_id = rejection_skill_tool_use_id rejection in
+    (match Hashtbl.find_opt builder.cells skill_tool_use_id with
+     | None -> Error (Orphan_transition_rejection skill_tool_use_id)
+     | Some cell ->
+       if Ids.Turn_ref.equal (!cell).turn_ref (rejection_activation_turn_ref rejection)
+       then (
+         builder.rejections_newest_first
+         <- rejection :: builder.rejections_newest_first;
+         Ok ())
+       else Error (Transition_rejection_activation_mismatch skill_tool_use_id))
+;;
+
+(* The complete rows of [bytes], each ended by its newline. Text after the
+   last newline is a row still being appended and is not part of the store
+   yet; a read under the store lock never returns one. *)
+let complete_rows bytes =
+  match List.rev (String.split_on_char '\n' bytes) with
+  | [] -> Ok []
+  | _being_appended :: newest_first ->
+    let rows = List.rev newest_first in
+    if List.exists (String.equal "") rows then Error Blank_event_row else Ok rows
+;;
+
+let parse_row row =
+  match Yojson.Safe.from_string row with
+  | json -> Ok json
+  | exception Yojson.Json_error _ -> Error (Expected_object { field = "event" })
+;;
+
+let apply_event_rows ~expected_trace_id ledger rows =
+  let builder = builder_of_ledger ledger in
+  let* () =
+    List.fold_left
+      (fun result row ->
+         let* () = result in
+         let* json = parse_row row in
+         let* event = decode_event ~expected_trace_id json in
+         apply_event builder event)
+      (Ok ())
+      rows
+  in
+  Ok (ledger_of_builder builder)
+;;
+
+(* The whole store, from its first byte: the header, then every event. A
+   store with no rows is a session that has recorded nothing; the Bool says
+   whether the header is on disk. *)
+let replay_store ~workspace_root ~expected_trace_id bytes =
+  let base = empty ~workspace_root ~trace_id:expected_trace_id in
+  let* rows = complete_rows bytes in
+  match rows with
+  | [] -> Ok (base, false)
+  | header :: events ->
+    let* header = parse_row header in
+    let* () =
+      decode_header
+        ~expected_workspace_key:base.workspace_key
+        ~expected_trace_id
+        header
+    in
+    let* ledger = apply_event_rows ~expected_trace_id base events in
+    Ok (ledger, true)
+;;
+
+(* ── This process's view of each session store ──────────────────── *)
+
+type session_log =
+  { ledger : t
+  ; cursor : Fs_compat.Private_jsonl_cursor.t
+  ; header_written : bool
+  }
+
+module Session_logs = Map.Make (String)
+
+(* Keyed by the canonical store path. A store is read and written only under
+   its session lock, so one entry never has two writers; the compare-and-set
+   loop keeps two sessions' updates from dropping each other. *)
+let session_logs : session_log Session_logs.t Atomic.t = Atomic.make Session_logs.empty
+
+let rec update_session_logs change =
+  let current = Atomic.get session_logs in
+  if not (Atomic.compare_and_set session_logs current (change current))
+  then update_session_logs change
+;;
+
+let remember_session_log path log = update_session_logs (Session_logs.add path log)
+let forget_session_log path = update_session_logs (Session_logs.remove path)
+let remembered_session_log path = Session_logs.find_opt path (Atomic.get session_logs)
+
+let observe_settlement_warning ~path error =
+  Log.Keeper.error
+    "skill_activation_ledger: descriptor settlement incomplete store=%s detail=%s"
+    path
+    (Fs_compat.private_jsonl_transaction_error_to_string error)
+;;
+
+let snapshot_result ~path result =
+  match Fs_compat.private_jsonl_snapshot_success_receipt result with
+  | Error error -> Error error
+  | Ok { Fs_compat.value; settlement_error } ->
+    Option.iter (observe_settlement_warning ~path) settlement_error;
+    Ok value
+;;
+
+let cursor_result ~path result =
+  match Fs_compat.private_jsonl_cursor_success_receipt result with
+  | Error error -> Error error
+  | Ok { Fs_compat.value; settlement_error } ->
+    Option.iter (observe_settlement_warning ~path) settlement_error;
+    Ok value
+;;
+
+(* Replay a store from its first byte. The first read of a store in this
+   process recovers it: a row a crash left half-appended is cut back to the
+   last complete row, under the store's lock, before anything is replayed. *)
+let replay_session_log ~ownership_root ~expected_trace_id ~recover path =
+  let read =
+    if recover
+    then Fs_compat.recover_private_jsonl_durable_locked_result path
+    else Fs_compat.read_private_jsonl_durable_locked_result path ~after:None
+  in
+  match snapshot_result ~path read with
+  | Error error -> Error (Event_log_failed error)
+  | Ok (snapshot : Fs_compat.private_jsonl_snapshot) ->
+    let* ledger, header_written =
+      replay_store ~workspace_root:ownership_root ~expected_trace_id snapshot.bytes
+      |> Result.map_error (fun error -> Decode_failed error)
+    in
+    let log = { ledger; cursor = snapshot.cursor; header_written } in
+    remember_session_log path log;
+    Ok log
+;;
+
+(* Under the session lock. A remembered store is read only after its cursor;
+   a store replaced or truncated behind that cursor is replayed from its
+   first byte. *)
+let read_locked ~ownership_root ~expected_trace_id session_dir =
+  let path = events_path session_dir in
+  match remembered_session_log path with
+  | None -> replay_session_log ~ownership_root ~expected_trace_id ~recover:true path
+  | Some log ->
+    (match
+       snapshot_result
+         ~path
+         (Fs_compat.read_private_jsonl_durable_locked_result
+            path
+            ~after:(Some log.cursor))
+     with
+     | Error (Fs_compat.Cursor_mismatch _) ->
+       forget_session_log path;
+       replay_session_log ~ownership_root ~expected_trace_id ~recover:false path
+     | Error error -> Error (Event_log_failed error)
+     | Ok (snapshot : Fs_compat.private_jsonl_snapshot) ->
+       if String.equal snapshot.bytes ""
+       then Ok log
+       else
+         let* ledger =
+           (let* rows = complete_rows snapshot.bytes in
+            apply_event_rows ~expected_trace_id log.ledger rows)
+           |> Result.map_error (fun error -> Decode_failed error)
+         in
+         let log = { log with ledger; cursor = snapshot.cursor } in
+         remember_session_log path log;
+         Ok log)
 ;;
 
 let with_lock ~config ~trace_id operation =
@@ -1745,65 +2187,79 @@ let with_lock ~config ~trace_id operation =
 
 let load ~config ~trace_id =
   with_lock ~config ~trace_id (fun ~ownership_root session_dir ->
-    read_locked ~ownership_root ~expected_trace_id:trace_id session_dir)
+    read_locked ~ownership_root ~expected_trace_id:trace_id session_dir
+    |> Result.map (fun log -> log.ledger))
 ;;
 
-let load_existing ~config ~trace_id =
-  let session_dir =
-    Keeper_fs.keeper_session_dir config (Keeper_id.Trace_id.to_string trace_id)
-  in
-  let ownership_root = Filename.dirname session_dir in
-  let path = ledger_path session_dir in
+(* Without a lock: the store is only ever appended to, so what is on disk is
+   a run of committed rows, possibly followed by the row a writer is
+   appending right now, which [complete_rows] leaves out. *)
+let replay_unlocked ~ownership_root ~trace_id path =
   match Fs_compat.load_owned_regular_file ~ownership_root path with
   | Error error -> Error (Read_failed error)
   | Ok None -> Ok None
-  | Ok (Some _) ->
-    with_lock ~config ~trace_id (fun ~ownership_root session_dir ->
-      read_existing_locked ~ownership_root ~expected_trace_id:trace_id session_dir)
+  | Ok (Some contents) ->
+    (match
+       replay_store ~workspace_root:ownership_root ~expected_trace_id:trace_id contents
+     with
+     | Error error -> Error (Decode_failed error)
+     | Ok (_, false) -> Ok None
+     | Ok (ledger, true) -> Ok (Some ledger))
 ;;
 
 let load_existing_read_only_from_root ~ownership_root ~trace_id =
   let session_dir =
     Filename.concat ownership_root (Keeper_id.Trace_id.to_string trace_id)
   in
-  read_existing_locked ~ownership_root ~expected_trace_id:trace_id session_dir
+  replay_unlocked ~ownership_root ~trace_id (events_path session_dir)
 ;;
 
-let persist_locked
-      ~ownership_root
-      ~trace_id
-      session_dir
-      ~activations
-      ~transition_rejections
-  =
-  let next =
-    make
-      ~workspace_key:(workspace_key_of_root ownership_root)
-      ~session_id:trace_id
-      ~activations
-      ~transition_rejections
+(* The header binds the workspace key of the canonical root the writer
+   resolves under its lock, so an unlocked reader resolves the same root. *)
+let load_existing ~config ~trace_id =
+  let session_root =
+    Filename.dirname
+      (Keeper_fs.keeper_session_dir config (Keeper_id.Trace_id.to_string trace_id))
   in
-  let path = ledger_path session_dir in
-  let* () =
-    Keeper_fs.save_json_durable_atomic
-      ~ownership_root
-      ~pretty:false
-      path
-      (to_yojson next)
-    |> Result.map_error (fun error -> Write_failed error)
-  in
-  (* [next] is what was written, so it is what this returns. Reading the file
-     back to compare its revision decoded the whole ledger a second time on the
-     caller's domain, under the session lock a checkpoint save also needs, and
-     the ledger is one JSON document rewritten whole on every activation: 844
-     activations, 898KB, and the msx keeper's tool fiber spent 1.9 of every 300
-     seconds of the main domain on it (rtev, 2026-09-16).
+  match Unix.realpath session_root with
+  | exception Unix.Unix_error (cause, _, _) ->
+    Error (Canonical_root_failed { path = session_root; cause })
+  | ownership_root -> load_existing_read_only_from_root ~ownership_root ~trace_id
+;;
 
-     What it checked was that the codec reads back what it writes. That is a
-     property of the codec, pinned by [a recorded ledger loads back as it was
-     returned] rather than paid for on every write; the write itself already
-     reports a failure at any stage, and the rename is atomic. *)
-  Ok next
+(* Append [event] after the rows [log] was read to and keep the ledger it
+   makes. The header goes first when the store has none. A failed append
+   leaves the store's end unknown to this process, so the next read replays
+   it from the first byte. *)
+let commit_event_locked session_dir (log : session_log) event =
+  let* ledger =
+    (let builder = builder_of_ledger log.ledger in
+     let* () = apply_event builder event in
+     Ok (ledger_of_builder builder))
+    |> Result.map_error (fun error -> Decode_failed error)
+  in
+  let path = events_path session_dir in
+  let header =
+    if log.header_written
+    then ""
+    else
+      event_row
+        (header_to_yojson ~workspace_key:ledger.workspace_key ~session_id:ledger.session_id)
+  in
+  match
+    cursor_result
+      ~path
+      (Fs_compat.append_private_jsonl_durable_locked_at_cursor_result
+         path
+         ~expected:log.cursor
+         (header ^ event_row (event_to_yojson event)))
+  with
+  | Error error ->
+    forget_session_log path;
+    Error (Event_log_failed error)
+  | Ok cursor ->
+    remember_session_log path { ledger; cursor; header_written = true };
+    Ok ledger
 ;;
 
 let record ~config ~trace_id (activation : activation) =
@@ -1816,7 +2272,8 @@ let record ~config ~trace_id (activation : activation) =
       then Ok ()
       else Error (Decode_failed Turn_ref_session_mismatch)
     in
-    let* current = read_locked ~ownership_root ~expected_trace_id:trace_id session_dir in
+    let* log = read_locked ~ownership_root ~expected_trace_id:trace_id session_dir in
+    let current = log.ledger in
     match List.find_opt (exact_key_equal activation) current.activations with
     | Some existing
       when Yojson.Safe.equal
@@ -1825,33 +2282,16 @@ let record ~config ~trace_id (activation : activation) =
       Ok (current, Already_recorded existing)
     | Some _ -> Error (Invocation_id_collision activation.skill_tool_use_id)
     | None ->
-      let* readback =
-        persist_locked
-          ~ownership_root
-          ~trace_id
-          session_dir
-          ~activations:(current.activations @ [ activation ])
-          ~transition_rejections:current.transition_rejections
+      let* stored =
+        commit_event_locked session_dir log (Activation_recorded activation)
       in
-      Ok (readback, Recorded activation))
+      Ok (stored, Recorded activation))
 ;;
 
-let persist_transition_rejection
-      ~ownership_root
-      ~trace_id
-      session_dir
-      current
-      rejection
-      error
-  =
-  let* _stored =
-    persist_locked
-      ~ownership_root
-      ~trace_id
-      session_dir
-      ~activations:current.activations
-      ~transition_rejections:(current.transition_rejections @ [ rejection ])
-  in
+(* The rejection is evidence in its own right: it is recorded, and the
+   observation that produced it still fails. *)
+let reject_transition_locked session_dir log rejection error =
+  let* _stored = commit_event_locked session_dir log (Transition_rejected rejection) in
   Error error
 ;;
 
@@ -1895,9 +2335,10 @@ let observe_delivery
       |> Result.map_error (fun _ -> Invalid_delivery_time delivered_at)
       |> Result.map_error (fun error -> Decode_failed error)
     in
-    let* current =
+    let* log =
       read_locked ~ownership_root ~expected_trace_id:trace_id session_dir
     in
+    let current = log.ledger in
     let matching_receipt (activation : activation) =
       if not (Ids.Turn_ref.equal activation.turn_ref turn_ref)
       then None
@@ -1974,51 +2415,41 @@ let observe_delivery
     in
     match rejected with
     | Some (rejection, error) ->
-      persist_transition_rejection
-        ~ownership_root
-        ~trace_id
-        session_dir
-        current
-        rejection
-        error
+      reject_transition_locked session_dir log rejection error
     | None ->
-    let reversed, matched, changed =
-      List.fold_left
-        (fun (reversed, matched, changed) activation ->
-           match matching_receipt activation with
-           | None -> activation :: reversed, matched, changed
-           | Some receipt ->
-             let matched = activation.skill_tool_use_id :: matched in
-             match activation.delivery with
-             | None ->
-               let delivery =
-                 Some
-                   { boundary
-                   ; runtime_id
-                   ; delivered_at
-                   ; content_bytes = receipt.content_bytes
-                   ; content_sha256 = receipt.content_sha256
-                   }
-               in
-               { activation with delivery } :: reversed, matched, true
-             | Some _ -> activation :: reversed, matched, changed)
-        ([], [], false)
-        current.activations
-    in
-    let activations = List.rev reversed in
-    let matched = List.rev matched in
-    if not changed
-    then Ok (current, matched)
-    else
-      let* stored =
-        persist_locked
-          ~ownership_root
-          ~trace_id
-          session_dir
-          ~activations
-          ~transition_rejections:current.transition_rejections
+      (* The activations this request's results belong to, including ones
+         already marked; the event carries only the deliveries not yet on
+         the ledger. *)
+      let matched, deliveries =
+        List.fold_left
+          (fun (matched, deliveries) activation ->
+             match matching_receipt activation with
+             | None -> matched, deliveries
+             | Some receipt ->
+               let matched = activation.skill_tool_use_id :: matched in
+               (match activation.delivery with
+                | Some _ -> matched, deliveries
+                | None ->
+                  ( matched
+                  , ( activation.skill_tool_use_id
+                    , { boundary
+                      ; runtime_id
+                      ; delivered_at
+                      ; content_bytes = receipt.content_bytes
+                      ; content_sha256 = receipt.content_sha256
+                      } )
+                    :: deliveries )))
+          ([], [])
+          current.activations
       in
-      Ok (stored, matched))
+      let matched = List.rev matched in
+      (match List.rev deliveries with
+       | [] -> Ok (current, matched)
+       | deliveries ->
+         let* stored =
+           commit_event_locked session_dir log (Deliveries_observed deliveries)
+         in
+         Ok (stored, matched)))
 ;;
 
 let observe_action
@@ -2045,9 +2476,10 @@ let observe_action
     | Error _ -> Error (Invalid_action_observed_at observed_at)
     | Ok _ ->
       with_lock ~config ~trace_id (fun ~ownership_root session_dir ->
-        let* current =
+        let* log =
           read_locked ~ownership_root ~expected_trace_id:trace_id session_dir
         in
+        let current = log.ledger in
         let active = List.sort_uniq String.compare active_skill_tool_use_ids in
         let action =
           { identity = action_identity
@@ -2090,53 +2522,44 @@ let observe_action
         in
         match rejected with
         | Some (rejection, error) ->
-          persist_transition_rejection
-            ~ownership_root
-            ~trace_id
-            session_dir
-            current
-            rejection
-            error
+          reject_transition_locked session_dir log rejection error
         | None ->
-        let* reversed, added =
-          List.fold_left
-            (fun result activation ->
-               let* reversed, added = result in
-               if not (List.mem activation.skill_tool_use_id active)
-               then Ok (activation :: reversed, added)
-               else
-                 match activation.delivery with
-                 | None -> Ok (activation :: reversed, added)
-                 | Some _ ->
-                   (match
-                      List.find_opt
-                        (fun (known : action) -> known.identity = action_identity)
-                        activation.actions
-                    with
-                    | Some known
-                      when String.equal known.tool_name action.tool_name
-                           && String.equal known.runtime_id action.runtime_id
-                           && known.agent_core_turn = action.agent_core_turn ->
-                      Ok (activation :: reversed, added)
-                    | Some _ -> Error (Action_identity_collision action_identity)
-                    | None ->
-                      let activation =
-                        { activation with actions = activation.actions @ [ action ] }
-                      in
-                      Ok (activation :: reversed, added + 1)))
-            (Ok ([], 0))
-            current.activations
-        in
-        if added = 0
-        then Ok (current, 0)
-        else
-          let* stored =
-            persist_locked
-              ~ownership_root
-              ~trace_id
-              session_dir
-              ~activations:(List.rev reversed)
-              ~transition_rejections:current.transition_rejections
+          (* Every active Skill that has been delivered and has not seen
+             this action yet; the same identity already recorded with other
+             fields is a collision. *)
+          let* targets =
+            List.fold_left
+              (fun result (activation : activation) ->
+                 let* targets = result in
+                 if not (List.mem activation.skill_tool_use_id active)
+                 then Ok targets
+                 else
+                   match activation.delivery with
+                   | None -> Ok targets
+                   | Some _ ->
+                     (match
+                        List.find_opt
+                          (fun (known : action) -> known.identity = action_identity)
+                          activation.actions
+                      with
+                      | Some known
+                        when String.equal known.tool_name action.tool_name
+                             && String.equal known.runtime_id action.runtime_id
+                             && known.agent_core_turn = action.agent_core_turn ->
+                        Ok targets
+                      | Some _ -> Error (Action_identity_collision action_identity)
+                      | None -> Ok (activation.skill_tool_use_id :: targets)))
+              (Ok [])
+              current.activations
           in
-          Ok (stored, added))
+          (match List.rev targets with
+           | [] -> Ok (current, 0)
+           | skill_tool_use_ids ->
+             let* stored =
+               commit_event_locked
+                 session_dir
+                 log
+                 (Action_observed { skill_tool_use_ids; action })
+             in
+             Ok (stored, List.length skill_tool_use_ids)))
 ;;

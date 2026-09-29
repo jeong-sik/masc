@@ -201,6 +201,12 @@ type decode_error =
   | Workspace_key_mismatch
   | Invalid_ledger_revision of Skill_catalog_snapshot.revision_error
   | Ledger_revision_mismatch
+  | Invalid_event_kind of string
+  | Blank_event_row
+  | Activation_recorded_with_evidence of string
+  | Unknown_event_activation of string
+  | Delivery_already_observed of string
+  | Action_target_not_delivered of string
 
 type store_error =
   | Lock_failed of string
@@ -223,7 +229,7 @@ type store_error =
   | Invalid_action_tool_name of string
   | Invalid_action_turn of int
   | Invalid_action_observed_at of string
-  | Write_failed of Keeper_fs.durable_write_error
+  | Event_log_failed of Fs_compat.private_jsonl_transaction_error
 
 val store_error_to_string : store_error -> string
 val store_error_code : store_error -> string
@@ -274,12 +280,7 @@ val of_projection_yojson : Yojson.Safe.t -> (t, decode_error) result
 (** Strictly decode the self-contained dashboard projection. This verifies the
     schema, exact fields, typed ids, activation invariants, uniqueness, and
     derived ledger revision. It does not assert which workspace requested the
-    projection; callers with that authority use {!of_yojson}. *)
-val of_yojson :
-  expected_workspace_root:string ->
-  expected_trace_id:Keeper_id.Trace_id.t ->
-  Yojson.Safe.t ->
-  (t, decode_error) result
+    projection. *)
 
 val load :
   config:Workspace.config ->
@@ -290,17 +291,19 @@ val load_existing :
   config:Workspace.config ->
   trace_id:Keeper_id.Trace_id.t ->
   (t option, store_error) result
-(** Strict snapshot read that creates neither the trace root nor a session lock.
-    The durable writer publishes by atomic rename, while
-    {!Fs_compat.load_owned_regular_file} verifies the opened descriptor before
-    and after reading. Use this for observational fleet discovery; mutations
-    must continue to use the locked operations above. *)
+(** Strict read of the session's event log that creates neither the trace root
+    nor a session lock. The log is only appended to, so the file holds
+    committed rows, possibly followed by a row a writer is appending, which is
+    left out; {!Fs_compat.load_owned_regular_file} verifies the opened
+    descriptor before and after reading. [None] is a session that has recorded
+    nothing. Use this for observational reads; mutations must continue to use
+    the locked operations above. *)
 
 val load_existing_read_only_from_root :
   ownership_root:string ->
   trace_id:Keeper_id.Trace_id.t ->
   (t option, store_error) result
-(** Same snapshot read using a caller-pinned, canonical retained-trace root.
+(** Same read using a caller-pinned, canonical retained-trace root.
     Fleet discovery uses this to avoid resolving a replaced configured root
     independently for every session. *)
 

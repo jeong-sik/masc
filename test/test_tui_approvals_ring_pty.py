@@ -15,6 +15,7 @@ SOURCE_MODULES = (
     "bin/masc_tui_types.ml",
     "bin/masc_tui_render_prim.ml",
     "bin/masc_tui_render.ml",
+    "bin/masc_tui_keys.ml",
 )
 
 CURRENT = b"\xe2\x96\xb8"
@@ -156,6 +157,15 @@ def run(executable: str) -> None:
         # the queue rather than about the screen.
         h.wait_for_output(process, master_fd, output,
                           b"Questions waiting on you (1)", start=0, timeout=10)
+        h.wait_for_output(process, master_fd, output,
+                          b"a:answer a question", start=0, timeout=10)
+        answering = h.send_and_wait(process, master_fd, output,
+                                    b"a", b"Enter:answer")
+        frame = h.frame_containing(answering, b"Enter:answer")
+        if b"1-9:pick" not in h.CSI_RE.sub(b"", frame):
+            raise AssertionError(
+                "the question reader did not offer its actual choice key: "
+                + repr(frame))
         os.write(master_fd, b"q")
 
     h.run_terminal_scenario(

@@ -783,6 +783,10 @@ let current_server_state () = Atomic.get server_state
 let publish_server_state state = Atomic.set server_state (Some state)
 let clear_server_state () = Atomic.set server_state None
 
+let ready_server_state () =
+  if (Server_startup_state.snapshot ()).state_ready then current_server_state ()
+  else None
+
 (** CORS origin *)
 exception Invalid_origin_header
 
@@ -1190,25 +1194,34 @@ let authorize_optional_token_bound_permission_request
 let is_dashboard_bootstrap_path path =
   String.starts_with ~prefix:"/api/v1/dashboard/" path
 
+let not_initialized_status = `Service_unavailable
+let not_initialized_headers = [ "retry-after", "1" ]
+
 let not_initialized_response path =
   if is_dashboard_bootstrap_path path then
     {|{"status":"initializing","message":"Server is warming up"}|}
   else
     {|{"error":"not initialized"}|}
 
+let respond_not_initialized request reqd =
+  Http_server_eio.Response.json ~status:not_initialized_status
+    ~extra_headers:not_initialized_headers
+    (not_initialized_response (Http_server_eio.Request.path request)) reqd
+
 let rec with_public_read handler request reqd =
-  let strict = http_auth_strict_enabled () in
-  let path = Http_server_eio.Request.path request in
-  if strict && not (is_public_read_path path) then
-    with_read_auth handler request reqd
-  else
-    match current_server_state () with
-    | None -> Http_server_eio.Response.json (not_initialized_response path) reqd
-    | Some state -> handler state request reqd
+  match ready_server_state () with
+  | None -> respond_not_initialized request reqd
+  | Some state ->
+      let strict = http_auth_strict_enabled () in
+      let path = Http_server_eio.Request.path request in
+      if strict && not (is_public_read_path path) then
+        with_read_auth handler request reqd
+      else
+        handler state request reqd
 
 and with_read_auth handler request reqd =
   match current_server_state () with
-  | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
+  | None -> respond_not_initialized request reqd
   | Some state ->
       let base_path = (Mcp_server.workspace_config state).base_path in
       (match authorize_read_request ~base_path request with
@@ -1222,7 +1235,7 @@ and with_read_auth handler request reqd =
 
 and with_permission_auth ~permission handler request reqd =
   match current_server_state () with
-  | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
+  | None -> respond_not_initialized request reqd
   | Some state ->
       let base_path = (Mcp_server.workspace_config state).base_path in
       (match authorize_permission_request ~base_path ~permission request with
@@ -1240,7 +1253,7 @@ and with_permission_auth ~permission handler request reqd =
 
 and with_tool_auth ~tool_name handler request reqd =
   match current_server_state () with
-  | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
+  | None -> respond_not_initialized request reqd
   | Some state ->
       let base_path = (Mcp_server.workspace_config state).base_path in
       let request_authority = Server_request_authority.current_exn () in
@@ -1261,7 +1274,7 @@ and with_tool_auth ~tool_name handler request reqd =
 
 and with_tool_actor_auth ~tool_name handler request reqd =
   match current_server_state () with
-  | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
+  | None -> respond_not_initialized request reqd
   | Some state ->
     let base_path = (Mcp_server.workspace_config state).base_path in
     let request_authority = Server_request_authority.current_exn () in
@@ -1281,7 +1294,7 @@ and with_tool_actor_auth ~tool_name handler request reqd =
 
 and with_token_permission_auth ~permission handler request reqd =
   match current_server_state () with
-  | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
+  | None -> respond_not_initialized request reqd
   | Some state ->
       let base_path = (Mcp_server.workspace_config state).base_path in
       (match authorize_token_bound_permission_request ~base_path ~permission request with

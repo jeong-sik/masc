@@ -14,6 +14,8 @@ module Json = Yojson.Safe.Util
 module Sse = Masc.Sse
 module Workspace = Masc.Workspace
 
+let () = Masc.Server_startup_state.mark_state_ready () |> Result.get_ok
+
 let has_route meth path router =
   List.exists
     (fun (route : Http.Router.route) ->

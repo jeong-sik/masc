@@ -1169,7 +1169,7 @@
 (test
  (name test_operator_control_snapshot_cache)
  (modules test_operator_control_snapshot_cache)
- (libraries alcotest yojson masc_test_deps eio_main))
+ (libraries alcotest yojson masc_test_deps eio_main eio.mock))
 
 ; Extracted from the big (tests ...) group above: the "keeper up ok" case
 ; creates a keeper without a sandbox_profile, which resolves to Local and is
@@ -2981,6 +2981,8 @@
 
 (include stanzas/test_mcp_server_eio_tool_profile_capability.inc)
 
+(include stanzas/test_mcp_dos_screen_image.inc)
+
 (include stanzas/test_mcp_tool_matrix.inc)
 
 
@@ -4383,6 +4385,12 @@
   masc_types
   masc_tui_types
   masc_tui_overview_team))
+
+(test
+ (name test_tui_overview_cache)
+ (modules test_tui_overview_cache)
+ (libraries alcotest masc masc_types masc_tui_types
+  masc_tui_overview_cache masc_tui_overview_team masc_tui_overview_tasks))
 
 (test
  (name test_tui_overview_goals)
@@ -7052,6 +7060,16 @@
 (test
  (name test_workspace_memory_ledger)
  (modules test_workspace_memory_ledger)
+ (libraries alcotest digestif yojson masc))
+
+(test
+ (name test_keeper_memory_search_index)
+ (modules test_keeper_memory_search_index)
+ (libraries alcotest masc))
+
+(test
+ (name test_workspace_memory_request)
+ (modules test_workspace_memory_request)
  (libraries alcotest digestif yojson masc))
 
 (test

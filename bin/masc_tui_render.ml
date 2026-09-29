@@ -325,16 +325,22 @@ let task_line (task : task) =
     (priority_indicator task.priority)
     goal_tag
 
-(* The Team block's rows, projected from the briefing's Keeper rows and the
-   backlog the same refresh loaded. [None] until a briefing has been read: a
-   Team block over no Keeper rows would claim an empty fleet. *)
+(* Keep the latest immutable loader snapshots across cursor-only frames. *)
+let overview_cache = Masc_tui_overview_cache.create ()
+
+(* Cache absolute creation times; the renderer still computes ages at now. *)
+let overview_backlog (state : state) =
+  Masc_tui_overview_cache.backlog overview_cache state.tasks_domain
+
+(* No briefing means an unread fleet, not an empty Team projection. *)
 let overview_team (state : state) =
   match state.overview with
   | None -> None
   | Some overview ->
       Some
-        (Overview_team.project ~keepers:overview.ov_keeper_rows
-           ~tasks:state.tasks ~attention:overview.ov_attention_items)
+        (Masc_tui_overview_cache.team overview_cache
+           ~keepers:overview.ov_keeper_rows ~tasks:state.tasks
+           ~attention:overview.ov_attention_items)
 
 let overview_pulls_lines (state : state) = Repository_pulls.lines state.overview_pulls
 
@@ -611,7 +617,7 @@ let overview_layout (state : state) ~terminal_rows ~cols =
         ~team_count ~team_stuck ~providers_count
         ~task_count:
           (Overview_tasks.line_count state.tasks
-             (Overview_tasks.backlog state.tasks_domain))
+             (overview_backlog state))
         ~has_task_error:(Option.is_some tasks_error)
     in
     let first = with_intro (List.length intro_lines) in
@@ -1016,7 +1022,7 @@ let render_overview (state : state) =
       let held_back =
         Overview_tasks.held_back ~height:row_budget.task_rows
           ~selected:task_selection state.tasks
-          (Overview_tasks.backlog state.tasks_domain)
+          (overview_backlog state)
       in
       let window =
         if held_back > 0 then Printf.sprintf " +%d more" held_back else ""
@@ -1066,7 +1072,7 @@ let render_overview (state : state) =
       else
         Overview_tasks.lines ~height:row_budget.task_rows
           ~selected state.tasks
-          (Overview_tasks.backlog state.tasks_domain)
+          (overview_backlog state)
     in
     List.iter
       (fun line ->

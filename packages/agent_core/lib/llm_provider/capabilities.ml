@@ -115,12 +115,14 @@ type structured_output_support = Capability_vocab.structured_output_support =
 
 type anthropic_thinking_control =
   | Anthropic_adaptive_default
+  | Anthropic_adaptive_between_tools
   | Anthropic_adaptive_preferred
   | Anthropic_adaptive_only
   | Anthropic_always_adaptive
 
 let anthropic_thinking_control_of_vocab_value = function
   | Capability_vocab.Adaptive_default -> Anthropic_adaptive_default
+  | Capability_vocab.Adaptive_between_tools -> Anthropic_adaptive_between_tools
   | Capability_vocab.Adaptive_preferred -> Anthropic_adaptive_preferred
   | Capability_vocab.Adaptive_only -> Anthropic_adaptive_only
   | Capability_vocab.Always_adaptive -> Anthropic_always_adaptive

@@ -7678,6 +7678,7 @@ let launch_runtime_lane_pick state ~mailbox ~(pick : Masc_tui_types.runtime_lane
             match pick with
             | Masc_tui_types.Pick_conversation_lane lane ->
                 Masc_tui_http.set_runtime_lane_slots ~host ~port ~lane
+                  ~expected_runtime_ids:existing
                   ~runtime_ids:(existing @ [ runtime_id ])
             | Masc_tui_types.Pick_exact_lane lane ->
                 (* Only the one slot is sent: the server appends it to the order
@@ -7757,6 +7758,7 @@ let handle_runtime_lane_edit state ~mailbox edit =
       state.runtime_lane_remove_armed <- Some lane;
       Masc_tui_types.dismiss_runtime_lane_notice state
   | Masc_tui_types.Send_lane_write { lane; request; cursor_after } ->
+      let expected_runtime_ids = Masc_tui_types.conversation_lane_candidates state lane in
       (match request with
        | Masc_tui_types.Write_lane_removal -> state.runtime_lane_remove_armed <- None
        | Masc_tui_types.Write_lane_order _ -> ());
@@ -7765,7 +7767,8 @@ let handle_runtime_lane_edit state ~mailbox edit =
         ~written:Masc_tui_types.Runtime_surface_list (fun ~host ~port ->
         match request with
         | Masc_tui_types.Write_lane_order runtime_ids ->
-            Masc_tui_http.set_runtime_lane_slots ~host ~port ~lane ~runtime_ids
+            Masc_tui_http.set_runtime_lane_slots ~host ~port ~lane
+              ~expected_runtime_ids ~runtime_ids
         | Masc_tui_types.Write_lane_removal ->
             Masc_tui_http.remove_runtime_lane ~host ~port ~lane)
   | Masc_tui_types.Refuse_lane_edit notice -> state.runtime_lane_notice <- Some notice

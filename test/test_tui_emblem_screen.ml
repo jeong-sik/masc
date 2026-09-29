@@ -23,11 +23,12 @@ let caption = [ "first caption"; "second caption" ]
 let cols = 80
 let rows = 24
 let origin = (3, 2)
-let pixels = View.Pixels { cell_width = 10; cell_height = 20 }
+let cell_height = 20
+let pixels = View.Pixels { cell_width = 10; cell_height }
 let project = Palette.For_testing.best_color_for_level ~level:Palette.True_color
 
-let laid_out ?(rows = rows) ?(elapsed = 0.0) display =
-  Screen.rows ~cols ~rows ~caption ~elapsed ~display ~project ~origin
+let laid_out ?(style = Screen.Painted) ?(rows = rows) ?(elapsed = 0.0) display =
+  Screen.rows ~style ~cols ~rows ~caption ~elapsed ~display ~project ~origin
 
 (* The rows the picture can have: the space less the caption and its gap. *)
 let picture_rows_in rows = rows - List.length caption - 1
@@ -139,6 +140,37 @@ let test_elapsed_time_is_the_pose () =
   check bool "a time that is not finite holds it still" true
     (image_at Float.nan = drawn Draw.still)
 
+(* The dotted candle is the solid mascot, drawn as many pixels tall as the
+   terminal shows it, so the terminal never scales its dots. *)
+let test_a_dotted_candle_is_drawn_at_the_size_it_is_shown () =
+  let placed ~elapsed =
+    Option.get (laid_out ~style:Screen.Dotted ~elapsed pixels).Screen.placement
+  in
+  let p = placed ~elapsed:1.5 in
+  let shown = Option.get (Draw.size_of_int (p.View.box.View.rows * cell_height)) in
+  check int "one pixel per pixel the terminal shows" (p.View.box.View.rows * cell_height)
+    p.View.image.Draw.edge;
+  check bool "the solid mascot at that moment of its sway" true
+    (String.equal p.View.image.Draw.rgba
+       (Keeper_portrait_solid.mascot ~milliseconds:1500 shown).Draw.rgba);
+  check bool "not the painted candle" false
+    (String.equal p.View.image.Draw.rgba (Option.get (laid_out pixels).Screen.placement).View.image.Draw.rgba);
+  check bool "held still, it faces front" true
+    (String.equal (placed ~elapsed:Float.nan).View.image.Draw.rgba
+       (Keeper_portrait_solid.mascot ~milliseconds:0 shown).Draw.rgba);
+  let mosaic = laid_out ~style:Screen.Dotted View.Mosaic in
+  check bool "a mosaic draws it too" true (List.exists has_block mosaic.Screen.lines)
+
+let test_the_style_is_stored_by_name () =
+  List.iter
+    (fun style ->
+      check bool "round trip" true
+        (Screen.style_of_string (Screen.string_of_style style) = Some style);
+      check bool "the other one and back" true
+        (Screen.next_style (Screen.next_style style) = style && Screen.next_style style <> style))
+    [ Screen.Painted; Screen.Dotted ];
+  check bool "an unknown name is none" true (Screen.style_of_string "sparkly" = None)
+
 let test_about_says_only_what_was_read () =
   check string "a read roster is counted"
     "Theme: dusk  \xc2\xb7  Keepers: 2"
@@ -201,6 +233,9 @@ let () =
         ; test_case "a frame records only what it drew" `Quick
             test_a_frame_records_only_what_it_drew
         ; test_case "a body asks for its picture" `Quick test_a_body_asks_for_its_picture
+        ; test_case "a dotted candle is drawn at the size it is shown" `Quick
+            test_a_dotted_candle_is_drawn_at_the_size_it_is_shown
+        ; test_case "the style is stored by name" `Quick test_the_style_is_stored_by_name
         ] )
     ; ( "about"
       , [ test_case "it says only what was read" `Quick

@@ -931,6 +931,50 @@ let paint_colour (b : body) = function
   | Patch -> rgb 40 36 44
   | Freckle -> rgb 150 96 80
 
+type palette = {
+  wax_rgb : rgb;
+  drip_rgb : rgb;
+  flame_rgb : rgb;
+  flame_core_rgb : rgb;
+  horn_rgb : rgb;
+  eye_rgb : rgb;
+  glint_rgb : rgb;
+  blush_rgb : rgb;
+  mouth_rgb : rgb;
+  ink_rgb : rgb;
+  backdrop_rgb : rgb;
+}
+
+let palette (b : body) =
+  {
+    wax_rgb = paint_colour b Wax;
+    drip_rgb = paint_colour b Wax_drip;
+    flame_rgb = paint_colour b Flame;
+    flame_core_rgb = paint_colour b Flame_core;
+    horn_rgb = paint_colour b Horn;
+    eye_rgb = paint_colour b Eye;
+    glint_rgb = paint_colour b Glint;
+    blush_rgb = paint_colour b Blush;
+    mouth_rgb = paint_colour b Mouth;
+    ink_rgb = ink_rgb b;
+    backdrop_rgb = paint_colour b Outside;
+  }
+
+let image_init size pixel_at =
+  let rgba = Bytes.create (size * size * 4) in
+  for y = 0 to size - 1 do
+    for x = 0 to size - 1 do
+      let { red; green; blue }, alpha = pixel_at ~x ~y in
+      let at = ((y * size) + x) * 4 in
+      let byte v = Char.chr (max 0 (min 255 v)) in
+      Bytes.set rgba at (byte red);
+      Bytes.set rgba (at + 1) (byte green);
+      Bytes.set rgba (at + 2) (byte blue);
+      Bytes.set rgba (at + 3) (byte alpha)
+    done
+  done;
+  { edge = size; rgba = Bytes.unsafe_to_string rgba }
+
 (* ---- raster -------------------------------------------------------------- *)
 
 let shade c =

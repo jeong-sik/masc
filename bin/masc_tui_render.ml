@@ -675,6 +675,16 @@ let render_overview (state : state) =
     Terminal_text.optional_single_line state.overview_error
   in
 
+  let unread_note =
+    match state.connection_status, state.http_refresh_started_ns with
+    | Booting, _ -> "  Waiting for workspace server…"
+    | Connecting, _
+    | (Connected | Degraded | Reconnecting | Disconnected), Some _ ->
+        "  Loading…"
+    | (Connected | Degraded | Reconnecting | Disconnected), None ->
+        page_unread_note
+  in
+
   (* Summary line *)
   let summary_line =
     match (ov, overview_error) with
@@ -854,7 +864,7 @@ let render_overview (state : state) =
     | Page_empty when on_team_rows > 0 ->
         Some (Printf.sprintf "(%d on Team rows below)" on_team_rows)
     | Page_empty -> Some "Nothing needs attention."
-    | Page_unread -> Some (String.trim page_unread_note)
+    | Page_unread -> Some (String.trim unread_note)
     | Page_failed -> None
   in
   for i = 0 to row_budget.attention_rows - 1 do
@@ -1048,7 +1058,7 @@ let render_overview (state : state) =
   let no_tasks_note =
     match local_rows_page state ~error:tasks_error with
     | Page_empty -> Some "  No tasks."
-    | Page_unread -> Some page_unread_note
+    | Page_unread -> Some unread_note
     | Page_failed -> None
   in
   (match no_tasks_note with
@@ -16408,7 +16418,7 @@ let render_about (state : state) =
         Masc_tui_emblem_screen.Keepers_read (List.length state.keepers)
   in
   surface_chrome ~overflow:Fits ~frame:Chrome_overlay state ~terminal_rows ~cols
-    ~surface_key:"about" ~title:(screen_title " MASC") ~hints:"Esc:close"
+    ~surface_key:"about" ~title:(screen_title " MASC") ~hints:"c:candle  Esc:close"
     ~body:(fun ~budget c ->
       Masc_tui_emblem_screen.body
         ~cols:(framed_inner_width cols) ~rows:budget

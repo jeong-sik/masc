@@ -250,7 +250,7 @@ let test_stalled_projection_names_last_runtime_and_next_attempt () =
   check_names content
     [ "last runtime: glm-coding.glm-5-3"
     ; "retry_after: 120.000s"
-    ; "next attempt around " ^ Time_codec.rfc3339_of_unix 60.0
+    ; "next attempt around 1970-01-01T00:01:00Z"
     ];
   let metadata =
     VP.For_testing.stalled_metadata_with_runtime

@@ -11,8 +11,8 @@ vi.mock('./keeper-badge', () => ({ KeeperBadge: () => html`<div />` }))
 
 import { KeeperItemsPanel } from './keeper-items-panel'
 
-const keeper = (name: string) => ({ name, portrait: { state: 'ready', equipment: {
-  face: 'bare_face', neck: 'bare_neck', head: 'crown', hand: 'empty_hand', base: 'no_dish',
+const keeper = (name: string, head = 'crown') => ({ name, portrait: { state: 'ready', equipment: {
+  face: 'bare_face', neck: 'bare_neck', head, hand: 'empty_hand', base: 'no_dish',
 } } }) as Keeper
 const catalog = Object.entries(EQUIPMENT_IDS).flatMap(([slot, ids]) =>
   ids.slice(1).map(id => ({ id, slot, price_status: id === 'crown' ? 'priced' : 'unpriced', ...(id === 'crown' ? { price_milli: '200' } : {}) })),
@@ -55,5 +55,15 @@ describe('Keeper Item tab', () => {
     view.rerender(html`<${KeeperItemsPanel} keeper=${keeper('geek-scout')} />`)
     expect(screen.queryByText('0.800 Candle')).toBeNull()
     expect(await screen.findByText('Candle 기능이 꺼져 있습니다.')).toBeTruthy()
+  })
+
+  it('rereads ownership when the server-observed outfit changes', async () => {
+    fetchKeeperItems.mockResolvedValueOnce({ status: 'ready', keeper: 'rondo', balance_milli: '800', owned_items: ['crown'], catalog })
+      .mockResolvedValueOnce({ status: 'ready', keeper: 'rondo', balance_milli: '600', owned_items: ['crown', 'beanie'], catalog })
+    const view = render(html`<${KeeperItemsPanel} keeper=${keeper('rondo')} />`)
+    expect(await screen.findByText('0.800 Candle')).toBeTruthy()
+    view.rerender(html`<${KeeperItemsPanel} keeper=${keeper('rondo', 'beanie')} />`)
+    expect(await screen.findByText('0.600 Candle')).toBeTruthy()
+    expect(fetchKeeperItems).toHaveBeenCalledTimes(2)
   })
 })

@@ -2126,3 +2126,11 @@ Keeper. An empty, successfully read roster offers creation while any existing
 Goal or task decisions remain visible. Home's `i` also selects a Keeper before
 writing. A conversation opened through Continue returns to Dashboard with Esc
 and keeps its draft through the existing per-Keeper draft store.
+
+Plan Usage is a frequent-use destination on the top-level **Usage** tab, not
+an expanded Home panel. The tab, Home's `m`, `go Usage` and `/cost` open its
+account rows even if the previous visit ended in Telemetry. The account reading
+includes scope, observed usage,
+reset times and freshness; scrolling reaches rows below the viewport. `p`
+opens the separate Telemetry reading, as do `/metrics` and `/telemetry`.
+A missing report is not a zero balance.

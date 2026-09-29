@@ -20009,16 +20009,30 @@ def dashboard_usage_interaction(
     send_and_wait(process, master_fd, output, b"3", b"Gate Governance")
     send_and_wait(process, master_fd, output, b"p", b"MASC Usage")
     send_and_wait(process, master_fd, output, b"w", b"7 UTC days")
+    # Leave from diagnostics: Home's Usage shortcut must still open accounts.
+    send_and_wait(process, master_fd, output, b"p", b"MASC Usage / Telemetry")
     system = tab_until(process, master_fd, output, b"MASC System")
     if b"MASC System" not in system:
         raise AssertionError(f"System is not on the main ring: {system!r}")
     send_and_wait(process, master_fd, output, b"A", b"MASC Activity")
     tab_until(process, master_fd, output, b"MASC Dashboard")
-    send_and_wait(process, master_fd, output, b"i", b"MASC Keepers")
+    send_and_wait(process, master_fd, output, b"m", b"7 UTC days")
+    usage = screen_text(bytes(output))
+    if b"MASC Usage / Telemetry" in usage:
+        raise AssertionError(f"Home Usage shortcut resumed diagnostics: {usage!r}")
+    send_and_wait(process, master_fd, output, b"p", b"MASC Usage / Telemetry")
+    palette_go(process, master_fd, output, b"go Usage", b"7 UTC days")
+    send_and_wait(process, master_fd, output, b"p", b"MASC Usage / Telemetry")
+    palette_go(process, master_fd, output, b"go Keepers", b"MASC Keepers")
     select_keeper_row(process, master_fd, output, b"alpha")
     send_and_wait(process, master_fd, output, b"c", b"Esc:list")
     send_and_wait(process, master_fd, output, b"/cost", b"/cost")
-    send_and_wait(process, master_fd, output, b"\r", b"MASC Usage")
+    send_and_wait(process, master_fd, output, b"\r", b"7 UTC days")
+    send_and_wait(process, master_fd, output, b"i", b"to alpha")
+    send_and_wait(process, master_fd, output, b"/telemetry", b"/telemetry")
+    send_and_wait(process, master_fd, output, b"\r", b"MASC Usage / Telemetry")
+    tab_until(process, master_fd, output, b"MASC Usage")
+    wait_for_output(process, master_fd, output, b"7 UTC days", start=output.rfind(b"MASC Usage"))
     os.write(master_fd, b"q")
 
 

@@ -464,7 +464,8 @@ init = read()
 assert init["method"] == "initialize", init
 if SCENARIO == "hang_init":
     drain()
-expected_capabilities = [] if SCENARIO == "text_only" else ["sessionMcp"]
+requested_capabilities = init["params"]["capabilities"]["requestedCapabilities"]
+expected_capabilities = [] if SCENARIO == "text_only" or (FIXTURE.get("usage_read_only") and requested_capabilities == []) else ["sessionMcp"]
 assert init["params"]["capabilities"]["requestedCapabilities"] == expected_capabilities, init
 send({"jsonrpc": "2.0", "id": init["id"], "result": {
     "serverInfo": {"name": "muse-session-server", "version": "1.3.0"},
@@ -478,6 +479,13 @@ if SCENARIO == "deny_capability":
 assert read()["method"] == "initialized"
 
 opened = read()
+if opened["method"] == "usage/read":
+    assert FIXTURE.get("usage_read_only"), opened
+    with open(os.path.join(HERE, "usage-read.log"), "a") as handle:
+        handle.write("usage/read\n")
+    send({"jsonrpc": "2.0", "id": opened["id"],
+          "result": {"usage": FIXTURE.get("subscription_usage")}})
+    drain()
 if opened["method"] == "session/start":
     assert opened["params"]["approvalMode"] == "promptUnmatched", opened
     with open(os.path.join(HERE, "start-root.txt"), "w") as handle:
@@ -583,7 +591,7 @@ def acknowledge(disposition="started"):
     if disposition == "started":
         notify("turn/started", {"sessionId": SESSION, "turnId": turn_id,
                                 "commandId": turn_id})
-        if "subscription_usage" in FIXTURE:
+        if "subscription_usage" in FIXTURE and not FIXTURE.get("suppress_turn_usage_notification"):
             notify("usage/changed", FIXTURE["subscription_usage"])
         # One session/tokenUsage per model call; null names no model.
         for model in FIXTURE.get("call_models", []):
@@ -1064,7 +1072,7 @@ let write_fixture ?root ~base_path members =
 
 (* [f] runs in a prepared workspace under the Eio environment and the fixture
    runtime.toml, with [fixture] added to fixture.json. *)
-let with_scripted_host ?(fixture = []) f =
+let with_scripted_host ?(fixture = []) ?(after = fun ~base_path:_ -> ()) f =
   let base_path = temp_workspace () in
   Fun.protect
     ~finally:(fun () -> try Fs_compat.remove_tree base_path with _ -> ())
@@ -1088,7 +1096,8 @@ let with_scripted_host ?(fixture = []) f =
                    | Ok () -> ()
                    | Error detail -> fail detail);
                   persist_fixture_meta ~base_path;
-                  f ~base_path)))))
+                  f ~base_path)));
+          after ~base_path))
 ;;
 
 let test_declared_muse_runtime_routes_keeper_turns () =
@@ -1216,6 +1225,110 @@ let test_subscription_exhaustion_is_account_scoped () =
       check (option (float 0.)) "pre-ack quota survives the rejected turn" (Some 500.)
         (Runtime_quota_window.active_until ~scope ~now:100.);
       Runtime_quota_window.reset_for_testing ())
+;;
+
+let test_muse_usage_read_rests_only_the_selected_account () =
+  let usage = `Assoc
+    [ "observedAtMs", `Int 100000
+    ; "tier", `String "fixture"
+    ; "window", `Assoc
+        [ "usedPercent", `Int 20; "resetsAtMs", `Int 500000
+        ; "windowDurationMins", `Int 5 ]
+    ; "weekly", `Assoc
+        [ "usedPercent", `Int 101; "resetsAtMs", `Int 900000 ]
+    ]
+  in
+  with_scripted_host ~fixture:["usage_read_only", `Bool true;
+    "subscription_usage", usage] (fun ~base_path ->
+      Runtime_quota_window.reset_for_testing ();
+      let account_home = Filename.concat base_path "account-home" in
+      let scope = Runtime_quota_window.scope_of_muse_home account_home in
+      let other = Runtime_quota_window.scope_of_muse_home
+        (Filename.concat base_path "other-account") in
+      let env = Option.get (Eio_context.get_env_opt ()) in
+      let clock = Eio.Stdenv.clock env in
+      let config =
+        { (Serve.default_config ()) with
+          cli_path = launcher ~base_path
+        ; account_home = Some account_home
+        }
+      in
+      (match Runtime_provider_usage_read.read_muse
+               ~mgr:(Posix_spawn_process_mgr.foreground_mgr ~clock
+                 ~grace_seconds:Process_eio.child_exit_grace_seconds)
+               ~clock ~cwd:Eio.Path.(Eio.Stdenv.fs env / base_path)
+               ~scope config with
+       | Ok () -> ()
+       | Error detail -> fail detail);
+      check (option (float 0.)) "weekly reset recorded from usage/read"
+        (Some 900.) (Runtime_quota_window.active_until ~scope ~now:100.);
+      check bool "different account remains dispatchable" false
+        (Runtime_quota_window.is_exhausted ~scope:other ~now:100.);
+      check bool "no model session was started" false
+        (Sys.file_exists (Filename.concat base_path "sessions.log"));
+      check string "one provider usage request" "usage/read\n"
+        (read_text (Filename.concat base_path "usage-read.log"));
+      Runtime_quota_window.reset_for_testing ())
+;;
+
+let test_failed_muse_turn_reads_typed_usage_without_replay () =
+  List.iter (fun used_percent ->
+    let now = Time_compat.now () in
+    let resets_at_ms = int_of_float ((now +. 3600.) *. 1000.) in
+    let usage = `Assoc
+      [ "observedAtMs", `Int (int_of_float (now *. 1000.))
+      ; "tier", `String "fixture"
+      ; "window", `Assoc
+          [ "usedPercent", `Int 20
+          ; "resetsAtMs", `Int resets_at_ms
+          ; "windowDurationMins", `Int 300 ]
+      ; "weekly", `Assoc
+          [ "usedPercent", `Int used_percent
+          ; "resetsAtMs", `Int resets_at_ms ]
+      ]
+    in
+    Runtime_quota_window.reset_for_testing ();
+    with_scripted_host
+      ~fixture:[ "scenario", `String "turn_failed"
+               ; "usage_read_only", `Bool true
+               ; "suppress_turn_usage_notification", `Bool true
+               ; "subscription_usage", usage ]
+      ~after:(fun ~base_path ->
+        let scope = Runtime_quota_window.scope_of_muse_home
+          (Filename.concat base_path "account-home") in
+        let other = Runtime_quota_window.scope_of_muse_home
+          (Filename.concat base_path "other-account") in
+        let expected =
+          if used_percent >= 100
+          then Some (float_of_int resets_at_ms /. 1000.)
+          else None
+        in
+        check (option (float 0.001)) "typed read controls selected account only"
+          expected (Runtime_quota_window.active_until ~scope ~now);
+        check bool "different account remains available" false
+          (Runtime_quota_window.is_exhausted ~scope:other ~now);
+        check string "one independent usage/read" "usage/read\n"
+          (read_text (Filename.concat base_path "usage-read.log"));
+        check string "failed model turn was not replayed" "start\n"
+          (read_text (Filename.concat base_path "sessions.log"));
+        check string "one turn/start reached the host" "1"
+          (read_text (Filename.concat base_path "host-turn-count.txt")))
+      (fun ~base_path ->
+        let run = run_turn ~base_path ~tool:(masc_probe_tool (ref `Null)) in
+        check bool "model failure stays failed" true
+          (Result.is_error run.outcome.result);
+        check_effect "original uncertainty stays fenced"
+          Keeper_provider_attempt_effect.Observation_unavailable run.outcome;
+        (match Store.load ~base_path ~keeper_name with
+         | Ok (Some { phase = Store.Settled settled
+                    ; last_transient_release = Some release; _ }) ->
+           check_failure "original recovery stays retryable"
+             Store.Retryable_turn_failed release.failure;
+           check string "original turn identity is retained"
+             (started_turn_id ~base_path) settled.turn_id
+         | _ -> fail "failed turn lost its durable session"));
+    Runtime_quota_window.reset_for_testing ())
+    [101; 20]
 ;;
 
 (* Fail the actual MCP listener edge while retaining real process/filesystem
@@ -2248,6 +2361,10 @@ let () =
             test_declared_muse_runtime_routes_keeper_turns
         ; test_case "subscription exhaustion uses selected account scope" `Quick
             test_subscription_exhaustion_is_account_scoped
+        ; test_case "usage read rests the exhausted Muse account without a turn" `Quick
+            test_muse_usage_read_rests_only_the_selected_account
+        ; test_case "failed Muse turn reads typed usage without replay" `Quick
+            test_failed_muse_turn_reads_typed_usage_without_replay
         ; test_case "prepared hook tool surface controls session binding" `Quick test_hook_tool_surface_controls_session_binding
         ; test_case "completed message suffix is forwarded once" `Quick test_completed_message_suffix_is_forwarded_once
         ; test_case "later unstreamed message reaches live consumers" `Quick test_later_unstreamed_message_reaches_live_consumers

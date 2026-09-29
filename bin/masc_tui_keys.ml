@@ -789,6 +789,9 @@ let for_surface = function
           ~help:"browse and search consolidated memory across the entire fleet"
       ; b Act "s" "sort"
           ~help:"cycle sort keepers (facts, size, delta, state, name)"
+      ; b Act "d" "detail"
+          ~help:"show the selected keeper's ledger rows, or fold them back to \
+                 its state, last save and actions"
       ; b Act "Esc" "clear / back"
           ~help:"clear the filter, or return to Overview"
       ; b Search "/" "filter"

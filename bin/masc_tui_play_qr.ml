@@ -12,4 +12,7 @@ let render ~available_cells link =
       if required_cells > available_cells then
         Error (Pane_too_narrow { required_cells; available_cells })
       else
-        Ok (Format.asprintf "%a" (Qrc_fmt.pp_utf_8_half ~quiet_zone:true) matrix)
+        Ok
+          (Format.asprintf "%a"
+             (Qrc_fmt.pp_utf_8_half ~invert:false ~quiet_zone:true)
+             matrix)

@@ -207,6 +207,32 @@ type misc_operation =
 
 let misc_operations = all_of_misc_operation
 
+(* What a call does with the shared DOS machine's controller (RFC
+   play-link-for-the-shared-machine §2.8). Every operation is named, so a new
+   DOS tool is classified where it is declared. *)
+type dos_controller_need =
+  | Takes_controller
+  | Hands_controller
+  | No_controller
+
+let dos_controller_need = function
+  | Misc_dos_load | Misc_dos_eject | Misc_dos_step | Misc_dos_press | Misc_dos_click
+  | Misc_dos_type | Misc_dos_restore ->
+    Takes_controller
+  | Misc_dos_pass -> Hands_controller
+  | Misc_lane_declaration_read | Misc_lane_declaration_save | Misc_lane_updates
+  | Misc_lane_attach | Misc_lane_inspect | Misc_lane_observe | Misc_lane_slice
+  | Misc_lane_detach | Misc_lane_evidence | Misc_lane_act | Misc_lane_action_status
+  | Misc_ask | Misc_ask_status | Misc_ask_withdraw | Misc_config | Misc_dashboard
+  | Misc_gc | Misc_keeper_waiting_inventory | Misc_tool_help | Misc_web_fetch
+  | Misc_web_search | Misc_browser_tabs | Misc_browser_read | Misc_browser_session
+  | Misc_browser_goto | Misc_browser_act | Misc_browser_interact
+  | Misc_browser_instruct | Misc_msx_load | Misc_msx_eject | Misc_msx_save
+  | Misc_msx_restore | Misc_msx_change_disk | Misc_msx_screen | Misc_msx_press
+  | Misc_msx_step | Misc_msx_step_until_change | Misc_msx_peek | Misc_msx_ram_diff
+  | Misc_dos_screen | Misc_dos_peek | Misc_dos_save | Misc_portrait_read ->
+    No_controller
+
 let misc_tool_name = function
   | Misc_lane_declaration_read -> "masc_lane_declaration_read"
   | Misc_lane_declaration_save -> "masc_lane_declaration_save"

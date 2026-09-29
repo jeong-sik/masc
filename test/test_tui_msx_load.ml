@@ -62,8 +62,8 @@ let test_empty_frame () =
   let out = captured (fun write ->
         Masc_tui_msx.render ~write ~connection:Masc_tui_types.Connected
         ~live:Masc_tui_machine_live.Unread None None) in
-  check bool "an empty frame says no machine is loaded" true
-    (contains out "no machine loaded");
+  check bool "an unread frame says the screen is pending" true
+    (contains out "waiting for live screen");
   check bool "and writes something" true (String.length out > 0)
 
 let test_real_frame () =
@@ -276,6 +276,10 @@ let test_dos_render () =
   check bool "its footer offers no MSX keys" false (contains shown "F6");
   let empty = draw Masc_tui_machine_live.Not_loaded in
   check bool "no machine says so" true (contains empty "DOS \xe2\x80\x94 no machine loaded");
+  let unread = draw Masc_tui_machine_live.Unread in
+  check bool "before the read, machine absence is not asserted" true
+    (contains unread "waiting for live screen"
+     && not (contains unread "no machine loaded"));
   check bool "and names the DOS load tool" true (contains empty "masc_dos_load");
   let failed = draw (Masc_tui_machine_live.Failed "HTTP 401: denied") in
   check bool "a failed read is shown as its error" true

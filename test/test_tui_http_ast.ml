@@ -753,6 +753,49 @@ let test_recent_projection_is_prepared_inside_frame_build () =
     [["prepare"; "store"; "render"]] (List.rev !build_steps)
 ;;
 
+(* Render must use the cache tested by test_tui_overview_cache. Counting
+   references also catches pipes and partial applications bypassing it. *)
+let test_overview_projections_are_made_once_per_input () =
+  let open Parsetree in
+  let render = "bin/masc_tui_render.ml" in
+  let cache = "bin/masc_tui_overview_cache.ml" in
+  let references path name =
+    let count = ref 0 in
+    let iter =
+      { Ast_iterator.default_iterator with
+        expr = (fun self expression ->
+          (match expression.pexp_desc with
+           | Pexp_ident { txt; _ } when Ast_grep.longident_to_string txt = name ->
+             incr count
+           | _ -> ());
+          Ast_iterator.default_iterator.expr self expression)
+      }
+    in
+    iter.structure iter (Ast_grep.parse_implementation_or_fail path);
+    !count
+  in
+  List.iter
+    (fun (binding_name, callee) ->
+      check int ("binding exists: " ^ binding_name) 1
+        (Ast_grep.count_value_bindings ~module_path:render ~name:binding_name);
+      check int ("render uses tested cache: " ^ binding_name) 1
+        (Ast_grep.count_calls_in_value_binding ~module_path:render
+           ~binding_name ~callee))
+    [ "overview_backlog", "Masc_tui_overview_cache.backlog";
+      "overview_team", "Masc_tui_overview_cache.team" ];
+  check int "renderer keeps one cache across frames" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"overview_cache" ~callee:"Masc_tui_overview_cache.create");
+  check int "renderer never constructs another cache" 1
+    (references render "Masc_tui_overview_cache.create");
+  List.iter
+    (fun name -> check int ("no render bypass: " ^ name) 0 (references render name))
+    [ "Overview_tasks.backlog"; "Overview_team.project";
+      "Masc_tui_overview_tasks.backlog"; "Masc_tui_overview_team.project" ];
+  check int "one Todo summary computation" 1 (references cache "Tasks.backlog");
+  check int "one Team projection computation" 1 (references cache "Team.project")
+;;
+
 let test_user_message_background_has_one_render_snapshot () =
   let main_path = "bin/masc_tui.ml" in
   (* Every binding this test still reaches for is drawn by the chat surface,
@@ -3173,6 +3216,10 @@ let () =
           "Recent projection is prepared inside frame Build"
           `Quick
           test_recent_projection_is_prepared_inside_frame_build;
+        test_case
+          "Overview projections are made once per input"
+          `Quick
+          test_overview_projections_are_made_once_per_input;
         test_case
           "user message background has one render snapshot"
           `Quick

@@ -24,6 +24,7 @@ def run(executable: str) -> None:
         200,
         {"posts": [] if hide_list_post.is_set() else [post]},
     )
+    fixtures["/api/v1/board?sort_by=hot"] = fixtures["/api/v1/board"]
     fixtures["/api/v1/board/post-vocab?format=flat"] = (
         503,
         {"error": CAUSE.decode()},

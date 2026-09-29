@@ -1,0 +1,30 @@
+ ‹2 Keepers  Lanes  Memory  Board  Planning  Fusion  Workspace  ▸Config
+
+  9:Runtime  p:next  ▸runtime.toml  6›  /wo…e.toml  13:56:00  HTTP [connected]
+ ──────────────────────────────────────────────────────────────────────────────
+    base /tmp/buil…-keyboard-12kjnq2g   masc <base>/.masc   binary age unknown
+    Source revision: fixture-read
+    Validation: valid
+    Routing active · Keeper pending restart
+ ──────────────────────────────────────────────────────────────────────────────
+     1  # operator notes stay visible
+     2  first-value = 1
+     3  # another note
+     4
+     5  second-value = 2
+     6  # context row 5
+     7  # context row 6
+     8  # context row 7
+     9  # context row 8
+    10  # context row 9
+    11  # context row 10
+    12  # context row 11
+    13  # context row 12
+    14  # context row 13
+    15  # context row 14
+    16  # context row 15
+    17  # context row 16
+    18  # context row 17
+
+  j/k:select / scroll  PgUp/PgDn:page  v:read status  Esc:overview  q:quit  …?
+ › to alpha   (i to write)

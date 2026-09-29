@@ -4,9 +4,12 @@
 val holder_left : config:Workspace.config -> now:float -> string -> Tool_misc_dos_lane.holder_departure option
 (** Why [holder] can no longer act, or [None] while it still can.
     [Keeper_stopped]: a Keeper that is paused or stopped, including one whose
-    stop finished and left the registry but kept its meta. [Player_expired]:
-    a name whose Player credential ran out before [now], by the rule its
-    bearer is checked by ({!Play_invite.expired}). [No_credential]: a name
+    stop finished and left the registry but kept its meta. [Credential_expired]:
+    a name whose persisted credential ran out before [now], by the rule
+    its bearer is checked by ({!Play_invite.expired}), only where every request
+    must carry a credential. This includes a Worker that took a free controller
+    through a direct move, even though Workers are not handoff targets.
+    [No_credential]: a name
     that is not a Keeper and has no credential file, only where every request
     must carry a credential (auth enabled, [require_token]). A credential file
     that cannot be read, and a missing one where a request needs no token,

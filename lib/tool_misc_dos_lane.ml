@@ -463,14 +463,14 @@ let release_revoked_invite ~holder ~by =
 
 type holder_departure =
   | Keeper_stopped
-  | Player_expired
+  | Credential_expired
   | No_credential
 
 let departure_notice holder = function
   | Keeper_stopped ->
     Printf.sprintf "%s 님의 Keeper 가 멈춰서 DOS 조종권이 풀렸어요" holder
-  | Player_expired ->
-    Printf.sprintf "%s 님의 플레이 초대가 만료되어 DOS 조종권이 풀렸어요" holder
+  | Credential_expired ->
+    Printf.sprintf "%s 님의 접속 권한이 만료되어 DOS 조종권이 풀렸어요" holder
   | No_credential ->
     Printf.sprintf "%s 님은 접속 권한이 없어서 DOS 조종권이 풀렸어요" holder
 ;;

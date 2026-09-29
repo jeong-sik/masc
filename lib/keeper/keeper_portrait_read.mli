@@ -19,3 +19,5 @@ val handle
   -> start_time:Tool_timing.started
   -> args:Yojson.Safe.t
   -> Tool_result.result
+(** Return the current equipment and a PNG handle retained in the Keeper's
+    vision store, including after transient screen frames are evicted. *)

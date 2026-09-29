@@ -509,6 +509,7 @@ let test_the_keeper_block_breaks_the_librarian_row_at_a_clause_mark () =
     }
   in
   let state = make_state () in
+  state.memory_overview_detail <- true;  (* pins the [d] detail rows (#39831) *)
   state.memory_health <- Some (make_fleet_health keeper);
   state.memory_health_cursor <- 0;
   let holds needle lines =
@@ -552,6 +553,7 @@ let test_the_keeper_block_breaks_the_librarian_row_at_a_clause_mark () =
    when the wrapping landed without the counting (#36497). *)
 let test_memory_header_rows_come_out_of_the_budget () =
   let state = make_state () in
+  state.memory_overview_detail <- true;  (* pins the [d] detail rows (#39831) *)
   let keeper =
     make_keeper_health ~keeper_id:"alpha" ~facts:10 ~snapshot_bytes:1024
   in
@@ -702,6 +704,7 @@ let test_the_memory_filter_bar_names_the_query_it_counted () =
 
 let test_render_memory_body_with_keepers () =
   let state = make_state () in
+  state.memory_overview_detail <- true;  (* pins the [d] detail rows (#39831) *)
   let keeper = make_keeper_health ~keeper_id:"alpha" ~facts:10 ~snapshot_bytes:1024 in
   let keeper = {keeper with mkh_context_cycle =
     {mcc_saved = Some {mcf_trace_id = "saved-trace"; mcf_end_atom = 5; mcf_boundary_line = 9};
@@ -999,6 +1002,7 @@ let test_the_librarian_line_speaks_the_pass_ending_and_its_cause () =
   in
   let render_health snapshot =
     let state = make_state () in
+    state.memory_overview_detail <- true;  (* pins the [d] detail rows (#39831) *)
     state.memory_health <- Some snapshot;
     state.memory_health_cursor <- 0;
     let lines = ref [] in
@@ -1837,6 +1841,7 @@ let test_render_memory_body_sorting () =
 
 let test_render_memory_overflow_selection () =
   let state = make_state () in
+  state.memory_overview_detail <- true;  (* pins the [d] detail rows (#39831) *)
   state.view <- Types.Memory;
   let keepers = List.init 5 (fun index ->
       let keeper =
@@ -2056,6 +2061,102 @@ let test_event_sidecar_read_error_is_visible () =
     (List.exists (contains "events sidecar: permission denied") !styled)
 ;;
 
+(* #39831: the classifier the default Memory block reads. A reading that did
+   not come back is an action, never a zero; zeros and ledger coordinates wait
+   behind the [d] detail toggle. *)
+let test_memory_row_visibility () =
+  let shown kind =
+    match Render_memory.memory_row_visibility kind with
+    | Render_memory.Shown_by_default -> true
+    | Render_memory.Detail_only -> false
+  in
+  List.iter
+    (fun (label, kind, expected) -> check bool label expected (shown kind))
+    [ "the state is shown", Render_memory.Row_state, true
+    ; "the last save is shown", Render_memory.Row_last_saved, true
+    ; "an unread lag is shown, not folded to zero", Render_memory.Row_lag None, true
+    ; "a lag of 3 is shown", Render_memory.Row_lag (Some 3), true
+    ; "a lag of 0 waits for detail", Render_memory.Row_lag (Some 0), false
+    ; "3 Librarian failures are shown", Render_memory.Row_librarian_failures 3, true
+    ; "0 Librarian failures wait for detail", Render_memory.Row_librarian_failures 0, false
+    ; "0 vision errors wait for detail", Render_memory.Row_vision_errors 0, false
+    ; "vision errors stay off the action list", Render_memory.Row_vision_errors 2, false
+    ; "ledger coordinates wait for detail", Render_memory.Row_ledger, false
+    ; "a stall is shown", Render_memory.Row_stalled, true
+    ; "a pass-end cause is shown", Render_memory.Row_cause, true
+    ; "a read error is shown", Render_memory.Row_read_error, true
+    ; "a server alert is shown", Render_memory.Row_alert, true
+    ]
+;;
+
+(* #39831: the block under the selected keeper draws one status row -- the
+   keeper, its state word and when memory was last saved -- and an action row
+   only when there is something to do. [d] draws every row it drew before. *)
+let test_the_default_memory_block_keeps_state_save_and_actions () =
+  let base =
+    let keeper = make_keeper_health ~keeper_id:"alpha" ~facts:10 ~snapshot_bytes:1024 in
+    { keeper with
+      Decode.mkh_librarian =
+        { keeper.Decode.mkh_librarian with Decode.mlh_last_success_at = Some 1_775_000_000.0 }
+    }
+  in
+  let render ~detail keeper =
+    let state = make_state () in
+    state.memory_health <- Some (make_fleet_health keeper);
+    state.memory_health_cursor <- 0;
+    state.memory_overview_detail <- detail;
+    body_lines ~cols:140 ~budget:40 state
+  in
+  let joined lines = String.concat "\n" lines in
+  let quiet = render ~detail:false base in
+  check bool "one row names the keeper and when memory was saved" true
+    (List.exists
+       (fun line ->
+          String.starts_with ~prefix:"alpha \xc2\xb7 " (String.trim line)
+          && contains "Memory saved" line)
+       quiet);
+  List.iter
+    (fun needle ->
+       check bool ("the default view folds " ^ needle) false (contains needle (joined quiet)))
+    [ "snapshot r1"
+    ; "Request prepared"
+    ; "Context saved"
+    ; "Context used"
+    ; "facts 10 (observed"
+    ; "source-bound snapshot"
+    ; "vision ingest errors"
+    ; "failed 0 since server start"
+    ; "unread 0"
+    ; "continuity behind 0"
+    ];
+  let full = joined (render ~detail:true base) in
+  List.iter
+    (fun needle -> check bool ("detail draws " ^ needle) true (contains needle full))
+    [ "snapshot r1"
+    ; "Request prepared (not provider success)"
+    ; "Context saved"
+    ; "facts 10 (observed"
+    ; "source-bound snapshot"
+    ; "vision ingest errors 0"
+    ; "failed 0 since server start"
+    ];
+  let unread =
+    { base with
+      Decode.mkh_librarian =
+        { base.Decode.mkh_librarian with Decode.mlh_unread_atom_turns = None }
+    }
+  in
+  check bool "a lag that did not read is an action, not a zero" true
+    (contains "unread ?" (joined (render ~detail:false unread)));
+  let failing = { base with Decode.mkh_librarian_failures = 3 } in
+  check bool "Librarian failures are an action" true
+    (contains "failed 3 since server start" (joined (render ~detail:false failing)));
+  let unreadable = { base with Decode.mkh_read_error = Some "EACCES on facts.jsonl" } in
+  check bool "a read error is an action" true
+    (contains "ordinary read error: EACCES on facts.jsonl"
+       (joined (render ~detail:false unreadable)))
+;;
+
 let () =
   run "tui_render_memory"
     [ ( "age_label"
@@ -2093,6 +2194,10 @@ let () =
             test_the_fact_filter_bar_names_the_query_it_counted
         ; test_case "the librarian line says when the continuity lag is unknown" `Quick
             test_the_librarian_line_says_when_the_continuity_lag_is_unknown
+        ; test_case "the default block folds the ledger behind detail" `Quick
+            test_the_default_memory_block_keeps_state_save_and_actions
+        ; test_case "the row classifier keeps unread readings as actions" `Quick
+            test_memory_row_visibility
         ; test_case "the librarian line names a stalled gap" `Quick
             test_the_librarian_line_names_a_stalled_gap
         ; test_case "the fleet header fits the frame it is drawn in" `Quick

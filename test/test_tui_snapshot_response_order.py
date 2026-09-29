@@ -17,7 +17,7 @@ import test_tui_keyboard_input as h
 # The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs
 # a suite when a pull request changes a path the suite names, so without
 # this a change to the drawn text below reaches main with no scenario run.
-# The surface this loads ("MASC Metrics") is titled in masc_tui_render.ml.
+# The surface this loads ("MASC Usage") is titled in masc_tui_render.ml.
 SOURCE_MODULES = (
     "bin/masc_tui_render.ml",
 )
@@ -68,7 +68,8 @@ def open_source(source, process, master, output, count=0):
     if source == "schedules":
         h.palette_go(process, master, output, b"go schedules", label(source, count))
     else:
-        h.palette_go(process, master, output, b"go metrics", b"MASC Metrics")
+        h.palette_go(process, master, output, b"go Usage", b"MASC Usage")
+        h.send_and_wait(process, master, output, b"p", b"MASC Usage / Telemetry")
         h.send_and_wait(process, master, output, b"3", label(source, count))
 
 

@@ -225,7 +225,10 @@ let test_a_timestamp_value_never_starts_at_the_colon () =
     (Detail.timestamp_line ~label:"reviewed" "2026-08-27 20:36")
 
 let confirmation_fixture ?(goal_id = "goal-1") ?(revision = "revision-1")
-    ?(metric = "passing scenarios") ?(run_id = "run-1") ?(confirmed = false) () =
+    ?(metric = "passing scenarios") ?(run_id = "run-1") ?(confirmed = false) ?phase () =
+  let phase = match phase with
+    | Some phase -> phase
+    | None -> if confirmed then Goal_phase.Completed else Goal_phase.Awaiting_confirmation in
   let criterion = Goal_store.Criterion
       { revision = "revision-1"; title = "Harness";
         metric = Some "passing scenarios"; target_value = Some "10" } in
@@ -243,7 +246,7 @@ let confirmation_fixture ?(goal_id = "goal-1") ?(revision = "revision-1")
   `Assoc
     [ "goal", `Assoc
         [ "id", `String goal_id
-        ; "phase", Goal_phase.to_yojson (if confirmed then Completed else Awaiting_confirmation)
+        ; "phase", Goal_phase.to_yojson phase
         ; "title", `String "Harness"
         ; "criterion_revision", `String revision
         ; "metric", `String metric
@@ -273,6 +276,26 @@ let test_confirmation_retains_the_displayed_proof () =
   let rendered = texts (Detail.confirmation_lines ~width:80 read) in
   check_bool "operator sees exact run" true (List.mem "Verifier run: run-1" rendered);
   check_bool "evidence keeps its second line" true (List.mem "Observed result retained" rendered)
+
+(* The server records a confirmation before it runs the caller's step and saves
+   the phase. If the step refuses, or the phase cannot be saved, the goal stays
+   awaiting confirmation with the confirmation recorded. Confirming again is how
+   the operator finishes it, so this state has to read as confirmable. *)
+let test_a_recorded_confirmation_that_did_not_complete_can_be_confirmed_again () =
+  let recorded =
+    confirmation_exn
+      (confirmation_fixture ~confirmed:true ~phase:Goal_phase.Awaiting_confirmation ())
+  in
+  check_bool "the goal is still awaiting confirmation" true
+    (recorded.phase = Goal_phase.Awaiting_confirmation);
+  check_bool "the same proof is bound" true
+    (Detail.confirmation_body recorded
+     = `Assoc
+         [ "goal_id", `String "goal-1"; "criterion_revision", `String "revision-1";
+           "request_id", `String "request-1"; "verification_run_id", `String "run-1" ]);
+  let completed = confirmation_exn (confirmation_fixture ~confirmed:true ()) in
+  check_bool "the completed answer binds the same proof" true
+    (Detail.same_confirmation_binding recorded completed)
 
 let test_confirmation_refuses_unrelated_or_changed_proof () =
   List.iter
@@ -433,6 +456,8 @@ let () =
             test_a_timestamp_value_never_starts_at_the_colon
         ; Alcotest.test_case "confirmation retains the displayed proof" `Quick
             test_confirmation_retains_the_displayed_proof
+        ; Alcotest.test_case "a recorded confirmation that did not complete can be confirmed again" `Quick
+            test_a_recorded_confirmation_that_did_not_complete_can_be_confirmed_again
         ; Alcotest.test_case "confirmation refuses unrelated or changed proof" `Quick
             test_confirmation_refuses_unrelated_or_changed_proof
         ; Alcotest.test_case "cancelled confirmation ignores late read" `Quick

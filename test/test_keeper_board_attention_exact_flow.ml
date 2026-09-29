@@ -2090,6 +2090,97 @@ let test_wrong_shape_on_every_slot_ends_domain_invalid_naming_the_shape () =
         (Fixture.post_count second_server)))
 ;;
 
+(* The same wrong-shape walk, read from the run record. The Blocked partition
+   keeps the terminal detail verbatim; the run record must quote the same
+   words, not only the terminal class, or the operator who opens the lane run
+   cannot tell which keys the lane rejected. HTTP slots only: the CLI tail
+   branch of [Exact_flow.error_detail] already keeps its sentence. *)
+let test_wrong_shape_run_record_keeps_the_shape () =
+  with_prompt_registry (fun () ->
+    run_eio (fun ~sw ~net ~clock ->
+      let candidate = candidate "board-attention-wrong-shape-record" in
+      let answer fields = `Assoc [ "verdicts", `List [ `Assoc fields ] ] in
+      let extra_key =
+        answer
+          [ "candidate_id", `String candidate.candidate_id
+          ; "decision", `String "relevant"
+          ; "rationale", `String "SECRET-FIRST-RATIONALE"
+          ; "confidence", `String "SECRET-CONFIDENCE"
+          ]
+      in
+      let aliased_key =
+        answer
+          [ "candidate_id", `String candidate.candidate_id
+          ; "decision", `String "relevant"
+          ; "reason", `String "SECRET-REASON"
+          ]
+      in
+      let first_server =
+        Fixture.start_server
+          ~sw
+          ~net
+          ~clock
+          (Fixture.Reply (Fixture.openai_response extra_key))
+      in
+      let second_server =
+        Fixture.start_server
+          ~sw
+          ~net
+          ~clock
+          (Fixture.Reply (Fixture.openai_response aliased_key))
+      in
+      let first = target "board-attention-wrong-shape-record-extra" first_server.base_url in
+      let second = target "board-attention-wrong-shape-record-alias" second_server.base_url in
+      publish_lane [ first; second ];
+      let prepared =
+        match prepare_exact ~net:(Some net) candidate with
+        | Ok prepared -> prepared
+        | Error _ -> Alcotest.fail "the wrong-shape fixture was not admitted"
+      in
+      let before = board_attention_run_ids () in
+      (match
+         Exact_flow.execute
+           ~clock
+           ~callback_error_to_string:Fun.id
+           ~before_dispatch:(fun _ -> Ok ())
+           ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+           prepared
+       with
+       | Ok _ -> Alcotest.fail "a wrong shape on every slot must not be accepted"
+       | Error (Exact_flow.Domain_output_invalid _) -> ()
+       | Error _ -> Alcotest.fail "expected Domain_output_invalid as the terminal error");
+      match (new_board_attention_run ~before).Exact_lane_run_registry.status with
+      | Exact_lane_run_registry.Completed
+          { outcome = Exact_lane_run_registry.Failed { code; detail }; _ } ->
+        Alcotest.(check string)
+          "the run record keeps the terminal class"
+          "invalid_domain_output"
+          code;
+        List.iter
+          (fun needle ->
+            Alcotest.(check bool)
+              (Printf.sprintf "the run record detail names %s" needle)
+              true
+              (contains_substring ~needle detail))
+          [ "fields must be exactly"
+          ; "item=0"
+          ; "missing=[\"rationale\"]"
+          ; "extra=[\"reason\"]"
+          ; "repeated=[]"
+          ];
+        List.iter
+          (fun secret ->
+            Alcotest.(check bool)
+              (Printf.sprintf "the run record detail never quotes %s" secret)
+              false
+              (contains_substring ~needle:secret detail))
+          [ "SECRET-REASON"; "SECRET-FIRST-RATIONALE"; "SECRET-CONFIDENCE" ]
+      | Exact_lane_run_registry.Running
+      | Exact_lane_run_registry.Completed _
+      | Exact_lane_run_registry.Completion_persistence_failed _ ->
+        Alcotest.fail "the wrong-shape run did not close with durable detail"))
+;;
+
 let () =
   Alcotest.run
     "Keeper Board-attention exact flow"
@@ -2125,6 +2216,10 @@ let () =
             "a wrong shape on every slot ends domain-invalid and names the shape"
             `Quick
             test_wrong_shape_on_every_slot_ends_domain_invalid_naming_the_shape
+        ; Alcotest.test_case
+            "a wrong shape on every slot keeps the shape in the run record"
+            `Quick
+            test_wrong_shape_run_record_keeps_the_shape
         ; Alcotest.test_case
             "Keeper preference reorders the Board lane"
             `Quick

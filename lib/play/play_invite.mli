@@ -2,8 +2,8 @@
 
     An invite is a credential with the [Player] role and an expiry. The
     operator issues it under a name, hands the link on, and revokes it by
-    that name. This module owns the credential side only: whoever calls
-    {!revoke} frees the DOS controller the name may still hold. *)
+    that name. This module owns the credential side only: {!revoke} keeps its
+    caller's controller effect inside the credential transaction. *)
 
 (** An invite's name: the [who] its presses are recorded under.
 
@@ -76,6 +76,17 @@ type invite =
   ; expired : bool
   }
 
+val credential_exists : base_path:string -> string -> bool
+(** Whether [name]'s own credential file is there, read or not.
+    [Auth.load_credential] answers [None] both for a missing file and for one
+    it cannot parse, so only this tells the two apart. *)
+
+val expired : now:float -> Masc_domain.agent_credential -> bool
+(** Whether a credential's time has run out at [now]. A credential with no
+    [expires_at] never expires; an invite always has one. This is the rule a
+    static bearer is checked by: whole UTC seconds and a strict [now > expiry],
+    so the bearer still works during its expiry second. *)
+
 val list : base_path:string -> now:float -> invite list
 (** Every [Player] credential, expired ones included, by name. *)
 
@@ -89,7 +100,15 @@ type revoked =
 type revoke_error =
   | Not_an_invite of Masc_domain.agent_role
       (** The name belongs to a credential of another role; nothing changed. *)
+  | Credential_not_deleted of Masc_domain.masc_error
+      (** Credential storage or lock admission failed; no controller effect ran. *)
 
-val revoke : base_path:string -> name:Name.t -> (revoked, revoke_error) result
-(** Deletes the invite's credential; its bearer stops validating from the
-    next request. *)
+val revoke :
+  base_path:string -> name:Name.t -> after_revoke:(revoked -> 'a) ->
+  ('a, revoke_error) result
+(** Checks the current role and deletes the invite in one Auth transaction;
+    its bearer stops validating from the next request. [after_revoke] runs for
+    both [Deleted] and [Already_gone], before credential writers can resume.
+    It may free a controller or check Keeper identity but must not enter an
+    Auth transaction or perform Board publication. Flush announcements after
+    this returns. *)

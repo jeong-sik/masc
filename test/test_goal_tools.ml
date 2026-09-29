@@ -467,6 +467,134 @@ let test_goal_creation_emits_an_event () =
   check int "editing a goal is not a second beginning" 1 (List.length (events ()))
 ;;
 
+(* A due date or priority edit moves no phase, so it records a row of its own
+   with the value it replaced (#39878). Only the fields that changed are in it. *)
+let test_goal_due_date_and_priority_edits_are_recorded () =
+  with_workspace
+  @@ fun config ->
+  let events_path =
+    Filename.concat
+      (Filename.dirname (Goal_store.goals_path config))
+      "goal_events.jsonl"
+  in
+  let edits () =
+    if Sys.file_exists events_path
+    then
+      Fs_compat.load_file events_path
+      |> String.split_on_char '\n'
+      |> List.filter (fun line -> String.trim line <> "")
+      |> List.map Yojson.Safe.from_string
+      |> List.filter (fun event ->
+        String.equal (get_string_field event "event_type") "goal_edited")
+    else []
+  in
+  let upsert args =
+    match
+      Tool_workspace.dispatch
+        (workspace_ctx config)
+        ~name:"masc_goal_upsert"
+        ~args:(`Assoc args)
+    with
+    | Some result -> parse_json_result result
+    | None -> fail "masc_goal_upsert not handled"
+  in
+  let created =
+    upsert
+      [ "title", `String "Dated later"
+      ; "metric", `String "goals counted"
+      ; "target_value", `String "1"
+      ]
+  in
+  let goal_id = get_string_field created "goal_id" in
+  let edit_of = function
+    | [ event ] -> Yojson.Safe.Util.member "payload" event
+    | events -> fail (Printf.sprintf "expected one new edit, got %d" (List.length events))
+  in
+  let newest_edit ~already =
+    edit_of (List.filteri (fun index _ -> index >= already) (edits ()))
+  in
+  let change payload field =
+    let change = Yojson.Safe.Util.member field payload in
+    Yojson.Safe.Util.member "from" change, Yojson.Safe.Util.member "to" change
+  in
+  let json = testable Yojson.Safe.pp Yojson.Safe.equal in
+  let json_pair = pair json json in
+  check int "creating a goal records no edit" 0 (List.length (edits ()));
+  (* A due date that was not set comes from null. *)
+  ignore (upsert [ "id", `String goal_id; "due_date", `String "2026-10-15" ]);
+  let first = newest_edit ~already:0 in
+  check json_pair "due date set" (`Null, `String "2026-10-15") (change first "due_date");
+  check json "the priority did not change" `Null (Yojson.Safe.Util.member "priority" first);
+  check string "the editor is named" "planner" (get_string_field first "actor");
+  ignore (upsert [ "id", `String goal_id; "priority", `Int 1 ]);
+  let second = newest_edit ~already:1 in
+  check json_pair "priority moved" (`Int 3, `Int 1) (change second "priority");
+  check json "the due date did not change" `Null (Yojson.Safe.Util.member "due_date" second);
+  ignore
+    (upsert [ "id", `String goal_id; "due_date", `String "2026-11-01"; "priority", `Int 5 ]);
+  let third = newest_edit ~already:2 in
+  check json_pair "due date moved" (`String "2026-10-15", `String "2026-11-01") (change third "due_date");
+  check json_pair "priority moved again" (`Int 1, `Int 5) (change third "priority");
+  (* The dashboard reads what the handler wrote. Each side of this contract is
+     also pinned by hand-written rows in test_goal_timeline_projection, and a
+     renamed key would keep both green without this. *)
+  let projected = Dashboard_goals_types.goal_event_timeline_json (List.nth (edits ()) 2) in
+  check
+    string
+    "the timeline reads the row the handler wrote"
+    "due_date 2026-10-15 -> 2026-11-01, priority 1 -> 5 by planner"
+    (get_string_field projected "summary");
+  check string "and does not flag it" "ok" (get_string_field projected "severity");
+  (* The same values again, and an edit to something else, record nothing. *)
+  ignore
+    (upsert [ "id", `String goal_id; "due_date", `String "2026-11-01"; "priority", `Int 5 ]);
+  ignore (upsert [ "id", `String goal_id; "title", `String "Renamed" ]);
+  check int "an edit that changes neither field records nothing" 3 (List.length (edits ()))
+;;
+
+(* The edit is stored before its row is appended. A row that cannot be appended
+   (here the events path is a directory) must not turn a stored edit into a
+   failure: the caller would retry, see no difference, and record nothing. *)
+let test_a_goal_edit_whose_row_cannot_be_appended_still_succeeds () =
+  with_workspace
+  @@ fun config ->
+  (* Made without the tool, so nothing has opened the events file yet and no
+     cached handle can hide the failure. *)
+  let goal, _ =
+    match
+      Goal_store.upsert_goal
+        config
+        ~title:"Dated later"
+        ~metric:"goals counted"
+        ~target_value:"1"
+        ()
+    with
+    | Ok created -> created
+    | Error error -> failf "%s" (Goal_store.write_error_to_string error)
+  in
+  let events_path =
+    Filename.concat
+      (Filename.dirname (Goal_store.goals_path config))
+      "goal_events.jsonl"
+  in
+  Unix.mkdir events_path 0o755;
+  match
+    Tool_workspace.dispatch
+      (workspace_ctx config)
+      ~name:"masc_goal_upsert"
+      ~args:(`Assoc [ "id", `String goal.id; "due_date", `String "2026-10-15" ])
+  with
+  | None -> fail "masc_goal_upsert not handled"
+  | Some result ->
+    let json = parse_json_result result in
+    check string "the edit is reported as stored" goal.id (get_string_field json "goal_id");
+    check
+      string
+      "with the new due date"
+      "2026-10-15"
+      (get_string_field (Yojson.Safe.Util.member "goal" json) "due_date")
+;;
+
 let test_goal_upsert_rejects_lifecycle_fields () =
   with_workspace
   @@ fun config ->
@@ -716,12 +844,96 @@ let test_operator_confirmation_binds_current_proof () =
   (match confirm () with Error _ -> () | Ok _ -> fail "changed criterion accepted stale proof")
 ;;
 
+
+(* {1 The caller's step after a confirmation is recorded} *)
+
+let goal_awaiting_confirmation config title =
+  let goal, _ = match Goal_store.upsert_goal config ~title
+    ~metric:"observed artifacts" ~target_value:"1" () with
+    | Ok value -> value | Error error -> fail (Goal_store.write_error_to_string error) in
+  ignore (request_complete config goal.id);
+  check string "the verifier proves it" "awaiting_confirmation"
+    (transition_phase (prove_complete config goal.id));
+  let verdict = match Goal_verification.get_record_authoritative config ~goal_id:goal.id with
+    | Ok (Some {completion = Goal_verification.Proof_proven verdict; _}) -> verdict
+    | _ -> fail "missing current proof" in
+  goal, verdict
+;;
+
+let confirm_with ?after_confirmation config (goal : Goal_store.goal)
+    (verdict : Goal_verification.verdict) =
+  Workspace_goals.confirm_completion ?after_confirmation config ~goal_id:goal.id
+    ~operator_id:"operator-a" ~criterion_revision:goal.criterion_revision
+    ~request_id:verdict.request_id ~verification_run_id:verdict.verification_run_id
+;;
+
+let phase_of_confirmation = function
+  | Ok json -> Yojson.Safe.Util.(member "goal" json |> member "phase" |> to_string)
+  | Error error -> fail (Goal_store.write_error_to_string error)
+;;
+
+let test_confirmation_step_runs_once_the_confirmation_is_recorded () =
+  with_workspace @@ fun config ->
+  let goal, verdict = goal_awaiting_confirmation config "Step after confirmation" in
+  let seen = ref [] in
+  let step (g : Goal_store.goal) (v : Goal_verification.verdict)
+      (c : Goal_verification.confirmation) =
+    let recorded = match Goal_verification.get_record_authoritative config ~goal_id:g.Goal_store.id with
+      | Ok (Some {completion = Goal_verification.Human_confirmed _; _}) -> true
+      | _ -> false in
+    seen := (g.Goal_store.id, v.Goal_verification.request_id,
+             c.Goal_verification.operator_id, recorded,
+             Goal_phase.to_string g.Goal_store.phase) :: !seen;
+    Ok () in
+  check string "the confirmation completes the goal" "completed"
+    (phase_of_confirmation (confirm_with ~after_confirmation:step config goal verdict));
+  (match !seen with
+   | [ (id, request_id, operator, recorded, phase) ] ->
+     check string "names the Goal" goal.id id;
+     check string "names the confirmed request" verdict.request_id request_id;
+     check string "names the operator" "operator-a" operator;
+     check bool "the confirmation is already in the ledger" true recorded;
+     check string "the phase is not written yet" "awaiting_confirmation" phase
+   | calls -> fail (Printf.sprintf "expected one call, got %d" (List.length calls)));
+  (* A repeated confirmation of a Completed Goal runs the step again. *)
+  check string "a repeat answers the same" "completed"
+    (phase_of_confirmation (confirm_with ~after_confirmation:step config goal verdict));
+  check int "the repeat ran the step again" 2 (List.length !seen)
+;;
+
+let test_a_refusing_confirmation_step_keeps_the_confirmation_retryable () =
+  with_workspace @@ fun config ->
+  let goal, verdict = goal_awaiting_confirmation config "Step refuses confirmation" in
+  (match confirm_with ~after_confirmation:(fun _ _ _ -> Error "candle ledger unavailable")
+           config goal verdict with
+   | Error (Goal_store.Rejected message) ->
+     check string "the refusal reaches the caller" "candle ledger unavailable" message
+   | Error other -> fail ("expected Rejected, got " ^ Goal_store.write_error_to_string other)
+   | Ok _ -> fail "a refusing step did not stop the confirmation");
+  (match Goal_store.find_goal config ~goal_id:goal.id with
+   | Goal_store.Goal_found stored ->
+     check string "the phase did not move" "awaiting_confirmation"
+       (Goal_phase.to_string stored.Goal_store.phase)
+   | Goal_store.Goal_absent | Goal_store.Store_unavailable _ -> fail "goal not readable");
+  (match Goal_verification.get_record_authoritative config ~goal_id:goal.id with
+   | Ok (Some {completion = Goal_verification.Human_confirmed (_, confirmation); _}) ->
+     check string "the confirmation stays recorded" "operator-a"
+       confirmation.Goal_verification.operator_id
+   | _ -> fail "the confirmation was not kept");
+  check string "confirming again completes it" "completed"
+    (phase_of_confirmation (confirm_with config goal verdict))
+;;
+
 let () =
   run
     "goal_tools"
     [ ( "tool_workspace"
       , [ test_case "confirmation requires token-bound operator" `Quick test_confirmation_uses_token_bound_operator
         ; test_case "operator confirms exact current proof" `Quick test_operator_confirmation_binds_current_proof
+        ; test_case "a confirmation step runs once the confirmation is recorded" `Quick
+            test_confirmation_step_runs_once_the_confirmation_is_recorded
+        ; test_case "a refusing confirmation step keeps the confirmation retryable" `Quick
+            test_a_refusing_confirmation_step_keeps_the_confirmation_retryable
         ; test_case "upsert and list" `Quick test_goal_upsert_and_list
         ; test_case "list preserves source failure" `Quick test_goal_list_preserves_source_failure
         ; test_case "list answers the Unavailable envelope on #34459 rows" `Quick
@@ -750,6 +962,14 @@ let () =
             "creating a goal emits an event"
             `Quick
             test_goal_creation_emits_an_event
+        ; test_case
+            "due date and priority edits are recorded"
+            `Quick
+            test_goal_due_date_and_priority_edits_are_recorded
+        ; test_case
+            "a goal edit whose row cannot be appended still succeeds"
+            `Quick
+            test_a_goal_edit_whose_row_cannot_be_appended_still_succeeds
         ; test_case
             "goal review removed from dispatch"
             `Quick

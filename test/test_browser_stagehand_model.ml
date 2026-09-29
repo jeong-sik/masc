@@ -114,9 +114,10 @@ let with_provider behavior f =
   f ~net ~clock server
 ;;
 
-let generate ?cli_runner ~net ~clock resolved params =
+let generate ?cli_runner ?on_refusal ~net ~clock resolved params =
   Model.create
     ?cli_runner
+    ?on_refusal
     ~net
     ~clock
     ~base_path:(Sys.getcwd ())
@@ -460,11 +461,81 @@ let test_missing_nested_required_key_advances_to_second_http_slot () =
       (Yojson.Safe.equal answer (U.member "structured_content" result))
 ;;
 
+let test_typed_observer_records_failover_without_provider_text () =
+  let _, progress, _ = Lazy.force recorded_params in
+  let canary = "PRIVATE_PROVIDER_TEXT_FIXTURE" in
+  with_provider (F.Reply_with (fun count _ ->
+    (if count = 0 then `Service_unavailable else `Bad_request),
+    "{\"error\":{\"message\":\"" ^ canary ^ "\"}}"))
+  @@ fun ~net ~clock server ->
+  let resolved = resolved_lane ~slot_ids:[slot_id; second_slot_id]
+      ~base_url:server.base_url ~system_prompt:true () in
+  let seen = ref [] in
+  let result = generate ~on_refusal:(fun refusal -> seen := refusal :: !seen)
+      ~net ~clock resolved progress in
+  Alcotest.(check bool) "the ordinary RPC result stays refused" true (Result.is_error result);
+  Alcotest.(check int) "both real loopback requests were made" 2 (F.post_count server);
+  Alcotest.(check int) "one terminal refusal observed" 1 (List.length !seen);
+  let observation = Browser_stagehand_model_observation.refusal_json (List.hd !seen) in
+  let http = U.member "http" observation in
+  let final = U.member "terminal" http |> U.member "detail" in
+  let prior = U.member "prior_advances" http |> U.to_list in
+  Alcotest.(check int) "one prior failed slot" 1 (List.length prior);
+  Alcotest.(check int) "injected primary HTTP status retained" 503
+    (List.hd prior |> U.member "detail" |> U.member "http_status" |> U.to_int);
+  Alcotest.(check int) "fallback HTTP status retained" 400
+    (U.member "http_status" final |> U.to_int);
+  Alcotest.(check string) "typed terminal cause" "provider_response_refused"
+    (U.member "cause" final |> U.to_string);
+  let text = Yojson.Safe.to_string observation in
+  List.iter (fun private_text ->
+    Alcotest.(check bool) "shareable observation excludes private text/identities" false
+      (contains ~affix:private_text text)) [canary; slot_id; second_slot_id; server.base_url]
+;;
+
+let test_typed_observer_records_shape_rejection () =
+  let _, _, act = Lazy.force recorded_params in
+  with_provider (F.Reply (openai_body_for ~output:(`Assoc []) ~usage:""))
+  @@ fun ~net ~clock server ->
+  let resolved = resolved_lane ~base_url:server.base_url ~system_prompt:true () in
+  let seen = ref None in
+  let result = generate ~on_refusal:(fun refusal -> seen := Some refusal)
+      ~net ~clock resolved act in
+  Alcotest.(check bool) "incomplete output remains refused" true (Result.is_error result);
+  let observation = match !seen with
+    | Some refusal -> Browser_stagehand_model_observation.refusal_json refusal
+    | None -> Alcotest.fail "missing typed shape refusal" in
+  Alcotest.(check (list string)) "semantic refusal survives separately from transport"
+    ["missing_required_key"]
+    (U.member "rejected_shapes" observation |> U.to_list
+     |> List.map (fun issue -> U.member "cause" issue |> U.to_string));
+  Alcotest.(check bool) "no transport failure invented" true
+    (U.member "http" observation = `Null)
+;;
+
+let test_success_does_not_observe_refusal () =
+  let _, _, act = Lazy.force recorded_params in
+  with_provider (F.Reply (openai_body ~usage:""))
+  @@ fun ~net ~clock server ->
+  let resolved = resolved_lane ~base_url:server.base_url ~system_prompt:true () in
+  let observations = ref 0 in
+  let result = generate ~on_refusal:(fun _ -> incr observations)
+      ~net ~clock resolved act in
+  Alcotest.(check bool) "answer still succeeds" true (Result.is_ok result);
+  Alcotest.(check int) "success emits no failure evidence" 0 !observations
+;;
+
 let () =
   Alcotest.run
     "browser_stagehand_model"
     [ ( "llm.generate"
-      , [ Alcotest.test_case "the recorded params parse" `Quick test_recorded_params_parse
+      , [ Alcotest.test_case "typed refusal keeps both failed candidates safely" `Quick
+            test_typed_observer_records_failover_without_provider_text
+        ; Alcotest.test_case "typed refusal keeps semantic rejection" `Quick
+            test_typed_observer_records_shape_rejection
+        ; Alcotest.test_case "accepted output emits no refusal" `Quick
+            test_success_does_not_observe_refusal
+        ; Alcotest.test_case "the recorded params parse" `Quick test_recorded_params_parse
         ; Alcotest.test_case
             "an answer carries the reported usage"
             `Quick

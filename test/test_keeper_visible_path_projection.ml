@@ -134,7 +134,7 @@ let docker_sandbox_image_available =
        Sys.command
          (Printf.sprintf
             "docker image inspect %s >/dev/null 2>&1"
-            (Filename.quote Keeper_sandbox_image.default_tag))
+            (Filename.quote Masc_test_deps.live_sandbox_image_tag))
        = 0
      in
      (* A silent skip reads as "ran and passed" in a log someone scans later.
@@ -147,7 +147,7 @@ let docker_sandbox_image_available =
          "SKIPPING every case in this suite: it runs each turn inside the %s \
           sandbox image, which is not on this host. Build it with `masc \
           sandbox-image --tag %s` to run them.\n%!"
-         Keeper_sandbox_image.default_tag Keeper_sandbox_image.default_tag;
+         Masc_test_deps.live_sandbox_image_tag Masc_test_deps.live_sandbox_image_tag;
      available)
 
 (* The image being present is half the premise. Every case here writes the
@@ -179,7 +179,7 @@ let docker_shares_a_temp_workspace =
             "docker run --rm -v %s:/masc-mount-premise:ro %s cat \
              /masc-mount-premise/mount-premise >/dev/null 2>&1"
             (Filename.quote dir)
-            (Filename.quote Keeper_sandbox_image.default_tag))
+            (Filename.quote Masc_test_deps.live_sandbox_image_tag))
        = 0
      in
      (try Sys.remove sentinel with Sys_error _ -> ());
@@ -208,7 +208,8 @@ let setup ?sandbox ?always_allow f =
   let base = temp_dir () in
   ensure_dir (Filename.concat base Common.masc_dirname);
   Masc_test_deps.write_sandbox_image_catalog ~base_path:base
-    [ "base", Keeper_sandbox_image.default_tag ];
+    [ "base", Masc_test_deps.live_sandbox_image_tag ];
+
   Fun.protect
     ~finally:(fun () -> cleanup_dir base)
     (fun () ->
@@ -731,6 +732,84 @@ let contains_in haystack needle =
   n = 0 || go 0
 ;;
 
+(* Equal local commits do not prove a fresh origin observation. A ref moved
+   with an old reflog timestamp must say stale on both surfaces; moving it
+   again makes the same checkout current. *)
+let test_equal_checkout_requires_recent_target_ref () =
+  setup
+  @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
+  seed_masc_checkout_one_ahead ~config ~meta ~playground;
+  let checkout = Filename.concat playground "repos/masc" in
+  let fetch_head = Filename.concat checkout ".git/FETCH_HEAD" in
+  if Sys.file_exists fetch_head then Sys.remove fetch_head;
+  let old_update =
+    Printf.sprintf
+      "GIT_COMMITTER_DATE='@1600000000 +0000' git -C %s update-ref refs/remotes/origin/main HEAD"
+      (Filename.quote checkout)
+  in
+  if Sys.command old_update <> 0 then Alcotest.fail "old update-ref failed";
+  let entry () =
+    Keeper_sandbox_control.repository_checkouts_json ~config ~meta
+    |> Json.member "entries" |> Json.to_list |> List.hd
+    |> Json.member "freshness"
+  in
+  let stale = entry () in
+  Alcotest.(check string) "stale JSON state" "stale_ref"
+    (stale |> Json.member "state" |> Json.to_string);
+  Alcotest.(check int) "last moved" 1600000000
+    (stale |> Json.member "target_ref_last_observed_at_unix" |> Json.to_int);
+  let rows =
+    match Keeper_sandbox_control.checkout_freshness_rows ~config ~meta () with
+    | Ok [ ({ row_freshness = Keeper_sandbox_control.Stale_ref
+                  { age_s = Some age; _ }; _ } as row) ] ->
+      Alcotest.(check bool) "old local ref" true (age > 900);
+      [ row ]
+    | _ -> Alcotest.fail "World State did not receive Stale_ref"
+  in
+  let observation = Masc.Keeper_world_observation.observe
+    ~pending_board_events:(Some []) ~config ~meta in
+  let { Masc.Keeper_unified_prompt.world_state; _ } =
+    Masc.Keeper_unified_prompt.build_prompt
+      ~turn_decision:(Masc.Keeper_world_observation.keeper_cycle_decision
+                        ~meta observation)
+      ~current_task:Masc.Keeper_world_observation_inputs.No_current_task
+      ~repository_freshness:rows ~observation ()
+  in
+  Alcotest.(check bool) "World State says as of" true
+    (contains_in world_state "origin/main as of 2020-09-13 12:26:40 UTC");
+  let head =
+    match run_git_or_fail ~cwd:checkout [ "rev-parse"; "HEAD" ] with
+    | head :: _ -> head
+    | [] -> Alcotest.fail "HEAD unavailable" in
+  write_file fetch_head
+    (head ^ "\t\tbranch 'other' of https://example.invalid/masc.git\n");
+  Alcotest.(check string) "unrelated fetch remains stale" "stale_ref"
+    (entry () |> Json.member "state" |> Json.to_string);
+  write_file fetch_head
+    (head ^ "\t\tbranch 'main' of https://example.invalid/masc.git\n");
+  Alcotest.(check string) "matching row without fetch receipt stays stale" "stale_ref"
+    (entry () |> Json.member "state" |> Json.to_string);
+  let common_dir = Filename.concat checkout ".git" in
+  (match Repo_fetch_observation.write ~common_dir
+           { common_dir
+           ; origin_url = "https://example.invalid/masc.git"
+           ; target_ref = "origin/main"
+           ; oid = head
+           ; observed_at_unix = int_of_float (Unix.gettimeofday ())
+           } with
+   | Ok () -> ()
+   | Error message -> Alcotest.fail message);
+  Alcotest.(check string) "matching managed fetch receipt is current" "current"
+    (entry () |> Json.member "state" |> Json.to_string);
+  Sys.remove (Filename.concat common_dir Repo_fetch_observation.filename);
+  let _ = run_git_or_fail ~cwd:checkout
+    [ "update-ref"; "refs/remotes/origin/main"; "HEAD~1" ] in
+  let _ = run_git_or_fail ~cwd:checkout
+    [ "update-ref"; "refs/remotes/origin/main"; "HEAD" ] in
+  Alcotest.(check string) "fresh JSON state" "current"
+    (entry () |> Json.member "state" |> Json.to_string)
+;;
+
 (* The row projection reads the same probe as the JSON surface, so the same
    seeded world must answer with the same facts in typed form. *)
 let test_checkout_freshness_rows_read_the_same_probe () =
@@ -835,7 +914,8 @@ let test_freshness_layer_sorts_drift_first_and_aggregates_unmeasured () =
     ; row_changed_files = Some 0
     ; row_freshness =
         Masc.Keeper_sandbox_control.Current
-          { target_ref = "origin/main"; upstream_head = "deadbeef" }
+          { target_ref = "origin/main"; upstream_head = "deadbeef"
+          ; last_observed_at_unix = 1; age_s = 0 }
     }
   in
   let stale_row : Masc.Keeper_sandbox_control.freshness_row =
@@ -974,6 +1054,9 @@ let () =
             "starts inspection budget after discovery"
             `Quick
             test_repository_checkout_budget_starts_after_discovery
+        ; Alcotest.test_case
+            "equal checkout requires recent target ref" `Quick
+            test_equal_checkout_requires_recent_target_ref
         ; Alcotest.test_case
             "freshness rows read the same probe as the JSON surface"
             `Quick

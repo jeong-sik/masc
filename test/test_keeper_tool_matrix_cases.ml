@@ -487,6 +487,10 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
       (* No artifact carries this digest in a fresh workspace, so the call
          refuses rather than reading one. *)
       `Assoc [ ("sha256", `String (String.make 64 '0')) ]
+  | "keeper_portrait_read" ->
+      (* The read-only portrait tool renders the Keeper's own portrait and
+         returns its equipment. A small edge keeps the case cheap. *)
+      `Assoc [ ("size", `Int 96) ]
   | "keeper_skill_validate" ->
       (* The request has the public fields, but the empty artifact must be
          refused before any Skill content is read. *)

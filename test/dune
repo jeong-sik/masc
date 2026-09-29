@@ -1601,7 +1601,15 @@
 (test
  (name test_goal_owner_notification)
  (modules test_goal_owner_notification)
- (libraries masc_test_deps))
+ (libraries masc_test_deps ptime))
+
+; Goal_due: the one reading of a Goal's due date (the day it names, the UTC
+; instant it falls due, the UTC days left).
+
+(test
+ (name test_goal_due)
+ (modules test_goal_due)
+ (libraries alcotest masc.masc_goal ptime))
 
 ; RFC-0267 Phase 2: validated task->goal assignment
 ; (Task.Goal_assignment.set_task_goal).
@@ -2124,6 +2132,11 @@
  (deps %{workspace_root}/lib/otel_metric_store/otel_metric_store_core.ml)
  (libraries alcotest ast_grep otel_metric_store eio eio_main))
 
+(test
+ (name test_otel_metric_total)
+ (modules test_otel_metric_total)
+ (libraries alcotest otel_metric_store))
+
 ; Real local exact-output fixture shared by exact-output lane tests.
 (library
  (name exact_output_fixture)
@@ -2535,6 +2548,10 @@
 
 (include stanzas/test_briefing_sections.inc)
 
+(include stanzas/test_candle_event.inc)
+(include stanzas/test_candle_time.inc)
+(include stanzas/test_candle_ledger.inc)
+
 (include stanzas/test_audit_keeper_fleet_readiness.inc)
 
 (include stanzas/test_keeper_production_readiness_gate.inc)
@@ -2571,6 +2588,7 @@
 (include stanzas/test_msx_tools.inc)
 
 (include stanzas/test_dos_input_routes.inc)
+(include stanzas/test_play_credential_transaction.inc)
 (include stanzas/test_dos_tools.inc)
 
 (include stanzas/test_machine_checkpoint.inc)
@@ -2982,6 +3000,8 @@
 
 (include stanzas/test_mcp_server_eio_tool_profile_capability.inc)
 
+(include stanzas/test_tools_list_assignment_agent.inc)
+
 (include stanzas/test_mcp_seat_profile.inc)
 
 (include stanzas/test_mcp_dos_screen_image.inc)
@@ -3340,6 +3360,11 @@
  (name test_scheduler_lag)
  (modules test_scheduler_lag)
  (libraries alcotest eio eio_main masc.masc_core))
+
+(test
+ (name test_file_version_cache)
+ (modules test_file_version_cache)
+ (libraries alcotest masc.masc_core unix))
 
 (test
  (name test_eval_tool_selector_boundary)
@@ -3857,6 +3882,7 @@
   masc
   masc_tui_fetched
   masc_tui_keys
+  masc_tui_message_layout
   masc_tui_preset_text
   masc_tui_types))
 
@@ -3969,6 +3995,11 @@
  (name test_tui_clipboard)
  (modules test_tui_clipboard)
  (libraries alcotest masc_tui_clipboard))
+
+(test
+ (name test_tui_sse_lines)
+ (modules test_tui_sse_lines)
+ (libraries alcotest masc_tui_sse_lines))
 
 (test
  (name test_tui_image_preview)
@@ -4363,43 +4394,6 @@
  (modules test_tui_chart)
  (libraries alcotest masc_tui_chart masc_tui_message_layout masc_tui_theme))
 
-; RFC-0464: the Overview Team block's projection.
-; RFC-0465: the TUI pull request decoder against the server's own encoder.
-(test
- (name test_tui_repository_pulls)
- (modules test_tui_repository_pulls)
- (libraries alcotest masc.server masc_tui_types masc_tui_repository_pulls))
-
-; The Team block's per-Keeper spend decoder against the server's own encoder.
-(test
- (name test_tui_keeper_spend)
- (modules test_tui_keeper_spend)
- (libraries
-  alcotest
-  masc_test_deps
-  masc.jsonl_writer
-  masc.dashboard_utils
-  masc.server
-  masc_tui_types
-  masc_tui_message_layout
-  masc_tui_keeper_spend))
-
-(test
- (name test_tui_overview_team)
- (modules test_tui_overview_team)
- (libraries
-  alcotest
-  masc
-  masc_types
-  masc_tui_types
-  masc_tui_overview_team))
-
-(test
- (name test_tui_overview_cache)
- (modules test_tui_overview_cache)
- (libraries alcotest masc masc_types masc_tui_types
-  masc_tui_overview_cache masc_tui_overview_team masc_tui_overview_tasks))
-
 (test
  (name test_tui_overview_goals)
  (modules test_tui_overview_goals)
@@ -4561,6 +4555,11 @@
  (name test_tui_link)
  (modules test_tui_link)
  (libraries alcotest base64 masc_tui_link))
+
+(test
+ (name test_tui_play_qr)
+ (modules test_tui_play_qr)
+ (libraries alcotest masc_tui_play_qr masc_tui_message_layout))
 
 (test
  (name test_tui_planning_order)
@@ -6426,7 +6425,7 @@
 (test
  (name test_keeper_sandbox_remote_checkouts)
  (modules test_keeper_sandbox_remote_checkouts)
- (libraries alcotest masc unix yojson))
+ (libraries alcotest masc masc.repo_manager unix yojson))
 
 (test
  (name test_tui_image_mosaic)
@@ -6487,8 +6486,8 @@
 (test
  (name test_tui_msx_load)
  (modules test_tui_msx_load)
- (libraries alcotest unix masc masc_tui_types masc_tui_machine_live masc_tui_interactive
-   masc_tui_msx))
+ (libraries alcotest unix masc masc.msx_lane masc_tui_types masc_tui_machine_live
+   masc_tui_interactive masc_tui_msx))
 
 ; The spectator's typed read of GET /api/v1/lane-addons/live: every answer
 ; shape, the malformed ones, and what a read does to the drawn view.
@@ -6582,7 +6581,18 @@
  (deps test_tui_keyboard_input.py ../bin/masc_tui.exe)
  (action
   (run python3 %{dep:test_tui_keyboard_input.py}
-   %{dep:../bin/masc_tui.exe} fusion-history)))
+  %{dep:../bin/masc_tui.exe} fusion-history)))
+
+(rule
+ (alias runtest-test_tui_keyboard_input-dashboard-usage)
+ (deps test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe} dashboard-usage)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-dashboard-usage)))
 
 (alias
  (name runtest)
@@ -6679,6 +6689,16 @@
  (action
   (run python3 %{dep:test_tui_tab_strip_pty.py} %{dep:../bin/masc_tui.exe})))
 
+(rule
+ (alias runtest-test_tui_play_invites_pty)
+ (deps test_tui_play_invites_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_play_invites_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_play_invites_pty)))
+
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_tab_strip_pty)))
@@ -6774,6 +6794,16 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_memory_health_read_error)))
+
+(rule
+ (alias runtest-test_tui_memory_default_view_pty)
+ (deps test_tui_memory_default_view_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_memory_default_view_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_memory_default_view_pty)))
 
 (rule
  (alias runtest-test_tui_lane_detail_says_what_the_lane_answers)
@@ -7060,10 +7090,9 @@
  (deps (alias runtest-test_install_local_build)))
 
 (test
- (name test_workspace_memory_proposals)
- (modules test_workspace_memory_proposals)
- (libraries alcotest yojson unix masc masc.server masc.masc_core masc.prompt_registry)
- (deps ../config/prompts/keeper.md ../docs/evidence/2026-09-10-workspace-memory-curator/qwen38-27b/proposal.json))
+ (name test_workspace_memory_ledger_view)
+ (modules test_workspace_memory_ledger_view)
+ (libraries alcotest digestif yojson masc masc.fs_compat))
 
 (test
  (name test_workspace_memory_ledger)
@@ -7596,3 +7625,13 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_chat_activity_pane_pty)))
+
+(rule
+ (alias runtest-test_tui_chat_load_errors_pty)
+ (deps test_tui_chat_load_errors_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_chat_load_errors_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_chat_load_errors_pty)))

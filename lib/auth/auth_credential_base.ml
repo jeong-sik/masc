@@ -57,6 +57,7 @@ let internal_keeper_token_holder : string option Atomic.t = Atomic.make None
 let internal_keeper_token () = Atomic.get internal_keeper_token_holder
 let run_blocking_io f = Eio_guard.run_in_systhread ~label:"auth-credential-io" f
 let file_exists path = run_blocking_io (fun () -> Sys.file_exists path)
+let stat_file path = run_blocking_io (fun () -> Unix.stat path)
 let read_text_file path = Fs_compat.load_file path
 let write_text_file path content = Fs_compat.save_file path content
 let chmod path perm = run_blocking_io (fun () -> Unix.chmod path perm)
@@ -170,11 +171,15 @@ let raise_auth_config_error ~file reason =
   raise (Auth_config_error { file; reason })
 ;;
 
+(* HIGH-RISK-UNREVIEWED: every authenticated request calls this. The stat runs
+   on a system thread, so a filesystem that takes seconds to answer holds the
+   calling fiber rather than the scheduler every other request shares. Which
+   answers load, default, or raise is the same as a stat on the fiber. *)
 (** Load auth config *)
 let load_auth_config config : auth_config =
   let file = auth_config_file config in
   match
-    try Some (Unix.stat file) with
+    try Some (stat_file file) with
     | Unix.Unix_error (Unix.ENOENT, _, _) -> None
     | Unix.Unix_error (error, function_name, argument) ->
       raise_auth_config_error
@@ -235,18 +240,8 @@ let credential_of_json agent_name json : agent_credential option =
     None
 ;;
 
-(** Load agent credential.
-
-    Tries an exact filename match first. If that misses and [agent_name]
-    looks like a generated nickname ({agent_type}-{adj}-{animal}[...]),
-    retry with just the agent_type prefix — shared-token aliases
-    provisioned for stable keeper names (e.g. [example-keeper.json]) then
-    cover every dynamically generated nickname in that family
-    (e.g. [example-keeper-fair-tapir]).
-
-    Without this fallback, Workspace.bind_session's nickname output caused a
-    chronic "No credential found for <type>-<adj>-<animal>" noise band
-    at ~0.3/min on the live fleet (2026-04-20). *)
+(* One credential file at [path]: [None] when it is absent, cannot be read,
+   or does not decode. *)
 let load_credential_from_path_raw config agent_name path : agent_credential option =
   if file_exists path
   then (
@@ -286,6 +281,11 @@ let load_redirect_target config path =
 
 let remove_file_if_exists path = if file_exists path then remove_file path
 
+(* [agent_name]'s own file, then the id-named file its redirect stub points
+   to. A name that signs in with another name's token (a generated nickname,
+   a Keeper transport alias) has no file of its own; the token check maps it
+   to the owner ([Auth_credential_token.verify_token_owner_alias]), not this
+   lookup. *)
 let load_credential config agent_name : agent_credential option =
   let file = credential_file config agent_name in
   if not (file_exists file)
@@ -354,13 +354,46 @@ let credential_cache_invalidator_ref
   ref (fun (_ : string) -> ())
 ;;
 
+type credential_transaction = Credential_transaction of string
+
+let with_credential_transaction config f =
+  let lock_path =
+    try
+      ensure_auth_dirs config;
+      (* One path spelling also gives aliases of the base directory the same
+         in-process gate; POSIX record locks alone do not exclude own threads. *)
+      Ok (run_blocking_io (fun () ->
+        Filename.concat (Unix.realpath (auth_dir config)) ".credentials.lock"))
+    with
+    | Sys_error detail -> Error (System (System_error.IoError detail))
+    | Unix.Unix_error (error, operation, argument) ->
+      Error (System (System_error.IoError
+        (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error))))
+    | Eio.Io _ as exn -> Error (System (System_error.IoError (Printexc.to_string exn)))
+  in
+  match lock_path with
+  | Error _ as error -> error
+  | Ok lock_path ->
+    match File_lock_eio.with_durable_lock_observed ~lock_path
+        (fun () -> f (Credential_transaction config)) with
+    | File_lock_eio.Lock_not_acquired error ->
+      Error (System (System_error.IoError (File_lock_eio.durable_lock_error_to_string error)))
+    | File_lock_eio.Body_completed { value; release_error } ->
+      (match release_error with
+       | None -> ()
+       | Some error ->
+         Log.Auth.error "credential transaction completed but lock release failed: %s"
+           (File_lock_eio.durable_lock_error_to_string error));
+      Ok value
+;;
+
 (** Save agent credential.
 
     When [cred.id] is present the credential is stored under
     [{uuid}.json] and a redirect stub [{agent_name}.json] is written so
     legacy lookup paths still resolve. *)
 let save_credential config (cred : agent_credential) =
-  ensure_auth_dirs config;
+  let saved = with_credential_transaction config (fun _transaction ->
   let json = agent_credential_to_yojson cred in
   let json_str = Yojson.Safe.pretty_to_string json in
   let stub_file = credential_file config cred.agent_name in
@@ -383,7 +416,10 @@ let save_credential config (cred : agent_credential) =
      a ref so the cache module can register its invalidator after both
      definitions are visible; see [register_credential_cache_invalidator]
      near [credential_token_index]. *)
-  !credential_cache_invalidator_ref config
+  !credential_cache_invalidator_ref config) in
+  match saved with
+  | Ok () -> ()
+  | Error error -> raise (Sys_error (masc_error_to_string error))
 ;;
 
 (** #10440: write a short-form alias [<alias_name>.json] as a
@@ -409,6 +445,7 @@ let save_credential config (cred : agent_credential) =
     require both sides to share the same UUID file. *)
 let ensure_credential_alias config ~canonical_name ~alias_name : (unit, masc_error) result
   =
+  let result = with_credential_transaction config (fun _transaction ->
   if String.equal canonical_name alias_name
   then Ok ()
   else (
@@ -448,6 +485,7 @@ let ensure_credential_alias config ~canonical_name ~alias_name : (unit, masc_err
           try
             ensure_auth_dirs config;
             save_private_text_file alias_file (Yojson.Safe.pretty_to_string desired_stub);
+            !credential_cache_invalidator_ref config;
             Ok ()
           with
           | Eio.Cancel.Cancelled _ as e -> raise e
@@ -459,7 +497,8 @@ let ensure_credential_alias config ~canonical_name ~alias_name : (unit, masc_err
                        "Failed to write alias %s -> %s: %s"
                        alias_name
                        canonical_name
-                       (Printexc.to_string exn)))))))
+                       (Printexc.to_string exn)))))))) in
+  Result.join result
 ;;
 
 let load_raw_token config ~agent_name =
@@ -476,21 +515,40 @@ let persist_raw_token config ~agent_name raw_token =
   save_private_text_file (raw_token_file config agent_name) raw_token
 ;;
 
+(** Delete using the caller's admitted workspace. The public wrapper and
+    multi-effect transactions share this implementation. *)
+let delete_credential_in_transaction (Credential_transaction config) agent_name =
+  try
+    Fun.protect ~finally:(fun () -> !credential_cache_invalidator_ref config)
+      (fun () ->
+        let file = credential_file config agent_name in
+        let raw_token = raw_token_file config agent_name in
+        let redirect_target = load_redirect_target config file in
+        let credential_target =
+          match load_credential config agent_name with
+          | Some { id = Some cid; _ } -> Some (credential_uuid_file config cid)
+          | _ -> None
+        in
+        remove_file_if_exists file;
+        remove_file_if_exists raw_token;
+        Option.iter remove_file_if_exists redirect_target;
+        Option.iter remove_file_if_exists credential_target;
+        Ok ())
+  with
+  | Sys_error detail -> Error (System (System_error.IoError detail))
+  | Unix.Unix_error (error, operation, argument) ->
+    Error (System (System_error.IoError
+      (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error))))
+  | Eio.Io _ as exn -> Error (System (System_error.IoError (Printexc.to_string exn)))
+;;
+
 (** Delete agent credential *)
 let delete_credential config agent_name =
-  let file = credential_file config agent_name in
-  let raw_token = raw_token_file config agent_name in
-  let redirect_target = load_redirect_target config file in
-  let credential_target =
-    match load_credential config agent_name with
-    | Some { id = Some cid; _ } -> Some (credential_uuid_file config cid)
-    | _ -> None
-  in
-  remove_file_if_exists file;
-  remove_file_if_exists raw_token;
-  Option.iter remove_file_if_exists redirect_target;
-  Option.iter remove_file_if_exists credential_target;
-  !credential_cache_invalidator_ref config
+  let deleted = with_credential_transaction config (fun transaction ->
+    delete_credential_in_transaction transaction agent_name) in
+  match Result.join deleted with
+  | Ok () -> ()
+  | Error error -> raise (Sys_error (masc_error_to_string error))
 ;;
 
 (** List all credentials.
@@ -612,14 +670,13 @@ let invalidate_credential_index_cache config =
 ;;
 
 let credential_token_index config
-  : (string, agent_credential list) Hashtbl.t
+  : ((string, agent_credential list) Hashtbl.t, masc_error) result
   =
   let key = agents_dir config in
   let now = Time_compat.now () in
-  (* Two-phase: lookup under the lock; if a miss, drop the lock to
-     run the disk read, then re-acquire to publish.  Holding the
-     lock across the disk read would serialize all auth checks
-     during the cold path. *)
+  (* The cache mutex covers memory only. A cold read publishes under the
+     credential transaction, so it cannot restore an old index after a
+     writer invalidated it. Cache hits keep the short in-memory path. *)
   let cached =
     with_credential_index_cache_lock (fun () ->
       match Hashtbl.find_opt credential_index_cache key with
@@ -633,19 +690,17 @@ let credential_token_index config
     Auth_metric_store.inc_counter
       Auth_metric_store.metric_auth_credential_index_cache_hits
       ();
-    by_token
+    Ok by_token
   | None ->
     Auth_metric_store.inc_counter
       Auth_metric_store.metric_auth_credential_index_cache_misses
       ();
-    let creds = list_credentials config in
-    let by_token = build_token_index creds in
-    with_credential_index_cache_lock (fun () ->
-      Hashtbl.replace
-        credential_index_cache
-        key
-        { loaded_at = now; by_token });
-    by_token
+    with_credential_transaction config (fun _transaction ->
+       let creds = list_credentials config in
+       let by_token = build_token_index creds in
+       with_credential_index_cache_lock (fun () ->
+         Hashtbl.replace credential_index_cache key { loaded_at = now; by_token });
+       by_token)
 ;;
 
 (* Wire the forward-declared invalidator so [save_credential] and

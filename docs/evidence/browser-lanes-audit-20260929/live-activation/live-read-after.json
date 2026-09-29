@@ -1,0 +1,44 @@
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": {
+    "_meta": {
+      "io.modelcontextprotocol/serverInfo": {
+        "name": "masc",
+        "title": "MASC MCP Server",
+        "version": "0.46.0"
+      },
+      "com.github.yousleepwhen.masc/call": {
+        "envelope": {
+          "kind": "tool_call",
+          "summary": "{\"clientId\":null,\"tabId\":0,\"url\":\"http://127.0.0.1:8998/\",\"title\":\"MASC Stagehand verification\",\"text\":\"Stagehand verification\\n\\nPlan price: 42 USD\\n\\nConfirm test\\n\\nConfirmed by Stagehand\",\"chars\":80,\"truncated\":false}",
+          "status": "ok",
+          "tool": "masc_browser_read"
+        },
+        "trace_id": "2",
+        "agent_id": "admin",
+        "tool": "masc_browser_read",
+        "duration_ms": 8,
+        "attempts": 1,
+        "timestamp": "2026-09-29T02:13:48Z"
+      }
+    },
+    "resultType": "complete",
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"clientId\":null,\"tabId\":0,\"url\":\"http://127.0.0.1:8998/\",\"title\":\"MASC Stagehand verification\",\"text\":\"Stagehand verification\\n\\nPlan price: 42 USD\\n\\nConfirm test\\n\\nConfirmed by Stagehand\",\"chars\":80,\"truncated\":false}"
+      }
+    ],
+    "isError": false,
+    "structuredContent": {
+      "clientId": null,
+      "tabId": 0,
+      "url": "http://127.0.0.1:8998/",
+      "title": "MASC Stagehand verification",
+      "text": "Stagehand verification\n\nPlan price: 42 USD\n\nConfirm test\n\nConfirmed by Stagehand",
+      "chars": 80,
+      "truncated": false
+    }
+  }
+}

@@ -152,8 +152,11 @@ const canvas = el('screen');
 const ctx = canvas.getContext('2d');
 let me = null;
 let controller = null;
+let machine = false;
 let since = null;
 let lastActivityKey = null;
+let latestSeatRequest = null;
+let handoffRead = null;
 let ended = false;
 let sending = Promise.resolve();
 // The saves name the seat last reported (null: nothing loaded), and the one
@@ -165,7 +168,12 @@ let padBound = new Set();
 const gamepadHeld = new Set();
 let gamepadLoop = false;
 
-function setStatus(text) { el('status').textContent = text; }
+const statusMessages = new Map();
+function setStatus(source, text) {
+  if (text === '') statusMessages.delete(source);
+  else statusMessages.set(source, text);
+  el('status').textContent = [...statusMessages.values()].join(' ');
+}
 
 function setControlsEnabled(enabled) {
   for (const node of document.querySelectorAll('button, input, select')) node.disabled = !enabled;
@@ -193,7 +201,11 @@ async function api(method, path, body) {
 
 function renderTurn() {
   const turn = el('turn');
-  if (controller === null) {
+  setControlsEnabled(machine && !ended);
+  if (!machine) {
+    turn.className = '';
+    turn.textContent = '지금 켜진 게임이 없어요.';
+  } else if (controller === null) {
     turn.className = '';
     turn.textContent = '조종권이 비어 있어요. 먼저 누르는 사람이 가져가요.';
   } else if (controller === me) {
@@ -224,14 +236,44 @@ function renderPassTargets(participants) {
 }
 
 async function refreshSeat() {
-  const r = await api('GET', SEAT_PATH);
-  if (ended) return;
-  if (r.status !== 200 || !r.json) { setStatus('자리 정보를 읽지 못했어요 (' + r.status + ')'); return; }
+  // Only a successful read may acknowledge the activity that prompted it.
+  // A failed read after sending a move must be retried by the poll as well.
+  lastActivityKey = null;
+  const request = {};
+  latestSeatRequest = request;
+  let r;
+  try {
+    r = await api('GET', SEAT_PATH);
+  } catch (_) {
+    if (ended || latestSeatRequest !== request) return false;
+    setStatus('seat', '자리 정보를 읽지 못했어요. 다시 시도하고 있어요.');
+    return false;
+  }
+  if (ended || latestSeatRequest !== request) return false;
+  if (r.status !== 200 || !r.json || typeof r.json.machine !== 'boolean'
+      || typeof r.json.name !== 'string'
+      || !(r.json.controller === null || typeof r.json.controller === 'string')
+      || !(r.json.saves_name === null || typeof r.json.saves_name === 'string')
+      || !Array.isArray(r.json.participants)
+      || !r.json.participants.every(name => typeof name === 'string')) {
+    setStatus('seat', '자리 정보를 읽지 못했어요 (' + r.status + ')');
+    return false;
+  }
   me = r.json.name;
   controller = r.json.controller;
+  machine = r.json.machine;
   renderTurn();
   renderPassTargets(r.json.participants);
-  seatSavesName = r.json.saves_name === undefined ? null : r.json.saves_name;
+  seatSavesName = r.json.saves_name;
+  setStatus('seat', '');
+  return true;
+}
+
+// A pointer opening also focuses the select. Those events share one read;
+// a later reopening still asks again even if the select never lost focus.
+function refreshHandoffTargets() {
+  if (ended || handoffRead !== null) return;
+  handoffRead = refreshSeat().finally(() => { handoffRead = null; });
 }
 
 function showPad(savesName, buttons) {
@@ -246,6 +288,7 @@ function showPad(savesName, buttons) {
   }
   pad.hidden = buttons.length === 0;
   el('keys').hidden = buttons.length !== 0;
+  setStatus('pad', '');
 }
 
 // No machine, or a program with no layout: the plain keys row stays. Only
@@ -262,7 +305,7 @@ async function syncPad() {
   const named = r.json !== null && typeof r.json.saves_name === 'string';
   if (r.status === 200 && named && Array.isArray(r.json.buttons)) showPad(r.json.saves_name, r.json.buttons);
   else if (r.status === 404 && named) showPad(r.json.saves_name, []);
-  else setStatus('패드 배치를 읽지 못했어요 (' + r.status + '). 다시 읽고 있어요.');
+  else setStatus('pad', '패드 배치를 읽지 못했어요 (' + r.status + '). 다시 읽고 있어요.');
 }
 
 // The saves name goes with the button: a program loaded since the pad was
@@ -289,27 +332,32 @@ function pollGamepads() {
 
 // Whether the frame was drawn; a frame that was not says why in the status.
 function draw(screen) {
-  if (!screen || screen.format !== 'rgb8') { setStatus('이 화면 형식은 아직 그릴 수 없어요'); return false; }
-  const raw = atob(screen.rgb_base64);
-  const width = screen.width;
-  const height = screen.height;
-  // An rgb8 frame is width * height pixels of three bytes. A frame that says
-  // otherwise is not drawn, rather than drawn from missing bytes.
-  if (!(Number.isInteger(width) && width > 0 && Number.isInteger(height) && height > 0 && raw.length === width * height * 3)) {
-    setStatus('화면을 읽지 못했어요 (' + width + 'x' + height + ', ' + raw.length + ' bytes)');
+  if (!screen || screen.format !== 'rgb8') { setStatus('frame', '이 화면 형식은 아직 그릴 수 없어요'); return false; }
+  try {
+    const raw = atob(screen.rgb_base64);
+    const width = screen.width;
+    const height = screen.height;
+    // An rgb8 frame is width * height pixels of three bytes. A frame that says
+    // otherwise is not drawn, rather than drawn from missing bytes.
+    if (!(Number.isInteger(width) && width > 0 && Number.isInteger(height) && height > 0 && raw.length === width * height * 3)) {
+      setStatus('frame', '화면을 읽지 못했어요 (' + width + 'x' + height + ', ' + raw.length + ' bytes)');
+      return false;
+    }
+    if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
+    const image = ctx.createImageData(width, height);
+    for (let pixel = 0, source = 0; pixel < width * height; pixel += 1, source += 3) {
+      const target = pixel * 4;
+      image.data[target] = raw.charCodeAt(source);
+      image.data[target + 1] = raw.charCodeAt(source + 1);
+      image.data[target + 2] = raw.charCodeAt(source + 2);
+      image.data[target + 3] = 255;
+    }
+    ctx.putImageData(image, 0, 0);
+    return true;
+  } catch (_) {
+    setStatus('frame', '화면을 읽지 못했어요. 다시 읽고 있어요.');
     return false;
   }
-  if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
-  const image = ctx.createImageData(width, height);
-  for (let pixel = 0, source = 0; pixel < width * height; pixel += 1, source += 3) {
-    const target = pixel * 4;
-    image.data[target] = raw.charCodeAt(source);
-    image.data[target + 1] = raw.charCodeAt(source + 1);
-    image.data[target + 2] = raw.charCodeAt(source + 2);
-    image.data[target + 3] = 255;
-  }
-  ctx.putImageData(image, 0, 0);
-  return true;
 }
 
 function renderActivity(activity) {
@@ -329,7 +377,7 @@ async function tick() {
   try {
     await poll();
   } catch (_) {
-    setStatus('연결이 잠시 끊겼어요. 다시 시도하고 있어요.');
+    setStatus('connection', '연결이 잠시 끊겼어요. 다시 시도하고 있어요.');
   } finally {
     if (!ended) setTimeout(tick, POLL_MS);
   }
@@ -341,34 +389,45 @@ async function poll() {
   const r = await api('GET', LIVE_PATH + query);
   if (ended) return;
   if (r.status !== 200 || !r.json) {
-    setStatus('연결이 잠시 끊겼어요. 다시 시도하고 있어요.');
+    setStatus('connection', '연결이 잠시 끊겼어요. 다시 시도하고 있어요.');
   } else {
+    setStatus('connection', '');
     const live = r.json;
     if (live.state === 'no_machine') {
       since = null;
-      setStatus('지금 켜진 게임이 없어요.');
+      latestSeatRequest = null;
+      machine = false;
+      controller = null;
+      seatSavesName = null;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      setStatus('frame', '지금 켜진 게임이 없어요.');
+      renderTurn();
+      showPad(null, []);
     } else if (live.state === 'changed') {
-      since = { count: live.change_count, incarnation: live.incarnation };
-      if (draw(live.screen)) setStatus('');
+      if (draw(live.screen)) {
+        since = { count: live.change_count, incarnation: live.incarnation };
+        setStatus('frame', '');
+      }
     }
     const activity = live.activity || [];
     renderActivity(activity);
-    // The feed moves on every press, pass and load; the seat is read again
-    // only then, instead of on every poll.
+    // Machine activity prompts a seat read; failed reads remain pending.
+    // Opening the handoff selector refreshes participants independently.
     const key = activity.length === 0 ? '' : JSON.stringify(activity[0]) + '#' + activity.length;
-    if (key !== lastActivityKey) { lastActivityKey = key; await refreshSeat(); }
+    if (key !== lastActivityKey && await refreshSeat()) lastActivityKey = key;
     await syncPad();
   }
 }
 
 function send(path, body) {
   sending = sending.then(async () => {
-    if (ended) return;
+    if (ended || !machine) return;
     const r = await api('POST', path, body);
     if (ended) return;
-    if (!r.json || r.json.ok !== true) setStatus((r.json && r.json.message) || ('요청이 거절됐어요 (' + r.status + ')'));
+    if (!r.json || r.json.ok !== true) setStatus('action', (r.json && r.json.message) || ('요청이 거절됐어요 (' + r.status + ')'));
+    else setStatus('action', '');
     await refreshSeat();
-  }).catch(() => setStatus('보내지 못했어요. 연결을 확인해 주세요.'));
+  }).catch(() => setStatus('action', '보내지 못했어요. 연결을 확인해 주세요.'));
 }
 
 function press(key) { send('/api/v1/dos/press', { keys: [key] }); }
@@ -409,15 +468,27 @@ el('send-text').addEventListener('click', () => {
   send('/api/v1/dos/type', { text });
 });
 el('text').addEventListener('keydown', (event) => { if (event.key === 'Enter') el('send-text').click(); });
+// Invites and Keeper seats can change while the machine is idle. Refresh
+// when choosing a handoff target; machine activity does not version this list.
+el('pass-to').addEventListener('focus', refreshHandoffTargets);
+el('pass-to').addEventListener('pointerdown', refreshHandoffTargets);
+el('pass-to').addEventListener('keydown', event => {
+  switch (event.key) {
+    case 'ArrowDown': case 'ArrowUp': case 'Enter': case ' ': case 'F4':
+      refreshHandoffTargets();
+      break;
+  }
+});
 el('pass').addEventListener('click', () => {
   const to = el('pass-to').value;
   send('/api/v1/dos/pass', to === RELEASE_OPTION ? {} : { to });
 });
 
+setControlsEnabled(false);
 if (token === '') {
   end('링크에 초대 토큰이 없어요. 받은 링크를 그대로 열어 주세요.');
 } else {
-  refreshSeat().catch(() => setStatus('자리 정보를 읽지 못했어요. 다시 시도하고 있어요.')).finally(tick);
+  refreshSeat().catch(() => setStatus('seat', '자리 정보를 읽지 못했어요. 다시 시도하고 있어요.')).finally(tick);
 }
 </script>
 </body>
@@ -456,13 +527,10 @@ let controller_json () =
     ; ("controller_error", `String (Dos_lane.error_to_string err)) ]
 
 let seat_response ~config ~name =
-  match Play_seat.keeper_names config with
+  match Play_seat.hand_to config ~now:(Time_compat.now ()) with
   | Error detail ->
     `Service_unavailable, `Assoc [ ("error", `String "keepers_unreadable"); ("message", `String detail) ]
-  | Ok keepers ->
-    let participants =
-      Play_seat.participants ~base_path:config.Workspace.base_path ~keepers ~now:(Time_compat.now ())
-    in
+  | Ok participants ->
     ( `OK
     , `Assoc
         ((("name", `String name) :: controller_json ())

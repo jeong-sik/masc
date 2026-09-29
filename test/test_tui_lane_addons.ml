@@ -114,6 +114,45 @@ let configuration_and_ports () =
     "rows":[],"coverage":[]
   }|} in
   let snapshot = UI.decode json |> ok in
+  let overview = {UI.initial with snapshot=Some snapshot} in
+  let empty = {snapshot with instances=[];
+    configuration=Some {directory="/config/lane-addons";complete=true;declarations=[]}} in
+  let first = {snapshot with instances=[];
+    configuration=Some {directory="/config/lane-addons";complete=true;
+      declarations=[List.hd (Option.get snapshot.configuration).declarations]}} in
+  let first = UI.reconcile_snapshot {overview with snapshot=Some empty} first in
+  check int "first saved TOML becomes the selected list row" 0 first.instance_cursor;
+  check int "Enter opens the first saved TOML" 0
+    (UI.open_selected_instance first).configuration_cursor;
+  let overview_lines = UI.lines ~width:120 overview in
+  check int "overview offers the worker and four configuration issues" 5
+    (UI.overview_count snapshot);
+  check bool "issue-only rows do not become declared installations" true
+    (List.mem "Lane Add-ons · 1 declared · 4 config issues · inventory partial · 1 active · 0 failed workers" overview_lines);
+  let issue = UI.open_selected_instance {overview with instance_cursor=1} in
+  check bool "Enter opens the exact broken installation" true
+    (issue.focus=UI.Configurations && issue.presentation=UI.Technical
+     && issue.configuration_cursor=1);
+  check bool "Installation detail retains the selected source and a return path" true
+    (List.exists (String.starts_with ~prefix:"Installation details · broken.toml")
+       (UI.lines ~width:120 issue)
+     && List.exists (String.starts_with ~prefix:"?:help  Esc:back  E:edit TOML")
+       [UI.overview_hints issue]);
+  check bool "Installation detail does not offer refresh during an in-flight read" true
+    (let lines = UI.lines ~width:120 {issue with loading=true} in
+     List.exists (String.starts_with ~prefix:"Esc:back  E:edit TOML  Reading") lines
+     && not (List.exists (fun line -> List.mem "r:refresh" (String.split_on_char ' ' line)) lines));
+  let directory_issue = UI.open_selected_instance {overview with instance_cursor=2} in
+  check bool "directory issue detail does not advertise TOML editing" true
+    (not (List.exists (fun line -> List.mem "E:edit" (String.split_on_char ' ' line))
+      (UI.lines ~width:120 directory_issue)));
+  check bool "failed refresh labels retained Add-on counts stale" true
+    (List.exists (String.ends_with ~suffix:" · STALE")
+      (UI.lines ~width:120 {overview with snapshot_read_error=Some "read failed"}));
+  check bool "a configuration issue has no worker action" true
+    (Result.is_error (UI.open_actions ~request_id:"01901234-1234-7000-8000-000000000001" issue));
+  let refreshed = UI.reconcile_snapshot {overview with instance_cursor=1} snapshot in
+  check int "refresh keeps a selected issue row" 1 refreshed.instance_cursor;
   let view = {UI.initial with presentation=UI.Technical;focus=UI.Configurations;snapshot=Some snapshot;configuration_cursor=1} in
   check int "partial inventory cannot fabricate subscription choices" 0
     (List.length (UI.subscription_targets view));
@@ -139,13 +178,30 @@ let configuration_and_ports () =
   check (option string) "current instance can edit its declaration" (Some "/config/lane-addons/custom.toml")
     (UI.selected_source_path {view with focus=UI.Instances});
   let past = {snapshot with instances=List.map (fun (i : UI.instance) -> {i with id="past-worker"}) snapshot.instances} in
+  check int "unapplied parsed TOML remains selectable" 6 (UI.overview_count past);
+  let selected_unapplied = {overview with snapshot=Some past;instance_cursor=1} in
+  let unapplied = UI.open_selected_instance selected_unapplied in
+  check int "Enter opens the saved declaration without a worker" 0 unapplied.configuration_cursor;
+  check (option string) "E can edit the saved declaration from its list row"
+    (Some "/config/lane-addons/custom.toml")
+    (UI.selected_source_path selected_unapplied);
+  check bool "saved declaration is shown without claiming an active worker" true
+    (List.exists (String.starts_with ~prefix:"  custom · pending · custom.toml")
+       (UI.lines ~width:120 {overview with snapshot=Some past}));
+  let wrong_source = {snapshot with instances=List.map (fun (i : UI.instance) ->
+    {i with source_path=Some "/config/lane-addons/elsewhere.toml"}) snapshot.instances} in
+  check int "matching worker ID at another source cannot hide a declaration" 6
+    (UI.overview_count wrong_source);
   check (option string) "retained historical source does not authorize a new owner edit" None
     (UI.selected_source_path {view with focus=UI.Instances;snapshot=Some past});
   let lines = UI.lines ~width:100 view in
   check bool "unknown parse identity remains unknown" true
     (List.exists (String.starts_with ~prefix:"> unresolved installation") lines);
-  check bool "named output is projected without domain branch" true (List.mem "   output metrics → speed" lines);
-  check bool "package Skill directory is visible" true (List.mem "   Skills skills" lines);
+  let worker_detail = UI.open_selected_instance {view with focus=UI.Instances;instance_cursor=0} in
+  let worker_lines = UI.lines ~width:100
+    {worker_detail with focus=UI.Instances;presentation=UI.Technical} in
+  check bool "named output is projected without domain branch" true (List.mem "   output metrics → speed" worker_lines);
+  check bool "package Skill directory is visible" true (List.mem "   Skills skills" worker_lines);
   let slice = UI.decode_slice ~snapshot (Yojson.Safe.from_string {|{"rows":[],"coverage":[],"complete":false}|}) |> ok in
   check bool "slice keeps TOML inventory" true (slice.configuration=snapshot.configuration);
   check (option bool) "partial slice stays partial" (Some false) slice.complete
@@ -182,7 +238,7 @@ let metric_fields_and_receipts_remain_readable () =
     evidence=[{uri="lane-evidence:" ^ digest;sha256=Some digest}];related_ids=[] } in
   let snapshot : UI.snapshot = {instances=[];configuration=None;
     output={rows=[row];coverage=[]};complete=Some true} in
-  let view = {UI.initial with presentation=UI.Technical;snapshot=Some snapshot;
+  let view = {UI.initial with presentation=UI.Technical;focus=UI.Timeline;snapshot=Some snapshot;
     receipt=Some (`Assoc ["uri",`String digest;"result",`String "last receipt value"])} in
   List.iter (fun width ->
     let lines = UI.lines ~width view in
@@ -267,9 +323,16 @@ let guided_actions () =
     action_schema=None} in
   let failed_lines = UI.lines ~width:76 {UI.initial with focus=UI.Instances;
     snapshot=Some {snapshot with instances=[failed]}} in
-  check bool "failed row keeps retry and cleanup ahead of its long reason" true
-    (List.exists (String.starts_with
-      ~prefix:"> MSX · failed · o:retry observation  d:cleanup · ") failed_lines);
+  check bool "failed row keeps retry and cleanup visible with its long reason" true
+    (List.exists (String.starts_with ~prefix:"> MSX · failed") failed_lines
+     && List.exists (String.starts_with
+       ~prefix:"    Enter:open  o:retry observation  d:cleanup") failed_lines
+     && List.mem "    D:full ·" failed_lines
+     && List.exists (String.starts_with ~prefix:("    " ^ String.make 8 'x')) failed_lines);
+  check int "long failure reason survives wrapping" 120
+    (List.fold_left (fun total line ->
+       String.fold_left (fun total char -> if char='x' then total+1 else total) total line)
+       0 failed_lines);
   check bool "technical action schema is folded by default" false
     (List.exists (fun line -> String.contains line '{') compact);
   let form_schema = match schema with
@@ -365,15 +428,16 @@ let context_flow_uses_declared_connections () =
   let configured_lines = UI.lines ~width:160 configured in
   check (option string) "configuration action targets its selected declaration" (Some producer.id)
     (Option.map (fun (i : UI.instance) -> i.id) (UI.selected_instance configured));
-  check bool "configuration worker rows do not advertise another action target" true
-    (List.mem "  Project observer · attached" configured_lines
-     && List.mem "  Project metric · attached" configured_lines
-     && List.mem "> project-observer · applied" configured_lines);
-  check bool "compact Tab hint does not claim the wrong next pane" true
-    (List.mem "Horizontal Lane timeline · Tab:next pane, j/k select, D opens original evidence" configured_lines);
+  check bool "overview lists both workers regardless of hidden focus" true
+    (List.exists (String.starts_with ~prefix:"  Project observer · attached") configured_lines
+     && List.exists (String.starts_with ~prefix:"> Project metric · attached") configured_lines);
+  check bool "overview offers help and opening" true
+    (List.exists (String.starts_with ~prefix:"?:help  Esc:back  Enter:open  i:install  n:new  S:subs  r:refresh") configured_lines);
+  check bool "overview omits the old timeline" true
+    (not (List.exists (String.starts_with ~prefix:"Horizontal Lane timeline") configured_lines));
   let worker_lines = UI.lines ~width:160 {configured with focus=UI.Instances} in
-  check bool "worker controls follow the marked worker" true
-    (List.mem "> Project metric · attached · o:observe  d:remove" worker_lines);
+  check bool "worker controls remain visible for the selected worker" true
+    (List.exists (String.starts_with ~prefix:"    Enter:open  o:observe  d:remove") worker_lines);
   let partial = {snapshot with instances=[consumer];configuration=Some {configuration with complete=false}} in
   let partial_view = {view with snapshot=Some partial;snapshot_read_error=Some "network failure"} in
   let partial_lines = UI.lines ~width:160 partial_view in
@@ -616,7 +680,65 @@ let refresh_preserves_operator_target () =
     (List.exists (fun line -> String.starts_with ~prefix:"Read: network failed" (plain line))
       (UI.lines ~height:24 ~width:120 failed))
 
+let detail_keeps_installation_ownership () =
+  let worker id : UI.instance = {id;incarnation=id ^ "-run";run_id="project";
+    addon_id="fixture";title=id;revision="1";phase=UI.Row.Attached;
+    observation_seq=1;rows_count=2;source_path=Some ("/config/" ^ id ^ ".toml");
+    binding=`Assoc ["sources",`List []];outputs=[];skills_directory=None;
+    action_schema=None;binding_schema=None;display=Masc.Lane_addon_presentation.empty} in
+  let declaration id : UI.declaration = {source_path="/config/" ^ id ^ ".toml";
+    installation_id=Some id;desired=Some "1";applied=Some "1";
+    instance_id=Some id;issues=[]} in
+  let row owner lane observed_at : UI.Row.row = {id=owner ^ "-" ^ lane;
+    lane_id=owner ^ "/" ^ lane;kind=UI.Row.Value;title=owner ^ " " ^ lane;
+    observed_at;subject_id="project";clock=None;actor=None;
+    fields=[];evidence=[];related_ids=[]} in
+  let snapshot : UI.snapshot = {instances=[worker "a";worker "b"];
+    output={rows=[row "a" "first" 1.;row "b" "first" 2.;
+      row "a" "last" 3.;row "b" "last" 4.];coverage=[]};complete=Some true;
+    configuration=Some {directory="/config";complete=true;
+      declarations=[declaration "a";declaration "b"]}} in
+  let overview = {UI.initial with snapshot=Some snapshot;focus=UI.Instances;
+    instance_cursor=1;configuration_cursor=0;row_cursor=0;selected=["a-first"]} in
+  let overview = UI.put_document overview (Draft.create "a.toml" |> ok) in
+  let detail = UI.open_selected_instance overview in
+  check bool "Enter pins the selected incarnation" true (detail.screen=UI.Detail ("b","b-run"));
+  check (list string) "opening detail clears another installation's evidence" [] detail.selected;
+  check bool "opening detail clears another installation's active document" true
+    (UI.selected_document detail=None);
+  check (option string) "Installation E targets the displayed TOML despite global cursor zero"
+    (Some "/config/b.toml") (UI.selected_source_path {detail with focus=UI.Configurations});
+  let selected_id view = Option.map (fun (r : UI.Row.row) -> r.id) (UI.selected_row view) in
+  check (option string) "Records starts at displayed installation" (Some "b-first") (selected_id detail);
+  let last = UI.move_record {detail with focus=UI.Rows} 1 in
+  check (option string) "Records next skips another installation's intervening row"
+    (Some "b-last") (selected_id last);
+  check (option string) "Records next stays within displayed installation"
+    (Some "b-last") (selected_id (UI.move_record last 1));
+  check (option string) "Activity next stays within displayed installation"
+    (Some "b-last") (selected_id (UI.move_observation detail 1));
+  check (option string) "Activity previous lane cannot select another installation"
+    (Some "b-first") (selected_id (UI.move_lane detail (-1)));
+  let selected = {last with selected=["b-last"]} in
+  (match UI.evidence_request selected |> ok with
+   | UI.Evidence evidence ->
+       check string "export belongs to the displayed installation" "b"
+         Yojson.Safe.Util.(evidence |> member "instance_id" |> to_string);
+       check (list string) "export contains the displayed record" ["b-last"]
+         Yojson.Safe.Util.(evidence |> member "row_ids" |> to_list |> List.map to_string)
+   | _ -> fail "expected evidence export");
+  check bool "invisible evidence cannot be exported from detail" true
+    (Result.is_error (UI.evidence_request {detail with selected=["a-first"]}));
+  let replacement = {snapshot with instances=[worker "a";{(worker "b") with incarnation="new-run"}]} in
+  let refreshed = UI.reconcile_snapshot selected replacement in
+  check bool "replacement cannot inherit old detail's edit or row selection" true
+    (UI.selected_instance refreshed=None && UI.selected_row refreshed=None
+     && UI.selected_source_path {refreshed with focus=UI.Configurations}=None);
+  check bool "replacement cannot inherit old detail's evidence export" true
+    (Result.is_error (UI.evidence_request refreshed))
+
 let () = run "TUI Lane package operations" ["operator scenarios",[
+  test_case "detail keeps installation ownership for edit, navigation and export" `Quick detail_keeps_installation_ownership;
   test_case "refresh retains exact operator targets and exposes failure" `Quick refresh_preserves_operator_target;
   test_case "evidence export chooses a Keeper by name" `Quick evidence_export_chooses_a_keeper_by_name;
   test_case "edit object array items through nested schema forms" `Quick object_array_fields;

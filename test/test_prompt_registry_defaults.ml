@@ -432,6 +432,82 @@ let test_duplicate_and_empty_slots () =
         None (registered_variables "test.dup.b"))
 ;;
 
+(* The [file_value] a listing gives [key]; [None] when the listing has no
+   such key or no file text for it. *)
+let listed_file_value key =
+  List.find_map
+    (function
+      | `Assoc fields when List.assoc_opt "key" fields = Some (`String key) -> (
+          match List.assoc_opt "file_value" fields with
+          | Some (`String value) -> Some value
+          | Some _ | None -> None)
+      | _ -> None)
+    (Prompt_registry.list_prompts ())
+;;
+
+let pinned_dir () =
+  match Prompt_registry.get_markdown_dir () with
+  | Some dir -> dir
+  | None -> Alcotest.fail "the test pinned a prompt directory"
+;;
+
+(* A listing reads each file once for all of its keys, and every key still
+   gets its own text: the text a resolution of that key alone gives. *)
+let test_a_listing_gives_every_slot_its_paragraph () =
+  let open Alcotest in
+  with_prompts_dir
+    [ ( "test.pass.md",
+        "---\ndescription: a group a listing reads once\ncategory: test\n---\nThe group's own prose.\n\n### first\nAlpha\n\n### second\nBravo\n\n### third\nCharlie\n"
+      )
+    ; ( "test.whole.md",
+        "---\ndescription: a file without slots\ncategory: test\n---\nWhole body.\n" ) ]
+    (fun () ->
+      List.iter
+        (fun (key, expected) ->
+          check string (key ^ " resolves to its own text") expected
+            (String.trim (Prompt_registry.get_prompt key));
+          check (option string) (key ^ " lists the text it resolves to")
+            (Some (Prompt_registry.get_prompt key))
+            (listed_file_value key))
+        [ ("test.pass", "The group's own prose.")
+        ; ("test.pass.first", "Alpha")
+        ; ("test.pass.second", "Bravo")
+        ; ("test.pass.third", "Charlie")
+        ; ("test.whole", "Whole body.") ])
+;;
+
+(* A resolution reads the file every time and reuses a parse only for the same
+   bytes: an edit that keeps the file's length shows on the next resolution
+   and the next listing, and a removed file resolves to nothing. *)
+let test_an_edited_file_reads_again () =
+  let open Alcotest in
+  let group first second =
+    Printf.sprintf
+      "---\ndescription: a group edited in place\ncategory: test\n---\n### first\n%s\n\n### second\n%s\n"
+      first second
+  in
+  with_prompts_dir
+    [ ("test.edit.md", group "Alpha one" "Bravo one") ]
+    (fun () ->
+      let path = Filename.concat (pinned_dir ()) "test.edit.md" in
+      check string "the first text resolves" "Alpha one"
+        (Prompt_registry.get_prompt "test.edit.first");
+      check (option string) "the first text lists" (Some "Bravo one")
+        (listed_file_value "test.edit.second");
+      write_file path (group "Alpha two" "Bravo two");
+      check string "an edit of the same length shows on the next resolution"
+        "Alpha two"
+        (Prompt_registry.get_prompt "test.edit.first");
+      check (option string) "and on the next listing" (Some "Bravo two")
+        (listed_file_value "test.edit.second");
+      Sys.remove path;
+      check string "a removed file resolves to nothing" "missing"
+        (Prompt_registry.prompt_source_to_string
+           (Prompt_registry.prompt_source "test.edit.first"));
+      check (option string) "and lists no file text" None
+        (listed_file_value "test.edit.second"))
+;;
+
 let () =
   let open Alcotest in
   run "Prompt_registry_defaults"
@@ -446,7 +522,10 @@ let () =
         ; test_case "a slot declares its own operator surface" `Quick
             test_a_slot_declares_its_own_surface
         ; test_case "a repeated marker keeps its first paragraph and an empty one is skipped"
-            `Quick test_duplicate_and_empty_slots ] );
+            `Quick test_duplicate_and_empty_slots
+        ; test_case "a listing gives every slot its paragraph" `Quick
+            test_a_listing_gives_every_slot_its_paragraph
+        ; test_case "an edited file reads again" `Quick test_an_edited_file_reads_again ] );
       ( "registration",
         [
           (* Guards the count assertion below: a bulk key rename that maps two

@@ -154,14 +154,6 @@ let is_valid_prompt_key key =
          | _ -> false)
        key
 
-(** Read a markdown file, stripping YAML frontmatter if present.
-    Returns only the body after the closing [---] delimiter. *)
-let read_file_if_exists path =
-  if Sys.file_exists path && not (Sys.is_directory path) then
-    let content = In_channel.with_open_text path In_channel.input_all in
-    Some (markdown_body content)
-  else None
-
 (* ── Fragment-group slots (#32780, #32814) ─────────────────────────────
 
    A group file carries several short fragments as [### marker]
@@ -278,10 +270,48 @@ let split_body body : body_split =
   gather ~preamble:[] ~slots:[] ~pending:None ~paragraph:[]
     (String.split_on_char '\n' body)
 
-let slot_paragraph body marker =
-  (split_body body).slots
+let slot_paragraph (split : body_split) marker =
+  split.slots
   |> List.find_opt (fun (m, _, _, _) -> String.equal m marker)
   |> Option.map (fun (_, _, _, paragraph) -> paragraph)
+
+(* A prompt file as read: the body after its YAML frontmatter, and that body
+   split into its preamble and slots. *)
+type prompt_file = {
+  body : string;
+  split : body_split;
+}
+
+(* The last parse of each prompt file, with the bytes it was parsed from.
+   Slot keys share their group's file, and every resolution parsed the whole
+   file again: a listing resolves each key, and 140 keys read the 32 KB
+   [keeper.md]; resolving one of its slots took 173 us (measured
+   2026-09-30). The file is still read on every resolution, so an edit shows
+   on the next one; only a read that finds the same bytes reuses the parse. *)
+let parsed_files : (string, string * prompt_file) Hashtbl.t = Hashtbl.create 32
+let parsed_files_mutex = Stdlib.Mutex.create ()
+
+(** Read a markdown file and parse it: the body after the closing [---] of
+    its YAML frontmatter, split into preamble and slots. [None] when [path]
+    names nothing or a directory. *)
+let read_file_if_exists path =
+  if Sys.file_exists path && not (Sys.is_directory path) then (
+    let content = In_channel.with_open_text path In_channel.input_all in
+    let parsed_before =
+      Stdlib.Mutex.protect parsed_files_mutex (fun () ->
+          match Hashtbl.find_opt parsed_files path with
+          | Some (bytes, file) when String.equal bytes content -> Some file
+          | Some _ | None -> None)
+    in
+    match parsed_before with
+    | Some file -> Some file
+    | None ->
+        let body = markdown_body content in
+        let file = { body; split = split_body body } in
+        Stdlib.Mutex.protect parsed_files_mutex (fun () ->
+            Hashtbl.replace parsed_files path (content, file));
+        Some file)
+  else None
 
 (* ── Directory scan and commit ──────────────────────────────────────
 
@@ -531,8 +561,9 @@ let prompt_source_path key =
 
 (* The file value for a key: one slot paragraph for a slot key; for any
    other key its file's body — the preamble alone when the file carries
-   slots, so a group key never returns its slots' text. *)
-let file_value_of_key key =
+   slots, so a group key never returns its slots' text. [read] reads a
+   prompt file; a pass over many keys gives one that reads each file once. *)
+let file_value_of_key_with ~read key =
   (* Resolve the directory before consulting the slot table: in an unpinned
      process the first resolution is what pins the dune fallback and loads
      its slot keys. Asked before that, a slot key such as judge.effect is
@@ -542,14 +573,28 @@ let file_value_of_key key =
   let (_ : string option) = effective_markdown_dir () in
   match Hashtbl.find_opt fragment_tbl key with
   | Some (group_key, marker) -> (
-    match Option.bind (prompt_markdown_path group_key) read_file_if_exists with
-    | Some body -> slot_paragraph body marker
+    match Option.bind (prompt_markdown_path group_key) read with
+    | Some file -> slot_paragraph file.split marker
     | None -> None)
   | None ->
-    Option.bind (prompt_markdown_path key) read_file_if_exists
-    |> Option.map (fun body ->
-           let split = split_body body in
-           if split.slots = [] then body else split.preamble)
+    Option.bind (prompt_markdown_path key) read
+    |> Option.map (fun file ->
+           if file.split.slots = [] then file.body else file.split.preamble)
+
+let file_value_of_key key = file_value_of_key_with ~read:read_file_if_exists key
+
+(* A reader for one pass over every key. Slot keys share their group's
+   file, so the pass reads each file once, and every key of a file answers
+   from the same read. The reads are not kept after the pass. *)
+let reader_for_one_pass () =
+  let files = Hashtbl.create 32 in
+  fun path ->
+    match Hashtbl.find_opt files path with
+    | Some file -> file
+    | None ->
+        let file = read_file_if_exists path in
+        Hashtbl.replace files path file;
+        file
 
 (** {1 Registration and Lookup} *)
 
@@ -650,8 +695,8 @@ type prompt_snapshot = {
 (* Resolve a single prompt by doing the filesystem read OUTSIDE the
    mutex.  Intended for batch [list_prompts]/[validate_prompt_templates]
    call sites that previously held [with_mutex] across [read_file_if_exists]. *)
-let resolved_of_snapshot (s : prompt_snapshot) =
-  let file_value = file_value_of_key s.snap_key in
+let resolved_of_snapshot ~read (s : prompt_snapshot) =
+  let file_value = file_value_of_key_with ~read s.snap_key in
   build_resolved_from_snapshot
     ~key:s.snap_key
     ~override_value:
@@ -893,9 +938,10 @@ let validate_prompt_templates () =
           } :: acc)
         meta_tbl [])
   in
+  let read = reader_for_one_pass () in
   List.fold_left
     (fun acc s ->
-      let resolved = resolved_of_snapshot s in
+      let resolved = resolved_of_snapshot ~read s in
       let issues =
         (* A key nothing resolves and that carries no text has no template
            to check. Every source is named rather than caught by a wildcard:
@@ -942,9 +988,10 @@ let list_prompts () =
           } :: acc)
         meta_tbl [])
   in
+  let read = reader_for_one_pass () in
   snapshots
   |> List.map (fun s ->
-    let resolved = resolved_of_snapshot s in
+    let resolved = resolved_of_snapshot ~read s in
     let override_default_moved =
       match s.snap_override with
       | None -> false

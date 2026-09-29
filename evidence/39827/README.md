@@ -13,4 +13,11 @@ Local verification after the final flame-tip adjustment:
 - `test/test_tui_emblem_screen_pty.py` — 11 scenarios PASS.
 - Captured screens: 32 rows each; every row fits its 80 or 140 cell width. After removing only the half-block picture cells and whitespace, Info text is identical. The /about text is identical except for the fixture's temporary base path and port. The preview renders a named candle with face, flame, shading and small horns; the narrow 24-pixel features remain small.
 
-The 24/40 PNGs are direct pixel outputs. Kitty transport continues to use the original full-resolution image; the compact drawing is used only for the text terminal mosaic.
+The preview PNGs use matching canvases. The old 120×24 and 200×40 sheets included four empty columns; the corrected 24×24 and 40×40 originals contain exactly the same RGB pixels as each old sheet's first tile. Generate each pair from the same preview binary with `--size 24 alpha` or `--size 40 alpha`, adding `--compact` only for the after image.
+
+| Canvas | Original | Compact proposal |
+|---|---|---|
+| 24×24 | [before-alpha-24.png](before-alpha-24.png) | [after-alpha-24.png](after-alpha-24.png) |
+| 40×40 | [before-alpha-40.png](before-alpha-40.png) | [after-alpha-40.png](after-alpha-40.png) |
+
+These PNGs are direct pixel outputs. Kitty transport continues to use the original full-resolution image; the compact drawing is used only for the text terminal mosaic.

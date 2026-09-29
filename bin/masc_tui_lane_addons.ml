@@ -1091,7 +1091,7 @@ let overview_lines ~width view =
               [lead; controls] @ detail) items
   in
   List.concat_map wrap ([ overview_hints view; "" ]
-    @ diagnostic_lines view @ content)
+    @ diagnostic_lines view @ action_lines view @ content)
 
 let help_lines = [
   "Lane Add-ons keys · Esc:close";

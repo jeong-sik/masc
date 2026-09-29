@@ -319,81 +319,19 @@ let decode_primary config path : (state, primary_failure) Result.t =
     Error (Primary_unparseable (Workspace_utils.json_doc_error_to_string read_err))
 ;;
 
-(* The decoded primary, keyed on the file version it was read from, the way
-   [Workspace_backlog] keys the backlog it decodes. The ledger keeps every
-   terminal schedule and is several megabytes, and it is read far more often
-   than it is written -- every Keeper's world observation, the dashboard and
-   the schedule tools read all of it, a runner commit writes it -- so a reader
-   of an unchanged file takes the state the last miss decoded. A commit
-   replaces the file, so its inode changes even when two commits land within
-   one file-time tick with the same size; [write_state] also drops the entry
-   after it writes. *)
-type file_version =
-  { device : int
-  ; inode : int
-  ; size : int
-  ; mtime : float
-  }
-
-let file_version_of_stats (stats : Unix.stats) =
-  { device = stats.st_dev; inode = stats.st_ino; size = stats.st_size; mtime = stats.st_mtime }
-;;
-
-let same_file_version left right =
-  left.device = right.device
-  && left.inode = right.inode
-  && left.size = right.size
-  && Float.equal left.mtime right.mtime
-;;
-
-type primary_cache_entry =
-  { decoded_from : file_version
-  ; state : state
-  }
-
-let primary_cache : (string, primary_cache_entry) Hashtbl.t = Hashtbl.create 1
-let primary_cache_mu = Stdlib.Mutex.create ()
-
-let file_version_opt path =
-  try Some (file_version_of_stats (Unix.stat path)) with
-  | Unix.Unix_error _ | Sys_error _ -> None
-;;
-
-let clear_primary_cache_for path =
-  Stdlib.Mutex.protect primary_cache_mu (fun () -> Hashtbl.remove primary_cache path)
-;;
+(* The decoded primary, kept with the file version it was read from. The
+   ledger keeps every terminal schedule and is several megabytes, and it is
+   read far more often than it is written -- every Keeper's world
+   observation, the dashboard and the schedule tools read all of it, a runner
+   commit writes it -- so a reader of an unchanged file takes the state the
+   last miss decoded. [write_state] forgets it after it writes. A miss reads,
+   parses and decodes as one job on the domain pool when one is installed. *)
+let decoded_primary : state File_version_cache.t = File_version_cache.create ()
 
 let load_primary config : (state, primary_failure) Result.t =
   let path = schedules_path config in
-  let cached =
-    match
-      Stdlib.Mutex.protect primary_cache_mu (fun () -> Hashtbl.find_opt primary_cache path)
-    with
-    | None -> None
-    | Some entry ->
-      (match file_version_opt path with
-       | Some version when same_file_version version entry.decoded_from -> Some entry.state
-       | Some _ | None -> None)
-  in
-  match cached with
-  | Some state -> Ok state
-  | None ->
-    (* A commit that lands between the read and a stat taken only after it
-       would register the new version with the old state, and the writer's
-       clear has already passed. Stat before the read too, and register only
-       when nothing changed across it. The read, the parse and the typed
-       decode run as one job on the domain pool when one is installed, as the
-       backlog's miss does. *)
-    let version_before = file_version_opt path in
-    let decoded =
-      Domain_pool_ref.submit_cpu_or_inline (fun () -> decode_primary config path)
-    in
-    (match decoded, version_before, file_version_opt path with
-     | Ok state, Some before, Some after when same_file_version before after ->
-       Stdlib.Mutex.protect primary_cache_mu (fun () ->
-         Hashtbl.replace primary_cache path { decoded_from = after; state })
-     | (Ok _ | Error _), (Some _ | None), (Some _ | None) -> ());
-    decoded
+  File_version_cache.load decoded_primary path ~decode:(fun () ->
+    Domain_pool_ref.submit_cpu_or_inline (fun () -> decode_primary config path))
 ;;
 
 let primary_failure_message ~path = function
@@ -507,8 +445,8 @@ let write_state config state =
   let written =
     Workspace_utils.write_encoded_json_result config (schedules_path config) content
   in
-  (* Landed or not, the file may no longer be the version the cache decoded. *)
-  clear_primary_cache_for (schedules_path config);
+  (* Landed or not, the file may no longer be the version that was decoded. *)
+  File_version_cache.forget decoded_primary (schedules_path config);
   let* () = written |> Result.map_error (fun msg -> Persistence_failed msg) in
   (match Workspace_utils.write_encoded_json_result config (recovery_path config) content with
    | Ok () -> ()

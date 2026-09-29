@@ -84,7 +84,7 @@
 | RT-A1 | 계정 제거 미리보기는 "removable" 인데 실제 저장은 Fusion 자리 검사로 400 이 난다 | 보고(코드 재확인은 audit) | 후보 |
 | RT-A2 / MM-W1·W2 | curator 는 `cli_slots` 가 있으면 lane 전체를 거절한다. 쓰는 쪽·TUI 는 받아들인다. `max_output_tokens` 도 없다 | 보고 | curator 를 다시 켜기 전 필수 |
 | TU-F04 | Schedules 의 "Next due" 가 안 보인다. 서버는 `next_due_at`, TUI 는 `next_due_at_iso` 를 읽는다. fixture 가 TUI 철자라 테스트가 못 잡는다 | 보고 | #39998 |
-| TU-F11 | 거절 응답 모양이 넷인데 TUI 공용 reader 는 하나만 읽는다. #39877 은 play 하나만 고친다(N-of-M) | 보고 | 후보 |
+| TU-F11 | 거절 응답 모양이 넷인데 TUI 공용 reader 는 하나만 읽는다. #39877 은 play 하나만 고친다(N-of-M) | 보고 | `Server_refusal` 스택, 1단계 #40050 |
 | TU-F06·F07·F08 | Overview 가 판정 ledger 를 못 읽어도 "판정 없음"으로 그린다. Gate lane 이 unavailable 이어도 "Auto Judge" 로 그린다. Keeper 상세가 실제로 적용되는 Gate 모드 대신 저장된 override 를 보여 준다 | 보고 | 후보 |
 | TU-F03·F16 | Chat 의 `Ctrl-T:queue` 는 마우스 토글이 먼저 잡는다. Patch 창의 두 번째 `q` 는 앱을 끈다 | 보고 | RFC(아래 4-3) |
 

@@ -213,8 +213,16 @@ let test_refused_transport_waits_for_an_event () =
     idle env;
     check int "pulse does not redispatch refused request" refused_attempts !attempts;
     accept := true;
-    Candle_payout_worker.wake ();
-    await env "event retries pending obligation"
+    Candle_status.install_appraiser_check (fun () -> Error "publication unavailable");
+    Fun.protect
+      ~finally:(fun () -> Candle_status.install_appraiser_check (fun () -> Ok ()))
+      (fun () ->
+        Candle_payout_worker.wake ();
+        idle env;
+        check int "an unavailable pass does not call the provider"
+          refused_attempts !attempts);
+    Candle_payout_worker.pulse ();
+    await env "the retained event retries after availability recovers"
       (fun () -> paid config "provider-refusal" <> []);
     idle env);
   ignore (one_payment config "provider-refusal")

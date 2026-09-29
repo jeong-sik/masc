@@ -80,12 +80,15 @@ resize it; game input and turn changes go through the server's controller.
 
 Select a Keeper chat to use the TUI composer. `/play invites` lists invites, `/play invite <name>
 <hours>` issues one, `/play link` reopens the last link issued in this TUI
-session, and `/play revoke <name>` removes it. Issuance requires
+session, `/play qr` shows that link as a scannable terminal QR, and
+`/play revoke <name>` removes it. Issuance requires
 an admin operator credential, token-required authentication and
 `MASC_HTTP_BASE_URL`. The one-time link appears in a local TUI reply (it is
 not sent to the Keeper) and
 is sent through OSC 52 for copying; terminal clipboard support varies. The
 TUI keeps the last link only until it exits or that invite is revoked.
+The QR stays in this TUI process; if the chat pane is too small to display it
+without wrapping, the command asks for a wider or taller terminal.
 If the issue request has no trustworthy answer, inspect the invite list and
 revoke that name before retrying because the original link cannot be recovered.
 If revocation reports a controller release failure or an unknown outcome,
@@ -1131,6 +1134,15 @@ provider accepted anything. `DIGEST ONLY` means a producer prompt-block digest
 is retained without same-turn exact text. `BYTES ONLY` means only the component
 byte count is available. The inspector never joins independent readings by
 label, position, or similar-looking content.
+
+#### Reading chat loading errors
+
+If saved history, older messages, or the memory journal cannot be loaded, a
+short warning above the input points to `/errors`. Run it in the open Keeper
+chat to put the current full details in the local conversation log, where
+lines wrap and you can scroll back through them. Hidden memory-journal errors
+are included. This reads the recorded failures without sending a message or
+retrying a request; no recorded error does not imply loading has finished.
 
 #### Copying a reply
 

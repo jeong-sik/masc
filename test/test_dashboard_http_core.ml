@@ -104,6 +104,17 @@ let with_cached_surface_success
       Server_dashboard_http_cache.mark_cached_surface_success surface json;
       f ())
 
+let with_mission_cache_success json f =
+  let module Core = Server_dashboard_http_core in
+  let surface = Core.mission_cache in
+  let saved = Core.snapshot surface in
+  let saved_payload = surface.Core.memoized_payload in
+  Fun.protect
+    ~finally:(fun () ->
+      surface.Core.current <- saved;
+      surface.Core.memoized_payload <- saved_payload)
+    (fun () -> Core.mark_cached_surface_success surface json; f ())
+
 let with_env key value f =
   let old = Sys.getenv_opt key in
   Unix.putenv key value;
@@ -3227,7 +3238,7 @@ beanie = 0
   Surface.invalidate_execution_cache ();
   Eio_guard.protect ~finally:Surface.invalidate_execution_cache @@ fun () ->
   with_cached_surface_success Surface.execution_cache execution_seed @@ fun () ->
-  with_cached_surface_success Server_dashboard_http_core.mission_cache mission_seed @@ fun () ->
+  with_mission_cache_success mission_seed @@ fun () ->
   let state = Lib.Mcp_server_eio.For_testing.create_state ~base_path () in
   let clock = Eio.Stdenv.clock env in
   let req = request_with_headers "/api/v1/dashboard/execution"
@@ -3274,7 +3285,7 @@ beanie = 0
   check bool "equipment refresh does not rebuild cached execution metadata" true
     ((Server_dashboard_http_cache.snapshot Surface.execution_cache).json = execution_seed);
   check bool "equipment refresh does not rebuild cached mission metadata" true
-    ((Server_dashboard_http_cache.snapshot Server_dashboard_http_core.mission_cache).json = mission_seed);
+    ((Server_dashboard_http_core.snapshot Server_dashboard_http_core.mission_cache).json = mission_seed);
   let ledger = Candle_ledger.path ~base_path in
   Fs_compat.append_file ledger "{partial";
   let corrupt = Fs_compat.load_file ledger in

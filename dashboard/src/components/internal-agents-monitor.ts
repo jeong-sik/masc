@@ -171,6 +171,8 @@ function laneLabel(row: Row): string {
 }
 
 function status(row: Row): string {
+  if (row.source === 'exact' && row.run.lane === 'hitl_auto_judge'
+    && row.run.code === 'exact_source_resolved') return 'failed · source resolved'
   return row.run.status
 }
 
@@ -178,6 +180,7 @@ function tone(row: Row): StatusBadgeTone {
   const value = status(row)
   if (value === 'succeeded' || value === 'completed' || value === 'approved') return 'ok'
   if (value === 'running') return 'warn'
+  if (value === 'cancelled') return 'info'
   if (value === 'rejected') return 'info'
   return 'bad'
 }
@@ -506,6 +509,12 @@ function ExactRunDetail({ runId }: { runId: string }) {
                ? html` · Workspace <code>${run.actor}</code> · model-proposed; semantic verification not performed`
                : html` · <a class="text-[var(--color-accent)] hover:underline" href=${keeperHref(run.actor)}>Keeper 전체 evidence 열기 →</a>`}
           </p>
+          ${run.lane === 'hitl_auto_judge' && run.code === 'exact_source_resolved'
+            ? html`<p class="ia-note">승인 항목이 판정 기록 전에 해결됐습니다. 이전 실행 단계에 오류가 있었는지는 이 과거 기록만으로 확정할 수 없습니다.</p>`
+            : null}
+          ${run.lane === 'hitl_auto_judge' && record(run.output)?.reason === 'source_resolved_without_recorded_judgment'
+            ? html`<p class="ia-note">승인 항목이 판정 기록 전에 해결되어 판정이 저장되지 않았습니다.</p>`
+            : null}
           ${run.code === undefined
             ? null
             : html`<p class="ia-err"><code>${run.code}</code>: ${run.detail}</p>`}

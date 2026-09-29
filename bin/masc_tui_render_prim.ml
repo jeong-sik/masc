@@ -3126,6 +3126,24 @@ let runtime_quota_badge (runtime : Masc.Tui_decode.runtime_option) =
            | None -> "quota exhausted (no reset stated)")
         ^ Ansi.reset )
 
+(* The other half of "alive on paper": this process saw a 429 on the runtime
+   whose provider wait has not ended and no successful answer has cleared.
+   It is a different fact from the quota
+   window above, so a runtime can carry both. [resets_at] is the provider's
+   own Retry-After and is present only while it is still ahead. *)
+let runtime_rate_limit_badge (runtime : Masc.Tui_decode.runtime_option) =
+  if not runtime.ro_rate_limited then None
+  else
+    Some
+      ( (Theme.warn ())
+        ^ (match runtime.ro_rate_limit_resets_at with
+           | Some resets_at ->
+             let tm = Unix.localtime resets_at in
+             Printf.sprintf "rate limited (retry %02d:%02d)" tm.Unix.tm_hour
+               tm.Unix.tm_min
+           | None -> "rate limited")
+        ^ Ansi.reset )
+
 
 (* Which lanes list this runtime among their candidates, in the order the
    resolved projection holds them. The runtime detail asks the same question

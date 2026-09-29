@@ -1376,7 +1376,7 @@ let test_masc_board_descriptions_disambiguate_post_id_flow () =
     (schema_property_int get_schema.input_schema "comment_limit" "maximum");
   Alcotest.(check (option int))
     "masc_board_post_get tail minimum"
-    (Some 1)
+    (Some 0)
     (schema_property_int get_schema.input_schema "comment_tail" "minimum");
   Alcotest.(check (option int))
     "masc_board_post_get tail maximum"

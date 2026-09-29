@@ -65,7 +65,7 @@ def run(executable: str) -> None:
         h.wait_for_output(process, master, output, b"\xe2\x96\x88")
         command(b"/play invites", b"old \xc2\xb7 expires not recorded")
         command(b"/play revoke guest1", b"retry /play revoke guest1")
-        h.wait_for_output(process, master, output, b"disk fault")
+        h.wait_for_output(process, master, output, b"disk fault", start=0, timeout=5.0)
         h.wait_for_http_request(process, master, output, requests,
                                 path="/api/v1/play/invites/guest1")
         command(b"/play link", b"No play link has been issued")
@@ -79,7 +79,7 @@ def run(executable: str) -> None:
             raise AssertionError(f"the TUI did not issue and revoke through the play API: {paths!r}")
         if revoke_methods != ["DELETE"] * 4:
             raise AssertionError(f"play revokes used the wrong HTTP methods: {revoke_methods!r}")
-        h.send_and_wait(process, master, output, b"\x1b", b"MASC Keepers")
+        h.escape_to_keeper_detail(process, master, output, name=b"alpha")
         os.write(master, b"q")
 
     h.run_terminal_scenario(

@@ -71,6 +71,36 @@ This change does not remove context already present in vendor sessions,
 implement partial updates inside a changed Recall block, or attribute Recall
 and Tools separately in provider tokens.
 
+## Tick-by-tick state synchronization
+
+Deduplication alone cannot synchronize a retained conversation. An empty
+Recall previously disappeared from the next input, leaving its earlier facts
+in the vendor history without notice of withdrawal. A read failure also
+disappeared, so it could not communicate uncertainty or force redelivery on
+recovery. The same applied to missing, corrupt or stale Librarian indexes.
+
+Recall now explicitly communicates present, empty, absent, unavailable and
+disabled states. Ordinary and source-bound memory have independent states.
+A replacement snapshot marks prior facts as historical; an unavailable state
+marks them unverified without claiming deletion. Librarian reader loss and
+unavailable indexes withdraw the old reference's current status. Repeating
+one state produces identical text; recovering the same old content produces
+a new delivery after the intervening status.
+
+Every identical-fact commit advances the store revision and update time.
+Those bookkeeping fields no longer change the model-facing Recall payload;
+they remain in the durable store and inspection tools. Rendered fact content,
+category, origin kind, displayed basis, source identity and verification
+remain part of the payload. Detailed derivation metadata continues to be
+available through its existing tools.
+
+The native Codex fixture follows 27 ticks in the same session: A, unchanged A,
+B, empty, unchanged empty, unreadable, unchanged unreadable, restored empty,
+absent, unchanged absent, restored A, then 16 identical-fact recommits with new
+revision/time and changing clock. It checks actual transport content and that
+held delivery records remain bounded by the two block identities. Separate
+fixtures exercise reader loss, source validity, failure and compaction.
+
 ## Validation
 
 Native fixture regressions exercise the production adapters and capture
@@ -85,3 +115,8 @@ reported no-op.
 Build and behavioral execution belong to GitHub CI under the repository
 execution protocol. Fixture success does not establish live deployment or
 post-deployment token savings.
+
+The first PR check and targeted run at `aa6e1a1d92` failed compilation because
+the TUI block-label match did not include `Librarian_working_context`. The
+missing arm was added with the cycle changes. This failure did not execute
+the behavioral cases and is not a behavioral PASS.

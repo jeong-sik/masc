@@ -369,6 +369,95 @@ let test_context_blocks_survive_fresh_retry () =
   check bool "settled replacement remembers the recall" false
     (String_util.contains_substring (turn_text (send "WORLD_3")) "RECALL_RETRY")
 
+let test_recall_lifecycle_across_native_ticks () =
+  with_fixture @@ fun ~run ~capture ~reports:_ ->
+  let module Current = Keeper_memory_os_current in
+  let module Memory = Keeper_memory_os_types in
+  let keepers_dir = Filename.concat (Filename.dirname capture) "recall-store" in
+  Unix.mkdir keepers_dir 0o700;
+  let keeper_id = "context-fixture" in
+  let path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let fact claim : Memory.fact =
+    { claim; category = Constraint; first_seen = 1.; last_seen = 1.
+    ; origin = { kind = Authored; trace_id = "recall-cycle" }
+    ; basis = Observed Transcript } in
+  let replace ?(now = 1.) expected_revision facts =
+    match Current.replace ~keepers_dir ~keeper_id ~expected_revision
+      ~now ~source:{kind = Librarian; trace_id = "recall-cycle"} ~facts () with
+    | Ok _ -> ()
+    | Error _ -> fail "fixture could not replace the committed memory"
+  in
+  let tick = ref 0 in
+  let send ~changed =
+    incr tick;
+    let recall = Keeper_memory_os_recall.render_context ~keepers_dir ~keeper_id () in
+    check bool "current memory availability is explicit" true (recall <> "");
+    let clock = Printf.sprintf "CYCLE_TICK_%d" !tick in
+    let prompt_blocks =
+      [ Prompt_block_id.Memory_os_recall, recall
+      ; Prompt_block_id.Temporal_summary, clock ] in
+    let before = List.length (read_requests capture) in
+    successful (run ~instructions:"Keeper instructions" ~prompt_blocks
+      ~world:(String.concat "\n\n" (List.map snd prompt_blocks)) ());
+    let rows = read_requests capture |> List.filteri (fun i _ -> i >= before) in
+    let sent = if !tick = 1 then
+        List.find (fun row -> member "method" row = `String "thread/start") rows
+        |> member "params" |> member "developerInstructions" |> text
+      else (
+        check int "subsequent tick resumes the same session" 1
+          (List.length (List.filter (fun row -> member "method" row = `String "thread/resume") rows));
+        turn_text rows)
+    in
+    (* The model receives the encoded context envelope. Compare its text
+       against the actual rendered snapshot rather than estimating tokens. *)
+    let encoded = Yojson.Safe.to_string (`String recall) in
+    let body = String.sub encoded 1 (String.length encoded - 2) in
+    check bool (Printf.sprintf "tick %d delivers exactly when state changes" !tick)
+      changed (String_util.contains_substring sent body);
+    check bool "the current tick still reaches the model" true
+      (String_util.contains_substring sent clock);
+    recall
+  in
+  replace None [fact "CURRENT_FACT_A"];
+  let original_file = Fs_compat.load_file path in
+  let present = send ~changed:true in
+  ignore (send ~changed:false);
+  replace (Some 1) [fact "CURRENT_FACT_B"];
+  let revised = send ~changed:true in
+  check bool "revised memory changes the delivered state" true (present <> revised);
+  replace (Some 2) [];
+  let empty_file = Fs_compat.load_file path in
+  let cleared = send ~changed:true in
+  check bool "cleared snapshot carries no previous claim" false
+    (String_util.contains_substring cleared "CURRENT_FACT_");
+  ignore (send ~changed:false);
+  write path "{broken snapshot";
+  let unavailable = send ~changed:true in
+  check bool "read failure is distinct from authoritative empty memory" true
+    (unavailable <> cleared);
+  ignore (send ~changed:false);
+  write path empty_file;
+  check string "recovery re-delivers the same empty snapshot" cleared (send ~changed:true);
+  Unix.unlink path;
+  let absent = send ~changed:true in
+  check bool "missing snapshot is distinct from a failed read" true (absent <> unavailable);
+  ignore (send ~changed:false);
+  write path original_file;
+  check string "returning to an earlier snapshot re-delivers it" present (send ~changed:true);
+  (* Each Librarian pass can commit unchanged facts with a new revision/time.
+     That bookkeeping and the changing clock must not append another Recall.
+     This is a test horizon, not a runtime deduplication gate. *)
+  for revision = 1 to 16 do
+    replace ~now:(float_of_int (100 + revision)) (Some revision) [fact "CURRENT_FACT_A"];
+    ignore (send ~changed:false)
+  done;
+  (match Keeper_official_client_session_store.load
+      ~base_path:(Filename.dirname capture) ~keeper_name:keeper_id with
+   | Ok (Some {context_frontier = Some frontier; _}) ->
+     check int "delivery receipts stay bounded by the two block identities"
+       2 (List.length frontier.held_context)
+   | Ok _ | Error _ -> fail "settled native session lost its context frontier")
+
 let test_rejected_context_never_submits_turn () =
   with_fixture ~reject_context:true @@ fun ~run ~capture ~reports ->
   let attempt = run ~instructions:"Keeper current instructions" ~world:"World State: task-003 todo" () in
@@ -866,6 +955,7 @@ let test_declared_limit_above_history_changes_nothing () =
 let () = run "Keeper current Codex context" ["native requests",[
   test_case "resume delivers only changed blocks and pending operator note" `Quick test_resume_deduplicates_context_blocks;
   test_case "fresh overflow retry receives and remembers recall" `Quick test_context_blocks_survive_fresh_retry;
+  test_case "memory changes, clears, fails and recovers across native ticks" `Quick test_recall_lifecycle_across_native_ticks;
   test_case "operator interruption preserves previous Codex settlement" `Quick test_operator_interrupt_preserves_previous_native_settlement;
   test_case "a declared prompt limit windows a Start" `Quick test_declared_limit_windows_start;
   test_case "a Start carries the range, not the whole history" `Quick test_start_carries_the_range_not_the_whole_history;

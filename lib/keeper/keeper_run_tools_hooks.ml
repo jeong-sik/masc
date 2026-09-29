@@ -963,11 +963,12 @@ let assemble_hooks
                    the user is waiting for the first model request. Only offer
                    a reference when its in-process reader is on this surface. *)
                 let working_context_recall = if not post_tool_round
-                    && List.mem Keeper_runtime_schemas_toml.artifact_read.name schema_filter
                  then
                    Domain_pool_ref.submit_io_or_inline (fun () ->
                      Keeper_librarian_context_recall.render
-                       ~keepers_dir:memory_os_keepers_dir ~keeper_name:meta.name)
+                       ~artifact_reader_available:
+                         (List.mem Keeper_runtime_schemas_toml.artifact_read.name schema_filter)
+                       ~keepers_dir:memory_os_keepers_dir ~keeper_name:meta.name ())
                  else None in
                 (if not post_tool_round
                  then

@@ -25,6 +25,9 @@ arrived), which is what this shape check closes.
 Usage: dune_suite_scope.py <dir> <name>
 Prints "run" or "skip <reason>" and always exits 0; a scope it cannot
 determine is a skip, not a run.
+
+With --expand-library-sources, reads selected source paths from stdin and
+replaces a library module with test executables that link its library.
 """
 import re
 import sys
@@ -96,6 +99,53 @@ def declares(form, name):
     return name in field.group(1).split()
 
 
+def field_values(form, field):
+    match = re.search(rf"\(\s*{field}\s+([^)]*)\)", form)
+    return match.group(1).split() if match else []
+
+
+def linked_test_sources(root, sources):
+    """Replace selected library modules with tests that link their library."""
+    selected = set()
+    stanzas_by_dir = {}
+    for source in sources:
+        path = Path(source)
+        if path.suffix != ".ml":
+            selected.add(source)
+            continue
+        directory = path.parent
+        dune = root / directory / "dune"
+        if not dune.is_file():
+            selected.add(source)
+            continue
+        if directory not in stanzas_by_dir:
+            stanzas_by_dir[directory] = expand_includes(dune)
+        stanzas = stanzas_by_dir[directory]
+        if any(declares(form, path.stem) for form in stanzas):
+            selected.add(source)
+            continue
+        libraries = {
+            library
+            for form in stanzas
+            if re.match(r"\(\s*library\b", form)
+            and path.stem in field_values(form, "modules")
+            for library in field_values(form, "name")
+        }
+        linked = {
+            str(directory / name) + ".ml"
+            for form in stanzas
+            if re.match(r"\(\s*tests?\b", form)
+            and libraries.intersection(field_values(form, "libraries"))
+            for name in field_values(form, "names?")
+            if (root / directory / (name + ".ml")).is_file()
+        }
+        if linked:
+            selected.update(linked)
+        else:
+            selected.add(source)
+    return sorted(selected)
+
+
 def scope(directory, name):
     dune = Path(directory) / "dune"
     if not dune.is_file():
@@ -140,6 +190,12 @@ def action_runner(form):
 
 
 def main(argv):
+    if argv[1:] == ["--expand-library-sources"]:
+        root = Path(__file__).resolve().parents[2]
+        sources = [line.strip() for line in sys.stdin if line.strip()]
+        for source in linked_test_sources(root, sources):
+            print(source)
+        return 0
     if len(argv) != 3:
         print("skip usage: dune_suite_scope.py <dir> <name>")
         return 0

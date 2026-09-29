@@ -651,6 +651,19 @@ STANZAS
       | grep -v '^[[:space:]]*$' | sort -u)
   fi
 
+  # A selected test/ source can be a library module rather than a test
+  # executable. Run the test stanzas linking that library instead.
+  if ! sources=$(printf '%s\n' "${sources}" \
+    | python3 "${scope_tool}" --expand-library-sources); then
+    echo "dune_suite_scope.py could not expand selected library modules" >&2
+    exit 1
+  fi
+  if ! direct_sources=$(printf '%s\n' "${direct_sources}" \
+    | python3 "${scope_tool}" --expand-library-sources); then
+    echo "dune_suite_scope.py could not expand directly edited library modules" >&2
+    exit 1
+  fi
+
   # Return no selection only when no input mapped to a runnable suite.
   if ! printf '%s\n' "${sources}" | grep -v '^[[:space:]]*$' > /dev/null; then
     echo "no suite left to run"
@@ -1066,6 +1079,15 @@ self_test() {
   check "a source edit selects the suites named after it" \
     "test/test_keeper_toml.ml test/test_tui_http_ast.ml test/test_tui_msx_graphics.ml test/test_tui_msx_load.ml test/test_tui_msx_tick.ml" \
     "bin/masc_tui_msx.ml"
+  check_required "a selected test library module reaches test_keeper_tool_matrix and test_mcp_tool_matrix" \
+    "test/test_keeper_tool_matrix.ml test/test_mcp_tool_matrix.ml" \
+    "lib/keeper/keeper_tool_descriptor.ml"
+  check_required "an edited test library module reaches test_keeper_tool_matrix and test_mcp_tool_matrix" \
+    "test/test_keeper_tool_matrix.ml test/test_mcp_tool_matrix.ml" \
+    "test/test_keeper_tool_matrix_cases.ml"
+  check_direct "linked executables from an edited library keep direct priority" \
+    "test/test_keeper_tool_matrix.ml test/test_mcp_tool_matrix.ml test/test_mcp_tool_runtime_workspace_path.ml" \
+    "test/test_keeper_tool_matrix_cases.ml"
   # Turn-record keys live in OCaml, while the Context Inspector's HTTP
   # response is a Python fixture. Run only that PTY scenario when the
   # contract moves; the full keyboard walk costs hundreds of seconds.

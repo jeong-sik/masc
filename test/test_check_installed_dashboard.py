@@ -8,6 +8,7 @@ import runpy
 import sys
 import tempfile
 import unittest
+import urllib.error
 from unittest.mock import patch
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "check-installed-dashboard.py"
@@ -62,6 +63,7 @@ class DashboardMismatchDiagnostics(unittest.TestCase):
                     return self.body
 
             responses = [
+                Response(b'{"ready":true}', 200, {}),
                 Response(json.dumps(health).encode(), 200, {}),
                 Response(served, 200, {"Content-Type": "text/html",
                                       "X-Dashboard-Generation": "fixture-7"}),
@@ -85,7 +87,37 @@ class DashboardMismatchDiagnostics(unittest.TestCase):
             self.assertIn(f"expected body: length={len(expected)} sha256={hashlib.sha256(expected).hexdigest()}",
                           diagnostic)
             self.assertIn(f"served body first 200 bytes: {served[:200]!r}", diagnostic)
-            self.assertEqual(urlopen.call_count, 2)
+            self.assertEqual(urlopen.call_count, 3)
+            self.assertEqual([call.args[0] for call in urlopen.call_args_list],
+                             ["http://fixture/health/ready", "http://fixture/health?full=1",
+                              "http://fixture/dashboard"])
+
+            # A healthy liveness endpoint or a truthy string/number must not
+            # allow dashboard byte checks before startup publishes readiness.
+            for readiness in ({"ready": False}, {"status": "ok"},
+                              {"ready": "true"}, {"ready": 1}, None):
+                with self.subTest(readiness=readiness), \
+                     patch("urllib.request.urlopen", return_value=Response(
+                         json.dumps(readiness).encode(), 200, {})) as urlopen, \
+                     patch.object(sys, "argv", ["check-installed-dashboard.py",
+                                                "--binary", str(binary),
+                                                "--base-url", "http://fixture"]):
+                    with self.assertRaisesRegex(SystemExit, "installed server is not ready"):
+                        runpy.run_path(str(SCRIPT), run_name="__main__")
+                    self.assertEqual(urlopen.call_count, 1)
+                    self.assertEqual(urlopen.call_args.args[0], "http://fixture/health/ready")
+
+
+            unavailable = urllib.error.HTTPError("http://fixture/health/ready", 503,
+                                                 "Service Unavailable", {}, None)
+            with patch("urllib.request.urlopen", side_effect=unavailable) as urlopen, \
+                 patch.object(sys, "argv", ["check-installed-dashboard.py",
+                                            "--binary", str(binary),
+                                            "--base-url", "http://fixture"]):
+                with self.assertRaises(urllib.error.HTTPError):
+                    runpy.run_path(str(SCRIPT), run_name="__main__")
+                self.assertEqual(urlopen.call_count, 1)
+                self.assertEqual(urlopen.call_args.args[0], "http://fixture/health/ready")
 
 
 if __name__ == "__main__":

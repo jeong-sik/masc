@@ -29,6 +29,9 @@ def get_dashboard():
         return response.read(), response.status, dict(response.headers.items())
 
 
+readiness = json.loads(get("/health/ready"))
+if not isinstance(readiness, dict) or readiness.get("ready") is not True:
+    raise SystemExit("installed server is not ready for dashboard verification")
 health = json.loads(get("/health?full=1"))
 if health["build"]["binary_commit"] != receipt["source_commit"]:
     raise SystemExit("running binary commit differs from installed receipt")

@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
-import { fetchKeeperItems, type KeeperItemsReading, type ItemSlot } from '../api/keeper-items'
+import { fetchKeeperItems, type KeeperItemsReading } from '../api/keeper-items'
+import type { KeeperEquipment } from '../api/schemas/keeper-portrait'
 import { KeeperPortrait } from './keeper-portrait'
 import { KeeperBadge } from './keeper-badge'
 import type { Keeper } from '../types'
@@ -9,6 +10,8 @@ type Reading =
   | { kind: 'loading'; keeper: string }
   | { kind: 'loaded'; keeper: string; value: KeeperItemsReading }
   | { kind: 'error'; keeper: string; message: string }
+
+type ItemSlot = keyof KeeperEquipment
 
 const slotNames: Record<ItemSlot, string> = {
   face: '얼굴', neck: '목', head: '머리', hand: '손', base: '받침',
@@ -50,8 +53,8 @@ export function KeeperItemsPanel({ keeper }: { keeper: Keeper }) {
         <${KeeperPortrait} name=${keeper.name} reading=${keeper.portrait ?? { state: 'unavailable', reason: '초상화 관측 없음' }} sizePx=${112} fallback=${html`<${KeeperBadge} id=${keeper.name} size="lg" variant="sigil" />`} />
         <div>
           <div class="text-xs text-[var(--color-fg-muted)]">현재 잔액</div>
-          <div class="text-xl font-semibold tabular-nums text-[var(--color-fg-primary)]">${candle(account.balanceMilli)}</div>
-          <div class="mt-1 text-xs text-[var(--color-fg-muted)]">보유 ${account.ownedItems.length} / ${account.catalog.length}개</div>
+          <div class="text-xl font-semibold tabular-nums text-[var(--color-fg-primary)]">${candle(account.balance_milli)}</div>
+          <div class="mt-1 text-xs text-[var(--color-fg-muted)]">보유 ${account.owned_items.length} / ${account.catalog.length}개</div>
         </div>
       </div>
       <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -60,13 +63,13 @@ export function KeeperItemsPanel({ keeper }: { keeper: Keeper }) {
             <h4 class="m-0 mb-2 text-sm font-semibold text-[var(--color-fg-primary)]">${slotNames[slot]}</h4>
             <ul class="m-0 list-none space-y-1 p-0">
               ${account.catalog.filter(item => item.slot === slot).map(item => {
-                const owned = account.ownedItems.includes(item.id)
+                const owned = account.owned_items.includes(item.id)
                 const equipped = keeper.portrait?.state === 'ready' && keeper.portrait.equipment[slot] === item.id
                 return html`<li class="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--color-border-divider)] py-2 text-xs">
                   <span class="font-mono text-[var(--color-fg-primary)]">${item.id}</span>
                   <span class="flex items-center gap-2 text-[var(--color-fg-muted)]">
                     ${equipped ? html`<span class="font-semibold text-[var(--color-accent-fg)]">착용 중</span>` : owned ? html`<span>보유</span>` : null}
-                    <span class="tabular-nums">${item.priceMilli === null ? '가격 미설정' : candle(item.priceMilli)}</span>
+                    <span class="tabular-nums">${item.price_status === 'unpriced' ? '가격 미설정' : candle(item.price_milli)}</span>
                   </span>
                 </li>`
               })}

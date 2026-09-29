@@ -14,9 +14,9 @@ describe('Keeper Item account wire', () => {
     const parsed = parseKeeperItems(ready, 'rondo')
     expect(parsed.status).toBe('ready')
     if (parsed.status !== 'ready') throw new Error('Expected ready account')
-    expect(parsed.balanceMilli).toBe('800')
-    expect(parsed.catalog.find(item => item.id === 'crown')?.priceMilli).toBe('200')
-    expect(parsed.catalog.find(item => item.id === 'book')?.priceMilli).toBeNull()
+    expect(parsed.balance_milli).toBe('800')
+    expect(parsed.catalog.find(item => item.id === 'crown')).toMatchObject({ price_milli: '200' })
+    expect(parsed.catalog.find(item => item.id === 'book')).toMatchObject({ price_status: 'unpriced' })
   })
 
   it('rejects a different Keeper, incomplete catalog, duplicate ownership and malformed price', () => {
@@ -26,7 +26,7 @@ describe('Keeper Item account wire', () => {
     expect(() => parseKeeperItems({ ...ready, catalog: catalog.map(item => item.id === 'crown' ? { ...item, price_milli: '-1' } : item) }, 'rondo')).toThrow()
     expect(() => parseKeeperItems({ ...ready, balance_milli: 800 }, 'rondo')).toThrow()
     expect(() => parseKeeperItems({ ...ready, balance_milli: '0800' }, 'rondo')).toThrow()
-    expect(parseKeeperItems({ ...ready, balance_milli: '9007199254740993' }, 'rondo')).toMatchObject({ balanceMilli: '9007199254740993' })
+    expect(parseKeeperItems({ ...ready, balance_milli: '9007199254740993' }, 'rondo')).toMatchObject({ balance_milli: '9007199254740993' })
     expect(() => parseKeeperItems({ ...ready, extra: true }, 'rondo')).toThrow()
   })
 })

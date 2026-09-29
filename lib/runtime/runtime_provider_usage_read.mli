@@ -32,6 +32,17 @@ val read_codex :
   (unit, string) result
 (** Read one Codex account and record its windows under [scope]. *)
 
+val read_muse :
+  mgr:_ Eio.Process.mgr ->
+  clock:_ Eio.Time.clock ->
+  cwd:Eio.Fs.dir_ty Eio.Path.t ->
+  scope:Runtime_quota_window.scope ->
+  Runtime_muse_serve.config ->
+  (unit, string) result
+(** Read [usage/read] without a model turn. Only a provider-stated exhausted
+    window with a future reset rests [scope]; an absent or unspent report
+    changes no routing state. *)
+
 type http_error
 (** Why one HTTP read recorded nothing. *)
 
@@ -124,6 +135,16 @@ val read_codex_in_background :
 (** {!read_codex} in a fiber on the server's root switch, so it outlives the
     turn that asked for it, with at most one read per scope at a time. Its
     failure is logged. *)
+
+val read_muse_in_background :
+  clock:_ Eio.Time.clock ->
+  cwd:Eio.Fs.dir_ty Eio.Path.t ->
+  scope:Runtime_quota_window.scope ->
+  Runtime_muse_serve.config ->
+  background
+(** {!read_muse} after a Muse model-error terminal. The read outlives the
+    failed turn and never resubmits its input. At most one read per account
+    scope is active. *)
 
 (** What the usage endpoint said after the provider refused the account with
     HTTP 403. Only windows whose role is

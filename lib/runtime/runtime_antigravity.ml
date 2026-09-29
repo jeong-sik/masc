@@ -1059,7 +1059,16 @@ let run_turn ?(conversation_mode = Start) ?home_dir ?on_spawned ?on_prompt_sent 
     | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | Runtime_error error -> Error error
-    | exn -> Error (Unhandled_exception (Printexc.to_string exn))
+    | exn ->
+      (* Read before anything else runs: the backtrace belongs to this raise.
+         Nothing else records where the exception came from. *)
+      let backtrace = Printexc.get_backtrace () in
+      Llm_provider.Reserved_exn.reraise_if_reserved exn;
+      Log.Runtime_agent.error
+        "Antigravity runtime raised outside the protocol: %s\nBacktrace: %s"
+        (Printexc.to_string exn)
+        backtrace;
+      Error (Unhandled_exception (Printexc.to_string exn))
   in
   let* status, state, stderr = run_result in
   let wall_duration_s = max 0.0 (Eio.Time.now clock -. started_at) in

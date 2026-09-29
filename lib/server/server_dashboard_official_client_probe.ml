@@ -96,7 +96,6 @@ let claude_failure_status = function
   | Subscription_required _ -> "login_required"
   | Timeout _ -> "timeout"
   | Protocol_error _ | Unsupported_control_request _ -> "protocol_error"
-  | Unhandled_exception _ -> "runtime_exception"
   | Turn_transport_interrupted _
   | Context_window_exceeded _
   | Turn_failed _
@@ -104,7 +103,10 @@ let claude_failure_status = function
   | Quota_blocked _
   (* Same reading as [codex_failure_status]: [probe_subscription] measures
      "the official CLI login without submitting a model turn"
-     (runtime_claude_code.mli), so a mid-turn host abort cannot reach here. *)
+     (runtime_claude_code.mli), so a mid-turn host abort cannot reach here.
+     [Unhandled_exception] is built only by [run_turn]'s catch-all, which the
+     probe does not go through. *)
+  | Unhandled_exception _
   | Stopped_by_host _ ->
     "probe_contract_error"
 ;;

@@ -20,7 +20,10 @@ val handle_goal_list
     create-or-update a goal record. Validates priority and rejects lifecycle
     fields, which belong to [masc_goal_transition]. Lifecycle field errors are
     reported via the dedicated
-    [goal_upsert_lifecycle_error] formatter. *)
+    [goal_upsert_lifecycle_error] formatter. A committed write remains successful
+    if a subsequent event append fails. [event_recordings] reports each snapshot
+    and criterion-induced phase event as [recorded] or [failed]; a failed entry
+    carries the attempted payload and error. Cancellation still propagates. *)
 val handle_goal_upsert
   :  tool_name:string
   -> start_time:Tool_timing.started

@@ -204,6 +204,40 @@ let goal_snapshot_event_payload (ctx : context) (goal : Goal_store.goal) =
   `Assoc (("actor", `String ctx.agent_name) :: fields)
 ;;
 
+type goal_event_recording =
+  | Event_recorded
+  | Event_recording_failed of string
+
+(* The Goal write has committed before its audit projection runs. Report each
+   append separately: failure must neither reverse that success nor claim a
+   snapshot or phase event reached the ledger. *)
+let record_committed_goal_event (ctx : context) ~goal_id ~event_type ~payload =
+  let recording =
+    try
+      emit_goal_event ctx ~goal_id ~event_type ~payload;
+      Event_recorded
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn ->
+      let detail = Printexc.to_string exn in
+      Log.Misc.error
+        "goal event recording failed after Goal commit goal_id=%s event_type=%s payload=%s detail=%s"
+        goal_id event_type (Yojson.Safe.to_string payload) detail;
+      Event_recording_failed detail
+  in
+  event_type, payload, recording
+;;
+
+let goal_event_recording_to_yojson (event_type, payload, recording) =
+  let fields =
+    match recording with
+    | Event_recorded -> [ "status", `String "recorded" ]
+    | Event_recording_failed detail ->
+      [ "status", `String "failed"; "error", `String detail; "payload", payload ]
+  in
+  `Assoc (("event_type", `String event_type) :: fields)
+;;
+
 (* RFC-0387 stage 2: wake the goal verifier lane after a durable
    [Proof_pending] request committed. The wake is
    scheduling only — the same discipline as the task-side
@@ -346,13 +380,15 @@ let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result
             | `created -> "created", "goal_created"
             | `updated _ -> "updated", "goal_updated"
           in
-          (* Every successful upsert records its caller and committed snapshot.
+          (* Every committed upsert attempts to record its caller and snapshot.
              The title remains at payload.title for Goal history after the row
              leaves the current store. *)
-          emit_goal_event ctx ~goal_id:goal.id ~event_type
-            ~payload:(goal_snapshot_event_payload ctx goal);
-          (match action with
-           | `created -> ()
+          let snapshot_recording =
+            record_committed_goal_event ctx ~goal_id:goal.id ~event_type
+              ~payload:(goal_snapshot_event_payload ctx goal)
+          in
+          let phase_recordings = match action with
+           | `created -> []
            | `updated previous_phase ->
              (* An edit to the success criterion takes a Verifying,
                 Awaiting_confirmation or Completed goal back to Executing
@@ -360,20 +396,25 @@ let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result
                 other, so it enters the same ledger with the phase it left and
                 who moved it. *)
              if previous_phase <> goal.phase then
-               emit_goal_event ctx ~goal_id:goal.id ~event_type:"goal_phase"
+               [ record_committed_goal_event ctx ~goal_id:goal.id ~event_type:"goal_phase"
                  ~payload:
                    (`Assoc
                       [ "phase", Goal_phase.to_yojson goal.phase
                       ; "previous_phase", Goal_phase.to_yojson previous_phase
                       ; "actor", `String ctx.agent_name
                       ; "cause", `String "criterion_edit"
-                      ]));
+                      ]) ]
+             else []
+          in
           ok_result
             ~tool_name
             ~start_time
             [ "action", `String action_name
             ; "goal_id", `String goal.id
             ; "goal", Goal_store.goal_to_yojson goal
+            ; "event_recordings", `List
+                (List.map goal_event_recording_to_yojson
+                   (snapshot_recording :: phase_recordings))
             ; ( "task_goal_id_example"
               , `String
                   (Printf.sprintf

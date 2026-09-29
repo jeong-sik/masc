@@ -484,6 +484,111 @@ let test_goal_creation_emits_an_event () =
    | _ -> fail "the edit must record exactly one separate update event")
 ;;
 
+let block_goal_event_path config =
+  let path = Filename.concat (Workspace_utils.masc_dir config) "goal_events.jsonl" in
+  let before = Fs_compat.load_file path in
+  let saved = path ^ ".before-failure" in
+  Fs_compat.invalidate_cached_writer path;
+  Unix.rename path saved;
+  Unix.mkdir path 0o700;
+  path, saved, before
+;;
+
+let event_recordings receipt =
+  Yojson.Safe.Util.(receipt |> member "event_recordings" |> to_list)
+;;
+
+let check_event_recordings label expected receipt =
+  let actual = event_recordings receipt
+    |> List.map (fun row -> get_string_field row "event_type", get_string_field row "status") in
+  check (list (pair string string)) label expected actual
+;;
+
+let test_metadata_edit_survives_event_recording_failure () =
+  List.iter (fun phase ->
+    with_workspace @@ fun config ->
+    let call name args =
+      match Tool_workspace.dispatch (workspace_ctx config) ~name ~args:(`Assoc args) with
+      | Some result -> parse_json_result result
+      | None -> fail (name ^ " not handled") in
+    let created = call "masc_goal_upsert"
+        [ "title", `String "Overdue shared Goal"; "metric", `String "artifacts"
+        ; "target_value", `String "1"; "due_date", `String "2000-01-01" ] in
+    check_event_recordings "creation reports its actual append"
+      [ "goal_created", "recorded" ] created;
+    let goal_id = get_string_field created "goal_id" in
+    (match phase with
+     | `Executing -> ()
+     | `Dropped -> ignore (call "masc_goal_transition"
+         [ "goal_id", `String goal_id; "action", `String "drop" ]));
+    let expected_phase = match phase with `Executing -> "executing" | `Dropped -> "dropped" in
+    let path, saved, before = block_goal_event_path config in
+    let updated = call "masc_goal_upsert"
+        [ "id", `String goal_id; "due_date", `String "2099-01-01"; "priority", `Int 1 ] in
+    let goal = Yojson.Safe.Util.member "goal" updated in
+    check string "metadata edit keeps the Goal phase" expected_phase (get_string_field goal "phase");
+    check_event_recordings "failed projection is explicit after the committed edit"
+      [ "goal_updated", "failed" ] updated;
+    let recording = List.hd (event_recordings updated) in
+    check bool "the receipt retains the append error" true
+      (String.length (get_string_field recording "error") > 0);
+    let payload = Yojson.Safe.Util.member "payload" recording in
+    check string "the missing row retains the caller" "planner" (get_string_field payload "actor");
+    check string "the missing row retains the committed due date" "2099-01-01"
+      (get_string_field payload "due_date");
+    let listed = call "masc_goal_list" [] |> Yojson.Safe.Util.member "goals" |> Yojson.Safe.Util.to_list in
+    (match listed with
+     | [ stored ] ->
+       check string "the successful edit is readable" "2099-01-01" (get_string_field stored "due_date");
+       check int "priority was committed" 1 Yojson.Safe.Util.(stored |> member "priority" |> to_int);
+       check string "the stored phase is unchanged" expected_phase (get_string_field stored "phase")
+     | _ -> fail "the shared Goal must remain readable");
+    check bool "the failure fixture is still a directory" true (Sys.is_directory path);
+    check string "no append leaked into the displaced history" before (Fs_compat.load_file saved))
+    [ `Executing; `Dropped ]
+;;
+
+let test_criterion_edit_reports_each_failed_event () =
+  with_workspace @@ fun config ->
+  let call name args =
+    match Tool_workspace.dispatch (workspace_ctx config) ~name ~args:(`Assoc args) with
+    | Some result -> parse_json_result result
+    | None -> fail (name ^ " not handled") in
+  let created = call "masc_goal_upsert"
+      [ "title", `String "Revise a pending criterion"; "metric", `String "artifacts"
+      ; "target_value", `String "1" ] in
+  let goal_id = get_string_field created "goal_id" in
+  ignore (call "masc_goal_transition"
+    [ "goal_id", `String goal_id; "action", `String "request_complete" ]);
+  let path, saved, before = block_goal_event_path config in
+  let updated = call "masc_goal_upsert" [ "id", `String goal_id; "target_value", `String "2" ] in
+  check_event_recordings "each missing row is reported after the criterion changed"
+    [ "goal_updated", "failed"; "goal_phase", "failed" ] updated;
+  List.iter (fun row ->
+    check bool "every failed append retains its error" true
+      (String.length (get_string_field row "error") > 0)) (event_recordings updated);
+  let phase_payload = List.nth (event_recordings updated) 1 |> Yojson.Safe.Util.member "payload" in
+  check string "the missing phase event remembers the old phase" "verifying"
+    (get_string_field phase_payload "previous_phase");
+  check string "the missing phase event remembers the committed phase" "executing"
+    (get_string_field phase_payload "phase");
+  check string "the missing phase event keeps its cause" "criterion_edit"
+    (get_string_field phase_payload "cause");
+  let primary, mirror = goal_files config in
+  List.iter (fun bytes ->
+    match Yojson.Safe.Util.(Yojson.Safe.from_string bytes |> member "goals" |> to_list) with
+    | [ goal ] ->
+      check string "the criterion was committed" "2" (get_string_field goal "target_value");
+      check string "the phase was committed" "executing" (get_string_field goal "phase")
+    | _ -> fail "both stores must retain the Goal") [ primary; mirror ];
+  check string "failed appends preserved prior history" before (Fs_compat.load_file saved);
+  Unix.rmdir path;
+  Unix.rename saved path;
+  let repeated = call "masc_goal_upsert" [ "id", `String goal_id; "target_value", `String "2" ] in
+  check_event_recordings "a later successful snapshot does not claim the lost phase append"
+    [ "goal_updated", "recorded" ] repeated
+;;
+
 let test_goal_upsert_rejects_lifecycle_fields () =
   with_workspace
   @@ fun config ->
@@ -987,6 +1092,14 @@ let () =
             "creating a goal emits an event"
             `Quick
             test_goal_creation_emits_an_event
+        ; test_case
+            "metadata edit survives event recording failure"
+            `Quick
+            test_metadata_edit_survives_event_recording_failure
+        ; test_case
+            "criterion edit reports each failed event"
+            `Quick
+            test_criterion_edit_reports_each_failed_event
         ; test_case
             "goal review removed from dispatch"
             `Quick

@@ -46,7 +46,9 @@ val set_task_goal :
     - [Error (Unknown_goal _)] — no goal with [goal_id] in the primary Goal store.
     - [Error (Task_finished _)] — the task is [Done] or [Cancelled]. A link
       carries no timestamp, so a task finished before it is linked could not
-      be told apart from work done for the goal.
+      be told apart from work done for the goal. This is checked before the
+      link is read, so a finished task that already has a link is refused as
+      finished, not as [Already_assigned].
     - [Error (Already_assigned _)] — the task already carries one or more
       goal links; reassignment/unlink is out of scope (RFC-0267 §4, which
       keeps Phase 2 strictly additive for goalless tasks).

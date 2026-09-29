@@ -204,6 +204,24 @@ let test_rejects_finished_task () =
     finished_statuses
 ;;
 
+(* The status check runs before the link is read, so a finished task that
+   already has a link is refused as finished. *)
+let test_finished_task_with_a_link_is_refused_as_finished () =
+  with_test_env (fun config ->
+    make_goal config ~id:"goal-a";
+    make_goal config ~id:"goal-b";
+    let task_id = make_unassigned_task config ~title:"t" in
+    (match Goal_assignment.set_task_goal config ~task_id ~goal_id:"goal-a" with
+     | Ok () -> ()
+     | Error e -> failf "first assign should succeed: %s" (err_to_string e));
+    set_task_status config ~task_id (List.assoc "done" finished_statuses);
+    match Goal_assignment.set_task_goal config ~task_id ~goal_id:"goal-b" with
+    | Error (Goal_assignment.Task_finished { task_id = t; _ }) ->
+      check string "names the task" task_id t
+    | Ok () -> fail "a finished task was linked to a second goal"
+    | Error other -> failf "expected Task_finished, got %s" (err_to_string other))
+;;
+
 let test_links_an_unfinished_task_in_every_open_status () =
   let started_at = "2026-09-01T00:00:00Z" in
   let open_statuses =
@@ -459,6 +477,10 @@ let () =
         ; test_case "goalless task links to goal" `Quick test_links_goalless_task
         ; test_case "reassignment is rejected" `Quick test_rejects_reassignment
         ; test_case "a finished task is rejected" `Quick test_rejects_finished_task
+        ; test_case
+            "a finished task that has a link is refused as finished"
+            `Quick
+            test_finished_task_with_a_link_is_refused_as_finished
         ; test_case
             "an unfinished task links in every open status"
             `Quick

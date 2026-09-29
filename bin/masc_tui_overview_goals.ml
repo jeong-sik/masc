@@ -10,15 +10,10 @@ let drawn_phase : Goal_phase.t -> bool = function
       true
   | Goal_phase.Completed | Goal_phase.Dropped -> false
 
-(* A calendar date as the server writes [due_date]. Anything else is drawn as
-   written, without a countdown, and sorts with the goals that have no date. *)
-let parse_due_date due =
-  match Scanf.sscanf_opt due "%4d-%2d-%2d%!" (fun y m d -> (y, m, d)) with
-  | None -> None
-  | Some date -> Ptime.of_date date
-
+(* A goal sorts by the moment it falls due ({!Goal_due}). A value that is not a
+   due date sorts with the goals that have none. *)
 let due_order (goal : Tui_decode.overview_goal) =
-  Option.bind goal.og_due_date parse_due_date
+  Goal_due.instant (Goal_due.read goal.og_due_date)
 
 let compare_due left right =
   match (left, right) with
@@ -65,32 +60,37 @@ let task_count_text (goal : Tui_decode.overview_goal) =
   if goal.og_task_count <= 0 then "no tasks"
   else Printf.sprintf "%d/%d tasks" goal.og_task_done_count goal.og_task_count
 
-(* [due_date] is a calendar date with no zone, so it is compared with the
-   operator's own calendar date: the day [localtime] puts [now] on. *)
-let local_today ~now ~localtime =
-  let tm : Unix.tm = localtime now in
-  Ptime.of_date (tm.Unix.tm_year + 1900, tm.Unix.tm_mon + 1, tm.Unix.tm_mday)
-
-let due_text ~today (goal : Tui_decode.overview_goal) =
+(* The countdown counts UTC days to the due date and reads the due date the
+   way the server does ({!Goal_due}): it falls due at 23:59:59 UTC, whatever
+   the operator's time zone is. The value is read as it arrived and only the
+   text drawn is cleaned for the terminal, so a value the server cannot read
+   never gets a countdown here. A value that is not a due date is drawn as
+   written, without a countdown. *)
+let due_text ~now (goal : Tui_decode.overview_goal) =
   match goal.og_due_date with
   | None -> None
   | Some raw -> (
-      let raw = Terminal_text.single_line raw in
-      match (parse_due_date raw, today) with
-      | Some due, Some today ->
-          let days, _ = Ptime.Span.to_d_ps (Ptime.diff due today) in
-          let y, m, d = Ptime.to_date due in
-          let today_year, _, _ = Ptime.to_date today in
-          let date =
-            if y = today_year then Printf.sprintf "%02d-%02d" m d
-            else Printf.sprintf "%04d-%02d-%02d" y m d
-          in
-          let countdown =
-            if days >= 0 then Printf.sprintf "D-%d" days
-            else Printf.sprintf "D+%d" (-days)
-          in
-          Some (Printf.sprintf "due %s (%s)" date countdown)
-      | None, _ | Some _, None -> Some ("due " ^ raw))
+      let shown = Terminal_text.single_line raw in
+      let due = Goal_due.read (Some raw) in
+      match (due, now) with
+      | Goal_due.Due_date { date = (y, m, d); _ }, Some now -> (
+          match Goal_due.days_left ~now due with
+          | None -> Some ("due " ^ shown)
+          | Some days ->
+              let now_year, _, _ = Ptime.to_date now in
+              let date =
+                if y = now_year then Printf.sprintf "%02d-%02d" m d
+                else Printf.sprintf "%04d-%02d-%02d" y m d
+              in
+              let countdown =
+                if days >= 0 then Printf.sprintf "D-%d" days
+                else Printf.sprintf "D+%d" (-days)
+              in
+              Some (Printf.sprintf "due %s (%s)" date countdown))
+      | ( ( Goal_due.No_due_date | Goal_due.Unreadable_due_date _
+          | Goal_due.Due_date _ ),
+          _ ) ->
+          Some ("due " ^ shown))
 
 (* A Goal whose latest verdict was a rejection (#39571). The verification
    ledger's current completion state is [proof_refuted]; the phase alone cannot
@@ -103,22 +103,20 @@ let refuted_text (goal : Tui_decode.overview_goal) =
 (* A Goal past its [due_date] while still executing or verifying (#39571). A
    completed or dropped Goal is not drawn at all, so it can never read as
    overdue. *)
-let is_overdue ~today (goal : Tui_decode.overview_goal) =
-  match (goal.og_phase, goal.og_due_date) with
-  | (Goal_phase.Executing | Goal_phase.Verifying), Some raw -> (
-      match (parse_due_date (Terminal_text.single_line raw), today) with
-      | Some due, Some today -> Ptime.compare due today < 0
-      | _ -> false)
+let is_overdue ~now (goal : Tui_decode.overview_goal) =
+  match (goal.og_phase, goal.og_due_date, now) with
+  | (Goal_phase.Executing | Goal_phase.Verifying), Some raw, Some now ->
+      Goal_due.is_overdue ~now (Goal_due.read (Some raw))
   | _ -> false
 
-let overdue_text ~today (goal : Tui_decode.overview_goal) =
-  if is_overdue ~today goal then Some (Theme.warn () ^ "overdue" ^ Ansi.reset)
+let overdue_text ~now (goal : Tui_decode.overview_goal) =
+  if is_overdue ~now goal then Some (Theme.warn () ^ "overdue" ^ Ansi.reset)
   else None
 
 (* A row is a scan target, not a Goal progress meter. Task counts name
    linked task work only; the Goal metric and ownership live in Planning. *)
-let goal_rows ~now ~localtime ~inner_width goals =
-  let today = local_today ~now ~localtime in
+let goal_rows ~now ~inner_width goals =
+  let now = Ptime.of_float_s now in
   List.map
     (fun (goal : Tui_decode.overview_goal) ->
       let phase =
@@ -130,7 +128,7 @@ let goal_rows ~now ~localtime ~inner_width goals =
       in
       let attention =
         List.filter_map Fun.id
-          [ refuted_text goal; overdue_text ~today goal ]
+          [ refuted_text goal; overdue_text ~now goal ]
       in
       (* Keep enough of the title to identify the Goal even when several
          attention flags compete for a narrow row. The suffix puts warnings
@@ -152,7 +150,7 @@ let goal_rows ~now ~localtime ~inner_width goals =
       let suffix =
         select_suffix 0 []
           (attention @ phase @ [ task_count_text goal ]
-           @ Option.to_list (due_text ~today goal))
+           @ Option.to_list (due_text ~now goal))
         |> String.concat separator
       in
       let suffix_width = Masc_tui_message_layout.display_width suffix in
@@ -179,7 +177,7 @@ let title count =
 
 let take rows items = List.filteri (fun index _ -> index < rows) items
 
-let lines ~now ~localtime ~inner_width ~rows ~tasks (reading : Types.overview_goals_reading)
+let lines ~now ~inner_width ~rows ~tasks (reading : Types.overview_goals_reading)
     =
   let rows = max 0 rows in
   let all =
@@ -194,7 +192,7 @@ let lines ~now ~localtime ~inner_width ~rows ~tasks (reading : Types.overview_go
         let drawn = drawn_goals goals in
         let goal_count = List.length drawn in
         let title = title (Some goal_count) in
-        let goal_lines = goal_rows ~now ~localtime ~inner_width drawn in
+        let goal_lines = goal_rows ~now ~inner_width drawn in
         let shown_lines = take (max 0 (rows - 1)) goal_lines in
         let shown = List.length shown_lines in
         let cut =
@@ -224,10 +222,10 @@ let lines ~now ~localtime ~inner_width ~rows ~tasks (reading : Types.overview_go
   in
   take rows all
 
-let draw buf ~cols ~rows ~now ~localtime ~tasks reading =
+let draw buf ~cols ~rows ~now ~tasks reading =
   if rows > 0 then begin
     let inner_width = framed_inner_width cols in
-    let drawn = lines ~now ~localtime ~inner_width ~rows ~tasks reading in
+    let drawn = lines ~now ~inner_width ~rows ~tasks reading in
     List.iter (box_line buf cols) drawn;
     (* [rows] is what the budget spent; a short list still fills it so the
        frame below starts where the budget says. *)

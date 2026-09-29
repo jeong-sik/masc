@@ -1,7 +1,8 @@
 (** [Board_snapshot_rows.render] writes the board's posts and comments
     snapshots. These cases pin that a snapshot is exactly the rows of the
-    table's values, and that a value is rendered only when the table holds a
-    value the last snapshot did not write. *)
+    table's values, that a value is rendered only when the table holds a
+    value no earlier snapshot rendered, and that [rows] keeps one row per key
+    the table holds. *)
 
 open Alcotest
 module Rows = Masc_board_handlers.Board_snapshot_rows
@@ -63,7 +64,8 @@ let test_an_unchanged_table_renders_nothing () =
 ;;
 
 (* The replacement has the same contents as the value it replaces: a row is
-   kept for the physical value, not for equal contents. *)
+   kept for the physical value, not for equal contents. The replacement's row
+   takes the old one's place, so the next snapshot renders nothing. *)
 let test_a_replaced_value_is_rendered_again () =
   let table = table_of (items 5) in
   let rows = Hashtbl.create 8 in
@@ -74,7 +76,10 @@ let test_a_replaced_value_is_rendered_again () =
   Hashtbl.replace table "item-3" { (Hashtbl.find table "item-3") with id = "item-3" };
   check string "the rows show the replacement" (rendered_in_full table)
     (Rows.render ~rows ~to_json table);
-  check int "only the two replaced values rendered again" 7 !renders
+  check int "only the two replaced values rendered again" 7 !renders;
+  check int "one row per key" 5 (Hashtbl.length rows);
+  ignore (Rows.render ~rows ~to_json table : string);
+  check int "the replacements are not rendered a third time" 7 !renders
 ;;
 
 let test_a_removed_value_leaves_the_snapshot_and_its_row () =
@@ -92,11 +97,15 @@ let test_a_removed_value_leaves_the_snapshot_and_its_row () =
   check int "once" 6 !renders
 ;;
 
-let test_an_empty_table_is_an_empty_snapshot () =
+let test_an_emptied_table_is_an_empty_snapshot () =
+  let table = table_of (items 5) in
   let rows = Hashtbl.create 8 in
   let to_json, renders = counting () in
-  check string "no rows" "" (Rows.render ~rows ~to_json (Hashtbl.create 8));
-  check int "nothing rendered" 0 !renders
+  ignore (Rows.render ~rows ~to_json table : string);
+  Hashtbl.reset table;
+  check string "no rows" "" (Rows.render ~rows ~to_json table);
+  check int "no row kept" 0 (Hashtbl.length rows);
+  check int "nothing rendered again" 5 !renders
 ;;
 
 let () =
@@ -111,8 +120,8 @@ let () =
             test_a_replaced_value_is_rendered_again
         ; test_case "a removed value leaves the snapshot and its row" `Quick
             test_a_removed_value_leaves_the_snapshot_and_its_row
-        ; test_case "an empty table is an empty snapshot" `Quick
-            test_an_empty_table_is_an_empty_snapshot
+        ; test_case "an emptied table is an empty snapshot" `Quick
+            test_an_emptied_table_is_an_empty_snapshot
         ] )
     ]
 ;;

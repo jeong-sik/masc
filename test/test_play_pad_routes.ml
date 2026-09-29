@@ -148,7 +148,7 @@ let test_the_pad () =
         check bool "for the program's saves name" true (member "saves_name" layout = Some (`String "samguk3"));
         check bool "from the builtin 삼국지3 layout" true (member "source" layout = Some (`String "builtin"));
         (match member "buttons" layout with
-         | Some (`List buttons) -> check int "ten buttons" 10 (List.length buttons)
+         | Some (`List buttons) -> check int "every button" 12 (List.length buttons)
          | _ -> fail "no buttons");
         let before = change_count () in
         let early = press ~token:player "BTN_SOUTH" in
@@ -157,8 +157,7 @@ let test_the_pad () =
         dos_ok "pass" (Dos_lane.pass ~who:"operator" ~to_:(Some "minsu") ~announce:ignore);
         List.iter
           (fun (body, what) -> check int what 400 (status_of (call ~token:player "POST" ~body)))
-          [ {|{"button":"BTN_TL","saves_name":"samguk3"}|}, "an unbound button is a 400"
-          ; {|{"button":"BTN_Z","saves_name":"samguk3"}|}, "an unknown button is a 400"
+          [ {|{"button":"BTN_Z","saves_name":"samguk3"}|}, "an unknown button is a 400"
           ; {|{"button":"BTN_SOUTH","saves_name":"samguk3","keys":["x"]}|}, "an unknown field is a 400"
           ; {|{"button":"BTN_SOUTH"}|}, "no saves name is a 400"
           ; {|{"button":"BTN_SOUTH","saves_name":1}|}, "a saves name that is not a string is a 400"
@@ -183,7 +182,16 @@ let test_the_pad () =
         let who, action = newest_activity () in
         check string "credited to the invite" "minsu" who;
         check string "as the machine key the button stands for" "press return" action;
-        check bool "the machine moved" true (change_count () > before));
+        check bool "the machine moved" true (change_count () > before);
+        (* The builtin 삼국지3 layout binds every button, so a workspace
+           layout that binds one stands in for a layout that leaves one out. *)
+        let pads = Masc.Play_pad.pads_dir ~base_path in
+        mkdir_p pads;
+        Out_channel.with_open_bin (Filename.concat pads "samguk3.toml") (fun oc ->
+          output_string oc "[BTN_SOUTH]\nkeys = [\"return\"]\nlabel = \"결정\"\n");
+        let moved = change_count () in
+        check int "an unbound button is a 400" 400 (status_of (press ~token:player "BTN_TL"));
+        check int "and the machine did not move" moved (change_count ()));
       with_machine ~saves_name:"zzt" (fun () ->
         let none = call ~token:operator "GET" in
         check int "a program with no layout is a 404" 404 (status_of none);

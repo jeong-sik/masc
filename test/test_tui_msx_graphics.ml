@@ -377,7 +377,7 @@ let drawn_live ?(activity = []) () =
   with_protocol Graphics.Unsupported_protocol (fun () ->
     let buf = Buffer.create 65536 in
     Msx.render_live ~write:(Buffer.add_string buf) ~connection:Types.Connected ~activity
-      Masc_tui_machine_live.Dos (Masc_tui_machine_live.Showing (live_picture ()));
+      Masc.Machine_lane.Dos (Masc_tui_machine_live.Showing (live_picture ()));
     Buffer.contents buf)
 
 (* The two numbers {!Msx.shows_sidebar} weighs are exact, so this is checked

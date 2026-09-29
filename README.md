@@ -79,13 +79,13 @@ Check [GitHub Releases](https://github.com/jeong-sik/masc/releases) for binary a
 
 ### Published binaries
 
-Download the installer attached to [GitHub Releases](https://github.com/jeong-sik/masc/releases/tag/v0.42.0).
+Download the installer attached to [GitHub Releases](https://github.com/jeong-sik/masc/releases/tag/v0.46.0).
 It verifies and installs the assets for the selected release.
 
-> Installation target: v0.42.0 (check tag availability on GitHub Releases).
+> Installation target: v0.46.0 (check tag availability on GitHub Releases).
 
 ```bash
-TAG=v0.42.0
+TAG=v0.46.0
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
 bash /tmp/masc-install.sh --version "$TAG"
@@ -93,7 +93,7 @@ bash /tmp/masc-install.sh --version "$TAG"
 
 Optional inspection: run `less /tmp/masc-install.sh` before installation. Press `q` to exit, then run the `bash` installation command above.
 
-If a model check fails, the wizard names the cause. For a yellow **Rate limit (temporary)** or **Provider busy**, wait and *Retry*. For **No answer in time**, retry once; if it keeps timing out, check the endpoint or choose a smaller model. A red cause (credential refused, quota used up, not signed in) needs the fix it names. You can exclude that connection and continue, or choose *Configure later* and run `masc setup` afterwards. A running check shows its elapsed seconds, so a slow provider is not a frozen installer. `NO_COLOR=1` gives plain output.
+If a model check fails, the wizard names the cause. For a yellow **Provider busy**, wait and *Retry*. For **No answer in time**, retry once; if it keeps timing out, check the endpoint or choose a smaller model. A red cause (credential refused, not signed in) needs the fix it names. When the provider declines the check for the account's quota or rate limit, the model is still saved and the wizard names it as saved without the check. You can exclude that connection and continue, or choose *Configure later* and run `masc setup` afterwards. A running check shows its elapsed seconds, so a slow provider is not a frozen installer. `NO_COLOR=1` gives plain output.
 
 For a reinstall, append `--force` or `--wizard` to the `bash /tmp/masc-install.sh` command.
 
@@ -423,6 +423,8 @@ What a Keeper needs before its first turn runs:
   in. On the TUI path, export it before launching, because the server the TUI
   starts inherits the TUI's environment. CLI providers require their CLI installation
   and login instead; local model servers follow their configured authentication.
+  Claude Code, Codex, Antigravity and Muse Code account selection and the Muse
+  runtime template are documented in [Configuration](docs/spec/14-configuration.md#official-client-accounts-and-muse-code).
 
 Two approval lanes gate what a Keeper does. The workspace lane starts in
 `auto_judge`: a model reads each gated call and decides. That judgement runs

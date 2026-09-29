@@ -143,19 +143,19 @@ type error =
   | State_callback_failed of string
   | Turn_failed of string
   | Process_exited of string
+  | Unhandled_exception of string
+      (** An exception nothing in the runtime expected, caught as the turn
+          leaves it: a host-side failure, not something the CLI sent. The
+          string is the exception. *)
   | Timeout of float
 
 val error_to_string : error -> string
 
 val redact_stderr_tail : string -> string
-(** Shared structural secret masking. The stderr reader drops an incomplete
-    leading line before this boundary; display truncation follows masking. *)
-
-module For_testing : sig
-  val stderr_from_chunks : string list -> string
-  (** The production bounded stderr reader's retention and masking boundary,
-      with deterministic input chunks instead of a process pipe. *)
-end
+(** Shared structural secret masking. The shared stderr capture masks complete
+    retained input before display truncation. Once the raw byte bound is
+    exceeded the entire diagnostic is omitted, including later lines, so a
+    multiline credential cannot survive a dropped identifying prefix. *)
 
 val validate_turn :
   ?conversation_mode:conversation_mode ->

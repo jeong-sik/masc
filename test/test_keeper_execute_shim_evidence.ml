@@ -134,7 +134,7 @@ let with_workspace ~response_kind f =
   with_env "PATH" (bin_dir ^ ":" ^ Option.value (Sys.getenv_opt "PATH") ~default:"") @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false" @@ fun () ->
   let execute ~always_allow argv =
-    let execution = Keeper_tool_execute_runtime.handle_tool_execute_with_outcome
+    let execution = Keeper_tool_execute_runtime.handle_tool_execute_with_outcome ~result_projection:Tool_output.default_model_projection
       ~shell_ir_rewrite:Keeper_shell_tool_command.refuse_reserved_command
       ~turn_sandbox_factory:None ~config ~meta:{ meta with always_allow = Some always_allow }
       ~args:(`Assoc ["argv", `List (List.map (fun arg -> `String arg) argv)
@@ -172,6 +172,14 @@ let assert_payload ~ordinal ~exit_code (payload, evidence) =
     (text "output" payload);
   check string "remote preview does not claim full capture" "capture_only"
     (text "output_completeness" evidence);
+  check int "ledger sees the bytes compared at Execute's inline boundary"
+    (String.length (text "output" payload))
+    (integer "compared_output_bytes" evidence);
+  check bool "this small Execute was not stored by its handler" false
+    (field "handler_stored" evidence |> Yojson.Safe.Util.to_bool);
+  check bool "the model sees neither measurement" true
+    (field "compared_output_bytes" payload = `Null
+     && field "handler_stored" payload = `Null);
   check bool "the model is not told the usual capture marker" true
     (field "output_completeness" payload = `Null);
   check bool "the model still reads its location observation" true

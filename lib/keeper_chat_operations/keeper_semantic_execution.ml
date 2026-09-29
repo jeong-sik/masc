@@ -79,7 +79,12 @@ let session_scope components =
   then Error "invalid relative session scope"
   else Ok (Session_scope components)
 let session_scope_components (Session_scope components) = components
-type official_client_kind = Codex | Claude_code | Antigravity
+type official_client_kind = Codex | Claude_code | Antigravity | Muse
+let official_client_kind_to_string = function
+  | Codex -> "codex" | Claude_code -> "claude_code" | Antigravity -> "antigravity" | Muse -> "muse"
+let official_client_kind_of_string = function
+  | "codex" -> Some Codex | "claude_code" -> Some Claude_code | "antigravity" -> Some Antigravity
+  | "muse" -> Some Muse | _ -> None
 type official_client_checkpoint =
   { client_kind : official_client_kind; runtime_id : string; session_id : string;
     turn_id : string; tool_surface_sha256 : string; frame : Keeper_repetition_snapshot.t }
@@ -215,6 +220,7 @@ type action =
   | Suspend_official_checkpoint of official_client_checkpoint
   | Suspend_runtime_retry of runtime_retry
   | Resume_runtime_retry of runtime_retry
+  | Update_runtime_retry_wait of { observed : runtime_retry; replacement : runtime_retry }
   | Suspend_gate_reconciliation of gate_binding * string
   | Suspend_gate of gate_wait
   | Reconcile_gate_binding of gate_binding * gate_wait
@@ -404,6 +410,16 @@ let apply ~now action current =
            | Running | Resuming_runtime_retry _ | Resuming_gate _ -> unchanged (Recovering {origin = Runtime_retry retry;
                diagnostic = "checkpointed runtime retry awaits its frozen continuation"})
            | Preparing | Ready | Recovering _ | Suspended _ | Settled _ -> reject ())
+      | Update_runtime_retry_wait { observed; replacement } ->
+          (match current.phase with
+           | Recovering {origin = Runtime_retry expected; diagnostic} ->
+             if expected = observed
+                && Keeper_checkpoint_ref.equal expected.checkpoint replacement.checkpoint
+             then unchanged (Recovering {origin = Runtime_retry replacement; diagnostic})
+             else reject ()
+           | Recovering {origin = (Checkpointed _ | Official_checkpointed _ | Unconfirmed_sources
+               | Confirmed_undispatched | Interrupted_execution | Gate_wait _ | Gate_binding _); _}
+           | Preparing | Ready | Running | Resuming_runtime_retry _ | Resuming_gate _ | Suspended _ | Settled _ -> reject ())
       | Resume_runtime_retry observed ->
           (match current.phase with
            | Recovering {origin = Runtime_retry expected; _} ->
@@ -503,7 +519,7 @@ let apply ~now action current =
       | Confirm_sources | Begin_execution | Recheck_sources _ | Resume_checkpoint _
       | Resume_official_checkpoint _ | Suspend_official_checkpoint _
       | Record_observation _ | Require_reconciliation _ | Suspend _ | Suspend_runtime_retry _
-      | Resume_runtime_retry _ | Resolve_gate _ | Resume_gate _ -> current.gate_obligations in
+      | Resume_runtime_retry _ | Update_runtime_retry_wait _ | Resolve_gate _ | Resume_gate _ -> current.gate_obligations in
     if phase = current.phase && Snapshot.equal frame current.frame && current_sources = current.current_sources
        && gate_obligations = current.gate_obligations
     then Ok current
@@ -542,7 +558,7 @@ let runtime_suffix_json (suffix : runtime_suffix) = `Assoc [
   "next_runtime_id", `String suffix.next_runtime_id;
   "later_runtime_ids", `List (List.map (fun id -> `String id) suffix.later_runtime_ids)]
 let official_client_checkpoint_json value = `Assoc [
-  "client_kind", `String (match value.client_kind with Codex -> "codex" | Claude_code -> "claude_code" | Antigravity -> "antigravity");
+  "client_kind", `String (official_client_kind_to_string value.client_kind);
   "runtime_id", `String value.runtime_id; "session_id", `String value.session_id;
   "turn_id", `String value.turn_id; "tool_surface_sha256", `String value.tool_surface_sha256;
   "frame", Snapshot.to_json value.frame]
@@ -712,8 +728,8 @@ let agent_core_gate_wait_of_json json =
 let official_client_checkpoint_of_json json =
     let* native = exact ["client_kind"; "runtime_id"; "session_id"; "turn_id"; "tool_surface_sha256"; "frame"] json in
     let* kind = string "client_kind" native in
-    let* client_kind = match kind with "codex" -> Ok Codex | "claude_code" -> Ok Claude_code
-      | "antigravity" -> Ok Antigravity | _ -> Error "invalid official-client kind" in
+    let* client_kind = Option.to_result ~none:"invalid official-client kind"
+      (official_client_kind_of_string kind) in
     let* runtime_id = string "runtime_id" native in
     let* session_id = string "session_id" native in
     let* turn_id = string "turn_id" native in

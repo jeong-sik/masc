@@ -18,21 +18,50 @@ type api_format =
   | Codex_app_server_runtime
   | Antigravity_cli_runtime
   | Claude_code_runtime
+  | Muse_serve_runtime
 [@@deriving show, eq]
 
 (* The runtimes whose admission reads [max-prompt-bytes]: Claude Code cuts the
    history it seeds a start turn with to it, Antigravity refuses to send a
-   prompt above it, and Codex windows its Start and Resume to it from the
-   first attempt when one is declared (#37353). No other runtime reads the
-   field, so a declaration there bounds nothing the provider checks. Every arm
-   is listed so a new format has to be decided here. *)
+   prompt above it, Codex windows its Start and Resume to it from the
+   first attempt when one is declared (#37353), and Muse Code lowers the
+   ceiling it derives from [max-context] to it
+   ([Runtime.muse_prompt_capacity]). No other runtime reads the field, so a
+   declaration there bounds nothing the provider checks. Every arm is listed
+   so a new format has to be decided here. *)
 let api_format_reads_max_prompt_bytes = function
-  | Claude_code_runtime | Antigravity_cli_runtime | Codex_app_server_runtime -> true
+  | Claude_code_runtime
+  | Antigravity_cli_runtime
+  | Codex_app_server_runtime
+  | Muse_serve_runtime -> true
   | Messages_api
   | Chat_completions_api
   | Ollama_api
   | Gemini_api
   | Vertex_gemini_api -> false
+;;
+
+(* Whether a runtime of this format can be handed a JSON Schema to hold its
+   answer to. Every exact-output call hands one over: an HTTP slot sends it in
+   the request, and a cli_slots id gets it through
+   [Keeper_lane_cli_oneshot.run]. Muse Code's [turn/start] has no field for
+   one, so [Fusion_official_client] refuses each such call, and a Muse Code
+   runtime can stand in no exact-output list. Every arm is listed so a new
+   format has to be decided here. *)
+type output_schema_channel =
+  | Holds_output_schema
+  | No_output_schema_channel
+
+let api_format_output_schema_channel = function
+  | Messages_api
+  | Chat_completions_api
+  | Ollama_api
+  | Gemini_api
+  | Vertex_gemini_api
+  | Codex_app_server_runtime
+  | Antigravity_cli_runtime
+  | Claude_code_runtime -> Holds_output_schema
+  | Muse_serve_runtime -> No_output_schema_channel
 ;;
 
 (** Which vendor dialect an endpoint speaks. [protocol] names the request
@@ -42,8 +71,8 @@ let api_format_reads_max_prompt_bytes = function
 
     A provider the AGENT_CORE catalog knows states its dialect there, and
     restating it here is refused at load. The key exists for an endpoint the
-    catalog has never seen: the install wizard builds its provider id from a
-    hash of the operator's answers, so no catalog row can ever match it.
+    catalog has never seen: the install wizard's provider id carries a hash
+    of the operator's answers, so no catalog row can ever match it.
 
     Re-exports the AGENT_CORE type so a variant added there breaks this
     compile instead of leaving a stale local mirror. *)
@@ -342,14 +371,17 @@ type model_spec =
         Declared in bytes rather than derived from [max-context] because MASC
         has no tokenizer: converting a token budget would need a
         bytes-per-token constant with nothing to justify it, and a wrong
-        constant either truncates silently or overflows silently.
+        constant either truncates silently or overflows silently. Muse Code
+        is the exception: its host's own estimate is a measured bytes / 4, so
+        MASC derives the ceiling there and a declaration can only lower it
+        ([Runtime_muse_prompt_capacity]).
 
-        Only Claude Code, Antigravity and Codex runtimes read it
+        Only Claude Code, Antigravity, Codex and Muse Code runtimes read it
         ([api_format_reads_max_prompt_bytes]). Declared on a model bound
         through any other provider, it bounds nothing and no reader counts it.
 
-        [None] applies no ceiling, which is the behaviour every deployment has
-        today. Resolved via {!Runtime.max_prompt_bytes_of_runtime_id} →
+        [None] applies no ceiling on every runtime but Muse Code. Resolved
+        via {!Runtime.max_prompt_bytes_of_runtime_id} →
         {!Runtime_inference.resolve_max_prompt_bytes}. *)
   ; capabilities : model_capabilities option
   }

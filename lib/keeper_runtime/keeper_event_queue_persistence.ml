@@ -122,9 +122,33 @@ let transition_wal_path_of_owner owner =
   Filename.concat (keeper_runtime_dir_of_owner owner) transition_wal_filename
 ;;
 
+let inspect_path_kind ?(follow = false) path =
+  try
+    match Fs_compat.exact_path_kind ~follow path with
+    | Fs_compat.Exact_unknown -> Error ("could not inspect event queue path: " ^ path)
+    | (Fs_compat.Exact_missing | Fs_compat.Exact_kind _) as kind -> Ok kind
+  with
+  | (Sys_error _ | Unix.Unix_error _ | Eio.Io _) as exn ->
+    Error (Printf.sprintf "could not inspect event queue path %s: %s" path (Printexc.to_string exn))
+;;
+
+let path_exists_exact path =
+  match inspect_path_kind path with
+  | Ok Fs_compat.Exact_missing -> Ok false
+  | Ok (Fs_compat.Exact_kind _) -> Ok true
+  | Ok Fs_compat.Exact_unknown -> Error ("could not inspect event queue path: " ^ path)
+  | Error _ as error -> error
+;;
+
+let durable_paths_exist snapshot wal =
+  let ( let* ) = Result.bind in
+  let* snapshot_exists = path_exists_exact snapshot in
+  let* wal_exists = path_exists_exact wal in
+  Ok (snapshot_exists || wal_exists)
+;;
+
 let durable_state_exists_unlocked owner =
-  Sys.file_exists (snapshot_path_of_owner owner)
-  || Sys.file_exists (transition_wal_path_of_owner owner)
+  durable_paths_exist (snapshot_path_of_owner owner) (transition_wal_path_of_owner owner)
 ;;
 
 (* Whether the Keeper has a durable queue at all. A missing queue loads as the
@@ -133,7 +157,7 @@ let durable_state_exists_unlocked owner =
 let durable_state_exists_result ~base_path ~keeper_name =
   match Owner_lock.resolve ~base_path ~keeper_name with
   | Error error -> Error (owner_error_to_string error)
-  | Ok owner -> Ok (durable_state_exists_unlocked owner)
+  | Ok owner -> durable_state_exists_unlocked owner
 ;;
 
 let compact_wal_unlocked ~surface ~path owner =
@@ -487,6 +511,19 @@ let replay_transition_wal_bytes ~wal_only owner state bytes =
 ;;
 
 let read_and_replay_wal_unlocked ~wal_only ~path ~surface owner state =
+  let ( let* ) = Result.bind in
+  (* The generic JSONL reader follows paths and treats ENOENT at offset zero
+     as an empty stream. Queue state instead rejects a present indirect or
+     non-regular entry, including a dangling link, before that reader runs. *)
+  let* () =
+    match inspect_path_kind path with
+    | Ok (Fs_compat.Exact_missing | Fs_compat.Exact_kind Unix.S_REG) -> Ok ()
+    | Ok (Fs_compat.Exact_kind
+            (Unix.S_DIR | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK)) ->
+      Error (Printf.sprintf "%s at %s is not a regular file" surface path)
+    | Ok Fs_compat.Exact_unknown -> Error ("could not inspect event queue path: " ^ path)
+    | Error _ as error -> error
+  in
   let replay_slice slice =
     match slice.Fs_compat.Private_jsonl_slice.bytes with
     | "" -> Ok (state, false)
@@ -593,42 +630,92 @@ let load_state_result ~base_path ~keeper_name =
 ;;
 
 
-let read_state_read_only_unlocked ~require_existing owner =
-  match read_primary_unlocked owner with
-  | Error _ as error -> error
-  | Ok (Primary_current state) ->
-    replay_transition_wal_read_only_unlocked owner state
-  | Ok Primary_absent
-    when require_existing && not (durable_state_exists_unlocked owner) ->
-    Error
-      (Printf.sprintf
-         "event queue durable state is missing keeper=%s snapshot_path=%s wal_path=%s"
-         (keeper_name_of_owner owner)
-         (snapshot_path_of_owner owner)
-         (transition_wal_path_of_owner owner))
-  | Ok Primary_absent ->
-    replay_transition_wal_read_only_unlocked
-      ~wal_only:true
-      owner
-      State.empty
+type durable_file =
+  | Snapshot
+  | Transition_wal
+
+type file_failure =
+  { file : durable_file
+  ; path : string
+  ; detail : string
+  }
+
+type state_failure =
+  | State_missing of string
+  | File_rejected of file_failure
+
+type read_only_failure =
+  | Owner_unresolved of string
+  | Read_raised of string
+  | State_failed of state_failure
+
+let state_failure_to_string = function
+  | State_missing detail | File_rejected { detail; _ } -> detail
 ;;
 
-let validate_state_read_only_result_with ~require_existing ~base_path ~keeper_name =
+let read_only_failure_to_string = function
+  | Owner_unresolved detail | Read_raised detail -> detail
+  | State_failed failure -> state_failure_to_string failure
+;;
+
+(* The one read-only read. A failure names the file it came from, so boot can
+   point at that file and move it last. *)
+let read_state_read_only_classified_unlocked ~require_existing owner =
+  let rejected file path detail = File_rejected { file; path; detail } in
+  let wal_rejected detail =
+    rejected Transition_wal (transition_wal_path_of_owner owner) detail
+  in
+  match read_primary_unlocked owner with
+  | Error detail -> Error (rejected Snapshot (snapshot_path_of_owner owner) detail)
+  | Ok (Primary_current state) ->
+    replay_transition_wal_read_only_unlocked owner state |> Result.map_error wal_rejected
+  | Ok Primary_absent ->
+    (match path_exists_exact (transition_wal_path_of_owner owner) with
+     | Error detail -> Error (wal_rejected detail)
+     | Ok false when require_existing ->
+       Error
+         (State_missing
+            (Printf.sprintf
+               "event queue durable state is missing keeper=%s snapshot_path=%s wal_path=%s"
+               (keeper_name_of_owner owner)
+               (snapshot_path_of_owner owner)
+               (transition_wal_path_of_owner owner)))
+     | Ok false | Ok true ->
+       replay_transition_wal_read_only_unlocked
+         ~wal_only:true
+         owner
+         State.empty
+       |> Result.map_error wal_rejected)
+;;
+
+let read_state_read_only_unlocked ~require_existing owner =
+  read_state_read_only_classified_unlocked ~require_existing owner
+  |> Result.map_error state_failure_to_string
+;;
+
+let validate_existing_state_read_only_classified_result ~base_path ~keeper_name =
   match resolve_owner ~base_path ~keeper_name with
-  | Error _ as error -> error
+  | Error detail -> Error (Owner_unresolved detail)
   | Ok owner ->
     (try
        Owner_lock.with_durable_lock owner (fun () ->
-         read_state_read_only_unlocked ~require_existing owner)
+         read_state_read_only_classified_unlocked ~require_existing:true owner
+         |> Result.map_error (fun failure -> State_failed failure))
      with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn ->
        Error
-         (Printf.sprintf
-            "event queue read-only validation raised keeper=%s path=%s: %s"
-            (keeper_name_of_owner owner)
-            (snapshot_path_of_owner owner)
-            (Printexc.to_string exn)))
+         (Read_raised
+            (Printf.sprintf
+               "event queue read-only validation raised keeper=%s path=%s: %s"
+               (keeper_name_of_owner owner)
+               (snapshot_path_of_owner owner)
+               (Printexc.to_string exn))))
+;;
+
+let validate_existing_state_read_only_result ~base_path ~keeper_name =
+  validate_existing_state_read_only_classified_result ~base_path ~keeper_name
+  |> Result.map_error read_only_failure_to_string
 ;;
 
 type read_only_observation_error =
@@ -687,20 +774,111 @@ let observe_state_read_only_typed_with ~between_samples ~base_path ~keeper_name 
                (Printexc.to_string exn))))
 ;;
 
-let validate_state_read_only_result ~base_path ~keeper_name =
-  validate_state_read_only_result_with
-    ~require_existing:false
-    ~base_path
-    ~keeper_name
-;;
+type moved_aside =
+  { path : string
+  ; rejected_path : string
+  ; moved_with : (string * string) option
+  }
 
-let validate_existing_state_read_only_result ~base_path ~keeper_name =
-  validate_state_read_only_result_with
-    ~require_existing:true
-    ~base_path
-    ~keeper_name
-;;
+(* Boot quarantine (RFC every-durable-store-has-one-boot-policy): the snapshot
+   and the WAL carry one state, so they move together. Under the owner lock the
+   state is read again the way [validate_existing_state_read_only_result] reads
+   it; state that decodes now, or has no files, is left where it is.
 
+   The WAL always moves first. A move that stops after it leaves the snapshot
+   alone: a rejected snapshot refuses the next boot again, and a readable one
+   is the committed state the WAL was replayed on. The other order could leave
+   a WAL alone, and a WAL replays alone from its first row's pre-state, which
+   is how a WAL rejected only for disagreeing with its snapshot would come back
+   as the queue. The next load after a full move finds no durable state and
+   starts the empty queue. *)
+let move_aside_undecodable_result ~base_path ~keeper_name ~rejected_path_of =
+  match resolve_owner ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok owner ->
+    let rename path =
+      let rejected_path = rejected_path_of path in
+      match Fs_compat.rename path rejected_path with
+      | () -> Ok rejected_path
+      | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+      | exception exn ->
+        Error
+          (Printf.sprintf
+             "%s could not be moved to %s: %s"
+             path
+             rejected_path
+             (Printexc.to_string exn))
+    in
+    (* The rejected file is renamed whatever it is, since reading it failed;
+       its partner whenever a directory entry exists, including a dangling
+       symbolic link that the no-follow reader rejected. *)
+    let rename_partner path =
+      match path_exists_exact path with
+      | Error _ as error -> error
+      | Ok true -> rename path |> Result.map (fun rejected_path -> Some (path, rejected_path))
+      | Ok false -> Ok None
+    in
+    (try
+       Owner_lock.with_durable_lock owner (fun () ->
+         match read_state_read_only_classified_unlocked ~require_existing:true owner with
+         | Ok (_ : State.t) -> Error "the event queue decodes now; it was left in place"
+         | Error (State_missing (_ : string)) ->
+           Error "the event queue has no durable state; nothing was moved"
+         | Error (File_rejected { file = Snapshot; path; detail = _ }) ->
+           (match rename_partner (transition_wal_path_of_owner owner) with
+            | Error _ as error -> error
+            | Ok moved_with ->
+              (match rename path, moved_with with
+               | Ok rejected_path, _ -> Ok { path; rejected_path; moved_with }
+               | Error detail, None -> Error detail
+               | Error detail, Some (wal, rejected_wal) ->
+                 Error
+                   (Printf.sprintf
+                      "%s; %s was already moved to %s and the rejected snapshot \
+                       stays, so the next boot refuses again"
+                      detail
+                      wal
+                      rejected_wal)))
+         | Error (File_rejected { file = Transition_wal; path; detail = _ }) ->
+           (match rename path with
+            | Error _ as error -> error
+            | Ok rejected_path ->
+              (match rename_partner (snapshot_path_of_owner owner) with
+               | Ok moved_with -> Ok { path; rejected_path; moved_with }
+               | Error detail ->
+                 (* The WAL is aside but its snapshot is not. Restoring the WAL
+                    leaves the pair as the read found it, so the next boot
+                    refuses again at the WAL instead of reading the snapshot
+                    without the WAL's durable transitions. *)
+                 (match Fs_compat.rename rejected_path path with
+                  | () ->
+                    Error
+                      (Printf.sprintf
+                         "%s; the snapshot could not be moved aside, so %s was \
+                          restored from %s and the next boot refuses again"
+                         detail
+                         path
+                         rejected_path)
+                  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+                  | exception exn ->
+                    Error
+                      (Printf.sprintf
+                         "%s; the snapshot could not be moved aside and %s could not \
+                          be restored from %s (%s): quarantine is incomplete"
+                         detail
+                         path
+                         rejected_path
+                         (Printexc.to_string exn))))))
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Error
+         (Printf.sprintf
+            "event queue move-aside raised keeper=%s path=%s: %s"
+            (keeper_name_of_owner owner)
+            (snapshot_path_of_owner owner)
+            (Printexc.to_string exn)))
+;;
 
 let load_with_projection ~projection ~base_path ~keeper_name =
   load_state_result ~base_path ~keeper_name |> Result.map projection
@@ -804,20 +982,39 @@ type durable_state_discovery =
   }
 
 let discover_keeper_names_with_durable_state ~base_path =
+  let directory_kind path =
+    match inspect_path_kind path with
+    | Error _ as error -> error
+    | Ok Fs_compat.Exact_missing -> Ok Fs_compat.Missing
+    | Ok (Fs_compat.Exact_kind Unix.S_DIR) -> Ok Fs_compat.Directory
+    | Ok (Fs_compat.Exact_kind Unix.S_LNK) ->
+      (match inspect_path_kind ~follow:true path with
+       | Ok (Fs_compat.Exact_kind Unix.S_DIR) -> Ok Fs_compat.Directory
+       | Ok (Fs_compat.Exact_kind
+               (Unix.S_REG | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK)) -> Ok Fs_compat.Other
+       | Ok Fs_compat.Exact_missing | Ok Fs_compat.Exact_unknown ->
+         Error ("could not follow event queue directory: " ^ path)
+       | Error _ as error -> error)
+    | Ok (Fs_compat.Exact_kind
+            (Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK)) -> Ok Fs_compat.Other
+    | Ok Fs_compat.Exact_unknown -> Error ("could not inspect event queue directory: " ^ path)
+  in
   match Owner_lock.canonical_base_path base_path with
   | Error error ->
     { keeper_names = []; read_error = Some (owner_error_to_string error) }
   | Ok base_path ->
     let keepers_dir = Common.keepers_runtime_dir_of_base ~base_path in
     (try
-       if not (Sys.file_exists keepers_dir)
-       then { keeper_names = []; read_error = None }
-       else if not (Sys.is_directory keepers_dir)
-       then
+       match directory_kind keepers_dir with
+       | Error error ->
+         { keeper_names = []; read_error = Some error }
+       | Ok Fs_compat.Missing ->
+         { keeper_names = []; read_error = None }
+       | Ok Fs_compat.Other ->
          { keeper_names = []
          ; read_error = Some ("keepers runtime path is not a directory: " ^ keepers_dir)
          }
-       else
+       | Ok Fs_compat.Directory ->
          let names, errors =
            Sys.readdir keepers_dir
            |> Array.fold_left
@@ -825,11 +1022,15 @@ let discover_keeper_names_with_durable_state ~base_path =
                    let keeper_dir = Filename.concat keepers_dir name in
                    let primary = Filename.concat keeper_dir snapshot_filename in
                    let wal = Filename.concat keeper_dir transition_wal_filename in
-                   if
-                     not (Sys.file_exists keeper_dir && Sys.is_directory keeper_dir)
-                     || not (Sys.file_exists primary || Sys.file_exists wal)
-                   then names, errors
-                   else
+                   let observed =
+                     Result.bind (directory_kind keeper_dir) (function
+                       | Fs_compat.Missing | Fs_compat.Other -> Ok false
+                       | Fs_compat.Directory -> durable_paths_exist primary wal)
+                   in
+                   match observed with
+                   | Error error -> names, error :: errors
+                   | Ok false -> names, errors
+                   | Ok true ->
                      match Keeper_id.Keeper_name.of_string name with
                      | Ok keeper_name ->
                        Keeper_id.Keeper_name.to_string keeper_name :: names, errors

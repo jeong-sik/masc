@@ -61,49 +61,6 @@ let empty_success_stderr_bytes = 200
    diagnostics while masking credentials, including standalone token values. *)
 let redact_stderr_tail = Secret_patterns.redact_text
 
-type stderr_line_start = Complete | Truncated
-
-type stderr_tail =
-  { text : string
-  ; leading_line : stderr_line_start
-  }
-
-let empty_stderr_tail = { text = ""; leading_line = Complete }
-
-let append_stderr tail addition =
-  let combined = tail.text ^ addition in
-  let length = String.length combined in
-  if length <= stderr_tail_bytes then { tail with text = combined }
-  else
-    let first = length - stderr_tail_bytes in
-    { text = String.sub combined first stderr_tail_bytes
-    ; leading_line =
-        if Char.equal combined.[first - 1] '\n' then Complete else Truncated
-    }
-;;
-
-let stderr_for_projection tail =
-  (* A byte suffix can retain a credential's value after dropping [token=].
-     Only a known line beginning can be passed to the structural masker.
-     Keep the bound while reading; a line longer than it is omitted until a
-     newline provides a fresh boundary, even across arbitrary pipe chunks. *)
-  let text =
-    match tail.leading_line with
-    | Complete -> tail.text
-    | Truncated ->
-      (match String.index_opt tail.text '\n' with
-       | None -> ""
-       | Some index ->
-         String.sub tail.text (index + 1) (String.length tail.text - index - 1))
-  in
-  redact_stderr_tail text
-;;
-
-module For_testing = struct
-  let stderr_from_chunks chunks =
-    List.fold_left append_stderr empty_stderr_tail chunks |> stderr_for_projection
-end
-
 let empty_success_detail ~model ~tool_steps stderr =
   let trimmed = String.trim stderr in
   (* Cut at a UTF-8 character boundary — String_util is the SSOT for that
@@ -242,6 +199,7 @@ type error =
   | State_callback_failed of string
   | Turn_failed of string
   | Process_exited of string
+  | Unhandled_exception of string
   | Timeout of float
 
 exception Runtime_error of error
@@ -254,6 +212,7 @@ let error_to_string = function
   | State_callback_failed detail -> "Antigravity conversation state callback failed: " ^ detail
   | Turn_failed detail -> "Antigravity turn failed: " ^ detail
   | Process_exited detail -> "Antigravity CLI exited before completion: " ^ detail
+  | Unhandled_exception detail -> "Antigravity runtime raised: " ^ detail
   | Timeout seconds -> Printf.sprintf "Antigravity stream was idle for %.3fs" seconds
 ;;
 
@@ -271,6 +230,8 @@ module Shared_json = Runtime_official_client_json.Make (struct
 end)
 
 open Shared_json
+
+module Stderr = Runtime_official_client_json.Stderr
 
 let required_string ?(nonempty = true) stage name fields =
   match List.assoc_opt name fields with
@@ -659,7 +620,7 @@ let drain_stderr flow tail =
   try
     while true do
       let count = Eio.Flow.single_read flow chunk in
-      tail := append_stderr !tail (Cstruct.to_string (Cstruct.sub chunk 0 count))
+      Stderr.append tail (Cstruct.to_string (Cstruct.sub chunk 0 count))
     done
   with
   | End_of_file -> ()
@@ -925,7 +886,7 @@ let run_spawned ?home_dir ?on_spawned ?on_prompt_sent ~mgr ~clock ~cwd config ~c
     let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
     let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
     let stderr_r, stderr_w = Eio.Process.pipe ~sw mgr in
-    let stderr_tail = ref empty_stderr_tail in
+    let stderr_tail = Stderr.create ~limit:stderr_tail_bytes in
     let proc =
       try
         Eio.Process.spawn
@@ -1062,7 +1023,7 @@ let run_spawned ?home_dir ?on_spawned ?on_prompt_sent ~mgr ~clock ~cwd config ~c
         Eio.Process.await proc
     in
     process_settled := true;
-    status, !state, String.trim (stderr_for_projection !stderr_tail))
+    status, !state, String.trim (Stderr.contents stderr_tail))
 ;;
 
 let run_turn ?(conversation_mode = Start) ?home_dir ?on_spawned ?on_prompt_sent ~mgr ~clock ~cwd
@@ -1098,10 +1059,7 @@ let run_turn ?(conversation_mode = Start) ?home_dir ?on_spawned ?on_prompt_sent 
     | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | Runtime_error error -> Error error
-    | exn ->
-      Error
-        (Protocol_error
-           { stage = "runtime boundary"; detail = Printexc.to_string exn })
+    | exn -> Error (Unhandled_exception (Printexc.to_string exn))
   in
   let* status, state, stderr = run_result in
   let wall_duration_s = max 0.0 (Eio.Time.now clock -. started_at) in

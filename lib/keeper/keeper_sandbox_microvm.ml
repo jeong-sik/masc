@@ -526,6 +526,22 @@ let parse_nerdctl_native_images raw =
   | exception Yojson.Json_error detail -> Error ("invalid native image JSON: " ^ detail)
 ;;
 
+let image_lock_marker_from_inspect raw =
+  let key = "masc.sandbox.opam_lock_sha256" in
+  let rec find = function
+    | `Assoc fields ->
+      (match List.find_opt (fun (name, _) -> String.equal name key) fields with
+       | Some (_, `String digest) -> Some digest
+       | Some _ -> None
+       | None -> List.find_map (fun (_, value) -> find value) fields)
+    | `List values -> List.find_map find values
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ -> None
+  in
+  match Yojson.Safe.from_string raw with
+  | json -> find json
+  | exception Yojson.Json_error _ -> None
+;;
+
 let classify_image_probe_for backend ~image ~inspect ~listing =
   match backend, inspect with
   | Backend.Nerdctl_kata, (Unix.WEXITED 0 as status, stdout, stderr) ->
@@ -554,7 +570,7 @@ let classify_image_probe_for backend ~image ~inspect ~listing =
       ~inspect ~listing
 ;;
 
-let image_probe_for backend ~image ~timeout_sec =
+let image_probe_with_inspect_for backend ~image ~timeout_sec =
   let inspect =
     Process_eio.run_argv_with_status_split
       ~timeout_sec
@@ -569,7 +585,11 @@ let image_probe_for backend ~image ~timeout_sec =
            (image_listing_argv_for backend))
     | _ -> None
   in
-  classify_image_probe_for backend ~image ~inspect ~listing
+  classify_image_probe_for backend ~image ~inspect ~listing, inspect
+;;
+
+let image_probe_for backend ~image ~timeout_sec =
+  fst (image_probe_with_inspect_for backend ~image ~timeout_sec)
 ;;
 
 (* Build the image this binary carries the recipe for, into the store the
@@ -610,23 +630,39 @@ let build_recipe_image_for backend ~image ~timeout_sec =
         let dockerfile = Keeper_sandbox_image.write_recipe_into ~dir:context in
         let argv =
           command_argv_for backend
-          @ Keeper_sandbox_image.context_directory_build_argv ~tag:image
-              ~dockerfile ~context ()
+          @ Keeper_sandbox_image.context_directory_build_argv
+              ~labels:[ "masc.sandbox.opam_lock_sha256", Keeper_sandbox_image_version.current_lock_sha256 () ]
+              ~tag:image ~dockerfile ~context ()
         in
         match Process_eio.run_argv_with_status_split ~timeout_sec argv with
         | Unix.WEXITED 0, _, _ -> Ok ()
         | _, _, stderr -> Error (`Build_failed stderr))
 
+(* Presence and the build marker come from the same store observation.
+   Missing metadata warns but never blocks boot. *)
+let warn_if_lock_marker ~image (_, stdout, _) =
+  Keeper_sandbox_image_version.lock_warning
+    ~image
+    ~built_lock_sha256:(image_lock_marker_from_inspect stdout)
+  |> Option.iter (fun warning -> Log.Keeper.warn "%s" warning)
+;;
+
 let image_present_for backend ~image ~timeout_sec =
-  match image_probe_for backend ~image ~timeout_sec with
+  let probe () =
+    let outcome, inspect = image_probe_with_inspect_for backend ~image ~timeout_sec in
+    (match outcome with
+     | Image_present -> warn_if_lock_marker ~image inspect
+     | Image_missing | Image_cli_unavailable | Image_probe_failed _ -> ());
+    outcome
+  in
+  match probe () with
   | Image_missing when String.equal image Keeper_sandbox_image.default_tag -> (
     match build_recipe_image_for backend ~image ~timeout_sec with
     | Ok () ->
       (* Ask the store again rather than trust the build's exit: the gate's
          question is whether the image is there, and only the store answers
          that. *)
-      image_probe_for backend ~image ~timeout_sec
-      |> image_present_result_for backend ~image
+      probe () |> image_present_result_for backend ~image
     | Error `No_build_command ->
       Error
         (Printf.sprintf
@@ -651,6 +687,7 @@ let image_present_for backend ~image ~timeout_sec =
            (Backend.to_string backend)
            image
            (String.trim stderr)))
+  | Image_present -> Ok ()
   | probe -> image_present_result_for backend ~image probe
 ;;
 
@@ -1027,73 +1064,105 @@ let work_volume_mount_args ~volume_name =
 
 let trim_guest_root = "/masc-trim"
 let trim_capability = "CAP_SYS_ADMIN"
-let work_volume_trim_name volume_name = volume_name ^ "-trim"
+let work_volume_trim_name ~keeper_name =
+  Keeper_sandbox_container_name.make
+    (Keeper_sandbox_container_name.Micro_vm_work_volume_trim { keeper_name })
+  |> Keeper_sandbox_container_name.to_string
+;;
+
+(* util-linux's path on the Debian and Ubuntu bases of the catalog images
+   (measured in [masc-sandbox:general] and [masc-keeper-sandbox:local]). *)
+let fstrim_guest_path = "/usr/sbin/fstrim"
 
 (** Apple's work volume is a sparse ext4 image, and a guest delete leaves its
     blocks allocated on the host until something discards them. The virtio
     disk does accept discard ([discard_max_bytes] 274877906944 on
     [/dev/vdc], measured 2026-09-26); a keeper guest cannot issue it, since
     its capability set is empty and [FITRIM] needs [CAP_SYS_ADMIN]. So a
-    one-shot container with only that capability, and only [fstrim] to run,
-    does it while no guest has the volume attached. Measured on
-    [masc-keeper-work-pr-updater]: 39 GB used inside, host image 116 GB ->
-    39 GB, 213.3 GiB trimmed. *)
-let apple_work_volume_trim_argv ~volume_name ~image =
+    one-shot container does it while no guest has the volume attached.
+    Measured on [masc-keeper-work-pr-updater]: 39 GB used inside, host image
+    116 GB -> 39 GB, 213.3 GiB trimmed.
+
+    [--cap-add] alone adds to the runtime's default set: measured 2026-09-27
+    on container 1.3.1, [--user 0 --cap-add CAP_SYS_ADMIN] gives [CapEff]
+    00000000a82425fb (the default set plus SYS_ADMIN), and with [--cap-drop
+    ALL] first it is 0000000000200000, SYS_ADMIN only. The root is read-only
+    and the network is off, and [fstrim] is the entrypoint, so the image's
+    own entrypoint ([opam] on the ocaml image) never runs with the
+    capability. *)
+let apple_work_volume_trim_argv ~keeper_name ~volume_name ~image =
   command_argv_for Backend.Apple_container
-  @ [ "run"; "--rm"; "--name"; work_volume_trim_name volume_name
-    ; "--user"; "0"; "--cap-add"; trim_capability
+  @ [ "run"; "--rm"; "--name"; work_volume_trim_name ~keeper_name
+    ; "--user"; "0"; "--cap-drop"; "ALL"; "--cap-add"; trim_capability
+    ; "--network"; "none"; "--read-only"
+    ; "--entrypoint"; fstrim_guest_path
     ; "--volume"; volume_name ^ ":" ^ trim_guest_root
-    ; image; "fstrim"; "-v"; trim_guest_root ]
+    ; image; "-v"; trim_guest_root ]
 ;;
 
-let reclaim_apple_work_volume ~run ~volume_name ~image =
-  let name = work_volume_trim_name volume_name in
+let remove_apple_work_volume_trim ~run ~timeout_sec ~remove_timeout_sec ~keeper_name =
+  let name = work_volume_trim_name ~keeper_name in
   let cli = command_argv_for Backend.Apple_container in
-  let cleanup () =
-    (* Removal's exit code alone cannot prove absence: --rm may already have
-       removed the container, or a timed-out CLI may have left it running. *)
-    let removal_status, removal_out, removal_err =
-      run (delete_force_argv_for Backend.Apple_container ~container_name:name)
-    in
-    match run (cli @ [ "list"; "--all"; "--format"; "json" ]) with
-    | Unix.WEXITED 0, listing, _ ->
-      let rec absent = function
-        | [] -> Ok ()
-        | `Assoc fields :: rest ->
-          let id =
-            match List.assoc_opt "id" fields with
-            | Some (`String id) when String.trim id <> "" -> Some id
-            | Some _ -> None
-            | None ->
-              (match List.assoc_opt "configuration" fields with
-               | Some (`Assoc config) ->
-                 (match List.assoc_opt "id" config with
-                  | Some (`String id) when String.trim id <> "" -> Some id
-                  | Some _ | None -> None)
-               | Some _ | None -> None)
-          in
-          (match id with
-           | Some id when String.equal id name ->
-             Error (Printf.sprintf "trim container %s remains after removal (%s): %s"
-               name (Keeper_sandbox_exec_failure.status_label removal_status)
-               (output_for_log ~stdout:removal_out ~stderr:removal_err))
-           | Some _ -> absent rest
-           | None -> Error "trim cleanup inventory contains a container without an id")
-        | _ :: _ -> Error "trim cleanup inventory contains a non-object container"
-      in
-      (match Yojson.Safe.from_string listing with
-       | `List entries -> absent entries
-       | _ -> Error "trim cleanup inventory is not a JSON array"
-       | exception Yojson.Json_error detail -> Error ("trim cleanup inventory is invalid JSON: " ^ detail))
-    | status, stdout, stderr ->
-      Error (Printf.sprintf "cannot verify trim container %s was removed (%s): %s"
-        name (Keeper_sandbox_exec_failure.status_label status) (output_for_log ~stdout ~stderr))
+  (* Removal's exit code alone cannot prove absence: --rm may already have
+     removed the container, or a timed-out CLI may have left it running. *)
+  let removal_status, removal_out, removal_err =
+    run ~timeout_sec:remove_timeout_sec (delete_force_argv_for Backend.Apple_container ~container_name:name)
   in
-  let ( let* ) = Result.bind in
-  let* () = cleanup () in
-  let status, stdout, stderr = run (apple_work_volume_trim_argv ~volume_name ~image) in
-  let* () = cleanup () in
-  Ok (status, output_for_log ~stdout ~stderr)
+  match run ~timeout_sec (cli @ [ "list"; "--all"; "--format"; "json" ]) with
+  | Unix.WEXITED 0, listing, _ ->
+    let rec absent = function
+      | [] -> Ok ()
+      | `Assoc fields :: rest ->
+        let id =
+          match List.assoc_opt "id" fields with
+          | Some (`String id) when String.trim id <> "" -> Some id
+          | Some _ -> None
+          | None ->
+            (match List.assoc_opt "configuration" fields with
+             | Some (`Assoc config) ->
+               (match List.assoc_opt "id" config with
+                | Some (`String id) when String.trim id <> "" -> Some id
+                | Some _ | None -> None)
+             | Some _ | None -> None)
+        in
+        (match id with
+         | Some id when String.equal id name ->
+           Error (Printf.sprintf "trim container %s remains after removal (%s): %s"
+             name (Keeper_sandbox_exec_failure.status_label removal_status)
+             (output_for_log ~stdout:removal_out ~stderr:removal_err))
+         | Some _ -> absent rest
+         | None -> Error "trim cleanup inventory contains a container without an id")
+      | _ :: _ -> Error "trim cleanup inventory contains a non-object container"
+    in
+    (match Yojson.Safe.from_string listing with
+     | `List entries -> absent entries
+     | _ -> Error "trim cleanup inventory is not a JSON array"
+     | exception Yojson.Json_error detail -> Error ("trim cleanup inventory is invalid JSON: " ^ detail))
+  | status, stdout, stderr ->
+    Error (Printf.sprintf "cannot verify trim container %s was removed (%s): %s"
+      name (Keeper_sandbox_exec_failure.status_label status) (output_for_log ~stdout ~stderr))
+;;
+
+let reclaim_apple_work_volume ~run ~on_cleanup_error ~timeout_sec ~remove_timeout_sec
+    ~keeper_name ~volume_name ~image =
+  let cleanup () =
+    remove_apple_work_volume_trim ~run ~timeout_sec ~remove_timeout_sec ~keeper_name
+  in
+  let released = ref (Ok ()) in
+  let result = Eio.Switch.run (fun sw ->
+    (* Register before the first external operation. Switch release handlers
+       run protected from cancellation, including while deletion/listing yield. *)
+    Eio.Switch.on_release sw (fun () ->
+      released := cleanup ();
+      match !released with Ok () -> () | Error detail -> on_cleanup_error detail);
+    let ( let* ) = Result.bind in
+    let* () = cleanup () in
+    let status, stdout, stderr =
+      run ~timeout_sec (apple_work_volume_trim_argv ~keeper_name ~volume_name ~image)
+    in
+    Ok (status, output_for_log ~stdout ~stderr))
+  in
+  match !released with Ok () -> result | Error _ as error -> error
 ;;
 
 (** The keeper's root on the work volume: [<work root>/<keeper>], the

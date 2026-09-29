@@ -239,6 +239,11 @@ def judge(
             "the chat pane drew its no-messages notice: the transcript never loaded, "
             "and a pane with nothing in it is quick for the wrong reason",
         )
+    # A capped prefix does not describe later surfaces or chat phases.
+    # The timing report explicitly records dropped frame and stage samples.
+    omitted = re.search(r"^\s*(?:build|present|stage samples retained=\d+) omitted=([1-9]\d*)\b", timing_text, re.M)
+    if omitted:
+        return "INCOMPLETE", "the TUI omitted timing samples; rerun shorter scenarios before comparing clocks"
     frames = sum(session.measure(p)["frames"] for p in phases)
     if frames < MIN_FRAMES_FOR_A_MEASUREMENT:
         return "EMPTY", f"{frames:.0f} frames drawn across the scenarios; the surface had nothing to move"

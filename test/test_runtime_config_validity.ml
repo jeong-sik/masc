@@ -23,7 +23,8 @@ let agent_core_provider_config (runtime : Runtime.t) =
   | Runtime_execution.Agent_core provider_config -> provider_config
   | Runtime_execution.Codex_app_server _
   | Runtime_execution.Claude_code _
-  | Runtime_execution.Antigravity_cli _ ->
+  | Runtime_execution.Antigravity_cli _
+  | Runtime_execution.Muse_serve _ ->
     failf "runtime %s is not an agent_core provider" runtime.id
 ;;
 
@@ -55,12 +56,12 @@ let ollama_cloud_seed_cases =
     ; thinking = true
     ; vision = true
     }
-  ; { runtime_id = "ollama_cloud.ollama-cloud-deepseek-v4-flash"
-    ; api_name = "deepseek-v4-flash"
+  ; { runtime_id = "ollama_cloud.ollama-cloud-deepseek-v4-1-flash-none"
+    ; api_name = "deepseek-v4.1-flash"
     ; context = 1048576
     ; tools = true
     ; thinking = true
-    ; vision = false
+    ; vision = true
     }
   ; { runtime_id = "ollama_cloud.ollama-cloud-deepseek-v4-pro"
     ; api_name = "deepseek-v4-pro"
@@ -215,7 +216,7 @@ let assert_ollama_cloud_seed_runtime runtimes case =
             (agent_core_provider_config runtime)));
     (* "forced tool_choice disabled" is a claim about what this runtime can
        send, and the seed declares supports-tool-choice for none of these
-       eighteen models. It read false only because an unwritten key parsed as
+       twenty models. It read false only because an unwritten key parsed as
        false; the ollama wire is what actually disables it. Ask the resolved
        capability, which is what the name always meant (#37435). *)
     (match
@@ -694,7 +695,8 @@ let test_repo_runtime_bindings_resolve_through_agent_core_provider_config () =
            | Runtime_execution.Agent_core _ -> true
            | Runtime_execution.Codex_app_server _
            | Runtime_execution.Claude_code _
-           | Runtime_execution.Antigravity_cli _ -> false)
+           | Runtime_execution.Antigravity_cli _
+           | Runtime_execution.Muse_serve _ -> false)
         runtimes
     in
     List.iter
@@ -749,6 +751,26 @@ let test_repo_deepseek_thinking_request () =
     [true, None, "enabled";
      true, Some Llm_provider.Reasoning_effort.High, "enabled";
      false, None, "disabled"]
+;;
+
+let test_repo_deepseek_nothinking_binding_requests_no_reasoning () =
+  with_deployment_agent_core_model_catalog @@ fun _catalog ->
+  let path = Filename.concat (repo_root ()) "config/runtime.toml" in
+  let runtimes = match load_list_text ~config_path:path with
+    | Ok (runtimes, _, _, _, _) -> runtimes
+    | Error detail -> fail detail in
+  let runtime = match List.find_opt (fun (runtime : Runtime.t) ->
+      String.equal runtime.id "ollama_cloud.ollama-cloud-deepseek-v4-1-flash-none") runtimes with
+    | Some runtime -> runtime
+    | None -> fail "no-thinking DeepSeek seed runtime is missing" in
+  let provider_config = agent_core_provider_config runtime in
+  check (option string) "no-thinking binding resolves effort none" (Some "none")
+    (Option.map Llm_provider.Reasoning_effort.to_string provider_config.reasoning_effort);
+  let request = Llm_provider.Backend_openai.build_request_assoc
+    ~config:provider_config ~messages:[Llm_provider.Types.user_msg "Explain the evidence."] () in
+  let open Yojson.Safe.Util in
+  check (option string) "wire carries reasoning_effort none" (Some "none")
+    (request |> member "reasoning_effort" |> to_string_option)
 ;;
 
 let test_unset_thinking_does_not_disable_reasoning_model () =
@@ -1323,7 +1345,7 @@ let test_repo_runtime_toml_declares_no_clamped_max_context () =
             (Runtime.resolve_max_context_of_runtime runtime
              |> Option.map (fun (n, source) -> n, Runtime.max_context_source_to_string source)))
       [ "deepseek.deepseek-v4-flash", 1048576
-      ; "ollama_cloud.deepseek-v4-flash", 1048576
+      ; "ollama_cloud.ollama-cloud-deepseek-v4-1-flash", 1048576
       ; "ollama_cloud.ollama-cloud-deepseek-v4-pro", 1048576
       ; "ollama_cloud.ollama-cloud-glm-5-2", 1048576
       ; "ollama_cloud.minimax-m3", 512000
@@ -1633,7 +1655,8 @@ let test_seed_catalog_decided_capability_keys_agree_with_the_catalog () =
        | Runtime_execution.Agent_core _, None
        | ( ( Runtime_execution.Codex_app_server _
            | Runtime_execution.Claude_code _
-           | Runtime_execution.Antigravity_cli _ )
+           | Runtime_execution.Antigravity_cli _
+           | Runtime_execution.Muse_serve _ )
          , _ ) -> ()
        | Runtime_execution.Agent_core config, Some declared ->
          let provider_label =
@@ -1742,9 +1765,9 @@ check
   (list (pair string (list string)))
   "Board exact-output lanes and opaque slot order"
   [ ( "board_attention_exact"
-    , [ "glm-coding.glm-5-3"; "ollama_cloud.deepseek-v4-flash" ] )
+    , [ "glm-coding.glm-5-3"; "ollama_cloud.ollama-cloud-deepseek-v4-1-flash" ] )
   ; ( "hitl_auto_judge"
-    , [ "glm-coding.glm-5-3"; "ollama_cloud.deepseek-v4-flash" ] )
+    , [ "glm-coding.glm-5-3"; "ollama_cloud.ollama-cloud-deepseek-v4-1-flash" ] )
   ]
   (List.filter
      (fun (lane_id, _) ->
@@ -1756,7 +1779,7 @@ check
 check
   (option (list string))
   "verifier_exact slot order is frozen"
-  (Some [ "glm-coding.glm-5-3"; "ollama_cloud.ollama-cloud-deepseek-v4-flash" ])
+  (Some [ "glm-coding.glm-5-3"; "ollama_cloud.ollama-cloud-deepseek-v4-1-flash" ])
   (match
      List.find_opt
        (fun (lane_id, _) -> String.equal lane_id "verifier_exact")
@@ -1786,6 +1809,9 @@ List.iter
     List.iter
       (assert_ollama_cloud_seed_runtime runtimes)
       ollama_cloud_seed_cases;
+    check bool "retired Ollama Cloud Flash absent from seed" true
+      (Option.is_none
+         (find_runtime runtimes "ollama_cloud.ollama-cloud-deepseek-v4-flash"));
     (match
        List.find_opt
          (fun (runtime : Runtime.t) ->
@@ -1877,7 +1903,7 @@ List.iter
 (* The lane-resolution test below iterates the lanes a config declares, so it
    passes vacuously on a config that declares none of them. Startup does the
    opposite: it requires every id in
-   Server_runtime_bootstrap.mandatory_exact_output_lane_ids to be present with a
+   Standalone_lane.required_ids to be present with a
    non-empty slot list and synthesizes nothing. Absence is therefore the failure
    mode no existing test could see — #25671 added hitl_auto_judge and main failed
    every push for ~29 hours because the boot path that would have caught it runs
@@ -1916,7 +1942,7 @@ let assert_mandatory_exact_output_lanes_declared ~label path =
              label
              lane_id
          | Some { slot_ids = _ :: _; _ } -> ())
-      Server_runtime_bootstrap.mandatory_exact_output_lane_ids
+      Standalone_lane.required_ids
 ;;
 
 let boot_path_fixtures_root () =
@@ -1970,7 +1996,7 @@ let mandatory_lane_violation_pair = function
 ;;
 
 let test_boot_reports_every_unusable_mandatory_exact_output_lane_at_once () =
-  let lane_ids = Server_runtime_bootstrap.mandatory_exact_output_lane_ids in
+  let lane_ids = Standalone_lane.required_ids in
   let violations lanes =
     Server_runtime_bootstrap.For_testing.mandatory_exact_output_lane_violations lanes
     |> List.map mandatory_lane_violation_pair
@@ -2179,7 +2205,7 @@ let test_release_evidence_fixture_lanes_resolve_without_environment_credentials 
                        lane_id
                        target_ref))
              lane.slot_ids)
-      Server_runtime_bootstrap.mandatory_exact_output_lane_ids
+      Standalone_lane.required_ids
 ;;
 
 let test_deployment_exact_output_catalog_admits_seed_lanes () =
@@ -5427,9 +5453,9 @@ let test_codex_app_server_materializes_as_turn_runtime () =
     | Ok (runtimes, default, _, _, _) ->
       check int "one runtime" 1 (List.length runtimes);
       check string "default id" "codex.codex" default.id;
-      check string "picker and exact writer agree on Codex destination" "cli_slots"
+      check (option string) "picker and exact writer agree on Codex destination" (Some "cli_slots")
         (Runtime.exact_slot_list_key_of_api_format default.provider.api_format);
-      check string "HTTP bindings append to the other declared list" "slots"
+      check (option string) "HTTP bindings append to the other declared list" (Some "slots")
         (Runtime.exact_slot_list_key_of_api_format Runtime_schema.Chat_completions_api);
       (match default.execution with
        | Runtime_execution.Agent_core _
@@ -5440,7 +5466,9 @@ let test_codex_app_server_materializes_as_turn_runtime () =
            config.cli_path;
          check (option string) "model" (Some "gpt-5.6-sol") config.model
        | Runtime_execution.Antigravity_cli _ ->
-         fail "codex-app-server was incorrectly materialized as antigravity-cli"))
+         fail "codex-app-server was incorrectly materialized as antigravity-cli"
+       | Runtime_execution.Muse_serve _ ->
+         fail "codex-app-server was incorrectly materialized as muse-serve"))
 ;;
 
 let antigravity_cli_runtime_toml ?credential ?(options = "") () =
@@ -5501,7 +5529,8 @@ let test_file_credential_path_expands_home () =
               config.oauth_source
           | Runtime_execution.Agent_core _
           | Runtime_execution.Claude_code _
-          | Runtime_execution.Codex_app_server _ ->
+          | Runtime_execution.Codex_app_server _
+          | Runtime_execution.Muse_serve _ ->
             fail "antigravity-cli runtime expected"))
 ;;
 
@@ -5540,7 +5569,8 @@ let test_antigravity_cli_materializes_typed_process_options () =
             check (float 0.0) "timeout" 45.0 config.timeout_s
           | Runtime_execution.Agent_core _
           | Runtime_execution.Codex_app_server _
-          | Runtime_execution.Claude_code _ ->
+          | Runtime_execution.Claude_code _
+          | Runtime_execution.Muse_serve _ ->
             fail "antigravity-cli was materialized through the wrong execution owner"))
 ;;
 
@@ -5563,7 +5593,8 @@ let test_antigravity_cli_add_dirs_reach_the_execution_config () =
               [ "/srv/repos"; "/srv/shared" ] config.add_dirs
           | Runtime_execution.Agent_core _
           | Runtime_execution.Codex_app_server _
-          | Runtime_execution.Claude_code _ ->
+          | Runtime_execution.Claude_code _
+          | Runtime_execution.Muse_serve _ ->
             fail "antigravity-cli was materialized through the wrong execution owner"))
 ;;
 
@@ -5981,6 +6012,8 @@ let () =
             `Quick test_openrouter_seed_runtimes_are_dispatchable;
           test_case "repo DeepSeek seed encodes thinking without an effort override"
             `Quick test_repo_deepseek_thinking_request;
+          test_case "repo DeepSeek no-thinking seed requests reasoning_effort none"
+            `Quick test_repo_deepseek_nothinking_binding_requests_no_reasoning;
           test_case "unset thinking preserves provider defaults and explicit disable"
             `Quick test_unset_thinking_does_not_disable_reasoning_model;
           test_case

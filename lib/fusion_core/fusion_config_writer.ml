@@ -31,7 +31,7 @@ type settings =
   ; staged_judge_group_size : int
   }
 
-let fusion_path = [ "fusion" ]
+let fusion_path = [ Runtime_toml_namespace.(key Fusion) ]
 let panels_key = "panels"
 let judges_key = "judges"
 let panel_key = "panel"

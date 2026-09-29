@@ -38,6 +38,7 @@ let describe = function
   | Command.Acting_pane_scroll_unknown word -> "acting-pane-scroll-unknown:" ^ word
   | Command.Lane_addons input -> "lane-addons:" ^ input
   | Command.Open_metrics -> "open-metrics"
+  | Command.Account_login client -> "account-login:" ^ client
   | Command.Switch_keeper name -> "keeper:" ^ name
   | Command.Switch_keeper_missing_name -> "keeper-missing-name"
   | Command.Queue input -> "queue:" ^ input
@@ -61,6 +62,7 @@ let describe = function
       ^ (match mode with
          | `Toggle -> "toggle"
          | `Compact -> "compact"
+         | `Results -> "results"
          | `Full -> "full")
   | Command.Cycle_memory -> "cycle-memory"
   | Command.Open_fleet_memory -> "open-fleet-memory"
@@ -188,6 +190,7 @@ let test_pane_commands_parse_by_word () =
     ; "thinking:full"
     ; "tools:toggle"
     ; "tools:compact"
+    ; "tools:results"
     ; "tools:full"
     ; "cycle-memory"
     ; "open-fleet-memory"
@@ -258,6 +261,7 @@ let test_pane_commands_parse_by_word () =
        ; "/thinking full"
        ; "/tools"
        ; "/tools compact"
+       ; "/tools results"
        ; "/tools full"
        ; "/memory"
        ; "/fleet-memory"
@@ -274,44 +278,6 @@ let test_pane_commands_parse_by_word () =
        ; "/image shots/frame.png"
        ; "/image   "
        ])
-
-let test_about_banner () =
-  let banner = Command.about_banner ~theme_name:"dungeon-gold" ~active_keepers:(Ok 3) () in
-  let contains_sub haystack needle =
-    let len_h = String.length haystack in
-    let len_n = String.length needle in
-    if len_n = 0 then true
-    else if len_h < len_n then false
-    else
-      let rec loop i =
-        if i + len_n > len_h then false
-        else if String.sub haystack i len_n = needle then true
-        else loop (i + 1)
-      in
-      loop 0
-  in
-  check bool "banner starts with ASCII art header" true
-    (String.starts_with ~prefix:"   ___" banner);
-  check bool "banner contains HORNED REAPER CORE" true
-    (contains_sub banner "HORNED REAPER CORE");
-  check bool "banner includes active theme" true
-    (contains_sub banner "dungeon-gold");
-  check bool "banner counts the keepers it was given" true
-    (contains_sub banner "Keepers: 3 ");
-  let failed = Command.about_banner ~active_keepers:(Error "metadata unreadable") () in
-  check bool "failed roster reports unavailable" true (contains_sub failed "Keepers: unavailable");
-  check bool "failed roster never reports zero" false (contains_sub failed "Keepers: 0");
-  let empty = Command.about_banner ~active_keepers:(Ok 0) () in
-  check bool "known empty roster still reports zero" true (contains_sub empty "Keepers: 0");
-  (* No count is not a count of none: the roster has not been read (#35747). *)
-  let unread = Command.about_banner () in
-  check bool "an unread roster says not loaded" true
-    (contains_sub unread "Keepers: not loaded");
-  check bool "and does not say zero" false (contains_sub unread "Keepers: 0");
-  (* The banner is given a theme and a keeper count and nothing else, so a gate
-     state in it could only be made up. *)
-  check bool "the banner claims no gate state it was not given" false
-    (contains_sub banner "Gates:")
 
 let test_preset_commands_parse_verb_name_and_description () =
   check (list string) "preset commands"
@@ -866,6 +832,8 @@ let test_autocomplete_sub_arguments () =
     (Command.autocomplete "/thinking folded");
   check (option string) "/tools c -> compact" (Some "/tools compact")
     (Command.autocomplete "/tools c");
+  check (option string) "/tools r -> results" (Some "/tools results")
+    (Command.autocomplete "/tools r");
   check (option string) "/preset s -> save" (Some "/preset save")
     (Command.autocomplete "/preset s");
   check (option string) "/preset sh -> show" (Some "/preset show")
@@ -973,6 +941,28 @@ let test_resource_read_keeps_each_part_type () =
       Alcotest.failf "unexpected resource contents (%d parts)"
         (List.length contents)
 
+
+let test_command_menu_keeps_selection_separate_from_draft () =
+  let menu state draft = Command.menu ~keeper_names:["가람"; "가온"] ~state draft |> Option.get in
+  let draft = "/t\nkeep the original body" in
+  let initial = menu Command.Menu_idle draft in
+  let next = menu (Command.menu_step ~direction:Command.Next ~draft initial) draft in
+  check string "arrow selects another command without replacing query" "/thinking \nkeep the original body"
+    (Command.menu_accept next);
+  check int "window contains one selection" 1
+    (Command.menu_window ~max_rows:2 next |> List.filter fst |> List.length);
+  check bool "dismissed exact draft closes" true
+    (Option.is_none (Command.menu ~keeper_names:[] ~state:(Command.Menu_dismissed draft) draft));
+  check bool "changed query opens" true
+    (Option.is_some (Command.menu ~keeper_names:[] ~state:(Command.Menu_dismissed draft) "/d"));
+  check bool "complete command can execute normally" true
+    (Option.is_none (Command.menu ~keeper_names:[] ~state:Command.Menu_idle "/help"));
+  check string "Korean keeper argument remains whole" "/keeper 가온"
+    (let draft = "/keeper 가" in
+     let initial = menu Command.Menu_idle draft in
+     menu (Command.menu_step ~direction:Command.Next ~draft initial) draft |> Command.menu_accept)
+
+
 let () =
   run "tui command"
     [ ( "composer"
@@ -984,8 +974,6 @@ let () =
             test_keeper_names_resolve_by_unique_prefix
         ; test_case "pane commands parse by word" `Quick
             test_pane_commands_parse_by_word
-        ; test_case "about banner contains Horned Reaper emblem" `Quick
-            test_about_banner
         ; test_case "every command has a help line" `Quick
             test_every_command_has_a_help_line
         ; test_case "preset commands parse verb, name and description" `Quick
@@ -1053,6 +1041,8 @@ let () =
             test_is_slash_navigable
         ; test_case "autocomplete subargument cycling" `Quick
             test_autocomplete_subargument_cycling
+        ; test_case "command menu selection preserves its draft" `Quick
+            test_command_menu_keeps_selection_separate_from_draft
         ] )
     ; ( "tools/call"
       , [ test_case "cancel arguments carry the reason as summary" `Quick

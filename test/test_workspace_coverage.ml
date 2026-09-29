@@ -1561,13 +1561,14 @@ let test_transition_done_idempotent () =
 let test_transition_cancel_idempotent () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Test" ~priority:1 ~description:"" in
-    (* Cancel from Todo (allowed) *)
+    (* Cancel from Todo (allowed with a stated reason) *)
     let _ =
       Workspace.transition_task_r
         config
         ~agent_name:"claude"
         ~task_id:"task-001"
         ~action:Masc_domain.Cancel
+        ~reason:"no longer needed"
         ()
     in
     (* Second cancel call should succeed as no-op *)
@@ -1604,6 +1605,7 @@ let test_transition_cancel_clears_reclaim_policy () =
          ~agent_name:"claude"
          ~task_id:"task-001"
          ~action:Masc_domain.Cancel
+         ~reason:"stale task cancelled before reclaim"
          ()
      with
      | Ok _ -> ()
@@ -2577,7 +2579,6 @@ let test_gc_preserves_awaiting_verification () =
              { assignee = "claude"
              ; started_at = gc_ancient_ts
              ; submitted_at = gc_ancient_ts
-             ; intent = Complete_task
              ; verification_id = "verif-900"
              })
     in
@@ -2630,7 +2631,6 @@ let test_gc_restores_orphaned_nonterminal_from_archive () =
              { assignee = "claude"
              ; started_at = gc_ancient_ts
              ; submitted_at = gc_ancient_ts
-             ; intent = Complete_task
              ; verification_id = "verif-901"
              })
     in
@@ -2666,7 +2666,6 @@ let test_gc_restored_task_preserves_old_messages_same_pass () =
              { assignee = "claude"
              ; started_at = gc_ancient_ts
              ; submitted_at = gc_ancient_ts
-             ; intent = Complete_task
              ; verification_id = "verif-904"
              })
     in

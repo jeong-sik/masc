@@ -46,11 +46,11 @@ let is_agent_core_history_file ~(session_dir : string) (filename : string) : boo
 let list_agent_core_history_files ~(session_dir : string) : string list =
   if not (Fs_compat.file_exists session_dir) then []
   else
-    Eio_guard.run_in_systhread ~label:"keeper.checkpoint.history.list" (fun () ->
-    Sys.readdir session_dir
-    |> Array.to_list
-    |> List.filter (is_agent_core_history_file ~session_dir)
-    |> List.sort (fun a b -> compare b a))
+    Domain_pool_ref.submit_io_or_inline (fun () ->
+      Sys.readdir session_dir
+      |> Array.to_list
+      |> List.filter (is_agent_core_history_file ~session_dir)
+      |> List.sort (fun a b -> compare b a))
 
 (* Each entry is a whole checkpoint of the session, and a live keeper's runs
    111 MB: twelve of them held 1.4 GB per trace directory and 8.4 GB across
@@ -321,7 +321,9 @@ let read_checkpoint_bytes ~(session_dir : string) path : (string, checkpoint_loa
   | Error error ->
     let detail = Fs_compat.owned_regular_file_read_error_to_string error in
     (match error.failure with
-     | Fs_compat.Ownership_boundary_rejected _ | Fs_compat.Path_is_not_regular_file _ ->
+     | Fs_compat.Ownership_boundary_rejected _ | Fs_compat.Path_is_not_regular_file _
+     | Fs_compat.Owned_path_owner_mismatch _
+     | Fs_compat.Owned_path_writable_by_others _ ->
        Error (Io_error detail)
      | Fs_compat.Filesystem_identity_changed _ ->
        Error (Read_failed { cause = Changed_while_read; detail })

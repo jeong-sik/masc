@@ -2,6 +2,7 @@ type client_kind = Keeper_semantic_execution.official_client_kind =
   | Codex
   | Claude_code
   | Antigravity
+  | Muse
 
 type settlement =
   { session_id : string
@@ -26,6 +27,7 @@ type recovery_failure =
   | Pre_dispatch_failed
   | Transient_spawn_failed
   | Owner_stopped_turn
+  | Retryable_turn_failed
   | Transport_interrupted
   | Protocol_failed
   | Provider_rejected
@@ -47,7 +49,7 @@ type failure_disposition =
    adjudicate, and routing it to Recovery_required blocked every later turn for
    that keeper until someone resolved it by hand (#28012). *)
 let failure_disposition = function
-  | Pre_dispatch_failed | Transient_spawn_failed | Owner_stopped_turn -> Transient
+  | Pre_dispatch_failed | Transient_spawn_failed | Owner_stopped_turn | Retryable_turn_failed -> Transient
   | Transport_interrupted
   | Protocol_failed
   | Host_hook_failed
@@ -223,7 +225,7 @@ let rec canonical_json = function
     value
 ;;
 
-let tool_surface_sha256 ?account_home ~native_posture tools =
+let tool_surface_sha256 ?account_home ?account_revision ~native_posture tools =
   let tool_json (tool : Agent_core.Tool.t) =
     let input_schema =
       match tool.schema.input_schema with
@@ -255,7 +257,10 @@ let tool_surface_sha256 ?account_home ~native_posture tools =
     ; "tools", `List tools
     ] @ (match account_home with
          | None -> []
-         | Some home -> ["account_home", `String home]))
+         | Some home -> ["account_home", `String home])
+      @ (match account_revision with
+         | None -> []
+         | Some revision -> ["account_revision", `String revision]))
   |> canonical_json
   |> Yojson.Safe.to_string
   |> Digestif.SHA256.digest_string
@@ -435,6 +440,7 @@ let recovery_failure_to_string = function
   | Pre_dispatch_failed -> "pre_dispatch_failed"
   | Transient_spawn_failed -> "transient_spawn_failed"
   | Owner_stopped_turn -> "owner_stopped_turn"
+  | Retryable_turn_failed -> "retryable_turn_failed"
   | Transport_interrupted -> "transport_interrupted"
   | Protocol_failed -> "protocol_failed"
   | Provider_rejected -> "provider_rejected"
@@ -452,6 +458,7 @@ let recovery_failure_of_string = function
   | "pre_dispatch_failed" -> Ok Pre_dispatch_failed
   | "transient_spawn_failed" -> Ok Transient_spawn_failed
   | "owner_stopped_turn" -> Ok Owner_stopped_turn
+  | "retryable_turn_failed" -> Ok Retryable_turn_failed
   | "transport_interrupted" -> Ok Transport_interrupted
   | "protocol_failed" -> Ok Protocol_failed
   | "provider_rejected" -> Ok Provider_rejected
@@ -464,19 +471,6 @@ let recovery_failure_of_string = function
   | "vendor_session_full_no_activity" -> Ok (Vendor_session_full No_activity_observed)
   | "vendor_session_full_after_activity" -> Ok (Vendor_session_full Activity_observed)
   | _ -> Error "unknown official-client recovery failure"
-;;
-
-let client_kind_to_string = function
-  | Codex -> "codex"
-  | Claude_code -> "claude_code"
-  | Antigravity -> "antigravity"
-;;
-
-let client_kind_of_string = function
-  | "codex" -> Ok Codex
-  | "claude_code" -> Ok Claude_code
-  | "antigravity" -> Ok Antigravity
-  | _ -> Error "unknown official-client kind"
 ;;
 
 let recovery_resolution_to_yojson = function
@@ -737,7 +731,9 @@ let context_frontier_of_yojson = function
 
 let to_yojson binding =
   `Assoc
-    [ "client_kind", `String (client_kind_to_string binding.client_kind)
+    [ ( "client_kind"
+      , `String
+          (Keeper_semantic_execution.official_client_kind_to_string binding.client_kind) )
     ; "context_frontier", context_frontier_to_yojson binding.context_frontier
     ; ( "last_recovery_resolution"
       , recovery_resolution_record_opt_to_yojson
@@ -777,7 +773,10 @@ let of_yojson = function
        if not (String.equal encoded_schema schema)
        then Error "unsupported official-client session schema"
        else
-         let* client_kind = client_kind_of_string client_kind_json in
+         let* client_kind =
+           Keeper_semantic_execution.official_client_kind_of_string client_kind_json
+           |> Option.to_result ~none:"unknown official-client kind"
+         in
          let* phase = phase_of_yojson phase_json in
          let* last_recovery_resolution =
            recovery_resolution_record_opt_of_yojson last_resolution_json
@@ -886,6 +885,135 @@ let inspect_store_directory directory =
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> Error (Printexc.to_string exn)
+;;
+
+type stored_binding =
+  { keeper_name : string
+  ; path : string
+  ; decoded : (t, string) result
+  }
+
+(* Not [Workspace.keepers_runtime_dir_for_base_path]: [state_dir] writes under
+   [Common.keepers_runtime_dir_of_base], the default cluster's keepers
+   directory, on every cluster, so that is the directory listed here. Every
+   entry [path] accepts is read with [load_path], the reader every claim
+   uses, so this reads exactly the files a claim would read, a linked keeper
+   directory included. Ordinary metadata files are not Keeper directories.
+   A name [path] refuses is left out: [state_dir] refuses it too, so this
+   store never wrote there. Directory inspection failures refuse discovery
+   instead of treating a potentially hidden binding as absent. *)
+let stored_bindings ~base_path =
+  let keepers_dir = Common.keepers_runtime_dir_of_base ~base_path in
+  let filesystem_error path operation cause =
+    Error (Printf.sprintf "%s %s: %s" operation path (Unix.error_message cause))
+  in
+  let inspect_keeper keeper_name =
+    match path ~base_path ~keeper_name with
+    | Error _ -> Ok None
+    | Ok state_path ->
+      let keeper_dir = Filename.concat keepers_dir keeper_name in
+      (match Unix.lstat keeper_dir with
+       | exception Unix.Unix_error (cause, _, _) ->
+         filesystem_error keeper_dir "failed to inspect" cause
+       | { Unix.st_kind = Unix.S_DIR; _ } -> Ok (Some state_path)
+       | { Unix.st_kind = Unix.S_LNK; _ } ->
+         (match Unix.stat keeper_dir with
+          | { Unix.st_kind = Unix.S_DIR; _ } -> Ok (Some state_path)
+          | _ -> Error ("linked Keeper entry is not a directory: " ^ keeper_dir)
+          | exception Unix.Unix_error (cause, _, _) ->
+            filesystem_error keeper_dir "failed to follow" cause)
+       | _ -> Ok None)
+  in
+  let inspect_binding keeper_name state_path =
+    let state_dir = Filename.dirname state_path in
+    let* state_dir_exists =
+      match Unix.lstat state_dir with
+      | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
+      | exception Unix.Unix_error (cause, _, _) ->
+        filesystem_error state_dir "failed to inspect" cause
+      | { Unix.st_kind = Unix.S_DIR; _ } -> Ok true
+      | { Unix.st_kind = Unix.S_LNK; _ } ->
+        (match Unix.stat state_dir with
+         | { Unix.st_kind = Unix.S_DIR; _ } -> Ok true
+         | _ -> Error ("linked official-client session entry is not a directory: " ^ state_dir)
+         | exception Unix.Unix_error (cause, _, _) ->
+           filesystem_error state_dir "failed to follow" cause)
+      | _ -> Error ("official-client session entry is not a directory: " ^ state_dir)
+    in
+    if not state_dir_exists
+    then Ok None
+    else
+      match Unix.lstat state_path with
+      | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+      | exception Unix.Unix_error (cause, _, _) ->
+        filesystem_error state_path "failed to inspect" cause
+      | _ ->
+        (match load_path state_path with
+         | Ok None ->
+           Error ("official-client session disappeared or became unreadable during discovery: " ^ state_path)
+         | Ok (Some binding) ->
+           Ok (Some { keeper_name; path = state_path; decoded = Ok binding })
+         | Error rejection ->
+           Ok (Some { keeper_name; path = state_path; decoded = Error rejection }))
+  in
+  match Unix.lstat keepers_dir with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok []
+  | exception Unix.Unix_error (error, _, _) ->
+    Error (Printf.sprintf "%s: %s" keepers_dir (Unix.error_message error))
+  | _ ->
+    (match Sys.readdir keepers_dir with
+     | exception Sys_error detail -> Error detail
+     | entries ->
+       Array.to_list entries
+       |> List.sort String.compare
+       |> List.fold_left
+            (fun collected keeper_name ->
+               let* collected = collected in
+               let* state_path = inspect_keeper keeper_name in
+               match state_path with
+               | None -> Ok collected
+               | Some state_path ->
+                 let* binding = inspect_binding keeper_name state_path in
+                 Ok (match binding with None -> collected | Some binding -> binding :: collected))
+            (Ok [])
+       |> Result.map List.rev)
+;;
+
+(* The lock is [store_lock_path] of [state_dir], the one [with_store_lock]
+   takes for every claim and transition. Under it the binding is read again:
+   one that decodes now, or is gone, is not moved. The observed form keeps a
+   completed rename when only the release fails, as [clear_then_with_lock]
+   does. *)
+let move_aside ~base_path ~keeper_name ~rejected_path =
+  let* directory = state_dir ~base_path ~keeper_name in
+  let state_path = Filename.concat directory filename in
+  match
+    File_lock_eio.with_durable_lock_observed
+      ~lock_path:(store_lock_path directory)
+      (fun () ->
+         match load_path state_path with
+         | Ok (Some (_ : t)) -> Error "the binding decodes now; it was left in place"
+         | Ok None -> Error "the binding is gone; nothing was moved"
+         | Error (_ : string) ->
+           (match Fs_compat.rename state_path rejected_path with
+            | () -> Ok ()
+            | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+            | exception exn -> Error (Printexc.to_string exn)))
+  with
+  | File_lock_eio.Lock_not_acquired error ->
+    Error (File_lock_eio.durable_lock_error_to_string error)
+  | File_lock_eio.Body_completed { value; release_error } ->
+    Option.iter
+      (fun error ->
+         Log.Keeper.error
+           ~keeper_name
+           "official-client session move-aside %s; releasing the claim lock failed: %s"
+           (match value with
+            | Ok () -> "completed"
+            | Error detail -> "did not move the file (" ^ detail ^ ")")
+           (File_lock_eio.durable_lock_error_to_string error))
+      release_error;
+    value
 ;;
 
 let clear_then_with_lock ~with_lock ~base_path ~keeper_name after_clear =
@@ -1397,7 +1525,16 @@ let release_transient ~base_path ~keeper_name ~expected ~failure ~released_at =
     | Some claim -> Ok claim
     | None -> Error "official-client session has no incomplete claim to release"
   in
-  let turn_count = max 0 (expected.turn_count - 1) in
+  let* previous_settlement, turn_count =
+    match failure, expected.phase with
+    | Retryable_turn_failed, Turn_inflight {session_id; turn_id=Some turn_id; _} ->
+      (* The host observed a terminal, reusable turn, not a successful answer.
+         Retain its durable history even when this was the first failed turn;
+         the release record preserves the failure while the caller returns it. *)
+      Ok (Some {session_id; turn_id}, expected.turn_count)
+    | Retryable_turn_failed, _ ->
+      Error "retryable official-client terminal requires an acknowledged turn identity"
+    | _, _ -> Ok (previous_settlement, max 0 (expected.turn_count - 1)) in
   let* released =
     transition
       ~base_path
@@ -1470,11 +1607,11 @@ let resolve_recovery ~base_path ~keeper_name ~expected ~recovery_id ~resolution
            no previous settlement worth returning to. *)
         (match recovery.failure, recovery.previous_settlement with
          | Vendor_session_full _, (Some _ | None) -> Error Retry_previous_unavailable
-         | ( ( Pre_dispatch_failed | Transient_spawn_failed | Owner_stopped_turn | Transport_interrupted
+         | ( ( Pre_dispatch_failed | Transient_spawn_failed | Owner_stopped_turn | Retryable_turn_failed | Transport_interrupted
              | Protocol_failed | Provider_rejected | Input_rejected _ | Host_hook_failed
              | State_persistence_failed | Process_restarted )
            , None ) -> Error Retry_previous_unavailable
-         | ( ( Pre_dispatch_failed | Transient_spawn_failed | Owner_stopped_turn | Transport_interrupted
+         | ( ( Pre_dispatch_failed | Transient_spawn_failed | Owner_stopped_turn | Retryable_turn_failed | Transport_interrupted
              | Protocol_failed | Provider_rejected | Input_rejected _ | Host_hook_failed
              | State_persistence_failed | Process_restarted )
            , Some settlement ) -> Ok (Some settlement, current.turn_count - 1))

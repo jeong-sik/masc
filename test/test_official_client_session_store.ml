@@ -623,6 +623,8 @@ let test_terminal_identity_switch_starts_fresh () =
 ;;
 
 let test_restart_recovery_and_transient_release () =
+  List.iter (fun failure ->
+  check bool "release classification is transient" true (failure_disposition failure = Transient);
   with_workspace "masc-official-client-store-restart-" (fun base_path ->
     let keeper_name = "restart" in
     let claimed =
@@ -678,7 +680,7 @@ let test_restart_recovery_and_transient_release () =
         ~base_path
         ~keeper_name
         ~expected:reclaimed
-        ~failure:Transient_spawn_failed
+        ~failure
         ~released_at:5.0
       |> Result.get_ok
     in
@@ -689,9 +691,10 @@ let test_restart_recovery_and_transient_release () =
        fail "transient failure did not release the claim");
     match released.last_transient_release with
     | Some record ->
-      check bool "transient evidence" true (record.failure = Transient_spawn_failed);
+      check bool "transient evidence" true (record.failure = failure);
       check string "release epoch" next_owner_epoch record.owner_epoch
-    | None -> fail "transient release evidence was not persisted")
+    | None -> fail "transient release evidence was not persisted"))
+    [Pre_dispatch_failed; Transient_spawn_failed]
 ;;
 
 let test_exact_recovery_restart () =
@@ -1978,6 +1981,34 @@ let test_retry_previous_keeps_a_vendor_held_frontier () =
       (retried.context_frontier = failed.recovery.context_frontier))
 ;;
 
+let test_retryable_terminal_requires_acknowledged_identity () =
+  with_workspace "masc-retryable-terminal-" (fun base_path ->
+    let keeper_name = "retryable-terminal" in
+    let claimed = claim_new ~base_path ~keeper_name ~client_kind:Muse
+      ~runtime_id:"muse.fixture" ~owner_epoch ~at:1.0 in
+    let release expected = release_transient ~base_path ~keeper_name ~expected
+      ~failure:Retryable_turn_failed ~released_at:5.0 in
+    check bool "an unacknowledged failed attempt cannot claim a reusable terminal" true
+      (Result.is_error (release claimed));
+    check bool "rejected release preserves exact claim" true
+      (load ~base_path ~keeper_name = Ok (Some claimed));
+    let active = mark_active ~base_path ~keeper_name ~expected:claimed
+      ~session_id:"session-retryable" ~updated_at:2.0 |> Result.get_ok in
+    let starting = mark_turn_starting ~base_path ~keeper_name ~expected:active
+      ~session_id:"session-retryable" ~updated_at:3.0 |> Result.get_ok in
+    check bool "missing turn ID cannot be fabricated" true (Result.is_error (release starting));
+    let inflight = mark_turn_started ~base_path ~keeper_name ~expected:starting
+      ~session_id:"session-retryable" ~turn_id:"failed-turn" ~turn_count:1 ~updated_at:4.0 |> Result.get_ok in
+    let released = release inflight |> Result.get_ok in
+    check bool "terminal session remains, despite no prior successful settlement" true
+      (released.phase = Settled {session_id="session-retryable"; turn_id="failed-turn"});
+    check int "observed failed turn ordinal retained" 1 released.turn_count;
+    check bool "failure survives durable roundtrip" true
+      (match load ~base_path ~keeper_name with
+       | Ok (Some {last_transient_release=Some {failure=Retryable_turn_failed; _}; _}) -> true
+       | _ -> false))
+;;
+
 let () =
   run
     "official client session store"
@@ -2014,6 +2045,8 @@ let () =
             "duplicate claim and CAS fail closed"
             `Quick
             test_duplicate_claim_and_cas_are_fail_closed
+        ; test_case "retryable terminal retains only acknowledged history" `Quick
+            test_retryable_terminal_requires_acknowledged_identity
         ; test_case
             "owner stop releases without recovery"
             `Quick

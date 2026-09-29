@@ -308,6 +308,8 @@ let test_run_context_binds_generation_before_agent_core_checkpoint () =
       fail (Keeper_checkpoint_store.checkpoint_load_error_to_string error)
     | Error (Keeper_run_context.Constitution_unreadable error) ->
       fail (World_constitution_store.read_error_to_string error)
+    | Error (Keeper_run_context.Prompt_unrenderable detail) ->
+      fail ("unexpected prompt failure: " ^ detail)
   in
   check bool "caller-owned context remains the AGENT_CORE context" true
     (run_context.shared_context == shared_context);
@@ -515,6 +517,126 @@ let prepare_error_to_string = function
     Keeper_checkpoint_store.checkpoint_load_error_to_string error
   | Keeper_run_context.Constitution_unreadable error ->
     World_constitution_store.read_error_to_string error
+  | Keeper_run_context.Prompt_unrenderable detail -> detail
+;;
+
+(* Raw file edits can break an already registered slot. The override API
+   refuses these values before they reach the turn, so the fixture edits an
+   isolated keeper.md after first preparing successfully. It never changes
+   the override table, and restores the original directory after the case. *)
+let test_unrenderable_prompt_refuses_preparation_typed ~key ~body ~worldview () =
+  with_run_checkpoint
+  @@ fun ~config ~meta ~base_dir ~session_dir:_ ~checkpoint ~path ~prepare ->
+  let original_dir =
+    match Prompt_registry.get_markdown_dir () with
+    | Some dir -> dir
+    | None -> fail "the prompt refusal fixture needs the shipped prompt directory"
+  in
+  let original_overrides = Prompt_registry.override_entries () in
+  let prompt_dir = Filename.concat base_dir "prompt-fixture" in
+  Fs_compat.mkdir_p prompt_dir;
+  let prompt_path = Filename.concat prompt_dir "keeper.md" in
+  let valid_body = "Shared Keeper fixture contract" in
+  let valid_worldview = "World fixture contract" in
+  let write body worldview =
+    Fs_compat.save_file prompt_path
+      (Printf.sprintf
+         {|---
+description: Keeper refusal fixture
+---
+%s
+
+### worldview
+%s
+
+### identity (vars: keeper_name)
+<identity>{{keeper_name}}</identity>
+
+### workspace (vars: workspace_root)
+<workspace>{{workspace_root}}</workspace>
+
+### tags.system_open
+<system>
+
+### tags.system_close
+</system>
+
+### tags.instructions_open
+<instructions>
+
+### tags.instructions_close
+</instructions>
+|}
+         body worldview)
+  in
+  let require_prepared () =
+    match prepare () with
+    | Error error -> fail (prepare_error_to_string error)
+    | Ok ctx ->
+      check int "preparation retains the saved turn count" 1 ctx.start_turn_count;
+      check bool "preparation retains the saved messages" true
+        (Keeper_context_runtime.messages_of_context ctx.ctx_work = checkpoint.messages);
+      ctx
+  in
+  write valid_body valid_worldview;
+  Fun.protect
+    ~finally:(fun () -> Prompt_registry.set_markdown_dir original_dir)
+    (fun () ->
+      Prompt_registry.set_markdown_dir prompt_dir;
+      ignore (require_prepared ());
+      let original_checkpoint = Fs_compat.load_file path in
+      write body worldview;
+      let resolved = Prompt_registry.resolve_prompt key in
+      check (option string) "the edited file is not shadowed by an override"
+        None resolved.override_value;
+      let detail =
+        match prepare () with
+        | Ok _ -> fail "preparation admitted an unrenderable prompt"
+        | Error (Keeper_run_context.Prompt_unrenderable detail) ->
+          check bool "the refusal names the edited slot" true
+            (String_util.contains_substring detail key);
+          detail
+        | Error error -> fail ("wrong refusal: " ^ prepare_error_to_string error)
+      in
+      let prompt_built = ref false in
+      let settlement =
+        Keeper_agent_run.run_turn ~config ~meta ~base_dir
+          ~publication_recovery:
+            { Keeper_publication_recovery_availability.provider =
+                Keeper_publication_recovery_availability.non_runtime_provider
+            ; keeper_name = meta.name }
+          ~profile_defaults:Keeper_types_profile_defaults.empty_keeper_profile_defaults
+          ~turn_ctx_cell:(Keeper_tool_call_log.create_turn_ctx_cell ())
+          ~max_context:4096
+          ~build_turn_prompt:(fun ~base_system_prompt:_ ~messages:_ ->
+            prompt_built := true;
+            fail "an invalid shared prompt reached model prompt construction")
+          ~user_message:"continue the saved work"
+          ~input_speaker:(Keeper_input_speaker.Person Keeper_input_speaker.Owner)
+          ~turn_kind:Turn_record.Direct
+          ~skill_snapshot:(Skill_catalog_snapshot.config_unreadable ~detail:"unused fixture")
+          ~task_skill_selection:(Ok Keeper_task_skill_turn.empty)
+          ~runtime_id:"unconfigured-test-runtime" ()
+      in
+      (match settlement.Keeper_agent_run.result with
+       | Error (Agent_core.Error.Config (InvalidConfig { field; detail = reported })) ->
+         check string "typed prompt refusal" "keeper.prompt" field;
+         check string "the diagnosed cause survives" detail reported
+       | Error error -> fail (Agent_core.Error.to_string error)
+       | Ok _ -> fail "an unrenderable prompt allowed a turn");
+      check bool "no model prompt or dispatch was reached" false !prompt_built;
+      check string "refusal preserves saved checkpoint bytes" original_checkpoint
+        (Fs_compat.load_file path);
+      write valid_body valid_worldview;
+      let resumed = require_prepared () in
+      check bool "the next preparation reads the repaired primary slot" true
+        (String_util.contains_substring resumed.base_system_prompt valid_body);
+      check string "repair preparation also preserves checkpoint bytes"
+        original_checkpoint (Fs_compat.load_file path));
+  check (option string) "the prompt directory is restored" (Some original_dir)
+    (Prompt_registry.get_markdown_dir ());
+  check bool "other prompt overrides are untouched" true
+    (original_overrides = Prompt_registry.override_entries ())
 ;;
 
 (* The same young Keeper has a valid history before and after a failed read.
@@ -1895,6 +2017,56 @@ let test_history_link_keeps_transaction_until_cancelled_job_finishes () =
   check int "history remains a hardlink to committed bytes"
     (Unix.stat canonical).Unix.st_ino (Unix.stat history).Unix.st_ino
 
+(* A busy one-domain pool holds the directory scan until its worker is free.
+   This exercises the store entry point rather than only the pool wrapper. *)
+let test_history_listing_waits_for_the_shared_pool () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+  let previous = Domain_pool_ref.get () in
+  Fun.protect ~finally:(fun () ->
+    match previous with
+    | None -> Domain_pool_ref.clear_for_tests ()
+    | Some pool -> Domain_pool_ref.set pool) @@ fun () ->
+  Domain_pool_ref.set pool;
+  Eio_guard.enable ();
+  Fun.protect ~finally:Eio_guard.disable @@ fun () ->
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
+  let clock = Eio.Stdenv.clock env in
+  let gate = Mutex.create () in
+  Mutex.lock gate;
+  let released = ref false in
+  let release () =
+    if not !released then (released := true; Mutex.unlock gate)
+  in
+  Fun.protect ~finally:release @@ fun () ->
+  let worker_entered = Atomic.make false in
+  let busy_done, busy_done_u = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    Domain_pool.submit_cpu pool (fun () ->
+      Atomic.set worker_entered true;
+      Mutex.lock gate;
+      Mutex.unlock gate);
+    Eio.Promise.resolve busy_done_u ());
+  Eio.Time.with_timeout_exn clock 2. (fun () ->
+    while not (Atomic.get worker_entered) do Eio.Time.sleep clock 0.001 done);
+  let listing_started, listing_started_u = Eio.Promise.create () in
+  let listing_done, listing_done_u = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    Eio.Promise.resolve listing_started_u ();
+    let files = Keeper_checkpoint_store.list_agent_core_history_files ~session_dir in
+    Eio.Promise.resolve listing_done_u files);
+  Eio.Promise.await listing_started;
+  Eio.Time.sleep clock 0.1;
+  check bool "history scan waits for the occupied shared pool" false
+    (Eio.Promise.is_resolved listing_done);
+  release ();
+  Eio.Promise.await busy_done;
+  check (list string) "empty session has no history" []
+    (Eio.Time.with_timeout_exn clock 2. (fun () -> Eio.Promise.await listing_done))
+
 let test_history_retention_after_syscall_offload () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -1973,12 +2145,28 @@ let () =
         [
           test_case "history syscall retains transaction through cancellation" `Quick
             test_history_link_keeps_transaction_until_cancelled_job_finishes;
+          test_case "history listing waits for the shared pool" `Quick
+            test_history_listing_waits_for_the_shared_pool;
           test_case "history syscall retains exact rolling window" `Quick
             test_history_retention_after_syscall_offload;
           test_case "history window follows the runtime setting" `Quick
             test_history_window_follows_the_runtime_setting;
           test_case "run context binds generation before AGENT_CORE checkpoint" `Quick
             test_run_context_binds_generation_before_agent_core_checkpoint;
+          test_case "unrenderable fragment refuses the turn and recovers" `Quick
+            (test_unrenderable_prompt_refuses_preparation_typed
+               ~key:Prompt_names.keeper_worldview
+               ~body:"Shared Keeper fixture contract"
+               ~worldview:"broken {{unresolved_test_variable}}");
+          test_case "unrenderable primary prompt refuses the turn and recovers" `Quick
+            (test_unrenderable_prompt_refuses_preparation_typed
+               ~key:Prompt_names.keeper
+               ~body:"broken {{unresolved_test_variable}}"
+               ~worldview:"World fixture contract");
+          test_case "empty primary prompt refuses the turn and recovers" `Quick
+            (test_unrenderable_prompt_refuses_preparation_typed
+               ~key:Prompt_names.keeper ~body:""
+               ~worldview:"World fixture contract");
           test_case "checkpoint I/O failure stops the turn and preserves history" `Quick
             (test_checkpoint_read_error_stops_turn ~io_failure:true);
           test_case "checkpoint parse failure stops the turn and preserves history" `Quick

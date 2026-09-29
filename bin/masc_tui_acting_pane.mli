@@ -36,9 +36,12 @@ val reading_cells : int
     the list. Exported so a test can hold that sum without restating it. *)
 
 val threshold_cols : int
-(** The width from which a surface can afford the pane beside it. The pane
-    plus what the roster pane leaves a surface, so the two panes sharing one
-    screen leave the surface no narrower than the roster alone would. *)
+(** The width from which a surface can afford the pane beside it: the pane
+    plus what every surface keeps beside it -- the frame around the inner
+    width the Keepers list needs for its flag columns
+    ({!Masc_tui_render_schedule.keeper_flags_minimum_inner_width}). The floor
+    is the same on every surface, so moving between surfaces never opens or
+    closes the pane. *)
 
 val wide_threshold_cols : int
 (** The width from which a surface can afford the wide pane: the wide pane
@@ -142,6 +145,9 @@ type changes =
       calls : int;  (** tool calls the window held, changes or not *)
       over_budget : int;  (** changes the log kept no text for *)
       malformed : int;
+      refresh_failed : string option;
+        (** Why the refresh after this answer failed: the files are the last
+            good read, and the status row says so above them. *)
     }
 
 (** How much of the fleet the Recent tab draws. Beside the Keepers roster

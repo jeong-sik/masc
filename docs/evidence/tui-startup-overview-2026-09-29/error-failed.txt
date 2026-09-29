@@ -1,0 +1,30 @@
+ ▸Overview  Activity  Keepers  Lanes  Memory  Approvals  Board  Planning  Fusion  Workspace  Config
+
+   MASC Overview  [workspace\x1B]8;;https://attacker.invalid\x07owned]  01:25:15  HTTP [partial]
+ ──────────────────────────────────────────────────────────────────────────────────────────────────
+    (data unreliable: overview load failed: HTTP 503: briefing temporarily unavailable)
+ ──────────────────────────────────────────────────────────────────────────────────────────────────
+  Goals (0)   No goal is executing or verifying.
+
+  Attention
+
+
+
+ Plan usage
+
+   no usage data
+
+ Tasks (0 open)
+
+    No tasks.
+
+
+
+
+
+
+
+
+
+  m:telemetry  t:tasks  2:keepers  r:refresh  Tab:next  q:quit  | Port: 33123
+ › to alpha   (i to write)

@@ -207,6 +207,22 @@ let test_login_rejects_a_window_outside_the_bound () =
     (Result.is_error (mint 8_761));
   check bool "a year exactly still is" true (Result.is_ok (mint 8_760))
 
+(* A Player credential is an invite (RFC play-link-for-the-shared-machine
+   §2.4), so login refuses the role before it enables auth or writes a file. *)
+let test_login_refuses_a_player () =
+  with_temp_dir "auth-login-player" @@ fun base_path ->
+  (match
+     Auth_login.mint ~base_path ~host:"127.0.0.1" ~port:8935
+       ~agent_name:"invitee" ~role:Masc_domain.Player
+       ~token_env_var:"MASC_TOKEN" ~token_lifetime:Auth_login.With_expiry ()
+   with
+   | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden { agent; _ })) ->
+       check string "the refusal names the login" "invitee" agent
+   | Error err -> failf "unexpected error: %s" (Masc_domain.masc_error_to_string err)
+   | Ok _ -> fail "a player login was minted");
+  check (array string) "nothing was written under the workspace" [||]
+    (Sys.readdir base_path)
+
 (* The two flags that can name a lifetime name different ones, so asking for
    both is refused rather than resolved by precedence. A precedence rule would
    quietly hand back the policy the operator did not ask for, and how long a
@@ -428,6 +444,8 @@ let () =
             test_login_expires_in_hours_outlives_the_config_window;
           test_case "a window outside the bound is refused, not raised" `Quick
             test_login_rejects_a_window_outside_the_bound;
+          test_case "a player is invited, not logged in" `Quick
+            test_login_refuses_a_player;
           test_case "URL uses URI components" `Quick
             test_login_url_uses_uri_components;
           test_case "URLs do not advertise a bind wildcard" `Quick

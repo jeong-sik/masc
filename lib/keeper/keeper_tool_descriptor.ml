@@ -113,6 +113,7 @@ type runtime_handler =
   | Tool_memory_retract
   | Tool_memory_write
   | Tool_constitution_write
+  | Tool_constitution_read
   | Tool_constitution_remove
   | Tool_library_search
   | Tool_library_read
@@ -248,6 +249,7 @@ let runtime_handler_to_string = function
   | Tool_memory_retract -> "tool_memory_retract"
   | Tool_memory_write -> "tool_memory_write"
   | Tool_constitution_write -> "tool_constitution_write"
+  | Tool_constitution_read -> "tool_constitution_read"
   | Tool_constitution_remove -> "tool_constitution_remove"
   | Tool_library_search -> "tool_library_search"
   | Tool_library_read -> "tool_library_read"
@@ -344,16 +346,44 @@ let translate_read_file input =
    inferring overwrite from its presence turned a mistaken key into a silent
    whole-file overwrite (masc#31573). Translation is closed to match: only the
    declared patch fields reach the runtime, so even a validation-bypassing
-   caller cannot smuggle extra members through this path. *)
+   caller cannot smuggle extra members through this path.
+   [cwd] joins here, syntactically, the way Read resolves it: a relative
+   [file_path] reads against [cwd] and an absolute one ignores it. The joined
+   string faces the runtime's containment and gates exactly as a directly
+   spelled path, so no new expressiveness reaches the write path; [cwd]
+   itself never leaves the translator.
+   Both parts are trimmed before the join, as Read trims each of them
+   (keeper_tool_filesystem_runtime.resolve_read_file_target). The runtime
+   trims only the whole path, so an untrimmed join would turn [cwd = "lib "]
+   into "lib /src.ml" and [file_path = " /abs"] into a relative name under
+   [cwd]: a different file than Read opens for the same arguments. A blank
+   [file_path] stays blank so the runtime still refuses it as missing. *)
 let translate_edit_file input =
   match input with
   | `Assoc fields ->
     let out = ref [ "mode", `String "patch" ] in
+    let cwd =
+      match List.assoc_opt "cwd" fields with
+      | Some (`String raw) ->
+        let cwd = String.trim raw in
+        if cwd = "" then None else Some cwd
+      | Some _ | None -> None
+    in
+    let join_cwd path =
+      match path, cwd with
+      | `String raw, Some cwd ->
+        let file = String.trim raw in
+        if file <> "" && Filename.is_relative file
+        then `String (Filename.concat cwd file)
+        else `String file
+      | path, _ -> path
+    in
     List.iter
       (fun (k, v) ->
          match k with
-         | "file_path" -> out := ("path", v) :: !out
+         | "file_path" -> out := ("path", join_cwd v) :: !out
          | "old_string" | "new_string" | "replace_all" -> out := (k, v) :: !out
+         | "cwd" -> ()
          | _ -> ())
       fields;
     `Assoc (List.rev !out)
@@ -457,6 +487,7 @@ let descriptor
       | Tool_memory_write
       | Tool_memory_retract
       | Tool_constitution_write
+      | Tool_constitution_read
       | Tool_constitution_remove
       | Tool_keeper_code_query_dispatch
       | Tool_keeper_webmcp_dispatch
@@ -1334,6 +1365,10 @@ let constitution_remove_schema_source, constitution_remove_schema =
   base_schema_declared "keeper_constitution_remove"
 ;;
 
+let constitution_read_schema_source, constitution_read_schema =
+  base_schema_declared "keeper_constitution_read"
+;;
+
 let ide_annotate_schema_source, ide_annotate_schema =
   base_schema_declared "keeper_ide_annotate"
 ;;
@@ -1879,6 +1914,7 @@ let masc_board_descriptor board_name =
     | Board_sub_board_get
     | Board_sub_board_list -> Concurrent
     | ( Board_cleanup
+      | Board_close
       | Board_comment
       | Board_comment_vote
       | Board_curation_submit
@@ -1886,6 +1922,7 @@ let masc_board_descriptor board_name =
       | Board_post
       | Board_post_update
       | Board_reaction
+      | Board_reopen
       | Board_sub_board_create
       | Board_sub_board_delete
       | Board_sub_board_update
@@ -1938,6 +1975,7 @@ let masc_board_descriptor board_name =
     descriptor
     |> with_composable_output (Json_output { schema = board_list_output_schema })
   | ( Board_cleanup
+    | Board_close
     | Board_comment
     | Board_comment_vote
     | Board_curation_read
@@ -1949,6 +1987,7 @@ let masc_board_descriptor board_name =
     | Board_post_update
     | Board_profile
     | Board_reaction
+    | Board_reopen
     | Board_search
     | Board_sub_board_create
     | Board_sub_board_delete
@@ -2529,6 +2568,20 @@ let internal_descriptors : t list =
       ~input_schema:constitution_remove_schema.input_schema
       ~policy:(write_in_process_policy ())
       ~handler:Tool_constitution_remove
+      ()
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
+      ~input_schema_source:constitution_read_schema_source
+      ~id:"keeper.constitution.read"
+      ~name:"keeper_constitution_read"
+      ~description:constitution_read_schema.description
+      ~input_schema:constitution_read_schema.input_schema
+      (* Concurrent: each read opens its own ledger channel, then folds and
+         renders local immutable values; it never creates or mutates the ledger. *)
+      ~ordinary_execution_mode:Concurrent
+      ~policy:(read_only_in_process_policy ())
+      ~handler:Tool_constitution_read
       ()
     (* ── library (RFC-0179 PR-3) ──────────────────────────────── *)
   ; in_process_descriptor

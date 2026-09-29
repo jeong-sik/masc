@@ -23,9 +23,11 @@ type t =
         dispatch never used (PR #28219 review). *)
   }
 
-val exact_slot_list_key_of_api_format : api_format -> string
+val exact_slot_list_key_of_api_format : api_format -> string option
 (** The declaration key used when an exact-output lane appends a binding with
-    this provider format: [slots] or [cli_slots]. The runtime writer and the
+    this provider format: [Some slots] or [Some cli_slots]. [None] means the
+    protocol has no output-schema channel and cannot enter an exact lane.
+    The runtime writer and the
     resolved picker projection use the same decision. *)
 
 type dispatch_credential_error =
@@ -299,17 +301,27 @@ type exact_slot_degradation =
 val exact_slot_body_deadline_gap_to_string : exact_slot_body_deadline_gap -> string
 (** One line naming the lane table, the slot, the provider and the key to add. *)
 
-type exact_lane_cli_slot_not_official_client =
+type exact_lane_cli_slot_unservable_reason =
+  | Not_an_official_client
+      (** The runtime is dispatched over HTTP ([Agent_core]). *)
+  | Client_without_output_schema
+      (** An official client that cannot hold an answer to a JSON Schema
+          ({!Runtime_schema.api_format_output_schema_channel}). *)
+
+type exact_lane_cli_slot_unservable =
   { lane_id : string
   ; slot_id : string
   ; provider_id : string
+  ; reason : exact_lane_cli_slot_unservable_reason
   }
 (** One [\[runtime.exact_output_lanes.<lane>\]] [cli_slots] entry that names a
-    configured runtime dispatched over HTTP ([Agent_core]) rather than an
-    official client. Every lane's [cli_slots] dispatches through
-    {!Keeper_lane_cli_oneshot.run} alone, which requires
-    {!Runtime_execution.Official_client}; an id that resolves to nothing
-    instead is {!Reference_unresolved}, not this. *)
+    configured runtime the CLI tail cannot call. Every lane's [cli_slots]
+    dispatches through {!Keeper_lane_cli_oneshot.run} alone, which requires
+    {!Runtime_execution.Official_client} and hands the client an output
+    schema on every call; an id that resolves to nothing instead is
+    {!Reference_unresolved}, not this. An official client with no schema
+    channel is also refused when its runtime id appears in [slots];
+    catalog-only [slots] ids remain catalog-owned. *)
 
 type load_failure =
   | Toml_unparsable of Runtime_toml.parse_error list
@@ -341,7 +353,11 @@ type load_failure =
       ; high_water_tokens : int
       ; max_context : int
       }
-  | Exact_lane_cli_slot_not_official_client of exact_lane_cli_slot_not_official_client
+  | Muse_window_below_host_overhead of
+      { runtime_id : string
+      ; max_context : int
+      }
+  | Exact_lane_cli_slot_unservable of exact_lane_cli_slot_unservable
       (** Why {!load_list} refused a configuration. Closed, so a consumer
           decides per case instead of matching rendered text — the contract
           {!drop_reason} keeps one level down. [Toml_unparsable] is the one case
@@ -634,6 +650,16 @@ val keeper_assignments : unit -> (string * string) list
     Dashboard/operator surfaces use this to expose assignment blast radius
     without parsing TOML independently. *)
 
+type keeper_dispatch_snapshot
+(** Effective route, ordered candidates and their frozen dispatch identities
+    from one loaded-state read. Unrelated config edits do not change it. *)
+
+val keeper_dispatch_snapshot : keeper_name:string -> keeper_dispatch_snapshot
+val same_keeper_dispatch :
+  keeper_dispatch_snapshot -> keeper_dispatch_snapshot -> bool
+(** Unchanged bindings retain their candidate cells across catalog reloads.
+    A reassignment, lane edit, removal or binding replacement differs. *)
+
 type dashboard_runtime_defaults_snapshot =
   { default_runtime : t option
   ; runtimes : t list
@@ -659,14 +685,6 @@ type exact_lane = Standalone_lane.t =
   | Browser_stagehand
       (** Answers the Stagehand extension's [llm.generate] for the browser
           lane (RFC-browser-lane-stagehand §3.7). *)
-
-val exact_lane_supports_cli_tail : exact_lane -> bool
-(** Whether this exact lane can walk official-client [cli_slots] when HTTP
-    provider slots are absent or exhausted. Verifier uses the managed tool-call
-    runner and its typed verdict callback. [Browser_stagehand] walks its
-    [cli_slots] as official-client one-shots after its HTTP slots; see
-    {!Browser_stagehand_model} for the one request shape a one-shot cannot
-    carry. *)
 
 val verifier_runtime_admission : t -> (unit, string) result
 (** The one answer to "can this runtime judge a completion review?", used by
@@ -796,18 +814,18 @@ val entry_runtime_id_of_route : string -> string option
     answers [None] for a lane name. *)
 
 val smallest_max_prompt_bytes_of_route : string -> int option
-(** The smallest [max-prompt-bytes] declared by any candidate the route may
-    walk: every candidate of a declared lane, or the runtime itself when the
-    route names one. A candidate that declares none adds no ceiling and does
-    not erase one a sibling declares. [None] when no candidate declares a
-    ceiling, or when the route names neither a lane nor a runtime. *)
+(** The smallest start-prompt ceiling ({!prompt_capacity_bytes}) of any
+    candidate the route may walk: every candidate of a declared lane, or the
+    runtime itself when the route names one. A candidate without one adds no
+    ceiling and does not erase one a sibling has. [None] when no candidate
+    has a ceiling, or when the route names neither a lane nor a runtime. *)
 
 val smallest_max_prompt_bytes_of_runtime_ids : string list -> int option
-(** The smallest [max-prompt-bytes] declared by the named runtimes, for a
-    walk whose candidate list is already fixed (a deferred lane suffix). An id
-    that declares none, or that the loaded catalog does not hold, adds no
-    ceiling and does not erase one another id declares. [None] when no named
-    runtime declares a ceiling. *)
+(** The smallest start-prompt ceiling ({!prompt_capacity_bytes}) of the
+    named runtimes, for a walk whose candidate list is already fixed (a
+    deferred lane suffix). An id without one, or that the loaded catalog does
+    not hold, adds no ceiling and does not erase one another id has. [None]
+    when no named runtime has a ceiling. *)
 
 val get_runtime_by_id : string -> t option
 (** [get_runtime_by_id id] is the materialized runtime whose binding-key id
@@ -915,13 +933,30 @@ val quota_scope_of_runtime_id : string -> Runtime_quota_window.scope option
     the runtime id is unknown. Consumed by
     {!Runtime_quota_window.demote_order} and the matching note site. *)
 
+val muse_prompt_capacity : t -> (int, Runtime_muse_prompt_capacity.error) result
+(** The start-prompt ceiling of a Muse runtime: derived from its resolved
+    window ({!resolve_max_context_of_runtime}) and narrowed by a declared
+    [max-prompt-bytes] ({!Runtime_muse_prompt_capacity.start_prompt_bytes}).
+    A Muse turn applies this and refuses with the error's cause. *)
+
+val prompt_capacity_bytes : t -> int option
+(** The start-prompt ceiling a turn on this runtime applies: the model's
+    declared [max-prompt-bytes], or for a Muse model {!muse_prompt_capacity}.
+    [None] when no ceiling applies, which for Muse means the ceiling cannot
+    be derived and the turn itself refuses. *)
+
 val max_prompt_bytes_of_runtime_id : string -> int option
-(** Declared [max-prompt-bytes] for the model bound to this runtime id, or
-    [None] when the model declares none. *)
+(** {!prompt_capacity_bytes} of the runtime with this id, or [None] when the
+    id is unknown or no ceiling applies. *)
 
 val context_marks_of_runtime_id : string -> Runtime_schema.context_marks option
 (** The binding's eviction marks, or [None] when the binding declares none
     (the keeper then evicts carried history only on a provider refusal). *)
+
+val validate_muse_prompt_ceilings : t list -> (unit, load_failure) result
+(** Refuses a Muse runtime whose resolved window cannot hold the host's own
+    overhead, so no start-prompt ceiling exists ({!muse_prompt_capacity})
+    whatever [max-prompt-bytes] it declares. *)
 
 val validate_runtime_context_marks : t list -> (unit, load_failure) result
 (** Refuses a runtime whose high-water mark exceeds its resolved max-context;

@@ -113,6 +113,7 @@ type librarian_failure_kind =
   | Exact_setup_failure
   | Exact_execution_failure
   | Domain_output_invalid
+  | Absorb_judgment_failure
   | Memory_snapshot_write_failure
   | Runtime_context_unavailable
   | Lane_cancelled
@@ -1259,6 +1260,7 @@ let librarian_failure_kind_to_string = function
   | Exact_setup_failure -> "exact_setup_failure"
   | Exact_execution_failure -> "exact_execution_failure"
   | Domain_output_invalid -> "domain_output_invalid"
+  | Absorb_judgment_failure -> "absorb_judgment_failure"
   | Memory_snapshot_write_failure -> "memory_snapshot_write_failure"
   | Runtime_context_unavailable -> "runtime_context_unavailable"
   | Lane_cancelled -> "lane_cancelled"
@@ -1271,6 +1273,7 @@ let librarian_failure_kind_of_string = function
   | "exact_setup_failure" -> Some Exact_setup_failure
   | "exact_execution_failure" -> Some Exact_execution_failure
   | "domain_output_invalid" -> Some Domain_output_invalid
+  | "absorb_judgment_failure" -> Some Absorb_judgment_failure
   | "memory_snapshot_write_failure" -> Some Memory_snapshot_write_failure
   | "runtime_context_unavailable" -> Some Runtime_context_unavailable
   | "lane_cancelled" -> Some Lane_cancelled
@@ -2049,6 +2052,41 @@ let update_locked_with_output
            |> Result.map_error store_error
          in
          let* next, output = build ~snapshot_content previous in
+         let* source_lines =
+           match
+             Keeper_memory_source_current.read_for_keepers_dir
+               ~keepers_dir
+               ~keeper_id
+           with
+           | Error message -> Error (store_error message)
+           | Ok snapshot ->
+             let lines =
+               Option.fold
+                 ~none:[]
+                 ~some:(fun (snapshot : Keeper_memory_source_current.t) ->
+                   List.map
+                     (Keeper_memory_source_current.render_fact ~verified:false)
+                     snapshot.facts
+                   @ List.map
+                       Keeper_memory_source_current.render_invalidation
+                       snapshot.invalidations)
+                 snapshot
+             in
+             Ok lines
+         in
+         let previous_bytes =
+           Keeper_memory_os_render.facts_payload_bytes
+             ~ordinary_facts:
+               (Option.fold ~none:[] ~some:(fun (snapshot : t) -> snapshot.facts) previous)
+             ~source_lines
+         in
+         let* () =
+           Keeper_memory_os_render.check_facts_budget
+             ~previous_bytes
+             ~ordinary_facts:next.facts
+             ~source_lines
+           |> Result.map_error store_error
+         in
          (* The file is 150-330 KB per keeper and every commit reads it, parses
             it, prints it and replaces it. On the scheduler domain that was one
             11-24 ms run per commit (rtev, 2026-09-16), about 80 commits an

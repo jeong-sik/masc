@@ -1,3 +1,5 @@
+(* [all] is derived in constructor order, the order the runtime file editor
+   and the route error list use. *)
 type t =
   | Librarian
   | Hitl_auto_judge
@@ -5,11 +7,7 @@ type t =
   | Workspace_curator
   | Verifier
   | Browser_stagehand
-
-(* [to_id] is exhaustive and [all] is not, so the two stay adjacent.
-   test_exact_lane_run_registry holds [all] against a match of its own. The
-   order is the one the runtime file editor and the route error list use. *)
-let all = [ Librarian; Hitl_auto_judge; Board_attention; Workspace_curator; Verifier; Browser_stagehand ]
+[@@deriving enumerate]
 
 let to_id = function
   | Librarian -> "librarian_exact"
@@ -24,3 +22,25 @@ let equal (left : t) (right : t) = left = right
 
 (* Read back through [to_id], so no id is spelled a second time. *)
 let of_id id = List.find_opt (fun lane -> String.equal (to_id lane) id) all
+
+type obligation =
+  | Required
+  | Optional
+
+(* Board attention candidates persist before any model call and never expire,
+   so without this lane no Board post between Keepers is ever judged. HITL auto
+   judge was required before this list moved here; the reason is not recorded
+   in the code (RFC every-lane-is-one-row-in-one-registry, decision d3). *)
+let obligation = function
+  | Board_attention | Hitl_auto_judge -> Required
+  | Librarian | Workspace_curator | Verifier | Browser_stagehand -> Optional
+;;
+
+let required_ids =
+  List.filter_map
+    (fun lane ->
+       match obligation lane with
+       | Required -> Some (to_id lane)
+       | Optional -> None)
+    all
+;;

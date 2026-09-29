@@ -256,11 +256,11 @@ let test_source_activity_does_not_infer_ownership () =
   let dependent = interest [`Assoc ["source_id",`String "metric";"kind",`String "lane_output";
     "installation_id",`String "producer";"selection",`String "latest_completed"]] in
   check bool "MSX changes refresh only the declared native MSX source" true
-    (Sources.interested msx Sources.Msx_changed);
+    (Sources.interested msx (Sources.Machine_changed Masc.Machine_lane.Msx));
   let dos = interest [`Assoc ["source_id",`String "machine";"kind",`String "dos_capture"]] in
   check bool "DOS changes refresh the declared DOS source" true
-    (Sources.interested dos Sources.Dos_changed);
-  check bool "and MSX changes do not" false (Sources.interested dos Sources.Msx_changed);
+    (Sources.interested dos (Sources.Machine_changed Masc.Machine_lane.Dos));
+  check bool "and MSX changes do not" false (Sources.interested dos (Sources.Machine_changed Masc.Machine_lane.Msx));
   check bool "browser changes refresh only the declared browser source" true
     (Sources.interested browser Sources.Browser_changed);
   List.iter (fun activity ->
@@ -268,7 +268,8 @@ let test_source_activity_does_not_infer_ownership () =
       (Sources.interested dependent activity);
     check bool "owned environment has no invented external source" false
       (Sources.interested (interest []) activity))
-    [Sources.Tool_completed;Sources.Msx_changed;Sources.Dos_changed;Sources.Browser_changed];
+    [Sources.Tool_completed;Sources.Machine_changed Masc.Machine_lane.Msx;
+     Sources.Machine_changed Masc.Machine_lane.Dos;Sources.Browser_changed];
   check bool "unrelated completion does not refresh browser capture" false
     (Sources.interested browser Sources.Tool_completed);
   check bool "browser completion does not refresh MSX capture" false
@@ -279,8 +280,8 @@ let test_source_activity_does_not_infer_ownership () =
    and reads are not source changes. *)
 let test_misc_tools_name_the_source_they_move () =
   let label = function
-    | Sources.Msx_changed -> "msx"
-    | Sources.Dos_changed -> "dos"
+    | Sources.Machine_changed Masc.Machine_lane.Msx -> "msx"
+    | Sources.Machine_changed Masc.Machine_lane.Dos -> "dos"
     | Sources.Browser_changed -> "browser"
     | Sources.Tool_completed -> "tool" in
   let activity operation = label (Sources.activity_of_misc_operation operation) in
@@ -302,10 +303,44 @@ let test_misc_tools_name_the_source_they_move () =
     (activity Tool_schemas_misc.Misc_browser_interact);
   check string "listing tabs moves nothing" "tool"
     (activity Tool_schemas_misc.Misc_browser_tabs);
+  check string "a stagehand sentence moves no source a lane addon observes" "tool"
+    (activity Tool_schemas_misc.Misc_browser_instruct);
   check string "subscription reading and acknowledgement do not move an MSX or browser source" "tool"
     (activity Tool_schemas_misc.Misc_lane_updates);
   check string "a web search is a plain completion" "tool"
     (activity Tool_schemas_misc.Misc_web_search)
+
+(* What a built-in lane offers a binding and what [parse] accepts come from one
+   match, so a backend without an idle document observer is refused as a
+   source and lists no source kind. *)
+let test_built_in_lanes_offer_what_parse_accepts () =
+  let offers builtin = List.map Sources.kind_to_string (Sources.offers builtin) in
+  check (Alcotest.list string) "Stagehand offers no source" []
+    (offers (Masc.Lane_id.Browser Browser_lane.Lane_name.Stagehand));
+  check (Alcotest.list string) "automation offers its document" [ "browser_document" ]
+    (offers (Masc.Lane_id.Browser Browser_lane.Lane_name.Automation));
+  check (Alcotest.list string) "the live browser offers its document" [ "browser_document" ]
+    (offers (Masc.Lane_id.Browser Browser_lane.Lane_name.Live));
+  check (Alcotest.list string) "MSX offers its capture" [ "msx_capture" ]
+    (offers (Masc.Lane_id.Machine Masc.Machine_lane.Msx));
+  check (Alcotest.list string) "DOS offers its capture" [ "dos_capture" ]
+    (offers (Masc.Lane_id.Machine Masc.Machine_lane.Dos));
+  List.iter
+    (fun lane ->
+       check (Alcotest.list string) (Standalone_lane.to_id lane ^ " offers no source") []
+         (offers (Masc.Lane_id.Exact lane)))
+    Standalone_lane.all;
+  let document lane =
+    binding [`Assoc ["source_id",`String "page";"kind",`String "browser_document";
+      "lane",`String (Browser_lane.Lane_name.to_wire lane);"tab_id",`Int 1;
+      "target_id",`String "project";"environment",`String "preview";"request_id",`String "capture"]] in
+  (match Sources.parse (document Browser_lane.Lane_name.Stagehand) with
+   | Ok _ -> fail "a stagehand document source must be refused"
+   | Error error ->
+     check bool "the refusal names the stagehand lane" true
+       (String.equal error "a lane addon cannot observe the stagehand lane: it has no idle document observer"));
+  check bool "an automation document source is accepted" true
+    (Result.is_ok (Sources.parse (document Browser_lane.Lane_name.Automation)))
 
 let () = run "Lane source provenance" ["acquisition", [
   test_case "activity follows declared typed sources" `Quick test_source_activity_does_not_infer_ownership;
@@ -315,4 +350,5 @@ let () = run "Lane source provenance" ["acquisition", [
   test_case "file rotation keeps original bytes" `Quick test_file_rotation_keeps_exact_original_bytes;
   test_case "combined ingress preserves incomplete coverage" `Quick test_combined_ingress_marks_omitted_sources;
   test_case "browser actual identity and unknown coverage" `Quick test_browser_identity_and_unknown_coverage;
-  test_case "misc tools name the source they move" `Quick test_misc_tools_name_the_source_they_move]]
+  test_case "misc tools name the source they move" `Quick test_misc_tools_name_the_source_they_move;
+  test_case "built-in lanes offer what parse accepts" `Quick test_built_in_lanes_offer_what_parse_accepts]]

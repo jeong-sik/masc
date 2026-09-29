@@ -1,0 +1,249 @@
+{
+  "schema": "masc.standalone_llm_lanes.v2",
+  "generated_at": "2026-09-28T23:41:31Z",
+  "observed_at_unix": 1790638891.440724,
+  "observation_only": true,
+  "exact_run_projection_count": 2000,
+  "exact_run_source_total": 4158,
+  "exact_run_projection_truncated": true,
+  "lanes": [
+    {
+      "lane_id": "board_attention_exact",
+      "label": "Board Attention",
+      "purpose": "Judges one durable Board candidate for Keeper attention.",
+      "required": true,
+      "observation_only": true,
+      "configured": true,
+      "configuration_state": "ready",
+      "admitted_slots": [
+        "glm-coding.glm-5.3-flash"
+      ],
+      "cli_slots": [],
+      "dropped_slots": [],
+      "declared_slots": [
+        "glm-coding.glm-5.3-flash"
+      ],
+      "declared_cli_slots": [],
+      "admission_error": null,
+      "status": "running",
+      "retained_run_count": 859,
+      "running_count": 1,
+      "succeeded_count": 762,
+      "failed_count": 96,
+      "cancelled_count": 0,
+      "last_started_at": 1790638887.173536,
+      "last_terminal_at": 1790638887.165977,
+      "last_outcome": "succeeded",
+      "p50_elapsed_s": 12.973491191864014,
+      "selected_slots": [
+        {
+          "slot_id": "glm-coding.glm-5.3-flash",
+          "count": 567
+        }
+      ],
+      "runs_without_slot": {
+        "vendor_system_one": 285,
+        "server_restarted": 6,
+        "no_slot": 0
+      },
+      "jev": {
+        "state": "configured",
+        "destinations": [
+          {
+            "destination_uri": "https://api.typesafe.ai/v1/systemone",
+            "model": "jev-latest"
+          }
+        ]
+      }
+    },
+    {
+      "lane_id": "hitl_auto_judge",
+      "label": "HITL Auto Judge",
+      "purpose": "Produces the structured judgment for one held approval.",
+      "required": true,
+      "observation_only": true,
+      "configured": true,
+      "configuration_state": "ready",
+      "admitted_slots": [
+        "glm-coding.glm-5.3-flash"
+      ],
+      "cli_slots": [],
+      "dropped_slots": [],
+      "declared_slots": [
+        "glm-coding.glm-5.3-flash"
+      ],
+      "declared_cli_slots": [],
+      "admission_error": null,
+      "status": "no_retained_observation",
+      "retained_run_count": 0,
+      "running_count": 0,
+      "succeeded_count": 0,
+      "failed_count": 0,
+      "cancelled_count": 0,
+      "last_started_at": null,
+      "last_terminal_at": null,
+      "last_outcome": null,
+      "p50_elapsed_s": null,
+      "selected_slots": [],
+      "runs_without_slot": {
+        "vendor_system_one": 0,
+        "server_restarted": 0,
+        "no_slot": 0
+      }
+    },
+    {
+      "lane_id": "librarian_exact",
+      "label": "Librarian",
+      "purpose": "Selects the next Memory OS snapshot from immutable Keeper history.",
+      "required": false,
+      "observation_only": true,
+      "configured": true,
+      "configuration_state": "ready",
+      "admitted_slots": [
+        "ollama_cloud.ollama-cloud-deepseek-v4-1-flash"
+      ],
+      "cli_slots": [
+        "claude_code.claude-sonnet-5-high"
+      ],
+      "dropped_slots": [],
+      "declared_slots": [
+        "ollama_cloud.ollama-cloud-deepseek-v4-1-flash"
+      ],
+      "declared_cli_slots": [
+        "claude_code.claude-sonnet-5-high"
+      ],
+      "admission_error": null,
+      "status": "running",
+      "retained_run_count": 1141,
+      "running_count": 7,
+      "succeeded_count": 1118,
+      "failed_count": 12,
+      "cancelled_count": 4,
+      "last_started_at": 1790638889.385517,
+      "last_terminal_at": 1790638890.540941,
+      "last_outcome": "succeeded",
+      "p50_elapsed_s": 10.641808986663818,
+      "selected_slots": [
+        {
+          "slot_id": "claude_code.claude-sonnet-5-high",
+          "count": 12
+        },
+        {
+          "slot_id": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
+          "count": 1106
+        }
+      ],
+      "runs_without_slot": {
+        "vendor_system_one": 0,
+        "server_restarted": 0,
+        "no_slot": 16
+      }
+    },
+    {
+      "lane_id": "workspace_curator_exact",
+      "label": "Workspace Curator",
+      "purpose": "Synthesizes attributed proposals after committed workspace memory changes; semantic verification is not performed.",
+      "required": false,
+      "observation_only": true,
+      "configured": false,
+      "configuration_state": "unconfigured",
+      "admitted_slots": [],
+      "cli_slots": [],
+      "dropped_slots": [],
+      "declared_slots": [],
+      "declared_cli_slots": [],
+      "admission_error": "exact-output lane \"workspace_curator_exact\" is not configured",
+      "status": "unavailable",
+      "retained_run_count": 0,
+      "running_count": 0,
+      "succeeded_count": 0,
+      "failed_count": 0,
+      "cancelled_count": 0,
+      "last_started_at": null,
+      "last_terminal_at": null,
+      "last_outcome": null,
+      "p50_elapsed_s": null,
+      "selected_slots": [],
+      "runs_without_slot": {
+        "vendor_system_one": 0,
+        "server_restarted": 0,
+        "no_slot": 0
+      }
+    },
+    {
+      "lane_id": "verifier_exact",
+      "label": "Verifier",
+      "purpose": "Reviews Task completion and Goal proof evidence.",
+      "required": false,
+      "observation_only": true,
+      "configured": true,
+      "configuration_state": "ready",
+      "admitted_slots": [
+        "glm-coding.glm-5.3-flash"
+      ],
+      "cli_slots": [],
+      "dropped_slots": [],
+      "declared_slots": [
+        "glm-coding.glm-5.3-flash"
+      ],
+      "declared_cli_slots": [],
+      "admission_error": null,
+      "status": "running",
+      "retained_run_count": 79,
+      "running_count": 1,
+      "succeeded_count": 70,
+      "failed_count": 7,
+      "cancelled_count": 1,
+      "last_started_at": 1790638740.688341,
+      "last_terminal_at": 1790636313.635036,
+      "last_outcome": "succeeded",
+      "p50_elapsed_s": 172.52230095863342,
+      "selected_slots": [
+        {
+          "slot_id": "claude_code.claude-sonnet-5",
+          "count": 45
+        },
+        {
+          "slot_id": "glm-coding.glm-5.3-flash",
+          "count": 32
+        }
+      ],
+      "runs_without_slot": {
+        "vendor_system_one": 0,
+        "server_restarted": 0,
+        "no_slot": 1
+      }
+    },
+    {
+      "lane_id": "browser_stagehand_exact",
+      "label": "Browser Stagehand",
+      "purpose": "Answers structured model requests from the Stagehand browser lane; run records are not retained yet.",
+      "required": false,
+      "observation_only": true,
+      "configured": false,
+      "configuration_state": "unconfigured",
+      "admitted_slots": [],
+      "cli_slots": [],
+      "dropped_slots": [],
+      "declared_slots": [],
+      "declared_cli_slots": [],
+      "admission_error": "exact-output lane \"browser_stagehand_exact\" is not configured",
+      "status": "unavailable",
+      "retained_run_count": 0,
+      "running_count": 0,
+      "succeeded_count": 0,
+      "failed_count": 0,
+      "cancelled_count": 0,
+      "last_started_at": null,
+      "last_terminal_at": null,
+      "last_outcome": null,
+      "p50_elapsed_s": null,
+      "selected_slots": [],
+      "runs_without_slot": {
+        "vendor_system_one": 0,
+        "server_restarted": 0,
+        "no_slot": 0
+      }
+    }
+  ]
+}

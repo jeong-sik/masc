@@ -99,6 +99,9 @@ type call =
   | Page_goto of { page_id : string; url : string }
   | Page_screenshot of { page_id : string }
   | Page_evaluate of { page_id : string; expression : string }
+  | Page_click of { page_id : string; x : float; y : float }
+  | Page_scroll of { page_id : string; x : float; y : float; delta_x : float; delta_y : float }
+  | Page_drag_and_drop of { page_id : string; from_x : float; from_y : float; to_x : float; to_y : float }
 
 val method_name : call -> string
 val call_params : call -> Yojson.Safe.t

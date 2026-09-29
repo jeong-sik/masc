@@ -263,6 +263,18 @@ let test_image_probe_uses_structured_evidence () =
   | M.Image_cli_unavailable -> ()
   | _ -> Alcotest.fail "exit 127 must preserve the CLI-unavailable class"
 
+let test_image_lock_marker_is_read_from_inspect_json () =
+  let with_marker =
+    {|[{"Config":{"Labels":{"masc.sandbox.opam_lock_sha256":"abc123"}}}]|}
+  in
+  Alcotest.(check (option string)) "marker" (Some "abc123")
+    (M.image_lock_marker_from_inspect with_marker);
+  Alcotest.(check (option string)) "object response marker" (Some "def456")
+    (M.image_lock_marker_from_inspect
+       {|{"config":{"labels":{"masc.sandbox.opam_lock_sha256":"def456"}}}|});
+  Alcotest.(check (option string)) "missing marker" None
+    (M.image_lock_marker_from_inspect {|[{"Config":{"Labels":{}}}]|})
+
 (* [msb image inspect --format json] answers a bare object where the other
    two answer an array of one (measured 0.6.16, 2026-09-04). Read with the
    array check, an image that is present classified as "the probe could not
@@ -352,6 +364,32 @@ let with_eio_fs f =
     ~proc_mgr:(Eio.Stdenv.process_mgr env)
     ~clock:(Eio.Stdenv.clock env);
   Fun.protect ~finally:Process_eio.reset_for_testing f
+
+let test_image_admission_inspects_once () =
+  with_eio_fs @@ fun () ->
+  let dir = temp_dir "microvm-image-cli-" in
+  let cli = Filename.concat dir "container" in
+  let log = Filename.concat dir "calls" in
+  let previous_path = Sys.getenv "PATH" in
+  Unix.putenv "PATH" (dir ^ ":" ^ previous_path);
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.putenv "PATH" previous_path;
+      List.iter (fun p -> if Sys.file_exists p then Unix.unlink p) [cli; log];
+      Unix.rmdir dir)
+  @@ fun () ->
+  let oc = open_out cli in
+  Printf.fprintf oc
+    "#!/bin/sh\nprintf '%%s\\n' \"$*\" >> %s\nprintf '%%s\\n' '[{}]'\n"
+    (Filename.quote log);
+  close_out oc;
+  Unix.chmod cli 0o755;
+  (match M.image_present_for Backend.Apple_container ~image:"fixture:local" ~timeout_sec:5.0 with
+   | Ok () -> ()
+   | Error reason -> Alcotest.fail reason);
+  Alcotest.(check string) "admission and marker share one inspect"
+    "image inspect fixture:local\n" (Fs_compat.load_file log)
+;;
 
 let test_live_structured_image_probe () =
   match Sys.getenv_opt "MASC_MICROVM_IMAGE_PROBE_LIVE" with
@@ -1802,40 +1840,62 @@ let test_volume_create_argv_carries_a_size () =
 
 let test_work_volume_trim_argv_grants_one_capability () =
   let argv =
-    M.apple_work_volume_trim_argv ~volume_name:"masc-keeper-work-x" ~image:"masc-sandbox:general"
+    M.apple_work_volume_trim_argv ~keeper_name:"x" ~volume_name:"masc-keeper-work-x" ~image:"masc-sandbox:general"
+  in
+  let spelled guest_constraint =
+    match Backend.run_constraint_argv Backend.Apple_container guest_constraint with
+    | Backend.Expressed tokens -> tokens
+    | Backend.Not_expressible reason -> Alcotest.failf "Apple cannot spell it: %s" reason
+  in
+  let rec contains_run run = function
+    | [] -> false
+    | _ :: rest as whole ->
+      (List.length whole >= List.length run
+       && List.equal String.equal run (List.filteri (fun i _ -> i < List.length run) whole))
+      || contains_run run rest
   in
   Alcotest.(check bool) "goes through container" true (contains "container" argv);
   Alcotest.(check bool) "a one-shot container" true (contains "--rm" argv);
   Alcotest.(check bool) "cleanup can address this exact trim" true
     (adjacent ~flag:"--name" ~value:"masc-keeper-work-x-trim" argv);
   Alcotest.(check bool) "runs as root" true (adjacent ~flag:"--user" ~value:"0" argv);
-  (* FITRIM needs this one capability; nothing broader is granted. *)
+  (* --cap-add alone adds to the runtime's default set, so the default set is
+     dropped first, spelled the way the keeper guest's boot spells it. *)
+  Alcotest.(check bool) "drops every capability first" true
+    (contains_run (spelled Backend.Drop_all_capabilities) argv);
   Alcotest.(check bool) "only CAP_SYS_ADMIN is added" true
     (adjacent ~flag:"--cap-add" ~value:"CAP_SYS_ADMIN" argv
      && List.length (List.filter (String.equal "--cap-add") argv) = 1);
+  Alcotest.(check bool) "read-only root" true (contains_run (spelled Backend.Read_only_rootfs) argv);
+  Alcotest.(check bool) "no network" true (adjacent ~flag:"--network" ~value:"none" argv);
+  Alcotest.(check bool) "fstrim is the entrypoint, not the image's own" true
+    (adjacent ~flag:"--entrypoint" ~value:"/usr/sbin/fstrim" argv);
   Alcotest.(check bool) "mounts the work volume at the trim root" true
     (adjacent ~flag:"--volume" ~value:("masc-keeper-work-x:" ^ M.trim_guest_root) argv);
-  Alcotest.(check (list string)) "the image runs fstrim on that root"
-    [ "masc-sandbox:general"; "fstrim"; "-v"; M.trim_guest_root ]
+  Alcotest.(check (list string)) "the image trims that root"
+    [ "masc-sandbox:general"; "-v"; M.trim_guest_root ]
     (let n = List.length argv in
-     List.filteri (fun i _ -> i >= n - 4) argv)
+     List.filteri (fun i _ -> i >= n - 3) argv)
 ;;
 
 let test_work_volume_trim_confirms_cleanup () =
+  Eio_main.run @@ fun _ ->
   let cli = [ Backend.cli_name Backend.Apple_container ] in
   let volume_name = "masc-keeper-work-x" in
-  let name = volume_name ^ "-trim" in
+  let name = M.work_volume_trim_name ~keeper_name:"x" in
   let image = "masc-sandbox:general" in
   let rm = M.delete_force_argv_for Backend.Apple_container ~container_name:name in
   let list = cli @ [ "list"; "--all"; "--format"; "json" ] in
-  let trim = M.apple_work_volume_trim_argv ~volume_name ~image in
-  let execute ~before ~after ~trim_status =
+  let trim = M.apple_work_volume_trim_argv ~keeper_name:"x" ~volume_name ~image in
+  let execute ?(expect_trim = true) ~before ~after ~trim_status () =
     let remaining = ref
-      [ rm, (Unix.WEXITED 0, "", ""); list, before;
-        trim, (trim_status, "", "trim interrupted");
-        rm, (Unix.WEXITED 0, "", ""); list, after ]
+      ([ rm, (Unix.WEXITED 1, "", "already absent or failed"); list, before ]
+       @ (if expect_trim then [trim, (trim_status, "", "trim interrupted")] else [])
+       @ [rm, (Unix.WEXITED 1, "", "already absent or failed"); list, after])
     in
-    let run argv =
+    let run ~timeout_sec argv =
+      Alcotest.(check (float 0.)) "only deletion gets the removal budget"
+        (if argv = rm then 180. else 30.) timeout_sec;
       match !remaining with
       | (expected, result) :: rest ->
         Alcotest.(check (list string)) "cleanup brackets the trim" expected argv;
@@ -1843,30 +1903,330 @@ let test_work_volume_trim_confirms_cleanup () =
         result
       | [] -> Alcotest.fail "unexpected container command"
     in
-    M.reclaim_apple_work_volume ~run ~volume_name ~image, remaining
+    M.reclaim_apple_work_volume ~run ~on_cleanup_error:(fun _ -> ())
+      ~timeout_sec:30. ~remove_timeout_sec:180. ~keeper_name:"x" ~volume_name ~image, remaining
   in
   let absent = Unix.WEXITED 0, "[]", "" in
-  let result, remaining = execute ~before:absent ~after:absent ~trim_status:(Unix.WSIGNALED 9) in
+  let result, remaining = execute ~before:absent ~after:absent ~trim_status:(Unix.WSIGNALED 9) () in
   (match result with
    | Ok (Unix.WSIGNALED 9, _) -> ()
    | Ok _ | Error _ -> Alcotest.fail "a confirmed cleanup preserves the trim failure");
   Alcotest.(check int) "both cleanup inventories were read" 0 (List.length !remaining);
   List.iter
     (fun after ->
-       let result, _ = execute ~before:absent ~after ~trim_status:(Unix.WEXITED 0) in
+       let result, _ = execute ~before:absent ~after ~trim_status:(Unix.WEXITED 0) () in
        match result with
        | Error _ -> ()
        | Ok _ -> Alcotest.fail "unproven cleanup permits a second volume mount")
-    [ Unix.WEXITED 0, {|[{"configuration":{"id":"masc-keeper-work-x-trim"}}]|}, ""
+    [ Unix.WEXITED 0, Yojson.Safe.to_string (`List [`Assoc ["configuration", `Assoc ["id", `String name]]]), ""
     ; Unix.WEXITED 0, "[{}]", ""
     ; Unix.WEXITED 0, {|[{"id":""}]|}, ""
     ; Unix.WEXITED 0, {|[{"configuration":{"id":""}}}]|}, ""
+    ; Unix.WEXITED 0, {|[{"id":"   "}]|}, ""
+    ; Unix.WEXITED 0, "[1]", ""
+    ; Unix.WEXITED 0, "{}", ""
     ; Unix.WEXITED 0, "not JSON", ""
     ; Unix.WEXITED 1, "", "container service unavailable"
     ];
-  let result, remaining = execute ~before:(Unix.WEXITED 0, "[{}]", "") ~after:absent ~trim_status:(Unix.WEXITED 0) in
+  let result, remaining = execute ~expect_trim:false ~before:(Unix.WEXITED 0, "[{}]", "") ~after:absent ~trim_status:(Unix.WEXITED 0) () in
   (match result with Error _ -> () | Ok _ -> Alcotest.fail "unknown inventory starts a trim");
-  Alcotest.(check int) "no trim starts without proving prior cleanup" 3 (List.length !remaining)
+  Alcotest.(check int) "no trim starts; protected cleanup still runs" 0 (List.length !remaining)
+;;
+
+let trim_test_plan keeper_name =
+  M.work_volume_trim_name ~keeper_name,
+  M.apple_work_volume_trim_argv ~keeper_name ~volume_name:("masc-keeper-work-" ^ keeper_name) ~image:"trim-fixture"
+;;
+
+let test_trim_names_fit_apple_and_distinguish_long_keepers () =
+  List.iter (fun keeper_name ->
+    Alcotest.(check string) "existing valid helper names survive upgrades"
+      ("masc-keeper-work-" ^ keeper_name ^ "-trim")
+      (M.work_volume_trim_name ~keeper_name))
+    [ "x"; "Mixed.Case_9-name"; String.make 41 'a' ];
+  Alcotest.(check int) "the first overlong name is bounded" 63
+    (String.length (M.work_volume_trim_name ~keeper_name:(String.make 42 'a')));
+  let keeper = String.make 127 'a' in
+  let first, argv = trim_test_plan (keeper ^ "x") in
+  let second, _ = trim_test_plan (keeper ^ "y") in
+  let repeated, _ = trim_test_plan (keeper ^ "x") in
+  Alcotest.(check int) "Apple's maximum is respected" 63 (String.length first);
+  Alcotest.(check bool) "distinct suffixes survive truncation" false (first = second);
+  Alcotest.(check string) "name is stable for cleanup" first repeated;
+  Alcotest.(check bool) "run uses bounded name" true (adjacent ~flag:"--name" ~value:first argv)
+;;
+
+let test_trim_cancellation_runs_protected_cleanup () =
+  Eio_main.run @@ fun _ ->
+  List.iter (fun cleanup_fails ->
+    let container_name, trim_argv = trim_test_plan "trim-cancel" in
+    let delete_argv = M.delete_force_argv_for Backend.Apple_container ~container_name in
+    let listing = [ Backend.cli_name Backend.Apple_container; "list"; "--all"; "--format"; "json" ] in
+    let started = ref false and cleaned = ref false and reported = ref [] in
+    let cancelled =
+      try
+        Eio.Cancel.sub (fun cancel ->
+          let run ~timeout_sec:_ argv =
+            if argv = trim_argv then (
+              started := true;
+              Eio.Cancel.cancel cancel Exit;
+              Eio.Fiber.await_cancel ())
+            else if argv = delete_argv then (
+              if !started then (Eio.Fiber.yield (); cleaned := true);
+              Unix.WEXITED 0, "removed", "")
+            else if argv = listing then
+              if !started && cleanup_fails then Unix.WEXITED 1, "API unavailable", ""
+              else Unix.WEXITED 0, "[]", ""
+            else Alcotest.fail "unexpected trim command"
+          in
+          ignore (M.reclaim_apple_work_volume ~run ~timeout_sec:30. ~remove_timeout_sec:180.
+            ~on_cleanup_error:(fun error -> reported := error :: !reported)
+            ~keeper_name:"trim-cancel" ~volume_name:"masc-keeper-work-trim-cancel" ~image:"trim-fixture"));
+        false
+      with Eio.Cancel.Cancelled _ -> true
+    in
+    Alcotest.(check bool) "cancellation reaches caller" true cancelled;
+    Alcotest.(check bool) "yielding cleanup completed despite cancellation" true !cleaned;
+    Alcotest.(check bool) "failed cleanup is reported without replacing cancellation"
+      cleanup_fails (!reported <> [])) [ false; true ]
+;;
+
+let test_teardown_removes_or_reports_abandoned_trim_helper () =
+  with_eio_fs @@ fun () ->
+  let context = Eio_context.snapshot_state () in
+  let dir = temp_dir "trim-teardown-" in
+  let cli = Filename.concat dir "container" in
+  let log = Filename.concat dir "calls" in
+  let marker = Filename.concat dir "helper-present" in
+  let keep = Filename.concat dir "delete-fails" in
+  let keeper_name = String.make 128 'a' in
+  let name = M.work_volume_trim_name ~keeper_name in
+  let previous_path = Sys.getenv "PATH" in
+  let oc = open_out cli in
+  Printf.fprintf oc {|#!/bin/sh
+marker=%s
+log=%s
+trim=%s
+keep=%s
+printf '%%s\n' "$*" >> "$log"
+case "$*" in
+  "delete --force $trim") [ -e "$keep" ] || rm -f "$marker"; exit 1 ;;
+  "list --all --format json")
+    if [ -e "$marker" ]; then printf '[{"id":"%%s"}]\n' "$trim"; else printf '[]\n'; fi ;;
+  inspect\ *) exit 1 ;;
+  stop\ *|delete\ --force\ *) exit 0 ;;
+  *) exit 99 ;;
+esac
+|} (Filename.quote marker) (Filename.quote log) (Filename.quote name) (Filename.quote keep);
+  close_out oc;
+  Unix.chmod cli 0o755;
+  Unix.putenv "PATH" (dir ^ ":" ^ previous_path);
+  Fun.protect ~finally:(fun () ->
+    Eio_context.restore_state context;
+    Unix.putenv "PATH" previous_path;
+    (* The real teardown also creates workspace state below this owned root. *)
+    Fs_compat.remove_tree dir)
+  @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.set_switch sw;
+  let config = Masc.Workspace.default_config dir in
+  let teardown () =
+    Masc.Keeper_turn_sandbox_runtime.teardown_keeper_sandbox_by_name
+      ~timeout_sec:5. ~config ~keeper_name ~backend:Masc.Keeper_sandbox.Micro_vm
+      ~microvm_backend:Backend.Apple_container ()
+  in
+  close_out (open_out marker);
+  (match teardown () with
+   | Ok () -> ()
+   | Error detail -> Alcotest.failf "abandoned helper teardown failed: %s" detail);
+  Alcotest.(check bool) "helper was removed despite a nonzero delete status" false
+    (Sys.file_exists marker);
+  let calls = In_channel.with_open_bin log In_channel.input_all in
+  Alcotest.(check bool) "teardown addresses the same bounded helper name" true
+    (List.mem ("delete --force " ^ name) (String.split_on_char '\n' calls));
+  close_out (open_out marker);
+  close_out (open_out keep);
+  (match teardown () with
+   | Error _ -> ()
+   | Ok () -> Alcotest.fail "remaining helper was reported as removed");
+  Alcotest.(check bool) "failed deletion retains its evidence" true (Sys.file_exists marker)
+;;
+
+(* A trim inventory the helper cannot confirm must not spare the ordinary
+   guests: every name is attempted, and the trim error surfaces only when
+   all removals succeeded. *)
+let test_teardown_removes_guests_despite_trim_cleanup_error () =
+  with_eio_fs @@ fun () ->
+  let module Turn = Masc.Keeper_turn_sandbox_runtime in
+  let context = Eio_context.snapshot_state () in
+  let dir = temp_dir "trim-teardown-sweep-" in
+  let cli = Filename.concat dir "container" in
+  let log = Filename.concat dir "calls" in
+  let stuck = Filename.concat dir "guest-stuck" in
+  let keeper_name = "trim-teardown-sweep" in
+  let config = Masc.Workspace.default_config dir in
+  let guests =
+    List.map
+      (fun network_mode ->
+         Turn.For_testing_microvm.microvm_container_name ~config ~keeper_name ~network_mode)
+      Profile.all_network_modes
+  in
+  let stuck_guest =
+    match guests with
+    | first :: _ -> first
+    | [] -> Alcotest.fail "all_network_modes names no guest"
+  in
+  let trim = M.work_volume_trim_name ~keeper_name in
+  let previous_path = Sys.getenv "PATH" in
+  let oc = open_out cli in
+  Printf.fprintf oc {|#!/bin/sh
+log=%s
+trim=%s
+stuck_guest=%s
+stuck=%s
+printf '%%s\n' "$*" >> "$log"
+case "$*" in
+  "list --all --format json") printf 'not json\n'; exit 0 ;;
+  "inspect $stuck_guest")
+    if [ -e "$stuck" ]; then printf '[{"status":{"state":"running"}}]\n'; exit 0; else exit 1; fi ;;
+  inspect\ *) exit 1 ;;
+  stop\ *|delete\ --force\ *) exit 0 ;;
+  *) exit 99 ;;
+esac
+|} (Filename.quote log) (Filename.quote trim) (Filename.quote stuck_guest) (Filename.quote stuck);
+  close_out oc;
+  Unix.chmod cli 0o755;
+  Unix.putenv "PATH" (dir ^ ":" ^ previous_path);
+  Fun.protect ~finally:(fun () ->
+    Eio_context.restore_state context;
+    Unix.putenv "PATH" previous_path;
+    (* The real teardown also creates workspace state below this owned root. *)
+    Fs_compat.remove_tree dir)
+  @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.set_switch sw;
+  let teardown () =
+    Turn.teardown_keeper_sandbox_by_name
+      ~timeout_sec:5. ~config ~keeper_name ~backend:Masc.Keeper_sandbox.Micro_vm
+      ~microvm_backend:Backend.Apple_container ()
+  in
+  let calls () =
+    In_channel.with_open_bin log In_channel.input_all
+    |> String.split_on_char '\n'
+  in
+  let attempted lines name =
+    List.mem ("stop " ^ name) lines && List.mem ("delete --force " ^ name) lines
+  in
+  (* Malformed helper inventory, guests removable: every guest is attempted
+     and the trim error is the result. *)
+  (match teardown () with
+   | Error detail ->
+     Alcotest.(check bool) "trim error surfaces when guests are removed" true
+       (Astring.String.is_infix ~affix:"trim cleanup inventory is invalid JSON" detail)
+   | Ok () -> Alcotest.fail "unconfirmed helper absence was reported as removed");
+  let first_calls = calls () in
+  List.iter
+    (fun guest ->
+       Alcotest.(check bool) ("teardown attempts " ^ guest) true
+         (attempted first_calls guest))
+    guests;
+  (* The first guest stuck running: the guest failure is reported, and the
+     names after it are still attempted. *)
+  close_out (open_out stuck);
+  close_out (open_out log);
+  (match teardown () with
+   | Error detail ->
+     Alcotest.(check bool) "guest failure wins over the trim failure" true
+       (Astring.String.is_infix ~affix:"microvm_teardown_failed" detail)
+   | Ok () -> Alcotest.fail "a stuck guest was reported as removed");
+  let second_calls = calls () in
+  List.iter
+    (fun guest ->
+       Alcotest.(check bool) ("teardown still attempts " ^ guest) true
+         (attempted second_calls guest))
+    guests
+;;
+
+(* Both failures occur after a fresh snapshot was claimed and before any
+   persistent guest can mount it. Drive the actual boot with a fake CLI. *)
+let test_preboot_network_refusal_releases_claimed_identity () =
+  with_eio_fs @@ fun () ->
+  let module Turn = Masc.Keeper_turn_sandbox_runtime in
+  List.iter (fun policy_listing_fails ->
+    let context = Eio_context.snapshot_state () in
+    let dir = temp_dir "preboot-identity-" in
+    let bin = Filename.concat dir "bin" in
+    let base = Filename.concat dir "base" in
+    List.iter (fun path -> Unix.mkdir path 0o755) [ bin; base ];
+    let cli = Filename.concat bin "container" in
+    let log = Filename.concat dir "calls" in
+    let keeper_name = "preboot-identity" in
+    let masc = Filename.concat base ".masc" in
+    let microvm = Filename.concat masc "microvm" in
+    let shim_dir = Filename.concat microvm "shim" in
+    List.iter (fun path -> Unix.mkdir path 0o755) [ masc; microvm; shim_dir ];
+    let shim = Filename.concat shim_dir M.shim_binary_name in
+    Out_channel.with_open_bin shim (fun channel -> output_string channel "#!/bin/sh\nexit 0\n");
+    Unix.chmod shim 0o755;
+    Out_channel.with_open_bin cli (fun channel ->
+      Printf.fprintf channel {|#!/bin/sh
+log=%s
+listing_fails=%s
+printf '%%s\n' "$*" >> "$log"
+case "$1" in
+  stop|delete) exit 0 ;;
+  inspect) exit 1 ;;
+  image) printf '[]\n'; exit 0 ;;
+  volume)
+    case "$2" in inspect|delete) exit 0 ;; *) exit 99 ;; esac ;;
+  list) printf '[]\n'; exit 0 ;;
+  run) exit 0 ;;
+  network)
+    case "$2" in
+      list) printf '[]\n'; exit "$listing_fails" ;;
+      create) exit 0 ;;
+      inspect) printf '[{"status":{"ipv4Gateway":"192.0.2.1"}}]\n'; exit 0 ;;
+      *) exit 99 ;;
+    esac ;;
+  *) exit 99 ;;
+esac
+|} (Filename.quote log) (if policy_listing_fails then "1" else "0"));
+    Unix.chmod cli 0o755;
+    let previous_path = Sys.getenv "PATH" in
+    Unix.putenv "PATH" (bin ^ ":" ^ previous_path);
+    Fun.protect ~finally:(fun () ->
+      Eio_context.restore_state context;
+      Unix.putenv "PATH" previous_path;
+      Fs_compat.remove_tree dir)
+    @@ fun () ->
+    Eio.Switch.run @@ fun sw ->
+    Eio_context.set_switch sw;
+    let config = Masc.Workspace.default_config base in
+    let meta = { (microvm_meta ~name:keeper_name) with network_mode = Profile.Network_policy } in
+    let runtime = Turn.create ~config ~meta ~image:(Ok "trim-fixture")
+      ~network_mode:Profile.Network_policy () in
+    let container_name = Turn.For_testing_microvm.microvm_container_name
+      ~config ~keeper_name ~network_mode:Profile.Network_policy in
+    let expected = if policy_listing_fails then "microvm_policy_network_unreadable"
+      else "microvm_policy_proxy_unknown" in
+    (match Turn.microvm_remote_endpoint ~timeout_sec:5. runtime with
+     | Error detail ->
+       Alcotest.(check bool) "reached the intended pre-boot refusal" true
+         (Astring.String.is_infix ~affix:expected detail)
+     | Ok _ -> Alcotest.fail "a refused policy boot returned an endpoint");
+    Alcotest.(check bool) "unmounted identity is no longer registered" false
+      (Turn.For_testing_microvm.microvm_identity_snapshot_registered ~container_name);
+    let calls = In_channel.with_open_bin log In_channel.input_all
+      |> String.split_on_char '\n' in
+    Alcotest.(check bool) "policy lookup ran after the snapshot claim" true
+      (List.mem "network list --format json" calls);
+    let runs = List.filter (String.starts_with ~prefix:"run ") calls in
+    Alcotest.(check int) "only trim ran; no persistent guest was started" 1 (List.length runs);
+    List.iter (fun command ->
+      Alcotest.(check bool) "the sole run names the trim helper" true
+        (String.starts_with
+           ~prefix:("run --rm --name " ^ M.work_volume_trim_name ~keeper_name ^ " ") command)) runs)
+    [ true; false ]
 ;;
 
 let test_nerdctl_volume_ensure_confirms_persistent_identity () =
@@ -2726,8 +3086,11 @@ let () =
             test_image_probe_uses_structured_evidence
         ; Alcotest.test_case "the inspect shape follows the runtime" `Quick
             test_the_inspect_shape_follows_the_runtime
+        ; Alcotest.test_case "image lock marker is read from inspect JSON" `Quick
+            test_image_lock_marker_is_read_from_inspect_json
         ; Alcotest.test_case "live structured image probe" `Slow
             test_live_structured_image_probe
+        ; Alcotest.test_case "image admission inspects once" `Quick test_image_admission_inspects_once
         ; Alcotest.test_case "an absent image we have no recipe for is not built"
             `Slow test_live_absent_image_we_have_no_recipe_for_is_not_built
         ; Alcotest.test_case "sweeps only guests whose owner is gone" `Quick
@@ -2809,6 +3172,16 @@ let () =
             test_work_volume_trim_argv_grants_one_capability
         ; Alcotest.test_case "work volume trim proves cleanup before boot" `Quick
             test_work_volume_trim_confirms_cleanup
+        ; Alcotest.test_case "trim names preserve existing helpers and bound long names" `Quick
+            test_trim_names_fit_apple_and_distinguish_long_keepers
+        ; Alcotest.test_case "trim cancellation runs protected cleanup" `Quick
+            test_trim_cancellation_runs_protected_cleanup
+        ; Alcotest.test_case "teardown removes or reports abandoned trim helper" `Quick
+            test_teardown_removes_or_reports_abandoned_trim_helper
+        ; Alcotest.test_case "teardown attempts every guest after helper or guest errors" `Quick
+            test_teardown_removes_guests_despite_trim_cleanup_error
+        ; Alcotest.test_case "pre-boot network refusals release claimed identities" `Quick
+            test_preboot_network_refusal_releases_claimed_identity
         ; Alcotest.test_case "shim travels read-only with its config" `Quick
             test_shim_travels_read_only_with_its_config
         ; Alcotest.test_case "the shim sidecar decides the boot" `Quick

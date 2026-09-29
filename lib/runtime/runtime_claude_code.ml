@@ -70,6 +70,65 @@ let effective_account_home = function
          (Env_config_core.raw_value_opt "HOME"))
 ;;
 
+(* Claude Code 2.1.283 reads [.config.json] in its config directory while that
+   legacy file exists, and otherwise
+   [join(CLAUDE_CONFIG_DIR || homedir(), ".claude.json")]: without
+   CLAUDE_CONFIG_DIR the file sits in HOME itself, not in the HOME/.claude
+   directory above. *)
+let account_file account_home =
+  let legacy =
+    Option.map
+      (fun directory -> Filename.concat directory ".config.json")
+      (effective_account_home account_home)
+  in
+  match legacy with
+  | Some path when Sys.file_exists path -> Some path
+  | Some _ | None ->
+    let directory =
+      match account_home, Env_config_core.raw_value_opt "CLAUDE_CONFIG_DIR" with
+      | Some _, _ -> effective_account_home account_home
+      | None, Some path when path <> "" -> effective_account_home None
+      | None, (Some _ | None) ->
+        (match Env_config_core.raw_value_opt "HOME" with
+         | Some home when home <> "" -> Some home
+         | Some _ | None -> None)
+    in
+    Option.map (fun directory -> Filename.concat directory ".claude.json") directory
+;;
+
+(* Claude Code uses a cloud provider selection, ANTHROPIC_AUTH_TOKEN,
+   ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN before the /login account, and
+   a non-interactive session always uses ANTHROPIC_API_KEY when it is set
+   (code.claude.com/docs/en/iam, "Authentication precedence", read
+   2026-09-28). [client_environment] passes all of these to a child on the
+   inherited home and none to a selected home. *)
+let provider_switches =
+  [ "CLAUDE_CODE_USE_BEDROCK"; "CLAUDE_CODE_USE_VERTEX"; "CLAUDE_CODE_USE_FOUNDRY"
+  ; "CLAUDE_CODE_USE_MANTLE"
+  ]
+
+let credentials_before_login =
+  [ "ANTHROPIC_AUTH_TOKEN"; "ANTHROPIC_API_KEY"; "CLAUDE_CODE_OAUTH_TOKEN" ]
+
+let environment_credential_names = provider_switches @ credentials_before_login
+
+(* The 2.1.283 bundle reads a provider switch as on only for "1", "true",
+   "yes" or "on", ignoring case and surrounding space. *)
+let switch_on value =
+  List.mem (String.lowercase_ascii (String.trim value)) [ "1"; "true"; "yes"; "on" ]
+
+let runs_on_environment_credential = function
+  | Some _ -> false
+  | None ->
+    let set test name =
+      match Env_config_core.raw_value_opt name with
+      | Some value -> test value
+      | None -> false
+    in
+    List.exists (set switch_on) provider_switches
+    || List.exists (set (fun value -> value <> "")) credentials_before_login
+;;
+
 let timeout_s_for_phase config ~turn_admitted =
   if turn_admitted
   then config.timeout_s
@@ -167,7 +226,6 @@ type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_
       }
 
 type host_stop = Runtime_official_client_tool.host_stop =
-  | Queued_chat_operation
   | Repeated_tool_call of
       { tool_name : string
       ; repeated_count : int
@@ -188,6 +246,8 @@ type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
   { name : string
   ; description : string
   ; input_schema : Yojson.Safe.t
+  ; loading : Runtime_official_client_tool.loading
+  ; result_bound : Runtime_official_client_tool.result_bound
   ; call_effect : Yojson.Safe.t -> Agent_core.Tool.call_effect
   ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
   }
@@ -232,8 +292,6 @@ let emit_stream_event on_stream_event event =
          (Printexc.to_string exn))
 ;;
 
-let dynamic_tool_bytes = Runtime_official_client_tool.dynamic_tool_bytes
-
 type error =
   | Invalid_config of string
   | Spawn_failed of string
@@ -276,6 +334,7 @@ type error =
       { detail : string
       ; turn_admitted : bool
       }
+  | Unhandled_exception of string
   | Timeout of float
 
 exception Runtime_error of error
@@ -310,8 +369,6 @@ let error_to_string = function
       "Claude Code stopped after repeated tool call: tool=%s count=%d"
       tool_name
       repeated_count
-  | Stopped_by_host { stop = Queued_chat_operation; _ } ->
-    "Claude Code stopped for a queued chat operation"
   | Stopped_by_host { stop = Terminal_tool_boundary { tool_name; _ }; _ } ->
     Printf.sprintf "Claude Code stopped at terminal tool boundary: tool=%s" tool_name
   | Quota_blocked
@@ -334,6 +391,7 @@ let error_to_string = function
   | Process_exited { detail; turn_admitted } ->
     Printf.sprintf "Claude Code exited before terminal result (turn_admitted=%b): %s"
       turn_admitted detail
+  | Unhandled_exception detail -> "Claude Code runtime raised: " ^ detail
   | Timeout seconds ->
     Printf.sprintf "Claude Code stream was idle for %.3fs" seconds
 ;;
@@ -351,6 +409,7 @@ let error_kind = function
   | Stopped_by_host _ -> "stopped_by_host"
   | Quota_blocked _ -> "quota_blocked"
   | Process_exited _ -> "process_exited"
+  | Unhandled_exception _ -> "unhandled_exception"
   | Timeout _ -> "timeout"
 ;;
 
@@ -369,7 +428,7 @@ end)
 
 open Shared_json
 
-let bounded_tail = Runtime_official_client_json.bounded_tail
+module Stderr = Runtime_official_client_json.Stderr
 
 let parse_json ~stage text =
   let parsed =
@@ -522,12 +581,64 @@ let read_subscription ~mgr ~cwd config =
   | exn -> Error (Spawn_failed (Printexc.to_string exn))
 ;;
 
+(* Claude Code reads two keys from a tools/list entry's [_meta]
+   (code.claude.com/docs/en/mcp):
+
+   - ["anthropic/alwaysLoad"]: it keeps that one tool's definition in context
+     instead of behind tool search, whatever [ENABLE_TOOL_SEARCH] says. It is
+     written only for a tool whose declaration loads it upfront.
+   - ["anthropic/maxResultSizeChars"]: the result size above which Claude Code
+     writes the result to a file instead of passing it inline. It is written
+     only for a tool whose result MASC bounds ([Bounded_bytes]), with that
+     bound: UTF-8 characters never outnumber their bytes, so the byte
+     ceiling is a safe character count. An attached-service
+     result reaches the wire as the service returned it
+     ([Keeper_identity_tools.tool_result_of_call]), so it is [Unbounded] and
+     keeps the client's own threshold.
+
+   A tool with neither is sent as it was before, with no [_meta]. *)
+let dynamic_tool_meta (tool : dynamic_tool) =
+  let always_load =
+    match tool.loading with
+    | Runtime_official_client_tool.Upfront -> [ "anthropic/alwaysLoad", `Bool true ]
+    | Runtime_official_client_tool.On_demand -> []
+  in
+  let max_result_size =
+    match tool.result_bound with
+    | Runtime_official_client_tool.Bounded_bytes bytes ->
+      [ "anthropic/maxResultSizeChars", `Int bytes ]
+    | Runtime_official_client_tool.Unbounded -> []
+  in
+  match always_load @ max_result_size with
+  | [] -> None
+  | meta -> Some (`Assoc meta)
+;;
+
 let dynamic_tool_spec (tool : dynamic_tool) =
-  `Assoc
+  let fields =
     [ "name", `String tool.name
     ; "description", `String tool.description
     ; "inputSchema", tool.input_schema
     ]
+  in
+  match dynamic_tool_meta tool with
+  | None -> `Assoc fields
+  | Some meta -> `Assoc (fields @ [ "_meta", meta ])
+;;
+
+(* The name, description and schema sum is shared with Codex. Claude Code also
+   carries a per-tool [_meta] object that only some tools have, so its bytes
+   are added here: a surface size that leaves out part of what is sent cannot
+   be checked against the request window (#27427). *)
+let dynamic_tool_bytes tools =
+  Runtime_official_client_tool.dynamic_tool_bytes tools
+  + List.fold_left
+      (fun acc tool ->
+         match dynamic_tool_meta tool with
+         | None -> acc
+         | Some meta -> acc + String.length (Yojson.Safe.to_string meta))
+      0
+      tools
 ;;
 
 let find_dynamic_tool tools name =
@@ -1535,7 +1646,7 @@ let drain_stderr flow tail =
     while true do
       let count = Eio.Flow.single_read flow chunk in
       let text = Cstruct.to_string (Cstruct.sub chunk 0 count) in
-      tail := bounded_tail ~limit:stderr_tail_bytes !tail text
+      Stderr.append tail text
     done
   with
   | End_of_file -> ()
@@ -1681,7 +1792,7 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
     let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
     let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
     let stderr_r, stderr_w = Eio.Process.pipe ~sw mgr in
-    let stderr_tail = ref "" in
+    let stderr_tail = Stderr.create ~limit:stderr_tail_bytes in
     let proc =
       try
         Eio.Process.spawn
@@ -1727,7 +1838,7 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
         |> parse_wire_line
       with
       | End_of_file ->
-        let detail = String.trim !stderr_tail in
+        let detail = String.trim (Stderr.contents stderr_tail) in
         (* A client that dies before the turn is admitted submitted nothing,
            so another candidate may still be tried. [turn_admitted] is the
            same fact the control responses above already read. *)
@@ -1943,10 +2054,7 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
     | Idle_timeout seconds -> Error (Timeout seconds)
     | Eio.Time.Timeout as exn -> raise exn
     | Runtime_error error -> Error error
-    | exn ->
-      Error
-        (Protocol_error
-           { stage = "runtime boundary"; detail = Printexc.to_string exn })
+    | exn -> Error (Unhandled_exception (Printexc.to_string exn))
   in
   (match result with
    | Ok turn ->
@@ -1968,8 +2076,7 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
    | Error
        (Stopped_by_host
           { stop =
-              ( Queued_chat_operation
-              | Repeated_tool_call _
+              ( Repeated_tool_call _
               | Terminal_tool_boundary
                   { outcome =
                       (Terminal_completed | Durable_stimulus_deferred)

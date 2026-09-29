@@ -565,12 +565,36 @@ let test_content_cols_give_the_surface_the_rest () =
   check int "hidden takes nothing" roomy (Pane.content_cols ~layout:Pane.Hidden ~cols:roomy);
   check int "no room takes nothing" narrow (Pane.content_cols ~layout:Pane.Narrow ~cols:narrow)
 
-let test_threshold_leaves_the_surface_the_roster_floor () =
-  check int "surface floor is what the roster leaves"
-    (Masc_tui_roster_pane.threshold_cols - Masc_tui_roster_pane.pane_cols)
-    (Pane.threshold_cols - Pane.pane_cols);
-  check int "the wide pane leaves the same floor" (Pane.threshold_cols - Pane.pane_cols)
-    (Pane.wide_threshold_cols - Pane.wide_pane_cols)
+(* Whether the Keepers list shows its flag columns on a surface this wide: the
+   list lays out inside the frame ([Masc_tui_render.render_keeper_list]). *)
+let keepers_show_flags ~surface_cols =
+  (Masc_tui_render_schedule.allocate_keeper_columns
+     ~inner_width:(Masc_tui_frame.inner_width ~cols:surface_cols)
+     ~widest_runtime:0)
+    .Masc_tui_render_schedule.kcol_show_flags
+
+(* Memory indents its rows two cells inside the frame before it lays out its
+   columns ([Masc_tui_render_memory], the [allocate_memory_columns] call). *)
+let memory_row_indent_cells = 2
+
+let memory_shows_source ~surface_cols =
+  (Masc_tui_render_schedule.allocate_memory_columns
+     ~inner_width:
+       (Masc_tui_frame.inner_width ~cols:surface_cols - memory_row_indent_cells))
+    .Masc_tui_render_schedule.mcol_show_source
+
+let test_the_pane_leaves_the_tables_their_columns () =
+  let narrow_surface = Pane.threshold_cols - Pane.pane_cols in
+  let wide_surface = Pane.wide_threshold_cols - Pane.wide_pane_cols in
+  check bool "beside the narrow pane the Keepers list keeps its flags" true
+    (keepers_show_flags ~surface_cols:narrow_surface);
+  check bool "and beside the wide one" true
+    (keepers_show_flags ~surface_cols:wide_surface);
+  check bool "one column less and the flags drop, so the floor asks no more than that"
+    false
+    (keepers_show_flags ~surface_cols:(narrow_surface - 1));
+  check bool "Memory keeps its SOURCE column beside the pane" true
+    (memory_shows_source ~surface_cols:narrow_surface)
 
 (* ── rows ───────────────────────────────────────────────────────────── *)
 
@@ -816,6 +840,7 @@ let ready : Pane.changes =
     ; calls = 12
     ; over_budget = 0
     ; malformed = 0
+    ; refresh_failed = None
     }
 
 let changes_fixture = { fixture with Pane.tab = Pane.Tab_changes; changes = ready }
@@ -885,7 +910,7 @@ let test_changes_status_reads_each_state () =
   let empty =
     Pane.Changes_ready
       { keeper = "tester"; files = []; fetched_at = 990.; window_hours = 24.; calls = 7
-      ; over_budget = 0; malformed = 0 }
+      ; over_budget = 0; malformed = 0; refresh_failed = None }
   in
   let drawn = Pane.lines ~rows ~cols ~scroll:0 { changes_fixture with Pane.changes = empty } in
   let texts = List.map text drawn.Pane.rows in
@@ -894,12 +919,26 @@ let test_changes_status_reads_each_state () =
   let dropped =
     Pane.Changes_ready
       { keeper = "tester"; files = []; fetched_at = 990.; window_hours = 24.; calls = 7
-      ; over_budget = 2; malformed = 1 }
+      ; over_budget = 2; malformed = 1; refresh_failed = None }
   in
   let drawn = Pane.lines ~rows ~cols ~scroll:0 { changes_fixture with Pane.changes = dropped } in
   let texts = List.map text drawn.Pane.rows in
   check bool "counts the changes the log kept no text for" true
-    (List.exists (fun row -> contains "2 without text" row && contains "1 malformed" row) texts)
+    (List.exists (fun row -> contains "2 without text" row && contains "1 malformed" row) texts);
+  (* A refresh that failed after a good read keeps the files it read, and the
+     status says the refresh failed above them rather than in their place. *)
+  let stale =
+    match ready with
+    | Pane.Changes_ready r ->
+        Pane.Changes_ready { r with refresh_failed = Some "connection refused" }
+    | Pane.Changes_absent | Pane.Changes_loading | Pane.Changes_failed _ -> ready
+  in
+  let drawn = Pane.lines ~rows ~cols ~scroll:0 { changes_fixture with Pane.changes = stale } in
+  let texts = List.map text drawn.Pane.rows in
+  check bool "a failed refresh says so" true
+    (List.exists (fun row -> contains "refresh failed" row && contains "connection refused" row) texts);
+  check bool "a failed refresh keeps the files it read" true
+    (List.exists (fun row -> contains "masc_tui_acting_pane.ml" row) texts)
 
 let test_changes_overflow_folds_and_scrolls () =
   (* header, status, three files: five rows. Four rows leave three below. *)
@@ -1015,7 +1054,7 @@ let test_hidden_rows_do_not_allocate_text_layout () =
       keeper = "tester";
       files = List.init count (fun i -> file ~at:990. (label long i));
       fetched_at = 990.; window_hours = 24.; calls = count;
-      over_budget = 0; malformed = 0 } } in
+      over_budget = 0; malformed = 0; refresh_failed = None } } in
   let measure rows input =
     ignore (Sys.opaque_identity (Pane.lines ~rows ~cols ~scroll:0 input));
     let before = Gc.allocated_bytes () in
@@ -2100,8 +2139,8 @@ let () =
             test_ctrl_l_walks_narrow_wide_hidden
         ; test_case "content cols give the surface the rest" `Quick
             test_content_cols_give_the_surface_the_rest
-        ; test_case "threshold leaves the surface the roster floor" `Quick
-            test_threshold_leaves_the_surface_the_roster_floor
+        ; test_case "the pane leaves the tables their columns" `Quick
+            test_the_pane_leaves_the_tables_their_columns
         ; test_case "clipped header preserves styled Unicode spans" `Quick
             test_clipped_header_preserves_spans_and_padding
         ; test_case "full-width row retains empty toned spans" `Quick

@@ -1,0 +1,45 @@
+name = "masc_board_close"
+description = """
+Close a Board post you authored or moderate.
+Supply a summary and successor_id or no_successor=true. Operators use the dashboard. New comments stop after closing.
+"""
+
+defer_loading = true
+
+identity_fields = ["closed_by"]
+
+[[params]]
+name = "post_id"
+type = "string"
+pattern = "^[a-zA-Z0-9_-]{1,64}$"
+required = true
+description = "ID of the post to close"
+
+[[params]]
+name = "closed_by"
+type = "string"
+description = """
+Caller identity, filled automatically. Must be the author or a configured Board moderator.
+"""
+
+[[params]]
+name = "successor_id"
+type = "string"
+description = """
+Existing post that continues this thread; cannot be this post. Use instead of no_successor.
+"""
+
+[[params]]
+name = "no_successor"
+type = "boolean"
+description = """
+Set true when there is no successor. Use instead of successor_id.
+"""
+
+[[params]]
+name = "summary"
+type = "string"
+required = true
+description = """
+Nonblank closing summary shown to readers.
+"""

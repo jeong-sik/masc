@@ -187,6 +187,7 @@ describe('InternalAgentsMonitor', () => {
       return {
         laneId,
         label: 'Board Attention',
+        purpose: 'Judges durable Board candidates.',
         required: true,
         observationOnly: true,
         configured: true,
@@ -274,6 +275,45 @@ describe('InternalAgentsMonitor', () => {
     }
   })
 
+  it('marks retained lanes stale after failure and clears the warning only on recovery', async () => {
+    api.fetchExactLaneRuns.mockResolvedValue({ runs: [], count: 0, total: 0, hasMore: false, generatedAt: 'now' })
+    api.fetchFusionRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
+    api.fetchVerificationRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
+    const purpose = 'Answers structured model requests; run records are not retained yet.'
+    const snapshot = {
+      schema: 'masc.standalone_llm_lanes.v2', generatedAt: 'now', observedAtUnix: 20,
+      observationOnly: true, exactRunProjectionCount: 0, exactRunSourceTotal: 0,
+      exactRunProjectionTruncated: false,
+      lanes: [{
+        laneId: 'browser_stagehand_exact', label: 'Browser Stagehand', purpose,
+        required: false, observationOnly: true, configured: false,
+        configurationState: 'unconfigured', jev: null, admittedSlots: [],
+        cliSlots: [], droppedSlots: [], admissionError: 'model lane not configured',
+        status: 'unavailable', retainedRunCount: 0, runningCount: 0,
+        succeededCount: 0, failedCount: 0, cancelledCount: 0, lastStartedAt: null,
+        lastTerminalAt: null, lastOutcome: null, p50ElapsedSeconds: null, selectedSlots: [],
+      }],
+    }
+    api.fetchStandaloneLanes.mockResolvedValue(snapshot)
+    render(html`<${InternalAgentsMonitor} />`)
+    expect(await screen.findByText(purpose)).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'Lanes', exact: true })).toBeTruthy()
+    expect(screen.getByText('Config: unconfigured')).toBeTruthy()
+    expect(screen.getByText(/Observed ·/)).toBeTruthy()
+
+    api.fetchStandaloneLanes.mockRejectedValue(new Error('offline'))
+    sse.refresh?.()
+    const warning = await screen.findByRole('alert')
+    expect(warning.textContent).toContain('STALE')
+    expect(warning.textContent).toContain('offline')
+    expect(screen.getByText(purpose)).toBeTruthy()
+
+    api.fetchStandaloneLanes.mockResolvedValue({ ...snapshot, observedAtUnix: 30 })
+    sse.refresh?.()
+    await vi.waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
+    expect(screen.getByText(purpose)).toBeTruthy()
+  })
+
   it('does not let an older refresh overwrite the latest lane matrix', async () => {
     api.fetchExactLaneRuns.mockResolvedValue({ runs: [], count: 0, total: 0, hasMore: false, generatedAt: 'now' })
     api.fetchFusionRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
@@ -281,7 +321,7 @@ describe('InternalAgentsMonitor', () => {
     let resolveOlder!: (value: unknown) => void
     const older = new Promise(resolve => { resolveOlder = resolve })
     const lane = (label: string) => ({
-      laneId: 'board_attention_exact', label, required: true, observationOnly: true,
+      laneId: 'board_attention_exact', label, purpose: 'Judges durable Board candidates.', required: true, observationOnly: true,
       configured: true, configurationState: 'ready', jev: { state: 'off' as const }, admittedSlots: ['primary'], cliSlots: [], droppedSlots: [],
       admissionError: null, status: 'idle', retainedRunCount: 1, runningCount: 0,
       succeededCount: 1, failedCount: 0, cancelledCount: 0, lastStartedAt: 10,
@@ -682,6 +722,49 @@ describe('InternalAgentsMonitor', () => {
     await screen.findByText('Exact-output registry metadata', { exact: false })
     expect(container.textContent).toContain('missing_deadline')
     expect(container.textContent).toContain('target has no finite request window')
+  })
+
+  it('distinguishes unread run sources, measured zero, stale rows and recovery', async () => {
+    shellRuntimeResolution.value = {
+      fleet_safety: { paused_keepers_health: { names: ['keeper-a'] } },
+    } as typeof shellRuntimeResolution.value
+    api.fetchExactLaneRuns.mockRejectedValue(new Error('schema mismatch'))
+    api.fetchFusionRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
+    api.fetchVerificationRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
+    render(html`<${InternalAgentsMonitor} />`)
+    const inventory = screen.getByRole('heading', { name: 'Observed run inventory' }).closest('section')!
+    const librarian = within(inventory).getByRole('button', { name: /Librarian/ })
+    await vi.waitFor(() => expect(librarian.textContent).toContain('관측 불가'))
+    const ownerRow = screen.getByRole('link', { name: 'keeper-a' }).closest('tr')!
+    const lastObserved = () => ownerRow.lastElementChild?.textContent
+    expect(lastObserved()).toBe('관측 불가')
+    expect(librarian.textContent).toContain('—')
+    expect(within(inventory).getByRole('button', { name: /Fusion/ }).textContent).toContain('0')
+    expect(screen.getByText('Run observations unavailable for this filter.')).toBeTruthy()
+    expect(screen.queryByText('No internal agent runs for this filter.')).toBeNull()
+
+    const run = { runId: 'observed-run', runKind: 'exact_output', lane: 'librarian_exact',
+      subjectId: 'audit-subject', actor: 'keeper-a', startedAt: 10, status: 'succeeded', elapsedSeconds: 1 }
+    api.fetchExactLaneRuns.mockResolvedValue({ runs: [run], count: 1, total: 1, hasMore: false, generatedAt: 'now' })
+    sse.refresh?.()
+    await screen.findByRole('button', { name: /Librarian audit-subject/ })
+    const measuredLastObserved = lastObserved()
+    expect(measuredLastObserved).not.toBe('관측 불가')
+    expect(measuredLastObserved).not.toContain('STALE')
+    api.fetchExactLaneRuns.mockRejectedValue(new Error('offline'))
+    sse.refresh?.()
+    await vi.waitFor(() => expect(librarian.textContent).toContain('STALE'))
+    expect(screen.getByRole('button', { name: /Librarian audit-subject/ }).textContent).toContain('STALE')
+    expect(librarian.textContent).toContain('1')
+    expect(lastObserved()).toBe(`STALE · ${measuredLastObserved}`)
+
+    api.fetchExactLaneRuns.mockResolvedValue({ runs: [], count: 0, total: 0, hasMore: false, generatedAt: 'now' })
+    sse.refresh?.()
+    await vi.waitFor(() => expect(librarian.textContent).not.toContain('STALE'))
+    expect(librarian.textContent).toContain('0')
+    expect(screen.queryByRole('button', { name: /Librarian audit-subject/ })).toBeNull()
+    expect(screen.getByText('No internal agent runs for this filter.')).toBeTruthy()
+    expect(lastObserved()).toBe('없음')
   })
 
   it('states that exact lanes and RAW require an Admin bearer', async () => {

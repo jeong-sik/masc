@@ -1,0 +1,330 @@
+{
+  "experiment_commit": "658bd75ee6038f76be8a111bc2cd8fc8b5ebc42d",
+  "run_id": "36041115080",
+  "run_attempt": "1",
+  "started_at": "2026-09-24T18:27:57.640374+00:00",
+  "finished_at": "2026-09-24T18:28:19.774983+00:00",
+  "platform": "macOS-14.8.9-arm64-arm-64bit-Mach-O",
+  "python": "3.14.7 (v3.14.7:823f0323ee6, Aug  5 2026, 07:07:01) [Clang 21.0.0 (clang-2100.1.1.101)]",
+  "perf_counter": {
+    "implementation": "mach_absolute_time()",
+    "monotonic": true,
+    "adjustable": false,
+    "resolution": 4.166666666666666e-08
+  },
+  "scenario_sha256": "91a32bfc252fd112beb31d434d7f5dce83c5e4fcdb083bb7ebf89c64a52d3c4f",
+  "helper_sha256": "942f1f36896fbaeb67f99d48904a6437462ed9a0eaccdcfbd14cac2f1873ce4a",
+  "identities": {
+    "baseline": {
+      "manifest": {
+        "commit": "8e2224bde96ba4aeddb79bdbea79ff03482ee1e3",
+        "arch": "macos-arm64",
+        "run_attempt": 1,
+        "release_validated": false,
+        "sha256": {
+          "main_eio.exe": "caa54fd77c9cb3ba14207f7f72a94fcb2419b4cbbccaddf12a9a9a749722a1ea",
+          "masc_tui.exe": "3ec318b6b5d4134d7748d4c255634757ae4c1276e0a79b41005b6922317db289",
+          "masc_browser_host.exe": "946c871104f331bd2e9156bb77d43bc9dd8a31e987ca3515c4dfcd93d06f8539"
+        }
+      },
+      "artifact": {
+        "id": 10822896321,
+        "node_id": "MDg6QXJ0aWZhY3QxMDgyMjg5NjMyMQ==",
+        "name": "runtime-probe-macos-arm64-8e2224bde96ba4aeddb79bdbea79ff03482ee1e3-attempt-1",
+        "size_in_bytes": 66645428,
+        "url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/10822896321",
+        "archive_download_url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/10822896321/zip",
+        "expired": false,
+        "digest": "sha256:a5e085d60c00227744de66665f0188c02c13150e4d64b1e17a48ec8f9b6bde54",
+        "created_at": "2026-09-24T17:06:34Z",
+        "updated_at": "2026-09-24T17:06:34Z",
+        "expires_at": "2026-10-01T17:06:26Z",
+        "workflow_run": {
+          "id": 36031132761,
+          "repository_id": 1136640865,
+          "head_repository_id": 1136640865,
+          "head_branch": "perf/runtime-candidate2-20260925",
+          "head_sha": "8e2224bde96ba4aeddb79bdbea79ff03482ee1e3"
+        }
+      },
+      "binary": "/Users/runner/work/masc/masc/runtime-baseline/masc_tui.exe"
+    },
+    "candidate": {
+      "manifest": {
+        "commit": "dfe4e9955627660e39947d5917e311c2091a24c7",
+        "arch": "macos-arm64",
+        "run_attempt": 1,
+        "release_validated": false,
+        "sha256": {
+          "main_eio.exe": "1e4165232751c0424fccfd376fdd0ead0b99beef685e7d7253757e2dddeb3ca1",
+          "masc_tui.exe": "117927d1201f715048bea3ab2f808e0fb0f3849b4db0b71dd890a79a2df39be3",
+          "masc_browser_host.exe": "8e862252cbc01c4487b145ac5fc63a587c80fefa8e61a9740b814d27d3552432"
+        }
+      },
+      "artifact": {
+        "id": 10826796900,
+        "node_id": "MDg6QXJ0aWZhY3QxMDgyNjc5NjkwMA==",
+        "name": "runtime-probe-macos-arm64-dfe4e9955627660e39947d5917e311c2091a24c7-attempt-1",
+        "size_in_bytes": 66645001,
+        "url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/10826796900",
+        "archive_download_url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/10826796900/zip",
+        "expired": false,
+        "digest": "sha256:fb04f1b16c756cea4d0edc0879ae5652ce8fc0c98861b5f5d8831029500c99f3",
+        "created_at": "2026-09-24T18:17:11Z",
+        "updated_at": "2026-09-24T18:17:11Z",
+        "expires_at": "2026-10-01T18:17:04Z",
+        "workflow_run": {
+          "id": 36039010105,
+          "repository_id": 1136640865,
+          "head_repository_id": 1136640865,
+          "head_branch": "perf/runtime-candidate3-20260925",
+          "head_sha": "dfe4e9955627660e39947d5917e311c2091a24c7"
+        }
+      },
+      "binary": "/Users/runner/work/masc/masc/runtime-candidate/masc_tui.exe"
+    }
+  },
+  "execution_order": [
+    "baseline",
+    "candidate",
+    "candidate",
+    "baseline",
+    "baseline",
+    "candidate"
+  ],
+  "rows": [
+    {
+      "action": "arrow down",
+      "baseline": {
+        "samples_ms": [
+          0.671083,
+          0.788417,
+          1.184792
+        ],
+        "median_ms": 0.788417,
+        "min_ms": 0.671083,
+        "max_ms": 1.184792
+      },
+      "candidate": {
+        "samples_ms": [
+          0.743,
+          1.490833,
+          0.550375
+        ],
+        "median_ms": 0.743,
+        "min_ms": 0.550375,
+        "max_ms": 1.490833
+      }
+    },
+    {
+      "action": "arrow up",
+      "baseline": {
+        "samples_ms": [
+          106.282916,
+          76.279917,
+          35.662542
+        ],
+        "median_ms": 76.279917,
+        "min_ms": 35.662542,
+        "max_ms": 106.282916
+      },
+      "candidate": {
+        "samples_ms": [
+          19.128209,
+          18.419458,
+          18.883334
+        ],
+        "median_ms": 18.883334,
+        "min_ms": 18.419458,
+        "max_ms": 19.128209
+      }
+    },
+    {
+      "action": "wheel down",
+      "baseline": {
+        "samples_ms": [
+          37.80225,
+          76.173541,
+          138.831709
+        ],
+        "median_ms": 76.173541,
+        "min_ms": 37.80225,
+        "max_ms": 138.831709
+      },
+      "candidate": {
+        "samples_ms": [
+          19.105916,
+          18.6545,
+          18.599583
+        ],
+        "median_ms": 18.6545,
+        "min_ms": 18.599583,
+        "max_ms": 19.105916
+      }
+    },
+    {
+      "action": "wheel up",
+      "baseline": {
+        "samples_ms": [
+          22.664959,
+          71.899042,
+          111.292459
+        ],
+        "median_ms": 71.899042,
+        "min_ms": 22.664959,
+        "max_ms": 111.292459
+      },
+      "candidate": {
+        "samples_ms": [
+          18.16325,
+          18.309375,
+          18.46475
+        ],
+        "median_ms": 18.309375,
+        "min_ms": 18.16325,
+        "max_ms": 18.46475
+      }
+    },
+    {
+      "action": "page down",
+      "baseline": {
+        "samples_ms": [
+          103.117333,
+          49.129667,
+          84.345458
+        ],
+        "median_ms": 84.345458,
+        "min_ms": 49.129667,
+        "max_ms": 103.117333
+      },
+      "candidate": {
+        "samples_ms": [
+          17.857458,
+          18.299667,
+          18.877458
+        ],
+        "median_ms": 18.299667,
+        "min_ms": 17.857458,
+        "max_ms": 18.877458
+      }
+    },
+    {
+      "action": "page up",
+      "baseline": {
+        "samples_ms": [
+          73.279584,
+          40.153083,
+          75.560458
+        ],
+        "median_ms": 73.279584,
+        "min_ms": 40.153083,
+        "max_ms": 75.560458
+      },
+      "candidate": {
+        "samples_ms": [
+          18.59175,
+          18.887291,
+          17.960292
+        ],
+        "median_ms": 18.59175,
+        "min_ms": 17.960292,
+        "max_ms": 18.887291
+      }
+    },
+    {
+      "action": "detail key down",
+      "baseline": {
+        "samples_ms": [
+          0.589333,
+          0.972042,
+          0.564167
+        ],
+        "median_ms": 0.589333,
+        "min_ms": 0.564167,
+        "max_ms": 0.972042
+      },
+      "candidate": {
+        "samples_ms": [
+          0.504209,
+          0.716333,
+          0.559667
+        ],
+        "median_ms": 0.559667,
+        "min_ms": 0.504209,
+        "max_ms": 0.716333
+      }
+    },
+    {
+      "action": "detail key up",
+      "baseline": {
+        "samples_ms": [
+          23.178083,
+          50.615042,
+          34.477625
+        ],
+        "median_ms": 34.477625,
+        "min_ms": 23.178083,
+        "max_ms": 50.615042
+      },
+      "candidate": {
+        "samples_ms": [
+          18.954667,
+          16.622125,
+          18.5795
+        ],
+        "median_ms": 18.5795,
+        "min_ms": 16.622125,
+        "max_ms": 18.954667
+      }
+    },
+    {
+      "action": "detail wheel down",
+      "baseline": {
+        "samples_ms": [
+          32.530458,
+          118.539708,
+          22.578084
+        ],
+        "median_ms": 32.530458,
+        "min_ms": 22.578084,
+        "max_ms": 118.539708
+      },
+      "candidate": {
+        "samples_ms": [
+          18.6565,
+          18.733792,
+          21.430917
+        ],
+        "median_ms": 18.733792,
+        "min_ms": 18.6565,
+        "max_ms": 21.430917
+      }
+    },
+    {
+      "action": "detail wheel up",
+      "baseline": {
+        "samples_ms": [
+          22.647792,
+          100.334583,
+          134.350417
+        ],
+        "median_ms": 100.334583,
+        "min_ms": 22.647792,
+        "max_ms": 134.350417
+      },
+      "candidate": {
+        "samples_ms": [
+          18.855625,
+          18.189875,
+          16.370583
+        ],
+        "median_ms": 18.189875,
+        "min_ms": 16.370583,
+        "max_ms": 18.855625
+      }
+    }
+  ],
+  "goal_ms": 0.1,
+  "all_candidate_observations_below_goal": false,
+  "scope": "same runner, temporary fixtures, input to acknowledged PTY frame; includes observer and OS scheduling; no physical display or live server proof"
+}

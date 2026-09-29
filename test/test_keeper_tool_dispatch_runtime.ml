@@ -2435,6 +2435,131 @@ let test_constitution_tools_dispatch_by_name () =
       check int "taking it back empties the world" 0 (List.length after))
 ;;
 
+(* A removal carries its digest both ways: the answer names what left, and
+   the ledger line keeps why. *)
+let test_constitution_remove_leaves_a_reasoned_digest () =
+  with_exec_fixture
+    "keeper_tool_dispatch_runtime_constitution_digest"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+      let run name input =
+        KET.execute_keeper_tool_call_with_outcome ~config ~meta
+          ~publication_recovery ~ctx_work ~name ~input ()
+      in
+      let written =
+        run "keeper_constitution_write"
+          (`Assoc [ "text", `String "record the reason with the removal" ])
+      in
+      let written_json =
+        check_success_result "keeper_constitution_write" written
+      in
+      let article_id =
+        json_string_field ~default:"" "article_id" written_json
+      in
+      let removed =
+        run "keeper_constitution_remove"
+          (`Assoc
+            [ "article_id", `String article_id
+            ; "reason", `String "superseded by the board's new rule"
+            ])
+      in
+      let removed_json =
+        check_success_result "keeper_constitution_remove" removed
+      in
+      check string "the answer names what left"
+        "record the reason with the removal"
+        (json_string_field ~default:"" "removed_text" removed_json);
+      check string "the answer echoes why"
+        "superseded by the board's new rule"
+        (json_string_field ~default:"" "reason" removed_json);
+      let path =
+        Masc.World_constitution_store.ledger_path
+          ~base_path:config.Workspace.base_path
+      in
+      let lines = In_channel.with_open_text path In_channel.input_lines in
+      (match List.rev lines with
+      | [] -> fail "the ledger holds no line"
+      | last :: _ -> (
+        match
+          Masc.World_constitution_wire.entry_of_json
+            (Yojson.Safe.from_string last)
+        with
+        | Ok (Masc.World_constitution_types.Removed { reason; _ }) -> (
+          match reason with
+          | Some why ->
+            check string "the ledger keeps why"
+              "superseded by the board's new rule" why
+          | None -> fail "the removal line carries no reason")
+        | Ok (Masc.World_constitution_types.Added _) ->
+          fail "the last ledger line is not the removal"
+        | Error error ->
+          fail (Masc.World_constitution_wire.decode_error_to_string error))))
+;;
+
+let test_constitution_history_is_visible_to_later_keeper () =
+  with_exec_fixture "keeper_constitution_history_reader"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+      let run ~meta name input =
+        KET.execute_keeper_tool_call_with_outcome ~config ~meta
+          ~publication_recovery ~ctx_work ~name ~input ()
+        |> check_success_result name in
+      let path = Masc.World_constitution_store.ledger_path ~base_path:config.Workspace.base_path in
+      let empty = run ~meta "keeper_constitution_read" (`Assoc []) in
+      check int "fresh world has no history" 0
+        (List.length Yojson.Safe.Util.(empty |> member "entries" |> to_list));
+      check bool "read does not create the ledger" false (Sys.file_exists path);
+      let remove text reason =
+        let written = run ~meta "keeper_constitution_write" (`Assoc ["text", `String text]) in
+        let id = json_string_field ~default:"" "article_id" written in
+        let args = ("article_id", `String id) :: (match reason with
+          | None -> [] | Some reason -> ["reason", `String reason]) in
+        ignore (run ~meta "keeper_constitution_remove" (`Assoc args));
+        id in
+      let first = remove "Retired norm from the earlier turn." (Some "Replaced by the board agreement.") in
+      let second = remove "Another withdrawn norm." None in
+      (* A broken ledger row must remain visible as a diagnostic to the reader,
+         without concealing the successfully decoded moves around it. *)
+      let out = open_out_gen [Open_wronly; Open_append] 0o600 path in
+      Fun.protect ~finally:(fun () -> close_out_noerr out) (fun () -> output_string out "not-json\n");
+      let before = In_channel.with_open_bin path In_channel.input_all in
+      let later = {meta with name="later-reader"} in
+      let history = run ~meta:later "keeper_constitution_read" (`Assoc []) in
+      check int "withdrawn norms stay out of force" 0
+        Yojson.Safe.Util.(history |> member "articles_held" |> to_int);
+      let entries = Yojson.Safe.Util.(history |> member "entries" |> to_list) in
+      let entries = List.map (fun json -> match Masc.World_constitution_wire.entry_of_json json with
+        | Ok entry -> entry
+        | Error error -> fail (Masc.World_constitution_wire.decode_error_to_string error)) entries in
+      (match entries with
+       | [Masc.World_constitution_types.Added old;
+          Masc.World_constitution_types.Removed removed;
+          Masc.World_constitution_types.Added another;
+          Masc.World_constitution_types.Removed reasonless] ->
+         check string "later reader sees the original norm" "Retired norm from the earlier turn." old.text;
+         check string "removal joins its original norm" first
+           (Masc.World_constitution_types.Article_id.to_string removed.id);
+         check string "remover identity is retained" meta.name removed.by;
+         check bool "removal time is retained" true (removed.at >= old.at);
+         check (option string) "later reader sees why" (Some "Replaced by the board agreement.") removed.reason;
+         check string "second original is retained" "Another withdrawn norm." another.text;
+         check string "second removal is not coalesced" second
+           (Masc.World_constitution_types.Article_id.to_string reasonless.id);
+         check (option string) "absent reason is not invented" None reasonless.reason
+       | _ -> fail "ordered write/remove history is missing");
+      let unreadable = Yojson.Safe.Util.(history |> member "unreadable_ledger_lines" |> to_list) in
+      check int "broken row remains observable" 1 (List.length unreadable);
+      check int "diagnostic names the original line" 5
+        Yojson.Safe.Util.(List.hd unreadable |> member "line" |> to_int);
+      check string "history read never changes the ledger" before
+        (In_channel.with_open_bin path In_channel.input_all);
+      Unix.unlink path;
+      Unix.mkdir path 0o700;
+      let unavailable = KET.execute_keeper_tool_call_with_outcome ~config ~meta:later
+        ~publication_recovery ~ctx_work ~name:"keeper_constitution_read" ~input:(`Assoc []) () in
+      (match unavailable.KTE.disposition with
+       | Tool_result.Failed Tool_result.Runtime_failure -> ()
+       | _ -> fail "unreadable ledger did not return a typed runtime failure"))
+;;
+
 let test_model_visible_local_tools_dispatch_to_runtime_handlers () =
   with_exec_fixture
     ~require_sandbox:true
@@ -6563,7 +6688,7 @@ let test_direct_execute_post_effect_artifact_failure_closes_official_client_loop
                   ~keeper_name:meta.name
                   ~turn_count:1
                   ~tools:bundle.tools
-                  ~hooks:Agent_core.Hooks.empty
+                  ~loading_plan:Masc.Keeper_official_client_host.All_on_demand ~hooks:Agent_core.Hooks.empty
                   ~event_bus:None
                   ~context_injector:None
                   ~context:(Some (Agent_core.Context.create_sync ()))
@@ -6614,8 +6739,7 @@ let test_direct_execute_post_effect_artifact_failure_closes_official_client_loop
               ()
             | Some
                 (Masc.Keeper_official_client_host.Terminal_tool_boundary _)
-            | Some (Masc.Keeper_official_client_host.Queued_chat_operation
-                   | Masc.Keeper_official_client_host.Repeated_tool_call _)
+            | Some Masc.Keeper_official_client_host.Repeated_tool_call _
             | None ->
               fail "direct Execute post-effect failure remained provider-retryable"))
 ;;
@@ -6649,7 +6773,7 @@ let test_direct_pre_effect_and_readonly_failures_remain_correction_capable () =
                   ~keeper_name:meta.name
                   ~turn_count:1
                   ~tools:bundle.tools
-                  ~hooks:Agent_core.Hooks.empty
+                  ~loading_plan:Masc.Keeper_official_client_host.All_on_demand ~hooks:Agent_core.Hooks.empty
                   ~event_bus:None
                   ~context_injector:None
                   ~context:(Some (Agent_core.Context.create_sync ()))
@@ -6753,7 +6877,7 @@ let test_stale_spawn_handles_remain_correction_capable () =
                   ~keeper_name:meta.name
                   ~turn_count:1
                   ~tools:bundle.tools
-                  ~hooks:Agent_core.Hooks.empty
+                  ~loading_plan:Masc.Keeper_official_client_host.All_on_demand ~hooks:Agent_core.Hooks.empty
                   ~event_bus:None
                   ~context_injector:None
                   ~context:(Some (Agent_core.Context.create_sync ()))
@@ -7324,7 +7448,7 @@ value = {surface="dashboard", content="must not run"}
           ~content_transport:Runtime_official_client_tool.Codex ~accepts_image_input:false
           ~tool_approval:None ~pre_tool_rejects:(ref []) ~runtime_label:"read-recovery-test"
           ~keeper_name:meta.name ~turn_count:7 ~tools:bundle.tools
-          ~hooks:Agent_core.Hooks.empty ~event_bus:None ~context_injector:None
+          ~loading_plan:Masc.Keeper_official_client_host.All_on_demand ~hooks:Agent_core.Hooks.empty ~event_bus:None ~context_injector:None
           ~context:(Some (Agent_core.Context.create_sync ()))
           ~terminal_effect_state:bundle.terminal_effect_state ~terminal_error:(ref None)
           ~raw_trace_run:None () with
@@ -7442,7 +7566,7 @@ id = "second"
           ~content_transport:Runtime_official_client_tool.Codex ~accepts_image_input:false
           ~tool_approval:None ~pre_tool_rejects:(ref []) ~runtime_label:"node-boundary-test"
           ~keeper_name:meta.name ~turn_count:7 ~tools:bundle.tools
-          ~hooks:Agent_core.Hooks.empty ~event_bus:None ~context_injector:None
+          ~loading_plan:Masc.Keeper_official_client_host.All_on_demand ~hooks:Agent_core.Hooks.empty ~event_bus:None ~context_injector:None
           ~context:(Some (Agent_core.Context.create_sync ()))
           ~terminal_effect_state:bundle.terminal_effect_state ~terminal_error:(ref None)
           ~raw_trace_run:None () with
@@ -7507,7 +7631,7 @@ let test_terminal_composition_post_effect_failure_closes_official_client_loop ()
                   ~keeper_name:meta.name
                   ~turn_count:7
                   ~tools:bundle.tools
-                  ~hooks:Agent_core.Hooks.empty
+                  ~loading_plan:Masc.Keeper_official_client_host.All_on_demand ~hooks:Agent_core.Hooks.empty
                   ~event_bus:None
                   ~context_injector:None
                   ~context:(Some (Agent_core.Context.create_sync ()))
@@ -7583,8 +7707,7 @@ let test_terminal_composition_post_effect_failure_closes_official_client_loop ()
                 tool_name
             | Some
                 (Masc.Keeper_official_client_host.Terminal_tool_boundary _)
-            | Some (Masc.Keeper_official_client_host.Queued_chat_operation
-                   | Masc.Keeper_official_client_host.Repeated_tool_call _)
+            | Some Masc.Keeper_official_client_host.Repeated_tool_call _
             | None ->
               fail "official-client provider loop remained open after prior effect"))
 ;;
@@ -7629,7 +7752,7 @@ let test_terminal_composition_literal_input_failure_runs_no_node () =
                   ~keeper_name:meta.name
                   ~turn_count:7
                   ~tools:bundle.tools
-                  ~hooks:Agent_core.Hooks.empty
+                  ~loading_plan:Masc.Keeper_official_client_host.All_on_demand ~hooks:Agent_core.Hooks.empty
                   ~event_bus:None
                   ~context_injector:None
                   ~context:(Some (Agent_core.Context.create_sync ()))
@@ -7765,7 +7888,7 @@ let test_composition_over_an_empty_msx_lane_returns_the_refusal ?(break_evidence
                   ~keeper_name:meta.name
                   ~turn_count:7
                   ~tools:bundle.tools
-                  ~hooks:Agent_core.Hooks.empty
+                  ~loading_plan:Masc.Keeper_official_client_host.All_on_demand ~hooks:Agent_core.Hooks.empty
                   ~event_bus:None
                   ~context_injector:None
                   ~context:(Some (Agent_core.Context.create_sync ()))
@@ -7869,7 +7992,7 @@ let test_terminal_composition_unknown_write_failure_closes_official_client_loop 
                   ~keeper_name:meta.name
                   ~turn_count:8
                   ~tools:bundle.tools
-                  ~hooks:Agent_core.Hooks.empty
+                  ~loading_plan:Masc.Keeper_official_client_host.All_on_demand ~hooks:Agent_core.Hooks.empty
                   ~event_bus:None
                   ~context_injector:None
                   ~context:(Some (Agent_core.Context.create_sync ()))
@@ -7967,8 +8090,7 @@ let test_terminal_composition_unknown_write_failure_closes_official_client_loop 
                 tool_name
             | Some
                 (Masc.Keeper_official_client_host.Terminal_tool_boundary _)
-            | Some (Masc.Keeper_official_client_host.Queued_chat_operation
-                   | Masc.Keeper_official_client_host.Repeated_tool_call _)
+            | Some Masc.Keeper_official_client_host.Repeated_tool_call _
             | None ->
               fail "official-client provider loop remained open after unknown effect"))
 ;;
@@ -8049,7 +8171,7 @@ let test_write_then_unchanged_read_completes () =
                   ~keeper_name:meta.name
                   ~turn_count:9
                   ~tools:bundle.tools
-                  ~hooks:Agent_core.Hooks.empty
+                  ~loading_plan:Masc.Keeper_official_client_host.All_on_demand ~hooks:Agent_core.Hooks.empty
                   ~event_bus:None
                   ~context_injector:None
                   ~context:(Some (Agent_core.Context.create_sync ()))
@@ -9704,7 +9826,7 @@ let test_peer_delegate_schema_reaches_model_wires () =
           ~content_transport:Runtime_official_client_tool.Codex
           ~accepts_image_input:true
           ~tool_approval:None ~runtime_label:"schema-fixture" ~keeper_name:meta.name
-          ~turn_count:1 ~tools:[tool] ~hooks:Agent_core.Hooks.empty
+          ~turn_count:1 ~tools:[tool] ~loading_plan:Masc.Keeper_official_client_host.All_on_demand ~hooks:Agent_core.Hooks.empty
           ~event_bus:None ~context_injector:None
           ~context:(Some (Agent_core.Context.create_sync ()))
           ~terminal_effect_state:bundle.terminal_effect_state
@@ -9910,6 +10032,10 @@ let () =
         test_model_visible_local_tools_dispatch_to_runtime_handlers;
       test_case "constitution tools dispatch by name" `Quick
         test_constitution_tools_dispatch_by_name;
+      test_case "constitution removal leaves a reasoned digest" `Quick
+        test_constitution_remove_leaves_a_reasoned_digest;
+      test_case "later Keeper reads removal history" `Quick
+        test_constitution_history_is_visible_to_later_keeper;
       test_case "keeper_task_claim accepts explicit task_id" `Quick
         test_keeper_task_claim_accepts_specific_task_id;
       test_case "unknown tool returns exact error" `Quick

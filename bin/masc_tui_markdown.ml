@@ -146,7 +146,7 @@ let find_char text ~from char =
   | Some index -> Some index
   | None -> None
 
-let inline_segments text =
+let inline_segments_lexed text =
   let limit = String.length text in
   let out = ref [] in
   let pending = Buffer.create (String.length text) in
@@ -234,6 +234,16 @@ let inline_segments text =
   walk 0;
   flush_pending ();
   List.rev !out
+
+let inline_segments text =
+  (* Plain comments need one segment, without a byte-by-byte lexer walk. *)
+  if text = "" then []
+  else if
+    String.exists
+      (function '`' | '*' | '_' | '~' | '[' -> true | _ -> false)
+      text
+  then inline_segments_lexed text
+  else [ (text, kind_plain) ]
 
 (* {1 Wrapping styled segments} *)
 
@@ -565,13 +575,58 @@ let fill_styled_row ~width (opening, closing) text =
   let remaining = max 0 (width - Layout.display_width text) in
   opening ^ text ^ String.make remaining ' ' ^ closing
 
-(* One lexed row. Two regimes, and the diff check comes first.
+(* A diff row with token colours underneath: the first run carries the row's
+   added or removed kind and the rest lex the content (["```diff:ocaml"]).
+   Whole-line rows take [diff_row_span] above and keep their exact bytes,
+   so reaching here with a diff-kind first run implies a mixed row. *)
+let diff_mixed_kind pieces =
+  let non_empty = List.filter (fun (text, _) -> String.length text > 0) pieces in
+  match non_empty with
+  | (_, kind) :: _
+    when String.equal kind kind_code_diff_added
+         || String.equal kind kind_code_diff_removed ->
+      Some kind
+  | _ -> None
+
+(* Close each token before restoring the enclosing diff band. The close may
+   reset the background as well as bold/italic; reopening the row span before
+   any next visible cell keeps the band continuous without leaking token
+   attributes. Wrapped tails refill the same way so a narrow pane cannot turn
+   them back into ordinary code. Cell widths measure the plain text; escapes
+   are added after the cut, as in [wrap_pieces]. *)
+let styled_diff_mixed_rows palette ~width kind pieces =
+  let gutter = palette.code_gutter in
+  let body_width = max 1 (width - Layout.display_width gutter) in
+  let opening, closing = span_of_palette palette kind in
+  wrap_pieces ~max_cells:body_width pieces
+  |> List.map (fun row ->
+         let plain = gutter ^ String.concat "" (List.map fst row) in
+         let styled =
+           gutter
+           ^ String.concat ""
+               (List.map
+                  (fun (text, piece_kind) ->
+                    if String.length text = 0 then ""
+                    else
+                      let piece_opening, piece_closing =
+                        span_of_palette palette piece_kind
+                      in
+                      piece_opening ^ text ^ piece_closing ^ opening)
+                  row)
+         in
+         let remaining = max 0 (width - Layout.display_width plain) in
+         opening ^ styled ^ String.make remaining ' ' ^ closing)
+
+(* One lexed row. Three regimes, and the diff checks come first.
 
    The diff lexer gives an added or removed row one typed kind from edge to
    edge. That row span includes the gutter and fills the available width;
    every hard-split chunk repeats it, so a narrow pane cannot turn the tail of
    a changed line back into ordinary code. No source-prefix check belongs
    here: the lexer remains the authority for what is a changed row.
+
+   A diff row with token colours underneath keeps its band the same way,
+   with each run's foreground over the row's background.
 
    Every other row wraps as pieces ([wrap_pieces]), so a long code line keeps
    its per-token colours across the wrap instead of falling back to a
@@ -588,10 +643,14 @@ let styled_code_rows palette ~width pieces =
         else Layout.split_cells ~max_cells:body_width plain
       in
       List.map (fun chunk -> fill_styled_row ~width span (gutter ^ chunk)) chunks
-  | None ->
-      wrap_pieces ~max_cells:body_width pieces
-      |> List.map (fun row ->
-           gutter ^ String.concat "" (List.map (styled_piece palette) row))
+  | None -> (
+      match diff_mixed_kind pieces with
+      | Some kind -> styled_diff_mixed_rows palette ~width kind pieces
+      | None ->
+          wrap_pieces ~max_cells:body_width pieces
+          |> List.map (fun row ->
+               gutter ^ String.concat "" (List.map (styled_piece palette) row))
+      )
 
 let horizontal cells =
   String.concat "" (List.init (max 0 cells) (fun _ -> "\xe2\x94\x80"))
@@ -1024,4 +1083,8 @@ let render_streaming ~palette ~width text =
     mutable_row_start;
   }
 
-let render ~palette ~width text = (render_streaming ~palette ~width text).rows
+let render ~palette ~width text =
+  (* A single non-fence line is one block; streaming adds no context to it. *)
+  if not (String.contains text '\n') && Option.is_none (fence_marker text) then
+    block_rows palette ~width:(max 1 width) text
+  else (render_streaming ~palette ~width text).rows

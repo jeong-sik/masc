@@ -15,7 +15,7 @@ name_suffix = " Help"
 uri = "masc://status"
 name = "MASC Status"
 title = "Project Status"
-description = "Workspace status view of agents, tasks, and recent messages"
+description = "Workspace status view of agents, tasks, and cumulative message count"
 mime_type = "text/markdown"
 
 [[resources]]

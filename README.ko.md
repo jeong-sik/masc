@@ -3,7 +3,7 @@
 </p>
 
 <h1 align="center">MASC</h1>
-<p align="center"><strong>개성 있는 에이전트들과 함께 문제를 해결하는 작업 공간.</strong></p>
+<p align="center"><strong>에이전트와 함께 일하는 작업 공간.</strong></p>
 <p align="center">
   <a href="README.md">English</a> ·
   <a href="#시작하기">시작하기</a> ·

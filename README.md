@@ -3,7 +3,7 @@
 </p>
 
 <h1 align="center">MASC</h1>
-<p align="center"><strong>A workspace for solving problems together with agents that have personality.</strong></p>
+<p align="center"><strong>A workspace for working with agents.</strong></p>
 <p align="center">
   <a href="README.ko.md">한국어</a> ·
   <a href="#start-here">Get started</a> ·

@@ -499,6 +499,7 @@ let all_surface_golden_names =
   ; "keeper_broadcast"
   ; "keeper_candle_balance"
   ; "keeper_candle_catalog"
+  ; "keeper_candle_equip"
   ; "keeper_candle_purchase"
   ; "keeper_code_query"
   ; "keeper_context_status"

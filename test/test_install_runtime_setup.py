@@ -1562,19 +1562,19 @@ class InstalledModelCatalog(unittest.TestCase):
         self.assertNotEqual(unknown.returncode,0)
         self.assertEqual(unknown.stdout,'')
 
-    def test_claude_list_includes_sonnet5_and_selects_without_context_question(self):
+    def test_claude_list_includes_sonnet5_5_and_selects_without_context_question(self):
         result=subprocess.run([BINARY,'runtime-model-list','claude-code'],check=True,capture_output=True,text=True)
         catalog=json.loads(result.stdout)
         self.assertIs(catalog['account_availability_verified'],False)
         models=catalog['models']
-        sonnet=next(row for row in models if row['id']=='claude-sonnet-5')
+        sonnet=next(row for row in models if row['id']=='claude-sonnet-5-5')
         self.assertEqual(sonnet['max_context'],1000000)
         self.assertTrue(all(row['id'].startswith('claude-') and row['max_context']>0 for row in models))
         self.assertNotIn('claude_code',{row['id'] for row in models})
         index=models.index(sonnet)+1
         with patch('sys.stdin',io.StringIO(str(index)+'\n')), contextlib.redirect_stderr(io.StringIO()) as terminal:
             selected=SETUP.select_model(BINARY,'claude_code')
-        self.assertEqual(selected,dict(model='claude-sonnet-5',max_context=1000000))
+        self.assertEqual(selected,dict(model='claude-sonnet-5-5',max_context=1000000))
         self.assertIn('No number to enter',terminal.getvalue())
         self.assertNotIn('Documented/configured context limit',terminal.getvalue())
 

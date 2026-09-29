@@ -758,18 +758,49 @@ let test_recent_projection_is_prepared_inside_frame_build () =
    for every key. Each is now made once per input list, in one binding; a
    second call site would make it once per frame again. *)
 let test_overview_projections_are_made_once_per_input () =
+  let open Parsetree in
   let render = "bin/masc_tui_render.ml" in
-  check int "the Todo backlog is summarised in one binding" 1
-    (Ast_grep.count_calls ~module_path:render ~callee:"Overview_tasks.backlog");
+  (* Any mention, not only an application: a pipe or a partial application
+     names the function without applying it at that spot. *)
+  let references name =
+    let count = ref 0 in
+    let iter =
+      { Ast_iterator.default_iterator with
+        expr = (fun self expression ->
+          (match expression.pexp_desc with
+           | Pexp_ident { txt; _ } when Ast_grep.longident_to_string txt = name ->
+             incr count
+           | _ -> ());
+          Ast_iterator.default_iterator.expr self expression)
+      }
+    in
+    iter.structure iter (Ast_grep.parse_implementation_or_fail render);
+    !count
+  in
+  (* A count inside a binding that no longer exists is zero, which would
+     read as a pass; the bindings are asked for first. *)
+  List.iter
+    (fun name ->
+      check int ("binding exists: " ^ name) 1
+        (Ast_grep.count_value_bindings ~module_path:render ~name))
+    [ "overview_backlog"; "overview_team"; "overview_goal_status_of_id" ];
+  check int "the Todo backlog is summarised in one place" 1
+    (references "Overview_tasks.backlog");
   check int "... the Overview backlog binding" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render
        ~binding_name:"overview_backlog" ~callee:"Overview_tasks.backlog");
-  check int "the Team block is projected in one binding" 1
-    (Ast_grep.count_calls ~module_path:render ~callee:"Overview_team.project");
+  check int "the Team block is projected in one place" 1
+    (references "Overview_team.project");
   check int "... the Overview Team binding" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render
        ~binding_name:"overview_team" ~callee:"Overview_team.project");
-  check int "goal links resolve through the task-status index" 0
+  check int "no call spells the modules out to get round the aliases" 0
+    (references "Masc_tui_overview_tasks.backlog"
+     + references "Masc_tui_overview_team.project");
+  check int "goal links resolve through the task-status index" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"overview_goal_status_of_id" ~callee:"Hashtbl.find_opt");
+  check int "... and not by searching the backlog" 0
     (Ast_grep.count_calls_in_value_binding ~module_path:render
        ~binding_name:"overview_goal_status_of_id" ~callee:"List.find_opt")
 ;;

@@ -3,9 +3,8 @@
 #
 # Stages the release binaries as a local file:// release, installs them
 # through the real installer (detect_asset + SHA256SUMS verification +
-# placement), then boots the installed server and checks liveness, readiness,
-# and the installed dashboard. This guards the installer's asset-name and
-# checksum contract that a release
+# placement), then boots the installed server and waits for /health/ready. This
+# guards the installer's asset-name and checksum contract that a release
 # depends on -- the contract that broke silently when nothing exercised the
 # download path end to end -- without any network access.
 #
@@ -273,37 +272,23 @@ env -u MASC_ASSETS_DIR MASC_BASE_PATH="$base" MASC_OTEL_ENABLED=0 \
   "$prefix/masc" --base-path "$base" --host 127.0.0.1 --port "$PORT" >"$log" 2>&1 &
 PID=$!
 
-ready_deadline=$((SECONDS + 30))
-health=""
-while (( SECONDS < ready_deadline )); do
-  if health="$(curl -fsS "http://127.0.0.1:$PORT/health" 2>/dev/null)"; then
+# /health can report ok before authenticated routes have their server state.
+# /health/ready returns 503 until that state and the startup barrier are ready.
+ready=""
+for _ in $(seq 1 30); do
+  if ready="$(curl -fsS "http://127.0.0.1:$PORT/health/ready" 2>/dev/null)"; then
     break
   fi
   kill -0 "$PID" 2>/dev/null || { echo "install-smoke: server exited before answering" >&2; cat "$log" >&2; exit 1; }
   sleep 1
 done
 
-case "$health" in
-  *'"status":"ok"'*) echo "install-smoke: installed server answered /health ok" ;;
-  *) echo "install-smoke: /health did not report ok: ${health:-<no response>}" >&2; cat "$log" >&2; exit 1 ;;
-esac
-
-ready_body="$work/readiness.json"
-ready_code="000"
-while (( SECONDS < ready_deadline )); do
-  ready_code="$(curl -sS -o "$ready_body" -w '%{http_code}' \
-    "http://127.0.0.1:$PORT/health/ready" 2>/dev/null || true)"
-  if [[ "$ready_code" == "200" ]] && grep -q '"ready":true' "$ready_body"; then
-    break
-  fi
-  kill -0 "$PID" 2>/dev/null || { echo "install-smoke: server exited before readiness" >&2; cat "$log" >&2; exit 1; }
-  sleep 1
-done
-if [[ "$ready_code" != "200" ]] || ! grep -q '"ready":true' "$ready_body"; then
-  echo "install-smoke: /health/ready did not report ready (HTTP $ready_code): $(cat "$ready_body" 2>/dev/null)" >&2
+if ! printf '%s' "$ready" | python3 -c 'import json, sys; value = json.load(sys.stdin); sys.exit(0 if isinstance(value, dict) and value.get("ready") is True else 1)'; then
+  echo "install-smoke: /health/ready did not report ready: ${ready:-<no response>}" >&2
   cat "$log" >&2
   exit 1
 fi
+echo "install-smoke: installed server answered /health/ready ready"
 
 python3 "$REPO_ROOT/scripts/check-installed-dashboard.py" \
   --binary "$prefix/masc" --base-url "http://127.0.0.1:$PORT"

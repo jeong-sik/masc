@@ -562,7 +562,7 @@ let test_criterion_edits_invalidate_proof_phase () =
     last_review_note = Some "proved"; last_review_at = Some (iso_now ()) } in
   Goal_store.write_state config { version = 1; updated_at = iso_now (); goals = [completed] };
   let same = upsert_exn config ~id:original.id ~title:original.title ~metric:"p99"
-      ~target_value:"400ms" ~priority:1 ~due_date:"tomorrow" () in
+      ~target_value:"400ms" ~priority:1 ~due_date:"2026-09-23" () in
   check string "priority, due date and no-op criterion preserve revision" original.criterion_revision same.criterion_revision;
   check bool "unrelated edit preserves completion" true (same.phase = Goal_phase.Completed);
   let changed = upsert_exn config ~id:original.id ~target_value:"200ms" () in
@@ -581,6 +581,69 @@ let test_criterion_edits_invalidate_proof_phase () =
   Goal_store.write_state config { version = 6; updated_at = iso_now (); goals = [dropped] };
   let updated = upsert_exn config ~id:original.id ~metric:"p95" () in
   check bool "criterion edit does not reopen dropped Goal" true (updated.phase = Goal_phase.Dropped)
+
+(* [due_date] is a calendar day written YYYY-MM-DD; it falls due at 23:59:59
+   UTC of that day (Goal_due). A value the reader cannot read is refused where
+   it is written, so it never reaches the store. "2_26" and "+026" are the
+   spellings [int_of_string_opt] alone would take as a year. *)
+let due_dates_that_are_not_a_calendar_day =
+  [ "tomorrow"; ""; "2026-9-3"; "2026-09-3"; "26-09-23"; "2026-13-01"
+  ; "2026-00-10"; "2026-02-30"; "2027-02-29"; " 2026-09-23"; "2026-09-23 "
+  ; "2026-09-23T10:00:00Z"; "2026/09/23"; "2026-0x-23"; "+026-09-23"
+  ; "2_26-09-23" ]
+
+let test_upsert_refuses_a_due_date_that_is_not_a_calendar_day () =
+  with_workspace @@ fun config ->
+  List.iter
+    (fun raw ->
+      match
+        Goal_store.upsert_goal config ~title:"Dated" ~metric:"m"
+          ~target_value:"1" ~due_date:raw ()
+      with
+      | Error (Goal_store.Rejected message) ->
+        check bool (Printf.sprintf "%S: the refusal says what a due date is" raw) true
+          (String.starts_with
+             ~prefix:"due_date must be a calendar date written YYYY-MM-DD" message);
+        check bool (Printf.sprintf "%S: the refusal names the value" raw) true
+          (String.ends_with ~suffix:(Printf.sprintf "got %S" raw) message)
+      | Error other ->
+        fail (Printf.sprintf "%S refused as %s" raw (write_error_msg other))
+      | Ok _ -> fail (Printf.sprintf "%S was accepted" raw))
+    due_dates_that_are_not_a_calendar_day;
+  check bool "a refused create wrote no goals.json" false
+    (Sys.file_exists (Goal_store.goals_path config))
+
+let test_upsert_accepts_a_real_calendar_day () =
+  with_workspace @@ fun config ->
+  List.iter
+    (fun raw ->
+      let goal =
+        upsert_exn config ~title:("Due " ^ raw) ~metric:"m" ~target_value:"1"
+          ~due_date:raw ()
+      in
+      check (option string) (raw ^ " is stored as written") (Some raw)
+        goal.due_date)
+    [ "2026-09-23"; "2028-02-29"; "9999-12-31" ]
+
+(* An update is checked like a create, and a refused one changes nothing. *)
+let test_upsert_keeps_the_stored_due_date_when_the_new_one_is_refused () =
+  with_workspace @@ fun config ->
+  let goal =
+    upsert_exn config ~title:"Dated" ~metric:"m" ~target_value:"1"
+      ~due_date:"2026-09-23" ()
+  in
+  let before = available config in
+  (match Goal_store.upsert_goal config ~id:goal.id ~due_date:"TBD" () with
+   | Error (Goal_store.Rejected _) -> ()
+   | Error other -> fail ("TBD refused as " ^ write_error_msg other)
+   | Ok _ -> fail "an update to TBD was accepted");
+  let after = available config in
+  check int "a refused update writes nothing" before.version after.version;
+  match after.goals with
+  | [ stored ] ->
+    check (option string) "the stored due date is unchanged" (Some "2026-09-23")
+      stored.due_date
+  | goals -> fail (Printf.sprintf "expected one goal, got %d" (List.length goals))
 
 let test_transact_goal_authoritative_and_noop () =
   with_workspace @@ fun config ->
@@ -1011,6 +1074,13 @@ let () =
         [ test_case "criterion edits invalidate proof phase" `Quick test_criterion_edits_invalidate_proof_phase;
           test_case "transaction uses primary and preserves no-op" `Quick test_transact_goal_authoritative_and_noop;
           test_case "missing revision refuses bound mutation" `Quick test_missing_criterion_revision_refuses_bound_mutation ] );
+      ( "due date",
+        [ test_case "a value that is not a calendar day is refused" `Quick
+            test_upsert_refuses_a_due_date_that_is_not_a_calendar_day;
+          test_case "a real calendar day is stored as written" `Quick
+            test_upsert_accepts_a_real_calendar_day;
+          test_case "a refused update keeps the stored due date" `Quick
+            test_upsert_keeps_the_stored_due_date_when_the_new_one_is_refused ] );
       ( "regression-7690",
         [ test_case "version bumps +1" `Quick test_delete_goal_bumps_version;
           test_case "three deletes = +3" `Quick

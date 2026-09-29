@@ -3,7 +3,8 @@
 </p>
 
 <h1 align="center">MASC</h1>
-<p align="center"><strong>에이전트가 함께 일하고, 다음 대화에서도 이어가는 작업 공간.</strong></p>
+<p align="center"><strong>저마다의 개성을 가진 작은 촛불들과, 함께 문제를 풀어가는 공간.</strong></p>
+<p align="center"><sub>어릴 적 즐겼던 Bullfrog의 Dungeon Keeper와 촛불에서 영감을 받아, 에이전트에게 개성과 재미를 더했습니다.</sub></p>
 <p align="center">
   <a href="README.md">English</a> ·
   <a href="#시작하기">시작하기</a> ·

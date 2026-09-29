@@ -40,6 +40,7 @@ module Markdown_cache = Masc_tui_markdown_render_cache
 module Composer = Masc_tui_composer
 module Composer_projection = Masc_tui_composer_projection
 module Keeper_control = Masc_tui_keeper_control
+module Item_account = Masc_tui_keeper_items
 module Task_selection = Masc_tui_task_selection
 module Overview_tasks = Masc_tui_overview_tasks
 module Tool_tree = Masc_tui_tool_tree
@@ -7640,6 +7641,43 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       let count = List.length items in
       let cursor = max 0 (min (count - 1) state.item_cursor) in
       let first = max 0 (min (cursor - 4) (count - 10)) in
+      let account =
+        match state.item_account with
+        | Some (name, account) when String.equal name k.k_name -> Some account
+        | Some _ | None -> None
+      in
+      let milli value = Printf.sprintf "%d.%03d" (value / 1000) (value mod 1000) in
+      let account_line =
+        match account, state.item_account_error with
+        | Some (Item_account.Ready account), _ ->
+            "  Balance " ^ milli account.balance_milli ^ " Candle · preview only"
+        | Some Item_account.Off, _ -> "  Candle off · preview only"
+        | Some (Item_account.Disabled reason), _ ->
+            "  Candle disabled: " ^ Terminal_text.single_line reason
+        | None, Some detail ->
+            "  Account unavailable: " ^ Terminal_text.single_line detail
+        | None, None -> "  Loading Item account…"
+      in
+      let item_account_facts item =
+        match account with
+        | Some (Item_account.Ready account) ->
+            let owned =
+              List.exists (fun owned ->
+                String.equal (Keeper_portrait_item.id owned)
+                  (Keeper_portrait_item.id item)) account.owned_items in
+            let price =
+              match List.find_opt (fun (entry : Item_account.entry) ->
+                String.equal (Keeper_portrait_item.id entry.item)
+                  (Keeper_portrait_item.id item)) account.catalog with
+              | Some entry ->
+                (match entry.price with
+                 | Item_account.Unpriced -> "unpriced"
+                 | Item_account.Priced amount -> milli amount)
+              | None -> "catalog unavailable"
+            in
+            Some (price ^ (if owned then " owned" else ""))
+        | Some (Item_account.Off | Item_account.Disabled _) | None -> None
+      in
       let rows =
         items
         |> List.mapi (fun index item -> index, item)
@@ -7657,15 +7695,22 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                           String.equal (Keeper_portrait_item.id equipped)
                             (Keeper_portrait_item.id item))
                in
-               Some (Printf.sprintf "  %s %-2d %-5s %-20s%s"
+               let account_facts =
+                 if inner < 90 then ""
+                 else match item_account_facts item with
+                   | Some facts -> "  " ^ facts
+                   | None -> ""
+               in
+               Some (Printf.sprintf "  %s %-2d %-5s %-20s%s%s"
                  (if index = cursor then ">" else " ") (index + 1)
                  (Keeper_portrait_item.slot_id (Keeper_portrait_item.slot item))
                  (Keeper_portrait_item.id item)
-                 (if worn then "  equipped" else "")))
+                 account_facts
+                 (if worn then " equipped" else "")))
       in
       let headline =
         [ Printf.sprintf "  Items %d/%d · j/k to preview" (cursor + 1) count
-        ; "  Preview changes this picture only"
+        ; account_line
         ]
       in
       let listing =
@@ -7679,8 +7724,16 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
         | Tui_decode.Unavailable reason ->
             [ "  Portrait unavailable: " ^ Terminal_text.single_line reason ]
       in
-      listing @ observation
-      @ [ ""; "  Ownership and prices are not available in this view." ]
+      let selected_facts =
+        match List.nth_opt items cursor with
+        | None -> []
+        | Some item ->
+          (match item_account_facts item with
+           | Some facts -> [ "  Selected: " ^ facts ]
+           | None -> [])
+      in
+      listing @ selected_facts @ observation
+      @ [ "  Preview changes this picture only." ]
     in
 
     (* Each tab projects only when selected. Retained data for the other

@@ -201,6 +201,20 @@ def run_declaration_without_worker(executable: str) -> None:
         terminal.send_and_wait(process, master, output, b"a", b"no available worker")
         terminal.send_and_wait(process, master, output, b"\r", b"Installation details")
         terminal.send_and_wait(process, master, output, b"\x1b", b"> broken")
+        fixtures["/api/v1/lane-addons"] = (200, {
+            "instances": [], "rows": [], "coverage": [],
+            "configuration": {"directory": "/fixture/lane-addons", "complete": False,
+                              "declarations": [],
+                              "issues": [{"id": None, "source_path": "/fixture/lane-addons",
+                                          "message": "directory unavailable"}]},
+        })
+        issue = terminal.send_and_wait(process, master, output, b"r",
+                                       b"0 declared \xc2\xb7 0 active")
+        shown = terminal.screen_text(terminal.frame_containing(issue, b"0 declared"))
+        if b"Configuration problems" not in shown or b"No Add-ons declared" in shown:
+            raise AssertionError("directory-only issue was displayed as an empty installation")
+        if b"E:edit" in shown:
+            raise AssertionError("directory issue advertised editing a missing TOML file")
         os.write(master, b"q")
 
     terminal.run_terminal_scenario(executable,

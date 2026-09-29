@@ -225,7 +225,15 @@ let rows_in_screen view snapshot =
 let selected_declaration view = Option.bind view.snapshot (fun snapshot ->
   Option.bind snapshot.configuration (fun configuration ->
     match view.screen with
-    | Overview -> at_cursor configuration.declarations view.configuration_cursor
+    | Overview ->
+        (match view.focus with
+         | Configurations -> at_cursor configuration.declarations view.configuration_cursor
+         | Timeline | Connections | Instances | Rows ->
+             Option.bind (at_cursor snapshot.instances view.instance_cursor) (fun item ->
+               List.find_opt (fun (declaration : declaration) ->
+                 declaration.instance_id=Some item.id
+                 && Some declaration.source_path=item.source_path)
+                 configuration.declarations))
     | Detail _ -> Option.bind (detail_instance view snapshot) (fun item ->
         List.find_opt (fun (declaration : declaration) ->
           declaration.instance_id = Some item.id
@@ -1083,19 +1091,29 @@ let overview_lines ~width view =
           | None -> ["Installation inventory unread · r:refresh"]
           | Some config when not config.complete -> ["Installation inventory partial · r:refresh"]
           | Some _ -> [] in
-        let declaration_rows =
+        let installation_rows, configuration_problem_rows =
           let window = max 0 (view.configuration_cursor - 4) in
-          List.mapi (fun index (d : declaration) -> index,d) declarations
-          |> List.filter (fun (index,_) -> index >= window && index < window + 9)
-          |> List.concat_map (fun (index,d) ->
+          let visible = List.mapi (fun index (d : declaration) -> index,d) declarations
+            |> List.filter (fun (index,_) -> index >= window && index < window + 9) in
+          let render (index,d) =
             let name = Option.value ~default:(Filename.basename d.source_path) d.installation_id in
             let status =
-              if d.issues<>[] then "needs attention"
+              if Option.is_none d.desired then "configuration issue"
+              else if d.issues<>[] then "needs attention"
               else if d.applied=d.desired then "applied" else "pending" in
+            let controls =
+              if Option.is_none d.desired then "    Enter:details"
+              else if Option.fold ~none:false ~some:(fun (c : configuration) ->
+                    Document.editable_source_path ~directory:c.directory d.source_path)
+                    snapshot.configuration
+              then "    Enter:Installation  E:edit"
+              else "    Enter:Installation" in
             [ (if view.focus=Configurations && index=view.configuration_cursor then "> " else "  ")
               ^ name ^ " · " ^ status ^ " · " ^ Filename.basename d.source_path
-            ; "    Enter:Installation  E:edit"
-            ] @ List.map (fun issue -> "    Issue: " ^ issue) d.issues) in
+            ; controls
+            ] @ List.map (fun issue -> "    Issue: " ^ issue) d.issues in
+          let installations, problems = List.partition (fun (_,d) -> Option.is_some d.desired) visible in
+          List.concat_map render installations, List.concat_map render problems in
         let instance_rows =
           let window = max 0 (view.instance_cursor - 4) in
           let items = List.mapi (fun index (item : instance) -> index,item) snapshot.instances
@@ -1114,7 +1132,8 @@ let overview_lines ~width view =
                 | _ -> [] in
               [lead; controls] @ detail) items in
         [heading; ""] @ inventory_note
-        @ (if declarations=[] then [] else ["Installations"] @ declaration_rows @ [""])
+        @ (if installation_rows=[] then [] else ["Installations"] @ installation_rows @ [""])
+        @ (if configuration_problem_rows=[] then [] else ["Configuration problems"] @ configuration_problem_rows @ [""])
         @ (if snapshot.instances=[] then [] else ["Workers"] @ instance_rows)
         @ (if declarations=[] && snapshot.instances=[]
               && Option.fold ~none:false ~some:(fun (c : configuration) -> c.complete) snapshot.configuration

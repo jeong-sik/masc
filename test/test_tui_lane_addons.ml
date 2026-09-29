@@ -696,8 +696,23 @@ let declaration_without_worker_is_visible () =
   check bool "a declaration without worker cannot advertise an action" true
     (Result.is_error (UI.open_actions ~request_id:"test-action" view))
 
+let directory_issue_is_not_an_editable_installation () =
+  let json = Yojson.Safe.from_string
+    {|{"instances":[],"rows":[],"coverage":[],"configuration":{"directory":"/config","complete":false,"declarations":[],"issues":[{"id":null,"source_path":"/config","message":"directory unavailable"}]}}|} in
+  let snapshot = UI.decode json |> ok in
+  let view = UI.reconcile_snapshot UI.initial snapshot in
+  let lines = UI.lines ~width:110 view in
+  check bool "directory issue is a problem, not a TOML installation" true
+    (List.mem "Lane Add-ons · 0 declared · 0 active · 0 failed · 1 config issues" lines
+     && List.mem "Configuration problems" lines
+     && not (List.mem "Installations" lines)
+     && not (List.exists (fun line -> String_util.contains_substring line "E:edit") lines));
+  check bool "directory has no editable TOML source" true
+    (UI.selected_source_path view=None)
+
 let () = run "TUI Lane package operations" ["operator scenarios",[
   test_case "declaration without worker stays visible" `Quick declaration_without_worker_is_visible;
+  test_case "directory issue is not an editable installation" `Quick directory_issue_is_not_an_editable_installation;
   test_case "detail keeps installation ownership for edit, navigation and export" `Quick detail_keeps_installation_ownership;
   test_case "refresh retains exact operator targets and exposes failure" `Quick refresh_preserves_operator_target;
   test_case "evidence export chooses a Keeper by name" `Quick evidence_export_chooses_a_keeper_by_name;

@@ -50,11 +50,13 @@ let kept t path =
 ;;
 
 (* A value a [forget] stopped from being kept still says which version this
-   decode saw. An entry kept for another version is older than that, so it
-   goes too; left in place, a file that later returned to that version with
-   other bytes, through a writer that never forgets, would be answered from
-   it. An entry for the same version was kept after the [forget], so it
-   stays. *)
+   decode saw. An entry kept for another version goes too, as a keep would
+   have replaced it: left in place, a file that later returned to that
+   version with other bytes, through a writer that never forgets, would be
+   answered from it. The entry may instead be newer than this decode, kept
+   by a reader that started after the [forget]; the next read then decodes
+   again. An entry for the same version stays: a decode no [forget]
+   interrupted kept it, after the last [forget] of [path]. *)
 let keep t path entry ~forgets_before =
   Mutex.protect t.mutex (fun () ->
     if t.forgets = forgets_before

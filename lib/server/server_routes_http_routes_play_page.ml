@@ -456,13 +456,10 @@ let controller_json () =
     ; ("controller_error", `String (Dos_lane.error_to_string err)) ]
 
 let seat_response ~config ~name =
-  match Play_seat.keeper_names config with
+  match Play_seat.hand_to config ~now:(Time_compat.now ()) with
   | Error detail ->
     `Service_unavailable, `Assoc [ ("error", `String "keepers_unreadable"); ("message", `String detail) ]
-  | Ok keepers ->
-    let participants =
-      Play_seat.participants ~base_path:config.Workspace.base_path ~keepers ~now:(Time_compat.now ())
-    in
+  | Ok participants ->
     ( `OK
     , `Assoc
         ((("name", `String name) :: controller_json ())

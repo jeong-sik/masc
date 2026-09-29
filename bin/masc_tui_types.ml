@@ -5576,6 +5576,10 @@ type state = {
      [~who] on several calls), so there is no [msx_activity] here -- adding
      one before the server ever fills it would be a field nothing draws. *)
   mutable dos_activity: Masc_tui_machine_live.activity_entry list;
+  (* The server sends an invite bearer once. Keep the latest link only in
+     this TUI process so /play link can recover it after a pane switch or a
+     terminal without OSC 52; never persist it in workspace state. *)
+  mutable play_invite_link: (string * string) option;
   (* The load menu (RFC-0439 §3.7): the human picks a game from the cartridge
      inventory to plug into the shared machine. It is an overlay on the MSX
      screen -- while [msx_menu_open] the keyboard drives the picker, not the
@@ -8034,6 +8038,7 @@ let create_state
   dos_live = Masc_tui_machine_live.Unread;
   dos_live_in_flight = None;
   dos_activity = [];
+  play_invite_link = None;
   msx_menu_open = false;
   msx_notice = None;
   msx_menu_mode = Boot_game;
@@ -11924,6 +11929,7 @@ type palette_action =
      list and closes the lane to get there. *)
   | Palette_connectors
   | Palette_msx
+  | Palette_dos
   | Palette_lane_addons
   | Palette_goto of surface
   | Palette_config of config_pane
@@ -12047,6 +12053,7 @@ let palette_entries (state : state) =
      when there is no key path to it. *)
   @ [ "go Connectors", Palette_connectors ]
   @ [ "go MSX", Palette_msx ]
+  @ [ "go DOS", Palette_dos ]
   @ [ "go Lane Add-ons", Palette_lane_addons ]
   @ [ "go Logs", Palette_goto System_logs ]
   @ [ "go Metrics", Palette_goto Metrics ]
@@ -12114,7 +12121,7 @@ let palette_action_words = function
       | Repositories | Code | Changes | Connectors | Runtime | Config
       | Resources | Tools | System_logs )
   | Palette_browser_lane | Palette_hide_browser_lane | Palette_connectors
-  | Palette_msx
+  | Palette_msx | Palette_dos
   | Palette_lane_addons | Palette_config _ | Palette_gate_mode _
   | Palette_chat _ | Palette_task _ | Palette_board_hearth _
   | Palette_board_post _ | Palette_lsp _ ->

@@ -36,6 +36,21 @@ let with_workspace (f : Workspace.config -> unit) =
 let past_date = "2000-01-01"
 let future_date = "2999-01-01"
 
+(* An operator whose clock is nine hours ahead of UTC. POSIX TZ syntax, so the
+   test needs no zoneinfo on the host. An unset TZ came from the host, so UTC
+   stands in for it afterwards. *)
+let in_kst f =
+  let previous = Sys.getenv_opt "TZ" in
+  Unix.putenv "TZ" "KST-9";
+  Fun.protect
+    ~finally:(fun () -> Unix.putenv "TZ" (Option.value previous ~default:"UTC"))
+    f
+
+let utc year month day hour minute second =
+  match Ptime.of_date_time ((year, month, day), ((hour, minute, second), 0)) with
+  | Some instant -> instant
+  | None -> failwith "test setup: not a calendar instant"
+
 let make_goal ?(owner = Goal_store.Owner "keeper-a") ?due_date
     ?(phase = Goal_phase.Executing) id =
   { Goal_store.id
@@ -402,6 +417,44 @@ let test_scan_overdue_skips_unknown_future_terminal () =
     check int "completed goal sends nothing" 0
       (List.length (overdue_rows config "keeper-a")))
 
+(* A due date is a UTC day (Goal_due): the Goal falls due at 23:59:59Z. For an
+   operator in KST, 15:30Z on the 23rd is already the 24th, and the scan still
+   waits. *)
+let test_scan_overdue_follows_utc_not_the_operator_zone () =
+  with_workspace (fun config ->
+    write_goals config [ make_goal ~due_date:"2026-09-23" "goal-1" ];
+    let scan now =
+      in_kst (fun () ->
+        Workspace_goals.scan_overdue_goal_notifications ~now config)
+    in
+    scan (utc 2026 9 23 15 30 0);
+    check int "00:30 KST on the 24th is not overdue" 0
+      (List.length (overdue_rows config "keeper-a"));
+    scan (utc 2026 9 23 23 59 59);
+    check int "23:59:59Z is the due instant, not past it" 0
+      (List.length (overdue_rows config "keeper-a"));
+    scan (utc 2026 9 24 0 0 0);
+    check int "00:00:00Z on the 24th is overdue" 1
+      (List.length (overdue_rows config "keeper-a")))
+
+(* A value that is not YYYY-MM-DD is never past its date. The wall clock is far
+   beyond every one of these, so only the reader keeps them quiet; the last
+   goal is the control that a real date still sends. *)
+let test_scan_overdue_skips_a_value_that_is_not_a_due_date () =
+  with_workspace (fun config ->
+    write_goals
+      config
+      [ make_goal ~due_date:"TBD" "goal-word"
+      ; make_goal ~due_date:"2000-1-1" "goal-short"
+      ; make_goal ~due_date:" 2000-01-01" "goal-padded"
+      ; make_goal ~owner:(Goal_store.Owner "keeper-b") ~due_date:past_date "goal-real"
+      ];
+    Workspace_goals.scan_overdue_goal_notifications config;
+    check int "unreadable values send nothing" 0
+      (List.length (overdue_rows config "keeper-a"));
+    check int "a real date beside them sends" 1
+      (List.length (overdue_rows config "keeper-b")))
+
 (* A failed send leaves no marker, so the next scan retries and the owner ends
    with exactly one row — not zero, not two. *)
 let test_scan_overdue_retries_after_send_failure () =
@@ -542,6 +595,10 @@ let () =
             test_scan_overdue_owner_change_notifies_new_owner
         ; test_case "skips ownerless, future and terminal goals" `Quick
             test_scan_overdue_skips_unknown_future_terminal
+        ; test_case "follows UTC, not the operator's zone" `Quick
+            test_scan_overdue_follows_utc_not_the_operator_zone
+        ; test_case "skips a value that is not a due date" `Quick
+            test_scan_overdue_skips_a_value_that_is_not_a_due_date
         ; test_case "retries after a failed send" `Quick
             test_scan_overdue_retries_after_send_failure
         ] )

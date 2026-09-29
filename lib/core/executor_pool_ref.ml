@@ -14,14 +14,24 @@
 
 let pool : Eio.Executor_pool.t option Atomic.t = Atomic.make None
 
-let worker_depth = Domain.DLS.new_key (fun () -> 0)
+(* Pool work is marked on the fiber that runs it and on the fibers it forks,
+   not on its domain. A worker domain runs several jobs at once -- an IO job
+   weighs a twentieth of a worker -- and they suspend and end in any order, so
+   a per-domain mark cleared when one job ends would unmark another job still
+   running there, and that job's nested submit would queue behind the
+   capacity it holds. *)
+let worker_marker : unit Eio.Fiber.key = Eio.Fiber.create_key ()
 
-let in_worker_context () = Domain.DLS.get worker_depth > 0
+let in_worker_context () =
+  match Eio_guard.execution_context () with
+  | Eio_guard.Eio_fiber -> Option.is_some (Eio.Fiber.get worker_marker)
+  | Eio_guard.Non_eio -> false
+;;
 
 let with_worker_context f =
-  let previous = Domain.DLS.get worker_depth in
-  Domain.DLS.set worker_depth (previous + 1);
-  Fun.protect ~finally:(fun () -> Domain.DLS.set worker_depth previous) f
+  match Eio_guard.execution_context () with
+  | Eio_guard.Eio_fiber -> Eio.Fiber.with_binding worker_marker () f
+  | Eio_guard.Non_eio -> f ()
 ;;
 
 let get () = Atomic.get pool

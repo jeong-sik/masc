@@ -790,7 +790,7 @@ let render_overview (state : state) =
      says it has not loaded. A note on rows that were read (backup recovery,
      goal links) stays in the Tasks section below; GOALS counts the rows. *)
   Overview_goals.draw buf ~cols ~rows:row_budget.goal_rows
-    ~now:(Unix.gettimeofday ()) ~localtime:Unix.localtime ~tasks:state.task_reading
+    ~now:(Unix.gettimeofday ()) ~tasks:state.task_reading
     state.overview_goals;
   (* The panel spans the band the rest of the screen's rows cover: one cell of
      margin on each side of the frame. *)
@@ -15585,9 +15585,7 @@ let render_presets (state : state) =
              state.preset_detail
              ~key:m.Tui_decode.pm_name)
       ~report:state.preset_report
-    @ List.map
-        (fun (name, reason) -> Printf.sprintf "! %s — %s" name reason)
-        unreadable
+    @ Masc_tui_preset_text.unreadable_rows ~max_cells:(max 4 (cols - 6)) unreadable
   in
   let max_scroll = max 0 (List.length detail - detail_height) in
   let scroll = max 0 (min state.config_scroll max_scroll) in

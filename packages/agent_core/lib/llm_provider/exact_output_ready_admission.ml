@@ -491,6 +491,7 @@ let admit_candidate_request
   in
   match
     Flow_admission.admit
+      ~admission_config:target.config
       ~net
       ~clock
       ~now_unix_s:(fun () -> int_of_float (Unix.gettimeofday ()))

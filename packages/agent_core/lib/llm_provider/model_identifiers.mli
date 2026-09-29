@@ -45,8 +45,7 @@ module Id_prefix : sig
 
   val equality_key : t -> Equality_key.t
   (** The key {!equal} compares: two rows are [equal] exactly when their
-      keys are.  A row and a {!Model_id.t} with equal keys name the same
-      model. *)
+      keys are.  The provider-scoped catalog lookup files rows by it. *)
 
   val starts_with : prefix:t -> t -> bool
   (** Prefix matching between catalog identifiers, e.g. wizard client gating
@@ -98,8 +97,9 @@ module Model_id : sig
       {!of_string} rejects padded input. *)
 
   val equality_key : t -> Equality_key.t
-  (** The key {!equal} compares.  A requested model id names a catalog row
-      exactly when its key equals the row's {!Id_prefix.equality_key}. *)
+  (** The key {!equal} compares.  The provider-scoped catalog lookup
+      ([Model_catalog.lookup_for_provider_result]) answers with the row whose
+      {!Id_prefix.equality_key} equals it. *)
 
   val starts_with : prefix:Id_prefix.t -> t -> bool
   (** Prefix matching between a catalog row and a requested model id.

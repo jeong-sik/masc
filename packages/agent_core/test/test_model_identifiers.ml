@@ -440,10 +440,66 @@ let test_scoped_lookup_retries_under_the_canonical_provider () =
   check "a row under the alias label answers before the retry"
     ~provider_name:"alias-fixture-old" ~model_id:"verbatim-model"
     (Ok (Some "alias-fixture-old", Some 3));
+  check "an alias label is folded before its own rows are asked"
+    ~provider_name:" Alias-Fixture-Old " ~model_id:"VERBATIM-MODEL"
+    (Ok (Some "alias-fixture-old", Some 3));
   check "the canonical label keeps its own row" ~provider_name:"alias-fixture"
     ~model_id:"verbatim-model" (Ok (Some "alias-fixture", Some 2));
   check "an id neither label declares misses" ~provider_name:"alias-fixture-old"
     ~model_id:"no-row-declares-this-model" (Error "no such row")
+;;
+
+(* Two rows under one provider whose ids differ only in case would share one
+   slot of the index, and the second would never answer: the loader refuses
+   the catalog and names the second row. *)
+let test_the_loader_refuses_rows_that_fold_to_one_id () =
+  match
+    Model_catalog.of_toml_string ~source:"rows that fold to one id"
+      "[[models]]\n\
+       id_prefix = \"Dup-Model\"\n\
+       provider_name = \"provider-a\"\n\
+       \n\
+       [[models]]\n\
+       id_prefix = \"dup-model\"\n\
+       provider_name = \"provider-a\"\n"
+  with
+  | Ok _ -> Alcotest.fail "a catalog with two rows that fold to one id loaded"
+  | Error message ->
+    Alcotest.(check string) "the loader names the second row"
+      "model catalog declares model row \"dup-model\" for provider \"provider-a\" twice"
+      message
+;;
+
+(* The exact-output binding tells rows apart by the key the index files them
+   under: rows whose ids differ only in case are one identity, and an overlay
+   row merges into the base row it folds to. *)
+let test_the_binding_folds_row_ids_as_the_index_does () =
+  let catalog =
+    catalog_of_toml ~source:"binding row ids"
+      "[[models]]\n\
+       id_prefix = \"Fold-Model\"\n\
+       provider_name = \"provider-a\"\n\
+       max_context_tokens = 1\n"
+  in
+  match Model_catalog.model_entries catalog with
+  | [ base ] ->
+    let lower =
+      { base with
+        id_prefix = Model_identifiers.Id_prefix.of_string_exn "fold-model"
+      ; max_context_tokens = Some 2
+      }
+    in
+    Alcotest.(check bool) "rows whose ids differ only in case are one identity" false
+      (Exact_output_catalog_binding.model_identities_unique [ base; lower ]);
+    (match
+       Exact_output_catalog_binding.merge_exact_model_entries ~base:[ base ]
+         ~overlay:[ lower ]
+     with
+     | [ (merged : Model_catalog.model_entry) ] ->
+       Alcotest.(check (option int)) "the overlay row merges into the base row"
+         (Some 2) merged.max_context_tokens
+     | rows -> Alcotest.failf "the merge kept %d rows, not one" (List.length rows))
+  | rows -> Alcotest.failf "the fixture loaded %d rows, not one" (List.length rows)
 ;;
 
 let () =
@@ -470,4 +526,8 @@ let () =
         ; Alcotest.test_case "scoped_lookup_folds_row_ids_and_keeps_providers_apart" `Quick
             test_scoped_lookup_folds_row_ids_and_keeps_providers_apart
         ; Alcotest.test_case "scoped_lookup_retries_under_the_canonical_provider" `Quick
-            test_scoped_lookup_retries_under_the_canonical_provider ] ) ]
+            test_scoped_lookup_retries_under_the_canonical_provider
+        ; Alcotest.test_case "the_loader_refuses_rows_that_fold_to_one_id" `Quick
+            test_the_loader_refuses_rows_that_fold_to_one_id
+        ; Alcotest.test_case "the_binding_folds_row_ids_as_the_index_does" `Quick
+            test_the_binding_folds_row_ids_as_the_index_does ] ) ]

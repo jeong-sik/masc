@@ -125,6 +125,7 @@ type misc_operation =
   | Misc_msx_step_until_change
   | Misc_msx_peek
   | Misc_msx_ram_diff
+  | Misc_portrait_read
   | Misc_dos_load
   | Misc_dos_eject
   | Misc_dos_screen

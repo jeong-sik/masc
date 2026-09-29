@@ -8640,6 +8640,7 @@ let composable_output_probes =
         `Assoc [])
     }
   ; probe "keeper_lane_status" (`Assoc [])
+  ; probe "keeper_portrait_read" (`Assoc [ "size", `Int 96 ])
   ; { tool_name = "keeper_tasks_list"
     ; needs_sandbox = false
     ; prepare =

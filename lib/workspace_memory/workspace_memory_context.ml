@@ -84,7 +84,8 @@ let discover ~keepers_dir =
        | Sys_error detail -> Error detail)
     | _ -> Error "Keeper memory directory is not a directory"
   with
-  | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok []
+  | Unix.Unix_error (Unix.ENOENT, _, _) ->
+    Error ("Keeper memory directory is missing: " ^ keepers_dir)
   | Unix.Unix_error (error, operation, path) -> Error (failure error operation path)
   | Sys_error detail -> Error detail
 

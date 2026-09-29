@@ -95,6 +95,7 @@ let fusion_judge_output = "fusion.judge.output"
 let mcp_full = "mcp.full"
 let mcp_managed_agent = "mcp.managed_agent"
 let mcp_operator_remote = "mcp.operator_remote"
+let mcp_seat = "mcp.seat"
 
 (* MCP tool_help prompt body — one slot per assembly piece in
    config/prompts/mcp.tool_help.md, rendered by Mcp_prompt_surface when a

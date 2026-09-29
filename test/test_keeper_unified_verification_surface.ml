@@ -1405,6 +1405,7 @@ let test_workspace_memory_discovery_is_ephemeral () =
   let base_path = Filename.temp_dir "workspace-memory-prompt" "" in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
   let require = function Ok value -> value | Error detail -> fail detail in
+  Fs_compat.mkdir_p (Config_dir_resolver.keepers_dir_for_base_path ~base_path);
   let inventory = Masc.Workspace_memory_context.collect ~base_path |> require in
   let envelope = Masc.Workspace_memory_context.proposal_json inventory
     (`Assoc ["shared_claims", `List []; "conflicts", `List []; "excluded", `List []]) in

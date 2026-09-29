@@ -104,11 +104,21 @@ let test_claude_cli_snap_admits_minimal_as_low () =
     [ Effort.None_; Effort.Low; Effort.Medium; Effort.High; Effort.XHigh; Effort.Max ]
 ;;
 
+let test_gpt_6_1_sol_preserves_ultra () =
+  check_case ~label_prefix:"GPT-6.1 Sol" ~model_id:(Some "gpt-6.1-sol")
+    ~requested:(Some Effort.Ultra) ~expected:(Some Effort.Ultra) ();
+  check_case ~label_prefix:"GPT-6 Sol keeps its own ladder"
+    ~model_id:(Some "gpt-6-sol") ~requested:(Some Effort.Ultra)
+    ~expected:(Some Effort.Max) ()
+;;
+
 let () =
   Alcotest.run
     "keeper_codex_effort_clamp"
     [ ( "clamp"
       , [ Alcotest.test_case "catalog clamps effort" `Quick test_clamp
+        ; Alcotest.test_case "GPT-6.1 Sol preserves ultra" `Quick
+            test_gpt_6_1_sol_preserves_ultra
         ; Alcotest.test_case
             "catalog clamp applies to anthropic rows"
             `Quick

@@ -2740,3 +2740,70 @@ streaming = true
 reasoning-effort = "high"
 
 [openrouter.openrouter-free-lfm-2-5-2-6b]
+
+# GPT-6.1 Sol: advertised by Codex model/list, 2026-09-29.
+[models.codex-gpt-6-1-sol-low]
+api-name = "gpt-6.1-sol"
+max-context = 272000
+max-prompt-bytes = 10485760
+tools-support = true
+streaming = true
+reasoning-effort = "low"
+[models.codex-gpt-6-1-sol-low.capabilities]
+supports-image-input = true
+[codex_subscription.codex-gpt-6-1-sol-low]
+
+[models.codex-gpt-6-1-sol-medium]
+api-name = "gpt-6.1-sol"
+max-context = 272000
+max-prompt-bytes = 10485760
+tools-support = true
+streaming = true
+reasoning-effort = "medium"
+[models.codex-gpt-6-1-sol-medium.capabilities]
+supports-image-input = true
+[codex_subscription.codex-gpt-6-1-sol-medium]
+
+[models.codex-gpt-6-1-sol-high]
+api-name = "gpt-6.1-sol"
+max-context = 272000
+max-prompt-bytes = 10485760
+tools-support = true
+streaming = true
+reasoning-effort = "high"
+[models.codex-gpt-6-1-sol-high.capabilities]
+supports-image-input = true
+[codex_subscription.codex-gpt-6-1-sol-high]
+
+[models.codex-gpt-6-1-sol-xhigh]
+api-name = "gpt-6.1-sol"
+max-context = 272000
+max-prompt-bytes = 10485760
+tools-support = true
+streaming = true
+reasoning-effort = "xhigh"
+[models.codex-gpt-6-1-sol-xhigh.capabilities]
+supports-image-input = true
+[codex_subscription.codex-gpt-6-1-sol-xhigh]
+
+[models.codex-gpt-6-1-sol-max]
+api-name = "gpt-6.1-sol"
+max-context = 272000
+max-prompt-bytes = 10485760
+tools-support = true
+streaming = true
+reasoning-effort = "max"
+[models.codex-gpt-6-1-sol-max.capabilities]
+supports-image-input = true
+[codex_subscription.codex-gpt-6-1-sol-max]
+
+[models.codex-gpt-6-1-sol-ultra]
+api-name = "gpt-6.1-sol"
+max-context = 272000
+max-prompt-bytes = 10485760
+tools-support = true
+streaming = true
+reasoning-effort = "ultra"
+[models.codex-gpt-6-1-sol-ultra.capabilities]
+supports-image-input = true
+[codex_subscription.codex-gpt-6-1-sol-ultra]

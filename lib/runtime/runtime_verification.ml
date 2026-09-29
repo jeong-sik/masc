@@ -606,7 +606,8 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
           |> Option.map (function
             | Llm_provider.Reasoning_effort.None_ -> Runtime_muse_msp.Effort_none
             | Minimal -> Effort_minimal | Low -> Effort_low | Medium -> Effort_medium
-            | High -> Effort_high | XHigh -> Effort_xhigh | Max -> Effort_max) in
+            | High -> Effort_high | XHigh -> Effort_xhigh | Max -> Effort_max
+            | Ultra -> Effort_ultra) in
         (match Runtime_verification_muse.run ~secure_random ~net ~mgr ~clock ~cwd
            ~directory:cwd_path ~account_home:execution.account_home
            ~quota_scope:(Runtime.quota_scope_of_runtime runtime) ~config

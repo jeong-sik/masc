@@ -326,7 +326,7 @@ let with_fixture_sequence ?capture_path first_lines second_lines f =
     (fun () -> f path)
 ;;
 
-let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_tools = []) ?thread_mode ?(history = [])
+let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_tools = []) ?reasoning_effort ?thread_mode ?(history = [])
     ?(developer_context = []) ?developer_instructions ?(cwd = "/tmp")
     ?(timeout_s = 2.0) ?admission_timeout_s ?(no_turn_deadline = false)
     ?on_thread_ready_delay_s ?on_turn_started_delay_s ?on_stream_event
@@ -372,6 +372,7 @@ let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_to
       ~clock
       ~cwd:Eio.Path.(Eio.Stdenv.fs env / cwd)
       ~dynamic_tools
+      ?reasoning_effort
       ?thread_mode
       ~history
       ~developer_context
@@ -1194,7 +1195,8 @@ let test_prompt_transmission_boundary ?(worker_pool = false) () =
   let transmitted_prompt = String.make 65_536 '"' ^ "한글 👩‍💻\n\\marker" in
   Fun.protect ~finally:(fun () -> Sys.remove captured) (fun () ->
     with_fixture ~capture_path:captured lines (fun path ->
-      let result = run_fixture ~prompt:transmitted_prompt ~on_prompt_sent:report path in
+      let result = run_fixture ~prompt:transmitted_prompt ~on_prompt_sent:report
+        ~reasoning_effort:Llm_provider.Reasoning_effort.Ultra path in
       check bool "complete turn succeeds" true (Result.is_ok result);
       check int "complete write emits once" 1 !sent;
       let open Yojson.Safe.Util in
@@ -1205,7 +1207,9 @@ let test_prompt_transmission_boundary ?(worker_pool = false) () =
         |> List.find (fun json -> json |> member "method" = `String "turn/start") in
       let text = request |> member "params" |> member "input" |> to_list
         |> List.hd |> member "text" |> to_string in
-      check string "client received exact turn input" transmitted_prompt text));
+      check string "client received exact turn input" transmitted_prompt text;
+      check string "ultra reaches the Codex turn/start wire unchanged" "ultra"
+        (request |> member "params" |> member "effort" |> to_string)));
   with_fixture [ init_result; account_chatgpt; thread_result; turn_result; turn_failed ]
     (fun path ->
       (match run_fixture ~on_prompt_sent:report path with

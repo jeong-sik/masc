@@ -963,7 +963,7 @@ let test_deployment_agent_core_model_catalog_modality_priorities_resolve () =
    one that was accepted and dropped. *)
 let test_model_reasoning_effort_parses_into_the_typed_variant () =
   let config =
-    "[models.probe]\napi-name = \"probe\"\nreasoning-effort = \"xhigh\"\n"
+    "[models.probe]\napi-name = \"gpt-6.1-sol\"\nreasoning-effort = \"ultra\"\n"
   in
   match Runtime_toml.parse_string config with
   | Error _ -> fail "a model declaring a known reasoning-effort must parse"
@@ -972,10 +972,10 @@ let test_model_reasoning_effort_parses_into_the_typed_variant () =
      | [ model ] ->
        check
          bool
-         "reasoning-effort xhigh reaches the model spec as XHigh"
+         "reasoning-effort ultra reaches the model spec as Ultra"
          true
          (model.Runtime_schema.reasoning_effort
-          = Some Llm_provider.Reasoning_effort.XHigh)
+          = Some Llm_provider.Reasoning_effort.Ultra)
      | _ -> fail "exactly one model must parse")
 
 let test_model_reasoning_effort_rejects_unknown_value_at_load () =

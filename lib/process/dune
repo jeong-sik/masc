@@ -9,6 +9,7 @@
   unix_foreground_process
   process_output_capture
   posix_spawn_process_mgr
+  process_group_members
   spawn_handle
   spawn_registry
   spawn_turn_registry

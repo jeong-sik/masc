@@ -267,36 +267,42 @@ CAMLprim value masc_process_exited_without_reaping(value v_pid)
   CAMLreturn(Val_bool(info.si_pid != 0));
 }
 
-/* Darwin killpg skips zombies, then reports EPERM when it found no live
-   signalable member (XNU kern_sig.c: killpg1). Distinguish that case from
-   real permission denial without releasing the owner's waitable PID anchor.
-   An incomplete/unavailable snapshot is not evidence of an empty live group. */
-CAMLprim value masc_process_group_only_owned_zombies(value v_pid)
+/* Observe only: the members of process group [pgid] as
+   (pid, parent pid, zombie, exiting) rows. [exiting] is P_WEXIT, which
+   sysctl reports for a member whose exit has begun (P_LEXIT); a zombie
+   carries it too. Process_group_members decides what the rows mean.
+   None when there is no snapshot -- an unavailable or incomplete one is not
+   evidence of an empty group -- and on every platform but Darwin. */
+CAMLprim value masc_process_group_members(value v_pgid)
 {
-  CAMLparam1(v_pid);
-  int only_owned_zombies = 0;
+  CAMLparam1(v_pgid);
+  CAMLlocal3(result, rows, row);
+  result = Val_none;
 #if defined(__APPLE__)
-  pid_t pid = (pid_t)Int_val(v_pid);
-  int mib[] = { CTL_KERN, KERN_PROC, KERN_PROC_PGRP, pid };
+  pid_t pgid = (pid_t)Int_val(v_pgid);
+  int mib[] = { CTL_KERN, KERN_PROC, KERN_PROC_PGRP, pgid };
   size_t size = 0;
   if (sysctl(mib, 4, NULL, &size, NULL, 0) == 0 && size > 0) {
     struct kinfo_proc *members = malloc(size);
     if (members != NULL) {
       size_t capacity = size;
       if (sysctl(mib, 4, members, &size, NULL, 0) == 0 &&
-          size <= capacity && size % sizeof(*members) == 0) {
-        int found_leader = 0;
-        int all_zombies = 1;
-        for (size_t i = 0; i < size / sizeof(*members); i++) {
-          if (members[i].kp_proc.p_stat != SZOMB) all_zombies = 0;
-          if (members[i].kp_proc.p_pid == pid &&
-              members[i].kp_eproc.e_ppid == getpid()) found_leader = 1;
+          size > 0 && size <= capacity && size % sizeof(*members) == 0) {
+        size_t count = size / sizeof(*members);
+        rows = caml_alloc((mlsize_t)count, 0);
+        for (size_t i = 0; i < count; i++) {
+          row = caml_alloc_tuple(4);
+          Store_field(row, 0, Val_int(members[i].kp_proc.p_pid));
+          Store_field(row, 1, Val_int(members[i].kp_eproc.e_ppid));
+          Store_field(row, 2, Val_bool(members[i].kp_proc.p_stat == SZOMB));
+          Store_field(row, 3, Val_bool((members[i].kp_proc.p_flag & P_WEXIT) != 0));
+          Store_field(rows, i, row);
         }
-        only_owned_zombies = found_leader && all_zombies;
+        result = caml_alloc_some(rows);
       }
       free(members);
     }
   }
 #endif
-  CAMLreturn(Val_bool(only_owned_zombies));
+  CAMLreturn(result);
 }

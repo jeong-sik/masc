@@ -4293,12 +4293,11 @@ let restore_account_login state (view : Masc_tui_account_login.t) =
     if json |> member "host" = `String server_peer_host && json |> member "port" = `Int state.port then (
       let integration = json |> member "integration_id" |> to_string in
       let login_id = json |> member "login_id" |> to_string in
-      let selected = List.nth_opt view.providers view.cursor in
       match List.find_opt (fun (p:Masc_tui_account_login.provider) -> p.id=integration) view.providers with
       | Some provider when Auth.is_generated_token_shape login_id &&
-          (view.requested="" || Option.exists (fun (p:Masc_tui_account_login.provider) -> p.id=integration) selected) ->
+          Masc_tui_account_login.requested_matches view provider ->
         view.provider<-Some provider; view.login_id<-Some login_id;
-        view.notice<-"이전 로그인 기록이 있습니다. r로 상태를 확인하거나 Enter로 새 계정을 추가하세요."
+        view.notice<-"이전 로그인 기록이 있습니다. r로 상태를 확인하거나 n으로 새 계정을 추가하세요."
       | Some _ | None -> ())
   with Unix.Unix_error _ | Sys_error _ | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ()
 
@@ -4308,7 +4307,7 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
   (match action with
    | Login.Input _ | Nothing -> ()
    | Inventory | Refresh_saved _ | Refresh_retry | Start _ | Cancel | Recover | Discover | Prepare _ | Save _ | Close
-   | Preview_removal _ | Remove _ | Refresh_removed _ ->
+   | Preview_removal _ | Remove _ | Refresh_removed _ | Refresh_list _ ->
      view.generation <- view.generation + 1;
      Option.iter (fun stop -> stop ()) view.cancel_stream;
      view.cancel_stream <- None);
@@ -4339,11 +4338,8 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
   | Cancel ->
     Option.iter (fun stop -> stop ()) view.cancel_stream; view.cancel_stream<-None;
     view.draft<-""; view.phase<-Login.Failed; view.notice<-"로그인을 취소했습니다. r로 저장된 상태를 확인하세요."
-  | Start existing ->
-    let provider = if view.phase=Login.Providers then List.nth_opt view.providers view.cursor else view.provider in
-    (match provider with
-     | None -> view.notice<-"공급자를 선택하세요."
-     | Some provider ->
+  | Start {provider; existing} ->
+    (
        let previous = Login.begin_attempt view provider ~existing in
        start_job (fun () ->
          let selected = if not existing || Option.is_some previous then Ok previous else
@@ -4366,8 +4362,8 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
   | Input (_, json) ->
     (match view.login_id with None -> view.input_pending<-false
      | Some id -> start_job (fun () -> enqueue (post (login_path id ^ "/input") json)))
-  | Inventory | Refresh_saved _ | Refresh_retry ->
-    (match action with Inventory | Refresh_retry -> view.phase<-Login.Loading | _ -> ()); start_job (fun () -> enqueue (Masc_tui_http.get_json ~host ~port ~path:"/api/v1/setup/inventory"))
+  | Inventory | Refresh_saved _ | Refresh_retry | Refresh_list _ ->
+    (match action with Inventory | Refresh_retry | Refresh_list _ -> view.phase<-Login.Loading | _ -> ()); start_job (fun () -> enqueue (Masc_tui_http.get_json ~host ~port ~path:"/api/v1/setup/inventory"))
   | Recover -> (match view.login_id with
       | None -> view.notice<-"조회할 로그인 세션이 없습니다. n으로 새 로그인을 시작하세요."
       | Some id -> view.phase<-Login.Loading; start_job (fun () -> enqueue (Masc_tui_http.get_json ~host ~port ~path:(login_path id))))
@@ -9356,7 +9352,7 @@ let draw_browser_viewport state (shot : Browser_lane_view.screenshot) bytes =
         (match shot.source with
          | Browser_lane_view.Live -> "click: link   drag: requires automation"
          | Browser_lane_view.Automation -> "click: link   drag: move"
-         | Browser_lane_view.Stagehand -> "click/drag: not served on the stagehand lane")
+         | Browser_lane_view.Stagehand -> "click: control   drag: move")
     | _ -> "click/drag unavailable: terminal cell geometry unknown" in
   let wheel_hint = match !image_cell_pixels with
     | Some (width,height) when width > 0 && height > 0 -> "wheel:pane"
@@ -11258,7 +11254,7 @@ let open_lanes_standalone_selection state ~mailbox =
       open_lane_run_list state ~mailbox lane
   | None ->
       show_lanes_action_error state
-        "Cannot open runs: standalone lane observation is unavailable"
+        "Cannot open runs: lane observation is unavailable"
 
 (* A left press on the Lanes overview is the cursor keys by another hand: the
    first press lands the selection on the row under it (exactly where j/k
@@ -14816,8 +14812,11 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                | Error message -> Error message)
              | Input _ -> Ok ()
              | Preview_removal {provider; refused} -> Login.removal_preview view provider ~refused json
-             | Refresh_removed notice ->
-               (match Login.inventory view json with
+             | Refresh_list list_view ->
+               (match Login.inventory ~view:list_view view json with
+                | Ok () -> restore_account_login state view; Ok () | Error _ as error -> error)
+             | Refresh_removed {client; notice} ->
+               (match Login.inventory ~view:(Login.Accounts client) view json with
                 | Ok () -> restore_account_login state view; view.notice<-notice; Ok () | Error _ as error -> error)
              (* A removal answers through [Account_login_removal]. *)
              | Remove _ -> Ok ()
@@ -14836,7 +14835,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
          let module Login = Masc_tui_account_login in
          (match outcome with
           | Masc_tui_http.Post_answered _ ->
-            launch_account_login_action state ~mailbox view (Login.Refresh_removed (Login.removed_notice provider login_store))
+            launch_account_login_action state ~mailbox view
+              (Login.Refresh_removed {client = provider.client; notice = Login.removed_notice provider login_store})
           (* The server's refusal is about the file as it is now -- it moved,
              or the account can no longer go -- so the preview is read again
              under it rather than left standing. *)
@@ -16067,7 +16067,15 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       (match state.browser_lane with
        | Some view ->
            (match view.Browser_lane_view.load with
-            | Browser_lane_view.Loading (current, (Open_session | Close_session | Goto _))
+            | Browser_lane_view.Loading (current, Close_session)
+              when generation = current ->
+                (match result with
+                 | Error detail ->
+                     state.browser_lane <- Some (Browser_lane_view.fail_action detail view)
+                 | Ok () ->
+                     let closed = Browser_lane_view.after_action view in
+                     state.browser_lane <- Some { closed with load = No_browser })
+            | Browser_lane_view.Loading (current, (Open_session | Goto _))
               when generation = current ->
                 (match result with
                  | Error detail ->
@@ -17311,17 +17319,23 @@ let main
         ~invalidate_before:(damaged || authority_changed)
         ~write ~flush frame
     with
-    | Frame_presenter.Presented ->
+    | Frame_presenter.Presented repaint ->
         state.frames_presented <- state.frames_presented + 1;
         commit_presented_approval approval;
         presented_presses := presses;
         presented_reader := reader;
-        (* The frame's pictures go over it once it is on the terminal: a
-           repainted frame may have cleared them, so all are placed again. *)
-        Masc_tui_portrait_view.flush ~presented:true ~write:write_to_terminal
+        (* The frame's pictures go over it once it is on the terminal, and
+           again over any row the frame erased and wrote: a full redraw
+           cleared them all, a row it rewrote may have taken one's cells. *)
+        Masc_tui_portrait_view.flush
+          ~rewritten:
+            (match repaint with
+             | Frame_presenter.Whole_screen -> fun _ -> true
+             | Frame_presenter.Rows rows -> fun row -> List.mem row rows)
+          ~write:write_to_terminal
     | Frame_presenter.Unchanged ->
         (* Same text, but a picture may have moved on a step. *)
-        Masc_tui_portrait_view.flush ~presented:false ~write:write_to_terminal
+        Masc_tui_portrait_view.flush ~rewritten:(fun _ -> false) ~write:write_to_terminal
   in
   (* Bind the bearer to the workspace actually opened, before any request is
      built. Reported before the recovery load as well, so when neither source
@@ -17915,8 +17929,8 @@ let main
      same two spellings the table parser accepts, kept together here so a
      name that parses cannot fail to be found. *)
   let config_models_source_line ~(row : Masc_tui_model_runtime_table.row) rows =
-    let bare = "[models." ^ row.Masc_tui_model_runtime_table.model ^ "]" in
-    let quoted = "[models.\"" ^ row.Masc_tui_model_runtime_table.model ^ "\"]" in
+    let bare = "[" ^ Runtime_toml_namespace.(path Models) row.Masc_tui_model_runtime_table.model ^ "]" in
+    let quoted = "[" ^ Runtime_toml_namespace.(path Models) ("\"" ^ row.Masc_tui_model_runtime_table.model ^ "\"") ^ "]" in
     let rec scan i = function
       | [] -> None
       | segments :: rest ->
@@ -18063,7 +18077,8 @@ let main
               (String.length sr_slot - boundary - 1)
           in
           (match kind with
-           | Masc_tui_types.Catalog_slot -> Some [ "providers"; provider_id ]
+           | Masc_tui_types.Catalog_slot ->
+             Some [ Runtime_toml_namespace.(key Providers); provider_id ]
            | Masc_tui_types.Official_client_slot -> Some [ provider_id; model_id ]
            | Masc_tui_types.Media_route_slot -> None)
         | Some _ | None -> None
@@ -25729,7 +25744,7 @@ and is loaded on demand through keeper_skill.
                  | Lanes_run_list _ | Lanes_run_detail _ | Lanes_measurement_detail _ -> ()
                  | Lanes_overview ->
                      show_lanes_action_error state
-                       "Cannot open chat: Standalone lanes have no Keeper; use Keepers")
+                       "Cannot open chat: These lanes have no Keeper; use Keepers")
             | Keepers Keeper_list
               when Option.is_none state.keepers_error
                    && state.keeper_cursor < List.length state.keepers ->
@@ -26038,7 +26053,7 @@ and is loaded on demand through keeper_skill.
                 (match state.lanes_mode, selected_standalone_lane state with
                  | Lanes_overview, Some lane ->
                    let path =
-                     [ "runtime"; "exact_output_lanes"
+                     [ Runtime_toml_namespace.(key Runtime); "exact_output_lanes"
                      ; Standalone_lane.to_id lane.Tui_decode.sl_lane ]
                    in
                    let section = runtime_config_path_text path in
@@ -26547,7 +26562,7 @@ and is loaded on demand through keeper_skill.
               again from that frame. *)
            Masc_tui_emblem_screen.begin_frame ();
            Masc_tui_portrait_view.begin_frame ();
-           Masc_tui_portrait_view.flush ~presented:false ~write:write_to_terminal
+           Masc_tui_portrait_view.flush ~rewritten:(fun _ -> false) ~write:write_to_terminal
        | Render_schedule.Render ->
            let frame, clamped, approval, presses =
              Masc_tui_frame_timing.time_tagged Masc_tui_frame_timing.Build

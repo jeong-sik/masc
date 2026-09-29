@@ -127,7 +127,7 @@ let frame requests =
   View.begin_frame ();
   List.iter View.request requests;
   let written = Buffer.create 4096 in
-  View.flush ~presented:false ~write:(Buffer.add_string written);
+  View.flush ~rewritten:(fun _ -> false) ~write:(Buffer.add_string written);
   Buffer.contents written
 
 let placed name =

@@ -21,6 +21,7 @@ import test_tui_keyboard_input as h
 # "Enter:read region") are masc_tui_render.ml's; the palette row this types
 # ("go Browser Lane") is masc_tui_types.ml's.
 SOURCE_MODULES = (
+    "bin/masc_tui.ml",
     "bin/masc_tui_render.ml",
     "bin/masc_tui_types.ml",
 )
@@ -177,6 +178,103 @@ def run(binary):
                             interact=interact, http_fixtures=fixtures)
 
 
+def run_session_lifecycle(binary, lane, source_key):
+    fixtures = h.overview_event_http_fixtures()
+    requests = []
+    release = threading.Event()
+    state = {"closed": False, "url": "https://example.org/session", "revision": 0}
+    binary_digest = hashlib.sha256(Path(binary).read_bytes()).hexdigest()
+    fixtures["/api/v1/dashboard/browser-lane/clients"] = (200, {
+        "ok": True, "data": {"clients": []}})
+
+    def read(body):
+        request = json.loads(body)
+        requests.append(("read", request, state["closed"]))
+        assert request["lane"] == lane
+        if state["closed"]:
+            return 200, {"ok": False, "error": "no_session"}
+        state["revision"] += 1
+        text = f"SESSION PAGE {state['revision']}\nREAD URL {state['url']}"
+        return 200, {"ok": True, "data": {"source": lane, "clientId": None,
+            "elapsed_ms": 1, "tabs": [{"id": 2, "title": "Session", "url": state["url"], "active": True}],
+            "page": {"tabId": 2, "title": "Session", "url": state["url"],
+                     "text": text, "chars": len(text), "truncated": False}}}
+
+    def session(body):
+        request = json.loads(body)
+        requests.append(("session", request))
+        assert request["lane"] == lane
+        assert release.wait(10), "session progress was never released"
+        state["closed"] = request["action"] == "close"
+        return 200, {"ok": True}
+
+    def goto(body):
+        request = json.loads(body)
+        requests.append(("goto", request))
+        assert request["lane"] == lane
+        assert release.wait(10), "navigation progress was never released"
+        state["url"] = request["url"]
+        return 200, {"ok": True}
+
+    for verb, handler in (("read", read), ("session", session), ("goto", goto)):
+        fixtures[f"/api/v1/dashboard/browser-lane/{verb}"] = h.RequestHttpResponse(handler)
+
+    def record_terminal(label, output):
+        end = output.rfind(h.FRAME_END)
+        assert end >= 0
+        recording = bytes(output[:end + len(h.FRAME_END)])
+        print("BROWSER_SESSION_PTY " + json.dumps({
+            "label": label, "lane": lane, "columns": 101, "rows": 30,
+            "binary_sha256": binary_digest, "encoding": "zlib+base64",
+            "pty": base64.b64encode(zlib.compress(recording)).decode(),
+        }), flush=True)
+
+    def release_and_wait(process, fd, output, needle):
+        start = len(output)
+        release.set()
+        h.wait_for_output(process, fd, output, needle, start=start, timeout=3)
+        needle_end = h.end_of_needle(output, needle, start)
+        h.wait_for_output(process, fd, output, h.FRAME_END, start=needle_end, timeout=3)
+
+    def interact(process, fd, _slave, output, _base):
+        try:
+            h.palette_go(process, fd, output, b"go Browser Lane", b"No active native browser connections")
+            h.send_and_wait(process, fd, output, source_key, b"SESSION PAGE 1")
+            h.send_and_wait(process, fd, output, b"x", f"Closing {lane} browser".encode())
+            release.set()
+            h.wait_for_output(process, fd, output, b"Browser session closed", start=0, timeout=3)
+            h.resize_and_wait(process, fd, output, rows=30, columns=101,
+                              needle=b"Browser session closed", controls=(h.FULL_REDRAW,))
+            assert b"HTTP failed" not in h.screen_text(output)
+            assert b"SESSION PAGE" not in h.screen_text(output), "closed session retained stale page text"
+            record_terminal("closed", output)
+            release.clear()
+            next_revision = state["revision"] + 1
+            h.send_and_wait(process, fd, output, b"o", f"Opening {lane} browser".encode())
+            release_and_wait(process, fd, output, f"SESSION PAGE {next_revision}".encode())
+            record_terminal("reopened", output)
+            release.clear()
+            h.send_and_wait(process, fd, output, b"g", b"URL>")
+            h.send_and_wait(process, fd, output, b"\x15https://example.org/next\r",
+                            f"Navigating {lane} browser".encode())
+            # A cadence read can increment the revision before the URL draft
+            # owns input. Only the read receipt for this destination proves
+            # navigation completed; neither the composer nor old output can.
+            release_and_wait(process, fd, output, b"READ URL https://example.org/next")
+            assert state["url"] == "https://example.org/next"
+            assert not [r for r in requests if r[0] == "read" and r[2]], \
+                "successful close must not trigger a read against the closed session"
+            assert [r[1]["action"] for r in requests if r[0] == "session"] == ["close", "open"]
+            os.write(fd, b"q")
+        finally:
+            release.set()
+
+    h.run_terminal_scenario(binary, description=f"{lane} browser close and reopen preserve truthful status",
+                            interact=interact, http_fixtures=fixtures)
+
+
 if __name__ == "__main__":
     run(str(Path(sys.argv[1]).resolve()))
+    for lane, source_key in (("automation", b"a"), ("stagehand", b"c")):
+        run_session_lifecycle(str(Path(sys.argv[1]).resolve()), lane, source_key)
     print("Browser action navigation: PASS")

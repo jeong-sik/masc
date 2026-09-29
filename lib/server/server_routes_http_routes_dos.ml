@@ -79,6 +79,24 @@ let run_response ~config ~who ~route ~body =
           ( (if ok then `OK else `Bad_request)
           , result_json ~ok ~message:(Tool_result.message result) (Tool_result.data result) )))
 
+(* A press for a caller that chose the keys from one program's layout (the
+   masc pad). It takes [POST /api/v1/dos/press]'s steps -- the departed-holder
+   release, the tool's lane call and answer, the watchers -- with the lane's
+   [press_into] in place of [press], so the keys go in only while that
+   program is still loaded. The keys come from a parsed layout, whose every
+   name was checked when it was read, so there is no body to check against
+   the tool's schema. *)
+let press_into ~config ~who ~saves_name ~keys =
+  Keeper_dos_controller.before_move ~config ~who;
+  let result =
+    Tool_misc_dos_lane.press_into ~tool_name:(tool_name Press) ~start_time:(Tool_timing.start ())
+      ~base_path:config.Workspace.base_path ~who ~saves_name ~keys
+  in
+  machine_changed ~config;
+  let ok = Tool_result.is_success result in
+  ( (if ok then `OK else `Bad_request)
+  , result_json ~ok ~message:(Tool_result.message result) (Tool_result.data result) )
+
 let add_route router route =
   Http.Router.post (path route)
     (fun request reqd ->

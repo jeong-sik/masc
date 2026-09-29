@@ -714,7 +714,8 @@ let send_best_effort io ~what json =
 (* Subscription observations apply even before an acknowledgement or a
    rejected turn. Other session projections are not consumed before the
    turn; a server request before the turn exists is not one MASC answers. *)
-let rec await_response io ~id ~method_ =
+let rec await_response ?(on_view_gap = fun _ -> ())
+    ?(on_model_usage = fun ~session_id:_ ~turn_id:_ -> ()) io ~id ~method_ =
   let* message = io.receive () in
   match message with
   | Msp.Response { id = Msp.Int_id response_id; result } when response_id = id -> Ok result
@@ -728,10 +729,13 @@ let rec await_response io ~id ~method_ =
     let* notification = lift (Msp.parse_notification ~method_:notification_method params) in
     (match notification with
      | Msp.Usage_changed usage -> io.on_subscription_usage usage
+     | Msp.View_gap { session_id; _ } -> on_view_gap session_id
+     | Msp.Model_usage_reported { session_id; turn_id; _ } ->
+       on_model_usage ~session_id ~turn_id
      | Msp.Turn_started _ | Turn_completed _ | Item_started _ | Item_updated _
-     | Item_completed _ | Item_delta _ | Model_usage_reported _
+     | Item_completed _ | Item_delta _
      | Unhandled_notification _ -> ());
-    await_response io ~id ~method_
+    await_response ~on_view_gap ~on_model_usage io ~id ~method_
   | Msp.Server_request { id = request_id; method_ = requested; _ } ->
     send_best_effort
       io
@@ -794,6 +798,15 @@ let same_call a b =
   | Named _, Unnamed | Unnamed, Named _ -> false
 ;;
 
+type observed_usage =
+  | Observing_usage of Msp.token_usage option
+  | Usage_gap
+
+let gap_applies ~session_id = function
+  | None -> true
+  | Some reported -> String.equal reported session_id
+;;
+
 type turn_state =
   { open_items : (string * Msp.item_kind) list
   ; open_tool_items : int
@@ -804,7 +817,38 @@ type turn_state =
   ; call_models : call_model list
     (** Newest first; a call that names the same model as the one before it,
         or like it names none, adds nothing. *)
+  ; usage_cursors : string list
+  ; observed_usage : observed_usage
   }
+
+(* Per-completion counts are turn-local, never the session's cumulative
+   counters. Preserve unknown cache splits across the sum. *)
+let add_usage (left : Msp.token_usage) (right : Msp.token_usage) =
+  let add_known a b = match a, b with
+    | Some a, Some b -> Some (a + b)
+    | None, _ | _, None -> None in
+  { Msp.input_tokens = left.input_tokens + right.input_tokens
+  ; output_tokens = left.output_tokens + right.output_tokens
+  ; cached_tokens = left.cached_tokens + right.cached_tokens
+  ; reasoning_tokens = left.reasoning_tokens + right.reasoning_tokens
+  ; prompt_tokens = add_known left.prompt_tokens right.prompt_tokens
+  ; cache_read_tokens = add_known left.cache_read_tokens right.cache_read_tokens
+  ; cache_write_tokens = add_known left.cache_write_tokens right.cache_write_tokens }
+;;
+
+let terminal_usage ~observed ~terminal =
+  let observed = match observed with
+    | Observing_usage observed -> observed
+    | Usage_gap -> None in
+  match observed, terminal with
+  | Some observed, Some terminal
+      when observed.Msp.input_tokens = terminal.Msp.input_tokens
+        && observed.output_tokens = terminal.output_tokens
+        && observed.cached_tokens = terminal.cached_tokens
+        && observed.reasoning_tokens = terminal.reasoning_tokens -> Some observed
+  | _, Some terminal -> Some terminal
+  | observed, None -> observed
+;;
 
 let observation (item : Msp.item) : Runtime_native_tools.observation =
   { identity =
@@ -948,12 +992,28 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
      | Msp.Usage_changed usage ->
        emit (Subscription_usage_observed usage);
        continue state
+     | Msp.View_gap { session_id = sid; _ } ->
+       if gap_applies ~session_id sid
+       then continue { state with observed_usage = Usage_gap }
+       else continue state
      (* The session's selection is what MASC asked for; the model a call ran
         on is what the host names here. They differ only when the host ran
         another model, which is recorded and reported, not refused: the call
         already happened. *)
-     | Msp.Model_usage_reported { session_id = sid; turn_id = reported; model_id }
+     | Msp.Model_usage_reported { session_id = sid; turn_id = reported; model_id;
+                                 view_cursor; usage }
        when ours sid && String.equal reported turn_id ->
+       if List.mem view_cursor state.usage_cursors then continue state
+       else
+       let state =
+         { state with
+           usage_cursors = view_cursor :: state.usage_cursors;
+           observed_usage = (match state.observed_usage with
+             | Usage_gap -> Usage_gap
+             | Observing_usage None -> Observing_usage (Some usage)
+             | Observing_usage (Some previous) ->
+               Observing_usage (Some (add_usage previous usage))) }
+       in
        let call = match model_id with Some model -> Named model | None -> Unnamed in
        (match state.call_models with
         | previous :: _ when same_call previous call -> continue state
@@ -973,6 +1033,7 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
      | Msp.Turn_completed { session_id = sid; turn_id = completed; terminal; usage; _ }
        when ours sid && String.equal completed turn_id ->
        emit (Turn_terminal_received terminal);
+       let usage = terminal_usage ~observed:state.observed_usage ~terminal:usage in
        Option.iter (fun usage -> emit (Usage_reported { session_id; turn_id; usage })) usage;
        (match terminal with
         | Msp.Terminal_completed -> Ok (state, usage)
@@ -1180,14 +1241,23 @@ let run_protocol
   (* The complete request is outside this process now; only the model turn
      that follows adopts the declared idle policy. *)
   io.set_receive_phase Model_turn;
+  let observed_usage = ref (Observing_usage None) in
+  let discarded_usage_turns = ref [] in
   let* ack =
-    match await_response io ~id:turn_request_id ~method_:"turn/start" with
+    match await_response
+      ~on_view_gap:(fun sid ->
+        if gap_applies ~session_id sid then observed_usage := Usage_gap)
+      ~on_model_usage:(fun ~session_id:sid ~turn_id ->
+        if String.equal sid session_id then
+          discarded_usage_turns := turn_id :: !discarded_usage_turns)
+      io ~id:turn_request_id ~method_:"turn/start" with
     (* Written but unanswered: the host takes a command in durably before
        it acknowledges it, so it may be running the turn. *)
     | Error (Timeout { seconds; turn_accepted = _ }) ->
       Error (Timeout { seconds; turn_accepted = true })
     | Error (Process_exited exited) -> Error (Process_exited { exited with turn_accepted = true })
-    | response -> response
+    | Ok response -> Ok response
+    | Error error -> Error error
   in
   let* ack = lift (Msp.parse_turn_start_result ack) in
   let* () =
@@ -1199,6 +1269,9 @@ let run_protocol
       protocol_error "turn/start" "the host did not start a new turn for this session"
   in
   let turn_id = ack.Msp.turn_id in
+  (* Notifications can precede the response that names this turn. A call
+     discarded while awaiting that identity makes the later sum partial. *)
+  if List.mem turn_id !discarded_usage_turns then observed_usage := Usage_gap;
   emit_stream_event
     on_stream_event
     (Turn_started { session_id; turn_id; model = session.Msp.model_id });
@@ -1215,6 +1288,8 @@ let run_protocol
         ; open_tool_items = 0
         ; final_text = None
         ; call_models = []
+        ; usage_cursors = []
+        ; observed_usage = !observed_usage
         ; tool_calls = 0
         ; approvals = 0
         ; pending_decisions = []

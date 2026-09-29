@@ -656,6 +656,9 @@ type token_usage =
   ; output_tokens : int
   ; cached_tokens : int
   ; reasoning_tokens : int
+  ; prompt_tokens : int option
+  ; cache_read_tokens : int option
+  ; cache_write_tokens : int option
   }
 
 let parse_token_usage stage fields =
@@ -663,7 +666,10 @@ let parse_token_usage stage fields =
   let* output_tokens = required_count stage "outputTokens" fields in
   let* cached_tokens = required_count stage "cachedTokens" fields in
   let* reasoning_tokens = required_count stage "reasoningTokens" fields in
-  Ok { input_tokens; output_tokens; cached_tokens; reasoning_tokens }
+  let* cache_read_tokens = optional_count stage "cacheReadTokens" fields in
+  let* cache_write_tokens = optional_count stage "cacheWriteTokens" fields in
+  Ok { input_tokens; output_tokens; cached_tokens; reasoning_tokens;
+       prompt_tokens = None; cache_read_tokens; cache_write_tokens }
 ;;
 
 type turn_error_kind =
@@ -1014,10 +1020,17 @@ type notification =
       ; delta : string
       }
   | Usage_changed of subscription_usage
+  | View_gap of
+      { session_id : string option
+      ; after : string
+      ; next : string
+      }
   | Model_usage_reported of
       { session_id : string
       ; turn_id : string
       ; model_id : string option
+      ; view_cursor : string
+      ; usage : token_usage
       }
   | Unhandled_notification of { method_ : string }
 
@@ -1073,11 +1086,22 @@ let parse_notification ~method_ params =
   | "usage/changed" ->
     let* usage = parse_subscription_usage stage fields in
     Ok (Usage_changed usage)
+  | "view/gap" ->
+    let* session_id = optional_string stage "sessionId" fields in
+    let* after = required_string stage "after" fields in
+    let* next = required_string stage "next" fields in
+    Ok (View_gap { session_id; after; next })
   | "session/tokenUsage" ->
     let* session_id = required_string stage "sessionId" fields in
     let* turn_id = required_string stage "turnId" fields in
     let* model_id = optional_string stage "modelId" fields in
-    Ok (Model_usage_reported { session_id; turn_id; model_id })
+    let* view_cursor = required_string stage "viewCursor" fields in
+    let* prompt_tokens = required_count stage "promptTokens" fields in
+    let* usage_json = required_member stage "usage" fields in
+    let* usage_fields = assoc_at stage usage_json in
+    let* usage = parse_token_usage stage usage_fields in
+    Ok (Model_usage_reported { session_id; turn_id; model_id; view_cursor;
+                              usage = { usage with prompt_tokens = Some prompt_tokens } })
   | _ -> Ok (Unhandled_notification { method_ })
 ;;
 

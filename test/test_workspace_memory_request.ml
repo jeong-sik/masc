@@ -119,7 +119,7 @@ let test_related_ledger_context_is_trimmed_with_its_neighbor () =
     match batch.input |> member "new_facts" |> to_list with
     | [row] -> row
     | _ -> Alcotest.fail "one changed fact must produce exactly one request row" in
-  let neighbor fact =
+  let neighbor (fact : Ledger.pending_fact) =
     `Assoc ["id", `String (Request.fact_id fact.fact);
             "fact", `Assoc (fact_fields fact); "claim", `String fact.claim] in
   let full = prepare ~limit:100_000 ~neighbors:3 in

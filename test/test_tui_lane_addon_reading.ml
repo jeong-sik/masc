@@ -66,6 +66,18 @@ let test_unapplied_declarations_are_not_active_workers () =
                      configuration_issues=1; complete=true;
                      freshness=UI.Stale "HTTP 503" })
 
+let test_directory_issue_is_not_a_declaration () =
+  let json = Yojson.Safe.from_string
+    {|{"instances":[],"rows":[],"coverage":[],"configuration":{"directory":"/addons","complete":true,"declarations":[],"issues":[{"source_path":"/addons","id":null,"message":"directory unreadable"}]}}|} in
+  match UI.decode json with
+  | Error detail -> fail ("directory issue fixture did not decode: " ^ detail)
+  | Ok snapshot ->
+    check bool "directory problem without a parsed TOML is zero declarations" true
+      (UI.installation_reading { UI.initial with snapshot=Some snapshot }
+       = UI.Observed { declared=0; active=0; failed_workers=0;
+                       configuration_issues=1; complete=true;
+                       freshness=UI.Current })
+
 (* The status row's reading of the view. Measured on the live server at 150
    columns: pressing [o] drew
 
@@ -156,6 +168,8 @@ let () =
             test_a_read_that_found_none_says_so
         ; test_case "unapplied declarations are not active workers" `Quick
             test_unapplied_declarations_are_not_active_workers
+        ; test_case "directory issue is not a declaration" `Quick
+            test_directory_issue_is_not_a_declaration
         ; test_case "a first read has no previous reading" `Quick
             test_a_first_read_has_no_previous_reading
         ; test_case "a retry after a failure keeps the failure" `Quick

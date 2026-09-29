@@ -1,3 +1,4 @@
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/pr-check-run-contract.sh" || return 1
 # Read-only workflow/check gate shared by approval and the final merge read.
 # Caller supplies GH, repo, pr, head and gitdir. On success wf, wf_ids, n_runs,
 # dispatch_skips and ignored_release_run_suites describe the admitted checks
@@ -72,21 +73,30 @@ check_current_ci() {
 # and then the guard refuses. A newer queued or in-progress run still outranks
 # an older finished one.
 # sort+awk rather than an associative array: lanes may run bash 3.2.
-wf_all="$(ci_gh_json "repos/${repo}/actions/runs?head_sha=${head}&per_page=100" '.workflow_runs[] | [(.workflow_id|tostring), (if .conclusion == "cancelled" then "0" else "1" end), (.run_number|tostring), .name, .status, (.conclusion // "none"), (.id|tostring), ((.check_suite_id // 0)|tostring), (.event // "none"), (.path // ""), (.head_branch // ""), ([.pull_requests[]?.number | tostring] | join(","))] | @tsv')" || return 1
+wf_all="$(ci_gh_json "repos/${repo}/actions/runs?head_sha=${head}&per_page=100" '.workflow_runs[] | [(.workflow_id|tostring), (if .conclusion == "cancelled" then "0" else "1" end), (.run_number|tostring), (.name // "-"), .status, (.conclusion // "none"), (.id|tostring), ((.check_suite_id // 0)|tostring), (.event // "none"), (.path // "-"), (.head_branch // "-"), (.head_sha // "-"), (.created_at // "-"), ([.pull_requests[]?.number | tostring] | join(","))] | @tsv')" || return 1
 # Different PR branches may share a SHA. Bind PR-event rows before picking
 # a newest run, and discard their suites as well as superseded/cancelled ones.
 # Empty associations require the event branch; ci-freshness validates the cited
 # run's suite linkage independently. Non-PR workflows keep their existing gate.
 unrelated_suites="$(printf '%s\n' "$wf_all" | awk -F '\t' -v branch="$ci_branch" -v pr="$pr" '
-  NF && $9=="pull_request" && ($11!=branch || ($12!="" && $12!=pr)) {
+  NF && $9=="pull_request" && ($11!=branch || ($14!="" && $14!=pr)) {
     if ($8!="0") printf "%s ", $8
   }')"
 wf_all="$(printf '%s\n' "$wf_all" | awk -F '\t' -v branch="$ci_branch" -v pr="$pr" '
-  NF && ($9!="pull_request" || ($11==branch && ($12=="" || $12==pr)))')"
+  NF && ($9!="pull_request" || ($11==branch && ($14=="" || $14==pr)))')"
 if ! printf '%s\n' "$wf_all" | awk -F '\t' '
   $9=="pull_request" && $10==".github/workflows/pr-check.yml" { found=1 }
   END { exit !found }'; then
   ci_reasons+=("no PR-check workflow run for PR ${pr} branch ${ci_branch}")
+fi
+# Classify only candidate-owned suites, after excluding another same-SHA PR.
+runs="$(ci_gh_json "repos/${repo}/commits/${head}/check-runs?per_page=100" "$PR_CHECK_CHECKS_JQ")" || return 1
+runs="$(printf '%s\n' "$runs" | awk -F '\t' -v ignored="$unrelated_suites" 'BEGIN {n=split(ignored,a," "); for(i=1;i<=n;i++) drop[a[i]]=1} NF && !($5 in drop)')"
+pr_check_classify "$repo" "$head" "$wf_all" "$runs" ci_gh_json || return 1
+[ -z "$PR_CHECK_INVALID" ] || ci_reasons+=("$PR_CHECK_INVALID")
+if [ -n "$PR_CHECK_DRAFT_RUNS$PR_CHECK_CANCELLED_RUNS" ]; then
+  [ "$PR_CHECK_READY_OK" = yes ] || ci_reasons+=("Draft snapshot exclusion requires six successful checks in the selected Ready PR-check suite")
+  wf_all="$(printf '%s\n' "$wf_all" | awk -F '\t' -v ignored="$PR_CHECK_DRAFT_RUNS $PR_CHECK_CANCELLED_RUNS" 'BEGIN {n=split(ignored,a," "); for(i=1;i<=n;i++) drop[a[i]]=1} NF && !($7 in drop)')"
 fi
 # A failed manual Release run is ignorable only when the validator itself
 # recorded the intended ref refusal. A runner/setup failure on the same ref
@@ -150,9 +160,10 @@ done <<<"$(printf '%s\n' "$wf" | awk -F '\t' '$9=="pull_request" && $10==".githu
 # success 108051995088, while its suite 97836272095 was older than 97836300496.
 # Within one suite (a re-run), the higher check-run id is the newer row.
 # sort+awk rather than an associative array: lanes may run bash 3.2.
-runs="$(ci_gh_json "repos/${repo}/commits/${head}/check-runs?per_page=100" '.check_runs[] | [.name, .status, (.conclusion // "none"), (.id|tostring), ((.check_suite.id // 0)|tostring)] | @tsv')" || return 1
 # Rows from a suite whose workflow run lost in section 3 never count.
-runs="$(printf '%s\n' "$runs" | awk -F '\t' -v lost="$lost_suites" -v ignored="$ignored_release_suites" 'BEGIN { n = split(lost, l, " "); for (i = 1; i <= n; i++) if (l[i] != "") drop[l[i]] = 1; n = split(ignored, x, " "); for (i = 1; i <= n; i++) if (x[i] != "") drop[x[i]] = 1 } NF && !($5 in drop)')"
+runs="$(printf '%s\n' "$runs" | awk -F '\t' -v lost="$lost_suites" -v ignored="$ignored_release_suites $PR_CHECK_DRAFT_SUITES $PR_CHECK_CANCELLED_SUITES" 'BEGIN { n = split(lost, l, " "); for (i = 1; i <= n; i++) if (l[i] != "") drop[l[i]] = 1; n = split(ignored, x, " "); for (i = 1; i <= n; i++) if (x[i] != "") drop[x[i]] = 1 } NF && !($5 in drop)')"
+# Classification used started_at; the workflow/event key below is column six.
+runs="$(printf '%s\n' "$runs" | cut -f1-5)"
 # A multi-event workflow may use the same check name in PR and dispatch
 # suites. Keep the newest check in each admitted workflow/event, so a dispatch
 # success cannot replace a PR failure. Checks without a workflow suite retain

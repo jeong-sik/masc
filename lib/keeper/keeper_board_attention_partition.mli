@@ -303,7 +303,10 @@ val requeue_blocked :
 val confirm_ready :
   base_path:string -> partition:t -> (exact_transition, string) result
 (** Reappend an unchanged [Ready] snapshot for fsync confirmation. This never
-    converts a later [Blocked] generation back to [Ready]. *)
+    converts a later [Blocked] generation back to [Ready]. The same durable
+    append records its confirmation time and runtime instance identity as an
+    observation. Process-start compaction preserves these observations without
+    treating them as state transitions; older rows have no inferred time. *)
 
 val completed : base_path:string -> keeper_name:string -> (t list, string) result
 

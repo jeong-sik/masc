@@ -1511,6 +1511,33 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
           client_result
           |> Result.map (fun turn -> `Completed turn)
           |> Result.map_error (fun error ->
+            (match error with
+             | Serve.Turn_failed { Msp.kind = Msp.Model_error; _ }
+               when not (Runtime_quota_window.is_exhausted
+                           ~scope:quota_scope ~now:(Time_compat.now ())) ->
+               (* MSP's modelError gives only free text and retryable. The
+                  account's typed usage/read can identify a spent window;
+                  never infer it from the error sentence or replay this turn. *)
+               (match Runtime_provider_usage_read.read_muse_in_background
+                        ~clock ~cwd:process_cwd ~scope:quota_scope client_config with
+                | Runtime_provider_usage_read.Started
+                | Runtime_provider_usage_read.Already_reading -> ()
+                | Runtime_provider_usage_read.No_root_switch ->
+                  Log.Keeper.warn ~keeper_name
+                    "Muse usage not read after model error: no server root switch"
+                | Runtime_provider_usage_read.Scheduling_failed ->
+                  Log.Keeper.warn ~keeper_name
+                    "Muse usage not read after model error: background scheduling failed")
+             | Serve.Turn_failed _
+             | Serve.Invalid_config _ | Serve.Spawn_failed _
+             | Serve.Turn_input_write_failed _ | Serve.Protocol_error _
+             | Serve.Rpc_error _ | Serve.Capability_not_granted _
+             | Serve.Session_not_durable | Serve.Session_model_mismatch _
+             | Serve.Session_workspace_mismatch _
+             | Serve.Session_approval_mode_mismatch _ | Serve.Auth_required _
+             | Serve.Turn_cancelled | Serve.Unsupported_server_request _
+             | Serve.Runtime_shutting_down | Serve.Process_exited _
+             | Serve.Timeout _ -> ());
             if failure_leaves_effects_unknown ~admission:!admission error
             then observe_transport_uncertain ();
             recovery_failure := recovery_failure_for_attempt

@@ -165,6 +165,7 @@ depends: [
   "prettym" {= "0.0.5"}
   "psq" {= "0.2.1"}
   "ptime" {= "1.2.0"}
+  "qrc" {= "0.2.0"}
   "qcheck-alcotest" {= "0.91" & with-test}
   "qcheck-core" {= "0.91" & with-test}
   "re" {= "1.14.0"}

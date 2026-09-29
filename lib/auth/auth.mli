@@ -60,8 +60,13 @@ val save_auth_config : string -> auth_config -> unit
 (** {1 Credentials} *)
 
 val load_credential : string -> string -> agent_credential option
-(** [load_credential config agent_name] looks up the agent's credential.
-    Falls back to agent-type prefix for generated nicknames. *)
+(** [load_credential config agent_name] reads [agent_name]'s own credential
+    file, following its redirect stub to the id-named file. [None] when the
+    file is missing, and also when it cannot be read or decoded. A name that
+    signs in with another name's token (a generated nickname, a Keeper
+    transport alias) has no file of its own: the token check maps it to the
+    owner ([Auth_credential_token.verify_token_owner_alias]), not this
+    lookup. *)
 
 (** Outcome of {!load_credential_of}: distinguishes "no credential file
     at all" from "credential found but its owner does not match the

@@ -435,6 +435,22 @@ let execute_tool_eio
                         | Misc_dos_press | Misc_dos_click | Misc_dos_type | Misc_dos_restore )) ->
                       Keeper_dos_controller.before_move ~config ~who:agent_name;
                       dispatch ()
+                    (* Keeper-only, like spawn and code_query above: the
+                       portrait is the Keeper's own, drawn from its name, and
+                       this endpoint has no Keeper turn to name. The name is
+                       registered and this endpoint cannot run it, so it says
+                       that rather than answering "Unknown tool". *)
+                    | Some Tool_schemas_misc.Misc_portrait_read ->
+                      Some
+                        (Tool_result.error
+                           ~failure_class:Tool_result.Workflow_rejection
+                           ~tool_name:name
+                           ~start_time
+                           (Printf.sprintf
+                              "tool '%s' is keeper-internal; not available on this MCP endpoint \
+                               (a Keeper's portrait is drawn from its own name, which this \
+                               endpoint does not have)"
+                              name))
                     | _ -> dispatch ())
                  | Mod_library ->
                    Tool_library.dispatch

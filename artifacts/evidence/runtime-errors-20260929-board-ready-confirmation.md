@@ -6,4 +6,4 @@ The partition test exercises Blocked → requeue → Ready confirmation, a repea
 
 The original 12 affected rows have no confirmation time or boot identity. This change does not backfill them or assign them to earlier restarts. The 68 newly quarantined candidates in the 2026-09-29 A1 observation had no authorized requeue as of 03:04:37Z, so they provide no live Ready confirmation proof yet.
 
-Validation: `ocamlformat --check` and `git diff --check` pass. Local Dune builds are disallowed by `docs/constitution.xml`; PR CI and an isolated distinct-boot replay are pending.
+Validation: `ocamlformat --check`, `git diff --check`, and the repository determinism, cancel-guard, silent-failure, and wildcard-only static checks pass. An independent source review found the real multi-boot runtime measurement still pending. Local Dune builds are disallowed by `docs/constitution.xml`; PR CI and an isolated distinct-boot replay are pending.

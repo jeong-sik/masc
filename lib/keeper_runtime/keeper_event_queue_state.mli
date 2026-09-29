@@ -313,6 +313,32 @@ val terminalize_pending_turn_completed :
     contradictory settlement fails closed instead of replacing the first
     durable outcome. *)
 
+val pending_turn_selection_withdrawn : selection:pending_selection -> t -> bool
+(** [true] when the entry an admitted turn was given is no longer pending
+    under its source identity and this attempt has no receipt of its own.
+    Something else removed it while the turn ran -- a schedule withdrawal, a
+    transfer, another terminal receipt, or a removal that writes no receipt --
+    so nothing is left for that turn to settle. An entry still pending under
+    the same identity, or one this attempt already settled, answers [false],
+    and the turn terminal applies, replays or refuses as before. *)
+
+val pending_cancellation_source_withdrawn :
+  cancellation:accepted_cancellation -> t -> bool
+(** The same question for one accepted cancellation: [true] when its source
+    is no longer pending and this cancellation has no receipt, so a fold that
+    read the pending list earlier has nothing left to cancel for it. *)
+
+type admitted_selection_standing =
+  | Admitted_selection_pending
+  | Admitted_selection_withdrawn
+
+val admitted_selection_standing :
+  selection:pending_selection -> t -> (admitted_selection_standing, string) result
+(** Dispatch-time view of one admitted selection. [Admitted_selection_withdrawn]
+    is {!pending_turn_selection_withdrawn}; otherwise the exact selection is
+    validated like {!validate_pending_selection}, and a changed snapshot or
+    incarnation stays an error. *)
+
 val accepted_pending_cancellation_replay :
   accepted_cancellation ->
   t ->

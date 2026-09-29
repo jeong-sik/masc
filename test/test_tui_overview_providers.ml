@@ -20,16 +20,16 @@ let resolved state_word =
        {|{
   "provider_usage_windows_since": 1790179140.2,
   "provider_usage_windows": [
-    { "scope": "provider:codex", "providers": [{"id": "codex", "display_name": "Codex Pro"}],
+    { "scope": "provider:codex", "scope_id": "id-codex", "providers": [{"id": "codex", "display_name": "Codex Pro"}],
       "state": "not_reported_since_start", "windows": [] },
-    { "scope": "provider:kimi", "providers": [{"id": "kimi", "display_name": "Kimi Coding"}], "state": "reported",
+    { "scope": "provider:kimi", "scope_id": "id-kimi", "providers": [{"id": "kimi", "display_name": "Kimi Coding"}], "state": "reported",
       "windows": [
         { "limit_id": null, "window": {"kind": "duration_minutes", "minutes": 300},
           "role": "gates_model_calls",
           "utilization": {"unit": "percent", "value": 100},
           "resets_at": 1790179580, "observed_at": 1790170000.0,
           "source": "codex.account_rate_limits_updated" } ] },
-    { "scope": "provider:claude_code", "providers": [{"id": "claude_code", "display_name": "Claude Max"}], "state": %S,
+    { "scope": "provider:claude_code", "scope_id": "id-claude_code", "providers": [{"id": "claude_code", "display_name": "Claude Max"}], "state": %S,
       "windows": [
         { "limit_id": null, "window": {"kind": "five_hour"}, "role": "gates_model_calls",
           "utilization": {"unit": "fraction", "value": 0.67},
@@ -39,7 +39,7 @@ let resolved state_word =
           "utilization": {"unit": "fraction", "value": 0.44},
           "resets_at": 1790700000, "observed_at": 1790180000.0,
           "source": "claude_code.rate_limit_event" } ] },
-    { "scope": "provider:ollama_cloud", "providers": [{"id": "ollama_cloud", "display_name": "Ollama Cloud"}],
+    { "scope": "provider:ollama_cloud", "scope_id": "id-ollama_cloud", "providers": [{"id": "ollama_cloud", "display_name": "Ollama Cloud"}],
       "state": "not_reported_since_start", "windows": [] }
   ]
 }|}
@@ -123,19 +123,7 @@ let test_section_draws_three_line_shapes () =
     lines;
   check string "plain usage title" " Plan usage" (plain section.title);
   (* Codex Pro and Ollama Cloud have not reported and are not observed
-     exhausted, so they draw nothing and are not counted. *)
-  check int "two accounts behind three rows" 2 section.account_count;
-  check (list int) "account row groups" [ 1; 2 ] section.account_row_counts;
-  let short = Providers.visible_rows section ~rows:3 in
-  check int "both accounts fit three rows" 2 short.shown_accounts;
-  check int "no account hidden" 0 short.hidden_accounts;
-  check bool "the second window remains with its account" true
-    (List.exists (contains ~affix:"7d") (List.map plain short.lines));
-  let tighter = Providers.visible_rows section ~rows:2 in
-  check int "two-row account does not split at a short height" 1
-    tighter.shown_accounts;
-  check int "only the complete first account row remains" 1
-    (List.length tighter.lines);
+     exhausted, so they draw nothing: two accounts, three rows. *)
   match lines with
   | [ kimi; five_hour; seven_day ] ->
       (* The exhausted account comes first: a budget cut from the bottom
@@ -269,7 +257,7 @@ let test_window_that_gates_nothing_is_not_an_alarm () =
       {|{
   "provider_usage_windows_since": 1790179140.2,
   "provider_usage_windows": [
-    { "scope": "provider:glm", "providers": [{"id": "glm", "display_name": "Z.AI Coding"}],
+    { "scope": "provider:glm", "scope_id": "id-glm", "providers": [{"id": "glm", "display_name": "Z.AI Coding"}],
       "state": "reported",
       "windows": [
         { "limit_id": "TIME_LIMIT",
@@ -323,7 +311,7 @@ let test_unknown_role_is_rejected () =
       {|{
   "provider_usage_windows_since": 1790179140.2,
   "provider_usage_windows": [
-    { "scope": "provider:glm", "providers": [{"id": "glm", "display_name": "Z.AI Coding"}],
+    { "scope": "provider:glm", "scope_id": "id-glm", "providers": [{"id": "glm", "display_name": "Z.AI Coding"}],
       "state": "reported",
       "windows": [
         { "limit_id": null, "window": {"kind": "five_hour"}, "role": "advisory",
@@ -391,13 +379,11 @@ let test_empty_read_names_missing_usage_data () =
       ~runtimes:Types.Quota_unread ~now ~width:80
   with
   | Some section ->
-      check int "no account is reported" 0 section.account_count;
       check (list string) "the missing data is visible" [ " no usage data" ]
         (List.map plain section.lines)
   | None -> fail "an empty account list disappeared"
 
-(* An account's email sits under its name. The name column stays as wide as
-   the widest account name ("Kimi Coding", 11 cells): an email that fits goes
+(* An account's email sits under its name and scope id. An email that fits goes
    on the account's second window row, a wider one or the email of a
    one-window account takes a row of its own, so the meters never narrow. An
    account that draws no row draws no email either. *)
@@ -425,40 +411,104 @@ let test_account_emails_name_their_accounts () =
   in
   (match fitting.lines with
    | [ claude_5h; claude_7d; kimi; kimi_email ] ->
-       check bool "the name stays on the first row" true (starts claude_5h " Claude Max   5h");
+       check bool "the name and scope stay on the first row" true
+         (starts claude_5h " Claude Max · id-claud  5h");
        check bool "an email that fits goes under the name, on the next window row" true
-         (starts claude_7d " c@x.io       7d" && contains ~affix:meter_open claude_7d);
+         (starts claude_7d " c@x.io " && contains ~affix:"7d" claude_7d
+          && contains ~affix:meter_open claude_7d);
        check bool "drawn dim" true (contains ~affix:(Masc_tui_ansi.Ansi.dim ^ "c@x.io") claude_7d);
        check bool "a one-window account names it on a row of its own" true
-         (starts kimi " Kimi Coding  " && String.equal (String.trim (plain kimi_email)) "kimi@example.com");
+         (starts kimi " Kimi Coding · id-kimi  "
+          && String.equal (String.trim (plain kimi_email)) "kimi@example.com");
        check bool "the email row has no meter" false (contains ~affix:meter_open kimi_email)
    | lines -> failf "expected four rows, got %d" (List.length lines));
-  check (list int) "an email row counts with its account" [ 2; 2 ] fitting.account_row_counts;
   check bool "an account that draws no row draws no email" false
     (List.exists (contains ~affix:"codex@example.com") fitting.lines);
-  let wide = read [ ("claude_code", "claude@example.com") ] in
+  let wide_email = "claude.with.long.address@example.com" in
+  let wide = read [ ("claude_code", wide_email) ] in
   (match wide.lines, without.lines with
    | [ claude_5h; claude_7d; claude_email; kimi ], [ bare_5h; bare_7d; bare_kimi ] ->
        check (list string) "a wider email leaves every window row as it was"
          [ plain bare_5h; plain bare_7d; plain bare_kimi ]
          [ plain claude_5h; plain claude_7d; plain kimi ];
-       check string "and takes a row of its own under the account" "claude@example.com"
+       check string "and takes a row of its own under the account" wide_email
          (String.trim (plain claude_email))
    | lines, bare -> failf "expected four and three rows, got %d and %d" (List.length lines) (List.length bare));
-  check (list int) "the account has three rows" [ 3; 1 ] wide.account_row_counts;
   check (list string) "a failed read is said once, after the rows"
-    [ " account emails unread: HTTP 403" ]
-    (List.map plain (section (Types.Account_emails_failed "HTTP 403")).note_lines);
+    (List.map plain without.lines @ [ " account emails unread: HTTP 403" ])
+    (List.map plain (section (Types.Account_emails_failed "HTTP 403")).lines);
   check bool "and no row names an email" false
     (List.exists (contains ~affix:"@") (section (Types.Account_emails_failed "HTTP 403")).lines);
   check (list string) "rows this build cannot read are counted"
-    [ " account emails: 2 rows this build cannot read" ]
-    (List.map plain (read ~unreadable_rows:2 []).note_lines)
+    (List.map plain without.lines @ [ " account emails: 2 rows this build cannot read" ])
+    (List.map plain (read ~unreadable_rows:2 []).lines)
 
 let test_unknown_state_is_rejected () =
   check bool "an unknown state fails the reading" true
     (Result.is_error
        (Tui_decode.decode_provider_usage_windows (resolved "paused")))
+
+let test_history_preserves_reported_days_and_units () =
+  let json = Yojson.Safe.from_string
+    {|{"days":14,"generated_at":1780000000.0,"sampling":"latest_provider_report_per_utc_day","unreadable_reports":0,"points":[{"scope_id":"abc12345","kind":"five_hour","limit_id":null,"unit":"fraction","value":0.4,"observed_at":1779999900.0,"source":"codex.account_rate_limits_read","resets_at":null}]}|}
+  in
+  match Tui_decode.decode_provider_usage_history json with
+  | Error detail -> fail detail
+  | Ok history ->
+      check int "declared UTC days" 14 history.puh_days;
+      (match history.puh_points with
+       | [point] ->
+           check string "opaque scope" "abc12345" point.puhp_scope_id;
+           (match point.puhp_unit with
+            | Tui_decode.Utilization_fraction value ->
+                check (float 0.0001) "reported fraction" 0.4 value
+            | Tui_decode.Utilization_percent _ -> fail "unit changed")
+       | _ -> fail "expected one reported point")
+
+(* The trend is built once from the answer. A day without a report is the
+   no-report mark, never the lowest bar; a scope whose only point is outside
+   the window keeps its row and says it reported no day. *)
+let test_trend_is_built_from_the_answer () =
+  let point ~scope_id ~observed_at unit : Tui_decode.provider_usage_history_point =
+    { puhp_scope_id = scope_id; puhp_kind = "five_hour"; puhp_limit_id = None;
+      puhp_unit = unit; puhp_observed_at = observed_at }
+  in
+  let generated_at = 1780000000.0 in
+  let day = 86400.0 in
+  let history : Tui_decode.provider_usage_history =
+    { puh_days = 3; puh_generated_at = generated_at; puh_unreadable_reports = 1;
+      puh_points =
+        [ point ~scope_id:"s1" ~observed_at:(generated_at -. (2.0 *. day))
+            (Tui_decode.Utilization_fraction 0.0)
+        ; point ~scope_id:"s1" ~observed_at:generated_at
+            (Tui_decode.Utilization_percent 100)
+        ; point ~scope_id:"s0" ~observed_at:(generated_at -. (30.0 *. day))
+            (Tui_decode.Utilization_fraction 0.5)
+        ] }
+  in
+  let trend =
+    Masc_tui_usage_trend.of_history ~share:Providers.share_of_full history
+  in
+  check int "the unreadable count is carried" 1 trend.unreadable_reports;
+  let none = Masc_tui_usage_trend.no_report_mark in
+  check (list (triple string string int)) "rows, marks and reported days"
+    [ ("s0", none ^ none ^ none, 0)
+    ; ("s1", "\xe2\x96\x81" ^ none ^ "\xe2\x96\x88", 2)
+    ]
+    (List.map
+       (fun (row : Masc_tui_usage_trend.row) ->
+         (row.scope_id, row.marks, row.reported_days))
+       trend.rows)
+
+(* The id the section names a scope by is the server's, carried on the row,
+   so the trend's points and the current windows cannot disagree. *)
+let test_scope_id_is_the_servers () =
+  match Tui_decode.decode_provider_usage_windows (resolved "reported") with
+  | Error err -> failf "fixture should decode: %s" err
+  | Ok windows ->
+      check (list string) "ids as the server sent them"
+        [ "id-codex"; "id-kimi"; "id-claude_code"; "id-ollama_cloud" ]
+        (List.map Providers.scope_id windows.puws_accounts)
 
 let () =
   run "tui_overview_providers"
@@ -470,6 +520,11 @@ let () =
         ; test_case "empty read names missing usage" `Quick
             test_empty_read_names_missing_usage_data
         ; test_case "unknown state is rejected" `Quick test_unknown_state_is_rejected
+        ; test_case "history uses reported points" `Quick
+            test_history_preserves_reported_days_and_units
+        ; test_case "trend is built from the answer" `Quick
+            test_trend_is_built_from_the_answer
+        ; test_case "scope id is the server's" `Quick test_scope_id_is_the_servers
         ; test_case "a silent account draws only its exhaustion" `Quick
             test_silent_account_draws_only_its_exhaustion
         ; test_case "meter width is bounded" `Quick test_meter_width_is_bounded

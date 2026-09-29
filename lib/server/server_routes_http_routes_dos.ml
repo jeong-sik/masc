@@ -13,7 +13,7 @@
 
     Each call first runs the gate a Keeper's own call runs
     ([Keeper_dos_controller.before_call]): before a move, a controller whose
-    Keeper stopped or whose Player invite expired or is gone is let go, and a
+    Keeper stopped or whose credential expired or is gone is let go, and a
     pass to a name not at the machine is a 400 (a 503 when who sits there
     cannot be read) and nothing runs. *)
 
@@ -94,7 +94,11 @@ let run_response ~config ~who ~route ~body =
    name was checked when it was read, so there is no body to check against
    the tool's schema. *)
 let press_into ~config ~who ~saves_name ~keys =
-  Keeper_dos_controller.before_move ~config ~who;
+  match Keeper_dos_controller.before_move ~config ~who with
+  | Error error ->
+    `Service_unavailable,
+    result_json ~ok:false ~message:(Masc_domain.masc_error_to_string error) `Null
+  | Ok () ->
   let result =
     Tool_misc_dos_lane.press_into ~tool_name:(tool_name Press) ~start_time:(Tool_timing.start ())
       ~base_path:config.Workspace.base_path ~who ~saves_name ~keys

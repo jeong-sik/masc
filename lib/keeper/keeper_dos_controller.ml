@@ -10,8 +10,10 @@
    - Running, Failing, Draining, Restarting, Crashed (whose only way out is
      an automatic restart) and Offline (launch pending) are on their way
      back and keep the controller.
-   - An expired Player credential cannot act again, so its controller is
-     freed on the next move.
+   - Where a request needs a token, a persisted credential that expired
+     cannot authenticate, so its controller is freed on the next move.
+     Workers can take a free controller directly, despite not being handoff
+     targets, and have the same expiry rule.
    - A name with no meta is not a Keeper. Where every request must carry a
      credential (auth on, token required) nothing else can move the machine,
      so a name whose credential file is gone (a revoked invite) has left
@@ -40,9 +42,11 @@ let auth_mode ~(config : Workspace.config) =
 
 let credential_departure ~(config : Workspace.config) ~now holder =
   match Auth.load_credential config.base_path holder with
-  | Some ({ Masc_domain.agent_name; role = Masc_domain.Player; _ } as credential)
+  | Some ({ Masc_domain.agent_name; _ } as credential)
     when String.equal agent_name holder && Play_invite.expired ~now credential ->
-    Some Tool_misc_dos_lane.Player_expired
+    (match auth_mode ~config with
+     | Enforced -> Some Tool_misc_dos_lane.Credential_expired
+     | Self_declared | Unreadable _ -> None)
   | Some _ -> None
   | None ->
     (match auth_mode ~config with
@@ -65,9 +69,14 @@ let holder_left ~(config : Workspace.config) ~now holder =
 ;;
 
 let before_move ~config ~who =
-  (* DET-OK: sample time once at the move boundary to classify invite expiry. *)
-  let now = Unix.gettimeofday () in
-  Tool_misc_dos_lane.free_left_controller ~holder_left:(holder_left ~config ~now) ~who
+  let released = Auth.with_credential_transaction config.Workspace.base_path (fun _transaction ->
+    (* The credential is read without the token cache, under the same lock as
+       all credential writers. Keep that lock until release_left commits. *)
+    let now = Time_compat.now () in
+    Tool_misc_dos_lane.free_left_controller ~holder_left:(holder_left ~config ~now) ~who)
+  in
+  (* Board publication must never run while credential writers are excluded. *)
+  Tool_misc_dos_lane.after_announcing released
 ;;
 
 type call_refusal =
@@ -107,18 +116,20 @@ let refusal_result ~tool_name = function
 ;;
 
 let before_call ~config ~who ~name ~args =
+  let ready_to_move () =
+    Result.map_error
+      (fun error -> Seats_unknown ("cannot recover the DOS controller: " ^ Masc_domain.masc_error_to_string error))
+      (before_move ~config ~who)
+  in
   match
     Option.map Tool_schemas_misc.dos_controller_need
       (Tool_schemas_misc.misc_operation_of_tool_name name)
   with
   | Some Tool_schemas_misc.Takes_controller ->
-    before_move ~config ~who;
-    Ok ()
+    ready_to_move ()
   | Some Tool_schemas_misc.Hands_controller ->
     (match pass_refusal ~config args with
      | Some refusal -> Error refusal
-     | None ->
-       before_move ~config ~who;
-       Ok ())
+     | None -> ready_to_move ())
   | Some Tool_schemas_misc.No_controller | None -> Ok ()
 ;;

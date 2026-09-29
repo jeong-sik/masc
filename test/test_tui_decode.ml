@@ -459,7 +459,12 @@ let test_terminal_text_ascii_is_returned_whole () =
       ("\xc3\xa9" ^ expected)
       (Tui_decode.sanitize_terminal_text ("\xc3\xa9" ^ text));
     Alcotest.(check string) (label ^ " is not invisible") text
-      (Tui_decode.escape_invisible text)
+      (Tui_decode.escape_invisible text);
+    (* The same byte raw after a non-ASCII scalar goes through the walk, so
+       the walk and the short cut are held to one answer for it. *)
+    Alcotest.(check string) (label ^ " is not invisible to the walk")
+      ("\xc3\xa9" ^ text)
+      (Tui_decode.escape_invisible ("\xc3\xa9" ^ text))
   done;
   let printable = String.init 0x5F (fun index -> Char.chr (0x20 + index)) in
   Alcotest.(check bool) "printable ASCII comes back without a copy" true

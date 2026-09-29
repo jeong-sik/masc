@@ -314,7 +314,8 @@ let approval_answer =
     ~help:"open the selected Keeper question in its own mode; Esc leaves it"
 let approval_walk =
   b Navigate "[ / ]" "ask"
-    ~help:"while browsing or answering a question, move to the previous or next ask"
+    ~help:"while browsing or answering a question, move to the previous or next ask; \
+           with an approval detail open, move to the previous or next approval"
 let approval_workspace =
   b Act "w" "Workspace mode"
     ~help:"choose manual, Auto Judge or allow-all; Enter applies, Esc cancels"

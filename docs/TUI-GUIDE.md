@@ -713,6 +713,15 @@ The Channels tab lists every transport and its channel bindings. A channel
 reads `name (id)` when the connector's name directory knows it, and
 `id (name unknown)` when it does not.
 
+The Items tab is one `]` after Info. It lists the 18 portrait accessories by
+slot. `j`/`k`, the page keys, and Home/End select an item; the portrait beside
+the list previews that item over the Keeper's current observed outfit. An
+`equipped` label describes the current picture, while the preview changes no
+equipment or Candle ledger entry. If the server cannot report equipment, the
+tab gives the reason and leaves the picture unavailable. The catalog remains
+readable without a picture. Prices, ownership, buying, and equipping are not
+part of this tab yet.
+
 | Key | Effect |
 |-----|--------|
 | `j` / `k` | move between transports |

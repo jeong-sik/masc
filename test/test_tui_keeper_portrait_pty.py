@@ -226,9 +226,39 @@ def portrait_as_pixels(binary: str) -> None:
     )
 
 
+def item_tab_previews_accessories(binary: str) -> None:
+    fixtures = h.keeper_runtime_http_fixtures()
+
+    def interact(process, fd, _slave, output, _base):
+        open_alpha_detail(process, fd, output)
+        h.resize_and_wait(process, fd, output, rows=SHORT_ROWS, columns=COLUMNS, needle=INFO_TAB)
+        h.send_and_wait(process, fd, output, b"]", "▸Items".encode())
+        h.drain_until_quiet(process, fd, output)
+        first = last_frame_rows(output)
+        assert row_of(first, b"Items 1/18") > 0
+        assert row_of(first, b"glasses") > 0
+        assert portrait_rows(first), "the Item preview has no picture at 100x24"
+        h.send_and_wait(process, fd, output, b"j", b"Items 2/18")
+        h.drain_until_quiet(process, fd, output)
+        second = last_frame_rows(output)
+        assert row_of(second, b"shades") > 0
+        assert portrait_rows(second), "the selected accessory lost its picture"
+        assert row_of(second, b"Preview changes this picture only") > 0
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(
+        binary,
+        description="the Keeper Items tab browses accessories and previews them at 100x24",
+        interact=interact,
+        http_fixtures=fixtures,
+        terminal_cols=COLUMNS,
+    )
+
+
 if __name__ == "__main__":
     binary = str(Path(sys.argv[1]).resolve())
     portrait_follows_the_terminal_height(binary)
     no_portrait_under_no_color(binary)
     portrait_as_pixels(binary)
-    print("tui keeper portrait: PASS (3 scenarios)")
+    item_tab_previews_accessories(binary)
+    print("tui keeper portrait: PASS (4 scenarios)")

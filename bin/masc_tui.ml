@@ -18934,6 +18934,11 @@ and is loaded on demand through keeper_skill.
              Masc_tui_http.post_schedule_update ~host:server_peer_host
                ~port:state.port ~body_json))
   in
+  let reconcile_chat_focus () =
+    let _, terminal_cols = Masc_tui_ansi.get_terminal_size () in
+    let cols = max 1 (terminal_cols - acting_pane_columns state ~terminal_cols) in
+    reconcile_keeper_message_focus state ~cols
+  in
   let consume_resize_request () =
     if Atomic.exchange resize_requested false then
       invalidate_frame_for_resize frame_presenter render_schedule
@@ -19204,6 +19209,7 @@ and is loaded on demand through keeper_skill.
             | Some (shot, bytes) -> draw_browser_viewport state shot bytes
             | None -> ())
        | Render_schedule.Terminal_size_cache.Unchanged _ -> ());
+      reconcile_chat_focus ();
       (* Any deliberate input withdraws a standing Ctrl-C. Without this the
          armed state outlives the moment it was meant for, and a Ctrl-C typed
          minutes apart from another would read as a double press. *)
@@ -20482,7 +20488,7 @@ and is loaded on demand through keeper_skill.
                      Masc_tui_roster_pane.threshold_cols)
             | Some preference ->
                 state.roster_pane_preference <- preference;
-                if roster_pane_hidden state then state.keeper_message_focus <- Right_pane;
+                reconcile_chat_focus ();
                 Render_schedule.request render_schedule Render_schedule.Force)
        | Some k when String.equal k toggle_acting_pane_key ->
            (match toggle_acting_pane state with
@@ -26715,6 +26721,9 @@ and is loaded on demand through keeper_skill.
            Masc_tui_portrait_view.begin_frame ();
            Masc_tui_portrait_view.flush ~rewritten:(fun _ -> false) ~write:write_to_terminal
        | Render_schedule.Render ->
+           (* Keys and async updates can change the pane reservation after
+              the interaction snapshot. Store the focus the next frame shows. *)
+           reconcile_chat_focus ();
            let frame, clamped, approval, presses =
              Masc_tui_frame_timing.time_tagged Masc_tui_frame_timing.Build
                ~tag:(fun (frame, _, _, _) -> frame.Frame_presenter.surface_key)

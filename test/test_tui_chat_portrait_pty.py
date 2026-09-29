@@ -26,6 +26,8 @@ SOURCE_MODULES = (
     "bin/masc_tui_render_chat.ml",
     "bin/masc_tui_render_prim.ml",
     "bin/masc_tui_roster_pane.ml",
+    "bin/masc_tui_types.ml",
+    "bin/masc_tui.ml",
 )
 
 COLUMNS = 150  # Roster fits; the separate Activity pane does not open.
@@ -281,6 +283,60 @@ def pixels_follow_conversation(binary: str) -> None:
                             terminal_cols=COLUMNS, preload_input=KITTY_REPLIES)
 
 
+def hidden_roster_releases_focus(binary: str, *, resize: bool) -> None:
+    def interact(process, fd, _slave, output, _base):
+        open_chat(process, fd, output)
+        draft = b"alpha-kept-draft"
+        h.send_and_wait(process, fd, output, draft, h.composer_showing(draft))
+        h.send_and_wait(process, fd, output, b"\x1b[D", b"Up/Down:move")
+        # Leave the roster cursor on beta, distinct from the open conversation.
+        # A stale focus would let Enter switch chats and abandon alpha's draft.
+        h.write_all(fd, output, b"\x1b[B")
+        h.drain_until_quiet(process, fd, output)
+        if resize:
+            h.resize_and_wait(process, fd, output, rows=TALL_ROWS, columns=109,
+                              needle=chat_title(b"alpha"))
+        else:
+            h.send_and_wait(process, fd, output, b"\x02", chat_title(b"alpha"))
+        h.drain_until_quiet(process, fd, output)
+        rows = screen(output)
+        assert not any(b"KEEPERS" in row for row in rows.values()), "roster is still visible"
+        assert draft in b"\n".join(rows.values()), "hiding the roster discarded the draft"
+        assert b"Up/Down:move" not in b"\n".join(rows.values()), "hidden roster still owns the footer"
+        assert output.rfind(b"\x1b[?25h") > output.rfind(b"\x1b[?25l"), "hidden roster still hides the input cursor"
+        h.send_and_wait(process, fd, output, b"-typed", h.composer_showing(draft + b"-typed"))
+
+        def composer_keys():
+            # Arrow keys must select command candidates, then Enter must insert
+            # the chosen command, without executing it or opening beta.
+            h.send_and_wait(process, fd, output, b"\x15/", b"Commands  1/")
+            h.send_and_wait(process, fd, output, b"\x1b[B", b"Commands  2/")
+            h.send_and_wait(process, fd, output, b"\x1b[A", b"Commands  1/")
+            h.send_and_wait(process, fd, output, b"\x15/se", b"Commands  1/1")
+            h.send_and_wait(process, fd, output, b"\r", h.composer_showing(b"/settings"))
+            h.drain_until_quiet(process, fd, output)
+            assert chat_title(b"alpha") in b"\n".join(screen(output).values()), "Enter left alpha's composer"
+
+        composer_keys()
+        if resize:
+            h.resize_and_wait(process, fd, output, rows=TALL_ROWS, columns=COLUMNS,
+                              needle=chat_title(b"alpha"))
+        else:
+            h.send_and_wait(process, fd, output, b"\x02", b"KEEPERS")
+        h.drain_until_quiet(process, fd, output)
+        assert any(b"KEEPERS" in row for row in screen(output).values()), "roster did not return"
+        # Showing it again must not restore the former invisible focus.
+        composer_keys()
+        h.write_all(fd, output, b"\x15")
+        h.drain_until_quiet(process, fd, output)
+        close_chat(process, fd, output)
+
+    reason = "resize" if resize else "Ctrl-B"
+    h.run_terminal_scenario(binary, description=f"chat roster {reason} hands focus back to the composer",
+                            interact=interact, http_fixtures=h.keeper_runtime_http_fixtures(),
+                            terminal_cols=COLUMNS)
+
+
 def no_colour(binary: str) -> None:
     def interact(process, fd, _slave, output, _base):
         open_chat(process, fd, output)
@@ -299,4 +355,6 @@ if __name__ == "__main__":
     mosaic_resizes(binary)
     pixels_follow_conversation(binary)
     no_colour(binary)
-    print("tui chat portrait: PASS (3 scenarios)")
+    hidden_roster_releases_focus(binary, resize=True)
+    hidden_roster_releases_focus(binary, resize=False)
+    print("tui chat portrait: PASS (5 scenarios)")

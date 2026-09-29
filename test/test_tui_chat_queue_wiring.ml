@@ -4143,6 +4143,35 @@ let test_roster_default_follows_chat_without_rewriting_preference () =
       [Tui_types.Keepers Tui_types.Keeper_message; Tui_types.Keepers Tui_types.Keeper_detail])
     [Masc_tui_roster_pane.Hidden, true; Masc_tui_roster_pane.Shown, false]
 
+let test_hidden_chat_roster_releases_focus_without_changing_conversation () =
+  let state = Tui_types.create_state ~workspace:"test" ~port:0 ~refresh_interval:2. () in
+  state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+  state.msg_target_keeper_name <- Some "alpha";
+  state.keeper_cursor <- 1;
+  Buffer.add_string state.msg_input "alpha's unsent draft";
+  let threshold = Masc_tui_roster_pane.threshold_cols in
+  List.iter (fun (preference, cols) ->
+    state.roster_pane_preference <- preference;
+    state.keeper_message_focus <- Tui_types.Left_pane;
+    Tui_types.reconcile_keeper_message_focus state ~cols;
+    check bool "hidden roster releases focus" true
+      (state.keeper_message_focus = Tui_types.Right_pane);
+    check (option string) "conversation preserved" (Some "alpha") state.msg_target_keeper_name;
+    check int "roster selection preserved" 1 state.keeper_cursor;
+    check string "draft preserved" "alpha's unsent draft" (Buffer.contents state.msg_input);
+    check bool "visibility preference preserved" true (state.roster_pane_preference = preference);
+    state.roster_pane_preference <- Masc_tui_roster_pane.Shown;
+    Tui_types.reconcile_keeper_message_focus state ~cols:threshold;
+    check bool "returning roster does not steal focus" true
+      (state.keeper_message_focus = Tui_types.Right_pane))
+    [Masc_tui_roster_pane.Auto, threshold - 1;
+     Masc_tui_roster_pane.Shown, threshold - 1;
+     Masc_tui_roster_pane.Hidden, threshold];
+  state.keeper_message_focus <- Tui_types.Left_pane;
+  Tui_types.reconcile_keeper_message_focus state ~cols:threshold;
+  check bool "visible roster retains deliberate focus" true
+    (state.keeper_message_focus = Tui_types.Left_pane)
+
 let () =
   run
     "tui_chat_queue_wiring"
@@ -4377,7 +4406,9 @@ let () =
         ] )
     ; ( "roster default"
       , [ test_case "chat default preserves explicit preference" `Quick
-            test_roster_default_follows_chat_without_rewriting_preference ] )
+            test_roster_default_follows_chat_without_rewriting_preference
+        ; test_case "hidden roster releases focus and retains the conversation" `Quick
+            test_hidden_chat_roster_releases_focus_without_changing_conversation ] )
     ; ( "queue"
       , [ test_case "take_newest returns the last and keeps order" `Quick
             test_take_newest_returns_last_and_keeps_order

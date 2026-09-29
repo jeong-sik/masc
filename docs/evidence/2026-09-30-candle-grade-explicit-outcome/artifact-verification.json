@@ -1,0 +1,26 @@
+{
+  "run_id": 36582657889,
+  "source_commit": "4fae8f4e3fef99a0b23871dd6bfc58a0250df43f",
+  "files": [
+    {
+      "file": "deployment_preflight_helper.exe",
+      "sha256": "6b6211e6d5f726bdc96ee6fde842ee12f05b6df5ae0ccaa78826c772e2f37f34"
+    },
+    {
+      "file": "main_eio.exe",
+      "sha256": "6c7276f2bcf81241612ac550d6398c846b66ca7ccb3a3ead29117db6e2657fae"
+    },
+    {
+      "file": "masc_browser_host.exe",
+      "sha256": "74d8e43d5f431114072e5bd2b5fa05db426c88bcd793c6fbc56f9585c16309bf"
+    },
+    {
+      "file": "masc_tui.exe",
+      "sha256": "b833e5f9664673ddd69aaa7fe1bb08235948f6830b7b0de3e74696eb2f72e819"
+    },
+    {
+      "file": "candle_appraiser_eval_cli.exe",
+      "sha256": "fd5d67fd9befb6349f20521f1ea86759498d3d83187bbb2812808403df495a19"
+    }
+  ]
+}

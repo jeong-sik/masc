@@ -62,6 +62,24 @@ let test_summary_names_the_actor () =
     (field "summary" json)
 ;;
 
+let test_mutation_summary_names_each_actor () =
+  List.iter
+    (fun (kind, actor, verb) ->
+      let projected =
+        DGT.goal_event_timeline_json
+          (`Assoc
+             [ "ts", `String "2026-09-29T12:00:00Z"
+             ; "goal_id", `String "goal-shared"
+             ; "event_type", `String kind
+             ; "payload", `Assoc [ "actor", `String actor; "title", `String "Shared goal" ]
+             ])
+      in
+      check (option string) "the action names its actor"
+        (Some (verb ^ " by " ^ actor ^ ": Shared goal")) (field "summary" projected);
+      check (option string) "the event kind survives" (Some kind) (field "kind" projected))
+    [ "goal_created", "creator", "created"; "goal_updated", "reviewer", "updated" ]
+;;
+
 let test_severity_follows_the_phase () =
   let severity_of phase =
     field
@@ -130,7 +148,6 @@ let test_unknown_event_type_keeps_its_token () =
 
 let goal : Goal_store.goal =
   { id = "goal-1"
-  ; owner = Goal_store.Unknown_owner
   ; criterion_revision = "fixture-goal-1"
   ; title = "Goal One"
   ; metric = None
@@ -140,8 +157,6 @@ let goal : Goal_store.goal =
   ; phase = Goal_phase.Executing
   ; last_review_note = None
   ; last_review_at = None
-  ; notified_refuted_key = None
-  ; notified_overdue_key = None
   ; created_at = "2026-08-01T00:00:00Z"
   ; updated_at = "2026-08-21T00:00:00Z"
   }
@@ -375,6 +390,9 @@ let test_unlisted_history_reconstructs_a_departed_goal () =
     [ history_row ~ts:"2026-09-10T00:00:00Z" ~goal_id:"goal-gone"
         ~event_type:"goal_created"
         (`Assoc [ "title", `String "Shipped and gone" ])
+    ; history_row ~ts:"2026-09-10T03:00:00Z" ~goal_id:"goal-gone"
+        ~event_type:"goal_updated"
+        (`Assoc [ "title", `String "Reviewed and shipped"; "actor", `String "reviewer" ])
     ; history_row ~ts:"2026-09-10T06:00:00Z" ~goal_id:"goal-gone"
         ~event_type:"goal_phase"
         (live_phase_payload ~phase:"completed" ~actor:"alpha")
@@ -390,7 +408,7 @@ let test_unlisted_history_reconstructs_a_departed_goal () =
   check int "a goal the store still lists is not history" 1 (List.length rows_out);
   let row = List.hd rows_out in
   check (option string) "the goal is named" (Some "goal-gone") (field "goal_id" row);
-  check (option string) "the title outlived the store" (Some "Shipped and gone")
+  check (option string) "the updated title outlived the store" (Some "Reviewed and shipped")
     (field "title" row);
   check (option string) "opening comes from the creation row"
     (Some "2026-09-10T00:00:00Z") (field "opened_at" row);
@@ -461,6 +479,7 @@ let () =
     [ ( "normalizer"
       , [ test_case "phase event shape" `Quick test_normalizes_a_phase_event
         ; test_case "summary names the actor" `Quick test_summary_names_the_actor
+        ; test_case "creation and update actors" `Quick test_mutation_summary_names_each_actor
         ; test_case "severity follows the phase" `Quick test_severity_follows_the_phase
         ; test_case "unparseable phase is not ok" `Quick test_unparseable_phase_is_not_ok
         ; test_case "missing fields are marked" `Quick test_missing_payload_fields_are_marked

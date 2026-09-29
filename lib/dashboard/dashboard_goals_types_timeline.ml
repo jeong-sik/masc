@@ -228,8 +228,21 @@ let goal_event_timeline_json event =
   let payload = Option.value ~default:`Null (Json_util.assoc_member_opt "payload" event) in
   let payload_field field = json_member_or_null field payload in
   let ts = Json_util.get_string event "ts" |> Option.value ~default:"" in
+  let mutation_summary title verb =
+    match Json_util.get_string payload "actor", Json_util.get_string payload "title" with
+    | Some actor, Some goal_title ->
+        (title, Printf.sprintf "%s by %s: %s" verb actor goal_title, "ok")
+    | actor, goal_title ->
+        (title,
+         Printf.sprintf "%s by %s: %s" verb
+           (Option.value actor ~default:"<missing payload.actor>") (* NDT-OK: warning text for an absent audit field. *)
+           (Option.value goal_title ~default:"<missing payload.title>"), (* NDT-OK: warning text for an absent audit field. *)
+         "warn")
+  in
   let title, summary, severity =
     match event_type with
+    | "goal_created" -> mutation_summary "Goal Created" "created"
+    | "goal_updated" -> mutation_summary "Goal Updated" "updated"
     | "goal_phase" ->
         (* Each [Option.value ~default:"unknown"] in this match used to
            render in the dashboard timeline as a verbatim value

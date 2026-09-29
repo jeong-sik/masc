@@ -353,7 +353,8 @@ let context_flow_uses_declared_connections () =
       "installation_id":"project-observer","output_id":"events","selection":"latest_completed"}]}|}} in
   let declaration installation_id instance_id : UI.declaration =
     {source_path="/config/" ^ installation_id ^ ".toml";installation_id=Some installation_id;
-      instance_id=Some instance_id;desired=Some "1";applied=Some "1";issues=[]} in
+      instance_id=Some instance_id;desired=Some "1";applied=Some "1";issues=[];
+      origin=UI.Parsed_declaration} in
   let configuration : UI.configuration = {directory="/config";complete=true;
     declarations=[declaration "project-observer" producer.id;declaration "project-metric" consumer.id]} in
   let snapshot : UI.snapshot = {instances=[producer;consumer];configuration=Some configuration;
@@ -566,7 +567,7 @@ let refresh_preserves_operator_target () =
     display=Masc.Lane_addon_presentation.empty} in
   let declaration id : UI.declaration = {source_path=id ^ ".toml";
     installation_id=Some id;desired=Some "1";applied=Some "1";
-    instance_id=Some id;issues=[]} in
+    instance_id=Some id;issues=[];origin=UI.Parsed_declaration} in
   let snapshot : UI.snapshot = {instances=[worker "worker";worker "other"];
     output={rows=[row "chosen";row "other"];coverage=[]};complete=Some true;
     configuration=Some {directory="/config";complete=true;
@@ -632,7 +633,7 @@ let detail_keeps_installation_ownership () =
     action_schema=None;binding_schema=None;display=Masc.Lane_addon_presentation.empty} in
   let declaration id : UI.declaration = {source_path="/config/" ^ id ^ ".toml";
     installation_id=Some id;desired=Some "1";applied=Some "1";
-    instance_id=Some id;issues=[]} in
+    instance_id=Some id;issues=[];origin=UI.Parsed_declaration} in
   let row owner lane observed_at : UI.Row.row = {id=owner ^ "-" ^ lane;
     lane_id=owner ^ "/" ^ lane;kind=UI.Row.Value;title=owner ^ " " ^ lane;
     observed_at;subject_id="project";clock=None;actor=None;
@@ -708,7 +709,11 @@ let directory_issue_is_not_an_editable_installation () =
      && not (List.mem "Installations" lines)
      && not (List.exists (fun line -> String_util.contains_substring line "E:edit") lines));
   check bool "directory has no editable TOML source" true
-    (UI.selected_source_path view=None)
+    (UI.selected_source_path view=None);
+  check bool "Lanes rollup and Add-on overview share the issue-only reading" true
+    (UI.installation_reading view = UI.Observed {
+      declared=0; active=0; failed_workers=0; configuration_issues=1;
+      complete=false; freshness=UI.Current })
 
 let () = run "TUI Lane package operations" ["operator scenarios",[
   test_case "declaration without worker stays visible" `Quick declaration_without_worker_is_visible;

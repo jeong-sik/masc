@@ -7,9 +7,11 @@ type instance = {
   source_path : string option; binding : Yojson.Safe.t; outputs : Row.output_ports;
   skills_directory : string option; incarnation : string; action_schema : Yojson.Safe.t option; binding_schema : Yojson.Safe.t option; display : Masc.Lane_addon_presentation.t;
 }
+type declaration_origin = Parsed_declaration | Issue_only
 type declaration = {
   source_path : string; installation_id : string option; desired : string option;
   applied : string option; instance_id : string option; issues : string list;
+  origin : declaration_origin;
 }
 type configuration = { directory : string; complete : bool; declarations : declaration list }
 type snapshot = { instances : instance list; output : Row.output; complete : bool option;
@@ -93,7 +95,7 @@ let configuration = function
         let* desired = get text "desired_revision" json in
         let* applied = optional "applied_revision" text json in
         let* instance_id = optional "instance_id" text json in
-        Ok {source_path;installation_id=Some installation_id;desired=Some desired;applied;instance_id;issues=[]})) "declarations" json in
+        Ok {source_path;installation_id=Some installation_id;desired=Some desired;applied;instance_id;issues=[];origin=Parsed_declaration})) "declarations" json in
       let* issues = get (array (fun json ->
         let* source_path = get text "source_path" json in
         let* installation_id = optional "id" text json in
@@ -101,7 +103,7 @@ let configuration = function
       let declarations = List.fold_left (fun declarations (path, id, message) ->
         if List.exists (fun (d : declaration) -> d.source_path = path) declarations
         then List.map (fun (d : declaration) -> if d.source_path = path then {d with issues=d.issues @ [message]} else d) declarations
-        else declarations @ [{source_path=path;installation_id=id;desired=None;applied=None;instance_id=None;issues=[message]}]) declarations issues in
+        else declarations @ [{source_path=path;installation_id=id;desired=None;applied=None;instance_id=None;issues=[message];origin=Issue_only}]) declarations issues in
       Ok (Some {directory;complete;declarations})
 let phase json =
   let* kind = get text "kind" json in
@@ -1063,26 +1065,33 @@ let reading_summary fields =
         Some (key ^ "=" ^ Yojson.Safe.to_string value)
     | _ -> None) |> String.concat " · "
 
+let worker_counts instances =
+  List.fold_left (fun (active, failed) (item : instance) ->
+    match item.phase with
+    | Row.Attached | Row.Observing -> active + 1, failed
+    | Row.Failed _ -> active, failed + 1
+    | Row.Detaching | Row.Detached -> active, failed)
+    (0, 0) instances
+
+let configuration_counts (configuration : configuration) =
+  List.fold_left (fun (declared, issues) (d : declaration) ->
+    let declared = match d.origin with
+      | Parsed_declaration -> declared + 1
+      | Issue_only -> declared in
+    declared, issues + List.length d.issues)
+    (0, 0) configuration.declarations
+
 let overview_lines ~width view =
   let wrap text = Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
     (Masc.Tui_decode.sanitize_terminal_text text) in
   let content = match view.snapshot with
     | None -> [unread_body_text ~failed_note:"Read failed · r:retry" view]
     | Some snapshot ->
-        let active, failed = List.fold_left (fun (active, failed) (item : instance) ->
-          match item.phase with
-          | Row.Attached | Row.Observing -> active + 1, failed
-          | Row.Failed _ -> active, failed + 1
-          | Row.Detaching | Row.Detached -> active, failed)
-          (0, 0) snapshot.instances in
+        let active, failed = worker_counts snapshot.instances in
         let declared, issue_count, declarations = match snapshot.configuration with
           | None -> None, 0, []
           | Some config ->
-              let declared = List.fold_left (fun count (d : declaration) ->
-                if Option.is_some d.desired then count + 1 else count)
-                0 config.declarations in
-              let issues = List.fold_left (fun count (d : declaration) ->
-                count + List.length d.issues) 0 config.declarations in
+              let declared, issues = configuration_counts config in
               Some declared, issues, config.declarations in
         let heading = Printf.sprintf "Lane Add-ons · %s declared · %d active · %d failed"
           (Option.fold ~none:"?" ~some:string_of_int declared) active failed in
@@ -1098,11 +1107,11 @@ let overview_lines ~width view =
           let render (index,d) =
             let name = Option.value ~default:(Filename.basename d.source_path) d.installation_id in
             let status =
-              if Option.is_none d.desired then "configuration issue"
+              if d.origin=Issue_only then "configuration issue"
               else if d.issues<>[] then "needs attention"
               else if d.applied=d.desired then "applied" else "pending" in
             let controls =
-              if Option.is_none d.desired then "    Enter:details"
+              if d.origin=Issue_only then "    Enter:details"
               else if Option.fold ~none:false ~some:(fun (c : configuration) ->
                     Document.editable_source_path ~directory:c.directory d.source_path)
                     snapshot.configuration
@@ -1112,7 +1121,7 @@ let overview_lines ~width view =
               ^ name ^ " · " ^ status ^ " · " ^ Filename.basename d.source_path
             ; controls
             ] @ List.map (fun issue -> "    Issue: " ^ issue) d.issues in
-          let installations, problems = List.partition (fun (_,d) -> Option.is_some d.desired) visible in
+          let installations, problems = List.partition (fun (_,d) -> d.origin=Parsed_declaration) visible in
           List.concat_map render installations, List.concat_map render problems in
         let instance_rows =
           let window = max 0 (view.instance_cursor - 4) in
@@ -1316,25 +1325,36 @@ let lines ?(height=24) ?(failed_note = "") ~width view =
         | Overview -> overview_lines ~width view
         | Detail _ -> detail_lines ~width view)
 
-(* The Lanes surface drew a fixed sentence -- "No Add-ons installed. Press A
-   to inspect installed add-ons" -- with no state behind it, so it said so
-   whether or not any were installed and whether or not anything had read.
-   Nothing on that surface asks for Add-ons: [launch_lanes_load] fetches
-   standalone lanes only, so the honest answer there is that nobody has read
-   yet. The three answers are apart in the type; the row that draws them
-   chooses the words. *)
-type installed_reading =
+(* A TOML declaration may exist while no worker can run. Keep the file count,
+   live worker count, and failures separate on the Lanes surface. *)
+type reading_freshness = Current | Stale of string
+type installation_reading =
   | Not_read
-  | Nothing_installed
-  | Installed of int
+  | Observed of {
+      declared : int;
+      active : int;
+      failed_workers : int;
+      configuration_issues : int;
+      complete : bool;
+      freshness : reading_freshness;
+    }
 
-let installed view =
+let installation_reading view =
   match view.snapshot with
   | None -> Not_read
   | Some snapshot ->
     (match snapshot.configuration with
      | None -> Not_read
      | Some configuration ->
-       (match List.length configuration.declarations with
-        | 0 -> Nothing_installed
-        | count -> Installed count))
+       let active, failed_workers = worker_counts snapshot.instances in
+       let declared, configuration_issues = configuration_counts configuration in
+       Observed {
+         declared;
+         active;
+         failed_workers;
+         configuration_issues;
+         complete = configuration.complete;
+         freshness = (match view.snapshot_read_error with
+           | None -> Current
+           | Some detail -> Stale detail);
+       })

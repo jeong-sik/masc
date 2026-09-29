@@ -1169,7 +1169,7 @@
 (test
  (name test_operator_control_snapshot_cache)
  (modules test_operator_control_snapshot_cache)
- (libraries alcotest yojson masc_test_deps eio_main))
+ (libraries alcotest yojson masc_test_deps eio_main eio.mock))
 
 ; Extracted from the big (tests ...) group above: the "keeper up ok" case
 ; creates a keeper without a sandbox_profile, which resolves to Local and is
@@ -2472,6 +2472,7 @@
 (include stanzas/test_keeper_portrait.inc)
 
 (include stanzas/test_keeper_census_outputs.inc)
+(include stanzas/test_keeper_shim_fleet.inc)
 (include stanzas/test_keeper_wire_terminal.inc)
 (include stanzas/test_agent_transport_vocabulary.inc)
 (include stanzas/test_agent_api_query_params.inc)
@@ -2981,6 +2982,10 @@
 
 (include stanzas/test_mcp_server_eio_tool_profile_capability.inc)
 
+(include stanzas/test_mcp_seat_profile.inc)
+
+(include stanzas/test_mcp_dos_screen_image.inc)
+
 (include stanzas/test_mcp_tool_matrix.inc)
 
 
@@ -3337,6 +3342,11 @@
  (libraries alcotest eio eio_main masc.masc_core))
 
 (test
+ (name test_file_version_cache)
+ (modules test_file_version_cache)
+ (libraries alcotest masc.masc_core unix))
+
+(test
  (name test_eval_tool_selector_boundary)
  (modules test_eval_tool_selector_boundary)
  (libraries alcotest masc.string_util masc_core yojson)
@@ -3494,6 +3504,11 @@
  (name test_keeper_vision_tool)
  (modules test_keeper_vision_tool)
  (libraries masc_test_deps masc.runtime masc.browser_lane))
+
+(test
+ (name test_keeper_portrait_read)
+ (modules test_keeper_portrait_read)
+ (libraries alcotest masc_test_deps masc masc_keeper_portrait masc_config_dir_resolver masc_tool_types))
 
 (test
  (name test_keeper_image_dimensions)
@@ -3847,6 +3862,7 @@
   masc
   masc_tui_fetched
   masc_tui_keys
+  masc_tui_message_layout
   masc_tui_preset_text
   masc_tui_types))
 
@@ -4361,6 +4377,7 @@
   masc
   masc.masc_goal
   masc_types
+  masc_tui_message_layout
   masc_tui_types
   masc_tui_overview_goals
   masc_tui_overview_tasks
@@ -7023,14 +7040,23 @@
  (deps (alias runtest-test_install_local_build)))
 
 (test
- (name test_workspace_memory_proposals)
- (modules test_workspace_memory_proposals)
- (libraries alcotest yojson unix masc masc.server masc.masc_core masc.prompt_registry)
- (deps ../config/prompts/keeper.md ../docs/evidence/2026-09-10-workspace-memory-curator/qwen38-27b/proposal.json))
+ (name test_workspace_memory_ledger_view)
+ (modules test_workspace_memory_ledger_view)
+ (libraries alcotest digestif yojson masc masc.fs_compat))
 
 (test
  (name test_workspace_memory_ledger)
  (modules test_workspace_memory_ledger)
+ (libraries alcotest digestif yojson masc))
+
+(test
+ (name test_keeper_memory_search_index)
+ (modules test_keeper_memory_search_index)
+ (libraries alcotest masc))
+
+(test
+ (name test_workspace_memory_request)
+ (modules test_workspace_memory_request)
  (libraries alcotest digestif yojson masc))
 
 (test

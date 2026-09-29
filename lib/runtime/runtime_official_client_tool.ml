@@ -157,3 +157,12 @@ let project_content transport ~content ~content_blocks =
 
 let codex_content_items = project_content Codex
 let mcp_content = project_content Mcp
+
+let mcp_tool_result_content ~success ~content ~content_blocks =
+  match mcp_content ~content ~content_blocks with
+  | Ok items -> items, not success
+  | Error detail ->
+    ( [ `Assoc [ "type", `String "text"; "text", `String detail ]
+      ; `Assoc [ "type", `String "text"; "text", `String (Llm_provider.Utf8_sanitize.sanitize content) ]
+      ]
+    , true )

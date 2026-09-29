@@ -122,6 +122,58 @@ let window_summary row =
         (window |> member "source" |> to_string)))
 ;;
 
+let test_rate_limit_lifecycle_reaches_the_tui () =
+  with_runtimes @@ fun () ->
+  let runtime =
+    match Runtime.get_runtime_by_id "usage_claude.sonnet" with
+    | Some runtime -> runtime
+    | None -> fail "fixture runtime missing"
+  in
+  let candidate = runtime.Runtime.candidate_backpressure in
+  let project ~now =
+    let json =
+      Server_dashboard_runtime_resolved_json.build_at ~now
+        ~generated_at_iso:"2026-09-29T00:00:00Z"
+        ~config:(Workspace.default_config (Filename.get_temp_dir_name ()))
+    in
+    let default = Yojson.Safe.Util.member "default_runtime" json in
+    let row = runtime_row json runtime.id in
+    check string "default and catalog share the same observation time"
+      (Yojson.Safe.to_string default) (Yojson.Safe.to_string row);
+    match Tui_decode.decode_runtime_resolved json with
+    | Error detail -> fail detail
+    | Ok (rows, _) ->
+      List.find (fun (row : Tui_decode.runtime_option) -> String.equal row.ro_id runtime.id) rows
+  in
+  let assert_state label limited resets row =
+    check bool (label ^ " rate limited") limited row.Tui_decode.ro_rate_limited;
+    check (option (float 0.)) (label ^ " provider deadline") resets row.ro_rate_limit_resets_at
+  in
+  Runtime_candidate_backpressure.note_candidate_success ~candidate;
+  assert_state "clear" false None (project ~now:0.);
+  Runtime_candidate_backpressure.note_rate_limit ~candidate ~retry_after:(Some 60.);
+  let deadline =
+    match Runtime_candidate_backpressure.candidate_backpressure ~now:0. ~candidate with
+    | Some
+        { rate_limit =
+            Some (Runtime_candidate_backpressure.Unknown_scope_rate_limit
+                    { noted_at; retry_after = Some wait })
+        ; failed_attempt = _
+        } ->
+      noted_at +. wait
+    | Some _ | None -> fail "provider Retry-After was not retained"
+  in
+  assert_state "before deadline" true (Some deadline) (project ~now:(deadline -. 1.));
+  assert_state "at deadline without another answer" false None (project ~now:deadline);
+  Runtime_candidate_backpressure.note_rate_limit ~candidate ~retry_after:None;
+  assert_state "no stated wait remains observed" true None (project ~now:1e12);
+  Runtime_candidate_backpressure.note_candidate_success ~candidate;
+  assert_state "success clears unknown wait" false None (project ~now:1e12);
+  Runtime_candidate_backpressure.note_rate_limit ~candidate ~retry_after:(Some 60.);
+  Runtime_candidate_backpressure.note_candidate_success ~candidate;
+  assert_state "success clears a stated wait before expiry" false None (project ~now:0.)
+;;
+
 let test_reports_reach_the_resolved_document () =
   with_runtimes @@ fun () ->
   let claude_scope = scope_of "usage_claude.sonnet" in
@@ -1009,7 +1061,9 @@ let () =
   run
     "provider_usage_windows"
     [ ( "resolved"
-      , [ test_case "reports reach the resolved document" `Quick
+      , [ test_case "rate-limit lifecycle reaches the TUI" `Quick
+            test_rate_limit_lifecycle_reaches_the_tui
+        ; test_case "reports reach the resolved document" `Quick
             test_reports_reach_the_resolved_document
         ; test_case "malformed window is a typed error" `Quick
             test_malformed_window_is_a_typed_error

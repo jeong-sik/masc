@@ -13381,6 +13381,8 @@ def runtime_resolved_runtime(
         "is_local": False,
         # This binding flag is independent of the fleet's top-level default.
         "is_default": False,
+        "rate_limited": False,
+        "rate_limit_resets_at": None,
     }
 
 

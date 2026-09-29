@@ -17,22 +17,20 @@ let png_content_type = "image/png"
 
 let error_json code message = `Assoc [ ("error", `String code); ("message", `String message) ]
 
-(* The observation and the frame come from one locked read, then the PNG is
-   encoded off the Eio domain, as Keeper_dos_screen does. *)
+(* The capture every DOS image surface shares (Tool_misc_dos_lane.capture_png). *)
 let screen_response () =
-  match Tool_misc_dos_lane.off_domain Dos_lane.capture with
-  | Error Dos_lane.No_machine -> Error (`Conflict, error_json "no_machine" "no DOS program is loaded")
+  match Tool_misc_dos_lane.capture_png () with
+  | Error (Tool_misc_dos_lane.Lane Dos_lane.No_machine) ->
+    Error (`Conflict, error_json "no_machine" "no DOS program is loaded")
   | Error
-      (( Dos_lane.Invalid_request _ | Dos_lane.Unreadable _ | Dos_lane.Held_by _
-       | Dos_lane.Guest_fault _ | Dos_lane.Unsaveable _ | Dos_lane.Checkpoint_refused _
-       | Dos_lane.Other_program _ ) as err) ->
+      (Tool_misc_dos_lane.Lane
+        (( Dos_lane.Invalid_request _ | Dos_lane.Unreadable _ | Dos_lane.Held_by _
+         | Dos_lane.Guest_fault _ | Dos_lane.Unsaveable _ | Dos_lane.Checkpoint_refused _
+         | Dos_lane.Other_program _ ) as err)) ->
     Error (`Internal_server_error, error_json "capture_failed" (Dos_lane.error_to_string err))
-  | Ok (_observation, { Dos_lane.width; height; rgb }) ->
-    (match
-       Eio_guard.run_in_systhread ~label:"play-screen-png" (fun () -> Rgb_png.encode ~width ~height ~rgb)
-     with
-     | Ok png -> Ok png
-     | Error message -> Error (`Internal_server_error, error_json "encode_failed" message))
+  | Error (Tool_misc_dos_lane.Encode message) ->
+    Error (`Internal_server_error, error_json "encode_failed" message)
+  | Ok { Tool_misc_dos_lane.png; _ } -> Ok png
 
 let add_routes router =
   router

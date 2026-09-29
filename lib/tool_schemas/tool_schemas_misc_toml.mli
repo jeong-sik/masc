@@ -28,6 +28,7 @@ val msx_step : Masc_domain.tool_schema
 val msx_step_until_change : Masc_domain.tool_schema
 val msx_peek : Masc_domain.tool_schema
 val msx_ram_diff : Masc_domain.tool_schema
+val portrait_read : Masc_domain.tool_schema
 
 val dos_load : Masc_domain.tool_schema
 val dos_eject : Masc_domain.tool_schema

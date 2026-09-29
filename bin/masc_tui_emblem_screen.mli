@@ -1,9 +1,6 @@
-(** MASC's candle ({!Keeper_portrait_look.mascot}) laid out as the body rows
-    of a screen, under a few lines of caption. The startup splash and
-    [/about] both draw it through here, so the two keep one fitting rule, one
-    motion rule and one pace; only how tall the candle may grow differs. How
-    the candle reaches the terminal -- real pixels, a half-block mosaic, or
-    not at all -- is {!Masc_tui_portrait_view}'s. *)
+(** MASC's candle ({!Keeper_portrait_look.mascot}) for [/about].
+    {!Masc_tui_portrait_view} chooses real pixels, a half-block mosaic,
+    or no picture from the terminal capabilities. *)
 
 (** How the candle is drawn. The reader picks one on [/about]. *)
 type style =
@@ -34,17 +31,7 @@ type laid_out = {
           display; [None] for a mosaic, which is in [lines] already *)
 }
 
-(** The screen the candle is drawn on. *)
-type screen =
-  | Startup
-      (** The splash before the first overview read: the candle is at most
-          {!startup_picture_rows} rows tall, however tall the terminal. *)
-  | About  (** [/about]: the candle takes the rows its caption leaves. *)
-
-val startup_picture_rows : int
-
 val rows :
-  screen:screen ->
   style:style ->
   cols:int ->
   rows:int ->
@@ -54,9 +41,9 @@ val rows :
   project:(Masc_tui_terminal_palette.rgb -> Masc_tui_terminal_palette.projected_color option) ->
   origin:int * int ->
   laid_out
-(** The body: the candle centred in [cols] x [rows], no taller than
-    [screen] lets it grow, with [caption] centred under it, one blank row
-    between, the block centred top to bottom, drawn in [style].
+(** The body: the candle fitted within [cols] x [rows], with [caption]
+    centred under it and one blank row between, the block centred top to bottom,
+    drawn in [style].
     [elapsed] is how long the candle has been on screen, in seconds; it
     picks the moment of the loop -- the pose
     ({!Keeper_portrait_draw.pose_at}) or the sway
@@ -70,7 +57,7 @@ val rows :
     carry colour escapes; they are measured without them. *)
 
 val body :
-  screen:screen -> cols:int -> rows:int -> caption:string list -> elapsed:float -> origin:int * int -> string list
+  cols:int -> rows:int -> caption:string list -> elapsed:float -> origin:int * int -> string list
 (** {!rows} against this process: the display the start-up probe chose, the
     {!style} the reader picked, and the stdout colour projection. Records what it drew for {!drawn}, and asks
     {!Masc_tui_portrait_view.request} for the placed picture. *)

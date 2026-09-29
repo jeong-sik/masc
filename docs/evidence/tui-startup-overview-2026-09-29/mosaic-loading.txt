@@ -1,0 +1,30 @@
+ ▸Overview  Activity  Keepers  Lanes  Memory  Approvals  Board  Planning  Fusion  Workspace  Config
+
+   MASC Overview  [workspace\x1B]8;;https://attacker.invalid\x07owned]  01:25:08  HTTP [loading..…
+ ──────────────────────────────────────────────────────────────────────────────────────────────────
+    Connecting to workspace…
+ ──────────────────────────────────────────────────────────────────────────────────────────────────
+    Overview briefing not read yet
+  Goals   No goal data read yet.
+
+  Attention
+
+  (not loaded yet — press r)
+
+
+ Tasks
+
+    (not loaded yet — press r)
+
+
+
+
+
+
+
+
+
+
+
+  m:telemetry  t:tasks  2:keepers  r:refresh  Tab:next  q:quit  | Refresh: 60s | Port: 44075
+ › no keeper selected

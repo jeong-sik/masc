@@ -2542,7 +2542,7 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     [ "overview_error"
     ; "ai_summary"
     ];
-  (* The Overview's title row, which the startup splash draws too, and
+  (* The Overview's title row, visible from the first frame, and
      /about's colour scheme name from the operator's configuration. *)
   check_fields "overview_header" [ "workspace" ];
   check_fields "render_about" [ "theme_choice" ];

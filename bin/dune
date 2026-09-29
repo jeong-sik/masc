@@ -2064,8 +2064,8 @@
   masc_tui_image_mosaic
   masc_tui_terminal_palette))
 
-;; MASC's candle laid out as a screen body under its caption, for the startup
-;; splash and /about. Apart from the TUI so its layout is tested without it.
+;; MASC's candle laid out as a screen body under its caption for /about.
+;; Apart from the TUI so its layout is tested without it.
 (library
  (name masc_tui_emblem_screen)
  (wrapped false)

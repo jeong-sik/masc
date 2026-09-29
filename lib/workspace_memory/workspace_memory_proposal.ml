@@ -134,7 +134,7 @@ let decode raw =
   else if List.sort_uniq String.compare (used @ excluded) <> List.sort String.compare source_ids then Error "Source coverage mismatch: unknown or missing references"
   else Ok { raw; claims; conflicts; exclusions }
 
-let directory ~base_path = Filename.concat (Filename.concat base_path Common.masc_dirname) "workspace-memory/proposals"
+let directory ~base_path = Filename.concat (Workspace_memory_ledger.directory ~base_path) "proposals"
 let file ~base_path id = Filename.concat (directory ~base_path) (id ^ ".json")
 let io f = try f () with
   | Unix.Unix_error (e,fn,arg) -> Error (Unavailable (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message e)))

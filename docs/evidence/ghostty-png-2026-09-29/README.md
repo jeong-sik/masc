@@ -39,6 +39,13 @@ compression uses its Wuffs PNG decoder. The TUI already probes PNG support
 at startup. The change reuses `Rgb_png.encode_rgba`, keeping alpha, compact
 payloads, image/placement identity, cursor preservation, and chunk boundaries.
 
+## Main integration
+
+PR #39798 removed the startup candle independently. The merged source keeps
+that working Overview and its eleven PTY scenarios; PNG transmission applies
+to `/about` and Keeper portraits. The historical startup crash above remains
+evidence for the same inflater, not a claim that startup still draws a candle.
+
 ## Validation boundary
 
 The crash and protocol comparison were measured in real Ghostty processes.

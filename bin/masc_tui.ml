@@ -10315,9 +10315,6 @@ let apply_transport_load state = function
         err
 
 let apply_overview_load state result =
-  (* The first answer either way ends the startup splash: the sections, or
-     the reason there are none, now have something to say. *)
-  state.startup_emblem <- false;
   match result with
   | Ok overview ->
       state.overview <- Some overview;
@@ -13909,9 +13906,6 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       approval_ticket;
       state.server_identity <- None;
       state.connection_status <- Masc_tui_types.Disconnected;
-      (* The splash ends here for good: the Overview's "press r" line is what
-         the operator needs, and a retry must not bring the candle back. *)
-      state.startup_emblem <- false;
       add_event state "error" err;
       react_to_server_contact state ~base_path ~host:server_peer_host
         ~port:state.port ~http_refresh_inflight ~http_scoped_refresh_inflight
@@ -17359,9 +17353,6 @@ let main
    match Masc_tui_credential.outcome_notice outcome with
    | Some notice -> add_event state (Masc_tui_credential.outcome_level outcome) notice
    | None -> ());
-  (* The candle stands in for the Overview's sections until this first read
-     answers or the operator sends anything. *)
-  state.startup_emblem <- true;
   start_http_refresh state ~host ~port ~intent:Revalidate
     ~refresh_inflight:http_refresh_inflight
     ~scoped_refresh_inflight:http_scoped_refresh_inflight
@@ -17451,7 +17442,7 @@ let main
      image placement against the screen and cannot ask the terminal itself. *)
   Masc_tui_msx.set_cell_pixels terminal_probe.cell_pixels;
   image_cell_pixels := terminal_probe.cell_pixels;
-  (* How the splash candle reaches this terminal, from the same answers:
+  (* How the portraits and /about candle reach this terminal, from the same answers:
      real pixels only where the graphics query was answered -- an iTerm2
      inline image cannot be replaced in place frame by frame --, else a
      mosaic where stdout projects colour, else none. *)
@@ -19144,15 +19135,6 @@ and is loaded on demand through keeper_skill.
         close_image state;
         invalidate_frame_for_resize frame_presenter render_schedule
       end;
-      (* The startup splash is a stand-in, not a gate: the first thing the
-         operator sends ends it and still goes where it was going, so nothing
-         typed while the candle flickers is lost. A terminal's own reply is not the
-         operator's. *)
-      (match input with
-       | Some (Key _ | Pasted _ | Mouse_wheel _ | Mouse_left_press _
-              | Mouse_left_release _) ->
-           state.startup_emblem <- false
-       | Some (Graphics_reply _) | None -> ());
       (* The MSX screen owns the keyboard the same way a showing picture
          does, except it answers keys instead of ending on the first one:
          each is injected into the machine and steps a frame, and only [esc]
@@ -26408,7 +26390,7 @@ and is loaded on demand through keeper_skill.
            else state.activity_frame + 1);
         Render_schedule.request render_schedule Render_schedule.Background
       end;
-      (* The candle -- the startup splash or /about -- steps on its own
+      (* The /about candle steps on its own
          clock while the last frame drew it. When no frame does, nothing here
          asks for a repaint, and the next time it is drawn it starts from the
          first step. *)

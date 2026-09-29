@@ -376,8 +376,9 @@ active tasks.
 
 The Goals block uses one row per active Goal: title, attention state, linked
 task count, and due date. The task count describes linked work, not progress
-against the Goal's metric. Open Planning → Goals for the recorded owner,
-metric, proof, and activity; an unknown owner is shown explicitly there.
+against the Goal's metric. Goals are shared across the workspace. Open
+Planning → Goals for the metric, proof, and activity. Creation, edits, and
+phase changes name the caller in their activity events.
 
 ```
  MASC Overview  [me]  10:54:52  [connected]

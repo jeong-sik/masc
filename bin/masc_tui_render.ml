@@ -3886,11 +3886,6 @@ let planning_detail_pane (state : state)
     Ansi.bold
     (fit_width (Terminal_text.single_line goal.pg_title) (cols - 6))
     Ansi.reset);
-  box_line buf cols
-    ("  Owner:   "
-     ^ (match goal.pg_owner with
-        | Goal_store.Owner name -> Terminal_text.single_line name
-        | Goal_store.Unknown_owner -> "unknown"));
   let prio_color =
     match goal.pg_priority with
     | 1 -> (Theme.bad ()) ^ Ansi.bold

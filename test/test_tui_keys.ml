@@ -2666,7 +2666,6 @@ let test_board_without_posts_offers_nothing_to_search () =
 let planning_goal_row id title =
   { pg_id = id
   ; pg_title = title
-  ; pg_owner = Goal_store.Unknown_owner
   ; pg_phase = Goal_phase.Executing
   ; pg_priority = 1
   ; pg_due_date = None

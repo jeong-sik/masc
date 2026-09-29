@@ -1368,15 +1368,6 @@ let test_planning_goal_keeps_the_last_review_note () =
       .Tui_decode.pg_last_review_note
 ;;
 
-let test_planning_goal_keeps_owner () =
-  let owned = decoded_proof ~extra:[ "owner", `String "keeper-z" ] () in
-  let unowned = decoded_proof () in
-  Alcotest.(check bool) "recorded owner is preserved" true
-    (owned.Tui_decode.pg_owner = Goal_store.Owner "keeper-z");
-  Alcotest.(check bool) "missing owner is explicitly unknown" true
-    (unowned.Tui_decode.pg_owner = Goal_store.Unknown_owner)
-;;
-
 let test_planning_goal_keeps_the_server_timestamps () =
   let goal =
     decoded_proof
@@ -12545,8 +12536,6 @@ let () =
           test_planning_goal_without_the_verifier_field_is_refused;
         Alcotest.test_case "keeps the last review note" `Quick
           test_planning_goal_keeps_the_last_review_note;
-        Alcotest.test_case "planning goal owner" `Quick
-          test_planning_goal_keeps_owner;
         Alcotest.test_case "keeps the server timestamps" `Quick
           test_planning_goal_keeps_the_server_timestamps;
         Alcotest.test_case "tolerates missing timestamps" `Quick

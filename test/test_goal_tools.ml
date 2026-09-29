@@ -433,9 +433,9 @@ let test_goal_creation_emits_an_event () =
     else []
   in
   check int "no goal has been opened yet" 0 (List.length (events ()));
-  let upsert args =
+  let upsert ?(agent_name = "planner") args =
     Tool_workspace.dispatch
-      (workspace_ctx config)
+      (workspace_ctx ~agent_name config)
       ~name:"masc_goal_upsert"
       ~args:(`Assoc args)
   in
@@ -461,10 +461,27 @@ let test_goal_creation_emits_an_event () =
      current set, so it travels in the payload rather than only in the store. *)
   check string "the payload carries the title as created" "Close the goal ledger"
     (get_string_field (Yojson.Safe.Util.member "payload" event) "title");
-  (match upsert [ "id", `String goal_id; "title", `String "Renamed after the fact" ] with
-   | Some _ -> ()
+  check string "creation records who acted" "planner"
+    (get_string_field (Yojson.Safe.Util.member "payload" event) "actor");
+  (match upsert ~agent_name:"editor"
+       [ "id", `String goal_id; "title", `String "Renamed after the fact" ] with
+   | Some result -> ignore (parse_json_result result)
    | None -> fail "masc_goal_upsert not handled on update");
-  check int "editing a goal is not a second beginning" 1 (List.length (events ()))
+  let history = List.map Yojson.Safe.from_string (events ()) in
+  let of_kind kind = List.filter (fun event -> get_string_field event "event_type" = kind) history in
+  (match of_kind "goal_created" with
+   | [ created_event ] ->
+     check string "editing preserves the one original creation event"
+       (Yojson.Safe.to_string event) (Yojson.Safe.to_string created_event)
+   | _ -> fail "a Goal must have exactly one creation event after editing");
+  (match of_kind "goal_updated" with
+   | [ updated_event ] ->
+     check string "the update names the same Goal" goal_id (get_string_field updated_event "goal_id");
+     let payload = Yojson.Safe.Util.member "payload" updated_event in
+     check string "the update keeps its own actor" "editor" (get_string_field payload "actor");
+     check string "the update keeps the title as edited" "Renamed after the fact"
+       (get_string_field payload "title")
+   | _ -> fail "the edit must record exactly one separate update event")
 ;;
 
 let test_goal_upsert_rejects_lifecycle_fields () =
@@ -570,6 +587,140 @@ let prove_complete config goal_id =
        ~verification_run_id:"goal-verifier-test-run"
        ~decision:Workspace_goals.Proof_proven
        ~evidence:"observed by the test verifier")
+;;
+
+(* A Goal belongs to the workspace. Different callers can work on the same
+   criterion; their actions and the verifier's verdict keep their provenance. *)
+let test_callers_share_a_goal_without_private_delivery () =
+  with_workspace @@ fun config ->
+  let open Yojson.Safe.Util in
+  let creator = workspace_ctx config in
+  let collaborator = workspace_ctx ~agent_name:"reviewer" config in
+  (* A real Keeper created it: lack of a receiving Keeper must not be what
+     prevents a private notice after the refuted proof. *)
+  let meta = match Masc_test_deps.meta_of_json_fixture
+      (`Assoc [ "name", `String creator.agent_name ]) with
+    | Ok meta -> meta | Error detail -> fail detail in
+  (match Keeper_fs.save_json_atomic
+      (Keeper_types_profile.keeper_meta_path config creator.agent_name)
+      (Keeper_meta_json.meta_to_json meta) with
+   | Ok () -> () | Error detail -> fail detail);
+  let call ctx name args =
+    match Tool_workspace.dispatch ctx ~name ~args:(`Assoc args) with
+    | Some result -> parse_json_result result
+    | None -> fail (name ^ " not handled") in
+  let shared_row label row =
+    let fields = to_assoc row in
+    List.iter (fun field ->
+      check bool (label ^ ": no " ^ field) false (List.mem_assoc field fields))
+      [ "owner"; "notified_refuted_key"; "notified_overdue_key" ];
+    row in
+  let listed ctx =
+    match member "goals" (call ctx "masc_goal_list" []) |> to_list with
+    | [ row ] -> shared_row "listed Goal" row
+    | _ -> fail "the workspace must contain one shared Goal" in
+  let incomplete = expect_error (Tool_workspace.dispatch creator
+      ~name:"masc_goal_upsert" ~args:(`Assoc [ "title", `String "Missing criterion" ])) in
+  check string "shared creation still requires a measurable criterion" "validation_error"
+    (get_string_field incomplete "error_code");
+  let created = call creator "masc_goal_upsert"
+      [ "title", `String "Ship together"; "metric", `String "verified artifacts"
+      ; "target_value", `String "1"; "due_date", `String "2000-01-01" ] in
+  let goal_id = get_string_field created "goal_id" in
+  let initial = shared_row "created Goal" (member "goal" created) in
+  check string "a new shared Goal is executing" "executing"
+    (get_string_field initial "phase");
+  check string "another caller sees the same Goal" goal_id
+    (get_string_field (listed collaborator) "id");
+  let rejected = expect_error (Tool_workspace.dispatch collaborator
+      ~name:"masc_goal_upsert" ~args:(`Assoc
+        [ "id", `String goal_id; "phase", `String "completed" ])) in
+  check string "sharing cannot bypass the lifecycle" "validation_error"
+    (get_string_field rejected "error_code");
+  let edited = call collaborator "masc_goal_upsert"
+      [ "id", `String goal_id; "title", `String "Ship verified artifacts together"
+      ; "metric", `String "independently verified artifacts"; "target_value", `String "2" ]
+    |> member "goal" |> shared_row "edited Goal" in
+  check string "another caller edits the same Goal" goal_id (get_string_field edited "id");
+  check string "metadata edit preserves execution" "executing" (get_string_field edited "phase");
+  check bool "the new criterion has its own revision" true
+    (get_string_field initial "criterion_revision" <> get_string_field edited "criterion_revision");
+  let visible = listed creator in
+  List.iter (fun field -> check string ("creator sees shared " ^ field)
+      (get_string_field edited field) (get_string_field visible field))
+    [ "title"; "metric"; "target_value"; "due_date" ];
+  let requested = call collaborator "masc_goal_transition"
+      [ "goal_id", `String goal_id; "action", `String "request_complete" ] in
+  check string "another caller requests verification" "verifying"
+    (get_string_field (shared_row "verification request" (member "goal" requested)) "phase");
+  let request_id, criterion =
+    match Goal_verification.get_record_authoritative config ~goal_id with
+    | Ok (Some { completion = Goal_verification.Proof_pending pending; _ }) ->
+      pending.request_id, pending.criterion
+    | _ -> fail "verification must retain its exact pending criterion" in
+  let evidence = "Only one of the two required artifacts was verified" in
+  let refuted = Workspace_goals.commit_verifier_decision
+      ~tool_name:"goal_verifier_commit" ~start_time:(Tool_timing.start ()) config
+      ~goal_id ~request_id ~criterion ~verification_run_id:"shared-goal-proof"
+      ~decision:(Workspace_goals.Proof_refuted { reason = "target not reached" }) ~evidence
+    |> parse_json_result in
+  check string "refutation returns the shared Goal to execution" "executing"
+    (get_string_field (shared_row "refuted Goal" (member "goal" refuted)) "phase");
+  let completion = listed creator |> member "verification" |> member "completion" in
+  check string "refutation stays visible in the public list" "proof_refuted"
+    (get_string_field completion "state");
+  let verdict = member "verdict" completion in
+  check string "the verifier's evidence is retained" evidence (get_string_field verdict "evidence");
+  check string "verifier identity is independent of either caller" "verifier_exact"
+    (get_string_field (member "authority" verdict) "actor");
+  check string "proof authority stays in the verifier lane" "system_llm_agent"
+    (get_string_field (member "authority" verdict) "kind");
+  let history = Fs_compat.load_file
+      (Filename.concat (Workspace_utils.masc_dir config) "goal_events.jsonl")
+    |> String.split_on_char '\n' |> List.filter (fun line -> line <> "")
+    |> List.map Yojson.Safe.from_string in
+  let event_payload kind =
+    match List.filter (fun event -> get_string_field event "event_type" = kind) history with
+    | [ event ] ->
+      check string (kind ^ " names the shared Goal") goal_id (get_string_field event "goal_id");
+      shared_row kind (member "payload" event)
+    | _ -> fail ("expected exactly one " ^ kind ^ " event") in
+  let creation_payload = event_payload "goal_created" in
+  check string "creation credits the caller without assigning ownership" "planner"
+    (get_string_field creation_payload "actor");
+  let update_payload = event_payload "goal_updated" in
+  check string "the shared edit credits its caller" "reviewer"
+    (get_string_field update_payload "actor");
+  List.iter (fun field -> check string ("update event retains edited " ^ field)
+      (get_string_field edited field) (get_string_field update_payload field))
+    [ "title"; "metric"; "target_value"; "criterion_revision" ];
+  let phases = history
+    |> List.filter (fun event -> get_string_field event "event_type" = "goal_phase")
+    |> List.map (fun event -> let payload = member "payload" event in
+        get_string_field payload "phase", get_string_field payload "actor") in
+  check (list (pair string string)) "phase events retain each acting identity"
+    [ "verifying", "reviewer"; "executing", "verifier_exact" ] phases;
+  let announcements = Workspace.get_all_messages_raw config ~since_seq:0
+    |> List.filter (fun (message : Masc_domain.message) ->
+        has_substring ~needle:"[goal_verdict]" message.content
+        && has_substring ~needle:goal_id message.content) in
+  (match announcements with
+   | [ message ] ->
+     check string "the verifier announces to the workspace" "verifier_exact" message.from_agent;
+     check bool "the shared announcement carries the evidence" true
+       (has_substring ~needle:evidence message.content)
+   | _ -> fail "the workspace must receive one proof verdict announcement");
+  let primary, mirror = goal_files config in
+  List.iter (fun (label, bytes) ->
+    match Yojson.Safe.from_string bytes |> member "goals" |> to_list with
+    | [ row ] -> ignore (shared_row label row)
+    | _ -> fail (label ^ " must retain the one shared Goal"))
+    [ "primary", primary; "mirror", mirror ];
+  List.iter (fun (ctx : Tool_workspace.context) ->
+    check bool (ctx.agent_name ^ " has no private Goal transcript") false
+      (Sys.file_exists (Keeper_chat_store.chat_path
+         ~base_dir:config.base_path ~keeper_name:ctx.agent_name)))
+    [ creator; collaborator ]
 ;;
 
 let test_goal_completion_accepts_goal_without_tasks () =
@@ -807,6 +958,8 @@ let () =
         ; test_case "a refusing confirmation step keeps the confirmation retryable" `Quick
             test_a_refusing_confirmation_step_keeps_the_confirmation_retryable
         ; test_case "upsert and list" `Quick test_goal_upsert_and_list
+        ; test_case "different callers share a Goal without private delivery" `Quick
+            test_callers_share_a_goal_without_private_delivery
         ; test_case "list preserves source failure" `Quick test_goal_list_preserves_source_failure
         ; test_case "list answers the Unavailable envelope on #34459 rows" `Quick
             test_goal_list_schema_rejected_envelope

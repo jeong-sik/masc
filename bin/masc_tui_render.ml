@@ -328,6 +328,10 @@ let task_line (task : task) =
 (* Keep the latest immutable loader snapshots across cursor-only frames. *)
 let overview_cache = Masc_tui_overview_cache.create ()
 
+(* Cache absolute creation times; the renderer still computes ages at now. *)
+let overview_backlog (state : state) =
+  Masc_tui_overview_cache.backlog overview_cache state.tasks_domain
+
 (* No briefing means an unread fleet, not an empty Team projection. *)
 let overview_team (state : state) =
   match state.overview with
@@ -587,13 +591,14 @@ let overview_intro_lines (state : state) =
   | Some reason -> ("  " ^ Terminal_text.single_line reason) :: usual
   | None -> usual
 
-(* Goal links include finished tasks omitted by the active task rows. *)
-let overview_goal_status_of_id (state : state) =
-  Masc_tui_overview_cache.goal_status_of_id overview_cache state.tasks_domain
-
-(* Cache absolute creation times; the renderer still computes ages at now. *)
-let overview_backlog (state : state) =
-  Masc_tui_overview_cache.backlog overview_cache state.tasks_domain
+(* Goal links include finished tasks, which the Overview's active task rows
+   intentionally omit. Resolve owners against the full snapshot from that
+   same task read. *)
+let overview_goal_status_of_id (state : state) id =
+  List.find_opt
+    (fun (task : Masc_domain.task) -> String.equal task.id id)
+    state.tasks_domain
+  |> Option.map (fun (task : Masc_domain.task) -> task.task_status)
 
 (** Project the shared Overview row budget and its sanitized variable inputs. *)
 let overview_layout (state : state) ~terminal_rows ~cols =

@@ -13,9 +13,4 @@ val team :
   attention:Masc_tui_types.attention_item list ->
   Masc_tui_overview_team.t
 
-val goal_status_of_id :
-  t -> Masc_domain.task list -> string -> Masc_domain.task_status option
-(** Resolve against the full backlog, including completed tasks. When an id
-    occurs twice, the first occurrence wins, as in the original linear read. *)
-
 val backlog : t -> Masc_domain.task list -> Masc_tui_overview_tasks.backlog

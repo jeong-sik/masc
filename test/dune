@@ -4386,9 +4386,8 @@
 (test
  (name test_tui_overview_cache)
  (modules test_tui_overview_cache)
- (libraries alcotest astring masc masc_types masc.masc_goal masc_tui_types
-  masc_tui_overview_cache masc_tui_overview_team masc_tui_overview_tasks
-  masc_tui_overview_goals unix))
+ (libraries alcotest masc masc_types masc_tui_types
+  masc_tui_overview_cache masc_tui_overview_team masc_tui_overview_tasks))
 
 (test
  (name test_tui_overview_goals)

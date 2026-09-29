@@ -107,50 +107,10 @@ let test_backlog_refresh_and_clock () =
   check int "empty replacement drops the previous backlog" 0
     (Cache.backlog cache []).todo_count
 
-let test_goal_performers_refresh () =
-  let cache = Cache.create () in
-  let todo = task "linked" "2026-09-29T00:00:00Z" in
-  let goal : Masc.Tui_decode.overview_goal =
-    { og_id = "goal"; og_title = "Ship the release";
-      og_owner = Goal_store.Unknown_owner; og_completion = None;
-      og_phase = Goal_phase.Executing; og_priority = 1; og_due_date = None;
-      og_task_count = 1; og_task_done_count = 0; og_stagnation_seconds = None;
-      og_task_ids = ["linked"] }
-  in
-  let draw_goal goal tasks =
-    Masc_tui_overview_goals.lines ~now ~localtime:Unix.gmtime ~inner_width:140
-      ~rows:12 ~tasks:(Tasks.Rows_read [])
-      ~status_of_id:(Cache.goal_status_of_id cache tasks) (Types.Goals_read [goal])
-    |> String.concat " "
-  in
-  let draw = draw_goal goal in
-  let has text word = Astring.String.is_infix ~affix:word text in
-  check bool "unclaimed linked task has no performer" false (has (draw [todo]) "performer @");
-  let held = [{ todo with task_status = working "alpha" }] in
-  check bool "new status supplies goal's performer" true (has (draw held) "performer @alpha");
-  check bool "same snapshot keeps the performer" true (has (draw held) "performer @alpha");
-  let done_task =
-    { todo with task_status = Masc_domain.Done
-        { assignee = "beta"; completed_at = "2026-09-29T00:01:00Z"; notes = None } }
-  in
-  let completed = draw [done_task] in
-  check bool "completed task still supplies its new performer" true (has completed "performer @beta");
-  check bool "old performer disappears" false (has completed "performer @alpha");
-  check bool "removed task cannot retain a cached performer" false (has (draw []) "performer @");
-  let duplicate = draw [done_task; { todo with task_status = working "alpha" }] in
-  check bool "first duplicate id wins as before indexing" true (has duplicate "performer @beta");
-  check bool "later duplicate cannot overwrite first status" false (has duplicate "performer @alpha");
-  let same_tasks = [done_task; { todo with id = "other"; task_status = working "alpha" }] in
-  ignore (draw same_tasks);
-  let relinked = draw_goal { goal with og_task_ids = ["other"] } same_tasks in
-  check bool "new goal links use the unchanged task index" true (has relinked "performer @alpha");
-  check bool "old goal link's performer disappears" false (has relinked "performer @beta")
-
 let () =
   run "tui_overview_cache"
     [ "snapshot lifecycle",
       [ test_case "Team task refresh and reuse" `Quick test_team_task_refresh;
         test_case "Team roster replacement" `Quick test_team_roster_refresh;
         test_case "Team attention arrival, change and removal" `Quick test_team_attention_refresh;
-        test_case "backlog refresh and age on unchanged inputs" `Quick test_backlog_refresh_and_clock;
-        test_case "Goals follow full-backlog status lifecycle" `Quick test_goal_performers_refresh ] ]
+        test_case "backlog refresh and age on unchanged inputs" `Quick test_backlog_refresh_and_clock ] ]

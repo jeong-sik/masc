@@ -782,8 +782,7 @@ let test_overview_projections_are_made_once_per_input () =
         (Ast_grep.count_calls_in_value_binding ~module_path:render
            ~binding_name ~callee))
     [ "overview_backlog", "Masc_tui_overview_cache.backlog";
-      "overview_team", "Masc_tui_overview_cache.team";
-      "overview_goal_status_of_id", "Masc_tui_overview_cache.goal_status_of_id" ];
+      "overview_team", "Masc_tui_overview_cache.team" ];
   check int "renderer keeps one cache across frames" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render
        ~binding_name:"overview_cache" ~callee:"Masc_tui_overview_cache.create");
@@ -794,13 +793,7 @@ let test_overview_projections_are_made_once_per_input () =
     [ "Overview_tasks.backlog"; "Overview_team.project";
       "Masc_tui_overview_tasks.backlog"; "Masc_tui_overview_team.project" ];
   check int "one Todo summary computation" 1 (references cache "Tasks.backlog");
-  check int "one Team projection computation" 1 (references cache "Team.project");
-  check int "goal links resolve through the index" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:cache
-       ~binding_name:"goal_status_of_id" ~callee:"Hashtbl.find_opt");
-  check int "goal links do not search the backlog" 0
-    (Ast_grep.count_calls_in_value_binding ~module_path:cache
-       ~binding_name:"goal_status_of_id" ~callee:"List.find_opt")
+  check int "one Team projection computation" 1 (references cache "Team.project")
 ;;
 
 let test_user_message_background_has_one_render_snapshot () =

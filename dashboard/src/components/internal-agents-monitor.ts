@@ -804,7 +804,7 @@ export function InternalAgentsMonitor() {
                     const noTerminalLabel = stagehandHasNoHistory
                       ? '실행 기록 미보존'
                       : exactWindowExcludesHistory
-                        ? '최근 관측창에 없음'
+                        ? '최근 완료 관측 없음'
                         : '관측 기록 없음'
                     const statusClass = lane.status === 'degraded' || lane.status === 'unavailable'
                       ? 'text-[var(--color-danger)]'

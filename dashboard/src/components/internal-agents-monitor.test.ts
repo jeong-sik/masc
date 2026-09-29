@@ -290,7 +290,7 @@ describe('InternalAgentsMonitor', () => {
     sse.refresh?.()
     expect(await within(matrix).findByText('No run in recent window')).toBeTruthy()
     expect(within(matrix).getByText('Run history not retained')).toBeTruthy()
-    expect(within(matrix).getByText('최근 관측창에 없음')).toBeTruthy()
+    expect(within(matrix).getByText('최근 완료 관측 없음')).toBeTruthy()
     expect(within(matrix).getByText('실행 기록 미보존')).toBeTruthy()
   })
 

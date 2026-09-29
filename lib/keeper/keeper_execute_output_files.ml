@@ -18,6 +18,7 @@ let capture_directory ~base_path =
 
 type publication =
   { fields : (string * Yojson.Safe.t) list
+  ; compared_output_bytes : int
   ; release_sources : unit -> unit
   }
 
@@ -120,6 +121,7 @@ let publish ~inline_ceiling_bytes ~base_path ~redaction (files : Process_output_
         in
         Ok
           { fields = ("output_completeness", `String "complete") :: fields
+          ; compared_output_bytes = total_bytes
           ; release_sources = (fun () ->
               Eio_guard.run_in_systhread ~label:"keeper-execute-release-output"
                 (fun () -> cleanup [ stdout_path; stderr_path ]))

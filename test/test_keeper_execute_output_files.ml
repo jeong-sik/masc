@@ -71,6 +71,9 @@ let test_publication_retains_sources_until_release () =
     in
     Alcotest.(check bool) "complete output is explicitly marked" true
       (List.assoc_opt "output_completeness" publication.fields = Some (`String "complete"));
+    Alcotest.(check int) "compared size is the published combined stream"
+      (String.length stdout + String.length stderr)
+      publication.compared_output_bytes;
     Alcotest.(check bool) "published output preserves both child streams" true
       (List.assoc_opt "output" publication.fields = Some (`String (stdout ^ stderr)));
     Alcotest.(check string) "stdout survives publication awaiting caller commit" stdout
@@ -120,7 +123,10 @@ let publish_payload ~lane bytes check_fields =
   with_process_output ~stdout:payload ~stderr:"" (fun ~base_path ~redaction ~stdout_path:_ ~stderr_path:_ files ->
     match Publish.publish ~inline_ceiling_bytes:(lane_ceiling lane) ~base_path ~redaction files with
     | Error error -> Alcotest.fail (Publish.error_to_string error)
-    | Ok publication -> check_fields ~base_path ~payload publication.Publish.fields)
+    | Ok publication ->
+      Alcotest.(check int) "compared bytes match the redacted stream"
+        (String.length payload) publication.compared_output_bytes;
+      check_fields ~base_path ~payload publication.Publish.fields)
 
 let blob_bytes ~base_path field fields =
   match List.assoc_opt field fields with

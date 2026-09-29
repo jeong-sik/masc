@@ -3342,6 +3342,11 @@
  (libraries alcotest eio eio_main masc.masc_core))
 
 (test
+ (name test_file_version_cache)
+ (modules test_file_version_cache)
+ (libraries alcotest masc.masc_core unix))
+
+(test
  (name test_eval_tool_selector_boundary)
  (modules test_eval_tool_selector_boundary)
  (libraries alcotest masc.string_util masc_core yojson)
@@ -3857,6 +3862,7 @@
   masc
   masc_tui_fetched
   masc_tui_keys
+  masc_tui_message_layout
   masc_tui_preset_text
   masc_tui_types))
 
@@ -3969,6 +3975,11 @@
  (name test_tui_clipboard)
  (modules test_tui_clipboard)
  (libraries alcotest masc_tui_clipboard))
+
+(test
+ (name test_tui_sse_lines)
+ (modules test_tui_sse_lines)
+ (libraries alcotest masc_tui_sse_lines))
 
 (test
  (name test_tui_image_preview)
@@ -6426,7 +6437,7 @@
 (test
  (name test_keeper_sandbox_remote_checkouts)
  (modules test_keeper_sandbox_remote_checkouts)
- (libraries alcotest masc unix yojson))
+ (libraries alcotest masc masc.repo_manager unix yojson))
 
 (test
  (name test_tui_image_mosaic)
@@ -6678,6 +6689,16 @@
  (deps test_tui_tab_strip_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
  (action
   (run python3 %{dep:test_tui_tab_strip_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(rule
+ (alias runtest-test_tui_play_invites_pty)
+ (deps test_tui_play_invites_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_play_invites_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_play_invites_pty)))
 
 (alias
  (name runtest)
@@ -7060,10 +7081,9 @@
  (deps (alias runtest-test_install_local_build)))
 
 (test
- (name test_workspace_memory_proposals)
- (modules test_workspace_memory_proposals)
- (libraries alcotest yojson unix masc masc.server masc.masc_core masc.prompt_registry)
- (deps ../config/prompts/keeper.md ../docs/evidence/2026-09-10-workspace-memory-curator/qwen38-27b/proposal.json))
+ (name test_workspace_memory_ledger_view)
+ (modules test_workspace_memory_ledger_view)
+ (libraries alcotest digestif yojson masc masc.fs_compat))
 
 (test
  (name test_workspace_memory_ledger)
@@ -7596,3 +7616,13 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_chat_activity_pane_pty)))
+
+(rule
+ (alias runtest-test_tui_chat_load_errors_pty)
+ (deps test_tui_chat_load_errors_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_chat_load_errors_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_chat_load_errors_pty)))

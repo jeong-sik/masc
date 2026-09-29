@@ -1342,10 +1342,17 @@ let init_scope =
 
 type init_tally = { written : int; skipped : int; failed : int }
 
+(* [masc init] prints one line per file and per Skill. [masc setup] runs the
+   same work as one step of a longer install, where hundreds of routine lines
+   bury the ones that need a look, so it asks for [Summary]: routine lines are
+   left out and the closing count line, failures and Skills kept for operator
+   review are still printed. *)
+type init_report = Every_line | Summary
+
 (* [rel] keys the embedded tree and [dest_rel] names where it lands. They are
    the same string for every asset but the fresh-install roster, which is
    authored under [keepers-default/] and seeds as [keepers/]. *)
-let seed_one ~target_root ~force tally (rel, dest_rel) =
+let seed_one ~report ~target_root ~force tally (rel, dest_rel) =
   match Embedded_config.read rel with
   | None ->
     Printf.eprintf "init: missing embedded asset: %s\n" rel;
@@ -1354,12 +1361,16 @@ let seed_one ~target_root ~force tally (rel, dest_rel) =
     let dest = Filename.concat target_root dest_rel in
     Fs_compat.mkdir_p (Filename.dirname dest);
     if Fs_compat.file_exists dest && not force then begin
-      Printf.printf "skip   %s (exists, --force to overwrite)\n" dest;
+      (match report with
+       | Every_line -> Printf.printf "skip   %s (exists, --force to overwrite)\n" dest
+       | Summary -> ());
       { tally with skipped = tally.skipped + 1 }
     end else
       try
         Fs_compat.save_file dest content;
-        Printf.printf "wrote  %s (%d bytes)\n" dest (String.length content);
+        (match report with
+         | Every_line -> Printf.printf "wrote  %s (%d bytes)\n" dest (String.length content)
+         | Summary -> ());
         { tally with written = tally.written + 1 }
       with Sys_error msg ->
         Printf.eprintf "init: %s: %s\n" dest msg;
@@ -1367,19 +1378,35 @@ let seed_one ~target_root ~force tally (rel, dest_rel) =
 
 type init_skills = { changed : int; skill_failed : bool }
 
-(* Every package's verdict is printed. A package that was not reconciled
+(* The two outcomes a healthy install repeats on every run. Anything else is
+   news to the operator, so a report this list does not name is printed. *)
+let routine_skill_report = function
+  | Builtin_skill_package.Bundled
+      { result = Ok (Builtin_skill_package.Up_to_date
+                    | Builtin_skill_package.Install_missing); _ } -> true
+  | _ -> false
+
+let print_skill_report ~report skill_report =
+  match report with
+  | Every_line -> Printf.printf "%s\n" (Builtin_skill_package.report_to_string skill_report)
+  | Summary ->
+    if not (routine_skill_report skill_report)
+    then Printf.printf "%s\n" (Builtin_skill_package.report_to_string skill_report)
+
+(* Every package's verdict is printed, except that [Summary] leaves out the
+   routine ones. A package that was not reconciled
    fails the command; packages kept for operator review do not, and neither
    does a leftover staging directory that could not be removed, which the next
    installation tries again. *)
-let init_builtin_skills_reconcile = function
+let init_builtin_skills_reconcile ~report = function
   | Error error ->
     Printf.eprintf "init: builtin Skills were not reconciled: %s\n"
       (Builtin_skill_package.error_message error);
     { changed = 0; skill_failed = true }
   | Ok reports ->
-    List.fold_left (fun tally report ->
-      Printf.printf "%s\n" (Builtin_skill_package.report_to_string report);
-      match report with
+    List.fold_left (fun tally skill_report ->
+      print_skill_report ~report skill_report;
+      match skill_report with
       | Builtin_skill_package.Bundled
           { result = Ok (Builtin_skill_package.Install_missing
                         | Builtin_skill_package.Adopt_identical
@@ -1417,7 +1444,7 @@ let init_builtin_skills_reconcile = function
 let print_skill_lock_wait lock =
   Printf.eprintf "waiting for another Skill installation to release %s\n%!" lock
 
-let init_cmd_exit base_path force scope record_default =
+let init_cmd_exit_with ~report base_path force scope record_default =
   let base_path = Env_config.normalize_masc_base_path_input base_path in
   (* [init] seeds the explicitly requested workspace; runtime resolution may
      honor [MASC_CONFIG_DIR], but bootstrap materialization must not. *)
@@ -1432,7 +1459,7 @@ let init_cmd_exit base_path force scope record_default =
       Fs_compat.mkdir_p target_root;
       Fs_compat.mkdir_p (Filename.concat target_root Common.keepers_runtime_dirname);
       List.fold_left
-        (seed_one ~target_root ~force)
+        (seed_one ~report ~target_root ~force)
         { written = 0; skipped = 0; failed = 0 }
         (List.filter_map
            (fun rel ->
@@ -1446,7 +1473,7 @@ let init_cmd_exit base_path force scope record_default =
   let skills = match scope with
     | Config_only -> { changed = 0; skill_failed = false }
     | All | Skills_only ->
-      init_builtin_skills_reconcile
+      init_builtin_skills_reconcile ~report
         (Server_runtime_config_root_bootstrap.install_builtin_skills
            ~on_wait:print_skill_lock_wait ~base_path) in
   Printf.printf "init: %d written, %d skipped, %d failed, %d builtin Skill package(s) changed (root=%s)\n"
@@ -1487,6 +1514,8 @@ let init_cmd_exit base_path force scope record_default =
         "default workspace not recorded: a test executable does not write the \
          operator's default\n");
   if result.failed > 0 || skills.skill_failed then 1 else 0
+
+let init_cmd_exit = init_cmd_exit_with ~report:Every_line
 
 let init_cmd =
   let doc =
@@ -3794,7 +3823,7 @@ let setup_validate_runtime base_path =
         let result = verify_runtime_execution runtime runtime_verification_timeout_s in
         let code = Runtime_verification.exit_code result in
         match result.failure with
-        | None when code = 0 -> print_endline "Model response and harmless tool roundtrip verified."; 0
+        | None when code = 0 -> print_endline (Masc_cli_setup.ok_line "Model response and harmless tool roundtrip verified."); 0
         | Some failure when Runtime_setup_batch.usage_limit failure ->
           (* The same rule as the setup save: the provider answered for the
              account and declined for its usage, so the connection stands.
@@ -3843,7 +3872,7 @@ let setup_cmd_exit base_path port no_tui sandbox_profile microvm_backend network
     (* A person running setup on a terminal makes the workspace the default for
        later commands; a scripted `setup --no-tui` does not change the machine's
        default. *)
-    ~initialize:(fun () -> init_cmd_exit base_path false All (stdio_is_a_terminal ()))
+    ~initialize:(fun () -> init_cmd_exit_with ~report:Summary base_path false All (stdio_is_a_terminal ()))
     ~validate_runtime:(fun () -> setup_validate_runtime base_path)
     ~prepare_image:(fun ~selection ->
       let runtime = Masc.Sandbox_readiness.microvm_backend selection.Masc.Sandbox_readiness.backend in

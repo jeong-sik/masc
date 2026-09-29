@@ -663,7 +663,7 @@ let test_direct_turn_reuses_current_task_context () =
   let context =
     Turn.For_testing.direct_turn_dynamic_context
       ~lane_updates:(Ok (`List []))
-      ~workspace_memory:Masc.Workspace_memory_publication.Missing
+      ~workspace_memory:Masc.Workspace_memory_ledger.Missing
       ~current_task:(Inputs.Current_task task)
       ~held_task_skills:[]
       ~task_skill_surfaces:[]
@@ -693,7 +693,7 @@ let test_direct_turn_carries_held_task_skills () =
   let context =
     Turn.For_testing.direct_turn_dynamic_context
       ~lane_updates:(Ok (`List []))
-      ~workspace_memory:Masc.Workspace_memory_publication.Missing
+      ~workspace_memory:Masc.Workspace_memory_ledger.Missing
       ~current_task:Inputs.No_current_task
       ~held_task_skills:
         [ { Inputs.held_task_id = "task-364"
@@ -721,7 +721,7 @@ let test_direct_turn_has_no_synthetic_task_context () =
   let context =
     Turn.For_testing.direct_turn_dynamic_context
       ~lane_updates:(Ok (`List []))
-      ~workspace_memory:Masc.Workspace_memory_publication.Missing
+      ~workspace_memory:Masc.Workspace_memory_ledger.Missing
       ~current_task:Inputs.No_current_task
       ~held_task_skills:[]
       ~task_skill_surfaces:[]
@@ -736,43 +736,37 @@ let test_direct_turn_has_no_synthetic_task_context () =
   check string "non-task context remains" "recent owner message" context
 
 let test_direct_turn_discovers_published_workspace_memory () =
-  let module Publication = Masc.Workspace_memory_publication in
-  let module Store = Masc.Workspace_memory_proposal in
-  let module Inventory = Masc.Workspace_memory_context in
+  let module Ledger = Masc.Workspace_memory_ledger in
   let base_path = Filename.temp_dir "direct-workspace-memory" "" in
   let require = function Ok value -> value | Error detail -> fail detail in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
-    let inventory = Inventory.collect ~base_path |> require in
-    let envelope = Inventory.proposal_json inventory
-      (`Assoc ["shared_claims", `List []; "conflicts", `List []; "excluded", `List []]) in
-    let proposal_id = match Store.submit ~base_path envelope with
-      | Ok (id, _) -> id
-      | Error (Invalid detail | Unavailable detail) -> fail detail in
-    Publication.publish ~base_path ~proposal_id |> require;
+    Ledger.save ~base_path Ledger.empty |> require;
+    let ledger_sha256 = match Ledger.observe ~base_path with
+      | Ledger.Available row -> row.ledger_sha256
+      | _ -> fail "saved ledger is unavailable" in
     let render () = Turn.For_testing.direct_turn_dynamic_context
       ~lane_updates:(Ok (`List []))
-      ~workspace_memory:(Publication.observe ~base_path)
+      ~workspace_memory:(Ledger.observe ~base_path)
       ~current_task:Inputs.No_current_task ~held_task_skills:[] ~task_skill_surfaces:[]
       ~approval_authority_text:"" ~recent_direct_conversation_text:"owner conversation"
       ~worktree_text:"" ~telemetry_feedback_text:"" ~turn_instructions_text:"" in
     let direct = render () in
-    List.iter (fun needle -> check bool "direct reply can inspect attributed shared proposal" true
+    List.iter (fun needle -> check bool "direct reply can inspect shared ledger" true
       (contains ~needle direct))
-      [proposal_id; "keeper_workspace_memory_read"; "model_proposed"; "not_performed";
-       "not_checked_against_current_memory"; "owner conversation"];
-    let shared = Prompt.format_workspace_memory_observation (Publication.observe ~base_path)
+      [ledger_sha256; "keeper_workspace_memory_read"; "model_classified"; "not_performed";
+       "owner conversation"];
+    let shared = Prompt.format_workspace_memory_observation (Ledger.observe ~base_path)
       |> Option.get in
     check bool "direct reply uses the same shared publication renderer" true
       (contains ~needle:shared direct);
     check string "unchanged observation does not accumulate briefing text" direct (render ());
-    let target = Filename.concat base_path
-      (Common.masc_dirname ^ "/workspace-memory/proposals/" ^ proposal_id ^ ".json") in
+    let target = Filename.concat (Ledger.directory ~base_path) "ledger.json" in
     Sys.remove target;
     let unavailable = render () in
-    check bool "missing referenced proposal is explicitly unavailable" true
-      (contains ~needle:"Discovery is unavailable" unavailable);
+    check bool "missing ledger loses the read target" false
+      (contains ~needle:"Current ledger SHA-256" unavailable);
     check bool "unavailable direct reply does not reuse a stale read target" false
-      (contains ~needle:proposal_id unavailable))
+      (contains ~needle:ledger_sha256 unavailable))
 
 let test_open_goal_store_keeps_one_stable_safety_contract () =
   let meta_with_goal =
@@ -907,7 +901,7 @@ let lane_notice =
 let direct_context ~lane_updates =
   Turn.For_testing.direct_turn_dynamic_context
     ~lane_updates
-    ~workspace_memory:Masc.Workspace_memory_publication.Missing
+    ~workspace_memory:Masc.Workspace_memory_ledger.Missing
     ~current_task:Inputs.No_current_task
     ~held_task_skills:[]
     ~task_skill_surfaces:[]

@@ -245,6 +245,40 @@ let test_a_job_that_submits_again_runs_the_inner_work_on_its_worker () =
         in
         check int "an async io job's inner submit runs on its worker" outer inner)))
 
+(* A worker runs several jobs at once -- an IO job weighs a twentieth of it --
+   and they end in any order. Job A starts, job B starts on the same worker,
+   and A ends while B still runs: B is still pool work, so its own submit
+   stays inline on its worker instead of queueing behind the capacity it
+   holds. *)
+let test_a_job_still_running_after_another_ends_is_pool_work () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      R.clear_for_tests ();
+      let pool = D.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+      R.set pool;
+      Fun.protect ~finally:R.clear_for_tests (fun () ->
+        let a_started, a_started_u = Eio.Promise.create () in
+        let a_release, a_release_u = Eio.Promise.create () in
+        let b_started, b_started_u = Eio.Promise.create () in
+        let b_check, b_check_u = Eio.Promise.create () in
+        let a =
+          D.submit_io_async ~sw pool (fun () ->
+            Eio.Promise.resolve a_started_u ();
+            Eio.Promise.await a_release)
+        in
+        Eio.Promise.await a_started;
+        let b =
+          D.submit_io_async ~sw pool (fun () ->
+            Eio.Promise.resolve b_started_u ();
+            Eio.Promise.await b_check;
+            Executor_pool_ref.in_worker_context ())
+        in
+        Eio.Promise.await b_started;
+        Eio.Promise.resolve a_release_u ();
+        Eio.Promise.await_exn a;
+        Eio.Promise.resolve b_check_u ();
+        check bool "the job still running is pool work" true (Eio.Promise.await_exn b))))
+
 let test_ref_inline_from_raw_domain_with_pool () =
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw ->
@@ -315,5 +349,7 @@ let () =
         test_ref_inline_from_raw_domain_with_pool;
       test_case "a job that submits again runs the inner work on its worker" `Quick
         test_a_job_that_submits_again_runs_the_inner_work_on_its_worker;
+      test_case "a job still running after another ends is pool work" `Quick
+        test_a_job_still_running_after_another_ends_is_pool_work;
     ];
   ]

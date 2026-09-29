@@ -97,6 +97,7 @@
 - The schedule store keeps the decoded `schedules.json` with the file version it was read from, so a reader of an unchanged ledger no longer reads, parses and decodes the whole multi-megabyte document; a miss decodes on the domain pool (#39870).
 - File-version caching applies only to filesystem-backed schedules; Memory backends retain their own authoritative ledger even when a local mirror shares the same path (#39870).
 - The TUI splits its server-sent event streams (the observer feed, the Keeper chat stream and the GitHub login stream) by scanning only the bytes each chunk adds, instead of copying and searching everything held since the last line ended. A 919KB `execution_snapshot` read in 16KB chunks took 35.6ms of the TUI's loop to split and now takes 1.2ms (#39909).
+- The TUI reads an observer frame's leading `type` member before parsing the frame, and a frame that type decides by itself (a whole dashboard projection, the internal agent runs push, or a type outside the event families this build reads) is delivered without the rest being parsed. A 722KB `operator_snapshot` took 8.9-10.3ms of the TUI's loop to parse and its type now takes about 15-20µs to read; the rest of such a frame is no longer checked, so it no longer reads as undecodable when it is not JSON (#39926).
 
 ## [0.47.0] - 2026-09-29
 

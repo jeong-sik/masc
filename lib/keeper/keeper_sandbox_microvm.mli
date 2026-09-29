@@ -98,11 +98,17 @@ val network_args_for :
     be a guess at how open the guest is. *)
 
 val image_present_for :
-  Keeper_microvm_backend.t -> image:string -> timeout_sec:float -> (unit, string) result
+  Keeper_microvm_backend.t ->
+  name:string option ->
+  image:string ->
+  timeout_sec:float ->
+  (unit, string) result
 (** Gate the run on the image already being in this runtime's own store.
     None of the three has a [--pull=never]: without this, a missing image is
     fetched from a registry rather than refused. The refusal names the CLI
-    that was asked, so an [msb] keeper is not told to install Apple's. *)
+    that was asked, so an [msb] keeper is not told to install Apple's.
+    Never builds an image. The same inspect response supplies the presence
+    result and lock-marker warning; an absent marker does not block admission. *)
 
 type image_probe_phase =
   | Image_inspect
@@ -121,6 +127,18 @@ type image_probe_outcome =
   | Image_missing
   | Image_cli_unavailable
   | Image_probe_failed of image_probe_failure
+
+val image_present_result_for :
+  Keeper_microvm_backend.t ->
+  name:string option ->
+  image:string ->
+  image_probe_outcome ->
+  (unit, string) result
+(** The gate's answer for one probe outcome. [name] is the Keeper's catalog
+    name, when declared. A missing image gives the recovery steps the
+    selected backend supports: [masc sandbox-image] builds into [container]'s
+    and [nerdctl]'s store, a build reaches [msb]'s through [msb load], and on
+    every backend [masc sandbox-image promote] records a tag that store has. *)
 
 type json_shape =
   | Json_array

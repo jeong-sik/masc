@@ -280,7 +280,11 @@ let credential_plan config aliases =
 
 let delete_credentials config ({ aliases; credential_paths } : credential_plan) =
   let rec delete_aliases = function
-    | [] -> remove_paths_strict credential_paths
+    | [] ->
+      (match Auth.with_credential_transaction config.Workspace.base_path
+          (fun () -> remove_paths_strict credential_paths) with
+       | Ok result -> result
+       | Error error -> Error (Masc_domain.masc_error_to_string error))
     | alias :: rest ->
       (try
          Auth.delete_credential config.Workspace.base_path alias;

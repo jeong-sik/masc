@@ -434,9 +434,10 @@ let after_announcing result =
    tool surface does not read (RFC-0194). Called before a call that needs the
    controller, it frees a departed holder's controller and tells the board.
 
-   The holder's state is read between two lane calls, not under the lane's
-   lock, so a holder resumed in those milliseconds still loses it and must
-   wait for a pass like any other player. And the name is
+   The caller holds the credential transaction through this read and release,
+   and flushes the queued announcement after that transaction. Keeper registry
+   state can still change between the two lane calls: a resumed Keeper must
+   wait for a pass like any other player. The name is
    the caller's own: an MCP client named like a stopped Keeper is let go as
    that Keeper would be. *)
 (* A revoked invite can never pass the controller its name holds (RFC
@@ -488,9 +489,9 @@ let free_left_controller ~holder_left ~who =
              (announce ~author:who
                 (departure_notice holder reason)))
      with
-     (* Posted now: the call that follows may be refused before it reaches
-        the lane, and would not post it. *)
-     | Ok true -> flush_announcements ()
+     (* The caller publishes the queued notice after its transaction, even
+        when the subsequent machine operation is refused. *)
+     | Ok true -> ()
      (* A hand-off that landed after the read above: that pass stands. *)
      | Ok false -> ()
      (* The machine went away; the call that follows reports it. *)

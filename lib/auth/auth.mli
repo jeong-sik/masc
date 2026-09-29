@@ -59,6 +59,17 @@ val save_auth_config : string -> auth_config -> unit
 
 (** {1 Credentials} *)
 
+val with_credential_transaction : string -> (unit -> 'a) -> ('a, masc_error) result
+(** Serialize a credential-dependent effect with credential save, deletion and
+    alias publication in this workspace, across fibers, threads and processes.
+    The callback may use {!load_credential} and hold its decision through its
+    effect; it must not call a credential writer, token-index lookup (whose cold
+    publication also takes this lock), or recursively enter this transaction.
+    Admission is cancellable; an admitted callback and lock release are protected
+    from cancellation. A failed admission runs no callback. A completed callback
+    keeps its result if lock cleanup fails, with the cleanup failure logged.
+    Body exceptions propagate after release. *)
+
 val load_credential : string -> string -> agent_credential option
 (** [load_credential config agent_name] reads [agent_name]'s own credential
     file, following its redirect stub to the id-named file. [None] when the
@@ -121,6 +132,8 @@ val load_credential_of :
     perpetuate dual identity. *)
 
 val save_credential : string -> agent_credential -> unit
+(** Publish under {!with_credential_transaction}, including token-cache
+    invalidation. Lock admission errors raise [Sys_error], like write errors. *)
 
 val ensure_credential_alias :
   string ->

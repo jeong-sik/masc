@@ -1,12 +1,15 @@
 (** Declaring one more sign-in of an official client runtime.toml already
     declares.
 
-    A second Codex, Claude Code or Antigravity account is one more provider
+    A second Codex, Claude Code, Antigravity or Muse account is one more provider
     shaped like an existing one: the same protocol, command and binding
     tables, and a different login store. This module copies that provider
     from a chosen base and appends the copy to the file's text. Lines already
     in the text are not touched, so comments and layout stay as they were.
-    Nothing here reads or writes a file, and nothing signs in. *)
+    Nothing here reads or writes a file, and nothing signs in. A copied Muse
+    account requires file-backed credentials under its account home. The
+    form's login command and runtime explicitly select the file backend,
+    so they do not store that login in the shared macOS Keychain. *)
 
 type t
 (** A runtime.toml text together with its parsed tables. *)
@@ -15,6 +18,7 @@ type client =
   | Claude_code
   | Codex
   | Antigravity
+  | Muse
 [@@deriving enumerate]
 
 type base =
@@ -23,6 +27,9 @@ type base =
       (** The name the loader shows: [display-name], else [provider-name],
           else the id. *)
   ; client : client
+  ; command : string option
+      (** The provider's configured [command], so sign-in hints invoke the
+          same executable. *)
   }
 
 type declared =
@@ -58,8 +65,8 @@ val parse : string -> (t, error) result
 
 val bases : t -> base list
 (** The official-client providers, in file order. HTTP providers are left
-    out: they are endpoints with keys, not signed-in clients. Muse is also left
-    out because this account-copy form does not support its sign-in flow. *)
+    out: they are endpoints with keys, not signed-in clients. Muse requires
+    file-backed sign-in under the selected account home. *)
 
 val suggest_id : t -> base -> string
 (** [<base>_<n>] for the smallest [n] from 2 up that no provider or
@@ -83,13 +90,13 @@ val declare :
     declares. Copied values keep their exact value. [location] is the login
     store:
 
-    - Claude Code and Codex: [account-home], the directory given as
-      [CLAUDE_CONFIG_DIR] or [CODEX_HOME] at sign-in.
+    - Claude Code, Codex and Muse: [account-home], the directory given as
+      [CLAUDE_CONFIG_DIR], [CODEX_HOME] or [HOME] at sign-in.
     - Antigravity: the OAuth file [masc runtime-antigravity-account] reports,
       written as [credentials] of type [file].
 
     A leading [~/] is expanded against [home_dir] when it is given.
-    [inherited_home] is the home a Claude Code or Codex provider without
+    [inherited_home] is the home a Claude Code, Codex or Muse provider without
     [account-home] runs on; a location equal to it is refused like any other
     login already in use, since the copy would share that login and its
     quota. Two locations are one login when they lead to one file or

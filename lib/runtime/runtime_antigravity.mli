@@ -146,7 +146,8 @@ type error =
   | Unhandled_exception of string
       (** An exception nothing in the runtime expected, caught as the turn
           leaves it: a host-side failure, not something the CLI sent. The
-          string is the exception. *)
+          string is the exception. That catch-all re-raises
+          [Out_of_memory], [Stack_overflow] and [Sys.Break] instead. *)
   | Timeout of float
 
 val error_to_string : error -> string

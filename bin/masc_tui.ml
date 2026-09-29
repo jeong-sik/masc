@@ -22249,7 +22249,7 @@ and is loaded on demand through keeper_skill.
               else
                 Masc_tui_scroll.cursor_up ~count
                   state.connectors_binding_cursor)
-       | Some "Q"
+       | Some "b"
          when state.view = Keepers Keeper_detail
               && state.detail_tab = Detail_info ->
            (match selected_keeper state, state.board_quarantine_requeue_inflight with
@@ -26159,7 +26159,7 @@ and is loaded on demand through keeper_skill.
            then report_action state "system" "런타임 프롬프트 자산은 읽기 전용입니다"
            else handle_prompt_clear ()
        (* [a] on the runtime.toml pane: one more account of a Claude Code,
-          Codex or Antigravity provider the file already declares. The status
+          Codex, Antigravity or Muse provider the file already declares. The status
           reading hides the source, so it does not open there. *)
        | Some ("a" | "A")
          when state.view = Config && state.config_pane = Config_runtime

@@ -157,13 +157,24 @@ let no_machine ~base_path ~tool_name ~start_time =
   reject ~tool_name ~start_time ~data:(reject_data_of_fields (autosave_lookup_fields found)) message
 ;;
 
-let of_lane ?(extra = []) ~base_path ~tool_name ~start_time
+(* [png] adds the frame for a model that reads images: the observation's text,
+   then the PNG. A caller that shows only text still has the whole observation
+   in [data]. *)
+let of_lane ?(extra = []) ?png ~base_path ~tool_name ~start_time
     (result : (Dos_lane.observation, Dos_lane.error) result) =
   match result with
   | Ok o ->
-    Tool_result.make_ok ~tool_name ~start_time
-      ~data:(`Assoc (observation_fields o @ extra))
-      ()
+    let data = `Assoc (observation_fields o @ extra) in
+    let content_blocks =
+      Option.map
+        (fun png ->
+          [ Llm_provider.Types.Text (Yojson.Safe.to_string data)
+          ; Llm_provider.Types.image_block ~media_type:"image/png"
+              ~data:(Base64.encode_exn png) ()
+          ])
+        png
+    in
+    Tool_result.make_ok ~tool_name ~start_time ~data ?content_blocks ()
   | Error Dos_lane.No_machine -> no_machine ~base_path ~tool_name ~start_time
   | Error
       (( Dos_lane.Invalid_request _ | Dos_lane.Held_by _ | Dos_lane.Other_program _
@@ -560,8 +571,58 @@ let handle_pass ~tool_name ~start_time ~base_path ~agent_name args =
             Dos_lane.pass ~who:agent_name ~to_ ~announce:(announce ~author:agent_name content))))
 ;;
 
+(* The screen as an image. A VGA game draws its menus as pixels -- 삼국지3's
+   Korean menus are glyphs from its own font -- so frame_ascii shows where
+   something is drawn but not what it says. Every surface that shows the frame
+   as an image reads it here: the observation and the frame come from one
+   locked read, and the PNG is encoded off the Eio domain. *)
+type png_capture =
+  { observation : Dos_lane.observation
+  ; width : int
+  ; height : int
+  ; png : string
+  }
+
+type png_capture_error =
+  | Lane of Dos_lane.error
+  | Encode of string
+
+let capture_png () =
+  match off_domain Dos_lane.capture with
+  | Error e -> Error (Lane e)
+  | Ok (observation, { Dos_lane.width; height; rgb }) ->
+    (match
+       Eio_guard.run_in_systhread ~label:"dos-png" (fun () -> Rgb_png.encode ~width ~height ~rgb)
+     with
+     | Ok png -> Ok { observation; width; height; png }
+     | Error message -> Error (Encode message))
+;;
+
+let png_fields ~width ~height ~png =
+  [ ("media_type", `String "image/png")
+  ; ("width", `Int width)
+  ; ("height", `Int height)
+  ; ("bytes", `Int (String.length png))
+  ]
+;;
+
+let image_capture_failed ~tool_name ~start_time message =
+  Tool_result.make_err ~tool_name ~class_:Tool_result.Runtime_failure ~start_time
+    ("DOS image capture failed: " ^ message)
+;;
+
+(* A generic caller (an MCP client) gets the PNG inline, beside the text
+   observation. A Keeper gets it through its vision store instead
+   (Keeper_dos_screen). *)
 let handle_screen ~tool_name ~start_time ~base_path _args =
-  of_lane ~base_path ~extra:[ core_field ] ~tool_name ~start_time (off_domain Dos_lane.screen)
+  match capture_png () with
+  | Error (Lane e) -> of_lane ~base_path ~tool_name ~start_time (Error e)
+  | Error (Encode message) -> image_capture_failed ~tool_name ~start_time message
+  | Ok { observation; width; height; png } ->
+    of_lane ~base_path ~tool_name ~start_time
+      ~extra:(png_fields ~width ~height ~png @ [ core_field ])
+      ~png
+      (Ok observation)
 ;;
 
 (* The whole per-call ceiling: a call that settles stops early, so a large

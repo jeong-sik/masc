@@ -65,7 +65,7 @@ let open_on ?home_dir text =
   | Error e -> Error (D.error_message e)
   | Ok declaration ->
     (match D.bases declaration with
-     | [] -> Error "runtime.toml declares no Claude Code, Codex or Antigravity provider to copy"
+     | [] -> Error "runtime.toml declares no Claude Code, Codex, Antigravity or Muse provider to copy"
      | chosen :: after ->
        Ok
          { declaration
@@ -132,6 +132,7 @@ let field_of_error = function
 let inherited_home = function
   | D.Claude_code -> Runtime_claude_code.effective_account_home None
   | D.Codex -> Runtime_codex_app_server.effective_account_home None
+  | D.Muse -> Sys.getenv_opt "HOME"
   | D.Antigravity -> None
 ;;
 
@@ -143,17 +144,28 @@ let inherited_home = function
    break anywhere else -- between the home and the client -- would leave the
    client to run, and sign in, on the default login. Antigravity has none;
    its OAuth file exists before it can be typed here. *)
-let command_halves client home =
-  match client with
+let muse_executable command =
+  let command = match command with Some configured -> configured | None -> "muse" in
+  Runtime_official_cli_install.spawn_path Muse ~command
+;;
+
+let command_halves (base : D.base) home =
+  match base.client with
   | D.Codex -> Some (Printf.sprintf "(export CODEX_HOME=%s &&" home, "codex login)")
   | D.Claude_code -> Some (Printf.sprintf "(export CLAUDE_CONFIG_DIR=%s &&" home, "claude)")
+  | D.Muse ->
+    Some
+      ( Printf.sprintf
+          "(unset META_API_KEY && export MUSE_NO_AUTO_UPDATE=1 %s HOME=%s XDG_CONFIG_HOME=%s/.config XDG_DATA_HOME=%s/.local/share XDG_CACHE_HOME=%s/.cache XDG_STATE_HOME=%s/.local/state XDG_RUNTIME_DIR=%s/.local/run &&"
+          Runtime_muse_serve.credential_backend_entry home home home home home home
+      , Filename.quote (muse_executable base.command) ^ " login)" )
   | D.Antigravity -> None
 ;;
 
 (* What to type inside the client once it runs; Codex logs in by itself. *)
 let typed_after = function
   | D.Claude_code -> Some "/login"
-  | D.Codex | D.Antigravity -> None
+  | D.Codex | D.Muse | D.Antigravity -> None
 ;;
 
 let one_line (setup, run) = setup ^ " " ^ run
@@ -161,10 +173,10 @@ let command s = one_line (s.setup, s.run)
 let then_type s = typed_after s.client
 
 (* Quoted, because a home with a space in it is still one argument. *)
-let sign_in client home =
+let sign_in (base : D.base) home =
   Option.map
-    (fun (setup, run) -> { client; setup; run })
-    (command_halves client (Filename.quote home))
+    (fun (setup, run) -> { client = base.client; setup; run })
+    (command_halves base (Filename.quote home))
 ;;
 
 type hint =
@@ -188,9 +200,14 @@ let hints_for client halves =
     :: List.map
          (fun typed -> Say ("그다음 claude 안에서 " ^ typed ^ " 을 입력합니다"))
          (Option.to_list (typed_after client))
+  | D.Muse, Some halves ->
+    [ Run halves
+    ; Say "이 HOME의 .config/muse/auth.json 파일이 필요합니다."
+    ; Say "이 명령은 Keychain 대신 선택한 HOME의 파일에 로그인 정보를 저장합니다."
+    ]
   | D.Antigravity, _ ->
     [ Say "OAuth 파일: masc runtime-antigravity-account --sign-in 이 출력하는 credential_file" ]
-  | (D.Codex | D.Claude_code), None -> []
+  | (D.Codex | D.Claude_code | D.Muse), None -> []
 ;;
 
 (* The hints under the fields, for the location typed so far. *)
@@ -201,7 +218,7 @@ let sign_in_hints t =
     then "<" ^ D.location_label client ^ ">"
     else Filename.quote (D.expand_home ?home_dir:t.home_dir t.location)
   in
-  hints_for client (command_halves client home)
+  hints_for client (command_halves t.ring.chosen home)
 ;;
 
 let edit t f =
@@ -275,7 +292,7 @@ let declare_on ~inherited_home t current =
           Ok
             { id = t.id
             ; text = declared.D.text
-            ; sign_in = sign_in base.client declared.D.location
+            ; sign_in = sign_in base declared.D.location
             }
         | Error e -> refuse e))
 ;;
@@ -325,25 +342,31 @@ let wrapped ~width ~lead text =
 
 let command_lead = "  로그인: "
 
-(* The command on one row when it fits, else broken only between its
-   halves (see {!command_halves}), the second under the first. When the
-   first half alone is wider than the pane the frame cuts it: a cut row
-   leaves the home's quote open, so it cannot run either. *)
-let command_rows ~width halves =
+(* Show only complete shell segments. A clipped export can still parse,
+   so neither half is displayed when either one would be cut by the pane.
+   The saved form's copy action always carries the complete command. *)
+let command_rows ~width ~copy_available halves =
   let whole = command_lead ^ Terminal_text.single_line (one_line halves) in
   if Masc_tui_message_layout.display_width whole <= width
   then [ whole ]
   else (
     let setup, run = halves in
     let indent = String.make (Masc_tui_message_layout.display_width command_lead) ' ' in
-    [ command_lead ^ Terminal_text.single_line setup; indent ^ run ])
+    let rows = [ command_lead ^ Terminal_text.single_line setup; indent ^ run ] in
+    if List.for_all (fun row -> Masc_tui_message_layout.display_width row <= width) rows
+    then rows
+    else
+      wrapped ~width ~lead:hint_lead
+        (if copy_available
+         then "명령이 화면보다 깁니다. y 를 눌러 전체 명령을 복사하세요."
+         else "명령이 화면보다 깁니다. 저장 후 y 로 전체 명령을 복사하세요."))
 ;;
 
-let hint_rows ~width hints =
+let hint_rows ~width ~copy_available hints =
   List.concat_map
     (function
       | Say text -> wrapped ~width ~lead:hint_lead text
-      | Run halves -> command_rows ~width halves)
+      | Run halves -> command_rows ~width ~copy_available halves)
     hints
 ;;
 
@@ -363,7 +386,7 @@ let filling_rows ~width t =
     ; line Id id_label t.id
     ; line Location (D.location_label base.client) t.location
     ]
-  @ hint_rows ~width (sign_in_hints t)
+  @ hint_rows ~width ~copy_available:false (sign_in_hints t)
   @ (match t.error with
      | None -> []
      | Some reason -> wrapped ~width ~lead:refusal_lead reason)
@@ -375,7 +398,7 @@ let filling_rows ~width t =
 let saved_rows ~width ~id sign_in =
   wrapped ~width ~lead:hint_lead
     (Printf.sprintf "%s 를 저장했습니다 · lane 후보에 넣어야 턴이 갑니다" id)
-  @ hint_rows ~width (hints_for sign_in.client (Some (sign_in.setup, sign_in.run)))
+  @ hint_rows ~width ~copy_available:true (hints_for sign_in.client (Some (sign_in.setup, sign_in.run)))
   @ [ "" ]
 ;;
 

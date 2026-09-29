@@ -3077,6 +3077,17 @@ let test_exact_anthropic_frozen_artifact_parity () =
           ~native:true
           ~json:true
           ()
+      ; catalog_entry
+          ~kind:"anthropic"
+          ~request_path:"/v1/messages"
+          ~model_id:"thinking-between-tools-model"
+          ~anthropic_thinking_control:"adaptive_between_tools"
+          ~enable_thinking:false
+          ~id:"thinking-between-tools"
+          ~base_url
+          ~native:true
+          ~json:true
+          ()
       ]
     @@ fun snapshot ->
     let execute id =
@@ -3089,10 +3100,11 @@ let test_exact_anthropic_frozen_artifact_parity () =
     let measured = execute "thinking-measured" in
     let implicit = execute "thinking-default-implicit" in
     let disabled = execute "thinking-default-disabled" in
-    [ unmeasured; measured; implicit; disabled ]
+    let between_tools = execute "thinking-between-tools" in
+    [ unmeasured; measured; implicit; disabled; between_tools ]
   in
   check int "exact artifact measures only constrained request" 1 posts.measurement_posts;
-  check int "exact artifact generates all four requests" 4 posts.generation_posts;
+  check int "exact artifact generates all five requests" 5 posts.generation_posts;
   List.iter
     (fun (success : EO.success) ->
        match
@@ -3101,10 +3113,10 @@ let test_exact_anthropic_frozen_artifact_parity () =
        | EO.Terminal, Some _ -> ()
        | _ -> fail "terminal generation receipt lost its late provider trace")
     successes;
-  let unmeasured_body, measured_body, implicit_body, disabled_body =
+  let unmeasured_body, measured_body, implicit_body, disabled_body, between_tools_body =
     match posts.generation_bodies with
-    | [ unmeasured; measured; implicit; disabled ] ->
-      unmeasured, measured, implicit, disabled
+    | [ unmeasured; measured; implicit; disabled; between_tools ] ->
+      unmeasured, measured, implicit, disabled, between_tools
     | _ -> fail "frozen artifact fixture lost generation request bodies"
   in
   let measurement_body =
@@ -3114,7 +3126,7 @@ let test_exact_anthropic_frozen_artifact_parity () =
   in
   let measured_success : EO.success =
     match successes with
-    | [ _; measured; _; _ ] -> measured
+    | [ _; measured; _; _; _ ] -> measured
     | _ -> fail "frozen artifact fixture lost measured success"
   in
   check
@@ -3153,6 +3165,9 @@ let test_exact_anthropic_frozen_artifact_parity () =
     "explicit false target thinking policy emits disabled control"
     true
     (thinking disabled_json = `Assoc [ "type", `String "disabled" ]);
+  check bool "frozen catalog preserves the between_tools policy" true
+    (thinking (Yojson.Safe.from_string between_tools_body)
+     = `Assoc [ "type", `String "between_tools" ]);
   check
     int
     "frozen output-token receipt reaches actual generation bytes"

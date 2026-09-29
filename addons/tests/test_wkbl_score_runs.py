@@ -59,6 +59,14 @@ class WkblScoreRuns(unittest.TestCase):
         self.assertEqual(manifest["contributions"], ["derive"])
         self.assertEqual(manifest["world"]["outputs"]["runs"]["lanes"], ["wkbl/score-runs"])
 
+    def test_raw_export_matches_addon_snapshot_rows(self):
+        raw = json.loads((PACKAGE / "fixtures/046-01-48-X2-raw.json").read_text())
+        observation = FIXTURE["observations"][0]
+        self.assertEqual(raw["game_id"], observation["game_id"])
+        self.assertEqual(raw["period_code"], observation["period_code"])
+        self.assertEqual(raw["initial_score"], observation["initial_score"])
+        self.assertEqual(raw["rows"], observation["rows"])
+
     def test_real_ot2_rows_yield_seven_unanswered_points_with_exact_evidence(self):
         result = self.output(FIXTURE)
         self.assertEqual(result["coverage"][0]["complete"], True)

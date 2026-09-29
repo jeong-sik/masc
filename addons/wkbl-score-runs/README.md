@@ -12,6 +12,11 @@ rows of game `046-01-48`, captured from the WKBL production
 `play_by_play_events` table on 2026-09-29 17:04 UTC with a read-only,
 autocommit query. Its SHA-256 is
 `962ba99b96588b26bf8718e52a9787612f5a565288feb60797544d4aa1c70dd0`.
+The [raw export](fixtures/046-01-48-X2-raw.json) preserves the original
+46-row query result byte for byte (SHA-256
+`1522d732fcaa12f690c375bc7e9a6773430c51655af3995025b0379d1b3f1b6c`).
+Use that same file for both arms of a Hook-versus-Add-on comparison. The
+Add-on fixture wraps those rows in a `snapshot_file` source envelope.
 The source query selected `id, event_index, team_side, clock, description,
 team1_score, team2_score` where `game_id='046-01-48'` and
 `period_code='X2'`, ordered by `event_index`. The prior X1 period's last

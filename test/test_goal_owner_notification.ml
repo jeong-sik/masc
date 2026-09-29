@@ -368,6 +368,19 @@ let test_scan_overdue_restart_sends_nothing () =
    creation through a fresh store read to the owner's Pending Message. *)
 let test_owner_named_unknown_receives_overdue_notice_after_restart () =
   with_workspace (fun config ->
+    (* The owner has a real receiving Keeper, including after a restart. *)
+    let meta =
+      match Masc_test_deps.meta_of_json_fixture (`Assoc [ "name", `String "unknown" ]) with
+      | Ok meta -> meta
+      | Error detail -> fail detail
+    in
+    (match
+       Keeper_fs.save_json_atomic
+         (Keeper_types_profile.keeper_meta_path config "unknown")
+         (Keeper_meta_json.meta_to_json meta)
+     with
+     | Ok () -> ()
+     | Error detail -> fail detail);
     let ctx : Tool_workspace.context =
       { Tool_workspace.config; agent_name = "unknown" }
     in

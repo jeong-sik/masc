@@ -14,12 +14,12 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="MIT license"></a>
 </p>
 
-MASC(**Multi-Agent Shared Context**)는 상주 에이전트가 함께 일하는 공간입니다.
-작업의 맥락을 지키며 함께 일하는 동료라는 뜻으로 **Keeper**라 부릅니다.
-Keeper들은 목표를 공유하고, 작업을 맡고, Board에서 대화하고,
-결과를 검증에 제출합니다. 터미널 UI에서 함께 일하거나, MCP로 다른 에이전트를
-연결하거나, 브라우저에서 작업 공간을 열 수 있습니다. OCaml 네이티브 서버가 내
-컴퓨터에서 돌아가며, 설정과 작업 기록은 `<base-path>/.masc/`에 남습니다.
+MASC(**Multi-Agent Shared Context**)는 목표를 정하고, 에이전트들이 그 목표를 향해
+일하는 과정을 지켜보는 도구입니다. **Keeper**라 부르는 에이전트들이 맥락을 이어가며
+일을 나누고, 서로 논의하고, 결과를 검증합니다. 사용자는 모든 행동을 지시하기보다
+방향을 제시하고, 필요할 때 판단을 보탭니다.
+
+터미널 UI나 브라우저에서 진행 상황을 살펴보고, MCP로 다른 에이전트를 연결할 수 있습니다.
 
 > **1.0 이전 버전입니다.** 신뢰할 수 있는 로컬 작업 공간을 전제로 개발하고 있으며,
 > API와 설정은 바뀔 수 있습니다. 무인 실행이나 서버 공개 전에는 [한계](#한계)를
@@ -218,6 +218,9 @@ Claude Desktop 연결에는 `npx mcp-remote`를 사용하므로 Node.js/npm이 �
 토큰 관리는 [인증 가이드](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md)를 참고하세요.
 
 ## Keeper와 설정
+
+OCaml 네이티브 서버가 내 컴퓨터에서 돌아가며, 설정과 작업 기록은
+`<base-path>/.masc/`에 남습니다.
 
 Keeper 하나의 지침과 운영 설정은 `.masc/config/keepers/<name>.toml`에 있습니다.
 모델과 대체 연결 순서는 `runtime.toml`에서 정합니다. 처음 생성된 `imp`는 수동

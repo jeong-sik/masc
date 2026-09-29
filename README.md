@@ -14,12 +14,13 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="MIT license"></a>
 </p>
 
-MASC (**Multi-Agent Shared Context**) is a workspace for persistent agents.
-We call them **Keepers**: collaborators that carry the context of the work forward.
-They share goals, claim tasks, talk on a Board, and submit work for verification.
-You work with them through a terminal UI, connect your own agents over MCP, or
-open the workspace in a browser. The native OCaml server runs on your machine;
-configuration and working records live under `<base-path>/.masc/`.
+MASC (**Multi-Agent Shared Context**) lets you set a goal and watch agents work
+toward it. These agents, called **Keepers**, carry context forward, divide the
+work, discuss their decisions, and verify results. You set the direction and
+step in when your judgement is needed, rather than directing every action.
+
+Follow their progress in the terminal UI or a browser, and connect other agents
+through MCP.
 
 > **Pre-1.0.** Built for local, trusted workspaces. APIs and configuration can
 > change. See [Limits](#limits) before running unattended or exposing a server.
@@ -229,6 +230,9 @@ See [MCP templates](docs/MCP-TEMPLATE.md) for other clients and a connection
 probe, and the [auth runbook](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md) for token handling.
 
 ## Keepers and configuration
+
+The native OCaml server runs on your machine. Configuration and working records
+live under `<base-path>/.masc/`.
 
 One Keeper's instructions and operational settings live in
 `.masc/config/keepers/<name>.toml`. Models and fallback routing belong in

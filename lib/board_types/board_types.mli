@@ -507,6 +507,13 @@ type store = {
   mutable dirty_comments : bool;
   dirty_post_ids : (string, unit) Hashtbl.t;
   dirty_comment_ids : (string, unit) Hashtbl.t;
+  post_rows : (string, post * string) Hashtbl.t;
+  (** post_id -> the post the last snapshot wrote and its JSONL row. Posts
+      are replaced in [posts], never changed in place, so a row kept with the
+      same physical post is still that post's row. Only the snapshot writers
+      read or change it, under [mutex]. *)
+  comment_rows : (string, comment * string) Hashtbl.t;
+  (** The same for [comments]. *)
   mutable last_flush : float;
   flusher_inbox : flusher_msg Eio.Stream.t;
   sub_boards : (string, sub_board) Hashtbl.t;

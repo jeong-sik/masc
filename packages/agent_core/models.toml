@@ -215,6 +215,30 @@ output_per_million = 20.0
 cache_write_multiplier = 1.25
 cache_read_multiplier = 0.05
 
+# Claude Sonnet 5.5 (released 2026-09-28). Specs from the platform model page,
+# effort page and pricing table (checked 2026-09-29): 1M/128K, $2/$10, 5m cache
+# write $2.50 = 1.25x, cache read $0.20 = 0.1x. Adaptive thinking stays the
+# default; the lowest mode is between_tools, not disabled (low..high only).
+# https://platform.claude.com/docs/en/build-with-claude/effort
+# Forced tool
+# use returns an error (a listed breaking change), so required and named
+# tool_choice are refused here while sonnet-5 still takes them. It needs a row of
+# its own because "claude-sonnet-5" prefixes it and would hand those two flags
+# back as true.
+[[models]]
+id_prefix = "claude-sonnet-5-5"
+base = "anthropic"
+anthropic_thinking_control = "adaptive_between_tools"
+accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
+max_context_tokens = 1000000
+max_output_tokens = 128000
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+input_per_million = 2.0
+output_per_million = 10.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
+
 [[models]]
 id_prefix = "claude-sonnet-5"
 base = "anthropic"

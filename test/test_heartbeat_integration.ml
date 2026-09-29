@@ -3010,6 +3010,10 @@ let test_keeper_up_shared_boundary_outlives_calling_turn () =
       let config = Masc.Workspace.default_config base_dir in
       ignore (Masc.Workspace.init config ~agent_name:(Some "beta"));
       seed_keeper_sandbox_profile ~base_dir target_name;
+      (* keeper up refuses a sandbox_image with nothing promoted on this
+         host; the seeded profile names "base". *)
+      Masc_test_deps.write_sandbox_image_catalog ~base_path:base_dir
+        [ "base", Masc_test_deps.live_sandbox_image_tag ];
       ignore Masc.Keeper_tool_surface.schemas;
       Masc.Server_startup_state.reset ();
       (match

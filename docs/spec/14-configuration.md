@@ -313,11 +313,17 @@ Codex and Claude expose an `authenticated` native observation. Muse reports
 validation. Antigravity reports `credential_captured`; this is not a network
 verification. All login receipts retain `invocation_verified:false`. The returned
 reference is used for model discovery and the existing response/tool verification
-before configuration publication. Every selected runtime is verified, including
-the current default and its fallbacks. A runtime whose provider declines the check
+before configuration publication. A save calls the runtimes it adds and the
+runtime that becomes the first call in the chain. A runtime already bound in
+`runtime.toml` that stays where it was is not called again. When the save leaves
+any selected runtime uncalled, the receipt reports `readiness: "partly_checked"`
+and lists them under `not_rechecked`; that says nothing about whether they ever
+passed a check, and clients must not show the save as verified. `verified` means
+every selected runtime answered a real check in that save. A runtime whose provider declines the check
 for the account's usage (`quota_exhausted` or `rate_limited`) is still published:
-the save receipt reports `readiness: "usage_limited"` and lists those runtimes
-under `unverified` with their code. Any other verification failure refuses the
+the save receipt lists those runtimes under `unverified` with their code:
+`readiness: "usage_limited"` when every selected runtime was called, and
+`"partly_checked"` (with `not_rechecked`) when some were not. Any other verification failure refuses the
 save and publishes nothing. `masc setup` applies the same rule when it checks
 imp's runtime: a usage limit is reported and the step succeeds. Antigravity reauthentication publishes a new
 reference, preserving the previous configured reference until an explicit save.

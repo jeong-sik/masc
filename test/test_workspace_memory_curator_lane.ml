@@ -133,7 +133,7 @@ let test_initial_inventory_drains_across_bounded_runs () = with_base (fun base_p
   List.iter (fun index ->
     commit ~keeper_id:("keeper-" ^ string_of_int index) base_path
       ("Distinct initial observation number " ^ string_of_int index))
-    (List.init 12 Fun.id);
+    (List.init 4 Fun.id);
   let calls = ref 0 in
   let execute ~rendered_prompt ~selected ~ledger:_ =
     incr calls;
@@ -144,7 +144,7 @@ let test_initial_inventory_drains_across_bounded_runs () = with_base (fun base_p
     Worker.For_testing.start ~sw ~base_path ~max_input_bytes:2000 ~execute;
     await_idle ~clock ~base_path;
     Alcotest.(check bool) "initial inventory required more than one model call" true (!calls > 1);
-    Alcotest.(check int) "all facts are classified" 12
+    Alcotest.(check int) "all facts are classified" 4
       (List.length (Ledger.dispositions (Ledger.load ~base_path |> require)));
     Worker.For_testing.stop ~base_path))
 

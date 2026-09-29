@@ -16,7 +16,7 @@ in audit issue#39953: shared ownerless Goals, hard cut, and five explicit grades
 | Model decisions cannot manufacture eligible recipients or money | `Candle_appraise`, `Candle_payment`, `test_candle_appraisal_flow` | Injected judgments prove orchestration/arithmetic, not model quality |
 | No wallet/supply secondary storage | Immutable `Candle_balance` fold; `Candle_observe` single view | Decimal strings and Zarith aggregates; only actual credited allocations issue currency |
 | Purchase/equip trusted self; Item catalog follows Look types | `Keeper_candle_tools`, shop/equipment, purchase and portrait HTTP suites | Public response and rendering evidence is distinct from deployed identity |
-| HTTP and proactive SSE withdraw unavailable authority | `Dashboard_projection_cache`, execution surface preparation | New SSE path at7a5cdd awaits integrated native result; payload test is not live socket ordering proof |
+| HTTP and proactive SSE withdraw unavailable authority | `Dashboard_projection_cache`, execution surface preparation | New SSE path passes integrated f467 payload scenario; not live socket ordering proof |
 | TUI/browser keep lifecycle usable during monetary failure | Strict decoder, currency state, Keeper surfaces | Synthetic wire PTY/browser evidence does not prove live Keeper behavior |
 | Keeper discovers balance/purchase without reward prompt injection | Eager tool descriptors; `test_candle_purchase_flow` | Shared Keeper prompt stays separate; no automatic balance context or work gate |
 | Decay remains Off | Explicit policy and constitution boundary | `HalfLifeSet`/Hours require the separate adopted constitution amendment; no implicit authorization here |
@@ -35,9 +35,10 @@ in audit issue#39953: shared ownerless Goals, hard cut, and five explicit grades
   not a full browser purchase session or remote TUI PNG proof.
 - Integrated frontend atf467: six files/64 tests and full TypeScript check pass.
 - Combined30 run[36597801658](https://github.com/jeong-sik/masc/actions/runs/36597801658)
-  was dispatched atf467; result not yet inspected here. It selects Goal,
-  appraisal, purchase, equipment, currency, remote TUI, Play/Auth and Lane
-  Add-on suites. Selection alone proves none of their outcomes.
+  atf467 has29/30 targeted suites passing, including the new SSE payload
+  scenario and main Dashboard currency PTY. Remote TUI list/PNG scenario
+  fails; it is not an integration PASS. [Raw results](../evidence/2026-09-30-candle-integration-f467/README.md)
+  distinguish the observed paths and limits.
 - Collector run[36591058373](https://github.com/jeong-sik/masc/actions/runs/36591058373)
   at26b0541d completed all four Python CLI cases through its Dune alias.
   Missing edit events are `not_observed`, not zero actual edits.

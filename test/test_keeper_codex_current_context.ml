@@ -9,7 +9,7 @@ let text = Yojson.Safe.Util.to_string
 let items = Yojson.Safe.Util.to_list
 let require = function Ok value -> value | Error detail -> fail detail
 
-let fixture root ~reject_context ~overflow_resume ~hold_first_resume =
+let fixture root ~reject_context ~overflow_resume ~hold_first_resume ~compact_resume =
   let capture = Filename.concat root "requests.jsonl" in
   let command = Filename.concat root "codex-fixture" in
   write command (Printf.sprintf {|#!/usr/bin/env python3
@@ -20,6 +20,7 @@ capture = %S
 reject_context = %s
 overflow_resume = %s
 hold_first_resume = %s
+compact_resume = %s
 turn_id = 'fresh-turn'
 def emit(value):
     print(json.dumps(value), flush=True)
@@ -54,16 +55,25 @@ for line in sys.stdin:
                 out.write('rejected before effects')
             emit({'method':'turn/completed','params':{'threadId':'context-thread','turn':{'id':turn_id,'items':[],'status':'failed','error':{'message':'context is full','codexErrorInfo':'contextWindowExceeded'}}}})
             continue
+        if compact_resume and turn_id == 'resumed-turn' and not os.path.exists(capture+'.compacted'):
+            with open(capture+'.compacted', 'w') as out:
+                out.write('compaction followed by another model response')
+            request_usage = {'inputTokens':100,'cachedInputTokens':0,'outputTokens':10,'reasoningOutputTokens':0,'totalTokens':110}
+            estimate = {'inputTokens':0,'cachedInputTokens':0,'outputTokens':0,'reasoningOutputTokens':0,'totalTokens':50}
+            for last in (estimate, request_usage):
+                emit({'method':'thread/tokenUsage/updated','params':{'threadId':'context-thread','turnId':turn_id,
+                     'tokenUsage':{'last':last,'total':request_usage,'modelContextWindow':400000}}})
         item = {'type':'agentMessage','id':'answer','text':'CONTEXT_RECEIVED','phase':'final_answer'}
         emit({'method':'item/completed','params':{'threadId':'context-thread','turnId':turn_id,'completedAtMs':1,'item':item}})
         emit({'method':'turn/completed','params':{'threadId':'context-thread','turn':{'id':turn_id,'items':[item],'status':'completed'}}})
 |} capture (if reject_context then "True" else "False")
     (if overflow_resume then "True" else "False")
-    (if hold_first_resume then "True" else "False"));
+    (if hold_first_resume then "True" else "False")
+    (if compact_resume then "True" else "False"));
   Unix.chmod command 0o700;
   command, capture
 
-let with_fixture ?(worker_pool = false) ?(reject_context = false) ?(overflow_resume = false) ?(hold_first_resume = false) ?max_prompt_bytes test =
+let with_fixture ?(worker_pool = false) ?(reject_context = false) ?(overflow_resume = false) ?(hold_first_resume = false) ?(compact_resume = false) ?max_prompt_bytes test =
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
   let previous_pool = Domain_pool_ref.get () in
   Eio.Switch.on_release sw (fun () ->
@@ -86,7 +96,7 @@ let with_fixture ?(worker_pool = false) ?(reject_context = false) ?(overflow_res
     ~base_path:root ~sandbox_profile:None "context-fixture";
   let saved = Runtime.For_testing.snapshot () in
   Eio.Switch.on_release sw (fun () -> Runtime.For_testing.restore saved; Fs_compat.remove_tree root);
-  let command, capture = fixture root ~reject_context ~overflow_resume ~hold_first_resume in
+  let command, capture = fixture root ~reject_context ~overflow_resume ~hold_first_resume ~compact_resume in
   let config_path = Filename.concat root "runtime.toml" in
   write config_path (Printf.sprintf {|
 [providers.codex]
@@ -368,6 +378,24 @@ let test_context_blocks_survive_fresh_retry () =
        (fresh |> member "params" |> member "developerInstructions" |> text) "RECALL_RETRY");
   check bool "settled replacement remembers the recall" false
     (String_util.contains_substring (turn_text (send "WORLD_3")) "RECALL_RETRY")
+
+let test_compaction_receipt_survives_later_request_usage () =
+  with_fixture ~compact_resume:true @@ fun ~run ~capture ~reports:_ ->
+  List.iteri (fun index recall_expected ->
+    let prompt_blocks =
+      [ Prompt_block_id.Memory_os_recall, "RECALL_AFTER_COMPACTION"
+      ; Prompt_block_id.Temporal_summary, Printf.sprintf "COMPACTION_TICK_%d" index ] in
+    let before = List.length (read_requests capture) in
+    successful (run ~instructions:"Keeper instructions" ~prompt_blocks
+      ~world:(String.concat "\n\n" (List.map snd prompt_blocks)) ());
+    let rows = read_requests capture |> List.filteri (fun i _ -> i >= before) in
+    let sent = if index = 0 then Yojson.Safe.to_string (`List rows) else turn_text rows in
+    check bool "compacted session receives recall again despite later request usage"
+      recall_expected (String_util.contains_substring sent "RECALL_AFTER_COMPACTION");
+    if index > 0 then
+      check int "compaction does not require a new thread" 1
+        (List.length (List.filter (fun row -> member "method" row = `String "thread/resume") rows)))
+    [true; false; true; false]
 
 let test_recall_lifecycle_across_native_ticks () =
   with_fixture @@ fun ~run ~capture ~reports:_ ->
@@ -953,6 +981,7 @@ let test_declared_limit_above_history_changes_nothing () =
 
 
 let () = run "Keeper current Codex context" ["native requests",[
+  test_case "compaction invalidates recall despite later request usage" `Quick test_compaction_receipt_survives_later_request_usage;
   test_case "resume delivers only changed blocks and pending operator note" `Quick test_resume_deduplicates_context_blocks;
   test_case "fresh overflow retry receives and remembers recall" `Quick test_context_blocks_survive_fresh_retry;
   test_case "memory changes, clears, fails and recovers across native ticks" `Quick test_recall_lifecycle_across_native_ticks;

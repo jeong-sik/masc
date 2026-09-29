@@ -47,11 +47,16 @@ No private memory text is reproduced here.
 
 ## Correction
 
-All three affected adapters receive the assembly's typed block witness after
-the preparation hook, record delivered block digests on a fresh session, and
-compare against the acknowledged frontier on resume. Unchanged blocks stay
-out; changed blocks are sent in full. Operator notes retain their explicit
-repeat-delivery semantics. A replacement session still receives its context.
+Codex and Muse receive the assembly's typed block witness after the preparation
+hook, record delivered block digests on a fresh session, and compare against
+the acknowledged frontier on resume. Unchanged blocks stay out; changed blocks
+are sent in full. Operator notes retain their explicit repeat-delivery
+semantics. A replacement session still receives its context.
+Codex retains invalidation from every typed usage event for the whole attempt:
+an observed compaction followed by a normal request must not restore the old
+held digests merely because the final usage describes that later request.
+The four-tick regression verifies initial delivery, compaction on resume,
+redelivery on the next resume, and suppression once that delivery settles.
 
 Muse and Antigravity retain their canonical-history guard. When an incomplete
 claim is released, its new held-context digests are cleared: recovering the
@@ -59,12 +64,18 @@ previous canonical snapshot does not prove the new blocks were delivered.
 This permits a safe resend after failure instead of suppressing unsent memory.
 Muse also clears held digests when its host reports that compaction rewrote
 context, including on the host-stop settlement path. A reported no-op keeps
-them. Antigravity's current transport exposes no compaction notification;
-retention through an invisible vendor compaction is not established here.
+them. Antigravity's current transport exposes no compaction notification.
+It therefore retains an empty held set and resends carried context on every
+resume. Suppression requires a compaction/reset witness; prior delivery alone
+is insufficient. Its native regression explicitly requires unchanged Recall
+on each resume.
 
 Ordinary Recall and the Librarian index now have separate typed block
-identities. A Librarian-only revision sends its updated reference without
-replaying unchanged ordinary Recall. Both remain first-round context; the
+identities. On lanes with held-context suppression, a Librarian-only revision
+sends its updated reference without replaying unchanged ordinary Recall.
+The assembly uses `List.stable_sort` in `keeper_run_tools_hooks.ml`, preserving
+ordinary Recall before the Librarian reference at their shared rank.
+Both remain first-round context; the
 Dashboard decodes and labels the new `librarian_working_context` identity.
 
 This change does not remove context already present in vendor sessions,
@@ -115,6 +126,13 @@ reported no-op.
 Build and behavioral execution belong to GitHub CI under the repository
 execution protocol. Fixture success does not establish live deployment or
 post-deployment token savings.
+
+After deployment, compare Codex/Muse provider-reported per-request input-token
+deltas between consecutive resumes of the same native session and model,
+separating unchanged-memory ticks, actual content changes and compaction
+boundaries. Verify duplicate Recall occurrence counts in native inputs as
+well. A lower net average caused by compaction alone is not evidence of this
+fix; no expected numerical saving is asserted before that measurement.
 
 The first PR check and targeted run at `aa6e1a1d92` failed compilation because
 the TUI block-label match did not include `Librarian_working_context`. The

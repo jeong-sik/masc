@@ -761,7 +761,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
                           ~goal:"Observe recall delivery" ("recall fixture system", snd unchanged));
                         let prompt = Fs_compat.load_file
                           (Filename.concat base_path "antigravity-prompt.txt") in
-                        check bool "recall only on start or revision" (index = 0 || index = 2)
+                        check bool "recall remains available without a compaction witness" true
                           (String_util.contains_substring prompt recall);
                         check bool "changing clock survives" true
                           (String_util.contains_substring prompt clock);
@@ -838,8 +838,8 @@ let test_keeper_projects_mcp_tool_and_settles () =
         | None -> fail "resumed Antigravity prompt was not captured"
       in
       check bool
-        "resume omits unchanged dynamic System context"
-        false
+        "resume carries dynamic System context without a compaction witness"
+        true
         (String_util.contains_substring
            resumed_prompt
            (Keeper_official_client_host.encode_history_message

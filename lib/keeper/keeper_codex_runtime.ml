@@ -1030,6 +1030,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
         delivery.prompt, delivery.held_context
     in
     let context_frontier = { context_frontier with held_context } in
+    let settled_held_context = ref held_context in
     let developer_instructions = Some composed_developer_instructions in
     (* The window already fits; this is the account checked once more before
        anything is written, so a measure that ever undercounts is refused here
@@ -1380,9 +1381,16 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
           (match event with
            | Runtime_codex_app_server.Native_tool_started _
            | Native_tool_finished _ -> observe_effect_attempted ()
+           | Usage_reported { frame; _ } ->
+             (* The final usage keeps only the newest request. A compaction
+                earlier in this turn still invalidates its context receipts. *)
+             (match frame with
+              | Runtime_codex_app_server.Counted { last = Context_estimate _; _ }
+              | Context_window_filled _ -> settled_held_context := []
+              | Counted { last = Request_usage _; _ } -> ())
            | Turn_started _ | Text_delta _ | Dynamic_tool_started _
            | Dynamic_tool_finished _ | Elicitation_cancelled _
-           | Usage_windows_reported _ | Usage_reported _ | Turn_finished _ -> ());
+           | Usage_windows_reported _ | Turn_finished _ -> ());
           Option.iter (fun observe -> observe event) observe_stream
         in
         (match
@@ -1509,38 +1517,14 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
        recovery_failure := Keeper_official_client_session_store.State_persistence_failed;
        let* () =
          match
-           (match turn.usage with
-            | Some (Runtime_codex_app_server.Thread_count
-                      { last = Runtime_codex_app_server.Context_estimate _; _ }) ->
-              (* The thread replaced its history during compaction; the
-                 pre-compaction context is no longer a held-context receipt. *)
-              Keeper_official_client_session_store.settle_holding
-                ~held_context:[]
-                ~base_path
-                ~keeper_name
-                ~expected:!session_state
-                ~session_id:turn.thread_id
-                ~turn_id:turn.turn_id
-                ~updated_at:(Time_compat.now ())
-            | Some Runtime_codex_app_server.Thread_count_replaced ->
-              Keeper_official_client_session_store.settle_holding
-                ~held_context:[]
-                ~base_path
-                ~keeper_name
-                ~expected:!session_state
-                ~session_id:turn.thread_id
-                ~turn_id:turn.turn_id
-                ~updated_at:(Time_compat.now ())
-            | Some (Runtime_codex_app_server.Thread_count
-                      { last = Runtime_codex_app_server.Request_usage _; _ })
-            | None ->
-              Keeper_official_client_session_store.settle
-                ~base_path
-                ~keeper_name
-                ~expected:!session_state
-                ~session_id:turn.thread_id
-                ~turn_id:turn.turn_id
-                ~updated_at:(Time_compat.now ()))
+           Keeper_official_client_session_store.settle_holding
+             ~held_context:!settled_held_context
+             ~base_path
+             ~keeper_name
+             ~expected:!session_state
+             ~session_id:turn.thread_id
+             ~turn_id:turn.turn_id
+             ~updated_at:(Time_compat.now ())
          with
          | Ok settled ->
            session_state := settled;

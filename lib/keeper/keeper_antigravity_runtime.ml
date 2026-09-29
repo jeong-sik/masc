@@ -730,14 +730,10 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
          else Host.Whole_input_transmitted prepared.messages)
     in
     let composed_context = Option.bind composed_context (fun read -> read ()) in
-    let held = Session_store.held_context_for_resume claim_plan ~expected:stored_session in
-    let held_context =
-      if is_resume
-      then (Host.resume_prompt ~goal ~held ?composed_context prepared.messages).held_context
-      else Host.start_held_context ?composed_context prepared.messages
-    in
-    let context_frontier = { context_frontier with held_context } in
-    let* prompt = prompt_for_turn ?composed_context ~held ~is_resume ~goal prepared in
+    (* Antigravity exposes no compaction or context-reset witness. A settled
+       delivery cannot prove these blocks remain in its current model input,
+       so keep the frontier's held set empty and resend on every resume. *)
+    let* prompt = prompt_for_turn ?composed_context ~held:[] ~is_resume ~goal prepared in
     let* () =
       if String.length prompt <= capacity_bytes
       then Ok ()

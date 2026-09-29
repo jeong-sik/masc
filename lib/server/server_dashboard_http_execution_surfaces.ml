@@ -772,6 +772,13 @@ let refresh_execution_default_light_http_body ~config =
     ~prepare:Http_response_payload.prepare ~config ()
 ;;
 
+(* Observe equipment after cached response preparation, outside the publication
+   lock, so a completed purchase/equip is not replaced by an older snapshot. *)
+let prepare_execution_snapshot_broadcast ~config () =
+  refresh_execution_default_light_http_body ~config
+  |> Dashboard_projection_cache.with_current_keeper_portraits ~config
+;;
+
 type execution_read =
   | Published_snapshot of Server_dashboard_http_cache.surface_snapshot * Yojson.Safe.t
   | Unpublished_response of Yojson.Safe.t
@@ -1317,7 +1324,7 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
         broadcast_cached_surface
           ~encoding:Encode_inline
           ~event_type:"execution_snapshot"
-          (refresh_execution_default_light_http_body ~config:workspace_config);
+          (prepare_execution_snapshot_broadcast ~config:workspace_config ());
         !broadcast_namespace_truth_ref state))
 ;;
 
@@ -1390,6 +1397,8 @@ module For_testing = struct
   let refresh_execution_default_light_http_body
         ?(prepare = Http_response_payload.prepare) ~config () =
     refresh_execution_default_light_http_body_with ~prepare ~config ()
+
+  let prepare_execution_snapshot_broadcast = prepare_execution_snapshot_broadcast
 
   let prepared_payload_for_snapshot = prepared_execution_payload_for_snapshot
 end

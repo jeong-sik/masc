@@ -152,6 +152,10 @@ module For_testing : sig
   (** The preparation callback runs outside the publication lock on the CPU
       worker. It can coordinate source changes and concurrent readers. *)
 
+  val prepare_execution_snapshot_broadcast :
+    config:Workspace.config -> unit -> Yojson.Safe.t
+  (** Production SSE payload preparation, including current ledger observations. *)
+
   val prepared_payload_for_snapshot :
     config:Workspace.config -> Server_dashboard_http_cache.surface_snapshot ->
     Dashboard_cache.cached_payload option

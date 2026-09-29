@@ -273,7 +273,13 @@ type catalog_resolution =
   | Origin_unavailable of string
 
 type checkout_freshness =
-  | Current of { target_ref : string; upstream_head : string }
+  | Current of { target_ref : string; upstream_head : string; last_observed_at_unix : int; age_s : int }
+  | Stale_ref of
+      { target_ref : string
+      ; upstream_head : string
+      ; last_observed_at_unix : int option
+      ; age_s : int option
+      }
   | Ahead of { target_ref : string; upstream_head : string; ahead : int }
   | Behind of { target_ref : string; upstream_head : string; behind : int }
   | Diverged of
@@ -329,6 +335,75 @@ let dirty_state ~budget ~repository =
   | Ok summary -> Ok (summary.Repo_git.changed_files > 0, summary.changed_files)
   | Error _ as error -> error
 
+(* Three nominal five-minute repository sync intervals allow normal scheduler
+   jitter while refusing an older local observation. Both probe paths use
+   the same threshold even if a repository's sync interval is reconfigured. *)
+let target_ref_stale_after_s = Keeper_sandbox_remote_checkouts.target_ref_stale_after_s
+
+(* A tracking ref's reflog records when its local value last moved. A managed
+   no-op fetch leaves it untouched, so read the fetch owner's per-ref receipt.
+   Neither probe fetches. *)
+let reflog_moved_at_unix ~budget ~cwd target_ref =
+  match first_git_line ~budget ~cwd
+          [ "reflog"; "show"; "-1"; "--date=unix"; "--format=%gd"; target_ref ] with
+  | Error _ -> None
+  | Ok line ->
+    (match String.rindex_opt line '{', String.rindex_opt line '}' with
+     | Some left, Some right when right > left + 1 ->
+       int_of_string_opt (String.sub line (left + 1) (right - left - 1))
+     | _ -> None)
+;;
+
+let newer_time left right =
+  match left, right with
+  | None, other | other, None -> other
+  | Some left, Some right -> Some (max left right)
+;;
+
+let matching_fetch_receipt_time ~budget ~cwd ~target_ref ~upstream_head ~origin_url =
+  match first_git_line ~budget ~cwd
+          [ "rev-parse"; "--path-format=absolute"; "--git-common-dir" ] with
+  | Error _ -> None
+  | Ok common_dir ->
+    (match Repo_fetch_observation.read ~common_dir with
+     | Some observation
+       when String.equal observation.target_ref target_ref
+            && String.equal observation.oid upstream_head ->
+       (match canonical_url observation.origin_url, canonical_url origin_url with
+        | Some fetched, Some origin when String.equal fetched origin ->
+          Some observation.observed_at_unix
+        | _ -> None)
+     | _ -> None)
+;;
+
+let target_ref_last_observed_at_unix ~budget ~cwd ~target_ref ~upstream_head
+      ~origin_url =
+  let moved = reflog_moved_at_unix ~budget ~cwd target_ref in
+  match moved with
+  | Some timestamp
+    when int_of_float (Time_compat.now ()) - timestamp <= target_ref_stale_after_s ->
+    moved
+  | _ ->
+    newer_time moved
+      (matching_fetch_receipt_time ~budget ~cwd ~target_ref ~upstream_head ~origin_url)
+;;
+
+let freshness_from_counts ~now_unix ~target_ref ~upstream_head
+      ~last_observed_at_unix ~behind ~ahead =
+  match behind, ahead with
+  | 0, 0 ->
+    let age_s = Option.map
+      (fun moved -> int_of_float now_unix - moved) last_observed_at_unix in
+    (match last_observed_at_unix, age_s with
+     | Some last_observed_at_unix, Some age_s
+       when age_s >= 0 && age_s <= target_ref_stale_after_s ->
+       Current { target_ref; upstream_head; last_observed_at_unix; age_s }
+     | _ -> Stale_ref { target_ref; upstream_head; last_observed_at_unix; age_s })
+  | 0, ahead -> Ahead { target_ref; upstream_head; ahead }
+  | behind, 0 -> Behind { target_ref; upstream_head; behind }
+  | behind, ahead -> Diverged { target_ref; upstream_head; ahead; behind }
+;;
+
 let freshness_of_catalog ~budget ~repository = function
   | Registered catalog_repo ->
     let target_ref = "origin/" ^ catalog_repo.default_branch in
@@ -345,10 +420,15 @@ let freshness_of_catalog ~budget ~repository = function
             Repo_git.ahead_behind ~timeout_sec ~repository ~target_ref ())
         with
         | Error error -> Freshness_unavailable error
-        | Ok (0, 0) -> Current { target_ref; upstream_head }
-        | Ok (0, ahead) -> Ahead { target_ref; upstream_head; ahead }
-        | Ok (behind, 0) -> Behind { target_ref; upstream_head; behind }
-        | Ok (behind, ahead) -> Diverged { target_ref; upstream_head; ahead; behind }))
+        | Ok (behind, ahead) ->
+          let last_observed_at_unix =
+            if behind = 0 && ahead = 0 then
+              target_ref_last_observed_at_unix ~budget
+                ~cwd:repository.local_path ~target_ref ~upstream_head
+                ~origin_url:catalog_repo.url
+            else None in
+          freshness_from_counts ~now_unix:(Time_compat.now ()) ~target_ref
+            ~upstream_head ~last_observed_at_unix ~behind ~ahead))
   | Unregistered -> Freshness_unavailable "checkout is not registered in the repository catalog"
   | Ambiguous ids ->
     Freshness_unavailable
@@ -372,10 +452,20 @@ let catalog_json = function
     `Assoc [ "state", `String "origin_unavailable"; "error", `String error ]
 
 let freshness_json = function
-  | Current { target_ref; upstream_head } ->
+  | Current { target_ref; upstream_head; last_observed_at_unix; age_s } ->
     `Assoc
       [ "state", `String "current"; "target_ref", `String target_ref
-      ; "upstream_head", `String upstream_head; "ahead", `Int 0; "behind", `Int 0 ]
+      ; "upstream_head", `String upstream_head; "ahead", `Int 0; "behind", `Int 0
+      ; "target_ref_last_observed_at_unix", `Int last_observed_at_unix
+      ; "target_ref_age_s", `Int age_s ]
+  | Stale_ref { target_ref; upstream_head; last_observed_at_unix; age_s } ->
+    `Assoc
+      [ "state", `String "stale_ref"; "target_ref", `String target_ref
+      ; "upstream_head", `String upstream_head; "ahead", `Int 0; "behind", `Int 0
+      ; "target_ref_last_observed_at_unix",
+        (match last_observed_at_unix with Some value -> `Int value | None -> `Null)
+      ; "target_ref_age_s", (match age_s with Some value -> `Int value | None -> `Null)
+      ]
   | Ahead { target_ref; upstream_head; ahead } ->
     `Assoc
       [ "state", `String "ahead"; "target_ref", `String target_ref
@@ -537,11 +627,11 @@ let checkout_inspection_of_remote ~catalog (ic : Keeper_sandbox_remote_checkouts
               (Printf.sprintf "remote target_ref %s not found" target_ref)
           | Some upstream_head ->
             (match ic.ahead, ic.behind with
-             | Some 0, Some 0 -> Current { target_ref; upstream_head }
-             | Some ahead, Some 0 -> Ahead { target_ref; upstream_head; ahead }
-             | Some 0, Some behind -> Behind { target_ref; upstream_head; behind }
              | Some ahead, Some behind ->
-               Diverged { target_ref; upstream_head; ahead; behind }
+               freshness_from_counts ~now_unix:(Time_compat.now ()) ~target_ref
+                 ~upstream_head
+                 ~last_observed_at_unix:ic.target_ref_last_observed_at_unix
+                 ~behind ~ahead
              | _ -> Freshness_unavailable "ahead/behind counts unavailable")))
     | Unregistered ->
       Freshness_unavailable "checkout is not registered in the repository catalog"

@@ -22,6 +22,7 @@ from test_tui_emblem_screen_pty import rgba_png
 SOURCE_MODULES = (
     "bin/masc_tui.ml",
     "bin/masc_tui_keeper_portrait.ml",
+    "bin/masc_tui_metrics_tail.ml",
     "bin/masc_tui_portrait_view.ml",
     "bin/masc_tui_render.ml",
     "lib/keeper_portrait/keeper_portrait_equipment.ml",
@@ -209,8 +210,9 @@ def remote_portrait(binary: str, evidence: Path) -> None:
             assert h.wait_for_fixture_state(process, fd, output,
                 lambda: roster.count() > calls, timeout=WAIT_SECONDS)
             h.resize_and_wait(process, fd, output, rows=70, columns=99, needle=b"Metadata:")
-            screen_is(lambda text: b"Metadata:" in text and b"trace_id" in text,
-                      "brief identity failure was not visible")
+            screen_is(lambda text: b"Metadata:" in text and b"trace_id" in text
+                      and b"metrics not read for the remote workspace" in text,
+                      "unavailable identity and remote metrics were not visible")
             h.send_and_wait(process, fd, output, b"p", f"{keeper} boot accepted".encode())
             assert [json.loads(body) for path, body in requests if path == boot_path] == [{}]
             assert not (Path(local_base) / ".masc/keepers" / f"{keeper}.json").exists()

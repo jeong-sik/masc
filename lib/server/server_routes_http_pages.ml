@@ -321,7 +321,7 @@ let handle_post_graphql request reqd =
   Http.Request.read_body_async reqd (fun body_str ->
     match get_server_state_result () with
     | Error message ->
-        respond_json_with_cors ~status:`Internal_server_error request reqd
+        respond_json_with_cors ~status:not_initialized_status request reqd
           (server_state_error_json message)
     | Ok state ->
         let response = Graphql_api.handle_request ~config:(Mcp_server.workspace_config state) body_str in

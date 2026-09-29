@@ -272,8 +272,9 @@ env -u MASC_ASSETS_DIR MASC_BASE_PATH="$base" MASC_OTEL_ENABLED=0 \
   "$prefix/masc" --base-path "$base" --host 127.0.0.1 --port "$PORT" >"$log" 2>&1 &
 PID=$!
 
+ready_deadline=$((SECONDS + 30))
 health=""
-for _ in $(seq 1 30); do
+while (( SECONDS < ready_deadline )); do
   if health="$(curl -fsS "http://127.0.0.1:$PORT/health" 2>/dev/null)"; then
     break
   fi
@@ -285,6 +286,23 @@ case "$health" in
   *'"status":"ok"'*) echo "install-smoke: installed server answered /health ok" ;;
   *) echo "install-smoke: /health did not report ok: ${health:-<no response>}" >&2; cat "$log" >&2; exit 1 ;;
 esac
+
+ready_body="$work/readiness.json"
+ready_code="000"
+while (( SECONDS < ready_deadline )); do
+  ready_code="$(curl -sS -o "$ready_body" -w '%{http_code}' \
+    "http://127.0.0.1:$PORT/health/ready" 2>/dev/null || true)"
+  if [[ "$ready_code" == "200" ]] && grep -q '"ready":true' "$ready_body"; then
+    break
+  fi
+  kill -0 "$PID" 2>/dev/null || { echo "install-smoke: server exited before readiness" >&2; cat "$log" >&2; exit 1; }
+  sleep 1
+done
+if [[ "$ready_code" != "200" ]] || ! grep -q '"ready":true' "$ready_body"; then
+  echo "install-smoke: /health/ready did not report ready (HTTP $ready_code): $(cat "$ready_body" 2>/dev/null)" >&2
+  cat "$log" >&2
+  exit 1
+fi
 
 python3 "$REPO_ROOT/scripts/check-installed-dashboard.py" \
   --binary "$prefix/masc" --base-url "http://127.0.0.1:$PORT"

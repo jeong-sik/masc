@@ -490,9 +490,10 @@ let named_refusal what ~status ~body = what ^ ": " ^ refusal ~status_code:status
 (* Dashboard answers kept with their entity tags ([Masc_tui_kept_reads]). The
    refresh cadence reads most dashboard paths again every tick and most answers
    have not changed since the last one: on 2026-09-30 the board (289 KB),
-   keepers/composite (183 KB), goals, briefing and planning changed at most once
-   in five two-second polls, and parsing the bodies took about a fifth of this
-   process's CPU. *)
+   keepers/composite (193 KB), goals, briefing and planning changed at most once
+   in five two-second polls. The JSON lexer was 11.6% of this process's busy
+   samples on its main thread, and parsing one of those bodies takes 0.38 ms to
+   1.86 ms. *)
 let kept_reads : Yojson.Safe.t Masc_tui_kept_reads.t = Masc_tui_kept_reads.create ()
 
 (** Starts a new generation of kept dashboard answers. The refresh loop calls

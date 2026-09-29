@@ -11,7 +11,7 @@ const catalog = Object.entries({
   base: ['dish_gilt', 'dish_silver', 'dish_oak'],
 }).flatMap(([slot, ids]) => ids.map(id => ({
   id, slot, price_status: id === 'crown' ? 'priced' : 'unpriced',
-  ...(id === 'crown' ? { price_milli: 200 } : {}),
+  ...(id === 'crown' ? { price_milli: '200' } : {}),
 })))
 
 const browser = await chromium.launch({ headless: true })
@@ -21,7 +21,7 @@ try {
   page.on('pageerror', error => errors.push(error.message))
   await page.route('**/api/v1/keepers/rondo/items', route => route.fulfill({
     status: 200, contentType: 'application/json',
-    body: JSON.stringify({ status: 'ready', keeper: 'rondo', balance_milli: 800, owned_items: ['crown'], catalog }),
+    body: JSON.stringify({ status: 'ready', keeper: 'rondo', balance_milli: '800', owned_items: ['crown'], catalog }),
   }))
   await page.route('**/api/v1/keepers/rondo/portrait.png?*', route => route.fulfill({ status: 503 }))
   await page.goto(fixtureUrl)

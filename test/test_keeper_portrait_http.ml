@@ -436,7 +436,30 @@ beanie = 200
     check string "refusal did not mutate ledger" initial (ledger_bytes ());
     let before = get ~router (path ~size:"96" keeper) in
     check int "starting portrait" 200 before.status;
-    (match item_account (get ~router (item_path keeper)) with
+    let credited = get ~router (item_path keeper) in
+    let credited_json = Yojson.Safe.from_string credited.body in
+    check string "Item balance is an exact decimal string" "1000"
+      Yojson.Safe.Util.(credited_json |> member "balance_milli" |> to_string);
+    let catalog_json = Yojson.Safe.Util.(credited_json |> member "catalog" |> to_list) in
+    let priced = List.find (fun entry ->
+      Yojson.Safe.Util.(entry |> member "id" |> to_string) = id) catalog_json in
+    check string "Item price is an exact decimal string" "200"
+      Yojson.Safe.Util.(priced |> member "price_milli" |> to_string);
+    let with_balance value = match credited_json with
+      | `Assoc fields -> `Assoc (List.map (fun (key, field) ->
+          key, if String.equal key "balance_milli" then value else field) fields)
+      | _ -> fail "Item account response is not an object" in
+    (match Masc_tui_keeper_items.decode ~keeper_name:keeper
+        (with_balance (`String (string_of_int max_int))) with
+     | Ok (Masc_tui_keeper_items.Ready account) ->
+       check int "Item decoder keeps the full OCaml wallet range" max_int account.balance_milli
+     | Ok _ | Error _ -> fail "Item decoder lost a valid large wallet");
+    List.iter (fun amount ->
+      match Masc_tui_keeper_items.decode ~keeper_name:keeper (with_balance amount) with
+      | Error _ -> ()
+      | Ok _ -> fail "Item decoder accepted a noncanonical wallet")
+      [`Int 1000; `String "01000"; `String "999999999999999999999999999999"];
+    (match item_account credited with
      | Masc_tui_keeper_items.Ready account ->
        check int "Item view reads credited balance" 1000 account.balance_milli;
        check int "Item view reads full catalog" 18 (List.length account.catalog);

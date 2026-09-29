@@ -199,15 +199,18 @@ let test_the_seat () =
           check bool "the saves name the pad layout is found by" true
             (member "saves_name" answer = Some (`String "saves")))))
 
-let test_an_expired_invite_is_not_a_seat () =
+let test_expired_credentials_are_not_seats () =
   with_dir "play-seat-expiry-" (fun base_path ->
     let _ =
       Auth.create_token_expiring_in base_path ~agent_name:"minsu" ~role:Masc_domain.Player ~hours:1
     in
-    let _ = Auth.create_token base_path ~agent_name:"operator" ~role:Masc_domain.Admin in
+    let _ =
+      Auth.create_token_expiring_in base_path ~agent_name:"visiting-operator" ~role:Masc_domain.Admin ~hours:1
+    in
+    let _ = Auth.create_token_without_expiry base_path ~agent_name:"operator" ~role:Masc_domain.Admin in
     let now = Unix.gettimeofday () in
     let seats at = Masc.Play_seat.participants ~base_path ~keepers:[ "Alpha"; "operator" ] ~now:at in
-    check (list string) "live" [ "Alpha"; "minsu"; "operator" ] (seats now);
+    check (list string) "live" [ "Alpha"; "minsu"; "operator"; "visiting-operator" ] (seats now);
     check (list string) "two hours on" [ "Alpha"; "operator" ] (seats (now +. (2. *. 3600.))))
 
 let () =
@@ -215,6 +218,6 @@ let () =
     [ ( "page"
       , [ test_case "the page is public and self-contained" `Quick test_the_page_is_public_and_self_contained
         ; test_case "the seat names the bearer, the holder and the seats" `Quick test_the_seat
-        ; test_case "an expired invite is not a seat" `Quick test_an_expired_invite_is_not_a_seat
+        ; test_case "expired invites and operators are not seats" `Quick test_expired_credentials_are_not_seats
         ] )
     ]

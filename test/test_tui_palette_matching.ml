@@ -115,6 +115,10 @@ let test_the_palette_lists_tasks_and_posts () =
     ["go MSX"]
     (List.filter_map (function label, Palette_msx -> Some label | _ -> None)
        (palette_entries state));
+  Alcotest.(check (list string)) "one DOS spectator destination"
+    ["go DOS"]
+    (List.filter_map (function label, Palette_dos -> Some label | _ -> None)
+       (palette_entries state));
   check_bool "Slack is not a separate destination" false (List.mem "go Slack Lane" labels);
   check_bool "settings is a direct entry" true
     (List.exists
@@ -373,13 +377,23 @@ let test_msx_is_reached_by_its_name () =
    | _ -> Alcotest.fail "the label spelled out must lead its own matches")
 ;;
 
+let test_dos_is_reached_by_its_name () =
+  let state =
+    create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  state.palette_query <- "dos";
+  (match palette_matches state with
+   | ("go DOS", Palette_dos) :: _ -> ()
+   | _ -> Alcotest.fail "typing dos must offer the DOS spectator")
+;;
+
 (* One row per destination. Metrics was five rows that all jumped to it; its
    other names still find it, from the one row. *)
 let test_metrics_is_one_row_that_answers_its_other_names () =
   let state =
     create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
   in
-  Alcotest.(check (list string)) "one row goes to Metrics" [ "go Metrics" ]
+  Alcotest.(check (list string)) "one row goes to Usage" [ "go Usage" ]
     (List.filter_map
        (function label, Palette_goto Metrics -> Some label | _ -> None)
        (palette_entries state));
@@ -387,8 +401,8 @@ let test_metrics_is_one_row_that_answers_its_other_names () =
     (fun word ->
       state.palette_query <- word;
       match palette_matches state with
-      | ("go Metrics", Palette_goto Metrics) :: _ -> ()
-      | _ -> Alcotest.fail (Printf.sprintf "%S does not lead with go Metrics" word))
+      | ("go Usage", Palette_goto Metrics) :: _ -> ()
+      | _ -> Alcotest.fail (Printf.sprintf "%S does not lead with go Usage" word))
     [ "metrics"; "telemetry"; "charts"; "stats"; "tele" ]
 ;;
 
@@ -435,19 +449,24 @@ let test_every_surface_and_config_pane_has_a_row () =
         (Printf.sprintf "a row opens the %s pane" label)
         true
         (List.exists
-           (function _, Palette_config target -> target = pane | _ -> false)
+           (function
+             | entry, Palette_config target ->
+               entry = "go System / " ^ label && target = pane
+             | _ -> false)
            entries);
       (* Typed the way the other destinations are: "go" and the name. *)
-      state.palette_query <- "go " ^ label;
+      state.palette_query <- "go System / " ^ label;
       match palette_matches state with
       | (_, Palette_config target) :: _ when target = pane -> ()
       | _ ->
-        Alcotest.fail (Printf.sprintf "%S does not lead with its pane" ("go " ^ label)))
+        Alcotest.fail
+          (Printf.sprintf "%S does not lead with its pane"
+             ("go System / " ^ label)))
     config_panes;
-  state.palette_query <- "go config";
+  state.palette_query <- "go system";
   match palette_matches state with
-  | ("go Config", Palette_goto Config) :: _ -> ()
-  | _ -> Alcotest.fail "\"go config\" no longer leads with the Config surface"
+  | ("go System", Palette_goto Config) :: _ -> ()
+  | _ -> Alcotest.fail "\"go system\" no longer leads with the System surface"
 ;;
 
 let test_addons_do_not_require_a_keeper () =
@@ -492,6 +511,8 @@ let () =
             test_the_palette_goes_to_both_halves_of_task_review
         ; Alcotest.test_case "msx is reached by its name" `Quick
             test_msx_is_reached_by_its_name
+        ; Alcotest.test_case "dos is reached by its name" `Quick
+            test_dos_is_reached_by_its_name
         ; Alcotest.test_case "Metrics is one row that answers its other names"
             `Quick test_metrics_is_one_row_that_answers_its_other_names
         ; Alcotest.test_case "Add-ons do not require a Keeper" `Quick

@@ -20,10 +20,10 @@ def frame(event, data):
 
 def leave_login_and_arm_quit(process, fd, output):
     # Esc closes only the login modal. Its parent is still the chat composer,
-    # where q is text; return to Overview before arming the harness's exit.
+    # where q is text; return to Dashboard before arming the harness's exit.
     h.send_and_wait(process, fd, output, b"\x1b", "Keepers ▸ alpha ▸ chat".encode())
     h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
-    h.send_and_wait(process, fd, output, b"\x1b", b"MASC Overview")
+    h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
     os.write(fd, b"q")
 
 
@@ -85,7 +85,7 @@ def scenario(binary, client, protocol, *, delayed_save=False, conflict_save=Fals
     fixtures["/api/v1/setup/connections"] = h.RequestHttpResponse(verify)
 
     def interact(process, fd, _slave, output, _base_path):
-        h.send_and_wait(process, fd, output, b"2", b"MASC Keepers")
+        h.tab_until(process, fd, output, b"MASC Keepers")
         h.select_keeper_row(process, fd, output, b"alpha")
         h.send_and_wait(process, fd, output, b"c", "Keepers ▸ alpha ▸ chat".encode())
         h.send_and_wait(process, fd, output, ("/login " + client + "\r").encode(), b"MASC Account Login")
@@ -184,7 +184,7 @@ def retry_before_started(binary):
 
     def interact(process, fd, _slave, output, _base_path):
         try:
-            h.send_and_wait(process, fd, output, b"2", b"MASC Keepers")
+            h.tab_until(process, fd, output, b"MASC Keepers")
             h.select_keeper_row(process, fd, output, b"alpha")
             h.send_and_wait(process, fd, output, b"c", "Keepers ▸ alpha ▸ chat".encode())
             h.send_and_wait(process, fd, output, b"/login codex\r", b"MASC Account Login")

@@ -163,7 +163,7 @@ def run(executable: str, *, cycles: int = 1, metadata_path: Path | None = None,
 
         h.wait_for_output(process, master_fd, output, b"Health: ", start=0, timeout=10.0)
         stage = "prepare roster"
-        h.send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        h.send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
         # This benchmark measures input against a loaded snapshot. Request
         # that snapshot explicitly before measuring, equally for both binaries.
         # A previous run stalled here before its first sample; retain that

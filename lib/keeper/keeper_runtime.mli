@@ -21,6 +21,11 @@ type boot_meta_failure_cause =
   | Config_invalid
   | Sandbox_profile_required
   | Sandbox_image_required
+  | Sandbox_image_unresolved
+      (** The profile starts a container and its [sandbox_image] does not
+          resolve for the Keeper's image store: not in the catalog, nothing
+          promoted on this host, or the catalog unreadable
+          ({!Keeper_sandbox_image_admission}). *)
   | Materialization_failed
 (** Structured cause for the last boot/materialization failure.  Labels are
     rendered only at JSON/log boundaries; fleet recovery policy should pattern
@@ -139,7 +144,10 @@ val load_or_materialize_boot_meta :
   [> float Eio.Time.clock_ty ] Keeper_types_profile.context ->
   string -> (boot_meta_resolution, string) result
 (** Eio-aware variant of [ensure_keeper_meta] used during server boot;
-    surfaces whether the meta was materialised from defaults. *)
+    surfaces whether the meta was materialised from defaults. Unlike
+    [ensure_keeper_meta] it also refuses a Keeper whose effective meta cannot
+    be made ([Config_invalid]) or whose container image does not resolve on
+    this host ([Sandbox_image_unresolved]). *)
 
 (** {1 Supervisor sweep state} *)
 

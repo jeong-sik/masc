@@ -67,9 +67,14 @@ val global : binding list
     printable key before its cross-surface fallback runs; each such binding's
     help text states that boundary. *)
 
+val keepers_jump : binding
+(** The shared Keepers jump. Its [key] is the one {!opens_keepers} matches and
+    the one the Dashboard's first-use steps name. *)
+
 val opens_keepers : message_mode:bool -> string -> bool
 (** Whether [key] is the shared Keepers jump after earlier input owners have
-    declined it. Message mode never treats printable [2] as this jump. *)
+    declined it. Message mode never treats the printable {!keepers_jump} key
+    as this jump. *)
 
 val cancels_two_press :
   input_seen:bool -> key:string option -> second_press:string list -> bool
@@ -101,6 +106,20 @@ val footer_hints : ?detail_open:bool -> Masc_tui_types.surface -> string
     Left out by a surface that does own one, every binding stands too -- the
     behaviour from before this argument existed, and the one
     {!has_detail_scoped_keys} exists to catch. *)
+
+val footer_hints_metrics : telemetry:bool -> string
+(** Usage footer, showing only the keys for the visible Usage or Telemetry
+    reading. *)
+
+type approvals_footer =
+  | Approval_browsing
+  | Approval_writing
+  | Approval_armed
+  | Approval_answering of { has_choices : bool; takes_text : bool }
+
+val footer_hints_approvals : approvals_footer -> string
+(** Project the Approvals queue and question reader's modal footers from the
+    same binding records as the Help sheet. *)
 
 val has_detail_scoped_keys : Masc_tui_types.surface -> bool
 (** Whether this surface's table scopes any binding to one of the two states,
@@ -143,11 +162,11 @@ val footer_hints_prompt_assets : string
 (** The prompts pane while it shows the read-only runtime assets: its keys
     without the ones that edit the registry, and [o] named for the way back. *)
 
-val footer_hints_overview : task_focus:bool -> string
-(** The Overview footer. Separate from {!footer_hints} because Overview owns
-    one runtime fact the static table cannot: whether the task list is
-    selected (task_focus). The projection drops the keys dead in the other
-    mode — the table stays the SSOT, no second key list. *)
+val work_tasks_bindings : binding list
+(** Work's task list while it owns j/k. *)
+
+val footer_hints_work_tasks : string
+(** {!work_tasks_bindings} as a footer. *)
 
 type code_pane =
   | Code_tree  (** the file list has focus *)

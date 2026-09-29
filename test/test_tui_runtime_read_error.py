@@ -18,8 +18,8 @@ def run(executable: str) -> None:
     )
 
     def interact(process, fd, _slave, output, _base):
-        h.tab_until(process, fd, output, b"MASC Config")
-        h.send_and_wait(process, fd, output, b"9", b"MASC Config / Runtime")
+        h.tab_until(process, fd, output, b"MASC System")
+        h.send_and_wait(process, fd, output, b"9", b"MASC System / Runtime")
         h.wait_for_output(process, fd, output, ERROR, start=0, timeout=10)
         h.resize_and_wait(
             process, fd, output, rows=30, columns=160,

@@ -142,12 +142,13 @@ harness_seed_server_config() {
   fi
 }
 
+# Historical function name; callers need an initialized owner before route checks.
 harness_wait_for_health() {
   local port="$1"
   local timeout_sec="${2:-20}"
   local deadline=$(( $(date +%s) + timeout_sec ))
   while [[ "$(date +%s)" -lt "$deadline" ]]; do
-    if curl -fsS --max-time 2 "http://127.0.0.1:${port}/health" >/dev/null 2>&1; then
+    if curl -fsS --max-time 2 "http://127.0.0.1:${port}/health/ready" >/dev/null 2>&1; then
       return 0
     fi
     sleep 1

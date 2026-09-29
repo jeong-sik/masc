@@ -318,8 +318,11 @@ let missing_required_sandbox_profile_error ~keeper_name
    toolchain, and in 2026-09 five Keepers whose instructions ran pnpm or dune
    came up on it and met `command not found` in their first turn. Nothing
    upstream of the turn said the image had been chosen for them. A Keeper
-   that wants the general image writes its tag; that is a choice on record
-   rather than a default nobody made. Remote_ssh runs on a host, not from an
+   that wants the general image names it by its catalog name; that is a
+   choice on record rather than a default nobody made. This asks only that a
+   name is there. Whether the name resolves to a build on this host is asked
+   where the Keeper boots and at keeper up
+   ([Keeper_sandbox_image_admission]). Remote_ssh runs on a host, not from an
    image, so it is not asked. *)
 let missing_required_sandbox_image_error ~keeper_name
     (sandbox_profile : Keeper_types_profile.sandbox_profile)
@@ -346,6 +349,17 @@ let missing_required_sandbox_image_error ~keeper_name
             (Keeper_types_profile.sandbox_profile_to_string sandbox_profile)
             manifest_hint
             Keeper_sandbox_image_version.(base_embedded.name)))
+;;
+
+(* RFC-0405. The keeper TOML names the runtime; a keeper that names none takes
+   the host's. Keeper-up reads this to find the image store a new guest would
+   start from, so it cannot drift from what the overlay below resolves. *)
+let microvm_backend_of_profile_defaults
+    (defaults : Keeper_types_profile.keeper_profile_defaults) =
+  match defaults.microvm_backend with
+  | Some _ as declared -> declared
+  | None -> Keeper_microvm_backend.default_for_host ()
+
 ;;
 
 let effective_meta_of_profile_defaults
@@ -396,8 +410,7 @@ let effective_meta_of_profile_defaults
      backend, or use a profile this host can serve — rather than handing the
      keeper an isolation weaker than the one it asked for. *)
   | Ok Micro_vm
-    when Option.is_none defaults.microvm_backend
-         && Option.is_none (Keeper_microvm_backend.default_for_host ()) ->
+    when Option.is_none (microvm_backend_of_profile_defaults defaults) ->
       Error
         (Printf.sprintf
            "keeper %s rejected: microvm_backend_unresolved: sandbox_profile \
@@ -451,10 +464,7 @@ let effective_meta_of_profile_defaults
              for the answer to live. *)
           microvm_backend =
             (match sandbox_profile with
-             | Micro_vm ->
-               (match defaults.microvm_backend with
-                | Some _ as declared -> declared
-                | None -> Keeper_microvm_backend.default_for_host ())
+             | Micro_vm -> microvm_backend_of_profile_defaults defaults
              | Docker | Remote_ssh -> None);
           (* The guest's size is TOML-owned for the same reason, and only a
              Micro_vm keeper has a guest to size. [None] is the workspace

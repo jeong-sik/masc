@@ -36,16 +36,33 @@ export async function importAntigravityAccount(integration_id: string, options: 
 }
 // A runtime MASC published without a response and tool measurement because
 // its provider declined the check for the account's usage (a spent quota or
-// a rate limit). Empty when every selected runtime was verified.
+// a rate limit).
 export type Unverified = { runtime_id: string; code: string }
-function readUnverified(response: Record<string, unknown>, runtimeIds: unknown[]): Unverified[] | null {
-  if (response.readiness === 'verified') return response.unverified === undefined ? [] : null
-  if (response.readiness !== 'usage_limited' || !Array.isArray(response.unverified) || response.unverified.length === 0) return null
-  const rows = response.unverified.map(row => isRecord(row) && typeof row.runtime_id === 'string' && runtimeIds.includes(row.runtime_id)
+// What a save left unconfirmed. Both lists empty means every selected runtime
+// answered a real check in this save. [notRechecked] names selected runtimes
+// the save did not call again; it says nothing about whether they ever passed.
+export type SaveOutcome = { unverified: Unverified[]; notRechecked: string[] }
+function readUnverifiedRows(rows: unknown, runtimeIds: unknown[]): Unverified[] | null {
+  if (!Array.isArray(rows)) return null
+  const parsed = rows.map(row => isRecord(row) && typeof row.runtime_id === 'string' && runtimeIds.includes(row.runtime_id)
     && typeof row.code === 'string' && row.code ? { runtime_id: row.runtime_id, code: row.code } : null)
-  return rows.every((row): row is Unverified => row !== null) ? rows : null
+  return parsed.every((row): row is Unverified => row !== null) ? parsed : null
 }
-export async function saveSetupSelections(revision: string, choices: Selection[], options: { signal?: AbortSignal } = {}): Promise<Unverified[]> {
+function readSaveOutcome(response: Record<string, unknown>, runtimeIds: unknown[]): SaveOutcome | null {
+  if (response.readiness === 'verified') {
+    return response.unverified === undefined && response.not_rechecked === undefined ? { unverified: [], notRechecked: [] } : null
+  }
+  const unverified = readUnverifiedRows(response.unverified, runtimeIds)
+  if (unverified === null) return null
+  if (response.readiness === 'usage_limited') {
+    return unverified.length > 0 && response.not_rechecked === undefined ? { unverified, notRechecked: [] } : null
+  }
+  if (response.readiness !== 'partly_checked') return null
+  const kept = response.not_rechecked
+  if (!Array.isArray(kept) || kept.length === 0 || !kept.every((id): id is string => typeof id === 'string' && runtimeIds.includes(id))) return null
+  return { unverified, notRechecked: kept }
+}
+export async function saveSetupSelections(revision: string, choices: Selection[], options: { signal?: AbortSignal } = {}): Promise<SaveOutcome> {
   const connections: { source: Source; models: { id: string; context: number; streaming: boolean }[] }[] = []
   const selection = choices.map(choice => {
     if (choice.kind === 'existing') return { runtime_id: choice.id }
@@ -60,9 +77,9 @@ export async function saveSetupSelections(revision: string, choices: Selection[]
     || new Set(response.runtime_ids).size !== response.runtime_ids.length
     || response.runtime_ids.some(id => typeof id !== 'string' || !id)
     || response.runtime_id !== response.runtime_ids[0]) throw new Error('Unconfirmed configuration save')
-  const unverified = readUnverified(response, response.runtime_ids)
-  if (unverified === null) throw new Error('Unconfirmed configuration save')
-  return unverified
+  const outcome = readSaveOutcome(response, response.runtime_ids)
+  if (outcome === null) throw new Error('Unconfirmed configuration save')
+  return outcome
 }
 
 export async function prepareSetupModel(source: Source, model: Model, load: boolean, options: { signal?: AbortSignal } = {}): Promise<Model> {

@@ -41,11 +41,24 @@ def operator_menu_from_dashboard(executable: str) -> None:
                     needle=menu, controls=(keyboard.FULL_REDRAW,),
                     final_cursor=b"\x1b[?25l",
                 )
-                visible = keyboard.screen_text(frame)
-                if menu not in visible:
-                    raise AssertionError(f"{columns}x16 hid the operator menu: {visible!r}")
+                rows = keyboard.screen_rows(frame)
+                # The footer repeats this label. Require its own body row,
+                # above the footer, so a surviving hint cannot satisfy this.
+                body_rows = [
+                    row for row, text in rows.items()
+                    if text.strip() == menu and row < max(rows)
+                ]
+                if len(body_rows) != 1:
+                    raise AssertionError(
+                        f"{columns}x16 hid the operator menu body row: {rows!r}"
+                    )
                 print(f"OPERATOR_MENU_{int(pending)}_{columns}X16_B64="
                       f"{base64.b64encode(frame).decode()}")
+                keyboard.press_label_on_screen(
+                    process, fd, output, menu,
+                    row=body_rows[0], needle=b"MASC Approvals",
+                )
+                keyboard.send_and_wait(process, fd, output, b"1", b"MASC Dashboard")
             keyboard.resize_and_wait(
                 process, fd, output, rows=40, columns=80, needle=menu,
                 controls=(keyboard.FULL_REDRAW,), final_cursor=b"\x1b[?25l",
@@ -57,13 +70,6 @@ def operator_menu_from_dashboard(executable: str) -> None:
                 )
                 keyboard.send_and_wait(process, fd, output, b"a", b"ship the cold-start")
                 keyboard.send_and_wait(process, fd, output, b"\x1b", b"MASC Approvals")
-            keyboard.send_and_wait(process, fd, output, b"1", b"MASC Dashboard")
-            keyboard.drain_until_quiet(process, fd, output)
-            rows = keyboard.screen_rows(bytes(output))
-            keyboard.press_label_on_screen(
-                process, fd, output, menu,
-                row=keyboard.screen_row_of(rows, menu), needle=b"MASC Approvals",
-            )
             os.write(fd, b"q")
 
         keyboard.run_terminal_scenario(

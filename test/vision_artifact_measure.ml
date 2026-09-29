@@ -9,16 +9,22 @@ let read path = In_channel.with_open_bin path In_channel.input_all
 let write path body = Out_channel.with_open_bin path (fun out -> output_string out body)
 let hash bytes = Digestif.SHA256.(digest_string bytes |> to_hex)
 let now () = Unix.gettimeofday ()
-type sample = { operation : string; start_epoch : float; end_epoch : float; elapsed_ms : float }
-let sample operation samples f =
+type sample = {
+  operation : string; fixture : string; outcome : string;
+  start_epoch : float; end_epoch : float; elapsed_ms : float;
+}
+let sample ~fixture ~verify operation samples f =
   let start_epoch = now () in
   let result = f () in
   let end_epoch = now () in
-  samples := { operation; start_epoch; end_epoch;
+  verify result;
+  samples := { operation; fixture; outcome = "verified"; start_epoch; end_epoch;
                elapsed_ms = (end_epoch -. start_epoch) *. 1000. } :: !samples;
   result
 let sample_json s =
   `Assoc ["operation", `String s.operation;
+          "fixture", `String s.fixture;
+          "outcome", `String s.outcome;
           "start_utc_epoch", `Float s.start_epoch;
           "end_utc_epoch", `Float s.end_epoch;
           "elapsed_ms", `Float s.elapsed_ms]
@@ -102,38 +108,51 @@ let run ~root ~fixtures ~count ~window_seconds =
       let args = `Assoc [
         "artifact", `String handle; "query", `String "measurement";
         "media_type", `String "invalid/measurement"] in
-      let result = V.handle_with_outcome ~sw ~clock:env#clock ~net:env#net
-        ~meta ~args () in
+      V.handle_with_outcome ~sw ~clock:env#clock ~net:env#net ~meta ~args () in
+    let verify_load (result : Keeper_tool_execution.t) =
       let output = Yojson.Safe.from_string result.raw_output in
       if Yojson.Safe.Util.member "error" output <>
          `String "invalid_media_type" then
         fail ("load did not reach media validation: " ^ result.raw_output) in
     let window_start = now () in
     write (Filename.concat root "window-start") (string_of_float window_start);
-    let first = read (Filename.concat fixtures "0000.png") in
-    let first_handle = sample "store_kept_new" kept_new (fun () ->
-      get (V.store_kept ~keeper_name:keeper first)) in
-    let first_name = check_file kept first first_handle in
-    ignore (sample "store_kept_repeat" kept_repeat (fun () ->
-      get (V.store_kept ~keeper_name:keeper first)));
-    sample "load_kept" load_kept (fun () -> load first_name);
+    let first_fixture = "0000.png" in
+    let first = read (Filename.concat fixtures first_fixture) in
+    let first_name = ref "" in
+    ignore (sample ~fixture:first_fixture
+      ~verify:(fun handle -> first_name := check_file kept first handle)
+      "store_kept_new" kept_new (fun () ->
+        get (V.store_kept ~keeper_name:keeper first)));
+    ignore (sample ~fixture:first_fixture
+      ~verify:(fun handle -> ignore (check_file kept first handle))
+      "store_kept_repeat" kept_repeat (fun () ->
+        get (V.store_kept ~keeper_name:keeper first)));
+    ignore (sample ~fixture:first_fixture ~verify:verify_load
+      "load_kept" load_kept (fun () -> load !first_name));
     for i = 1 to count do
       let due = window_start +. (float i *. window_seconds /. float count) in
       let delay = due -. now () in
       if delay > 0. then Eio.Time.sleep env#clock delay;
-      let bytes = read (Filename.concat fixtures (Printf.sprintf "%04d.png" (499 + i))) in
-      let handle = sample "store_frame" frame_samples (fun () ->
-        get (V.store_frame ~keeper_name:keeper bytes)) in
-      let name = check_file frames bytes handle in
-      sample "load_frame" load_frame (fun () ->
-        load name);
-      let kept_handle = sample "store_kept_new" kept_new (fun () ->
-        get (V.store_kept ~keeper_name:keeper bytes)) in
-      ignore (check_file kept bytes kept_handle);
-      ignore (sample "store_kept_repeat" kept_repeat (fun () ->
-        get (V.store_kept ~keeper_name:keeper bytes)));
-      sample "load_kept" load_kept (fun () ->
-        load name)
+      let fixture = Printf.sprintf "%04d.png" (499 + i) in
+      let bytes = read (Filename.concat fixtures fixture) in
+      let name = ref "" in
+      ignore (sample ~fixture
+        ~verify:(fun handle -> name := check_file frames bytes handle)
+        "store_frame" frame_samples (fun () ->
+          get (V.store_frame ~keeper_name:keeper bytes)));
+      ignore (sample ~fixture ~verify:verify_load
+        "load_frame" load_frame (fun () -> load !name));
+      let kept_name = ref "" in
+      ignore (sample ~fixture
+        ~verify:(fun handle -> kept_name := check_file kept bytes handle)
+        "store_kept_new" kept_new (fun () ->
+          get (V.store_kept ~keeper_name:keeper bytes)));
+      ignore (sample ~fixture
+        ~verify:(fun handle -> ignore (check_file kept bytes handle))
+        "store_kept_repeat" kept_repeat (fun () ->
+          get (V.store_kept ~keeper_name:keeper bytes)));
+      ignore (sample ~fixture ~verify:verify_load
+        "load_kept" load_kept (fun () -> load !kept_name))
     done;
     let files = Array.to_list (Sys.readdir frames)
       |> List.filter (fun n -> String.length n = 64) in

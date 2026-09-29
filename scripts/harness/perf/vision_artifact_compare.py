@@ -190,9 +190,14 @@ def run_window(
             if (sample.get("operation") not in {"store_frame", "store_kept_new",
                                                  "store_kept_repeat", "load_kept",
                                                  "load_frame"}
+                or not isinstance(sample.get("fixture"), str)
+                or not re.fullmatch(r"[0-9]{4}\.png", sample["fixture"])
+                or sample.get("outcome") != "verified"
                 or not isinstance(sample.get("start_utc_epoch"), (int, float))
                 or not isinstance(sample.get("end_utc_epoch"), (int, float))
-                or sample["start_utc_epoch"] > sample["end_utc_epoch"]):
+                or not isinstance(sample.get("elapsed_ms"), (int, float))
+                or sample["start_utc_epoch"] > sample["end_utc_epoch"]
+                or sample["elapsed_ms"] < 0):
                 raise RuntimeError("invalid per-operation sample")
         first_start = min(row["start_utc_epoch"] for row in samples)
         last_end = max(row["end_utc_epoch"] for row in samples)

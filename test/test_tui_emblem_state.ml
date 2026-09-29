@@ -1,43 +1,12 @@
-(* When the startup splash stands aside, which overlays own the keys, and how
-   far the moving marks have gone -- read off the TUI state, the way the main
-   loop and the renderer read them. *)
+(* Key ownership of overlays and the shared pace of moving marks. *)
 
 open Alcotest
 module Types = Masc_tui_types
 
 let fresh () =
   let state = Types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
-  state.Types.startup_emblem <- true;
   state.Types.connection_status <- Types.Connecting;
   state
-
-let test_the_splash_stands_only_while_the_overview_has_nothing_to_say () =
-  let state = fresh () in
-  check bool "connecting, nothing read: the imp stands" true
-    (Types.startup_emblem_visible state);
-  state.Types.connection_status <- Types.Booting;
-  check bool "booting before the backlog is read: the imp stands" true
-    (Types.startup_emblem_visible state);
-  state.Types.task_reading <- Masc_tui_overview_tasks.Rows_read [];
-  check bool "booting with the backlog read: the Overview draws it" false
-    (Types.startup_emblem_visible state);
-  state.Types.task_reading <- Masc_tui_overview_tasks.Rows_unavailable "unreadable";
-  check bool "booting with the backlog unreadable: the Overview says so" false
-    (Types.startup_emblem_visible state);
-  let failed = fresh () in
-  failed.Types.connection_status <- Types.Disconnected;
-  check bool "a failed refresh: the Overview's press-r line" false
-    (Types.startup_emblem_visible failed);
-  let answered = fresh () in
-  answered.Types.overview_error <- Some "overview load failed: 503";
-  check bool "an answered read, even an error" false
-    (Types.startup_emblem_visible answered);
-  let elsewhere = fresh () in
-  elsewhere.Types.view <- Types.Keepers Types.Keeper_list;
-  check bool "another surface" false (Types.startup_emblem_visible elsewhere);
-  let ended = fresh () in
-  ended.Types.startup_emblem <- false;
-  check bool "ended once, gone for good" false (Types.startup_emblem_visible ended)
 
 let open_each state =
   [ ("help", fun () -> state.Types.help_open <- true)
@@ -82,11 +51,7 @@ let test_moving_marks_share_one_pace () =
 
 let () =
   run "tui_emblem_state"
-    [ ( "splash"
-      , [ test_case "it stands only while the Overview has nothing to say" `Quick
-            test_the_splash_stands_only_while_the_overview_has_nothing_to_say
-        ] )
-    ; ( "overlays"
+    [ ( "overlays"
       , [ test_case "each key-owning overlay owns the keys" `Quick
             test_each_key_owning_overlay_owns_the_keys
         ; test_case "the palette is not one of them" `Quick

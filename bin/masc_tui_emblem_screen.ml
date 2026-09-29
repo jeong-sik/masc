@@ -44,29 +44,12 @@ let centred ~cols line =
 (* The blank row between the candle and its caption. *)
 let caption_gap_rows = 1
 
-type screen =
-  | Startup
-  | About
-
-(* The splash holds the Overview's place for one read, so its candle stays
-   small on a tall terminal too. Twelve rows of mosaic is a 24 px candle,
-   two pixels to a row: the smallest edge at which its eyes and mouth still
-   show. At 16 and 20 px they blur into the wax. *)
-let startup_picture_rows = 12
-
-let picture_rows_for screen ~space =
-  match screen with
-  | Startup -> Int.min startup_picture_rows space
-  | About -> space
-
-let rows ~screen ~cols ~rows ~caption ~elapsed ~display ~project ~origin:(origin_row, origin_col) =
+let rows ~cols ~rows ~caption ~elapsed ~display ~project ~origin:(origin_row, origin_col) =
   let caption_rows = List.length caption in
   let picture_rows =
-    picture_rows_for screen
-      ~space:
-        (match caption with
-         | [] -> rows
-         | _ :: _ -> rows - caption_rows - caption_gap_rows)
+    match caption with
+    | [] -> rows
+    | _ :: _ -> rows - caption_rows - caption_gap_rows
   in
   let picture =
     match View.fit display ~max_cols:cols ~max_rows:picture_rows with
@@ -127,9 +110,9 @@ let last_drawn = ref Absent
 let begin_frame () = last_drawn := Absent
 let drawn () = !last_drawn
 
-let body ~screen ~cols ~rows:height ~caption ~elapsed ~origin =
+let body ~cols ~rows:height ~caption ~elapsed ~origin =
   let laid_out =
-    rows ~screen ~cols ~rows:height ~caption ~elapsed ~display:(View.current_display ())
+    rows ~cols ~rows:height ~caption ~elapsed ~display:(View.current_display ())
       ~project:Masc_tui_terminal_palette.best_color ~origin
   in
   last_drawn := laid_out.drawn;

@@ -1,10 +1,11 @@
-"""MASC's candle: the startup splash while the first overview read is out, and
-/about over the chat, drawn by the real TUI in a pseudo-terminal -- as a
-half-block mosaic, as real pixels where the terminal answers the Kitty
-graphics query, and not at all under NO_COLOR."""
+"""The working Overview from the first frame; the candle belongs to /about.
+Exercise real PTYs with mosaic, Kitty graphics and NO_COLOR terminals.
+"""
 from __future__ import annotations
 
 import base64
+import hashlib
+import json
 import zlib
 import os
 import re
@@ -33,28 +34,17 @@ SOURCE_MODULES = (
 BRIEFING = "/api/v1/dashboard/briefing"
 # U+2580 and U+2584, the half blocks the mosaic is drawn in.
 HALF_BLOCK = re.compile(rb"\xe2\x96[\x80\x84]")
-SPLASH_CAPTION = "MASC · keepers on watch".encode()
+STARTUP_CAPTION = "MASC · keepers on watch".encode()
 ABOUT_CAPTION = b"Multi-Agent Shared Context"
 CHAT_TITLE = "Keepers ▸ alpha ▸ chat".encode()
 # Colour escapes the renderer writes for a foreground: 38;5 on a 256-colour
 # terminal, 38;2 on a truecolour one.
 FOREGROUND_ESCAPE = b"\x1b[38;"
-# The Overview's own line for a briefing not read yet, which the splash keeps.
 UNREAD_BRIEFING = b"Overview briefing not read yet"
-# The terminal width the centring checks measure against, passed to the
-# harness so it is the terminal the TUI drew in.
-SPLASH_COLUMNS = 100
-# How far the candle's drawn cells may sit off centre. The picture is a round
-# backdrop centred in a square box, so its drawn extent is symmetric up to the
-# rounding of an antialiased edge; a box drawn from the left edge of the body
-# would miss by about half the body's width, several times this.
-CENTRE_TOLERANCE_CELLS = 6
+SCENARIO_COLUMNS = 100
 # The fewest rows a drawn candle has: the smallest mosaic edge the renderer
 # takes is 16 pixels, two to a row.
 MIN_CANDLE_ROWS = 8
-# The most rows the splash candle takes, however tall the terminal
-# (Masc_tui_emblem_screen.startup_picture_rows).
-STARTUP_CANDLE_ROWS = 12
 # Text typed while /about is open; it must reach neither the composer nor a
 # Keeper.
 SWALLOWED_TEXT = b"not-for-alpha-39658"
@@ -140,56 +130,70 @@ def mascot_transfers(wire: bytes) -> list[tuple[dict[bytes, bytes], bytes]]:
     return transfers
 
 
-def assert_centred(rows: list[bytes], columns: int) -> None:
-    text = [row.decode("utf-8", "replace") for row in rows]
-    left = min(len(row) - len(row.lstrip(" ")) for row in text)
-    right = min(columns - len(row.rstrip(" ")) for row in text)
-    assert abs(left - right) <= CENTRE_TOLERANCE_CELLS, \
-        f"candle not centred: left {left}, right {right}"
+def assert_working_overview(output: bytearray) -> bytes:
+    screen = h.screen_text(bytes(output))
+    for label in (b"MASC Overview", b"Goals", b"Attention", b"Tasks"):
+        assert label in screen, f"working Overview omitted {label!r}: {screen!r}"
+    assert STARTUP_CAPTION not in screen, "startup branding replaced the work"
+    assert not HALF_BLOCK.search(bytes(output)), "startup drew a mosaic candle"
+    assert not MASCOT_TRANSFER_HEAD.search(bytes(output)), "startup placed a mascot image"
+    return screen
 
 
-def startup_splash(binary: str) -> None:
+def frame_evidence(binary: str, phase: str, output: bytearray) -> None:
+    print(json.dumps({
+        "phase": phase,
+        "binary_sha256": hashlib.sha256(Path(binary).read_bytes()).hexdigest(),
+        "screen": h.screen_text(bytes(output)).decode("utf-8", "replace"),
+    }, ensure_ascii=False), flush=True)
+
+
+def startup_overview(binary: str, *, no_color: bool = False,
+                     graphics: bool = False, narrow: bool = False,
+                     fail_first: bool = False) -> None:
     fixtures = h.keeper_runtime_http_fixtures()
     briefing = fixtures[BRIEFING]
-    gate = h.GatedHttpResponse(briefing, subsequent_response=briefing, hold_seconds=20.0)
+    response = (503, {"error": "briefing temporarily unavailable"}) if fail_first else briefing
+    gate = h.GatedHttpResponse(response, subsequent_response=briefing, hold_seconds=20.0)
     fixtures[BRIEFING] = gate
+    mode = "no-color" if no_color else "kitty" if graphics else "narrow" if narrow else "error" if fail_first else "mosaic"
 
     def interact(process, fd, _slave, output, _base):
         try:
             assert h.wait_for_fixture_event(process, fd, output, gate.requested, timeout=5.0), \
                 "the first overview read never went out"
-            wait_for_whole_frame(process, fd, output, SPLASH_CAPTION, start=0, timeout=5.0)
-            screen = h.screen_text(bytes(output))
-            rows = candle_rows(output)
-            assert len(rows) >= MIN_CANDLE_ROWS, \
-                "no candle on the Overview while its first read is out: " + repr(screen)
-            assert len(rows) <= STARTUP_CANDLE_ROWS, \
-                f"the splash candle is {len(rows)} rows, over its {STARTUP_CANDLE_ROWS}"
-            assert b"connecting" in screen, "the splash does not say it is connecting"
-            assert UNREAD_BRIEFING in screen, \
-                "the splash hid that the briefing is not read yet: " + repr(screen)
-            assert_centred(rows, SPLASH_COLUMNS)
-            # It flickers: a later frame redraws some of its rows.
-            start = len(output)
-            h.wait_for_output(process, fd, output, HALF_BLOCK, start=start, timeout=STEP_WAIT_SECONDS * 3)
+            wait_for_whole_frame(process, fd, output, UNREAD_BRIEFING, start=0, timeout=5.0)
+            if narrow:
+                h.resize_and_wait(process, fd, output, rows=24, columns=80,
+                                  needle=UNREAD_BRIEFING, controls=(h.FULL_REDRAW,))
+            screen = assert_working_overview(output)
+            assert b"Connecting to workspace" in screen, repr(screen)
+            assert b"press 'r'" not in screen, "pending read already asks for a retry"
+            assert b"Attention (0)" not in screen, "unread attention was counted as empty"
+            frame_evidence(binary, mode + ("-resized-80x24-loading" if narrow else "-loading"), output)
             start = len(output)
             gate.release.set()
-            h.wait_for_output(process, fd, output, b"Health:", start=start, timeout=5.0)
-            assert h.drain_until_quiet(process, fd, output), "the screen kept moving after the Overview loaded"
-            assert not candle_rows(output), "the candle stayed after the Overview loaded"
-            assert SPLASH_CAPTION not in h.screen_text(bytes(output)), \
-                "the splash caption stayed after the Overview loaded"
-            # Quit is armed by one q and confirmed by the harness's second.
+            if fail_first:
+                wait_for_whole_frame(process, fd, output, b"503", start=start, timeout=5.0)
+                assert_working_overview(output)
+                frame_evidence(binary, mode + "-failed", output)
+                start = len(output)
+                os.write(fd, b"r")
+            wait_for_whole_frame(process, fd, output, b"Health:", start=start, timeout=5.0)
+            assert_working_overview(output)
+            frame_evidence(binary, mode + "-loaded", output)
             os.write(fd, b"q")
         finally:
             gate.release.set()
 
-    h.run_terminal_scenario(binary, description="startup splash stands until the overview answers",
+    h.run_terminal_scenario(binary, description="startup keeps the working Overview: " + mode,
                             interact=interact, http_fixtures=fixtures,
-                            terminal_cols=SPLASH_COLUMNS)
+                            terminal_cols=80 if narrow else SCENARIO_COLUMNS,
+                            extra_env={"NO_COLOR": "1"} if no_color else None,
+                            preload_input=KITTY_TERMINAL_REPLIES if graphics else None)
 
 
-def splash_key_passes_through(binary: str) -> None:
+def startup_keys_work(binary: str) -> None:
     fixtures = h.keeper_runtime_http_fixtures()
     briefing = fixtures[BRIEFING]
     gate = h.GatedHttpResponse(briefing, subsequent_response=briefing, hold_seconds=20.0)
@@ -197,19 +201,18 @@ def splash_key_passes_through(binary: str) -> None:
 
     def interact(process, fd, _slave, output, _base):
         try:
-            h.wait_for_output(process, fd, output, SPLASH_CAPTION, start=0, timeout=5.0)
-            # The key that ends the splash still does its own job: 2 opens the
-            # Keepers surface, it is not spent on dismissing the candle.
+            wait_for_whole_frame(process, fd, output, UNREAD_BRIEFING, start=0, timeout=5.0)
+            assert_working_overview(output)
             h.send_and_wait(process, fd, output, b"2", b"MASC Keepers")
             h.send_and_wait(process, fd, output, b"\x1b", b"MASC Overview")
-            assert h.drain_until_quiet(process, fd, output), "the screen kept moving after a key ended the splash"
-            assert not candle_rows(output), "the splash came back after a key ended it"
+            assert h.drain_until_quiet(process, fd, output), "Overview kept animating"
+            assert_working_overview(output)
             gate.release.set()
             os.write(fd, b"q")
         finally:
             gate.release.set()
 
-    h.run_terminal_scenario(binary, description="a key ends the startup splash and still does its job",
+    h.run_terminal_scenario(binary, description="Overview keys work during the first read",
                             interact=interact, http_fixtures=fixtures)
 
 
@@ -292,7 +295,7 @@ def about_screen_with_graphics(binary: str) -> None:
         assert caption_row == row + rows_tall + 1, \
             f"the picture spans rows {row}..{row + rows_tall - 1} but the caption is at {caption_row}"
         left = column - 1
-        right = SPLASH_COLUMNS - left - cells_wide
+        right = SCENARIO_COLUMNS - left - cells_wide
         assert abs(left - right) <= 1, f"picture not centred: left {left}, right {right}"
         assert not candle_rows(output), "real pixels were drawn as a mosaic as well"
         # Esc closes /about and takes the picture down with it.
@@ -306,7 +309,7 @@ def about_screen_with_graphics(binary: str) -> None:
 
     h.run_terminal_scenario(binary, description="/about places the candle as real pixels on a Kitty terminal",
                             interact=interact, http_fixtures=fixtures,
-                            terminal_cols=SPLASH_COLUMNS,
+                            terminal_cols=SCENARIO_COLUMNS,
                             preload_input=KITTY_TERMINAL_REPLIES)
 
 
@@ -349,10 +352,14 @@ def about_owns_the_keys(binary: str) -> None:
 
 if __name__ == "__main__":
     binary = str(Path(sys.argv[1]).resolve())
-    startup_splash(binary)
-    splash_key_passes_through(binary)
+    startup_overview(binary)
+    startup_overview(binary, no_color=True)
+    startup_overview(binary, graphics=True)
+    startup_overview(binary, narrow=True)
+    startup_overview(binary, fail_first=True)
+    startup_keys_work(binary)
     about_screen(binary, no_color=False)
     about_screen(binary, no_color=True)
     about_screen_with_graphics(binary)
     about_owns_the_keys(binary)
-    print("tui emblem screens: PASS (6 scenarios)")
+    print("tui emblem screens: PASS (10 scenarios)")

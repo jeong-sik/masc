@@ -553,9 +553,8 @@ let overview_providers_section (state : state) ~cols =
     ~now:(Unix.gettimeofday ())
     ~width:(framed_inner_width cols)
 
-(* The Overview's title row: the name, the workspace, the clock and the
-   connection badge. The startup splash draws the same row, so the two
-   cannot disagree about what the screen is or whether it is connected. *)
+(* The Overview keeps the same compact title and working layout from the
+   first frame through loading, success and failure. *)
 let overview_header (state : state) =
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
@@ -682,8 +681,16 @@ let render_overview (state : state) =
     | _, Some err ->
         data_unreliable_row ~cols err
     | None, None ->
-        Printf.sprintf "  %s(no overview data — press 'r' to refresh)%s"
-          Ansi.dim Ansi.reset
+        let status =
+          match state.connection_status, state.http_refresh_started_ns with
+          | Connecting, _ -> "Connecting to workspace…"
+          | Booting, _ -> "Workspace server is starting…"
+          | (Connected | Degraded | Reconnecting | Disconnected), Some _ ->
+              "Loading Overview…"
+          | (Connected | Degraded | Reconnecting | Disconnected), None ->
+              "(no overview data — press 'r' to refresh)"
+        in
+        "  " ^ Ansi.dim ^ status ^ Ansi.reset
     | Some o, None ->
         let health_color = workspace_health_color o.ov_workspace_health in
         let health_label = workspace_health_label o.ov_workspace_health in
@@ -16386,36 +16393,6 @@ let render_config (state : state) =
             | None -> ()
           done)
 
-(* The startup splash: the Overview's own frame and header -- title,
-   workspace, clock, connection badge -- with the candle where its sections
-   will be once the first overview read answers. Keys are the Overview's; the
-   first one ends the splash and still does its job. *)
-let render_overview_startup (state : state) =
-  let terminal_rows, cols = get_terminal_size () in
-  surface_chrome ~overflow:Fits state ~terminal_rows ~cols ~surface_key:"overview"
-    ~title:(overview_header state)
-    ~hints:(Masc_tui_keys.footer_hints_overview ~task_focus:false)
-    ~body:(fun ~budget c ->
-      Masc_tui_emblem_screen.body ~screen:Masc_tui_emblem_screen.Startup
-        ~cols:(framed_inner_width cols) ~rows:budget
-        ~origin:(c.next_origin ())
-        ~caption:
-          ([ Masc_tui_theme.tone Masc_tui_theme.Accent
-             ^ "MASC \xc2\xb7 keepers on watch" ^ Ansi.reset
-           ]
-           (* The Overview's own word for this state -- the briefing is not
-              read yet -- stays on screen under the candle. *)
-           @ List.filter_map
-               (fun line ->
-                 match String.trim line with "" -> None | text -> Some text)
-               (overview_intro_lines state)
-           @ [ Ansi.dim
-               ^ Masc_tui_types.connection_status_label state.connection_status
-               ^ Ansi.reset
-             ])
-        ~elapsed:(Masc_tui_types.motion_elapsed_seconds state.emblem_frame)
-      |> List.iter c.push)
-
 (* /about: the candle over the surface, with what the TUI is running under
    -- its colour scheme and how many Keepers the workspace holds. *)
 let render_about (state : state) =
@@ -16433,7 +16410,7 @@ let render_about (state : state) =
   surface_chrome ~overflow:Fits ~frame:Chrome_overlay state ~terminal_rows ~cols
     ~surface_key:"about" ~title:(screen_title " MASC") ~hints:"Esc:close"
     ~body:(fun ~budget c ->
-      Masc_tui_emblem_screen.body ~screen:Masc_tui_emblem_screen.About
+      Masc_tui_emblem_screen.body
         ~cols:(framed_inner_width cols) ~rows:budget
         ~origin:(c.next_origin ())
         ~caption:
@@ -16460,10 +16437,7 @@ let render_surface (state : state) =
            with
            | Some task -> render_task_detail state task
            | None -> render_overview state )
-       | None ->
-           if Masc_tui_types.startup_emblem_visible state then
-             render_overview_startup state
-           else render_overview state)
+       | None -> render_overview state)
   | Keepers Keeper_list ->
       if state.repository_changes_open then render_repository_changes state
       else render_keeper_list state

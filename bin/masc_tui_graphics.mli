@@ -35,7 +35,7 @@ val fit_rows : cell_pixels:(int * int) option -> image_pixels:(int * int) option
 type image =
   | Graphics_query  (** {!query}'s one-pixel probe, received but never drawn *)
   | Msx_screen  (** the MSX spectator screen *)
-  | Mascot  (** MASC's candle on the startup splash and [/about] *)
+  | Mascot  (** MASC's candle on [/about] *)
   | Keeper_portrait  (** a Keeper's own portrait at the head of its detail *)
 [@@deriving enumerate]
 

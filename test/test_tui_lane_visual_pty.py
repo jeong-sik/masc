@@ -230,7 +230,8 @@ def run_declaration_without_worker(executable: str) -> None:
         broken_at = shown.find(b"broken.toml \xc2\xb7 configuration issue")
         if good_at < 0 or broken_at < 0 or good_at >= broken_at:
             raise AssertionError("display order differs from configuration navigation")
-        terminal.send_and_wait(process, master, output, b"j", b"> good")
+        if b"> good" not in shown:
+            raise AssertionError("refresh did not focus the first available installation")
         terminal.send_and_wait(process, master, output, b"j", b"> broken.toml")
         detail = terminal.send_and_wait(process, master, output, b"\r", b"Installation details \xc2\xb7 broken.toml")
         if b"E:edit TOML" not in terminal.screen_text(detail):

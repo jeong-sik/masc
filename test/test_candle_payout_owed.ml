@@ -110,6 +110,10 @@ let ledger_path config = Candle_ledger.path ~base_path:(base_path_of config)
 let enable_candle config = write_file (candle_toml config) ""
 let clock = 1_790_000_000.
 
+(* How far the real clock may sit outside the two readings taken around a call. It
+   covers a wall-clock step between the readings, not the call's own duration. *)
+let real_clock_slack_s = 2.
+
 let ledger_events config =
   match Candle_ledger.read ~base_path:(base_path_of config) with
   | Ok view -> Candle_ledger.events view
@@ -259,6 +263,69 @@ let test_a_ledger_that_fails_after_recovery_refuses_the_step () =
   is_refused "ledger path is a directory" (confirm config)
 ;;
 
+(* The ledger reads and cannot be appended to: its file is read-only. The test
+   before this one fails at the read. This one reaches the append, so it covers the
+   step's answer to a row that cannot be written, which the interface says refuses
+   the confirmation. A user with root rights opens a read-only file anyway. *)
+let test_a_ledger_that_reads_and_cannot_be_written_refuses_the_step () =
+  if Unix.geteuid () = 0 then skip ();
+  with_workspace
+  @@ fun config ->
+  enable_candle config;
+  pass config;
+  Unix.chmod (ledger_path config) 0o444;
+  Fun.protect
+    ~finally:(fun () -> Unix.chmod (ledger_path config) 0o600)
+    (fun () -> is_refused "read-only ledger" (confirm config));
+  check (list string) "only the Snapshot" [ "snapshot" ] (kinds config)
+;;
+
+(* Candle is off when the operator confirms, so nothing is owed. The confirmation
+   made again once Candle is on finds the Snapshot and owes the pass. *)
+let test_a_confirmation_made_again_with_candle_on_owes_the_pass_it_missed () =
+  with_workspace
+  @@ fun config ->
+  enable_candle config;
+  pass config;
+  Sys.remove (candle_toml config);
+  is_ok "confirm with candle off" (confirm config);
+  check (list string) "nothing owed while candle is off" [ "snapshot" ] (kinds config);
+  enable_candle config;
+  is_ok "confirm again with candle on" (confirm config);
+  check (list string) "the pass is owed now" [ "snapshot"; "payout_owed" ] (kinds config)
+;;
+
+(* [after_confirmation] is the step the Goal flow calls: [record] with the real
+   clock. Every other test gives [record] a fixed clock. *)
+let test_the_confirmation_step_stamps_the_row_with_the_clock_of_that_moment () =
+  with_workspace
+  @@ fun config ->
+  enable_candle config;
+  pass config;
+  let before = Time_compat.now () in
+  is_ok
+    "after_confirmation"
+    (Candle_payout_owed.after_confirmation
+       config
+       (make_goal ())
+       (make_verdict ())
+       (make_confirmation ()));
+  let after = Time_compat.now () in
+  match List.rev (ledger_events config) with
+  | { Candle_event.at; body = Candle_event.Payout_owed _ } :: _ ->
+    let instant seconds = Candle_time.of_ptime (Option.get (Ptime.of_float_s seconds)) in
+    let earliest = instant (before -. real_clock_slack_s) in
+    let latest = instant (after +. real_clock_slack_s) in
+    if Candle_time.compare at earliest < 0 || Candle_time.compare at latest > 0
+    then
+      failf
+        "at %s is outside %s .. %s"
+        (Candle_time.to_rfc3339 at)
+        (Candle_time.to_rfc3339 earliest)
+        (Candle_time.to_rfc3339 latest)
+  | _ -> fail "expected a PayoutOwed last"
+;;
+
 let test_a_confirmation_time_the_ledger_cannot_hold_refuses_the_step () =
   with_workspace
   @@ fun config ->
@@ -320,6 +387,18 @@ let () =
             "a ledger that fails after recovery refuses the step"
             `Quick
             test_a_ledger_that_fails_after_recovery_refuses_the_step
+        ; test_case
+            "a ledger that reads and cannot be written refuses the step"
+            `Quick
+            test_a_ledger_that_reads_and_cannot_be_written_refuses_the_step
+        ; test_case
+            "a confirmation made again with candle on owes the pass it missed"
+            `Quick
+            test_a_confirmation_made_again_with_candle_on_owes_the_pass_it_missed
+        ; test_case
+            "the confirmation step stamps the row with the clock of that moment"
+            `Quick
+            test_the_confirmation_step_stamps_the_row_with_the_clock_of_that_moment
         ; test_case
             "a confirmation time the ledger cannot hold refuses the step"
             `Quick

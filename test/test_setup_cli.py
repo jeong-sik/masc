@@ -400,6 +400,8 @@ sys.exit(int(open(exit_code).read()) if os.path.exists(exit_code) else 0)
                                       env=env, text=True, capture_output=True, timeout=30)
             initialized = run('init')
             self.assertEqual(initialized.returncode, 0, initialized.stderr)
+            # `masc init` on its own still names every file it writes.
+            self.assertIn('wrote  ', initialized.stdout)
             if linked_root:
                 volume = base / 'deployment-volume'
                 (base / '.masc').rename(volume)
@@ -558,6 +560,13 @@ sys.exit(int(open(exit_code).read()) if os.path.exists(exit_code) else 0)
                 self.assertTrue(all(auth == 'Bearer ' + persisted for _, auth, _ in accepted_auth))
                 self.assertEqual(accepted_auth[0][2], 'local-admin')
                 self.assertIn('Model response and harmless tool roundtrip verified.', result.stdout)
+                # setup runs init as one step: routine per-file and per-Skill
+                # lines are folded into the closing count line.
+                self.assertNotIn('skip   ', result.stdout)
+                self.assertNotIn('is up to date', result.stdout)
+                self.assertRegex(result.stdout, r'init: \d+ written, \d+ skipped, \d+ failed')
+                self.assertIn('imp is started.', result.stdout)
+                self.assertNotIn('\x1b[', result.stdout)
                 self.assertEqual(len(model_requests),4)
                 self.assertTrue(all(request['model']=='setup-fixture-owned-model' for request in model_requests))
                 self.assertTrue(any(message['role']=='tool' for message in model_requests[-1]['messages']))

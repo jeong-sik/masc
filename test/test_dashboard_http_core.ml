@@ -4183,9 +4183,10 @@ let tools_h2_wire_response ~handler ~headers target =
   | Some (status, headers) -> status, headers, Buffer.contents body
   | None -> fail "tools H2 route omitted response headers"
 
-(* On HTTP/2 a cached payload's status comes from its origin: the gateway has
-   nothing else that tells the cache's timeout envelope from a page. *)
-let test_h2_cached_payload_status_comes_from_the_origin () =
+(* On HTTP/2 a cached payload's timeout envelope goes out as 504 whoever
+   produced it: the cache (origin [Timeout]) or a builder whose envelope the
+   cache keeps as a computed page. *)
+let test_h2_cached_payload_timeout_is_504 () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config:_ ->
   let payload origin json =
     { Dashboard_cache.json
@@ -4202,10 +4203,15 @@ let test_h2_cached_payload_status_comes_from_the_origin () =
       ~headers:[] "/cached"
   in
   let envelope =
-    payload Dashboard_cache.Timeout (`Assoc [ "error", `String "computation_timeout" ])
+    `Assoc [ "error", `String Dashboard_cache.timeout_error_code; "key", `String "k" ]
   in
-  let status, _, _ = read envelope in
-  check int "a timeout envelope is 504" 504 status;
+  List.iter
+    (fun (label, origin) ->
+       let status, _, _ = read (payload origin envelope) in
+       check int (label ^ " is 504") 504 status)
+    [ "a cache timeout", Dashboard_cache.Timeout
+    ; "a builder's timeout kept as a page", Dashboard_cache.Computed
+    ];
   let page = payload Dashboard_cache.Computed (`Assoc [ "posts", `List [] ]) in
   let status, _, body = read page in
   check int "a page is 200" 200 status;
@@ -7021,8 +7027,8 @@ let () =
             test_project_snapshot_wire_returns_snapshot_when_populated;
           test_case "telemetry n default is bounded (freeze guard)" `Quick
             test_telemetry_n_default_is_bounded;
-          test_case "an HTTP/2 cached payload's status comes from its origin" `Quick
-            test_h2_cached_payload_status_comes_from_the_origin;
+          test_case "an HTTP/2 cached payload's timeout envelope is 504" `Quick
+            test_h2_cached_payload_timeout_is_504;
           test_case "fleet-composite envelope is cached across polls" `Quick
             test_dashboard_fleet_composite_envelope_is_cached;
           test_case "state diagram runtime projection stays empty without meta" `Quick

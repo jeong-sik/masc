@@ -23,7 +23,9 @@ val h2_respond_json :
   H2.Reqd.t -> string -> unit
 
 (** [payload.raw_json], the string the cache serialized with the entry: 200
-    for a page, 504 when [payload.origin] is [Timeout]. The body is compressed
+    for a page, 504 when [payload.json] is a timeout envelope
+    ({!Dashboard_cache.is_timeout_envelope}), whether the cache or the builder
+    produced it. The body is compressed
     per request as {!h2_respond_json} does; encodings prepared in
     [payload.encoded] are not used, so a payload prepared with them goes
     through {!Dashboard_cache.select_http_representation} instead. *)

@@ -68,14 +68,13 @@ let h2_respond_json_string ?status ?extra_headers ?(compress = true) h2_reqd bod
 let h2_respond_json ?status ?extra_headers ?compress h2_reqd body =
   h2_respond_json_string ?status ?extra_headers ?compress h2_reqd body
 
-(* The payload's [origin] says whether its bytes are a page or the cache's
-   timeout envelope; nothing else on this transport would tell them apart. *)
+(* A timeout envelope is recognized from the payload's JSON, not from its
+   [origin]: a builder with a shorter ceiling of its own can return the
+   envelope as its value, and the cache keeps it as a computed page. *)
 let h2_respond_cached_payload ?extra_headers h2_reqd
     (payload : Dashboard_cache.cached_payload) =
   let status =
-    match payload.origin with
-    | Dashboard_cache.Timeout -> `Gateway_timeout
-    | Dashboard_cache.Computed | Dashboard_cache.Seeded -> `OK
+    if Dashboard_cache.is_timeout_envelope payload.json then `Gateway_timeout else `OK
   in
   h2_respond_json_string ~status ?extra_headers h2_reqd payload.raw_json
 

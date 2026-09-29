@@ -112,6 +112,7 @@ let test_load () =
          ; Pad.Tl, [ "1" ], "the left shoulder is 1, down-left"
          ; Pad.Tr, [ "3" ], "the right shoulder is 3, down-right"
          ; Pad.Select, [ "0" ], "select is 0 alone, which places an officer"
+         ; Pad.East, [ "backspace" ], "east deletes a typed digit; esc does nothing in the game"
          ]
      | Ok (Some (Pad.Workspace, _)) -> fail "no workspace file was written"
      | Ok None -> fail "no builtin layout for samguk3"

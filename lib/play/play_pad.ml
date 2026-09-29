@@ -141,15 +141,20 @@ let pads_dir ~base_path =
    keys, 4 and 6 do nothing there, so the pad sends digits: the D-pad for the
    four upper and vertical hexes, the shoulders for the two lower diagonals.
    Placing an officer before a battle takes 0, not enter, so Select sends 0
-   alone. At the command prompt, 0 then enter asks whether to end the month. *)
+   alone. At the command prompt, 0 then enter asks whether to end the month.
+
+   Esc does nothing anywhere in the game. Enter on an empty prompt goes back
+   one menu, and Backspace deletes the last typed digit, so East sends
+   Backspace. A battle menu takes its digit alone; an enter after it goes back
+   out of the menu the digit opened. *)
 let samguk3 =
   {toml|[BTN_SOUTH]
 keys = ["return"]
-label = "결정"
+label = "결정·뒤로"
 
 [BTN_EAST]
-keys = ["esc"]
-label = "취소"
+keys = ["backspace"]
+label = "지우기"
 
 [BTN_NORTH]
 keys = ["y"]
@@ -189,7 +194,7 @@ label = "아무 키"
 
 [BTN_SELECT]
 keys = ["0"]
-label = "0 (배치, 이달 명령 끝내기 묻기)"
+label = "0 입력 (배치)"
 |toml}
 
 (* Keyed by the saves name, the inventory name the sangokushi-3 Skill loads

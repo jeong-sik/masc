@@ -69,6 +69,8 @@ type pending_fact =
 
 type reconciliation =
   { ledger : t  (** the input ledger without the [vanished] facts *)
+  ; current_facts : pending_fact list
+        (** All readable current facts, in discovery and store order. *)
   ; new_facts : pending_fact list
         (** In the given Keeper order, ordinary store first, each store in
             its own row order. *)

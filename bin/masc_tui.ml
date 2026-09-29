@@ -15328,13 +15328,22 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              (* A failed read leaves [dos_activity] as it was -- the sidebar
                 keeps showing the last activity it had rather than flashing
                 empty on a read that did not answer at all. *)
-             (match result with
-              | Ok (_, activity) -> state.dos_activity <- activity
-              | Error _ -> ());
-             (* An unchanged answer draws nothing and decodes no pixels. The
-                read also discovers the DOS watch row while the menu is open. *)
+             let activity_changed =
+               match result with
+               | Ok (_, activity) ->
+                   let changed = activity <> state.dos_activity in
+                   state.dos_activity <- activity;
+                   changed
+               | Error _ -> false
+             in
+             (* An unchanged picture decodes no pixels. A changed activity
+                feed still repaints the spectator sidebar; an identical feed
+                remains silent. The read also discovers the DOS watch row
+                while the menu is open. *)
              (match Masc_tui_machine_live.advance state.dos_live (Result.map fst result) with
-              | None -> ()
+              | None ->
+                  if activity_changed && not state.msx_menu_open then
+                    render_spectator state
               | Some view ->
                   state.dos_live <- view;
                   if state.msx_menu_open then

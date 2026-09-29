@@ -19819,9 +19819,10 @@ def dos_flat_frame(rgb: bytes) -> dict[str, object]:
 def run_dos_live_regression(executable: str) -> None:
     """Watch the DOS machine through the live route (RFC machine-spectating
     stage 3). The menu offers it, the picture is drawn in its own shape, an
-    unchanged machine redraws nothing, a key reaches no machine, and a
-    changed machine is drawn at its new counter."""
+    unchanged machine redraws nothing unless activity changes, a key reaches
+    no machine, and a changed machine is drawn at its new counter."""
     picture: dict[str, Any] = {"frame": dos_flat_frame(bytes([255, 0, 0])), "steps": 100}
+    activity: list[dict[str, object]] = []
     dos_reads: list[LiveMark | None] = []
     posts: HttpRequests = []
     held: dict[str, Any] = {"armed": False, "entered": threading.Event(),
@@ -19844,10 +19845,14 @@ def run_dos_live_regression(executable: str) -> None:
             held["armed"] = False
             held["entered"].set()
             held["release"].wait(timeout=10.0)
-        return machine_live_answer(kind, picture["frame"], since,
-                                   count=int(picture["steps"]), frame_number=None)
+        status, answer = machine_live_answer(
+            kind, picture["frame"], since,
+            count=int(picture["steps"]), frame_number=None)
+        answer["activity"] = activity
+        return status, answer
 
     def interact(process, master, _slave, output, _base):
+        nonlocal activity
         def key(value, needle):
             start = len(output)
             os.write(master, value)
@@ -19913,6 +19918,22 @@ def run_dos_live_regression(executable: str) -> None:
             raise AssertionError(
                 f"an unchanged answer redrew the screen: {bytes(output[still_from:])[:200]!r}")
 
+        # A pass changes the sidebar without changing DOS pixels. The live
+        # answer remains `unchanged`, but the spectator must show the event.
+        activity = [{"at": 1790650000, "who": "guest", "action": "pass -> keeper"}]
+        activity_from = len(output)
+        wait_for_output(process, master, output, b"guest pass", start=activity_from,
+                        timeout=5.0)
+        wait_for_output(process, master, output, b"Esc: back", start=activity_from,
+                        timeout=5.0)
+        activity_drawn = bytes(output[activity_from:])
+        if b"change 100" not in activity_drawn:
+            raise AssertionError("activity-only repaint lost the current DOS picture")
+        still_from = len(output)
+        observe_for(0.8)
+        if bytes(output[still_from:]):
+            raise AssertionError("identical activity redrew an unchanged DOS screen")
+
         # A key is the spectator's, not a machine's: it repaints and posts nothing.
         key(b"x", b"Esc: back  +/-: 100%")
         pressed = [path for path, _ in posts if path.startswith("/api/v1/msx/")]
@@ -19959,6 +19980,12 @@ def run_dos_live_regression(executable: str) -> None:
         if any(since != (200, LIVE_INCARNATION) for since in dos_reads[-2:]):
             raise AssertionError(f"reads after the change did not ask at 200: {dos_reads[-4:]!r}")
 
+        key(b"\x1b", b"MASC Overview")
+        # The palette has a direct DOS door as well as the older MSX picker.
+        direct_from = key(b":go dos\r", b"Esc: back")
+        direct = bytes(output[direct_from:])
+        if b"DOS \xe2\x80\x94" not in direct or b"MSX \xe2\x80\x94 pick a game" in direct:
+            raise AssertionError("go DOS did not open the DOS spectator directly")
         key(b"\x1b", b"MASC Overview")
         os.write(master, b"q")
         print(json.dumps({"dos_reads": len(dos_reads),

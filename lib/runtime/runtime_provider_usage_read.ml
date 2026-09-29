@@ -70,14 +70,22 @@ let readable_scopes () =
   |> List.rev
 ;;
 
-let read_codex ~mgr ~clock ~cwd ~scope codex =
+(* The windows reach the operator projection on every read; whether the same
+   answer also rests the scope is the caller's ([read_codex_after_spent_usage]). *)
+let read_codex_report ~mgr ~clock ~cwd ~scope codex =
   match
     Runtime_codex_app_server.read_rate_limits ~mgr ~clock ~cwd (codex_config codex)
   with
   | Ok report ->
     Runtime_provider_usage_window.record ~scope ~observed_at:(Time_compat.now ()) report;
-    Ok ()
+    Ok report
   | Error error -> Error (Runtime_codex_app_server.error_to_string error)
+;;
+
+let read_codex ~mgr ~clock ~cwd ~scope codex =
+  Result.map
+    (fun (_ : Runtime_provider_usage_window.report) -> ())
+    (read_codex_report ~mgr ~clock ~cwd ~scope codex)
 ;;
 
 let read_muse ~mgr ~clock ~cwd ~scope (config : Runtime_muse_serve.config) =
@@ -430,11 +438,6 @@ let read_client_in_background ~clock ~cwd ~scope read =
     Scheduling_failed
 ;;
 
-let read_codex_in_background ~clock ~cwd ~scope codex =
-  read_client_in_background ~clock ~cwd ~scope
-    (fun ~mgr ~clock ~cwd ~scope -> read_codex ~mgr ~clock ~cwd ~scope codex)
-;;
-
 let read_muse_in_background ~clock ~cwd ~scope config =
   read_client_in_background ~clock ~cwd ~scope
     (fun ~mgr ~clock ~cwd ~scope -> read_muse ~mgr ~clock ~cwd ~scope config)
@@ -445,14 +448,15 @@ module For_testing = struct
 end
 
 
-(* After a 403: the one read whose answer the walk reads.
+(* After an account refusal: the reads whose answer the walk reads.
 
    An HTTP 403 does not say why the account was refused. Kimi For Coding
    sends the same body type for a spent 5-hour window and for a client the
    plan does not admit. The provider's usage endpoint answers the question
    with counts: a window that gates model calls and whose used count reached
    its limit is spent until its stated reset. Only that answer rests the
-   scope; the status alone rests nothing. *)
+   scope; the status alone rests nothing. A Codex turn refused for spent
+   usage says why but not until when, and its read answers the same way. *)
 
 type account_refusal_read =
   | Spent_until of float
@@ -508,6 +512,12 @@ let materialized_api_key : Llm_provider.Provider_config.credential_source * _ ->
   | Refreshable_credential _, _ -> Error Credential_not_refreshed
 ;;
 
+let rest_on_account_refusal_read ~scope = function
+  | Spent_until resets_at -> Runtime_quota_window.note_exhausted ~scope ~resets_at
+  | Spent_without_reset -> Runtime_quota_window.note_observed_exhausted ~scope
+  | No_window_spent -> ()
+;;
+
 let read_after_account_refusal ~fetch ~scope http =
   let ( let* ) = Result.bind in
   let* (report : Runtime_provider_usage_window.report) =
@@ -515,11 +525,31 @@ let read_after_account_refusal ~fetch ~scope http =
   in
   Runtime_provider_usage_window.record ~scope ~observed_at:(Time_compat.now ()) report;
   let read = account_refusal_read_of_report report in
-  (match read with
-   | Spent_until resets_at -> Runtime_quota_window.note_exhausted ~scope ~resets_at
-   | Spent_without_reset -> Runtime_quota_window.note_observed_exhausted ~scope
-   | No_window_spent -> ());
+  rest_on_account_refusal_read ~scope read;
   Ok read
+;;
+
+(* The turn error of a spent-usage refusal names no reset, so the turn left
+   an observation with no end, and a lane with no other candidate asked the
+   spent account again every [path_rest] cap (2026-09-29: three Keepers on
+   one Codex account, refused about every 15 minutes with "try again at Oct
+   4th"). The account's own read states the spent window's reset, the same
+   minute the refusal text named, and rests the scope as a 403 read does. *)
+let read_codex_after_spent_usage ~mgr ~clock ~cwd ~scope codex =
+  Result.map
+    (fun report ->
+      let read = account_refusal_read_of_report report in
+      rest_on_account_refusal_read ~scope read;
+      Log.Runtime_agent.info
+        "provider usage read after a Codex spent-usage refusal for %s: %s"
+        (Runtime_quota_window.scope_to_string scope)
+        (account_refusal_read_to_string read))
+    (read_codex_report ~mgr ~clock ~cwd ~scope codex)
+;;
+
+let read_codex_in_background ~clock ~cwd ~scope codex =
+  read_client_in_background ~clock ~cwd ~scope
+    (fun ~mgr ~clock ~cwd ~scope -> read_codex_after_spent_usage ~mgr ~clock ~cwd ~scope codex)
 ;;
 
 let http_read_of_runtime (rt : Runtime.t) =

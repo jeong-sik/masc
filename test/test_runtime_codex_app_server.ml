@@ -1369,6 +1369,91 @@ let test_background_read_outlives_the_turn () =
           check bool "the window is recorded after the turn ended" true recorded)))
 ;;
 
+(* A Keeper turn refused for spent usage names no reset, so the turn driver
+   records an observation with no end, and a lane with no other candidate
+   asked the spent account again at every rest cap: on 2026-09-29 three
+   Keepers on one Codex account were refused about every 15 minutes with
+   "try again at Oct 4th". The read that refusal starts had the reset
+   (1791068942 is 2026-10-04 08:09 KST, the minute the text named) and wrote
+   it only to the operator table. *)
+let codex_spent_reset = 1791068942.
+
+let codex_spent_with_reset =
+  {|{"id":3,"result":{"rateLimits":{"limitId":"codex","primary":{"usedPercent":100,"windowDurationMins":10080,"resetsAt":1791068942},"secondary":null},"rateLimitsByLimitId":null}}|}
+;;
+
+let codex_spent_without_reset =
+  {|{"id":3,"result":{"rateLimits":{"limitId":"codex","primary":{"usedPercent":100,"windowDurationMins":10080},"secondary":null},"rateLimitsByLimitId":null}}|}
+;;
+
+(* The refused turn's record, then the read it starts, to its end: the root
+   switch returns only after the forked read has finished. *)
+let read_after_spent_usage_refusal ~provider_id read_result =
+  let scope = Runtime_quota_window.scope_of_credential ~provider_id None in
+  with_fixture [init_result; account_chatgpt; read_result] (fun path ->
+    let saved = Eio_context.snapshot_state () in
+    Fun.protect ~finally:(fun () -> Eio_context.restore_state saved) (fun () ->
+      Eio_main.run (fun env ->
+        let clock = Eio.Stdenv.clock env in
+        let cwd = Eio.Path.(Eio.Stdenv.fs env / "/tmp") in
+        let codex =
+          ({ cli_path = path; account_home = None; model = None; timeout_s = 2.0 } : Runtime_execution.codex_app_server)
+        in
+        Runtime_quota_window.note_observed_exhausted ~scope;
+        Eio.Switch.run (fun root_sw ->
+          Eio_context.set_switch root_sw;
+          check bool "the refusal starts a read" true
+            (Runtime_provider_usage_read.read_codex_in_background ~clock ~cwd ~scope codex
+             = Runtime_provider_usage_read.Started)))));
+  (match Runtime_provider_usage_window.state ~scope with
+   | Runtime_provider_usage_window.Reported _ -> ()
+   | Runtime_provider_usage_window.Not_reported_since_start ->
+     fail "the read after the refusal recorded no window");
+  scope
+;;
+
+let test_spent_usage_read_rests_until_the_stated_reset () =
+  let scope =
+    read_after_spent_usage_refusal ~provider_id:"spent-usage-read-reset" codex_spent_with_reset
+  in
+  check (option (float 0.0)) "the account rests until the reset it stated"
+    (Some codex_spent_reset)
+    (Runtime_quota_window.active_until ~scope ~now:(codex_spent_reset -. 1.));
+  check bool "the rest ends at that reset" false
+    (Runtime_quota_window.is_exhausted ~scope ~now:codex_spent_reset)
+;;
+
+let test_spent_usage_read_without_a_reset_keeps_the_observation () =
+  let scope =
+    read_after_spent_usage_refusal ~provider_id:"spent-usage-read-no-reset"
+      codex_spent_without_reset
+  in
+  check (option (float 0.0)) "no reset is invented" None
+    (Runtime_quota_window.active_until ~scope ~now:codex_spent_reset);
+  check bool "the refusal's observation still holds the account back" true
+    (Runtime_quota_window.is_exhausted ~scope ~now:codex_spent_reset)
+;;
+
+(* The start read of the same answer is the operator projection only. *)
+let test_start_read_of_a_spent_account_rests_nothing () =
+  let scope =
+    Runtime_quota_window.scope_of_credential ~provider_id:"spent-usage-start-read" None
+  in
+  with_fixture [init_result; account_chatgpt; codex_spent_with_reset] (fun path ->
+    Eio_main.run (fun env ->
+      let codex =
+        ({ cli_path = path; account_home = None; model = None; timeout_s = 2.0 } : Runtime_execution.codex_app_server)
+      in
+      match
+        Runtime_provider_usage_read.read_codex ~mgr:(Eio.Stdenv.process_mgr env)
+          ~clock:(Eio.Stdenv.clock env) ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp") ~scope codex
+      with
+      | Ok () -> ()
+      | Error detail -> fail detail));
+  check bool "the start read rests nothing" false
+    (Runtime_quota_window.is_exhausted ~scope ~now:(codex_spent_reset -. 1.))
+;;
+
 let test_thread_resume_skips_history_injection () =
   let history =
     [ { Runtime_codex_app_server.role = User; text = "already in official thread" } ]
@@ -6849,6 +6934,12 @@ let () =
         ; test_case "metadata listing pages without turn" `Quick test_metadata_listing_pages_without_turn
         ; test_case "rate limits read without turn" `Quick test_rate_limits_read_without_turn
         ; test_case "background read outlives the turn" `Quick test_background_read_outlives_the_turn
+        ; test_case "spent-usage read rests until the stated reset" `Quick
+            test_spent_usage_read_rests_until_the_stated_reset
+        ; test_case "spent-usage read without a reset keeps the observation" `Quick
+            test_spent_usage_read_without_a_reset_keeps_the_observation
+        ; test_case "start read of a spent account rests nothing" `Quick
+            test_start_read_of_a_spent_account_rests_nothing
         ; test_case "declared cwd reaches spawn" `Quick test_declared_cwd_reaches_spawn
         ; test_case
             "protocol and spawn share cwd authority"

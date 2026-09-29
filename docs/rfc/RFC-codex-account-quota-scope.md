@@ -64,7 +64,8 @@ Codex 가 한도를 매기는 단위는 홈이 아니라 **ChatGPT 계정**이�
 - 이 기록에는 끝나는 시각이 없다. 같은 scope 로 호출이 한 번 통과해야 지워진다 (`lib/runtime/runtime_quota_window.ml:36-50`, RFC-0433).
 - 후보 순서는 scope 가 소진인지 묻고, 소진이면 뒤로 보낸다 (`lib/keeper/keeper_turn_driver.ml:202-245`).
 - 거절 뒤에는 같은 홈으로 `account/rateLimits/read` 를 백그라운드에서 한 번 읽는다 (`lib/keeper/keeper_codex_runtime.ml:296-304`, `:1432-1436`).
-  이 결과는 운영자에게 보여 주는 사용량 표에만 들어간다.
+  이 결과는 운영자에게 보여 주는 사용량 표에 들어간다. 모델 호출을 막는 창이 다 찼고 리셋 시각이 있으면,
+  403 뒤 읽기와 같은 규칙으로 같은 scope 를 그 시각까지 쉬게 한다 (`lib/runtime/runtime_provider_usage_read.ml`, `read_codex_after_spent_usage`).
 
 ### 사용량 창이 기록되고 보이는 길
 

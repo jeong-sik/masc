@@ -4,6 +4,8 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -12,6 +14,11 @@ ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location("candle_eval", ROOT / "scripts/candle-appraiser-eval.py")
 EVAL = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(EVAL)
+BINARY = None
+if "--binary" in sys.argv:
+    index = sys.argv.index("--binary")
+    BINARY = Path(sys.argv[index + 1]).resolve()
+    del sys.argv[index:index + 2]
 
 
 class EvalFeature(unittest.TestCase):
@@ -24,6 +31,7 @@ class EvalFeature(unittest.TestCase):
 [runtime]
 default = "sample.model"
 [providers.sample]
+display-name = "Fixture HTTP"
 protocol = "openai-compatible-http"
 endpoint = "https://example.invalid/v1"
 [providers.sample.credentials]
@@ -35,6 +43,8 @@ endpoint = "https://not-selected.invalid/v1"
 [models.model]
 api-name = "fixture"
 max-context = 4096
+tools-support = true
+streaming = true
 [sample.model]
 ''')
         self.args = argparse.Namespace(
@@ -69,6 +79,17 @@ max-context = 4096
         with patch.dict(os.environ, {}, clear=True), self.assertRaisesRegex(ValueError, "unavailable"):
             EVAL.prepare(self.args)
         self.assertFalse(self.args.workspace.exists())
+
+    @unittest.skipIf(BINARY is None, "native executable is supplied by targeted CI")
+    def test_prepared_fixture_passes_the_actual_opt_in_executable_without_calls(self):
+        self.prepare()
+        result = subprocess.run([str(BINARY), "--base-path", str(self.args.workspace)],
+                                text=True, capture_output=True, check=False)
+        self.assertEqual(0, result.returncode, result.stderr)
+        observed = json.loads(result.stdout)
+        self.assertEqual("validated_without_model_calls", observed["mode"])
+        self.assertEqual(12, observed["cases"])
+        self.assertFalse((self.args.workspace / "evidence").exists())
 
     def write_results(self, rows):
         evidence = self.args.workspace / "evidence"

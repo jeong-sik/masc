@@ -66,6 +66,14 @@ let () =
   let dir = Sys.argv.(1) in
   let pid = int_of_string Sys.argv.(2) in
   let seconds = float_of_string Sys.argv.(3) in
+  let control = Sys.getenv_opt "MASC_RTEV_CONTROL_DIR" in
+  let mark name stamp = match control with
+    | None -> ()
+    | Some dir -> Out_channel.with_open_text (Filename.concat dir name)
+        (fun out -> Printf.fprintf out "%.9f\n" stamp) in
+  let stopping () = match control with
+    | None -> false
+    | Some dir -> Sys.file_exists (Filename.concat dir "stop") in
   let states : (int, dstate) Hashtbl.t = Hashtbl.create 16 in
   let state d =
     match Hashtbl.find_opt states d with
@@ -181,12 +189,16 @@ let () =
   let rec drain_all () = if RE.read_poll cursor drain None > 0 then drain_all () in
   drain_all ();
   let t_start = Unix.gettimeofday () in
+  mark "ready" t_start;
   let events = ref 0 in
-  while Unix.gettimeofday () -. t_start < seconds do
+  while not (stopping ()) && Unix.gettimeofday () -. t_start < seconds do
     events := !events + RE.read_poll cursor callbacks None;
     Unix.sleepf 0.02
   done;
-  let window = Unix.gettimeofday () -. t_start in
+  events := !events + RE.read_poll cursor callbacks None;
+  let t_end = Unix.gettimeofday () in
+  mark "ended" t_end;
+  let window = t_end -. t_start in
   Printf.printf "pid=%d window_s=%.1f events=%d lost=%d\n\n" pid window !events !lost;
   let domains = List.sort compare (Hashtbl.fold (fun d _ l -> d :: l) states []) in
   Printf.printf "%-7s %9s %10s %8s %8s %8s %8s %9s\n" "domain" "runs" "run_ms" "busy%" ">=10ms" ">=50ms" ">=100ms" "max_ms";

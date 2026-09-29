@@ -7,6 +7,8 @@ import base64
 import hashlib
 import json
 import os
+import re
+import signal
 from pathlib import Path
 import shutil
 import struct
@@ -71,6 +73,10 @@ def prepare_source(repo: Path, root: Path, label: str, sha: str) -> tuple[Path, 
     if "vision_artifact_measure" in body:
         raise RuntimeError("historical source already contains the harness target")
     dune.write_text(body + STANZA)
+    if label == "after":
+        for name in ("rtev_fibers.ml", "rtev_watch.ml"):
+            shutil.copy2(repo / "tools/rtev_trace" / name,
+                         path / "tools/rtev_trace" / name)
     env = os.environ.copy()
     env["DUNE_JOBS"] = "2"
     command(["dune", "build", "test/vision_artifact_measure.exe"], cwd=path, env=env)
@@ -89,6 +95,17 @@ def wait_for(path: Path, process: subprocess.Popen[bytes], timeout: float) -> No
             raise RuntimeError(f"measurement exited before {path.name}: {process.returncode}")
         time.sleep(0.1)
     raise RuntimeError(f"measurement did not create {path.name}")
+
+
+def trace_header(name: str, body: bytes) -> dict[str, int]:
+    first = body.decode().splitlines()[0] if body else ""
+    match = re.search(r"events=([0-9]+) lost=([0-9]+)", first)
+    if match is None:
+        raise RuntimeError(f"{name} has no runtime-events header")
+    events, lost = map(int, match.groups())
+    if events == 0 or lost != 0:
+        raise RuntimeError(f"{name} has events={events} lost={lost}")
+    return {"events": events, "lost": lost}
 
 
 def run_window(
@@ -117,48 +134,102 @@ def run_window(
         OCAML_RUNTIME_EVENTS_DIR=str(events),
     )
     started = time.time()
-    proc = subprocess.Popen(
-        [str(binary), str(state), str(fixtures), str(count), str(seconds)],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=output, env=env,
-    )
-    watchers: list[tuple[str, subprocess.Popen[bytes]]] = []
+    proc: subprocess.Popen[bytes] | None = None
+    watchers: list[tuple[str, subprocess.Popen[bytes], Path]] = []
+    completed = False
     try:
-        wait_for(state / "window-start", proc, 120)
+        proc = subprocess.Popen(
+            [str(binary), str(state), str(fixtures), str(count), str(seconds)],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=output, env=env,
+        )
+        wait_for(state / "window-ready", proc, 120)
         for name in ("rtev_fibers", "rtev_watch"):
             tool = tracer_dir / f"{name}.exe"
             if not tool.is_file():
                 raise RuntimeError(f"missing runtime-events consumer: {tool}")
+            control = output / f"{name}-control"
+            control.mkdir()
+            watcher_env = os.environ.copy()
+            watcher_env["MASC_RTEV_CONTROL_DIR"] = str(control)
             watcher = subprocess.Popen(
-                [str(tool), str(events), str(proc.pid), str(max(1, seconds - 2))],
+                [str(tool), str(events), str(proc.pid), str(seconds + 60)],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=output,
+                env=watcher_env,
             )
-            watchers.append((name, watcher))
-        stdout, stderr = proc.communicate(timeout=seconds + 30)
-    except Exception:
-        proc.kill()
-        proc.communicate()
+            watchers.append((name, watcher, control))
+            wait_for(control / "ready", watcher, 30)
+        (state / "window-go").write_text(str(time.time()) + chr(10))
+        wait_for(state / "window-complete", proc, seconds + 120)
+        traces: dict[str, dict[str, float | int]] = {}
+        for name, watcher, control in watchers:
+            (control / "stop").write_text(str(time.time()) + chr(10))
+            trace, error = watcher.communicate(timeout=30)
+            (output / f"{name}.txt").write_bytes(trace)
+            (output / f"{name}.stderr.txt").write_bytes(error)
+            if watcher.returncode:
+                raise RuntimeError(f"{name} exited {watcher.returncode}: {error.decode(errors='replace')}")
+            summary = trace_header(name, trace)
+            ready = float((control / "ready").read_text())
+            ended = float((control / "ended").read_text())
+            traces[name] = {"ready_utc_epoch": ready, "end_utc_epoch": ended,
+                            **summary}
+        (state / "window-release").write_text(str(time.time()) + chr(10))
+        stdout, stderr = proc.communicate(timeout=30)
+        (output / "stdout.jsonl").write_bytes(stdout)
+        (output / "stderr.txt").write_bytes(stderr)
+        if proc.returncode:
+            raise RuntimeError(f"measurement exited {proc.returncode}: {stderr.decode(errors='replace')}")
+        rows = [json.loads(line) for line in stdout.decode().splitlines()
+                if line.startswith("{")]
+        if len(rows) != 1 or rows[0].get("source") != sha:
+            raise RuntimeError("measurement receipt is missing or has wrong source")
+        samples = rows[0].get("samples")
+        if not isinstance(samples, list) or len(samples) != 3 + 5 * count:
+            raise RuntimeError("per-operation samples are missing or incomplete")
+        for sample in samples:
+            if (sample.get("operation") not in {"store_frame", "store_kept_new",
+                                                 "store_kept_repeat", "load_kept",
+                                                 "load_frame"}
+                or not isinstance(sample.get("start_utc_epoch"), (int, float))
+                or not isinstance(sample.get("end_utc_epoch"), (int, float))
+                or sample["start_utc_epoch"] > sample["end_utc_epoch"]):
+                raise RuntimeError("invalid per-operation sample")
+        first_start = min(row["start_utc_epoch"] for row in samples)
+        last_end = max(row["end_utc_epoch"] for row in samples)
+        if any(not (trace["ready_utc_epoch"] <= first_start
+                    and last_end <= trace["end_utc_epoch"])
+               for trace in traces.values()):
+            raise RuntimeError("one or more operations fell outside a trace window")
+        receipt = {
+            "label": label, "source": sha, "window": index,
+            "start_utc_epoch": started, "end_utc_epoch": time.time(),
+            "binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
+            "trace": traces,
+            "result": rows[0],
+        }
+        (output / "receipt.json").write_text(json.dumps(receipt, indent=2) + chr(10))
+        completed = True
+        return receipt
+    except BaseException as error:
+        (output / "failure.json").write_text(
+            json.dumps({"type": type(error).__name__, "message": str(error)}) + chr(10))
         raise
-    (output / "stdout.jsonl").write_bytes(stdout)
-    (output / "stderr.txt").write_bytes(stderr)
-    for name, watcher in watchers:
-        trace, error = watcher.communicate(timeout=seconds + 30)
-        (output / f"{name}.txt").write_bytes(trace)
-        (output / f"{name}.stderr.txt").write_bytes(error)
-        if watcher.returncode:
-            raise RuntimeError(f"{name} exited {watcher.returncode}: {error.decode(errors='replace')}")
-    if proc.returncode:
-        raise RuntimeError(f"measurement exited {proc.returncode}: {stderr.decode(errors='replace')}")
-    rows = [json.loads(line) for line in stdout.decode().splitlines() if line.startswith("{")]
-    if len(rows) != 1 or rows[0].get("source") != sha:
-        raise RuntimeError("measurement receipt is missing or has wrong source")
-    receipt = {
-        "label": label, "source": sha, "window": index,
-        "start_utc_epoch": started, "end_utc_epoch": time.time(),
-        "binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
-        "result": rows[0],
-    }
-    (output / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
-    return receipt
+    finally:
+        owned = [("measurement", proc)] + [(name, watcher) for name, watcher, _ in watchers]
+        cleanup = {}
+        for name, child in owned:
+            if child is None:
+                continue
+            if child.poll() is None:
+                child.kill()
+            try:
+                child.communicate(timeout=10)
+            except subprocess.TimeoutExpired:
+                child.kill()
+                child.communicate(timeout=10)
+            cleanup[name] = {"returncode": child.returncode, "reaped": child.poll() is not None}
+        (output / "cleanup.json").write_text(json.dumps(
+            {"completed": completed, "children": cleanup}, indent=2) + chr(10))
 
 
 def main() -> int:
@@ -168,6 +239,10 @@ def main() -> int:
     parser.add_argument("--seconds", type=int, default=90)
     parser.add_argument("--pairs", type=int, default=3)
     args = parser.parse_args()
+    def interrupted(signum: int, _frame: object) -> None:
+        raise KeyboardInterrupt(f"signal {signum}")
+    signal.signal(signal.SIGTERM, interrupted)
+    signal.signal(signal.SIGINT, interrupted)
     if args.count < 1 or args.count > 40 or args.seconds < 1 or args.pairs < 1:
         parser.error("count must be 1..40, seconds and pairs must be positive")
     repo = Path.cwd()

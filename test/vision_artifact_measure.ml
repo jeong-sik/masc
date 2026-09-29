@@ -9,22 +9,31 @@ let read path = In_channel.with_open_bin path In_channel.input_all
 let write path body = Out_channel.with_open_bin path (fun out -> output_string out body)
 let hash bytes = Digestif.SHA256.(digest_string bytes |> to_hex)
 let now () = Unix.gettimeofday ()
-let sample samples f =
-  let start = now () in
+type sample = { operation : string; start_epoch : float; end_epoch : float; elapsed_ms : float }
+let sample operation samples f =
+  let start_epoch = now () in
   let result = f () in
-  samples := ((now () -. start) *. 1000.) :: !samples;
+  let end_epoch = now () in
+  samples := { operation; start_epoch; end_epoch;
+               elapsed_ms = (end_epoch -. start_epoch) *. 1000. } :: !samples;
   result
+let sample_json s =
+  `Assoc ["operation", `String s.operation;
+          "start_utc_epoch", `Float s.start_epoch;
+          "end_utc_epoch", `Float s.end_epoch;
+          "elapsed_ms", `Float s.elapsed_ms]
 let sorted values = List.sort Float.compare values
 let percentile values p =
   let values = Array.of_list (sorted values) in
   if Array.length values = 0 then 0. else
   values.(min (Array.length values - 1) (int_of_float (ceil (p *. float (Array.length values))) - 1))
-let stats values =
+let stats_float values =
   `Assoc ["count", `Int (List.length values);
           "p50_ms", `Float (percentile values 0.50);
           "p95_ms", `Float (percentile values 0.95);
           "p99_ms", `Float (percentile values 0.99);
           "max_ms", `Float (percentile values 1.0)]
+let stats values = stats_float (List.map (fun s -> s.elapsed_ms) values)
 
 let run ~root ~fixtures ~count ~window_seconds =
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
@@ -69,6 +78,10 @@ let run ~root ~fixtures ~count ~window_seconds =
   check_load_error corrupt_handle "artifact_load_failed";
   let frame_samples = ref [] and kept_new = ref [] and kept_repeat = ref [] in
   let load_kept = ref [] and load_frame = ref [] and lag = ref [] in
+  write (Filename.concat root "window-ready") (string_of_float (now ()));
+  while not (Sys.file_exists (Filename.concat root "window-go")) do
+    Eio.Time.sleep env#clock 0.01
+  done;
   let running = ref true in
   Eio.Fiber.fork ~sw (fun () ->
     let interval = 0.005 in
@@ -85,7 +98,7 @@ let run ~root ~fixtures ~count ~window_seconds =
       if actual <> hash bytes then fail "returned handle differs from input SHA-256";
       if read (Filename.concat dir actual) <> bytes then fail "stored bytes differ";
       actual in
-    let load handle expected =
+    let load handle =
       let args = `Assoc [
         "artifact", `String handle; "query", `String "measurement";
         "media_type", `String "invalid/measurement"] in
@@ -94,34 +107,33 @@ let run ~root ~fixtures ~count ~window_seconds =
       let output = Yojson.Safe.from_string result.raw_output in
       if Yojson.Safe.Util.member "error" output <>
          `String "invalid_media_type" then
-        fail ("load did not reach media validation: " ^ result.raw_output);
-      if read expected = "" then fail "loaded fixture is empty" in
+        fail ("load did not reach media validation: " ^ result.raw_output) in
     let window_start = now () in
     write (Filename.concat root "window-start") (string_of_float window_start);
     let first = read (Filename.concat fixtures "0000.png") in
-    let first_handle = sample kept_new (fun () ->
+    let first_handle = sample "store_kept_new" kept_new (fun () ->
       get (V.store_kept ~keeper_name:keeper first)) in
     let first_name = check_file kept first first_handle in
-    ignore (sample kept_repeat (fun () ->
+    ignore (sample "store_kept_repeat" kept_repeat (fun () ->
       get (V.store_kept ~keeper_name:keeper first)));
-    sample load_kept (fun () -> load first_name (Filename.concat kept first_name));
+    sample "load_kept" load_kept (fun () -> load first_name);
     for i = 1 to count do
       let due = window_start +. (float i *. window_seconds /. float count) in
       let delay = due -. now () in
       if delay > 0. then Eio.Time.sleep env#clock delay;
       let bytes = read (Filename.concat fixtures (Printf.sprintf "%04d.png" (499 + i))) in
-      let handle = sample frame_samples (fun () ->
+      let handle = sample "store_frame" frame_samples (fun () ->
         get (V.store_frame ~keeper_name:keeper bytes)) in
       let name = check_file frames bytes handle in
-      sample load_frame (fun () ->
-        load name (Filename.concat frames name));
-      let kept_handle = sample kept_new (fun () ->
+      sample "load_frame" load_frame (fun () ->
+        load name);
+      let kept_handle = sample "store_kept_new" kept_new (fun () ->
         get (V.store_kept ~keeper_name:keeper bytes)) in
       ignore (check_file kept bytes kept_handle);
-      ignore (sample kept_repeat (fun () ->
+      ignore (sample "store_kept_repeat" kept_repeat (fun () ->
         get (V.store_kept ~keeper_name:keeper bytes)));
-      sample load_kept (fun () ->
-        load name (Filename.concat kept name))
+      sample "load_kept" load_kept (fun () ->
+        load name)
     done;
     let files = Array.to_list (Sys.readdir frames)
       |> List.filter (fun n -> String.length n = 64) in
@@ -132,6 +144,7 @@ let run ~root ~fixtures ~count ~window_seconds =
       fail "frame retention limit exceeded";
     let output = `Assoc [
       "source", `String (Sys.getenv "MEASURE_SOURCE");
+      "window_start_utc_epoch", `Float window_start;
       "input_count", `Int count;
       "frame_entries", `Int (List.length files);
       "frame_bytes", `Int bytes;
@@ -140,7 +153,15 @@ let run ~root ~fixtures ~count ~window_seconds =
       "store_kept_repeat", stats !kept_repeat;
       "load_kept", stats !load_kept;
       "load_frame", stats !load_frame;
-      "scheduler_lag", stats !lag] in
+      "scheduler_lag", stats_float !lag;
+      "samples", `List (List.map sample_json
+        (List.sort (fun a b -> Float.compare a.start_epoch b.start_epoch)
+          (!frame_samples @ !kept_new @ !kept_repeat @ !load_kept @ !load_frame)))] in
+    let window_end = now () in
+    write (Filename.concat root "window-complete") (string_of_float window_end);
+    while not (Sys.file_exists (Filename.concat root "window-release")) do
+      Eio.Time.sleep env#clock 0.01
+    done;
     print_endline (Yojson.Safe.to_string output))
 
 let () =

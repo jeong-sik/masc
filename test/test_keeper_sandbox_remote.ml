@@ -748,6 +748,47 @@ let test_missing_and_invalid_receipts_keep_actual_status () =
     ["exit3"; "bad-receipt"]
 ;;
 
+let test_openssh_observation_reads_the_dispatch_cache () =
+  with_eio @@ fun () ->
+  let base_path = temp_dir () in
+  let cli, _ = make_stub ~dir:base_path ~mode:"exit3" in
+  let ssh_bin = Filename.concat base_path "ssh-protocol-stub" in
+  save ssh_bin
+    (Printf.sprintf
+       "#!/bin/sh\ncase \"$*\" in\n  *--probe*) exec %s --probe ;;\n  *) exec %s \"$@\" ;;\nesac\n"
+       (shell_quote cli) (shell_quote cli));
+  Unix.chmod ssh_bin 0o700;
+  let endpoint : Exec_ssh_endpoint.t =
+    { name = "observed-box"; host = "fleet.invalid"; user = "masc"; port = 22
+    ; identity_file = "key"; known_hosts_file = "hosts"
+    ; remote_root = "/srv/masc"; connect_timeout_sec = 1
+    ; max_concurrent_sessions = 1; env_allowlist = []; capabilities = []
+    ; private_home = false; allowed_paths = [] }
+  in
+  let cached () = Keeper_sandbox_remote.report_openssh ~base_path ~endpoint in
+  (match (cached ()).probe with
+   | Probe_not_asked -> ()
+   | _ -> fail "an unused endpoint cannot have a probe observation");
+  let state =
+    Keeper_sandbox_remote.of_openssh ~base_path ~keeper_name:"keeper-a"
+      { endpoint; ssh_bin; identity_file = "key"; known_hosts_file = "hosts"
+      ; control_path_dir = Filename.concat base_path "unused-control" }
+  in
+  let status, _, _ = run_request (Keeper_sandbox_remote.runner ~timeout_sec:2.0 state) () in
+  check status_testable "stub dispatch ran" (Unix.WEXITED 3) status;
+  Sys.remove ssh_bin;
+  let observed = cached () in
+  (match observed.probe, observed.last_dispatch with
+   | Probe_answered _, Some (Payload_finished _) -> ()
+   | _ -> fail "the observation must contain the dispatch's probe and outcome");
+  check string "cached observation is exactly the runner's report"
+    (Yojson.Safe.to_string (Keeper_tool_lane_status.json_of_report (Keeper_sandbox_remote.report state)))
+    (Yojson.Safe.to_string (Keeper_tool_lane_status.json_of_report observed));
+  (match (Keeper_sandbox_remote.report_openssh ~base_path:(base_path ^ "-other") ~endpoint).probe with
+   | Probe_not_asked -> ()
+   | _ -> fail "another workspace cannot see this workspace's observation")
+;;
+
 let () =
   if Array.length Sys.argv > 1 && String.equal Sys.argv.(1) "--container-stub"
   then stub_main ()
@@ -786,6 +827,8 @@ let () =
               test_the_lane_status_names_who_acts
           ; test_case "the lane status names a shim from another release" `Quick
               test_the_lane_status_names_a_shim_from_another_release
+          ; test_case "SSH observation reads the dispatch cache" `Quick
+              test_openssh_observation_reads_the_dispatch_cache
           ; test_case "lane error codes" `Quick test_lane_error_codes
           ; test_case "preflight unreachable names the guest" `Quick
               test_preflight_unreachable_names_the_guest

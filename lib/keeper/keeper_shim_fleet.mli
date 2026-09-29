@@ -3,7 +3,7 @@
     read for all of them at once.
 
     A projection of what this process learned from its own probes and
-    dispatches. Reads no disk beyond the keeper metas, dispatches nothing,
+    dispatches. Reads keeper metas and endpoint declarations, dispatches nothing,
     starts no guest and stores nothing, so it is empty for a keeper whose lane
     has not been asked since the server started, and a server restart empties
     it. Each row's [probe.observed_at_unix] says how old its shim reading is. *)

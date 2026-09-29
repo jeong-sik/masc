@@ -18,6 +18,10 @@ type remote_origin =
   | Origin_unread
       (** The lookup timed out, git was missing, or it failed otherwise. *)
 
+val target_ref_stale_after_s : int
+(** Maximum age of a local target-ref observation before equality with HEAD
+    must be reported as stale in both host and endpoint probes. *)
+
 type inspected_checkout =
   { checkout : Keeper_playground_checkouts.checkout
   ; origin : remote_origin
@@ -26,6 +30,7 @@ type inspected_checkout =
   ; dirty : (bool * int, string) result
   ; target_ref : string option
   ; upstream_head : string option
+  ; target_ref_last_observed_at_unix : int option
   ; ahead : int option
   ; behind : int option
   }

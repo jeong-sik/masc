@@ -108,6 +108,10 @@ let with_workspace f =
             (match Runtime.init_default ~config_path:runtime_path with
              | Ok () -> ()
              | Error error -> failf "runtime fixture rejected: %s" error);
+            (* keeper up refuses a sandbox_image with nothing promoted on
+               this host, and every keeper here names "base". *)
+            Masc_test_deps.write_sandbox_image_catalog ~base_path
+              [ "base", Masc_test_deps.live_sandbox_image_tag ];
             Eio.Switch.run @@ fun sw ->
             Masc_test_deps.with_server_root_switch ~sw @@ fun () ->
             (match

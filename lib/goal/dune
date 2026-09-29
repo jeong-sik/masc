@@ -23,6 +23,8 @@
   masc.tool_types
   time_compat
   fs_compat
+  ; Goal_due reads a due date into a Ptime instant.
+  ptime
   yojson
   eio
   unix)

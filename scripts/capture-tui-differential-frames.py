@@ -378,7 +378,7 @@ def measured_ttyd_session(
             "window.term && window.term.cols === 99 && window.term.rows === 30",
             timeout=10_000,
         )
-        support.wait_text(page, "MASC Overview")
+        support.wait_text(page, "MASC Dashboard")
         page.wait_for_timeout(3_000)
         require(len(web_socket_urls) == 1, f"WebSocket count: {web_socket_urls}")
         yield page, process, frames

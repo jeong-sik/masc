@@ -27,6 +27,7 @@ module Http = Masc.Http_server_eio
 let runner_tick_sec = 1.0
 
 let () = Mirage_crypto_rng_unix.use_default ()
+let () = Masc.Server_startup_state.mark_state_ready () |> Result.get_ok
 
 let runtime_toml =
   {|

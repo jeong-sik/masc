@@ -552,6 +552,7 @@ let canonical_catalog_evidence catalog model_entries target_declarations =
          ; PC.string_of_provider_kind binding.PC.kind
          ; binding.PC.base_url
          ; binding.PC.request_path
+         ; Binding.option_int binding.PC.max_concurrent_requests
          ]))
   in
   ("agent_core-exact-output-catalog-evidence-v5" :: providers) @ models @ targets
@@ -815,6 +816,11 @@ let load_resolver_snapshot
          let* () =
            validate_model_path ~target_ref:target.target_ref kind target.model_id
          in
+         let max_concurrent_requests =
+           match target.wire with
+           | Catalog_provider_wire -> None
+           | Binding_wire { config = binding; _ } -> binding.PC.max_concurrent_requests
+         in
          let projection_config =
            PC.make
              ~kind
@@ -830,6 +836,7 @@ let load_resolver_snapshot
              ~model_capabilities_override:capabilities
              ~reasoning_uncontrolled
              ?connect_timeout_s:target.connect_timeout_s
+             ?max_concurrent_requests
              ()
          in
          let codec =
@@ -858,6 +865,7 @@ let load_resolver_snapshot
               ; option_string (Option.map Reasoning_effort.to_string target.reasoning_effort)
               ; option_float target.connect_timeout_s
               ; option_float target.body_timeout_s
+              ; Binding.option_int max_concurrent_requests
               ; codec
               ; "content-type\000application/json"
               ]

@@ -38,7 +38,7 @@ export function KeeperCommsPanel({ keeper }: { keeper: Keeper }) {
 // ── Repository Checkouts Panel ──────────────────────────
 
 type CatalogState = 'registered' | 'unregistered' | 'ambiguous' | 'unavailable' | 'origin_unavailable'
-type FreshnessState = 'current' | 'ahead' | 'behind' | 'diverged' | 'unavailable'
+type FreshnessState = 'current' | 'stale_ref' | 'ahead' | 'behind' | 'diverged' | 'unavailable'
 
 interface CatalogProjection {
   state: CatalogState | 'unsupported'
@@ -51,6 +51,8 @@ interface FreshnessProjection {
   rawState: string | null
   behind: number | null
   ahead: number | null
+  targetRef: string | null
+  observedAtUnix: number | null
 }
 
 interface RepositoryCheckout {
@@ -68,7 +70,7 @@ const CATALOG_STATES = new Set<CatalogState>([
   'registered', 'unregistered', 'ambiguous', 'unavailable', 'origin_unavailable',
 ])
 const FRESHNESS_STATES = new Set<FreshnessState>([
-  'current', 'ahead', 'behind', 'diverged', 'unavailable',
+  'current', 'stale_ref', 'ahead', 'behind', 'diverged', 'unavailable',
 ])
 
 function parseCatalogProjection(value: unknown): CatalogProjection {
@@ -93,6 +95,10 @@ function parseFreshnessProjection(value: unknown): FreshnessProjection {
     rawState,
     behind: isRecord(value) && typeof value.behind === 'number' ? value.behind : null,
     ahead: isRecord(value) && typeof value.ahead === 'number' ? value.ahead : null,
+    targetRef: isRecord(value) && typeof value.target_ref === 'string' ? value.target_ref : null,
+    observedAtUnix: isRecord(value) && typeof value.target_ref_last_observed_at_unix === 'number'
+      ? value.target_ref_last_observed_at_unix
+      : null,
   }
 }
 
@@ -151,6 +157,14 @@ export function RepositoryCheckoutsPanel({ keeperName }: { keeperName: string })
                 const behind = checkout.freshness.behind
                 const ahead = checkout.freshness.ahead
                 const repositoryId = checkout.catalog.repositoryId
+                const observedAt = checkout.freshness.observedAtUnix
+                const freshnessDetail = checkout.freshness.state === 'stale_ref'
+                  ? `${checkout.freshness.targetRef ?? 'target ref'} as of ${observedAt === null
+                    ? 'unknown'
+                    : `${new Date(observedAt * 1000).toISOString().slice(0, 19).replace('T', ' ')} UTC`} · not re-read`
+                  : behind === null || ahead === null
+                    ? checkout.inspection_state
+                    : `behind ${behind} · ahead ${ahead}`
                 return html`
                 <div class="flex items-center gap-3 px-3 py-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] v2-monitoring-row">
                   <div class="flex-1 min-w-0">
@@ -164,7 +178,7 @@ export function RepositoryCheckoutsPanel({ keeperName }: { keeperName: string })
                     <div class="text-3xs text-[var(--color-fg-muted)] font-mono mt-0.5 truncate">${checkout.head?.trim() || 'Git metadata unavailable'}</div>
                     <div class="text-3xs text-[var(--color-fg-disabled)] font-mono mt-0.5 truncate">${checkout.path}${repositoryId ? ` · ${repositoryId}` : ''}</div>
                   </div>
-                  <span class="text-3xs text-[var(--color-fg-disabled)] flex-shrink-0">${behind === null || ahead === null ? checkout.inspection_state : `behind ${behind} · ahead ${ahead}`}</span>
+                  <span class="text-3xs text-[var(--color-fg-disabled)] max-w-[50%] text-right break-words">${freshnessDetail}</span>
                 </div>
               `})}
             </div>

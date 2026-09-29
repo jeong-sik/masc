@@ -7,6 +7,12 @@ val keeper_names : Workspace.config -> (string list, string) result
     not an empty fleet. *)
 
 val participants : base_path:string -> keepers:string list -> now:float -> string list
-(** [keepers], every operator ([Admin] credential) and every invite ([Player]
-    credential) that has not expired, sorted and deduplicated. [Worker]
+(** [keepers] plus unexpired operator ([Admin]) and invite ([Player])
+    credentials, sorted and deduplicated. [Worker]
     credentials are agents' MCP clients, not seats at the machine. *)
+
+val hand_to : Workspace.config -> now:float -> (string list, string) result
+(** The names a pass may hand the controller to: {!participants} over
+    {!keeper_names}. [Error] when the fleet or the credentials do not list,
+    since then nobody can say who sits at the machine. The play page lists these names and
+    [masc_dos_pass] accepts only them. *)

@@ -384,7 +384,8 @@ let test_image_admission_inspects_once () =
     (Filename.quote log);
   close_out oc;
   Unix.chmod cli 0o755;
-  (match M.image_present_for Backend.Apple_container ~image:"fixture:local" ~timeout_sec:5.0 with
+  (match M.image_present_for Backend.Apple_container ~name:(Some "base")
+           ~image:"fixture:local" ~timeout_sec:5.0 with
    | Ok () -> ()
    | Error reason -> Alcotest.fail reason);
   Alcotest.(check string) "admission and marker share one inspect"
@@ -413,13 +414,11 @@ let test_live_structured_image_probe () =
     | M.Image_missing -> ()
     | _ -> Alcotest.fail "a definitely absent image did not produce Image_missing"
 
-(* The gate builds the image this binary carries the recipe for, and only
-   that one. A keeper naming any other image names one we have no recipe
-   for -- and an operator who pointed the default at their own tag would
-   find our recipe written over theirs. So an absent image that is not the
-   recipe's own tag has to come back as the plain refusal, with no build
-   attempted: a build that ran would say so in its own error. *)
-let test_live_absent_image_we_have_no_recipe_for_is_not_built () =
+(* The gate never builds: a Keeper's image is the build the host catalog
+   promoted, and only [masc sandbox-image] builds one. An absent image comes
+   back as the plain refusal; a build that ran would say so in its own
+   error. *)
+let test_live_an_absent_image_is_refused_not_built () =
   match Sys.getenv_opt "MASC_MICROVM_IMAGE_PROBE_LIVE" with
   | None -> ()
   | Some _ ->
@@ -427,6 +426,7 @@ let test_live_absent_image_we_have_no_recipe_for_is_not_built () =
     (match
        M.image_present_for
          Backend.Apple_container
+         ~name:(Some "base")
          ~image:"masc-proof-definitely-missing:never"
          ~timeout_sec:15.0
      with
@@ -434,12 +434,44 @@ let test_live_absent_image_we_have_no_recipe_for_is_not_built () =
        Alcotest.fail "an absent image passed the gate"
      | Error message ->
        Alcotest.(check bool)
-         "the refusal is the plain one, so nothing was built"
+         "the refusal is the missing-image one"
          true
-         (String.length message > 0
-         && not
-              (Astring.String.is_infix ~affix:"microvm_image_build_failed"
-                 message)))
+         (Astring.String.is_infix ~affix:"microvm_image_missing" message))
+
+(* A missing promoted build needs different repair steps for each backend.
+   Every store takes a promote; msb's gets its build through `msb load`
+   because masc cannot build into it. *)
+let test_a_missing_image_names_supported_recovery_for_its_backend () =
+  let refusal backend name =
+    match
+      M.image_present_result_for backend ~name ~image:"masc-sandbox-ocaml:t1"
+        M.Image_missing
+    with
+    | Ok () -> Alcotest.fail "a missing image passed the gate"
+    | Error message -> message
+  in
+  let has message needle = Astring.String.is_infix ~affix:needle message in
+  List.iter
+    (fun (backend, runtime) ->
+       let message = refusal backend (Some "ocaml") in
+       List.iter
+         (fun needle -> Alcotest.(check bool) (runtime ^ ": " ^ needle) true (has message needle))
+         [ "masc-sandbox-ocaml:t1"
+         ; "masc sandbox-image --recipe ocaml --source <checkout> --runtime " ^ runtime
+         ; "masc sandbox-image promote ocaml <tag> --runtime " ^ runtime
+         ];
+       Alcotest.(check bool) (runtime ^ " is not told to roll back") false
+         (has message "rollback");
+       Alcotest.(check bool) (runtime ^ " is not told about a digest") false
+         (has message "digest"))
+    [ Backend.Apple_container, "apple_container"; Backend.Nerdctl_kata, "nerdctl_kata" ];
+  let msb = refusal Backend.Microsandbox (Some "ocaml") in
+  Alcotest.(check bool) "msb load is how a build reaches msb" true
+    (has msb "msb load");
+  Alcotest.(check bool) "msb promotes what it loaded" true
+    (has msb "masc sandbox-image promote ocaml <tag> --runtime microsandbox");
+  Alcotest.(check bool) "msb is not told to build" false
+    (has msb "masc sandbox-image --recipe")
 
 let test_factory_resolves_microvm_to_a_profile_carrying_runtime () =
   with_eio_fs @@ fun () ->
@@ -2149,7 +2181,7 @@ esac
 
 (* Both failures occur after a fresh snapshot was claimed and before any
    persistent guest can mount it. Drive the actual boot with a fake CLI. *)
-let test_preboot_network_refusal_releases_claimed_identity () =
+let test_preboot_refusals_release_identity_and_recheck_shim () =
   with_eio_fs @@ fun () ->
   let module Turn = Masc.Keeper_turn_sandbox_runtime in
   List.iter (fun policy_listing_fails ->
@@ -2166,8 +2198,18 @@ let test_preboot_network_refusal_releases_claimed_identity () =
     let shim_dir = Filename.concat microvm "shim" in
     List.iter (fun path -> Unix.mkdir path 0o755) [ masc; microvm; shim_dir ];
     let shim = Filename.concat shim_dir M.shim_binary_name in
-    Out_channel.with_open_bin shim (fun channel -> output_string channel "#!/bin/sh\nexit 0\n");
+    let shim_contents = "#!/bin/sh\nexit 0\n" in
+    Out_channel.with_open_bin shim (fun channel -> output_string channel shim_contents);
     Unix.chmod shim 0o755;
+    (* The first boot below must pass integrity before the network refuses
+       it. This also primes the old metadata cache the regression catches. *)
+    Out_channel.with_open_bin (Filename.concat shim_dir M.shim_sidecar_name)
+      (fun channel -> output_string channel
+        (Digestif.SHA256.(to_hex (digest_string shim_contents)) ^ "  masc-exec-shim\n"));
+    (* Whole seconds round-trip through utimes on both Linux and macOS. *)
+    let timestamp = floor (Unix.stat shim).Unix.st_mtime in
+    Unix.utimes shim timestamp timestamp;
+    let original_shim = Unix.stat shim in
     Out_channel.with_open_bin cli (fun channel ->
       Printf.fprintf channel {|#!/bin/sh
 log=%s
@@ -2225,7 +2267,29 @@ esac
     List.iter (fun command ->
       Alcotest.(check bool) "the sole run names the trim helper" true
         (String.starts_with
-           ~prefix:("run --rm --name " ^ M.work_volume_trim_name ~keeper_name ^ " ") command)) runs)
+           ~prefix:("run --rm --name " ^ M.work_volume_trim_name ~keeper_name ^ " ") command)) runs;
+    (* Rewrite the same inode with equal-length bytes and restore its mtime.
+       A fresh runtime drives the real boot entry again, not just the hash
+       helper; neither branch may admit this changed shim to a guest. *)
+    Out_channel.with_open_bin shim (fun channel -> output_string channel "#!/bin/sh\nexit 1\n");
+    Unix.utimes shim original_shim.Unix.st_atime original_shim.Unix.st_mtime;
+    let changed_shim = Unix.stat shim in
+    Alcotest.(check bool) "device/inode/size/mtime are unchanged" true
+      (original_shim.Unix.st_dev = changed_shim.Unix.st_dev
+       && original_shim.Unix.st_ino = changed_shim.Unix.st_ino
+       && original_shim.Unix.st_size = changed_shim.Unix.st_size
+       && original_shim.Unix.st_mtime = changed_shim.Unix.st_mtime);
+    let retry = Turn.create ~config ~meta ~image:(Ok "trim-fixture")
+      ~network_mode:Profile.Network_policy () in
+    (match Turn.microvm_remote_endpoint ~timeout_sec:5. retry with
+     | Error detail ->
+       Alcotest.(check bool) "next boot refuses the rewritten shim before networking" true
+         (Astring.String.is_infix ~affix:"microvm_shim_hash_mismatch" detail)
+     | Ok _ -> Alcotest.fail "equal-metadata rewritten shim was admitted to a guest");
+    let retry_calls = In_channel.with_open_bin log In_channel.input_all
+      |> String.split_on_char '\n' in
+    Alcotest.(check (list string)) "rejected shim starts no further container"
+      runs (List.filter (String.starts_with ~prefix:"run ") retry_calls))
     [ true; false ]
 ;;
 
@@ -3090,9 +3154,12 @@ let () =
             test_image_lock_marker_is_read_from_inspect_json
         ; Alcotest.test_case "live structured image probe" `Slow
             test_live_structured_image_probe
-        ; Alcotest.test_case "image admission inspects once" `Quick test_image_admission_inspects_once
-        ; Alcotest.test_case "an absent image we have no recipe for is not built"
-            `Slow test_live_absent_image_we_have_no_recipe_for_is_not_built
+        ; Alcotest.test_case "image admission inspects once" `Quick
+            test_image_admission_inspects_once
+        ; Alcotest.test_case "an absent image is refused, not built"
+            `Slow test_live_an_absent_image_is_refused_not_built
+        ; Alcotest.test_case "a missing image gives backend-supported recovery" `Quick
+            test_a_missing_image_names_supported_recovery_for_its_backend
         ; Alcotest.test_case "sweeps only guests whose owner is gone" `Quick
             test_only_guests_whose_owner_is_gone
         ; Alcotest.test_case "lists only this Keeper's Apple Container VM" `Quick
@@ -3180,8 +3247,8 @@ let () =
             test_teardown_removes_or_reports_abandoned_trim_helper
         ; Alcotest.test_case "teardown attempts every guest after helper or guest errors" `Quick
             test_teardown_removes_guests_despite_trim_cleanup_error
-        ; Alcotest.test_case "pre-boot network refusals release claimed identities" `Quick
-            test_preboot_network_refusal_releases_claimed_identity
+        ; Alcotest.test_case "pre-boot refusals release identity and recheck shim bytes" `Quick
+            test_preboot_refusals_release_identity_and_recheck_shim
         ; Alcotest.test_case "shim travels read-only with its config" `Quick
             test_shim_travels_read_only_with_its_config
         ; Alcotest.test_case "the shim sidecar decides the boot" `Quick

@@ -14,7 +14,7 @@ import test_tui_keyboard_input as h
 # The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs
 # a suite when a pull request changes a path the suite names, so without
 # this a change to the drawn text below reaches main with no scenario run.
-# The surface this opens ("MASC Planning") is titled in
+# The surface this opens ("MASC Work") is titled in
 # masc_tui_render_prim.ml and nowhere else in bin/.
 SOURCE_MODULES = (
     "bin/masc_tui_render_prim.ml",
@@ -77,10 +77,10 @@ def run(executable: str, scenario: str) -> None:
 
     def interact(process, master, _slave, output, _base):
         if scenario == "proven":
-            h.palette_go(process, master, output, b"go Planning", b"MASC Planning")
+            h.palette_go(process, master, output, b"go Work", b"MASC Work")
             h.send_and_wait(process, master, output, b"f", b"plan-alpha-29424")
         else:
-            h.palette_go(process, master, output, b"go Planning", b"plan-alpha-29424")
+            h.palette_go(process, master, output, b"go Work", b"plan-alpha-29424")
         h.send_and_wait(process, master, output, b"\x1b[C", expected)
         h.read_available(master, output)
         before = len(output)

@@ -4,6 +4,7 @@
 
 type error =
   | Invalid_limit
+  | Render_failed of string
   | Index_unavailable of string
   | Fact_exceeds_limit of Workspace_memory_ledger.fact_ref
 
@@ -17,10 +18,14 @@ type batch =
   ; index_stats : Keeper_memory_search_index.batch_stats
   }
 
+val fact_id : Workspace_memory_ledger.fact_ref -> string
+(** Stable id for one fact identity, including source-bound path. The model
+    returns this instead of copying the full fact reference into each answer. *)
+
 val prepare
   :  max_input_bytes:int
   -> neighbor_limit:int
-  -> render:(Yojson.Safe.t -> string)
+  -> render:(Yojson.Safe.t -> (string, string) result)
   -> ledger:Workspace_memory_ledger.t
   -> current:Workspace_memory_ledger.pending_fact list
   -> pending:Workspace_memory_ledger.pending_fact list

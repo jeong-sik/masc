@@ -540,7 +540,7 @@ let announce_proof_verdict
 
 (* {1 Owner-directed Goal notices (#39571)}
 
-   A Goal records the Keeper that created it. Two events are worth one direct
+   A Goal records the caller that created it. Two events are worth one direct
    notice to that owner: a refuted proof verdict, and a due date that passed
    while the Goal is still executing or verifying. The notice is a Pending
    Message in the owner's own transcript, not a fleet broadcast: the owner is
@@ -548,8 +548,10 @@ let announce_proof_verdict
    Keeper's window.
 
    A Goal with no recorded owner has no recipient. The notice is skipped and
-   the screen keeps showing "unknown" so the operator can set an owner
-   explicitly; nothing is posted to the Board on the owner's behalf.
+   the screen keeps showing "unknown". A named owner must resolve to a Keeper
+   before a transcript is written: a client name alone has no receiving turn.
+   An absent or unreadable recipient leaves delivery outstanding for a later
+   scan; no replacement recipient is chosen.
 
    Delivery is idempotent by the [Goal_notification] key (goal id, owner, and
    the one event). The same event, a retry after a failed send, or a restart
@@ -575,28 +577,34 @@ let deliver_goal_owner_notice config ~(goal : Goal_store.goal) ~event ~content =
   match goal.Goal_store.owner with
   | Goal_store.Unknown_owner -> Ok ()
   | Goal_store.Owner owner ->
-    let delivery_key =
-      Keeper_chat_delivery_identity.Goal_notification
-        { goal_id = goal.Goal_store.id; owner; event }
-    in
-    let mentions =
-      match Keeper_identity.Keeper_id.of_string owner with
-      | Some keeper_id -> [ keeper_id ]
-      | None -> []
-    in
-    (match
-       Keeper_chat_store.append_user_message_once
-         ~base_dir:config.Workspace_utils_backend_setup.base_path
-         ~keeper_name:owner
-         ~delivery_key
-         ~content
-         ~surface:Surface_ref.Agent
-         ~speaker:goal_notice_speaker
-         ~extra_mentions:mentions
-         ()
-     with
-     | Ok _ -> Ok ()
-     | Error detail -> Error detail)
+    (match Keeper_producer_route.resolve ~config owner with
+     | Error detail ->
+       Error (Printf.sprintf "goal owner %S recipient lookup failed: %s" owner detail)
+     | Ok Keeper_producer_route.No_keeper ->
+       Error (Printf.sprintf "goal owner %S has no Keeper recipient" owner)
+     | Ok (Keeper_producer_route.Keeper keeper_name) ->
+       let delivery_key =
+         Keeper_chat_delivery_identity.Goal_notification
+           { goal_id = goal.Goal_store.id; owner; event }
+       in
+       let mentions =
+         match Keeper_identity.Keeper_id.of_string keeper_name with
+         | Some keeper_id -> [ keeper_id ]
+         | None -> []
+       in
+       (match
+          Keeper_chat_store.append_user_message_once
+            ~base_dir:config.Workspace_utils_backend_setup.base_path
+            ~keeper_name
+            ~delivery_key
+            ~content
+            ~surface:Surface_ref.Agent
+            ~speaker:goal_notice_speaker
+            ~extra_mentions:mentions
+            ()
+        with
+        | Ok _ -> Ok ()
+        | Error detail -> Error detail))
 ;;
 
 let mark_goal_notice config ~goal_id kind ~key =

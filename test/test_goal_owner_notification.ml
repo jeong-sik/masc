@@ -24,6 +24,20 @@ let rm_rf dir =
   in
   try rm dir with _ -> ()
 
+let persist_keeper config name =
+  let meta =
+    match Masc_test_deps.meta_of_json_fixture (`Assoc [ "name", `String name ]) with
+    | Ok meta -> meta
+    | Error detail -> fail detail
+  in
+  match
+    Keeper_fs.save_json_atomic
+      (Keeper_types_profile.keeper_meta_path config name)
+      (Keeper_meta_json.meta_to_json meta)
+  with
+  | Ok () -> ()
+  | Error detail -> fail detail
+
 let with_workspace (f : Workspace.config -> unit) =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -31,6 +45,7 @@ let with_workspace (f : Workspace.config -> unit) =
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () ->
     let config = Workspace.default_config dir in
     ignore (Workspace.init config ~agent_name:(Some "test"));
+    List.iter (persist_keeper config) [ "keeper-a"; "keeper-b"; "planner" ];
     f config)
 
 let past_date = "2000-01-01"
@@ -106,6 +121,78 @@ let verdict_rows (config : Workspace.config) owner =
   |> List.filter (fun (m : Keeper_chat_store.chat_message) ->
     String.length m.content >= 14
     && String.sub m.content 0 14 = "[goal_verdict]")
+
+(* Exercise both notices through a real tool-created Goal and committed proof.
+   Its caller identity is retained even while it has no receiving Keeper. *)
+let test_unavailable_recipient_recovers owner initial_record () =
+  with_workspace (fun config ->
+    (match initial_record with
+     | None -> ()
+     | Some bytes ->
+       let path = Keeper_types_profile.keeper_meta_path config owner in
+       Out_channel.with_open_text path (fun out -> output_string out bytes));
+    let ctx : Tool_workspace.context = { Tool_workspace.config; agent_name = owner } in
+    let created =
+      must_succeed "create goal"
+        (dispatch ctx ~name:"masc_goal_upsert"
+           [ "title", `String "Goal with an unavailable recipient"
+           ; "metric", `String "accepted artifacts"
+           ; "target_value", `String "1"
+           ; "due_date", `String past_date
+           ])
+    in
+    let goal_id = json_state created "goal_id" in
+    ignore
+      (must_succeed "request_complete"
+         (dispatch ctx ~name:"masc_goal_transition"
+            [ "goal_id", `String goal_id; "action", `String "request_complete" ]));
+    let request_id, criterion =
+      match Goal_verification.get_record_authoritative config ~goal_id with
+      | Ok (Some { completion = Goal_verification.Proof_pending pending; _ }) ->
+        pending.request_id, pending.criterion
+      | Ok _ -> fail "test setup needs a bound proof request"
+      | Error detail -> fail detail
+    in
+    ignore
+      (must_succeed "refuted commit"
+         (Workspace_goals.commit_verifier_decision
+            ~tool_name:"goal_verifier_commit" ~start_time:(Tool_timing.start ())
+            config ~goal_id ~verification_run_id:"recipient-boundary-test"
+            ~request_id ~criterion
+            ~decision:(Workspace_goals.Proof_refuted { reason = "not proven" })
+            ~evidence:"observed by the verifier"));
+    let check_undelivered () =
+      let goal = goal_of config goal_id in
+      check (option string) "refuted notice is outstanding" None goal.notified_refuted_key;
+      check (option string) "overdue notice is outstanding" None goal.notified_overdue_key;
+      check bool "no orphan transcript is created" false
+        (Sys.file_exists
+           (Keeper_chat_store.chat_path ~base_dir:config.base_path ~keeper_name:owner))
+    in
+    let scan () =
+      Workspace_goals.scan_overdue_goal_notifications config;
+      Workspace_goals.scan_refuted_goal_notifications config
+    in
+    check_undelivered ();
+    scan ();
+    check_undelivered ();
+    scan ();
+    check_undelivered ();
+    (* The same owner becomes a stopped Keeper, or its damaged record is
+       repaired. Existing scans can now deliver both outstanding notices. *)
+    persist_keeper config owner;
+    scan ();
+    check int "refuted notice reaches the recovered owner" 1
+      (List.length (verdict_rows config owner));
+    check int "overdue notice reaches the recovered owner" 1
+      (List.length (overdue_rows config owner));
+    let goal = goal_of config goal_id in
+    check bool "the caller still owns the goal" true (goal.owner = Goal_store.Owner owner);
+    check bool "refuted delivery has a marker" true (Option.is_some goal.notified_refuted_key);
+    check bool "overdue delivery has a marker" true (Option.is_some goal.notified_overdue_key);
+    scan ();
+    check int "refuted delivery stays singular" 1 (List.length (verdict_rows config owner));
+    check int "overdue delivery stays singular" 1 (List.length (overdue_rows config owner)))
 
 (* A refuted verdict sends the owner exactly one notice, and an exact replay of
    the same verdict sends nothing new. *)
@@ -651,6 +738,12 @@ let () =
     ; ( "delivery key"
       , [ test_case "is idempotent per event" `Quick
             test_goal_notification_delivery_key_is_idempotent
+        ] )
+    ; ( "recipient boundary"
+      , [ test_case "an external owner waits for a real Keeper" `Quick
+            (test_unavailable_recipient_recovers "masc-tui" None)
+        ; test_case "an unreadable Keeper waits for repair" `Quick
+            (test_unavailable_recipient_recovers "broken-owner" (Some "{not json"))
         ] )
     ; ( "refuted verdict"
       , [ test_case "notifies the owner once" `Quick

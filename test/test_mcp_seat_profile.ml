@@ -77,7 +77,7 @@ let with_state ?(auth = false) f =
           end
           else None
         in
-        f (fun ?(profile = Mcp_eio.Seat) ?auth_token body ->
+        f ~base_path (fun ?(profile = Mcp_eio.Seat) ?auth_token body ->
           let auth_token =
             match auth_token with
             | Some token -> Some token
@@ -108,7 +108,7 @@ let tool_names response =
   | _ -> failf "no tools in %s" (Yojson.Safe.to_string response)
 
 let test_the_seat_lists_only_the_play_tools () =
-  with_state (fun handle ->
+  with_state (fun ~base_path:_ handle ->
     check (list string) "the seat lists the CanPlayMachine tools" seat_tools
       (tool_names (handle (request "tools/list")));
     let full = tool_names (handle ~profile:Mcp_eio.Full (request "tools/list")) in
@@ -116,7 +116,7 @@ let test_the_seat_lists_only_the_play_tools () =
       (List.length full > List.length seat_tools))
 
 let test_the_handshake_advertises_tools_only () =
-  with_state (fun handle ->
+  with_state (fun ~base_path:_ handle ->
     let result =
       match member "result" (handle (request ~params:initialize_params "initialize")) with
       | Some result -> result
@@ -165,7 +165,7 @@ let refused_methods =
   ]
 
 let test_the_seat_refuses_every_other_method () =
-  with_state (fun handle ->
+  with_state (fun ~base_path:_ handle ->
     List.iter
       (fun method_ ->
         check (option int) (method_ ^ " is refused on the seat") (Some method_not_found)
@@ -177,7 +177,7 @@ let test_the_seat_refuses_every_other_method () =
       (handle (request ~notification:true "dashboard/ack") = `Null))
 
 let test_the_seat_refuses_a_tool_it_does_not_list () =
-  with_state (fun handle ->
+  with_state (fun ~base_path:_ handle ->
     let call name =
       handle
         (request
@@ -204,7 +204,7 @@ let call_tool ?auth_token handle name =
    so the credential store, the catalog permission check and the profile gate
    all see a Player. *)
 let test_an_invite_plays_through_the_seat_with_auth_on () =
-  with_state ~auth:true (fun handle ->
+  with_state ~auth:true (fun ~base_path:_ handle ->
     check (list string) "an invite lists the play tools" seat_tools
       (tool_names (handle (request "tools/list")));
     check (option int) "a made-up bearer is refused" (Some auth_error)
@@ -231,6 +231,79 @@ let test_an_invite_plays_through_the_seat_with_auth_on () =
     check (option string) "masc_dos_screen ran as the invitee" (Some "pi") (meta_string "agent_id");
     check (option string) "the lane refused it, not the permission check"
       (Some "workflow_rejection") (meta_string "failure_class"))
+
+let test_an_invite_recovers_only_a_stopped_keepers_controller () =
+  let module Lane = Dos_lane in
+  let holder = "seat-holder" in
+  (* A self-contained COM guest that waits for a BIOS key, then exits. *)
+  let program = "\xb4\x00\xcd\x16\x09\xc0\x74\xf8\xcd\x20" in
+  let controller () =
+    match Lane.screen () with
+    | Ok observation -> observation.Lane.controller
+    | Error error -> fail (Lane.error_to_string error)
+  in
+  List.iter
+    (fun running ->
+      List.iter
+        (fun (name, arguments) ->
+          with_state ~auth:true (fun ~base_path handle ->
+            let config = Masc.Workspace.default_config base_path in
+            let meta =
+              match Masc_test_deps.meta_of_json_fixture
+                (`Assoc [ "name", `String holder; "activation_mode", `String "manual" ]) with
+              | Ok meta -> meta
+              | Error detail -> fail detail
+            in
+            (match Masc.Keeper_meta_store.replace_snapshot config meta with
+             | Ok () -> ()
+             | Error detail -> fail detail);
+            if running then
+              ignore (Masc.Keeper_registry.For_testing.register ~base_path holder meta
+                : Masc.Keeper_registry.registry_entry);
+            Fun.protect
+              ~finally:(fun () ->
+                Masc.Keeper_registry.For_testing.unregister ~base_path holder;
+                let who = match Lane.screen () with
+                  | Ok { Lane.controller = Some name; _ } -> name
+                  | Ok _ | Error _ -> "cleanup" in
+                ignore (Lane.eject ~who ~announce:(fun () -> ()) ()
+                  : (unit, Lane.error) result))
+              (fun () ->
+                (match Lane.load ~who:holder
+                  ~ledger_dir:(Filename.concat base_path "ledger")
+                  ~saves_dir:(Filename.concat base_path "saves")
+                  ~checkpoint_dir:(Filename.concat base_path "checkpoints")
+                  ~program_name:"wait.com" ~program_bytes:program ~files:[]
+                  ~announce:(fun () -> ()) with
+                 | Ok _ -> ()
+                 | Error error -> fail (Lane.error_to_string error));
+                let call ?auth_token () =
+                  handle ?auth_token
+                    (request ~params:(`Assoc [ "name", `String name; "arguments", arguments ])
+                       "tools/call")
+                in
+                check (option int) "invalid token is refused before recovery" (Some auth_error)
+                  (error_code (call ~auth_token:"not-an-invite" ()));
+                check (option string) "unauthorized move leaves the controller" (Some holder)
+                  (controller ());
+                ignore (call_tool handle "masc_dos_screen" : Yojson.Safe.t);
+                check (option string) "watching leaves the controller" (Some holder)
+                  (controller ());
+                let response = call () in
+                check (option int) "authorized move reaches the tool" None (error_code response);
+                check (option string) (name ^ ": selected controller")
+                  (Some (if running then holder else "pi")) (controller ());
+                match member "result" response with
+                | None -> fail "tools/call produced no result"
+                | Some result ->
+                  check bool "only a running holder blocks the move" running
+                    (member "isError" result = Some (`Bool true)))))
+        [ "masc_dos_press", `Assoc [ "keys", `List [ `String "a" ] ]
+        ; "masc_dos_type", `Assoc [ "text", `String "a" ]
+        ; "masc_dos_step", `Assoc [ "steps", `Int 1 ]
+        ; "masc_dos_pass", `Assoc [ "to", `String "pi" ]
+        ])
+    [ false; true ]
 
 let loopback_request_authority () =
   match Server_request_authority.of_host_port ~host:"127.0.0.1" ~port:8935 with
@@ -331,6 +404,8 @@ let () =
             test_the_seat_refuses_a_tool_it_does_not_list
         ; test_case "an invite plays through the seat with auth on" `Quick
             test_an_invite_plays_through_the_seat_with_auth_on
+        ; test_case "an invite recovers only a stopped Keeper controller" `Quick
+            test_an_invite_recovers_only_a_stopped_keepers_controller
         ] )
     ; ( "http"
       , [ test_case "an invite opens the seat door, not /mcp" `Quick

@@ -417,13 +417,25 @@ let execute_tool_eio
                      ~name
                      ~args:coerced_args
                  | Mod_misc ->
-                   Tool_misc.dispatch
-                     { Tool_misc.config
-                     ; agent_name
-                     ; help_schemas = Config.raw_all_tool_schemas
-                     }
-                     ~name
-                     ~args:coerced_args
+                   let dispatch () =
+                     Tool_misc.dispatch
+                       { Tool_misc.config
+                       ; agent_name
+                       ; help_schemas = Config.raw_all_tool_schemas
+                       }
+                       ~name
+                       ~args:coerced_args
+                   in
+                   (* Identity, profile membership and tool authorization have
+                      passed above. Match the Keeper/HTTP move boundary here:
+                      a stopped Keeper cannot pass its controller itself. *)
+                   (match Tool_schemas_misc.misc_operation_of_tool_name name with
+                    | Some Tool_schemas_misc.(
+                        ( Misc_dos_load | Misc_dos_eject | Misc_dos_step | Misc_dos_pass
+                        | Misc_dos_press | Misc_dos_click | Misc_dos_type | Misc_dos_restore )) ->
+                      Keeper_dos_controller.before_move ~config ~who:agent_name;
+                      dispatch ()
+                    | _ -> dispatch ())
                  | Mod_library ->
                    Tool_library.dispatch
                      { Tool_library.base_path = config.base_path; agent_name }

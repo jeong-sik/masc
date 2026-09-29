@@ -79,36 +79,17 @@ let execute_http ~(resolved : Runtime_exact_output_registry.resolved_lane) ~requ
          (rejections.first :: rejections.rest)))))
   | _ -> Error (Http_failed "workspace curator execution context unavailable")
 
-(* The lane's CLI slots answer after its HTTP slots, or in their place when
-   the lane admits none -- the order every exact lane walks, through the same
-   one-shot executor the Librarian and the Stagehand lane use. The answer is
-   checked by the proposal decode the HTTP flow uses. *)
-let execute ?cli_runner ~base_path ~(resolved : Runtime_exact_output_registry.resolved_lane)
+(* This lane requires a measured context window for every provider it can
+   dispatch to. Official-client slots do not publish one, so they are refused
+   by [prepare_execution] instead of silently exceeding the request bound. *)
+let execute ~(resolved : Runtime_exact_output_registry.resolved_lane)
     ~rendered_prompt ~selected ~ledger =
   let requirement = Exact.make_output_requirement ~schema:output_schema
       ~minimum_guarantee:Exact.Json_syntax in
-  match execute_http ~resolved ~requirement ~rendered_prompt ~selected ~ledger, resolved.cli_slots with
-  | Ok answer, _ -> Ok answer
-  | Error No_http_slot, [] -> Error "workspace curator has no admitted exact-output slot"
-  | Error (Http_failed detail), [] -> Error detail
-  | Error http, (_ :: _ as cli_slots) ->
-    (match
-       Keeper_lane_cli_oneshot.walk ?runner:cli_runner ~base_dir:base_path ~cli_slots
-         ~system_prompt:""
-         ~requirement ~prompt:rendered_prompt
-         ~validate:(validate ~selected ~ledger)
-         ~on_failure:(fun failure ->
-           Log.Server.warn "workspace curator cli slot: %s"
-             (Keeper_lane_cli_oneshot.failure_to_string failure))
-         ()
-     with
-     | Ok (runtime_id, raw) -> Ok (raw, runtime_id)
-     | Error failures ->
-       let cli =
-         String.concat "; " (List.map Keeper_lane_cli_oneshot.failure_to_string failures) in
-       Error (match http with
-         | No_http_slot -> cli
-         | Http_failed detail -> detail ^ "; " ^ cli))
+  match execute_http ~resolved ~requirement ~rendered_prompt ~selected ~ledger with
+  | Ok answer -> Ok answer
+  | Error No_http_slot -> Error "workspace curator has no admitted exact-output HTTP slot"
+  | Error (Http_failed detail) -> Error detail
 
 type owner =
   { mutex : Stdlib.Mutex.t
@@ -170,13 +151,15 @@ let prepare_execution ~base_path =
     |> Result.map_error Runtime_exact_output_registry.publication_error_to_string in
   let* resolved = Runtime_exact_output_registry.resolve_lane registry ~lane_id
     |> Result.map_error Runtime_exact_output_registry.lane_resolution_error_to_string in
+  let* () = if resolved.cli_slots = [] then Ok ()
+    else Error "workspace curator cannot bound official-client slots without a declared context window" in
   let* max_input_bytes = minimum_input_bytes resolved.selected_slots in
   let configuration = `Assoc
     [ "catalog_generation", `String (Runtime_exact_output_registry.catalog_generation_fingerprint registry)
     ; "slots", `List (List.map (fun (slot : Runtime_exact_output_registry.selected_slot) -> `String slot.slot_id) resolved.selected_slots)
     ; "cli_slots", `List (List.map (fun id -> `String id) resolved.cli_slots) ] in
   Ok { configuration; max_input_bytes;
-       execute = execute ?cli_runner:None ~base_path ~resolved }
+       execute = execute ~resolved }
 
 let run ~base_path ~prepare =
   let initial = Domain_pool_ref.submit_io_or_inline (fun () ->
@@ -269,8 +252,10 @@ let run ~base_path ~prepare =
 let start_with ~sw ~base_path ~enabled ~prepare =
   let base_path = Unix.realpath base_path in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-  Fs_compat.mkdir_p keepers_dir;
-  let keepers_dir = Unix.realpath keepers_dir in
+  (* A missing directory is an inventory failure, not an empty workspace.
+     Creating it here could reconcile every durable ledger member away. *)
+  let keepers_dir = try Unix.realpath keepers_dir with
+    | Unix.Unix_error (Unix.ENOENT, _, _) -> keepers_dir in
   let owner = { mutex = Stdlib.Mutex.create (); pending = true; in_flight = false; stopped = false; wake = None } in
   let admitted = Stdlib.Mutex.protect owners_mutex (fun () ->
     if Hashtbl.mem owners base_path then false

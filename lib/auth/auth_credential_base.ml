@@ -235,18 +235,8 @@ let credential_of_json agent_name json : agent_credential option =
     None
 ;;
 
-(** Load agent credential.
-
-    Tries an exact filename match first. If that misses and [agent_name]
-    looks like a generated nickname ({agent_type}-{adj}-{animal}[...]),
-    retry with just the agent_type prefix — shared-token aliases
-    provisioned for stable keeper names (e.g. [example-keeper.json]) then
-    cover every dynamically generated nickname in that family
-    (e.g. [example-keeper-fair-tapir]).
-
-    Without this fallback, Workspace.bind_session's nickname output caused a
-    chronic "No credential found for <type>-<adj>-<animal>" noise band
-    at ~0.3/min on the live fleet (2026-04-20). *)
+(* One credential file at [path]: [None] when it is absent, cannot be read,
+   or does not decode. *)
 let load_credential_from_path_raw config agent_name path : agent_credential option =
   if file_exists path
   then (
@@ -286,6 +276,11 @@ let load_redirect_target config path =
 
 let remove_file_if_exists path = if file_exists path then remove_file path
 
+(* [agent_name]'s own file, then the id-named file its redirect stub points
+   to. A name that signs in with another name's token (a generated nickname,
+   a Keeper transport alias) has no file of its own; the token check maps it
+   to the owner ([Auth_credential_token.verify_token_owner_alias]), not this
+   lookup. *)
 let load_credential config agent_name : agent_credential option =
   let file = credential_file config agent_name in
   if not (file_exists file)

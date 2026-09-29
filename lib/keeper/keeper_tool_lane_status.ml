@@ -45,7 +45,9 @@ let outdated_shim_action =
   "The endpoint answers, but its shim came from a different release than this \
    server. The lane still runs: the two negotiate the protocol and tolerate one \
    release apart. Nothing you run changes it, and the operator repairs it by \
-   reinstalling the shim from this server's release."
+   reinstalling the shim from this server's release. The release shown is what \
+   the endpoint answered at observed_at_unix; a shim replaced since is not \
+   seen until the server asks again."
 ;;
 
 let json_of_report (r : Keeper_sandbox_remote.lane_report) : Yojson.Safe.t =
@@ -53,7 +55,7 @@ let json_of_report (r : Keeper_sandbox_remote.lane_report) : Yojson.Safe.t =
     match r.probe with
     | Keeper_sandbox_remote.Probe_not_asked ->
       `Assoc [ "state", `String "not_asked" ], None
-    | Keeper_sandbox_remote.Probe_answered { major; capabilities; release } ->
+    | Keeper_sandbox_remote.Probe_answered { major; capabilities; release; observed_at } ->
       ( `Assoc
           [ "state", `String "answered"
           ; "protocol_major", `Int (Exec_ssh_protocol.int_of_major major)
@@ -63,6 +65,7 @@ let json_of_report (r : Keeper_sandbox_remote.lane_report) : Yojson.Safe.t =
               | Some release -> `String release
               | None -> `Null )
           ; "server_release", `String Build_version.current
+          ; "observed_at_unix", `Float observed_at
           ]
       , (match release with
          | Some release when String.equal release Build_version.current -> None

@@ -482,6 +482,7 @@ let thinking_control_request_rejection
          | Some Capabilities.Anthropic_always_adaptive -> true
          | Some
              ( Capabilities.Anthropic_adaptive_default
+             | Capabilities.Anthropic_adaptive_between_tools
              | Capabilities.Anthropic_adaptive_preferred
              | Capabilities.Anthropic_adaptive_only ) -> false
          | None ->

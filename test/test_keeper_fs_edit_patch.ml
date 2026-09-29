@@ -607,7 +607,11 @@ let test_patch_no_match_errors () =
            else if String.sub msg i nlen = needle then true
            else loop (i + 1)
          in
-         loop 0)
+         loop 0);
+      (* The message carries the next move the Edit description gives,
+         so a caller that never re-reads the description still sees it. *)
+      Alcotest.(check bool) "error names the re-Read next move" true
+        (Astring.String.is_infix ~affix:"Re-Read the file" msg)
 
 let test_patch_multiple_matches_without_replace_all_errors () =
   setup @@ fun ~config ~meta ~playground ~publication_recovery ->

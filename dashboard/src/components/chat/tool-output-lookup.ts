@@ -25,13 +25,17 @@ export function useToolOutputLookup(executionId: string | null | undefined) {
   // A recent-tail cache cannot prove uniqueness across the complete ledger.
   // Only the exact endpoint may supply evidence, including a cached identity.
   const needsFetch = state.kind !== 'loaded'
-  // A bulk hydration that completes is new evidence about this execution, so a
-  // lookup that could not read it yet asks again. Without this, one failed
-  // read stays failed for the life of the row: refreshing the conversation
-  // repairs the ledger while the row still reads as if the output were gone,
-  // and only a per-row retry clears it. A loaded row is never re-read, since
-  // `needsFetch` is already false for it.
-  const hydrationCompletedAt = keeper ? toolCallOutputHydrationContract(keeper).completedAtMs : null
+  // A bulk hydration that succeeds is new ledger evidence, so a row that could
+  // not read its output (failed) or did not find it yet (missing) asks again.
+  // Without this, one failed read stays failed for the life of the row:
+  // refreshing the conversation repairs the ledger while the row still reads
+  // as if the output were gone. Other states cannot change on new ledger
+  // evidence (admin-required follows authRevision), so they do not re-ask.
+  // `coveredThroughMs` only grows on success, unlike `completedAtMs`, which
+  // also moves on a failed hydration and on every tool call of a live turn.
+  const asksAgainOnHydration = state.kind === 'failed' || state.kind === 'missing'
+  const hydratedThrough = keeper && asksAgainOnHydration
+    ? toolCallOutputHydrationContract(keeper).coveredThroughMs : null
   useEffect(() => {
     if (!keeper || !executionId || !inView || !needsFetch) return
     const controller = new AbortController()
@@ -51,7 +55,7 @@ export function useToolOutputLookup(executionId: string | null | undefined) {
       else set({ kind: 'failed' })
     })
     return () => controller.abort()
-  }, [keeper, executionId, inView, needsFetch, attempt, authRevision, hydrationCompletedAt])
+  }, [keeper, executionId, inView, needsFetch, attempt, authRevision, hydratedThrough])
   return { ref, output: state.kind === 'loaded' ? state.entry : null,
     state,
     retry: () => retry(value => value + 1) }

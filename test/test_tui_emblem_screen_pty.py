@@ -506,7 +506,8 @@ def about_arrival_frames(binary: str, columns: int, *, reduced_motion: bool) -> 
         assert not MASCOT_TRANSFER_HEAD.search(bytes(output[before:])), \
             "a settled /about candle was placed again during four animation ticks"
         h.send_and_wait(process, fd, output, b"\x1b", CHAT_TITLE)
-        h.escape_to_keeper_detail(process, fd, output, name=b"alpha")
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
         os.write(fd, b"q")
 
     with tempfile.TemporaryDirectory(prefix="masc-about-timing-") as timing_dir:

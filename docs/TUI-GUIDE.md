@@ -2060,13 +2060,18 @@ out the two commands.
 own binary. `start-masc.sh` builds and restarts the server (`bin/main_eio.exe`)
 and does not touch it, so a server restart leaves the TUI on the binary it
 started with. Rebuild with `dune build bin/masc_tui.exe`, then quit and reopen
-the TUI. `scripts/tui-graceful-restart.sh --build` does that hand quit for you:
-it builds first (a failed build leaves the running session untouched), sends
-the running surface `SIGTERM`, and only starts the fresh binary after the old
-session's per-PID log carries a graceful row (`exit: normal (signal SIGTERM)`,
+the TUI. To restart every local TUI process at once, inspect the target PIDs
+with `scripts/tui-graceful-restart.sh --dry-run` before running
+`scripts/tui-graceful-restart.sh --build`. The script searches the system for
+all processes named `masc_tui.exe` or `masc-tui`, including other checkouts and
+installed copies. `--base-path` selects the exit-log location and new TUI
+workspace; it does not narrow the processes to stop. The script builds first
+(a failed build leaves the running sessions untouched), sends each matched
+process `SIGTERM`, and starts one fresh binary only after every old process's
+per-PID log carries a graceful row (`[masc-tui] exit: normal (signal SIGTERM)`,
 the vocabulary above). A session that does not end within `--timeout` is left
-alone — the script never escalates to `SIGKILL` and never starts a second
-surface on top of a live one.
+alone — the script never escalates to `SIGKILL` and never starts a new TUI
+while a matched session remains live.
 
 **Header shows `[disconnected]`.** The server is not answering on
 `127.0.0.1:<port>`. Keepers and the Tasks panel keep working; Approvals, Board,

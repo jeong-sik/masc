@@ -1684,6 +1684,12 @@
  (modules masc_tui_overview_team)
  (libraries masc masc_types masc_tui_types))
 
+(library
+ (name masc_tui_overview_cache)
+ (wrapped false)
+ (modules masc_tui_overview_cache)
+ (libraries masc masc_types masc_tui_types masc_tui_overview_team masc_tui_overview_tasks))
+
 ;; The Overview's GOALS section: whether the fleet's work moves any goal. A
 ;; library so a test can draw it from a fixture of the server's goal tree.
 (library
@@ -1789,6 +1795,7 @@
   masc.sse_wire
   masc_tui_task_flow
   masc_tui_overview_team
+  masc_tui_overview_cache
   masc_tui_overview_goals
   masc_tui_overview_providers
   masc.masc_tool_blob_store

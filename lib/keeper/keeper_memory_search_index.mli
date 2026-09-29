@@ -21,3 +21,25 @@ val rank : query:string -> string list -> ((int * float) list, error) result
 (** [rank ~query texts] is the positions in [texts] of the texts holding any
     term of [query], best first, each with its BM25 score (lower is better;
     ties keep input order). A query with no term ranks nothing. *)
+
+val rank_many : queries:string list -> string list -> ((int * float) list list, error) result
+(** Rank several queries against one transient FTS5 table, in query order.
+    The table is built once and closed before this function returns. An empty
+    query has an empty result; an index error fails the whole batch. *)
+
+type batch_stats =
+  { index_builds : int
+  ; indexed_rows : int
+  ; queries_executed : int
+  }
+
+val rank_many_excluding_owners
+  :  queries:(string * string) list
+  -> texts:(string * string) list
+  -> max_results:int
+  -> (((int * float) list list * batch_stats), error) result
+(** [(keeper_id, claim)] in both lists. The owner filter and result bound are
+    applied in SQLite before returning rows, so a Keeper with many matching
+    facts cannot crowd another Keeper out of the requested neighbor count.
+    [max_results = 0] and empty/blank queries build no index. The stats report
+    actual table construction and insertion, including the no-work case. *)

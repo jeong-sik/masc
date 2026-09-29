@@ -13,6 +13,16 @@ import unittest
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = Path(os.environ.get("LEDGER_TEST_SCRIPT", ROOT / "scripts/review/queue-ledger.sh"))
 RUN_TIME = "2026-01-01T00:30:00Z"
+PR_CHECK_NAMES = (
+    "TLA model check", "lint suite", "dune build @check",
+    "dune build --profile release @check", "dashboard typecheck",
+    "PR required success",
+)
+# Skipped jobs retain their unevaluated name expression in the GitHub API.
+# Use the observed strings, independently of the classifier's expected names.
+DRAFT_CAPTURE = ROOT / "scripts/review/fixtures/pr-check-draft-jobs-39834.json"
+DRAFT_JOBS = json.loads(DRAFT_CAPTURE.read_text())["jobs"]
+DRAFT_CHECK_NAMES = tuple(job["name"] for job in DRAFT_JOBS)
 
 
 class QueueLedgerTest(unittest.TestCase):
@@ -52,15 +62,25 @@ elif args[0] == 'api':
     endpoint = next(a for a in args[1:] if a.startswith('repos/'))
     if endpoint.endswith('/reviews'): key = 'reviews'
     elif endpoint.endswith('/comments'): key = 'comments'
+    elif '/check-runs' in endpoint: key = 'checkruns'
     elif '/actions/runs?' in endpoint: key = 'runs'
-    elif endpoint.endswith('/jobs'): key = 'jobs'
-    elif '/actions/runs/' in endpoint: key = 'run'
+    elif '/actions/runs/' in endpoint and '/jobs' in endpoint:
+        run_id = endpoint.split('/actions/runs/', 1)[1].split('/', 1)[0]
+        key = 'jobs:' + run_id if 'jobs:' + run_id in fixtures else 'jobs'
+    elif '/actions/runs/' in endpoint:
+        run_id = endpoint.split('/actions/runs/', 1)[1].split('?', 1)[0]
+        key = 'run:' + run_id if 'run:' + run_id in fixtures else 'run'
     else: raise SystemExit('unexpected endpoint: ' + endpoint)
 else: raise SystemExit('read-only fixture refuses: ' + repr(args))
 if key == fixtures.get('fail'): raise SystemExit('injected read failure')
-result = subprocess.run([os.environ['LEDGER_JQ'], '-r', query],
-    input=json.dumps(fixtures[key]), text=True)
-raise SystemExit(result.returncode)
+pages = fixtures.get('pages', {}).get(key)
+if pages is not None and '--paginate' not in args:
+    raise SystemExit('missing pagination for ' + key)
+for page in pages if pages is not None else [fixtures[key]]:
+    result = subprocess.run([os.environ['LEDGER_JQ'], '-r', query],
+        input=json.dumps(page), text=True)
+    if result.returncode:
+        raise SystemExit(result.returncode)
 """)
         self.fake.chmod(0o755)
         self.env = dict(os.environ, LEDGER_GH=str(self.fake),
@@ -102,7 +122,7 @@ raise SystemExit(result.returncode)
         return dict(body=body, created_at=time, submitted_at=time,
                     user={"login": "review-account"}, state="COMMENTED", **fields)
 
-    def ledger(self, comments=None, reviews=None, fail=None):
+    def ledger(self, comments=None, reviews=None, fail=None, change=None):
         data = {
             "prs": [{"number": 1, "author": {"login": "author"}, "baseRefName": "main",
                      "headRefOid": self.head, "headRefName": "fixture-pr", "isDraft": False,
@@ -111,10 +131,16 @@ raise SystemExit(result.returncode)
                                             "conclusion": "SUCCESS", "startedAt": RUN_TIME}]}],
             "comments": comments if comments is not None else [self.message(self.verdict())],
             "reviews": reviews or [],
-            "runs": {"workflow_runs": [{"created_at": RUN_TIME, "conclusion": "success"}]},
+            "runs": {"workflow_runs": [{"created_at": RUN_TIME, "conclusion": "success",
+                                        "event": "pull_request"}]},
             "run": {"head_sha": self.head, "status": "completed", "conclusion": "success"},
-            "jobs": {"jobs": [{"conclusion": "success"}]}, "fail": fail,
+            "jobs": {"jobs": [{"conclusion": "success"}]},
+            "checkruns": {"check_runs": [{"name": "dune build @check", "status": "completed",
+                                          "conclusion": "success", "started_at": RUN_TIME}]},
+            "fail": fail,
         }
+        if change is not None:
+            change(data)
         self.fixtures.write_text(json.dumps(data))
         result = subprocess.run(["bash", str(SCRIPT), "--git-dir", str(self.repo), "--repo", "o/r"],
                                 env=self.env, capture_output=True, text=True, timeout=20)
@@ -199,6 +225,231 @@ raise SystemExit(result.returncode)
         self.assertEqual(self.ledger(fail="comments")["waits_on"], "unknown:verdict")
         self.main_change("lib/example.ml")
         self.assertEqual(self.ledger()["waits_on"], "stale:1")
+
+    def draft_race(self, data):
+        """A later-numbered Draft snapshot beside a complete Ready run."""
+        def run(run_id, number, suite, created):
+            return {"id": run_id, "workflow_id": 100, "run_number": number,
+                    "run_attempt": 1, "name": "PR check", "head_sha": self.head,
+                    "head_branch": "fixture-pr", "check_suite_id": suite,
+                    "path": ".github/workflows/pr-check.yml", "event": "pull_request",
+                    "status": "completed", "conclusion": "success", "created_at": created}
+
+        def jobs(run_id, suite, names, conclusion, first_id, started):
+            return [{"id": first_id + index, "run_id": run_id, "run_attempt": 1,
+                     "head_sha": self.head, "name": name,
+                     "status": "completed", "conclusion": conclusion,
+                     "started_at": started, "completed_at": started,
+                     "check_run_url": f"https://api.github.com/repos/o/r/check-runs/{first_id + index}",
+                     "check_suite": {"id": suite}}
+                    for index, name in enumerate(names)]
+
+        ready = run(900, 10, 55, RUN_TIME)
+        draft = run(901, 11, 56, "2026-01-01T00:05:00Z")
+        ready_jobs = jobs(900, 55, PR_CHECK_NAMES, "success", 100, RUN_TIME)
+        draft_jobs = jobs(901, 56, DRAFT_CHECK_NAMES, "skipped", 200, draft["created_at"])
+        data.update({"runs": {"workflow_runs": [ready, draft]},
+                     "run": ready, "run:900": ready, "run:901": draft,
+                     "jobs:900": {"jobs": ready_jobs}, "jobs:901": {"jobs": draft_jobs},
+                     "checkruns": {"check_runs": ready_jobs + draft_jobs}})
+        self.sync_rollup(data)
+
+    def sync_rollup(self, data):
+        data["prs"][0]["statusCheckRollup"] = [
+            {"name": check["name"], "databaseId": check["id"],
+             "status": check["status"].upper(), "conclusion": check["conclusion"].upper(),
+             "startedAt": check["started_at"],
+             "detailsUrl": f"https://github.com/o/r/actions/runs/{check['run_id']}/job/{check['id']}"}
+            for check in data["checkruns"]["check_runs"]]
+
+    def test_late_draft_does_not_hide_successful_ready(self):
+        row = self.ledger(change=self.draft_race)
+        self.assertEqual((row["checks"], row["waits_on"]), ("ok", "merge"))
+
+    def test_captured_draft_jobs_preserve_complete_ready(self):
+        def change(data):
+            self.draft_race(data)
+            # Replay every captured job field. Only the Git head is rebound to
+            # this test's real repository; CheckRun suite identity is supplied
+            # separately because the jobs API has no check_suite field.
+            jobs = [dict(job, head_sha=self.head) for job in DRAFT_JOBS]
+            first = jobs[0]
+            draft = data.pop("run:901")
+            draft.update(id=first["run_id"], head_branch=first["head_branch"],
+                         run_attempt=first["run_attempt"], created_at=first["created_at"])
+            del data["jobs:901"]
+            data[f"run:{draft['id']}"] = draft
+            data[f"jobs:{draft['id']}"] = {"total_count": len(jobs), "jobs": jobs}
+            data["checkruns"]["check_runs"] = data["jobs:900"]["jobs"] + [
+                dict(job, check_suite={"id": draft["check_suite_id"]}) for job in jobs]
+            self.sync_rollup(data)
+        row = self.ledger(change=change)
+        self.assertEqual((row["checks"], row["waits_on"]), ("ok", "merge"))
+
+    def test_draft_timestamp_does_not_make_ready_evidence_stale(self):
+        self.main_change("lib/example.ml", "2026-01-01T00:20:00Z")
+        self.assertEqual(self.ledger(change=self.draft_race)["waits_on"], "merge")
+
+    def test_external_commit_status_survives_draft_check_exclusion(self):
+        for state, expected in (("FAILURE", "ci:fail"), ("PENDING", "ci:pending"),
+                                ("SUCCESS", "merge")):
+            with self.subTest(state=state):
+                def change(data):
+                    self.draft_race(data)
+                    data["prs"][0]["statusCheckRollup"].append({
+                        "__typename": "StatusContext", "context": "external validation",
+                        "state": state, "createdAt": RUN_TIME})
+                self.assertEqual(self.ledger(change=change)["waits_on"], expected)
+
+    def test_earlier_real_pr_run_still_sets_freshness_floor(self):
+        self.main_change("lib/example.ml", "2026-01-01T00:20:00Z")
+
+        def change(data):
+            self.draft_race(data)
+            earlier = dict(data["run"], id=899, run_number=9,
+                           check_suite_id=54, created_at="2026-01-01T00:15:00Z")
+            data["runs"]["workflow_runs"].append(earlier)
+            data["jobs:899"] = {"jobs": [dict(j, id=j["id"] - 10, run_id=899,
+                check_suite={"id": 54}) for j in data["jobs:900"]["jobs"]]}
+        self.assertEqual(self.ledger(change=change)["waits_on"], "stale:1")
+
+    def test_earlier_remaining_check_still_sets_freshness_floor(self):
+        self.main_change("lib/example.ml", "2026-01-01T00:20:00Z")
+
+        def change(data):
+            self.draft_race(data)
+            data["checkruns"]["check_runs"].append(dict(
+                data["jobs:900"]["jobs"][0], name="other check", id=300,
+                run_id=902, check_suite={"id": 57}, started_at="2026-01-01T00:15:00Z"))
+            self.sync_rollup(data)
+        self.assertEqual(self.ledger(change=change)["waits_on"], "stale:1")
+
+    def test_draft_only_or_foreign_workflow_is_not_ready_proof(self):
+        for foreign in (False, True):
+            with self.subTest(foreign=foreign):
+                def change(data):
+                    self.draft_race(data)
+                    if foreign:
+                        data["run"]["path"] = ".github/workflows/other.yml"
+                        data["run"]["workflow_id"] = 200
+                    else:
+                        data["runs"]["workflow_runs"] = [data["run:901"]]
+                        data["checkruns"]["check_runs"] = data["jobs:901"]["jobs"]
+                    self.sync_rollup(data)
+                row = self.ledger(change=change)
+                self.assertNotEqual(row["checks"], "ok")
+                self.assertNotEqual(row["waits_on"], "merge")
+
+    def test_malformed_or_wrong_provenance_draft_cannot_be_ignored(self):
+        for fault in ("missing", "extra", "duplicate", "success", "wrong_path", "wrong_head", "wrong_name"):
+            with self.subTest(fault=fault):
+                def change(data):
+                    self.draft_race(data)
+                    jobs = data["jobs:901"]["jobs"]
+                    if fault == "missing":
+                        jobs.pop()
+                    elif fault == "extra":
+                        jobs.append(dict(jobs[0], id=299, name="extra check", conclusion="success"))
+                    elif fault == "duplicate":
+                        jobs[-1]["name"] = jobs[0]["name"]
+                    elif fault == "success":
+                        for job in jobs:
+                            job["conclusion"] = "success"
+                    elif fault == "wrong_name":
+                        jobs[0]["name"] = jobs[0]["name"].replace("== true", "== false")
+                    elif fault == "wrong_path":
+                        data["run:901"]["path"] = ".github/workflows/other.yml"
+                    else:
+                        data["run:901"]["head_sha"] = "a" * 40
+                    data["checkruns"]["check_runs"] = data["jobs:900"]["jobs"] + jobs
+                    self.sync_rollup(data)
+                row = self.ledger(change=change)
+                self.assertNotEqual(row["checks"], "ok")
+                self.assertNotEqual(row["waits_on"], "merge")
+
+    def test_draft_expression_lookalikes_are_never_excluded(self):
+        for fault in ("wrong_expression", "friendly_lookalike", "wrapped_expression"):
+            for conclusion in ("skipped", "success"):
+                with self.subTest(fault=fault, conclusion=conclusion):
+                    def change(data):
+                        self.draft_race(data)
+                        jobs = data["jobs:901"]["jobs"]
+                        for job, name in zip(jobs, PR_CHECK_NAMES):
+                            if fault == "wrong_expression":
+                                job["name"] = job["name"].replace("== true", "!= true")
+                            elif fault == "friendly_lookalike":
+                                job["name"] = "Draft snapshot / " + name
+                            else:
+                                job["name"] = "${{ " + job["name"] + " }}"
+                            job["conclusion"] = conclusion
+                        self.sync_rollup(data)
+                    row = self.ledger(change=change)
+                    self.assertNotEqual(row["checks"], "ok")
+                    self.assertNotEqual(row["waits_on"], "merge")
+
+    def test_ready_checks_cannot_be_combined_across_suites(self):
+        def change(data):
+            self.draft_race(data)
+            data["jobs:900"]["jobs"].pop()
+            other = dict(data["run"], id=902, check_suite_id=57, workflow_id=200,
+                         path=".github/workflows/other.yml")
+            data["runs"]["workflow_runs"].append(other)
+            misplaced = dict(data["checkruns"]["check_runs"][5], run_id=902,
+                             check_suite={"id": 57})
+            data["checkruns"]["check_runs"][5] = misplaced
+            data["jobs:902"] = {"jobs": [misplaced]}
+            self.sync_rollup(data)
+        self.assertNotEqual(self.ledger(change=change)["waits_on"], "merge")
+
+    def test_newer_real_ready_failure_or_pending_remains_blocking(self):
+        for conclusion in ("failure", None):
+            with self.subTest(conclusion=conclusion):
+                def change(data):
+                    self.draft_race(data)
+                    newer = dict(data["run"], id=902, run_number=12, check_suite_id=57,
+                                 status="in_progress" if conclusion is None else "completed",
+                                 conclusion=conclusion)
+                    data["runs"]["workflow_runs"].append(newer)
+                    data["jobs:902"] = {"jobs": []}
+                self.assertNotEqual(self.ledger(change=change)["waits_on"], "merge")
+
+    def test_cancelled_draft_twin_does_not_hide_complete_ready(self):
+        def change(data):
+            self.draft_race(data)
+            data["run:901"]["conclusion"] = "cancelled"
+            data["jobs:901"] = {"jobs": []}
+        self.assertEqual(self.ledger(change=change)["waits_on"], "merge")
+
+    def test_only_cancelled_runs_cannot_grant_merge(self):
+        def change(data):
+            self.draft_race(data)
+            data["run:901"]["conclusion"] = "cancelled"
+            data["run:900"]["conclusion"] = "cancelled"
+        self.assertNotEqual(self.ledger(change=change)["waits_on"], "merge")
+
+    def test_draft_signature_and_checks_are_read_across_pages(self):
+        def change(data):
+            self.draft_race(data)
+            data["pages"] = {
+                "runs": [{"workflow_runs": [data["run:901"]]},
+                         {"workflow_runs": [data["run:900"]]}],
+                "jobs:901": [{"jobs": data["jobs:901"]["jobs"][:3]},
+                             {"jobs": data["jobs:901"]["jobs"][3:]}],
+                "checkruns": [{"check_runs": data["checkruns"]["check_runs"][:4]},
+                              {"check_runs": data["checkruns"]["check_runs"][4:]}],
+            }
+        self.assertEqual(self.ledger(change=change)["waits_on"], "merge")
+
+    def test_second_page_extra_draft_job_is_not_discarded(self):
+        def change(data):
+            self.draft_race(data)
+            data["pages"] = {"jobs:901": [data["jobs:901"], {"jobs": [
+                dict(data["jobs:901"]["jobs"][0], id=299, name="extra", conclusion="success")]}]}
+        self.assertNotEqual(self.ledger(change=change)["waits_on"], "merge")
+
+    def test_draft_classification_transport_failure_stays_unknown(self):
+        row = self.ledger(change=self.draft_race, fail="jobs:901")
+        self.assertTrue(row["waits_on"].startswith("unknown:"), row)
 
 
 if __name__ == "__main__":

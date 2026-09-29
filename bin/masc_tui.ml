@@ -4552,12 +4552,6 @@ let launch_preset_call state ~mailbox ~call ~wrap =
       enqueue_async mailbox (wrap result))
     (fun () -> call ~host ~port)
 
-let launch_play_call state ~mailbox ~call ~wrap =
-  let host = server_peer_host and port = state.port in
-  Masc_tui_async_read.launch
-    ~deliver:(fun result -> enqueue_async mailbox (wrap result))
-    (fun () -> call ~host ~port)
-
 (* A revoked invite's link opens nothing, so its card goes, on screen or held.
    The card carries the name the server sent, made safe to draw, so the name
    asked for is compared in the same form. *)
@@ -10228,7 +10222,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       notice ~kind:Notice_failure reason
   | Masc_tui_command.Play_invites ->
       Buffer.clear state.msg_input;
-      launch_play_call state ~mailbox
+      launch_preset_call state ~mailbox
         ~call:Masc_tui_http.list_play_invites
         ~wrap:(fun result ->
           Play_invites_listed (target, Result.bind result Tui_decode.decode_play_invites))
@@ -10246,7 +10240,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       else begin
         Buffer.clear state.msg_input;
         state.play_invite_inflight <- true;
-        launch_play_call state ~mailbox
+        launch_preset_call state ~mailbox
           ~call:(fun ~host ~port ->
             Ok (Masc_tui_http.issue_play_invite ~host ~port ~name ~hours))
           ~wrap:(fun result ->
@@ -10258,7 +10252,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       end
   | Masc_tui_command.Play_revoke name ->
       Buffer.clear state.msg_input;
-      launch_play_call state ~mailbox
+      launch_preset_call state ~mailbox
         ~call:(fun ~host ~port ->
           Ok (Masc_tui_http.revoke_play_invite ~host ~port ~name))
         ~wrap:(fun result ->
@@ -14487,32 +14481,40 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            chat_notice state ~keeper_name:target ~kind:Notice_failure
              ("play invite outcome unknown (" ^ detail ^ "); list and revoke before retrying"))
   | Play_invite_revoked (target, requested_name, result) ->
-      let retry = "; retry /play revoke " ^ requested_name ^ " to release the controller" in
+      let retry reason =
+        Printf.sprintf "retry /play revoke %s — %s" requested_name reason
+      in
       (match result with
        | Play_revoke_absent ->
            forget_play_invite state ~name:requested_name;
            chat_notice state ~keeper_name:target ~kind:Notice_reply
-             ("Play invite " ^ requested_name ^ " is absent; no controller held")
+             ("Play invite " ^ requested_name ^ " is absent (no invite has that name)")
        | Play_revoke_result (Play_answered (Ok revoked)) ->
            forget_play_invite state ~name:revoked.Tui_decode.pir_name;
-           chat_notice state ~keeper_name:target
-             ~kind:(if Option.is_some revoked.pir_release_error then Notice_failure else Notice_reply)
-             (Printf.sprintf "Play invite %s: %s%s"
-                revoked.pir_name
-                (if revoked.pir_revoked then "revoked" else "already absent")
-                (match revoked.pir_release_error with
-                 | Some detail -> "; controller release failed: " ^ detail ^ retry
-                 | None ->
-                     if revoked.pir_released_controller then "; controller released" else ""))
+           (match revoked.pir_release_error with
+            | Some detail ->
+                chat_notice state ~keeper_name:target ~kind:Notice_failure
+                  (retry
+                     (detail
+                      ^ (if revoked.pir_revoked then
+                           " (invite revoked; controller release failed)"
+                         else
+                           " (invite already absent; controller release failed)")))
+            | None ->
+                chat_notice state ~keeper_name:target ~kind:Notice_reply
+                  (Printf.sprintf "Play invite %s: %s%s"
+                     revoked.pir_name
+                     (if revoked.pir_revoked then "revoked" else "already absent")
+                     (if revoked.pir_released_controller then "; controller released" else "")))
        | Play_revoke_result (Play_answered (Error detail)) ->
            chat_notice state ~keeper_name:target ~kind:Notice_failure
-             ("play revoke response unreadable (" ^ detail ^ ")" ^ retry)
+             (retry (detail ^ " (play revoke response unreadable)"))
        | Play_revoke_result (Play_refused detail) ->
            chat_notice state ~keeper_name:target ~kind:Notice_failure
              ("play revoke refused: " ^ detail)
        | Play_revoke_result (Play_unanswered detail) ->
            chat_notice state ~keeper_name:target ~kind:Notice_failure
-             ("play revoke outcome unknown (" ^ detail ^ ")" ^ retry))
+             (retry (detail ^ " (play revoke outcome unknown)")))
   | Librarian_input_loaded (prompt_key, result) ->
       let still_selected =
         match selected_prompt_for_state state with
@@ -22431,7 +22433,7 @@ and is loaded on demand through keeper_skill.
               else
                 Masc_tui_scroll.cursor_up ~count
                   state.connectors_binding_cursor)
-       | Some "Q"
+       | Some "b"
          when state.view = Keepers Keeper_detail
               && state.detail_tab = Detail_info ->
            (match selected_keeper state, state.board_quarantine_requeue_inflight with
@@ -26341,7 +26343,7 @@ and is loaded on demand through keeper_skill.
            then report_action state "system" "런타임 프롬프트 자산은 읽기 전용입니다"
            else handle_prompt_clear ()
        (* [a] on the runtime.toml pane: one more account of a Claude Code,
-          Codex or Antigravity provider the file already declares. The status
+          Codex, Antigravity or Muse provider the file already declares. The status
           reading hides the source, so it does not open there. *)
        | Some ("a" | "A")
          when state.view = Config && state.config_pane = Config_runtime

@@ -1021,7 +1021,14 @@ let escape_text code =
   then Printf.sprintf "\\u%04X" code
   else Printf.sprintf "\\U%08X" code
 
+(* No ASCII scalar is Default_Ignorable, a variation selector, a joiner, an
+   emoji modifier, a pictograph or the flag that opens a tag sequence, so
+   the walk below copies an all-ASCII text unchanged. A frame sanitises
+   every cell it draws, and most cells -- names, ids, counts, key hints --
+   are only ASCII, so such a text is returned as it came. *)
 let escape_invisible text =
+  if String.for_all (fun byte -> byte < '\x80') text then text
+  else
   let output = Buffer.create (String.length text) in
   let length = String.length text in
   (* [base]: the scalar before this one, when it was drawn and is not itself
@@ -1102,7 +1109,14 @@ let escape_invisible text =
   Buffer.contents output
 ;;
 
+(* Printable ASCII (0x20..0x7E) is the one input both passes below copy
+   byte for byte: no control to escape, no multi-byte sequence to check and,
+   through [escape_invisible], no scalar a terminal draws as nothing. It is
+   returned as it came; DEL and every other control still take the escape
+   table. *)
 let sanitize_terminal_text text =
+  if String.for_all (fun byte -> byte >= ' ' && byte <= '~') text then text
+  else
   let escaped_byte byte = Printf.sprintf "\\x%02X" byte in
   let escaped_codepoint byte = Printf.sprintf "\\u00%02X" byte in
   let output = Buffer.create (String.length text) in
@@ -12473,8 +12487,8 @@ let play_revoke_http_error ~status_code ~body =
         then Ok detail else Error "not a controller release failure"
     | exception Yojson.Json_error detail -> Error detail in
   match failure with
-  | Ok detail -> Printf.sprintf "HTTP %d: controller release failed: %s"
-      status_code (sanitize_terminal_text detail)
+  | Ok detail -> Printf.sprintf "%s (HTTP %d: controller release failed)"
+      (sanitize_terminal_text detail) status_code
   | Error _ -> http_status_error ~status_code ~body
 
 (* The play routes refuse with [{error: <code>, message: <sentence>}] and add

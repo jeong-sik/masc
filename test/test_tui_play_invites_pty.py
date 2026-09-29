@@ -72,6 +72,7 @@ def run(executable: str) -> None:
         close_card()
         command(b"/play invites", b"old \xc2\xb7 expires not recorded")
         command(b"/play revoke guest1", b"retry /play revoke guest1")
+        h.wait_for_output(process, master, output, b"disk fault")
         h.wait_for_http_request(process, master, output, requests,
                                 path="/api/v1/play/invites/guest1")
         command(b"/play link", b"No play link has been issued")
@@ -79,7 +80,7 @@ def run(executable: str) -> None:
         command(b"/play revoke guest1", b"controller released")
         command(b"/play invite guest1 24", LINK.encode())
         close_card()
-        command(b"/play revoke guest1", b"is absent; no controller held")
+        command(b"/play revoke guest1", b"is absent (no invite has that name)")
         command(b"/play link", b"No play link has been issued")
         paths = [path for path, _ in requests]
         if paths.count("/api/v1/play/invites") != 2 or revokes.served != 4:

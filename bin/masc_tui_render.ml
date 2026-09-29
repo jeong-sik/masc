@@ -286,8 +286,8 @@ let render_overview (state : state) =
   let continuation = home_continue_rows state in
   let selected = home_selected_action state in
   let health =
-    match state.overview_error, state.overview with
-    | Some error, _ -> " Health: unavailable · " ^ Terminal_text.single_line error
+    match Terminal_text.optional_single_line state.overview_error, state.overview with
+    | Some error, _ -> " Health: unavailable · " ^ error
     | None, None ->
         let status =
           match state.connection_status, state.http_refresh_started_ns with

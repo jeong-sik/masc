@@ -429,9 +429,9 @@ let after_announcing result =
 (* A game can run for hours, and the Keeper holding the controller can stop
    in that time. It will never pass, and every other caller would be refused
    until a restart. [holder_left] says whether a holder can no longer act;
-   the Keeper boundary supplies it from Keeper state, which this tool surface
-   does not read (RFC-0194). Called before a call that needs the controller,
-   it frees a stopped holder's controller and tells the board.
+   the Keeper boundary supplies it from Keeper and invite state, which this
+   tool surface does not read (RFC-0194). Called before a call that needs the
+   controller, it frees a departed holder's controller and tells the board.
 
    The holder's state is read between two lane calls, not under the lane's
    lock, so a holder resumed in those milliseconds still loses it and must
@@ -458,17 +458,30 @@ let release_revoked_invite ~holder ~by =
   released
 ;;
 
+type holder_departure =
+  | Keeper_stopped
+  | Player_expired
+
+let departure_notice holder = function
+  | Keeper_stopped ->
+    Printf.sprintf "%s 님의 Keeper 가 멈춰서 DOS 조종권이 풀렸어요" holder
+  | Player_expired ->
+    Printf.sprintf "%s 님의 플레이 초대가 만료되어 DOS 조종권이 풀렸어요" holder
+;;
+
 let free_left_controller ~holder_left ~who =
   match off_domain Dos_lane.screen with
   | Ok { Dos_lane.controller = Some holder; _ }
-    when (not (String.equal holder who)) && holder_left holder ->
+    when not (String.equal holder who) ->
+    (match holder_left holder with
+     | None -> ()
+     | Some reason ->
     (match
        off_domain (fun () ->
          Dos_lane.release_left ~holder
            ~announce:
              (announce ~author:who
-                (Printf.sprintf
-                   "%s 님의 Keeper 가 멈춰서 DOS 조종권이 풀렸어요" holder)))
+                (departure_notice holder reason)))
      with
      (* Posted now: the call that follows may be refused before it reaches
         the lane, and would not post it. *)
@@ -476,7 +489,7 @@ let free_left_controller ~holder_left ~who =
      (* A hand-off that landed after the read above: that pass stands. *)
      | Ok false -> ()
      (* The machine went away; the call that follows reports it. *)
-     | Error _ -> ())
+     | Error _ -> ()))
   | Ok _ | Error _ -> ()
 ;;
 

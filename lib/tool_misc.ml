@@ -174,6 +174,7 @@ let dispatch ctx ~name ~args : Tool_result.result option =
         | Ok data -> Tool_result.make_ok ~tool_name:name ~start_time:start ~data ()
         | Error message -> Tool_result.make_err ~tool_name:name ~start_time:start
             ~class_:Tool_result.Workflow_rejection message)
+  | Some Tool_schemas_misc.Misc_portrait_read -> None
   | Some Tool_schemas_misc.Misc_lane_action_status ->
       Some (match Lane_addon_runtime.dispatch ~caller:ctx.agent_name ~config:ctx.config ~operation:Lane_addon_runtime.Action_status args with
         | Ok data -> Tool_result.make_ok ~tool_name:name ~start_time:start ~data ()
@@ -339,6 +340,7 @@ let is_read_only = function
   | Tool_schemas_misc.Misc_dashboard
   | Tool_schemas_misc.Misc_keeper_waiting_inventory
   | Tool_schemas_misc.Misc_tool_help
+  | Tool_schemas_misc.Misc_portrait_read
   (* Read-back only: records nothing, matching the descriptor's readonly flag
      and the MCP lane's runtime_tool_policy. *)
   | Tool_schemas_misc.Misc_ask_status -> true

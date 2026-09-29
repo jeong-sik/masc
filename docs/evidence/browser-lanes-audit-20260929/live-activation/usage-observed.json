@@ -1,0 +1,103 @@
+{
+  "observed_at_utc": "2026-09-29T02:49:05Z",
+  "source": "live authenticated API :8935",
+  "exact_projection_count": 2000,
+  "exact_source_total": 4182,
+  "exact_projection_truncated": true,
+  "lanes": [
+    {
+      "lane_id": "board_attention_exact",
+      "configuration_state": "ready",
+      "status_in_window": "running",
+      "runs_in_window": 1654,
+      "running_in_window": 9,
+      "retained_page_total": 2009,
+      "retained_sample_count": 200,
+      "retained_sample_statuses": {
+        "running": 9,
+        "failed": 161,
+        "succeeded": 30
+      },
+      "newest_retained_at_utc": "2026-09-29T02:49:04.962315+00:00",
+      "retained_sample_truncated": true
+    },
+    {
+      "lane_id": "hitl_auto_judge",
+      "configuration_state": "ready",
+      "status_in_window": "no_retained_observation",
+      "runs_in_window": 0,
+      "running_in_window": 0,
+      "retained_page_total": 16,
+      "retained_sample_count": 16,
+      "retained_sample_statuses": {
+        "failed": 14,
+        "succeeded": 2
+      },
+      "newest_retained_at_utc": "2026-09-23T01:59:05.101264+00:00",
+      "retained_sample_truncated": false
+    },
+    {
+      "lane_id": "librarian_exact",
+      "configuration_state": "ready",
+      "status_in_window": "running",
+      "runs_in_window": 346,
+      "running_in_window": 23,
+      "retained_page_total": 2022,
+      "retained_sample_count": 200,
+      "retained_sample_statuses": {
+        "running": 22,
+        "succeeded": 178
+      },
+      "newest_retained_at_utc": "2026-09-29T02:49:03.414947+00:00",
+      "retained_sample_truncated": true
+    },
+    {
+      "lane_id": "workspace_curator_exact",
+      "configuration_state": "unconfigured",
+      "status_in_window": "unavailable",
+      "runs_in_window": 0,
+      "running_in_window": 0,
+      "retained_page_total": 134,
+      "retained_sample_count": 134,
+      "retained_sample_statuses": {
+        "failed": 134
+      },
+      "newest_retained_at_utc": "2026-09-28T14:05:58.298763+00:00",
+      "retained_sample_truncated": false
+    },
+    {
+      "lane_id": "verifier_exact",
+      "configuration_state": "ready",
+      "status_in_window": "running",
+      "runs_in_window": 78,
+      "running_in_window": 3,
+      "retained_page_total": 78,
+      "retained_sample_count": 78,
+      "retained_sample_statuses": {
+        "not_reviewed": 10,
+        "running": 3,
+        "review_cancelled": 2,
+        "rejected": 14,
+        "approved": 35,
+        "committed": 11,
+        "deferred": 2,
+        "commit_failed": 1
+      },
+      "newest_retained_at_utc": "2026-09-29T02:48:28.674063+00:00",
+      "retained_sample_truncated": false
+    },
+    {
+      "lane_id": "browser_stagehand_exact",
+      "configuration_state": "ready",
+      "status_in_window": "no_retained_observation",
+      "runs_in_window": 0,
+      "running_in_window": 0,
+      "retained_page_total": 0,
+      "retained_sample_count": 0,
+      "retained_sample_statuses": {},
+      "newest_retained_at_utc": null,
+      "retained_sample_truncated": false
+    }
+  ],
+  "page_contract": "The /exact-lane-runs endpoint includes task/Goal review rows for verifier_exact; totals are retained lane-filtered pages, not all-time exact model calls."
+}

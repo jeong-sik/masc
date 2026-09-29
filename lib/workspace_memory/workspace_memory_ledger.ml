@@ -57,6 +57,7 @@ type t =
 
 type reconciliation =
   { ledger : t
+  ; current_facts : pending_fact list
   ; new_facts : pending_fact list
   ; vanished : fact_ref list
   }
@@ -316,6 +317,40 @@ let save ~base_path t =
        | Eio.Cancel.Cancelled _ as exn -> Printexc.raise_with_backtrace exn failure.backtrace
        | _ -> Error (Fs_compat.atomic_replace_failure_to_string failure)))
 
+type observation =
+  | Missing
+  | Unavailable of string
+  | Available of
+      { ledger_sha256 : string
+      ; claim_count : int
+      ; conflict_count : int
+      ; classified_count : int
+      }
+
+let observe ~base_path =
+  let ledger_path = path ~base_path in
+  try
+    match Unix.lstat ledger_path with
+    | { Unix.st_kind = Unix.S_REG; _ } ->
+      let stored = io (fun () ->
+        let text = Fs_compat.load_file ledger_path in
+        let* json = try Ok (Yojson.Safe.from_string text)
+          with Yojson.Json_error detail -> Error (ledger_path ^ ": " ^ detail) in
+        of_json json |> Result.map_error (fun detail -> ledger_path ^ ": " ^ detail)) in
+      (match stored with
+       | Error detail -> Unavailable detail
+       | Ok ledger ->
+         let ledger_sha256 = Digestif.SHA256.(digest_string
+           (Yojson.Safe.to_string (to_json ledger)) |> to_hex) in
+         Available { ledger_sha256; claim_count = List.length (claims ledger);
+                     conflict_count = List.length (conflicts ledger);
+                     classified_count = List.length (dispositions ledger) })
+    | _ -> Unavailable (ledger_path ^ ": not a regular file")
+  with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> Missing
+  | Unix.Unix_error (error, fn, arg) ->
+    Unavailable (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message error))
+
 (* Reconciliation *)
 
 let claim_sha256 claim = Digestif.SHA256.(digest_string claim |> to_hex)
@@ -342,7 +377,7 @@ let facts_of_observation observation facts =
   | Workspace_memory_context.Missing -> Some []
   | Workspace_memory_context.Available snapshot -> Some (facts snapshot)
 
-let observe (keeper : Workspace_memory_context.keeper) =
+let observe_keeper (keeper : Workspace_memory_context.keeper) =
   let keeper_id = keeper.keeper_id in
   [ ( Ordinary_store keeper_id
     , facts_of_observation keeper.ordinary (fun (snapshot : Keeper_memory_os_current.t) ->
@@ -359,7 +394,7 @@ let observe (keeper : Workspace_memory_context.keeper) =
           snapshot.facts) ) ]
 
 let reconcile t keepers =
-  let stores = List.concat_map observe keepers in
+  let stores = List.concat_map observe_keeper keepers in
   let unreadable =
     List.filter_map (fun (key, facts) -> match facts with None -> Some key | Some _ -> None) stores
   in
@@ -376,8 +411,9 @@ let reconcile t keepers =
       (Fact_map.empty, [])
       stores
   in
+  let current_facts = List.rev observed_order in
   let new_facts =
-    List.rev observed_order
+    current_facts
     |> List.filter (fun pending -> not (Fact_map.mem pending.fact t.dispositions))
   in
   let vanished =
@@ -391,7 +427,7 @@ let reconcile t keepers =
       []
     |> List.rev
   in
-  { ledger = remove vanished t; new_facts; vanished }
+  { ledger = remove vanished t; current_facts; new_facts; vanished }
 
 type decision =
   | Join_claim of string

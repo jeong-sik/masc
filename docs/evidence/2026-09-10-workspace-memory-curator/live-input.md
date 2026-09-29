@@ -1,3 +1,5 @@
+> Historical evidence: the proposal workflow and the scripts shown below were retired in #39865. These commands do not apply to the ledger reader API. Current read-only installed discovery verification uses `scripts/verify-installed-workspace-memory-discovery.py`; there is no replacement proposal write endpoint.
+
 # Capture live workspace memory for a local curator proposal
 
 The standalone CLI can read the server-owned workspace memory inventory directly:

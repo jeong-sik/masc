@@ -96,7 +96,7 @@ let direct_turn_dynamic_context
       ~(current_task : Keeper_world_observation_inputs.current_task_observation)
       ~(held_task_skills : Keeper_world_observation_inputs.held_task_skills list)
       ~(task_skill_surfaces : (string * Keeper_skill_catalog.exact_surface list) list)
-      ~(workspace_memory : Workspace_memory_publication.observation)
+      ~(workspace_memory : Workspace_memory_ledger.observation)
       ~(lane_updates : (Yojson.Safe.t,string) result)
       ~(approval_authority_text : string)
       ~(recent_direct_conversation_text : string)
@@ -693,9 +693,9 @@ let run_keeper_invocation_turn_admitted_inner
             let lane_updates = Domain_pool_ref.submit_io_or_inline (fun () ->
               Lane_addon_subscription.observe ~config:ctx.config ~keeper_name:meta.name) in
             let workspace_memory = Domain_pool_ref.submit_io_or_inline (fun () ->
-              Workspace_memory_publication.observe ~base_path:ctx.config.base_path) in
+              Workspace_memory_ledger.observe ~base_path:ctx.config.base_path) in
             (match workspace_memory with
-             | Workspace_memory_publication.Unavailable detail ->
+             | Workspace_memory_ledger.Unavailable detail ->
                Log.Keeper.warn "workspace memory discovery unavailable keeper=%s: %s" meta.name detail
              | Missing | Available _ -> ());
             let build_turn_prompt ~base_system_prompt:_ ~messages:_

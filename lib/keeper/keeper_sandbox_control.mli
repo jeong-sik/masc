@@ -42,13 +42,20 @@ val repository_checkouts_json :
     checkout directory; freshness is measured against the local tracking ref.
     Missing or ambiguous evidence is returned as an explicit typed state. *)
 
-(** Where a checkout's HEAD stands relative to [origin/<default_branch>] of
-    its catalog repository, measured against the checkout's locally known
-    remote refs (the server's periodic repository sync keeps those fetched).
-    [Freshness_unavailable] carries the reason a probe could not answer —
-    unregistered origin, exhausted inspection budget, or a failed git call. *)
+(** Where a checkout's HEAD stands relative to the locally known
+    [origin/<default_branch>] of its catalog repository. [Current] requires a
+    target-ref reflog move or matching FETCH_HEAD observation within 900
+    seconds. [Stale_ref] records the last local observation when older or
+    unknown. Neither proves the remote's current HEAD.
+    [Freshness_unavailable] carries a failed comparison or catalog probe. *)
 type checkout_freshness =
-  | Current of { target_ref : string; upstream_head : string }
+  | Current of { target_ref : string; upstream_head : string; last_observed_at_unix : int; age_s : int }
+  | Stale_ref of
+      { target_ref : string
+      ; upstream_head : string
+      ; last_observed_at_unix : int option
+      ; age_s : int option
+      }
   | Ahead of { target_ref : string; upstream_head : string; ahead : int }
   | Behind of { target_ref : string; upstream_head : string; behind : int }
   | Diverged of

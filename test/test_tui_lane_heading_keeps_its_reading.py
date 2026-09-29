@@ -11,6 +11,7 @@ import test_tui_keyboard_input as h
 SOURCE_MODULES = (
     "bin/masc_tui_render.ml",
     "bin/masc_tui_keys.ml",
+    "bin/masc_tui_lane_addons.ml",
 )
 
 HEADING = "Lanes · observed ".encode()
@@ -73,6 +74,42 @@ def run(executable: str) -> None:
                             interact=interact, http_fixtures=fixtures)
 
 
+def run_unapplied_installations(executable: str) -> None:
+    fixtures = h.keeper_runtime_http_fixtures()
+    fixtures[h.STANDALONE_LANES_PATH] = h.standalone_lanes_response()
+    fixtures["/api/v1/lane-addons"] = (200, {
+        "instances": [], "rows": [], "coverage": [],
+        "configuration": {
+            "directory": "/fixture/lane-addons", "complete": True,
+            "declarations": [
+                {"id": name, "source_path": f"/fixture/lane-addons/{name}.toml",
+                 "desired_revision": name, "applied_revision": None, "instance_id": None}
+                for name in ("dos-counter", "dos-output-statistics")
+            ],
+            "issues": [
+                {"id": name, "source_path": f"/fixture/lane-addons/{name}.toml",
+                 "message": "Docker image missing"}
+                for name in ("dos-counter", "dos-output-statistics")
+            ],
+        },
+    })
+
+    def interact(process, fd, _slave, output, _base_path):
+        h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
+        h.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
+        h.send_and_wait(process, fd, output, b"A", b"Recorded observations")
+        frame = h.send_and_wait(process, fd, output, b"\x1b", b"2 declared")
+        reading = b"Lane Add-ons: 2 declared \xc2\xb7 0 active \xc2\xb7 2 config issues"
+        if reading not in h.screen_text(frame):
+            raise AssertionError("unapplied TOML was counted as an installed worker")
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(executable,
+                            description="unapplied Add-ons are not active workers",
+                            interact=interact, http_fixtures=fixtures)
+
+
 if __name__ == "__main__":
     run(os.path.abspath(sys.argv[1]))
-    print("the lanes heading keeps its reading: PASS")
+    run_unapplied_installations(os.path.abspath(sys.argv[1]))
+    print("lanes heading and installation truth: PASS")

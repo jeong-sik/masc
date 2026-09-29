@@ -1179,25 +1179,38 @@ let lines ?(height=24) ?(failed_note = "") ~width view =
         Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
           (Masc.Tui_decode.sanitize_terminal_text line))
 
-(* The Lanes surface drew a fixed sentence -- "No Add-ons installed. Press A
-   to inspect installed add-ons" -- with no state behind it, so it said so
-   whether or not any were installed and whether or not anything had read.
-   Nothing on that surface asks for Add-ons: [launch_lanes_load] fetches
-   standalone lanes only, so the honest answer there is that nobody has read
-   yet. The three answers are apart in the type; the row that draws them
-   chooses the words. *)
-type installed_reading =
+(* A TOML declaration may exist while no worker can run. Keep the file count,
+   live worker count, and failures separate on the Lanes surface. *)
+type installation_reading =
   | Not_read
-  | Nothing_installed
-  | Installed of int
+  | Observed of {
+      declared : int;
+      active : int;
+      failed_workers : int;
+      configuration_issues : int;
+      complete : bool;
+    }
 
-let installed view =
+let installation_reading view =
   match view.snapshot with
   | None -> Not_read
   | Some snapshot ->
     (match snapshot.configuration with
      | None -> Not_read
      | Some configuration ->
-       (match List.length configuration.declarations with
-        | 0 -> Nothing_installed
-        | count -> Installed count))
+       let active, failed_workers =
+         List.fold_left (fun (active, failed) (instance : instance) ->
+           match instance.phase with
+           | Row.Attached | Row.Observing -> active + 1, failed
+           | Row.Failed _ -> active, failed + 1
+           | Row.Detaching | Row.Detached -> active, failed)
+           (0, 0) snapshot.instances in
+       Observed {
+         declared = List.length configuration.declarations;
+         active;
+         failed_workers;
+         configuration_issues = List.fold_left (fun count declaration ->
+           if declaration.issues = [] then count else count + 1)
+           0 configuration.declarations;
+         complete = configuration.complete;
+       })

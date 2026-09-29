@@ -576,8 +576,9 @@ the reading. This is a registry view, not a socket list - a leftover
 process holding a connection is still an `lsof` question.
 
 ```
- MASC Lanes · Standalone (4 lanes)  17:02:53  [connected]
-  Standalone LLM lanes · o:Lane Add-ons · a:append slot · observed 17:02:52
+ MASC Lanes (6 lanes)  17:02:53  [connected]
+  Lanes · observed 17:02:52
+  Lane Add-ons: 2 declared · 0 active · 2 config issues
     LANE       STATUS          ACTIVE  RUNS  OK/FAIL/CANCEL  P50     SLOTS            OBSERVED
  >◒ Librarian  running 12s          1    50  47/2/1          8.0s    librarian-exact  librarian-exact×50
 ```
@@ -591,11 +592,14 @@ a long name moves every row's columns together rather than one row's. The
 counts come before the slots because they are what a reader compares down
 the column; beside the Activity pane the slot column is the one cut, and the
 block under the list prints the selected lane's slots in full. This build
-projects four fixed consumers:
+projects six fixed consumers:
 `Board Attention` judges one durable Board attention candidate, `HITL Auto
 Judge` judges one held approval, `Librarian` selects the next Memory OS
 snapshot from immutable Keeper history, and `Verifier` reviews Task completion
-and Goal proof evidence.
+and Goal proof evidence. `Workspace Curator` classifies changed Keeper facts,
+and `Browser Stagehand` handles model-driven browser operations. The Add-on
+summary counts declared TOML files separately from active workers; a saved
+file can remain unapplied when its package image is unavailable.
 
 The selected row expands underneath the matrix instead of forcing its long
 identifiers through the clipped comparison row. It names the exact

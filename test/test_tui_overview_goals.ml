@@ -257,31 +257,9 @@ let contains ~sub text =
   let rec at i = i + n <= m && (String.sub text i n = sub || at (i + 1)) in
   at 0
 
-(* Detail lines carry a two-space indent and wrap at spaces, so a clause can
-   span lines. Collapse runs of spaces to read the metadata as one line. *)
-let collapse_spaces text =
-  let buf = Buffer.create (String.length text) in
-  let previous_space = ref false in
-  String.iter
-    (fun c ->
-      if c = ' ' then begin
-        if not !previous_space then Buffer.add_char buf ' ';
-        previous_space := true
-      end
-      else begin
-        Buffer.add_char buf c;
-        previous_space := false
-      end)
-    text;
-  Buffer.contents buf
-
-let status_of_id tasks id =
-  List.find_opt (fun (task : Tui_decode.task) -> String.equal task.id id) tasks
-  |> Option.map (fun (task : Tui_decode.task) -> task.status)
-
 let draw ?(rows = 25) ?(tasks = live_tasks) reading =
   Goals.lines ~now:captured_at ~localtime:Unix.gmtime ~inner_width:120 ~rows
-    ~tasks:(Tasks.Rows_read tasks) ~status_of_id:(status_of_id tasks) reading
+    ~tasks:(Tasks.Rows_read tasks) reading
   |> List.map strip_ansi
 
 let find_row ~sub rows =
@@ -292,88 +270,40 @@ let find_row ~sub rows =
 let test_live_fleet_moves_no_goal () =
   let goals = decode_fixture () in
   check int "every goal of the tree is read" 8 (List.length goals);
-  check (list string) "drawn goals by priority, then due date"
-    [ "goal-1790086689552-6c127e32"
-    ; "goal-audit-cross-verification-20260911"
-    ; "goal-reliable-change-g1-20260909"
-    ; "goal-1790125941892-ccfcc7ac"
-    ; "goal-msx-play-token-cost"
-    ]
-    (List.map
-       (fun (goal : Tui_decode.overview_goal) -> goal.og_id)
-       (Goals.drawn_goals goals));
   let rows = draw (Types.Goals_read goals) in
-  check int "the headline and two rows per executing goal" 11 (List.length rows);
-  check bool "the headline counts no active task toward a goal" true
-    (contains ~sub:"active work toward a goal: 0 of 13 tasks" (List.hd rows));
+  check int "one headline and one row per executing goal" 6 (List.length rows);
+  check bool "headline counts linked active tasks" true
+    (contains ~sub:"active tasks linked: 0/13" (List.hd rows));
   let audit = find_row ~sub:"6일간" rows in
-  check bool "the bar row counts the goal's tasks" true
-    (contains ~sub:"\xe2\x96\x91\xe2\x96\x91  0/6 tasks" audit);
-  check bool "the bar row prints how long the goal has been idle" true
-    (contains ~sub:"idle 1d" audit);
+  check bool "the linked task count is explicit" true
+    (contains ~sub:"0/6 tasks" audit);
+  check bool "task progress is not drawn as goal progress" false
+    (contains ~sub:"░" audit || contains ~sub:"idle" audit);
   let release = find_row ~sub:"v0.37.0" rows in
-  check bool "a goal with no task says so instead of a zero" true
+  check bool "a goal with no tasks says so" true
     (contains ~sub:"no tasks" release);
-  check bool "a due date counts down" true
-    (contains ~sub:"due 10-07 (D-14)" release)
+  check bool "due date appears once" true
+    (contains ~sub:"due 10-07 (D-14)" release);
+  check bool "no second metadata row" false
+    (contains ~sub:"owner unknown" (String.concat " " rows))
 
-let test_goal_metadata_keeps_owner_state_and_due_together () =
+let test_one_row_fits_a_short_viewport () =
   let goal =
     match Goals.drawn_goals (decode_fixture ()) with
-    | first :: _ -> { first with og_task_ids = [ "task-1501"; "task-gone" ] }
+    | first :: _ -> first
     | [] -> fail "fixture has no drawn goal"
   in
   let rows =
     Goals.lines ~now:captured_at ~localtime:Unix.gmtime ~inner_width:46
-      ~rows:12 ~tasks:(Tasks.Rows_read [ in_progress "task-1501" ])
-      ~status_of_id:(status_of_id [ in_progress "task-1501" ])
+      ~rows:2 ~tasks:(Tasks.Rows_read live_tasks)
       (Types.Goals_read [ goal ])
     |> List.map strip_ansi
   in
-  let detail =
-    collapse_spaces (String.concat " " (List.tl (List.tl rows)))
-  in
-  check bool "an unowned goal reads unknown and names performers apart" true
-    (contains ~sub:"owner unknown" detail
-     && contains ~sub:"performer @keeper-a" detail
-     && contains ~sub:"other performers unknown" detail
-     && not (contains ~sub:"owner @keeper-a" detail));
-  check bool "the phase and due date are both present" true
-    (contains ~sub:"state executing" detail
-     && contains ~sub:"due 10-07 (D-14)" detail);
-  let hidden =
-    Goals.lines ~now:captured_at ~localtime:Unix.gmtime ~inner_width:46
-      ~rows:2 ~tasks:(Tasks.Rows_read [ in_progress "task-1501" ])
-      ~status_of_id:(status_of_id [ in_progress "task-1501" ])
-      (Types.Goals_read [ goal ])
-    |> List.map strip_ansi
-  in
-  check int "a short viewport keeps the whole goal entry offscreen" 1
-    (List.length hidden);
-  check bool "the headline accounts for the hidden goal" true
-    (contains ~sub:"0 of 1 goals shown" (List.hd hidden))
-
-let test_a_completed_task_keeps_its_goal_performer () =
-  let goal =
-    match Goals.drawn_goals (decode_fixture ()) with
-    | first :: _ -> { first with og_task_ids = [ "task-done" ] }
-    | [] -> fail "fixture has no drawn goal"
-  in
-  let done_task =
-    task "task-done"
-      (Masc_domain.Done
-         { assignee = "keeper-done"; completed_at = "2026-09-23T00:00:00Z"
-         ; notes = None })
-  in
-  let rows =
-    Goals.lines ~now:captured_at ~localtime:Unix.gmtime ~inner_width:120
-      ~rows:10 ~tasks:(Tasks.Rows_read [])
-      ~status_of_id:(status_of_id [ done_task ]) (Types.Goals_read [ goal ])
-    |> List.map strip_ansi
-  in
-  check bool "finished task absent from active rows still names its performer" true
-    (contains ~sub:"owner unknown" (String.concat " " rows)
-     && contains ~sub:"performer @keeper-done" (String.concat " " rows))
+  check int "a headline and goal fit" 2 (List.length rows);
+  check bool "goal title remains visible" true
+    (contains ~sub:"v0.37" (List.nth rows 1));
+  check bool "the goal stays inside its 46-cell frame" true
+    (Masc_tui_message_layout.display_width (List.nth rows 1) <= 46)
 
 (* The input that splits the headline: one of the active tasks is a task an
    executing goal lists. *)
@@ -382,39 +312,37 @@ let test_an_active_goal_task_counts () =
   let tasks = in_progress "task-1501" :: live_tasks in
   let rows = draw ~tasks (Types.Goals_read goals) in
   check bool "the linked task is counted toward a goal" true
-    (contains ~sub:"active work toward a goal: 1 of 14 tasks" (List.hd rows))
+    (contains ~sub:"active tasks linked: 1/14" (List.hd rows))
 
 let test_a_short_budget_says_what_it_cut () =
   let goals = decode_fixture () in
   let rows = draw ~rows:3 (Types.Goals_read goals) in
   check int "the budget is kept" 3 (List.length rows);
   check bool "the headline says how many goals are drawn" true
-    (contains ~sub:"1 of 5 goals shown" (List.hd rows))
+    (contains ~sub:"2 of 5 goals shown" (List.hd rows))
 
 let test_a_failed_read_is_one_explicit_line () =
   check (list string) "a failure is named, not drawn as an empty section"
     [ "Goals unavailable: goals load failed: connection refused" ]
     (draw ~rows:1 (Types.Goals_failed "goals load failed: connection refused"));
   check int "a failed read asks for one row" 1
-    (Goals.wanted_rows ~now:captured_at ~localtime:Unix.gmtime
-       ~inner_width:120 ~tasks:(Tasks.Rows_read live_tasks)
-       ~status_of_id:(status_of_id live_tasks) (Types.Goals_failed "x"))
+    (Goals.wanted_rows
+       (Types.Goals_failed "x"))
 
 let test_an_unread_goals_read_names_the_unknown_in_one_row () =
   check (list string) "one allocated row includes the unread reason"
     [ "Goals   No goal data read yet." ]
     (draw ~rows:1 Types.Goals_unread);
   check int "an unread read asks for one row" 1
-    (Goals.wanted_rows ~now:captured_at ~localtime:Unix.gmtime
-       ~inner_width:120 ~tasks:(Tasks.Rows_read live_tasks)
-       ~status_of_id:(status_of_id live_tasks) Types.Goals_unread)
+    (Goals.wanted_rows
+       Types.Goals_unread)
 
 let test_an_unread_backlog_is_not_a_zero () =
   let goals = decode_fixture () in
   let rows =
     Goals.lines ~now:captured_at ~localtime:Unix.gmtime ~inner_width:120 ~rows:10
       ~tasks:(Tasks.Rows_unavailable "backlog.json unreadable")
-      ~status_of_id:(status_of_id live_tasks) (Types.Goals_read goals)
+      (Types.Goals_read goals)
     |> List.map strip_ansi
   in
   check bool "the headline names the unread backlog" true
@@ -427,7 +355,7 @@ let test_a_backlog_not_read_yet_is_not_a_zero () =
   let goals = decode_fixture () in
   let rows =
     Goals.lines ~now:captured_at ~localtime:Unix.gmtime ~inner_width:120 ~rows:10
-      ~tasks:Tasks.Rows_unread ~status_of_id:(status_of_id live_tasks)
+      ~tasks:Tasks.Rows_unread
       (Types.Goals_read goals)
     |> List.map strip_ansi
   in
@@ -446,7 +374,7 @@ let test_the_countdown_uses_the_operator_calendar () =
   let rows =
     Goals.lines ~now:just_after_kst_midnight ~localtime:kst ~inner_width:120
       ~rows:10 ~tasks:(Tasks.Rows_read live_tasks)
-      ~status_of_id:(status_of_id live_tasks) (Types.Goals_read goals)
+      (Types.Goals_read goals)
     |> List.map strip_ansi
   in
   check bool "the countdown is from the local date" true
@@ -469,9 +397,8 @@ let test_a_goal_without_children_is_refused () =
 let test_an_empty_tree_is_one_headline () =
   let empty = Types.Goals_read [] in
   check int "an empty tree asks for one row" 1
-    (Goals.wanted_rows ~now:captured_at ~localtime:Unix.gmtime
-       ~inner_width:120 ~tasks:(Tasks.Rows_read live_tasks)
-       ~status_of_id:(status_of_id live_tasks) empty);
+    (Goals.wanted_rows
+       empty);
   check (list string) "the empty section gives the next fact"
     [ "Goals (0)   No goal is executing or verifying." ]
     (draw empty)
@@ -492,49 +419,14 @@ let test_an_unknown_phase_is_refused () =
         (Tui_decode.overview_goals_error_to_string other)
   | Ok _ -> fail "an unknown phase decoded"
 
-(* #39571: when the Goal records an owner, the metadata names it instead of
-   guessing from the task performers. *)
-let test_a_recorded_owner_is_shown () =
-  let goal =
-    match Goals.drawn_goals (decode_fixture ()) with
-    | first :: _ -> { first with og_owner = Goal_store.Owner "keeper-z" }
-    | [] -> fail "fixture has no drawn goal"
-  in
+let row_of_goal goal =
   let rows =
-    Goals.lines ~now:captured_at ~localtime:Unix.gmtime ~inner_width:46
-      ~rows:12 ~tasks:(Tasks.Rows_read [])
-      ~status_of_id:(status_of_id []) (Types.Goals_read [ goal ])
+    Goals.lines ~now:captured_at ~localtime:Unix.gmtime ~inner_width:120
+      ~rows:2 ~tasks:(Tasks.Rows_read live_tasks)
+      (Types.Goals_read [ goal ])
     |> List.map strip_ansi
   in
-  let detail = String.concat " " (List.tl (List.tl rows)) in
-  check bool "the recorded owner is named" true
-    (contains ~sub:"owner keeper-z" detail)
-
-let detail_of_goal ?(tasks = []) goal =
-  let rows =
-    Goals.lines ~now:captured_at ~localtime:Unix.gmtime ~inner_width:46
-      ~rows:12 ~tasks:(Tasks.Rows_read tasks)
-      ~status_of_id:(status_of_id tasks) (Types.Goals_read [ goal ])
-    |> List.map strip_ansi
-  in
-  let drop_one = function _ :: rest -> rest | [] -> [] in
-  String.concat " " (drop_one (drop_one rows))
-
-(* #39571 P2: a Goal with no recorded owner must not borrow a task performer's
-   name as its owner. The counterexample is an unowned Goal whose linked task
-   is in progress under a keeper. *)
-let test_an_unowned_goal_does_not_borrow_a_performer () =
-  let goal =
-    match Goals.drawn_goals (decode_fixture ()) with
-    | first :: _ -> { first with og_task_ids = [ "task-1501" ] }
-    | [] -> fail "fixture has no drawn goal"
-  in
-  let detail = detail_of_goal ~tasks:[ in_progress "task-1501" ] goal in
-  check bool "the unowned goal reads unknown, not the performer's name" true
-    (contains ~sub:"owner unknown" detail
-     && not (contains ~sub:"owner @keeper-a" detail));
-  check bool "the performer is a separate label" true
-    (contains ~sub:"performer @keeper-a" detail)
+  List.nth rows 1
 
 (* #39571: a Goal whose latest verdict was a rejection reads as refuted, not as
    one that is simply executing again. *)
@@ -545,7 +437,7 @@ let test_a_refuted_goal_is_shown_as_refuted () =
     | [] -> fail "fixture has no drawn goal"
   in
   check bool "the refuted goal is named refuted" true
-    (contains ~sub:"refuted" (detail_of_goal goal))
+    (contains ~sub:"refuted" (row_of_goal goal))
 
 (* #39571: overdue appears only after due_date, and only for a Goal still
    executing or verifying. captured_at is 2026-09-23. *)
@@ -565,29 +457,23 @@ let test_overdue_appears_only_after_due_date () =
     { base with og_phase = Goal_phase.Dropped; og_due_date = Some "2026-09-01" }
   in
   check bool "a past due date on an executing goal is overdue" true
-    (contains ~sub:"overdue" (detail_of_goal past));
+    (contains ~sub:"overdue" (row_of_goal past));
   check bool "a future due date is not overdue" false
-    (contains ~sub:"overdue" (detail_of_goal future));
+    (contains ~sub:"overdue" (row_of_goal future));
   check bool "a dropped goal is not drawn, so never overdue" false
-    (contains ~sub:"overdue" (detail_of_goal dropped))
+    (contains ~sub:"overdue" (String.concat " " (draw (Types.Goals_read [ dropped ]))))
 
 let () =
   run "tui_overview_goals"
     [ ( "overview goals"
       , [ test_case "the live fleet moves no goal" `Quick
             test_live_fleet_moves_no_goal
-        ; test_case "goal metadata stays whole" `Quick
-            test_goal_metadata_keeps_owner_state_and_due_together
-        ; test_case "a recorded owner is named" `Quick
-            test_a_recorded_owner_is_shown
-        ; test_case "an unowned goal does not borrow a performer" `Quick
-            test_an_unowned_goal_does_not_borrow_a_performer
+        ; test_case "a goal fits one short row" `Quick
+            test_one_row_fits_a_short_viewport
         ; test_case "a refuted goal is shown as refuted" `Quick
             test_a_refuted_goal_is_shown_as_refuted
         ; test_case "overdue appears only after due_date" `Quick
             test_overdue_appears_only_after_due_date
-        ; test_case "a completed task keeps its goal performer" `Quick
-            test_a_completed_task_keeps_its_goal_performer
         ; test_case "an active goal task counts" `Quick
             test_an_active_goal_task_counts
         ; test_case "a short budget says what it cut" `Quick

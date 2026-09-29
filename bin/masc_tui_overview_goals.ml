@@ -61,37 +61,9 @@ let progress ~goals ~tasks =
            active_tasks)
   }
 
-(* Cells of the task bar. A width, not a threshold: nothing is decided by it. *)
-let bar_cells = 16
-
-(* Below this the title names no goal; the row runs past the frame's edge
-   instead, where the frame's own fit cuts it. *)
-let minimum_title_cells = 12
-
-let column_gap = "  "
-
-let task_bar (goal : Tui_decode.overview_goal) =
-  if goal.og_task_count <= 0 then String.make bar_cells ' '
-  else
-    let filled =
-      max 0
-        (min bar_cells (goal.og_task_done_count * bar_cells / goal.og_task_count))
-    in
-    let repeat glyph count =
-      String.concat "" (List.init (max 0 count) (fun _ -> glyph))
-    in
-    Theme.ok () ^ repeat "\xe2\x96\x88" filled ^ Ansi.reset ^ Ansi.dim
-    ^ repeat "\xe2\x96\x91" (bar_cells - filled)
-    ^ Ansi.reset
-
 let task_count_text (goal : Tui_decode.overview_goal) =
   if goal.og_task_count <= 0 then "no tasks"
   else Printf.sprintf "%d/%d tasks" goal.og_task_done_count goal.og_task_count
-
-let idle_text (goal : Tui_decode.overview_goal) =
-  match goal.og_stagnation_seconds with
-  | Some seconds -> "idle " ^ Masc_tui_render_prim.keeper_lane_idle_text seconds
-  | None -> "idle \xe2\x80\x94"
 
 (* [due_date] is a calendar date with no zone, so it is compared with the
    operator's own calendar date: the day [localtime] puts [now] on. *)
@@ -120,10 +92,6 @@ let due_text ~today (goal : Tui_decode.overview_goal) =
           Some (Printf.sprintf "due %s (%s)" date countdown)
       | None, _ | Some _, None -> Some ("due " ^ raw))
 
-let widest texts =
-  List.fold_left (fun acc text -> max acc (Masc_tui_message_layout.display_width text)) 0
-    texts
-
 (* A Goal whose latest verdict was a rejection (#39571). The verification
    ledger's current completion state is [proof_refuted]; the phase alone cannot
    tell it apart from a Goal that is simply executing again. *)
@@ -147,123 +115,42 @@ let overdue_text ~today (goal : Tui_decode.overview_goal) =
   if is_overdue ~today goal then Some (Theme.warn () ^ "overdue" ^ Ansi.reset)
   else None
 
+(* A row is a scan target, not a Goal progress meter. Task counts name
+   linked task work only; the Goal metric and ownership live in Planning. *)
 let goal_rows ~now ~localtime ~inner_width goals =
   let today = local_today ~now ~localtime in
-  let counts = List.map task_count_text goals in
-  let idles = List.map idle_text goals in
-  let dues = List.map (due_text ~today) goals in
-  let count_width = widest counts in
-  let idle_width = widest idles in
-  let due_width =
-    widest
-      (List.filter_map
-         (Option.map (fun text -> column_gap ^ text))
-         dues)
-  in
-  let gap = String.length column_gap in
-  let title_width =
-    max minimum_title_cells
-      (inner_width - gap - (gap + bar_cells) - (gap + count_width)
-     - (gap + idle_width) - due_width)
-  in
-  List.map2
-    (fun (goal : Tui_decode.overview_goal) (count, (idle, due)) ->
-      let due_cell =
-        match due with Some text -> column_gap ^ text | None -> ""
+  List.map
+    (fun (goal : Tui_decode.overview_goal) ->
+      let phase =
+        match goal.og_phase with
+        | Goal_phase.Executing -> []
+        | phase -> [ Masc_tui_render_prim.planning_phase_label phase ]
       in
-      String.concat ""
-        [ column_gap
-        ; fit_width (Terminal_text.single_line goal.og_title) title_width
-        ; column_gap
-        ; task_bar goal
-        ; column_gap
-        ; fit_width count count_width
-        ; column_gap
-        ; Ansi.dim ^ fit_width idle idle_width ^ Ansi.reset
-        ; due_cell
-        ])
+      let attention =
+        List.filter_map Fun.id
+          [ refuted_text goal; overdue_text ~today goal ]
+      in
+      let suffix =
+        String.concat " · "
+          (phase @ attention @ [ task_count_text goal ]
+           @ Option.to_list (due_text ~today goal))
+      in
+      let suffix_width =
+        min (Masc_tui_message_layout.display_width suffix) (max 0 (inner_width - 5))
+      in
+      let title_width = max 1 (inner_width - 4 - suffix_width) in
+      "  " ^ fit_width (Terminal_text.single_line goal.og_title) title_width
+      ^ "  " ^ fit_width suffix suffix_width)
     goals
-    (List.combine counts (List.combine idles dues))
 
-let owner_text (goal : Tui_decode.overview_goal) =
-  match goal.og_owner with
-  | Goal_store.Owner name -> "owner " ^ Terminal_text.single_line name
-  | Goal_store.Unknown_owner -> "owner unknown"
-
-(* The performers of a Goal's tasks are not its owner (#39571). They are drawn
-   as a separate label, and only while the Goal records no owner: a recorded
-   owner is authoritative, and the fallback exists because the task performers
-   were the only ownership signal before the owner field. *)
-let performer_text ~tasks ~status_of_id (goal : Tui_decode.overview_goal) =
-  match goal.og_owner with
-  | Goal_store.Owner _ -> None
-  | Goal_store.Unknown_owner -> (
-      match tasks with
-      | Masc_tui_overview_tasks.Rows_unread
-      | Masc_tui_overview_tasks.Rows_unavailable _ ->
-          None
-      | Masc_tui_overview_tasks.Rows_read _ ->
-          let names, missing =
-            List.fold_left
-              (fun (names, missing) id ->
-                match status_of_id id with
-                | None -> (names, true)
-                | Some status -> (
-                    match Masc_domain.task_performer_of_status status with
-                    | None -> (names, missing)
-                    | Some name ->
-                        (Terminal_text.single_line name :: names, missing)))
-              ([], false) goal.og_task_ids
-          in
-          let names = List.sort_uniq String.compare names in
-          (match names with
-          | [] -> None
-          | _ :: _ ->
-              Some
-                ("performer @" ^ String.concat ", @" names
-                ^ if missing then " · other performers unknown" else "")))
-
-let goal_entries ~now ~localtime ~inner_width ~tasks ~status_of_id goals =
-  let today = local_today ~now ~localtime in
-  let summaries = goal_rows ~now ~localtime ~inner_width goals in
-  List.map2
-    (fun (goal : Tui_decode.overview_goal) summary ->
-      let due =
-        match due_text ~today goal with
-        | Some text -> text
-        | None -> "due not set"
-      in
-      let metadata =
-        [ owner_text goal ]
-        @ (match performer_text ~tasks ~status_of_id goal with
-          | Some text -> [ text ]
-          | None -> [])
-        @ [ "state " ^ Masc_tui_render_prim.planning_phase_label goal.og_phase
-          ; due ]
-        @ (match refuted_text goal with Some text -> [ text ] | None -> [])
-        @ (match overdue_text ~today goal with Some text -> [ text ] | None -> [])
-      in
-      let detail =
-        Masc_tui_message_layout.pack_clauses
-          ~max_cells:(max 1 (inner_width - 2)) metadata
-        |> List.map (fun line -> "  " ^ line)
-      in
-      summary :: detail)
-    goals summaries
-
-let wanted_rows ~now ~localtime ~inner_width ~tasks ~status_of_id
-    (reading : Types.overview_goals_reading) =
+let wanted_rows (reading : Types.overview_goals_reading) =
   match reading with
   | Types.Goals_unread -> 1
   | Types.Goals_failed _ -> 1
   | Types.Goals_read goals ->
       let goals = drawn_goals goals in
       if goals = [] then 1
-      else
-        1
-        + List.fold_left
-            (fun count entry -> count + List.length entry)
-            0 (goal_entries ~now ~localtime ~inner_width ~tasks ~status_of_id goals)
+      else 1 + List.length goals
 
 let title count =
   Ansi.bold
@@ -274,7 +161,7 @@ let title count =
 
 let take rows items = List.filteri (fun index _ -> index < rows) items
 
-let lines ~now ~localtime ~inner_width ~rows ~tasks ~status_of_id (reading : Types.overview_goals_reading)
+let lines ~now ~localtime ~inner_width ~rows ~tasks (reading : Types.overview_goals_reading)
     =
   let rows = max 0 rows in
   let all =
@@ -289,16 +176,9 @@ let lines ~now ~localtime ~inner_width ~rows ~tasks ~status_of_id (reading : Typ
         let drawn = drawn_goals goals in
         let goal_count = List.length drawn in
         let title = title (Some goal_count) in
-        let entries = goal_entries ~now ~localtime ~inner_width ~tasks ~status_of_id drawn in
-        let rec take_entries remaining shown collected = function
-          | entry :: rest when List.length entry <= remaining ->
-              take_entries (remaining - List.length entry) (shown + 1)
-                (entry :: collected) rest
-          | _ -> (shown, List.concat (List.rev collected))
-        in
-        let shown, shown_lines =
-          take_entries (max 0 (rows - 1)) 0 [] entries
-        in
+        let goal_lines = goal_rows ~now ~localtime ~inner_width drawn in
+        let shown_lines = take (max 0 (rows - 1)) goal_lines in
+        let shown = List.length shown_lines in
         let cut =
           if shown < goal_count then
             Printf.sprintf "  %s\xc2\xb7 %d of %d goals shown%s" Ansi.dim shown
@@ -314,7 +194,7 @@ let lines ~now ~localtime ~inner_width ~rows ~tasks ~status_of_id (reading : Typ
                 Ansi.reset cut
           | Masc_tui_overview_tasks.Rows_read tasks ->
               let { active; toward_goal } = progress ~goals:drawn ~tasks in
-              Printf.sprintf "%s   active work toward a goal: %d of %d tasks%s"
+              Printf.sprintf "%s   active tasks linked: %d/%d%s"
                 title toward_goal active cut
           | Masc_tui_overview_tasks.Rows_unavailable reason ->
               Printf.sprintf "%s   %sactive work unread: %s%s%s" title
@@ -326,10 +206,10 @@ let lines ~now ~localtime ~inner_width ~rows ~tasks ~status_of_id (reading : Typ
   in
   take rows all
 
-let draw buf ~cols ~rows ~now ~localtime ~tasks ~status_of_id reading =
+let draw buf ~cols ~rows ~now ~localtime ~tasks reading =
   if rows > 0 then begin
     let inner_width = framed_inner_width cols in
-    let drawn = lines ~now ~localtime ~inner_width ~rows ~tasks ~status_of_id reading in
+    let drawn = lines ~now ~localtime ~inner_width ~rows ~tasks reading in
     List.iter (box_line buf cols) drawn;
     (* [rows] is what the budget spent; a short list still fills it so the
        frame below starts where the budget says. *)

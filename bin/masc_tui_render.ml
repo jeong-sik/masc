@@ -585,15 +585,6 @@ let overview_intro_lines (state : state) =
   | Some reason -> ("  " ^ Terminal_text.single_line reason) :: usual
   | None -> usual
 
-(* Goal links include finished tasks, which the Overview's active task rows
-   intentionally omit. Resolve owners against the full snapshot from that
-   same task read. *)
-let overview_goal_status_of_id (state : state) id =
-  List.find_opt
-    (fun (task : Masc_domain.task) -> String.equal task.id id)
-    state.tasks_domain
-  |> Option.map (fun (task : Masc_domain.task) -> task.task_status)
-
 (** Project the shared Overview row budget and its sanitized variable inputs. *)
 let overview_layout (state : state) ~terminal_rows ~cols =
   let intro_lines = overview_intro_lines state in
@@ -616,10 +607,7 @@ let overview_layout (state : state) ~terminal_rows ~cols =
       Render_schedule.allocate_overview ~terminal_rows
         ~intro_count ~attention_count:(List.length attention_items)
         ~goal_count:
-          (Overview_goals.wanted_rows ~now:(Unix.gettimeofday ())
-             ~localtime:Unix.localtime ~inner_width:(framed_inner_width cols)
-             ~tasks:state.task_reading
-             ~status_of_id:(overview_goal_status_of_id state) state.overview_goals)
+          (Overview_goals.wanted_rows state.overview_goals)
         ~team_count ~team_stuck ~providers_count
         ~task_count:
           (Overview_tasks.line_count state.tasks
@@ -797,7 +785,7 @@ let render_overview (state : state) =
      goal links) stays in the Tasks section below; GOALS counts the rows. *)
   Overview_goals.draw buf ~cols ~rows:row_budget.goal_rows
     ~now:(Unix.gettimeofday ()) ~localtime:Unix.localtime ~tasks:state.task_reading
-    ~status_of_id:(overview_goal_status_of_id state) state.overview_goals;
+    state.overview_goals;
   (* The panel spans the band the rest of the screen's rows cover: one cell of
      margin on each side of the frame. *)
   let panel_width = cols - 2 in
@@ -3866,7 +3854,7 @@ let render_planning_list (state : state) =
    screen. *)
 (* One more than it was: the stage rail took the phase word's row and the
    next-step sentence is a row of its own. Counted here, drawn below. *)
-let planning_detail_fixed_rows = 12
+let planning_detail_fixed_rows = 13
 
 let planning_detail_pane (state : state)
     ~(armed : Goal_phase.Public_action.t option) ~confirmation ~rows ~cols
@@ -3892,6 +3880,11 @@ let planning_detail_pane (state : state)
     Ansi.bold
     (fit_width (Terminal_text.single_line goal.pg_title) (cols - 6))
     Ansi.reset);
+  box_line buf cols
+    ("  Owner:   "
+     ^ (match goal.pg_owner with
+        | Goal_store.Owner name -> Terminal_text.single_line name
+        | Goal_store.Unknown_owner -> "unknown"));
   let prio_color =
     match goal.pg_priority with
     | 1 -> (Theme.bad ()) ^ Ansi.bold

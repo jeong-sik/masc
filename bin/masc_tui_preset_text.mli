@@ -4,6 +4,12 @@ val listing_lines : Masc.Tui_decode.presets_snapshot -> string list
 (** One header, one line per preset with its counts and description, then
     one [!] line per unreadable directory; a single hint line when empty. *)
 
+val unreadable_rows : max_cells:int -> (string * string) list -> string list
+(** One [! name — reason] entry per unreadable preset, folded at spaces so
+    no row is wider than [max_cells] terminal cells. Continuation rows are
+    indented two cells. Nothing is cut, so a recovery step at the end of a
+    reason stays on screen. *)
+
 val saved_line : Masc.Tui_decode.preset_manifest -> string
 
 val pane_empty_line : Masc.Tui_decode.presets_snapshot -> string option

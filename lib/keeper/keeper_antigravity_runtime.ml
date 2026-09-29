@@ -1387,6 +1387,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
 
 module For_testing = struct
   let runtime_error_to_core_error = runtime_error_to_core_error
+  let recovery_failure_of_runtime_error = recovery_failure_of_runtime_error
 
   let report_stream_usage ~turn_count ~position ~report event =
     (stream_projection

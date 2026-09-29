@@ -2054,7 +2054,17 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
     | Idle_timeout seconds -> Error (Timeout seconds)
     | Eio.Time.Timeout as exn -> raise exn
     | Runtime_error error -> Error error
-    | exn -> Error (Unhandled_exception (Printexc.to_string exn))
+    | exn ->
+      (* Read before anything else runs: the backtrace belongs to this raise.
+         Nothing else records where the exception came from -- the typed error
+         and the turn-failed line below carry only its text. *)
+      let backtrace = Printexc.get_backtrace () in
+      Llm_provider.Reserved_exn.reraise_if_reserved exn;
+      Log.Runtime_agent.error
+        "Claude Code runtime raised outside the protocol: %s\nBacktrace: %s"
+        (Printexc.to_string exn)
+        backtrace;
+      Error (Unhandled_exception (Printexc.to_string exn))
   in
   (match result with
    | Ok turn ->

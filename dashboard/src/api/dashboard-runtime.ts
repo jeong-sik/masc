@@ -1429,7 +1429,6 @@ export type DashboardOfficialClientLoginStatus =
   | 'login_required'
   | 'timeout'
   | 'protocol_error'
-  | 'runtime_exception'
   | 'probe_contract_error'
 
 export interface DashboardOfficialClientProbeResponse {
@@ -1509,7 +1508,6 @@ const OFFICIAL_CLIENT_LOGIN_STATUSES = new Set<DashboardOfficialClientLoginStatu
   'login_required',
   'timeout',
   'protocol_error',
-  'runtime_exception',
   'probe_contract_error',
 ])
 

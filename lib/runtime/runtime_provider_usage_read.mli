@@ -125,6 +125,7 @@ type background =
   | Started  (** A read was forked on the server's root switch. *)
   | Already_reading  (** A read for this scope is still running. *)
   | No_root_switch  (** No server root switch is installed (outside a server). *)
+  | Scheduling_failed  (** The root owner could not schedule the read. *)
 
 val read_codex_in_background :
   clock:_ Eio.Time.clock ->
@@ -145,6 +146,15 @@ val read_muse_in_background :
 (** {!read_muse} after a Muse model-error terminal. The read outlives the
     failed turn and never resubmits its input. At most one read per account
     scope is active. *)
+
+module For_testing : sig
+  val start_background :
+    scope:Runtime_quota_window.scope ->
+    fork:((unit -> unit) -> unit) ->
+    read:(unit -> unit) ->
+    background
+  (** Exercise the claim and fork boundary without a running server. *)
+end
 
 (** What the usage endpoint said after the provider refused the account with
     HTTP 403. Only windows whose role is

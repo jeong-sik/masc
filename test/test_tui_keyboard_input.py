@@ -381,6 +381,12 @@ def assert_workspace_payload_is_inert(output: bytearray) -> None:
 # pinning the column widths around it. #29777 widened the Board row by one
 # column and every literal that had baked the old gutter into itself stopped
 # matching, which reads as "the selection broke" rather than "the row moved".
+#
+# A pattern searches the buffer in place: `re` reads a bytearray through the
+# buffer protocol with the same match positions as bytes. Copying it first
+# cost a whole-session copy per check, and a timed transition checks at least
+# three times, so an input-to-frame observation grew with everything the
+# session had printed before it.
 def find_needle(
     haystack: bytes | bytearray,
     needle: bytes | re.Pattern[bytes],
@@ -388,7 +394,7 @@ def find_needle(
 ) -> int:
     if isinstance(needle, bytes):
         return haystack.find(needle, start)
-    found = needle.search(bytes(haystack), start)
+    found = needle.search(haystack, start)
     return found.start() if found else -1
 
 
@@ -400,7 +406,7 @@ def end_of_needle(
 ) -> int:
     if isinstance(needle, bytes):
         return haystack.find(needle, start) + len(needle)
-    found = needle.search(bytes(haystack), start)
+    found = needle.search(haystack, start)
     assert found is not None
     return found.end()
 

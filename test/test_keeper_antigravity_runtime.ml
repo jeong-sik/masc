@@ -2201,6 +2201,17 @@ let test_an_unhandled_runtime_exception_is_internal () =
        ^ Agent_core.Error.to_string core)
 ;;
 
+(* No recovery kind names a host exception. It takes the one whose disposition
+   is Ambiguous -- what the CLI did is unknown -- so the next claim starts a
+   fresh conversation rather than resuming one of unknown state. *)
+let test_an_unhandled_runtime_exception_recovers_as_protocol_failed () =
+  check bool "the recovery kind"
+    (Keeper_antigravity_runtime.For_testing.recovery_failure_of_runtime_error
+       (Runtime_antigravity.Unhandled_exception "Failure(\"boom\")")
+    = Keeper_official_client_session_store.Protocol_failed)
+    true
+;;
+
 let () =
   run
     "keeper_antigravity_runtime"
@@ -2215,6 +2226,10 @@ let () =
             "an unhandled runtime exception is a masc internal error"
             `Quick
             test_an_unhandled_runtime_exception_is_internal
+          ; test_case
+            "an unhandled runtime exception recovers as protocol failed"
+            `Quick
+            test_an_unhandled_runtime_exception_recovers_as_protocol_failed
           ; test_case
             "every declared loading is eager on Antigravity"
             `Quick

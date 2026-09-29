@@ -74,7 +74,7 @@ id 접두어: `RT-` Runtime·Lane·Schedule, `MM-` Memory·Librarian·Skills·Co
 | id | 심각도 | 분류 | 위치 | 들어온 곳 | 결함 한 줄 | 확신 |
 |---|---|---|---|---|---|---|
 | DM-BD-1 | P1 | 1·3 N-of-M | `lib/keeper/keeper_board_attention_worker.ml:1775-1799` | #39186/#39301 에서 도달 가능, #39784 가 한 쌍만 고침 | 예상 밖 (partition 상태 × quarantine phase) 한 쌍이 keeper 의 Board attention worker 전체를 멈춘다. 재시작도 없다 | High (재확인) |
-| DM-PL-01 | P1 | 1 | `lib/keeper/keeper_dos_controller.ml:46-60` | #38438, #39915 까지 이어짐 | meta 를 지우고 멈춘 Keeper 가 서버 재시작 전까지 DOS controller 를 쥔다. 운영자가 풀 경로도 없다 | Medium-High (재확인) |
+| DM-PL-01 | P1 | 1 | `lib/keeper/keeper_dos_controller.ml:46-60` | #38438, #39915 까지 이어짐 | meta 를 지우고 멈춘 Keeper 가 서버 재시작 전까지 DOS controller 를 쥔다. 운영자가 풀 경로도 없다. purge 는 credential 까지 지워 인증 필수 모드에서 풀리지만, `remove_meta` 종료와 supervisor 정리는 만료 없는 Worker credential 을 남긴다 | High (09-30 라이브 credential 확인), **열린 #40045 가 고침** |
 | DM-PT-1 | P1 | 1 | `lib/keeper_portrait/keeper_portrait_draw.ml:216` | #39803 | 짧은 초에서 메달이 frame 아래로 잘린다(몸 약 25%) | High, **열린 #39961 이 고침** |
 | DM-PT-2 | P1 | 1 | `lib/keeper/keeper_portrait_read.ml:81` | #39869 | "durable" 초상화 PNG 를 500개·20MB 회전 frame 캐시에 넣어 다른 frame 에 밀려난다 | Medium (재확인), **열린 #39957 이 고침** |
 | DM-BD-4 | P2 (lane 을 켜면 P1) | 1·2 | `lib/server/server_workspace_memory_curator.ml:224-245`, `workspace_memory_request.ml:81-92` | #39858 | 실패한 batch 가 앞 prefix 로 매번 다시 뽑혀서 curation 전체가 막힌다 | Medium |

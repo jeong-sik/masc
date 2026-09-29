@@ -80,7 +80,7 @@
 | MM-C1 | Agent Core 가 atom 을 저장한 뒤 turn 끝 줄이 `no_atom_history` 로만 남으면 Librarian atom 진도가 멈춘다. pr-updater 는 turn 이 atom 15839 에서 시작하는데 진도는 15803 에 멈췄다. `librarian-continuity.json` 은 09-28 02:25 가 마지막이다 | 확인·라이브 | #40019 |
 | MM-M3 | 기억이 수렴하지 않는다. 감쇠·강화가 없고 512 KiB 한도에 2~3일 안에 닿는 Keeper 가 있다 | 보고·라이브 수치 | RFC |
 | DM-BD-1 | 부팅 대조에서 예상 못 한 (partition × quarantine) 쌍 하나가 그 Keeper 의 Board 판정 worker 를 멈추고, 다시 띄우지 않는다. #39784 는 한 쌍만 고쳤고 같은 표가 quarantine 명령에 복사돼 있다. 09-28 로그 279줄 | 보고·라이브 | #40003 |
-| DM-PL-01 | 지우면서 멈춘 Keeper 는 만료 없는 Worker credential 이 남아 DOS 조작권을 서버 재시작까지 쥔다. 회수 route 는 409/400 | 보고 | 다음 PR |
+| DM-PL-01 | 지우면서 멈춘 Keeper 는 만료 없는 Worker credential 이 남아 DOS 조작권을 서버 재시작까지 쥔다. 회수 route 는 409/400 | 보고 | #40045 (종료 마무리에서 풀기) |
 | RT-A1 | 계정 제거 미리보기는 "removable" 인데 실제 저장은 Fusion 자리 검사로 400 이 난다 | 보고(코드 재확인은 audit) | 후보 |
 | RT-A2 / MM-W1·W2 | curator 는 `cli_slots` 가 있으면 lane 전체를 거절한다. 쓰는 쪽·TUI 는 받아들인다. `max_output_tokens` 도 없다 | 보고 | curator 를 다시 켜기 전 필수 |
 | TU-F04 | Schedules 의 "Next due" 가 안 보인다. 서버는 `next_due_at`, TUI 는 `next_due_at_iso` 를 읽는다. fixture 가 TUI 철자라 테스트가 못 잡는다 | 보고 | #39998 |

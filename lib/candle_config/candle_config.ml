@@ -42,7 +42,11 @@ let integer context fields key low high =
   let* value = required context fields key in
   match value with
   | Otoml.TomlInteger n when n >= low && n <= high -> Ok n
-  | _ -> Error (Printf.sprintf "%s.%s must be an integer in %d..%d" context key low high)
+  | Otoml.TomlInteger _ | Otoml.TomlString _ | Otoml.TomlFloat _
+  | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
+  | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _
+  | Otoml.TomlTableArray _ | Otoml.TomlTable _ | Otoml.TomlInlineTable _ ->
+    Error (Printf.sprintf "%s.%s must be an integer in %d..%d" context key low high)
 
 let policy_of_toml toml =
   let* root = exact_table "candle.toml" ["payout"] toml in

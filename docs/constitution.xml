@@ -205,6 +205,12 @@
       </not_board>
     </board>
 
+    <candle note="Candle 은 Goal 완료에 대한 keeper 의 보상 화폐다.">
+      <rule>원장(candle-ledger.jsonl)에는 사실만 덧붙인다. 잔액은 원장을 읽어 계산한 값이다.</rule>
+      <rule>Candle 로 살 수 있는 것은 초상화 장신구뿐이다. 도구, 스킬, 모델, 예산은 사지 못한다.</rule>
+      <rule>잔액은 시간이 지나면 지수적으로 줄어든다. 반감기는 설정이 정한다.</rule>
+    </candle>
+
     <!-- 도메인 전반 불변식 -->
     <invariants scope="domain-wide">
       <inv id="no_wall_clock_death">
@@ -212,6 +218,7 @@
         Task 에도, Board attention Pending 에도 만료가 없다.
         Board 기본 TTL 은 0이고 영구를 뜻한다.
         만료가 필요해 보이면 그건 대개 상태 전이가 빠진 것이다.
+        예외: Candle 잔액. 잔액의 감소는 화폐 가치의 감쇠이고, Task·Goal·Board 의 어떤 상태도 만료시키지 않으며 원장의 사실을 지우지 않는다.
       </inv>
 
       <inv id="closed_sum_over_string">
@@ -265,7 +272,7 @@
 
   <feature_surface note="Keeper(Agent) 개념이 이 전부를 사용한다. 전수 검사 대상.
                          괄호 안은 코드상 실제 명칭/위치 매핑이다.">
-    <group name="domain">Task, Board, Goal, Comment</group>
+    <group name="domain">Task, Board, Goal, Comment, Candle</group>
     <group name="judgement">Fusion, Judge, Judge of Judge, Karma,
           Cross-Verification (코드명: verifier_exact exact-output lane)</group>
     <group name="cognition">Thinking (keeper_agent_run_thinking_trajectory),

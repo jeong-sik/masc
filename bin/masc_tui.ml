@@ -9356,7 +9356,7 @@ let draw_browser_viewport state (shot : Browser_lane_view.screenshot) bytes =
         (match shot.source with
          | Browser_lane_view.Live -> "click: link   drag: requires automation"
          | Browser_lane_view.Automation -> "click: link   drag: move"
-         | Browser_lane_view.Stagehand -> "click/drag: not served on the stagehand lane")
+         | Browser_lane_view.Stagehand -> "click: control   drag: move")
     | _ -> "click/drag unavailable: terminal cell geometry unknown" in
   let wheel_hint = match !image_cell_pixels with
     | Some (width,height) when width > 0 && height > 0 -> "wheel:pane"
@@ -11258,7 +11258,7 @@ let open_lanes_standalone_selection state ~mailbox =
       open_lane_run_list state ~mailbox lane
   | None ->
       show_lanes_action_error state
-        "Cannot open runs: standalone lane observation is unavailable"
+        "Cannot open runs: lane observation is unavailable"
 
 (* A left press on the Lanes overview is the cursor keys by another hand: the
    first press lands the selection on the row under it (exactly where j/k
@@ -16067,7 +16067,15 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       (match state.browser_lane with
        | Some view ->
            (match view.Browser_lane_view.load with
-            | Browser_lane_view.Loading (current, (Open_session | Close_session | Goto _))
+            | Browser_lane_view.Loading (current, Close_session)
+              when generation = current ->
+                (match result with
+                 | Error detail ->
+                     state.browser_lane <- Some (Browser_lane_view.fail_action detail view)
+                 | Ok () ->
+                     let closed = Browser_lane_view.after_action view in
+                     state.browser_lane <- Some { closed with load = No_browser })
+            | Browser_lane_view.Loading (current, (Open_session | Goto _))
               when generation = current ->
                 (match result with
                  | Error detail ->
@@ -25729,7 +25737,7 @@ and is loaded on demand through keeper_skill.
                  | Lanes_run_list _ | Lanes_run_detail _ | Lanes_measurement_detail _ -> ()
                  | Lanes_overview ->
                      show_lanes_action_error state
-                       "Cannot open chat: Standalone lanes have no Keeper; use Keepers")
+                       "Cannot open chat: These lanes have no Keeper; use Keepers")
             | Keepers Keeper_list
               when Option.is_none state.keepers_error
                    && state.keeper_cursor < List.length state.keepers ->

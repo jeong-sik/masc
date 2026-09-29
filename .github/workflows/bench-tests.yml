@@ -23,6 +23,10 @@ on:
       - 'scripts/harness/perf/linux_probe_artifact.py'
       - 'scripts/harness/perf/server_artifact_session.py'
       - 'scripts/harness/perf/compare_server_artifacts.py'
+      - 'scripts/harness/perf/vision_artifact_compare.py'
+      - 'test/vision_artifact_measure.ml'
+      - 'tools/rtev_trace/rtev_fibers.ml'
+      - 'tools/rtev_trace/rtev_watch.ml'
       - 'test/test_server_artifact_comparison.py'
   workflow_dispatch:
     inputs:
@@ -32,6 +36,10 @@ on:
         default: false
       compare_server:
         description: Compare two existing Linux x64 manual probe artifacts
+        type: boolean
+        default: false
+      compare_vision:
+        description: Measure vision artifact storage and load on the fixed source pair
         type: boolean
         default: false
       baseline_run:
@@ -78,11 +86,11 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: bench-tests-${{ inputs.compare_server && 'compare-server' || inputs.compare_tui && 'compare-tui' || 'pytest' }}-${{ github.ref }}
+  group: bench-tests-${{ inputs.compare_vision && 'compare-vision' || inputs.compare_server && 'compare-server' || inputs.compare_tui && 'compare-tui' || 'pytest' }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   pytest:
-    if: ${{ !inputs.compare_tui && !inputs.compare_server }}
+    if: ${{ !inputs.compare_tui && !inputs.compare_server && !inputs.compare_vision }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     defaults:
@@ -118,7 +126,7 @@ jobs:
           sys.exit(1 if skipped else 0)
           PY
   compare-tui:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.compare_tui && !inputs.compare_server }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.compare_tui && !inputs.compare_server && !inputs.compare_vision }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -179,7 +187,7 @@ jobs:
           python-version: '3.12'
       - run: python3 -m unittest discover -s test -p test_server_artifact_comparison.py -v
   compare-server:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.compare_server }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.compare_server && !inputs.compare_vision }}
     needs: server-harness-tests
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -226,4 +234,44 @@ jobs:
         with:
           name: server-artifact-comparison-${{ github.run_id }}-attempt-${{ github.run_attempt }}
           path: comparison-results/
+          if-no-files-found: warn
+
+  compare-vision:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.compare_vision && !inputs.compare_server && !inputs.compare_tui }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/setup-ocaml-toolchain
+      - uses: ./.github/actions/pin-ocaml-deps
+      - uses: ./.github/actions/install-ocaml-deps
+        with:
+          install-flags: --with-test
+          os-packages: jq ripgrep
+      - name: Measure the same vision artifacts on both source commits
+        env:
+          DUNE_JOBS: "2"
+        run: |
+          python3 scripts/harness/perf/vision_artifact_compare.py \
+            --output "${RUNNER_TEMP}/vision-results" --count 40 --seconds 90 --pairs 3
+      - name: Retain identity, latency, scheduler and runtime-event receipts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: vision-artifact-comparison-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/vision-results/summary.json
+            ${{ runner.temp }}/vision-results/fixture-sha256.txt
+            ${{ runner.temp }}/vision-results/window-*/receipt.json
+            ${{ runner.temp }}/vision-results/window-*/cleanup.json
+            ${{ runner.temp }}/vision-results/window-*/failure.json
+            ${{ runner.temp }}/vision-results/window-*/stdout.jsonl
+            ${{ runner.temp }}/vision-results/window-*/stderr.txt
+            ${{ runner.temp }}/vision-results/window-*/rtev_*.txt
+            ${{ runner.temp }}/vision-results/window-*/rtev_*-control/ready
+            ${{ runner.temp }}/vision-results/window-*/rtev_*-control/ended
+            ${{ runner.temp }}/vision-results/window-*/state/window-start
+            ${{ runner.temp }}/vision-results/window-*/state/window-complete
           if-no-files-found: warn

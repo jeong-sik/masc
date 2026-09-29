@@ -260,11 +260,14 @@ let run_with_selection ~network_mode ~base_path ~port ~initialize ~prepare_image
         require_ok "Workspace initialization" initialize;
         let base_path = Unix.realpath base_path in
         Printf.printf "Preparing imp in %s\n%!" base_path;
-        require_ok "Model validation" validate_runtime;
         let module Sandbox = Masc.Sandbox_readiness in
         let path = Keeper_sandbox_config.keeper_toml_path ~base_path ~agent_name:"imp" in
         let original = In_channel.with_open_text path In_channel.input_all in
         let host = Sandbox.detect_host ~run:Sandbox.system_runner in
+        (* imp.toml is checked before the model is called: a keeper file the
+           server will refuse (for example a microvm keeper naming no
+           sandbox_image) fails here in milliseconds, not after a model
+           round trip that cannot change the outcome. *)
         let selection = match Sandbox.selection_of_contents ~path ~contents:original
           ~profile:sandbox_profile ~microvm_backend ~network_mode with
           | Ok selection -> selection | Error reason -> fail reason in
@@ -272,6 +275,7 @@ let run_with_selection ~network_mode ~base_path ~port ~initialize ~prepare_image
           | None, None, None -> original
           | _ -> (match Sandbox.stage_contents ~path ~contents:original selection with
             | Ok staged -> staged | Error reason -> fail reason) in
+        require_ok "Model validation" validate_runtime;
         let readiness = Sandbox.probe ~host ~run:Sandbox.system_runner
           ~require_rootless:(Env_config_sandbox.Hardening.require_rootless ())
           ~require_userns:(Env_config_sandbox.Hardening.require_userns ()) selection.backend in

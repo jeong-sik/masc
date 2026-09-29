@@ -1,0 +1,16 @@
+{
+  "source": "stagehand",
+  "clientId": null,
+  "tabId": 0,
+  "title": "MASC Stagehand verification",
+  "url": "http://127.0.0.1:8998/",
+  "mimeType": "image/png",
+  "viewport": {
+    "documentId": "14ed6be6dacf70720f1a954813f2969b",
+    "width": 1280.0,
+    "height": 657.0,
+    "scrollX": 0.0,
+    "scrollY": 0.0
+  },
+  "elapsed_ms": 89.237459
+}

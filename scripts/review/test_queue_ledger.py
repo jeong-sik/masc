@@ -230,9 +230,12 @@ for page in pages if pages is not None else [fixtures[key]]:
                     "path": ".github/workflows/pr-check.yml", "event": "pull_request",
                     "status": "completed", "conclusion": "success", "created_at": created}
 
-        def jobs(run_id, suite, prefix, conclusion, first_id, started):
+        def jobs(run_id, suite, draft, conclusion, first_id, started):
             return [{"id": first_id + index, "run_id": run_id, "run_attempt": 1,
-                     "head_sha": self.head, "name": prefix + name,
+                     "head_sha": self.head,
+                     # Observed skipped-job wire names in run 36514675023.
+                     "name": (f"github.event.pull_request.draft == true && 'Draft snapshot / {name}' || '{name}'"
+                              if draft else name),
                      "status": "completed", "conclusion": conclusion,
                      "started_at": started, "completed_at": started,
                      "check_run_url": f"https://api.github.com/repos/o/r/check-runs/{first_id + index}",
@@ -241,8 +244,8 @@ for page in pages if pages is not None else [fixtures[key]]:
 
         ready = run(900, 10, 55, RUN_TIME)
         draft = run(901, 11, 56, "2026-01-01T00:05:00Z")
-        ready_jobs = jobs(900, 55, "", "success", 100, RUN_TIME)
-        draft_jobs = jobs(901, 56, "Draft snapshot / ", "skipped", 200, draft["created_at"])
+        ready_jobs = jobs(900, 55, False, "success", 100, RUN_TIME)
+        draft_jobs = jobs(901, 56, True, "skipped", 200, draft["created_at"])
         data.update({"runs": {"workflow_runs": [ready, draft]},
                      "run": ready, "run:900": ready, "run:901": draft,
                      "jobs:900": {"jobs": ready_jobs}, "jobs:901": {"jobs": draft_jobs},
@@ -316,7 +319,7 @@ for page in pages if pages is not None else [fixtures[key]]:
                 self.assertNotEqual(row["waits_on"], "merge")
 
     def test_malformed_or_wrong_provenance_draft_cannot_be_ignored(self):
-        for fault in ("missing", "extra", "duplicate", "success", "wrong_path", "wrong_head"):
+        for fault in ("missing", "extra", "duplicate", "success", "wrong_path", "wrong_head", "wrong_name"):
             with self.subTest(fault=fault):
                 def change(data):
                     self.draft_race(data)
@@ -330,6 +333,8 @@ for page in pages if pages is not None else [fixtures[key]]:
                     elif fault == "success":
                         for job in jobs:
                             job["conclusion"] = "success"
+                    elif fault == "wrong_name":
+                        jobs[0]["name"] = jobs[0]["name"].replace("== true", "== false")
                     elif fault == "wrong_path":
                         data["run:901"]["path"] = ".github/workflows/other.yml"
                     else:

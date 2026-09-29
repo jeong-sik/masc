@@ -280,8 +280,16 @@ race_setup() {
     {workflow_id:1,run_number:11,name:"PR check",status:"completed",conclusion:"success",id:901,check_suite_id:66,event:"pull_request",path:".github/workflows/pr-check.yml",head_sha:$h}]}' >"$1/actions.json"
   "$JQ" -n --arg h "$H" '
     ["TLA model check","lint suite","dune build @check","dune build --profile release @check","dashboard typecheck","PR required success"] |
-    to_entries | {jobs:map({name:("Draft snapshot / "+.value),status:"completed",conclusion:"skipped",id:(200+.key),run_id:901,head_sha:$h})}' >"$1/jobs-901.json"
-  "$JQ" '{check_runs:([.jobs[] | {name:(.name|ltrimstr("Draft snapshot / ")),status:"completed",conclusion:"success",id:(.id-100),check_suite:{id:55}}] + [.jobs[] | {name,status,conclusion,id,check_suite:{id:66}}])}' "$1/jobs-901.json" >"$1/checkruns.json"
+    to_entries | {jobs:map({name:.value,status:"completed",conclusion:"skipped",id:(200+.key),run_id:901,head_sha:$h})}' >"$1/jobs-901.json"
+  "$JQ" '{check_runs:([.jobs[] | {name:.name,status:"completed",conclusion:"success",id:(.id-100),check_suite:{id:55}}] + [.jobs[] | {name,status,conclusion,id,check_suite:{id:66}}])}' "$1/jobs-901.json" >"$1/checkruns.json"
+  # GitHub run 36514675023 emitted the unevaluated expression body for
+  # skipped jobs. Build Ready names independently, then use those wire names
+  # for both Draft jobs and checks (not the hypothetical evaluated branch).
+  local draft_name='"github.event.pull_request.draft == true && \u0027Draft snapshot / " + . + "\u0027 || \u0027" + . + "\u0027"'
+  "$JQ" ".jobs[].name |= ($draft_name)" "$1/jobs-901.json" >"$1/jobs.tmp"
+  mv "$1/jobs.tmp" "$1/jobs-901.json"
+  "$JQ" "(.check_runs[] | select(.check_suite.id == 66) | .name) |= ($draft_name)" "$1/checkruns.json" >"$1/checks.tmp"
+  mv "$1/checks.tmp" "$1/checkruns.json"
 }
 mutate() { "$JQ" "$2" "$1" >"$1.tmp" && mv "$1.tmp" "$1"; }
 race_case() { run_case "$1" "$2" "$3" 0 "$d" --check --repo o/r --pr 5 --head "$H"; }
@@ -298,7 +306,7 @@ mutate "$d/checkruns.json" '.check_runs |= map(select(.check_suite.id != 66 or .
 race_case cancelled-incomplete-draft-loses-to-ready 0 'WOULD APPROVE'
 d="$work/race-only-cancelled"; race_setup "$d"; mutate "$d/actions.json" '.workflow_runs |= map(select(.id == 901) | .conclusion="cancelled")'
 race_case cancelled-draft-only-refused 2 'invalid Draft snapshot'
-for fault in missing duplicate extra success pending head run id; do
+for fault in missing duplicate extra success pending head run id name; do
   d="$work/race-jobs-$fault"; race_setup "$d"
   case "$fault" in
     missing) change='.jobs |= .[0:5]' ;;
@@ -309,6 +317,7 @@ for fault in missing duplicate extra success pending head run id; do
     head) change='.jobs[0].head_sha="wrong"' ;;
     run) change='.jobs[0].run_id=999' ;;
     id) change='.jobs[0].id=999' ;;
+    name) change='.jobs[0].name |= sub("== true"; "== false")' ;;
   esac
   mutate "$d/jobs-901.json" "$change"
   race_case "draft-jobs-$fault-refused" 2 'Draft snapshot'

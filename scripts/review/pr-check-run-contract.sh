@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Shared PR-check Draft snapshot evidence. Source from Bash 3.2 callers.
 # JSON is decoded by the caller's paginated gh --jq callback, never standalone jq.
-# Only the new, complete six-job Draft namespace is excludable as Draft.
+# Only the complete six-job skipped expression signature is excludable as Draft.
 # Cancelled twins retain their existing loser rule. Historical
 # canonical skipped checks and unrelated workflows keep the caller's policy.
 PR_CHECK_WORKFLOWS_JQ='.workflow_runs[] | [(.workflow_id|tostring), (if .conclusion == "cancelled" then "0" else "1" end), (.run_number|tostring), (.name // "-"), .status, (.conclusion // "none"), (.id|tostring), ((.check_suite_id // 0)|tostring), (.event // "none"), (.path // "-"), (.head_branch // "-"), (.head_sha // "-"), (.created_at // "-")] | @tsv'
@@ -10,6 +10,17 @@ PR_CHECK_CHECKS_JQ='.check_runs[] | [.name, .status, (.conclusion // "none"), (.
 pr_check_names() {
   printf '%s\n' 'TLA model check' 'lint suite' 'dune build @check' \
     'dune build --profile release @check' 'dashboard typecheck' 'PR required success'
+}
+
+# A job skipped by its job-level if does not evaluate name. Actions returns
+# the expression body without ${{ }} (run 36514675023), while Ready jobs
+# evaluate to the canonical names above. Match the six exact wire values;
+# neither an arbitrary expression nor a Draft-looking substring is evidence.
+pr_check_draft_names() {
+  local name
+  while IFS= read -r name; do
+    printf "github.event.pull_request.draft == true && 'Draft snapshot / %s' || '%s'\n" "$name" "$name"
+  done < <(pr_check_names)
 }
 
 # Keep the guard's latest per-name rule, constrained to ONE selected suite.
@@ -28,9 +39,11 @@ pr_check_classify() { # repo head workflow-TSV check-TSV gh_json_callback
   local repo="$1" head="$2" workflows="$3" checks="$4" api="$5"
   local suites suite meta count wid rank num name status conclusion run event path branch sha created
   local jobs rows expected actual pairs check_pairs draft_wid="" ready
-  suites=$(printf '%s\n' "$checks" | awk -F '\t' 'index($1,"Draft snapshot / ")==1 {print $5}' | sort -u)
+  expected=$(pr_check_draft_names | LC_ALL=C sort)
+  suites=$(awk -F '\t' '
+    NR == FNR {draft[$0]=1; next}
+    $1 in draft {print $5}' <(pr_check_draft_names) <(printf '%s\n' "$checks") | sort -u)
   [ -n "$suites" ] || return 0
-  expected=$(pr_check_names | sed 's|^|Draft snapshot / |' | LC_ALL=C sort)
   for suite in $suites; do
     meta=$(printf '%s\n' "$workflows" | awk -F '\t' -v suite="$suite" '$8 == suite')
     count=$(printf '%s\n' "$meta" | awk 'NF {n++} END {print n+0}')

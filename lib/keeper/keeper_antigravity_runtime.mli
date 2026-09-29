@@ -81,6 +81,9 @@ val eager_tool_names : Keeper_official_client_host.dynamic_tool list -> string l
     declared on-demand tool is still eager here. *)
 
 module For_testing : sig
+  val runtime_error_to_core_error : Runtime_antigravity.error -> Agent_core.Error.t
+  (** The Agent Core error a runtime error becomes. *)
+
   val report_stream_usage
     :  turn_count:int
     -> position:Keeper_usage_resolution.cumulative_position

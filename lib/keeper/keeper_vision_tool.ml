@@ -517,7 +517,7 @@ let official_failure_can_advance : Fusion_official_client.failure -> bool = func
      | Invalid_config _ | Protocol_error _ | Unsupported_control_request _
      | Turn_transport_interrupted _ | Context_window_exceeded _ | Turn_failed _
      | Turn_failed_with_observation _ | Stopped_by_host _ | Quota_blocked _
-     | Process_exited { turn_admitted = true; _ } | Timeout _ -> false)
+     | Process_exited { turn_admitted = true; _ } | Unhandled_exception _ | Timeout _ -> false)
 ;;
 
 let outcome_of_official_failure ~runtime_id failure =

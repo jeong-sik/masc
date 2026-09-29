@@ -43,6 +43,7 @@ while [ $# -gt 0 ]; do
     --jq) jqf="$2"; shift 2 ;;
     --input) echo "fake gh: --input is not how the guard posts" >&2; exit 1 ;;
     -f|-F) case "$2" in
+             merge_method=*|sha=*) : ;;
              event=*) ev="${2#event=}" ;;
              commit_id=*) cid="${2#commit_id=}" ;;
              body=@-) body_src=stdin ;;
@@ -53,6 +54,7 @@ while [ $# -gt 0 ]; do
 done
 # A GET that reads only the first page would miss the newest reviews on a PR
 # with more than 100 of them (API order is oldest first).
+echo "$method $ep" >> "$d/api_reads"
 if [ "$method" = GET ] && [ "$paged" = 0 ]; then
   echo "fake gh: GET $ep without --paginate" >&2; exit 1
 fi
@@ -60,14 +62,49 @@ if [ -n "${FAKE_FAIL:-}" ]; then
   case "$ep" in $FAKE_FAIL) echo "HTTP 502: Bad Gateway (fake)" >&2; exit 1 ;; esac
 fi
 case "$ep" in
-  */check-runs/*/annotations*) f=annotations ;;
-  */check-runs*) f=checkruns ;;
+  */commits/main)
+    n=$(cat "$d/main_reads" 2>/dev/null || echo 0); n=$((n+1)); echo "$n" > "$d/main_reads"
+    if [ -f "$d/late_cr" ]; then
+      "$FAKE_JQ" -n --arg h "$FAKE_HEAD" '[{id:999,state:"CHANGES_REQUESTED",commit_id:$h,user:{login:"pangyo-preachers"}}]' > "$d/reviews.json"
+    fi
+    if { [ -f "$d/late_hold" ] && [ "$n" -ge 3 ]; } || [ -f "$d/late_approval_hold" ]; then
+      "$FAKE_JQ" -n --arg h "$FAKE_HEAD" '[{created_at:"2026-01-01T00:55:00Z",body:("verdict: HOLD head: "+$h+" run: 900 by: keeper")}]' > "$d/comments.json"
+    fi
+    printf '{"sha":"%s"}\n' "$FAKE_MAIN" | "$FAKE_JQ" -r "$jqf"; exit ;;
+  */files\?*) echo '[{"filename":"pr.ml"}]' | "$FAKE_JQ" -r "$jqf"; exit ;;
   */actions/runs/*/jobs*)
     rid="${ep#*/actions/runs/}"; rid="${rid%%/*}"
-    if [ -f "$d/jobs-$rid.json" ]; then f="jobs-$rid"; else f=jobs; fi ;;
+    if [ -f "$d/jobs-$rid.json" ]; then f="jobs-$rid"
+    elif [ "$rid" = 900 ]; then f=prjobs
+    elif [ -f "$d/jobs.json" ]; then f=jobs; else f=prjobs; fi ;;
+  */actions/runs/[0-9]*)
+    id="${ep##*/}"
+    "$FAKE_JQ" --argjson id "$id" --arg h "$FAKE_HEAD" '
+      .workflow_runs[] | select(.id==$id) |
+      . + {head_sha:$h,head_branch:"pr",pull_requests:[{number:5}],created_at:"2026-01-01T00:30:00Z",event:"pull_request",path:".github/workflows/pr-check.yml"}' "$d/actions.json" | "$FAKE_JQ" -r "$jqf"; exit ;;
+  */comments*) f=comments ;;
+  */merge-async)
+    [ "$method" = PUT ] || exit 1
+    echo called > "$d/merged"
+    echo '{"uuid":"fixture-merge"}'
+    exit ;;
+  */check-runs/*/annotations*) f=annotations ;;
+  */check-runs*) f=checkruns ;;
   */actions/runs*) f=actions ;;
   user) f=user ;;
-  */reviews/*) f=reviewget ;;
+  */reviews/*)
+    # A merge check reads the selected review itself, including later-page
+    # reviews and mutations during the final CI read. Posted review 777 falls
+    # back to the dedicated readback fixture used by the approval tests.
+    pages=("$d/reviews.json")
+    for page in "$d/reviews-page-2.json" "$d/reviews-page2.json"; do
+      [ ! -f "$page" ] || pages+=("$page")
+    done
+    row=$("$FAKE_JQ" -s --argjson id "${ep##*/}" '[.[][] | select(.id==$id)] | first // empty' "${pages[@]}")
+    if [ -n "$row" ]; then
+      printf '%s\n' "$row" | "$FAKE_JQ" -r "$jqf"; exit
+    fi
+    f=reviewget ;;
   */reviews*) if [ "$method" = POST ]; then
                 [ "$body_src" = stdin ] || { echo "fake gh: POST without body=@-" >&2; exit 1; }
                 cat >"$d/posted.body"
@@ -79,8 +116,57 @@ case "$ep" in
   *) echo "fake gh: no fixture for $ep" >&2; exit 1 ;;
 esac
 [ -f "$d/$f.json" ] || { echo "fake gh: missing $f.json" >&2; exit 1; }
+if [ "$f" = checkruns ] && [ -f "$d/after_checks_verdict" ] && [ "$(cat "$d/main_reads" 2>/dev/null || echo 0)" -ge "${FAKE_LATE_PR_AFTER_MAIN_READS:-4}" ]; then
+  # All CI still succeeds; a reviewer posts only while the final check read is
+  # in flight, after the guard's earlier verdict read has already accepted PASS.
+  "$FAKE_JQ" -n --arg h "$FAKE_HEAD" --arg state "$(cat "$d/after_checks_verdict")" \
+    '[{created_at:"2026-01-01T00:55:00Z",author_association:"COLLABORATOR",
+       body:("verdict: "+$state+" head: "+$h+" run: 900 by: keeper")}]' > "$d/comments.json"
+  touch "$d/verdict_arrived_during_checks"
+fi
+if [ "$f" = checkruns ] && [ -f "$d/after_checks_review" ] && [ ! -f "$d/review_arrived_during_checks" ] && [ "$(cat "$d/main_reads" 2>/dev/null || echo 0)" -ge "${FAKE_LATE_PR_AFTER_MAIN_READS:-4}" ]; then
+  case "$(cat "$d/after_checks_review")" in
+    new-cr)
+      "$FAKE_JQ" --arg h "$FAKE_HEAD" '. + [{id:999,state:"CHANGES_REQUESTED",commit_id:$h,
+        author_association:"COLLABORATOR",user:{login:"another-reviewer"}}]' "$d/reviews.json" > "$d/reviews.next.json" ;;
+    new-own-cr)
+      "$FAKE_JQ" --arg h "$FAKE_HEAD" '. + [{id:999,state:"CHANGES_REQUESTED",commit_id:$h,
+        author_association:"COLLABORATOR",user:{login:"pangyo-preachers"},body:"Please fix this"}]' "$d/reviews.json" > "$d/reviews.next.json" ;;
+    dismiss-approval)
+      "$FAKE_JQ" 'map(if .id == 888 then .state = "DISMISSED" else . end)' \
+        "$d/reviews.json" > "$d/reviews.next.json" ;;
+    remove-footer)
+      "$FAKE_JQ" 'map(if .id == 888 then .body |= split("\n")[0] else . end)' \
+        "$d/reviews.json" > "$d/reviews.next.json" ;;
+    *) echo "fake gh: unknown late review mutation" >&2; exit 1 ;;
+  esac
+  mv "$d/reviews.next.json" "$d/reviews.json"
+  touch "$d/review_arrived_during_checks"
+fi
+if [ "$f" = checkruns ] && [ -f "$d/after_checks_pull.json" ] && [ "$(cat "$d/main_reads" 2>/dev/null || echo 0)" -ge "${FAKE_LATE_PR_AFTER_MAIN_READS:-4}" ]; then
+  cp "$d/after_checks_pull.json" "$d/pull.json"
+fi
+if [ "$f" = pull ] && [ -f "$d/late_pull.json" ] && [ "$(cat "$d/main_reads" 2>/dev/null || echo 0)" -ge "${FAKE_LATE_PR_AFTER_MAIN_READS:-4}" ]; then
+  # The last freshness PR read precedes its last main read. Inject only after
+  # both have completed, so these cases exercise the final write-boundary read.
+  "$FAKE_JQ" -r "$jqf" "$d/late_pull.json"
+elif [ "$f" = actions ] && [ -f "$d/late_workflow" ] && [ "$(cat "$d/main_reads" 2>/dev/null || echo 0)" -ge "${FAKE_LATE_AFTER_MAIN_READS:-3}" ]; then
+  # The first check read succeeded. Register a newer same-head run while the
+  # merge guard is reading freshness, without changing the PR head or old run.
+  status=$(cat "$d/late_workflow")
+  "$FAKE_JQ" --arg status "$status" '.workflow_runs |= map(. + {event:(.event//"pull_request"),path:(.path//".github/workflows/pr-check.yml"),head_branch:(.head_branch//"pr"),pull_requests:(.pull_requests//[{number:5}])}) | .workflow_runs += [{workflow_id:1,run_number:11,
+    name:"PR Check",status:$status,conclusion:(if $status=="queued" then null else "failure" end),
+    id:901,event:"pull_request",path:".github/workflows/pr-check.yml",
+    head_branch:"pr",pull_requests:[{number:5}]}]' "$d/$f.json" | "$FAKE_JQ" -r "$jqf"
+elif [ "$f" = checkruns ] && [ -f "$d/late_check" ] && [ "$(cat "$d/main_reads" 2>/dev/null || echo 0)" -ge "${FAKE_LATE_AFTER_MAIN_READS:-3}" ]; then
+  "$FAKE_JQ" '.check_runs += [{name:"lint suite",status:"completed",conclusion:"failure",id:99}]' "$d/$f.json" | "$FAKE_JQ" -r "$jqf"
+elif [ "$f" = actions ]; then
+  "$FAKE_JQ" '.workflow_runs |= map(. + {event:(.event//"pull_request"),path:(.path//".github/workflows/pr-check.yml"),head_branch:(.head_branch//"pr"),pull_requests:(.pull_requests//[{number:5}])})' "$d/$f.json" | "$FAKE_JQ" -r "$jqf"
 # gh api --paginate runs --jq once per response page and concatenates outputs.
-if [ -f "$d/$f-page2.json" ]; then
+elif [ "$f" = reviews ] && [ -f "$d/reviews-page-2.json" ]; then
+  "$FAKE_JQ" -r "$jqf" "$d/reviews.json"
+  "$FAKE_JQ" -r "$jqf" "$d/reviews-page-2.json"
+elif [ -f "$d/$f-page2.json" ]; then
   "$FAKE_JQ" -r "$jqf" "$d/$f.json" || exit 1
   "$FAKE_JQ" -r "$jqf" "$d/$f-page2.json"
 else
@@ -89,7 +175,52 @@ fi
 EOF
 chmod +x "$work/gh"
 
-H=0123456789abcdef0123456789abcdef01234567
+# A real immutable graph backs freshness; API fixtures only name its objects.
+git init -q -b main "$work/repo"
+git -C "$work/repo" config core.hooksPath "$work/no-hooks"
+git -C "$work/repo" config commit.gpgSign false
+git -C "$work/repo" config user.name fixture
+git -C "$work/repo" config user.email fixture@example.invalid
+echo base > "$work/repo/base"
+# Workflow policy belongs to the immutable candidate; later cases deliberately
+# edit/delete these working files without changing the API-named commit.
+mkdir -p "$work/repo/.github/workflows"
+cat >"$work/repo/.github/workflows/pr-check.yml" <<'EOF'
+name: PR check
+on:
+  pull_request:
+  workflow_dispatch:
+jobs:
+  compare-tui:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.compare_tui }}
+    runs-on: macos-14
+    steps: []
+  required-test:
+    if: ${{ false }}
+    runs-on: ubuntu-latest
+    steps: []
+EOF
+cat >"$work/repo/.github/workflows/other.yml" <<'EOF'
+name: Other
+on:
+  pull_request:
+jobs:
+  compare-tui:
+    runs-on: ubuntu-latest
+    steps: []
+EOF
+git -C "$work/repo" add .
+GIT_AUTHOR_DATE=2026-01-01T00:00:00Z GIT_COMMITTER_DATE=2026-01-01T00:00:00Z git -C "$work/repo" commit -qm base
+export FAKE_MAIN="$(git -C "$work/repo" rev-parse HEAD)"
+git -C "$work/repo" checkout -qb pr
+echo changed > "$work/repo/pr.ml"
+git -C "$work/repo" add .
+GIT_AUTHOR_DATE=2026-01-01T00:10:00Z GIT_COMMITTER_DATE=2026-01-01T00:10:00Z git -C "$work/repo" commit -qm pr
+H="$(git -C "$work/repo" rev-parse HEAD)"
+export FAKE_HEAD="$H" GUARD_REPO_ROOT="$work/repo"
+git init -q --bare "$work/remote.git"
+git -C "$work/repo" remote add origin "$work/remote.git"
+git -C "$work/repo" push -q origin main pr
 H2=fedcba9876543210fedcba9876543210fedcba98
 pass=0; fail=0
 
@@ -101,11 +232,13 @@ else fail=$((fail+1)); echo 'FAIL missing-requested-workflow-refuses'; fi
 
 setup() { # setup <casedir>: default happy fixtures
   local d="$1"; mkdir -p "$d"
-  echo "{\"state\":\"open\",\"draft\":false,\"merged\":false,\"base\":{\"ref\":\"main\"},\"head\":{\"sha\":\"$H\",\"ref\":\"feature/task-1786\"}}" >"$d/pull.json"
+  echo "{\"state\":\"open\",\"draft\":false,\"merged\":false,\"changed_files\":1,\"user\":{\"login\":\"jeong-sik\"},\"base\":{\"ref\":\"main\"},\"head\":{\"sha\":\"$H\",\"ref\":\"pr\"}}" >"$d/pull.json"
   echo '{"check_runs":[{"name":"dune build @check","status":"completed","conclusion":"success","id":11},{"name":"lint suite","status":"completed","conclusion":"success","id":12}]}' >"$d/checkruns.json"
   echo '{"workflow_runs":[{"workflow_id":1,"run_number":10,"name":"PR Check","status":"completed","conclusion":"success","id":900}]}' >"$d/actions.json"
+  "$JQ" -n '{jobs: ["lint suite", "dune build @check", "dune build --profile release @check", "dashboard typecheck", "TLA model check"] | map({name:.,status:"completed",conclusion:"success"})}' >"$d/prjobs.json"
   echo '{"login":"pangyo-preachers"}' >"$d/user.json"
   echo '[]' >"$d/reviews.json"
+  echo '[]' >"$d/comments.json"
   echo "{\"id\":777,\"state\":\"APPROVED\",\"commit_id\":\"$H\"}" >"$d/postresp.json"
   echo "{\"id\":777,\"state\":\"APPROVED\",\"commit_id\":\"$H\"}" >"$d/reviewget.json"
   printf 'verdict: PASS head: %s run: 900 by: selftest-keeper\nLGTM, file:line evidence\n' "$H" >"$d/body.md"
@@ -114,7 +247,7 @@ setup() { # setup <casedir>: default happy fixtures
 run_case() { # run_case <name> <want_rc> <needle> <want_post 0|1> <casedir> [guard args...]
   local name="$1" want="$2" needle="$3" wpost="$4" d="$5"; shift 5
   local out rc posted=0
-  out="$(FAKE_DIR="$d" GUARD_GH="$work/gh" bash "$guard" "$@" 2>&1)"; rc=$?
+  out="$(FAKE_DIR="$d" GUARD_GH="$work/gh" bash "$guard" --git-dir "$work/repo" "$@" 2>&1)"; rc=$?
   [ -f "$d/posted.json" ] && posted=1
   local masked=0
   [ "$want" = 1 ] && printf '%s' "$out" | grep -qF -- "REFUSED" && masked=1
@@ -126,10 +259,43 @@ run_case() { # run_case <name> <want_rc> <needle> <want_post 0|1> <casedir> [gua
 }
 
 
+for required_name in "lint suite" "dune build @check" "dune build --profile release @check" "dashboard typecheck" "TLA model check"; do
+  d="$work/missing-required-$required_name"; setup "$d"
+  "$JQ" --arg name "$required_name" '.jobs |= map(select(.name != $name))' "$d/prjobs.json" > "$d/next.json"
+  mv "$d/next.json" "$d/prjobs.json"
+  run_case "missing-required-$required_name" 2 "required PR-check job '$required_name' missing" 0 "$d" --check --repo o/r --pr 5 --head "$H"
+done
+
 d="$work/happy"; setup "$d"
 run_case happy 0 "APPROVED #5 head $H review 777" 1 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+# Truncated/empty option values must finish without reaching even a GET. A
+# subprocess deadline makes the historical shift-2 loop a deterministic failure.
+d="$work/missing-values"; setup "$d"
+if FAKE_DIR="$d" GUARD_GH="$work/gh" python3 - "$guard" "$d" <<'PY'
+from pathlib import Path
+import subprocess
+import sys
+guard, directory = sys.argv[1:]
+for option in ("--run", "--git-dir", "--repo", "--pr", "--head", "--body", "--replace-own-cr"):
+    for tail in ([option], [option, ""], [option, "--check"]):
+        # File-backed stderr avoids buffering the broken parser's infinite
+        # shift-error stream in memory while proving that it terminates.
+        with open(Path(directory) / "option.stderr", "w+") as error:
+            try:
+                result = subprocess.run(["bash", guard, *tail], timeout=2,
+                    stdout=subprocess.DEVNULL, stderr=error)
+            except subprocess.TimeoutExpired:
+                raise SystemExit(f"option parser did not terminate: {tail!r}")
+            error.seek(0)
+            if result.returncode != 1 or f"{option} requires a value" not in error.read():
+                raise SystemExit(f"option parser did not reject: {tail!r}")
+assert not list(Path(directory).glob("posted*"))
+assert not (Path(directory) / "api_reads").exists()
+PY
+then pass=$((pass+1)); echo "ok   missing-option-values-terminate"
+else fail=$((fail+1)); echo "FAIL missing-option-values-terminate"; fi
 d="$work/happy-footer"; setup "$d"
-FAKE_DIR="$d" GUARD_GH="$work/gh" bash "$guard" --repo o/r --pr 5 --head "$H" --body "$d/body.md" >/dev/null 2>&1
+FAKE_DIR="$d" GUARD_GH="$work/gh" bash "$guard" --git-dir "$work/repo" --repo o/r --pr 5 --head "$H" --body "$d/body.md" >/dev/null 2>&1
 if jq -e --arg h "$H" '.event=="APPROVE" and .commit_id==$h and (.body|contains("run")) and (.body|contains("approve-guard: head"))' "$d/posted.json" >/dev/null; then pass=$((pass+1)); echo "ok   posted-payload"; else fail=$((fail+1)); echo "FAIL posted-payload"; cat "$d/posted.json"; fi
 
 d="$work/check"; setup "$d"
@@ -175,7 +341,7 @@ approved_review() { # id commit_id footer_head verdict_head
 
 ---
 approve-guard: head $tick$footer$tick · 2 check-runs completed+success" \
-    '[{id:$id,user:{login:"pangyo-preachers"},state:"APPROVED",commit_id:$commit,body:$body}]'
+    '[{id:$id,user:{login:"pangyo-preachers"},state:"APPROVED",commit_id:$commit,body:$body,author_association:"COLLABORATOR"}]'
 }
 d="$work/dup"; setup "$d"; approved_review 42 "$H" "$H" "$H" >"$d/reviews.json"
 run_case already-approved 0 "already APPROVED" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
@@ -399,13 +565,14 @@ d="$work/race-nojq"; race_setup "$d"
 PATH="$work/nojq:$PATH" race_case draft-selection-needs-no-standalone-jq 0 'WOULD APPROVE'
 
 
-# Exact captured API jobs: no name, job ID, run ID, head or status rewrite.
-# The accompanying green Ready run is synthetic, not live qualification proof.
+# Captured API job names, IDs, run IDs and statuses; only head is rebound
+# to the fixture Git commit that the freshness gate can inspect. The green
+# Ready run is synthetic, not live qualification proof.
 d="$work/race-captured"; race_setup "$d"
 captured="$here/fixtures/pr-check-draft-jobs-39834.json"
-captured_head=$("$JQ" -r '.jobs[0].head_sha' "$captured")
+captured_head="$H"
 captured_run=$("$JQ" -r '.jobs[0].run_id' "$captured")
-cp "$captured" "$d/jobs-$captured_run.json"
+"$JQ" --arg h "$captured_head" '.jobs[].head_sha=$h' "$captured" >"$d/jobs-$captured_run.json"
 "$JQ" --arg h "$captured_head" '.head.sha=$h' "$d/pull.json" >"$d/p" && mv "$d/p" "$d/pull.json"
 "$JQ" --arg h "$captured_head" --argjson run "$captured_run" '.workflow_runs[].head_sha=$h | .workflow_runs[1].id=$run | .workflow_runs[1].conclusion="skipped"' "$d/actions.json" >"$d/p" && mv "$d/p" "$d/actions.json"
 "$JQ" --slurpfile captured "$captured" '.check_runs |= (map(select(.check_suite.id==55)) + [$captured[0].jobs[] | {name,status,conclusion,id,check_suite:{id:66}}])' "$d/checkruns.json" >"$d/p" && mv "$d/p" "$d/checkruns.json"
@@ -432,56 +599,105 @@ done
 # ---- dispatch-only skipped job (#38873): workflow file decides, never the row alone ----
 # A job whose `if:` requires workflow_dispatch is skipped in every pull_request
 # run by design; the newest pull_request suite may still be green. The guard
-# reads the condition from the workflow file at GUARD_REPO_ROOT, so the
-# fixtures point it at a small tree instead of the working repo.
-wfroot="$work/wftree"; mkdir -p "$wfroot/.github/workflows"
-cat >"$wfroot/.github/workflows/pr-check.yml" <<'EOF'
-name: PR check
-on:
-  pull_request:
-  workflow_dispatch:
-jobs:
-  compare-tui:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.compare_tui }}
-    runs-on: macos-14
-    steps: []
-EOF
-cat >"$wfroot/.github/workflows/other.yml" <<'EOF'
-name: Other
-on:
-  pull_request:
-jobs:
-  compare-tui:
-    runs-on: ubuntu-latest
-    steps: []
-EOF
+# reads the condition from the API-named commit in the fixture Git repository.
 mkcase() { # mkcase <dir> <suite-event> <suite-path>
   local d="$1" ev="$2" p="$3"; mkdir -p "$d"
-  echo "{\"state\":\"open\",\"draft\":false,\"merged\":false,\"base\":{\"ref\":\"main\"},\"head\":{\"sha\":\"$H\",\"ref\":\"feature/task-1786\"}}" >"$d/pull.json"
+  echo "{\"state\":\"open\",\"draft\":false,\"merged\":false,\"changed_files\":1,\"base\":{\"ref\":\"main\"},\"head\":{\"sha\":\"$H\",\"ref\":\"pr\"}}" >"$d/pull.json"
   echo "{\"workflow_runs\":[{\"workflow_id\":1,\"run_number\":10,\"name\":\"PR check\",\"status\":\"completed\",\"conclusion\":\"success\",\"id\":900,\"check_suite_id\":55,\"event\":\"$ev\",\"path\":\"$p\"}]}" >"$d/actions.json"
   echo '{"check_runs":[{"name":"dune build @check","status":"completed","conclusion":"success","id":60,"check_suite":{"id":55}},{"name":"compare-tui","status":"completed","conclusion":"skipped","id":61,"check_suite":{"id":55}}]}' >"$d/checkruns.json"
+  "$JQ" -n '{jobs: ["lint suite", "dune build @check", "dune build --profile release @check", "dashboard typecheck", "TLA model check"] | map({name:.,status:"completed",conclusion:"success"})}' >"$d/prjobs.json"
   echo '{"login":"pangyo-preachers"}' >"$d/user.json"
   echo '[]' >"$d/reviews.json"
+  echo '[]' >"$d/comments.json"
   echo "{\"id\":777,\"state\":\"APPROVED\",\"commit_id\":\"$H\"}" >"$d/postresp.json"
   echo "{\"id\":777,\"state\":\"APPROVED\",\"commit_id\":\"$H\"}" >"$d/reviewget.json"
   printf 'verdict: PASS head: %s run: 900 by: selftest-keeper\nLGTM, file:line evidence\n' "$H" >"$d/body.md"
 }
 d="$work/dispatchskip"; mkcase "$d" pull_request ".github/workflows/pr-check.yml"
-out="$(GUARD_REPO_ROOT="$wfroot" FAKE_DIR="$d" GUARD_GH="$work/gh" bash "$guard" --repo o/r --pr 5 --head "$H" --body "$d/body.md" 2>&1)"; rc=$?
+out="$(FAKE_DIR="$d" GUARD_GH="$work/gh" bash "$guard" --git-dir "$work/repo" --repo o/r --pr 5 --head "$H" --body "$d/body.md" 2>&1)"; rc=$?
 if [ "$rc" = 0 ] && [ -f "$d/posted.json" ] && "$JQ" -e '.body|endswith(" · dispatch-only skipped: compare-tui")' "$d/posted.json" >/dev/null; then pass=$((pass+1)); echo "ok   dispatch-only-job-skipped-approves"; else fail=$((fail+1)); echo "FAIL dispatch-only-job-skipped-approves (rc=$rc)"; printf '%s\n' "$out" | sed 's/^/     /'; cat "$d/posted.json" 2>/dev/null; fi
 d="$work/requiredskip"; mkcase "$d" pull_request ".github/workflows/other.yml"
 run_case required-job-skipped-refuses 2 "check 'compare-tui' is completed/skipped (check-run 61)" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
 d="$work/dispatchskip-dispatch-suite"; mkcase "$d" workflow_dispatch ".github/workflows/pr-check.yml"
 run_case dispatch-suite-skipped-still-refuses 2 "check 'compare-tui' is completed/skipped (check-run 61)" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
 
+# A stale/dirty checkout says the opposite of the candidate in both directions.
+# It must neither exempt a required skipped job nor veto a dispatch-only one.
+cp "$work/repo/.github/workflows/pr-check.yml" "$work/original-workflow"
+cat >"$work/repo/.github/workflows/pr-check.yml" <<'EOF'
+jobs:
+  required-test:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+  compare-tui:
+    if: ${{ false }}
+EOF
+for mode in write check; do
+  set --; [ "$mode" = check ] && set -- --check
+  d="$work/head-required-checkout-dispatch-$mode"; mkcase "$d" pull_request ".github/workflows/pr-check.yml"
+  "$JQ" '.check_runs[1].name="required-test"' "$d/checkruns.json" > "$d/p"
+  mv "$d/p" "$d/checkruns.json"
+  run_case "head-required-ignores-checkout-exemption-$mode" 2 "check 'required-test' is completed/skipped" 0 "$d" \
+    --repo o/r --pr 5 --head "$H" --body "$d/body.md" "$@"
+done
+d="$work/head-dispatch-checkout-required"; mkcase "$d" pull_request ".github/workflows/pr-check.yml"
+run_case head-dispatch-ignores-checkout-refusal 0 "review 777" 1 "$d" \
+  --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+rm "$work/repo/.github/workflows/pr-check.yml"
+d="$work/head-dispatch-checkout-missing"; mkcase "$d" pull_request ".github/workflows/pr-check.yml"
+run_case head-dispatch-ignores-missing-working-file 0 "review 777" 1 "$d" \
+  --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+cp "$work/original-workflow" "$work/repo/.github/workflows/pr-check.yml"
+# A normal main-only clone can read the exact head after an object fetch;
+# unavailable objects fail closed without consulting a plausible local file.
+git clone -q --no-local --single-branch --branch main "$work/remote.git" "$work/main-only"
+if git -C "$work/main-only" cat-file -e "$H^{commit}" 2>/dev/null; then
+  echo "FAIL main-only fixture already has candidate"; fail=$((fail+1))
+fi
+d="$work/head-dispatch-fetch"; mkcase "$d" pull_request ".github/workflows/pr-check.yml"
+run_case head-workflow-fetches-missing-candidate 0 "review 777" 1 "$d" \
+  --repo o/r --pr 5 --head "$H" --body "$d/body.md" --git-dir "$work/main-only"
+git init -q "$work/no-object"
+d="$work/head-workflow-unavailable"; mkcase "$d" pull_request ".github/workflows/pr-check.yml"
+run_case head-workflow-object-unavailable-no-post 1 "candidate workflow object unavailable" 0 "$d" \
+  --repo o/r --pr 5 --head "$H" --body "$d/body.md" --git-dir "$work/no-object"
+
+# A token inside a negated/OR expression, step or comment does not prove a
+# dispatch-only job. These are different committed candidates, not dirty files.
+policy_base="$H"
+for policy in negated disjunction step-mention comment-mention multiline; do
+  git -C "$work/repo" checkout -q --detach "$policy_base"
+  python3 - "$work/repo/.github/workflows/pr-check.yml" "$policy" <<'PYCASE'
+from pathlib import Path
+import sys
+conditions = {
+    "negated": "    if: ${{ github.event_name != 'workflow_dispatch' && false }}\n",
+    "disjunction": "    if: ${{ github.event_name == 'workflow_dispatch' || false }}\n",
+    "step-mention": "    if: ${{ false }}\n    steps:\n      - run: echo workflow_dispatch\n",
+    "comment-mention": "    if: ${{ false }} # workflow_dispatch is mentioned, not required\n",
+    "multiline": "    if: >-\n      github.event_name == 'workflow_dispatch'\n",
+}
+Path(sys.argv[1]).write_text("name: PR check\non: [pull_request, workflow_dispatch]\njobs:\n  compare-tui:\n" + conditions[sys.argv[2]])
+PYCASE
+  git -C "$work/repo" add .github/workflows/pr-check.yml
+  git -C "$work/repo" commit -qm "candidate skip policy $policy"
+  H="$(git -C "$work/repo" rev-parse HEAD)"; export FAKE_HEAD="$H"
+  for mode in write check; do
+    set --; [ "$mode" = check ] && set -- --check
+    d="$work/skip-policy-$policy-$mode"; mkcase "$d" pull_request ".github/workflows/pr-check.yml"
+    run_case "skip-policy-$policy-refuses-$mode" 2 "check 'compare-tui' is completed/skipped" 0 "$d" \
+      --repo o/r --pr 5 --head "$H" --body "$d/body.md" "$@"
+  done
+done
+git -C "$work/repo" checkout -q pr
+H="$policy_base"; export FAKE_HEAD="$H"
+
 # A failed/cancelled early refusal from the manual Release workflow is not
-# release evidence on this exact feature PR ref. Its suite is excluded and the
+# release evidence on this exact PR ref. Its suite is excluded and the
 # ignored run id is visible in the approval footer. A release/v* dispatch still
 # participates in the ordinary green-run gate.
 for release_conclusion in failure cancelled; do
   d="$work/manual-release-refused-$release_conclusion"; setup "$d"
-  echo "{\"state\":\"open\",\"draft\":false,\"merged\":false,\"base\":{\"ref\":\"main\"},\"head\":{\"sha\":\"$H\",\"ref\":\"feature/task-1786\"}}" >"$d/pull.json"
-  echo "{\"workflow_runs\":[{\"workflow_id\":1,\"run_number\":10,\"name\":\"PR Check\",\"status\":\"completed\",\"conclusion\":\"success\",\"id\":900,\"check_suite_id\":55},{\"workflow_id\":2,\"run_number\":1,\"name\":\"Release\",\"status\":\"completed\",\"conclusion\":\"$release_conclusion\",\"id\":901,\"check_suite_id\":66,\"event\":\"workflow_dispatch\",\"path\":\".github/workflows/release.yml\",\"head_branch\":\"feature/task-1786\"}]}" >"$d/actions.json"
+  echo "{\"workflow_runs\":[{\"workflow_id\":1,\"run_number\":10,\"name\":\"PR Check\",\"status\":\"completed\",\"conclusion\":\"success\",\"id\":900,\"check_suite_id\":55,\"event\":\"pull_request\",\"path\":\".github/workflows/pr-check.yml\",\"head_branch\":\"pr\"},{\"workflow_id\":2,\"run_number\":1,\"name\":\"Release\",\"status\":\"completed\",\"conclusion\":\"$release_conclusion\",\"id\":901,\"check_suite_id\":66,\"event\":\"workflow_dispatch\",\"path\":\".github/workflows/release.yml\",\"head_branch\":\"pr\"}]}" >"$d/actions.json"
   echo "{\"check_runs\":[{\"name\":\"dune build @check\",\"status\":\"completed\",\"conclusion\":\"success\",\"id\":60,\"check_suite\":{\"id\":55}},{\"name\":\"Validate manual Release ref\",\"status\":\"completed\",\"conclusion\":\"failure\",\"id\":61,\"check_suite\":{\"id\":66}}]}" >"$d/checkruns.json"
   echo '{"jobs":[{"id":61,"name":"Validate manual Release ref","status":"completed","conclusion":"failure","steps":[{"name":"Set up job","status":"completed","conclusion":"success"},{"name":"Refuse unsupported manual ref","status":"completed","conclusion":"failure"}]},{"id":62,"name":"release-body","status":"completed","conclusion":"skipped"},{"id":63,"name":"build","status":"completed","conclusion":"skipped"},{"id":64,"name":"release","status":"completed","conclusion":"skipped"}]}' >"$d/jobs.json"
   echo '[{"annotation_level":"failure","title":"MASC_RELEASE_REF_REJECTED","message":"Manual Release is limited to tags and release/v* branches."}]' >"$d/annotations.json"
@@ -512,10 +728,11 @@ done
 
 # Red control: removing the marker predicate must turn the negative fixture
 # into an approval, proving the fixture distinguishes the safety check.
-cp "$here/pr-check-run-contract.sh" "$work/pr-check-run-contract.sh"
-sed 's/\[ "$marker" = "1" \] || continue/: # red-control marker removed/' "$guard" >"$work/no-marker-guard.sh"
+mkdir -p "$work/no-marker-review"
+cp "$here/approve-guard.sh" "$here/ci-checks.sh" "$here/ci-freshness.py" "$here/review-verdict.sh" "$here/pr-check-run-contract.sh" "$work/no-marker-review/"
+sed 's/\[ "$marker" = "1" \] || continue/: # red-control marker removed/' "$here/ci-checks.sh" >"$work/no-marker-review/ci-checks.sh"
 d="$work/manual-release-unrelated-missing-marker"
-out="$(FAKE_DIR="$d" GUARD_GH="$work/gh" bash "$work/no-marker-guard.sh" --repo o/r --pr 5 --head "$H" --body "$d/body.md" 2>&1)"; rc=$?
+out="$(FAKE_DIR="$d" GUARD_GH="$work/gh" bash "$work/no-marker-review/approve-guard.sh" --repo o/r --pr 5 --head "$H" --body "$d/body.md" 2>&1)"; rc=$?
 if [ "$rc" = 0 ] && [ -f "$d/posted.json" ]; then
   pass=$((pass+1)); echo "ok   missing-marker-red-control-approves-only-with-predicate-removed"
 else
@@ -550,7 +767,7 @@ run_case old-slot-argument-stops 1 "unknown argument: --slot" 0 "$d" --repo o/r 
 
 # ---- lane without jq: the guard must still post (code-reviewer P1 on #38625) ----
 d="$work/nojq-case"; setup "$d"
-out="$(PATH="$work/nojq:$PATH" FAKE_DIR="$d" GUARD_GH="$work/gh" bash "$guard" --repo o/r --pr 5 --head "$H" --body "$d/body.md" 2>&1)"; rc=$?
+out="$(PATH="$work/nojq:$PATH" FAKE_DIR="$d" GUARD_GH="$work/gh" bash "$guard" --git-dir "$work/repo" --repo o/r --pr 5 --head "$H" --body "$d/body.md" 2>&1)"; rc=$?
 if [ "$rc" = 0 ] && [ -f "$d/posted.json" ] && "$JQ" -e --arg h "$H" '.event=="APPROVE" and .commit_id==$h and (.body|startswith("verdict: PASS head: "+$h)) and (.body|contains("approve-guard: head"))' "$d/posted.json" >/dev/null; then
   pass=$((pass+1)); echo "ok   no-jq-still-posts"
 else fail=$((fail+1)); echo "FAIL no-jq-still-posts (rc=$rc)"; printf '%s\n' "$out" | sed 's/^/     /'; fi
@@ -564,6 +781,234 @@ d="$work/userfail"; setup "$d"
 FAKE_FAIL='user' run_case gh-user-fails-no-post 1 "gh api user failed" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
 d="$work/userempty"; setup "$d"; echo '{"login":""}' >"$d/user.json"
 run_case user-empty-no-post 1 "returned no login" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+
+# The merge boundary executes only against this fake API. Its write marker
+# proves a later HOLD and stale evidence cannot reach merge-async.
+merge_case() {
+  local name="$1" want="$2" write="$3" d="$4" rc out actual=0; shift 4
+  out="$(cd "${MERGE_CASE_CWD:-$PWD}" && FAKE_DIR="$d" GUARD_GH="$work/gh" bash "$here/merge-guard.sh" --repo o/r --pr 5 \
+    --head "$H" --run 900 --git-dir "$work/repo" "$@" 2>&1)"; rc=$?
+  [ -f "$d/merged" ] && actual=1
+  if [ "$rc" = "$want" ] && [ "$actual" = "$write" ]; then
+    pass=$((pass+1)); echo "ok   $name"
+  else fail=$((fail+1)); echo "FAIL $name rc=$rc write=$actual"; echo "$out"; fi
+}
+merge_setup() {
+  setup "$1"
+  approved_review 888 "$H" "$H" "$H" | "$JQ" \
+    'map(.user.login="reviewer" | .submitted_at="2026-01-01T00:40:00Z")' > "$1/reviews.json"
+}
+d="$work/merge-fresh"; merge_setup "$d"
+merge_case merge-fresh 0 1 "$d"
+# The required wrapper must preserve the shared merge-check contract. Keep a
+# separate current PASS so these failures cannot be hidden by verdict parsing.
+for mode in write check; do
+  set --; [ "$mode" = check ] && set -- --check
+  for mutation in missing-footer retargeted author split-authority; do
+    d="$work/merge-binding-$mutation-$mode"; merge_setup "$d"
+    "$JQ" '[.[] | {created_at:"2026-01-01T00:41:00Z",body,author_association}]' "$d/reviews.json" > "$d/comments.json"
+    case "$mutation" in
+      missing-footer) expression='map(.body |= split("\n")[0])' ;;
+      retargeted) expression='map(.body |= gsub($head; $old))' ;;
+      author) expression='map(.user.login="jeong-sik")' ;;
+      split-authority)
+        expression='.[0] as $bound | map(.body |= split("\n")[0]) +
+          [($bound | .id=889 | .user.login="outsider" | .author_association="NONE")]' ;;
+    esac
+    "$JQ" --arg head "$H" --arg old "$H2" "$expression" "$d/reviews.json" > "$d/p"
+    mv "$d/p" "$d/reviews.json"
+    merge_case "merge-binding-$mutation-$mode" 2 0 "$d" "$@"
+  done
+  d="$work/merge-binding-old-commit-$mode"; merge_setup "$d"
+  "$JQ" --arg old "$H2" 'map(.commit_id=$old)' "$d/reviews.json" > "$d/p"
+  mv "$d/p" "$d/reviews.json"
+  expected_write=1; [ "$mode" != check ] || expected_write=0
+  merge_case "merge-binding-current-body-old-commit-$mode" 0 "$expected_write" "$d" "$@"
+done
+# Correcting explanatory text on an old PASS cannot resurrect it over a newer
+# refusal. Exercise approval/merge and both --check/write paths with a formal
+# approval still present, so only the structured decision blocks the write.
+for verdict in HOLD FAIL; do
+  for mode in write check; do
+    set --; [ "$mode" = check ] && set -- --check
+    d="$work/merge-edited-old-pass-$verdict-$mode"; merge_setup "$d"
+    "$JQ" -n --arg h "$H" --arg state "$verdict" '[
+      {id:1,created_at:"2026-01-01T00:41:00Z",updated_at:"2026-01-01T00:59:00Z",author_association:"COLLABORATOR",
+       body:("verdict: PASS head: "+$h+" run: 900 by: keeper\nCorrected explanation")},
+      {id:2,created_at:"2026-01-01T00:50:00Z",author_association:"COLLABORATOR",
+       body:("verdict: "+$state+" head: "+$h+" run: 900 by: keeper")} ]' > "$d/comments.json"
+    merge_case "merge-edited-old-pass-keeps-$verdict-$mode" 2 0 "$d" "$@"
+    run_case "approval-edited-old-pass-keeps-$verdict-$mode" 2 "latest structured verdict is $verdict" 0 "$d" \
+      --repo o/r --pr 5 --head "$H" --body "$d/body.md" "$@"
+  done
+done
+# The final CI read itself can receive a later decision. Exercise both dry-run
+# returns and real write paths; every refusal must occur after the injected read.
+for verdict in HOLD FAIL; do
+  for mode in write check; do
+    set --; [ "$mode" = check ] && set -- --check
+    d="$work/merge-final-check-$verdict-$mode"; merge_setup "$d"
+    echo "$verdict" > "$d/after_checks_verdict"
+    merge_case "merge-$verdict-during-final-check-$mode" 2 0 "$d" "$@"
+    [ -f "$d/verdict_arrived_during_checks" ] || { echo "FAIL late merge verdict was not injected"; fail=$((fail+1)); }
+    d="$work/approval-final-check-$verdict-$mode"; setup "$d"
+    echo "$verdict" > "$d/after_checks_verdict"
+    FAKE_LATE_PR_AFTER_MAIN_READS=2 run_case "approval-$verdict-during-final-check-$mode" 2 \
+      "latest structured verdict is $verdict" 0 "$d" --repo o/r --pr 5 --head "$H" \
+      --body "$d/body.md" "$@"
+    [ -f "$d/verdict_arrived_during_checks" ] || { echo "FAIL late approval verdict was not injected"; fail=$((fail+1)); }
+  done
+done
+# A formal review can change during the final check read without a new
+# structured verdict. The last review-state read must refuse both cases.
+for review_mutation in new-cr dismiss-approval remove-footer; do
+  for mode in write check; do
+    set --; [ "$mode" = check ] && set -- --check
+    d="$work/merge-final-review-$review_mutation-$mode"; merge_setup "$d"
+    echo "$review_mutation" > "$d/after_checks_review"
+    merge_case "merge-$review_mutation-during-final-check-$mode" 2 0 "$d" "$@"
+    [ -f "$d/review_arrived_during_checks" ] || { echo "FAIL late formal review was not injected"; fail=$((fail+1)); }
+  done
+done
+# The approval account must also re-read formal requests after final CI.
+# Bodies deliberately carry no structured verdict, including our shared account.
+for review_mutation in new-cr new-own-cr; do
+  for mode in write check; do
+    set --; [ "$mode" = check ] && set -- --check
+    d="$work/approval-final-review-$review_mutation-$mode"; setup "$d"
+    echo "$review_mutation" > "$d/after_checks_review"
+    FAKE_LATE_PR_AFTER_MAIN_READS=2 run_case "approval-$review_mutation-during-final-check-$mode" 2 "CHANGES_REQUESTED" 0 "$d" \
+      --repo o/r --pr 5 --head "$H" --body "$d/body.md" "$@"
+    [ -f "$d/review_arrived_during_checks" ] || { echo "FAIL late approval formal review was not injected"; fail=$((fail+1)); }
+  done
+done
+# Every late change keeps the branch ref and old checks green. Only the live
+# PR-state read can prevent an old-head approval/merge request from being sent.
+for mutation in head draft closed base merged; do
+  case "$mutation" in
+    head) expression='.head.sha=$h' ;;
+    draft) expression='.draft=true' ;;
+    closed) expression='.state="closed"' ;;
+    base) expression='.base.ref="release"' ;;
+    merged) expression='.merged=true' ;;
+  esac
+  d="$work/merge-late-pr-$mutation"; merge_setup "$d"
+  "$JQ" --arg h "$H2" "$expression" "$d/pull.json" > "$d/late_pull.json"
+  merge_case "merge-late-pr-$mutation-no-write" 2 0 "$d"
+  d="$work/approval-late-pr-$mutation"; setup "$d"
+  "$JQ" --arg h "$H2" "$expression" "$d/pull.json" > "$d/late_pull.json"
+  FAKE_LATE_PR_AFTER_MAIN_READS=2 run_case "approval-late-pr-$mutation-no-post" 2 "REFUSED" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+done
+# Also move head after the final gate has begun reading green checks.
+d="$work/merge-pr-moves-during-checks"; merge_setup "$d"
+"$JQ" --arg h "$H2" '.head.sha=$h' "$d/pull.json" > "$d/after_checks_pull.json"
+merge_case merge-pr-moves-during-checks-no-write 2 0 "$d"
+d="$work/approval-pr-moves-during-checks"; setup "$d"
+"$JQ" --arg h "$H2" '.head.sha=$h' "$d/pull.json" > "$d/after_checks_pull.json"
+FAKE_LATE_PR_AFTER_MAIN_READS=2 run_case approval-pr-moves-during-checks-no-post 2 "head moved" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+# Passing --git-dir must not depend on the caller already being in a repo.
+d="$work/merge-outside-repo"; merge_setup "$d"
+GUARD_REPO_ROOT= MERGE_CASE_CWD="$work" merge_case merge-explicit-git-dir-outside-repo 0 1 "$d"
+for late_status in queued completed; do
+  d="$work/merge-late-workflow-$late_status"; merge_setup "$d"
+  echo "$late_status" > "$d/late_workflow"
+  merge_case "merge-later-$late_status-workflow-no-write" 2 0 "$d"
+done
+d="$work/merge-late-check"; merge_setup "$d"; touch "$d/late_check"
+merge_case merge-later-failed-check-no-write 2 0 "$d"
+# A newer other-PR run cannot hide a candidate failure or block its success,
+# even when GitHub associates the other run with both same-SHA PRs.
+for association in other both; do
+  for candidate_conclusion in failure success; do
+    d="$work/merge-cross-pr-$association-$candidate_conclusion"; merge_setup "$d"
+    "$JQ" --arg candidate "$candidate_conclusion" --arg association "$association" '
+      .workflow_runs |= map(. + {check_suite_id:200}) |
+      .workflow_runs += [
+        {workflow_id:1,run_number:11,name:"PR Check",status:"completed",conclusion:$candidate,
+         id:901,check_suite_id:201,head_branch:"pr",pull_requests:[{number:5}]},
+        {workflow_id:1,run_number:12,name:"PR Check",status:"completed",
+         conclusion:(if $candidate=="failure" then "success" else "failure" end),
+         id:902,check_suite_id:202,head_branch:"other-pr",
+         pull_requests:(if $association=="both" then [{number:5},{number:6}] else [{number:6}] end)}]' "$d/actions.json" > "$d/p"
+    mv "$d/p" "$d/actions.json"
+    "$JQ" -n --arg candidate "$candidate_conclusion" '{check_runs:[
+      {name:"lint suite",status:"completed",conclusion:"success",id:10,check_suite:{id:200}},
+      {name:"lint suite",status:"completed",conclusion:$candidate,id:11,check_suite:{id:201}},
+      {name:"lint suite",status:"completed",conclusion:(if $candidate=="failure" then "success" else "failure" end),id:12,check_suite:{id:202}}]}' > "$d/checkruns.json"
+    if [ "$candidate_conclusion" = failure ]; then
+      merge_case "merge-cross-pr-$association-cannot-hide-failure" 2 0 "$d"
+    else
+      merge_case "merge-cross-pr-$association-cannot-block-success" 0 1 "$d"
+    fi
+  done
+done
+for candidate_conclusion in failure success check_failure; do
+  d="$work/merge-mixed-event-$candidate_conclusion"; merge_setup "$d"
+  "$JQ" --arg candidate "$candidate_conclusion" '
+    .workflow_runs |= map(. + {check_suite_id:200}) |
+    .workflow_runs += [
+      {workflow_id:1,run_number:11,name:"PR Check",status:"completed",conclusion:(if $candidate=="check_failure" then "success" else $candidate end),
+       id:901,check_suite_id:201,event:"pull_request",head_branch:"pr"},
+      {workflow_id:1,run_number:12,name:"PR Check",status:"completed",conclusion:"success",
+       id:902,check_suite_id:202,event:"workflow_dispatch",head_branch:"pr"}]' "$d/actions.json" > "$d/p"
+  mv "$d/p" "$d/actions.json"
+  "$JQ" -n --arg candidate "$candidate_conclusion" '{check_runs:[
+    {name:"lint suite",status:"completed",conclusion:(if $candidate=="check_failure" then "failure" else $candidate end),id:11,check_suite:{id:201}},
+    {name:"lint suite",status:"completed",conclusion:"success",id:12,check_suite:{id:202}}]}' > "$d/checkruns.json"
+  if [ "$candidate_conclusion" != success ]; then
+    merge_case "merge-dispatch-cannot-hide-pr-$candidate_conclusion" 2 0 "$d"
+  else
+    merge_case merge-successful-pr-and-dispatch 0 1 "$d"
+  fi
+done
+# Trusted comment PASS does not authorize an unrelated outsider's APPROVED.
+# All three repository participant classes can provide the formal approval.
+for authority in NONE CONTRIBUTOR UNKNOWN null OWNER MEMBER COLLABORATOR; do
+  d="$work/merge-approval-$authority"; merge_setup "$d"
+  "$JQ" '[.[] | {created_at:"2026-01-01T00:41:00Z",body,author_association}]' "$d/reviews.json" > "$d/comments.json"
+  "$JQ" --arg a "$authority" 'map(.author_association=(if $a=="null" then null else $a end))' "$d/reviews.json" > "$d/p"
+  mv "$d/p" "$d/reviews.json"
+  case "$authority" in
+    OWNER|MEMBER|COLLABORATOR) merge_case "merge-trusted-approval-$authority" 0 1 "$d" ;;
+    *) merge_case "merge-untrusted-approval-$authority-no-write" 2 0 "$d" ;;
+  esac
+done
+d="$work/merge-paginated"; merge_setup "$d"
+cp "$d/reviews.json" "$d/reviews-page-2.json"
+"$JQ" -n --arg h "$H" '[range(1;101) | {id:.,state:"COMMENTED",commit_id:$h,user:{login:"reviewer"},body:"earlier review",submitted_at:"2026-01-01T00:20:00Z"}]' > "$d/reviews.json"
+merge_case merge-paginated-latest-approval 0 1 "$d"
+d="$work/merge-late-hold"; merge_setup "$d"; touch "$d/late_hold"
+merge_case merge-hold-arrives-during-freshness 2 0 "$d"
+d="$work/merge-hold"; merge_setup "$d"
+"$JQ" -n --arg h "$H" '[{created_at:"2026-01-01T00:50:00Z",
+ body:("verdict: HOLD head: "+$h+" run: 900 by: keeper")}]' > "$d/comments.json"
+merge_case merge-later-hold 2 0 "$d"
+d="$work/merge-no-approval"; setup "$d"
+"$JQ" -n --arg h "$H" '[{created_at:"2026-01-01T00:40:00Z",author_association:"COLLABORATOR",
+ body:("verdict: PASS head: "+$h+" run: 900 by: keeper")}]' > "$d/comments.json"
+merge_case merge-no-approval 2 0 "$d"
+d="$work/approval-late-cr"; setup "$d"; touch "$d/late_cr"
+run_case approval-cr-arrives-during-freshness 2 "--replace-own-cr 999" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+d="$work/approval-late-hold"; setup "$d"; touch "$d/late_approval_hold"
+run_case approval-hold-arrives-during-freshness 2 "latest structured verdict is HOLD" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+for late_status in queued completed; do
+  d="$work/approval-late-workflow-$late_status"; setup "$d"
+  echo "$late_status" > "$d/late_workflow"
+  FAKE_LATE_AFTER_MAIN_READS=1 run_case "approval-later-$late_status-workflow-no-post" 2 "run 901 is $late_status" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+done
+d="$work/approval-late-check"; setup "$d"; touch "$d/late_check"
+FAKE_LATE_AFTER_MAIN_READS=1 run_case approval-later-failed-check-no-post 2 "check-run 99" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+# Main now touches a PR file after the cited run; both write boundaries refuse.
+git -C "$work/repo" checkout -q main
+echo integration > "$work/repo/pr.ml"
+git -C "$work/repo" add .
+GIT_AUTHOR_DATE=2026-01-01T01:00:00Z GIT_COMMITTER_DATE=2026-01-01T01:00:00Z git -C "$work/repo" commit -qm integration
+export FAKE_MAIN="$(git -C "$work/repo" rev-parse HEAD)"
+git -C "$work/repo" push -q origin main
+d="$work/stale-approval"; setup "$d"
+run_case stale-approval-no-post 2 '"status": "stale"' 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+d="$work/stale-merge"; merge_setup "$d"
+merge_case stale-merge-no-write 2 0 "$d"
 
 
 if [ -n "$workflow" ]; then

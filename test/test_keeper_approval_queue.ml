@@ -5171,7 +5171,7 @@ let test_observed_delivery_preserves_grant_without_replaying_wake () =
          Keeper_event_queue.hitl_resolution_post_id resolution
        in
        (match
-          Reaction_ledger.event_queue_turn_started_seen_for_source_result
+          Reaction_ledger.event_queue_delivery_seen_for_source_result
             ~base_path
             ~keeper_name
             ~post_id

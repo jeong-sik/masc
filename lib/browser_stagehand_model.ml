@@ -676,12 +676,13 @@ let serve ?cli_runner ~net ~clock ~base_path ~resolve_lane params =
            (rejections.first :: rejections.rest)))
 ;;
 
-let create ?cli_runner ~net ~clock ~base_path ~resolve_lane params
+let create ?cli_runner ?on_refusal ~net ~clock ~base_path ~resolve_lane params
   : (Yojson.Safe.t, Wire.rpc_error) result
   =
   match serve ?cli_runner ~net ~clock ~base_path ~resolve_lane params with
   | Ok answer -> Ok answer
   | Error refusal ->
+    Option.iter (fun observe -> observe refusal) on_refusal;
     Log.Server.warn "browser_stagehand: llm.generate refused (%s)" (refusal_kind refusal);
     Error (refusal_to_rpc_error refusal)
 ;;

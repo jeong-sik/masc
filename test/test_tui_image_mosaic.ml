@@ -82,6 +82,26 @@ let test_rgba_ends_on_the_terminal_colours () =
       check bool "never a full reset" false (contains ~sub:"\027[0m" line)
   | lines -> failf "one line, got %d" (List.length lines)
 
+(* A colour the projection cannot draw must not borrow the one before it:
+   after a red cell, the next cell says the terminal's own colours. *)
+let test_rgba_undrawable_colour_is_the_terminal_s_own () =
+  let blue = Masc_tui_terminal_palette.make_rgb ~red:0 ~green:0 ~blue:255 in
+  let project rgb = if rgb = blue then None else true_colour rgb in
+  match render_rgba ~project ~cols:2 ~rows:2 (rgba_of [ red; (0, 0, 255, 255); red; (0, 0, 255, 255) ]) with
+  | [ line ] ->
+      (* The second cell is whatever follows the first cell's half block. *)
+      let block = "\xe2\x96\x80" in
+      let rec after_first i = if String.sub line i 3 = block then i + 3 else after_first (i + 1) in
+      let cut = after_first 0 in
+      let second = String.sub line cut (String.length line - cut) in
+      (* Rows are [red; blue] over [red; blue]: the second cell is all blue. *)
+      check bool "the second cell names the terminal's own colours" true
+        (String.starts_with
+           ~prefix:(Masc_tui_theme.Sgr.default_fg ^ Masc_tui_theme.Sgr.default_bg)
+           second);
+      check bool "and never the red before it" false (contains ~sub:"255;0;0" second)
+  | lines -> failf "one line, got %d" (List.length lines)
+
 let test_rgba_refuses_what_render_refuses () =
   check (list string) "odd rows" [] (render_rgba ~project:true_colour ~cols:1 ~rows:3 (String.make 12 '\000'));
   check (list string) "short buffer" [] (render_rgba ~project:true_colour ~cols:2 ~rows:2 (String.make 15 '\000'))
@@ -194,6 +214,8 @@ let () =
         ; test_case "colours go through the projection" `Quick
             test_rgba_colours_go_through_the_projection
         ; test_case "ends on the terminal colours" `Quick test_rgba_ends_on_the_terminal_colours
+        ; test_case "an undrawable colour is the terminal's own" `Quick
+            test_rgba_undrawable_colour_is_the_terminal_s_own
         ; test_case "refuses what render refuses" `Quick test_rgba_refuses_what_render_refuses
         ] )
     ]

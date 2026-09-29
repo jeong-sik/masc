@@ -1,0 +1,166 @@
+{
+  "window_utc": {
+    "start_inclusive": "2026-09-28T01:08:51Z",
+    "end_inclusive": "2026-09-29T01:08:51Z"
+  },
+  "levels": {
+    "INFO": 306311,
+    "WARN": 20169,
+    "ERROR": 1554
+  },
+  "malformed_rows": 0,
+  "error_total": 1554,
+  "groups": {
+    "keeper_cycle_failed": {
+      "count": 310,
+      "first": {
+        "file": "system_log_2026-09-28.jsonl",
+        "line": 17718,
+        "seq": 52429433,
+        "ts": "2026-09-28T01:16:24Z"
+      },
+      "last": {
+        "file": "system_log_2026-09-29.jsonl",
+        "line": 8325,
+        "seq": 53855612,
+        "ts": "2026-09-29T01:08:24Z"
+      }
+    },
+    "tool_call_error": {
+      "count": 687,
+      "first": {
+        "file": "system_log_2026-09-28.jsonl",
+        "line": 18484,
+        "seq": 52430199,
+        "ts": "2026-09-28T01:21:14Z"
+      },
+      "last": {
+        "file": "system_log_2026-09-29.jsonl",
+        "line": 8470,
+        "seq": 53855757,
+        "ts": "2026-09-29T01:08:41Z"
+      }
+    },
+    "keeper_request_error": {
+      "count": 39,
+      "first": {
+        "file": "system_log_2026-09-28.jsonl",
+        "line": 21938,
+        "seq": 52433653,
+        "ts": "2026-09-28T01:53:49Z"
+      },
+      "last": {
+        "file": "system_log_2026-09-28.jsonl",
+        "line": 325668,
+        "seq": 53687383,
+        "ts": "2026-09-28T23:21:53Z"
+      }
+    },
+    "other": {
+      "count": 137,
+      "first": {
+        "file": "system_log_2026-09-28.jsonl",
+        "line": 22156,
+        "seq": 52433871,
+        "ts": "2026-09-28T01:54:23Z"
+      },
+      "last": {
+        "file": "system_log_2026-09-28.jsonl",
+        "line": 332393,
+        "seq": 53794108,
+        "ts": "2026-09-28T23:42:51Z"
+      }
+    },
+    "inner_tool_error": {
+      "count": 66,
+      "first": {
+        "file": "system_log_2026-09-28.jsonl",
+        "line": 23634,
+        "seq": 52485349,
+        "ts": "2026-09-28T01:59:39Z"
+      },
+      "last": {
+        "file": "system_log_2026-09-29.jsonl",
+        "line": 7045,
+        "seq": 53804332,
+        "ts": "2026-09-29T00:56:47Z"
+      }
+    },
+    "board_recovery_generation": {
+      "count": 315,
+      "first": {
+        "file": "system_log_2026-09-28.jsonl",
+        "line": 102694,
+        "seq": 52664409,
+        "ts": "2026-09-28T06:05:28Z"
+      },
+      "last": {
+        "file": "system_log_2026-09-29.jsonl",
+        "line": 8165,
+        "seq": 53855452,
+        "ts": "2026-09-29T01:07:18Z"
+      }
+    }
+  },
+  "tool_call_counts": {
+    "Read": 174,
+    "WebFetch": 54,
+    "Edit": 46,
+    "masc_board_post_get": 43,
+    "Execute": 43,
+    "github_pull_request_read": 37,
+    "Grep": 32,
+    "keeper_artifact_read": 26,
+    "keeper_skill": 23,
+    "BrowserRead": 22,
+    "masc_schedule_update": 21,
+    "keeper_memory_write": 20,
+    "WebSearch": 15,
+    "masc_board_comment": 14,
+    "keeper_tasks_list": 9,
+    "keeper_capability_search": 9,
+    "BrowserGoto": 9,
+    "masc_schedule_cancel": 7,
+    "masc_schedule_get": 5,
+    "keeper_compose_browser-navigate-read": 5,
+    "masc_msx_screen": 5,
+    "Write": 5,
+    "BrowserSession": 4,
+    "keeper_broadcast": 4,
+    "keeper_artifact_transfer": 4,
+    "keeper_surface_read": 4,
+    "BrowserTabs": 4,
+    "keeper_analyze_image": 4,
+    "masc_dos_screen": 3,
+    "masc_dos_peek": 3,
+    "BrowserInteract": 3,
+    "keeper_task_claim": 3,
+    "masc_msx_step_until_change": 3,
+    "masc_keeper_delegate": 2,
+    "keeper_compose_msx-observe": 2,
+    "github_issue_read": 2,
+    "cloudflare_execute": 2,
+    "github_pull_request_review_write": 2,
+    "railway_list-deployments": 2,
+    "keeper_compose_browser-live-follow-read": 2,
+    "masc_schedule_note_add": 2,
+    "masc_board_comment_vote": 1,
+    "github_get_file_contents": 1,
+    "masc_board_post_update": 1,
+    "masc_run_plan": 1,
+    "BrowserInstruct": 1,
+    "masc_board_post": 1,
+    "railway_list-services": 1,
+    "railway_environment-status": 1
+  },
+  "sources": [
+    {
+      "file": "system_log_2026-09-28.jsonl",
+      "error_rows": 1471
+    },
+    {
+      "file": "system_log_2026-09-29.jsonl",
+      "error_rows": 83
+    }
+  ]
+}

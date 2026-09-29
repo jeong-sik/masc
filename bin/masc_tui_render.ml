@@ -553,9 +553,8 @@ let overview_providers_section (state : state) ~cols =
     ~now:(Unix.gettimeofday ())
     ~width:(framed_inner_width cols)
 
-(* The Overview's title row: the name, the workspace, the clock and the
-   connection badge. The startup splash draws the same row, so the two
-   cannot disagree about what the screen is or whether it is connected. *)
+(* The Overview keeps the same compact title and working layout from the
+   first frame through loading, success and failure. *)
 let overview_header (state : state) =
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
@@ -676,14 +675,32 @@ let render_overview (state : state) =
     Terminal_text.optional_single_line state.overview_error
   in
 
+  let unread_note =
+    match state.connection_status, state.http_refresh_started_ns with
+    | Booting, _ -> "  Waiting for workspace server…"
+    | Connecting, _
+    | (Connected | Degraded | Reconnecting | Disconnected), Some _ ->
+        "  Loading…"
+    | (Connected | Degraded | Reconnecting | Disconnected), None ->
+        page_unread_note
+  in
+
   (* Summary line *)
   let summary_line =
     match (ov, overview_error) with
     | _, Some err ->
         data_unreliable_row ~cols err
     | None, None ->
-        Printf.sprintf "  %s(no overview data — press 'r' to refresh)%s"
-          Ansi.dim Ansi.reset
+        let status =
+          match state.connection_status, state.http_refresh_started_ns with
+          | Connecting, _ -> "Connecting to workspace…"
+          | Booting, _ -> "Workspace server is starting…"
+          | (Connected | Degraded | Reconnecting | Disconnected), Some _ ->
+              "Loading Overview…"
+          | (Connected | Degraded | Reconnecting | Disconnected), None ->
+              "(no overview data — press 'r' to refresh)"
+        in
+        "  " ^ Ansi.dim ^ status ^ Ansi.reset
     | Some o, None ->
         let health_color = workspace_health_color o.ov_workspace_health in
         let health_label = workspace_health_label o.ov_workspace_health in
@@ -847,7 +864,7 @@ let render_overview (state : state) =
     | Page_empty when on_team_rows > 0 ->
         Some (Printf.sprintf "(%d on Team rows below)" on_team_rows)
     | Page_empty -> Some "Nothing needs attention."
-    | Page_unread -> Some (String.trim page_unread_note)
+    | Page_unread -> Some (String.trim unread_note)
     | Page_failed -> None
   in
   for i = 0 to row_budget.attention_rows - 1 do
@@ -1041,7 +1058,7 @@ let render_overview (state : state) =
   let no_tasks_note =
     match local_rows_page state ~error:tasks_error with
     | Page_empty -> Some "  No tasks."
-    | Page_unread -> Some page_unread_note
+    | Page_unread -> Some unread_note
     | Page_failed -> None
   in
   (match no_tasks_note with
@@ -5725,7 +5742,7 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
   in
   let last_run =
     match lane.sl_last_outcome, lane.sl_last_terminal_at with
-    | None, _ -> "no run has finished"
+    | None, _ -> "no retained terminal observation"
     | Some outcome, None -> "last run " ^ Terminal_text.single_line outcome
     | Some outcome, Some at ->
       Printf.sprintf "last run %s %s ago"
@@ -6040,24 +6057,24 @@ let render_lanes_overview (state : state) =
     match state.standalone_lanes with
     | None ->
         Printf.sprintf "%s  %s  %s  %s"
-          (screen_title " MASC Lanes \xc2\xb7 Standalone") (title_missing_reading ~error:state.standalone_lanes_error) timestamp
+          (screen_title " MASC Lanes") (title_missing_reading ~error:state.standalone_lanes_error) timestamp
           (connection_badge state)
     | Some _ ->
         Printf.sprintf "%s  %s  %s  %s"
-          (screen_title " MASC Lanes \xc2\xb7 Standalone")
+          (screen_title " MASC Lanes")
           (tab_strip
              ~width:
                (tab_strip_width ~cols
-                  ~before:(screen_title " MASC Lanes \xc2\xb7 Standalone" ^ tab_strip_gap)
+                  ~before:(screen_title " MASC Lanes" ^ tab_strip_gap)
                   ~after:("  " ^ timestamp ^ "  " ^ connection_badge state))
              ~press:pressable
-             [ ( tab_entry_label "Lanes" lane_reading
+             [ ( tab_entry_label "Runtime lanes" lane_reading
                , false
                , Press_runtime_mode Masc_tui_types.Runtime_lanes )
              ; ( tab_entry_label "All runtimes" all_reading
                , false
                , Press_runtime_mode Masc_tui_types.Runtime_all )
-             ; ( tab_entry_label "Standalone"
+             ; ( tab_entry_label "Lanes"
                    (Some
                       (Masc_tui_message_layout.count_noun standalone_count "lane"))
                , true
@@ -6079,11 +6096,11 @@ let render_lanes_overview (state : state) =
      answers does not get to push a reading off the row that carries it. *)
   let standalone_heading =
     match state.standalone_lanes with
-    | None -> "  Standalone LLM lanes"
+    | None -> "  Lanes"
     | Some snapshot ->
         let observed = Unix.localtime snapshot.sls_observed_at_unix in
         Printf.sprintf
-          "  Standalone LLM lanes · observed %02d:%02d:%02d"
+          "  Lanes · observed %02d:%02d:%02d"
           observed.Unix.tm_hour observed.Unix.tm_min observed.Unix.tm_sec
   in
   box_line_styled buf cols ~style:(Ansi.bold ^ (Masc_tui_theme.tone Masc_tui_theme.Accent)) standalone_heading;
@@ -6133,7 +6150,7 @@ let render_lanes_overview (state : state) =
          snapshot.Tui_decode.sls_lanes;
        if snapshot.sls_lanes = [] then
          box_line_styled buf cols ~style:(Theme.recede ())
-           "  (no standalone lane observations)";
+           "  (no lane observations)";
        if snapshot.sls_exact_run_projection_truncated then
          box_line buf cols
            (Printf.sprintf
@@ -6149,10 +6166,10 @@ let render_lanes_overview (state : state) =
    | None ->
        box_line buf cols
          (match state.standalone_lanes_error with
-          | None -> Ansi.dim ^ "  loading standalone lane observations…" ^ Ansi.reset
+          | None -> Ansi.dim ^ "  loading lane observations…" ^ Ansi.reset
           | Some detail ->
               (* The lane-read boundary already names the subject and verdict --
-                 "standalone lanes load failed: <reason>" -- so the sentence
+                 "lanes load failed: <reason>" -- so the sentence
                  that stood here said "standalone lane" a second time and
                  put an unavailable verdict beside the read error's own, and
                  pushed the reason
@@ -6670,7 +6687,7 @@ let lane_run_tool_summary = function
 let lane_run_skill_summary = function
   | Tui_decode.Lane_run_no_skills_by_contract ->
     Theme.muted (),
-    "SKILLS  none · standalone runs do not load Keeper Skill instructions"
+    "SKILLS  none · these runs do not load Keeper Skill instructions"
   | Tui_decode.Lane_run_skills_contract_unknown ->
     Theme.muted (), "SKILLS  unknown · this run kind has no typed Skill contract"
 
@@ -11990,9 +12007,9 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
              | Some browser -> "Reading " ^ browser ^ "…"
              | None -> "Reading…"), Theme.info ()
         | Loading (_, Read_refresh) -> "Refreshing browser text…", Theme.info ()
-        | Loading (_, Open_session) -> "Opening automation browser…", Theme.info ()
-        | Loading (_, Close_session) -> "Closing automation browser…", Theme.info ()
-        | Loading (_, Goto _) -> "Navigating automation browser…", Theme.info ()
+        | Loading (_, Open_session) -> "Opening " ^ source_name view.source ^ " browser…", Theme.info ()
+        | Loading (_, Close_session) -> "Closing " ^ source_name view.source ^ " browser…", Theme.info ()
+        | Loading (_, Goto _) -> "Navigating " ^ source_name view.source ^ " browser…", Theme.info ()
         | Loading (_, Scene_regions _) -> "Reading page regions…", Theme.info ()
         | Loading (_, Scene_scroll _) -> "Scrolling page and refreshing scene…", Theme.info ()
         | Loading (_, Scene_focus _) -> "Reading selected page region…", Theme.info ()
@@ -12013,7 +12030,10 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
               | Some _ -> " · followed destination pending · r:recheck"
               | None -> "" in
             "Cause: " ^ Terminal_text.single_line detail ^ retry, Theme.bad ()
-        | No_browser -> "Browser bridge not connected", Theme.recede ()
+        | No_browser ->
+            (match view.source with
+             | Live -> "Browser bridge not connected"
+             | Automation | Stagehand -> "Browser session closed • o:open"), Theme.recede ()
         | Idle when Option.is_some view.scene ->
             (match view.scene with
              | Some scene ->
@@ -12678,7 +12698,7 @@ let render_runtime (state : state) =
                     (Printf.sprintf "  %s%s  %s  %s" probe_status probe_read
                        timestamp (connection_badge state)))
              ~press:pressable
-             [ ( tab_entry_label "Lanes"
+             [ ( tab_entry_label "Runtime lanes"
                    (Some
                       (Printf.sprintf "%s, %s"
                          (Masc_tui_message_layout.count_noun lane_count "lane")
@@ -12689,7 +12709,7 @@ let render_runtime (state : state) =
              ; ( tab_entry_label "All runtimes" (Some (string_of_int all_count))
                , not lanes_active
                , Press_runtime_mode Masc_tui_types.Runtime_all )
-             ; ( tab_entry_label "Standalone" standalone_reading
+             ; ( tab_entry_label "Lanes" standalone_reading
                , false
                , Press_standalone_lanes )
              ])
@@ -16383,36 +16403,6 @@ let render_config (state : state) =
             | None -> ()
           done)
 
-(* The startup splash: the Overview's own frame and header -- title,
-   workspace, clock, connection badge -- with the candle where its sections
-   will be once the first overview read answers. Keys are the Overview's; the
-   first one ends the splash and still does its job. *)
-let render_overview_startup (state : state) =
-  let terminal_rows, cols = get_terminal_size () in
-  surface_chrome ~overflow:Fits state ~terminal_rows ~cols ~surface_key:"overview"
-    ~title:(overview_header state)
-    ~hints:(Masc_tui_keys.footer_hints_overview ~task_focus:false)
-    ~body:(fun ~budget c ->
-      Masc_tui_emblem_screen.body ~screen:Masc_tui_emblem_screen.Startup
-        ~cols:(framed_inner_width cols) ~rows:budget
-        ~origin:(c.next_origin ())
-        ~caption:
-          ([ Masc_tui_theme.tone Masc_tui_theme.Accent
-             ^ "MASC \xc2\xb7 keepers on watch" ^ Ansi.reset
-           ]
-           (* The Overview's own word for this state -- the briefing is not
-              read yet -- stays on screen under the candle. *)
-           @ List.filter_map
-               (fun line ->
-                 match String.trim line with "" -> None | text -> Some text)
-               (overview_intro_lines state)
-           @ [ Ansi.dim
-               ^ Masc_tui_types.connection_status_label state.connection_status
-               ^ Ansi.reset
-             ])
-        ~elapsed:(Masc_tui_types.motion_elapsed_seconds state.emblem_frame)
-      |> List.iter c.push)
-
 (* /about: the candle over the surface, with what the TUI is running under
    -- its colour scheme and how many Keepers the workspace holds. *)
 let render_about (state : state) =
@@ -16428,9 +16418,9 @@ let render_about (state : state) =
         Masc_tui_emblem_screen.Keepers_read (List.length state.keepers)
   in
   surface_chrome ~overflow:Fits ~frame:Chrome_overlay state ~terminal_rows ~cols
-    ~surface_key:"about" ~title:(screen_title " MASC") ~hints:"Esc:close"
+    ~surface_key:"about" ~title:(screen_title " MASC") ~hints:"c:candle  Esc:close"
     ~body:(fun ~budget c ->
-      Masc_tui_emblem_screen.body ~screen:Masc_tui_emblem_screen.About
+      Masc_tui_emblem_screen.body
         ~cols:(framed_inner_width cols) ~rows:budget
         ~origin:(c.next_origin ())
         ~caption:
@@ -16457,10 +16447,7 @@ let render_surface (state : state) =
            with
            | Some task -> render_task_detail state task
            | None -> render_overview state )
-       | None ->
-           if Masc_tui_types.startup_emblem_visible state then
-             render_overview_startup state
-           else render_overview state)
+       | None -> render_overview state)
   | Keepers Keeper_list ->
       if state.repository_changes_open then render_repository_changes state
       else render_keeper_list state
@@ -16489,7 +16476,7 @@ let render_surface (state : state) =
                     let terminal_rows, cols = get_terminal_size () in
                     surface_chrome ~overflow:Fits state ~terminal_rows ~cols ~surface_key:"board-read"
                       ~title:(screen_title (" MASC Board / " ^ Terminal_text.single_line post_id))
-                      ~hints:"r:retry  Esc:back  Tab:next"
+                      ~hints:Masc_tui_keys.footer_hints_board_pending
                       ~body:(fun ~budget:_ c ->
                         match Board_detail.view_for state.board_detail ~post_id with
                         | Board_detail.Failed detail ->

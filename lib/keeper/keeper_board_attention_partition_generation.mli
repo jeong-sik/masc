@@ -9,5 +9,8 @@ val initial : t
 val next : t -> (t, string) result
 val equal : t -> t -> bool
 val is_direct_successor : previous:t -> t -> bool
+val is_later : previous:t -> t -> bool
+(** Has the partition advanced beyond this generation, possibly through
+    several execution and deferral transitions? *)
 val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result

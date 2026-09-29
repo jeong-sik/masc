@@ -46,6 +46,7 @@ let claude_error_is_binding_rest : Runtime_claude_code.error -> bool = function
   | Runtime_claude_code.Turn_failed_with_observation _
   | Runtime_claude_code.Stopped_by_host _
   | Runtime_claude_code.Process_exited _
+  | Runtime_claude_code.Unhandled_exception _
   | Runtime_claude_code.Timeout _ -> false
 ;;
 
@@ -98,6 +99,7 @@ let antigravity_error_is_binding_rest : Runtime_antigravity.error -> bool = func
   | Runtime_antigravity.State_callback_failed _
   | Runtime_antigravity.Turn_failed _
   | Runtime_antigravity.Process_exited _
+  | Runtime_antigravity.Unhandled_exception _
   | Runtime_antigravity.Timeout _ -> false
 ;;
 

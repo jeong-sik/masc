@@ -19,7 +19,7 @@ def run(executable: str) -> None:
             h.open_atomic_chat(process, master_fd, output)
             h.send_and_wait(process, master_fd, output, b"first", h.composer_showing(b"first"))
             os.write(master_fd, b"\r")
-            if not fixture.first_post_received.wait(timeout=5):
+            if not h.wait_for_fixture_event(process, master_fd, output, fixture.first_post_received, timeout=5):
                 raise AssertionError("first POST never reached the HTTP fixture")
             h.send_and_wait(process, master_fd, output, b"second", h.composer_showing(b"second"))
             h.send_and_wait(process, master_fd, output, b"\r", b"Queue (1 waiting")

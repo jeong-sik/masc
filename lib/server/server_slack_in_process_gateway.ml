@@ -46,7 +46,7 @@ let default_trigger_policy : Gw.trigger_policy = Gw.Mention_or_thread
 module Policy_load = Connector_trigger_policy.Make (struct
   type policy = Gw.trigger_policy
 
-  let table = "slack"
+  let table = Runtime_toml_namespace.(key Slack)
   let parse = Gw.parse_trigger_policy
   let default = default_trigger_policy
 end)

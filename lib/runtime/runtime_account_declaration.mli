@@ -43,7 +43,9 @@ type error =
   | Nothing_to_bind of string
       (** The base binds no model, so the copy could not run a turn. *)
   | Id_taken of string
-      (** A provider or a top-level table already uses this name. *)
+      (** A provider or a top-level table already uses this name, or the
+          name is one {!Runtime_toml.reserved_provider_ids} keeps for
+          another reader. *)
   | Invalid_location of string
   | Location_taken of
       { location : string

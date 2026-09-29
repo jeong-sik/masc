@@ -2669,7 +2669,10 @@
 (include stanzas/test_dated_jsonl_count_cache.inc)
 (include stanzas/test_dated_jsonl_off_fiber.inc)
 (include stanzas/test_play_role_permissions.inc)
+(include stanzas/test_play_screen.inc)
 (include stanzas/test_play_page.inc)
+(include stanzas/test_play_pad.inc)
+(include stanzas/test_play_pad_routes.inc)
 (include stanzas/test_play_invite.inc)
 (include stanzas/test_play_invite_routes.inc)
 (include stanzas/test_pool_body_limit.inc)
@@ -6225,6 +6228,7 @@
 
 (include stanzas/test_tui_keeper_runs_view.inc)
 
+(include stanzas/test_runtime_toml_namespace.inc)
 (include stanzas/test_runtime_toml_wrong_typed_keys.inc)
 
 (test
@@ -7042,6 +7046,11 @@
  (modules test_workspace_memory_proposals)
  (libraries alcotest yojson unix masc masc.server masc.masc_core masc.prompt_registry)
  (deps ../config/prompts/keeper.md ../docs/evidence/2026-09-10-workspace-memory-curator/qwen38-27b/proposal.json))
+
+(test
+ (name test_workspace_memory_ledger)
+ (modules test_workspace_memory_ledger)
+ (libraries alcotest digestif yojson masc))
 
 (test
  (name test_keeper_direct_runtime_resume)

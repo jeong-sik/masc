@@ -1,9 +1,10 @@
 type store = Ordinary | Source_bound
-type snapshot =
-  | Ordinary_snapshot of Keeper_memory_os_current.t
-  | Source_snapshot of Keeper_memory_source_current.t
-type observation = Missing | Unavailable of string | Available of snapshot
-type keeper = { keeper_id : string; ordinary : observation; source_bound : observation }
+type 'snapshot observation = Missing | Unavailable of string | Available of 'snapshot
+type keeper =
+  { keeper_id : string
+  ; ordinary : Keeper_memory_os_current.t observation
+  ; source_bound : Keeper_memory_source_current.t observation
+  }
 type t =
   { observed_at : float
   ; keepers : keeper list
@@ -16,9 +17,6 @@ type t =
 
 let ( let* ) = Result.bind
 let store_name = function Ordinary -> "ordinary" | Source_bound -> "source_bound"
-let snapshot_json = function
-  | Ordinary_snapshot value -> Keeper_memory_os_current.to_json value
-  | Source_snapshot value -> Keeper_memory_source_current.to_json value
 
 let rec canonical = function
   | `Assoc fields -> `Assoc (List.map (fun (key, value) -> key, canonical value) fields
@@ -27,22 +25,22 @@ let rec canonical = function
   | value -> value
 
 let hash value = Digestif.SHA256.(digest_string (Yojson.Safe.to_string (canonical value)) |> to_hex)
-let observation_json = function
+let observation_json snapshot_json = function
   | Missing -> `Assoc ["status", `String "missing"]
   | Unavailable detail -> `Assoc ["status", `String "unavailable"; "detail", `String detail]
   | Available snapshot -> `Assoc ["status", `String "available"; "snapshot", snapshot_json snapshot]
 
 let keeper_json keeper = `Assoc
   [ "keeper_id", `String keeper.keeper_id
-  ; "ordinary", observation_json keeper.ordinary
-  ; "source_bound", observation_json keeper.source_bound ]
+  ; "ordinary", observation_json Keeper_memory_os_current.to_json keeper.ordinary
+  ; "source_bound", observation_json Keeper_memory_source_current.to_json keeper.source_bound ]
 
-let read_snapshot path read wrap =
+let read_snapshot path read =
   try
     match Unix.stat path with
     | { Unix.st_kind = Unix.S_REG; _ } ->
       (try match read () with
-       | Ok (Some snapshot) -> Available (wrap snapshot)
+       | Ok (Some snapshot) -> Available snapshot
        | Ok None -> Unavailable (path ^ ": snapshot became unavailable during read")
        | Error detail -> Unavailable detail
        with
@@ -95,11 +93,9 @@ let read_keeper ~keepers_dir keeper_id =
   ; ordinary = read_snapshot
       (Keeper_memory_os_current.path_for_keepers_dir ~keepers_dir ~keeper_id)
       (fun () -> Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id)
-      (fun snapshot -> Ordinary_snapshot snapshot)
   ; source_bound = read_snapshot
       (Keeper_memory_source_current.path_for_keepers_dir ~keepers_dir ~keeper_id)
       (fun () -> Keeper_memory_source_current.read_for_keepers_dir ~keepers_dir ~keeper_id)
-      (fun snapshot -> Source_snapshot snapshot)
   }
 
 (* Preserve original fact positions and metadata evidence, using the same
@@ -111,12 +107,12 @@ let project keepers =
     incr source_count;
     sources := `Assoc (("source_id", `String ("s" ^ string_of_int !source_count)) :: fields) :: !sources
   in
-  let add_store keeper_id store observation =
+  let add_store keeper_id store snapshot_json observation =
     let store = store_name store in
     match observation with
     | Missing | Unavailable _ ->
       gaps := `Assoc ["keeper_id", `String keeper_id; "store", `String store;
-        "observation", observation_json observation] :: !gaps;
+        "observation", observation_json snapshot_json observation] :: !gaps;
       Ok ()
     | Available snapshot ->
       let raw = snapshot_json snapshot in
@@ -151,8 +147,9 @@ let project keepers =
   let rec loop = function
     | [] -> Ok (List.rev !sources, List.rev !gaps, List.rev !snapshots)
     | keeper :: rest ->
-      let* () = add_store keeper.keeper_id Ordinary keeper.ordinary in
-      let* () = add_store keeper.keeper_id Source_bound keeper.source_bound in
+      let* () = add_store keeper.keeper_id Ordinary Keeper_memory_os_current.to_json keeper.ordinary in
+      let* () = add_store keeper.keeper_id Source_bound Keeper_memory_source_current.to_json
+          keeper.source_bound in
       loop rest
   in
   loop keepers
@@ -166,6 +163,7 @@ let collect ~base_path =
   Ok { observed_at = Time_compat.now (); keepers; input; sources; gaps; snapshots;
        identity = hash (`List (List.map keeper_json keepers)) }
 
+let keepers t = t.keepers
 let fingerprint t = t.identity
 let source_count t = List.length t.sources
 let to_json t = t.input

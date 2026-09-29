@@ -174,6 +174,9 @@ type turn_result =
         model [session/setModel] selected on a resumed session. *)
   ; text : string  (** The last completed agent message of the turn. *)
   ; usage : Runtime_muse_msp.token_usage option
+    (** Terminal aggregate, enriched with counted-once counts when the
+        observed completions agree; otherwise the sum of this turn's unique
+        completion events when the terminal omits usage. Never session totals. *)
   ; tool_calls : int
   ; approvals_decided : int
   ; call_models : call_model list

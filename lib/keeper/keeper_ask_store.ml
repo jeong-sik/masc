@@ -44,29 +44,42 @@ let withdraw_failure_to_string = function
       Printf.sprintf "already withdrawn at %.0f" withdrawn_at
   | Withdraw_store_failed detail -> "store failed: " ^ detail
 
+(* Each keeper's decoded log, kept with the file version it was read from.
+   The fleet question list is read on every TUI refresh and a keeper's
+   heartbeat reads its own log, while an ask, an answer or a withdrawal
+   appends a row now and then, so a reader of an unchanged log takes the
+   events the last miss decoded. [append_event] forgets the log it appends
+   to. *)
+let decoded_logs : Keeper_ask.event list File_version_cache.t =
+  File_version_cache.create ()
+
 let append_event ~base_path ~keeper_name event =
-  try
-    ensure_ask_dir ~base_path;
-    let path = log_path ~base_path ~keeper_name in
-    Fs_compat.append_file path (Yojson.Safe.to_string (Keeper_ask.event_to_json event) ^ "\n");
-    Ok ()
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-      let detail = Printexc.to_string exn in
-      Log.Keeper.warn "keeper_ask_store: append failed for %s: %s" (sanitize_name keeper_name)
-        detail;
-      Error detail
+  let path = log_path ~base_path ~keeper_name in
+  let appended =
+    try
+      ensure_ask_dir ~base_path;
+      Fs_compat.append_file path (Yojson.Safe.to_string (Keeper_ask.event_to_json event) ^ "\n");
+      Ok ()
+    with
+    | Eio.Cancel.Cancelled _ as e ->
+        File_version_cache.forget decoded_logs path;
+        raise e
+    | exn ->
+        let detail = Printexc.to_string exn in
+        Log.Keeper.warn "keeper_ask_store: append failed for %s: %s" (sanitize_name keeper_name)
+          detail;
+        Error detail
+  in
+  (* Landed or not, the log may no longer be the version that was decoded. *)
+  File_version_cache.forget decoded_logs path;
+  appended
 
 let decode_line line =
   match Yojson.Safe.from_string line with
   | exception Yojson.Json_error detail -> Error detail
   | json -> Keeper_ask.event_of_json json
 
-let load_events_result ~base_path ~keeper_name =
-  let path = log_path ~base_path ~keeper_name in
-  if not (Sys.file_exists path) then Ok []
-  else
+let decode_log ~path ~keeper_name =
     try
       let (parsed_rev, line_count), _boundary =
         Fs_compat.fold_appended_lines ~path ~from:0 ~init:([], 0)
@@ -104,6 +117,11 @@ let load_events_result ~base_path ~keeper_name =
         Error
           (Printf.sprintf "%s ask log load failed for %s: %s" path (sanitize_name keeper_name)
              (Printexc.to_string exn))
+
+let load_events_result ~base_path ~keeper_name =
+  let path = log_path ~base_path ~keeper_name in
+  if not (Sys.file_exists path) then Ok []
+  else File_version_cache.load decoded_logs path ~decode:(fun () -> decode_log ~path ~keeper_name)
 
 let load_events ~base_path ~keeper_name =
   match load_events_result ~base_path ~keeper_name with

@@ -11,8 +11,9 @@
     (another player holds the controller, no machine is loaded, an unknown
     key), as [POST /api/v1/msx/load] answers.
 
-    Before a move, a controller whose Keeper stopped is let go, as it is
-    before a Keeper's own move ([Keeper_dos_controller.before_move]). *)
+    Before a move, a controller whose Keeper stopped or whose Player invite
+    expired is let go, as it is before a Keeper's own move
+    ([Keeper_dos_controller.before_move]). *)
 
 open Server_auth
 module Http = Http_server_eio

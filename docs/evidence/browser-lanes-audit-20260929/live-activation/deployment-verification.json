@@ -1,0 +1,17 @@
+{
+  "verified_at_utc": "2026-09-29T02:35:23.503042+00:00",
+  "url": "http://127.0.0.1:8935/dashboard/",
+  "source_commit": "2f1ddd7733dc5c23a80f227554779efd95485d44",
+  "served_index_sha256": "47715f46676a4d8f930f793d04ce092fef8b11e554269d067200ad167f280163",
+  "served_index_matches_ci_receipt": true,
+  "browser_matrix": "deployed-lanes.png",
+  "live_browser_reading": {
+    "Stagehand_configuration": "ready",
+    "verification_retained_count": 66,
+    "exact_retained_count": 50,
+    "fusion_retained_count": 19,
+    "schema_errors_visible": false
+  },
+  "backup_preserved": true,
+  "coherent_release_manifest": false
+}

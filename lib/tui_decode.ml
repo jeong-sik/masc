@@ -506,6 +506,7 @@ type verifier_unreconciled = {
 type planning_goal = {
   pg_id : string;
   pg_title : string;
+  pg_owner : Goal_store.owner;
   pg_phase : Goal_phase.t;
   pg_priority : int;
   pg_due_date : string option;
@@ -2206,6 +2207,11 @@ let decode_verifier_unreconciled json =
 let decode_planning_goal json =
   let* pg_id = required_string_field json "id" in
   let* pg_title = required_string_field json "title" in
+  let* pg_owner =
+    match Json_util.assoc_member_opt "owner" json with
+    | None | Some `Null -> Ok Goal_store.Unknown_owner
+    | Some owner_json -> Goal_store.owner_of_yojson owner_json
+  in
   let* raw_phase = required_string_field json "phase" in
   let* pg_phase =
     match Goal_phase.parse raw_phase with
@@ -2226,6 +2232,7 @@ let decode_planning_goal json =
     {
       pg_id;
       pg_title;
+      pg_owner;
       pg_phase;
       pg_priority;
       pg_due_date;
@@ -2858,6 +2865,8 @@ type runtime_option = {
   ro_quota_exhausted : bool;
   ro_quota_resets_at : float option;
   ro_quota_scope : string option;
+  ro_rate_limited : bool;
+  ro_rate_limit_resets_at : float option;
 }
 
 type runtime_resolved_lane = {
@@ -5020,6 +5029,8 @@ let decode_runtime_option ~default_id json =
   in
   let* ro_quota_resets_at = optional_float_field json "quota_resets_at" in
   let* ro_quota_scope = optional_string_field json "quota_scope" in
+  let* ro_rate_limited = required_bool_field json "rate_limited" in
+  let* ro_rate_limit_resets_at = optional_float_field json "rate_limit_resets_at" in
   let ro_is_default = Option.equal String.equal default_id (Some ro_id) in
   Ok
     { ro_id
@@ -5036,6 +5047,8 @@ let decode_runtime_option ~default_id json =
     ; ro_quota_exhausted
     ; ro_quota_resets_at
     ; ro_quota_scope
+    ; ro_rate_limited
+    ; ro_rate_limit_resets_at
     }
 
 let decode_runtime_default_member json =
@@ -12401,3 +12414,92 @@ let decode_oauth_client_saved json =
       Error
         (Printf.sprintf "the reply must be an object (received %s)"
            (Json_util.kind_name other))
+
+type play_invite_row = {
+  pi_name : string;
+  pi_expires_at : string option;
+  pi_expired : bool;
+  pi_holds_controller : bool;
+}
+
+type play_invite_issued = {
+  pii_name : string;
+  pii_expires_at : string;
+  pii_link : string;
+}
+
+type play_invite_revoked = {
+  pir_name : string;
+  pir_revoked : bool;
+  pir_released_controller : bool;
+  pir_release_error : string option;
+}
+
+let play_object = function
+  | `Assoc _ as json -> Ok json
+  | _ -> Error "play invite response must be an object"
+
+let decode_play_invite_row json =
+  let* json = play_object json in
+  let* pi_name = require_string_field json "name" in
+  let* pi_expires_at = required_nullable_string_field json "expires_at" in
+  let* pi_expired = required_bool_field json "expired" in
+  let* pi_holds_controller = required_bool_field json "holds_controller" in
+  Ok { pi_name; pi_expires_at; pi_expired; pi_holds_controller }
+
+let decode_play_invites json =
+  let* json = play_object json in
+  match Json_util.assoc_member_opt "invites" json with
+  | Some (`List rows) ->
+      List.fold_left
+        (fun result row ->
+          let* decoded = result in
+          let* invite = decode_play_invite_row row in
+          Ok (invite :: decoded))
+        (Ok []) rows
+      |> Result.map List.rev
+  | _ -> Error "play invites response has no invites list"
+
+let decode_play_invite_issued json =
+  let* json = play_object json in
+  let* pii_name = require_string_field json "name" in
+  let* pii_expires_at = require_string_field json "expires_at" in
+  let* pii_link = require_string_field json "link" in
+  Ok { pii_name; pii_expires_at; pii_link }
+
+let decode_play_invite_revoked json =
+  let* json = play_object json in
+  let* pir_name = require_string_field json "name" in
+  let* pir_revoked = required_bool_field json "revoked" in
+  let* pir_released_controller = required_bool_field json "released_controller" in
+  let* pir_release_error =
+    match Json_util.assoc_member_opt "release_error" json with
+    | None -> Ok None
+    | Some (`String detail) -> Ok (Some detail)
+    | Some _ -> Error "release_error must be a string"
+  in
+  Ok { pir_name; pir_revoked; pir_released_controller; pir_release_error }
+
+let play_invite_absent_body body =
+  match Yojson.Safe.from_string body with
+  | `Assoc fields ->
+      (match List.assoc_opt "error" fields with
+       | Some (`String "no_such_invite") -> true
+       | _ -> false)
+  | _ -> false
+  | exception Yojson.Json_error _ -> false
+
+let play_revoke_http_error ~status_code ~body =
+  let failure =
+    match Yojson.Safe.from_string body with
+    | json ->
+        let* error = required_string_field json "error" in
+        let* detail = required_nonempty_string_field json "release_error" in
+        let* released = required_bool_field json "released_controller" in
+        if status_code = 500 && error = "release_failed" && not released
+        then Ok detail else Error "not a controller release failure"
+    | exception Yojson.Json_error detail -> Error detail in
+  match failure with
+  | Ok detail -> Printf.sprintf "%s (HTTP %d: controller release failed)"
+      (sanitize_terminal_text detail) status_code
+  | Error _ -> http_status_error ~status_code ~body

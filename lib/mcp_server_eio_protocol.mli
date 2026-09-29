@@ -63,6 +63,7 @@ type tool_profile = Mcp_server_eio_types.tool_profile =
   | Full
   | Managed_agent
   | Operator_remote
+  | Seat
 (** Capability profile selected per request.  Pinned at
     this boundary because {!handle_request} accepts
     [?profile] and downstream callers

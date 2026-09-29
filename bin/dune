@@ -510,7 +510,7 @@
  (name masc_tui_preset_text)
  (wrapped false)
  (modules masc_tui_preset_text)
- (libraries masc masc_tui_fetched))
+ (libraries masc masc_tui_fetched masc_tui_message_layout))
 
 (library
  (name masc_tui_mcp)

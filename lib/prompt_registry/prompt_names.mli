@@ -102,6 +102,7 @@ val fusion_judge_output : string
 val mcp_full : string
 val mcp_managed_agent : string
 val mcp_operator_remote : string
+val mcp_seat : string
 
 (** MCP [tool_help] prompt body pieces, rendered at [prompts/get] time.
     One slot per assembly piece in [config/prompts/mcp.tool_help.md];
@@ -152,6 +153,7 @@ val eval_calibration_few_shot_rejected_label : string
 val keeper_context_checkouts_section : string
 val keeper_context_checkouts_row : string
 val keeper_context_checkouts_standing_current : string
+val keeper_context_checkouts_standing_stale_ref : string
 val keeper_context_checkouts_standing_ahead : string
 val keeper_context_checkouts_standing_behind : string
 val keeper_context_checkouts_standing_diverged : string

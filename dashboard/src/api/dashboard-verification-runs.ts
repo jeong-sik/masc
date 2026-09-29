@@ -21,6 +21,7 @@ export type VerificationRunStatusLabel =
   | 'not_reviewed'
   | 'commit_failed'
   | 'raised'
+  | 'review_cancelled'
 
 export type VerificationToolDisposition = 'completed' | 'deferred' | 'failed'
 
@@ -42,15 +43,15 @@ const BACKEND_STATUSES: readonly string[] = [
   'not_reviewed',
   'commit_failed',
   'raised',
+  'review_cancelled',
 ]
 
 /** One tracked review from the registry.
 
     `cause` is the operator-readable reason the outcome happened, flattened from
     the backend's per-outcome field (`reason` on an approval or a rejection,
-    `detail` on the failure shapes). Absent on `running`, and on an approval
-    whose reviewer stated nothing — rows written before approvals carried a
-    reason have no such field at all. */
+    `detail` on the failure or cancellation shapes). Absent on `running`.
+    An approval whose reviewer stated nothing carries an empty string. */
 export interface VerificationRunRecord {
   verificationId: string
   taskId: string
@@ -64,12 +65,6 @@ export interface VerificationRunRecord {
   cause?: string
   /** Which gate declined to produce a verdict; `not_reviewed` rows only. */
   gate?: string
-  /** Whether the completion authority will schedule another automatic
-      attempt for this outcome; `not_reviewed` rows only. `false` means the
-      same review is expected to fail the same way — the task stays parked
-      until an operator acts (resubmission, evidence trim, config change),
-      not until the retry timer fires again. */
-  retryable?: boolean
   /** Which pre-review boundary was unavailable. */
   infrastructureStage?: 'review_preparation' | 'lookup_surface'
   tools?: VerificationToolObservation[]
@@ -117,9 +112,9 @@ function optionalNonEmptyString(value: unknown, context: string): string | undef
   return value === undefined ? undefined : nonEmptyString(value, context)
 }
 
-function strictBoolean(value: unknown, context: string): boolean {
-  if (typeof value !== 'boolean') {
-    protocolError(`${context} must be a boolean`)
+function stringValue(value: unknown, context: string): string {
+  if (typeof value !== 'string') {
+    protocolError(`${context} must be a string`)
   }
   return value
 }
@@ -188,17 +183,12 @@ function parseRun(raw: unknown, index: number): VerificationRunRecord {
     case 'running':
       break
     case 'approved':
-      requiredOutcomeFields = ['elapsed_s', 'tools']
-      // Optional, not required: rows written before an approval carried its
-      // reviewer's stated reason have no `reason` field and must still decode.
-      optionalFields = ['evaluator_runtime', 'reason']
-      break
     case 'rejected':
       requiredOutcomeFields = ['elapsed_s', 'reason', 'tools']
       optionalFields = ['evaluator_runtime']
       break
     case 'not_reviewed':
-      requiredOutcomeFields = ['elapsed_s', 'gate', 'detail', 'retryable', 'tools']
+      requiredOutcomeFields = ['elapsed_s', 'gate', 'detail', 'tools']
       optionalFields = ['evaluator_runtime']
       break
     case 'infrastructure_unavailable':
@@ -207,6 +197,7 @@ function parseRun(raw: unknown, index: number): VerificationRunRecord {
       break
     case 'commit_failed':
     case 'raised':
+    case 'review_cancelled':
       requiredOutcomeFields = ['elapsed_s', 'detail', 'tools']
       optionalFields = ['evaluator_runtime']
       break
@@ -238,16 +229,13 @@ function parseRun(raw: unknown, index: number): VerificationRunRecord {
     cause: status === 'rejected'
       ? nonEmptyString(raw.reason, `${context}.reason`)
       : status === 'approved'
-      ? optionalNonEmptyString(raw.reason, `${context}.reason`)
+      ? stringValue(raw.reason, `${context}.reason`)
       : status === 'infrastructure_unavailable' || status === 'not_reviewed'
-        || status === 'commit_failed' || status === 'raised'
+        || status === 'commit_failed' || status === 'raised' || status === 'review_cancelled'
         ? nonEmptyString(raw.detail, `${context}.detail`)
         : undefined,
     gate: status === 'not_reviewed'
       ? nonEmptyString(raw.gate, `${context}.gate`)
-      : undefined,
-    retryable: status === 'not_reviewed'
-      ? strictBoolean(raw.retryable, `${context}.retryable`)
       : undefined,
     infrastructureStage: status === 'infrastructure_unavailable'
       ? raw.stage === 'review_preparation' || raw.stage === 'lookup_surface'

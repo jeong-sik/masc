@@ -70,21 +70,23 @@ let readable_scopes () =
   |> List.rev
 ;;
 
-(* The windows reach the operator projection on every read; whether the same
-   answer also rests the scope is the caller's ([read_codex_after_spent_usage]). *)
+(* The windows reach the operator projection on every read, stamped with the
+   time the answer arrived; whether the same answer also rests the scope is
+   the caller's ([read_codex_after_spent_usage_refusal]). *)
 let read_codex_report ~mgr ~clock ~cwd ~scope codex =
   match
     Runtime_codex_app_server.read_rate_limits ~mgr ~clock ~cwd (codex_config codex)
   with
   | Ok report ->
-    Runtime_provider_usage_window.record ~scope ~observed_at:(Time_compat.now ()) report;
-    Ok report
+    let observed_at = Time_compat.now () in
+    Runtime_provider_usage_window.record ~scope ~observed_at report;
+    Ok (observed_at, report)
   | Error error -> Error (Runtime_codex_app_server.error_to_string error)
 ;;
 
 let read_codex ~mgr ~clock ~cwd ~scope codex =
   Result.map
-    (fun (_ : Runtime_provider_usage_window.report) -> ())
+    (fun ((_ : float), (_ : Runtime_provider_usage_window.report)) -> ())
     (read_codex_report ~mgr ~clock ~cwd ~scope codex)
 ;;
 
@@ -512,10 +514,31 @@ let materialized_api_key : Llm_provider.Provider_config.credential_source * _ ->
   | Refreshable_credential _, _ -> Error Credential_not_refreshed
 ;;
 
-let rest_on_account_refusal_read ~scope = function
-  | Spent_until resets_at -> Runtime_quota_window.note_exhausted ~scope ~resets_at
-  | Spent_without_reset -> Runtime_quota_window.note_observed_exhausted ~scope
-  | No_window_spent -> ()
+(* A spent window whose stated reset is not after the moment the answer
+   arrived (a zero, a stale backend, a skewed clock) names no rest. Planted
+   as a window it would replace the refusal's observation with one already
+   over, and the scope would look available on the next cycle; the turn
+   driver drops a hint that is not ahead for the same reason
+   ([Keeper_runtime_failure_route.usable_retry_after]). It stays a spent
+   window without a reset. Returns the read as rested. *)
+let rest_on_account_refusal_read ~scope ~observed_at read =
+  let read =
+    match read with
+    | Spent_until resets_at when Float.compare resets_at observed_at <= 0 ->
+      Log.Runtime_agent.info
+        "provider usage read for %s states a spent window that reset at %.0f, not \
+         after the answer at %.0f: the scope rests until its next success"
+        (Runtime_quota_window.scope_to_string scope)
+        resets_at
+        observed_at;
+      Spent_without_reset
+    | Spent_until _ | Spent_without_reset | No_window_spent -> read
+  in
+  (match read with
+   | Spent_until resets_at -> Runtime_quota_window.note_exhausted ~scope ~resets_at
+   | Spent_without_reset -> Runtime_quota_window.note_observed_exhausted ~scope
+   | No_window_spent -> ());
+  read
 ;;
 
 let read_after_account_refusal ~fetch ~scope http =
@@ -523,10 +546,9 @@ let read_after_account_refusal ~fetch ~scope http =
   let* (report : Runtime_provider_usage_window.report) =
     usage_report ~api_key_of:materialized_api_key ~fetch http
   in
-  Runtime_provider_usage_window.record ~scope ~observed_at:(Time_compat.now ()) report;
-  let read = account_refusal_read_of_report report in
-  rest_on_account_refusal_read ~scope read;
-  Ok read
+  let observed_at = Time_compat.now () in
+  Runtime_provider_usage_window.record ~scope ~observed_at report;
+  Ok (rest_on_account_refusal_read ~scope ~observed_at (account_refusal_read_of_report report))
 ;;
 
 (* The turn error of a spent-usage refusal names no reset, so the turn left
@@ -534,22 +556,20 @@ let read_after_account_refusal ~fetch ~scope http =
    spent account again every [path_rest] cap (2026-09-29: three Keepers on
    one Codex account, refused about every 15 minutes with "try again at Oct
    4th"). The account's own read states the spent window's reset, the same
-   minute the refusal text named, and rests the scope as a 403 read does. *)
-let read_codex_after_spent_usage ~mgr ~clock ~cwd ~scope codex =
-  Result.map
-    (fun report ->
-      let read = account_refusal_read_of_report report in
-      rest_on_account_refusal_read ~scope read;
-      Log.Runtime_agent.info
-        "provider usage read after a Codex spent-usage refusal for %s: %s"
-        (Runtime_quota_window.scope_to_string scope)
-        (account_refusal_read_to_string read))
-    (read_codex_report ~mgr ~clock ~cwd ~scope codex)
-;;
-
-let read_codex_in_background ~clock ~cwd ~scope codex =
-  read_client_in_background ~clock ~cwd ~scope
-    (fun ~mgr ~clock ~cwd ~scope -> read_codex_after_spent_usage ~mgr ~clock ~cwd ~scope codex)
+   minute the refusal text named, and rests the scope as a 403 read does.
+   Only this entry point rests; [read_codex] is the start read's projection. *)
+let read_codex_after_spent_usage_refusal ~clock ~cwd ~scope codex =
+  read_client_in_background ~clock ~cwd ~scope (fun ~mgr ~clock ~cwd ~scope ->
+    Result.map
+      (fun (observed_at, report) ->
+        let read =
+          rest_on_account_refusal_read ~scope ~observed_at (account_refusal_read_of_report report)
+        in
+        Log.Runtime_agent.info
+          "provider usage read after a Codex spent-usage refusal for %s: %s"
+          (Runtime_quota_window.scope_to_string scope)
+          (account_refusal_read_to_string read))
+      (read_codex_report ~mgr ~clock ~cwd ~scope codex))
 ;;
 
 let http_read_of_runtime (rt : Runtime.t) =

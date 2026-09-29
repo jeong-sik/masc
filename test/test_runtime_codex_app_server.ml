@@ -1345,10 +1345,10 @@ let test_background_read_outlives_the_turn () =
                 Eio.Switch.run (fun turn_sw ->
                   Eio_context.with_turn_switch turn_sw (fun () ->
                     let first =
-                      Runtime_provider_usage_read.read_codex_in_background ~clock ~cwd ~scope codex
+                      Runtime_provider_usage_read.read_codex_after_spent_usage_refusal ~clock ~cwd ~scope codex
                     in
                     let second =
-                      Runtime_provider_usage_read.read_codex_in_background ~clock ~cwd ~scope codex
+                      Runtime_provider_usage_read.read_codex_after_spent_usage_refusal ~clock ~cwd ~scope codex
                     in
                     first, second))
               in
@@ -1373,18 +1373,26 @@ let test_background_read_outlives_the_turn () =
    records an observation with no end, and a lane with no other candidate
    asked the spent account again at every rest cap: on 2026-09-29 three
    Keepers on one Codex account were refused about every 15 minutes with
-   "try again at Oct 4th". The read that refusal starts had the reset
-   (1791068942 is 2026-10-04 08:09 KST, the minute the text named) and wrote
-   it only to the operator table. *)
-let codex_spent_reset = 1791068942.
-
-let codex_spent_with_reset =
-  {|{"id":3,"result":{"rateLimits":{"limitId":"codex","primary":{"usedPercent":100,"windowDurationMins":10080,"resetsAt":1791068942},"secondary":null},"rateLimitsByLimitId":null}}|}
+   "try again at Oct 4th". The read that refusal starts had the reset and
+   wrote it only to the operator table. *)
+let codex_spent_window ?resets_at () =
+  let reset =
+    match resets_at with
+    | Some resets_at -> Printf.sprintf {|,"resetsAt":%d|} resets_at
+    | None -> ""
+  in
+  Printf.sprintf
+    {|{"id":3,"result":{"rateLimits":{"limitId":"codex","primary":{"usedPercent":100,"windowDurationMins":10080%s},"secondary":null},"rateLimitsByLimitId":null}}|}
+    reset
 ;;
 
-let codex_spent_without_reset =
-  {|{"id":3,"result":{"rateLimits":{"limitId":"codex","primary":{"usedPercent":100,"windowDurationMins":10080},"secondary":null},"rateLimitsByLimitId":null}}|}
-;;
+(* The reset a read states is ahead of the moment it arrives, so the
+   fixture's reset is taken from the wall clock when the fixture is built. *)
+let seconds_per_week = 7 * 24 * 60 * 60
+let reset_a_week_ahead () = int_of_float (Unix.gettimeofday ()) + seconds_per_week
+
+(* 2026-09-25, before any run of this suite: a stale backend's answer. *)
+let reset_already_past = 1790300000
 
 (* The refused turn's record, then the read it starts, to its end: the root
    switch returns only after the forked read has finished. *)
@@ -1403,7 +1411,7 @@ let read_after_spent_usage_refusal ~provider_id read_result =
         Eio.Switch.run (fun root_sw ->
           Eio_context.set_switch root_sw;
           check bool "the refusal starts a read" true
-            (Runtime_provider_usage_read.read_codex_in_background ~clock ~cwd ~scope codex
+            (Runtime_provider_usage_read.read_codex_after_spent_usage_refusal ~clock ~cwd ~scope codex
              = Runtime_provider_usage_read.Started)))));
   (match Runtime_provider_usage_window.state ~scope with
    | Runtime_provider_usage_window.Reported _ -> ()
@@ -1413,25 +1421,42 @@ let read_after_spent_usage_refusal ~provider_id read_result =
 ;;
 
 let test_spent_usage_read_rests_until_the_stated_reset () =
+  let resets_at = reset_a_week_ahead () in
+  let reset = float_of_int resets_at in
   let scope =
-    read_after_spent_usage_refusal ~provider_id:"spent-usage-read-reset" codex_spent_with_reset
+    read_after_spent_usage_refusal ~provider_id:"spent-usage-read-reset"
+      (codex_spent_window ~resets_at ())
   in
-  check (option (float 0.0)) "the account rests until the reset it stated"
-    (Some codex_spent_reset)
-    (Runtime_quota_window.active_until ~scope ~now:(codex_spent_reset -. 1.));
+  check (option (float 0.0)) "the account rests until the reset it stated" (Some reset)
+    (Runtime_quota_window.active_until ~scope ~now:(reset -. 1.));
   check bool "the rest ends at that reset" false
-    (Runtime_quota_window.is_exhausted ~scope ~now:codex_spent_reset)
+    (Runtime_quota_window.is_exhausted ~scope ~now:reset)
+;;
+
+(* The observation the refusal left: no end time, still holding the account
+   back. *)
+let check_refusal_observation_kept ~scope =
+  let now = Unix.gettimeofday () in
+  check (option (float 0.0)) "no reset is planted" None
+    (Runtime_quota_window.active_until ~scope ~now);
+  check bool "the refusal's observation still holds the account back" true
+    (Runtime_quota_window.is_exhausted ~scope ~now)
 ;;
 
 let test_spent_usage_read_without_a_reset_keeps_the_observation () =
-  let scope =
-    read_after_spent_usage_refusal ~provider_id:"spent-usage-read-no-reset"
-      codex_spent_without_reset
-  in
-  check (option (float 0.0)) "no reset is invented" None
-    (Runtime_quota_window.active_until ~scope ~now:codex_spent_reset);
-  check bool "the refusal's observation still holds the account back" true
-    (Runtime_quota_window.is_exhausted ~scope ~now:codex_spent_reset)
+  check_refusal_observation_kept
+    ~scope:
+      (read_after_spent_usage_refusal ~provider_id:"spent-usage-read-no-reset"
+         (codex_spent_window ()))
+;;
+
+(* A reset already past would replace the observation with a window that has
+   ended, and the next cycle would call the spent account with no rest. *)
+let test_spent_usage_read_with_a_past_reset_keeps_the_observation () =
+  check_refusal_observation_kept
+    ~scope:
+      (read_after_spent_usage_refusal ~provider_id:"spent-usage-read-past-reset"
+         (codex_spent_window ~resets_at:reset_already_past ()))
 ;;
 
 (* The start read of the same answer is the operator projection only. *)
@@ -1439,7 +1464,7 @@ let test_start_read_of_a_spent_account_rests_nothing () =
   let scope =
     Runtime_quota_window.scope_of_credential ~provider_id:"spent-usage-start-read" None
   in
-  with_fixture [init_result; account_chatgpt; codex_spent_with_reset] (fun path ->
+  with_fixture [init_result; account_chatgpt; codex_spent_window ~resets_at:(reset_a_week_ahead ()) ()] (fun path ->
     Eio_main.run (fun env ->
       let codex =
         ({ cli_path = path; account_home = None; model = None; timeout_s = 2.0 } : Runtime_execution.codex_app_server)
@@ -1451,7 +1476,7 @@ let test_start_read_of_a_spent_account_rests_nothing () =
       | Ok () -> ()
       | Error detail -> fail detail));
   check bool "the start read rests nothing" false
-    (Runtime_quota_window.is_exhausted ~scope ~now:(codex_spent_reset -. 1.))
+    (Runtime_quota_window.is_exhausted ~scope ~now:(Unix.gettimeofday ()))
 ;;
 
 let test_thread_resume_skips_history_injection () =
@@ -6938,6 +6963,8 @@ let () =
             test_spent_usage_read_rests_until_the_stated_reset
         ; test_case "spent-usage read without a reset keeps the observation" `Quick
             test_spent_usage_read_without_a_reset_keeps_the_observation
+        ; test_case "spent-usage read with a past reset keeps the observation" `Quick
+            test_spent_usage_read_with_a_past_reset_keeps_the_observation
         ; test_case "start read of a spent account rests nothing" `Quick
             test_start_read_of_a_spent_account_rests_nothing
         ; test_case "declared cwd reaches spawn" `Quick test_declared_cwd_reaches_spawn

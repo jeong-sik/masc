@@ -35,7 +35,7 @@ SOURCE_MODULES = (
     "bin/masc_tui_lane_installer.ml",
     "bin/masc_tui_schema_form.ml",
     # Not for a word on screen: the walk types ":go lane add-ons" and the
-    # keys 3 / a / 1 / e, so the palette row and the dispatcher own the path
+    # keys j / Enter / 4 / e, so the palette row and dispatcher own the path
     # it takes even though it waits for nothing they spell.
     "bin/masc_tui_types.ml",
     "bin/masc_tui.ml",
@@ -88,13 +88,11 @@ def main(executable: str, captures: Path | None) -> None:
         def key(value: bytes, needle: bytes) -> bytes:
             return terminal.send_and_wait(process, master, output, value, needle)
 
-        key(b':go lane add-ons\r', b'Selected second producer')
-        key(b'3', b'unapplied-installation')
-        frame = key(b'a', b'no available worker')
-        if b'Run action on' in terminal.CSI_RE.sub(b'', frame):
-            raise AssertionError('Unapplied installation opened unrelated worker actions')
-        key(b'1', b'Selected second producer')
-        key(b' ', b'[x]')
+        key(b':go lane add-ons\r', b'Lane Add-ons \xc2\xb7 2 installed')
+        key(b'j', b'Second producer')
+        key(b'\r', b'Selected second producer')
+        key(b'4', b'Selected second producer')
+        key(b' ', b'[selected]')
         # `e` opens a choice (preserve only, or preserve and send the
         # reference to a named Keeper) rather than submitting; Enter takes the
         # default, which sends no keeper_name and is what `preserve` asserts.
@@ -107,29 +105,32 @@ def main(executable: str, captures: Path | None) -> None:
             raise AssertionError('Successful evidence preservation was reported as a request failure')
         if len(accepted) != 1:
             raise AssertionError('Expected one explicit evidence preservation')
-        # Keeping the first mark then adding another owner must not submit a
-        # mixed batch or silently change the first marked row's identity.
-        key(b'j', b'Other producer event')
-        key(b' ', b'[x]')
-        # Two owners are refused by `open_evidence`, so no prompt opens here.
-        refused = key(b'e', b'Input:')
-        refused_plain = b''.join(terminal.screen_text(refused).split())
-        if b'Loadfailed:' in refused_plain:
-            raise AssertionError('A mixed-owner selection was reported as a failed read')
-        if b'PreviousAdd-onsread:' not in refused_plain:
-            raise AssertionError('Input refusal erased the previous inventory failure')
+        # The detail screen contains only this worker's rows. Opening another
+        # worker clears the mark, so a later export cannot mix owners.
+        key(b'q', b'Lane Add-ons \xc2\xb7 2 installed')
+        key(b'k', first['title'].encode())
+        key(b'\r', b'Other producer event')
+        key(b'4', b'Other producer event')
+        first_frame = key(b' ', b'[selected]')
+        if b'Selected second producer' in terminal.screen_text(first_frame):
+            raise AssertionError('Another producer leaked into the selected detail')
+        choice = key(b'e', b'Preserve 1 marked row from ' + first['title'].encode())
+        if b'Second producer' in terminal.screen_text(choice):
+            raise AssertionError('An old mark crossed the producer boundary')
+        key(b'\x1b', b'Other producer event')
         if len(accepted) != 1:
-            raise AssertionError('Mixed-owner evidence unexpectedly submitted')
+            raise AssertionError('Switching producers unexpectedly submitted evidence')
         if captures is not None:
             captures.mkdir(parents=True, exist_ok=True)
             (captures / 'target-identity.pty').write_bytes(bytes(output))
             (captures / 'requests.json').write_text(json.dumps(accepted, indent=2))
+        key(b'q', b'Lane Add-ons \xc2\xb7 2 installed')
         key(b'q', b'MASC Overview')
         os.write(master, b'q')
 
     terminal.run_terminal_scenario(executable, description='Lane operator target identity',
         interact=interact, http_fixtures=fixtures, http_requests=requests)
-    print('Unapplied action / receipt with failed inventory read / mixed-owner refusal: PASS')
+    print('Owner-specific evidence / receipt with failed inventory read / isolated marks: PASS')
 
 
 def guided_install(executable: str, captures: Path | None) -> None:

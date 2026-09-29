@@ -982,12 +982,12 @@ let overview_hints view =
   else match view.screen with
   | Overview ->
       "?:help  Esc:back  Enter:open  i:install  n:new  S:subs"
-      ^ (if view.loading then "" else "  r:refresh")
+      ^ (if view.loading then "  Reading …" else "  r:refresh")
   | Detail _ ->
       "?:help  Esc:back  1-4:section  Tab:next section  j/k:move  " ^
       (match selected_instance view with None -> "" | Some instance -> instance_controls instance ^ "  ") ^
       "D:raw  J/K:scroll"
-      ^ (if view.loading then "" else "  r:refresh")
+      ^ (if view.loading then "  Reading …" else "  r:refresh")
 
 let open_actions ~request_id view =
   let* instance = match action_target view with

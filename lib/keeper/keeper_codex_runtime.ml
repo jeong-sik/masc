@@ -751,7 +751,7 @@ let native_posture_note = function
   | Runtime_native_tools.Native_full | Runtime_native_tools.Native_none -> []
 ;;
 
-let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~quota_scope ~keeper_name
+let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~quota_scope ~keeper_name
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~loading_plan ~initial_messages ~declared_max_prompt_bytes ~capacity_bytes ~project_history
     ~on_transmitted_model_input ~hooks
@@ -1009,14 +1009,20 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         in
         Ok (history, context_frontier, composed_developer_instructions))
     in
+    let composed_context =
+      match composed_context with
+      | None -> None
+      | Some read -> read ()
+    in
     let prompt, held_context =
       match thread_mode with
       | Runtime_codex_app_server.Start ->
-        prompt, Host.start_held_context prepared.messages
+        prompt, Host.start_held_context ?composed_context prepared.messages
       | Runtime_codex_app_server.Resume _ ->
         let delivery =
           Host.resume_prompt
             ~goal:prompt
+            ?composed_context
             ~held:(Keeper_official_client_session_store.held_context_for_resume
                      claim_plan ~expected:stored_session)
             prepared.messages
@@ -1658,7 +1664,7 @@ let note_transport_uncertainty effect_disposition =
   | true | false -> ()
 ;;
 
-let run ?official_task_reference ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
+let run ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ?(loading_plan = Keeper_official_client_host.All_on_demand) ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks
     ~context_injector ~context
@@ -1744,7 +1750,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
         (* A read in an abandoned attempt cannot certify a tool-only answer
            from the next one. Effect evidence remains cumulative. *)
         Atomic.set successful_tool_completion No_successful_tool_completion;
-        run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_session_settled ~official_client_continuation
+        run_without_lifecycle ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~official_client_continuation
           ~required_native_posture
           ~runtime_id
           ~quota_scope

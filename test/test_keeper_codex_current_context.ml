@@ -108,17 +108,25 @@ default = "codex.context"
     | Some {execution=Runtime_execution.Codex_app_server config;_} -> config
     | Some _ | None -> fail "fixture runtime missing" in
   let reports = ref [] in
-  let run ?official_task_reference ?model_input_projection
+  let run ?official_task_reference ?model_input_projection ?prompt_blocks
       ?carried_front_seed ?librarian_front ?on_model_input_window_observation
       ?(turn_start = Keeper_carried_front.Turn_boundary { end_atom = 0 })
       ?(initial_messages=[Agent_core.Types.user_msg "Previous completed work"])
       ?official_client_continuation ?on_event
       ?(goal="Continue from current World State.") ~instructions ~world () =
+    let composed_context = ref None in
     let hooks = { Agent_core.Hooks.empty with before_turn_params = Some (function
       | Agent_core.Hooks.BeforeTurnParams {current_params;_} ->
+        (* Production records the block witness in this hook. Reading it before
+           preparation would observe None and silently resend the carrier. *)
+        composed_context := Option.map (fun blocks ->
+          { Keeper_official_client_host.carrier_sha256 =
+              Digestif.SHA256.(digest_string world |> to_hex)
+          ; blocks }) prompt_blocks;
         Agent_core.Hooks.AdjustParams {current_params with extra_system_context=Some world}
       | _ -> Agent_core.Hooks.Continue) } in
     Keeper_codex_runtime.run
+      ~composed_context:(fun () -> !composed_context)
         ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input
           ~runtime:(Runtime.get_runtime_by_id "codex.context" |> Option.get)) ~runtime_id:"codex.context" ~keeper_name:"context-fixture"
       ~turn_start
@@ -304,6 +312,62 @@ let test_resume_carries_per_turn_context_in_front_of_the_goal ?(worker_pool = fa
    | [Keeper_official_client_host.Whole_input_transmitted _;
       Keeper_official_client_host.Held_by_client_session] -> ()
    | _ -> fail "a Start transmits its prepared context; a Resume leaves the conversation to the thread")
+
+let test_resume_deduplicates_context_blocks () =
+  with_fixture @@ fun ~run ~capture ~reports:_ ->
+  let instructions = "Keeper instructions" in
+  let send ~memory ~world ~clock =
+    let prompt_blocks =
+      [ Prompt_block_id.Memory_os_recall, memory
+      ; Prompt_block_id.Dynamic_context, world
+      ; Prompt_block_id.Temporal_summary, clock
+      ; Prompt_block_id.Operator_note, "OPERATOR_NOTE"
+      ] in
+    let before = List.length (read_requests capture) in
+    successful (run ~instructions ~prompt_blocks
+      ~world:(String.concat "\n\n" (List.map snd prompt_blocks)) ());
+    read_requests capture |> List.filteri (fun i _ -> i >= before)
+  in
+  let first = send ~memory:"RECALL_A" ~world:"WORLD_1" ~clock:"CLOCK_1" in
+  check bool "fresh thread receives recall" true
+    (String_util.contains_substring (Yojson.Safe.to_string (`List first)) "RECALL_A");
+  let check_resume rows expected =
+    check int "same session resumes" 1
+      (List.length (List.filter (fun row -> member "method" row = `String "thread/resume") rows));
+    let sent = turn_text rows in
+    List.iter (fun (marker, present) ->
+      check bool marker present (String_util.contains_substring sent marker)) expected;
+    check bool "operator note is delivered even unchanged" true
+      (String_util.contains_substring sent "OPERATOR_NOTE")
+  in
+  let second = send ~memory:"RECALL_A" ~world:"WORLD_2" ~clock:"CLOCK_2" in
+  check_resume second [ "RECALL_A", false; "WORLD_2", true; "CLOCK_2", true ];
+  let third = send ~memory:"RECALL_B" ~world:"WORLD_2" ~clock:"CLOCK_3" in
+  check_resume third [ "RECALL_A", false; "RECALL_B", true; "WORLD_2", false; "CLOCK_3", true ];
+  let fourth = send ~memory:"RECALL_B" ~world:"WORLD_3" ~clock:"CLOCK_4" in
+  check_resume fourth [ "RECALL_B", false; "WORLD_3", true; "CLOCK_4", true ]
+
+let test_context_blocks_survive_fresh_retry () =
+  with_fixture ~overflow_resume:true @@ fun ~run ~capture ~reports:_ ->
+  let send world =
+    let prompt_blocks =
+      [ Prompt_block_id.Memory_os_recall, "RECALL_RETRY"
+      ; Prompt_block_id.Dynamic_context, world ] in
+    let before = List.length (read_requests capture) in
+    successful (run ~instructions:"Keeper instructions" ~prompt_blocks
+      ~world:(String.concat "\n\n" (List.map snd prompt_blocks)) ());
+    read_requests capture |> List.filteri (fun i _ -> i >= before)
+  in
+  ignore (send "WORLD_1");
+  let retried = send "WORLD_2" in
+  check bool "overflowing resume omits held recall" false
+    (String_util.contains_substring (turn_text retried) "RECALL_RETRY");
+  let fresh = List.find (fun row -> member "method" row = `String "thread/start") retried in
+  check bool "replacement thread receives recall" true
+    (String_util.contains_substring
+       (fresh |> member "params" |> member "developerInstructions" |> text) "RECALL_RETRY");
+  check bool "settled replacement remembers the recall" false
+    (String_util.contains_substring (turn_text (send "WORLD_3")) "RECALL_RETRY")
 
 let test_rejected_context_never_submits_turn () =
   with_fixture ~reject_context:true @@ fun ~run ~capture ~reports ->
@@ -800,6 +864,8 @@ let test_declared_limit_above_history_changes_nothing () =
 
 
 let () = run "Keeper current Codex context" ["native requests",[
+  test_case "resume delivers only changed blocks and pending operator note" `Quick test_resume_deduplicates_context_blocks;
+  test_case "fresh overflow retry receives and remembers recall" `Quick test_context_blocks_survive_fresh_retry;
   test_case "operator interruption preserves previous Codex settlement" `Quick test_operator_interrupt_preserves_previous_native_settlement;
   test_case "a declared prompt limit windows a Start" `Quick test_declared_limit_windows_start;
   test_case "a Start carries the range, not the whole history" `Quick test_start_carries_the_range_not_the_whole_history;

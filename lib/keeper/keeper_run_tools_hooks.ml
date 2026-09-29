@@ -993,10 +993,12 @@ let assemble_hooks
                          ~keeper_id:meta.name
                          ~now:(Time_compat.now ())
                          ()) in
-                   match List.filter_map Fun.id [ordinary_recall; working_context_recall] with
-                   | [] -> ()
-                   | blocks -> record_block Prompt_block_id.Memory_os_recall
-                       (String.concat "\n\n" blocks));
+                   Option.iter (record_block Prompt_block_id.Memory_os_recall) ordinary_recall);
+                (* The Librarian index changes independently of ordinary facts.
+                   Keeping separate identities avoids replaying every fact when
+                   only the working-context revision or artifact changed. *)
+                Option.iter (record_block Prompt_block_id.Librarian_working_context)
+                  working_context_recall;
                 (* RFC-0366: last in assembly order. It is the most recent fact
                    the keeper has, and when it disagrees with an earlier block
                    the later text is the one that reads as current. Stamped

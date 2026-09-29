@@ -216,14 +216,9 @@ let capacity_bounded_model_input_projection ~declared_max_prompt_bytes
               source_projection))
 ;;
 
-let prompt_for_turn ~is_resume ~goal (prepared : Host.prepared_turn) =
+let prompt_for_turn ?composed_context ~held ~is_resume ~goal (prepared : Host.prepared_turn) =
   if is_resume
-  then
-    (* The provider conversation already owns the static system prompt and
-       seeded history. The hook context is turn-local, though, so dropping its
-       typed carrier on resume changes provider meaning. Nothing is recorded
-       as held on this lane, so every carried context is sent. *)
-    Ok (Host.resume_prompt ~goal ~held:[] prepared.messages).Host.prompt
+  then Ok (Host.resume_prompt ~goal ~held ?composed_context prepared.messages).Host.prompt
   else
     let* history = render_messages prepared.messages in
     Ok
@@ -460,7 +455,7 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action 
     }
 ;;
 
-let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
+let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
     ~on_model_input_window_observation
     ~carried_front_seed
     ~librarian_front
@@ -734,7 +729,15 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
          then Host.Held_by_client_session
          else Host.Whole_input_transmitted prepared.messages)
     in
-    let* prompt = prompt_for_turn ~is_resume ~goal prepared in
+    let composed_context = Option.bind composed_context (fun read -> read ()) in
+    let held = Session_store.held_context_for_resume claim_plan ~expected:stored_session in
+    let held_context =
+      if is_resume
+      then (Host.resume_prompt ~goal ~held ?composed_context prepared.messages).held_context
+      else Host.start_held_context ?composed_context prepared.messages
+    in
+    let context_frontier = { context_frontier with held_context } in
+    let* prompt = prompt_for_turn ?composed_context ~held ~is_resume ~goal prepared in
     let* () =
       if String.length prompt <= capacity_bytes
       then Ok ()
@@ -1326,7 +1329,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
                   recovery_detail))))
 ;;
 
-let run ?official_task_reference ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
+let run ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ?(loading_plan = Keeper_official_client_host.All_on_demand) ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks ~context_injector
     ~context
@@ -1351,7 +1354,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
   in
   let result =
     Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
-      run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_session_settled ~official_client_continuation
+      run_without_lifecycle ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~official_client_continuation
         ~required_native_posture
         ~runtime_id
         ~keeper_name
@@ -1460,7 +1463,7 @@ module For_testing = struct
     let prepared : Host.prepared_turn =
       { messages; system_prompt; tools = []; reasoning_effort = None }
     in
-    Result.map String.length (prompt_for_turn ~is_resume:false ~goal prepared)
+    Result.map String.length (prompt_for_turn ~held:[] ~is_resume:false ~goal prepared)
   ;;
 
   let reserved_prompt_bytes ~system_prompt ~goal =

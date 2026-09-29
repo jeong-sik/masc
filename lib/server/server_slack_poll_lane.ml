@@ -46,7 +46,7 @@ let poll_config_error_to_string = function
    function so the nesting stays flat. *)
 let poll_interval_of_toml ~path ~toml : (poll_config, poll_config_error) result =
   match
-    Field_resolution.resolve_int toml [ "slack"; "poll_interval_sec" ]
+    Field_resolution.resolve_int toml [ Runtime_toml_namespace.(key Slack); "poll_interval_sec" ]
   with
   | Field_resolution.Missing ->
     Ok { interval_sec = float default_poll_interval_sec }
@@ -65,7 +65,7 @@ let poll_interval_of_toml ~path ~toml : (poll_config, poll_config_error) result 
 
 let poll_config_of_toml ~path ~toml : (poll_config_load, poll_config_error) result =
   match
-    Field_resolution.resolve_bool toml [ "slack"; "poll_enabled" ]
+    Field_resolution.resolve_bool toml [ Runtime_toml_namespace.(key Slack); "poll_enabled" ]
   with
   | Field_resolution.Missing -> Ok Poll_disabled
   | Field_resolution.Type_mismatch { expected; message } ->

@@ -215,14 +215,14 @@ let render spec =
       @ (match c.timeout with None -> [] | Some timeout -> ["timeout-s",`Float timeout])
       @ (match c.account_home with None -> [] | Some home -> ["account-home", `String home]),
       Option.map (fun path -> File_reference path) c.oauth in
-  let runtime = table ["providers";provider] (fields @ transport_fields) in
-  let runtime = runtime ^ (if http spec.choice then table ["providers";provider;"healthcheck"]
+  let runtime = table [Runtime_toml_namespace.(key Providers);provider] (fields @ transport_fields) in
+  let runtime = runtime ^ (if http spec.choice then table [Runtime_toml_namespace.(key Providers);provider;"healthcheck"]
       ["path",`String (if spec.choice=Ollama then "/api/tags" else "/models")] else "") in
   let runtime = runtime ^ (match credential with
-    | Some (File_reference path) -> table ["providers";provider;"credentials"] ["type",`String "file";"path",`String path]
-    | Some (Env_reference name) -> table ["providers";provider;"credentials"] ["type",`String "env";"key",`String name]
+    | Some (File_reference path) -> table [Runtime_toml_namespace.(key Providers);provider;"credentials"] ["type",`String "file";"path",`String path]
+    | Some (Env_reference name) -> table [Runtime_toml_namespace.(key Providers);provider;"credentials"] ["type",`String "env";"key",`String name]
     | None -> "") in
-  let runtime = runtime ^ table ["models";model_key] (["api-name",`String spec.model;"max-context",`Int spec.context;
+  let runtime = runtime ^ table [Runtime_toml_namespace.(key Models);model_key] (["api-name",`String spec.model;"max-context",`Int spec.context;
     "tools-support",`Bool spec.tools;"streaming",`Bool spec.streaming])
     (* The wizard's provider id carries a hash of the operator's answers, so no
        catalog row can ever name it and the binding's model is one AGENT_CORE
@@ -233,7 +233,7 @@ let render spec =
        startup gate from rejecting the binding as catalog-missing. Nobody
        verified this model's reasoning stream, so it is declared off rather
        than left to the wire default. *)
-    ^ table ["models";model_key;"capabilities"]
+    ^ table [Runtime_toml_namespace.(key Models);model_key;"capabilities"]
         ["reasoning-streaming-format",`String "none"]
     ^ table [provider;model_key] (["wizard-default",`Bool true] @ if spec.choice=Ollama then ["num-ctx",`Int spec.context] else []) in
   {runtime_id;runtime_toml=runtime}

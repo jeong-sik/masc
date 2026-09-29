@@ -120,7 +120,9 @@ let frames_dir ~keeper_name =
 let run_artifact_job ~label f =
   match Domain_pool_ref.get () with
   | None -> Eio_guard.run_in_systhread ~label f
-  | Some _ -> Domain_pool_ref.submit_io_or_inline f
+  | Some _ ->
+      Eio_guard.check_if_ready ();
+      Domain_pool_ref.submit_io_or_inline f
 
 let store_frame ~keeper_name bytes =
   let dir = frames_dir ~keeper_name in

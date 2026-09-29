@@ -2239,6 +2239,11 @@ trigger_policy = "mention_or_thread"
 [slack]
 trigger_policy = "mention_or_thread"
 
+# Board 글 닫기·다시 열기: 작성자 외에 이 목록의 Keeper도 도구를 쓸 수 있다.
+# 운영자는 별도 Dashboard 관리자 권한으로 처리한다. 빈 배열은 moderator를 끈다.
+[board]
+moderators = ["e-masc-the-leader"]
+
 # ── Fusion 패널+심판 심의 (RFC-0252) ─────────────────────────────────
 # masc_fusion 도구의 out-of-band 심의 루프 설정. 개인 dev 카나리로 기본 ON.
 # harness(RFC-0252 §11) 미검증 — 카나리 출력(panel 답 + judge 종합)으로 사후 판단.

@@ -499,7 +499,7 @@ let read_repository ~now ~http_post ~token ?(graphql_url = default_graphql_url) 
 
 (* --- Reader --- *)
 
-let repositories_table = "repositories"
+let repositories_table = Runtime_toml_namespace.(key Repositories)
 let pr_reader_key = "pr_reader"
 let github_host_key = "github_host"
 let graphql_url_key = "graphql_url"

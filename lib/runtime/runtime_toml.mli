@@ -52,6 +52,12 @@ val editor_protocols : editor_protocol list
     Protocols that parse but cannot materialize as a production runtime are
     deliberately absent. *)
 
+val reserved_provider_ids : string list
+(** Names no provider may take. A provider's bindings are a top-level table
+    named after its id, so these are the top-level tables another reader
+    owns, plus the obsolete ones the loader refuses. Editors read this list
+    from the server instead of keeping a copy. *)
+
 val parse_string : string -> (Runtime_schema.config, parse_error list) result
 (** Parse a TOML string into a Runtime config.
     Returns [Ok config] on success, [Error errors] with all

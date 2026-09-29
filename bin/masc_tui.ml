@@ -8800,6 +8800,26 @@ let open_msx_screen (state : Masc_tui_types.state) ~mailbox =
      the read is in flight, and redraw its watch row when it arrives. *)
   launch_dos_live_poll state ~mailbox
 
+(* DOS has a spectator of its own. Enter it directly from the palette; the
+   MSX media picker is only for choosing MSX media. No key from this view is
+   forwarded to DOS, whose input and controller remain server-owned. *)
+let open_dos_screen (state : Masc_tui_types.state) ~mailbox =
+  invalidate_msx_poll ();
+  state.image_request_generation <- state.image_request_generation + 1;
+  state.browser_viewport <- None;
+  if state.image_open then begin
+    Masc_tui_msx.invalidate ();
+    write_to_terminal Masc_tui_graphics.delete_all;
+    state.image_open <- false
+  end;
+  state.machine_source <- Masc.Machine_lane.Dos;
+  state.msx_open <- true;
+  state.msx_menu_open <- false;
+  state.dos_live <- Masc_tui_machine_live.Unread;
+  state.msx_last_poll_ns <- 0L;
+  render_spectator state;
+  launch_dos_live_poll state ~mailbox
+
 (* Where a reference lands, and what it opens when it gets there.
 
    The surfaces already print [masc://] references beside what they name and
@@ -15509,13 +15529,22 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              (* A failed read leaves [dos_activity] as it was -- the sidebar
                 keeps showing the last activity it had rather than flashing
                 empty on a read that did not answer at all. *)
-             (match result with
-              | Ok (_, activity) -> state.dos_activity <- activity
-              | Error _ -> ());
-             (* An unchanged answer draws nothing and decodes no pixels. The
-                read also discovers the DOS watch row while the menu is open. *)
+             let activity_changed =
+               match result with
+               | Ok (_, activity) ->
+                   let changed = activity <> state.dos_activity in
+                   state.dos_activity <- activity;
+                   changed
+               | Error _ -> false
+             in
+             (* An unchanged picture decodes no pixels. A changed activity
+                feed still repaints the spectator sidebar; an identical feed
+                remains silent. The read also discovers the DOS watch row
+                while the menu is open. *)
              (match Masc_tui_machine_live.advance state.dos_live (Result.map fst result) with
-              | None -> ()
+              | None ->
+                  if activity_changed && not state.msx_menu_open then
+                    render_spectator state
               | Some view ->
                   state.dos_live <- view;
                   if state.msx_menu_open then
@@ -20107,8 +20136,16 @@ and is loaded on demand through keeper_skill.
                       | _ -> ())
                  | None,None, None ->
                      match key with
+                     | "esc" when view.help_open -> update {view with help_open=false;scroll=0}
+                     | "?" -> update {view with help_open=not view.help_open;scroll=0}
+                     | _ when view.help_open -> ()
                      | "esc" when Option.is_some view.document_key -> update {view with document_key=None;scroll=0}
+                     | "esc" when view.presentation<>Addons.Summary -> update {view with presentation=Addons.Summary;
+                         focus=(if view.screen=Addons.Overview then Addons.Instances else view.focus);scroll=0}
+                     | "esc" | "q" when view.screen<>Addons.Overview -> update {view with screen=Addons.Overview;focus=Addons.Instances;scroll=0}
                      | "esc" | "q" -> state.lane_addons_cached <- view; state.lane_addons <- None
+                     | ("\r" | "\n" | "enter") when view.screen=Addons.Overview ->
+                         update (Addons.open_selected_instance view)
                      | "i" ->
                          if view.loading then update {view with error=lane_addons_input_failure "Wait for the current Lane request before opening installation."}
                          else (match Masc_tui_lane_installer.create () with
@@ -20149,7 +20186,9 @@ and is loaded on demand through keeper_skill.
                              ~targets:(Addons.subscription_targets view) in
                            update {view with subscription_panel=Some panel;document_key=None;scroll=0};
                            launch_lane_subscriptions state ~mailbox:async_messages Masc_tui_lane_subscriptions.Inspect)
-                     | "D" -> update {view with presentation=(if view.presentation=Addons.Technical then Addons.Summary else Addons.Technical);scroll=0}
+                     | "D" -> update {view with
+                         presentation=(if view.presentation=Addons.Technical then Addons.Summary else Addons.Technical);
+                         focus=(if view.screen=Addons.Overview then Addons.Instances else view.focus);scroll=0}
                      | "f" -> update {view with presentation=(if view.presentation=Addons.Flow then Addons.Summary else Addons.Flow);document_key=None;scroll=0}
                      | "a" ->
                          if view.loading || Option.is_some (Addons.pending_action view)
@@ -20165,12 +20204,17 @@ and is loaded on demand through keeper_skill.
                           | Some instance when Addons.can_observe instance -> selected (fun id -> Addons.Observe id)
                           | Some _ | None -> update {view with error=lane_addons_input_failure "Select an active worker to observe; D shows retained state."})
                      | "d" -> selected (fun id -> Addons.Detach id)
-                     | "1" -> update {view with focus=Addons.Timeline;scroll=0}
-                     | "2" -> update {view with focus=Addons.Connections;scroll=0}
-                     | "3" -> update {view with focus=Addons.Configurations;scroll=0}
-                     | "4" -> update {view with focus=Addons.Instances;scroll=0}
-                     | "5" -> update {view with focus=Addons.Rows;scroll=0}
-                     | "\t" | "tab" -> update { view with scroll=0;focus = (match view.focus with Addons.Timeline -> Addons.Connections | Addons.Connections -> Addons.Configurations | Addons.Configurations -> Addons.Instances | Addons.Instances -> Addons.Rows | Addons.Rows -> Addons.Timeline) }
+                     | "1" when view.screen<>Addons.Overview -> update {view with focus=Addons.Timeline;scroll=0}
+                     | "2" when view.screen<>Addons.Overview -> update {view with focus=Addons.Connections;scroll=0}
+                     | "3" when view.screen<>Addons.Overview -> update {view with focus=Addons.Configurations;scroll=0}
+                     | "4" when view.screen<>Addons.Overview -> update {view with focus=Addons.Rows;scroll=0}
+                     | "5" when view.screen<>Addons.Overview -> update {view with focus=Addons.Rows;scroll=0}
+                     | "\t" | "tab" when view.screen<>Addons.Overview ->
+                         update {view with scroll=0;focus = (match view.focus with
+                           | Addons.Timeline | Addons.Instances -> Addons.Connections
+                           | Addons.Connections -> Addons.Configurations
+                           | Addons.Configurations -> Addons.Rows
+                           | Addons.Rows -> Addons.Timeline) }
                      | "J" | "K" ->
                          let _, cols = get_terminal_size () in
                          let width = framed_inner_width cols in
@@ -20181,14 +20225,19 @@ and is loaded on demand through keeper_skill.
                          update (Addons.move_lane view delta)
                      | "j" | "down" | "k" | "up" ->
                          let delta = if key = "j" || key = "down" then 1 else -1 in
-                         (match view.snapshot, view.focus with
-                          | Some snapshot, Addons.Configurations ->
-                              let size = Option.fold ~none:0 ~some:(fun (c : Addons.configuration) -> List.length c.declarations) snapshot.configuration in
-                              update {view with configuration_cursor=max 0 (min (size - 1) (view.configuration_cursor + delta))}
-                          | Some snapshot, (Addons.Instances | Addons.Connections) -> update { view with instance_cursor = max 0 (min (List.length snapshot.instances - 1) (view.instance_cursor + delta)) }
-                          | Some snapshot, Addons.Rows -> update { view with row_cursor = max 0 (min (List.length snapshot.output.rows - 1) (view.row_cursor + delta)) }
-                          | Some _, Addons.Timeline -> update (Addons.move_observation view delta)
-                          | None, _ -> ())
+                         (match view.snapshot, view.screen, view.focus with
+                          | Some snapshot, Addons.Overview, Addons.Configurations ->
+                              (match snapshot.configuration with
+                               | None -> ()
+                               | Some configuration -> update {view with configuration_cursor=max 0
+                                   (min (List.length configuration.declarations - 1) (view.configuration_cursor + delta))})
+                          | Some snapshot, Addons.Overview, _ ->
+                              update {view with instance_cursor=max 0 (min (Addons.overview_count snapshot - 1) (view.instance_cursor + delta))}
+                          | Some _, Addons.Detail _, (Addons.Configurations | Addons.Instances | Addons.Connections) -> ()
+                          | Some _, Addons.Detail _, Addons.Rows ->
+                              update (Addons.move_record view delta)
+                          | Some _, Addons.Detail _, Addons.Timeline -> update (Addons.move_observation view delta)
+                          | None, _, _ -> ())
                      | " " ->
                          (match Addons.selected_row view with None -> () | Some row ->
                            update { view with selected = if List.mem row.id view.selected then List.filter ((<>) row.id) view.selected else row.id :: view.selected })
@@ -21354,6 +21403,8 @@ and is loaded on demand through keeper_skill.
                      hide_browser_lane state
                  | Some (_, Masc_tui_types.Palette_msx) ->
                      open_msx_screen state ~mailbox:async_messages
+                 | Some (_, Masc_tui_types.Palette_dos) ->
+                     open_dos_screen state ~mailbox:async_messages
                  | Some (_, Masc_tui_types.Palette_lane_addons) ->
                      launch_lane_addons state ~mailbox:async_messages
                        Masc_tui_lane_addons.Inspect

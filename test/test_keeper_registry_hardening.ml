@@ -727,7 +727,7 @@ let test_tool_dispatch_preserves_exact_meta_after_replacement () =
          }
        in
        Masc_test_deps.write_sandbox_image_catalog ~base_path:config.base_path
-         [ "base", Keeper_sandbox_image.default_tag ];
+         [ "base", Masc_test_deps.live_sandbox_image_tag ];
        let evidence = "exact-turn-meta-evidence" in
        (* Inside the keeper sandbox: the sandbox root is the whole read
           boundary, so the evidence file lives in the keeper playground. *)

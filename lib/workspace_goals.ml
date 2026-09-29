@@ -795,8 +795,26 @@ let goal_after_proof (goal : Goal_store.goal) phase note =
   ; last_review_at = Some (Masc_domain.now_iso ()) }
 ;;
 
-let commit_verifier_decision ~tool_name ~start_time config ~goal_id
-    ~verification_run_id ~request_id ~criterion ~decision ~evidence =
+type proof_step = Goal_store.goal -> Goal_verification.verdict -> (unit, string) result
+
+type confirmation_step =
+  Goal_store.goal
+  -> Goal_verification.verdict
+  -> Goal_verification.confirmation
+  -> (unit, string) result
+
+(* The caller's step runs for a passing verdict only: a refutation sends the
+   Goal back to Executing and is not a completion. *)
+let run_before_proof_commit step (goal : Goal_store.goal)
+    (verdict : Goal_verification.verdict) =
+  match step, verdict.Goal_verification.outcome with
+  | Some step, Goal_verification.Proven -> step goal verdict
+  | Some _, Goal_verification.Refuted _ -> Ok ()
+  | None, (Goal_verification.Proven | Goal_verification.Refuted _) -> Ok ()
+;;
+
+let commit_verifier_decision ?before_proof_commit ~tool_name ~start_time config
+    ~goal_id ~verification_run_id ~request_id ~criterion ~decision ~evidence =
   let ctx : context = { config; agent_name = Standalone_lane.to_id Standalone_lane.Verifier } in
   let action, verdict_outcome, note = verifier_decision_parts decision in
   match validate_verification_run_id verification_run_id,
@@ -810,6 +828,8 @@ let commit_verifier_decision ~tool_name ~start_time config ~goal_id
       else
         match Goal_phase.decide_transition ~phase:goal.phase ~action with
         | Ok (Goal_phase.Move_to phase) ->
+          let open Result.Syntax in
+          let* () = run_before_proof_commit before_proof_commit goal verdict in
           Result.map (fun record -> goal_after_proof goal phase note, (record, true))
             (Goal_verification.record_proof_verdict config ~goal_id verdict)
         | Error detail ->
@@ -1184,8 +1204,8 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
       ]
 ;;
 
-let confirm_completion config ~goal_id ~operator_id ~request_id
-    ~verification_run_id ~criterion_revision =
+let confirm_completion ?after_confirmation config ~goal_id ~operator_id
+    ~request_id ~verification_run_id ~criterion_revision =
   Goal_store.transact_goal config ~goal_id (fun goal ->
     let open Result.Syntax in
     let* record = Goal_verification.get_record_authoritative config ~goal_id in
@@ -1199,9 +1219,13 @@ let confirm_completion config ~goal_id ~operator_id ~request_id
       | _ -> Error "confirmation must name the current proven criterion, request and verifier run" in
     let* transition = Goal_phase.decide_transition ~phase:goal.phase ~action:Goal_phase.Confirm_completion in
     let* record = Goal_verification.record_human_confirmation config ~goal_id verdict ~operator_id in
-    let* confirming_operator = match record.Goal_verification.completion with
-      | Goal_verification.Human_confirmed (_, confirmation) -> Ok confirmation.operator_id
+    let* stored_verdict, confirmation = match record.Goal_verification.completion with
+      | Goal_verification.Human_confirmed (stored, confirmation) -> Ok (stored, confirmation)
       | _ -> Error "confirmation store did not retain operator authority" in
+    let confirming_operator = confirmation.Goal_verification.operator_id in
+    let* () = match after_confirmation with
+      | Some step -> step goal stored_verdict confirmation
+      | None -> Ok () in
     let updated = match transition with
       | Goal_phase.Move_to phase -> goal_after_proof goal phase goal.last_review_note
       | Goal_phase.Already _ -> goal in

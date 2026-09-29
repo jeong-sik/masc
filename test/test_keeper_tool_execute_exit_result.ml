@@ -141,7 +141,7 @@ let test_escaped_shell_advice_is_in_what_the_model_reads () =
     ~clock:(Eio.Stdenv.clock env);
   let config = Workspace.default_config base in
   Masc_test_deps.write_sandbox_image_catalog ~base_path:base
-    [ "base", Keeper_sandbox_image.default_tag ];
+    [ "base", Masc_test_deps.live_sandbox_image_tag ];
   let meta = make_meta ~name:"costume-advice" in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   Masc_test_deps.with_fixture_sandbox ~config ~meta (fun () ->
@@ -230,7 +230,7 @@ let test_a_backgrounded_child_still_holds_the_call () =
     ~clock:(Eio.Stdenv.clock env);
   let config = Workspace.default_config base in
   Masc_test_deps.write_sandbox_image_catalog ~base_path:base
-    [ "base", Keeper_sandbox_image.default_tag ];
+    [ "base", Masc_test_deps.live_sandbox_image_tag ];
   let meta = make_meta ~name:"background-holds" in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   Masc_test_deps.with_fixture_sandbox ~config ~meta (fun () ->

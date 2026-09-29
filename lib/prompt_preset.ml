@@ -517,6 +517,19 @@ let read_manifest dir =
     stored_manifest_of_json json
 ;;
 
+(* A preset's overrides file is read only in the format this build writes.
+   One in any other format cannot be restored, so the reason says what the
+   operator can do: set the prompts again and save them as a new preset. *)
+let preset_overrides_error_to_string = function
+  | Override.Unsupported_schema_version { expected; actual } ->
+    Printf.sprintf
+      "%s has schema_version %d and this build reads only schema_version %d, so \
+       this preset cannot be restored; set its prompts again and save them as a \
+       new preset"
+      overrides_file actual expected
+  | error -> Override.error_to_string error
+;;
+
 let load ~base_path name =
   if not (is_valid_name name)
   then Error ("invalid preset name: " ^ name)
@@ -540,7 +553,7 @@ let load ~base_path name =
       in
       let* prompt_overrides =
         Override.load ~path:(Filename.concat dir overrides_file)
-        |> Result.map_error Override.error_to_string
+        |> Result.map_error preset_overrides_error_to_string
       in
       let* assignments, lanes =
         match Fs_compat.load_file_opt (Filename.concat dir runtime_file) with

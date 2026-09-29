@@ -755,9 +755,9 @@ let run_keeper_cycle
                let lane_updates = Domain_pool_ref.submit_io_or_inline (fun () ->
                  Lane_addon_subscription.observe ~config ~keeper_name:meta.name) in
                let workspace_memory = Domain_pool_ref.submit_io_or_inline (fun () ->
-                 Workspace_memory_publication.observe ~base_path:config.base_path) in
+                 Workspace_memory_ledger.observe ~base_path:config.base_path) in
                (match workspace_memory with
-                | Workspace_memory_publication.Unavailable detail ->
+                | Workspace_memory_ledger.Unavailable detail ->
                   Log.Keeper.warn "workspace memory discovery unavailable keeper=%s: %s" meta.name detail
                 | Missing | Available _ -> ());
                (* Repository freshness projection (context only, never a

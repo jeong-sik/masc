@@ -43,6 +43,22 @@ let listing_lines (snapshot : D.presets_snapshot) =
   presets @ unreadable
 ;;
 
+(* A reason names what to do at its end, so cutting the row at the pane
+   width hides the part the operator needs. Each reason is folded at spaces
+   instead; continuation rows are indented under the name. *)
+let unreadable_rows ~max_cells unreadable =
+  let budget = max 1 (max_cells - 2) in
+  List.concat_map
+    (fun (name, reason) ->
+      match
+        Masc_tui_message_layout.wrap_words ~max_cells:budget
+          (Printf.sprintf "! %s — %s" name reason)
+      with
+      | [] -> []
+      | first :: rest -> first :: List.map (fun row -> "  " ^ row) rest)
+    unreadable
+;;
+
 let saved_line (m : D.preset_manifest) =
   Printf.sprintf "saved preset %s — %s" m.D.pm_name (counts m)
 ;;

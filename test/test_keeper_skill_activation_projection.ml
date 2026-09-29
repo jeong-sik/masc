@@ -194,7 +194,7 @@ let test_corrupt_ledger_is_unavailable_not_empty () =
       (Keeper_fs.keeper_session_dir
          config
          (Keeper_id.Trace_id.to_string meta.runtime.trace_id))
-      "skill-activations.json"
+      "skill-activation-events.jsonl"
   in
   let channel = open_out_bin path in
   output_string channel "not-json";
@@ -337,7 +337,7 @@ let test_corrupt_exact_trace_is_unavailable () =
       (Keeper_fs.keeper_session_dir
          config
          (Keeper_id.Trace_id.to_string meta.runtime.trace_id))
-      "skill-activations.json"
+      "skill-activation-events.jsonl"
   in
   let channel = open_out_bin path in
   output_string channel "{}";

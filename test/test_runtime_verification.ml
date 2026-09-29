@@ -981,20 +981,30 @@ assert request["params"]["reasoningEffort"] == "high"
 reply(request, {"commandId": request["params"]["commandId"], "status": "accepted", "turnId": "t-readiness",
     "startedNewTurn": True, "disposition": "started"})
 notify("turn/started", turnId="t-readiness", commandId=request["params"]["commandId"])
+# Each model call is its own view event: the runtime drops a report whose
+# viewCursor it has already seen as a replay, so every call carries a new one.
+usage_reports = 0
+def report_model_usage(model_id):
+    global usage_reports
+    usage_reports += 1
+    notify("session/tokenUsage", turnId="t-readiness", modelId=model_id,
+        viewCursor="v:usage-%d" % usage_reports,
+        promptTokens=1, usage={"inputTokens": 1, "outputTokens": 1,
+            "cachedTokens": 0, "reasoningTokens": 0})
 if mode == "muse-ran-other-model":
     # The session started on the requested model, but the host names another
     # for the turn's model call.
-    notify("session/tokenUsage", turnId="t-readiness", modelId="another-model")
+    report_model_usage("another-model")
 elif mode == "muse-ran-then-unnamed":
     # The first call names the requested model; the last names none, so the
     # model it ran on is unknown.
-    notify("session/tokenUsage", turnId="t-readiness", modelId=model)
-    notify("session/tokenUsage", turnId="t-readiness", modelId=None)
+    report_model_usage(model)
+    report_model_usage(None)
 elif mode == "muse-ran-other-model-first":
     # Only the first call ran on another model; the last one ran on the
     # requested model, which must not hide the first.
-    notify("session/tokenUsage", turnId="t-readiness", modelId="another-model")
-    notify("session/tokenUsage", turnId="t-readiness", modelId=model)
+    report_model_usage("another-model")
+    report_model_usage(model)
 if mode in ("muse-auth", "muse-auth-retryable"):
     notify("turn/completed", turnId="t-readiness", terminal="failed",
         error={"kind": "authRequired", "message": "fixture sign-in required", "retryable": mode == "muse-auth-retryable"})

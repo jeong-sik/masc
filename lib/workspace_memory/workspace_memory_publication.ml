@@ -4,8 +4,7 @@ let ( let* ) = Result.bind
 type descriptor = { proposal_id : string; context_sha256 : string }
 type observation = Missing | Available of descriptor | Unavailable of string
 
-let directory ~base_path =
-  Filename.concat (Filename.concat base_path Common.masc_dirname) "workspace-memory"
+let directory = Workspace_memory_ledger.directory
 let path ~base_path = Filename.concat (directory ~base_path) "publication.json"
 let store_error = function Store.Invalid detail | Store.Unavailable detail -> detail
 let io f = try f () with

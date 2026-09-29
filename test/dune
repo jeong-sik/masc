@@ -4392,6 +4392,7 @@
   masc
   masc.masc_goal
   masc_types
+  masc_tui_message_layout
   masc_tui_types
   masc_tui_overview_goals
   masc_tui_overview_tasks

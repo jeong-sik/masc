@@ -67,7 +67,7 @@ let read ~base_path =
 
 let member_refs facts ~kind ~id =
   facts |> List.filter_map (function
-    | `Assoc fields as row ->
+    | `Assoc fields ->
       (match List.assoc_opt "disposition" fields with
        | Some (`Assoc disposition) when List.assoc_opt "kind" disposition = Some (`String kind)
          && List.assoc_opt (kind ^ "_id") disposition = Some (`String id) ->

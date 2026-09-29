@@ -25,12 +25,12 @@ type box = { cols : int; rows : int; size : Draw.size }
 let min_pixel_rows = 4
 
 (* The renderer draws 160 px in about 17 ms and 240 px in about 34 ms
-   (#39704). The splash steps every 150 ms, and the terminal scales the
+   (#39704). The /about candle steps every 150 ms, and the terminal scales the
    picture into its box anyway, so 160 keeps a step's render small. *)
 let pixel_edge_cap = 160
 
 (* A mosaic draws one pixel per cell across, so its edge is also its width in
-   cells; 96 cells is wider than any splash leaves for it. *)
+   cells; 96 cells is wider than any portrait surface leaves for it. *)
 let mosaic_edge_cap = 96
 
 let clamp lo hi v = max lo (min hi v)

@@ -553,9 +553,8 @@ let overview_providers_section (state : state) ~cols =
     ~now:(Unix.gettimeofday ())
     ~width:(framed_inner_width cols)
 
-(* The Overview's title row: the name, the workspace, the clock and the
-   connection badge. The startup splash draws the same row, so the two
-   cannot disagree about what the screen is or whether it is connected. *)
+(* The Overview keeps the same compact title and working layout from the
+   first frame through loading, success and failure. *)
 let overview_header (state : state) =
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
@@ -676,14 +675,32 @@ let render_overview (state : state) =
     Terminal_text.optional_single_line state.overview_error
   in
 
+  let unread_note =
+    match state.connection_status, state.http_refresh_started_ns with
+    | Booting, _ -> "  Waiting for workspace server…"
+    | Connecting, _
+    | (Connected | Degraded | Reconnecting | Disconnected), Some _ ->
+        "  Loading…"
+    | (Connected | Degraded | Reconnecting | Disconnected), None ->
+        page_unread_note
+  in
+
   (* Summary line *)
   let summary_line =
     match (ov, overview_error) with
     | _, Some err ->
         data_unreliable_row ~cols err
     | None, None ->
-        Printf.sprintf "  %s(no overview data — press 'r' to refresh)%s"
-          Ansi.dim Ansi.reset
+        let status =
+          match state.connection_status, state.http_refresh_started_ns with
+          | Connecting, _ -> "Connecting to workspace…"
+          | Booting, _ -> "Workspace server is starting…"
+          | (Connected | Degraded | Reconnecting | Disconnected), Some _ ->
+              "Loading Overview…"
+          | (Connected | Degraded | Reconnecting | Disconnected), None ->
+              "(no overview data — press 'r' to refresh)"
+        in
+        "  " ^ Ansi.dim ^ status ^ Ansi.reset
     | Some o, None ->
         let health_color = workspace_health_color o.ov_workspace_health in
         let health_label = workspace_health_label o.ov_workspace_health in
@@ -847,7 +864,7 @@ let render_overview (state : state) =
     | Page_empty when on_team_rows > 0 ->
         Some (Printf.sprintf "(%d on Team rows below)" on_team_rows)
     | Page_empty -> Some "Nothing needs attention."
-    | Page_unread -> Some (String.trim page_unread_note)
+    | Page_unread -> Some (String.trim unread_note)
     | Page_failed -> None
   in
   for i = 0 to row_budget.attention_rows - 1 do
@@ -1041,7 +1058,7 @@ let render_overview (state : state) =
   let no_tasks_note =
     match local_rows_page state ~error:tasks_error with
     | Page_empty -> Some "  No tasks."
-    | Page_unread -> Some page_unread_note
+    | Page_unread -> Some unread_note
     | Page_failed -> None
   in
   (match no_tasks_note with
@@ -16398,36 +16415,6 @@ let render_config (state : state) =
             | None -> ()
           done)
 
-(* The startup splash: the Overview's own frame and header -- title,
-   workspace, clock, connection badge -- with the candle where its sections
-   will be once the first overview read answers. Keys are the Overview's; the
-   first one ends the splash and still does its job. *)
-let render_overview_startup (state : state) =
-  let terminal_rows, cols = get_terminal_size () in
-  surface_chrome ~overflow:Fits state ~terminal_rows ~cols ~surface_key:"overview"
-    ~title:(overview_header state)
-    ~hints:(Masc_tui_keys.footer_hints_overview ~task_focus:false)
-    ~body:(fun ~budget c ->
-      Masc_tui_emblem_screen.body ~screen:Masc_tui_emblem_screen.Startup
-        ~cols:(framed_inner_width cols) ~rows:budget
-        ~origin:(c.next_origin ())
-        ~caption:
-          ([ Masc_tui_theme.tone Masc_tui_theme.Accent
-             ^ "MASC \xc2\xb7 keepers on watch" ^ Ansi.reset
-           ]
-           (* The Overview's own word for this state -- the briefing is not
-              read yet -- stays on screen under the candle. *)
-           @ List.filter_map
-               (fun line ->
-                 match String.trim line with "" -> None | text -> Some text)
-               (overview_intro_lines state)
-           @ [ Ansi.dim
-               ^ Masc_tui_types.connection_status_label state.connection_status
-               ^ Ansi.reset
-             ])
-        ~elapsed:(Masc_tui_types.motion_elapsed_seconds state.emblem_frame)
-      |> List.iter c.push)
-
 (* /about: the candle over the surface, with what the TUI is running under
    -- its colour scheme and how many Keepers the workspace holds. *)
 let render_about (state : state) =
@@ -16445,7 +16432,7 @@ let render_about (state : state) =
   surface_chrome ~overflow:Fits ~frame:Chrome_overlay state ~terminal_rows ~cols
     ~surface_key:"about" ~title:(screen_title " MASC") ~hints:"c:candle  Esc:close"
     ~body:(fun ~budget c ->
-      Masc_tui_emblem_screen.body ~screen:Masc_tui_emblem_screen.About
+      Masc_tui_emblem_screen.body
         ~cols:(framed_inner_width cols) ~rows:budget
         ~origin:(c.next_origin ())
         ~caption:
@@ -16472,10 +16459,7 @@ let render_surface (state : state) =
            with
            | Some task -> render_task_detail state task
            | None -> render_overview state )
-       | None ->
-           if Masc_tui_types.startup_emblem_visible state then
-             render_overview_startup state
-           else render_overview state)
+       | None -> render_overview state)
   | Keepers Keeper_list ->
       if state.repository_changes_open then render_repository_changes state
       else render_keeper_list state
@@ -16504,7 +16488,7 @@ let render_surface (state : state) =
                     let terminal_rows, cols = get_terminal_size () in
                     surface_chrome ~overflow:Fits state ~terminal_rows ~cols ~surface_key:"board-read"
                       ~title:(screen_title (" MASC Board / " ^ Terminal_text.single_line post_id))
-                      ~hints:"r:retry  Esc:back  Tab:next"
+                      ~hints:Masc_tui_keys.footer_hints_board_pending
                       ~body:(fun ~budget:_ c ->
                         match Board_detail.view_for state.board_detail ~post_id with
                         | Board_detail.Failed detail ->

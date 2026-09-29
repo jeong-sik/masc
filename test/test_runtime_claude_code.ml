@@ -460,6 +460,21 @@ let test_unexpected_exception_is_unhandled () =
     | Ok _ -> fail "an observer exception was admitted as a successful turn")
 ;;
 
+(* #39824: the exceptions [Reserved_exn] names belong to the process, not to
+   the runtime to type. Raised where the test above raises its [Failure], they
+   reach the outermost catch-all, which re-raises them. *)
+let test_reserved_exceptions_leave_run_turn () =
+  List.iter
+    (fun exn ->
+       with_fixture [ Emit assistant; Emit result ] (fun path ->
+         check_raises
+           (Printexc.to_string exn ^ " leaves run_turn untyped")
+           exn
+           (fun () ->
+              ignore (run_fixture ~on_spawned:(fun () -> raise exn) path))))
+    [ Out_of_memory; Stack_overflow; Sys.Break ]
+;;
+
 let test_no_deadline_keeps_initialize_bounded () =
   with_fixture
     ~before_initialize_response:[ Pause 0.2 ]
@@ -2506,6 +2521,10 @@ let () =
             "an unexpected exception is unhandled, not a protocol error"
             `Quick
             test_unexpected_exception_is_unhandled
+        ; test_case
+            "reserved exceptions leave run_turn untyped"
+            `Quick
+            test_reserved_exceptions_leave_run_turn
         ; test_case
             "no deadline keeps initialize bounded"
             `Quick

@@ -7,6 +7,7 @@
   masc.mcp_client
   masc.skill_config
   masc.skill_snapshot
+  masc.skill_reference
   eio
   eio_main
   mirage-crypto-rng.unix))

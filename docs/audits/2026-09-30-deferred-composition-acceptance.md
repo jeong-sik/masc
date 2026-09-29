@@ -81,9 +81,14 @@ do not establish spontaneous discovery and selection.
 ## Verification status
 
 - Component suite CI: [36598237622](https://github.com/jeong-sik/masc/actions/runs/36598237622),
-  head `0e3348dea76ddef7ee4779c43b9e66f0e068cb77`; dispatched, result pending at writing.
-- Joined fixture: implemented in `test/test_keeper_attached_tools_lane_scope.ml`,
-  under source review; no execution pass claimed.
+  head `0e3348dea76ddef7ee4779c43b9e66f0e068cb77`; all six targeted component suites passed (91 tests).
+  This baseline predates the joined fixture.
+- Joined fixture: first native CI [36599722466](https://github.com/jeong-sik/masc/actions/runs/36599722466)
+  failed during compilation: `Skill_reference` was not visible to the test.
+  Its direct `masc.skill_reference` dependency is now declared. The remaining
+  new modules were checked against direct dependencies and `masc_test_deps`
+  re-exports; the corrected candidate has not yet passed native CI.
+  No joined execution pass is claimed.
 - Current production execution: not established by this audit.
 - Unprompted model selection and independently checked task outcome: not measured.
 

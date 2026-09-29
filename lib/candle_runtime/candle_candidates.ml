@@ -152,7 +152,7 @@ let report = function
 let drain_with ~sources ~now ~base_path =
   match Candle_status.current ~base_path with
   | Candle_config.Off | Candle_config.Disabled _ -> Ok []
-  | Candle_config.Enabled ->
+  | Candle_config.Enabled _ ->
     let* view =
       Result.map_error Candle_ledger.read_error_to_string (Candle_ledger.read ~base_path)
     in

@@ -42,9 +42,9 @@ let ensure_recovered ~base_path =
 let current ~base_path =
   match Candle_config.load ~base_path with
   | (Candle_config.Off | Candle_config.Disabled _) as answer -> answer
-  | Candle_config.Enabled ->
+  | Candle_config.Enabled policy ->
     (match ensure_recovered ~base_path with
-     | Recovered | Locked_by_another_process -> Candle_config.Enabled
+     | Recovered | Locked_by_another_process -> Candle_config.Enabled policy
      | Not_recoverable reason -> Candle_config.Disabled { reason })
 ;;
 
@@ -52,7 +52,7 @@ let report_at_start ~base_path =
   match Candle_config.load ~base_path with
   | Candle_config.Off -> Log.Misc.info "candle: off (no candle.toml)"
   | Candle_config.Disabled { reason } -> Log.Misc.warn "candle: disabled: %s" reason
-  | Candle_config.Enabled ->
+  | Candle_config.Enabled _ ->
     (match ensure_recovered ~base_path with
      | Recovered -> Log.Misc.info "candle: enabled"
      | Locked_by_another_process ->

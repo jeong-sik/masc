@@ -15,9 +15,13 @@ val holder_left : config:Workspace.config -> now:float -> string -> Tool_misc_do
     that cannot be read, and a missing one where a request needs no token,
     keep the controller. *)
 
-val before_move : config:Workspace.config -> who:string -> unit
+val before_move :
+  config:Workspace.config -> who:string -> (unit, Masc_domain.masc_error) result
 (** Lets a departed holder's controller go so that [who] can take it, and
-    posts the board announcement. *)
+    posts the board announcement after releasing the credential transaction.
+    Credential publication and the departure read/release cannot interleave.
+    A failed credential-lock admission returns [Error] without releasing or
+    moving the machine. Keeper phase changes are governed by the Keeper registry. *)
 
 (** Why a call was stopped before it reached the machine. *)
 type call_refusal =

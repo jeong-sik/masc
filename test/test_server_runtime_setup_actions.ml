@@ -43,7 +43,11 @@ if args[0]=='runtime-muse-models':
 if args[0]=='runtime-codex-models':
     with open(os.path.join(os.path.dirname(__file__),'codex-args.json'),'w') as f:
         json.dump(args,f)
-    print(json.dumps({'schema':'masc.codex_model_refresh.v1','models':[{'id':'fresh-model','label':'Fresh model','context':272000}], 'credential_file':'/private/not-for-browser'}))
+    print(json.dumps({'schema':'masc.codex_model_refresh.v1','models':[
+      {'id':'fresh-model','label':'Fresh model','context':272000},
+      {'id':'second-model','label':'Second model','context':272000},
+      {'id':'other-model','label':'Other account model','context':272000}],
+      'credential_file':'/private/not-for-browser'}))
     sys.exit(0)
 assert args[1]=='--base-path'
 with open(os.path.join(os.path.dirname(__file__),'save-calls'),'a') as f:
@@ -351,6 +355,40 @@ let test_named_lane_save () = fixture (fun base runtime binary _net ->
     (receipt |> member "runtime_ids" |> to_list |> List.map to_string);
   let after = Runtime_toml.parse_file runtime |> Result.get_ok in
   Alcotest.check (Alcotest.option Alcotest.string) "HTTP save preserves configured route" (Some "conversation") after.default_runtime_id)
+let test_bound_models_follow_account_home () = fixture (fun base runtime binary net ->
+  let home = Filename.concat base "shared-codex-account" in
+  let other_home = Filename.concat base "other-codex-account" in
+  Unix.mkdir home 0o700; Unix.mkdir other_home 0o700;
+  let add model account_home =
+    let spec = Runtime_setup_spec.of_json (`Assoc [
+      "choice",`String "codex"; "model",`String model;
+      "max_context",`Int 32768; "tools",`Bool true; "streaming",`Bool true;
+      "command",`String "codex"; "account_home",`String account_home]) |> Result.get_ok in
+    Runtime_setup_spec.render spec in
+  let first = add "fresh-model" home in
+  let second = add "second-model" home in
+  let other = add "other-model" other_home in
+  Out_channel.with_open_gen [Open_append;Open_binary] 0o600 runtime (fun channel ->
+    List.iter (fun rendered -> output_string channel ("\n" ^ rendered.Runtime_setup_spec.runtime_toml))
+      [first;second;other]);
+  let provider_id rendered =
+    match String.split_on_char '.' rendered.Runtime_setup_spec.runtime_id with
+    | id :: _ -> id | [] -> Alcotest.fail "rendered runtime has no provider" in
+  Eio.Switch.run (fun sw ->
+    let flags rendered =
+      let json = get (Actions.discover ~binary ~sw ~net ~base_path:base
+        (`Assoc ["integration_id",`String (provider_id rendered)])) in
+      let open Yojson.Safe.Util in
+      json |> member "models" |> to_list |> List.map (fun row ->
+        row |> member "id" |> to_string, row |> member "bound" |> to_bool) in
+    let shared = ["fresh-model",true;"second-model",true;"other-model",false] in
+    let isolated = ["fresh-model",false;"second-model",false;"other-model",true] in
+    Alcotest.check (Alcotest.list (Alcotest.pair Alcotest.string Alcotest.bool))
+      "first provider sees every model on its account" shared (flags first);
+    Alcotest.check (Alcotest.list (Alcotest.pair Alcotest.string Alcotest.bool))
+      "second provider sees every model on its account" shared (flags second);
+    Alcotest.check (Alcotest.list (Alcotest.pair Alcotest.string Alcotest.bool))
+      "another account keeps its own model" isolated (flags other)))
 let test_status_of_error () =
   let check name expected error =
     Alcotest.check Alcotest.bool name true (Actions.status_of_error error = expected) in
@@ -372,5 +410,6 @@ let () = Alcotest.run "web setup actions" ["request boundary",[
   Alcotest.test_case "declared provider variants refuse before discovery" `Quick test_declared_provider_variants;
   Alcotest.test_case "selected native accounts survive verified save" `Quick test_selected_native_account;
   Alcotest.test_case "Muse save rechecks selected account catalog before effects" `Quick test_muse_save_rechecks_selected_catalog;
+  Alcotest.test_case "bound models follow account home across provider IDs" `Quick test_bound_models_follow_account_home;
   Alcotest.test_case "named default route survives HTTP save" `Quick test_named_lane_save;
   Alcotest.test_case "route status follows the error sum" `Quick test_status_of_error]]

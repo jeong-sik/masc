@@ -37,7 +37,7 @@ def run(executable: str) -> None:
             "schedule_store_read_error": None,
             "request_count": 0,
             "truncated": False,
-            "fsm": {"next_due_at_iso": None},
+            "fsm": {"next_due_at": None},
             "requests": [],
         },
     )

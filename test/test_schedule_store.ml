@@ -1558,6 +1558,74 @@ let test_a_mutation_encodes_the_ledger_once_on_the_pool () =
   check int "and it holds the schedule" 1 (List.length (read_state config).schedules)
 ;;
 
+(* A reader of an unchanged ledger takes the state the last read decoded. A
+   commit through the store, or a rewrite of the file by anything else, is
+   read and decoded again. *)
+let test_an_unchanged_ledger_is_decoded_once () =
+  with_workspace
+  @@ fun config ->
+  ignore (insert_ok config (make_request ()));
+  let one_schedule = In_channel.with_open_bin (schedules_path config) In_channel.input_all in
+  let first = read_state config in
+  check bool "an unchanged ledger is not decoded again" true (read_state config == first);
+  ignore (insert_ok config (make_request ~schedule_id:"sched-2" ()));
+  let after_commit = read_state config in
+  check int "a commit is read again" 2 (List.length after_commit.schedules);
+  check bool "and what it read is kept in turn" true (read_state config == after_commit);
+  Workspace_core.write_text config (schedules_path config) one_schedule;
+  check int "a rewrite outside the store is read again" 1
+    (List.length (read_state config).schedules)
+;;
+
+(* A read that misses decodes on the pool, as a write encodes there: while the
+   pool's one worker is busy, the read waits for it. *)
+let test_a_read_that_misses_decodes_on_the_pool () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = Filename.temp_dir "schedule_store_test" "" in
+  Eio.Switch.run
+  @@ fun sw ->
+  Eio.Switch.on_release sw (fun () -> Masc_test_deps.cleanup_test_workspace dir);
+  let config = Workspace_core.default_config dir in
+  ignore (Workspace_core.init config ~agent_name:(Some "test"));
+  ignore (insert_ok config (make_request ()));
+  let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+  let previous_pool = Domain_pool_ref.get () in
+  Fun.protect
+    ~finally:(fun () ->
+      match previous_pool with
+      | None -> Domain_pool_ref.clear_for_tests ()
+      | Some previous -> Domain_pool_ref.set previous)
+  @@ fun () ->
+  Domain_pool_ref.set pool;
+  let occupied, occupied_u = Eio.Promise.create () in
+  let release, release_u = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    Domain_pool_ref.submit_cpu_or_inline (fun () ->
+      Eio.Promise.resolve occupied_u ();
+      Eio.Promise.await release));
+  Eio.Promise.await occupied;
+  let read = ref None in
+  let clock = Eio.Stdenv.clock env in
+  Eio.Fiber.both
+    (fun () -> read := Some (read_state_result config))
+    (fun () ->
+      let rec wait polls =
+        if polls > 0 && Option.is_none !read
+        then (
+          Eio.Time.sleep clock busy_worker_poll_interval_s;
+          wait (polls - 1))
+      in
+      wait busy_worker_polls;
+      check bool "the read waits for the busy worker" true (Option.is_none !read);
+      Eio.Promise.resolve release_u ());
+  match !read with
+  | Some (Ok state) -> check int "and it holds the schedule" 1 (List.length state.schedules)
+  | Some (Error error) -> fail (read_error_to_string error)
+  | None -> fail "the read never finished"
+;;
+
 (* Compact JSON has no spelling for NaN or an infinity, so a schedule time that
    is not finite is refused where the request is made, not by a later write of
    the whole ledger. *)
@@ -1773,6 +1841,10 @@ let () =
             test_a_clock_behind_the_ledger_forgets_nothing;
           test_case "a mutation encodes the ledger once on the pool" `Quick
             test_a_mutation_encodes_the_ledger_once_on_the_pool;
+          test_case "an unchanged ledger is decoded once" `Quick
+            test_an_unchanged_ledger_is_decoded_once;
+          test_case "a read that misses decodes on the pool" `Quick
+            test_a_read_that_misses_decodes_on_the_pool;
           test_case "a schedule time that is not finite is refused" `Quick
             test_a_schedule_time_that_is_not_finite_is_refused;
           test_case "a ledger that cannot be encoded fails the write" `Quick

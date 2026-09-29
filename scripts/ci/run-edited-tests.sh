@@ -1185,15 +1185,16 @@ self_test() {
   # packages/ carry no library-module shortfall gate behind them, so the
   # miss reached a green run. lib/ may gain stanza-linked suites as the tree
   # grows; the tree guard is what it must never lose.
+  # Expected suite and probe path share a line on purpose: a probe path alone
+  # on its line reads as a scan-scope declaration to
+  # scripts/lint/guard-scan-targets-exist.sh, and these probes must not exist.
   check "an unreferenced bin/ source still selects the tree-reading suite" \
-    "test/test_keeper_toml.ml" \
-    "bin/no_suite_names_this_probe.ml"
+    "test/test_keeper_toml.ml" "bin/no_suite_names_this_probe.ml"
   check "an unreferenced packages/ source still selects the tree-reading suite" \
     "test/test_keeper_toml.ml" \
     "packages/no_suite_names_this/lib/no_suite_names_this_probe.ml"
   check_required "an unreferenced lib/ source still selects the tree-reading suite" \
-    "test/test_keeper_toml.ml" \
-    "lib/no_suite_names_this_probe.ml"
+    "test/test_keeper_toml.ml" "lib/no_suite_names_this_probe.ml"
   # A guard can watch a document. Four do, among them the RFC-0086 namespace
   # invariant and this one, and before the declared mapping took every changed
   # path they were selected by nothing.

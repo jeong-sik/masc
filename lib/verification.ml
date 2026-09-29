@@ -292,11 +292,15 @@ let scan_present_directory base_path ~load =
   | Ok Present_directory -> scan_directory base_path ~load
 
 (* A request whose projection fails is reported unreadable with the reason, as
-   one the schema cannot read is; neither is kept. *)
+   one the schema cannot read is; neither is kept. The walk runs on the domain
+   pool when one is installed: the first one after a start reads, parses and
+   projects every request file, and that must not hold the domain that asked,
+   which in the server is the one serving requests. *)
 let list_projected listing base_path =
-  scan_present_directory base_path ~load:(fun id ->
-    File_version_cache.load listing.projections (request_path base_path id)
-      ~decode:(fun () -> Result.bind (load_request base_path id) listing.project))
+  Domain_pool_ref.submit_cpu_or_inline (fun () ->
+    scan_present_directory base_path ~load:(fun id ->
+      File_version_cache.load listing.projections (request_path base_path id)
+        ~decode:(fun () -> Result.bind (load_request base_path id) listing.project)))
 
 (** High-level API *)
 

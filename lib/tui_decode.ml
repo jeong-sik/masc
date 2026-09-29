@@ -12505,21 +12505,17 @@ let play_invite_refusal ~status_code ~body =
     match Yojson.Safe.from_string body with
     | exception Yojson.Json_error _ -> None
     | `Assoc fields ->
-      let text field =
-        match List.assoc_opt field fields with
-        | Some (`String value) when String.trim value <> "" ->
+      let text_of = function
+        | `String value when String.trim value <> "" ->
           Some (sanitize_terminal_text (String.trim value))
-        | Some _ | None -> None
+        | `String _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _ ->
+          None
       in
+      let text field = Option.bind (List.assoc_opt field fields) text_of in
       let gaps =
         match List.assoc_opt "missing" fields with
-        | Some (`List gaps) ->
-          List.filter_map
-            (function
-              | `String gap -> Some (sanitize_terminal_text gap)
-              | _ -> None)
-            gaps
-        | Some _ | None -> []
+        | Some (`List gaps) -> List.filter_map text_of gaps
+        | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _) | None -> []
       in
       Option.map
         (fun sentence ->

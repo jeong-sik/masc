@@ -34,7 +34,8 @@ type t =
    scans as nothing, so that case draws no QR at all. *)
 let qr_of ~project link =
   match project dark, project light with
-  | None, _ | _, None -> Undrawable "this terminal has no colour to draw a QR in; use the link"
+  | None, _ | _, None ->
+    Undrawable "this terminal cannot draw the black and white a QR needs; use the link"
   | Some _, Some _ ->
     (match Qrc.encode link with
      | None -> Undrawable "the link is too long for a QR code; use the link"
@@ -87,17 +88,29 @@ let make ~project ~name ~expires_at ~link =
 let name card = card.name
 let link card = card.link
 
+let issued_notice card ~replaced =
+  let replaced =
+    match replaced with
+    | None -> ""
+    | Some previous -> Printf.sprintf ". The link of %s can no longer be shown here" previous.name
+  in
+  Printf.sprintf "Play invite %s issued, expires %s. /play link shows its link again%s"
+    card.name card.expires_at replaced
+;;
+
 type row =
   | Heading of string
   | Advice of string
   | Link_row of string
   | Qr_row of string
   | Note of string
+  | Qr_needs of { columns : int; rows : int }
   | Blank
 
 let advice =
-  [ "Send this link to one person. It is shown once,"
-  ; "and it opens the shared machine and nothing else."
+  [ "Send this link to one person."
+  ; "The server cannot show it again."
+  ; "It opens the shared machine and nothing else."
   ]
 ;;
 
@@ -116,24 +129,25 @@ let cut_to_width ~width text =
   cut 0 []
 ;;
 
-let draw card ~width ~rows =
+(* Everything above the QR: what the card is, and the link cut to [width]. *)
+let text_rows card ~width =
   let heading = Heading (Printf.sprintf "%s · expires %s" card.name card.expires_at) in
-  let text =
-    (heading :: Blank :: List.map (fun line -> Advice line) advice)
-    @ (Blank :: List.map (fun piece -> Link_row piece) (cut_to_width ~width card.link))
-  in
+  (heading :: Blank :: List.map (fun line -> Advice line) advice)
+  @ (Blank :: List.map (fun piece -> Link_row piece) (cut_to_width ~width card.link))
+;;
+
+let draw card ~width ~rows =
+  let text = text_rows card ~width in
   match card.qr with
   | Undrawable why -> text @ [ Blank; Note why ]
   | Drawn { cols; rows = qr_rows } ->
-    let needed_rows = List.length text + 1 + List.length qr_rows in
-    if cols <= width && needed_rows <= rows
+    let rows_at width = List.length (text_rows card ~width) + 1 + List.length qr_rows in
+    if cols <= width && rows_at width <= rows
     then text @ (Blank :: List.map (fun row -> Qr_row row) qr_rows)
-    else
-      text
-      @ [ Blank
-        ; Note
-            (Printf.sprintf
-               "the QR needs %d columns and %d rows; enlarge the window to draw it, or use the link"
-               cols needed_rows)
-        ]
+    else (
+      (* What is asked for is what is missing: a window already wide enough is
+         not asked to grow, and the rows are counted at the width the QR will
+         have, because a wider card cuts its link into fewer rows. *)
+      let columns = max width cols in
+      text @ [ Blank; Qr_needs { columns; rows = rows_at columns } ])
 ;;

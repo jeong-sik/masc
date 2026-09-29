@@ -17025,6 +17025,18 @@ let render_play_card (state : state) card =
               c.push (play_card_indent ^ text)
           | Masc_tui_play_card.Note text ->
               c.push_styled ~style:(Theme.warn ()) (play_card_indent ^ text)
+          | Masc_tui_play_card.Qr_needs { columns; rows } ->
+              (* The card counts its own cells. The window is those plus what
+                 surrounds them: the frame and the indent beside the width, and
+                 the composer, the agenda strip and the frame around the body
+                 rows. Both are read off this frame, so they cannot drift from
+                 what [surface_chrome] takes. *)
+              c.push_styled ~style:(Theme.warn ())
+                (Printf.sprintf
+                   "%sthe QR needs a window of %d columns by %d rows"
+                   play_card_indent
+                   (columns + (cols - width))
+                   (rows + (terminal_rows - budget)))
           | Masc_tui_play_card.Blank -> c.push_empty ())
         (Masc_tui_play_card.draw card ~width ~rows:budget))
 

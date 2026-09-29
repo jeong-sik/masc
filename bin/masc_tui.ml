@@ -14450,16 +14450,11 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              ("Shared DOS play invites:\n" ^ String.concat "\n" (List.map row invites)))
   | Play_invite_issued (target, result) ->
       state.play_invite_inflight <- false;
-      let link_unreadable () =
-        chat_notice state ~keeper_name:target ~kind:Notice_failure
-          "play invite may exist, but its one-time link was unreadable; list and revoke it before retrying"
-      in
       (match result with
        | Play_answered (Ok invite) ->
            (* The link is a credential the server will not show again. It goes
               to the card and, on [y], the clipboard: not to the chat row,
-              the footer or the session log. A link the card cannot draw is
-              as good as unreadable, and reads the same way below. *)
+              the footer or the session log. *)
            (match
               Masc_tui_play_card.make
                 ~project:Masc_tui_play_card.project_for_terminal
@@ -14467,13 +14462,26 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                 ~expires_at:invite.pii_expires_at ~link:invite.pii_link
             with
             | Ok card ->
+                (* The card this one replaces was the last place the earlier
+                   link could be read: the server keeps only a hash. *)
+                let replaced =
+                  match state.play_invite with
+                  | Play_invite_held previous | Play_invite_shown previous -> Some previous
+                  | Play_invite_none -> None
+                in
                 state.play_invite <- Play_invite_shown card;
                 chat_notice state ~keeper_name:target ~kind:Notice_reply
-                  (Printf.sprintf
-                     "Play invite %s issued, expires %s. /play link shows its link again"
-                     (Masc_tui_play_card.name card) invite.pii_expires_at)
-            | Error _ -> link_unreadable ())
-       | Play_answered (Error _) -> link_unreadable ()
+                  (Masc_tui_play_card.issued_notice card ~replaced)
+            | Error reason ->
+                (* The link is the server's public base URL and a hex token,
+                   so a link the card refuses names the base URL. The reason is
+                   the card's own sentence and carries no part of the link. *)
+                chat_notice state ~keeper_name:target ~kind:Notice_failure
+                  ("play invite may exist, but its link cannot be shown: " ^ reason
+                   ^ "; check MASC_HTTP_BASE_URL, then list and revoke it before retrying"))
+       | Play_answered (Error _) ->
+           chat_notice state ~keeper_name:target ~kind:Notice_failure
+             "play invite may exist, but its one-time link was unreadable; list and revoke it before retrying"
        | Play_refused detail ->
            chat_notice state ~keeper_name:target ~kind:Notice_failure
              ("play invite refused: " ^ detail)
@@ -19501,6 +19509,11 @@ and is loaded on demand through keeper_skill.
         | Some _ | None -> None
       in
       (match input with
+       (* The invite card owns every key, and a paste is keys. One that reached
+          the composer under the card would put the link [y] just copied into a
+          draft that goes to a Keeper on the next Enter. It is first, above the
+          overlays the card is drawn over. *)
+       | Some (Pasted _) when Option.is_some (Masc_tui_types.play_card_shown state) -> ()
        | Some (Pasted paste) when Option.is_some state.lane_addons ->
            (match state.lane_addons with
             | Some ({installer=Some installer;_} as view) ->
@@ -19930,7 +19943,7 @@ and is loaded on demand through keeper_skill.
                 copy_reference_to_terminal render_schedule
                   (Masc_tui_play_card.link card);
                 report_action state "system"
-                  "Copied the invite link to the terminal clipboard"
+                  "Asked the terminal to copy the invite link (OSC 52, unconfirmed)"
             | _, (Play_invite_none | Play_invite_held _ | Play_invite_shown _) -> ())
        | Some key when Option.is_some state.account_login ->
            (match state.account_login with

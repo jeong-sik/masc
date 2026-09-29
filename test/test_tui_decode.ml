@@ -12090,6 +12090,18 @@ let test_play_invite_refusal_says_the_servers_sentence () =
     (Some "HTTP 409: another participant already has this name (held by a keeper)")
     ~status_code:409
     {|{"error":"name_taken","message":"another participant already has this name","taken_by":"keeper"}|};
+  check_sentence "blank and non-string gaps are not listed"
+    (Some "HTTP 409: an invite needs auth (missing: no_public_base_url)")
+    ~status_code:409
+    {|{"error":"not_ready","message":"an invite needs auth","missing":["", 7, "no_public_base_url", null]}|};
+  check_sentence "a missing that lists nothing adds nothing"
+    (Some "HTTP 409: an invite needs auth")
+    ~status_code:409
+    {|{"error":"not_ready","message":"an invite needs auth","missing":["  "]}|};
+  check_sentence "a missing that is not a list adds nothing"
+    (Some "HTTP 409: an invite needs auth")
+    ~status_code:409
+    {|{"error":"not_ready","message":"an invite needs auth","missing":"no_public_base_url"}|};
   check_sentence "a plain sentence stands alone"
     (Some "HTTP 400: hours must be between 1 and 8760, got 0")
     ~status_code:400

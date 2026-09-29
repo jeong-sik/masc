@@ -11,9 +11,10 @@ type t
 val project_for_terminal :
   Masc_tui_terminal_palette.rgb -> Masc_tui_terminal_palette.projected_color option
 (** The colours a QR can be drawn in on this terminal. [None] under NO_COLOR
-    or when the terminal reports no colour depth: a QR drawn in the terminal's
-    own two colours is a pattern of blocks that no phone reads, so the card
-    says so and leaves the link. *)
+    and on a terminal that cannot show an exact black and white (16 colours or
+    fewer, or no colour depth reported): a QR drawn in the terminal's own
+    theme colours is a pattern of blocks that no phone reads, so the card says
+    so and leaves the link. *)
 
 val make :
   project:
@@ -35,6 +36,13 @@ val link : t -> string
 (** The link itself, for the terminal clipboard. The one place it leaves the
     card apart from {!draw}; a caller that logs it has copied a credential. *)
 
+val issued_notice : t -> replaced:t option -> string
+(** The line the conversation keeps of an issue: which invite, when it
+    expires, and that [/play link] opens the card again. It never carries the
+    link. [replaced] is the card this one took the place of: the server keeps
+    only a hash of a link, so the earlier link cannot be shown again, and the
+    line says so. *)
+
 (** One row of the card, in the order they are drawn. The renderer styles each
     kind and pushes it; where the rows fall is decided here, once. *)
 type row =
@@ -42,9 +50,16 @@ type row =
   | Advice of string  (** What the link is, in a few short lines. *)
   | Link_row of string  (** A piece of the link, cut to the width. *)
   | Qr_row of string  (** A row of the QR, already coloured. *)
-  | Note of string  (** Why there is no QR: no colour, or no room. *)
+  | Note of string  (** Why there is no QR: this terminal or this link cannot have one. *)
+  | Qr_needs of { columns : int; rows : int }
+      (** There is no QR because it does not fit. The cells the card needs,
+          in the units of [draw]'s [width] and [rows]: what is asked for is
+          what is missing, so a dimension that already fits comes back as it
+          was given. The caller adds what surrounds the card to say it in
+          window units. *)
   | Blank
 
 val draw : t -> width:int -> rows:int -> row list
 (** The card laid out for [width] cells and [rows] body rows. The QR is drawn
-    only when the whole of it fits: a QR cut short scans as nothing. *)
+    only when the whole of it fits: a QR cut short scans as nothing, so when it
+    does not fit the card says what it needs instead ({!Qr_needs}). *)

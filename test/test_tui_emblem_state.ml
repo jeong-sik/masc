@@ -35,6 +35,27 @@ let test_each_key_owning_overlay_owns_the_keys () =
   check int "the agenda too" 0 state.Types.agenda_scroll;
   check int "and the inspector" 0 state.Types.context_inspector_scroll
 
+(* The invite card holds a link the server will not show again, so it takes
+   the keys only while it is on screen, and the sweep that closes the other
+   overlays leaves it: an unrelated event must not take the only copy. *)
+let test_the_invite_card_owns_the_keys_only_while_shown () =
+  let state = fresh () in
+  let card =
+    match
+      Masc_tui_play_card.make ~project:(fun _ -> None) ~name:"minsu"
+        ~expires_at:"2026-09-30T04:12:33Z" ~link:"https://masc.example.com/play#abc"
+    with
+    | Ok card -> card
+    | Error reason -> failf "the fixture link was refused: %s" reason
+  in
+  state.Types.play_invite <- Types.Play_invite_held card;
+  check bool "a held card does not own the keys" false (Types.modal_owns_keys state);
+  state.Types.play_invite <- Types.Play_invite_shown card;
+  check bool "a shown card owns the keys" true (Types.modal_owns_keys state);
+  Types.close_key_modals state;
+  check bool "the sweep that closes the other overlays leaves it" true
+    (Types.modal_owns_keys state)
+
 let test_the_palette_is_not_one_of_them () =
   (* The palette takes typed text, which the text-field rule already routes;
      it is not a key-swallowing overlay. *)
@@ -56,6 +77,8 @@ let () =
             test_each_key_owning_overlay_owns_the_keys
         ; test_case "the palette is not one of them" `Quick
             test_the_palette_is_not_one_of_them
+        ; test_case "the invite card owns the keys only while shown" `Quick
+            test_the_invite_card_owns_the_keys_only_while_shown
         ] )
     ; ( "motion"
       , [ test_case "moving marks share one pace" `Quick test_moving_marks_share_one_pace ] )

@@ -1,9 +1,9 @@
 """/play invite draws the invite's link and a QR on a card, and keeps them until closed.
 
-The server answers an invite once, and the link it carries is the only way in,
-so the card is the link's only copy on this screen: it stays until Esc or q,
-Enter does not close it, [y] copies the link exactly as issued, and
-/play link brings it back.
+The server answers an invite once and keeps only a hash of its link, so the
+card is where the link is read: it stays until Esc or q, Enter does not close
+it, [y] copies the link exactly as issued, a paste does not reach the composer
+under it, and /play link opens it again.
 
 SOURCE_MODULES makes the PR edited-tests selector run this scenario when the
 card, the request or the terminal writer changes.
@@ -30,6 +30,8 @@ SOURCE_MODULES = (
 
 TOKEN = "3f9a1c07d25b48e6a0c1d7e2f4b86a59c3d10e7f2a4b6c8d9e0f1a2b3c4d5e6f"
 LINK = "https://masc.example.com/play#" + TOKEN
+SECOND_TOKEN = "9c1e2d3f4a5b60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9"
+SECOND_LINK = "https://masc.example.com/play#" + SECOND_TOKEN
 EXPIRES = "2026-09-30T04:12:33Z"
 INVITES = "/api/v1/play/invites"
 ISSUED = (201, {"name": "minsu", "expires_at": EXPIRES, "link": LINK})
@@ -40,6 +42,8 @@ MOUSE_TRACKING_OFF = b"\x1b[?1006;1000l"
 MOUSE_TRACKING_ON = b"\x1b[?1006;1000h"
 CHAT_TITLE = "Keepers ▸ alpha ▸ chat".encode()
 CHAT_HISTORY = "/api/v1/keepers/alpha/chat/history"
+PASTED = b"pasted-under-the-card"
+QR_NEEDS = re.compile(rb"the QR needs a window of (\d+) columns by (\d+) rows")
 
 # The 94-byte fixture link needs QR version 6 at the library's default error
 # correction (level M holds 84 bytes in version 5 and 106 in version 6): 41
@@ -50,7 +54,7 @@ QR_TEXT_ROWS = 25
 
 # The card's body budget is the window less the composer row, the agenda strip
 # when it shows, and five rows of frame. The text above the QR and the QR need
-# 32 of them: 37 or 38 are left in 44 rows, 23 or 24 in 30.
+# 33 of them: 37 or 38 are left in 44 rows, 23 or 24 in 30.
 TALL_ROWS = 44
 SHORT_ROWS = 30
 WIDE_COLUMNS = 110
@@ -102,10 +106,10 @@ def open_chat(process, fd, output):
     h.send_and_wait(process, fd, output, b"m", CHAT_TITLE)
 
 
-def resize(process, fd, output, *, rows: int, needle) -> bytes:
+def resize(process, fd, output, *, rows: int, needle, columns: int = WIDE_COLUMNS) -> bytes:
     return h.resize_and_wait(
         process, fd, output,
-        rows=rows, columns=WIDE_COLUMNS, needle=needle, controls=(h.FULL_REDRAW,),
+        rows=rows, columns=columns, needle=needle, controls=(h.FULL_REDRAW,),
     )
 
 
@@ -127,7 +131,15 @@ def issued_card(binary: str) -> None:
     requests: list[tuple[str, bytes]] = []
     fixtures = h.keeper_runtime_http_fixtures()
     fixtures[CHAT_HISTORY] = (200, [])
-    fixtures[INVITES] = ISSUED
+    links = {"minsu": LINK, "jiwon": SECOND_LINK}
+
+    def issue(body: bytes):
+        if not body:
+            return 200, {"invites": []}
+        name = json.loads(body)["name"]
+        return 201, {"name": name, "expires_at": EXPIRES, "link": links[name]}
+
+    fixtures[INVITES] = h.RequestHttpResponse(issue)
 
     def interact(process, fd, _slave, output, _base):
         open_chat(process, fd, output)
@@ -150,16 +162,37 @@ def issued_card(binary: str) -> None:
             "pty": base64.b64encode(zlib.compress(card)).decode(),
         }), flush=True)
 
-        # A window too short for the whole QR draws none of it and says what it
-        # needs: a QR cut short scans as nothing.
-        resize(process, fd, output, rows=SHORT_ROWS, needle=b"the QR needs")
+        # A window too short for the whole QR draws none of it and says how big
+        # the window must be: a QR cut short scans as nothing. The sentence is
+        # in window units, so it is checked by resizing to exactly that.
+        resize(process, fd, output, rows=SHORT_ROWS, needle=b"the QR needs a window of")
         drawn = settled(process, fd, output)
         assert qr_cells(drawn) == [], "a QR was drawn in a window too short for it"
         assert LINK.encode() in h.screen_text(drawn), (
             "the link is what remains when the QR does not fit"
         )
+        needs = QR_NEEDS.search(h.screen_text(drawn))
+        assert needs is not None, h.screen_text(drawn)
+        need_columns, need_rows = int(needs.group(1)), int(needs.group(2))
+        assert need_columns == WIDE_COLUMNS, (
+            f"a window already wide enough was asked for {need_columns} columns"
+        )
+        assert need_rows > SHORT_ROWS, f"the QR asked for {need_rows} rows in {SHORT_ROWS}"
+        resize(
+            process, fd, output, rows=need_rows - 1, columns=need_columns,
+            needle=b"the QR needs a window of",
+        )
+        assert qr_cells(settled(process, fd, output)) == [], (
+            f"a QR was drawn one row short of the {need_rows} it asked for"
+        )
+        resize(
+            process, fd, output, rows=need_rows, columns=need_columns,
+            needle=UPPER_HALF_BLOCK,
+        )
+        assert qr_cells(settled(process, fd, output)) == [QR_COLUMNS] * QR_TEXT_ROWS, (
+            f"no QR at the {need_rows} rows it asked for"
+        )
         resize(process, fd, output, rows=TALL_ROWS, needle=UPPER_HALF_BLOCK)
-        assert qr_cells(settled(process, fd, output)) == [QR_COLUMNS] * QR_TEXT_ROWS
 
         # A terminal that ignores OSC 52 has only the mouse to copy the link
         # with, so Ctrl-T still hands the mouse back while the card is open.
@@ -169,10 +202,16 @@ def issued_card(binary: str) -> None:
             "Ctrl-T closed the card"
         )
 
+        # A paste is keys. Under the card it would land in the composer, and
+        # the next Enter would send it to the Keeper: [y] puts the link on the
+        # clipboard, so a paste is what an operator does next. It is dropped,
+        # and [y] straight after it shows the card still owns the keys.
+        h.write_all(fd, output, h.PASTE_START + PASTED + h.PASTE_END)
         copied = press_y(process, fd, output)
         assert copied == LINK.encode(), f"the clipboard got {copied!r}"
         h.wait_for_output(
-            process, fd, output, b"Copied the invite link", start=0, timeout=5
+            process, fd, output, b"Asked the terminal to copy the invite link",
+            start=0, timeout=5,
         )
         assert TOKEN.encode() not in h.screen_text(
             settled(process, fd, output)
@@ -190,6 +229,7 @@ def issued_card(binary: str) -> None:
         after = h.screen_text(drawn)
         assert TOKEN.encode() not in after, "the link stayed on screen after the card closed"
         assert qr_cells(drawn) == [], "QR cells stayed on screen after the card closed"
+        assert PASTED not in after, "a paste under the card reached the composer"
         # The conversation says an invite was issued, and never carries its link.
         assert b"Play invite minsu issued" in after, after
 
@@ -198,6 +238,24 @@ def issued_card(binary: str) -> None:
         h.send_and_wait(process, fd, output, b"\r", b"MASC Play invite")
         assert qr_cells(settled(process, fd, output)) == [QR_COLUMNS] * QR_TEXT_ROWS
         assert press_y(process, fd, output) == LINK.encode()
+        h.send_and_wait(process, fd, output, b"\x1b", CHAT_TITLE)
+
+        # A second invite replaces the first card, and the first link cannot be
+        # shown again: /play link now brings back the second, and the first
+        # token is nowhere on the screen.
+        type_line(process, fd, output, b"/play invite jiwon 3")
+        h.send_and_wait(process, fd, output, b"\r", b"MASC Play invite")
+        drawn = settled(process, fd, output)
+        assert SECOND_LINK.encode() in h.screen_text(drawn), "the second card lost its link"
+        assert TOKEN.encode() not in h.screen_text(drawn), "the first link outlived its card"
+        assert press_y(process, fd, output) == SECOND_LINK.encode()
+        h.send_and_wait(process, fd, output, b"\x1b", CHAT_TITLE)
+        assert b"Play invite jiwon issued" in h.screen_text(settled(process, fd, output))
+        type_line(process, fd, output, b"/play link")
+        h.send_and_wait(process, fd, output, b"\r", b"MASC Play invite")
+        assert press_y(process, fd, output) == SECOND_LINK.encode(), (
+            "/play link did not bring back the newest card"
+        )
         h.send_and_wait(process, fd, output, b"\x1b", CHAT_TITLE)
 
         leave(process, fd, output)
@@ -209,9 +267,10 @@ def issued_card(binary: str) -> None:
         http_fixtures=fixtures,
         http_requests=requests,
     )
-    assert posted(requests, INVITES) == [{"name": "minsu", "hours": 2}], (
-        f"the request was {posted(requests, INVITES)!r}"
-    )
+    assert posted(requests, INVITES) == [
+        {"name": "minsu", "hours": 2},
+        {"name": "jiwon", "hours": 3},
+    ], f"the requests were {posted(requests, INVITES)!r}"
 
 
 def refused_invite(binary: str) -> None:
@@ -253,6 +312,95 @@ def refused_invite(binary: str) -> None:
         http_requests=requests,
     )
     assert posted(requests, INVITES) == [{"name": "minsu", "hours": 24}]
+
+
+def unreadable_link(binary: str) -> None:
+    """The server made the invite, but its link is not one a card can draw (a
+    public base URL with no scheme is enough). The card says why and never
+    draws the link, and the request is over: the next invite is sent."""
+    requests: list[tuple[str, bytes]] = []
+    fixtures = h.keeper_runtime_http_fixtures()
+    fixtures[CHAT_HISTORY] = (200, [])
+
+    def issue(body: bytes):
+        if not body:
+            return 200, {"invites": []}
+        if json.loads(body)["name"] == "minsu":
+            return 201, {
+                "name": "minsu", "expires_at": EXPIRES,
+                "link": "masc.example.com/play#" + TOKEN,
+            }
+        return 409, {"error": "not_ready", "message": "auth is off"}
+
+    fixtures[INVITES] = h.RequestHttpResponse(issue)
+
+    def interact(process, fd, _slave, output, _base):
+        open_chat(process, fd, output)
+        resize(process, fd, output, rows=SHORT_ROWS, needle=CHAT_TITLE)
+        type_line(process, fd, output, b"/play invite minsu 2")
+        h.send_and_wait(
+            process, fd, output, b"\r", b"play invite may exist, but its link cannot be shown"
+        )
+        drawn = settled(process, fd, output)
+        assert b"MASC Play invite" not in drawn, "an unreadable link opened a card"
+        assert TOKEN.encode() not in h.screen_text(drawn), "the unreadable link was drawn"
+
+        # The failed request released the guard: this one reaches the server,
+        # and its own answer is what the footer says.
+        type_line(process, fd, output, b"/play invite jiwon 3")
+        h.send_and_wait(process, fd, output, b"\r", b"HTTP 409: auth is off")
+        leave(process, fd, output)
+
+    h.run_terminal_scenario(
+        binary,
+        description="an unreadable invite link is never drawn and does not block the next invite",
+        interact=interact,
+        http_fixtures=fixtures,
+        http_requests=requests,
+    )
+    assert posted(requests, INVITES) == [
+        {"name": "minsu", "hours": 2},
+        {"name": "jiwon", "hours": 3},
+    ], f"the requests were {posted(requests, INVITES)!r}"
+
+
+def without_colour(binary: str) -> None:
+    """Under NO_COLOR there is no black and white the card may draw in, and a
+    QR in the terminal's own colours scans as nothing. It draws none, says so,
+    and the link is still there to copy and send."""
+    requests: list[tuple[str, bytes]] = []
+    fixtures = h.keeper_runtime_http_fixtures()
+    fixtures[CHAT_HISTORY] = (200, [])
+    fixtures[INVITES] = ISSUED
+
+    def interact(process, fd, _slave, output, _base):
+        # NO_COLOR draws no bold either, so the chat is opened by the key the
+        # emblem scenario uses and left by Esc.
+        h.send_and_wait(process, fd, output, b"2", b"MASC Keepers")
+        h.select_keeper_row(process, fd, output, b"alpha")
+        h.send_and_wait(process, fd, output, b"c", CHAT_TITLE)
+        resize(process, fd, output, rows=TALL_ROWS, needle=CHAT_TITLE)
+        type_line(process, fd, output, b"/play invite minsu 2")
+        h.send_and_wait(process, fd, output, b"\r", b"MASC Play invite")
+        drawn = settled(process, fd, output)
+        screen = h.screen_text(drawn)
+        assert LINK.encode() in screen, f"the card lost the link: {screen!r}"
+        assert qr_cells(drawn) == [], "a QR was drawn with no colour to draw it in"
+        assert b"cannot draw the black and white a QR needs" in screen, screen
+        assert press_y(process, fd, output) == LINK.encode()
+        h.send_and_wait(process, fd, output, b"\x1b", CHAT_TITLE)
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Overview")
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(
+        binary,
+        description="the invite card draws no QR under NO_COLOR and keeps the link",
+        interact=interact,
+        http_fixtures=fixtures,
+        http_requests=requests,
+        extra_env={"NO_COLOR": "1"},
+    )
 
 
 def second_request_waits(binary: str) -> None:
@@ -301,6 +449,8 @@ def second_request_waits(binary: str) -> None:
 def run(binary: str) -> None:
     issued_card(binary)
     refused_invite(binary)
+    unreadable_link(binary)
+    without_colour(binary)
     second_request_waits(binary)
     print("play invite card: PASS")
 

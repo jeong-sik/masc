@@ -18,10 +18,16 @@ type removal =
   | Removable of { changes : removal_change list; login_store : string option }
   | Unremovable of string  (** Why the server will not remove it. *)
 type unverified = { runtime_id : string; code : string }
-type saved = Saved_verified | Saved_unverified of unverified * unverified list
+type saved =
+  | Saved_verified
+  | Saved_unverified of unverified * unverified list
+  | Saved_partly of { unverified : unverified list; not_rechecked : string list }
 (** What a save published. [Saved_unverified] names the runtimes the server
     published unmeasured because their provider declined the verification
-    for the account's usage (a spent quota or a rate limit). *)
+    for the account's usage (a spent quota or a rate limit). [Saved_partly]
+    means the server left selected runtimes it did not call again:
+    [not_rechecked] names them and [unverified] lists any that were called and
+    declined for usage. Neither is reported as verified. *)
 type list_view = Clients | Accounts of client
 (** The list opens on [Clients]; choosing one shows [Accounts] of that client:
     a row that adds a new account, then its configured accounts. *)

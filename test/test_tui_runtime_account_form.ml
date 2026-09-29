@@ -489,6 +489,27 @@ let test_muse_sign_in_keeps_the_configured_absolute_command () =
         true
         (String.ends_with ~suffix:"'/custom path/muse' login)" hint))
 
+let test_muse_sign_in_keeps_custom_commands_when_muse_is_installed () =
+  with_muse_env ~path:"/nonexistent-path" ~install_dir:None ~home:"/nonexistent-home" (fun root ->
+    let bindir = Filename.concat root "bin" in
+    Unix.mkdir bindir 0o755;
+    List.iter (fun name -> write_executable (Filename.concat bindir name))
+      [ "muse"; "muse-custom" ];
+    let cwd = Sys.getcwd () in
+    Fun.protect ~finally:(fun () -> Sys.chdir cwd) (fun () ->
+      Sys.chdir root;
+      Masc_test_deps.with_process_env "PATH" (Some bindir) (fun () ->
+        List.iter
+          (fun (command, expected) ->
+            match declare_muse_sign_in (muse_current ~command) with
+            | None -> Alcotest.fail "expected a sign-in hint"
+            | Some hint ->
+              Alcotest.(check bool) ("configured client signs in: " ^ command) true
+                (String.ends_with ~suffix:(Filename.quote expected ^ " login)") hint))
+          [ "muse-custom", Filename.concat bindir "muse-custom"
+          ; "./bin/muse-custom", Filename.concat (Sys.getcwd ()) "./bin/muse-custom"
+          ])))
+
 let test_muse_rows_state_the_authentication_boundary () =
   match F.open_on ~home_dir:"/home/op" (muse_current ~command:"muse") with
   | Error reason -> Alcotest.fail reason
@@ -565,6 +586,8 @@ let () =
             test_muse_sign_in_prefers_the_resolved_executable
         ; Alcotest.test_case "muse sign-in keeps the configured absolute command" `Quick
             test_muse_sign_in_keeps_the_configured_absolute_command
+        ; Alcotest.test_case "muse sign-in keeps custom commands when muse is installed" `Quick
+            test_muse_sign_in_keeps_custom_commands_when_muse_is_installed
         ; Alcotest.test_case "muse rows state the authentication boundary" `Quick
             test_muse_rows_state_the_authentication_boundary
         ; Alcotest.test_case "muse narrow pane hides partial commands and copies whole" `Quick

@@ -145,12 +145,8 @@ let inherited_home = function
    client to run, and sign in, on the default login. Antigravity has none;
    its OAuth file exists before it can be typed here. *)
 let muse_executable command =
-  match command with
-  | Some configured when not (Filename.is_relative configured) -> configured
-  | _ ->
-    (match Runtime_official_cli_install.executable Muse with
-     | Some resolved -> resolved
-     | None -> (match command with Some configured -> configured | None -> "muse"))
+  let command = match command with Some configured -> configured | None -> "muse" in
+  Runtime_official_cli_install.spawn_path Muse ~command
 ;;
 
 let command_halves (base : D.base) home =

@@ -1,17 +1,14 @@
 module Worker = Server_workspace_memory_curator
-module Inventory = Masc.Workspace_memory_context
+module Ledger = Masc.Workspace_memory_ledger
+module Request = Masc.Workspace_memory_request
+module Decision = Masc.Workspace_memory_decision
 module Current = Masc.Keeper_memory_os_current
 module Types = Masc.Keeper_memory_os_types
-module Proposals = Masc.Workspace_memory_proposal
 module Runs = Masc.Exact_lane_run_registry
 
 let require = function Ok value -> value | Error detail -> Alcotest.fail detail
 let field name json = Yojson.Safe.Util.member name json
-let list = Yojson.Safe.Util.to_list
 let string = Yojson.Safe.Util.to_string
-let stored base_path = match Proposals.list ~base_path with
-  | Ok rows -> rows
-  | Error (Proposals.Invalid detail | Unavailable detail) -> Alcotest.fail detail
 
 let commit ?(keeper_id = "writer") base_path claim =
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
@@ -21,276 +18,123 @@ let commit ?(keeper_id = "writer") base_path claim =
   let fact = Types.observed ~claim ~category:Types.Fact ~now
       ~origin:{ kind = Types.Authored; trace_id = "curator-test" } in
   Current.replace ~keepers_dir ~keeper_id ~expected_revision ~now
-    ~source:{ kind = Current.Librarian; trace_id = "curator-test" } ~facts:[fact] () |> require |> ignore
+    ~source:{ kind = Current.Librarian; trace_id = "curator-test" } ~facts:[fact] ()
+  |> require |> ignore
 
-let proposal context =
-  let ids = Inventory.to_json context |> field "sources" |> list
-    |> List.map (fun source -> field "source_id" source) in
-  `Assoc [ "shared_claims", `List [];
-           "conflicts", `List [];
-           "excluded", `List (List.map (fun source_id ->
-             `Assoc [ "source_id", source_id; "reason", `String "No semantic assertion in this injected-runner test" ]) ids) ]
+let answer selected =
+  `Assoc ["decisions", `List (List.map (fun (fact : Ledger.pending_fact) ->
+    `Assoc ["fact_id", `String (Request.fact_id fact.fact);
+            "kind", `String "create_claim"; "value", `String fact.claim]) selected)]
 
 let await_idle ~clock ~base_path =
-  (* Test harness deadline only: a broken wake/drain must fail CI, not hang it. *)
   Eio.Time.with_timeout_exn clock 5. (fun () ->
     while not (Worker.For_testing.is_idle ~base_path) do Eio.Fiber.yield () done)
 
 let with_base f =
   Prompt_registry.set_markdown_dir "../config/prompts";
-  let base_path = Filename.temp_dir "workspace-curator-lane" "" in
+  let base_path = Filename.temp_dir "workspace-curator-ledger" "" in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
     Eio_main.run (fun env -> f base_path env#clock))
 
-let test_commit_coalescing_and_restart () = with_base (fun base_path clock ->
+let test_changed_facts_update_ledger_and_no_work_is_silent () = with_base (fun base_path clock ->
   commit base_path "Original observation";
-  let first_context = Inventory.collect ~base_path |> require in
-  let started, signal_started = Eio.Promise.create () in
-  let release, signal_release = Eio.Promise.create () in
-  let contexts = ref [] in
-  let execute ~rendered_prompt:_ context =
-    contexts := !contexts @ [Inventory.fingerprint context];
-    if List.length !contexts = 1 then (
-      Eio.Promise.resolve signal_started ();
-      Eio.Promise.await release);
-    Ok (proposal context, "test.admitted-slot") in
+  let calls = ref 0 in
+  let execute ~rendered_prompt ~selected ~ledger:_ =
+    incr calls;
+    Alcotest.(check bool) "prompt includes only changed facts" true
+      (String.contains rendered_prompt 'O');
+    Ok (answer selected, "test.slot") in
   Eio.Switch.run (fun sw ->
-    Worker.For_testing.start ~sw ~base_path ~execute;
-    Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await started);
-    commit base_path "Intermediate observation";
-    commit ~keeper_id:"reviewer" base_path "Independent reviewer observation";
-    commit base_path "Latest corrected observation";
-    let latest = Inventory.collect ~base_path |> require in
-    Eio.Promise.resolve signal_release ();
+    Worker.For_testing.start ~sw ~base_path ~max_input_bytes:8192 ~execute;
     await_idle ~clock ~base_path;
-    Alcotest.(check (list string)) "in-flight input survives; pending work captures the latest commit"
-      [Inventory.fingerprint first_context; Inventory.fingerprint latest] !contexts;
-    (match Masc.Workspace_memory_publication.observe ~base_path with
-     | Available descriptor ->
-       Alcotest.(check string) "Keeper discovery points at latest captured input"
-         (Inventory.fingerprint latest) descriptor.context_sha256;
-       Alcotest.(check (list string)) "publishing the newer proposal removes the superseded one"
-         [descriptor.proposal_id] (List.map fst (stored base_path))
-     | Missing | Unavailable _ -> Alcotest.fail "curator did not publish discovery");
+    Alcotest.(check int) "one initial model call" 1 !calls;
+    let ledger = Ledger.load ~base_path |> require in
+    Alcotest.(check int) "first fact assigned" 1 (List.length (Ledger.dispositions ledger));
     ignore (Worker.request ~base_path);
     await_idle ~clock ~base_path;
-    Alcotest.(check int) "unchanged wake does not call a model" 2 (List.length !contexts);
-    let published_id = match Masc.Workspace_memory_publication.observe ~base_path with
-      | Available descriptor -> descriptor.proposal_id
-      | Missing | Unavailable _ -> Alcotest.fail "missing prior publication" in
-    Sys.remove (Filename.concat base_path (Common.masc_dirname ^ "/workspace-memory/publication.json"));
-    ignore (Worker.request ~base_path);
+    Alcotest.(check int) "unchanged wake makes no model call" 1 !calls;
+    commit ~keeper_id:"reviewer" base_path "Independent observation";
     await_idle ~clock ~base_path;
-    Alcotest.(check int) "missing descriptor repair does not call a model" 2 (List.length !contexts);
-    (match Masc.Workspace_memory_publication.observe ~base_path with
-     | Available descriptor -> Alcotest.(check string) "successful exact output repairs the same discovery id"
-         published_id descriptor.proposal_id
-     | Missing | Unavailable _ -> Alcotest.fail "cache did not repair missing descriptor");
-    let id, _ = List.hd (stored base_path) in
-    let status, response = Server_workspace_memory_proposals.get ~base_path ~id:(Some id) in
-    Alcotest.(check bool) "existing reader API reaches the background result" true (status = `OK);
-    Alcotest.(check string) "never claims semantic verification" "not_performed"
-      (response |> field "semantic_verification" |> string);
-    Worker.For_testing.stop ~base_path);
-  Eio.Switch.run (fun sw ->
-    Worker.For_testing.start ~sw ~base_path ~execute;
-    await_idle ~clock ~base_path;
-    Alcotest.(check int) "startup reconciliation reuses the exact published inventory" 2 (List.length !contexts);
+    Alcotest.(check int) "new fact makes one more call" 2 !calls;
+    let ledger = Ledger.load ~base_path |> require in
+    Alcotest.(check int) "both facts assigned" 2 (List.length (Ledger.dispositions ledger));
     Worker.For_testing.stop ~base_path))
 
-let test_failure_then_changed_input () = with_base (fun base_path clock ->
+let test_failure_preserves_ledger_and_later_change_retries () = with_base (fun base_path clock ->
   commit base_path "First observation";
   let fail = ref true in
-  let execute ~rendered_prompt:_ context = if !fail then Error "injected provider failure" else Ok (proposal context, "test.slot") in
+  let execute ~rendered_prompt:_ ~selected ~ledger:_ =
+    if !fail then Error "injected provider failure" else Ok (answer selected, "test.slot") in
   Eio.Switch.run (fun sw ->
-    Worker.For_testing.start ~sw ~base_path ~execute;
+    Worker.For_testing.start ~sw ~base_path ~max_input_bytes:8192 ~execute;
     await_idle ~clock ~base_path;
-    Alcotest.(check int) "failure writes no empty success proposal" 0 (List.length (stored base_path));
+    Alcotest.(check int) "failed answer stores no assignment" 0
+      (List.length (Ledger.dispositions (Ledger.load ~base_path |> require)));
     let canonical = Unix.realpath base_path in
-    Alcotest.(check bool) "failed input remains observable in the exact registry" true
+    Alcotest.(check bool) "failure remains in exact runs" true
       (List.exists (fun (run : Runs.run) ->
         String.equal run.actor canonical && run.lane = Runs.Workspace_curator &&
         match run.status with Runs.Completed { outcome = Runs.Failed _; _ } -> true | _ -> false)
         (Runs.list_runs (Runs.global ())));
     fail := false;
-    commit base_path "New evidence after provider recovery";
+    commit ~keeper_id:"reviewer" base_path "New observation";
     await_idle ~clock ~base_path;
-    Alcotest.(check int) "next commit remains eligible after failure" 1 (List.length (stored base_path));
-    let before = Masc.Workspace_memory_publication.observe ~base_path in
-    fail := true;
-    commit base_path "Changed facts while provider unavailable";
-    await_idle ~clock ~base_path;
-    Alcotest.(check bool) "failed new curation preserves prior captured publication, not current facts"
-      true (before = Masc.Workspace_memory_publication.observe ~base_path);
-    let live = Inventory.collect ~base_path |> require in
-    (match before with
-     | Available descriptor -> Alcotest.(check bool) "old descriptor is not a claim of current source currency"
-         false (descriptor.context_sha256 = Inventory.fingerprint live)
-     | Missing | Unavailable _ -> Alcotest.fail "recovered proposal was not published");
+    Alcotest.(check int) "both pending facts assigned after recovery" 2
+      (List.length (Ledger.dispositions (Ledger.load ~base_path |> require)));
     Worker.For_testing.stop ~base_path))
 
-let test_directory_alias () = with_base (fun base_path clock ->
-  let alias = base_path ^ "-alias" in
-  Unix.symlink base_path alias;
-  Fun.protect ~finally:(fun () -> Unix.unlink alias) (fun () ->
-    commit base_path "Original observation";
-    let count = ref 0 in
-    let execute ~rendered_prompt:_ context = incr count; Ok (proposal context, "test.slot") in
-    Eio.Switch.run (fun sw ->
-      Worker.For_testing.start ~sw ~base_path:alias ~execute;
-      await_idle ~clock ~base_path:alias;
-      commit base_path "Committed through physical directory";
-      await_idle ~clock ~base_path:alias;
-      Alcotest.(check int) "physical event wakes the alias-started owner" 2 !count;
-      Worker.For_testing.stop ~base_path:alias)))
-
-let test_the_owner_loop_does_not_outlive_its_switch () = with_base (fun base_path clock ->
-  commit base_path "Original observation";
-  let execute ~rendered_prompt:_ context = Ok (proposal context, "test.slot") in
-  (* Nothing calls [For_testing.stop] here, because the server does not either:
-     the switch is the owner's whole life. The loop parks on [owner.wake] once
-     the backlog is empty, and the release hook that sets [stopped] runs only
-     after every ordinary fiber has finished, so it cannot be what ends it.
-
-     Test harness deadline only: a loop that outlives its switch must fail CI,
-     not hang it. *)
-  match
-    Eio.Time.with_timeout clock 5. (fun () ->
-      Eio.Switch.run (fun sw ->
-        Worker.For_testing.start ~sw ~base_path ~execute;
-        await_idle ~clock ~base_path);
-      Ok ())
-  with
-  | Ok () -> ()
-  | Error `Timeout ->
-    Alcotest.fail "the owner's loop held its switch open after the body returned")
-
-let test_prompt_change_is_a_new_request () = with_base (fun base_path clock ->
-  let key = Prompt_names.workspace_memory_curator in
-  let mutation = Server_prompt_override_mutation.apply ~base_path in
-  let applied request = match mutation request with
-    | Ok applied -> applied
-    | Error (Server_prompt_override_mutation.Validation detail | Persistence detail) -> Alcotest.fail detail in
-  let set value = Server_prompt_override_request.Set { key; value } in
-  let clear = Server_prompt_override_request.Clear { key } in
-  let path = Filename.concat (Filename.concat base_path Common.masc_dirname) "prompt_overrides.json" in
-  let persisted () = match Prompt_override_persistence.load ~path with
-    | Ok entries -> entries
-    | Error error -> Alcotest.fail (Prompt_override_persistence.error_to_string error) in
-  let first = "Initial override. {{workspace_memory_inventory}}" in
-  let second = "Changed curator instructions. Preserve attribution. {{workspace_memory_inventory}}" in
-  commit base_path "Stable source observation";
-  let inventory = Inventory.collect ~base_path |> require |> Inventory.fingerprint in
-  let prompts = ref [] in
-  let execute ~rendered_prompt context =
-    Alcotest.(check string) "all executions retain identical memory" inventory (Inventory.fingerprint context);
-    prompts := rendered_prompt :: !prompts;
-    Ok (proposal context, "test.slot") in
-  Fun.protect ~finally:(fun () -> Prompt_registry.clear_prompt_override key) (fun () ->
-    Alcotest.(check bool) "saved without an owner does not claim queued execution" true
-      ((applied (set first)).curator_refresh = Some Worker.No_owner);
-    Eio.Switch.run (fun sw ->
-      Worker.For_testing.start ~sw ~base_path ~execute;
-      await_idle ~clock ~base_path;
-      let result = applied (set second) in
-      Alcotest.(check bool) "successful persisted HTTP mutation queues existing owner" true
-        (result.curator_refresh = Some Worker.Queued);
-      Alcotest.(check bool) "new override persisted before caller sees success" true
-        (List.exists (fun (entry : Prompt_override_persistence.entry) -> entry.key = key && entry.value = second) (persisted ()));
-      await_idle ~clock ~base_path;
-      Alcotest.(check int) "changed prompt with identical sources executes without explicit wake" 2 (List.length !prompts);
-      Alcotest.(check bool) "delivered rendered prompt changed" true (List.hd !prompts <> List.nth !prompts 1);
-      let canonical = Unix.realpath base_path in
-      let latest = Runs.list_runs (Runs.global ()) |> List.find (fun (run : Runs.run) ->
-        String.equal run.actor canonical && run.lane = Runs.Workspace_curator) in
-      let full = match Runs.get (Runs.global ()) ~run_id:latest.run_id with Some run -> run | None -> Alcotest.fail "missing exact run" in
-      let Runs.Exact_input input = full.input in
-      Alcotest.(check string) "registry preserved the exact delivered prompt" (List.hd !prompts)
-        (input |> field "prompt" |> field "rendered" |> string);
-      (match mutation (set "{{unknown_curator_variable}}") with
-       | Error (Server_prompt_override_mutation.Validation _) -> ()
-       | _ -> Alcotest.fail "invalid template accepted");
-      Alcotest.(check bool) "rejected mutation does not wake owner" true (Worker.For_testing.is_idle ~base_path);
-      Alcotest.(check string) "rejected mutation preserves effective prompt" second (Prompt_registry.get_prompt key);
-      Sys.rename path (path ^ ".saved");
-      Unix.mkdir path 0o700;
-      Fun.protect ~finally:(fun () -> Unix.rmdir path; Sys.rename (path ^ ".saved") path) (fun () ->
-        List.iter (fun request ->
-          (match mutation request with
-           | Error (Server_prompt_override_mutation.Persistence _) -> ()
-           | _ -> Alcotest.fail "blocked persisted mutation unexpectedly succeeded");
-          Alcotest.(check bool) "failed persistence does not wake owner" true (Worker.For_testing.is_idle ~base_path);
-          Alcotest.(check string) "failed persistence preserves effective prompt" second (Prompt_registry.get_prompt key))
-          [set first; clear]);
-      Alcotest.(check bool) "persisted clear queues reevaluation" true
-        ((applied clear).curator_refresh = Some Worker.Queued);
-      Alcotest.(check bool) "clear removed persisted override before success" false
-        (List.exists (fun (entry : Prompt_override_persistence.entry) -> entry.key = key) (persisted ()));
-      await_idle ~clock ~base_path;
-      Alcotest.(check int) "clear executes restored file prompt with unchanged memory" 3 (List.length !prompts);
-      Worker.For_testing.stop ~base_path)))
-
-let test_failed_publication_is_not_success () = with_base (fun base_path clock ->
-  commit base_path "Original source";
-  let execute ~rendered_prompt:_ context = Ok (proposal context, "test.slot") in
-  let directory = Filename.concat base_path (Common.masc_dirname ^ "/workspace-memory") in
-  Fs_compat.mkdir_p directory;
-  Fs_compat.save_file (Filename.concat directory "publication.json") "{broken descriptor";
+let test_invalid_model_answer_is_not_saved () = with_base (fun base_path clock ->
+  commit base_path "Stable observation";
+  let execute ~rendered_prompt:_ ~selected:_ ~ledger:_ =
+    Ok (`Assoc ["decisions", `List []], "test.slot") in
   Eio.Switch.run (fun sw ->
-    Worker.For_testing.start ~sw ~base_path ~execute;
+    Worker.For_testing.start ~sw ~base_path ~max_input_bytes:8192 ~execute;
     await_idle ~clock ~base_path;
-    Alcotest.(check int) "immutable model output still exists for inspection" 1 (List.length (stored base_path));
-    (match Masc.Workspace_memory_publication.observe ~base_path with
-     | Unavailable _ -> () | Missing | Available _ -> Alcotest.fail "invalid latest was overwritten");
-    let canonical = Unix.realpath base_path in
-    let runs = Runs.list_runs (Runs.global ()) |> List.filter (fun (run : Runs.run) ->
-      String.equal run.actor canonical && run.lane = Runs.Workspace_curator) in
-    Alcotest.(check int) "one matching publication attempt exists" 1 (List.length runs);
-    Alcotest.(check bool) "publication failure has no successful run" true
-      (List.for_all (fun (run : Runs.run) -> match run.status with
-       | Runs.Completed { outcome = Runs.Failed _; _ } -> true | _ -> false) runs);
+    Alcotest.(check int) "invalid answer did not write an assignment" 0
+      (List.length (Ledger.dispositions (Ledger.load ~base_path |> require)));
     Worker.For_testing.stop ~base_path))
 
-(* The curator walks its CLI slots when it admits no HTTP slot, as every
-   exact lane does, and holds a CLI answer to the same proposal decode as an
-   HTTP one. The runner stands in for the official client. *)
-let test_cli_slots_answer_the_curator () =
+let test_owner_switch_liveness () = with_base (fun base_path clock ->
+  commit base_path "Observation";
+  let execute ~rendered_prompt:_ ~selected ~ledger:_ = Ok (answer selected, "test.slot") in
+  match Eio.Time.with_timeout clock 5. (fun () ->
+    Eio.Switch.run (fun sw ->
+      Worker.For_testing.start ~sw ~base_path ~max_input_bytes:8192 ~execute;
+      await_idle ~clock ~base_path)) with
+  | Ok () -> ()
+  | Error `Timeout -> Alcotest.fail "curator owner held its switch open")
+
+let test_cli_answer_uses_same_decision_validation () =
   Exact_output_fixture.with_official_client_runtimes (fun () ->
     with_base (fun base_path _clock ->
-      commit base_path "Observation a CLI slot curates";
-      let context = Inventory.collect ~base_path |> require in
-      let resolved =
-        { Runtime_exact_output_registry.selected_slots = []
-        ; cli_slots = [ Exact_output_fixture.cli_primary_runtime ] }
-      in
-      let asked = ref [] in
-      let answering ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt:_ =
-        asked := !asked @ [ runtime_id ];
-        Ok (Yojson.Safe.to_string (proposal context)) in
-      (match
-         Worker.For_testing.execute ~cli_runner:answering ~base_path ~resolved
-           ~rendered_prompt:"curate" context
-       with
-       | Ok (_, slot) ->
-         Alcotest.(check string) "the CLI slot answered"
-           Exact_output_fixture.cli_primary_runtime slot;
-         Alcotest.(check (list string)) "the client was asked once"
-           [ Exact_output_fixture.cli_primary_runtime ] !asked
-       | Error detail -> Alcotest.failf "the curator refused its CLI slot: %s" detail);
-      let refused ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ = Ok "{}" in
-      match
-        Worker.For_testing.execute ~cli_runner:refused ~base_path ~resolved
-          ~rendered_prompt:"curate" context
-      with
-      | Ok _ -> Alcotest.fail "a CLI answer the proposal decode refuses was accepted"
+      let pending : Ledger.pending_fact =
+        { fact = Ledger.Ordinary { keeper_id = "writer";
+            claim_sha256 = Digestif.SHA256.(digest_string "Observation" |> to_hex) };
+          claim = "Observation" } in
+      let selected = [pending] in
+      let resolved = { Runtime_exact_output_registry.selected_slots = [];
+                       cli_slots = [Exact_output_fixture.cli_primary_runtime] } in
+      let answering ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+        Ok (Yojson.Safe.to_string (answer selected)) in
+      (match Worker.For_testing.execute ~cli_runner:answering ~base_path ~resolved
+         ~rendered_prompt:"curate" ~selected ~ledger:Ledger.empty with
+       | Ok (_, runtime_id) -> Alcotest.(check string) "CLI answered"
+           Exact_output_fixture.cli_primary_runtime runtime_id
+       | Error detail -> Alcotest.fail detail);
+      let invalid ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ = Ok "{}" in
+      match Worker.For_testing.execute ~cli_runner:invalid ~base_path ~resolved
+        ~rendered_prompt:"curate" ~selected ~ledger:Ledger.empty with
+      | Ok _ -> Alcotest.fail "invalid CLI decision was accepted"
       | Error _ -> ()))
 
 let () = Alcotest.run "workspace curator lane"
-  [ "background proposal publication",
-    [ Alcotest.test_case "failed publication retains output but never succeeds" `Quick test_failed_publication_is_not_success
-    ; Alcotest.test_case "commits coalesce, reader sees proposals, restart reconciles" `Quick test_commit_coalescing_and_restart
-    ; Alcotest.test_case "failure stays visible and a later commit proceeds" `Quick test_failure_then_changed_input
-    ; Alcotest.test_case "canonical directory aliases share an owner" `Quick test_directory_alias
-    ; Alcotest.test_case "changed prompt is delivered and recorded with unchanged facts" `Quick test_prompt_change_is_a_new_request
-    ; Alcotest.test_case "the owner's loop does not outlive its switch" `Quick test_the_owner_loop_does_not_outlive_its_switch
-    ; Alcotest.test_case "CLI slots answer when no HTTP slot is admitted" `Quick test_cli_slots_answer_the_curator ] ]
+  [ "changed-fact ledger",
+    [ Alcotest.test_case "changed facts persist; no work is silent" `Quick
+        test_changed_facts_update_ledger_and_no_work_is_silent
+    ; Alcotest.test_case "failed call preserves ledger; new commit retries" `Quick
+        test_failure_preserves_ledger_and_later_change_retries
+    ; Alcotest.test_case "invalid answer cannot be saved" `Quick
+        test_invalid_model_answer_is_not_saved
+    ; Alcotest.test_case "owner switch closes" `Quick test_owner_switch_liveness
+    ; Alcotest.test_case "CLI answer uses decision validation" `Quick
+        test_cli_answer_uses_same_decision_validation ] ]

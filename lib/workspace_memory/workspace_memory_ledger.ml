@@ -57,6 +57,7 @@ type t =
 
 type reconciliation =
   { ledger : t
+  ; current_facts : pending_fact list
   ; new_facts : pending_fact list
   ; vanished : fact_ref list
   }
@@ -376,8 +377,9 @@ let reconcile t keepers =
       (Fact_map.empty, [])
       stores
   in
+  let current_facts = List.rev observed_order in
   let new_facts =
-    List.rev observed_order
+    current_facts
     |> List.filter (fun pending -> not (Fact_map.mem pending.fact t.dispositions))
   in
   let vanished =
@@ -391,7 +393,7 @@ let reconcile t keepers =
       []
     |> List.rev
   in
-  { ledger = remove vanished t; new_facts; vanished }
+  { ledger = remove vanished t; current_facts; new_facts; vanished }
 
 type decision =
   | Join_claim of string

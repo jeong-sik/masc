@@ -6694,6 +6694,14 @@ let roster_pane_hidden (state : state) =
   Masc_tui_roster_pane.effective_hidden state.roster_pane_preference
     ~in_chat:(state.view = Keepers Keeper_message)
 
+(* Called at interaction and presentation boundaries with the surface width,
+   after reserving any Activity pane. Visibility preference survives a resize;
+   focus does not: an absent roster cannot keep arrows, Enter or the caret. *)
+let reconcile_keeper_message_focus (state : state) ~cols =
+  if state.view = Keepers Keeper_message
+     && not (Masc_tui_roster_pane.shown ~hidden:(roster_pane_hidden state) ~cols)
+  then state.keeper_message_focus <- Right_pane
+
 (* Which field a typed character lands in.
 
    Seven fields take letters. Paste named four of them and typing named all

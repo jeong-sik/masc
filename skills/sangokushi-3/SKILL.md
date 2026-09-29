@@ -1,6 +1,6 @@
 ---
 name: sangokushi-3
-description: "삼국지 III (Koei 1993, Korean) on the shared DOS machine: boot with KOEI.COM, the copy-protection code, the numbered prompts from main menu to the first ruler's turn, going back and fixing a typed number, a 2-player hotseat, ending a month, going to war, placing officers (digits move, 0 places), battle commands, saving, and the ending. Apply a fact only when the visible prompt matches it."
+description: "삼국지 III (Koei 1993, Korean) on the shared DOS machine: boot with KOEI.COM, the copy-protection code, the numbered prompts from main menu to the first ruler's turn, going back and fixing a typed number, a 2-player hotseat, ending a month, going to war, placing officers (digits move, 0 places), battle commands, saving, the ending, and watching an all-AI game. Apply a fact only when the visible prompt matches it."
 ---
 
 # 삼국지 III
@@ -165,8 +165,5 @@ failure.` Until the file is added, expect that line instead of the ending.
 ## Watching an all-AI game
 
 `0` players starts a game with no human ruler: 표시군주 `n`, and the months run
-on `space`. Every AI war is shown on the battle map. In scenario 6 one such
-run stopped at 237년 1월: a war carried over at 26 강하 reopened as 조예군
-against 조예군 with no attacking soldiers, and after 조예 retreated the
-machine kept running without asking for a key. Restore a checkpoint taken
-before the carried-over war rather than stepping further.
+on `space`. Every AI war is shown on the battle map, and each `<장수>의 전술`
+line waits for a key.

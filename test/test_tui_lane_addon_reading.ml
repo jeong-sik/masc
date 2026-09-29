@@ -68,14 +68,14 @@ let test_unapplied_declarations_are_not_active_workers () =
 
 let test_directory_issue_is_not_a_declaration () =
   let json = Yojson.Safe.from_string
-    {|{"instances":[],"rows":[],"coverage":[],"configuration":{"directory":"/addons","complete":true,"declarations":[],"issues":[{"source_path":"/addons","id":null,"message":"directory unreadable"}]}}|} in
+    {|{"instances":[],"rows":[],"coverage":[],"configuration":{"directory":"/addons","complete":false,"declarations":[],"issues":[{"source_path":"/addons","id":null,"message":"directory unreadable"}]}}|} in
   match UI.decode json with
   | Error detail -> fail ("directory issue fixture did not decode: " ^ detail)
   | Ok snapshot ->
     check bool "directory problem without a parsed TOML is zero declarations" true
       (UI.installation_reading { UI.initial with snapshot=Some snapshot }
        = UI.Observed { declared=0; active=0; failed_workers=0;
-                       configuration_issues=1; complete=true;
+                       configuration_issues=1; complete=false;
                        freshness=UI.Current })
 
 (* The status row's reading of the view. Measured on the live server at 150

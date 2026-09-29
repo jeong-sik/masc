@@ -1,8 +1,16 @@
+(* config/tools/keeper_portrait_read.toml states these three numbers as
+   literals; test_keeper_portrait_read compares them with these. The renderer
+   accepts a wider range ({!Keeper_portrait_draw.min_size} up), which the TUI
+   uses for small terminal cells; this tool keeps to the range it declares. *)
+let minimum_size = 48
+let maximum_size = 512
+let default_size = 160
+
 let size_arg args =
   match args with
   | `Assoc fields ->
       (match List.assoc_opt "size" fields with
-       | None -> Ok 160
+       | None -> Ok default_size
        | Some (`Int size) -> Ok size
        | Some _ -> Error "size must be an integer")
   | _ -> Error "arguments must be an object"
@@ -36,9 +44,14 @@ let handle ~keeper_name ~tool_name ~start_time ~args =
   match size_arg args with
   | Error message -> Tool_result.make_err ~tool_name ~class_:Tool_result.Policy_rejection ~start_time message
   | Ok size ->
+      let refuse () =
+        Tool_result.make_err ~tool_name ~class_:Tool_result.Policy_rejection ~start_time
+          (Printf.sprintf "size must be between %d and %d" minimum_size maximum_size)
+      in
+      if size < minimum_size || size > maximum_size then refuse ()
+      else
       (match Keeper_portrait_draw.size_of_int size with
-       | None -> Tool_result.make_err ~tool_name ~class_:Tool_result.Policy_rejection ~start_time
-           (Printf.sprintf "size must be between %d and %d" Keeper_portrait_draw.min_size Keeper_portrait_draw.max_size)
+       | None -> refuse ()
        | Some size ->
            let body = Keeper_portrait_look.body_of_name keeper_name in
            let equipment = Keeper_portrait_look.equipment_of_name keeper_name in

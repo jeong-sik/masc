@@ -220,7 +220,7 @@ let test_a_body_asks_for_its_picture () =
 
 let about ~cols ~frame display =
   Screen.about_rows ~style:Screen.Painted ~cols ~rows:24 ~caption
-    ~frame ~keepers:["rondo"; "sangsu"; "indie-geek-blue"; "jazz-developer"; "extra"]
+    ~frame ~keepers:["fixture-alpha"; "fixture-bravo"; "fixture-charlie"; "fixture-delta"; "extra"]
     ~display ~project ~origin
 
 let test_the_arrival_gathers_then_stops () =

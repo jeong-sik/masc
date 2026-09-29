@@ -2801,7 +2801,7 @@ let test_detail_tab_hint_projects_the_table () =
    as the drift they were written to close. This list is the contract:
    changing it is a decision, not a slip. Sources are the guarded arms in
    masc_tui.ml (T/A// at Detail_identity, R at Detail_identity, L/P and one
-   digit per login scope on the GitHub tab, e for the settings form, Q/B for
+   digit per login scope on the GitHub tab, e for the settings form, b/B for
    the Board requeue on Info). *)
 let live_tab_keys : (Masc_tui_types.keeper_detail_tab * string list) list =
   [ Detail_info, [ "b"; "B" ]

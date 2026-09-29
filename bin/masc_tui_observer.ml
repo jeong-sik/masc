@@ -575,14 +575,14 @@ let event_of_json (json : Yojson.Safe.t) =
       Error "event is not a JSON object"
 
 type t = {
-  pending : Buffer.t;
+  lines : Masc_tui_sse_lines.t;
   mutable frame_cursor : (int option, string) result;
   mutable frame_data : string list;
   mutable frame_error : string option;
 }
 
 let create () =
-  { pending = Buffer.create 4096; frame_cursor = Ok None; frame_data = []; frame_error = None }
+  { lines = Masc_tui_sse_lines.create (); frame_cursor = Ok None; frame_data = []; frame_error = None }
 
 (* The event's first member when it is its "type", read without lexing the
    members after it. The server writes the type first. *)
@@ -660,16 +660,4 @@ let feed_line t raw_line =
 (* A cursor is committed with its frame, not when an id/data line happens to
    end a network chunk. A disconnect before the blank line must replay it. *)
 let feed t chunk =
-  Buffer.add_string t.pending chunk;
-  let buffered = Buffer.contents t.pending in
-  match String.rindex_opt buffered '\n' with
-  | None -> []
-  | Some last_newline ->
-      let complete = String.sub buffered 0 last_newline in
-      let remainder =
-        String.sub buffered (last_newline + 1)
-          (String.length buffered - last_newline - 1)
-      in
-      Buffer.clear t.pending;
-      Buffer.add_string t.pending remainder;
-      String.split_on_char '\n' complete |> List.concat_map (feed_line t)
+  Masc_tui_sse_lines.feed t.lines chunk |> List.concat_map (feed_line t)

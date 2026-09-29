@@ -27,7 +27,7 @@ def leave_login_and_arm_quit(process, fd, output):
     os.write(fd, b"q")
 
 
-def scenario(binary, client, protocol, *, delayed_save=False, conflict_save=False, usage_limited_save=False):
+def scenario(binary, client, protocol, *, delayed_save=False, conflict_save=False, usage_limited_save=False, multi_models=False):
     supplied = threading.Event()
     requests = []
     save_attempts = []
@@ -66,11 +66,18 @@ def scenario(binary, client, protocol, *, delayed_save=False, conflict_save=Fals
 
     fixtures[LOGIN] = h.StreamingHttpResponse(chunks)
     fixtures[LOGIN + "/" + SESSION + "/input"] = h.RequestHttpResponse(accept)
-    fixtures["/api/v1/setup/models"] = (200, {"models": [{"id": "test-model", "label": "Selected account model", "context": 32768, "tools": True}]})
+    catalog = [{"id": "test-model", "label": "Selected account model", "context": 32768, "tools": True}]
+    if multi_models:
+        catalog = [catalog[0],
+            {"id": "unsupported-model", "label": "Unsupported account model", "context": 32768, "tools": False},
+            {"id": "second-model", "label": "Second account model", "context": 65536, "tools": True}]
+    fixtures["/api/v1/setup/models"] = (200, {"models": catalog})
     def verify(body):
         save_attempts.append(json.loads(body))
         if conflict_save and len(save_attempts) == 1:
             return 409, {"error": "configuration revision changed"}
+        if multi_models and len(save_attempts) == 1:
+            return 502, {"error": 'Runtime "codex_x.test-model_12345678" did not pass response and tool verification (provider_rejected)'}
         if delayed_save:
             # Deliberately exceed the old generic HTTP read deadline (10s).
             # This is a test stimulus, not a product timeout.
@@ -98,9 +105,21 @@ def scenario(binary, client, protocol, *, delayed_save=False, conflict_save=Fals
         # Exercise main-loop routing, including rejection before the byte-exact paste.
         h.send_and_wait(process, fd, output, b"\x1b[200~first\nsecond\x1b[201~", "여러 줄이나 제어 문자".encode())
         assert not supplied.is_set(), "rejected multiline credential was sent"
-        h.send_and_wait(process, fd, output, b"\x1b[200~" + (secret + "\r\n").encode() + b"\x1b[201~\r", b"Selected account model")
+        model_frame = h.send_and_wait(process, fd, output, b"\x1b[200~" + (secret + "\r\n").encode() + b"\x1b[201~\r", b"Selected account model")
         assert b"fixture-private-login-code" not in output, "secret echoed to terminal"
-        if conflict_save:
+        if multi_models:
+            plain = h.unwrapped(h.screen_text(model_frame))
+            for needle in (b"[x] Selected account model", b"[ ] Unsupported account model", b"[x] Second account model", "도구 호출 미지원".encode()):
+                assert needle in plain, f"model choice or refusal missing: {needle!r}: {plain!r}"
+        if multi_models:
+            h.send_and_wait(process, fd, output, b"\r", b"test-model_12345678")
+            assert len(save_attempts) == 1, "verification failure was retried without a choice"
+            h.send_and_wait(process, fd, output, b"r", "최신 설정을 읽었습니다".encode())
+            h.send_and_wait(process, fd, output, b" ", b"[ ] Selected account model")
+            h.send_and_wait(process, fd, output, b"\r", "검증하고 저장했습니다".encode())
+            assert len(save_attempts) == 2, "operator retry did not save once"
+            assert [m["id"] for m in save_attempts[1]["connections"][0]["models"]] == ["second-model"]
+        elif conflict_save:
             h.send_and_wait(process, fd, output, b"\r", "설정을 새로 읽은 뒤 다시 저장".encode())
             assert b"configuration revision changed" in output, "the server's refusal reason was not drawn"
             assert len(save_attempts) == 1, "failed save retried without operator approval"
@@ -134,10 +153,14 @@ def scenario(binary, client, protocol, *, delayed_save=False, conflict_save=Fals
         save = next(body for path, body in calls if path.endswith("/connections"))
         assert save["revision"] == "fixture-revision"
         assert save["connections"][0]["source"] == {"integration_id": client, "account_ref": ACCOUNT}
+        if multi_models:
+            assert [model["id"] for model in save["connections"][0]["models"]] == ["test-model", "second-model"]
+            assert save["selection"] == [{"connection": 0, "model": 0}, {"connection": 0, "model": 1}]
+            assert "모델 2개 검증 중".encode() in output, "save did not name the verification count"
         assert not any("chat/stream" in path for path, _ in requests), "login reached Keeper chat"
         leave_login_and_arm_quit(process, fd, output)
 
-    h.run_terminal_scenario(binary, description=client + (" usage-limited save names the unmeasured runtime" if usage_limited_save else " save conflict refresh retains account and model" if conflict_save else " slow verification retains request ownership" if delayed_save else " remote login through model verification"),
+    h.run_terminal_scenario(binary, description=client + (" selects two of three models" if multi_models else " usage-limited save names the unmeasured runtime" if usage_limited_save else " save conflict refresh retains account and model" if conflict_save else " slow verification retains request ownership" if delayed_save else " remote login through model verification"),
                             interact=interact, http_fixtures=fixtures, http_requests=requests)
 
 
@@ -218,4 +241,5 @@ if __name__ == "__main__":
     scenario(str(Path(sys.argv[1]).resolve()), "codex", "codex-app-server", delayed_save=True)
     scenario(str(Path(sys.argv[1]).resolve()), "codex", "codex-app-server", conflict_save=True)
     scenario(str(Path(sys.argv[1]).resolve()), "claude", "claude-code", usage_limited_save=True)
-    print("tui account login: PASS (8 scenarios)")
+    scenario(str(Path(sys.argv[1]).resolve()), "codex", "codex-app-server", multi_models=True)
+    print("tui account login: PASS (9 scenarios)")

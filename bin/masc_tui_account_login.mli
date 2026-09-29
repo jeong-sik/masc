@@ -48,7 +48,8 @@ type account_emails =
   | Email_list_unrecognized  (* the inventory carried no readable email list *)
 type t = {
   requested : string; mutable generation : int; mutable phase : phase; mutable providers : provider list;
-  mutable provider : provider option; mutable models : model list; mutable cursor : int;
+  mutable provider : provider option; mutable models : model list; mutable selected_models : string list;
+  mutable bound_models : (string * string) list; mutable cursor : int;
   mutable account_ref : string option; mutable login_id : string option;
   mutable revision : string; mutable existing : string list; mutable default_runtime_id : string option; mutable draft : string;
   mutable output : string; mutable notice : string; mutable input_pending : bool; mutable input_sequence : int;
@@ -62,7 +63,7 @@ type action = Inventory | Refresh_saved of saved | Refresh_retry
   | Start of { provider : provider; existing : bool }
       (** Log in through [provider]: a new account, or the one it holds. *)
   | Input of int * Yojson.Safe.t | Cancel
-  | Recover | Discover | Prepare of model | Save of model | Close | Nothing
+  | Recover | Discover | Prepare of model | Save of model list | Close | Nothing
   | Preview_removal of { provider : provider; refused : string option }
       (** Read what removing [provider] changes. [refused] is why the server
           declined the removal just asked for, shown above the fresh preview. *)
@@ -103,10 +104,10 @@ val removal_preview : t -> provider -> refused:string option -> Yojson.Safe.t ->
 val removed_notice : provider -> string option -> string
 (** What the list says once [provider] is removed, with the login store left
     on disk. *)
-val save_failed : t -> model -> string -> unit
+val save_failed : t -> string -> unit
 val refresh_retry : t -> (Yojson.Safe.t, string) result -> unit
 (** Refresh configuration revision and selection after an unsuccessful save,
-    retaining the account and chosen model for an explicit retry. *)
+    retaining the account and selected models for an explicit retry. *)
 val saved : t -> Yojson.Safe.t -> (saved, string) result
 (** Read a save's receipt into [Finished]. A receipt that is neither verified
     nor a readable usage-limited list of runtimes it selected is an error. *)
@@ -118,7 +119,7 @@ val prepared : t -> model -> Yojson.Safe.t -> (unit, string) result
 val receipt : t -> Yojson.Safe.t -> (bool, string) result
 val event : generation:int -> t -> event -> action
 val source : t -> Yojson.Safe.t
-val save_body : t -> model -> Yojson.Safe.t
+val save_body : t -> model list -> Yojson.Safe.t
 type row =
   | Text of string  (** Written by this pane or the server: drawn as plain text. *)
   | Terminal of Masc_tui_sgr_text.line

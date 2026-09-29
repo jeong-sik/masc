@@ -8640,6 +8640,7 @@ let composable_output_probes =
         `Assoc [])
     }
   ; probe "keeper_lane_status" (`Assoc [])
+  ; probe "keeper_portrait_read" (`Assoc [ "size", `Int 96 ])
   ; { tool_name = "keeper_tasks_list"
     ; needs_sandbox = false
     ; prepare =
@@ -9085,42 +9086,45 @@ let test_workspace_memory_read_dispatch () =
         KET.execute_keeper_tool_call_with_outcome ~config ~meta
           ~publication_recovery ~ctx_work ~name:"keeper_workspace_memory_read" ~input () in
       let empty = invoke (`Assoc []) |> check_success_result "empty workspace" in
-      check int "missing store is empty" 0
-        Yojson.Safe.Util.(member "proposals" empty |> to_list |> List.length);
-      let snapshot owner text = `Assoc [
-        "snapshot_id", `String owner; "keeper_id", `String owner;
-        "store", `String "ordinary"; "snapshot_sha256", `String (String.make 64 'a');
-        "metadata", `Assoc ["revision", `Int 2;
-          "change", `Assoc ["removed", `List [`String text]]]] in
-      let source owner = `Assoc ["source_id", `String owner;
-        "snapshot_id", `String owner; "evidence_path", `List [`String "change"]] in
-      let payload = `Assoc ["status", `String "model_proposed";
-        "context_sha256", `String (String.make 64 'b');
-        "snapshots", `List [snapshot "writer" "PDF completed"; snapshot "reviewer" "PDF incomplete"];
-        "sources", `List [source "writer"; source "reviewer"];
-        "gaps", `List [];
-        "proposal", `Assoc ["shared_claims", `List []; "excluded", `List [];
-          "conflicts", `List [`Assoc ["description", `String "Owners disagree on PDF completion";
-            "source_ids", `List [`String "writer"; `String "reviewer"]]]]] in
-      let id, stored = match Masc.Workspace_memory_proposal.submit ~base_path:config.base_path payload with
-        | Ok value -> value
-        | Error _ -> fail "could not save shared memory fixture" in
-      let listed = invoke (`Assoc []) |> check_success_result "list proposal" in
-      let row = Yojson.Safe.Util.(member "proposals" listed |> to_list |> List.hd) in
-      check string "discover saved ID" id Yojson.Safe.Util.(member "id" row |> to_string);
-      let fetched = invoke (`Assoc ["id", `String id]) |> check_success_result "read proposal" in
-      let actual = Yojson.Safe.Util.(member "result" fetched |> member "proposal") in
-      check bool "dispatcher preserves complete conflicting evidence" true
-        (Yojson.Safe.equal (Masc.Workspace_memory_proposal.to_json stored) actual);
-      let missing = invoke (`Assoc ["id", `String (String.make 64 'c')])
-        |> check_success_result "missing proposal" in
-      check bool "missing is explicit" false Yojson.Safe.Util.(member "found" missing |> to_bool);
+      check string "missing ledger is explicit" "missing"
+        Yojson.Safe.Util.(member "workspace_memory" empty |> member "status" |> to_string);
+      let module Ledger = Masc.Workspace_memory_ledger in
+      let pending owner claim : Ledger.pending_fact =
+        { fact = Ledger.Ordinary { keeper_id = owner;
+            claim_sha256 = Digestif.SHA256.(digest_string claim |> to_hex) }; claim } in
+      let writer = pending "writer" "PDF completed" in
+      let reviewer = pending "reviewer" "PDF incomplete" in
+      let selected = [writer; reviewer] in
+      let assignments : Ledger.assignment list = List.map (fun (row : Ledger.pending_fact) ->
+        { Ledger.fact = row.fact; decision = Ledger.Create_conflict "Owners disagree on PDF completion" }) selected in
+      let ledger = match Ledger.apply Ledger.empty ~selected assignments with
+        | Ok ledger -> ledger
+        | Error error -> fail (Ledger.apply_error_to_string error) in
+      (match Ledger.save ~base_path:config.base_path ledger with
+       | Ok () -> () | Error detail -> fail detail);
+      let listed = invoke (`Assoc []) |> check_success_result "list ledger" in
+      let actual = Yojson.Safe.Util.(member "workspace_memory" listed |> member "conflicts" |> to_list) in
+      check int "conflict summary is available" 1 (List.length actual);
+      let id = Yojson.Safe.Util.(List.hd actual |> member "id" |> to_string) in
+      let fetched = invoke (`Assoc ["id", `String id]) |> check_success_result "read one conflict" in
+      let members = Yojson.Safe.Util.(member "workspace_memory" fetched |> member "members" |> to_list) in
+      check int "only the selected conflict's two members are returned" 2 (List.length members);
+      let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path in
+      Fs_compat.mkdir_p keepers_dir;
+      let writer_store = Masc.Keeper_memory_os_current.path_for_keepers_dir
+        ~keepers_dir ~keeper_id:"writer" in
+      Fs_compat.save_file writer_store "{broken";
+      let with_gap = invoke (`Assoc ["id", `String id]) |> check_success_result "read with one corrupt store" in
+      let members = Yojson.Safe.Util.(member "workspace_memory" with_gap |> member "members" |> to_list) in
+      let writer = List.find (fun row ->
+        Yojson.Safe.Util.(member "keeper_id" row |> to_string) = "writer") members in
+      check string "corrupt store is unknown, not observed absent" "unavailable"
+        Yojson.Safe.Util.(member "source_state" writer |> to_string);
       let invalid = invoke (`Assoc ["id", `String "../private"]) in
-      check string "invalid ID is failure" "failure" (outcome_label invalid.disposition);
-      let path = Filename.concat config.base_path
-        (Common.masc_dirname ^ "/workspace-memory/proposals/" ^ id ^ ".json") in
+      check string "unknown ID is a read, not a path" "success" (outcome_label invalid.disposition);
+      let path = Filename.concat (Ledger.directory ~base_path:config.base_path) "ledger.json" in
       let channel = open_out_bin path in output_string channel "broken"; close_out channel;
-      let corrupt = invoke (`Assoc ["id", `String id]) in
+      let corrupt = invoke (`Assoc []) in
       check string "corrupt store is failure" "failure" (outcome_label corrupt.disposition))
 ;;
 

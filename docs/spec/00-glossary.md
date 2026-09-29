@@ -408,7 +408,7 @@ status: reference
   - TUI 표시 및 복구:
     - Keeper Info 탭에 원인 카테고리별로 집계(건수, 최장 경과 시간, 파티션 ID, 재투입
       대기 수)되어 표시된다. 수백 건의 슬롯 소진 행이 화면을 덮지 않도록 카테고리당 한 줄로 묶는다.
-    - `Q` 키를 누르면 가장 오래 대기 중인 항목(`oldest_waiting`)부터 원장의
+    - `b` 키를 누르면 가장 오래 대기 중인 항목(`oldest_waiting`)부터 원장의
       `Requeue_requested`로 전이시키며 재투입을 요청한다.
     - `B` 키는 읽힌 대기 목록 전체를 오래된 순서로 별도 재투입 요청한다. 목록이 아직
       읽히지 않았거나 오래된 상태이면 일괄 재투입을 거절한다.
@@ -2388,9 +2388,9 @@ status: reference
   operator config의 Keeper 이름에 묶인다. cluster 사이에서 무엇을 같이 쓰는지는
   **Cluster** 항목에 적었다.
 
-**Workspace Memory Proposal (작업공간 기억 제안)**
-: Workspace memory curator가 캡처한 작업공간 인벤토리를 바탕으로 만든 모델 제안. 제안은 claim, conflict, exclusion을 원본 source ID에 연결하고 해당 인벤토리에 묶인다. 저장·제출은 참조 구조만 검증하며 의미상 참인지 판정하지 않고, 제안은 Keeper Memory OS를 변경하지 않는다. 게시된 proposal descriptor는 제안을 찾게 하는 기록이지 의미 검증이나 승격이 아니다.
-  → [workspace_memory_proposal](../../lib/workspace_memory/workspace_memory_proposal.mli) · [workspace_memory_context](../../lib/workspace_memory/workspace_memory_context.mli) · [workspace_memory_publication](../../lib/workspace_memory/workspace_memory_publication.mli)
+**Workspace Memory Ledger (작업공간 기억 원장)**
+: Workspace Curator가 변경된 Keeper 사실을 기존 주장·충돌에 합류시키거나 새 항목을 만들고, 제외 이유를 기록한 원장. 다른 Keeper의 가까운 사실은 판정 맥락이고 선택된 변경 사실만 분류한다. 원장은 Keeper Memory OS를 바꾸지 않으며, 모델 분류가 의미 검증이나 사실 승격을 뜻하지 않는다. Keeper는 주장·충돌 목록을 본 뒤 ID별로 현재 원문 상태를 읽는다. 스토어를 읽지 못한 사실은 사라진 사실로 단정하지 않는다.
+  → [workspace_memory_ledger](../../lib/workspace_memory/workspace_memory_ledger.mli) · [workspace_memory_request](../../lib/workspace_memory/workspace_memory_request.mli) · [workspace_memory_ledger_view](../../lib/workspace_memory/workspace_memory_ledger_view.mli)
 
 **Continuity Snapshot (하던 일 저장본)**
 : 이어서 할 일의 설명과, 그 설명이 대신하는 완료된 History 범위를 함께 담은

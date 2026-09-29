@@ -356,6 +356,7 @@ let task_string = function
 let anthropic_thinking_control_string = function
   | None -> "none"
   | Some Caps.Anthropic_adaptive_default -> "adaptive_default"
+  | Some Caps.Anthropic_adaptive_between_tools -> "adaptive_between_tools"
   | Some Caps.Anthropic_adaptive_preferred -> "adaptive_preferred"
   | Some Caps.Anthropic_adaptive_only -> "adaptive_only"
   | Some Caps.Anthropic_always_adaptive -> "always_adaptive"
@@ -408,6 +409,7 @@ let functional_capability_projection
 let catalog_anthropic_thinking_control = function
   | None -> None
   | Some Capability_vocab.Adaptive_default -> Some Caps.Anthropic_adaptive_default
+  | Some Capability_vocab.Adaptive_between_tools -> Some Caps.Anthropic_adaptive_between_tools
   | Some Capability_vocab.Adaptive_preferred -> Some Caps.Anthropic_adaptive_preferred
   | Some Capability_vocab.Adaptive_only -> Some Caps.Anthropic_adaptive_only
   | Some Capability_vocab.Always_adaptive -> Some Caps.Anthropic_always_adaptive

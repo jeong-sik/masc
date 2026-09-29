@@ -1043,6 +1043,55 @@ for line in sys.stdin:
     pass
 |}
 
+(* A Muse host that fails the readiness turn with a modelError and answers
+   [usage/read] from argv[0]'s name: "spent" reports a full window with a
+   future reset, "open" reports headroom. Both spellings of the failure text
+   are the same on purpose: only the typed usage read may change the verdict. *)
+let muse_quota_fixture = {|#!/usr/bin/env python3
+import json
+import sys
+from pathlib import Path
+
+mode = Path(sys.argv[0]).name
+def read():
+    return json.loads(sys.stdin.readline())
+def emit(frame):
+    print(json.dumps(frame), flush=True)
+def reply(request, result):
+    emit({"jsonrpc": "2.0", "id": request["id"], "result": result})
+def notify(method, **params):
+    emit({"jsonrpc": "2.0", "method": method, "params": {"sessionId": "s-quota", "viewCursor": "v:1", **params}})
+
+request = read()
+assert request["method"] == "initialize"
+reply(request, {"serverInfo": {"name": "muse-session-server", "version": "1.4.0"},
+    "userAgent": "fixture/1", "museHome": "/nonexistent", "platformFamily": "unix", "platformOs": "linux",
+    "schema": {"version": 1, "fingerprint": "sha256:fixture"}, "grantedCapabilities": ["sessionMcp"],
+    "experimentalApi": False, "sessionDurability": "durable"})
+assert read()["method"] == "initialized"
+request = read()
+if request["method"] == "usage/read":
+    spent = mode == "muse-quota-spent"
+    now_ms = 1_800_000_000_000
+    reply(request, {"usage": {"observedAtMs": now_ms, "tier": "fixture",
+        "window": {"usedPercent": 100 if spent else 10, "resetsAtMs": now_ms + 3_600_000, "windowDurationMins": 300},
+        "weekly": {"usedPercent": 10, "resetsAtMs": now_ms + 86_400_000}}})
+    sys.stdin.read()
+    sys.exit(0)
+assert request["method"] == "session/start"
+reply(request, {"session": {"sessionId": "s-quota", "status": "idle", "turnCount": 0,
+    "approvalMode": {"mode": "promptUnmatched", "source": "startup", "lastCommandId": None},
+    "modelId": request["params"]["modelId"], "workspaceRoot": request["params"]["workspaceRoot"]}, "viewCursor": "v:1"})
+request = read()
+assert request["method"] == "turn/start"
+reply(request, {"commandId": request["params"]["commandId"], "status": "accepted", "turnId": "t-quota",
+    "startedNewTurn": True, "disposition": "started"})
+notify("turn/started", turnId="t-quota", commandId=request["params"]["commandId"])
+notify("turn/completed", turnId="t-quota", terminal="failed",
+    error={"kind": "modelError", "message": "fixture provider failure", "retryable": False})
+sys.stdin.read()
+|}
+
 let test_muse_private_tool_roundtrip () =
   Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
     let directory = Filename.temp_dir "muse-readiness-test-" "" |> Unix.realpath in
@@ -1140,6 +1189,25 @@ tools-support = true
        "muse-ran-other-model-first", Some "provider_rejected";
        "muse-ran-then-unnamed", Some "model_unreported";
        "muse-hang", Some "timed_out"];
+    (* Same failing turn, same text: the typed usage/read alone decides
+       between a spent account and a plain refusal. *)
+    List.iter (fun (mode, expected) ->
+      let script = Filename.concat directory mode in
+      write script muse_quota_fixture; Unix.chmod script 0o700;
+      Runtime_quota_window.reset_for_testing ();
+      let selected = runtime script in
+      let result = Verify.verify ~secure_random:env#secure_random ~sw ~net:env#net
+        ~mgr ~clock:env#clock ~cwd:Eio.Path.(env#fs / directory)
+        ~cwd_path:directory ~timeout_s:15. selected in
+      check (option string) (mode ^ " verdict") (Some expected)
+        (Option.map Verify.failure_code result.failure);
+      check bool (mode ^ " rests the account only when the window is spent")
+        (String.equal expected "quota_exhausted")
+        (Runtime_quota_window.is_exhausted
+           ~scope:(Runtime.quota_scope_of_runtime selected) ~now:(Time_compat.now ()));
+      Runtime_quota_window.reset_for_testing ();
+      Unix.unlink script)
+      ["muse-quota-spent", "quota_exhausted"; "muse-quota-open", "provider_rejected"];
     Unix.unlink source;
     List.iter (fun max_prompt_bytes ->
       let script = Filename.concat directory "muse-invalid-capacity" in

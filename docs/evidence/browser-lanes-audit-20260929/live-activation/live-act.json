@@ -1,0 +1,63 @@
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": {
+    "_meta": {
+      "io.modelcontextprotocol/serverInfo": {
+        "name": "masc",
+        "title": "MASC MCP Server",
+        "version": "0.46.0"
+      },
+      "com.github.yousleepwhen.masc/call": {
+        "envelope": {
+          "kind": "tool_call",
+          "summary": "{\"tabId\":0,\"data\":{\"success\":true,\"message\":\"Action [click] performed successfully on selector: xpath=/html[1]/body[1]/button[1]\",\"action_description\":\"Confirm test button\",\"actions\":[{\"selector\":\"xpath=/html[1]/body[1]/button[1]\",\"description\":\"Confirm test button\",\"method\":\"click\",\"arguments\":[]}]},\"metadata\":{\"cache\":{\"status\":\"DISABLED\"},\"usage\":{\"input_tokens\":1104,\"output_tokens\":119,\"reasoning_tokens\":0,\"cached_input_tokens\":1024,\"inference_time_ms\":1692}}}",
+          "status": "ok",
+          "tool": "masc_browser_instruct"
+        },
+        "trace_id": "2",
+        "agent_id": "admin",
+        "tool": "masc_browser_instruct",
+        "duration_ms": 2570,
+        "attempts": 1,
+        "timestamp": "2026-09-29T02:13:48Z"
+      }
+    },
+    "resultType": "complete",
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"tabId\":0,\"data\":{\"success\":true,\"message\":\"Action [click] performed successfully on selector: xpath=/html[1]/body[1]/button[1]\",\"action_description\":\"Confirm test button\",\"actions\":[{\"selector\":\"xpath=/html[1]/body[1]/button[1]\",\"description\":\"Confirm test button\",\"method\":\"click\",\"arguments\":[]}]},\"metadata\":{\"cache\":{\"status\":\"DISABLED\"},\"usage\":{\"input_tokens\":1104,\"output_tokens\":119,\"reasoning_tokens\":0,\"cached_input_tokens\":1024,\"inference_time_ms\":1692}}}"
+      }
+    ],
+    "isError": false,
+    "structuredContent": {
+      "tabId": 0,
+      "data": {
+        "success": true,
+        "message": "Action [click] performed successfully on selector: xpath=/html[1]/body[1]/button[1]",
+        "action_description": "Confirm test button",
+        "actions": [
+          {
+            "selector": "xpath=/html[1]/body[1]/button[1]",
+            "description": "Confirm test button",
+            "method": "click",
+            "arguments": []
+          }
+        ]
+      },
+      "metadata": {
+        "cache": {
+          "status": "DISABLED"
+        },
+        "usage": {
+          "input_tokens": 1104,
+          "output_tokens": 119,
+          "reasoning_tokens": 0,
+          "cached_input_tokens": 1024,
+          "inference_time_ms": 1692
+        }
+      }
+    }
+  }
+}

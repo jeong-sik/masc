@@ -2,6 +2,7 @@ type tool_profile = Server_mcp_transport_http_types.tool_profile =
   | Full
   | Managed_agent
   | Operator_remote
+  | Seat
 
 type runtime = Server_mcp_transport_http_types.runtime = {
   base_path : string;
@@ -36,6 +37,8 @@ type deps = {
   verify_mcp_observer_stream_auth :
     base_path:string -> Httpun.Request.t -> (unit, auth_failure) result;
   verify_operator_mcp_auth :
+    base_path:string -> Httpun.Request.t -> (unit, auth_failure) result;
+  verify_seat_mcp_auth :
     base_path:string -> Httpun.Request.t -> (unit, auth_failure) result;
 }
 
@@ -127,9 +130,16 @@ val body_jsonrpc_id : string -> Yojson.Safe.t option
     and [null] are different answers and stay so: JSON-RPC 2.0 requires a
     request to carry an id. *)
 
-val body_is_subscriptions_listen : string -> bool
-(** Whether the body is a [subscriptions/listen] request, which every transport
-    answers with a long-lived stream rather than a single response. *)
+val profile_opens_server_stream : tool_profile -> bool
+(** Whether the endpoint opens a long-lived server stream (the GET agent stream
+    or [subscriptions/listen]). The seat does not: both carry workspace
+    traffic. *)
+
+val serves_subscriptions_listen : profile:tool_profile -> string -> bool
+(** Whether the transport answers this body with a [subscriptions/listen]
+    stream rather than a single response: the body is a listen request and the
+    endpoint {!profile_opens_server_stream}. Otherwise the body goes to the
+    dispatcher, which refuses listen where the endpoint has no stream. *)
 
 val body_jsonrpc_params : string -> Yojson.Safe.t option
 (** [params] of a JSON-RPC body, or [None] when it is absent or the body does

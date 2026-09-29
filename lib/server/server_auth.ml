@@ -228,8 +228,10 @@ let mcp_unauthorized ?(reason = Masc_domain.Auth_error.Generic) message =
   Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized { reason; message })
 ;;
 
-(** Verify Bearer token for MCP endpoints *)
-let verify_mcp_auth_unscoped ~base_path request =
+(** Verify Bearer token for MCP endpoints. [permission] is what the endpoint's
+    profile asks of the credential: [CanReadState] for /mcp and /mcp/managed,
+    [CanPlayMachine] for the seat door /mcp/play. *)
+let verify_mcp_auth_unscoped ~permission ~base_path request =
   let auth_config = Auth.load_auth_config base_path in
   let credential = request_auth_credential_from_request request in
   let* auth_config =
@@ -266,17 +268,24 @@ let verify_mcp_auth_unscoped ~base_path request =
                     "Bearer token did not resolve to a credential identity."))
         | Some agent_name ->
             Auth.check_permission base_path ~agent_name ~token:(Some token)
-              ~permission:Masc_domain.CanReadState
+              ~permission
             |> Result.map (fun () -> None))
 
 let verify_mcp_auth ~base_path request =
-  with_mcp_expected_resource (fun () -> verify_mcp_auth_unscoped ~base_path request)
+  with_mcp_expected_resource (fun () ->
+    verify_mcp_auth_unscoped ~permission:Masc_domain.CanReadState ~base_path request)
+;;
+
+let verify_seat_mcp_auth ~base_path request =
+  with_mcp_expected_resource (fun () ->
+    verify_mcp_auth_unscoped ~permission:Masc_domain.CanPlayMachine ~base_path request)
 ;;
 
 let verify_mcp_auth_for_authority ~base_path ~request_authority request =
   Auth_oauth.with_expected_resource
     (Server_oauth_metadata.resource request_authority)
-    (fun () -> verify_mcp_auth_unscoped ~base_path request)
+    (fun () ->
+      verify_mcp_auth_unscoped ~permission:Masc_domain.CanReadState ~base_path request)
 ;;
 
 let verify_mcp_observer_stream_auth_unscoped ~base_path request =

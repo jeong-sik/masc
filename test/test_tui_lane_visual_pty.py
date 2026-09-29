@@ -211,10 +211,31 @@ def run_declaration_without_worker(executable: str) -> None:
         issue = terminal.send_and_wait(process, master, output, b"r",
                                        b"0 declared \xc2\xb7 0 active")
         shown = terminal.screen_text(terminal.frame_containing(issue, b"0 declared"))
-        if b"Configuration problems" not in shown or b"No Add-ons declared" in shown:
+        if b"Installations and configuration problems" not in shown or b"No Add-ons declared" in shown:
             raise AssertionError("directory-only issue was displayed as an empty installation")
         if b"E:edit" in shown:
             raise AssertionError("directory issue advertised editing a missing TOML file")
+        fixtures["/api/v1/lane-addons"] = (200, {
+            "instances": [], "rows": [], "coverage": [],
+            "configuration": {"directory": "/fixture/lane-addons", "complete": True,
+                              "declarations": [{"id": "good", "source_path": "/fixture/lane-addons/good.toml",
+                                                "desired_revision": "r1", "applied_revision": None,
+                                                "instance_id": None}],
+                              "issues": [{"id": None, "source_path": "/fixture/lane-addons/broken.toml",
+                                          "message": "invalid TOML"}]},
+        })
+        mixed = terminal.send_and_wait(process, master, output, b"r", b"1 declared \xc2\xb7 0 active")
+        shown = terminal.screen_text(terminal.frame_containing(mixed, b"1 declared"))
+        good_at = shown.find(b"good \xc2\xb7 pending")
+        broken_at = shown.find(b"broken.toml \xc2\xb7 configuration issue")
+        if good_at < 0 or broken_at < 0 or good_at >= broken_at:
+            raise AssertionError("display order differs from configuration navigation")
+        terminal.send_and_wait(process, master, output, b"j", b"> good")
+        terminal.send_and_wait(process, master, output, b"j", b"> broken.toml")
+        detail = terminal.send_and_wait(process, master, output, b"\r", b"Installation details \xc2\xb7 broken.toml")
+        if b"E:edit TOML" not in terminal.screen_text(detail):
+            raise AssertionError("malformed TOML detail omitted the repair path")
+        terminal.send_and_wait(process, master, output, b"\x1b", b"> broken.toml")
         os.write(master, b"q")
 
     terminal.run_terminal_scenario(executable,

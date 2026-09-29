@@ -289,7 +289,11 @@ let reconcile_snapshot view snapshot =
         then configuration_cursor else -1 in
       (* A vanished identity leaves no selection. Selecting a replacement is
          an explicit navigation action, never a side effect of a refresh. *)
-      {view with snapshot=Some snapshot;
+      let focus, configuration_cursor =
+        match view.screen, snapshot.instances, declarations snapshot with
+        | Overview, [], _ :: _ -> Configurations, (if configuration_cursor < 0 then 0 else configuration_cursor)
+        | _ -> view.focus, configuration_cursor in
+      {view with snapshot=Some snapshot;focus;
         row_cursor;
         instance_cursor=anchor (fun (instance : instance) -> instance.id, instance.incarnation)
           previous.instances snapshot.instances view.instance_cursor;
@@ -962,6 +966,22 @@ let rec finite_values = function
 let technical_lines ?(height=24) ?(failed_note = "") ~width view =
   visual_text_lines ~height ~failed_note ~visual:false ~width view
 
+let installation_detail_lines ~width view =
+  let wrap line = Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
+      (Masc.Tui_decode.sanitize_terminal_text line) in
+  let body = match view.snapshot with
+    | Some ({configuration=Some configuration;_} as snapshot) ->
+        (match selected_declaration view with
+         | Some declaration ->
+             ["Installation details · " ^
+                Option.value ~default:(Filename.basename declaration.source_path) declaration.installation_id;
+              "Esc:back  j/k:choose installation  E:edit TOML  r:refresh"; ""]
+             @ configuration_lines {view with configuration_cursor=0}
+                 {snapshot with configuration=Some {configuration with declarations=[declaration]}}
+         | None -> ["Installation selection changed · Esc:back  r:refresh"])
+    | _ -> ["Installation inventory unread · Esc:back  r:refresh"] in
+  List.concat_map wrap (diagnostic_lines view @ body)
+
 let pending_action view =
   match view.last_action, view.action_receipt with
   | Some request, Some {Action.state=(Action.Queued | Action.Running);_} -> Some request
@@ -1095,12 +1115,13 @@ let overview_lines ~width view =
               Some declared, issues, config.declarations in
         let heading = Printf.sprintf "Lane Add-ons · %s declared · %d active · %d failed"
           (Option.fold ~none:"?" ~some:string_of_int declared) active failed in
-        let heading = heading ^ (if issue_count=0 then "" else Printf.sprintf " · %d config issues" issue_count) in
+        let heading = heading ^ (if issue_count=0 then "" else Printf.sprintf " · %d config issues" issue_count)
+          ^ (if Option.is_some view.snapshot_read_error then " · STALE" else "") in
         let inventory_note = match snapshot.configuration with
           | None -> ["Installation inventory unread · r:refresh"]
           | Some config when not config.complete -> ["Installation inventory partial · r:refresh"]
           | Some _ -> [] in
-        let installation_rows, configuration_problem_rows =
+        let configuration_rows =
           let window = max 0 (view.configuration_cursor - 4) in
           let visible = List.mapi (fun index (d : declaration) -> index,d) declarations
             |> List.filter (fun (index,_) -> index >= window && index < window + 9) in
@@ -1110,19 +1131,16 @@ let overview_lines ~width view =
               if d.origin=Issue_only then "configuration issue"
               else if d.issues<>[] then "needs attention"
               else if d.applied=d.desired then "applied" else "pending" in
-            let controls =
-              if d.origin=Issue_only then "    Enter:details"
-              else if Option.fold ~none:false ~some:(fun (c : configuration) ->
-                    Document.editable_source_path ~directory:c.directory d.source_path)
-                    snapshot.configuration
-              then "    Enter:Installation  E:edit"
-              else "    Enter:Installation" in
+            let editable = Option.fold ~none:false ~some:(fun (c : configuration) ->
+                Document.editable_source_path ~directory:c.directory d.source_path)
+                snapshot.configuration in
+            let controls = (if d.origin=Issue_only then "    Enter:details"
+                else "    Enter:Installation") ^ (if editable then "  E:edit" else "") in
             [ (if view.focus=Configurations && index=view.configuration_cursor then "> " else "  ")
               ^ name ^ " · " ^ status ^ " · " ^ Filename.basename d.source_path
             ; controls
             ] @ List.map (fun issue -> "    Issue: " ^ issue) d.issues in
-          let installations, problems = List.partition (fun (_,d) -> d.origin=Parsed_declaration) visible in
-          List.concat_map render installations, List.concat_map render problems in
+          List.concat_map render visible in
         let instance_rows =
           let window = max 0 (view.instance_cursor - 4) in
           let items = List.mapi (fun index (item : instance) -> index,item) snapshot.instances
@@ -1141,8 +1159,7 @@ let overview_lines ~width view =
                 | _ -> [] in
               [lead; controls] @ detail) items in
         [heading; ""] @ inventory_note
-        @ (if installation_rows=[] then [] else ["Installations"] @ installation_rows @ [""])
-        @ (if configuration_problem_rows=[] then [] else ["Configuration problems"] @ configuration_problem_rows @ [""])
+        @ (if configuration_rows=[] then [] else ["Installations and configuration problems"] @ configuration_rows @ [""])
         @ (if snapshot.instances=[] then [] else ["Workers"] @ instance_rows)
         @ (if declarations=[] && snapshot.instances=[]
               && Option.fold ~none:false ~some:(fun (c : configuration) -> c.complete) snapshot.configuration
@@ -1319,6 +1336,9 @@ let lines ?(height=24) ?(failed_note = "") ~width view =
         Masc_tui_message_layout.fit_width line (max 1 width)) help_lines
       else if view.presentation = Flow then flow_lines view |> List.concat_map
         (fun line -> Masc_tui_message_layout.split_cells ~max_cells:(max 1 width) (Masc.Tui_decode.sanitize_terminal_text line))
+      else if view.presentation = Technical && view.screen=Overview && view.focus=Configurations
+        && Option.is_none view.document_key && Option.is_none view.draft
+      then installation_detail_lines ~width view
       else if view.presentation = Technical || Option.is_some view.document_key || Option.is_some view.draft
       then technical_lines ~height ~failed_note ~width view
       else (match view.screen with

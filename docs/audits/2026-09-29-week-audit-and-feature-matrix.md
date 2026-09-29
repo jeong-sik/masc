@@ -73,11 +73,11 @@
 |---|---|---|---|
 | DM-verifier | 라이브 `verifier_exact` 는 `glm-coding.glm-5.3-flash` 하나다. 카탈로그는 이 모델이 이미지를 읽는다고 적지만, 라이브 `[models."glm-5.3-flash"]` 에 `capabilities` 표가 없다. 적지 않은 media 입력은 false 로 닫히므로(#37435) 이미지 증거 제출은 판정 전에 거절된다(09-29 50건). 나머지는 같은 슬롯의 429 로 60초마다 다시 시도한다(675회). 확정은 15건 | 확인·라이브 | 운영자 설정 |
 | RT-R1 | Codex 가 "사용량 다 씀"으로 거절하면 리셋 시각을 읽어 오고도 쉼에 쓰지 않는다. 403(#38975)·Muse(#39810) 경로만 고쳐진 N-of-M. 한 계정을 15분마다, 새 thread 약 620 KB 로 다시 부른다 | 확인·라이브 | #39997 |
-| RT-S1 | 이 wake 로 시작한 turn 이 한 번이라도 있으면 "가져간 wake"로 본다. 그 turn 이 끝났는지는 보지 않는다. 실패한 turn 의 wake 는 취소·대체가 못 거두고, 취소한 schedule 이 나중에 실행될 수 있다. 판정마다 33~35 MB ledger 를 훑는다 | 확인 | 수정 중 |
+| RT-S1 | 이 wake 로 시작한 turn 이 한 번이라도 있으면 "가져간 wake"로 본다. 그 turn 이 끝났는지는 보지 않는다. 실패한 turn 의 wake 는 취소·대체가 못 거두고, 취소한 schedule 이 나중에 실행될 수 있다. 판정마다 33~35 MB ledger 를 훑는다 | 확인 | #40006 |
 | RT-C2 | Codex 턴 중간 compaction 은 마지막 frame 만 보고 판단한다. 그래서 사라진 문맥을 계속 "보냄"으로 들고 있다가 다음 resume 에서 뺀다 | 확인 | #39972 에 코멘트 |
 | RT-C1 / MM-M2 | Codex resume 이 block 단위가 아니라 carrier 전체로 비교해 매 턴 약 170 KB 를 다시 보낸다(09-29 243 MB) | 보고만 | 열린 #39972 |
 | MM-M1 | Librarian 커밋의 67% 가 facts 는 그대로인데 revision 만 올린다. recall 머리글에 revision 이 들어가 140~440 KB block 을 resume 마다 다시 보낸다(09-29 Codex 263.5 MB, Claude Code 182.6 MB) | 보고·라이브 수치 | #40001 |
-| MM-C1 | Agent Core 가 atom 을 저장한 뒤 turn 끝 줄이 `no_atom_history` 로만 남으면 Librarian atom 진도가 멈춘다. pr-updater 는 turn 이 atom 15839 에서 시작하는데 진도는 15803 에 멈췄다. `librarian-continuity.json` 은 09-28 02:25 가 마지막이다 | 확인·라이브 | 수정 중 |
+| MM-C1 | Agent Core 가 atom 을 저장한 뒤 turn 끝 줄이 `no_atom_history` 로만 남으면 Librarian atom 진도가 멈춘다. pr-updater 는 turn 이 atom 15839 에서 시작하는데 진도는 15803 에 멈췄다. `librarian-continuity.json` 은 09-28 02:25 가 마지막이다 | 확인·라이브 | #40019 |
 | MM-M3 | 기억이 수렴하지 않는다. 감쇠·강화가 없고 512 KiB 한도에 2~3일 안에 닿는 Keeper 가 있다 | 보고·라이브 수치 | RFC |
 | DM-BD-1 | 부팅 대조에서 예상 못 한 (partition × quarantine) 쌍 하나가 그 Keeper 의 Board 판정 worker 를 멈추고, 다시 띄우지 않는다. #39784 는 한 쌍만 고쳤고 같은 표가 quarantine 명령에 복사돼 있다. 09-28 로그 279줄 | 보고·라이브 | #40003 |
 | DM-PL-01 | 지우면서 멈춘 Keeper 는 만료 없는 Worker credential 이 남아 DOS 조작권을 서버 재시작까지 쥔다. 회수 route 는 409/400 | 보고 | 다음 PR |
@@ -206,9 +206,11 @@
 | #39991 | 웹 Gate 승인 대기 표시(TU-F01, P0) |
 | #39996 | 대시보드 decoder 셋: runtime-probe 상태 단어(TU-F02, P0), async-requests `request_context`(TU-F17), 채팅 delivery kind(TU-F18) |
 | #39998 | TUI Schedules·Agenda 다음 일정(TU-F04) |
-| #39997 | Codex 사용량 거절 뒤 리셋 시각까지 쉼(RT-R1). Fusion 경로는 남음 |
+| #39997 | Codex 사용량 거절 뒤 리셋 시각까지 쉼(RT-R1). 소진된 limit 이 여럿이면 쉼을 정하지 않음. Fusion 경로는 남음 |
 | #40001 | facts 가 그대로인 Librarian pass 는 snapshot·revision 을 새로 쓰지 않음(MM-M1 근본) |
 | #40003 | Board 판정 reconcile 쌍을 한 분류로, 불일치는 그 구역만 Blocked(DM-BD-1) |
+| #40006 | schedule 취소·대체가 실패한 turn 의 wake 도 거둠, dispatch 직전 철회는 그 source 만 뺌(RT-S1) |
+| #40019 | 끝 줄 없이 저장된 atom 도 다음 turn 의 시작 위치까지 읽음(MM-C1) |
 | #40000 | RFC: 클라이언트 decoder 는 서버가 쓴 fixture 로 시험 |
 
 리뷰 코멘트: #39972(RT-C2), #39928(DM-CD-2), #39978(DM-CD-2·CD-3).

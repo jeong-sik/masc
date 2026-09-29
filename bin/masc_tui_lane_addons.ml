@@ -1026,6 +1026,8 @@ let instance_controls (instance : instance) = match instance.phase with
    the front so it remains easy to find even when the other hints give way. *)
 let overview_hints view =
   if view.help_open then "Esc:close help"
+  else if Option.is_some view.document_key then
+    "?:help  Esc:back  E:edit  s:save  l:reload  u/U:revision"
   else match view.screen with
   | Overview when view.presentation=Technical && view.focus=Configurations
       && Option.is_none view.document_key ->

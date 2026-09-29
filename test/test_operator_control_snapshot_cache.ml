@@ -71,38 +71,59 @@ let test_singleflight () =
 ;;
 
 let test_stale_while_revalidate () =
-  Eio_main.run @@ fun env ->
-  Eio_guard.enable ();
-  Eio.Switch.run @@ fun sw ->
-  with_test_eio env sw (fun () ->
-    invalidate ();
-    Unix.putenv "MASC_OPERATOR_CACHE_BACKGROUND_REVALIDATE" "true";
-    let compute_count = ref 0 in
-    let compute () =
-      incr compute_count;
-      `Assoc [ ("count", `Int !compute_count) ]
-    in
-    let ttl = 0.2 in
-    let v1 = get_or_compute "stale-key" ~ttl compute in
-    Alcotest.(check int) "first compute" 1 !compute_count;
-    Alcotest.(check yojson) "fresh value" (`Assoc [ ("count", `Int 1) ]) v1;
-    Eio.Time.sleep (Eio.Stdenv.clock env) 0.25;
-    let v2 = get_or_compute "stale-key" ~ttl compute in
-    Alcotest.(check yojson) "stale value served immediately" (`Assoc [ ("count", `Int 1) ]) v2;
-    (* Wait for the background revalidation to finish. *)
-    let deadline = Unix.gettimeofday () +. 1.0 in
-    let rec wait_for_refresh () =
-      match Operator_control_snapshot_cache.peek "stale-key" with
-      | Some j when Yojson.Safe.equal j (`Assoc [ ("count", `Int 2) ]) -> ()
-      | _ when Unix.gettimeofday () > deadline -> Alcotest.fail "background refresh did not finish"
-      | _ ->
-        Eio.Time.sleep (Eio.Stdenv.clock env) 0.05;
-        wait_for_refresh ()
-    in
-    wait_for_refresh ();
-    let v3 = get_or_compute "stale-key" ~ttl compute in
-    Alcotest.(check int) "background revalidation ran once more" 2 !compute_count;
-    Alcotest.(check yojson) "refreshed value" (`Assoc [ ("count", `Int 2) ]) v3)
+  let previous_context = Eio_context.snapshot_state () in
+  (* This suite installs both clock registries together in [with_test_eio],
+     so its saved Eio clock is also the Time_compat clock to restore. *)
+  let previous_clock = Eio_context.get_clock_opt () in
+  (* Protect the backend itself: it raises [Deadlock_detected] outside the
+     callback if an inline refresh blocks before returning the stale value. *)
+  Fun.protect
+    ~finally:(fun () ->
+      Eio_context.restore_state previous_context;
+      match previous_clock with
+      | Some clock -> Time_compat.set_clock clock
+      | None -> Time_compat.clear_clock ())
+    (fun () ->
+      Eio_mock.Backend.run @@ fun () ->
+      Eio_guard.enable ();
+      let clock = Eio_mock.Clock.make () in
+      let compute_count = ref 0 in
+      let refreshing, mark_refreshing = Eio.Promise.create () in
+      let finish_refresh, release_refresh = Eio.Promise.create () in
+      let compute () =
+        incr compute_count;
+        if !compute_count = 2 then (
+          Eio.Promise.resolve mark_refreshing ();
+          Eio.Promise.await finish_refresh);
+        `Assoc [ ("count", `Int !compute_count) ]
+      in
+      let ttl = 0.2 in
+      let cache_clock = (clock :> float Eio.Time.clock_ty Eio.Resource.t) in
+      Time_compat.set_clock cache_clock;
+      Eio_context.set_clock cache_clock;
+      Eio.Switch.run (fun sw ->
+        Eio_context.set_switch sw;
+        invalidate ();
+        let v1 = get_or_compute "stale-key" ~ttl compute in
+        Alcotest.(check int) "first compute" 1 !compute_count;
+        Alcotest.(check yojson) "fresh value" (`Assoc [ ("count", `Int 1) ]) v1;
+        (* Expire the initial value explicitly. Runner scheduling must not
+           also expire the refreshed value before the final lookup. *)
+        Eio_mock.Clock.set_time clock 0.25;
+        let v2 = get_or_compute "stale-key" ~ttl compute in
+        Alcotest.(check yojson) "stale value served immediately"
+          (`Assoc [ ("count", `Int 1) ]) v2;
+        Eio.Promise.await refreshing;
+        let waiting = get_or_compute "stale-key" ~ttl compute in
+        Alcotest.(check yojson) "another reader gets stale while refresh is blocked"
+          v2 waiting;
+        Alcotest.(check int) "stale readers share the background refresh" 2 !compute_count;
+        Eio.Promise.resolve release_refresh ());
+      (* Leaving the switch joins the background fiber, including its cache
+         writeback. Logical time is still 0.25, so the new entry is fresh. *)
+      let v3 = get_or_compute "stale-key" ~ttl compute in
+      Alcotest.(check int) "background revalidation ran once more" 2 !compute_count;
+      Alcotest.(check yojson) "refreshed value" (`Assoc [ ("count", `Int 2) ]) v3)
 ;;
 
 let test_invalidation () =

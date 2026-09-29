@@ -124,23 +124,41 @@ let goal_rows ~now ~localtime ~inner_width goals =
       let phase =
         match goal.og_phase with
         | Goal_phase.Executing -> []
-        | phase -> [ Masc_tui_render_prim.planning_phase_label phase ]
+        | Goal_phase.Verifying -> [ "verify" ]
+        | Goal_phase.Awaiting_confirmation -> [ "confirm" ]
+        | Goal_phase.Completed | Goal_phase.Dropped -> []
       in
       let attention =
         List.filter_map Fun.id
           [ refuted_text goal; overdue_text ~today goal ]
       in
+      (* Keep enough of the title to identify the Goal even when several
+         attention flags compete for a narrow row. The suffix puts warnings
+         first, so its less urgent task/due tail yields when space runs out. *)
+      let title_floor = max 1 (inner_width / 3) in
+      let suffix_budget = max 0 (inner_width - 4 - title_floor) in
+      let separator = " · " in
+      let separator_width = Masc_tui_message_layout.display_width separator in
+      let rec select_suffix width selected = function
+        | [] -> List.rev selected
+        | clause :: rest ->
+            let next_width =
+              width + (if selected = [] then 0 else separator_width)
+              + Masc_tui_message_layout.display_width clause
+            in
+            if next_width > suffix_budget then List.rev selected
+            else select_suffix next_width (clause :: selected) rest
+      in
       let suffix =
-        String.concat " · "
-          (phase @ attention @ [ task_count_text goal ]
+        select_suffix 0 []
+          (attention @ phase @ [ task_count_text goal ]
            @ Option.to_list (due_text ~today goal))
+        |> String.concat separator
       in
-      let suffix_width =
-        min (Masc_tui_message_layout.display_width suffix) (max 0 (inner_width - 5))
-      in
+      let suffix_width = Masc_tui_message_layout.display_width suffix in
       let title_width = max 1 (inner_width - 4 - suffix_width) in
       "  " ^ fit_width (Terminal_text.single_line goal.og_title) title_width
-      ^ "  " ^ fit_width suffix suffix_width)
+      ^ "  " ^ suffix)
     goals
 
 let wanted_rows (reading : Types.overview_goals_reading) =

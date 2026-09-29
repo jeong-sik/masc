@@ -305,6 +305,30 @@ let test_one_row_fits_a_short_viewport () =
   check bool "the goal stays inside its 46-cell frame" true
     (Masc_tui_message_layout.display_width (List.nth rows 1) <= 46)
 
+let test_narrow_goal_keeps_identity_and_attention () =
+  let goal =
+    match Goals.drawn_goals (decode_fixture ()) with
+    | first :: _ ->
+        { first with
+          og_phase = Goal_phase.Verifying
+        ; og_completion = Some "proof_refuted"
+        ; og_due_date = Some "2026-09-01"
+        }
+    | [] -> fail "fixture has no drawn goal"
+  in
+  let row =
+    Goals.lines ~now:captured_at ~localtime:Unix.gmtime ~inner_width:46
+      ~rows:2 ~tasks:(Tasks.Rows_read live_tasks) (Types.Goals_read [ goal ])
+    |> List.map strip_ansi |> fun rows -> List.nth rows 1
+  in
+  check bool "the title still identifies the goal" true
+    (contains ~sub:"v0.37.0" row);
+  check bool "both warnings and stage remain visible" true
+    (contains ~sub:"refuted" row && contains ~sub:"overdue" row
+     && contains ~sub:"verify" row);
+  check bool "row stays within 46 cells" true
+    (Masc_tui_message_layout.display_width row <= 46)
+
 (* The input that splits the headline: one of the active tasks is a task an
    executing goal lists. *)
 let test_an_active_goal_task_counts () =
@@ -470,6 +494,8 @@ let () =
             test_live_fleet_moves_no_goal
         ; test_case "a goal fits one short row" `Quick
             test_one_row_fits_a_short_viewport
+        ; test_case "a narrow goal keeps identity and attention" `Quick
+            test_narrow_goal_keeps_identity_and_attention
         ; test_case "a refuted goal is shown as refuted" `Quick
             test_a_refuted_goal_is_shown_as_refuted
         ; test_case "overdue appears only after due_date" `Quick

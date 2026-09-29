@@ -21,5 +21,12 @@ let rejection_to_user_message = function
        valid path"
       count
   | Outside_sandbox { raw } ->
-    Printf.sprintf "path_outside_sandbox: %s" raw
+    (* The prefix stays first so callers that match on it keep working;
+       the tail names where the tool can reach, which the bare path did
+       not say. *)
+    Printf.sprintf
+      "path_outside_sandbox: %s (not under your workspace root or a root \
+       declared for this Keeper; pass a path inside them — relative paths \
+       resolve against your workspace root)"
+      raw
 ;;

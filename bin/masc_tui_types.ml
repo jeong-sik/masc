@@ -10991,7 +10991,7 @@ let home_continue_rows (state : state) =
     | Some _ | None -> []
   in
   let choose =
-    match state.workspace_identity, state.local_workspace_reading, state.keepers_error, state.keepers with
+    match state.workspace_identity, state.local_workspace, state.keepers_error, state.keepers with
     | Workspace_identity_match, Local_workspace_read, None, [] ->
         [ Home_create_keeper, "Create a Keeper  · choose who will take the work" ]
     | _ ->

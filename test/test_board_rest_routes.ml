@@ -666,6 +666,72 @@ let test_board_write_routes_use_authenticated_actor () =
     (Masc.Board.Agent_id.to_string local_post.author)
 ;;
 
+(* The Board list page is one projection for both transports, kept with its
+   serialized bytes. A second read of an unchanged board takes the kept
+   bytes. The board write hook drops every [board:list:] entry, so the read
+   after it shows the write, and the route sends the page the projection
+   keeps. *)
+let page_titles (page : Yojson.Safe.t) =
+  match page with
+  | `Assoc fields ->
+    (match List.assoc_opt "posts" fields with
+     | Some (`List posts) ->
+       List.filter_map
+         (function
+           | `Assoc post ->
+             (match List.assoc_opt "title" post with
+              | Some (`String title) -> Some title
+              | Some _ | None -> None)
+           | _ -> None)
+         posts
+       |> List.sort String.compare
+     | Some _ | None -> fail "the page has no posts list")
+  | _ -> fail "the page is not an object"
+;;
+
+let test_board_list_page_is_kept_until_a_board_write () =
+  with_authenticated_activity_router
+    ~prefix:"board-list-kept-"
+    ~agent_name:"list-reader"
+  @@ fun ~base_path ~config ~state:_ ~sw:_ ~clock:_ ~router ~token ->
+  with_board_store ~base_path
+  @@ fun () ->
+  let post title =
+    let status, _ =
+      dispatch_json ~router ~token ~path:"/api/v1/tools/masc_board_post"
+        ~extra_headers:[]
+        ~body:
+          (Yojson.Safe.to_string
+             (`Assoc [ "title", `String title; "body", `String "a post the list shows" ]))
+        ()
+    in
+    check int ("post accepted: " ^ title) 201 status
+  in
+  let path = "/api/v1/board?sort_by=recent" in
+  let page () =
+    Server_board_list_http.payload ~config ~reaction_actor:None
+      (Httpun.Request.create `GET path)
+  in
+  post "the first post";
+  let first = page () in
+  check (list string) "the page shows the post" [ "the first post" ]
+    (page_titles first.Dashboard_cache.json);
+  check bool "an unchanged board answers from the kept bytes" true
+    (first.Dashboard_cache.raw_json == (page ()).Dashboard_cache.raw_json);
+  post "the second post";
+  Server_dashboard_http_core_cache.invalidate_board_projections ();
+  let after_write = page () in
+  check (list string) "the read after the write hook shows the write"
+    [ "the first post"; "the second post" ]
+    (page_titles after_write.Dashboard_cache.json);
+  let status, json =
+    dispatch_json ~meth:"GET" ~router ~token ~path ~extra_headers:[] ~body:"" ()
+  in
+  check int "the route answers" 200 status;
+  check (list string) "the route sends the same page"
+    (page_titles after_write.Dashboard_cache.json) (page_titles json)
+;;
+
 let test_board_http_typed_attachments () =
   with_authenticated_activity_router
     ~prefix:"board-http-attachments-"
@@ -1297,6 +1363,8 @@ let () =
             test_goal_transition_uses_authenticated_actor
         ; test_case "board write actors come from auth" `Quick
             test_board_write_routes_use_authenticated_actor
+        ; test_case "the Board list page is kept until a board write" `Quick
+            test_board_list_page_is_kept_until_a_board_write
         ; test_case "HTTP Board attachments use typed input" `Quick
             test_board_http_typed_attachments
         ; test_case "sub-board owner comes from auth" `Quick

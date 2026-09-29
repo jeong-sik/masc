@@ -214,16 +214,6 @@ The composer sends messages to the selected Keeper. `/task <title>` creates a
 Task and sends its ID in the same message. Chat controls let you unfold tool
 results, reasoning and context when you need them.
 
-<details>
-<summary>Earlier TUI capture · September 4, 2026</summary>
-
-![MASC terminal UI captured on September 4, 2026](docs/screenshots/tui/2026-09-04/surfaces/01-overview.png)
-
-This capture predates the navigation above. Keeper names and the base path were
-replaced with stand-ins of the same width. [More captures and metadata](docs/screenshots/tui/2026-09-04/surfaces/README.md).
-
-</details>
-
 The [TUI guide](docs/TUI-GUIDE.md) covers every view, key, theme, browser lane,
 voice controls and troubleshooting.
 

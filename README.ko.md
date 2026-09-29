@@ -203,16 +203,6 @@ Firefox browser-lane host도 새 빌드로 다시 설치하고, 그 작업 공�
 입력창은 선택한 Keeper에게 메시지를 보냅니다. `/task <제목>`은 Task를 만들고
 그 ID를 같은 메시지로 전달합니다. 대화에서 도구 결과, 추론과 맥락을 필요할 때 펼쳐 볼 수 있습니다.
 
-<details>
-<summary>이전 TUI 화면 · 2026년 9월 4일</summary>
-
-![2026년 9월 4일의 MASC 터미널 UI](docs/screenshots/tui/2026-09-04/surfaces/01-overview.png)
-
-위 탐색 구성이 적용되기 전의 화면입니다. Keeper 이름과 경로는 같은 너비의 가짜
-값으로 바꿨습니다. [다른 캡처와 촬영 조건](docs/screenshots/tui/2026-09-04/surfaces/README.md).
-
-</details>
-
 화면별 조작, 테마, 브라우저 레인, 음성과 문제 해결은 [TUI 가이드](docs/TUI-GUIDE.md)에 있습니다.
 
 ## MCP 클라이언트 연결

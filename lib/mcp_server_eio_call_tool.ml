@@ -18,6 +18,13 @@ type tool_profile = Mcp_server_eio_types.tool_profile =
    [Mcp_server_eio_helpers.mcp_exn_level_and_tag]. *)
 let log_mcp_exn = Mcp_server_eio_helpers.log_mcp_exn
 
+(* A result's model-visible blocks when it has them. [None] is a text-only
+   result, whose message is the whole content. *)
+let content_blocks_of_result : Tool_result.result -> Llm_provider.Types.content_block list option =
+  function
+  | Tool_result.Completed { content_blocks; _ } -> content_blocks
+  | Tool_result.Deferred _ | Tool_result.Failed _ -> None
+
 let status_of_result : Tool_result.result -> string = function
   | Tool_result.Completed _ -> "ok"
   | (Tool_result.Deferred _ as result) -> Tool_result.string_of_disposition result
@@ -809,14 +816,24 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
       ("tool", `String name);
     ]
   in
-  let content_items =
-    [
-      `Assoc
-        [
-          ("type", `String "text");
-          ("text", `String message);
+  (* The same projection the official-client MCP bridge uses: text and
+     base64 images in its media types become items, and a block MCP cannot
+     carry fails the projection rather than disappearing. The tool has already
+     run, so that failure keeps the message and says what was not sent. *)
+  let content_items, media_delivered =
+    match
+      Runtime_official_client_tool.mcp_content ~content:message
+        ~content_blocks:(content_blocks_of_result result)
+    with
+    | Ok items -> items, true
+    | Error detail ->
+      ( [ `Assoc [ ("type", `String "text"); ("text", `String message) ]
+        ; `Assoc
+            [ ("type", `String "text")
+            ; ("text", `String ("This result's media was not sent: " ^ detail))
+            ]
         ]
-    ]
+      , false )
   in
   let structured_content = structured_content_of_result result in
   let meta_fields =
@@ -853,7 +870,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
   let result_fields =
     [
       ("content", `List content_items);
-      ("isError", `Bool (not success));
+      ("isError", `Bool (not (success && media_delivered)));
       ("_meta", `Assoc call_meta);
     ]
     @

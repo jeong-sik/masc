@@ -715,12 +715,29 @@ let blank_opt = function
   | None -> true
   | Some raw -> String.trim raw = ""
 
+(* A due date is refused where it is written, so an unreadable one never
+   reaches the store. Reading it back is {!Goal_due}'s job. *)
+let due_date_refusal = function
+  | None -> None
+  | Some raw ->
+    (match Goal_due.read (Some raw) with
+     | Goal_due.Unreadable_due_date _ ->
+       Some
+         (Printf.sprintf
+            "due_date must be a calendar date written YYYY-MM-DD (it falls due \
+             at 23:59:59 UTC that day), got %S"
+            raw)
+     | Goal_due.No_due_date | Goal_due.Due_date _ -> None)
+
 let upsert_goal config ?id ?title ?metric ?target_value ?due_date
     ?priority ?owner () =
   let is_new_goal = id = None in
   if is_new_goal && (title = None || title = Some "") then
     Error (Rejected "title required for new goal")
   else
+    match due_date_refusal due_date with
+    | Some message -> Error (Rejected message)
+    | None ->
     let now = Masc_domain.now_iso () in
         let resolved_id = Option.value id ~default:(gen_goal_id ()) in
         let upserted = ref None in
@@ -753,7 +770,7 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
                     || not (Option.equal String.equal existing.metric next_goal.metric)
                     || not (Option.equal String.equal existing.target_value next_goal.target_value)
                   in
-                  upserted := Some (`updated existing.phase);
+                  upserted := Some (`updated existing);
                   let next_goal =
                     if not criterion_changed then next_goal
                     else

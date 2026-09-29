@@ -1,5 +1,5 @@
-(** The Overview's Plan usage section: one strip per provider account, the way
-    a mixer shows one channel strip per input. Each strip says how full the
+(** The Usage surface's Plan usage section: one strip per provider account,
+    the way a mixer shows one channel strip per input. Each strip says how full the
     account's usage windows are, when they reset, and how long ago the
     provider said so.
 
@@ -18,28 +18,16 @@ type section = {
   title : string;
   lines : string list;
       (** The section's rows in draw order: reported accounts first, then by
-          account name. A budget shorter than this list cuts from the
-          bottom. *)
-  account_count : int;
-      (** Accounts represented by those rows. One account can have several
-          usage windows, so this can be smaller than [List.length lines]. *)
-  account_row_counts : int list;
-      (** Row count per account, in display order. *)
-  note_lines : string list;
-      (** Runtime catalogue errors, then a failed email read, after the
-          account rows. *)
+          account name. *)
 }
 
-type visible = {
-  lines : string list;
-  shown_accounts : int;
-  hidden_accounts : int;
-  hidden_notes : int;
-}
+val scope_id : Masc.Tui_decode.provider_usage_account -> string
+(** The server's id for the scope, as its usage history names it. *)
 
-val visible_rows : section -> rows:int -> visible
-(** Only complete account groups fit. One row is reserved to say what was
-    omitted when the section is taller than its budget. *)
+val scope_id_cells : int
+(** How much of a scope id a row draws to tell scopes apart. *)
+
+val scope_name : Masc.Tui_decode.provider_usage_account -> string
 
 val section :
   providers:Masc_tui_types.overview_providers_reading ->
@@ -67,6 +55,8 @@ val utilization_text : Masc.Tui_decode.provider_usage_utilization -> string
 (** The value as a whole percent, so accounts read in one unit. A percent is
     shown as reported; a fraction is multiplied by 100 and floored, so
     [0.9999] reads [99%] and never [100%]. *)
+
+val share_of_full : Masc.Tui_decode.provider_usage_utilization -> float
 
 val meter : cells:int -> float -> string
 (** A meter [cells] cells wide filled to the given share of full, drawn with

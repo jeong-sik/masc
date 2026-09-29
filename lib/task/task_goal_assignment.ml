@@ -20,6 +20,10 @@ type set_task_goal_error =
   | Backlog_read_failed of string
   | Unknown_task of string
   | Unknown_goal of string
+  | Task_finished of
+      { task_id : string
+      ; status : Masc_domain.task_status
+      }
   | Already_assigned of
       { task_id : string
       ; existing_goal_ids : string list
@@ -33,6 +37,12 @@ let set_task_goal_error_to_string = function
   | Backlog_read_failed message -> Printf.sprintf "failed to read authoritative backlog: %s" message
   | Unknown_task task_id -> Printf.sprintf "unknown task '%s'" task_id
   | Unknown_goal goal_id -> Printf.sprintf "unknown goal '%s'" goal_id
+  | Task_finished { task_id; status } ->
+    Printf.sprintf
+      "task '%s' is already %s; a finished task is not linked to a goal (a link \
+       has no timestamp)"
+      task_id
+      (Masc_domain.task_status_to_string status)
   | Already_assigned { task_id; existing_goal_ids } ->
     Printf.sprintf
       "task '%s' is already assigned to goal(s) [%s]; reassignment is out of \
@@ -47,15 +57,24 @@ let set_task_goal config ~task_id ~goal_id : (unit, set_task_goal_error) result 
     match Workspace_utils.with_file_lock_r config (Workspace_backlog.backlog_lock_path config) (fun () ->
       match Workspace_backlog.read_backlog_r config with
       | Error message -> Error (Backlog_read_failed message)
-      | Ok backlog when not (List.exists (fun (t : Masc_domain.task) -> String.equal t.id task_id) backlog.tasks) ->
-        Error (Unknown_task task_id)
-      | Ok _ ->
-        match Workspace_goal_index.link_goalless_task_to_goal config ~goal_id ~task_id with
-        | Ok () -> Ok ()
-        | Error (Workspace_goal_index.Already_linked_to_goals existing_goal_ids) ->
-          Error (Already_assigned { task_id; existing_goal_ids })
-        | Error (Workspace_goal_index.Link_write_failed message) ->
-          Error (Link_write_failed message)) with
+      | Ok backlog ->
+        (match
+           List.find_opt
+             (fun (t : Masc_domain.task) -> String.equal t.id task_id)
+             backlog.tasks
+         with
+         | None -> Error (Unknown_task task_id)
+         | Some task when Masc_domain.task_status_is_terminal task.Masc_domain.task_status ->
+           Error (Task_finished { task_id; status = task.Masc_domain.task_status })
+         | Some _ ->
+           (match
+              Workspace_goal_index.link_goalless_task_to_goal config ~goal_id ~task_id
+            with
+            | Ok () -> Ok ()
+            | Error (Workspace_goal_index.Already_linked_to_goals existing_goal_ids) ->
+              Error (Already_assigned { task_id; existing_goal_ids })
+            | Error (Workspace_goal_index.Link_write_failed message) ->
+              Error (Link_write_failed message)))) with
     | Ok result -> result
     | Error error -> Error (Backlog_read_failed (Masc_domain.masc_error_to_string error))) with
   | Ok result -> result

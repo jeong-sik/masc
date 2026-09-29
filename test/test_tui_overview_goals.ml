@@ -258,7 +258,7 @@ let contains ~sub text =
   at 0
 
 let draw ?(rows = 25) ?(tasks = live_tasks) reading =
-  Goals.lines ~now:captured_at ~localtime:Unix.gmtime ~inner_width:120 ~rows
+  Goals.lines ~now:captured_at ~inner_width:120 ~rows
     ~tasks:(Tasks.Rows_read tasks) reading
   |> List.map strip_ansi
 
@@ -294,7 +294,7 @@ let test_one_row_fits_a_short_viewport () =
     | [] -> fail "fixture has no drawn goal"
   in
   let rows =
-    Goals.lines ~now:captured_at ~localtime:Unix.gmtime ~inner_width:46
+    Goals.lines ~now:captured_at ~inner_width:46
       ~rows:2 ~tasks:(Tasks.Rows_read live_tasks)
       (Types.Goals_read [ goal ])
     |> List.map strip_ansi
@@ -317,7 +317,7 @@ let test_narrow_goal_keeps_identity_and_attention () =
     | [] -> fail "fixture has no drawn goal"
   in
   let row =
-    Goals.lines ~now:captured_at ~localtime:Unix.gmtime ~inner_width:46
+    Goals.lines ~now:captured_at ~inner_width:46
       ~rows:2 ~tasks:(Tasks.Rows_read live_tasks) (Types.Goals_read [ goal ])
     |> List.map strip_ansi |> fun rows -> List.nth rows 1
   in
@@ -364,7 +364,7 @@ let test_an_unread_goals_read_names_the_unknown_in_one_row () =
 let test_an_unread_backlog_is_not_a_zero () =
   let goals = decode_fixture () in
   let rows =
-    Goals.lines ~now:captured_at ~localtime:Unix.gmtime ~inner_width:120 ~rows:10
+    Goals.lines ~now:captured_at ~inner_width:120 ~rows:10
       ~tasks:(Tasks.Rows_unavailable "backlog.json unreadable")
       (Types.Goals_read goals)
     |> List.map strip_ansi
@@ -378,7 +378,7 @@ let test_an_unread_backlog_is_not_a_zero () =
 let test_a_backlog_not_read_yet_is_not_a_zero () =
   let goals = decode_fixture () in
   let rows =
-    Goals.lines ~now:captured_at ~localtime:Unix.gmtime ~inner_width:120 ~rows:10
+    Goals.lines ~now:captured_at ~inner_width:120 ~rows:10
       ~tasks:Tasks.Rows_unread
       (Types.Goals_read goals)
     |> List.map strip_ansi
@@ -389,20 +389,40 @@ let test_a_backlog_not_read_yet_is_not_a_zero () =
   check bool "and names no reason it does not have" false
     (contains ~sub:"unread:" (List.hd rows))
 
-(* 2026-09-23T15:30:00Z is already 00:30 on the 24th in KST. The operator's
-   calendar says the release is 13 days away; UTC days would say 14. *)
-let test_the_countdown_uses_the_operator_calendar () =
+(* An operator whose clock is nine hours ahead of UTC. POSIX TZ syntax, so the
+   test needs no zoneinfo on the host. A test binary is its own process, and an
+   unset TZ came from the host, so UTC stands in for it afterwards. *)
+let in_kst f =
+  let previous = Sys.getenv_opt "TZ" in
+  Unix.putenv "TZ" "KST-9";
+  Fun.protect
+    ~finally:(fun () -> Unix.putenv "TZ" (Option.value previous ~default:"UTC"))
+    f
+
+let release_row ~now =
   let goals = decode_fixture () in
+  Goals.lines ~now ~inner_width:120 ~rows:10 ~tasks:(Tasks.Rows_read live_tasks)
+    (Types.Goals_read goals)
+  |> List.map strip_ansi |> find_row ~sub:"v0.37.0"
+
+(* A due date is a UTC day (Goal_due). 2026-09-23T15:30:00Z is already 00:30 on
+   the 24th for an operator in KST; the release is still 14 days away by the
+   UTC calendar. *)
+let test_the_countdown_counts_utc_days_in_any_zone () =
   let just_after_kst_midnight = 1790177400.0 in
-  let kst now = Unix.gmtime (now +. (9. *. 3600.)) in
-  let rows =
-    Goals.lines ~now:just_after_kst_midnight ~localtime:kst ~inner_width:120
-      ~rows:10 ~tasks:(Tasks.Rows_read live_tasks)
-      (Types.Goals_read goals)
-    |> List.map strip_ansi
-  in
-  check bool "the countdown is from the local date" true
-    (contains ~sub:"due 10-07 (D-13)" (find_row ~sub:"v0.37.0" rows))
+  in_kst (fun () ->
+      check bool "00:30 KST on the 24th still counts from the 23rd" true
+        (contains ~sub:"due 10-07 (D-14)"
+           (release_row ~now:just_after_kst_midnight)))
+
+(* The countdown turns over at 00:00:00 UTC, not a second before. *)
+let test_the_countdown_turns_over_at_utc_midnight () =
+  let last_second_of_the_23rd = 1790207999.0 in
+  let first_second_of_the_24th = 1790208000.0 in
+  check bool "23:59:59Z is still the 23rd" true
+    (contains ~sub:"due 10-07 (D-14)" (release_row ~now:last_second_of_the_23rd));
+  check bool "00:00:00Z is the 24th" true
+    (contains ~sub:"due 10-07 (D-13)" (release_row ~now:first_second_of_the_24th))
 
 let test_a_goal_without_children_is_refused () =
   let json =
@@ -443,9 +463,30 @@ let test_an_unknown_phase_is_refused () =
         (Tui_decode.overview_goals_error_to_string other)
   | Ok _ -> fail "an unknown phase decoded"
 
-let row_of_goal goal =
+let test_explicit_measurement_requires_the_current_criterion () =
+  let document revision =
+    Yojson.Safe.from_string
+      (Printf.sprintf
+         {|{"tree":[{"id":"goal-x","title":"x","phase":"executing","priority":1,
+            "criterion_revision":"r2","metric":"passing checks","target_value":"5",
+            "measurement":{"state":"reported","record":{"goal_id":"goal-x",
+              "criterion_revision":"%s","observed_value":"3","evidence":"artifact:checks",
+              "actor":"planner","recorded_at":"2026-09-24T00:00:00Z"}},
+            "due_date":null,"task_count":0,"task_done_count":0,
+            "stagnation_seconds":null,"tasks":[],"children":[]}]}|}
+         revision)
+  in
+  (match Tui_decode.decode_overview_goals (document "r2") with
+   | Ok [ { og_measurement = Tui_decode.Goal_measurement_reported { value; _ }; _ } ] ->
+       check string "value is reported, not inferred" "3" value
+   | Ok _ | Error _ -> fail "current explicit observation was not decoded");
+  (match Tui_decode.decode_overview_goals (document "r1") with
+   | Error (Tui_decode.Overview_goals_malformed _) -> ()
+   | Ok _ | Error _ -> fail "stale criterion was accepted")
+
+let row_of_goal ?(now = captured_at) goal =
   let rows =
-    Goals.lines ~now:captured_at ~localtime:Unix.gmtime ~inner_width:120
+    Goals.lines ~now ~inner_width:120
       ~rows:2 ~tasks:(Tasks.Rows_read live_tasks)
       (Types.Goals_read [ goal ])
     |> List.map strip_ansi
@@ -487,6 +528,77 @@ let test_overdue_appears_only_after_due_date () =
   check bool "a dropped goal is not drawn, so never overdue" false
     (contains ~sub:"overdue" (String.concat " " (draw (Types.Goals_read [ dropped ]))))
 
+let first_drawn_goal () =
+  match Goals.drawn_goals (decode_fixture ()) with
+  | first :: _ -> first
+  | [] -> fail "fixture has no drawn goal"
+
+(* Due 2026-09-23 falls due at 23:59:59Z that day. The row reads overdue from
+   the first instant after it, not from the operator's midnight. *)
+let test_overdue_turns_on_after_23_59_59_utc () =
+  let due_on_the_23rd =
+    { (first_drawn_goal ()) with
+      og_phase = Goal_phase.Executing
+    ; og_due_date = Some "2026-09-23"
+    }
+  in
+  in_kst (fun () ->
+      let at_the_last_second = row_of_goal ~now:1790207999.0 due_on_the_23rd in
+      let a_second_later = row_of_goal ~now:1790208000.0 due_on_the_23rd in
+      check bool "23:59:59Z is not overdue" false
+        (contains ~sub:"overdue" at_the_last_second);
+      check bool "the due day counts D-0" true
+        (contains ~sub:"due 09-23 (D-0)" at_the_last_second);
+      check bool "00:00:00Z the next day is overdue" true
+        (contains ~sub:"overdue" a_second_later);
+      check bool "and counts D+1" true
+        (contains ~sub:"due 09-23 (D+1)" a_second_later))
+
+(* A value that is not YYYY-MM-DD is drawn as written, with no countdown, and
+   is never overdue. Goal_due does not guess what "2026-9-3" or "tomorrow"
+   meant. *)
+let test_an_unreadable_due_date_is_drawn_as_written () =
+  let base = first_drawn_goal () in
+  List.iter
+    (fun raw ->
+      let row =
+        row_of_goal
+          { base with og_phase = Goal_phase.Executing; og_due_date = Some raw }
+      in
+      check bool (raw ^ " is drawn as written") true
+        (contains ~sub:("due " ^ raw) row);
+      check bool (raw ^ " has no countdown") false
+        (contains ~sub:"(D-" row || contains ~sub:"(D+" row);
+      check bool (raw ^ " is never overdue") false
+        (contains ~sub:"overdue" row))
+    [ "tomorrow"; "2026-9-3"; "2026-13-01"; "2026-02-30"
+    ; "2000-01-01T00:00:00Z" ]
+
+(* Goals of one priority order by the day they fall due. A value that is not a
+   due date has no day, so it sorts with the goals that have none. *)
+let test_an_unreadable_due_date_sorts_with_the_undated () =
+  let base = first_drawn_goal () in
+  let goal og_id og_due_date =
+    { base with
+      og_id
+    ; og_phase = Goal_phase.Executing
+    ; og_priority = 1
+    ; og_due_date
+    }
+  in
+  let order =
+    Goals.drawn_goals
+      [ goal "unreadable" (Some "tomorrow")
+      ; goal "undated" None
+      ; goal "later" (Some "2026-10-07")
+      ; goal "sooner" (Some "2026-09-30")
+      ]
+    |> List.map (fun (drawn : Tui_decode.overview_goal) -> drawn.og_id)
+  in
+  check (list string) "dated goals first, the rest in the order they came"
+    [ "sooner"; "later"; "unreadable"; "undated" ]
+    order
+
 let () =
   run "tui_overview_goals"
     [ ( "overview goals"
@@ -512,13 +624,23 @@ let () =
             test_an_unread_backlog_is_not_a_zero
         ; test_case "a backlog not read yet is not a zero" `Quick
             test_a_backlog_not_read_yet_is_not_a_zero
-        ; test_case "the countdown uses the operator calendar" `Quick
-            test_the_countdown_uses_the_operator_calendar
+        ; test_case "the countdown counts UTC days in any zone" `Quick
+            test_the_countdown_counts_utc_days_in_any_zone
+        ; test_case "the countdown turns over at UTC midnight" `Quick
+            test_the_countdown_turns_over_at_utc_midnight
+        ; test_case "overdue turns on after 23:59:59 UTC" `Quick
+            test_overdue_turns_on_after_23_59_59_utc
+        ; test_case "an unreadable due date is drawn as written" `Quick
+            test_an_unreadable_due_date_is_drawn_as_written
+        ; test_case "an unreadable due date sorts with the undated" `Quick
+            test_an_unreadable_due_date_sorts_with_the_undated
         ; test_case "a goal without children is refused" `Quick
             test_a_goal_without_children_is_refused
         ; test_case "an empty tree is one headline" `Quick
             test_an_empty_tree_is_one_headline
         ; test_case "an unknown phase is refused" `Quick
             test_an_unknown_phase_is_refused
+        ; test_case "measurement is bound to the current criterion" `Quick
+            test_explicit_measurement_requires_the_current_criterion
         ] )
     ]

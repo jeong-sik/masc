@@ -118,18 +118,17 @@ type invite =
   ; expired : bool
   }
 
+let expired ~now (cred : Masc_domain.agent_credential) =
+  match cred.expires_at with
+  | Some expires_at -> String.compare (Masc_domain.iso8601_of_unix_seconds now) expires_at > 0
+  | None -> false
+
 let list ~base_path ~now =
-  let now_iso = Masc_domain.iso8601_of_unix_seconds now in
   Auth.list_credentials base_path
   |> List.filter_map (fun (cred : Masc_domain.agent_credential) ->
     match cred.role with
     | Masc_domain.Player ->
-      let expired =
-        match cred.expires_at with
-        | Some expires_at -> String.compare now_iso expires_at > 0
-        | None -> false
-      in
-      Some { invite_name = cred.agent_name; expires_at = cred.expires_at; expired }
+      Some { invite_name = cred.agent_name; expires_at = cred.expires_at; expired = expired ~now cred }
     | Masc_domain.Worker | Masc_domain.Admin -> None)
   |> List.sort (fun a b -> String.compare a.invite_name b.invite_name)
 
@@ -137,13 +136,19 @@ type revoked =
   | Deleted
   | Already_gone
 
-type revoke_error = Not_an_invite of Masc_domain.agent_role
+type revoke_error =
+  | Not_an_invite of Masc_domain.agent_role
+  | Credential_not_deleted of Masc_domain.masc_error
 
-let revoke ~base_path ~name =
-  match Auth.load_credential base_path name with
-  | Some { Masc_domain.agent_name; role = Masc_domain.Player; _ } when String.equal agent_name name ->
-    Auth.delete_credential base_path name;
-    Ok Deleted
-  | Some { Masc_domain.agent_name; role; _ } when String.equal agent_name name ->
-    Error (Not_an_invite role)
-  | Some _ | None -> Ok Already_gone
+let revoke ~base_path ~name ~after_revoke =
+  Auth.with_credential_transaction base_path (fun transaction ->
+    match Auth.load_credential base_path name with
+    | Some { Masc_domain.agent_name; role = Masc_domain.Player; _ } when String.equal agent_name name ->
+      Auth.delete_credential_in_transaction transaction name
+      |> Result.map_error (fun error -> Credential_not_deleted error)
+      |> Result.map (fun () -> after_revoke Deleted)
+    | Some { Masc_domain.agent_name; role; _ } when String.equal agent_name name ->
+      Error (Not_an_invite role)
+    | Some _ | None -> Ok (after_revoke Already_gone))
+  |> Result.map_error (fun error -> Credential_not_deleted error)
+  |> Result.join

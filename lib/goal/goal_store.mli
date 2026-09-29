@@ -275,16 +275,20 @@ val upsert_goal :
   ?priority:int ->
   ?owner:string ->
   unit ->
-  (goal * [ `created | `updated of Goal_phase.t ], write_error) result
+  (goal * [ `created | `updated of goal ], write_error) result
 (** Creates a new goal when [id] is omitted (mints [goal-<ms>-<4 hex digits>]
     internally), updates the matched row otherwise. Returns the resolved goal
-    paired with [`created], or [`updated previous_phase] carrying the phase
-    the row held before this write: an edit to the title, [metric] or
-    [target_value] moves a [Verifying], [Awaiting_confirmation] or [Completed]
-    goal back to [Executing], and the caller records that move.
+    paired with [`created], or [`updated previous] carrying the row as it was
+    before this write, read inside the write lock. The caller records what
+    changed. An edit to the title, [metric] or [target_value] moves a
+    [Verifying], [Awaiting_confirmation] or [Completed] goal back to
+    [Executing]. An edit to [due_date] or [priority] moves no phase.
 
     {!Rejected}:
     - [title] required for new goals (omit / empty string on a new goal id).
+    - [due_date] that {!Goal_due.read} cannot read, on a create and on an
+      update alike. Nothing is written. [None] leaves the stored due date as
+      it is; there is no way to clear one here.
     - RFC-0387 B1: [metric] and [target_value] are both required (non-blank)
       whenever the upsert creates a new row — including an explicit
       previously-unknown [id]. The create/update split is decided inside the

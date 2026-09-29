@@ -3,7 +3,7 @@
 #
 # Stages the release binaries as a local file:// release, installs them
 # through the real installer (detect_asset + SHA256SUMS verification +
-# placement), then boots the installed server and asserts /health. This
+# placement), then boots the installed server and waits for /health/ready. This
 # guards the installer's asset-name and checksum contract that a release
 # depends on -- the contract that broke silently when nothing exercised the
 # download path end to end -- without any network access.
@@ -272,19 +272,23 @@ env -u MASC_ASSETS_DIR MASC_BASE_PATH="$base" MASC_OTEL_ENABLED=0 \
   "$prefix/masc" --base-path "$base" --host 127.0.0.1 --port "$PORT" >"$log" 2>&1 &
 PID=$!
 
-health=""
+# /health can report ok before authenticated routes have their server state.
+# /health/ready returns 503 until that state and the startup barrier are ready.
+ready=""
 for _ in $(seq 1 30); do
-  if health="$(curl -fsS "http://127.0.0.1:$PORT/health" 2>/dev/null)"; then
+  if ready="$(curl -fsS "http://127.0.0.1:$PORT/health/ready" 2>/dev/null)"; then
     break
   fi
   kill -0 "$PID" 2>/dev/null || { echo "install-smoke: server exited before answering" >&2; cat "$log" >&2; exit 1; }
   sleep 1
 done
 
-case "$health" in
-  *'"status":"ok"'*) echo "install-smoke: installed server answered /health ok" ;;
-  *) echo "install-smoke: /health did not report ok: ${health:-<no response>}" >&2; cat "$log" >&2; exit 1 ;;
-esac
+if ! printf '%s' "$ready" | python3 -c 'import json, sys; value = json.load(sys.stdin); sys.exit(0 if isinstance(value, dict) and value.get("ready") is True else 1)'; then
+  echo "install-smoke: /health/ready did not report ready: ${ready:-<no response>}" >&2
+  cat "$log" >&2
+  exit 1
+fi
+echo "install-smoke: installed server answered /health/ready ready"
 
 python3 "$REPO_ROOT/scripts/check-installed-dashboard.py" \
   --binary "$prefix/masc" --base-url "http://127.0.0.1:$PORT"

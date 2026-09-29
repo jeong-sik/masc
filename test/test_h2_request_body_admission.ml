@@ -7,6 +7,8 @@
 
 open Alcotest
 
+let () = Masc.Server_startup_state.mark_state_ready () |> Result.get_ok
+
 module Helpers = Server_h2_gateway_helpers
 
 (* The request's :authority and the gateway's trust policy name the same

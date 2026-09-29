@@ -32,11 +32,7 @@ def run(executable):
         ]
 
     def interact(process, master_fd, _slave_fd, output, _base_path):
-        h.tab_until(process, master_fd, output, b"MASC Planning")
-        h.send_and_wait(process, master_fd, output, b"v", b"Task Review")
-        h.wait_for_output(
-            process, master_fd, output, b"old submission", start=0, timeout=3.0
-        )
+        h.palette_go(process, master_fd, output, b"go Task Review", b"old submission")
         h.send_and_wait(
             process, master_fd, output, b"a",
             b"armed: approve task-901 -- same key again to send [vr-old]",
@@ -99,11 +95,7 @@ def run(executable):
     detail_requests = []
 
     def detail_interaction(process, master_fd, _slave_fd, output, _base_path):
-        h.tab_until(process, master_fd, output, b"MASC Planning")
-        h.send_and_wait(process, master_fd, output, b"v", b"Task Review")
-        h.wait_for_output(
-            process, master_fd, output, b"old submission", start=0, timeout=3.0
-        )
+        h.palette_go(process, master_fd, output, b"go Task Review", b"old submission")
         h.send_and_wait(process, master_fd, output, b"\r", b"HOW TO READ THIS")
         h.send_and_wait(
             process, master_fd, output, b"a",

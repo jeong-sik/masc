@@ -328,8 +328,9 @@ let test_neck_item_leaves_the_mouth () =
           (fun mouth ->
             List.iter
               (fun body ->
-                let plain = D.render body bare (size n) in
-                let worn = D.render body { bare with neck } (size n) in
+                let equipment = { bare with neck } in
+                let plain = D.For_testing.render_in_frame_of body bare ~frame_of:equipment D.still (size n) in
+                let worn = D.render body equipment (size n) in
                 let marked = [ D.For_testing.mouth_rgb body; D.For_testing.tooth_rgb body ] in
                 let kept = ref 0 in
                 for y = 0 to n - 1 do
@@ -394,8 +395,9 @@ let test_beard_is_not_the_wax () =
       Alcotest.(check bool) "the beard is drawn" true (!painted > 0))
     all_wax
 
-(* Everything a part can reach: a body at the ranges' ends wearing an item in
-   every slot, in the poses that stretch it most. *)
+(* Bodies at the ranges' ends wearing an item in every slot. Cross every
+   neck item with every body: coupling their indices tested the medal only
+   on a tall candle and missed its disc leaving the frame on a short one. *)
 let extreme_cases () =
   let lo (a, _) = a and hi (_, b) = b in
   let widths = [ lo half_width_range; hi half_width_range ] and heights = [ lo half_height_range; hi half_height_range ] in
@@ -417,11 +419,16 @@ let extreme_cases () =
           ~mouth:(List.nth all_mouths (k mod List.length all_mouths))
           ()
       in
-      let equipment =
-        { face; neck = List.nth all_neck_items (k mod List.length all_neck_items); head = Bow; hand = List.nth all_hand_items (k mod List.length all_hand_items); base = Dish (List.nth dishes (k mod List.length dishes)) }
-      in
-      (body, equipment))
+      List.map
+        (fun neck ->
+          let equipment =
+            { face; neck; head = Bow; hand = List.nth all_hand_items (k mod List.length all_hand_items); base = Dish (List.nth dishes (k mod List.length dishes)) }
+          in
+          (body, equipment))
+        all_neck_items)
     all_face_items
+  |> List.concat
+  |> fun cases -> cases
   @ [ (make ~half_width:(hi half_width_range) ~half_height:(lo half_height_range) (), bare) ]
 
 let stretched_poses = [ pose ~flicker:1.0 ~blink:false ~bob:1.0; pose ~flicker:(-1.0) ~blink:true ~bob:(-1.0) ]
@@ -440,22 +447,48 @@ let test_culling_changes_nothing () =
         (D.still :: stretched_poses))
     (extreme_cases ())
 
+let check_empty_border img =
+  let n = img.D.edge in
+  for i = 0 to n - 1 do
+    List.iter
+      (fun (x, y) ->
+        let _, a = D.pixel img ~x ~y in
+        Alcotest.(check int) (Printf.sprintf "border pixel (%d, %d) is empty" x y) 0 a)
+      [ (i, 0); (i, n - 1); (0, i); (n - 1, i) ]
+  done
+
 let test_nothing_reaches_the_border () =
-  let n = 128 in
   List.iter
     (fun (body, equipment) ->
       List.iter
         (fun p ->
-          let img = D.render_posed body equipment p (size n) in
-          for i = 0 to n - 1 do
-            List.iter
-              (fun (x, y) ->
-                let _, a = D.pixel img ~x ~y in
-                Alcotest.(check int) (Printf.sprintf "border pixel (%d, %d) is empty" x y) 0 a)
-              [ (i, 0); (i, n - 1); (0, i); (n - 1, i) ]
-          done)
-        stretched_poses)
+          List.iter
+            (fun n -> D.render_posed body equipment p (size n) |> check_empty_border)
+            [ D.min_size; 128 ])
+        (D.still :: stretched_poses))
     (extreme_cases ())
+
+(* This valid name receives a medal and a short, wide body. Its disc used to
+   end at y=1.0832 while the image ended at y=0.97, cutting it across the
+   middle on the dashboard, TUI and portrait-read tool alike. *)
+let test_name_derived_medal_is_whole () =
+  let name = "audit-keeper-79" in
+  let body = body_of_name name and equipment = equipment_of_name name in
+  Alcotest.(check bool) "the name wears a medal" true (equipment.neck = Medal);
+  List.iter
+    (fun n ->
+      List.iter
+        (fun p ->
+          let shown = D.render_posed body equipment p (size n) in
+          check_empty_border shown;
+          let without_medal =
+            D.For_testing.render_in_frame_of body { equipment with neck = Bare_neck }
+              ~frame_of:equipment p (size n)
+          in
+          Alcotest.(check bool) "the medal is drawn in the frame" false
+            (String.equal shown.D.rgba without_medal.D.rgba))
+        (D.still :: stretched_poses))
+    [ D.min_size; 48; 160; D.max_size ]
 
 (* ---- motion ---------------------------------------------------------------- *)
 
@@ -663,6 +696,7 @@ let () =
           Alcotest.test_case "beard is not the wax" `Quick test_beard_is_not_the_wax;
           Alcotest.test_case "culling changes nothing" `Quick test_culling_changes_nothing;
           Alcotest.test_case "nothing reaches the border" `Quick test_nothing_reaches_the_border;
+          Alcotest.test_case "name-derived medal is whole" `Quick test_name_derived_medal_is_whole;
         ] );
       ( "dotted",
         [

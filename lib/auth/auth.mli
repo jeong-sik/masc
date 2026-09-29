@@ -59,9 +59,31 @@ val save_auth_config : string -> auth_config -> unit
 
 (** {1 Credentials} *)
 
+type credential_transaction
+(** An admitted transaction, bound to its workspace. Use it only in the
+    callback that received it; it must not escape or be shared with a fiber. *)
+
+val with_credential_transaction :
+  string -> (credential_transaction -> 'a) -> ('a, masc_error) result
+(** Serialize a credential-dependent effect with credential save, deletion and
+    alias publication in this workspace, across fibers, threads and processes.
+    The callback may use {!load_credential} and hold its decision through its
+    effect. It may delete through {!delete_credential_in_transaction}; other
+    credential writers, token-index lookup (whose cold publication also takes
+    this lock), and recursive entry would deadlock and must not be called.
+    Admission is cancellable; an admitted callback and lock release are protected
+    from cancellation. A failed admission runs no callback. A completed callback
+    keeps its result if lock cleanup fails, with the cleanup failure logged.
+    Body exceptions propagate after release. *)
+
 val load_credential : string -> string -> agent_credential option
-(** [load_credential config agent_name] looks up the agent's credential.
-    Falls back to agent-type prefix for generated nicknames. *)
+(** [load_credential config agent_name] reads [agent_name]'s own credential
+    file, following its redirect stub to the id-named file. [None] when the
+    file is missing, and also when it cannot be read or decoded. A name that
+    signs in with another name's token (a generated nickname, a Keeper
+    transport alias) has no file of its own: the token check maps it to the
+    owner ([Auth_credential_token.verify_token_owner_alias]), not this
+    lookup. *)
 
 (** Outcome of {!load_credential_of}: distinguishes "no credential file
     at all" from "credential found but its owner does not match the
@@ -116,6 +138,8 @@ val load_credential_of :
     perpetuate dual identity. *)
 
 val save_credential : string -> agent_credential -> unit
+(** Publish under {!with_credential_transaction}, including token-cache
+    invalidation. Lock admission errors raise [Sys_error], like write errors. *)
 
 val ensure_credential_alias :
   string ->
@@ -142,6 +166,12 @@ val delete_credential : string -> string -> unit
 (** Retire [agent_name]: the credential, its redirect stub and UUID file, and
     the raw token file, then invalidate the credential cache. The bearer stops
     validating from the next request. Absent files are not an error. *)
+
+val delete_credential_in_transaction :
+  credential_transaction -> string -> (unit, masc_error) result
+(** The same deletion, using the workspace already admitted by
+    {!with_credential_transaction}. No second lock is acquired. Cache
+    invalidation also runs if a removal fails after a partial deletion. *)
 
 val list_credentials : string -> agent_credential list
 

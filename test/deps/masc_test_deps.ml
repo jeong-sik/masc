@@ -549,6 +549,12 @@ let declare_fixture_keeper ~base_path ~sandbox_profile name =
          (Otoml.TomlTable [ "keeper", Otoml.TomlTable fields ])))
 ;;
 
+(* The image the live sandbox suites look for in the host's Docker store and
+   promote as [base] in each run's catalog; build it with
+   [masc sandbox-image --tag masc-sandbox-test:ci]. *)
+let live_sandbox_image_tag = "masc-sandbox-test:ci"
+
+
 (* A Keeper's container starts from the build its [sandbox_image] name has in
    the host's image catalog, so a fixture that reaches a container start
    promotes one for its workspace, at the config root the runtime resolves
@@ -556,6 +562,7 @@ let declare_fixture_keeper ~base_path ~sandbox_profile name =
    each [(name, reference)] is promoted in the selected store (Docker by
    default). Nothing asks the store whether it holds the reference. Any
    builds the workspace had are replaced. *)
+
 
 let write_sandbox_image_catalog
     ?(store = Masc.Keeper_sandbox_image_catalog.Docker_daemon)

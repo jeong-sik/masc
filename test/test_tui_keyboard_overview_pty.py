@@ -1,4 +1,4 @@
-"""Keyboard PTY overview scenarios in the Dune parallel batch."""
+"""Keyboard PTY Dashboard scenarios in the Dune parallel batch."""
 
 import base64
 import json
@@ -38,12 +38,13 @@ def first_use_frames(executable: str) -> None:
         "openai",
         "zai",
     )
-    # One reported window per account, so each account draws one row. An
-    # account with no report draws none, and the budget below counts rows.
+    # One reported window per account, so the Dashboard's usage line counts
+    # nine reported scopes.
     observed_at = time.time()
     payload["provider_usage_windows"] = [
         {
             "scope": f"provider:{name}",
+            "scope_id": f"scope-{name}",
             "providers": [{"id": name, "display_name": name}],
             "state": "reported",
             "windows": [
@@ -81,19 +82,19 @@ def first_use_frames(executable: str) -> None:
             )
             visible = keyboard.screen_text(frame)
             print(
-                f"OVERVIEW_FRAME_{state}_{columns}X32_B64="
+                f"DASHBOARD_FRAME_{state}_{columns}X32_B64="
                 f"{base64.b64encode(frame).decode()}"
             )
             print(
-                f"OVERVIEW_SCREEN_{state}_{columns}X32_BEGIN\n"
+                f"DASHBOARD_SCREEN_{state}_{columns}X32_BEGIN\n"
                 f"{visible.decode(errors='replace')}\n"
-                f"OVERVIEW_SCREEN_{state}_{columns}X32_END"
+                f"DASHBOARD_SCREEN_{state}_{columns}X32_END"
             )
             return visible
 
         try:
-            # Read the PTY while the briefing is held. The previous wait
-            # intermittently timed out before observing the request.
+            # Keep reading frames while the briefing is held so the terminal
+            # buffer cannot stop the TUI before its request is observed.
             if not keyboard.wait_for_fixture_event(
                 process, fd, output, requested, timeout=10
             ):
@@ -102,13 +103,14 @@ def first_use_frames(executable: str) -> None:
                         f"the TUI exited before requesting the briefing: {bytes(output)!r}"
                     )
                 raise AssertionError("the TUI did not request the briefing")
+            # The Dashboard is working from the first frame. Use a width that
+            # differs from the harness and the checks below to force a redraw.
+            capture("LOADING", 120, b"Connecting to workspace")
             for columns in (80, 140):
-                unread = capture(
-                    "UNREAD", columns, b"Overview briefing not read yet"
-                )
+                unread = capture("UNREAD", columns, b"attention not observed")
                 if b"Start here (2 steps)" in unread:
                     raise AssertionError("an unread briefing claimed an empty fleet")
-                if b"Attention (0)" in unread:
+                if b"0 attention items" in unread:
                     raise AssertionError("an unread briefing claimed zero attention items")
         finally:
             release.set()
@@ -121,12 +123,9 @@ def first_use_frames(executable: str) -> None:
             for expected in (
                 b"Start here (2 steps)",
                 b"masc keeper-create --edit --host 127.0.0.1 --port ",
-                b"Goals (0)",
-                b"No goal is executing or verifying.",
-                b"Nothing needs attention.",
-                b"Plan usage",
-                b"10%",
-                b"Approvals: 0?",
+                b"Open Keepers with 3",
+                b"0 attention items",
+                b"9/9 quota scopes reported",
             ):
                 if expected not in visible:
                     raise AssertionError(
@@ -143,30 +142,10 @@ def first_use_frames(executable: str) -> None:
                 raise AssertionError(
                     f"{columns} columns did not target the displayed server: {visible!r}"
                 )
-            count = re.search(rb"Plan usage \((\d+)/(\d+) accounts shown\)", visible)
-            if count is None or tuple(int(part) for part in count.groups()) != (6, 9):
-                raise AssertionError(f"{columns} columns did not show 6/9 accounts: {visible!r}")
-            if b"3 more accounts do not fit at this height." not in visible:
-                raise AssertionError(f"{columns} columns hid the usage count: {visible!r}")
-            left = [line.split(b"\xe2\x94\x82", 1)[0].strip() for line in visible.splitlines()]
-            attention = next(i for i, line in enumerate(left) if b"Attention (0)" in line)
-            tasks = next(i for i, line in enumerate(left) if b"Tasks (0 open)" in line)
-            if left[attention + 1] or left[tasks - 1] or left[tasks + 1]:
-                raise AssertionError(f"{columns} columns lost approved section spacing: {visible!r}")
-        narrow = keyboard.resize_and_wait(
-            process, fd, output, rows=20, columns=80,
-            needle=b"Plan usage", controls=(keyboard.FULL_REDRAW,),
-            final_cursor=b"\x1b[?25l",
-        )
-        narrow_text = keyboard.screen_text(narrow)
-        if b"Start here (2 steps)" in narrow_text:
-            raise AssertionError(f"a partial first-use guide was drawn: {narrow_text!r}")
-        if b"Plan usage" not in narrow_text or b"antigravity_subscription" not in narrow_text:
-            raise AssertionError(f"suppressed guide did not free provider rows: {narrow_text!r}")
         os.write(fd, b"q")
 
     keyboard.run_terminal_scenario(
-        executable, description="first-use overview at 80 and 140 columns",
+        executable, description="first-use Dashboard at 80 and 140 columns",
         interact=interact, http_fixtures=fixtures, workspace="overview-demo",
     )
 
@@ -203,15 +182,15 @@ def opening_boot_frames(executable: str) -> None:
         '[local.sample]\n[runtime]\ndefault = "local.sample"\n'
     )
     cases = (
-        (None, None, b"MASC Overview"),
-        ("overview", None, b"MASC Overview"),
-        ("last", None, b"Could not open last chat (no saved Keeper). Showing Overview."),
+        (None, None, b"MASC Dashboard"),
+        ("overview", None, b"MASC Dashboard"),
+        ("last", None, b"Could not open last chat (no saved Keeper). Showing Dashboard."),
         ("last", "alpha", "Keepers ▸ alpha ▸ chat".encode()),
         ("last", "beta", "Keepers ▸ beta ▸ chat".encode()),
         ("last", "last", "Keepers ▸ last ▸ chat".encode()),
         ("keeper", "alpha", "Keepers ▸ alpha ▸ chat".encode()),
         ("keeper", "missing",
-         b"Could not open chat with missing (Keeper not found). Showing Overview."),
+         b"Could not open chat with missing (Keeper not found). Showing Dashboard."),
     )
     for mode, target, expected in cases:
         def prepare(base_path: str) -> None:
@@ -235,15 +214,19 @@ def opening_boot_frames(executable: str) -> None:
 
         def interact(process, fd, _slave, output, base_path):
             chat = expected.startswith(b"Keepers ")
-            needle = expected if chat else b"Goals ("
-            keyboard.wait_for_output(
-                process, fd, output, needle, start=0, timeout=10
-            )
+            # The Dashboard draws its Goals row from the loading frame, but a
+            # fallback reason is set only once the Keeper list is known. Wait
+            # for both before reading the frame, or the read lands too early.
+            needles = (expected,) if chat else (b"Goals \xc2\xb7", expected)
+            for needle in needles:
+                keyboard.wait_for_output(
+                    process, fd, output, needle, start=0, timeout=10
+                )
             # The needle can arrive before the rest of its frame, and that
             # frame rewrites only the rows that changed: the title can sit in
             # an earlier one. So wait for the frame's end and replay every row
             # painted up to it (screen_text starts at the last full redraw).
-            needle_end = keyboard.end_of_needle(output, needle, 0)
+            needle_end = max(keyboard.end_of_needle(output, needle, 0) for needle in needles)
             keyboard.wait_for_output(
                 process, fd, output, keyboard.FRAME_END, start=needle_end, timeout=3.0
             )
@@ -257,9 +240,9 @@ def opening_boot_frames(executable: str) -> None:
             if not chat:
                 rows = visible.splitlines()
                 reason = next((i for i, row in enumerate(rows) if expected in row), None)
-                goals = next((i for i, row in enumerate(rows) if b"Goals (" in row), None)
+                goals = next((i for i, row in enumerate(rows) if b"Goals \xc2\xb7" in row), None)
                 if mode in ("last", "keeper") and (reason is None or goals is None or reason >= goals):
-                    raise AssertionError(f"fallback reason was not the first Overview row: {visible!r}")
+                    raise AssertionError(f"fallback reason was not the first Dashboard row: {visible!r}")
             if mode == "last" and target is None:
                 narrow = keyboard.resize_and_wait(
                     process, fd, output, rows=20, columns=80,

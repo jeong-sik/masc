@@ -217,7 +217,7 @@ describe('dashboardHealthChips', () => {
       } as any,
       runtimeProviderProbe: {
         source: 'runtime.toml',
-        status: 'unreachable',
+        status: 'unavailable',
         probe_ok: false,
         checked_at: '2026-08-24T12:00:00Z',
         summary: {

@@ -1534,6 +1534,145 @@ let test_recovery_proof_cannot_authorize_mutation () =
   check string "primary failure is not overwritten" "broken-primary" (ledger_bytes config)
 ;;
 
+
+(* {1 The caller's step before a passing verdict is written} *)
+
+let verifier_transition_with_step ~before_proof_commit config goal_id decision evidence =
+  let request_id, criterion = proof_identity config goal_id in
+  Workspace_goals.commit_verifier_decision
+    ~before_proof_commit
+    ~tool_name:"goal_verifier_commit"
+    ~start_time:(Tool_timing.start ())
+    config
+    ~goal_id
+    ~verification_run_id:"goal-verifier-test-run"
+    ~request_id
+    ~criterion
+    ~decision
+    ~evidence
+;;
+
+let goal_in_verifying config title =
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx title in
+  ignore (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
+  goal_id
+;;
+
+let test_step_sees_the_passing_verdict_before_it_is_written () =
+  with_workspace
+  @@ fun config ->
+  let goal_id = goal_in_verifying config "Step sees the verdict" in
+  let request_id, _ = proof_identity config goal_id in
+  let seen = ref [] in
+  let step (goal : Goal_store.goal) (verdict : Goal_verification.verdict) =
+    let request_still_pending =
+      match (ledger_record config goal_id).completion with
+      | Goal_verification.Proof_pending _ -> true
+      | Goal_verification.Completion_idle | Goal_verification.Proof_proven _
+      | Goal_verification.Proof_refuted _ | Goal_verification.Human_confirmed _ -> false
+    in
+    seen
+    := ( goal.Goal_store.id
+       , verdict.Goal_verification.request_id
+       , verdict.Goal_verification.outcome
+       , request_still_pending
+       , Goal_phase.to_string goal.Goal_store.phase )
+       :: !seen;
+    Ok ()
+  in
+  let committed =
+    must_succeed
+      "proven"
+      (verifier_transition_with_step
+         ~before_proof_commit:step
+         config
+         goal_id
+         Workspace_goals.Proof_proven
+         "artifact:proof")
+  in
+  check string "the Goal moved" "awaiting_confirmation" (json_state committed [ "goal"; "phase" ]);
+  match !seen with
+  | [ (id, seen_request, outcome, request_still_pending, phase) ] ->
+    check string "names the Goal" goal_id id;
+    check string "names the pending request" request_id seen_request;
+    check bool "is a passing verdict" true (outcome = Goal_verification.Proven);
+    check bool "the ledger still holds the pending request" true request_still_pending;
+    check string "the Goal is still Verifying" "verifying" phase
+  | calls -> fail (Printf.sprintf "expected one call, got %d" (List.length calls))
+;;
+
+let test_a_refusing_step_leaves_the_proof_pending () =
+  with_workspace
+  @@ fun config ->
+  let goal_id = goal_in_verifying config "Step refuses" in
+  let request_id, _ = proof_identity config goal_id in
+  let refusal =
+    verifier_transition_with_step
+      ~before_proof_commit:(fun _ _ -> Error "candle ledger unavailable")
+      config
+      goal_id
+      Workspace_goals.Proof_proven
+      "artifact:proof"
+  in
+  ignore (must_fail "the step refuses" refusal);
+  check bool "the refusal reaches the caller" true
+    (String_util.contains_substring (Tool_result.message refusal) "candle ledger unavailable");
+  check string "the Goal stays in Verifying" "verifying" (stored_phase config goal_id);
+  (match (ledger_record config goal_id).completion with
+   | Goal_verification.Proof_pending pending ->
+     check string "the same request is still pending" request_id pending.request_id
+   | Goal_verification.Completion_idle | Goal_verification.Proof_proven _
+   | Goal_verification.Proof_refuted _ | Goal_verification.Human_confirmed _ ->
+     fail "a refused step must not consume the request");
+  let committed =
+    must_succeed
+      "the same verdict commits once nothing refuses"
+      (verifier_transition config goal_id Workspace_goals.Proof_proven "artifact:proof")
+  in
+  check string "the Goal moved" "awaiting_confirmation" (json_state committed [ "goal"; "phase" ])
+;;
+
+let test_the_step_does_not_run_for_a_refutation () =
+  with_workspace
+  @@ fun config ->
+  let goal_id = goal_in_verifying config "Step skipped for a refutation" in
+  let calls = ref 0 in
+  let refuted =
+    must_succeed
+      "refuted"
+      (verifier_transition_with_step
+         ~before_proof_commit:(fun _ _ -> incr calls; Error "must not run")
+         config
+         goal_id
+         (Workspace_goals.Proof_refuted { reason = "metric moved under the claim" })
+         "coverage run attached")
+  in
+  check int "the step did not run" 0 !calls;
+  check string "back to executing" "executing" (json_state refuted [ "goal"; "phase" ])
+;;
+
+let test_the_step_does_not_run_again_for_a_replayed_verdict () =
+  with_workspace
+  @@ fun config ->
+  let goal_id = goal_in_verifying config "Step skipped for a replay" in
+  let calls = ref 0 in
+  let commit () =
+    must_succeed
+      "proven"
+      (verifier_transition_with_step
+         ~before_proof_commit:(fun _ _ -> incr calls; Ok ())
+         config
+         goal_id
+         Workspace_goals.Proof_proven
+         "artifact:proof")
+  in
+  ignore (commit ());
+  check int "the first commit ran the step" 1 !calls;
+  ignore (commit ());
+  check int "the replay did not" 1 !calls
+;;
+
 let () =
   run
     "goal_verification_gate"
@@ -1624,6 +1763,16 @@ let () =
             test_keeper_keeps_and_sees_a_verifying_goal
         ; test_case "corrupt ledger fails request_complete loudly" `Quick
             test_corrupt_ledger_fails_request_complete_loudly
+        ] )
+    ; ( "before proof commit"
+      , [ test_case "the step sees the passing verdict before it is written" `Quick
+            test_step_sees_the_passing_verdict_before_it_is_written
+        ; test_case "a refusing step leaves the proof pending" `Quick
+            test_a_refusing_step_leaves_the_proof_pending
+        ; test_case "the step does not run for a refutation" `Quick
+            test_the_step_does_not_run_for_a_refutation
+        ; test_case "the step does not run again for a replayed verdict" `Quick
+            test_the_step_does_not_run_again_for_a_replayed_verdict
         ] )
     ]
 ;;

@@ -26,11 +26,11 @@ let write ~now (config : Workspace_utils_backend_setup.config) goal verdict conf
            ~passed_at:verdict.recorded_at
            (Candle_ledger.events view)
        with
-       | None -> Ok ([], ())
+       | None -> Ok ([], false)
        | Some passed_at ->
          let* at = Candle_stamp.at ~now in
          let* owed = row ~at ~goal ~verdict ~confirmation ~passed_at in
-         Ok ([ owed ], ())))
+         Ok ([ owed ], true)))
 ;;
 
 let record ~now (config : Workspace_utils_backend_setup.config) goal verdict confirmation =
@@ -44,9 +44,16 @@ let record ~now (config : Workspace_utils_backend_setup.config) goal verdict con
       reason;
     Ok ()
   | Candle_config.Enabled ->
-    Result.map_error
-      (fun detail -> "candle payout owed: " ^ detail)
-      (write ~now config goal verdict confirmation)
+    (match
+       Result.map_error
+         (fun detail -> "candle payout owed: " ^ detail)
+         (write ~now config goal verdict confirmation)
+     with
+     | Ok wrote ->
+       (* The worker takes it from here; it does not need the Goal's lock. *)
+       if wrote then Candle_payout_worker.wake ();
+       Ok ()
+     | Error _ as refused -> refused)
 ;;
 
 let after_confirmation config goal verdict confirmation =

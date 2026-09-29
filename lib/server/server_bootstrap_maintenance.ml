@@ -810,6 +810,10 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
          (Printexc.to_string exn));
     let rec loop () =
       Eio.Time.sleep clock maintenance_tick_sec;
+      (* A payout that could not be prepared (a Task or the links did not read)
+         is tried again on this tick. It comes before the work below so that a
+         step that raises cannot skip the retry. *)
+      Candle_payout_worker.wake ();
       project_transition_outboxes Maintenance_projection;
       reconcile_broadcast_mentions ();
       (try

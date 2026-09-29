@@ -160,7 +160,10 @@ let goal_ids events =
   List.map
     (fun (event : Candle_event.t) ->
        match event.body with
-       | Candle_event.Snapshot { goal_id; _ } | Candle_event.Payout_owed { goal_id; _ } -> goal_id)
+       | Candle_event.Snapshot { goal_id; _ }
+       | Candle_event.Payout_owed { goal_id; _ }
+       | Candle_event.Candidates { goal_id; _ }
+       | Candle_event.Unattributed { goal_id; _ } -> goal_id)
     events
 ;;
 

@@ -16,6 +16,8 @@ type task_lookup =
       }
   | Deleted
 
+type unattributed_reason = No_candidates
+
 type body =
   | Snapshot of
       { goal_id : string
@@ -35,6 +37,18 @@ type body =
       ; passed_at : Candle_time.t
       ; confirmed_at : Candle_time.t
       }
+  | Candidates of
+      { goal_id : string
+      ; request_id : string
+      ; tasks : (string * task_lookup) list
+      ; candidate_task_ids : string list
+      ; candidate_keepers : string list
+      }
+  | Unattributed of
+      { goal_id : string
+      ; request_id : string
+      ; reason : unattributed_reason
+      }
 
 type t =
   { at : Candle_time.t
@@ -44,11 +58,46 @@ type t =
 let kind = function
   | Snapshot _ -> "snapshot"
   | Payout_owed _ -> "payout_owed"
+  | Candidates _ -> "candidates"
+  | Unattributed _ -> "unattributed"
 ;;
 
 let nullable_text = function
   | None -> `Null
   | Some value -> `String value
+;;
+
+let text_list ids = `List (List.map (fun id -> `String id) ids)
+
+let status_text = function
+  | Todo -> "todo"
+  | Claimed -> "claimed"
+  | In_progress -> "in_progress"
+  | Awaiting_verification -> "awaiting_verification"
+  | Done _ -> "done"
+  | Cancelled -> "cancelled"
+;;
+
+(* Only a done Task has a completion time; the other rows write [null]. *)
+let completed_at_json = function
+  | Done { completed_at } -> Candle_time.to_yojson completed_at
+  | Todo | Claimed | In_progress | Awaiting_verification | Cancelled -> `Null
+;;
+
+let lookup_fields task_id : task_lookup -> (string * Yojson.Safe.t) list = function
+  | Found found ->
+    [ "task_id", `String task_id
+    ; "state", `String "found"
+    ; "title", `String found.title
+    ; "assignee", nullable_text found.assignee
+    ; "status", `String (status_text found.status)
+    ; "completed_at", completed_at_json found.status
+    ]
+  | Deleted -> [ "task_id", `String task_id; "state", `String "deleted" ]
+;;
+
+let unattributed_reason_text = function
+  | No_candidates -> "no_candidates"
 ;;
 
 let body_fields : body -> (string * Yojson.Safe.t) list = function
@@ -69,6 +118,19 @@ let body_fields : body -> (string * Yojson.Safe.t) list = function
     ; "request_id", `String p.request_id
     ; "passed_at", Candle_time.to_yojson p.passed_at
     ; "confirmed_at", Candle_time.to_yojson p.confirmed_at
+    ]
+  | Candidates c ->
+    [ "goal_id", `String c.goal_id
+    ; "request_id", `String c.request_id
+    ; ( "tasks"
+      , `List (List.map (fun (task_id, lookup) -> `Assoc (lookup_fields task_id lookup)) c.tasks) )
+    ; "candidate_task_ids", text_list c.candidate_task_ids
+    ; "candidate_keepers", text_list c.candidate_keepers
+    ]
+  | Unattributed u ->
+    [ "goal_id", `String u.goal_id
+    ; "request_id", `String u.request_id
+    ; "reason", `String (unattributed_reason_text u.reason)
     ]
 ;;
 
@@ -127,6 +189,80 @@ let payout_owed_of_fields ~context fields =
   Ok (Payout_owed { goal_id; request_id; passed_at; confirmed_at })
 ;;
 
+let status_of_fields ~status ~completed_at =
+  match status, completed_at with
+  | "done", Some completed_at -> Ok (Done { completed_at })
+  | "done", None -> Error "a done task has no completed_at"
+  | "todo", None -> Ok Todo
+  | "claimed", None -> Ok Claimed
+  | "in_progress", None -> Ok In_progress
+  | "awaiting_verification", None -> Ok Awaiting_verification
+  | "cancelled", None -> Ok Cancelled
+  | ("todo" | "claimed" | "in_progress" | "awaiting_verification" | "cancelled"), Some _ ->
+    Error (Printf.sprintf "a %s task has a completed_at" status)
+  | unknown, (Some _ | None) -> Error (Printf.sprintf "unknown status %S" unknown)
+;;
+
+let lookup_of_json json =
+  let context = "task" in
+  let* fields = Candle_json.object_fields ~context json in
+  let field key decode fields = Candle_json.field ~context key decode fields in
+  let* task_id, fields = field "task_id" Candle_json.as_non_blank fields in
+  let* state, fields = field "state" Candle_json.as_string fields in
+  match state with
+  | "found" ->
+    let* title, fields = field "title" Candle_json.as_string fields in
+    let* assignee, fields =
+      field "assignee" (Candle_json.as_nullable Candle_json.as_non_blank) fields
+    in
+    let* status, fields = field "status" Candle_json.as_non_blank fields in
+    let* completed_at, fields =
+      field "completed_at" (Candle_json.as_nullable Candle_time.of_yojson) fields
+    in
+    let* () = Candle_json.finish ~context fields in
+    let* status =
+      Result.map_error
+        (Printf.sprintf "%s %s: %s" context task_id)
+        (status_of_fields ~status ~completed_at)
+    in
+    Ok (task_id, Found { title; assignee; status })
+  | "deleted" ->
+    let* () = Candle_json.finish ~context fields in
+    Ok (task_id, Deleted)
+  | unknown -> Error (Printf.sprintf "%s: unknown state %S" context unknown)
+;;
+
+let candidates_of_fields ~context fields =
+  let field key decode fields = Candle_json.field ~context key decode fields in
+  let* goal_id, fields = field "goal_id" Candle_json.as_non_blank fields in
+  let* request_id, fields = field "request_id" Candle_json.as_non_blank fields in
+  let* tasks, fields = field "tasks" (Candle_json.as_list lookup_of_json) fields in
+  let* candidate_task_ids, fields =
+    field "candidate_task_ids" (Candle_json.as_list Candle_json.as_non_blank) fields
+  in
+  let* candidate_keepers, fields =
+    field "candidate_keepers" (Candle_json.as_list Candle_json.as_non_blank) fields
+  in
+  let* () = Candle_json.finish ~context fields in
+  Ok (Candidates { goal_id; request_id; tasks; candidate_task_ids; candidate_keepers })
+;;
+
+let unattributed_reason_of_json json =
+  let* text = Candle_json.as_string json in
+  match text with
+  | "no_candidates" -> Ok No_candidates
+  | unknown -> Error (Printf.sprintf "unknown reason %S" unknown)
+;;
+
+let unattributed_of_fields ~context fields =
+  let field key decode fields = Candle_json.field ~context key decode fields in
+  let* goal_id, fields = field "goal_id" Candle_json.as_non_blank fields in
+  let* request_id, fields = field "request_id" Candle_json.as_non_blank fields in
+  let* reason, fields = field "reason" unattributed_reason_of_json fields in
+  let* () = Candle_json.finish ~context fields in
+  Ok (Unattributed { goal_id; request_id; reason })
+;;
+
 let of_yojson json =
   let context = "candle event" in
   let* fields = Candle_json.object_fields ~context json in
@@ -137,6 +273,8 @@ let of_yojson json =
     match kind_text with
     | "snapshot" -> snapshot_of_fields ~context fields
     | "payout_owed" -> payout_owed_of_fields ~context fields
+    | "candidates" -> candidates_of_fields ~context fields
+    | "unattributed" -> unattributed_of_fields ~context fields
     | unknown -> Error (Printf.sprintf "%s: unknown kind %S" context unknown)
   in
   Ok { at; body }

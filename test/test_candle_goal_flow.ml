@@ -27,7 +27,7 @@ let rec rm_rf path =
     else Sys.remove path
 ;;
 
-let with_workspace f =
+let with_workspace_and_env f =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -37,8 +37,10 @@ let with_workspace f =
     (fun () ->
        let config = Workspace.default_config dir in
        ignore (Workspace.init config ~agent_name:(Some "planner"));
-       f config)
+       f env config)
 ;;
+
+let with_workspace f = with_workspace_and_env (fun _env config -> f config)
 
 let rec mkdir_p dir =
   if not (Sys.file_exists dir)
@@ -71,7 +73,9 @@ let rows config =
     (fun (event : Candle_event.t) ->
        match event.body with
        | Candle_event.Snapshot { goal_id; request_id; _ }
-       | Candle_event.Payout_owed { goal_id; request_id; _ } ->
+       | Candle_event.Payout_owed { goal_id; request_id; _ }
+       | Candle_event.Candidates { goal_id; request_id; _ }
+       | Candle_event.Unattributed { goal_id; request_id; _ } ->
          Candle_event.kind event.body, goal_id, request_id)
     (ledger_events config)
 ;;
@@ -371,6 +375,52 @@ let test_a_reopened_goal_that_passes_again_owes_no_second_payout () =
   check int "one PayoutOwed" 1 (count_kind config "payout_owed")
 ;;
 
+(* The whole way: the verifier passes the Goal, the worker is running, the
+   operator confirms, and the confirmation wakes the worker, which reads the
+   Tasks the Goal linked (none) and closes the payout. *)
+let test_a_confirmation_wakes_the_worker_that_prepares_the_payout () =
+  with_workspace_and_env
+  @@ fun env config ->
+  enable_candle config;
+  Workspace_backlog.write_backlog
+    config
+    { Masc_domain.tasks = []
+    ; task_deletion_receipts = []
+    ; pending_completion_rejections = []
+    ; last_updated = "2026-09-29T00:00:00Z"
+    ; version = 1
+    };
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path in
+  if not (String.starts_with ~prefix:config.base_path keepers_dir)
+  then failf "the keepers directory %s is outside the test workspace" keepers_dir;
+  mkdir_p keepers_dir;
+  let goal_id = goal_in_verifying config in
+  pass config goal_id;
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run (fun sw ->
+    Candle_payout_worker.start ~sw ~config;
+    confirmed config goal_id;
+    match
+      Eio.Time.with_timeout clock 10. (fun () ->
+        while count_kind config "unattributed" = 0 do
+          Eio.Time.sleep clock 0.02
+        done;
+        Ok ())
+    with
+    | Ok () -> ()
+    | Error `Timeout -> fail "the worker did not close the payout within 10s");
+  let request_id = (current_verdict config goal_id).Goal_verification.request_id in
+  check
+    rows_testable
+    "Snapshot, PayoutOwed, Candidates, Unattributed"
+    [ "snapshot", goal_id, request_id
+    ; "payout_owed", goal_id, request_id
+    ; "candidates", goal_id, request_id
+    ; "unattributed", goal_id, request_id
+    ]
+    (rows config)
+;;
+
 let () =
   run
     "candle_goal_flow"
@@ -400,6 +450,10 @@ let () =
             "a phase that could not be saved after the row leaves one row"
             `Quick
             test_a_phase_that_could_not_be_saved_after_the_row_leaves_one_row
+        ; test_case
+            "a confirmation wakes the worker that prepares the payout"
+            `Quick
+            test_a_confirmation_wakes_the_worker_that_prepares_the_payout
         ] )
     ]
 ;;

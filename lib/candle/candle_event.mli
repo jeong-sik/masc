@@ -29,6 +29,9 @@ type task_lookup =
 (** What reading one linked Task found. A Task that could not be read has no row
     here: nothing is written until every linked Task reads. *)
 
+type unattributed_reason = No_candidates
+(** Nobody could be paid. *)
+
 type body =
   | Snapshot of
       { goal_id : string
@@ -51,6 +54,19 @@ type body =
       ; passed_at : Candle_time.t  (** When that request's passing result was made. *)
       ; confirmed_at : Candle_time.t  (** When the operator confirmed it. *)
       }
+  | Candidates of
+      { goal_id : string
+      ; request_id : string
+      ; tasks : (string * task_lookup) list
+            (** One entry per Task the [Snapshot] linked, in its order. *)
+      ; candidate_task_ids : string list
+      ; candidate_keepers : string list
+      }
+  | Unattributed of
+      { goal_id : string
+      ; request_id : string
+      ; reason : unattributed_reason
+      }
 
 type t =
   { at : Candle_time.t
@@ -58,7 +74,8 @@ type t =
   }
 
 val kind : body -> string
-(** The row's ["kind"]: [snapshot] or [payout_owed]. *)
+(** The row's ["kind"]: [snapshot], [payout_owed], [candidates] or
+    [unattributed]. *)
 
 val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result

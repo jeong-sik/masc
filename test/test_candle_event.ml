@@ -45,6 +45,51 @@ let payout_owed ?(goal_id = "goal-1") () =
        })
 ;;
 
+let candidates ?(tasks = None) () =
+  let tasks =
+    Option.value
+      tasks
+      ~default:
+        [ ( "task-1"
+          , E.Found
+              { title = "Write the ledger"
+              ; assignee = Some "keeper-a"
+              ; status = E.Done { completed_at = at "2026-09-25T00:00:00Z" }
+              } )
+        ; "task-2", E.Deleted
+        ; ( "task-3"
+          , E.Found
+              { title = "Still going"
+              ; assignee = None
+              ; status = E.Todo
+              } )
+        ]
+  in
+  event
+    (E.Candidates
+       { goal_id = "goal-1"
+       ; request_id = "req-1"
+       ; tasks
+       ; candidate_task_ids = [ "task-1" ]
+       ; candidate_keepers = [ "keeper-a" ]
+       })
+;;
+
+let every_status =
+  let found title status = E.Found { title; assignee = None; status } in
+  [ "task-1", found "todo" E.Todo
+  ; "task-2", found "claimed" E.Claimed
+  ; "task-3", found "in progress" E.In_progress
+  ; "task-4", found "awaiting" E.Awaiting_verification
+  ; "task-5", found "done" (E.Done { completed_at = at "2026-09-25T00:00:00Z" })
+  ; "task-6", found "cancelled" E.Cancelled
+  ]
+;;
+
+let unattributed () =
+  event (E.Unattributed { goal_id = "goal-1"; request_id = "req-1"; reason = E.No_candidates })
+;;
+
 let event_testable =
   Alcotest.testable
     (fun formatter (row : E.t) ->
@@ -66,7 +111,37 @@ let test_the_row_format () =
     "payout_owed"
     ({|{"kind":"payout_owed","at":"2026-09-29T06:00:00Z","goal_id":"goal-1","request_id":"req-1",|}
      ^ {|"passed_at":"2026-09-28T06:32:00Z","confirmed_at":"2026-09-29T05:00:00Z"}|})
-    (line_of (payout_owed ()))
+    (line_of (payout_owed ()));
+  Alcotest.(check string)
+    "candidates"
+    ({|{"kind":"candidates","at":"2026-09-29T06:00:00Z","goal_id":"goal-1","request_id":"req-1",|}
+     ^ {|"tasks":[{"task_id":"task-1","state":"found","title":"Write the ledger","assignee":"keeper-a",|}
+     ^ {|"status":"done","completed_at":"2026-09-25T00:00:00Z"},{"task_id":"task-2","state":"deleted"},|}
+     ^ {|{"task_id":"task-3","state":"found","title":"Still going","assignee":null,"status":"todo",|}
+     ^ {|"completed_at":null}],"candidate_task_ids":["task-1"],"candidate_keepers":["keeper-a"]}|})
+    (line_of (candidates ()));
+  Alcotest.(check string)
+    "unattributed"
+    ({|{"kind":"unattributed","at":"2026-09-29T06:00:00Z","goal_id":"goal-1","request_id":"req-1",|}
+     ^ {|"reason":"no_candidates"}|})
+    (line_of (unattributed ()))
+;;
+
+(* The spelling of a status is what a later reader of the file sees, so it is
+   pinned here and not only round-tripped. *)
+let test_a_status_is_spelled_as_the_backlog_spells_it () =
+  Alcotest.(check string)
+    "every status"
+    ({|{"kind":"candidates","at":"2026-09-29T06:00:00Z","goal_id":"goal-1","request_id":"req-1",|}
+     ^ {|"tasks":[|}
+     ^ {|{"task_id":"task-1","state":"found","title":"todo","assignee":null,"status":"todo","completed_at":null},|}
+     ^ {|{"task_id":"task-2","state":"found","title":"claimed","assignee":null,"status":"claimed","completed_at":null},|}
+     ^ {|{"task_id":"task-3","state":"found","title":"in progress","assignee":null,"status":"in_progress","completed_at":null},|}
+     ^ {|{"task_id":"task-4","state":"found","title":"awaiting","assignee":null,"status":"awaiting_verification","completed_at":null},|}
+     ^ {|{"task_id":"task-5","state":"found","title":"done","assignee":null,"status":"done","completed_at":"2026-09-25T00:00:00Z"},|}
+     ^ {|{"task_id":"task-6","state":"found","title":"cancelled","assignee":null,"status":"cancelled","completed_at":null}|}
+     ^ {|],"candidate_task_ids":["task-1"],"candidate_keepers":["keeper-a"]}|})
+    (line_of (candidates ~tasks:(Some every_status) ()))
 ;;
 
 let round_trips label row =
@@ -82,7 +157,11 @@ let test_a_row_reads_back_as_written () =
   round_trips "typical" (snapshot ());
   round_trips "nothing optional" (snapshot ~due_date:None ~metric:None ~linked_task_ids:[] ());
   round_trips "an empty title" (snapshot ~title:"" ());
-  round_trips "a payout owed" (payout_owed ())
+  round_trips "a payout owed" (payout_owed ());
+  round_trips "candidates" (candidates ());
+  round_trips "candidates with no linked task" (candidates ~tasks:(Some []) ());
+  round_trips "candidates with a Task in every status" (candidates ~tasks:(Some every_status) ());
+  round_trips "unattributed" (unattributed ())
 ;;
 
 (* The due date is a fact as the Goal held it. The ledger does not decide what
@@ -121,9 +200,14 @@ let replace_first ~sub ~by text =
 
 let valid_owed = line_of (payout_owed ())
 
+let valid_candidates = line_of (candidates ())
+let valid_unattributed = line_of (unattributed ())
+
 let test_the_valid_line_used_below_does_read () =
   Alcotest.(check bool) "valid" true (Result.is_ok (E.of_line valid));
-  Alcotest.(check bool) "valid payout_owed" true (Result.is_ok (E.of_line valid_owed))
+  Alcotest.(check bool) "valid payout_owed" true (Result.is_ok (E.of_line valid_owed));
+  Alcotest.(check bool) "valid candidates" true (Result.is_ok (E.of_line valid_candidates));
+  Alcotest.(check bool) "valid unattributed" true (Result.is_ok (E.of_line valid_unattributed))
 ;;
 
 let test_a_row_that_is_not_exactly_the_schema_is_refused () =
@@ -166,6 +250,41 @@ let test_a_row_that_is_not_exactly_the_schema_is_refused () =
           ~by:{|"confirmed_at":"2026-09-29T14:00:00+09:00"|}
           valid_owed )
     ; "snapshot fields on a payout_owed kind", replace_first ~sub:{|"snapshot"|} ~by:{|"payout_owed"|} valid
+    ; ( "candidates task in an unknown state"
+      , replace_first ~sub:{|"state":"deleted"|} ~by:{|"state":"missing"|} valid_candidates )
+    ; ( "deleted candidates task with a title"
+      , replace_first ~sub:{|"state":"deleted"|} ~by:{|"state":"deleted","title":"x"|} valid_candidates )
+    ; ( "found candidates task without a status"
+      , replace_first ~sub:{|"status":"done",|} ~by:"" valid_candidates )
+    ; ( "candidates task in an unknown status"
+      , replace_first ~sub:{|"status":"todo"|} ~by:{|"status":"finished"|} valid_candidates )
+    ; ( "candidates task status spelled with a capital"
+      , replace_first ~sub:{|"status":"todo"|} ~by:{|"status":"Todo"|} valid_candidates )
+    ; ( "done candidates task without a completion time"
+      , replace_first
+          ~sub:{|"completed_at":"2026-09-25T00:00:00Z"|}
+          ~by:{|"completed_at":null|}
+          valid_candidates )
+    ; ( "todo candidates task with a completion time"
+      , replace_first
+          ~sub:{|"completed_at":null|}
+          ~by:{|"completed_at":"2026-09-25T00:00:00Z"|}
+          valid_candidates )
+    ; ( "candidates task with a blank id"
+      , replace_first ~sub:{|"task_id":"task-2"|} ~by:{|"task_id":" "|} valid_candidates )
+    ; ( "candidates task completed_at with an offset"
+      , replace_first
+          ~sub:{|"completed_at":"2026-09-25T00:00:00Z"|}
+          ~by:{|"completed_at":"2026-09-25T09:00:00+09:00"|}
+          valid_candidates )
+    ; ( "candidates tasks is not a list"
+      , replace_first ~sub:{|"candidate_task_ids":["task-1"]|} ~by:{|"candidate_task_ids":"task-1"|} valid_candidates )
+    ; ( "candidates without keepers field"
+      , replace_first ~sub:{|,"candidate_keepers":["keeper-a"]|} ~by:"" valid_candidates )
+    ; ( "unattributed with an unknown reason"
+      , replace_first ~sub:{|"no_candidates"|} ~by:{|"no_luck"|} valid_unattributed )
+    ; ( "unattributed with an extra field"
+      , replace_first ~sub:{|"reason"|} ~by:{|"note":"x","reason"|} valid_unattributed )
     ; "not an object", "[]"
     ; "text after the row", valid ^ " x"
     ; "a second row on the line", valid ^ valid
@@ -196,6 +315,10 @@ let () =
             `Quick
             test_a_due_date_is_kept_as_the_goal_held_it
         ; Alcotest.test_case "a row stays one line" `Quick test_a_row_stays_one_line
+        ; Alcotest.test_case
+            "a status is spelled as the backlog spells it"
+            `Quick
+            test_a_status_is_spelled_as_the_backlog_spells_it
         ] )
     ; ( "strict reading"
       , [ Alcotest.test_case

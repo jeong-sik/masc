@@ -51,7 +51,10 @@ let goal_ids events =
   List.map
     (fun (event : E.t) ->
        match event.body with
-       | E.Snapshot { goal_id; _ } | E.Payout_owed { goal_id; _ } -> goal_id)
+       | E.Snapshot { goal_id; _ }
+       | E.Payout_owed { goal_id; _ }
+       | E.Candidates { goal_id; _ }
+       | E.Unattributed { goal_id; _ } -> goal_id)
     events
 ;;
 

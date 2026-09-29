@@ -180,17 +180,21 @@ class Grader:
         # measures. Graded as usual, counted apart in the score.
         about_answerer = (answerer is not None and fact["field"] in SELF_FIELDS
                           and answerer == fact["answer"])
+        # The host keeps the authenticated requester. This worker only knows
+        # the claimed label, which belongs in fields. Upstream question IDs
+        # also stay in fields: related_ids are local to this worker's output.
         grade = {"id": stable_id(self.context["incarnation"], "grade", request_id),
                  "lane_id": "quiz/grades", "kind": "event",
                  "title": ("정답 ✓ — " if correct else "오답 ✗ — ") + question["title"],
                  "observed_at": time.time(), "subject_id": action["question_id"],
-                 "clock": None, "actor": answerer,
+                 "clock": None, "actor": None,
                  "fields": {"question_id": action["question_id"], "choice": action["choice"],
+                            "question_row": question,
                             "correct": correct, "answer": fact["answer"], "fact_id": fact_id,
                             "deck_incarnation": self.deck_incarnation,
                             "answerer_claimed": answerer, "about_answerer": about_answerer,
                             "request_id": request_id},
-                 "evidence": [fact["record"]], "related_ids": [question["id"]]}
+                 "evidence": [fact["record"]], "related_ids": []}
         self.grades.append(grade)
         result = {"status": "confirmed",
                   "result": {"checked": f"choice compared with the answer of fact {fact_id} "

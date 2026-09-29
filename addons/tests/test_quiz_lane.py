@@ -1,8 +1,9 @@
 """Questioner and grader over real stdio. No Docker image, host, or Keeper is exercised.
 
-`host_deck` imitates what the host does to a snapshot file before a worker sees
+`deck_source` imitates what the host does to a snapshot file before a worker sees
 it (lane_addon_sources.ml snapshot_file): each observation's evidence starts with
 the host's own copy of the deck, `lane-evidence:<sha256>`.
+`retained_output` applies the host's row namespace before composing the two workers.
 """
 from __future__ import annotations
 
@@ -66,13 +67,29 @@ def ask(sources):
     return run("quiz-questions", [("lane_observe", {"binding": {"sources": []}, "sources": sources})])[0]
 
 
+def retained_output(output, instance_id, sequence):
+    retained = copy.deepcopy(output)
+    prefix = f"{instance_id}/{sequence}/"
+    for row in retained["rows"]:
+        row["id"] = prefix + row["id"]
+        row["lane_id"] = instance_id + "/" + row["lane_id"]
+        row["related_ids"] = [prefix + ident for ident in row["related_ids"]]
+    return retained
+
+
 def as_lane_output(questions_output):
-    return {"source_id": "questions", "incarnation": "questioner-1", "cursor": None,
+    return {"source_id": "questions", "incarnation": "questioner-1", "cursor": "1",
             "complete": True, "detail": None, "observations": [{
                 "id": "questioner-1/output/1", "kind": "lane_output", "observed_at": 1790175100,
                 "actor": None, "evidence": [HOST_COPY],
-                "producer": {"installation_id": "quiz-questions"},
-                "output": questions_output}]}
+                "producer": {"installation_id": "quiz-questions", "instance_id": "questioner-1",
+                             "run_id": "quiz-test", "configuration_revision": "config-1",
+                             "package_revision": "0.1.0", "observation_seq": 1,
+                             "output_id": "questions", "output_selection": {"lanes": ["quiz/questions"]},
+                             "coverage_scope": "whole_producer"},
+                "producer_status": {"source_id": "questioner-1", "incarnation": "questioner-1",
+                                    "cursor": "1", "complete": True, "detail": None},
+                "output": retained_output(questions_output, "questioner-1", 1)}]}
 
 
 class Questioner(unittest.TestCase):
@@ -175,6 +192,31 @@ class Grader(unittest.TestCase):
                                       self.answer("r1", "f-truncate", self.wrong_choice("f-truncate"),
                                                   answerer="quiz-grader")])
         self.assertFalse(results[1]["structuredContent"]["result"]["correct"])
+
+    def test_claimed_answerer_does_not_become_the_observed_actor(self):
+        result = run("quiz-grader", [self.observe(),
+                                    self.answer("r1", "f-live-path", "lane-smith",
+                                                answerer="claimed-operator")])[1]["structuredContent"]
+        grade = next(row for row in result["output"]["rows"] if row["lane_id"] == "quiz/grades")
+        self.assertEqual(result["status"], "confirmed")
+        self.assertIsNone(grade["actor"])
+        self.assertEqual(grade["fields"]["answerer_claimed"], "claimed-operator")
+
+    def test_question_provenance_survives_both_worker_namespaces(self):
+        result = run("quiz-grader", [self.observe(),
+                                    self.answer("r1", "f-live-path", "lane-smith")])[1]["structuredContent"]
+        upstream = as_lane_output(self.questions)["observations"][0]["output"]
+        question = next(row for row in upstream["rows"] if row["subject_id"] == "f-live-path")
+        retained = retained_output(result["output"], CONTEXT["instance_id"], 2)
+        grade = next(row for row in retained["rows"] if row["lane_id"] == "grader-1/quiz/grades")
+        score = next(row for row in retained["rows"] if row["lane_id"] == "grader-1/quiz/score")
+        self.assertEqual(grade["related_ids"], [])
+        self.assertEqual(grade["fields"]["question_row"], question)
+        self.assertTrue(question["id"].startswith("questioner-1/1/"))
+        self.assertEqual(score["related_ids"], [grade["id"]])
+        row_ids = {row["id"] for row in retained["rows"]}
+        self.assertNotIn(question["id"], row_ids)
+        self.assertTrue(all(ident in row_ids for row in retained["rows"] for ident in row["related_ids"]))
 
     def test_repeated_request_returns_the_same_grade_once(self):
         results = run("quiz-grader", [self.observe(),

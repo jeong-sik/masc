@@ -144,8 +144,10 @@ let configuration_and_ports () =
   let lines = UI.lines ~width:100 view in
   check bool "unknown parse identity remains unknown" true
     (List.exists (String.starts_with ~prefix:"> unresolved installation") lines);
-  check bool "named output is projected without domain branch" true (List.mem "   output metrics → speed" lines);
-  check bool "package Skill directory is visible" true (List.mem "   Skills skills" lines);
+  let worker_lines = UI.lines ~width:100
+    {(UI.open_selected_instance {view with focus=UI.Instances}) with focus=UI.Instances;presentation=UI.Technical} in
+  check bool "named output is projected without domain branch" true (List.mem "   output metrics → speed" worker_lines);
+  check bool "package Skill directory is visible" true (List.mem "   Skills skills" worker_lines);
   let slice = UI.decode_slice ~snapshot (Yojson.Safe.from_string {|{"rows":[],"coverage":[],"complete":false}|}) |> ok in
   check bool "slice keeps TOML inventory" true (slice.configuration=snapshot.configuration);
   check (option bool) "partial slice stays partial" (Some false) slice.complete
@@ -375,9 +377,9 @@ let context_flow_uses_declared_connections () =
     (Option.map (fun (i : UI.instance) -> i.id) (UI.selected_instance configured));
   check bool "overview lists both workers regardless of hidden focus" true
     (List.exists (String.starts_with ~prefix:"  Project observer · attached") configured_lines
-     && List.exists (String.starts_with ~prefix:"> Project metric · attached") configured_lines);
+     && List.exists (String.starts_with ~prefix:"  Project metric · attached") configured_lines);
   check bool "overview offers help and opening" true
-    (List.exists (String.starts_with ~prefix:"?:help  Esc:back  Enter:open  i:install  n:new  S:subs  r:refresh") configured_lines);
+    (List.exists (String.starts_with ~prefix:"?:help  Esc:back  Tab:workers/installations  Enter:open  i:install  n:new  S:subs  r:refresh") configured_lines);
   check bool "overview omits the old timeline" true
     (not (List.exists (String.starts_with ~prefix:"Horizontal Lane timeline") configured_lines));
   let worker_lines = UI.lines ~width:160 {configured with focus=UI.Instances} in
@@ -582,7 +584,8 @@ let refresh_preserves_operator_target () =
   check (option string) "row identity survives reorder" (Some "chosen")
     (Option.map (fun (r : UI.Row.row) -> r.id) (UI.selected_row refreshed));
   check (option string) "declaration identity survives reorder" (Some "worker.toml")
-    (Option.map (fun (d : UI.declaration) -> d.source_path) (UI.selected_declaration refreshed));
+    (Option.map (fun (d : UI.declaration) -> d.source_path)
+      (UI.selected_declaration {refreshed with focus=UI.Configurations}));
   check int "refresh retains requested scroll position" 7 refreshed.scroll;
   let removed = UI.reconcile_snapshot refreshed {snapshot with instances=[worker "other"];
     output={snapshot.output with rows=[row "other"]};configuration=None} in

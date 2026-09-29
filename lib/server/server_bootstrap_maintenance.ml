@@ -788,7 +788,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
       (* A payout that could not be prepared (a Task or the links did not read)
          is tried again on this tick. It comes before the work below so that a
          step that raises cannot skip the retry. *)
-      Candle_payout_worker.wake ();
+      Candle_payout_worker.pulse ();
       project_transition_outboxes Maintenance_projection;
       reconcile_broadcast_mentions ();
       (try

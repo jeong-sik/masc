@@ -1,6 +1,7 @@
 (** Is Candle on right now (RFC-goal-candle-ledger 3.9)?
 
     [candle.toml] is read on every call. When it says [Enabled], the first call
+    and the server appraiser check succeeds, the first read
     for a base path in this process runs {!Candle_ledger.recover_at_start} on
     the ledger: a tail left by an append that never finished is cut, and a
     ledger that cannot be read makes the answer [Disabled] instead of blocking
@@ -26,3 +27,8 @@ val report_at_start : base_path:string -> unit
     on, or disabled and why. It is the first read of the ledger in the process,
     so a tail left by a write that never finished is cut here, before any Goal
     moves. *)
+
+val install_appraiser_check : (unit -> (unit, string) result) -> unit
+(** Server-owned dynamic availability check, installed before any Goal lifecycle
+    writer starts. Without one, configured Candle is Disabled with an explicit
+    reason. Each read observes current lane configuration. *)

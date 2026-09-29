@@ -6379,6 +6379,7 @@ let render_lane_run_list (state : state) ~(lane : Standalone_lane.t) =
     | Standalone_lane.Hitl_auto_judge
     | Standalone_lane.Board_attention
     | Standalone_lane.Workspace_curator
+    | Standalone_lane.Candle_appraiser
     | Standalone_lane.Browser_stagehand -> "ACTOR"
   in
   (* The slot takes what the drawn columns leave. *)

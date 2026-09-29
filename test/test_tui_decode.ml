@@ -6122,7 +6122,7 @@ let test_decode_keeper_lanes_requires_the_phase_conditions () =
             (Astring.String.is_infix ~affix:field detail))
     [ "launch_pending"; "heartbeat_healthy"; "turn_healthy" ]
 
-let standalone_lane_json ?purpose ?(status = "idle") ?(retained = 3)
+let standalone_lane_json ?purpose ?(required = true) ?(status = "idle") ?(retained = 3)
     ?(running = 0) ?(selected_slots = []) ?(configuration_state = "ready")
     lane_id label =
   let jev =
@@ -6135,7 +6135,7 @@ let standalone_lane_json ?purpose ?(status = "idle") ?(retained = 3)
      ; "label", `String label
      ]
      @ (match purpose with None -> [] | Some text -> [ "purpose", `String text ])
-     @ [ "required", `Bool true
+     @ [ "required", `Bool required
     ; "observation_only", `Bool true
     ; "configured", `Bool true
     ; "configuration_state", `String configuration_state
@@ -6197,6 +6197,7 @@ let test_decode_standalone_lane_configuration_is_a_closed_set () =
             ; standalone_lane_json "workspace_curator_exact" "Workspace Curator"
             ; standalone_lane_json "verifier_exact" "Verifier"
             ; stagehand_lane_json ()
+            ; standalone_lane_json ~required:false "candle_appraiser" "Candle Appraiser"
             ] )
       ]
   in
@@ -6371,6 +6372,7 @@ let test_decode_standalone_lane_keeps_the_run_start () =
           ; standalone_lane_json ~status:"no_retained_observation" ~retained:0
               "verifier_exact" "Verifier"
           ; stagehand_lane_json ()
+          ; standalone_lane_json ~required:false "candle_appraiser" "Candle Appraiser"
           ]
       ]
   in
@@ -6417,6 +6419,7 @@ let test_decode_standalone_lanes_keeps_running_and_no_retained_observation () =
     ; standalone_lane_json ~status:"no_retained_observation" ~retained:0
         "verifier_exact" "Verifier"
     ; stagehand_lane_json ()
+    ; standalone_lane_json ~required:false "candle_appraiser" "Candle Appraiser"
     ]
   in
   let json =
@@ -6482,6 +6485,7 @@ let test_decode_standalone_lane_jev_is_typed_and_required () =
             ; standalone_lane_json "workspace_curator_exact" "Workspace Curator"
             ; standalone_lane_json "verifier_exact" "Verifier"
             ; stagehand_lane_json ()
+            ; standalone_lane_json ~required:false "candle_appraiser" "Candle Appraiser"
             ] )
       ]
   in

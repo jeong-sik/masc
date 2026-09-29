@@ -1,3 +1,7 @@
+let appraise ~identity:_ _ = Error (Candle_appraisal.Transport_unavailable "fixture stops after durable Candidates")
+
+let () = Candle_status.install_appraiser_check (fun () -> Ok ())
+
 (** A Goal's way through the two Candle steps: the verifier's passing result
     writes a Snapshot, and the operator's confirmation writes a PayoutOwed
     (RFC-goal-candle-ledger 3.2). The confirmation goes through the HTTP route's
@@ -85,8 +89,10 @@ let rows config =
        | Candle_event.Snapshot { goal_id; request_id; _ }
        | Candle_event.Payout_owed { goal_id; request_id; _ }
        | Candle_event.Candidates { goal_id; request_id; _ }
-       | Candle_event.Unattributed { goal_id; request_id; _ } ->
-         Candle_event.kind event.body, goal_id, request_id)
+       | Candle_event.Unattributed { goal_id; request_id; _ }
+       | Candle_event.Payout_failed { goal_id; request_id; _ } ->
+         Candle_event.kind event.body, goal_id, request_id
+       | Candle_event.Paid p -> Candle_event.kind event.body, p.identity.goal_id, p.identity.request_id)
     (ledger_events config)
 ;;
 
@@ -479,7 +485,7 @@ let test_a_confirmation_wakes_the_worker_that_prepares_the_payout () =
   pass config goal_id;
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run (fun sw ->
-    Candle_payout_worker.start ~sw ~config;
+    Candle_payout_worker.start ~appraise ~sw ~config;
     confirmed config goal_id;
     match
       Eio.Time.with_timeout clock 10. (fun () ->

@@ -1,3 +1,5 @@
+let () = Candle_status.install_appraiser_check (fun () -> Ok ())
+
 (** The Candle Snapshot step (RFC-goal-candle-ledger 3.2, step 1): what is
     written to the ledger when the verifier's passing result is about to be
     committed, and when nothing is. *)
@@ -170,7 +172,9 @@ let goal_ids events =
        | Candle_event.Snapshot { goal_id; _ }
        | Candle_event.Payout_owed { goal_id; _ }
        | Candle_event.Candidates { goal_id; _ }
-       | Candle_event.Unattributed { goal_id; _ } -> goal_id)
+       | Candle_event.Unattributed { goal_id; _ }
+       | Candle_event.Payout_failed { goal_id; _ } -> goal_id
+       | Candle_event.Paid p -> p.identity.goal_id)
     events
 ;;
 

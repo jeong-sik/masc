@@ -79,6 +79,55 @@ let test_subscription_models_resolve_their_own_rows () =
     subscription_model_rows
 ;;
 
+let test_sonnet_5_5_thinking_modes_reach_the_wire () =
+  let module Backend = Llm_provider.Backend_anthropic in
+  let module Effort = Llm_provider.Reasoning_effort in
+  let catalog = Model_catalog_test_support.load_repo_model_catalog ~suite:"Sonnet 5.5 wire" in
+  with_clean_model_catalog_override (fun () ->
+    Model_catalog.set_global catalog;
+    let messages = [ Llm_provider.Types.make_message ~role:User [ Text "hello" ] ] in
+    let config ?enable_thinking ?reasoning_effort () =
+      Llm_provider.Provider_config.make
+        ~kind:Anthropic ~model_id:"claude-sonnet-5-5"
+        ~base_url:"https://api.anthropic.com" ~max_tokens:1024
+        ?enable_thinking ?reasoning_effort ()
+    in
+    let body config = Backend.build_request ~config ~messages () |> Yojson.Safe.from_string in
+    let thinking body = Yojson.Safe.Util.member "thinking" body in
+    check bool "default leaves adaptive choice to the provider" true
+      (thinking (body (config ())) = `Null);
+    List.iter
+      (fun effort ->
+        let cfg = config ~enable_thinking:false ?reasoning_effort:effort () in
+        check bool "lowest mode is between_tools on completion" true
+          (thinking (body cfg) = `Assoc [ "type", `String "between_tools" ]);
+        let count = Backend.build_count_tokens_request ~config:cfg ~messages ()
+          |> Yojson.Safe.from_string in
+        check bool "token count shares the lowest thinking mode" true
+          (thinking count = `Assoc [ "type", `String "between_tools" ]);
+        check (option string) "explicit effort survives with between_tools"
+          (Option.map Effort.to_string effort)
+          (match Yojson.Safe.Util.member "output_config" (body cfg) with
+           | `Null -> None
+           | output -> Yojson.Safe.Util.(output |> member "effort" |> to_string_option)))
+      [ None; Some Effort.Low; Some Medium; Some High ];
+    List.iter
+      (fun effort ->
+        let cfg = config ~enable_thinking:false ~reasoning_effort:effort () in
+        List.iter
+          (fun build ->
+            match build ~config:cfg ~messages () with
+            | (_ : string) -> fail "between_tools admitted unsupported effort"
+            | exception Invalid_argument _ -> ())
+          [ (fun ~config ~messages () -> Backend.build_request ~config ~messages ())
+          ; (fun ~config ~messages () -> Backend.build_count_tokens_request ~config ~messages ())
+          ];
+        check bool "higher efforts remain available with adaptive thinking" true
+          (thinking (body (config ~enable_thinking:true ~reasoning_effort:effort ()))
+           = `Assoc [ "type", `String "adaptive" ]))
+      [ Effort.XHigh; Max ])
+;;
+
 (* The effort ladders are written out as literals rather than read back from the
    row under test: a comparison that sources both sides from the catalog passes
    whatever the catalog happens to say, including a row that admits nothing. *)
@@ -895,6 +944,10 @@ let () =
             "subscription models resolve their own rows"
             `Quick
             test_subscription_models_resolve_their_own_rows
+        ; test_case
+            "Sonnet 5.5 thinking modes reach the wire"
+            `Quick
+            test_sonnet_5_5_thinking_modes_reach_the_wire
         ; test_case
             "subscription models admit their reasoning efforts"
             `Quick

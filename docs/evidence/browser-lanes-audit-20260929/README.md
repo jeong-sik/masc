@@ -76,3 +76,36 @@ Remaining operational work: establish a working model binding and Chromium
 extension configuration, run real model plus browser act/extract checks, and
 install source-matched server/TUI/dashboard artifacts. The shared Stagehand
 session must not be repurposed or closed without its ownership being clear.
+
+## Deployed dashboard mismatch and follow-up
+
+The actual deployed dashboard was opened in a separate headless browser using
+an existing admin credential (the credential was not logged or included in the
+URL). `deployed-monitor-before.png` is its real rendered monitor, not a replay.
+It displayed zero exact/verification counts while reporting these errors:
+
+- `Invalid exact lane runs response: runs[0] fields mismatch (missing=[], unknown=[run_kind])`
+- `Invalid verification runs response: runs[2] fields mismatch (missing=[retryable], unknown=[])`
+- `Invalid standalone lanes response: root.schema is unknown`
+
+This establishes deployed frontend/backend drift, independently of the unknown
+asset provenance in `/health`. The current source already decodes the current
+lane schema and exact run kind. Source edits do not replace the installed assets.
+
+The follow-up keeps successful rows independently for exact, verification and
+Fusion sources. A failed first read shows **— / 관측 불가**, not a measured zero;
+a failed later read retains the last successful rows with **STALE**. Successful
+empty recovery legitimately replaces retained rows with zero. The owner matrix,
+filters and empty timeline use the same reading state. `runs-unavailable.png`
+replays a deliberate exact-source HTTP failure through the changed component.
+The focused regression exercises first failure, one successful run, later
+failure, and successful empty recovery.
+
+PR #39783 was merged outside this session at 2026-09-29 00:21:00 UTC by account
+`jeong-sik`, merge `8d2b8148d969eaddd3dbb74a710ad9f8fed43475`. At the post-merge
+inspection all five required checks were still in progress and the separate
+`PR required success` check had failed. This is not a CI pass or an action by
+this coding session. A [focused TUI run](https://github.com/jeong-sik/masc/actions/runs/36505146452)
+was dispatched on that exact merged SHA for browser lifecycle, lane heading,
+stale failure, async reads, decoding, and keyboard scenarios. Its result must
+be read separately; dispatch is not completion evidence.

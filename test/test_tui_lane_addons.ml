@@ -689,7 +689,7 @@ let detail_keeps_installation_ownership () =
     action_schema=None;binding_schema=None;display=Masc.Lane_addon_presentation.empty} in
   let declaration id : UI.declaration = {source_path="/config/" ^ id ^ ".toml";
     installation_id=Some id;desired=Some "1";applied=Some "1";
-    instance_id=Some id;issues=[]} in
+    instance_id=Some id;issues=[];origin=UI.Parsed_declaration} in
   let row owner lane observed_at : UI.Row.row = {id=owner ^ "-" ^ lane;
     lane_id=owner ^ "/" ^ lane;kind=UI.Row.Value;title=owner ^ " " ^ lane;
     observed_at;subject_id="project";clock=None;actor=None;

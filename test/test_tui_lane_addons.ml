@@ -138,6 +138,10 @@ let configuration_and_ports () =
        (UI.lines ~width:120 issue)
      && List.exists (String.starts_with ~prefix:"?:help  Esc:back  E:edit TOML")
        [UI.overview_hints issue]);
+  check bool "Installation detail does not offer refresh during an in-flight read" true
+    (let lines = UI.lines ~width:120 {issue with loading=true} in
+     List.exists (String.starts_with ~prefix:"Esc:back  E:edit TOML  Reading") lines
+     && not (List.exists (fun line -> List.mem "r:refresh" (String.split_on_char ' ' line)) lines));
   let directory_issue = UI.open_selected_instance {overview with instance_cursor=2} in
   check bool "directory issue detail does not advertise TOML editing" true
     (not (List.exists (fun line -> List.mem "E:edit" (String.split_on_char ' ' line))
@@ -204,8 +208,11 @@ let configuration_and_ports () =
   let lines = UI.lines ~width:100 view in
   check bool "unknown parse identity remains unknown" true
     (List.exists (String.starts_with ~prefix:"> unresolved installation") lines);
-  check bool "named output is projected without domain branch" true (List.mem "   output metrics → speed" lines);
-  check bool "package Skill directory is visible" true (List.mem "   Skills skills" lines);
+  let worker_detail = UI.open_selected_instance {view with focus=UI.Instances;instance_cursor=0} in
+  let worker_lines = UI.lines ~width:100
+    {worker_detail with focus=UI.Instances;presentation=UI.Technical} in
+  check bool "named output is projected without domain branch" true (List.mem "   output metrics → speed" worker_lines);
+  check bool "package Skill directory is visible" true (List.mem "   Skills skills" worker_lines);
   let slice = UI.decode_slice ~snapshot (Yojson.Safe.from_string {|{"rows":[],"coverage":[],"complete":false}|}) |> ok in
   check bool "slice keeps TOML inventory" true (slice.configuration=snapshot.configuration);
   check (option bool) "partial slice stays partial" (Some false) slice.complete

@@ -1190,16 +1190,12 @@ type shim_provenance =
   | Shim_verified of { sha256 : string }
   | Shim_unverified
 
-(* The shim binary's digest, kept with the version of the file it was taken
-   from. Every guest boot verifies the shim, so a boot hashes the 5MB binary
-   only when an install replaced or rewrote it since the last digest. *)
-let shim_digests : string File_version_cache.t = File_version_cache.create ()
-
+(* Integrity follows current bytes, not metadata that an in-place writer
+   can preserve. The boot edge offloads this read and hash to its executor. *)
 let sha256_of_file path =
-  File_version_cache.load shim_digests path ~decode:(fun () ->
-    match In_channel.with_open_bin path In_channel.input_all with
-    | contents -> Ok Digestif.SHA256.(digest_string contents |> to_hex)
-    | exception Sys_error detail -> Error detail)
+  match In_channel.with_open_bin path In_channel.input_all with
+  | contents -> Ok Digestif.SHA256.(digest_string contents |> to_hex)
+  | exception Sys_error detail -> Error detail
 ;;
 
 let verify_shim_sidecar ~dir =

@@ -2,13 +2,13 @@
 """Cross-session Skill usage rollup from a workspace's activation ledgers.
 
 The per-turn Skill activation evidence masc already writes
-(`<base>/.masc/traces/<trace>/skill-activations.json`, schema
-`masc.skill-activations/v5`) is durable but scattered one file per session, and
-nothing aggregates it. The dashboard and TUI show a keeper's *current* trace
-only. This operator tool walks every retained trace and reports, per Skill:
-total activations, the instruction/composition split, how many distinct
-sessions used it, the runtimes that served it, and when it was last used. It
-also lists installed Skills that never activated.
+(`<base>/.masc/traces/<trace>/skill-activation-events.jsonl`, an append-only
+event log that folds into the session's ledger) is durable but scattered one
+file per session, and nothing aggregates it. The dashboard and TUI show a
+keeper's *current* trace only. This operator tool walks every retained trace
+and reports, per Skill: total activations, the instruction/composition split,
+how many distinct sessions used it, the runtimes that served it, and when it
+was last used. It also lists installed Skills that never activated.
 
 This is a read-only reporting stopgap; a first-class rollup surfaced in the TUI
 Runtime view and the dashboard is the durable target (see the accompanying RFC).
@@ -29,9 +29,12 @@ import os
 import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Iterator
 
-SCHEMA_PREFIX = "masc.skill-activations/"
+sys.path.insert(0, str(Path(__file__).resolve().parent / "harness" / "workload"))
+
+import skill_activation_events  # noqa: E402
 
 
 @dataclass
@@ -46,18 +49,20 @@ class SkillRow:
 
 def load_activations(base_path: str) -> Iterator[tuple[str, dict[str, Any]]]:
     """Yield (session_id, activation) for every activation in every trace."""
-    pattern = os.path.join(base_path, ".masc", "traces", "*", "skill-activations.json")
+    pattern = os.path.join(
+        base_path, ".masc", "traces", "*", skill_activation_events.EVENTS_FILENAME
+    )
     for fp in sorted(glob.glob(pattern)):
         try:
-            with open(fp, encoding="utf-8") as fh:
-                doc = json.load(fh)
-        except (OSError, json.JSONDecodeError) as exc:
+            with open(fp, "rb") as fh:
+                ledger = skill_activation_events.fold_event_log(fh.read())
+        except (OSError, skill_activation_events.SkillLedgerError) as exc:
             print(f"warn: skipping {fp}: {exc}", file=sys.stderr)
             continue
-        if not str(doc.get("schema", "")).startswith(SCHEMA_PREFIX):
+        if ledger is None:
             continue
-        session_id = doc.get("session_id", os.path.basename(os.path.dirname(fp)))
-        for act in doc.get("activations", []):
+        session_id = ledger["session_id"]
+        for act in ledger["activations"]:
             yield session_id, act
 
 

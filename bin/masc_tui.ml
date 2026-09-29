@@ -22729,6 +22729,10 @@ and is loaded on demand through keeper_skill.
              Masc_tui_types.next_memory_overview_sort state.memory_overview_sort;
            state.memory_health_cursor <- 0;
            state.memory_health_scroll <- 0
+       | Some ("d" | "D")
+         when state.view = Memory
+              && Option.is_none state.memory_facts_keeper ->
+           state.memory_overview_detail <- not state.memory_overview_detail
        | Some ("a" | "A") when state.view = Memory ->
            open_all_fleet_memory state ~mailbox:async_messages
        (* Resources and Tools hang off Config the way Connectors hangs off

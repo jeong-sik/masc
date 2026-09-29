@@ -38,7 +38,8 @@ let describe = function
   | Command.Acting_pane_scroll_unknown word -> "acting-pane-scroll-unknown:" ^ word
   | Command.Lane_addons input -> "lane-addons:" ^ input
   | Command.Play_invites -> "play-invites"
-  | Command.Play_link -> "play-link"
+  | Command.Play_link None -> "play-link"
+  | Command.Play_link (Some name) -> "play-link:" ^ name
   | Command.Play_invite { name; hours } ->
       Printf.sprintf "play-invite:%s:%d" name hours
   | Command.Play_revoke name -> "play-revoke:" ^ name
@@ -112,10 +113,15 @@ let test_measurement_command () =
 let test_play_commands_are_explicit () =
   check (list string) "play list, issue and revoke are distinct"
     [ "play-invites"; "play-invites"; "play-invite:guest1:24"; "play-link"
+    ; "play-link:guest1"
     ; "play-revoke:guest1" ]
     (List.map (fun line -> describe (Command.parse line))
        [ "/play"; "/play invites"; "/play invite guest1 24"; "/play link"
+       ; "/play link guest1"
        ; "/play revoke guest1" ]);
+  check bool "two names are invalid" true
+    (String.starts_with ~prefix:"play-invalid:"
+       (describe (Command.parse "/play link guest1 guest2")));
   check bool "a missing expiry never issues an invite" true
     (String.starts_with ~prefix:"play-invalid:"
        (describe (Command.parse "/play invite guest1")))

@@ -36,12 +36,11 @@ val link : t -> string
 (** The link itself, for the terminal clipboard. The one place it leaves the
     card apart from {!draw}; a caller that logs it has copied a credential. *)
 
-val issued_notice : t -> replaced:t option -> string
+val issued_notice : t -> retained:bool -> string
 (** The line the conversation keeps of an issue: which invite, when it
     expires, and that [/play link] opens the card again. It never carries the
-    link. [replaced] is the card this one took the place of: the server keeps
-    only a hash of a link, so the earlier link cannot be shown again, and the
-    line says so. *)
+    link. [retained] says whether another card remains available by name in
+    this TUI session; the server itself keeps only a hash of each link. *)
 
 (** One row of the card, in the order they are drawn. The renderer styles each
     kind and pushes it; where the rows fall is decided here, once. *)

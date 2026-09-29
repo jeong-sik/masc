@@ -4556,12 +4556,10 @@ let launch_preset_call state ~mailbox ~call ~wrap =
    The card carries the name the server sent, made safe to draw, so the name
    asked for is compared in the same form. *)
 let forget_play_invite state ~name =
-  match state.play_invite with
-  | Play_invite_held card | Play_invite_shown card
-    when String.equal (Masc_tui_play_card.name card)
-           (Tui_decode.sanitize_terminal_text name) ->
-      state.play_invite <- Play_invite_none
-  | Play_invite_none | Play_invite_held _ | Play_invite_shown _ -> ()
+  state.play_invite <-
+    Masc_tui_types.play_invite_forget state.play_invite
+      (Tui_decode.sanitize_terminal_text name);
+  state.play_invite_scroll <- 0
 
 let launch_presets_load state ~mailbox =
   state.presets_error <- None;
@@ -10226,13 +10224,23 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
         ~call:Masc_tui_http.list_play_invites
         ~wrap:(fun result ->
           Play_invites_listed (target, Result.bind result Tui_decode.decode_play_invites))
-  | Masc_tui_command.Play_link ->
+  | Masc_tui_command.Play_link requested_name ->
       Buffer.clear state.msg_input;
-      (match state.play_invite with
-       | Play_invite_none ->
-           notice ~kind:Notice_reply "No play link has been issued in this TUI session"
-       | Play_invite_held card | Play_invite_shown card ->
-           state.play_invite <- Play_invite_shown card)
+      (let card =
+         match requested_name with
+         | None -> Masc_tui_types.play_invite_latest state
+         | Some name -> Masc_tui_types.play_invite_find state name
+       in
+       match card with
+       | None ->
+           notice ~kind:Notice_reply
+             (match requested_name with
+              | None -> "No play link has been issued in this TUI session"
+              | Some name -> "No local play link for " ^ name)
+       | Some card ->
+           state.play_invite <-
+             { state.play_invite with shown_name = Some (Masc_tui_play_card.name card) };
+           state.play_invite_scroll <- 0)
   | Masc_tui_command.Play_invite { name; hours } ->
       if state.play_invite_inflight then
         notice ~kind:Notice_failure
@@ -13076,7 +13084,7 @@ let handle_composer_key state ~base_path ~mailbox key =
           operator is not looking at, so the chat pane comes forward the way
           it does for a message. *)
        | Masc_tui_command.Queue _
-       | Masc_tui_command.Play_invites | Masc_tui_command.Play_link
+       | Masc_tui_command.Play_invites | Masc_tui_command.Play_link _
        | Masc_tui_command.Play_invite _
        | Masc_tui_command.Play_revoke _ | Masc_tui_command.Play_invalid _
        | Masc_tui_command.Preset_list | Masc_tui_command.Preset_save _
@@ -14462,16 +14470,13 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                 ~expires_at:invite.pii_expires_at ~link:invite.pii_link
             with
             | Ok card ->
-                (* The card this one replaces was the last place the earlier
-                   link could be read: the server keeps only a hash. *)
-                let replaced =
-                  match state.play_invite with
-                  | Play_invite_held previous | Play_invite_shown previous -> Some previous
-                  | Play_invite_none -> None
-                in
-                state.play_invite <- Play_invite_shown card;
+                let retained = state.play_invite.cards <> [] in
+                state.play_invite <-
+                  { (Masc_tui_types.play_invite_store state.play_invite card) with
+                    shown_name = Some (Masc_tui_play_card.name card) };
+                state.play_invite_scroll <- 0;
                 chat_notice state ~keeper_name:target ~kind:Notice_reply
-                  (Masc_tui_play_card.issued_notice card ~replaced)
+                  (Masc_tui_play_card.issued_notice card ~retained)
             | Error reason ->
                 (* The link is the server's public base URL and a hex token,
                    so a link the card refuses names the base URL. The reason is
@@ -19936,15 +19941,21 @@ and is loaded on demand through keeper_skill.
        | Some k
          when Option.is_some (Masc_tui_types.play_card_shown state)
               && not (String.equal k toggle_mouse_tracking_key) ->
-           (match k, state.play_invite with
-            | ("esc" | "q" | "Q"), Play_invite_shown card ->
-                state.play_invite <- Play_invite_held card
-            | ("y" | "Y"), Play_invite_shown card ->
+           (match k, Masc_tui_types.play_card_shown state with
+            | ("esc" | "q" | "Q"), Some _ ->
+                state.play_invite <- { state.play_invite with shown_name = None }
+            | ("y" | "Y"), Some card ->
                 copy_reference_to_terminal render_schedule
                   (Masc_tui_play_card.link card);
                 report_action state "system"
                   "Asked the terminal to copy the invite link (OSC 52, unconfirmed)"
-            | _, (Play_invite_none | Play_invite_held _ | Play_invite_shown _) -> ())
+            | ("j" | "down"), Some _ ->
+                state.play_invite_scroll <- Masc_tui_types.scroll_down_from state.play_invite_scroll ~by:1
+            | ("k" | "up"), Some _ ->
+                state.play_invite_scroll <- max 0 (state.play_invite_scroll - 1)
+            | "g", Some _ -> state.play_invite_scroll <- 0
+            | "G", Some _ -> state.play_invite_scroll <- Masc_tui_types.clamped_scroll_end
+            | _, _ -> ())
        | Some key when Option.is_some state.account_login ->
            (match state.account_login with
             | Some view ->

@@ -5339,15 +5339,14 @@ module Verification_evidence_read = struct
     | Launch_failure of string
 end
 
-(* The last invite this TUI issued, and whether its card is on screen. The
-   server sends an invite's link once and keeps only its hash, so the card is
-   the only copy there is. It is kept in this process for [/play link] until
-   the TUI exits or that invite is revoked, and never written to workspace
-   state. *)
+(* The server sends each invite's link once and keeps only its hash. Keep the
+   cards newest first in this TUI process so issuing another invite does not
+   erase the first person's only link. [shown_name] selects the card on screen;
+   [None] keeps all cards available for /play link without taking input. *)
 type play_invite =
-  | Play_invite_none
-  | Play_invite_held of Masc_tui_play_card.t  (* issued, not on screen *)
-  | Play_invite_shown of Masc_tui_play_card.t  (* on screen, taking every key *)
+  { cards : Masc_tui_play_card.t list
+  ; shown_name : string option
+  }
 
 type state = {
   mutable metrics_scroll: int;
@@ -5585,13 +5584,11 @@ type state = {
      [~who] on several calls), so there is no [msx_activity] here -- adding
      one before the server ever fills it would be a field nothing draws. *)
   mutable dos_activity: Masc_tui_machine_live.activity_entry list;
-  (* The card of the latest /play invite. Nothing closes it but the
-     operator's own key, and [close_key_modals] leaves it alone for that
-     reason. *)
+  (* Locally retained invite cards, newest first. The selected card remains
+     open until the operator closes it; the modal sweep leaves it alone. *)
   mutable play_invite: play_invite;
-  (* An invite request is out and its answer has not come back. A second one
-     is refused meanwhile: its answer would replace the card that holds the
-     first link, and the server will not show that link again. *)
+  mutable play_invite_scroll: int;
+  (* Serialize issue requests so their one-time answers arrive in order. *)
   mutable play_invite_inflight: bool;
   (* The load menu (RFC-0439 §3.7): the human picks a game from the cartridge
      inventory to plug into the shared machine. It is an overlay on the MSX
@@ -7914,9 +7911,41 @@ let supersede_context_inspector_load state stop =
 
 (* The invite card on screen, if there is one. *)
 let play_card_shown (state : state) =
-  match state.play_invite with
-  | Play_invite_shown card -> Some card
-  | Play_invite_none | Play_invite_held _ -> None
+  match state.play_invite.shown_name with
+  | None -> None
+  | Some name ->
+    List.find_opt
+      (fun card -> String.equal (Masc_tui_play_card.name card) name)
+      state.play_invite.cards
+
+let play_invite_latest (state : state) = List.hd_opt state.play_invite.cards
+
+let play_invite_find (state : state) name =
+  List.find_opt
+    (fun card -> String.equal (Masc_tui_play_card.name card) name)
+    state.play_invite.cards
+
+let play_invite_store current card =
+  let name = Masc_tui_play_card.name card in
+  { cards =
+      card
+      :: List.filter
+           (fun previous ->
+             not (String.equal (Masc_tui_play_card.name previous) name))
+           current.cards
+  ; shown_name = Some name
+  }
+
+let play_invite_forget current name =
+  { cards =
+      List.filter
+        (fun card -> not (String.equal (Masc_tui_play_card.name card) name))
+        current.cards
+  ; shown_name =
+      (match current.shown_name with
+       | Some shown when String.equal shown name -> None
+       | Some _ | None -> current.shown_name)
+  }
 
 (* The overlays that take every key while they are open. Each answers its own
    keys and swallows the rest in its dispatch arm, so nothing drawn under it --
@@ -8060,7 +8089,8 @@ let create_state
   dos_live = Masc_tui_machine_live.Unread;
   dos_live_in_flight = None;
   dos_activity = [];
-  play_invite = Play_invite_none;
+  play_invite = { cards = []; shown_name = None };
+  play_invite_scroll = 0;
   play_invite_inflight = false;
   msx_menu_open = false;
   msx_notice = None;
@@ -8982,6 +9012,7 @@ type clamped_scroll =
      the drawing instead, which is the one thing the renderer must not do. *)
   | Patch_modal_scroll of int
   | Link_modal_scroll of int
+  | Play_invite_scroll of int
   (* The voice pane and its wizard lay out lines out of two HTTP reads and the
      probe's answers, so their count exists only once the frame is drawn. Both
      drew every line into a fixed budget with no offset, and whatever fell past
@@ -9056,6 +9087,7 @@ let apply_clamped_scroll (state : state) = function
   | Approval_detail_scroll value -> state.approval_detail_scroll <- value
   | Patch_modal_scroll value -> state.patch_modal_scroll <- value
   | Link_modal_scroll value -> state.link_modal_scroll <- value
+  | Play_invite_scroll value -> state.play_invite_scroll <- value
   | Voice_scroll value -> state.config_scroll <- value
   | Keeper_list_scroll value -> state.keeper_list_scroll <- value
   | Context_inspector_scroll value -> state.context_inspector_scroll <- value

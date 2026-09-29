@@ -88,14 +88,12 @@ let make ~project ~name ~expires_at ~link =
 let name card = card.name
 let link card = card.link
 
-let issued_notice card ~replaced =
-  let replaced =
-    match replaced with
-    | None -> ""
-    | Some previous -> Printf.sprintf ". The link of %s can no longer be shown here" previous.name
+let issued_notice card ~retained =
+  let earlier =
+    if retained then ". /play link <name> opens an earlier invite" else ""
   in
   Printf.sprintf "Play invite %s issued, expires %s. /play link shows its link again%s"
-    card.name card.expires_at replaced
+    card.name card.expires_at earlier
 ;;
 
 type row =

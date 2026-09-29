@@ -48,9 +48,9 @@ let test_the_invite_card_owns_the_keys_only_while_shown () =
     | Ok card -> card
     | Error reason -> failf "the fixture link was refused: %s" reason
   in
-  state.Types.play_invite <- Types.Play_invite_held card;
+  state.Types.play_invite <- { cards = [ card ]; shown_name = None };
   check bool "a held card does not own the keys" false (Types.modal_owns_keys state);
-  state.Types.play_invite <- Types.Play_invite_shown card;
+  state.Types.play_invite <- { cards = [ card ]; shown_name = Some "minsu" };
   check bool "a shown card owns the keys" true (Types.modal_owns_keys state);
   Types.close_key_modals state;
   check bool "the sweep that closes the other overlays leaves it" true

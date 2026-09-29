@@ -17029,10 +17029,13 @@ let render_play_card (state : state) card =
      out in are that less the navigation strip and any pane beside the surface,
      so a size the card asks for is added to this, not to those. *)
   let window_rows, window_cols = Masc_tui_ansi.get_terminal_size () in
-  surface_chrome ~overflow:Fits state ~terminal_rows ~cols ~surface_key:"play-invite"
+  surface_chrome
+    ~overflow:(Scrolled { scroll = state.play_invite_scroll;
+                          report = (fun scroll -> Play_invite_scroll scroll) })
+    state ~terminal_rows ~cols ~surface_key:"play-invite"
     ~frame:Chrome_overlay
     ~title:(screen_title " MASC Play invite")
-    ~hints:"y:copy link  Esc:close"
+    ~hints:"j/k:scroll  y:copy link  Esc:close"
     ~body:(fun ~budget c ->
       let width = framed_inner_width cols - String.length play_card_indent in
       List.iter

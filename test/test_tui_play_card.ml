@@ -296,16 +296,15 @@ let test_a_name_from_the_wire_is_drawn_safe () =
 (* What the conversation keeps of an issue is a row anyone reading the chat
    sees, so it names the invite and never carries the link. *)
 let test_the_issue_notice_never_carries_the_link () =
-  let notice = Card.issued_notice (card ()) ~replaced:None in
+  let notice = Card.issued_notice (card ()) ~retained:false in
   check bool "it names the invite and its expiry" true
     (contains ~sub:"minsu" notice && contains ~sub:expires_at notice);
   check bool "it says how to see the card again" true (contains ~sub:"/play link" notice);
   check bool "the link is not in it" false (contains ~sub:"play#" notice);
-  check bool "a first invite replaced nothing" false (contains ~sub:"no longer" notice);
-  let replacing = Card.issued_notice (card ~name:"jiwon" ()) ~replaced:(Some (card ())) in
-  check bool "a second invite says the first link is gone" true
-    (contains ~sub:"The link of minsu can no longer be shown here" replacing);
-  check bool "and still does not carry a link" false (contains ~sub:"play#" replacing)
+  let retained = Card.issued_notice (card ~name:"jiwon" ()) ~retained:true in
+  check bool "a second invite explains how to open the earlier card" true
+    (contains ~sub:"/play link <name>" retained);
+  check bool "and still does not carry a link" false (contains ~sub:"play#" retained)
 ;;
 
 let () =

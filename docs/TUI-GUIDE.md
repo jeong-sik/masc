@@ -73,7 +73,8 @@ machine accepts and where the images come from.
 ## Shared DOS play invites
 
 Select a Keeper chat to use the TUI composer. `/play invites` lists invites, `/play invite <name>
-<hours>` issues one, `/play link` reopens the last link issued in this TUI
+<hours>` issues one, `/play link` reopens the latest link issued in this TUI
+session, `/play link <name>` reopens an earlier link issued in this TUI
 session, and `/play revoke <name>` removes it. Issuance requires
 an admin operator credential, token-required authentication and
 `MASC_HTTP_BASE_URL`. A refusal shows the server's own sentence and what it
@@ -85,11 +86,11 @@ the link to the terminal clipboard through OSC 52; terminal clipboard support
 varies, and `Ctrl-T` still hands the mouse back so the link can be selected
 from the card. `Esc` or `q` closes the card. Enter does not, so an Enter
 pressed while the answer was on its way cannot dismiss it. `/play link` opens
-the card again. The TUI keeps the last card only until it exits or that
-invite is revoked. Only one invite request runs at a time, because a second
-answer would replace a card whose link the server will not show again.
+the card again. The TUI keeps issued cards until it exits or their invites
+are revoked. Only one invite request runs at a time so answers arrive in order.
 
-The QR is drawn only when all of it fits. A smaller window shows the link and
+The QR is drawn only when all of it fits. `j`/`k` scroll the card so a long
+link can be read to its end. A smaller window shows the link and
 the size the QR needs, because a cut QR scans as nothing. A terminal without
 colour shows the link alone.
 

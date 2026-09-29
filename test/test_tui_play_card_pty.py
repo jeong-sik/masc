@@ -240,17 +240,21 @@ def issued_card(binary: str) -> None:
         assert press_y(process, fd, output) == LINK.encode()
         h.send_and_wait(process, fd, output, b"\x1b", CHAT_TITLE)
 
-        # A second invite replaces the first card, and the first link cannot be
-        # shown again: /play link now brings back the second, and the first
-        # token is nowhere on the screen.
+        # A second invite keeps the first link available by name while the
+        # unnamed command continues to reopen the newest card.
         type_line(process, fd, output, b"/play invite jiwon 3")
         h.send_and_wait(process, fd, output, b"\r", b"MASC Play invite")
         drawn = settled(process, fd, output)
         assert SECOND_LINK.encode() in h.screen_text(drawn), "the second card lost its link"
-        assert TOKEN.encode() not in h.screen_text(drawn), "the first link outlived its card"
         assert press_y(process, fd, output) == SECOND_LINK.encode()
         h.send_and_wait(process, fd, output, b"\x1b", CHAT_TITLE)
         assert b"Play invite jiwon issued" in h.screen_text(settled(process, fd, output))
+        type_line(process, fd, output, b"/play link minsu")
+        h.send_and_wait(process, fd, output, b"\r", b"MASC Play invite")
+        assert press_y(process, fd, output) == LINK.encode(), (
+            "/play link minsu did not retain the earlier one-time link"
+        )
+        h.send_and_wait(process, fd, output, b"\x1b", CHAT_TITLE)
         type_line(process, fd, output, b"/play link")
         h.send_and_wait(process, fd, output, b"\r", b"MASC Play invite")
         assert press_y(process, fd, output) == SECOND_LINK.encode(), (
@@ -446,12 +450,45 @@ def second_request_waits(binary: str) -> None:
     )
 
 
+def long_link_scrolls_to_end(binary: str) -> None:
+    long_link = "https://masc.example.com/play#" + ("a" * 512) + "deadbeef"
+    fixtures = h.keeper_runtime_http_fixtures()
+    fixtures[CHAT_HISTORY] = (200, [])
+    fixtures[INVITES] = h.RequestHttpResponse(
+        lambda body: (201, {"name": "minsu", "expires_at": EXPIRES, "link": long_link})
+    )
+
+    def interact(process, fd, _slave, output, _base):
+        open_chat(process, fd, output)
+        resize(process, fd, output, rows=20, columns=60, needle=CHAT_TITLE)
+        type_line(process, fd, output, b"/play invite minsu 2")
+        h.send_and_wait(process, fd, output, b"\r", b"MASC Play invite")
+        assert b"deadbeef" not in h.screen_text(settled(process, fd, output)), (
+            "the long link did not overflow the small card"
+        )
+        h.send_and_wait(process, fd, output, b"G", b"deadbeef")
+        assert b"deadbeef" in h.screen_text(settled(process, fd, output)), (
+            "scrolling to the end did not expose the token suffix"
+        )
+        assert press_y(process, fd, output) == long_link.encode()
+        h.send_and_wait(process, fd, output, b"\x1b", CHAT_TITLE)
+        leave(process, fd, output)
+
+    h.run_terminal_scenario(
+        binary,
+        description="a long invite link scrolls to its last token bytes",
+        interact=interact,
+        http_fixtures=fixtures,
+    )
+
+
 def run(binary: str) -> None:
     issued_card(binary)
     refused_invite(binary)
     unreadable_link(binary)
     without_colour(binary)
     second_request_waits(binary)
+    long_link_scrolls_to_end(binary)
     print("play invite card: PASS")
 
 

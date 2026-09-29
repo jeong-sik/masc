@@ -191,7 +191,7 @@ let replace_rgb ~image_id ~placement_id =
 
 (* A portrait is mostly a transparent surround and flat bands of shading: a
    160 px candle's 102,400 bytes deflate to about 3 KB, and a stepping
-   splash sends one every 150 ms. *)
+   /about candle sends one every 150 ms. *)
 let replace_rgba ~image_id ~placement_id =
   encode_raw ~format:Rgba ~compression:Zlib ~identity:(identity ~image_id ~placement_id)
 

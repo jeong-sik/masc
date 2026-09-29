@@ -126,8 +126,11 @@ Where each checkout stands against its upstream default branch.
 ### context.checkouts.unmeasured (vars: count)
 - {{count}} checkout(s) not measurable this turn — the keeper_status tool carries each reason
 
-### context.checkouts.standing.current (vars: target)
-current with {{target}}
+### context.checkouts.standing.current (vars: target, age)
+current with locally observed {{target}} ({{age}}s ago)
+
+### context.checkouts.standing.stale_ref (vars: target, as_of, age)
+{{target}} as of {{as_of}} ({{age}}); recent local observation unverified
 
 ### context.checkouts.standing.ahead (vars: target, ahead)
 ahead of {{target}} by {{ahead}}

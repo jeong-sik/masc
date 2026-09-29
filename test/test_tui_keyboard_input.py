@@ -4115,8 +4115,7 @@ def assert_row_budgeted_surfaces(
     output: bytearray,
     _base_path: str,
 ) -> None:
-    # The startup splash draws the Dashboard's title row too, so the title
-    # alone does not say Home is ready; its continuation section does.
+    # The title appears before the body; wait for the Home entry points.
     wait_for_output(process, master_fd, output, b"Continue", start=0, timeout=10.0)
 
     overview = resize_and_wait(

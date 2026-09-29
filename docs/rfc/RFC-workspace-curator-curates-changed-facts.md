@@ -62,9 +62,11 @@ type fact_ref =
 
 curator 는 자기 결과를 원장 하나에 모은다 (`<base>/.masc/workspace-memory/ledger.json`).
 
-- 공유 주장: `{ claim_id, claim, members : fact_ref list }`
-- 충돌: `{ conflict_id, description, members : fact_ref list }`
-- 사실마다 처분: `fact_ref -> Member_of claim_id | Member_of conflict_id | Excluded reason`
+- 공유 주장: `{ claim_id, claim }`
+- 충돌: `{ conflict_id, description }`
+- 사실마다 처분: `fact_ref -> Claim_member claim_id | Conflict_member conflict_id | Excluded reason`
+
+멤버 목록은 따로 적지 않는다. 어떤 주장의 id 를 처분으로 가진 사실이 그 주장의 멤버다. 멤버를 주장 쪽과 처분 쪽에 둘 다 적으면 두 기록이 어긋날 수 있다. 읽을 때는 처분이 없는 주장, 없는 id 를 가리키는 처분을 거절한다 (`lib/workspace_memory/workspace_memory_ledger.mli`).
 
 원장은 모델의 해석이다. Keeper 기억을 바꾸지 않고, 의미를 검증하지 않는다. 지금 제안의 성격과 같다.
 
@@ -77,7 +79,11 @@ curator 는 자기 결과를 원장 하나에 모은다 (`<base>/.masc/workspace
 
 둘 다 현재 스토어와 원장을 `fact_ref`(2.1) 끼리 비교해서 구한다. 커밋 알림이나 journal 을 거슬러 읽지 않는다. 알림을 놓쳐도 다음 실행이 같은 차이를 다시 구한다.
 
-사라진 사실은 모델 없이 처리한다. 처분을 지우고, 멤버였으면 멤버에서 뺀다. 멤버가 하나도 남지 않은 주장·충돌은 지운다. source_bound 에서는 같은 Keeper 의 다른 경로가 같은 claim 을 계속 가져도, 바뀐 경로의 사실만 사라진다.
+읽지 못한 스토어(`Unavailable`)는 비교에서 뺀다. 그 스토어의 사실은 새로 넣지도, 사라진 것으로 보지도 않는다. 파일이 없는 스토어와 목록에 없는 Keeper 의 사실은 사라진 것으로 본다.
+
+keepers 디렉터리가 없으면 실행하지 않는다. keepers 디렉터리 위치는 base 경로와 환경변수의 설정 디렉터리로 정해진다 (`Config_dir_resolver.inputs_for_base_path`). 그래서 설정이 다른 프로세스는 Keeper 를 0명으로 보고, 원장 전체를 사라진 사실로 지울 수 있다. 지금 `Workspace_memory_context.collect` 는 없는 디렉터리를 Keeper 0명으로 읽는다. 3단계 실행기는 이 둘을 구분해서 받는다.
+
+사라진 사실은 모델 없이 처리한다. 처분을 지우면 멤버에서도 빠진다. 멤버가 하나도 남지 않은 주장·충돌은 지운다. source_bound 에서는 같은 Keeper 의 다른 경로가 같은 claim 을 계속 가져도, 바뀐 경로의 사실만 사라진다.
 
 **할 일이 없으면 모델을 부르지 않는다.** 1장의 측정에서는 실행 대부분이 여기에 해당한다.
 
@@ -149,11 +155,11 @@ curator 는 자기 결과를 원장 하나에 모은다 (`<base>/.masc/workspace
 
 ## 6. 정할 것
 
-- **Q1. 이웃 검색은?** 추천: 있는 lexical 검색(`Keeper_memory_search_index` 의 FTS5 trigram BM25)으로 시작한다. 색인은 2.4 대로 실행마다 한 번 만든다. embedding 검색은 새 인프라와 외부 호출이 필요하다.
+- **Q1. 이웃 검색은?** 결정 (운영자, 2026-09-29): 있는 lexical 검색(`Keeper_memory_search_index` 의 FTS5 trigram BM25)으로 시작한다. 색인은 2.4 대로 실행마다 한 번 만든다. embedding 검색은 새 인프라와 외부 호출이 필요하다.
 - **Q2. 묶음 크기는 어떻게 정하나?** 후보: (a) 사실 개수로 고정, (b) lane 슬롯 가운데 가장 작은 입력 창에서 계산. (b) 는 창이 작은 슬롯이 끼어도 넘치지 않지만, 창 정보가 없는 슬롯을 따로 다뤄야 한다.
 - **Q3. 이웃 K 는?** 요청 크기와 놓친 관계 사이의 교환이다. 7장의 하네스로 정한다.
-- **Q4. source_bound 스토어도 넣나?** 추천: 넣는다. 지금도 두 스토어를 모두 읽는다.
-- **Q5. 같은 Keeper 안의 사실끼리도 비교하나?** 추천: 하지 않는다. 한 Keeper 안의 중복은 그 Keeper 의 Librarian 이 흡수(absorb)로 다룬다.
+- **Q4. source_bound 스토어도 넣나?** 결정 (운영자, 2026-09-29): 넣는다. 지금도 두 스토어를 모두 읽는다.
+- **Q5. 같은 Keeper 안의 사실끼리도 비교하나?** 결정 (운영자, 2026-09-29): 하지 않는다. 한 Keeper 안의 중복은 그 Keeper 의 Librarian 이 흡수(absorb)로 다룬다.
 
 ## 7. 검증
 

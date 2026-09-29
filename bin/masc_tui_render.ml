@@ -270,9 +270,7 @@ let task_line (task : task) =
 (* Dashboard rows summarize sources without changing their meaning. The full
    task list lives in Work, Keeper rows in Keepers, and account windows in
    Usage. A missing reading is never projected as a zero. *)
-(* The Dashboard's title row: the name, the workspace, the clock and the
-   connection badge. The startup splash draws the same row (#39658), so the
-   two cannot disagree about what the screen is or whether it is connected. *)
+(* The Dashboard keeps its working layout through loading and failure. *)
 let overview_header (state : state) =
   let now = Unix.localtime (Unix.gettimeofday ()) in
   Printf.sprintf "%s  %s[%s]%s  %02d:%02d:%02d  %s"
@@ -290,7 +288,17 @@ let render_overview (state : state) =
   let health =
     match state.overview_error, state.overview with
     | Some error, _ -> " Health: unavailable · " ^ Terminal_text.single_line error
-    | None, None -> " Health: not observed"
+    | None, None ->
+        let status =
+          match state.connection_status, state.http_refresh_started_ns with
+          | Connecting, _ -> "Connecting to workspace…"
+          | Booting, _ -> "Workspace server is starting…"
+          | (Connected | Degraded | Reconnecting | Disconnected), Some _ ->
+              "Loading Dashboard…"
+          | (Connected | Degraded | Reconnecting | Disconnected), None ->
+              "Health: not observed — press 'r' to refresh"
+        in
+        " " ^ status
     | None, Some overview ->
         " Health: " ^ workspace_health_label overview.ov_workspace_health
         ^ (match overview.ov_keeper_listing with
@@ -15840,36 +15848,6 @@ let render_config (state : state) =
             | None -> ()
           done)
 
-(* The startup splash: the Dashboard's own frame and header -- title,
-   workspace, clock, connection badge -- with the candle where its sections
-   will be once the first briefing read answers. The footer and keys are the
-   Dashboard's; the first key ends the splash and still does its job. *)
-let render_overview_startup (state : state) =
-  let terminal_rows, cols = get_terminal_size () in
-  surface_chrome ~overflow:Fits state ~terminal_rows ~cols ~surface_key:"overview"
-    ~title:(overview_header state)
-    ~status:[ Masc_tui_footer.Refresh_interval state.refresh_interval ]
-    ~hints:(Masc_tui_keys.footer_hints Overview)
-    ~body:(fun ~budget c ->
-      Masc_tui_emblem_screen.body ~screen:Masc_tui_emblem_screen.Startup
-        ~cols:(framed_inner_width cols) ~rows:budget
-        ~origin:(c.next_origin ())
-        ~caption:
-          ([ Masc_tui_theme.tone Masc_tui_theme.Accent
-             ^ "MASC \xc2\xb7 keepers on watch" ^ Ansi.reset
-           ]
-           (* The splash stands only while the briefing is unread and has not
-              failed ([startup_emblem_visible]), so it says that under the
-              candle, after why a configured opening chat did not open. *)
-           @ List.map Terminal_text.single_line (Option.to_list state.opening_notice)
-           @ [ "Dashboard briefing not read yet" ]
-           @ [ Ansi.dim
-               ^ Masc_tui_types.connection_status_label state.connection_status
-               ^ Ansi.reset
-             ])
-        ~elapsed:(Masc_tui_types.motion_elapsed_seconds state.emblem_frame)
-      |> List.iter c.push)
-
 (* /about: the candle over the surface, with what the TUI is running under
    -- its colour scheme and how many Keepers the workspace holds. *)
 let render_about (state : state) =
@@ -15887,7 +15865,7 @@ let render_about (state : state) =
   surface_chrome ~overflow:Fits ~frame:Chrome_overlay state ~terminal_rows ~cols
     ~surface_key:"about" ~title:(screen_title " MASC") ~hints:"c:candle  Esc:close"
     ~body:(fun ~budget c ->
-      Masc_tui_emblem_screen.body ~screen:Masc_tui_emblem_screen.About
+      Masc_tui_emblem_screen.body
         ~cols:(framed_inner_width cols) ~rows:budget
         ~origin:(c.next_origin ())
         ~caption:
@@ -15902,10 +15880,7 @@ let render_about (state : state) =
 
 let render_surface (state : state) =
   match state.view with
-  | Overview ->
-      if Masc_tui_types.startup_emblem_visible state then
-        render_overview_startup state
-      else render_overview state
+  | Overview -> render_overview state
   | Keepers Keeper_list ->
       if state.repository_changes_open then render_repository_changes state
       else render_keeper_list state
@@ -15934,7 +15909,7 @@ let render_surface (state : state) =
                     let terminal_rows, cols = get_terminal_size () in
                     surface_chrome ~overflow:Fits state ~terminal_rows ~cols ~surface_key:"board-read"
                       ~title:(screen_title (" MASC Board / " ^ Terminal_text.single_line post_id))
-                      ~hints:"r:retry  Esc:back  Tab:next"
+                      ~hints:Masc_tui_keys.footer_hints_board_pending
                       ~body:(fun ~budget:_ c ->
                         match Board_detail.view_for state.board_detail ~post_id with
                         | Board_detail.Failed detail ->

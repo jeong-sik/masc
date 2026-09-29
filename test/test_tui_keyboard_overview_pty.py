@@ -92,8 +92,8 @@ def first_use_frames(executable: str) -> None:
             return visible
 
         try:
-            # The splash candle keeps drawing while the briefing is held, so
-            # the wait reads the PTY; an unread one fills and stops the TUI.
+            # Keep reading frames while the briefing is held so the terminal
+            # buffer cannot stop the TUI before its request is observed.
             if not keyboard.wait_for_fixture_event(
                 process, fd, output, requested, timeout=10
             ):
@@ -102,13 +102,9 @@ def first_use_frames(executable: str) -> None:
                         f"the TUI exited before requesting the briefing: {bytes(output)!r}"
                     )
                 raise AssertionError("the TUI did not request the briefing")
-            # The startup splash stands while the briefing is held, and any key
-            # ends it; r only asks for the held briefing again. It is captured
-            # at a width neither the harness start (100) nor the checks below
-            # use: resizing to the size the terminal already has redraws
-            # nothing to wait for.
-            capture("SPLASH", 120, b"Dashboard briefing not read yet")
-            os.write(fd, b"r")
+            # The Dashboard is working from the first frame. Use a width that
+            # differs from the harness and the checks below to force a redraw.
+            capture("LOADING", 120, b"Connecting to workspace")
             for columns in (80, 140):
                 unread = capture("UNREAD", columns, b"Approvals and questions: not fully read")
                 if b"Create a Keeper" in unread:

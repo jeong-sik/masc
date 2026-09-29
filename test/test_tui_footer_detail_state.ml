@@ -180,6 +180,15 @@ let test_the_board_list_keeps_the_keys_it_answers () =
   check bool "Board keeps both vote directions together" true
     (Masc_tui_footer.item_is_pinned "v / V:up / down")
 
+let test_the_board_pending_footer_keeps_only_live_keys () =
+  let hints = Keys.footer_hints_board_pending in
+  check string "Board pending footer projects the three live keys"
+    "Left / Esc:back  r:refresh  Tab:next" hints;
+  List.iter
+    (fun key ->
+      check bool ("Board pending omits " ^ key) false (contains hints key))
+    [ "j/k"; "[/]"; "v / V"; "c:reply" ]
+
 (* Two surfaces read their table through a filter of their own, so the state
    rule has to reach them too. Resources calls its focused pane the detail;
    Fusion's detail footer is a hand-built list, and a key scoped to the
@@ -239,6 +248,8 @@ let () =
             test_each_list_footer_names_no_key_it_refuses
         ; test_case "the Board list keeps the keys it answers" `Quick
             test_the_board_list_keeps_the_keys_it_answers
+        ; test_case "the Board pending footer keeps only live keys" `Quick
+            test_the_board_pending_footer_keeps_only_live_keys
         ; test_case "the detail footers name the scoped key" `Quick
             test_the_detail_footers_name_the_scoped_key
         ; test_case "every scoped surface is named here" `Quick

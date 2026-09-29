@@ -156,11 +156,13 @@ let profile_to_string = function
   | Server_mcp_transport_http_types.Full -> "full"
   | Server_mcp_transport_http_types.Managed_agent -> "managed_agent"
   | Server_mcp_transport_http_types.Operator_remote -> "operator_remote"
+  | Server_mcp_transport_http_types.Seat -> "seat"
 
 let profile_of_string = function
   | "full" -> Some Server_mcp_transport_http_types.Full
   | "managed_agent" -> Some Server_mcp_transport_http_types.Managed_agent
   | "operator_remote" -> Some Server_mcp_transport_http_types.Operator_remote
+  | "seat" -> Some Server_mcp_transport_http_types.Seat
   | _ -> None
 
 let sessions_file_path () =
@@ -405,6 +407,7 @@ let profile_label = function
   | Server_mcp_transport_http_types.Full -> "/mcp"
   | Server_mcp_transport_http_types.Managed_agent -> "/mcp/managed"
   | Server_mcp_transport_http_types.Operator_remote -> "/mcp/operator"
+  | Server_mcp_transport_http_types.Seat -> "/mcp/play"
 
 let validate_mcp_session_profile ~profile session_id =
   match SMap.find_opt session_id (Atomic.get mcp_profile_by_session) with
@@ -429,7 +432,8 @@ let validate_mcp_session_delete_profile ~profile session_id =
              (Printf.sprintf "Session %s is not registered on %s." session_id
                 (profile_label profile)))
   | Server_mcp_transport_http_types.Full
-  | Server_mcp_transport_http_types.Managed_agent ->
+  | Server_mcp_transport_http_types.Managed_agent
+  | Server_mcp_transport_http_types.Seat ->
       validate_mcp_session_profile ~profile session_id
 
 let protocol_version_from_body body_str =

@@ -84,7 +84,7 @@ let current_server_state_opt () = current_server_state ()
 let is_mcp_transport_request (request : Httpun.Request.t) =
   match request.meth, Http.Request.path request with
   | `POST, "/" -> true
-  | _, ("/mcp" | "/mcp/managed" | "/mcp/operator" | "/sse") -> true
+  | _, ("/mcp" | "/mcp/managed" | "/mcp/operator" | "/mcp/play" | "/sse") -> true
   | _ -> false
 ;;
 
@@ -116,6 +116,7 @@ let mcp_transport_http_deps () : Server_mcp_transport_http.deps =
     | Server_mcp_transport_http.Managed_agent -> Mcp_server_eio.Managed_agent
     | Server_mcp_transport_http.Operator_remote ->
         Mcp_server_eio.Operator_remote
+    | Server_mcp_transport_http.Seat -> Mcp_server_eio.Seat
   in
   {
     get_origin;
@@ -176,6 +177,12 @@ let mcp_transport_http_deps () : Server_mcp_transport_http.deps =
     verify_operator_mcp_auth =
       (fun ~base_path request ->
         verify_operator_mcp_auth ~base_path request
+        |> Result.map (fun _ -> ())
+        |> Result.map_error
+             Server_mcp_transport_http_types.auth_failure_of_masc_error);
+    verify_seat_mcp_auth =
+      (fun ~base_path request ->
+        verify_seat_mcp_auth ~base_path request
         |> Result.map (fun _ -> ())
         |> Result.map_error
              Server_mcp_transport_http_types.auth_failure_of_masc_error);

@@ -436,10 +436,19 @@ let test_h1_h2_post_route_wiring_parity () =
     ~needle:{|handle_post_mcp ~profile:Server_mcp_transport_http.Operator_remote|}
     h1_routes;
   assert_contains "H2 exposes POST /mcp/operator route"
-    ~needle:{|`POST, "/mcp/operator" ->|}
+    ~needle:{|`POST, "/mcp/operator"|}
     h2;
   assert_contains "H2 binds /mcp/operator to operator profile"
     ~needle:{|"/mcp/operator" -> Server_mcp_transport_http.Operator_remote|}
+    h2;
+  assert_contains "H1 binds POST /mcp/play to seat profile"
+    ~needle:{|handle_post_mcp ~profile:Server_mcp_transport_http.Seat|}
+    h1_routes;
+  assert_contains "H2 exposes POST /mcp/play route"
+    ~needle:{|`POST, "/mcp/play" ->|}
+    h2;
+  assert_contains "H2 binds /mcp/play to seat profile"
+    ~needle:{|"/mcp/play" -> Server_mcp_transport_http.Seat|}
     h2;
   List.iter
     (fun (label, needle) ->
@@ -485,7 +494,13 @@ let test_h1_h2_delete_route_wiring_parity () =
     ~needle:{|`DELETE, "/mcp/managed"|}
     h2;
   assert_contains "H2 exposes DELETE /mcp/operator route"
-    ~needle:{|`DELETE, "/mcp/operator" ->|}
+    ~needle:{|`DELETE, "/mcp/operator"|}
+    h2;
+  assert_contains "H1 exposes DELETE /mcp/play route"
+    ~needle:{|Http.Router.add ~path:"/mcp/play" ~methods:[`DELETE]|}
+    h1_routes;
+  assert_contains "H2 exposes DELETE /mcp/play route"
+    ~needle:{|`DELETE, "/mcp/play" ->|}
     h2;
   List.iter
     (fun (label, needle) ->

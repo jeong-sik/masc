@@ -10,6 +10,7 @@ type tool_profile = Mcp_server_eio_types.tool_profile =
   | Full
   | Managed_agent
   | Operator_remote
+  | Seat
 
 (* Delegate to the single canonical definition rather than re-declaring the
    exception→severity match (it previously drifted as a verbatim copy in two
@@ -517,7 +518,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
         | Ok resolved -> resolved
         | Error msg ->
             raise (Managed_agent_translation_failed msg))
-    | Full | Operator_remote -> requested_name, admitted_arguments
+    | Full | Operator_remote | Seat -> requested_name, admitted_arguments
   in
   (* The executor supplies its actual resolved identity before effects. Capture
      the corresponding Keeper entry at that boundary; neither session rebinding

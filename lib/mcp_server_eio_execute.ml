@@ -63,7 +63,7 @@ let execute_tool_eio
     match profile with
     | Mcp_server_eio_tool_profile.Full ->
       Mcp_server_eio_caller_identity.Catalog_policy
-    | Managed_agent | Operator_remote ->
+    | Managed_agent | Operator_remote | Seat ->
       if
         Mcp_server_eio_tool_profile.tool_allowed_in_profile state
           profile
@@ -170,7 +170,9 @@ let execute_tool_eio
               ~agent_name
               ~token
               ~permission:Masc_domain.CanAdmin
-          | Full | Managed_agent ->
+          (* A seat tool asks for CanPlayMachine through the same catalog check
+             every other tool uses; the profile already refused anything else. *)
+          | Full | Managed_agent | Seat ->
             Auth.authorize_tool_v2
               config.base_path
               ~agent_name

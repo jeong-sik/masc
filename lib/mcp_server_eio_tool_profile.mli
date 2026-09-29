@@ -34,12 +34,21 @@ type tool_profile = Mcp_server_eio_types.tool_profile =
   | Full
   | Managed_agent
   | Operator_remote
+  | Seat
 
 (** {1 Profile-specific instructions}
 
     Operator-managed prompt assets served as the [instructions] field on each
     [initialize] response. Operator-visible — drift in these strings changes
     how clients describe / discover the server. *)
+
+val seat_instructions : unit -> string
+(** [Seat] profile instructions: an invited player's tools at the shared
+    machine, and how turns pass. *)
+
+val is_seat_tool : string -> bool
+(** Whether the catalog asks [CanPlayMachine] for [tool_name]: the [Seat]
+    profile's whole inventory. *)
 
 val default_instructions : unit -> string
 (** [default_instructions ()] returns [Full] profile instructions. Describes

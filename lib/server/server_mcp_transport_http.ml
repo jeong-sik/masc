@@ -4,6 +4,7 @@ type tool_profile = Server_mcp_transport_http_types.tool_profile =
   | Full
   | Managed_agent
   | Operator_remote
+  | Seat
 
 type runtime = Server_mcp_transport_http_types.runtime = {
   base_path : string;
@@ -305,6 +306,8 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
         deps.verify_mcp_auth ~base_path request
     | Operator_remote ->
         deps.verify_operator_mcp_auth ~base_path request
+    | Seat ->
+        deps.verify_seat_mcp_auth ~base_path request
   in
   let auth_ms =
     Int64.to_float (Int64.sub (Mtime_clock.elapsed_ns ()) auth_started) /. 1e6
@@ -659,6 +662,15 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
              deps.verify_mcp_auth ~base_path request)
     | Operator_remote ->
         deps.verify_operator_mcp_auth ~base_path request
+    (* No route reaches this arm: /mcp/play registers no GET. Every stream
+       kind carries workspace traffic (the agent stream receives task events
+       through [Sse.broadcast]), so a seat opens none of them. *)
+    | Seat ->
+        Error
+          { Server_mcp_transport_http_types.message =
+              "the seat endpoint offers no server stream"
+          ; auth_error_code = None
+          }
   in
   let last_event_id = Server_mcp_transport_http_headers.get_last_event_id request in
   match validate_mcp_session_profile ~profile session_id with
@@ -905,6 +917,8 @@ let handle_delete_mcp ~deps ?(profile = Full) request reqd =
         deps.verify_mcp_auth ~base_path request
     | Operator_remote ->
         deps.verify_operator_mcp_auth ~base_path request
+    | Seat ->
+        deps.verify_seat_mcp_auth ~base_path request
   in
   match auth_result with
   | Error failure ->

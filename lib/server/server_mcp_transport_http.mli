@@ -2,6 +2,7 @@ type tool_profile = Server_mcp_transport_http_types.tool_profile =
   | Full
   | Managed_agent
   | Operator_remote
+  | Seat
 
 type runtime = Server_mcp_transport_http_types.runtime = {
   base_path : string;
@@ -36,6 +37,8 @@ type deps = {
   verify_mcp_observer_stream_auth :
     base_path:string -> Httpun.Request.t -> (unit, auth_failure) result;
   verify_operator_mcp_auth :
+    base_path:string -> Httpun.Request.t -> (unit, auth_failure) result;
+  verify_seat_mcp_auth :
     base_path:string -> Httpun.Request.t -> (unit, auth_failure) result;
 }
 

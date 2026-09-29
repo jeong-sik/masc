@@ -35,6 +35,7 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
     | Server_mcp_transport_http.Full -> Mcp_eio.Full
     | Server_mcp_transport_http.Managed_agent -> Mcp_eio.Managed_agent
     | Server_mcp_transport_http.Operator_remote -> Mcp_eio.Operator_remote
+    | Server_mcp_transport_http.Seat -> Mcp_eio.Seat
   in
   (* ═══════════════════════════════════════════════════════════════════════
      Route-local query helpers
@@ -138,7 +139,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
      | _ -> ())
   in
 
-  (* The route match below admits exactly four MCP paths; classifying them
+  (* The route match below admits exactly five MCP paths; classifying them
      here again must therefore never invent a profile for anything else. An
      unrouted path reaching this classifier is route-table drift, and a loud
      failure beats silently granting the widest (Full) surface (#8605
@@ -147,6 +148,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
     match path with
     | "/mcp/managed" -> Server_mcp_transport_http.Managed_agent
     | "/mcp/operator" -> Server_mcp_transport_http.Operator_remote
+    | "/mcp/play" -> Server_mcp_transport_http.Seat
     | "/mcp" | "/" -> Server_mcp_transport_http.Full
     | unrouted ->
       invalid_arg ("mcp profile requested for unrouted path: " ^ unrouted)
@@ -621,7 +623,8 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
       | `POST, "/mcp"
       | `POST, "/"
       | `POST, "/mcp/managed"
-      | `POST, "/mcp/operator" ->
+      | `POST, "/mcp/operator"
+      | `POST, "/mcp/play" ->
           let session_id = match session_id_opt with
             | Some id -> id
             | None -> Mcp_session.generate ()
@@ -653,6 +656,10 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                      Server_mcp_transport_http_types.auth_failure_of_masc_error
             | Server_mcp_transport_http.Operator_remote ->
                 verify_operator_mcp_auth ~base_path httpun_request
+                |> Result.map_error
+                     Server_mcp_transport_http_types.auth_failure_of_masc_error
+            | Server_mcp_transport_http.Seat ->
+                verify_seat_mcp_auth ~base_path httpun_request
                 |> Result.map_error
                      Server_mcp_transport_http_types.auth_failure_of_masc_error
           in
@@ -822,7 +829,8 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
 
       | `DELETE, "/mcp"
       | `DELETE, "/mcp/managed"
-      | `DELETE, "/mcp/operator" ->
+      | `DELETE, "/mcp/operator"
+      | `DELETE, "/mcp/play" ->
           let profile = profile_for_mcp_path path in
           let base_path = match current_server_state () with
             | Some s -> (Mcp_server.workspace_config s).base_path
@@ -837,6 +845,10 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                      Server_mcp_transport_http_types.auth_failure_of_masc_error
             | Server_mcp_transport_http.Operator_remote ->
                 verify_operator_mcp_auth ~base_path httpun_request
+                |> Result.map_error
+                     Server_mcp_transport_http_types.auth_failure_of_masc_error
+            | Server_mcp_transport_http.Seat ->
+                verify_seat_mcp_auth ~base_path httpun_request
                 |> Result.map_error
                      Server_mcp_transport_http_types.auth_failure_of_masc_error
           in

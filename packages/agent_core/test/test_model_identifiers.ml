@@ -205,6 +205,135 @@ let test_ollama_cloud_deepseek_cloud_suffix_resolves () =
     ~expected_id_prefix:"deepseek-v4.1-flash:cloud"
 ;;
 
+(* [equality_key] is what [equal] and [equal_id_prefix] compare, so a table
+   keyed by it finds exactly the rows they would. *)
+let test_equality_key_agrees_with_equal () =
+  let cases =
+    [ "claude-opus-5"; "CLAUDE-OPUS-5"; "Claude-Opus-5"; "gpt-5.6-terra"
+    ; "GPT-5.6-TERRA"; "Qwen/Qwen3-Coder-480B"; "qwen/qwen3-coder-480b"
+    ; "deepseek-v4.1-flash:cloud"; "\xc3\x84bc"; "\xc3\xa4bc" ]
+  in
+  List.iter
+    (fun a ->
+       List.iter
+         (fun b ->
+            let model_a = Model_identifiers.Model_id.of_string_exn a in
+            let model_b = Model_identifiers.Model_id.of_string_exn b in
+            Alcotest.(check bool)
+              (Printf.sprintf "model ids %S and %S" a b)
+              (Model_identifiers.Model_id.equal model_a model_b)
+              (String.equal
+                 (Model_identifiers.Model_id.equality_key model_a)
+                 (Model_identifiers.Model_id.equality_key model_b));
+            let row = prefix_of a in
+            Alcotest.(check bool)
+              (Printf.sprintf "row %S and model id %S" a b)
+              (Model_identifiers.Model_id.equal_id_prefix ~prefix:row model_b)
+              (String.equal
+                 (Model_identifiers.Id_prefix.equality_key row)
+                 (Model_identifiers.Model_id.equality_key model_b)))
+         cases)
+    cases
+;;
+
+(* What the provider-scoped lookup answered before it had an index: the first
+   row, in catalog order, that names the provider and the model id. *)
+let scan_scoped_rows rows ~provider_name ~model_id =
+  let label value = String.lowercase_ascii (String.trim value) in
+  let model_id = Model_identifiers.Model_id.of_string_exn model_id in
+  List.find_opt
+    (fun (entry : Model_catalog.model_entry) ->
+       match entry.provider_name with
+       | Some declared ->
+         String.equal (label declared) (label provider_name)
+         && Model_identifiers.Model_id.equal_id_prefix ~prefix:entry.id_prefix model_id
+       | None -> false)
+    rows
+;;
+
+(* For every row of the repository catalog that names a provider, asked by
+   that provider and that row's id in either case, the indexed lookup answers
+   with the very row a scan of the rows in catalog order finds. *)
+let test_scoped_lookup_matches_a_scan_of_the_rows () =
+  let catalog =
+    Model_catalog_test_support.load_repo_model_catalog
+      ~suite:"model_identifiers scoped lookup index"
+  in
+  let rows = Model_catalog.model_entries catalog in
+  let scoped =
+    List.filter_map
+      (fun (entry : Model_catalog.model_entry) ->
+         Option.map (fun provider -> provider, entry) entry.provider_name)
+      rows
+  in
+  List.iter
+    (fun (provider, (entry : Model_catalog.model_entry)) ->
+       let id = Model_identifiers.Id_prefix.to_string entry.id_prefix in
+       List.iter
+         (fun (provider_name, model_id) ->
+            let label = Printf.sprintf "%s / %s" provider_name model_id in
+            match
+              ( Model_catalog.lookup_for_provider_result catalog ~provider_name ~model_id
+              , scan_scoped_rows rows ~provider_name ~model_id )
+            with
+            | Ok found, Some expected ->
+              Alcotest.(check bool) (label ^ " answers with the scanned row") true
+                (found == expected)
+            | Ok _, None -> Alcotest.failf "%s: the index found a row the scan does not" label
+            | Error _, _ -> Alcotest.failf "%s: the row's own provider and id miss" label)
+         [ provider, id; String.uppercase_ascii provider, String.uppercase_ascii id ])
+    scoped;
+  match scoped with
+  | [] -> Alcotest.fail "the catalog has no row that names a provider"
+  | (provider, _) :: _ ->
+    (match
+       Model_catalog.lookup_for_provider_result catalog ~provider_name:provider
+         ~model_id:"no-row-declares-this-model"
+     with
+     | Error Model_catalog.No_such_row -> ()
+     | Error (Model_catalog.Malformed_model_id detail) -> Alcotest.fail detail
+     | Ok _ -> Alcotest.fail "a model id no row declares must miss")
+;;
+
+(* Two rows with one provider and one id: the lookup answers with the first,
+   as the scan did. A loaded catalog refuses such a pair; a catalog built from
+   entries does not. *)
+let test_scoped_lookup_answers_with_the_first_of_equal_rows () =
+  let catalog =
+    Model_catalog_test_support.load_repo_model_catalog
+      ~suite:"model_identifiers scoped lookup first row"
+  in
+  match
+    List.find_opt
+      (fun (entry : Model_catalog.model_entry) -> Option.is_some entry.provider_name)
+      (Model_catalog.model_entries catalog)
+  with
+  | None -> Alcotest.fail "the catalog has no row that names a provider"
+  | Some first ->
+    let second = { first with max_context_tokens = Some 1 } in
+    let provider_name =
+      match first.provider_name with
+      | Some provider -> provider
+      | None -> Alcotest.fail "the chosen row names a provider"
+    in
+    let model_id = Model_identifiers.Id_prefix.to_string first.id_prefix in
+    let answer entries =
+      match
+        Model_catalog.lookup_for_provider_result
+          (Model_catalog.of_model_entries entries) ~provider_name ~model_id
+      with
+      | Ok entry -> entry
+      | Error _ -> Alcotest.fail "the lookup missed a row that names its provider and id"
+    in
+    Alcotest.(check bool) "the first row answers" true (answer [ first; second ] == first);
+    Alcotest.(check bool) "order decides, not the row" true
+      (answer [ second; first ] == second);
+    (* The row's provider label is trimmed and case-folded like the query's. *)
+    let spelled = { first with provider_name = Some (" " ^ String.uppercase_ascii provider_name ^ " ") } in
+    Alcotest.(check bool) "a row's provider label is folded as the query's is" true
+      (answer [ spelled ] == spelled)
+;;
+
 let () =
   Alcotest.run "model_identifiers"
     [ ( "Id_prefix.starts_with"
@@ -218,4 +347,11 @@ let () =
       , [ Alcotest.test_case "query_case_fold_and_padding_rejection" `Quick test_lookup_folds_case_and_rejects_padding
         ; Alcotest.test_case "misses_stay_misses" `Quick test_lookup_misses_stay_misses
         ; Alcotest.test_case "ollama_cloud_deepseek_cloud_suffix_resolves" `Quick
-            test_ollama_cloud_deepseek_cloud_suffix_resolves ] ) ]
+            test_ollama_cloud_deepseek_cloud_suffix_resolves ] )
+    ; ( "Model_catalog provider-scoped index"
+      , [ Alcotest.test_case "equality_key_agrees_with_equal" `Quick
+            test_equality_key_agrees_with_equal
+        ; Alcotest.test_case "scoped_lookup_matches_a_scan_of_the_rows" `Quick
+            test_scoped_lookup_matches_a_scan_of_the_rows
+        ; Alcotest.test_case "scoped_lookup_answers_with_the_first_of_equal_rows" `Quick
+            test_scoped_lookup_answers_with_the_first_of_equal_rows ] ) ]

@@ -47,9 +47,11 @@ module Make (L : LABELS) = struct
     | Error message -> invalid_arg (L.label ^ ": " ^ message)
   ;;
 
-  let equal a b =
-    String.equal (String.lowercase_ascii a) (String.lowercase_ascii b)
-  ;;
+  (* The bytes [equal] compares, so a table keyed by it finds exactly the
+     values [equal] would. *)
+  let equality_key t = String.lowercase_ascii t
+
+  let equal a b = String.equal (equality_key a) (equality_key b)
 
   let to_string t = t
 end

@@ -31,6 +31,10 @@ module Id_prefix : sig
   (** Case-insensitive equality (ASCII case folded); no trim, since
       {!of_string} rejects padded input. *)
 
+  val equality_key : t -> string
+  (** The bytes {!equal} compares, ASCII case folded: two values are [equal]
+      exactly when their keys are byte-equal, so a table can be keyed by it. *)
+
   val starts_with : prefix:t -> t -> bool
   (** Prefix matching between catalog identifiers, e.g. wizard client gating
       on [claude-] / [gpt-]. ASCII case is folded on both sides. *)
@@ -79,6 +83,11 @@ module Model_id : sig
   val equal : t -> t -> bool
   (** Case-insensitive equality (ASCII case folded); no trim, since
       {!of_string} rejects padded input. *)
+
+  val equality_key : t -> string
+  (** The bytes {!equal} and {!equal_id_prefix} compare, ASCII case folded:
+      [equal_id_prefix ~prefix t] holds exactly when
+      [Id_prefix.equality_key prefix] and [equality_key t] are byte-equal. *)
 
   val equal_id_prefix : prefix:Id_prefix.t -> t -> bool
   (** Exact comparison with a catalog row identifier. ASCII case is folded;

@@ -1930,14 +1930,21 @@ let find_removal ~keepers_dir ~keeper_id target =
     | Error error -> Journal_unreadable (Dated_jsonl.read_error_to_string error))
 ;;
 
+(* An exact retraction batch: its plan id and the error that reports pending
+   journal evidence for the snapshot it wrote. *)
+type 'error retraction_plan =
+  string
+  * (plan_id:string -> snapshot_revision:int -> snapshot_sha256:string -> detail:string -> 'error)
+
 (* What a commit does when its facts equal the stored ones. A Librarian pass
    keeps the stored snapshot. An explicit write still writes a revision: its
    caller reads the returned [change] as what that write did, and the keeper
    stamps [last_seen] with the write time, so an equal set does not arise
-   from it in practice. *)
-type equal_facts =
+   from it in practice. A retraction plan is an explicit write, so a kept
+   pass never carries one. *)
+type 'error equal_facts =
   | Keep_stored
-  | Write_revision
+  | Write_revision of 'error retraction_plan option
 
 let update_locked_with_output
       ?on_committed
@@ -1946,7 +1953,6 @@ let update_locked_with_output
       ?before_replace
       ?durable_range_id
       ?official_range_id
-      ?retraction_plan
       ~equal_facts
       ~store_error
       ~keepers_dir
@@ -1954,6 +1960,11 @@ let update_locked_with_output
       ~now
       build
   =
+  let retraction_plan =
+    match equal_facts with
+    | Keep_stored -> None
+    | Write_revision plan -> plan
+  in
   let* () =
     match official_range_id with
     | None -> Ok ()
@@ -2137,12 +2148,17 @@ let update_locked_with_output
             comparison runs on the pool for the reason the print below does. *)
          let kept =
            match equal_facts, snapshot with
-           | Write_revision, (Some _ | None) | Keep_stored, None -> None
+           | Write_revision _, (Some _ | None) | Keep_stored, None -> None
            | Keep_stored, Some (current, current_content) ->
+             (* A kept fact is the stored value itself, so it compares without
+                serializing; only a different value or count needs the bytes. *)
              let same_facts =
-               Domain_pool_ref.submit_cpu_or_inline (fun () ->
+               Int.equal (List.compare_lengths current.facts next.facts) 0
+               && Domain_pool_ref.submit_cpu_or_inline (fun () ->
                  List.equal
-                   (fun left right -> String.equal (fact_payload left) (fact_payload right))
+                   (fun left right ->
+                      left == right
+                      || String.equal (fact_payload left) (fact_payload right))
                    current.facts
                    next.facts)
              in
@@ -2330,8 +2346,8 @@ let update_locked_with_error
       build
   =
   update_locked_with_output
-    ?clock ?dropped_statements ?retraction_plan
-    ~equal_facts:Write_revision ~store_error ~keepers_dir ~keeper_id ~now
+    ?clock ?dropped_statements
+    ~equal_facts:(Write_revision retraction_plan) ~store_error ~keepers_dir ~keeper_id ~now
     (fun ~snapshot_content previous ->
        let+ next = build ~snapshot_content previous in
        next, ())
@@ -2912,7 +2928,7 @@ let supersede_fact
           ; reason = "superseded_by " ^ incoming_identity
           }
         ]
-      ~equal_facts:Write_revision
+      ~equal_facts:(Write_revision None)
       ~store_error:(fun detail -> Supersede_persistence_failed detail)
       ~keepers_dir
       ~keeper_id

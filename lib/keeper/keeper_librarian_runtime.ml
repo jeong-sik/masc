@@ -1624,7 +1624,7 @@ let run_best_effort
                    (completed_output ~inp ~exact_output ~absorb_gate disposition);
                Log.Keeper.warn
                  ~keeper_name:keeper_id
-                 "memory os librarian cancelled after snapshot commit revision=%d; post-commit work may be incomplete"
+                 "memory os librarian cancelled after its pass committed at revision=%d; post-commit work may be incomplete"
                  disposition.snapshot.revision
              | None ->
                if not run_completed then

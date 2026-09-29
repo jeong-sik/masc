@@ -1,0 +1,10 @@
+(node:56876) [DEP0205] DeprecationWarning: `module.register()` is deprecated. Use `module.registerHooks()` instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+{
+  "status": "passed",
+  "output_dir": "/tmp/masc-equipped-portrait-browser-20260929/native-2c413",
+  "requests": 3,
+  "screenshots": 5,
+  "source_head": "7df3bd2d41c71d3a41597e578d32618cc5662b0c",
+  "native_ci_head": "2c413a064c82f57c722fed3c7f99c485c1c0429f"
+}

@@ -186,6 +186,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: python3 -m unittest discover -s test -p test_server_artifact_comparison.py -v
+      - run: python3 -m unittest discover -s scripts/harness/perf -p test_vision_artifact_compare.py -v
   compare-server:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.compare_server && !inputs.compare_vision }}
     needs: server-harness-tests

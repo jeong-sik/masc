@@ -228,10 +228,16 @@ def run_window(
             if child.poll() is None:
                 child.kill()
             try:
-                child.communicate(timeout=10)
+                stdout, stderr = child.communicate(timeout=10)
             except subprocess.TimeoutExpired:
                 child.kill()
-                child.communicate(timeout=10)
+                stdout, stderr = child.communicate(timeout=10)
+            log_names = (("stdout.jsonl", "stderr.txt") if name == "measurement"
+                         else (f"{name}.txt", f"{name}.stderr.txt"))
+            for filename, data in zip(log_names, (stdout, stderr)):
+                log = output / filename
+                if not log.exists():
+                    log.write_bytes(data)
             cleanup[name] = {"returncode": child.returncode, "reaped": child.poll() is not None}
         (output / "cleanup.json").write_text(json.dumps(
             {"completed": completed, "children": cleanup}, indent=2) + chr(10))

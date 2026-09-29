@@ -14,3 +14,6 @@ val is_later : previous:t -> t -> bool
     several execution and deferral transitions? *)
 val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result
+val to_int : t -> int
+(** The generation as a plain integer, for records that carry it beside other
+    typed fields rather than as a JSON value of their own. *)

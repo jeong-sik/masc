@@ -16,6 +16,7 @@ let is_direct_successor ~previous generation =
 ;;
 
 let to_yojson generation = `Int generation
+let to_int generation = generation
 
 let of_yojson = function
   | `Int generation when generation >= 0 -> Ok generation

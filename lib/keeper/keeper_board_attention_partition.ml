@@ -1925,6 +1925,47 @@ let requeue_blocked ~base_path ~(partition : t) =
     Error ("partition is not Blocked: " ^ partition.partition_id)
 ;;
 
+(* The partition ledger's own confirmation row is byte-identical to the one
+   before it, so it carries no time and no process identity, and
+   [recover_for_process_start] compacts the ledger to one row per partition at
+   the next boot. This sidecar record keeps what the ledger cannot: which boot
+   confirmed this generation, and when. It is diagnostic, so a failure to write
+   it never fails the confirmation it describes -- the partition ledger is the
+   authority. It is written only after the partition row is committed: a record
+   for a confirmation the ledger does not hold would be a false observation. *)
+let observe_ready_confirmation ~base_path ~(partition : t) ~changed ~write_outcome =
+  let confirm_outcome =
+    if changed
+    then Keeper_board_attention_ready_confirmation.Appended
+    else Keeper_board_attention_ready_confirmation.Unchanged
+  in
+  let partition_write =
+    match write_outcome with
+    | Fsync_completed -> Keeper_board_attention_ready_confirmation.Fsync_completed
+    | Visible_sync_unconfirmed detail ->
+      Keeper_board_attention_ready_confirmation.Visible_sync_unconfirmed detail
+  in
+  match
+    Keeper_board_attention_ready_confirmation.append
+      ~base_path
+      ~keeper_name:partition.keeper_name
+      ~partition_id:partition.partition_id
+      ~generation:(Generation.to_int partition.generation)
+      ~observed_at:(Time_compat.now ())
+      ~confirm_outcome
+      ~partition_write
+  with
+  | Ok () -> ()
+  | Error detail ->
+    Log.Keeper.warn
+      "board_attention_partition: ready confirmation record not written keeper=%s \
+       partition=%s generation=%d detail=%s"
+      partition.keeper_name
+      partition.partition_id
+      (Generation.to_int partition.generation)
+      detail
+;;
+
 let confirm_ready ~base_path ~(partition : t) =
   match partition.state with
   | Ready ->
@@ -1945,6 +1986,7 @@ let confirm_ready ~base_path ~(partition : t) =
             ("partition advanced before Ready fsync confirmation: "
              ^ partition.partition_id))
     in
+    observe_ready_confirmation ~base_path ~partition:confirmed ~changed ~write_outcome;
     Ok { partition = confirmed; changed; write_outcome }
   | Blocked _ | Running _ | Completed _ | Settled _ | Abandoned _ ->
     Error ("partition is not Ready: " ^ partition.partition_id)

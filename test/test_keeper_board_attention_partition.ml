@@ -1401,6 +1401,69 @@ let test_a_judged_candidate_keeps_its_abandoned_root_closed () =
   | _ -> Alcotest.fail "judged replay changed the abandoned root's state"
 ;;
 
+(* task-1827: the partition ledger's own confirmation row is byte-identical to
+   the one before it and is compacted away at the next boot, so a restart that
+   confirmed the same generation leaves no trace. The sidecar record keeps the
+   boot identity and time, and the partition compaction must not touch it. *)
+let test_ready_confirmation_records_boot_and_survives_compaction () =
+  with_temp_base "board-attention-ready-confirmation" @@ fun base_path ->
+  let module R = Masc.Keeper_board_attention_ready_confirmation in
+  let pending = candidate ~id:"candidate-confirm" ~recorded_at:1.0 () in
+  let ready =
+    match roots ~base_path [ pending ] with
+    | [ partition ] -> partition
+    | _ -> Alcotest.fail "expected one Ready root"
+  in
+  let ledger_path = P.For_testing.path ~base_path ~keeper_name:"alpha" in
+  let record_path = R.path ~base_path ~keeper_name:"alpha" in
+  Alcotest.(check bool) "no record before the first confirmation" false
+    (Sys.file_exists record_path);
+  (* Two confirmations stand in for two boots: the partition row is appended
+     both times, and the sidecar keeps one row each. *)
+  let first = ok "first confirmation" (P.confirm_ready ~base_path ~partition:ready) in
+  let second = ok "second confirmation" (P.confirm_ready ~base_path ~partition:ready) in
+  Alcotest.(check bool) "the confirmation did not change the domain state" false
+    first.P.changed;
+  Alcotest.(check bool) "and neither did the second" false second.P.changed;
+  let records = ok "read records" (R.read ~base_path ~keeper_name:"alpha") in
+  Alcotest.(check int) "one record per confirmation" 2 (List.length records);
+  List.iter
+    (fun (record : R.record) ->
+      Alcotest.(check string) "names the partition" ready.P.partition_id record.partition_id;
+      Alcotest.(check string) "names the keeper" "alpha" record.keeper_name;
+      Alcotest.(check int)
+        "names the generation"
+        (P.Generation.to_int ready.P.generation)
+        record.generation;
+      Alcotest.(check string)
+        "names the boot"
+        (Masc.Build_identity.runtime_instance_id)
+        record.boot_identity;
+      Alcotest.(check bool) "carries an observation time" true (record.observed_at > 0.0);
+      Alcotest.(check bool)
+        "the state was already what the confirmation asked for"
+        true
+        (match record.confirm_outcome with R.Unchanged -> true | R.Appended -> false);
+      Alcotest.(check bool)
+        "the partition row was fsync-confirmed"
+        true
+        (match record.partition_write with R.Fsync_completed -> true | R.Visible_sync_unconfirmed _ -> false))
+    records;
+  (* The partition ledger compacts to one row; the sidecar keeps both. *)
+  ignore
+    (ok
+       "startup compaction"
+       (P.recover_for_process_start ~now:20.0 ~base_path ~keeper_name:"alpha"));
+  Alcotest.(check int)
+    "startup compacts the partition ledger to one row"
+    1
+    (List.length (ledger_lines ledger_path));
+  Alcotest.(check int)
+    "the confirmation records survive the partition compaction"
+    2
+    (List.length (ok "read records after compaction" (R.read ~base_path ~keeper_name:"alpha")))
+;;
+
 let () =
   Alcotest.run
     "keeper_board_attention_partition"
@@ -1481,6 +1544,10 @@ let () =
             "a judged candidate keeps its abandoned root closed"
             `Quick
             test_a_judged_candidate_keeps_its_abandoned_root_closed
+        ; Alcotest.test_case
+            "ready confirmation records boot and survives compaction"
+            `Quick
+            test_ready_confirmation_records_boot_and_survives_compaction
         ] )
     ]
 ;;

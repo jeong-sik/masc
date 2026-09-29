@@ -46,10 +46,6 @@ val seat_instructions : unit -> string
 (** [Seat] profile instructions: an invited player's tools at the shared
     machine, and how turns pass. *)
 
-val is_seat_tool : string -> bool
-(** Whether the catalog asks [CanPlayMachine] for [tool_name]: the [Seat]
-    profile's whole inventory. *)
-
 val default_instructions : unit -> string
 (** [default_instructions ()] returns [Full] profile instructions. Describes
     where MASC state lives (project / cluster / read / write conventions). It

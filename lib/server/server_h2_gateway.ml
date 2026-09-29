@@ -754,13 +754,15 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                                    ~extra_headers:(cors @ mcp_headers session_id protocol_version)
                              | Ok post_context ->
                                  with_server_state h2_reqd (fun state ->
+                                   let serves_listen =
+                                     Server_mcp_transport_http
+                                     .serves_subscriptions_listen ~profile
+                                       post_context.body_str
+                                   in
                                    let profile =
                                      mcp_eio_profile_of_transport_profile profile
                                    in
-                                   if
-                                     Server_mcp_transport_http
-                                     .body_is_subscriptions_listen
-                                       post_context.body_str
+                                   if serves_listen
                                    then
                                      serve_subscriptions_listen_h2 ~sw:request_sw ~clock
                                        ~cors ~body_str:post_context.body_str

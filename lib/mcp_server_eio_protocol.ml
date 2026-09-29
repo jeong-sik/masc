@@ -724,8 +724,8 @@ let otel_tool_request_context
 ;;
 
 (* The seat door answers only what a player needs: the handshake (initialize,
-   or server/discover on the stateless protocol), its tool list and its tool
-   calls. The other methods here admit any valid credential (Requires_auth) or
+   or server/discover on the stateless protocol), ping, its tool list and its
+   tool calls. The other methods here admit any valid credential (Requires_auth) or
    none (the dashboard ones), and a seat's credential is an invitee's, so they
    are not reachable through it. A method not named here is refused on this
    door, so a method added to the dispatcher stays off the seat until named. *)
@@ -738,6 +738,7 @@ let method_allowed_in_profile profile method_ =
      | "initialized"
      | "notifications/initialized"
      | "server/discover"
+     | "ping"
      | "tools/list"
      | "tools/call" -> true
      | _ -> false)
@@ -993,6 +994,13 @@ let handle_request
                   (fun auth_token ->
                      match TP.requested_tool_list_params req.params with
                      | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_params msg
+                     | Ok { include_usage = true; _ } when profile = Seat ->
+                       (* Usage telemetry counts every agent's calls and names
+                          the host path it is read from. *)
+                       make_error_typed
+                         ~id
+                         Mcp_error_code.Invalid_params
+                         "include_usage is not available on the seat endpoint"
                      | Ok { names; include_hidden; include_usage; cursor }
                        ->
                        let list_profile =

@@ -450,6 +450,18 @@ let test_h1_h2_post_route_wiring_parity () =
   assert_contains "H2 binds /mcp/play to seat profile"
     ~needle:{|"/mcp/play" -> Server_mcp_transport_http.Seat|}
     h2;
+  assert_contains "H1 asks the profile before serving a listen stream"
+    ~needle:"if serves_subscriptions_listen ~profile body_str then"
+    h1;
+  assert_not_contains "H1 does not serve listen on the body alone"
+    ~needle:"if body_is_subscriptions_listen"
+    h1;
+  assert_contains "H2 asks the profile before serving a listen stream"
+    ~needle:".serves_subscriptions_listen ~profile"
+    h2;
+  assert_not_contains "H2 does not serve listen on the body alone"
+    ~needle:".body_is_subscriptions_listen"
+    h2;
   List.iter
     (fun (label, needle) ->
       assert_contains ("H1 " ^ label) ~needle h1;

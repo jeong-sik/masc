@@ -42,7 +42,26 @@ let initialize_params =
     ; "clientInfo", `Assoc [ "name", `String "pi"; "version", `String "1.0" ]
     ]
 
-let with_state f =
+let invite_token base_path =
+  let name =
+    match Masc.Play_invite.Name.of_string "pi" with
+    | Ok name -> name
+    | Error msg -> fail msg
+  in
+  match
+    Masc.Play_invite.issue ~base_path ~public_base_url:(Some "http://127.0.0.1:8935")
+      ~keeper_names:(Ok []) ~name ~hours:1
+  with
+  | Ok { Masc.Play_invite.link; _ } ->
+    (match String.index_opt link '#' with
+     | Some at -> String.sub link (at + 1) (String.length link - at - 1)
+     | None -> failf "no token in %s" link)
+  | Error _ -> fail "invite issue failed"
+
+(* [For_testing.create_state] turns workspace auth off. With [~auth:true] it is
+   turned back on and every request carries an invite's Player token unless
+   the caller passes another. *)
+let with_state ?(auth = false) f =
   with_dir "mcp-seat-" (fun base_path ->
     Eio_main.run (fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -50,8 +69,21 @@ let with_state f =
       let clock = Eio.Stdenv.clock env in
       Eio.Switch.run (fun sw ->
         let state = Mcp_eio.For_testing.create_state ~base_path () in
-        f (fun ?(profile = Mcp_eio.Seat) body ->
-          Mcp_eio.handle_request ~clock ~sw ~profile state body))))
+        let player =
+          if auth then begin
+            Auth.save_auth_config base_path
+              { Masc_domain.default_auth_config with enabled = true; require_token = true };
+            Some (invite_token base_path)
+          end
+          else None
+        in
+        f (fun ?(profile = Mcp_eio.Seat) ?auth_token body ->
+          let auth_token =
+            match auth_token with
+            | Some token -> Some token
+            | None -> player
+          in
+          Mcp_eio.handle_request ~clock ~sw ~profile ?auth_token state body))))
 
 let error_code response =
   match member "error" response with
@@ -161,6 +193,45 @@ let test_the_seat_refuses_a_tool_it_does_not_list () =
       (String_util.contains_substring (Yojson.Safe.to_string (call "masc_dos_screen"))
          "not available on this MCP endpoint"))
 
+let invalid_params = Masc.Mcp_error_code.to_wire_code Masc.Mcp_error_code.Invalid_params
+let auth_error = Masc.Mcp_error_code.to_wire_code Masc.Mcp_error_code.Auth_error
+
+let call_tool ?auth_token handle name =
+  handle ?profile:None ?auth_token
+    (request ~params:(`Assoc [ "name", `String name; "arguments", `Assoc [] ]) "tools/call")
+
+(* The protocol cases above run with auth off; this one runs as an invitee,
+   so the credential store, the catalog permission check and the profile gate
+   all see a Player. *)
+let test_an_invite_plays_through_the_seat_with_auth_on () =
+  with_state ~auth:true (fun handle ->
+    check (list string) "an invite lists the play tools" seat_tools
+      (tool_names (handle (request "tools/list")));
+    check (option int) "a made-up bearer is refused" (Some auth_error)
+      (error_code (handle ~auth_token:"nope" (request "tools/list")));
+    check (option int) "usage telemetry is not shown on the seat" (Some invalid_params)
+      (error_code
+         (handle (request ~params:(`Assoc [ "include_usage", `Bool true ]) "tools/list")));
+    check bool "ping is answered" true (member "result" (handle (request "ping")) <> None);
+    check (option int) "masc_status is refused to an invite" (Some method_not_found)
+      (error_code (call_tool handle "masc_status"));
+    let screen = call_tool handle "masc_dos_screen" in
+    check (option int) "masc_dos_screen is not a protocol error" None (error_code screen);
+    (* No machine is loaded, so the lane itself answers: the call got past the
+       permission check and ran as the invitee. *)
+    let call_meta =
+      Option.bind (member "result" screen) (member "_meta")
+      |> Fun.flip Option.bind (member Masc.Mcp_server.tool_call_meta_key)
+    in
+    let meta_string key =
+      match Option.bind call_meta (member key) with
+      | Some (`String value) -> Some value
+      | _ -> None
+    in
+    check (option string) "masc_dos_screen ran as the invitee" (Some "pi") (meta_string "agent_id");
+    check (option string) "the lane refused it, not the permission check"
+      (Some "workflow_rejection") (meta_string "failure_class"))
+
 let loopback_request_authority () =
   match Server_request_authority.of_host_port ~host:"127.0.0.1" ~port:8935 with
   | Ok authority -> authority
@@ -179,22 +250,6 @@ let passes = function
   | Ok _ -> true
   | Error _ -> false
 
-let invite_token base_path =
-  let name =
-    match Masc.Play_invite.Name.of_string "pi" with
-    | Ok name -> name
-    | Error msg -> fail msg
-  in
-  match
-    Masc.Play_invite.issue ~base_path ~public_base_url:(Some "http://127.0.0.1:8935")
-      ~keeper_names:(Ok []) ~name ~hours:1
-  with
-  | Ok { Masc.Play_invite.link; _ } ->
-    (match String.index_opt link '#' with
-     | Some at -> String.sub link (at + 1) (String.length link - at - 1)
-     | None -> failf "no token in %s" link)
-  | Error _ -> fail "invite issue failed"
-
 let test_the_seat_door_admits_an_invite_and_the_full_door_does_not () =
   with_dir "mcp-seat-auth-" (fun base_path ->
     Auth.save_auth_config base_path
@@ -208,11 +263,18 @@ let test_the_seat_door_admits_an_invite_and_the_full_door_does_not () =
           | Ok (token, _) -> token
           | Error err -> fail (Masc_domain.masc_error_to_string err)
         in
+        (* The verifiers the transport is handed, not the Server_auth
+           functions: a door bound to the wrong verifier fails here. *)
+        let deps = Server_routes_http_common.mcp_transport_http_deps () in
         let seat ?token () =
-          passes (Server_auth.verify_seat_mcp_auth ~base_path (http_request ?token "/mcp/play"))
+          passes
+            (deps.Server_mcp_transport_http.verify_seat_mcp_auth ~base_path
+               (http_request ?token "/mcp/play"))
         in
         let full ?token () =
-          passes (Server_auth.verify_mcp_auth ~base_path (http_request ?token "/mcp"))
+          passes
+            (deps.Server_mcp_transport_http.verify_mcp_auth ~base_path
+               (http_request ?token "/mcp"))
         in
         check bool "an invite opens the seat door" true (seat ~token:player ());
         check bool "an invite does not open /mcp" false (full ~token:player ());
@@ -220,6 +282,30 @@ let test_the_seat_door_admits_an_invite_and_the_full_door_does_not () =
         check bool "a worker opens /mcp" true (full ~token:worker ());
         check bool "no bearer opens neither" false (seat () || full ());
         check bool "a made-up bearer does not open the seat" false (seat ~token:"nope" ()))))
+
+let test_the_seat_opens_no_stream () =
+  let listen = request "subscriptions/listen" in
+  check bool "a listen body on the seat goes to the dispatcher" false
+    (Server_mcp_transport_http.serves_subscriptions_listen
+       ~profile:Server_mcp_transport_http.Seat listen);
+  check bool "the full door serves it as a stream" true
+    (Server_mcp_transport_http.serves_subscriptions_listen
+       ~profile:Server_mcp_transport_http.Full listen)
+
+let test_the_seat_ends_only_its_own_sessions () =
+  let module T = Server_mcp_transport_http in
+  let seat_session = "seat-session-test" and full_session = "full-session-test" in
+  Fun.protect
+    ~finally:(fun () ->
+      T.forget_mcp_session seat_session;
+      T.forget_mcp_session full_session)
+    (fun () ->
+      T.remember_mcp_profile seat_session T.Seat;
+      T.remember_mcp_profile full_session T.Full;
+      let ends id = passes (T.validate_mcp_session_delete_profile ~profile:T.Seat id) in
+      check bool "a seat ends its own session" true (ends seat_session);
+      check bool "a seat does not end a /mcp session" false (ends full_session);
+      check bool "a seat does not end a session it cannot place" false (ends "no-such-session"))
 
 let test_the_routes_serve_post_and_delete_but_no_stream () =
   let router = Server_routes_http_routes_frontend.add_routes ~port:8935 (Router.create ()) in
@@ -243,11 +329,16 @@ let () =
         ; test_case "the seat refuses every other method" `Quick test_the_seat_refuses_every_other_method
         ; test_case "the seat refuses a tool it does not list" `Quick
             test_the_seat_refuses_a_tool_it_does_not_list
+        ; test_case "an invite plays through the seat with auth on" `Quick
+            test_an_invite_plays_through_the_seat_with_auth_on
         ] )
     ; ( "http"
       , [ test_case "an invite opens the seat door, not /mcp" `Quick
             test_the_seat_door_admits_an_invite_and_the_full_door_does_not
         ; test_case "POST and DELETE are routed, GET is 405" `Quick
             test_the_routes_serve_post_and_delete_but_no_stream
+        ; test_case "the seat opens no stream" `Quick test_the_seat_opens_no_stream
+        ; test_case "the seat ends only its own sessions" `Quick
+            test_the_seat_ends_only_its_own_sessions
         ] )
     ]

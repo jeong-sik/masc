@@ -107,7 +107,10 @@ let tool_allowed_in_profile state profile tool_name =
           |> List.exists (fun (schema : Masc_domain.tool_schema) ->
                  String.equal schema.name tool_name))
   | Operator_remote -> List.mem tool_name (Tool_operator.remote_tool_names ())
-  | Seat -> is_seat_tool tool_name
+  | Seat ->
+      tool_schemas_for_profile state Seat
+      |> List.exists (fun (schema : Masc_domain.tool_schema) ->
+             String.equal schema.name tool_name)
 
 let tool_annotations_for_profile _profile tool_name =
   let read_only =

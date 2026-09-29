@@ -420,9 +420,12 @@ let validate_mcp_session_profile ~profile session_id =
 
 let validate_mcp_session_delete_profile ~profile session_id =
   match profile with
-  | Server_mcp_transport_http_types.Operator_remote ->
+  (* A narrow door ends only the sessions it registered: its credential may
+     not be able to open any other door. *)
+  | Server_mcp_transport_http_types.Operator_remote
+  | Server_mcp_transport_http_types.Seat ->
       (match SMap.find_opt session_id (Atomic.get mcp_profile_by_session) with
-       | Some Server_mcp_transport_http_types.Operator_remote -> Ok ()
+       | Some existing when existing = profile -> Ok ()
        | Some existing ->
            Error
              (Printf.sprintf "Session %s belongs to %s, not %s." session_id
@@ -432,8 +435,7 @@ let validate_mcp_session_delete_profile ~profile session_id =
              (Printf.sprintf "Session %s is not registered on %s." session_id
                 (profile_label profile)))
   | Server_mcp_transport_http_types.Full
-  | Server_mcp_transport_http_types.Managed_agent
-  | Server_mcp_transport_http_types.Seat ->
+  | Server_mcp_transport_http_types.Managed_agent ->
       validate_mcp_session_profile ~profile session_id
 
 let protocol_version_from_body body_str =

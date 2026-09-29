@@ -77,6 +77,11 @@ type body =
       ; reason : unattributed_reason
       }
   | Paid of Candle_payment.t
+  | Purchased of
+      { keeper : string
+      ; item : Keeper_portrait_item.t
+      ; amount_milli : int
+      }
   | Payout_failed of { goal_id : string; request_id : string; verification_run_id : string; due_date : string }
 
 type t =

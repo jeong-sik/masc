@@ -34,7 +34,7 @@ let test_explicit_policy () =
   match enabled with
   | Candle_config.Enabled policy ->
     List.iter2 (fun grade expected -> Alcotest.(check int) (Candle_grade.to_string grade)
-      expected (Candle_config.grade_amount_milli policy grade))
+      expected (Candle_config.grade_amount_milli policy.payout grade))
       Candle_grade.all [1000;2000;3000;4000;5000]
   | Off | Disabled _ -> Alcotest.fail "complete payout policy was rejected"
 ;;
@@ -45,7 +45,7 @@ let test_policy_boundaries () =
   List.iter (fun weight ->
     let limit = min (max_int / weight) (max_int / 1000) in
     (match Candle_config.of_toml_string (text ~weight ~amount:limit) with
-     | Enabled policy -> Alcotest.(check int) "largest safe amount" limit policy.trivial_milli
+     | Enabled policy -> Alcotest.(check int) "largest safe amount" limit policy.payout.trivial_milli
      | Off | Disabled _ -> Alcotest.fail "safe arithmetic boundary rejected");
     ignore (disabled_reason (Candle_config.of_toml_string (text ~weight ~amount:(limit + 1)))))
     [1; 1000; 1001; max_int];

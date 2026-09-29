@@ -336,7 +336,7 @@ def about_screen_with_graphics(binary: str) -> None:
         assert not candle_rows(output), "real pixels were drawn as a mosaic as well"
         # Esc closes /about and takes the picture down with it.
         start = len(output)
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+        h.send_and_wait(process, fd, output, b"\x1b", CHAT_TITLE)
         h.wait_for_output(process, fd, output, MASCOT_DELETE, start=start, timeout=3.0)
         assert h.drain_until_quiet(process, fd, output), "the screen kept moving after /about closed"
         after = bytes(output[output.find(MASCOT_DELETE, start):])
@@ -373,7 +373,7 @@ def about_owns_the_keys(binary: str) -> None:
         screen = h.screen_text(bytes(output))
         assert ABOUT_CAPTION in screen, "a key typed under /about closed it: " + repr(screen)
         assert SWALLOWED_TEXT not in screen, "text typed under /about reached the composer"
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+        h.send_and_wait(process, fd, output, b"\x1b", CHAT_TITLE)
         assert h.drain_until_quiet(process, fd, output), "the screen kept moving after /about closed"
         screen = h.screen_text(bytes(output))
         assert ABOUT_CAPTION not in screen, "Esc left /about open"
@@ -430,7 +430,7 @@ def about_turns_the_candle(binary: str) -> None:
         start = len(output)
         h.write_all(fd, output, b"c")
         transfer_after(process, fd, output, start, is_painted, "painted")
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+        h.send_and_wait(process, fd, output, b"\x1b", CHAT_TITLE)
         os.write(fd, b"q")
 
     h.run_terminal_scenario(

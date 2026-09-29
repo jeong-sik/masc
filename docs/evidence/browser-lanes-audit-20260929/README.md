@@ -64,12 +64,12 @@ Validation performed:
 - Independent source review found the close/read bug and inaccurate hints;
   fixes reviewed, including correction of a cadence race in the PTY scenario.
 
-Reproduce the browser check with the dashboard dev fixture server running:
+From `dashboard/`, reproduce the browser check with the dev fixture server running:
 
 ```sh
 INTERNAL_AGENTS_FIXTURE_URL=http://127.0.0.1:5197/dashboard/dev-fixtures/internal-agents-monitor-fixture.html \
 INTERNAL_AGENTS_ARTIFACT_DIR=../docs/evidence/browser-lanes-audit-20260929 \
-pnpm --dir dashboard exec node e2e/lanes-truth.mjs
+pnpm exec node e2e/lanes-truth.mjs
 ```
 
 Remaining operational work: establish a working model binding and Chromium

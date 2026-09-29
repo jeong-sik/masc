@@ -70,6 +70,7 @@
 - `masc setup` checks `imp.toml` before calling the model, so an `imp.toml` the server would refuse (such as a microVM keeper without `sandbox_image`) stops setup before the model round trip (#39895).
 - Runtime lane candidate edits in the TUI now check the displayed order and submit the configuration revision, refusing concurrent changes instead of replacing another client's candidate order (#39900).
 - The MCP endpoint answers `keeper_portrait_read` with the typed keeper-internal refusal instead of "Unknown tool (registry inconsistency)", and the keeper tool matrix exercises the tool (#39906).
+- Exact-output generation and token measurement now share the provider concurrency limit with ordinary requests; permit waits respect the exact request deadline (#39879).
 
 ### Internal
 

@@ -1,0 +1,183 @@
+{
+  "scope": "Source browser replay of unchanged actual-model receipts through the real InternalAgentsMonitor and decoders; fixture API envelopes. Not native HTTP, live dashboard, Goal verification or Candle payment proof.",
+  "source_head": "c46fec5b68c94ee1e8a56e20e47e5e961e195756",
+  "source_diff": "diff --git a/dashboard/src/components/internal-agents-monitor.ts b/dashboard/src/components/internal-agents-monitor.ts\nindex d847086633..7e5548541e 100644\n--- a/dashboard/src/components/internal-agents-monitor.ts\n+++ b/dashboard/src/components/internal-agents-monitor.ts\n@@ -942,7 +942,7 @@ export function InternalAgentsMonitor() {\n                     <span class=\"ia-sub\">\n                       <b>${laneLabel(row)}</b>\n                       <code class=\"mono\" title=${subject(row)}>${subject(row)}</code>\n-                      ${row.source === 'exact' && row.run.lane === 'librarian_exact'\n+                      ${row.source === 'exact'\n                         ? html`<code translate=\"no\" class=\"mono\" title=${row.run.runId}>run_id · ${row.run.runId}</code>`\n                         : null}\n                     </span>\n",
+  "source_hashes": {
+    "dashboard/src/components/internal-agents-monitor.ts": "daeeddd1704bf7848f851c661b3322fb906f741b1df6489ece4aa395db1a9bb9",
+    "dashboard/src/api/dashboard-exact-lane-runs.ts": "96851b77a2b52ee1e8a3828f3d07b57cfbbd6171098c49469e1210aa57c7b306",
+    "dashboard/src/api/dashboard-standalone-lanes.ts": "a19cd152a30d0ec9e6ddbe165d984300011f73cee0145c3a211c40c2e2cda79e",
+    "dashboard/src/demo/internal-agents-monitor-fixture.ts": "8de22f789bd934a67d13b7432d16ac8c6d469c3e0027e6878f63a61d004c71df"
+  },
+  "native_metadata": {
+    "plan": {
+      "schema": "masc.candle_appraiser_eval.v1",
+      "source_commit": "4fae8f4e3fef99a0b23871dd6bfc58a0250df43f",
+      "runtime_id": "glm-coding.glm-5.3-flash",
+      "credential_env": "ZAI_API_KEY_SB",
+      "trials": 20,
+      "case_count": 12,
+      "planned_calls": 240,
+      "runtime_config_sha256": "97e96bfeaa9567756b108e462e6eb46c1bfa465d12eaa6b70ac806d59f5fcbc3",
+      "cases_sha256": "e73b7151f79c0253419e516ceb60d45bb27e7aa34fdcdf194f93b28deedc3c78",
+      "prompt_sha256": {
+        "candle_appraiser_grade.md": "ad555b807b75b214a1efdc4d3616403ae5a6cd95068dc2ed8591c544659008f9",
+        "candle_appraiser_relation.md": "515f02279539c69e38d86202b48d865687f89446e560cff9692d141c0fb731ad",
+        "candle_appraiser_weights.md": "2adf48d36d1686f2b5be67855850da2b7d109eb18777ced390d187894c00d4ae"
+      },
+      "evaluation_overrides": {
+        "exact-body-timeout-s": 1200,
+        "source-exact-body-timeout-s": 1200,
+        "max-output-tokens": 4096
+      },
+      "calibration": {
+        "status": "not_performed",
+        "reason": "No human-graded set of 20 Goals is supplied"
+      },
+      "scope": "Synthetic isolated stage judgments; no Goal, Task, Candle ledger or Paid mutations"
+    },
+    "build": {
+      "release_version": "dev",
+      "binary_version": "dev",
+      "commit": "4fae8f4e3fef99a0b23871dd6bfc58a0250df43f",
+      "commit_source": "embedded",
+      "binary_commit": "4fae8f4e3fef99a0b23871dd6bfc58a0250df43f",
+      "binary_commit_source": "embedded",
+      "ocaml_dos_core": {
+        "source_digest": "338277ba6cc5b69d499c769d4351d73c",
+        "pinned_source_digest": "338277ba6cc5b69d499c769d4351d73c",
+        "matches_pin": true
+      },
+      "provenance_source": "self_observed",
+      "executable_sha256": "fd5d67fd9befb6349f20521f1ea86759498d3d83187bbb2812808403df495a19",
+      "binary_commit_unix_ts": 1790691940,
+      "binary_commit_age_seconds": 1330,
+      "executable_path": "/artifact/candle_appraiser_eval_cli.exe",
+      "executable_dir": "/artifact",
+      "runtime_instance_id": "01a0eda2-e36c-7000-80d2-572cdd55bf29",
+      "started_at": "2026-09-29T14:47:50Z",
+      "uptime_seconds": 0
+    },
+    "scope": "production appraiser judgments only; no Goal or Candle ledger writes"
+  },
+  "mode": "after",
+  "actor": "/fixture/glm-baseline",
+  "selected_slot": "glm-coding.glm-5.3-flash",
+  "rows": [
+    {
+      "stage": "grade",
+      "case_id": "grade-base",
+      "trial": 1,
+      "run_id": "candle-appraisal-386122c07ea0ac3a28408576be0cf402",
+      "receipt_sha256": "cace5fc4cb696b0439bc9555f60923b80d0cf1de0df2b4fd2991d13780677972",
+      "answer": {
+        "grade": "small"
+      },
+      "run_id_visible": true
+    },
+    {
+      "stage": "relation",
+      "case_id": "relation-related",
+      "trial": 1,
+      "run_id": "candle-appraisal-b936c6c8b7eb8ff5c7603b3792a0a154",
+      "receipt_sha256": "7e1c328707f01ed53b4a621660cc41193821819d83c41e3e4c401d88193ad410",
+      "answer": {
+        "relation": "related"
+      },
+      "run_id_visible": true
+    },
+    {
+      "stage": "weights",
+      "case_id": "weights-base",
+      "trial": 1,
+      "run_id": "candle-appraisal-763ff129f6848c01b117194bef4287eb",
+      "receipt_sha256": "1d58814075633531470ec01b95089ec07fa711a2556f0966d98893fa4d69cf10",
+      "answer": {
+        "weights": {
+          "keeper-a": 5,
+          "keeper-b": 5
+        }
+      },
+      "run_id_visible": true
+    }
+  ],
+  "fixture_projection": "Only run_kind=exact_output and skill_evidence=no_keeper_skills are added to detail. List omits payloads. Lane counts are derived from these three records; other lane observations are explicitly unavailable.",
+  "requests": [
+    {
+      "path": "/api/v1/dashboard/exact-lane-runs",
+      "method": "GET",
+      "response_sha256": "f0e121dcbb682cb68633fb8cdf8151cfacbb1ac6a87cb5641129574c804fa3ac"
+    },
+    {
+      "path": "/api/v1/dashboard/verification-runs",
+      "method": "GET",
+      "response_sha256": "8118ece00d9e59025eda3f5428d8d1d37dc4ac0f7d8c4681b95551ebed9cac58"
+    },
+    {
+      "path": "/api/v1/dashboard/fusion-runs",
+      "method": "GET",
+      "response_sha256": "97e40fc297fc4c2bcbd2e72537b9e7e4c97933b6ebf5adaf9d0d8f596bbdb791"
+    },
+    {
+      "path": "/api/v1/dashboard/standalone-lanes",
+      "method": "GET",
+      "response_sha256": "56d0ef00190fb22cb905e4ff0f14632d4df49b3eae0b72fe41ec3c3a722d3326"
+    },
+    {
+      "path": "/api/v1/dashboard/exact-lane-runs/candle-appraisal-386122c07ea0ac3a28408576be0cf402",
+      "method": "GET",
+      "response_sha256": "9a8dbf42d2ad20384519f7c7a0449ea3555e9d54f24e3fc05e804e7e0f7b66a4"
+    },
+    {
+      "path": "/api/v1/dashboard/exact-lane-runs/candle-appraisal-b936c6c8b7eb8ff5c7603b3792a0a154",
+      "method": "GET",
+      "response_sha256": "55cd2d91688a97609883dc6134c753e7a46c055c48b003e4c8f1aeb6706d957f"
+    },
+    {
+      "path": "/api/v1/dashboard/exact-lane-runs/candle-appraisal-763ff129f6848c01b117194bef4287eb",
+      "method": "GET",
+      "response_sha256": "1e1ef9ca6ec984038273a18c0ed28a0af10e723daad5b9737d23b403707f9de6"
+    }
+  ],
+  "errors": [],
+  "assertions": [
+    "grade: recorded input, result, request ID, workspace actor and selected slot rendered; fetched exact run ID candle-appraisal-386122c07ea0ac3a28408576be0cf402",
+    "relation: recorded input, result, request ID, workspace actor and selected slot rendered; fetched exact run ID candle-appraisal-b936c6c8b7eb8ff5c7603b3792a0a154",
+    "weights: recorded input, result, request ID, workspace actor and selected slot rendered; fetched exact run ID candle-appraisal-763ff129f6848c01b117194bef4287eb",
+    "Zero Keeper owners, Keeper evidence links, workspace-as-Keeper options and Keeper API requests"
+  ],
+  "screenshots": [
+    {
+      "file": "01-recorded-inventory.png",
+      "sha256": "d44ab8bd66c04854df9f82dcd51005d49f31c039b095cf18be0738dee2a9e79f"
+    },
+    {
+      "file": "02-grade.png",
+      "sha256": "feeaf734b52ffd22bd96236ca6e80c05c827a321febc07829c1475e6bfe080d9"
+    },
+    {
+      "file": "02-relation.png",
+      "sha256": "661fe8fda60e031d360a0a0f0596cd4e9984b8be6816b779b327655c261b6643"
+    },
+    {
+      "file": "03-relation-task-input.png",
+      "sha256": "e470be55747576f2395aba7f4829f114c8c55bea25bcc8f885a379bfa12708ba"
+    },
+    {
+      "file": "02-weights.png",
+      "sha256": "72ede525438eaa717eb001f2968d9dc05fff918e365e5f5b885213ec4f08f8f0"
+    },
+    {
+      "file": "03-weights-task-input.png",
+      "sha256": "916ebcac69e49ccf8f4d1f7a4b3d26a1b92bdddcfc9a74fab085b6cda810141d"
+    }
+  ],
+  "browser": {
+    "name": "Chromium",
+    "version": "149.0.7827.55",
+    "viewport": {
+      "width": 1520,
+      "height": 1080
+    }
+  },
+  "outcome": "passed"
+}

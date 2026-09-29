@@ -762,7 +762,7 @@ let test_openssh_observation_reads_the_dispatch_cache () =
     { name = "observed-box"; host = "fleet.invalid"; user = "masc"; port = 22
     ; identity_file = "key"; known_hosts_file = "hosts"
     ; remote_root = "/srv/masc"; connect_timeout_sec = 1
-    ; max_concurrent_sessions = 1; env_allowlist = []; capabilities = []
+    ; max_concurrent_sessions = 1; env_allowlist = [ "LANG" ]; capabilities = []
     ; private_home = false; allowed_paths = [] }
   in
   let cached () = Keeper_sandbox_remote.report_openssh ~base_path ~endpoint in
@@ -774,8 +774,8 @@ let test_openssh_observation_reads_the_dispatch_cache () =
       { endpoint; ssh_bin; identity_file = "key"; known_hosts_file = "hosts"
       ; control_path_dir = Filename.concat base_path "unused-control" }
   in
-  let status, _, _ = run_request (Keeper_sandbox_remote.runner ~timeout_sec:2.0 state) () in
-  check status_testable "stub dispatch ran" (Unix.WEXITED 3) status;
+  let status, _, stderr = run_request (Keeper_sandbox_remote.runner ~timeout_sec:2.0 state) () in
+  check status_testable ("stub dispatch ran: " ^ stderr) (Unix.WEXITED 3) status;
   Sys.remove ssh_bin;
   let observed = cached () in
   (match observed.probe, observed.last_dispatch with

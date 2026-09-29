@@ -9095,8 +9095,7 @@ let test_workspace_memory_read_dispatch () =
       let reviewer = pending "reviewer" "PDF incomplete" in
       let selected = [writer; reviewer] in
       let assignments : Ledger.assignment list = List.map (fun (row : Ledger.pending_fact) ->
-        ({ fact = row.fact; decision = Ledger.Create_conflict "Owners disagree on PDF completion" }
-          : Ledger.assignment)) selected in
+        { Ledger.fact = row.fact; decision = Ledger.Create_conflict "Owners disagree on PDF completion" }) selected in
       let ledger = match Ledger.apply Ledger.empty ~selected assignments with
         | Ok ledger -> ledger
         | Error error -> fail (Ledger.apply_error_to_string error) in

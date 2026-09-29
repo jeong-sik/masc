@@ -38,3 +38,13 @@ The earlier649 prepared-byte failures are absent: this source contains the
 canonical portrait fields in the smoke fixture. No assertions were weakened.
 A replacement run after the remote list correction must retain its own source
 identity and results. No deployment or live workspace change was performed.
+
+## Original artifacts
+
+`currency-artifacts.tar.gz` retains all original current-head terminal frames,
+PTY streams, request receipts and binary manifest. The Ready captures identify
+the actual MASC Dashboard title and all three exact large supply amounts.
+`remote-artifacts.tar.gz` retains the failed remote scenario's raw PTY, health
+fixtures, native router log, original before/equipped PNGs and roster JSON.
+Both archives preserve every source file byte; they do not turn the failed
+remote render into a successful image comparison.

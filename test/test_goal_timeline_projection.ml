@@ -168,6 +168,57 @@ let test_an_edit_event_shows_what_it_replaced () =
           ]))
 ;;
 
+(* A row this build cannot read is marked in the summary and is `warn`, so the
+   marker is not the only sign of it. The producer writes objects and nothing
+   else, so these rows come from a damaged file or from another writer. *)
+let test_an_edit_row_that_cannot_be_read_is_marked_and_warned () =
+  let read payload =
+    let json = DGT.goal_event_timeline_json (goal_edited_event payload) in
+    field "summary" json, field "severity" json
+  in
+  let summary_and_severity = pair (option string) (option string) in
+  let priority_moved = edit_change ~from_json:(`Int 3) ~to_json:(`Int 1) in
+  check
+    summary_and_severity
+    "a field that is not an object"
+    (Some "due_date <unreadable payload.due_date>, priority 3 -> 1 by a", Some "warn")
+    (read
+       (`Assoc
+          [ "actor", `String "a"
+          ; "due_date", `String "2026-10-15"
+          ; "priority", priority_moved
+          ]));
+  check
+    summary_and_severity
+    "a value that is neither text, a number nor null"
+    (Some "priority <unreadable payload.priority.from> -> 1 by a", Some "warn")
+    (read
+       (`Assoc
+          [ "actor", `String "a"
+          ; "priority", edit_change ~from_json:(`Bool true) ~to_json:(`Int 1)
+          ]));
+  check
+    summary_and_severity
+    "a key that is missing"
+    (Some "priority <missing payload.priority.from> -> 1 by a", Some "warn")
+    (read (`Assoc [ "actor", `String "a"; "priority", `Assoc [ "to", `Int 1 ] ]));
+  check
+    summary_and_severity
+    "no changed field"
+    (Some "<missing payload.due_date and payload.priority> by a", Some "warn")
+    (read (`Assoc [ "actor", `String "a" ]));
+  check
+    summary_and_severity
+    "no editor"
+    (Some "priority 3 -> 1 by <missing payload.actor>", Some "warn")
+    (read (`Assoc [ "priority", priority_moved ]));
+  check
+    summary_and_severity
+    "a row that reads whole is not flagged"
+    (Some "priority 3 -> 1 by a", Some "ok")
+    (read (`Assoc [ "actor", `String "a"; "priority", priority_moved ]))
+;;
+
 let test_unknown_event_type_keeps_its_token () =
   let json =
     DGT.goal_event_timeline_json
@@ -561,6 +612,10 @@ let () =
             "an edit event shows what it replaced"
             `Quick
             test_an_edit_event_shows_what_it_replaced
+        ; test_case
+            "an edit row that cannot be read is marked and warned"
+            `Quick
+            test_an_edit_row_that_cannot_be_read_is_marked_and_warned
         ; test_case
             "unknown event type keeps its token"
             `Quick

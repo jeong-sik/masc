@@ -200,7 +200,12 @@ let emit_goal_event (ctx : context) ~goal_id ~event_type ~payload =
 (* An edit to a goal's due date or priority moves no phase, so no other row
    remembers the value it replaced, and a due date pushed back left no trace
    (#39878). One row per edit holds only the fields that changed, each as
-   {from, to}. It records the edit and never refuses it. *)
+   {from, to}. It records the edit and never refuses it. The edit is already
+   stored when the row is appended, so a row that cannot be appended does not
+   fail the edit: the error log carries the goal and the payload.
+
+   The row is appended after the store's lock is released, so the file does not
+   guarantee the order of two edits that overlap. *)
 let emit_goal_edit (ctx : context) ~(previous : Goal_store.goal) (goal : Goal_store.goal) =
   let change field ~from_json ~to_json = field, `Assoc [ "from", from_json; "to", to_json ] in
   let due_date =
@@ -222,11 +227,15 @@ let emit_goal_edit (ctx : context) ~(previous : Goal_store.goal) (goal : Goal_st
   match due_date @ priority with
   | [] -> ()
   | changes ->
-    emit_goal_event
-      ctx
-      ~goal_id:goal.id
-      ~event_type:"goal_edited"
-      ~payload:(`Assoc (("actor", `String ctx.agent_name) :: changes))
+    let payload = `Assoc (("actor", `String ctx.agent_name) :: changes) in
+    (try emit_goal_event ctx ~goal_id:goal.id ~event_type:"goal_edited" ~payload with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Log.Misc.error
+         "goal edit not recorded after it was stored goal_id=%s payload=%s detail=%s"
+         goal.id
+         (Yojson.Safe.to_string payload)
+         (Printexc.to_string exn))
 ;;
 
 (* RFC-0387 stage 2: wake the goal verifier lane after a durable

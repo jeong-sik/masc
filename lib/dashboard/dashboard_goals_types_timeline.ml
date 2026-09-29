@@ -282,36 +282,43 @@ let goal_event_timeline_json event =
         ("Goal Phase", Printf.sprintf "phase=%s by %s" phase actor, severity)
     | "goal_edited" ->
         (* The payload holds only the fields the edit changed, each as
-           {from, to}. A due date that was not set is JSON null. A field that
-           is present but unreadable shows as a bracketed marker, the way the
-           [goal_phase] row marks a missing field. *)
+           {from, to}. A due date that was not set is JSON null. Anything else
+           this build cannot read shows as a bracketed marker, the way the
+           [goal_phase] row marks a missing field, and the row is `warn` so the
+           marker is not the only thing that tells it from a healthy edit. *)
         let edit_value field change key =
           match Json_util.assoc_member_opt key change with
-          | Some `Null -> "(none)"
-          | Some (`String text) -> text
-          | Some (`Int number) -> string_of_int number
-          | Some _ | None -> Printf.sprintf "<missing payload.%s.%s>" field key
+          | Some `Null -> "(none)", true
+          | Some (`String text) -> text, true
+          | Some (`Int number) -> string_of_int number, true
+          | Some _ -> Printf.sprintf "<unreadable payload.%s.%s>" field key, false
+          | None -> Printf.sprintf "<missing payload.%s.%s>" field key, false
         in
         let edit field =
           match payload_field field with
+          | `Null -> None
           | `Assoc _ as change ->
+              let from_text, from_readable = edit_value field change "from" in
+              let to_text, to_readable = edit_value field change "to" in
               Some
-                (Printf.sprintf "%s %s -> %s" field
-                   (edit_value field change "from")
-                   (edit_value field change "to"))
-          | _ -> None
+                ( Printf.sprintf "%s %s -> %s" field from_text to_text
+                , from_readable && to_readable )
+          | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+              Some (Printf.sprintf "%s <unreadable payload.%s>" field field, false)
         in
-        let edits =
+        let edits, edits_readable =
           match List.filter_map edit [ "due_date"; "priority" ] with
-          | [] -> "<missing payload.due_date and payload.priority>"
-          | changed -> String.concat ", " changed
+          | [] -> "<missing payload.due_date and payload.priority>", false
+          | changed -> String.concat ", " (List.map fst changed), List.for_all snd changed
         in
-        let actor =
+        let actor, actor_readable =
           match payload_field "actor" |> json_to_string_opt with
-          | Some actor -> actor
-          | None -> "<missing payload.actor>"
+          | Some actor -> actor, true
+          | None -> "<missing payload.actor>", false
         in
-        ("Goal Edit", Printf.sprintf "%s by %s" edits actor, "ok")
+        ( "Goal Edit"
+        , Printf.sprintf "%s by %s" edits actor
+        , if edits_readable && actor_readable then "ok" else "warn" )
     | _ ->
         ("Goal Event", event_type, "ok")
   in

@@ -535,6 +535,16 @@ let test_goal_due_date_and_priority_edits_are_recorded () =
   let third = newest_edit ~already:2 in
   check json_pair "due date moved" (`String "2026-10-15", `String "2026-11-01") (change third "due_date");
   check json_pair "priority moved again" (`Int 1, `Int 5) (change third "priority");
+  (* The dashboard reads what the handler wrote. Each side of this contract is
+     also pinned by hand-written rows in test_goal_timeline_projection, and a
+     renamed key would keep both green without this. *)
+  let projected = Dashboard_goals_types.goal_event_timeline_json (List.nth (edits ()) 2) in
+  check
+    string
+    "the timeline reads the row the handler wrote"
+    "due_date 2026-10-15 -> 2026-11-01, priority 1 -> 5 by planner"
+    (get_string_field projected "summary");
+  check string "and does not flag it" "ok" (get_string_field projected "severity");
   (* The same values again, and an edit to something else, record nothing. *)
   ignore
     (upsert [ "id", `String goal_id; "due_date", `String "2026-11-01"; "priority", `Int 5 ]);

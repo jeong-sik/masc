@@ -3496,6 +3496,11 @@
  (libraries masc_test_deps masc.runtime masc.browser_lane))
 
 (test
+ (name test_keeper_portrait_read)
+ (modules test_keeper_portrait_read)
+ (libraries alcotest masc_test_deps masc masc_keeper_portrait masc_config_dir_resolver masc_tool_types))
+
+(test
  (name test_keeper_image_dimensions)
  (modules test_keeper_image_dimensions)
  (libraries alcotest masc))

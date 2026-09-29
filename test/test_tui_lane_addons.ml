@@ -182,7 +182,7 @@ let metric_fields_and_receipts_remain_readable () =
     evidence=[{uri="lane-evidence:" ^ digest;sha256=Some digest}];related_ids=[] } in
   let snapshot : UI.snapshot = {instances=[];configuration=None;
     output={rows=[row];coverage=[]};complete=Some true} in
-  let view = {UI.initial with presentation=UI.Technical;snapshot=Some snapshot;
+  let view = {UI.initial with presentation=UI.Technical;focus=UI.Timeline;snapshot=Some snapshot;
     receipt=Some (`Assoc ["uri",`String digest;"result",`String "last receipt value"])} in
   List.iter (fun width ->
     let lines = UI.lines ~width view in
@@ -267,9 +267,16 @@ let guided_actions () =
     action_schema=None} in
   let failed_lines = UI.lines ~width:76 {UI.initial with focus=UI.Instances;
     snapshot=Some {snapshot with instances=[failed]}} in
-  check bool "failed row keeps retry and cleanup ahead of its long reason" true
-    (List.exists (String.starts_with
-      ~prefix:"> MSX · failed · o:retry observation  d:cleanup · ") failed_lines);
+  check bool "failed row keeps retry and cleanup visible with its long reason" true
+    (List.exists (String.starts_with ~prefix:"> MSX · failed") failed_lines
+     && List.exists (String.starts_with
+       ~prefix:"    Enter:open  o:retry observation  d:cleanup") failed_lines
+     && List.mem "    D:full ·" failed_lines
+     && List.exists (String.starts_with ~prefix:("    " ^ String.make 8 'x')) failed_lines);
+  check int "long failure reason survives wrapping" 120
+    (List.fold_left (fun total line ->
+       String.fold_left (fun total char -> if char='x' then total+1 else total) total line)
+       0 failed_lines);
   check bool "technical action schema is folded by default" false
     (List.exists (fun line -> String.contains line '{') compact);
   let form_schema = match schema with
@@ -365,15 +372,16 @@ let context_flow_uses_declared_connections () =
   let configured_lines = UI.lines ~width:160 configured in
   check (option string) "configuration action targets its selected declaration" (Some producer.id)
     (Option.map (fun (i : UI.instance) -> i.id) (UI.selected_instance configured));
-  check bool "configuration worker rows do not advertise another action target" true
-    (List.mem "  Project observer · attached" configured_lines
-     && List.mem "  Project metric · attached" configured_lines
-     && List.mem "> project-observer · applied" configured_lines);
-  check bool "compact Tab hint does not claim the wrong next pane" true
-    (List.mem "Horizontal Lane timeline · Tab:next pane, j/k select, D opens original evidence" configured_lines);
+  check bool "overview lists both workers regardless of hidden focus" true
+    (List.exists (String.starts_with ~prefix:"  Project observer · attached") configured_lines
+     && List.exists (String.starts_with ~prefix:"> Project metric · attached") configured_lines);
+  check bool "overview offers help and opening" true
+    (List.exists (String.starts_with ~prefix:"?:help  Esc:back  Enter:open  i:install  n:new  S:subs  r:refresh") configured_lines);
+  check bool "overview omits the old timeline" true
+    (not (List.exists (String.starts_with ~prefix:"Horizontal Lane timeline") configured_lines));
   let worker_lines = UI.lines ~width:160 {configured with focus=UI.Instances} in
-  check bool "worker controls follow the marked worker" true
-    (List.mem "> Project metric · attached · o:observe  d:remove" worker_lines);
+  check bool "worker controls remain visible for the selected worker" true
+    (List.exists (String.starts_with ~prefix:"    Enter:open  o:observe  d:remove") worker_lines);
   let partial = {snapshot with instances=[consumer];configuration=Some {configuration with complete=false}} in
   let partial_view = {view with snapshot=Some partial;snapshot_read_error=Some "network failure"} in
   let partial_lines = UI.lines ~width:160 partial_view in

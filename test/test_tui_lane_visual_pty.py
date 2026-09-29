@@ -64,74 +64,92 @@ def main(executable: str, captures: Path | None) -> None:
         def key(value: bytes, needle: bytes) -> bytes:
             return terminal.send_and_wait(process, master, output, value, needle)
 
+        def screen(data: bytes, needle: bytes) -> bytes:
+            return terminal.screen_text(terminal.frame_containing(data, needle))
+
         def capture(name: str, rows: int, columns: int) -> None:
             if captures is not None:
                 captures.mkdir(parents=True, exist_ok=True)
                 (captures / f"{name}.pty").write_bytes(bytes(output))
                 (captures / f"{name}.json").write_text(json.dumps({
-                    "rows": rows, "columns": columns, "source": "native TUI / controlled HTTP fixture",
-                    "screen": name}, indent=2))
+                    "rows": rows, "columns": columns,
+                    "source": "native TUI / controlled HTTP fixture", "screen": name,
+                }, indent=2))
 
         key(b":go lanes\r", b"MASC Lanes")
         palette = key(b":go LANE", b"go Lane Add-ons")
         if b"MASC Lane Add-ons" in terminal.CSI_RE.sub(b"", palette):
             raise AssertionError("uppercase A intercepted palette input")
         key(b"\x1b", b"MASC Lanes")
-        key(b"A", b"DOM captured")
-        worker_output = key(b"4", b"Horizontal Lane timeline")
-        worker_frame = terminal.frame_containing(worker_output, b"Horizontal Lane timeline")
-        worker_screen = terminal.screen_text(worker_frame)
-        if b"Tab:next pane" not in worker_screen or b"> World observer" not in worker_screen:
-            raise AssertionError("Workers compact view lost its pane or selected worker guidance")
-        print("TUI_CAPTURE lane-addons Workers compact " + repr(worker_screen), flush=True)
-        terminal.resize_and_wait(process, master, output, rows=24, columns=80,
-            needle=b"Installed Add-ons", controls=(terminal.FULL_REDRAW,))
-        narrow_output = bytes(output)
-        needle_at = narrow_output.rfind(b"Installed Add-ons")
-        frame_at = narrow_output.rfind(terminal.FRAME_START, 0, needle_at)
-        if frame_at < 0:
-            raise AssertionError("80-column Lane frame start was not captured")
-        narrow_frame = terminal.frame_containing(narrow_output[frame_at:], b"Installed Add-ons")
-        plain_narrow = terminal.CSI_RE.sub(b"", narrow_frame)
-        expected_hints = b"Esc:back  Tab:Time \xe2\x86\x92 Links \xe2\x86\x92 TOML \xe2\x86\x92 Workers \xe2\x86\x92 Rows  j/k:select  D:details"
-        if expected_hints not in plain_narrow:
-            raise AssertionError("80-column Lane guidance was cut")
-        if b"MSX \xc2\xb7 failed \xc2\xb7 o:retry observation  d:cleanup" not in plain_narrow:
-            raise AssertionError("failed instance lost retry or cleanup before its long reason")
-        print("TUI_CAPTURE lane-addons 80x24 " + repr(terminal.screen_text(narrow_frame)), flush=True)
-        key(b"1", b"DOM captured")
+        overview = key(b"A", b"Lane Add-ons \xc2\xb7 2 installed")
+        first = screen(overview, b"Lane Add-ons \xc2\xb7 2 installed")
+        for needle in (b"> World observer", b"MSX", b"o:retry observation",
+                       b"d:cleanup", b"D:full"):
+            if needle not in first:
+                raise AssertionError(f"Add-on overview omitted {needle!r}")
+        print("TUI_CAPTURE lane-addons overview " + repr(first), flush=True)
+        capture("01-overview-100", 30, 100)
+
+        narrow = terminal.resize_and_wait(process, master, output, rows=24, columns=80,
+            needle=b"Lane Add-ons", controls=(terminal.FULL_REDRAW,))
+        narrow_screen = terminal.screen_text(narrow)
+        if b"Enter:open" not in narrow_screen or b"D:full" not in narrow_screen:
+            raise AssertionError("80-column overview lost navigation or full failure path")
+        if b"sha256:" + b"4" * 64 not in narrow_screen:
+            raise AssertionError("80-column overview cut the failed image identifier")
+        print("TUI_CAPTURE lane-addons 80x24 " + repr(narrow_screen), flush=True)
+        capture("02-overview-80", 24, 80)
+
+        help_output = key(b"?", b"Lane Add-ons keys")
+        help_screen = screen(help_output, b"Lane Add-ons keys")
+        for needle in (b"Esc:close", b"j/k select", b"Enter open", b"1 Activity",
+                       b"4 Records", b"E edit", b"e export marked rows", b":act"):
+            if needle not in help_screen:
+                raise AssertionError(f"Lane help omitted {needle!r}")
+        key(b"\x1b", b"Lane Add-ons \xc2\xb7 2 installed")
+        os.write(master, b"\t")
+        if not terminal.drain_until_quiet(process, master, output):
+            raise AssertionError("overview did not settle after Tab")
+        detail = key(b"\r", b"1 Activity")
+        activity = screen(detail, b"1 Activity")
+        for needle in (b"World observer", b"DOM captured", b"Frame advanced"):
+            if needle not in activity:
+                raise AssertionError(f"Activity omitted {needle!r}")
+        capture("03-activity-80", 24, 80)
+        key(b"2", b"Input: game-producer/frames")
+        key(b"3", b"Revision: 1")
+        records = key(b"4", b"Value derived")
+        if b"Row " not in screen(records, b"Value derived"):
+            raise AssertionError("Records omitted row identities")
         wide = terminal.resize_and_wait(process, master, output, rows=32, columns=140,
-            needle=b"statistics", controls=(terminal.FULL_REDRAW,))
-        plain = terminal.CSI_RE.sub(b"", wide)
-        for needle in [b"browser", b"game", b"statistics", b"PARTIAL", b"2026-09-13", b"DOM captured", b"Frame advanced"]:
+            needle=b"Value derived", controls=(terminal.FULL_REDRAW,))
+        capture("04-records-140", 32, 140)
+
+        os.write(master, b"jjj")
+        if not terminal.drain_until_quiet(process, master, output):
+            raise AssertionError("Records did not settle after moving selection")
+        technical = key(b"D", b"Rows")
+        if b"outside-current-slice" not in technical:
+            raise AssertionError("raw Records lost declared relations")
+        key(b"\x1b", b"4 Records")
+        timeline = key(b"1", b"Horizontal Lane timeline")
+        plain = terminal.CSI_RE.sub(b"", timeline)
+        for needle in (b"browser", b"game", b"statistics", b"PARTIAL",
+                       b"2026-09-13", b"DOM captured", b"Frame advanced"):
             if needle not in plain:
-                raise AssertionError(f"multi-lane screen omitted {needle!r}")
-        capture("01-concurrent-timeline", 32, 140)
-        key(b"\x1b[C", b"154618")
-        key(b" ", b"[x]")
-        capture("02-game-clock-marked", 32, 140)
-        key(b"j", b"Value derived")
-        key(b"j", b"outside-current-slice")
-        capture("03-date-and-relations", 32, 140)
-        key(b"2", b"game-producer/frames")
-        capture("04-source-worker-output", 32, 140)
-        key(b"1", b"Next day input")
-        narrow = terminal.resize_and_wait(process, master, output, rows=24, columns=64,
-            needle=b"Next day input", controls=(terminal.FULL_REDRAW,))
-        if b">" not in narrow:
-            raise AssertionError("narrow timeline lost selection marker")
-        capture("05-narrow-timeline", 24, 64)
-        toml_output = key(b"3", b"Installations (E:edit)")
-        toml_frame = terminal.frame_containing(toml_output, b"Installations (E:edit)")
-        toml_screen = terminal.screen_text(toml_frame)
-        if b"Tab:next pane" not in toml_screen or b"No Add-ons installed." not in toml_screen:
-            raise AssertionError("TOML compact view lost its pane or empty inventory guidance")
-        print("TUI_CAPTURE lane-addons TOML compact " + repr(toml_screen), flush=True)
+                raise AssertionError(f"Activity timeline omitted {needle!r}")
+        capture("05-activity-timeline-140", 32, 140)
+        key(b"\x1b", b"Lane Add-ons \xc2\xb7 2 installed")
+        empty = snapshot()
+        empty["instances"] = []
+        empty["rows"] = []
+        fixtures["/api/v1/lane-addons"] = (200, empty)
+        empty_output = key(b"r", b"Lane Add-ons \xc2\xb7 0 installed")
+        empty_screen = screen(empty_output, b"Lane Add-ons \xc2\xb7 0 installed")
+        if b"No Add-ons installed. i:install a package  n:new TOML" not in empty_screen:
+            raise AssertionError("empty Add-on workspace lacks a next step")
+        capture("06-empty-140", 32, 140)
         os.write(master, b"d")
-        # Every POST the fixture sees lands in [requests], and the TUI opens an
-        # MCP session of its own at startup ("/mcp" initialize). What this
-        # scenario is about is the Add-on surface: browsing it, and pressing d
-        # where no detach is offered, must not write to it.
         addon_writes = [entry for entry in requests
                         if entry[0].startswith("/api/v1/lane-addons")]
         if addon_writes:

@@ -26,6 +26,7 @@ type action_menu = {
 }
 type focus = Timeline | Connections | Configurations | Instances | Rows
 type presentation = Summary | Technical | Flow
+type screen = Overview | Detail of string * string
 type diagnostic =
   | Detail_read_failure of string
   | Request_failure of string
@@ -40,7 +41,8 @@ type t = {
   installer : Masc_tui_lane_installer.t option;
   subscription_panel : Masc_tui_lane_subscriptions.t option;
   evidence_prompt : evidence_prompt option;
-  presentation : presentation; action_menu : action_menu option;
+  presentation : presentation; screen : screen; help_open : bool;
+  action_menu : action_menu option;
   snapshot : snapshot option; loading : bool; error : diagnostic option;
   snapshot_read_error : string option;
       (** The last failed inventory read. Input and request diagnostics do

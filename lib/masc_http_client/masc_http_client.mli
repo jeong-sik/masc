@@ -83,6 +83,15 @@ val patch_sync :
 (** [patch_sync ?clock ?timeout_sec ~url ~headers ~body ()] performs
     a [PATCH url].  Same error handling as {!post_sync}. *)
 
+val delete_sync :
+  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  ?timeout_sec:float ->
+  url:string ->
+  headers:(string * string) list ->
+  unit ->
+  ((int * string), string) result
+(** [delete_sync ?clock ?timeout_sec ~url ~headers ()] performs a [DELETE url]. *)
+
 val get_response_sync :
   ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   ?timeout_sec:float ->

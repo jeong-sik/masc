@@ -74,12 +74,17 @@ def run(binary):
         print("CHAT_LOAD_ERRORS_FRAME " + json.dumps({str(k): v.decode() for k, v in rows.items()}, ensure_ascii=False))
         h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
         h.palette_go(process, fd, output, b"keeper beta", "Keepers ▸ beta ▸ chat".encode())
-        assert h.wait_for_fixture_state(process, fd, output, beta_history.requested.is_set, timeout=3.0), "beta history request did not start"
-        assert not beta_history.completed.is_set(), "beta gate ended before error inspection"
-        inspect_errors(process, fd, output, b"No chat loading errors recorded")
-        _, plain = snapshot(process, fd, output)
-        assert b"history-cause" not in plain and b"journal-cause" not in plain, "another Keeper inherited alpha's errors"
-        beta_history.release.set()
+        try:
+            assert h.wait_for_fixture_state(process, fd, output, beta_history.requested.is_set, timeout=3.0), "beta history request did not start"
+            assert not beta_history.completed.is_set(), "beta gate ended before error inspection"
+            # At 50 columns the local notice wraps before "recorded.".
+            # Wait for its first line, then check the complete screen text.
+            inspect_errors(process, fd, output, b"No chat loading errors")
+            _, plain = snapshot(process, fd, output)
+            assert b"No chat loading errors recorded." in plain, "empty-error notice lost its wrapped tail"
+            assert b"history-cause" not in plain and b"journal-cause" not in plain, "another Keeper inherited alpha's errors"
+        finally:
+            beta_history.release.set()
         assert h.wait_for_fixture_state(process, fd, output, beta_history.completed.is_set, timeout=3.0)
         h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
         os.write(fd, b"q")

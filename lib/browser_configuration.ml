@@ -2,6 +2,9 @@ type automation = { driver : string; binary : string option }
 type stagehand = { chrome : string; extension : string; profile : string option }
 type t = { automation : automation option; stagehand : stagehand option }
 
+(* The [[browser]] table of runtime.toml, spelled once (#39539). *)
+let browser_table = Runtime_toml_namespace.(key Browser)
+
 let none = { automation = None; stagehand = None }
 let ( let* ) = Result.bind
 
@@ -22,11 +25,11 @@ let absolute toml path ~refusal =
 
 let parse_automation toml =
   let* driver =
-    absolute toml [ "browser"; "geckodriver" ]
+    absolute toml [ browser_table; "geckodriver" ]
       ~refusal:"browser.geckodriver must be an absolute path to the geckodriver executable"
   in
   let* binary =
-    absolute toml [ "browser"; "binary" ]
+    absolute toml [ browser_table; "binary" ]
       ~refusal:"browser.binary must be an absolute browser executable or app bundle path"
   in
   match driver, binary with
@@ -37,18 +40,18 @@ let parse_automation toml =
 
 let parse_stagehand toml =
   let configured =
-    Option.is_some (Otoml.find_opt toml Fun.id [ "browser"; "stagehand" ])
+    Option.is_some (Otoml.find_opt toml Fun.id [ browser_table; "stagehand" ])
   in
   let* chrome =
-    absolute toml [ "browser"; "stagehand"; "chrome" ]
+    absolute toml [ browser_table; "stagehand"; "chrome" ]
       ~refusal:"browser.stagehand.chrome must be an absolute path to a Chromium-family executable"
   in
   let* extension =
-    absolute toml [ "browser"; "stagehand"; "extension" ]
+    absolute toml [ browser_table; "stagehand"; "extension" ]
       ~refusal:"browser.stagehand.extension must be an absolute path to the unpacked Stagehand extension"
   in
   let* profile =
-    absolute toml [ "browser"; "stagehand"; "profile" ]
+    absolute toml [ browser_table; "stagehand"; "profile" ]
       ~refusal:
         "browser.stagehand.profile must be an absolute path to an operator-owned profile directory (not Chrome's default user-data-dir: Chrome 136+ refuses remote debugging there)"
   in

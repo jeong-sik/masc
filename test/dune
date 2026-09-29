@@ -2669,7 +2669,10 @@
 (include stanzas/test_dated_jsonl_count_cache.inc)
 (include stanzas/test_dated_jsonl_off_fiber.inc)
 (include stanzas/test_play_role_permissions.inc)
+(include stanzas/test_play_screen.inc)
 (include stanzas/test_play_page.inc)
+(include stanzas/test_play_pad.inc)
+(include stanzas/test_play_pad_routes.inc)
 (include stanzas/test_play_invite.inc)
 (include stanzas/test_play_invite_routes.inc)
 (include stanzas/test_pool_body_limit.inc)
@@ -5934,6 +5937,7 @@
 (include stanzas/test_tui_image_ref.inc)
 (include stanzas/test_tui_emblem_screen.inc)
 (include stanzas/test_tui_portrait_view.inc)
+(include stanzas/test_tui_keeper_portrait.inc)
 (include stanzas/test_tui_emblem_state.inc)
 (include stanzas/test_tui_link_label.inc)
 (include stanzas/test_tui_link_preview.inc)
@@ -6224,6 +6228,7 @@
 
 (include stanzas/test_tui_keeper_runs_view.inc)
 
+(include stanzas/test_runtime_toml_namespace.inc)
 (include stanzas/test_runtime_toml_wrong_typed_keys.inc)
 
 (test
@@ -7391,6 +7396,8 @@
 
 (include stanzas/test_tui_keeper_current_failure_pty.inc)
 
+(include stanzas/test_tui_keeper_portrait_pty.inc)
+
 (include stanzas/test_safe_ops_read_json_eio.inc)
 
 (rule
@@ -7524,8 +7531,8 @@
 (test
  (name test_tui_account_login)
  (modules test_tui_account_login)
- (libraries alcotest masc masc.runtime masc_tui_account_login masc_tui_command masc_tui_sgr_text
-  masc_tui_terminal_palette masc_tui_theme yojson))
+ (libraries alcotest masc masc.runtime masc_tui_account_login masc_tui_command masc_tui_message_layout
+  masc_tui_sgr_text masc_tui_terminal_palette masc_tui_theme yojson))
 
 (test
  (name test_runtime_setup_login_session)

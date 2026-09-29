@@ -56,8 +56,8 @@ type body = private {
 
 type face_item = Bare_face | Glasses | Shades | Eye_patch | Plaster | Freckles | Beard
 type neck_item = Bare_neck | Scarf
-type head_item = Bare_head | Bow
-type hand_item = Empty_hand
+type head_item = Bare_head | Bow | Crown | Beanie
+type hand_item = Empty_hand | Book | Mug | Quill
 type dish = Gilt | Silver | Oak
 type base_item = No_dish | Dish of dish
 

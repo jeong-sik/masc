@@ -1,28 +1,38 @@
 module Judgment = Keeper_board_attention_judgment
 
+type assessment =
+  | Decided of Judgment.t
+  | Needs_review of string
+
+type decision = Settled of Judgment.decision | Uncertain
+
+let decision_label = function
+  | Settled decision -> Judgment.decision_to_string decision
+  | Uncertain -> "uncertain"
+;;
+
 type judged =
-  { verdict : Judgment.t
+  { assessment : assessment
   ; provenance : Keeper_board_attention_candidate.system_one_provenance
+  ; confidence : float
   }
 
 let ( let* ) = Result.bind
 
-(* Jev picks between the Board-attention decisions themselves, offered and
-   read back under the labels the LLM lane uses for them. The options and the
-   labels come from the variant, so a new decision reaches Jev without an edit
-   here, and [describe] does not compile until it says what that decision
-   means. *)
+(* The explicit uncertainty choice delegates to the full lane. Confidence
+   remains evidence and never chooses a control-flow branch. *)
 let relevance_choices =
   Typesafeai_types.choice_set
-    ~options:Judgment.all_of_decision
-    ~label:Judgment.decision_to_string
+    ~options:(List.map (fun decision -> Settled decision) Judgment.all_of_decision @ [Uncertain])
+    ~label:decision_label
     ~describe:(function
-      | Judgment.Relevant ->
+      | Settled Judgment.Relevant ->
         Some
           "The current signal itself requires this keeper's concrete attention, review, or action for one of keeper_role.board_interests; general topic or capability overlap alone is insufficient."
-      | Judgment.Not_relevant ->
+      | Settled Judgment.Not_relevant ->
         Some
-          "The current signal is aimed elsewhere, is general discussion or noise, only overlaps with a board interest, or does not require this keeper to act.")
+          "The current signal is aimed elsewhere, is general discussion or noise, only overlaps with a board interest, or does not require this keeper to act."
+      | Uncertain -> Some "The current signal does not provide enough evidence to decide; request a full judgment by the review lane.")
 ;;
 
 let relevance_question_id = "relevance"
@@ -31,16 +41,16 @@ let relevance_question ~choices candidate =
   Typesafeai_types.choice_of_set
     ~instructions:
       (Printf.sprintf
-         "Does the current Board signal in items[0] itself require concrete attention, review, or action from keeper %S for one of keeper_role.board_interests? General topic or capability overlap is not sufficient."
+         "Does the current Board signal in items[0] itself require concrete attention, review, or action from keeper %S for one of keeper_role.board_interests? General topic or capability overlap is not sufficient. Choose uncertain when you cannot establish either decision from the supplied signal."
          candidate.Keeper_board_attention_candidate.keeper_name)
     choices
 ;;
 
 let rationale
       ({ Typesafeai_types.choice; probabilities; confidence } :
-        Judgment.decision Typesafeai_types.decoded_choice)
+        decision Typesafeai_types.decoded_choice)
   =
-  let label = Judgment.decision_to_string in
+  let label = decision_label in
   let probabilities =
     List.map
       (fun (decision, probability) -> Printf.sprintf "%s:%.2f" (label decision) probability)
@@ -87,19 +97,20 @@ let judge_candidate ?clock ~destinations ~candidate () =
     | Some answer -> Ok answer
     | None -> Error "typesafeai: response missing answer for relevance question"
   in
-  let* (decided : Judgment.decision Typesafeai_types.decoded_choice) =
+  let* (decided : decision Typesafeai_types.decoded_choice) =
     Typesafeai_types.decode_choice choices answer
   in
   Ok
-    { verdict =
-        { Judgment.decision = decided.Typesafeai_types.choice
-        ; rationale = rationale decided
-        }
+    { assessment =
+        (match decided.Typesafeai_types.choice with
+         | Settled decision -> Decided { Judgment.decision; rationale = rationale decided }
+         | Uncertain -> Needs_review (rationale decided))
     ; provenance =
         { Keeper_board_attention_candidate.destination_uri =
             evaluated.destination.destination_uri
         ; answering_model_id = response.model
         ; request_body_sha256 = evaluated.request_body_sha256
         }
+    ; confidence = decided.Typesafeai_types.confidence
     }
 ;;

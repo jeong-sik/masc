@@ -106,7 +106,8 @@ let test_pixels_leave_blank_rows_and_place_the_picture_there () =
   let origin_row, origin_col = origin in
   let top = p.View.row - origin_row in
   let left = p.View.column - origin_col in
-  check int "the mascot's picture slot" View.mascot_image_id p.View.image_id;
+  check int "the mascot's picture slot" (Masc_tui_graphics.image_id Masc_tui_graphics.Mascot)
+    p.View.image_id;
   check bool "placed inside the body" true (top >= 0 && top + p.View.box.View.rows <= rows);
   check int "centred left to right" left ((cols - p.View.box.View.cols) / 2);
   List.iteri
@@ -203,14 +204,14 @@ let test_a_frame_records_only_what_it_drew () =
    thrown away. *)
 let retire () =
   View.begin_frame ();
-  View.flush ~presented:false ~write:ignore
+  View.flush ~rewritten:(fun _ -> false) ~write:ignore
 
 let test_a_body_asks_for_its_picture () =
   View.set_display pixels;
   retire ();
   ignore (Screen.body ~screen:Screen.About ~cols ~rows ~caption ~elapsed:0.0 ~origin);
   let written = Buffer.create 4096 in
-  View.flush ~presented:true ~write:(Buffer.add_string written);
+  View.flush ~rewritten:(fun _ -> false) ~write:(Buffer.add_string written);
   let bytes = Buffer.contents written in
   let expected = Option.get (laid_out pixels).Screen.placement in
   check string "the laid-out placement, and only it, is sent"

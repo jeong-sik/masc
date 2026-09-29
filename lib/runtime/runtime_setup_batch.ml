@@ -216,7 +216,7 @@ let configure_locked ~pending_credentials ~default_lane_id ~binary ~base ~expect
   let runtime_text = match default_lane_id with
     | None -> runtime_text
     | Some lane_id -> Toml_line_editor.edit_table_multiline_array runtime_text
-        ~path:("runtime.lanes." ^ Toml_line_editor.render_key lane_id)
+        ~path:(Runtime_toml_namespace.(path Runtime) ("lanes." ^ Toml_line_editor.render_key lane_id))
         ~key:"candidates" ~values:selected in
   let* (validated, readiness) = with_stage (fun stage ->
     let _,runtime = paths stage in

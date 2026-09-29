@@ -20,7 +20,8 @@ let turn_started =
 ;;
 
 let usage : Msp.token_usage =
-  { input_tokens = 100; output_tokens = 7; cached_tokens = 50; reasoning_tokens = 3 }
+  { input_tokens = 100; output_tokens = 7; cached_tokens = 50; reasoning_tokens = 3;
+    prompt_tokens = None; cache_read_tokens = None; cache_write_tokens = None }
 ;;
 
 (* ── Stream projection ───────────────────────────────────────────────── *)
@@ -587,11 +588,14 @@ def acknowledge(disposition="started"):
         # One session/tokenUsage per model call; null names no model.
         for model in FIXTURE.get("call_models", []):
             usage = {"sessionId": SESSION, "turnId": turn_id,
-                     "usage": {"inputTokens": 1, "outputTokens": 1},
+                     "usage": {"inputTokens": 1, "outputTokens": 1,
+                               "cachedTokens": 0, "reasoningTokens": 0},
                      "promptTokens": 1, "totalTokens": 2}
             if model is not None:
                 usage["modelId"] = model
             notify("session/tokenUsage", usage)
+        for usage in FIXTURE.get("model_usage", []):
+            notify("session/tokenUsage", dict(usage, sessionId=SESSION, turnId=turn_id))
 
 def tool_item(item_id, tool, call_id, status, revision, args="{}"):
     return {"itemId": item_id, "kind": "toolCall", "turnId": turn_id, "revision": revision,
@@ -1390,14 +1394,18 @@ let test_a_stop_before_the_turn_start_answer_settles () =
       run_turn_with
         ~on_stream_event:(function Agent_core.Types.MessageStart _ -> Eio.Fiber.yield () | _ -> ())
         ~on_official_client_tool_boundary:(fun () ->
-          Ok (Some Keeper_official_client_host.Queued_chat_operation))
+          Ok (Some (Keeper_official_client_host.Repeated_tool_call
+            { tool_name = "masc_probe"; repeated_count = 3 })))
         ~base_path
         ~tool:(masc_probe_tool (ref `Null))
         ()
     in
     (match run.outcome.result with
-     | Ok { Runtime_agent.stop_reason = Runtime_agent.Yielded_to_operation_queued _; _ } -> ()
-     | Ok _ -> fail "the stop did not yield to the queued operation"
+     | Ok { Runtime_agent.stop_reason =
+              Runtime_agent.Yielded_after_repeated_tool_call { tool_name; repeated_count; _ }; _ } ->
+       check string "stopped tool" "masc_probe" tool_name;
+       check int "repetition count" 3 repeated_count
+     | Ok _ -> fail "the stop did not retain its repeated-tool cause"
      | Error error -> fail (Agent_core.Error.to_string error));
     (match List.rev run.events with
      | Agent_core.Types.MessageStop :: MessageDelta _ :: _ -> ()
@@ -1748,6 +1756,40 @@ let test_hook_nudges_bind_the_session_but_carried_context_does_not () =
        |> String.split_on_char '\n' |> List.filter (fun line -> line <> "")))
 ;;
 
+let test_call_usage_survives_missing_terminal_aggregate () =
+  let call = `Assoc
+      [ "modelId", `String "muse-fixture-1"
+      ; "promptTokens", `Int 150; "totalTokens", `Int 157
+      ; "usage", `Assoc
+          [ "inputTokens", `Int 100; "outputTokens", `Int 7
+          ; "cachedTokens", `Int 50; "reasoningTokens", `Int 3
+          ; "cacheReadTokens", `Int 40; "cacheWriteTokens", `Int 10 ] ] in
+  with_scripted_host ~fixture:(scenario "text_only" @ [ "model_usage", `List [call; call] ])
+    (fun ~base_path ->
+      let tool = masc_probe_tool (ref `Null) in
+      List.iter (fun expected_turn ->
+        let run = run_turn_with ~tools:[] ~base_path ~tool () in
+        (match run.outcome.result with
+         | Ok result ->
+           check int "session ordinal" expected_turn result.turns;
+           (match result.response.usage with
+            | Some usage ->
+              check int "host counted-once input, not raw input" 300 usage.input_tokens;
+              check int "two model calls" 14 usage.output_tokens;
+              check int "cache reads" 80 usage.cache_read_input_tokens;
+              check int "cache writes" 20 usage.cache_creation_input_tokens
+            | None -> fail "per-call usage lost when terminal aggregate was absent")
+         | Error error -> fail (Agent_core.Error.to_string error));
+        match run.reports with
+        | [report] ->
+          check bool "usage is turn total, including on resume" true
+            (report.usage_scope = Runtime_usage_scope.Turn_total);
+          (match report.count with
+           | Running_count usage -> check int "reported once, never session cumulative" 300 usage.input_tokens
+           | Count_replaced -> fail "unexpected replacement")
+        | _ -> fail "expected one usage report per completed turn") [1; 2])
+;;
+
 let test_text_only_session_does_not_require_session_mcp () =
   with_scripted_host ~fixture:(scenario "text_only") (fun ~base_path ->
     let tool = masc_probe_tool (ref `Null) in
@@ -1989,10 +2031,14 @@ let test_host_stop_resume_requires_a_folded_native_terminal () =
       let tool = masc_probe_tool (ref `Null) in
       let stopped = run_turn_with ~base_path ~tool
         ~on_official_client_tool_boundary:(fun () ->
-          Ok (Some Keeper_official_client_host.Queued_chat_operation)) () in
+          Ok (Some (Keeper_official_client_host.Repeated_tool_call
+            { tool_name = "masc_probe"; repeated_count = 3 }))) () in
       (match stopped.outcome.result with
-       | Ok {Runtime_agent.stop_reason=Runtime_agent.Yielded_to_operation_queued _; _} -> ()
-       | Ok _ -> fail "host stop did not yield"
+       | Ok { Runtime_agent.stop_reason =
+                Runtime_agent.Yielded_after_repeated_tool_call { tool_name; repeated_count; _ }; _ } ->
+         check string "stopped tool" "masc_probe" tool_name;
+         check int "repetition count" 3 repeated_count
+       | Ok _ -> fail "host stop lost its repeated-tool cause"
        | Error error -> fail (Agent_core.Error.to_string error));
       let _, _, local_count = settled_turn ~base_path in
       check int "host stop acknowledges one local turn" 1 local_count;
@@ -2247,6 +2293,7 @@ let () =
       , [ test_case "account switch starts fresh" `Quick test_account_selection_starts_a_fresh_vendor_session
         ; test_case "source relogin starts fresh, refresh survives" `Quick test_source_relogin_starts_fresh_and_preserves_vendor_refresh
         ; test_case "hook nudge identity and carried context" `Quick test_hook_nudges_bind_the_session_but_carried_context_does_not
+        ; test_case "per-call usage survives missing terminal aggregate" `Quick test_call_usage_survives_missing_terminal_aggregate
         ; test_case "effective system override starts fresh" `Quick test_effective_system_override_starts_fresh
         ; test_case "missing selected auth requires sign-in before spawn" `Quick test_missing_selected_account_auth_requires_sign_in
         ; test_case "invalid goal media refuses before claim and spawn" `Quick test_invalid_goal_media_never_claims_or_spawns

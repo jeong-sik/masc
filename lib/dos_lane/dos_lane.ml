@@ -17,6 +17,7 @@ type observation = {
   frame_nonblack : int;
   frame_ascii : string;
   program : string option;
+  saves_name : string option;
   controller : string option;
   files : string list;
 }
@@ -31,6 +32,7 @@ type error =
   | Guest_fault of string
   | Unsaveable of string
   | Checkpoint_refused of Machine_checkpoint.error
+  | Other_program of { expected : string; loaded : string }
 
 let error_to_string = function
   | No_machine -> "no DOS machine is loaded: call masc_dos_load first"
@@ -46,6 +48,8 @@ let error_to_string = function
     ^ message
   | Unsaveable message -> "the machine cannot be checkpointed right now, so nothing was written: " ^ message
   | Checkpoint_refused e -> Machine_checkpoint.error_to_string e
+  | Other_program { expected; loaded } ->
+    Printf.sprintf "%s is loaded now, not %s, so nothing was pressed" loaded expected
 ;;
 
 (* The core runs about 24 million instructions a second on this hardware
@@ -240,7 +244,9 @@ let running f =
   in
   (match result with
    | Ok _ | Error (Unreadable _ | Guest_fault _) -> mark_change ()
-   | Error (No_machine | Invalid_request _ | Held_by _ | Unsaveable _ | Checkpoint_refused _) ->
+   | Error
+       ( No_machine | Invalid_request _ | Held_by _ | Unsaveable _ | Checkpoint_refused _
+       | Other_program _ ) ->
      publish_stable ());
   result
 ;;
@@ -264,7 +270,9 @@ let with_control ~who f =
       (match result with
        | Ok _ | Error (Unreadable _ | Guest_fault _) -> ()
          (* the call ran: the machine may have moved *)
-       | Error (No_machine | Invalid_request _ | Held_by _ | Unsaveable _ | Checkpoint_refused _) ->
+       | Error
+           ( No_machine | Invalid_request _ | Held_by _ | Unsaveable _ | Checkpoint_refused _
+           | Other_program _ ) ->
          st.controller <- before);
       result)
 ;;
@@ -306,6 +314,10 @@ let frame_summaries m =
   (cols, rows, !nonblack, Buffer.contents b)
 ;;
 
+(* The name the program's saves are kept under: masc_dos_load keeps them in
+   a directory named after the inventory entry. *)
+let saves_name_of st = Filename.basename st.saves_dir
+
 let observe st =
   let m = st.m in
   let cpu = Dos_machine.cpu_of m in
@@ -328,6 +340,7 @@ let observe st =
     frame_nonblack = nonblack;
     frame_ascii = ascii;
     program = Some st.program;
+    saves_name = Some (saves_name_of st);
     controller = st.controller;
     files = Dos_machine.mounted_names m;
   }
@@ -764,6 +777,8 @@ let release_left ~holder ~announce =
     | Some _ | None -> Ok false)
 ;;
 
+let check_key_name name = Result.map (fun (_ : int) -> ()) (Dos_machine.key_of_string name)
+
 let screen () = with_machine (fun st -> Ok (observe st))
 
 type frame = { width : int; height : int; rgb : string }
@@ -884,26 +899,34 @@ let press_resolved st ~who ~keys ~budget =
   }
 ;;
 
-let press ~who ~keys ~steps =
+let press_on st ~who ~keys ~steps =
+  if keys = [] then Error (Invalid_request "keys must name at least one key")
+  else if List.length keys > max_keys_per_call then
+    Error
+      (Invalid_request
+         (Printf.sprintf "keys may name at most %d keys, got %d" max_keys_per_call
+            (List.length keys)))
+  else
+    match clamp_steps steps with
+    | Error e -> Error e
+    | Ok budget ->
+      (* Every name is resolved before anything is pressed: a typo must not
+         leave half a sequence in the ring. *)
+      (match resolve_keys keys with
+       | Error e -> Error e
+       | Ok resolved ->
+         let ran = press_resolved st ~who ~keys:resolved ~budget in
+         note_activity ~who ("press " ^ String.concat "," (List.map fst resolved));
+         ran_then_kept st ~who ran)
+;;
+
+let press ~who ~keys ~steps = with_control ~who (fun st -> press_on st ~who ~keys ~steps)
+
+let press_into ~saves_name ~who ~keys ~steps =
   with_control ~who (fun st ->
-    if keys = [] then Error (Invalid_request "keys must name at least one key")
-    else if List.length keys > max_keys_per_call then
-      Error
-        (Invalid_request
-           (Printf.sprintf "keys may name at most %d keys, got %d" max_keys_per_call
-              (List.length keys)))
-    else
-      match clamp_steps steps with
-      | Error e -> Error e
-      | Ok budget ->
-        (* Every name is resolved before anything is pressed: a typo must not
-           leave half a sequence in the ring. *)
-        (match resolve_keys keys with
-         | Error e -> Error e
-         | Ok resolved ->
-           let ran = press_resolved st ~who ~keys:resolved ~budget in
-           note_activity ~who ("press " ^ String.concat "," (List.map fst resolved));
-           ran_then_kept st ~who ran))
+    let loaded = saves_name_of st in
+    if String.equal loaded saves_name then press_on st ~who ~keys ~steps
+    else Error (Other_program { expected = saves_name; loaded }))
 ;;
 
 (* The mouse is state, not a queue. A key enters the ring and is gone; the

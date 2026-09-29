@@ -4,7 +4,10 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { fireEvent, waitFor } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { committedRuntimeTomlConfigFixture } from '../lib/runtime-config-receipt.test-fixture'
+import {
+  committedRuntimeTomlConfigFixture,
+  runtimeReservedProviderIdsFixture,
+} from '../lib/runtime-config-receipt.test-fixture'
 import { getRuntimeTomlKey } from '../lib/runtime-toml-config'
 
 const apiMocks = vi.hoisted(() => ({
@@ -115,6 +118,7 @@ const baseConfig = {
   source_revision: 'a'.repeat(64),
   reloaded: false,
   provider_protocols: providerProtocols,
+  reserved_provider_ids: [...runtimeReservedProviderIdsFixture],
 }
 
 const richSourceText = `[runtime]
@@ -1289,6 +1293,33 @@ describe('RuntimeTomlEditor', () => {
     })
   })
 
+  it.each(['wire_capture', 'board'])('refuses server-reserved provider id %s', async reservedId => {
+    // The form reads the response's list and keeps no copy of its own.
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce({ ...richConfig, reserved_provider_ids: [reservedId] })
+    render(html`<${RuntimeTomlEditor} />`, container)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-toml-nav-providers"]')).not.toBeNull()
+    })
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-providers"]') as HTMLButtonElement)
+    fireEvent.click(container.querySelector('[data-testid="runtime-add-provider-toggle"]') as HTMLButtonElement)
+
+    fireEvent.input(container.querySelector('[data-testid="runtime-add-provider-id"]') as HTMLInputElement, {
+      target: { value: reservedId },
+    })
+    fireEvent.input(container.querySelector('[aria-label="새 provider transport 값"]') as HTMLInputElement, {
+      target: { value: 'https://irrelevant.example/v1' },
+    })
+    fireEvent.click(container.querySelector('[data-testid="runtime-add-provider-submit"]') as HTMLButtonElement)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-add-provider-error"]')?.textContent)
+        .toContain('예약된 이름')
+    })
+    expect(container.querySelector('[data-testid="runtime-toml-status"]')?.textContent).not.toContain('modified')
+    expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
+  })
+
   it('adds a new model through the form', async () => {
     apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
     render(html`<${RuntimeTomlEditor} />`, container)
@@ -1313,6 +1344,32 @@ describe('RuntimeTomlEditor', () => {
       expect(source).toContain('[models.brandnewmodel]')
       expect(source).toContain('max-context = 50000')
       expect(source).toContain('max-prompt-bytes = 45678')
+    })
+  })
+
+  it('adds a model whose id is on the reserved provider list', async () => {
+    // Only a provider id becomes a top-level table. A model id sits under
+    // [models], so the list does not apply to it.
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce({ ...richConfig, reserved_provider_ids: ['turn'] })
+    render(html`<${RuntimeTomlEditor} />`, container)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-toml-nav-models"]')).not.toBeNull()
+    })
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-models"]') as HTMLButtonElement)
+    fireEvent.click(container.querySelector('[data-testid="runtime-add-model-toggle"]') as HTMLButtonElement)
+
+    fireEvent.input(container.querySelector('[data-testid="runtime-add-model-id"]') as HTMLInputElement, {
+      target: { value: 'turn' },
+    })
+    fireEvent.input(container.querySelector('[data-testid="runtime-add-model-max-context"]') as HTMLInputElement, {
+      target: { value: '50000' },
+    })
+    fireEvent.click(container.querySelector('[data-testid="runtime-add-model-submit"]') as HTMLButtonElement)
+
+    await waitFor(() => {
+      const source = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
+      expect(source).toContain('[models.turn]')
     })
   })
 
@@ -1461,13 +1518,10 @@ ${declared ? 'max-prompt-bytes = 45678' : ''}
   })
 
   it('rejects a binding whose provider id is a reserved top-level namespace', async () => {
-    // Legacy/hand-edited data: a provider table literally named "models" is
-    // parseable (providerIds() has no reserved check on read), so it can show
-    // up in the binding form's provider dropdown even though a *new* provider
-    // could never be created with this id (runtimeTomlIdError blocks it).
-    // bindingSections() excludes RESERVED_TOP_LEVEL first segments on read,
-    // so a binding pinned to it would be silently unreadable -- or collide
-    // with a real [models.<id>] model definition outright.
+    // Hand-edited text can declare a provider named "models", so it shows up
+    // in the binding form's provider list although the add-provider form
+    // refuses the name. The server refuses it too (reserved_provider_ids), so
+    // the binding form stops a binding pinned to it before any save.
     const configWithReservedProvider = {
       ...richConfig,
       source_text: `${richConfig.source_text}

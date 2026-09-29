@@ -8,6 +8,7 @@ open Alcotest
 
 let apc = "\x1b_G"
 let st = "\x1b\\"
+let query_id = Masc_tui_graphics.image_id Masc_tui_graphics.Graphics_query
 
 (* Split a run of APC escapes into their bodies. Nothing outside an escape is
    allowed to reach the terminal, so anything between them is a failure the
@@ -149,14 +150,14 @@ let test_the_query_asks_without_drawing () =
         (fun expected ->
           if not (List.exists (String.equal expected) keys) then
             failf "the query does not say %s: %S" expected body)
-        [ Printf.sprintf "i=%d" Masc_tui_graphics.query_id; "a=q" ]
+        [ Printf.sprintf "i=%d" query_id; "a=q" ]
   | escapes -> failf "the query is %d escapes, not one" (List.length escapes)
 ;;
 
 let test_a_reply_is_read_for_what_it_answers () =
   let reply status =
     Masc_tui_graphics.parse_query_reply
-      (Printf.sprintf "i=%d;%s" Masc_tui_graphics.query_id status)
+      (Printf.sprintf "i=%d;%s" query_id status)
   in
   check bool "OK is support" true (reply "OK" = Some Masc_tui_graphics.Supported);
   check bool "anything else is a refusal, with its reason" true
@@ -165,14 +166,24 @@ let test_a_reply_is_read_for_what_it_answers () =
   (* A reply about a different image is not an answer to this question. A
      terminal drawing pictures answers about those too. *)
   check bool "another image's reply is not this answer" true
-    (Masc_tui_graphics.parse_query_reply "i=7;OK" = None);
+    (Masc_tui_graphics.parse_query_reply
+       (Printf.sprintf "i=%d;OK" (Masc_tui_graphics.image_id Masc_tui_graphics.Mascot))
+     = None);
   check bool "a body that is not a reply at all" true
     (Masc_tui_graphics.parse_query_reply "nonsense" = None);
   (* i=310 must not be read as i=31. Matching on a prefix would. *)
   check bool "a longer id is a different id" true
     (Masc_tui_graphics.parse_query_reply
-       (Printf.sprintf "i=%d0;OK" Masc_tui_graphics.query_id)
+       (Printf.sprintf "i=%d0;OK" query_id)
      = None)
+;;
+
+(* Placing a picture under another's id replaces that one, and deleting it
+   takes that one down: every picture keeps an id of its own. *)
+let test_every_picture_has_its_own_id () =
+  let ids = List.map Masc_tui_graphics.image_id Masc_tui_graphics.all_of_image in
+  check int "no two pictures share an image id" (List.length ids)
+    (List.length (List.sort_uniq Int.compare ids))
 ;;
 
 (* tmux stops forwarding at the first ESC it sees inside a passthrough, so
@@ -259,22 +270,46 @@ let test_raw_rgb_refuses_a_frame_that_contradicts_itself () =
     (Masc_tui_graphics.place_rgb ~data:"" ~pixel_width:4 ~pixel_height:2 ~rows:5)
 ;;
 
+(* What a terminal does with an [o=z] payload: RFC 1950 inflate. *)
+let inflate data =
+  let input = De.bigstring_create De.io_buffer_size in
+  let output = De.bigstring_create De.io_buffer_size in
+  let decoded = Buffer.create (String.length data * 4) in
+  let consumed = ref 0 in
+  let refill buffer =
+    let len = min (Bigstringaf.length buffer) (String.length data - !consumed) in
+    Bigstringaf.blit_from_string data ~src_off:!consumed buffer ~dst_off:0 ~len;
+    consumed := !consumed + len;
+    len
+  in
+  let flush buffer len = Buffer.add_string decoded (Bigstringaf.substring buffer ~off:0 ~len) in
+  match
+    Zl.Higher.uncompress ~allocate:(fun bits -> De.make_window ~bits) ~refill ~flush input output
+  with
+  | Ok () -> Buffer.contents decoded
+  | Error (`Msg message) -> failf "the payload is not zlib: %s" message
+;;
+
 (* Straight-alpha pixels under a stable identity: the portrait's transparent
    surround is blended by the terminal, and a second transfer under the same
    ids replaces the first rather than stacking. *)
 let test_raw_rgba_replaces_under_its_identity () =
   let w = 3 and h = 2 in
   let data = String.init (w * h * 4) (fun index -> Char.chr (index mod 256)) in
-  let keys =
+  let keys, payload =
     match
       Masc_tui_graphics.replace_rgba ~image_id:41 ~placement_id:1 ~data
         ~pixel_width:w ~pixel_height:h ~rows:4
       |> bodies
     with
-    | first :: _ -> fst (keys_and_payload first)
+    | first :: rest ->
+        let keys, first_payload = keys_and_payload first in
+        (keys, String.concat "" (first_payload :: List.map (fun body -> snd (keys_and_payload body)) rest))
     | [] -> failf "raw RGBA placement produced no escape"
   in
   let says key = List.exists (String.equal key) keys in
+  check bool "the pixels travel zlib-compressed" true (says "o=z");
+  check string "and inflate back to the frame" data (inflate (Base64.decode_exn payload));
   check bool "the payload is RGBA" true (says "f=32");
   check bool "and says how wide it is" true (says "s=3");
   check bool "and how tall" true (says "v=2");
@@ -331,6 +366,8 @@ let () =
             test_the_query_asks_without_drawing
         ; test_case "a reply is read for what it answers" `Quick
             test_a_reply_is_read_for_what_it_answers
+        ; test_case "every picture has its own id" `Quick
+            test_every_picture_has_its_own_id
         ] )
     ; ( "raw pixels"
       , [ test_case "raw RGB states its pixel dimensions" `Quick

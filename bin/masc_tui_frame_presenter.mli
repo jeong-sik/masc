@@ -14,8 +14,15 @@ type frame = {
   lines : string list;
 }
 
+(** The rows a presented frame wrote. *)
+type repaint =
+  | Whole_screen  (** cleared ([ESC [2J]) and every row written again *)
+  | Rows of int list
+      (** only these rows, 0-based and top first, each erased ([ESC [2K])
+          and written again; [[]] when only the cursor moved *)
+
 type present_result =
-  | Presented
+  | Presented of repaint
   | Unchanged
 
 type t
@@ -51,7 +58,8 @@ val present :
     out-of-band terminal writes to the next full redraw.
     Content updates compare opaque ANSI rows byte-for-byte. Cursor-only moves
     remain differential and are emitted in the same atomic output buffer.
-    [Presented] means the terminal accepted output for this frame;
+    [Presented] means the terminal accepted output for this frame, and says
+    which rows it wrote;
     [Unchanged] means no bytes were necessary, so semantic input authority
     must remain with the last frame that was actually emitted. *)
 

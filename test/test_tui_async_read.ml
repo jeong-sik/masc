@@ -26,7 +26,7 @@ let test_unavailable_switch_clears_before_delivery () =
     ~on_not_run:(fun () -> events := "clear" :: !events)
     ~deliver:(fun answer ->
       check result_t "attributed failure"
-        (Error "standalone lanes load failed: Eio switch is unavailable") answer;
+        (Error "lanes load failed: Eio switch is unavailable") answer;
       events := "deliver" :: !events)
     (fun () -> fail "read ran without a switch");
   check (list string) "clear before delivery" [ "clear"; "deliver" ]

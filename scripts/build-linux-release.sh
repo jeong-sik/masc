@@ -37,6 +37,7 @@
 #   --floor VERSION    glibc floor to enforce (default: 2.35)
 #   --image IMAGE      builder image (default: ocaml/opam:ubuntu-22.04-ocaml-5.5)
 #   --jobs N           dune -j (default: container default)
+#   --include-candle-appraiser-eval  include the opt-in semantic eval executable
 #   --keep             leave the build container running for inspection
 #   --run-contract-test  also run test/test_tool_contract_truth.exe in the
 #                      container (release.yml asks for this on one arch)
@@ -97,6 +98,7 @@ while [ "$#" -gt 0 ]; do
     --floor) floor="${2:?--floor needs a version}"; shift 2 ;;
     --image) image="${2:?--image needs an image}"; shift 2 ;;
     --jobs) jobs="${2:?--jobs needs a number}"; shift 2 ;;
+    --include-candle-appraiser-eval) release_binaries+=(test/candle_appraiser_eval_cli.exe); shift ;;
     --keep) keep=1; shift ;;
     --run-contract-test) run_contract_test=1; shift ;;
     --print-binaries)

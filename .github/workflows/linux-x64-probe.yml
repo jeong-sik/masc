@@ -1,7 +1,12 @@
 name: Linux x64 manual probe
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      candle_appraiser_eval:
+        description: Include the opt-in Candle semantic evaluation executable (no model calls in CI)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -20,7 +25,11 @@ jobs:
           PROBE_OUT: ${{ runner.temp }}/masc-linux-x64-probe
         run: |
           chmod +x scripts/build-linux-release.sh
-          scripts/build-linux-release.sh --out "$PROBE_OUT"
+          args=()
+          if [ "${{ inputs.candle_appraiser_eval }}" = true ]; then
+            args+=(--include-candle-appraiser-eval)
+          fi
+          scripts/build-linux-release.sh --out "$PROBE_OUT" "${args[@]}"
 
       - name: Write and verify SHA-256 manifest
         env:
@@ -29,6 +38,9 @@ jobs:
           set -euo pipefail
           cd "$PROBE_OUT"
           sha256sum deployment_preflight_helper.exe main_eio.exe masc_browser_host.exe masc_tui.exe > SHA256SUMS
+          if [ -f candle_appraiser_eval_cli.exe ]; then
+            sha256sum candle_appraiser_eval_cli.exe >> SHA256SUMS
+          fi
           sha256sum --check SHA256SUMS
 
       - name: Upload Linux x64 probe

@@ -3,10 +3,12 @@
 The server answers an invite once and keeps only a hash of its link, so the
 card is where the link is read: it stays until Esc or q, Enter does not close
 it, [y] copies the link exactly as issued, a paste does not reach the composer
-under it, and /play link opens it again.
+under it, /play link opens it again, /play link <name> opens an earlier one,
+and a link longer than the card scrolls to its last byte.
 
 SOURCE_MODULES makes the PR edited-tests selector run this scenario when the
-card, the request or the terminal writer changes.
+card, the request, the command parser, the scrolling frame or the terminal
+writer changes.
 """
 import base64
 import hashlib
@@ -21,9 +23,12 @@ import test_tui_keyboard_input as h
 
 SOURCE_MODULES = (
     "bin/masc_tui.ml",
+    "bin/masc_tui_command.ml",
     "bin/masc_tui_http.ml",
     "bin/masc_tui_play_card.ml",
     "bin/masc_tui_render.ml",
+    "bin/masc_tui_render_prim.ml",
+    "bin/masc_tui_scroll.ml",
     "bin/masc_tui_types.ml",
     "lib/tui_decode.ml",
 )
@@ -44,6 +49,17 @@ CHAT_TITLE = "Keepers ▸ alpha ▸ chat".encode()
 CHAT_HISTORY = "/api/v1/keepers/alpha/chat/history"
 PASTED = b"pasted-under-the-card"
 QR_NEEDS = re.compile(rb"the QR needs a window of (\d+) columns by (\d+) rows")
+
+# The first advice line under the heading: on screen at the top of the card and
+# scrolled off at its end.
+TOP_OF_CARD = b"Send this link to one person"
+KEY_DOWN = b"\x1b[B"
+KEY_UP = b"\x1b[A"
+WHEEL_DOWN = b"\x1b[<65;5;5M"
+WHEEL_UP = b"\x1b[<64;5;5M"
+# More steps than the long card has rows to give, so a way of scrolling ends at
+# the top or the end whichever row it started from.
+SCROLL_STEPS = 30
 
 # The 94-byte fixture link needs QR version 6 at the library's default error
 # correction (level M holds 84 bytes in version 5 and 106 in version 6): 41
@@ -262,6 +278,14 @@ def issued_card(binary: str) -> None:
         )
         h.send_and_wait(process, fd, output, b"\x1b", CHAT_TITLE)
 
+        # A name nothing was issued under has no card to open. The operator is
+        # told so, and no other invite's link takes its place.
+        type_line(process, fd, output, b"/play link nobody")
+        h.send_and_wait(process, fd, output, b"\r", b"No local play link for nobody")
+        assert b"MASC Play invite" not in h.screen_text(settled(process, fd, output)), (
+            "an unknown name opened a card"
+        )
+
         leave(process, fd, output)
 
     h.run_terminal_scenario(
@@ -407,7 +431,7 @@ def without_colour(binary: str) -> None:
     )
 
 
-def second_request_waits(binary: str) -> None:
+def second_request_is_refused(binary: str) -> None:
     requests: list[tuple[str, bytes]] = []
     fixtures = h.keeper_runtime_http_fixtures()
     fixtures[CHAT_HISTORY] = (200, [])
@@ -424,8 +448,8 @@ def second_request_waits(binary: str) -> None:
                 process, fd, output, held.requested.is_set, timeout=5.0
             ), "the first invite request never reached the server"
 
-            # Its answer would open a card over the first one, and the server
-            # will not show the first link again.
+            # One request at a time: a second command sent while the first
+            # answer is on its way is refused and never reaches the server.
             type_line(process, fd, output, b"/play invite jiwon 3")
             h.send_and_wait(
                 process, fd, output, b"\r", b"An invite request is still waiting"
@@ -440,7 +464,7 @@ def second_request_waits(binary: str) -> None:
 
     h.run_terminal_scenario(
         binary,
-        description="a second invite request waits for the first card",
+        description="a second invite request is refused until the first answers",
         interact=interact,
         http_fixtures=fixtures,
         http_requests=requests,
@@ -463,14 +487,34 @@ def long_link_scrolls_to_end(binary: str) -> None:
         resize(process, fd, output, rows=20, columns=60, needle=CHAT_TITLE)
         type_line(process, fd, output, b"/play invite minsu 2")
         h.send_and_wait(process, fd, output, b"\r", b"MASC Play invite")
-        assert b"deadbeef" not in h.screen_text(settled(process, fd, output)), (
-            "the long link did not overflow the small card"
-        )
+        opened = h.screen_text(settled(process, fd, output))
+        assert TOP_OF_CARD in opened, "the card did not open at its top"
+        assert b"deadbeef" not in opened, "the long link did not overflow the small card"
         h.send_and_wait(process, fd, output, b"G", b"deadbeef")
-        assert b"deadbeef" in h.screen_text(settled(process, fd, output)), (
-            "scrolling to the end did not expose the token suffix"
-        )
+        at_end = h.screen_text(settled(process, fd, output))
+        assert b"deadbeef" in at_end, "scrolling to the end did not expose the token suffix"
+        assert TOP_OF_CARD not in at_end, "the end of the card still shows its top"
         assert press_y(process, fd, output) == long_link.encode()
+
+        # g goes back to the top. From there each way of scrolling reaches the
+        # end and comes back, and stops at both.
+        h.send_and_wait(process, fd, output, b"g", TOP_OF_CARD)
+        assert b"deadbeef" not in h.screen_text(settled(process, fd, output)), (
+            "g did not return to the top"
+        )
+        for way, up, down in (
+            ("j and k", b"k", b"j"),
+            ("the arrow keys", KEY_UP, KEY_DOWN),
+            ("the mouse wheel", WHEEL_UP, WHEEL_DOWN),
+        ):
+            h.send_and_wait(process, fd, output, down * SCROLL_STEPS, b"deadbeef")
+            assert TOP_OF_CARD not in h.screen_text(settled(process, fd, output)), (
+                f"{way} did not scroll down to the end"
+            )
+            h.send_and_wait(process, fd, output, up * SCROLL_STEPS, TOP_OF_CARD)
+            assert b"deadbeef" not in h.screen_text(settled(process, fd, output)), (
+                f"{way} did not scroll back to the top"
+            )
         h.send_and_wait(process, fd, output, b"\x1b", CHAT_TITLE)
         leave(process, fd, output)
 
@@ -487,7 +531,7 @@ def run(binary: str) -> None:
     refused_invite(binary)
     unreadable_link(binary)
     without_colour(binary)
-    second_request_waits(binary)
+    second_request_is_refused(binary)
     long_link_scrolls_to_end(binary)
     print("play invite card: PASS")
 

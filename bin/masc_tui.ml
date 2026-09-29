@@ -4552,14 +4552,13 @@ let launch_preset_call state ~mailbox ~call ~wrap =
       enqueue_async mailbox (wrap result))
     (fun () -> call ~host ~port)
 
-(* A revoked invite's link opens nothing, so its card goes, on screen or held.
-   The card carries the name the server sent, made safe to draw, so the name
-   asked for is compared in the same form. *)
+(* A revoked invite's link opens nothing, so its card goes, whether or not it
+   is the one on screen. The card carries the name the server sent, made safe
+   to draw, so the name asked for is compared in the same form. *)
 let forget_play_invite state ~name =
   state.play_invite <-
     Masc_tui_types.play_invite_forget state.play_invite
-      (Tui_decode.sanitize_terminal_text name);
-  state.play_invite_scroll <- 0
+      (Tui_decode.sanitize_terminal_text name)
 
 let launch_presets_load state ~mailbox =
   state.presets_error <- None;
@@ -10226,6 +10225,11 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
           Play_invites_listed (target, Result.bind result Tui_decode.decode_play_invites))
   | Masc_tui_command.Play_link requested_name ->
       Buffer.clear state.msg_input;
+      (* The cards carry names made safe to draw, so the name typed is
+         compared in the same form. *)
+      let requested_name =
+        Option.map Tui_decode.sanitize_terminal_text requested_name
+      in
       (let card =
          match requested_name with
          | None -> Masc_tui_types.play_invite_latest state
@@ -14470,13 +14474,12 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                 ~expires_at:invite.pii_expires_at ~link:invite.pii_link
             with
             | Ok card ->
-                let retained = state.play_invite.cards <> [] in
-                state.play_invite <-
-                  { (Masc_tui_types.play_invite_store state.play_invite card) with
-                    shown_name = Some (Masc_tui_play_card.name card) };
+                let stored = Masc_tui_types.play_invite_store state.play_invite card in
+                state.play_invite <- stored;
                 state.play_invite_scroll <- 0;
                 chat_notice state ~keeper_name:target ~kind:Notice_reply
-                  (Masc_tui_play_card.issued_notice card ~retained)
+                  (Masc_tui_play_card.issued_notice card
+                     ~retained:(Masc_tui_types.play_invite_holds_earlier stored))
             | Error reason ->
                 (* The link is the server's public base URL and a hex token,
                    so a link the card refuses names the base URL. The reason is

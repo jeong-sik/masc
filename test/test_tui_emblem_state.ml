@@ -51,7 +51,8 @@ let test_the_invite_card_owns_the_keys_only_while_shown () =
   let state = fresh () in
   let card = card_named "minsu" in
   state.Types.play_invite <- { Types.cards = [ card ]; shown_name = None };
-  check bool "a held card does not own the keys" false (Types.modal_owns_keys state);
+  check bool "a kept card that is not shown does not own the keys" false
+    (Types.modal_owns_keys state);
   state.Types.play_invite <- { Types.cards = [ card ]; shown_name = Some "minsu" };
   check bool "a shown card owns the keys" true (Types.modal_owns_keys state);
   Types.close_key_modals state;
@@ -64,15 +65,20 @@ let shown_name state =
 let kept_names state =
   List.map Masc_tui_play_card.name state.Types.play_invite.Types.cards
 
+let store state name =
+  state.Types.play_invite <-
+    Types.play_invite_store state.Types.play_invite (card_named name)
+
+let holds_earlier state = Types.play_invite_holds_earlier state.Types.play_invite
+
 (* The server sends each link once, so a second invite must leave the first
    card reachable, and revoking one invite must take only its own card. *)
 let test_issued_cards_are_kept_by_name () =
   let state = fresh () in
-  List.iter
-    (fun name ->
-      state.Types.play_invite <-
-        Types.play_invite_store state.Types.play_invite (card_named name))
-    [ "minsu"; "jiwon" ];
+  store state "minsu";
+  check bool "one card has no earlier card to point at" false (holds_earlier state);
+  store state "jiwon";
+  check bool "a second card points at the first" true (holds_earlier state);
   check (list string) "both cards stay, newest first" [ "jiwon"; "minsu" ]
     (kept_names state);
   check (option string) "the newest is the one on screen" (Some "jiwon")
@@ -86,6 +92,7 @@ let test_issued_cards_are_kept_by_name () =
   state.Types.play_invite <- Types.play_invite_forget state.Types.play_invite "minsu";
   check (list string) "revoking minsu keeps jiwon" [ "jiwon" ] (kept_names state);
   check (option string) "and jiwon stays on screen" (Some "jiwon") (shown_name state);
+  check bool "one card is left with no earlier card" false (holds_earlier state);
   state.Types.play_invite <- Types.play_invite_forget state.Types.play_invite "jiwon";
   check (list string) "revoking the last leaves none" [] (kept_names state);
   check bool "and nothing owns the keys" false (Types.modal_owns_keys state);
@@ -97,13 +104,16 @@ let test_issued_cards_are_kept_by_name () =
    place. *)
 let test_a_reissued_name_replaces_its_card () =
   let state = fresh () in
-  List.iter
-    (fun name ->
-      state.Types.play_invite <-
-        Types.play_invite_store state.Types.play_invite (card_named name))
-    [ "minsu"; "jiwon"; "minsu" ];
+  List.iter (store state) [ "minsu"; "jiwon"; "minsu" ];
   check (list string) "one card per name, the reissued one first"
-    [ "minsu"; "jiwon" ] (kept_names state)
+    [ "minsu"; "jiwon" ] (kept_names state);
+  check bool "the other name is still there to point at" true (holds_earlier state);
+  (* A name issued again with nothing else kept leaves no earlier card, so the
+     issue notice must not send the operator to one. *)
+  let alone = fresh () in
+  List.iter (store alone) [ "minsu"; "minsu" ];
+  check (list string) "the old card of that name is gone" [ "minsu" ] (kept_names alone);
+  check bool "and there is nothing earlier to point at" false (holds_earlier alone)
 
 let test_the_palette_is_not_one_of_them () =
   (* The palette takes typed text, which the text-field rule already routes;

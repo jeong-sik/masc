@@ -7939,6 +7939,14 @@ let play_invite_store current card =
   ; shown_name = Some name
   }
 
+(* Whether a card older than the newest is kept: what an issue notice points at
+   with /play link <name>. [play_invite_store] keeps one card per name, so a
+   name issued again on its own leaves nothing earlier. *)
+let play_invite_holds_earlier current =
+  match current.cards with
+  | _ :: _ :: _ -> true
+  | [] | [ _ ] -> false
+
 let play_invite_forget current name =
   { cards =
       List.filter

@@ -7,6 +7,7 @@ other cases check the colour fallback and the space returned on small screens.
 from __future__ import annotations
 
 import base64
+import json
 import os
 import re
 import struct
@@ -20,6 +21,7 @@ SOURCE_MODULES = (
     "bin/masc_tui_chat_portrait.ml",
     "bin/masc_tui_keeper_portrait.ml",
     "bin/masc_tui_portrait_view.ml",
+    "bin/masc_tui_frame_presenter.ml",
     "bin/masc_tui_graphics.ml",
     "bin/masc_tui_render_chat.ml",
     "bin/masc_tui_render_prim.ml",
@@ -108,6 +110,46 @@ def png_transfers(output: bytes) -> list[tuple[int, int, bytes]]:
     return pictures
 
 
+def assert_typing_repaints(output: bytes, *, row: int, column: int, image: bytes) -> None:
+    """Attribute each transfer to its immediately preceding text presentation.
+
+    The interval includes asynchronous updates, so proximity to a keypress
+    alone is not causation. Match actual frame bytes, using the full-row erase
+    prefix emitted by Frame_presenter.append_row, not ordinary cursor moves.
+    Each repaint can explain only one transfer of this unchanged portrait.
+    """
+    previous_transfer_end = 0
+    image_rows = set(range(row, row + 8))  # png_transfers validates r=8.
+    row_write = re.compile(rb"\x1b\[(\d+);1H\x1b\[0m\x1b\[2K")
+    for placement in PLACED.finditer(output):
+        pictures = png_transfers(placement[0])
+        if not pictures:
+            continue
+        frame_start = output.rfind(h.FRAME_START, 0, placement.start())
+        frame_end = output.find(h.FRAME_END, frame_start, placement.start()) if frame_start >= 0 else -1
+        complete = frame_end >= 0
+        frame = output[frame_start:frame_end + len(h.FRAME_END)] if complete else b""
+        fresh = frame_start >= previous_transfer_end
+        rewritten = sorted({int(match[1]) for match in row_write.finditer(frame)})
+        overlap = sorted(image_rows.intersection(rewritten))
+        full_clear = h.FULL_REDRAW in frame
+        evidence = {
+            "transfer_offset": placement.start(), "frame_offset": frame_start,
+            "complete_frame": complete, "fresh_frame": fresh,
+            "full_clear": full_clear, "rewritten_rows": rewritten,
+            "portrait_rows": sorted(image_rows), "overlap_rows": overlap,
+        }
+        # No image payload or full terminal dump: one bounded row summary per
+        # transfer, including the evidence for a rejected unexplained repeat.
+        print("portrait typing-interval repaint: " + json.dumps(evidence, sort_keys=True), flush=True)
+        for typed_row, typed_column, typed_image in pictures:
+            assert (typed_row, typed_column) == (row, column), "typing moved the portrait"
+            assert typed_image == image, "typing changed the conversation's portrait"
+        assert complete and fresh, f"portrait transfer has no new complete presentation: {evidence}"
+        assert full_clear or overlap, f"portrait retransmit has no overlapping repaint: {evidence}"
+        previous_transfer_end = placement.end()
+
+
 def open_chat(process, fd, output) -> None:
     h.send_and_wait(process, fd, output, b"2", b"MASC Keepers")
     h.select_keeper_row(process, fd, output, b"alpha")
@@ -191,23 +233,17 @@ def pixels_follow_conversation(binary: str) -> None:
         assert row + 7 < h.screen_row_of(rows, b"Context"), "portrait crossed the full-width status row"
         assert not mosaic_rows(rows), "Kitty portrait also drew a mosaic"
         assert_chat_intact(rows, b"alpha")
-        h.drain_until_quiet(process, fd, output)
+        assert h.drain_until_quiet(process, fd, output), "chat did not settle before typing measurement"
         typing_start = len(output)
         draft = b"portrait10"
         for count, key in enumerate(draft, 1):
             h.send_and_wait(process, fd, output, bytes([key]), h.composer_showing(draft[:count]))
-        h.drain_until_quiet(process, fd, output)
+        assert h.drain_until_quiet(process, fd, output), "chat did not settle after typing measurement"
         typing_output = bytes(output[typing_start:])
         typing_transfers = png_transfers(typing_output)
         print(f"portrait PNG transfers during {len(draft)} typed characters: {len(typing_transfers)}; "
               f"full redraw: {h.FULL_REDRAW in typing_output}")
-        # This wall-clock interval can include asynchronous row/full redraws,
-        # for which the portrait flush deliberately sends the image again.
-        # Measure transfers without attributing every repaint to a keypress;
-        # any transfer must still preserve the conversation and placement.
-        for typed_row, typed_column, typed_image in typing_transfers:
-            assert (typed_row, typed_column) == (row, column), "typing moved the portrait"
-            assert typed_image == alpha, "typing changed the conversation's portrait"
+        assert_typing_repaints(typing_output, row=row, column=column, image=alpha)
         assert_chat_intact(screen(output), b"alpha")
         h.send_and_wait(process, fd, output, b"\x1b[D", b"Enter:open")
         cursor_start = len(output)

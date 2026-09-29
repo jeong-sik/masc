@@ -1,0 +1,10 @@
+{
+  "status": "stopped_provider_unavailable",
+  "completed_calls": 121,
+  "statuses": {
+    "transport_unavailable": 121
+  },
+  "reason": "provider HTTP403 weekly usage quota exhausted",
+  "process_exit": 143,
+  "semantic_decisions": 0
+}

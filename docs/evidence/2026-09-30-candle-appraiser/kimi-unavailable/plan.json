@@ -1,0 +1,26 @@
+{
+  "schema": "masc.candle_appraiser_eval.v1",
+  "source_commit": "4fae8f4e3fef99a0b23871dd6bfc58a0250df43f",
+  "runtime_id": "kimi_coding.kimi-k3",
+  "credential_env": "KIMI_API_KEY",
+  "trials": 20,
+  "case_count": 12,
+  "planned_calls": 240,
+  "runtime_config_sha256": "c235a75c16fb8972f9a939fc1e7f7ba9fe183e7ccf64e219ba05a57b38d50bf8",
+  "cases_sha256": "e73b7151f79c0253419e516ceb60d45bb27e7aa34fdcdf194f93b28deedc3c78",
+  "prompt_sha256": {
+    "candle_appraiser_grade.md": "ad555b807b75b214a1efdc4d3616403ae5a6cd95068dc2ed8591c544659008f9",
+    "candle_appraiser_relation.md": "515f02279539c69e38d86202b48d865687f89446e560cff9692d141c0fb731ad",
+    "candle_appraiser_weights.md": "2adf48d36d1686f2b5be67855850da2b7d109eb18777ced390d187894c00d4ae"
+  },
+  "evaluation_overrides": {
+    "exact-body-timeout-s": 1200.0,
+    "source-exact-body-timeout-s": null,
+    "max-output-tokens": 4096
+  },
+  "calibration": {
+    "status": "not_performed",
+    "reason": "No human-graded set of 20 Goals is supplied"
+  },
+  "scope": "Synthetic isolated stage judgments; no Goal, Task, Candle ledger or Paid mutations"
+}

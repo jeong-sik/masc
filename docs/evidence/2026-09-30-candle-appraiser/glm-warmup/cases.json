@@ -1,0 +1,15 @@
+[
+  {
+    "id": "grade-base",
+    "stage": "grade",
+    "input": {
+      "goal": {
+        "title": "Add CSV export for the filtered expense report",
+        "metric": "CSV export acceptance tests passing",
+        "target_value": "24"
+      }
+    },
+    "comparison": null,
+    "relation_expectation": null
+  }
+]

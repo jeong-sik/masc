@@ -1,0 +1,8 @@
+{
+  "source_commit": "4fae8f4e3fef99a0b23871dd6bfc58a0250df43f",
+  "runtime_id": "glm-coding.glm-5.3-flash",
+  "credential_reference_only": "ZAI_API_KEY_SB",
+  "eio_backend": "posix",
+  "scope": "separate single-slot 20-trial baseline; warmup excluded",
+  "planned_calls": 240
+}

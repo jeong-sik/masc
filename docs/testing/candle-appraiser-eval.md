@@ -86,3 +86,7 @@ human-graded Goals is supplied. A high count on synthetic cases does not replace
 that calibration or show that a different model/slot behaves the same way.
 Copy reviewed non-secret results to `docs/evidence/<date>-candle-appraiser/`;
 private runtime files and credential values do not belong in that bundle.
+
+The [2026-09-30 baseline](../evidence/2026-09-30-candle-appraiser/README.md)
+retains a completed 240-call GLM run, its measured Grade wording failure and
+Weights variability, and the separate Kimi provider-quota failure.

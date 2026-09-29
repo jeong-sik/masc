@@ -7,9 +7,10 @@ val holder_left : config:Workspace.config -> now:float -> string -> Tool_misc_do
     stop finished and left the registry but kept its meta. [Player_expired]:
     a name whose Player credential ran out before [now], by the rule its
     bearer is checked by ({!Play_invite.expired}). [No_credential]: a name
-    that is not a Keeper and that no credential carries, only where every
-    request must carry one (auth enabled, [require_token]). Where a request
-    needs no token, a missing credential keeps the controller. *)
+    that is not a Keeper and has no credential file, only where every request
+    must carry a credential (auth enabled, [require_token]). A credential file
+    that cannot be read, and a missing one where a request needs no token,
+    keep the controller. *)
 
 val before_move : config:Workspace.config -> who:string -> unit
 (** Lets a departed holder's controller go so that [who] can take it, and

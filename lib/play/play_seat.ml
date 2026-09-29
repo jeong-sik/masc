@@ -18,6 +18,7 @@ let participants ~base_path ~keepers ~now =
     (keepers @ List.filter_map seated (Auth.list_credentials base_path))
 
 let hand_to config ~now =
-  Result.map
-    (fun keepers -> participants ~base_path:config.Workspace.base_path ~keepers ~now)
-    (keeper_names config)
+  Result.bind (keeper_names config) (fun keepers ->
+    match participants ~base_path:config.Workspace.base_path ~keepers ~now with
+    | names -> Ok names
+    | exception Sys_error detail -> Error ("cannot list credentials: " ^ detail))

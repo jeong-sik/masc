@@ -76,6 +76,11 @@ type invite =
   ; expired : bool
   }
 
+val credential_exists : base_path:string -> string -> bool
+(** Whether [name]'s own credential file is there, read or not.
+    [Auth.load_credential] answers [None] both for a missing file and for one
+    it cannot parse, so only this tells the two apart. *)
+
 val expired : now:float -> Masc_domain.agent_credential -> bool
 (** Whether a credential's time has run out at [now]. A credential with no
     [expires_at] never expires; an invite always has one. This is the rule a

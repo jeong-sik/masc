@@ -13,6 +13,6 @@ val participants : base_path:string -> keepers:string list -> now:float -> strin
 
 val hand_to : Workspace.config -> now:float -> (string list, string) result
 (** The names a pass may hand the controller to: {!participants} over
-    {!keeper_names}. [Error] when the fleet does not list, since then nobody
-    can say who sits at the machine. The play page lists these names and
+    {!keeper_names}. [Error] when the fleet or the credentials do not list,
+    since then nobody can say who sits at the machine. The play page lists these names and
     [masc_dos_pass] accepts only them. *)

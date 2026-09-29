@@ -14,8 +14,9 @@
      freed on the next move.
    - A name with no meta is not a Keeper. Where every request must carry a
      credential (auth on, token required) nothing else can move the machine,
-     so a name no credential carries any more (a revoked invite) has left
-     (RFC play-link-for-the-shared-machine §2.8).
+     so a name whose credential file is gone (a revoked invite) has left
+     (RFC play-link-for-the-shared-machine §2.8). A file that is there but
+     cannot be read tells nothing, like a meta that cannot be read.
    - Where a request needs no token a name may be self-declared, and a meta
      that cannot be read tells nothing. Both keep the controller: nothing
      here can say whether they are still playing. *)
@@ -42,12 +43,13 @@ let credential_departure ~(config : Workspace.config) ~now holder =
   | Some ({ Masc_domain.agent_name; role = Masc_domain.Player; _ } as credential)
     when String.equal agent_name holder && Play_invite.expired ~now credential ->
     Some Tool_misc_dos_lane.Player_expired
-  (* Any credential the name resolves to, a shared-token alias included, may
-     still carry it. *)
   | Some _ -> None
   | None ->
     (match auth_mode ~config with
-     | Enforced -> Some Tool_misc_dos_lane.No_credential
+     | Enforced ->
+       if Play_invite.credential_exists ~base_path:config.base_path holder
+       then None
+       else Some Tool_misc_dos_lane.No_credential
      | Self_declared | Unreadable _ -> None)
 ;;
 
@@ -63,9 +65,9 @@ let holder_left ~(config : Workspace.config) ~now holder =
 ;;
 
 let before_move ~config ~who =
-  Tool_misc_dos_lane.free_left_controller
-    ~holder_left:(holder_left ~config ~now:(Time_compat.now ()))
-    ~who
+  (* DET-OK: sample time once at the move boundary to classify invite expiry. *)
+  let now = Unix.gettimeofday () in
+  Tool_misc_dos_lane.free_left_controller ~holder_left:(holder_left ~config ~now) ~who
 ;;
 
 type call_refusal =

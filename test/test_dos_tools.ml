@@ -721,6 +721,10 @@ let test_a_holder_departs_with_its_credential () =
     check string "an operator stays" "still here" (reason (departure "operator" later));
     check string "an agent's credential stays" "still here" (reason (departure "codex" later));
     check string "a name no credential carries has left" "no credential" (reason (departure "ghost" now));
+    Out_channel.with_open_bin (Auth.credential_file base_path "broken") (fun oc ->
+      output_string oc "{ not json");
+    check string "a credential file that cannot be read says nothing, so the holder stays"
+      "still here" (reason (departure "broken" now));
     Auth.save_auth_config base_path
       { Masc_domain.default_auth_config with enabled = true; require_token = false };
     check string "where a request needs no token a name may be self-declared, so it stays"
@@ -743,6 +747,25 @@ let test_a_holder_departs_with_its_credential () =
      | Error (Keeper_dos_controller.Refused message) ->
        failf "an unreadable auth config is not the caller's fault: %s" message
      | Ok () -> fail "a pass went through with the auth config unreadable"))
+;;
+
+(* A credential listing that fails is not an empty list: nobody can say who
+   sits at the machine, so a pass is refused as [Seats_unknown] and nothing
+   raises out of the gate. *)
+let test_a_pass_is_refused_when_the_credentials_do_not_list () =
+  with_workspace (fun base_path ->
+    let agents = Filename.dirname (Auth.credential_file base_path "minsu") in
+    if Sys.file_exists agents then Fs_compat.remove_tree agents;
+    Fs_compat.mkdir_p (Filename.dirname agents);
+    Out_channel.with_open_bin agents (fun oc -> output_string oc "not a directory");
+    match
+      Keeper_dos_controller.before_call ~config:(Workspace.default_config base_path)
+        ~who:"operator" ~name:"masc_dos_pass" ~args:(`Assoc [ ("to", `String "minsu") ])
+    with
+    | Error (Keeper_dos_controller.Seats_unknown _) -> ()
+    | Error (Keeper_dos_controller.Refused message) ->
+      failf "a listing that failed is not the caller's fault: %s" message
+    | Ok () -> fail "a pass went through with the credentials unlisted")
 ;;
 
 let keeper_pass ~base_path who target =
@@ -1392,6 +1415,8 @@ let () =
             test_a_keeper_passes_only_to_someone_at_the_machine
         ; test_case "a holder departs with its credential" `Quick
             test_a_holder_departs_with_its_credential
+        ; test_case "a pass is refused when the credentials do not list" `Quick
+            test_a_pass_is_refused_when_the_credentials_do_not_list
         ; test_case "unimplemented instruction" `Quick
             test_an_unimplemented_instruction_is_an_error
         ; test_case "a fault keeps the steps that ran" `Quick

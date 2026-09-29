@@ -5,7 +5,7 @@ import { ApiRequestError, currentStoredTokenRevision } from '../../api/core'
 import { storedTokenRevision } from '../../api/token-revision'
 import { ADMIN_REQUIRED_MESSAGE, isAdminRequired } from '../../api/admin-required'
 import { fetchKeeperToolCall, type ToolCallEntry } from '../../api/dashboard-keeper-tool-calls'
-import { recordToolCallOutputs } from '../../tool-call-output-store'
+import { recordToolCallOutputs, toolCallOutputHydrationContract } from '../../tool-call-output-store'
 import { useInViewOnce } from '../common/use-in-view'
 
 // Scope comes from the selected Keeper, never its mutable display label.
@@ -25,6 +25,13 @@ export function useToolOutputLookup(executionId: string | null | undefined) {
   // A recent-tail cache cannot prove uniqueness across the complete ledger.
   // Only the exact endpoint may supply evidence, including a cached identity.
   const needsFetch = state.kind !== 'loaded'
+  // A bulk hydration that completes is new evidence about this execution, so a
+  // lookup that could not read it yet asks again. Without this, one failed
+  // read stays failed for the life of the row: refreshing the conversation
+  // repairs the ledger while the row still reads as if the output were gone,
+  // and only a per-row retry clears it. A loaded row is never re-read, since
+  // `needsFetch` is already false for it.
+  const hydrationCompletedAt = keeper ? toolCallOutputHydrationContract(keeper).completedAtMs : null
   useEffect(() => {
     if (!keeper || !executionId || !inView || !needsFetch) return
     const controller = new AbortController()
@@ -44,7 +51,7 @@ export function useToolOutputLookup(executionId: string | null | undefined) {
       else set({ kind: 'failed' })
     })
     return () => controller.abort()
-  }, [keeper, executionId, inView, needsFetch, attempt, authRevision])
+  }, [keeper, executionId, inView, needsFetch, attempt, authRevision, hydrationCompletedAt])
   return { ref, output: state.kind === 'loaded' ? state.entry : null,
     state,
     retry: () => retry(value => value + 1) }

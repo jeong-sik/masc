@@ -2132,6 +2132,11 @@
  (deps %{workspace_root}/lib/otel_metric_store/otel_metric_store_core.ml)
  (libraries alcotest ast_grep otel_metric_store eio eio_main))
 
+(test
+ (name test_otel_metric_total)
+ (modules test_otel_metric_total)
+ (libraries alcotest otel_metric_store))
+
 ; Real local exact-output fixture shared by exact-output lane tests.
 (library
  (name exact_output_fixture)

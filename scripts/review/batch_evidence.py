@@ -479,6 +479,31 @@ def evaluate(f, *, line, repo, pr, head, run, git_dir, gh, landing=False, expect
     return result
 
 
+class LandStatus(Enum):
+    """What land() reports. The value is the receipt's `status`."""
+    PUBLISHED = "published"
+    CHECKED = "checked"
+    PENDING = "pending"
+
+
+# Total over LandStatus; test_batch_evidence pins that every member has a code.
+LAND_EXIT_CODES = {
+    LandStatus.PUBLISHED: ExitCode.SUCCESS,
+    LandStatus.CHECKED: ExitCode.SUCCESS,
+    LandStatus.PENDING: ExitCode.PENDING,
+}
+
+
+@dataclass(frozen=True)
+class Landing:
+    status: LandStatus
+    receipt: dict
+
+
+def landing(status, receipt):
+    return Landing(status, {**receipt, "status": status.value})
+
+
 def land(f, *, batch_file, repo, git_dir, gh, check_only):
     """Keeper entry: publish the tested ROLL once, then prove its arrival.
 
@@ -489,17 +514,20 @@ def land(f, *, batch_file, repo, git_dir, gh, check_only):
     batch = parse(Path(batch_file).read_text())
     roll, pull = resolve_roll(f, gh, repo, batch)
     if pull.get("merged"):
-        return evaluate(f, line=batch.line, repo=repo, pr=None, head=None, run=None,
-                        git_dir=git_dir, gh=gh)
+        # With no candidate, evaluate refuses unless the ROLL has arrived.
+        return landing(LandStatus.PUBLISHED,
+                       evaluate(f, line=batch.line, repo=repo, pr=None, head=None, run=None,
+                                git_dir=git_dir, gh=gh))
     before = evaluate(f, line=batch.line, repo=repo, pr=roll.pr, head=roll.head,
                       run=batch.run, git_dir=git_dir, gh=gh, landing=True)
     observation = {"scope": "preflight_before_merge_guard_not_write_boundary",
                    "members": before["members"], "roll": batch.roll, "roll_run": batch.run,
                    "approvals": before["approval_observation"]}
     if check_only:
-        return {"status": "checked", "roll": batch.roll, "roll_pr": roll.pr,
-                "members": [member.pr for member in batch.members],
-                "preflight_observation": observation}
+        return landing(LandStatus.CHECKED,
+                       {"roll": batch.roll, "roll_pr": roll.pr,
+                        "members": [member.pr for member in batch.members],
+                        "preflight_observation": observation})
     with tempfile.TemporaryDirectory(prefix="masc-batch-evidence-") as tmp:
         frozen = Path(tmp) / "batch.txt"
         frozen.write_text(batch.line + "\n")
@@ -508,13 +536,14 @@ def land(f, *, batch_file, repo, git_dir, gh, check_only):
                      "--run", str(batch.run), "--git-dir", git_dir, "--batch", str(frozen)])
     pull = f.api(gh, f"repos/{repo}/pulls/{roll.pr}")
     if not pull.get("merged"):
-        return {"status": "pending", "pr": roll.pr, "head": roll.head, "roll": batch.roll,
-                "preflight_observation": observation,
-                "message": "merge submitted; resume at next work boundary"}
+        return landing(LandStatus.PENDING,
+                       {"pr": roll.pr, "head": roll.head, "roll": batch.roll,
+                        "preflight_observation": observation,
+                        "message": "merge submitted; resume at next work boundary"})
     result = evaluate(f, line=batch.line, repo=repo, pr=None, head=None, run=None,
                       git_dir=git_dir, gh=gh, expected_main=before["main"])
     result["preflight_observation"] = observation
-    return result
+    return landing(LandStatus.PUBLISHED, result)
 
 
 def main():
@@ -530,10 +559,10 @@ def main():
     try:
         if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", args.repo):
             raise ValueError("invalid_repository")
-        result = land(f, batch_file=args.batch, repo=args.repo, git_dir=args.git_dir,
+        landed = land(f, batch_file=args.batch, repo=args.repo, git_dir=args.git_dir,
                       gh=os.environ.get("GUARD_GH", "gh"), check_only=args.check_only)
-        code = {"published": ExitCode.SUCCESS, "checked": ExitCode.SUCCESS,
-                "pending": ExitCode.PENDING}.get(result["status"], ExitCode.INVALID)
+        result = landed.receipt
+        code = LAND_EXIT_CODES[landed.status]
     except (Refusal, f.Unavailable) as error:
         result = {"status": "unavailable", "reason": str(error)}
         code = failure_code(f, error)

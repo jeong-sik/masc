@@ -285,8 +285,11 @@ print(value)
              patch.object(F, "command", side_effect=command), \
              patch.object(B, "merge_guard", side_effect=lambda args: command(args)), \
              patch.object(B, "current_checks", side_effect=checks):
-            return B.land(F, batch_file=str(batch), repo="o/r", git_dir=str(self.repo),
-                          gh=str(self.fake), check_only=check_only)
+            landed = B.land(F, batch_file=str(batch), repo="o/r", git_dir=str(self.repo),
+                            gh=str(self.fake), check_only=check_only)
+        self.assertIsInstance(landed.status, B.LandStatus)
+        self.assertEqual(landed.receipt["status"], landed.status.value)
+        return landed.receipt
 
 
 
@@ -966,13 +969,16 @@ print(value)
     def test_cli_status_keeps_success_and_pending_distinct(self):
         # The asynchronous pending transition itself uses the real-Git land
         # control above; here hold its result fixed at the public CLI boundary.
-        for status, code in [("checked", 0), ("published", 0), ("pending", 7), ("unexpected", 2)]:
+        self.assertEqual(set(B.LAND_EXIT_CODES), set(B.LandStatus))
+        for status, code in [(B.LandStatus.CHECKED, 0), (B.LandStatus.PUBLISHED, 0),
+                             (B.LandStatus.PENDING, 7)]:
             with self.subTest(status=status), patch.object(sys, "argv", [
                     "batch_evidence.py", "--repo", "o/r", "--batch", "unused",
                     "--git-dir", str(self.repo)]), \
-                 patch.object(B, "land", return_value={"status": status}), redirect_stdout(io.StringIO()) as output:
+                 patch.object(B, "land", return_value=B.landing(status, {})), \
+                 redirect_stdout(io.StringIO()) as output:
                 self.assertEqual(B.main(), code)
-                self.assertEqual(json.loads(output.getvalue())["status"], status)
+                self.assertEqual(json.loads(output.getvalue())["status"], status.value)
 
 
 

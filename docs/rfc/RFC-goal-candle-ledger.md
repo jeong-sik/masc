@@ -15,7 +15,7 @@ related: ["every-lane-is-one-row-in-one-registry", "0267", "0362", "0387", "0435
 - 다루는 것: Candle 원장, Goal 완료 때의 지급, 기한 초과 감액, 기여자별 분배, 잔액이 시간이 지나며 줄어드는 규칙, 장신구 구매와 착용.
 - 다루지 않는 것: Goal 의 phase(진행 단계) 흐름과 검증. Tool·Skill·모델 구입과 현상금 Task 는 후속 RFC 로 미룬다.
 - 관련 문서: `RFC-0267`(Task 와 Goal 의 연결), `RFC-0362`(Goal owner), `RFC-0387`(Goal 완료 검증), `RFC-0435`(keeper 재화가 행동을 바꾸는지 재는 설계), `RFC-every-lane-is-one-row-in-one-registry`(새 lane 의 등록).
-- 근거 기준: `origin/main` = `f632782f8c` (2026-09-29). 줄 번호는 이 커밋 기준이다. 데이터는 같은 날 `~/me/.masc` 에서 읽었다.
+- 근거 기준: `origin/main` = `f632782f8c` (2026-09-29). 줄 번호는 이 커밋 기준이다. 데이터는 같은 날 이 컴퓨터에서 도는 서버의 `<base-path>/.masc` 에서 읽었다.
 - 표시: **[사실]** 은 코드나 데이터에서 확인한 것이다. **[제안]** 은 이 RFC 가 정하려는 것이다.
 
 ## 용어
@@ -52,10 +52,10 @@ related: ["every-lane-is-one-row-in-one-registry", "0267", "0362", "0387", "0435
 ## 2. 지금 코드에서 확인한 것
 
 - **[사실]** `Completed` 는 끝이 아니다. `Completed` 에서 `Reopen` 하면 `Executing` 으로 돌아간다(`lib/goal/goal_phase.ml:186`). 완료될 때 지급하기만 하면 재오픈했다가 다시 완료할 때마다 또 지급된다.
-- **[사실]** `Completed` 로 가는 길은 하나다. 검증기가 통과시키면 `Awaiting_confirmation` 이 되고, 사람이 `Confirm_completion` 을 하면 `Completed` 가 된다(`goal_phase.ml:196`). 완료된 3건에서 검증 통과부터 사람의 확정까지 7.9~35.2시간이 걸렸다(`~/me/.masc/goal_events.jsonl`).
+- **[사실]** `Completed` 로 가는 길은 하나다. 검증기가 통과시키면 `Awaiting_confirmation` 이 되고, 사람이 `Confirm_completion` 을 하면 `Completed` 가 된다(`goal_phase.ml:196`). 완료된 3건에서 검증 통과부터 사람의 확정까지 7.9~35.2시간이 걸렸다(`<base-path>/.masc/goal_events.jsonl`).
 - **[사실]** 제목·metric·target 을 고치면 Goal 이 `Executing` 으로 돌아간다. 기한(`due_date`)과 priority 를 고쳐도 phase 는 그대로이고 기록도 남지 않는다(`lib/goal/goal_store.ml:741-766`).
 - **[사실]** 새 Goal 에는 제목과 비어 있지 않은 metric·target_value 가 필요하다(`goal_store.ml:721-722`, `:785-791`).
-- **[사실]** Worker 역할은 `masc_goal_upsert`, `masc_goal_transition`(CanBroadcast)과 `masc_task_set_goal`(CanCompleteTask)을 쓸 수 있다(`lib/types/types_auth.ml:341-345`, `lib/tool/tool_catalog.ml:354-360`). 세 도구는 keeper 에게 노출되어 있고(`lib/keeper/keeper_tool_descriptor.ml:2860, 2940, 2944`), keeper 가 호출한 기록이 있다(`~/me/.masc/keepers/tool_usage/`).
+- **[사실]** Worker 역할은 `masc_goal_upsert`, `masc_goal_transition`(CanBroadcast)과 `masc_task_set_goal`(CanCompleteTask)을 쓸 수 있다(`lib/types/types_auth.ml:341-345`, `lib/tool/tool_catalog.ml:354-360`). 세 도구는 keeper 에게 노출되어 있고(`lib/keeper/keeper_tool_descriptor.ml:2860, 2940, 2944`), keeper 가 호출한 기록이 있다(`<base-path>/.masc/keepers/tool_usage/`).
 - **[사실]** `set_task_goal` 은 Goal 이 없는 Task 를 아무 Goal 에나 붙인다. 호출자, Task 상태, Goal phase 를 보지 않는다(`lib/task/task_goal_assignment.ml:45-66`). Task 와 Goal 의 연결에는 시각이 없다.
 - **[사실]** Goal 을 `Drop` 하거나 `Reopen` 할 때 호출자는 이벤트에 기록될 뿐 owner 와 비교하지 않는다(`lib/workspace_goals.ml:1060-1182`). `Awaiting_confirmation` 에서도 누구나 `Reopen` 과 `Drop` 을 할 수 있다(`lib/goal/goal_phase.ml:198-199`). `goal_events.jsonl` 에 keeper 가 Goal 을 drop 한 기록이 7건 있다(`e-masc-the-leader` 6건, `indie-geek-blue` 1건).
 - **[사실]** Goal 에는 `owner` 하나뿐이고 기여자 기록이 없다(`goal_store.mli:33-38`, 레코드는 `:43-66`). 새 Goal 은 만든 에이전트가 owner 로 기록되고(`lib/workspace_goals.ml:324`), owner 는 만들 때만 정해진다(`goal_store.ml:796`, 갱신 경로에는 owner 를 바꾸는 줄이 없다). 지금 있는 Goal 18개는 전부 `Unknown_owner` 다.
@@ -257,7 +257,7 @@ price : item -> milli_candle
 
 ### 3.8 실제 데이터로 본 어림 (2026-09-29)
 
-`~/me/.masc/goals.json` 의 Goal 18개, Task 1,634개(`tasks/backlog.json` 865개와 `tasks-archive.json` 769개), `tasks/goal_task_links.json` 을 2026-09-29 05:59Z 에 읽었다(`docs/evidence/2026-09-29-candle-baseline/`). 지급 근거는 검증 통과 때 `done` 이던 Task 의 담당자다. `Snapshot` 기능이 아직 없어서 지금 상태로 어림했다. archive 를 빼면 Goal 에 연결된 Task 41개 중 12개가 빠진다.
+`<base-path>/.masc/goals.json` 의 Goal 18개, Task 1,634개(`tasks/backlog.json` 865개와 `tasks-archive.json` 769개), `tasks/goal_task_links.json` 을 2026-09-29 05:59Z 에 읽었다(`docs/evidence/2026-09-29-candle-baseline/`). 지급 근거는 검증 통과 때 `done` 이던 Task 의 담당자다. `Snapshot` 기능이 아직 없어서 지금 상태로 어림했다. archive 를 빼면 Goal 에 연결된 Task 41개 중 12개가 빠진다.
 
 | 구분 | 개수 |
 |---|---|
@@ -269,7 +269,7 @@ price : item -> milli_candle
 - 지급 후보가 있는 완료 Goal 은 `핵심 24페이지 화면 품질`(기한 `2026-10-12`)이다. 검증 통과가 기한보다 341시간 앞섰고, 이때 감액 계수는 1000(감액 없음)이다.
 - 지금 규칙이면 완료 3건 중 2건이 `Unattributed` 다. 이런 Goal 은 지급하지 않는다(운영자 결정). PR 과 Goal 을 잇는 방법은 이 RFC 범위 밖이고, 필요해지면 별도 RFC 로 다룬다.
 - `dropped` 로 끝난 Goal 9개 중 2개에 후보가 있다(done Task 4건, 담당자 `masc-pro-builder`, `e-masc-the-leader`, `goo-yang-bong`). 3.2 에 따라 지급은 0이다. 일은 했지만 보상이 없다. 진행 중인 Goal 5개 중 1개에도 후보가 있다(`tui-developer` 의 done Task 3건).
-- Goal 에 연결된 done Task 9건의 담당자 5명(`tui-developer`, `wkbl-front`, `e-masc-the-leader`, `masc-pro-builder`, `goo-yang-bong`)은 모두 keeper 설정(`~/me/.masc/config/keepers/`)이 있고, 9건 모두 Goal 생성 뒤에 끝났다. backlog 의 done Task 140개 중 담당자에게 keeper 설정이 없는 것이 3개 있다(`codex-mcp-client`, `edgar.a.poe`, `analyst` 각 1개). 셋 다 Goal 에 연결되지 않았다. 그런 이름이 Goal 에 붙은 Task 를 하게 되면 후보에서 뺀다. 기준은 keeper 설정 파일이 있는지다(3.4).
+- Goal 에 연결된 done Task 9건의 담당자 5명(`tui-developer`, `wkbl-front`, `e-masc-the-leader`, `masc-pro-builder`, `goo-yang-bong`)은 모두 keeper 설정(`<base-path>/.masc/config/keepers/`)이 있고, 9건 모두 Goal 생성 뒤에 끝났다. backlog 의 done Task 140개 중 담당자에게 keeper 설정이 없는 것이 3개 있다(`codex-mcp-client`, `edgar.a.poe`, `analyst` 각 1개). 셋 다 Goal 에 연결되지 않았다. 그런 이름이 Goal 에 붙은 Task 를 하게 되면 후보에서 뺀다. 기준은 keeper 설정 파일이 있는지다(3.4).
 - 완료는 3건이 모두 2026-09-26~29 에 나왔다. 최초 Goal 생성(2026-09-09)부터 약 2.9주 동안 완료 3건이라 주 1건 남짓이다. 이 중 지급 후보가 있는 것은 1건이라 지급은 주 0.35건꼴이다. 그 1건의 후보 keeper 는 `wkbl-front` 한 명이다. 반감기를 정하는 데 필요한 것은 keeper 한 명이 지급을 받는 간격(3.1.1 의 Δ)인데, 받을 keeper 가 한 명뿐이라 지금 데이터로는 재지 못한다. 그래서 처음에는 `Off` 로 두고, 지급이 쌓인 뒤 값을 정한다.
 
 ### 3.9 설정과 배포

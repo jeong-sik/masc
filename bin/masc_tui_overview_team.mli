@@ -75,6 +75,10 @@ val project :
   tasks:Tui_decode.task list ->
   attention:Masc_tui_types.attention_item list ->
   t
+(** A function of these three lists and nothing else. The Overview keeps a
+    projection for as long as the same three lists are current, so a new
+    input -- a clock, a setting, a fourth list -- has to join that key in
+    [Masc_tui_overview_cache.team] or the block is drawn from stale rows. *)
 
 val drawn_rows : t -> int
 (** Rows the block draws below its title: one per [rows] entry, one for the

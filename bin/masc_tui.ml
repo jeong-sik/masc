@@ -22249,7 +22249,7 @@ and is loaded on demand through keeper_skill.
               else
                 Masc_tui_scroll.cursor_up ~count
                   state.connectors_binding_cursor)
-       | Some "Q"
+       | Some "b"
          when state.view = Keepers Keeper_detail
               && state.detail_tab = Detail_info ->
            (match selected_keeper state, state.board_quarantine_requeue_inflight with

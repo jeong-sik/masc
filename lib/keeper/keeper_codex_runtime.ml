@@ -301,6 +301,10 @@ let read_usage_after_quota_refusal ~keeper_name ~quota_scope ~clock ~cwd config 
     Log.Keeper.warn
       ~keeper_name
       "Codex usage not read after a quota refusal: no server root switch"
+  | Runtime_provider_usage_read.Scheduling_failed ->
+    Log.Keeper.warn
+      ~keeper_name
+      "Codex usage not read after a quota refusal: background scheduling failed"
 ;;
 
 (* The newest request: the context it occupied, in the inclusive convention

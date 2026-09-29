@@ -336,9 +336,9 @@ let claude_error_to_core_error = function
     Keeper_internal_error.core_error_of_masc_internal_error
       (Keeper_internal_error.Runtime_connection_closed
          { runtime_id = "claude_code"; detail; turn_accepted = turn_admitted })
-  (* A host-side failure, not the client's reply: Protocol_error would file
-     it as a provider parse error and stop the lane walk on a reading no
-     candidate made (#39768). *)
+  (* A host-side failure, not the client's reply. As Protocol_error it would
+     be filed as a provider parse error although nothing was misread
+     (#39768). The lane walk stops on either, so only the label differs. *)
   | Runtime_claude_code.Unhandled_exception exn_repr ->
     Keeper_internal_error.core_error_of_masc_internal_error
       (Keeper_internal_error.Internal_unhandled_exception

@@ -1,0 +1,30 @@
+ Overview  Activity  ▸Keepers  Lanes  Memory  Board  Planning  Fusion 2›
+
+   MASC Keepers (2)   1 healthy · 1 idle            13:55:55  HTTP [connected]
+ ──────────────────────────────────────────────────────────────────────────────
+    fleet ok   running 0/0   turn capacity 0/0
+     HEALTH     KEEPER                             TURN TASK
+ ──────────────────────────────────────────────────────────────────────────────
+     ●          alpha                                 — —
+     · idle     beta                                  — —
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    OPERATIONS  no composite row for alpha
+ ──────────────────────────────────────────────────────────────────────────────
+  j/k:move  p:pause  w:wake  s:shutdown  x:delete  e:settings  a:new  q:quit  …?
+ › to alpha   (i to write)

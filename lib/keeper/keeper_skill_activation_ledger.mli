@@ -207,6 +207,7 @@ type decode_error =
   | Unknown_event_activation of string
   | Delivery_already_observed of string
   | Action_target_not_delivered of string
+  | Unterminated_header_row
 
 type store_error =
   | Lock_failed of string
@@ -291,13 +292,15 @@ val load_existing :
   config:Workspace.config ->
   trace_id:Keeper_id.Trace_id.t ->
   (t option, store_error) result
-(** Strict read of the session's event log that creates neither the trace root
-    nor a session lock. The log is only appended to, so the file holds
-    committed rows, possibly followed by a row a writer is appending, which is
-    left out; {!Fs_compat.load_owned_regular_file} verifies the opened
-    descriptor before and after reading. [None] is a session that has recorded
-    nothing. Use this for observational reads; mutations must continue to use
-    the locked operations above. *)
+(** Strict read of the session's event log that takes no session lock and
+    creates no session directory. The log is only appended to, so a completed
+    read sees committed rows, possibly followed by the unterminated row of a
+    writer that died mid-append, which is left out.
+    {!Fs_compat.load_owned_regular_file} verifies the opened descriptor before
+    and after reading, so a read that overlaps an append fails as
+    [Read_failed] rather than returning part of a row. [None] is a session
+    that has recorded nothing. Use this for observational reads; mutations
+    must continue to use the locked operations above. *)
 
 val load_existing_read_only_from_root :
   ownership_root:string ->

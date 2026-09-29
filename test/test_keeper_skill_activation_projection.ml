@@ -197,7 +197,7 @@ let test_corrupt_ledger_is_unavailable_not_empty () =
       "skill-activation-events.jsonl"
   in
   let channel = open_out_bin path in
-  output_string channel "not-json\n";
+  output_string channel "not-json";
   close_out channel;
   match Projection.resolve ~config ~keeper_name with
   | Projection.Unavailable { reason; _ } ->
@@ -340,7 +340,7 @@ let test_corrupt_exact_trace_is_unavailable () =
       "skill-activation-events.jsonl"
   in
   let channel = open_out_bin path in
-  output_string channel "{}\n";
+  output_string channel "{}";
   close_out channel;
   match Projection.resolve_trace ~config ~trace_id:meta.runtime.trace_id with
   | Projection.Trace_unavailable { reason; _ } ->

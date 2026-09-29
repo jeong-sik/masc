@@ -219,6 +219,7 @@ type decode_error =
   | Unknown_event_activation of string
   | Delivery_already_observed of string
   | Action_target_not_delivered of string
+  | Unterminated_header_row
 
 type store_error =
   | Lock_failed of string
@@ -294,6 +295,7 @@ let decode_error_code = function
   | Unknown_event_activation _ -> "unknown_event_activation"
   | Delivery_already_observed _ -> "delivery_already_observed"
   | Action_target_not_delivered _ -> "action_target_not_delivered"
+  | Unterminated_header_row -> "unterminated_header_row"
 ;;
 
 let store_error_code = function
@@ -2050,11 +2052,19 @@ let apply_event_rows ~expected_trace_id ledger rows =
   Ok (ledger_of_builder builder)
 ;;
 
+(* This writer creates a store with its header and first event in one atomic
+   step, so a store it made starts with a complete row. Bytes with no newline
+   at all are some other file, not a crash residue to cut. *)
+let starts_with_complete_row bytes = String.equal bytes "" || String.contains bytes '\n'
+
 (* The whole store, from its first byte: the header, then every event. A
    store with no rows is a session that has recorded nothing; the Bool says
    whether the header is on disk. *)
 let replay_store ~workspace_root ~expected_trace_id bytes =
   let base = empty ~workspace_root ~trace_id:expected_trace_id in
+  let* () =
+    if starts_with_complete_row bytes then Ok () else Error Unterminated_header_row
+  in
   let* rows = complete_rows bytes in
   match rows with
   | [] -> Ok (base, false)
@@ -2118,34 +2128,51 @@ let cursor_result ~path result =
     Ok value
 ;;
 
-(* Replay a store from its first byte. The first read of a store in this
-   process recovers it: a row a crash left half-appended is cut back to the
-   last complete row, under the store's lock, before anything is replayed. *)
-let replay_session_log ~ownership_root ~expected_trace_id ~recover path =
-  let read =
-    if recover
-    then Fs_compat.recover_private_jsonl_durable_locked_result path
-    else Fs_compat.read_private_jsonl_durable_locked_result path ~after:None
+(* Replay a store from its first byte: on the first read of it in this
+   process, and whenever this process no longer knows where the store ends.
+   A row a crash left half-appended is cut back to the last complete row
+   before anything is replayed. The session lock is held, and every writer
+   appends under it, so such a tail was left by a writer that died, never by
+   one still writing. A store whose very first row is unterminated is refused
+   and left as it is. *)
+let replay_session_log ~ownership_root ~expected_trace_id path =
+  let* snapshot =
+    match
+      snapshot_result
+        ~path
+        (Fs_compat.read_private_jsonl_durable_locked_result path ~after:None)
+    with
+    | Ok snapshot -> Ok snapshot
+    | Error (Fs_compat.Incomplete_transaction_tail _) ->
+      (match Fs_compat.load_owned_regular_file ~ownership_root path with
+       | Error error -> Error (Read_failed error)
+       | Ok (Some contents) when not (starts_with_complete_row contents) ->
+         Error (Decode_failed Unterminated_header_row)
+       | Ok (Some _ | None) ->
+         snapshot_result ~path (Fs_compat.recover_private_jsonl_durable_locked_result path)
+         |> Result.map_error (fun error -> Event_log_failed error))
+    | Error error -> Error (Event_log_failed error)
   in
-  match snapshot_result ~path read with
-  | Error error -> Error (Event_log_failed error)
-  | Ok (snapshot : Fs_compat.private_jsonl_snapshot) ->
-    let* ledger, header_written =
-      replay_store ~workspace_root:ownership_root ~expected_trace_id snapshot.bytes
-      |> Result.map_error (fun error -> Decode_failed error)
-    in
-    let log = { ledger; cursor = snapshot.cursor; header_written } in
-    remember_session_log path log;
-    Ok log
+  let* ledger, header_written =
+    replay_store
+      ~workspace_root:ownership_root
+      ~expected_trace_id
+      snapshot.Fs_compat.bytes
+    |> Result.map_error (fun error -> Decode_failed error)
+  in
+  let log = { ledger; cursor = snapshot.Fs_compat.cursor; header_written } in
+  remember_session_log path log;
+  Ok log
 ;;
 
-(* Under the session lock. A remembered store is read only after its cursor;
-   a store replaced or truncated behind that cursor is replayed from its
-   first byte. *)
+(* Under the session lock. A remembered store is read only after its cursor.
+   A failure there drops what this process remembers of the store, and one
+   replaced, truncated or left with a torn tail behind that cursor is
+   replayed from its first byte at once. *)
 let read_locked ~ownership_root ~expected_trace_id session_dir =
   let path = events_path session_dir in
   match remembered_session_log path with
-  | None -> replay_session_log ~ownership_root ~expected_trace_id ~recover:true path
+  | None -> replay_session_log ~ownership_root ~expected_trace_id path
   | Some log ->
     (match
        snapshot_result
@@ -2154,22 +2181,27 @@ let read_locked ~ownership_root ~expected_trace_id session_dir =
             path
             ~after:(Some log.cursor))
      with
-     | Error (Fs_compat.Cursor_mismatch _) ->
+     | Error (Fs_compat.Cursor_mismatch _ | Fs_compat.Incomplete_transaction_tail _) ->
        forget_session_log path;
-       replay_session_log ~ownership_root ~expected_trace_id ~recover:false path
-     | Error error -> Error (Event_log_failed error)
+       replay_session_log ~ownership_root ~expected_trace_id path
+     | Error error ->
+       forget_session_log path;
+       Error (Event_log_failed error)
      | Ok (snapshot : Fs_compat.private_jsonl_snapshot) ->
        if String.equal snapshot.bytes ""
        then Ok log
-       else
-         let* ledger =
-           (let* rows = complete_rows snapshot.bytes in
-            apply_event_rows ~expected_trace_id log.ledger rows)
-           |> Result.map_error (fun error -> Decode_failed error)
-         in
-         let log = { log with ledger; cursor = snapshot.cursor } in
-         remember_session_log path log;
-         Ok log)
+       else (
+         match
+           let* rows = complete_rows snapshot.bytes in
+           apply_event_rows ~expected_trace_id log.ledger rows
+         with
+         | Error error ->
+           forget_session_log path;
+           Error (Decode_failed error)
+         | Ok ledger ->
+           let log = { log with ledger; cursor = snapshot.cursor } in
+           remember_session_log path log;
+           Ok log))
 ;;
 
 let with_lock ~config ~trace_id operation =
@@ -2228,13 +2260,18 @@ let load_existing ~config ~trace_id =
 ;;
 
 (* Append [event] after the rows [log] was read to and keep the ledger it
-   makes. The header goes first when the store has none. A failed append
+   makes. The row is decoded before it is written, and the decoded event is
+   the one applied: a replay reads every row this appends, so a row it could
+   not read is never written, and what this process holds is what a replay
+   builds. The header goes first when the store has none. A failed append
    leaves the store's end unknown to this process, so the next read replays
    it from the first byte. *)
 let commit_event_locked session_dir (log : session_log) event =
+  let row = event_to_yojson event in
   let* ledger =
-    (let builder = builder_of_ledger log.ledger in
-     let* () = apply_event builder event in
+    (let* decoded = decode_event ~expected_trace_id:log.ledger.session_id row in
+     let builder = builder_of_ledger log.ledger in
+     let* () = apply_event builder decoded in
      Ok (ledger_of_builder builder))
     |> Result.map_error (fun error -> Decode_failed error)
   in
@@ -2252,7 +2289,7 @@ let commit_event_locked session_dir (log : session_log) event =
       (Fs_compat.append_private_jsonl_durable_locked_at_cursor_result
          path
          ~expected:log.cursor
-         (header ^ event_row (event_to_yojson event)))
+         (header ^ event_row row))
   with
   | Error error ->
     forget_session_log path;

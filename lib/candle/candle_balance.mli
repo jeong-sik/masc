@@ -1,4 +1,4 @@
-(** Checked cumulative credits from the authoritative Candle ledger.
+(** Checked wallets, ownership, equipment and currency supply from the Candle ledger.
     Values are never clamped or wrapped. This projection does not authorize
     a recipient: the settlement boundary validates durable candidate evidence. *)
 type t
@@ -22,6 +22,18 @@ type error =
 val error_to_string : error -> string
 val empty : t
 val balance : t -> keeper:string -> int
+
+(** Exact nonnegative decimal milli-Candle amounts. Aggregate issuance can
+    exceed a machine integer even when every individual wallet is valid. *)
+type supply =
+  { issued_milli : string
+  ; burned_milli : string
+  ; circulating_milli : string
+  }
+
+val supply : t -> supply
+(** Issuance counts actual credited allocations after deduction. Purchases
+    burn their recorded debit; equipment changes do not move currency. *)
 
 (** Purchased items, in canonical catalog order. Starting portrait equipment
     does not imply ownership. *)

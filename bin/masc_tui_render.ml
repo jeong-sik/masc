@@ -465,6 +465,12 @@ let dashboard_opening_notice_lines (state : state) =
   | Some reason -> [ " " ^ Terminal_text.single_line reason ]
   | None -> []
 
+let dashboard_candle_lines (state : state) ~cols =
+  Masc_tui_candle.summary_lines state.candle_observation
+  |> List.concat_map (fun line -> Message_layout.wrap_words ~max_cells:(max 1 (cols - 4))
+       (Terminal_text.single_line line))
+  |> List.map (fun line -> "  " ^ line)
+
 let dashboard_usage_lines (state : state) =
   let accounts =
     match state.overview_providers with
@@ -593,7 +599,8 @@ let render_overview (state : state) =
     title :: List.map (fun line -> "   " ^ line) body
   in
   let summary =
-    dashboard_goal_lines state
+    dashboard_candle_lines state ~cols
+    @ dashboard_goal_lines state
     @ [ "" ]
     @ dashboard_work_lines state
     @ [ "" ]
@@ -7246,6 +7253,12 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
             (if k.k_paused then (Theme.warn ()) ^ "yes" ^ Ansi.reset
              else Ansi.dim ^ "no" ^ Ansi.reset)
         ]
+        @ (let amount = match (keeper_reading state k).Keeper_control.liveness with
+            | Keeper_control.Present runtime -> runtime.kr_candle_balance_milli
+            | Keeper_control.Unobserved | Keeper_control.Absent | Keeper_control.Invalid _ -> None in
+           match Masc_tui_candle.balance_text state.candle_observation amount with
+           | None -> []
+           | Some value -> [row_line "Candle balance:" (Terminal_text.single_line value)])
       in
       List.iter add_line
         (match portrait with

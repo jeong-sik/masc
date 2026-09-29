@@ -42,9 +42,9 @@ let drawn ?(f = frame ()) ?(surface = surface_of ()) ?notice () =
   Buffer.contents buf
 ;;
 
-let drawn_empty ~connection =
+let drawn_empty ?(live = Masc_tui_machine_live.Unread) ~connection =
   let buf = Buffer.create 4096 in
-  Msx.render ~live:Masc_tui_machine_live.Unread ~write:(Buffer.add_string buf) ~connection None None;
+  Msx.render ~live ~write:(Buffer.add_string buf) ~connection None None;
   Buffer.contents buf
 ;;
 
@@ -54,16 +54,22 @@ let mentions ~needle haystack =
   n = 0 || at 0
 ;;
 
-(* An empty cache reads the same whether the server said no machine is loaded
-   or could not be reached to say anything: Masc_tui_http maps a transport
-   failure onto the [None] a loaded:false answer gives. What is on screen has
-   to separate them, or an operator whose server is down is told to load a
-   machine. *)
+(* An unread live response, an explicit no-machine response, and an
+   unreachable server have different next steps. The screen must not suggest
+   loading a machine until the server has actually answered Not_loaded. *)
 let test_a_connected_server_with_no_machine_says_so () =
-  let text = drawn_empty ~connection:Masc_tui_types.Connected in
+  let text = drawn_empty ~live:Masc_tui_machine_live.Not_loaded
+      ~connection:Masc_tui_types.Connected in
   check bool "names the loader" true (mentions ~needle:"masc_msx_load" text);
   check bool "does not blame the connection" false
     (mentions ~needle:"the server is" text)
+
+let test_a_connected_server_waiting_for_a_read_does_not_suggest_loading () =
+  let text = drawn_empty ~connection:Masc_tui_types.Connected in
+  check bool "names the pending read" true
+    (mentions ~needle:"waiting for live screen" text);
+  check bool "does not claim the machine is absent" false
+    (mentions ~needle:"masc_msx_load" text)
 
 let test_an_unreachable_server_is_not_a_missing_machine () =
   List.iter
@@ -477,6 +483,8 @@ let () =
     ; ( "empty"
       , [ test_case "a connected server with no machine says so" `Quick
             test_a_connected_server_with_no_machine_says_so
+        ; test_case "a connected server still reading does not suggest loading" `Quick
+            test_a_connected_server_waiting_for_a_read_does_not_suggest_loading
         ; test_case "an unreachable server is not a missing machine" `Quick
             test_an_unreachable_server_is_not_a_missing_machine
         ] )

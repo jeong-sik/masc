@@ -3046,6 +3046,7 @@ and surface_needs_of_surface : surface -> surface_needs = function
   | Overview ->
       { nothing with
         needs_transport = true
+      ; needs_keeper_roster = true
       ; needs_runtime_quota = true
       ; needs_repository_pulls = true
       ; needs_keeper_spend = true
@@ -5794,6 +5795,7 @@ type state = {
      lifecycle actions. *)
   mutable keeper_roster: Masc_tui_keeper_control.roster;
   mutable keeper_roster_error: string option;
+  mutable candle_observation: (Candle_observation.t, string) result option;
   mutable keeper_action_inflight:
     (string * Masc_tui_keeper_control.action) option;
   mutable keeper_action_pending: Masc_tui_keeper_control.pending option;
@@ -8141,6 +8143,7 @@ let create_state
   keepers_error = None;
   keeper_roster = Masc_tui_keeper_control.Roster_unobserved;
   keeper_roster_error = None;
+  candle_observation = None;
   keeper_action_inflight = None;
   keeper_action_pending = None;
   keeper_action_serial = 0;

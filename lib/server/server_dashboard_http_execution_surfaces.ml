@@ -1365,7 +1365,7 @@ let execution_cached_http_representation ~(config : Workspace.config)
       | Empty | Preparing _ | Ready _ -> None) in
     (match selected with
      | Some (json, representation)
-       when Dashboard_projection_cache.with_current_keeper_portraits ~config json = json ->
+       when Dashboard_projection_cache.with_current_keeper_observations ~config json = json ->
        Some representation
      | Some _ | None -> None)
   | _ -> None
@@ -1672,7 +1672,7 @@ let dashboard_execution_http_response ~sw ~clock context =
   match context.parameters.fixture with
   | Some _ -> response
   | None ->
-    let refresh = Dashboard_projection_cache.with_current_keeper_portraits ~config:context.config in
+    let refresh = Dashboard_projection_cache.with_current_keeper_observations ~config:context.config in
     match response with
     | Execution_json json -> Execution_json (refresh json)
     | Execution_payload payload ->

@@ -3214,11 +3214,24 @@ medium = 1000
 large = 1000
 epic = 1000
 [shop.prices_milli]
-crown = 0
-beanie = 0
+crown = 200
+beanie = 200
 |};
   Candle_status.install_appraiser_check (fun () -> Ok ());
   let owner = ok Fun.id (Keeper_id.Keeper_name.of_string keeper) in
+  (* A real ledger payment funds the purchase. The cached metadata below is
+     synthetic; the payment/purchase/equipment facts and their replay are real
+     isolated-store operations. This does not exercise the model appraisal. *)
+  let at = ok Fun.id (Candle_time.of_rfc3339 "2026-09-29T00:00:00Z") in
+  let payment = ok Fun.id (Candle_payment.make
+    ~identity:{goal_id="warm-cache-goal";request_id="warm-cache-request";verification_run_id="warm-cache-run"}
+    ~grade:Candle_grade.Trivial ~total_milli:1000
+    ~grade_trace:{run_id="grade";slot_id="fixture"}
+    ~relations:[{task_id="task";relation=Candle_appraisal.Related;trace={run_id="relation";slot_id="fixture"}}]
+    ~weights_trace:{run_id="weights";slot_id="fixture"}
+    ~weight_max:1 ~deduction_rate:0 ~deduction_floor:1000 ~overdue_hours:0 ~weights:[keeper,1]) in
+  ok (Candle_ledger.update_error_to_string Fun.id)
+    (Candle_ledger.update ~base_path (fun _ -> Ok ([{Candle_event.at;body=Candle_event.Paid payment}], ())));
   let starting = Keeper_portrait_look.equipment_of_name keeper in
   let item_id = match starting.head with
     | Keeper_portrait_look.Crown -> "beanie"
@@ -3231,8 +3244,9 @@ beanie = 0
      authority must not defeat the prepared-byte path by reordering fields. *)
   let row = `Assoc ["name", `String keeper;
     "portrait", Portrait.reading_to_json (Portrait.Ready starting);
-    "candle_balance_milli", `String "0"] in
-  let ready_candle = Candle_observation.Ready (Candle_balance.supply Candle_balance.empty) in
+    "candle_balance_milli", `String "1000"] in
+  let ready_candle = Candle_observation.Ready
+    {issued_milli="1000";burned_milli="0";circulating_milli="1000"} in
   let candle_json = Candle_observation.to_json ready_candle in
   let execution_seed = `Assoc ["cache_marker", `String "retained-metadata";
     "candle", candle_json;
@@ -3263,7 +3277,12 @@ beanie = 0
   let assert_surfaces label ~expected_portrait ~expected_candle ~expected_balance =
     let execution = read_execution () in
     let mission = read_mission () in
-    List.iter (fun (json, paths) ->
+    (* The production proactive on_result uses this exact preparation function
+       before broadcasting. Assert its payload, not a replacement test-only
+       projection; no SSE socket delivery is claimed by this scenario. *)
+    let broadcast = Surface.For_testing.prepare_execution_snapshot_broadcast ~config () in
+    List.iter (fun (surface, json, paths) ->
+      let label = label ^ " " ^ surface in
       check string (label ^ " preserves metadata") "retained-metadata"
         Yojson.Safe.Util.(json |> member "cache_marker" |> to_string);
       let candle = ok Fun.id (Candle_observation.of_json
@@ -3276,8 +3295,9 @@ beanie = 0
           check (option string) (label ^ " balance " ^ String.concat "." path)
             expected_balance balance
         | _ -> fail "cached surface lost or duplicated its Keeper") paths)
-      [execution, [["keepers"]; ["continuity_briefs"]];
-       mission, [["keeper_briefs"]; ["operator_targets"; "keepers"]]] in
+      ["HTTP execution", execution, [["keepers"]; ["continuity_briefs"]];
+       "HTTP briefing", mission, [["keeper_briefs"]; ["operator_targets"; "keepers"]];
+       "SSE payload preparation", broadcast, [["keepers"]; ["continuity_briefs"]]] in
   let first = execution_payload ~state ~sw ~clock req in
   (match Surface.dashboard_execution_cached_http_representation (context ()) with
    | Some (body, etag, _) ->
@@ -3286,7 +3306,7 @@ beanie = 0
    | None -> fail "unchanged authority discarded prepared execution bytes");
   assert_surfaces "starting"
     ~expected_portrait:(fun reading -> reading = Portrait.Ready starting)
-    ~expected_candle:(fun candle -> candle = ready_candle) ~expected_balance:(Some "0");
+    ~expected_candle:(fun candle -> candle = ready_candle) ~expected_balance:(Some "1000");
   ignore (ok Candle_shop.error_to_string
     (Candle_shop.purchase ~now:(fun () -> 1790640000.) ~base_path ~keeper:owner ~item));
   (match Lib.Keeper_candle_tools.handle ~operation:Lib.Keeper_candle_tools.Equip
@@ -3299,7 +3319,9 @@ beanie = 0
     (Option.is_none (Surface.dashboard_execution_cached_http_representation (context ())));
   assert_surfaces "equipped"
     ~expected_portrait:(fun reading -> reading = Portrait.Ready expected)
-    ~expected_candle:(fun candle -> candle = ready_candle) ~expected_balance:(Some "0");
+    ~expected_candle:(fun candle -> candle = Candle_observation.Ready
+      {issued_milli="1000";burned_milli="200";circulating_milli="800"})
+    ~expected_balance:(Some "800");
   check bool "equipment refresh does not rebuild cached execution metadata" true
     ((Server_dashboard_http_cache.snapshot Surface.execution_cache).json = execution_seed);
   check bool "equipment refresh does not rebuild cached mission metadata" true
@@ -3315,7 +3337,7 @@ beanie = 0
       | Candle_observation.Disabled {reason} -> String.trim reason <> ""
       | Candle_observation.Off | Candle_observation.Ready _ -> false)
     ~expected_balance:None;
-  check string "warm HTTP reads never repair the damaged ledger" corrupt (Fs_compat.load_file ledger)
+  check string "warm HTTP and SSE preparation never repair the damaged ledger" corrupt (Fs_compat.load_file ledger)
 
 let test_execution_parameterized_payload_reuses_decorated_bytes () =
   with_execution_payload_env @@ fun ~env ~sw ~state ->

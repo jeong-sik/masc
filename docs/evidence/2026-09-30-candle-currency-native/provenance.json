@@ -1,0 +1,130 @@
+{
+  "source_head": "f86dfe04f95a4ef608b92cc0985d6cff56b8a9d7",
+  "run_id": 36595091066,
+  "job_id": 109497825498,
+  "workflow_conclusion": "success",
+  "suite_ok": [
+    "test_tui_candle_currency_pty",
+    "test/test_candle_purchase_flow",
+    "test/test_candle_balance",
+    "test/test_candle_config",
+    "test/test_candle_event",
+    "test/test_candle_ledger",
+    "test/test_candle_appraisal_flow",
+    "test/test_keeper_portrait_http",
+    "test/test_keeper_portrait_read",
+    "test/test_keeper_list_truncation",
+    "test/test_tui_keeper_control",
+    "test/test_tui_keeper_portrait",
+    "test/test_tui_decode",
+    "test/test_lane_addon_sources",
+    "test/test_dashboard_http_core",
+    "test/test_tui_candle",
+    "test/test_tui_surface_needs"
+  ],
+  "alcotest_case_count": 653,
+  "terminal_scenarios": [
+    "disabled",
+    "malformed-supply",
+    "malformed-balance",
+    "off"
+  ],
+  "raw_log_sha256": "2c3ed86ed6d2ad6aedd4f648d563f57ed80f77ab40b83eaa9728880fcc115752",
+  "source_sha256": {
+    "test/test_tui_candle_currency_pty.py": "10819bffb33a47219495a29205233dc355abca3a12ae705620bd48c26a5d9980",
+    "bin/masc_tui.ml": "cbf4dc78939706831dd1996abdcc94fb8366aa2f12800898324f58c1c3115dca",
+    "bin/masc_tui_render.ml": "4afc51ac401fc47f599a7c5a8dca5ef88481ac59b5376b3915fb506bde2eca05",
+    "bin/masc_tui_candle.ml": "91cdc2bff3691d5961681b98755b452102fb36e0d4fb4ff55fa92b57b40e4de1",
+    "bin/masc_tui_keeper_control.ml": "cc9c0af011fe02384e03e2579875ac8e83c41b49d61d77364940d2465081d32a",
+    "lib/tui_decode.ml": "2be6c471c077e985bf295bb17f90c6e9e7e53ec2e27f2a26dbcbfa95f83e3408",
+    "lib/candle/candle_observation.ml": "fdb1a9fe458653b7e61b6899e6e683f8811af93c0f409f348f867f4460e52c30"
+  },
+  "artifacts": [
+    {
+      "id": 11046188434,
+      "node_id": "MDg6QXJ0aWZhY3QxMTA0NjE4ODQzNA==",
+      "name": "keeper-creative-proof-f86dfe04f95a4ef608b92cc0985d6cff56b8a9d7",
+      "size_in_bytes": 114391,
+      "url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/11046188434",
+      "archive_download_url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/11046188434/zip",
+      "expired": false,
+      "digest": "sha256:33925c66a06b6830b4049f4086061ebd0c88e170158d20c214f1d77f92b36c33",
+      "created_at": "2026-09-29T16:19:45Z",
+      "updated_at": "2026-09-29T16:19:45Z",
+      "expires_at": "2026-12-28T16:05:02Z",
+      "workflow_run": {
+        "id": 36595091066,
+        "repository_id": 1136640865,
+        "head_repository_id": 1136640865,
+        "head_branch": "feat/candle-economy-observation-20260930",
+        "head_sha": "f86dfe04f95a4ef608b92cc0985d6cff56b8a9d7"
+      }
+    },
+    {
+      "id": 11046083673,
+      "node_id": "MDg6QXJ0aWZhY3QxMTA0NjA4MzY3Mw==",
+      "name": "suite-runner-log",
+      "size_in_bytes": 52534,
+      "url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/11046083673",
+      "archive_download_url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/11046083673/zip",
+      "expired": false,
+      "digest": "sha256:8f36ba2c697fd689b7108bbb3228bd7ae21702fafd14dd8e17ee4e9ddf1aa071",
+      "created_at": "2026-09-29T16:19:46Z",
+      "updated_at": "2026-09-29T16:19:46Z",
+      "expires_at": "2026-10-13T16:19:45Z",
+      "workflow_run": {
+        "id": 36595091066,
+        "repository_id": 1136640865,
+        "head_repository_id": 1136640865,
+        "head_branch": "feat/candle-economy-observation-20260930",
+        "head_sha": "f86dfe04f95a4ef608b92cc0985d6cff56b8a9d7"
+      }
+    },
+    {
+      "id": 11046073581,
+      "node_id": "MDg6QXJ0aWZhY3QxMTA0NjA3MzU4MQ==",
+      "name": "candle-equipped-portrait",
+      "size_in_bytes": 7332,
+      "url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/11046073581",
+      "archive_download_url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/11046073581/zip",
+      "expired": false,
+      "digest": "sha256:9c5ab7fe08af28ad4c686a6566611c84f42ba62a51e52942b9a0e4b96b0efb47",
+      "created_at": "2026-09-29T16:19:34Z",
+      "updated_at": "2026-09-29T16:19:34Z",
+      "expires_at": "2026-10-13T16:19:34Z",
+      "workflow_run": {
+        "id": 36595091066,
+        "repository_id": 1136640865,
+        "head_repository_id": 1136640865,
+        "head_branch": "feat/candle-economy-observation-20260930",
+        "head_sha": "f86dfe04f95a4ef608b92cc0985d6cff56b8a9d7"
+      }
+    },
+    {
+      "id": 11045494886,
+      "node_id": "MDg6QXJ0aWZhY3QxMTA0NTQ5NDg4Ng==",
+      "name": "candle-currency-tui",
+      "size_in_bytes": 128804,
+      "url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/11045494886",
+      "archive_download_url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/11045494886/zip",
+      "expired": false,
+      "digest": "sha256:ca3106e31237666ed2290fd6c3aff63f92e4a02339fd0214d674e0fb2037a1cd",
+      "created_at": "2026-09-29T16:19:35Z",
+      "updated_at": "2026-09-29T16:19:35Z",
+      "expires_at": "2026-10-13T16:19:35Z",
+      "workflow_run": {
+        "id": 36595091066,
+        "repository_id": 1136640865,
+        "head_repository_id": 1136640865,
+        "head_branch": "feat/candle-economy-observation-20260930",
+        "head_sha": "f86dfe04f95a4ef608b92cc0985d6cff56b8a9d7"
+      }
+    }
+  ],
+  "limits": [
+    "PTY currency inputs are synthetic wire served by isolated loopback HTTP",
+    "Native ledger purchase and strict decoder are separate scenarios in the same run",
+    "Does not verify later SSE correction7a5cdd or main Dashboard composition",
+    "No live Keeper or workspace changes"
+  ]
+}

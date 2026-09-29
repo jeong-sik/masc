@@ -1,12 +1,13 @@
 module Ledger = Masc.Workspace_memory_ledger
 module Request = Masc.Workspace_memory_request
+module Decision = Masc.Workspace_memory_decision
 
 let sha claim = Digestif.SHA256.(digest_string claim |> to_hex)
 let pending keeper claim : Ledger.pending_fact =
   { fact = Ledger.Ordinary { keeper_id = keeper; claim_sha256 = sha claim }; claim }
 let sourced keeper path claim : Ledger.pending_fact =
   { fact = Ledger.Source_bound { keeper_id = keeper; path; claim_sha256 = sha claim }; claim }
-let render json = "Curate changed facts:\n" ^ Yojson.Safe.to_string json
+let render json = Ok ("Curate changed facts:\n" ^ Yojson.Safe.to_string json)
 let request ~limit ~neighbors ~current pending =
   Request.prepare ~max_input_bytes:limit ~neighbor_limit:neighbors ~render
     ~ledger:Ledger.empty ~current ~pending
@@ -70,6 +71,34 @@ let test_many_facts_drain_in_bounded_requests () =
   Alcotest.(check bool) "every fact is eventually selected in order" true
     (drain [] facts = facts)
 
+let test_model_answer_applies_only_to_selected_facts () =
+  let first = pending "writer" "The report has twelve pages" in
+  let second = sourced "reviewer" "notes/a.md" "The report has ten pages" in
+  let selected = [first; second] in
+  let row (fact : Ledger.pending_fact) kind value = `Assoc
+    ["fact_id", `String (Request.fact_id fact.fact);
+     "kind", `String kind; "value", `String value] in
+  let answer rows = `Assoc ["decisions", `List rows] in
+  let valid = answer [row first "create_conflict" "Page counts disagree";
+                      row second "create_conflict" "Page counts disagree"] in
+  let assignments = match Decision.decode ~selected valid with
+    | Ok values -> values | Error detail -> Alcotest.fail detail in
+  let ledger = match Ledger.apply Ledger.empty ~selected assignments with
+    | Ok ledger -> ledger
+    | Error error -> Alcotest.fail (Ledger.apply_error_to_string error) in
+  Alcotest.(check int) "one conflict has both fact members" 1
+    (List.length (Ledger.conflicts ledger));
+  Alcotest.(check int) "both facts are disposed" 2
+    (List.length (Ledger.dispositions ledger));
+  let refused label raw = match Decision.decode ~selected raw with
+    | Ok _ -> Alcotest.fail (label ^ " was accepted")
+    | Error _ -> () in
+  refused "unknown fact" (answer [row (pending "stranger" "no") "exclude" "out of scope";
+                                  row second "exclude" "out of scope"]);
+  refused "duplicate fact" (answer [row first "exclude" "one"; row first "exclude" "two"]);
+  refused "missing fact" (answer [row first "exclude" "one"]);
+  refused "unknown action" (answer [row first "magic" "one"; row second "exclude" "two"])
+
 let () =
   Alcotest.run "Workspace memory request"
     [ "bounded change", [Alcotest.test_case "neighbors and remainder" `Quick
@@ -77,4 +106,6 @@ let () =
                           ; Alcotest.test_case "no change is silent" `Quick
                             test_no_change_does_not_render_or_search
                           ; Alcotest.test_case "many changes drain" `Quick
-                            test_many_facts_drain_in_bounded_requests] ]
+                            test_many_facts_drain_in_bounded_requests
+                          ; Alcotest.test_case "model answer changes selected facts only" `Quick
+                            test_model_answer_applies_only_to_selected_facts] ]

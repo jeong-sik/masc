@@ -1,0 +1,15 @@
+{
+  "head": "359302dcfce161a9139734199784125d0daf2d48",
+  "run_id": 36610234025,
+  "test_step": "success",
+  "whole_workflow_completion_inspected": false,
+  "raw_log_sha256": "9eccac694bd34048946cd1e4a1dd3134463d5ff11f492ede3e400933b57deceb",
+  "eio_backend": "unset",
+  "suites": [
+    "test_tui_account_login_pty",
+    "test_tui_lane_heading_keeps_its_reading"
+  ],
+  "account_login_scenarios": 10,
+  "native_TUI": true,
+  "HTTP": "isolated fixture responses"
+}

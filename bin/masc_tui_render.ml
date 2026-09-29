@@ -15575,9 +15575,7 @@ let render_presets (state : state) =
              state.preset_detail
              ~key:m.Tui_decode.pm_name)
       ~report:state.preset_report
-    @ List.map
-        (fun (name, reason) -> Printf.sprintf "! %s — %s" name reason)
-        unreadable
+    @ Masc_tui_preset_text.unreadable_rows ~max_cells:(max 4 (cols - 6)) unreadable
   in
   let max_scroll = max 0 (List.length detail - detail_height) in
   let scroll = max 0 (min state.config_scroll max_scroll) in

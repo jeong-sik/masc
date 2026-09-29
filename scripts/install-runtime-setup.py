@@ -327,16 +327,36 @@ def configure_many(binary, base_path, specs, selected_ids=None, verify=False, de
         expected_revision=expected_revision, verify=verify), arguments=['--base-path', str(base_path)],
         progress='Checking each model with a real reply and a harmless tool call' if verify else None)
     unmeasured = unmeasured_runtimes(result, selected) if verify else None
+    kept = kept_runtimes(result, selected) if verify else None
     if (result.get('runtime_id') != default_id or result.get('runtime_ids') != selected
             or result.get('configured') is not True or result.get('validation') != 'passed'
-            or (result.get('readiness') != ('verified' if verify else 'not_probed') and unmeasured is None)
-            or ('unverified' in result and unmeasured is None)):
+            or (result.get('readiness') != ('verified' if verify else 'not_probed')
+                and unmeasured is None and kept is None)
+            or (('unverified' in result or 'not_rechecked' in result) and unmeasured is None and kept is None)):
         raise SetupError('MASC did not confirm the selected configuration. Inspect the workspace before retrying.')
-    for row in unmeasured or []:
+    if kept is not None:
+        print(paint('! Saved without checking these again: ', 'warn') + ', '.join(terminal_text(name) for name in kept[0])
+              + '. They stay as they were.', file=sys.stderr)
+    for row in unmeasured or (kept[1] if kept is not None else []):
         print(paint('! Saved without the response and tool check: ', 'warn') + terminal_text(row['runtime_id'])
               + ' (' + terminal_text(row['code']) + '). The provider declined the check for the account\'s usage.',
               file=sys.stderr)
     return result
+
+
+def kept_runtimes(result, selected):
+    # The selected runtimes the save left uncalled (already bound, not first in
+    # the chain) with any that were called and declined for the account's
+    # usage. None unless the receipt says so in a form this script can read.
+    # Nothing here says the kept runtimes ever passed a check.
+    kept, rows = result.get('not_rechecked'), result.get('unverified')
+    if (result.get('readiness') != 'partly_checked' or not isinstance(kept, list) or not kept
+            or not all(isinstance(name, str) and name in selected for name in kept)
+            or not isinstance(rows, list)
+            or not all(isinstance(row, dict) and row.get('runtime_id') in selected and model_text(row.get('code'))
+                       for row in rows)):
+        return None
+    return kept, rows
 
 
 def unmeasured_runtimes(result, selected):
@@ -2268,7 +2288,7 @@ def ask_local_voice(binary, base):
 # Quick setup's model when Claude Code is on this computer. Chosen 2026-09-16:
 # a first conversation and its tool check answer quickly on it, and a
 # subscription spends less of its allowance than on the larger models.
-QUICK_MODEL = 'claude-sonnet-5'
+QUICK_MODEL = 'claude-sonnet-5-5'
 
 # The order quick setup takes Apple Container's own actions in. Each runs at
 # most once, so a service that never becomes ready ends in the step 4 screen
@@ -2419,7 +2439,7 @@ def journey(binary, base_path, port, timeout, resume=False):
         print('The model connection was not saved. Run masc again once the '
               'problem above is resolved.', file=sys.stderr)
         return 1
-    if configured.get('readiness') not in ('verified', 'usage_limited'):
+    if configured.get('readiness') not in ('verified', 'usage_limited', 'partly_checked'):
         print('Your workspace is saved. Run masc to continue from here.', file=sys.stderr)
         return 0
     # Before the sandbox rather than after it: voice needs no guest and no

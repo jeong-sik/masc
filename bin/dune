@@ -415,10 +415,16 @@
   base64))
 
 (library
+ (name masc_tui_sse_lines)
+ (wrapped false)
+ (modules masc_tui_sse_lines))
+
+(library
  (name masc_tui_keeper_chat_live)
  (wrapped false)
  (modules masc_tui_keeper_chat_live)
- (libraries masc masc.masc_types masc_tui_keeper_chat_projection yojson))
+ (libraries masc masc.masc_types masc_tui_keeper_chat_projection
+  masc_tui_sse_lines yojson))
 
 (library
  (name masc_tui_keeper_chat_log)
@@ -442,7 +448,7 @@
  ; masc.sse_event for the agent lifecycle payloads, read with the generated
  ; readers of the contract the bridge writes them with (RFC-0004).
  (libraries masc masc.sse_event atdgen-runtime agent_core
-  masc_tui_keeper_chat_projection yojson))
+  masc_tui_keeper_chat_projection masc_tui_sse_lines yojson))
 
 (library
  (name masc_tui_lane_declaration)
@@ -510,7 +516,7 @@
  (name masc_tui_preset_text)
  (wrapped false)
  (modules masc_tui_preset_text)
- (libraries masc masc_tui_fetched))
+ (libraries masc masc_tui_fetched masc_tui_message_layout))
 
 (library
  (name masc_tui_mcp)
@@ -798,6 +804,12 @@
  (preprocess
   (pps ppx_enumerate))
  (libraries base64 masc.masc_compression))
+
+(library
+ (name masc_tui_play_qr)
+ (wrapped false)
+ (modules masc_tui_play_qr)
+ (libraries qrc))
 
 (library
  (name masc_tui_link)
@@ -1670,6 +1682,12 @@
  (modules masc_tui_overview_team)
  (libraries masc masc_types masc_tui_types))
 
+(library
+ (name masc_tui_overview_cache)
+ (wrapped false)
+ (modules masc_tui_overview_cache)
+ (libraries masc masc_types masc_tui_types masc_tui_overview_team masc_tui_overview_tasks))
+
 ;; The Overview's GOALS section: whether the fleet's work moves any goal. A
 ;; library so a test can draw it from a fixture of the server's goal tree.
 (library
@@ -1735,6 +1753,7 @@
  (public_name masc-tui)
  (package masc)
  (libraries
+  masc_tui_play_qr
   masc_tui_account_login
   masc_tui_sgr_text
   masc_tui_emblem_screen
@@ -1774,6 +1793,7 @@
   masc.sse_wire
   masc_tui_task_flow
   masc_tui_overview_team
+  masc_tui_overview_cache
   masc_tui_overview_goals
   masc_tui_overview_providers
   masc.masc_tool_blob_store
@@ -1869,6 +1889,7 @@
   masc_tui_keeper_chat_projection
   masc_tui_keeper_chat_queue
   masc_tui_observer
+  masc_tui_sse_lines
   masc_tui_acting
   masc_tui_command
   masc_tui_gate_text

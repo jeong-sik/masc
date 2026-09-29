@@ -125,6 +125,7 @@ type misc_operation =
   | Misc_msx_step_until_change
   | Misc_msx_peek
   | Misc_msx_ram_diff
+  | Misc_portrait_read
   | Misc_dos_load
   | Misc_dos_eject
   | Misc_dos_screen
@@ -147,6 +148,15 @@ val misc_tool_name : misc_operation -> string
 
 val misc_operation_of_tool_name : string -> misc_operation option
 (** Parse a canonical misc wire name at the dispatch boundary. *)
+
+(** What a call does with the shared DOS machine's controller (RFC
+    play-link-for-the-shared-machine §2.8). *)
+type dos_controller_need =
+  | Takes_controller  (** moves the machine, so it needs the controller *)
+  | Hands_controller  (** [masc_dos_pass]: gives the controller to someone *)
+  | No_controller  (** reads or saves the machine, or is not a DOS call *)
+
+val dos_controller_need : misc_operation -> dos_controller_need
 
 val misc_registered_schema : misc_operation -> Masc_domain.tool_schema option
 (** The schema [Tool_misc] registers for an operation, or [None] for the two web

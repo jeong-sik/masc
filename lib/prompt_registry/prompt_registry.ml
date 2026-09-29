@@ -751,8 +751,7 @@ let resolve_prompt key =
 (** Get a prompt value. Resolution: override > file > missing *)
 let get_prompt key = (resolve_prompt key).effective
 
-let resolve_and_render_prompt_template key vars =
-  let resolved = resolve_prompt key in
+let render_resolved_prompt_template key resolved vars =
   if String.trim resolved.effective = "" then
     Error (Printf.sprintf "Prompt '%s' is missing" key)
   else
@@ -780,11 +779,14 @@ let resolve_and_render_prompt_template key vars =
              "Prompt '%s' metadata template_variables drift from effective template: metadata=[%s] effective=[%s]"
              key (String.concat ", " metadata_variables)
              (String.concat ", " effective_variables));
-    Result.map
-      (fun rendered -> resolved, rendered)
-      (render_template
-         ~template_variables:effective_variables
-         ~template:resolved.effective ~vars ())
+    render_template
+      ~template_variables:effective_variables
+      ~template:resolved.effective ~vars ()
+
+let resolve_and_render_prompt_template key vars =
+  let resolved = resolve_prompt key in
+  Result.map (fun rendered -> resolved, rendered)
+    (render_resolved_prompt_template key resolved vars)
 
 let render_prompt_template key vars =
   Result.map snd (resolve_and_render_prompt_template key vars)

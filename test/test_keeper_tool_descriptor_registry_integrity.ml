@@ -1376,7 +1376,7 @@ let test_masc_board_descriptions_disambiguate_post_id_flow () =
     (schema_property_int get_schema.input_schema "comment_limit" "maximum");
   Alcotest.(check (option int))
     "masc_board_post_get tail minimum"
-    (Some 1)
+    (Some 0)
     (schema_property_int get_schema.input_schema "comment_tail" "minimum");
   Alcotest.(check (option int))
     "masc_board_post_get tail maximum"
@@ -1576,6 +1576,7 @@ let test_concurrent_execution_opt_ins_are_exact () =
     ; "keeper_lane_status"
     ; "keeper_library_read"
     ; "keeper_library_search"
+    ; "keeper_portrait_read"
     ; "keeper_surface_read"
     ; "keeper_tasks_audit"
     ; "keeper_tasks_list"

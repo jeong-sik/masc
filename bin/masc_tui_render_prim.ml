@@ -307,6 +307,9 @@ let chat_markdown_palette ~closing : Markdown.palette =
   ; emphasis = (Ansi.italic, Ansi.no_italic)
   ; strike = (Ansi.strike, Ansi.no_strike)
   ; code = (Theme.Syntax.code_span, closing)
+  (* QR contrast is functional, even under NO_COLOR. The source is sanitized
+     before Markdown creates these SGRs, so a guest cannot inject escapes. *)
+  ; code_qr = ("\027[30;47m", "\027[0m" ^ closing)
   (* Bold alone. [white] is a colour like any other -- on a light background
      it is the background -- so painting a heading with it hid the heading on
      exactly the terminals that read it as text. Bold already says heading. *)
@@ -3121,6 +3124,24 @@ let runtime_quota_badge (runtime : Masc.Tui_decode.runtime_option) =
              Printf.sprintf "quota exhausted (resets %02d:%02d)"
                tm.Unix.tm_hour tm.Unix.tm_min
            | None -> "quota exhausted (no reset stated)")
+        ^ Ansi.reset )
+
+(* The other half of "alive on paper": this process saw a 429 on the runtime
+   whose provider wait has not ended and no successful answer has cleared.
+   It is a different fact from the quota
+   window above, so a runtime can carry both. [resets_at] is the provider's
+   own Retry-After and is present only while it is still ahead. *)
+let runtime_rate_limit_badge (runtime : Masc.Tui_decode.runtime_option) =
+  if not runtime.ro_rate_limited then None
+  else
+    Some
+      ( (Theme.warn ())
+        ^ (match runtime.ro_rate_limit_resets_at with
+           | Some resets_at ->
+             let tm = Unix.localtime resets_at in
+             Printf.sprintf "rate limited (retry %02d:%02d)" tm.Unix.tm_hour
+               tm.Unix.tm_min
+           | None -> "rate limited")
         ^ Ansi.reset )
 
 

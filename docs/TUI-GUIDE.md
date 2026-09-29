@@ -70,6 +70,35 @@ loaded. `Esc` returns. The directory starts empty;
 the [MSX cartridges runbook](operations/msx-carts-runbook.md) says what the
 machine accepts and where the images come from.
 
+## Shared DOS machine
+
+Open `:` then `go DOS` to watch the same live DOS screen an invited player
+sees at `/play`. The TUI view is a spectator: `Esc` returns and `+`/`-`
+resize it; game input and turn changes go through the server's controller.
+
+## Shared DOS play invites
+
+Select a Keeper chat to use the TUI composer. `/play invites` lists invites, `/play invite <name>
+<hours>` issues one, `/play link` reopens the last link issued in this TUI
+session, `/play qr` shows that link as a scannable terminal QR, and
+`/play revoke <name>` removes it. Issuance requires
+an admin operator credential, token-required authentication and
+`MASC_HTTP_BASE_URL`. The one-time link appears in a local TUI reply (it is
+not sent to the Keeper) and
+is sent through OSC 52 for copying; terminal clipboard support varies. The
+TUI keeps the last link only until it exits or that invite is revoked.
+The QR stays in this TUI process; if the chat pane is too small to display it
+without wrapping, the command asks for a wider or taller terminal.
+If the issue request has no trustworthy answer, inspect the invite list and
+revoke that name before retrying because the original link cannot be recovered.
+If revocation reports a controller release failure or an unknown outcome,
+repeat `/play revoke <name>`: a second request can release a controller even
+after the invite credential was deleted.
+
+The invited person opens the link in a browser to watch and play the shared
+DOS machine. The TUI can also watch through `go DOS` or the `go MSX` menu's
+`watch DOS machine` entry when a DOS machine is loaded.
+
 ## Options
 
 | Option | Default | Effect |
@@ -344,6 +373,11 @@ The `Changes` tab lists the files this keeper's calls wrote, newest first.
 
 Workspace health, agent count, pending approvals, the Attention list, and
 active tasks.
+
+The Goals block uses one row per active Goal: title, attention state, linked
+task count, and due date. The task count describes linked work, not progress
+against the Goal's metric. Open Planning → Goals for the recorded owner,
+metric, proof, and activity; an unknown owner is shown explicitly there.
 
 ```
  MASC Overview  [me]  10:54:52  [connected]
@@ -1100,6 +1134,15 @@ provider accepted anything. `DIGEST ONLY` means a producer prompt-block digest
 is retained without same-turn exact text. `BYTES ONLY` means only the component
 byte count is available. The inspector never joins independent readings by
 label, position, or similar-looking content.
+
+#### Reading chat loading errors
+
+If saved history, older messages, or the memory journal cannot be loaded, a
+short warning above the input points to `/errors`. Run it in the open Keeper
+chat to put the current full details in the local conversation log, where
+lines wrap and you can scroll back through them. Hidden memory-journal errors
+are included. This reads the recorded failures without sending a message or
+retrying a request; no recorded error does not imply loading has finished.
 
 #### Copying a reply
 
@@ -2027,13 +2070,18 @@ out the two commands.
 own binary. `start-masc.sh` builds and restarts the server (`bin/main_eio.exe`)
 and does not touch it, so a server restart leaves the TUI on the binary it
 started with. Rebuild with `dune build bin/masc_tui.exe`, then quit and reopen
-the TUI. `scripts/tui-graceful-restart.sh --build` does that hand quit for you:
-it builds first (a failed build leaves the running session untouched), sends
-the running surface `SIGTERM`, and only starts the fresh binary after the old
-session's per-PID log carries a graceful row (`exit: normal (signal SIGTERM)`,
+the TUI. To restart every local TUI process at once, inspect the target PIDs
+with `scripts/tui-graceful-restart.sh --dry-run` before running
+`scripts/tui-graceful-restart.sh --build`. The script searches the system for
+all processes named `masc_tui.exe` or `masc-tui`, including other checkouts and
+installed copies. `--base-path` selects the exit-log location and new TUI
+workspace; it does not narrow the processes to stop. The script builds first
+(a failed build leaves the running sessions untouched), sends each matched
+process `SIGTERM`, and starts one fresh binary only after every old process's
+per-PID log carries a graceful row (`[masc-tui] exit: normal (signal SIGTERM)`,
 the vocabulary above). A session that does not end within `--timeout` is left
-alone — the script never escalates to `SIGKILL` and never starts a second
-surface on top of a live one.
+alone — the script never escalates to `SIGKILL` and never starts a new TUI
+while a matched session remains live.
 
 **Header shows `[disconnected]`.** The server is not answering on
 `127.0.0.1:<port>`. Keepers and the Tasks panel keep working; Approvals, Board,

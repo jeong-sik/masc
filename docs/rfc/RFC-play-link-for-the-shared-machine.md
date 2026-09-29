@@ -129,11 +129,11 @@ related: ["0439", "machine-spectating-goes-through-lanes"]
 - 회수는 `CanAdmin` 만 한다. `DELETE /api/v1/play/invites/<이름>` 와 TUI `/play revoke <이름>`.
   - `Auth.delete_credential` 로 지운다.
   - 그 이름이 조종권을 쥐고 있으면 같이 비운다. `Dos_lane.release_left ~holder ~announce` 가 이미
-    "holder 가 아직 쥐고 있으면 비운다"를 한다. 떠난 사람이 조종권을 쥔 채 사라지는 경우를
-    푸는 길은 이것 하나다. 시간이 지나서 풀리는 규칙은 두지 않는다.
+    "holder 가 아직 쥐고 있으면 비운다"를 한다. 떠난 사람이 쥔 조종권은 이 회수와 §2.8 의
+    "떠난 조종자" 규칙으로만 푼다. 오래 가만히 있었다고 푸는 규칙은 두지 않는다.
   - credential 을 먼저 지우고 조종권을 푼다. 초대받은 사람이 지우기 전에 보낸 요청이 푼 뒤에 기계에
     닿으면 빈 조종권을 다시 잡을 수 있다. 그 이름은 더 요청을 보내지 못하므로 조종권이 묶인다.
-    이 경우와 아래의 기한 지난 초대는 3단계의 "떠난 조종자" 규칙이 푼다(§2.8).
+    이 경우와 기한 지난 초대는 "떠난 조종자" 규칙이 푼다(§2.8).
 - 목록: `GET /api/v1/play/invites` (`CanAdmin`). 이름, 기한, 지금 조종자인지.
 
 ### 2.5 DOS 사람 입력 라우트
@@ -162,12 +162,13 @@ related: ["0439", "machine-spectating-goes-through-lanes"]
 
 ### 2.7 외부 에이전트
 
-- 초대 credential 로 MCP 에 붙는다. `tools/list` 에는 이 credential 이 부를 수 있는 도구만 나온다.
-- 지금 `/mcp` 는 도구를 고르기 전에 전송 계층에서 `CanReadState` 를 요구한다
-  (`Server_auth.verify_mcp_auth`, observer stream 과 H2 게이트웨이도 같다). 1단계로 다섯 도구의
-  catalog 권한은 바뀌었지만, 이 문이 닫혀 있어 `Player` 는 아직 MCP 로 닿지 못한다
-  (`test_server_auth_dashboard_actor_resolution` 이 이 거절을 확인한다). 6단계는 이 문을
-  `Player` 에게 여는 방법부터 정한다. 도구마다 권한을 거는 뒷단 검사는 이미 있다.
+- 초대 credential 은 `/mcp/play` 로 MCP 에 붙는다. 이 문은 `CanPlayMachine` 을 요구한다.
+  `/mcp` 는 계속 `CanReadState` 를 요구하므로 초대 credential 로는 열리지 않는다.
+- `/mcp/play` 는 catalog 권한이 `CanPlayMachine` 인 도구만 `tools/list` 에 보여 주고, 보여 준 도구만 부를 수 있다.
+- `/mcp/play` 는 `initialize`, `server/discover`, `ping`, `tools/list`, `tools/call` 만 받는다.
+  다른 메서드는 유효한 credential 이면 누구나, 또는 credential 없이도 받는 것이라 이 문에서는 거절한다.
+- `/mcp/play` 는 서버 스트림을 열지 않는다. GET agent stream 과 `subscriptions/listen` 은
+  작업공간 전체의 이벤트를 나른다.
 - `masc_dos_screen` 은 keeper 호출에만 PNG 를 붙인다(`lib/keeper/keeper_dos_screen.ml`). 초대 credential 호출에도 프레임 이미지를
   돌려준다. 삼국지3 메뉴는 그래픽 한글이라 이미지가 없으면 읽을 수 없다.
 - 외부 에이전트는 기계 입력 이름(`["down","return"]`)을 그대로 쓴다. 패드는 사람을 위한 층이다.
@@ -175,12 +176,23 @@ related: ["0439", "machine-spectating-goes-through-lanes"]
 ### 2.8 차례
 
 - 차례는 `pass` 로만 바뀐다. 화면을 읽어 누구 차례인지 추측하지 않는다.
-- `masc_dos_pass` 의 `to` 는 keeper 이름과 초대 이름을 받는다. 둘 다 아닌 이름은 거절한다.
+- `masc_dos_pass` 의 `to` 는 keeper 이름, 운영자(`Admin`) 이름, 기한이 남은 초대 이름을 받는다
+  (`Play_seat.hand_to`, 플레이 페이지가 보여 주는 목록과 같다). 다른 이름은 거절하고 아무것도 바꾸지 않는다.
+- 이 검사는 모든 요청이 credential 을 가져야 하는 워크스페이스(인증 켜짐, `require_token = true`)에서만 한다.
+  초대 발급 조건과 같다. 그렇지 않은 곳에서는 이름을 스스로 정할 수 있어 명단이 없으므로 지금처럼 넘긴다.
+- Keeper 가 움직이든, 플레이 페이지 라우트든, MCP 클라이언트든 도구를 부르기 전에 같은 문
+  (`Keeper_dos_controller.before_call`)을 지난다.
 - 비어 있는 조종권은 지금처럼 다음에 움직이는 쪽이 가져간다.
-- 기한이 지난 초대는 조종권을 쥐고 있어도 넘길 수 없다. 지금 "떠난 조종자"(`Keeper_dos_controller.holder_left`)는
-  멈춘 keeper 만 알아본다. 3단계에서 기한 지난 `Player` credential 을 떠난 조종자로 본다.
-  회수된 이름은 credential 이 지워져 초대였다는 흔적이 없다. "credential 이 없는 이름" 으로 가르면
-  인증이 꺼진 워크스페이스의 사람까지 떠난 것으로 보게 되므로, 회수 기록을 남길지 3단계에서 같이 정한다.
+- "떠난 조종자"(`Keeper_dos_controller.holder_left`)는 다음 움직임 전에 풀린다.
+  - 멈춘 keeper.
+  - 기한이 지난 초대. 기한은 토큰 검사와 같은 규칙(`Play_invite.expired`: 초 단위, 지금 > 기한)으로 판단해서,
+    기한이 끝나는 그 초 동안은 아직 움직일 수 있는 것으로 본다.
+  - 인증이 켜지고 토큰이 필수인 워크스페이스에서, keeper 가 아닌 이름 중 credential 파일이 없는 이름(회수된 초대).
+    이런 곳에서는 credential 없이 기계를 움직일 수 없으므로 따로 회수 기록을 남기지 않는다.
+    파일이 있는데 읽지 못하면 떠났다고 볼 근거가 없으므로 조종권을 지킨다.
+  - 기한이 지난 운영자(`Admin`)·에이전트(`Worker`) credential 은 풀지 않는다. 같은 이름으로 다시 발급받아
+    돌아오기 때문이다(`masc_auth_refresh`, TUI 의 운영자 토큰 갱신). 초대는 다시 발급되지 않는다.
+  - 인증이 꺼진 곳에서는 이름을 스스로 정할 수 있어 떠났는지 알 수 없으므로, credential 이 없는 이름도 조종권을 지킨다.
 
 ### 2.9 masc 패드
 
@@ -253,8 +265,7 @@ related: ["0439", "machine-spectating-goes-through-lanes"]
 3. **DOS 입력 라우트와 `pass` 대상.** §2.5, §2.8. 찾을 자리: `masc_dos_pass` 핸들러가 `to` 를 검사하는 곳.
 4. **masc 패드.** 버튼 타입, 배치 파서, 삼국지3 배치 하나.
 5. **플레이 페이지.** §2.6, TUI QR. 찾을 자리: 대시보드나 TUI 에 이미 있는 live 그리기 코드.
-6. **MCP.** §2.7. 찾을 자리: `/mcp` 전송 계층 권한(`Server_auth.verify_mcp_auth`, H2 게이트웨이),
-   MCP `tools/list` 가 도구를 거르는 곳, `masc_dos_screen` 이 PNG 를 붙이는 조건.
+6. **MCP.** §2.7. `/mcp/play` 문(프로필 `Seat`)과 `masc_dos_screen` 이 PNG 를 붙이는 조건.
 
 ## 7. 나중에 볼 것
 

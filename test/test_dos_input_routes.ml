@@ -169,6 +169,11 @@ let test_a_person_plays_in_turn () =
             ; "/api/v1/dos/step", {|{"until_ready":"yes"}|}, "a text until_ready is a 400"
             ; "/api/v1/dos/press", {|not json|}, "a body that is not JSON is a 400"
             ];
+          let stray = post ~token:operator "/api/v1/dos/pass" {|{"to":"nobody"}|} in
+          check int "a pass to a name not at the machine is a 400" 400 (status_of stray);
+          check bool "and says so" true (contains ~sub:"not at the DOS machine" (message_of stray));
+          check (option string) "and the operator keeps the controller" (Some "operator")
+            (controller ());
           check int "the operator passes to the invite" 200
             (status_of (post ~token:operator "/api/v1/dos/pass" {|{"to":"minsu"}|}));
           check (option string) "the invite holds the controller" (Some "minsu") (controller ());
@@ -188,6 +193,74 @@ let test_a_person_plays_in_turn () =
             (status_of (post ~token:player "/api/v1/dos/pass" {|{"to":"operator"}|}));
           check (option string) "the operator holds it again" (Some "operator") (controller ()))))
 
+let test_expired_invite_releases_controller_on_next_move () =
+  with_dir "dos-expired-invite-" (fun base_path ->
+    Auth.save_auth_config base_path
+      { Masc_domain.default_auth_config with enabled = true; require_token = true };
+    let operator = token_for base_path ~agent_name:"operator" ~role:Masc_domain.Admin in
+    let player = token_for base_path ~agent_name:"minsu" ~role:Masc_domain.Player in
+    let state = Masc.Mcp_server.For_testing.create_state ~base_path in
+    Eio_main.run (fun env ->
+      Masc_test_deps.init_eio_clock env;
+      let post ~token target body = dispatch ~state ~target ~token:(Some token) ~body in
+      let dir = Filename.temp_dir "dos-expired-machine-" "" in
+      Fun.protect
+        ~finally:(fun () ->
+          (match Dos_lane.eject ~who:(Option.value (controller_opt ()) ~default:"operator") ~announce:ignore () with
+           | Ok () | Error _ -> ());
+          remove_tree dir)
+        (fun () ->
+          dos_ok "load"
+            (Dos_lane.load ~who:"operator" ~ledger_dir:(Filename.concat dir "ledger")
+               ~saves_dir:(Filename.concat dir "saves")
+               ~checkpoint_dir:(Filename.concat dir "checkpoints") ~program_name:"game.com"
+               ~program_bytes:hello_com ~files:[] ~announce:ignore);
+          check int "the operator passes to a valid invite" 200
+            (status_of (post ~token:operator "/api/v1/dos/pass" {|{"to":"minsu"}|}));
+          check int "the valid invite still holds the controller" 400
+            (status_of (post ~token:operator "/api/v1/dos/pass" {|{"to":"operator"}|}));
+          check (option string) "the valid invite keeps its turn" (Some "minsu") (controller ());
+          let credential =
+            match Auth.load_credential base_path "minsu" with
+            | Some credential -> credential
+            | None -> fail "the invite credential disappeared"
+          in
+          let expiry = "2030-01-01T00:00:00Z" in
+          Auth.save_credential base_path { credential with expires_at = Some expiry };
+          let expiry_second =
+            match Time_codec.parse_rfc3339_opt expiry with
+            | Some at -> at
+            | None -> fail "the fixed expiry did not parse"
+          in
+          let holder_left ~now =
+            Masc.Keeper_dos_controller.holder_left
+              ~config:(Masc.Mcp_server.workspace_config state) ~now "minsu"
+          in
+          check bool "the invite is still eligible during its expiry second" true
+            (Option.is_none (holder_left ~now:(expiry_second +. 0.5)));
+          check bool "the invite has left once that second ends" true
+            (match holder_left ~now:(expiry_second +. 1.) with
+             | Some Masc.Tool_misc_dos_lane.Player_expired -> true
+             | Some (Masc.Tool_misc_dos_lane.Keeper_stopped | Masc.Tool_misc_dos_lane.No_credential)
+             | None -> false);
+          Auth.save_credential base_path
+            { credential with expires_at = Some "2000-01-01T00:00:00Z" };
+          check bool "the expired bearer cannot move" true
+            (Result.is_error (Auth.find_credential_by_token base_path ~token:player));
+          check int "the operator moves after expiry without a manual revoke" 200
+            (status_of (post ~token:operator "/api/v1/dos/pass" {|{"to":"operator"}|}));
+          check (option string) "the operator now holds the controller" (Some "operator") (controller ());
+          check bool "the expired turn was released in the lane ledger" true
+            (List.exists
+               (fun entry ->
+                 String.equal entry.Lane_activity.who "minsu"
+                 && String.equal entry.Lane_activity.action "released (idle)")
+               (Dos_lane.recent_activity ())))))
+
 let () =
   run "dos-input-routes"
-    [ ("routes", [ test_case "a person presses, types, steps and passes in turn" `Quick test_a_person_plays_in_turn ]) ]
+    [ ("routes",
+       [ test_case "a person presses, types, steps and passes in turn" `Quick test_a_person_plays_in_turn
+       ; test_case "an expired invite releases its turn on the next move" `Quick
+           test_expired_invite_releases_controller_on_next_move
+       ]) ]

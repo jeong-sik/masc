@@ -3,7 +3,7 @@
 (using menhir 3.0)
 
 (name masc)
-(version 0.46.0)
+(version 0.48.0)
 
 ; Local-sandbox-only: vendor/ocaml-msx carries a copy of the pinned
 ; ocaml-msx package so sandboxes whose opam switch lacks the pin can still
@@ -72,6 +72,7 @@
   ; Standard dependencies
   (re (>= 1.10))
   (ptime (>= 1.2))
+  (qrc (= 0.2.0))
   ; Upper bound, not just a floor. yojson 3.0 landed through a floor-only
   ; constraint on a cache miss and broke every build on main (#28327); the
   ; repair raised the floor and left 3 -> 4 open (#28543). --locked pins the

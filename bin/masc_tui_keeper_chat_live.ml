@@ -87,7 +87,9 @@ type delta =
   | Undecodable of string
 
 type t =
-  { pending : Buffer.t
+  { lines : Masc_tui_sse_lines.t
+        (* Holds a line until it ends: half a line parses as invalid JSON,
+           and reporting that would be wrong. *)
   ; mutable pending_seq : int option
         (* The [id:] of the frame being read, held until the frame's end;
            every [data:] line of the frame is tagged with it. It lives on [t],
@@ -96,7 +98,7 @@ type t =
            (acceptance, the settle-time run_error) cannot inherit it. *)
   }
 
-let create () = { pending = Buffer.create 4096; pending_seq = None }
+let create () = { lines = Masc_tui_sse_lines.create (); pending_seq = None }
 
 let string_field fields name =
   match List.assoc_opt name fields with
@@ -461,22 +463,7 @@ let line_deltas t raw_line =
       | exception Yojson.Json_error detail ->
           tagged [ Undecodable ("invalid JSON: " ^ detail) ])
 
+(* [concat_map] visits lines in order, which the [pending_seq] state depends
+   on: an id line must be seen before the data line it tags. *)
 let feed t chunk =
-  Buffer.add_string t.pending chunk;
-  let buffered = Buffer.contents t.pending in
-  match String.rindex_opt buffered '\n' with
-  | None ->
-      (* No line has ended yet. Holding the bytes is the whole point: half a
-         line parses as invalid JSON, and reporting that would be wrong. *)
-      []
-  | Some last_newline ->
-      let complete = String.sub buffered 0 last_newline in
-      let remainder =
-        String.sub buffered (last_newline + 1)
-          (String.length buffered - last_newline - 1)
-      in
-      Buffer.clear t.pending;
-      Buffer.add_string t.pending remainder;
-      (* [concat_map] visits lines in order, which the [pending_seq] state
-         depends on: an id line must be seen before the data line it tags. *)
-      String.split_on_char '\n' complete |> List.concat_map (line_deltas t)
+  Masc_tui_sse_lines.feed t.lines chunk |> List.concat_map (line_deltas t)

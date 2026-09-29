@@ -270,7 +270,7 @@ let test_raw_rgb_refuses_a_frame_that_contradicts_itself () =
     (Masc_tui_graphics.place_rgb ~data:"" ~pixel_width:4 ~pixel_height:2 ~rows:5)
 ;;
 
-(* What a terminal does with an [o=z] payload: RFC 1950 inflate. *)
+(* Inflate the PNG IDAT, independently of the encoder. *)
 let inflate data =
   let input = De.bigstring_create De.io_buffer_size in
   let output = De.bigstring_create De.io_buffer_size in
@@ -293,8 +293,8 @@ let inflate data =
 (* Straight-alpha pixels under a stable identity: the portrait's transparent
    surround is blended by the terminal, and a second transfer under the same
    ids replaces the first rather than stacking. *)
-let test_raw_rgba_replaces_under_its_identity () =
-  let w = 3 and h = 2 in
+let test_rgba_png_replaces_under_its_identity () =
+  let w = 160 and h = 160 in
   let data = String.init (w * h * 4) (fun index -> Char.chr (index mod 256)) in
   let keys, payload =
     match
@@ -305,14 +305,32 @@ let test_raw_rgba_replaces_under_its_identity () =
     | first :: rest ->
         let keys, first_payload = keys_and_payload first in
         (keys, String.concat "" (first_payload :: List.map (fun body -> snd (keys_and_payload body)) rest))
-    | [] -> failf "raw RGBA placement produced no escape"
+    | [] -> failf "RGBA PNG placement produced no escape"
   in
   let says key = List.exists (String.equal key) keys in
-  check bool "the pixels travel zlib-compressed" true (says "o=z");
-  check string "and inflate back to the frame" data (inflate (Base64.decode_exn payload));
-  check bool "the payload is RGBA" true (says "f=32");
-  check bool "and says how wide it is" true (says "s=3");
-  check bool "and how tall" true (says "v=2");
+  check bool "no Kitty transport inflater" false (says "o=z");
+  check bool "the payload is PNG" true (says "f=100");
+  let png = Base64.decode_exn payload in
+  check string "PNG signature" "\137PNG\r\n\026\n" (String.sub png 0 8);
+  check int "PNG width" w (Int32.to_int (String.get_int32_be png 16));
+  check int "PNG height" h (Int32.to_int (String.get_int32_be png 20));
+  check int "8-bit channels" 8 (Char.code png.[24]);
+  check int "straight alpha RGBA" 6 (Char.code png.[25]);
+  let rec idat offset acc =
+    let length = Int32.to_int (String.get_int32_be png offset) in
+    match String.sub png (offset + 4) 4 with
+    | "IEND" -> String.concat "" (List.rev acc)
+    | "IDAT" -> idat (offset + length + 12) (String.sub png (offset + 8) length :: acc)
+    | _ -> idat (offset + length + 12) acc
+  in
+  let scanlines = inflate (idat 8 []) in
+  check int "one filter byte per row" ((w * 4 + 1) * h) (String.length scanlines);
+  for row = 0 to h - 1 do
+    let offset = row * (w * 4 + 1) in
+    check char "unfiltered row" '\000' scanlines.[offset];
+    check string "RGBA arrives losslessly" (String.sub data (row * w * 4) (w * 4))
+      (String.sub scanlines (offset + 1) (w * 4))
+  done;
   check bool "under the caller's image id" true (says "i=41");
   check bool "and placement id" true (says "p=1");
   check bool "the cursor stays where it was" true (says "C=1");
@@ -375,7 +393,7 @@ let () =
         ; test_case "a frame that contradicts itself is refused" `Quick
             test_raw_rgb_refuses_a_frame_that_contradicts_itself
         ; test_case "raw RGBA replaces under its identity" `Quick
-            test_raw_rgba_replaces_under_its_identity
+            test_rgba_png_replaces_under_its_identity
         ] )
     ; ( "tmux"
       , [ test_case "passthrough doubles every escape" `Quick

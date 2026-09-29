@@ -1,0 +1,9 @@
+{
+  "mode": "png",
+  "pid": 2656,
+  "parent": 2651,
+  "transfer_bytes": 4218,
+  "cursor_reply": "b'\\x1b[1;1R'",
+  "reply_received": true,
+  "repeat_survived": true
+}

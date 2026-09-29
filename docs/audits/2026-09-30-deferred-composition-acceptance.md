@@ -92,6 +92,11 @@ do not establish spontaneous discovery and selection.
   lacked the required `description`. That description is now supplied, and
   the complete fixture was checked against the catalog parser's required and
   allowed fields. The newly corrected candidate remains pending native CI.
+  The next run [36646271028](https://github.com/jeong-sik/masc/actions/runs/36646271028)
+  passed discovery, then the real loader refused to read current work scope
+  because the fixture had not installed its Keeper owner inventory. The
+  retained-Agent fixture now persists its metadata and installs a real owner
+  under its Eio switch. Native verification of this correction is pending.
   No joined execution pass is claimed.
 - Current production execution: not established by this audit.
 - Unprompted model selection and independently checked task outcome: not measured.

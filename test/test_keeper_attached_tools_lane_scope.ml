@@ -97,6 +97,20 @@ let with_bundle
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   prepare dir;
   let meta = make_meta () in
+  (* The production loader reads current task ownership from the live owner
+     inventory before recording a load receipt. A retained Agent therefore
+     needs the same persisted metadata and owner lifecycle as a real turn. *)
+  (match retained_agent with
+   | None -> ()
+   | Some _ ->
+     let config = Workspace.default_config dir in
+     (match Keeper_meta_store.replace_snapshot config meta with
+      | Ok () -> ()
+      | Error detail -> fail detail);
+     (match Keeper_owner_registry.install_from_store ~sw ~operation_runner:None
+       ~on_turn_slot_released:None config with
+      | Ok count -> check int "the retained Agent has one real metadata owner" 1 count
+      | Error error -> fail (Keeper_owner_registry.install_error_to_string error)));
   (* No skills unless a case passes a snapshot and its catalog, so the bundle
      carries no composition tools and the only difference between the two
      shapes is the one under test. A Skill-bearing bundle is refused without a

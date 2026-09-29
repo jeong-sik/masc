@@ -62,7 +62,7 @@ let setup f =
   ensure_dir (Filename.concat base Common.masc_dirname);
   let config = Workspace.default_config base in
   Masc_test_deps.write_sandbox_image_catalog ~base_path:config.base_path
-    [ "base", Keeper_sandbox_image.default_tag ];
+    [ "base", Masc_test_deps.live_sandbox_image_tag ];
   Keeper_registry.For_testing.clear ();
   let meta = make_meta ~name:"via-keeper" in
   let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in

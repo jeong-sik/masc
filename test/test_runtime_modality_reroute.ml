@@ -220,7 +220,11 @@ let test_checkpoint_media_drives_reroute_and_floor () =
   | Error err ->
       failf "expected InvalidConfig, got %s" (Agent_core.Error.to_string err)
 
-let test_checkpoint_resume_deduplicates_initial_history () =
+(* A message the checkpoint repeats from the initial messages needs nothing
+   its first copy did not, so the resumed run needs each modality once, in the
+   order the history first shows it, as a run over the history without the
+   repeat would. *)
+let test_checkpoint_history_repeated_in_initial_messages_adds_no_modality () =
   let shared =
     message_with_blocks
       [ Agent_core.Types.Text "shared image history"
@@ -233,18 +237,18 @@ let test_checkpoint_resume_deduplicates_initial_history () =
       ; Agent_core.Types.audio_block ~media_type:"audio/wav" ~data:"def" ()
       ]
   in
-  let active_messages =
-    Runtime_agent.For_testing.messages_for_run_with_checkpoint
+  let required ~checkpoint_messages =
+    Runtime_agent.For_testing.required_modalities_for_run_with_checkpoint
       ~initial_messages:[ shared ]
-      ~checkpoint_messages:[ shared; checkpoint_audio ]
+      ~checkpoint_messages
+      ~goal_blocks:[ Agent_core.Types.Text "follow up" ]
   in
-  check int "shared history is not duplicated" 2 (List.length active_messages);
   check (list string) "required modalities include both sources"
     [ "image"; "audio" ]
-    (Runtime_agent.For_testing.required_modalities_for_run_with_checkpoint
-       ~initial_messages:[ shared ]
-       ~checkpoint_messages:[ shared; checkpoint_audio ]
-       ~goal_blocks:[ Agent_core.Types.Text "follow up" ])
+    (required ~checkpoint_messages:[ shared; checkpoint_audio ]);
+  check (list string) "the repeat changes nothing"
+    (required ~checkpoint_messages:[ checkpoint_audio ])
+    (required ~checkpoint_messages:[ shared; checkpoint_audio; shared ])
 
 (* The decision is a pure function: identical inputs yield identical output. *)
 let test_decision_is_deterministic () =
@@ -868,8 +872,8 @@ let () =
             test_history_media_floor_rejects_before_provider
         ; test_case "checkpoint media drives reroute and floor" `Quick
             test_checkpoint_media_drives_reroute_and_floor
-        ; test_case "checkpoint resume deduplicates initial history" `Quick
-            test_checkpoint_resume_deduplicates_initial_history
+        ; test_case "checkpoint history repeated in initial messages adds no modality" `Quick
+            test_checkpoint_history_repeated_in_initial_messages_adds_no_modality
         ; test_case "deterministic" `Quick test_decision_is_deterministic
         ] )
     ; ( "caps_admit_required_modalities"

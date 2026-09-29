@@ -823,6 +823,9 @@ let test_keeper_up_materializes_missing_profile_source () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "nosourceup" in
   let config = Workspace.default_config base in
+  (* keeper up refuses a sandbox_image with nothing promoted on this host. *)
+  Masc_test_deps.write_sandbox_image_catalog ~base_path:base
+    [ "base", Masc_test_deps.live_sandbox_image_tag ];
   let runtime_meta = seed_runtime_meta config name in
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->

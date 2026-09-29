@@ -1,7 +1,8 @@
 # Candle feature verification: remaining completion requirements
 
-This is a scope audit, not an acceptance or deployment verdict. The implementation
-reference is integration commit `f4673b23d7686a62ace921be5ecb588e7e072f88`.
+This is a scope audit, not an acceptance or deployment verdict. The reviewed source composition is `f915e8a3508487ec9b873486afe510971541115d`,
+including main `f077ca17de16b2c3207bba1abcee3f50968b235b`. Earlier native
+results below retain their own source identity.
 Requirements come from [the Candle RFC](../rfc/RFC-goal-candle-ledger.md),
 particularly sections3.2,3.6,3.7,3.9 and5, plus the operator decisions recorded
 in audit issue#39953: shared ownerless Goals, hard cut, and five explicit grades.
@@ -67,7 +68,9 @@ has no linked Tasks and ends as Unattributed. The positive
 and prepared Candidates. Both are useful, but neither alone proves that the
 actual successful Goal path reaches Paid.
 
-The missing scenario must connect:
+PR#40047 implements the missing scenario below. Its targeted run36600485412
+atd0bc9de53a is pending; implementation alone does not close the evidence gap.
+The new integrated source includes the scenario and verifies these boundaries:
 
 1. A persisted Goal and linked completed Task belonging to a configured Keeper.
 2. Production proof commit, then the existing HTTP confirmation handler.
@@ -82,8 +85,10 @@ will prove this orchestration path; actual provider judgments remain separate.
 ## Semantic acceptance remains incomplete
 
 The retained baseline has240 structurally valid actual-model decisions and a
-confirmed short/expanded-title grade mode divergence. The separate candidate
-experiment is ongoing. Human20Goal labels, accepted stability/fairness
+confirmed short/expanded-title grade mode divergence. The completed candidate experiment retained240 attempts (239 valid and one
+transport failure). Each of its four Grade cases returned Small20/20; all
+four describe the same CSV capability. [The complete comparison](../evidence/2026-09-30-candle-grade-explicit-outcome/README.md)
+retains unchanged-prompt Weights variance and the failed attempt. Human20Goal labels, accepted stability/fairness
 thresholds and all five grade boundaries remain uncalibrated. Assistant rubric
 proposals are not human labels. Do not infer payout readiness from type checks,
 injected judgments or a successful transport receipt.
@@ -91,3 +96,20 @@ injected judgments or a successful transport receipt.
 No source check or scoped fixture establishes the constitution's10-turn and
 1h/2h/4h/24h+ multi-runtime Keeper continuity, deployed binary identity or the
 live shared-Goal hard cut. These remain independent completion requirements.
+
+## Composed source checkpoint
+
+- Shared Goal#39975 now includes current main's exact `goal_edited` producer.
+  Locked previous values generate due/priority deltas; public snapshot, phase
+  and exact edit events each report recorded/failed after the primary commit.
+  Collector#40017 is composed with the real producer; no neighboring-snapshot
+  change inference was introduced. The historical baseline bytes stay intact.
+- Remote TUI#40053 projects authoritative HTTP rows, represents absent activity
+  and brief identity honestly, and keeps local file reads behind the existing
+  workspace match. Workspace change/loss clears destructive confirmation and
+  invalidates old history responses while preserving unsent drafts. New remote
+  sends remain unavailable under the existing attachment/spilled-file boundary.
+- The extended PNG PTY and separate held-history A→B→A scenario are implemented.
+  They have not yet passed native execution. The older failed runs are retained.
+- Nine frontend files/411 tests and full TypeScript check pass after composing
+  current main;87 changed OCaml files parse. These are not native TUI proof.

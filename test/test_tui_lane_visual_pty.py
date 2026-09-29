@@ -175,9 +175,48 @@ def main(executable: str, captures: Path | None) -> None:
     print("Lane timeline / clocks / marks / relations / links / resize: PASS")
 
 
+def run_installation_detail(executable: str) -> None:
+    fixtures = terminal.overview_event_http_fixtures()
+    fixtures["/api/v1/lane-addons"] = (200, {
+        "instances": [], "rows": [], "coverage": [],
+        "configuration": {"directory": "/fixture/lane-addons", "complete": False,
+                          "declarations": [{"id": "broken", "source_path": "/fixture/lane-addons/broken.toml",
+                                            "desired_revision": "r1", "applied_revision": None,
+                                            "instance_id": None}],
+                          "issues": [{"id": "broken", "source_path": "/fixture/lane-addons/broken.toml",
+                                      "message": "Docker image missing"}]},
+    })
+    requests: terminal.HttpRequests = []
+
+    def interact(process, master, _slave, output, _base):
+        terminal.wait_for_output(process, master, output, b"Health: ", start=0, timeout=10)
+        overview = terminal.send_and_wait(process, master, output, b":go lane add-ons\r",
+                                          b"1 declared")
+        if b"> broken" not in terminal.screen_text(overview):
+            raise AssertionError("unapplied installation was not selected")
+        terminal.send_and_wait(process, master, output, b"a", b"no available worker")
+        detail = terminal.send_and_wait(process, master, output, b"\r",
+                                        b"Installation details \xc2\xb7 broken")
+        screen = terminal.screen_text(detail)
+        if b"Esc:back  E:edit TOML" not in screen or b"Docker image missing" not in screen:
+            raise AssertionError("focused Installation detail omitted repair context")
+        returned = terminal.send_and_wait(process, master, output, b"\x1b", b"> broken")
+        if b"1 declared" not in terminal.screen_text(returned):
+            raise AssertionError("Esc did not return to the same Installation list")
+        os.write(master, b"q")
+
+    terminal.run_terminal_scenario(executable,
+        description="unapplied Installation detail preserves edit and return path",
+        interact=interact, http_fixtures=fixtures, http_requests=requests)
+    if any(path.startswith("/api/v1/lane-addons") for path, _ in requests):
+        raise AssertionError("browse-only Installation detail sent a write")
+    print("Lane Add-on Installation detail: PASS")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("executable")
     parser.add_argument("--capture-dir", type=Path)
     args = parser.parse_args()
     main(os.path.abspath(args.executable), args.capture_dir)
+    run_installation_detail(os.path.abspath(args.executable))

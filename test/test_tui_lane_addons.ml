@@ -133,6 +133,18 @@ let configuration_and_ports () =
   check bool "Enter opens the exact broken installation" true
     (issue.focus=UI.Configurations && issue.presentation=UI.Technical
      && issue.configuration_cursor=1);
+  check bool "Installation detail retains the selected source and a return path" true
+    (List.exists (String.starts_with ~prefix:"Installation details · broken.toml")
+       (UI.lines ~width:120 issue)
+     && List.exists (String.starts_with ~prefix:"?:help  Esc:back  E:edit TOML")
+       [UI.overview_hints issue]);
+  let directory_issue = UI.open_selected_instance {overview with instance_cursor=2} in
+  check bool "directory issue detail does not advertise TOML editing" true
+    (not (List.exists (fun line -> List.mem "E:edit" (String.split_on_char ' ' line))
+      (UI.lines ~width:120 directory_issue)));
+  check bool "failed refresh labels retained Add-on counts stale" true
+    (List.exists (String.ends_with ~suffix:" · STALE")
+      (UI.lines ~width:120 {overview with snapshot_read_error=Some "read failed"}));
   check bool "a configuration issue has no worker action" true
     (Result.is_error (UI.open_actions ~request_id:"01901234-1234-7000-8000-000000000001" issue));
   let refreshed = UI.reconcile_snapshot {overview with instance_cursor=1} snapshot in

@@ -686,6 +686,13 @@ let validate_pending_selection_result ~base_path name ~selection =
     ~selection
 ;;
 
+let admitted_selection_standing_result ~base_path name ~selection =
+  Keeper_event_queue_persistence.admitted_selection_standing_result
+    ~base_path
+    ~keeper_name:name
+    ~selection
+;;
+
 let ack_pending_result ~base_path name ~selection =
   Keeper_event_queue_persistence.ack_pending_result
     ~base_path
@@ -729,11 +736,25 @@ let cancel_pending_accepted_result
    a two-occurrence supersede for one keeper was refused with "cannot cancel
    pending work while an outbox transition exists" on 22 retries in eleven
    minutes, and every one of the keeper's turn acks in between would have been
-   refused the same way. *)
+   refused the same way.
+
+   A fold reads the pending list before it takes the queue lock for each
+   entry, so a turn terminal or another cancel can settle an entry first.
+   That entry answers [Fold_source_already_left] and the fold goes on to the
+   next one instead of failing the whole withdrawal. *)
+type fold_cancellation =
+  | Fold_cancelled
+  | Fold_source_already_left
+
+type fold_cancellation_receipt =
+  | Receipt_to_project of Keeper_event_queue_state.transition_receipt
+  | Receipt_already_projected
+  | Receipt_source_already_left
+
 let commit_and_project_accepted_cancellation ~base_path name ~applied_at cancellation =
-  let receipt_to_project =
+  let receipt =
     match
-      Keeper_event_queue_persistence.cancel_pending_accepted_result
+      Keeper_event_queue_persistence.cancel_pending_if_present_result
         ~base_path
         ~keeper_name:name
         ~applied_at
@@ -742,8 +763,13 @@ let commit_and_project_accepted_cancellation ~base_path name ~applied_at cancell
         ()
     with
     | Error detail -> Error detail
-    | Ok (Transition_applied receipt) -> Ok (Some receipt)
-    | Ok (Transition_already_applied receipt) ->
+    | Ok Keeper_event_queue_persistence.Cancellation_source_withdrawn ->
+      Ok Receipt_source_already_left
+    | Ok (Keeper_event_queue_persistence.Cancellation_committed (Transition_applied receipt)) ->
+      Ok (Receipt_to_project receipt)
+    | Ok
+        (Keeper_event_queue_persistence.Cancellation_committed
+          (Transition_already_applied receipt)) ->
       (* A replay: the receipt is either still waiting in the outbox (the
          earlier call died between commit and projection) or already projected.
          The slot holds one entry and nothing commits behind an unprojected
@@ -756,9 +782,11 @@ let commit_and_project_accepted_cancellation ~base_path name ~applied_at cancell
          (match Keeper_event_queue_state.transition_outbox state with
           | [ entry ]
             when String.equal entry.receipt.transition_id receipt.transition_id ->
-            Ok (Some receipt)
-          | [] | [ _ ] | _ :: _ :: _ -> Ok None))
-    | Ok (Transition_committed_followup_failed { receipt; stage; detail }) ->
+            Ok (Receipt_to_project receipt)
+          | [] | [ _ ] | _ :: _ :: _ -> Ok Receipt_already_projected))
+    | Ok
+        (Keeper_event_queue_persistence.Cancellation_committed
+          (Transition_committed_followup_failed { receipt; stage; detail })) ->
       let stage =
         match stage with
         | `Checkpoint -> "checkpoint"
@@ -772,14 +800,16 @@ let commit_and_project_accepted_cancellation ~base_path name ~applied_at cancell
            stage
            detail)
   in
-  match receipt_to_project with
+  match receipt with
   | Error detail -> Error detail
-  | Ok None -> Ok ()
-  | Ok (Some (receipt : Keeper_event_queue_state.transition_receipt)) ->
+  | Ok Receipt_source_already_left -> Ok Fold_source_already_left
+  | Ok Receipt_already_projected -> Ok Fold_cancelled
+  | Ok (Receipt_to_project (receipt : Keeper_event_queue_state.transition_receipt)) ->
     Keeper_reaction_ledger.project_event_queue_transition_outbox_result
       ~base_path
       ~keeper_name:name
       ~expected_transition_id:receipt.transition_id
+    |> Result.map (fun () -> Fold_cancelled)
 ;;
 
 let cancel_scheduled_wakes_result ~base_path name ~applied_at ~schedule_ids ~reason =
@@ -851,7 +881,8 @@ let cancel_scheduled_wakes_result ~base_path name ~applied_at ~schedule_ids ~rea
                 ~applied_at
                 cancellation
             with
-            | Ok () -> Ok (count + 1)
+            | Ok Fold_cancelled -> Ok (count + 1)
+            | Ok Fold_source_already_left -> Ok count
             | Error detail -> Error detail))
       (Ok 0)
       cancelled
@@ -904,7 +935,8 @@ let drain_owner_absent_pending_result ~base_path name ~applied_at ~reason =
                 ~applied_at
                 cancellation
             with
-            | Ok () -> Ok (count + 1)
+            | Ok Fold_cancelled -> Ok (count + 1)
+            | Ok Fold_source_already_left -> Ok count
             | Error detail -> Error detail))
       (Ok 0)
       selections

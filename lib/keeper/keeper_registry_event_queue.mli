@@ -103,6 +103,15 @@ val validate_pending_selection_result :
   selection:Keeper_event_queue_state.pending_selection ->
   (unit, string) result
 
+val admitted_selection_standing_result :
+  base_path:string ->
+  string ->
+  selection:Keeper_event_queue_state.pending_selection ->
+  (Keeper_event_queue_state.admitted_selection_standing, string) result
+(** Dispatch-time view of one admitted selection
+    ({!Keeper_event_queue_state.admitted_selection_standing}): still pending,
+    or withdrawn after intake by another transition. *)
+
 val ack_pending_result :
   base_path:string ->
   string ->

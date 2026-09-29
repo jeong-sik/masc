@@ -532,7 +532,16 @@ let test_one_intake_admits_only_one_hitl_resolution () =
             ~applied_at:1000.0
             ~selection
         with
-        | Ok _ -> ()
+        | Ok
+            (Keeper_registry_event_queue.Turn_source_acked
+               ( Keeper_registry_event_queue.Acked _
+               | Keeper_registry_event_queue.Already_acked _ )) -> ()
+        | Ok
+            (Keeper_registry_event_queue.Turn_source_acked
+               (Keeper_registry_event_queue.Ack_committed_followup_failed { detail; _ })) ->
+          failf "first approval ACK follow-up failed: %s" detail
+        | Ok Keeper_registry_event_queue.Turn_selection_withdrawn ->
+          fail "first approval ACK found its selection withdrawn"
         | Error detail -> failf "first approval ACK failed: %s" detail)
      | _ -> fail "one HITL intake must carry one ACK selection");
     let queued =
@@ -920,7 +929,17 @@ let test_batch_completion_acks_every_member () =
                   ~applied_at:1000.0
                   ~selection
               with
-              | Ok _ -> true
+              | Ok
+                  (Keeper_registry_event_queue.Turn_source_acked
+                     ( Keeper_registry_event_queue.Acked _
+                     | Keeper_registry_event_queue.Already_acked _ )) -> true
+              | Ok
+                  (Keeper_registry_event_queue.Turn_source_acked
+                     (Keeper_registry_event_queue.Ack_committed_followup_failed
+                        { detail; _ })) ->
+                failf "ack follow-up failed for %s: %s" selection.source.Q.post_id detail
+              | Ok Keeper_registry_event_queue.Turn_selection_withdrawn ->
+                failf "ack found %s withdrawn" selection.source.Q.post_id
               | Error detail ->
                 failf "ack failed for %s: %s" selection.source.Q.post_id detail)
            (Keeper_heartbeat_source_batch.selections intake.source_batch)
@@ -990,11 +1009,14 @@ let test_exact_mixed_bindings_reach_dispatch_and_settlement () =
     Keeper_turn_dispatch_authority.run (fun token ->
       Keeper_turn_dispatch_authority.install token (fun () ->
         Batch.validate ~diagnostic:intake.diagnostic_selection
-          ~validate_selection:(fun selection ->
+          ~standing:(fun selection ->
             checked := selection :: !checked;
-            Keeper_registry_event_queue.validate_pending_selection_result
+            Keeper_registry_event_queue.admitted_selection_standing_result
               ~base_path keeper_name ~selection)
-          batch)
+          batch
+        |> Result.map (fun (admitted, withdrawn) ->
+          check bool "dispatch keeps the whole batch when nothing was withdrawn" true
+            (Batch.selections admitted = expected && withdrawn = [])))
       |> require "install dispatch authority";
       Keeper_turn_dispatch_authority.validate token |> require "dispatch validation");
     check bool "dispatch validates the same complete exact batch" true

@@ -87,6 +87,10 @@ type pending_turn_terminal_result =
   | Turn_terminal_committed of transition_result
   | Turn_selection_withdrawn
 
+type pending_cancellation_result =
+  | Cancellation_committed of transition_result
+  | Cancellation_source_withdrawn
+
 type transfer_projection_result = State.transfer_projection_result =
   | Transfer_projected
   | Transfer_already_projected
@@ -1276,6 +1280,12 @@ let validate_pending_selection_result ~base_path ~keeper_name ~selection =
   | Ok state -> State.validate_pending_selection ~selection state
 ;;
 
+let admitted_selection_standing_result ~base_path ~keeper_name ~selection =
+  match load_state_result ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok state -> State.admitted_selection_standing ~selection state
+;;
+
 let ack_pending_result
       ?(after_commit = fun _ -> ())
       ~base_path
@@ -1439,6 +1449,42 @@ let cancel_pending_accepted_result
                 ~cancellation)
              state
            |> Result.map fst)
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Error
+         (Printf.sprintf
+            "event queue pending accepted cancellation raised keeper=%s: %s"
+            (keeper_name_of_owner owner)
+            (Printexc.to_string exn)))
+;;
+
+let cancel_pending_if_present_result
+      ?(after_commit = fun _ -> ())
+      ~base_path
+      ~keeper_name
+      ~applied_at
+      ~cancellation
+      ()
+  =
+  match resolve_owner ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok owner ->
+    (try
+       Owner_lock.with_durable_lock owner (fun () ->
+         match load_state_unlocked owner with
+         | Error _ as error -> error
+         | Ok state when State.pending_cancellation_source_withdrawn ~cancellation state ->
+           Ok Cancellation_source_withdrawn
+         | Ok state ->
+           commit_transition_unlocked
+             owner
+             ~after_commit
+             (State.cancel_pending_accepted
+                ~applied_at
+                ~cancellation)
+             state
+           |> Result.map (fun (result, _pending) -> Cancellation_committed result))
      with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn ->

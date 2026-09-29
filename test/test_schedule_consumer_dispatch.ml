@@ -986,21 +986,56 @@ let test_recurring_wake_supersedes_the_earlier_pending_occurrence () =
     (List.map (fun (stimulus : Keeper_event_queue.stimulus) -> stimulus.post_id) queued)
 ;;
 
-(* The heartbeat loop runs this terminal for each entry a completed turn was
-   given. An entry withdrawn under the turn answers the typed outcome, writes
-   nothing, and leaves the transition outbox free for the next ACK. *)
-let check_turn_terminal_finds_withdrawn ~base_path ~keeper_name ~applied_at selection =
-  (match
-     Keeper_registry_event_queue.terminalize_pending_turn_completed_result
-       ~base_path
-       keeper_name
-       ~applied_at
-       ~selection
-   with
+(* The two turn-end terminals: the one a completed turn runs for each entry it
+   was given, and the one a failed attempt commits. *)
+let complete_turn ~base_path ~keeper_name ~applied_at selection =
+  Keeper_registry_event_queue.terminalize_pending_turn_completed_result
+    ~base_path
+    keeper_name
+    ~applied_at
+    ~selection
+;;
+
+let fail_turn ~base_path ~keeper_name ~applied_at selection =
+  Keeper_registry_event_queue.terminalize_pending_turn_attempt_result
+    ~base_path
+    keeper_name
+    ~applied_at
+    ~selection
+    ~detail:"the turn failed before its ACK"
+;;
+
+let check_turn_acked label = function
+  | Ok
+      (Keeper_registry_event_queue.Turn_source_acked
+         ( Keeper_registry_event_queue.Acked _
+         | Keeper_registry_event_queue.Already_acked _ )) -> ()
+  | Ok
+      (Keeper_registry_event_queue.Turn_source_acked
+         (Keeper_registry_event_queue.Ack_committed_followup_failed { detail; _ })) ->
+    failf "%s: follow-up failed: %s" label detail
+  | Ok Keeper_registry_event_queue.Turn_selection_withdrawn ->
+    failf "%s: the entry was reported withdrawn" label
+  | Error detail -> failf "%s: %s" label detail
+;;
+
+(* An entry withdrawn under the turn answers the typed outcome, writes
+   nothing, and leaves the transition outbox free for the next ACK. The
+   heartbeat loop reads that outcome as settled and records no queue
+   failure, so the cycle is not marked crashed. *)
+let check_turn_terminal_finds_withdrawn ~base_path ~keeper_name result =
+  (match result with
    | Ok Keeper_registry_event_queue.Turn_selection_withdrawn -> ()
    | Ok (Keeper_registry_event_queue.Turn_source_acked _) ->
      fail "the turn's terminal committed a receipt for a withdrawn entry"
    | Error detail -> fail ("the turn's terminal refused its withdrawn entry: " ^ detail));
+  let settlement =
+    Keeper_heartbeat_loop.turn_terminal_settlement ~label:"turn completion" result
+  in
+  check bool "the heartbeat settles the withdrawn entry" true
+    settlement.Keeper_heartbeat_loop.settled;
+  check (option string) "the heartbeat records no queue failure" None
+    settlement.Keeper_heartbeat_loop.queue_failure;
   match Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name with
   | Error detail -> fail detail
   | Ok state ->
@@ -1055,31 +1090,11 @@ let test_supersede_withdraws_the_wake_a_failed_turn_left_pending () =
     (Keeper_registry_event_queue.snapshot ~base_path keeper_name
      |> Keeper_event_queue.to_list
      |> List.map (fun (stimulus : Keeper_event_queue.stimulus) -> stimulus.post_id));
-  check_turn_terminal_finds_withdrawn
-    ~base_path
-    ~keeper_name
-    ~applied_at:262.0
-    failed_selection;
-  let current_selection = pending_selection_exn ~base_path ~keeper_name in
-  (match
-     Keeper_registry_event_queue.terminalize_pending_turn_completed_result
-       ~base_path
-       keeper_name
-       ~applied_at:263.0
-       ~selection:current_selection
-   with
-   | Ok
-       (Keeper_registry_event_queue.Turn_source_acked
-          ( Keeper_registry_event_queue.Acked _
-          | Keeper_registry_event_queue.Already_acked _ )) -> ()
-   | Ok
-       (Keeper_registry_event_queue.Turn_source_acked
-          (Keeper_registry_event_queue.Ack_committed_followup_failed
-             { detail; _ })) ->
-     fail detail
-   | Ok Keeper_registry_event_queue.Turn_selection_withdrawn ->
-     fail "the current occurrence was reported withdrawn"
-   | Error detail -> fail ("the current occurrence could not settle: " ^ detail));
+  fail_turn ~base_path ~keeper_name ~applied_at:262.0 failed_selection
+  |> check_turn_terminal_finds_withdrawn ~base_path ~keeper_name;
+  pending_selection_exn ~base_path ~keeper_name
+  |> complete_turn ~base_path ~keeper_name ~applied_at:263.0
+  |> check_turn_acked "the current occurrence settles";
   check int "the current occurrence's ACK empties the queue" 0
     (Keeper_registry_event_queue.snapshot ~base_path keeper_name
      |> Keeper_event_queue.length)
@@ -1484,10 +1499,12 @@ let test_schedule_cancel_mid_turn_withdraws_the_running_turns_wake () =
   check int "the cancel withdraws both occurrences, the running turn's too" 0
     (Keeper_registry_event_queue.snapshot ~base_path keeper_name
      |> Keeper_event_queue.length);
-  check_turn_terminal_finds_withdrawn ~base_path ~keeper_name ~applied_at:262.0 selection;
+  complete_turn ~base_path ~keeper_name ~applied_at:262.0 selection
+  |> check_turn_terminal_finds_withdrawn ~base_path ~keeper_name;
   (* A repeated terminal for the same entry answers the same way and never
      turns into an error. *)
-  check_turn_terminal_finds_withdrawn ~base_path ~keeper_name ~applied_at:263.0 selection;
+  complete_turn ~base_path ~keeper_name ~applied_at:263.0 selection
+  |> check_turn_terminal_finds_withdrawn ~base_path ~keeper_name;
   check int "the queue stays empty after the turn's terminal" 0
     (Keeper_registry_event_queue.snapshot ~base_path keeper_name
      |> Keeper_event_queue.length);
@@ -1530,12 +1547,164 @@ let test_retirement_cancel_withdraws_the_wake_a_failed_turn_left_pending () =
   check int "retirement withdraws the failed turn's wake" 0
     (Keeper_registry_event_queue.snapshot ~base_path keeper_name
      |> Keeper_event_queue.length);
-  check_turn_terminal_finds_withdrawn ~base_path ~keeper_name ~applied_at:202.0 selection;
+  fail_turn ~base_path ~keeper_name ~applied_at:202.0 selection
+  |> check_turn_terminal_finds_withdrawn ~base_path ~keeper_name;
   match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
   | None -> fail "cancelled schedule missing"
   | Some stored ->
     check string "schedule is cancelled" "cancelled"
       (Schedule_domain.schedule_status_to_string stored.status)
+;;
+
+(* A turn's batch is checked again right before its provider call. A
+   schedule wake cancelled between intake and that call leaves the batch the
+   turn settles, and the other wake stays admitted and settles normally: the
+   turn is not failed because one of its sources was withdrawn. *)
+let test_dispatch_drops_a_wake_withdrawn_after_intake () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "schedule-keeper" in
+  let base_path = config.Workspace_utils.base_path in
+  ignore (persist_keeper_meta config keeper_name : Keeper_meta_contract.keeper_meta);
+  let wake ~schedule_id ~occurrence_id : Keeper_event_queue.stimulus =
+    let wake : Keeper_event_queue.scheduled_wake =
+      { occurrence_id
+      ; schedule_instance_id = schedule_id ^ "-instance"
+      ; schedule_id
+      ; due_at = 201.0
+      ; payload_digest = occurrence_id ^ "-digest"
+      ; title = None
+      ; message = "batched wake"
+      ; result_delivery = None
+      }
+    in
+    { post_id = occurrence_id
+    ; urgency = Keeper_event_queue.Normal
+    ; arrived_at = wake.due_at
+    ; payload = Keeper_event_queue.Schedule_due wake
+    }
+  in
+  List.iter
+    (fun stimulus ->
+       match
+         Keeper_registry_event_queue.enqueue_stimulus_durable_result
+           ~base_path
+           keeper_name
+           stimulus
+       with
+       | Keeper_registry_event_queue.Stimulus_enqueued -> ()
+       | Keeper_registry_event_queue.Stimulus_already_present ->
+         fail "batched wake already present in a fresh workspace"
+       | Keeper_registry_event_queue.Stimulus_storage_error detail -> fail detail)
+    [ wake ~schedule_id:"cancelled-schedule" ~occurrence_id:"cancelled-occurrence"
+    ; wake ~schedule_id:"kept-schedule" ~occurrence_id:"kept-occurrence"
+    ];
+  let selections =
+    match Keeper_event_queue_persistence.pending_selections_result ~base_path ~keeper_name with
+    | Ok selections -> selections
+    | Error detail -> fail detail
+  in
+  check int "intake admits both wakes" 2 (List.length selections);
+  let batch = Keeper_heartbeat_source_batch.of_selections selections in
+  (match
+     Keeper_registry_event_queue.cancel_scheduled_wakes_result
+       ~base_path
+       keeper_name
+       ~applied_at:202.0
+       ~schedule_ids:[ "cancelled-schedule" ]
+       ~reason:"cancelled between intake and provider dispatch"
+   with
+   | Ok 1 -> ()
+   | Ok n -> failf "expected one wake withdrawn, got %d" n
+   | Error detail -> fail detail);
+  let admitted, withdrawn =
+    match
+      Keeper_heartbeat_source_batch.validate
+        ~diagnostic:None
+        ~standing:(fun selection ->
+          Keeper_registry_event_queue.admitted_selection_standing_result
+            ~base_path
+            keeper_name
+            ~selection)
+        batch
+    with
+    | Ok checked -> checked
+    | Error detail -> fail ("dispatch refused the batch: " ^ detail)
+  in
+  let post_ids =
+    List.map (fun (selection : Keeper_event_queue_state.pending_selection) ->
+      selection.source.post_id)
+  in
+  check (list string) "the cancelled wake leaves the batch" [ "cancelled-occurrence" ]
+    (post_ids withdrawn);
+  check (list string) "the other wake stays admitted" [ "kept-occurrence" ]
+    (post_ids (Keeper_heartbeat_source_batch.selections admitted));
+  List.iter
+    (fun selection ->
+       complete_turn ~base_path ~keeper_name ~applied_at:203.0 selection
+       |> check_turn_acked "the admitted wake settles")
+    (Keeper_heartbeat_source_batch.selections admitted);
+  check int "nothing stays pending" 0
+    (Keeper_registry_event_queue.snapshot ~base_path keeper_name
+     |> Keeper_event_queue.length)
+;;
+
+(* A withdrawal reads the pending list once and then cancels entry by entry,
+   each under its own queue lock. A turn terminal that settles an entry in
+   between leaves nothing for that cancellation: it answers
+   [Cancellation_source_withdrawn] and writes nothing, so the withdrawal goes
+   on to the next entry instead of failing. *)
+let test_withdrawal_skips_an_entry_a_turn_settled_first () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "schedule-keeper" in
+  let base_path = config.Workspace_utils.base_path in
+  ignore (persist_keeper_meta config keeper_name : Keeper_meta_contract.keeper_meta);
+  let request =
+    create_keeper_wake_schedule
+      ~recurrence:(Schedule_domain.Interval { interval_sec = 60 })
+      config
+  in
+  let _occurrence_id = tick_ok config ~now:201.0 |> single_occurrence_id in
+  let selection = pending_selection_exn ~base_path ~keeper_name in
+  let cancellation =
+    { Keeper_event_queue_state.source = selection.source
+    ; source_incarnation = selection.admitted_revision
+    ; operator_operation_id = "schedule-cancel:raced-by-turn-terminal"
+    ; reason = "schedule cancelled after its turn already settled the wake"
+    }
+  in
+  complete_turn ~base_path ~keeper_name ~applied_at:202.0 selection
+  |> check_turn_acked "the turn settles its wake first";
+  (match
+     Keeper_event_queue_persistence.cancel_pending_if_present_result
+       ~base_path
+       ~keeper_name
+       ~applied_at:203.0
+       ~cancellation
+       ()
+   with
+   | Ok Keeper_event_queue_persistence.Cancellation_source_withdrawn -> ()
+   | Ok (Keeper_event_queue_persistence.Cancellation_committed _) ->
+     fail "the cancellation committed a receipt for an entry already settled"
+   | Error detail -> fail ("the cancellation failed on a settled entry: " ^ detail));
+  (match Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name with
+   | Error detail -> fail detail
+   | Ok state ->
+     (match Keeper_event_queue_state.transition_outbox state with
+      | [] -> ()
+      | _ :: _ -> fail "the skipped cancellation left a transition in the outbox"));
+  match
+    Keeper_registry_event_queue.cancel_scheduled_wakes_result
+      ~base_path
+      keeper_name
+      ~applied_at:204.0
+      ~schedule_ids:[ request.schedule_id ]
+      ~reason:"schedule cancelled"
+  with
+  | Ok 0 -> ()
+  | Ok n -> failf "nothing was pending, yet %d wake(s) were withdrawn" n
+  | Error detail -> fail ("withdrawal after the turn settled failed: " ^ detail)
 ;;
 
 let test_keeper_purge_cancels_future_schedule_intent () =  with_workspace
@@ -4060,6 +4229,10 @@ let () =
             "retirement cancel withdraws the wake a failed turn left pending"
             `Quick
             test_retirement_cancel_withdraws_the_wake_a_failed_turn_left_pending
+        ; test_case "dispatch drops a wake withdrawn after intake" `Quick
+            test_dispatch_drops_a_wake_withdrawn_after_intake
+        ; test_case "withdrawal skips an entry a turn settled first" `Quick
+            test_withdrawal_skips_an_entry_a_turn_settled_first
         ; test_case "owner absent pending demand is drained not retained" `Quick
             test_owner_absent_pending_demand_is_drained_not_retained
         ; test_case "shutdown fence rejects schedule intake before enqueue" `Quick

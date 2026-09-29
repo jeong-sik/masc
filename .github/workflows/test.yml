@@ -111,7 +111,7 @@ permissions:
 # keeps the cancel where it is wanted (a newer dispatch of the same branch
 # supersedes an older one) and spends up to one full run per branch in
 # parallel, which the one-lane rule existed to avoid when a run took 180
-# minutes; a full run now takes about 13 minutes (median of the last three). One group for the whole repo did reach
+# minutes; a dispatched run now takes 13 to 19 minutes (the 15 most recent completed runs). One group for the whole repo did reach
 # it: on 2026-09-04 the scheduled run (17:43:56Z, 7aed1b696f) was
 # cancelled within two seconds by a branch dispatch created the same
 # second, and of this lane's first 13 runs none completed successfully.

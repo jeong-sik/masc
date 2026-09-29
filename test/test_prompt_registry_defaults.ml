@@ -524,6 +524,22 @@ let () =
                      | Ok value -> value
                      | Error msg -> fail msg)
               | Error msg -> fail msg);
+          test_case "a resolved template stays pinned during batch sizing" `Quick
+            (fun () ->
+              with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
+              let pinned = Prompt_registry.resolve_prompt "test.templated" in
+              (match Prompt_registry.set_override "test.templated" "new {{facts_json}}" with
+               | Ok () -> () | Error _ -> fail "could not replace template") ;
+              let vars = ["facts_json", "first batch"] in
+              let from_pinned = Prompt_registry.render_resolved_prompt_template
+                  "test.templated" pinned vars in
+              let from_current = Prompt_registry.render_prompt_template
+                  "test.templated" vars in
+              (match from_pinned, from_current with
+               | Ok pinned_text, Ok current_text ->
+                 check string "pinned source still renders" "templated body first batch" pinned_text;
+                 check string "current override differs" "new first batch" current_text
+               | Error detail, _ | _, Error detail -> fail detail));
           test_case "render_prompt_template leaves braces in values literal" `Quick
             (fun () ->
               with_registry @@ fun ~dir:_ ~prompts_dir:_ ->

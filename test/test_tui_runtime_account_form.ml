@@ -48,7 +48,9 @@ let typed text = List.init (String.length text) (fun i -> String.make 1 text.[i]
 (* The fixture's codex_subscription has no account-home and runs on this. *)
 let inherited_home = function
   | Runtime_account_declaration.Codex -> Some "/home/op/.codex"
-  | Runtime_account_declaration.Claude_code | Runtime_account_declaration.Antigravity -> None
+  | Runtime_account_declaration.Claude_code
+  | Runtime_account_declaration.Antigravity
+  | Runtime_account_declaration.Muse -> None
 
 let press form keys =
   List.fold_left
@@ -334,6 +336,9 @@ let check_command_rows ~drawn command form =
       (parses (setup ^ "\n" ^ run));
     if not cut
     then Alcotest.(check string) "the rows are the command" command (setup ^ " " ^ run)
+  | [] ->
+    Alcotest.(check bool) "a long command directs to complete-command copying" true
+      (row_mentions "전체 명령" form)
   | rows -> Alcotest.failf "the command took %d rows: %s" (List.length rows) drawn
 
 (* A command copied off two rows that ran as two commands would sign the
@@ -415,6 +420,139 @@ let test_a_long_refusal_wraps_under_its_mark () =
     (Some true)
     (Option.map (String.starts_with ~prefix:"    ") (after_mark (rows form)))
 
+let muse_current ~command =
+  Printf.sprintf
+    {|[providers.muse_personal]
+display-name = "Muse"
+protocol = "muse-serve"
+command = "%s"
+is-non-interactive = true
+
+[models.muse_fixture]
+api-name = "muse-fixture-1"
+max-context = 200000
+max-prompt-bytes = 1048576
+tools-support = true
+
+[muse_personal.muse_fixture]
+|}
+    command
+let declare_muse_sign_in current =
+  let form =
+    match F.open_on ~home_dir:"/home/op" current with
+    | Ok form -> form
+    | Error reason -> Alcotest.fail reason
+  in
+  match F.declare_on ~inherited_home (submitted (press form ([ "\r"; "\r" ] @ typed "/home/op/.muse-account2" @ [ "\r" ]))) current with
+  | Ok { F.sign_in; _ } -> Option.map F.command sign_in
+  | Error form -> Alcotest.failf "refused: %s" (String.concat " / " (F.rows ~width:240 form))
+(* PATH, MUSE_INSTALL_DIR and HOME decide the hinted executable; hold all
+   three so the suite passes with or without a Muse install around. *)
+let with_muse_env ~path ~install_dir ~home f =
+  let root = Filename.temp_dir "masc-muse-hint-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
+    Masc_test_deps.with_process_env "PATH" (Some path) (fun () ->
+      Masc_test_deps.with_process_env "MUSE_INSTALL_DIR" install_dir (fun () ->
+        Masc_test_deps.with_process_env "HOME" (Some home) (fun () -> f root))))
+let write_executable path =
+  let channel = open_out path in
+  close_out channel;
+  Unix.chmod path 0o755
+let test_muse_sign_in_sets_xdg_roots_at_the_new_account () =
+  with_muse_env ~path:"/nonexistent-path" ~install_dir:None ~home:"/nonexistent-home" (fun _ ->
+    let quoted = "'/home/op/.muse-account2'" in
+    Alcotest.(check (option string)) "HOME and XDG roots select the new account"
+      (Some
+         (Printf.sprintf
+            "(unset META_API_KEY && export MUSE_NO_AUTO_UPDATE=1 TBH_CREDENTIAL_BACKEND=file HOME=%s XDG_CONFIG_HOME=%s/.config XDG_DATA_HOME=%s/.local/share XDG_CACHE_HOME=%s/.cache XDG_STATE_HOME=%s/.local/state XDG_RUNTIME_DIR=%s/.local/run && 'muse' login)"
+            quoted quoted quoted quoted quoted quoted))
+      (declare_muse_sign_in (muse_current ~command:"muse")))
+let test_muse_sign_in_prefers_the_resolved_executable () =
+  with_muse_env ~path:"/nonexistent-path" ~install_dir:None ~home:"/nonexistent-home" (fun root ->
+    let bindir = Filename.concat root "bin" in
+    Unix.mkdir bindir 0o755;
+    let resolved = Filename.concat bindir "muse" in
+    write_executable resolved;
+    Masc_test_deps.with_process_env "PATH" (Some bindir) (fun () ->
+      match declare_muse_sign_in (muse_current ~command:"muse") with
+      | None -> Alcotest.fail "expected a sign-in hint"
+      | Some hint ->
+        Alcotest.(check bool) "resolved executable signs in"
+          true
+          (String.ends_with ~suffix:(Filename.quote resolved ^ " login)") hint)))
+let test_muse_sign_in_keeps_the_configured_absolute_command () =
+  with_muse_env ~path:"/nonexistent-path" ~install_dir:None ~home:"/nonexistent-home" (fun _ ->
+    match declare_muse_sign_in (muse_current ~command:"/custom path/muse") with
+    | None -> Alcotest.fail "expected a sign-in hint"
+    | Some hint ->
+      Alcotest.(check bool) "configured command signs in"
+        true
+        (String.ends_with ~suffix:"'/custom path/muse' login)" hint))
+
+let test_muse_sign_in_keeps_custom_commands_when_muse_is_installed () =
+  with_muse_env ~path:"/nonexistent-path" ~install_dir:None ~home:"/nonexistent-home" (fun root ->
+    let bindir = Filename.concat root "bin" in
+    Unix.mkdir bindir 0o755;
+    List.iter (fun name -> write_executable (Filename.concat bindir name))
+      [ "muse"; "muse-custom" ];
+    let cwd = Sys.getcwd () in
+    Fun.protect ~finally:(fun () -> Sys.chdir cwd) (fun () ->
+      Sys.chdir root;
+      Masc_test_deps.with_process_env "PATH" (Some bindir) (fun () ->
+        List.iter
+          (fun (command, expected) ->
+            match declare_muse_sign_in (muse_current ~command) with
+            | None -> Alcotest.fail "expected a sign-in hint"
+            | Some hint ->
+              Alcotest.(check bool) ("configured client signs in: " ^ command) true
+                (String.ends_with ~suffix:(Filename.quote expected ^ " login)") hint))
+          [ "muse-custom", Filename.concat bindir "muse-custom"
+          ; "./bin/muse-custom", Filename.concat (Sys.getcwd ()) "./bin/muse-custom"
+          ])))
+
+let test_muse_rows_state_the_authentication_boundary () =
+  match F.open_on ~home_dir:"/home/op" (muse_current ~command:"muse") with
+  | Error reason -> Alcotest.fail reason
+  | Ok form ->
+    let rows = F.rows ~width:240 form in
+    List.iter (fun expected ->
+      Alcotest.(check bool) expected true (List.mem expected rows))
+      [ "  이 HOME의 .config/muse/auth.json 파일이 필요합니다."
+      ; "  이 명령은 Keychain 대신 선택한 HOME의 파일에 로그인 정보를 저장합니다."
+      ]
+
+let test_muse_narrow_pane_hides_partial_commands_and_copies_whole () =
+  let copied =
+    with_muse_env ~path:"/nonexistent-path" ~install_dir:None ~home:"/nonexistent-home" (fun _ ->
+      let current = muse_current ~command:"muse" in
+      let form = match F.open_on ~home_dir:"/home/op" current with
+        | Ok form -> form | Error reason -> Alcotest.fail reason in
+      let form = submitted (press form
+        ([ "\r"; "\r" ] @ typed "/home/op/.muse-account2" @ [ "\r" ])) in
+      match F.declare_on ~inherited_home form current with
+      | Error form -> Alcotest.failf "refused: %s" (String.concat " / " (rows form))
+      | Ok { F.sign_in = None; _ } -> Alcotest.fail "missing Muse command"
+      | Ok { F.id; sign_in = Some sign_in; _ } ->
+        let saved = F.saved form ~id sign_in in
+        List.iter (fun shown ->
+          Alcotest.(check (list string)) "80-column pane exposes no partial command" []
+            (copied_command ~width:width_80 shown);
+          Alcotest.(check bool) "pane directs to full copy" true
+            (row_mentions "전체 명령" shown);
+          fits width_80 shown) [form; saved];
+        match F.key saved "y" with
+        | F.Copy (_, copied) ->
+          Alcotest.(check string) "copy retains every environment assignment"
+            (F.command sign_in) copied;
+          Alcotest.(check bool) "file backend survives narrow rendering" true
+            (contains "TBH_CREDENTIAL_BACKEND=file" copied);
+          copied
+        | F.Editing _ | F.Submitted _ | F.Cancelled -> Alcotest.fail "saved copy did not fire")
+  in
+  (* The fixture hides installed clients through PATH. Restore it before
+     asking [parses] to find bash and check the copied command's syntax. *)
+  Alcotest.(check bool) "whole copied command parses" true (parses copied)
+
 let test_a_file_with_no_client_has_nothing_to_copy () =
   match
     F.open_on
@@ -442,6 +580,18 @@ let () =
             test_antigravity_has_no_sign_in_after_the_save
         ; Alcotest.test_case "a name from the file cannot colour the pane" `Quick
             test_a_name_from_the_file_cannot_colour_the_pane
+        ; Alcotest.test_case "muse sign-in sets XDG roots at the new account" `Quick
+            test_muse_sign_in_sets_xdg_roots_at_the_new_account
+        ; Alcotest.test_case "muse sign-in prefers the resolved executable" `Quick
+            test_muse_sign_in_prefers_the_resolved_executable
+        ; Alcotest.test_case "muse sign-in keeps the configured absolute command" `Quick
+            test_muse_sign_in_keeps_the_configured_absolute_command
+        ; Alcotest.test_case "muse sign-in keeps custom commands when muse is installed" `Quick
+            test_muse_sign_in_keeps_custom_commands_when_muse_is_installed
+        ; Alcotest.test_case "muse rows state the authentication boundary" `Quick
+            test_muse_rows_state_the_authentication_boundary
+        ; Alcotest.test_case "muse narrow pane hides partial commands and copies whole" `Quick
+            test_muse_narrow_pane_hides_partial_commands_and_copies_whole
         ; Alcotest.test_case "a file with no client has nothing to copy" `Quick
             test_a_file_with_no_client_has_nothing_to_copy
         ] )

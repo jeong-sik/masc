@@ -11,6 +11,7 @@ type tool_profile = Mcp_server_eio_types.tool_profile =
   | Full
   | Managed_agent
   | Operator_remote
+  | Seat
 
 let make_response = Mcp_transport_protocol.make_response
 let make_error = Mcp_transport_protocol.make_error
@@ -176,7 +177,7 @@ let task_resource_ids =
 ;;
 
 let agent_resource_ids =
-  dedup_strings (core_status_resource_ids @ [ "who"; "who.json"; "agents"; "agents.json" ])
+  dedup_strings (core_status_resource_ids @ [ "who"; "who.json" ])
 ;;
 
 let message_resource_ids =
@@ -230,6 +231,15 @@ let maybe_emit_resource_notifications ~success ~tool_name =
 
 (** {1 Protocol Handlers} *)
 
+(* A seat answers tools and nothing else (see [method_allowed_in_profile]),
+   so it advertises only tools: a client told about resources or prompts
+   would ask for them and read the refusal as a broken server. It has no
+   stream to carry list_changed on. *)
+let capabilities_for_profile = function
+  | Full | Managed_agent | Operator_remote -> Mcp_server.capabilities
+  | Seat -> `Assoc [ "tools", `Assoc [ "listChanged", `Bool false ] ]
+;;
+
 let handle_initialize_eio ?(profile = Full) id params =
   match Mcp_transport_protocol.validate_initialize_params params with
   | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_params msg
@@ -245,13 +255,14 @@ let handle_initialize_eio ?(profile = Full) id params =
          (`Assoc
              [ "protocolVersion", `String protocol_version
              ; "serverInfo", Mcp_server.server_info
-             ; "capabilities", Mcp_server.capabilities
+             ; "capabilities", capabilities_for_profile profile
              ; ( "instructions"
                , `String
                    (match profile with
                     | Full -> TP.default_instructions ()
                     | Managed_agent -> TP.managed_agent_instructions ()
-                    | Operator_remote -> TP.operator_remote_instructions ()) )
+                    | Operator_remote -> TP.operator_remote_instructions ()
+                    | Seat -> TP.seat_instructions ()) )
              ; ( "_meta"
                , `Assoc
                    (Mcp_server.meta_field
@@ -263,7 +274,8 @@ let handle_initialize_eio ?(profile = Full) id params =
                             (match profile with
                              | Full -> "full"
                              | Managed_agent -> "managed_agent"
-                             | Operator_remote -> "operator_remote") )
+                             | Operator_remote -> "operator_remote"
+                             | Seat -> "seat") )
                       ]) )
              ]))
 ;;
@@ -272,6 +284,7 @@ let profile_instructions = function
   | Full -> TP.default_instructions ()
   | Managed_agent -> TP.managed_agent_instructions ()
   | Operator_remote -> TP.operator_remote_instructions ()
+  | Seat -> TP.seat_instructions ()
 ;;
 
 let handle_server_discover_eio ?(profile = Full) id =
@@ -284,7 +297,7 @@ let handle_server_discover_eio ?(profile = Full) id =
                (List.map
                   (fun version -> `String version)
                   Mcp_transport_protocol.supported_protocol_versions) )
-         ; "capabilities", Mcp_server.capabilities
+         ; "capabilities", capabilities_for_profile profile
          ; "serverInfo", Mcp_server.server_info
          ; "instructions", `String (profile_instructions profile)
          ]
@@ -337,6 +350,7 @@ let handle_list_tools_eio
        | Full -> "full"
        | Managed_agent -> "managed_agent"
        | Operator_remote -> "operator_remote"
+       | Seat -> "seat"
      in
      ignore
        (Tool_assignment_telemetry.emit_assigned
@@ -709,10 +723,32 @@ let otel_tool_request_context
   }
 ;;
 
+(* The seat door answers only what a player needs: the handshake (initialize,
+   or server/discover on the stateless protocol), ping, its tool list and its
+   tool calls. The other methods here admit any valid credential (Requires_auth) or
+   none (the dashboard ones), and a seat's credential is an invitee's, so they
+   are not reachable through it. A method not named here is refused on this
+   door, so a method added to the dispatcher stays off the seat until named. *)
+let method_allowed_in_profile profile method_ =
+  match profile with
+  | Full | Managed_agent | Operator_remote -> true
+  | Seat ->
+    (match method_ with
+     | "initialize"
+     | "initialized"
+     | "notifications/initialized"
+     | "server/discover"
+     | "ping"
+     | "tools/list"
+     | "tools/call" -> true
+     | _ -> false)
+;;
+
 let tool_profile_label = function
   | Full -> "full"
   | Managed_agent -> "managed_agent"
   | Operator_remote -> "operator_remote"
+  | Seat -> "seat"
 ;;
 
 let mcp_tool_call_log_details ?outcome ~phase ~profile ~tool_name ~id ?mcp_session_id () =
@@ -775,7 +811,17 @@ let handle_request
         | Ok req ->
           let id = get_id req in
           let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
-          if Mcp_transport_protocol.is_notification req
+          if not (method_allowed_in_profile profile req.method_)
+          then (
+            if Mcp_transport_protocol.is_notification req
+            then `Null
+            else
+              make_error_typed
+                ~id
+                Mcp_error_code.Method_not_found
+                (Printf.sprintf "%s is not available on the %s endpoint" req.method_
+                   (tool_profile_label profile)))
+          else if Mcp_transport_protocol.is_notification req
           then (
             match req.method_ with
             | "dashboard/ack" ->
@@ -948,11 +994,18 @@ let handle_request
                   (fun auth_token ->
                      match TP.requested_tool_list_params req.params with
                      | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_params msg
+                     | Ok { include_usage = true; _ } when profile = Seat ->
+                       (* Usage telemetry counts every agent's calls and names
+                          the host path it is read from. *)
+                       make_error_typed
+                         ~id
+                         Mcp_error_code.Invalid_params
+                         "include_usage is not available on the seat endpoint"
                      | Ok { names; include_hidden; include_usage; cursor }
                        ->
                        let list_profile =
                          match profile with
-                         | Managed_agent | Operator_remote -> profile
+                         | Managed_agent | Operator_remote | Seat -> profile
                          | Full -> Full
                        in
                        handle_list_tools_eio
@@ -1007,7 +1060,7 @@ let handle_request
                                decision is reviewed at the boundary. *)
                       let call_profile =
                         match profile with
-                        | Operator_remote | Managed_agent -> profile
+                        | Operator_remote | Managed_agent | Seat -> profile
                         | Full -> Full
                       in
                       if

@@ -12314,6 +12314,49 @@ def run_keeper_unbind_all_channels_regression(executable: str) -> None:
     )
 
 
+def run_keeper_info_requeue_key_regression(executable: str) -> None:
+    """On the Info tab b reaches the Board requeue; Q still asks to quit.
+
+    The requeue key was Q, but the global quit test takes Q as well as q and
+    runs before the Info tab's arm, so Q armed the exit and the requeue was
+    unreachable. b answers with the requeue's own reply -- here that the
+    partitions are not read, since no fixture serves them -- and must not
+    arm the exit. Q keeps quitting, so its notice still appears after.
+    """
+
+    def interact(process: subprocess.Popen[bytes], master_fd: int,
+                 _slave_fd: int, output: bytearray, _base_path: str) -> None:
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"alpha")
+        send_and_wait(process, master_fd, output, b"\r", b"\xe2\x96\xb8Info")
+        drain_until_quiet(process, master_fd, output)
+        mark = len(output)
+        os.write(master_fd, b"b")
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            re.compile(rb"nothing requeued|No blocked Board partition to requeue"),
+            start=mark,
+            timeout=5.0,
+        )
+        if b"press again to quit" in bytes(output[mark:]):
+            raise AssertionError(
+                f"b on the Info tab armed the exit: {bytes(output[mark:])[-600:]!r}"
+            )
+        if process.poll() is not None:
+            raise AssertionError("b on the Info tab ended the TUI")
+        send_and_wait(process, master_fd, output, b"Q", b"press again to quit")
+        os.write(master_fd, b"q")
+
+    run_terminal_scenario(
+        executable,
+        description="b on the Info tab requeues Board and Q still asks to quit",
+        interact=interact,
+        http_fixtures=keeper_runtime_http_fixtures(),
+    )
+
+
 def run_pause_offers_channel_unbind_regression(executable: str) -> None:
     """Pausing a Keeper that holds bindings offers to remove them, once.
 
@@ -13293,6 +13336,8 @@ def runtime_resolved_runtime(
         "is_local": False,
         # This binding flag is independent of the fleet's top-level default.
         "is_default": False,
+        "rate_limited": False,
+        "rate_limit_resets_at": None,
     }
 
 
@@ -16209,6 +16254,7 @@ def run_keyboard_regression(executable: str, *, group: int | None = None) -> Non
         )
         run_tab_strip_keeps_current_entry_regression(executable)
         run_keeper_unbind_all_channels_regression(executable)
+        run_keeper_info_requeue_key_regression(executable)
         run_pause_offers_channel_unbind_regression(executable)
         run_keeper_runtime_picker_filter_regression(executable)
         run_activity_logs_tab_pane_regression(executable)

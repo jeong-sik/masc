@@ -18,10 +18,4 @@ val keepers : t -> keeper list
 (** Every discovered Keeper, in discovery order. *)
 val fingerprint : t -> string
 (** Stable identity of the captured inventory, excluding observation time. *)
-val source_count : t -> int
-val to_json : t -> Yojson.Safe.t
-(** Model input with original sources, snapshot metadata and store gaps. *)
-val proposal_json : t -> Yojson.Safe.t -> Yojson.Safe.t
-(** Bind a model proposal to this exact inventory. The proposal store still
-    validates coverage; this operation does not establish semantic truth. *)
 val http_json : base_path:string -> Yojson.Safe.t

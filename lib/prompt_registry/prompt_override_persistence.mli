@@ -20,7 +20,34 @@ type entry = {
           saved, sorted. *)
 }
 
-type error
+type error =
+  | Invalid_json of string
+  | Read_failed of string
+  | Write_failed of string
+  | Expected_object of string
+  | Expected_list of string
+  | Expected_integer of string
+  | Expected_string of string
+  | Duplicate_field of {
+      location : string;
+      field : string;
+    }
+  | Missing_field of {
+      location : string;
+      field : string;
+    }
+  | Unexpected_field of {
+      location : string;
+      field : string;
+    }
+  | Unsupported_schema_version of {
+      expected : int;
+      actual : int;
+    }
+      (** The file's envelope is in a schema version this build does not
+          read. A caller that knows how the operator gets the data back in
+          the current format says so with this case. *)
+  | Duplicate_override_key of string
 
 val default_revision : body:string -> string
 (** SHA256 hex of the default body. Stored as [authored_against] and

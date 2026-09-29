@@ -325,16 +325,39 @@ let task_line (task : task) =
     (priority_indicator task.priority)
     goal_tag
 
+(* The last Team projection and the three lists it was made from. *)
+let overview_team_projection :
+    (overview_keeper list * task list * attention_item list * Overview_team.t)
+    option
+    ref =
+  ref None
+
 (* The Team block's rows, projected from the briefing's Keeper rows and the
    backlog the same refresh loaded. [None] until a briefing has been read: a
-   Team block over no Keeper rows would claim an empty fleet. *)
+   Team block over no Keeper rows would claim an empty fleet.
+
+   The projection walks every task once per Keeper. One Overview frame asks
+   for it five times -- the row budget three times, the Team block and the
+   first-use note once each -- and a key that only moves a cursor draws the
+   frame again. A refresh replaces each input list whole and nothing edits
+   one in place, so the same three lists always give the same projection:
+   it is made again only when one of them is a different list. *)
 let overview_team (state : state) =
   match state.overview with
   | None -> None
-  | Some overview ->
-      Some
-        (Overview_team.project ~keepers:overview.ov_keeper_rows
-           ~tasks:state.tasks ~attention:overview.ov_attention_items)
+  | Some overview -> (
+      let keepers = overview.ov_keeper_rows in
+      let tasks = state.tasks in
+      let attention = overview.ov_attention_items in
+      match !overview_team_projection with
+      | Some (seen_keepers, seen_tasks, seen_attention, team)
+        when seen_keepers == keepers && seen_tasks == tasks
+             && seen_attention == attention ->
+          Some team
+      | Some _ | None ->
+          let team = Overview_team.project ~keepers ~tasks ~attention in
+          overview_team_projection := Some (keepers, tasks, attention, team);
+          Some team)
 
 let overview_pulls_lines (state : state) = Repository_pulls.lines state.overview_pulls
 
@@ -585,14 +608,55 @@ let overview_intro_lines (state : state) =
   | Some reason -> ("  " ^ Terminal_text.single_line reason) :: usual
   | None -> usual
 
+(* The last task-status index and the task list it was built from. *)
+let overview_task_status_index :
+    (Masc_domain.task list * (string, Masc_domain.task_status) Hashtbl.t)
+    option
+    ref =
+  ref None
+
 (* Goal links include finished tasks, which the Overview's active task rows
    intentionally omit. Resolve owners against the full snapshot from that
-   same task read. *)
-let overview_goal_status_of_id (state : state) id =
-  List.find_opt
-    (fun (task : Masc_domain.task) -> String.equal task.id id)
-    state.tasks_domain
-  |> Option.map (fun (task : Masc_domain.task) -> task.task_status)
+   same task read.
+
+   GOALS asks for one status per linked task, and the row budget asks again
+   for every allocation it tries, so a search of the whole backlog ran for
+   each link several times a frame. The index is built once per task list and
+   keeps the first task an id names, the one that search returned. *)
+let overview_goal_status_of_id (state : state) =
+  let tasks = state.tasks_domain in
+  let index =
+    match !overview_task_status_index with
+    | Some (seen, index) when seen == tasks -> index
+    | Some _ | None ->
+        let index = Hashtbl.create (List.length tasks) in
+        List.iter
+          (fun (task : Masc_domain.task) ->
+            if not (Hashtbl.mem index task.id) then
+              Hashtbl.add index task.id task.task_status)
+          tasks;
+        overview_task_status_index := Some (tasks, index);
+        index
+  in
+  fun id -> Hashtbl.find_opt index id
+
+(* The last Todo backlog summary and the task list it was read from. *)
+let overview_backlog_summary :
+    (Masc_domain.task list * Overview_tasks.backlog) option ref =
+  ref None
+
+(* The Todo backlog under the Tasks rows. Summarising it parses the creation
+   time of every Todo task -- several hundred on a live board -- and one
+   frame asked for it once per row allocation the Team block tried and twice
+   more to draw. Read once per task list, like the Team projection. *)
+let overview_backlog (state : state) =
+  let tasks = state.tasks_domain in
+  match !overview_backlog_summary with
+  | Some (seen, backlog) when seen == tasks -> backlog
+  | Some _ | None ->
+      let backlog = Overview_tasks.backlog tasks in
+      overview_backlog_summary := Some (tasks, backlog);
+      backlog
 
 (** Project the shared Overview row budget and its sanitized variable inputs. *)
 let overview_layout (state : state) ~terminal_rows ~cols =
@@ -623,7 +687,7 @@ let overview_layout (state : state) ~terminal_rows ~cols =
         ~team_count ~team_stuck ~providers_count
         ~task_count:
           (Overview_tasks.line_count state.tasks
-             (Overview_tasks.backlog state.tasks_domain))
+             (overview_backlog state))
         ~has_task_error:(Option.is_some tasks_error)
     in
     let first = with_intro (List.length intro_lines) in
@@ -1028,7 +1092,7 @@ let render_overview (state : state) =
       let held_back =
         Overview_tasks.held_back ~height:row_budget.task_rows
           ~selected:task_selection state.tasks
-          (Overview_tasks.backlog state.tasks_domain)
+          (overview_backlog state)
       in
       let window =
         if held_back > 0 then Printf.sprintf " +%d more" held_back else ""
@@ -1078,7 +1142,7 @@ let render_overview (state : state) =
       else
         Overview_tasks.lines ~height:row_budget.task_rows
           ~selected state.tasks
-          (Overview_tasks.backlog state.tasks_domain)
+          (overview_backlog state)
     in
     List.iter
       (fun line ->

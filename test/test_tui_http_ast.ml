@@ -753,6 +753,27 @@ let test_recent_projection_is_prepared_inside_frame_build () =
     [["prepare"; "store"; "render"]] (List.rev !build_steps)
 ;;
 
+(* One Overview frame summarised the Todo backlog, projected the Team block
+   and searched the backlog for each goal link several times, and drew again
+   for every key. Each is now made once per input list, in one binding; a
+   second call site would make it once per frame again. *)
+let test_overview_projections_are_made_once_per_input () =
+  let render = "bin/masc_tui_render.ml" in
+  check int "the Todo backlog is summarised in one binding" 1
+    (Ast_grep.count_calls ~module_path:render ~callee:"Overview_tasks.backlog");
+  check int "... the Overview backlog binding" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"overview_backlog" ~callee:"Overview_tasks.backlog");
+  check int "the Team block is projected in one binding" 1
+    (Ast_grep.count_calls ~module_path:render ~callee:"Overview_team.project");
+  check int "... the Overview Team binding" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"overview_team" ~callee:"Overview_team.project");
+  check int "goal links resolve through the task-status index" 0
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"overview_goal_status_of_id" ~callee:"List.find_opt")
+;;
+
 let test_user_message_background_has_one_render_snapshot () =
   let main_path = "bin/masc_tui.ml" in
   (* Every binding this test still reaches for is drawn by the chat surface,
@@ -3173,6 +3194,10 @@ let () =
           "Recent projection is prepared inside frame Build"
           `Quick
           test_recent_projection_is_prepared_inside_frame_build;
+        test_case
+          "Overview projections are made once per input"
+          `Quick
+          test_overview_projections_are_made_once_per_input;
         test_case
           "user message background has one render snapshot"
           `Quick

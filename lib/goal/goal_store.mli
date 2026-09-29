@@ -285,6 +285,9 @@ val upsert_goal :
 
     {!Rejected}:
     - [title] required for new goals (omit / empty string on a new goal id).
+    - [due_date] that {!Goal_due.read} cannot read, on a create and on an
+      update alike. Nothing is written. [None] leaves the stored due date as
+      it is; there is no way to clear one here.
     - RFC-0387 B1: [metric] and [target_value] are both required (non-blank)
       whenever the upsert creates a new row — including an explicit
       previously-unknown [id]. The create/update split is decided inside the

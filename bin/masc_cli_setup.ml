@@ -4,6 +4,21 @@ exception Setup_error of string
 
 let fail message = raise (Setup_error message)
 
+(* A green check before a success line, only where a person is reading: a
+   terminal that is not "dumb" and no NO_COLOR (https://no-color.org, any
+   non-empty value turns it off). Piped or scripted output keeps the bare text
+   that tests and log readers match on. *)
+let styled_output () =
+  Unix.isatty Unix.stdout
+  && Sys.getenv_opt "TERM" <> Some "dumb"
+  && (match Sys.getenv_opt "NO_COLOR" with None | Some "" -> true | Some _ -> false)
+
+let ok_line text = if styled_output () then "\027[32m\xE2\x9C\x93\027[0m " ^ text else text
+
+(* The candle is the project's mark. One emoji opens the run, on the same
+   terminals that get the green check and nowhere else. *)
+let start_line text = if styled_output () then "\xF0\x9F\x95\xAF\xEF\xB8\x8F " ^ text else text
+
 type workspace_issue_kind = Invalid_state | Unreadable_state
 
 type workspace_issue = { path : string; kind : workspace_issue_kind; detail : string }
@@ -259,7 +274,7 @@ let run_with_selection ~network_mode ~base_path ~port ~initialize ~prepare_image
         require_compatible_workspace base_path;
         require_ok "Workspace initialization" initialize;
         let base_path = Unix.realpath base_path in
-        Printf.printf "Preparing imp in %s\n%!" base_path;
+        print_endline (start_line (Printf.sprintf "Preparing imp in %s" base_path));
         let module Sandbox = Masc.Sandbox_readiness in
         let path = Keeper_sandbox_config.keeper_toml_path ~base_path ~agent_name:"imp" in
         let original = In_channel.with_open_text path In_channel.input_all in
@@ -281,8 +296,8 @@ let run_with_selection ~network_mode ~base_path ~port ~initialize ~prepare_image
           ~require_userns:(Env_config_sandbox.Hardening.require_userns ()) selection.backend in
         (match readiness.state with
          | Sandbox.Service_ready ->
-           Printf.printf "Sandbox: %s — %s\n%!" (Sandbox.backend_id selection.backend)
-             (Sandbox.state_message readiness.state)
+           print_endline (ok_line (Printf.sprintf "Sandbox: %s — %s" (Sandbox.backend_id selection.backend)
+             (Sandbox.state_message readiness.state)))
          | Sandbox.Needs_configuration _ when selection.backend = Sandbox.Remote_ssh
              && String.equal original staged ->
            print_endline "Remote SSH endpoint execution is verified by the server; no local guest readiness is claimed."
@@ -297,10 +312,11 @@ let run_with_selection ~network_mode ~base_path ~port ~initialize ~prepare_image
           (fun () -> match Sandbox.commit_staged ~path ~original ~staged with
             | Ok () -> 0 | Error reason -> prerr_endline reason; 1);
         require_ok "Starting imp" start_keeper;
-        Printf.printf "\nimp is started. Send your first message to begin the conversation.\n\
+        Printf.printf "\n%s\n\
           Keepers: select imp, open its chat, and say hello. Then ask it to create a Board post\n\
           and a Task, list its sandbox directory, and fetch https://example.com.\n\
-          If a tool asks permission, answer in the chat.\n%!";
+          If a tool asks permission, answer in the chat.\n%!"
+          (ok_line "imp is started. Send your first message to begin the conversation.");
         if open_tui then (
           let is_executable path =
             try Unix.access path [Unix.X_OK]; true

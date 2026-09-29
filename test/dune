@@ -1601,7 +1601,15 @@
 (test
  (name test_goal_owner_notification)
  (modules test_goal_owner_notification)
- (libraries masc_test_deps))
+ (libraries masc_test_deps ptime))
+
+; Goal_due: the one reading of a Goal's due date (the day it names, the UTC
+; instant it falls due, the UTC days left).
+
+(test
+ (name test_goal_due)
+ (modules test_goal_due)
+ (libraries alcotest masc.masc_goal ptime))
 
 ; RFC-0267 Phase 2: validated task->goal assignment
 ; (Task.Goal_assignment.set_task_goal).
@@ -2982,6 +2990,8 @@
 
 (include stanzas/test_mcp_server_eio_tool_profile_capability.inc)
 
+(include stanzas/test_tools_list_assignment_agent.inc)
+
 (include stanzas/test_mcp_seat_profile.inc)
 
 (include stanzas/test_mcp_dos_screen_image.inc)
@@ -3977,6 +3987,11 @@
  (libraries alcotest masc_tui_clipboard))
 
 (test
+ (name test_tui_sse_lines)
+ (modules test_tui_sse_lines)
+ (libraries alcotest masc_tui_sse_lines))
+
+(test
  (name test_tui_image_preview)
  (modules test_tui_image_preview)
  (libraries alcotest masc_tui_image_preview masc_tui_keeper_chat_projection masc.masc_tool_blob_store))
@@ -4567,6 +4582,11 @@
  (name test_tui_link)
  (modules test_tui_link)
  (libraries alcotest base64 masc_tui_link))
+
+(test
+ (name test_tui_play_qr)
+ (modules test_tui_play_qr)
+ (libraries alcotest masc_tui_play_qr masc_tui_message_layout))
 
 (test
  (name test_tui_planning_order)
@@ -6453,7 +6473,7 @@
 (test
  (name test_keeper_sandbox_remote_checkouts)
  (modules test_keeper_sandbox_remote_checkouts)
- (libraries alcotest masc unix yojson))
+ (libraries alcotest masc masc.repo_manager unix yojson))
 
 (test
  (name test_tui_image_mosaic)
@@ -6705,6 +6725,16 @@
  (deps test_tui_tab_strip_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
  (action
   (run python3 %{dep:test_tui_tab_strip_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(rule
+ (alias runtest-test_tui_play_invites_pty)
+ (deps test_tui_play_invites_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_play_invites_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_play_invites_pty)))
 
 (alias
  (name runtest)
@@ -7622,3 +7652,13 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_chat_activity_pane_pty)))
+
+(rule
+ (alias runtest-test_tui_chat_load_errors_pty)
+ (deps test_tui_chat_load_errors_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_chat_load_errors_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_chat_load_errors_pty)))

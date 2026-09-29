@@ -103,12 +103,20 @@ class RequestHttpResponse:
         self.resolve = resolve
 
 
+class MethodHttpResponse:
+    """A fixture that can assert the HTTP method for a mutation route."""
+
+    def __init__(self, resolve: Callable[[str], HttpResponse]) -> None:
+        self.resolve = resolve
+
+
 HttpFixture = (
     HttpResponse
     | RawHttpResponse
     | StreamingHttpResponse
     | DroppedHttpResponse
     | RequestHttpResponse
+    | MethodHttpResponse
     | HeadersHttpResponse
     | PathHttpResponse
     | Callable[[], HttpResponse]
@@ -272,6 +280,8 @@ def test_http_endpoint(
                 fixture = (503, {"error": "fixture endpoint unavailable"})
             if isinstance(fixture, RequestHttpResponse):
                 resolved = fixture.resolve(request_body or b"")
+            elif isinstance(fixture, MethodHttpResponse):
+                resolved = fixture.resolve(self.command)
             elif isinstance(fixture, PathHttpResponse):
                 resolved = fixture.resolve(self.path)
             elif isinstance(fixture, HeadersHttpResponse):
@@ -341,6 +351,11 @@ def test_http_endpoint(
             self.respond(body)
             if requests is not None:
                 requests.append((self.path, body))
+
+        def do_DELETE(self) -> None:
+            self.respond()
+            if requests is not None:
+                requests.append((self.path, b""))
 
         def log_message(self, format: str, *args: object) -> None:
             del format, args
@@ -2114,6 +2129,7 @@ def run_terminal_scenario(
     confirm_exit: bytes = b"q",
     refresh: float = 60.0,
     terminal_cols: int = 100,
+    terminal_rows: int = 30,
     workspace: str = WORKSPACE_PAYLOAD,
     http_fixtures: HttpFixtures | None = None,
     http_requests: HttpRequests | None = None,
@@ -2135,7 +2151,7 @@ def run_terminal_scenario(
     output = PtyOutput()
     process: subprocess.Popen[bytes] | None = None
     try:
-        fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, struct.pack("HHHH", 30, terminal_cols, 0, 0))
+        fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, struct.pack("HHHH", terminal_rows, terminal_cols, 0, 0))
         os.set_blocking(master_fd, False)
         with tempfile.TemporaryDirectory(prefix="masc-tui-keyboard-") as base_path:
             with test_http_endpoint(

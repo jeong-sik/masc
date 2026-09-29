@@ -1050,6 +1050,7 @@ for line in sys.stdin:
 let muse_quota_fixture = {|#!/usr/bin/env python3
 import json
 import sys
+import time
 from pathlib import Path
 
 mode = Path(sys.argv[0]).name
@@ -1072,7 +1073,7 @@ assert read()["method"] == "initialized"
 request = read()
 if request["method"] == "usage/read":
     spent = mode == "muse-quota-spent"
-    now_ms = 1_800_000_000_000
+    now_ms = time.time_ns() // 1_000_000
     reply(request, {"usage": {"observedAtMs": now_ms, "tier": "fixture",
         "window": {"usedPercent": 100 if spent else 10, "resetsAtMs": now_ms + 3_600_000, "windowDurationMins": 300},
         "weekly": {"usedPercent": 10, "resetsAtMs": now_ms + 86_400_000}}})

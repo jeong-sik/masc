@@ -112,8 +112,8 @@ status: reference
     시간(`stagnation_seconds` — 연결 태스크 갱신·승인 요청·Keeper 영수증·runtime trust
     이벤트·Goal 메타데이터 중 가장 최근 관측 활동 시각부터 지난 시간. Team 블록의 `Idle`
     과 다른 값이다: `Idle` 은 Keeper 의 작업 배정 상태이고 이 값은 Goal 의 마지막 관측
-    활동 이후 지난 시간이다), 운영자의 로컬 캘린더 날짜 기준 마감 카운트다운
-    (`D-N due countdown`).
+    활동 이후 지난 시간이다), UTC 날짜 기준 마감 카운트다운(기한은 그날 23:59:59 UTC,
+    `D-N due countdown`).
   - 관측 권위: 목표가 자체 지표(`metric`·`target`)를 가지고 있어도 측정값이 보고되지
     않으면 지어내지 않고, 진행 바는 순수하게 연결된 태스크의 완료 수만 측정한다.
     보고된 측정값은 **Goal Measurement**다.
@@ -174,6 +174,16 @@ status: reference
   퍼센트로 말하지 않는다.
   → [Runtime_quota_window](../../lib/runtime/runtime_quota_window.ml),
   [Masc_tui_overview_team](../../bin/masc_tui_overview_team.mli)
+
+**Runtime Rate Limit (런타임 속도 제한 관측)**
+: 한 런타임 후보가 받은 429 또는 제공자 속도 제한을 그 후보의 프로세스 로컬 셀에
+  기록한 증거. 계정 단위의 **닫힌 quota 창**과 구분한다. 같은 자격 증명을 쓰는 다른
+  후보까지 소진으로 표시하지 않고 해당 후보만 순서 뒤로 보낸다. 유효한 `Retry-After`
+  기한이 지나거나 그 후보가 성공하면 해제되며, 기한이 없으면 성공 전까지 남는다.
+  런타임 카탈로그는 이를 `rate_limited`·`rate_limit_resets_at`으로 따로 싣고, TUI는
+  quota와 속도 제한 상태를 구분해 표시한다(#39815).
+  → [Runtime_candidate_backpressure](../../lib/runtime/runtime_candidate_backpressure.mli) ·
+  [runtime resolved projection](../../lib/server/server_dashboard_runtime_resolved_json.mli)
 
 **Server Push (서버가 밀어 보내는 사건)**
 : 서버가 클라이언트로 밀어 보내는 사건으로, Keeper가 한 일이 아니라 서버가 보고하는

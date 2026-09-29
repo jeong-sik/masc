@@ -38,9 +38,10 @@ whether a digit needs `enter` or what an empty `enter` will do.
   destination, officer and unit-type choices, gold and food amounts, the
   officer carrying food, and the save-slot number. Follow their named steps.
 - Empty `enter` closed the 군사 submenu and gold prompt in the observed run.
-  In the war officer list it finishes selection and advances to gold; it
-  does not go back. At `어떻게 하겠습니까(1-3)` in the save menu, it returns
-  to the command prompt.
+  In the war officer list it returned to the command prompt while nobody was
+  sent yet; once an officer has a `*`, it ends the list and advances to gold.
+  At `어떻게 하겠습니까(1-3)` in the save menu, it returns to the command
+  prompt.
 - Battle-menu digits act immediately; a following `enter` backs out of the
   menu just opened. During officer placement, `enter` does nothing and `0`
   places the officer. Read those sections before sending another key.

@@ -1,5 +1,21 @@
 let ( let* ) = Result.bind
 
+type task_status =
+  | Todo
+  | Claimed
+  | In_progress
+  | Awaiting_verification
+  | Done of { completed_at : Candle_time.t }
+  | Cancelled
+
+type task_lookup =
+  | Found of
+      { title : string
+      ; assignee : string option
+      ; status : task_status
+      }
+  | Deleted
+
 type body =
   | Snapshot of
       { goal_id : string
@@ -13,6 +29,12 @@ type body =
       ; target_value : string option
       ; linked_task_ids : string list
       }
+  | Payout_owed of
+      { goal_id : string
+      ; request_id : string
+      ; passed_at : Candle_time.t
+      ; confirmed_at : Candle_time.t
+      }
 
 type t =
   { at : Candle_time.t
@@ -21,6 +43,7 @@ type t =
 
 let kind = function
   | Snapshot _ -> "snapshot"
+  | Payout_owed _ -> "payout_owed"
 ;;
 
 let nullable_text = function
@@ -40,6 +63,12 @@ let body_fields : body -> (string * Yojson.Safe.t) list = function
     ; "metric", nullable_text s.metric
     ; "target_value", nullable_text s.target_value
     ; "linked_task_ids", `List (List.map (fun id -> `String id) s.linked_task_ids)
+    ]
+  | Payout_owed p ->
+    [ "goal_id", `String p.goal_id
+    ; "request_id", `String p.request_id
+    ; "passed_at", Candle_time.to_yojson p.passed_at
+    ; "confirmed_at", Candle_time.to_yojson p.confirmed_at
     ]
 ;;
 
@@ -88,6 +117,16 @@ let snapshot_of_fields ~context fields =
        })
 ;;
 
+let payout_owed_of_fields ~context fields =
+  let field key decode fields = Candle_json.field ~context key decode fields in
+  let* goal_id, fields = field "goal_id" Candle_json.as_non_blank fields in
+  let* request_id, fields = field "request_id" Candle_json.as_non_blank fields in
+  let* passed_at, fields = field "passed_at" Candle_time.of_yojson fields in
+  let* confirmed_at, fields = field "confirmed_at" Candle_time.of_yojson fields in
+  let* () = Candle_json.finish ~context fields in
+  Ok (Payout_owed { goal_id; request_id; passed_at; confirmed_at })
+;;
+
 let of_yojson json =
   let context = "candle event" in
   let* fields = Candle_json.object_fields ~context json in
@@ -97,6 +136,7 @@ let of_yojson json =
   let* body =
     match kind_text with
     | "snapshot" -> snapshot_of_fields ~context fields
+    | "payout_owed" -> payout_owed_of_fields ~context fields
     | unknown -> Error (Printf.sprintf "%s: unknown kind %S" context unknown)
   in
   Ok { at; body }

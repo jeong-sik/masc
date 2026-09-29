@@ -35,6 +35,16 @@ let snapshot
        })
 ;;
 
+let payout_owed ?(goal_id = "goal-1") () =
+  event
+    (E.Payout_owed
+       { goal_id
+       ; request_id = "req-1"
+       ; passed_at = at "2026-09-28T06:32:00Z"
+       ; confirmed_at = at "2026-09-29T05:00:00Z"
+       })
+;;
+
 let event_testable =
   Alcotest.testable
     (fun formatter (row : E.t) ->
@@ -51,7 +61,12 @@ let test_the_row_format () =
      ^ {|"criterion_revision":"rev-1","passed_at":"2026-09-28T06:32:00Z","goal_created_at":"2026-09-20T01:00:00Z",|}
      ^ {|"due_date":"2026-09-26","title":"Ship the ledger","metric":"tests","target_value":null,|}
      ^ {|"linked_task_ids":["task-1","task-2"]}|})
-    (line_of (snapshot ()))
+    (line_of (snapshot ()));
+  Alcotest.(check string)
+    "payout_owed"
+    ({|{"kind":"payout_owed","at":"2026-09-29T06:00:00Z","goal_id":"goal-1","request_id":"req-1",|}
+     ^ {|"passed_at":"2026-09-28T06:32:00Z","confirmed_at":"2026-09-29T05:00:00Z"}|})
+    (line_of (payout_owed ()))
 ;;
 
 let round_trips label row =
@@ -66,7 +81,8 @@ let round_trips label row =
 let test_a_row_reads_back_as_written () =
   round_trips "typical" (snapshot ());
   round_trips "nothing optional" (snapshot ~due_date:None ~metric:None ~linked_task_ids:[] ());
-  round_trips "an empty title" (snapshot ~title:"" ())
+  round_trips "an empty title" (snapshot ~title:"" ());
+  round_trips "a payout owed" (payout_owed ())
 ;;
 
 (* The due date is a fact as the Goal held it. The ledger does not decide what
@@ -103,8 +119,11 @@ let replace_first ~sub ~by text =
   String.sub text 0 i ^ by ^ String.sub text (i + n) (String.length text - i - n)
 ;;
 
+let valid_owed = line_of (payout_owed ())
+
 let test_the_valid_line_used_below_does_read () =
-  Alcotest.(check bool) "valid" true (Result.is_ok (E.of_line valid))
+  Alcotest.(check bool) "valid" true (Result.is_ok (E.of_line valid));
+  Alcotest.(check bool) "valid payout_owed" true (Result.is_ok (E.of_line valid_owed))
 ;;
 
 let test_a_row_that_is_not_exactly_the_schema_is_refused () =
@@ -135,6 +154,18 @@ let test_a_row_that_is_not_exactly_the_schema_is_refused () =
       , replace_first ~sub:{|["task-1","task-2"]|} ~by:{|"task-1"|} valid )
     ; ( "title is null"
       , replace_first ~sub:{|"title":"Ship the ledger"|} ~by:{|"title":null|} valid )
+    ; ( "payout_owed missing confirmed_at"
+      , replace_first ~sub:{|,"confirmed_at":"2026-09-29T05:00:00Z"|} ~by:"" valid_owed )
+    ; ( "payout_owed with a snapshot field"
+      , replace_first ~sub:{|"request_id"|} ~by:{|"title":"x","request_id"|} valid_owed )
+    ; ( "payout_owed with a blank request id"
+      , replace_first ~sub:{|"request_id":"req-1"|} ~by:{|"request_id":""|} valid_owed )
+    ; ( "payout_owed confirmed_at with an offset"
+      , replace_first
+          ~sub:{|"confirmed_at":"2026-09-29T05:00:00Z"|}
+          ~by:{|"confirmed_at":"2026-09-29T14:00:00+09:00"|}
+          valid_owed )
+    ; "snapshot fields on a payout_owed kind", replace_first ~sub:{|"snapshot"|} ~by:{|"payout_owed"|} valid
     ; "not an object", "[]"
     ; "text after the row", valid ^ " x"
     ; "a second row on the line", valid ^ valid

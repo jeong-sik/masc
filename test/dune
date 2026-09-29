@@ -2549,6 +2549,10 @@
 (include stanzas/test_candle_stamp.inc)
 (include stanzas/test_candle_status.inc)
 (include stanzas/test_candle_snapshot.inc)
+(include stanzas/test_candle_payout.inc)
+(include stanzas/test_candle_payout_owed.inc)
+(include stanzas/test_candle_tasks.inc)
+(include stanzas/test_candle_goal_flow.inc)
 
 (include stanzas/test_audit_keeper_fleet_readiness.inc)
 

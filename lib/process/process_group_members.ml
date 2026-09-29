@@ -26,5 +26,7 @@ let group_has_no_live_member pgid =
   match snapshot pgid with
   | None -> false
   | Some rows ->
+    (* NDT-OK: the owner is this process by definition -- the check asks
+       whether the leader is still our own unreaped child. *)
     no_live_member ~leader:pgid ~owner:(Unix.getpid ())
       (Array.to_list (Array.map member_of_row rows))

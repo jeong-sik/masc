@@ -334,6 +334,7 @@ type error =
       { detail : string
       ; turn_admitted : bool
       }
+  | Unhandled_exception of string
   | Timeout of float
 
 exception Runtime_error of error
@@ -390,6 +391,7 @@ let error_to_string = function
   | Process_exited { detail; turn_admitted } ->
     Printf.sprintf "Claude Code exited before terminal result (turn_admitted=%b): %s"
       turn_admitted detail
+  | Unhandled_exception detail -> "Claude Code runtime raised: " ^ detail
   | Timeout seconds ->
     Printf.sprintf "Claude Code stream was idle for %.3fs" seconds
 ;;
@@ -407,6 +409,7 @@ let error_kind = function
   | Stopped_by_host _ -> "stopped_by_host"
   | Quota_blocked _ -> "quota_blocked"
   | Process_exited _ -> "process_exited"
+  | Unhandled_exception _ -> "unhandled_exception"
   | Timeout _ -> "timeout"
 ;;
 
@@ -2051,10 +2054,7 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
     | Idle_timeout seconds -> Error (Timeout seconds)
     | Eio.Time.Timeout as exn -> raise exn
     | Runtime_error error -> Error error
-    | exn ->
-      Error
-        (Protocol_error
-           { stage = "runtime boundary"; detail = Printexc.to_string exn })
+    | exn -> Error (Unhandled_exception (Printexc.to_string exn))
   in
   (match result with
    | Ok turn ->

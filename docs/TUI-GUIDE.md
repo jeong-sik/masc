@@ -207,6 +207,19 @@ be selected. If the target is unavailable, the TUI starts on Overview and
 shows the reason there. An invalid opening setting also starts on Overview
 with a reason.
 
+The candle on the startup splash and `/about` comes in two styles. `painted`
+is the 2D portrait, with smooth shading, a flickering flame and blinking
+eyes. `dotted` is a small 3D figure in square dots that sways on its axis.
+On a Kitty terminal it is sent as many pixels as its rows show, so the
+terminal never scales a dot. `c` on `/about` turns the candle to the other
+style and stores it; an absent key is `painted`, and an unknown one is
+named in the event log:
+
+```toml
+[tui]
+candle = "dotted" # or "painted"
+```
+
 The table measures the seven colours MASC uses for semantic text against a
 4.5:1 contrast floor. `native 7/7` means the theme clears it without help;
 `lift N/7` means MASC raises those colours to the floor. With

@@ -9,6 +9,7 @@ val capture_directory : base_path:string -> string
 
 type publication =
   { fields : (string * Yojson.Safe.t) list
+  ; compared_output_bytes : int
   ; release_sources : unit -> unit
   }
 

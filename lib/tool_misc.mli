@@ -15,13 +15,13 @@ type context = {
   help_schemas : Masc_domain.tool_schema list;
 }
 
-val parse_searxng_json : string -> (string * string * string) list
-val parse_brave_json : string -> (string * string * string) list
-val parse_brave_llm_context_json : string -> (string * string * string list) list
-val parse_ollama_search_json : string -> (string * string * string) list
-val parse_tavily_json : string -> (string * string * string) list
-val parse_exa_json : string -> (string * string * string) list
-val parse_bing_search_json : string -> (string * string * string) list
+val parse_searxng_json : string -> ((string * string * string) list, Tool_misc_web_search.provider_error) result
+val parse_brave_json : string -> ((string * string * string) list, Tool_misc_web_search.provider_error) result
+val parse_brave_llm_context_json : string -> ((string * string * string list) list, Tool_misc_web_search.provider_error) result
+val parse_ollama_search_json : string -> ((string * string * string) list, Tool_misc_web_search.provider_error) result
+val parse_tavily_json : string -> ((string * string * string) list, Tool_misc_web_search.provider_error) result
+val parse_exa_json : string -> ((string * string * string) list, Tool_misc_web_search.provider_error) result
+val parse_bing_search_json : string -> ((string * string * string) list, Tool_misc_web_search.provider_error) result
 val redact_transport_error_detail : string -> string
 val web_search_provider_error_to_string : Tool_misc_web_search.provider_error -> string
 val web_search_provider_plan : unit -> string list

@@ -43,6 +43,7 @@ export type StandaloneLaneJev =
 export interface StandaloneLaneSnapshotRow {
   laneId: StandaloneLaneId
   label: string
+  purpose: string
   required: boolean
   observationOnly: true
   configured: boolean | null
@@ -94,7 +95,7 @@ const CONFIGURATION_STATES: readonly string[] = ['ready', 'degraded', 'unconfigu
 const OUTCOMES: readonly string[] = ['succeeded', 'failed', 'cancelled']
 
 function fail(message: string): never {
-  throw new Error(`Invalid standalone lanes response: ${message}`)
+  throw new Error(`Invalid lanes response: ${message}`)
 }
 
 function string(value: unknown, context: string): string {
@@ -178,6 +179,7 @@ function parseLane(raw: unknown, index: number): StandaloneLaneSnapshotRow {
   return {
     laneId: laneId as StandaloneLaneId,
     label: string(raw.label, `${context}.label`),
+    purpose: string(raw.purpose, `${context}.purpose`),
     required: raw.required,
     observationOnly: true,
     configured: raw.configured as boolean | null,

@@ -210,12 +210,23 @@ let dish_bottom = wax_bottom +. dish_drop +. dish_half_height
 let scarf_bottom g =
   scarf_band_centre g +. Float.max scarf_half_height (scarf_tail_drop +. scarf_tail_end_radius)
 
+(* A bow tie's wings and a medal's disc hang from the same band; the medal's
+   disc reaches lowest. *)
+let bow_tie_bottom g = scarf_band_centre g +. 0.075
+let medal_bottom g = scarf_band_centre g +. 0.185 +. 0.145
+
+let neck_bottom g (e : equipment) =
+  match e.neck with
+  | Scarf -> scarf_bottom g
+  | Bow_tie -> bow_tie_bottom g
+  | Medal -> medal_bottom g
+  | Bare_neck -> wax_bottom
+
 (* The lowest point any part reaches: the wax, then whatever hangs below it.
    The beard is cut at the wax's bottom, so it never does. *)
 let bottom_reach g (e : equipment) =
   let dish = match e.base with Dish _ -> dish_bottom | No_dish -> wax_bottom in
-  let scarf = match e.neck with Scarf -> scarf_bottom g | Bare_neck -> wax_bottom in
-  Float.max wax_bottom (Float.max dish scarf)
+  Float.max wax_bottom (Float.max dish (neck_bottom g e))
 
 let geometry_posed ~cull (b : body) (e : equipment) (p : pose) =
   let top = wax_bottom -. (2.0 *. b.half_height) in
@@ -375,6 +386,38 @@ let scarf_field g x y =
       (taper x y (g.w *. 0.45) (c +. 0.01) (g.w *. 0.70) (c +. scarf_tail_drop) scarf_tail_radius
          scarf_tail_end_radius)
 
+(* A bow tie and a medal hang from the same band the scarf does, so they clear
+   the mouth the same way. The bow tie is two wings and a knot; the medal is a
+   V ribbon with a disc below it. Heights are fixed units, not shares of the
+   wax width, so the wings stay as thick as the scarf's band and the disc
+   stays a visible dot even at 48 px, where one shape unit is about 25 px. *)
+let neck_band_centre g = scarf_band_centre g
+
+let bow_tie_wing_field g x y =
+  let c = neck_band_centre g in
+  let hw = g.w *. 0.40 in
+  Float.min (ellipse x y (-.hw) c (hw *. 0.60) 0.075 0.25)
+    (ellipse x y hw c (hw *. 0.60) 0.075 (-0.25))
+
+let bow_tie_knot_field g x y =
+  let c = neck_band_centre g in
+  circle x y 0.0 c 0.06
+
+let bow_tie_field g x y =
+  Float.min (bow_tie_wing_field g x y) (bow_tie_knot_field g x y)
+
+let medal_disc_field g x y =
+  let c = neck_band_centre g in
+  circle x y 0.0 (c +. 0.185) 0.145
+
+let medal_ribbon_field g x y =
+  let c = neck_band_centre g in
+  Float.min
+    (taper x y (-.(g.w *. 0.52)) (c -. 0.07) (-.0.045) (c +. 0.07) 0.034 0.022)
+    (taper x y (g.w *. 0.52) (c -. 0.07) 0.045 (c +. 0.07) 0.034 0.022)
+
+let medal_field g x y = Float.min (medal_ribbon_field g x y) (medal_disc_field g x y)
+
 let bow_centre g = (-.g.w *. 0.55, g.top +. 0.02)
 
 let bow_field g x y =
@@ -521,6 +564,10 @@ type paint =
   | Lens
   | Beard_hair
   | Scarf_cloth
+  | Bow_tie_wing
+  | Bow_tie_knot
+  | Medal_ribbon
+  | Medal_metal
   | Bow_ribbon
   | Crown_metal
   | Beanie_felt
@@ -552,49 +599,57 @@ let paint_index = function
   | Lens -> 13
   | Beard_hair -> 14
   | Scarf_cloth -> 15
-  | Bow_ribbon -> 16
-  | Crown_metal -> 17
-  | Beanie_felt -> 18
-  | Book_cover -> 19
-  | Book_spine -> 20
-  | Book_pages -> 21
-  | Mug_ceramic -> 22
-  | Mug_rim -> 23
-  | Quill_feather -> 24
-  | Quill_nib -> 25
-  | Plaster_strip -> 26
-  | Patch -> 27
-  | Freckle -> 28
+  | Bow_tie_wing -> 16
+  | Bow_tie_knot -> 17
+  | Medal_ribbon -> 18
+  | Medal_metal -> 19
+  | Bow_ribbon -> 20
+  | Crown_metal -> 21
+  | Beanie_felt -> 22
+  | Book_cover -> 23
+  | Book_spine -> 24
+  | Book_pages -> 25
+  | Mug_ceramic -> 26
+  | Mug_rim -> 27
+  | Quill_feather -> 28
+  | Quill_nib -> 29
+  | Plaster_strip -> 30
+  | Patch -> 31
+  | Freckle -> 32
 
 (* Soft marks and highlights sit on a part without an ink line round them. *)
 let quiet = function
   | Glint | Blush | Freckle -> true
   | Outside | Wax | Wax_drip | Flame | Flame_core | Horn | Dish_metal _ | Eye | Mouth | Tooth | Frame | Lens
-  | Beard_hair | Scarf_cloth | Bow_ribbon | Crown_metal | Beanie_felt | Book_cover | Book_spine | Book_pages | Mug_ceramic | Mug_rim
-  | Quill_feather | Quill_nib | Plaster_strip | Patch ->
+  | Beard_hair | Scarf_cloth | Bow_tie_wing | Bow_tie_knot | Medal_ribbon | Medal_metal | Bow_ribbon | Crown_metal
+  | Beanie_felt | Book_cover | Book_spine | Book_pages | Mug_ceramic | Mug_rim | Quill_feather | Quill_nib
+  | Plaster_strip | Patch ->
       false
 
 (* Parts that give light keep their colour in the shade band. *)
 let emissive = function
   | Flame | Flame_core | Glint -> true
   | Outside | Wax | Wax_drip | Horn | Dish_metal _ | Eye | Blush | Mouth | Tooth | Frame | Lens | Beard_hair
-  | Scarf_cloth | Bow_ribbon | Crown_metal | Beanie_felt | Book_cover | Book_spine | Book_pages | Mug_ceramic | Mug_rim | Quill_feather
-  | Quill_nib | Plaster_strip | Patch | Freckle ->
+  | Scarf_cloth | Bow_tie_wing | Bow_tie_knot | Medal_ribbon | Medal_metal | Bow_ribbon | Crown_metal | Beanie_felt
+  | Book_cover | Book_spine | Book_pages | Mug_ceramic | Mug_rim | Quill_feather | Quill_nib | Plaster_strip | Patch
+  | Freckle ->
       false
 
 let outside = function
   | Outside -> true
   | Wax | Wax_drip | Flame | Flame_core | Horn | Dish_metal _ | Eye | Glint | Blush | Mouth | Tooth | Frame | Lens
-  | Beard_hair | Scarf_cloth | Bow_ribbon | Crown_metal | Beanie_felt | Book_cover | Book_spine | Book_pages | Mug_ceramic | Mug_rim
-  | Quill_feather | Quill_nib | Plaster_strip | Patch | Freckle ->
+  | Beard_hair | Scarf_cloth | Bow_tie_wing | Bow_tie_knot | Medal_ribbon | Medal_metal | Bow_ribbon | Crown_metal
+  | Beanie_felt | Book_cover | Book_spine | Book_pages | Mug_ceramic | Mug_rim | Quill_feather | Quill_nib
+  | Plaster_strip | Patch | Freckle ->
       false
 
 (* The flame and its core are one light; no line between them. *)
 let flame_part = function
   | Flame | Flame_core -> true
   | Outside | Wax | Wax_drip | Horn | Dish_metal _ | Eye | Glint | Blush | Mouth | Tooth | Frame | Lens | Beard_hair
-  | Scarf_cloth | Bow_ribbon | Crown_metal | Beanie_felt | Book_cover | Book_spine | Book_pages | Mug_ceramic | Mug_rim | Quill_feather
-  | Quill_nib | Plaster_strip | Patch | Freckle ->
+  | Scarf_cloth | Bow_tie_wing | Bow_tie_knot | Medal_ribbon | Medal_metal | Bow_ribbon | Crown_metal | Beanie_felt
+  | Book_cover | Book_spine | Book_pages | Mug_ceramic | Mug_rim | Quill_feather | Quill_nib | Plaster_strip | Patch
+  | Freckle ->
       false
 
 let eye_offset = 0.19
@@ -714,7 +769,21 @@ let face_overlay (e : equipment) g x y =
   | Beard -> if beard_field g x y < 0.0 then Some Beard_hair else None
   | Bare_face | Plaster | Freckles -> None
 
-let neck_field (e : equipment) g x y = match e.neck with Scarf -> scarf_field g x y | Bare_neck -> Float.infinity
+let neck_field (e : equipment) g x y =
+  match e.neck with
+  | Scarf -> scarf_field g x y
+  | Bow_tie -> bow_tie_field g x y
+  | Medal -> medal_field g x y
+  | Bare_neck -> Float.infinity
+
+(* The paint for whatever is worn at the neck. [Bare_neck] never reaches here:
+   its field is infinite, so no sample is inside it. *)
+let neck_paint (e : equipment) g x y =
+  match e.neck with
+  | Scarf -> Scarf_cloth
+  | Bow_tie -> if bow_tie_knot_field g x y < 0.0 then Bow_tie_knot else Bow_tie_wing
+  | Medal -> if medal_disc_field g x y < 0.0 then Medal_metal else Medal_ribbon
+  | Bare_neck -> Outside
 
 let head_field (e : equipment) g x y =
   match e.head with
@@ -824,7 +893,7 @@ let sample (b : body) (e : equipment) ~dish g x y =
         match face_overlay e g x y with
         | Some p -> p
         | None -> (
-            if neck_d < 0.0 then Scarf_cloth
+            if neck_d < 0.0 then neck_paint e g x y
             else
               match dish with
               | Some metal when base_d < 0.0 && wax_d > -0.01 -> metal
@@ -917,6 +986,10 @@ let paint_colour (b : body) = function
   | Lens -> rgb 30 30 40
   | Beard_hair -> rgb 150 112 84
   | Scarf_cloth -> rgb 214 64 84
+  | Bow_tie_wing -> rgb 60 70 150
+  | Bow_tie_knot -> rgb 36 42 100
+  | Medal_ribbon -> rgb 200 60 70
+  | Medal_metal -> rgb 226 186 74
   | Bow_ribbon -> rgb 236 110 150
   | Crown_metal -> rgb 240 200 70
   | Beanie_felt -> rgb 96 76 150
@@ -930,6 +1003,50 @@ let paint_colour (b : body) = function
   | Plaster_strip -> rgb 246 220 180
   | Patch -> rgb 40 36 44
   | Freckle -> rgb 150 96 80
+
+type palette = {
+  wax_rgb : rgb;
+  drip_rgb : rgb;
+  flame_rgb : rgb;
+  flame_core_rgb : rgb;
+  horn_rgb : rgb;
+  eye_rgb : rgb;
+  glint_rgb : rgb;
+  blush_rgb : rgb;
+  mouth_rgb : rgb;
+  ink_rgb : rgb;
+  backdrop_rgb : rgb;
+}
+
+let palette (b : body) =
+  {
+    wax_rgb = paint_colour b Wax;
+    drip_rgb = paint_colour b Wax_drip;
+    flame_rgb = paint_colour b Flame;
+    flame_core_rgb = paint_colour b Flame_core;
+    horn_rgb = paint_colour b Horn;
+    eye_rgb = paint_colour b Eye;
+    glint_rgb = paint_colour b Glint;
+    blush_rgb = paint_colour b Blush;
+    mouth_rgb = paint_colour b Mouth;
+    ink_rgb = ink_rgb b;
+    backdrop_rgb = paint_colour b Outside;
+  }
+
+let image_init size pixel_at =
+  let rgba = Bytes.create (size * size * 4) in
+  for y = 0 to size - 1 do
+    for x = 0 to size - 1 do
+      let { red; green; blue }, alpha = pixel_at ~x ~y in
+      let at = ((y * size) + x) * 4 in
+      let byte v = Char.chr (max 0 (min 255 v)) in
+      Bytes.set rgba at (byte red);
+      Bytes.set rgba (at + 1) (byte green);
+      Bytes.set rgba (at + 2) (byte blue);
+      Bytes.set rgba (at + 3) (byte alpha)
+    done
+  done;
+  { edge = size; rgba = Bytes.unsafe_to_string rgba }
 
 (* ---- raster -------------------------------------------------------------- *)
 
@@ -981,7 +1098,8 @@ let render_with ~cull (b : body) (e : equipment) (p : pose) (n : size) =
         let x = x_of i and y = y_of j in
         if Float.hypot x (y -. view_centre_y) < backdrop_r then Some backdrop else None
     | Wax | Wax_drip | Flame | Flame_core | Horn | Dish_metal _ | Eye | Glint | Blush | Mouth | Tooth | Frame | Lens
-    | Beard_hair | Scarf_cloth | Bow_ribbon | Crown_metal | Beanie_felt | Book_cover | Book_spine | Book_pages | Mug_ceramic | Mug_rim
+    | Beard_hair | Scarf_cloth | Bow_tie_wing | Bow_tie_knot | Medal_ribbon | Medal_metal | Bow_ribbon | Crown_metal
+    | Beanie_felt | Book_cover | Book_spine | Book_pages | Mug_ceramic | Mug_rim
     | Quill_feather | Quill_nib | Plaster_strip | Patch | Freckle ->
         let d = dist i j in
         if d > -.outline || boundary i j part then Some ink

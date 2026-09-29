@@ -420,7 +420,18 @@ open Alcotest
    its 128,595 base was not re-measured after #39454 trimmed four board
    descriptions (about 67 to 98 bytes by replay), so the surface sits that
    far under this ceiling rather than exactly at it. *)
-let ceiling_bytes = 129_200
+(* Candle balance, catalog and purchase let a Keeper inspect and spend its
+   earned currency. The observed 130,405-byte inventory at #40008 is 1,205
+   bytes over the previous ceiling; 130,800 preserves 395 bytes of slack. *)
+(* 2026-09-30: #40010 PR-check 36601686224, job 109522529179, measured
+   131,080 bytes across 151 tools at caa414d390. Equipment adds a 567-byte
+   keeper_candle_equip schema, and the portrait reader's description adds
+   108 serialized bytes to distinguish current, starting and preview gear.
+   These 675 bytes account for the increase over #40008. What it bought:
+   a Keeper can equip an owned accessory or restore one slot's starting
+   item, then read the actual equipped portrait. Pin to the measured
+   inventory without adding headroom. *)
+let ceiling_bytes = 131_080
 
 
 let schema_json (schema : Masc_domain.tool_schema) =
@@ -494,6 +505,10 @@ let all_surface_golden_names =
   ; "keeper_artifact_read"
   ; "keeper_artifact_transfer"
   ; "keeper_broadcast"
+  ; "keeper_candle_balance"
+  ; "keeper_candle_catalog"
+  ; "keeper_candle_equip"
+  ; "keeper_candle_purchase"
   ; "keeper_code_query"
   ; "keeper_context_status"
   ; "keeper_ide_annotate"

@@ -16,6 +16,28 @@
 let string_opt_json = Json_util.string_opt_to_json
 let int_opt_json = Json_util.int_opt_to_json
 
+(* The rate limit this process holds for [rt], and the moment the provider's
+   own Retry-After ends it when that is still ahead of [now]. *)
+let runtime_rate_limit ~now (rt : Runtime.t) : bool * float option =
+  match
+    Runtime_candidate_backpressure.candidate_backpressure ~now
+      ~candidate:rt.candidate_backpressure
+  with
+  | Some
+      { Runtime_candidate_backpressure.rate_limit =
+          Some (Runtime_candidate_backpressure.Unknown_scope_rate_limit { noted_at; retry_after })
+      ; failed_attempt = _
+      } ->
+    let resets_at =
+      match Keeper_runtime_failure_route.usable_retry_after retry_after with
+      | Some wait when Float.compare (noted_at +. wait) now > 0 -> Some (noted_at +. wait)
+      | Some _ | None -> None
+    in
+    true, resets_at
+  | Some { Runtime_candidate_backpressure.rate_limit = None; failed_attempt = _ } | None ->
+    false, None
+;;
+
 let runtime_resolution_json ~scope_label (rt : Runtime.t) : Yojson.Safe.t =
   let exact_slot_group =
     Runtime.exact_slot_list_key_of_api_format rt.provider.api_format
@@ -41,6 +63,12 @@ let runtime_resolution_json ~scope_label (rt : Runtime.t) : Yojson.Safe.t =
   let quota_exhausted = Runtime_quota_window.is_exhausted ~scope:quota_scope ~now in
   let quota_resets_at = Runtime_quota_window.active_until ~scope:quota_scope ~now in
   let quota_scope_label = scope_label quota_scope in
+  (* A rate limit is a separate fact from the quota window: it is this
+     process's own observation of a 429 on this runtime, and it stays until the
+     runtime answers. [rate_limit_resets_at] exists only while the provider's
+     stated wait is still ahead; a limit with no stated wait, or one whose wait
+     has passed without an answer since, says [rate_limited] alone. *)
+  let rate_limited, rate_limit_resets_at = runtime_rate_limit ~now rt in
   `Assoc
     [ "id", `String rt.id
     ; "provider", `String rt.provider.display_name
@@ -74,6 +102,9 @@ let runtime_resolution_json ~scope_label (rt : Runtime.t) : Yojson.Safe.t =
     ; "quota_exhausted", `Bool quota_exhausted
     ; "quota_resets_at", (match quota_resets_at with Some t -> `Float t | None -> `Null)
     ; "quota_scope", `String quota_scope_label
+    ; "rate_limited", `Bool rate_limited
+    ; ( "rate_limit_resets_at"
+      , match rate_limit_resets_at with Some t -> `Float t | None -> `Null )
     ]
 ;;
 

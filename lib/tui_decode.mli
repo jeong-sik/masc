@@ -883,6 +883,12 @@ type runtime_option = {
   ro_quota_exhausted : bool;
   ro_quota_resets_at : float option;
   ro_quota_scope : string option;
+  ro_rate_limited : bool;
+      (** This process observed a 429 on this runtime and no answer has cleared
+          it. Distinct from [ro_quota_exhausted], the provider's quota window. *)
+  ro_rate_limit_resets_at : float option;
+      (** The end of the provider's stated wait; [None] when it stated none or
+          the wait has already passed. *)
 }
 
 type runtime_resolved_lane = {

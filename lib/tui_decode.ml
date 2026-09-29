@@ -2844,6 +2844,8 @@ type runtime_option = {
   ro_quota_exhausted : bool;
   ro_quota_resets_at : float option;
   ro_quota_scope : string option;
+  ro_rate_limited : bool;
+  ro_rate_limit_resets_at : float option;
 }
 
 type runtime_resolved_lane = {
@@ -5006,6 +5008,14 @@ let decode_runtime_option ~default_id json =
   in
   let* ro_quota_resets_at = optional_float_field json "quota_resets_at" in
   let* ro_quota_scope = optional_string_field json "quota_scope" in
+  let* ro_rate_limited =
+    match optional_bool_field json "rate_limited" with
+    | Ok (Some value) -> Ok value
+    (* Absent on an older server's document, as the quota fields are. *)
+    | Ok None -> Ok false
+    | Error detail -> Error detail
+  in
+  let* ro_rate_limit_resets_at = optional_float_field json "rate_limit_resets_at" in
   let ro_is_default = Option.equal String.equal default_id (Some ro_id) in
   Ok
     { ro_id
@@ -5022,6 +5032,8 @@ let decode_runtime_option ~default_id json =
     ; ro_quota_exhausted
     ; ro_quota_resets_at
     ; ro_quota_scope
+    ; ro_rate_limited
+    ; ro_rate_limit_resets_at
     }
 
 let decode_runtime_default_member json =

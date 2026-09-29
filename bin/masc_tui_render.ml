@@ -12327,9 +12327,14 @@ let runtime_overall_badge status =
   style ^ runtime_probe_status_to_string status ^ Ansi.reset
 
 let runtime_route_badge (runtime : Masc.Tui_decode.runtime_option) =
-  (match runtime_quota_badge runtime with
-     | Some badge -> badge
-     | None -> (Theme.info ()) ^ "ready" ^ Ansi.reset)
+  (* "ready" is said only when neither refusal is held; a rate-limited
+     runtime used to read as ready because only the quota window was asked. *)
+  match
+    List.filter_map Fun.id
+      [ runtime_quota_badge runtime; runtime_rate_limit_badge runtime ]
+  with
+  | [] -> (Theme.info ()) ^ "ready" ^ Ansi.reset
+  | badges -> String.concat " " badges
 
 let runtime_probe_badge = function
   | None -> Ansi.dim ^ "unobserved" ^ Ansi.reset
@@ -12511,6 +12516,18 @@ let runtime_detail_lines state target ~width =
                   | None ->
                     Printf.sprintf "exhausted, no reset stated (%s)" scope))
       in
+      let rate_limit =
+        match runtime.ro_rate_limited, runtime.ro_rate_limit_resets_at with
+        | false, _ -> []
+        | true, Some resets_at ->
+          let tm = Unix.localtime resets_at in
+          runtime_detail_field ~width ~style:(Theme.warn ()) "Rate limit"
+            (Printf.sprintf "retry after %02d:%02d, cleared by the next answer"
+               tm.Unix.tm_hour tm.Unix.tm_min)
+        | true, None ->
+          runtime_detail_field ~width ~style:(Theme.warn ()) "Rate limit"
+            "no wait stated, cleared by the next answer"
+      in
       let probe_lines =
         match probe with
         | None -> [ Ansi.dim, "  Probe: unobserved" ]
@@ -12581,7 +12598,7 @@ let runtime_detail_lines state target ~width =
             runtime_detail_field ~width ~style:Ansi.reset "Bound keepers" names
             @ runtime_detail_field ~width ~style:Ansi.reset "Keeper telemetry" activity_str
       in
-      fields @ candidate @ quota @ keeper_lines @ probe_lines @ probe_limitations
+      fields @ candidate @ quota @ rate_limit @ keeper_lines @ probe_lines @ probe_limitations
 
 let render_runtime_detail (state : state) target =
   let terminal_rows, cols = get_terminal_size () in

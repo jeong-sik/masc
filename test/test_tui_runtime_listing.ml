@@ -8,7 +8,8 @@ let runtime id : Masc.Tui_decode.runtime_option =
     ro_effective_max_context = 200000; ro_max_context_source = Runtime_context_capability;
     ro_max_output_tokens = Some 8192; ro_declared_reasoning_effort = None; ro_is_local = false;
     ro_is_default = false;
-    ro_quota_exhausted = false; ro_quota_resets_at = None; ro_quota_scope = None }
+    ro_quota_exhausted = false; ro_quota_resets_at = None; ro_quota_scope = None;
+    ro_rate_limited = false; ro_rate_limit_resets_at = None }
 
 let state () = create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
 
@@ -542,6 +543,34 @@ let test_narrow_rows_keep_the_fact_that_is_said_nowhere_else () =
     Alcotest.failf "80 columns kept %d facts, wanted the warning alone"
       (List.length facts)
 
+(* A rate limit is its own fact, not a spelling of the quota window: the row
+   says which refusal it is, and a lane row counts the candidates that hold
+   either. *)
+let test_rate_limit_is_said_on_model_and_lane_rows () =
+  let limited = { (runtime "a") with ro_rate_limited = true } in
+  let quota = { (runtime "b") with ro_quota_exhausted = true } in
+  let clear = runtime "c" in
+  let texts item =
+    runtime_pick_visible_facts ~cols:200 item
+    |> List.map (fun (fact : runtime_pick_fact) -> fact.rpf_text)
+  in
+  Alcotest.(check (list string)) "a rate-limited model row says so"
+    [ "[200k ctx]"; "[rate limited]" ]
+    (texts (Pick_model limited));
+  Alcotest.(check (list string)) "a clear model row says neither"
+    [ "[200k ctx]" ] (texts (Pick_model clear));
+  let lane candidates =
+    Pick_lane
+      ( { rrl_id = "coding"; rrl_runtime_ids = List.map (fun (o : Masc.Tui_decode.runtime_option) -> o.ro_id) candidates;
+          rrl_declared = true }
+      , candidates )
+  in
+  Alcotest.(check (list string)) "a lane counts quota and rate limit alike"
+    [ "(3 hops)"; "[2 of 3 limited]" ]
+    (texts (lane [ limited; quota; clear ]));
+  Alcotest.(check (list string)) "a lane with nothing refusing adds nothing"
+    [ "(1 hops)" ] (texts (lane [ clear ]))
+
 (* The reasoning step is the last four cells of the id, and a head-keeping cut
    drops exactly those: at 80 columns both bindings drew as
    [claude_code.claude-sonn…]. *)
@@ -819,7 +848,7 @@ let test_the_picker_offers_only_declared_lanes () =
     ["lane coding"; "model a"; "model b"]
     (List.map
        (function
-         | Pick_lane lane -> "lane " ^ lane.Masc.Tui_decode.rrl_id
+         | Pick_lane (lane, _) -> "lane " ^ lane.Masc.Tui_decode.rrl_id
          | Pick_model model -> "model " ^ model.Masc.Tui_decode.ro_id)
         (runtime_picker_items state))
 
@@ -1156,8 +1185,10 @@ let test_the_keeper_picker_filters_across_lanes_and_runtimes () =
    the columns the renderer draws. *)
 let test_the_keeper_picker_label_is_the_drawn_columns () =
   let lane =
-    Pick_lane { rrl_id = "coding"; rrl_runtime_ids = [ "anthropic.claude"; "odd" ];
-                rrl_declared = true }
+    Pick_lane
+      ( { rrl_id = "coding"; rrl_runtime_ids = [ "anthropic.claude"; "odd" ];
+          rrl_declared = true }
+      , [] )
   in
   let columns = runtime_pick_columns lane in
   Alcotest.(check string) "a lane route names its models"
@@ -1294,6 +1325,8 @@ let () = Alcotest.run "runtime list geometry"
         test_every_row_fits_the_frame;
       Alcotest.test_case "narrow rows keep the quota warning" `Quick
         test_narrow_rows_keep_the_fact_that_is_said_nowhere_else;
+      Alcotest.test_case "rate limit shows on model and lane rows" `Quick
+        test_rate_limit_is_said_on_model_and_lane_rows;
       Alcotest.test_case "narrow target column tells the variants apart" `Quick
         test_narrow_target_column_still_tells_the_variants_apart;
       Alcotest.test_case "the slot editor edits the declared order" `Quick

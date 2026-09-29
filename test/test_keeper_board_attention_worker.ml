@@ -234,6 +234,14 @@ let process ~base_path ~prepare ~execute =
   process_at ~now:(fun () -> 3.0) ~base_path ~prepare ~execute
 ;;
 
+let reconcile ~now ~base_path =
+  W.For_testing.reconcile_quarantines
+    ~now
+    ~worker_epoch:(P.Worker_epoch.generate ())
+    ~base_path
+    ~keeper_name:"alpha"
+;;
+
 let test_worker_exact_callback_integration_and_owner_settlement () =
   with_temp_base "board-attention-worker-callback-chain" @@ fun base_path ->
   let persisted = record ~base_path (candidate ()) in
@@ -2436,10 +2444,7 @@ let test_candidate_quarantine_restores_a_missing_partition () =
       : int);
   ok
     "process-start reconciliation"
-    (W.For_testing.reconcile_quarantines
-       ~now:21.0
-       ~base_path
-       ~keeper_name:"alpha");
+    (reconcile ~now:21.0 ~base_path);
   (match (load_one_partition ~base_path).state with
    | P.Ready -> ()
    | _ -> Alcotest.fail "process-start replay did not restore Ready");
@@ -2667,9 +2672,9 @@ let test_manual_quarantine_requeue_is_unclaimable_until_authorized_and_settles (
        (P.recover_for_process_start ~now:33.0 ~base_path ~keeper_name:"alpha")
      : int);
   ok "reconcile authorized requeue after deferral"
-    (W.For_testing.reconcile_quarantines ~now:34.0 ~base_path ~keeper_name:"alpha");
+    (reconcile ~now:34.0 ~base_path);
   ok "repeat process-start reconciliation"
-    (W.For_testing.reconcile_quarantines ~now:35.0 ~base_path ~keeper_name:"alpha");
+    (reconcile ~now:35.0 ~base_path);
   let confirmations = ready_confirmation_events ~base_path in
   Alcotest.(check int)
     "each authorized Ready reconciliation is durable"
@@ -2701,7 +2706,7 @@ let test_manual_quarantine_requeue_is_unclaimable_until_authorized_and_settles (
     (ok "recover interrupted authorized requeue"
        (P.recover_for_process_start ~now:37.0 ~base_path ~keeper_name:"alpha"));
   ok "reconcile authorized requeue after interrupted run"
-    (W.For_testing.reconcile_quarantines ~now:38.0 ~base_path ~keeper_name:"alpha");
+    (reconcile ~now:38.0 ~base_path);
   let confirmations = ready_confirmation_events ~base_path in
   Alcotest.(check int)
     "recovery of the cut run confirms a later Ready generation"
@@ -2837,6 +2842,236 @@ let test_ready_requested_recovery_fails_closed () =
   match (load_one_candidate ~base_path).status, (load_one_partition ~base_path).state with
   | A.Quarantine { phase = A.Requeue_requested _; _ }, P.Ready -> ()
   | _ -> Alcotest.fail "Ready+Requested rejection mutated durable state"
+;;
+
+let candidate_by_id ~base_path candidate_id =
+  match
+    List.find_opt
+      (fun (candidate : A.candidate) -> String.equal candidate.candidate_id candidate_id)
+      (ok "load candidates" (A.load_candidates ~base_path ~keeper_name:"alpha"))
+  with
+  | Some candidate -> candidate
+  | None -> Alcotest.failf "candidate %s is missing" candidate_id
+;;
+
+let partition_of ~base_path candidate_id =
+  match
+    List.find_opt
+      (fun (partition : P.t) -> String.equal partition.candidate_id candidate_id)
+      (ok "load partitions" (P.load ~base_path ~keeper_name:"alpha"))
+  with
+  | Some partition -> partition
+  | None -> Alcotest.failf "partition of %s is missing" candidate_id
+;;
+
+let quarantine_of ~base_path candidate_id =
+  match (candidate_by_id ~base_path candidate_id).status with
+  | A.Quarantine state -> state
+  | A.Pending _ | A.Judged _ | A.Consumed _ ->
+    Alcotest.failf "candidate %s is not quarantined" candidate_id
+;;
+
+(* The worker's own failed run blocks the partition and quarantines the
+   candidate at that Blocked generation. *)
+let quarantine_through_failed_run ~base_path =
+  let execute ~before_dispatch:_ ~before_advance:_ _candidate =
+    raise (Failure "injected exact worker exception")
+  in
+  match
+    ok
+      "quarantine through a failed run"
+      (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+  with
+  | W.Partition_blocked _ -> ()
+  | _ -> Alcotest.fail "failed run did not block the partition"
+;;
+
+(* The partition row leaves Blocked although the candidate never recorded a
+   finished requeue: the order a lost candidate write leaves behind. *)
+let ready_without_candidate_requeue ~base_path candidate_id =
+  match
+    ok
+      "move the Blocked row to Ready"
+      (P.requeue_blocked ~base_path ~partition:(partition_of ~base_path candidate_id))
+  with
+  | P.Requeued _ -> ()
+  | P.Cursor_conflict detail | P.Generation_conflict detail ->
+    Alcotest.failf "fixture requeue conflicted: %s" detail
+;;
+
+let request_requeue ~base_path candidate_id =
+  let state = quarantine_of ~base_path candidate_id in
+  ignore
+    (ok
+       "persist the operator requeue request"
+       (A.request_quarantine_requeue
+          ~base_path
+          ~candidate:(candidate_by_id ~base_path candidate_id)
+          ~partition_id:state.quarantine.partition_id
+          ~expected_quarantine_id:state.quarantine.quarantine_id
+          ~requested_at:40.0
+          ~requested_by:"operator-test")
+     : A.candidate)
+;;
+
+let finish_requeue ~base_path candidate_id =
+  let state = quarantine_of ~base_path candidate_id in
+  ignore
+    (ok
+       "persist the finished requeue"
+       (A.finish_quarantine_requeue
+          ~base_path
+          ~candidate:(candidate_by_id ~base_path candidate_id)
+          ~partition_id:state.quarantine.partition_id
+          ~expected_quarantine_id:state.quarantine.quarantine_id
+          ~requeued_at:41.0)
+     : A.candidate)
+;;
+
+let ready_with_unacknowledged_quarantine ~base_path candidate_id =
+  quarantine_through_failed_run ~base_path;
+  ready_without_candidate_requeue ~base_path candidate_id
+;;
+
+let ready_before_requeue_recorded ~base_path candidate_id =
+  quarantine_through_failed_run ~base_path;
+  request_requeue ~base_path candidate_id;
+  ready_without_candidate_requeue ~base_path candidate_id
+;;
+
+(* A finished requeue that names the Ready row's own generation: the row
+   never reached the Blocked generation the quarantine claims. *)
+let ready_at_requeued_generation ~base_path candidate_id =
+  let candidate = candidate_by_id ~base_path candidate_id in
+  ignore
+    (ok "create the Ready root" (P.ensure_roots ~base_path ~keeper_name:"alpha" [ candidate ])
+     : int);
+  let ready = partition_of ~base_path candidate_id in
+  ignore
+    (ok
+       "quarantine at the Ready generation"
+       (A.quarantine
+          ~base_path
+          ~candidate
+          ~partition_id:ready.partition_id
+          ~partition_generation:ready.generation
+          ~failure_category:A.Unexpected_worker_failure
+          ~attempt_provenance:None
+          ~quarantined_at:2.0)
+     : A.candidate);
+  request_requeue ~base_path candidate_id;
+  finish_requeue ~base_path candidate_id
+;;
+
+let judge_not_relevant
+      ~(before_dispatch : E.attempt_provenance -> (unit, string) result)
+      ~before_advance:_
+      (judged : A.candidate)
+  =
+  let exact = provenance judged.candidate_id in
+  ok "bind the judgment call" (before_dispatch exact);
+  Ok (judgment exact J.Not_relevant)
+;;
+
+let expect_judged ~base_path label candidate_id =
+  match
+    ok label (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute:judge_not_relevant)
+  with
+  | W.Judgment_completed { candidate_id = judged; _ } when String.equal judged candidate_id -> ()
+  | _ -> Alcotest.failf "%s: the expected candidate was not judged" label
+;;
+
+(* Each pair used to fail process-start recovery, which stopped this Keeper's
+   whole Board attention worker until the next restart hit it again. *)
+let test_contradicting_quarantine_blocks_only_its_partition make_pair () =
+  with_temp_base "board-attention-worker-contradicting-quarantine" @@ fun base_path ->
+  let contradicted = record ~base_path (candidate ~id:"candidate-contradicted" ()) in
+  make_pair ~base_path contradicted.candidate_id;
+  (match (partition_of ~base_path contradicted.candidate_id).state with
+   | P.Ready -> ()
+   | _ -> Alcotest.fail "fixture partition is not Ready");
+  let contradicting = quarantine_of ~base_path contradicted.candidate_id in
+  let sibling =
+    record ~base_path (candidate ~id:"candidate-sibling" ~recorded_at:2.0 ())
+  in
+  ok "process-start reconciliation" (reconcile ~now:50.0 ~base_path);
+  let blocked = partition_of ~base_path contradicted.candidate_id in
+  (match blocked.state with
+   | P.Blocked { reason = P.Durable_partition_invariant _; _ } -> ()
+   | _ -> Alcotest.fail "contradicted partition was not blocked on its own");
+  let confined = quarantine_of ~base_path contradicted.candidate_id in
+  (match confined.phase, confined.quarantine.failure_category, confined.quarantine.prior_status with
+   | A.Quarantined, A.Durable_partition_invariant, A.Resumable_pending _ -> ()
+   | _ -> Alcotest.fail "new quarantine lost its category or the prior domain status");
+  Alcotest.(check bool)
+    "candidate names the new Blocked generation"
+    true
+    (P.Generation.equal confined.quarantine.partition_generation blocked.generation);
+  Alcotest.(check bool)
+    "the contradicting quarantine is replaced"
+    false
+    (String.equal confined.quarantine.quarantine_id contradicting.quarantine.quarantine_id);
+  ok "repeat process-start reconciliation" (reconcile ~now:50.5 ~base_path);
+  Alcotest.(check bool)
+    "a second pass leaves the Blocked row alone"
+    true
+    (P.Generation.equal blocked.generation (partition_of ~base_path contradicted.candidate_id).generation);
+  expect_judged ~base_path "the sibling drains" sibling.candidate_id;
+  let request : Q.request =
+    { candidate_id = contradicted.candidate_id
+    ; expected_quarantine_id = confined.quarantine.quarantine_id
+    ; decision = Q.Acknowledge_and_requeue
+    }
+  in
+  let command =
+    match
+      Q.make
+        ~keeper_name:"alpha"
+        ~raw_partition_id:blocked.partition_id
+        ~requested_by:"operator-test"
+        request
+    with
+    | Ok command -> command
+    | Error error ->
+      Alcotest.failf "operator command rejected: %s" (Q.input_error_to_string error)
+  in
+  (match Q.execute ~now:51.0 ~base_path command with
+   | Ok { partition = { state = P.Ready; _ }; _ } -> ()
+   | Ok _ -> Alcotest.fail "operator requeue did not return the partition to Ready"
+   | Error error ->
+     Alcotest.failf "operator requeue failed: %s" (Q.execution_error_label error));
+  expect_judged ~base_path "the requeued candidate is judged" contradicted.candidate_id;
+  match
+    (candidate_by_id ~base_path contradicted.candidate_id).status,
+    (partition_of ~base_path contradicted.candidate_id).state
+  with
+  | A.Consumed _, P.Settled _ -> ()
+  | _ -> Alcotest.fail "requeued candidate did not finish its lifecycle"
+;;
+
+(* Without a restart, the drain claims the same pair first because it needs
+   no lane, and used to stop the whole worker there. *)
+let test_drain_blocks_a_claimed_partition_whose_candidate_is_quarantined () =
+  with_temp_base "board-attention-worker-claimed-quarantine" @@ fun base_path ->
+  let contradicted = record ~base_path (candidate ~id:"candidate-contradicted" ()) in
+  ready_with_unacknowledged_quarantine ~base_path contradicted.candidate_id;
+  let sibling =
+    record ~base_path (candidate ~id:"candidate-sibling" ~recorded_at:2.0 ())
+  in
+  (match
+     ok
+       "drain claims the contradicted partition"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute:judge_not_relevant)
+   with
+   | W.Partition_blocked { candidate_id; reason = P.Durable_partition_invariant _ }
+     when String.equal candidate_id contradicted.candidate_id -> ()
+   | _ -> Alcotest.fail "claimed quarantined candidate was not blocked on its own");
+  let blocked = partition_of ~base_path contradicted.candidate_id in
+  (match quarantine_of ~base_path contradicted.candidate_id with
+   | { A.phase = A.Quarantined; quarantine }
+     when P.Generation.equal quarantine.partition_generation blocked.generation -> ()
+   | _ -> Alcotest.fail "candidate does not name the new Blocked generation");
+  expect_judged ~base_path "the sibling drains" sibling.candidate_id
 ;;
 
 let test_stale_quarantine_generation_is_rejected () =
@@ -3450,7 +3685,7 @@ let test_reconcile_quarantines_abandons_a_blocked_partition_whose_candidate_was_
      a still-[Resumable_pending] candidate can still reopen the root later. *)
   ok
     "reconcile abandons the orphaned quarantine instead of failing"
-    (W.For_testing.reconcile_quarantines ~now:10.0 ~base_path ~keeper_name:"alpha");
+    (reconcile ~now:10.0 ~base_path);
   (match (load_one_partition ~base_path).state with
    | P.Abandoned { abandoned_at } ->
      Alcotest.(check (float 0.0)) "give-up time recorded" 10.0 abandoned_at
@@ -3458,7 +3693,7 @@ let test_reconcile_quarantines_abandons_a_blocked_partition_whose_candidate_was_
    | _ -> Alcotest.fail "blocked partition with a retired candidate did not get abandoned");
   ok
     "second reconciliation pass stays a no-op"
-    (W.For_testing.reconcile_quarantines ~now:11.0 ~base_path ~keeper_name:"alpha")
+    (reconcile ~now:11.0 ~base_path)
 ;;
 
 let test_settle_completed_snapshot_terminalizes_a_partition_whose_candidate_was_retired
@@ -3685,6 +3920,25 @@ let () =
             "Ready+Requested recovery fails closed"
             `Quick
             test_ready_requested_recovery_fails_closed
+        ; Alcotest.test_case
+            "startup blocks only a Ready row with an unacknowledged quarantine"
+            `Quick
+            (test_contradicting_quarantine_blocks_only_its_partition
+               ready_with_unacknowledged_quarantine)
+        ; Alcotest.test_case
+            "startup blocks only a Ready row that preceded requeue authorization"
+            `Quick
+            (test_contradicting_quarantine_blocks_only_its_partition
+               ready_before_requeue_recorded)
+        ; Alcotest.test_case
+            "startup blocks only a Ready row at the requeued generation"
+            `Quick
+            (test_contradicting_quarantine_blocks_only_its_partition
+               ready_at_requeued_generation)
+        ; Alcotest.test_case
+            "drain blocks only a claimed row whose candidate is quarantined"
+            `Quick
+            test_drain_blocks_a_claimed_partition_whose_candidate_is_quarantined
         ; Alcotest.test_case
             "stale quarantine generation is rejected"
             `Quick

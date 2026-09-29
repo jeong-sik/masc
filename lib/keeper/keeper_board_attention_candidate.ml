@@ -2140,9 +2140,21 @@ let quarantine
        | Quarantine state
          when same_quarantine_identity state.quarantine requested ->
          Ok (None, current)
+       (* The same partition is Blocked again at another generation. Only
+          that newest block can be requeued, so it replaces the unfinished
+          quarantine, and the prior domain status carries over. *)
+       | Quarantine
+           { quarantine = held; phase = (Quarantined | Requeue_requested _) }
+         when String.equal held.partition_id partition_id ->
+         let updated =
+           { current with
+             status = Quarantine { quarantine = requested; phase = Quarantined }
+           }
+         in
+         Ok (Some updated, updated)
        | Quarantine { phase = (Quarantined | Requeue_requested _); _ } ->
          Error
-           ("candidate is already quarantined by another generation: "
+           ("candidate is already quarantined for another partition: "
             ^ current.candidate_id)
        | Pending _ | Judged _ | Consumed _ | Quarantine { phase = Requeued _; _ } ->
          let updated =

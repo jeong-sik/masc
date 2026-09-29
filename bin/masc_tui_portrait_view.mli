@@ -44,7 +44,7 @@ val fit : display -> max_cols:int -> max_rows:int -> box option
     draws none, or when the space leaves less than a readable picture:
     fewer than {!min_pixel_rows} cell rows for real pixels, or a mosaic
     edge under the renderer's {!Keeper_portrait_draw.min_size}. The edge is
-    capped so one frame renders in a small part of the splash's 150 ms step:
+    capped so one frame renders in a small part of [/about]'s 150 ms step:
     pixels are placed and scaled by the terminal, so a larger edge costs
     render time and buys little. *)
 

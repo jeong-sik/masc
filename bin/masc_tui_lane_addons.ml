@@ -980,11 +980,14 @@ let instance_controls (instance : instance) = match instance.phase with
 let overview_hints view =
   if view.help_open then "Esc:close help"
   else match view.screen with
-  | Overview -> "?:help  Esc:back  Enter:open  i:install  n:new  S:subs  r:refresh"
+  | Overview ->
+      "?:help  Esc:back  Enter:open  i:install  n:new  S:subs"
+      ^ (if view.loading then "" else "  r:refresh")
   | Detail _ ->
       "?:help  Esc:back  1-4:section  Tab:next section  j/k:move  " ^
       (match selected_instance view with None -> "" | Some instance -> instance_controls instance ^ "  ") ^
-      "D:raw  J/K:scroll  r:refresh"
+      "D:raw  J/K:scroll"
+      ^ (if view.loading then "" else "  r:refresh")
 
 let open_actions ~request_id view =
   let* instance = match action_target view with

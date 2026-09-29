@@ -942,7 +942,7 @@ export function InternalAgentsMonitor() {
                     <span class="ia-sub">
                       <b>${laneLabel(row)}</b>
                       <code class="mono" title=${subject(row)}>${subject(row)}</code>
-                      ${row.source === 'exact' && row.run.lane === 'librarian_exact'
+                      ${row.source === 'exact'
                         ? html`<code translate="no" class="mono" title=${row.run.runId}>run_id · ${row.run.runId}</code>`
                         : null}
                     </span>

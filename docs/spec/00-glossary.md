@@ -38,6 +38,18 @@ status: reference
 : Claude Code, Codex, Antigravity 같은 공식 클라이언트가 자기 프로세스에서
   provider 요청을 보내고, MASC는 새 turn과 결과를 조율·관찰하는 실행 경로.
 
+**Official Client Tool Result Bound (공식 클라이언트 도구 결과 상한)**
+: 공식 클라이언트에 넘기는 동적 도구 하나의 모델 대상 결과에 MASC가 선언하는
+  바이트 상한이다(`Runtime_official_client_tool.result_bound` = `Bounded_bytes n`·
+  `Unbounded`). `Bounded_bytes n`은 결과가 `n`바이트를 넘지 않음을 뜻하고,
+  `Unbounded`는 MASC가 결과 크기를 제한하지 않아 상한을 선언하지 않음을 뜻한다.
+  Claude Code 전송은 `Bounded_bytes n`의 수치 `n`을 `tools/list` 항목의
+  `_meta["anthropic/maxResultSizeChars"]`에 문자 기준 인라인 한도로 싣는다.
+  UTF-8 문자 수는 바이트 수를 넘지 않으므로 `n`바이트로 제한된 결과는
+  이 문자 한도를 넘지 않는다. 이 값은 제공자 토큰 한도와 다르다.
+  → [Runtime_official_client_tool](../../lib/runtime/runtime_official_client_tool.mli),
+  [Runtime_claude_code](../../lib/runtime/runtime_claude_code.mli)
+
 **Clients (TUI 클라이언트 표)**
 : `GET /api/v1/dashboard/clients` 한 읽기를 그리는 TUI 표. 한 워크스페이스에 붙은
   모두를 한 번에 보여준다 — directory agent, state-backed session, runtime fiber.
@@ -97,8 +109,11 @@ status: reference
   `Verifying`·`Awaiting_confirmation`)의 Goal마다 우선순위(낮은 숫자 우선) 및 마감일
   순으로 한 줄씩 그린다(#38386).
   - 각 행: 목표 제목, 연결 태스크 대비 완료 태스크 바(`done/linked task bar`), 정체
-    시간(`stagnation_seconds` 기준 idle 기간), 운영자의 로컬 캘린더 날짜 기준 마감
-    카운트다운(`D-N due countdown`).
+    시간(`stagnation_seconds` — 연결 태스크 갱신·승인 요청·Keeper 영수증·runtime trust
+    이벤트·Goal 메타데이터 중 가장 최근 관측 활동 시각부터 지난 시간. Team 블록의 `Idle`
+    과 다른 값이다: `Idle` 은 Keeper 의 작업 배정 상태이고 이 값은 Goal 의 마지막 관측
+    활동 이후 지난 시간이다), 운영자의 로컬 캘린더 날짜 기준 마감 카운트다운
+    (`D-N due countdown`).
   - 관측 권위: 목표가 자체 지표(`metric`·`target`)를 가지고 있어도 측정값이 보고되지
     않으면 지어내지 않고, 진행 바는 순수하게 연결된 태스크의 완료 수만 측정한다.
     보고된 측정값은 **Goal Measurement**다.
@@ -130,7 +145,8 @@ status: reference
 : TUI Overview 에서 fleet 을 Keeper 한 명당 한 줄로 보여 주며 "누가 무엇을 하고 누가 막혔나" 에 답하는
   자리. briefing 의 `keeper_briefs` 와 backlog 를 합쳐 그린다. 줄은 네 무리로 나뉜다 —
   막힘(Failing·Crashed, 또는 phase 없이 info 가 아닌 Attention 이 가리키는 Keeper),
-  일하는 중(Running·Draining·Restarting 이고 Claimed·InProgress Task 를 잡음), 쉬는 중,
+  일하는 중(Running·Draining·Restarting 이고 Claimed·InProgress Task 를 잡음),
+  쉬는 중(`Idle` — 살아 있으며 Claimed·InProgress Task 를 맡지 않음),
   멈춤(brief 의 `paused` 가 true 이거나 Paused·Stopped·Offline, 한 줄로 모음). 순서는
   점수가 아니라 이 무리와 이름이다. 막힌 줄의 설명은 그 Keeper 를 `Attention_keeper` 로
   가리키는 info 가 아닌 첫 Attention 문장을 그대로 싣는다. Keeper 가 아닌
@@ -880,6 +896,9 @@ status: reference
   `[runtime.lanes.<이름>]` 표가 이름을 붙이고 `Runtime_lane.t`(`{id; candidates}`)가
   그 값이다. TUI 화면은 "runtime candidate order"로 읽는다. RFC-0457부터 Keeper를
   특정 lane에 배정할 수 있고, 배정된 Keeper는 그 lane의 후보 순서를 따른다.
+  Dashboard Settings는 선언된 후보 순서를 편집하며, 저장 전에 읽은 source revision이
+  바뀌었으면 충돌로 거절해 새 순서를 덮어쓰지 않는다. 빈 후보 목록은 lane 제거와
+  다른 편집이므로 거절되고, lane 제거는 별도 동작이다.
   `[runtime].media_failover`(vision runtimes, 이미지를 읽는 런타임 목록)와
   exact-output lane의 slot 우선순위 failover(`docs/spec/05-keeper-agent.md:394`)는
   런타임 후보 순서와 별개 축이다. 다만 후보 나열이 별개여도 rate-limit 증거 셀은
@@ -895,7 +914,10 @@ status: reference
   terminal로 거절한다 — 이 상한이 없으면 keeper는 그 거절로 한도를 한 번에
   29분 걸리는 시도마다 하나씩 배워야 했다(2026-08-24). Codex 모델에 선언된
   10 MiB(10485760)는 MASC 추정이 아니라 app-server가 요구하는 벤더 자체 한도다
-  (#38740). **닫힌 quota 창**(provider 가 매기는 사용량)과는 다른 층이다 — 이쪽은
+  (#38740). Muse 는 넘친 입력을 거절하지 않고 조용히 요약으로 줄이므로, MASC 가
+  `max-context` 에서 `4 × (⌊75% × max-context⌋ − 11,946)` 로 계산한다(Muse Code
+  1.4.0 실측, `Runtime_muse_prompt_capacity`). 선언값은 이보다 작을 때만 쓴다.
+  운영자에게는 묻지 않는다. **닫힌 quota 창**(provider 가 매기는 사용량)과는 다른 층이다 — 이쪽은
   MASC 가 보내는 프롬프트 크기의 상한이고, 저쪽은 provider 측 사용량 제한이다.
   → [Runtime_schema.model](../../lib/runtime/runtime_schema.mli)
 
@@ -1167,31 +1189,28 @@ status: reference
     `Json_syntax` 프롬프트 텍스트로 전달되고, 응답은 JSON 값·선언된 필수 객체 키·방문한
     primitive 모양만 검사한다. 전체 JSON Schema 검증은 하지 않으며, 그 밖의 요청 모양은
     provider 호출 전에 거절한다(#38708).
-  - **슬롯 전진 조건 (`execution_failure_may_advance`)**: 한 슬롯이 실패했을 때 패스를
-    끝내거나 범위를 줄이지 않고 선언된 다음 후보 슬롯으로 넘어가는 경우는 둘이다.
-    (1) 보내기 직전 단계(`Before_dispatch`)에서 실패했고 이 슬롯이 아무것도 보내지 않았다
-    (`receipt_dispatch_count = 0`). (2) 한 번 보낸 뒤(`receipt_dispatch_count = 1`) 이
-    바인딩의 사정으로 실패했다 — 헤더 기한(`connect_timeout_s`, `Http_operation`)이나 전체
-    기한(`body_timeout_s`, `Wall_clock`) 안에 응답 헤더가 오지 않음(#38437); 2xx 헤더는
-    왔지만 전체 기한 안에 본문이 끝나지 않음(`Response_body_deadline_exceeded`, 원문 응답과
-    provider trace가 남지 않았을 때); 응답으로 온 제공자 거절 가운데 Candidate Fault가
-    `Binding`이나 `Unattributed`로 읽는 것(413·429·402·529·5xx·창 초과(#38454)·401·403·
-    404·이유를 기계가 읽을 수 없는 거절·본문이 기한 안에 오지 않은 거절, #38913); 답이 JSON으로 읽히지 않음(`Invalid_json_output`); content가 비었음(답을 content
-    밖 필드에 둠, `Missing_output`). 그 밖에는 넘기지 않는다 — 보낸 뒤의 다른 기한 종류
-    (`Queue`·`First_token`·`Capacity_backpressure`·`Non_streaming_body`·`Stream_body`·
-    `Stream_idle`·`Provider_step`·`Cli_stdout_idle`·`Unknown_timeout`)와 보낸 뒤 결과를
-    모르는 실패가 그렇다. 바인딩의 기한·창·키·quota·출력 방언은 그 슬롯의 성질이라, 다음
-    후보는 자기 것을 들고 같은 입력을 받을 수 있다(예: 더 큰 창의 Claude CLI).
+  - **슬롯 전진 조건 (`flow_execution_terminal_kind`)**: 한 슬롯이 실패하면 선언된 다음
+    후보 슬롯으로 넘어간다. 실행 실패는 모두 넘긴다 — 제공자 거절, 보내기 전후의 기한 초과,
+    보낸 뒤 결과를 모르는 실패(응답 전에 끊긴 연결, 도중에 멈춘 stream), 읽을 수 없는 답
+    (`Incomplete_output`·`Ambiguous_output`·`Unexpected_output_content`·`Invalid_json_output`·
+    `Missing_output`), 입력 크기를 재는 요청(count-tokens)을 보낸 뒤의 후보 거절. 멈추는 것은
+    masc 자기 기록과 취소뿐이다 — 방문 전 bind·넘김 기록·측정 callback 실패, 같은 flow 를 다시
+    실행함, 식별자를 만들지 못함, 취소. masc 배선은 실행을 실패시킬 수 없다. 계획을 고정할 때
+    URL·헤더를 파싱해서 보낼 수 없는 바인딩은 입장에서 거절되고, flow 는 늘 clock 을 받고,
+    시도는 그것을 만든 단계가 한 번만 시작하고, 정규화한 답은 늘 JSON 이다. exact 요청에는
+    도구가 없어서 넘겨도 효과가 겹치지 않는다. 결과를 모르는 요청을 제공자가 이미 처리했다면
+    한 번 더 과금된다(RFC-exact-lane-walks-one-slot-list Q1).
   - **공유 rate-limit 휴식**: 한 Exact-output slot의 runtime이 `Rate_limited` 응답으로
     쉬는 동안 그 slot을 쉬지 않는 형제 뒤로 보낸다. Keeper turn walk와 Exact-output
-    route는 같은 runtime의 후보별 휴식 근거를 읽고 쓴다. 제공자의 `Retry-After`를 쓰고,
-    없으면 설정한 바닥 시간을 쓰며, 설정한 상한을 넘기지 않는다. 선언 순서 또는 운영자
-    선호 순서는 각 무리 안에서 유지한다. 이후 응답을 받으면 수락된 답과 의미 검증 거절
-    모두 휴식 근거를 지운다. CLI slot에는 적용하지 않는다(#39077).
+    route는 같은 runtime의 후보별 휴식 근거를 읽고 쓴다. 유효한 제공자 `Retry-After`는
+    그대로 보존하고, 쓸 수 있는 힌트가 없을 때만 설정된 바닥 시간을 fallback으로 쓰며
+    fallback 상한을 적용한다. 선언 순서 또는 운영자 선호 순서는 각 무리 안에서 유지한다.
+    이후 응답을 받으면 수락된 답과 의미 검증 거절 모두 휴식 근거를 지운다. CLI slot에는
+    적용하지 않는다(#39077).
   - **도메인 검증 결말**: `Invalid_json_output`은 응답을 JSON으로 읽지 못한 경우다.
     JSON 응답을 도메인 소비자가 거절하면 Board Attention exact flow는
     `Domain_output_invalid` 오류와 종단 결말 `Invalid_domain_output`을 기록한다. 이 결말은
-    `execution_failure_may_advance` 슬롯 전진 조건이 아니다(#38786).
+    슬롯 전진 조건이 다루는 실행 실패가 아니다(#38786).
   - **생성 발송 관측 권위 (`flow_evidence_generation_dispatch`)**: 걸음(walk)에 속한 어느
     후보라도 외부 완료 생성 요청(`generation dispatch`)을 시작했는지 여부를 불변
     증거(`Started`·`Not_started`)로 기록한다. 앞선 슬롯이 생성 요청을 보낸 뒤(예: 5xx
@@ -2187,10 +2206,16 @@ status: reference
   → [Keeper_carried_front.seed](../../lib/keeper/keeper_carried_front.mli)
 
 **Carried Front (실어 보낼 이력의 시작 위치)**
-: 요청에 실리는 가장 오래된 Atom의 번호와 그 Atom을 여는 Message의 digest.
+: 요청 범위의 시작 위치로, 전송된 Atom이 있으면 가장 오래된 Atom의 번호와 그 Atom을 여는
+  Message의 digest로 증명한다. `model_input_front`는 닫힌 세 값이다 — `At_atom`은 이 위치,
+  `After_history`는 아무 Atom도 보내지 않은 요청이 제안된 History의 끝을 마지막 Atom digest로
+  증명한 경계, `Empty_history`는 제안된 History가 비었거나 크기 축소가 이력 전체를 제외한
+  요청을 기록한다. 후자의 경우에는 끝 digest가 없어 비어 있지 않은 History에서 위치의 증거로
+  재사용할 수 없다. 입력 관측 자체가 없다는 뜻은 model-input window 기록의 부재로 남는다.
   후보별 usage 원장에서 읽되, 같은 Keeper turn의 거절이 더 뒤로 옮긴 위치가 있으면
   그 위치를 쓴다. 반 자르기와 묶음 비우기 모두 다음 후보로 이 위치를 전달한다.
-  다른 History의 위치는 digest가 맞지 않으므로 쓰지 않는다.
+  다른 History의 위치는 witness digest가 맞지 않으면 쓰지 않는다.
+  → [Model_input_front.t](../../lib/types/model_input_front.mli)
   이 위치의 출처(`Keeper_carried_front.origin`)는 여섯이다 — `Carried`(seed에서 온
   위치: 원장, turn 기록, 거절 뒤 반 자르기·묶음 비우기, 씨앗 범위 거절 뒤 turn 경계),
   `Librarian_snapshot`(하던 일 저장본이 대신하는 경계),

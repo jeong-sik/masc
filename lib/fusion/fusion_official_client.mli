@@ -2,7 +2,8 @@
 
     Fusion panels are fanned out through {!Agent_core.Async_agent.all}, which
     can only drive [Runtime_execution.Agent_core] runtimes. A panelist naming a
-    Claude Code / Codex / Antigravity runtime therefore never produced an answer:
+    Claude Code / Codex / Antigravity / Muse Code runtime therefore never
+    produced an answer:
     a panel made only of them ended in [Panels_unavailable], and a mixed panel
     completed on quorum while those panelists silently contributed nothing.
 
@@ -17,6 +18,10 @@ val is_official_client : runtime_id:string -> bool
     report, and the Agent_core path already names it precisely. *)
 
 module For_testing : sig
+  val claude_usage : Runtime_claude_code.turn_usage -> Fusion_types.usage
+  val codex_usage : Runtime_codex_app_server.turn_usage -> Fusion_types.usage
+  (** Account for vendor cache conventions and refuse replaced thread estimates. *)
+
   val missing_handle_detail : env_present:bool -> clock_present:bool -> string option
   (** The failure detail for an unresolvable Eio context, or [None] when both
       handles are present. Exposed because {!Eio_context} has no reset, so a
@@ -48,8 +53,11 @@ val run_panelist
   -> ?output_schema:Yojson.Safe.t
   -> prompt:string
   -> unit
-  -> (string, Fusion_types.panel_failure) result
-(** Execute [prompt] as a single turn on [runtime_id] and return the answer text.
+  -> (string * Fusion_types.usage, Fusion_types.panel_failure * Fusion_types.usage) result
+(** Execute [prompt] as a single turn on [runtime_id] and retain reported token
+    usage on success and observed failures from every official client.
+    The panel route sums failed-attempt usage into a later answer or the failed
+    seat when every candidate is exhausted. Judge errors retain it too.
 
     Typed Claude quota rejections update {!Runtime_quota_window} before error
     rendering. The scope is captured from the resolved runtime before dispatch,
@@ -64,7 +72,7 @@ val run_panelist
     timeout. It does not move [admission_timeout_s], which bounds waiting for
     admission rather than the answer.
 
-    On all three clients the turn timeout is the longest silence allowed
+    On every client the turn timeout is the longest silence allowed
     between stream messages, not a whole-turn limit: a client that keeps
     streaming can continue until its terminal or owner cancellation.
     On Codex the window is suspended while a tool
@@ -72,11 +80,12 @@ val run_panelist
     same preset key on an Agent_core runtime is a whole-call deadline
     ([body_timeout_s]).
 
-    [output_schema] is a JSON Schema the client holds its own answer to. Every
-    official client has a channel for one and no two are the same shape:
-    [--json-schema] on the Claude and Antigravity CLIs, [outputSchema] on the
-    Codex v2 [turn/start] request. On the two CLIs the mechanism is validation
-    with a re-prompt, not constrained decoding, and
+    [output_schema] is a JSON Schema the client holds its own answer to. The
+    Claude, Antigravity and Codex clients each have a channel for one and no
+    two are the same shape: [--json-schema] on the Claude and Antigravity
+    CLIs, [outputSchema] on the Codex v2 [turn/start] request. On the two
+    CLIs the mechanism is validation with a re-prompt, not constrained
+    decoding, and
     the answer returned here is then the validated value rather than the
     narrated text: the Antigravity result event was measured on 2026-08-30
     carrying a fenced draft in [response] while [structured_output] held the
@@ -88,12 +97,26 @@ val run_panelist
     there is no second field to prefer — the text returned here is already the
     constrained one.
 
-    [base_dir] selects workspace state. Antigravity uses the configured OAuth
-    source in a persistent account-specific HOME and spawns in its private
-    native read workspace. It does not inherit the ambient login or the Keeper
-    bookkeeping directory as its working tree. Other clients spawn in [base_dir].
-    Callers thread the base path down from
-    {!Fusion_tool.handle}, which already receives it.
+    Muse Code's [muse serve] has no such channel, so a schema asked of a Muse
+    Code runtime is a [Setup_failure] and no process starts.
+
+    [base_dir] is the directory the official client is spawned in. There is no
+    global accessor for the MASC base path, so callers thread it down from
+    {!Fusion_tool.handle}, which already receives it. A Muse Code panelist is
+    the exception: its session's workspace root and working directory are a
+    fresh empty directory created for the call and removed when it ends,
+    to avoid starting in the operator's runtime state directory. This is a
+    working coordinate, not a filesystem confinement guarantee. The client's
+    managed read policy remains separate. Muse keeps the durable MSP completion protocol but places native data, cache,
+    state and temporary files in another per-call subtree removed after process
+    reaping. Selected account HOME and managed login config remain unchanged. A directory that cannot be created is
+    a [Setup_failure]; one that cannot be removed is logged.
+
+    Antigravity uses the configured OAuth source in a persistent
+    account-specific HOME and spawns in its private native read workspace. It
+    does not inherit the ambient login or the Keeper bookkeeping directory as
+    its working tree. Other panelists spawn in [base_dir] unless documented
+    above.
 
     Requires the initialized Eio runtime: the process manager and clock come
     from {!Eio_context}, the same way the official-client login probe obtains
@@ -105,7 +128,7 @@ val run_panelist
 
 
 type image_input = { media_type : string; base64_data : string }
-type response = { text : string; model : string }
+type response = { text : string; model : string; usage : Fusion_types.usage }
 type failure =
   | Setup_failure of string
       (** A setup cause without runtime attribution. The renderer adds the
@@ -114,6 +137,7 @@ type failure =
   | Claude_failure of Runtime_claude_code.error
   | Claude_admission_failure of Runtime_claude_code.error
   | Antigravity_failure of Runtime_antigravity.error
+  | Muse_failure of Runtime_muse_serve.error
 
 val failure_detail : runtime_id:string -> failure -> string
 (** The adapter's own failure text, naming [runtime_id] once. A
@@ -130,7 +154,8 @@ val panel_failure : runtime_id:string -> failure -> Fusion_types.panel_failure
     observations. *)
 
 val run_with_images
-  :  images:image_input list
+  :  ?on_usage:(Fusion_types.usage -> unit)
+  -> images:image_input list
   -> base_dir:string
   -> runtime:Runtime.t
   -> system_prompt:string
@@ -145,4 +170,12 @@ val run_with_images
     through their native transports. Antigravity rejects nonempty image input
     and, having no system-prompt channel, gets a nonempty [system_prompt]
     framed into its input ({!Antigravity_input_frame}); a missing frame label
-    asset is a [Setup_failure]. [model] is the transport's response identity. *)
+    asset is a [Setup_failure]. Muse Code carries the image bytes over
+    [muse serve], gets [system_prompt] framed the same way, and starts a new
+    session in a private temporary workspace and native storage tree for each call.
+    [on_usage] observes reported counts before terminal failure is projected;
+    counts are snapshots, not additive deltas. [model] is the transport's
+    response identity. [usage] carries reported token counts; absent counts are
+    not estimated. Claude/Antigravity prompt totals include cache tokens. Codex
+    fresh-thread snapshots are retained up to a counter replacement; later reset
+    counts are not added or substituted for the already reported spend. *)

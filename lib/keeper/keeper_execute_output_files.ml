@@ -18,6 +18,7 @@ let capture_directory ~base_path =
 
 type publication =
   { fields : (string * Yojson.Safe.t) list
+  ; compared_output_bytes : int
   ; release_sources : unit -> unit
   }
 
@@ -64,7 +65,7 @@ let copy_chunks ?expected_bytes path emit =
 let unlink_if_present path =
   try Unix.unlink path with Unix.Unix_error (Unix.ENOENT, _, _) -> ()
 
-let publish ~base_path ~redaction (files : Process_output_capture.files) =
+let publish ~inline_ceiling_bytes ~base_path ~redaction (files : Process_output_capture.files) =
   let* stdout_path, stdout_bytes = complete_path "stdout" files.stdout in
   let* stderr_path, stderr_bytes = complete_path "stderr" files.stderr in
   Eio_guard.run_in_systhread ~label:"keeper-execute-publish-output" (fun () ->
@@ -105,7 +106,7 @@ let publish ~base_path ~redaction (files : Process_output_capture.files) =
           copy_chunks stderr (output_string channel));
         let total_bytes = (Unix.stat combined).st_size in
         let fields =
-          if total_bytes <= Tool_bridge.default_externalize_threshold_bytes then
+          if total_bytes <= inline_ceiling_bytes then
             [ "output", `String (In_channel.with_open_bin combined In_channel.input_all) ]
           else
             let store = Tool_blob_store.create ~base_path in
@@ -120,6 +121,7 @@ let publish ~base_path ~redaction (files : Process_output_capture.files) =
         in
         Ok
           { fields = ("output_completeness", `String "complete") :: fields
+          ; compared_output_bytes = total_bytes
           ; release_sources = (fun () ->
               Eio_guard.run_in_systhread ~label:"keeper-execute-release-output"
                 (fun () -> cleanup [ stdout_path; stderr_path ]))

@@ -96,6 +96,7 @@ let claude_failure_status = function
   | Subscription_required _ -> "login_required"
   | Timeout _ -> "timeout"
   | Protocol_error _ | Unsupported_control_request _ -> "protocol_error"
+  | Unhandled_exception _ -> "runtime_exception"
   | Turn_transport_interrupted _
   | Context_window_exceeded _
   | Turn_failed _
@@ -275,7 +276,7 @@ let probe_body ~base_path ~body =
          ~runtime_id
          ~model
          config)
-  | Runtime_execution.Antigravity_cli _ ->
+  | Runtime_execution.Antigravity_cli _ | Runtime_execution.Muse_serve _ ->
     error
       Bad_request
       "login_probe_unsupported"

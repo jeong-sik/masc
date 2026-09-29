@@ -411,7 +411,7 @@ max-concurrent = 1
                   messages-cli, messages-http, openai-compatible-cli, \
                   openai-compatible-http, ollama-http, gemini-http, \
                   vertex-gemini, codex-app-server, claude-code, \
-                  antigravity-cli")
+                  antigravity-cli, muse-serve")
          errors)
 
 let test_runtime_toml_editor_protocol_inventory_is_backend_owned () =
@@ -453,11 +453,15 @@ let test_runtime_toml_editor_protocol_inventory_is_backend_owned () =
     ; "codex-app-server:command:official_client:forbidden:true:account-home:"
     ; "claude-code:command:official_client:forbidden:true:account-home:"
     ; "antigravity-cli:command:official_client:file_required:true:agent,effort,timeout-s:timeout-s"
+    ; "muse-serve:command:official_client:forbidden:true:account-home:account-home"
     ]
     (List.map render Runtime_toml.editor_protocols)
 ;;
 
-let test_runtime_toml_rejects_reserved_provider_and_model_ids () =
+(* Only a provider id becomes a top-level table (its bindings), so only a
+   provider id is refused for naming one; test_runtime_toml_namespace
+   covers every name and shows model ids are not refused (#39539). *)
+let test_runtime_toml_rejects_reserved_provider_ids () =
   let cases =
     [ ( "provider"
       , "providers.runtime"
@@ -466,13 +470,6 @@ let test_runtime_toml_rejects_reserved_provider_and_model_ids () =
 display-name = "Reserved"
 protocol = "openai-compatible-http"
 endpoint = "https://example.invalid/v1"
-|} )
-    ; ( "model"
-      , "models.routes"
-      , {|
-[models.routes]
-api-name = "reserved"
-max-context = 1024
 |} )
     ]
   in
@@ -1494,7 +1491,8 @@ let agent_core_provider_config_or_fail runtime =
   | Runtime_execution.Agent_core provider_config -> provider_config
   | Runtime_execution.Codex_app_server _
   | Runtime_execution.Claude_code _
-  | Runtime_execution.Antigravity_cli _ ->
+  | Runtime_execution.Antigravity_cli _
+  | Runtime_execution.Muse_serve _ ->
     fail "expected Agent Core runtime"
 
 let test_dispatch_rejects_missing_declared_env_credential () =
@@ -2226,7 +2224,8 @@ is-default = true
             | Ok (Runtime_execution.Agent_core config) -> config
             | Ok (Runtime_execution.Codex_app_server _
                  | Runtime_execution.Claude_code _
-                 | Runtime_execution.Antigravity_cli _) ->
+                 | Runtime_execution.Antigravity_cli _
+                 | Runtime_execution.Muse_serve _) ->
               fail "HTTP binding selected an official client"
             | Error message -> failf "binding failed: %s" message)
          | _ -> fail "expected one declared binding"
@@ -2808,6 +2807,7 @@ let test_parallel_policy_rejects_unsupported_runtimes () =
   ) [ Runtime_schema.Claude_code_runtime, "claude-code"
     ; Codex_app_server_runtime, "codex-app-server"
     ; Antigravity_cli_runtime, "antigravity-cli"
+    ; Muse_serve_runtime, "muse-serve"
     ; Ollama_api, "ollama-http"
     ; Gemini_api, "gemini-http"
     ; Vertex_gemini_api, "vertex-gemini" ]
@@ -3087,7 +3087,7 @@ let () =
         ; test_case
             "runtime TOML rejects reserved provider and model ids"
             `Quick
-            test_runtime_toml_rejects_reserved_provider_and_model_ids
+            test_runtime_toml_rejects_reserved_provider_ids
         ; test_case
             "runtime TOML rejects obsolete top-level namespaces"
             `Quick

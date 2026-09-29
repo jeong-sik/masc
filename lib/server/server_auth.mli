@@ -58,6 +58,10 @@ val observer_sse_auth_token_from_request : Httpun.Request.t -> string option
 (** Combined header-or-query lookup for the SSE observer endpoint. *)
 
 val ide_lsp_upgrade_path : string
+
+val play_page_path : string
+(** [/play], the page an invite link opens. A public read path: the page
+    carries no data and sends the link's bearer on every request it makes. *)
 (** Route of the IDE language-server WebSocket. A browser WebSocket cannot
     set headers, so token-bound auth also reads the token query parameter on
     a GET to exactly this path; a credential header still takes precedence. *)
@@ -368,6 +372,11 @@ type request_credential_standing =
       (** The internal keeper token with its keeper name header, or a bearer
           whose credential has the [Worker] role. The name is verified; the
           caller is not the operator. *)
+  | Player_credential
+      (** A bearer whose credential has the [Player] role: an invited
+          outsider who may play the shared machine and nothing else. The
+          name is verified; the caller is neither the operator nor a
+          keeper. *)
   | No_credential
       (** No bearer, or one that resolves to no credential: any name on the
           request is the caller's own claim. *)

@@ -46,6 +46,7 @@ let claude_error_is_binding_rest : Runtime_claude_code.error -> bool = function
   | Runtime_claude_code.Turn_failed_with_observation _
   | Runtime_claude_code.Stopped_by_host _
   | Runtime_claude_code.Process_exited _
+  | Runtime_claude_code.Unhandled_exception _
   | Runtime_claude_code.Timeout _ -> false
 ;;
 
@@ -98,7 +99,30 @@ let antigravity_error_is_binding_rest : Runtime_antigravity.error -> bool = func
   | Runtime_antigravity.State_callback_failed _
   | Runtime_antigravity.Turn_failed _
   | Runtime_antigravity.Process_exited _
+  | Runtime_antigravity.Unhandled_exception _
   | Runtime_antigravity.Timeout _ -> false
+;;
+
+(* MSP's TurnErrorKind names no quota or rate-limit kind, so no Muse Code
+   refusal says the account itself is resting. *)
+let muse_error_is_binding_rest : Runtime_muse_serve.error -> bool = function
+  | Runtime_muse_serve.Invalid_config _
+  | Runtime_muse_serve.Spawn_failed _
+  | Runtime_muse_serve.Turn_input_write_failed _
+  | Runtime_muse_serve.Protocol_error _
+  | Runtime_muse_serve.Rpc_error _
+  | Runtime_muse_serve.Capability_not_granted _
+  | Runtime_muse_serve.Session_not_durable
+  | Runtime_muse_serve.Session_model_mismatch _
+  | Runtime_muse_serve.Session_workspace_mismatch _
+  | Runtime_muse_serve.Session_approval_mode_mismatch _
+  | Runtime_muse_serve.Auth_required _
+  | Runtime_muse_serve.Turn_failed _
+  | Runtime_muse_serve.Turn_cancelled
+  | Runtime_muse_serve.Unsupported_server_request _
+  | Runtime_muse_serve.Runtime_shutting_down
+  | Runtime_muse_serve.Process_exited _
+  | Runtime_muse_serve.Timeout _ -> false
 ;;
 
 let refused_for_binding_rest = function
@@ -111,6 +135,8 @@ let refused_for_binding_rest = function
   | Execution_failed
       { cause = Fusion_official_client.Antigravity_failure error; runtime_id = _ } ->
     antigravity_error_is_binding_rest error
+  | Execution_failed { cause = Fusion_official_client.Muse_failure error; runtime_id = _ } ->
+    muse_error_is_binding_rest error
   | Execution_failed { cause = Fusion_official_client.Setup_failure _; runtime_id = _ }
   | Unknown_runtime _
   | Not_an_official_client _

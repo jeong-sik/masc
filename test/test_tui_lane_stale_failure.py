@@ -37,11 +37,11 @@ def run(executable: str) -> None:
             h.wait_for_output(process, fd, output, b"observed ", start=0, timeout=5)
             drawn = h.send_and_wait(process, fd, output, b"r", b"STALE")
             frame = h.unwrapped(h.screen_text(drawn))
-            if b"STALE \xc2\xb7 standalone lanes load failed:" not in frame:
+            if b"STALE \xc2\xb7 lanes load failed:" not in frame:
                 raise AssertionError(f"stale reading lost the failure verdict: {frame!r}")
             if cause not in frame:
                 raise AssertionError(f"stale reading lost the cause: {frame!r}")
-            if frame.count(b"standalone lanes load failed:") != 1:
+            if frame.count(b"lanes load failed:") != 1:
                 raise AssertionError(f"stale reading repeated its verdict: {frame!r}")
             h.send_and_wait(process, fd, output, b"\x1b", b"MASC Overview")
             os.write(fd, b"q")

@@ -123,6 +123,42 @@ const FILTERS: Array<{ id: Filter; label: string }> = [
   { id: 'fusion', label: 'Fusion' },
 ]
 
+type RunReading = 'loading' | 'ready' | 'stale' | 'unavailable'
+type RunSource = Row['source']
+
+function sourceForKind(kind: Exclude<Filter, 'all'>): RunSource {
+  switch (kind) {
+    case 'verification': return 'verification'
+    case 'fusion': return 'fusion'
+    case 'librarian': case 'workspace-curator': case 'auto-judge': case 'board-attention': return 'exact'
+  }
+}
+
+function nextRunReading(previous: RunReading, result: PromiseSettledResult<unknown>): RunReading {
+  if (result.status === 'fulfilled') return 'ready'
+  return previous === 'ready' || previous === 'stale' ? 'stale' : 'unavailable'
+}
+
+function readingHasRows(reading: RunReading): boolean {
+  return reading === 'ready' || reading === 'stale'
+}
+
+function inventoryReadingCaption(reading: RunReading, latest: number | null): string {
+  const observed = latest === null ? '관측 기록 없음' : `최근 ${formatDateTimeKo(latest)}`
+  switch (reading) {
+    case 'loading': return '읽는 중'
+    case 'unavailable': return '관측 불가'
+    case 'ready': return observed
+    case 'stale': return `STALE · ${observed}`
+  }
+}
+
+function ownerLastObserved(latest: number | null, completeReading: boolean, allFresh: boolean): string {
+  if (latest === null && !completeReading) return '관측 불가'
+  const observed = latest === null ? '없음' : formatDateTimeKo(latest)
+  return allFresh ? observed : `STALE · ${observed}`
+}
+
 function laneLabel(row: Row): string {
   if (row.source === 'verification') return 'Verification'
   if (row.source === 'fusion') return 'Fusion'
@@ -614,10 +650,14 @@ function resolvedOwner(row: Row, roster: readonly KeeperIdentity[]): string {
 export function InternalAgentsMonitor() {
   const [rows, setRows] = useState<Row[]>([])
   const [laneMatrix, setLaneMatrix] = useState<StandaloneLanesSnapshot | null>(null)
+  const [laneMatrixError, setLaneMatrixError] = useState<string | null>(null)
   const [filter, setFilter] = useState<Filter>('all')
   const [expanded, setExpanded] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [errors, setErrors] = useState<string[]>([])
+  const [runReadings, setRunReadings] = useState<Record<RunSource, RunReading>>({
+    exact: 'loading', verification: 'loading', fusion: 'loading',
+  })
   const refreshVersion = useRef(0)
 
   const refresh = useCallback(async () => {
@@ -642,15 +682,25 @@ export function InternalAgentsMonitor() {
     if (fusion.status === 'fulfilled') {
       next.push(...fusion.value.runs.map(run => ({ source: 'fusion' as const, id: `fusion:${run.runId}`, run })))
     } else failures.push(`Fusion: ${String(fusion.reason)}`)
-    if (standalone.status === 'rejected') {
-      failures.push(isForbidden(standalone.reason)
-        ? 'Standalone lane matrix: Admin 권한 필요.'
-        : `Standalone lane matrix: ${String(standalone.reason)}`)
-    }
     if (version !== refreshVersion.current) return
-    if (standalone.status === 'fulfilled') setLaneMatrix(standalone.value)
-    next.sort((a, b) => startedAt(b) - startedAt(a))
-    setRows(next)
+    if (standalone.status === 'fulfilled') {
+      setLaneMatrix(standalone.value)
+      setLaneMatrixError(null)
+    } else {
+      setLaneMatrixError(isForbidden(standalone.reason)
+        ? 'Lanes: Admin 권한 필요.'
+        : `Lanes: ${String(standalone.reason)}`)
+    }
+    const results = { exact, verification, fusion }
+    setRows(previous => [
+      ...next,
+      ...previous.filter(row => results[row.source].status === 'rejected'),
+    ].sort((a, b) => startedAt(b) - startedAt(a)))
+    setRunReadings(previous => ({
+      exact: nextRunReading(previous.exact, exact),
+      verification: nextRunReading(previous.verification, verification),
+      fusion: nextRunReading(previous.fusion, fusion),
+    }))
     setErrors(failures)
     setLoading(false)
   }, [])
@@ -675,12 +725,19 @@ export function InternalAgentsMonitor() {
     }
     return Array.from(names).sort()
   }, [pausedKeeperNames, rows, roster])
+  const allReadings = Object.values(runReadings)
+  const completeReading = allReadings.every(readingHasRows)
+  const allFresh = allReadings.every(reading => reading === 'ready')
+  const selectedReading = filter === 'all'
+    ? !completeReading ? 'unavailable' : allFresh ? 'ready' : 'stale'
+    : runReadings[sourceForKind(filter)]
   const inventory = FILTERS.filter(item => item.id !== 'all').map(item => {
     const kind = item.id as Exclude<Filter, 'all'>
     const matching = rows.filter(row => rowKind(row) === kind)
     return {
       ...item,
-      count: matching.length,
+      count: readingHasRows(runReadings[sourceForKind(kind)]) ? matching.length : null,
+      reading: runReadings[sourceForKind(kind)],
       latest: matching.reduce<number | null>((value, row) => value == null ? startedAt(row) : Math.max(value, startedAt(row)), null),
     }
   })
@@ -698,7 +755,7 @@ export function InternalAgentsMonitor() {
     <section class="v2-monitoring-surface ia-wrap" data-testid="internal-agents-monitor">
       <div class="ia-head">
         <h3>Internal execution evidence</h3>
-        <span class="ia-count mono">${rows.length} runs · ${keepers.length} Keeper owners</span>
+        <span class="ia-count mono">${completeReading ? rows.length : "—"} runs · ${keepers.length} Keeper owners${allFresh ? "" : " · incomplete or stale"}</span>
         <span class="ia-route mono">monitoring?section=internal-agents</span>
         <${Btn} class="v2-monitoring-action" onClick=${() => void refresh()} disabled=${loading}>
           ${loading ? 'Loading…' : 'Refresh'}
@@ -714,13 +771,15 @@ export function InternalAgentsMonitor() {
 
       <section class="grid gap-2" aria-labelledby="standalone-lane-matrix-title">
         <div class="flex flex-wrap items-end gap-2">
-          <h3 id="standalone-lane-matrix-title" class="text-sm font-semibold text-[var(--color-fg-primary)]">Standalone LLM lane matrix</h3>
+          <h3 id="standalone-lane-matrix-title" class="text-sm font-semibold text-[var(--color-fg-primary)]">Lanes</h3>
           <span class="rounded border border-[var(--color-accent)] px-1.5 py-0.5 text-3xs font-semibold text-[var(--color-accent)]">READ-ONLY OBSERVATION</span>
           <span class="text-3xs text-[var(--color-fg-muted)]">설정됐지만 현재 retained 관측이 없는 lane도 표시합니다.</span>
         </div>
+        ${laneMatrixError === null ? null : html`<div role="alert" class="rounded border border-[var(--status-warn)] p-2 text-xs text-[var(--status-warn)]">${laneMatrix === null ? '관측 불가' : 'STALE · 마지막 성공 관측을 표시합니다.'} · ${laneMatrixError}</div>`}
         ${laneMatrix === null
-          ? html`<div class="ia-empty">Standalone lane 관측 정보를 읽는 중이거나 사용할 수 없습니다.</div>`
+          ? html`<div class="ia-empty">Lane 관측 정보를 읽는 중이거나 사용할 수 없습니다.</div>`
           : html`
+            <div class="text-xs text-[var(--color-fg-muted)]">Observed · ${formatDateTimeKo(laneMatrix.observedAtUnix)}</div>
             ${laneMatrix.exactRunProjectionTruncated
               ? html`<div class="rounded border border-[var(--status-warn)] p-2 text-xs text-[var(--status-warn)]">Exact run window ${laneMatrix.exactRunProjectionCount} / ${laneMatrix.exactRunSourceTotal} · 표의 exact counts/p50는 최신 bounded window 기준입니다.</div>`
               : null}
@@ -750,8 +809,8 @@ export function InternalAgentsMonitor() {
                             : `JEV CONFIGURED · ${lane.jev.destinations.map(d => `${d.destinationUri} (${d.model})`).join(', ')}`
                     return html`
                       <tr key=${lane.laneId}>
-                        <td><strong>${lane.label}</strong>${lane.required ? html` <span class="dim">required</span>` : null}<br /><code class="mono dim">${lane.laneId}</code>${jevLabel === null ? null : html`<br /><span class="mono text-3xs">${jevLabel}</span>`}</td>
-                        <td class=${statusClass}><strong>${statusLabel}</strong>${lane.admissionError ? html`<br /><span class="text-3xs">${lane.admissionError}</span>` : null}</td>
+                        <td><strong>${lane.label}</strong>${lane.required ? html` <span class="dim">required</span>` : null}<br /><code class="mono dim">${lane.laneId}</code><p class="text-xs text-[var(--color-fg-muted)]">${lane.purpose}</p>${jevLabel === null ? null : html`<br /><span class="mono text-3xs">${jevLabel}</span>`}</td>
+                        <td class=${statusClass}><strong>${statusLabel}</strong><br /><span class="text-3xs">Config: ${lane.configurationState}</span>${lane.admissionError ? html`<br /><span class="text-3xs">${lane.admissionError}</span>` : null}</td>
                         <td class="mono">${lane.admittedSlots.length === 0 ? '—' : lane.admittedSlots.join(', ')}${lane.cliSlots.length === 0 ? null : html`<br /><span class="text-3xs text-[var(--color-text-tertiary)]">cli: ${lane.cliSlots.join(', ')}</span>`}${lane.droppedSlots.length === 0 ? null : html`<br /><span class="text-3xs text-[var(--color-danger)]">dropped: ${lane.droppedSlots.join(', ')}</span>`}</td>
                         <td class="r mono">${lane.runningCount}</td>
                         <td class="r mono">${lane.retainedRunCount}</td>
@@ -767,6 +826,7 @@ export function InternalAgentsMonitor() {
           `}
       </section>
 
+      ${errors.length > 0 ? html`<${ErrorState} message=${'Run observations incomplete or stale; retained rows may be older. ' + errors.join(' · ')} />` : null}
       <section class="grid gap-2" aria-labelledby="internal-agent-inventory-title">
         <div class="flex items-end gap-2">
           <h3 id="internal-agent-inventory-title" class="text-sm font-semibold text-[var(--color-fg-primary)]">Observed run inventory</h3>
@@ -782,8 +842,8 @@ export function InternalAgentsMonitor() {
               onClick=${() => setFilter(item.id)}
             >
               <span class="k">${item.label}</span>
-              <span class="v mono">${item.count}</span>
-              <span class="cl-sub mono">${item.latest == null ? '관측 기록 없음' : `최근 ${formatDateTimeKo(item.latest)}`}</span>
+              <span class="v mono">${item.count ?? "—"}</span>
+              <span class="cl-sub mono">${inventoryReadingCaption(item.reading, item.latest)}</span>
             </button>
           `)}
         </div>
@@ -802,12 +862,12 @@ export function InternalAgentsMonitor() {
             <tbody>
               ${owners.map(owner => html`
                 <tr key=${owner.name}>
-                  <td><a class="text-[var(--color-accent)] hover:underline" href=${keeperHref(owner.name)}>${owner.name}</a> <span class="dim mono">${owner.total}</span></td>
+                  <td><a class="text-[var(--color-accent)] hover:underline" href=${keeperHref(owner.name)}>${owner.name}</a> <span class="dim mono">${completeReading ? owner.total : "—"}</span></td>
                   ${inventory.map(item => {
                     const count = owner.counts[item.id as Exclude<Filter, 'all'>]
-                    return html`<td key=${item.id} class=${`r mono ${count === 0 ? 'dim' : ''}`}>${count}</td>`
+                    return html`<td key=${item.id} class=${`r mono ${count === 0 ? 'dim' : ''}`}>${item.count === null ? "—" : count}${item.reading === "stale" ? " · STALE" : ""}</td>`
                   })}
-                  <td class="r dim mono">${owner.latest == null ? '없음' : formatDateTimeKo(owner.latest)}</td>
+                  <td class="r dim mono">${ownerLastObserved(owner.latest, completeReading, allFresh)}</td>
                 </tr>
               `)}
             </tbody>
@@ -823,10 +883,9 @@ export function InternalAgentsMonitor() {
             class=${`ia-filter ${filter === item.id ? 'on' : ''}`}
             aria-pressed=${filter === item.id}
             onClick=${() => setFilter(item.id)}
-          >${item.label} ${item.id === 'all' ? rows.length : inventory.find(entry => entry.id === item.id)?.count ?? 0}</button>
+          >${item.label} ${item.id === 'all' ? completeReading ? rows.length : '—' : inventory.find(entry => entry.id === item.id)?.count ?? '—'}</button>
         `)}
       </div>
-      ${errors.length > 0 ? html`<${ErrorState} message=${errors.join(' · ')} />` : null}
       <div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
         <${KeeperTurnInspectorPanel} keepers=${keepers} />
       </div>
@@ -835,7 +894,7 @@ export function InternalAgentsMonitor() {
         <span class="text-3xs text-[var(--color-fg-muted)]">절대 시각 + 상대 시각 + elapsed</span>
       </div>
       ${!loading && visible.length === 0
-        ? html`<div class="ia-empty">No internal agent runs for this filter.</div>`
+        ? html`<div class="ia-empty">${selectedReading === 'ready' ? 'No internal agent runs for this filter.' : selectedReading === 'stale' ? 'STALE · No runs in the last successful observation.' : 'Run observations unavailable for this filter.'}</div>`
         : html`<div class="ia-list">
             ${visible.map(row => {
               const open = expanded === row.id
@@ -857,6 +916,7 @@ export function InternalAgentsMonitor() {
                         : null}
                     </span>
                     <span class="ia-meta mono">
+                      ${runReadings[row.source] === "stale" ? html`<span>STALE</span>` : null}
                       <span>${actor(row)}</span>
                       <span><time dateTime=${startIso}>${formatDateTimeKo(startedAt(row))}</time> · ${relativeTime(startIso)}</span>
                       <span>elapsed ${formatElapsed(elapsed(row))}</span>

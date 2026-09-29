@@ -1,3 +1,35 @@
+let clamp_reasoning_effort_to_catalog
+    ~(model_id : string option)
+    ~(requested : Llm_provider.Reasoning_effort.t option)
+    : Llm_provider.Reasoning_effort.t option =
+  match requested, model_id with
+  | None, _ | _, None -> requested
+  | Some effort, Some model ->
+    (match Llm_provider.Capabilities.for_model_id_catalog model with
+     | None -> requested
+     | Some caps ->
+       (match caps.Llm_provider.Capabilities.accepted_reasoning_efforts with
+        | None -> requested
+        | Some accepted when List.mem effort accepted -> requested
+        | Some [] -> requested
+        | Some (first :: rest as accepted) ->
+          let below =
+            List.filter
+              (fun candidate ->
+                 Llm_provider.Reasoning_effort.compare candidate effort < 0)
+              accepted
+          in
+          let pick_max a b =
+            if Llm_provider.Reasoning_effort.compare a b >= 0 then a else b
+          in
+          let pick_min a b =
+            if Llm_provider.Reasoning_effort.compare a b <= 0 then a else b
+          in
+          match below with
+          | [] -> Some (List.fold_left pick_min first rest)
+          | b_first :: b_rest -> Some (List.fold_left pick_max b_first b_rest)))
+;;
+
 (* Per-runtime sampling temperature. A model may declare a fixed [temperature]
    in runtime.toml ([models.<id>.temperature], read via
    [Runtime.temperature_of_runtime_id]); when set, that value is the request

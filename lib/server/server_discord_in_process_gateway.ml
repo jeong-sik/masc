@@ -37,7 +37,7 @@ let default_trigger_policy : Gw.trigger_policy = Gw.Mention_or_thread
 module Policy_load = Connector_trigger_policy.Make (struct
   type policy = Gw.trigger_policy
 
-  let table = "discord"
+  let table = Runtime_toml_namespace.(key Discord)
   (* [Gw] is the client here, not the state machine: the grammar lives with
      the state module the client re-exports its policy type from. *)
   let parse = Discord_gateway_state.parse_trigger_policy

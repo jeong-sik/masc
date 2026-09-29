@@ -18,7 +18,6 @@ import {
   runtimeCatalogSnapshotFacts,
 } from '../lib/runtime-provider-summary'
 import {
-  isReservedRuntimeTomlId,
   isValidRuntimeTomlIdFormat,
   enabledRuntimeIds,
   parseRuntimeTomlEnvironment,
@@ -69,6 +68,7 @@ export interface NewRuntimeModelInput {
   id: string
   apiName: string
   maxContext: number
+  maxPromptBytes?: number
   toolsSupport: boolean
   thinkingSupport: boolean
   streaming: boolean
@@ -78,6 +78,8 @@ export interface NewRuntimeModelInput {
 interface RuntimeEnvironmentEditorProps {
   sourceText: string
   providerProtocols: RuntimeTomlEditorProtocol[]
+  // The server's list of names no provider may take.
+  reservedProviderIds: readonly string[]
   section: RuntimeStructuredSection
   disabled?: boolean
   draftDirty?: boolean
@@ -170,6 +172,7 @@ interface NewModelDraft {
   id: string
   apiName: string
   maxContext: string
+  maxPromptBytes: string
   toolsSupport: boolean
   thinkingSupport: boolean
   streaming: boolean
@@ -180,6 +183,7 @@ const DEFAULT_NEW_MODEL: NewModelDraft = {
   id: '',
   apiName: '',
   maxContext: '',
+  maxPromptBytes: '',
   toolsSupport: false,
   thinkingSupport: false,
   streaming: true,
@@ -295,6 +299,7 @@ function keeperDotTone(status: string): string {
 export function RuntimeEnvironmentEditor({
   sourceText,
   providerProtocols,
+  reservedProviderIds,
   section,
   disabled,
   draftDirty,
@@ -319,7 +324,10 @@ export function RuntimeEnvironmentEditor({
     () => newProviderDraft(defaultProviderProtocol),
     [defaultProviderProtocol],
   )
-  const environment = useMemo(() => parseRuntimeTomlEnvironment(sourceText), [sourceText])
+  const environment = useMemo(
+    () => parseRuntimeTomlEnvironment(sourceText, reservedProviderIds),
+    [sourceText, reservedProviderIds],
+  )
   const [modelQuery, setModelQuery] = useState('')
 
   const [providerFormOpen, setProviderFormOpen] = useState(false)
@@ -381,22 +389,28 @@ export function RuntimeEnvironmentEditor({
     onBindingFieldChange(runtimeId, 'keep-alive', next === '' ? null : next)
   }
 
-  // Shared id checks for the three add-forms below: format (TOML-header-safe),
-  // reserved namespace (would collide with providers./models./runtime. etc.),
-  // and uniqueness against the current draft (never silently overwrite).
+  // Shared id checks for the add-forms below: format (TOML-header-safe) and
+  // uniqueness against the current draft (never silently overwrite).
   function runtimeTomlIdError(id: string, taken: readonly string[]): string | null {
     if (id === '') return 'id를 입력하세요'
     if (!isValidRuntimeTomlIdFormat(id)) {
       return 'id는 영문·숫자·-·_ 만 사용할 수 있습니다'
     }
-    if (isReservedRuntimeTomlId(id)) return `"${id}"는 예약된 이름입니다`
     if (taken.includes(id)) return `이미 존재하는 id입니다: ${id}`
     return null
   }
 
+  // A provider's bindings are a top-level table named after its id, so the
+  // server refuses an id that names another reader's table. A model id never
+  // becomes a top-level table and is not checked against the list.
+  function providerIdError(id: string): string | null {
+    return runtimeTomlIdError(id, environment.providers.map(p => p.id))
+      ?? (reservedProviderIds.includes(id) ? `"${id}"는 예약된 이름입니다` : null)
+  }
+
   function submitAddProvider() {
     const id = newProvider.id.trim()
-    const idError = runtimeTomlIdError(id, environment.providers.map(p => p.id))
+    const idError = providerIdError(id)
     if (idError) {
       setProviderFormError(idError)
       return
@@ -434,6 +448,10 @@ export function RuntimeEnvironmentEditor({
     }
     const agent = newProvider.agent.trim()
     const accountHome = newProvider.accountHome.trim()
+    if (protocol.required_provider_fields.includes('account-home') && accountHome === '') {
+      setProviderFormError('사용할 계정 홈을 선택하세요')
+      return
+    }
     if (accountHome !== '' && !accountHome.startsWith('/')) {
       setProviderFormError('계정 홈은 절대 경로여야 합니다')
       return
@@ -495,10 +513,15 @@ export function RuntimeEnvironmentEditor({
       setModelFormError('max-context는 1 이상의 정수여야 합니다')
       return
     }
+    const maxPromptBytes = newModel.maxPromptBytes.trim() ? parseRequiredPositiveInteger(newModel.maxPromptBytes) : undefined
+    if (newModel.maxPromptBytes.trim() && maxPromptBytes === undefined) {
+      setModelFormError('max-prompt-bytes는 1 이상의 정수여야 합니다'); return
+    }
     onAddModel({
       id,
       apiName: newModel.apiName.trim(),
       maxContext,
+      ...(maxPromptBytes !== undefined ? { maxPromptBytes } : {}),
       toolsSupport: newModel.toolsSupport,
       thinkingSupport: newModel.thinkingSupport,
       streaming: newModel.streaming,
@@ -516,7 +539,7 @@ export function RuntimeEnvironmentEditor({
     }
     // Backend validation rejects this source on save. Keep the same reason at
     // the draft boundary so the operator sees it before attempting the write.
-    if (isReservedRuntimeTomlId(bindingProviderId)) {
+    if (reservedProviderIds.includes(bindingProviderId)) {
       setBindingFormError(`"${bindingProviderId}"는 예약된 이름이라 바인딩 provider로 쓸 수 없습니다`)
       return
     }
@@ -718,6 +741,9 @@ export function RuntimeEnvironmentEditor({
               protocol => protocol.protocol === provider.protocol,
             )
             const officialClient = editorProtocol?.semantics === 'official_client'
+            // This editor writes [providers.<id>] tables; a provider declared
+            // by keys would get a second, conflicting declaration.
+            const providerLocked = isDisabled || !provider.ownTable
             return html`
             <div key=${provider.id} class="rt-card" data-testid=${`runtime-provider-${provider.id}`}>
               <div class="rt-card-h">
@@ -729,7 +755,7 @@ export function RuntimeEnvironmentEditor({
                   <input
                     type="checkbox"
                     checked=${provider.enabled}
-                    disabled=${isDisabled}
+                    disabled=${providerLocked}
                     aria-label=${`${provider.id} provider enabled`}
                     data-testid=${`runtime-provider-${provider.id}-enabled`}
                     onChange=${(event: Event) => {
@@ -744,17 +770,22 @@ export function RuntimeEnvironmentEditor({
                 <button
                   type="button"
                   class="rt-delete-provider"
-                  disabled=${isDisabled}
+                  disabled=${providerLocked}
                   data-testid=${`runtime-provider-${provider.id}-delete`}
                   onClick=${() => deleteProvider(provider.id)}
                 >삭제</button>
               </div>
+              ${provider.ownTable ? null : html`
+                <div class="rt-warn" data-testid=${`runtime-provider-${provider.id}-key-declared`}>
+                  이 provider는 [providers.${provider.id}] 테이블이 아니라 키로 선언돼 있어서 여기서는 고칠 수 없어요. TOML 탭에서 고쳐 주세요.
+                </div>
+              `}
               <div class="rt-field">
                 <span class="sub-k">${providerTransportField}</span>
                 <input
                   class="rt-input mono"
                   value=${transportValue(provider)}
-                  disabled=${isDisabled}
+                  disabled=${providerLocked}
                   aria-label=${`${provider.id} provider transport value`}
                   onInput=${(event: Event) => {
                     onProviderTransportChange(
@@ -778,7 +809,7 @@ export function RuntimeEnvironmentEditor({
                       class="rt-input mono"
                       type=${provider.credentialType === 'inline' ? 'password' : 'text'}
                       value=${credentialValue(provider)}
-                      disabled=${isDisabled}
+                      disabled=${providerLocked}
                       aria-label=${`${provider.id} provider credential value`}
                       onInput=${(event: Event) => {
                         onProviderCredentialChange(
@@ -799,8 +830,11 @@ export function RuntimeEnvironmentEditor({
                   <input
                     class="rt-input mono"
                     value=${provider.accountHome}
-                    placeholder="절대 경로 · 비우면 기본 로그인"
-                    disabled=${isDisabled}
+                    placeholder=${editorProtocol.required_provider_fields.includes('account-home')
+                      ? '사용할 계정의 절대 경로 (필수)'
+                      : '절대 경로 · 비우면 기본 로그인'}
+                    required=${editorProtocol.required_provider_fields.includes('account-home')}
+                    disabled=${providerLocked}
                     aria-label=${`${provider.id} 계정 홈`}
                     data-testid=${`runtime-provider-${provider.id}-account-home`}
                     onInput=${(event: Event) => onProviderOptionChange(
@@ -817,7 +851,7 @@ export function RuntimeEnvironmentEditor({
                   <input
                     class="rt-input mono"
                     value=${provider.agent}
-                    disabled=${isDisabled}
+                    disabled=${providerLocked}
                     aria-label=${`${provider.id} Antigravity agent`}
                     onInput=${(event: Event) => onProviderOptionChange(
                       provider.id,
@@ -833,7 +867,7 @@ export function RuntimeEnvironmentEditor({
                   <select
                     class="rt-select rt-select-narrow"
                     value=${provider.effort}
-                    disabled=${isDisabled}
+                    disabled=${providerLocked}
                     aria-label=${`${provider.id} Antigravity effort`}
                     onChange=${(event: Event) => onProviderOptionChange(
                       provider.id,
@@ -857,7 +891,7 @@ export function RuntimeEnvironmentEditor({
                     min="0.001"
                     step="0.001"
                     value=${provider.timeoutS ?? ''}
-                    disabled=${isDisabled}
+                    disabled=${providerLocked}
                     aria-label=${`${provider.id} Antigravity timeout-s`}
                     onInput=${(event: Event) => {
                       const raw = (event.currentTarget as HTMLInputElement).value
@@ -1173,6 +1207,13 @@ export function RuntimeEnvironmentEditor({
                     data-testid="runtime-add-model-max-context"
                     onInput=${(event: Event) => setNewModel({ ...newModel, maxContext: (event.currentTarget as HTMLInputElement).value })}
                   />
+                </div>
+                <div class="rt-field">
+                  <span class="sub-k">max-prompt-bytes · 선택</span>
+                  <input class="rt-input mono" type="number" min="1" step="1"
+                    value=${newModel.maxPromptBytes} disabled=${isDisabled}
+                    aria-label="새 model max-prompt-bytes" data-testid="runtime-add-model-max-prompt-bytes"
+                    onInput=${(event: Event) => setNewModel({ ...newModel, maxPromptBytes: (event.currentTarget as HTMLInputElement).value })} />
                 </div>
                 <div class="rt-field">
                   <span class="sub-k">json 지원</span>

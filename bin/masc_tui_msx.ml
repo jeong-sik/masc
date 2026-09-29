@@ -28,7 +28,7 @@ type retained_frame = {
 let retained : retained_frame option ref = ref None
 let invalidate () = retained := None
 let image_may_exist = ref false
-let image_id = 32
+let image_id = Masc_tui_graphics.image_id Masc_tui_graphics.Msx_screen
 let placement_id = 1
 let synchronized_output = ref false
 let set_synchronized_output enabled = synchronized_output := enabled

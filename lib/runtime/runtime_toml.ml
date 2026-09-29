@@ -174,6 +174,12 @@ let official_client_editor protocol =
     }
 ;;
 
+let muse_serve_protocol = "muse-serve"
+let muse_serve_editor =
+  Option.map (fun (editor : editor_protocol) ->
+    { editor with required_provider_fields = ["account-home"] })
+    (official_client_editor muse_serve_protocol)
+
 let antigravity_editor =
   Some
     { protocol = "antigravity-cli"
@@ -215,6 +221,10 @@ let protocol_declarations =
   ; { protocol = "antigravity-cli"
     ; api_format = Runtime_schema.Antigravity_cli_runtime
     ; editor = antigravity_editor
+    }
+  ; { protocol = muse_serve_protocol
+    ; api_format = Runtime_schema.Muse_serve_runtime
+    ; editor = muse_serve_editor
     }
   ]
 ;;
@@ -271,20 +281,24 @@ let transport_of_provider ~(path : string) (tbl : Otoml.t) (id : string)
          (Printf.sprintf "provider %s: must specify either 'endpoint' or 'command'" id))
 ;;
 
-let active_top_level_namespaces =
-  [ "providers"
-  ; "models"
-  ; "runtime"
-  ; "web_search"
-  ; "exec"
-  ; "egress"
-  ; "lsp"
-  ; Skill_source_config.top_level_namespace
-  ]
-;;
+module Ns = Runtime_toml_namespace
+
 let obsolete_top_level_namespaces = [ "system"; "routes"; "profiles" ]
-let reserved_namespaces = active_top_level_namespaces @ obsolete_top_level_namespaces
-let is_reserved name = List.mem name reserved_namespaces
+
+(* A provider's bindings are a top-level table named after its id, so the id
+   may not be a table another reader owns: [Runtime_toml_namespace] for the
+   tables with a reader of their own, the keeper runtime settings'
+   namespaces from their registry, and the obsolete tables this loader still
+   refuses. Only provider ids become top-level tables; a model id sits under
+   [[models]] and inside [[<provider>.<model>]], and an SSH endpoint under
+   [[exec.ssh.endpoints]], so neither can collide and neither is checked. *)
+let reserved_provider_ids =
+  List.map Ns.key Ns.all
+  @ Keeper_runtime_config.owned_namespaces
+  @ obsolete_top_level_namespaces
+;;
+
+let is_reserved name = List.exists (String.equal name) reserved_provider_ids
 
 (* Provider ids stay dot-free: a Runtime id is the literal string
    "<provider>.<model>", so a dot inside the provider id would make that
@@ -312,22 +326,26 @@ let runtime_id_charset ~allow_dot =
 ;;
 
 let validate_runtime_id_component ~allow_dot ~kind ~path value =
-  if not (valid_runtime_id_component ~allow_dot value)
-  then
+  if valid_runtime_id_component ~allow_dot value
+  then Ok ()
+  else
     Error
       (error
          path
          (Printf.sprintf "%s id must match %s" kind (runtime_id_charset ~allow_dot)))
-  else if is_reserved value
-  then
+;;
+
+let validate_provider_id ~path value =
+  match validate_runtime_id_component ~allow_dot:false ~kind:"provider" ~path value with
+  | Error _ as refused -> refused
+  | Ok () when is_reserved value ->
     Error
       (error
          path
          (Printf.sprintf
-            "%s id %S collides with a reserved top-level runtime.toml namespace"
-            kind
+            "provider id %S collides with a reserved top-level runtime.toml namespace"
             value))
-  else Ok ()
+  | Ok () -> Ok ()
 ;;
 
 (* --- Layer 1: Providers --- *)
@@ -573,7 +591,8 @@ let antigravity_cli_options ~(path : string) (tbl : Otoml.t)
   | Gemini_api
   | Vertex_gemini_api
   | Codex_app_server_runtime
-  | Claude_code_runtime ->
+  | Claude_code_runtime
+  | Muse_serve_runtime ->
     (match
        List.find_opt
          (fun key -> Option.is_some (Otoml.find_opt tbl Fun.id [ key ]))
@@ -670,11 +689,12 @@ let usage_read_url_field ~path ~(transport : Runtime_schema.transport) tbl =
 
 (* The read sends the API key the runtime's HTTP execution was built with,
    and its windows are recorded under the quota scope of that key.  An
-   official-client runtime (Codex, Claude Code, Antigravity) logs in with the
-   vendor's subscription, and its quota scope names no API key (Antigravity's
-   names the OAuth file of that login), so an API-key read there would file
-   one account's usage under another.  Codex and Antigravity are read through
-   their own client instead (Runtime_provider_usage_read). *)
+   official-client runtime (Codex, Claude Code, Antigravity, Muse Code) logs
+   in with the vendor's subscription, and its quota scope names no API key
+   (Antigravity's names the OAuth file of that login), so an API-key read
+   there would file one account's usage under another.  Codex and
+   Antigravity are read through their own client instead
+   (Runtime_provider_usage_read). *)
 let usage_read_execution_errors ~path (api_format : Runtime_schema.api_format) =
   match api_format with
   | Runtime_schema.Messages_api
@@ -684,7 +704,8 @@ let usage_read_execution_errors ~path (api_format : Runtime_schema.api_format) =
   | Runtime_schema.Vertex_gemini_api -> []
   | Runtime_schema.Codex_app_server_runtime
   | Runtime_schema.Antigravity_cli_runtime
-  | Runtime_schema.Claude_code_runtime ->
+  | Runtime_schema.Claude_code_runtime
+  | Runtime_schema.Muse_serve_runtime ->
     error
       path
       "usage-read is only for an API-key HTTP provider; this protocol runs an \
@@ -756,7 +777,7 @@ let parse_usage_read
 let parse_provider (id : string) (tbl : Otoml.t)
   : (Runtime_schema.provider, parse_error list) result
   =
-  let path = Printf.sprintf "providers.%s" id in
+  let path = Ns.(path Providers) id in
   let enabled_result =
     typed_find "a boolean" path tbl "enabled" Otoml.get_boolean
   in
@@ -791,12 +812,12 @@ let parse_provider (id : string) (tbl : Otoml.t)
       | Ok None -> Ok None
       | Ok (Some home) ->
         (match api_format with
-         | Codex_app_server_runtime | Claude_code_runtime
+         | Codex_app_server_runtime | Claude_code_runtime | Muse_serve_runtime
            when Runtime_account_home.is_valid home -> Ok (Some home)
-         | Codex_app_server_runtime | Claude_code_runtime ->
+         | Codex_app_server_runtime | Claude_code_runtime | Muse_serve_runtime ->
            Error (error (path ^ ".account-home") "account-home must be a non-empty absolute path without surrounding whitespace")
          | _ ->
-           Error (error (path ^ ".account-home") "account-home is valid only for Claude Code and Codex official clients"))
+           Error (error (path ^ ".account-home") "account-home is valid only for Claude Code, Codex and Muse Code official clients"))
     in
     let is_non_interactive_result =
       typed_find_or "a boolean" path tbl "is-non-interactive" Otoml.get_boolean ~default:false
@@ -928,18 +949,14 @@ let parse_provider (id : string) (tbl : Otoml.t)
 let parse_providers (toml : Otoml.t)
   : (Runtime_schema.provider list, parse_error list) result
   =
-  match Otoml.find_opt toml Fun.id [ "providers" ] with
+  match Otoml.find_opt toml Fun.id [ Ns.(key Providers) ] with
   | None -> Ok []
   | Some (Otoml.TomlTable entries | Otoml.TomlInlineTable entries) ->
     partition_results
       (List.map
          (fun (id, tbl) ->
             match
-              validate_runtime_id_component
-                ~allow_dot:false
-                ~kind:"provider"
-                ~path:("providers." ^ id)
-                id
+              validate_provider_id ~path:(Ns.(path Providers) id) id
             with
             | Error _ as error -> error
             | Ok () -> parse_provider id tbl)
@@ -948,7 +965,7 @@ let parse_providers (toml : Otoml.t)
       ( Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
       | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
       | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ ) ->
-    Error (error "providers" "[providers] must be a TOML table")
+    Error (error (Ns.(key Providers)) "[providers] must be a TOML table")
 ;;
 
 (* --- Layer 2: Models --- *)
@@ -1368,7 +1385,7 @@ let model_unknown_key_errors ~path (tbl : Otoml.t) =
 let parse_model (id : string) (tbl : Otoml.t)
   : (Runtime_schema.model_spec, parse_error list) result
   =
-  let path = Printf.sprintf "models.%s" id in
+  let path = Ns.(path Models) id in
   match model_unknown_key_errors ~path tbl with
   | _ :: _ as errors -> Error errors
   | [] ->
@@ -1481,13 +1498,13 @@ let parse_model (id : string) (tbl : Otoml.t)
 let parse_models (toml : Otoml.t)
   : (Runtime_schema.model_spec list, parse_error list) result
   =
-  match Otoml.find_opt toml Fun.id [ "models" ] with
+  match Otoml.find_opt toml Fun.id [ Ns.(key Models) ] with
   | None -> Ok []
   | Some
       ( Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
       | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
       | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ ) ->
-    Error (error "models" "[models] must be a TOML table")
+    Error (error (Ns.(key Models)) "[models] must be a TOML table")
   | Some (Otoml.TomlTable entries | Otoml.TomlInlineTable entries) ->
     partition_results
       (List.map
@@ -1496,7 +1513,7 @@ let parse_models (toml : Otoml.t)
               validate_runtime_id_component
                 ~allow_dot:true
                 ~kind:"model"
-                ~path:("models." ^ id)
+                ~path:(Ns.(path Models) id)
                 id
             with
             | Error _ as error -> error
@@ -1666,7 +1683,7 @@ let exec_ssh_allowed_paths_field ~(path : string) (tbl : Otoml.t)
 let parse_exec_ssh_endpoint ~(name : string) (tbl : Otoml.t)
   : (Exec_ssh_endpoint.t, parse_error list) result
   =
-  let path = "exec.ssh.endpoints." ^ name in
+  let path = Ns.(path Exec) ("ssh.endpoints." ^ name) in
   let unknown_key_errors =
     match tbl with
     | Otoml.TomlTable entries | Otoml.TomlInlineTable entries ->
@@ -1904,7 +1921,7 @@ let egress_keeper_keys = [ "allow" ]
 let parse_egress_keeper ~(name : string) (tbl : Otoml.t)
   : (Egress_allowlist.t, parse_error list) result
   =
-  let path = "egress.keepers." ^ name in
+  let path = Ns.(path Egress) ("keepers." ^ name) in
   let unknown_key_errors =
     match tbl with
     | Otoml.TomlTable entries | Otoml.TomlInlineTable entries ->
@@ -1968,30 +1985,30 @@ let parse_egress_keeper ~(name : string) (tbl : Otoml.t)
 let parse_egress_allowlists (toml : Otoml.t)
   : (Egress_allowlist.t list, parse_error list) result
   =
-  match Otoml.find_opt toml Fun.id [ "egress" ] with
+  match Otoml.find_opt toml Fun.id [ Ns.(key Egress) ] with
   | None -> Ok []
   | Some egress_value ->
-    (match exec_single_child ~path:"egress" ~child_key:"keepers" egress_value with
+    (match exec_single_child ~path:(Ns.(key Egress)) ~child_key:"keepers" egress_value with
      | Error _ as error -> error
      | Ok None -> Ok []
      | Ok (Some keepers_value) ->
        (match keepers_value with
         | Otoml.TomlTable entries | Otoml.TomlInlineTable entries ->
           partition_results (List.map (fun (name, tbl) -> parse_egress_keeper ~name tbl) entries)
-        | _ -> Error (error "egress.keepers" "expected a table")))
+        | _ -> Error (error (Ns.(path Egress) "keepers") "expected a table")))
 ;;
 
 let parse_exec_endpoints (toml : Otoml.t)
   : (Exec_ssh_endpoint.t list, parse_error list) result
   =
-  match Otoml.find_opt toml Fun.id [ "exec" ] with
+  match Otoml.find_opt toml Fun.id [ Ns.(key Exec) ] with
   | None -> Ok []
   | Some exec_value ->
-    (match exec_single_child ~path:"exec" ~child_key:"ssh" exec_value with
+    (match exec_single_child ~path:(Ns.(key Exec)) ~child_key:"ssh" exec_value with
      | Error _ as error -> error
      | Ok None -> Ok []
      | Ok (Some ssh_value) ->
-       (match exec_single_child ~path:"exec.ssh" ~child_key:"endpoints" ssh_value with
+       (match exec_single_child ~path:(Ns.(key Exec) ^ ".ssh") ~child_key:"endpoints" ssh_value with
         | Error _ as error -> error
         | Ok None -> Ok []
         | Ok (Some endpoints_value) ->
@@ -2004,7 +2021,7 @@ let parse_exec_endpoints (toml : Otoml.t)
                        validate_runtime_id_component
                          ~allow_dot:false
                          ~kind:"exec ssh endpoint"
-                         ~path:("exec.ssh.endpoints." ^ name)
+                         ~path:(Ns.(path Exec) ("ssh.endpoints." ^ name))
                          name
                      with
                      | Error _ as error -> error
@@ -2016,7 +2033,7 @@ let parse_exec_endpoints (toml : Otoml.t)
            | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ ->
              Error
                (error
-                  "exec.ssh.endpoints"
+                  (Ns.(path Exec) "ssh.endpoints")
                   "[exec.ssh.endpoints] must be a TOML table of endpoint tables"))))
 ;;
 
@@ -2028,7 +2045,7 @@ let parse_exec_endpoints (toml : Otoml.t)
 let parse_lsp_server ~(lang_id : string) (value : Otoml.t)
   : (string * (string * string list), parse_error list) result
   =
-  let path = "lsp.servers." ^ lang_id in
+  let path = Ns.(path Lsp) ("servers." ^ lang_id) in
   match Lsp_process_manager.language_of_lang_id lang_id with
   | None ->
     Error
@@ -2068,10 +2085,10 @@ let parse_lsp_server ~(lang_id : string) (value : Otoml.t)
 let parse_lsp_servers (toml : Otoml.t)
   : ((string * (string * string list)) list, parse_error list) result
   =
-  match Otoml.find_opt toml Fun.id [ "lsp" ] with
+  match Otoml.find_opt toml Fun.id [ Ns.(key Lsp) ] with
   | None -> Ok []
   | Some lsp_value ->
-    (match exec_single_child ~path:"lsp" ~child_key:"servers" lsp_value with
+    (match exec_single_child ~path:(Ns.(key Lsp)) ~child_key:"servers" lsp_value with
      | Error _ as error -> error
      | Ok None -> Ok []
      | Ok (Some servers_value) ->
@@ -2079,7 +2096,7 @@ let parse_lsp_servers (toml : Otoml.t)
         | Otoml.TomlTable entries | Otoml.TomlInlineTable entries ->
           partition_results
             (List.map (fun (lang_id, value) -> parse_lsp_server ~lang_id value) entries)
-        | _ -> Error (error "lsp.servers" "expected a table of language = [\"command\", ...]")))
+        | _ -> Error (error (Ns.(path Lsp) "servers") "expected a table of language = [\"command\", ...]")))
 ;;
 
 (* --- Reserved namespace detection --- *)
@@ -2353,7 +2370,7 @@ let parse_provider_table (provider_id : string) (tbl : Otoml.t)
    provider row must be reported as a provider error, not silently reclassify its
    bindings as some other namespace. *)
 let declared_provider_ids (toml : Otoml.t) : string list =
-  match Otoml.find_opt toml Fun.id [ "providers" ] with
+  match Otoml.find_opt toml Fun.id [ Ns.(key Providers) ] with
   | Some (Otoml.TomlTable entries | Otoml.TomlInlineTable entries) -> List.map fst entries
   | Some _ | None -> []
 ;;
@@ -2414,7 +2431,7 @@ let extract_after_all_errors_guard ~label = function
 let parse_keeper_assignments (toml : Otoml.t)
   : ((string * string) list, parse_error list) result
   =
-  match Otoml.find_opt toml Fun.id [ "runtime"; "assignments" ] with
+  match Otoml.find_opt toml Fun.id [ Ns.(key Runtime); "assignments" ] with
   | None -> Ok []
   | Some (Otoml.TomlTable entries | Otoml.TomlInlineTable entries) ->
     let oks, errs =
@@ -2424,7 +2441,7 @@ let parse_keeper_assignments (toml : Otoml.t)
           | Otoml.TomlString runtime_id -> Left (keeper_name, runtime_id)
           | _ ->
             Right
-              { path = Printf.sprintf "runtime.assignments.%s" keeper_name
+              { path = Ns.(path Runtime) ("assignments." ^ keeper_name)
               ; message = "keeper runtime assignment must be a string runtime id"
               })
         entries
@@ -2432,7 +2449,7 @@ let parse_keeper_assignments (toml : Otoml.t)
     if errs <> [] then Error errs else Ok oks
   | Some _ ->
     Error
-      [ { path = "runtime.assignments"
+      [ { path = Ns.(path Runtime) "assignments"
         ; message = "[runtime.assignments] must be a table of keeper = runtime-id"
         }
       ]
@@ -2474,7 +2491,7 @@ let parse_runtime_media_failover ~path value =
 ;;
 
 let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list) result =
-  match Otoml.find_opt toml Fun.id [ "runtime" ] with
+  match Otoml.find_opt toml Fun.id [ Ns.(key Runtime) ] with
   | None -> Ok empty_runtime_section
   | Some (Otoml.TomlTable entries | Otoml.TomlInlineTable entries) ->
     let section, errs =
@@ -2482,12 +2499,12 @@ let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list)
         (fun (section, errs) (key, value) ->
            match key with
            | "default" ->
-             (match parse_runtime_string_leaf ~path:"runtime.default" ~key value with
+             (match parse_runtime_string_leaf ~path:(Ns.(key Runtime) ^ ".default") ~key value with
               | Ok default_runtime_id ->
                 { section with default_runtime_id = Some default_runtime_id }, errs
               | Error e -> section, errs @ e)
            | "media_failover" ->
-             (match parse_runtime_media_failover ~path:"runtime.media_failover" value with
+             (match parse_runtime_media_failover ~path:(Ns.(key Runtime) ^ ".media_failover") value with
               | Ok media_failover -> { section with media_failover }, errs
               | Error e -> section, errs @ e)
            | "assignments" ->
@@ -2509,7 +2526,7 @@ let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list)
              ( section
              , errs
                @ error
-                   ("runtime." ^ key)
+                   (Ns.(path Runtime) key)
                    (Printf.sprintf
                       "unknown [runtime] key %S; expected default, \
                        media_failover, [runtime.lanes], \
@@ -2521,7 +2538,7 @@ let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list)
         entries
     in
     if errs <> [] then Error errs else Ok section
-  | Some _ -> Error (error "runtime" "[runtime] must be a TOML table")
+  | Some _ -> Error (error (Ns.(key Runtime)) "[runtime] must be a TOML table")
 ;;
 
 (* [\[runtime.lanes.<id>\]] — ordered failover candidate lists. Each lane is a
@@ -2537,7 +2554,7 @@ let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list)
 let parse_lane ~(id : string) (tbl : Otoml.t)
   : (Runtime_schema.lane_decl, parse_error list) result
   =
-  let path = Printf.sprintf "runtime.lanes.%s" id in
+  let path = Ns.(path Runtime) ("lanes." ^ id) in
   let unknown_key_errors =
     match tbl with
     | Otoml.TomlTable entries | Otoml.TomlInlineTable entries ->
@@ -2578,7 +2595,7 @@ let parse_lane ~(id : string) (tbl : Otoml.t)
 ;;
 
 let parse_lanes (toml : Otoml.t) : (Runtime_schema.lane_decl list, parse_error list) result =
-  match Otoml.find_opt toml Fun.id [ "runtime"; "lanes" ] with
+  match Otoml.find_opt toml Fun.id [ Ns.(key Runtime); "lanes" ] with
   | None -> Ok []
   | Some (Otoml.TomlTable entries | Otoml.TomlInlineTable entries) ->
     partition_results
@@ -2589,17 +2606,17 @@ let parse_lanes (toml : Otoml.t) : (Runtime_schema.lane_decl list, parse_error l
             | _ ->
               Error
                 (error
-                   (Printf.sprintf "runtime.lanes.%s" id)
+                   (Ns.(path Runtime) ("lanes." ^ id))
                    "lane must be a table"))
          entries)
   | Some _ ->
-    Error (error "runtime.lanes" "[runtime.lanes] must be a table of lane tables")
+    Error (error (Ns.(path Runtime) "lanes") "[runtime.lanes] must be a table of lane tables")
 ;;
 
 let parse_exact_output_lane ~(id : string) (tbl : Otoml.t)
   : (Runtime_schema.exact_output_lane_decl, parse_error list) result
   =
-  let path = Printf.sprintf "runtime.exact_output_lanes.%s" id in
+  let path = Ns.(path Runtime) ("exact_output_lanes." ^ id) in
   let unknown_key_errors =
     match tbl with
     | Otoml.TomlTable entries | Otoml.TomlInlineTable entries ->
@@ -2752,7 +2769,7 @@ let parse_exact_output_lane ~(id : string) (tbl : Otoml.t)
 let parse_exact_output_lanes (toml : Otoml.t)
   : (Runtime_schema.exact_output_lane_decl list, parse_error list) result
   =
-  match Otoml.find_opt toml Fun.id [ "runtime"; "exact_output_lanes" ] with
+  match Otoml.find_opt toml Fun.id [ Ns.(key Runtime); "exact_output_lanes" ] with
   | None -> Ok []
   | Some (Otoml.TomlTable entries | Otoml.TomlInlineTable entries) ->
     partition_results
@@ -2767,7 +2784,7 @@ let parse_exact_output_lanes (toml : Otoml.t)
               when Option.is_none (Standalone_lane.of_id id) ->
               Error
                 (error
-                   (Printf.sprintf "runtime.exact_output_lanes.%s" id)
+                   (Ns.(path Runtime) ("exact_output_lanes." ^ id))
                    (Printf.sprintf
                       "unknown exact-output lane %S; expected one of %s"
                       id
@@ -2779,13 +2796,13 @@ let parse_exact_output_lanes (toml : Otoml.t)
             | _ ->
               Error
                 (error
-                   (Printf.sprintf "runtime.exact_output_lanes.%s" id)
+                   (Ns.(path Runtime) ("exact_output_lanes." ^ id))
                    "exact-output lane must be a table"))
          entries)
   | Some _ ->
     Error
       (error
-         "runtime.exact_output_lanes"
+         (Ns.(path Runtime) "exact_output_lanes")
          "[runtime.exact_output_lanes] must be a table of lane tables")
 ;;
 
@@ -2831,7 +2848,8 @@ let validate_ollama_only_binding_fields
             | Runtime_schema.Vertex_gemini_api
             | Runtime_schema.Codex_app_server_runtime
             | Runtime_schema.Antigravity_cli_runtime
-            | Runtime_schema.Claude_code_runtime ) as api_format) ->
+            | Runtime_schema.Claude_code_runtime
+            | Runtime_schema.Muse_serve_runtime ) as api_format) ->
          let path = binding.provider_id ^ "." ^ binding.model_id in
          let refuse key =
            error
@@ -3004,7 +3022,7 @@ let parse_typesafeai_destinations ~(path : string) (tbl : Otoml.t)
 let parse_typesafeai (toml : Otoml.t)
   : (Runtime_schema.typesafeai, parse_error list) result
   =
-  let path = "typesafeai" in
+  let path = Ns.(key Typesafeai) in
   match Otoml.find_opt toml Fun.id [ path ] with
   | None -> Ok Runtime_schema.default_typesafeai
   | Some ((Otoml.TomlTable entries | Otoml.TomlInlineTable entries) as tbl) ->
@@ -3088,9 +3106,9 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
   then Error all_errors
   else (
     let providers =
-      extract_after_all_errors_guard ~label:"providers" providers_result
+      extract_after_all_errors_guard ~label:(Ns.(key Providers)) providers_result
     in
-    let models = extract_after_all_errors_guard ~label:"models" models_result in
+    let models = extract_after_all_errors_guard ~label:(Ns.(key Models)) models_result in
     let keeper_assignments =
       extract_after_all_errors_guard ~label:"assignments" assignments_result
     in
@@ -3098,7 +3116,7 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
       extract_after_all_errors_guard ~label:"bindings" bindings_result
     in
     let runtime_section =
-      extract_after_all_errors_guard ~label:"runtime" runtime_section_result
+      extract_after_all_errors_guard ~label:(Ns.(key Runtime)) runtime_section_result
     in
     let lane_decls =
       extract_after_all_errors_guard ~label:"lanes" lanes_result
@@ -3119,7 +3137,7 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
     let lsp_servers =
       extract_after_all_errors_guard ~label:"lsp_servers" lsp_servers_result
     in
-    let typesafeai = extract_after_all_errors_guard ~label:"typesafeai" typesafeai_result in
+    let typesafeai = extract_after_all_errors_guard ~label:(Ns.(key Typesafeai)) typesafeai_result in
     (* Cross-table Gate: a binding field only reaches the wire through its
        provider's request builder, so whether it is carriable is a fact about
        the provider, not about the binding table it was written in. *)

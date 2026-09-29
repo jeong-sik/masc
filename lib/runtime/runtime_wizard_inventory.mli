@@ -2,6 +2,11 @@
     credential or executable is unavailable. Credential values and file paths
     are omitted by default; credential values are never projected. Undeclared context limits stay null.
 
+    [default_runtime_selection] contains concrete candidates of the configured
+    default lane in declared order, or the concrete default itself. The separate
+    [default_runtime_id] preserves the route name; unrelated enabled bindings
+    are not selected.
+
     [integrations] independently projects configured providers, AGENT_CORE
     provider prototypes, and named CLI/local-server transports. Setup and
     verification support describe adapter capability, never account access or

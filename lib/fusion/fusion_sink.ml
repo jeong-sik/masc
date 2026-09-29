@@ -574,14 +574,14 @@ let emit ~source_context ~registry ~base_dir ~keeper ~run_id ~channel ~question 
   in
   try
     (* 비용 관측(제약 아님) — 패널 N + 심판 1 실측 토큰 합산 (RFC §10). board 증거에만
-       남긴다 (cost cap은 v1 제외, 측정값만 — 괴상한 제약 제거 원칙). 실패한 패널/심판은
-       완성이 없어 0(usage_of가 완성 응답에서만 토큰을 뽑음). *)
+       남긴다 (cost cap은 v1 제외, 측정값만 — 괴상한 제약 제거 원칙). 실패한 패널/심판도
+       provider가 보고한 사용량은 보존한다. 보고 없는 사용량은 추정하지 않는다. *)
     let panel_usage =
       List.fold_left
         (fun acc (o : Fusion_types.panel_outcome) ->
           match o with
           | Fusion_types.Answered a -> Fusion_types.add_usage acc a.usage
-          | Fusion_types.Failed _ -> acc)
+          | Fusion_types.Failed error -> Fusion_types.add_usage acc error.usage)
         Fusion_types.zero_usage panel
     in
     let total_usage = Fusion_types.add_usage panel_usage judge_usage in

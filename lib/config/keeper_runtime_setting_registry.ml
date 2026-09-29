@@ -506,6 +506,17 @@ let all =
       ~category:"memory"
       "Enable memory recall prompt injection"
   ; setting
+      ~range:(int_range ~min:1 ())
+      ~reload_class:Next_turn
+      ~effective:(Reader (fun () -> display_int (Env_config_keeper.KeeperMemoryOs.facts_max_bytes ())))
+      ~env_name:Env_config_keeper.KeeperMemoryOs.facts_max_bytes_env_key
+      ~exposure:Env_only
+      ~value_kind:Integer
+      ~default:"524288"
+      ~consumers:[ "Env_config_keeper.KeeperMemoryOs"; "Keeper memory commits" ]
+      ~category:"memory"
+      "Maximum rendered current facts bytes per Keeper"
+  ; setting
       ~reload_class:Next_turn
       ~effective:
         (Reader

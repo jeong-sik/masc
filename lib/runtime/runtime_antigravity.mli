@@ -143,6 +143,10 @@ type error =
   | State_callback_failed of string
   | Turn_failed of string
   | Process_exited of string
+  | Unhandled_exception of string
+      (** An exception nothing in the runtime expected, caught as the turn
+          leaves it: a host-side failure, not something the CLI sent. The
+          string is the exception. *)
   | Timeout of float
 
 val error_to_string : error -> string

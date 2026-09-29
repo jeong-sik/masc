@@ -3,11 +3,11 @@ rfc: "tui-operator-workbench"
 title: "TUI 작업대 — 모든 화면에 같은 클릭·스크롤·복사·추이 부품을 쓴다"
 status: Draft
 created: 2026-09-26
-updated: 2026-09-26
+updated: 2026-09-28
 author: dancer + claude
 supersedes: []
 superseded_by: null
-related: ["tui-measured-operator-home", "tui-operator-ia", "tui-single-input-decoder", "0459", "0462", "tui-chat-boundary-continuity"]
+related: ["tui-operator-ia", "tui-single-input-decoder", "0459", "0462", "tui-chat-boundary-continuity"]
 implementation_prs: []
 ---
 
@@ -16,7 +16,9 @@ implementation_prs: []
 ## 0. 요약
 
 운영자가 2026-09-26 16:05–16:07(KST)에 TUI 화면 35장을 찍어 전체 흐름을 다시 봤다.
-최상위 메뉴는 이미 `RFC-tui-measured-operator-home`(Accepted, 09-25, #38801 에 있음)이 7곳으로 정했다.
+최상위 메뉴 7곳은 [열린 PR #38801](https://github.com/jeong-sik/masc/pull/38801)의 제안에 의존한다.
+그 PR의 `RFC-tui-measured-operator-home`은 이 브랜치에 없으므로 이 문서의 검증된 저장소 의존성으로 세지 않는다.
+#38801이 병합될 때 문서와 실제 일곱 화면을 다시 확인한다.
 Dashboard, Work, Keepers, Usage, Board, Workspace, System 이다. 이 RFC 는 그 결정을 바꾸지 않는다.
 그 RFC 와 다르게 정하는 것은 §10 의 결정 항목으로 따로 적었다.
 
@@ -303,9 +305,22 @@ footer, 도움말, 키 처리가 하나의 타입 있는 키 표를 본다. 이 
 
 ### 5.4 열 폭 (#38988)
 
-`Table.cell` 에 우선순위와 최소 폭을 더한다. 좁아지면 우선순위가 낮은 열부터 뺀다.
+표마다 열을 닫힌 variant 로 이름 짓고, `Masc_tui_table.fit` 에 빼는 순서(`drop_order`)와 늘어나는 열 하나(`flex`)를 넘긴다.
+좁아지면 빼는 순서의 앞에서부터 열을 통째로 뺀다. 늘어나는 열은 남은 폭을 다 받고, 최소 폭 아래로는 줄지 않는다.
+빼는 순서는 표마다 운영자가 정한다(2026-09-28).
+
+| 표 | 빼는 순서 | 늘어나는 열 | 반영 |
+|---|---|---|---|
+| Board | ID → HEARTH → REPLIES → SCORE → AUTHOR | TITLE, 최소 30칸 | #39627, #39643 |
+| Changes | TURN → TASK → OP → RESULT | WHAT | #39662 |
+| Harness | EVALUATOR → TIME → GATE | REASON | #39662 |
+| Planning | DUE → AGE → OPEN → JUDGE | TITLE | #39662 |
+| Schedule | DELIVERY → WAKE → STATUS | RECURRENCE | #39671 |
+| Lanes 실행 목록 | STARTED → ELAPSED | SLOT | #39673 |
+
+Lanes 실행 목록에는 RUN ID 열이 없다. run id 는 상세 화면 머리에 통째로 나온다.
 손으로 센 폭 상수(최상위 156개, 그중 74개가 `render_schedule.ml`)는 이 방식으로 옮긴다.
-ID 열은 기본 우선순위를 가장 낮게 둔다. ID 는 복사 키로 가져간다(§5.6).
+표에서 빠진 ID 는 복사 키로 가져간다(§5.6).
 
 ### 5.5 읽기 상태 하나 (`Masc_tui_fetched`)
 
@@ -348,6 +363,123 @@ ID 열은 기본 우선순위를 가장 낮게 둔다. ID 는 복사 키로 가�
 막대 옆에는 늘 숫자를 쓴다. 사용량 퍼센트에는 `사용` 을 붙인다. 지금 들어오는 사용량 값은 모두 사용한 비율이다
 (`Runtime_provider_usage_window.utilization`).
 
+### 5.9 영역 경계와 포커스 (2026-09-28 추가)
+
+운영자가 2026-09-28 에 "화면이 많은데 영역이 헷갈린다, 경계가 애매하다"고 했다.
+이 절의 아래 목록은 소스 조사이며, 줄 번호는 `1fb92879fe` 기준이다.
+80·100·131·132·140칸 라이브 화면 관찰에는 공개 재현 자료가 없으므로 측정 기준선이나
+검증 근거로 사용하지 않는다. G0 시작 전에 가짜 Keeper·Board 자료를 쓰는 PTY 시나리오로
+동일 폭의 ANSI 원문, 화면 이미지, 실행 head와 명령을 커밋해야 한다. 머리 행 오프셋과
+빈 행 수는 그 자료에서 다시 측정한다. 이 문서 PR은 화면 구현·측정 완료를 주장하지 않는다.
+
+이 절은 경계, 섹션과 표 머리 구분, 포커스, 선택만 다룬다.
+오른쪽 칸의 이름과 내용은 §6.1("지금" 패널)과 D2 가 정한다.
+RFC-0459 §3.2 의 층(L0–L3)과 §3 의 "focus 는 border glyph" 를 구체적인 규칙으로 옮긴다.
+
+#### 무엇이 헷갈리게 하나
+
+- **선 한 모양이 여러 뜻이다.** 같은 가는 가로선이 화면 제목 밑줄(`render_prim.ml:1285-1287`),
+  섹션 구분(`push_divider`, `render_prim.ml:1299`), 표 머리 아래(`render.ml:3487-3490`, `:9014`)를 모두 맡는다.
+  그래서 선을 보고는 새 영역인지, 새 섹션인지, 표 머리인지 알 수 없다.
+  - `box_divider buf cols`(`ansi.ml:849`) 호출 105곳, 4개 파일(`render.ml` 97, `render_prim.ml` 4, `render_chat.ml` 3, `overview_goals.ml` 1)
+  - `push_divider ()` 호출 41곳, `framed_divider` 8곳, `draw_hline` 을 직접 부르는 곳 3곳(`render.ml:5215`, `:5324`, `render_chat.ml:491`)
+  - 오른쪽 칸 안의 선은 따로 `rule_line`(`acting_pane.ml:571`)이 긋지만 모양은 같다.
+- **오른쪽 칸 머리에 이름이 없다.** 머리 줄(`header_line`, `acting_pane.ml:606`)은 탭 이름(`[Recent] Changes`)부터 시작한다.
+- **키가 어느 영역으로 가는지 표시가 없다.** `Theme.border_focus`(`theme.ml:380`)는 정의만 있고 쓰는 곳이 없다.
+  `Ctrl-W` 로 오른쪽 칸에 커서를 주면 칸의 커서 행도 반전된다(`render_prim.ml:1127`). 본문 선택 행도 반전 그대로라 반전 두 줄이 같이 보인다.
+- **선택 표시가 적어도 일곱 가지다.**
+  - 행 전체 반전: `box_line_selected`(`ansi.ml:892`, 호출 15곳), `render.ml:7904`, `:13525`, `:15036`, `:15192`, `:15345`, `:16980`
+  - `>` + 행 반전: `render_prim.ml:4402`, `:4605`
+  - `>` 한 칸만 반전: `render.ml:4347`, `:10161`, `:10179`, `:13667`
+  - `▸` + 행 반전: `render.ml:7971-7979`, `:16581`(`push_selected`)
+  - `▸` 앞머리만: `render_prim.ml:1558`
+  - bold + `▸`: `render_prim.ml:3932`
+  - raw SGR 행 반전: `masc_tui_msx.ml:517`의 MSX game/disk picker (`\027[7m`)
+
+`render_chat.ml:672`의 이름 반전은 선택이 아닌 `Origin_row` 출처 배지다.
+채팅 출처 배지의 별도 의미 API를 보존하며 선택 통합 대상에 넣지 않는다.
+- **맨 아래 세 띠가 붙어 있다.** 본문 키 힌트(본문의 마지막 줄), agenda 띠, 입력 줄 사이에 구분이 없다.
+  agenda 의 `; Awaiting you·N`(`agenda.ml:156`)은 키 힌트처럼 읽힌다.
+  입력 줄의 `(i to write)`(`render_prim.ml:673`)는 Board 화면에서도 보인다.
+- **머리 높이가 어긋난다.** 본문은 `box_top` 이 빈 줄을 먼저 넣어(`ansi.ml:840`) 제목이 한 줄 내려간다. 오른쪽 칸 머리는 그 줄에 붙어 있다.
+
+`▸` 는 지금도 뜻이 많다. 활성 탭(`render_prim.ml:834-837`, `ansi.ml:380`), 선택 행, 접기(§5.7)다.
+bold 는 `NO_COLOR` 에서 사라진다(`theme.ml:22-23`, `:153`). 끄지 않는 속성은 반전 하나다(`theme.ml:207`).
+그래서 포커스를 `▸` 나 bold 로 표시하면 구별이 안 된다.
+
+#### 다른 도구
+
+| 도구 | 방식 | 출처 |
+|---|---|---|
+| lazygit | 키를 받는 패널만 테두리 색을 바꾼다. 좁으면 패널을 세로로 쌓는다 | https://github.com/jesseduffield/lazygit/blob/master/docs/Config.md |
+| Codex CLI | 위아래 테두리 없이 배경 틴트. 틴트 양은 OSC 11 로 읽은 배경에 맞춘다 | https://github.com/openai/codex/blob/main/codex-rs/tui/styles.md |
+| opencode | 한쪽 막대(`┃`)만 긋는다 | https://github.com/anomalyco/opencode/blob/dev/packages/tui/src/ui/border.ts |
+| zellij | 테두리 없는 pane 과 제목만 있는 틀 | https://github.com/zellij-org/zellij/blob/main/CHANGELOG.md |
+
+공통점: 선이나 틴트는 영역 경계에만 쓴다. 키를 받는 영역은 하나만, 테두리 모양이나 색으로 표시한다.
+
+#### 규칙
+
+1. **경계는 영역에만 긋는다.** 영역은 탭 띠, 본문, 옆 칸(§6.1 패널, roster), 본문 안 상세 칸, 모달, agenda 띠, 입력 줄이다.
+   섹션과 표 머리는 영역이 아니다.
+2. **섹션은 제목 줄과 빈 줄로 나눈다.** 표 머리는 선 없이 `recede` 로 그린다. 화면 제목 밑줄은 없앤다.
+3. **영역 머리는 선 한 줄이고, 이름은 그 선 안에 쓴다.** 예: `── Keepers / code-reviewer / chat ─────`. 제목 줄과 밑줄 두 줄이 한 줄이 된다.
+   본문 머리에 무엇을 쓸지는 D14 를 따른다. 탭 띠가 이미 말한 화면 이름 대신 탭 아래 경로와 상태를 쓴다.
+   하위 경로가 없는 최상위 본문은 탭 띠의 활성 탭이 이름을 소유한다. 본문 머리는 상태만 쓰거나
+   비워 두되 경계는 유지해 포커스를 표시한다. 이는 모든 영역 머리에 이름을 넣는 규칙의 명시적 예외다.
+   오른쪽 칸의 이름은 §6.1 이 정한다. 나란한 영역의 머리는 같은 행에 놓는다.
+4. **키를 받는 영역은 하나고, 그 영역의 경계만 굵은 선으로 그린다.** 머리 선은 `━`, 옆 칸 세로 경계는 `┃` 를 쓴다.
+   나머지 영역은 가는 선(`─`, `│`)이다. 색(`border.focused`)은 굵기 위에 더한다.
+   글리프 모양이라 `NO_COLOR` 와 16색에서도 남는다. Mermaid `Border_thick`도 `┃`, `━`를 UTF-8 이스케이프로 쓴다(`masc_tui_mermaid.ml:1263,1269`).
+   도식 내부 획은 내용이고 포커스가 아니다. 영역 바깥 경계의 굵기만 포커스로 읽으며,
+   도식 자체와 도식을 담은 영역의 경계를 별도 좌표로 유지한다.
+5. **선택은 한 모양이다.** 목록마다 한 칸짜리 선택 자리를 두고, 커서 행에 `>` 를 찍는다.
+   포커스 영역에서만 그 행을 반전한다. `▸` 는 활성 탭과 접기에만 남긴다.
+   커서 글리프와 반전 속성을 같이 쓰는 것은 RFC-0459 §3 의 선택 규칙과 같다.
+   선택 자리 한 칸은 열 폭 예산(§5.4, #38988)에서 나온다.
+6. **맨 아래 띠.** 키 힌트는 본문 영역의 마지막 줄이다. agenda 띠와 입력 줄은 전역 띠다.
+   입력 줄이 포커스를 받으면 규칙 4 대로 경계가 굵어진다.
+7. **폭(운영자 결정, 2026-09-28).** 옆 칸은 본문이 Keepers 표의 flag 열까지 담을 때만 연다.
+   본문 바닥은 테두리·여백 4칸과 `keeper_flags_minimum_inner_width`(98)를 더한 102칸이고, narrow 158칸, wide 176칸부터다.
+   숫자를 따로 적지 않고 그 두 상수에서 계산한다. RUNTIME 열(안쪽 118칸)까지 담는 기준은 아니다.
+   Activity와 roster가 함께 열리면 두 폭을 모두 뺀 본문 폭을 검사한다. 102칸을
+   유지할 수 없으면 roster를 접고, 그래도 부족하면 Activity를 접는다. D13의 76칸은
+   Activity 없는 채팅에서만 적용한다.
+   모든 탭에 같은 기준이다. 탭마다 칸을 끄는 목록은 두지 않는다(D12).
+   바닥은 `Masc_tui_acting_pane.surface_floor_cols` 가 계산한다(#39593).
+   채팅도 옆 칸을 그린다(운영자 결정). 채팅과 Board 글쓰기는 `finish_frame_beside_acting_pane` 으로 프레임을 끝낸다(#39583).
+
+#### 모서리
+
+지금 둥근 모서리를 틀로 쓰는 곳은 context inspector 머리 네 곳(`render_prim.ml:4443`, `:4463`, `:4630`, `:4645`)뿐이다.
+`╰─`(`render_prim.ml:4695`, `tool_detail.ml:234`)는 트리 가지이고, `command.ml:852` 는 about 로고다. 둘은 대상이 아니다.
+나머지 틀은 `Theme.Box`(`theme.ml:235-244`) 각진 모서리다. context inspector 머리는 규칙 3 의 영역 머리로 바뀌므로 따로 고치지 않는다.
+
+#### 구현 순서
+
+부르는 자리마다 고치지 않는다. 각 단계는 정의를 바꿔서 컴파일러나 AST 가드가 모든 자리를 찾게 한다.
+
+| 단계 | 내용 | 확인 |
+|---|---|---|
+| G0 | **행 수를 한 곳에서.** 규칙 2·3 은 제목 밑줄을 없애고 두 줄을 한 줄로 만든다. `ansi.ml:834-838` 의 "행 예산은 움직이지 않는다" 계약을 바꾸는 일이다. 먼저 `Masc_tui_frame.chrome_rows`(=5, `frame.ml:3`)를 직접 빼는 14곳과 채팅의 마우스 행 기준 `chat_history_first_row`(`render_chat.ml:3054`)가 frame 이 돌려주는 값 하나를 읽게 한다. #39008 과 같이 간다 | 아래 명령에 주석 말고 남는 줄이 없음. PTY 에서 클릭한 행이 맞음 |
+| G1 | **선택 하나.** 선택 행을 그리는 함수 하나(규칙 5)로 일곱 가지를 모은다. `box_line_selected` 는 `.mli` 에서 빼고, 선택 목적의 `Theme.selection`·`Ansi.reverse`·`Sgr.reverse` 호출을 새 모듈 밖에서 발견하면 실패하는 `Ast_grep.count_calls_across_files` 가드를 `test/test_tui_http_ast.ml` 에 둔다. 출처 배지는 별도 의미 API 안에서 허용한다. AST 호출 가드와 함께 모든 `bin/masc_tui_*.ml` 문자열 리터럴을 디코드해 SGR 7(ESC `[7m`, 복합 파라미터 포함)을 검사한다. MSX picker도 옮기고 `test_tui_msx_load`로 확인한다. 포커스 표시(G3)보다 먼저다 | 허용된 의미 API 밖 선택 호출과 raw SGR가 0. 선택 모양 캡처가 한 가지 |
+| G2 | **영역 머리 부품.** 새 모듈 `Masc_tui_region` 에 머리 값(이름, 탭, 개수, 포커스)과 그리기를 둔다. `Masc_tui_theme` 에만 기댄다. 오른쪽 칸은 지금 자기 `tone` variant 로 머리 span 을 만든다(`acting_pane.ml:117-123`). 이 머리를 region 값으로 돌려주고 render_prim 이 그린다. 의존 방향은 `acting_pane → region → theme`, `render_prim → region` 이다. `surface_chrome`(`render.ml` 27곳, 그중 overlay 4곳)의 제목과 밑줄을 이 머리로 바꾼다 | 80/100/120칸 PTY golden frame(RFC-0459 §7) |
+| G3 | **포커스 한 값.** 키를 받는 영역을 variant 하나로 둔다(본문, 식별자를 가진 본문 내부 상세 칸, 옆 칸, 입력 줄, 모달). Context Inspector의 왼쪽/오른쪽 영역도 서로 다른 식별자로 담는다. 영역 머리와 선택이 이 값을 읽는다. 입력을 열 때 직전 영역을 보관하고 입력으로 독점 이동하며, Escape는 살아 있는 직전 영역(없으면 본문)으로 복원한다. `composer_focused`와 `acting_pane_cursor`가 동시에 포커스를 주장하지 않게 이 값에서 유도한다. `border_focus` 가 여기서 처음 쓰인다 | `NO_COLOR` 텍스트 스냅샷에서 굵은 선 머리가 정확히 하나. `Ctrl-W` 전후로 반전 행이 한 줄 |
+| G4 | **섹션과 표 머리.** `push_divider : unit -> unit` 을 제목을 받는 `push_section` 으로 바꿔 41곳을 컴파일러가 찾게 한다. 표 머리 아래 선은 표 부품이 긋지 않는다. `box_divider` 는 `.mli` 에서 빼서 105곳을 한 PR 의 codemod 로 옮긴다. `framed_divider` 8곳과 직접 `draw_hline` 3곳, Activity `rule_line`도 용도별로 옮기고 영역 경계 API 밖의 잔존 호출을 AST로 검사한다. 각 변환 화면의 chrome/content 행 예산과 키보드·클릭 좌표를 같은 layout 값으로 갱신한다 | 한 화면의 선 개수가 영역 경계 수와 같음. 최소 지원 높이 및 그 전후에서 마지막 행·페이지·커서·클릭 일치. frame budget 전후 측정(RFC-0459 §7) |
+| G5 | **맨 아래 띠.** D15대로 기존 agenda 표기를 유지한다. composer 진입은 RFC-0459의 `Meta-i`를 사용하고 Config_prompts의 plain `i`를 보존한다. G3의 독점 포커스 이동·Escape 복원을 입력에도 적용한다 | PTY: Activity 포커스 → `Meta-i` → Escape에서 굵은 경계가 하나이며 원래 영역으로 복원됨. agenda 20/30칸에서 줄 폭과 키 표시 유지 |
+
+순서는 G0 → G1 → G2 → G3 → G4 → G5 다. G2 와 G4 는 #38801 이 Dashboard 를 새로 그린 뒤에 한다.
+
+크기는 PR 마다 같은 명령으로 잰다.
+
+```sh
+rg -o '\bbox_divider [a-z_(]' bin/masc_tui_*.ml | wc -l                 # 106 (정의 1 포함)
+rg -o 'push_divider \(\)' bin/masc_tui_*.ml | wc -l                     # 41
+rg -n 'Theme\.selection|Ansi\.reverse|Sgr\.reverse' bin/masc_tui_render*.ml | wc -l   # 26
+rg -o '\bbox_line_selected [a-z_(~]' bin/masc_tui_*.ml | wc -l          # 16 (정의 1 포함)
+rg -n 'framed_chrome_rows|framed_content_height|Masc_tui_frame\.chrome_rows' bin/masc_tui_*.ml | rg -v 'let framed_' | wc -l   # 15 (주석 1줄 포함)
+```
+
 ## 6. 실시간과 추이
 
 ### 6.1 "지금" 패널 (D2)
@@ -360,7 +492,8 @@ ID 열은 기본 우선순위를 가장 낮게 둔다. ID 는 복사 키로 가�
 ◐ won-chik        turn 1882  2m42s  masc_dos_pass
 ◐ tui-developer   turn 625   1m37s  14 calls
 ! rondo           rate limited · 16:06:51 재시도
-─ 최근 ─────────────────────────────
+
+최근
 ■ code-reviewer   turn 791  6.2s  no calls
 × pr-updater      turn failed · antigravity_cli
 쉬는 Keeper 10 · 오프라인 1
@@ -369,7 +502,8 @@ ID 열은 기본 우선순위를 가장 낮게 둔다. ID 는 복사 키로 가�
 - 상태 어휘는 Keepers 목록과 같다(§4.2).
 - 머리의 `HTTP [connected]` 대신 마지막 이벤트 뒤 지난 시간(`live 0.4s`)을 보여 준다.
   SSE 가 끊기면 `polling 2s` 로 바뀐다.
-- 기본으로 켜는 폭은 지금 넓은 패널 기준(`Masc_tui_acting_pane.wide_threshold_cols`)이다. `Ctrl-L` 로 켜고 끈다.
+- `최근` 은 패널 안의 섹션이라 선 대신 제목 줄과 빈 줄로 나눈다(§5.9 규칙 2).
+- 켜는 폭은 운영자가 2026-09-28 에 정했다. 본문이 102칸 이상 남을 때만 켠다(§5.9 규칙 7, #36351). `Ctrl-L` 로 켜고 끈다.
 
 ### 6.2 계정 사용량
 
@@ -519,6 +653,10 @@ measured-home RFC 의 Dashboard 에 다음 세 줄만 더한다.
 | S7-3 | 글자 맞추기 함수를 `Message_layout` 로. 바이트를 세는 두 곳을 칸으로 |
 | S7-4 | 직접 문자열 footer 힌트 14곳을 키 표로(#38987 의 일부). 그 뒤 footer 클릭 |
 
+### S8 — 영역 경계와 포커스 (§5.9)
+
+§5.9 의 G0–G5 를 차례로 쌓는다. G0 이 먼저이고, G2·G4 는 #38801 병합 뒤에 한다.
+
 ## 9. 확인 방법
 
 - 각 PR 은 PTY 시나리오로 화면을 실제로 그려 확인한다. 마우스는 SGR 바이트(`ESC [ < b ; x ; y M`)를
@@ -551,7 +689,7 @@ measured-home RFC 의 Dashboard 에 다음 세 줄만 더한다.
 | # | 질문 | 제안 |
 |---|---|---|
 | D1 | 7곳으로 바로 가는 키를 맨 숫자로 할까, 다른 수정 키와 함께 할까 | 맨 숫자는 Activity·Metrics·Approvals·GitHub 칸이 이미 쓴다. `Alt` + 숫자를 제안한다. #39223 해석기가 Alt 를 구분하는지 확인이 먼저다 |
-| D2 | "지금" 패널을 기본으로 켤 폭과 보여 줄 것 | 넓은 패널 기준 폭 이상에서 켜고, 움직이는 것만 보인다 |
+| D2 | "지금" 패널에 보여 줄 것 | 움직이는 것만 보인다. 켜는 폭은 2026-09-28 에 정해졌다: 본문 102칸 이상(§5.9 규칙 7) |
 | D3 | Memory 를 Keepers 안으로 넣을까, 따로 둘까 | Keepers 안. 목록에 Memory 열, 상세에 Memory 칸 |
 | D4 | Config `/preset` 을 Snapshot 으로 바꿀까 | 바꾼다. Glossary 의 Preset 과 겹친다 |
 | D5 | Work 의 Task Review 칸을 Awaiting you 목록으로 합칠까 | 합친다. measured-home 은 Task Review/Verdicts 를 따로 뒀다 |
@@ -560,6 +698,12 @@ measured-home RFC 의 Dashboard 에 다음 세 줄만 더한다.
 | D8 | 휠이 목록에서 선택을 옮길까, 화면만 옮길까 | 선택을 3행 옮긴다. 선택 행이 화면 밖으로 나가지 않는 규칙을 지킨다 |
 | D9 | 초기화 시각이 지난 사용량 보고를 어떻게 보일까 | 값은 그대로 두고 흐리게 그리며 `초기화 시각 지남 · 새 보고 없음` 을 붙인다. 회복됐다고 쓰지 않는다 |
 | D10 | 월 단위 추이 | Keeper metrics 일 파일 보관 기간을 확인한 뒤 정한다. 제공자 사용량 이력은 14일까지다 |
+| D11 | 포커스 영역을 무엇으로 표시할까 | 운영자 결정(2026-09-28). 경계를 굵은 선(`━`, `┃`)으로 그린다(§5.9 규칙 4). `NO_COLOR` 에서도 남는다. 굵은 선과 이중선 모두 Mermaid 도식에 쓰인다. 충돌이 없어서 고른 것은 아니다. 도식 내부는 내용, 바깥 영역 경계는 포커스라는 좌표 경계를 유지한다(§5.9 규칙 4) |
+| D12 | #38801(열린 PR, main 아님)이 Dashboard·Work·Usage 에서 옆 칸을 끄는 목록(`List.mem state.view [...]`)을 102칸 기준 뒤에도 둘까 | 뺀다(운영자 결정, 2026-09-28). 목록은 158칸 이상에서 탭을 바꿀 때 칸이 생겼다 사라지게 만든다. #38801 에 목록을 빼 달라고 요청했다 |
+| D13 | roster 칸의 본문 바닥 76칸을 둘까 | 둔다(운영자 결정, 2026-09-28). roster 는 채팅 옆에만 선다. 채팅 문장은 76칸에서 읽힌다. 102칸 바닥은 §6.1 패널이 열려 있을 때 두 옆 칸을 모두 뺀 본문에 적용한다. 둘을 함께 둘 수 없으면 roster를 접는다. roster 는 자기 바닥(`Masc_tui_roster_pane.threshold_cols` 110 − 칸 34)을 쓴다 |
+| D14 | 본문 머리에서 `MASC <이름>` 을 뺄까 | 뺀다(운영자 결정, 2026-09-28). 탭 띠가 이미 말한다. 본문 머리 선에는 탭 아래 경로와 그 화면의 상태만 남긴다. 최상위 본문의 이름은 활성 탭이 소유하며 본문 경계에는 상태만(없으면 빈 선) 남긴다 |
+| D15 | agenda 띠의 `; Awaiting you·N` 모양을 바꿀까 | 지금 모양을 둔다. 탭 배지(`Approvals·N`)와 같은 표기다. 헷갈림은 띠 경계(§5.9 규칙 1)로 푼다. 입력 줄처럼 `(; to open)` 을 붙이면 약 10칸 길어져 agenda 시계 쪽 폭을 줄인다(`agenda.ml:172-178`) |
+| D16 | 옆 칸 경계를 틴트로 할까, 선으로 할까 | 둘 다 둔다(운영자 결정, 2026-09-28. 틴트 `side_pane_background` + 세로선). 포커스일 때 세로선만 `┃` 로 바뀐다 |
 
 ## 11. 하지 않는 것
 

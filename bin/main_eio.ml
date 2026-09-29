@@ -1844,7 +1844,7 @@ let runtime_verify_cmd_exit base_path runtime_id timeout_s =
 let runtime_verify_cmd =
   let runtime_id = Arg.(required & pos 0 (some string) None & info [] ~docv:"RUNTIME_ID") in
   let timeout = Arg.(value & opt float runtime_verification_timeout_s & info ["timeout"] ~docv:"SECONDS"
-    ~doc:"Deadline for this explicit readiness measurement, including client admission and model/tool roundtrip.") in
+    ~doc:"Deadline for cancellable client admission and model/tool exchange; blocking Muse account preparation can delay it.") in
   Cmd.v (Cmd.info "runtime-verify" ~doc:"Verify the selected model response and a harmless tool-result roundtrip.")
     Term.(const runtime_verify_cmd_exit $ base_path $ runtime_id $ timeout)
 
@@ -2246,6 +2246,11 @@ let runtime_probe_cmd_exit base_path runtime_id =
           | Runtime_execution.Antigravity_cli _ ->
               print_string "unsupported\n";
               Printf.eprintf "runtime %S (antigravity) exposes no login probe\n"
+                runtime_id;
+              3
+          | Runtime_execution.Muse_serve _ ->
+              print_string "unsupported\n";
+              Printf.eprintf "runtime %S (muse code) exposes no login probe\n"
                 runtime_id;
               3
           | Runtime_execution.Claude_code exec ->
@@ -3611,13 +3616,57 @@ let runtime_model_list_cmd =
 
 let runtime_codex_models_cmd =
   let cli = Arg.(value & opt string "codex" & info ["cli-path"] ~docv:"EXECUTABLE") in
-  let run cli_path =
+  let account_home = Arg.(value & opt (some string) None & info ["account-home"]
+    ~docv:"DIRECTORY" ~doc:"Selected CODEX_HOME for metadata discovery.") in
+  let run cli_path account_home =
     Masc_cli_codex_models.run
       ~cli_path:(Runtime_official_cli_install.spawn_path Codex ~command:cli_path)
-      ~timeout_s:runtime_probe_subscription_timeout_s
+      ~account_home ~timeout_s:runtime_probe_subscription_timeout_s
   in
   Cmd.v (Cmd.info "runtime-codex-models" ~doc:"Refresh selected Codex model metadata in an isolated connection home without a model turn.")
-    Term.(const run $ cli)
+    Term.(const run $ cli $ account_home)
+
+let runtime_muse_models_cmd =
+  let cli = Arg.(value & opt string "muse" & info ["cli-path"] ~docv:"EXECUTABLE") in
+  let account_home = Arg.(required & opt (some string) None & info ["account-home"]
+    ~docv:"DIRECTORY" ~doc:"Explicit Muse account HOME; never inherited from the caller.") in
+  let timeout = Arg.(value & opt float runtime_probe_subscription_timeout_s
+    & info ["timeout-s"] ~docv:"SECONDS"
+      ~doc:"Finite positive deadline for the metadata exchange, including protocol notifications; blocking account preparation can delay it.") in
+  let run cli_path account_home timeout_s =
+    if not (Float.is_finite timeout_s) || timeout_s <= 0. then (
+      prerr_endline "Muse discovery timeout must be finite and positive.";
+      1)
+    else Masc_cli_muse_models.run
+      ~cli_path:(Runtime_official_cli_install.spawn_path Muse ~command:cli_path)
+      ~account_home ~timeout_s in
+  Cmd.v (Cmd.info "runtime-muse-models"
+    ~doc:"List source-labelled Muse model metadata without a session or model turn; account availability is not verified.")
+    Term.(const run $ cli $ account_home $ timeout)
+
+let runtime_account_login_cmd =
+  let client = Arg.(required & opt (some (enum
+      [ "codex", Runtime_setup_login_client.Codex_home; "claude", Runtime_setup_login_client.Claude_home;
+        "muse", Runtime_setup_login_client.Muse_home ])) None
+    & info ["client"] ~docv:"CLIENT" ~doc:"The official client to sign in: codex, claude or muse.") in
+  let cli = Arg.(value & opt (some string) None & info ["cli-path"] ~docv:"EXECUTABLE"
+    ~doc:"The client's executable; its usual command name when omitted.") in
+  let account_home = Arg.(required & opt (some string) None & info ["account-home"]
+    ~docv:"DIRECTORY" ~doc:"Explicit account home runtime.toml declares; never inherited from the caller.") in
+  let run client cli_path account_home =
+    let install_client = match client with
+      | Runtime_setup_login_client.Codex_home -> Runtime_official_cli_install.Codex
+      | Claude_home -> Runtime_official_cli_install.Claude
+      | Muse_home -> Runtime_official_cli_install.Muse in
+    let command = match cli_path with
+      | Some command -> command
+      | None -> Runtime_official_cli_install.name install_client in
+    Masc_cli_account_login.run ~client
+      ~cli_path:(Runtime_official_cli_install.spawn_path install_client ~command)
+      ~account_home in
+  Cmd.v (Cmd.info "runtime-account-login"
+    ~doc:"Run the official sign-in for a declared Codex, Claude Code or Muse Code account home with the environment /login gives that client.")
+    Term.(const run $ client $ cli $ account_home)
 
 let runtime_setup_render_cmd =
   let spec = Arg.(required & opt (some string) None & info ["spec"] ~doc:"Private setup JSON file.") in
@@ -3744,28 +3793,36 @@ let setup_validate_runtime base_path =
       else
         let result = verify_runtime_execution runtime runtime_verification_timeout_s in
         let code = Runtime_verification.exit_code result in
-        if code = 0 then print_endline "Model response and harmless tool roundtrip verified."
-        else (
+        match result.failure with
+        | None when code = 0 -> print_endline "Model response and harmless tool roundtrip verified."; 0
+        | Some failure when Runtime_setup_batch.usage_limit failure ->
+          (* The same rule as the setup save: the provider answered for the
+             account and declined for its usage, so the connection stands.
+             The detail carries the retry hint or the usage window's reopen
+             time. *)
+          Printf.eprintf "%s: the provider declined the check for the account's usage, so the model's response and tool path were not measured.\n%!"
+            (Runtime_verification.failure_code failure);
+          Option.iter (Printf.eprintf "  %s\n%!") (Runtime_verification.failure_detail failure);
+          0
+        | None | Some _ ->
           (match result.failure, runtime.provider.credentials with
            | Some (Runtime_verification.Unavailable (Missing_credential _)), Some (Runtime_schema.Env key) ->
              Printf.eprintf "Missing model credential: %s. Set this variable in the shell that starts MASC.\n" key
            | _ -> ());
-          (* Name the cause: a rate limit only needs a wait, a refused key
-             needs a new one, and the operator cannot tell them apart from
-             the sentence below alone. *)
+          (* Name the cause: a refused key needs a new one, a missing model
+             another choice, and the operator cannot tell them apart from the
+             sentence below alone. *)
           Option.iter
             (fun failure ->
                Printf.eprintf "%s: %s\n%!"
                  (Runtime_verification.failure_code failure)
                  (Runtime_verification.failure_message failure);
-               (* The detail carries the provider's retry hint or the usage
-                  window's reopen time, which the setup wizard already shows. *)
                Option.iter
                  (Printf.eprintf "  %s\n%!")
                  (Runtime_verification.failure_detail failure))
             result.failure;
-          prerr_endline "The selected model did not pass its real response/tool check. Run masc runtime-verify for details or choose another connection in the installer.");
-        code
+          prerr_endline "The selected model did not pass its real response/tool check. Run masc runtime-verify for details or choose another connection in the installer.";
+          code
 
 let ensure_local_operator_login ~base_path ~port ~agent =
   match Auth_login.read_persisted_token ~base_path ~agent_name:agent with
@@ -3885,7 +3942,7 @@ let setup_stop_owner_cmd =
 
 let runtime_client_path_cmd =
   let client = Arg.(required & opt (some Masc_cli_client_path.client_arg) None & info ["client"]
-    ~docv:"CLIENT" ~doc:"claude-code, codex or antigravity.") in
+    ~docv:"CLIENT" ~doc:"claude-code, codex, antigravity or muse-code.") in
   let command = Arg.(value & opt (some string) None & info ["command"]
     ~docv:"COMMAND" ~doc:"The configured command; defaults to the client's own name.") in
   Cmd.v (Cmd.info "runtime-client-path"
@@ -4137,6 +4194,8 @@ let cmd =
     ; voice_local_setup_cmd
     ; runtime_model_list_cmd
     ; runtime_codex_models_cmd
+    ; runtime_muse_models_cmd
+    ; runtime_account_login_cmd
     ; runtime_setup_render_cmd
     ; runtime_setup_inventory_cmd
     ; runtime_setup_batch_cmd

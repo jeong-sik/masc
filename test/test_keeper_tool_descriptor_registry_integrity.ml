@@ -988,6 +988,130 @@ let test_edit_public_validation_rejects_content () =
   | None -> Alcotest.fail "Edit public descriptor did not resolve"
 ;;
 
+(* Fleet evidence (tool_calls 2026-09-26/27/28): 25 Edit calls carried a [cwd]
+   Read would have honoured and Edit rejected. Validation accepts it now;
+   translation joins it into [path] the way Read resolves it, and [cwd]
+   itself never reaches the runtime — the joined string faces containment
+   exactly as a directly spelled path. *)
+let test_edit_public_validation_translates_cwd () =
+  let fields_of input =
+    match
+      Resolution.validated_descriptor_and_input_for_tool_call ~tool_name:"Edit" ~input
+    with
+    | Some (Ok (_, `Assoc fields)) -> fields
+    | Some (Ok (_, other)) ->
+      Alcotest.failf "Edit translated input is not an object: %s" (Yojson.Safe.to_string other)
+    | Some (Error validation_result) ->
+      Alcotest.failf
+        "Edit public validation unexpectedly failed: %s"
+        (Tool_result.data validation_result |> Yojson.Safe.to_string)
+    | None -> Alcotest.fail "Edit public descriptor did not resolve"
+  in
+  let string_field fields key =
+    match List.assoc_opt key fields with
+    | Some (`String value) -> Some value
+    | Some _ | None -> None
+  in
+  let edit_input ?cwd file_path =
+    `Assoc
+      ([ "file_path", `String file_path
+       ; "old_string", `String "let x = 1"
+       ; "new_string", `String "let x = 2"
+       ]
+       @ match cwd with None -> [] | Some cwd -> [ "cwd", `String cwd ])
+  in
+  let fields = fields_of (edit_input ~cwd:"lib" "src.ml") in
+  Alcotest.(check (option string))
+    "relative file_path joins against cwd"
+    (Some "lib/src.ml")
+    (string_field fields "path");
+  Alcotest.(check bool)
+    "cwd is consumed by translation"
+    true
+    (List.assoc_opt "cwd" fields = None);
+  Alcotest.(check (option string))
+    "mode stays pinned to patch"
+    (Some "patch")
+    (string_field fields "mode");
+  let fields = fields_of (edit_input ~cwd:"lib" "/abs/src.ml") in
+  Alcotest.(check (option string))
+    "absolute file_path ignores cwd"
+    (Some "/abs/src.ml")
+    (string_field fields "path");
+  let fields = fields_of (edit_input "lib/src.ml") in
+  Alcotest.(check (option string))
+    "missing cwd leaves the path alone"
+    (Some "lib/src.ml")
+    (string_field fields "path");
+  let fields = fields_of (edit_input ~cwd:"  " "lib/src.ml") in
+  Alcotest.(check (option string))
+    "blank cwd is ignored"
+    (Some "lib/src.ml")
+    (string_field fields "path");
+  (* Read trims cwd and file_path separately before joining them; the
+     runtime trims only the joined path, so padding inside the join would
+     name a different file than Read opens for the same arguments. *)
+  let fields = fields_of (edit_input ~cwd:" lib " "src.ml") in
+  Alcotest.(check (option string))
+    "padded cwd is trimmed before the join"
+    (Some "lib/src.ml")
+    (string_field fields "path");
+  let fields = fields_of (edit_input ~cwd:"lib" " src.ml ") in
+  Alcotest.(check (option string))
+    "padded file_path is trimmed before the join"
+    (Some "lib/src.ml")
+    (string_field fields "path");
+  let fields = fields_of (edit_input ~cwd:"lib" " /abs/src.ml") in
+  Alcotest.(check (option string))
+    "padded absolute file_path still ignores cwd"
+    (Some "/abs/src.ml")
+    (string_field fields "path");
+  let fields = fields_of (edit_input ~cwd:"lib" "  ") in
+  Alcotest.(check (option string))
+    "blank file_path is not joined into cwd"
+    (Some "")
+    (string_field fields "path")
+;;
+
+(* The translator stays closed for callers that bypass validation: a
+   non-string [cwd] is ignored rather than joined, and undeclared keys still
+   never reach the runtime. *)
+let test_edit_translation_consumes_cwd_without_validation () =
+  let fields =
+    match
+      Descriptor.translate_input
+        ~public:"Edit"
+        (`Assoc
+          [ "file_path", `String "src.ml"
+          ; "old_string", `String "let x = 1"
+          ; "new_string", `String "let x = 2"
+          ; "cwd", `Int 42
+          ; "content", `String "let clobbered = true"
+          ])
+    with
+    | `Assoc fields -> fields
+    | other ->
+      Alcotest.failf "Edit translated input is not an object: %s" (Yojson.Safe.to_string other)
+  in
+  let string_field key =
+    match List.assoc_opt key fields with
+    | Some (`String value) -> Some value
+    | Some _ | None -> None
+  in
+  Alcotest.(check (option string))
+    "non-string cwd is ignored"
+    (Some "src.ml")
+    (string_field "path");
+  Alcotest.(check bool)
+    "cwd never reaches the runtime"
+    true
+    (List.assoc_opt "cwd" fields = None);
+  Alcotest.(check bool)
+    "content still never reaches the runtime"
+    true
+    (List.assoc_opt "content" fields = None)
+;;
+
 let test_read_public_validation_translates_supported_fields () =
   let input =
     `Assoc
@@ -1157,7 +1281,7 @@ let test_board_descriptions_disambiguate_post_id_flow () =
     get_schema.description;
   check_contains
     "board_post_get post_id field says exact ID is required"
-    ~sub:"Required exact board post ID"
+    ~sub:"Exact post_id from masc_board_list or masc_board_post_get; do not guess."
     get_post_id_description;
   check_contains
     "board_list schema says it discovers post_id"
@@ -1175,9 +1299,17 @@ let test_board_descriptions_disambiguate_post_id_flow () =
        in
        check_contains
          (label ^ " post_id field says exact ID is required")
-         ~sub:"Required exact board post ID"
+         ~sub:"Exact post_id from masc_board_list or masc_board_post_get; do not guess."
          post_id_description)
-    [ "board_comment", comment_schema; "board_vote", vote_schema ];
+    [ "board_comment", comment_schema ];
+  let vote_post_id_description =
+    schema_property_description vote_schema.input_schema "post_id"
+    |> Option.value ~default:""
+  in
+  check_contains
+    "board_vote post_id field says exact ID is required"
+    ~sub:"Required exact board post ID"
+    vote_post_id_description;
   List.iter
     (fun (schema : Masc_domain.tool_schema) ->
        if string_contains ~sub:"BoardList" schema.description
@@ -1211,8 +1343,8 @@ let test_masc_board_descriptions_disambiguate_post_id_flow () =
     ~sub:"masc_board_list or masc_board_search first"
     get_schema.description;
   check_contains
-    "masc_board_post_get schema advertises pagination"
-    ~sub:"Comments are paginated by default"
+    "masc_board_post_get schema advertises the newest-first default read"
+    ~sub:"The default read returns the post body and its newest comments"
     get_schema.description;
   check_contains
     "masc_board_post_get schema forbids empty args"
@@ -1220,15 +1352,15 @@ let test_masc_board_descriptions_disambiguate_post_id_flow () =
     get_schema.description;
   check_contains
     "masc_board_post_get post_id field says exact ID is required"
-    ~sub:"Required exact board post ID"
+    ~sub:"Exact post_id from masc_board_list or masc_board_post_get; do not guess."
     get_post_id_description;
   check_contains
-    "masc_board_post_get offset description mentions default"
-    ~sub:"default: 0"
+    "masc_board_post_get offset description says omitting reads the newest"
+    ~sub:"Omit it to read the newest comments"
     comment_offset_description;
   check_contains
     "masc_board_post_get limit description mentions bounds"
-    ~sub:"default: 50, max: 100"
+    ~sub:"20 if omitted, at most 100"
     comment_limit_description;
   Alcotest.(check (option int))
     "masc_board_post_get offset minimum"
@@ -1250,6 +1382,19 @@ let test_masc_board_descriptions_disambiguate_post_id_flow () =
     "masc_board_post_get tail maximum"
     (Some Board_types.Limits.max_comment_page_limit)
     (schema_property_int get_schema.input_schema "comment_tail" "maximum");
+  (* #39448: comment_offset and comment_limit are mutually exclusive with
+     comment_tail and after_comment_id, so a client that filled a declared
+     [default] would send a value that conflicts with the argument the caller
+     chose. The server applies the default itself; the schema must not invite
+     the client to send one. *)
+  Alcotest.(check (option int))
+    "masc_board_post_get offset has no machine-readable default"
+    None
+    (schema_property_int get_schema.input_schema "comment_offset" "default");
+  Alcotest.(check (option int))
+    "masc_board_post_get limit has no machine-readable default"
+    None
+    (schema_property_int get_schema.input_schema "comment_limit" "default");
   check_contains
     "masc_board_post_get schema names the two ways to skip read comments"
     ~sub:"pass after_comment_id (the newest one you read) or comment_tail (the newest N)"
@@ -1270,9 +1415,17 @@ let test_masc_board_descriptions_disambiguate_post_id_flow () =
        in
        check_contains
          (label ^ " post_id field says exact ID is required")
-         ~sub:"Required exact board post ID"
+         ~sub:"Exact post_id from masc_board_list or masc_board_post_get; do not guess."
          post_id_description)
-    [ "masc_board_comment", comment_schema; "masc_board_vote", vote_schema ]
+    [ "masc_board_comment", comment_schema ];
+  let vote_post_id_description =
+    schema_property_description vote_schema.input_schema "post_id"
+    |> Option.value ~default:""
+  in
+  check_contains
+    "masc_board_vote post_id field says exact ID is required"
+    ~sub:"Required exact board post ID"
+    vote_post_id_description
 ;;
 
 let test_masc_board_registry_has_descriptor_projection () =
@@ -2056,6 +2209,14 @@ let () =
             "Edit rejects an undeclared content key before translation"
             `Quick
             test_edit_public_validation_rejects_content
+        ; test_case
+            "Edit validates then joins an explicit cwd into path"
+            `Quick
+            test_edit_public_validation_translates_cwd
+        ; test_case
+            "Edit translation consumes cwd without validation"
+            `Quick
+            test_edit_translation_consumes_cwd_without_validation
         ; test_case
             "translation validation policy is typed for all descriptors"
             `Quick

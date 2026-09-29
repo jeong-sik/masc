@@ -1,5 +1,9 @@
 # OCaml build artifacts
 _build/
+# `_build/` matches only a directory. Some Keeper lanes keep `_build` as a
+# symlink to an outside build dir; without the next line `git add -A` commits
+# that symlink and every CI dune build then fails on open(_build/.lock) (#39561).
+/_build
 _build_*/
 # Dune build trace dumps (RFC-0209: env serialization footgun — DUNE_BUILD_DIR=_build-* writes trace.csexp with full env including API keys)
 _build-*/

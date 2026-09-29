@@ -2631,6 +2631,47 @@ let test_manual_quarantine_requeue_is_unclaimable_until_authorized_and_settles (
    | A.Quarantine { phase = A.Requeued _; _ }, P.Ready -> ()
    | _ -> Alcotest.fail "Requeued+Blocked recovery did not commit Ready");
   let exact = provenance "manual-requeue-success" in
+  let spent ~before_dispatch ~before_advance:_ _candidate =
+    ok "bind requeued spent lane" (before_dispatch (provenance "requeued-spent"));
+    Error (spent_http_walk_then_spent_cli_tail ())
+  in
+  (match
+     ok "defer authorized requeue"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute:spent)
+   with
+   | W.Judgment_deferred _ -> ()
+   | _ -> Alcotest.fail "authorized requeue did not defer on the spent lane");
+  let deferred = load_one_partition ~base_path in
+  Alcotest.(check bool) "deferral advances beyond the initial Ready" false
+    (P.Generation.is_direct_successor
+       ~previous:quarantine.partition_generation deferred.generation);
+  ignore
+    (ok "restart after authorized requeue deferral"
+       (P.recover_for_process_start ~now:33.0 ~base_path ~keeper_name:"alpha")
+     : int);
+  ok "reconcile authorized requeue after deferral"
+    (W.For_testing.reconcile_quarantines ~now:34.0 ~base_path ~keeper_name:"alpha");
+  ok "repeat process-start reconciliation"
+    (W.For_testing.reconcile_quarantines ~now:35.0 ~base_path ~keeper_name:"alpha");
+  Alcotest.(check bool) "reconciliation retains the deferred generation" true
+    (P.Generation.equal deferred.generation (load_one_partition ~base_path).generation);
+  (match (load_one_candidate ~base_path).status with
+   | A.Quarantine { phase = A.Requeued _; _ } -> ()
+   | _ -> Alcotest.fail "reconciliation lost the operator authorization");
+  let ready = load_one_partition ~base_path in
+  (match
+     ok "claim authorized requeue before process exit"
+       (P.claim_ready_exact ~now:36.0 ~worker_epoch:(P.Worker_epoch.generate ())
+          ~base_path ~keeper_name:"alpha" ~partition_id:ready.partition_id
+          ~generation:ready.generation)
+   with
+   | Some { state = P.Running _; _ } -> ()
+   | _ -> Alcotest.fail "authorized requeue was not claimed");
+  Alcotest.(check int) "restart releases the interrupted run" 1
+    (ok "recover interrupted authorized requeue"
+       (P.recover_for_process_start ~now:37.0 ~base_path ~keeper_name:"alpha"));
+  ok "reconcile authorized requeue after interrupted run"
+    (W.For_testing.reconcile_quarantines ~now:38.0 ~base_path ~keeper_name:"alpha");
   let execute ~before_dispatch ~before_advance:_ _candidate =
     ok "bind manual requeue attempt" (before_dispatch exact);
     (* Relevant, not Not_relevant: task-1666 makes the worker settle a

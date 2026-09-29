@@ -7,6 +7,9 @@ let connection_key = function
   | _ -> false
 ;;
 
+let credentials_store_key = "cli_auth_credentials_store"
+let credentials_store_file = "file"
+
 let project_config ?(disabled_mcp_servers = []) body =
   try match Otoml.Parser.from_string_result body with
   | Error _ -> Error "The Codex connection configuration could not be parsed."
@@ -26,7 +29,7 @@ let project_config ?(disabled_mcp_servers = []) body =
     Ok (Otoml.Printer.to_string (Otoml.TomlTable (projected @ [
       "mcp_servers", Otoml.TomlTable (List.map (fun name -> name,
         Otoml.TomlTable ["enabled", Otoml.TomlBoolean false]) disabled_mcp_servers);
-      "cli_auth_credentials_store", Otoml.TomlString "file";
+      credentials_store_key, Otoml.TomlString credentials_store_file;
       "web_search", Otoml.TomlString "disabled";
       "features", Otoml.TomlTable (List.map (fun key -> key, Otoml.TomlBoolean false)
         [ "apps"; "plugins"; "hooks"; "enable_mcp_apps"; "skill_search";
@@ -55,7 +58,9 @@ let cli_overrides ~home =
     | None -> []
     | Some fields -> List.map (fun (name, _) ->
       Printf.sprintf "features.%s=false" name) fields in
-  [ "web_search=\"disabled\""; "cli_auth_credentials_store=\"file\"" ] @ features @
+  [ "web_search=\"disabled\""
+  ; Printf.sprintf "%s=\"%s\"" credentials_store_key credentials_store_file ]
+  @ features @
   (* Codex CLI splits override paths on dots without TOML quoting. Put exact
      server names inside a TOML inline table, not in the dotted override path. *)
   [ "mcp_servers={" ^
@@ -79,6 +84,9 @@ let inherited_server_names ~directory =
     if Sys.file_exists path then server_names (Fs_compat.load_file path) else [])
   |> List.sort_uniq String.compare
 ;;
+
+let auth_file = "auth.json"
+let auth_path ~codex_home = Filename.concat codex_home auth_file
 
 let prepare ?source_home ~directory () =
   (* These are the external Codex client's credential/configuration locations,
@@ -105,8 +113,8 @@ let prepare ?source_home ~directory () =
       Fun.protect ~finally:(fun () -> close_out channel) (fun () -> output_string channel content)
     in
     write "config.toml" config;
-    let auth = Filename.concat source "auth.json" in
-    if Sys.file_exists auth then write "auth.json" (Fs_compat.load_file auth);
+    let auth = auth_path ~codex_home:source in
+    if Sys.file_exists auth then write auth_file (Fs_compat.load_file auth);
     Ok destination
   with
   | Not_found -> Error "HOME is required to find the Codex connection credentials."

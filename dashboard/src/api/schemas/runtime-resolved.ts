@@ -90,11 +90,21 @@ const ProviderUsageWindowSchema = object({
   resets_at: nullable(number()),
   observed_at: number(),
   source: string(),
+  role: union([
+    literal('gates_model_calls'),
+    literal('counts_other_use'),
+    literal('unclassified_limit'),
+  ]),
+})
+
+const ProviderUsageProviderSchema = object({
+  id: string(),
+  display_name: string(),
 })
 
 const ProviderUsageScopeSchema = object({
   scope: string(),
-  providers: array(string()),
+  providers: array(ProviderUsageProviderSchema),
   state: union([literal('reported'), literal('not_reported_since_start')]),
   windows: array(ProviderUsageWindowSchema),
 })

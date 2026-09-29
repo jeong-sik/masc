@@ -437,16 +437,20 @@ let endpoint_file_writers_text = function
    once it exists the channel owns the descriptor and [close_in_noerr] is its
    only close, as Unix.in_channel_of_descr asks. *)
 let read_endpoint_file ~what path =
-  let cannot_read () =
-    Error (Printf.sprintf "%s: cannot read %s %s" config_error_code what path) in
+  let cannot_read operation detail =
+    Error
+      (Printf.sprintf "%s: cannot read %s %s: %s: %s"
+         config_error_code what path operation detail) in
   let close_descriptor fd = try Unix.close fd with Unix.Unix_error _ -> () in
   match Unix.openfile path [ Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC ] 0 with
-  | exception Unix.Unix_error _ -> cannot_read ()
+  | exception Unix.Unix_error (error, operation, _) ->
+    cannot_read operation (Unix.error_message error)
   | fd ->
     let euid = Unix.geteuid () in
     let verdict =
       match Unix.fstat fd with
-      | exception Unix.Unix_error _ -> cannot_read ()
+      | exception Unix.Unix_error (error, operation, _) ->
+        cannot_read operation (Unix.error_message error)
       | { Unix.st_kind = Unix.S_REG; st_uid; st_perm; _ } ->
         (match refuse_endpoint_file ~euid ~owner:st_uid ~perm:st_perm with
          | None -> Ok ()
@@ -479,16 +483,16 @@ let read_endpoint_file ~what path =
          Unix.clear_nonblock fd;
          Unix.in_channel_of_descr fd
        with
-       | exception Unix.Unix_error _ ->
+       | exception Unix.Unix_error (error, operation, _) ->
          close_descriptor fd;
-         cannot_read ()
+         cannot_read operation (Unix.error_message error)
        | channel ->
          Fun.protect
            ~finally:(fun () -> close_in_noerr channel)
            (fun () ->
              match In_channel.input_all channel with
              | content -> Ok content
-             | exception Sys_error _ -> cannot_read ()))
+             | exception Sys_error detail -> cannot_read "read" detail))
 
 let read_config_file path =
   Result.bind (read_endpoint_file ~what:"config file" path) parse_config

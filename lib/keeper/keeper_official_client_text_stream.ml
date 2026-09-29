@@ -70,6 +70,14 @@ let suffix_after ~prefix text =
   else None
 ;;
 
+let complete_message t ~message ~text =
+  if String.equal text "" then None
+  else if starts_new_message t ~message:(Some message)
+  then Some (forward t ~message:(Some message) text)
+  else Option.map (forward t ~message:(Some message))
+      (suffix_after ~prefix:(Buffer.contents t.current) text)
+;;
+
 let remainder t ~final_text =
   let shown = Buffer.contents t.shown in
   if String.starts_with ~prefix:shown final_text

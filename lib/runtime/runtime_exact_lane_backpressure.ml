@@ -73,17 +73,13 @@ let note_cause ~slot_id (cause : Exact.execution_error_cause) =
       (fun candidate -> Backpressure.note_rate_limit ~candidate ~retry_after:retry_after_s)
       (candidate_of_slot slot_id)
   | Exact.Provider_response_refused _
-  | Exact.Attempt_already_started
-  | Exact.Clock_required_for_timeout
-  | Exact.Frozen_request_mismatch
   | Exact.Completion_failed _
   | Exact.Response_body_deadline_exceeded
   | Exact.Incomplete_output
   | Exact.Missing_output
   | Exact.Ambiguous_output _
   | Exact.Unexpected_output_content
-  | Exact.Invalid_json_output
-  | Exact.Internal_non_json_output -> ()
+  | Exact.Invalid_json_output -> ()
 ;;
 
 let note_answered (success : Exact.flow_success) =

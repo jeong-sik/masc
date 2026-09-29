@@ -3,9 +3,9 @@ rfc: "one-slot-fault-judgment-for-every-walk"
 title: "다음 후보로 넘길지는 한 곳에서 정한다 — exact 걸음과 Keeper 걸음이 같은 오류에 같은 답을 한다"
 status: Draft
 created: 2026-09-24
-updated: 2026-09-24
+updated: 2026-09-28
 author: claude
-related: ["librarian-lifecycle", "0440", "0454", "typed-terminal-reason"]
+related: ["librarian-lifecycle", "0440", "0454", "typed-terminal-reason", "exact-lane-walks-one-slot-list"]
 ---
 
 # 다음 후보로 넘길지는 한 곳에서 정한다
@@ -149,9 +149,10 @@ val of_transport_error : Http_client.http_error -> dispatch:dispatch -> t
 |---|---|---|
 | `Binding _` | 넘김 | 넘김. 다시 보내도 되는지는 지금처럼 `allow_retry` 가 effect fence 로 정한다 |
 | `Unattributed` | 넘김 | 넘김 (같은 fence) |
-| `Unknown_after_dispatch` | 멈춤. 지금 규칙 그대로다 | `allow_retry` (checkpoint·effect 규칙). 지금 규칙 그대로다 |
+| `Unknown_after_dispatch` | 넘김 | `allow_retry` (checkpoint·effect 규칙). 지금 규칙 그대로다 |
 
-두 걸음의 차이는 "보냈는데 결과를 모름"을 어떻게 다루는지 하나만 남는다. 이건 오류 분류가 아니라 걸음의 효과 규칙이라, 이 RFC 는 어느 쪽도 바꾸지 않는다.
+두 걸음의 차이는 "보냈는데 결과를 모름"을 어떻게 다루는지 하나만 남는다. 이건 오류 분류가 아니라 걸음의 효과 규칙이다.
+exact 걸음은 세 판정을 모두 넘기므로 이 판정을 읽지 않는다. exact 요청에는 도구가 없어서 결과를 모르는 요청을 넘겨도 효과가 겹치지 않는다 (`RFC-exact-lane-walks-one-slot-list.md` §3.3, Q1). Keeper 턴은 도구를 쓰므로 `allow_retry` 가 정한다.
 넘기기 전에 같은 후보에서 하는 일(같은 후보 재시도, 범위를 줄여 다시 보내기)도 바꾸지 않는다.
 
 `Keeper_runtime_failure_route` 의 rotate·retry 분류도 `binding_fact` 에서 나오게 해서, 손으로 맞추는 곳을 없앤다.

@@ -30,3 +30,22 @@ let render_fact fact =
 let render_facts facts =
   facts |> List.map render_fact |> String.concat "\n"
 ;;
+
+let facts_payload_bytes ~ordinary_facts ~source_lines =
+  List.map render_fact ordinary_facts @ source_lines
+  |> String.concat "\n"
+  |> String.length
+;;
+
+let check_facts_budget ~previous_bytes ~ordinary_facts ~source_lines =
+  let actual = facts_payload_bytes ~ordinary_facts ~source_lines in
+  let maximum = Env_config.KeeperMemoryOs.facts_max_bytes () in
+  if actual <= maximum || actual < previous_bytes
+  then Ok ()
+  else
+    Error
+      (Printf.sprintf
+         "current Memory OS facts exceed commit budget: %d bytes > %d bytes; drop facts before committing"
+         actual
+         maximum)
+;;

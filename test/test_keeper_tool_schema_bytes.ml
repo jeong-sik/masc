@@ -389,7 +389,38 @@ open Alcotest
    do not compose exactly once both land in the same JSON array (ordering
    and shared-key overhead are not perfectly additive). Using the CI
    measurement now, with headroom. *)
-let ceiling_bytes = 128_450
+(* 2026-09-28: 128,547 across 146 tools, this suite run locally on the change.
+   #39448 item 5: every board tool that takes a post_id now declares the
+   parser's shape as a JSON Schema pattern (^[a-zA-Z0-9_-]{1,64}$), and
+   masc_board_comment takes [body] as an alias for [content] the way
+   masc_board_post already does. What it bought: a client that invents a
+   post_id is refused at the schema with the accepted shape instead of a
+   lookup miss, and the comment body field matches post's. The pattern mirrors
+   Board.Post_id.of_string exactly, so it rejects no id the parser accepts.
+   Pin to the measured inventory with no added headroom. *)
+(* 2026-09-28: 128,595 across 146 tools, this suite run locally on the merge
+   of #39505 into this branch. This branch alone measured 128,547 (entry
+   below); #39505 changed masc_board_post_get's default read and added 48
+   rendered bytes. The two touch the same file, so the merged figure is the
+   measurement rather than the sum. Pin to it with no added headroom. *)
+(* 2026-09-28: 128,889, +294 over the entry above: the production renderer's
+   rules replayed on the three changed descriptions, not a CI reading.
+   masc_goal_upsert.metric +141 names the three sources the Goal judge opens
+   (4 of 17 Goals were refuted or dropped because their metric named a host
+   path the judge cannot read); masc_keeper_delegate.prompt +121 and
+   masc_ask.context +32 take the checklists the shared Keeper prompt spelled
+   out for those two calls, which the prompt no longer carries. All three
+   tools are deferred on the agent-core lane. No added headroom. *)
+(* 2026-09-28: 128,988, +99 over the entry above, again a replay and not a
+   CI reading. masc_goal_upsert.metric no longer says the judge cannot read
+   inside a Keeper's sandbox, which was false for the Docker profile's shared
+   mount. It now says a path as a Keeper sees it in its workspace is not one
+   the judge opens, which holds on every sandbox profile, and keeps the host
+   .masc/playground file for host-side authors. Correction to that entry:
+   its 128,595 base was not re-measured after #39454 trimmed four board
+   descriptions (about 67 to 98 bytes by replay), so the surface sits that
+   far under this ceiling rather than exactly at it. *)
+let ceiling_bytes = 128_988
 
 
 let schema_json (schema : Masc_domain.tool_schema) =

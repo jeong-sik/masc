@@ -38,6 +38,7 @@ let with_workspace f =
 let goal_in phase id title =
   let ts = Masc_domain.now_iso () in
   { Goal_store.id
+  ; owner = Goal_store.Unknown_owner
   ; criterion_revision = "fixture-" ^ id
   ; title
   ; metric = None
@@ -47,6 +48,8 @@ let goal_in phase id title =
   ; phase
   ; last_review_note = None
   ; last_review_at = None
+  ; notified_refuted_key = None
+  ; notified_overdue_key = None
   ; created_at = ts
   ; updated_at = ts
   }

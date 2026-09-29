@@ -2268,7 +2268,7 @@ def ask_local_voice(binary, base):
 # Quick setup's model when Claude Code is on this computer. Chosen 2026-09-16:
 # a first conversation and its tool check answer quickly on it, and a
 # subscription spends less of its allowance than on the larger models.
-QUICK_MODEL = 'claude-sonnet-5'
+QUICK_MODEL = 'claude-sonnet-5-5'
 
 # The order quick setup takes Apple Container's own actions in. Each runs at
 # most once, so a service that never becomes ready ends in the step 4 screen

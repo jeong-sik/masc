@@ -1169,7 +1169,7 @@
 (test
  (name test_operator_control_snapshot_cache)
  (modules test_operator_control_snapshot_cache)
- (libraries alcotest yojson masc_test_deps eio_main))
+ (libraries alcotest yojson masc_test_deps eio_main eio.mock))
 
 ; Extracted from the big (tests ...) group above: the "keeper up ok" case
 ; creates a keeper without a sandbox_profile, which resolves to Local and is
@@ -2980,6 +2980,8 @@
 (include stanzas/test_mcp_post_sse_e2e.inc)
 
 (include stanzas/test_mcp_server_eio_tool_profile_capability.inc)
+
+(include stanzas/test_mcp_dos_screen_image.inc)
 
 (include stanzas/test_mcp_tool_matrix.inc)
 

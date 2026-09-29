@@ -195,20 +195,15 @@ let protocol_version params =
 ;;
 
 let tool_result_json ~id (result : tool_result) =
-  let success, content =
-    match Runtime_official_client_tool.mcp_content
-      ~content:result.content ~content_blocks:result.content_blocks with
-    | Ok content -> result.success, content
-    | Error detail -> false,
-        [ `Assoc [ "type", `String "text"; "text", `String detail ]
-        ; `Assoc [ "type", `String "text"; "text",
-            `String (Llm_provider.Utf8_sanitize.sanitize result.content) ] ]
+  let content, is_error =
+    Runtime_official_client_tool.mcp_tool_result_content ~success:result.success
+      ~content:result.content ~content_blocks:result.content_blocks
   in
   Mcp_transport_protocol.make_response
     ~id
     (`Assoc
        ([ "content", `List content ]
-        @ if success then [] else [ "isError", `Bool true ]))
+        @ if is_error then [ "isError", `Bool true ] else []))
 ;;
 
 let tools_call ~id ~params ~call_tool =

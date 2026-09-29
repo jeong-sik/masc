@@ -3,6 +3,7 @@ module Index = Keeper_memory_search_index
 
 type error =
   | Invalid_limit
+  | Render_failed of string
   | Index_unavailable of string
   | Fact_exceeds_limit of Ledger.fact_ref
 
@@ -16,6 +17,7 @@ type batch =
 
 let error_to_string = function
   | Invalid_limit -> "workspace curator request limit must be positive"
+  | Render_failed detail -> "workspace curator prompt render: " ^ detail
   | Index_unavailable detail -> "workspace curator neighbor index: " ^ detail
   | Fact_exceeds_limit _ -> "one workspace fact and its neighbors exceed the admitted input limit"
 
@@ -27,11 +29,16 @@ let fact_ref_json = function
     `Assoc ["keeper_id", `String keeper_id; "store", `String "source_bound";
             "path", `String path; "claim_sha256", `String claim_sha256]
 
+let fact_id fact =
+  "fact-" ^ Digestif.SHA256.(digest_string
+    (Yojson.Safe.to_string (fact_ref_json fact)) |> to_hex)
+
 let keeper_id = function
   | Ledger.Ordinary { keeper_id; _ } | Ledger.Source_bound { keeper_id; _ } -> keeper_id
 
 let pending_json (pending : Ledger.pending_fact) =
-  `Assoc ["fact", fact_ref_json pending.fact; "claim", `String pending.claim]
+  `Assoc ["id", `String (fact_id pending.fact);
+          "fact", fact_ref_json pending.fact; "claim", `String pending.claim]
 
 let referenced_entries ~ledger neighbors =
   let dispositions = Ledger.dispositions ledger in
@@ -66,6 +73,8 @@ let prepare ~max_input_bytes ~neighbor_limit ~render ~ledger ~current ~pending =
   else match pending with
   | [] -> Ok None
   | _ :: _ ->
+    let ( let* ) = Result.bind in
+    let render payload = render payload |> Result.map_error (fun detail -> Render_failed detail) in
     (* The index still holds every current fact, but ask it only about facts
        whose bare rows could fit in this request. Otherwise the first fill
        would issue thousands of needless BM25 queries. *)
@@ -73,13 +82,13 @@ let prepare ~max_input_bytes ~neighbor_limit ~render ~ledger ~current ~pending =
       | [] -> Ok (List.rev selected, [])
       | (fact : Ledger.pending_fact) :: rest as remaining ->
         let proposed = row_json ~ledger fact [] :: rows in
-        if String.length (render (input (List.rev proposed))) > max_input_bytes then
+        let* rendered = render (input (List.rev proposed)) in
+        if String.length rendered > max_input_bytes then
           (match selected with
            | [] -> Error (Fact_exceeds_limit fact.fact)
            | _ :: _ -> Ok (List.rev selected, remaining))
         else candidates (fact :: selected) proposed rest
     in
-    let ( let* ) = Result.bind in
     let* candidates, tail = candidates [] [] pending in
     let texts = List.map (fun (fact : Ledger.pending_fact) ->
       keeper_id fact.fact, fact.claim) current in
@@ -113,14 +122,15 @@ let prepare ~max_input_bytes ~neighbor_limit ~render ~ledger ~current ~pending =
            let rec fit neighbors =
              let proposed = row_json ~ledger fact neighbors :: rows in
              let payload = input (List.rev proposed) in
-             let rendered = render payload in
+             let* rendered = render payload in
              if String.length rendered <= max_input_bytes
-             then Some (proposed, payload, rendered)
+             then Ok (Some (proposed, payload, rendered))
              else match List.rev neighbors with
-               | [] -> None
+               | [] -> Ok None
                | _ :: prior -> fit (List.rev prior)
            in
-           (match fit (neighbors fact ranked) with
+           let* fitted = fit (neighbors fact ranked) in
+           (match fitted with
             | Some (proposed, payload, rendered) ->
               (match rest with
                | [] -> Ok (Some { input = payload; rendered_prompt = rendered;

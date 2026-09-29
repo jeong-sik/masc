@@ -301,7 +301,8 @@ module Comment_page : sig
   (** Built only by {!request_of_args}: a [From_offset] is [>= 0] and
       [1 <= limit <= Limits.max_comment_page_limit]. For [Latest], [limit] is
       the [comment_tail] count, or {!Limits.default_comment_page_limit} when
-      the caller named no page at all. *)
+      the caller named no page at all; a [comment_tail] of [0] gives a
+      [Latest] request with [limit = 0], an empty page beside the post body. *)
 
   type argument =
     | Comment_offset

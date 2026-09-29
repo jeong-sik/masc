@@ -2005,6 +2005,91 @@ let test_batch_rejection_names_the_answer_shape () =
    | Ok _ | Error _ -> Alcotest.fail "an empty verdict list must remain accepted")
 ;;
 
+(* Board-attention quarantines on 2026-09-29 ended on a rejected key set whose
+   sentence did not say which keys. Scenario: each declared slot answers with a
+   wrong shape (an extra key on the first, an alias for [rationale] on the
+   second). The flow must walk to the successor, end as
+   [Domain_output_invalid], and the detail the durable partition keeps (the
+   last slot's) must name the shape and quote no value. *)
+let test_wrong_shape_on_every_slot_ends_domain_invalid_naming_the_shape () =
+  with_prompt_registry (fun () ->
+    run_eio (fun ~sw ~net ~clock ->
+      let candidate = candidate "board-attention-wrong-shape" in
+      let answer fields = `Assoc [ "verdicts", `List [ `Assoc fields ] ] in
+      let extra_key =
+        answer
+          [ "candidate_id", `String candidate.candidate_id
+          ; "decision", `String "relevant"
+          ; "rationale", `String "SECRET-FIRST-RATIONALE"
+          ; "confidence", `String "SECRET-CONFIDENCE"
+          ]
+      in
+      let aliased_key =
+        answer
+          [ "candidate_id", `String candidate.candidate_id
+          ; "decision", `String "relevant"
+          ; "reason", `String "SECRET-REASON"
+          ]
+      in
+      let first_server =
+        Fixture.start_server
+          ~sw
+          ~net
+          ~clock
+          (Fixture.Reply (Fixture.openai_response extra_key))
+      in
+      let second_server =
+        Fixture.start_server
+          ~sw
+          ~net
+          ~clock
+          (Fixture.Reply (Fixture.openai_response aliased_key))
+      in
+      let first = target "board-attention-wrong-shape-extra" first_server.base_url in
+      let second = target "board-attention-wrong-shape-alias" second_server.base_url in
+      publish_lane [ first; second ];
+      let prepared =
+        match prepare_exact ~net:(Some net) candidate with
+        | Ok prepared -> prepared
+        | Error _ -> Alcotest.fail "the wrong-shape fixture was not admitted"
+      in
+      (match
+         Exact_flow.execute
+           ~clock
+           ~callback_error_to_string:Fun.id
+           ~before_dispatch:(fun _ -> Ok ())
+           ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+           prepared
+       with
+       | Ok _ -> Alcotest.fail "a wrong shape on every slot must not be accepted"
+       | Error (Exact_flow.Domain_output_invalid detail) ->
+         List.iter
+           (fun needle ->
+             Alcotest.(check bool)
+               (Printf.sprintf "the terminal detail names %s" needle)
+               true
+               (contains_substring ~needle detail))
+           [ "fields must be exactly"
+           ; "item=0"
+           ; "missing=[\"rationale\"]"
+           ; "extra=[\"reason\"]"
+           ; "repeated=[]"
+           ];
+         List.iter
+           (fun secret ->
+             Alcotest.(check bool)
+               (Printf.sprintf "the terminal detail never quotes %s" secret)
+               false
+               (contains_substring ~needle:secret detail))
+           [ "SECRET-REASON"; "SECRET-FIRST-RATIONALE"; "SECRET-CONFIDENCE" ]
+       | Error _ -> Alcotest.fail "expected Domain_output_invalid as the terminal error");
+      Alcotest.(check int) "first slot dispatched once" 1 (Fixture.post_count first_server);
+      Alcotest.(check int)
+        "second slot dispatched once"
+        1
+        (Fixture.post_count second_server)))
+;;
+
 let () =
   Alcotest.run
     "Keeper Board-attention exact flow"
@@ -2036,6 +2121,10 @@ let () =
             "strict singleton mismatch advances to declared successor"
             `Quick
             test_domain_candidate_id_mismatch_advances_to_declared_successor
+        ; Alcotest.test_case
+            "a wrong shape on every slot ends domain-invalid and names the shape"
+            `Quick
+            test_wrong_shape_on_every_slot_ends_domain_invalid_naming_the_shape
         ; Alcotest.test_case
             "Keeper preference reorders the Board lane"
             `Quick

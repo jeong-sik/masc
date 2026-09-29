@@ -35,10 +35,7 @@ let every_surface =
    Named together the way the [ / ] table below is, so the next surface that
    arrives with a cursor and nothing to open has to be a decision. *)
 let enter_atom_count_exceptions =
-  [ (* A summary with no row cursor: Work owns the task list and Keepers the
-       roster (RFC-tui-measured-operator-home), so nothing on it is opened. *)
-    "Dashboard", 0
-  ; (* Charts, not a list: [j/k] scrolls. *)
+  [ (* Charts, not a list: [j/k] scrolls. *)
     "Usage", 0
   ; (* A detail screen. Its tabs carry their own keys. *)
     "Keeper detail", 0

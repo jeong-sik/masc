@@ -37,12 +37,25 @@ def seed_goals(base, rows=()):
     }))
 
 
+def assert_no_decision_posts(requests):
+    # The fixture records protocol initialization as well as product writes.
+    # Only those two MCP setup messages are harmless here; tools/call and
+    # every product POST must still fail this navigation-only assertion.
+    unexpected = [
+        (path, body) for path, body in requests
+        if path != "/mcp" or json.loads(body).get("method") not in (
+            "initialize", "notifications/initialized",
+        )
+    ]
+    assert not unexpected, f"Home navigation sent a decision POST: {unexpected!r}"
+
+
 def unknown_and_resume(executable):
     fixtures = h.overview_event_http_fixtures()
     fixtures["/api/v1/keepers/beta/chat/history"] = (200, [])
 
     def interact(process, fd, _slave, output, _base):
-        h.wait_for_output(process, fd, output, b"Choose a Keeper", start=0)
+        h.wait_for_output(process, fd, output, b"Choose a Keeper", start=0, timeout=10)
         frame = capture(process, fd, output, "unknown", b"Choose a Keeper")
         assert b"not fully read" in frame
         assert b"No decision is waiting" not in frame
@@ -71,10 +84,10 @@ def requests_are_navigation(executable):
     requests = []
 
     def interact(process, fd, _slave, output, _base):
-        h.wait_for_output(process, fd, output, b"Approvals and questions: 3", start=0)
+        h.wait_for_output(process, fd, output, b"Approvals and questions: 3", start=0, timeout=10)
         capture(process, fd, output, "requests", b"Approvals and questions: 3")
         h.send_and_wait(process, fd, output, b"\r", b"MASC Approvals")
-        assert not requests, "opening Home's request link must not POST a decision"
+        assert_no_decision_posts(requests)
         os.write(fd, b"q")
 
     h.run_terminal_scenario(executable, description="Home requests open without deciding",
@@ -95,7 +108,7 @@ def automatic_gate_is_not_a_human_decision(executable):
     fixtures["/api/v1/dashboard/gate"] = gate
 
     def interact(process, fd, _slave, output, _base):
-        h.wait_for_output(process, fd, output, b"No decision is waiting", start=0)
+        h.wait_for_output(process, fd, output, b"No decision is waiting", start=0, timeout=10)
         frame = capture(process, fd, output, "automatic-gate", b"No decision is waiting")
         assert b"Needs your decision" not in frame
         # The same read becomes actionable only with the typed human handoff.
@@ -116,14 +129,14 @@ def refresh_preserves_destination(executable):
     requests = []
 
     def interact(process, fd, _slave, output, _base):
-        h.wait_for_output(process, fd, output, b"No decision is waiting", start=0)
+        h.wait_for_output(process, fd, output, b"No decision is waiting", start=0, timeout=10)
         # Resolve the initial unread selection, leaving Choose highlighted.
         h.send_and_wait(process, fd, output, b"j", b"Choose a Keeper")
         current.extend(items)
         h.send_and_wait(process, fd, output, b"r", b"Approvals and questions: 3")
         capture(process, fd, output, "request-inserted", b"Approvals and questions: 3")
         h.send_and_wait(process, fd, output, b"\r", b"MASC Keepers")
-        assert not requests
+        assert_no_decision_posts(requests)
         h.palette_go(process, fd, output, b"go dashboard", b"Continue")
         h.send_and_wait(process, fd, output, b"k", b"Approvals and questions: 3")
         current.clear()
@@ -131,7 +144,7 @@ def refresh_preserves_destination(executable):
         # A removed destination must never silently fall through to another.
         result = h.send_and_wait(process, fd, output, b"\r", b"Selection changed")
         assert b"MASC Keepers" not in h.screen_text(result)
-        assert not requests
+        assert_no_decision_posts(requests)
         os.write(fd, b"q")
 
     h.run_terminal_scenario(executable, description="Home refresh preserves selected identity",
@@ -153,11 +166,11 @@ def empty_roster_preserves_confirmation(executable):
         seed_goals(base, [goal])
 
     def interact(process, fd, _slave, output, _base):
-        h.wait_for_output(process, fd, output, b"1 Goals to confirm", start=0)
+        h.wait_for_output(process, fd, output, b"1 Goals to confirm", start=0, timeout=10)
         frame = capture(process, fd, output, "no-keepers-with-goal", b"1 Goals to confirm")
         assert b"Create a Keeper" in frame
         h.send_and_wait(process, fd, output, b"j\r", b"MASC Agenda")
-        h.wait_for_output(process, fd, output, b"Retained goal", start=0)
+        h.wait_for_output(process, fd, output, b"Retained goal", start=0, timeout=10)
         h.send_and_wait(process, fd, output, b"\x1b", b"Create a Keeper")
         os.write(fd, b"q")
 

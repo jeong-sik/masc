@@ -115,7 +115,15 @@ let test_forward_navigation_fetches_only_new_surface_datasets () =
   let _, dataset_count =
     List.fold_left add_delta (needs Types.Overview, 0) destinations
   in
-  check int "only newly visible scoped requests are planned" 9 dataset_count
+  (* Home no longer fetches Goal measurement. Entering Work now adds that
+     request beside planning: Work 2 + Keepers 2 + Usage 5 + Board 1. *)
+  let work_delta =
+    Types.surface_needs_delta ~previous:(needs Types.Overview)
+      ~next:(needs Types.Planning)
+  in
+  check bool "entering Work adds the Goal measurement absent from Home" true
+    work_delta.Types.needs_overview_goals;
+  check int "only newly visible scoped requests are planned" 10 dataset_count
 ;;
 
 let test_equal_needs_have_no_delta () =

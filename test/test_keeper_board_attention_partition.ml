@@ -178,6 +178,52 @@ let confirm_ready_in_child base_path =
   | _ -> Alcotest.fail "child did not find one Ready root"
 ;;
 
+(* After another boot compacts the ledger, the original process's cursor
+   deliberately cannot follow the new inode. Every post-restart mutation in
+   the multi-boot scenario therefore belongs to this fresh process. *)
+let defer_confirm_and_settle_in_child base_path =
+  ignore
+    (ok
+       "third child process-start recovery"
+       (P.recover_for_process_start ~now:10.0 ~base_path ~keeper_name:"alpha")
+     : int);
+  let owner = P.Worker_epoch.generate () in
+  let deferred =
+    let running = claim ~base_path ~worker_epoch:owner ~now:11.0 in
+    P.defer ~worker_epoch:owner ~base_path ~partition:running
+    |> ok "defer after two boots"
+    |> fsynced "defer after two boots"
+  in
+  (match deferred.state with
+   | P.Ready -> ()
+   | P.Running _ | P.Completed _ | P.Settled _ | P.Abandoned _ | P.Blocked _ ->
+     Alcotest.fail "deferral did not return to Ready");
+  ignore
+    (P.confirm_ready ~base_path ~partition:deferred
+     |> ok "third child confirms deferred Ready"
+     |> fsynced "third child confirms deferred Ready"
+     : P.t);
+  let running = claim ~base_path ~worker_epoch:owner ~now:12.0 in
+  let completed =
+    P.complete_existing_judgment
+      ~now:13.0
+      ~worker_epoch:owner
+      ~base_path
+      ~partition:running
+      ~item:{ candidate_id = running.candidate_id; judgment = judgment (provenance ()) }
+    |> ok "complete after multi-boot deferral"
+    |> fsynced "complete after multi-boot deferral"
+  in
+  ignore
+    (ok
+       "settle after multi-boot deferral"
+       (P.settle ~now:14.0 ~base_path ~partition:completed)
+     : P.t);
+  (match ok "load multi-boot settled root" (P.load ~base_path ~keeper_name:"alpha") with
+   | [ { P.state = P.Settled _; _ } ] -> ()
+   | _ -> Alcotest.fail "multi-boot Ready confirmation prevented settlement")
+;;
+
 let test_roots_are_singleton_deterministic_and_context_exact () =
   with_temp_base "board-attention-partition-roots" @@ fun base_path ->
   let first = candidate ~id:"candidate-first" ~recorded_at:1.0 () in
@@ -1085,11 +1131,11 @@ let test_ready_confirmations_identify_distinct_process_boots () =
     then Filename.concat (Sys.getcwd ()) Sys.executable_name
     else Sys.executable_name
   in
-  let run_child () =
+  let run_child mode =
     let pid =
       Unix.create_process
         executable
-        [| executable; "--ready-confirm-child"; base_path |]
+        [| executable; mode; base_path |]
         Unix.stdin
         Unix.stdout
         Unix.stderr
@@ -1097,26 +1143,16 @@ let test_ready_confirmations_identify_distinct_process_boots () =
     match Unix.waitpid [] pid with
     | _, Unix.WEXITED 0 -> ()
     | _, (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) ->
-      Alcotest.fail "Ready confirmation child process failed"
+      Alcotest.failf "Ready confirmation child process failed: %s" mode
   in
-  run_child ();
-  run_child ();
+  run_child "--ready-confirm-child";
+  run_child "--ready-confirm-child";
   let ledger_path = P.For_testing.path ~base_path ~keeper_name:"alpha" in
   Alcotest.(check int)
     "two boots confirmed the same Ready generation"
     2
     (List.length (ready_confirmation_events ledger_path));
-  let deferred =
-    let running = claim ~base_path ~worker_epoch:owner ~now:11.0 in
-    P.defer ~worker_epoch:owner ~base_path ~partition:running
-    |> ok "defer after two boots"
-    |> fsynced "defer after two boots"
-  in
-  (match deferred.state with
-   | P.Ready -> ()
-   | P.Running _ | P.Completed _ | P.Settled _ | P.Abandoned _ | P.Blocked _ ->
-     Alcotest.fail "deferral did not return to Ready");
-  run_child ();
+  run_child "--ready-defer-confirm-settle-child";
   let events = ready_confirmation_events ledger_path in
   let open Yojson.Safe.Util in
   (match events with
@@ -1138,26 +1174,7 @@ let test_ready_confirmations_identify_distinct_process_boots () =
        "deferral advances the Ready generation"
        false
        (second |> member "generation" = (third |> member "generation"))
-   | _ -> Alcotest.fail "three boots did not leave three confirmations");
-  let running = claim ~base_path ~worker_epoch:owner ~now:12.0 in
-  let completed =
-    P.complete_existing_judgment
-      ~now:13.0
-      ~worker_epoch:owner
-      ~base_path
-      ~partition:running
-      ~item:{ candidate_id = pending.candidate_id; judgment = judgment (provenance ()) }
-    |> ok "complete after multi-boot deferral"
-    |> fsynced "complete after multi-boot deferral"
-  in
-  ignore
-    (ok
-       "settle after multi-boot deferral"
-       (P.settle ~now:14.0 ~base_path ~partition:completed)
-     : P.t);
-  (match ok "load multi-boot settled root" (P.load ~base_path ~keeper_name:"alpha") with
-   | [ { P.state = P.Settled _; _ } ] -> ()
-   | _ -> Alcotest.fail "multi-boot Ready confirmation prevented settlement")
+   | _ -> Alcotest.fail "three boots did not leave three confirmations")
 ;;
 
 let test_restart_returns_every_running_root_to_ready () =
@@ -1681,6 +1698,8 @@ let test_a_judged_candidate_keeps_its_abandoned_root_closed () =
 let () =
   match Array.to_list Sys.argv with
   | [ _; "--ready-confirm-child"; base_path ] -> confirm_ready_in_child base_path
+  | [ _; "--ready-defer-confirm-settle-child"; base_path ] ->
+    defer_confirm_and_settle_in_child base_path
   | _ ->
     Alcotest.run
     "keeper_board_attention_partition"

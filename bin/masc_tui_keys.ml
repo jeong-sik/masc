@@ -1263,6 +1263,14 @@ let footer_hints_board_read ~focus_posts ~focus_comments
        ; b Meta "Tab" "next"
        ])
 
+(* A missing post has no read pane or copy target. Keep only the Board
+   bindings that still act while loading or after a failed read. *)
+let footer_hints_board_pending =
+  for_surface Board
+  |> List.filter (fun binding ->
+         List.exists (String.equal binding.key) [ "r"; "Left / Esc"; "Tab" ])
+  |> hints_of_bindings
+
 (* The scroll position is not here. It is not a key and it cannot be looked
    up, so it travels to the footer as its own argument
    ([Masc_tui_footer.line]'s [?position]) rather than as two spaces on the end

@@ -4116,8 +4116,8 @@ def assert_row_budgeted_surfaces(
     _base_path: str,
 ) -> None:
     # The startup splash draws the Dashboard's title row too, so the title
-    # alone does not say the briefing arrived; its first attention item does.
-    wait_for_output(process, master_fd, output, b"attention-1", start=0, timeout=10.0)
+    # alone does not say Home is ready; its continuation section does.
+    wait_for_output(process, master_fd, output, b"Continue", start=0, timeout=10.0)
 
     overview = resize_and_wait(
         process,
@@ -5577,17 +5577,12 @@ def board_detail_authority_interaction(
         try:
             open_loaded_board(process, master_fd, output, post_count=2)
             fixtures["/api/v1/board?sort_by=hot"] = late_list
-            # The Overview draws the new briefing's attention item, which is
-            # how the walk below knows the refresh reached it.
+            # Home retains the briefing's unreadable-source reason. Use it
+            # to observe the refresh without relying on removed incident cards.
             late_briefing = overview_event_briefing()
-            late_briefing["attention_queue"] = [
-                {
-                    "kind": "fixture_marker",
-                    "severity": "info",
-                    "summary": "late-list-applied",
-                    "target_type": "board",
-                }
-            ]
+            late_briefing["keepers_listing"] = {
+                "state": "unreadable", "detail": "late-list-applied"
+            }
             fixtures["/api/v1/dashboard/briefing"] = (200, late_briefing)
 
             read_available(master_fd, output)
@@ -12549,7 +12544,7 @@ def run_activity_logs_tab_pane_regression(executable: str) -> None:
                         columns=ACTING_PANE_THRESHOLD_COLUMNS,
                         needle=b"MASC Dashboard", final_cursor=b"\x1b[?25l")
         for title, ready, whole_row in (
-            (b"MASC Dashboard", b"D12 Goal", b"linked tasks 0/1 done"),
+            (b"MASC Dashboard", b"Continue", b"Choose a Keeper"),
             (b"MASC Work", b"D12 Goal", b"D12 Goal"),
             (b"MASC Usage", b"D12 provider", b"40%"),
         ):
@@ -15190,7 +15185,10 @@ def task_dispatch_interaction(requests: HttpRequests) -> Interaction:
             process, master_fd, output, b"feed: closed", start=0, timeout=10.0
         )
         tab_until(process, master_fd, output, b"MASC Dashboard")
-        send_and_wait(process, master_fd, output, b"i", b"\xe2\x80\xba to alpha")
+        send_and_wait(process, master_fd, output, b"i", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"alpha")
+        send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+        send_and_wait(process, master_fd, output, b"c", b"Esc:detail")
         send_and_wait(process, master_fd, output, b"/task Lanes surface", b"/task Lanes surface")
         os.write(master_fd, b"\r")
         chat_body = wait_for_http_request(
@@ -15297,7 +15295,7 @@ def unread_keeper_counted_interaction() -> Interaction:
             process,
             master_fd,
             output,
-            b"Keepers: 1 listed (1 state unreadable)",
+            b"1 Keeper states unreadable",
             start=0,
             timeout=10.0,
         )
@@ -15353,7 +15351,7 @@ def unlisted_keepers_named_interaction() -> Interaction:
             process,
             master_fd,
             output,
-            b"(EACCES)",
+            b"Keepers unlisted: EACCES",
             start=0,
             timeout=10.0,
         )
@@ -15400,10 +15398,9 @@ def paused_apart_from_stopped_interaction() -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        # The first screen counts listed Keepers without guessing state from
-        # recent tasks or folding paused/stopped into a synthetic idle count.
+        # Home no longer derives a fleet state summary from briefing rows.
         wait_for_output(
-            process, master_fd, output, b"Keepers: 5 listed", start=0, timeout=10.0
+            process, master_fd, output, b"Continue", start=0, timeout=10.0
         )
         frame = resize_and_wait(
             process, master_fd, output, rows=30, columns=120,
@@ -15425,36 +15422,16 @@ def attention_drawn_once_interaction() -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        wait_for_output(
-            process,
-            master_fd,
-            output,
-            b"sangsu has external attention",
-            start=0,
-            timeout=10.0,
-        )
-        wait_for_output(
-            process, master_fd, output, b"analyst needs operator", start=0, timeout=3.0
-        )
-        # One full repaint to count rows in: the ordinary paints are row
-        # diffs, so counting in the raw stream would count repaints.
+        wait_for_output(process, master_fd, output, b"Continue", start=0, timeout=10.0)
         frame = resize_and_wait(
-            process,
-            master_fd,
-            output,
-            rows=30,
-            columns=99,
-            needle=b"sangsu has external attention",
-            controls=(FULL_REDRAW,),
-            final_cursor=b"\x1b[?25l",
+            process, master_fd, output, rows=30, columns=99, needle=b"Continue",
+            controls=(FULL_REDRAW,), final_cursor=b"\x1b[?25l",
         )
-        repeated = frame.count(b"sangsu has external attention")
-        if repeated != 1:
-            raise AssertionError(
-                f"an attention fact on two briefing lists drew {repeated} rows: {frame!r}"
-            )
-        if frame.count(b"analyst needs operator") != 1:
-            raise AssertionError(f"the distinct item vanished: {frame!r}")
+        # Incident text is not an authoritative operator request. Neither
+        # duplicated nor distinct briefing incidents enter Home's decisions.
+        for label in (b"sangsu has external attention", b"analyst needs operator"):
+            if label in frame:
+                raise AssertionError(f"Home projected an incident as a decision: {frame!r}")
 
         os.write(master_fd, b"q")
 
@@ -19998,10 +19975,12 @@ def dashboard_usage_interaction(
     _base_path: str,
 ) -> None:
     wait_for_output(process, master_fd, output, b"MASC Dashboard", start=0, timeout=30.0)
-    wait_for_output(process, master_fd, output, b"actual 3 (reported)", start=0, timeout=10.0)
+    wait_for_output(process, master_fd, output, b"Continue", start=0, timeout=10.0)
     dashboard = unwrapped(screen_text(bytes(output)))
-    if b"Goals" not in dashboard or b"Work" not in dashboard or b"linked tasks 0/1 done" not in dashboard:
-        raise AssertionError(f"Dashboard summary missing: {dashboard!r}")
+    if b"Work:" not in dashboard or b"Continue" not in dashboard:
+        raise AssertionError(f"Dashboard entry missing: {dashboard!r}")
+    if b"actual 3 (reported)" in dashboard or b"linked tasks 0/1 done" in dashboard:
+        raise AssertionError(f"Dashboard duplicated Work detail: {dashboard!r}")
     print("DASHBOARD_PTY_SCREEN=" + json.dumps(dashboard.decode("utf-8", errors="replace")), flush=True)
     send_and_wait(process, master_fd, output, b"\t", b"Fixture Goal")
     send_and_wait(process, master_fd, output, b"\r", b"Actual: 3 (reported)")
@@ -20035,7 +20014,9 @@ def dashboard_usage_interaction(
         raise AssertionError(f"System is not on the main ring: {system!r}")
     send_and_wait(process, master_fd, output, b"A", b"MASC Activity")
     tab_until(process, master_fd, output, b"MASC Dashboard")
-    send_and_wait(process, master_fd, output, b"i", b"\xe2\x80\xba to alpha")
+    send_and_wait(process, master_fd, output, b"i", b"MASC Keepers")
+    select_keeper_row(process, master_fd, output, b"alpha")
+    send_and_wait(process, master_fd, output, b"c", b"Esc:list")
     send_and_wait(process, master_fd, output, b"/cost", b"/cost")
     send_and_wait(process, master_fd, output, b"\r", b"MASC Usage")
     os.write(master_fd, b"q")

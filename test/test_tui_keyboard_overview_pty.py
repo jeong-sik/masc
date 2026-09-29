@@ -143,10 +143,10 @@ def unreadable_keeper_listing_has_no_first_use_guide(executable: str) -> None:
     fixtures["/api/v1/dashboard/briefing"] = keyboard.unlisted_keepers_briefing()
 
     def interact(process, fd, _slave, output, _base):
-        keyboard.wait_for_output(process, fd, output, b"(EACCES)", start=0, timeout=10)
+        keyboard.wait_for_output(process, fd, output, b"Keepers unlisted: EACCES", start=0, timeout=10)
         frame = keyboard.resize_and_wait(
             process, fd, output, rows=32, columns=140,
-            needle=b"(EACCES)", controls=(keyboard.FULL_REDRAW,),
+            needle=b"Keepers unlisted: EACCES", controls=(keyboard.FULL_REDRAW,),
             final_cursor=b"\x1b[?25l",
         )
         visible = keyboard.screen_text(frame)

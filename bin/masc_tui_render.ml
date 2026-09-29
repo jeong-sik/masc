@@ -296,7 +296,11 @@ let render_overview (state : state) =
         ^ (match overview.ov_keeper_listing with
            | Keeper_snapshot_unread.Unreadable detail ->
                " · Keepers unlisted: " ^ Terminal_text.single_line detail
-           | Listed | Not_listed -> "")
+           | Not_listed -> " · Keepers not observed"
+           | Listed ->
+               match overview.ov_keeper_liveness.klc_unreadable with
+               | 0 -> ""
+               | count -> Printf.sprintf " · %d Keeper states unreadable" count)
   in
   let work =
     match state.task_flow, state.tasks_error with

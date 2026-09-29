@@ -11542,7 +11542,7 @@ def keeper_lanes_ia_interaction(
             output,
             rows=30,
             columns=220,
-            needle=b"Standalone LLM lanes",
+            needle="Lanes · observed ".encode(),
             controls=(FULL_REDRAW,),
         )
         # The resize clears the screen and repaints the lane list -- ten rows
@@ -11552,7 +11552,7 @@ def keeper_lanes_ia_interaction(
         # screen.
         drain_until_quiet(process, master_fd, output)
         lanes_plain = screen_text(bytes(output)).decode("utf-8")
-        if "MASC Lanes · Standalone" not in lanes_plain:
+        if "MASC Lanes" not in lanes_plain:
             raise AssertionError(
                 f"Lanes did not name the standalone scope: {lanes_plain!r}"
             )
@@ -11810,7 +11810,7 @@ def keeper_lanes_ia_interaction(
             master_fd,
             output,
             b"c",
-            b"Standalone lanes have no Keeper; use Keepers",
+            b"These lanes have no Keeper; use Keepers",
         )
         config = send_and_wait(
             process,
@@ -13560,7 +13560,7 @@ def runtime_surface_interaction(
             all_list = screen_text(bytes(output))
             if b"runtime-a" not in all_list:
                 raise AssertionError("Runtime catalog did not keep the selected runtime")
-            if b"Lanes (3 lanes, 5 slots)" not in all_list:
+            if b"Runtime lanes (3 lanes, 5 slots)" not in all_list:
                 raise AssertionError("Runtime catalog counted runtimes as lane slots")
             if b"ready / reachable" not in all_list:
                 raise AssertionError("Runtime catalog omitted independent probe status")
@@ -13594,7 +13594,7 @@ def runtime_surface_interaction(
             # /api/v1/dashboard/standalone-lanes body. Walk the full circuit
             # so the return leg is what gets asserted.
             send_and_wait(process, master_fd, output, b"p", b"MASC Lanes")
-            send_and_wait(process, master_fd, output, b"p", b"Lanes (3 lanes, 5 slots)")
+            send_and_wait(process, master_fd, output, b"p", b"Runtime lanes (3 lanes, 5 slots)")
 
             # The overflow scroll hint is unreachable with this fixture: it
             # renders only when candidates exceed the listing height, but the
@@ -18884,7 +18884,7 @@ def lanes_press_selects_the_lane_under_the_pointer(
         output,
         rows=30,
         columns=220,
-        needle=b"Standalone LLM lanes",
+        needle="Lanes · observed ".encode(),
         controls=(FULL_REDRAW,),
     )
     drain_until_quiet(process, master_fd, output)

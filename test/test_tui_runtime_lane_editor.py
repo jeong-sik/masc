@@ -301,7 +301,7 @@ def run(executable: str) -> None:
             process, fd, output, rows=30, columns=131,
             needle=b"MASC Config", controls=(h.FULL_REDRAW,),
         )
-        h.send_and_wait(process, fd, output, b"9", b"Lanes (3 lanes, 4 slots)")
+        h.send_and_wait(process, fd, output, b"9", b"Runtime lanes (3 lanes, 4 slots)")
 
         # [a] opens the name field; the letters typed after it are the name's.
         h.send_and_wait(process, fd, output, b"a", b"new lane name: _")
@@ -317,7 +317,7 @@ def run(executable: str) -> None:
         # A lane with no candidates yet ranks the catalog by id. The catalog
         # is read when [a] opens the field, so its rows can trail the header.
         h.wait_for_output(process, fd, output, b"> runtime-a", start=mark, timeout=5.0)
-        h.send_and_wait(process, fd, output, b"\r", b"Lanes (4 lanes, 5 slots)")
+        h.send_and_wait(process, fd, output, b"\r", b"Runtime lanes (4 lanes, 5 slots)")
 
         # The new lane's row is the fifth. [e] there names the lane it adds
         # to, which is what shows the cursor stands on it.
@@ -358,7 +358,7 @@ def run(executable: str) -> None:
             process, fd, output, b"D",
             f"press D again to remove lane {NEW_LANE}".encode(),
         )
-        h.send_and_wait(process, fd, output, b"D", b"Lanes (3 lanes, 4 slots)")
+        h.send_and_wait(process, fd, output, b"D", b"Runtime lanes (3 lanes, 4 slots)")
         h.read_available(fd, output)
         if NEW_LANE.encode() in h.screen_text(bytes(output)):
             raise AssertionError(f"{NEW_LANE} is still on screen after its removal")
@@ -917,7 +917,7 @@ def run_filter(executable: str) -> None:
             process, fd, output, rows=30, columns=131,
             needle=b"MASC Config", controls=(h.FULL_REDRAW,),
         )
-        h.send_and_wait(process, fd, output, b"9", b"Lanes (3 lanes, 4 slots)")
+        h.send_and_wait(process, fd, output, b"9", b"Runtime lanes (3 lanes, 4 slots)")
         # primary holds runtime-a and runtime-b, so the other three rank
         # first: c, d, e, then a, b.
         mark = mark_output(fd, output)

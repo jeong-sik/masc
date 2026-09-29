@@ -614,6 +614,7 @@ function resolvedOwner(row: Row, roster: readonly KeeperIdentity[]): string {
 export function InternalAgentsMonitor() {
   const [rows, setRows] = useState<Row[]>([])
   const [laneMatrix, setLaneMatrix] = useState<StandaloneLanesSnapshot | null>(null)
+  const [laneMatrixError, setLaneMatrixError] = useState<string | null>(null)
   const [filter, setFilter] = useState<Filter>('all')
   const [expanded, setExpanded] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -642,13 +643,15 @@ export function InternalAgentsMonitor() {
     if (fusion.status === 'fulfilled') {
       next.push(...fusion.value.runs.map(run => ({ source: 'fusion' as const, id: `fusion:${run.runId}`, run })))
     } else failures.push(`Fusion: ${String(fusion.reason)}`)
-    if (standalone.status === 'rejected') {
-      failures.push(isForbidden(standalone.reason)
-        ? 'Standalone lane matrix: Admin 권한 필요.'
-        : `Standalone lane matrix: ${String(standalone.reason)}`)
-    }
     if (version !== refreshVersion.current) return
-    if (standalone.status === 'fulfilled') setLaneMatrix(standalone.value)
+    if (standalone.status === 'fulfilled') {
+      setLaneMatrix(standalone.value)
+      setLaneMatrixError(null)
+    } else {
+      setLaneMatrixError(isForbidden(standalone.reason)
+        ? 'Lanes: Admin 권한 필요.'
+        : `Lanes: ${String(standalone.reason)}`)
+    }
     next.sort((a, b) => startedAt(b) - startedAt(a))
     setRows(next)
     setErrors(failures)
@@ -714,13 +717,15 @@ export function InternalAgentsMonitor() {
 
       <section class="grid gap-2" aria-labelledby="standalone-lane-matrix-title">
         <div class="flex flex-wrap items-end gap-2">
-          <h3 id="standalone-lane-matrix-title" class="text-sm font-semibold text-[var(--color-fg-primary)]">Standalone LLM lane matrix</h3>
+          <h3 id="standalone-lane-matrix-title" class="text-sm font-semibold text-[var(--color-fg-primary)]">Lanes</h3>
           <span class="rounded border border-[var(--color-accent)] px-1.5 py-0.5 text-3xs font-semibold text-[var(--color-accent)]">READ-ONLY OBSERVATION</span>
           <span class="text-3xs text-[var(--color-fg-muted)]">설정됐지만 현재 retained 관측이 없는 lane도 표시합니다.</span>
         </div>
+        ${laneMatrixError === null ? null : html`<div role="alert" class="rounded border border-[var(--status-warn)] p-2 text-xs text-[var(--status-warn)]">${laneMatrix === null ? '관측 불가' : 'STALE · 마지막 성공 관측을 표시합니다.'} · ${laneMatrixError}</div>`}
         ${laneMatrix === null
-          ? html`<div class="ia-empty">Standalone lane 관측 정보를 읽는 중이거나 사용할 수 없습니다.</div>`
+          ? html`<div class="ia-empty">Lane 관측 정보를 읽는 중이거나 사용할 수 없습니다.</div>`
           : html`
+            <div class="text-xs text-[var(--color-fg-muted)]">Observed · ${formatDateTimeKo(laneMatrix.observedAtUnix)}</div>
             ${laneMatrix.exactRunProjectionTruncated
               ? html`<div class="rounded border border-[var(--status-warn)] p-2 text-xs text-[var(--status-warn)]">Exact run window ${laneMatrix.exactRunProjectionCount} / ${laneMatrix.exactRunSourceTotal} · 표의 exact counts/p50는 최신 bounded window 기준입니다.</div>`
               : null}
@@ -750,8 +755,8 @@ export function InternalAgentsMonitor() {
                             : `JEV CONFIGURED · ${lane.jev.destinations.map(d => `${d.destinationUri} (${d.model})`).join(', ')}`
                     return html`
                       <tr key=${lane.laneId}>
-                        <td><strong>${lane.label}</strong>${lane.required ? html` <span class="dim">required</span>` : null}<br /><code class="mono dim">${lane.laneId}</code>${jevLabel === null ? null : html`<br /><span class="mono text-3xs">${jevLabel}</span>`}</td>
-                        <td class=${statusClass}><strong>${statusLabel}</strong>${lane.admissionError ? html`<br /><span class="text-3xs">${lane.admissionError}</span>` : null}</td>
+                        <td><strong>${lane.label}</strong>${lane.required ? html` <span class="dim">required</span>` : null}<br /><code class="mono dim">${lane.laneId}</code><p class="text-xs text-[var(--color-fg-muted)]">${lane.purpose}</p>${jevLabel === null ? null : html`<br /><span class="mono text-3xs">${jevLabel}</span>`}</td>
+                        <td class=${statusClass}><strong>${statusLabel}</strong><br /><span class="text-3xs">Config: ${lane.configurationState}</span>${lane.admissionError ? html`<br /><span class="text-3xs">${lane.admissionError}</span>` : null}</td>
                         <td class="mono">${lane.admittedSlots.length === 0 ? '—' : lane.admittedSlots.join(', ')}${lane.cliSlots.length === 0 ? null : html`<br /><span class="text-3xs text-[var(--color-text-tertiary)]">cli: ${lane.cliSlots.join(', ')}</span>`}${lane.droppedSlots.length === 0 ? null : html`<br /><span class="text-3xs text-[var(--color-danger)]">dropped: ${lane.droppedSlots.join(', ')}</span>`}</td>
                         <td class="r mono">${lane.runningCount}</td>
                         <td class="r mono">${lane.retainedRunCount}</td>

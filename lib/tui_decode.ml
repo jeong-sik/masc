@@ -2211,7 +2211,6 @@ let decode_verifier_unreconciled json =
 let decode_planning_goal json =
   let* pg_id = required_string_field json "id" in
   let* pg_title = required_string_field json "title" in
-  let* kr_portrait = Keeper_portrait_equipment.reading_of_json (member "portrait" json) in
   let* raw_phase = required_string_field json "phase" in
   let* pg_phase =
     match Goal_phase.parse raw_phase with
@@ -7086,6 +7085,7 @@ let decode_overview_goals json =
 
 let decode_keeper_runtime json =
   let* kr_name = required_string_field json "name" in
+  let* kr_portrait = Keeper_portrait_equipment.reading_of_json (member "portrait" json) in
   let* raw_health = required_string_field json "health" in
   let* kr_health =
     match keeper_health_of_string raw_health with

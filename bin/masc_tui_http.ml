@@ -537,8 +537,7 @@ type post_outcome =
   | Post_refused of string
   | Post_unanswered of string
 
-let post_json_outcome ~(host : string) ~(port : int) ~(path : string) ~(body : string) =
-  match http_post ~headers:(auth_headers ()) ~host ~port ~path ~body with
+let mutation_outcome = function
   | Error detail -> Post_unanswered detail
   | Ok (status_code, response) when status_code >= 400 && status_code < 500 ->
     (match decode_json ~allow_empty:true ~status_code ~body:response with
@@ -548,6 +547,42 @@ let post_json_outcome ~(host : string) ~(port : int) ~(path : string) ~(body : s
     (match decode_json ~allow_empty:false ~status_code ~body:response with
      | Ok json -> Post_answered json
      | Error message -> Post_unanswered message)
+
+let post_json_outcome ~(host : string) ~(port : int) ~(path : string) ~(body : string) =
+  http_post ~headers:(auth_headers ()) ~host ~port ~path ~body
+  |> mutation_outcome
+
+let http_delete ~(host : string) ~(port : int) ~(path : string) =
+  let url = url_of ~host ~port ~path in
+  timed ~verb:"DELETE" ~path @@ fun () ->
+  with_credential_refresh @@ fun () ->
+  match Masc_http_client.delete_sync ?clock:(request_clock ())
+          ~timeout_sec:(request_timeout_sec ()) ~url ~headers:(auth_headers ()) () with
+  | Ok answer -> Ok answer
+  | Error detail ->
+      Error (Masc.Tui_decode.http_transport_error ~verb:"DELETE" ~url ~detail)
+
+let list_play_invites ~host ~port =
+  get_json ~host ~port ~path:"/api/v1/play/invites"
+
+let issue_play_invite ~host ~port ~name ~hours =
+  post_json_outcome ~host ~port ~path:"/api/v1/play/invites"
+    ~body:(Yojson.Safe.to_string
+      (`Assoc [ "name", `String name; "hours", `Int hours ]))
+
+type revoke_outcome = Revoke_absent | Revoke_other of post_outcome
+
+let revoke_play_invite ~host ~port ~name =
+  let response =
+    http_delete ~host ~port
+      ~path:("/api/v1/play/invites/" ^ percent_encode_path_segment name)
+  in
+  match response with
+  | Ok (404, body) when Masc.Tui_decode.play_invite_absent_body body ->
+      Revoke_absent
+  | Ok (status_code, body) when status_code >= 500 ->
+      Revoke_other (Post_unanswered (Masc.Tui_decode.play_revoke_http_error ~status_code ~body))
+  | answer -> Revoke_other (mutation_outcome answer)
 
 let post_json ~(host : string) ~(port : int) ~(path : string) ~(body : string) : (Yojson.Safe.t, string) result =
   match http_post ~headers:(auth_headers ()) ~host ~port ~path ~body with

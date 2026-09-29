@@ -255,7 +255,21 @@ let test_fetch () =
           | Error e -> Alcotest.fail ("fetch failed: " ^ e)
           | Ok remotes ->
               Alcotest.(check bool) "has origin/main" true
-                (List.mem "origin/main" remotes)))
+                (List.mem "origin/main" remotes);
+              let common_dir = Filename.concat dest ".git" in
+              let oid =
+                match Repo_git.run_git ~cwd:dest [ "rev-parse"; "origin/main" ] with
+                | Ok [ oid ] -> oid
+                | _ -> Alcotest.fail "origin/main OID unavailable"
+              in
+              (match Repo_fetch_observation.read ~common_dir with
+               | Some receipt ->
+                 Alcotest.(check string) "no-op fetch receipt ref" "origin/main" receipt.target_ref;
+                 Alcotest.(check string) "no-op fetch receipt OID" oid receipt.oid;
+                 Alcotest.(check string) "no-op fetch receipt URL" source receipt.origin_url;
+                 Alcotest.(check bool) "recorded completion time" true
+                   (receipt.observed_at_unix > 1600000000)
+               | None -> Alcotest.fail "no-op fetch did not write a receipt")))
 
 let test_get_recent_commits () =
   with_temp_dir (fun tmp ->

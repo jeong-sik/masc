@@ -84,10 +84,17 @@ def main(executable: str, captures: Path | None) -> None:
         if b"Tab:next pane" not in worker_screen or b"> World observer" not in worker_screen:
             raise AssertionError("Workers compact view lost its pane or selected worker guidance")
         print("TUI_CAPTURE lane-addons Workers compact " + repr(worker_screen), flush=True)
-        terminal.resize_and_wait(process, master, output, rows=24, columns=80,
+        resized = terminal.resize_and_wait(process, master, output, rows=24, columns=80,
             needle=b"Installed Add-ons", controls=(terminal.FULL_REDRAW,))
-        narrow_output = bytes(output)
-        needle_at = narrow_output.rfind(b"Installed Add-ons")
+        resize_at = len(output) - len(resized)
+        needle_at = output.find(b"Installed Add-ons", resize_at)
+        # The resize helper stops at the needle. Finish that frame even when
+        # the same read also brings the beginning of another redraw.
+        needle_end = needle_at + len(b"Installed Add-ons")
+        terminal.wait_for_output(process, master, output, terminal.FRAME_END,
+            start=needle_end, timeout=3.0)
+        frame_end = output.find(terminal.FRAME_END, needle_end) + len(terminal.FRAME_END)
+        narrow_output = bytes(output[:frame_end])
         frame_at = narrow_output.rfind(terminal.FRAME_START, 0, needle_at)
         if frame_at < 0:
             raise AssertionError("80-column Lane frame start was not captured")

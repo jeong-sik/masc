@@ -84,6 +84,11 @@ module For_testing : sig
   val runtime_error_to_core_error : Runtime_antigravity.error -> Agent_core.Error.t
   (** The Agent Core error a runtime error becomes. *)
 
+  val recovery_failure_of_runtime_error
+    :  Runtime_antigravity.error
+    -> Keeper_official_client_session_store.recovery_failure
+  (** The durable recovery failure a runtime error settles a claim with. *)
+
   val report_stream_usage
     :  turn_count:int
     -> position:Keeper_usage_resolution.cumulative_position

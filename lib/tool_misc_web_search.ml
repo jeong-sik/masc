@@ -67,6 +67,7 @@ type simulated_provider_outcome =
   | `Empty
   | `Hits of (string * string * string) list
   | `Grounded of (string * string * string list) list
+  | `Brave_body of string
   ]
 
 let whitespace_re = Re.Pcre.re "[ \t\r\n]+" |> Re.compile
@@ -154,9 +155,27 @@ let parse_searxng_json payload =
       | Some (`List (_ :: _)) -> Error (Server "search engines unavailable")
       | Some _ -> Error (Parse "provider unresponsive_engines field is not an array")
 
+(* Brave's Web Search 200 body declares [web] as a nullable object; only
+   inside that object is [results] required. A search envelope
+   ([type = "search"]) whose [web] is null or absent is Brave's answer for a
+   query with no web hits, so it is an empty answer. Anything else keeps the
+   #39802 rule: a body we cannot read as that envelope is a failure, never a
+   cached no-hit answer.
+   https://api-dashboard.search.brave.com/api-reference/web/search/get *)
 let parse_brave_json payload =
-  parse_json_search_results ~results_path:["web"; "results"]
-    ~title_field:"title" ~snippet_field:"description" payload
+  match Yojson.Safe.from_string payload with
+  | exception Yojson.Json_error _ -> Error (Parse "provider returned invalid JSON")
+  | `Assoc _ as root ->
+      (match Json_util.assoc_member_opt "web" root with
+       | Some (`Assoc _) ->
+           parse_json_search_results ~results_path:["web"; "results"]
+             ~title_field:"title" ~snippet_field:"description" payload
+       | None | Some `Null ->
+           (match Json_util.assoc_member_opt "type" root with
+            | Some (`String "search") -> Ok []
+            | _ -> Error (Parse "provider response is missing its result array"))
+       | Some _ -> Error (Parse "provider web field is not an object"))
+  | _ -> Error (Parse "provider response is not a JSON object")
 
 let parse_tavily_json payload =
   parse_json_search_results ~results_path:["results"]
@@ -446,6 +465,16 @@ let fetch_searxng ~timeout_sec ~query =
           Error (Server (Printf.sprintf "search endpoint returned HTTP %d" status))
       | Ok (None, _) -> Error (Server "search endpoint returned no HTTP status")
 
+(* One path from a Brave 200 body to a response, shared by [fetch_brave] and
+   the simulator's [`Brave_body] outcome so tests exercise the real parse. *)
+let brave_response_of_body ~search_url ~limit payload =
+  let* parsed = parse_brave_json payload in
+  let hits =
+    parsed |> take_results limit
+    |> normalize_hits ~source:(provider_to_string Brave)
+  in
+  Ok { engine = provider_to_string Brave; search_url; hits }
+
 let fetch_brave ~timeout_sec ~query ~limit =
   match env_value "BRAVE_SEARCH_API_KEY" with
   | None -> Error (Config "missing BRAVE_SEARCH_API_KEY")
@@ -464,13 +493,7 @@ let fetch_brave ~timeout_sec ~query ~limit =
       with
       | Error detail ->
           Error (Transport (endpoint_error ~fallback:"provider request failed" detail))
-      | Ok (Some 200, payload) ->
-          let* parsed = parse_brave_json payload in
-          let hits =
-            parsed |> take_results limit
-            |> normalize_hits ~source:(provider_to_string Brave)
-          in
-          Ok { engine = provider_to_string Brave; search_url; hits }
+      | Ok (Some 200, payload) -> brave_response_of_body ~search_url ~limit payload
       | Ok (Some status, _) -> Error (Server (Printf.sprintf "provider returned HTTP %d" status))
       | Ok (None, _) -> Error (Server "provider returned no HTTP status")
 
@@ -803,6 +826,11 @@ let simulated_search_impl ~outcomes ~query:_ ~limit =
           ; items = List.map (fun (url, title, snippets) ->
                 { source_url = url; source_title = title; snippets }) entries
           })
+    | `Brave_body body ->
+        brave_response_of_body ~search_url:("test://" ^ provider_name) ~limit body
+        |> Result.map (fun response -> Hits response)
+        |> Result.map_error (fun error ->
+            provider_name ^ ": " ^ provider_error_to_string error)
     | `Error message -> Error (provider_name ^ ": " ^ message))
 
 let with_simulated_search_for_test ~outcomes f =

@@ -166,6 +166,102 @@ let test_worker_pays_once_with_isolated_inputs_and_integer_evidence () =
   let decoded = Candle_payment.of_yojson (Candle_payment.to_yojson p) |> ok in
   check bool "ledger decode retains the issued payment and its evidence" true (decoded = p)
 
+let test_mixed_relations_pay_only_the_related_keeper () =
+  with_workspace @@ fun env config ->
+  let waiting = prepared ~due_date:None config "mixed-relations" in
+  let calls = ref [] in
+  let relation title = if title = "Test the ledger" then A.Unrelated else A.Related in
+  Eio.Switch.run (fun sw ->
+    Candle_payout_worker.start ~sw ~config ~appraise:(make_runner ~relation calls);
+    await env "mixed-related payment" (fun () -> paid config waiting.goal_id <> []);
+    idle env);
+  let weights_requests = List.filter_map (fun (_, request) -> match request with
+    | A.Weights _ -> Some request
+    | A.Grade _ | A.Relation _ -> None) !calls in
+  (match weights_requests with
+   | [A.Weights weights as request] ->
+     check (list string) "unrelated and external Keepers never reach weights"
+       ["keeper-a"] weights.keepers;
+     check (list string) "weights contains only the related Keeper's Task"
+       ["task-a"] (List.map (fun (task : A.task) -> task.task_id) weights.tasks);
+     let input = A.input request in
+     check (list (pair string string)) "the actual model input excludes unrelated and external tasks"
+       ["Store the ledger","keeper-a"]
+       Yojson.Safe.Util.(input |> member "tasks" |> to_list
+         |> List.map (fun task -> (task |> member "title" |> to_string),
+             (task |> member "assignee" |> to_string)));
+     let schema = Yojson.Safe.Util.(A.schema request |> member "properties" |> member "weights") in
+     check (list string) "only the related Keeper is a required output property"
+       ["keeper-a"] Yojson.Safe.Util.(schema |> member "required" |> to_list |> List.map to_string);
+     check (list string) "unrelated Keeper has no output-schema property"
+       ["keeper-a"] Yojson.Safe.Util.(schema |> member "properties" |> to_assoc |> List.map fst);
+     check int "the output schema uses the configured weight maximum" 10
+       Yojson.Safe.Util.(schema |> member "properties" |> member "keeper-a" |> member "maximum" |> to_int);
+     check bool "the model cannot add an unrelated output property" false
+       Yojson.Safe.Util.(schema |> member "additionalProperties" |> to_bool)
+   | _ -> fail "mixed relations did not make exactly one weights request");
+  let payment = one_payment config waiting.goal_id in
+  check bool "the receipt keeps all actual relation decisions" true
+    (List.map (fun (r : A.task_relation) -> r.task_id,r.relation) payment.relations
+     = ["task-a",A.Related;"task-b",A.Unrelated;"external",A.Related]);
+  check (list (pair string int)) "only related Keeper work earns the configured amount"
+    ["keeper-a",3001]
+    (List.map (fun (a : Candle_payment.allocation) -> a.keeper,a.amount_milli) payment.allocations);
+  let balance = match Candle_balance.of_events (events config) with
+    | Ok value -> value | Error error -> fail (Candle_balance.error_to_string error) in
+  List.iter (fun (keeper, expected) ->
+    check int (keeper ^ " receives only its related contribution") expected
+      (Candle_balance.balance balance ~keeper))
+    ["keeper-a",3001;"keeper-b",0;"external-operator",0]
+
+let test_malformed_weights_keep_the_obligation_unpaid () =
+  let cases =
+    [ "negative", (fun _ -> ["keeper-a",-1;"keeper-b",1])
+    ; "above configured maximum", (fun maximum -> ["keeper-a",maximum + 1;"keeper-b",1])
+    ; "all zero", (fun _ -> ["keeper-a",0;"keeper-b",0])
+    ; "duplicate keeper", (fun _ -> ["keeper-a",1;"keeper-a",1;"keeper-b",1])
+    ; "missing keeper", (fun _ -> ["keeper-a",1]) ] in
+  List.iter (fun (label, malformed) ->
+    with_workspace @@ fun _env config ->
+    let waiting = prepared ~due_date:None config "malformed-weights" in
+    let before = events config in
+    let ledger_path = Candle_ledger.path ~base_path:config.base_path in
+    let before_bytes = In_channel.with_open_bin ledger_path In_channel.input_all in
+    let calls = ref [] in
+    let appraise ~identity request = match request with
+      | A.Weights weights ->
+        calls := !calls @ [identity,request];
+        (* Production [Candle_appraise.call] encodes and decodes this answer,
+           including duplicate object keys, before it can settle the debt. *)
+        Ok {A.decision=A.Weights_decided (malformed weights.weight_max);
+            trace=trace "malformed-weights"}
+      | A.Grade _ | A.Relation _ -> make_runner calls ~identity request in
+    (match drain config appraise with
+     | [Candle_appraise.Rejected rejected] ->
+       check string (label ^ ": refusal names the original Goal") waiting.goal_id rejected.goal_id;
+       check bool (label ^ ": refusal retains a reason") true (rejected.detail <> "")
+     | _ -> fail (label ^ ": malformed model weights were not rejected by appraisal"));
+    check (list string) (label ^ ": rejection reaches the real weights boundary")
+      ["grade";"relation";"relation";"relation";"weights"]
+      (List.map (fun (_, request) -> A.stage request) !calls);
+    check bool (label ^ ": durable facts are unchanged") true (events config = before);
+    check string (label ^ ": rejection appends no ledger bytes") before_bytes
+      (In_channel.with_open_bin ledger_path In_channel.input_all);
+    check bool (label ^ ": the exact confirmed obligation remains pending") true
+      (Candle_payout.waiting (events config) = [waiting]);
+    check int (label ^ ": no Paid receipt is minted") 0 (List.length (paid config waiting.goal_id));
+    let balance = match Candle_balance.of_events (events config) with
+      | Ok value -> value | Error error -> fail (Candle_balance.error_to_string error) in
+    List.iter (fun keeper -> check int (label ^ ": no credit for " ^ keeper) 0
+      (Candle_balance.balance balance ~keeper)) ["keeper-a";"keeper-b"];
+    ignore (drain config (make_runner calls));
+    let payment = one_payment config waiting.goal_id in
+    check string (label ^ ": a valid answer settles the retained verifier run")
+      waiting.verification_run_id payment.identity.verification_run_id;
+    check (list (pair string int)) (label ^ ": only the valid successor issues money")
+      ["keeper-a",2001;"keeper-b",1000]
+      (List.map (fun (a : Candle_payment.allocation) -> a.keeper,a.amount_milli) payment.allocations)) cases
+
 let test_invalid_weights_wait_for_an_event_not_a_pulse () =
   with_workspace @@ fun env config ->
   ignore (prepared config "rejected");
@@ -469,6 +565,8 @@ let () =
   run "candle_appraisal_flow"
     ["payout",
       [test_case "worker pays once with isolated judgments and arithmetic" `Quick test_worker_pays_once_with_isolated_inputs_and_integer_evidence
+      ;test_case "mixed relations pay only the related Keeper" `Quick test_mixed_relations_pay_only_the_related_keeper
+      ;test_case "malformed weights retain the unpaid obligation" `Quick test_malformed_weights_keep_the_obligation_unpaid
       ;test_case "invalid weights wait for an event, not a pulse" `Quick test_invalid_weights_wait_for_an_event_not_a_pulse
       ;test_case "provider refusal waits for an event" `Quick test_refused_transport_waits_for_an_event
       ;test_case "pulse retries unavailable transport" `Quick test_transport_recovery_is_retried_by_pulse

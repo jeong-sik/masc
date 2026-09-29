@@ -148,7 +148,8 @@ let test_related_ledger_context_is_trimmed_with_its_neighbor () =
     | [row] -> row
     | _ -> Alcotest.fail "one changed fact must produce exactly one request row" in
   let neighbor fact =
-    `Assoc ["fact", `Assoc (fact_fields fact); "claim", `String fact.claim] in
+    `Assoc ["id", `String (Request.fact_id fact.fact);
+            "fact", `Assoc (fact_fields fact); "claim", `String fact.claim] in
   let full = prepare ~limit:100_000 ~neighbors:3 in
   let full_row = only_row full in
   Alcotest.check json "both source paths and the conflicting fact remain attributed"

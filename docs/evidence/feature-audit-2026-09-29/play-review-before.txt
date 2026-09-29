@@ -1,0 +1,58 @@
+source_ref: 0ef4249370
+✔ a failed seat read retries without a new move and restores playable controls (5.299667ms)
+✔ a frame rejected for wrong byte count is fetched again before acknowledging its mark (0.990333ms)
+✔ a frame rejected for invalid base64 is fetched again before acknowledging its mark (0.837166ms)
+✔ a failed seat request after an input retries while the activity feed is unchanged (1.580125ms)
+✔ eject clears the last picture and the game pad (0.956209ms)
+✔ no_machine hides the old pad while seat is unavailable and a loaded game restores controls (0.92975ms)
+✔ a malformed frame does not prevent new activity from refreshing the controller (0.743125ms)
+✔ choosing a handoff discovers an invite added while the machine stays idle (0.858375ms)
+✔ revoked access keeps controls disabled and stops sending moves (0.735709ms)
+✖ an older seat response cannot overwrite a newer poll result (1.745083ms)
+✖ reopening a focused handoff selector refreshes new invites once per opening (1.169833ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 9
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 103.859541
+
+✖ failing tests:
+
+test at ../../../../../../../../private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-play-before-ro540s52/test/test_play_page_client.cjs:276:1
+✖ an older seat response cannot overwrite a newer poll result (1.745083ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + '지금 켜진 게임이 없어요.'
+  - 'operator 님 차례예요'
+
+      at TestContext.<anonymous> (/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-play-before-ro540s52/test/test_play_page_client.cjs:295:10)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '지금 켜진 게임이 없어요.',
+    expected: 'operator 님 차례예요',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../../../../../private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-play-before-ro540s52/test/test_play_page_client.cjs:302:1
+✖ reopening a focused handoff selector refreshes new invites once per opening (1.169833ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  false !== true
+
+      at TestContext.<anonymous> (/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-play-before-ro540s52/test/test_play_page_client.cjs:323:10)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

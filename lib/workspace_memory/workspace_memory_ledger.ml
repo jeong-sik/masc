@@ -317,6 +317,40 @@ let save ~base_path t =
        | Eio.Cancel.Cancelled _ as exn -> Printexc.raise_with_backtrace exn failure.backtrace
        | _ -> Error (Fs_compat.atomic_replace_failure_to_string failure)))
 
+type observation =
+  | Missing
+  | Unavailable of string
+  | Available of
+      { ledger_sha256 : string
+      ; claim_count : int
+      ; conflict_count : int
+      ; classified_count : int
+      }
+
+let observe ~base_path =
+  let ledger_path = path ~base_path in
+  try
+    match Unix.lstat ledger_path with
+    | { Unix.st_kind = Unix.S_REG; _ } ->
+      let stored = io (fun () ->
+        let text = Fs_compat.load_file ledger_path in
+        let* json = try Ok (Yojson.Safe.from_string text)
+          with Yojson.Json_error detail -> Error (ledger_path ^ ": " ^ detail) in
+        of_json json |> Result.map_error (fun detail -> ledger_path ^ ": " ^ detail)) in
+      (match stored with
+       | Error detail -> Unavailable detail
+       | Ok ledger ->
+         let ledger_sha256 = Digestif.SHA256.(digest_string
+           (Yojson.Safe.to_string (to_json ledger)) |> to_hex) in
+         Available { ledger_sha256; claim_count = List.length (claims ledger);
+                     conflict_count = List.length (conflicts ledger);
+                     classified_count = List.length (dispositions ledger) })
+    | _ -> Unavailable (ledger_path ^ ": not a regular file")
+  with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> Missing
+  | Unix.Unix_error (error, fn, arg) ->
+    Unavailable (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message error))
+
 (* Reconciliation *)
 
 let claim_sha256 claim = Digestif.SHA256.(digest_string claim |> to_hex)

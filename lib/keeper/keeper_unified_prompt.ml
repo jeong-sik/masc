@@ -1457,13 +1457,15 @@ let previous_turn_stop_lines (stop : Keeper_turn_checkpoint_reason.t option) :
       | Keeper_turn_checkpoint_reason.Durable_stimulus_arrived ) -> []
 
 let format_workspace_memory_observation = function
-  | Workspace_memory_publication.Missing -> None
-  | Workspace_memory_publication.Unavailable _ ->
+  | Workspace_memory_ledger.Missing -> None
+  | Workspace_memory_ledger.Unavailable _ ->
     Some (render_fragment Prompt_names.keeper_context_workspace_memory_unavailable [] ^ "\n\n")
-  | Workspace_memory_publication.Available descriptor ->
+  | Workspace_memory_ledger.Available descriptor ->
     Some (render_fragment Prompt_names.keeper_context_workspace_memory_available
-      [ "proposal_id", descriptor.proposal_id;
-        "context_sha256", descriptor.context_sha256 ] ^ "\n\n")
+      [ "ledger_sha256", descriptor.ledger_sha256;
+        "claim_count", string_of_int descriptor.claim_count;
+        "conflict_count", string_of_int descriptor.conflict_count;
+        "classified_count", string_of_int descriptor.classified_count ] ^ "\n\n")
 
 let build_prompt_internal
     ~(turn_decision : Keeper_world_observation.keeper_cycle_decision option)
@@ -1473,7 +1475,7 @@ let build_prompt_internal
         (string * Keeper_skill_catalog.exact_surface list) list = [])
     ?(active_goal_summaries : (goal_summary list, Goal_store.unavailable) result option)
     ?(lane_updates = Ok (`List []))
-    ?(workspace_memory = Workspace_memory_publication.Missing)
+    ?(workspace_memory = Workspace_memory_ledger.Missing)
     ?(repository_freshness : Keeper_sandbox_control.freshness_row list = [])
     ?(context_budget_bytes : int option)
     ~(observation : Keeper_world_observation.world_observation)

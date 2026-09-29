@@ -7,6 +7,7 @@ module Types = Masc.Keeper_memory_os_types
 module Runs = Masc.Exact_lane_run_registry
 
 let require = function Ok value -> value | Error detail -> Alcotest.fail detail
+let json = Alcotest.testable Yojson.Safe.pp Yojson.Safe.equal
 let field name json = Yojson.Safe.Util.member name json
 let string = Yojson.Safe.Util.to_string
 
@@ -104,28 +105,28 @@ let test_owner_switch_liveness () = with_base (fun base_path clock ->
   | Ok () -> ()
   | Error `Timeout -> Alcotest.fail "curator owner held its switch open")
 
-let test_cli_answer_uses_same_decision_validation () =
-  Exact_output_fixture.with_official_client_runtimes (fun () ->
-    with_base (fun base_path _clock ->
-      let pending : Ledger.pending_fact =
-        { fact = Ledger.Ordinary { keeper_id = "writer";
-            claim_sha256 = Digestif.SHA256.(digest_string "Observation" |> to_hex) };
-          claim = "Observation" } in
-      let selected = [pending] in
-      let resolved = { Runtime_exact_output_registry.selected_slots = [];
-                       cli_slots = [Exact_output_fixture.cli_primary_runtime] } in
-      let answering ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
-        Ok (Yojson.Safe.to_string (answer selected)) in
-      (match Worker.For_testing.execute ~cli_runner:answering ~base_path ~resolved
-         ~rendered_prompt:"curate" ~selected ~ledger:Ledger.empty with
-       | Ok (_, runtime_id) -> Alcotest.(check string) "CLI answered"
-           Exact_output_fixture.cli_primary_runtime runtime_id
-       | Error detail -> Alcotest.fail detail);
-      let invalid ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ = Ok "{}" in
-      match Worker.For_testing.execute ~cli_runner:invalid ~base_path ~resolved
-        ~rendered_prompt:"curate" ~selected ~ledger:Ledger.empty with
-      | Ok _ -> Alcotest.fail "invalid CLI decision was accepted"
-      | Error _ -> ()))
+let test_missing_keeper_directory_preserves_existing_ledger () = with_base (fun base_path clock ->
+  let selected : Ledger.pending_fact list =
+    [{ fact = Ledger.Ordinary { keeper_id = "writer"; claim_sha256 = String.make 64 'a' };
+       claim = "Retained fact" }] in
+  let assignments : Ledger.assignment list =
+    [{ fact = (List.hd selected).fact; decision = Ledger.Create_claim "Retained fact" }] in
+  let ledger = match Ledger.apply Ledger.empty ~selected assignments with
+    | Ok ledger -> ledger
+    | Error error -> Alcotest.fail (Ledger.apply_error_to_string error) in
+  Ledger.save ~base_path ledger |> require;
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  Alcotest.(check bool) "fixture has no Keeper directory" false (Sys.file_exists keepers_dir);
+  let execute ~rendered_prompt:_ ~selected:_ ~ledger:_ =
+    Alcotest.fail "missing Keeper directory reached a model" in
+  Eio.Switch.run (fun sw ->
+    Worker.For_testing.start ~sw ~base_path ~max_input_bytes:8192 ~execute;
+    await_idle ~clock ~base_path;
+    Alcotest.(check bool) "owner did not fabricate the missing directory" false
+      (Sys.file_exists keepers_dir);
+    Alcotest.check json "previous ledger remains unchanged"
+      (Ledger.to_json ledger) (Ledger.to_json (Ledger.load ~base_path |> require));
+    Worker.For_testing.stop ~base_path))
 
 let () = Alcotest.run "workspace curator lane"
   [ "changed-fact ledger",
@@ -135,6 +136,6 @@ let () = Alcotest.run "workspace curator lane"
         test_failure_preserves_ledger_and_later_change_retries
     ; Alcotest.test_case "invalid answer cannot be saved" `Quick
         test_invalid_model_answer_is_not_saved
-    ; Alcotest.test_case "owner switch closes" `Quick test_owner_switch_liveness
-    ; Alcotest.test_case "CLI answer uses decision validation" `Quick
-        test_cli_answer_uses_same_decision_validation ] ]
+    ; Alcotest.test_case "missing Keeper directory preserves ledger" `Quick
+        test_missing_keeper_directory_preserves_existing_ledger
+    ; Alcotest.test_case "owner switch closes" `Quick test_owner_switch_liveness ] ]

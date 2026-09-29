@@ -1405,30 +1405,27 @@ let test_workspace_memory_discovery_is_ephemeral () =
   let base_path = Filename.temp_dir "workspace-memory-prompt" "" in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
   let require = function Ok value -> value | Error detail -> fail detail in
-  let inventory = Masc.Workspace_memory_context.collect ~base_path |> require in
-  let envelope = Masc.Workspace_memory_context.proposal_json inventory
-    (`Assoc ["shared_claims", `List []; "conflicts", `List []; "excluded", `List []]) in
-  let proposal_id = match Masc.Workspace_memory_proposal.submit ~base_path envelope with
-    | Ok (id, _) -> id
-    | Error (Invalid detail | Unavailable detail) -> fail detail in
-  Masc.Workspace_memory_publication.publish ~base_path ~proposal_id |> require;
-  let workspace_memory = Masc.Workspace_memory_publication.observe ~base_path in
+  Masc.Workspace_memory_ledger.save ~base_path Masc.Workspace_memory_ledger.empty |> require;
+  let workspace_memory = Masc.Workspace_memory_ledger.observe ~base_path in
+  let ledger_sha256 = match workspace_memory with
+    | Masc.Workspace_memory_ledger.Available row -> row.ledger_sha256
+    | _ -> fail "saved ledger is unavailable" in
   let prompt = build_prompt ~workspace_memory ~meta:minimal_meta base_observation in
-  check bool "exact proposal discoverable in this turn's world frame" true
-    (Astring.String.is_infix ~affix:proposal_id prompt.world_state);
+  check bool "ledger digest discoverable in this turn's world frame" true
+    (Astring.String.is_infix ~affix:ledger_sha256 prompt.world_state);
   check bool "discovery never enters the durable user message" false
-    (Astring.String.is_infix ~affix:proposal_id prompt.user_message);
+    (Astring.String.is_infix ~affix:ledger_sha256 prompt.user_message);
   let preview = Masc.Keeper_unified_prompt.build_prompt_preview
     ~workspace_memory
     ~current_task:Masc.Keeper_world_observation_inputs.No_current_task
     ~observation:base_observation () in
   check bool "preview renders the same published read target" true
-    (Astring.String.is_infix ~affix:proposal_id preview.world_state);
+    (Astring.String.is_infix ~affix:ledger_sha256 preview.world_state);
   let later = build_prompt ~workspace_memory ~meta:minimal_meta base_observation in
   check string "repeated observation does not accumulate history" prompt.user_message later.user_message;
-  let absent = build_prompt ~workspace_memory:Masc.Workspace_memory_publication.Missing ~meta:minimal_meta base_observation in
+  let absent = build_prompt ~workspace_memory:Masc.Workspace_memory_ledger.Missing ~meta:minimal_meta base_observation in
   check bool "missing publication does not invent a read target" false
-    (Astring.String.is_infix ~affix:proposal_id absent.world_state))
+    (Astring.String.is_infix ~affix:ledger_sha256 absent.world_state))
 ;;
 
 let () =

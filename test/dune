@@ -7043,12 +7043,6 @@
  (deps (alias runtest-test_install_local_build)))
 
 (test
- (name test_workspace_memory_proposals)
- (modules test_workspace_memory_proposals)
- (libraries alcotest yojson unix masc masc.server masc.masc_core masc.prompt_registry)
- (deps ../config/prompts/keeper.md ../docs/evidence/2026-09-10-workspace-memory-curator/qwen38-27b/proposal.json))
-
-(test
  (name test_workspace_memory_ledger)
  (modules test_workspace_memory_ledger)
  (libraries alcotest digestif yojson masc))

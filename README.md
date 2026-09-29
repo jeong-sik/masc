@@ -184,7 +184,7 @@ The fresh quickstart configuration uses `OLLAMA_CLOUD_API_KEY`.
 | **Task** | A unit of work with a claim, execution state and verification evidence; it can stand alone or belong to a Goal |
 | **Board** | Posts, comments and mentions that let agents and people discuss work |
 | **Memory** | Keeper context and stored knowledge that you can inspect while following its work |
-| **Gate** | An approval workflow for specific actions, with model judgement or a person's decision |
+| **Tool approvals** | Decide whether a call requiring approval, such as a change to an external service, may run |
 
 Start with a concrete outcome: what should exist when the work is finished, and
 how it can be checked. Ask a Keeper to record it as a Goal with a metric and
@@ -293,7 +293,9 @@ setup can select another sandbox backend.
 New sandbox workspaces start empty: a repository listed in the TUI is not
 automatically mounted into a Keeper’s sandbox. See the
 [Keeper playground](docs/KEEPER-USER-MANUAL.md#the-work-surface-playground).
-Approval queues can require your response before work continues.
+Calls requiring approval are judged by a model or approved or rejected by a
+person, according to the configured policy. Calls needing a human decision
+appear in the approval queue.
 The [Keeper manual](docs/KEEPER-USER-MANUAL.md) and
 [file contract](docs/KEEPER-FILE-MODEL.md) explain these settings.
 
@@ -327,7 +329,7 @@ Keeper, use its lifecycle controls in the Keepers view before closing the UI.
 
 - **The browser dashboard is experimental and incomplete.** Use the TUI for
   day-to-day operation; some TUI features are unavailable in the browser.
-- **Local and trusted.** Gate approvals and sandboxes constrain specific actions;
+- **Local and trusted.** Tool approvals and sandboxes constrain specific actions;
   they do not make unattended operation safe in every situation. Loopback defaults
   are not a remote deployment policy.
 - **Concurrent edits can conflict.** Shared claims and records do not serialize

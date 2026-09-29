@@ -313,24 +313,22 @@ let to_shell_ir_unvalidated
       { source; cwd; timeout_sec = _; intent = _ }
   =
   (* RFC execute-boundary-is-the-sandbox §4.1. An argv whose program is a
-     shell with [-c] is a command line wearing an argv costume: it normalises
-     to the command form and takes the same shell, so there is no second way to reach
-     one. Nothing is classified here any more. Whether the subset can
+     shell with [-c] is a command line wearing an argv costume: it takes the
+     same shell path the [command] field does, so there is no second way to
+     reach one. Nothing is classified here any more. Whether the subset can
      represent the text decided which of two execution models it got, and that
      decision is now the field's, so the classifier speaks as a judge
-     (telemetry, [escaped_shell] advice) rather than as a router. *)
+     (telemetry, [escaped_shell] advice) rather than as a router.
+
+     The caller's argv goes to [shell_simple] whole. Rebuilding it as
+     [shell; "-c"; script] from the recognised costume dropped every token
+     that was not the shell, the [-c] or the script: the options before [-c]
+     ([-n], [-e]), the positional arguments after the script, and the
+     program's directory. [sh -n -c S] then ran S instead of only checking it,
+     and a directory-qualified program lost its path (#39692). *)
   match source with
   | Command command -> command_to_shell ~sandbox ~cwd command
-  | Argv argv ->
-    (match Keeper_tooling.Shell_costume.of_argv argv with
-     | Some costume ->
-       command_to_shell
-         ~sandbox
-         ~cwd
-         { shell = costume.Keeper_tooling.Shell_costume.shell
-         ; text = costume.Keeper_tooling.Shell_costume.script
-         }
-     | None -> shell_simple ~sandbox ?cwd argv)
+  | Argv argv -> shell_simple ~sandbox ?cwd argv
 ;;
 
 let to_shell_ir ?sandbox input =

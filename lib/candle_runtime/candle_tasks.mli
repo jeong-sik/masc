@@ -15,8 +15,9 @@ val lookups :
     links no longer name it, it was deleted, because deleting a Task removes
     its links too. No ids is an empty answer that reads nothing.
 
-    The archive and the links are read only when the backlog leaves a Task
-    unfound, and only the archive rows of the Tasks asked for are decoded.
+    The archive is read only when the backlog leaves a Task unfound, and only
+    the archive rows of the Tasks asked for are decoded. The links are read only
+    when neither store has a Task.
     [Error] when the backlog cannot be read, when the archive or the links
     cannot be read while they are needed, when a wanted row of the archive does
     not decode or a row has no readable id, when a completion time is not in

@@ -297,6 +297,19 @@ let test_only_a_missing_task_sends_the_read_to_the_archive () =
   error_names "a Task the backlog lacks" ~needle:"tasks-archive.json" (lookups config [ "task-1"; "task-2" ])
 ;;
 
+(* The links only tell a Task that no store has from one that was deleted. A Task
+   the archive has needs no such answer, so links that do not read leave it found. *)
+let test_a_task_the_archive_has_does_not_need_the_links () =
+  with_workspace
+  @@ fun config ->
+  write_backlog config [];
+  write_archive config [ make_task ~id:"task-9" ~title:"Old" (done_by ~assignee:"keeper-b" ()) ];
+  write_file (Workspace_goal_index.goal_task_links_path config) "not json";
+  match lookup_of "task-9" (lookups config [ "task-9" ]) with
+  | Candle_event.Found { title; _ } -> check string "title" "Old" title
+  | Candle_event.Deleted -> fail "task-9 was not found"
+;;
+
 let test_a_completion_time_the_ledger_cannot_hold_is_an_error () =
   with_workspace
   @@ fun config ->
@@ -375,6 +388,10 @@ let () =
             "only a missing task sends the read to the archive"
             `Quick
             test_only_a_missing_task_sends_the_read_to_the_archive
+        ; test_case
+            "a task the archive has does not need the links"
+            `Quick
+            test_a_task_the_archive_has_does_not_need_the_links
         ; test_case "a blank assignee is no assignee" `Quick test_a_blank_assignee_is_no_assignee
         ] )
     ; ( "stores that do not read"

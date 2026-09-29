@@ -112,14 +112,13 @@ let lookups config ~goal_id task_ids =
     let missing =
       List.filter (fun task_id -> Option.is_none (find_task task_id backlog)) task_ids
     in
-    let* archived, linked =
+    let* archived =
       match missing with
-      | [] -> Ok ([], [])
-      | _ :: _ ->
-        let* archived = archived_tasks config ~wanted:missing in
-        let* linked = linked_task_ids config ~goal_id in
-        Ok (archived, linked)
+      | [] -> Ok []
+      | _ :: _ -> archived_tasks config ~wanted:missing
     in
+    (* Read once, at the first Task that neither store has. *)
+    let linked = lazy (linked_task_ids config ~goal_id) in
     let rec go found = function
       | [] -> Ok (List.rev found)
       | task_id :: rest ->
@@ -128,7 +127,8 @@ let lookups config ~goal_id task_ids =
            let* lookup = found_of_task task in
            go ((task_id, lookup) :: found) rest
          | None, None ->
-           if List.mem task_id linked
+           let* linked_ids = Lazy.force linked in
+           if List.mem task_id linked_ids
            then
              Error
                (Printf.sprintf

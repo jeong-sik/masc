@@ -66,36 +66,63 @@ let nearest_rank_index n p =
   Int.max 0 (Int.min (n - 1) (rank - 1))
 ;;
 
-(* [select xs lo hi k] puts at [xs.(k)] the value an ascending sort by
-   [Float.compare] would put there, and leaves every value in [lo, k) at or
-   below it and every value in (k, hi] at or above it. It reorders only
-   [xs.(lo..hi)], which must contain [k]. Each step partitions around the
-   middle value and keeps the side that holds [k]. *)
-let rec select xs lo hi k =
+(* Each round of [select] partitions a slice around the value at its middle
+   index and keeps the side that holds the rank. A ring whose order keeps an
+   extreme value at the middle index -- a lag that falls and rises within the
+   window -- sheds a sample or two per round, so a selection would cost a
+   round per sample. A selection therefore gets two rounds per halving of its
+   slice and sorts the slice it is left with once they are spent: at worst it
+   costs those rounds and one sort. *)
+let rounds_per_halving = 2
+
+(* The fewest halvings that bring [m] samples down to one. *)
+let halvings_to_one m =
+  let rec count halvings =
+    if 1 lsl halvings >= m then halvings else count (halvings + 1)
+  in
+  count 0
+;;
+
+(* [select xs lo hi k] puts at [xs.(k)] a value equal, by [Float.compare], to
+   the one an ascending sort would put there, and leaves every value in
+   [lo, k) at or below it and every value in (k, hi] at or above it. It
+   reorders only [xs.(lo..hi)], which must contain [k]. *)
+let rec select_within xs lo hi k ~rounds =
   if lo < hi
-  then begin
-    let pivot = xs.(lo + ((hi - lo) / 2)) in
-    let i = ref lo in
-    let j = ref hi in
-    while !i <= !j do
-      while Float.compare xs.(!i) pivot < 0 do
-        incr i
+  then
+    if rounds = 0
+    then Array.stable_sort_sub Float.compare xs lo (hi - lo + 1)
+    else begin
+      let pivot = xs.(lo + ((hi - lo) / 2)) in
+      let i = ref lo in
+      let j = ref hi in
+      while !i <= !j do
+        while Float.compare xs.(!i) pivot < 0 do
+          incr i
+        done;
+        while Float.compare xs.(!j) pivot > 0 do
+          decr j
+        done;
+        if !i <= !j
+        then begin
+          let v = xs.(!i) in
+          xs.(!i) <- xs.(!j);
+          xs.(!j) <- v;
+          incr i;
+          decr j
+        end
       done;
-      while Float.compare xs.(!j) pivot > 0 do
-        decr j
-      done;
-      if !i <= !j
-      then begin
-        let v = xs.(!i) in
-        xs.(!i) <- xs.(!j);
-        xs.(!j) <- v;
-        incr i;
-        decr j
-      end
-    done;
-    (* Every index between [!j] and [!i] holds the pivot, already in place. *)
-    if k <= !j then select xs lo !j k else if k >= !i then select xs !i hi k
-  end
+      (* Every index between [!j] and [!i] holds the pivot, already in place. *)
+      let rounds = rounds - 1 in
+      if k <= !j
+      then select_within xs lo !j k ~rounds
+      else if k >= !i
+      then select_within xs !i hi k ~rounds
+    end
+;;
+
+let select xs lo hi k =
+  select_within xs lo hi k ~rounds:(rounds_per_halving * halvings_to_one (hi - lo + 1))
 ;;
 
 let milliseconds_per_second = 1000.0
@@ -123,7 +150,8 @@ let summarize t =
     in
     (* The three ranks ascend, and after each selection every sample above
        the chosen index is at or above the chosen value, so the next rank is
-       looked for only there. The ring is never fully sorted. *)
+       looked for only there. Only [xs], the copy [samples] made, is
+       reordered. *)
     let at_rank ~above p =
       let k = nearest_rank_index n p in
       select xs above (n - 1) k;

@@ -79,6 +79,31 @@ let reference_cases () =
     random_lags (1 + Random.State.int state 600) ~distinct:(1 + Random.State.int state 50))
 ;;
 
+(* Lags that climb smoothly from a fifth of a millisecond, to 20 ms at the
+   top. *)
+let climb ~steps step = 0.0002 +. (0.02 *. Float.of_int step /. Float.of_int steps)
+
+(* A lag that rises and falls within the window, and one that climbs twice. *)
+let rise_and_fall n = Array.init n (fun i -> climb ~steps:(n / 2) (Int.min i (n - 1 - i)))
+let two_climbs n = Array.init n (fun i -> climb ~steps:(n / 2) (i mod (n / 2)))
+
+(* The samples of [shape] as a ring holds them when recording started
+   [offset] samples into it. *)
+let from_offset shape offset =
+  let n = Array.length shape in
+  List.init n (fun i -> shape.((i + offset) mod n))
+;;
+
+(* Both shapes from every offset in the default window. Some offsets keep an
+   extreme value at the middle index, where each selection round takes its
+   pivot from, so the selection spends its rounds and sorts what is left. *)
+let smooth_cases () =
+  let n = 600 in
+  List.concat_map
+    (fun shape -> List.init n (from_offset shape))
+    [ rise_and_fall n; two_climbs n ]
+;;
+
 let test_percentiles_match_a_full_sort () =
   List.iteri
     (fun case lags ->
@@ -96,8 +121,54 @@ let test_percentiles_match_a_full_sort () =
          exact "p50" (ms p50) s.p50_ms;
          exact "p95" (ms p95) s.p95_ms;
          exact "p99" (ms p99) s.p99_ms;
-         exact "max" (ms largest) s.max_ms)
-    (reference_cases ())
+         exact "max" (ms largest) s.max_ms;
+         (* The ring holds the samples in the order they were recorded here,
+            and the mean adds them in that order. *)
+         exact "mean" (ms (List.fold_left ( +. ) 0.0 lags /. Float.of_int n)) s.mean_ms)
+    (reference_cases () @ smooth_cases ())
+;;
+
+(* How many sorts of its samples a summary may cost. A selection that spent
+   its rounds sorts only what is left, so a ring that keeps an extreme at the
+   middle index costs about one sort; a round per sample would cost dozens of
+   sorts at [large_window]. *)
+let summary_cost_in_sorts = 10.0
+let large_window = 60_000
+
+let test_a_smooth_rise_and_fall_costs_about_one_sort () =
+  Eio_main.run
+  @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  (* Recording started just past the top, so the samples fall to the bottom
+     at the middle index and climb back. *)
+  let lags = from_offset (rise_and_fall large_window) ((large_window / 2) + 1) in
+  let t = Scheduler_lag.create ~interval_s:0.1 ~window:large_window () in
+  record_all t lags;
+  (* The fastest of three runs: a loaded runner only ever adds time. *)
+  let fastest_of_three run =
+    let once () =
+      let started = Eio.Time.now clock in
+      run ();
+      Eio.Time.now clock -. started
+    in
+    Float.min (once ()) (Float.min (once ()) (once ()))
+  in
+  let sort_s =
+    fastest_of_three (fun () -> Array.sort Float.compare (Array.of_list lags))
+  in
+  let summary_s =
+    fastest_of_three (fun () ->
+      ignore (Scheduler_lag.summarize t : Scheduler_lag.summary option))
+  in
+  check
+    bool
+    (Printf.sprintf
+       "summary %.1f ms within %.0f sorts of %.1f ms"
+       (summary_s *. 1000.0)
+       summary_cost_in_sorts
+       (sort_s *. 1000.0))
+    true
+    (summary_s <= summary_cost_in_sorts *. sort_s)
 ;;
 
 let test_empty_ring_has_no_percentiles () =
@@ -169,6 +240,10 @@ let () =
       , [ test_case "percentiles" `Quick test_percentiles_over_recorded_samples
         ; test_case "window" `Quick test_ring_keeps_only_the_window
         ; test_case "same ranks as a full sort" `Quick test_percentiles_match_a_full_sort
+        ; test_case
+            "a smooth rise and fall costs about one sort"
+            `Quick
+            test_a_smooth_rise_and_fall_costs_about_one_sort
         ; test_case "empty" `Quick test_empty_ring_has_no_percentiles
         ; test_case "shape" `Quick test_invalid_shape_is_refused
         ] )

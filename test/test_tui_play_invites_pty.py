@@ -46,12 +46,14 @@ def run(executable: str) -> None:
                                 path="/api/v1/play/invites")
         command(b"/play link", b"Last play link issued")
         command(b"/play invites", b"old \xc2\xb7 expires not recorded")
-        command(b"/play revoke guest1", b"controller released")
+        command(b"/play revoke guest1", b"retry /play revoke guest1")
         h.wait_for_http_request(process, master, output, requests,
                                 path="/api/v1/play/invites/guest1")
         command(b"/play link", b"No play link has been issued")
+        command(b"/play revoke guest1", b"retry /play revoke guest1")
+        command(b"/play revoke guest1", b"controller released")
         paths = [path for path, _ in requests]
-        if paths.count("/api/v1/play/invites") != 1 or "/api/v1/play/invites/guest1" not in paths:
+        if paths.count("/api/v1/play/invites") != 1 or paths.count("/api/v1/play/invites/guest1") != 3:
             raise AssertionError(f"the TUI did not issue and revoke through the play API: {paths!r}")
         h.send_and_wait(process, master, output, b"\x1b", b"MASC Keepers")
         os.write(master, b"q")
@@ -63,7 +65,14 @@ def run(executable: str) -> None:
         http_fixtures={
             "/api/v1/play/invites": h.RequestHttpResponse(invites),
             "/api/v1/play/invites/guest1":
-                (200, {"name": "guest1", "revoked": True, "released_controller": True}),
+                h.SequencedHttpResponse([
+                    (200, {"name": "guest1", "revoked": True,
+                           "released_controller": False, "release_error": "disk fault"}),
+                    (500, {"error": "release_failed", "name": "guest1",
+                           "released_controller": False, "release_error": "disk fault"}),
+                    (200, {"name": "guest1", "revoked": False,
+                           "released_controller": True}),
+                ]),
         },
         http_requests=requests,
     )

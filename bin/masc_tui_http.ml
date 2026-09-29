@@ -537,8 +537,7 @@ type post_outcome =
   | Post_refused of string
   | Post_unanswered of string
 
-let post_json_outcome ~(host : string) ~(port : int) ~(path : string) ~(body : string) =
-  match http_post ~headers:(auth_headers ()) ~host ~port ~path ~body with
+let mutation_outcome = function
   | Error detail -> Post_unanswered detail
   | Ok (status_code, response) when status_code >= 400 && status_code < 500 ->
     (match decode_json ~allow_empty:true ~status_code ~body:response with
@@ -549,6 +548,10 @@ let post_json_outcome ~(host : string) ~(port : int) ~(path : string) ~(body : s
      | Ok json -> Post_answered json
      | Error message -> Post_unanswered message)
 
+let post_json_outcome ~(host : string) ~(port : int) ~(path : string) ~(body : string) =
+  http_post ~headers:(auth_headers ()) ~host ~port ~path ~body
+  |> mutation_outcome
+
 let http_delete ~(host : string) ~(port : int) ~(path : string) =
   let url = url_of ~host ~port ~path in
   timed ~verb:"DELETE" ~path @@ fun () ->
@@ -558,17 +561,6 @@ let http_delete ~(host : string) ~(port : int) ~(path : string) =
   | Ok answer -> Ok answer
   | Error detail ->
       Error (Masc.Tui_decode.http_transport_error ~verb:"DELETE" ~url ~detail)
-
-let mutation_outcome = function
-  | Error detail -> Post_unanswered detail
-  | Ok (status_code, response) when status_code >= 400 && status_code < 500 ->
-      (match decode_json ~allow_empty:true ~status_code ~body:response with
-       | Error message -> Post_refused message
-       | Ok _ -> Post_refused (Printf.sprintf "HTTP %d" status_code))
-  | Ok (status_code, response) ->
-      (match decode_json ~allow_empty:false ~status_code ~body:response with
-       | Ok json -> Post_answered json
-       | Error message -> Post_unanswered message)
 
 let list_play_invites ~host ~port =
   get_json ~host ~port ~path:"/api/v1/play/invites"

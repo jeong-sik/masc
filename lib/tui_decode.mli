@@ -3745,3 +3745,27 @@ val decode_oauth_client_saved : Yojson.Safe.t -> (int, string) result
     read as a valid scope count. The server's refusals arrive as a non-2xx
     status, which the HTTP client has already turned into an error before this
     runs. *)
+
+type play_invite_row = {
+  pi_name : string;
+  pi_expires_at : string option;
+  pi_expired : bool;
+  pi_holds_controller : bool;
+}
+
+type play_invite_issued = {
+  pii_name : string;
+  pii_expires_at : string;
+  pii_link : string;
+}
+
+type play_invite_revoked = {
+  pir_name : string;
+  pir_revoked : bool;
+  pir_released_controller : bool;
+  pir_release_error : string option;
+}
+
+val decode_play_invites : Yojson.Safe.t -> (play_invite_row list, string) result
+val decode_play_invite_issued : Yojson.Safe.t -> (play_invite_issued, string) result
+val decode_play_invite_revoked : Yojson.Safe.t -> (play_invite_revoked, string) result

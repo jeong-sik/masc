@@ -12387,3 +12387,68 @@ let decode_oauth_client_saved json =
       Error
         (Printf.sprintf "the reply must be an object (received %s)"
            (Json_util.kind_name other))
+
+type play_invite_row = {
+  pi_name : string;
+  pi_expires_at : string option;
+  pi_expired : bool;
+  pi_holds_controller : bool;
+}
+
+type play_invite_issued = {
+  pii_name : string;
+  pii_expires_at : string;
+  pii_link : string;
+}
+
+type play_invite_revoked = {
+  pir_name : string;
+  pir_revoked : bool;
+  pir_released_controller : bool;
+  pir_release_error : string option;
+}
+
+let play_object = function
+  | `Assoc _ as json -> Ok json
+  | _ -> Error "play invite response must be an object"
+
+let decode_play_invite_row json =
+  let* json = play_object json in
+  let* pi_name = require_string_field json "name" in
+  let* pi_expires_at = required_nullable_string_field json "expires_at" in
+  let* pi_expired = required_bool_field json "expired" in
+  let* pi_holds_controller = required_bool_field json "holds_controller" in
+  Ok { pi_name; pi_expires_at; pi_expired; pi_holds_controller }
+
+let decode_play_invites json =
+  let* json = play_object json in
+  match Json_util.assoc_member_opt "invites" json with
+  | Some (`List rows) ->
+      List.fold_left
+        (fun result row ->
+          let* decoded = result in
+          let* invite = decode_play_invite_row row in
+          Ok (invite :: decoded))
+        (Ok []) rows
+      |> Result.map List.rev
+  | _ -> Error "play invites response has no invites list"
+
+let decode_play_invite_issued json =
+  let* json = play_object json in
+  let* pii_name = require_string_field json "name" in
+  let* pii_expires_at = require_string_field json "expires_at" in
+  let* pii_link = require_string_field json "link" in
+  Ok { pii_name; pii_expires_at; pii_link }
+
+let decode_play_invite_revoked json =
+  let* json = play_object json in
+  let* pir_name = require_string_field json "name" in
+  let* pir_revoked = required_bool_field json "revoked" in
+  let* pir_released_controller = required_bool_field json "released_controller" in
+  let* pir_release_error =
+    match Json_util.assoc_member_opt "release_error" json with
+    | None -> Ok None
+    | Some (`String detail) -> Ok (Some detail)
+    | Some _ -> Error "release_error must be a string"
+  in
+  Ok { pir_name; pir_revoked; pir_released_controller; pir_release_error }

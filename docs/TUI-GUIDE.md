@@ -82,6 +82,9 @@ is sent through OSC 52 for copying; terminal clipboard support varies. The
 TUI keeps the last link only until it exits or that invite is revoked.
 If the issue request has no trustworthy answer, inspect the invite list and
 revoke that name before retrying because the original link cannot be recovered.
+If revocation reports a controller release failure or an unknown outcome,
+repeat `/play revoke <name>`: a second request can release a controller even
+after the invite credential was deleted.
 
 The invited person opens the link in a browser to watch and play the shared
 DOS machine. The TUI's existing `go MSX` menu also has `watch DOS machine`

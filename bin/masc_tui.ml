@@ -2004,6 +2004,16 @@ type lane_addons_reply = {
 
 type lane_addons_slice_source = Cached_snapshot | Fresh_inventory
 
+type 'a play_mutation =
+  | Play_answered of ('a, string) result
+  | Play_refused of string
+  | Play_unanswered of string
+
+let decode_play_mutation decode = function
+  | Masc_tui_http.Post_answered json -> Play_answered (decode json)
+  | Masc_tui_http.Post_refused detail -> Play_refused detail
+  | Masc_tui_http.Post_unanswered detail -> Play_unanswered detail
+
 type async_msg =
   | Lane_package_preview_loaded of int * string * (Yojson.Safe.t, string) result
   | Keeper_queue_loaded of string * int option * Masc_tui_queue_inspection.action * (string list, string) result
@@ -2356,9 +2366,9 @@ type async_msg =
   | Preset_contents_shown of preset_sink * (Tui_decode.preset_detail, string) result
   | Preset_saved of preset_sink * (Tui_decode.preset_manifest, string) result
   | Preset_restored of preset_sink * (Tui_decode.preset_restore_report, string) result
-  | Play_invites_listed of string option * (Yojson.Safe.t, string) result
-  | Play_invite_issued of string option * Masc_tui_http.post_outcome
-  | Play_invite_revoked of string option * Masc_tui_http.post_outcome
+  | Play_invites_listed of string option * (Tui_decode.play_invite_row list, string) result
+  | Play_invite_issued of string option * Tui_decode.play_invite_issued play_mutation
+  | Play_invite_revoked of string option * string * Tui_decode.play_invite_revoked play_mutation
   | Librarian_input_loaded of string * (string list, string) result
   | Resources_listed of (Masc_tui_mcp.resource list, string) result
   (* The scope travels with the directory. Without it a reply names a
@@ -10205,7 +10215,8 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       Buffer.clear state.msg_input;
       launch_play_call state ~mailbox
         ~call:Masc_tui_http.list_play_invites
-        ~wrap:(fun result -> Play_invites_listed (target, result))
+        ~wrap:(fun result ->
+          Play_invites_listed (target, Result.bind result Tui_decode.decode_play_invites))
   | Masc_tui_command.Play_link ->
       Buffer.clear state.msg_input;
       (match state.play_invite_link with
@@ -10228,19 +10239,21 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
                Ok (Masc_tui_http.issue_play_invite ~host ~port ~name ~hours))
              ~wrap:(fun result ->
                Play_invite_issued (target,
-                 match result with
-                 | Ok outcome -> outcome
-                 | Error detail -> Masc_tui_http.Post_unanswered detail)))
+                 decode_play_mutation Tui_decode.decode_play_invite_issued
+                   (match result with
+                    | Ok outcome -> outcome
+                    | Error detail -> Masc_tui_http.Post_unanswered detail))))
   | Masc_tui_command.Play_revoke name ->
       Buffer.clear state.msg_input;
       launch_play_call state ~mailbox
         ~call:(fun ~host ~port ->
           Ok (Masc_tui_http.revoke_play_invite ~host ~port ~name))
         ~wrap:(fun result ->
-          Play_invite_revoked (target,
-            match result with
-            | Ok outcome -> outcome
-            | Error detail -> Masc_tui_http.Post_unanswered detail))
+          Play_invite_revoked (target, name,
+            decode_play_mutation Tui_decode.decode_play_invite_revoked
+              (match result with
+               | Ok outcome -> outcome
+               | Error detail -> Masc_tui_http.Post_unanswered detail)))
   | Masc_tui_command.Unknown word ->
       report_action state "error"
         (Printf.sprintf
@@ -14410,111 +14423,67 @@ let apply_async_message state ~base_path ~http_refresh_inflight
        | Error detail ->
            chat_notice state ~keeper_name:target ~kind:Notice_failure
              ("play invites: " ^ detail)
-       | Ok (`Assoc fields) ->
-           (match List.assoc_opt "invites" fields with
-            | Some (`List invites) ->
-                let row = function
-                  | `Assoc fields ->
-                      let expiry =
-                        match List.assoc_opt "expires_at" fields with
-                        | Some (`String value) -> Some value
-                        | Some `Null -> Some "not recorded"
-                        | _ -> None
-                      in
-                      (match List.assoc_opt "name" fields, expiry,
-                             List.assoc_opt "expired" fields,
-                             List.assoc_opt "holds_controller" fields with
-                       | Some (`String name), Some expires_at,
-                         Some (`Bool expired), Some (`Bool holds_controller) ->
-                           Ok (name ^ " · expires " ^ expires_at
-                               ^ (if expired then " · expired" else "")
-                               ^ (if holds_controller then " · controlling" else ""))
-                       | _ -> Error "play invites: invalid invite row")
-                  | _ -> Error "play invites: invalid invite row"
-                in
-                let rec rows acc = function
-                  | [] -> Ok (List.rev acc)
-                  | invite :: rest ->
-                      (match row invite with
-                       | Ok line -> rows (line :: acc) rest
-                       | Error _ as error -> error)
-                in
-                (match rows [] invites with
-                 | Ok [] ->
-                     chat_notice state ~keeper_name:target ~kind:Notice_reply
-                       "No shared DOS play invites"
-                 | Ok lines ->
-                     chat_notice state ~keeper_name:target ~kind:Notice_reply
-                       ("Shared DOS play invites:\n" ^ String.concat "\n" lines)
-                 | Error detail ->
-                     chat_notice state ~keeper_name:target ~kind:Notice_failure detail)
-            | _ ->
-                chat_notice state ~keeper_name:target ~kind:Notice_failure
-                  "play invites: response has no invites list")
-       | Ok _ ->
-           chat_notice state ~keeper_name:target ~kind:Notice_failure
-             "play invites: invalid response")
+       | Ok [] ->
+           chat_notice state ~keeper_name:target ~kind:Notice_reply
+             "No shared DOS play invites"
+       | Ok invites ->
+           let row invite =
+             let expires_at =
+               match invite.Tui_decode.pi_expires_at with
+               | Some value -> value
+               | None -> "not recorded"
+             in
+             invite.pi_name ^ " · expires " ^ expires_at
+             ^ (if invite.pi_expired then " · expired" else "")
+             ^ (if invite.pi_holds_controller then " · controlling" else "")
+           in
+           chat_notice state ~keeper_name:target ~kind:Notice_reply
+             ("Shared DOS play invites:\n" ^ String.concat "\n" (List.map row invites)))
   | Play_invite_issued (target, result) ->
       (match result with
-       | Masc_tui_http.Post_answered (`Assoc fields) ->
-           (match List.assoc_opt "name" fields,
-                  List.assoc_opt "expires_at" fields,
-                  List.assoc_opt "link" fields with
-            | Some (`String name), Some (`String expires_at), Some (`String link) ->
-                state.play_invite_link <- Some (name, link);
-                Terminal_write_repair.note ();
-                write_to_terminal (Link.osc52_copy link);
-                chat_notice state ~keeper_name:target ~kind:Notice_reply
-                  (Printf.sprintf "Play invite %s expires %s. Link copied via OSC 52 (terminal support unconfirmed)%s"
-                     name expires_at
-                     (if Option.is_some target then ": " ^ link else ""))
-            | _ ->
-                chat_notice state ~keeper_name:target ~kind:Notice_failure
-                  "play invite may exist, but its one-time link was unreadable; list and revoke it before retrying")
-       | Masc_tui_http.Post_answered _ ->
+       | Play_answered (Ok invite) ->
+           state.play_invite_link <- Some (invite.Tui_decode.pii_name, invite.pii_link);
+           Terminal_write_repair.note ();
+           write_to_terminal (Link.osc52_copy invite.pii_link);
+           chat_notice state ~keeper_name:target ~kind:Notice_reply
+             (Printf.sprintf
+                "Play invite %s expires %s. Link copied via OSC 52 (terminal support unconfirmed): %s"
+                invite.pii_name invite.pii_expires_at invite.pii_link)
+       | Play_answered (Error _) ->
            chat_notice state ~keeper_name:target ~kind:Notice_failure
              "play invite may exist, but its one-time link was unreadable; list and revoke it before retrying"
-       | Masc_tui_http.Post_refused detail ->
+       | Play_refused detail ->
            chat_notice state ~keeper_name:target ~kind:Notice_failure
              ("play invite refused: " ^ detail)
-       | Masc_tui_http.Post_unanswered detail ->
+       | Play_unanswered detail ->
            chat_notice state ~keeper_name:target ~kind:Notice_failure
              ("play invite outcome unknown (" ^ detail ^ "); list and revoke before retrying"))
-  | Play_invite_revoked (target, result) ->
+  | Play_invite_revoked (target, requested_name, result) ->
+      let retry = "; retry /play revoke " ^ requested_name ^ " to release the controller" in
       (match result with
-       | Masc_tui_http.Post_answered (`Assoc fields) ->
-           (match List.assoc_opt "name" fields,
-                  List.assoc_opt "revoked" fields,
-                  List.assoc_opt "released_controller" fields with
-            | Some (`String name), Some (`Bool revoked), Some (`Bool released) ->
-                (match state.play_invite_link with
-                 | Some (held_name, _) when String.equal held_name name ->
-                     state.play_invite_link <- None
-                 | Some _ | None -> ());
-                let release_error =
-                  match List.assoc_opt "release_error" fields with
-                  | Some (`String detail) -> Some detail
-                  | _ -> None
-                in
-                chat_notice state ~keeper_name:target
-                  ~kind:(if Option.is_some release_error then Notice_failure else Notice_reply)
-                  (Printf.sprintf "Play invite %s: %s%s"
-                     name (if revoked then "revoked" else "already absent")
-                     (match release_error with
-                      | Some detail -> "; controller release failed: " ^ detail
-                      | None -> if released then "; controller released" else ""))
-            | _ ->
-                chat_notice state ~keeper_name:target ~kind:Notice_failure
-                  "play revoke answered without a name; inspect /play invites")
-       | Masc_tui_http.Post_answered _ ->
+       | Play_answered (Ok revoked) ->
+           (match state.play_invite_link with
+            | Some (held_name, _) when String.equal held_name revoked.Tui_decode.pir_name ->
+                state.play_invite_link <- None
+            | Some _ | None -> ());
+           chat_notice state ~keeper_name:target
+             ~kind:(if Option.is_some revoked.pir_release_error then Notice_failure else Notice_reply)
+             (Printf.sprintf "Play invite %s: %s%s"
+                revoked.pir_name
+                (if revoked.pir_revoked then "revoked" else "already absent")
+                (match revoked.pir_release_error with
+                 | Some detail -> "; controller release failed: " ^ detail ^ retry
+                 | None ->
+                     if revoked.pir_released_controller then "; controller released" else ""))
+       | Play_answered (Error detail) ->
            chat_notice state ~keeper_name:target ~kind:Notice_failure
-             "play revoke answered with an invalid body; inspect /play invites"
-       | Masc_tui_http.Post_refused detail ->
+             ("play revoke response unreadable (" ^ detail ^ ")" ^ retry)
+       | Play_refused detail ->
            chat_notice state ~keeper_name:target ~kind:Notice_failure
              ("play revoke refused: " ^ detail)
-       | Masc_tui_http.Post_unanswered detail ->
+       | Play_unanswered detail ->
            chat_notice state ~keeper_name:target ~kind:Notice_failure
-             ("play revoke outcome unknown (" ^ detail ^ "); inspect /play invites"))
+             ("play revoke outcome unknown (" ^ detail ^ ")" ^ retry))
   | Librarian_input_loaded (prompt_key, result) ->
       let still_selected =
         match selected_prompt_for_state state with

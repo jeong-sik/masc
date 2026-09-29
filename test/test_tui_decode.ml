@@ -1,5 +1,24 @@
 open Masc
 
+let test_play_invite_responses_preserve_recovery_facts () =
+  let json = Yojson.Safe.from_string in
+  (match Tui_decode.decode_play_invites
+           (json {|{"invites":[{"name":"old","expires_at":null,"expired":false,"holds_controller":true}]}|}) with
+   | Ok [{ pi_name = "old"; pi_expires_at = None; pi_expired = false;
+           pi_holds_controller = true }] -> ()
+   | _ -> Alcotest.fail "invite list lost null expiry or controller holder");
+  (match Tui_decode.decode_play_invite_revoked
+           (json {|{"name":"old","revoked":true,"released_controller":false,"release_error":"disk fault"}|}) with
+   | Ok { pir_name = "old"; pir_revoked = true; pir_released_controller = false;
+          pir_release_error = Some "disk fault" } -> ()
+   | _ -> Alcotest.fail "partial revoke lost its release error");
+  Alcotest.(check bool) "bad release_error is rejected" true
+    (Result.is_error (Tui_decode.decode_play_invite_revoked
+      (json {|{"name":"old","revoked":true,"released_controller":false,"release_error":null}|})));
+  Alcotest.(check bool) "issued link is required" true
+    (Result.is_error (Tui_decode.decode_play_invite_issued
+      (json {|{"name":"old","expires_at":"tomorrow"}|})))
+
 (* The saved-app reply's scope count picks the TUI notice: 0 says the
    service's own list will be asked for. A reply without [scopes] used to
    count as 0 and so told the operator something the server never said. *)
@@ -12811,6 +12830,9 @@ let () =
       ; Alcotest.test_case "reads as of its time unless the runner is ok" `Quick
           test_schedule_hold_reads_as_of_its_time_unless_the_runner_is_ok
       ] );
+    ( "play invites"
+    , [ Alcotest.test_case "preserves partial revoke and rejects unreadable links"
+          `Quick test_play_invite_responses_preserve_recovery_facts ] );
     ( "file change"
     , [ Alcotest.test_case "reads an insert" `Quick test_decode_file_change_reads_an_insert
       ; Alcotest.test_case "reads a materialize" `Quick

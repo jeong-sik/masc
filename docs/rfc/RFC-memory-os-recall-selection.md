@@ -41,6 +41,8 @@ source store read error                            -> ordinary recall only + ope
 
 선택 순서는 `Standing` → 현재 Task 링크 → 현재 Goal 링크 → 현재 자극 링크다. 중복 fact는 memory identity로 한 번만 싣고 동일 우선순위에서는 ID로 안정 정렬한다. `Expired` fact와 검증 실패 source-bound claim은 본문 후보에서 제외한다. `Validity_unknown`은 본문 대신 ID와 보류 이유만 표시한다. 연결이 없는 current fact는 검색 가능한 주소로 남는다.
 
+현재 Task/Goal/자극에 연결된 `Expired` fact는 본문 대신 짧은 typed 만료 표식을 모델에 보낸다: memory ID, 연결된 규칙·사건 키, `Expired` 판정, terminal 사건 영수증의 조회 주소다. 표식은 검증된 사건 영수증에서만 만들고, 원래 fact 본문이나 기밀 경로를 복원하지 않는다. 영수증이 없거나 불독가면 만료로 단정하지 않고 `Validity_unknown`으로 보류한다. 표식도 위 선택 순서의 원자적 항목으로 용량에 넣으며, 필요한 표식이 넘치면 조용히 버리지 않고 `Budget_overrun`과 대상 ID를 남긴다. 따라서 만료를 확인한 경우와 근거가 처음부터 없는 경우가 모델 입력에서 구별된다.
+
 용량은 구성된 provider 요청의 남은 입력 예산에서 산출하며 상한값 자체는 동일 입력 실측 후 설정한다. 필수 상시 본문이나 한 우선순위의 원자적 묶음이 용량을 넘으면 그 묶음의 일부를 조용히 싣지 않는다. `Budget_overrun`을 반환하고 대상 ID·필요 바이트·가용 바이트를 운영자 영수증에 남긴다. 모델에는 작은 고정형 상태 머리줄과 조회 도구 주소를 전달한다. 긴 제외 목록은 프롬프트에 모두 쓰지 않고 별도 결정 영수증에 보존한다. 주소 목록도 예산을 넘으면 첫 페이지와 다음 페이지 토큰만 보인다. 주소를 눌러 원문을 읽을 때는 기존 `keeper_memory_search`/읽기 권한과 source 재검증을 다시 적용한다.
 
 제안 결과 타입은 다음처럼 닫는다.
@@ -70,7 +72,7 @@ Task/Goal 조회가 실패하면 해당 링크 후보는 보류하고 검증된 
 
 ## §5 관측과 평가 게이트
 
-매 projection은 `receipt_id`, 입력 snapshot revision/해시, 정책 버전, 포함·제외 ID와 이유, 유효 조건 판정, source 검증 결과, 예산, 모델에 실제 보낸 블록 해시를 남긴다. 모델에는 상태 코드·포함 건수·생략 건수·조회 수단을 짧게 보인다. 운영자는 영수증에서 개별 제외 이유를 읽는다. 정보 누락과 검색 실패를 구별할 수 있도록 실제 `keeper_memory_search` 호출도 센다.
+매 projection은 `receipt_id`, 입력 snapshot revision/해시, 정책 버전, 포함·제외 ID와 이유, 유효 조건 판정, source 검증 결과, 예산, 모델에 실제 보낸 블록 해시를 남긴다. 모델에는 상태 코드·포함 건수·생략 건수·조회 수단과 §3의 연결된 만료 표식을 짧게 보인다. 운영자는 영수증에서 개별 제외 이유와 표식의 근거 사건을 읽는다. 정보 누락과 검색 실패를 구별할 수 있도록 실제 `keeper_memory_search` 호출도 센다. C03/C05는 고정 입력·정답을 유지한 채 모델에 보낸 표식 바이트, terminal 영수증 조회, 답변을 각각 기록해 만료 확인이 실제 답에 도달했는지 판정한다.
 
 평가는 운영 원본 기억을 복제하지 않은 격리 fact 스냅숏과 고정 턴 자극으로 현재 전량 주입과 후보 선택을 같은 입력에 shadow 재생한다. `test/test_keeper_memory_os_current.ml`의 `with_temp_keepers`/typed fact/replace가 픽스처 시작점이며, 테스트 파일의 존재 자체를 실행 성공으로 세지 않는다. 필수 질문은 현재 Task 권한, Goal 상태, 뒤집힌 PR 상태, 만료된 HOLD, source 변경·불독가, ordinary 읽기 오류, 선택 오류, 예산 초과, 근거 없을 때 기권을 포함한다.
 

@@ -32,7 +32,7 @@ let equipment_to_json (equipment : Keeper_portrait_look.equipment) =
   `Assoc [ "face", `String face; "neck", `String neck; "head", `String head
          ; "hand", `String hand; "base", `String base ]
 
-let handle ~keeper_name ~tool_name ~start_time ~config ~args =
+let handle ~keeper_name ~tool_name ~start_time ~args =
   match size_arg args with
   | Error message -> Tool_result.make_err ~tool_name ~class_:Tool_result.Policy_rejection ~start_time message
   | Ok size ->
@@ -42,23 +42,27 @@ let handle ~keeper_name ~tool_name ~start_time ~config ~args =
        | Some size ->
            let body = Keeper_portrait_look.body_of_name keeper_name in
            let equipment = Keeper_portrait_look.equipment_of_name keeper_name in
-           let image = Keeper_portrait_draw.render body equipment size in
            let width = Keeper_portrait_draw.int_of_size size in
-           let rgb = Bytes.create (width * width * 3) in
-           for y = 0 to width - 1 do
-             for x = 0 to width - 1 do
-               let colour, alpha = Keeper_portrait_draw.pixel image ~x ~y in
-               let offset = (y * width + x) * 3 in
-               let blend channel =
-                 let background = 22 in
-                 (channel * alpha + background * (255 - alpha)) / 255
-               in
-               Bytes.set rgb offset (Char.chr (blend colour.red));
-               Bytes.set rgb (offset + 1) (Char.chr (blend colour.green));
-               Bytes.set rgb (offset + 2) (Char.chr (blend colour.blue))
-             done
-           done;
-           match Rgb_png.encode ~width ~height:width ~rgb:(Bytes.unsafe_to_string rgb) with
+           (* Distance-field sampling, pixel composition and PNG compression
+              are CPU work. Let other Keeper fibers run while rendering. *)
+           let encoded = Eio_guard.run_in_systhread ~label:"keeper-portrait-png" (fun () ->
+             let image = Keeper_portrait_draw.render body equipment size in
+             let rgb = Bytes.create (width * width * 3) in
+             for y = 0 to width - 1 do
+               for x = 0 to width - 1 do
+                 let colour, alpha = Keeper_portrait_draw.pixel image ~x ~y in
+                 let offset = (y * width + x) * 3 in
+                 let blend channel =
+                   let background = 22 in
+                   (channel * alpha + background * (255 - alpha)) / 255
+                 in
+                 Bytes.set rgb offset (Char.chr (blend colour.red));
+                 Bytes.set rgb (offset + 1) (Char.chr (blend colour.green));
+                 Bytes.set rgb (offset + 2) (Char.chr (blend colour.blue))
+               done
+             done;
+             Rgb_png.encode ~width ~height:width ~rgb:(Bytes.unsafe_to_string rgb)) in
+           match encoded with
            | Error message -> Tool_result.make_err ~tool_name ~class_:Tool_result.Runtime_failure ~start_time message
            | Ok bytes ->
                (match Keeper_vision_tool.store_frame ~keeper_name bytes with

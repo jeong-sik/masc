@@ -7,9 +7,9 @@ type t = {
   placement : View.placement option;
 }
 
-(* Four roster entries plus top, title, divider and bottom. The portrait
-   yields before the list becomes too small to navigate. *)
-let minimum_roster_rows = 8
+(* Use the roster renderer's chrome budget so four selectable entries remain.
+   The portrait yields before that navigation capacity is reduced. *)
+let minimum_roster_rows = Masc_tui_frame.chrome_rows + 4
 
 let prepare cache ~display ~project ~name ~rows ~cols =
   match Portrait.band_size display with

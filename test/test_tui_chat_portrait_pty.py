@@ -142,7 +142,9 @@ def mosaic_resizes(binary: str) -> None:
             caption = caption_row(rows, b"alpha")
             band = mosaic_rows(rows)
             assert len(band) >= 6 and all(caption < row <= caption + 12 for row in band), "mosaic escaped its reserved band"
-            assert caption >= 9, "portrait left fewer than eight rows for the roster"
+            # Row 1 is the tab strip; the roster starts at row 2. Its
+            # eight drawn rows leave four entries after its four chrome rows.
+            assert caption - 2 >= 8, "portrait left fewer than four selectable roster rows"
             assert_chat_intact(rows, b"alpha")
 
         visible()

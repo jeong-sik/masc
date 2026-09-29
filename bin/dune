@@ -2104,7 +2104,7 @@
  (wrapped false)
  (modules masc_tui_chat_portrait)
  (libraries masc_tui_keeper_portrait masc_tui_portrait_view
-  masc_tui_graphics masc_tui_terminal_palette masc_tui_ansi))
+  masc_tui_graphics masc_tui_terminal_palette masc_tui_ansi masc_tui_frame))
 
 ;; Decides, by magic bytes, whether a downloaded body may sit in the preview
 ;; image cache, and what a curl or ffmpeg exit status means. Kept apart from

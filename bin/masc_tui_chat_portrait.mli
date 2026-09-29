@@ -1,7 +1,7 @@
 (** The active conversation's portrait under the Keeper roster. The roster
     keeps at least four selectable rows; the conversation keeps every row. *)
 type t = private {
-  roster_rows : int;
+  roster_rows : int;  (** Requested roster budget, including its chrome. *)
   picture_lines : string list;
   placement : Masc_tui_portrait_view.placement option;
 }

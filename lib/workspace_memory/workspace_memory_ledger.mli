@@ -44,9 +44,10 @@ val dispositions : t -> (fact_ref * disposition) list
 
 val to_json : t -> Yojson.Safe.t
 val of_json : Yojson.Safe.t -> (t, string) result
-(** Refuses unknown or missing fields, duplicate fields, a hash that is not 64
-    lowercase hex digits, a fact listed twice, a disposition naming an absent
-    entry, and an entry no fact names. *)
+(** Refuses another [schema], unknown, missing or repeated fields, a value of
+    the wrong JSON type, a blank string, a hash that is not 64 lowercase hex
+    digits, an id or fact listed twice, a disposition naming an absent entry,
+    and an entry no fact names. *)
 
 val directory : base_path:string -> string
 (** The workspace memory directory under [base_path]'s runtime directory. *)
@@ -56,7 +57,9 @@ val load : base_path:string -> (t, string) result
     unreadable file or a file [of_json] refuses is an error, never [empty]. *)
 
 val save : base_path:string -> t -> (unit, string) result
-(** Atomic replacement. Cancellation propagates. *)
+(** Atomic replacement. A failure before the rename keeps the previous ledger;
+    a failure after it can leave the new one in place, so an error does not
+    say which ledger the next [load] reads. Cancellation propagates. *)
 
 (** A fact the stores hold that the ledger has no disposition for. *)
 type pending_fact =

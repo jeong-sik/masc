@@ -93,15 +93,18 @@ let test_codec_round_trip_is_canonical () =
       ; ordinary_ref "auditor" "Lunch is at noon", excluded "not about the workspace" ]
   in
   let ledger = decode input in
-  Alcotest.(check (list string)) "claims in id order" ["c1"; "c2"] (List.map fst (Ledger.claims ledger));
-  Alcotest.(check (list fact_ref)) "facts in keeper, store and path order"
-    [ ordinary_ref "auditor" "Lunch is at noon"
-    ; ordinary_ref "reviewer" "PDF has twelve pages"
-    ; ordinary_ref "tester" "Tests run from the worktree root"
-    ; ordinary_ref "writer" "PDF has ten pages"
-    ; source_ref "writer" "notes/b.md" "PDF has ten pages" ]
-    (List.map fst (Ledger.dispositions ledger));
+  let canonical =
+    ledger_json ~claims:["c1", "PDF has ten pages"; "c2", "Tests run from the worktree root"]
+      ~conflicts:["x1", "Owners disagree on the page count"]
+      [ ordinary_ref "auditor" "Lunch is at noon", excluded "not about the workspace"
+      ; ordinary_ref "reviewer" "PDF has twelve pages", conflict_member "x1"
+      ; ordinary_ref "tester" "Tests run from the worktree root", claim_member "c2"
+      ; ordinary_ref "writer" "PDF has ten pages", claim_member "c1"
+      ; source_ref "writer" "notes/b.md" "PDF has ten pages", claim_member "c1" ]
+  in
   let encoded = Ledger.to_json ledger in
+  Alcotest.check json "every text and disposition, entries in id order, facts in keeper, store and path order"
+    canonical encoded;
   Alcotest.check json "decoding the encoding changes nothing" encoded (Ledger.to_json (decode encoded))
 
 let replace key value = function
@@ -119,6 +122,9 @@ let test_codec_refuses_malformed_ledgers () =
   in
   let fact = fact_json writer (claim_member "c1") in
   let with_fact fact = replace "facts" (`List [fact]) valid in
+  refused "missing top-level field"
+    (match valid with `Assoc fields -> `Assoc (List.remove_assoc "conflicts" fields) | _ -> `Null);
+  refused "facts that are not an array" (replace "facts" (`Assoc []) valid);
   refused "unknown top-level field"
     (match valid with `Assoc fields -> `Assoc (("extra", `Null) :: fields) | _ -> `Null);
   refused "repeated field"
@@ -131,11 +137,16 @@ let test_codec_refuses_malformed_ledgers () =
   refused "ordinary fact with a path"
     (with_fact (match fact with `Assoc fields -> `Assoc (("path", str "a.md") :: fields) | _ -> `Null));
   refused "source-bound fact without a path" (with_fact (replace "store" (str "source_bound") fact));
-  refused "unknown disposition kind" (with_fact (replace "disposition" (`Assoc ["kind", str "maybe"]) fact));
-  refused "blank exclusion reason" (with_fact (replace "disposition" (excluded "") fact));
+  (* A ledger with no claims, so the only broken rule is the disposition's. *)
+  ignore (decode (ledger_json [writer, excluded "old"]));
+  refused "unknown disposition kind" (ledger_json [writer, `Assoc ["kind", str "maybe"]]);
+  refused "blank exclusion reason" (ledger_json [writer, excluded " "]);
+  refused "blank claim text" (ledger_json ~claims:["c1", " "] [writer, claim_member "c1"]);
   refused "fact listed twice" (replace "facts" (`List [fact; fact]) valid);
   refused "claim listed twice"
     (ledger_json ~claims:["c1", "PDF has ten pages"; "c1", "again"] [writer, claim_member "c1"]);
+  refused "conflict listed twice"
+    (ledger_json ~conflicts:["x1", "Owners disagree"; "x1", "again"] [writer, conflict_member "x1"]);
   refused "absent claim" (ledger_json [writer, claim_member "c1"]);
   refused "absent conflict" (ledger_json [writer, conflict_member "x1"]);
   refused "claim without members" (ledger_json ~claims:["c1", "PDF has ten pages"] [writer, excluded "old"]);

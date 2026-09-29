@@ -304,13 +304,11 @@ let test_a_completion_time_the_ledger_cannot_hold_is_an_error () =
   error_names "completed_at" ~needle:"task-1" (lookups config [ "task-1" ])
 ;;
 
-let test_a_blank_assignee_is_no_assignee () =
+let test_a_blank_assignee_is_unreadable () =
   with_workspace
   @@ fun config ->
   write_backlog config [ make_task ~id:"task-1" (done_by ~assignee:"  " ()) ];
-  match lookup_of "task-1" (lookups config [ "task-1" ]) with
-  | Candle_event.Found { assignee; _ } -> check (option string) "assignee" None assignee
-  | Candle_event.Deleted -> fail "task-1 was not found"
+  error_names "blank performer" ~needle:"assignee" (lookups config [ "task-1" ])
 ;;
 
 (* {1 Keepers} *)
@@ -375,7 +373,7 @@ let () =
             "only a missing task sends the read to the archive"
             `Quick
             test_only_a_missing_task_sends_the_read_to_the_archive
-        ; test_case "a blank assignee is no assignee" `Quick test_a_blank_assignee_is_no_assignee
+        ; test_case "a blank assignee is unreadable" `Quick test_a_blank_assignee_is_unreadable
         ] )
     ; ( "stores that do not read"
       , [ test_case "a backlog that does not read is an error" `Quick test_a_backlog_that_does_not_read_is_an_error

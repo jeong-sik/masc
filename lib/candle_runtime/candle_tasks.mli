@@ -19,7 +19,8 @@ val lookups :
     unfound, and only the archive rows of the Tasks asked for are decoded.
     [Error] when the backlog cannot be read, when the archive or the links
     cannot be read while they are needed, when a wanted row of the archive does
-    not decode or a row has no readable id, when a completion time is not in
+    not decode or a row has no readable id, when a performer-bearing Task has
+    a blank assignee, when a completion time is not in
     the ledger's form, and when a Task is in neither store while the Goal still
     links it. The last one is usually the collector between writing the backlog
     and appending to the archive, and the next read finds the Task. It stays an

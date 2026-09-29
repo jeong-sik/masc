@@ -77,7 +77,7 @@
 - Keep Draft PR snapshots from cancelling or shadowing Ready CI, and require complete Ready results when approval and queue checks exclude verified Draft evidence using the exact skipped-job names emitted by GitHub (#39834).
 - Make the operator snapshot cache revalidation test use controlled time and explicit background completion while preserving stale-value and single-compute assertions (#39849).
 - Validate exactly one Workspace Curator decision per selected changed fact before updating the ledger, reject duplicate or out-of-batch decisions and unknown preexisting claim or conflict references, and pin prompt resolution while sizing requests (#39853).
-- Run Workspace Curator through bounded changed-fact batches, validate answers before saving their decisions to the ledger, and skip model calls on unchanged wakes. Existing reader surfaces still use the previous publication path; this change does not enable the live lane (#39858).
+- Run Workspace Curator through bounded changed-fact batches, validate answers before saving their decisions to the ledger, and skip model calls on unchanged wakes. This change does not enable the live lane (#39858).
 
 ### Performance
 

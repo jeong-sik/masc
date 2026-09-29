@@ -67,7 +67,14 @@ let reference_cases () =
     ; List.rev (List.sort Float.compare lags)
     ]
   in
+  (* The probe never records nan, but both ways order by [Float.compare], which
+     puts nan below every number, so they must agree on it too. *)
+  let with_nan n =
+    random_lags n ~distinct:1000
+    |> List.mapi (fun i x -> if i mod 7 = 0 then Float.nan else x)
+  in
   List.concat_map shaped sizes
+  @ [ with_nan 50; with_nan 600 ]
   @ List.init 200 (fun _ ->
     random_lags (1 + Random.State.int state 600) ~distinct:(1 + Random.State.int state 50))
 ;;

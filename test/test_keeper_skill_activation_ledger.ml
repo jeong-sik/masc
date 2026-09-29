@@ -340,13 +340,17 @@ let test_each_mutation_appends_one_row () =
   let after_delivery = expect_one_more "a delivery" after_second in
   let _ = ok "action" (act config trace_id ~call:"call-action" [ "call-workspace-a" ]) in
   let after_action = expect_one_more "an action" after_delivery in
-  (* Record compares every persisted field. The pristine activation is no
-     longer identical once delivery and action evidence have been added. *)
+  (* A repeated recording is judged on what the activation recorded when it
+     was made. The delivery and action that followed do not make it another
+     invocation, and the stored activation keeps them. *)
   (match Ledger.record ~config ~trace_id (activation ()) with
-   | Error (Ledger.Invocation_id_collision "call-workspace-a") -> ()
-   | Error error -> fail ("wrong stale record error: " ^ Ledger.store_error_to_string error)
-   | Ok _ -> fail "a pristine record replaced an activation with evidence");
-  check string "a stale record leaves the log unchanged" after_action (read_file file);
+   | Ok (_, Ledger.Already_recorded (existing : Ledger.activation)) ->
+     check bool "the stored activation keeps its delivery" true
+       (Option.is_some existing.delivery);
+     check int "and its action" 1 (List.length existing.actions)
+   | Ok (_, Ledger.Recorded _) -> fail "a repeated recording was recorded again"
+   | Error error -> fail ("a repeated recording was refused: " ^ Ledger.store_error_to_string error));
+  check string "a repeat after evidence adds nothing" after_action (read_file file);
   let _ = ok "repeat delivery" (deliver config trace_id [ "call-workspace-a" ]) in
   let _ = ok "repeat action" (act config trace_id ~call:"call-action" [ "call-workspace-a" ]) in
   check string "repeats add nothing" after_action (read_file file)

@@ -316,8 +316,10 @@ val record :
   activation ->
   (t * record_outcome, store_error) result
 (** Record one exact Agent Core invocation. Re-observing the same
-    [skill_tool_use_id] is idempotent only when every persisted field agrees.
-    A later invocation of the same Skill remains a distinct activation. *)
+    [skill_tool_use_id] is idempotent when every field the invocation recorded
+    agrees; the delivery and actions observed after it are not compared, and
+    the stored activation keeps them. A later invocation of the same Skill
+    remains a distinct activation. *)
 
 val observe_delivery :
   config:Workspace.config ->

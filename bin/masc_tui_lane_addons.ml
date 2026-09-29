@@ -986,6 +986,24 @@ let rec finite_values = function
 let technical_lines ?(height=24) ?(failed_note = "") ~width view =
   visual_text_lines ~height ~failed_note ~visual:false ~width view
 
+let installation_detail_lines ~width view =
+  let wrap line = Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
+      (Masc.Tui_decode.sanitize_terminal_text line) in
+  let edit_hint = if Option.is_some (selected_source_path view) then "  E:edit TOML" else "" in
+  let refresh_hint = if view.loading then "  Reading …" else "  r:refresh" in
+  let body = match view.snapshot with
+    | Some ({configuration=Some configuration;_} as snapshot) ->
+        (match selected_declaration view with
+         | Some declaration ->
+             ["Installation details · " ^
+                Option.value ~default:(Filename.basename declaration.source_path) declaration.installation_id;
+              "Esc:back" ^ edit_hint ^ refresh_hint; ""]
+             @ configuration_lines {view with configuration_cursor=0}
+                 {snapshot with configuration=Some {configuration with declarations=[declaration]}}
+         | None -> ["Installation selection changed · Esc:back" ^ refresh_hint])
+    | _ -> ["Installation inventory unread · Esc:back" ^ refresh_hint] in
+  List.concat_map wrap (diagnostic_lines view @ body)
+
 let pending_action view =
   match view.last_action, view.action_receipt with
   | Some request, Some {Action.state=(Action.Queued | Action.Running);_} -> Some request
@@ -1009,7 +1027,14 @@ let instance_controls (instance : instance) = match instance.phase with
    the front so it remains easy to find even when the other hints give way. *)
 let overview_hints view =
   if view.help_open then "Esc:close help"
+  else if Option.is_some view.document_key then
+    "?:help  Esc:back  E:edit  s:save  l:reload  u/U:revision"
   else match view.screen with
+  | Overview when view.presentation=Technical && view.focus=Configurations
+      && Option.is_none view.document_key ->
+      "?:help  Esc:back"
+      ^ (if Option.is_some (selected_source_path view) then "  E:edit TOML" else "")
+      ^ (if view.loading then "  Reading …" else "  r:refresh")
   | Overview ->
       "?:help  Esc:back  Enter:open  i:install  n:new  S:subs"
       ^ (if view.loading then "  Reading …" else "  r:refresh")
@@ -1113,8 +1138,9 @@ let overview_lines ~width view =
               Printf.sprintf "%d declared%s%s" declared
                 (if issues=0 then "" else Printf.sprintf " · %d config issues" issues)
                 (if config.complete then "" else " · inventory partial") in
-        let heading = Printf.sprintf "Lane Add-ons · %s · %d active · %d failed workers"
-          configuration_summary active failed in
+        let heading = Printf.sprintf "Lane Add-ons · %s · %d active · %d failed workers%s"
+          configuration_summary active failed
+          (if Option.is_some view.snapshot_read_error then " · STALE" else "") in
         let entries = overview_entries snapshot in
         let window = max 0 (view.instance_cursor - 4) in
         let items = List.mapi (fun index item -> index,item) entries
@@ -1323,6 +1349,9 @@ let lines ?(height=24) ?(failed_note = "") ~width view =
         Masc_tui_message_layout.fit_width line (max 1 width)) help_lines
       else if view.presentation = Flow then flow_lines view |> List.concat_map
         (fun line -> Masc_tui_message_layout.split_cells ~max_cells:(max 1 width) (Masc.Tui_decode.sanitize_terminal_text line))
+      else if view.presentation = Technical && view.screen=Overview && view.focus=Configurations
+        && Option.is_none view.document_key && Option.is_none view.draft
+      then installation_detail_lines ~width view
       else if view.presentation = Technical || Option.is_some view.document_key || Option.is_some view.draft
       then technical_lines ~height ~failed_note ~width view
       else (match view.screen with

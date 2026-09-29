@@ -436,7 +436,8 @@ beanie = 200
     check string "refusal did not mutate ledger" initial (ledger_bytes ());
     let before = get ~router (path ~size:"96" keeper) in
     check int "starting portrait" 200 before.status;
-    let credited = get ~router (item_path keeper) in
+    let reader = token_for config ~agent_name:"portrait-item-reader" Masc_domain.Worker in
+    let credited = get ~router ~token:reader (item_path keeper) in
     let credited_json = Yojson.Safe.from_string credited.body in
     check string "Item balance is an exact decimal string" "1000"
       Yojson.Safe.Util.(credited_json |> member "balance_milli" |> to_string);
@@ -481,7 +482,7 @@ beanie = 200
       (dashboard_portrait () = Keeper_portrait_equipment.Ready starting);
     ignore (require_ok Candle_shop.error_to_string
       (Candle_shop.purchase ~now:(fun () -> 1790640000.) ~base_path ~keeper:owner ~item));
-    (match item_account (get ~router (item_path keeper)) with
+    (match item_account (get ~router ~token:reader (item_path keeper)) with
      | Masc_tui_keeper_items.Ready account ->
        check int "Item view reads debit" 800 account.balance_milli;
        check bool "Item view reads purchase" true (List.mem item account.owned_items)
@@ -535,7 +536,7 @@ beanie = 200
     let corrupt = ledger_bytes () in
     check int "unreadable ledger refuses a cached portrait" 503 (get ~router (path ~size:"96" keeper)).status;
     check int "unreadable ledger refuses an Item account" 503
-      (get ~router (item_path keeper)).status;
+      (get ~router ~token:reader (item_path keeper)).status;
     (match dashboard_portrait () with
      | Keeper_portrait_equipment.Unavailable _ -> ()
      | Keeper_portrait_equipment.Ready _ -> fail "dashboard hid unreadable authority with cached gear");

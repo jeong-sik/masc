@@ -349,7 +349,10 @@ let test_explicit_prices_and_unpriced_items () =
 let test_large_tool_amounts_remain_exact () =
   with_workspace (fun _ _ config ->
     let amount = 9_007_199_254_740_993 in
-    credit config ~goal:"large-wallet" ~keeper:"keeper-a" amount;
+    (* Each payout stays within Candle_math's checked multiplication range;
+       their combined wallet crosses JavaScript's safe-integer boundary. *)
+    credit config ~goal:"large-wallet-a" ~keeper:"keeper-a" 4_503_599_627_370_497;
+    credit config ~goal:"large-wallet-b" ~keeper:"keeper-a" 4_503_599_627_370_496;
     write_config config
       ("\n[shop.prices_milli]\nglasses = " ^ string_of_int amount ^ "\n");
     let account = balance config "keeper-a" in

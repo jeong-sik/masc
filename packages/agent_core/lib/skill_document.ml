@@ -190,8 +190,11 @@ let unicode_trim value =
   loop 0 None 0
 ;;
 
-(* Stops at the first scalar that is not whitespace, or at a byte that does
-   not decode: either answers the question, and a skill body can be 16 KB. *)
+(* The answer [String.equal (unicode_trim value) ""] gives: every scalar
+   decodes and is whitespace. It stops at the first scalar that is not
+   whitespace or the first byte that does not decode, without building the
+   trimmed copy; the skill catalog asks it of a whole body before it checks
+   the body's size. *)
 let is_blank value =
   let rec blank_from index =
     index = String.length value

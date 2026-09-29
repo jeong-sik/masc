@@ -299,6 +299,12 @@ let test_blank_values () =
     ; "whitespace, then an invalid byte", "  \xff", false
     ; "an invalid byte, then whitespace", "\xff  ", false
     ; "a truncated scalar after whitespace", " \xe3\x80", false
+    ; "a space encoded in two bytes", "\xc0\xa0", false
+    ; "a space encoded in three bytes", "\xe0\x80\xa0", false
+    ; "a surrogate", "\xed\xa0\x80", false
+    ; "a lone continuation byte", "\x80", false
+    ; "escape, just below the separators", "\x1b", false
+    ; "a megabyte of spaces", String.make 1_048_576 ' ', true
     ]
 ;;
 

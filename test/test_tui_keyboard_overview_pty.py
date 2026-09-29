@@ -198,7 +198,10 @@ def opening_boot_frames(executable: str) -> None:
 
         def interact(process, fd, _slave, output, base_path):
             chat = expected.startswith(b"Keepers ")
-            needle = expected if chat else b"Continue"
+            # Home actions exist while the initial Keeper read is still in
+            # flight. A fallback must wait for that read's actual reason,
+            # not the earlier loading frame that already says Continue.
+            needle = expected if chat or mode in ("last", "keeper") else b"Continue"
             keyboard.wait_for_output(
                 process, fd, output, needle, start=0, timeout=10
             )

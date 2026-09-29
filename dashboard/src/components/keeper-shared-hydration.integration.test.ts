@@ -631,22 +631,22 @@ describe('KeeperConversationPanel hydration wiring', () => {
       expect(container.textContent).toContain('출력 hydration 실패 1')
     })
 
+    const recoveredEntry: ToolCallEntry & { keeper: string; execution_id: string } = {
+      ts: 1_783_267_241,
+      keeper: 'sangsu',
+      tool: 'keeper_context_status',
+      input: {},
+      output: 'recovered output joined from forced refresh',
+      wire_outcome: 'ok',
+      duration_ms: 37,
+      tool_use_id: 'tc-refresh-recovery',
+      execution_id: 'exec-refresh-recovery',
+    }
     fetchKeeperChatHistory.mockResolvedValueOnce(recoveryHistory)
-    fetchKeeperToolCalls.mockResolvedValueOnce({
-      entries: [
-        {
-          ts: 1_783_267_241,
-          keeper: 'sangsu',
-          tool: 'keeper_context_status',
-          input: {},
-          output: 'recovered output joined from forced refresh',
-          wire_outcome: 'ok',
-          duration_ms: 37,
-          tool_use_id: 'tc-refresh-recovery',
-          execution_id: 'exec-refresh-recovery',
-        },
-      ],
-    })
+    fetchKeeperToolCalls.mockResolvedValueOnce({ entries: [recoveredEntry] })
+    // #35924: the bulk refresh restores coverage, but the row reads ok only
+    // after the exact per-execution endpoint verifies that same output.
+    stubExactToolCallLookup(recoveredEntry)
 
     await hydrateKeeperChatHistory('sangsu', { force: true })
 
@@ -753,22 +753,22 @@ describe('KeeperConversationPanel hydration wiring', () => {
       expect(container.textContent).toContain('출력 hydration 실패 1')
     })
 
+    const reconnectRecoveredEntry: ToolCallEntry & { keeper: string; execution_id: string } = {
+      ts: 1_783_267_251,
+      keeper: 'sangsu',
+      tool: 'keeper_context_status',
+      input: {},
+      output: 'recovered output joined from active reconnect refresh',
+      wire_outcome: 'ok',
+      duration_ms: 39,
+      tool_use_id: 'tc-reconnect-recovery',
+      execution_id: 'exec-reconnect-recovery',
+    }
     fetchKeeperChatHistory.mockResolvedValueOnce(reconnectHistory)
-    fetchKeeperToolCalls.mockResolvedValueOnce({
-      entries: [
-        {
-          ts: 1_783_267_251,
-          keeper: 'sangsu',
-          tool: 'keeper_context_status',
-          input: {},
-          output: 'recovered output joined from active reconnect refresh',
-          wire_outcome: 'ok',
-          duration_ms: 39,
-          tool_use_id: 'tc-reconnect-recovery',
-          execution_id: 'exec-reconnect-recovery',
-        },
-      ],
-    })
+    fetchKeeperToolCalls.mockResolvedValueOnce({ entries: [reconnectRecoveredEntry] })
+    // #35924: the reconnect refresh restores coverage, but the row reads ok
+    // only after the exact per-execution endpoint verifies that same output.
+    stubExactToolCallLookup(reconnectRecoveredEntry)
 
     refreshActiveKeeperChatHistory({ force: true })
 

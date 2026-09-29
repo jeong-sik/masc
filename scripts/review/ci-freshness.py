@@ -40,10 +40,12 @@ def api_pages(gh, endpoint):
 
 
 def api(gh, endpoint):
-    pages = api_pages(gh, endpoint)
-    if len(pages) != 1 or not isinstance(pages[0], dict):
+    # Commit details paginate their files; the object's identity is on page one.
+    raw = command([gh, "api", endpoint])
+    value = json.loads(raw)
+    if not isinstance(value, dict):
         raise Unavailable("invalid_object_response")
-    return pages[0]
+    return value
 
 
 def timestamp(value):

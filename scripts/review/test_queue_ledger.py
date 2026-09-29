@@ -93,7 +93,9 @@ if key == 'files' and 'files_pages' in fixtures:
     raise SystemExit(0)
 pages = fixtures.get('pages', {}).get(key)
 if pages is not None and '--paginate' not in args:
-    raise SystemExit('missing pagination for ' + key)
+    if key != 'main':
+        raise SystemExit('missing pagination for ' + key)
+    pages = pages[:1]
 for page in pages if pages is not None else [fixtures[key]]:
     result = subprocess.run([os.environ['LEDGER_JQ'], '-r', query],
         input=json.dumps(page), text=True)
@@ -785,6 +787,15 @@ os.execv(os.environ['LEDGER_REAL_GIT'], [os.environ['LEDGER_REAL_GIT'], *args])
                                 env=dict(self.env, GUARD_GH=str(self.fake)), text=True,
                                 capture_output=True, timeout=20)
         return result.returncode, json.loads(result.stdout)
+
+    def test_paginated_main_commit_object_still_identifies_main(self):
+        def pages(data):
+            commit = data["main"]
+            data["pages"] = {"main": [dict(commit, files=[{"filename": "first"}] * 100),
+                                      dict(commit, files=[{"filename": "last"}] * 51)]}
+        code, receipt = self.freshness(pages)
+        self.assertEqual((code, receipt["status"]), (0, "fresh"))
+        self.assertEqual(receipt["main"], self.git("rev-parse", "main"))
 
     def test_created_at_not_delayed_job_or_rerun_start(self):
         self.main_change("lib/example.ml")

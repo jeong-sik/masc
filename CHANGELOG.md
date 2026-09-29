@@ -2,6 +2,114 @@
 
 ## [Unreleased]
 
+## [0.47.0] - 2026-09-29
+
+### Upgrade notes
+
+- runtime.toml now refuses a provider id that names a top-level table another reader owns, because a provider's bindings are a top-level table named after its id (`[voice.tts]` under a provider called `voice` was both a binding and the voice settings). The full list, which the server also sends as `reserved_provider_ids` in `GET /api/v1/runtime/config/raw`: tables with their own reader `providers`, `models`, `runtime`, `exec`, `egress`, `lsp`, `typesafeai`, `skills`, `fusion`, `board`, `voice`, `tui`, `slack`, `discord`, `repositories`, `browser`, `memory_os`; keeper runtime settings `keeper_settings`, `autonomous`, `debug`, `heartbeat`, `metrics`, `otel`, `reactive`, `sandbox`, `supervisor`, `turn`, `vision`, `web_search`, `wire_capture`; obsolete tables `system`, `routes`, `profiles` (#39559).
+- Newly refused from this version: `typesafeai`, `fusion`, `board`, `voice`, `tui`, `slack`, `discord`, `repositories`, `browser`, `memory_os` and every keeper runtime setting name except `web_search`. A file that declares one of them as a provider no longer loads; the error is at path `providers.<id>` and reads `provider id "<id>" collides with a reserved top-level runtime.toml namespace` (#39559).
+- To upgrade such a file, rename the provider before installing this version: rename `[providers.<id>]` and its sub-tables such as `[providers.<id>.credentials]`; rename each binding table `[<id>.<model>]`, one whose second segment is a model declared under `[models]`, to `[<new-id>.<model>]`, and leave the other `[<id>.*]` tables (for example `[voice.tts]`) to the reader that owns them; replace the runtime id `<id>.<model>` with `<new-id>.<model>` wherever the file names it, such as `[runtime] default`, `[runtime.assignments]`, lane `candidates` and exact-output lane slots (#39559).
+- Model ids and SSH endpoint ids are not top-level tables and are no longer checked against this list, so a model id such as `vision`, `runtime` or `routes` now loads (#39559).
+
+### Added
+
+- A Keeper's detail opens its Info tab with that Keeper's own portrait beside the Identity rows: real pixels eight rows tall on a Kitty terminal, a half-block mosaic twelve rows by 24 cells elsewhere, nothing under `NO_COLOR`, and the facts keep every row in a pane too short or narrow for it (#39750).
+- `[repositories]` accepts optional `github_host` and `graphql_url`, so the pull-request reader can target a GitHub Enterprise host instead of the hardcoded github.com endpoint. The reader token is read from the `hosts.yml` section for the configured host. #39752
+- Add the masc pad: `GET /api/v1/play/pad` answers the loaded DOS program's gamepad layout (Linux `BTN_*` button names onto machine keys, found by the program's saves name) and `POST /api/v1/play/pad {button, saves_name}` presses the bound keys; a press made on the layout of a program that is no longer loaded is refused, checked again under the machine's lock where the keys go in. `<.masc>/dos/pads/<saves name>.toml` overrides the builtin layout, which ships for `samguk3`. The play page draws the pad (narrower pads put SELECT and START under the two grids), reads a pad layout again on the next poll when a read fails, and reads a standard-mapping gamepad (RFC play-link-for-the-shared-machine). (#39753)
+- Keeper portraits can wear a crown or a beanie in the head slot, drawn in the band between the flame and the horns so neither is covered (#39765).
+- Add `GET /api/v1/play/screen.png`: an invite's bearer (`CanPlayMachine`) reads the shared DOS machine's current frame as a PNG, so an external agent with only a shell can see a game whose menus are drawn as pixels (RFC play-link-for-the-shared-machine). (#39769)
+- Keeper portraits can hold a book, a mug or a quill in the hand slot, drawn at the candle's lower right so they clear the flame, the horns and the face (#39773).
+- The `/about` candle comes in two styles: `painted`, the 2D portrait, and `dotted`, a small ray-marched 3D figure in square dots that sways on its axis. `c` on `/about` turns the candle to the other style and stores it in `[tui].candle`. On a Kitty terminal the dotted candle is sent as many pixels as its rows show, so no dot is scaled (#39791).
+- Keeper portraits can wear a bow tie or a medal in the neck slot, hung from the same band the scarf uses so they clear the mouth (#39803).
+
+### Changed
+
+- Board attention offers Jev an explicit uncertainty choice that sends the candidate to the full judgment lane. Confidence is validated as 0..1 and retained as evidence, without a numeric routing threshold (#39545).
+- Configured Board moderators can now close and reopen posts through the Board tools, alongside each post's author. Set `[board].moderators` in `runtime.toml`; the default list includes `e-masc-the-leader` (#39691, part of #39356).
+- `/login` opens on the four official clients with each one's number of
+  configured accounts. Choosing a client lists its accounts by email under a
+  `+ 새 계정` row; Enter on an account signs in as it, `D` previews removing
+  it and Esc goes back to the clients. `/login <client>` and
+  `/login <integration id>` open that client's accounts directly (#39751).
+- Open the TUI directly on the working Overview with connecting/loading status instead of a large animated startup candle; retain Keeper portraits and the `/about` candle. #39798
+- In the TUI, a Board post that has not loaded yet shows a short footer with only the keys that work there: Left/Esc to go back, r to retry, and Tab (#39799).
+
+### Fixed
+
+- Let a queued chat take the next Keeper slot after a debt-cap AGENT_CORE turn reaches a settled tool boundary. Keep official-client turns running until completion so their tool results remain in the vendor conversation (#39387).
+- Remove the unreachable official-client queued-chat host stop from shared and adapter types; retain repetition and terminal-effect stops. (#39387)
+- `/login` wraps its notice at the pane width, so a refused save's reason is read to its end, where the verification code (such as `rate_limited`) and detail are, instead of being cut at the pane's edge (#39699).
+- A non-default `github_host` without `graphql_url` is refused as an invalid declaration with the fix, instead of posting every repository to api.github.com where each would read as not visible. #39752
+- The pull-request reader compares a remote's host without case (RFC 4343) and reads `github_host` in lower case, so `https://GitHub.com/o/r` or `github_host = "GHE.EXAMPLE"` no longer reads as not GitHub. The `owner/repo` path keeps its case. #39752
+- A refused token is held per `graphql_url`: correcting the endpoint asks the new one with the same token instead of keeping the old endpoint's 401. #39752
+- On a Kitty terminal a placed portrait is sent again only when it is new, moved or changed, or when the frame rewrote a row it covers. A Kitty terminal that does not report its cell size draws the mosaic instead of placing a box from a guessed 10x20 cell, and a placement the encoder refuses is no longer recorded as on screen (#39770).
+- On macOS, a finished Claude Code, Codex or Muse turn no longer fails with
+  `Parse error: runtime boundary: Unix.Unix_error(Unix.EPERM, "kill", "")`
+  when a descendant of the client is still exiting as its process group is
+  cleaned up. A group kill that reached nobody counts as done when every
+  member is a zombie or already exiting; a live member still reports the
+  refusal (#39771).
+- A cancelled vision artifact request is rejected before submitting a store or load job to the domain pool (#39774).
+- Muse Keeper usage retains per-completion counted-once prompt and explicit cache counters when terminal totals are absent, ignores replayed usage events, and withholds partial totals after observed delivery gaps (#39778).
+- The shared-screen PNG route matches `Dos_lane.Other_program`, so `dune build @check` no longer fails on a partial match and main CI is green again (#39780).
+- Name the TUI and dashboard surface Lanes. The dashboard shows each lane's purpose, configuration state and observation time, and marks retained rows stale when refresh fails. Missing terminal evidence no longer means a run never finished. Browser progress names the selected source, Stagehand help acknowledges pointer actions, and closing a session clears its page without immediately reading the closed browser (#39783).
+- An exception the Claude Code or Antigravity runtime did not expect, caught
+  as the turn leaves it, is a masc internal error
+  (`internal_unhandled_exception`, site `claude_code.runtime_boundary` or
+  `antigravity.runtime_boundary`) rather than a provider parse error, so the
+  receipt, the failure route and the chat text no longer say "Parse error".
+  Lane rotation is unchanged: the walk stops on it as it did before (#39792).
+- A half-block mosaic cell whose colour the terminal cannot draw is drawn in the terminal's own foreground or background instead of the colour of the cell before it (#39801).
+- Send the TUI /about candle and Keeper portraits as PNG images to avoid Ghostty 1.3.1 Kitty decompression crashes while preserving transparency and image replacement (#39805).
+- Web search with Brave as the only provider answers "no results" again when a rare query has no web hits, instead of reporting that every search provider failed (#39806).
+- The outermost `run_turn` catch-all for Claude Code and Antigravity re-raises
+  `Out_of_memory`, `Stack_overflow` and `Sys.Break` instead of reporting them as
+  `internal_unhandled_exception`. It logs the backtrace of other exceptions it
+  types, because the typed error keeps only the exception text. Inner state
+  callbacks, stdout reads and Claude Code's user-message write still turn
+  these three exceptions into errors (#39824).
+- When a Muse account runs out of quota, MASC now reads that account's usage and rests only that account until the reset time the provider gives. The next turn can use another declared account or runtime instead of retrying the spent one. MASC does not guess quota from the error text (#39810).
+- When MASC is shutting down while it reads a Codex or Muse account's usage, the Keeper's failure recovery still runs, and that account is no longer left stuck as "already reading", so a later read can run (#39832).
+- Web search now tells a search that finished with no hits apart from a provider that failed or sent a broken answer. An empty answer no longer counts as a failure, and the next provider is still tried (#39802).
+- The dashboard's agent monitor no longer shows 0 when a run source could not be read. It shows — until that source answers, and keeps the last good rows marked STALE (#39786).
+- Keepers resume Board work after an approved retry was deferred or interrupted by a restart. Before, the startup check refused that state and stopped the Board workers (#39784).
+- When a Keeper's sandbox cannot read a config or environment file, the error now says why: missing file, bad path, permission, or filesystem error. Before it said only "cannot read config file" (#39788).
+- Execute keeps every token of an argv-shaped shell call, so `sh -n -c S` checks the script instead of running it and a directory-qualified program keeps its path (#39839).
+
+### Internal
+
+- Every Kitty picture takes its image id from the closed `Masc_tui_graphics.image` variant, and a test checks no two share one; `Masc_tui_graphics.query_id` and `Masc_tui_portrait_view.mascot_image_id` are removed (#39750).
+- Require a Ready PR and all five PR check jobs to succeed before the new summary check succeeds; Draft and skipped jobs now leave a failing check (#39759).
+- PTY scenarios that wait on a fixture event keep reading the terminal, and a lint check reports a wait that does not, so a TUI blocked on a full PTY no longer hides the request a scenario waits for (#39767).
+- `Masc_tui_frame_presenter.Presented` carries the rows the frame wrote (`Whole_screen` or `Rows`), `Masc_tui_portrait_view.flush` takes `~rewritten` in place of `~presented`, and `Masc_tui_portrait_view.default_cell` is removed (#39770).
+- Upgrade dashboard test tooling to Vitest 5 and align the registered jest-axe matcher declarations with Vitest's matcher interface; declare the Node versions supported by Vitest, Vite, and jsdom (#39772).
+- The "Keeper selection identity" roster scenario walks beta's detail down
+  after `r` until the refreshed current task id is drawn. Since the portrait
+  opens the Info tab, Current Work sits below the first screen at the
+  harness height (#39781).
+- `Keeper_portrait_solid.mascot` renders the dotted figure, and `Keeper_portrait_draw` exposes `palette` (the table the 2D renderer paints with) and `image_init` (#39791).
+- Execute now records, in its tool-call ledger row, the output size it compared
+  against the inline ceiling and whether its handler stored the output, and
+  `scripts/harness/tool_calls/result_size_windows.py` prints a numbers-only
+  table of result sizes per tool and lane from the ledger (#39793).
+- The workspace curator gains a ledger of per-fact dispositions and a
+  model-free reconciliation that finds new and vanished facts, stage 1 of
+  RFC-workspace-curator-curates-changed-facts. Nothing calls it yet (#39800).
+- Make macOS Lane Add-on qualification read repository fixtures and wait for a complete resized terminal frame before checking its guidance (#39790, #39804).
+- The TUI region baseline suite, `test_tui_region_baseline_pty`, pins where
+  the Board list, Config, the keeper detail (with and without the roster),
+  the keeper chat and, as a control, the Keepers list put their title, rules,
+  borders, last row, blank rows and list window at 80 to 158 columns, where
+  the roster's borders sit, and that a press on the chat's folded Gate row
+  lands on it. It reads a screen only once it is whole, still, uncut and
+  fully answered by fixtures; its shared helpers
+  (`test/tui_region_harness.py`) serve the suites for the frame's remaining
+  readers (#39703).
+
+### Performance
+
+- Move vision artifact hash, verification, and frame pruning work from the main Eio domain to the shared domain pool (#39766).
+
 ## [0.46.0] - 2026-09-28
 
 ### Upgrade notes

@@ -1903,10 +1903,203 @@ let test_jev_adapter_sends_the_decisions_and_reads_not_relevant () =
         Alcotest.failf "expected one request to Jev, saw %d" (List.length bodies)))
 ;;
 
+(* A rejected batch answer must say which keys it carried. The 53 quarantines
+   of 2026-09-29 all read "fields must be exactly ..." and nothing durable
+   separates a missing field from an extra one from a repeated one. The parser
+   stays as strict as before; only the message names the shape, and a value
+   never appears in it. *)
+let test_batch_rejection_names_the_answer_shape () =
+  let one_item fields = `Assoc [ "verdicts", `List [ `Assoc fields ] ] in
+  let valid =
+    [ "candidate_id", `String "c-1"
+    ; "decision", `String "relevant"
+    ; "rationale", `String "SECRET-RATIONALE-VALUE"
+    ]
+  in
+  let rejected label answer =
+    match Judgment.batch_of_yojson answer with
+    | Ok _ -> Alcotest.failf "%s: the answer must stay rejected" label
+    | Error detail -> detail
+  in
+  let check_names label detail needles =
+    List.iter
+      (fun needle ->
+        Alcotest.(check bool)
+          (Printf.sprintf "%s names %s" label needle)
+          true
+          (contains_substring ~needle detail))
+      needles
+  in
+  (match Judgment.batch_of_yojson (one_item valid) with
+   | Ok [ _ ] -> ()
+   | Ok _ | Error _ -> Alcotest.fail "the exact three fields must still be accepted");
+  let extra =
+    rejected "extra" (one_item (valid @ [ "confidence", `String "SECRET-EXTRA-VALUE" ]))
+  in
+  check_names "extra" extra [ "item=0"; "missing=[]"; "extra=[\"confidence\"]"; "repeated=[]" ];
+  Alcotest.(check bool) "an extra field's value stays out" false
+    (contains_substring ~needle:"SECRET-EXTRA-VALUE" extra);
+  Alcotest.(check bool) "a field's value stays out" false
+    (contains_substring ~needle:"SECRET-RATIONALE-VALUE" extra);
+  let missing =
+    rejected "missing" (one_item [ "candidate_id", `String "c-1"; "decision", `String "relevant" ])
+  in
+  check_names "missing" missing [ "missing=[\"rationale\"]"; "extra=[]" ];
+  let alias =
+    rejected
+      "alias"
+      (one_item
+         [ "candidate_id", `String "c-1"
+         ; "decision", `String "relevant"
+         ; "reason", `String "x"
+         ])
+  in
+  check_names "alias" alias [ "missing=[\"rationale\"]"; "extra=[\"reason\"]" ];
+  let repeated =
+    rejected
+      "repeated"
+      (one_item
+         [ "candidate_id", `String "c-1"
+         ; "candidate_id", `String "c-2"
+         ; "decision", `String "relevant"
+         ; "rationale", `String "x"
+         ])
+  in
+  check_names "repeated" repeated [ "missing=[]"; "extra=[]"; "repeated=[\"candidate_id\"]" ];
+  let long_key = String.make 40 'k' in
+  let clipped = rejected "long key" (one_item (valid @ [ long_key, `Null ])) in
+  Alcotest.(check bool) "a long key is clipped" false
+    (contains_substring ~needle:long_key clipped);
+  let second_item =
+    rejected
+      "second item"
+      (`Assoc
+          [ ( "verdicts"
+            , `List
+                [ `Assoc valid
+                ; `Assoc [ "candidate_id", `String "c-2"; "decision", `String "relevant" ]
+                ] )
+          ])
+  in
+  check_names "second item" second_item [ "item=1"; "missing=[\"rationale\"]" ];
+  let envelope =
+    rejected "envelope" (`Assoc [ "verdicts", `List []; "note", `String "SECRET-NOTE" ])
+  in
+  check_names "envelope" envelope [ "keys=[\"verdicts\"; \"note\"]" ];
+  Alcotest.(check bool) "an envelope value stays out" false
+    (contains_substring ~needle:"SECRET-NOTE" envelope);
+  (* The expected envelope key with the wrong value type must name that
+     type requirement, not claim its already-correct key is missing. None
+     of these answers may become accepted or reveal the rejected value. *)
+  List.iter
+    (fun value ->
+      let detail =
+        rejected "non-list verdicts" (`Assoc [ "verdicts", value ])
+      in
+      Alcotest.(check string) "wrong envelope value explains the list requirement"
+        "board-attention batch verdict field verdicts must be a list" detail)
+    [ `Null; `Bool false; `Int 1; `String "SECRET-VERDICTS-VALUE";
+      `Assoc [ "secret", `String "SECRET-OBJECT-VALUE" ] ];
+  (match Judgment.batch_of_yojson (`Assoc [ "verdicts", `List [] ]) with
+   | Ok [] -> ()
+   | Ok _ | Error _ -> Alcotest.fail "an empty verdict list must remain accepted")
+;;
+
+(* Board-attention quarantines on 2026-09-29 ended on a rejected key set whose
+   sentence did not say which keys. Scenario: each declared slot answers with a
+   wrong shape (an extra key on the first, an alias for [rationale] on the
+   second). The flow must walk to the successor, end as
+   [Domain_output_invalid], and the detail the durable partition keeps (the
+   last slot's) must name the shape and quote no value. *)
+let test_wrong_shape_on_every_slot_ends_domain_invalid_naming_the_shape () =
+  with_prompt_registry (fun () ->
+    run_eio (fun ~sw ~net ~clock ->
+      let candidate = candidate "board-attention-wrong-shape" in
+      let answer fields = `Assoc [ "verdicts", `List [ `Assoc fields ] ] in
+      let extra_key =
+        answer
+          [ "candidate_id", `String candidate.candidate_id
+          ; "decision", `String "relevant"
+          ; "rationale", `String "SECRET-FIRST-RATIONALE"
+          ; "confidence", `String "SECRET-CONFIDENCE"
+          ]
+      in
+      let aliased_key =
+        answer
+          [ "candidate_id", `String candidate.candidate_id
+          ; "decision", `String "relevant"
+          ; "reason", `String "SECRET-REASON"
+          ]
+      in
+      let first_server =
+        Fixture.start_server
+          ~sw
+          ~net
+          ~clock
+          (Fixture.Reply (Fixture.openai_response extra_key))
+      in
+      let second_server =
+        Fixture.start_server
+          ~sw
+          ~net
+          ~clock
+          (Fixture.Reply (Fixture.openai_response aliased_key))
+      in
+      let first = target "board-attention-wrong-shape-extra" first_server.base_url in
+      let second = target "board-attention-wrong-shape-alias" second_server.base_url in
+      publish_lane [ first; second ];
+      let prepared =
+        match prepare_exact ~net:(Some net) candidate with
+        | Ok prepared -> prepared
+        | Error _ -> Alcotest.fail "the wrong-shape fixture was not admitted"
+      in
+      (match
+         Exact_flow.execute
+           ~clock
+           ~callback_error_to_string:Fun.id
+           ~before_dispatch:(fun _ -> Ok ())
+           ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+           prepared
+       with
+       | Ok _ -> Alcotest.fail "a wrong shape on every slot must not be accepted"
+       | Error (Exact_flow.Domain_output_invalid detail) ->
+         List.iter
+           (fun needle ->
+             Alcotest.(check bool)
+               (Printf.sprintf "the terminal detail names %s" needle)
+               true
+               (contains_substring ~needle detail))
+           [ "fields must be exactly"
+           ; "item=0"
+           ; "missing=[\"rationale\"]"
+           ; "extra=[\"reason\"]"
+           ; "repeated=[]"
+           ];
+         List.iter
+           (fun secret ->
+             Alcotest.(check bool)
+               (Printf.sprintf "the terminal detail never quotes %s" secret)
+               false
+               (contains_substring ~needle:secret detail))
+           [ "SECRET-REASON"; "SECRET-FIRST-RATIONALE"; "SECRET-CONFIDENCE" ]
+       | Error _ -> Alcotest.fail "expected Domain_output_invalid as the terminal error");
+      Alcotest.(check int) "first slot dispatched once" 1 (Fixture.post_count first_server);
+      Alcotest.(check int)
+        "second slot dispatched once"
+        1
+        (Fixture.post_count second_server)))
+;;
+
 let () =
   Alcotest.run
     "Keeper Board-attention exact flow"
-    [ ( "production adapter"
+    [ ( "parse boundary"
+      , [ Alcotest.test_case
+            "a rejected batch answer names its shape, never its values"
+            `Quick
+            test_batch_rejection_names_the_answer_shape
+        ] )
+    ; ( "production adapter"
       , [ Alcotest.test_case "CLI-only Board judgments need no HTTP attempt" `Quick
             test_cli_only_executes_without_http_provenance
         ; Alcotest.test_case
@@ -1928,6 +2121,10 @@ let () =
             "strict singleton mismatch advances to declared successor"
             `Quick
             test_domain_candidate_id_mismatch_advances_to_declared_successor
+        ; Alcotest.test_case
+            "a wrong shape on every slot ends domain-invalid and names the shape"
+            `Quick
+            test_wrong_shape_on_every_slot_ends_domain_invalid_naming_the_shape
         ; Alcotest.test_case
             "Keeper preference reorders the Board lane"
             `Quick

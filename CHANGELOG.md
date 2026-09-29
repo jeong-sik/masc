@@ -71,6 +71,7 @@
 - Runtime lane candidate edits in the TUI now check the displayed order and submit the configuration revision, refusing concurrent changes instead of replacing another client's candidate order (#39900).
 - The MCP endpoint answers `keeper_portrait_read` with the typed keeper-internal refusal instead of "Unknown tool (registry inconsistency)", and the keeper tool matrix exercises the tool (#39906).
 - Exact-output generation and token measurement now share the provider concurrency limit with ordinary requests; permit waits respect the exact request deadline (#39879).
+- When the TUI refuses a runtime lane edit, the message now says the lane differs from the displayed order, or names the first runtime.toml parse error and where it is (#39913).
 
 ### Internal
 

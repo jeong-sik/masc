@@ -13,7 +13,7 @@ type t =
 let all = [ None_; Minimal; Low; Medium; High; XHigh; Max; Ultra ]
 
 (* Ordinal position on the canonical effort ladder. The variant declaration
-   order already encodes the ladder (None_ < Minimal < ... < Max); this
+   order already encodes the ladder (None_ < Minimal < ... < Ultra); this
    explicit map makes the order nameable and keeps [compare] total so a future
    variant addition surfaces as a non-exhaustive match instead of a silent
    misorder. *)

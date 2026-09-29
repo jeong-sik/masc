@@ -90,6 +90,38 @@ let test_a_path_that_cannot_be_examined_disables () =
       (contains ~affix:"could not be examined" reason))
 ;;
 
+(* A link to a file that is gone ends in ENOENT like a missing file does, but the
+   link is there: candle.toml was put there on purpose. *)
+let test_a_link_to_a_missing_file_disables () =
+  with_dir (fun dir ->
+    let path = Filename.concat dir "candle.toml" in
+    Unix.symlink (Filename.concat dir "not-mounted.toml") path;
+    let reason = disabled_reason (Candle_config.load_file ~path) in
+    Alcotest.(check bool) "says it is a link to a missing file" true
+      (contains ~affix:"link to a file that does not exist" reason))
+;;
+
+(* Opening a FIFO waits for a writer that never comes, and the wait would hold up
+   whatever asked whether Candle is on. The alarm turns a regression into a
+   failure instead of a hang. *)
+let test_a_file_that_is_not_a_regular_file_disables_without_being_opened () =
+  with_dir (fun dir ->
+    let path = Filename.concat dir "candle.toml" in
+    Unix.mkfifo path 0o600;
+    let previous =
+      Sys.signal Sys.sigalrm (Sys.Signal_handle (fun _ -> failwith "opening candle.toml blocked"))
+    in
+    let (_ : int) = Unix.alarm 10 in
+    Fun.protect
+      ~finally:(fun () ->
+        let (_ : int) = Unix.alarm 0 in
+        Sys.set_signal Sys.sigalrm previous)
+      (fun () ->
+        let reason = disabled_reason (Candle_config.load_file ~path) in
+        Alcotest.(check bool) "says it is not a regular file" true
+          (contains ~affix:"not a regular file" reason)))
+;;
+
 let () =
   Alcotest.run
     "candle_config"
@@ -107,6 +139,10 @@ let () =
             test_a_path_that_cannot_be_read_disables
         ; Alcotest.test_case "a path that cannot be examined disables" `Quick
             test_a_path_that_cannot_be_examined_disables
+        ; Alcotest.test_case "a link to a missing file disables" `Quick
+            test_a_link_to_a_missing_file_disables
+        ; Alcotest.test_case "a file that is not a regular file disables without being opened"
+            `Quick test_a_file_that_is_not_a_regular_file_disables_without_being_opened
         ] )
     ]
 ;;

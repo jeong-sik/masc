@@ -34,7 +34,7 @@ def run(executable: str) -> None:
 
     def interact(process, fd, _slave, output, _base):
         h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
-        h.palette_go(process, fd, output, b"go config", b"MASC Config")
+        h.palette_go(process, fd, output, b"go System / runtime.toml", b"MASC System")
         h.wait_for_output(process, fd, output, ERROR_PREFIX, start=0, timeout=10)
         h.resize_and_wait(process, fd, output, rows=30, columns=131,
                           needle=ERROR_PREFIX, controls=(h.FULL_REDRAW,),

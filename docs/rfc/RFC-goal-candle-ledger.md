@@ -76,7 +76,7 @@ related: ["every-lane-is-one-row-in-one-registry", "exact-lane-walks-one-slot-li
   - 컴파일러가 못 잡는 곳이 있다. `server_standalone_lane_projection.ml:89-98` 의 손으로 쓴 목록, 대시보드 `dashboard/src/api/dashboard-standalone-lanes.ts`(`standalone-lanes-parity.test.ts` 가 `Standalone_lane.to_id` 와 맞춘다), `dashboard/src/api/dashboard-exact-lane-runs.ts`(맞추는 시험이 없고, 모르는 lane 이 한 줄만 와도 응답 전체를 거절한다), `dashboard/src/components/internal-agents-monitor.ts`, Python 시험 `test/test_tui_keyboard_input.py`, `test/test_tui_runtime_lane_editor.py` 다.
   - 서버, TUI, 대시보드는 같은 PR 에 들어가야 한다(`docs/rfc/RFC-exact-lane-walks-one-slot-list.md:232`). 그 RFC 의 `cli_slots` 제거는 아직 main 에 없고(`runtime_toml.ml` 에 12곳), lane 표 모양이 바뀌는 중이다.
 - **[사실]** 헌법은 저장소에서 버전 관리되는 SSOT 다(`docs/constitution.xml:9-10`). 헌법의 규칙에 예외를 두려면 헌법을 고친다. RFC 가 예외를 선언해도 헌법은 그대로다.
-- **[사실]** Goal 전이는 `Goal_phase.decide_transition` 다음에 검증 원장에 기록하고, 그다음 phase 를 쓰고, 그다음 이벤트를 남긴다. 원장 기록이 실패하면 phase 쓰기를 막는다(`lib/workspace_goals.ml:409-416`). 사람이 확정하면 `confirmed_at` 이 같은 트랜잭션에서 검증 기록에 남는다(`lib/workspace_goals.ml:1204-1235`).
+- **[사실]** Goal 전이는 `Goal_phase.decide_transition` 다음에 검증 원장에 기록하고, 그다음 phase 를 쓰고, 그다음 이벤트를 남긴다. 원장 기록이 실패하면 phase 쓰기를 막는다(`lib/workspace_goals.ml:409-416`). 사람이 확정하면 Goal 잠금 안에서 `confirmed_at` 이 먼저 검증 기록(`goal_verifications.json`)에 저장되고, 그 뒤에 Goal phase 가 `goals.json` 에 저장된다. 두 저장은 다른 파일이라 한꺼번에 일어나지 않는다(`lib/workspace_goals.ml:1187-1208`, `lib/goal/goal_verification.ml:510-519`, `lib/goal/goal_store.ml:591-616`).
 - **[사실]** 검증기의 통과·반박 결과는 `Goal_store.transact_goal` 안에서 검증 원장에 먼저 커밋되고, phase 는 그 뒤에 쓰인다. 결과의 `recorded_at` 은 트랜잭션에 들어가기 전에 정해진다(`lib/workspace_goals.ml:482-498`, `:815-862`). 결과를 커밋하는 곳은 `Goal_verification.record_proof_verdict` 를 부르는 `commit_verifier_decision` 한 곳이다(`:831`). 이미 커밋된 결과로 phase 를 옮기는 경로가 둘 더 있다. 서버가 커밋과 phase 쓰기 사이에 죽었을 때 `reconcile_committed_proof`(`:871`)가, `Verifying` 에서 `request_complete` 를 다시 받았을 때 `answer_verifying_repeat`(`:1008`)가 그렇다. 이미 반영된 결과가 다시 오면 phase 를 옮기지 않고 그대로 돌려준다(`:832-846`). 사람의 확정 `confirm_completion` 은 `request_id`, `verification_run_id`, `criterion_revision` 셋을 대조하고, 확정을 커밋한 뒤 이벤트를 남긴다(`:1204-1235`). Goal 의 criterion 은 `revision` 문자열을 가진다(`lib/goal/goal_store.mli:69-74`). 잠금 순서는 Goal, backlog, goal-task links 이고(`goal_store.mli:295-297`), 검증 원장 잠금은 Goal 잠금을 잡은 뒤에 잡는다(`lib/goal/goal_verification.mli:4-5`).
 - **[사실]** `read_backlog_observation_r` 는 주 파일을 못 읽으면 `.last-good` 를 돌려준다. 원본만 읽는 함수는 `read_backlog_r` 다(`lib/workspace/workspace_backlog.mli:8, 20-27`). Task 와 Goal 의 연결에는 `read_goal_task_links_authoritative_r` 가 있다(`lib/workspace/workspace_goal_index.mli:73`).
 - **[사실]** GC 는 끝난(`Done`·`Cancelled`) Task 를 `tasks-archive.json` 으로 옮긴다(`lib/workspace/workspace_gc.mli:41-56`). 지금 Goal 에 연결된 Task 41개 중 12개가 archive 에 있다. GC 는 backlog 를 먼저 쓰고 잠금을 놓은 뒤에 archive 에 붙여서, 그 사이에는 끝난 Task 가 두 파일 어디에도 없다(`lib/workspace/workspace_gc.ml:121-129`). Task 를 삭제하면 Goal 연결도 함께 지운다(`lib/workspace/workspace_task.mli:29-36`).
@@ -95,7 +95,7 @@ related: ["every-lane-is-one-row-in-one-registry", "exact-lane-walks-one-slot-li
 | 이벤트 | 남기는 때 | 담는 것 |
 |---|---|---|
 | `Snapshot` | 검증기의 통과 결과를 검증 원장에 커밋하기 직전 | goal_id, 검증 요청 id, criterion revision, 검증 통과 시각, Goal 생성 시각, 그때의 기한(Goal 이 들고 있던 그대로. 없을 수 있다), 제목·metric·target, 그때 연결된 Task 의 id 목록 |
-| `PayoutOwed` | 사람이 확정할 때. 확정과 같은 Goal 트랜잭션 안에서 | goal_id, 검증 요청 id, 검증 통과 시각, 확정 시각 |
+| `PayoutOwed` | 사람이 확정할 때. 확정 기록을 저장한 다음, Goal phase 를 저장하기 전에(3.2) | goal_id, 검증 요청 id, 검증 통과 시각, 확정 시각 |
 | `Candidates` | 일꾼이 Task 를 읽은 뒤, 모델을 부르기 전에 | goal_id, 검증 요청 id, `Snapshot` 의 Task 마다 상태(찾음, 삭제됨)와 찾은 Task 의 제목·담당자·상태·끝난 시각, 후보 Task 와 후보 keeper 목록 |
 | `PayoutFailed` | 다시 시도해도 결과가 같은 이유가 생겼을 때(지금은 기한을 읽을 수 없음 하나) | goal_id, 검증 요청 id, 이유 |
 | `Paid` | 지급할 때. 한 줄에 전부 적는다 | goal_id, 검증 요청 id, 등급, 총액, 답한 lane 슬롯(모델) id(없을 수 있다), 후보 Task 마다 관계 판정, keeper 별 가중치·몫·감액 계수·지급액, 감액에 쓴 값(기준 시각, 기한, 감액률, 바닥) |
@@ -144,7 +144,7 @@ related: ["every-lane-is-one-row-in-one-registry", "exact-lane-walks-one-slot-li
 
 ### 3.2 지급 시점과 재오픈
 
-**[제안]** 지급은 세 시점에 걸친다. 검증을 통과할 때 입력을 고정하고, 사람이 확정할 때 지급 의무를 남기고, 그 뒤에 일꾼이 후보를 정해 지급한다. 앞의 둘은 Goal 전이 안에서 원장에 쓴다.
+**[제안]** 지급은 세 시점에 걸친다. 검증을 통과할 때 입력을 고정하고, 사람이 확정할 때 지급 의무를 남기고, 그 뒤에 일꾼이 후보를 정해 지급한다. 앞의 둘은 Goal 잠금 안에서 원장에 쓴다.
 
 1. **검증 통과.** 검증기가 통과 결과를 내면 `Snapshot` 을 원장에 쓰고, 그다음 결과를 검증 원장에 커밋한다. 커밋된 결과에는 언제나 `Snapshot` 이 있어야 해서 커밋 전에 쓴다. 결과를 커밋하는 곳이 `commit_verifier_decision` 한 곳이라 `Snapshot` 도 그 안에서 한 번만 쓴다(2장). phase 를 옮기는 통과 결과일 때만 쓰고, 반박 결과와 이미 반영된 결과가 다시 오는 경우(재전달)에는 쓰지 않는다.
    - `Snapshot` 의 검증 통과 시각은 그 결과의 `recorded_at` 과 같은 값이다. 결과는 트랜잭션에 들어가기 전에 만들어지므로(2장) 그 값을 그대로 쓴다.
@@ -152,9 +152,16 @@ related: ["every-lane-is-one-row-in-one-registry", "exact-lane-walks-one-slot-li
    - `Snapshot` 에 넣는 Task 정보는 연결 파일의 id 목록뿐이다. 원본만 읽는 함수(`read_goal_task_links_authoritative_r`)로 읽고, 읽지 못하면 쓰지 않고 전이를 거절한다.
    - 잠금 순서는 Goal, backlog, links 다음에 원장이다(2장). 원장 잠금은 덧붙이는 동안만 잡고 그 안에서 다른 잠금을 잡지 않는다.
    - 전이가 그 뒤에 실패하면 쓸모없는 `Snapshot` 이 남고, 같은 요청이 다시 오면 하나 더 남는다. 지급은 확정된 통과의 `Snapshot`(검증 요청 id 와 통과 시각이 같은 것)만 따른다.
-2. **사람의 확정.** `confirm_completion` 은 확정을 검증 원장에 기록한 뒤, Goal 잠금을 잡은 같은 트랜잭션 안에서 `PayoutOwed` 를 원장에 쓴다. 확정된 결과와 검증 요청 id, 통과 시각이 같은 `Snapshot` 이 있고, 지급 상태(3.1)가 새 `PayoutOwed` 를 쓸 수 있을 때만 쓴다. Candle 이 켜지기 전에 통과한 Goal 처럼 `Snapshot` 이 없으면 쓰지 않는다. `PayoutOwed` 를 쓰지 못하면 그 확정을 거절하고, 운영자가 다시 확정하면 된다. `PayoutOwed` 를 쓴 뒤 Goal 저장이 실패해서 phase 가 그대로여도 `PayoutOwed` 는 남는다. 다시 확정하면 검증 요청 id 가 같아서 새로 쓰지 않는다(3.1). 이미 `Completed` 인 Goal 에 확정이 다시 와도 같은 조건으로 판단한다.
-   - 확정 안에서 쓰는 이유: 확정과 `PayoutOwed` 사이에 틈이 있으면 누가 그 사이에 재오픈하거나 drop 하는 것만으로 확정된 지급이 흔적 없이 사라진다. 재오픈은 검증 원장의 확정 기록을 지우기까지 한다(`lib/goal/goal_verification.ml:426-465`).
-   - `PayoutOwed` 는 확정을 검증 원장에 기록한 다음에 쓴다. 원장에 쓰고 나서 확정이 실패해서 확정하지 않은 통과에 지급 의무가 남는 일이 없게 하려는 순서다.
+2. **사람의 확정.** `confirm_completion` 은 Goal 잠금을 잡은 채 세 가지를 차례로 저장한다. (가) 검증 원장의 확정 기록. (나) Candle 원장의 `PayoutOwed`. (다) Goal phase `Completed`. 셋은 다른 파일이라 한꺼번에 일어나지 않는다. 잠금이 막는 것은 그 사이에 다른 요청이 끼어드는 것뿐이다. 지급 의무는 (나)를 쓴 순간에 생긴다. (나)는 확정된 결과와 검증 요청 id, 통과 시각이 같은 `Snapshot` 이 있고, 지급 상태(3.1)가 새 `PayoutOwed` 를 쓸 수 있을 때만 쓴다. Candle 이 켜지기 전에 통과한 Goal 처럼 `Snapshot` 이 없으면 쓰지 않는다. (나)를 쓰지 못하면 (다)를 하지 않고 그 확정을 거절한다. 이미 `Completed` 인 Goal 에 확정이 다시 와도 같은 조건으로 판단한다.
+   - 순서의 이유. (가) 다음에 (나)를 쓴다. 확정하지 않은 통과에 지급 의무가 남는 일이 없게 하려는 것이다. (나) 다음에 (다)를 저장한다. 기존 Goal 전이가 기록을 phase 쓰기보다 먼저 하는 순서와 같다(`lib/workspace_goals.ml:409-416`).
+   - 잠금의 이유. 재오픈은 같은 Goal 잠금 안에서 검증 원장의 확정 기록을 지우고(`lib/goal/goal_verification.ml:426-465`), drop 은 같은 잠금 안에서 phase 를 쓴다(`lib/goal/goal_store.ml:622-648`). 잠금이 없으면 (가)와 (나) 사이에 재오픈이 끼어들어 확정 기록이 지워진 채 (나)가 쓰일 수 있다.
+   - 확정 중에 실패하면 아래처럼 남는다. 서버가 그 자리에서 죽어도 같다. 원장 끝에 반쯤 쓰인 줄이 남으면 서버를 시작할 때 잘려 나가서 (나)가 실패한 것과 같아진다(3.1).
+
+     | 실패한 곳 | 남는 것 | 다시 확정하면 | 재오픈하거나 drop 하면 |
+     |---|---|---|---|
+     | (가) | 없다 | 처음부터 한다 | 지급 의무가 없다 |
+     | (나) | 확정 기록만 있다. phase 는 `Awaiting_confirmation` | (나)와 (다)를 한다. `confirmed_at` 은 처음 확정한 시각이다 | 지급 의무가 없다. Goal 이 완료된 적이 없다. 재오픈하면 확정 기록이 지워지고, 다시 통과해 확정하면 새 `Snapshot` 과 새 `PayoutOwed` 를 쓴다 |
+     | (다) | 확정 기록과 `PayoutOwed`. phase 는 `Awaiting_confirmation` | `PayoutOwed` 를 새로 쓰지 않고(3.1) phase 만 옮긴다 | `PayoutOwed` 가 남아 지급 대기다. 완료되지 않은 Goal 에 지급이 나간다. 7장에서 운영자가 정한다 |
 3. **후보와 지급.** 일꾼이 지급 대기 Goal 마다 아래를 한다. 지급 대기 목록은 원장에서 읽고(3.1) Goal 의 phase 는 보지 않는다.
    - Task 를 읽어 후보를 정하고 `Candidates` 를 쓴다(3.4). `Candidates` 가 이미 있으면 그것을 쓴다.
    - 모델을 부르고(3.4) `Paid` 나 `Unattributed` 를 쓴다.
@@ -166,7 +173,7 @@ related: ["every-lane-is-one-row-in-one-registry", "exact-lane-walks-one-slot-li
 - 지급은 `PayoutOwed` 와 그것이 가리키는 `Snapshot` 의 값(검증 통과 시각, 기한, Task id 목록)만 따른다. 재오픈해서 다시 통과해도 이미 남은 `PayoutOwed` 는 바뀌지 않는다.
 - 같은 Goal 에 두 번 지급하지 않게 하는 키(멱등 키, idempotency key)는 goal_id 다. 3.1 의 cursor 조건 덧붙이기와 지급 상태가 이 키를 강제한다.
 - 재오픈했다가 다시 완료돼도 추가 지급이나 회수가 없다. 이미 지급된 Goal 이 `Dropped` 가 돼도 회수하지 않는다.
-- 확정한 뒤에는 재오픈하거나 drop 해도 확정된 지급은 그대로 한다. 확정된 적이 없는 Goal 이 `Dropped` 로 끝나면 지급하지 않는다.
+- `PayoutOwed` 를 쓴 뒤에는 재오픈하거나 drop 해도 지급은 그대로 한다. `PayoutOwed` 가 없는 Goal 이 `Dropped` 로 끝나면 지급하지 않는다.
 - Candle 이 켜지기 전이나 `Disabled` 인 동안 통과한 Goal 에는 `Snapshot` 이 없어서 지급하지 않는다. 원장에는 그 Goal 이 빠졌다는 기록도 남지 않는다. 그런 Goal 을 재오픈해서 다시 통과시키면 새 `Snapshot` 이 생기고 첫 지급 대상이 된다. 재오픈에는 게이트가 없어서(6장) 소급 지급을 하지 않는다는 4장의 규칙이 이 길로는 열려 있다. 지금 대상은 완료 3건이다.
 
 이유: 회수 규칙을 만들면 이미 쓴 Candle 때문에 잔액이 마이너스가 될 수 있고 그 처리 규칙이 또 필요하다. 재오픈해서 고쳐도 지급액은 처음 그대로다. 처음 완료가 부실했던 경우의 손해는 받아들인다.
@@ -384,6 +391,8 @@ Candle 을 켜면 keeper 행동이 바뀔 수 있다. 바뀌는지는 켜기 전
 - 재오픈해도 두 번 지급되지 않는지.
 - 확정한 뒤 지급 전에 재오픈하거나 drop 해도 지급되는지.
 - `PayoutOwed` 를 쓰지 못하면 확정이 거절되는지.
+- `PayoutOwed` 를 쓰지 못해 거절된 확정을 재오픈하면 지급 의무가 없고, 다시 통과해 확정하면 `PayoutOwed` 가 하나 남는지.
+- `PayoutOwed` 를 쓴 뒤 phase 저장이 실패한 확정을 다시 하면 `PayoutOwed` 가 하나 그대로이고 Goal 이 완료되는지.
 - 두 일꾼이 동시에 돌아도 한 번만 지급되는지.
 - Task 가 archive 에 있어도 후보가 되는지, Task 를 못 읽으면 `Candidates` 를 쓰지 않고 다음에 다시 하는지.
 - lane 이 쉬면 pulse 로 다시 시도되고, 응답이 거절되면 지급 대기로 남는지.
@@ -412,7 +421,7 @@ Candle 을 켜면 keeper 행동이 바뀔 수 있다. 바뀌는지는 켜기 전
 - **원장은 평문 파일이다.** 서명이나 해시 체인이 없어서, 호스트에서 이 파일에 쓸 수 있는 keeper 는 고칠 수 있다. keeper 샌드박스가 `.masc/` 에 닿는지는 확인하지 못했다.
 - **규칙을 바꾸는 경로.** 가격표와 등급 금액표는 TOML(운영자 소유)이다. lane 프롬프트, 등급 파서, 후보 필터, 나머지 계산은 저장소 파일과 코드다. 헌법은 병합과 auto-merge 를 keeper 가 한다고 적는다(`docs/constitution.xml:341`). 그래서 keeper 는 지급 규칙을 바꾸는 PR 을 내고 keeper 의 리뷰로 머지할 수 있다. 이 RFC 는 그 경로를 막지 않는다. 대신 `Paid` 에 답한 슬롯을 적고, 프롬프트나 슬롯을 바꾸는 PR 은 시험 세트의 결과를 붙이게 했다(3.4).
 - **원장이 고장 나면 검증 통과와 확정이 막힌다.** Candle 이 `Enabled` 일 때 `Snapshot` 이나 `PayoutOwed` 를 쓰지 못하면 그 전이를 거절한다. 원장 파일을 못 쓰는 상황(디스크, 권한)에서 켜져 있는 동안만 그렇다. 확정은 Candle 을 끄고 다시 하면 된다. 검증 통과는 다르다. 검증기는 거절된 커밋을 남기고 멈추고, keeper 가 다시 요청하거나 다른 결과를 커밋하거나 서버를 다시 시작해야 다시 본다. 그때 모델을 새로 불러서 통과 시각이 늦어지고, 그만큼 감액이 커질 수 있다(3.3). 설정 오류는 Candle 을 `Disabled` 상태로 만들어 이 영향을 없앤다(3.9).
-- **지급이 밀리거나 빠질 수 있다.** 확정과 `PayoutOwed` 는 같은 트랜잭션이라 확정된 지급이 재오픈이나 drop 으로 사라지지 않는다(3.2). lane 이 쉬거나 Task 를 못 읽으면 지급 대기가 pulse 간격에 다시 시도된다. 응답이 계속 거절되는 Goal 은 지급 대기로 남고, 다음 확정이나 다른 지급의 끝이나 서버 시작 때 다시 시도한다. 지급 대기 목록은 TUI 에서 보인다. 같은 Goal 의 지급이 두 번 나가는 것은 `Paid` 한 줄, cursor 조건 덧붙이기, Goal 별 일꾼 하나가 막는다(3.1, 3.2). `Disabled` 인 동안 통과한 Goal 은 원장에 흔적 없이 지급되지 않는다. TUI 는 `Disabled` 이유를 보이지만 그 기간에 통과한 Goal 을 세지는 않는다.
+- **지급이 밀리거나 빠질 수 있다.** 확정 호출이 성공하면 `PayoutOwed` 가 이미 있어서, 그 뒤의 재오픈이나 drop 이 지급을 지우지 못한다(3.2). lane 이 쉬거나 Task 를 못 읽으면 지급 대기가 pulse 간격에 다시 시도된다. 응답이 계속 거절되는 Goal 은 지급 대기로 남고, 다음 확정이나 다른 지급의 끝이나 서버 시작 때 다시 시도한다. 지급 대기 목록은 TUI 에서 보인다. 같은 Goal 의 지급이 두 번 나가는 것은 `Paid` 한 줄, cursor 조건 덧붙이기, Goal 별 일꾼 하나가 막는다(3.1, 3.2). `Disabled` 인 동안 통과한 Goal 은 원장에 흔적 없이 지급되지 않는다. TUI 는 `Disabled` 이유를 보이지만 그 기간에 통과한 Goal 을 세지는 않는다.
 - **워크어라운드 자가 점검.** 시그니처 3종과 체크리스트 7항목을 이렇게 봤다.
   - 텔레메트리만 남기는 항목이 하나 있다. 통과 전 기한 변경이다(위). 감액을 지키는 장치가 아니라 관찰이고, 다루는 방법은 운영자가 정한다(7장). 그 밖에는 없다.
   - 문자열 분류기와 catch-all 은 없다. 후보 keeper 는 이름 parse 와 keeper 설정 파일이 있는지로, 기한은 형식 파서로, 후보 Task 는 관계 판정 lane 으로 가른다.
@@ -441,7 +450,7 @@ Candle 을 켜면 keeper 행동이 바뀔 수 있다. 바뀌는지는 켜기 전
   - 막지 않고 관계 판정에만 맡긴다. 가장 넓게 열려 있다.
   - `Todo` 가 아닌 Task 도 거절한다. 이미 시작한 Task 를 붙이는 일까지 막는다.
   - 연결 시각을 남기고 '끝나기 전에 연결됐다'를 후보 조건으로 둔다. 연결 기록 형식이 바뀌어서 hard cut 이 필요하고, 지금 연결 45개에는 시각이 없다.
-- 사람이 확정할 때 원장에 `PayoutOwed` 를 쓰고, 못 쓰면 확정을 거절하는 것(3.2). 확정이 Candle 원장 쓰기에 걸린다. 대안은 확정을 걸지 않고 일꾼이 검증 원장과 이벤트에서 확정된 Goal 을 찾는 것인데, 재오픈이 검증 원장의 확정 기록을 지우고 이벤트 파일은 fsync 를 하지 않아서 지급이 빠질 수 있다.
+- 사람이 확정할 때 원장에 `PayoutOwed` 를 쓰고, 못 쓰면 확정을 거절하는 것(3.2). 확정이 Candle 원장 쓰기에 걸린다. 대안은 확정을 걸지 않고 일꾼이 검증 원장과 이벤트에서 확정된 Goal 을 찾는 것인데, 재오픈이 검증 원장의 확정 기록을 지우고 이벤트 파일은 fsync 를 하지 않아서 지급이 빠질 수 있다. 저장은 확정 기록, `PayoutOwed`, phase 순으로 세 번이고 한꺼번에 일어나지 않는다. 마지막 phase 저장만 실패한 뒤 운영자가 다시 확정하지 않고 재오픈하거나 drop 하면, 완료된 적 없는 Goal 에 지급이 나간다(3.2 표). 이것도 받아들일지 정해 주세요.
 - 통과 전 기한 변경으로 감액을 피할 수 있는 것을 3.11 의 관찰로 시작할지, 감액 입력을 keeper 가 바꿀 수 없는 값에 묶을지, 1단계에서 감액을 뺄지(6장).
 - 가격을 처음에 고정 가격표로 시작하고 유통량 연동 공식을 뒤로 미루는 것(3.5). 앞서 운영자는 같은 입력이면 같은 값이 나오는 물가 공식을 정했다.
 
@@ -456,7 +465,7 @@ Candle 을 켜면 keeper 행동이 바뀔 수 있다. 바뀌는지는 켜기 전
 | `magic_number` | 흐름 제어에 숫자 비교를 쓰지 않는다. 감액률, 바닥, 가격, 등급별 금액, 반감기는 TOML 값이다. 5장 시험 세트의 합격선은 시험 기준이다. |
 | `gates` | 새 게이트를 만들지 않는다. 설정 오류는 Candle 만 `Disabled` 상태로 만들고 서버 부팅과 keeper 의 턴을 막지 않는다(3.9). 잔액 확인은 구매 한 곳뿐이다. 예외가 셋 있다. (1) Candle 이 켜져 있을 때 `Snapshot` 을 쓰지 못하면 검증 통과 전이를 거절한다(3.2). (2) `PayoutOwed` 를 쓰지 못하면 확정을 거절한다(3.2). (1)(2)는 기존 전이가 원장 기록을 먼저 하는 순서를 따르는 것이고, Candle 을 끄면 사라진다. (3) `set_task_goal` 이 끝난 Task 를 거절한다(5장 2번 (나)). 이것은 Candle 을 꺼도 남는다. (2)와 (3)은 운영자 승인 항목이다(7장). |
 | `when_stuck` | 헌법은 "괴상한 비교문이나 결정론적 판단을 넣고 싶어지는 순간"에 lane 을 늘리라고 한다. 등급, 관계 판정, 가중치는 lane 이 정하고 산술은 코드가 한다(3.4). 가격은 고정 가격표라서 이 조항이 걸리지 않는다. 물가 연동 공식을 더할 때 다시 본다(3.5). |
-| `persist_before_model_call` | 판단 대상(`Snapshot`, `PayoutOwed`, `Candidates`)을 모델을 부르기 전에 남기고, 호출의 입력과 출력은 lane 실행 기록이 남긴다. 지급 근거는 `Paid` 에 적는다(3.1, 3.4). `PayoutOwed` 를 확정 안에서 써서 재오픈이나 drop 이 지급 대상을 지우지 못한다(3.2). |
+| `persist_before_model_call` | 판단 대상(`Snapshot`, `PayoutOwed`, `Candidates`)을 모델을 부르기 전에 남기고, 호출의 입력과 출력은 lane 실행 기록이 남긴다. 지급 근거는 `Paid` 에 적는다(3.1, 3.4). `PayoutOwed` 를 phase 저장 전에 써서, 확정이 성공한 뒤의 재오픈이나 drop 이 지급 대상을 지우지 못한다(3.2). |
 | `authoritative_read_only` | 원장을 읽을 수 없으면 지급과 구매를 하지 않는다(3.1). `Snapshot` 은 원본만 읽는 함수만 쓰고, 읽지 못하면 쓰지 않는다. Task 는 backlog 와 archive 를 함께 읽고, 못 읽으면 후보를 정하지 않고 다시 시도한다(3.4). |
 | `failure_keeps_evidence` | 모델 호출이 실패하면 lane 실행 기록에 `Failed` 가 남고 Goal 은 지급 대기로 남는다(3.4). 다시 해도 결과가 같은 실패만 `PayoutFailed` 로 끝낸다. 지급 의무는 `PayoutOwed` 로 남는다. |
 | `strict_parse_no_default`, `closed_sum_over_string` | 이벤트, 등급, 관계 판정, 아이템, 반감기(`Off` 또는 시간), 실패 이유, 기한(없음·날짜·읽을 수 없음), Task 상태(찾음·삭제됨·못 읽음)는 닫힌 variant 다. 모르는 값, 읽을 수 없는 기한, 잘못된 가중치, 못 읽는 archive 행은 실패로 처리하고 기본값으로 바꾸지 않는다. 기한을 읽는 함수를 합치면 overdue 알림의 "날짜가 아니면 늦지 않음"도 같은 값으로 바뀐다. 알림 동작은 읽을 수 없는 값에서 지금과 같다(3.3). |

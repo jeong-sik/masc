@@ -287,6 +287,7 @@ let start_with ~sw ~base_path ~enabled ~prepare =
         | `Stop -> ()
         | `Wait promise -> Eio.Promise.await promise; drain ()
         | `Run ->
+          (* fire-and-forget: queue the next batch; No_owner means shutdown already stopped it. *)
           (try if enabled () && run ~base_path ~prepare then ignore (wake owner) with
            | Eio.Cancel.Cancelled _ as error -> raise error
            | exn -> Log.Server.error "workspace curator owner %s: %s" base_path (Printexc.to_string exn));

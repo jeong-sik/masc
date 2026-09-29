@@ -8371,6 +8371,7 @@ let render_keeper_logs (state : state) =
       | Some error ->
           let style =
             match error with
+            | Metrics_tail.Remote_workspace | Metrics_tail.Workspace_unconfirmed -> Theme.recede ()
             | Metrics_tail.Storage_error _ -> (Theme.bad ())
             | Metrics_tail.Row_errors _ -> (Theme.warn ())
           in

@@ -10707,7 +10707,8 @@ let apply_remote_keeper_rows state =
     in
     replace_keeper_rows ~preserve_on_error:false state
       ~keepers:(List.map Tui_decode.keeper_of_runtime observed) ~error;
-    state.log_error <- Some "Local Keeper metrics are unavailable for a remote workspace"
+    apply_keeper_log_snapshot state
+      { entries = []; error = Some Metrics_tail.Remote_workspace }
 
 let apply_keeper_roster_load state result =
   (match result with
@@ -11100,6 +11101,8 @@ let apply_server_identity_reading state reading =
       | Workspace_identity_match | Workspace_identity_unread -> false
     in
     clear_local_workspace ~keep_keeper_rows:same_remote state;
+    apply_keeper_log_snapshot state
+      { entries = []; error = Some Metrics_tail.Remote_workspace };
     if not same_remote then begin
       state.keeper_roster <- Keeper_control.Roster_unobserved;
       state.keeper_roster_error <- None
@@ -11111,7 +11114,9 @@ let apply_server_identity_reading state reading =
      | Workspace_identity_mismatch _ ->
        clear_local_workspace state;
        state.keeper_roster <- Keeper_control.Roster_unobserved
-     | Workspace_identity_match | Workspace_identity_unread -> ())
+     | Workspace_identity_match | Workspace_identity_unread -> ());
+    apply_keeper_log_snapshot state
+      { entries = []; error = Some Metrics_tail.Workspace_unconfirmed }
 
 let apply_http_surfaces state results =
   (* Establish the workspace before projecting HTTP rows. A confirmed remote
@@ -11177,8 +11182,12 @@ let load_keeper_logs_if_safe state base_path limit keeper =
   match state.workspace_identity with
   | Masc_tui_types.Workspace_identity_match ->
     load_selected_keeper_logs state base_path limit keeper
-  | Masc_tui_types.Workspace_identity_unread
-  | Masc_tui_types.Workspace_identity_mismatch _ -> ()
+  | Masc_tui_types.Workspace_identity_unread ->
+    apply_keeper_log_snapshot state
+      { entries = []; error = Some Metrics_tail.Workspace_unconfirmed }
+  | Masc_tui_types.Workspace_identity_mismatch _ ->
+    apply_keeper_log_snapshot state
+      { entries = []; error = Some Metrics_tail.Remote_workspace }
 ;;
 
 (* What a detail tab reads on the way in, for the Keeper it is opened on.

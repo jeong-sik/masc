@@ -50,6 +50,7 @@ SOURCE_MODULES = (
     "bin/masc_tui_render.ml",
     "bin/masc_tui_keeper_portrait.ml",
     "bin/masc_tui_keeper_portrait.mli",
+    "bin/masc_tui_portrait_view.ml",
     "bin/masc_tui_render_chat.ml",
     "bin/masc_tui_message_layout.ml",
     "test/tui_region_harness.py",

@@ -3220,7 +3220,7 @@ beanie = 0
   let row = `Assoc ["name", `String keeper;
     "portrait", Portrait.reading_to_json (Portrait.Ready starting)] in
   let execution_seed = `Assoc ["cache_marker", `String "retained-metadata";
-    "keepers", `List [row]; "keeper_briefs", `List [row]] in
+    "keepers", `List [row]; "continuity_briefs", `List [row]] in
   let mission_seed = `Assoc ["cache_marker", `String "retained-metadata";
     "keeper_briefs", `List [row];
     "operator_targets", `Assoc ["keepers", `List [row]]] in
@@ -3251,7 +3251,7 @@ beanie = 0
         match portraits path json with
         | [reading] -> check bool (label ^ " " ^ String.concat "." path) true (expected reading)
         | _ -> fail "cached surface lost or duplicated its Keeper") paths)
-      [execution, [["keepers"]; ["keeper_briefs"]];
+      [execution, [["keepers"]; ["continuity_briefs"]];
        mission, [["keeper_briefs"]; ["operator_targets"; "keepers"]]] in
   let first = execution_payload ~state ~sw ~clock req in
   (match Surface.dashboard_execution_cached_http_representation (context ()) with

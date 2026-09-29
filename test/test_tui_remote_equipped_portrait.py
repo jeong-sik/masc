@@ -129,7 +129,7 @@ def remote_portrait(binary: str, evidence: Path) -> None:
             assert not (Path(local_base) / ".masc/keepers" / f"{keeper}.json").exists()
             h.wait_for_output(process, fd, output, b"[workspace mismatch]", start=0,
                               timeout=WAIT_SECONDS)
-            h.send_and_wait(process, fd, output, b"2", b"MASC Keepers")
+            h.tab_until(process, fd, output, b"MASC Keepers")
             h.select_keeper_row(process, fd, output, keeper.encode())
             start = len(output)
             h.send_and_wait(process, fd, output, b"\r", INFO_TAB)

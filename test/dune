@@ -7045,7 +7045,7 @@
 (test
  (name test_workspace_memory_ledger_view)
  (modules test_workspace_memory_ledger_view)
- (libraries alcotest digestif yojson masc))
+ (libraries alcotest digestif yojson masc masc.fs_compat))
 
 (test
  (name test_workspace_memory_ledger)

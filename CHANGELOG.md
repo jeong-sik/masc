@@ -2,6 +2,103 @@
 
 ## [Unreleased]
 
+## [0.48.0] - 2026-09-29
+
+### Fresh state required
+
+- Skill activations recorded before this release (`skill-activations.json` in each session directory) are not read: discovery and the activation projections show only what is recorded after the upgrade, and a session in progress at deploy records from its next event. The old files can be deleted (#39862).
+
+### Added
+
+- `/mcp/play` is a seat door for an invited player: an invite's Player
+  credential opens it, it lists and calls only the `CanPlayMachine` tools
+  (`masc_dos_screen`, `masc_dos_press`, `masc_dos_type`, `masc_dos_step`,
+  `masc_dos_pass`), answers only the handshake, `ping`, `tools/list` and
+  `tools/call`, and opens no server stream (#39821).
+- An authorized MCP move recovers a stopped Keeper's DOS controller; invalid
+  credentials, screen reads and an active Keeper retain the controller (#39821).
+- Include the observation time of a cached shim probe in keeper lane status, so operators can distinguish an old release reading from a fresh one (#39828).
+- Expose keeper shim observations through the authenticated operator fleet route, preserving observation times without probing SSH endpoints or repairing persisted metadata during a read (#39830).
+- An MCP caller of `masc_dos_screen` gets the frame as a PNG image item after
+  the text observation, so an invited agent can read a VGA game's lettering.
+  MCP tool results carry a tool's model-visible media through the projection
+  the official-client bridge uses; media MCP cannot carry is named and marks
+  the result `isError`. The fallback text and call-summary text sanitize
+  invalid UTF-8 from tool output (#39856).
+- The TUI can issue, inspect and revoke shared DOS play invites with `/play`,
+  and keeps the last issued link locally for `/play link` until the TUI exits
+  (#39861).
+- Add a read-only Keeper portrait tool that returns the current equipment and PNG artifact without changing equip state (#39869).
+- Portrait rasterization and PNG encoding run off the calling Keeper fiber so other work remains responsive during a read (#39869).
+- Claude Sonnet 5.5 (`claude-sonnet-5-5`) is in the model catalog: 1M context window, 128K output, and the low, medium, high, xhigh and max effort levels. Forcing a tool choice is refused for this model (#39812).
+- `/play qr` displays the last issued shared DOS invite link as a terminal QR
+  when the Keeper chat pane can show it without wrapping (#39873).
+
+### Changed
+
+- Prepare Workspace Curator requests from changed facts within a full rendered-prompt byte limit. Each batch searches one transient index for other Keepers' neighboring facts, includes their related ledger claims and conflicts, and retains unselected facts for later requests. This preparation step does not enable the Curator lane or change production configuration (#39846).
+- Show each active Goal on one Overview row with its title, attention state, linked-task count and due date, and show its recorded owner in Planning detail. Linked tasks are no longer presented as Goal achievement (#39847).
+- Board attention names the missing, extra and repeated keys of a rejected batch verdict item and the keys of a rejected envelope. A `verdicts` field with a non-list value names the list requirement. Quarantine diagnostics describe the rejected shape without quoting values or changing acceptance (#39857).
+- Read Workspace Curator results from the durable ledger across Keeper, dashboard, and HTTP surfaces. Retire the old proposal writer and publication route; show whether each member's current source is present, absent, or unreadable. Ledger summaries reject a concurrent replacement instead of combining an old digest with new contents. Classifications remain unverified; this change does not enable the live Curator lane (#39865).
+- Installed discovery verification now checks ledger contents, digest, and Keeper preview bindings. Retire the obsolete proposal writer, roundtrip probe, preview harness, and their direct tests; historical evidence is marked as retired (#39865).
+- A saved prompt preset whose `prompt_overrides.json` is in an older
+  `schema_version` is still listed as unreadable, but the reason now names
+  both versions and says what to do: set its prompts again and save them as
+  a new preset (#39872).
+- `masc_board_post_get` with `comment_tail=0` now returns the post body without comments instead of refusing (#39874).
+- The task-completion judge is told that a producer checkout's branch and HEAD are that checkout's state, not GitHub main. It decides "in main / not in main" from the current main content it opens on GitHub, not from a compare result (compare shows commit ancestry only, which a squash merge or a later revert breaks), and writes "unconfirmed: no main comparison" with the checkout's branch and HEAD when the repository is private or the content cannot be read (#39875).
+- Chat loading warnings point to `/errors` for full scrollable details; switching Keepers clears the previous conversation's loading errors before the new read completes. (#39899)
+- New setups use Claude Sonnet 5.5 instead of Claude Sonnet 5: the Claude Code seed bindings and the quick-setup default model moved, and the OpenRouter Sonnet 5 seed binding was removed. An existing `runtime.toml` keeps its own bindings (#39812).
+- `masc setup` folds the routine per-file and per-Skill lines of its init step into the closing count line, and marks success lines with a green check and its first line with a candle on a terminal (not with `NO_COLOR`, `TERM=dumb` or piped output). `masc init` still prints every line (#39897).
+- A Goal's `due_date` is read in one place. It is `YYYY-MM-DD` for a day that exists and falls due at 23:59:59 UTC of that day, whatever the operator's time zone is. The overdue notice and the Overview countdown use it, and `masc_goal_upsert` refuses a value that is not such a date instead of storing it (#39923).
+
+### Fixed
+
+- Declare a second Muse account from an existing `muse-serve` provider: the copy signs in at a new `account-home`, and the Config form shows the `HOME=<home> muse login` sign-in. #39578
+- The Verification screen reads the server's current cancelled, unreviewed and empty-approval-reason answers correctly, and the Lanes table now tells an empty recent observation window apart from run history that was not kept (#39807).
+- Show active runtime rate limits in the TUI list, details and assignment picker. Provider Retry-After expiry and successful answers clear the observation; narrow picker rows retain combined quota and rate-limit warnings. Missing rate-limit observations fail decoding instead of appearing ready. (#39815)
+- On the Keeper detail Info tab, requeueing the oldest blocked Board-attention partition is now `b`; it was `Q`, which the global quit key took first, so the requeue could not be reached (#39818).
+- Preserve Board Ready confirmation times and server boot identities across restart compaction, including repeated confirmations of the same generation, without inventing observations for older ledger rows (#39841).
+- Correct the MCP resource catalog descriptions and remove duplicate agent resources and unadvertised reader aliases. Missing library topics now return a JSON-RPC read error containing the requested URI, and the JSON library index returns an empty document list when the library directory is absent (#39850).
+- Edit on a missing file now points at Write instead of a `mode=overwrite` argument Edit does not accept (#39854).
+- Edit's no-match rejection now says to re-Read the file and copy `old_string` from its current bytes (#39855).
+- #39860 shows when a Keeper checkout's local upstream observation is stale.
+- Recording the same Skill invocation again after its delivery or an action was observed returns the stored activation instead of failing with `invocation_id_collision` (#39862).
+- `path_outside_sandbox` rejections now explain that paths must be inside a permitted root and that relative paths resolve against the workspace root (#39864).
+- Preserve Auto Judge provider or semantic failures when an approval source resolves during terminalization. Record a source-only ending as a cancelled run without a saved judgment, and distinguish historical uncertainty in the Internal Agents view (#39871).
+- A pool job's nested submit stays inline while the job runs even when another job on the same worker ends first: pool work is marked on the job's fiber instead of with a per-domain count that the other job's end reset (#39882).
+- Expired Player invites release the shared DOS controller on the next move, so another participant can continue (#39884).
+- A Muse model that fails verification with a non-retryable `modelError` is checked against the account's `usage/read`; a spent window is reported as `quota_exhausted` and saved as usage-limited instead of refusing the save with a 502 (#39887).
+- The Board-attention run record keeps the key-shape sentence of a rejected judgment (`item=`, `missing=`, `extra=`, `repeated=`) when the flow ends on HTTP slots alone. Before, only the class `invalid_domain_output` reached the run record while the Blocked partition kept the sentence. #39888
+- `masc setup` checks `imp.toml` before calling the model, so an `imp.toml` the server would refuse (such as a microVM keeper without `sandbox_image`) stops setup before the model round trip (#39895).
+- Runtime lane candidate edits in the TUI now check the displayed order and submit the configuration revision, refusing concurrent changes instead of replacing another client's candidate order (#39900).
+- The MCP endpoint answers `keeper_portrait_read` with the typed keeper-internal refusal instead of "Unknown tool (registry inconsistency)", and the keeper tool matrix exercises the tool (#39906).
+- Exact-output generation and token measurement now share the provider concurrency limit with ordinary requests; permit waits respect the exact request deadline (#39879).
+- When the TUI refuses a runtime lane edit, the message now says the lane differs from the displayed order, or names the first runtime.toml parse error and where it is (#39913).
+- MCP `tools/list` records its tool assignment under the verified
+  credential's owner instead of the raw bearer, so tokens no longer land in
+  `<base>/data/tool-events` and `tools/call` finds the assignment by name.
+  Files written before this fix may still hold bearers (#39829).
+- `keeper_portrait_read` now refuses a portrait size below 48 or above 512, which is the range the tool declares. Before, it accepted sizes down to 16 and its error message said "between 16 and 512". (#39925)
+- Release installation checks wait for server readiness before verifying the installed dashboard, preventing startup JSON from being mistaken for broken packaged assets (#39936).
+
+### Internal
+
+- Keep Draft PR snapshots from cancelling or shadowing Ready CI, and require complete Ready results when approval and queue checks exclude verified Draft evidence using the exact skipped-job names emitted by GitHub (#39834).
+- Make the operator snapshot cache revalidation test use controlled time and explicit background completion while preserving stale-value and single-compute assertions (#39849).
+- Validate exactly one Workspace Curator decision per selected changed fact before updating the ledger, reject duplicate or out-of-batch decisions and unknown preexisting claim or conflict references, and pin prompt resolution while sizing requests (#39853).
+- Run Workspace Curator through bounded changed-fact batches, validate answers before saving their decisions to the ledger, and skip model calls on unchanged wakes. This change does not enable the live lane (#39858).
+
+### Performance
+
+- The TUI Overview makes its Team projection and Todo backlog summary once per unchanged input snapshot instead of several times per frame, so a key that only moves a cursor no longer re-parses every Todo creation time (#39838).
+- The TUI's terminal-text sanitizers return an all-ASCII cell unchanged instead of walking it scalar by scalar, which made sanitising an ASCII name or key hint about sixteen times cheaper (#39842).
+- A Keeper session's Skill activation ledger is an append-only event log (`skill-activation-events.jsonl`): recording an activation, delivery or action appends one row and applies it to the ledger the server already holds, instead of reading, re-validating and atomically rewriting the whole session document on every event (#39862).
+- The schedule store keeps the decoded `schedules.json` with the file version it was read from, so a reader of an unchanged ledger no longer reads, parses and decodes the whole multi-megabyte document; a miss decodes on the domain pool (#39870).
+- File-version caching applies only to filesystem-backed schedules; Memory backends retain their own authoritative ledger even when a local mirror shares the same path (#39870).
+- The TUI splits its server-sent event streams (the observer feed, the Keeper chat stream and the GitHub login stream) by scanning only the bytes each chunk adds, instead of copying and searching everything held since the last line ended. A 919KB `execution_snapshot` read in 16KB chunks took 35.6ms of the TUI's loop to split and now takes 1.2ms (#39909).
+- The TUI reads an observer frame's leading `type` member before parsing the frame, and a frame that type decides by itself (a whole dashboard projection, the internal agent runs push, or a type outside the event families this build reads) is delivered without the rest being parsed. A 722KB `operator_snapshot` took 8.9-10.3ms of the TUI's loop to parse and its type now takes about 15-20µs to read; the rest of such a frame is no longer checked, so it no longer reads as undecodable when it is not JSON (#39926).
+
 ## [0.47.0] - 2026-09-29
 
 ### Upgrade notes

@@ -305,6 +305,47 @@ let test_an_invite_recovers_only_a_stopped_keepers_controller () =
         ])
     [ false; true ]
 
+(* RFC play-link-for-the-shared-machine §2.8 over MCP: the gate a Keeper's
+   call and the play page's routes run also stands before an MCP client's
+   pass. *)
+let test_an_invite_passes_only_to_someone_at_the_machine () =
+  let module Lane = Dos_lane in
+  let program = "\xb4\x00\xcd\x16\x09\xc0\x74\xf8\xcd\x20" in
+  with_state ~auth:true (fun ~base_path handle ->
+    Fun.protect
+      ~finally:(fun () ->
+        let who = match Lane.screen () with
+          | Ok { Lane.controller = Some name; _ } -> name
+          | Ok _ | Error _ -> "cleanup" in
+        ignore (Lane.eject ~who ~announce:(fun () -> ()) () : (unit, Lane.error) result))
+      (fun () ->
+        (match Lane.load ~who:"pi"
+          ~ledger_dir:(Filename.concat base_path "ledger")
+          ~saves_dir:(Filename.concat base_path "saves")
+          ~checkpoint_dir:(Filename.concat base_path "checkpoints")
+          ~program_name:"wait.com" ~program_bytes:program ~files:[]
+          ~announce:(fun () -> ()) with
+         | Ok _ -> ()
+         | Error error -> fail (Lane.error_to_string error));
+        let response =
+          handle
+            (request
+               ~params:(`Assoc [ "name", `String "masc_dos_pass"
+                               ; "arguments", `Assoc [ "to", `String "nobody" ] ])
+               "tools/call")
+        in
+        let result = match member "result" response with
+          | Some result -> result
+          | None -> fail "tools/call produced no result" in
+        check bool "a pass to a name not at the machine is an error" true
+          (member "isError" result = Some (`Bool true));
+        check bool "and says so" true
+          (String_util.contains_substring (Yojson.Safe.to_string result) "not at the DOS machine");
+        check (option string) "the invite keeps the controller" (Some "pi")
+          (match Lane.screen () with
+           | Ok observation -> observation.Lane.controller
+           | Error error -> fail (Lane.error_to_string error))))
+
 let loopback_request_authority () =
   match Server_request_authority.of_host_port ~host:"127.0.0.1" ~port:8935 with
   | Ok authority -> authority
@@ -404,6 +445,8 @@ let () =
             test_the_seat_refuses_a_tool_it_does_not_list
         ; test_case "an invite plays through the seat with auth on" `Quick
             test_an_invite_plays_through_the_seat_with_auth_on
+        ; test_case "an invite passes only to someone at the machine" `Quick
+            test_an_invite_passes_only_to_someone_at_the_machine
         ; test_case "an invite recovers only a stopped Keeper controller" `Quick
             test_an_invite_recovers_only_a_stopped_keepers_controller
         ] )

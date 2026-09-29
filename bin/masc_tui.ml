@@ -8800,6 +8800,26 @@ let open_msx_screen (state : Masc_tui_types.state) ~mailbox =
      the read is in flight, and redraw its watch row when it arrives. *)
   launch_dos_live_poll state ~mailbox
 
+(* DOS has a spectator of its own. Enter it directly from the palette; the
+   MSX media picker is only for choosing MSX media. No key from this view is
+   forwarded to DOS, whose input and controller remain server-owned. *)
+let open_dos_screen (state : Masc_tui_types.state) ~mailbox =
+  invalidate_msx_poll ();
+  state.image_request_generation <- state.image_request_generation + 1;
+  state.browser_viewport <- None;
+  if state.image_open then begin
+    Masc_tui_msx.invalidate ();
+    write_to_terminal Masc_tui_graphics.delete_all;
+    state.image_open <- false
+  end;
+  state.machine_source <- Masc.Machine_lane.Dos;
+  state.msx_open <- true;
+  state.msx_menu_open <- false;
+  state.dos_live <- Masc_tui_machine_live.Unread;
+  state.msx_last_poll_ns <- 0L;
+  render_spectator state;
+  launch_dos_live_poll state ~mailbox
+
 (* Where a reference lands, and what it opens when it gets there.
 
    The surfaces already print [masc://] references beside what they name and
@@ -10241,6 +10261,42 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
            notice ~kind:Notice_reply
              ("Last play link issued in this TUI session for " ^ name
               ^ " (copied via OSC 52; current validity not checked): " ^ link))
+  | Masc_tui_command.Play_qr ->
+      Buffer.clear state.msg_input;
+      (match state.play_invite_link with
+       | None -> notice ~kind:Notice_reply "No play link has been issued in this TUI session"
+       | Some (name, link) ->
+           let terminal_rows, terminal_cols = get_terminal_size () in
+           let pane_cells =
+             Masc_tui_roster_pane.content_cols
+               ~hidden:state.roster_pane_hidden ~cols:terminal_cols
+           in
+           let inner_width = framed_inner_width pane_cells in
+           let available_cells =
+             Masc_tui_message_layout.local_body_cells ~pane_cells ~inner_width
+           in
+           (match Masc_tui_play_qr.render ~available_cells link with
+            | Error Masc_tui_play_qr.Too_large ->
+                notice ~kind:Notice_failure "Play link is too long to encode as a QR code"
+            | Error (Masc_tui_play_qr.Pane_too_narrow { required_cells; available_cells }) ->
+                notice ~kind:Notice_failure
+                  (Printf.sprintf "Play QR needs %d body columns; this pane has %d. Widen the terminal or hide the roster"
+                     required_cells available_cells)
+            | Ok qr ->
+                let status_rows = keeper_message_status_rows state in
+                let visible_rows =
+                  Masc_tui_message_layout.message_history_height
+                    ~terminal_rows ~status_rows
+                in
+                let qr_rows = List.length (String.split_on_char '\n' qr) in
+                if qr_rows + 4 > visible_rows then
+                  notice ~kind:Notice_failure
+                    (Printf.sprintf "Play QR needs %d chat rows; this pane has %d. Make the terminal taller"
+                       (qr_rows + 4) visible_rows)
+                else
+                  chat_notice state ~keeper_name:target ~kind:Notice_reply
+                    ("Play QR for " ^ name ^ " (current validity not checked):\n```qr\n"
+                     ^ qr ^ "\n```")))
   | Masc_tui_command.Play_invite { name; hours } ->
       (match target with
        | None ->
@@ -13084,6 +13140,7 @@ let handle_composer_key state ~base_path ~mailbox key =
           it does for a message. *)
        | Masc_tui_command.Queue _
        | Masc_tui_command.Play_invites | Masc_tui_command.Play_link
+       | Masc_tui_command.Play_qr
        | Masc_tui_command.Play_invite _
        | Masc_tui_command.Play_revoke _ | Masc_tui_command.Play_invalid _
        | Masc_tui_command.Preset_list | Masc_tui_command.Preset_save _
@@ -15472,13 +15529,22 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              (* A failed read leaves [dos_activity] as it was -- the sidebar
                 keeps showing the last activity it had rather than flashing
                 empty on a read that did not answer at all. *)
-             (match result with
-              | Ok (_, activity) -> state.dos_activity <- activity
-              | Error _ -> ());
-             (* An unchanged answer draws nothing and decodes no pixels. The
-                read also discovers the DOS watch row while the menu is open. *)
+             let activity_changed =
+               match result with
+               | Ok (_, activity) ->
+                   let changed = activity <> state.dos_activity in
+                   state.dos_activity <- activity;
+                   changed
+               | Error _ -> false
+             in
+             (* An unchanged picture decodes no pixels. A changed activity
+                feed still repaints the spectator sidebar; an identical feed
+                remains silent. The read also discovers the DOS watch row
+                while the menu is open. *)
              (match Masc_tui_machine_live.advance state.dos_live (Result.map fst result) with
-              | None -> ()
+              | None ->
+                  if activity_changed && not state.msx_menu_open then
+                    render_spectator state
               | Some view ->
                   state.dos_live <- view;
                   if state.msx_menu_open then
@@ -21337,6 +21403,8 @@ and is loaded on demand through keeper_skill.
                      hide_browser_lane state
                  | Some (_, Masc_tui_types.Palette_msx) ->
                      open_msx_screen state ~mailbox:async_messages
+                 | Some (_, Masc_tui_types.Palette_dos) ->
+                     open_dos_screen state ~mailbox:async_messages
                  | Some (_, Masc_tui_types.Palette_lane_addons) ->
                      launch_lane_addons state ~mailbox:async_messages
                        Masc_tui_lane_addons.Inspect

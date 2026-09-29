@@ -1058,7 +1058,12 @@ let prepare_microvm_shim_dir (t : t) =
          binary
          (Unix.error_message code))
   | () ->
-    (match Keeper_sandbox_microvm.verify_shim_sidecar ~dir with
+    (* Read fresh bytes for every boot, using a worker domain when the
+       server's shared executor is installed. Metadata cannot authorize a
+       cached digest; the executor helper's inline fallback still reads
+       fresh bytes, including for no-pool test/pre-init callers. *)
+    (match Executor_pool_ref.submit_or_inline (fun () ->
+       Keeper_sandbox_microvm.verify_shim_sidecar ~dir) with
      | Error _ as refused -> refused
      | Ok provenance ->
        (match provenance with

@@ -1125,13 +1125,19 @@ let process_task (runtime : runtime) (task : Masc_domain.task) ~assignee ~verifi
          nothing. *)
       announce_stall
         ~notify:(fun ~task_id ~verification_id ~gate ~detail ~disposition ->
-          Verification_protocol.notify_stalled_verification
+          let evaluator_runtime =
+            match cause with
+            | Not_reviewed { evaluator_runtime; _ } -> Some evaluator_runtime
+            | Infrastructure_unavailable _ | Commit_failed _ | Raised _ -> None
+          in
+          Verification_protocol.notify_stalled_verification_with_runtime
             ~authority:system_authority
             ~subject:
               (Verification_protocol.Task_review
                  { task_id; verification_id; disposition })
             ~gate
-            ~detail)
+            ~detail
+            ~evaluator_runtime)
         ~task_id:task.id
         ~verification_id
         ~cause

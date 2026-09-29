@@ -17566,17 +17566,6 @@ let main
   let refresh_interval_ns =
     Int64.of_float (max 0.0 refresh *. nanoseconds_per_second)
   in
-  (* A TUI key name to the lane's key vocabulary (RFC-0439 §3.3). The TUI sends
-     " " for space and single characters for letters; arrows come through by
-     name. [None] means "not a game key" -- esc is handled before this, and
-     deliberate non-key input ("") has no server key. *)
-  let msx_server_key = function
-    | " " -> Some "space"
-    | "up" | "down" | "left" | "right" as d -> Some d
-    | name when String.length name = 1 && Char.code name.[0] >= 33 && Char.code name.[0] < 127 ->
-        Some name
-    | _ -> None
-  in
   (* Spectator cadence (RFC-0439 §3.7): ~3 Hz. Fast enough that a keeper's play
      reads as motion, slow enough that the 147 KB frame poll stays cheap. *)
   let msx_spectator_poll_seconds = 0.3 in
@@ -19362,7 +19351,7 @@ and is loaded on demand through keeper_skill.
        | Some "esc", (Masc.Machine_lane.Msx | Masc.Machine_lane.Dos) ->
            invalidate_msx_poll ()
        | Some ("f6" | "f7" | "f8"), Masc.Machine_lane.Msx -> invalidate_msx_poll ()
-       | Some name, Masc.Machine_lane.Msx when Option.is_some (msx_server_key name) ->
+       | Some name, Masc.Machine_lane.Msx when Option.is_some (Masc_tui_msx.server_key name) ->
            invalidate_msx_poll ()
        | Some _, (Masc.Machine_lane.Msx | Masc.Machine_lane.Dos)
        | None, (Masc.Machine_lane.Msx | Masc.Machine_lane.Dos) -> ());
@@ -19459,7 +19448,7 @@ and is loaded on demand through keeper_skill.
              then re-fetch so the human sees the result of their own press
              without waiting for the next poll. A key with no server mapping
              (e.g. deliberate non-key input) just repaints the cache. *)
-          match msx_server_key name with
+          match Masc_tui_msx.server_key name with
           | Some server_key ->
               (match
                  Masc_tui_http.post_msx_press ~host:server_peer_host

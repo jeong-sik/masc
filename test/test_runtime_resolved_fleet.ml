@@ -34,7 +34,7 @@ let runtime_toml =
    \n\
    [runtime.assignments]\n\
    assigned = \"fleet_codex.sol\"\n\
-   both = \"fleet_codex.sol\"\n"
+   both = \"fleet_claude.sonnet\"\n"
 ;;
 
 let rec remove_tree path =
@@ -99,7 +99,7 @@ let test_every_keeper_has_a_row_and_its_lane () =
     (list (triple string string string))
     "one row per keeper in the directory or the assignments"
     [ "assigned", "explicit", "fleet_codex.sol"
-    ; "both", "explicit", "fleet_codex.sol"
+    ; "both", "explicit", "fleet_claude.sonnet"
     ; "rider", "default", "fleet_claude.sonnet"
     ]
     (assignment_rows json);

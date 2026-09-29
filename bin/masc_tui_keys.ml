@@ -1498,7 +1498,10 @@ let keeper_detail_tab_bindings (tab : Masc_tui_types.keeper_detail_tab) =
                  Keeper meanwhile is left as is"
       ]
   | Detail_info ->
-      [ b Act "Q" "requeue board"
+      (* Lowercase [b] beside [B]: one partition, then all of them. It was
+         [Q], but the global quit test takes [Q] as well as [q] and runs
+         first, so the key armed the exit instead of the requeue. *)
+      [ b Act "b" "requeue board"
           ~help:
             "requeue the oldest blocked Board-attention partition; \
              its judgment call may run a second time"

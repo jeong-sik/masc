@@ -286,11 +286,10 @@ let admit
                          ~config:admission_config
                          dispatch
                      | Some _, Some timeout_s ->
-                       let deadline_at = Eio.Time.now clock +. timeout_s in
                        (match
-                          Provider_admission.with_admission_and_work_until
+                          Provider_admission.with_admission_and_work_for
                             ~clock
-                            ~deadline_at
+                            ~timeout_s
                             ~config:admission_config
                             dispatch
                         with

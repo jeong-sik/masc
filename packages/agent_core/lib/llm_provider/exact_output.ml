@@ -2068,11 +2068,10 @@ let execute_flow_candidate
           | None, _ -> run ()
           | Some _, None -> Provider_admission.with_admission ~config:target.config run
           | Some _, Some timeout_s ->
-            let deadline_at = Eio.Time.now clock +. timeout_s in
             (match
-               Provider_admission.with_admission_and_work_until
+               Provider_admission.with_admission_and_work_for
                  ~clock
-                 ~deadline_at
+                 ~timeout_s
                  ~config:target.config
                  run
              with

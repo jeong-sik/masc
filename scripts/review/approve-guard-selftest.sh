@@ -56,7 +56,10 @@ done
 # with more than 100 of them (API order is oldest first).
 echo "$method $ep" >> "$d/api_reads"
 if [ "$method" = GET ] && [ "$paged" = 0 ]; then
-  echo "fake gh: GET $ep without --paginate" >&2; exit 1
+  case "$ep" in
+    */commits/main) : ;; # The SHA does not need paginated commit files.
+    *) echo "fake gh: GET $ep without --paginate" >&2; exit 1 ;;
+  esac
 fi
 if [ -n "${FAKE_FAIL:-}" ]; then
   case "$ep" in $FAKE_FAIL) echo "HTTP 502: Bad Gateway (fake)" >&2; exit 1 ;; esac
@@ -70,7 +73,11 @@ case "$ep" in
     if { [ -f "$d/late_hold" ] && [ "$n" -ge 3 ]; } || [ -f "$d/late_approval_hold" ]; then
       "$FAKE_JQ" -n --arg h "$FAKE_HEAD" '[{created_at:"2026-01-01T00:55:00Z",body:("verdict: HOLD head: "+$h+" run: 900 by: keeper")}]' > "$d/comments.json"
     fi
-    printf '{"sha":"%s"}\n' "$FAKE_MAIN" | "$FAKE_JQ" -r "$jqf"; exit ;;
+    printf '{"sha":"%s"}\n' "$FAKE_MAIN" | "$FAKE_JQ" -r "$jqf"
+    if [ "${FAKE_PAGINATED_MAIN:-0}" = 1 ] && [ "$paged" = 1 ]; then
+      printf '{"sha":"%s"}\n' "$FAKE_MAIN" | "$FAKE_JQ" -r "$jqf"
+    fi
+    exit ;;
   */files\?*) echo '[{"filename":"pr.ml"}]' | "$FAKE_JQ" -r "$jqf"; exit ;;
   */actions/runs/*/jobs*)
     rid="${ep#*/actions/runs/}"; rid="${rid%%/*}"
@@ -300,6 +307,9 @@ if jq -e --arg h "$H" '.event=="APPROVE" and .commit_id==$h and (.body|contains(
 
 d="$work/check"; setup "$d"
 run_case check-mode-no-write 0 "WOULD APPROVE #5" 0 "$d" --check --repo o/r --pr 5 --head "$H"
+# A commit response can paginate its files while repeating the same SHA.
+d="$work/paginated-main"; setup "$d"
+FAKE_PAGINATED_MAIN=1 run_case paginated-main-identity 0 "WOULD APPROVE #5" 0 "$d" --check --repo o/r --pr 5 --head "$H"
 d="$work/sha41"; setup "$d"
 run_case sha-41-chars 2 "40 lowercase hex" 0 "$d" --repo o/r --pr 5 --head "${H}0" --body "$d/body.md"
 d="$work/emptybody"; setup "$d"; : >"$d/body.md"

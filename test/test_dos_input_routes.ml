@@ -219,8 +219,18 @@ let test_expired_credential_releases_controller_on_next_move role () =
                ~saves_dir:(Filename.concat dir "saves")
                ~checkpoint_dir:(Filename.concat dir "checkpoints") ~program_name:"game.com"
                ~program_bytes:hello_com ~files:[] ~announce:ignore);
-          check int "the operator passes to a valid credential holder" 200
-            (status_of (post ~token:operator "/api/v1/dos/pass" {|{"to":"minsu"}|}));
+          (match role with
+           | Masc_domain.Admin | Masc_domain.Player ->
+             check int "the operator passes to a valid credential holder" 200
+               (status_of (post ~token:operator "/api/v1/dos/pass" {|{"to":"minsu"}|}))
+           | Masc_domain.Worker ->
+             check bool "a live Worker is not a handoff target" false
+               (List.mem "minsu" (Masc.Play_seat.participants ~base_path ~keepers:[] ~now:(Time_compat.now ())));
+             check int "the operator frees the controller" 200
+               (status_of (post ~token:operator "/api/v1/dos/pass" {|{}|}));
+             check (option string) "the controller is free" None (controller ());
+             check int "a live Worker takes the free controller through a move" 200
+               (status_of (post ~token:holder_token "/api/v1/dos/step" {|{"steps":1,"until_ready":false}|})));
           check int "the valid holder still owns the controller" 400
             (status_of (post ~token:operator "/api/v1/dos/pass" {|{"to":"operator"}|}));
           check (option string) "the valid holder keeps its turn" (Some "minsu") (controller ());
@@ -249,8 +259,8 @@ let test_expired_credential_releases_controller_on_next_move role () =
              | None -> false);
           Auth.save_credential base_path
             { credential with expires_at = Some "2000-01-01T00:00:00Z" };
-          check bool "the expired bearer cannot move" true
-            (Result.is_error (Auth.find_credential_by_token base_path ~token:holder_token));
+          check int "the router rejects the expired bearer" 401
+            (status_of (post ~token:holder_token "/api/v1/dos/step" {|{"steps":1,"until_ready":false}|}));
           check bool "the expired credential is absent from handoff targets" false
             (List.mem "minsu" (Masc.Play_seat.participants ~base_path ~keepers:[] ~now:(Time_compat.now ())));
           check int "a stale handoff to the expired holder is refused" 400
@@ -275,4 +285,6 @@ let () =
            (test_expired_credential_releases_controller_on_next_move Masc_domain.Player)
        ; test_case "an expired operator releases its turn on the next move" `Quick
            (test_expired_credential_releases_controller_on_next_move Masc_domain.Admin)
+       ; test_case "an expired Worker releases a controller taken by a direct move" `Quick
+           (test_expired_credential_releases_controller_on_next_move Masc_domain.Worker)
        ]) ]

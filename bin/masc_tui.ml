@@ -20136,8 +20136,16 @@ and is loaded on demand through keeper_skill.
                       | _ -> ())
                  | None,None, None ->
                      match key with
+                     | "esc" when view.help_open -> update {view with help_open=false;scroll=0}
+                     | "?" -> update {view with help_open=not view.help_open;scroll=0}
+                     | _ when view.help_open -> ()
                      | "esc" when Option.is_some view.document_key -> update {view with document_key=None;scroll=0}
+                     | "esc" when view.presentation<>Addons.Summary -> update {view with presentation=Addons.Summary;
+                         focus=(if view.screen=Addons.Overview then Addons.Instances else view.focus);scroll=0}
+                     | "esc" | "q" when view.screen<>Addons.Overview -> update {view with screen=Addons.Overview;focus=Addons.Instances;scroll=0}
                      | "esc" | "q" -> state.lane_addons_cached <- view; state.lane_addons <- None
+                     | ("\r" | "\n" | "enter") when view.screen=Addons.Overview ->
+                         update (Addons.open_selected_instance view)
                      | "i" ->
                          if view.loading then update {view with error=lane_addons_input_failure "Wait for the current Lane request before opening installation."}
                          else (match Masc_tui_lane_installer.create () with
@@ -20178,7 +20186,9 @@ and is loaded on demand through keeper_skill.
                              ~targets:(Addons.subscription_targets view) in
                            update {view with subscription_panel=Some panel;document_key=None;scroll=0};
                            launch_lane_subscriptions state ~mailbox:async_messages Masc_tui_lane_subscriptions.Inspect)
-                     | "D" -> update {view with presentation=(if view.presentation=Addons.Technical then Addons.Summary else Addons.Technical);scroll=0}
+                     | "D" -> update {view with
+                         presentation=(if view.presentation=Addons.Technical then Addons.Summary else Addons.Technical);
+                         focus=(if view.screen=Addons.Overview then Addons.Instances else view.focus);scroll=0}
                      | "f" -> update {view with presentation=(if view.presentation=Addons.Flow then Addons.Summary else Addons.Flow);document_key=None;scroll=0}
                      | "a" ->
                          if view.loading || Option.is_some (Addons.pending_action view)
@@ -20194,12 +20204,17 @@ and is loaded on demand through keeper_skill.
                           | Some instance when Addons.can_observe instance -> selected (fun id -> Addons.Observe id)
                           | Some _ | None -> update {view with error=lane_addons_input_failure "Select an active worker to observe; D shows retained state."})
                      | "d" -> selected (fun id -> Addons.Detach id)
-                     | "1" -> update {view with focus=Addons.Timeline;scroll=0}
-                     | "2" -> update {view with focus=Addons.Connections;scroll=0}
-                     | "3" -> update {view with focus=Addons.Configurations;scroll=0}
-                     | "4" -> update {view with focus=Addons.Instances;scroll=0}
-                     | "5" -> update {view with focus=Addons.Rows;scroll=0}
-                     | "\t" | "tab" -> update { view with scroll=0;focus = (match view.focus with Addons.Timeline -> Addons.Connections | Addons.Connections -> Addons.Configurations | Addons.Configurations -> Addons.Instances | Addons.Instances -> Addons.Rows | Addons.Rows -> Addons.Timeline) }
+                     | "1" when view.screen<>Addons.Overview -> update {view with focus=Addons.Timeline;scroll=0}
+                     | "2" when view.screen<>Addons.Overview -> update {view with focus=Addons.Connections;scroll=0}
+                     | "3" when view.screen<>Addons.Overview -> update {view with focus=Addons.Configurations;scroll=0}
+                     | "4" when view.screen<>Addons.Overview -> update {view with focus=Addons.Rows;scroll=0}
+                     | "5" when view.screen<>Addons.Overview -> update {view with focus=Addons.Rows;scroll=0}
+                     | "\t" | "tab" when view.screen<>Addons.Overview ->
+                         update {view with scroll=0;focus = (match view.focus with
+                           | Addons.Timeline | Addons.Instances -> Addons.Connections
+                           | Addons.Connections -> Addons.Configurations
+                           | Addons.Configurations -> Addons.Rows
+                           | Addons.Rows -> Addons.Timeline) }
                      | "J" | "K" ->
                          let _, cols = get_terminal_size () in
                          let width = framed_inner_width cols in
@@ -20210,14 +20225,19 @@ and is loaded on demand through keeper_skill.
                          update (Addons.move_lane view delta)
                      | "j" | "down" | "k" | "up" ->
                          let delta = if key = "j" || key = "down" then 1 else -1 in
-                         (match view.snapshot, view.focus with
-                          | Some snapshot, Addons.Configurations ->
-                              let size = Option.fold ~none:0 ~some:(fun (c : Addons.configuration) -> List.length c.declarations) snapshot.configuration in
-                              update {view with configuration_cursor=max 0 (min (size - 1) (view.configuration_cursor + delta))}
-                          | Some snapshot, (Addons.Instances | Addons.Connections) -> update { view with instance_cursor = max 0 (min (List.length snapshot.instances - 1) (view.instance_cursor + delta)) }
-                          | Some snapshot, Addons.Rows -> update { view with row_cursor = max 0 (min (List.length snapshot.output.rows - 1) (view.row_cursor + delta)) }
-                          | Some _, Addons.Timeline -> update (Addons.move_observation view delta)
-                          | None, _ -> ())
+                         (match view.snapshot, view.screen, view.focus with
+                          | Some snapshot, Addons.Overview, Addons.Configurations ->
+                              (match snapshot.configuration with
+                               | None -> ()
+                               | Some configuration -> update {view with configuration_cursor=max 0
+                                   (min (List.length configuration.declarations - 1) (view.configuration_cursor + delta))})
+                          | Some snapshot, Addons.Overview, _ ->
+                              update {view with instance_cursor=max 0 (min (Addons.overview_count snapshot - 1) (view.instance_cursor + delta))}
+                          | Some _, Addons.Detail _, (Addons.Configurations | Addons.Instances | Addons.Connections) -> ()
+                          | Some _, Addons.Detail _, Addons.Rows ->
+                              update (Addons.move_record view delta)
+                          | Some _, Addons.Detail _, Addons.Timeline -> update (Addons.move_observation view delta)
+                          | None, _, _ -> ())
                      | " " ->
                          (match Addons.selected_row view with None -> () | Some row ->
                            update { view with selected = if List.mem row.id view.selected then List.filter ((<>) row.id) view.selected else row.id :: view.selected })

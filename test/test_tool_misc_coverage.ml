@@ -693,6 +693,50 @@ let () = test "web_search_empty_array_is_distinct_from_invalid_response" (fun ()
     ; Tool_misc.parse_bing_search_json, {|{"webPages":{"value":[]}}|} ]
 )
 
+(* task-1823: Brave's 200 schema makes [web] a nullable object. A search
+   envelope with [web] null or absent is a real no-hit answer; an envelope we
+   cannot read stays a Parse failure (#39802 rule). *)
+let () = test "web_search_brave_null_or_absent_web_is_an_empty_answer" (fun () ->
+  List.iter (fun body -> assert (Tool_misc.parse_brave_json body = Ok []))
+    [ {|{"type":"search","query":{"original":"rare phrase"},"web":null}|}
+    ; {|{"type":"search","query":{"original":"rare phrase"}}|} ];
+  List.iter (fun body ->
+    match Tool_misc.parse_brave_json body with
+    | Error (Tool_misc_web_search.Parse _) -> ()
+    | _ -> failwith ("Brave body must stay a Parse failure: " ^ body))
+    [ {|{"type":"search","web":{}}|}
+    ; {|{"type":"search","web":{"results":null}}|}
+    ; {|{"type":"search","web":"x"}|}
+    ; {|{"type":"search","web":[]}|}
+    ; {|{"web":null}|}
+    ; {|{"type":"other","web":null}|}
+    ; {|[]|}
+    ; {|"search"|} ]
+)
+
+let () = test "web_search_brave_only_null_web_answers_with_zero_results" (fun () ->
+  let null_web = {|{"type":"search","query":{"original":"rare phrase"},"web":null}|} in
+  let result =
+    Tool_misc.web_search_simulate_for_test ~query:"rare phrase" ~limit:3
+      [ ("brave", `Brave_body null_web) ]
+  in
+  assert (Tool_result.is_success result);
+  assert (Tool_result.failure_class result = None);
+  let open Yojson.Safe.Util in
+  let data = Tool_result.data result in
+  assert (data |> member "result" |> member "engine" |> to_string = "brave");
+  assert (data |> member "result" |> member "result_count" |> to_int = 0);
+  assert (data |> member "result" |> member "results" |> to_list = []);
+  assert (data |> member "provider_errors" = `Null);
+  let broken =
+    Tool_misc.web_search_simulate_for_test ~query:"rare phrase" ~limit:3
+      [ ("brave", `Brave_body {|{"type":"search","web":{}}|}) ]
+  in
+  assert (not (Tool_result.is_success broken));
+  assert (Tool_result.failure_class broken = Some Tool_result.Runtime_failure);
+  assert (str_contains (Tool_result.message broken) "brave: parse:")
+)
+
 let () = test "web_search_searxng_engine_outage_is_not_an_empty_answer" (fun () ->
   assert (Tool_misc.parse_searxng_json
       {|{"results":[],"unresponsive_engines":[["google","timeout"]]}|}

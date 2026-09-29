@@ -39,8 +39,8 @@ type readable =
    credential here would re-run alias selection against the process
    environment of the read.  runtime.toml refuses [usage-read] on an
    official-client protocol; a Codex app-server and the Antigravity CLI
-   answer without a turn. Claude Code states its windows only during one,
-   and no read is made for Muse Code, so none of its windows is recorded. *)
+   answer without a turn. Claude Code states its windows only during one.
+   Muse Code is read only after a failed turn, via its selected account. *)
 let how_of_runtime (rt : Runtime.t) =
   match rt.execution with
   | Runtime_execution.Agent_core config ->
@@ -78,6 +78,28 @@ let read_codex ~mgr ~clock ~cwd ~scope codex =
     Runtime_provider_usage_window.record ~scope ~observed_at:(Time_compat.now ()) report;
     Ok ()
   | Error error -> Error (Runtime_codex_app_server.error_to_string error)
+;;
+
+let read_muse ~mgr ~clock ~cwd ~scope (config : Runtime_muse_serve.config) =
+  let config =
+    { config with
+      Runtime_muse_serve.admission_timeout_s =
+        Float.min read_timeout_s config.admission_timeout_s
+    ; timeout_s = Some read_timeout_s
+    }
+  in
+  match Runtime_muse_serve.read_usage ~mgr ~clock ~cwd config with
+  | Ok usage ->
+    Option.iter
+      (fun usage ->
+        Option.iter
+          (fun reset_ms ->
+            Runtime_quota_window.note_exhausted
+              ~scope ~resets_at:(float_of_int reset_ms /. 1000.))
+          (Runtime_muse_msp.exhausted_subscription_reset_ms usage))
+      usage;
+    Ok ()
+  | Error error -> Error (Runtime_muse_serve.error_to_string error)
 ;;
 
 let read_antigravity ~scope (antigravity : Runtime_execution.antigravity_cli) =
@@ -346,43 +368,81 @@ type background =
   | Started
   | Already_reading
   | No_root_switch
+  | Scheduling_failed
 
 (* The caller is usually a turn that is about to end, and the read takes
    seconds (spawn, initialize, account/read, the request). A fiber on the
    turn's switch would be cancelled when the turn returns, so the read runs
    on the server's root switch, forked on the domain that owns it. *)
-let read_codex_in_background ~clock ~cwd ~scope codex =
-  Eio_context.run_on_owner_domain (fun () ->
-    match Eio_context.get_root_switch_opt () with
-    | None -> No_root_switch
-    | Some sw ->
-      if not (claim scope)
-      then Already_reading
-      else (
-        Eio.Fiber.fork ~sw (fun () ->
-          Fun.protect
-            ~finally:(fun () -> release scope)
-            (fun () ->
-              (* A raise here would fail the server's root switch; a read
-                 that goes wrong is only an unanswered observation. *)
-              match read_codex
-                ~mgr:(Posix_spawn_process_mgr.foreground_mgr ~clock
-                  ~grace_seconds:Process_eio.child_exit_grace_seconds)
-                ~clock ~cwd ~scope codex with
-              | Ok () -> ()
-              | Error detail ->
-                Log.Runtime_agent.warn
-                  "provider usage read failed for %s: %s"
-                  (Runtime_quota_window.scope_to_string scope)
-                  detail
-              | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
-              | exception exn ->
-                Log.Runtime_agent.warn
-                  "provider usage read raised for %s: %s"
-                  (Runtime_quota_window.scope_to_string scope)
-                  (Printexc.to_string exn)));
-        Started))
+let start_background ~scope ~fork ~read =
+  if not (claim scope)
+  then Already_reading
+  else (
+    match fork (fun () -> Fun.protect ~finally:(fun () -> release scope) read) with
+    | () -> Started
+    | exception (Eio.Cancel.Cancelled _ as cancelled) ->
+      release scope;
+      raise cancelled
+    | exception exn ->
+      release scope;
+      Log.Runtime_agent.warn
+        "provider usage read could not be scheduled for %s: %s"
+        (Runtime_quota_window.scope_to_string scope)
+        (Printexc.exn_slot_name exn);
+      Scheduling_failed)
 ;;
+
+let read_client_in_background ~clock ~cwd ~scope read =
+  let read_logged () =
+    (* A read failure is only an unanswered observation; it must not fail
+       the server's root switch or alter the original provider error. *)
+    match read
+            ~mgr:(Posix_spawn_process_mgr.foreground_mgr ~clock
+              ~grace_seconds:Process_eio.child_exit_grace_seconds)
+            ~clock ~cwd ~scope with
+    | Ok () -> ()
+    | Error detail ->
+      Log.Runtime_agent.warn
+        "provider usage read failed for %s: %s"
+        (Runtime_quota_window.scope_to_string scope)
+        detail
+    | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
+    | exception exn ->
+      Log.Runtime_agent.warn
+        "provider usage read raised for %s: %s"
+        (Runtime_quota_window.scope_to_string scope)
+        (Printexc.to_string exn)
+  in
+  match
+    Eio_context.run_on_owner_domain (fun () ->
+      match Eio_context.get_root_switch_opt () with
+      | None -> No_root_switch
+      | Some sw ->
+        start_background ~scope ~fork:(Eio.Fiber.fork ~sw) ~read:read_logged)
+  with
+  | outcome -> outcome
+  | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
+  | exception exn ->
+    Log.Runtime_agent.warn
+      "provider usage read could not reach the root owner for %s: %s"
+      (Runtime_quota_window.scope_to_string scope)
+      (Printexc.exn_slot_name exn);
+    Scheduling_failed
+;;
+
+let read_codex_in_background ~clock ~cwd ~scope codex =
+  read_client_in_background ~clock ~cwd ~scope
+    (fun ~mgr ~clock ~cwd ~scope -> read_codex ~mgr ~clock ~cwd ~scope codex)
+;;
+
+let read_muse_in_background ~clock ~cwd ~scope config =
+  read_client_in_background ~clock ~cwd ~scope
+    (fun ~mgr ~clock ~cwd ~scope -> read_muse ~mgr ~clock ~cwd ~scope config)
+;;
+
+module For_testing = struct
+  let start_background = start_background
+end
 
 
 (* After a 403: the one read whose answer the walk reads.

@@ -708,27 +708,31 @@ status: reference
   않는다. 클라이언트 턴 합계도 runtime 후보 순서를 포함한 Keeper turn 전체 합계는 아니다.
 
 **Provider Usage Window (제공자 사용량 창)**
-: Claude Code(`rate_limit_event`의 `unifiedWindows`)나 Codex app-server
-  (`account/rateLimits/updated`)가 턴 도중 wire로 통보한 제공자 자체의 사용량 한도 창
-  (`Runtime_provider_usage_window.t`). (quota scope, limit, window)별 최신 관측값과
-  수신 시각을 기록하며, `GET /api/v1/runtime/resolved`에 읽기 전용으로 노출된다(#38380).
+: 제공자가 보고한 계정 사용량 한도 창의 관측값(`Runtime_provider_usage_window.t`).
+  Claude Code의 `rate_limit_event`와 Codex app-server의 `account/rateLimits/updated`는
+  턴 중 wire로 보고한다. Codex·HTTP provider·Antigravity는 턴 밖 직접 읽기도 제공한다.
+  (quota scope, limit, window)별 최신 관측값과 수신 시각을 기록하며,
+  `GET /api/v1/runtime/resolved`에 읽기 전용으로 노출된다(#38380).
   - **관측 권위**: 이 표는 제공자 사용량 보고의 최신 관측값을 보존한다. 평상시 후보 순서가
     이 표를 조회하지는 않는다. 다만 HTTP 403 계정 거절(`Authorization_refused`) 뒤 provider가
     `usage-read`를 선언했으면 Keeper turn walk가 해당 endpoint를 한 번 읽는다(#38975).
     그 보고에서 모델 호출을 막는 창이 한도까지 소진된 경우에만 별도
     `Runtime_quota_window` 증거로 기록하고, 이후 후보 순서가 그 증거를 읽어 해당 scope를
-    뒤로 둔다. 소진율이나 리셋 시각만으로 일반 가용성을 추론하는 것은 아니다.
+    뒤로 둔다. Muse의 모델 오류 뒤 `usage/read`는 선택된 계정의 소진 창을 확인해
+    `Runtime_quota_window`에만 기록한다(#39810). 이 읽기는 사용량 관측값을 이 표에
+    추가하지 않고 실패한 turn도 재전송하지 않는다. 소진율이나 리셋 시각만으로 일반
+    가용성을 추론하는 것은 아니다.
   - **비영속·프로세스 로컬**: 프로세스 메모리에만 존재하며 저장소에 남지 않는다. 프로세스
     기동 후 통보가 한 번도 없었던 scope는 0이나 빈 창으로 꾸며내지 않고
     `Not_reported_since_start`로 명시한다.
   - **TTL 부재**: `resets_at` 시각이 지나도 자동으로 삭제되거나 만료되지 않으며, 더 새로운
     보고가 올 때까지 마지막 수신 기록을 유지한다.
-  - **직접 읽기**: 턴이 없어도 창을 알 수 있게, 서버는 시작할 때 계정마다 한 번 제공자에게
-    직접 묻는다. Codex 는 `account/rateLimits/read`(#38671), `usage-read` 를 선언한 HTTP
-    provider 는 그 URL 로 GET 한 번이다(#38706). `usage-read.refresh-s` 를 선언한 계정은
+  - **직접 읽기**: 턴이 없어도 창을 알 수 있게, 서버는 시작할 때 직접 읽기를 지원하는
+    계정마다 한 번 제공자에게 묻는다. Codex는 `account/rateLimits/read`(#38671),
+    `usage-read`를 선언한 HTTP provider는 그 URL로 GET 한 번이다(#38706). `usage-read.refresh-s` 를 선언한 계정은
     읽기가 끝날 때마다 그 초 뒤에 다시 묻는다(#39144).
   - **Usage Scope와의 구분**: 위의 Usage Scope(MASC가 집계하는 토큰 수의 범위)와 다른 축이다 —
-    이쪽은 모델 제공자가 wire로 알려준 자기 계정의 5시간·7일 한도 창이다.
+    이쪽은 제공자가 보고한 자기 계정의 사용량 한도 창이다.
   → [Runtime_provider_usage_window](../../lib/runtime/runtime_provider_usage_window.mli),
   [Runtime_provider_usage_read](../../lib/runtime/runtime_provider_usage_read.mli),
   [Runtime_quota_window](../../lib/runtime/runtime_quota_window.mli)
@@ -2597,14 +2601,17 @@ status: reference
     원장에 `Revised` 이벤트를 기록한다. 철회와 마찬가지로 대체된 Fact를 전제로 삼던 유도
     Fact들도 함께 무효화되며 영수증의 `removed_memory_ids`와 `support_invalidations`로
     보고된다. 기억 저장소는 Keeper마다 따로라서, 이 Keeper의 현재 Fact가 아닌 id는
-    대체할 대상이 없다. 그때는 이 Keeper의 저널에서 그 id를 지운 줄을 찾아 셋으로
+    대체할 대상이 없다. 그때는 이 Keeper의 저널에서 그 id를 지운 줄을 찾아 넷으로
     나눈다. (1) 이 Keeper가 직접 적었고 Librarian이 이미 지운 Fact면, 새 claim을 보통
     쓰기로 적고 영수증 `supersedes_already_removed`에 지운 커밋(revision·시각·이유)을
     적는다. 이 쓰기가 대체한 것이 아니므로 `Revised` 이벤트는 남기지 않는다. (2) Keeper
     자신이나 운영자가 명시적으로 지운(`explicit_write`·`explicit_retract`) id는
     `supersedes_not_current`로 거절하되 `supersedes_removed`로 그 커밋을 알려 준다.
     사유가 `superseded_by <id>`면 그 id가 대신 대체할 후계다. (3) 지운 기록이 없는 id
-    (알 수 없는 id, 다른 Keeper의 id)는 `supersedes_not_current`로 거절된다. 그 밖에
+    (알 수 없는 id, 다른 Keeper의 id)는 `supersedes_not_current`로 거절된다. (4) 저널을
+    읽거나 디코드하지 못해 id를 언급한 최신 줄을 확정할 수 없으면
+    `Supersede_journal_unreadable`로 거절한다. 지운 기록이 없다는 판정과 구별하며,
+    기록을 확인할 수 없으므로 후계 claim을 쓰지 않는다. 그 밖에
     `injected` id, 대체할 Fact와 글자까지 똑같은 claim(`supersedes_self`), `source_path`와의 동시 지정,
     대체될 Fact를 전제로 삼는 유도 claim(`supersedes_premise_of_successor`), 근거 경로가
     없는 유도 claim(`unsupported_derivation`)도 거절되며 아무것도 적지 않는다.

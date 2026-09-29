@@ -1,13 +1,12 @@
 (** Asking a provider for its own usage windows without a model turn.
 
-    [Runtime_provider_usage_window] hears a provider's windows only while a
-    turn runs. An account the router stopped picking because it is spent runs
-    no turn, so the operator never learns when it resets. This module asks
-    the provider directly and records the answer in the same table, for the
-    operator projection. Routing and admission do not read that table; the
-    one read the walk order sees is the read after a 403
-    ({!read_after_account_refusal}), which rests a spent account on
-    {!Runtime_quota_window}.
+    Turn events alone cannot report the windows of an account that the router
+    stopped picking. Codex, HTTP and Antigravity reads record provider reports
+    in [Runtime_provider_usage_window] for the operator projection. Routing
+    and admission do not read that observation table. An HTTP account read
+    after a 403 ({!read_after_account_refusal}) can also rest a spent scope on
+    {!Runtime_quota_window}. A Muse [usage/read] after a model error records
+    only provider-stated exhaustion there, not a usage-window report.
 
     Codex answers [account/rateLimits/read] after account admission, with no
     thread or turn. The Antigravity CLI answers a print-mode [/usage] in a
@@ -20,8 +19,8 @@
     official-client protocol. *)
 
 val read_timeout_s : float
-(** The bound on one read: a Codex account admission and one request, or one
-    whole HTTP GET. *)
+(** The bound on one read: a Codex account admission and one request, one
+    whole HTTP GET, or a Muse [usage/read]. *)
 
 val read_codex :
   mgr:_ Eio.Process.mgr ->
@@ -31,6 +30,17 @@ val read_codex :
   Runtime_execution.codex_app_server ->
   (unit, string) result
 (** Read one Codex account and record its windows under [scope]. *)
+
+val read_muse :
+  mgr:_ Eio.Process.mgr ->
+  clock:_ Eio.Time.clock ->
+  cwd:Eio.Fs.dir_ty Eio.Path.t ->
+  scope:Runtime_quota_window.scope ->
+  Runtime_muse_serve.config ->
+  (unit, string) result
+(** Read [usage/read] without a model turn. Only a provider-stated exhausted
+    window with a future reset rests [scope]; an absent or unspent report
+    changes no routing state. *)
 
 type http_error
 (** Why one HTTP read recorded nothing. *)
@@ -114,6 +124,7 @@ type background =
   | Started  (** A read was forked on the server's root switch. *)
   | Already_reading  (** A read for this scope is still running. *)
   | No_root_switch  (** No server root switch is installed (outside a server). *)
+  | Scheduling_failed  (** The root owner could not schedule the read. *)
 
 val read_codex_in_background :
   clock:_ Eio.Time.clock ->
@@ -124,6 +135,25 @@ val read_codex_in_background :
 (** {!read_codex} in a fiber on the server's root switch, so it outlives the
     turn that asked for it, with at most one read per scope at a time. Its
     failure is logged. *)
+
+val read_muse_in_background :
+  clock:_ Eio.Time.clock ->
+  cwd:Eio.Fs.dir_ty Eio.Path.t ->
+  scope:Runtime_quota_window.scope ->
+  Runtime_muse_serve.config ->
+  background
+(** {!read_muse} after a Muse model-error terminal. The read outlives the
+    failed turn and never resubmits its input. At most one read per account
+    scope is active. *)
+
+module For_testing : sig
+  val start_background :
+    scope:Runtime_quota_window.scope ->
+    fork:((unit -> unit) -> unit) ->
+    read:(unit -> unit) ->
+    background
+  (** Exercise the claim and fork boundary without a running server. *)
+end
 
 (** What the usage endpoint said after the provider refused the account with
     HTTP 403. Only windows whose role is

@@ -44,12 +44,15 @@
     grounded provider (no client-side truncation, matching the
     request-negotiated budget of the real path); [`Empty]
     simulates a successful response with no hits; [`Error msg]
-    simulates a transport-layer failure. *)
+    simulates a transport-layer failure; [`Brave_body body] feeds
+    [body] as a Brave HTTP 200 response through the same parse path
+    as the real Brave provider. *)
 type simulated_provider_outcome =
   [ `Error of string
   | `Empty
   | `Hits of (string * string * string) list
   | `Grounded of (string * string * string list) list
+  | `Brave_body of string
   ]
 
 (** {1 Provider fallback plan} *)

@@ -34,9 +34,12 @@
 #
 # Cancelled rows are ignored too: two runs on one head can start in the same
 # second and the loser is cancelled (#39049), so a cancelled row says nothing.
+# Renamed Draft snapshots and their cancelled siblings are removed only by
+# pr-check-run-contract.sh, with complete Ready evidence from one suite.
 #
 # Stale (condition 3) is counted from the earliest createdAt of this head's
-# non-skipped, non-cancelled pull_request workflow runs, and against the PR's
+# non-skipped, non-cancelled pull_request workflow runs after excluding verified
+# Draft snapshots, and against the PR's
 # full file list (re-read past gh's 100-file cap).
 # test/dune exception (R1 §5): test/dune does not
 # count when the PR's own change to it and every main change to it since the
@@ -52,6 +55,8 @@
 # Needs bash + gh + git. All JSON goes through gh --jq.
 set -u
 GH="${LEDGER_GH:-gh}"
+here="$(cd "$(dirname "$0")" && pwd)"
+source "$here/pr-check-run-contract.sh" || exit 1
 repo="jeong-sik/masc"; limit=200; gitdir=""; fmt="tsv"; mode="ledger"
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -96,16 +101,78 @@ rows=$("$GH" pr list --repo "$repo" --state open --limit "$limit" \
     ( [.statusCheckRollup[] | select((.conclusion//"") != "SKIPPED" and (.conclusion//"") != "CANCELLED")]
       | group_by(.name) | map(sort_by(.startedAt // "") | last) ) as $latest |
     ( [.statusCheckRollup[].name] | unique | length ) as $names |
+    ( [.statusCheckRollup[] | select(.__typename == "StatusContext")] ) as $contexts |
     [ .number, .author.login, .baseRefName, .headRefOid, .headRefName,
       ( if $names == 0 then "none"
         elif ($latest|length) < $names then "skipped"
         elif any($latest[]; (.conclusion//.state) == "FAILURE" or (.conclusion//"") == "TIMED_OUT") then "fail"
         elif all($latest[]; (.conclusion//.state) == "SUCCESS" or (.conclusion//"") == "NEUTRAL") then "ok"
         else "pending" end ),
-      ( [$latest[] | .startedAt // empty] | min // "" ),
+      ( [$latest[] | .startedAt // empty] | min // "-" ),
       .createdAt,
-      ( [.files[]?.path] | join(",") )
+      ( [.files[]?.path] | join(",") ),
+      ( if any($contexts[]; .state == "FAILURE") then "fail"
+        elif all($contexts[]; .state == "SUCCESS" or .state == "NEUTRAL") then "ok"
+        else "pending" end )
     ] | @tsv') || { echo "gh pr list failed" >&2; exit 1; }
+
+ledger_gh_json() {
+  "$GH" api --paginate "$1" --jq "$2"
+}
+
+# The rollup cannot identify a check's suite. Only the shared REST contract
+# can remove a Draft snapshot; every other row retains the existing policy.
+read_ci_snapshot() { # head; updates checks/started and retains workflow rows
+  local check_rows rollup
+  ledger_workflows=$(ledger_gh_json \
+    "repos/$repo/actions/runs?head_sha=$1&per_page=100" "$PR_CHECK_WORKFLOWS_JQ") || return 1
+  check_rows=$(ledger_gh_json \
+    "repos/$repo/commits/$1/check-runs?per_page=100" "$PR_CHECK_CHECKS_JQ") || return 1
+  pr_check_classify "$repo" "$1" "$ledger_workflows" "$check_rows" ledger_gh_json || return 1
+  if [ -n "$PR_CHECK_INVALID" ]; then
+    checks=fail
+    return 0
+  fi
+  [ -n "$PR_CHECK_DRAFT_RUNS${PR_CHECK_CANCELLED_RUNS:-}" ] || return 0
+  if [ "$PR_CHECK_READY_OK" != yes ]; then
+    if [ -z "$PR_CHECK_READY_RUN" ]; then
+      checks=none
+    elif printf '%s\n' "$ledger_workflows" | awk -F '\t' -v run="$PR_CHECK_READY_RUN" \
+      '$7 == run && $5 == "completed" { found=1 } END { exit !found }'; then
+      checks=fail
+    else
+      checks=pending
+    fi
+    return 0
+  fi
+  # Recompute the same name/startedAt rollup, excluding only proven Draft
+  # suite IDs. No per-name prefix exemption or cross-suite Ready proof.
+  rollup=$(printf '%s\n' "$check_rows" | sort -t "$tab" -k1,1 -k6,6 -k4,4n |
+    awk -F '\t' -v ignored="$PR_CHECK_DRAFT_SUITES ${PR_CHECK_CANCELLED_SUITES:-}" '
+      BEGIN { n=split(ignored, ids, " "); for (i=1;i<=n;i++) if (ids[i]!="") drop[ids[i]]=1 }
+      NF && !($5 in drop) {
+        names[$1]=1
+        if ($3!="skipped" && $3!="cancelled") { result[$1]=$3; started[$1]=$6 }
+      }
+      END {
+        count=0; latest=0; failed=0; pending=0; first=""
+        for (name in names) count++
+        for (name in result) {
+          latest++
+          if (result[name]=="failure" || result[name]=="timed_out") failed=1
+          else if (result[name]!="success" && result[name]!="neutral") pending=1
+          if (started[name]!="" && started[name]!="-" && (first=="" || started[name]<first)) first=started[name]
+        }
+        state=(count==0 ? "none" : latest<count ? "skipped" : failed ? "fail" : pending ? "pending" : "ok")
+        printf "%s\t%s\n", state, (first=="" ? "-" : first)
+      }') || return 1
+  IFS=$'\t' read -r checks started <<<"$rollup"
+  # Commit statuses are StatusContext objects, not REST CheckRuns. Preserve
+  # their verdict when replacing the Draft-polluted CheckRun rollup.
+  if [ "$checks" = ok ]; then checks="$status_contexts"
+  elif [ "$checks" = pending ] && [ "$status_contexts" = fail ]; then checks=fail
+  fi
+}
 
 # Newest decision per account (a later COMMENTED does not clear a CR).
 open_crs() {
@@ -215,10 +282,16 @@ stale_files() { # since files head changed-main-paths
 # skipped/cancelled; falls back to the rollup start only if that is earlier.
 window_start() { # head started -> ISO time
   local t
-  t=$("$GH" api "repos/$repo/actions/runs?head_sha=$1&event=pull_request&per_page=100" \
-      --jq '[.workflow_runs[] | select(.conclusion != "cancelled" and .conclusion != "skipped") | .created_at] | min // ""') || return 1
+  # Reuse the paginated snapshot used to classify Draft suites. Keep the
+  # earliest genuine run, including older Ready runs; choosing only the
+  # latest success here would relax the existing freshness rule.
+  t=$(printf '%s\n' "$ledger_workflows" | awk -F '\t' -v ignored="$PR_CHECK_DRAFT_RUNS" '
+    BEGIN { n=split(ignored, ids, " "); for (i=1;i<=n;i++) if (ids[i]!="") drop[ids[i]]=1 }
+    NF && !($7 in drop) && $9=="pull_request" && $6!="cancelled" && $6!="skipped" && $13!="-" && $13!="" {
+      if (first=="" || $13<first) first=$13
+    } END { print first }') || return 1
   [ -n "$t" ] || return 1
-  if [ -n "$2" ] && [[ "$2" < "$t" ]]; then echo "$2"; else echo "$t"; fi
+  if [ -n "$2" ] && [ "$2" != - ] && [[ "$2" < "$t" ]]; then echo "$2"; else echo "$t"; fi
 }
 
 # gh pr list --json files stops at 100 per PR; re-read the full list past that.
@@ -238,7 +311,7 @@ refspecs=$(printf '%s\n' "$rows" | awk -F'\t' '$3=="main"{printf "+refs/pull/%s/
 [ "$fmt" = md ] && { printf '| PR | author | waits on | age h | checks | stale files | verdict |\n|---|---|---|---|---|---|---|\n'; }
 [ "$fmt" = tsv ] && printf 'pr\tauthor\twaits_on\tage_h\tchecks\tstale_files\tverdict\n'
 
-printf '%s\n' "$rows" | while IFS=$'\t' read -r num author base head _branch checks started created files; do
+printf '%s\n' "$rows" | while IFS=$'\t' read -r num author base head _branch checks started created files status_contexts; do
   [ -n "$num" ] || continue
   age=$(( (now - $(epoch "$created")) / 3600 ))
   stale="-"; verdict="-"; dependencies=""
@@ -247,6 +320,7 @@ printf '%s\n' "$rows" | while IFS=$'\t' read -r num author base head _branch che
     waits="parent ${parent:+#$parent}${parent:-$base}"
   elif ! cr=$(open_crs "$num"); then waits="unknown:reviews"
   elif [ -n "$cr" ]; then waits="cr:$cr"
+  elif ! read_ci_snapshot "$head"; then waits="unknown:checks"
   elif [ "$checks" != ok ]; then waits="ci:$checks"
   elif ! since=$(window_start "$head" "$started"); then stale="?"; waits="unknown:run"
   elif ! files=$(full_files "$num" "$files"); then stale="?"; waits="unknown:files"

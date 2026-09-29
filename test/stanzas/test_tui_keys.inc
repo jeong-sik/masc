@@ -10,6 +10,9 @@
   masc_tui_mcp masc_tui_types masc_tui_operator_projection
   masc_tui_keys masc_tui_keeper_mark masc_tui_memory_mark masc_tui_footer
   masc_tui_config_mark
+  ;; The global quit test, so a detail tab key is checked against the one
+  ;; that runs before it rather than against a copy of its two letters.
+  masc_tui_render_schedule
   masc_tui_file_icon
   masc_tui_message_layout
    masc_tui_fetched masc_tui_keeper_chat_transcript))

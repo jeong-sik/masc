@@ -47,6 +47,7 @@ main { max-width: 760px; margin: 0 auto; padding: 12px 16px 32px; display:flex; 
 #screen-wrap:focus { box-shadow: 0 0 0 2px var(--dim); }
 canvas { display:block; width:100%; height:auto; image-rendering: pixelated; image-rendering: crisp-edges; }
 #status { color:var(--dim); min-height:1.5em; }
+#agent, #agent a { color:var(--dim); font-size:13px; }
 .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
 button, input, select { font:inherit; color:var(--ink); background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:8px 12px; }
 button { cursor:pointer; min-width:44px; min-height:44px; }
@@ -111,8 +112,20 @@ h2 { font-size:13px; color:var(--dim); margin:4px 0; font-weight:600; }
   </div>
   <h2>최근 기록</h2>
   <ol id="activity"></ol>
+|play}
+
+(* An agent that fetches the link reads this page without running its script.
+   The line points it at the guide ([Server_routes_http_routes_play_guide]). *)
+let agent_note =
+  String.concat ""
+    [ {play|  <p id="agent" lang="en">An AI agent handed this link joins by reading <a href="|play}
+    ; Play_invite.agent_guide_path
+    ; {play|">|play}
+    ; Play_invite.agent_guide_path
+    ; {play|</a>.</p>
 </main>
 <script nonce="|play}
+    ]
 
 let page_script =
   {play|">
@@ -495,7 +508,7 @@ if (token === '') {
 </html>
 |play}
 
-let page ~nonce = String.concat "" [ page_head; nonce; page_style; nonce; page_script ]
+let page ~nonce = String.concat "" [ page_head; nonce; page_style; agent_note; nonce; page_script ]
 
 let serve_page _request reqd =
   let nonce = Random_id.hex ~bytes:nonce_bytes in

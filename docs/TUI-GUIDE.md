@@ -97,7 +97,9 @@ repeat `/play revoke <name>`: a second request can release a controller even
 after the invite credential was deleted.
 
 The invited person opens the link in a browser to watch and play the shared
-DOS machine. The TUI can also watch through `go DOS` or the `go MSX` menu's
+DOS machine. The link can also go to an AI agent (Claude Code, Codex, Hermes,
+OpenClaw, pi, ...): the page points it at `/play/agent.md`, which says how to
+join over MCP (`/mcp/play`) or plain HTTP with the token after `#`. The TUI can also watch through `go DOS` or the `go MSX` menu's
 `watch DOS machine` entry when a DOS machine is loaded.
 
 ## Options

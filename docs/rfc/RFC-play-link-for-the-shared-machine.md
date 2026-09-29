@@ -172,6 +172,18 @@ related: ["0439", "machine-spectating-goes-through-lanes"]
 - `masc_dos_screen` 은 keeper 호출에만 PNG 를 붙인다(`lib/keeper/keeper_dos_screen.ml`). 초대 credential 호출에도 프레임 이미지를
   돌려준다. 삼국지3 메뉴는 그래픽 한글이라 이미지가 없으면 읽을 수 없다.
 - 외부 에이전트는 기계 입력 이름(`["down","return"]`)을 그대로 쓴다. 패드는 사람을 위한 층이다.
+- 에이전트가 받는 것도 사람과 같은 링크 하나다. 링크를 열면 `/play` 페이지가 뜨고, 페이지 맨 아래 줄이
+  `GET /play/agent.md`(`Play_invite.agent_guide_path`)를 가리킨다. 스크립트를 돌리지 않고 페이지를
+  읽는 에이전트도 이 줄은 본다.
+  - 안내문은 공개다. 토큰도 워크스페이스 상태도 담지 않는다. `#` 뒤가 bearer 토큰이라고 알려 줄 뿐이다.
+  - 글은 프롬프트 `play.agent_guide`(`config/prompts/play.agent_guide.md`)에 둔다. 운영자가 override 로 고칠 수 있다.
+  - 주소와 스키마는 서버가 채운다: `MASC_HTTP_BASE_URL` 뒤에 `/mcp/play`, seat, `screen.png`, §2.5 이동
+    라우트 네 개. 이동마다 그 라우트가 본문을 검사하는 도구 스키마를 그대로 싣는다
+    (`Server_routes_http_routes_dos.moves`). 복사본이 아니라서 스키마가 바뀌면 안내문도 같이 바뀐다.
+  - `MASC_HTTP_BASE_URL` 이 없으면 들어올 주소가 없으므로 `409 not_ready` 다. 초대 발급 조건과 같다.
+  - MCP 클라이언트는 Streamable HTTP 로 붙는다. 안내문에는 확인한 두 클라이언트(Claude Code, Codex)의 명령만 적고,
+    나머지는 "같은 URL 과 헤더"로 적는다. MCP 를 못 쓰거나 세션 중에 서버를 더할 수 없는 에이전트(pi 등)는
+    같은 자리를 HTTP 로 쓴다: seat 읽기, `screen.png`, `/api/v1/dos/{press,type,step,pass}`.
 
 ### 2.8 차례
 

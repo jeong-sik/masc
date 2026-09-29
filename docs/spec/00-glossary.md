@@ -1038,8 +1038,10 @@ status: reference
   공유 DOS 기계를 보고 조작한다. 초대 이름은 입력과
   조종권의 `who`로 기록되며 Keeper 이름과 겹칠 수 없다. 회수는 자격증명을 지우고
   그 이름이 쥔 조종권의 해제를 시도한다. 해제에 실패하거나 결과가 불명확하면 같은
-  이름으로 다시 회수할 수 있다.
+  이름으로 다시 회수할 수 있다. 링크는 AI 에이전트에게 넘겨도 된다. 에이전트는
+  `/play/agent.md`(에이전트 안내)를 읽고 MCP(`/mcp/play`)나 HTTP 로 같은 자리에 앉는다.
   → [Play_invite](../../lib/play/play_invite.mli) ·
+  [Server_routes_http_routes_play_guide](../../lib/server/server_routes_http_routes_play_guide.mli) ·
   [TUI play invites](../TUI-GUIDE.md)
 
 **기계 체크포인트 (Machine Checkpoint)**

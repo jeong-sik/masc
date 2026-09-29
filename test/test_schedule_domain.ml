@@ -237,6 +237,33 @@ let test_schedule_roundtrip () =
       (payload_digest decoded.payload)
 ;;
 
+(* A wake record and an occurrence id carry this digest, so it must stay the
+   SHA-256 of the payload's JSON with every object's keys sorted, printed
+   compact: here, of the text below. *)
+let canonical_payload_text =
+  {|{"body":{"a":[{"c":3,"d":2}],"b":"x"},"kind":"consumer.note"}|}
+
+let canonical_payload_sha256 =
+  "552baa56de06d4df966875e6c180e3f9c196b826a2d4e12f1789e428942a532e"
+
+let test_payload_digest_is_the_canonical_sha256 () =
+  let digest body =
+    match payload_of_yojson (payload_json ~body ()) with
+    | Ok payload -> payload_digest payload
+    | Error msg -> fail msg
+  in
+  let unsorted =
+    `Assoc [ "b", `String "x"; "a", `List [ `Assoc [ "d", `Int 2; "c", `Int 3 ] ] ]
+  in
+  let sorted =
+    `Assoc [ "a", `List [ `Assoc [ "c", `Int 3; "d", `Int 2 ] ]; "b", `String "x" ]
+  in
+  check string ("the SHA-256 of " ^ canonical_payload_text) canonical_payload_sha256
+    (digest unsorted);
+  check string "the same with the keys already sorted" canonical_payload_sha256
+    (digest sorted)
+;;
+
 let test_cron_schedule_roundtrip () =
   let req =
     request
@@ -416,6 +443,8 @@ let () =
         [
           test_case "schedule roundtrip" `Quick test_schedule_roundtrip;
           test_case "cron schedule roundtrip" `Quick test_cron_schedule_roundtrip;
+          test_case "payload digest is the canonical SHA-256" `Quick
+            test_payload_digest_is_the_canonical_sha256;
           test_case "recurrence summary" `Quick test_recurrence_summary;
           test_case "missing recurrence is rejected" `Quick
             test_missing_recurrence_is_rejected;

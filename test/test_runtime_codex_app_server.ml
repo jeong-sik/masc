@@ -1420,19 +1420,6 @@ let read_after_spent_usage_refusal ~provider_id read_result =
   scope
 ;;
 
-let test_spent_usage_read_rests_until_the_stated_reset () =
-  let resets_at = reset_a_week_ahead () in
-  let reset = float_of_int resets_at in
-  let scope =
-    read_after_spent_usage_refusal ~provider_id:"spent-usage-read-reset"
-      (codex_spent_window ~resets_at ())
-  in
-  check (option (float 0.0)) "the account rests until the reset it stated" (Some reset)
-    (Runtime_quota_window.active_until ~scope ~now:(reset -. 1.));
-  check bool "the rest ends at that reset" false
-    (Runtime_quota_window.is_exhausted ~scope ~now:reset)
-;;
-
 (* The observation the refusal left: no end time, still holding the account
    back. *)
 let check_refusal_observation_kept ~scope =
@@ -1441,6 +1428,22 @@ let check_refusal_observation_kept ~scope =
     (Runtime_quota_window.active_until ~scope ~now);
   check bool "the refusal's observation still holds the account back" true
     (Runtime_quota_window.is_exhausted ~scope ~now)
+;;
+
+let test_spent_usage_read_unattributed_reset_keeps_the_observation () =
+  check_refusal_observation_kept
+    ~scope:(read_after_spent_usage_refusal ~provider_id:"spent-usage-unattributed"
+      (codex_spent_window ~resets_at:(reset_a_week_ahead ()) ()))
+;;
+
+let test_spent_usage_read_unrelated_buckets_keep_the_observation () =
+  let later = reset_a_week_ahead () in
+  let earlier = later - seconds_per_week + 3600 in
+  let report = Printf.sprintf
+    {|{"id":3,"result":{"rateLimits":{"limitId":"codex","primary":{"usedPercent":100,"resetsAt":%d}},"rateLimitsByLimitId":{"codex":{"primary":{"usedPercent":100,"resetsAt":%d}},"unrelated":{"primary":{"usedPercent":100,"resetsAt":%d}}}}}|}
+    earlier earlier later in
+  check_refusal_observation_kept
+    ~scope:(read_after_spent_usage_refusal ~provider_id:"spent-usage-multiple-buckets" report)
 ;;
 
 let test_spent_usage_read_without_a_reset_keeps_the_observation () =
@@ -6959,8 +6962,10 @@ let () =
         ; test_case "metadata listing pages without turn" `Quick test_metadata_listing_pages_without_turn
         ; test_case "rate limits read without turn" `Quick test_rate_limits_read_without_turn
         ; test_case "background read outlives the turn" `Quick test_background_read_outlives_the_turn
-        ; test_case "spent-usage read rests until the stated reset" `Quick
-            test_spent_usage_read_rests_until_the_stated_reset
+        ; test_case "unattributed single bucket preserves refusal" `Quick
+            test_spent_usage_read_unattributed_reset_keeps_the_observation
+        ; test_case "unrelated spent buckets preserve refusal" `Quick
+            test_spent_usage_read_unrelated_buckets_keep_the_observation
         ; test_case "spent-usage read without a reset keeps the observation" `Quick
             test_spent_usage_read_without_a_reset_keeps_the_observation
         ; test_case "spent-usage read with a past reset keeps the observation" `Quick

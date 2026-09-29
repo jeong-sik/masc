@@ -457,8 +457,7 @@ end
    plan does not admit. The provider's usage endpoint answers the question
    with counts: a window that gates model calls and whose used count reached
    its limit is spent until its stated reset. Only that answer rests the
-   scope; the status alone rests nothing. A Codex turn refused for spent
-   usage says why but not until when, and its read answers the same way. *)
+   scope; the status alone rests nothing. Codex account snapshots cannot attribute a bucket to a refused call. *)
 
 type account_refusal_read =
   | Spent_until of float
@@ -551,24 +550,17 @@ let read_after_account_refusal ~fetch ~scope http =
   Ok (rest_on_account_refusal_read ~scope ~observed_at (account_refusal_read_of_report report))
 ;;
 
-(* The turn error of a spent-usage refusal names no reset, so the turn left
-   an observation with no end, and a lane with no other candidate asked the
-   spent account again every [path_rest] cap (2026-09-29: three Keepers on
-   one Codex account, refused about every 15 minutes with "try again at Oct
-   4th"). The account's own read states the spent window's reset, the same
-   minute the refusal text named, and rests the scope as a 403 read does.
-   Only this entry point rests; [read_codex] is the start read's projection. *)
+(* The refusal carries no metered limit_id. The read's default snapshot and
+   per-limit map identify observed buckets, not the bucket of that failed
+   call. Even a single reported bucket cannot establish that attribution.
+   Keep the turn's Observed evidence and refresh only the operator projection. *)
 let read_codex_after_spent_usage_refusal ~clock ~cwd ~scope codex =
   read_client_in_background ~clock ~cwd ~scope (fun ~mgr ~clock ~cwd ~scope ->
     Result.map
-      (fun (observed_at, report) ->
-        let read =
-          rest_on_account_refusal_read ~scope ~observed_at (account_refusal_read_of_report report)
-        in
+      (fun (_observed_at, _report) ->
         Log.Runtime_agent.info
-          "provider usage read after a Codex spent-usage refusal for %s: %s"
-          (Runtime_quota_window.scope_to_string scope)
-          (account_refusal_read_to_string read))
+          "Codex usage read for %s has no rejected limit_id attribution; keeping the refusal observation without a reset"
+          (Runtime_quota_window.scope_to_string scope))
       (read_codex_report ~mgr ~clock ~cwd ~scope codex))
 ;;
 

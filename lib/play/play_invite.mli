@@ -76,6 +76,12 @@ type invite =
   ; expired : bool
   }
 
+val expired : now:float -> Masc_domain.agent_credential -> bool
+(** Whether a credential's time has run out at [now]. A credential with no
+    [expires_at] never expires; an invite always has one. This is the rule a
+    static bearer is checked by: whole UTC seconds and a strict [now > expiry],
+    so the bearer still works during its expiry second. *)
+
 val list : base_path:string -> now:float -> invite list
 (** Every [Player] credential, expired ones included, by name. *)
 

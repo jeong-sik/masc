@@ -427,15 +427,15 @@ let execute_tool_eio
                        ~args:coerced_args
                    in
                    (* Identity, profile membership and tool authorization have
-                      passed above. Match the Keeper/HTTP move boundary here:
-                      a stopped Keeper cannot pass its controller itself. *)
-                   (match Tool_schemas_misc.misc_operation_of_tool_name name with
-                    | Some Tool_schemas_misc.(
-                        ( Misc_dos_load | Misc_dos_eject | Misc_dos_step | Misc_dos_pass
-                        | Misc_dos_press | Misc_dos_click | Misc_dos_type | Misc_dos_restore )) ->
-                      Keeper_dos_controller.before_move ~config ~who:agent_name;
-                      dispatch ()
-                    | _ -> dispatch ())
+                      passed above. The gate a Keeper's call and the play
+                      page's routes run comes next. *)
+                   (match
+                      Keeper_dos_controller.before_call ~config ~who:agent_name ~name
+                        ~args:coerced_args
+                    with
+                    | Ok () -> dispatch ()
+                    | Error refusal ->
+                      Some (Keeper_dos_controller.refusal_result ~tool_name:name refusal))
                  | Mod_library ->
                    Tool_library.dispatch
                      { Tool_library.base_path = config.base_path; agent_name }

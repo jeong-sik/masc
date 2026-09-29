@@ -683,8 +683,111 @@ let test_a_stopped_holders_controller_is_let_go () =
     [ (Stopped_and_gone, "a stopped Keeper", true)
     ; (Running, "a running Keeper", false)
     ; (Launching, "a launching Keeper", false)
-    ; (Not_a_keeper, "a name that is not a Keeper", false)
+      (* The workspace has no auth file, so auth is on with a token required:
+         a name that is neither a Keeper nor a credential cannot act here. *)
+    ; (Not_a_keeper, "a name with no Keeper and no credential", true)
     ]
+;;
+
+(* RFC play-link-for-the-shared-machine §2.8: a holder whose invite ran out
+   has left. Where every request carries a credential, a holder that is not a
+   Keeper has also left when no credential carries its name. Where requests
+   need no token a name may be self-declared, and it keeps the controller. *)
+let test_a_holder_departs_with_its_credential () =
+  with_workspace (fun base_path ->
+    let config = Workspace.default_config base_path in
+    let departure name at = Keeper_dos_controller.holder_left ~config ~now:at name in
+    let reason = function
+      | None -> "still here"
+      | Some Tool_misc_dos_lane.Keeper_stopped -> "keeper stopped"
+      | Some Tool_misc_dos_lane.Player_expired -> "invite expired"
+      | Some Tool_misc_dos_lane.No_credential -> "no credential"
+    in
+    let token name role =
+      match Auth.create_token base_path ~agent_name:name ~role with
+      | Ok _ -> ()
+      | Error e -> fail (Masc_domain.masc_error_to_string e)
+    in
+    (match
+       Auth.create_token_expiring_in base_path ~agent_name:"minsu" ~role:Masc_domain.Player ~hours:1
+     with
+     | Ok _ -> ()
+     | Error e -> fail (Masc_domain.masc_error_to_string e));
+    token "operator" Masc_domain.Admin;
+    token "codex" Masc_domain.Worker;
+    let now = Unix.gettimeofday () and later = Unix.gettimeofday () +. (2. *. 3600.) in
+    check string "a live invite stays" "still here" (reason (departure "minsu" now));
+    check string "an invite past its time has left" "invite expired" (reason (departure "minsu" later));
+    check string "an operator stays" "still here" (reason (departure "operator" later));
+    check string "an agent's credential stays" "still here" (reason (departure "codex" later));
+    check string "a name no credential carries has left" "no credential" (reason (departure "ghost" now));
+    Auth.save_auth_config base_path
+      { Masc_domain.default_auth_config with enabled = true; require_token = false };
+    check string "where a request needs no token a name may be self-declared, so it stays"
+      "still here" (reason (departure "ghost" now));
+    Auth.save_auth_config base_path { Masc_domain.default_auth_config with enabled = false };
+    check string "without auth it stays too" "still here" (reason (departure "ghost" now));
+    check string "an invite past its time has left either way: its bearer cannot act"
+      "invite expired" (reason (departure "minsu" later));
+    Out_channel.with_open_bin
+      (Filename.concat (Filename.concat (Filename.concat base_path ".masc") "auth") "config.json")
+      (fun oc -> output_string oc "{ not json");
+    check string "an unreadable auth config says nothing, so the holder stays" "still here"
+      (reason (departure "ghost" now));
+    let config = Workspace.default_config base_path in
+    (match
+       Keeper_dos_controller.before_call ~config ~who:"minsu" ~name:"masc_dos_pass"
+         ~args:(`Assoc [ ("to", `String "operator") ])
+     with
+     | Error (Keeper_dos_controller.Seats_unknown _) -> ()
+     | Error (Keeper_dos_controller.Refused message) ->
+       failf "an unreadable auth config is not the caller's fault: %s" message
+     | Ok () -> fail "a pass went through with the auth config unreadable"))
+;;
+
+let keeper_pass ~base_path who target =
+  Keeper_tool_in_process_runtime.handle_masc_misc_with_outcome
+    ~config:(Workspace.default_config base_path) ~meta:(keeper_meta who)
+    ~name:"masc_dos_pass" ~args:(`Assoc [ ("to", `String target) ])
+;;
+
+(* RFC play-link-for-the-shared-machine §2.8 on a Keeper's own call: a pass
+   goes only to someone at the machine. A name nobody sits under would leave
+   the controller with no one who can move the machine. *)
+let test_a_keeper_passes_only_to_someone_at_the_machine () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "hello.com" hello_com;
+    with_holder ~base_path Running "cao-cao" (fun () ->
+      with_holder ~base_path Running "liu-bei" (fun () ->
+        boot ~agent:"cao-cao" ~base_path "hello.com";
+        let refused = keeper_pass ~base_path "cao-cao" "nobody" in
+        check bool "a pass to a name not at the machine is refused" true
+          (match refused.disposition with Tool_result.Failed _ -> true | _ -> false);
+        check bool "and says so" true
+          (contains "not at the DOS machine" refused.raw_output);
+        check (option string) "the holder keeps the controller" (Some "cao-cao")
+          (current_controller ());
+        let passed = keeper_pass ~base_path "cao-cao" "liu-bei" in
+        check bool "a pass to a Keeper goes through" false
+          (match passed.disposition with Tool_result.Failed _ -> true | _ -> false);
+        check (option string) "the Keeper holds it" (Some "liu-bei") (current_controller ());
+        (match
+           Auth.create_token_expiring_in base_path ~agent_name:"minsu"
+             ~role:Masc_domain.Player ~hours:1
+         with
+         | Ok _ -> ()
+         | Error e -> fail (Masc_domain.masc_error_to_string e));
+        let to_invite = keeper_pass ~base_path "liu-bei" "minsu" in
+        check bool "a pass to an invite goes through" false
+          (match to_invite.disposition with Tool_result.Failed _ -> true | _ -> false);
+        check (option string) "the invite holds it" (Some "minsu") (current_controller ());
+        (* Without auth a name may be self-declared: there is no list, and the
+           pass goes through as it did before. *)
+        Auth.save_auth_config base_path { Masc_domain.default_auth_config with enabled = false };
+        let self_declared = keeper_pass ~base_path "minsu" "somebody" in
+        check bool "without auth a pass to any name goes through" false
+          (match self_declared.disposition with Tool_result.Failed _ -> true | _ -> false);
+        check (option string) "and that name holds it" (Some "somebody") (current_controller ()))))
 ;;
 
 (* A pass to a name no caller can ever have -- "@liu-bei", "liu bei" --
@@ -1285,6 +1388,10 @@ let () =
             test_a_pass_to_an_impossible_name_is_refused
         ; test_case "stopped holder is let go" `Quick
             test_a_stopped_holders_controller_is_let_go
+        ; test_case "a Keeper passes only to someone at the machine" `Quick
+            test_a_keeper_passes_only_to_someone_at_the_machine
+        ; test_case "a holder departs with its credential" `Quick
+            test_a_holder_departs_with_its_credential
         ; test_case "unimplemented instruction" `Quick
             test_an_unimplemented_instruction_is_an_error
         ; test_case "a fault keeps the steps that ran" `Quick

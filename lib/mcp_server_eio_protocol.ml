@@ -176,7 +176,7 @@ let task_resource_ids =
 ;;
 
 let agent_resource_ids =
-  dedup_strings (core_status_resource_ids @ [ "who"; "who.json"; "agents"; "agents.json" ])
+  dedup_strings (core_status_resource_ids @ [ "who"; "who.json" ])
 ;;
 
 let message_resource_ids =

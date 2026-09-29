@@ -173,31 +173,14 @@ let handle_read_resource_eio state id params =
           | "who.json" ->
               let statuses = Session.get_agent_statuses registry in
               ("application/json", Some (Yojson.Safe.pretty_to_string (`List statuses)))
-          | "agents" ->
-              let statuses = Session.get_agent_statuses registry in
-              let body =
-                if statuses = [] then "No active agents."
-                else Session.status_string registry
-              in
-              ("text/markdown", Some body)
-          | "agents.json" ->
-              let statuses = Session.get_agent_statuses registry in
-              let json =
-                `Assoc
-                  [
-                    ("replacement", `String "masc://who.json");
-                    ("agents", `List statuses);
-                  ]
-              in
-              ("application/json", Some (Yojson.Safe.pretty_to_string json))
-          | "messages" | "messages/recent" ->
+          | "messages" ->
               let since_seq = Mcp_server.int_query_param uri "since_seq" ~default:0 in
               let limit = Mcp_server.int_query_param uri "limit" ~default:10 in
               ( "text/markdown"
               , Some
                   (run_blocking_resource_io (fun () ->
                      Workspace.get_messages config ~since_seq ~limit)) )
-          | "messages.json" | "messages.json/recent" ->
+          | "messages.json" ->
               let since_seq = Mcp_server.int_query_param uri "since_seq" ~default:0 in
               let limit = Mcp_server.int_query_param uri "limit" ~default:10 in
               let json = read_messages_json ~since_seq ~limit in
@@ -209,29 +192,6 @@ let handle_read_resource_eio state id params =
               let limit = Mcp_server.int_query_param uri "limit" ~default:50 in
               let json = read_events_json ~limit in
               ("application/json", Some (Yojson.Safe.pretty_to_string json))
-          | "worktrees.json" ->
-              let worktrees_dir = Filename.concat config.base_path ".worktrees" in
-              let entries =
-                run_blocking_resource_io (fun () ->
-                  if Sys.file_exists worktrees_dir && Sys.is_directory worktrees_dir
-                  then
-                    Sys.readdir worktrees_dir
-                    |> Array.to_list
-                    |> List.sort String.compare
-                    |> List.map (fun name ->
-                      `Assoc
-                        [ "name", `String name
-                        ; "path", `String (Filename.concat worktrees_dir name)
-                        ])
-                  else [])
-              in
-              let json =
-                `Assoc
-                  [ "base_path", `String config.base_path
-                  ; "worktrees", `List entries
-                  ]
-              in
-              ("application/json", Some (Yojson.Safe.pretty_to_string json))
           | s
             when s = library_index_id
                  || s = library_index_json_id
@@ -239,11 +199,6 @@ let handle_read_resource_eio state id params =
               run_blocking_resource_io (fun () ->
                 let base_path = config.base_path in
                 let library_dir = Tool_library.library_root ~base_path in
-                if not (Sys.file_exists library_dir)
-                then
-                  ( "text/markdown"
-                  , Some "Library directory not found. Create docs/library/ first." )
-                else begin
                 (* Trimmed here, not in the parser. The three readers this
                    replaced disagreed: prompt_registry kept the body verbatim
                    and this one trimmed it. Frontmatter.parse follows the
@@ -269,6 +224,13 @@ let handle_read_resource_eio state id params =
                       (true, Filename.chop_suffix rest ".json")
                     else (false, rest)
                 in
+                if not (Sys.file_exists library_dir) then
+                  if topic <> "" then ("text/plain", None)
+                  else if is_json then
+                    ("application/json", Some (Yojson.Safe.to_string
+                      (`Assoc [ ("documents", `List []); ("count", `Int 0) ])))
+                  else ("text/markdown", Some "Library is empty.")
+                else begin
                 let topic_of path = Filename.chop_suffix (Filename.basename path) ".md" in
                 let uri_of path = "masc://library/" ^ topic_of path in
                 (* The same header rules as the library tools: a document that
@@ -351,15 +313,13 @@ let handle_read_resource_eio state id params =
                     in
                     ("application/json", Some (Yojson.Safe.to_string json))
                   end
-                  | None ->
-                    ("application/json", Some (Yojson.Safe.to_string (`Assoc [("error", `String (Printf.sprintf "Library document '%s' not found" topic))])))
+                  | None -> ("application/json", None)
                 end else begin
                   match library_doc_path topic with
                   | Some path ->
                     let content = Fs_compat.load_file path in
                     ("text/markdown", Some content)
-                  | None ->
-                    ("text/markdown", Some (Printf.sprintf "Library document '%s' not found." topic))
+                  | None -> ("text/markdown", None)
                 end
               end)
           | _ -> ("text/plain", None)
@@ -367,9 +327,10 @@ let handle_read_resource_eio state id params =
 
         match text_opt with
         | None ->
-            make_error ~id
+            make_error_typed ~id
               ~data:(`Assoc [ ("uri", `String uri_str) ])
-              (-32002) "Resource not found"
+              Mcp_error_code.Invalid_params
+              "Resource not found"
         | Some text ->
             let contents = `List [
               `Assoc [

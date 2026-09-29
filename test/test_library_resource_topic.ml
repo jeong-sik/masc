@@ -110,7 +110,34 @@ let test_prefix_without_separator_is_not_a_topic () =
     let json = read_resource state "masc://libraryfoo" in
     let open Yojson.Safe.Util in
     let code = json |> member "error" |> member "code" in
-    check bool "libraryfoo is not a library resource" true (code = `Int (-32002)))
+    check bool "libraryfoo is not a library resource" true (code = `Int (-32602)))
+;;
+
+let test_missing_topic_is_a_protocol_error () =
+  with_library (fun state ->
+    List.iter
+      (fun uri ->
+        let response = read_resource state uri in
+        let open Yojson.Safe.Util in
+        check (option string) (uri ^ " has no content") None (served_text response);
+        check int (uri ^ " error code") (-32602)
+          (response |> member "error" |> member "code" |> to_int);
+        check string (uri ^ " error URI") uri
+          (response |> member "error" |> member "data" |> member "uri" |> to_string))
+      [ "masc://library/missing"; "masc://library/missing.json" ])
+;;
+
+let test_missing_library_has_empty_json_index () =
+  let dir = test_dir () in
+  Fun.protect ~finally:(fun () -> rm_rf dir) (fun () ->
+    Eio_main.run @@ fun env ->
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    let state = Lib.Mcp_server_eio.For_testing.create_state ~base_path:dir () in
+    let response = read_resource state "masc://library.json" in
+    let body = Option.get (served_text response) |> Yojson.Safe.from_string in
+    let open Yojson.Safe.Util in
+    check int "empty document count" 0 (body |> member "count" |> to_int);
+    check int "empty document list" 0 (body |> member "documents" |> to_list |> List.length))
 ;;
 
 (* The resources read a document the way the library tools do. A document
@@ -230,6 +257,8 @@ let () =
             "library without a separator is not a topic"
             `Quick
             test_prefix_without_separator_is_not_a_topic
+        ; test_case "missing topic is a protocol error" `Quick test_missing_topic_is_a_protocol_error
+        ; test_case "missing library has an empty JSON index" `Quick test_missing_library_has_empty_json_index
         ] )
     ]
 ;;

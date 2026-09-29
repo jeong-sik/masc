@@ -25,17 +25,3 @@ val of_rfc3339 : string -> (t, string) result
 
 val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result
-
-(** A calendar day as a Goal's [due_date] writes it. *)
-module Date : sig
-  type t = private Ptime.date
-
-  val of_string : string -> t option
-  (** Four digits, [-], two digits, [-], two digits, and a day the calendar
-      has. [2026-9-3], [2026-02-30] and [ 2026-09-03] are [None]. *)
-
-  val to_string : t -> string
-  val equal : t -> t -> bool
-  val to_yojson : t -> Yojson.Safe.t
-  val of_yojson : Yojson.Safe.t -> (t, string) result
-end

@@ -27,7 +27,6 @@ val as_string : Yojson.Safe.t -> (string, string) result
 val as_non_blank : Yojson.Safe.t -> (string, string) result
 (** A string with something in it, for identifiers. *)
 
-val as_int : Yojson.Safe.t -> (int, string) result
 val as_list : (Yojson.Safe.t -> ('a, string) result) -> Yojson.Safe.t -> ('a list, string) result
 
 val as_nullable :

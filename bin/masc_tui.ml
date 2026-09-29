@@ -9809,7 +9809,9 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
         (String.concat "\n" Masc_tui_command.help_lines)
   | Masc_tui_command.About ->
       Buffer.clear state.msg_input;
-      state.about_open <- true
+      state.about_open <- true;
+      state.emblem_frame <-
+        (if state.about_reduce_motion then Masc_tui_emblem_screen.final_frame else 0)
   | Masc_tui_command.Open_diff ->
       Buffer.clear state.msg_input;
       state.repository_changes_return_chat <- true;
@@ -17220,6 +17222,8 @@ let main
        (match Masc_tui_emblem_screen.style_of_string value with
         | Some style -> Masc_tui_emblem_screen.set_style style
         | None -> add_event state "error" ("Unknown saved candle: " ^ value)));
+  state.about_reduce_motion <-
+    (match tui_settings.reduce_motion with Some enabled -> enabled | None -> false);
 
   (* Same file, same moment. Absent reads as on, which is what masc drew
      before the key existed -- a reader who never set it sees no change. *)
@@ -20545,6 +20549,18 @@ and is loaded on demand through keeper_skill.
                           state.fusion_scroll <- 0;
                           start_fusion_run state ~mailbox:async_messages ~request))
             | Some (Fusion_launch_started _) | None -> ())
+       (* The arrival consumes its first key. Esc leaves the overlay; every
+          other key reaches the final frame without also activating a shortcut
+          below it. In particular q cannot arm quit while skipping motion. *)
+       | Some "esc" when state.about_open ->
+           state.about_open <- false;
+           state.emblem_frame <- -1;
+           state.quit_armed <- false
+       | Some _ when state.about_open
+                     && state.emblem_frame < Masc_tui_emblem_screen.final_frame ->
+           state.emblem_frame <- Masc_tui_emblem_screen.final_frame;
+           state.quit_armed <- false;
+           Render_schedule.request render_schedule Render_schedule.Force
        (* [quit_key] is already false while anything is taking typed text, the
           row search and the Board draft among them, so this asks nothing more
           than that. It used to restate those two by hand and let a compact
@@ -26647,12 +26663,11 @@ and is loaded on demand through keeper_skill.
            else state.activity_frame + 1);
         Render_schedule.request render_schedule Render_schedule.Background
       end;
-      (* The /about candle steps on its own
-         clock while the last frame drew it. When no frame does, nothing here
-         asks for a repaint, and the next time it is drawn it starts from the
-         first step. *)
+      (* /about has a finite arrival. A closed overlay and a final frame
+         schedule no further candle work, even when the previous frame drew
+         motion immediately before the reader left. *)
       (match Masc_tui_emblem_screen.drawn () with
-       | Masc_tui_emblem_screen.Moving ->
+       | Masc_tui_emblem_screen.Moving when state.about_open ->
            if
              Int64.compare
                (Int64.sub now_ns !emblem_last_step_ns)
@@ -26661,11 +26676,13 @@ and is loaded on demand through keeper_skill.
            then begin
              emblem_last_step_ns := now_ns;
              state.emblem_frame <-
-               (if state.emblem_frame < 0 || state.emblem_frame = max_int then 0
-                else state.emblem_frame + 1);
+               min Masc_tui_emblem_screen.final_frame (state.emblem_frame + 1);
              Render_schedule.request render_schedule Render_schedule.Background
            end
-       | Masc_tui_emblem_screen.Absent -> state.emblem_frame <- -1);
+       | Masc_tui_emblem_screen.Moving
+       | Masc_tui_emblem_screen.Still
+       | Masc_tui_emblem_screen.Absent ->
+           if not state.about_open then state.emblem_frame <- -1);
       if
         Int64.compare (Int64.sub now_ns !last_check_ns) refresh_interval_ns >= 0
       then begin

@@ -218,6 +218,88 @@ let test_a_body_asks_for_its_picture () =
   retire ();
   View.set_display View.No_picture
 
+let about ~cols ~frame display =
+  Screen.about_rows ~style:Screen.Painted ~cols ~rows:24 ~caption
+    ~frame ~elapsed:(float_of_int frame *. 0.15)
+    ~keepers:["rondo"; "sangsu"; "indie-geek-blue"; "jazz-developer"; "extra"]
+    ~display ~project ~origin
+
+let test_the_arrival_gathers_then_stops () =
+  let at_start = about ~cols:76 ~frame:0 pixels in
+  let gathered = about ~cols:76 ~frame:7 pixels in
+  let finished = about ~cols:76 ~frame:Screen.final_frame pixels in
+  check int "narrow view shows two registered Keepers" 2 at_start.Screen.visible_keepers;
+  check bool "other registered Keepers have a count" true
+    (List.exists (fun line -> String.equal (trimmed line) "+3 more Keepers")
+       at_start.Screen.lines);
+  check bool "the arrival is moving at first" true
+    (at_start.Screen.drawn = Screen.Moving);
+  check bool "the final frame is still" true
+    (finished.Screen.drawn = Screen.Still);
+  let positions frame =
+    frame.Screen.placements
+    |> List.filter (fun p ->
+         p.View.image_id <> Masc_tui_graphics.image_id Masc_tui_graphics.Mascot)
+    |> List.map (fun p -> p.View.column)
+  in
+  check bool "the Keepers gather beside the candle" true
+    (positions at_start <> positions gathered);
+  check (list int) "they disperse into the final roster" (positions at_start)
+    (positions finished);
+  check (list int) "every portrait has its own Kitty id"
+    [41; 43; 44]
+    (List.map (fun p -> p.View.image_id) at_start.Screen.placements
+     |> List.sort Int.compare)
+
+let test_wide_and_mosaic_keep_the_roster () =
+  let wide = about ~cols:136 ~frame:Screen.final_frame View.Mosaic in
+  check int "wide view shows four registered Keepers" 4 wide.Screen.visible_keepers;
+  check bool "the fifth Keeper is counted" true
+    (List.exists (fun line -> String.equal (trimmed line) "+1 more Keepers")
+       wide.Screen.lines);
+  check bool "mosaic draws portraits in text cells" true
+    (List.exists has_block wide.Screen.lines);
+  check bool "mosaic asks for no Kitty placement" true
+    (wide.Screen.placements = []);
+  List.iter
+    (fun line ->
+      check bool "no about row loses its edge" true
+        (Layout.display_width line <= 136))
+    wide.Screen.lines
+
+let test_no_picture_keeps_the_count () =
+  let plain = about ~cols:76 ~frame:Screen.final_frame View.No_picture in
+  check bool "no picture asks for no animation tick" true
+    (plain.Screen.drawn = Screen.Absent);
+  check int "four Keeper names remain readable without colour" 4
+    plain.Screen.visible_keepers;
+  check bool "the remaining registered Keeper is counted" true
+    (List.exists (fun line -> String.equal (trimmed line) "+1 more Keepers")
+       plain.Screen.lines)
+
+let test_every_arrival_frame_fits_its_terminal () =
+  List.iter
+    (fun cols ->
+      List.iter
+        (fun display ->
+          for frame = 0 to Screen.final_frame do
+            let scene = about ~cols ~frame display in
+            List.iter
+              (fun line ->
+                check bool "arrival row fits without a cut" true
+                  (Layout.display_width line <= cols))
+              scene.Screen.lines;
+            List.iter
+              (fun placement ->
+                check bool "Kitty picture stays inside its frame" true
+                  (placement.View.column >= snd origin
+                   && placement.View.column + placement.View.box.View.cols
+                      <= snd origin + cols))
+              scene.Screen.placements
+          done)
+        [pixels; View.Mosaic])
+    [76; 136]
+
 let () =
   run "tui_emblem_screen"
     [ ( "layout"
@@ -240,5 +322,13 @@ let () =
     ; ( "about"
       , [ test_case "it says only what was read" `Quick
             test_about_says_only_what_was_read
+        ; test_case "the arrival gathers then stops" `Quick
+            test_the_arrival_gathers_then_stops
+        ; test_case "wide mosaic keeps the roster" `Quick
+            test_wide_and_mosaic_keep_the_roster
+        ; test_case "no picture keeps the count" `Quick
+            test_no_picture_keeps_the_count
+        ; test_case "every arrival frame fits the terminal" `Quick
+            test_every_arrival_frame_fits_its_terminal
         ] )
     ]

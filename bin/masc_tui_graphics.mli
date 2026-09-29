@@ -37,6 +37,8 @@ type image =
   | Msx_screen  (** the MSX spectator screen *)
   | Mascot  (** MASC's candle on [/about] *)
   | Keeper_portrait  (** a Keeper's own portrait at the head of its detail *)
+  | About_keeper_1 | About_keeper_2 | About_keeper_3 | About_keeper_4
+      (** The four bounded Keeper placements on [/about]. *)
 [@@deriving enumerate]
 
 val image_id : image -> int

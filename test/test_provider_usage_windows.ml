@@ -739,6 +739,28 @@ let antigravity_exec : Runtime_execution.antigravity_cli =
 
 let no_antigravity ~scope:_ _ = fail "an Antigravity read was asked for"
 
+let test_failed_background_schedule_releases_scope () =
+  let scope =
+    Runtime_quota_window.scope_of_credential
+      ~provider_id:"usage_read_fork_failure" None
+  in
+  let reads = ref 0 in
+  let read () = incr reads in
+  let failed =
+    Read.For_testing.start_background ~scope
+      ~fork:(fun _ -> raise (Invalid_argument "Switch finished!")) ~read
+  in
+  check bool "failed fork is an unanswered observation" true
+    (failed = Read.Scheduling_failed);
+  check int "failed fork started no read" 0 !reads;
+  let retried =
+    Read.For_testing.start_background ~scope ~fork:(fun child -> child ()) ~read
+  in
+  check bool "released account can schedule a later read" true
+    (retried = Read.Started);
+  check int "later read ran once" 1 !reads
+;;
+
 (* One scope raising, over HTTP or through an official client, is logged
    and the scopes after it are still read. *)
 let test_a_raising_scope_does_not_stop_the_rest () =
@@ -967,6 +989,8 @@ let () =
     ; ( "reading scopes"
       , [ test_case "a raising scope does not stop the rest" `Quick
             test_a_raising_scope_does_not_stop_the_rest
+        ; test_case "failed background schedule releases the account" `Quick
+            test_failed_background_schedule_releases_scope
         ; test_case "an empty key sends no request" `Quick test_an_empty_key_sends_no_request
         ] )
     ; ( "repeating a read"

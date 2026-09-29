@@ -4321,8 +4321,11 @@ let test_tools_routes_serve_prepared_http_representations () =
    time the cache turns a value into those bytes, so two reads of an unchanged
    entry count one: a route that serialized the cached value on every request
    counts none, and one that prepared the bytes per request counts two.
-   [/harness-health] is left out because its store sits under
-   [Env_config.base_path], outside this fixture's workspace. *)
+   Left out: [/harness-health] and [/board/hearths], whose stores sit under
+   [Env_config.base_path] outside this fixture's workspace; [/telemetry],
+   whose one-second TTL could lapse between the two reads; the keeper
+   [/trajectory] and [/file-changes] reads, which need a keeper record and an
+   admin token; and git [blame]/[log]/[diff], which need a repository. *)
 let test_cached_dashboard_reads_send_the_kept_bytes () =
   with_test_env @@ fun ~env ~sw ~config ->
   let previous_state = Server_auth.For_testing.snapshot_server_state () in
@@ -4364,16 +4367,17 @@ let test_cached_dashboard_reads_send_the_kept_bytes () =
       ; "/api/v1/dashboard/briefing/sections"
       ; "/api/v1/dashboard/tool-quality?window_hours=1"
       ; "/api/v1/dashboard/eval-feed"
-      ; "/api/v1/dashboard/telemetry"
       ; "/api/v1/keepers/fixture-keeper/tool-stats"
       ; "/api/v1/workspace/tree"
       ; "/api/v1/workspace/children?path=fixture-dir"
       ])
 
-(* A cached read's status comes from the payload's origin. The string check
-   [json_lazy] falls back on reads only bodies of 8 KB or less, so a timeout
-   envelope past that size left as 200. *)
-let test_cached_read_status_comes_from_the_payload_origin () =
+(* A timeout envelope goes out as 504 whoever produced it: the cache (origin
+   [Timeout]) or a builder with a shorter ceiling of its own, whose envelope
+   the cache keeps as a computed page. Both envelopes here pass 8 KB, past the
+   body parse [json_lazy] falls back on. A page goes out as 200 with its kept
+   validator, and 304 when the client holds it. *)
+let test_cached_read_status_comes_from_the_payload_json () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config:_ ->
   let payload origin json =
     { Dashboard_cache.json
@@ -4392,18 +4396,23 @@ let test_cached_read_status_comes_from_the_payload_origin () =
     tools_h1_wire_response ~router ~headers "/cached"
   in
   let envelope =
-    payload Dashboard_cache.Timeout
-      (`Assoc
-         [ "error", `String "computation_timeout"
-         ; "key", `String (String.make 9000 'k')
-         ])
+    `Assoc
+      [ "error", `String Dashboard_cache.timeout_error_code
+      ; "key", `String (String.make 9000 'k')
+      ]
   in
-  check bool "the envelope is past the string check's reach" true
-    (String.length envelope.raw_json > 8192);
-  let status, headers, _ = read envelope in
-  check int "a timeout envelope is 504" 504 status;
-  check (option string) "a timeout envelope carries no validator" None
-    (List.assoc_opt "etag" headers);
+  List.iter
+    (fun (label, origin) ->
+       let cached = payload origin envelope in
+       check bool (label ^ " is past the body parse's reach") true
+         (String.length cached.raw_json > 8192);
+       let status, headers, _ = read cached in
+       check int (label ^ " is 504") 504 status;
+       check (option string) (label ^ " carries no validator") None
+         (List.assoc_opt "etag" headers))
+    [ "a cache timeout", Dashboard_cache.Timeout
+    ; "a builder's timeout kept as a page", Dashboard_cache.Computed
+    ];
   let page = payload Dashboard_cache.Computed (`Assoc [ "posts", `List [] ]) in
   let status, headers, body = read page in
   check int "a page is 200" 200 status;
@@ -4413,6 +4422,27 @@ let test_cached_read_status_comes_from_the_payload_origin () =
   let status, _, body = read ~headers:[ "if-none-match", page.etag ] page in
   check int "a page the client holds is 304" 304 status;
   check string "a 304 has no body" "" body
+
+(* [respond_cached_read] answers through the same responder: a builder that
+   returns a timeout envelope larger than 8 KB gets 504, which the body parse
+   behind [json_lazy] would have sent as 200. *)
+let test_respond_cached_read_sends_a_builder_timeout_as_504 () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config:_ ->
+  Fun.protect ~finally:Dashboard_cache.invalidate_all (fun () ->
+    Dashboard_cache.invalidate_all ();
+    let router =
+      Lib.Http_server_eio.Router.create ()
+      |> Lib.Http_server_eio.Router.get "/cached-read" (fun request reqd ->
+        Server_routes_http_common.respond_cached_read ~request ~reqd
+          ~cache_key:"test:cached-read-builder-timeout" ~ttl:60.0 (fun () ->
+            `Assoc
+              [ "error", `String Dashboard_cache.timeout_error_code
+              ; "key", `String (String.make 9000 'k')
+              ]))
+    in
+    let status, headers, _ = tools_h1_wire_response ~router ~headers:[] "/cached-read" in
+    check int "a builder's timeout is 504" 504 status;
+    check (option string) "it carries no validator" None (List.assoc_opt "etag" headers))
 
 let test_execution_routes_serve_prepared_http_representations () =
   with_execution_payload_env @@ fun ~env ~sw ~state ->
@@ -7085,8 +7115,10 @@ let () =
             test_execution_routes_serve_prepared_http_representations;
           test_case "cached dashboard reads send the kept bytes" `Quick
             test_cached_dashboard_reads_send_the_kept_bytes;
-          test_case "a cached read's status comes from the payload origin" `Quick
-            test_cached_read_status_comes_from_the_payload_origin;
+          test_case "a cached read's status comes from the payload's JSON" `Quick
+            test_cached_read_status_comes_from_the_payload_json;
+          test_case "respond_cached_read sends a builder's timeout as 504" `Quick
+            test_respond_cached_read_sends_a_builder_timeout_as_504;
           test_case "RFC-0138 telemetry_summary wire returns snapshot" `Quick
             test_telemetry_summary_snapshot_wire_returns_snapshot;
           test_case "RFC-0138 telemetry_summary wire falls back when empty" `Quick

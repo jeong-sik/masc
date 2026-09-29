@@ -1036,8 +1036,8 @@ let handle_keeper_get_subroutes state req request reqd =
       let cache_key =
         keeper_file_changes_cache_key ~masc_root ~keeper_name:name ~window_hours
       in
-      let json =
-        Dashboard_cache.get_or_compute
+      let payload =
+        Dashboard_cache.get_or_compute_payload
           cache_key
           ~ttl:keeper_file_changes_cache_ttl_s
           (fun () ->
@@ -1076,7 +1076,7 @@ let handle_keeper_get_subroutes state req request reqd =
                 ; ("malformed", `Int tally.Keeper_tool_call_file_change.malformed)
                 ]))
       in
-      Http.Response.json_value ~status:`OK ~compress:true ~request:req json reqd
+      Server_cached_read_http.respond ~request:req reqd payload
   else if ends_with keeper_suffix_paused_work then
     Server_dashboard_http_keeper_paused_work.handle_get state req reqd
   else if ends_with keeper_suffix_runtime_trace then

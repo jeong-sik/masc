@@ -170,10 +170,9 @@ let test_authoritative_refresh_waits_for_both_owners_then_runs_once () =
     (cadence = Types.No_scoped_followup)
 ;;
 
-(* Dashboard and Work both show the exact Goal measurement. Work joins it to
-   the selected Goal only after the criterion revisions agree. *)
-let test_only_the_overview_asks_for_the_goal_tree () =
-  check bool "Dashboard asks for it" true
+(* Work owns exact Goal measurement; Home reads the confirmation projection. *)
+let test_only_work_asks_for_the_goal_tree () =
+  check bool "Dashboard does not ask for the measurement tree" false
     (needs Types.Overview).Types.needs_overview_goals;
   check bool "Work asks for it" true
     (needs Types.Planning).Types.needs_overview_goals;
@@ -221,8 +220,8 @@ let () =
     [ ( "refresh scope"
       , [ test_case "only the chat pane asks for chat history" `Quick
             test_only_the_chat_pane_asks_for_chat_history
-        ; test_case "only the overview asks for the goal tree" `Quick
-            test_only_the_overview_asks_for_the_goal_tree
+        ; test_case "only Work asks for the goal tree" `Quick
+            test_only_work_asks_for_the_goal_tree
         ; test_case "Usage owns Keeper usage" `Quick
             test_usage_asks_for_keeper_usage
         ; test_case "only Usage asks for account emails" `Quick

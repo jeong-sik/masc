@@ -80,24 +80,32 @@ type lane_report =
   ; last_dispatch : dispatch_record option
   }
 
+(* What one answered [--probe] said, kept whole so that no reader sees a
+   protocol major from one probe beside a release from another. [observed_at]
+   is when this process got the answer: the answer is kept for the life of the
+   process, so a reader that shows the release must also be able to show how
+   old that reading is. *)
+type probe_answer =
+  { major : Exec_ssh_protocol.major
+  ; capabilities : string list
+  ; release : string option
+  ; observed_at : float
+  }
+
 type shared_state =
   { semaphore : Eio.Semaphore.t
   ; first_dispatch_logged : bool Atomic.t
-  ; probe_capabilities : string list option Atomic.t
+  ; probe_answer : probe_answer option Atomic.t
     (* What the endpoint's shim answered to [--probe], kept for the life of
-       this process once asked (RFC-0422). [None] until a probe has run.
-       The shim is a host-installed binary, so its answer changes only when
-       the operator replaces it, and that comes with a server restart. *)
-  ; probe_release : string option Atomic.t
-    (* The MASC release the endpoint's shim was built from, from the same
-       probe (RFC-0427 B-3). [None] both before a probe has run and from a
-       shim built before the field existed; the two are told apart by
-       [probe_major], which any answered probe sets. *)
-  ; probe_major : Exec_ssh_protocol.major option Atomic.t
-    (* The protocol major the shim speaks, from the same probe. Every request
-       to this endpoint is framed in it, so a shim one release behind or
-       ahead of this server keeps running instead of refusing every frame;
-       [None] until asked, and the first dispatch asks. *)
+       this process once asked (RFC-0422); [None] until a probe has answered.
+       The major frames every request to this endpoint, so a shim one release
+       behind or ahead of this server keeps running instead of refusing every
+       frame, and the first dispatch asks. [release] is the MASC release the
+       shim was built from (RFC-0427 B-3): [None] from a shim built before
+       the field existed. A shim replaced in place, as the microVM guest's is
+       through its host mount, reaches this endpoint's next request but not
+       this cache: the answer is asked again only when the preflight cache is
+       cleared or the process restarts. *)
   ; last_probe_failure : (float * string) option Atomic.t
     (* The most recent probe that did not answer, cleared by one that did.
        [None] and no major means no probe has run yet. *)
@@ -122,9 +130,7 @@ let shared_state ~base_path ~name ~max_concurrent_sessions =
       let state =
         { semaphore = Eio.Semaphore.make max_concurrent_sessions
         ; first_dispatch_logged = Atomic.make false
-        ; probe_capabilities = Atomic.make None
-        ; probe_release = Atomic.make None
-        ; probe_major = Atomic.make None
+        ; probe_answer = Atomic.make None
         ; last_probe_failure = Atomic.make None
         ; last_dispatch = Atomic.make None
         }
@@ -560,9 +566,14 @@ let run_probe t =
      | Ok probe ->
        (match Exec_ssh_protocol.major_of_probe probe with
         | Ok major ->
-          Atomic.set t.shared.probe_major (Some major);
-          Atomic.set t.shared.probe_capabilities (Some probe.capabilities);
-          Atomic.set t.shared.probe_release probe.release;
+          Atomic.set
+            t.shared.probe_answer
+            (Some
+               { major
+               ; capabilities = probe.capabilities
+               ; release = probe.release
+               ; observed_at = Unix.gettimeofday ()
+               });
           warn_on_release_skew t probe.release;
           Ok major
         | Error detail ->
@@ -591,13 +602,10 @@ let run_probe t =
 
 let report t =
   let probe =
-    match Atomic.get t.shared.probe_major, Atomic.get t.shared.probe_capabilities with
-    | Some major, Some capabilities ->
-      Probe_answered { major; capabilities; release = Atomic.get t.shared.probe_release }
-    | Some major, None ->
-      Probe_answered
-        { major; capabilities = []; release = Atomic.get t.shared.probe_release }
-    | None, _ ->
+    match Atomic.get t.shared.probe_answer with
+    | Some { major; capabilities; release; observed_at } ->
+      Probe_answered { major; capabilities; release; observed_at }
+    | None ->
       (match Atomic.get t.shared.last_probe_failure with
        | Some (at, detail) -> Probe_failed { at; detail }
        | None -> Probe_not_asked)
@@ -616,8 +624,8 @@ let report t =
    anyway; the failure it is about to meet is the transport's, and it will
    say so in its own words. *)
 let wire_major t =
-  match Atomic.get t.shared.probe_major with
-  | Some major -> major
+  match Atomic.get t.shared.probe_answer with
+  | Some { major; _ } -> major
   | None ->
     (match run_probe t with
      | Ok major -> major
@@ -948,13 +956,13 @@ let observe_supported t =
   let advertised capabilities =
     List.mem Exec_ssh_protocol.observe_capability capabilities
   in
-  match Atomic.get t.shared.probe_capabilities with
-  | Some capabilities -> advertised capabilities
+  match Atomic.get t.shared.probe_answer with
+  | Some { capabilities; _ } -> advertised capabilities
   | None ->
     (match run_probe t with
      | Ok _major ->
-       (match Atomic.get t.shared.probe_capabilities with
-        | Some capabilities -> advertised capabilities
+       (match Atomic.get t.shared.probe_answer with
+        | Some { capabilities; _ } -> advertised capabilities
         | None -> false)
      | Error error ->
        Log.Keeper.warn

@@ -39,7 +39,8 @@ type account_emails =
   | Email_list_unrecognized  (* the inventory carried no readable email list *)
 type t = {
   requested : string; mutable generation : int; mutable phase : phase; mutable providers : provider list;
-  mutable provider : provider option; mutable models : model list; mutable cursor : int;
+  mutable provider : provider option; mutable models : model list; mutable selected_models : string list;
+  mutable cursor : int;
   mutable account_ref : string option; mutable login_id : string option;
   mutable revision : string; mutable existing : string list; mutable default_runtime_id : string option; mutable draft : string;
   mutable output : string; mutable notice : string; mutable input_pending : bool; mutable input_sequence : int;
@@ -49,14 +50,16 @@ type t = {
 type authentication = Authenticated | Login_completed | Credential_captured
 type event = Started of string * string option | Output of string | Input_ready
   | Complete of string * authentication | Login_failed of string * string option | Login_error
-type action = Inventory | Refresh_saved of saved | Refresh_retry | Start of { provider : provider; existing : bool }
+type action = Inventory | Refresh_saved of saved | Refresh_retry | Select_existing of provider
+  | Start of { provider : provider; existing : bool }
   | Input of int * Yojson.Safe.t | Cancel
-  | Recover | Discover | Prepare of model | Save of model | Close | Nothing
+  | Recover | Discover | Prepare of model | Save of model list | Close | Nothing
   | Preview_removal of { provider : provider; refused : string option }
   | Remove of { provider : provider; revision : string; login_store : string option }
   | Refresh_removed of { client : client; notice : string }
   | Refresh_list of list_view
-let create requested = {requested; generation=0; phase=Loading; providers=[]; provider=None; models=[]; account_emails=Email_rows {rows=[]; unattributed=0};
+let create requested = {requested; generation=0; phase=Loading; providers=[]; provider=None; models=[];
+  selected_models=[]; account_emails=Email_rows {rows=[]; unattributed=0};
   cursor=0; account_ref=None; login_id=None; revision=""; existing=[]; default_runtime_id=None; draft="";
   output=""; notice="계정 목록을 읽고 있습니다."; input_pending=false; input_sequence=0; cancel_stream=None; recovery=Login_status}
 let begin_attempt t provider ~existing =
@@ -64,7 +67,8 @@ let begin_attempt t provider ~existing =
   t.provider <- Some provider;
   let previous = if existing then t.account_ref else None in
   t.login_id <- None; t.recovery <- Login_status;
-  t.phase <- Logging; t.output <- ""; t.models <- []; t.draft <- ""; t.input_pending <- false;
+  t.phase <- Logging; t.output <- ""; t.models <- []; t.selected_models <- [];
+  t.draft <- ""; t.input_pending <- false;
   t.notice <- "공식 클라이언트의 안내 주소에서 로그인하세요.";
   previous
 let field name = function `Assoc fields -> (match List.assoc_opt name fields with Some v -> v | None -> `Null) | _ -> `Null
@@ -236,8 +240,7 @@ let inventory ?view t json =
        | None, Some (client, on) -> show_accounts ?on t client);
       Ok ())
   | _ -> Error "서버 계정 목록을 읽지 못했습니다."
-let save_failed t (model:model) message =
-  t.models <- List.map (fun (existing:model) -> if existing.id=model.id then model else existing) t.models;
+let save_failed t message =
   t.recovery <- Refresh_configuration; t.phase <- Failed;
   (* The reason leads; the key to press is also in the hints. *)
   t.notice <- message ^ " · r로 설정을 새로 읽은 뒤 다시 저장하세요."
@@ -305,19 +308,34 @@ let input_response ~sequence t result =
 let models t json =
   match field "models" json with
   | `List rows ->
-    let parsed = List.map (fun row -> match string (field "id" row) with
-      | None -> None
-      | Some id -> Some {id; label=(match string (field "label" row) with Some x -> x | None -> id);
+    let parsed = List.map (fun row -> match string (field "id" row), field "bound" row with
+      | Some id, `Bool bound -> Some ({id; label=(match string (field "label" row) with Some x -> x | None -> id);
         context=(match field "context" row with `Int n when n>0 -> Some n | _ -> None);
-        tools=(match field "tools" row with `Bool b -> Some b | _ -> None)}) rows in
+        tools=(match field "tools" row with `Bool b -> Some b | _ -> None)}, bound)
+      | _ -> None) rows in
     if List.exists Option.is_none parsed then Error "모델 목록 형식이 올바르지 않습니다."
-    else (t.models <- List.filter_map Fun.id parsed; t.cursor <- 0; t.phase <- Models;
-      t.notice <- "Enter: 검증 후 모델 추가. 기존 기본 모델 순서는 유지됩니다."; Ok ())
+    else (
+      let available = List.filter_map (function
+        | Some (model, false) -> Some model
+        | Some (_, true) | None -> None) parsed in
+      t.models <- available;
+      t.selected_models <- List.filter_map (fun (model:model) ->
+        if model.tools <> Some false && Option.is_some model.context then Some model.id else None) available;
+      t.cursor <- 0; t.phase <- Models;
+      t.notice <- "붙일 수 있는 모델을 모두 골랐습니다. Space:선택  a:전체  Enter:검증 후 저장";
+      Ok ())
   | _ -> Error "이 계정의 모델 목록을 읽지 못했습니다. r로 다시 확인하세요."
+let selected_account t provider json =
+  match reference (field "account_ref" json) with
+  | None -> Error "저장된 계정의 참조를 읽지 못했습니다."
+  | Some account_ref ->
+    t.provider <- Some provider; t.account_ref <- Some account_ref; t.login_id <- None;
+    t.models <- []; t.selected_models <- []; Ok ()
 let prepared t model json = match field "model" json, field "context" json with
   | `String id, `Int n when id=model.id && n>0 ->
     t.models <- List.map (fun m -> if m.id=id then {m with context=Some n} else m) t.models;
-    t.phase <- Models; t.notice <- "실행 context를 확인했습니다. Enter로 검증하고 추가하세요."; Ok ()
+    t.selected_models <- id :: List.filter (fun selected -> selected <> id) t.selected_models;
+    t.phase <- Models; t.notice <- "실행 context를 확인하고 모델을 선택했습니다. Enter로 검증하고 저장하세요."; Ok ()
   | _ -> Error "모델 실행 context를 확인하지 못했습니다."
 let removal_change row = match string (field "kind" row) with
   | Some "table" -> Option.map (fun path -> Removed_table path) (string (field "path" row))
@@ -411,6 +429,25 @@ let submit_input t json =
   t.input_sequence <- t.input_sequence + 1;
   t.input_pending <- true;
   Input (t.input_sequence, json)
+let toggle_model t (model:model) =
+  if List.mem model.id t.selected_models then (
+    t.selected_models <- List.filter (fun id -> id <> model.id) t.selected_models;
+    Nothing)
+  else if model.tools = Some false then (
+    t.notice <- model.label ^ " · 도구 호출 미지원"; Nothing)
+  else match model.context, t.provider with
+    | Some _, _ -> t.selected_models <- model.id :: t.selected_models; Nothing
+    | None, Some {client=Antigravity;_} -> Prepare model
+    | None, Some {client=(Codex | Claude);_} ->
+      t.phase <- Documented_context model; t.draft <- "";
+      t.notice <- model.label ^ " · 공식 문서나 CLI 설정에서 확인한 context 한도(tokens)를 입력하세요.";
+      Nothing
+    | None, Some {client=Muse;_} ->
+      t.notice <- model.label ^ " · context 확인 필요. CLI 설정을 확인하고 r로 목록을 새로 읽으세요.";
+      Nothing
+    | None, None -> Nothing
+let selected_models t =
+  List.filter (fun (model:model) -> List.mem model.id t.selected_models) t.models
 let key t key =
   if key="esc" then (match t.phase with
     (* Esc steps back to the list rather than closing /login: the removal is
@@ -418,7 +455,8 @@ let key t key =
     | Removal {provider; _} -> show_accounts ~on:provider t provider.client; Nothing
     (* Esc from a client's accounts goes back to the clients. *)
     | Providers (Accounts client) -> show_clients ~on:client t; Nothing
-    | Loading | Providers Clients | Logging | Models | Documented_context _ | Saving | Finished _ | Failed -> Close) else
+    | Documented_context _ -> t.phase <- Models; t.draft <- ""; Nothing
+    | Loading | Providers Clients | Logging | Models | Saving | Finished _ | Failed -> Close) else
   match t.phase with
   | Removal {provider; revision; removal = Removable {login_store; _}} ->
     if key="\r" || key="\n" || key="enter" then Remove {provider; revision; login_store} else Nothing
@@ -441,11 +479,24 @@ let key t key =
       (match int_of_string_opt t.draft with
        | Some n when n>0 ->
          t.draft<-"";
-         Save {model with context=Some n}
+         t.models <- List.map (fun (row:model) ->
+           if row.id=model.id then {row with context=Some n} else row) t.models;
+         t.selected_models <- model.id :: List.filter (fun id -> id <> model.id) t.selected_models;
+         t.phase <- Models; t.notice <- model.label ^ " · context를 확인하고 선택했습니다.";
+         Nothing
        | _ -> t.notice<-"확인한 한도를 양의 정수로 입력하세요."; Nothing)
     else if key="backspace" || key="\127" then (t.draft<-Masc_tui_message_layout.drop_last_utf8_scalar t.draft; Nothing)
     else if String.length key=1 && key.[0]>='0' && key.[0]<='9' then (paste t key; Nothing) else Nothing
   | Loading | Saving -> Nothing
+  | Models when key=" " ->
+    (match List.nth_opt t.models t.cursor with
+     | Some model -> toggle_model t model
+     | None -> Nothing)
+  | Models when key="a" ->
+    let eligible = List.filter (fun (model:model) -> model.tools <> Some false && Option.is_some model.context) t.models in
+    let all_selected = List.for_all (fun (model:model) -> List.mem model.id t.selected_models) eligible in
+    t.selected_models <- (if all_selected then [] else List.map (fun (model:model) -> model.id) eligible);
+    Nothing
   | Providers _ | Models | Finished _ | Failed ->
     if key="up" || key="k" then (t.cursor<-max 0 (t.cursor-1); Nothing)
     else if key="down" || key="j" then (
@@ -494,36 +545,30 @@ let key t key =
        | Providers (Accounts _) ->
          (match focused_row t with
           | Some (New_account provider) -> Start {provider; existing = false}
-          | Some (Account provider) -> Start {provider; existing = true}
+          | Some (Account provider) -> Select_existing provider
           | None -> Nothing)
-       | Models -> (match List.nth_opt t.models t.cursor with
-         | None -> Nothing | Some {tools=Some false;_} -> t.notice<-"이 모델은 도구 호출을 지원하지 않습니다."; Nothing
-         | Some ({context=None;_} as model) ->
-           (match t.provider with
-            | Some {client=Antigravity;_} -> Prepare model
-            | Some {client=(Codex | Claude);_} ->
-              t.phase<-Documented_context model; t.draft<-"";
-              t.notice<-"공식 문서나 CLI 설정에서 확인한 context 한도(tokens)를 입력하세요. 모르면 Esc로 닫으세요. 저장 전 응답·도구 검증을 수행합니다."; Nothing
-            | Some {client=Muse;_} ->
-              t.notice<-"Muse가 이 모델의 context를 보고하지 않았습니다. CLI 설정을 확인하고 r로 목록을 새로 읽으세요."; Nothing
-            | None -> Nothing)
-         | Some model -> Save model)
+       | Models ->
+         (match selected_models t with
+          | [] -> t.notice <- "선택한 모델이 없습니다. Space로 모델을 고르세요."; Nothing
+          | models -> Save models)
        | Loading | Logging | Documented_context _ | Saving | Finished _ | Failed | Removal _ -> Nothing)
     else Nothing
-let save_body t model =
+let save_body t models =
   let existing=List.map (fun id -> `Assoc ["runtime_id",`String id]) t.existing in
-  let model = `Assoc ["id",`String model.id;"context",(match model.context with Some n -> `Int n | None -> `Null);"streaming",`Bool true] in
-  `Assoc (["revision",`String t.revision;"connections",`List [`Assoc ["source",source t;"models",`List [model]]];
-    "selection",`List (existing @ [`Assoc ["connection",`Int 0;"model",`Int 0]])]
+  let model_rows=List.map (fun (model:model) ->
+    `Assoc ["id",`String model.id;"context",(match model.context with Some n -> `Int n | None -> `Null);"streaming",`Bool true]) models in
+  let selected=List.mapi (fun index _ -> `Assoc ["connection",`Int 0;"model",`Int index]) models in
+  `Assoc (["revision",`String t.revision;"connections",`List [`Assoc ["source",source t;"models",`List model_rows]];
+    "selection",`List (existing @ selected)]
     @ (match t.default_runtime_id with None -> [] | Some id -> ["default_runtime_id",`String id]))
 let hints t = match t.phase with
   | Logging -> "Enter:코드 전달  ↑↓/Tab:선택  Ctrl-D:입력 종료  Ctrl-C:취소  Esc:닫기"
-  | Documented_context _ -> "확인한 context 한도(tokens)  Enter:검증 후 추가  Esc:닫기"
+  | Documented_context _ -> "확인한 context 한도(tokens)  Enter:선택  Esc:모델 목록"
   | Providers Clients -> "↑↓:공급자  Enter:계정 보기  n:새 계정  Esc:닫기"
   | Providers (Accounts _) -> "↑↓:계정  Enter:선택  n:새 계정  D:지우기  Esc:공급자 목록"
   | Removal {removal = Removable _; _} -> "Enter:지우고 저장  Esc:목록으로"
   | Removal {removal = Unremovable _; _} -> "Esc:목록으로"
-  | Models -> "↑↓:모델  Enter:검증 후 추가  r:목록 새로고침  e:재로그인  Esc:닫기"
+  | Models -> "↑↓:모델  Space:선택  a:전체  Enter:검증 후 저장  r:새로고침  Esc:닫기"
   | Loading | Saving | Finished _ | Failed -> "r:상태 재확인  e:재로그인  n:새 계정  Esc:닫기"
 type row = Text of string | Terminal of Masc_tui_sgr_text.line
 (* A row with no entry runs on no account: a client prototype, an HTTP
@@ -562,7 +607,11 @@ let body_rows t =
   | Providers (Accounts client) -> List.mapi (fun i row ->
       Text ((if i=t.cursor then "> " else "  ")
             ^ (match row with New_account _ -> "+ 새 계정" | Account p -> account_label t p))) (account_rows t client)
-  | Models -> List.mapi (fun i (m:model) -> Text ((if i=t.cursor then "> " else "  ") ^ m.label ^ (match m.context with None->" · context 확인 필요" | Some _ -> ""))) t.models
+  | Models -> List.mapi (fun i (m:model) ->
+      let mark = if List.mem m.id t.selected_models then "[x] " else "[ ] " in
+      let reason = if m.tools = Some false then " · 도구 호출 미지원"
+        else if Option.is_none m.context then " · context 확인 필요" else "" in
+      Text ((if i=t.cursor then "> " else "  ") ^ mark ^ m.label ^ reason)) t.models
   | Logging -> List.map (fun line -> Terminal line) (Masc_tui_sgr_text.parse t.output)
     @ [Text ("로그인 코드: " ^ String.make (min 40 (String.length t.draft)) '*'); Text (if t.input_pending then "입력 전달 중" else if Option.is_none t.login_id then "로그인 세션 준비 중" else "코드 입력 대기")]
   | Documented_context _ -> [Text ("문서 또는 설정의 context 한도(tokens): " ^ t.draft)]

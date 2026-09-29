@@ -377,7 +377,7 @@ let facts_of_observation observation facts =
   | Workspace_memory_context.Missing -> Some []
   | Workspace_memory_context.Available snapshot -> Some (facts snapshot)
 
-let observe (keeper : Workspace_memory_context.keeper) =
+let observe_keeper_stores (keeper : Workspace_memory_context.keeper) =
   let keeper_id = keeper.keeper_id in
   [ ( Ordinary_store keeper_id
     , facts_of_observation keeper.ordinary (fun (snapshot : Keeper_memory_os_current.t) ->
@@ -394,7 +394,7 @@ let observe (keeper : Workspace_memory_context.keeper) =
           snapshot.facts) ) ]
 
 let reconcile t keepers =
-  let stores = List.concat_map observe keepers in
+  let stores = List.concat_map observe_keeper_stores keepers in
   let unreadable =
     List.filter_map (fun (key, facts) -> match facts with None -> Some key | Some _ -> None) stores
   in

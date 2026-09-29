@@ -19,10 +19,18 @@ export function WorkspaceMemoryLedgerPanel() {
   }, [generation])
   const value = state.kind === 'ready' ? state.value : null
   const ledger = value?.status === 'available' ? value.ledger : null
-  const members = (kind: 'claim' | 'conflict', id: string) =>
-    ledger?.facts.filter(row => row.disposition.kind === kind
-      && (kind === 'claim' ? row.disposition.kind === 'claim' && row.disposition.claim_id === id
-        : row.disposition.kind === 'conflict' && row.disposition.conflict_id === id)) ?? []
+  const memberGroups = new Map<string, Array<NonNullable<typeof ledger>['facts'][number]>>()
+  for (const row of ledger?.facts ?? []) {
+    const disposition = row.disposition
+    const key = disposition.kind === 'claim' ? `claim:${disposition.claim_id}`
+      : disposition.kind === 'conflict' ? `conflict:${disposition.conflict_id}` : null
+    if (key !== null) {
+      const group = memberGroups.get(key) ?? []
+      group.push(row)
+      memberGroups.set(key, group)
+    }
+  }
+  const members = (kind: 'claim' | 'conflict', id: string) => memberGroups.get(`${kind}:${id}`) ?? []
   const factRows = (rows: NonNullable<typeof ledger>['facts']) => rows.map(row => html`
     <li class="break-words py-1">
       <span>${row.keeper_id} · ${row.store === 'ordinary' ? '일반 기억' : row.path}</span>

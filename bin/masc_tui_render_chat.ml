@@ -2196,7 +2196,7 @@ let keeper_message_find_scroll (state : state) ~keeper_name ~needle ~older_than 
   else
     let _, cols = get_terminal_size () in
     let chat_cols =
-      Masc_tui_roster_pane.content_cols ~hidden:state.roster_pane_hidden ~cols
+      Masc_tui_roster_pane.content_cols ~hidden:(roster_pane_hidden state) ~cols
     in
     let messages = keeper_message_visible_messages state ~keeper_name in
     let entries =
@@ -2319,7 +2319,7 @@ let render_keeper_message (state : state) =
        view does; the chat lays out against its own pane width. *)
     let split = keeper_roster_pane_shown state ~cols in
     let chat_cols =
-      Masc_tui_roster_pane.content_cols ~hidden:state.roster_pane_hidden ~cols
+      Masc_tui_roster_pane.content_cols ~hidden:(roster_pane_hidden state) ~cols
     in
     let title, mode_suffix =
       (* Both features put a mode indicator here: memory arrived on main
@@ -3690,9 +3690,25 @@ let render_keeper_message (state : state) =
     in
     if split then begin
       let left_buf = Buffer.create 1024 in
+      let pane_rows = count_frame_lines chat_buf in
+      let portrait = Masc_tui_chat_portrait.shown ~name:keeper_name
+        ~rows:pane_rows ~cols:keeper_roster_pane_cols in
+      let roster_rows = match portrait with
+        | None -> pane_rows
+        | Some portrait -> portrait.Masc_tui_chat_portrait.roster_rows in
       keeper_roster_pane
         ~focused:(state.keeper_message_focus = Left_pane)
-        state ~rows:(count_frame_lines chat_buf) ~cols:keeper_roster_pane_cols left_buf;
+        state ~rows:roster_rows ~cols:keeper_roster_pane_cols left_buf;
+      Option.iter (fun portrait ->
+        box_line left_buf keeper_roster_pane_cols
+          (Theme.recede () ^ " 대화 · " ^ display_keeper_name ^ Ansi.reset);
+        List.iter (box_line left_buf keeper_roster_pane_cols)
+          portrait.Masc_tui_chat_portrait.picture_lines;
+        box_bottom left_buf keeper_roster_pane_cols;
+        Option.iter (fun (placement : Masc_tui_portrait_view.placement) ->
+          Masc_tui_portrait_view.request
+            {placement with row = placement.row + strip_rows}) portrait.placement)
+        portrait;
       write_two_panes buf ~left_cols:keeper_roster_pane_cols ~left:left_buf
         ~right:chat_buf
     end;

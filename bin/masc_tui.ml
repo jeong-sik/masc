@@ -366,7 +366,7 @@ let identity_query (state : state) =
 
 let identity_pane_columns (state : state) =
   let _rows, columns = get_terminal_size () in
-  Masc_tui_roster_pane.content_cols ~hidden:state.roster_pane_hidden
+  Masc_tui_roster_pane.content_cols ~hidden:(roster_pane_hidden state)
     ~cols:columns
 
 (* A row cursor over a plain listing: the keypress moves the cursor and the
@@ -20321,17 +20321,17 @@ and is loaded on demand through keeper_skill.
           surface is up. *)
        | Some k when String.equal k toggle_roster_pane_key ->
            (match
-              Masc_tui_roster_pane.toggle_hidden
-                ~hidden:state.roster_pane_hidden ~cols:terminal_columns
+              Masc_tui_roster_pane.toggle_preference state.roster_pane_preference
+                ~in_chat:(state.view = Keepers Keeper_message) ~cols:terminal_columns
             with
             | None ->
                 report_action state "system"
                   (Printf.sprintf
                      "Keeper roster needs %d columns; preference unchanged"
                      Masc_tui_roster_pane.threshold_cols)
-            | Some hidden ->
-                state.roster_pane_hidden <- hidden;
-                if hidden then state.keeper_message_focus <- Right_pane;
+            | Some preference ->
+                state.roster_pane_preference <- preference;
+                if roster_pane_hidden state then state.keeper_message_focus <- Right_pane;
                 Render_schedule.request render_schedule Render_schedule.Force)
        | Some k when String.equal k toggle_acting_pane_key ->
            (match toggle_acting_pane state with
@@ -21933,7 +21933,7 @@ and is loaded on demand through keeper_skill.
        | Some ("j" | "down" | "k" | "up" as move)
          when state.view = Keepers Keeper_detail && state.detail_tab = Detail_runs
               && not (Masc_tui_roster_pane.arrows_go_left
-                ~hidden:state.roster_pane_hidden ~cols:terminal_columns
+                ~hidden:(roster_pane_hidden state) ~cols:terminal_columns
                 ~preferring_left:(state.keeper_detail_focus = Left_pane)) ->
            let count = List.length (selected_keeper_runs state) in
            let delta = if move = "j" || move = "down" then 1 else -1 in
@@ -21942,7 +21942,7 @@ and is loaded on demand through keeper_skill.
        | Some ("\r" | "\n" | "right")
          when state.view = Keepers Keeper_detail && state.detail_tab = Detail_runs
               && not (Masc_tui_roster_pane.arrows_go_left
-                ~hidden:state.roster_pane_hidden ~cols:terminal_columns
+                ~hidden:(roster_pane_hidden state) ~cols:terminal_columns
                 ~preferring_left:(state.keeper_detail_focus = Left_pane)) ->
            (match selected_keeper_run state with
             | None -> ()
@@ -24175,7 +24175,7 @@ and is loaded on demand through keeper_skill.
             | Keepers Keeper_detail ->
                 if
                   Masc_tui_roster_pane.arrows_go_left
-                    ~hidden:state.roster_pane_hidden ~cols:terminal_columns
+                    ~hidden:(roster_pane_hidden state) ~cols:terminal_columns
                     ~preferring_left:(state.keeper_detail_focus = Left_pane)
                 then begin
                   state.keeper_cursor <-
@@ -24536,7 +24536,7 @@ and is loaded on demand through keeper_skill.
             | Keepers Keeper_detail ->
                 if
                   Masc_tui_roster_pane.arrows_go_left
-                    ~hidden:state.roster_pane_hidden ~cols:terminal_columns
+                    ~hidden:(roster_pane_hidden state) ~cols:terminal_columns
                     ~preferring_left:(state.keeper_detail_focus = Left_pane)
                 then begin
                   state.keeper_cursor <-

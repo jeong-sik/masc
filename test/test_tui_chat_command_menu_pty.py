@@ -92,7 +92,7 @@ def run(executable):
     def telemetry(process, fd, _slave, output, _base):
         open_chat(process, fd, output)
         h.resize_and_wait(process, fd, output, rows=30, columns=120, needle=CHAT)
-        h.send_and_wait(process, fd, output, b"\x02", b"KEEPERS")
+        h.wait_for_output(process, fd, output, b"KEEPERS", start=0, timeout=3.0)
         rows = screen(process, fd, output)
         status_row = h.screen_row_of(rows, b"Context")
         status = rows[status_row] if status_row >= 0 else b""

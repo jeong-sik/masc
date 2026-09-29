@@ -3659,6 +3659,7 @@
   masc_tui_ansi
   masc_tui_theme
   masc_tui_types
+  masc_tui_roster_pane
   unix
   yojson)
  (deps
@@ -5947,6 +5948,7 @@
 (include stanzas/test_tui_emblem_screen.inc)
 (include stanzas/test_tui_portrait_view.inc)
 (include stanzas/test_tui_keeper_portrait.inc)
+(include stanzas/test_tui_chat_portrait.inc)
 (include stanzas/test_tui_emblem_state.inc)
 (include stanzas/test_tui_link_label.inc)
 (include stanzas/test_tui_link_preview.inc)
@@ -7421,6 +7423,7 @@
 (include stanzas/test_tui_keeper_current_failure_pty.inc)
 
 (include stanzas/test_tui_keeper_portrait_pty.inc)
+(include stanzas/test_tui_chat_portrait_pty.inc)
 
 (include stanzas/test_safe_ops_read_json_eio.inc)
 

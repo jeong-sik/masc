@@ -10164,10 +10164,9 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
             composer_showing(b"alpha-draft"),
         )
 
-        # The roster is put away until it is asked for, so this scenario asks.
-        # Ctrl-B is refused below Masc_tui_roster_pane.threshold_cols, and the
-        # width above is chosen to clear it.
-        send_and_wait(process, master_fd, output, b"\x02", b"KEEPERS")
+        # Wide chat shows the roster by default. Leave that preference
+        # untouched while checking the selected Keeper and draft handoff.
+        wait_for_output(process, master_fd, output, b"KEEPERS", start=0, timeout=3.0)
 
         beta_start = len(output)
         # A drawn roster is an input pane: Left focuses it, Down moves its

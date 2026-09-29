@@ -1638,6 +1638,8 @@
   masc_tui_link_preview
   masc_tui_terminal_palette
   masc_tui_roster_pane
+  masc_tui_chat_portrait
+  masc_tui_portrait_view
   masc_tui_keeper_chat_queue
   masc_tui_answering
   masc_tui_esc_interrupt
@@ -2096,6 +2098,13 @@
   masc_tui_graphics
   masc_tui_portrait_view
   masc_tui_terminal_palette))
+
+(library
+ (name masc_tui_chat_portrait)
+ (wrapped false)
+ (modules masc_tui_chat_portrait)
+ (libraries masc_tui_keeper_portrait masc_tui_portrait_view
+  masc_tui_graphics masc_tui_terminal_palette masc_tui_ansi))
 
 ;; Decides, by magic bytes, whether a downloaded body may sit in the preview
 ;; image cache, and what a curl or ffmpeg exit status means. Kept apart from

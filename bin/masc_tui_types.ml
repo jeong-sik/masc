@@ -5473,10 +5473,9 @@ type state = {
      newest; the keys that move it re-fetch the exact provider input for the
      row they name, so every tab describes the turn the operator chose. *)
   mutable context_inspector_turn_back: int;
-  (* The roster beside a keeper surface costs the chat 30 columns for a
-     list the reader may already know. Hidden is a choice they make, not a
-     width the terminal forces, so it survives resizing. *)
-  mutable roster_pane_hidden: bool;
+  (* Chat shows its roster by default; other surfaces keep their columns.
+     An explicit Ctrl-B choice survives both navigation and resizing. *)
+  mutable roster_pane_preference: Masc_tui_roster_pane.preference;
   (* The Activity pane on the right edge costs a surface
      [Masc_tui_acting_pane.pane_cols] columns for the fleet's live feed, or
      [wide_pane_cols] wide. Same contract as the roster: narrow, wide or
@@ -6685,6 +6684,10 @@ type state = {
   port: int;
   refresh_interval: float;
 }
+
+let roster_pane_hidden (state : state) =
+  Masc_tui_roster_pane.effective_hidden state.roster_pane_preference
+    ~in_chat:(state.view = Keepers Keeper_message)
 
 (* Which field a typed character lands in.
 
@@ -7993,13 +7996,9 @@ let create_state
   context_inspector_detail_scroll = 0;
   context_inspector_focus = Left_pane;
   context_inspector_turn_back = 0;
-  (* The roster comes when it is asked for. Ctrl-L's Activity pane already
-     answers "what is every keeper doing right now", and a name-only column
-     beside the chat repeated that answer while taking 34 of the
-     conversation's cells. Ctrl-B brings it back, and that press is the whole
-     cost of being wrong here -- whereas the column was drawn on every frame
-     whether or not anyone read it. *)
-  roster_pane_hidden = true;
+  (* Wide chat starts with its Keeper roster. Other surfaces keep their
+     full width until Ctrl-B records an explicit choice. *)
+  roster_pane_preference = Masc_tui_roster_pane.Auto;
   acting_pane_layout = Masc_tui_acting_pane.Narrow;
   acting_pane_scroll = 0;
   acting_pane_cursor = None;
@@ -11842,7 +11841,7 @@ let keeper_message_command_window state ~terminal_rows ~terminal_cols =
      | Some menu ->
        let status_rows = keeper_message_status_rows state + 1 in
        let chat_cols = Masc_tui_roster_pane.content_cols
-           ~hidden:state.roster_pane_hidden ~cols:terminal_cols in
+           ~hidden:(roster_pane_hidden state) ~cols:terminal_cols in
        let history_rows = Masc_tui_message_layout.message_history_height
            ~terminal_rows ~status_rows in
        (* Keep three conversation rows plus a heading and input separator.

@@ -15,6 +15,10 @@ let styled_output () =
 
 let ok_line text = if styled_output () then "\027[32m\xE2\x9C\x93\027[0m " ^ text else text
 
+(* The candle is the project's mark. One emoji opens the run, on the same
+   terminals that get the green check and nowhere else. *)
+let start_line text = if styled_output () then "\xF0\x9F\x95\xAF\xEF\xB8\x8F " ^ text else text
+
 type workspace_issue_kind = Invalid_state | Unreadable_state
 
 type workspace_issue = { path : string; kind : workspace_issue_kind; detail : string }
@@ -270,7 +274,7 @@ let run_with_selection ~network_mode ~base_path ~port ~initialize ~prepare_image
         require_compatible_workspace base_path;
         require_ok "Workspace initialization" initialize;
         let base_path = Unix.realpath base_path in
-        Printf.printf "Preparing imp in %s\n%!" base_path;
+        print_endline (start_line (Printf.sprintf "Preparing imp in %s" base_path));
         require_ok "Model validation" validate_runtime;
         let module Sandbox = Masc.Sandbox_readiness in
         let path = Keeper_sandbox_config.keeper_toml_path ~base_path ~agent_name:"imp" in

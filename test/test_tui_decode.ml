@@ -1,5 +1,28 @@
 open Masc
 
+let test_play_invite_responses_preserve_recovery_facts () =
+  let json = Yojson.Safe.from_string in
+  (match Tui_decode.decode_play_invites
+           (json {|{"invites":[{"name":"old","expires_at":null,"expired":false,"holds_controller":true}]}|}) with
+   | Ok [{ pi_name = "old"; pi_expires_at = None; pi_expired = false;
+           pi_holds_controller = true }] -> ()
+   | _ -> Alcotest.fail "invite list lost null expiry or controller holder");
+  (match Tui_decode.decode_play_invite_revoked
+           (json {|{"name":"old","revoked":true,"released_controller":false,"release_error":"disk fault"}|}) with
+   | Ok { pir_name = "old"; pir_revoked = true; pir_released_controller = false;
+          pir_release_error = Some "disk fault" } -> ()
+   | _ -> Alcotest.fail "partial revoke lost its release error");
+  Alcotest.(check bool) "bad release_error is rejected" true
+    (Result.is_error (Tui_decode.decode_play_invite_revoked
+      (json {|{"name":"old","revoked":true,"released_controller":false,"release_error":null}|})));
+  Alcotest.(check bool) "issued link is required" true
+    (Result.is_error (Tui_decode.decode_play_invite_issued
+      (json {|{"name":"old","expires_at":"tomorrow"}|})));
+  Alcotest.(check bool) "authoritative absence" true
+    (Tui_decode.play_invite_absent_body {|{"error":"no_such_invite"}|});
+  Alcotest.(check bool) "another refusal is not absence" false
+    (Tui_decode.play_invite_absent_body {|{"error":"not_an_invite"}|})
+
 (* The saved-app reply's scope count picks the TUI notice: 0 says the
    service's own list will be asked for. A reply without [scopes] used to
    count as 0 and so told the operator something the server never said. *)
@@ -438,6 +461,41 @@ let test_terminal_text_is_idempotent_and_single_line () =
     (String.contains once '\n');
   Alcotest.(check string) "sanitization is idempotent" once
     (Tui_decode.sanitize_terminal_text once)
+
+(* Both sanitizers return an input they would copy byte for byte without
+   walking it: printable ASCII for the terminal text, any ASCII for the
+   invisible escape. Every ASCII byte is checked on both sides of that line,
+   inside a printable run and after a scalar that is not ASCII, so the short
+   cut can only ever answer what the full walk answers. *)
+let test_terminal_text_ascii_is_returned_whole () =
+  for code = 0 to 0x7F do
+    let byte = Char.chr code in
+    let label = Printf.sprintf "byte 0x%02X" code in
+    let text = Printf.sprintf "a%cb" byte in
+    let expected =
+      if code >= 0x20 && code <= 0x7E then text
+      else Printf.sprintf "a\\x%02Xb" code
+    in
+    Alcotest.(check string) (label ^ " in a printable run") expected
+      (Tui_decode.sanitize_terminal_text text);
+    Alcotest.(check string) (label ^ " after a non-ASCII scalar")
+      ("\xc3\xa9" ^ expected)
+      (Tui_decode.sanitize_terminal_text ("\xc3\xa9" ^ text));
+    Alcotest.(check string) (label ^ " is not invisible") text
+      (Tui_decode.escape_invisible text);
+    (* The same byte raw after a non-ASCII scalar goes through the walk, so
+       the walk and the short cut are held to one answer for it. *)
+    Alcotest.(check string) (label ^ " is not invisible to the walk")
+      ("\xc3\xa9" ^ text)
+      (Tui_decode.escape_invisible ("\xc3\xa9" ^ text))
+  done;
+  let printable = String.init 0x5F (fun index -> Char.chr (0x20 + index)) in
+  Alcotest.(check bool) "printable ASCII comes back without a copy" true
+    (Tui_decode.sanitize_terminal_text printable == printable);
+  let with_controls = "tab\there\x1b[0m" in
+  Alcotest.(check bool) "ASCII escape-invisible input comes back without a copy"
+    true
+    (Tui_decode.escape_invisible with_controls == with_controls)
 
 let test_terminal_text_escapes_invisible_codepoints () =
   (* #38445: a terminal draws bidi controls and zero-width characters as
@@ -1308,6 +1366,15 @@ let test_planning_goal_keeps_the_last_review_note () =
     (Some "blocked on the platform gap")
     (decoded_proof ~last_review_note:"blocked on the platform gap" ())
       .Tui_decode.pg_last_review_note
+;;
+
+let test_planning_goal_keeps_owner () =
+  let owned = decoded_proof ~extra:[ "owner", `String "keeper-z" ] () in
+  let unowned = decoded_proof () in
+  Alcotest.(check bool) "recorded owner is preserved" true
+    (owned.Tui_decode.pg_owner = Goal_store.Owner "keeper-z");
+  Alcotest.(check bool) "missing owner is explicitly unknown" true
+    (unowned.Tui_decode.pg_owner = Goal_store.Unknown_owner)
 ;;
 
 let test_planning_goal_keeps_the_server_timestamps () =
@@ -8315,6 +8382,8 @@ let picker_default_runtime =
     ; ("declared_reasoning_effort", `String "high")
     ; ("is_local", `Bool false)
     ; ("is_default", `Bool false)
+    ; ("rate_limited", `Bool false)
+    ; ("rate_limit_resets_at", `Null)
     ]
 
 let runtime_resolved_json =
@@ -8340,6 +8409,8 @@ let runtime_resolved_json =
               ; ("declared_reasoning_effort", `Null)
               ; ("is_local", `Bool true)
               ; ("is_default", `Bool false)
+              ; ("rate_limited", `Bool false)
+              ; ("rate_limit_resets_at", `Null)
               ]
           ] )
     ; ( "lanes"
@@ -8365,6 +8436,28 @@ let runtime_resolved_json =
               ]
           ] )
     ]
+
+let test_runtime_rate_limit_requires_an_observation () =
+  let row value =
+    match picker_default_runtime with
+    | `Assoc fields ->
+      let fields = List.remove_assoc "rate_limited" fields in
+      `Assoc (match value with None -> fields | Some value -> ("rate_limited", value) :: fields)
+    | _ -> Alcotest.fail "runtime fixture must be an object"
+  in
+  List.iter
+    (fun value ->
+       let json =
+         runtime_resolved_json
+         |> replace_assoc_field "default_runtime" (row value)
+         |> replace_assoc_field "runtimes" (`List [ row value ])
+       in
+       match Tui_decode.decode_runtime_resolved json with
+       | Ok _ -> Alcotest.fail "unknown rate-limit observation decoded as ready"
+       | Error detail ->
+         Alcotest.(check bool) "error names the unavailable observation" true
+           (Astring.String.is_infix ~affix:"rate_limited" detail))
+    [ None; Some `Null; Some (`String "false") ]
 
 let test_decode_runtime_resolved () =
   match Tui_decode.decode_runtime_resolved runtime_resolved_json with
@@ -8628,6 +8721,8 @@ let resolved_runtime id provider model =
     ; "declared_reasoning_effort", `Null
     ; "is_local", `Bool false
     ; "is_default", `Bool false
+    ; "rate_limited", `Bool false
+    ; "rate_limit_resets_at", `Null
     ]
 
 let runtime_lane ?(declared = true) id runtime_ids =
@@ -12001,8 +12096,24 @@ let test_tool_approval_mode_unknown_word_fails () =
          in
          contains "alpha" && contains "manual")
 
+let test_play_revoke_failure_detail () =
+  Alcotest.(check string) "500 preserves actual controller failure"
+    "controller busy (HTTP 500: controller release failed)"
+    (Tui_decode.play_revoke_http_error ~status_code:500
+      ~body:{|{"error":"release_failed","name":"guest1","released_controller":false,"release_error":"controller busy"}|});
+  Alcotest.(check string) "other failures retain their own reason" "HTTP 503: keepers_unreadable"
+    (Tui_decode.play_revoke_http_error ~status_code:503 ~body:{|{"error":"keepers_unreadable"}|});
+  List.iter (fun body ->
+    Alcotest.(check string) "malformed release details use ordinary HTTP error projection"
+      (Tui_decode.http_status_error ~status_code:500 ~body)
+      (Tui_decode.play_revoke_http_error ~status_code:500 ~body))
+    [{|{"error":"release_failed","released_controller":false,"release_error":42}|};
+     {|{"error":"release_failed","released_controller":true,"release_error":"busy"}|};
+     {|{"error":"release_failed","released_controller":false}|}; "not JSON"; "[]"; "null"; "42"]
+
 let () =
   Alcotest.run "tui_decode" [
+    ("play revoke failure", [Alcotest.test_case "preserves controller failure detail" `Quick test_play_revoke_failure_detail]);
     ( "decode_oauth_client_saved",
       [ Alcotest.test_case "reads scopes and refuses their absence" `Quick
           test_decode_oauth_client_saved_reads_scopes_and_refuses_their_absence
@@ -12070,7 +12181,9 @@ let () =
           test_runtime_surface_keeps_resolved_rows_without_a_probe
       ] );
     ( "decode_runtime_resolved",
-      [ Alcotest.test_case "carries runtimes and assignments" `Quick
+      [ Alcotest.test_case "requires a rate-limit observation" `Quick
+          test_runtime_rate_limit_requires_an_observation;
+        Alcotest.test_case "carries runtimes and assignments" `Quick
           test_decode_runtime_resolved;
         Alcotest.test_case "carries runtimes, lanes, and assignments" `Quick
           test_decode_runtime_resolved_full;
@@ -12432,6 +12545,8 @@ let () =
           test_planning_goal_without_the_verifier_field_is_refused;
         Alcotest.test_case "keeps the last review note" `Quick
           test_planning_goal_keeps_the_last_review_note;
+        Alcotest.test_case "planning goal owner" `Quick
+          test_planning_goal_keeps_owner;
         Alcotest.test_case "keeps the server timestamps" `Quick
           test_planning_goal_keeps_the_server_timestamps;
         Alcotest.test_case "tolerates missing timestamps" `Quick
@@ -12465,6 +12580,8 @@ let () =
           test_terminal_text_preserves_printable_utf8
       ; Alcotest.test_case "escapes malformed UTF-8 bytes" `Quick
           test_terminal_text_escapes_malformed_utf8_bytes
+      ; Alcotest.test_case "returns ASCII it would copy whole" `Quick
+          test_terminal_text_ascii_is_returned_whole
       ; Alcotest.test_case "escapes invisible codepoints" `Quick
           test_terminal_text_escapes_invisible_codepoints
       ; Alcotest.test_case "keeps the joiner inside an emoji" `Quick
@@ -12811,6 +12928,9 @@ let () =
       ; Alcotest.test_case "reads as of its time unless the runner is ok" `Quick
           test_schedule_hold_reads_as_of_its_time_unless_the_runner_is_ok
       ] );
+    ( "play invites"
+    , [ Alcotest.test_case "preserves partial revoke and rejects unreadable links"
+          `Quick test_play_invite_responses_preserve_recovery_facts ] );
     ( "file change"
     , [ Alcotest.test_case "reads an insert" `Quick test_decode_file_change_reads_an_insert
       ; Alcotest.test_case "reads a materialize" `Quick

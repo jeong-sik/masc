@@ -537,8 +537,7 @@ type post_outcome =
   | Post_refused of string
   | Post_unanswered of string
 
-let post_json_outcome ~(host : string) ~(port : int) ~(path : string) ~(body : string) =
-  match http_post ~headers:(auth_headers ()) ~host ~port ~path ~body with
+let mutation_outcome = function
   | Error detail -> Post_unanswered detail
   | Ok (status_code, response) when status_code >= 400 && status_code < 500 ->
     (match decode_json ~allow_empty:true ~status_code ~body:response with
@@ -548,6 +547,42 @@ let post_json_outcome ~(host : string) ~(port : int) ~(path : string) ~(body : s
     (match decode_json ~allow_empty:false ~status_code ~body:response with
      | Ok json -> Post_answered json
      | Error message -> Post_unanswered message)
+
+let post_json_outcome ~(host : string) ~(port : int) ~(path : string) ~(body : string) =
+  http_post ~headers:(auth_headers ()) ~host ~port ~path ~body
+  |> mutation_outcome
+
+let http_delete ~(host : string) ~(port : int) ~(path : string) =
+  let url = url_of ~host ~port ~path in
+  timed ~verb:"DELETE" ~path @@ fun () ->
+  with_credential_refresh @@ fun () ->
+  match Masc_http_client.delete_sync ?clock:(request_clock ())
+          ~timeout_sec:(request_timeout_sec ()) ~url ~headers:(auth_headers ()) () with
+  | Ok answer -> Ok answer
+  | Error detail ->
+      Error (Masc.Tui_decode.http_transport_error ~verb:"DELETE" ~url ~detail)
+
+let list_play_invites ~host ~port =
+  get_json ~host ~port ~path:"/api/v1/play/invites"
+
+let issue_play_invite ~host ~port ~name ~hours =
+  post_json_outcome ~host ~port ~path:"/api/v1/play/invites"
+    ~body:(Yojson.Safe.to_string
+      (`Assoc [ "name", `String name; "hours", `Int hours ]))
+
+type revoke_outcome = Revoke_absent | Revoke_other of post_outcome
+
+let revoke_play_invite ~host ~port ~name =
+  let response =
+    http_delete ~host ~port
+      ~path:("/api/v1/play/invites/" ^ percent_encode_path_segment name)
+  in
+  match response with
+  | Ok (404, body) when Masc.Tui_decode.play_invite_absent_body body ->
+      Revoke_absent
+  | Ok (status_code, body) when status_code >= 500 ->
+      Revoke_other (Post_unanswered (Masc.Tui_decode.play_revoke_http_error ~status_code ~body))
+  | answer -> Revoke_other (mutation_outcome answer)
 
 let post_json ~(host : string) ~(port : int) ~(path : string) ~(body : string) : (Yojson.Safe.t, string) result =
   match http_post ~headers:(auth_headers ()) ~host ~port ~path ~body with
@@ -1737,19 +1772,39 @@ let post_runtime_assignment ~(host : string) ~(port : int)
     "committed"; ...}]) — decoded here so a 2xx body of any other shape is an
     error rather than a guessed success, matching [tool_envelope_outcome]. *)
 let set_runtime_lane_slots ~(host : string) ~(port : int) ~(lane : string)
-      ~(runtime_ids : string list) : (unit, string) result =
-  let body =
-    Yojson.Safe.to_string
-      (`Assoc
-         [ "lane", `String lane
-         ; "runtime_ids", `List (List.map (fun id -> `String id) runtime_ids)
-         ])
-  in
-  match
-    post_json ~host ~port ~path:"/api/v1/runtime/config/routing" ~body
-  with
-  | Error detail -> Error detail
-  | Ok json ->
+      ~(expected_runtime_ids : string list) ~(runtime_ids : string list) :
+      (unit, string) result =
+  let ( let* ) = Result.bind in
+  (* The candidate order and revision must come from the same file read.
+     /runtime/resolved is a separately published in-process snapshot and can
+     lag a freshly committed runtime.toml. *)
+  let* raw = get_json ~host ~port ~path:"/api/v1/runtime/config/raw" in
+  let* revision = match Json_util.assoc_member_opt "source_revision" raw with
+    | Some (`String value) when String_util.is_lowercase_sha256_hex value -> Ok value
+    | _ -> Error "runtime config read did not supply a source revision" in
+  let* source_text = match Json_util.assoc_member_opt "source_text" raw with
+    | Some (`String text) -> Ok text
+    | _ -> Error "runtime config read did not supply source text" in
+  let* config = Runtime_toml.parse_string source_text
+    |> Result.map_error (function
+      | [] -> "runtime.toml could not be parsed"
+      | (first : Runtime_toml.parse_error) :: _ ->
+        Printf.sprintf "runtime.toml parse error at %s: %s"
+          first.path first.message
+        |> Masc.Tui_decode.sanitize_terminal_text) in
+  let* current = match List.find_opt
+      (fun (decl : Runtime_schema.lane_decl) -> String.equal decl.id lane)
+      config.Runtime_schema.lane_decls with
+    | Some decl -> Ok decl.Runtime_schema.candidate_ids
+    | None -> Error ("runtime lane " ^ lane ^ " is no longer present") in
+  if not (List.equal String.equal current expected_runtime_ids) then
+    Error ("runtime lane " ^ lane ^ " differs from the displayed order; refresh before editing")
+  else
+    let body = Yojson.Safe.to_string (`Assoc
+      [ "lane", `String lane
+      ; "runtime_ids", `List (List.map (fun id -> `String id) runtime_ids)
+      ; "expected_source_revision", `String revision ]) in
+    let* json = post_json ~host ~port ~path:"/api/v1/runtime/config/routing" ~body in
     decode_runtime_config_commit_receipt json
     |> Result.map (fun (_receipt : runtime_config_commit_receipt) -> ())
 

@@ -2149,7 +2149,7 @@ esac
 
 (* Both failures occur after a fresh snapshot was claimed and before any
    persistent guest can mount it. Drive the actual boot with a fake CLI. *)
-let test_preboot_network_refusal_releases_claimed_identity () =
+let test_preboot_refusals_release_identity_and_recheck_shim () =
   with_eio_fs @@ fun () ->
   let module Turn = Masc.Keeper_turn_sandbox_runtime in
   List.iter (fun policy_listing_fails ->
@@ -2166,8 +2166,18 @@ let test_preboot_network_refusal_releases_claimed_identity () =
     let shim_dir = Filename.concat microvm "shim" in
     List.iter (fun path -> Unix.mkdir path 0o755) [ masc; microvm; shim_dir ];
     let shim = Filename.concat shim_dir M.shim_binary_name in
-    Out_channel.with_open_bin shim (fun channel -> output_string channel "#!/bin/sh\nexit 0\n");
+    let shim_contents = "#!/bin/sh\nexit 0\n" in
+    Out_channel.with_open_bin shim (fun channel -> output_string channel shim_contents);
     Unix.chmod shim 0o755;
+    (* The first boot below must pass integrity before the network refuses
+       it. This also primes the old metadata cache the regression catches. *)
+    Out_channel.with_open_bin (Filename.concat shim_dir M.shim_sidecar_name)
+      (fun channel -> output_string channel
+        (Digestif.SHA256.(to_hex (digest_string shim_contents)) ^ "  masc-exec-shim\n"));
+    (* Whole seconds round-trip through utimes on both Linux and macOS. *)
+    let timestamp = floor (Unix.stat shim).Unix.st_mtime in
+    Unix.utimes shim timestamp timestamp;
+    let original_shim = Unix.stat shim in
     Out_channel.with_open_bin cli (fun channel ->
       Printf.fprintf channel {|#!/bin/sh
 log=%s
@@ -2225,7 +2235,29 @@ esac
     List.iter (fun command ->
       Alcotest.(check bool) "the sole run names the trim helper" true
         (String.starts_with
-           ~prefix:("run --rm --name " ^ M.work_volume_trim_name ~keeper_name ^ " ") command)) runs)
+           ~prefix:("run --rm --name " ^ M.work_volume_trim_name ~keeper_name ^ " ") command)) runs;
+    (* Rewrite the same inode with equal-length bytes and restore its mtime.
+       A fresh runtime drives the real boot entry again, not just the hash
+       helper; neither branch may admit this changed shim to a guest. *)
+    Out_channel.with_open_bin shim (fun channel -> output_string channel "#!/bin/sh\nexit 1\n");
+    Unix.utimes shim original_shim.Unix.st_atime original_shim.Unix.st_mtime;
+    let changed_shim = Unix.stat shim in
+    Alcotest.(check bool) "device/inode/size/mtime are unchanged" true
+      (original_shim.Unix.st_dev = changed_shim.Unix.st_dev
+       && original_shim.Unix.st_ino = changed_shim.Unix.st_ino
+       && original_shim.Unix.st_size = changed_shim.Unix.st_size
+       && original_shim.Unix.st_mtime = changed_shim.Unix.st_mtime);
+    let retry = Turn.create ~config ~meta ~image:(Ok "trim-fixture")
+      ~network_mode:Profile.Network_policy () in
+    (match Turn.microvm_remote_endpoint ~timeout_sec:5. retry with
+     | Error detail ->
+       Alcotest.(check bool) "next boot refuses the rewritten shim before networking" true
+         (Astring.String.is_infix ~affix:"microvm_shim_hash_mismatch" detail)
+     | Ok _ -> Alcotest.fail "equal-metadata rewritten shim was admitted to a guest");
+    let retry_calls = In_channel.with_open_bin log In_channel.input_all
+      |> String.split_on_char '\n' in
+    Alcotest.(check (list string)) "rejected shim starts no further container"
+      runs (List.filter (String.starts_with ~prefix:"run ") retry_calls))
     [ true; false ]
 ;;
 
@@ -3180,8 +3212,8 @@ let () =
             test_teardown_removes_or_reports_abandoned_trim_helper
         ; Alcotest.test_case "teardown attempts every guest after helper or guest errors" `Quick
             test_teardown_removes_guests_despite_trim_cleanup_error
-        ; Alcotest.test_case "pre-boot network refusals release claimed identities" `Quick
-            test_preboot_network_refusal_releases_claimed_identity
+        ; Alcotest.test_case "pre-boot refusals release identity and recheck shim bytes" `Quick
+            test_preboot_refusals_release_identity_and_recheck_shim
         ; Alcotest.test_case "shim travels read-only with its config" `Quick
             test_shim_travels_read_only_with_its_config
         ; Alcotest.test_case "the shim sidecar decides the boot" `Quick

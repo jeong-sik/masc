@@ -3,6 +3,7 @@
    for what the ranking is and is not. *)
 
 type error = Index_unavailable of string
+type batch_stats = { index_builds : int; indexed_rows : int; queries_executed : int }
 
 let error_to_string (Index_unavailable detail) = detail
 let ( let* ) = Result.bind
@@ -69,15 +70,16 @@ let match_expression query =
 ;;
 
 let populate db texts =
-  with_statement db "INSERT INTO memory_search(ordinal, claim) VALUES (?, ?)" (fun statement ->
+  with_statement db "INSERT INTO memory_search(ordinal, owner, claim) VALUES (?, ?, ?)" (fun statement ->
     let rec loop ordinal = function
       | [] -> Ok ()
-      | text :: rest ->
+      | (owner, text) :: rest ->
         let* () =
           check db "bind memory ordinal"
             (Sqlite3.bind statement 1 (Sqlite3.Data.INT (Int64.of_int ordinal)))
         in
-        let* () = check db "bind memory text" (Sqlite3.bind statement 2 (Sqlite3.Data.TEXT text)) in
+        let* () = check db "bind memory owner" (Sqlite3.bind statement 2 (Sqlite3.Data.TEXT owner)) in
+        let* () = check db "bind memory text" (Sqlite3.bind statement 3 (Sqlite3.Data.TEXT text)) in
         (match Sqlite3.step statement with
          | Sqlite3.Rc.DONE ->
            let* () = check db "reset memory insert" (Sqlite3.reset statement) in
@@ -87,13 +89,30 @@ let populate db texts =
     loop 0 texts)
 ;;
 
-let search db ~count expression =
+let search db ~count ~exclude_owner ~max_results expression =
+  let sql = match exclude_owner, max_results with
+    | None, None ->
+      "SELECT ordinal, bm25(memory_search) FROM memory_search WHERE memory_search MATCH ? \
+       ORDER BY bm25(memory_search), ordinal"
+    | Some _, Some _ ->
+      "SELECT ordinal, bm25(memory_search) FROM memory_search WHERE memory_search MATCH ? \
+       AND owner != ? ORDER BY bm25(memory_search), ordinal LIMIT ?"
+    | None, Some _ | Some _, None ->
+      "SELECT ordinal, bm25(memory_search) FROM memory_search WHERE memory_search MATCH ? \
+       ORDER BY bm25(memory_search), ordinal"
+  in
   with_statement
     db
-    "SELECT ordinal, bm25(memory_search) FROM memory_search WHERE memory_search MATCH ? \
-     ORDER BY bm25(memory_search), ordinal"
+    sql
     (fun statement ->
        let* () = check db "bind memory query" (Sqlite3.bind statement 1 (Sqlite3.Data.TEXT expression)) in
+       let* () = match exclude_owner, max_results with
+         | Some owner, Some limit ->
+           let* () = check db "bind excluded memory owner"
+             (Sqlite3.bind statement 2 (Sqlite3.Data.TEXT owner)) in
+           check db "bind memory result limit"
+             (Sqlite3.bind statement 3 (Sqlite3.Data.INT (Int64.of_int limit)))
+         | None, None | None, Some _ | Some _, None -> Ok () in
        let rec rows hits =
          match Sqlite3.step statement with
          | exception Sqlite3.Error detail -> Error (Index_unavailable ("search memory: " ^ detail))
@@ -108,10 +127,14 @@ let search db ~count expression =
        rows [])
 ;;
 
-let rank ~query texts =
-  match match_expression query, texts with
-  | None, _ | Some _, [] -> Ok []
-  | Some expression, _ :: _ ->
+let rank_many_with ~queries ~texts ~max_results =
+  let expressions = List.map (fun (owner, query) -> owner, match_expression query) queries in
+  let empty_stats = { index_builds = 0; indexed_rows = 0; queries_executed = 0 } in
+  match max_results, texts, List.exists (fun (_, expression) -> Option.is_some expression) expressions with
+  | Some limit, _, _ when limit < 0 -> Error (Index_unavailable "negative result limit")
+  | Some 0, _, _ | _, [], _ | _, _, false ->
+    Ok (List.map (fun _ -> []) queries, empty_stats)
+  | _, _ :: _, true ->
     (try
        with_database (Sqlite3.db_open ":memory:") (fun db ->
          let* () =
@@ -119,13 +142,42 @@ let rank ~query texts =
              Sqlite3.exec
                db
                "CREATE VIRTUAL TABLE memory_search USING \
-                fts5(ordinal UNINDEXED, claim, tokenize='trigram')"
+               fts5(ordinal UNINDEXED, owner UNINDEXED, claim, tokenize='trigram')"
            with
            | rc when Sqlite3.Rc.is_success rc -> Ok ()
            | _ -> Error (sqlite_error db "create memory search index")
          in
          let* () = populate db texts in
-         search db ~count:(List.length texts) expression)
+         let rec search_all results executed = function
+           | [] -> Ok (List.rev results,
+                       { index_builds = 1; indexed_rows = List.length texts;
+                         queries_executed = executed })
+           | (_, None) :: rest -> search_all ([] :: results) executed rest
+           | (owner, Some expression) :: rest ->
+             let* ranked = search db ~count:(List.length texts)
+                 ~exclude_owner:owner ~max_results expression in
+             search_all (ranked :: results) (executed + 1) rest
+         in
+         search_all [] 0 expressions)
      with
      | Sqlite3.Error detail -> Error (Index_unavailable detail))
+;;
+
+let rank_many ~queries texts =
+  let queries = List.map (fun query -> None, query) queries in
+  let texts = List.map (fun text -> "", text) texts in
+  let* ranked, _ = rank_many_with ~queries ~texts ~max_results:None in
+  Ok ranked
+;;
+
+let rank_many_excluding_owners ~queries ~texts ~max_results =
+  rank_many_with ~queries:(List.map (fun (owner, query) -> Some owner, query) queries)
+    ~texts ~max_results:(Some max_results)
+;;
+
+let rank ~query texts =
+  let* results = rank_many ~queries:[query] texts in
+  match results with
+  | [result] -> Ok result
+  | [] | _ :: _ :: _ -> Error (Index_unavailable "memory index returned an invalid query count")
 ;;

@@ -754,6 +754,7 @@ let test_composable_output_registry_is_closed () =
     ; "Write"
     ; "keeper_artifact_read"
     ; "keeper_lane_status"
+    ; "keeper_portrait_read"
       (* keeper_spawn answers a start with the handle every later spawn call
          names; declared so run-and-read can hand it from start to wait. *)
     ; "keeper_spawn"

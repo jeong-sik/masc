@@ -1,0 +1,40 @@
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": {
+    "_meta": {
+      "io.modelcontextprotocol/serverInfo": {
+        "name": "masc",
+        "title": "MASC MCP Server",
+        "version": "0.46.0"
+      },
+      "com.github.yousleepwhen.masc/call": {
+        "envelope": {
+          "kind": "tool_call",
+          "summary": "{\"opened\":true,\"reused\":false,\"backend\":\"chromium-stagehand\"}",
+          "status": "ok",
+          "tool": "masc_browser_session"
+        },
+        "trace_id": "2",
+        "agent_id": "admin",
+        "tool": "masc_browser_session",
+        "duration_ms": 1744,
+        "attempts": 1,
+        "timestamp": "2026-09-29T01:57:33Z"
+      }
+    },
+    "resultType": "complete",
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"opened\":true,\"reused\":false,\"backend\":\"chromium-stagehand\"}"
+      }
+    ],
+    "isError": false,
+    "structuredContent": {
+      "opened": true,
+      "reused": false,
+      "backend": "chromium-stagehand"
+    }
+  }
+}

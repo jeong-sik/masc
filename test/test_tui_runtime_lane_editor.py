@@ -119,6 +119,7 @@ class LaneStore:
         _status, body = h.runtime_resolved_response()
         self.body = body
         self.lanes = [dict(lane) for lane in body["lanes"]]
+        self.revision = 1
         self.lock = threading.Lock()
         self.held: tuple[threading.Event, threading.Event] | None = None
         self.fail_next_resolved = False
@@ -152,6 +153,16 @@ class LaneStore:
                 for lane in self.lanes
             ]
         return 200, {**self.body, "lanes": lanes}
+
+    def raw(self) -> h.HttpResponse:
+        with self.lock:
+            source = "\n".join(
+                f'[runtime.lanes.{lane["id"]}]\n'
+                f'candidates = {json.dumps(lane["runtime_ids"])}\n'
+                for lane in self.lanes
+            )
+            return 200, {"source_revision": f"{self.revision:064x}",
+                         "source_text": source}
 
     def standalone_lanes(self) -> h.HttpResponse:
         """The standalone lanes as they stand when the read arrives. A held
@@ -188,6 +199,7 @@ class LaneStore:
         with self.lock:
             lane = next(lane for lane in self.lanes if lane["id"] == lane_id)
             lane["runtime_ids"] = list(runtime_ids)
+            self.revision += 1
 
     def lane_candidates(self, lane_id: str) -> list[str]:
         with self.lock:
@@ -206,6 +218,9 @@ class LaneStore:
         lane_id = request["lane"]
         action = request.get("action", "set")
         with self.lock:
+            if action == "set" and not lane_id.startswith("exact/"):
+                if request.get("expected_source_revision") != f"{self.revision:064x}":
+                    return 409, {"error": "runtime config source revision changed"}
             if lane_id.startswith("exact/"):
                 name = lane_id[len("exact/"):]
                 slot = request["runtime_id"]
@@ -263,6 +278,7 @@ class LaneStore:
                 self.lanes.remove(declared[0])
             else:
                 raise AssertionError(f"the TUI posted an unknown action {action!r}")
+            self.revision += 1
         return 200, commit_receipt()
 
 
@@ -271,6 +287,18 @@ def mark_output(fd, output) -> int:
     an earlier frame drew."""
     h.read_available(fd, output)
     return len(output)
+
+
+def without_checked_revision(posted: list[dict]) -> list[dict]:
+    result = []
+    for request in posted:
+        request = dict(request)
+        if request.get("action", "set") == "set" and not request["lane"].startswith("exact/"):
+            revision = request.pop("expected_source_revision", None)
+            if not isinstance(revision, str) or len(revision) != 64:
+                raise AssertionError(f"named lane write lacked a source revision: {request!r}")
+        result.append(request)
+    return result
 
 
 def press(process, fd, output, key: bytes) -> None:
@@ -290,6 +318,7 @@ def run(executable: str) -> None:
     fixtures[h.RUNTIME_PROBE_FORCE_PATH] = h.runtime_probe_response(fresh=True)
     fixtures[h.RUNTIME_RESOLVED_PATH] = store.resolved
     fixtures[ROUTING_PATH] = h.RequestHttpResponse(store.route)
+    fixtures[h.RUNTIME_CONFIG_RAW_PATH] = store.raw
     requests: h.HttpRequests = []
 
     def interact(process, fd, _slave, output, _base):
@@ -427,7 +456,7 @@ def run(executable: str) -> None:
             if len(posted) >= len(expected) or time.monotonic() > deadline:
                 break
             time.sleep(0.05)
-        if posted != expected:
+        if without_checked_revision(posted) != expected:
             raise AssertionError(f"routing posts: {posted!r}, expected {expected!r}")
         primary = store.lane_candidates("primary")
         if primary != ["runtime-b"]:
@@ -475,6 +504,7 @@ def run_exact(executable: str) -> None:
     fixtures[h.RUNTIME_RESOLVED_PATH] = store.resolved
     fixtures[h.STANDALONE_LANES_PATH] = store.standalone_lanes
     fixtures[ROUTING_PATH] = h.RequestHttpResponse(store.route)
+    fixtures[h.RUNTIME_CONFIG_RAW_PATH] = store.raw
     requests: h.HttpRequests = []
     picker = f"adding a candidate to the candidate order of {EXACT_LANE}".encode()
 
@@ -525,7 +555,7 @@ def run_exact(executable: str) -> None:
             {"lane": f"exact/{EXACT_LANE}", "action": "append", "runtime_id": "runtime-a"},
             {"lane": f"exact/{EXACT_LANE}", "action": "append", "runtime_id": "runtime-b"},
         ]
-        if posted != expected:
+        if without_checked_revision(posted) != expected:
             raise AssertionError(f"exact posts: {posted!r}, expected {expected!r}")
         declared = store.exact_declared[EXACT_LANE]
         if declared != [DROPPED_SLOT, "glm-coding.glm-5-turbo", "runtime-a", "runtime-b"]:
@@ -562,6 +592,7 @@ def run_cli_editor(executable: str) -> None:
     fixtures[h.RUNTIME_RESOLVED_PATH] = store.resolved
     fixtures[h.STANDALONE_LANES_PATH] = store.standalone_lanes
     fixtures[ROUTING_PATH] = h.RequestHttpResponse(store.route)
+    fixtures[h.RUNTIME_CONFIG_RAW_PATH] = store.raw
     requests: h.HttpRequests = []
 
     def exact_posts() -> list[dict]:
@@ -654,6 +685,7 @@ def run_empty_cli_group(executable: str) -> None:
     fixtures[h.RUNTIME_RESOLVED_PATH] = store.resolved
     fixtures[h.STANDALONE_LANES_PATH] = store.standalone_lanes
     fixtures[ROUTING_PATH] = h.RequestHttpResponse(store.route)
+    fixtures[h.RUNTIME_CONFIG_RAW_PATH] = store.raw
     requests: h.HttpRequests = []
 
     def exact_posts() -> list[dict]:
@@ -715,6 +747,7 @@ def run_curator_takes_cli(executable: str) -> None:
     fixtures[h.RUNTIME_RESOLVED_PATH] = store.resolved
     fixtures[h.STANDALONE_LANES_PATH] = store.standalone_lanes
     fixtures[ROUTING_PATH] = h.RequestHttpResponse(store.route)
+    fixtures[h.RUNTIME_CONFIG_RAW_PATH] = store.raw
     requests: h.HttpRequests = []
 
     def exact_posts() -> list[dict]:
@@ -785,6 +818,7 @@ def run_provider_jump(executable: str) -> None:
     fixtures[h.RUNTIME_RESOLVED_PATH] = store.resolved
     fixtures[h.STANDALONE_LANES_PATH] = store.standalone_lanes
     fixtures[ROUTING_PATH] = h.RequestHttpResponse(store.route)
+    fixtures[h.RUNTIME_CONFIG_RAW_PATH] = store.raw
     status, config = h.standalone_lane_runtime_config_response()
     fixtures[h.RUNTIME_CONFIG_RAW_PATH] = (
         status,
@@ -897,6 +931,76 @@ WHEEL_DOWN = b"\x1b[<65;5;5M"
 FILTER_CURSOR = "▏".encode()
 
 
+def run_concurrent_edit(executable: str) -> None:
+    """A successful screen read must not license a later whole-order overwrite."""
+    store = LaneStore()
+    fixtures = h.overview_event_http_fixtures()
+    # Keep the in-process resolved projection at R1 after the file moves to
+    # R2. The writer must compare with raw source_text, not this stale read.
+    fixtures[h.RUNTIME_RESOLVED_PATH] = store.resolved()
+    fixtures[h.RUNTIME_CONFIG_RAW_PATH] = store.raw
+    fixtures[ROUTING_PATH] = h.RequestHttpResponse(store.route)
+    requests: h.HttpRequests = []
+
+    def interact(process, fd, _slave, output, _base):
+        h.tab_until(process, fd, output, b"MASC Config")
+        h.resize_and_wait(process, fd, output, rows=30, columns=131,
+                              needle=b"MASC Config", controls=(h.FULL_REDRAW,))
+        h.send_and_wait(process, fd, output, b"9", b"Runtime lanes (3 lanes, 4 slots)")
+        # The screen has just read primary as [a, b]; another client writes
+        # [b] before the operator presses Enter in the candidate picker.
+        store.replace_lane_from_another_client("primary", ["runtime-b"])
+        h.send_and_wait(process, fd, output, b"e",
+                        b"adding a candidate to the candidate order of primary")
+        h.send_and_wait(process, fd, output, b"\r",
+                        b"differs from the displayed order")
+        if store.lane_candidates("primary") != ["runtime-b"]:
+            raise AssertionError("the TUI overwrote another client's lane edit")
+        if any(path == ROUTING_PATH for path, _ in requests):
+            raise AssertionError("the TUI posted a stale whole-order edit")
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(executable,
+                            description="Runtime lane concurrent edit is refused",
+                            interact=interact, http_fixtures=fixtures,
+                            http_requests=requests)
+
+
+def run_invalid_runtime_config(executable: str) -> None:
+    """A malformed file explains its path and never licenses a routing POST."""
+    store = LaneStore()
+    fixtures = h.overview_event_http_fixtures()
+    fixtures[h.RUNTIME_RESOLVED_PATH] = store.resolved
+    fixtures[h.RUNTIME_CONFIG_RAW_PATH] = (
+        200,
+        {"source_revision": "a" * 64,
+         "source_text": "[runtime.lanes.primary]\ncandidates = 42\n"},
+    )
+    fixtures[ROUTING_PATH] = h.RequestHttpResponse(store.route)
+    requests: h.HttpRequests = []
+
+    def interact(process, fd, _slave, output, _base):
+        h.tab_until(process, fd, output, b"MASC Config")
+        h.resize_and_wait(process, fd, output, rows=30, columns=131,
+                              needle=b"MASC Config", controls=(h.FULL_REDRAW,))
+        h.send_and_wait(process, fd, output, b"9", b"Runtime lanes (3 lanes, 4 slots)")
+        h.send_and_wait(process, fd, output, b"e",
+                        b"adding a candidate to the candidate order of primary")
+        h.send_and_wait(process, fd, output, b"\r",
+                        b"runtime.toml parse error at runtime.lanes.primary.candidates")
+        h.drain_until_quiet(process, fd, output)
+        if b"lane candidates must be an array" not in h.screen_text(bytes(output)):
+            raise AssertionError("runtime TOML parse reason was hidden from the operator")
+        if any(path == ROUTING_PATH for path, _ in requests):
+            raise AssertionError("a malformed runtime config authorized a lane write")
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(executable,
+                            description="Malformed runtime config explains lane refusal",
+                            interact=interact, http_fixtures=fixtures,
+                            http_requests=requests)
+
+
 def run_filter(executable: str) -> None:
     """The candidate picker is walked without holding an arrow key: End, Home
     and PgDn jump, [/] narrows the list to the typed text, and Esc drops the
@@ -908,6 +1012,7 @@ def run_filter(executable: str) -> None:
     fixtures[h.RUNTIME_PROBE_FORCE_PATH] = h.runtime_probe_response(fresh=True)
     fixtures[h.RUNTIME_RESOLVED_PATH] = store.resolved
     fixtures[ROUTING_PATH] = h.RequestHttpResponse(store.route)
+    fixtures[h.RUNTIME_CONFIG_RAW_PATH] = store.raw
     requests: h.HttpRequests = []
     picker = b"adding a candidate to the candidate order of primary"
 
@@ -965,7 +1070,7 @@ def run_filter(executable: str) -> None:
             if len(posted) >= len(expected) or time.monotonic() > deadline:
                 break
             time.sleep(0.05)
-        if posted != expected:
+        if without_checked_revision(posted) != expected:
             raise AssertionError(f"routing posts: {posted!r}, expected {expected!r}")
         # [e] opens the picker for the lane under the list's cursor: still
         # primary, so no wheel notch moved it while the picker was open.
@@ -990,6 +1095,8 @@ if __name__ == "__main__":
     run_cli_editor(os.path.abspath(sys.argv[1]))
     run_empty_cli_group(os.path.abspath(sys.argv[1]))
     run_curator_takes_cli(os.path.abspath(sys.argv[1]))
+    run_concurrent_edit(os.path.abspath(sys.argv[1]))
+    run_invalid_runtime_config(os.path.abspath(sys.argv[1]))
     run_filter(os.path.abspath(sys.argv[1]))
     run_provider_jump(os.path.abspath(sys.argv[1]))
     run_cli_binding_jump(os.path.abspath(sys.argv[1]))

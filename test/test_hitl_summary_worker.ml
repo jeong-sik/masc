@@ -2552,6 +2552,33 @@ let test_missing_summary_earns_failed () =
   Alcotest.(check bool) "no output is synthesised" true (output = `Null)
 ;;
 
+let test_resolved_source_is_not_a_judgment_failure () =
+  let outcome, output =
+    Worker.For_testing.run_outcome_of_observed_summary
+      ~last_outcome:(Some Worker.Source_resolved) None in
+  (match outcome with
+   | Masc.Exact_lane_run_registry.Cancelled -> ()
+   | Masc.Exact_lane_run_registry.Succeeded -> Alcotest.fail "no judgment was produced"
+   | Masc.Exact_lane_run_registry.Failed _ -> Alcotest.fail "resolved source was called a failure");
+  Alcotest.(check string) "cancellation records why no judgment exists"
+    "source_resolved_without_recorded_judgment"
+    Yojson.Safe.Util.(member "reason" output |> to_string)
+;;
+
+let test_source_resolution_preserves_prior_failure () =
+  let last = Worker.For_testing.next_observed_outcome
+    (Some Worker.Execution_failed) Worker.Source_resolved in
+  (match last with
+   | Some Worker.Execution_failed -> ()
+   | _ -> Alcotest.fail "source resolution erased the execution failure");
+  let outcome, _ = Worker.For_testing.run_outcome_of_observed_summary
+    ~last_outcome:last None in
+  match outcome with
+  | Masc.Exact_lane_run_registry.Failed { code; _ } ->
+    Alcotest.(check string) "actual failure keeps its code" "exact_execution_failed" code
+  | _ -> Alcotest.fail "prior provider failure was cancelled"
+;;
+
 (* ── CLI lane-slot fallback (RFC cli-runtimes-as-lane-slots) ────────
    The walk engages only after every catalog slot is exhausted. These drive
    the real worker flow against an unreachable HTTP slot and an injected cli
@@ -3252,6 +3279,14 @@ let () =
             "a missing summary reports the branch it died on"
             `Quick
             test_missing_summary_reports_the_last_branch
+        ; test_case
+            "a resolved source ends without a judgment failure"
+            `Quick
+            test_resolved_source_is_not_a_judgment_failure
+        ; test_case
+            "source resolution preserves an earlier failure"
+            `Quick
+            test_source_resolution_preserves_prior_failure
         ] )
     ]
 ;;

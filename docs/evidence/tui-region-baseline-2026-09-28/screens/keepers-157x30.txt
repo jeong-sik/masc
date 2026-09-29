@@ -1,0 +1,30 @@
+ Overview  Activity  ▸Keepers  Lanes  Memory  Board  Planning  Fusion  Workspace  Config
+
+   MASC Keepers (2)   1 healthy · 1 idle                                                                                         13:55:56  HTTP [connected]
+ ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    fleet ok   running 0/0   turn capacity 0/0
+     HEALTH     KEEPER                           Mode S   TURN LIFECYCLE / RUNTIME              TASK
+ ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+     ●          alpha                            A D      — anthropic.claude-opus-5          —
+     · idle     beta                             D D      — paused anthropic.claude-sonnet-4 —
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    OPERATIONS  no composite row for alpha
+ ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  j/k:move  p:pause  w:wake  s:shutdown  x:delete  e:settings  a:new  l:logs  t:calls  g:yolo  u:runtime  c:chat  right/enter:detail  r:refresh  q:quit
+ › to alpha   (i to write)

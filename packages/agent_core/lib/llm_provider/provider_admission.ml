@@ -109,6 +109,11 @@ let with_admission_and_work_until ?wait ~clock ~deadline_at ~config f =
   | Error `Permit_wait_expired -> Error Permit_wait_expired
 ;;
 
+let with_admission_and_work_for ?wait ~clock ~timeout_s ~config f =
+  let deadline_at = Eio.Time.now clock +. timeout_s in
+  with_admission_and_work_until ?wait ~clock ~deadline_at ~config f
+;;
+
 let snapshot_for ~(config : Provider_config.t) =
   let key = key_of_config config in
   let snapshot = Stdlib.Mutex.protect state_mutex (fun () -> !state) in

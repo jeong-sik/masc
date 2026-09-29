@@ -290,6 +290,62 @@ let test_same_claim_in_two_files_is_two_facts () =
     [ ordinary_ref "reviewer" claim; source_ref "writer" "notes/a.md" claim ]
     (List.map fst (Ledger.dispositions result.ledger))
 
+let pending keeper_id claim : Ledger.pending_fact =
+  { fact = ordinary_ref keeper_id claim; claim }
+
+let applied ledger ~selected assignments =
+  match Ledger.apply ledger ~selected assignments with
+  | Ok updated -> updated
+  | Error error -> Alcotest.fail (Ledger.apply_error_to_string error)
+
+let test_selected_decisions_update_one_durable_ledger () =
+  let writer = pending "writer" "The report is twelve pages" in
+  let reviewer = pending "reviewer" "The report is twelve pages" in
+  let ledger = applied Ledger.empty ~selected:[writer; reviewer]
+    [ { Ledger.fact = writer.fact; decision = Ledger.Create_claim "The report is twelve pages" }
+    ; { Ledger.fact = reviewer.fact; decision = Ledger.Create_claim "The report is twelve pages" } ] in
+  Alcotest.(check int) "one shared claim" 1 (List.length (Ledger.claims ledger));
+  Alcotest.(check int) "both original facts retain membership" 2
+    (List.length (Ledger.dispositions ledger));
+  let claim_id = fst (List.hd (Ledger.claims ledger)) in
+  let newcomer = pending "auditor" "The report is about twelve pages" in
+  let ledger = applied ledger ~selected:[newcomer]
+      [{ Ledger.fact = newcomer.fact; decision = Ledger.Join_claim claim_id }] in
+  let retained = Ledger.reconcile ledger
+      [keeper "writer" ~ordinary:(Context.Available (ordinary [writer.claim]));
+       keeper "reviewer";
+       keeper "auditor" ~ordinary:(Context.Available (ordinary [newcomer.claim]))] in
+  Alcotest.(check (list fact_ref)) "only the vanished review member leaves"
+    [reviewer.fact] retained.vanished;
+  Alcotest.(check int) "claim with remaining members stays" 1
+    (List.length (Ledger.claims retained.ledger));
+  Alcotest.check json "applied ledger is valid on disk" (Ledger.to_json retained.ledger)
+    (Ledger.to_json (decode (Ledger.to_json retained.ledger)))
+
+let test_apply_refuses_unselected_or_missing_decisions () =
+  let writer = pending "writer" "Build uses OCaml" in
+  let reviewer = pending "reviewer" "Build uses OCaml" in
+  let decision fact : Ledger.assignment =
+    { fact; decision = Ledger.Create_claim "Build uses OCaml" } in
+  let refused expected selected assignments =
+    match Ledger.apply Ledger.empty ~selected assignments with
+    | Error error when error = expected -> ()
+    | Error error -> Alcotest.fail ("wrong refusal: " ^ Ledger.apply_error_to_string error)
+    | Ok _ -> Alcotest.fail "invalid batch was applied" in
+  refused Ledger.Missing_assignment [writer; reviewer] [decision writer.fact];
+  refused Ledger.Unselected_fact [writer] [decision reviewer.fact];
+  refused Ledger.Duplicate_assignment [writer; reviewer]
+    [decision writer.fact; decision writer.fact];
+  refused (Ledger.Unknown_claim "absent") [writer]
+    [{ Ledger.fact = writer.fact; decision = Ledger.Join_claim "absent" }];
+  let new_claim = "Build uses OCaml" in
+  let new_claim_id = "claim-" ^ Digestif.SHA256.(digest_string new_claim |> to_hex) in
+  refused (Ledger.Unknown_claim new_claim_id) [writer; reviewer]
+    [ decision writer.fact
+    ; { Ledger.fact = reviewer.fact; decision = Ledger.Join_claim new_claim_id } ];
+  refused Ledger.Blank_value [writer]
+    [{ Ledger.fact = writer.fact; decision = Ledger.Exclude " " }]
+
 let () =
   Alcotest.run "workspace memory ledger"
     [ ( "identity"
@@ -308,4 +364,9 @@ let () =
         ; Alcotest.test_case "vanished members leave and empty entries go" `Quick
             test_vanished_members_leave_and_empty_entries_go
         ; Alcotest.test_case "unavailable store keeps its facts" `Quick
-            test_unavailable_store_keeps_its_facts ] ) ]
+            test_unavailable_store_keeps_its_facts ] )
+    ; ( "apply"
+      , [ Alcotest.test_case "selected decisions make one durable ledger" `Quick
+            test_selected_decisions_update_one_durable_ledger
+        ; Alcotest.test_case "unselected or incomplete answers fail closed" `Quick
+            test_apply_refuses_unselected_or_missing_decisions ] ) ]

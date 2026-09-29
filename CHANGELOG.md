@@ -2,6 +2,211 @@
 
 ## [Unreleased]
 
+## [0.48.0] - 2026-09-29
+
+### Fresh state required
+
+- Skill activations recorded before this release (`skill-activations.json` in each session directory) are not read: discovery and the activation projections show only what is recorded after the upgrade, and a session in progress at deploy records from its next event. The old files can be deleted (#39862).
+
+### Added
+
+- `/mcp/play` is a seat door for an invited player: an invite's Player
+  credential opens it, it lists and calls only the `CanPlayMachine` tools
+  (`masc_dos_screen`, `masc_dos_press`, `masc_dos_type`, `masc_dos_step`,
+  `masc_dos_pass`), answers only the handshake, `ping`, `tools/list` and
+  `tools/call`, and opens no server stream (#39821).
+- An authorized MCP move recovers a stopped Keeper's DOS controller; invalid
+  credentials, screen reads and an active Keeper retain the controller (#39821).
+- Include the observation time of a cached shim probe in keeper lane status, so operators can distinguish an old release reading from a fresh one (#39828).
+- Expose keeper shim observations through the authenticated operator fleet route, preserving observation times without probing SSH endpoints or repairing persisted metadata during a read (#39830).
+- An MCP caller of `masc_dos_screen` gets the frame as a PNG image item after
+  the text observation, so an invited agent can read a VGA game's lettering.
+  MCP tool results carry a tool's model-visible media through the projection
+  the official-client bridge uses; media MCP cannot carry is named and marks
+  the result `isError`. The fallback text and call-summary text sanitize
+  invalid UTF-8 from tool output (#39856).
+- The TUI can issue, inspect and revoke shared DOS play invites with `/play`,
+  and keeps the last issued link locally for `/play link` until the TUI exits
+  (#39861).
+- Add a read-only Keeper portrait tool that returns the current equipment and PNG artifact without changing equip state (#39869).
+- Portrait rasterization and PNG encoding run off the calling Keeper fiber so other work remains responsive during a read (#39869).
+- Claude Sonnet 5.5 (`claude-sonnet-5-5`) is in the model catalog: 1M context window, 128K output, and the low, medium, high, xhigh and max effort levels. Forcing a tool choice is refused for this model (#39812).
+- `/play qr` displays the last issued shared DOS invite link as a terminal QR
+  when the Keeper chat pane can show it without wrapping (#39873).
+
+### Changed
+
+- Prepare Workspace Curator requests from changed facts within a full rendered-prompt byte limit. Each batch searches one transient index for other Keepers' neighboring facts, includes their related ledger claims and conflicts, and retains unselected facts for later requests. This preparation step does not enable the Curator lane or change production configuration (#39846).
+- Show each active Goal on one Overview row with its title, attention state, linked-task count and due date, and show its recorded owner in Planning detail. Linked tasks are no longer presented as Goal achievement (#39847).
+- Board attention names the missing, extra and repeated keys of a rejected batch verdict item and the keys of a rejected envelope. A `verdicts` field with a non-list value names the list requirement. Quarantine diagnostics describe the rejected shape without quoting values or changing acceptance (#39857).
+- Read Workspace Curator results from the durable ledger across Keeper, dashboard, and HTTP surfaces. Retire the old proposal writer and publication route; show whether each member's current source is present, absent, or unreadable. Ledger summaries reject a concurrent replacement instead of combining an old digest with new contents. Classifications remain unverified; this change does not enable the live Curator lane (#39865).
+- Installed discovery verification now checks ledger contents, digest, and Keeper preview bindings. Retire the obsolete proposal writer, roundtrip probe, preview harness, and their direct tests; historical evidence is marked as retired (#39865).
+- A saved prompt preset whose `prompt_overrides.json` is in an older
+  `schema_version` is still listed as unreadable, but the reason now names
+  both versions and says what to do: set its prompts again and save them as
+  a new preset (#39872).
+- `masc_board_post_get` with `comment_tail=0` now returns the post body without comments instead of refusing (#39874).
+- The task-completion judge is told that a producer checkout's branch and HEAD are that checkout's state, not GitHub main. It decides "in main / not in main" from the current main content it opens on GitHub, not from a compare result (compare shows commit ancestry only, which a squash merge or a later revert breaks), and writes "unconfirmed: no main comparison" with the checkout's branch and HEAD when the repository is private or the content cannot be read (#39875).
+- Chat loading warnings point to `/errors` for full scrollable details; switching Keepers clears the previous conversation's loading errors before the new read completes. (#39899)
+- New setups use Claude Sonnet 5.5 instead of Claude Sonnet 5: the Claude Code seed bindings and the quick-setup default model moved, and the OpenRouter Sonnet 5 seed binding was removed. An existing `runtime.toml` keeps its own bindings (#39812).
+- `masc setup` folds the routine per-file and per-Skill lines of its init step into the closing count line, and marks success lines with a green check and its first line with a candle on a terminal (not with `NO_COLOR`, `TERM=dumb` or piped output). `masc init` still prints every line (#39897).
+- A Goal's `due_date` is read in one place. It is `YYYY-MM-DD` for a day that exists and falls due at 23:59:59 UTC of that day, whatever the operator's time zone is. The overdue notice and the Overview countdown use it, and `masc_goal_upsert` refuses a value that is not such a date instead of storing it (#39923).
+
+### Fixed
+
+- Declare a second Muse account from an existing `muse-serve` provider: the copy signs in at a new `account-home`, and the Config form shows the `HOME=<home> muse login` sign-in. #39578
+- The Verification screen reads the server's current cancelled, unreviewed and empty-approval-reason answers correctly, and the Lanes table now tells an empty recent observation window apart from run history that was not kept (#39807).
+- Show active runtime rate limits in the TUI list, details and assignment picker. Provider Retry-After expiry and successful answers clear the observation; narrow picker rows retain combined quota and rate-limit warnings. Missing rate-limit observations fail decoding instead of appearing ready. (#39815)
+- On the Keeper detail Info tab, requeueing the oldest blocked Board-attention partition is now `b`; it was `Q`, which the global quit key took first, so the requeue could not be reached (#39818).
+- Preserve Board Ready confirmation times and server boot identities across restart compaction, including repeated confirmations of the same generation, without inventing observations for older ledger rows (#39841).
+- Correct the MCP resource catalog descriptions and remove duplicate agent resources and unadvertised reader aliases. Missing library topics now return a JSON-RPC read error containing the requested URI, and the JSON library index returns an empty document list when the library directory is absent (#39850).
+- Edit on a missing file now points at Write instead of a `mode=overwrite` argument Edit does not accept (#39854).
+- Edit's no-match rejection now says to re-Read the file and copy `old_string` from its current bytes (#39855).
+- #39860 shows when a Keeper checkout's local upstream observation is stale.
+- Recording the same Skill invocation again after its delivery or an action was observed returns the stored activation instead of failing with `invocation_id_collision` (#39862).
+- `path_outside_sandbox` rejections now explain that paths must be inside a permitted root and that relative paths resolve against the workspace root (#39864).
+- Preserve Auto Judge provider or semantic failures when an approval source resolves during terminalization. Record a source-only ending as a cancelled run without a saved judgment, and distinguish historical uncertainty in the Internal Agents view (#39871).
+- A pool job's nested submit stays inline while the job runs even when another job on the same worker ends first: pool work is marked on the job's fiber instead of with a per-domain count that the other job's end reset (#39882).
+- Expired Player invites release the shared DOS controller on the next move, so another participant can continue (#39884).
+- A Muse model that fails verification with a non-retryable `modelError` is checked against the account's `usage/read`; a spent window is reported as `quota_exhausted` and saved as usage-limited instead of refusing the save with a 502 (#39887).
+- The Board-attention run record keeps the key-shape sentence of a rejected judgment (`item=`, `missing=`, `extra=`, `repeated=`) when the flow ends on HTTP slots alone. Before, only the class `invalid_domain_output` reached the run record while the Blocked partition kept the sentence. #39888
+- `masc setup` checks `imp.toml` before calling the model, so an `imp.toml` the server would refuse (such as a microVM keeper without `sandbox_image`) stops setup before the model round trip (#39895).
+- Runtime lane candidate edits in the TUI now check the displayed order and submit the configuration revision, refusing concurrent changes instead of replacing another client's candidate order (#39900).
+- The MCP endpoint answers `keeper_portrait_read` with the typed keeper-internal refusal instead of "Unknown tool (registry inconsistency)", and the keeper tool matrix exercises the tool (#39906).
+- Exact-output generation and token measurement now share the provider concurrency limit with ordinary requests; permit waits respect the exact request deadline (#39879).
+- When the TUI refuses a runtime lane edit, the message now says the lane differs from the displayed order, or names the first runtime.toml parse error and where it is (#39913).
+- MCP `tools/list` records its tool assignment under the verified
+  credential's owner instead of the raw bearer, so tokens no longer land in
+  `<base>/data/tool-events` and `tools/call` finds the assignment by name.
+  Files written before this fix may still hold bearers (#39829).
+- `keeper_portrait_read` now refuses a portrait size below 48 or above 512, which is the range the tool declares. Before, it accepted sizes down to 16 and its error message said "between 16 and 512". (#39925)
+- Release installation checks wait for server readiness before verifying the installed dashboard, preventing startup JSON from being mistaken for broken packaged assets (#39936).
+
+### Internal
+
+- Keep Draft PR snapshots from cancelling or shadowing Ready CI, and require complete Ready results when approval and queue checks exclude verified Draft evidence using the exact skipped-job names emitted by GitHub (#39834).
+- Make the operator snapshot cache revalidation test use controlled time and explicit background completion while preserving stale-value and single-compute assertions (#39849).
+- Validate exactly one Workspace Curator decision per selected changed fact before updating the ledger, reject duplicate or out-of-batch decisions and unknown preexisting claim or conflict references, and pin prompt resolution while sizing requests (#39853).
+- Run Workspace Curator through bounded changed-fact batches, validate answers before saving their decisions to the ledger, and skip model calls on unchanged wakes. This change does not enable the live lane (#39858).
+
+### Performance
+
+- The TUI Overview makes its Team projection and Todo backlog summary once per unchanged input snapshot instead of several times per frame, so a key that only moves a cursor no longer re-parses every Todo creation time (#39838).
+- The TUI's terminal-text sanitizers return an all-ASCII cell unchanged instead of walking it scalar by scalar, which made sanitising an ASCII name or key hint about sixteen times cheaper (#39842).
+- A Keeper session's Skill activation ledger is an append-only event log (`skill-activation-events.jsonl`): recording an activation, delivery or action appends one row and applies it to the ledger the server already holds, instead of reading, re-validating and atomically rewriting the whole session document on every event (#39862).
+- The schedule store keeps the decoded `schedules.json` with the file version it was read from, so a reader of an unchanged ledger no longer reads, parses and decodes the whole multi-megabyte document; a miss decodes on the domain pool (#39870).
+- File-version caching applies only to filesystem-backed schedules; Memory backends retain their own authoritative ledger even when a local mirror shares the same path (#39870).
+- The TUI splits its server-sent event streams (the observer feed, the Keeper chat stream and the GitHub login stream) by scanning only the bytes each chunk adds, instead of copying and searching everything held since the last line ended. A 919KB `execution_snapshot` read in 16KB chunks took 35.6ms of the TUI's loop to split and now takes 1.2ms (#39909).
+- The TUI reads an observer frame's leading `type` member before parsing the frame, and a frame that type decides by itself (a whole dashboard projection, the internal agent runs push, or a type outside the event families this build reads) is delivered without the rest being parsed. A 722KB `operator_snapshot` took 8.9-10.3ms of the TUI's loop to parse and its type now takes about 15-20µs to read; the rest of such a frame is no longer checked, so it no longer reads as undecodable when it is not JSON (#39926).
+
+## [0.47.0] - 2026-09-29
+
+### Upgrade notes
+
+- runtime.toml now refuses a provider id that names a top-level table another reader owns, because a provider's bindings are a top-level table named after its id (`[voice.tts]` under a provider called `voice` was both a binding and the voice settings). The full list, which the server also sends as `reserved_provider_ids` in `GET /api/v1/runtime/config/raw`: tables with their own reader `providers`, `models`, `runtime`, `exec`, `egress`, `lsp`, `typesafeai`, `skills`, `fusion`, `board`, `voice`, `tui`, `slack`, `discord`, `repositories`, `browser`, `memory_os`; keeper runtime settings `keeper_settings`, `autonomous`, `debug`, `heartbeat`, `metrics`, `otel`, `reactive`, `sandbox`, `supervisor`, `turn`, `vision`, `web_search`, `wire_capture`; obsolete tables `system`, `routes`, `profiles` (#39559).
+- Newly refused from this version: `typesafeai`, `fusion`, `board`, `voice`, `tui`, `slack`, `discord`, `repositories`, `browser`, `memory_os` and every keeper runtime setting name except `web_search`. A file that declares one of them as a provider no longer loads; the error is at path `providers.<id>` and reads `provider id "<id>" collides with a reserved top-level runtime.toml namespace` (#39559).
+- To upgrade such a file, rename the provider before installing this version: rename `[providers.<id>]` and its sub-tables such as `[providers.<id>.credentials]`; rename each binding table `[<id>.<model>]`, one whose second segment is a model declared under `[models]`, to `[<new-id>.<model>]`, and leave the other `[<id>.*]` tables (for example `[voice.tts]`) to the reader that owns them; replace the runtime id `<id>.<model>` with `<new-id>.<model>` wherever the file names it, such as `[runtime] default`, `[runtime.assignments]`, lane `candidates` and exact-output lane slots (#39559).
+- Model ids and SSH endpoint ids are not top-level tables and are no longer checked against this list, so a model id such as `vision`, `runtime` or `routes` now loads (#39559).
+
+### Added
+
+- A Keeper's detail opens its Info tab with that Keeper's own portrait beside the Identity rows: real pixels eight rows tall on a Kitty terminal, a half-block mosaic twelve rows by 24 cells elsewhere, nothing under `NO_COLOR`, and the facts keep every row in a pane too short or narrow for it (#39750).
+- `[repositories]` accepts optional `github_host` and `graphql_url`, so the pull-request reader can target a GitHub Enterprise host instead of the hardcoded github.com endpoint. The reader token is read from the `hosts.yml` section for the configured host. #39752
+- Add the masc pad: `GET /api/v1/play/pad` answers the loaded DOS program's gamepad layout (Linux `BTN_*` button names onto machine keys, found by the program's saves name) and `POST /api/v1/play/pad {button, saves_name}` presses the bound keys; a press made on the layout of a program that is no longer loaded is refused, checked again under the machine's lock where the keys go in. `<.masc>/dos/pads/<saves name>.toml` overrides the builtin layout, which ships for `samguk3`. The play page draws the pad (narrower pads put SELECT and START under the two grids), reads a pad layout again on the next poll when a read fails, and reads a standard-mapping gamepad (RFC play-link-for-the-shared-machine). (#39753)
+- Keeper portraits can wear a crown or a beanie in the head slot, drawn in the band between the flame and the horns so neither is covered (#39765).
+- Add `GET /api/v1/play/screen.png`: an invite's bearer (`CanPlayMachine`) reads the shared DOS machine's current frame as a PNG, so an external agent with only a shell can see a game whose menus are drawn as pixels (RFC play-link-for-the-shared-machine). (#39769)
+- Keeper portraits can hold a book, a mug or a quill in the hand slot, drawn at the candle's lower right so they clear the flame, the horns and the face (#39773).
+- The `/about` candle comes in two styles: `painted`, the 2D portrait, and `dotted`, a small ray-marched 3D figure in square dots that sways on its axis. `c` on `/about` turns the candle to the other style and stores it in `[tui].candle`. On a Kitty terminal the dotted candle is sent as many pixels as its rows show, so no dot is scaled (#39791).
+- Keeper portraits can wear a bow tie or a medal in the neck slot, hung from the same band the scarf uses so they clear the mouth (#39803).
+
+### Changed
+
+- Board attention offers Jev an explicit uncertainty choice that sends the candidate to the full judgment lane. Confidence is validated as 0..1 and retained as evidence, without a numeric routing threshold (#39545).
+- Configured Board moderators can now close and reopen posts through the Board tools, alongside each post's author. Set `[board].moderators` in `runtime.toml`; the default list includes `e-masc-the-leader` (#39691, part of #39356).
+- `/login` opens on the four official clients with each one's number of
+  configured accounts. Choosing a client lists its accounts by email under a
+  `+ 새 계정` row; Enter on an account signs in as it, `D` previews removing
+  it and Esc goes back to the clients. `/login <client>` and
+  `/login <integration id>` open that client's accounts directly (#39751).
+- Open the TUI directly on the working Overview with connecting/loading status instead of a large animated startup candle; retain Keeper portraits and the `/about` candle. #39798
+- In the TUI, a Board post that has not loaded yet shows a short footer with only the keys that work there: Left/Esc to go back, r to retry, and Tab (#39799).
+
+### Fixed
+
+- Let a queued chat take the next Keeper slot after a debt-cap AGENT_CORE turn reaches a settled tool boundary. Keep official-client turns running until completion so their tool results remain in the vendor conversation (#39387).
+- Remove the unreachable official-client queued-chat host stop from shared and adapter types; retain repetition and terminal-effect stops. (#39387)
+- `/login` wraps its notice at the pane width, so a refused save's reason is read to its end, where the verification code (such as `rate_limited`) and detail are, instead of being cut at the pane's edge (#39699).
+- A non-default `github_host` without `graphql_url` is refused as an invalid declaration with the fix, instead of posting every repository to api.github.com where each would read as not visible. #39752
+- The pull-request reader compares a remote's host without case (RFC 4343) and reads `github_host` in lower case, so `https://GitHub.com/o/r` or `github_host = "GHE.EXAMPLE"` no longer reads as not GitHub. The `owner/repo` path keeps its case. #39752
+- A refused token is held per `graphql_url`: correcting the endpoint asks the new one with the same token instead of keeping the old endpoint's 401. #39752
+- On a Kitty terminal a placed portrait is sent again only when it is new, moved or changed, or when the frame rewrote a row it covers. A Kitty terminal that does not report its cell size draws the mosaic instead of placing a box from a guessed 10x20 cell, and a placement the encoder refuses is no longer recorded as on screen (#39770).
+- On macOS, a finished Claude Code, Codex or Muse turn no longer fails with
+  `Parse error: runtime boundary: Unix.Unix_error(Unix.EPERM, "kill", "")`
+  when a descendant of the client is still exiting as its process group is
+  cleaned up. A group kill that reached nobody counts as done when every
+  member is a zombie or already exiting; a live member still reports the
+  refusal (#39771).
+- A cancelled vision artifact request is rejected before submitting a store or load job to the domain pool (#39774).
+- Muse Keeper usage retains per-completion counted-once prompt and explicit cache counters when terminal totals are absent, ignores replayed usage events, and withholds partial totals after observed delivery gaps (#39778).
+- The shared-screen PNG route matches `Dos_lane.Other_program`, so `dune build @check` no longer fails on a partial match and main CI is green again (#39780).
+- Name the TUI and dashboard surface Lanes. The dashboard shows each lane's purpose, configuration state and observation time, and marks retained rows stale when refresh fails. Missing terminal evidence no longer means a run never finished. Browser progress names the selected source, Stagehand help acknowledges pointer actions, and closing a session clears its page without immediately reading the closed browser (#39783).
+- An exception the Claude Code or Antigravity runtime did not expect, caught
+  as the turn leaves it, is a masc internal error
+  (`internal_unhandled_exception`, site `claude_code.runtime_boundary` or
+  `antigravity.runtime_boundary`) rather than a provider parse error, so the
+  receipt, the failure route and the chat text no longer say "Parse error".
+  Lane rotation is unchanged: the walk stops on it as it did before (#39792).
+- A half-block mosaic cell whose colour the terminal cannot draw is drawn in the terminal's own foreground or background instead of the colour of the cell before it (#39801).
+- Send the TUI /about candle and Keeper portraits as PNG images to avoid Ghostty 1.3.1 Kitty decompression crashes while preserving transparency and image replacement (#39805).
+- Web search with Brave as the only provider answers "no results" again when a rare query has no web hits, instead of reporting that every search provider failed (#39806).
+- The outermost `run_turn` catch-all for Claude Code and Antigravity re-raises
+  `Out_of_memory`, `Stack_overflow` and `Sys.Break` instead of reporting them as
+  `internal_unhandled_exception`. It logs the backtrace of other exceptions it
+  types, because the typed error keeps only the exception text. Inner state
+  callbacks, stdout reads and Claude Code's user-message write still turn
+  these three exceptions into errors (#39824).
+- When a Muse account runs out of quota, MASC now reads that account's usage and rests only that account until the reset time the provider gives. The next turn can use another declared account or runtime instead of retrying the spent one. MASC does not guess quota from the error text (#39810).
+- When MASC is shutting down while it reads a Codex or Muse account's usage, the Keeper's failure recovery still runs, and that account is no longer left stuck as "already reading", so a later read can run (#39832).
+- Web search now tells a search that finished with no hits apart from a provider that failed or sent a broken answer. An empty answer no longer counts as a failure, and the next provider is still tried (#39802).
+- The dashboard's agent monitor no longer shows 0 when a run source could not be read. It shows — until that source answers, and keeps the last good rows marked STALE (#39786).
+- Keepers resume Board work after an approved retry was deferred or interrupted by a restart. Before, the startup check refused that state and stopped the Board workers (#39784).
+- When a Keeper's sandbox cannot read a config or environment file, the error now says why: missing file, bad path, permission, or filesystem error. Before it said only "cannot read config file" (#39788).
+- Execute keeps every token of an argv-shaped shell call, so `sh -n -c S` checks the script instead of running it and a directory-qualified program keeps its path (#39839).
+
+### Internal
+
+- Every Kitty picture takes its image id from the closed `Masc_tui_graphics.image` variant, and a test checks no two share one; `Masc_tui_graphics.query_id` and `Masc_tui_portrait_view.mascot_image_id` are removed (#39750).
+- Require a Ready PR and all five PR check jobs to succeed before the new summary check succeeds; Draft and skipped jobs now leave a failing check (#39759).
+- PTY scenarios that wait on a fixture event keep reading the terminal, and a lint check reports a wait that does not, so a TUI blocked on a full PTY no longer hides the request a scenario waits for (#39767).
+- `Masc_tui_frame_presenter.Presented` carries the rows the frame wrote (`Whole_screen` or `Rows`), `Masc_tui_portrait_view.flush` takes `~rewritten` in place of `~presented`, and `Masc_tui_portrait_view.default_cell` is removed (#39770).
+- Upgrade dashboard test tooling to Vitest 5 and align the registered jest-axe matcher declarations with Vitest's matcher interface; declare the Node versions supported by Vitest, Vite, and jsdom (#39772).
+- The "Keeper selection identity" roster scenario walks beta's detail down
+  after `r` until the refreshed current task id is drawn. Since the portrait
+  opens the Info tab, Current Work sits below the first screen at the
+  harness height (#39781).
+- `Keeper_portrait_solid.mascot` renders the dotted figure, and `Keeper_portrait_draw` exposes `palette` (the table the 2D renderer paints with) and `image_init` (#39791).
+- Execute now records, in its tool-call ledger row, the output size it compared
+  against the inline ceiling and whether its handler stored the output, and
+  `scripts/harness/tool_calls/result_size_windows.py` prints a numbers-only
+  table of result sizes per tool and lane from the ledger (#39793).
+- The workspace curator gains a ledger of per-fact dispositions and a
+  model-free reconciliation that finds new and vanished facts, stage 1 of
+  RFC-workspace-curator-curates-changed-facts. Nothing calls it yet (#39800).
+- Make macOS Lane Add-on qualification read repository fixtures and wait for a complete resized terminal frame before checking its guidance (#39790, #39804).
+- The TUI region baseline suite, `test_tui_region_baseline_pty`, pins where
+  the Board list, Config, the keeper detail (with and without the roster),
+  the keeper chat and, as a control, the Keepers list put their title, rules,
+  borders, last row, blank rows and list window at 80 to 158 columns, where
+  the roster's borders sit, and that a press on the chat's folded Gate row
+  lands on it. It reads a screen only once it is whole, still, uncut and
+  fully answered by fixtures; its shared helpers
+  (`test/tui_region_harness.py`) serve the suites for the frame's remaining
+  readers (#39703).
+
+### Performance
+
+- Move vision artifact hash, verification, and frame pruning work from the main Eio domain to the shared domain pool (#39766).
+
 ## [0.46.0] - 2026-09-28
 
 ### Upgrade notes

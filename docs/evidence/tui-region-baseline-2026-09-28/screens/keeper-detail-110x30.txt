@@ -1,0 +1,30 @@
+ Overview  Activity  ▸Keepers  Lanes  Memory  Board  Planning  Fusion  Workspace  Config
+
+   Keepers ▸ alpha  ▸Info  Sandbox  Settings  Secrets  GitHub  Identity  Channels  Automation  Runs
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    Identity
+    Name:                  alpha
+    Paused:                no
+
+    Current failure
+    none
+
+    Board attention
+    nothing blocked
+
+    Gate
+    Tool calls:            auto · per Gate policy
+    Effects (Gate mode):   workspace · Auto Judge
+    Lane first:            lane order
+
+    Current Work
+    Task:                  —
+
+    Live Context
+    Context:               measurement missing
+
+    Runtime Stats
+  1-22/37
+
+  [ ]:tab  Q:requeue board  B:requeue all board  j/k:move  p:pause  w:wake  Left / Esc:back  q:quit  …?
+ › to alpha   (i to write)

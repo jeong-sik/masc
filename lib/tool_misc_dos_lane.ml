@@ -157,13 +157,24 @@ let no_machine ~base_path ~tool_name ~start_time =
   reject ~tool_name ~start_time ~data:(reject_data_of_fields (autosave_lookup_fields found)) message
 ;;
 
-let of_lane ?(extra = []) ~base_path ~tool_name ~start_time
+(* [png] adds the frame for a model that reads images: the observation's text,
+   then the PNG. A caller that shows only text still has the whole observation
+   in [data]. *)
+let of_lane ?(extra = []) ?png ~base_path ~tool_name ~start_time
     (result : (Dos_lane.observation, Dos_lane.error) result) =
   match result with
   | Ok o ->
-    Tool_result.make_ok ~tool_name ~start_time
-      ~data:(`Assoc (observation_fields o @ extra))
-      ()
+    let data = `Assoc (observation_fields o @ extra) in
+    let content_blocks =
+      Option.map
+        (fun png ->
+          [ Llm_provider.Types.Text (Yojson.Safe.to_string data)
+          ; Llm_provider.Types.image_block ~media_type:"image/png"
+              ~data:(Base64.encode_exn png) ()
+          ])
+        png
+    in
+    Tool_result.make_ok ~tool_name ~start_time ~data ?content_blocks ()
   | Error Dos_lane.No_machine -> no_machine ~base_path ~tool_name ~start_time
   | Error
       (( Dos_lane.Invalid_request _ | Dos_lane.Held_by _ | Dos_lane.Other_program _
@@ -416,11 +427,12 @@ let after_announcing result =
 ;;
 
 (* A game can run for hours, and the Keeper holding the controller can stop
-   in that time. It will never pass, and every other caller would be refused
-   until a restart. [holder_left] says whether a holder can no longer act;
-   the Keeper boundary supplies it from Keeper state, which this tool surface
-   does not read (RFC-0194). Called before a call that needs the controller,
-   it frees a stopped holder's controller and tells the board.
+   in that time, or an invite holding it can run out or be revoked. Such a
+   holder will never pass, and every other caller would be refused until a
+   restart. [holder_left] says whether and why a holder can no longer act;
+   the Keeper boundary supplies it from Keeper and credential state, which this
+   tool surface does not read (RFC-0194). Called before a call that needs the
+   controller, it frees a departed holder's controller and tells the board.
 
    The holder's state is read between two lane calls, not under the lane's
    lock, so a holder resumed in those milliseconds still loses it and must
@@ -431,8 +443,9 @@ let after_announcing result =
    play-link-for-the-shared-machine §2.4), so revoking lets it go and tells
    the board. [by] is the operator who revoked. The credential is deleted
    first: a request the invitee sent before that and that reaches the lane
-   after this can still take the freed controller, and revoking the name
-   again frees it. *)
+   after this can still take the freed controller. Where every request needs
+   a credential, the next move by anyone else lets it go again
+   ([No_credential]). *)
 let release_revoked_invite ~holder ~by =
   let released =
     off_domain (fun () ->
@@ -447,17 +460,33 @@ let release_revoked_invite ~holder ~by =
   released
 ;;
 
+type holder_departure =
+  | Keeper_stopped
+  | Player_expired
+  | No_credential
+
+let departure_notice holder = function
+  | Keeper_stopped ->
+    Printf.sprintf "%s 님의 Keeper 가 멈춰서 DOS 조종권이 풀렸어요" holder
+  | Player_expired ->
+    Printf.sprintf "%s 님의 플레이 초대가 만료되어 DOS 조종권이 풀렸어요" holder
+  | No_credential ->
+    Printf.sprintf "%s 님은 접속 권한이 없어서 DOS 조종권이 풀렸어요" holder
+;;
+
 let free_left_controller ~holder_left ~who =
   match off_domain Dos_lane.screen with
   | Ok { Dos_lane.controller = Some holder; _ }
-    when (not (String.equal holder who)) && holder_left holder ->
+    when not (String.equal holder who) ->
+    (match holder_left holder with
+     | None -> ()
+     | Some reason ->
     (match
        off_domain (fun () ->
          Dos_lane.release_left ~holder
            ~announce:
              (announce ~author:who
-                (Printf.sprintf
-                   "%s 님의 Keeper 가 멈춰서 DOS 조종권이 풀렸어요" holder)))
+                (departure_notice holder reason)))
      with
      (* Posted now: the call that follows may be refused before it reaches
         the lane, and would not post it. *)
@@ -465,7 +494,7 @@ let free_left_controller ~holder_left ~who =
      (* A hand-off that landed after the read above: that pass stands. *)
      | Ok false -> ()
      (* The machine went away; the call that follows reports it. *)
-     | Error _ -> ())
+     | Error _ -> ()))
   | Ok _ | Error _ -> ()
 ;;
 
@@ -524,29 +553,32 @@ let handle_eject ~tool_name ~start_time ~agent_name _args =
      | Error e -> reject ~tool_name ~start_time (Dos_lane.error_to_string e))
 ;;
 
-(* The hand-off is also the wake-up: the board post names the next holder
-   with @, which the board delivers to that Keeper as an explicit mention, so
-   the player whose turn it is does not have to poll the machine to find out.
-   A post is a message in their queue, not an obligation to answer. *)
 (* [to] is parsed with the board's own agent-id rule, so a name that could
    never be mentioned -- "@liu-bei", "liu bei", "유비" -- is refused here. The
    controller would otherwise go to a name no caller has, nobody could move or
    eject the machine again, and the post meant to wake the next player would
-   address no one. *)
+   address no one. [Keeper_dos_controller.before_call] reads the name here
+   too, so the check of who sits at the machine sees the name the pass
+   uses. *)
+let pass_target args =
+  match get_string_opt args "to" with
+  | None -> Ok None
+  | Some t when String.trim t = "" -> Ok None
+  | Some t ->
+    (match Board_types.Agent_id.parse (String.trim t) with
+     | Ok id -> Ok (Some (Board_types.Agent_id.to_string id))
+     | Error _ ->
+       Error
+         (Printf.sprintf
+            "to %S is not a Keeper name: give the name alone, without @ or spaces" t))
+;;
+
+(* The hand-off is also the wake-up: the board post names the next holder
+   with @, which the board delivers to that Keeper as an explicit mention, so
+   the player whose turn it is does not have to poll the machine to find out.
+   A post is a message in their queue, not an obligation to answer. *)
 let handle_pass ~tool_name ~start_time ~base_path ~agent_name args =
-  let to_ =
-    match get_string_opt args "to" with
-    | None -> Ok None
-    | Some t when String.trim t = "" -> Ok None
-    | Some t ->
-      (match Board_types.Agent_id.parse (String.trim t) with
-       | Ok id -> Ok (Some (Board_types.Agent_id.to_string id))
-       | Error _ ->
-         Error
-           (Printf.sprintf
-              "to %S is not a Keeper name: give the name alone, without @ or spaces" t))
-  in
-  match to_ with
+  match pass_target args with
   | Error message -> reject ~tool_name ~start_time message
   | Ok to_ ->
     let content =
@@ -560,8 +592,58 @@ let handle_pass ~tool_name ~start_time ~base_path ~agent_name args =
             Dos_lane.pass ~who:agent_name ~to_ ~announce:(announce ~author:agent_name content))))
 ;;
 
+(* The screen as an image. A VGA game draws its menus as pixels -- 삼국지3's
+   Korean menus are glyphs from its own font -- so frame_ascii shows where
+   something is drawn but not what it says. Every surface that shows the frame
+   as an image reads it here: the observation and the frame come from one
+   locked read, and the PNG is encoded off the Eio domain. *)
+type png_capture =
+  { observation : Dos_lane.observation
+  ; width : int
+  ; height : int
+  ; png : string
+  }
+
+type png_capture_error =
+  | Lane of Dos_lane.error
+  | Encode of string
+
+let capture_png () =
+  match off_domain Dos_lane.capture with
+  | Error e -> Error (Lane e)
+  | Ok (observation, { Dos_lane.width; height; rgb }) ->
+    (match
+       Eio_guard.run_in_systhread ~label:"dos-png" (fun () -> Rgb_png.encode ~width ~height ~rgb)
+     with
+     | Ok png -> Ok { observation; width; height; png }
+     | Error message -> Error (Encode message))
+;;
+
+let png_fields ~width ~height ~png =
+  [ ("media_type", `String "image/png")
+  ; ("width", `Int width)
+  ; ("height", `Int height)
+  ; ("bytes", `Int (String.length png))
+  ]
+;;
+
+let image_capture_failed ~tool_name ~start_time message =
+  Tool_result.make_err ~tool_name ~class_:Tool_result.Runtime_failure ~start_time
+    ("DOS image capture failed: " ^ message)
+;;
+
+(* A generic caller (an MCP client) gets the PNG inline, beside the text
+   observation. A Keeper gets it through its vision store instead
+   (Keeper_dos_screen). *)
 let handle_screen ~tool_name ~start_time ~base_path _args =
-  of_lane ~base_path ~extra:[ core_field ] ~tool_name ~start_time (off_domain Dos_lane.screen)
+  match capture_png () with
+  | Error (Lane e) -> of_lane ~base_path ~tool_name ~start_time (Error e)
+  | Error (Encode message) -> image_capture_failed ~tool_name ~start_time message
+  | Ok { observation; width; height; png } ->
+    of_lane ~base_path ~tool_name ~start_time
+      ~extra:(png_fields ~width ~height ~png @ [ core_field ])
+      ~png
+      (Ok observation)
 ;;
 
 (* The whole per-call ceiling: a call that settles stops early, so a large

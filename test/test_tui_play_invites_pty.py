@@ -90,7 +90,9 @@ def run(executable: str) -> None:
             raise AssertionError(f"the TUI did not issue and revoke through the play API: {paths!r}")
         if revoke_methods != ["DELETE"] * 4:
             raise AssertionError(f"play revokes used the wrong HTTP methods: {revoke_methods!r}")
-        h.send_and_wait(process, master, output, b"\x1b", b"MASC Keepers")
+        # One Esc leaves the chat for the keeper's detail, not for the list, and
+        # how many it takes depends on the turn state: the harness counts.
+        h.escape_to_keeper_detail(process, master, output, name=b"alpha")
         os.write(master, b"q")
 
     h.run_terminal_scenario(

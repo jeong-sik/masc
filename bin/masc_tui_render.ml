@@ -17008,6 +17008,10 @@ let play_card_indent = "  "
 
 let render_play_card (state : state) card =
   let terminal_rows, cols = get_terminal_size () in
+  (* The window as the operator sees it. The rows and columns a frame is laid
+     out in are that less the navigation strip and any pane beside the surface,
+     so a size the card asks for is added to this, not to those. *)
+  let window_rows, window_cols = Masc_tui_ansi.get_terminal_size () in
   surface_chrome ~overflow:Fits state ~terminal_rows ~cols ~surface_key:"play-invite"
     ~frame:Chrome_overlay
     ~title:(screen_title " MASC Play invite")
@@ -17026,17 +17030,17 @@ let render_play_card (state : state) card =
           | Masc_tui_play_card.Note text ->
               c.push_styled ~style:(Theme.warn ()) (play_card_indent ^ text)
           | Masc_tui_play_card.Qr_needs { columns; rows } ->
-              (* The card counts its own cells. The window is those plus what
-                 surrounds them: the frame and the indent beside the width, and
-                 the composer, the agenda strip and the frame around the body
-                 rows. Both are read off this frame, so they cannot drift from
-                 what [surface_chrome] takes. *)
+              (* The card counts its own cells and says what it lacks. What
+                 surrounds them -- the frame, the composer, the agenda strip,
+                 the navigation strip -- stays the same when the window grows,
+                 so the window needs what it has now plus the card's shortfall
+                 in each direction. *)
               c.push_styled ~style:(Theme.warn ())
                 (Printf.sprintf
                    "%sthe QR needs a window of %d columns by %d rows"
                    play_card_indent
-                   (columns + (cols - width))
-                   (rows + (terminal_rows - budget)))
+                   (window_cols + max 0 (columns - width))
+                   (window_rows + max 0 (rows - budget)))
           | Masc_tui_play_card.Blank -> c.push_empty ())
         (Masc_tui_play_card.draw card ~width ~rows:budget))
 

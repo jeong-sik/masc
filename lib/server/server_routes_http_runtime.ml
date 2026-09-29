@@ -1476,10 +1476,10 @@ let liveness_handler _request reqd =
        ])
     reqd
 
-(** Readiness probe: responds 200 only when server_state is initialized. *)
+(** Readiness probe: responds 200 only after the startup barrier and state publication. *)
 let readiness_handler _request reqd =
   let current = Server_startup_state.snapshot () in
-  if current.state_ready then
+  if Option.is_some (ready_server_state ()) then
     Http.Response.json_value
       (`Assoc
          [

@@ -102,6 +102,16 @@ val footer_hints : ?detail_open:bool -> Masc_tui_types.surface -> string
     behaviour from before this argument existed, and the one
     {!has_detail_scoped_keys} exists to catch. *)
 
+type approvals_footer =
+  | Approval_browsing
+  | Approval_writing
+  | Approval_armed
+  | Approval_answering of { has_choices : bool; takes_text : bool }
+
+val footer_hints_approvals : approvals_footer -> string
+(** Project the Approvals queue and question reader's modal footers from the
+    same binding records as the Help sheet. *)
+
 val has_detail_scoped_keys : Masc_tui_types.surface -> bool
 (** Whether this surface's table scopes any binding to one of the two states,
     and so owes [footer_hints] a [~detail_open] from both of its renderers.

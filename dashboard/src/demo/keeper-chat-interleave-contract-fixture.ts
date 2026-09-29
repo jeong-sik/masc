@@ -21,7 +21,9 @@ export const INTERLEAVE_ORDER_SIGNATURE =
 export const INTERLEAVE_FIXTURE_COVERED_SINCE_MS = Date.parse('2026-07-05T14:19:50.000Z')
 export const INTERLEAVE_FIXTURE_COVERED_THROUGH_MS = Date.parse('2026-07-05T14:20:10.000Z')
 
-const joinedToolOutput: ToolCallEntry = {
+// Exported so a test can serve this same row through the exact per-execution
+// endpoint the joined row reads, instead of restating it.
+export const joinedToolOutput: ToolCallEntry = {
   ts: INTERLEAVE_FIXTURE_COVERED_THROUGH_MS / 1000,
   keeper: INTERLEAVE_FIXTURE_KEEPER,
   tool: 'keeper_context_status',

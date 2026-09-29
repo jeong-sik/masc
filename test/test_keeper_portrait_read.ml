@@ -1,0 +1,143 @@
+open Masc
+
+(* task-1830: the read-only portrait tool returns the equipment the name hash
+   gives, plus a durable PNG artifact a Keeper can open.
+
+   The tool is read-only: it never stores an equip choice. This test pins the
+   two things the task's first stage promises: the reported equipment equals
+   [equipment_of_name], and the artifact is a real PNG in the Keeper's vision
+   store. *)
+
+module Read = Masc.Keeper_portrait_read
+module Look = Keeper_portrait_look
+module Store = Multimodal.Vision_artifact_store
+
+let with_temp_base f =
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base = Filename.temp_dir "keeper-portrait-read" "" in
+  let previous = Sys.getenv_opt "MASC_BASE_PATH" in
+  let previous_config = Sys.getenv_opt "MASC_CONFIG_DIR" in
+  Unix.putenv "MASC_BASE_PATH" base;
+  Unix.unsetenv "MASC_CONFIG_DIR";
+  Config_dir_resolver.reset ();
+  Eio.Switch.on_release sw (fun () ->
+    (match previous with Some value -> Unix.putenv "MASC_BASE_PATH" value | None -> Unix.unsetenv "MASC_BASE_PATH");
+    (match previous_config with Some value -> Unix.putenv "MASC_CONFIG_DIR" value | None -> Unix.unsetenv "MASC_CONFIG_DIR");
+    Config_dir_resolver.reset ();
+    Masc_test_deps.cleanup_test_workspace base);
+  f ()
+;;
+
+let field key = function
+  | `Assoc fields ->
+    (match List.assoc_opt key fields with
+     | Some value -> value
+     | None -> Alcotest.failf "the tool output has no %s" key)
+  | other -> Alcotest.failf "the tool output is not an object: %s" (Yojson.Safe.to_string other)
+;;
+
+let call ~name ~args =
+  Read.handle
+    ~keeper_name:name
+    ~tool_name:"keeper_portrait_read"
+    ~start_time:(Tool_timing.start ())
+    ~args
+;;
+
+let completed_data (result : Tool_result.result) =
+  match result with
+  | Tool_result.Completed output -> output.data
+  | Tool_result.Failed error -> Alcotest.fail error.message
+  | Tool_result.Deferred _ -> Alcotest.fail "portrait read deferred"
+;;
+
+(* The tool reports the equipment the name hash gives, through the same mapping
+   the tool uses. A change to either side fails here. *)
+let test_equipment_matches_the_name_hash () =
+  with_temp_base @@ fun () ->
+  List.iter
+    (fun name ->
+      let result = call ~name ~args:(`Assoc []) in
+      let data = completed_data result in
+      Alcotest.(check string)
+        (name ^ ": the tool reports the name hash's equipment")
+        (Yojson.Safe.to_string (Read.equipment_to_json (Look.equipment_of_name name)))
+        (Yojson.Safe.to_string (field "equipment" data)))
+    [ "won-chik"; "lane-smith"; "jazz-developer"; "simplifyer" ]
+;;
+
+(* The artifact is a real PNG in the Keeper's vision store, and the reported
+   geometry matches the bytes. *)
+let test_artifact_is_a_readable_png () =
+  with_temp_base @@ fun () ->
+  let name = "won-chik" in
+  let result = call ~name ~args:(`Assoc [ "size", `Int 96 ]) in
+  let data = completed_data result in
+  Alcotest.(check string) "the tool names the Keeper" name
+    (match field "name" data with `String value -> value | _ -> Alcotest.fail "name is not a string");
+  Alcotest.(check string) "the media type is PNG" "image/png"
+    (match field "media_type" data with
+     | `String value -> value
+     | _ -> Alcotest.fail "media_type is not a string");
+  Alcotest.(check int) "the reported width is the requested edge" 96
+    (match field "width" data with `Int value -> value | _ -> Alcotest.fail "width is not an int");
+  Alcotest.(check int) "the reported height is the requested edge" 96
+    (match field "height" data with `Int value -> value | _ -> Alcotest.fail "height is not an int");
+  let handle =
+    match field "artifact" data with
+    | `String value -> value
+    | _ -> Alcotest.fail "artifact is not a string"
+  in
+  let bytes =
+    match field "bytes" data with `Int value -> value | _ -> Alcotest.fail "bytes is not an int"
+  in
+  let dir =
+    Store.frames_dir
+      ~dir:(Filename.concat (Config_dir_resolver.keepers_dir ()) (name ^ ".vision"))
+  in
+  match Store.load ~dir (Store.of_string handle) with
+  | Error error ->
+    Alcotest.failf "the artifact did not load: %s" (Store.load_error_to_string error)
+  | Ok loaded ->
+    Alcotest.(check int) "the stored bytes are the reported bytes" bytes (String.length loaded);
+    Alcotest.(check bool) "the artifact is a PNG" true
+      (String.length loaded >= 8 && String.sub loaded 0 8 = "\137PNG\r\n\026\n");
+    Alcotest.(check int) "IHDR width matches the requested edge" 96
+      (Int32.to_int (String.get_int32_be loaded 16));
+    Alcotest.(check int) "IHDR height matches the requested edge" 96
+      (Int32.to_int (String.get_int32_be loaded 20));
+    let repeated = call ~name ~args:(`Assoc ["size", `Int 96]) |> completed_data in
+    Alcotest.(check bool) "same identity and size retain the image" true
+      (field "artifact" repeated = field "artifact" data);
+    Alcotest.(check bool) "same identity retains equipment" true
+      (field "equipment" repeated = field "equipment" data)
+;;
+
+(* A size outside the renderer's range is refused, not clamped. *)
+let test_size_out_of_range_is_refused () =
+  with_temp_base @@ fun () ->
+  List.iter (fun args ->
+    match call ~name:"invalid-portrait" ~args with
+    | Tool_result.Failed error ->
+        Alcotest.(check bool) "invalid input is a policy rejection" true
+          (error.class_ = Tool_result.Policy_rejection)
+    | Tool_result.Completed _ | Tool_result.Deferred _ ->
+        Alcotest.fail "invalid portrait input succeeded")
+    [`Null; `Assoc ["size", `String "48"]; `Assoc ["size", `Int 8]; `Assoc ["size", `Int 513]];
+  let dir = Store.frames_dir
+    ~dir:(Filename.concat (Config_dir_resolver.keepers_dir ()) "invalid-portrait.vision") in
+  Alcotest.(check bool) "rejected inputs create no artifacts" false (Sys.file_exists dir)
+;;
+
+let () =
+  Alcotest.run
+    "keeper_portrait_read"
+    [ ( "read-only portrait"
+      , [ Alcotest.test_case "equipment matches the name hash" `Quick
+            test_equipment_matches_the_name_hash
+        ; Alcotest.test_case "artifact is a readable PNG" `Quick test_artifact_is_a_readable_png
+        ; Alcotest.test_case "size out of range is refused" `Quick test_size_out_of_range_is_refused
+        ] )
+    ]
+;;

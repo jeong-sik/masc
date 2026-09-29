@@ -2472,6 +2472,7 @@
 (include stanzas/test_keeper_portrait.inc)
 
 (include stanzas/test_keeper_census_outputs.inc)
+(include stanzas/test_keeper_shim_fleet.inc)
 (include stanzas/test_keeper_wire_terminal.inc)
 (include stanzas/test_agent_transport_vocabulary.inc)
 (include stanzas/test_agent_api_query_params.inc)
@@ -2980,6 +2981,8 @@
 (include stanzas/test_mcp_post_sse_e2e.inc)
 
 (include stanzas/test_mcp_server_eio_tool_profile_capability.inc)
+
+(include stanzas/test_mcp_seat_profile.inc)
 
 (include stanzas/test_mcp_dos_screen_image.inc)
 
@@ -3496,6 +3499,11 @@
  (name test_keeper_vision_tool)
  (modules test_keeper_vision_tool)
  (libraries masc_test_deps masc.runtime masc.browser_lane))
+
+(test
+ (name test_keeper_portrait_read)
+ (modules test_keeper_portrait_read)
+ (libraries alcotest masc_test_deps masc masc_keeper_portrait masc_config_dir_resolver masc_tool_types))
 
 (test
  (name test_keeper_image_dimensions)

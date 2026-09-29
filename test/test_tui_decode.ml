@@ -8350,6 +8350,8 @@ let picker_default_runtime =
     ; ("declared_reasoning_effort", `String "high")
     ; ("is_local", `Bool false)
     ; ("is_default", `Bool false)
+    ; ("rate_limited", `Bool false)
+    ; ("rate_limit_resets_at", `Null)
     ]
 
 let runtime_resolved_json =
@@ -8375,6 +8377,8 @@ let runtime_resolved_json =
               ; ("declared_reasoning_effort", `Null)
               ; ("is_local", `Bool true)
               ; ("is_default", `Bool false)
+              ; ("rate_limited", `Bool false)
+              ; ("rate_limit_resets_at", `Null)
               ]
           ] )
     ; ( "lanes"
@@ -8400,6 +8404,28 @@ let runtime_resolved_json =
               ]
           ] )
     ]
+
+let test_runtime_rate_limit_requires_an_observation () =
+  let row value =
+    match picker_default_runtime with
+    | `Assoc fields ->
+      let fields = List.remove_assoc "rate_limited" fields in
+      `Assoc (match value with None -> fields | Some value -> ("rate_limited", value) :: fields)
+    | _ -> Alcotest.fail "runtime fixture must be an object"
+  in
+  List.iter
+    (fun value ->
+       let json =
+         runtime_resolved_json
+         |> replace_assoc_field "default_runtime" (row value)
+         |> replace_assoc_field "runtimes" (`List [ row value ])
+       in
+       match Tui_decode.decode_runtime_resolved json with
+       | Ok _ -> Alcotest.fail "unknown rate-limit observation decoded as ready"
+       | Error detail ->
+         Alcotest.(check bool) "error names the unavailable observation" true
+           (Astring.String.is_infix ~affix:"rate_limited" detail))
+    [ None; Some `Null; Some (`String "false") ]
 
 let test_decode_runtime_resolved () =
   match Tui_decode.decode_runtime_resolved runtime_resolved_json with
@@ -8663,6 +8689,8 @@ let resolved_runtime id provider model =
     ; "declared_reasoning_effort", `Null
     ; "is_local", `Bool false
     ; "is_default", `Bool false
+    ; "rate_limited", `Bool false
+    ; "rate_limit_resets_at", `Null
     ]
 
 let runtime_lane ?(declared = true) id runtime_ids =
@@ -12105,7 +12133,9 @@ let () =
           test_runtime_surface_keeps_resolved_rows_without_a_probe
       ] );
     ( "decode_runtime_resolved",
-      [ Alcotest.test_case "carries runtimes and assignments" `Quick
+      [ Alcotest.test_case "requires a rate-limit observation" `Quick
+          test_runtime_rate_limit_requires_an_observation;
+        Alcotest.test_case "carries runtimes and assignments" `Quick
           test_decode_runtime_resolved;
         Alcotest.test_case "carries runtimes, lanes, and assignments" `Quick
           test_decode_runtime_resolved_full;

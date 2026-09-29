@@ -7,3 +7,4 @@ type tool_profile =
   | Full
   | Managed_agent
   | Operator_remote
+  | Seat

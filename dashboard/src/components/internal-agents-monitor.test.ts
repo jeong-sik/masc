@@ -123,6 +123,52 @@ describe('InternalAgentsMonitor', () => {
     expect(rawApi.fetchKeeperRawTraces).not.toHaveBeenCalled()
   })
 
+  it('keeps historical Auto Judge source resolution uncertain', async () => {
+    const run = {
+      runId: 'hitl-source-resolved', runKind: 'exact_output', lane: 'hitl_auto_judge',
+      subjectId: 'approval-1', actor: 'keeper-a', startedAt: 1786200000,
+      status: 'failed', code: 'exact_source_resolved',
+      detail: 'exact flow terminalized without a judgment summary', elapsedSeconds: 1,
+    }
+    api.fetchExactLaneRuns.mockResolvedValue({ runs: [run], count: 1, total: 1, hasMore: false, generatedAt: 'now' })
+    api.fetchFusionRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
+    api.fetchVerificationRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
+    api.fetchExactLaneRun.mockResolvedValue({ ...run,
+      input: { kind: 'exact', payload: { approval_id: 'approval-1' } }, output: null,
+      payloadAvailability: { input: { state: 'available' }, output: { state: 'available' } },
+      skillEvidence: { state: 'no_keeper_skills' },
+    })
+    const { container } = render(html`<${InternalAgentsMonitor} />`)
+    const row = await screen.findByRole('button', { name: /failed · source resolved Auto Judge approval-1/i })
+    expect(row.querySelector('[data-tone="bad"]')).toBeTruthy()
+    fireEvent.click(row)
+    await screen.findByText(/승인 항목이 판정 기록 전에 해결됐습니다/)
+    expect(container.textContent).toContain('오류가 있었는지는 이 과거 기록만으로 확정할 수 없습니다')
+  })
+
+  it('shows a new source-resolution cancellation as unrecorded judgment', async () => {
+    const run = {
+      runId: 'hitl-source-resolved-new', runKind: 'exact_output', lane: 'hitl_auto_judge',
+      subjectId: 'approval-2', actor: 'keeper-a', startedAt: 1786200001,
+      status: 'cancelled', elapsedSeconds: 1,
+    }
+    api.fetchExactLaneRuns.mockResolvedValue({ runs: [run], count: 1, total: 1, hasMore: false, generatedAt: 'now' })
+    api.fetchFusionRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
+    api.fetchVerificationRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
+    api.fetchExactLaneRun.mockResolvedValue({ ...run,
+      input: { kind: 'exact', payload: { approval_id: 'approval-2' } },
+      output: { reason: 'source_resolved_without_recorded_judgment', judgment_recorded: false },
+      payloadAvailability: { input: { state: 'available' }, output: { state: 'available' } },
+      skillEvidence: { state: 'no_keeper_skills' },
+    })
+    const { container } = render(html`<${InternalAgentsMonitor} />`)
+    const row = await screen.findByRole('button', { name: /cancelled Auto Judge approval-2/i })
+    expect(row.querySelector('[data-tone="info"]')).toBeTruthy()
+    fireEvent.click(row)
+    await screen.findByText(/판정이 저장되지 않았습니다/)
+    expect(container.textContent).not.toContain('exact_source_resolved')
+  })
+
   it.each([
     ['succeeded', null],
     ['completion_persistence_failed', 'not_persisted'],

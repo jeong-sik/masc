@@ -62,11 +62,12 @@
 - A half-block mosaic cell whose colour the terminal cannot draw is drawn in the terminal's own foreground or background instead of the colour of the cell before it (#39801).
 - Send the TUI /about candle and Keeper portraits as PNG images to avoid Ghostty 1.3.1 Kitty decompression crashes while preserving transparency and image replacement (#39805).
 - Web search with Brave as the only provider answers "no results" again when a rare query has no web hits, instead of reporting that every search provider failed (#39806).
-- The Claude Code and Antigravity runtime boundaries re-raise
-  `Out_of_memory`, `Stack_overflow` and `Sys.Break` instead of turning them
-  into a typed turn error, and log the backtrace of an exception they do type
-  as `internal_unhandled_exception`, whose error carries only its text
-  (#39824).
+- The outermost `run_turn` catch-all for Claude Code and Antigravity re-raises
+  `Out_of_memory`, `Stack_overflow` and `Sys.Break` instead of reporting them as
+  `internal_unhandled_exception`. It logs the backtrace of other exceptions it
+  types, because the typed error keeps only the exception text. Inner state
+  callbacks, stdout reads and Claude Code's user-message write still turn
+  these three exceptions into errors (#39824).
 - When a Muse account runs out of quota, MASC now reads that account's usage and rests only that account until the reset time the provider gives. The next turn can use another declared account or runtime instead of retrying the spent one. MASC does not guess quota from the error text (#39810).
 - When MASC is shutting down while it reads a Codex or Muse account's usage, the Keeper's failure recovery still runs, and that account is no longer left stuck as "already reading", so a later read can run (#39832).
 - Web search now tells a search that finished with no hits apart from a provider that failed or sent a broken answer. An empty answer no longer counts as a failure, and the next provider is still tried (#39802).

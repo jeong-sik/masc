@@ -28,7 +28,7 @@ let criterion_of_yojson = function
 
     Kept as a value rather than collapsed into a failure. A request that cannot
     be parsed says nothing about the requests beside it, so it must not decide
-    their fate: [list_requests] returns these alongside the ones it did read,
+    their fate: [list_projected] returns these alongside the ones it did read,
     and the caller reports both. Nothing here is shaped to accept a superseded
     schema — an unreadable file stays unreadable, it just stops being fatal. *)
 type unreadable_request = {
@@ -151,33 +151,41 @@ let verification_directory dir =
   | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok Missing_directory
   | Eio.Cancel.Cancelled _ as error -> raise error
   | exn ->
-    Keeper_fd_pressure.note_exception ~site:"verification.list_requests.stat" exn;
+    Keeper_fd_pressure.note_exception ~site:"verification.list_projected.stat" exn;
     Error
       (Printf.sprintf
          "verification request directory unavailable at %s: %s"
          dir
          (Printexc.to_string exn))
 
-(* A listing's projections, kept per file version. File_version_cache asks a
-   writer to drop the entry for the file it wrote, so every listing made here
-   is registered, and [save_request] and [delete_request] drop the path they
-   wrote from all of them. *)
-type 'a listing = 'a File_version_cache.t
+(* A listing keeps the projections one reader made, per file version, together
+   with the projection that made them, so every value it holds came from that
+   projection. File_version_cache asks a writer to drop the entry for the file
+   it wrote, so every listing made here is registered, and [save_request] and
+   [delete_request] drop the path they wrote from all of them. *)
+type 'a listing =
+  { projections : 'a File_version_cache.t
+  ; project : verification_request -> ('a, string) result
+  }
 
 let listing_forgets : (string -> unit) list Atomic.t = Atomic.make []
 
-let listing () =
-  let cache = File_version_cache.create () in
-  let forget path = File_version_cache.forget cache path in
+let listing ~project () =
+  let projections = File_version_cache.create () in
+  let forget path = File_version_cache.forget projections path in
   let rec register () =
     let registered = Atomic.get listing_forgets in
     if not (Atomic.compare_and_set listing_forgets registered (forget :: registered))
     then register ()
   in
   register ();
-  cache
+  { projections; project }
 
 let forget_listed path = List.iter (fun forget -> forget path) (Atomic.get listing_forgets)
+
+(* A write that fails part way may already have replaced the file, so the
+   listings drop their entry for it however the write ends. *)
+let forgetting_after path write = Fun.protect ~finally:(fun () -> forget_listed path) write
 
 let save_request base_path req =
   try
@@ -186,8 +194,10 @@ let save_request base_path req =
     let dir = verifications_dir base_path in
     Fs_compat.mkdir_p dir;
     let path = request_path base_path req.id in
-    let* () = Fs_compat.save_file_atomic path (Yojson.Safe.pretty_to_string json) in
-    forget_listed path;
+    let* () =
+      forgetting_after path (fun () ->
+        Fs_compat.save_file_atomic path (Yojson.Safe.pretty_to_string json))
+    in
     Ok req.id
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -205,8 +215,7 @@ let save_request base_path req =
 let delete_request base_path req_id =
   try
     let path = request_path base_path req_id in
-    if Sys.file_exists path then Sys.remove path;
-    forget_listed path;
+    forgetting_after path (fun () -> if Sys.file_exists path then Sys.remove path);
     Ok ()
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -282,17 +291,12 @@ let scan_present_directory base_path ~load =
   | Ok Missing_directory -> Ok { readable = []; unreadable = [] }
   | Ok Present_directory -> scan_directory base_path ~load
 
-(* Public entry: read the current directory and every current-schema request.
-   Every call reads every file. *)
-let list_requests base_path =
-  scan_present_directory base_path ~load:(load_request base_path)
-
 (* A request whose projection fails is reported unreadable with the reason, as
    one the schema cannot read is; neither is kept. *)
-let list_projected listing ~project base_path =
+let list_projected listing base_path =
   scan_present_directory base_path ~load:(fun id ->
-    File_version_cache.load listing (request_path base_path id) ~decode:(fun () ->
-      Result.bind (load_request base_path id) project))
+    File_version_cache.load listing.projections (request_path base_path id)
+      ~decode:(fun () -> Result.bind (load_request base_path id) listing.project))
 
 (** High-level API *)
 

@@ -259,7 +259,7 @@ let listed_of_request (req : V.verification_request) =
          call
          (Unix.error_message error))
 
-let listed_requests : listed V.listing = V.listing ()
+let listed_requests : listed V.listing = V.listing ~project:listed_of_request ()
 
 (** Load the request scan from the supplied MASC base_path.
 
@@ -270,7 +270,7 @@ let listed_requests : listed V.listing = V.listing ()
     raised here and the whole endpoint answered 500, which named a single path
     while hiding how many records the reader had actually rejected. *)
 let load_scan ~base_path () : listed V.scan =
-  match V.list_projected listed_requests ~project:listed_of_request base_path with
+  match V.list_projected listed_requests base_path with
   | Ok scan -> scan
   | Error detail -> failwith detail
 

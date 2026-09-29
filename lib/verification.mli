@@ -58,39 +58,35 @@ val generate_id : unit -> string
 val delete_request : string -> string -> (unit, string) result
 
 val load_request : string -> string -> (verification_request, string) result
-val list_requests : string -> (request_scan, string) result
-(** Missing storage is an empty scan. A file the schema cannot read lands in
-    [unreadable] with its path and the parse detail, and every file that did
-    read lands in [readable] — one bad file no longer costs the rest. [Error]
-    is reserved for the directory itself being unenumerable, where neither
-    list is known.
-
-    Each unreadable entry still increments the [persistence_read_drops] counter
-    at read time, so the metric keeps meaning "this many records did not make
-    it into the projection". *)
 
 type 'a listing
 (** The projections one reader keeps from the request files, each for the
-    version of the file (device, inode, size, modification time) it came from.
-    {!save_request} and {!delete_request} drop the entry for the file they
-    write from every listing. *)
+    version of the file (device, inode, size, modification time) it came from,
+    together with the projection that made them. {!create_request} and
+    {!delete_request} drop the entry for the file they write from every
+    listing, however the write ends. *)
 
-val listing : unit -> 'a listing
-(** A new, empty listing. A reader makes one and keeps it. *)
+val listing : project:(verification_request -> ('a, string) result) -> unit -> 'a listing
+(** A new, empty listing whose values all come from [project]. A reader makes
+    one and keeps it. *)
 
-val list_projected :
-  'a listing ->
-  project:(verification_request -> ('a, string) result) ->
-  string ->
-  ('a scan, string) result
-(** [list_projected listing ~project base_path] walks the directory as
-    {!list_requests} does and passes each readable request through [project].
-    A projection is kept in [listing] for the version of the file it came from,
-    so a file unchanged since the last pass is stat'ed, not read or parsed.
-    That includes a file that became unreadable without changing (a
+val list_projected : 'a listing -> string -> ('a scan, string) result
+(** [list_projected listing base_path] walks the request directory and passes
+    each readable request through the listing's projection.
+
+    Missing storage is an empty scan. A file the schema cannot read, or whose
+    projection fails, lands in [unreadable] with its path and the reason, and
+    every other file lands in [readable]: one bad file does not cost the rest.
+    [Error] is reserved for the directory itself being unenumerable, where
+    neither list is known. Each unreadable entry increments the
+    [persistence_read_drops] counter when it is read.
+
+    A projection is kept in the listing for the version of the file it came
+    from, so a file unchanged since the last pass is stat'ed, not read or
+    parsed. That includes a file that became unreadable without changing (a
     permission change, a disk error): it keeps its projection until it
-    changes. A file the schema cannot read, or whose projection fails, lands
-    in [unreadable] with the reason and is read again on every pass. *)
+    changes. An unreadable file is not kept, so it is read again on every
+    pass. *)
 
 (** {1 High-level API} *)
 

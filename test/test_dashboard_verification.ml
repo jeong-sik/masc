@@ -1,8 +1,8 @@
 (** Tests for {!Dashboard_verification} — Mission detail projection of
     verification requests.
 
-    The projection reads [Verification.list_requests] against
-    the explicitly supplied base path. Tests use a throwaway temp dir so
+    The projection reads the request files through
+    [Verification.list_projected] from the explicitly supplied base path. Tests use a throwaway temp dir so
     they stay independent from whatever is sitting in the user's real
     [.masc/verifications/] directory. *)
 
@@ -862,6 +862,138 @@ let test_a_request_whose_row_cannot_be_built_is_reported_unreadable () =
     Alcotest.(check int) "the summary still counts the other" 1
       (int_field "total" (D.summary_json ~base_path ())))
 
+(* The next cases change a request's bytes while keeping or replacing the
+   version the listing keeps rows under (device, inode, size, modification
+   time). A whole-second mtime is restored exactly by [Unix.utimes]. *)
+let fixed_mtime = 1_700_000_000.0
+
+let titled_output title =
+  `Assoc
+    [ ("required_artifacts", `List [])
+    ; ("submitted_evidence", `List [])
+    ; ("task_title", `String title)
+    ]
+
+let create_titled ~base_path ~request_id title =
+  match
+    V.create_request ~base_path ~task_id:"task-listed" ~output:(titled_output title)
+      ~criteria:[ "listed" ] ~worker:"keeper-alpha" ~request_id ()
+  with
+  | Ok req -> req
+  | Error e -> Alcotest.fail (Printf.sprintf "create_request failed: %s" e)
+
+let listed_titles ~base_path =
+  match member "requests" (D.requests_json ~base_path ()) with
+  | `List rows -> List.map (string_field "task_title") rows
+  | _ -> Alcotest.fail "requests is not a list"
+
+let file_version path =
+  let st = Unix.stat path in
+  Printf.sprintf "dev=%d ino=%d size=%d mtime=%.9f" st.Unix.st_dev st.Unix.st_ino
+    st.Unix.st_size st.Unix.st_mtime
+
+let replace_once text ~from ~into =
+  let text_length = String.length text and from_length = String.length from in
+  let rec find at =
+    if at + from_length > text_length then Alcotest.fail (Printf.sprintf "%S not found" from)
+    else if String.equal (String.sub text at from_length) from then at
+    else find (at + 1)
+  in
+  let at = find 0 in
+  String.sub text 0 at ^ into ^ String.sub text (at + from_length) (text_length - at - from_length)
+
+(* Same inode, same length, the fixed mtime again: the version stays what it
+   was while the bytes change. *)
+let rewrite_in_place path ~from ~into =
+  if String.length from <> String.length into then
+    Alcotest.fail "an in-place rewrite must keep the length";
+  let next = replace_once (In_channel.with_open_bin path In_channel.input_all) ~from ~into in
+  let fd = Unix.openfile path [ Unix.O_WRONLY ] 0 in
+  Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
+    let rec write off =
+      if off < String.length next then
+        write (off + Unix.write_substring fd next off (String.length next - off))
+    in
+    write 0);
+  Unix.utimes path fixed_mtime fixed_mtime
+
+(* A writer that cannot reach this process's listings -- another masc
+   process, an operator -- replaces a request file. The new file's version is
+   what makes the next listing read it. *)
+let test_a_replaced_request_file_is_read_again () =
+  with_temp_base_path (fun base_path ->
+    let req = create_titled ~base_path ~request_id:"vrf-replaced" "first" in
+    Alcotest.(check (list string)) "the first listing" [ "first" ]
+      (listed_titles ~base_path);
+    let path = Workspace_verification_store.request_path base_path req.V.id in
+    let replacement = path ^ ".replacement" in
+    Out_channel.with_open_bin replacement (fun oc ->
+      output_string oc
+        (replace_once (In_channel.with_open_bin path In_channel.input_all)
+           ~from:"\"first\"" ~into:"\"other\""));
+    Unix.rename replacement path;
+    Alcotest.(check (list string)) "the replaced file is read again" [ "other" ]
+      (listed_titles ~base_path))
+
+(* Writing a request drops its row from every listing. The path is then put
+   back on the file the listing kept, rewritten in place with its version
+   restored, which the version alone cannot tell apart; the next listing
+   still reads it. *)
+let test_writing_a_request_drops_its_kept_row () =
+  with_temp_base_path (fun base_path ->
+    let req = create_titled ~base_path ~request_id:"vrf-written" "first" in
+    let path = Workspace_verification_store.request_path base_path req.V.id in
+    Unix.utimes path fixed_mtime fixed_mtime;
+    let kept = file_version path in
+    Alcotest.(check (list string)) "the first listing" [ "first" ]
+      (listed_titles ~base_path);
+    let held = path ^ ".held" in
+    Unix.link path held;
+    ignore (create_titled ~base_path ~request_id:"vrf-written" "second" : V.verification_request);
+    rewrite_in_place held ~from:"\"first\"" ~into:"\"FIRST\"";
+    Unix.rename held path;
+    Alcotest.(check string) "the path is back on the version the listing kept" kept
+      (file_version path);
+    Alcotest.(check (list string)) "the listing reads the file again" [ "FIRST" ]
+      (listed_titles ~base_path))
+
+(* Deleting a request drops its row the same way. *)
+let test_deleting_a_request_drops_its_kept_row () =
+  with_temp_base_path (fun base_path ->
+    let req = create_titled ~base_path ~request_id:"vrf-deleted" "first" in
+    let path = Workspace_verification_store.request_path base_path req.V.id in
+    Unix.utimes path fixed_mtime fixed_mtime;
+    let kept = file_version path in
+    Alcotest.(check (list string)) "the first listing" [ "first" ]
+      (listed_titles ~base_path);
+    let held = path ^ ".held" in
+    Unix.link path held;
+    (match V.delete_request base_path req.V.id with
+     | Ok () -> ()
+     | Error e -> Alcotest.fail e);
+    rewrite_in_place held ~from:"\"first\"" ~into:"\"FIRST\"";
+    Unix.rename held path;
+    Alcotest.(check string) "the path is back on the version the listing kept" kept
+      (file_version path);
+    Alcotest.(check (list string)) "the listing reads the file again" [ "FIRST" ]
+      (listed_titles ~base_path))
+
+(* Rows come newest first by creation time, whatever order the file names
+   sort in. *)
+let test_requests_list_newest_first () =
+  with_temp_base_path (fun base_path ->
+    let created request_id created_at =
+      let req = create_titled ~base_path ~request_id request_id in
+      Yojson.Safe.to_file
+        (Workspace_verification_store.request_path base_path request_id)
+        (V.request_to_yojson { req with V.created_at })
+    in
+    created "vrf-a" 1_700_000_001.0;
+    created "vrf-b" 1_700_000_003.0;
+    created "vrf-c" 1_700_000_002.0;
+    Alcotest.(check (list string)) "newest first" [ "vrf-b"; "vrf-c"; "vrf-a" ]
+      (request_ids (D.requests_json ~base_path ())))
+
 let test_offset_pages_the_history_without_overlap () =
   with_temp_base_path (fun base_path ->
     let made =
@@ -1045,6 +1177,14 @@ let () =
         test_offset_pages_the_history_without_overlap;
       Alcotest.test_case "an unchanged request file is not read again" `Quick
         test_an_unchanged_request_file_is_not_read_again;
+      Alcotest.test_case "a replaced request file is read again" `Quick
+        test_a_replaced_request_file_is_read_again;
+      Alcotest.test_case "writing a request drops its kept row" `Quick
+        test_writing_a_request_drops_its_kept_row;
+      Alcotest.test_case "deleting a request drops its kept row" `Quick
+        test_deleting_a_request_drops_its_kept_row;
+      Alcotest.test_case "requests list newest first" `Quick
+        test_requests_list_newest_first;
       Alcotest.test_case "a request whose row cannot be built is unreadable" `Quick
         test_a_request_whose_row_cannot_be_built_is_reported_unreadable;
     ];

@@ -580,6 +580,8 @@ let revoke_play_invite ~host ~port ~name =
   match response with
   | Ok (404, body) when Masc.Tui_decode.play_invite_absent_body body ->
       Revoke_absent
+  | Ok (status_code, body) when status_code >= 500 ->
+      Revoke_other (Post_unanswered (Masc.Tui_decode.play_revoke_http_error ~status_code ~body))
   | answer -> Revoke_other (mutation_outcome answer)
 
 let post_json ~(host : string) ~(port : int) ~(path : string) ~(body : string) : (Yojson.Safe.t, string) result =

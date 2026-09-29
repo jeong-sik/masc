@@ -12461,3 +12461,18 @@ let play_invite_absent_body body =
        | _ -> false)
   | _ -> false
   | exception Yojson.Json_error _ -> false
+
+let play_revoke_http_error ~status_code ~body =
+  let failure =
+    match Yojson.Safe.from_string body with
+    | json ->
+        let* error = required_string_field json "error" in
+        let* detail = required_nonempty_string_field json "release_error" in
+        let* released = required_bool_field json "released_controller" in
+        if status_code = 500 && error = "release_failed" && not released
+        then Ok detail else Error "not a controller release failure"
+    | exception Yojson.Json_error detail -> Error detail in
+  match failure with
+  | Ok detail -> Printf.sprintf "HTTP %d: controller release failed: %s"
+      status_code (sanitize_terminal_text detail)
+  | Error _ -> http_status_error ~status_code ~body

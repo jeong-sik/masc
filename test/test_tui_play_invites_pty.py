@@ -10,6 +10,7 @@ SOURCE_MODULES = (
     "bin/masc_tui.ml",
     "bin/masc_tui_command.ml",
     "bin/masc_tui_http.ml",
+    "lib/tui_decode.ml",
 )
 
 LINK = "https://play.example.test/play#fixture-secret"
@@ -22,7 +23,7 @@ def run(executable: str) -> None:
         (200, {"name": "guest1", "revoked": True,
                "released_controller": False, "release_error": "disk fault"}),
         (500, {"error": "release_failed", "name": "guest1",
-               "released_controller": False, "release_error": "disk fault"}),
+               "released_controller": False, "release_error": "controller still busy"}),
         (200, {"name": "guest1", "revoked": False,
                "released_controller": True}),
         (404, {"error": "no_such_invite", "message": "no invite is named guest1"}),
@@ -64,7 +65,7 @@ def run(executable: str) -> None:
         h.wait_for_http_request(process, master, output, requests,
                                 path="/api/v1/play/invites/guest1")
         command(b"/play link", b"No play link has been issued")
-        command(b"/play revoke guest1", b"retry /play revoke guest1")
+        command(b"/play revoke guest1", b"controller still busy")
         command(b"/play revoke guest1", b"controller released")
         command(b"/play invite guest1 24", LINK.encode())
         command(b"/play revoke guest1", b"is absent; no controller held")

@@ -3772,3 +3772,6 @@ val decode_play_invite_revoked : Yojson.Safe.t -> (play_invite_revoked, string) 
 val play_invite_absent_body : string -> bool
 (** True only for the revoke route's [no_such_invite] JSON error code.
     A malformed body or another refusal cannot prove the invite absent. *)
+
+val play_revoke_http_error : status_code:int -> body:string -> string
+(** Preserve the release failure detail from the revoke endpoint's 500 reply. *)

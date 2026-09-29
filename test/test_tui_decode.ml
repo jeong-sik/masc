@@ -12024,8 +12024,24 @@ let test_tool_approval_mode_unknown_word_fails () =
          in
          contains "alpha" && contains "manual")
 
+let test_play_revoke_failure_detail () =
+  Alcotest.(check string) "500 preserves actual controller failure"
+    "HTTP 500: controller release failed: controller busy"
+    (Tui_decode.play_revoke_http_error ~status_code:500
+      ~body:{|{"error":"release_failed","name":"guest1","released_controller":false,"release_error":"controller busy"}|});
+  Alcotest.(check string) "other failures retain their own reason" "HTTP 503: keepers_unreadable"
+    (Tui_decode.play_revoke_http_error ~status_code:503 ~body:{|{"error":"keepers_unreadable"}|});
+  List.iter (fun body ->
+    Alcotest.(check string) "malformed release details use ordinary HTTP error projection"
+      (Tui_decode.http_status_error ~status_code:500 ~body)
+      (Tui_decode.play_revoke_http_error ~status_code:500 ~body))
+    [{|{"error":"release_failed","released_controller":false,"release_error":42}|};
+     {|{"error":"release_failed","released_controller":true,"release_error":"busy"}|};
+     {|{"error":"release_failed","released_controller":false}|}; "not JSON"; "[]"; "null"; "42"]
+
 let () =
   Alcotest.run "tui_decode" [
+    ("play revoke failure", [Alcotest.test_case "preserves controller failure detail" `Quick test_play_revoke_failure_detail]);
     ( "decode_oauth_client_saved",
       [ Alcotest.test_case "reads scopes and refuses their absence" `Quick
           test_decode_oauth_client_saved_reads_scopes_and_refuses_their_absence

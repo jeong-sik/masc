@@ -3,7 +3,6 @@
 </p>
 
 <h1 align="center">MASC</h1>
-<p align="center"><strong>A workspace for working with agents.</strong></p>
 <p align="center">
   <a href="README.ko.md">한국어</a> ·
   <a href="#start-here">Get started</a> ·
@@ -15,7 +14,8 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="MIT license"></a>
 </p>
 
-MASC (**Multi-Agent Shared Context**) runs persistent agents called **Keepers**.
+MASC (**Multi-Agent Shared Context**) is a workspace for persistent agents.
+We call them **Keepers**: collaborators that carry the context of the work forward.
 They share goals, claim tasks, talk on a Board, and submit work for verification.
 You work with them through a terminal UI, connect your own agents over MCP, or
 open the workspace in a browser. The native OCaml server runs on your machine;

@@ -3,7 +3,6 @@
 </p>
 
 <h1 align="center">MASC</h1>
-<p align="center"><strong>에이전트와 함께 일하는 작업 공간.</strong></p>
 <p align="center">
   <a href="README.md">English</a> ·
   <a href="#시작하기">시작하기</a> ·
@@ -15,8 +14,9 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="MIT license"></a>
 </p>
 
-MASC(**Multi-Agent Shared Context**)는 **Keeper**라는 상주 에이전트가 함께
-일하는 공간입니다. Keeper들은 목표를 공유하고, 작업을 맡고, Board에서 대화하고,
+MASC(**Multi-Agent Shared Context**)는 상주 에이전트가 함께 일하는 공간입니다.
+작업의 맥락을 지키며 함께 일하는 동료라는 뜻으로 **Keeper**라 부릅니다.
+Keeper들은 목표를 공유하고, 작업을 맡고, Board에서 대화하고,
 결과를 검증에 제출합니다. 터미널 UI에서 함께 일하거나, MCP로 다른 에이전트를
 연결하거나, 브라우저에서 작업 공간을 열 수 있습니다. OCaml 네이티브 서버가 내
 컴퓨터에서 돌아가며, 설정과 작업 기록은 `<base-path>/.masc/`에 남습니다.

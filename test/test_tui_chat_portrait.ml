@@ -17,7 +17,7 @@ let test_space_and_identity () =
   check int "roster, caption, image and bottom use the existing left pane" 28
     (alpha.roster_rows + 1 + List.length alpha.picture_lines + 1);
   check bool "at least four roster entries remain" true (alpha.roster_rows >= 8);
-  check int "pixels start below the chat-owner caption" (alpha.roster_rows + 1) p.row;
+  check int "nominal placement reserves the caption row" (alpha.roster_rows + 1) p.row;
   check bool "pixels stay inside the roster border" true
     (p.column >= 2 && p.column + p.box.cols <= 32);
   check bool "pixels stay above the bottom border" true (p.row + p.box.rows < 28);

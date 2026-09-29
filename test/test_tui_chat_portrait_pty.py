@@ -175,7 +175,8 @@ def pixels_follow_conversation(binary: str) -> None:
         assert pictures, "chat sent no keeper portrait"
         row, column, alpha = pictures[-1]
         rows = screen(output)
-        assert row == caption_row(rows, b"alpha") + 1, "pixels are not below their caption"
+        caption = caption_row(rows, b"alpha")
+        assert row == caption + 1, f"pixels at row {row} are not below caption row {caption}"
         assert column == 10, "16-cell portrait is not centered in the 30-cell roster interior"
         assert row + 7 < h.screen_row_of(rows, b"Context"), "portrait crossed the full-width status row"
         assert not mosaic_rows(rows), "Kitty portrait also drew a mosaic"

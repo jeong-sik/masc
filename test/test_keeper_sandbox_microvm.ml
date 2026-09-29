@@ -2352,6 +2352,37 @@ let test_the_shim_sidecar_decides_the_boot () =
   | Ok _ -> Alcotest.fail "a sidecar without a digest passed"
 ;;
 
+(* Every guest boot verifies the shim, and the binary is several megabytes.
+   Its digest is taken again only when the binary changed: the second
+   verification below succeeds although the binary can no longer be read,
+   so it did not read it. A replaced binary is hashed again and refused. *)
+let test_an_unchanged_shim_is_hashed_once () =
+  let dir = temp_dir "masc-shim-digest" in
+  let binary = Filename.concat dir M.shim_binary_name in
+  let sidecar = Filename.concat dir M.shim_sidecar_name in
+  let write path content = ignore (Fs_compat.save_file_atomic path content) in
+  let contents = "#!/bin/sh\necho shim\n" in
+  write binary contents;
+  write sidecar (Digestif.SHA256.(to_hex (digest_string contents)) ^ "  masc-exec-shim\n");
+  let verified () =
+    match M.verify_shim_sidecar ~dir with
+    | Ok (M.Shim_verified _) -> Ok ()
+    | Ok M.Shim_unverified -> Error "read as a hand-built shim"
+    | Error e -> Error e
+  in
+  Alcotest.(check (result unit string)) "the first boot hashes it" (Ok ()) (verified ());
+  Unix.chmod binary 0o000;
+  let unchanged = verified () in
+  Unix.chmod binary 0o755;
+  Alcotest.(check (result unit string)) "an unchanged binary is not read again" (Ok ()) unchanged;
+  write binary "#!/bin/sh\necho another shim\n";
+  match verified () with
+  | Error e ->
+    Alcotest.(check bool) "a replaced binary is hashed again" true
+      (String_util.contains_substring e "microvm_shim_hash_mismatch")
+  | Ok () -> Alcotest.fail "a replaced binary kept the digest of the one it replaced"
+;;
+
 let test_shim_travels_read_only_with_its_config () =
   Alcotest.(check bool)
     "shim dir is a read-only mount"
@@ -3186,6 +3217,8 @@ let () =
             test_shim_travels_read_only_with_its_config
         ; Alcotest.test_case "the shim sidecar decides the boot" `Quick
             test_the_shim_sidecar_decides_the_boot
+        ; Alcotest.test_case "an unchanged shim is hashed once" `Quick
+            test_an_unchanged_shim_is_hashed_once
         ; Alcotest.test_case "the box the TOML names is the box the shim is asked for" `Quick
             test_the_box_the_toml_names_is_the_box_the_shim_is_asked_for
         ; Alcotest.test_case "keeper work root is created as root with a mode" `Quick

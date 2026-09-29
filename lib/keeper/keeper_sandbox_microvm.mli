@@ -373,10 +373,13 @@ type shim_provenance =
 
 val verify_shim_sidecar : dir:string -> (shim_provenance, string) result
 (** Reads [dir/masc-exec-shim.sha256] if present and compares it with the
-    digest of [dir/masc-exec-shim]. [Error] names the case:
-    [microvm_shim_hash_mismatch] (both digests in the text),
-    [microvm_shim_sidecar_invalid], [microvm_shim_sidecar_unreadable],
-    [microvm_shim_unreadable]. Never raises. *)
+    digest of [dir/masc-exec-shim]. The digest is taken once per version of
+    the binary (its device, inode, size and modification time), so a later
+    call reads only the sidecar until an install replaces or rewrites the
+    binary. [Error] names the case: [microvm_shim_hash_mismatch] (both
+    digests in the text), [microvm_shim_sidecar_invalid],
+    [microvm_shim_sidecar_unreadable], [microvm_shim_unreadable]. Never
+    raises. *)
 val shim_guest_path : string
 val shim_config_guest_path : string
 val shim_mount_args : host_dir:string -> string list

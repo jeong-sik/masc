@@ -163,9 +163,14 @@ end
     {!Runtime_provider_usage_window.Gates_model_calls} count. *)
 type account_refusal_read =
   | Spent_until of float
-      (** A gating window's used count reached its limit; the latest stated
-          reset among the spent gating windows, Unix epoch seconds. *)
+      (** The spent gating windows all belong to one limit; the latest
+          stated reset among them, Unix epoch seconds. *)
   | Spent_without_reset  (** A spent gating window states no reset. *)
+  | Spent_in_several_limits of string option list
+      (** Spent gating windows belong to more than one limit (their limit
+          ids, sorted; [None] for a window that names none). A refusal does
+          not name the limit that refused it, so no reset is the rest: the
+          scope keeps the refusal's observation, as [Spent_without_reset]. *)
   | No_window_spent
       (** Every gating window has headroom, and the read rests nothing.
           After a 403 the refusal is not a spent quota (a blocked client, a

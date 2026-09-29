@@ -47,6 +47,7 @@
 - The task-completion judge is told that a producer checkout's branch and HEAD are that checkout's state, not GitHub main. It decides "in main / not in main" from the current main content it opens on GitHub, not from a compare result (compare shows commit ancestry only, which a squash merge or a later revert breaks), and writes "unconfirmed: no main comparison" with the checkout's branch and HEAD when the repository is private or the content cannot be read (#39875).
 - Chat loading warnings point to `/errors` for full scrollable details; switching Keepers clears the previous conversation's loading errors before the new read completes. (#39899)
 - New setups use Claude Sonnet 5.5 instead of Claude Sonnet 5: the Claude Code seed bindings and the quick-setup default model moved, and the OpenRouter Sonnet 5 seed binding was removed. An existing `runtime.toml` keeps its own bindings (#39812).
+- `masc setup` folds the routine per-file and per-Skill lines of its init step into the closing count line, and marks success lines with a green check and its first line with a candle on a terminal (not with `NO_COLOR`, `TERM=dumb` or piped output). `masc init` still prints every line (#39897).
 
 ### Fixed
 

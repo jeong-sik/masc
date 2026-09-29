@@ -106,7 +106,7 @@ let test_placement_bytes_leave_the_cursor_where_it_was () =
   check bool "moves to the 1-based corner" true (contains ~sub:"\027[5;8H" bytes);
   check bool "under the mascot's id" true
     (contains ~sub:(Printf.sprintf "i=%d," mascot_id) bytes);
-  check bool "straight-alpha RGBA" true (contains ~sub:"f=32," bytes);
+  check bool "RGBA PNG" true (contains ~sub:"f=100," bytes);
   check bool "as many rows as the box" true
     (contains ~sub:(Printf.sprintf "r=%d," p.View.box.View.rows) bytes)
 

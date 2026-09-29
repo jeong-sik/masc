@@ -293,12 +293,63 @@ let muse_catalog ~binary template =
   let* models=client_models ~catalog:false json in
   Ok ("muse_" ^ source,models)
 
+let bound_model_names (config : Runtime_schema.config) template id choice =
+  let selected_home = match choice with
+    | Runtime_setup_spec.Codex ->
+      Runtime_codex_app_server.effective_account_home
+        (match value "account_home" template with `String home -> Some home | _ -> None)
+    | Claude_code ->
+      Runtime_claude_code.effective_account_home
+        (match value "account_home" template with `String home -> Some home | _ -> None)
+    | Muse -> (match value "account_home" template with `String home -> Some home | _ -> None)
+    | Antigravity | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages -> None in
+  let selected_credential = match choice, value "credential_file" template with
+    | Runtime_setup_spec.Antigravity, `String path -> Some path
+    | _ -> None in
+  let same_account (provider : Runtime_schema.provider) =
+    provider.enabled
+    && (match choice_of_api_format provider.api_format with
+        | Ok candidate -> candidate = choice | Error _ -> false)
+    && (String.equal provider.id id
+        || (match choice, selected_home, provider.account_home with
+            | (Runtime_setup_spec.Codex | Claude_code | Muse), Some selected, Some home ->
+              String.equal selected home
+            | _ -> false)
+        || (match selected_credential, provider.credentials with
+            | Some selected, Some (Runtime_schema.File path) -> String.equal selected path
+            | _ -> false)) in
+  List.filter_map (fun (binding : Runtime_schema.binding) ->
+    if binding.enabled
+       && List.exists (fun (provider : Runtime_schema.provider) ->
+            String.equal provider.id binding.provider_id && same_account provider)
+            config.providers
+    then Option.map (fun (model : Runtime_schema.model_spec) -> model.api_name)
+           (List.find_opt (fun (model : Runtime_schema.model_spec) ->
+             String.equal model.id binding.model_id) config.models)
+    else None) config.bindings
+
+let mark_bound_models config template id choice = function
+  | `Assoc fields as json ->
+    (match List.assoc_opt "models" fields with
+     | Some (`List rows) ->
+       let bound = bound_model_names config template id choice in
+       let rows = List.map (function
+         | `Assoc row ->
+           let is_bound = match value "id" row with
+             | `String name -> List.mem name bound | _ -> false in
+           `Assoc (("bound", `Bool is_bound) :: List.remove_assoc "bound" row)
+         | row -> row) rows in
+       `Assoc (List.map (fun (key, value) ->
+         if String.equal key "models" then key, `List rows else key, value) fields)
+     | _ -> json)
+  | json -> json
+
 let discover ~binary ~sw:_ ~net ~base_path request =
   Eio.Switch.run (fun sw ->
     let* config=config ~base_path in
     let pending=ref [] in
     let* template,id,choice=source_template ~sw ~pending ~workspace:base_path config request in
-    match choice with
+    let* json = match choice with
     | Runtime_setup_spec.Codex ->
       let* command=text (value "command" template) in
       let* json=native_json ~binary (["runtime-codex-models";"--cli-path";command] @ selected_home_args template) in
@@ -317,7 +368,8 @@ let discover ~binary ~sw:_ ~net ~base_path request =
     | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages ->
       let* connection=Runtime_model_discovery.connection_of_json (`Assoc (("provider_id",`String id)::template))
         |> Result.map_error (fun _ -> Unsupported_connection) in
-      Runtime_model_discovery.discover ~sw ~net connection |> Result.map_error (fun error -> Discovery_failed error))
+      Runtime_model_discovery.discover ~sw ~net connection |> Result.map_error (fun error -> Discovery_failed error) in
+    Ok (mark_bound_models config template id choice json))
 let context ~binary ~net ~base_path request =
   Eio.Switch.run (fun sw ->
     let* request=fields ["source";"model";"load"] ["source";"model";"load"] request in

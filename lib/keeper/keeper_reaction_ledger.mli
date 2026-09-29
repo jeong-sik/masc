@@ -199,17 +199,6 @@ val event_queue_reaction_evidence_batch_result :
     Keeper's cache and returns {!Evidence_read_error}; callback exceptions
     also discard the partially updated cache and propagate unchanged. *)
 
-val event_queue_turn_started_seen_for_source_result :
-  base_path:string ->
-  keeper_name:string ->
-  post_id:string ->
-  stimulus_kind:stimulus_kind ->
-  (bool, event_queue_reaction_evidence_error) result
-(** Return [true] only when a current-schema, semantically valid turn-start
-    reaction exists for the exact durable source identity. Invalid matching
-    rows do not become positive evidence; read failures remain explicit so
-    callers can conservatively replay. *)
-
 val event_queue_delivery_seen_for_source_result :
   base_path:string ->
   keeper_name:string ->

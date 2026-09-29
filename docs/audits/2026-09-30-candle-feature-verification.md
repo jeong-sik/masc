@@ -142,3 +142,33 @@ source defects under repair; the third requires preserving strict structural
 ledger validation while separating historical values from new-payment math.
 PR#40064 implements the typed provider-refusal classification and is awaiting
 native transport/worker verification. Model calibration remains separate.
+
+## Payout review composition at 20ad271fe413723c446a16218a338f0b3382303c
+
+This source checkpoint includes main `97edaff1f01b2d4a51bce54f480e538bb63eee58`,
+remote row annotation fix `ffaaf68f5a`, currency fixtures `462e91f7cf`,
+and account navigation fixture #40065 `359302dcfc`. The former failures remain
+retained above; parser success is not a replacement native result.
+
+- #40068 `379a90db85`: preserve Snapshot/PayoutOwed during absent or busy
+  appraiser publication. Actual registry transaction fixtures expand the Goal
+  path to exercise deferred settlement. Configuration and ledger recovery
+  errors keep their existing refusal/disabled behavior.
+- #40064 `48b5bae848`: park permanent provider refusals while keeping temporary
+  transport and binding-rest failures retryable. A deferred scan preserves its
+  actual Event reason, including an Event promoted from an unattributed payout;
+  it does not set pending or broadcast, so recovery needs a later wake.
+- #40066 `c4c7a3a1a6`: read stored Paid amounts without rerunning today's split
+  or deduction. Structural receipt invariants remain strict; all new ledger
+  appends validate current arithmetic. Literal receipt and malformed-row
+  fixtures cover replay, recovery and rejection of incompatible new issuance.
+
+Independent source reviews and root inspection were completed. The latest
+composition parses21 changed OCaml files and4 Python files relative toe84;
+69 changelog fragments and diff checks pass. A57-suite native run is the next
+verification step. The earlier provider-refusal run36609262218 tests966089bc60,
+which predates the deferred-event fix and cannot prove that new behavior.
+
+The actual-model scope survey remains a separate400-attempt experiment. It
+does not supply human labels, adopt acceptance thresholds or authorize payout
+deployment. No live state was changed by this composition.

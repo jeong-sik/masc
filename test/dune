@@ -2537,6 +2537,7 @@
 
 (include stanzas/test_candle_event.inc)
 (include stanzas/test_candle_time.inc)
+(include stanzas/test_candle_ledger.inc)
 
 (include stanzas/test_audit_keeper_fleet_readiness.inc)
 

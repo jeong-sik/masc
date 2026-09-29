@@ -1,0 +1,67 @@
+(** The Candle ledger file, [<base path>/.masc/candle-ledger.jsonl]
+    (RFC-goal-candle-ledger 3.1).
+
+    Rows are only ever appended. Every read and every append goes through one
+    family of [Fs_compat] private JSONL functions (the cursor family), because
+    that family's lock only excludes writers that use the same family. Appends
+    fsync and roll back on failure.
+
+    A row that does not read fails the whole read. Paying and buying refuse to
+    run on a ledger nobody can read, so a bad row has to stop them, not be
+    skipped. *)
+
+val path : base_path:string -> string
+
+(** The ledger as one read saw it, and the position that read ended at. *)
+type view
+
+val events : view -> Candle_event.t list
+(** In file order. *)
+
+type read_error =
+  | Store_failed of
+      { path : string
+      ; detail : string
+      }
+  | Row_rejected of
+      { path : string
+      ; line_number : int  (** From 1. *)
+      ; detail : string
+      }
+
+val read_error_to_string : read_error -> string
+
+val read : base_path:string -> (view, read_error) result
+(** A missing file is an empty ledger. A file that ends inside a row is a
+    {!Store_failed}: {!recover_at_start} is the only place that cuts it. *)
+
+val recover_at_start : base_path:string -> (view, read_error) result
+(** {!read} for server start only. A tail that ends inside a row, left by an
+    append that never finished, is cut back to the last full row and the cut is
+    fsynced, so appends can follow. *)
+
+type 'error update_error =
+  | Read_failed of read_error
+  | Refused of 'error  (** The caller's [decide] returned [Error]. Nothing was written. *)
+  | Event_unwritable of string
+      (** An event would not read back. Nothing was written. *)
+  | Write_failed of
+      { path : string
+      ; detail : string
+      }
+
+val update_error_to_string : ('error -> string) -> 'error update_error -> string
+
+val update :
+  base_path:string
+  -> (view -> (Candle_event.t list * 'result, 'error) result)
+  -> ('result, 'error update_error) result
+(** Reads the ledger, lets [decide] look at it and name the events to append,
+    and appends them if the file is still as it was read. If another writer
+    appended first, nothing is written and [update] reads again and asks
+    [decide] again, so [decide] must give an answer that depends only on the
+    view it is given. There is no count or time limit: a failed round means
+    another writer finished one.
+
+    An empty event list writes nothing. Any other failure, an unreadable file
+    or a write that failed, is returned and not retried. *)

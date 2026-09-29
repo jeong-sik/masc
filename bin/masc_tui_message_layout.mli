@@ -386,9 +386,10 @@ val drop_last_utf8_word : string -> string
     presses walk two words. Empty or invalid text is preserved. *)
 
 val begin_frame : unit -> unit
-(** Marks the start of a frame. Laying out a text reuses what laying out the
-    same text gave in this frame or the one before; a text that no frame laid
-    out during two frames is forgotten. The TUI calls it once per frame. *)
+(** Marks the start of a frame. Laying out a non-ASCII text reuses the pieces
+    this frame or the previous one got for the same text; a text the previous
+    frame did not lay out is split again. The TUI calls it once per frame, a
+    frame that draws a picture included. *)
 
 val display_width : string -> int
 (** Approximate the display cells of a terminal that draws extended grapheme

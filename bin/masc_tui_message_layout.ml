@@ -173,9 +173,12 @@ type row = {
   action : row_action;
 }
 
+(* A byte below 0x80 is a whole UTF-8 scalar. *)
+let ascii_byte byte = Char.code byte < 0x80
+
 let utf8_scalar_byte_length first =
   let byte = Char.code first in
-  if byte < 0x80 then Some 1
+  if ascii_byte first then Some 1
   else if byte >= 0xC2 && byte <= 0xDF then Some 2
   else if byte >= 0xE0 && byte <= 0xEF then Some 3
   else if byte >= 0xF0 && byte <= 0xF4 then Some 4
@@ -512,47 +515,53 @@ let segment_display_pieces text =
   in
   loop 0 []
 
-(* The pieces of each text laid out in this frame or the one before it.
-   Most of a frame is text the previous frame drew, and splitting non-ASCII
-   text into grapheme clusters is most of what laying it out costs: on
-   2026-09-30 a TUI with no input spent 14% of its busy samples in the
+(* The pieces of each non-ASCII text laid out in this frame or the one before
+   it. Most of a frame is text the previous frame drew, and splitting
+   non-ASCII text into grapheme clusters is most of what laying it out costs:
+   on 2026-09-30 a TUI with no input spent 14% of its busy samples in the
    segmenter while it redrew every 150 ms for a running turn. Pieces depend on
    the text alone, so a text drawn again takes the pieces it had last time.
-   [begin_frame] runs once per frame; a text that no frame laid out during two
-   frames is dropped. The mutex covers a caller on a system thread; nothing
-   inside it suspends. *)
+
+   An ASCII text, escapes included, is split again each time. Its printable
+   runs skip the segmenter, and keeping it costs more than splitting it: on
+   2026-09-30 [take_cells] of a 9-byte row took 0.10 us split and 0.14 us
+   kept. The pieces of a kept text stay until [begin_frame] has run twice
+   without a layout of it; 1,000 texts of 40 Hangul syllables kept 1.6 MB.
+   Layout runs on the UI fiber, like [row_counts_memo] below, so the tables
+   take no lock. *)
 (* A sizing hint for one frame's texts, not a bound. *)
 let texts_per_frame = 1024
-let pieces_mutex = Mutex.create ()
 let pieces_this_frame : (string, display_piece list) Hashtbl.t ref =
   ref (Hashtbl.create texts_per_frame)
 let pieces_last_frame : (string, display_piece list) Hashtbl.t ref =
   ref (Hashtbl.create texts_per_frame)
 
 let begin_frame () =
-  Mutex.protect pieces_mutex (fun () ->
-      pieces_last_frame := !pieces_this_frame;
-      pieces_this_frame := Hashtbl.create texts_per_frame)
+  let finished = !pieces_this_frame in
+  pieces_this_frame := !pieces_last_frame;
+  Hashtbl.clear !pieces_this_frame;
+  pieces_last_frame := finished
+
+(* Top level, so the scan allocates no closure on each layout. *)
+let rec ascii_from text offset =
+  offset >= String.length text
+  || (ascii_byte text.[offset] && ascii_from text (offset + 1))
+
+let ascii_text text = ascii_from text 0
 
 let display_pieces text =
-  let known =
-    Mutex.protect pieces_mutex (fun () ->
-        match Hashtbl.find_opt !pieces_this_frame text with
-        | Some pieces -> Some pieces
-        | None -> (
-            match Hashtbl.find_opt !pieces_last_frame text with
-            | Some pieces ->
-                Hashtbl.replace !pieces_this_frame text pieces;
-                Some pieces
-            | None -> None))
-  in
-  match known with
-  | Some pieces -> pieces
-  | None ->
-      let pieces = segment_display_pieces text in
-      Mutex.protect pieces_mutex (fun () ->
-          Hashtbl.replace !pieces_this_frame text pieces);
-      pieces
+  if ascii_text text then segment_display_pieces text
+  else
+    match Hashtbl.find_opt !pieces_this_frame text with
+    | Some pieces -> pieces
+    | None ->
+        let pieces =
+          match Hashtbl.find_opt !pieces_last_frame text with
+          | Some pieces -> pieces
+          | None -> segment_display_pieces text
+        in
+        Hashtbl.replace !pieces_this_frame text pieces;
+        pieces
 
 let pieces_width pieces =
   List.fold_left (fun width piece -> width + piece.cell_width) 0 pieces

@@ -156,20 +156,30 @@ let test_grapheme_count_counts_clusters_not_scalars () =
 let test_column_layout_observations () =
   let ascii = String.init 120 (fun i -> Char.chr (Char.code 'a' + i mod 26)) in
   let iterations = 2_000 in
+  (* A non-ASCII text laid out again within a frame takes the pieces the frame
+     kept, so each operation is observed twice: split afresh, with two frames
+     begun before every call, and laid out before in the same frame. *)
   let observe case operation text apply =
-    ignore (Sys.opaque_identity (apply (Sys.opaque_identity text)));
-    let allocated_before = Gc.allocated_bytes () in
-    let started = Sys.time () in
-    for _ = 1 to iterations do
-      ignore (Sys.opaque_identity (apply (Sys.opaque_identity text)))
-    done;
-    let elapsed = Sys.time () -. started in
-    let allocated = Gc.allocated_bytes () -. allocated_before in
-    Printf.printf
-      "layout observation case=%s operation=%s iterations=%d input_bytes=%d cpu_us/op=%.3f allocated_bytes/op=%.1f (includes harness)\n%!"
-      case operation iterations (String.length text)
-      (elapsed *. 1_000_000. /. float_of_int iterations)
-      (allocated /. float_of_int iterations)
+    let observe_as layout before_each =
+      ignore (Sys.opaque_identity (apply (Sys.opaque_identity text)));
+      let allocated_before = Gc.allocated_bytes () in
+      let started = Sys.time () in
+      for _ = 1 to iterations do
+        before_each ();
+        ignore (Sys.opaque_identity (apply (Sys.opaque_identity text)))
+      done;
+      let elapsed = Sys.time () -. started in
+      let allocated = Gc.allocated_bytes () -. allocated_before in
+      Printf.printf
+        "layout observation case=%s operation=%s layout=%s iterations=%d input_bytes=%d cpu_us/op=%.3f allocated_bytes/op=%.1f (includes harness)\n%!"
+        case operation layout iterations (String.length text)
+        (elapsed *. 1_000_000. /. float_of_int iterations)
+        (allocated /. float_of_int iterations)
+    in
+    observe_as "split" (fun () ->
+        Layout.begin_frame ();
+        Layout.begin_frame ());
+    observe_as "laid_out_before" ignore
   in
   List.iter
     (fun (case, text) ->
@@ -2928,12 +2938,66 @@ let test_a_text_laid_out_again_keeps_its_layout () =
   Layout.begin_frame ();
   lay_out_all "two frames without them"
 
+(* Where a layout's pieces came from shows in what it allocates: splitting a
+   text allocates its pieces, and taking them from a frame's table does not.
+   On 2026-09-30 splitting this text allocated 93,848 bytes and taking its
+   pieces 240. *)
+let test_a_text_is_split_again_after_a_frame_without_it () =
+  let text = String.concat "" (List.init 400 (fun _ -> "\xed\x95\x9c")) in
+  let allocated () =
+    let before = Gc.allocated_bytes () in
+    ignore (Sys.opaque_identity (Layout.display_width (Sys.opaque_identity text)));
+    Gc.allocated_bytes () -. before
+  in
+  Layout.begin_frame ();
+  Layout.begin_frame ();
+  let split = allocated () in
+  let taken bytes = bytes *. 10. < split in
+  let split_again bytes = bytes *. 2. > split in
+  Layout.begin_frame ();
+  let next_frame = allocated () in
+  Layout.begin_frame ();
+  let frame_after = allocated () in
+  Layout.begin_frame ();
+  Layout.begin_frame ();
+  let after_a_frame_without_it = allocated () in
+  check bool
+    (Printf.sprintf "the next frame takes the pieces (%.0f of %.0f bytes)" next_frame split)
+    true (taken next_frame);
+  check bool
+    (Printf.sprintf "so does the frame after it (%.0f of %.0f bytes)" frame_after split)
+    true (taken frame_after);
+  check bool
+    (Printf.sprintf "a frame without the text lets it go (%.0f of %.0f bytes)"
+       after_a_frame_without_it split)
+    true (split_again after_a_frame_without_it)
+
+(* An ASCII text is split each time and never kept, escapes included. *)
+let test_an_ascii_text_is_not_kept () =
+  let text = "\027[31m" ^ String.make 400 'a' ^ "\027[0m" in
+  let allocated () =
+    let before = Gc.allocated_bytes () in
+    ignore (Sys.opaque_identity (Layout.take_cells (Sys.opaque_identity text) 200));
+    Gc.allocated_bytes () -. before
+  in
+  Layout.begin_frame ();
+  Layout.begin_frame ();
+  let first = allocated () in
+  let again = allocated () in
+  check bool
+    (Printf.sprintf "laying it out again allocates the same (%.0f then %.0f bytes)" first again)
+    true (Float.equal first again)
+
 let () =
   run "tui_message_layout"
     [
       ( "layout across frames"
       , [ test_case "a text laid out again keeps its layout" `Quick
-            test_a_text_laid_out_again_keeps_its_layout ] );
+            test_a_text_laid_out_again_keeps_its_layout
+        ; test_case "a text is split again after a frame without it" `Quick
+            test_a_text_is_split_again_after_a_frame_without_it
+        ; test_case "an ASCII text is not kept" `Quick test_an_ascii_text_is_not_kept
+        ] );
       ( "clause packing"
       , [ test_case "a row ends where a clause ends" `Quick
             test_a_row_ends_where_a_clause_ends

@@ -9,6 +9,7 @@ import test_tui_keyboard_input as h
 SOURCE_MODULES = (
     "bin/masc_tui.ml",
     "bin/masc_tui_loader.ml",
+    "bin/masc_tui_keys.ml",
     "bin/masc_tui_render.ml",
 )
 
@@ -19,7 +20,7 @@ def run(executable: str) -> None:
     fixtures = h.overview_event_http_fixtures()
     post = h.board_selection_post("vocab", "Failure vocabulary", "List body")
     hide_list_post = threading.Event()
-    fixtures["/api/v1/board?sort_by=hot"] = lambda: (
+    fixtures["/api/v1/board"] = lambda: (
         200,
         {"posts": [] if hide_list_post.is_set() else [post]},
     )
@@ -41,7 +42,7 @@ def run(executable: str) -> None:
                 raise AssertionError(f"{layout} did not use the fallback page: {frame!r}")
             if b"Failure vocabulary" in frame:
                 raise AssertionError(f"{layout} retained the removed list post: {frame!r}")
-            if b"r:retry Esc:back Tab:next" not in frame:
+            if b"Left / Esc:back r:refresh Tab:next" not in frame:
                 raise AssertionError(f"{layout} lost the fallback controls: {frame!r}")
 
     def interact(process, fd, _slave, output, _base_path):
@@ -62,6 +63,10 @@ def run(executable: str) -> None:
             start=h.end_of_needle(output, b"Failure vocabulary", before_board),
             timeout=5,
         )
+        list_frame = h.unwrapped(h.screen_text(bytes(output)))
+        for hint in (b"Right / Enter:read", b"Left / Esc:back", b"v / V:up / down"):
+            if hint not in list_frame:
+                raise AssertionError(f"Board list lost {hint!r}: {list_frame!r}")
         h.send_and_wait(process, fd, output, b"\r", CAUSE)
         check_frame(output, "Board read with list post")
 

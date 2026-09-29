@@ -90,100 +90,117 @@ let valid_search_result_url url =
     | Some "http" | Some "https" -> true
     | _ -> false
 
-let parse_json_search_results ~results_path ~title_field ~snippet_field payload =
-  let str_of item key =
-    Safe_ops.protect ~default:None (fun () ->
-      Option.bind (Json_util.get_string item key) String_util.trim_nonempty)
+let ( let* ) = Result.bind
+
+(* A provider's empty answer is data. Missing arrays and malformed responses
+   must stay failures; otherwise a broken endpoint becomes a cached no-hit
+   answer. Error messages deliberately omit the response body. *)
+let parse_result_array ~path payload =
+  let rec field_at_path json = function
+    | [] ->
+        (match json with
+         | `List items -> Ok items
+         | _ -> Error (Parse "provider result field is not an array"))
+    | key :: rest ->
+        (match Json_util.assoc_member_opt key json with
+         | Some value -> field_at_path value rest
+         | None -> Error (Parse "provider response is missing its result array"))
   in
-  Safe_ops.protect ~default:[] (fun () ->
-    let root = Yojson.Safe.from_string payload in
-    let items =
-      Safe_ops.protect ~default:[] (fun () ->
-        match results_path root with
-        | `List xs -> xs
-        | _ -> [])
-    in
-    items
-    |> List.filter_map (fun item ->
-           match str_of item title_field, str_of item "url" with
-           | Some title, Some url when valid_search_result_url url ->
-               let snippet = str_of item snippet_field |> Option.value ~default:"" in
-               Some (title, url, snippet)
-           | _ -> None))
+  match Yojson.Safe.from_string payload with
+  | json -> field_at_path json path
+  | exception Yojson.Json_error _ -> Error (Parse "provider returned invalid JSON")
+
+let usable_results original parsed =
+  match original, parsed with
+  | [], [] -> Ok []
+  | _ :: _, [] -> Error (Parse "provider returned no usable result entries")
+  | _, _ :: _ -> Ok parsed
+
+let string_field item key =
+  match Json_util.assoc_member_opt key item with
+  | Some (`String value) -> String_util.trim_nonempty value
+  | _ -> None
+
+let parse_json_search_results ~results_path ~title_field ~snippet_field payload =
+  let* items = parse_result_array ~path:results_path payload in
+  let parsed =
+    List.filter_map
+      (fun item ->
+        match string_field item title_field, string_field item "url" with
+        | Some title, Some url when valid_search_result_url url ->
+            let snippet =
+              match string_field item snippet_field with
+              | Some value -> value
+              | None -> ""
+            in
+            Some (title, url, snippet)
+        | _ -> None)
+      items
+  in
+  usable_results items parsed
 
 let parse_searxng_json payload =
-  parse_json_search_results
-    ~results_path:(fun j -> Json_util.assoc_member_opt "results" j |> Option.value ~default:`Null)
-    ~title_field:"title" ~snippet_field:"content" payload
+  let* hits = parse_json_search_results ~results_path:["results"]
+      ~title_field:"title" ~snippet_field:"content" payload in
+  match hits with
+  | _ :: _ -> Ok hits
+  | [] ->
+      (* SearxNG can answer HTTP 200 with no hits when its engines failed.
+         That is not evidence of a successful empty search. JSON syntax was
+         validated by the parser above. *)
+      match Json_util.assoc_member_opt "unresponsive_engines"
+              (Yojson.Safe.from_string payload) with
+      | None | Some (`List []) -> Ok []
+      | Some (`List (_ :: _)) -> Error (Server "search engines unavailable")
+      | Some _ -> Error (Parse "provider unresponsive_engines field is not an array")
 
 let parse_brave_json payload =
-  parse_json_search_results
-    ~results_path:(fun j ->
-      let web = Json_util.assoc_member_opt "web" j |> Option.value ~default:`Null in
-      Json_util.assoc_member_opt "results" web |> Option.value ~default:`Null)
+  parse_json_search_results ~results_path:["web"; "results"]
     ~title_field:"title" ~snippet_field:"description" payload
 
 let parse_tavily_json payload =
-  parse_json_search_results
-    ~results_path:(fun j -> Json_util.assoc_member_opt "results" j |> Option.value ~default:`Null)
+  parse_json_search_results ~results_path:["results"]
     ~title_field:"title" ~snippet_field:"content" payload
 
 let parse_ollama_search_json payload =
-  parse_json_search_results
-    (* Absent "results" resolves to `Null → zero hits, so the chain
-       reports "no results" instead of inventing content. DET-OK *)
-    ~results_path:(fun j -> Json_util.assoc_member_opt "results" j |> Option.value ~default:`Null)
+  parse_json_search_results ~results_path:["results"]
     ~title_field:"title" ~snippet_field:"content" payload
 
 let parse_exa_json payload =
-  parse_json_search_results
-    ~results_path:(fun j -> Json_util.assoc_member_opt "results" j |> Option.value ~default:`Null)
+  parse_json_search_results ~results_path:["results"]
     ~title_field:"title" ~snippet_field:"text" payload
 
 let parse_bing_search_json payload =
-  parse_json_search_results
-    ~results_path:(fun j ->
-      let web = Json_util.assoc_member_opt "webPages" j |> Option.value ~default:`Null in
-      Json_util.assoc_member_opt "value" web |> Option.value ~default:`Null)
+  parse_json_search_results ~results_path:["webPages"; "value"]
     ~title_field:"name" ~snippet_field:"snippet" payload
 
-(* Total like its sibling parsers — and through the same mechanism:
-   Safe_ops.protect, so every exception class malformed third-party
-   input can raise (not just Json_error) degrades to []. Response
-   contract:
-   { "grounding": { "generic": [ { url, title, snippets: [string] } ] } } *)
 let parse_brave_llm_context_json payload =
-  let member_list key json =
-    match Json_util.assoc_member_opt key json with
-    | Some (`List entries) -> entries
-    | _ -> []
+  let* items = parse_result_array ~path:["grounding"; "generic"] payload in
+  let parsed =
+    List.filter_map
+      (fun entry ->
+        let snippets =
+          match Json_util.assoc_member_opt "snippets" entry with
+          | Some (`List entries) ->
+              List.filter_map
+                (function
+                  | `String snippet -> String_util.trim_nonempty snippet
+                  | _ -> None)
+                entries
+          | _ -> []
+        in
+        match string_field entry "url", snippets with
+        | Some url, _ :: _ when valid_search_result_url url ->
+            let title =
+              match string_field entry "title" with
+              | Some title -> title
+              | None -> url
+            in
+            Some (url, title, snippets)
+        | _ -> None)
+      items
   in
-  Safe_ops.protect ~default:[] (fun () ->
-      let json = Yojson.Safe.from_string payload in
-      let generic =
-        match Json_util.assoc_member_opt "grounding" json with
-        | Some grounding -> member_list "generic" grounding
-        | None -> []
-      in
-      generic
-      |> List.filter_map (fun entry ->
-             let string_field key =
-               match Json_util.assoc_member_opt key entry with
-               | Some (`String value) -> String_util.trim_nonempty value
-               | _ -> None
-             in
-             let snippets =
-               member_list "snippets" entry
-               |> List.filter_map (function
-                    | `String snippet -> String_util.trim_nonempty snippet
-                    | _ -> None)
-             in
-             match string_field "url", snippets with
-             | Some url, _ :: _ when valid_search_result_url url ->
-                 (* DET-OK: a missing title deterministically falls back to
-                    the url — documented in the .mli, visible in output. *)
-                 Some (url, Option.value (string_field "title") ~default:url, snippets)
-             | _ -> None))
+  usable_results items parsed
 
 let provider_to_string = function
   | Searxng -> "searxng"
@@ -448,15 +465,12 @@ let fetch_brave ~timeout_sec ~query ~limit =
       | Error detail ->
           Error (Transport (endpoint_error ~fallback:"provider request failed" detail))
       | Ok (Some 200, payload) ->
-          Safe_ops.protect
-            ~default:(Error (Parse "provider returned invalid JSON"))
-            (fun () ->
-              let hits =
-                parse_brave_json payload
-                |> take_results limit
-                |> normalize_hits ~source:(provider_to_string Brave)
-              in
-              Ok { engine = provider_to_string Brave; search_url; hits })
+          let* parsed = parse_brave_json payload in
+          let hits =
+            parsed |> take_results limit
+            |> normalize_hits ~source:(provider_to_string Brave)
+          in
+          Ok { engine = provider_to_string Brave; search_url; hits }
       | Ok (Some status, _) -> Error (Server (Printf.sprintf "provider returned HTTP %d" status))
       | Ok (None, _) -> Error (Server "provider returned no HTTP status")
 
@@ -485,15 +499,12 @@ let fetch_tavily ~timeout_sec ~query ~limit =
       | Error detail ->
           Error (Transport (endpoint_error ~fallback:"provider request failed" detail))
       | Ok (Some 200, payload) ->
-          Safe_ops.protect
-            ~default:(Error (Parse "provider returned invalid JSON"))
-            (fun () ->
-              let hits =
-                parse_tavily_json payload
-                |> take_results limit
-                |> normalize_hits ~source:(provider_to_string Tavily)
-              in
-              Ok { engine = provider_to_string Tavily; search_url; hits })
+          let* parsed = parse_tavily_json payload in
+          let hits =
+            parsed |> take_results limit
+            |> normalize_hits ~source:(provider_to_string Tavily)
+          in
+          Ok { engine = provider_to_string Tavily; search_url; hits }
       | Ok (Some status, _) -> Error (Server (Printf.sprintf "provider returned HTTP %d" status))
       | Ok (None, _) -> Error (Server "provider returned no HTTP status")
 
@@ -522,15 +533,12 @@ let fetch_exa ~timeout_sec ~query ~limit =
       | Error detail ->
           Error (Transport (endpoint_error ~fallback:"provider request failed" detail))
       | Ok (Some 200, payload) ->
-          Safe_ops.protect
-            ~default:(Error (Parse "provider returned invalid JSON"))
-            (fun () ->
-              let hits =
-                parse_exa_json payload
-                |> take_results limit
-                |> normalize_hits ~source:(provider_to_string Exa)
-              in
-              Ok { engine = provider_to_string Exa; search_url; hits })
+          let* parsed = parse_exa_json payload in
+          let hits =
+            parsed |> take_results limit
+            |> normalize_hits ~source:(provider_to_string Exa)
+          in
+          Ok { engine = provider_to_string Exa; search_url; hits }
       | Ok (Some status, _) -> Error (Server (Printf.sprintf "provider returned HTTP %d" status))
       | Ok (None, _) -> Error (Server "provider returned no HTTP status")
 
@@ -561,15 +569,12 @@ let fetch_bing_api ~timeout_sec ~query ~limit =
       | Error detail ->
           Error (Transport (endpoint_error ~fallback:"provider request failed" detail))
       | Ok (Some 200, payload) ->
-          Safe_ops.protect
-            ~default:(Error (Parse "provider returned invalid JSON"))
-            (fun () ->
-              let hits =
-                parse_bing_search_json payload
-                |> take_results limit
-                |> normalize_hits ~source:(provider_to_string Bing_api)
-              in
-              Ok { engine = provider_to_string Bing_api; search_url; hits })
+          let* parsed = parse_bing_search_json payload in
+          let hits =
+            parsed |> take_results limit
+            |> normalize_hits ~source:(provider_to_string Bing_api)
+          in
+          Ok { engine = provider_to_string Bing_api; search_url; hits }
       | Ok (Some status, _) -> Error (Server (Printf.sprintf "provider returned HTTP %d" status))
       | Ok (None, _) -> Error (Server "provider returned no HTTP status")
 
@@ -600,16 +605,12 @@ let fetch_brave_llm_context ~timeout_sec ~query ~limit =
       | Error detail ->
           Error (Transport (endpoint_error ~fallback:"provider request failed" detail))
       | Ok (Some 200, payload) ->
-          Safe_ops.protect
-            ~default:(Error (Parse "provider returned invalid JSON"))
-            (fun () ->
-              Ok
-                { context_search_url = search_url
-                ; items =
-                    parse_brave_llm_context_json payload
-                    |> List.map (fun (url, title, snippets) ->
-                           { source_url = url; source_title = title; snippets })
-                })
+          let* parsed = parse_brave_llm_context_json payload in
+          Ok
+            { context_search_url = search_url
+            ; items = List.map (fun (url, title, snippets) ->
+                  { source_url = url; source_title = title; snippets }) parsed
+            }
       | Ok (Some status, _) -> Error (Server (Printf.sprintf "provider returned HTTP %d" status))
       | Ok (None, _) -> Error (Server "provider returned no HTTP status")
 
@@ -640,15 +641,12 @@ let fetch_ollama ~timeout_sec ~query ~limit =
       | Error detail ->
           Error (Transport (endpoint_error ~fallback:"provider request failed" detail))
       | Ok (Some 200, payload) ->
-          Safe_ops.protect
-            ~default:(Error (Parse "provider returned invalid JSON"))
-            (fun () ->
-              let hits =
-                parse_ollama_search_json payload
-                |> take_results limit
-                |> normalize_hits ~source:(provider_to_string Ollama)
-              in
-              Ok { engine = provider_to_string Ollama; search_url; hits })
+          let* parsed = parse_ollama_search_json payload in
+          let hits =
+            parsed |> take_results limit
+            |> normalize_hits ~source:(provider_to_string Ollama)
+          in
+          Ok { engine = provider_to_string Ollama; search_url; hits }
       | Ok (Some status, _) -> Error (Server (Printf.sprintf "provider returned HTTP %d" status))
       | Ok (None, _) -> Error (Server "provider returned no HTTP status")
 
@@ -659,9 +657,9 @@ let fetch_provider ~query ~limit provider =
       match fetch_searxng ~timeout_sec ~query with
       | Error err -> Error err
       | Ok (search_url, payload) ->
+          let* parsed = parse_searxng_json payload in
           let hits =
-            parse_searxng_json payload
-            |> take_results limit
+            parsed |> take_results limit
             |> normalize_hits ~source:(provider_to_string Searxng)
           in
           Ok (Hits { engine = provider_to_string Searxng; search_url; hits }))
@@ -740,28 +738,42 @@ let no_provider_configured_message =
    (MASC_SEARXNG_URL) or a provider API key (BRAVE_SEARCH_API_KEY / \
    TAVILY_API_KEY / EXA_API_KEY / BING_SEARCH_API_KEY / OLLAMA_API_KEY)"
 
-let search_impl ~query ~limit =
-  let rec loop errors = function
+(* Keep trying after an empty response so later providers may supply hits.
+   If none does, the first valid empty response still answers the query.
+   Failed providers remain visible in the result instead of turning that
+   answer into a runtime failure. Production and simulation share this loop. *)
+let search_chain ~fetch providers =
+  let rec loop first_empty errors = function
     | [] ->
-        Error
-          (if Stdlib.List.length errors = 0 then No_provider_configured
-           else
-             All_providers_failed
+        (match first_empty, errors with
+         | Some payload, _ -> Ok (payload, List.rev errors)
+         | None, [] -> Error No_provider_configured
+         | None, _ :: _ ->
+             Error (All_providers_failed
                ("all web search providers failed: "
-                ^ String.concat "; " (List.rev errors)))
-    | provider :: rest -> (
-        match fetch_provider ~query ~limit provider with
-        | Ok (Hits { hits = _ :: _; _ } as payload) -> Ok payload
-        | Ok (Grounded { items = _ :: _; _ } as payload) -> Ok payload
-        | Ok (Hits _ | Grounded _) ->
-            loop
-              (provider_error provider (provider_error_to_string (Parse "no results"))
-               :: errors)
-              rest
-        | Error err ->
-            loop (provider_error provider (provider_error_to_string err) :: errors) rest)
+                ^ String.concat "; " (List.rev errors))))
+    | provider :: rest ->
+        match fetch provider with
+        | Ok (Hits { hits = _ :: _; _ } as payload)
+        | Ok (Grounded { items = _ :: _; _ } as payload) ->
+            Ok (payload, List.rev errors)
+        | Ok (Hits _ | Grounded _ as payload) ->
+            let first_empty =
+              match first_empty with
+              | Some _ -> first_empty
+              | None -> Some payload
+            in
+            loop first_empty errors rest
+        | Error error -> loop first_empty (error :: errors) rest
   in
-  loop [] (provider_order ())
+  loop None [] providers
+
+let search_impl ~query ~limit =
+  search_chain (provider_order ())
+    ~fetch:(fun provider ->
+      fetch_provider ~query ~limit provider
+      |> Result.map_error (fun error ->
+          provider_error provider (provider_error_to_string error)))
 
 let search_impl_cell = Atomic.make search_impl
 
@@ -773,42 +785,25 @@ let with_search_impl_for_test impl f =
     ~finally:(fun () -> Atomic.set search_impl_cell previous)
     f
 
-let simulated_search_impl ~outcomes ~query ~limit =
-  let normalize source tuples =
-    tuples |> take_results limit |> normalize_hits ~source
-  in
-  let rec loop errors = function
-    | [] ->
-        Error
-          (if Stdlib.List.length errors = 0 then No_provider_configured
-           else All_providers_failed (String.concat "; " (List.rev errors)))
-    | (provider_name, outcome) :: rest -> (
-        match outcome with
-        | `Hits hits when Stdlib.List.length hits > 0 ->
-            Ok
-              (Hits
-                 {
-                   engine = provider_name;
-                   search_url = "test://" ^ provider_name;
-                   hits = normalize provider_name hits;
-                 })
-        | `Grounded ((_ :: _) as entries) ->
-            Ok
-              (Grounded
-                 {
-                   context_search_url = "test://" ^ provider_name;
-                   items =
-                     List.map
-                       (fun (url, title, snippets) ->
-                         { source_url = url; source_title = title; snippets })
-                       entries;
-                 })
-        | `Hits _ | `Empty | `Grounded [] ->
-            loop ((provider_name ^ ": no results") :: errors) rest
-        | `Error message ->
-            loop ((provider_name ^ ": " ^ message) :: errors) rest)
-  in
-  loop [] outcomes
+let simulated_search_impl ~outcomes ~query:_ ~limit =
+  search_chain outcomes ~fetch:(fun (provider_name, outcome) ->
+    let hits_payload tuples =
+      Hits
+        { engine = provider_name
+        ; search_url = "test://" ^ provider_name
+        ; hits = tuples |> take_results limit |> normalize_hits ~source:provider_name
+        }
+    in
+    match outcome with
+    | `Hits hits -> Ok (hits_payload hits)
+    | `Empty -> Ok (hits_payload [])
+    | `Grounded entries ->
+        Ok (Grounded
+          { context_search_url = "test://" ^ provider_name
+          ; items = List.map (fun (url, title, snippets) ->
+                { source_url = url; source_title = title; snippets }) entries
+          })
+    | `Error message -> Error (provider_name ^ ": " ^ message))
 
 let with_simulated_search_for_test ~outcomes f =
   with_search_impl_for_test (simulated_search_impl ~outcomes) f
@@ -848,6 +843,21 @@ let dependency_err ~tool_name ~start_time message =
   Tool_result.error ~failure_class:Tool_result.Dependency_unavailable ~tool_name
     ~start_time message
 
+let search_data ~query (payload, provider_errors) =
+  let data =
+    match payload with
+    | Hits response ->
+        result_data ~query ~search_url:response.search_url
+          ~engine:response.engine response.hits
+    | Grounded context -> grounded_result_data ~query context
+  in
+  match data, provider_errors with
+  | `Assoc fields, _ :: _ ->
+      `Assoc (("provider_errors", `List (List.map (fun error -> `String error) provider_errors))
+              :: fields)
+  | _, [] -> data
+  | _, _ :: _ -> data
+
 let handle ~tool_name ~start_time args : Tool_result.result =
   let query = get_string args "query" "" in
   match validate_query query with
@@ -860,14 +870,8 @@ let handle ~tool_name ~start_time args : Tool_result.result =
       | Some cached -> data_ok ~tool_name ~start_time cached
       | None ->
         (match (current_search_impl ()) ~query ~limit with
-         | Ok payload ->
-           let data =
-             match payload with
-             | Hits response ->
-               result_data ~query ~search_url:response.search_url
-                 ~engine:response.engine response.hits
-             | Grounded context -> grounded_result_data ~query context
-           in
+         | Ok response ->
+           let data = search_data ~query response in
            cache_store key data now;
            data_ok ~tool_name ~start_time data
          | Error No_provider_configured ->
@@ -878,15 +882,8 @@ let handle ~tool_name ~start_time args : Tool_result.result =
 let simulate_for_test ~query ~limit outcomes : Tool_result.result =
   let start_time = Tool_timing.start () in
   match simulated_search_impl ~outcomes ~query ~limit with
-  | Ok (Hits response) ->
-      data_ok ~tool_name:"masc_web_search" ~start_time
-        (result_data ~query
-           ~search_url:response.search_url
-           ~engine:response.engine
-           response.hits)
-  | Ok (Grounded context) ->
-      data_ok ~tool_name:"masc_web_search" ~start_time
-        (grounded_result_data ~query context)
+  | Ok response ->
+      data_ok ~tool_name:"masc_web_search" ~start_time (search_data ~query response)
   | Error No_provider_configured ->
       dependency_err ~tool_name:"masc_web_search" ~start_time
         no_provider_configured_message

@@ -266,21 +266,24 @@ let test_probe_tells_a_missing_origin_from_a_configured_one () =
         (Printf.sprintf
            "git -C %s update-ref refs/remotes/origin/main HEAD"
            (Filename.quote with_origin));
-      run
-        (Printf.sprintf
-           "sh -c %s"
-           (Filename.quote
-              (Printf.sprintf
-                 "cd %s && python3 -c %s %s 32 8192 %d > %s"
-                 (Filename.quote tree)
-                 (Filename.quote R.For_testing.probe_script)
-                 (Filename.quote {|[{"url":"https://github.com/jeong-sik/masc.git","default_branch":"main"}]|})
-                 R.target_ref_stale_after_s
-                 (Filename.quote out))));
-      let raw = In_channel.with_open_bin out In_channel.input_all in
-      match R.parse_probe_json ~root:tree raw with
-      | Error detail -> failf "probe output did not decode: %s" detail
-      | Ok (_, inspections) ->
+      let probe () =
+        run
+          (Printf.sprintf
+             "sh -c %s"
+             (Filename.quote
+                (Printf.sprintf
+                   "cd %s && python3 -c %s %s 32 8192 %d > %s"
+                   (Filename.quote tree)
+                   (Filename.quote R.For_testing.probe_script)
+                   (Filename.quote {|[{"url":"https://github.com/jeong-sik/masc.git","default_branch":"main"}]|})
+                   R.target_ref_stale_after_s
+                   (Filename.quote out))));
+        let raw = In_channel.with_open_bin out In_channel.input_all in
+        match R.parse_probe_json ~root:tree raw with
+        | Error detail -> failf "probe output did not decode: %s" detail
+        | Ok (_, inspections) -> inspections
+      in
+      let inspections = probe () in
         let origin_of (ic : R.inspected_checkout) =
           ( ic.checkout.relative_path
           , match ic.origin with
@@ -293,13 +296,49 @@ let test_probe_tells_a_missing_origin_from_a_configured_one () =
           "origins"
           [ "no-origin", "not configured"; "with-origin", "url https://github.com/jeong-sik/masc.git" ]
           (List.sort compare (List.map origin_of inspections));
-        let with_origin =
+        let with_origin_row =
           List.find
             (fun (ic : R.inspected_checkout) -> ic.checkout.relative_path = "with-origin")
             inspections in
-        (match with_origin.target_ref_last_observed_at_unix with
+        (match with_origin_row.target_ref_last_observed_at_unix with
          | Some timestamp -> check bool "reflog timestamp read" true (timestamp > 0)
-         | None -> fail "target ref timestamp missing"))
+         | None -> fail "target ref timestamp missing");
+        let oid =
+          match Repo_git.run_git ~cwd:with_origin [ "rev-parse"; "HEAD" ] with
+          | Ok [ oid ] -> oid
+          | _ -> fail "guest fixture HEAD unavailable"
+        in
+        let reflog = Filename.concat with_origin ".git/logs/refs/remotes/origin/main" in
+        Sys.remove reflog;
+        let fetch_head = Filename.concat with_origin ".git/FETCH_HEAD" in
+        let output = open_out fetch_head in
+        Fun.protect ~finally:(fun () -> close_out_noerr output)
+          (fun () ->
+             output_string output
+               (oid ^ "\t\tbranch 'main' of https://github.com/jeong-sik/masc.git\n"));
+        let observed inspections =
+          let row = List.find
+            (fun (ic : R.inspected_checkout) -> ic.checkout.relative_path = "with-origin")
+            inspections in
+          row.target_ref_last_observed_at_unix
+        in
+        check (option int) "fresh FETCH_HEAD mtime is not a receipt" None
+          (observed (probe ()));
+        let common_dir = Filename.concat with_origin ".git" in
+        (match Repo_fetch_observation.write ~common_dir
+                 { common_dir
+                 ; origin_url = "https://github.com/jeong-sik/masc.git"
+                 ; target_ref = "origin/main"
+                 ; oid
+                 ; observed_at_unix = int_of_float (Unix.gettimeofday ())
+                 } with
+         | Ok () -> ()
+         | Error message -> fail message);
+        (match observed (probe ()) with
+         | Some timestamp ->
+           check bool "guest reads managed no-op fetch receipt" true
+             (timestamp > 1600000000)
+         | None -> fail "guest did not read matching receipt"))
 ;;
 
 let test_the_wrong_top_level_shapes_are_errors () =

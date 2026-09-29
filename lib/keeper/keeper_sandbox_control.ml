@@ -340,9 +340,9 @@ let dirty_state ~budget ~repository =
    the same threshold even if a repository's sync interval is reconfigured. *)
 let target_ref_stale_after_s = Keeper_sandbox_remote_checkouts.target_ref_stale_after_s
 
-(* A tracking ref's reflog records when its local value last moved. A no-op
-   fetch leaves that timestamp untouched, so also inspect a matching FETCH_HEAD
-   in both the common repository and this worktree. Neither probe fetches. *)
+(* A tracking ref's reflog records when its local value last moved. A managed
+   no-op fetch leaves it untouched, so read the fetch owner's per-ref receipt.
+   Neither probe fetches. *)
 let reflog_moved_at_unix ~budget ~cwd target_ref =
   match first_git_line ~budget ~cwd
           [ "reflog"; "show"; "-1"; "--date=unix"; "--format=%gd"; target_ref ] with
@@ -360,42 +360,20 @@ let newer_time left right =
   | Some left, Some right -> Some (max left right)
 ;;
 
-let matching_fetch_head_time ~budget ~cwd ~target_ref ~upstream_head ~origin_url =
-  let branch = String.sub target_ref 7 (String.length target_ref - 7) in
-  let prefix = "branch '" ^ branch ^ "' of " in
-  let resolved_path args =
-    match first_git_line ~budget ~cwd args with
-    | Error _ -> None
-    | Ok path -> Some (if Filename.is_relative path then Filename.concat cwd path else path)
-  in
-  let common = resolved_path [ "rev-parse"; "--git-common-dir" ]
-    |> Option.map (fun path -> Filename.concat path "FETCH_HEAD") in
-  let local = resolved_path [ "rev-parse"; "--git-path"; "FETCH_HEAD" ] in
-  let read path =
-    try
-      let stat = Unix.stat path in
-      let matched = In_channel.with_open_bin path (fun input ->
-        let rec scan () =
-          match input_line input with
-          | line ->
-            (match String.split_on_char '\t' line with
-             | [ sha; _; description ]
-               when String.equal sha upstream_head
-                    && String.starts_with ~prefix description ->
-               let url = String.sub description (String.length prefix)
-                 (String.length description - String.length prefix) in
-               (match canonical_url url, canonical_url origin_url with
-                | Some fetched, Some origin when String.equal fetched origin -> true
-                | _ -> scan ())
-             | _ -> scan ())
-          | exception End_of_file -> false
-        in
-        scan ()) in
-      if matched then Some (int_of_float stat.Unix.st_mtime) else None
-    with Sys_error _ | Unix.Unix_error _ -> None
-  in
-  List.fold_left newer_time None
-    (List.filter_map (Option.map read) [ common; local ])
+let matching_fetch_receipt_time ~budget ~cwd ~target_ref ~upstream_head ~origin_url =
+  match first_git_line ~budget ~cwd
+          [ "rev-parse"; "--path-format=absolute"; "--git-common-dir" ] with
+  | Error _ -> None
+  | Ok common_dir ->
+    (match Repo_fetch_observation.read ~common_dir with
+     | Some observation
+       when String.equal observation.target_ref target_ref
+            && String.equal observation.oid upstream_head ->
+       (match canonical_url observation.origin_url, canonical_url origin_url with
+        | Some fetched, Some origin when String.equal fetched origin ->
+          Some observation.observed_at_unix
+        | _ -> None)
+     | _ -> None)
 ;;
 
 let target_ref_last_observed_at_unix ~budget ~cwd ~target_ref ~upstream_head
@@ -407,7 +385,7 @@ let target_ref_last_observed_at_unix ~budget ~cwd ~target_ref ~upstream_head
     moved
   | _ ->
     newer_time moved
-      (matching_fetch_head_time ~budget ~cwd ~target_ref ~upstream_head ~origin_url)
+      (matching_fetch_receipt_time ~budget ~cwd ~target_ref ~upstream_head ~origin_url)
 ;;
 
 let freshness_from_counts ~now_unix ~target_ref ~upstream_head
@@ -415,9 +393,10 @@ let freshness_from_counts ~now_unix ~target_ref ~upstream_head
   match behind, ahead with
   | 0, 0 ->
     let age_s = Option.map
-      (fun moved -> max 0 (int_of_float now_unix - moved)) last_observed_at_unix in
+      (fun moved -> int_of_float now_unix - moved) last_observed_at_unix in
     (match last_observed_at_unix, age_s with
-     | Some last_observed_at_unix, Some age_s when age_s <= target_ref_stale_after_s ->
+     | Some last_observed_at_unix, Some age_s
+       when age_s >= 0 && age_s <= target_ref_stale_after_s ->
        Current { target_ref; upstream_head; last_observed_at_unix; age_s }
      | _ -> Stale_ref { target_ref; upstream_head; last_observed_at_unix; age_s })
   | 0, ahead -> Ahead { target_ref; upstream_head; ahead }

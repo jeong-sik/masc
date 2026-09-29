@@ -24,7 +24,7 @@ let probe_script =
   {|\
 import os, sys, json, subprocess, time
 
-# The three arguments are built by the OCaml side; a malformed one is its
+# The four arguments are built by the OCaml side; a malformed one is its
 # defect and ends the probe with a traceback the caller reports.
 catalog = json.loads(sys.argv[1])
 checkout_budget = int(sys.argv[2])
@@ -115,30 +115,22 @@ def inspect_git(path):
                         target_ref_last_observed_at_unix = int(moved)
                 if target_ref_last_observed_at_unix is None or \
                    time.time() - target_ref_last_observed_at_unix > target_ref_stale_after_s:
-                    common = git('rev-parse', '--git-common-dir')
-                    local_fetch = git('rev-parse', '--git-path', 'FETCH_HEAD')
-                    candidates = []
+                    common = git('rev-parse', '--path-format=absolute', '--git-common-dir')
                     if common:
-                        candidates.append(os.path.join(common, 'FETCH_HEAD'))
-                    if local_fetch:
-                        candidates.append(local_fetch)
-                    prefix = "branch '" + def_branch + "' of "
-                    for candidate in candidates:
-                        fetch_path = candidate if os.path.isabs(candidate) else os.path.join(path, candidate)
+                        common = os.path.realpath(common)
+                        receipt_path = os.path.join(common, 'masc-target-ref-observation.json')
                         try:
-                            with open(fetch_path, encoding='utf-8') as source:
-                                for line in source:
-                                    fields = line.rstrip('\n').split('\t')
-                                    if len(fields) != 3 or fields[0] != upstream_head:
-                                        continue
-                                    description = fields[2]
-                                    if description.startswith(prefix) and \
-                                       canon_url(description[len(prefix):]) == canon_url(origin):
-                                        observed = int(os.stat(fetch_path).st_mtime)
-                                        target_ref_last_observed_at_unix = max(
-                                            target_ref_last_observed_at_unix or 0, observed)
-                                        break
-                        except OSError:
+                            with open(receipt_path, encoding='utf-8') as source:
+                                receipt = json.load(source)
+                            observed = receipt.get('observed_at_unix')
+                            if receipt.get('common_dir') == common and \
+                               receipt.get('target_ref') == target_ref and \
+                               receipt.get('oid') == upstream_head and \
+                               canon_url(receipt.get('origin_url')) == canon_url(origin) and \
+                               type(observed) is int and observed > 0:
+                                target_ref_last_observed_at_unix = max(
+                                    target_ref_last_observed_at_unix or 0, observed)
+                        except (OSError, ValueError, AttributeError):
                             pass
 
     return {

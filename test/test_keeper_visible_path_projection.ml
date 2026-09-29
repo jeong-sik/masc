@@ -786,8 +786,21 @@ let test_equal_checkout_requires_recent_target_ref () =
     (entry () |> Json.member "state" |> Json.to_string);
   write_file fetch_head
     (head ^ "\t\tbranch 'main' of https://example.invalid/masc.git\n");
-  Alcotest.(check string) "matching no-op fetch is current" "current"
+  Alcotest.(check string) "matching row without fetch receipt stays stale" "stale_ref"
     (entry () |> Json.member "state" |> Json.to_string);
+  let common_dir = Filename.concat checkout ".git" in
+  (match Repo_fetch_observation.write ~common_dir
+           { common_dir
+           ; origin_url = "https://example.invalid/masc.git"
+           ; target_ref = "origin/main"
+           ; oid = head
+           ; observed_at_unix = int_of_float (Unix.gettimeofday ())
+           } with
+   | Ok () -> ()
+   | Error message -> Alcotest.fail message);
+  Alcotest.(check string) "matching managed fetch receipt is current" "current"
+    (entry () |> Json.member "state" |> Json.to_string);
+  Sys.remove (Filename.concat common_dir Repo_fetch_observation.filename);
   let _ = run_git_or_fail ~cwd:checkout
     [ "update-ref"; "refs/remotes/origin/main"; "HEAD~1" ] in
   let _ = run_git_or_fail ~cwd:checkout

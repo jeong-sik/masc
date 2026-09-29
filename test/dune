@@ -7660,3 +7660,5 @@
 (include stanzas/test_tui_remote_equipped_portrait.inc)
 
 (include stanzas/test_tui_candle_currency_pty.inc)
+
+(include stanzas/test_candle_baseline_collector.inc)

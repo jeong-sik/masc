@@ -2536,7 +2536,7 @@
 (include stanzas/test_briefing_sections.inc)
 
 (include stanzas/test_candle_event.inc)
-(include stanzas/test_candle_scalars.inc)
+(include stanzas/test_candle_time.inc)
 (include stanzas/test_candle_ledger.inc)
 
 (include stanzas/test_audit_keeper_fleet_readiness.inc)

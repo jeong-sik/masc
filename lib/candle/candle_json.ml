@@ -42,12 +42,6 @@ let as_non_blank json =
   if String.equal (String.trim text) "" then Error "must not be blank" else Ok text
 ;;
 
-let as_int = function
-  | `Int number -> Ok number
-  | (`Null | `Bool _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _) as other ->
-    wrong_kind ~expected:"an integer" other
-;;
-
 let as_list decode = function
   | `List items ->
     let rec go index decoded = function

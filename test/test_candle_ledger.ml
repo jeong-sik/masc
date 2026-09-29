@@ -10,12 +10,6 @@ let ok_or_fail = function
 
 let at text = ok_or_fail (Candle_time.of_rfc3339 text)
 
-let date text =
-  match Candle_time.Date.of_string text with
-  | Some value -> value
-  | None -> Alcotest.failf "not a date: %S" text
-;;
-
 let snapshot ?(request_id = "req-1") goal_id : E.t =
   { at = at "2026-09-29T06:00:00Z"
   ; body =
@@ -25,7 +19,7 @@ let snapshot ?(request_id = "req-1") goal_id : E.t =
         ; criterion_revision = "rev-1"
         ; passed_at = at "2026-09-28T06:32:00Z"
         ; goal_created_at = at "2026-09-20T01:00:00Z"
-        ; due = E.Due_date (date "2026-09-26")
+        ; due_date = Some "2026-09-26"
         ; title = "Ship the ledger"
         ; metric = Some "tests"
         ; target_value = Some "10"
@@ -38,9 +32,7 @@ let goal_ids events =
   List.map
     (fun (event : E.t) ->
        match event.body with
-       | E.Snapshot { goal_id; _ } -> goal_id
-       | E.Payout_owed _ | E.Payout_failed _ | E.Paid _ | E.Unattributed _
-       | E.Purchased _ | E.Equipped _ -> Alcotest.fail "test ledgers hold snapshots only")
+       | E.Snapshot { goal_id; _ } -> goal_id)
     events
 ;;
 

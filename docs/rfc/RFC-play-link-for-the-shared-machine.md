@@ -124,7 +124,15 @@ related: ["0439", "machine-spectating-goes-through-lanes"]
     credential 이름은 생성된 별명이나 keeper 전송 별칭(`Auth_nickname`)으로 읽혀 다른 이름에
     묶일 수 있다. 이 문법이면 `Common.safe_filename` 이 이름을 바꾸지 않아, 이름 하나가 credential
     파일 하나에 대응한다.
-  - 답: `{name, expires_at, link: "<base>/play#<raw token>"}`. TUI 는 링크와 QR 을 찍는다.
+  - 답: `{name, expires_at, link: "<base>/play#<raw token>"}`. TUI 는 링크와 QR 을 카드에 띄운다.
+    - 링크는 이 카드가 유일한 사본이라 채팅 행, 푸터, 세션 로그에는 넣지 않는다. `Esc` 나 `q` 로
+      닫고 `/play link` 로 다시 연다. `y` 는 링크를 터미널 클립보드로 복사한다. 자동으로
+      복사하지는 않는다. Enter 는 카드를 닫지 않는다. 명령을 보내고 답이 오기 전에 Enter 를 한 번
+      더 눌렀을 때 카드가 닫히면 링크를 다시 볼 수 없다.
+    - QR 은 창에 통째로 들어갈 때만 그린다. 잘린 QR 은 읽히지 않으므로 좁으면 그리지 않고
+      필요한 칸과 줄 수를 알린다. 색을 못 그리는 터미널은 링크만 보여 준다.
+    - 요청은 한 번에 하나만 보낸다. 답이 두 번 오면 나중 카드가 먼저 카드를 덮고, 서버는 먼저
+      링크를 다시 보여 주지 않는다.
   - raw token 은 이 답에서 한 번만 나온다. 서버에는 SHA-256 만 남는다.
 - 회수는 `CanAdmin` 만 한다. `DELETE /api/v1/play/invites/<이름>` 와 TUI `/play revoke <이름>`.
   - `Auth.delete_credential` 로 지운다.

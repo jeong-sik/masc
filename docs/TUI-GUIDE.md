@@ -76,10 +76,23 @@ Select a Keeper chat to use the TUI composer. `/play invites` lists invites, `/p
 <hours>` issues one, `/play link` reopens the last link issued in this TUI
 session, and `/play revoke <name>` removes it. Issuance requires
 an admin operator credential, token-required authentication and
-`MASC_HTTP_BASE_URL`. The one-time link appears in a local TUI reply (it is
-not sent to the Keeper) and
-is sent through OSC 52 for copying; terminal clipboard support varies. The
-TUI keeps the last link only until it exits or that invite is revoked.
+`MASC_HTTP_BASE_URL`. A refusal shows the server's own sentence and what it
+says is missing, for example when auth is off or `require_token` is false.
+
+The server shows the link once, so it goes on a card with a QR code and
+nowhere else: not the chat, not the footer, not the session log. `y` copies
+the link to the terminal clipboard through OSC 52; terminal clipboard support
+varies, and `Ctrl-T` still hands the mouse back so the link can be selected
+from the card. `Esc` or `q` closes the card. Enter does not, so an Enter
+pressed while the answer was on its way cannot dismiss it. `/play link` opens
+the card again. The TUI keeps the last card only until it exits or that
+invite is revoked. Only one invite request runs at a time, because a second
+answer would replace a card whose link the server will not show again.
+
+The QR is drawn only when all of it fits. A smaller window shows the link and
+the size the QR needs, because a cut QR scans as nothing. A terminal without
+colour shows the link alone.
+
 If the issue request has no trustworthy answer, inspect the invite list and
 revoke that name before retrying because the original link cannot be recovered.
 If revocation reports a controller release failure or an unknown outcome,

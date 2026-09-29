@@ -16993,6 +16993,35 @@ let render_link_preview_modal (state : state) =
                 c.push line)
             content_lines)
 
+(* The invite card: the link a /play invite answer carries, and its QR. Where
+   each row falls, and whether the QR fits at all, is decided by
+   [Masc_tui_play_card.draw]; this only gives each kind of row its look. The
+   QR rows arrive coloured and go in as they are: a theme colour on them would
+   turn the code into a picture that no phone reads. *)
+let play_card_indent = "  "
+
+let render_play_card (state : state) card =
+  let terminal_rows, cols = get_terminal_size () in
+  surface_chrome ~overflow:Fits state ~terminal_rows ~cols ~surface_key:"play-invite"
+    ~frame:Chrome_overlay
+    ~title:(screen_title " MASC Play invite")
+    ~hints:"y:copy link  Esc:close"
+    ~body:(fun ~budget c ->
+      let width = framed_inner_width cols - String.length play_card_indent in
+      List.iter
+        (fun row ->
+          match row with
+          | Masc_tui_play_card.Heading text ->
+              c.push_styled ~style:Ansi.bold (play_card_indent ^ text)
+          | Masc_tui_play_card.Advice text ->
+              c.push_styled ~style:(Theme.recede ()) (play_card_indent ^ text)
+          | Masc_tui_play_card.Link_row text | Masc_tui_play_card.Qr_row text ->
+              c.push (play_card_indent ^ text)
+          | Masc_tui_play_card.Note text ->
+              c.push_styled ~style:(Theme.warn ()) (play_card_indent ^ text)
+          | Masc_tui_play_card.Blank -> c.push_empty ())
+        (Masc_tui_play_card.draw card ~width ~rows:budget))
+
 (* The record's rows and the viewport that shows them, the way
    [help_viewport] answers for the sheet: one pair for the keypress that
    bounds the scroll and the frame that draws it, and one row off the height
@@ -17348,7 +17377,11 @@ let render (state : state) =
   then
     let frame, clamped = render_terminal_too_small state ~rows ~cols in
     (frame, clamped, None, Overlay_drawn)
-  else match state.account_login with
+  else match play_card_shown state with
+  | Some card ->
+    let frame, clamped = render_play_card state card in
+    (frame, clamped, None, Overlay_drawn)
+  | None -> match state.account_login with
   | Some view -> let frame, clamped = render_account_login state view in (frame,clamped,None,Overlay_drawn)
   | None -> match state.lane_addons with
   | Some view ->

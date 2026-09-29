@@ -129,6 +129,9 @@
   (cstruct (>= 6.0))
   (digestif (>= 1.1))
   (eqaf (>= 0.10))
+  ; /play invite draws a QR of the invite link in the TUI; pure OCaml, no C
+  ; bindings.
+  (qrc (>= 0.2.0))
   optint
   (ocaml-protoc-plugin (>= 4.0))
   (pbrt (and (>= 3.0) (< 4.0)))

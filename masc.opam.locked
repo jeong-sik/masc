@@ -167,6 +167,7 @@ depends: [
   "ptime" {= "1.2.0"}
   "qcheck-alcotest" {= "0.91" & with-test}
   "qcheck-core" {= "0.91" & with-test}
+  "qrc" {= "0.2.0"}
   "re" {= "1.14.0"}
   "rresult" {= "0.7.0"}
   "sedlex" {= "3.7"}

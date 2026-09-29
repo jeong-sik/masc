@@ -5339,6 +5339,16 @@ module Verification_evidence_read = struct
     | Launch_failure of string
 end
 
+(* The last invite this TUI issued, and whether its card is on screen. The
+   server sends an invite's link once and keeps only its hash, so the card is
+   the only copy there is. It is kept in this process for [/play link] until
+   the TUI exits or that invite is revoked, and never written to workspace
+   state. *)
+type play_invite =
+  | Play_invite_none
+  | Play_invite_held of Masc_tui_play_card.t  (* issued, not on screen *)
+  | Play_invite_shown of Masc_tui_play_card.t  (* on screen, taking every key *)
+
 type state = {
   mutable metrics_scroll: int;
   mutable metrics_section: metrics_section;
@@ -5575,10 +5585,14 @@ type state = {
      [~who] on several calls), so there is no [msx_activity] here -- adding
      one before the server ever fills it would be a field nothing draws. *)
   mutable dos_activity: Masc_tui_machine_live.activity_entry list;
-  (* The server sends an invite bearer once. Keep the latest link only in
-     this TUI process so /play link can recover it after a pane switch or a
-     terminal without OSC 52; never persist it in workspace state. *)
-  mutable play_invite_link: (string * string) option;
+  (* The card of the latest /play invite. Nothing closes it but the
+     operator's own key, and [close_key_modals] leaves it alone for that
+     reason. *)
+  mutable play_invite: play_invite;
+  (* An invite request is out and its answer has not come back. A second one
+     is refused meanwhile: its answer would replace the card that holds the
+     first link, and the server will not show that link again. *)
+  mutable play_invite_inflight: bool;
   (* The load menu (RFC-0439 §3.7): the human picks a game from the cartridge
      inventory to plug into the shared machine. It is an overlay on the MSX
      screen -- while [msx_menu_open] the keyboard drives the picker, not the
@@ -7898,6 +7912,12 @@ let supersede_context_inspector_load state stop =
   state.context_inspector_cancel <- stop
 ;;
 
+(* The invite card on screen, if there is one. *)
+let play_card_shown (state : state) =
+  match state.play_invite with
+  | Play_invite_shown card -> Some card
+  | Play_invite_none | Play_invite_held _ -> None
+
 (* The overlays that take every key while they are open. Each answers its own
    keys and swallows the rest in its dispatch arm, so nothing drawn under it --
    the composer, a surface binding, a press on a row -- may act first. Every
@@ -7906,6 +7926,7 @@ let supersede_context_inspector_load state stop =
 let modal_owns_keys (state : state) =
   state.help_open || state.keeper_deletions_open || state.agenda_open
   || state.context_inspector_open || state.about_open
+  || Option.is_some (play_card_shown state)
 
 let close_context_inspector (state : state) =
   state.context_inspector_open <- false;
@@ -7922,8 +7943,10 @@ let close_agenda (state : state) =
   state.agenda_selected <- Masc_tui_agenda.Nowhere
 
 (* Every overlay [modal_owns_keys] names, closed the way its own Esc closes
-   it. The inspector and the agenda are only closed when open: closing stops
-   an inspector read in flight, and there is none to stop otherwise. *)
+   it, except the invite card: an unrelated event that clears the screen must
+   not take the only copy of a link with it. The inspector and the agenda are
+   only closed when open: closing stops an inspector read in flight, and there
+   is none to stop otherwise. *)
 let close_key_modals (state : state) =
   state.help_open <- false;
   state.help_scroll <- 0;
@@ -8037,7 +8060,8 @@ let create_state
   dos_live = Masc_tui_machine_live.Unread;
   dos_live_in_flight = None;
   dos_activity = [];
-  play_invite_link = None;
+  play_invite = Play_invite_none;
+  play_invite_inflight = false;
   msx_menu_open = false;
   msx_notice = None;
   msx_menu_mode = Boot_game;

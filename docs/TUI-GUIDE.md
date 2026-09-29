@@ -1106,6 +1106,15 @@ is retained without same-turn exact text. `BYTES ONLY` means only the component
 byte count is available. The inspector never joins independent readings by
 label, position, or similar-looking content.
 
+#### Reading chat loading errors
+
+If saved history, older messages, or the memory journal cannot be loaded, a
+short warning above the input points to `/errors`. Run it in the open Keeper
+chat to put the current full details in the local conversation log, where
+lines wrap and you can scroll back through them. Hidden memory-journal errors
+are included. This reads the recorded failures without sending a message or
+retrying a request; no recorded error does not imply loading has finished.
+
 #### Copying a reply
 
 In a Keeper chat, type `/copy` and press Enter to send that Keeper's latest

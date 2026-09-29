@@ -1243,6 +1243,20 @@ let open_message_for_keeper ?(return_to = Keeper_chat_return_detail) state
   (* Recall is a walk through one Keeper's messages. A Down on the new
      Keeper must not restore the previous Keeper's draft or image payload. *)
   forget_recall state;
+  if state.msg_target_keeper_name <> Some keeper_name then begin
+    (* These readings belong to one conversation. Clear them at the shared
+       target boundary before its replacement request can finish. *)
+    state.msg_loaded <- [];
+    state.msg_loaded_keeper <- None;
+    state.msg_loaded_error <- None;
+    state.msg_loaded_dropped <- 0;
+    state.msg_memory_error <- None;
+    state.msg_memory_dropped <- 0;
+    state.msg_older_cursor <- None;
+    state.msg_older_exist <- false;
+    state.msg_older_loading <- false;
+    state.msg_older_error <- None;
+  end;
   state.msg_target_keeper_name <- Some keeper_name;
   state.opening_notice <- None;
   (match state.opening_mode with
@@ -6900,9 +6914,8 @@ let launch_keeper_history_load ?(load_file_changes = true) ?(force = false) stat
         | exn -> Error (Printexc.to_string exn)
       in
       let memory_result =
-        (* The subject, because the row that draws this one does not add it:
-           every other failure of this read names itself and an exception
-           string does not. *)
+        (* Keep the subject attached to exception details, as the other
+           failures of this read already do. *)
         try Masc_tui_http.fetch_keeper_memory_journal ~host ~port ~keeper_name with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error ("memory journal: " ^ Printexc.to_string exn)
@@ -7063,16 +7076,6 @@ let switch_to_next_keeper_message state ~mailbox ~drain_queue =
         ~drain_queue;
       state.keeper_cursor <- cursor;
       set_msg_scroll state 0;
-      state.msg_loaded <- [];
-      state.msg_loaded_keeper <- None;
-      state.msg_loaded_error <- None;
-      state.msg_loaded_dropped <- 0;
-      state.msg_memory_error <- None;
-      state.msg_memory_dropped <- 0;
-      state.msg_older_cursor <- None;
-      state.msg_older_exist <- false;
-      state.msg_older_loading <- false;
-      state.msg_older_error <- None;
       launch_keeper_history_load state ~mailbox ~keeper_name
 
 (* Rows this session wrote that the transcript now carries. Dropped so the same
@@ -9750,6 +9753,28 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
                attachment.Masc_tui_keeper_chat_projection.mime_type
                attachment.Masc_tui_keeper_chat_projection.size
                (List.length state.msg_attachments)))
+  | Masc_tui_command.Show_load_errors ->
+      Buffer.clear state.msg_input;
+      if state.view <> Keepers Keeper_message
+         || Option.is_none target
+         || target <> state.msg_target_keeper_name then
+        notice ~kind:Notice_failure "Open a Keeper chat to inspect its loading errors"
+      else begin
+        let errors =
+          [ Option.map (fun detail -> "Saved history\n" ^ detail)
+              state.msg_loaded_error
+          ; Option.map (fun detail -> "Older messages\n" ^ detail) state.msg_older_error
+          ; Option.map (fun detail -> "Memory journal\n" ^ detail) state.msg_memory_error
+          ] |> List.filter_map Fun.id
+        in
+        set_msg_scroll state 0;
+        (* A local log entry wraps and scrolls. A failure toast would flatten
+           these details back into the one-line truncation being inspected. *)
+        notice ~kind:Notice_reply
+          (match errors with
+           | [] -> "No chat loading errors recorded."
+           | _ :: _ -> "Chat loading errors\n\n" ^ String.concat "\n\n" errors)
+      end
   | Masc_tui_command.Help ->
       Buffer.clear state.msg_input;
       notice ~kind:Notice_reply
@@ -13019,7 +13044,8 @@ let handle_composer_key state ~base_path ~mailbox key =
            end;
            state.view <- Keepers Keeper_message
        | Masc_tui_command.Task_for_keeper _ | Masc_tui_command.Task_missing_title
-       | Masc_tui_command.Help | Masc_tui_command.About | Masc_tui_command.Switch_keeper_missing_name
+       | Masc_tui_command.Help | Masc_tui_command.Show_load_errors
+       | Masc_tui_command.About | Masc_tui_command.Switch_keeper_missing_name
         | Masc_tui_command.Open_diff | Masc_tui_command.Open_patch_modal
         | Masc_tui_command.Toggle_cost | Masc_tui_command.Open_changes
         | Masc_tui_command.Toggle_acting_pane

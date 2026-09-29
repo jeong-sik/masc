@@ -16492,7 +16492,7 @@ let render_surface (state : state) =
                     let terminal_rows, cols = get_terminal_size () in
                     surface_chrome ~overflow:Fits state ~terminal_rows ~cols ~surface_key:"board-read"
                       ~title:(screen_title (" MASC Board / " ^ Terminal_text.single_line post_id))
-                      ~hints:"r:retry  Esc:back  Tab:next"
+                      ~hints:Masc_tui_keys.footer_hints_board_pending
                       ~body:(fun ~budget:_ c ->
                         match Board_detail.view_for state.board_detail ~post_id with
                         | Board_detail.Failed detail ->

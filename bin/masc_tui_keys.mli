@@ -186,6 +186,10 @@ val footer_hints_board_read :
     not drawn. The vote, reply and copy keys are the Board surface list's own
     bindings. *)
 
+val footer_hints_board_pending : string
+(** Board read controls while the post is loading, missing, or failed.
+    Projects the live [r], [Left / Esc], and [Tab] bindings. *)
+
 val footer_hints_fusion_detail : string
 (** The Fusion detail footer. Separate from {!footer_hints} because the
     surface is a drill-down the static per-surface table does not name. The

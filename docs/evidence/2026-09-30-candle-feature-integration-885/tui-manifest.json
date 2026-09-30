@@ -1,0 +1,145 @@
+{
+  "scope": "native purchase/equip HTTP receipts replayed through a remote-identity real TUI PTY",
+  "keeper": "portrait-http-probe",
+  "local_base": "/tmp/build_612c49_dune/masc-tui-keyboard-h4ec35st",
+  "remote_base": "/tmp/build_612c49_dune/masc-remote-portrait-mch4qvyo/candle-equipped-portrait/remote-server-workspace",
+  "workspace_mismatch_footer": "  MISMATCH local /tmp/build_612c49_dune/masc-tui-keyboard-h4ec35st (r:retry)  m:Usage  q:quit  \u2026?",
+  "tui_binary_sha256": "e4247f40f06f09dc383f6c6bac5ce25e651d3fd14bec78a8332ecd3610664f75",
+  "native_build": {
+    "release_version": "dev",
+    "binary_version": "dev",
+    "repo_version": "0.48.0",
+    "commit": "88531ac2f4d671b629567eb96113e7323bd6f9ff",
+    "commit_source": "embedded",
+    "binary_commit": "88531ac2f4d671b629567eb96113e7323bd6f9ff",
+    "binary_commit_source": "embedded",
+    "ocaml_dos_core": {
+      "source_digest": "307ce3cb738c345eda66091f2d01ba5f",
+      "pinned_source_digest": "307ce3cb738c345eda66091f2d01ba5f",
+      "matches_pin": true
+    },
+    "provenance_source": "self_observed",
+    "executable_sha256": "ad0c3029d619fc319c38bbfa8bf74da70fa99e398316175af739a86c970e4d83",
+    "binary_commit_unix_ts": 1790725844.0,
+    "binary_commit_age_seconds": 404,
+    "repo_head_commit": "88531ac2",
+    "repo_head_commit_source": "runtime_repo_head",
+    "repo_head_commit_unix_ts": 1790725844.0,
+    "repo_head_commit_age_seconds": 404,
+    "executable_path": "/home/runner/work/masc/masc/_build/default/test/test_keeper_portrait_http.exe",
+    "executable_dir": "/home/runner/work/masc/masc/_build/default/test",
+    "repo_root": "/home/runner/work/masc/masc",
+    "runtime_instance_id": "01a0ef9a-1751-7000-8ab8-ba7166f51b4d",
+    "started_at": "2026-09-29T23:57:28Z",
+    "uptime_seconds": 0
+  },
+  "roster_requests": [
+    "before",
+    "before",
+    "equipped",
+    "equipped",
+    "missing-identity",
+    "missing-identity",
+    "failed",
+    "empty",
+    "equipped",
+    "equipped",
+    "equipped"
+  ],
+  "pixel_dimensions": [
+    160,
+    160
+  ],
+  "before_rgba_sha256": "913647dd6c1dfdade9247b652869e86f7397f6582e2128dca6b88619c72c8f90",
+  "equipped_rgba_sha256": "925a6ddc00e38698a415a82910d882e12c1b9322af0ca83e6718d4ac7a87d14d",
+  "fresh_refresh_matches": true,
+  "failure_empty_recovery_matches": true,
+  "metadata_failure_preserves_lifecycle": true,
+  "workspace_switch_withdraws_delete_confirmation": true,
+  "posts": [
+    {
+      "path": "/mcp",
+      "body": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+          "protocolVersion": "2025-06-18",
+          "capabilities": {},
+          "clientInfo": {
+            "name": "masc-tui",
+            "version": "0.48.0"
+          }
+        }
+      }
+    },
+    {
+      "path": "/mcp",
+      "body": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+          "protocolVersion": "2025-06-18",
+          "capabilities": {},
+          "clientInfo": {
+            "name": "masc-tui",
+            "version": "0.48.0"
+          }
+        }
+      }
+    },
+    {
+      "path": "/api/v1/keepers/portrait-http-probe/boot",
+      "body": {}
+    },
+    {
+      "path": "/mcp",
+      "body": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+          "protocolVersion": "2025-06-18",
+          "capabilities": {},
+          "clientInfo": {
+            "name": "masc-tui",
+            "version": "0.48.0"
+          }
+        }
+      }
+    },
+    {
+      "path": "/mcp",
+      "body": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+          "protocolVersion": "2025-06-18",
+          "capabilities": {},
+          "clientInfo": {
+            "name": "masc-tui",
+            "version": "0.48.0"
+          }
+        }
+      }
+    },
+    {
+      "path": "/mcp",
+      "body": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+          "protocolVersion": "2025-06-18",
+          "capabilities": {},
+          "clientInfo": {
+            "name": "masc-tui",
+            "version": "0.48.0"
+          }
+        }
+      }
+    }
+  ]
+}

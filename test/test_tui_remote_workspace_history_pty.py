@@ -35,6 +35,9 @@ LATE = b"workspace-a-late-history-must-not-return"
 RECOVERED = b"workspace-a-current-history-after-return"
 DRAFT = b"unsent-draft-owned-by-workspace-a"
 WAIT_SECONDS = 8.0  # Fixture failure deadline, not a product refresh policy.
+# Runtime identities are the response-generation barrier below. Keep the
+# lifecycle/runtime column visible instead of waiting for a hidden cell.
+TERMINAL_COLUMNS = h.KEEPER_RUNTIME_COLUMN_COLUMNS
 
 
 def screen(output: bytearray) -> bytes:
@@ -183,7 +186,7 @@ def run(binary: str, captures: Path | None) -> None:
             wire.publish("b-after-late")
             await_screen(lambda text: b"b.settled" in text and b"MISMATCH local " in text,
                          "fresh B roster after the late response was not applied")
-            h.resize_and_wait(process, fd, output, rows=35, columns=120,
+            h.resize_and_wait(process, fd, output, rows=35, columns=TERMINAL_COLUMNS,
                              needle=b"b.settled", controls=(h.FULL_REDRAW,))
             assert BEFORE not in screen(output) and LATE not in screen(output)
             assert DRAFT not in screen(output), "A's input was relabelled as a remote draft"
@@ -220,7 +223,7 @@ def run(binary: str, captures: Path | None) -> None:
     h.run_terminal_scenario(binary,
         description="workspace change withdraws held chat history and retains its unsent draft",
         interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
-        http_requests=posts, refresh=0.5, terminal_rows=34, terminal_cols=120)
+        http_requests=posts, refresh=0.5, terminal_rows=34, terminal_cols=TERMINAL_COLUMNS)
 
 
 if __name__ == "__main__":

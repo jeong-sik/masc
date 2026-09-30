@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="320" viewBox="0 0 320 320" role="img" aria-labelledby="title desc">
+  <title id="title">MASC candle</title>
+  <desc id="desc">A smiling ivory candle with crimson horns, rosy cheeks, an amber flame and a golden dish on a plum backdrop.</desc>
+  <!-- README illustration based on Keeper_portrait_look.mascot; not a runtime capture. -->
+  <defs>
+    <radialGradient id="plum"><stop stop-color="#594060"/><stop offset="1" stop-color="#302238"/></radialGradient>
+    <linearGradient id="wax" x2="1" y2="1"><stop stop-color="#fff7df"/><stop offset="1" stop-color="#e8d7b7"/></linearGradient>
+    <linearGradient id="fire" x2="0" y2="1"><stop stop-color="#ffcd70"/><stop offset="1" stop-color="#f07845"/></linearGradient>
+  </defs>
+  <circle cx="160" cy="160" r="150" fill="url(#plum)"/>
+  <ellipse cx="160" cy="263" rx="73" ry="14" fill="#201825" opacity=".5"/>
+  <g stroke="#3d2535" stroke-width="4" stroke-linejoin="round">
+    <path d="M107 155 Q76 142 81 97 Q101 118 123 123Z" fill="#cb5261"/>
+    <path d="M213 155 Q244 142 239 97 Q219 118 197 123Z" fill="#cb5261"/>
+    <ellipse cx="160" cy="250" rx="73" ry="17" fill="#c18c47"/>
+    <ellipse cx="160" cy="244" rx="73" ry="12" fill="#edc77c"/>
+    <rect x="107" y="115" width="106" height="130" rx="23" fill="url(#wax)"/>
+    <path d="M108 133 Q115 118 127 126 L127 151 Q127 163 137 162 Q145 161 145 151 L145 132 Q157 125 177 133 L177 143 Q177 153 186 153 Q195 153 195 142 L195 127 Q206 125 211 133" fill="#fff7df" stroke="#ddc9a8" stroke-width="3"/>
+    <path d="M160 117 L160 103" fill="none" stroke-linecap="round"/>
+    <path d="M160 107 C124 98 139 70 160 43 C157 66 191 76 179 96 Q173 107 160 107Z" fill="url(#fire)"/>
+  </g>
+  <path d="M160 101 Q147 93 161 77 Q177 94 160 101" fill="#fff1ae"/>
+  <g fill="#392c3c"><ellipse cx="138" cy="181" rx="6" ry="9"/><ellipse cx="182" cy="181" rx="6" ry="9"/></g>
+  <g fill="#e9a29c" opacity=".8"><ellipse cx="123" cy="198" rx="10" ry="6"/><ellipse cx="197" cy="198" rx="10" ry="6"/></g>
+  <path d="M149 201 Q153 209 160 202 Q167 209 171 201" fill="none" stroke="#392c3c" stroke-width="3" stroke-linecap="round"/>
+  <g fill="#edc77c"><path d="m58 183 3-8 3 8 8 3-8 3-3 8-3-8-8-3Z"/><circle cx="251" cy="205" r="3"/><circle cx="111" cy="60" r="2"/></g>
+</svg>

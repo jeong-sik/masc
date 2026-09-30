@@ -281,6 +281,29 @@ status: reference
   [Keeper_unified_prompt](../../lib/keeper/keeper_unified_prompt.mli),
   [Keeper_prompt](../../lib/keeper/keeper_prompt.mli)
 
+**Keeper Portrait (Keeper 초상화)**
+: Keeper의 고유 시각 표현인 양초 임프(candle imp). 몸체(`body`)와 장비(`equipment`)의
+  두 층위로 구성된다. 몸체는 왁스 색상(`wax`: Ivory·Peach·Mint·Lavender·Sky·Butter·Rose·Charcoal 8종),
+  불꽃(`flame`: Ember·Azure·Jade·Violet·Pink·Gold 6종), 뿔 모양(`horn_style`: Nub·Long·One·Ram 4종),
+  뿔 색상(`horn_colour`: Crimson·Soot·Brass·Bone·Blossom 5종), 눈(`eyes`: Bean·Dot·Happy·Sleepy·Sparkle·Wink 6종),
+  입(`mouth`: W·Smile·O·Flat·Fang 5종), 볼터치(`blush`), 흘러내린 왁스(`drips`: 0~3개), 둥근 배경
+  색상(`backdrop_hue`)으로 이루어지며, Keeper 이름의 도메인 분리 SHA-256과 SplitMix64 난수
+  생성기로부터 결정론적으로 도출된다. 저장소에 별도 저장할 필요 없이 동일한 이름은 항상 동일한 몸체를
+  갖는다. 장비는 5개 슬롯으로 양초가 착용하는 아이템이다 — `face`(Bare_face·Glasses·Shades·Eye_patch·
+  Plaster·Freckles·Beard 7종), `neck`(Bare_neck·Scarf·Bow_tie·Medal 4종), `head`(Bare_head·Bow·
+  Crown·Beanie 4종), `hand`(Empty_hand·Book·Mug·Quill 4종), `base`(No_dish·Dish of Gilt/Silver/Oak 4종).
+  시작 장비는 이름의 별도 해시로 정해져 몸체와 독립적이다. MASC 자체의 고유 양초인 `mascot`은
+  TUI 시작 화면과 `/about`에 표시된다(Ivory 왁스, Ember 불꽃, Long Crimson 뿔, Bean 눈, "w" 입,
+  Blush, Gilt 접시, 무착용). MCP 도구 `keeper_portrait_read`는 PNG 아티팩트와 시작 장비,
+  액세서리 카탈로그를 반환하며 `preview_item`으로 장착 권한 변경 없이 임시 미리보기가 가능하다.
+  TUI에서는 상단 바 축약 캔들, 모자이크 카드, 엠블럼 화면에 렌더된다. 시작 화면과 `/about`의
+  마스코트 표시 스타일은 2D 초상화인 `painted`와 3D 점묘 양초인 `dotted`가 있다.
+  → [Keeper_portrait_look](../../lib/keeper_portrait/keeper_portrait_look.mli) ·
+  [Keeper_portrait_item](../../lib/keeper_portrait/keeper_portrait_item.mli) ·
+  [Keeper_portrait_draw](../../lib/keeper_portrait/keeper_portrait_draw.mli) ·
+  [Keeper_portrait_solid](../../lib/keeper_portrait/keeper_portrait_solid.mli) ·
+  [TUI candle styles](../TUI-GUIDE.md)
+
 **Ask (질문)**
 : Keeper가 운영자에게 묻는 durable 질문 묶음. `masc_ask`가 만들고,
   `masc_ask_status`·`masc_ask_withdraw`가 조회·철회하며, 답변은 별도 wake로
@@ -711,7 +734,11 @@ status: reference
     `usage-read`를 선언했으면 Keeper turn walk가 해당 endpoint를 한 번 읽는다(#38975).
     그 보고에서 모델 호출을 막는 창이 한도까지 소진된 경우에만 별도
     `Runtime_quota_window` 증거로 기록하고, 이후 후보 순서가 그 증거를 읽어 해당 scope를
-    뒤로 둔다. Muse의 모델 오류 뒤 `usage/read`는 선택된 계정의 소진 창을 확인해
+    뒤로 둔다. Codex turn 이 사용량 소진(`usageLimitExceeded`)으로 거절되면 같은 계정의
+    `account/rateLimits/read` 를 한 번 읽어 표를 갱신한다. 거절된 호출의 `limit_id`를
+    식별할 수 없으므로 단일 버킷도 휴식 시각으로 쓰지 않고 기존 `Observed`를 유지한다(#39997).
+    HTTP 403 뒤 읽기는 과거 리셋으로 거절 증거를 지우지 않는다.
+    Muse의 모델 오류 뒤 `usage/read`는 선택된 계정의 소진 창을 확인해
     `Runtime_quota_window`에만 기록한다(#39810). 이 읽기는 사용량 관측값을 이 표에
     추가하지 않고 실패한 turn도 재전송하지 않는다. 소진율이나 리셋 시각만으로 일반
     가용성을 추론하는 것은 아니다.
@@ -1025,12 +1052,20 @@ status: reference
   쥔 참가자만 기계의 시간을 움직인다. 다른 참가자의 시간 이동 요청은 거절되지만
   화면은 볼 수 있다.
   `masc_dos_pass`로 Keeper에게 넘기면 보드 글이 그 Keeper를 @멘션해 깨운다.
+  모든 요청이 자격증명을 실어야 하는 환경(인증 켜짐·토큰 필수)에서는 기계 앞에
+  앉은 이름(`Play_seat.hand_to`가 돌려주는 Keeper·운영자·만료되지 않은 초대)에게만
+  넘길 수 있고, 다른 이름은 아무 일도 일어나기 전에 거절된다. 그 목록을 읽지 못하면
+  `Seats_unknown`으로 거절한다. 이름을 스스로 적을 수 있는 환경에는 목록이 없어
+  넘김이 그대로 통과한다.
   쥔 Keeper가 일시정지되거나 정지하면 다음 움직임 전에 풀리고, 만료된 `Player`
-  초대의 조종권도 풀린다. 충돌 뒤 자동 재시작을 기다리거나 막 켜지는 중인 Keeper는
-  그대로 쥔다. 조종권의 이름은 차례 기록이며 권한 증명이 아니다. `Player` 권한은
-  별도 자격증명으로 검사한다.
+  초대의 조종권도 풀린다. 모든 요청이 자격증명을 실어야 하는 환경에서는 Keeper가
+  아니면서 자격증명 파일이 없는 이름(회수된 초대)의 조종권도 풀린다. 자격증명
+  파일을 읽지 못한 경우는 없는 것으로 보지 않고 그대로 쥔다. 충돌 뒤 자동 재시작을
+  기다리거나 막 켜지는 중인 Keeper는 그대로 쥔다. 조종권의 이름은 차례 기록이며
+  권한 증명이 아니다. `Player` 권한은 별도 자격증명으로 검사한다.
   → [Dos_lane.pass](../../lib/dos_lane/dos_lane.mli) ·
   [Play_seat.participants](../../lib/play/play_seat.mli) ·
+  [Play_seat.hand_to](../../lib/play/play_seat.mli) ·
   [Keeper_dos_controller.holder_left](../../lib/keeper/keeper_dos_controller.mli)
 
 **Shared DOS Play Invite (공유 DOS 플레이 초대)**
@@ -1038,8 +1073,10 @@ status: reference
   공유 DOS 기계를 보고 조작한다. 초대 이름은 입력과
   조종권의 `who`로 기록되며 Keeper 이름과 겹칠 수 없다. 회수는 자격증명을 지우고
   그 이름이 쥔 조종권의 해제를 시도한다. 해제에 실패하거나 결과가 불명확하면 같은
-  이름으로 다시 회수할 수 있다.
+  이름으로 다시 회수할 수 있다. 링크는 AI 에이전트에게 넘겨도 된다. 에이전트는
+  `/play/agent.md`(에이전트 안내)를 읽고 MCP(`/mcp/play`)나 HTTP 로 같은 자리에 앉는다.
   → [Play_invite](../../lib/play/play_invite.mli) ·
+  [Server_routes_http_routes_play_guide](../../lib/server/server_routes_http_routes_play_guide.mli) ·
   [TUI play invites](../TUI-GUIDE.md)
 
 **기계 체크포인트 (Machine Checkpoint)**
@@ -1138,6 +1175,21 @@ status: reference
   [Dos_lane.recent_activity](../../lib/dos_lane/dos_lane.mli),
   [Masc_tui_machine_live.activity_of](../../bin/masc_tui_machine_live.mli),
   [Masc_tui_msx.shows_sidebar](../../bin/masc_tui_msx.mli)
+
+**Agent Core Hook**
+: Agent 실행의 정해진 시점에 호스트가 등록한 동기 판단 콜백. `hook_event`
+  (BeforeTurn·BeforeTurnParams·AfterTurn·PreToolUse·PostToolUse·PostToolUseFailure·
+  OnStop·OnError·OnToolError) 하나를 받아 `hook_decision`
+  (Continue·AdjustParams·ElicitInput·ElicitToolApproval·Nudge·HookFailed·Block)을
+  돌려주는 함수다(`type hook = hook_event -> hook_decision`). `Block`은
+  PreToolUse에서만 정당하고, 호스트는 그 도구를 실행하지 않고 `is_error=true`
+  결과를 낸다. Hook은 **호스트 프로세스 안의 호출 지점**일 뿐이라 설치·격리
+  worker가 아니고, 출력 행·근거 보존·`lane_output` 연결 같은 Add-on 계약을 갖지
+  않는다. 판단 하나를 사건 시점에 부르는 것만 보면 Lane Add-on의 판단 모듈과 같은
+  메커니즘이므로, 'Hook과 다르다'는 주장은 그런 계약이 필요해지는 지점부터만
+  성립한다. **Keeper hook**(매 turn 턴별 문맥을 조립해 얹는 관행)과는 다른 층의
+  용어다.
+  → [Hooks_agent_core](../../packages/agent_core/lib/base/hooks.mli)
 
 **Lane Add-on**
 : 기존 MASC 원장과 실행 환경 위에 붙는 선택적 관측·관계 레이어. MSX Lane의 머신,
@@ -1433,6 +1485,33 @@ status: reference
     `not_loaded` 중 하나로 보여 준다. `Goals 블록 (Overview Goals)`의 진행 바는 이 값이
     아니라 연결된 Task 완료 수다.
   → [Goal_measurement](../../lib/goal/goal_measurement.mli)
+
+**Candle (보상 화폐)**
+: Goal 완료에 대해 Keeper가 받는 보상 화폐. 정수 `milli-candle`로 센다(1 Candle = 1,000 milli-candle).
+  부동소수점 단위를 쓰지 않는다.
+  - 원장(`candle-ledger.jsonl`): `<base-path>/.masc/candle-ledger.jsonl`에 한 줄씩 이벤트를
+    덧붙이는 전용 원장. 각 행은 `kind`·`at`과 해당 종류의 필드를 담은 닫힌 JSON 객체다. 현재 원장에
+    기록되는 사건은 6종(`Snapshot`·`Payout_owed`·`Candidates`·`Unattributed`·`Paid`·`Payout_failed`)이며,
+    잔액은 파일에 누적 값을 따로 적지 않고 원장의 `Paid` 사실을 순서대로 재생하여 계산한다. 헌법·승인·도구 호출 원장이나
+    `goal_verifications.json`(검증 원장)과 다른 별개 원장이다.
+  - 발행과 지급: Goal이 검증기를 통과(`Snapshot`)하고 사람의 확정(`Confirm_completion`)으로
+    `Completed`가 되면 지급 의무(`Payout_owed`)가 생긴다. 백그라운드 지급 일꾼이 기여 Task와 Keeper를
+    선별(`Candidates`)해 모델 감정을 거쳐 `Paid` 이벤트 한 줄로 지급을 기록한다. 분배는 한 줄에 원자적으로 적히므로
+    일부 Keeper만 지급되는 불완전 상태가 없다. 기여자가 없으면 `Unattributed`, 오류 시 `Payout_failed`를 남긴다.
+  - 사용처 한정: Candle로 살 수 있는 것은 초상화 장신구(**Keeper Portrait**의 장비 아이템)뿐이다.
+    도구, 스킬, 모델, 런타임 예산 등 다른 자원은 구매할 수 없다(헌법 불변식). 상점 구매와 착용 반영은
+    RFC 단계적 구현에 따르며, 현재 원장 스키마에는 포함되지 않는다.
+  - 잔액 감쇠 규범: 헌법(`<candle>`, `no_wall_clock_death` 예외)은 잔액의 지수 감쇠를 요구한다.
+    현재 빌드의 잔액(`Candle_balance.of_events`)은 `Paid` 사실의 누적이며 시간 감쇠를 적용하지 않고,
+    반감기 설정 키는 아직 없다(RFC의 `HalfLifeSet` 이벤트 및 반감기 설정 계획).
+    원장에 기록된 과거 사실은 지워지지 않는 불변식을 유지하며, 이는 `no_wall_clock_death` 불변식의
+    유일한 명시적 예외 요구다(Task·Goal·Board 상태는 만료시키지 않는다).
+  → [Candle_event](../../lib/candle/candle_event.mli) ·
+  [Candle_balance](../../lib/candle/candle_balance.mli) ·
+  [Candle_ledger](../../lib/candle_store/candle_ledger.mli) ·
+  [Candle_time](../../lib/candle/candle_time.mli) ·
+  [docs/constitution.xml](../constitution.xml) ·
+  [docs/rfc/RFC-goal-candle-ledger.md](../rfc/RFC-goal-candle-ledger.md)
 
 **Schedule (예약)**
 : 정한 시각에 Keeper를 깨우라는 요청. 저장되므로 서버를 다시 켜도 남는다. 만들기·조회·
@@ -1959,6 +2038,33 @@ status: reference
   TUI와 대시보드의 표시 전용(display only)이며, 커미터가 작성자 이름을 임의
   지정할 수 있으므로 권한(authority)이나 실행 증명으로 삼지 않는다.
   → [Server_repository_pulls](../../lib/server/server_repository_pulls.mli)
+
+**Stacked PR (스택 PR)**
+: 대규모 변경이나 연속 작업을 20k 토큰 이하의 작은 단위로 쪼개어 계층적으로 쌓아 올리는 PR 구조.
+  에이전트 협업의 컨텍스트 초과와 병목을 막고 빠른 릴리스 순환을 보장한다(헌법 `<work_unit>`·`<build_and_ci>`·`<merge>`).
+  - 브랜치 계층: 스택의 가장 바닥(bottom) PR만 `main`을 base로 삼고, 그 위의 상위 PR들은 각자
+    직전 스택 브랜치를 base로 지정한다. 기능(피처) 개발 스택과 CI·인프라 개선 스택은 섞지 않고
+    각자의 독립 스택으로 분리해 진행한다.
+  - Native Stack: REST PR의 `stack`과 Stacks API가 구성·순서·최종 base의 근거다.
+    선택한 PR까지의 미병합 하위 PR은 비동기 병합 API로 함께 병합할 수 있다. 부모 미병합이나
+    non-main base만으로 차단하거나 수동 retarget하지 않는다. 전체 포함 범위를 리뷰한다.
+    Native Stack이 아닌 브랜치 체인은 부모부터 처리한다. base나 head가 바뀌면 다시 검토한다.
+    → [Native GitHub Stack 절차](../guides/NATIVE-GITHUB-STACKS.md)
+  - 검증과 승인(2026-09-30 운영 정책): 일반 스택(Ordinary stack)은 CI 실행 여부나 대기에
+    묶이지 않고, 현재 head에 대한 다각도 소스 검토(기능·논리·코드 청결도)를 통해 P0·P1·P2 결함이
+    없으면 즉시 승인(Approve)한다. 판정 줄은 `verdict: PASS head: <40-hex SHA> by: <reviewer>`
+    형식을 쓰며, CI run ID를 요구하지 않는다. 사소한 P3(서식·단순 정리)는 승인을 막지 않고 모아서
+    일괄 수거한다.
+  - 빌드와 릴리스 집약: 일반 PR이나 스택 바닥 PR은 명시적으로 요청한 짧고 가벼운 최소 검사(`pr-check.yml`의
+    구문·자격증명 검사, `ci.yml`의 Core 라이브러리 빌드)만 확인하며, 전체 테스트 그래프는 돌리지 않는다.
+    "2분 정도"는 검사 규모를 설명하는 예시이며 강제 종료 시간이나 성공·실패 판정 기준이 아니다.
+    휴리스틱이나 임의 숫자·문구·snapshot 검사는 만들지 않는다. 전체 검증(Full CI Cycle:
+    `full-check.yml` 및 `release-candidate.yml`)은 개별 PR이 아닌 `release/vX.Y.Z` 브랜치나
+    Tag 단계에 집약하여 수행한다.
+  → [docs/constitution.xml](../constitution.xml) ·
+  [docs/AGENTIC-WORKFLOW.md](../AGENTIC-WORKFLOW.md) ·
+  [docs/CI-REVIEW-WORKFLOW.md](../CI-REVIEW-WORKFLOW.md) ·
+  [scripts/review/merge-guard.sh](../../scripts/review/merge-guard.sh)
 
 **Disposable Build Volume (일회용 빌드 볼륨)**
 : Apple container 샌드박스에서 Keeper의 `_build` 출력이 놓이는, Keeper마다 하나씩

@@ -91,6 +91,21 @@ let test_the_candle_stands_centred_over_its_caption () =
     lines;
   check bool "centred left to right" true (abs (left - (cols - left - box.View.cols)) <= 1)
 
+let test_mosaic_uses_the_compact_candle () =
+  let out = laid_out View.Mosaic in
+  let box = Option.get (View.fit View.Mosaic ~max_cols:cols ~max_rows:picture_rows) in
+  let body, equipment = Keeper_portrait_look.mascot in
+  let image = Draw.render_compact_posed body equipment Draw.still box.View.size in
+  let expected =
+    View.lines ~project View.Mosaic box image
+    |> List.map (fun line -> String.make ((cols - box.View.cols) / 2) ' ' ^ line)
+  in
+  let top = (rows - box.View.rows - List.length caption - 1) / 2 in
+  let actual =
+    List.filteri (fun index _ -> index >= top && index < top + box.View.rows) out.Screen.lines
+  in
+  check (list string) "the mosaic contains the compact candle" expected actual
+
 let test_pixels_leave_blank_rows_and_place_the_picture_there () =
   let out = laid_out pixels in
   check bool "drawn" true (out.Screen.drawn = Screen.Moving);
@@ -203,14 +218,14 @@ let test_a_frame_records_only_what_it_drew () =
    thrown away. *)
 let retire () =
   View.begin_frame ();
-  View.flush ~rewritten:(fun _ -> false) ~write:ignore
+  View.flush Masc_tui_frame_presenter.Unchanged ~write:(fun (_bytes : string) -> ())
 
 let test_a_body_asks_for_its_picture () =
   View.set_display pixels;
   retire ();
   ignore (Screen.body ~cols ~rows ~caption ~elapsed:0.0 ~origin);
   let written = Buffer.create 4096 in
-  View.flush ~rewritten:(fun _ -> false) ~write:(Buffer.add_string written);
+  View.flush Masc_tui_frame_presenter.Unchanged ~write:(Buffer.add_string written);
   let bytes = Buffer.contents written in
   let expected = Option.get (laid_out pixels).Screen.placement in
   check string "the laid-out placement, and only it, is sent"
@@ -218,11 +233,114 @@ let test_a_body_asks_for_its_picture () =
   retire ();
   View.set_display View.No_picture
 
+let about ~cols ~frame display =
+  Screen.about_rows ~style:Screen.Painted ~cols ~rows:24 ~caption
+    ~frame ~keepers:["fixture-alpha"; "fixture-bravo"; "fixture-charlie"; "fixture-delta"; "extra"]
+    ~display ~project ~origin
+
+let test_the_arrival_gathers_then_stops () =
+  let at_start = about ~cols:76 ~frame:0 pixels in
+  let gathered = about ~cols:76 ~frame:7 pixels in
+  let finished = about ~cols:76 ~frame:Screen.final_frame pixels in
+  check int "narrow view shows two registered Keepers" 2 at_start.Screen.visible_keepers;
+  check bool "other registered Keepers have a count" true
+    (List.exists (fun line -> String.equal (trimmed line) "+3 more Keepers")
+       at_start.Screen.lines);
+  check bool "the arrival is moving at first" true
+    (at_start.Screen.drawn = Screen.Moving);
+  check bool "the final frame is still" true
+    (finished.Screen.drawn = Screen.Still);
+  let positions frame =
+    frame.Screen.placements
+    |> List.filter (fun p ->
+         p.View.image_id <> Masc_tui_graphics.image_id Masc_tui_graphics.Mascot)
+    |> List.map (fun p -> p.View.column)
+  in
+  check bool "the Keepers gather beside the candle" true
+    (positions at_start <> positions gathered);
+  check (list int) "they disperse into the final roster" (positions at_start)
+    (positions finished);
+  check (list int) "every portrait has its own Kitty id"
+    [41; 43; 44]
+    (List.map (fun p -> p.View.image_id) at_start.Screen.placements
+     |> List.sort Int.compare)
+
+let test_wide_and_mosaic_keep_the_roster () =
+  let wide = about ~cols:136 ~frame:Screen.final_frame View.Mosaic in
+  check int "wide view shows four registered Keepers" 4 wide.Screen.visible_keepers;
+  check bool "the fifth Keeper is counted" true
+    (List.exists (fun line -> String.equal (trimmed line) "+1 more Keepers")
+       wide.Screen.lines);
+  check bool "mosaic draws portraits in text cells" true
+    (List.exists has_block wide.Screen.lines);
+  check bool "mosaic asks for no Kitty placement" true
+    (wide.Screen.placements = []);
+  List.iter
+    (fun line ->
+      check bool "no about row loses its edge" true
+        (Layout.display_width line <= 136))
+    wide.Screen.lines
+
+let test_no_picture_keeps_the_count () =
+  let plain = about ~cols:76 ~frame:Screen.final_frame View.No_picture in
+  check bool "no picture asks for no animation tick" true
+    (plain.Screen.drawn = Screen.Absent);
+  check int "four Keeper names remain readable without colour" 4
+    plain.Screen.visible_keepers;
+  check bool "the remaining registered Keeper is counted" true
+    (List.exists (fun line -> String.equal (trimmed line) "+1 more Keepers")
+       plain.Screen.lines)
+
+let test_every_arrival_frame_fits_its_terminal () =
+  List.iter
+    (fun cols ->
+      List.iter
+        (fun display ->
+          for frame = 0 to Screen.final_frame do
+            let scene = about ~cols ~frame display in
+            List.iter
+              (fun line ->
+                check bool "arrival row fits without a cut" true
+                  (Layout.display_width line <= cols))
+              scene.Screen.lines;
+            List.iter
+              (fun placement ->
+                check bool "Kitty picture stays inside its frame" true
+                  (placement.View.column >= snd origin
+                   && placement.View.column + placement.View.box.View.cols
+                      <= snd origin + cols))
+              scene.Screen.placements
+          done)
+        [pixels; View.Mosaic])
+    [76; 136]
+
+let test_about_candle_frames_are_reused_with_a_bound () =
+  let mascot_image scene =
+    scene.Screen.placements
+    |> List.find (fun p ->
+         p.View.image_id = Masc_tui_graphics.image_id Masc_tui_graphics.Mascot)
+    |> fun placement -> placement.View.image
+  in
+  let first = mascot_image (about ~cols:76 ~frame:4 pixels) in
+  ignore (about ~cols:76 ~frame:7 pixels);
+  let repeated = mascot_image (about ~cols:76 ~frame:4 pixels) in
+  check bool "returning to a candle frame reuses its image" true (first == repeated);
+  List.iter
+    (fun display ->
+      List.iter
+        (fun frame -> ignore (about ~cols:76 ~frame display))
+        (List.init (Screen.final_frame + 1) Fun.id))
+    [pixels; View.Mosaic];
+  check bool "the frame cache stays at sixteen images" true
+    (Screen.about_cached_frames () <= 16)
+
 let () =
   run "tui_emblem_screen"
     [ ( "layout"
       , [ test_case "the candle stands centred over its caption on /about" `Quick
             test_the_candle_stands_centred_over_its_caption
+        ; test_case "the mosaic uses the compact candle" `Quick
+            test_mosaic_uses_the_compact_candle
         ; test_case "pixels leave blank rows and place the picture there" `Quick
             test_pixels_leave_blank_rows_and_place_the_picture_there
         ; test_case "no picture draws the caption alone" `Quick
@@ -240,5 +358,15 @@ let () =
     ; ( "about"
       , [ test_case "it says only what was read" `Quick
             test_about_says_only_what_was_read
+        ; test_case "the arrival gathers then stops" `Quick
+            test_the_arrival_gathers_then_stops
+        ; test_case "wide mosaic keeps the roster" `Quick
+            test_wide_and_mosaic_keep_the_roster
+        ; test_case "no picture keeps the count" `Quick
+            test_no_picture_keeps_the_count
+        ; test_case "every arrival frame fits the terminal" `Quick
+            test_every_arrival_frame_fits_its_terminal
+        ; test_case "candle frames are reused within a bound" `Quick
+            test_about_candle_frames_are_reused_with_a_bound
         ] )
     ]

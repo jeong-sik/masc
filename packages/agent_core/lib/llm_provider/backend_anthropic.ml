@@ -166,7 +166,7 @@ let validate_thinking_controls wire (config : Provider_config.t) =
     (None | Some (Reasoning_effort.Low | Medium | High)) ->
     Provider_config.validate_reasoning_effort_request config
   | Capabilities.Anthropic_adaptive_between_tools, Some false,
-    Some (Reasoning_effort.None_ | Minimal | XHigh | Max) ->
+    Some (Reasoning_effort.None_ | Minimal | XHigh | Max | Ultra) ->
     Error
       (Printf.sprintf
          "model %S between_tools thinking accepts only low, medium or high effort"

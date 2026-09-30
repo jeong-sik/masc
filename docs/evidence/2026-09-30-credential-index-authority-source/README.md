@@ -35,3 +35,7 @@ These are isolated temporary workspace fixtures. HTTP request objects call produ
 The source receipts record OCaml 5.5.1 parsing only, targeted ignore-comment lint, diff whitespace, committed diff gates and public API/registration checks. Parsing is not typechecking, linking or native execution. Source hashes freeze the own code, fixture, registration, fragment and required contract; parent preservation receipts cover the existing feature suites and interfaces.
 
 No local Dune build, typecheck, native test, server/CLI runtime, network, CI result, installation or production observation was performed for this child. Its seven cases are prepared and have not been run. Parent source checks and older native results do not prove this index change. Root owns independent review, publication and exact published-head CI evidence.
+
+## Current index documentation correction
+
+After the first published source was reviewed, two retained cache/bucket comments were corrected to describe sorted current named owners and complete-record collision checks. The original `composition.json`, `source-checks.json` and `source-sha256.json` remain historical receipts for the preceding candidate; the original Auth base hash no longer identifies the file with corrected comments. The remaining eight recorded source hashes are unchanged. The correction changes no OCaml expression, interface, fixture or registration, and does not expand the scope of prior native evidence to a new head.

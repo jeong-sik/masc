@@ -928,9 +928,9 @@ let retire_prune_credential_in_transaction (Credential_transaction config) retir
     - Explicit invalidation from [save_credential] / [delete_credential]
       so writes through this module are visible immediately.
     - Token hash -> [agent_credential list] (not single value) so the
-      #9786 ambiguous-lookup warn path still sees all matches.  The
-      list is built in [list_credentials] order so first-match
-      semantics stay identical to the pre-cache implementation. *)
+      #9786 ambiguous-lookup warn path still sees all matches. Current named
+      owners are indexed in sorted name order; collision checks compare the
+      complete records rather than granting the first candidate authority. *)
 
 type credential_index_cache_entry = {
   loaded_at : float;
@@ -969,8 +969,8 @@ let build_token_index (creds : agent_credential list)
        in
        Hashtbl.replace idx cred.token (cred :: prev))
     creds;
-  (* Reverse each bucket so callers see [list_credentials] order
-     (first-match semantics match the legacy [List.filter] flow). *)
+  (* Restore the input credential order within each token bucket. The
+     caller supplies current named owners in sorted name order. *)
   Hashtbl.filter_map_inplace
     (fun _ entries -> Some (List.rev entries))
     idx;

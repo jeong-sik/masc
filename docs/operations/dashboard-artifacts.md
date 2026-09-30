@@ -25,8 +25,11 @@ to the build receipt, not the stamp.
 
 After the workflow is present on the default branch, dispatch the desired ref:
 
+
+Dispatch only for operator-requested verification or evidence required by a selected `ci:run` candidate. Reuse an existing run for the same purpose.
+
 ```sh
-gh workflow run dashboard-artifact.yml --repo jeong-sik/masc --ref <source-ref>
+gh workflow run dashboard-artifact.yml -f run_requested=true --repo jeong-sik/masc --ref <source-ref>
 ```
 
 Record the run ID and full `headSha` from that run. At the completion boundary,

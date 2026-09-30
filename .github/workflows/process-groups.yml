@@ -1,16 +1,20 @@
 name: Process group lifecycle
 on:
-  pull_request:
-    paths:
-      - 'lib/process/**'
-      - 'test/test_posix_spawn_process_mgr.ml'
-      - 'test/test_process_eio_coverage.ml'
-      - '.github/workflows/process-groups.yml'
+  workflow_call:
   workflow_dispatch:
 permissions:
   contents: read
+# Daily baseline and explicit proofs share one runner pool.
+concurrency:
+  group: proof-process-groups-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   process-groups:
+    concurrency:
+      group: masc-requested-proof
+      queue: max
+      cancel-in-progress: false
     strategy:
       fail-fast: false
       matrix:

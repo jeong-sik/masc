@@ -3,6 +3,10 @@ name: Dashboard artifact
 on:
   workflow_dispatch:
     inputs:
+      run_requested:
+        description: Operator-requested verification beyond the selected PR checks
+        type: boolean
+        default: false
       test_files:
         description: Space-separated dashboard feature test files to verify before packaging
         type: string
@@ -11,12 +15,18 @@ on:
 permissions:
   contents: read
 
+# Supersede only this request; the job pool below limits runner use.
 concurrency:
-  group: dashboard-artifact-${{ github.ref }}
-  cancel-in-progress: false
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}${{ github.event_name == 'workflow_dispatch' && !inputs.run_requested && format('-unrequested-{0}', github.run_id) || '' }}
+  cancel-in-progress: true
 
 jobs:
   bundle:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_requested }}
+    concurrency:
+      group: masc-requested-artifact
+      queue: max
+      cancel-in-progress: false
     name: Build and package dashboard
     runs-on: ubuntu-24.04
     timeout-minutes: 20

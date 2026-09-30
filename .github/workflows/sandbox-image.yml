@@ -1,21 +1,22 @@
 name: Keeper sandbox image
 
 on:
+  workflow_call:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - '.github/workflows/sandbox-image.yml'
-      - 'lib/keeper_sandbox_image/**'
-      - 'sandbox-images/base/**'
-      - 'scripts/verify-sandbox-creative-tools.py'
-      - 'scripts/verify-sandbox-image-archive.py'
-      - 'scripts/tests/test_sandbox_image_archive.py'
-
 permissions:
   contents: read
 
+# Daily baseline and explicit proofs share one runner pool.
+concurrency:
+  group: proof-sandbox-image-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   image:
+    concurrency:
+      group: masc-requested-proof
+      queue: max
+      cancel-in-progress: false
     strategy:
       fail-fast: false
       matrix:

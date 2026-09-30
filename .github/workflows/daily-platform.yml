@@ -1,0 +1,45 @@
+name: Daily platform verification
+
+on:
+  schedule:
+    # 18:13 UTC = 03:13 KST. Full Test runs at 02:43 KST in test.yml.
+    - cron: '13 18 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: daily-platform
+  cancel-in-progress: false
+
+# These reusable jobs share the single native-proof runner pool. Main, release
+# and selected PR compilation have independent pools and can still make progress.
+jobs:
+  antigravity-context:
+    uses: ./.github/workflows/antigravity-context.yml
+  apple-keychain:
+    uses: ./.github/workflows/apple-keychain.yml
+  bench-tests:
+    uses: ./.github/workflows/bench-tests.yml
+  browser-host:
+    uses: ./.github/workflows/browser-host-proof.yml
+  browser-stagehand:
+    uses: ./.github/workflows/browser-stagehand-proof.yml
+  installer:
+    uses: ./.github/workflows/installer-shell-path.yml
+  kata-volume:
+    uses: ./.github/workflows/kata-volume-smoke.yml
+  addon-images:
+    uses: ./.github/workflows/lane-addon-images.yml
+    with:
+      run_requested: true
+  dos-package:
+    uses: ./.github/workflows/lane-dos-package.yml
+  portable-python:
+    uses: ./.github/workflows/linux-portable-python.yml
+  process-groups:
+    uses: ./.github/workflows/process-groups.yml
+  sandbox-image:
+    uses: ./.github/workflows/sandbox-image.yml

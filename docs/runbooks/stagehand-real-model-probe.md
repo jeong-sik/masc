@@ -9,8 +9,11 @@ Keeper, or prove that a browser action completed.
 Dispatch the existing **Manual probe artifacts** workflow on the reviewed
 branch with target `stagehand-model-macos-arm64`:
 
+
+Dispatch only for operator-requested verification or evidence required by a selected `ci:run` candidate. Reuse an existing run for the same purpose.
+
 ```sh
-gh workflow run linux-x64-probe.yml --ref REVIEWED_PROBE_BRANCH \
+gh workflow run linux-x64-probe.yml -f run_requested=true --ref REVIEWED_PROBE_BRANCH \
   -f target=stagehand-model-macos-arm64
 ```
 

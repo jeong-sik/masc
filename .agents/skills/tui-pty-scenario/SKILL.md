@@ -99,9 +99,12 @@ AssertionError: timed out waiting for b'MASC Overview': b'...'
 
 ### 가족 하나를 Linux 에서
 
+
+수동 CI 는 운영자가 요청한 검증이나 `ci:run`으로 선택한 후보에 꼭 필요한 증거일 때만 실행한다. 기존 PR 검사와 중복 실행하지 않는다.
+
 ```sh
-gh workflow run test.yml --ref <branch> -f suite=test_tui_keyboard_input-<family>
-gh workflow run test.yml --ref <branch> -f suite=test_tui_keyboard_input   # 기본 산책
+gh workflow run test.yml -f run_requested=true --ref <branch> -f suite=test_tui_keyboard_input-<family>
+gh workflow run test.yml -f run_requested=true --ref <branch> -f suite=test_tui_keyboard_input   # 기본 산책
 ```
 
 `suite` 는 `test/<이름>.py` 파일 이름이나 `test/dune` 에 선언된 `runtest-<이름>` alias 이름을 받는다.

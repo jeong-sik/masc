@@ -72,6 +72,10 @@ on:
     - cron: "43 17 * * *"
   workflow_dispatch:
     inputs:
+      run_requested:
+        description: Operator-requested verification beyond the selected PR checks
+        type: boolean
+        default: false
       suite:
         description: >-
           Comma-separated test suites to build and run on their own instead of
@@ -101,33 +105,18 @@ permissions:
   # that step, so this scope is unused on every other path.
   issues: write
 
-# Two kinds of lane plus one per targeted run. A full dispatch shares a lane
-# with the other dispatches of the same ref, where a new dispatch cancels the
-# run in flight instead of stacking a second job for the same commit; the
-# scheduled run has a lane of its own that no dispatch can reach. The dispatch
-# lane was one for the whole repo. Parallel sessions each verify their own
-# branch by dispatching this workflow, so each dispatch cancelled another
-# branch's run: on 2026-09-29, 5 of the last 14 runs ended cancelled. A lane per ref
-# keeps the cancel where it is wanted (a newer dispatch of the same branch
-# supersedes an older one) and spends up to one full run per branch in
-# parallel, which the one-lane rule existed to avoid when a run took 180
-# minutes; a dispatched run now takes 13 to 19 minutes (the 15 most recent completed runs). One group for the whole repo did reach
-# it: on 2026-09-04 the scheduled run (17:43:56Z, 7aed1b696f) was
-# cancelled within two seconds by a branch dispatch created the same
-# second, and of this lane's first 13 runs none completed successfully.
-# A dispatch that names suites runs beside the full lane, not instead of
-# it, so it gets a group of its own keyed by run id: the first targeted
-# dispatch (33951571973, 2026-09-05 07:05:06Z) shared the dispatch lane
-# and cancelled a full run 82 minutes in (33947949528). On the schedule
-# there are no inputs, and `inputs.suite` is null; GitHub compares a null
-# with '' by coercing both to 0, so the test below is false and the
-# scheduled run keeps its lane.
+# Supersede only this request; the job pool below limits runner use.
 concurrency:
-  group: ${{ inputs.candidate_verification && format('candidate-test-{0}', github.run_id) || inputs.suite != '' && format('test-targeted-{0}', github.run_id) || github.event_name == 'workflow_dispatch' && format('test-dispatch-{0}', github.ref) || format('test-{0}', github.event_name) }}
+  group: ${{ inputs.candidate_verification && format('candidate-test-{0}', github.run_id) || inputs.suite != '' && format('test-targeted-{0}', github.run_id) || github.event_name == 'workflow_dispatch' && format('test-dispatch-{0}', github.ref) || format('test-{0}', github.event_name) }}${{ github.event_name == 'workflow_dispatch' && !inputs.run_requested && !inputs.candidate_verification && format('-unrequested-{0}', github.run_id) || '' }}
   cancel-in-progress: true
 
 jobs:
   test:
+    if: ${{ (github.event_name != 'workflow_dispatch' || inputs.run_requested || inputs.candidate_verification) }}
+    concurrency:
+      group: ${{ inputs.candidate_verification && 'masc-release-test' || github.event_name == 'schedule' && 'masc-nightly-test' || 'masc-requested-test' }}
+      queue: max
+      cancel-in-progress: false
     name: test suite
     runs-on: ubuntu-24.04
     # This cap counts from job start, not from the Test step. On an opam

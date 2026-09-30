@@ -9,25 +9,7 @@ name: Terminal-Bench harness tests
 # configs/render_configs.py copies into every rendered arm; and the two OCaml
 # sources tests/test_endpoint_env.py compares the env_file refusals with.
 on:
-  pull_request:
-    paths:
-      - 'benchmarks/terminal_bench/**'
-      - 'config/**'
-      - 'skills/**'
-      - 'lib/exec_shim/exec_shim.ml'
-      - 'lib/exec_ssh_protocol/exec_ssh_protocol.ml'
-      - '.github/workflows/bench-tests.yml'
-      - 'scripts/harness/perf/compare_tui_artifacts.py'
-      - 'test/test_tui_input_frame_pty.py'
-      - 'test/test_tui_artifact_comparison.py'
-      - 'scripts/harness/perf/linux_probe_artifact.py'
-      - 'scripts/harness/perf/server_artifact_session.py'
-      - 'scripts/harness/perf/compare_server_artifacts.py'
-      - 'test/test_server_artifact_comparison.py'
-      - 'scripts/harness/perf/checkpoint_history_artifact_session.py'
-      - 'scripts/harness/perf/compare_checkpoint_history.py'
-      - 'test/test_checkpoint_history_comparison.py'
-      - 'tools/rtev_trace/**'
+  workflow_call:
   workflow_dispatch:
     inputs:
       compare_checkpoint_history:
@@ -93,11 +75,17 @@ on:
         default: '0'
 permissions:
   contents: read
+# Daily baseline and explicit proofs share one runner pool.
 concurrency:
-  group: bench-tests-${{ inputs.compare_checkpoint_history && 'compare-checkpoint-history' || inputs.compare_server && 'compare-server' || inputs.compare_tui && 'compare-tui' || 'pytest' }}-${{ github.ref }}
+  group: proof-bench-tests-${{ github.ref }}
   cancel-in-progress: true
+
 jobs:
   pytest:
+    concurrency:
+      group: masc-requested-proof
+      queue: max
+      cancel-in-progress: false
     if: ${{ !inputs.compare_tui && !inputs.compare_server && !inputs.compare_checkpoint_history }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -134,6 +122,10 @@ jobs:
           sys.exit(1 if skipped else 0)
           PY
   compare-tui:
+    concurrency:
+      group: masc-requested-proof
+      queue: max
+      cancel-in-progress: false
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.compare_tui && !inputs.compare_server }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -186,6 +178,10 @@ jobs:
           path: comparison-results/
           if-no-files-found: warn
   server-harness-tests:
+    concurrency:
+      group: masc-requested-proof
+      queue: max
+      cancel-in-progress: false
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -196,6 +192,10 @@ jobs:
       - run: python3 -m unittest discover -s test -p test_server_artifact_comparison.py -v
       - run: python3 test/test_checkpoint_history_comparison.py
   compare-server:
+    concurrency:
+      group: masc-requested-proof
+      queue: max
+      cancel-in-progress: false
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.compare_server }}
     needs: server-harness-tests
     runs-on: ubuntu-24.04
@@ -246,6 +246,10 @@ jobs:
           if-no-files-found: warn
 
   compare-checkpoint-history:
+    concurrency:
+      group: masc-requested-proof
+      queue: max
+      cancel-in-progress: false
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.compare_checkpoint_history }}
     needs: server-harness-tests
     runs-on: ubuntu-24.04

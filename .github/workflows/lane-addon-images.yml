@@ -1,14 +1,30 @@
 name: Lane Add-on package images
 on:
-  workflow_dispatch: {}
-  pull_request:
-    paths:
-      - 'addons/**'
-      - '.github/workflows/lane-addon-images.yml'
+  workflow_call:
+    inputs:
+      run_requested:
+        type: boolean
+        default: false
+  workflow_dispatch:
+    inputs:
+      run_requested:
+        description: Operator-requested package image verification
+        type: boolean
+        default: false
 permissions:
   contents: read
+# Daily baseline and explicit proofs share one runner pool.
+concurrency:
+  group: proof-lane-addon-images-${{ github.ref }}${{ !inputs.run_requested && format('-unrequested-{0}', github.run_id) || '' }}
+  cancel-in-progress: true
+
 jobs:
   packages:
+    if: ${{ inputs.run_requested }}
+    concurrency:
+      group: masc-requested-proof
+      queue: max
+      cancel-in-progress: false
     runs-on: ubuntu-24.04
     outputs:
       matrix: ${{ steps.discover.outputs.matrix }}
@@ -33,6 +49,11 @@ jobs:
               output.write('matrix=' + json.dumps(matrix) + '\n')
           PY
   image:
+    if: ${{ inputs.run_requested }}
+    concurrency:
+      group: masc-requested-proof
+      queue: max
+      cancel-in-progress: false
     needs: packages
     strategy:
       fail-fast: false

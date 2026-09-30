@@ -29,13 +29,18 @@ on:
 permissions:
   contents: read
 
+# Supersede only this request; the job pool below limits runner use.
 concurrency:
-  group: pr-check-${{ github.event.pull_request.number }}-${{ github.event.pull_request.draft == true && 'draft' || 'ready' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   tla:
-    if: github.event.pull_request.draft == false
+    if: ${{ github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ci:run') }}
+    concurrency:
+      group: masc-selected-pr-tla
+      queue: max
+      cancel-in-progress: false
     name: ${{ github.event.pull_request.draft == true && 'Draft snapshot / TLA model check' || 'TLA model check' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -87,7 +92,11 @@ jobs:
   # they run now. The diff guards need the base commit present, hence
   # fetch-depth: 0.
   lint:
-    if: github.event.pull_request.draft == false
+    if: ${{ github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ci:run') }}
+    concurrency:
+      group: masc-selected-pr-lint
+      queue: max
+      cancel-in-progress: false
     name: ${{ github.event.pull_request.draft == true && 'Draft snapshot / lint suite' || 'lint suite' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -115,11 +124,15 @@ jobs:
       # live in run-lint-suite.sh -- that takes a base sha and knows nothing
       # about the head branch or the payload.
       - name: PR run is not stale
+        env:
+          PR_HEAD_BRANCH: ${{ github.event.pull_request.head.ref }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           bash scripts/check-pr-sync.sh \
-            --head-branch "${{ github.event.pull_request.head.ref }}" \
-            --expected-head-sha "${{ github.event.pull_request.head.sha }}" \
-            --pr-number "${{ github.event.pull_request.number }}"
+            --head-branch "$PR_HEAD_BRANCH" \
+            --expected-head-sha "$PR_HEAD_SHA" \
+            --pr-number "$PR_NUMBER"
 
       # These checks use only checked-in text, Bash and Python. Report them
       # alongside compilation without waiting for an OCaml toolchain.
@@ -190,7 +203,11 @@ jobs:
         run: bash scripts/ci/run-lint-suite.sh advisory
 
   check:
-    if: github.event.pull_request.draft == false
+    if: ${{ github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ci:run') }}
+    concurrency:
+      group: masc-selected-pr-ocaml
+      queue: max
+      cancel-in-progress: false
     name: ${{ github.event.pull_request.draft == true && 'Draft snapshot / dune build @check' || 'dune build @check' }}
     runs-on: ubuntu-24.04
     # Run 36009641291 selected 268 linked suites after a 5m40s PTY rule;
@@ -424,11 +441,14 @@ jobs:
   # asks for this).
   #
   # Its own job rather than a step in the one above, because it is a second
-  # full compile: as a step it would double that job's six minutes on the
-  # critical path, and as a job it runs beside it. The switch setup is the same
-  # composite actions, so the duplication is five lines.
+  # full compile with its own required result. Both builds share the one
+  # selected-PR OCaml runner slot; the switch setup uses the same composite action.
   release-check:
-    if: github.event.pull_request.draft == false
+    if: ${{ github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ci:run') }}
+    concurrency:
+      group: masc-selected-pr-ocaml
+      queue: max
+      cancel-in-progress: false
     name: ${{ github.event.pull_request.draft == true && 'Draft snapshot / dune build --profile release @check' || 'dune build --profile release @check' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -487,7 +507,11 @@ jobs:
   # load; RFC-0428 carries those numbers and the suite waits on that decision.
   # The type-check does not need to wait for it.
   dashboard-types:
-    if: github.event.pull_request.draft == false
+    if: ${{ github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ci:run') }}
+    concurrency:
+      group: masc-selected-pr-dashboard-types
+      queue: max
+      cancel-in-progress: false
     name: ${{ github.event.pull_request.draft == true && 'Draft snapshot / dashboard typecheck' || 'dashboard typecheck' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -567,9 +591,13 @@ jobs:
           if-no-files-found: error
 
   required-success:
+    if: ${{ github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ci:run') && always() }}
+    concurrency:
+      group: masc-selected-pr-required-success
+      queue: max
+      cancel-in-progress: false
     # Draft snapshots have separate names and cannot publish a required context.
-    # A Ready summary always runs, including when a required job fails or skips.
-    if: ${{ always() && github.event.pull_request.draft == false }}
+    # A selected Ready summary also runs when a required job fails or skips.
     name: ${{ github.event.pull_request.draft == true && 'Draft snapshot / PR required success' || 'PR required success' }}
     needs: [tla, lint, check, release-check, dashboard-types]
     runs-on: ubuntu-24.04

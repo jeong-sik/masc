@@ -122,8 +122,11 @@ REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
    멈춤을 못 가른다. 상한 코앞의 스위트는 재실행해도 같은 결과가 나오기 쉽다.
 7. **main 에서도 빨간가.** 스위트 이름으로 main 에서 한 번 돌려 대조한다.
 
+
+   수동 CI 는 운영자가 요청한 검증이나 `ci:run`으로 선택한 후보에 꼭 필요한 증거일 때만 실행한다. 기존 PR 검사와 중복 실행하지 않는다.
+
    ```sh
-   gh workflow run test.yml --ref main -f suite=<스위트 이름 또는 runtest alias 이름>
+   gh workflow run test.yml -f run_requested=true --ref main -f suite=<스위트 이름 또는 runtest alias 이름>
    ```
 
    main 에서도 빨가면 그 PR 에서 고치지 않는다. 이슈 하나로 적고 PR 에는 그 사실을 댓글로 남긴다.

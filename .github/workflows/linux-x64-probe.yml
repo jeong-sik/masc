@@ -3,6 +3,10 @@ name: Manual probe artifacts
 on:
   workflow_dispatch:
     inputs:
+      run_requested:
+        description: Operator-requested verification beyond the selected PR checks
+        type: boolean
+        default: false
       target:
         description: Artifact to build (no provider calls)
         type: choice
@@ -15,9 +19,18 @@ on:
 permissions:
   contents: read
 
+# Supersede only this request; the job pool below limits runner use.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ inputs.target }}${{ github.event_name == 'workflow_dispatch' && !inputs.run_requested && format('-unrequested-{0}', github.run_id) || '' }}
+  cancel-in-progress: true
+
 jobs:
   linux-x64-probe:
-    if: inputs.target != 'stagehand-model-macos-arm64'
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_requested && (inputs.target != 'stagehand-model-macos-arm64') }}
+    concurrency:
+      group: masc-requested-artifact
+      queue: max
+      cancel-in-progress: false
     name: Build Linux x64 probe
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -50,7 +63,11 @@ jobs:
           retention-days: 7
 
   stagehand-model-probe:
-    if: inputs.target == 'stagehand-model-macos-arm64'
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_requested && (inputs.target == 'stagehand-model-macos-arm64') }}
+    concurrency:
+      group: masc-requested-artifact
+      queue: max
+      cancel-in-progress: false
     name: Build manual macOS arm64 model probe
     runs-on: macos-14
     timeout-minutes: 90

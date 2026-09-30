@@ -1,14 +1,20 @@
 name: DOS Lane package proof
 on:
-  pull_request:
-    paths:
-      - 'addons/dos-world/**'
-      - '.github/workflows/lane-dos-package.yml'
+  workflow_call:
   workflow_dispatch: {}
 permissions:
   contents: read
+# Daily baseline and explicit proofs share one runner pool.
+concurrency:
+  group: proof-lane-dos-package-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   actual-dos:
+    concurrency:
+      group: masc-requested-proof
+      queue: max
+      cancel-in-progress: false
     strategy:
       fail-fast: false
       matrix:

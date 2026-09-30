@@ -1022,21 +1022,88 @@ merge_case stale-merge-no-write 2 0 "$d"
 
 
 if [ -n "$workflow" ]; then
-  # Workflow names/group are the scheduler half of the contract. Execute the
-  # actual summary shell for each unsuccessful needs result, not a copied gate.
-  expected_names="$work/workflow-names"
-  : >"$expected_names"
-  for check_name in 'TLA model check' 'lint suite' 'dune build @check' 'dune build --profile release @check' 'dashboard typecheck' 'PR required success'; do
-    printf "    name: \${{ github.event.pull_request.draft == true && 'Draft snapshot / %s' || '%s' }}\n" "$check_name" "$check_name" >>"$expected_names"
-  done
-  if diff -u <(LC_ALL=C sort "$expected_names") <(grep '^    name:' "$workflow" | LC_ALL=C sort) &&
-     grep -qFx "  group: pr-check-\${{ github.event.pull_request.number }}-\${{ github.event.pull_request.draft == true && 'draft' || 'ready' }}" "$workflow" &&
-     grep -qFx '  cancel-in-progress: true' "$workflow" &&
-     [ "$(grep -cFx '    if: github.event.pull_request.draft == false' "$workflow")" = 5 ] &&
-     grep -qFx '    if: ${{ always() && github.event.pull_request.draft == false }}' "$workflow" &&
-     grep -qFx '    needs: [tla, lint, check, release-check, dashboard-types]' "$workflow"; then
-    pass=$((pass+1)); echo 'ok   workflow-ready-names-and-draft-isolation'
-  else fail=$((fail+1)); echo 'FAIL workflow-ready-names-and-draft-isolation'; fi
+  # PyYAML is installed by the lint lane; native/Dune callers do not enter this
+  # optional branch. Check each job, so a gate or pool on the wrong job cannot
+  # satisfy a workflow-wide count. Names also bind the guard's Draft classifier.
+  if python3 - "$workflow" <<'PYWORKFLOW'
+import copy
+import sys
+from pathlib import Path
+
+import yaml
+
+workflow = yaml.load(Path(sys.argv[1]).read_text(), Loader=yaml.BaseLoader)
+names = {
+    "tla": "TLA model check",
+    "lint": "lint suite",
+    "check": "dune build @check",
+    "release-check": "dune build --profile release @check",
+    "dashboard-types": "dashboard typecheck",
+    "required-success": "PR required success",
+}
+selected = "github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ci:run')"
+
+
+def contract_errors(candidate):
+    errors = []
+    if candidate.get("on") != {"pull_request": {"types": [
+        "opened", "synchronize", "reopened", "ready_for_review", "converted_to_draft",
+    ]}}:
+        errors.append("only PR revision/readiness events may start checks")
+    if candidate.get("concurrency") != {
+        "group": "${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}",
+        "cancel-in-progress": "true",
+    }:
+        errors.append("new PR revisions must supersede that PR's prior run")
+    jobs = candidate.get("jobs", {})
+    if set(jobs) != set(names):
+        errors.append("required job set changed")
+    for job_id, name in names.items():
+        job = jobs.get(job_id, {})
+        if job.get("name") != "${{ github.event.pull_request.draft == true && 'Draft snapshot / " + name + "' || '" + name + "' }}":
+            errors.append(f"{job_id}: Draft/Ready name signature changed")
+        condition = "${{ " + selected + (" && always()" if job_id == "required-success" else "") + " }}"
+        if job.get("if") != condition:
+            errors.append(f"{job_id}: requires selected Ready PR gate")
+        pool = "ocaml" if job_id in ("check", "release-check") else job_id
+        if job.get("concurrency") != {
+            "group": "masc-selected-pr-" + pool,
+            "queue": "max",
+            "cancel-in-progress": "false",
+        }:
+            errors.append(f"{job_id}: requires shared pool with queued selected jobs")
+    if jobs.get("required-success", {}).get("needs") != ["tla", "lint", "check", "release-check", "dashboard-types"]:
+        errors.append("summary must depend on all five required jobs")
+    return errors
+
+
+errors = contract_errors(workflow)
+if errors:
+    sys.exit("\n".join(errors))
+# These changes must fail for each job independently, especially the two
+# expensive OCaml jobs that share a single runner pool across selected PRs.
+for job_id in names:
+    for fault in ("selection", "capacity", "per-pr-pool", "pending-replacement", "cancellation"):
+        broken = copy.deepcopy(workflow)
+        job = broken["jobs"][job_id]
+        if fault == "selection":
+            job["if"] = "${{ github.event.pull_request.draft == false }}"
+        elif fault == "capacity":
+            del job["concurrency"]
+        elif fault == "per-pr-pool":
+            job["concurrency"]["group"] += "-${{ github.event.pull_request.number }}"
+        elif fault == "pending-replacement":
+            del job["concurrency"]["queue"]
+        else:
+            job["concurrency"]["cancel-in-progress"] = "true"
+        if not contract_errors(broken):
+            sys.exit(f"accepted {job_id} without {fault} protection")
+        print(f"ok   workflow-refuses-{job_id}-{fault}")
+PYWORKFLOW
+  then
+    pass=$((pass+1)); echo 'ok   workflow-selected-ready-names-and-capacity'
+  else fail=$((fail+1)); echo 'FAIL workflow-selected-ready-names-and-capacity'; fi
+  # Execute the actual summary shell for each unsuccessful needs result.
   sed -n '/^  required-success:/,$p' "$workflow" | sed -n '/^        run: |/,$p' | tail -n +2 | sed 's/^          //' >"$work/summary.sh"
   for field in PR_DRAFT TLA_RESULT LINT_RESULT CHECK_RESULT RELEASE_RESULT DASHBOARD_RESULT; do
     for result in failure cancelled skipped pending ''; do

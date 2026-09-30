@@ -41,7 +41,7 @@ let test_the_mark_is_spelled_in_one_place () =
    within one still matches and a hyphen grown anywhere else does not. *)
 let diff_marker_bindings =
   [ "bin/masc_tui_render.ml", [ "diff_row_span"; "render_code" ]
-  ; "bin/masc_tui_render_prim.ml", [ "tree_diff_row_span" ]
+  ; "bin/masc_tui_render_prim.ml", [ "tree_diff_gutter" ]
   ; "bin/masc_tui_keeper_chat_diff.ml", [ "diff_line" ]
   ]
 ;;
@@ -51,6 +51,7 @@ let diff_marker_bindings =
    they keep a one-byte mark. *)
 let width_measured_modules =
   [ "bin/masc_tui_render.ml"
+  ; "bin/masc_tui_render_board.ml"
   ; "bin/masc_tui_render_prim.ml"
   ; "bin/masc_tui_render_memory.ml"
   ; "bin/masc_tui_render_schedule.ml"

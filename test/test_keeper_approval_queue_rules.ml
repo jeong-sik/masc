@@ -360,7 +360,7 @@ let with_gate_fixture f =
     (fun () ->
        (match AQ.install_persistence ~base_path with
         | Ok _report -> ()
-        | Error error -> fail (AQ.install_error_to_string error));
+        | Error error -> fail (Masc.Keeper_approval_queue_result.install_error_to_string error));
        f base_path)
 ;;
 
@@ -406,22 +406,22 @@ let submit_eligibility_entry ~base_path ~keeper_name label =
       ()
   with
   | Ok submission -> approval_entry_exn submission.approval_id
-  | Error error -> fail (AQ.storage_error_to_string error)
+  | Error error -> fail (Masc.Keeper_approval_queue_result.storage_error_to_string error)
 ;;
 
 let summary_update_exn label = function
   | Ok true -> ()
   | Ok false -> fail (label ^ " did not update the pending approval")
-  | Error error -> fail (AQ.summary_transition_error_to_string error)
+  | Error error -> fail (Masc.Keeper_approval_queue_result.summary_transition_error_to_string error)
 ;;
 
 let exact_update_exn label = function
-  | Ok { AQ.changed = true; write_outcome = AQ.Fsync_completed } -> ()
-  | Ok { changed = false; write_outcome = AQ.Fsync_completed } ->
+  | Ok { Masc.Keeper_approval_queue_result.changed = true; write_outcome = Masc.Keeper_approval_queue_result.Fsync_completed } -> ()
+  | Ok { changed = false; write_outcome = Masc.Keeper_approval_queue_result.Fsync_completed } ->
     fail (label ^ " did not update the exact attempt")
-  | Ok { write_outcome = AQ.Visible_sync_unconfirmed detail; _ } ->
+  | Ok { write_outcome = Masc.Keeper_approval_queue_result.Visible_sync_unconfirmed detail; _ } ->
     fail (label ^ " returned visible durability uncertainty: " ^ detail)
-  | Error error -> fail (AQ.exact_attempt_error_to_string error)
+  | Error error -> fail (Masc.Keeper_approval_queue_result.exact_attempt_error_to_string error)
 ;;
 
 let exact_identity label =
@@ -636,7 +636,7 @@ let test_completed_exact_judgment_finalizes_without_worker () =
   AQ.For_testing.reset_runtime_state ();
   (match AQ.install_persistence ~base_path with
    | Ok _ -> ()
-   | Error error -> fail (AQ.install_error_to_string error));
+   | Error error -> fail (Masc.Keeper_approval_queue_result.install_error_to_string error));
   let completed = approval_entry_exn completed.id in
   (match completed.exact_attempt, completed.summary_status with
    | Rule_types.Exact_bound { status = Rule_types.Exact_completed; _ }, Rule_types.Summary_available _ -> ()

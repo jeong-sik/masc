@@ -42,5 +42,7 @@ hashes are uploaded as `tui-item-workspace-authority`.
 The finishing selection also includes existing local/remote Portrait PTYs,
 held chat history, actual authenticated Item account HTTP/purchase fixtures,
 and tab-strip/keyboard guards. Actual model quality, deployment and live
-continuity remain separate. Native result is pending until its raw log is
-inspected.
+continuity remain separate. Native implementation head `f4041a99a7d86886336e4838588dc2f4e47f3b74`
+passed all9selected suites in run36654016413. [Complete raw evidence](../evidence/2026-09-30-item-workspace-authority-f404/README.md)
+retains its source identity, frames and limits; later documentation heads are
+not the tested implementation head.

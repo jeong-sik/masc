@@ -67,6 +67,45 @@ class SelectionTest(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertEqual(json.loads(result.stdout)['status'], 'unavailable')
 
+    def installation_token_fixture(self):
+        # Actions installation tokens can read the PR source-review endpoints,
+        # but cannot use the authenticated-user endpoint.
+        del self.preparation.fixture.data['user']
+        self.preparation.save()
+        (self.preparation.fixture.root / 'requests.jsonl').write_text('')
+
+    def test_cli_installation_token_rechecks_exact_candidate_without_user(self):
+        self.installation_token_fixture()
+        result = self.run_cli()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(json.loads(result.stdout)['candidate'], self.receipt['candidate'])
+        calls = (self.preparation.fixture.root / 'requests.jsonl').read_text().splitlines()
+        self.assertNotIn('user', calls)
+        self.assertTrue(any('/reviews' in call for call in calls))
+
+    def test_cli_installation_token_still_refuses_revoked_approval(self):
+        self.installation_token_fixture()
+        self.preparation.fixture.put('pulls/1/reviews?per_page=100', [])
+        self.preparation.save()
+        result = self.run_cli()
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertEqual(json.loads(result.stdout)['status'], 'refused')
+        self.assertNotIn('user', (self.preparation.fixture.root / 'requests.jsonl').read_text().splitlines())
+
+    def test_check_and_review_still_require_user_identity(self):
+        self.installation_token_fixture()
+        guard = Path(__file__).with_name('approve-guard.sh')
+        for mode in (['--check'], []):
+            with self.subTest(mode=mode):
+                result = subprocess.run(
+                    ['bash', str(guard), '--repo', 'o/r', '--pr', '1',
+                     '--head', self.preparation.fixture.heads[1], *mode],
+                    text=True, capture_output=True,
+                    env=os.environ | {'GUARD_GH': str(self.preparation.fixture.fake)})
+                # Preserve the upstream identity-read failure (fake gh exits 3).
+                self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
+                self.assertIn('unexpected endpoint user', result.stderr)
+
     def test_different_dispatch_commit_is_refused(self):
         with self.assertRaises(V.P.Rejected):
             self.verify(candidate=self.receipt['base'])

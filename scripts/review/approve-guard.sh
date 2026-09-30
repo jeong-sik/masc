@@ -28,8 +28,14 @@ source "$here/ci-checks.sh"
 source "$here/review-verdict.sh"
 refuse() { echo "REFUSED #$pr head $head: $*" >&2; exit 2; }
 read_current_pr
-me=$(ci_gh_json user '.login')
-[ -n "$me" ] || exit 1
+# Read-only candidate admission uses repository review evidence; Actions
+# installation tokens cannot query /user. Review/check paths still require
+# the caller identity for self-approval and owned change-request rules.
+me=""
+if [ "$merge_check" -eq 0 ]; then
+  me=$(ci_gh_json user '.login')
+  [ -n "$me" ] || exit 1
+fi
 footer_prefix=$(printf 'approve-guard: head `%s` · ' "$head")
 # Neither GitHub commit_id nor a footer alone supplies immutable head binding.
 verdict_pattern="^verdict: PASS head: ${head} by: [A-Za-z0-9._-]+$"

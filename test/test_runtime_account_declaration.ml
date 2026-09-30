@@ -417,6 +417,19 @@ let test_every_seed_client_takes_a_second_account () =
     | None -> Alcotest.fail "MASC_TEST_RUNTIME_SEED is not set"
   in
   let t = parsed seed in
+  let shared_models =
+    Otoml.find (toml_of seed) Otoml.get_array [ "model_sets"; "codex"; "models" ]
+    |> List.map Otoml.get_string
+    |> List.sort String.compare
+  in
+  let configured_codex_models =
+    bindings_of (config_of seed) "codex_subscription"
+    |> List.map (fun (binding : Runtime_schema.binding) -> binding.model_id)
+    |> List.sort String.compare
+  in
+  Alcotest.(check (list string))
+    "a new account's shared list includes every shipped Codex profile"
+    configured_codex_models shared_models;
   let bases = D.bases t in
   Alcotest.(check bool) "the seed declares official clients" true (bases <> []);
   List.iter

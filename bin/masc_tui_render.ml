@@ -4121,10 +4121,10 @@ let render_schedule_list (state : state) =
                 ^ Ansi.reset)
           | None -> ());
          (match state.schedule_cancel_error with
-          | Some err ->
+          | Some (schedule_id, err) ->
               c.push
                 ((Theme.bad ()) ^ "  "
-                ^ fit_width (Terminal_text.single_line err) (cols - 8)
+                ^ fit_width (Terminal_text.single_line (schedule_id ^ ": " ^ err)) (cols - 8)
                 ^ Ansi.reset)
           | None -> ())
        end))
@@ -4453,7 +4453,9 @@ let schedule_detail_content (state : state) ~cols ~runner (row : schedule_row) =
     (* The latest action refusal is the row the result handler reveals.
        Source freshness still has its fixed summary outside this document. *)
     (match state.schedule_cancel_error with
-     | None -> [] | Some error -> [Theme.bad (), "Cancel error: " ^ wire error])
+     | Some (schedule_id, error) when String.equal schedule_id row.sch_schedule_id ->
+         [Theme.bad (), "Cancel error: " ^ wire error]
+     | Some _ | None -> [])
     @ (match schedule_source_warning state with
        | None -> [] | Some error -> [Theme.bad (), "Source: " ^ wire error])
     @ (match state.schedule_cancel_armed with

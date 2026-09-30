@@ -1873,7 +1873,7 @@ type async_msg =
      filed under whoever is selected when it lands. *)
   | Keeper_schedules_loaded of string * (schedule_snapshot, string) result
   | System_logs_loaded of (system_log_snapshot, string) result
-  | Schedule_cancel_done of (string, string) result
+  | Schedule_cancel_done of string * (string, string) result
   (* (message, noop): [noop = true] says the verdict already stood. *)
   | Verification_verdict_done of (string * bool, string) result
   | Harness_label_done of (string, string) result
@@ -12021,7 +12021,7 @@ let start_schedule_cancel state ~mailbox ~(schedule_id : string) =
       | Error err -> Error err
       | Ok json -> Masc.Tui_decode.tool_envelope_outcome json
     in
-    enqueue_async mailbox (Schedule_cancel_done result)
+    enqueue_async mailbox (Schedule_cancel_done (schedule_id, result))
   in
   match Eio_context.get_switch_opt () with
   | Some sw -> Eio.Fiber.fork ~sw run_cancel
@@ -14678,7 +14678,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
        | Error err ->
            state.keeper_schedules <- None;
            state.keeper_schedules_error <- Some (keeper_name, err))
-  | Schedule_cancel_done result -> (
+  | Schedule_cancel_done (schedule_id, result) -> (
       match result with
       | Ok message ->
           state.schedule_cancel_armed <- None;
@@ -14689,10 +14689,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           launch_schedules_load ~intent:Snapshot_read.Refresh state ~mailbox
       | Error err ->
           state.schedule_cancel_armed <- None;
-          state.schedule_cancel_error <- Some err;
+          state.schedule_cancel_error <- Some (schedule_id, err);
           (* A refusal is new evidence for the operator's action. Reveal its
              first row even when the request was sent from the document end. *)
-          state.schedule_scroll <- 0)
+          if state.schedule_detail_id = Some schedule_id then state.schedule_scroll <- 0)
   | Verification_verdict_done result -> (
       match result with
       | Ok (message, noop) ->

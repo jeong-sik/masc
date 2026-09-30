@@ -9,6 +9,8 @@ import test_tui_keyboard_input as keyboard
 SOURCE_MODULES = (
     "bin/masc_tui_code_results.ml",
     "bin/masc_tui_code_results.mli",
+    "lib/tui_terminal_text.ml",
+    "lib/tui_terminal_text.mli",
     "bin/masc_tui_render.ml",
     "bin/masc_tui_types.ml",
 )

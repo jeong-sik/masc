@@ -18,17 +18,14 @@
 
 ## 캡처 재현
 
-`scripts/capture-tui-audit.py`는 Playwright Chromium, ttyd, Python fixture helper가 필요하다. 바이너리 또는 driver를 첫 인자로 받고 `--binary-file`로 실제 바이너리를 별도로 기록할 수 있다.
+`scripts/capture-tui-audit.py`는 Playwright Chromium, PATH의 ttyd(또는 `--ttyd`)와 Python fixture helper가 필요하다. 직접 실행할 native TUI 바이너리만 받는다. `--binary-file`을 사용하면 같은 파일이어야 하며 wrapper가 다른 artifact를 대신 증명하지 않는다. Linux artifact는 Linux 안에서 capture 도구·Chromium·ttyd와 함께 실행한다.
 
 ```sh
-python3 scripts/capture-tui-audit.py /path/to/baseline-tui \
-  --out docs/evidence/tui-audit-2026-09-30/board-comparison-before \
-  --board-only --author wkbl-reader
-python3 scripts/capture-tui-audit.py /path/to/linux-driver \
-  --binary-file /path/to/artifact/masc_tui.exe \
-  --out docs/evidence/tui-audit-2026-09-30/board-comparison-after \
-  --board-only --author wkbl-reader --provenance ci_binary_Docker_fixture_PTY
+python3 scripts/capture-tui-audit.py /path/to/masc_tui.exe \
+  --out /tmp/board-comparison-new --board-only --author wkbl-reader
 ```
+
+새 도구는 과거 fixture와 달라졌으며 아래 Docker driver를 다시 실행하는 방법이 아니다. 과거 before/after manifest에 새 provenance나 artifact hash 보증을 소급 적용하지 않는다. 새 비교는 양쪽 바이너리를 같은 새 fixture와 같은 native 실행 환경에서 실행해 별도 디렉터리에 저장한다.
 
 캡처 당시 실제 [driver 원문](board-probe-driver.sh.txt)과 [proxy 원문](board-fixture-proxy.py.txt)을 보관한다. driver SHA256은 after manifest의 `driver_sha256`이다. 원문에 적힌 `/tmp` 경로는 당시 artifact/proxy 위치이며 재현 시 준비한 위치로 바꿔야 한다. proxy image `masc-test-tool-matrix:fixture`는 당시 호스트의 Python 3.11.2 포함 image다. 해당 image도 필요하다. 재현 환경을 준비하지 않은 상태에서 이 원문을 곧바로 실행할 수 있다고 주장하지 않는다.
 

@@ -6,13 +6,21 @@
 
 ## 조사 범위와 수용 조건
 
-[기계 판독 목록](../evidence/tui-audit-2026-09-30/surface-inventory.json)은 surface dispatcher의 **48개 renderer**, 전역 overlay 10개, renderer 안에서 별도로 검증할 detail/form/tab을 기록한다. 단순히 상위 메뉴 7개를 열었다고 전수검증이 끝난 것으로 보지 않는다.
+[기계 판독 목록](../evidence/tui-audit-2026-09-30/surface-inventory.json)은 surface dispatcher의 **48개 renderer**, 전역 overlay 12개, renderer 안에서 별도로 검증할 detail/form/tab을 기록한다. 단순히 상위 메뉴 7개를 열었다고 전수검증이 끝난 것으로 보지 않는다. account login·lane addons·About은 전역 분기에 포함하며 상세 검토와 실행은 아직 대기다. browser live/history는 Connectors 내부 모드로 분류한다.
 
 - 폭 60/80/120/160/240열과 짧은 18/24행, 일반 32/48행에서 핵심 대상·상태·주 행동이 보이고 접근 가능해야 한다. 더 작은 지원 폭은 compact frame 또는 해당 입력창의 정책도 확인한다.
 - 긴 한국어·ASCII 이름/ID/경로/JSON/소스 줄, 빈·읽는 중·읽기 실패·보존된 이전 값·여러 페이지를 다룬다. NO_COLOR와 focus 전환·리사이즈를 포함한다.
 - 문서·근거·provenance의 잘린 부분은 줄바꿈 또는 실제 수평 스크롤로 도달 가능해야 한다. 세로 스크롤만 있는 화면에서 한 줄을 잘라 없애지 않는다.
 - 페이지 이동과 선택 이동을 구별한다. 화면 밖 커서를 Enter가 실행하지 않으며, 선택 이동·새 항목 삽입·복귀 후에도 같은 대상 identity를 유지한다.
 - 본문을 먼저 실제 표시 폭으로 렌더링하고 그 물리 행 수로 scroll을 계산한다. 고정 chrome·preview·footer를 포함한 행 예산을 보존한다.
+
+## 캡처 도구 리뷰 대응
+
+후속 capture 도구는 직접 실행하는 native TUI와 동일한 파일만 해시한다. wrapper와 별도 `--binary-file` 조합은 거절하며, Linux 바이너리는 도구도 해당 Linux 환경에서 실행한다. 시작 직후 manifest를 incomplete로 바꾸고, ttyd는 PATH 또는 `--ttyd`로 해소한다. capture/fixture/terminal helper 해시와 fixture parameter·payload 해시, 각 txt/png 해시를 남긴다. 입력 해시 검사는 Python -O에서도 유지한다. 각 화면은 합성 데이터의 준비 신호를 기다리고, Board는 Left로 목록 복귀 후 목록 전용 표식을 요구한다. Comments는 좁은/넓은 레이아웃 공통 표식을 쓴다. txt와 png는 terminal write를 동결하고 이미 대기 중인 write/DOM paint를 마친 같은 frame에서 기록한다.
+
+기존 baseline의 board-120/240은 detail과 같은 화면이므로 목록 증거로 쓰지 않는다. 과거 manifest에는 fixture/artifact 해시 및 동결 증명이 없으므로 새 도구의 보증을 소급 적용하지 않는다. 보존된 과거 캡처는 당시 문서의 제한 안에서만 해석한다. 도구 수정과 새 합성 fixture는 과거 before/after의 동일 입력 증명을 만들지 않으며, 새 비교는 같은 새 fixture·native 환경으로 다시 캡처해야 한다.
+
+수정 도구의 [새 검증 manifest](../evidence/tui-audit-2026-09-30/capture-review-validation/manifest.json)는 설치본 `ff7f49c40cd09e36acd18e76df0c0c512f6a7eab`을 별도 합성 fixture에서 실행해 24쌍을 완료했다. 48개 txt/png 해시를 다시 확인했고 세 폭의 Board 목록/상세가 서로 다르며 80열 Comments 본문도 도착했다. 도구·helper 입력 해시를 기록했다. 이는 캡처 도구 실행 증거이며 이 PR 소스 빌드·전체 화면 상태·운영 검증이 아니다. 자세한 실패 후 보완 경계와 Python -O 음성 검사는 [검증 기록](../evidence/tui-audit-2026-09-30/capture-review-validation/README.md)에 있다.
 
 ## 현재 실행 증거
 
@@ -97,10 +105,10 @@ S05 구현 후속: [#40254](https://github.com/jeong-sik/masc/pull/40254)의 `c0
 | O02 | Agenda | 첫 actionable target으로 뛰어 위 예정 일정을 못 읽음 | [#40102](https://github.com/jeong-sik/masc/pull/40102), reading/following 구별·visible-only Enter |
 | O03/O04 | Answering | byte name 폭과 no-target scroll 부재; hidden Enter | [#40098](https://github.com/jeong-sik/masc/pull/40098), 셀 배정·page scroll·visible target; 테스트 dict 순회 오류도 수정 |
 | M01 | Memory 상세 | claim 최소30셀이 실제 폭 초과; provenance 잘림 | [#40103](https://github.com/jeong-sik/masc/pull/40103), 폭 중복 차감 제거·필드 wrap |
-| K01 | Keeper Info/Channels | 22셀 라벨 뒤 원문 값을 한 줄로 잘라 잃음 | [#40131](https://github.com/jeong-sik/masc/pull/40131), 필드 wrap 후 scroll 계산; 집중 실행 검증 대기 |
-| K02 | Keeper logs | 75셀 고정 표 뒤 cost/work/tools가 도달 불가 | [#40160](https://github.com/jeong-sik/masc/pull/40160), 전체 필드를 물리 행 읽기로 투영·새 행 수와 key paging 공유; 집중 실행 검증 대기 |
-| K03/S03 | Connectors/Clients | printf 최소 폭으로 긴 이름이 열을 밀고 channel/last seen 소실 | [#40118](https://github.com/jeong-sik/masc/pull/40118), 공유 Table.fit; 실행 검증 대기 |
-| K04 | Schedules 상세/목록 | recurrence/ID/digest/fence 원문 잘림, mandatory target 폭 과다 | [#40167](https://github.com/jeong-sik/masc/pull/40167), 전체 필드 스크롤·실제 페이지 높이·원래 due/target/recurrence 우선순위 보존; 집중 실행 검증 대기 |
+| K01 | Keeper Info/Channels | 22셀 라벨 뒤 원문 값을 한 줄로 잘라 잃음 | [#40131](https://github.com/jeong-sik/masc/pull/40131), 필드 wrap 후 scroll 계산; `3308aef6b4`/run36663532148 집중 fixture PTY PASS, 이후 head·전체 행렬·설치는 미검증 |
+| K02 | Keeper logs | 75셀 고정 표 뒤 cost/work/tools가 도달 불가 | [#40160](https://github.com/jeong-sik/masc/pull/40160), 전체 필드를 물리 행 읽기로 투영·새 행 수와 key paging 공유; `8241076261`/run36665480126 집중 fixture PTY PASS, 이후 head·전체 행렬·설치는 미검증 |
+| K03/S03 | Connectors/Clients | printf 최소 폭으로 긴 이름이 열을 밀고 channel/last seen 소실 | [#40118](https://github.com/jeong-sik/masc/pull/40118), 공유 Table.fit; `8f1bd0ee90`/run36663560222 집중 fixture PTY PASS, 이후 head·전체 행렬·설치는 미검증 |
+| K04 | Schedules 상세/목록 | recurrence/ID/digest/fence 원문 잘림, mandatory target 폭 과다 | [#40167](https://github.com/jeong-sik/masc/pull/40167), 전체 필드 스크롤·실제 페이지 높이·원래 due/target/recurrence 우선순위 보존; `f088db60a2`/run36668855707 집중 viewport/source-status/hold PASS, 이후 head·전체 행렬·설치는 미검증 |
 | K05 | Runtime picker | mandatory 24셀×2 + chrome이 작은 frame 초과 | [#40143](https://github.com/jeong-sik/masc/pull/40143), 실제 셀 폭으로 열 배정; 집중 실행 검증 대기 |
 | K06 | Chat inflight row | 다른 Keeper 이름 뒤 interrupt 행동이 잘림 | [#40186](https://github.com/jeong-sik/masc/pull/40186), 전체 중단 명령을 먼저 wrap·공유 물리 행 예산; 실행 검증 대기 |
 | R02 | diff 읽기 | 기록된 호출·Changes working tree·Repository Changes는 세로 위치만 있어 긴 줄 끝이 도달 불가; Code Shift 키는 가려진 file offset을 바꿈 | Code 부분 [#40196](https://github.com/jeong-sik/masc/pull/40196); 나머지 세 읽기 경로 [#40208](https://github.com/jeong-sik/masc/pull/40208), 실행 검증 대기 |

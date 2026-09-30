@@ -322,8 +322,8 @@ let input_byte_ready reader =
       return_input_byte reader;
       true
 
-let paste_can_recover reader last_byte_ns =
-  paste_is_quiet last_byte_ns && not (input_byte_ready reader)
+let paste_can_recover reader clock =
+  paste_is_quiet clock.last_byte_ns && not (input_byte_ready reader)
 
 (* A paste is not a key and does not become one. Encoding the payload into
    the key channel would put a second meaning on a string every surface reads
@@ -503,4 +503,10 @@ let abandon_draining reader =
   Masc_tui_input_decoder.abandon_draining reader.decoder
 
 let recover_paste reader =
-  Masc_tui_input_decoder.recover_paste reader.decoder
+  let recovered = Masc_tui_input_decoder.recover_paste reader.decoder in
+  reader.paste_clock.last_byte_ns <- Mtime_clock.elapsed_ns ();
+  recovered
+
+let cancel_armed clock = clock.cancel_armed
+
+let arm_cancel clock = clock.cancel_armed <- true

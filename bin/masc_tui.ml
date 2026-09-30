@@ -18521,7 +18521,7 @@ and is loaded on demand through keeper_skill.
            (match paste_phase input_reader,
                   input_holds_incomplete_sequence input_reader with
             | Draining_tail tail, _
-              when not (paste_can_recover input_reader tail.last_byte_ns) ->
+              when not (paste_can_recover input_reader tail) ->
                 Masc_tui_exit_signals.withdraw_interrupt exit_signals;
                 report_action state "system" "Paste tail still arriving; waiting for end marker";
                 Render_schedule.request render_schedule Render_schedule.Background;
@@ -18539,25 +18539,24 @@ and is loaded on demand through keeper_skill.
                   "Paste input unlocked; confirm only after the terminal stops";
                 Render_schedule.request render_schedule Render_schedule.Background;
                 None
-            | Pasting paste, _ when not paste.cancel_armed ->
-                paste.cancel_armed <- true;
+            | Pasting paste, _ when not (cancel_armed paste) ->
+                arm_cancel paste;
                 Masc_tui_exit_signals.withdraw_interrupt exit_signals;
                 report_action state "system"
                   "Paste end awaited; press Ctrl-C again after bytes stop if the marker is missing";
                 Render_schedule.request render_schedule Render_schedule.Background;
                 None
             | Pasting paste, _
-              when not (paste_can_recover input_reader paste.last_byte_ns) ->
+              when not (paste_can_recover input_reader paste) ->
                 Masc_tui_exit_signals.withdraw_interrupt exit_signals;
                 report_action state "system"
                   "Paste still arriving; waiting for end marker";
                 Render_schedule.request render_schedule Render_schedule.Background;
                 None
-            | Pasting clock, _ ->
+            | Pasting _, _ ->
                 let recovered =
                   recover_paste input_reader
                 in
-                clock.last_byte_ns <- Mtime_clock.elapsed_ns ();
                 Masc_tui_exit_signals.withdraw_interrupt exit_signals;
                 recovered
             (* Bytes already waiting may finish the held head: a split
@@ -18700,14 +18699,14 @@ and is loaded on demand through keeper_skill.
        | Pasting _ -> ()
        | No_paste | Draining_tail _ -> paste_pause_notified := false);
       (match paste_phase input_reader with
-       | Pasting paste when paste.cancel_armed
-                     && paste_can_recover input_reader paste.last_byte_ns
+       | Pasting paste when cancel_armed paste
+                     && paste_can_recover input_reader paste
                      && not !paste_quiet_notified ->
            paste_quiet_notified := true;
            report_action state "system"
              "Paste quiet; Ctrl-C again restores the draft if the end marker was lost";
            Render_schedule.request render_schedule Render_schedule.Background
-       | Pasting paste when not (paste_can_recover input_reader paste.last_byte_ns) ->
+       | Pasting paste when not (paste_can_recover input_reader paste) ->
            paste_quiet_notified := false
        | Pasting _ -> ()
        | No_paste | Draining_tail _ -> paste_quiet_notified := false);
@@ -18729,13 +18728,13 @@ and is loaded on demand through keeper_skill.
             | Some _ | None -> ());
            csi_pause_notice := None);
       (match paste_phase input_reader with
-       | Draining_tail tail when paste_can_recover input_reader tail.last_byte_ns
+       | Draining_tail tail when paste_can_recover input_reader tail
                      && not !paste_guard_idle_notified ->
            paste_guard_idle_notified := true;
            report_action state "system"
              "Paste tail quiet; Ctrl-C unlocks input if the end marker was lost";
            Render_schedule.request render_schedule Render_schedule.Background
-       | Draining_tail tail when not (paste_can_recover input_reader tail.last_byte_ns) ->
+       | Draining_tail tail when not (paste_can_recover input_reader tail) ->
            paste_guard_idle_notified := false
        | Draining_tail _ -> ()
        | No_paste | Pasting _ -> paste_guard_idle_notified := false);

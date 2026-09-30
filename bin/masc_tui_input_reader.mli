@@ -4,10 +4,7 @@
 
 type input_reader
 
-type paste_clock = {
-  mutable last_byte_ns : int64;
-  mutable cancel_armed : bool;
-}
+type paste_clock
 
 type paste_phase =
   | No_paste
@@ -42,7 +39,9 @@ val input_reader_has_ready_input : input_reader -> bool
 val input_holds_incomplete_sequence : input_reader -> bool
 val cancel_incomplete_sequence : input_reader -> unit
 val input_byte_ready : input_reader -> bool
-val paste_can_recover : input_reader -> int64 -> bool
+val paste_can_recover : input_reader -> paste_clock -> bool
+val cancel_armed : paste_clock -> bool
+val arm_cancel : paste_clock -> unit
 val read_input : ?timeout:float -> input_reader -> unit -> input_event option
 (** [None] means no decoded event is ready within this read, including a
     partial paste or sequence retained for the next read. *)

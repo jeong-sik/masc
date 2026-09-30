@@ -22,7 +22,7 @@
 module Layout = Masc_tui_message_layout
 module Frame = Masc_tui_frame
 
-let module_path = "bin/masc_tui_render.ml"
+let module_path = "bin/masc_tui_render_approvals.ml"
 let binding_name = "approval_metadata_lines"
 
 let check_bool = Alcotest.(check bool)

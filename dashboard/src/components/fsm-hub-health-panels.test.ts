@@ -58,16 +58,10 @@ describe('flagTooltip', () => {
 // ================================================================
 
 describe('invariantDescription', () => {
-  it('returns description for no_runtime_before_measurement', () => {
-    const desc = invariantDescription('no_runtime_before_measurement')
-    expect(desc).toContain('Runtime selection')
-    expect(desc).toContain('measurement')
-  })
-
   it('returns description for event_priority_monotone', () => {
     const desc = invariantDescription('event_priority_monotone')
-    expect(desc).toContain('monotone')
-    expect(desc).toContain('priority')
+    expect(desc).toContain('bind_count <= 1')
+    expect(desc).toContain('current 와 pending measurement')
   })
 
   it('returns default for unknown key', () => {
@@ -84,8 +78,8 @@ describe('invariantDescription', () => {
 
   it('all known descriptions are non-empty strings', () => {
     const keys = [
-      'no_runtime_before_measurement',
       'event_priority_monotone',
+      'phase_derivation_agreement',
     ]
     for (const key of keys) {
       const desc = invariantDescription(key)

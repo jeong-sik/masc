@@ -11972,35 +11972,44 @@ let runtime_column width text =
       (max 0 (width - Message_layout.display_width clipped))
       ' '
 
-(* A column that holds names rather than prose. Lane and candidate ids share
-   long prefixes -- glm-coding-…-a, glm-coding-…-b -- and at eighty columns
-   the lane column is ten cells, so cutting from the end drew four different
-   lanes as four identical "glm-codin~". The tail is what tells them apart,
-   which is the same reason the Keepers table fits its names from the middle.
+type runtime_table_column =
+  | Runtime_lane_column
+  | Runtime_candidate_column
+  | Runtime_identity_column
+  | Runtime_status_column
+  | Runtime_detail_column
 
-   Padded to the column afterwards, like {!runtime_column}, so the columns to
-   the right do not move. *)
-let runtime_name_column width text =
-  let clipped = Message_layout.fit_middle width text in
-  clipped
-  ^ String.make
-      (max 0 (width - Message_layout.display_width clipped))
-      ' '
-
-(* The same column, for the rows whose cell is a word this renderer wrote
-   rather than a name the workspace chose. A name is told apart by its tail,
-   which is why {!runtime_name_column} cuts from the middle; a label is told
-   apart by its head, and cutting one from the middle keeps the half that
-   says nothing. At a hundred columns the lane column is ten cells and
-   the fallback cell came out as the tree glyph, an ellipsis, and the last
-   six characters of the word -- the end of something the reader never
-   sees the start of. *)
-let runtime_label_column width text =
-  let clipped = fit_width text width in
-  clipped
-  ^ String.make
-      (max 0 (width - Message_layout.display_width clipped))
-      ' '
+let runtime_table_cells ~cols ~mode ~lane ~lane_is_label ~candidate ~identity ~status ~detail =
+  let lane_width, candidate_width, identity_width, status_width = runtime_column_widths cols in
+  let inner_width = max 1 (framed_inner_width cols - 2) in
+  let candidate_floor = min candidate_width (max 1 (inner_width - status_width - Masc_tui_table.cell_gap)) in
+  let width = function
+    | Runtime_lane_column -> lane_width
+    | Runtime_candidate_column -> candidate_floor
+    | Runtime_identity_column -> identity_width
+    | Runtime_status_column -> status_width
+    | Runtime_detail_column ->
+        max (Message_layout.display_width "single candidate")
+          (inner_width - lane_width - candidate_floor - identity_width - status_width
+           - (4 * Masc_tui_table.cell_gap)) in
+  let layout = Masc_tui_table.fit ~inner_width ~width
+    ~flex:Runtime_candidate_column
+    ~drop_order:[Runtime_detail_column; Runtime_identity_column; Runtime_lane_column]
+    [Runtime_lane_column; Runtime_candidate_column; Runtime_identity_column;
+     Runtime_status_column; Runtime_detail_column] in
+  List.map (fun column ->
+    let header, value, fold = match column with
+      | Runtime_lane_column ->
+          (match mode with Masc_tui_types.Runtime_lanes -> "LANE" | Runtime_all -> "USED BY"),
+          lane, (if lane_is_label then Masc_tui_table.Fold_tail else Fold_middle)
+      | Runtime_candidate_column ->
+          (match mode with Masc_tui_types.Runtime_lanes -> "CANDIDATE" | Runtime_all -> "RUNTIME"),
+          candidate, Masc_tui_table.Fold_middle
+      | Runtime_identity_column -> "PROVIDER / MODEL", identity, Masc_tui_table.Fold_middle
+      | Runtime_status_column -> "ROUTE / PROBE", status, Masc_tui_table.Fold_tail
+      | Runtime_detail_column -> "DETAIL", detail, Masc_tui_table.Fold_tail in
+    let column_width = if column = Runtime_candidate_column then layout.flex_width else width column in
+    Masc_tui_table.cell ~header ~width:column_width ~fold value) layout.shown
 
 let runtime_detail_field ~width ~style label value =
   let prefix = "  " ^ label ^ ": " in
@@ -12224,8 +12233,8 @@ let render_runtime (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let ( runtime_lane_width
       , runtime_candidate_width
-      , runtime_identity_width
-      , runtime_status_width ) =
+      , _
+      , _ ) =
     runtime_column_widths cols
   in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -12404,21 +12413,10 @@ let render_runtime (state : state) =
             (runtime_column runtime_candidate_width media_text)
             (Ansi.dim ^ "m edits it · the vision runtimes, in call order" ^ Ansi.reset));
        c.push_divider ());
+  let table_cells = runtime_table_cells ~cols ~mode:state.runtime_mode in
   c.push_styled ~style:(Theme.recede ())
-    ("  "
-     ^ runtime_column runtime_lane_width
-         (match state.runtime_mode with
-          | Masc_tui_types.Runtime_lanes -> "LANE"
-          | Masc_tui_types.Runtime_all -> "USED BY")
-     ^ " "
-     ^ runtime_column runtime_candidate_width
-         (match state.runtime_mode with
-          | Masc_tui_types.Runtime_lanes -> "CANDIDATE"
-          | Masc_tui_types.Runtime_all -> "RUNTIME")
-     ^ " "
-     ^ runtime_column runtime_identity_width "PROVIDER / MODEL" ^ " "
-     ^ runtime_column runtime_status_width "ROUTE / PROBE"
-     ^ " DETAIL");
+    ("  " ^ Masc_tui_table.header_row
+      (table_cells ~lane:"" ~lane_is_label:false ~candidate:"" ~identity:"" ~status:"" ~detail:""));
   c.push_divider ();
   (match state.runtime_surface_error with
    | None -> ()
@@ -12605,19 +12603,14 @@ let render_runtime (state : state) =
                         (Option.bind state.runtime_surface (fun snapshot ->
                            Tui_decode.runtime_probe_for_id snapshot ~runtime_id:runtime.ro_id)))
                in
-               let line =
-                 "  " ^ runtime_column runtime_lane_width used_by ^ " "
-                 ^ runtime_column runtime_candidate_width
-                     (Terminal_text.single_line runtime.ro_id) ^ " "
-                 ^ runtime_column runtime_identity_width
-                     (Terminal_text.single_line
-                        (runtime.ro_provider ^ " / " ^ runtime.ro_model)) ^ " "
-                 ^ runtime_column runtime_status_width
-                      (runtime_route_probe_badge runtime
-                         (Option.bind state.runtime_surface (fun snapshot ->
-                            Tui_decode.runtime_probe_for_id snapshot ~runtime_id:runtime.ro_id)))
-                 ^ " " ^ Ansi.dim ^ detail ^ Ansi.reset
-               in
+               let line = "  " ^ Masc_tui_table.row
+                 (table_cells ~lane:(Terminal_text.single_line (Masc_tui_theme.strip_sgr used_by)) ~lane_is_label:(lanes = [])
+                   ~candidate:(Terminal_text.single_line runtime.ro_id)
+                   ~identity:(Terminal_text.single_line (runtime.ro_provider ^ " / " ^ runtime.ro_model))
+                   ~status:(runtime_route_probe_badge runtime
+                     (Option.bind state.runtime_surface (fun snapshot ->
+                       Tui_decode.runtime_probe_for_id snapshot ~runtime_id:runtime.ro_id)))
+                   ~detail:(Terminal_text.single_line (Masc_tui_theme.strip_sgr detail))) in
                if index + scroll = state.runtime_cursor then
                  c.push_selected (Masc_tui_theme.strip_sgr line)
                else c.push line)
@@ -12629,16 +12622,12 @@ let render_runtime (state : state) =
           let runtime = candidate.rcr_runtime in
           let is_first = candidate.rcr_position = 1 in
           let is_last = candidate.rcr_position = candidate.rcr_candidate_count in
-          (* A lane id is the workspace's name and a fallback row's cell is
-             this renderer's own word, and the two are cut by different
-             rules -- see [runtime_label_column]. *)
+          (* Names preserve both ends; the fallback label preserves its head. *)
           let lane_cell =
             if candidate.rcr_candidate_count <= 1 || is_first then
-              runtime_name_column runtime_lane_width
-                (Terminal_text.single_line candidate.rcr_lane_id)
+              Terminal_text.single_line candidate.rcr_lane_id
             else
-              runtime_label_column runtime_lane_width
-                (Printf.sprintf "  %s fallback #%d"
+              (Printf.sprintf "  %s fallback #%d"
                    (if is_last then "\xe2\x94\x94\xe2\x94\x80" else "\xe2\x94\x9c\xe2\x94\x80")
                    (candidate.rcr_position - 1))
           in
@@ -12686,29 +12675,18 @@ let render_runtime (state : state) =
               [ Printf.sprintf "fallback #%d" position ]
           in
           let default_fact = if runtime.ro_is_default then [ (Theme.ok ()) ^ "[default]" ^ Ansi.reset ] else [] in
-          (* The lane fact leads. This cell is what is left of the row after
-             the five fixed columns -- eighteen at a hundred -- and the keeper
-             assignment led it until now, which spent the whole cell: three of
-             the four rows read "[unassigned] . si..." and an operator could
-             not tell head from single candidate from fallback #2.
-
-             The lane fact is what this table is for: it says why this
-             candidate is the one the lane walks. Who is bound to the lane is
-             a keeper question, answered in full on Keepers, and it is the
-             half several rows repeat -- so it is the half that can be cut. *)
+          (* The detail column leads with the lane fact. When it does not fit,
+             Enter still opens the complete candidate reading. *)
           let detail =
             String.concat " \xc2\xb7 "
               (lane_fact @ assignment_fact @ default_fact
                @ runtime_probe_detail candidate.rcr_probe)
           in
-          let line =
-            "  "
-            ^ lane_cell
-            ^ " " ^ runtime_name_column runtime_candidate_width candidate_label
-            ^ " " ^ runtime_column runtime_identity_width provider_model
-            ^ " " ^ runtime_column runtime_status_width route_probe
-            ^ " " ^ detail
-          in
+          let line = "  " ^ Masc_tui_table.row
+            (table_cells ~lane:lane_cell
+              ~lane_is_label:(candidate.rcr_candidate_count > 1 && not is_first)
+              ~candidate:candidate_label ~identity:provider_model ~status:route_probe
+              ~detail:(Terminal_text.single_line (Masc_tui_theme.strip_sgr detail))) in
           if index + scroll = state.runtime_cursor then
             c.push_selected (Masc_tui_theme.strip_sgr line)
           else c.push line

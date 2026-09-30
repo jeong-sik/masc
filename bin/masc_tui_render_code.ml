@@ -59,6 +59,124 @@ let code_pane_content_height (state : state) =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   pane_surface_content_height ~rows
 
+let code_notes_rows (state : state) ~cols =
+  let memos =
+    match Masc_tui_fetched.current state.code_file with
+    | Some (_, Masc_tui_fetched.Ready _) -> state.code_memos
+    | Some (_, (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
+                | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _))
+    | None -> []
+  in
+  let wrap text =
+    Message_layout.wrap_body
+      ~max_cells:(max 1 (cols - 6)) ~sanitize:Terminal_text.single_line text
+  in
+  match memos with
+  | [] -> wrap "(no memo in this file: a comment on its own row reading masc(name): text)"
+  | _ :: _ ->
+      List.concat_map
+        (function
+          | Masc_tui_memo.Memo_at (line, memo) ->
+              let kind = match Ide_memo.kind_word memo.Ide_memo.kind with
+                | None -> "" | Some word -> " (" ^ word ^ ")"
+              in
+              wrap (Printf.sprintf "L%d · %s%s\n%s" line
+                      (Terminal_text.single_line memo.Ide_memo.author) kind
+                      (Terminal_text.single_line memo.Ide_memo.text))
+          | Masc_tui_memo.Broken_at (line, why) ->
+              wrap (Printf.sprintf "L%d · memo unreadable: %s" line
+                      (Terminal_text.single_line why)))
+        memos
+
+let code_notes_viewport (state : state) =
+  let _, cols = get_terminal_size () in
+  let pane_cols =
+    if cols >= keeper_split_threshold_cols then cols - keeper_roster_pane_cols
+    else cols
+  in
+  (List.length (code_notes_rows state ~cols:pane_cols),
+   max 1 (code_pane_content_height state - 1))
+
+let code_history_rows (state : state) ~cols =
+  let wrap owner text =
+    Message_layout.wrap_body
+      ~max_cells:(max 1 (cols - 6)) ~sanitize:Terminal_text.single_line text
+    |> List.map (fun text -> (owner, text))
+  in
+  let field name text = name ^ ": " ^ Terminal_text.single_line text in
+  let date seconds =
+    let t = Unix.localtime seconds in
+    Printf.sprintf "%04d-%02d-%02d %02d:%02d:%02d"
+      (t.Unix.tm_year + 1900) (t.tm_mon + 1) t.tm_mday
+      t.tm_hour t.tm_min t.tm_sec
+  in
+  match Masc_tui_fetched.current state.code_history with
+  | Some (_, (Masc_tui_fetched.Stale (_, detail) | Masc_tui_fetched.Failed detail)) ->
+      wrap None (field "History unavailable" detail)
+  | Some (_, Masc_tui_fetched.Loading) -> wrap None "(loading history)"
+  | Some (_, Masc_tui_fetched.Absent) | None -> []
+  | Some ((scope, path), Masc_tui_fetched.Ready listing) ->
+      let entries = List.concat_map
+        (fun entry ->
+          let lines = match entry with
+            | Hist_commit row ->
+                let open Masc.Tui_decode in
+                [field "Commit" row.gl_hash; field "Date" (date (row.gl_at_ms /. 1000.));
+                 field "Author" row.gl_author; field "Subject" row.gl_subject]
+            | Hist_keeper_change change ->
+                let open Masc.Tui_decode in
+                let kind = match change.fc_kind with
+                  | Fc_edited _ -> "EDIT" | Fc_inserted _ -> "MEMO"
+                  | Fc_written _ | Fc_materialized _ -> "WRITE"
+                in
+                let anchor = match file_change_evidence_label change.fc_line_evidence with
+                  | Some label -> label | None -> "L?"
+                in
+                [field "Keeper" change.fc_keeper; field "Date" (date change.fc_at);
+                 field "Kind" kind; field "Lines" anchor;
+                 field "Result" (if change.fc_succeeded then "applied" else "failed")]
+                @ List.filter_map Fun.id
+                    [Option.map (field "Task") change.fc_task_id;
+                     Option.map (fun turn -> field "Turn" (string_of_int turn)) change.fc_turn;
+                     Option.map (field "Execution") change.fc_execution_id]
+          in
+          List.concat_map (wrap (Some entry)) lines)
+        listing.chl_entries
+      in
+      let empty = match listing.chl_entries with
+        | [] -> wrap None "(no commit or exact Keeper change touches this file)"
+        | _ :: _ -> []
+      in
+      let note = match state.code_lsp_note with
+        | None -> [] | Some text -> wrap None (field "File note" text)
+      in
+      let scope_text = match scope with
+        | Code_scope_project -> "Project"
+        | Code_scope_keeper keeper -> "Keeper " ^ keeper
+        | Code_scope_repo repo -> "Repository " ^ repo
+      in
+      entries @ empty @ wrap None (field "File" path)
+      @ wrap None (field "Scope" scope_text)
+      @ wrap None (field "Coverage" listing.chl_activity_note) @ note
+
+let code_history_pane_cols () =
+  let _, cols = get_terminal_size () in
+  if cols >= keeper_split_threshold_cols then cols - keeper_roster_pane_cols
+  else cols
+
+let code_history_viewport (state : state) =
+  (List.length (code_history_rows state ~cols:(code_history_pane_cols ())),
+   max 1 (code_pane_content_height state - 1))
+
+let code_history_selected (state : state) =
+  let rows = code_history_rows state ~cols:(code_history_pane_cols ()) in
+  (* The first row owns Enter. Let every physical row reach that position,
+     including the final record when the whole document fits the pane. *)
+  let scroll = Masc_tui_scroll.normalize ~count:(List.length rows) ~height:1
+      state.code_history_scroll in
+  match List.nth_opt rows scroll with
+  | Some (owner, _) -> owner | None -> None
+
 let render_code (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let buf = Buffer.create 4096 in
@@ -318,62 +436,20 @@ let render_code (state : state) =
     box_divider pane_buf pane_cols;
     let content_height = code_pane_content_height state in
     (if notes_showing then
-       (* The memos are the file's own comments, so the overlay lists what
-          the loaded rows hold in the file's comment syntax and has no
-          reading state of its own. *)
-       (* Read off the rows at load, so this is a lookup. Shown only while
-          the file they came from is the loaded one: clearing the file
-          leaves the field behind, and a list captioning bytes that are no
-          longer on screen is worse than none. *)
-       let memos =
-         match Masc_tui_fetched.current state.code_file with
-         | Some (_, Masc_tui_fetched.Ready _) -> state.code_memos
-         | Some
-             ( _
-             , ( Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
-               | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _ ) )
-         | None -> []
-       in
-       match memos with
-       | [] ->
-           box_line pane_buf pane_cols
-             (Ansi.dim
-             ^ "  (no memo in this file: a comment on its own row reading \
-                masc(name): text)"
-             ^ Ansi.reset);
-           for _ = 2 to content_height do
-             box_empty pane_buf pane_cols
-           done
-       | _ :: _ ->
-           let total = List.length memos in
-           let max_scroll = max 0 (total - content_height) in
-           let scroll = max 0 (min state.code_notes_scroll max_scroll) in
-           let memos_window = Rows.of_list ~first:scroll ~height:content_height memos in
-           for i = 0 to content_height - 1 do
-             match Rows.at memos_window (scroll + i) with
-             | Some (Masc_tui_memo.Memo_at (line, memo)) ->
-                 let kind =
-                   match Ide_memo.kind_word memo.Ide_memo.kind with
-                   | None -> ""
-                   | Some word -> " (" ^ word ^ ")"
-                 in
-                 box_line pane_buf pane_cols
-                   (Printf.sprintf "  %s%-6s%s %s%s%s%s  %s" Ansi.dim
-                      (Printf.sprintf "L%d" line)
-                      Ansi.reset
-                      (Masc_tui_theme.tone Masc_tui_theme.Accent)
-                      (Terminal_text.single_line memo.Ide_memo.author)
-                      kind Ansi.reset
-                      (Terminal_text.single_line memo.Ide_memo.text))
-             | Some (Masc_tui_memo.Broken_at (line, why)) ->
-                 box_line pane_buf pane_cols
-                   (Printf.sprintf "  %s%-6s%s %smemo unreadable: %s%s" Ansi.dim
-                      (Printf.sprintf "L%d" line)
-                      Ansi.reset (Theme.bad ())
-                      (Terminal_text.single_line why)
-                      Ansi.reset)
-             | None -> box_empty pane_buf pane_cols
-           done
+       let rendered = code_notes_rows state ~cols:pane_cols in
+       let total = List.length rendered in
+       let height = max 1 (content_height - 1) in
+       let scroll = max 0 (min state.code_notes_scroll (max 0 (total - height))) in
+       if content_height > 1 then
+         box_line_styled pane_buf pane_cols ~style:(Theme.recede ())
+           (Printf.sprintf "  rows %d-%d of %d" (scroll + 1)
+              (min total (scroll + height)) total);
+       let window = Rows.of_list ~first:scroll ~height rendered in
+       for i = 0 to height - 1 do
+         match Rows.at window (scroll + i) with
+         | Some line -> box_line pane_buf pane_cols ("  " ^ line)
+         | None -> box_empty pane_buf pane_cols
+       done
      else if diff_showing then
        match Masc_tui_fetched.current state.code_diff with
        | Some (_, (Masc_tui_fetched.Stale (_, detail) | Masc_tui_fetched.Failed detail)) ->
@@ -477,102 +553,23 @@ let render_code (state : state) =
                  | None -> box_empty pane_buf pane_cols
                done)
      else if history_showing then
-       (* "(loading history)" used to be what an unasked overlay said as well
-          as a reading one. Now it is only the reading one. *)
-       match Masc_tui_fetched.current state.code_history with
-       | Some (_, (Masc_tui_fetched.Stale (_, detail) | Masc_tui_fetched.Failed detail)) ->
-           box_line pane_buf pane_cols
-             ((Theme.bad ()) ^ "  " ^ Terminal_text.single_line detail
-             ^ Ansi.reset);
-           for _ = 2 to content_height do
-             box_empty pane_buf pane_cols
-           done
-       | Some (_, Masc_tui_fetched.Loading) ->
-           box_line pane_buf pane_cols
-             (Ansi.dim ^ "  (loading history)" ^ Ansi.reset);
-           for _ = 2 to content_height do
-             box_empty pane_buf pane_cols
-           done
-       | Some (_, Masc_tui_fetched.Absent) | None ->
-           for _ = 1 to content_height do
-             box_empty pane_buf pane_cols
-           done
-       | Some (_, Masc_tui_fetched.Ready { chl_entries = []; chl_activity_note }) ->
-           box_line pane_buf pane_cols
-             (Ansi.dim
-              ^ "  (no commit or exact Keeper change touches this file)"
-              ^ Ansi.reset);
-           box_line_styled pane_buf pane_cols ~style:(Theme.recede ())
-             ("  " ^ Terminal_text.single_line chl_activity_note);
-           for _ = 3 to content_height do
-             box_empty pane_buf pane_cols
-           done
-       | Some (_, Masc_tui_fetched.Ready { chl_entries; chl_activity_note }) ->
-           box_line_styled pane_buf pane_cols ~style:(Theme.recede ())
-             ("  " ^ Terminal_text.single_line chl_activity_note);
-           let list_height = max 1 (content_height - 1) in
-           let total = List.length chl_entries in
-           let max_scroll = max 0 (total - list_height) in
-           let scroll = max 0 (min state.code_history_scroll max_scroll) in
-           let chl_entries_window = Rows.of_list ~first:scroll ~height:list_height chl_entries in
-           let at_of ms =
-             let t = Unix.localtime (ms /. 1000.) in
-             Printf.sprintf "%02d-%02d %02d:%02d" (t.Unix.tm_mon + 1)
-               t.Unix.tm_mday t.Unix.tm_hour t.Unix.tm_min
-           in
-           for i = 0 to list_height - 1 do
-             match Rows.at chl_entries_window (scroll + i) with
-             | Some (Hist_keeper_change change) ->
-                 let open Masc.Tui_decode in
-                 (* File-change rows carry Unix seconds; git history carries
-                    epoch milliseconds. [at_of] takes the latter because the
-                    two kinds are sorted in that unit too. *)
-                 let at = at_of (change.fc_at *. 1000.) in
-                 let anchor =
-                   Option.value ~default:"L?"
-                     (file_change_evidence_label change.fc_line_evidence)
-                 in
-                 let kind =
-                   match change.fc_kind with
-                   | Fc_edited _ -> "EDIT"
-                   | Fc_inserted _ -> "MEMO"
-                   | Fc_written _ -> "WRITE"
-                   | Fc_materialized _ -> "WRITE"
-                 in
-                 let result_style, result =
-                   if change.fc_succeeded
-                   then Theme.ok (), "✓"
-                   else Theme.bad (), "✗"
-                 in
-                 let provenance =
-                   [ Option.map (fun task -> "task " ^ task) change.fc_task_id
-                   ; Option.map
-                       (fun turn -> Printf.sprintf "turn %d" turn)
-                       change.fc_turn
-                   ; Option.map (fun id -> "exec " ^ id) change.fc_execution_id
-                   ]
-                   |> List.filter_map Fun.id
-                   |> String.concat " · "
-                 in
-                 box_line pane_buf pane_cols
-                   (Printf.sprintf
-                      "  %s%s%s  %s%s%s  %s%s%s %-5s  %s%s%s  %s"
-                      Ansi.dim at Ansi.reset Ansi.dim (fit_width anchor 12)
-                      Ansi.reset result_style result Ansi.reset kind (Masc_tui_theme.tone Masc_tui_theme.Accent)
-                      (Terminal_text.single_line change.fc_keeper)
-                      Ansi.reset
-                      (Terminal_text.single_line provenance))
-             | Some (Hist_commit row) ->
-                 let open Masc.Tui_decode in
-                 box_line pane_buf pane_cols
-                   (Printf.sprintf "  %s%s%s  %s%s%s  %s  %s" Ansi.dim
-                      (at_of row.gl_at_ms) Ansi.reset
-                      (Masc_tui_theme.tone Masc_tui_theme.Accent)
-                      row.gl_hash Ansi.reset
-                      (Terminal_text.single_line row.gl_author)
-                      (Terminal_text.single_line row.gl_subject))
-             | None -> box_empty pane_buf pane_cols
-           done
+       let rendered = code_history_rows state ~cols:pane_cols in
+       let total = List.length rendered in
+       let height = max 1 (content_height - 1) in
+       let scroll = Masc_tui_scroll.normalize ~count:total ~height:1 state.code_history_scroll in
+       if content_height > 1 then
+         box_line_styled pane_buf pane_cols ~style:(Theme.recede ())
+           (Printf.sprintf "  rows %d-%d of %d"
+              (if total = 0 then 0 else scroll + 1)
+              (min total (scroll + height)) total);
+       let window = Rows.of_list ~first:scroll ~height rendered in
+       for i = 0 to height - 1 do
+         match Rows.at window (scroll + i) with
+         | Some (_, line) ->
+             box_line pane_buf pane_cols
+               ("  " ^ (if i = 0 then Ansi.bold else "") ^ line ^ Ansi.reset)
+         | None -> box_empty pane_buf pane_cols
+       done
      else
        (* A blank pane used to mean three things: no file open, a file being
           read, and a file that failed to read. Two of them now say so. *)
@@ -728,8 +725,10 @@ let render_code (state : state) =
    else list_pane ~framed:false buf cols);
   let code_pane =
     if state.code_focus_file <> Right_pane then Masc_tui_keys.Code_tree
+    else if state.code_notes_open then Masc_tui_keys.Code_notes
+    else if state.code_history_open then Masc_tui_keys.Code_history
     else if
-      state.code_history_open || state.code_diff_open || state.code_notes_open
+      state.code_diff_open
     then Masc_tui_keys.Code_overlay
     else Masc_tui_keys.Code_file
   in

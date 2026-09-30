@@ -1,0 +1,9 @@
+Testing `Executor pool cancellation'.
+This run has ID `25GSDDI3'.
+
+  [OK]          compute          0   running worker stops with its caller.
+  [OK]          compute          1   waiting work does not run after cancella...
+  [OK]          compute          2   successful, nested and inline compute.
+
+Full test results in `/masc-work/jazz-developer/masc/.worktrees/36496-pool-cancel/_build/_tests/Executor pool cancellation'.
+Test Successful in 0.003s. 3 tests run.

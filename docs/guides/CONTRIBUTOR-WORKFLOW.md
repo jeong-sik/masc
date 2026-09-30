@@ -34,6 +34,7 @@ flowchart LR
   preceding branch. Give each PR one concrete outcome and land the stack bottom first.
 - Keep concurrent changes in separate worktrees. Task claims coordinate who is
   doing the work; they do not lock files or authorize editing another checkout.
+- For GitHub Native Stacks, inspect REST `stack` metadata and follow [Native GitHub Stacks](NATIVE-GITHUB-STACKS.md). Merging a selected PR includes its open downstack PRs; a non-main direct base is not a parent-merge blocker. Review the whole included scope.
 - Document the feature where readers look for it. README introduces the product,
   CONTRIBUTING starts development, manuals explain use, specs define interfaces,
   and RFCs record design proposals. Source and measured behavior support claims.

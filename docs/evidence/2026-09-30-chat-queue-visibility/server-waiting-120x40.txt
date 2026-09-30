@@ -1,0 +1,40 @@
+ Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System
+
+   Keepers ▸ alpha ▸ chat
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ┄┄ 2026-09-30 · 22:00 ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+       22:33 ▶ YOU                 queued-one
+             ▶ YOU                 queued-two
+             ○ STATUS            │ Update accepted; stopping the observed turn before continuing
+             ○ STATUS            │ Update accepted; stopping the observed turn before continuing
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    (waiting to start tui-01..6b6dcec31a7f · 3s…)
+    ◑ autonomous · 3s · waiting for cooperative settlement · last activity 3s ago · Esc stops it · /queue
+    Latest output: Atomic fixture ready
+    History load failed · /errors
+    Memory load failed · /errors
+    ○ WAITING TO START · queued · 2 messages in the keeper's queue · 3s
+    >
+
+ alpha · - unread AUTO · gate: not loaded · —  Context unavailable · Ctrl-X
+  Enter:send update  Ctrl-J:newline  Ctrl-R:reasoning  Ctrl-D:tools  Ctrl-N:journal  Esc:stop current turn  …?

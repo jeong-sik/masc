@@ -119,7 +119,7 @@ def main(executable: str, captures: Path | None) -> None:
         help_output = key(b"?", b"Lane Add-ons keys")
         help_screen = screen(help_output, b"Lane Add-ons keys")
         for needle in (b"Esc:close", b"j/k select", b"Enter open", b"1 Activity",
-                       b"4 Records", b"E edit", b"e export marked rows", b":act"):
+                       b"4 Records", b"E edit", b"e export marked rows", b"A command"):
             if needle not in help_screen:
                 raise AssertionError(f"Lane help omitted {needle!r}")
         key(b"\x1b", b"Lane Add-ons \xc2\xb7 0 declared \xc2\xb7 1 active \xc2\xb7 1 failed workers")
@@ -263,6 +263,10 @@ def run_navigation_consistency(executable: str) -> None:
         key(b"\r", b"hover, def and refs ask about the file open")
         key(b":go lane add-ons\r", b"World observer")
         capture("palette-from-addons", key(b":", b"From Lane Add-ons"))
+        key(b"\x1b", b"World observer")
+        draft = key(b"A::act", b":::act")
+        if b"MASC Command palette" in terminal.screen_text(draft):
+            raise AssertionError("advanced text input intercepted a literal colon")
         key(b"\x1b", b"World observer")
         key(b":go Board\r", b"MASC Board")
         key(b":go Dashboard\r", b"MASC Dashboard")

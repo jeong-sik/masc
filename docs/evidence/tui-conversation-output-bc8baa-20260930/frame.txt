@@ -1,0 +1,30 @@
+ Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System
+
+   Keepers ▸ alpha ▸ chat                                                                           
+ ────────────────────────────────────────────────────────────────────────────────────────────────── 
+  ┄┄ 2026-09-30 · 03:00 ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄  
+       03:30 ▶ YOU             queued-question-preserved                                            
+             ● alpha           진행 중 · autonomous · 최근 출력 발췌                                
+                               SECOND_PROGRESS_LINE                                                 
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+ ────────────────────────────────────────────────────────────────────────────────────────────────── 
+    ◓ autonomous · 6s · waiting for cooperative settlement · last activit… · Esc stops it · /queue  
+    Memory load failed · /errors                                                                    
+    ○ WAITING TO START · queued · 1 message in the keeper's queue · 1s                              
+    >                                                                                               
+
+ alpha · - unread AUTO · gate: not loaded · —  Context unavailable · Ctrl-X                         
+  Message submitted without interruption; refreshi…  Enter:send (0 local)  Esc:stop current turn  …?

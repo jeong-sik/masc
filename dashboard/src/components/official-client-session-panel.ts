@@ -36,6 +36,9 @@ function retryPreviousOffered(failure: DashboardOfficialClientRecoveryFailure): 
     case 'vendor_session_full_no_activity':
     case 'vendor_session_full_after_activity':
       return false
+    case 'owner_stopped_turn':
+    case 'input_rejected_bootstrap_floor_exceeded':
+    case 'input_rejected_effect_fenced':
     case 'pre_dispatch_failed':
     case 'transient_spawn_failed':
     case 'transport_interrupted':

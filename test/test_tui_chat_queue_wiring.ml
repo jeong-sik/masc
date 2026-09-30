@@ -1857,7 +1857,7 @@ let test_promoted_live_output_survives_settlement_and_replay () =
               causal_parent_request_id = None } }
       in
       state.view <- Tui_types.Keepers Tui_types.Keeper_message;
-      state.roster_pane_hidden <- true;
+      state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
       state.msg_target_keeper_name <- Some "alpha";
       state.msg_live <- Some entry.log;
       state.msg_inflight <- [entry];
@@ -1944,7 +1944,7 @@ let test_an_execute_call_leads_with_its_exit_and_output () =
         Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
       in
       state.view <- Tui_types.Keepers Tui_types.Keeper_message;
-      state.roster_pane_hidden <- true;
+      state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
       state.msg_target_keeper_name <- Some "alpha";
       state.msg_tool_visibility <- tool_visibility;
       let calls =
@@ -2135,7 +2135,7 @@ let test_mismatched_keeper_rows_make_results_incomplete () =
       Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
     in
     state.view <- Tui_types.Keepers Tui_types.Keeper_message;
-    state.roster_pane_hidden <- true;
+    state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
     state.msg_target_keeper_name <- Some "alpha";
     state.msg_tool_visibility <- Tui_types.Tools_results;
     let calls =
@@ -2193,7 +2193,7 @@ let test_held_tool_results_follow_async_snapshot_changes () =
     set_size (40, 140);
     let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
     state.view <- Tui_types.Keepers Tui_types.Keeper_message;
-    state.roster_pane_hidden <- true;
+    state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
     state.msg_target_keeper_name <- Some "alpha";
     state.msg_tool_visibility <- Tui_types.Tools_results;
     state.keeper_calls_keeper <- Some "alpha";
@@ -2254,7 +2254,7 @@ let test_a_failing_librarian_is_named_on_the_header () =
       Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
     in
     state.view <- Tui_types.Keepers Tui_types.Keeper_message;
-    state.roster_pane_hidden <- true;
+    state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
     state.msg_target_keeper_name <- Some "alpha";
     let failed at =
       { (chat_entry ~request_id:"" ~role:Tui_types.Message_memory
@@ -2317,7 +2317,7 @@ let test_a_journal_revision_draws_its_facts_in_columns () =
       Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
     in
     state.view <- Tui_types.Keepers Tui_types.Keeper_message;
-    state.roster_pane_hidden <- true;
+    state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
     state.msg_target_keeper_name <- Some "alpha";
     let summary = "Librarian \xc2\xb7 revision 454 \xc2\xb7 +1 \xe2\x88\x920 \xc2\xb7 63 retained" in
     let claim =
@@ -2377,7 +2377,7 @@ let test_a_nameless_heading_is_the_mark_and_the_rule () =
       Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
     in
     state.view <- Tui_types.Keepers Tui_types.Keeper_message;
-    state.roster_pane_hidden <- true;
+    state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
     state.msg_target_keeper_name <- Some "alpha";
     state.msg_origin_display <- Masc_tui_message_layout.Origin_row;
     let request = "tui-01a0c788-43a7" in
@@ -2426,7 +2426,7 @@ let test_an_arrival_reads_behind_a_bar () =
       Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
     in
     state.view <- Tui_types.Keepers Tui_types.Keeper_message;
-    state.roster_pane_hidden <- true;
+    state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
     state.msg_target_keeper_name <- Some "alpha";
     state.msg_history <-
       [ { (chat_entry ~request_id:"tui-01a0c788-0001"
@@ -2479,7 +2479,7 @@ let test_origin_row_heading_spells_the_name_and_ends_on_the_clock () =
       Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
     in
     state.view <- Tui_types.Keepers Tui_types.Keeper_message;
-    state.roster_pane_hidden <- true;
+    state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
     state.msg_target_keeper_name <- Some keeper;
     state.msg_origin_display <- Masc_tui_message_layout.Origin_row;
     let at = 1_790_053_724. in
@@ -2624,7 +2624,7 @@ let test_a_folded_reasoning_block_is_the_count_and_the_key () =
       Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
     in
     state.view <- Tui_types.Keepers Tui_types.Keeper_message;
-    state.roster_pane_hidden <- true;
+    state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
     state.msg_target_keeper_name <- Some "alpha";
     state.msg_reasoning_visibility <- Tui_types.Reasoning_folded;
     state.msg_history <-
@@ -2660,7 +2660,7 @@ let test_an_observed_running_turn_is_drawn_from_its_journal () =
       Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
     in
     state.view <- Tui_types.Keepers Tui_types.Keeper_message;
-    state.roster_pane_hidden <- true;
+    state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
     state.msg_target_keeper_name <- Some "alpha";
     state.msg_loaded_keeper <- Some "alpha";
     state.msg_loaded <-
@@ -4204,6 +4204,51 @@ let test_only_a_moving_skill_wears_the_live_mark () =
          | Masc_tui_message_layout.Skill_failure -> None)
        Keeper_chat_transcript.all_skill_states)
 
+let test_roster_default_follows_chat_without_rewriting_preference () =
+  let state = Tui_types.create_state ~workspace:"test" ~port:0 ~refresh_interval:2. () in
+  check bool "default is hidden outside chat" true (Tui_types.roster_pane_hidden state);
+  state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+  check bool "entering chat shows the roster" false (Tui_types.roster_pane_hidden state);
+  state.view <- Tui_types.Keepers Tui_types.Keeper_detail;
+  check bool "Auto returns to the detail default" true (Tui_types.roster_pane_hidden state);
+  List.iter (fun (preference, hidden) ->
+    state.roster_pane_preference <- preference;
+    List.iter (fun surface ->
+      state.view <- surface;
+      check bool "explicit preference survives navigation" hidden
+        (Tui_types.roster_pane_hidden state))
+      [Tui_types.Keepers Tui_types.Keeper_message; Tui_types.Keepers Tui_types.Keeper_detail])
+    [Masc_tui_roster_pane.Hidden, true; Masc_tui_roster_pane.Shown, false]
+
+let test_hidden_chat_roster_releases_focus_without_changing_conversation () =
+  let state = Tui_types.create_state ~workspace:"test" ~port:0 ~refresh_interval:2. () in
+  state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+  state.msg_target_keeper_name <- Some "alpha";
+  state.keeper_cursor <- 1;
+  Buffer.add_string state.msg_input "alpha's unsent draft";
+  let threshold = Masc_tui_roster_pane.threshold_cols in
+  List.iter (fun (preference, cols) ->
+    state.roster_pane_preference <- preference;
+    state.keeper_message_focus <- Tui_types.Left_pane;
+    Tui_types.reconcile_keeper_message_focus state ~cols;
+    check bool "hidden roster releases focus" true
+      (state.keeper_message_focus = Tui_types.Right_pane);
+    check (option string) "conversation preserved" (Some "alpha") state.msg_target_keeper_name;
+    check int "roster selection preserved" 1 state.keeper_cursor;
+    check string "draft preserved" "alpha's unsent draft" (Buffer.contents state.msg_input);
+    check bool "visibility preference preserved" true (state.roster_pane_preference = preference);
+    state.roster_pane_preference <- Masc_tui_roster_pane.Shown;
+    Tui_types.reconcile_keeper_message_focus state ~cols:threshold;
+    check bool "returning roster does not steal focus" true
+      (state.keeper_message_focus = Tui_types.Right_pane))
+    [Masc_tui_roster_pane.Auto, threshold - 1;
+     Masc_tui_roster_pane.Shown, threshold - 1;
+     Masc_tui_roster_pane.Hidden, threshold];
+  state.keeper_message_focus <- Tui_types.Left_pane;
+  Tui_types.reconcile_keeper_message_focus state ~cols:threshold;
+  check bool "visible roster retains deliberate focus" true
+    (state.keeper_message_focus = Tui_types.Left_pane)
+
 let () =
   run
     "tui_chat_queue_wiring"
@@ -4437,6 +4482,11 @@ let () =
         ; test_case "scroll anchor survives USER persistence" `Quick
             test_scroll_anchor_survives_session_user_persistence
         ] )
+    ; ( "roster default"
+      , [ test_case "chat default preserves explicit preference" `Quick
+            test_roster_default_follows_chat_without_rewriting_preference
+        ; test_case "hidden roster releases focus and retains the conversation" `Quick
+            test_hidden_chat_roster_releases_focus_without_changing_conversation ] )
     ; ( "queue"
       , [ test_case "take_newest returns the last and keeps order" `Quick
             test_take_newest_returns_last_and_keeps_order

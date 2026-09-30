@@ -5,6 +5,7 @@
 - Before planning or changing MASC, read `docs/constitution.xml` in full.
 - For MASC coding-agent work, its `<execution_protocol>` is the repository-specific workflow authority. It overrides parent or general contributor guidance, including `CONTRIBUTING.md`, only where those sources would require local Dune builds, CI watch/wait loops, or a different default for parallel review agents.
 - System, developer, and explicit user instructions still take precedence. The execution protocol does not relax safety, scope, destructive-action, or evidence-honesty rules.
+- Follow the concrete contributor procedures in `docs/guides/CONTRIBUTOR-WORKFLOW.md` after reading the constitution.
 - Keep this file as a thin entrypoint. Do not duplicate the full constitution here.
 
 ## Keeper Runtime Boundary

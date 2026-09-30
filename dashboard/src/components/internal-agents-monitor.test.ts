@@ -556,7 +556,8 @@ describe('InternalAgentsMonitor', () => {
     expect(within(filters).getByRole('button', { name: 'Auto Judge 1' })).toBeTruthy()
     expect(within(filters).getByRole('button', { name: 'Board Attention 1' })).toBeTruthy()
     expect(container.textContent).not.toContain('Board Judge')
-    expect(container.querySelector('code[translate="no"]')).toBeNull()
+    expect(Array.from(container.querySelectorAll('code[translate="no"]'), code => code.getAttribute('title')))
+      .toEqual(['auto-judge-1', 'board-attention-1'])
 
     fireEvent.click(within(filters).getByRole('button', { name: 'Auto Judge 1' }))
     expect(screen.getByRole('button', { name: /Auto Judge approval-1/i })).toBeTruthy()

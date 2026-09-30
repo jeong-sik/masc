@@ -16,6 +16,35 @@ let check_string = Alcotest.(check string)
 let wide = Pane.threshold_cols + 40
 let narrow = Pane.threshold_cols - 1
 
+let test_auto_shows_only_chat_when_wide () =
+  List.iter (fun in_chat ->
+    check_bool "surface default with room" in_chat
+      (Pane.shown ~hidden:(Pane.effective_hidden Pane.Auto ~in_chat) ~cols:wide);
+    check_bool "narrow chat retains all content columns" false
+      (Pane.shown ~hidden:(Pane.effective_hidden Pane.Auto ~in_chat) ~cols:narrow))
+    [false; true]
+
+let test_explicit_choice_survives_surface_and_width_changes () =
+  List.iter (fun (in_chat, expected) ->
+    let preference = match Pane.toggle_preference Pane.Auto ~in_chat ~cols:wide with
+      | Some preference -> preference
+      | None -> Alcotest.fail "wide toggle must record a choice" in
+    List.iter (fun in_chat ->
+      List.iter (fun cols ->
+        check_bool "explicit choice is independent of the current surface"
+          (expected && cols >= Pane.threshold_cols)
+          (Pane.shown ~hidden:(Pane.effective_hidden preference ~in_chat) ~cols))
+        [wide; narrow; Pane.threshold_cols; wide]) [false; true])
+    [true, false; false, true]
+
+let test_narrow_toggle_does_not_change_auto_or_explicit_choice () =
+  List.iter (fun preference ->
+    List.iter (fun in_chat ->
+      match Pane.toggle_preference preference ~in_chat ~cols:narrow with
+      | None -> ()
+      | Some _ -> Alcotest.fail "a narrow toggle changed the stored preference")
+      [false; true]) [Pane.Auto; Pane.Hidden; Pane.Shown]
+
 let test_a_wide_terminal_shows_the_roster () =
   check_bool "wide and wanted" true (Pane.shown ~hidden:false ~cols:wide)
 
@@ -159,7 +188,13 @@ let () =
             test_a_drawn_pane_keeps_what_the_reader_asked_for
         ] )
     ; ( "shown"
-      , [ Alcotest.test_case "a wide terminal shows the roster" `Quick
+      , [ Alcotest.test_case "Auto shows only chat when wide" `Quick
+            test_auto_shows_only_chat_when_wide
+        ; Alcotest.test_case "explicit choice survives surface and width changes" `Quick
+            test_explicit_choice_survives_surface_and_width_changes
+        ; Alcotest.test_case "narrow toggle preserves every preference" `Quick
+            test_narrow_toggle_does_not_change_auto_or_explicit_choice
+        ; Alcotest.test_case "a wide terminal shows the roster" `Quick
             test_a_wide_terminal_shows_the_roster
         ; Alcotest.test_case "a narrow terminal keeps it away" `Quick
             test_a_narrow_terminal_keeps_it_away

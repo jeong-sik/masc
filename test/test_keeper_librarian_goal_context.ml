@@ -17,11 +17,10 @@ let task id = Some (Keeper_id.Task_id.of_string id |> Result.get_ok)
 
 let goal id title : Goal_store.goal =
   let now = Masc_domain.now_iso () in
-  { id; owner = Goal_store.Unknown_owner; title; criterion_revision = "revision-" ^ id
+  { id; title; criterion_revision = "revision-" ^ id
   ; metric = Some "accepted artifacts"; target_value = Some "2"
   ; due_date = None; priority = 3; phase = Goal_phase.Executing
   ; last_review_note = None; last_review_at = None
-  ; notified_refuted_key = None; notified_overdue_key = None
   ; created_at = now; updated_at = now }
 
 let write_goals config goals =

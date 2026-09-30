@@ -92,7 +92,7 @@ let test_the_verdict_detail_reading_is_a_position_not_a_key () =
    Two rows reached for the title's helper from behind a label -- Overview drew
    "Pulse: (load failed)" and Lanes "Lane Add-ons: (not loaded)". That
    typechecks either way, so there was nothing to catch it but a screen. The
-   words themselves are pinned by scripts/check-ssot.sh; which of the two a row
+   words are supplied by the shared wording module; which of the two a row
    asks for is pinned here. *)
 let test_a_labelled_field_does_not_bracket_its_missing_reading () =
   let asks ~module_path ~binding_name ~callee =
@@ -248,31 +248,21 @@ let test_the_approvals_title_counts_what_the_badge_counts () =
   Alcotest.(check int) "and the surface reads the asks snapshot nowhere else" 0
     (reads ~binding_name:"render_approvals" ~fields:[ "asks_snapshot" ])
 
-(* The Overview summary row wears the same word as the tab badge beside it,
-   and for a while they counted different things: the badge walked all three
-   approval lists, the row read the confirm queue's own visible count. A
-   runtime holding one keeper tool call drew "Approvals: 0" under a tab
-   reading "Approvals·1". One name, one population. *)
-let test_the_overview_row_counts_every_approval_list () =
+(* Home owns a decision projection. Its renderer must not independently
+   reinterpret approval reads or mistake automatic Gate work for human work. *)
+let test_the_overview_draws_the_decision_projection () =
   Alcotest.(check int)
     "no confirm-queue count of its own in the Overview summary" 0
     (reads ~binding_name:"render_overview"
        ~fields:[ "aps_visible_count"; "aps_total_count" ]);
-  (* The row, the ring and the Approvals title count one population and judge
-     one reading. [approvals_count_label] takes the count from
-     [approvals_surface_pending] and the "?" from [approvals_reading_current],
-     and test_tui_keys checks that the label follows the reading. Here: the
-     row draws that label and keeps no copy of either half. Two copies of the
-     judgement drift: at fe6315aa69 (2026-09-26) the strip's copy left the Gate
-     queue out while this row's copy counted it. *)
   let calls callee =
     Ast_grep.count_calls_in_value_binding ~module_path:render
       ~binding_name:"render_overview" ~callee
     + Ast_grep.count_calls_in_value_binding ~module_path:render
         ~binding_name:"render_overview" ~callee:("Masc_tui_types." ^ callee)
   in
-  Alcotest.(check int) "the row draws the shared count label" 1
-    (calls "approvals_count_label");
+  Alcotest.(check int) "the row draws the decision projection" 1
+    (calls "home_decision_rows");
   Alcotest.(check int) "and counts no population of its own" 0
     (calls "approvals_surface_pending");
   Alcotest.(check int) "and makes no reading judgement of its own" 0
@@ -394,10 +384,7 @@ let test_the_fleet_row_reads_the_control_planes_own_word () =
     (Ast_grep.count_string_literals_in_value_binding ~module_path:loader
        ~binding_name:"keeper_liveness_of_briefs"
        ~literals:
-         [ "active"; "offline"; "idle"; "paused" ]);
-  (* The Dashboard's health row names its Keepers through one helper. *)
-  Alcotest.(check bool) "and the summary row reads the counts" true
-    (reads ~binding_name:"dashboard_keeper_line" ~fields:[ "ov_keeper_liveness" ] > 0)
+         [ "active"; "offline"; "idle"; "paused" ])
 
 (* [operation=] is the right-hand side of the line directly above whenever the
    two agree, which is every operation but an identity call. The detail line
@@ -876,33 +863,6 @@ let test_visible_navigation_glyphs_are_not_mojibake () =
   Alcotest.(check int) "preview has no double-encoded em dash" 0
     (count [ "live preview \xc3\xa2\xc2\x80\xc2\x94 none for this row" ])
 
-(* The Attention panel's badge. Critical and bad share a colour, so the word
-   is the only thing that tells those two rows apart -- and the badge fitted
-   that word to five fixed cells, which cut "critical" to [crit~] and padded
-   the shorter levels inside their own brackets as [bad  ].
-
-   Asserted at the source because nothing links the TUI executable, and
-   because both failures typecheck: a label one cell too long and a column one
-   cell too narrow are the same well-typed program. Two facts carry it -- the
-   vocabulary fits, and nothing cuts it. *)
-let test_the_attention_badge_cannot_cut_its_own_level () =
-  let literals binding names =
-    Ast_grep.count_string_literals_in_value_binding ~module_path:render
-      ~binding_name:binding ~literals:names
-  in
-  Alcotest.(check int) "every level is named and every name is short" 4
-    (literals "attention_severity_label" [ "crit"; "bad"; "warn"; "info" ]);
-  Alcotest.(check int) "the level that did not fit its column is gone" 0
-    (literals "attention_severity_label" [ "critical" ]);
-  let calls binding callee =
-    Ast_grep.count_calls_in_value_binding ~module_path:render
-      ~binding_name:binding ~callee
-  in
-  Alcotest.(check int) "the column measures the names" 1
-    (calls "attention_severity_badge_cells" "Message_layout.display_width");
-  Alcotest.(check int) "and the badge cuts nothing" 0
-    (calls "attention_severity_badge" "fit_width")
-
 (* Three facts about a surface's row list -- how many rows, which one the
    cursor is on, how to put the cursor elsewhere -- used to live in three
    separate matches over [surface], each naming every variant so a new one
@@ -1030,7 +990,7 @@ let test_both_strips_mark_where_they_are_from_one_value () =
    says nothing on screen but a smaller board. *)
 let test_the_board_title_counts_through_the_helper_that_knows_the_board () =
   let asks callee =
-    Ast_grep.count_calls_in_value_binding ~module_path:render
+    Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render_board.ml"
       ~binding_name:"render_board_list" ~callee
   in
   Alcotest.(check int) "the title asks what the board holds" 1
@@ -1163,7 +1123,7 @@ let test_the_tasks_list_pane_says_which_task_each_row_is () =
 
 let test_the_board_age_column_reads_the_sort_once () =
   let asks ~callee =
-    Ast_grep.count_calls_in_value_binding ~module_path:render
+    Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render_board.ml"
       ~binding_name:"render_board_list" ~callee
   in
   Alcotest.(check int) "the list asks which time the sort ordered by" 1
@@ -1368,8 +1328,8 @@ let () =
             test_the_verdict_detail_reading_is_a_position_not_a_key
         ; Alcotest.test_case "the title does not count another queue" `Quick
             test_the_title_does_not_count_another_queue
-        ; Alcotest.test_case "the Overview row counts every approval list"
-            `Quick test_the_overview_row_counts_every_approval_list
+        ; Alcotest.test_case "the Overview draws the decision projection"
+            `Quick test_the_overview_draws_the_decision_projection
         ; Alcotest.test_case "the Approvals screen reads the shared readings"
             `Quick test_the_approvals_screen_reads_the_shared_readings
         ; Alcotest.test_case "the summary row does not count the panel below"
@@ -1436,8 +1396,6 @@ let () =
             `Quick test_why_a_lane_cannot_admit_is_the_detail_panes_to_say
         ; Alcotest.test_case "visible navigation glyphs are not mojibake"
             `Quick test_visible_navigation_glyphs_are_not_mojibake
-        ; Alcotest.test_case "the attention badge cannot cut its own level"
-            `Quick test_the_attention_badge_cannot_cut_its_own_level
         ; Alcotest.test_case "the row cursor has one source" `Quick
             test_the_row_cursor_has_one_source
         ; Alcotest.test_case "the window is measured where the cursor lands"

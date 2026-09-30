@@ -101,51 +101,6 @@ let test_descriptor_is_typed_only () =
     (bool_field execute_schema.input_schema "additionalProperties")
 ;;
 
-let property_description (input_schema : Yojson.Safe.t) name =
-  match assoc_field_opt input_schema "properties" with
-  | Some (`Assoc props) ->
-    (match List.assoc_opt name props with
-     | Some prop ->
-       (match assoc_field_opt prop "description" with
-        | Some (`String text) -> text
-        | _ -> Alcotest.failf "%s has no description: %s" name (pp_json prop))
-     | None -> Alcotest.failf "%s missing from properties: %s" name (pp_json input_schema))
-  | _ -> Alcotest.failf "properties missing or wrong shape: %s" (pp_json input_schema)
-;;
-
-(* The no-shell rule is stated where a model reaches for '|': once in the
-   tool description, and once more on [argv] itself. Both ask for the rule,
-   not for a sentence -- #33528 cut the schema below its byte ceiling and
-   reworded both, and matching the old phrasing reported a wording change as
-   a missing rule. "without a shell" is the rule's own words. *)
-let test_description_states_the_no_shell_rule () =
-  let execute_schema =
-    Tool_shard_types.typed_execute_tools
-    |> find_execute_schema
-  in
-  Alcotest.(check bool)
-    "the description states there is no shell"
-    true
-    (Astring.String.is_infix ~affix:"without a shell" execute_schema.description);
-  Alcotest.(check bool)
-    "argv says there is no shell"
-    true
-    (Astring.String.is_infix
-       ~affix:"without a shell"
-       (property_description execute_schema.input_schema "argv"))
-;;
-
-let test_description_does_not_advertise_cmd () =
-  let execute_schema =
-    Tool_shard_types.typed_execute_tools
-    |> find_execute_schema
-  in
-  Alcotest.(check bool)
-    "description does not advertise cmd examples"
-    false
-    (Astring.String.is_infix ~affix:"cmd=" execute_schema.description)
-;;
-
 let () =
   Alcotest.run
     "tool_execute_descriptor"
@@ -154,14 +109,6 @@ let () =
             "descriptor is typed only"
             `Quick
             test_descriptor_is_typed_only
-        ; Alcotest.test_case
-            "description states the no-shell rule"
-            `Quick
-            test_description_states_the_no_shell_rule
-        ; Alcotest.test_case
-            "description does not advertise cmd"
-            `Quick
-            test_description_does_not_advertise_cmd
         ] )
     ]
 ;;

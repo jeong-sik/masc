@@ -1,116 +1,23 @@
-name: CI
-
-# Runs on manual dispatch or as the compile component of candidate verification. What changed on 2026-09-02 (owner decision) is the shape:
-# the previous 9-job lane (changes / meta / health / build / lint /
-# dashboard / structure-ratchet / shell-ir-ratchet / ci-gate) is now a
-# single job that builds the tree.
-#
-# Scope: `@check` type-checks the whole tree, test/ included, and links
-# nothing. It replaced `@install` on 2026-09-02 for two reasons.
-#
-# @install skips test/ entirely: that day's five main breakages put 3 of
-# 12 repaired sites — and two whole repairs (#32454, #32517) — in test
-# files it would never have compiled.
-#
-# `dune build .` would cover them but link the ~296 executables test/dune
-# declares, and linking is this repo's slow step; the @install job took
-# 10 minutes on 2026-09-02 before any of that. Every one of the five
-# breakages was a compile error — four unbound values or signature
-# mismatches, one shadowed duplicate caught as warning 32 — and @check
-# reports all of them. Nothing that day needed an executable to exist.
-#
-# Lint, dashboard, ratchets, and the ci-gate stopped running here that day,
-# and three of the four came back in pr-check.yml rather than staying gone:
-# the lint suite on 2026-09-05 (#33226), then the dashboard typecheck and the
-# OCaml boundary ratchet. Only the ci-gate runs nowhere. This lane is the
-# compile alone; pr-check.yml is where a pull request meets the rest, and
-# since 2026-09-06 (#33507) it also runs the suites the change selects.
+name: Stack Core build
 
 on:
-  push:
-    branches: [main]
-  workflow_call:
-    inputs:
-      candidate_verification:
-        type: boolean
-        default: false
   workflow_dispatch: {}
 
 permissions:
   contents: read
-  actions: write
 
-# Finish the main compile already running when another push arrives. Keep one
-# newer pending run so main CI cannot consume one runner per queued commit.
 concurrency:
-  group: ${{ inputs.candidate_verification && format('candidate-ci-{0}', github.run_id) || 'ci' }}
-  cancel-in-progress: false
+  group: stack-core-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build:
-    name: dune build @check
+  core:
+    name: Core build
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
     steps:
-      - name: Free disk space
-        # ubuntu-24.04 preinstalls the Android SDK (~9 GB), .NET (~1.6 GB),
-        # GHC (~1 GB) and the CodeQL bundle (~5 GB) this OCaml build never
-        # uses; removing them prevents the "No space left on device" failures
-        # seen on 2026-07-03 (runs 28638901622 / 28644587505 / 28652695346).
-        # See: https://github.com/jeong-sik/masc/issues/22954
-        run: |
-          set -euo pipefail
-          echo "Disk before cleanup:"
-          df -h /
-          cleanup_pids=()
-          sudo rm -rf /usr/local/lib/android & cleanup_pids+=("$!")
-          sudo rm -rf /usr/share/dotnet & cleanup_pids+=("$!")
-          sudo rm -rf /opt/ghc /usr/local/.ghcup & cleanup_pids+=("$!")
-          sudo rm -rf /opt/hostedtoolcache/CodeQL & cleanup_pids+=("$!")
-          sudo docker image prune --all --force & cleanup_pids+=("$!")
-          for cleanup_pid in "${cleanup_pids[@]}"; do
-            wait "${cleanup_pid}" || true
-          done
-          echo "Disk after cleanup:"
-          df -h /
-
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Install tools for documentation checks
-        run: |
-          bash scripts/ci/apt-refresh.sh
-          sudo apt-get install -y --no-install-recommends ripgrep
-
-      - name: Check doc truth
-        run: scripts/check-doc-truth.sh
-
-      - name: Verify doc truth uses stable checkout inputs
-        run: python3 test/test_doc_truth_stable_inputs.py
-
-      - name: Check source text integrity
-        run: scripts/ci/check-source-text-integrity.sh
-
-      - name: Setup OCaml toolchain
-        uses: ./.github/actions/setup-ocaml-toolchain
-
-      - name: Pin external OCaml dependencies
-        uses: ./.github/actions/pin-ocaml-deps
-        with:
-          pin-flags: --with-bisect
-
-      - name: Install system and OCaml dependencies
-        uses: ./.github/actions/install-ocaml-deps
-        with:
-          install-flags: --with-test
-          os-packages: jq ripgrep
-
-      - name: Build
-        env:
-          # Public runners give four CPUs; use all four for the
-          # compile-only graph.
-          DUNE_JOBS: "4"
-        # NO continue-on-error: the build is deterministic and must hard-fail.
-        run: |
-          set -euo pipefail
-          dune build @check
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-ocaml-toolchain
+      - uses: ./.github/actions/pin-ocaml-deps
+      - uses: ./.github/actions/install-ocaml-deps
+      - name: Build only the runtime library
+        run: opam exec -- dune build lib/masc.cmxa

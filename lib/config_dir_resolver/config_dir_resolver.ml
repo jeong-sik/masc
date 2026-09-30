@@ -2,6 +2,7 @@
     Consumed by the resolver here and by config loaders elsewhere in the
     codebase. Issue #8414. *)
 let runtime_toml_filename = "runtime.toml"
+let candle_toml_filename = "candle.toml"
 
 type source =
   | Env
@@ -369,6 +370,11 @@ let runtime_toml_path_for_base_path ~base_path =
   Filename.concat
     (resolve_for_base_path ~base_path).config_root.path
     runtime_toml_filename
+
+let candle_toml_path_for_base_path ~base_path =
+  Filename.concat
+    (resolve_for_base_path ~base_path).config_root.path
+    candle_toml_filename
 
 let keeper_toml_filename name = name ^ ".toml"
 

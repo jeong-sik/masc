@@ -1,4 +1,4 @@
-(** Admin-only durable execution records for model-driven Keeper exact-output
+(** Admin-only durable execution records for model-driven standalone exact-output
     lanes. Input/output values are exact. *)
 
 (** A run's lane. Verifier reviews have separate Task and Goal registries;
@@ -9,6 +9,7 @@ type lane =
   | Hitl_auto_judge
   | Board_attention
   | Workspace_curator
+  | Candle_appraiser
 
 val standalone_lane : lane -> Standalone_lane.t
 (** The lane in the shared vocabulary. A run record writes its

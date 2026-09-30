@@ -19,6 +19,8 @@ import test_tui_keyboard_input as h
 SOURCE_MODULES = (
     "bin/masc_tui_render.ml",
     "bin/masc_tui_render_tools.ml",
+    "lib/tui_decode_skill_evidence.ml",
+    "lib/tui_decode_skill_evidence.mli",
 )
 
 

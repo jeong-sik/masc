@@ -66,7 +66,7 @@ let with_clean_gate_runtime f =
 let install_exn ~base_path =
   match Keeper_approval_queue.install_persistence ~base_path with
   | Ok report -> report
-  | Error error -> fail (Keeper_approval_queue.install_error_to_string error)
+  | Error error -> fail (Masc.Keeper_approval_queue_result.install_error_to_string error)
 ;;
 
 let with_publication_recovery
@@ -514,7 +514,7 @@ let test_a_lane_that_reads_no_preference_is_refused () =
          "unknown exact-output lane %S; expected one of %s"
          "verifier_made_up"
          "librarian_exact, hitl_auto_judge, board_attention_exact, \
-          workspace_curator_exact, verifier_exact, browser_stagehand_exact")
+          workspace_curator_exact, verifier_exact, browser_stagehand_exact, candle_appraiser")
       detail;
     check int "a refusal stores no row" 0 (List.length rows)
   | _ -> fail "an unknown lane did not meet the refusal contract"
@@ -875,7 +875,7 @@ base_url = "http://127.0.0.1:1/v1"
     with
     | Ok entries -> entries
     | Error error ->
-      fail (Keeper_approval_queue.storage_error_to_string error)
+      fail (Masc.Keeper_approval_queue_result.storage_error_to_string error)
   in
   let speak_input = `Assoc [ "message", `String "gate coverage probe" ] in
   let speak =
@@ -962,7 +962,7 @@ let test_auto_judge_allows_speak_as_local_output_without_a_judge () =
    | Ok [] -> ()
    | Ok pending ->
      failf "speak left %d pending approval(s) behind" (List.length pending)
-   | Error error -> fail (Keeper_approval_queue.storage_error_to_string error));
+   | Error error -> fail (Masc.Keeper_approval_queue_result.storage_error_to_string error));
   match
     Keeper_gate.decide
       ~keeper_always_allow:false

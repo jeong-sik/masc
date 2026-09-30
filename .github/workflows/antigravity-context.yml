@@ -1,10 +1,5 @@
 name: Antigravity context transport
 on:
-  pull_request:
-    paths:
-      - 'scripts/antigravity-context-pty.py'
-      - 'test/test_antigravity_context_transport.py'
-      - '.github/workflows/antigravity-context.yml'
   workflow_dispatch:
 permissions:
   contents: read

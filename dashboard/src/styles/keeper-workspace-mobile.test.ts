@@ -158,7 +158,7 @@ describe('keeper workspace v2 (26) mobile contract', () => {
     ).toBe('none')
     expect(
       mediaRuleDecls('.v2-app[data-reading="true"] .kw-chat-actions', SHELL_MOBILE_CHROME_BREAKPOINT).display,
-    ).toBe('none')
+    ).not.toBe('none')
   })
 
   it('keeps the mobile topbar copilot button compact like the v2 phone shell', () => {

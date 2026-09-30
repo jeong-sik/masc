@@ -60,6 +60,13 @@ val refused_for_binding_rest : failure -> bool
     once the account frees. Every other failure, including an Antigravity
     refusal (its quota arrives only as turn text), is [false]. *)
 
+(** Emitted only after runtime admission, just before the runner and just after
+    its raw response. Observers retain failed syntax/semantic evidence without
+    changing slot progression or output validation. *)
+type attempt_observation =
+  | Dispatching of { runtime_id : string }
+  | Raw_response of { runtime_id : string; text : string }
+
 type runner =
   runtime_id:string
   -> system_prompt:string
@@ -79,6 +86,7 @@ type runner =
 
 val run
   :  ?runner:runner
+  -> ?observe:(attempt_observation -> unit)
   -> base_dir:string
   -> runtime_id:string
   -> system_prompt:string
@@ -97,6 +105,7 @@ val order_slots : string list -> string list
 
 val walk
   :  ?runner:runner
+  -> ?observe:(attempt_observation -> unit)
   -> base_dir:string
   -> cli_slots:string list
   -> system_prompt:string

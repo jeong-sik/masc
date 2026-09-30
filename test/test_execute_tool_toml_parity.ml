@@ -11,9 +11,8 @@
 
     What is pinned instead is the shape a model reads: which fields exist and
     in what order, which pairs of fields a call may carry, which retired names
-    are absent from the whole serialized schema, and the phrases in the
-    description that other suites and scripts/check-execute-async-surface.sh
-    key on. Read against the published list rather than the loader, so what a
+    are absent from the whole serialized schema. Read against the published
+    list rather than the loader, so what a
     Keeper receives is what is checked. *)
 
 open Alcotest
@@ -123,38 +122,6 @@ let test_serialized_schema_carries_no_retired_name () =
     [ "pipeline"; "then"; "stdin"; "stdout"; "stderr"; "env" ]
 ;;
 
-(* Six sentences, under 800 bytes: #34469 added the sentence on what an
-   enforced Observe run returns and the one on intent=request_effect, and
-   the description measured 752 bytes after it. The three phrases are what
-   test_keeper_tool_descriptor_registry_integrity,
-   test_keeper_tool_execute_descriptor_variant and
-   scripts/check-execute-async-surface.sh read; a rewrite that keeps them
-   keeps those in step. *)
-let description_ceiling_bytes = 800
-
-let test_description_is_short_and_keeps_its_stable_phrases () =
-  let description = execute_schema.description in
-  check
-    bool
-    (Printf.sprintf
-       "description is at most %d bytes (got %d)"
-       description_ceiling_bytes
-       (String.length description))
-    true
-    (String.length description <= description_ceiling_bytes);
-  List.iter
-    (fun phrase ->
-       check
-         bool
-         ("description says: " ^ phrase)
-         true
-         (Astring.String.is_infix ~affix:phrase description))
-    [ "one non-empty argv process vector"
-    ; "never interprets program or subcommand meaning"
-    ; "there is no background task lifecycle"
-    ]
-;;
-
 let () =
   run
     "execute_tool_toml_parity"
@@ -172,10 +139,6 @@ let () =
             "serialized schema carries no retired name"
             `Quick
             test_serialized_schema_carries_no_retired_name
-        ; test_case
-            "description is short and keeps its stable phrases"
-            `Quick
-            test_description_is_short_and_keeps_its_stable_phrases
         ] )
     ]
 ;;

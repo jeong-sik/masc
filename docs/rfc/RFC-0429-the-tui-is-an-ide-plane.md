@@ -55,7 +55,7 @@ TUI 에는 이미 IDE 의 조각이 있다. Workspace 에서 저장소를 열고
 1077 task-558   EDIT  APPLIED  masc-main-fr…nfig/env_config_keeper.ml [L404-408→L404-449] |> Float.max base\x0A  ;;\x…x0A    |> Float.max base\x0A  ;;\x0Aend\x0A\
 ```
 
-`change_row_summary` 가 편집 뒤 본문을 `Terminal_text.single_line` (= `Tui_decode.sanitize_terminal_text`) 에 통과시킨다. 이 함수는 외부에서 온 문자열을 한 줄로 만드는 안전장치라 제어 문자를 `\x0A` 로 바꾼다. 코드 본문의 줄바꿈은 제어 문자가 아니라 내용이다. 한 줄 미리보기에는 줄바꿈을 눈에 보이는 한 칸짜리 표시로 바꾸는 별도 투영이 필요하다. 승인 화면도 같은 문제를 이미 겪었고 (`approval_detail_pane` 주석), 게시판 본문은 줄 단위로 통과시키는 것으로 피했다.
+`change_row_summary` 가 편집 뒤 본문을 `Terminal_text.single_line` (= `Masc.Tui_terminal_text.sanitize_terminal_text`) 에 통과시킨다. 이 함수는 외부에서 온 문자열을 한 줄로 만드는 안전장치라 제어 문자를 `\x0A` 로 바꾼다. 코드 본문의 줄바꿈은 제어 문자가 아니라 내용이다. 한 줄 미리보기에는 줄바꿈을 눈에 보이는 한 칸짜리 표시로 바꾸는 별도 투영이 필요하다. 승인 화면도 같은 문제를 이미 겪었고 (`approval_detail_pane` 주석), 게시판 본문은 줄 단위로 통과시키는 것으로 피했다.
 
 ### 1.4 hover 후보 팔레트가 후보와 무관한 항목을 섞는다
 
@@ -127,7 +127,7 @@ TUI 에는 이미 IDE 의 조각이 있다. Workspace 에서 저장소를 열고
 
 ### 3.1 S1 — 읽히는 것 셋
 
-1. **한 줄 미리보기 투영.** `Tui_decode.preview_line : string -> string` 을 추가한다. 줄바꿈(`\n`, `\r\n`)은 `⏎` (U+23CE, 1칸) 로, 탭은 한 칸 공백으로, 나머지 제어 문자는 지금처럼 `sanitize_terminal_text` 로 보낸다. `change_row_summary` 와 승인 목록의 `Edit` 인자 줄이 이 투영을 쓴다. 단위 테스트는 `"a\nb"` → `"a⏎b"`, 폭이 입력 줄 수와 무관하게 1칸씩만 늘어남을 고정한다.
+1. **한 줄 미리보기 투영.** `Masc.Tui_terminal_text.preview_line : string -> string` 을 추가한다. 줄바꿈(`\n`, `\r\n`)은 `⏎` (U+23CE, 1칸) 로, 탭은 한 칸 공백으로, 나머지 제어 문자는 지금처럼 `sanitize_terminal_text` 로 보낸다. `change_row_summary` 와 승인 목록의 `Edit` 인자 줄이 이 투영을 쓴다. 단위 테스트는 `"a\nb"` → `"a⏎b"`, 폭이 입력 줄 수와 무관하게 1칸씩만 늘어남을 고정한다.
 2. **후보 팔레트.** `K`/`D`/`R` 에 이름이 여럿일 때 여는 팔레트는 후보만 담는 닫힌 모드다 (`Palette_choice of { question; candidates }`). 도착지 목록과 섞이지 않고, 필터는 후보 안에서만 돈다. 제목은 `hover · 4 names on line 11` 처럼 질문과 줄을 적는다.
 3. **메모는 여백.** (구현됨, 두 곳이 설계와 다르다.) 여백 표시는 `m` 을 기다리지 않는다 — 메모는 파일을 읽을 때 그 행들에서 같이 읽히므로 파일이 열리는 순간 켜진다. 글리프는 `┃` 가 아니라 `●` 이고, 같은 여백에서 Keeper 가 바꾼 줄이 `·` 를 쓰기 때문에 둘을 갈라야 했다. 커서가 메모 줄에 오면 메모가 제목줄에 탄다 — 아래 한 줄이 아니라 blame·언어서버 답과 같은 자리다. 행을 하나 넣었다 뺐다 하면 커서를 움직일 때마다 본문이 한 줄씩 튀고, 이 절이 지시한 "blame 과 같은 배치 코드"가 곧 제목줄이다. 길이는 프레임의 `fit_width` 가 자른다.
 
@@ -201,7 +201,7 @@ Ghostty 는 Kitty graphics 프로토콜을 지원하고 TUI 에는 `/image` 가 
 
 S3 의 두 조건은 서로를 대신하지 못한다. golden 은 렌더러가 무엇을 내놓는지 고정하고, 펜스가 렌더러까지 가는지는 못 본다. 채팅 본문은 `Masc_tui_render` 의 `chat_markdown` → `Masc_tui_markdown` 을 지나며, 그 모듈은 `Markdown` 이라는 로컬 alias 로 불린다. 언어가 `mermaid` 로 갈라지지 않으면 펜스는 평문 코드 경로로 떨어져 자기 소스를 찍는다 — golden 은 전부 초록인 채로. `mermaid-chat` 은 그 분기를 끄면 실패한다(확인함).
 
-S1 의 `\x0A` 조건도 자기 레인을 따로 쓴다. 처음에는 기존 Changes 시나리오 안에 단언을 넣었는데, 그 시나리오가 사는 기본 키보드 레인이 앞쪽 시나리오의 종료 단계에서 멈춘다(#34125). 단언은 돌지도 않은 채 초록으로 보였고, `Tui_decode.preview_line` 을 망가뜨려도 통과했다. 별도 레인(`changes-newline`)으로 옮기고서야 물었다 — 망가뜨리면 `let b = 2\x0A` 가 WHAT 열에 그대로 찍힌 걸 보고 실패한다.
+S1 의 `\x0A` 조건도 자기 레인을 따로 쓴다. 처음에는 기존 Changes 시나리오 안에 단언을 넣었는데, 그 시나리오가 사는 기본 키보드 레인이 앞쪽 시나리오의 종료 단계에서 멈춘다(#34125). 단언은 돌지도 않은 채 초록으로 보였고, `Masc.Tui_terminal_text.preview_line` 을 망가뜨려도 통과했다. 별도 레인(`changes-newline`)으로 옮기고서야 물었다 — 망가뜨리면 `let b = 2\x0A` 가 WHAT 열에 그대로 찍힌 걸 보고 실패한다.
 
 CI 비용: 단계마다 pr-check 1회 + 해당 suite 만 지정한 targeted run 1회.
 

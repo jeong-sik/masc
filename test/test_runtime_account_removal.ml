@@ -89,6 +89,32 @@ let contains ~sub text =
   | exception Not_found -> false
   | _ -> true
 
+let shared_model_declarations =
+  {|[models."gpt-5.6-high"]
+api-name = "gpt-5.6"
+max-context = 272000
+tools-support = true
+reasoning-effort = "high"
+
+[model_sets.codex]
+models = ["gpt-5.6", "gpt-5.6-high"]
+|}
+
+let shared_fixture =
+  fixture
+  |> replace ~sub:"[providers.codex_subscription]\n"
+       ~by:"[providers.codex_subscription]\nmodel-set = \"codex\"\n"
+  |> replace ~sub:"[providers.codex_acct1]\n"
+       ~by:"[providers.codex_acct1]\nmodel-set = \"codex\"\n"
+  |> replace ~sub:"[codex_subscription.\"gpt-5.6\"]\nmax-concurrent = 2\n" ~by:""
+  |> replace ~sub:"[codex_acct1.\"gpt-5.6\"]\nmax-concurrent = 1\n" ~by:""
+  |> fun text ->
+  text ^ "\n" ^ shared_model_declarations
+  ^ {|
+[runtime.lanes.high]
+candidates = ["codex_acct1.gpt-5.6-high", "codex_subscription.gpt-5.6-high"]
+|}
+
 let show_change = function
   | R.Table path -> "table " ^ path
   | R.Lane_candidate { lane; runtime } -> Printf.sprintf "lane %s: %s" lane runtime
@@ -194,6 +220,34 @@ path = "/home/op/.gemini/antigravity-oauth-token"
         ] )
     ]
 
+let test_accounts_using_a_shared_model_set_are_removed () =
+  List.iter
+    (fun (layout, source, expected_tables) ->
+      let before = loaded source in
+      let { R.text; changes; _ } = removed ~text:source "codex_acct1" in
+      let after = loaded text in
+      Alcotest.(check (list string)) (layout ^ ": only source tables removed")
+        expected_tables
+        (List.filter_map
+           (function R.Table path -> Some path | _ -> None)
+           changes);
+      Alcotest.(check bool) (layout ^ ": account bindings gone") false
+        (List.exists (fun (b : S.binding) -> b.provider_id = "codex_acct1") after.bindings);
+      Alcotest.(check (list string)) (layout ^ ": generated routes removed")
+        [ "codex_subscription.gpt-5.6-high" ] (lane after "high");
+      Alcotest.(check bool) (layout ^ ": shared model specifications unchanged") true
+        (before.models = after.models);
+      Alcotest.(check bool) (layout ^ ": shared model declarations kept verbatim") true
+        (contains ~sub:shared_model_declarations text);
+      Alcotest.(check bool) (layout ^ ": other provider bindings unchanged") true
+        (List.filter (fun (b : S.binding) -> b.provider_id <> "codex_acct1") before.bindings
+         = after.bindings))
+    [ "generated bindings", shared_fixture, [ "providers.codex_acct1" ]
+    ; ( "generated bindings with an explicit override"
+      , shared_fixture ^ "\n[codex_acct1.\"gpt-5.6\"]\nmax-concurrent = 1\n"
+      , [ "providers.codex_acct1"; "codex_acct1.\"gpt-5.6\"" ] )
+    ]
+
 let test_what_has_no_replacement_is_refused () =
   let cases =
     [ ( "the default"
@@ -259,6 +313,10 @@ account-home = "/home/op/.codex-account1"|}
           ~by:{|[providers]
 codex_acct1 = { display-name = "Codex · account1", protocol = "codex-app-server", command = "codex", is-non-interactive = true, account-home = "/home/op/.codex-account1" }|}
           fixture )
+    ; ( "an explicit binding written inline beside generated bindings"
+      , shared_fixture ^ "\n[codex_acct1]\n\"gpt-5.6\" = { max-concurrent = 1 }\n" )
+    ; ( "an explicit binding written as a dotted key beside generated bindings"
+      , shared_fixture ^ "\n[codex_acct1]\n\"gpt-5.6\".max-concurrent = 1\n" )
     ]
   in
   List.iter
@@ -286,6 +344,8 @@ let () =
             test_the_account_and_what_routes_to_it_go
         ; Alcotest.test_case "an antigravity account takes its credentials table" `Quick
             test_an_antigravity_account_takes_its_credentials_table
+        ; Alcotest.test_case "accounts using a shared model set are removed" `Quick
+            test_accounts_using_a_shared_model_set_are_removed
         ; Alcotest.test_case "what has no replacement is refused" `Quick
             test_what_has_no_replacement_is_refused
         ; Alcotest.test_case "a lane named like its runtime keeps its routes" `Quick

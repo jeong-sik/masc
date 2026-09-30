@@ -65,21 +65,24 @@ authorization rule or an automatic scheduler.
 
 ## 5. Goal and Task lifecycle
 
-Goal and Task remain weakly coupled. Completing a Task records its result and
-publishes a typed stimulus to the Goal owner. It does not complete the Goal.
+Goal is a shared workspace objective. Its creation, edits, and phase changes
+record the acting identity in the event log. Task responsibility is acquired
+through claim. Goal and Task remain weakly coupled: completing a linked Task
+records its result and does not complete the Goal.
 
-Semantic completion uses the configured LLM:
+Goal completion uses the configured verifier and a person's final confirmation:
 
 ```text
-Executing
-  -> Awaiting_llm_judgment
-  -> Executing | Completed | Dropped
+Executing -> Verifying
+Verifying -> Executing (proof refuted)
+Verifying -> Awaiting_confirmation (proof proven)
+Awaiting_confirmation -> Completed (human confirmation)
 ```
 
-The judgment input contains the Goal, related Tasks, Board/Job evidence, and
-the expected Goal version. The judgment result records verdict, rationale,
-model/runtime provenance, and evidence references. Workspace applies the
-verdict only if the version still matches.
+The judgment input contains the Goal's criterion, related Tasks, and submitted
+evidence. The verdict records the verifier's authority, runtime identity, and
+evidence. Workspace checks the request and criterion identity when committing
+the verdict; final confirmation must name that same proof.
 
 Optional HITL is a separate nonblocking Gate. Submitting a Gate request returns
 `Deferred`; the Keeper can continue other work. Resolution is durable and wakes
@@ -101,8 +104,8 @@ scoped to that object and lane. It cannot pause the Workspace or other Keepers.
 - `INV-WORKSPACE-001`: every mutation is versioned and atomic.
 - `INV-WORKSPACE-002`: every error is typed and observable.
 - `INV-WORKSPACE-003`: Task claim changes only through an explicit mutation.
-- `INV-WORKSPACE-004`: Goal completion requires configured LLM judgment and
-  matching version.
+- `INV-WORKSPACE-004`: Goal completion requires a verifier's proof of the current
+  criterion and a person's confirmation of that proof.
 - `INV-WORKSPACE-005`: Gate submission never blocks the originating lane.
 - `INV-WORKSPACE-006`: Gate resolution wakes only its origin lane.
 - `INV-WORKSPACE-007`: no observation automatically pauses or stops a Keeper.

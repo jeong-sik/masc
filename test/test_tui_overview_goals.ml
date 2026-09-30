@@ -283,9 +283,7 @@ let test_live_fleet_moves_no_goal () =
   check bool "a goal with no tasks says so" true
     (contains ~sub:"no tasks" release);
   check bool "due date appears once" true
-    (contains ~sub:"due 10-07 (D-14)" release);
-  check bool "no second metadata row" false
-    (contains ~sub:"owner unknown" (String.concat " " rows))
+    (contains ~sub:"due 10-07 (D-14)" release)
 
 let test_one_row_fits_a_short_viewport () =
   let goal =

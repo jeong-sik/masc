@@ -24,6 +24,8 @@ from test_tui_lane_visual_pty import snapshot
 # text with no PTY scenario running, and main sat red until someone ran the
 # suite by hand.
 SOURCE_MODULES = (
+    "lib/tui_terminal_text.ml",
+    "lib/tui_terminal_text.mli",
     # Read off the walk's own needles rather than guessed: each of these owns
     # a literal this file waits for and no other bin source spells it --
     # "MASC Lane Add-ons" and "MASC Dashboard" (render), "Run action on" and

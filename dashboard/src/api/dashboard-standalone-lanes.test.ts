@@ -47,14 +47,15 @@ function snapshot() {
       row('verifier_exact'),
       row('workspace_curator_exact'),
       row('browser_stagehand_exact', 'no_retained_observation'),
+      row('candle_appraiser', 'no_retained_observation'),
     ],
   }
 }
 
 describe('standalone lane snapshot decoder', () => {
-  it('keeps all six lane states and observed slot counts', () => {
+  it('keeps all seven lane states and observed slot counts', () => {
     const parsed = parseStandaloneLanesSnapshot(snapshot())
-    expect(parsed.lanes).toHaveLength(6)
+    expect(parsed.lanes).toHaveLength(7)
     expect(parsed.lanes[0]?.status).toBe('running')
     expect(parsed.lanes[0]?.selectedSlots).toEqual([{ slotId: 'primary', count: 1 }])
     expect(parsed.lanes[0]?.declaredSlots).toEqual(['primary', 'rejected'])

@@ -2572,7 +2572,7 @@ let parse_runtime_media_failover ~path value =
      to [] (the repo's Unknown→Permissive anti-pattern). An explicit empty array
      [] is preserved as the intentional derive-from-declared-caps signal; id typos
      in a well-typed array are still caught loudly by
-     {!Runtime.validate_runtime_references}, which now judges every [runtime]
+     {!Runtime_config_validation.validate_runtime_references}, which now judges every [runtime]
      field that names a routing target. *)
   try Ok (Otoml.get_array Otoml.get_string value) with
   | Otoml.Type_error msg ->

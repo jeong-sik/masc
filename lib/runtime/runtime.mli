@@ -717,15 +717,6 @@ val context_marks_of_runtime_id : string -> Runtime_schema.context_marks option
 (** The binding's eviction marks, or [None] when the binding declares none
     (the keeper then evicts carried history only on a provider refusal). *)
 
-val validate_muse_prompt_ceilings : t list -> (unit, load_failure) result
-(** Refuses a Muse runtime whose resolved window cannot hold the host's own
-    overhead, so no start-prompt ceiling exists ({!Runtime_instance.muse_prompt_capacity})
-    whatever [max-prompt-bytes] it declares. *)
-
-val validate_runtime_context_marks : t list -> (unit, load_failure) result
-(** Refuses a runtime whose high-water mark exceeds its resolved max-context;
-    such a request is refused by the provider before the mark is reached. *)
-
 val top_p_of_runtime_id : string -> float option
 (** Request [top_p] from the materialized AGENT_CORE provider config for runtime [id],
     or [None] when the runtime is not configured or no explicit value is

@@ -2955,7 +2955,7 @@ let run_named
              declares them (RFC keeper-context-window-in-tokens §10.2); a binding
              that declares none leaves eviction to a refusal. Their agreement
              with the model's max-context was checked at load
-             ([Runtime.validate_runtime_context_marks]). *)
+             ([Runtime_config_validation.validate_runtime_context_marks]). *)
           (let context_marks =
              Runtime.context_marks_of_runtime_id attempt_runtime_id
            in

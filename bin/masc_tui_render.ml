@@ -3039,6 +3039,30 @@ let planning_updated_age ~now (goal : planning_goal) =
 
 (** Render the Planning surface (list view). *)
 
+(* Panels use terminal cell widths, including styled and wide-script text.
+   Callers choose their height from the available rows and retain selection. *)
+let studio_panel ~width ~title ~lines =
+  let inner = max 1 (width - 4) in
+  let border left right =
+    Theme.recede () ^ left ^ draw_hline (max 0 (width - 2)) ^ right ^ Ansi.reset
+  in
+  [ Theme.info () ^ "┌ " ^ fit_width title (max 1 (width - 4)) ^ " ┐" ^ Ansi.reset ]
+  @ List.map (fun line ->
+      Theme.recede () ^ "│ " ^ Ansi.reset ^ fit_width line inner
+      ^ Theme.recede () ^ " │" ^ Ansi.reset) lines
+  @ [ border "└" "┘" ]
+
+let studio_pair ~width left right =
+  let gutter = 2 in
+  let left_width = (width - gutter) / 2 in
+  let right_width = width - gutter - left_width in
+  let left = left left_width and right = right right_width in
+  let count = max (List.length left) (List.length right) in
+  List.init count (fun index ->
+    fit_width (Option.value (List.nth_opt left index) ~default:"") left_width
+    ^ String.make gutter ' '
+    ^ fit_width (Option.value (List.nth_opt right index) ~default:"") right_width)
+
 let render_planning_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface
@@ -3205,7 +3229,22 @@ let render_planning_list (state : state) =
          if count_frame_lines buf + count_frame_lines summary + reserved_rows <= rows
          then Buffer.add_buffer buf summary
        in
-       box_line buf cols rollup;
+       let summary_width = framed_inner_width cols in
+       let summary_cards =
+         studio_pair ~width:summary_width
+           (fun width -> studio_panel ~width ~title:"Goals · measured outcomes"
+              ~lines:(Message_layout.wrap_words ~max_cells:(max 1 (width - 4))
+                (planning_rollup_row ~cols:width p.pl_rollup)))
+           (fun width -> studio_panel ~width ~title:"Tasks · Backlog:"
+              ~lines:(Message_layout.wrap_words ~max_cells:(max 1 (width - 4)) backlog))
+       in
+       let summary_card_rows = List.length summary_cards in
+       let cards_fit =
+         summary_width >= Message_layout.display_width "Goals · measured outcomes  Tasks · current backlog" * 2
+         && count_frame_lines buf + summary_card_rows + reserved_rows <= rows
+       in
+       if cards_fit then List.iter (box_line buf cols) summary_cards
+       else box_line buf cols rollup;
        let trend = Buffer.create 256 in
        box_line_styled trend cols ~style:(Theme.info ())
          (match state.planning_baseline with
@@ -3231,7 +3270,7 @@ let render_planning_list (state : state) =
        let backlog_summary = Buffer.create 256 in
        box_line backlog_summary cols
          (Printf.sprintf "  %sBacklog:%s %s" Ansi.dim Ansi.reset backlog);
-       add_summary_if_fits backlog_summary;
+       if not cards_fit then add_summary_if_fits backlog_summary;
        Buffer.add_buffer buf divider;
        (* The list drew rows and never said what they were. *)
        Buffer.add_buffer buf list_header;
@@ -10726,10 +10765,10 @@ let repository_context_lines ~width (repo : Masc.Tui_decode.repository) =
     | None -> []
     | Some reason -> wrap "Error" reason
   in
-  wrap "Path" repo.rp_resolved_local_path
+  failure
+  @ wrap "Path" repo.rp_resolved_local_path
   @ stored_path
   @ wrap "Keepers" keepers
-  @ failure
 
 let render_workspace_activity (state : state) repo_id =
   let terminal_rows, cols = get_terminal_size () in
@@ -10792,6 +10831,50 @@ let render_workspace_activity (state : state) repo_id =
             ("  Refresh failed, showing the last read: " ^ Terminal_text.single_line message);
           listing ~budget:(budget - 1) reading)
 
+let repository_studio_geometry (state : state) ~cols ~budget ~cursor =
+  let repos = match state.repositories with
+    | None -> [] | Some snapshot -> snapshot.rs_repositories in
+  let shown = List.length repos in
+      let width = framed_inner_width cols in
+      let named_width =
+        Message_layout.display_width
+          (Render_schedule.workspace_header_row
+             ~path_width:Render_schedule.workspace_minimum_path_width) + 4
+      in
+      let detail_minimum = Message_layout.display_width "Keepers: none assigned" + 4 in
+      let split = width >= named_width + detail_minimum + 2 && budget >= 8 in
+      let detail_width = if split then min (width - named_width - 2) (max detail_minimum (width / 3)) else width in
+      let list_width = if split then width - detail_width - 2 else width in
+      let selected = List.nth_opt repos cursor in
+      let context_lines = match selected with
+        | None -> []
+        | Some repo -> repository_context_lines ~width:(detail_width - 4) repo in
+      let detail_title = match selected with
+        | None -> "Selected repository"
+        | Some repo -> Terminal_text.single_line repo.rp_name in
+      let errors = match state.repositories_error with
+        | None -> []
+        | Some detail -> [Theme.bad () ^ Terminal_text.single_line detail ^ Ansi.reset] in
+      let context_budget = max 0 (if split then budget - 2 else budget - 6 - List.length errors) in
+      let truncated = List.length context_lines > context_budget in
+      let visible_context =
+        List.take (max 0 (context_budget - if truncated then 1 else 0)) context_lines in
+      let detail = studio_panel ~width:detail_width ~title:detail_title
+          ~lines:(visible_context @
+            (if truncated && context_budget > 0
+             then ["More context · enlarge the terminal"] else [])) in
+      let list_budget =
+        if split then budget else max 4 (budget - List.length detail) in
+      let room = max 1 (list_budget - 3 - List.length errors) in
+      let overflowing = shown > room && room > 1 in
+      let content_height = if overflowing && room > 1 then room - 1 else room in
+  (split, list_width, detail_width, detail, errors, content_height, overflowing)
+
+let repository_studio_content_height state ~cols ~budget ~cursor =
+  let _, _, _, _, _, content_height, _ =
+    repository_studio_geometry state ~cols ~budget ~cursor in
+  content_height
+
 let render_repository_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let repos =
@@ -10824,84 +10907,51 @@ let render_repository_list (state : state) =
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"repositories"
     ~title ~hints:(Masc_tui_keys.footer_hints state.view)
     ~body:(fun ~budget c ->
-      (* The path takes what the named columns leave, asked of the columns
-         rather than of a constant standing in for their total. *)
-      let path_width =
-        Render_schedule.workspace_path_width
-          ~inner_width:(max 1 (framed_inner_width cols - 2))
-      in
-      c.push_styled ~style:(Theme.recede ())
-        ("  " ^ Render_schedule.workspace_header_row ~path_width);
-      c.push_divider ();
-      (match state.repositories_error with
-       | None -> ()
-       | Some detail ->
-           c.push_styled ~style:(Theme.bad ())
-             ("  " ^ Keeper_chat.terminal_safe_text detail);
-           c.push_divider ());
-      let context_lines =
-        match List.nth_opt repos state.repositories_cursor with
-        | None -> []
-        | Some repo -> repository_context_lines ~width:(cols - 6) repo
-      in
-      let context_rows =
-        match context_lines with [] -> 0 | _ -> 1 + List.length context_lines
-      in
-      let fixed =
-        2 + context_rows
-        + (if Option.is_some state.repositories_error then 2 else 0)
-      in
-      let room = max 1 (budget - fixed) in
-      let overflowing = shown > room in
-      let content_height = if overflowing then max 1 (room - 1) else room in
+      let split, list_width, detail_width, detail, errors, content_height, overflowing =
+        repository_studio_geometry state ~cols ~budget ~cursor:state.repositories_cursor in
+      let path_width = Render_schedule.workspace_path_width
+          ~inner_width:(max 1 (list_width - 4)) in
       let max_scroll = max 0 (shown - content_height) in
-      let scroll = max 0 (min state.repositories_scroll max_scroll) in
-      let repos_window = Rows.of_list ~first:scroll ~height:content_height repos in
-      if shown = 0 then
-        let empty =
-          match
-            empty_page_of ~snapshot:state.repositories
-              ~error:state.repositories_error
-          with
-          | Page_failed -> page_failed_note
-          | Page_unread -> page_unread_note
-          | Page_empty -> "  (no repositories registered)"
-        in
-        c.push_styled ~style:(Theme.recede ()) empty
-      else begin
-        for i = 0 to content_height - 1 do
+      let scroll = max 0 (min max_scroll
+          (Masc_tui_scroll.ensure_visible ~cursor:state.repositories_cursor
+             ~height:content_height state.repositories_scroll)) in
+      let lines =
+        if shown = 0 then
+          [match empty_page_of ~snapshot:state.repositories ~error:state.repositories_error with
+           | Page_failed -> page_failed_note
+           | Page_unread -> page_unread_note
+           | Page_empty -> "(no repositories registered)"]
+        else List.init content_height (fun i ->
           let idx = i + scroll in
-          match Rows.at repos_window idx with
-          | None -> c.push_empty ()
+          match List.nth_opt repos idx with
+          | None -> ""
           | Some r ->
-              let open Masc.Tui_decode in
-              let line =
-                "  "
-                ^ Render_schedule.workspace_row ~path_width
-                    { Render_schedule.wrow_name =
-                        Terminal_text.single_line r.rp_name
-                    ; wrow_branch =
-                        Terminal_text.single_line r.rp_default_branch
-                    ; wrow_status =
-                        Terminal_text.single_line
-                          (Masc.Tui_decode.repository_status_word r.rp_status)
-                    ; wrow_sync = (if r.rp_auto_sync then "auto" else "manual")
-                    ; wrow_path =
-                        Terminal_text.single_line r.rp_resolved_local_path
-                    }
-              in
-              if idx = state.repositories_cursor then c.push_selected line
-              else c.push line
-        done;
-        if overflowing then
-          c.push_styled ~style:(Theme.recede ())
-            (Printf.sprintf "[repositories %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height shown))
-      end;
-      (match context_lines with
-       | [] -> ()
-       | lines ->
-           c.push_divider ();
-           List.iter (c.push_styled ~style:(Theme.recede ())) lines))
+              let line = Render_schedule.workspace_row ~path_width
+                { Render_schedule.wrow_name = Terminal_text.single_line r.rp_name
+                ; wrow_branch = Terminal_text.single_line r.rp_default_branch
+                ; wrow_status = Masc.Tui_decode.repository_status_word r.rp_status
+                ; wrow_sync = if r.rp_auto_sync then "auto" else "manual"
+                ; wrow_path = Terminal_text.single_line r.rp_resolved_local_path } in
+              if idx = state.repositories_cursor then
+                Theme.selection ^ fit_width line (list_width - 4) ^ Ansi.reset
+              else line)
+      in
+      let lines = [Theme.recede () ^ Render_schedule.workspace_header_row ~path_width ^ Ansi.reset]
+        @ errors @ lines
+        @ (if overflowing then
+             ["repositories " ^ Masc_tui_scroll.window_text ~scroll ~height:content_height shown]
+           else []) in
+      let listing = studio_panel ~width:list_width ~title:"Repositories · j/k select" ~lines in
+      if split then begin
+        let height = max (List.length listing) (List.length detail) in
+        for index = 0 to min budget height - 1 do
+          c.push (fit_width (Option.value (List.nth_opt listing index) ~default:"") list_width
+            ^ "  " ^ fit_width (Option.value (List.nth_opt detail index) ~default:"") detail_width)
+        done
+      end else begin
+        List.iter c.push listing;
+        List.iter c.push detail
+      end)
 
 let render_repository_changes (state : state) =
   match state.repository_changes_diff_path with
@@ -14708,14 +14758,35 @@ let render_runtime_params (state : state) =
   (* [box_line_styled] fits this row to the frame and the style covers what it
      fits, so a fit here only padded the row past the frame and spent its last
      cell on the cut mark. *)
-  box_line_styled buf cols ~style:(Theme.recede ())
-    (Terminal_text.single_line selected_contract);
+  let contract_panel =
+    match selected with
+    | None -> []
+    | Some row ->
+        studio_panel ~width:(framed_inner_width cols)
+          ~title:("Selected setting · " ^ Terminal_text.single_line row.rpr_key)
+          ~lines:[
+            "Current " ^ Terminal_text.single_line (runtime_param_value_text ~value_type:row.rpr_value_type row.rpr_current_json)
+            ^ " · Default " ^ Terminal_text.single_line (runtime_param_value_text ~value_type:row.rpr_value_type row.rpr_default_json)
+            ^ (if row.rpr_has_override then " · override" else " · default");
+            Terminal_text.single_line selected_contract ]
+  in
+  let contract_extra_rows =
+    if count_frame_lines buf + List.length contract_panel + 5 <= rows
+       && Option.is_none state.runtime_param_edit && contract_panel <> [] then begin
+      List.iter (box_line buf cols) contract_panel;
+      List.length contract_panel - 1
+    end else begin
+      box_line_styled buf cols ~style:(Theme.recede ())
+        (Terminal_text.single_line selected_contract);
+      0
+    end
+  in
   box_divider buf cols;
   let editing = Option.is_some state.runtime_param_edit in
   (* Editing adds a divider and two form rows.  Spend those rows out of the
      list budget so the footer remains visible instead of falling underneath
      the always-present composer. *)
-  let content_height = max 1 (rows - (if editing then 10 else 7)) in
+  let content_height = max 1 (rows - (if editing then 10 else 7) - contract_extra_rows) in
   let count = List.length state.runtime_params in
   let cursor = max 0 (min state.runtime_params_cursor (count - 1)) in
   (match state.runtime_params_error with

@@ -157,3 +157,7 @@ val runtime_config_status_scroll_limit :
   Masc_tui_types.state -> terminal_rows:int -> cols:int -> int
 
 val browser_history_scroll_limit : Masc_tui_types.state -> terminal_rows:int -> cols:int -> Masc_tui_types.Browser_history.t -> int
+
+val repository_studio_content_height : Masc_tui_types.state -> cols:int -> budget:int -> cursor:int -> int
+(** The repository list's actual viewport, including the selected context panel.
+    Keyboard page and cursor movement use the same geometry as rendering. *)

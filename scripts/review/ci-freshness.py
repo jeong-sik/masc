@@ -120,23 +120,18 @@ SHARED_CHECK_INPUTS = (
     SharedCheckInputs(
         "required_structural_fixtures",
         "pr-check.yml builds node parity aliases from test/dune and "
-        "test_browser_interaction.inc, and @packages/agent_core/test/exact-output-single-surface "
-        "whose explicit deps consume provider interfaces, implementations and fixtures",
-        paths=("connectors/browser/extension/background.js",
-               "packages/agent_core/test/check_public_mli_callbacks.ml"),
+        "test_browser_interaction.inc; @check compiles provider interfaces and tests",
+        paths=("connectors/browser/extension/background.js",),
         trees=("packages/agent_core/scripts/", "packages/agent_core/test/fixtures/",
                "packages/agent_core/lib/llm_provider/")),
     SharedCheckInputs(
         "runtime_configuration",
         "pr-check.yml installer fixtures read config/runtime.toml; @check embeds config; "
-        "run-lint-suite.sh validates prompt/tool registries",
+        "run-lint-suite.sh validates TOML syntax",
         trees=("config/",)),
     SharedCheckInputs(
         "tla_specifications",
-        "run-lint-suite.sh runs check-spec-truth.sh Mirrors resolution, "
-        "audit-tla-cfg-orphan.sh, "
-        "audit-tla-annotation-drift.sh --check-cross-spec and "
-        "check-tla-harness-coverage.sh over the specs tree",
+        "pr-check.yml runs TLC; lint checks cfg/spec pairing and harness coverage",
         trees=("specs/",)),
     SharedCheckInputs(
         "dashboard_build",

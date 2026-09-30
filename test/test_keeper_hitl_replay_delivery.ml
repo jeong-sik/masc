@@ -108,7 +108,7 @@ let register_keeper_exn ~config name =
 let approved_grant_fixture ~base_path ~keeper_name ~input =
   (match Keeper_approval_queue.install_persistence ~base_path with
    | Ok _ -> ()
-   | Error error -> fail (Keeper_approval_queue.install_error_to_string error));
+   | Error error -> fail (Masc.Keeper_approval_queue_result.install_error_to_string error));
   let approval_id =
     match
       Keeper_approval_queue.submit_pending
@@ -120,7 +120,7 @@ let approved_grant_fixture ~base_path ~keeper_name ~input =
         ()
     with
     | Ok submission -> submission.approval_id
-    | Error error -> fail (Keeper_approval_queue.storage_error_to_string error)
+    | Error error -> fail (Masc.Keeper_approval_queue_result.storage_error_to_string error)
   in
   (match
      Keeper_approval_queue.resolve_with_policy
@@ -331,12 +331,12 @@ let test_yield_request_tracks_grant_consumption () =
        ~tool_name:"external-effect"
        ~input
    with
-   | Ok (Keeper_approval_queue.Consumption_committed _) -> ()
-   | Ok Keeper_approval_queue.Consumption_already_committed ->
+   | Ok (Masc.Keeper_approval_queue_result.Consumption_committed _) -> ()
+   | Ok Masc.Keeper_approval_queue_result.Consumption_already_committed ->
      fail "grant was already consumed before the test consumed it"
-   | Ok Keeper_approval_queue.Consumption_not_matching ->
+   | Ok Masc.Keeper_approval_queue_result.Consumption_not_matching ->
      fail "exact grant did not match its own request"
-   | Error error -> fail (Keeper_approval_queue.grant_error_to_string error));
+   | Error error -> fail (Masc.Keeper_approval_queue_result.grant_error_to_string error));
   match Keeper_unified_turn.hitl_replay_yield_request ~base_path ~keeper_name with
   | Ok None -> ()
   | Ok (Some _) -> fail "spent grant preempted the source again"
@@ -376,7 +376,7 @@ let test_peek_skips_resolution_still_pending () =
   create_keeper_exn ~config keeper_name;
   (match Keeper_approval_queue.install_persistence ~base_path with
    | Ok _ -> ()
-   | Error error -> fail (Keeper_approval_queue.install_error_to_string error));
+   | Error error -> fail (Masc.Keeper_approval_queue_result.install_error_to_string error));
   let approval_id =
     match
       Keeper_approval_queue.submit_pending
@@ -388,7 +388,7 @@ let test_peek_skips_resolution_still_pending () =
         ()
     with
     | Ok submission -> submission.approval_id
-    | Error error -> fail (Keeper_approval_queue.storage_error_to_string error)
+    | Error error -> fail (Masc.Keeper_approval_queue_result.storage_error_to_string error)
   in
   (* The approval is still pending, so a queued resolution event for it is
      not ready and must not be projected. *)
@@ -424,7 +424,7 @@ let enqueue_resolution_without_record ~config ~keeper_name =
   let base_path = config.Workspace_utils.base_path in
   (match Keeper_approval_queue.install_persistence ~base_path with
    | Ok _ -> ()
-   | Error error -> fail (Keeper_approval_queue.install_error_to_string error));
+   | Error error -> fail (Masc.Keeper_approval_queue_result.install_error_to_string error));
   let approval_id = "appr_absent_" ^ keeper_name in
   (match
      Keeper_registry_event_queue.enqueue_hitl_resolution_durable_result
@@ -443,40 +443,40 @@ let enqueue_resolution_without_record ~config ~keeper_name =
 ;;
 
 let test_grant_error_absence_classification () =
-  let storage_error : Keeper_approval_queue.storage_error =
+  let storage_error : Masc.Keeper_approval_queue_result.storage_error =
     { path = "gate/pending.json"; reason = "unreadable" }
   in
   let absence_of error =
     Option.map
-      Keeper_approval_queue.resolution_absence_to_string
-      (Keeper_approval_queue.resolution_absence_of_grant_error error)
+      Masc.Keeper_approval_queue_result.resolution_absence_to_string
+      (Masc.Keeper_approval_queue_result.resolution_absence_of_grant_error error)
   in
   check (option string) "missing row is an absence"
     (Some "resolution_missing")
-    (absence_of (Keeper_approval_queue.Grant_resolution_missing "a"));
+    (absence_of (Masc.Keeper_approval_queue_result.Grant_resolution_missing "a"));
   check (option string) "still pending is an absence"
     (Some "resolution_still_pending")
-    (absence_of (Keeper_approval_queue.Grant_still_pending "a"));
+    (absence_of (Masc.Keeper_approval_queue_result.Grant_still_pending "a"));
   check (option string) "rejected is an absence"
     (Some "resolution_not_approved")
-    (absence_of (Keeper_approval_queue.Grant_resolution_not_approved "a"));
+    (absence_of (Masc.Keeper_approval_queue_result.Grant_resolution_not_approved "a"));
   check (option string) "another workspace's row is an absence"
     (Some "resolution_workspace_mismatch:/elsewhere")
     (absence_of
-       (Keeper_approval_queue.Grant_workspace_mismatch
+       (Masc.Keeper_approval_queue_result.Grant_workspace_mismatch
           { approval_id = "a"
           ; requested_base_path = "/here"
           ; stored_base_path = "/elsewhere"
           }));
   check (option string) "a store read failure is not an absence" None
-    (absence_of (Keeper_approval_queue.Grant_store_unavailable storage_error));
+    (absence_of (Masc.Keeper_approval_queue_result.Grant_store_unavailable storage_error));
   check (option string) "a projection read failure is not an absence" None
     (absence_of
-       (Keeper_approval_queue.Grant_replay_projection_unavailable storage_error));
+       (Masc.Keeper_approval_queue_result.Grant_replay_projection_unavailable storage_error));
   check (option string) "an unconsumed replay record is not an absence" None
-    (absence_of (Keeper_approval_queue.Grant_replay_not_consumed "a"));
+    (absence_of (Masc.Keeper_approval_queue_result.Grant_replay_not_consumed "a"));
   check (option string) "a conflicting replay record is not an absence" None
-    (absence_of (Keeper_approval_queue.Grant_replay_outcome_conflict "a"))
+    (absence_of (Masc.Keeper_approval_queue_result.Grant_replay_outcome_conflict "a"))
 ;;
 
 let test_peek_skips_resolution_without_record () =
@@ -520,13 +520,13 @@ let test_reconcile_retires_resolution_without_record () =
    | Ok
        (Keeper_heartbeat_stimulus_intake.Absent_grant_retired
           { approval_id = retired
-          ; absence = Keeper_approval_queue.Resolution_missing
+          ; absence = Masc.Keeper_approval_queue_result.Resolution_missing
           }) ->
      check string "the retired wake names the approval" approval_id retired
    | Ok (Keeper_heartbeat_stimulus_intake.Absent_grant_retired { absence; _ }) ->
      failf
        "retired with the wrong store answer: %s"
-       (Keeper_approval_queue.resolution_absence_to_string absence)
+       (Masc.Keeper_approval_queue_result.resolution_absence_to_string absence)
    | Ok Keeper_heartbeat_stimulus_intake.Selection_actionable ->
      fail "a wake with no record was left to spend a turn"
    | Ok Keeper_heartbeat_stimulus_intake.Spent_grant_replay_acknowledged ->
@@ -677,7 +677,7 @@ let test_retired_recipient_settles_delivery () =
       "retired recipient leaves no replay failures"
       0
       (List.length report.delivery_replay_failures)
-  | Error error -> fail (Keeper_approval_queue.install_error_to_string error)
+  | Error error -> fail (Masc.Keeper_approval_queue_result.install_error_to_string error)
 ;;
 
 let test_peek_none_on_empty_queue () =

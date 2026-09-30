@@ -248,8 +248,8 @@ let approved_resolution_deliverable
             ~base_path
             ~id:resolution.approval_id
         with
-        | Ok Keeper_approval_queue.Resolution_unconsumed -> true
-        | Ok Keeper_approval_queue.Resolution_consumed | Error _ -> false))
+        | Ok Keeper_approval_queue_result.Resolution_unconsumed -> true
+        | Ok Keeper_approval_queue_result.Resolution_consumed | Error _ -> false))
 ;;
 
 let hitl_replay_yield_request ~base_path ~keeper_name =

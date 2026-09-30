@@ -2061,12 +2061,12 @@ type overview_goals_reading =
     so a row this build cannot read does not hide what the providers said. *)
 type overview_providers_reading =
   | Providers_unread
-  | Providers_read of Tui_decode.provider_usage_windows
+  | Providers_read of Masc.Tui_decode_usage.provider_usage_windows
   | Providers_failed of string
 
 type keeper_usage_reading =
   | Keeper_usage_unread
-  | Keeper_usage_read of Tui_decode.keeper_usage_window
+  | Keeper_usage_read of Masc.Tui_decode_usage.keeper_usage_window
   | Keeper_usage_error of string
 
 (** Plan usage's reading of [GET /api/v1/setup/account-emails]: each

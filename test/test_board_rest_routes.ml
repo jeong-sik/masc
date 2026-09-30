@@ -774,7 +774,7 @@ let test_board_list_timeout_cannot_be_not_modified () =
   let actor = "timeout-reader" in
   let key = Printf.sprintf
     "board:list:%d:%s:-:recent:false:false:-:50:0:-:%d:%s"
-    (String.length config.Workspace.base_path) config.base_path
+    (String.length config.Masc.Workspace.base_path) config.base_path
     (String.length actor) actor in
   let read ?etag () =
     dispatch_response ~meth:"GET" ~router ~token

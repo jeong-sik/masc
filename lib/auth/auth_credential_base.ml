@@ -414,25 +414,21 @@ let save_credential_in_transaction (Credential_transaction config) (cred : agent
   let json_str = Yojson.Safe.pretty_to_string json in
   let stub_file = credential_file config cred.agent_name in
   let previous_target = load_redirect_target config stub_file in
-  (match cred.id with
-   | Some cid ->
-     let uuid_file = credential_uuid_file config cid in
-     (match previous_target with
-      | Some old_file when old_file <> uuid_file -> remove_file_if_exists old_file
-      | _ -> ());
-     save_private_text_file uuid_file json_str;
-     let stub =
-       `Assoc [ "redirect_to", `String (Credential_id.to_string cid ^ ".json") ]
-     in
-     save_private_text_file stub_file (Yojson.Safe.pretty_to_string stub)
-   | None ->
-     Option.iter remove_file_if_exists previous_target;
-     save_private_text_file stub_file json_str);
-  (* Bypass forward-reference into the cache module below.  Stored as
-     a ref so the cache module can register its invalidator after both
-     definitions are visible; see [register_credential_cache_invalidator]
-     near [credential_token_index]. *)
-  !credential_cache_invalidator_ref config
+  Fun.protect ~finally:(fun () -> !credential_cache_invalidator_ref config) (fun () ->
+    match cred.id with
+    | Some cid ->
+      let uuid_file = credential_uuid_file config cid in
+      save_private_text_file uuid_file json_str;
+      let stub =
+        `Assoc [ "redirect_to", `String (Credential_id.to_string cid ^ ".json") ] in
+      save_private_text_file stub_file (Yojson.Safe.pretty_to_string stub);
+      (match previous_target with
+       | Some old_file when old_file <> uuid_file -> remove_file_if_exists old_file
+       | _ -> ())
+    | None ->
+      save_private_text_file stub_file json_str;
+      Option.iter remove_file_if_exists previous_target)
+
 ;;
 
 let save_credential config cred =
@@ -765,6 +761,93 @@ let credential_owned_uuid_target config name stored (credential : agent_credenti
          refused "embedded UUID resolves to another credential")
   | Stored_redirect _, None -> refused "redirected credential has no UUID binding"
   | Unresolved_credential, (Some _ | None) -> refused "credential cannot be resolved"
+;;
+
+type credential_publication = Published | Not_published | Publication_unreadable of masc_error
+
+type credential_publication_failure =
+  { error : masc_error
+  ; raw_token : credential_publication
+  ; credential : credential_publication }
+
+let credential_publication_failure_to_string failure =
+  let render = function
+    | Published -> "published"
+    | Not_published -> "not published"
+    | Publication_unreadable error -> "unreadable: " ^ masc_error_to_string error in
+  Printf.sprintf "%s (raw token: %s; credential: %s)"
+    (masc_error_to_string failure.error) (render failure.raw_token) (render failure.credential)
+;;
+
+let observe_credential_publication config (expected : agent_credential) =
+  let observe f = match f () with
+    | Ok true -> Published
+    | Ok false -> Not_published
+    | Error error -> Publication_unreadable error in
+  let ( let* ) = Result.bind in
+  let raw_token = observe (fun () ->
+    let path = raw_token_file config expected.agent_name in
+    let* present = credential_path_exists path in
+    if not present then Ok false
+    else
+      let* raw = credential_read_result (fun () -> read_text_file path) in
+      Ok (String.equal (sha256_hash raw) expected.token)) in
+  let credential = observe (fun () ->
+    let path = credential_file config expected.agent_name in
+    let* present = credential_path_exists path in
+    if not present then Ok false
+    else
+      let* stored = read_stored_credential config expected.agent_name path in
+      let* current = resolve_stored_credential config expected.agent_name stored in
+      Ok (current = Some expected)) in
+  raw_token, credential
+;;
+
+let publish_file_backed_credential_in_transaction
+    ((Credential_transaction config) as transaction) credential ~raw_token =
+  let ( let* ) = Result.bind in
+  let saved_bytes path =
+    let* present = credential_path_exists path in
+    if present then credential_read_result (fun () -> read_text_file path) |> Result.map Option.some
+    else Ok None in
+  let raw_path = raw_token_file config credential.agent_name in
+  let named_path = credential_file config credential.agent_name in
+  let failure error =
+    let raw_token, credential = observe_credential_publication config credential in
+    Error { error; raw_token; credential } in
+  Fun.protect ~finally:(fun () -> !credential_cache_invalidator_ref config) (fun () ->
+    match (let* raw = saved_bytes raw_path in
+           let* named = saved_bytes named_path in Ok (raw, named)) with
+    | Error error -> failure error
+    | Ok (previous_raw, previous_named) ->
+      match credential_read_result (fun () ->
+        persist_raw_token config ~agent_name:credential.agent_name raw_token;
+        save_credential_in_transaction transaction credential) with
+      | Ok () -> Ok ()
+      | Error error ->
+        let _, published = observe_credential_publication config credential in
+        (* A redirect can keep identical bytes while its UUID payload advances.
+           Never restore the old raw token when the new credential is current. *)
+        match published, saved_bytes named_path with
+        | Not_published, Ok current_named when current_named = previous_named ->
+          (match credential_read_result (fun () ->
+             match previous_raw with
+             | Some raw -> save_private_text_file raw_path raw
+             | None -> remove_file_if_exists raw_path) with
+           | Ok () -> failure error
+           | Error restore_error -> failure (System (System_error.IoError
+               (Printf.sprintf "credential publication failed: %s; raw token restoration failed: %s"
+                  (masc_error_to_string error) (masc_error_to_string restore_error)))))
+        | _, Error observation_error -> failure (System (System_error.IoError
+            (Printf.sprintf "credential publication failed: %s; named publication is unreadable: %s"
+               (masc_error_to_string error) (masc_error_to_string observation_error))))
+        | Published, Ok _ | Publication_unreadable _, Ok _ | Not_published, Ok _ -> failure error)
+;;
+
+let file_backed_publication_error failure =
+  let detail = credential_publication_failure_to_string failure in
+  Log.Auth.error "file-backed credential publication failed: %s" detail;
+  System (System_error.IoError detail)
 ;;
 
 type credential_store_snapshot =

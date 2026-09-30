@@ -391,44 +391,16 @@ let save_raw_token_credential_without_expiry config ~agent_name ~role ~raw_token
 ;;
 
 let save_file_backed_raw_token_credential config ~agent_name ~role ~raw_token
-  : (agent_credential, masc_error) result
-  =
+  : (agent_credential, masc_error) result =
   let ( let* ) = Result.bind in
   let* () = validate_raw_token raw_token in
   with_credential_transaction config (fun transaction ->
-    let saved_bytes path =
-      let* present = credential_path_exists path in
-      if present then credential_read_result (fun () -> Some (read_text_file path))
-      else Ok None in
-    let raw_path = raw_token_file config agent_name in
-    let named_path = credential_file config agent_name in
-    let* previous_raw = saved_bytes raw_path in
-    let* previous_named = saved_bytes named_path in
-    match credential_read_result (fun () ->
-      let auth_cfg = load_auth_config config in
-      let cred = raw_token_credential ~agent_name ~role ~raw_token
-          ~expires_at:(expires_at_for_auth_config auth_cfg) in
-      persist_raw_token config ~agent_name raw_token;
-      save_credential_in_transaction transaction cred;
-      cred) with
-    | Ok _ as saved -> saved
-    | Error error ->
-      (* Restore only when the exact named authority did not change. If the
-         new credential reached disk, its matching new raw token must remain. *)
-      (match saved_bytes named_path with
-       | Ok current_named when current_named = previous_named ->
-         (match credential_read_result (fun () ->
-            match previous_raw with
-            | Some raw -> save_private_text_file raw_path raw
-            | None -> remove_file_if_exists raw_path) with
-          | Ok () -> Error error
-          | Error restore_error -> Error (System (System_error.IoError
-              (Printf.sprintf "credential publication failed: %s; raw token restoration failed: %s"
-                 (masc_error_to_string error) (masc_error_to_string restore_error)))))
-       | Ok _ -> Error error
-       | Error observation_error -> Error (System (System_error.IoError
-           (Printf.sprintf "credential publication failed: %s; named publication is unreadable: %s"
-              (masc_error_to_string error) (masc_error_to_string observation_error))))))
+    let* auth_cfg = credential_read_result (fun () -> load_auth_config config) in
+    let credential = raw_token_credential ~agent_name ~role ~raw_token
+        ~expires_at:(expires_at_for_auth_config auth_cfg) in
+    let* () = publish_file_backed_credential_in_transaction transaction credential ~raw_token
+      |> Result.map_error file_backed_publication_error in
+    Ok credential)
   |> Result.join
 ;;
 
@@ -502,12 +474,12 @@ let create_token_expiring_in_if_absent config ~agent_name ~role ~hours =
          (Printf.sprintf "Failed to create agent credential: %s" (Printexc.to_string exn))))))
 ;;
 
-type rotation_publication =
+type rotation_publication = Auth_credential_base.credential_publication =
   | Published
   | Not_published
   | Publication_unreadable of masc_error
 
-type rotation_failure =
+type rotation_failure = Auth_credential_base.credential_publication_failure =
   { error : masc_error
   ; raw_token : rotation_publication
   ; credential : rotation_publication }
@@ -516,55 +488,14 @@ type rotation_outcome =
   { token_hash_prefix : string
   ; rotated_agents : (string * (unit, rotation_failure) result) list }
 
-let rotation_failure_to_string failure =
-  let render = function
-    | Published -> "published"
-    | Not_published -> "not published"
-    | Publication_unreadable error -> "unreadable: " ^ masc_error_to_string error in
-  Printf.sprintf "%s (raw token: %s; credential: %s)"
-    (masc_error_to_string failure.error) (render failure.raw_token) (render failure.credential)
-;;
+let rotation_failure_to_string = credential_publication_failure_to_string
 
-let observe_rotation_publication config (rotated : agent_credential) =
-  let observe f = match f () with
-    | Ok true -> Published
-    | Ok false -> Not_published
-    | Error error -> Publication_unreadable error in
-  let ( let* ) = Result.bind in
-  let raw_token = observe (fun () ->
-    let path = raw_token_file config rotated.agent_name in
-    let* present = credential_path_exists path in
-    if not present then Ok false
-    else
-      let* raw = credential_read_result (fun () -> read_text_file path) in
-      Ok (String.equal (sha256_hash (String.trim raw)) rotated.token)) in
-  let credential = observe (fun () ->
-    let path = credential_file config rotated.agent_name in
-    let* present = credential_path_exists path in
-    if not present then Ok false
-    else
-      let* stored = read_stored_credential config rotated.agent_name path in
-      let* current = resolve_stored_credential config rotated.agent_name stored in
-      Ok (current = Some rotated)) in
-  raw_token, credential
-;;
-
-let save_rotated_raw_token_in_transaction
-    ((Credential_transaction config) as transaction) ~auth_cfg (cred : agent_credential) ~raw_token =
+let save_rotated_raw_token_in_transaction transaction ~auth_cfg (cred : agent_credential) ~raw_token =
   let rotated =
     { cred with token = sha256_hash raw_token
     ; created_at = now_iso ()
     ; expires_at = expires_at_for_auth_config auth_cfg } in
-  let written = Fun.protect
-      ~finally:(fun () -> !credential_cache_invalidator_ref config)
-      (fun () -> credential_read_result (fun () ->
-        persist_raw_token config ~agent_name:rotated.agent_name raw_token;
-        save_credential_in_transaction transaction rotated)) in
-  match written with
-  | Ok () -> Ok ()
-  | Error error ->
-    let raw_token, credential = observe_rotation_publication config rotated in
-    Error { error; raw_token; credential }
+  publish_file_backed_credential_in_transaction transaction rotated ~raw_token
 ;;
 
 let rotate_shared_tokens_matching config ~include_agent =

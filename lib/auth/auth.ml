@@ -33,9 +33,9 @@ let ensure_keeper_credential_in_transaction
         ; expires_at = None
         }
       in
-      persist_raw_token config ~agent_name raw_token;
-      save_credential_in_transaction transaction cred;
-      raw_token, cred
+      publish_file_backed_credential_in_transaction transaction cred ~raw_token
+      |> Result.map_error file_backed_publication_error
+      |> Result.map (fun () -> raw_token, cred)
     in
     let result =
       try
@@ -43,9 +43,9 @@ let ensure_keeper_credential_in_transaction
         | Some raw_token ->
           (match find_token ~token:raw_token with
            | Ok cred when String.equal cred.agent_name agent_name -> Ok (raw_token, cred)
-           | Ok _ | Error (Auth _) -> Ok (create_fresh_keeper_token ())
+           | Ok _ | Error (Auth _) -> create_fresh_keeper_token ()
            | Error _ as error -> error)
-        | None -> Ok (create_fresh_keeper_token ())
+        | None -> create_fresh_keeper_token ()
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->

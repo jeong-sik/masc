@@ -249,9 +249,14 @@ def run_grouped_history(executable: str, captures: Path | None) -> None:
     def retained_slice(path: str):
         slice_reads.append(path)
         query = parse_qs(urlsplit(path).query)
-        if query != {"run_id": ["retained world/0"]}:
-            raise AssertionError(f"history read changed its exact run target: {query!r}")
-        return 200, {"rows": [old_rows[0]], "coverage": [], "complete": True}
+        if query == {"run_id": ["retained world/0"]}:
+            rows = [old_rows[0]]
+        elif query == {"run_id": [active["run_id"]]}:
+            rows = [{**row, "title": "Fresh current result"} if index == 0 else row
+                    for index, row in enumerate(captured["rows"])]
+        else:
+            raise AssertionError(f"detail read changed its exact run target: {query!r}")
+        return 200, {"rows": rows, "coverage": [], "complete": True}
 
     fixtures["/api/v1/lane-addons/slice"] = terminal.PathHttpResponse(retained_slice)
     requests: terminal.HttpRequests = []
@@ -262,7 +267,7 @@ def run_grouped_history(executable: str, captures: Path | None) -> None:
         screen = terminal.screen_text(terminal.frame_containing(opened, b"Retained history"))
         if b"> Current reporter" not in screen or b"Repeated counters" in screen:
             raise AssertionError(f"old workers crowded current installations: {screen!r}")
-        terminal.send_and_wait(process, master, output, b"\r", b"Current reporter")
+        terminal.send_and_wait(process, master, output, b"\r", b"Fresh current result")
         terminal.send_and_wait(process, master, output, b"\x1b", b"h:open")
         history = terminal.send_and_wait(process, master, output, b"h", b"Instance retained-0")
         history_screen = terminal.screen_text(terminal.frame_containing(history, b"Instance retained-0"))
@@ -280,6 +285,10 @@ def run_grouped_history(executable: str, captures: Path | None) -> None:
         returned = terminal.send_and_wait(process, master, output, b"h", b"> Current reporter")
         if b"Repeated counters" in terminal.screen_text(returned):
             raise AssertionError("returning to installations expanded retained workers")
+        current = terminal.send_and_wait(process, master, output, b"\r", b"Fresh current result")
+        if b"Preserved old result" in terminal.screen_text(current):
+            raise AssertionError("current detail retained historical rows")
+        terminal.send_and_wait(process, master, output, b"\x1b", b"> Current reporter")
         terminal.send_and_wait(process, master, output, b"q", b"MASC Dashboard")
         os.write(master, b"q")
 
@@ -287,8 +296,10 @@ def run_grouped_history(executable: str, captures: Path | None) -> None:
         interact=interact, http_fixtures=fixtures, http_requests=requests)
     if any(path.startswith("/api/v1/lane-addons") for path, _ in requests):
         raise AssertionError("history navigation sent a write")
-    if len(slice_reads) != 1:
-        raise AssertionError(f"retained detail did not perform exactly one fresh scoped GET: {slice_reads!r}")
+    expected_runs = [active["run_id"], "retained world/0", active["run_id"]]
+    actual_runs = [parse_qs(urlsplit(path).query)["run_id"][0] for path in slice_reads]
+    if actual_runs != expected_runs:
+        raise AssertionError(f"detail reads did not follow current/history/current: {slice_reads!r}")
     print("Lane current list / grouped retained instances / fresh scoped GET / exact raw target / return: PASS")
 
 

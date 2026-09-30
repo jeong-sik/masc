@@ -1245,7 +1245,7 @@ let footer_hints_code ~pane =
   |> hints_of_bindings
   |> fun hints ->
       match pane with
-      | Code_history -> "j/k:scroll  PgUp/PgDn:page  Home/End:edges  Enter:top entry  Left / Esc:back"
+      | Code_history -> "j/k:scroll  PgUp/PgDn:page  Home/End:edges  Enter:open  Esc:back"
       | Code_tree | Code_file | Code_overlay -> hints
 
 (* The Runtime footer is the table's, with the two keys that depend on the

@@ -554,9 +554,17 @@ let save_message_draft state =
           state.msg_drafts
       in
       let text = Buffer.contents state.msg_input in
+      let draft =
+        { draft_text = text
+        ; draft_attachments = state.msg_attachments
+        ; draft_references = state.msg_references
+        ; draft_attachments_since = state.msg_attachments_since
+        }
+      in
       state.msg_drafts <-
-        if String.equal text "" then other_drafts
-        else (keeper_name, text) :: other_drafts
+        if String.equal text "" && draft.draft_attachments = []
+           && draft.draft_references = [] then other_drafts
+        else (keeper_name, draft) :: other_drafts
 
 let recovered_paste_send_locked_for state keeper_name =
   match keeper_name with
@@ -822,8 +830,16 @@ let open_message_for_keeper ?(return_to = Keeper_chat_return_detail)
   state.msg_return <- return_to;
   state.keeper_message_focus <- Right_pane;
   Buffer.clear state.msg_input;
-  List.assoc_opt keeper_name state.msg_drafts
-  |> Option.iter (Buffer.add_string state.msg_input);
+  (match List.assoc_opt keeper_name state.msg_drafts with
+   | None ->
+       state.msg_attachments <- [];
+       state.msg_references <- [];
+       state.msg_attachments_since <- None
+   | Some draft ->
+       Buffer.add_string state.msg_input draft.draft_text;
+       state.msg_attachments <- draft.draft_attachments;
+       state.msg_references <- draft.draft_references;
+       state.msg_attachments_since <- draft.draft_attachments_since);
   drain_queue ()
 
 (* Leaving puts the draft away, and a line held only for that compose
@@ -858,15 +874,18 @@ let clear_current_message_draft state =
 let consume_dispatched_message_draft state request =
   state.msg_drafts <-
     List.filter
-      (fun (keeper_name, text) ->
+      (fun (keeper_name, draft) ->
         not
           (String.equal keeper_name request.Keeper_chat.keeper_name
-           && String.equal text request.message))
+           && String.equal draft.draft_text request.message
+           && draft.draft_attachments = request.attachments
+           && draft.draft_references = request.references))
       state.msg_drafts;
   match state.msg_target_keeper_name with
   | Some keeper_name
     when String.equal keeper_name request.Keeper_chat.keeper_name
          && String.equal (Buffer.contents state.msg_input) request.message
+         && state.msg_attachments = [] && state.msg_references = []
          && not (recovered_paste_send_locked state) ->
       clear_current_message_draft state
   | Some _ | None -> save_message_draft state
@@ -5404,6 +5423,7 @@ let reading_pane (state : state) : (int -> Masc_tui_types.clamped_scroll) option
   (* The voice pane is lines the frame lays out; its wizard takes its own keys
      while open. *)
   | Config when state.config_pane = Config_voice -> pane (fun v -> Voice_scroll v)
+  | Config when state.config_pane = Config_presets -> pane (fun v -> Preset_detail_scroll v)
   (* Surfaces whose whole body is a row list, which [row_list] answers for,
      and the two panes that own every key while they are open. *)
   | Keepers Keeper_detail | Keepers Keeper_list | Keepers Keeper_logs
@@ -12826,15 +12846,28 @@ let apply_async_message state ~base_path ~http_refresh_inflight
        | Preset_to_chat target, Error detail ->
            chat_notice state ~keeper_name:target ~kind:Notice_failure detail
        | Preset_to_pane, Ok snapshot ->
+           let selected_name = selected_preset_for_state state
+               |> Option.map (fun row -> row.Tui_decode.pm_name) in
+           let cursor = match Option.bind selected_name (fun name ->
+               List.find_mapi (fun index row ->
+                 if String.equal row.Tui_decode.pm_name name then Some index else None)
+                 snapshot.Tui_decode.pss_presets) with
+             | Some index -> index
+             | None -> max 0 (min state.presets_cursor
+                 (List.length snapshot.Tui_decode.pss_presets - 1))
+           in
+           let next_name = List.nth_opt snapshot.Tui_decode.pss_presets cursor
+               |> Option.map (fun row -> row.Tui_decode.pm_name) in
+           if not (Option.equal String.equal selected_name next_name) then begin
+             state.config_scroll <- 0;
+             state.preset_restore_armed <- None
+           end;
            state.presets_snapshot <- Some snapshot;
            state.presets_error <- None;
-           state.presets_cursor <-
-             max 0
-               (min state.presets_cursor
-                  (List.length snapshot.Tui_decode.pss_presets - 1));
-           (* The listing just changed, so whatever the cursor now points at
-              is a fresh question. *)
-           state.preset_detail <- Masc_tui_fetched.clear state.preset_detail;
+           state.presets_cursor <- cursor;
+           (* Ask again while retaining the keyed reading. Clearing it first
+              shortens the document to its loading rows and clamps a reader
+              at its end to a different place before the answer arrives. *)
            ensure_preset_detail state ~mailbox
        | Preset_to_pane, Error detail -> state.presets_error <- Some detail)
   | Preset_contents_shown (sink, result) ->
@@ -17038,7 +17071,7 @@ and is loaded on demand through keeper_skill.
           state.keeper_sandbox_view_error <- None;
           launch_keeper_sandbox_view state ~mailbox:async_messages keeper.k_name)
   in
-  let handle_keeper_create () =
+  let handle_keeper_create ?(return_to = Keeper_chat_return_list) () =
     match Masc_tui_editor.editor_command () with
     | None ->
       report_action state "error" "no $EDITOR set; export EDITOR to create a keeper here"
@@ -17048,31 +17081,73 @@ and is loaded on demand through keeper_skill.
          is what went wrong: this form carried two fields across the whole
          time [sandbox_profile] was required, and every keeper made through
          it came back 400. *)
-      let stem = Masc.Keeper_turn_up_args.creation_stem in
+      let stem =
+        match state.keeper_creation_draft with
+        | Some declaration -> declaration
+        | None -> Masc.Keeper_turn_up_args.creation_stem
+      in
       match
         Masc_tui_editor.roundtrip ~restore:restore_terminal
           ~reenter:reenter_terminal stem
       with
       | Error abort -> report_editor_abort state ~action:"create" abort
       | Ok declaration -> (
+        state.keeper_creation_draft <- Some declaration;
+        let refuse detail =
+          goto_surface state ~mailbox:async_messages (Keepers Keeper_list);
+          report_action state "error"
+            (detail ^ " · press a to edit the retained declaration")
+        in
         let declared_name =
           match Yojson.Safe.from_string declaration with
+          | exception Yojson.Json_error detail ->
+              Error ("Keeper declaration is not JSON: " ^ detail)
           | `Assoc fields -> (
             match List.assoc_opt "name" fields with
-            | Some (`String value) -> String.trim value
-            | _ -> "")
-          | _ -> ""
+            | Some (`String value) ->
+                Keeper_id.Keeper_name.of_string (String.trim value)
+                |> Result.map Keeper_id.Keeper_name.to_string
+            | Some _ | None -> Error "declaration needs a non-empty name string")
+          | _ -> Error "Keeper declaration must be a JSON object"
         in
-        if String.length declared_name = 0 then
-          report_action state "error"
-            "declaration needs a non-empty \"name\" string; nothing was created"
-        else
-          match
+        match declared_name with
+        | Error detail -> refuse detail
+        | Ok declared_name ->
+          (match
             Masc_tui_http.post_keeper_up ~host ~port ~keeper_name:declared_name
               ~declaration_json:declaration
           with
-          | Ok _ -> report_action state "system" (declared_name ^ ": keeper created")
-          | Error detail -> report_action state "error" detail))
+          | Error detail -> refuse detail
+          | Ok receipt ->
+            (* This is the lifecycle route's typed JSON boundary. A 200
+               alone cannot bind the composer to the submitted Keeper. *)
+            let member key =
+              match receipt with
+              | `Assoc fields -> List.assoc_opt key fields
+              | _ -> None
+            in
+            (match
+               member "ok", member "action", member "name"
+             with
+             | Some (`Bool true), Some (`String "up"), Some (`String name)
+               when String.equal name declared_name ->
+                 state.keeper_creation_draft <- None;
+                 load_local_workspace_if_safe state base_path;
+                 open_message_for_keeper ~return_to
+                   state declared_name ~drain_queue:(fun () -> ());
+                 set_msg_scroll state 0;
+                 state.view <- Keepers Keeper_message;
+                 launch_keeper_history_load state ~mailbox:async_messages
+                   ~keeper_name:declared_name;
+                 start_http_refresh state ~host ~port ~intent:Revalidate
+                   ~refresh_inflight:http_refresh_inflight
+                   ~scoped_refresh_inflight:http_scoped_refresh_inflight
+                   ~scoped_refresh_followup ~mailbox:async_messages;
+                 report_action state "system"
+                   (declared_name ^ ": declaration accepted · write the first request")
+             | _ ->
+                 refuse
+                   "Creation response did not confirm this Keeper; inspect the roster before retrying"))))
   in
   (* Same shape as [handle_keeper_create]: several fields at once go through
      $EDITOR rather than a modal the TUI does not otherwise have. The stem
@@ -17743,7 +17818,7 @@ and is loaded on demand through keeper_skill.
           draft that goes to a Keeper on the next Enter. It is first, above the
           overlays the card is drawn over. *)
        | Some (Pasted _) when Option.is_some (Masc_tui_types.play_card_shown state) -> ()
-       | Some (Pasted paste) when Option.is_some state.lane_addons ->
+       | Some (Pasted paste) when Option.is_some state.lane_addons && not state.palette_open ->
            (match state.lane_addons with
             | Some ({installer=Some installer;_} as view) ->
                 state.lane_addons <- Some {view with installer=Some
@@ -18228,7 +18303,7 @@ and is loaded on demand through keeper_skill.
                 | "\r" | "\n" | "enter" ->
                     launch_voice_agent_voice_save state ~mailbox:async_messages session
                 | _ -> ()))
-       | Some key when Option.is_some state.lane_addons ->
+       | Some key when Option.is_some state.lane_addons && not state.palette_open ->
            let module Addons = Masc_tui_lane_addons in
            (match state.lane_addons with
             | None -> ()
@@ -18356,7 +18431,12 @@ and is loaded on demand through keeper_skill.
                           | Ok installer -> invalidate {view with installer=Some installer;document_key=None;error=None;scroll=0}
                           | Error detail -> update {view with error=lane_addons_input_failure detail})
                      | "n" -> update {view with draft=Some "";naming=true;document_key=None;scroll=0}
-                     | ":" -> update { view with draft = Some ""; naming=false; scroll = 0 }
+                     | ":" ->
+                         state.palette_open <- true;
+                         state.palette_mode <- Palette_jump;
+                         state.palette_query <- "";
+                         state.palette_cursor <- 0
+                     | "A" -> update { view with draft = Some ""; naming=false; scroll = 0 }
                      | "E" ->
                          (match Addons.selected_document view with
                           | Some _ -> update {view with editor_ready=true}
@@ -18401,7 +18481,7 @@ and is loaded on demand through keeper_skill.
                            | Ok next -> update next
                            | Error detail -> update {view with error=lane_addons_input_failure detail})
                      | "t" ->
-                         (match view.last_action with None -> update {view with error=lane_addons_input_failure "No action request yet; :act submits one"}
+                         (match view.last_action with None -> update {view with error=lane_addons_input_failure "No action request yet; A opens a command, then act submits one"}
                           | Some request -> launch_lane_addons state ~mailbox:async_messages (Addons.Action_status request))
                      | "o" ->
                          (match Addons.selected_instance view with
@@ -19591,38 +19671,22 @@ and is loaded on demand through keeper_skill.
              state.palette_query <- "";
              state.palette_cursor <- 0
            in
+           let typed_question =
+             match state.palette_mode with
+             | Palette_jump -> Masc_tui_palette.palette_typed_question state.palette_query
+             | Palette_choice _ -> None
+           in
+           let move_palette by =
+             let last = max 0 (List.length (Masc_tui_palette.palette_matches state) - 1) in
+             let current = max 0 (min state.palette_cursor last) in
+             state.palette_cursor <- max 0 (min last (current + by))
+           in
            (match k with
             | "esc" -> close ()
-            | "\r" when
-                (let q = String.trim state.palette_query in
-                 List.exists
-                   (fun (prefix, _) -> String.starts_with ~prefix q)
-                   Masc_tui_palette.lsp_question_prefixes) ->
-                (* A typed command, not an entry: the argument is the symbol
-                   the language-server question is asked about, on the Code
-                   pane's cursor line. *)
-                let q = String.trim state.palette_query in
-                let question, symbol =
-                  match String.index_opt q ' ' with
-                  | Some i ->
-                      ( String.sub q 0 i,
-                        String.trim
-                          (String.sub q (i + 1) (String.length q - i - 1)) )
-                  | None -> (q, "")
-                in
-                (* The typed word back to the question it names, through the
-                   same table the entries were built from. *)
-                let question =
-                  match
-                    List.find_opt
-                      (fun (prefix, _) ->
-                        String.equal (String.trim prefix) question)
-                      Masc_tui_palette.lsp_question_prefixes
-                  with
-                  | Some (_, canonical) -> canonical
-                  | None -> question
-                in
-                if String.equal symbol "" then begin
+            | "\r" when Option.is_some typed_question ->
+                (match typed_question with
+                 | None -> ()
+                 | Some (question, None) ->
                   (* Bare "def " or "hover ": run the highlighted candidate
                      entry -- the cursor line's names ride the palette list,
                      so Enter alone picks the one in view. *)
@@ -19634,16 +19698,15 @@ and is loaded on demand through keeper_skill.
                             (List.length matches - 1)))
                   in
                   close ();
-                  match chosen with
+                  (match chosen with
                   | Some (_, Masc_tui_palette.Palette_lsp (question, symbol))
                     ->
                       Masc_tui_code_requests.start_lsp_question state ~host:server_peer_host ~deliver:(fun message -> enqueue_async async_messages message) ~report:(fun level detail -> report_action state level detail) ~question ~symbol
                   | Some _ | None ->
                       report_action state "error"
                         (question ^ " needs a symbol: :" ^ question
-                       ^ " <name>")
-                end
-                else begin
+                       ^ " <name>"))
+                 | Some (question, Some symbol) ->
                   close ();
                   if state.view <> Code || Option.is_none (Masc_tui_fetched.current_key state.code_file)
                   then
@@ -19652,8 +19715,7 @@ and is loaded on demand through keeper_skill.
                        Code surface"
                   else
                     Masc_tui_code_requests.start_lsp_question state ~host:server_peer_host ~deliver:(fun message -> enqueue_async async_messages message) ~report:(fun level detail -> report_action state level detail)
-                      ~question ~symbol
-                end
+                      ~question ~symbol)
             | "\r" ->
                 let matches = Masc_tui_palette.palette_matches state in
                 let chosen =
@@ -19661,6 +19723,11 @@ and is loaded on demand through keeper_skill.
                     (max 0 (min state.palette_cursor (List.length matches - 1)))
                 in
                 close ();
+                (match chosen, state.lane_addons with
+                 | Some _, Some view ->
+                     state.lane_addons_cached <- view;
+                     state.lane_addons <- None
+                 | Some _, None | None, (Some _ | None) -> ());
                 (match chosen with
                  | Some (_, Masc_tui_palette.Palette_hide_browser_lane) ->
                      hide_browser_lane state
@@ -19744,8 +19811,11 @@ and is loaded on demand through keeper_skill.
                      Masc_tui_code_requests.start_lsp_question state ~host:server_peer_host ~deliver:(fun message -> enqueue_async async_messages message) ~report:(fun level detail -> report_action state level detail)
                        ~question ~symbol
                  | None -> ())
-            | "down" -> state.palette_cursor <- state.palette_cursor + 1
-            | "up" -> state.palette_cursor <- max 0 (state.palette_cursor - 1)
+            | "down" | "\014" -> move_palette 1
+            | "up" | "\016" -> move_palette (-1)
+            | "home" -> state.palette_cursor <- 0
+            | "end" -> state.palette_cursor <- max 0 (List.length (Masc_tui_palette.palette_matches state) - 1)
+            | "\021" -> state.palette_query <- ""; state.palette_cursor <- 0
             | "\127" | "\b" ->
                 state.palette_query <-
                   Masc_tui_message_layout.drop_last_utf8_scalar
@@ -21128,7 +21198,7 @@ and is loaded on demand through keeper_skill.
            goto_surface state ~mailbox:async_messages System_logs
        | Some ("j" | "down" | "k" | "up" as key) when state.view = Overview ->
            Masc_tui_home.home_step state ~backwards:(key = "k" || key = "up")
-       | Some "p" when state.view = Overview ->
+       | Some ("p" | "P") when state.view = Overview ->
            goto_surface state ~mailbox:async_messages Approvals
        | Some ("\r" | "\n" | "enter") when state.view = Overview ->
            (match Masc_tui_home.home_selected_action state with
@@ -21562,16 +21632,11 @@ and is loaded on demand through keeper_skill.
                if not (acting_pane_drawn state && focus_acting_pane state)
                then state.resource_focus <- Left_pane)
        | Some "shift-left"
-         when state.view = Code && state.code_focus_file = Right_pane
-              && not state.code_history_open ->
-           state.code_file_hscroll <- max 0 (state.code_file_hscroll - 1)
+         when state.view = Code && state.code_focus_file = Right_pane ->
+           pan_code_content state ~direction:(-1)
        | Some "shift-right"
-         when state.view = Code && state.code_focus_file = Right_pane
-              && not state.code_history_open ->
-           state.code_file_hscroll <-
-             min
-               (max 0 (state.code_file_max_width - 1))
-               (state.code_file_hscroll + 1)
+         when state.view = Code && state.code_focus_file = Right_pane ->
+           pan_code_content state ~direction:1
        | Some "B" when state.view = Code ->
            (* Walk back through the definition jumps, newest first. The
               stack holds where each jump left from; an empty stack says so
@@ -22137,8 +22202,11 @@ and is loaded on demand through keeper_skill.
                the key reached only prompts: a preset longer than its pane
                showed its first screen and nothing past it. *)
             | Config
-              when state.config_pane = Config_prompts
-                   || state.config_pane = Config_presets ->
+              when state.config_pane = Config_presets ->
+                let count, height = Masc_tui_render.presets_viewport state in
+                let move = if direction > 0 then Masc_tui_scroll.page_down else Masc_tui_scroll.page_up in
+                state.config_scroll <- move ~count ~height state.config_scroll
+            | Config when state.config_pane = Config_prompts ->
                 state.config_scroll <-
                   max 0 (state.config_scroll + (direction * page))
             | Config when state.config_pane = Config_voice ->
@@ -25250,7 +25318,9 @@ and is loaded on demand through keeper_skill.
                       if Option.is_none state.home_selected
                          && Masc_tui_home.home_initial_reading_ready state selected then
                         state.home_selected <- selected;
-                      let budget = Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows in
+                      (* The persistent requests link owns the first body row. *)
+                      let budget = max 0
+                          (Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows - 1) in
                       let first, _ = Masc_tui_home.home_decision_window state ~budget in
                       state.home_decision_scroll <- first
                   | _ -> ());

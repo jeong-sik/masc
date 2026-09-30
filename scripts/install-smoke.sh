@@ -291,7 +291,7 @@ fi
 echo "install-smoke: installed server answered /health/ready ready"
 
 python3 "$REPO_ROOT/scripts/check-installed-dashboard.py" \
-  --binary "$prefix/masc" --base-url "http://127.0.0.1:$PORT"
+  --binary "$prefix/masc" --base-url "http://127.0.0.1:$PORT" --exercise-corruption
 if [ -n "$KEEPER_IMAGE" ]; then
   python3 "$REPO_ROOT/scripts/keeper-first-turn-smoke.py" \
     --binary "$prefix/masc" --image "$KEEPER_IMAGE" \

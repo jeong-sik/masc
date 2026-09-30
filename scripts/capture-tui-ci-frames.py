@@ -23,6 +23,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import traceback
 
 
 def digest(data: bytes) -> str:
@@ -72,6 +73,50 @@ def binary_hashes(log: str) -> set[str]:
             raise ValueError("malformed STUDIO_BINARY_SHA256 record")
         result.add(value.lower())
     return result
+
+
+def preserve_failure(out: Path, name: str, record: dict, run: dict,
+                     page, console: list[dict], error: Exception) -> None:
+    """Save diagnostic artifacts; none of them constitute a verified frame."""
+    report = {
+        "capture_status": "failed",
+        "provenance": "unverified xterm replay diagnostics",
+        "run": run, "name": name,
+        "expected_columns": record["columns"], "expected_rows": record["rows"],
+        "expected_pty_screen": record["screen"],
+        "error_type": type(error).__name__, "error": str(error),
+        "traceback": "".join(traceback.format_exception(error)),
+        "browser_events": console, "diagnostic_errors": [],
+    }
+    report_path = out / f"{name}-failure.json"
+    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
+    if page is not None:
+        diagnostics = [
+            ("observed_xterm", lambda: page.evaluate("""() => {
+                const term = window.term;
+                return {
+                    url: location.href,
+                    viewport: {width: innerWidth, height: innerHeight},
+                    terminal: term ? {
+                        columns: term.cols, rows: term.rows,
+                        lines: Array.from({length: term.rows}, (_, i) =>
+                            term.buffer.active.getLine(i)?.translateToString(true) ?? '')
+                    } : null
+                };
+            }""")),
+            ("page_html", lambda: (out / f"{name}-failure.html").write_text(page.content())),
+            ("page_screenshot", lambda: page.screenshot(
+                path=str(out / f"{name}-failure.png"), timeout=5000)),
+        ]
+        for label, collect in diagnostics:
+            try:
+                result = collect()
+                if label == "observed_xterm":
+                    report[label] = result
+            except Exception as diagnostic_error:
+                report["diagnostic_errors"].append({
+                    "diagnostic": label, "error": str(diagnostic_error)})
+    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
 
 
 def main() -> None:
@@ -135,6 +180,8 @@ def main() -> None:
                 process = subprocess.Popen(command, stdout=subprocess.DEVNULL,
                                            stderr=subprocess.PIPE)
                 context = None
+                page = None
+                console = []
                 try:
                     deadline = time.monotonic() + 10
                     while True:
@@ -151,6 +198,10 @@ def main() -> None:
                     context = browser.new_context(viewport={
                         "width": columns * 10 + 24, "height": rows * 20 + 24})
                     page = context.new_page()
+                    page.on("console", lambda message: console.append({
+                        "event": "console", "type": message.type, "text": message.text}))
+                    page.on("pageerror", lambda error: console.append({
+                        "event": "pageerror", "text": str(error)}))
                     page.goto(f"http://127.0.0.1:{port}")
                     page.wait_for_selector(".xterm-helper-textarea", state="attached")
                     page.wait_for_function("window.term && window.term.buffer.active.getLine(0)")
@@ -187,6 +238,13 @@ def main() -> None:
                         "observed_xterm_screen": observed["screen"],
                         "actual_columns": observed["columns"], "actual_rows": observed["rows"],
                     })
+                except Exception as error:
+                    try:
+                        preserve_failure(args.out, name, record, run, page, console, error)
+                    except Exception as diagnostic_error:
+                        print(f"Replay failure diagnostics could not be saved: {diagnostic_error}",
+                              file=sys.stderr)
+                    raise
                 finally:
                     if context is not None:
                         context.close()

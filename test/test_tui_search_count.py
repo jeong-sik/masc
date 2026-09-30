@@ -46,7 +46,7 @@ def run(executable: str) -> None:
     for post in posts[:2]:
         detail = dict(post, body="detail-body-alpha")
         fixtures[f"/api/v1/board/{post['id']}?format=flat"] = (
-            200, {"post": detail, "comments": []})
+            200, h.board_detail_page(detail, []))
 
     def interact(process, fd, _slave, output, _base):
         h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=15)

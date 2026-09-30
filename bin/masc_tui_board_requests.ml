@@ -37,6 +37,11 @@ let start_board_post_refresh state ~host ~port ~post_id ~deliver ~report_error =
    action: the compose pane must keep accepting keys while the request is
    out, and the outcome lands in the same mailbox everything else does. *)
 let start_board_post state ~host ~deliver ~report ~(title : string) ~(body : string) ?hearth () =
+  if state.workspace_identity <> Workspace_identity_match then begin
+    let detail = "Cannot write to Board: workspace identity is unverified; draft retained" in
+    state.board_post_error <- Some detail;
+    report "error" detail
+  end else begin
   state.board_post_error <- None;
   state.board_post_inflight <- true;
   report "system" "posting to Board";
@@ -56,11 +61,17 @@ let start_board_post state ~host ~deliver ~report ~(title : string) ~(body : str
   match Eio_context.get_switch_opt () with
   | Some sw -> Eio.Fiber.fork ~sw run_post
   | None -> run_post ()
+  end
 
 (* Send a comment through the tools route. Same fiber-and-mailbox shape as
    the other board writes; the route stamps the author. *)
 let start_board_comment state ~host ~deliver ~report ~(post_id : string)
     ~(content : string) =
+  if state.workspace_identity <> Workspace_identity_match then begin
+    let detail = "Cannot write to Board: workspace identity is unverified; draft retained" in
+    state.board_post_error <- Some detail;
+    report "error" detail
+  end else begin
   state.board_post_error <- None;
   state.board_post_inflight <- true;
   report "system" "commenting on Board";
@@ -78,11 +89,17 @@ let start_board_comment state ~host ~deliver ~report ~(post_id : string)
   match Eio_context.get_switch_opt () with
   | Some sw -> Eio.Fiber.fork ~sw run_comment
   | None -> run_comment ()
+  end
 
 (* Send a vote through the tools route. The voter is stamped by the route,
    so the payload says only which post and which way. *)
 
 let start_board_vote state ~host ~deliver ~report ~(post_id : string) ~(up : bool) =
+  if state.workspace_identity <> Workspace_identity_match then begin
+    let detail = "Cannot write to Board: workspace identity is unverified; draft retained" in
+    state.board_post_error <- Some detail;
+    report "error" detail
+  end else begin
   report "system"
     (Printf.sprintf "voting %s on %s" (if up then "up" else "down") post_id);
   let port = state.port in
@@ -97,3 +114,4 @@ let start_board_vote state ~host ~deliver ~report ~(post_id : string) ~(up : boo
   match Eio_context.get_switch_opt () with
   | Some sw -> Eio.Fiber.fork ~sw run_vote
   | None -> run_vote ()
+  end

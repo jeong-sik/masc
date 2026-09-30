@@ -644,6 +644,25 @@ let test_upsert_keeps_the_stored_due_date_when_the_new_one_is_refused () =
       stored.due_date
   | goals -> fail (Printf.sprintf "expected one goal, got %d" (List.length goals))
 
+(* An update hands back the row as it was, read inside the write lock, so the
+   caller can record what the edit replaced (#39878). *)
+let test_upsert_returns_the_row_as_it_was_before_an_update () =
+  with_workspace @@ fun config ->
+  let created =
+    upsert_exn config ~title:"Dated" ~metric:"m" ~target_value:"1"
+      ~due_date:"2026-09-23" ~priority:2 ()
+  in
+  match
+    Goal_store.upsert_goal config ~id:created.id ~due_date:"2026-10-15" ~priority:5 ()
+  with
+  | Ok (updated, `updated previous) ->
+    check (option string) "the due date it held" (Some "2026-09-23") previous.due_date;
+    check int "the priority it held" 2 previous.priority;
+    check (option string) "the due date now" (Some "2026-10-15") updated.due_date;
+    check int "the priority now" 5 updated.priority
+  | Ok (_, `created) -> fail "an existing id must update, not create"
+  | Error error -> fail (write_error_msg error)
+
 let test_transact_goal_authoritative_and_noop () =
   with_workspace @@ fun config ->
   let goal = upsert_exn config ~title:"Atomic Goal" ~metric:"count" ~target_value:"10" () in
@@ -1011,7 +1030,9 @@ let () =
           test_case "a real calendar day is stored as written" `Quick
             test_upsert_accepts_a_real_calendar_day;
           test_case "a refused update keeps the stored due date" `Quick
-            test_upsert_keeps_the_stored_due_date_when_the_new_one_is_refused ] );
+            test_upsert_keeps_the_stored_due_date_when_the_new_one_is_refused;
+          test_case "an update returns the row as it was" `Quick
+            test_upsert_returns_the_row_as_it_was_before_an_update ] );
       ( "regression-7690",
         [ test_case "version bumps +1" `Quick test_delete_goal_bumps_version;
           test_case "three deletes = +3" `Quick

@@ -238,6 +238,40 @@ let goal_event_recording_to_yojson (event_type, payload, recording) =
   `Assoc (("event_type", `String event_type) :: fields)
 ;;
 
+(* An edit to a goal's due date or priority moves no phase, so no other row
+   remembers the value it replaced, and a due date pushed back left no trace
+   (#39878). One row per edit holds only the fields that changed, each as
+   {from, to}. It records the edit and never refuses it. The edit is already
+   stored when the row is appended, so a row that cannot be appended does not
+   fail the edit: the error log and append receipt carry the goal and payload.
+
+   The row is appended after the store's lock is released, so the file does not
+   guarantee the order of two edits that overlap. *)
+let record_goal_edit (ctx : context) ~(previous : Goal_store.goal) (goal : Goal_store.goal) =
+  let change field ~from_json ~to_json = field, `Assoc [ "from", from_json; "to", to_json ] in
+  let due_date =
+    if Option.equal String.equal previous.due_date goal.due_date
+    then []
+    else
+      [ change
+          "due_date"
+          ~from_json:(Json_util.string_opt_to_json previous.due_date)
+          ~to_json:(Json_util.string_opt_to_json goal.due_date)
+      ]
+  in
+  let priority =
+    if Int.equal previous.priority goal.priority
+    then []
+    else
+      [ change "priority" ~from_json:(`Int previous.priority) ~to_json:(`Int goal.priority) ]
+  in
+  match due_date @ priority with
+  | [] -> []
+  | changes ->
+    let payload = `Assoc (("actor", `String ctx.agent_name) :: changes) in
+    [ record_committed_goal_event ctx ~goal_id:goal.id ~event_type:"goal_edited" ~payload ]
+;;
+
 (* RFC-0387 stage 2: wake the goal verifier lane after a durable
    [Proof_pending] request committed. The wake is
    scheduling only — the same discipline as the task-side
@@ -387,24 +421,27 @@ let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result
             record_committed_goal_event ctx ~goal_id:goal.id ~event_type
               ~payload:(goal_snapshot_event_payload ctx goal)
           in
-          let phase_recordings = match action with
+          let update_recordings = match action with
            | `created -> []
-           | `updated previous_phase ->
+           | `updated previous ->
              (* An edit to the success criterion takes a Verifying,
                 Awaiting_confirmation or Completed goal back to Executing
                 (Goal_store.upsert_goal). That is a phase move like any
                 other, so it enters the same ledger with the phase it left and
                 who moved it. *)
-             if previous_phase <> goal.phase then
+             let phase_events =
+               if previous.phase <> goal.phase then
                [ record_committed_goal_event ctx ~goal_id:goal.id ~event_type:"goal_phase"
                  ~payload:
                    (`Assoc
                       [ "phase", Goal_phase.to_yojson goal.phase
-                      ; "previous_phase", Goal_phase.to_yojson previous_phase
+                      ; "previous_phase", Goal_phase.to_yojson previous.phase
                       ; "actor", `String ctx.agent_name
                       ; "cause", `String "criterion_edit"
                       ]) ]
-             else []
+               else []
+             in
+             phase_events @ record_goal_edit ctx ~previous goal
           in
           ok_result
             ~tool_name
@@ -414,7 +451,7 @@ let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result
             ; "goal", Goal_store.goal_to_yojson goal
             ; "event_recordings", `List
                 (List.map goal_event_recording_to_yojson
-                   (snapshot_recording :: phase_recordings))
+                   (snapshot_recording :: update_recordings))
             ; ( "task_goal_id_example"
               , `String
                   (Printf.sprintf

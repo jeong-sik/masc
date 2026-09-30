@@ -6,7 +6,7 @@ import sys
 
 import test_tui_keyboard_input as h
 
-# The surface this reads ("MASC Planning") is drawn here, and the source
+# The surface this reads ("MASC Work") is drawn here, and the source
 # selector runs a suite when a pull request changes a path the suite names.
 SOURCE_MODULES = ("bin/masc_tui_render.ml",)
 
@@ -45,8 +45,8 @@ def run(executable: str) -> None:
     def says_which_goals(process, fd, _slave, output, _base):
         # Short enough that the list cannot hold all of them.
         h.resize_and_wait(process, fd, output, rows=24, columns=100,
-                          needle=b"MASC Overview")
-        h.palette_go(process, fd, output, b"go planning", b"MASC Planning")
+                          needle=b"MASC Dashboard")
+        h.palette_go(process, fd, output, b"go Work", b"MASC Work")
         h.wait_for_output(process, fd, output, b"plan-window-00", start=0, timeout=5.0)
         h.wait_for_output(process, fd, output, b"[goals ", start=0, timeout=5.0)
         h.read_available(fd, output)
@@ -76,8 +76,8 @@ def run(executable: str) -> None:
     def a_whole_list_stays_quiet(process, fd, _slave, output, _base):
         # Tall enough to draw every goal.
         h.resize_and_wait(process, fd, output, rows=44, columns=100,
-                          needle=b"MASC Overview")
-        h.palette_go(process, fd, output, b"go planning", b"MASC Planning")
+                          needle=b"MASC Dashboard")
+        h.palette_go(process, fd, output, b"go Work", b"MASC Work")
         h.wait_for_output(process, fd, output,
                           f"plan-window-{GOAL_COUNT - 1:02d}".encode(),
                           start=0, timeout=5.0)

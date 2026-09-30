@@ -158,7 +158,7 @@ def assert_portrait_beside_identity(output: bytearray) -> None:
 
 
 def open_alpha_detail(process, fd, output) -> None:
-    h.send_and_wait(process, fd, output, b"2", b"MASC Keepers")
+    h.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
     h.select_keeper_row(process, fd, output, b"alpha")
     h.send_and_wait(process, fd, output, b"\r", INFO_TAB)
     h.drain_until_quiet(process, fd, output)

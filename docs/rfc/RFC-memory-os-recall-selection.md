@@ -30,13 +30,21 @@ related: ["#36687", "#25052", "RFC-memory-os-bounded-context-and-librarian-curat
 3. 이번 턴의 Task/Goal/자극과 **typed 링크가 있는** 유효 fact만 본문 후보가 된다. 연결이 없는 fact에 최신순·문자열 유사도·강화 카운터 점수를 임의 적용하지 않는다.
 4. 조건부 fact는 사실 본문과 함께 typed 유효 조건을 가진다. 예를 들어 `Until_pr_merged (owner, repo, number)`, `Until_hold_released (hold_id)`, `Until_task_terminal (task_id)`다. §4의 조건식 판정에 필요한 사건 증거가 확인됐을 때만 만료한다. 상태를 읽지 못했으면 “유효”나 “만료”로 추정하지 않고 `Validity_unknown`으로 보류한다.
 5. source-bound fact는 후보 선택 전에 기존의 정확한 소스 바이트 재검증을 거친다. 변경·불독가·검증 미완료를 ordinary fact와 합쳐 보이지 않게 하지 않는다. 검증되지 않은 claim 본문은 전송하지 않는다.
-6. 빈 저장소, 읽기 실패, 선택 실패, projection 예산 초과, 용량 미관측은 서로 다른 typed 결과다. 모델과 운영자가 그 차이를 볼 수 있어야 한다. 선택 실패나 예산 초과가 성공한 일부 fact 주입으로 둔갑하지 않는다.
-7. 같은 저장 revision, 소스 검증 결과, Task/Goal/자극 ID, projection 용량 상태·provenance와 정책 revision이면 같은 전송 결과가 나온다. 시계나 확률은 선택 순서의 입력이 아니다.
+6. 빈 저장소, 읽기 실패, source 저장 갱신 실패, 선택 실패, projection 예산 초과, 용량 미관측은 서로 다른 typed 결과다. 허용된 projection에서는 모델과 운영자가 그 차이를 볼 수 있어야 한다. §3의 Invalid_policy는 입력 거절이며 Recall projection을 보내지 않고 운영자 영수증으로만 보고하는 명시적 예외다. 선택 실패나 예산 초과가 성공한 일부 fact 주입으로 둔갑하지 않는다.
+7. 다음 입력 전체가 같으면 같은 전송 결과가 나온다.
+
+   - ordinary/source snapshot의 revision·내용 해시·가용성·갱신 결과와 source 바이트 재검증 결과.
+   - 현재 Task/Goal/자극 ID와 각 축의 Known/Unknown 문맥 상태.
+   - 사건별 조건 키·소유 저장소·객체 ID·raw 상태·Met/Not_met/Unknown, 영수증 revision·내용 해시·검증 provenance.
+   - projection 용량의 known/unobserved/invalid 상태·실효 상한·정책 revision·측정 provenance.
+   - 정렬 규약·renderer schema revision, 조회 주소·영수증 참조.
+
+   이 canonical 입력 전체를 결정 영수증에 해시한다. 사건 revision이나 조회 상태가 달라진 재생을 동일 입력으로 세지 않는다. fresh 결정 receipt_id를 만들면 envelope 입력도 달라지므로 body-only 재생 해시와 참조를 포함한 전체 전송 해시를 나눠 기록한다. 시계나 확률은 선택 순서의 입력이 아니다.
 8. projection 용량이 미관측이면 §3의 `Capacity_unobserved`로 안전한 전량 fallback을 보낸다. 기준 main SHA의 검증된 fact·ordinary/source 상태·invalidation 행은 보존하고, unverified source 본문 행만 ID·검증 실패 이유·조회 주소로 바꾼다. 이 바이트 변경과 별도 결과 상태 envelope를 기록한다. 새 링크 선택·만료 표식 전송이나 비용 절감으로 주장하지 않는다.
 
 ## §3 입력과 선택 계약
 
-`Recall.select`는 effect 없는 함수로 둔다. 입력은 (a) ordinary·source current snapshot과 revision, (b) source 재검증 결과, (c) 이번 턴의 typed `task_id`, `goal_id`, `stimulus_id` 집합, (d) 사건 상태 영수증, (e) 측정·구성된 MASC projection 바이트 상한의 typed 상태와 정책 revision·provenance다. 이 상한은 MASC가 조립하는 Recall 블록(상태 머리줄·표식·조회 주소 포함)의 바이트 한도이며 provider의 남은 입력 토큰 예산이 아니다. Task/Goal이 읽히지 않으면 그 축은 `Unknown_context`이며 “링크 없음”으로 취급하지 않는다. 소스·사건·용량 읽기는 함수 바깥에서 끝낸다.
+`Recall.select`는 effect 없는 함수로 둔다. 입력은 (a) ordinary·source current snapshot과 revision, (b) source 재검증과 authoritative invalidation 갱신의 닫힌 결과, (c) 이번 턴의 typed `task_id`, `goal_id`, `stimulus_id` 집합, (d) 사건 상태 영수증, (e) 측정·구성된 MASC projection 바이트 상한의 typed 상태와 정책 revision·provenance다. 이 상한은 MASC가 조립하는 Recall 블록(상태 머리줄·표식·조회 주소 포함)의 바이트 한도이며 provider의 남은 입력 토큰 예산이 아니다. Task/Goal이 읽히지 않으면 그 축은 `Unknown_context`이며 “링크 없음”으로 취급하지 않는다. 소스·사건·용량 읽기와 source 갱신은 함수 바깥에서 끝내고, 읽기·검증·쓰기 결과를 각각 닫힌 값으로 넘긴다. 영수증 참조·조회 주소를 edge에서 예약하고 capacity 입력 검증을 끝낸 뒤에만 Known 용량을 selector에 넘긴다.
 
 ### Fact identity와 조회 주소
 
@@ -72,6 +80,10 @@ C04: F05 body=<selected verified F05 text>
 
 용량 입력은 `Projection_capacity_known { ceiling_bytes; policy_revision; provenance }` 또는 `Projection_capacity_unobserved { reason; policy_revision; provenance }`다. known 상한값은 동일 입력의 MASC projection 바이트 실측에 근거해 구성하고, provenance는 측정 영수증과 설정 출처를 가리킨다. 값이 미구성되었거나 필요한 측정이 없으면 unobserved이며, 0·무한대·추정 `available_bytes`를 만들지 않는다. 공식 클라이언트 start/resume에도 같은 계약을 적용한다. `keeper_official_client_host.mli:23-37`의 client 소유 native conversation/tool history는 snapshot에 없고 누적 history는 관측할 수 없다. :299-309의 canonical MASC bytes는 lane window ceiling이 아니며, :573-579의 provider context window 초과는 별도 typed lane terminal이다. 따라서 known projection 상한도 provider remaining을 관측했다거나 실제 요청이 window에 들어간다는 보증이 아니다.
 
+구성된 ceiling은 입력 경계에서 먼저 검증한다. renderer schema가 정하는 최소 `Budget_overrun` 응답(고정 상태 머리줄, 예약된 receipt 참조와 실제 조회 주소)을 실제 UTF-8로 직렬화해 그 **전체 바이트 길이**를 `minimum_ceiling_bytes`로 계산한다. 고정 숫자나 provider remaining 추정으로 하한을 정하지 않는다. 조회 주소나 provenance·renderer schema가 바뀌면 같은 검증을 다시 한다. 모든 실패 코드·건수·긴 진단·제외 ID·required_bytes 상세는 운영자 영수증에 남기고 주소로 읽는다. selector가 뒤에 추가한 Selection_failed도 이 영수증에 보존하며 최소 응답 바이트를 늘리지 않는다. 정상 body/상태도 envelope를 포함해 실제 바이트를 계산하며, 들어가지 않으면 이 검증된 최소 응답으로 Budget_overrun을 보낸다.
+
+구성값이 최소 응답보다 작거나 capacity 선언을 디코드할 수 없으면 `Invalid_policy { reason; issues; receipt_id; projection=None }`를 입력 거절 영수증으로 반환한다. reason은 `Ceiling_below_minimum { configured_bytes; minimum_ceiling_bytes } | Invalid_capacity_declaration`의 닫힌 분류다. Known이나 Capacity_unobserved로 바꾸지 않으며 selector를 실행하지 않고 **Recall 블록을 전송하지 않는다**. 운영자는 구성 출처·실제 최소 직렬화 해시·길이·조회 주소·선행 issues를 확인한다. 이 경우 모델에 오류 상태를 보냈다고 기록하거나 빈 저장소/선택 성공으로 세지 않는다. 일반적인 모델 상태 표시 의무의 명시적 예외이며, 운영자 보고는 항상 남긴다. 이 거절은 Recall projection 설정에 대한 결과다. Keeper 턴·시간·토큰 실행을 제한하거나 자동으로 중지하는 게이트를 만들지 않는다.
+
 unobserved이면 `Capacity_unobserved`를 반환한다. 이는 §1의 main SHA에서 전량 블록을 조립하는 **제안된 안전 fallback**이다. 검증된 ordinary/source fact 행, 가용성 상태와 invalidation 행은 그 기준선의 동일 바이트·순서를 보존한다. unverified source fact 행만 `Source_revalidation_failed { fact_id; reason; lookup }`로 바꾸고 본문을 보내지 않는다. 원래 기준선과 fallback의 해시, 치환 ID·행 범위·이유를 영수증에 남긴다. unverified 행이 없을 때 baseline payload는 정확히 동일하다. `Capacity_unobserved` 결과를 알리는 상태 envelope는 baseline payload와 분리해 길이·해시를 기록하므로 전체 모델 입력이 원래 입력과 같다고 주장하지 않는다.
 
 fallback은 선행 `issues`를 모두 보존하며 링크 선택·만료 표식 전송·부분 선택을 수행하지 않는다. main 기준선에서는 empty/absent/unavailable도 상태 블록을 보내므로 블록 생략으로 실패를 빈 저장소로 바꾸지 않는다. `Baseline_absent`는 renderer가 실제로 블록을 만들지 않은 경우만 표현하며 이 main SHA의 정상 결과가 아니다. Recall disabled 상태는 selector를 호출하지 않고 main의 disabled 블록을 유지한다. 이 결과를 `Selected`나 비용 절감 표본으로 세지 않는다. source-only란 ordinary가 unavailable/absent여서 source 본문만 있는 경우를 뜻하며, ordinary 상태 행을 없앤다는 뜻은 아니다.
@@ -94,6 +106,7 @@ issues : issue list
 
 issue = Ordinary_read_failed
        | Source_store_read_failed
+       | Source_store_update_failed of { affected_fact_ids; stage: Invalidation_commit }
        | Source_revalidation_failed of source_ids
        | Unknown_context of { task: bool; goal: bool }
        | Selection_failed of selection_failure
@@ -101,9 +114,20 @@ issue = Ordinary_read_failed
 
 selection_failure = Snapshot_inconsistent | Fact_identity_conflict
                   | Invalid_link | Invalid_event_receipt | Invalid_policy
+
+capacity_admission = Admitted of projection_capacity
+                   | Invalid_policy of { reason: capacity_rejection; issues: issue list; receipt_id; projection=None }
+capacity_rejection = Ceiling_below_minimum of { configured_bytes; minimum_ceiling_bytes }
+                   | Invalid_capacity_declaration
 ```
 
+capacity_admission은 selector를 호출하기 전 입력 경계의 결과다. Admitted에서만 selector 결과를 만들며, 입력 거절을 Selected나 Capacity_unobserved로 바꾸지 않는다.
+
 known 용량에서 선택할 때 독립적으로 읽고 검증한 fact는 다른 축이 실패해도 살린다. unobserved 용량은 위 `Capacity_unobserved` 기준선 fallback을 적용한다. `Source_store_read_failed`는 source 저장소의 목록·snapshot 자체를 못 읽어 source ID를 모르는 경우다. 특정 ID를 이미 읽었지만 그 claim의 원문 바이트 검증이 실패한 `Source_revalidation_failed of source_ids`와 구분한다. known 용량에서 source store 읽기 실패에도 ordinary snapshot을 독립적으로 읽었다면 검증된 ordinary 본문을 `Selected`로 보낼 수 있으며, 모델 상태 줄은 `issues=[Source_store_read_failed]; source_included=0; ordinary_included=<count>; receipt=<receipt_id>`로 표시한다. 운영자 영수증은 source 읽기 실패 단계·오류 부류·ordinary snapshot revision·살아남은 ordinary ID와 source ID를 열거할 수 없음을 기록한다. 원문 경로나 예외 전문은 모델 상태 줄에 싣지 않는다. ordinary 읽기 실패·source store 읽기 실패·source 재검증 실패·Task/Goal 조회 실패가 함께 일어나면 `issues`에 **모두** 기록한다. known 용량에서 안전하게 보낼 본문이 있으면 `Selected`에 그 본문과 실패 코드를 함께 싣고, 없으면 `Unavailable`에 실패 코드들을 싣는다. `Empty_store { issues=[]; receipt_id }`는 known 용량에서 모든 저장소 읽기와 문맥 조회가 성공했고 사실이 실제로 0건일 때만 쓴다. 빈 결과도 snapshot·정책·블록 해시를 가진 영수증을 반드시 남긴다. issues는 모든 결과에서 issue list이며 서로 다른 실패를 동시에 담는다. Selection_failed의 reason은 위 닫힌 분류다. 예외 전문은 운영자 진단에만 두고 이 분류로 명시적으로 바꾸며, 분류하지 못한 실패를 성공으로 처리하지 않는다. 선택 계산 자체가 실패하면 `Unavailable`에 `Selection_failed`와 선행 실패를 모두 남기며, 부분 선택을 성공으로 보내지 않는다. 예산 초과도 부분 묶음을 보내지 않는 `Budget_overrun`에 선행 `issues`를 보존한다. 서로 다른 실패 사이에 한 가지 원인만 남기는 우선순위는 두지 않는다.
+
+source 원문을 성공적으로 읽고 hash 변경을 확인했지만 invalidation/current snapshot의 영속화가 실패하는 경로는 `Source_store_update_failed { affected_fact_ids; stage=Invalidation_commit }`다. 원문을 읽지 못한 Source_revalidation_failed나 source store 목록을 못 읽은 Source_store_read_failed로 바꾸지 않는다. `keeper_memory_source_current.revalidate`는 읽기와 갱신을 함께 수행하므로 구현 시 effect 경계에서 이 단계들을 닫힌 결과로 구분해야 한다. selector 내부에서 쓰기를 재시도하거나 복구 snapshot을 authoritative로 승인하지 않는다.
+
+이 실패에서는 그 턴의 source component를 Unavailable로 닫고 source claim 본문을 하나도 보내지 않는다. 바뀐 소스를 보았다는 관측 영수증은 남기되 invalidation이 저장됐다고 기록하지 않으며, 이전 current claim 본문을 대신 싣지 않는다. 실패 반환만으로 저장이 없었다거나 이전 snapshot으로 되돌아갔다고 추정하지 않는다. 저장 여부를 확인하지 못하면 운영자 영수증에 미확인으로 남긴다. ordinary snapshot은 독립적으로 읽어 검증된 Standing/정상 링크 후보를 유지한다. known 용량에서 ordinary 본문을 보낼 수 있으면 Selected와 Source_store_update_failed를 함께 표시하고, 없으면 Unavailable과 모든 선행 issues를 보낸다. unobserved fallback은 §1 main의 source Unavailable 상태·독립 ordinary 결과를 기준으로 조립하고 갱신 실패 코드를 별도 envelope에 남긴다. Invalid_policy에서는 이 실패도 운영자 영수증에 보존하지만 모델 projection은 보내지 않는다. 다음 정상 revalidation·commit이 성공한 새 영수증에서만 source component를 다시 Available로 표시한다.
 
 known 용량의 선택에서 Task/Goal 조회가 실패하면 해당 링크 후보는 보류하고 검증된 `Standing`과 다른 정상 링크만 보낸다. 모델에는 `issues`의 코드·건수와 조회 수단을 표시하고, 운영자 영수증에는 실패한 축·ID와 살아남은 fact ID를 함께 남긴다. source-bound 본문은 그 claim의 소스가 재검증된 경우에만 보낸다. 기밀 경로나 원문은 상태 머리줄에 넣지 않는다.
 
@@ -127,13 +151,15 @@ Unknown 사건이 있어도 확인된 다른 사건만으로 결합식의 판정
 
 ## §5 관측과 평가 게이트
 
-매 projection은 `receipt_id`, 입력 snapshot revision/해시, 정책 버전, 포함·제외 ID와 이유, 유효 조건 판정, source 검증 결과, projection 용량의 known/unobserved 상태·상한의 정책 revision·provenance, 모델에 실제 보낸 블록 해시를 남긴다. `Capacity_unobserved`는 이유·baseline mode/absence·검증된 ID·선행 issues를 기록하고 모델에도 fallback 상태를 표시한다. 관측되지 않은 provider remaining이나 `available_bytes` 숫자를 영수증에 넣지 않는다. native provider overflow는 selector 결과와 조인 가능한 별도 lane terminal 영수증으로 남긴다. 모델에는 상태 코드·포함 건수·생략 건수·조회 수단과 §3의 연결된 만료 표식을 짧게 보인다. 운영자는 영수증에서 개별 제외 이유와 표식의 근거 사건을 읽는다. 정보 누락과 검색 실패를 구별할 수 있도록 실제 `keeper_memory_search` 호출도 센다. C02/C04는 고정 입력·정답을 유지한 채 활성 fact 본문과 `Active_condition`의 실제 전송 바이트, E-A/E-B/E-C 사건 상태 영수증의 소유 저장소·객체 ID·revision 검증 결과, 각 영수증의 모델 도착 여부와 답변을 기록한다. 미종결 영수증 없이 고정 정답을 맞힌 경우는 근거를 전달한 성공으로 세지 않는다. C03/C05는 고정 입력·정답을 유지한 채 모델에 보낸 표식 바이트, `recall_fact`의 실제 호출·반환 ID·검증된 명제 구절·조건 충족 영수증 조회(All_of 구성 사건 전부), 답변을 각각 기록해 만료 확인이 실제 답에 도달했는지 판정한다. `recall_fact`는 이 RFC의 제안 조회 계약이며, 현행 `keeper_memory_search`가 그 응답을 이미 제공한다는 주장은 아니다. 구현 전 shadow가 이 조회를 제공하지 못하면 C03/C05를 통과로 세지 않는다.
+매 입력은 projection 여부와 무관하게 `receipt_id`와 §2의 전체 determinism key를 남긴다. Invalid_policy에는 projection=None·전송 없음·운영자 오류를 기록한다. 실제로 보낸 projection은 입력 snapshot revision/해시, 사건 영수증 revision/해시/provenance, source 갱신 결과, renderer/정렬 규약·조회 상태, 정책 버전, 포함·제외 ID와 이유, 유효 조건 판정, source 검증 결과, projection 용량의 known/unobserved 상태·상한의 정책 revision·provenance, 모델에 실제 보낸 블록 해시를 남긴다. `Capacity_unobserved`는 이유·baseline mode/absence·검증된 ID·선행 issues를 기록하고 모델에도 fallback 상태를 표시한다. 관측되지 않은 provider remaining이나 `available_bytes` 숫자를 영수증에 넣지 않는다. native provider overflow는 selector 결과와 조인 가능한 별도 lane terminal 영수증으로 남긴다. 유효한 capacity 입력으로 실제 projection을 보낼 때 모델에는 상태 코드·포함 건수·생략 건수·조회 수단과 §3의 연결된 만료 표식을 짧게 보인다. Budget_overrun은 §3의 최소 응답에 고정 상태·영수증 참조·조회 주소만 넣는다. 이 경우 실패 코드·건수를 모델 상태 줄에 직접 표시하는 의무의 명시적 예외이며 모든 선행·선택 실패와 판정 상세는 영수증에서 읽는다. Invalid_policy에서는 이 표시를 보내지 않았다는 사실을 운영자 영수증에 명시한다. 운영자는 영수증에서 개별 제외 이유와 표식의 근거 사건을 읽는다. 정보 누락과 검색 실패를 구별할 수 있도록 실제 `keeper_memory_search` 호출도 센다. C02/C04는 고정 입력·정답을 유지한 채 활성 fact 본문과 `Active_condition`의 실제 전송 바이트, E-A/E-B/E-C 사건 상태 영수증의 소유 저장소·객체 ID·revision 검증 결과, 각 영수증의 모델 도착 여부와 답변을 기록한다. 미종결 영수증 없이 고정 정답을 맞힌 경우는 근거를 전달한 성공으로 세지 않는다. C03/C05는 고정 입력·정답을 유지한 채 모델에 보낸 표식 바이트, `recall_fact`의 실제 호출·반환 ID·검증된 명제 구절·조건 충족 영수증 조회(All_of 구성 사건 전부), 답변을 각각 기록해 만료 확인이 실제 답에 도달했는지 판정한다. `recall_fact`는 이 RFC의 제안 조회 계약이며, 현행 `keeper_memory_search`가 그 응답을 이미 제공한다는 주장은 아니다. 구현 전 shadow가 이 조회를 제공하지 못하면 C03/C05를 통과로 세지 않는다.
 
 평가는 운영 원본 기억을 복제하지 않은 격리 fact 스냅숏과 고정 턴 자극으로 §1의 고정 main SHA 전량 주입, 안전 fallback, 후보 선택을 같은 입력에 shadow 재생한다. 원래 전량과 안전 fallback의 source-redaction 차이는 안전성 변경으로 별도 계수하고, 선택 절감은 안전 fallback과 후보 선택을 짝 비교한다. `test/test_keeper_memory_os_current.ml`의 `with_temp_keepers`/typed fact/replace가 픽스처 시작점이며, 테스트 파일의 존재 자체를 실행 성공으로 세지 않는다. 필수 질문은 현재 Task 권한, Goal 상태, 뒤집힌 PR 상태, 만료된 HOLD, source 변경·불독가, ordinary 읽기 오류, 선택 오류, 예산 초과, 근거 없을 때 기권을 포함한다.
 
 판정표에는 조립 바이트, 실제 요청 토큰(획득 시), 캐시 적중, 선택 지연, 필수 사실 회수, 옛 상태 오답, 만료 제약 재사용, 기권, 검색 호출률을 분리한다. `Unavailable`의 안전한 기권과 실패 때문에 잃은 검증 가능 정보도 별도 계수한다. 격리 픽스처는 source store 자체 읽기 실패로 ordinary만 살아남는 경우(`Selected`의 모델 상태 줄에 `Source_store_read_failed`, 운영자 영수증에 source ID 불명과 ordinary revision/ID가 기록되는지 검사), ordinary 읽기 실패로 source-bound만 살아남는 경우, Task/Goal 조회 실패, 링크 없는 사실을 실제 `keeper_memory_search`로 찾는 경우, Task/Goal 없이 `Standing`을 회수하는 경우를 포함한다. 공식 클라이언트 start와 resume 각각에서 known projection capacity와 unobserved capacity를 모두 고정 평가 입력에 넣는다. known에서는 원자적 선택과 `Budget_overrun`을, unobserved에서는 main `86751f610442e4d82992ebc54bf9eb8ba45ef6d2` 기준선의 검증된 행·상태 행의 동일 바이트 보존, unverified source 행만 치환된 diff·본문 미전송, 별도 상태 envelope 바이트, 선행 issues 보존을 확인한다. empty/unavailable에서도 Status_only 블록이 존재하는지 확인하며 정상 결과를 Baseline_absent로 세지 않는다. 이 네 조합의 fallback 발생률과 검증 가능 정보 보존은 별도 계수하며, unobserved를 선택 성공이나 절감 표본으로 합산하지 않는다. projection 한도 안인 입력도 native provider overflow를 낼 수 있는 별도 lane fixture를 포함해 두 판정이 섞이지 않는지 확인한다. 같은 Keeper·같은 턴 종류·같은 snapshot으로 짝 비교한다. 같은 입력의 안전한 전량 fallback 대비 30% 절감은 비용 목표이며(9/28 관측치는 추세 참고로만 사용), **필수 사실 회수 저하나 옛 상태 오답 증가를 허용하는 면제 조건이 아니다**. Shadow 결과와 실제 provider 요청 영수증 없이는 배포 효과나 완료를 선언하지 않는다.
 
 추가 필수 fixture는 (a) 동일한 PR이 open → closed-unmerged → merged로 바뀔 때 Until_pr_merged가 Not_met → Not_met → Met으로 판정되는 경우, (b) All_of 두 사건 중 한 영수증만 있으면 Expired 증명이 거절되는 경우, (c) Recall과 일반 검색이 Expired/Validity_unknown을 같은 typed 결과로 표시하고 source 불독가 본문을 보내지 않는 경우다. source claim은 순서 변경·동일 바이트 재기록에서 같은 fact_id, 변경된 claim/source hash에서 새 ID, 다른 Keeper에서 다른 ID를 갖는지 확인한다. Empty_store 영수증과 동시에 발생한 issue list도 검증한다. unobserved source-redaction에서 ordinary/status/invalidation 행의 바이트 diff가 0인지, 치환된 source ID·행만 달라졌는지, envelope 차이가 별도로 기록됐는지 검사한다.
+
+추가 입력 경계 fixture는 (a) 기억 revision·문맥 ID가 같지만 사건 영수증 revision이 달라 Active가 Expired로 바뀌는 경우, (b) source hash 변경을 확인한 뒤 invalidation commit만 실패하는 경우, (c) 실제 최소 UTF-8 응답보다 작은 ceiling과 정확히 같은 ceiling이다. (a)는 다른 determinism key와 판정을, (b)는 Source_store_update_failed·source 본문 없음·ordinary 독립 보존·저장 여부 미확인을 포함한 정직한 영수증을 확인한다. (c)의 작은 값은 Invalid_policy·selector 미실행·Recall 전송 없음·운영자 영수증을, 정확한 경계는 최소 Budget_overrun 응답이 상한 안에 드는지를 확인한다. 다중 바이트 주소·상태 텍스트와 길이가 바뀐 조회 주소도 같은 직렬화 검증에 포함한다. 입력 검증 뒤 Selection_failed가 추가돼도 최소 Budget_overrun 바이트는 그대로이고 모든 실패가 영수증에 보존되는 경우를 확인한다.
 
 ## §6 이행 순서와 열린 결정
 

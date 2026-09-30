@@ -399,6 +399,27 @@ print(value)
         self.later("pulls/99", moved)
         self.refusal("batch_roll_input_mismatch", E.ROLL)
 
+    def test_divergent_main_uses_merge_base_for_first_member_review(self):
+        source_base = self.base
+        new_base = self.change(source_base, "lib/main_new.ml", "let main_new = 1\n")
+        self.git("checkout", "-q", "--detach", new_base)
+        self.git("merge", "-q", "--no-ff", "--no-edit", self.heads[1])
+        self.base = new_base
+        self.main = new_base
+        self.roll = self.git("rev-parse", "HEAD")
+        self.install_pr(99, self.roll)
+        self.put("commits/main", {"sha": new_base})
+        # Source review still covers the original branch delta, not new main.
+        self.set_line([1])
+        self.approvals()
+        receipt = self.evaluate(pr=99, landing=True)
+        self.assertEqual(receipt["status"], "fresh")
+        self.assertEqual(receipt["members"][0]["base"], source_base)
+        self.get("pulls/1/reviews?per_page=100")[0]["body"] = (
+            self.get("pulls/1/reviews?per_page=100")[0]["body"].replace(
+                f"base: {source_base}", f"base: {new_base}"))
+        self.refusal("batch_member_without_current_review", E.MEMBER, pr=99, landing=True)
+
     def test_stacked_members_use_roll_ci_without_member_runs(self):
         parent = self.heads[1]
         child = self.change(parent, "lib/two.ml", "let two = 2\n")

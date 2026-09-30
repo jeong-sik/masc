@@ -486,7 +486,11 @@ def evaluate(f, *, line, repo, pr, head, run, git_dir, gh, landing=False, expect
         pulls[member.pr] = pull
         parent_ref = pulls[previous.pr]["head"]["ref"] if previous is not None else None
         if pull["base"]["ref"] == "main":
-            expected_base = batch.base
+            common = subprocess.run(trees.git + ["merge-base", batch.base, member.head],
+                                    capture_output=True, text=True)
+            if common.returncode or not common.stdout.strip():
+                raise Refusal(Reason.TREE_MERGE_CONFLICT_OR_UNAVAILABLE, ExitCode.INFRASTRUCTURE)
+            expected_base = common.stdout.strip()
         elif previous is not None and pull["base"]["ref"] == parent_ref:
             expected_base = previous.head
             if pull["base"]["sha"] != expected_base:

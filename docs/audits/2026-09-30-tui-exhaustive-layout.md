@@ -91,7 +91,7 @@ O05 링크 미리보기는 [#40209](https://github.com/jeong-sik/masc/pull/40209
 | R03 | Workspace Activity | fixed clock/keeper/task 뒤 file 잘림 | 반응형 행·선택 path wrap 필요 |
 | R04 | Code memo/history | subject/provenance 논리 행의 잘린 suffix 도달 불가 | 필드 wrap 또는 수평 탐색 필요 |
 | S11 | Tools | root path/rejection/composition 행·skill usage last-used 잘림 | 상세 검사·wrap/반응형 열 필요 |
-| O05 | Link preview | 설명 원문이 narrow frame에서 한 줄 잘림 | 설명 wrap 필요 |
+| O05 | Link preview | 설명 원문이 narrow frame에서 한 줄 잘림 | [#40209](https://github.com/jeong-sik/masc/pull/40209), 전체 URL·설명·거절 wrap, 실행 검증 대기 |
 
 ## source review의 한계와 다음 검증
 

@@ -489,13 +489,15 @@
     "remaining_readers_implementation_pr": 40208,
     "focused_run": 36673795966,
     "execution_status": "pending at ac8df5fb74; fixture excludes refresh, repository scope switching and patch modal",
-    "unimplemented_readers": [
+    "readers": [
       {
         "reader": "recorded tool-call before/after",
         "renderer": "bin/masc_tui_render.ml:11164",
         "state": "changes_diff_row + changes_diff_scroll",
         "evidence": "diff_row_span applies Span.truncate to marker and complete body; no horizontal position or input route",
-        "required_verification": "long removed/added tail reachable with fixed +/- marker; reopening or changed selection owns its position; materialized blob without recorded bytes remains explicit"
+        "required_verification": "long removed/added tail reachable with fixed +/- marker; reopening or changed selection owns its position; materialized blob without recorded bytes remains explicit",
+        "implementation_pr": 40208,
+        "runtime_evidence": "pending; audited source evidence describes c112 base defect"
       },
       {
         "reader": "Changes working tree",
@@ -503,7 +505,9 @@
         "shared_renderer": "bin/masc_tui_render_prim.ml:2980",
         "state": "changes_tree_diff_path + changes_tree_diff + changes_diff_scroll",
         "evidence": "diff_surface has ds_scroll only; tree_diff_row_span truncates composed old/new gutter and body",
-        "required_verification": "body pans while old/new/marker remain fixed; stale path answer refused; held or failed refresh keeps correct reading and position"
+        "required_verification": "body pans while old/new/marker remain fixed; stale path answer refused; held or failed refresh keeps correct reading and position",
+        "implementation_pr": 40208,
+        "runtime_evidence": "pending; audited source evidence describes c112 base defect"
       },
       {
         "reader": "Repository Changes working tree",
@@ -511,10 +515,11 @@
         "shared_renderer": "bin/masc_tui_render_prim.ml:2980",
         "state": "repository_changes_diff_path + repository_changes_diff + repository_changes_diff_scroll",
         "evidence": "same no-horizontal diff_surface; opens from selected repository-change row with its scope",
-        "required_verification": "body pans in project/repository scope; selected path changes reset own position; list and hidden Code file never move"
+        "required_verification": "body pans in project/repository scope; selected path changes reset own position; list and hidden Code file never move",
+        "implementation_pr": 40208,
+        "runtime_evidence": "pending; audited source evidence describes c112 base defect"
       }
-    ],
-    "implementation_note": "unimplemented_readers describes the audited base; three repairs now published in40208, executable proof pending"
+    ]
   },
   "link_preview_repair": {
     "pr": 40209,

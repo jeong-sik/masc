@@ -2050,10 +2050,10 @@ let terminate_spawned_process ~clock proc stdin_w =
 
 (* A Codex sub-agent is a separate thread. Its item frames reach this
    connection under another threadId, and [active_turn_item] ends the turn on
-   the first one. Every sub-agent a live Keeper's model spawned ended its turn
-   that way within 20 seconds. MASC records none of the child's frames, tool
-   calls or token use, so no client this module spawns may create one, whatever
-   the posture.
+   the first one. In the 12 rollouts of 2026-09-30 that hold a sub-agent spawn
+   matched to a failed turn, the turn ended that way within 20 seconds. MASC
+   records none of the child's frames, tool calls or token use, so no client
+   this module spawns may create one, whatever the posture.
    Codex picks the version in this order: [features.multi_agent_v2] (V2), then
    [agents] enabled=false (disabled), then the model catalog's own
    multi_agent_version, then [features.multi_agent]. gpt-6.1-sol declares v2 in

@@ -196,26 +196,26 @@ let skill_access_short = function
   | other -> other
 ;;
 
-let skill_source_reading (observation : Masc.Tui_decode.skill_source_observation) =
+let skill_source_reading (observation : Masc.Tui_decode_tools.skill_source_observation) =
   match observation with
-  | Masc.Tui_decode.Skill_source_ready count ->
+  | Masc.Tui_decode_tools.Skill_source_ready count ->
     ( (if count = 0 then Ansi.dim else Theme.ok ())
     , (if count = 0 then "\xc2\xb7" else "\xe2\x9c\x93")
     , Printf.sprintf "%d skill director%s" count
         (if count = 1 then "y" else "ies") )
-  | Skill_source_missing -> (Ansi.dim, "\xc2\xb7", "missing")
-  | Skill_source_not_directory kind ->
+  | Masc.Tui_decode_tools.Skill_source_missing -> (Ansi.dim, "\xc2\xb7", "missing")
+  | Masc.Tui_decode_tools.Skill_source_not_directory kind ->
     (Theme.warn (), "!", "not a directory (" ^ kind ^ ")")
-  | Skill_source_unavailable operation ->
+  | Masc.Tui_decode_tools.Skill_source_unavailable operation ->
     (Theme.warn (), "!", "unreadable at " ^ operation)
-  | Skill_source_unresolved ->
+  | Masc.Tui_decode_tools.Skill_source_unresolved ->
     (Theme.warn (), "!", "path refused by config")
 ;;
 
-let skill_config_line (config : Masc.Tui_decode.skill_catalog_config option) =
+let skill_config_line (config : Masc.Tui_decode_tools.skill_catalog_config option) =
   match config with
   | None -> []
-  | Some (Masc.Tui_decode.Skill_config_configured { revision; resource_read_max_bytes })
+  | Some (Masc.Tui_decode_tools.Skill_config_configured { revision; resource_read_max_bytes })
     ->
     let cap =
       match resource_read_max_bytes with
@@ -227,7 +227,7 @@ let skill_config_line (config : Masc.Tui_decode.skill_catalog_config option) =
           (short_revision (Terminal_text.single_line revision))
           cap )
     ]
-  | Some (Skill_config_rejected { source_revision; diagnostics }) ->
+  | Some (Masc.Tui_decode_tools.Skill_config_rejected { source_revision; diagnostics }) ->
     (* The catalog still stands on the defaults, so nothing else on the
        screen changes when the operator's section stops parsing. *)
     ( Theme.warn ()
@@ -237,7 +237,7 @@ let skill_config_line (config : Masc.Tui_decode.skill_catalog_config option) =
          (fun diagnostic ->
             (Theme.warn (), "     " ^ Terminal_text.single_line diagnostic))
          diagnostics
-  | Some Skill_config_unreadable ->
+  | Some Masc.Tui_decode_tools.Skill_config_unreadable ->
     [ ( Theme.warn ()
       , "   runtime.toml Skill config unreadable \xe2\x80\x94 defaults in use" )
     ]
@@ -256,14 +256,14 @@ let skill_config_line (config : Masc.Tui_decode.skill_catalog_config option) =
 
    Same arrow as the Goal stage rail and the Fusion topology row, so three
    surfaces spell a pipeline one way. *)
-let skill_flow_line (flow : Masc.Tui_decode.skill_flow) =
+let skill_flow_line (flow : Masc.Tui_decode_tools.skill_flow) =
   let tool_of id =
     List.find_map
-      (fun (node : Masc.Tui_decode.skill_flow_node) ->
+      (fun (node : Masc.Tui_decode_tools.skill_flow_node) ->
          if String.equal node.sfn_id id then Some node.sfn_tool_name else None)
       flow.sf_nodes
   in
-  let batch (b : Masc.Tui_decode.skill_flow_batch) =
+  let batch (b : Masc.Tui_decode_tools.skill_flow_batch) =
     match List.filter_map tool_of b.sfb_node_ids with
     | [] -> None
     | tools ->
@@ -278,13 +278,13 @@ let skill_flow_line (flow : Masc.Tui_decode.skill_flow) =
   | parts -> Some (String.concat "  \xe2\x94\x80\xe2\x96\xb6  " parts)
 ;;
 
-let skill_source_lines ~config ~(sources : Masc.Tui_decode.skill_catalog_source list) =
+let skill_source_lines ~config ~(sources : Masc.Tui_decode_tools.skill_catalog_source list) =
   let ready =
     List.length
       (List.filter
-         (fun (source : Masc.Tui_decode.skill_catalog_source) ->
+         (fun (source : Masc.Tui_decode_tools.skill_catalog_source) ->
             match source.scso_observation with
-            | Masc.Tui_decode.Skill_source_ready count -> count > 0
+            | Masc.Tui_decode_tools.Skill_source_ready count -> count > 0
             | _ -> false)
          sources)
   in
@@ -296,7 +296,7 @@ let skill_source_lines ~config ~(sources : Masc.Tui_decode.skill_catalog_source 
   in
   let rows =
     List.map
-      (fun (source : Masc.Tui_decode.skill_catalog_source) ->
+      (fun (source : Masc.Tui_decode_tools.skill_catalog_source) ->
          let tone, mark, reading = skill_source_reading source.scso_observation in
          let path =
            match source.scso_path with
@@ -360,7 +360,7 @@ let tools_display_lines ?(cols = 80) (state : state) =
   let registered_tools =
     match state.tools_inventory with
     | None -> []
-    | Some s -> s.Masc.Tui_decode.ts_tools
+    | Some s -> s.Masc.Tui_decode_tools.ts_tools
   in
   let effective_lines =
     lazy begin
@@ -372,20 +372,20 @@ let tools_display_lines ?(cols = 80) (state : state) =
         [ ( (if Option.is_some state.tools_error then Theme.bad () else Theme.warn ())
           , " Effective Keeper Surface " ^ title_missing_reading ~error:state.tools_error )
         ]
-    | Some { Masc.Tui_decode.ts_effective = None; _ } ->
+    | Some { Masc.Tui_decode_tools.ts_effective = None; _ } ->
         [ (Theme.warn ()), " Effective Keeper Surface — no Keeper selected" ]
     | Some
-        { Masc.Tui_decode.ts_effective =
+        { Masc.Tui_decode_tools.ts_effective =
             Some
-              (Masc.Tui_decode.Effective_surface_warming { ets_keeper_name });
+              (Masc.Tui_decode_tools.Effective_surface_warming { ets_keeper_name });
           _ } ->
         [ (Theme.warn ()),
           Printf.sprintf " Effective Keeper Surface — %s — warming"
             (Terminal_text.single_line ets_keeper_name) ]
     | Some
-        { Masc.Tui_decode.ts_effective =
+        { Masc.Tui_decode_tools.ts_effective =
             Some
-              (Masc.Tui_decode.Effective_surface_unavailable
+              (Masc.Tui_decode_tools.Effective_surface_unavailable
                  { ets_keeper_name; ets_reason; ets_detail });
           _ } ->
         [ (Theme.bad ()),
@@ -394,9 +394,9 @@ let tools_display_lines ?(cols = 80) (state : state) =
             (Terminal_text.single_line ets_reason);
           (Theme.bad ()), "   " ^ Terminal_text.single_line ets_detail ]
     | Some
-        { Masc.Tui_decode.ts_effective =
+        { Masc.Tui_decode_tools.ts_effective =
             Some
-              (Masc.Tui_decode.Effective_surface_available
+              (Masc.Tui_decode_tools.Effective_surface_available
                  { ets_keeper_name;
                    ets_runtime_id;
                    ets_official_client_kind;
@@ -421,8 +421,8 @@ let tools_display_lines ?(cols = 80) (state : state) =
         let native = Option.value ~default:"n/a" ets_native_posture in
         let delivery_tone, delivery =
           match ets_tool_delivery with
-          | Masc.Tui_decode.Effective_tools_delivered -> Ansi.dim, "지원"
-          | Masc.Tui_decode.Effective_tools_suppressed_runtime_unsupported ->
+          | Masc.Tui_decode_tools.Effective_tools_delivered -> Ansi.dim, "지원"
+          | Masc.Tui_decode_tools.Effective_tools_suppressed_runtime_unsupported ->
             Theme.warn (), "미지원으로 제외"
         in
         let resource_bound =
@@ -457,23 +457,23 @@ let tools_display_lines ?(cols = 80) (state : state) =
         in
         let tool_lines =
           List.map
-            (fun (tool : Masc.Tui_decode.effective_tool) ->
+            (fun (tool : Masc.Tui_decode_tools.effective_tool) ->
                (* The source id, not the skill name: the name repeats what
                   the tool is already called (keeper_compose_work-intake ->
                   work-intake), while the id answers the question this
                   column asks -- which configured source this came from. It
                   is also short, so the column does not have to cut it. *)
-               let kind = Masc.Tui_decode.effective_tool_origin_kind tool.et_origin in
+               let kind = Masc.Tui_decode_tools.effective_tool_origin_kind tool.et_origin in
                let source =
                  match tool.et_origin with
-                 | Masc.Tui_decode.Composition_skill_origin
+                 | Masc.Tui_decode_tools.Composition_skill_origin
                      { skill_source_id = Some source_id } ->
                    kind ^ ":" ^ source_id
-                 | Masc.Tui_decode.Composition_skill_origin { skill_source_id = None }
-                 | Masc.Tui_decode.Descriptor_origin
-                 | Masc.Tui_decode.Instruction_skill_origin
-                 | Masc.Tui_decode.Composition_control_origin
-                 | Masc.Tui_decode.Unrecognised_origin _ -> kind
+                 | Masc.Tui_decode_tools.Composition_skill_origin { skill_source_id = None }
+                 | Masc.Tui_decode_tools.Descriptor_origin
+                 | Masc.Tui_decode_tools.Instruction_skill_origin
+                 | Masc.Tui_decode_tools.Composition_control_origin
+                 | Masc.Tui_decode_tools.Unrecognised_origin _ -> kind
                in
                Ansi.dim,
                Tool_table.effective_tool_line
@@ -483,7 +483,7 @@ let tools_display_lines ?(cols = 80) (state : state) =
         in
         let skill_profile_lines =
           List.mapi
-            (fun index (profile : Masc.Tui_decode.effective_skill_profile) ->
+            (fun index (profile : Masc.Tui_decode_tools.effective_skill_profile) ->
                let instruction = String.equal profile.esp_kind "instruction" in
                let execution =
                  if instruction then "on-demand" else profile.esp_execution
@@ -507,9 +507,9 @@ let tools_display_lines ?(cols = 80) (state : state) =
                let chosen =
                  profile.esp_load_reasons
                  |> List.filter_map (function
-                      | Masc.Tui_decode.Skill_catalog_default -> None
-                      | Skill_keeper_profile -> Some "Keeper profile"
-                      | Skill_task task_id -> Some ("Task " ^ task_id))
+                      | Masc.Tui_decode_tools.Skill_catalog_default -> None
+                      | Masc.Tui_decode_tools.Skill_keeper_profile -> Some "Keeper profile"
+                      | Masc.Tui_decode_tools.Skill_task task_id -> Some ("Task " ^ task_id))
                in
                ( (if index = state.tools_skill_cursor
                   then Theme.selection
@@ -537,9 +537,9 @@ let tools_display_lines ?(cols = 80) (state : state) =
         let selected_skill_flow_lines =
           match List.nth_opt ets_skill_profiles state.tools_skill_cursor with
           | None -> []
-          | Some { Masc.Tui_decode.esp_flow = None; _ } ->
+          | Some { Masc.Tui_decode_tools.esp_flow = None; _ } ->
             [ Ansi.dim, "     Flow: instruction body loads on demand; the model orchestrates tools" ]
-          | Some { Masc.Tui_decode.esp_flow = Some flow; _ } ->
+          | Some { Masc.Tui_decode_tools.esp_flow = Some flow; _ } ->
             (* Grouped under the batch that runs them, rather than listed
                flat with a batch=N to cross-reference. The batches are the
                order; the nodes are what is in each one. Two readings, and
@@ -838,7 +838,7 @@ let tools_display_lines ?(cols = 80) (state : state) =
                Printf.sprintf "   %d configured skill name(s) not in the turn catalog"
                  (List.length unavailable) )
              :: List.map
-                  (fun { Masc.Tui_decode.csn_name; csn_reason } ->
+                  (fun { Masc.Tui_decode_tools.csn_name; csn_reason } ->
                     (Theme.warn ()),
                     "     "
                     ^ Terminal_text.single_line csn_name
@@ -853,21 +853,21 @@ let tools_display_lines ?(cols = 80) (state : state) =
     lazy begin
     match state.tools_inventory with
     | None -> [ Theme.warn (), " Skill Activations — not loaded" ]
-    | Some { Masc.Tui_decode.ts_skill_activations = None; _ } ->
+    | Some { Masc.Tui_decode_tools.ts_skill_activations = None; _ } ->
         [ Theme.warn (), " Skill Activations — no Keeper selected" ]
     | Some
-        { Masc.Tui_decode.ts_skill_activations =
+        { Masc.Tui_decode_tools.ts_skill_activations =
             Some
-              (Masc.Tui_decode.Skill_activations_no_session
+              (Masc.Tui_decode_tools.Skill_activations_no_session
                  { sap_keeper_name });
           _ } ->
         [ Theme.warn (),
           Printf.sprintf " Skill Activations — %s — no session"
             (Terminal_text.single_line sap_keeper_name) ]
     | Some
-        { Masc.Tui_decode.ts_skill_activations =
+        { Masc.Tui_decode_tools.ts_skill_activations =
             Some
-              (Masc.Tui_decode.Skill_activations_unavailable
+              (Masc.Tui_decode_tools.Skill_activations_unavailable
                  { sap_keeper_name; sap_reason; sap_detail });
           _ } ->
         [ Theme.bad (),
@@ -876,9 +876,9 @@ let tools_display_lines ?(cols = 80) (state : state) =
             (Terminal_text.single_line sap_reason);
           Theme.bad (), "   " ^ Terminal_text.single_line sap_detail ]
     | Some
-        { Masc.Tui_decode.ts_skill_activations =
+        { Masc.Tui_decode_tools.ts_skill_activations =
             Some
-              (Masc.Tui_decode.Skill_activations_available
+              (Masc.Tui_decode_tools.Skill_activations_available
                  { sap_keeper_name
                  ; sap_ledger
                  });
@@ -1201,7 +1201,7 @@ let tools_display_lines ?(cols = 80) (state : state) =
               Printf.sprintf "    %s (%d)" (Terminal_text.single_line name) count
           | Tool_tree.Tool tool ->
               let surfaces =
-                match tool.Masc.Tui_decode.tl_surfaces with
+                match tool.Masc.Tui_decode_tools.tl_surfaces with
                 | [] -> "none"
                 | names -> String.concat ", " names
               in
@@ -1243,14 +1243,14 @@ let tools_display_lines ?(cols = 80) (state : state) =
           (match state.skills_catalog_error with
            | None -> " Skill Usage — loading workspace catalog…"
            | Some _ -> " Skill Usage — unavailable (no catalog reading)") ]
-    | Some { Masc.Tui_decode.sc_state; _ }
-      when sc_state <> Masc.Tui_decode.Skills_ready ->
+    | Some { Masc.Tui_decode_tools.sc_state; _ }
+      when sc_state <> Masc.Tui_decode_tools.Skills_ready ->
         [ Ansi.dim,
           Printf.sprintf " Skill Usage — catalog %s"
             (Terminal_text.single_line
-               (Masc.Tui_decode.skills_catalog_state_to_string sc_state)) ]
+               (Masc.Tui_decode_tools.skills_catalog_state_to_string sc_state)) ]
     | Some
-        { Masc.Tui_decode.sc_surfaces
+        { Masc.Tui_decode_tools.sc_surfaces
         ; sc_rejections
         ; sc_shadows
         ; sc_sources
@@ -1261,16 +1261,16 @@ let tools_display_lines ?(cols = 80) (state : state) =
       ->
         let used =
           List.filter
-            (fun (surface : Masc.Tui_decode.skills_catalog_surface) ->
+            (fun (surface : Masc.Tui_decode_tools.skills_catalog_surface) ->
                surface.scs_usage <> [])
             sc_surfaces
         in
         let total field rows =
-          List.fold_left (fun sum (row : Masc.Tui_decode.skill_usage_row) ->
+          List.fold_left (fun sum (row : Masc.Tui_decode_tools.skill_usage_row) ->
             sum + field row) 0 rows
         in
         let invocations rows = total (fun row -> row.su_invocations) rows in
-        let compare_surface (a : Masc.Tui_decode.skills_catalog_surface) b =
+        let compare_surface (a : Masc.Tui_decode_tools.skills_catalog_surface) b =
           let count = Int.compare (invocations b.scs_usage) (invocations a.scs_usage) in
           if count <> 0 then count else
           let name = String.compare a.scs_name b.scs_name in
@@ -1278,7 +1278,7 @@ let tools_display_lines ?(cols = 80) (state : state) =
         in
         let used = List.stable_sort compare_surface used in
         let all_rows = List.concat_map
-          (fun (surface : Masc.Tui_decode.skills_catalog_surface) -> surface.scs_usage) used in
+          (fun (surface : Masc.Tui_decode_tools.skills_catalog_surface) -> surface.scs_usage) used in
         let keepers = all_rows |> List.map (fun row -> row.su_keeper)
           |> List.sort_uniq String.compare |> List.length in
         let coverage_lines =
@@ -1306,10 +1306,10 @@ let tools_display_lines ?(cols = 80) (state : state) =
            ] @ coverage_lines)
         in
         let rows = List.concat_map
-          (fun (surface : Masc.Tui_decode.skills_catalog_surface) ->
+          (fun (surface : Masc.Tui_decode_tools.skills_catalog_surface) ->
             let keeper_readings = surface.scs_usage
               |> List.stable_sort (fun a b -> String.compare a.su_keeper b.su_keeper)
-              |> List.map (fun (row : Masc.Tui_decode.skill_usage_row) ->
+              |> List.map (fun (row : Masc.Tui_decode_tools.skill_usage_row) ->
                   let last_used = match row.su_last_used_at with
                     | Some at when String.trim at <> "" -> Terminal_text.short_timestamp at
                     | Some _ | None -> skill_last_used_label None in
@@ -1360,7 +1360,7 @@ let tools_display_lines ?(cols = 80) (state : state) =
             ( Ansi.bold,
               Printf.sprintf " Rejected Skill Sources — %d" (List.length rejections) )
             :: List.concat_map
-                 (fun (rejection : Masc.Tui_decode.skill_catalog_rejection) ->
+                 (fun (rejection : Masc.Tui_decode_tools.skill_catalog_rejection) ->
                     let source =
                       rejection.scr_source_id
                       ^ "/"
@@ -1375,21 +1375,21 @@ let tools_display_lines ?(cols = 80) (state : state) =
                     in
                     let diagnostics =
                       match rejection.scr_reason with
-                      | Masc.Tui_decode.Skill_document_rejected diagnostics ->
+                      | Masc.Tui_decode_tools.Skill_document_rejected diagnostics ->
                         List.map
-                          (fun (diagnostic : Masc.Tui_decode.skill_rejection_diagnostic) ->
+                          (fun (diagnostic : Masc.Tui_decode_tools.skill_rejection_diagnostic) ->
                              ( Theme.warn (),
                                Printf.sprintf
                                  "     %s: %s"
-                                 (Masc.Tui_decode.skill_diagnostic_code_to_string
+                                 (Masc.Tui_decode_tools.skill_diagnostic_code_to_string
                                     diagnostic.srd_diagnostic)
                                  (Terminal_text.single_line diagnostic.srd_message) ))
                           diagnostics
-                      | Skill_document_unreadable ->
+                      | Masc.Tui_decode_tools.Skill_document_unreadable ->
                         [ Theme.warn (), "     document_unreadable" ]
-                      | Skill_exact_identity_duplicate ->
+                      | Masc.Tui_decode_tools.Skill_exact_identity_duplicate ->
                         [ Theme.warn (), "     exact_identity_duplicate" ]
-                      | Skill_invalid_package_id ->
+                      | Masc.Tui_decode_tools.Skill_invalid_package_id ->
                         [ Theme.warn (), "     invalid_package_id" ]
                     in
                     ( Theme.warn (),
@@ -1418,7 +1418,7 @@ let tools_display_lines ?(cols = 80) (state : state) =
             ( Ansi.bold,
               Printf.sprintf " Shadowed Skills — %d" (List.length shadows) )
             :: List.concat_map
-                 (fun (shadow : Masc.Tui_decode.skill_catalog_shadow) ->
+                 (fun (shadow : Masc.Tui_decode_tools.skill_catalog_shadow) ->
                     [ ( Theme.warn (),
                         Printf.sprintf
                           "   %s \xc2\xb7 %s"

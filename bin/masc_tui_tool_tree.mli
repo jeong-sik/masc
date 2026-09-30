@@ -18,14 +18,14 @@ type row =
       count : int;
     }
       (** A heading for the tools that follow it. *)
-  | Tool of Masc.Tui_decode.tool_entry
+  | Tool of Masc.Tui_decode_tools.tool_entry
 
 val domain_of_tool : string -> string option
 (** The domain a tool name puts it in -- one rule per domain, matched on the
     name; [None] for a name no rule claims, which surfaces as [unsorted]
     rather than silently borrowing a neighbour's domain. *)
 
-val rows : Masc.Tui_decode.tool_entry list -> row list
+val rows : Masc.Tui_decode_tools.tool_entry list -> row list
 (** Tools in a fixed domain order (board, work, run, keeper ops, keeper
     self, system, unsorted), name order within a domain, with a domain
     heading wherever the domain changes and a family heading wherever the

@@ -5,7 +5,7 @@
 open Alcotest
 
 module Tree = Masc_tui_tool_tree
-module Decode = Masc.Tui_decode
+module Decode = Masc.Tui_decode_tools
 
 let tool ?(surfaces = [ "mcp" ]) ?(direct = false) name : Decode.tool_entry =
   { tl_name = name

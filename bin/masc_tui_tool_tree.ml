@@ -17,7 +17,7 @@ type row =
       name : string;
       count : int;
     }
-  | Tool of Masc.Tui_decode.tool_entry
+  | Tool of Masc.Tui_decode_tools.tool_entry
 
 (* Fixed display order: the operator's centre of gravity first — boards and
    work items — then running, then the keeper's own instruments, then the
@@ -65,8 +65,8 @@ let family_of name =
   | _ -> None
 
 let rows tools =
-  let domain_of (tool : Masc.Tui_decode.tool_entry) =
-    match domain_of_tool tool.Masc.Tui_decode.tl_name with
+  let domain_of (tool : Masc.Tui_decode_tools.tool_entry) =
+    match domain_of_tool tool.Masc.Tui_decode_tools.tl_name with
     | Some domain -> domain
     | None -> "unsorted"
   in
@@ -82,8 +82,8 @@ let rows tools =
      [work] is a spelling fact worth showing, not noise. *)
   let family_counts = Hashtbl.create 32 in
   List.iter
-    (fun (tool : Masc.Tui_decode.tool_entry) ->
-       match family_of tool.Masc.Tui_decode.tl_name with
+    (fun (tool : Masc.Tui_decode_tools.tool_entry) ->
+       match family_of tool.Masc.Tui_decode_tools.tl_name with
        | None -> ()
        | Some family ->
            Hashtbl.replace family_counts family
@@ -91,7 +91,7 @@ let rows tools =
     tools;
   let rec walk current_domain current_family acc = function
     | [] -> List.rev acc
-    | (tool : Masc.Tui_decode.tool_entry) :: rest -> (
+    | (tool : Masc.Tui_decode_tools.tool_entry) :: rest -> (
         let domain = domain_of tool in
         let acc =
           if current_domain <> Some domain then
@@ -101,7 +101,7 @@ let rows tools =
             Domain { name = domain; count } :: acc
           else acc
         in
-        match family_of tool.Masc.Tui_decode.tl_name with
+        match family_of tool.Masc.Tui_decode_tools.tl_name with
         | Some family when current_family <> Some (Some family) ->
             let count =
               Option.value ~default:0 (Hashtbl.find_opt family_counts family)
@@ -116,7 +116,7 @@ let rows tools =
      order reads top to bottom regardless of how the inventory arrived. *)
   let by_domain tools =
     List.sort
-      (fun (a : Masc.Tui_decode.tool_entry) (b : Masc.Tui_decode.tool_entry) ->
+      (fun (a : Masc.Tui_decode_tools.tool_entry) (b : Masc.Tui_decode_tools.tool_entry) ->
          let rank name =
            let domain =
              match domain_of_tool name with Some d -> d | None -> "unsorted"
@@ -127,8 +127,8 @@ let rows tools =
            in
            (order, name)
          in
-         compare (rank a.Masc.Tui_decode.tl_name)
-           (rank b.Masc.Tui_decode.tl_name))
+         compare (rank a.Masc.Tui_decode_tools.tl_name)
+           (rank b.Masc.Tui_decode_tools.tl_name))
       tools
   in
   walk None None [] (by_domain tools)

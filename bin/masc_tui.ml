@@ -3166,9 +3166,9 @@ let settle_tools_read state ~generation part =
 let tools_skill_profiles state =
   match state.tools_inventory with
   | Some
-      { Masc.Tui_decode.ts_effective =
+      { Masc.Tui_decode_tools.ts_effective =
           Some
-            (Masc.Tui_decode.Effective_surface_available
+            (Masc.Tui_decode_tools.Effective_surface_available
                { ets_skill_profiles; _ });
         _ } ->
     ets_skill_profiles
@@ -18013,7 +18013,7 @@ and is loaded on demand through keeper_skill.
     match selected_tools_skill_profile state with
     | None -> report_action state "error" "no published Skill selected"
     | Some profile ->
-      let name = profile.Masc.Tui_decode.esp_name in
+      let name = profile.Masc.Tui_decode_tools.esp_name in
       let host = server_peer_host in
       let port = state.port in
       (match

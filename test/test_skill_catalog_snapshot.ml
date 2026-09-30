@@ -194,7 +194,7 @@ let test_precedence_and_exact_identity () =
   | _ -> fail "expected two configured sources"
 ;;
 
-(* The TUI reads this snapshot through Tui_decode.decode_skills_catalog. The
+(* The TUI reads this snapshot through Masc.Tui_decode_tools.decode_skills_catalog. The
    server's own serializer goes through it here, so a renamed or reshaped
    shadow fails this test instead of turning the TUI's Skill pane into a read
    failure. *)
@@ -222,7 +222,7 @@ let test_the_tui_reads_the_shadows_this_snapshot_writes () =
     , Reference.identity_source_id_to_string shadowed
       ^ "/" ^ Reference.identity_package_id_to_string shadowed )
   in
-  match Masc.Tui_decode.decode_skills_catalog response with
+  match Masc.Tui_decode_tools.decode_skills_catalog response with
   | Error error -> fail ("the TUI refused the snapshot's own JSON: " ^ error)
   | Ok catalog ->
     check (list (pair string string))
@@ -231,7 +231,7 @@ let test_the_tui_reads_the_shadows_this_snapshot_writes () =
          (fun (shadow : Snapshot.shadow) -> sides shadow.winner shadow.shadowed)
          (Snapshot.shadows snapshot))
       (List.map
-         (fun (shadow : Masc.Tui_decode.skill_catalog_shadow) ->
+         (fun (shadow : Masc.Tui_decode_tools.skill_catalog_shadow) ->
             sides shadow.scsh_winner shadow.scsh_shadowed)
          catalog.sc_shadows);
     check int "the fixture carries one shadow" 1 (List.length catalog.sc_shadows)

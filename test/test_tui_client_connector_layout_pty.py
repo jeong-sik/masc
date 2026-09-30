@@ -44,11 +44,13 @@ def run_tables(executable):
         "total": 3, "active_count": 2,
         "connectors": [
             {"connector_id": "a", "display_name": "long-" + "connector" * 18 + "-END",
-             "available": True, "connected": True, "status": "connected", "channel": "#connected"},
+             "available": True, "connected": True, "status": "connected", "channel": "#connected",
+             "configured_bindings": []},
             {"connector_id": "b", "display_name": "한" * 40 + "-END",
-             "available": True, "connected": False, "status": "disconnected", "channel": "#unreachable"},
+             "available": True, "connected": False, "status": "disconnected", "channel": "#unreachable",
+             "configured_bindings": []},
             {"connector_id": "c", "display_name": "offline", "available": False,
-             "connected": False, "status": "offline", "channel": None},
+             "connected": False, "status": "offline", "channel": None, "configured_bindings": []},
         ],
     })
 
@@ -138,7 +140,7 @@ def run_retained_read(executable):
                                                         if failed.is_set() else (200, payload))
     connector_payload = {"total": 1, "active_count": 1, "connectors": [{
         "connector_id": "discord", "display_name": "RetainedConnector", "available": True,
-        "connected": True, "status": "connected", "channel": "#retained"}]}
+        "connected": True, "status": "connected", "channel": "#retained", "configured_bindings": []}]}
     fixtures[h.CONNECTORS_PATH] = lambda: ((503, {"error": "reading failed"})
                                           if failed.is_set() else (200, connector_payload))
 

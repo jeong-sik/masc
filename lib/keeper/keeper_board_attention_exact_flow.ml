@@ -542,6 +542,7 @@ type jev_first =
   | Jev_decided of
       { provenance : Keeper_board_attention_candidate.system_one_provenance
       ; verdict : Keeper_board_attention_judgment.t
+      ; confidence : float
       ; judged_at : float
       }
   | Jev_low_confidence of
@@ -602,7 +603,9 @@ let ask_jev ~clock prepared =
                       confidence
                       (Typesafeai_config.board_attention_confidence_floor ())
                     >= 0
-                  then Jev_decided { provenance; verdict; judged_at = Eio.Time.now clock }
+                  then
+                    Jev_decided
+                      { provenance; verdict; confidence; judged_at = Eio.Time.now clock }
                   else Jev_low_confidence { provenance; verdict; confidence })))))
 ;;
 
@@ -640,8 +643,8 @@ let jev_first_to_yojson jev_first result =
   in
   match jev_first with
   | Jev_off | Jev_cli_only | Jev_not_pending -> `Assoc [ answer ]
-  | Jev_decided { provenance; _ } ->
-    with_provenance provenance [ answer ]
+  | Jev_decided { provenance; confidence; _ } ->
+    with_provenance provenance [ answer; "confidence", `Float confidence ]
   | Jev_failed { reason } -> `Assoc [ answer; "reason", `String reason ]
   | Jev_low_confidence { provenance; verdict; confidence } ->
     with_provenance
@@ -827,7 +830,7 @@ let execute_current
              Error (Cli_slots_exhausted { prior_error = None; failures }))
         | Http_flow attempt ->
           (match jev_first with
-           | Jev_decided { provenance; verdict; judged_at } ->
+           | Jev_decided { provenance; verdict; judged_at; confidence = _ } ->
              Ok
                { Keeper_board_attention_candidate.verdict
                ; slot_id = provenance.answering_model_id

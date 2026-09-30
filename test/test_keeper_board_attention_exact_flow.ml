@@ -1617,6 +1617,19 @@ let check_terminal_provenance label run provenance =
   | _ -> Alcotest.failf "%s: terminal evidence is missing" label
 ;;
 
+let check_terminal_confidence label run expected =
+  match run.terminal_jev with
+  | [ jev ] ->
+    (match json_field "confidence" jev with
+     | Some (`Float confidence) ->
+       Alcotest.(check (float 0.000001))
+         (label ^ ": the terminal entry keeps Jev's confidence")
+         expected
+         confidence
+     | Some _ | None -> Alcotest.failf "%s: terminal entry has no numeric confidence" label)
+  | _ -> Alcotest.failf "%s: terminal evidence is missing" label
+;;
+
 let test_jev_relevant_is_kept () =
   let run =
     execute_behind_jev
@@ -1627,6 +1640,7 @@ let test_jev_relevant_is_kept () =
       ()
   in
   check_terminal_jev "relevant" ~answer:"relevant" ~rejudged:None run;
+  check_terminal_confidence "relevant" run 0.9;
   match run.result with
   | Ok judgment ->
     Alcotest.(check int) "Jev asked once" 1 run.jev_posts;
@@ -1686,6 +1700,7 @@ let test_jev_confident_not_relevant_is_kept () =
       ()
   in
   check_terminal_jev "not_relevant" ~answer:"not_relevant" ~rejudged:None run;
+  check_terminal_confidence "not_relevant" run 0.9;
   match run.result with
   | Ok judgment ->
     Alcotest.(check int) "Jev asked once" 1 run.jev_posts;
@@ -1727,19 +1742,13 @@ let test_jev_low_confidence_is_judged_again () =
        check_judged_by_the_llm_lane label run;
        check_terminal_jev label ~answer:"low_confidence" ~rejudged:(Some "relevant") run;
        check_terminal_provenance label run (expected_jev_provenance run);
+       check_terminal_confidence label run below_the_settle_floor;
        match run.terminal_jev with
        | [ jev ] ->
          Alcotest.(check (option string))
            (label ^ ": the terminal entry keeps Jev's decision")
            (Some choice)
-           (json_string_field "decision" jev);
-         (match json_field "confidence" jev with
-          | Some (`Float confidence) ->
-            Alcotest.(check (float 0.000001))
-              (label ^ ": the terminal entry keeps Jev's confidence")
-              below_the_settle_floor
-              confidence
-          | Some _ | None -> Alcotest.failf "%s: terminal entry has no numeric confidence" label)
+           (json_string_field "decision" jev)
        | _ -> Alcotest.failf "%s: terminal evidence is missing" label)
     [ "relevant"; "not_relevant" ]
 ;;
@@ -1757,16 +1766,7 @@ let test_jev_uncertain_is_judged_again () =
   check_judged_by_the_llm_lane "uncertain" run;
   check_terminal_jev "uncertain" ~answer:"uncertain" ~rejudged:(Some "relevant") run;
   check_terminal_provenance "uncertain" run (expected_jev_provenance run);
-  (match run.terminal_jev with
-   | [ jev ] ->
-     (match json_field "confidence" jev with
-      | Some (`Float confidence) ->
-        Alcotest.(check (float 0.000001))
-          "the terminal entry retains confidence as observation"
-          0.26
-          confidence
-      | Some _ | None -> Alcotest.fail "uncertain: terminal entry has no numeric confidence")
-   | _ -> Alcotest.fail "uncertain: terminal evidence is missing")
+  check_terminal_confidence "uncertain" run 0.26
 ;;
 
 let test_jev_confidence_at_the_floor_settles () =
@@ -1907,7 +1907,7 @@ let test_jev_adapter_sends_the_decisions_and_reads_not_relevant () =
        | Typesafeai_board_attention.Needs_review _ ->
          Alcotest.fail "a not_relevant answer decoded as another assessment");
       Alcotest.(check (float 0.0))
-        "the adapter retains Jev's confidence as observation"
+        "the adapter returns Jev's confidence"
         0.6
         judged.confidence;
       match Fixture.request_bodies jev with

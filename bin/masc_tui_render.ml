@@ -4469,8 +4469,8 @@ let schedule_detail_content (state : state) ~cols ~runner (row : schedule_row) =
         | lines -> List.map (fun text -> style, text) lines))
     (warnings @ fields)
 
-let schedule_detail_height ~rows ~count =
-  Masc_tui_scroll.content_height ~rows ~chrome:framed_chrome_rows ~count
+let schedule_detail_height ~rows ~warning_rows ~count =
+  Masc_tui_scroll.content_height ~rows ~chrome:(framed_chrome_rows + warning_rows) ~count
     ~preview_keep:None ~overflow_takes_row:true
 
 let schedule_detail_viewport (state : state) =
@@ -4483,7 +4483,8 @@ let schedule_detail_viewport (state : state) =
          | None -> 0
          | Some row -> List.length (schedule_detail_content state ~cols ~runner:snapshot.scs_runner_status row))
     | Some _, None | None, _ -> 0 in
-  count, schedule_detail_height ~rows ~count
+  let warning_rows = if Option.is_some (schedule_source_warning state) then 1 else 0 in
+  count, schedule_detail_height ~rows ~warning_rows ~count
 
 let schedule_detail_pane (state : state) ~rows ~cols ~runner (row : schedule_row) buf =
   box_top buf cols;
@@ -4493,9 +4494,15 @@ let schedule_detail_pane (state : state) ~rows ~cols ~runner (row : schedule_row
        (schedule_status_color row.sch_status)
        (Terminal_text.single_line row.sch_status) Ansi.reset);
   box_divider buf cols;
+  (* Source freshness governs every evidence row, so it stays visible while
+     the reader moves. The complete warning also remains in the reader for
+     narrow viewports or a refusal longer than the fixed status summary. *)
+  let warning_rows = match schedule_source_warning state with
+    | None -> 0
+    | Some error -> box_line buf cols (data_unreliable_row ~cols error); 1 in
   let lines = schedule_detail_content state ~cols ~runner row in
   let count = List.length lines in
-  let height = schedule_detail_height ~rows ~count in
+  let height = schedule_detail_height ~rows ~warning_rows ~count in
   let scroll = Masc_tui_scroll.normalize ~count ~height state.schedule_scroll in
   let lines_window = Rows.of_list ~first:scroll ~height lines in
   for index = 0 to height - 1 do

@@ -123,6 +123,30 @@ def run(executable):
                 h.send_and_wait(process, fd, output, b"\x1b[H", b"SCHEDULE")
             h.send_and_wait(process, fd, output, b"\x1b", b"Requests: 1")
         h.send_and_wait(process, fd, output, b"\r", b"SCHEDULE")
+        # A retained snapshot's source warning qualifies every evidence row,
+        # including while paged away from the full raw warning in the reader.
+        fixtures[h.SCHEDULES_PATH] = (503, {"error": "schedule-source-unavailable"})
+        h.resize_and_wait(process, fd, output, rows=24, columns=80,
+                          needle=b"SCHEDULE", final_cursor=b"\x1b[?25l")
+        h.send_and_wait(process, fd, output, b"r", b"HTTP 503")
+        h.drain_until_quiet(process, fd, output)
+        first, last, total = window(output)
+        h.send_and_wait(process, fd, output, b"\x1b[6~", b"[lines ")
+        h.drain_until_quiet(process, fd, output)
+        assert window(output)[0] == first + max(1, last - first), (first, last, window(output))
+        assert b"HTTP 503" in screen(output), screen(output)
+        h.send_and_wait(process, fd, output, b"\x1b[F", b"[lines ")
+        h.drain_until_quiet(process, fd, output)
+        assert window(output)[1] == window(output)[2], window(output)
+        assert b"HTTP 503" in screen(output), screen(output)
+        print("SCHEDULE_RETAINED_SOURCE_VIEWPORT " + json.dumps({"window": window(output),
+              "screen": screen(output).decode("utf-8", "replace")}), flush=True)
+        snapshot["requests"][0]["status"] = "scheduled"
+        fixtures[h.SCHEDULES_PATH] = (200, snapshot)
+        h.send_and_wait(process, fd, output, b"r", b"[scheduled]")
+        h.drain_until_quiet(process, fd, output)
+        assert b"HTTP 503" not in screen(output), screen(output)
+        h.send_and_wait(process, fd, output, b"\x1b[H", b"SCHEDULE")
         h.resize_and_wait(process, fd, output, rows=400, columns=80,
                           needle=b"SCHEDULE", final_cursor=b"\x1b[?25l")
         h.send_and_wait(process, fd, output, b"x", b"Armed: cancel")

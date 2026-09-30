@@ -1307,6 +1307,11 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   }
 
   .kw-chat-command-popover {
+    /* Measure the space below this anchor, including the clipping chat pane. */
+    max-height: max(0px, calc(var(--kw-command-available-height, 100dvh) - env(safe-area-inset-bottom, 0px)));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    box-sizing: border-box;
     right: max(0px, env(safe-area-inset-right, 0px));
     max-width: calc(100vw - 28px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
   }

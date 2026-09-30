@@ -1444,7 +1444,16 @@ let fleet_body input =
          :: overview ~below:(below - 1))
 
 let fleet_lines ~below ~scroll (body, overview) =
-  window ~below ~scroll body ~overview:(fun () -> overview ~below)
+  let visible, scroll_max =
+    window ~below ~scroll body ~overview:(fun () -> overview ~below)
+  in
+  (* The shared window shows raw rows in a one-row viewport. At the fleet's
+     top, use its folded overview so trace notices cannot displace its only
+     Keeper target. Keep the full body's scroll range for reading the notices. *)
+  match body with
+  | Trace_unavailable _ :: _ when below = 1 && scroll <= 0 ->
+      (overview ~below, scroll_max)
+  | _ -> (visible, scroll_max)
 
 (* A row that spends the pane's four columns -- state, tool, calls and tokens.
    The column names sit over these. A focus header with no record of its own

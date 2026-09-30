@@ -279,7 +279,9 @@ let load_redirect_target config path =
     | Sys_error _ | Yojson.Json_error _ -> None)
 ;;
 
-let remove_file_if_exists path = if file_exists path then remove_file path
+let remove_file_if_exists path =
+  try run_blocking_io (fun () -> Unix.unlink path) with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> ()
 
 (* [agent_name]'s own file, then the id-named file its redirect stub points
    to. A name that signs in with another name's token (a generated nickname,
@@ -533,9 +535,51 @@ let persist_raw_token config ~agent_name raw_token =
   save_private_text_file (raw_token_file config agent_name) raw_token
 ;;
 
+(* Revocation admits only the payload's canonical name. Expiry need not decode,
+   but an alias must not retire another owner's UUID and leave its raw bearer. *)
+let validate_revocation_owner config agent_name =
+  let file = credential_file config agent_name in
+  let refused detail = Error (System (System_error.ValidationError
+      (Printf.sprintf "cannot revoke %s: %s" agent_name detail))) in
+  let read_json path =
+    try
+      let stat = run_blocking_io (fun () -> Unix.stat path) in
+      if stat.Unix.st_kind <> Unix.S_REG then refused "credential is not a regular file"
+      else Ok (Some (Yojson.Safe.from_string (read_text_file path)))
+    with
+    | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+    | Yojson.Json_error _ -> refused "credential owner cannot be decoded"
+    | Sys_error detail -> Error (System (System_error.IoError detail))
+    | Unix.Unix_error (error, operation, argument) ->
+      Error (System (System_error.IoError
+        (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error))))
+    | Eio.Io _ as exn -> Error (System (System_error.IoError (Printexc.to_string exn))) in
+  let ( let* ) = Result.bind in
+  let* named = read_json file in
+  let* payload = match named with
+    | Some (`Assoc fields) ->
+      (match List.assoc_opt "redirect_to" fields with
+       | Some (`String target) ->
+         (match redirect_target_file config target with
+          | Some path -> read_json path
+          | None -> refused "invalid redirect target")
+       | _ -> Ok named)
+    | _ -> Ok named in
+  match payload with
+  | None -> Ok () (* Missing targets and dangling named symlinks can be unlinked. *)
+  | Some (`Assoc fields) ->
+    (match List.assoc_opt "agent_name" fields with
+     | Some (`String owner) when String.equal owner agent_name -> Ok ()
+     | Some (`String _) -> refused "requested name is an alias, not the canonical owner"
+     | _ -> refused "credential owner cannot be decoded")
+  | Some _ -> refused "credential owner cannot be decoded"
+;;
+
 (** Delete using the caller's admitted workspace. The public wrapper and
     multi-effect transactions share this implementation. *)
 let delete_credential_in_transaction (Credential_transaction config) agent_name =
+  let ( let* ) = Result.bind in
+  let* () = validate_revocation_owner config agent_name in
   try
     Fun.protect ~finally:(fun () -> !credential_cache_invalidator_ref config)
       (fun () ->

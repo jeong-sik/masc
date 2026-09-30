@@ -238,4 +238,3 @@ let home_step state ~backwards =
         else min (List.length actions - 1) (index + 1)
   in
   state.home_selected <- List.nth_opt actions index
-

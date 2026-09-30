@@ -215,4 +215,3 @@ let approval_item_needs_person = function
 let approvals_human_pending (state : state) =
   List.length (List.filter approval_item_needs_person (approval_items state))
   + approvals_open_question_count state
-

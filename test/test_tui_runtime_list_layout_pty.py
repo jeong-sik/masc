@@ -62,7 +62,7 @@ def run(executable, no_color):
     h.run_terminal_scenario(executable,
         description=f"Runtime listing responsive identity and status NO_COLOR={no_color}",
         interact=interact, http_fixtures=fixtures,
-        extra_env={"NO_COLOR": "1"} if no_color else {"NO_COLOR": None})
+        extra_env={"NO_COLOR": "1"} if no_color else {})
 
 
 if __name__ == "__main__":

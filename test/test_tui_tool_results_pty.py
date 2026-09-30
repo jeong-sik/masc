@@ -53,7 +53,7 @@ def run(executable: str) -> None:
             before = h.screen_text(bytes(output))
             if b"GATE_TAIL" in before or changes.calls:
                 raise AssertionError(f"results mode prematurely expanded details: {before!r}")
-            h.send_and_wait(process, master_fd, output, b"\x02", b"KEEPERS")
+            h.wait_for_output(process, master_fd, output, b"KEEPERS", start=0, timeout=3.0)
             h.drain_until_quiet(process, master_fd, output)
             row = h.screen_row_of(h.screen_rows(bytes(output)), b"GATE_CLICK")
             if row < 0:

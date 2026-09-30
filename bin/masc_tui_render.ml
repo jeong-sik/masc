@@ -15598,7 +15598,7 @@ let finish_voice_surface (state : state) ~terminal_rows ~cols ~head ~body ~hints
    value rather than the clipped prefix of each logical line. *)
 let voice_body_rows cols content =
   let width = framed_inner_width cols in
-  if visible_width content <= width then [ content ]
+  if Message_layout.display_width content <= width then [ content ]
   else Message_layout.wrap_words ~max_cells:width content
 ;;
 
@@ -15744,7 +15744,7 @@ let render_voice_agent (state : state) (session : voice_agent_session) =
       | None -> Masc_tui_theme.Glyph.no_value
       | Some item -> draw item
     in
-    let room = max 1 (framed_inner_width cols - visible_width prefix) in
+    let room = max 1 (framed_inner_width cols - Message_layout.display_width prefix) in
     box_line head cols
       (prefix ^ Ansi.bold ^ Message_layout.fit_middle room value ^ Ansi.reset)
   in
@@ -16538,9 +16538,9 @@ let patch_modal_horizontal_limit (state : state) =
   | Some (_, diff) ->
       List.fold_left
         (fun limit row ->
-          let body_width = max 1 (width - visible_width (tree_diff_gutter row)) in
+          let body_width = max 1 (width - Message_layout.display_width (tree_diff_gutter row)) in
           let cells =
-            visible_width (Terminal_text.single_line row.Tui_decode.gdr_text)
+            Message_layout.display_width (Terminal_text.single_line row.Tui_decode.gdr_text)
           in
           max limit (max 0 (cells - body_width)))
         0 diff.Tui_decode.gd_rows

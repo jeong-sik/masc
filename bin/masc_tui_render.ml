@@ -1621,7 +1621,8 @@ let render_question_reader (state : state) =
   box_top buf cols;
   box_line buf cols (screen_title
     (" MASC Approvals / Questions"
-     ^ approval_list_note ~name:"questions" (approvals_questions_reading state)));
+     ^ Masc_tui_approvals_model.approval_list_note ~name:"questions"
+         (Masc_tui_approvals_model.approvals_questions_reading state)));
   box_line buf cols
     (match selected with
      | None -> "  No questions waiting"

@@ -47,6 +47,18 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read
        | Error error -> h2_respond_auth_error error)
   in
   match httpun_meth, path with
+  | `GET, path when path = Play_invite.agent_guide_path ->
+      (match Server_routes_http_routes_play_guide.guide_response () with
+       | Ok text ->
+         h2_respond_bytes h2_reqd text
+           ~content_type:Server_routes_http_routes_play_guide.markdown_content_type
+           ~extra_headers:(("cache-control", "no-store")
+                           :: ("x-content-type-options", "nosniff") :: cors)
+       | Error (status, json) ->
+         h2_respond_json_value h2_reqd json ~status:(status :> H2.Status.t)
+           ~extra_headers:cors);
+      true
+
   | `GET, "/api/v1/voice/config" ->
       with_public_read (fun () ->
         let status, json = voice_config_payload () in

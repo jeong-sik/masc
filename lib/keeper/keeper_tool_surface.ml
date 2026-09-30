@@ -90,6 +90,34 @@ let keeper_list_body ~(config : Workspace.config) args : tool_result =
         in
         json)
   in
+  (* Equipment and currency bypass the metadata TTL; one immutable ledger read serves
+     all rows, including failures, for this response. *)
+  let candle = Candle_observe.read ~base_path:config.base_path in
+  let equipment = Candle_observe.equipment candle in
+  let row = function
+    | `Assoc fields as json ->
+      let portrait = match Json_util.assoc_string_opt "name" json with
+        | Some keeper -> (match equipment ~keeper with
+            | Ok value -> Keeper_portrait_equipment.Ready value
+            | Error reason -> Keeper_portrait_equipment.Unavailable reason)
+        | None -> Keeper_portrait_equipment.Unavailable "Keeper name unavailable" in
+      let balance = match Json_util.assoc_string_opt "name" (`Assoc fields) with
+        | Some keeper -> Candle_observe.balance candle ~keeper
+        | None -> None in
+      `Assoc (("portrait", Keeper_portrait_equipment.reading_to_json portrait)
+        :: ("candle_balance_milli", Json_util.option_to_yojson (fun value -> `String value) balance)
+        :: List.remove_assoc "candle_balance_milli" (List.remove_assoc "portrait" fields))
+    | json -> json in
+  let data = match data with
+    | `Assoc fields -> `Assoc (List.map (fun (key, value) ->
+        if key = (if detailed then "keepers" else "items") then
+          match value with `List rows -> key, `List (List.map row rows) | value -> key, value
+        else key, value) fields)
+    | json -> json in
+  let data = match data with
+    | `Assoc fields -> `Assoc (("candle", Candle_observation.to_json (Candle_observe.summary candle))
+        :: List.remove_assoc "candle" fields)
+    | json -> json in
   tool_result_ok_data data
 
 let handle_keeper_list ctx args : tool_result =

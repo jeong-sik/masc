@@ -53,6 +53,8 @@ let slot_id = function
   | Hand -> "hand"
   | Base -> "base"
 
+let slot_of_id id = List.find_opt (fun slot -> String.equal (slot_id slot) id) slots
+
 let empty_id = function
   | Face -> "bare_face"
   | Neck -> "bare_neck"

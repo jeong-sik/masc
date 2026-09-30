@@ -8,13 +8,20 @@
 val normalize_actor_name : string option -> string
 (** Trim and default a missing/empty actor to ["dashboard"]. *)
 
+val with_current_keeper_observations :
+  config:Workspace_utils.config -> Yojson.Safe.t -> Yojson.Safe.t
+(** Refresh Keeper equipment, wallet balances and currency supply together in
+    an operator/execution/briefing envelope.
+    Call after outer HTTP caches as well as the metadata snapshot cache. *)
+
 val get_or_compute_snapshot_json :
   config:Workspace_utils.config ->
   actor:string option ->
   (string -> Yojson.Safe.t) ->
   Yojson.Safe.t
-(** Cached read with TTL [3.0 s]. The compute callback receives the
-    normalized actor name produced by {!normalize_actor_name}. *)
+(** Cached metadata with fresh authoritative portrait equipment per response.
+    The compute callback receives the normalized actor name produced by
+    {!normalize_actor_name}. *)
 
 val invalidate_snapshot_json : config:Workspace_utils.config -> unit
 (** Drop every actor and HTTP operator-snapshot cache entry and advance the

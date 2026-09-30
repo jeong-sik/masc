@@ -186,6 +186,7 @@ describe('KeeperDetailHeaderInfo', () => {
     vi.stubGlobal('fetch', fetchMock)
     const keeper = {
       name: 'wick-header-probe',
+      portrait: { state: 'ready', equipment: { face: 'bare_face', neck: 'bare_neck', head: 'bare_head', hand: 'empty_hand', base: 'no_dish' } },
       status: 'active',
       phase: 'Running',
       lifecycle_phase: 'Running',
@@ -215,6 +216,7 @@ describe('KeeperDetailHeaderInfo', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{"error":"not found"}', { status: 404 })))
     const keeper = {
       name: 'wick-header-probe',
+      portrait: { state: 'ready', equipment: { face: 'bare_face', neck: 'bare_neck', head: 'bare_head', hand: 'empty_hand', base: 'no_dish' } },
       status: 'active',
       phase: 'Running',
       lifecycle_phase: 'Running',
@@ -240,6 +242,7 @@ describe('KeeperDetailHeaderInfo', () => {
     vi.stubGlobal('fetch', fetchMock)
     const keeper = {
       name: 'wick-header-probe',
+      portrait: { state: 'ready', equipment: { face: 'bare_face', neck: 'bare_neck', head: 'bare_head', hand: 'empty_hand', base: 'no_dish' } },
       emoji: '🕯️',
       status: 'active',
       phase: 'Running',

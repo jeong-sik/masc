@@ -2027,6 +2027,11 @@
  (name test_dashboard_http_core)
  (modules test_dashboard_http_core)
  (libraries
+  masc.masc_candle
+  masc.masc_candle_runtime
+  masc.masc_candle_store
+  masc.keeper_portrait
+  masc.keeper_identity
   masc.keeper_runtime
   masc_test_deps
   masc_test_runtime
@@ -4317,8 +4322,9 @@
 (test
  (name test_tui_keeper_control)
  (modules test_tui_keeper_control)
- (libraries
+ (libraries masc.masc_candle
   alcotest
+  masc.keeper_portrait
   masc
   masc.string_util
   masc_tui_credential
@@ -6008,6 +6014,7 @@
 (include stanzas/test_tui_emblem_screen.inc)
 (include stanzas/test_tui_portrait_view.inc)
 (include stanzas/test_tui_keeper_portrait.inc)
+(include stanzas/test_tui_candle.inc)
 (include stanzas/test_tui_emblem_state.inc)
 (include stanzas/test_tui_link_label.inc)
 (include stanzas/test_tui_link_preview.inc)
@@ -7706,3 +7713,7 @@
 (include stanzas/test_candle_balance.inc)
 
 (include stanzas/test_candle_appraiser_transport.inc)
+
+(include stanzas/test_candle_purchase_flow.inc)
+
+(include stanzas/test_tui_candle_currency_pty.inc)

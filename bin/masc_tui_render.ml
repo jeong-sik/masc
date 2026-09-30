@@ -622,7 +622,24 @@ let render_overview (state : state) =
             then guide
             else []
           in
-          notice @ [ health; "" ] @ guide @ summary)
+          (* Currency uses only rows left by the current Dashboard. Its
+             full block is atomic; a crowded screen retains the baseline
+             and names the global, scrollable details route in Health. *)
+          let candle =
+            Masc_tui_candle.summary_lines state.candle_observation
+            |> List.concat_map (fun line ->
+                 Message_layout.wrap_words ~max_cells:(max 1 (cols - 4))
+                   (Terminal_text.single_line line))
+            |> List.map (fun line -> " " ^ line)
+          in
+          let baseline_rows = List.length notice + 2 + List.length guide + List.length summary in
+          let candle = if baseline_rows + List.length candle <= budget then candle else [] in
+          let health =
+            match candle, Masc_tui_candle.compact_status state.candle_observation with
+            | [], Some status -> " " ^ status ^ " · " ^ health
+            | _ -> health
+          in
+          notice @ [ health ] @ candle @ [ "" ] @ guide @ summary)
       |> List.iter c.push)
 
 (* One task's event history, appended after the detail body so it rides the
@@ -7206,10 +7223,17 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
     (* The Keeper's own portrait opens Info, its Identity facts beside it,
        where the pane is tall and wide enough to keep its facts in sight.
        The name only picks the drawing; it is never drawn as text. *)
+    let portrait_reading = match (keeper_reading state k).Keeper_control.liveness with
+      | Keeper_control.Present runtime -> runtime.kr_portrait
+      | Keeper_control.Unobserved -> Tui_decode.Unavailable "not yet read"
+      | Keeper_control.Absent -> Tui_decode.Unavailable "absent from live roster"
+      | Keeper_control.Invalid detail -> Tui_decode.Unavailable detail in
     let portrait =
       if state.detail_tab = Detail_info then
-        Masc_tui_keeper_portrait.shown ~name:k.k_name ~content_rows:base_height
-          ~content_cols:inner
+        match portrait_reading with
+        | Tui_decode.Ready equipment ->
+          Masc_tui_keeper_portrait.shown ~name:k.k_name ~equipment ~content_rows:base_height ~content_cols:inner
+        | Tui_decode.Unavailable _ -> None
       else None
     in
 
@@ -7238,12 +7262,33 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
             (if k.k_paused then (Theme.warn ()) ^ "yes" ^ Ansi.reset
              else Ansi.dim ^ "no" ^ Ansi.reset)
         ]
+        @ (let amount = match (keeper_reading state k).Keeper_control.liveness with
+            | Keeper_control.Present runtime -> runtime.kr_candle_balance_milli
+            | Keeper_control.Unobserved | Keeper_control.Absent | Keeper_control.Invalid _ -> None in
+           match Masc_tui_candle.balance_text state.candle_observation amount with
+           | None -> []
+           | Some value -> [row_line "Candle balance:" (Terminal_text.single_line value)])
       in
       List.iter add_line
         (match portrait with
          | Some band -> Masc_tui_keeper_portrait.beside band identity
          | None -> identity);
+      (match portrait_reading with
+       | Tui_decode.Ready _ -> ()
+       | Tui_decode.Unavailable reason -> add_row "Portrait:" ("unavailable: " ^ Terminal_text.single_line reason));
       add_empty ();
+      (* The short Overview names only the reading's state. Info retains
+         every diagnostic and exact supply amount, wrapped and scrollable. *)
+      let candle_lines = Masc_tui_candle.summary_lines state.candle_observation in
+      if candle_lines <> [] then (
+        add_section "Candle details";
+        List.iter
+          (fun line ->
+            Message_layout.wrap_words ~max_cells:(max 1 (inner - 2))
+              (Terminal_text.single_line line)
+            |> List.iter (fun line -> add_line ("  " ^ line)))
+          candle_lines;
+        add_empty ());
 
       (* The live roster owns this reading, including its absence after a
          successful turn. Neither historical last_error nor the last outcome

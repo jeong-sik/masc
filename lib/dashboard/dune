@@ -7,6 +7,9 @@
  (flags :standard -open Masc -w +33)
  (libraries
   masc
+  masc.masc_candle_runtime
+  masc.masc_candle
+  masc.keeper_portrait
   masc.masc_process
   masc.watched_work
   masc.tool_schemas_specs

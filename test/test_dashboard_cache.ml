@@ -409,7 +409,10 @@ let publish_execution_fixture marker =
   let generation = Execution_http.execution_publication_generation () in
   Alcotest.(check bool) "publish snapshot" true
     (Execution_http.publish_execution_success_if_current ~generation
-       (`Assoc [ "marker", `String marker; "data", `String (String.make 4000 'x') ]))
+       (* The execution producer includes this observation even when Candle is
+          off. Omitting it makes the fresh-observation gate reject these bytes. *)
+       (`Assoc [ "marker", `String marker; "data", `String (String.make 4000 'x');
+                 "candle", `Assoc [ "status", `String "off" ] ]))
 
 let execution_request ?(target = "/api/v1/dashboard/execution") encoding =
   Httpun.Request.create

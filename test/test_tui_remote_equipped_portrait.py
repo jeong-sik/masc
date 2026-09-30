@@ -36,6 +36,7 @@ PORTRAIT_ID = b"42"
 KITTY_REPLIES = b"\x1b[6;20;10t" + h.GRAPHICS_SUPPORTED_REPLY
 INFO_TAB = "▸Info".encode()
 WAIT_SECONDS = 10.0  # Test failure deadline, not a product refresh interval.
+REFRESH_APPLIED = b"fresh-roster-applied"
 
 
 def portrait_pngs(wire: bytes) -> list[bytes]:
@@ -82,20 +83,36 @@ class Roster:
         self.phase = "before"
         self.calls: list[str] = []
         self.lock = threading.Lock()
+        self.refresh_started = threading.Event()
+        self.release_refresh = threading.Event()
 
     def __call__(self):
         with self.lock:
             self.calls.append(self.phase)
             body = self.snapshots[self.phase]
+            held = self.phase == "refreshed"
+        if held:
+            self.refresh_started.set()
+            if not self.release_refresh.wait(timeout=30):
+                raise AssertionError("fresh roster fixture was never released")
         return h.RawHttpResponse(200, body, content_type="application/json")
 
     def equip(self):
         with self.lock:
             self.phase = "equipped"
 
-    def count(self):
+    def hold_refresh(self, keeper: str) -> bytes:
+        # A labelled scenario derivative of the native equipped receipt.
+        # Only the decoder's displayed runtime_blocker_summary is marked;
+        # equipment, identity and every other native field remain unchanged.
+        payload = json.loads(self.snapshots["equipped"])
+        row = next(row for row in payload["keepers"] if row["name"] == keeper)
+        row["runtime_blocker_summary"] = REFRESH_APPLIED.decode()
+        body = json.dumps(payload).encode()
         with self.lock:
-            return len(self.calls)
+            self.snapshots["refreshed"] = body
+            self.phase = "refreshed"
+        return body
 
 
 def remote_portrait(binary: str, evidence: Path) -> None:
@@ -155,10 +172,23 @@ def remote_portrait(binary: str, evidence: Path) -> None:
 
             # A subsequent successful read must retain the new pixels. Force
             # a full repaint afterwards, since an identical frame emits none.
-            calls = roster.count()
+            marked_receipt = roster.hold_refresh(keeper)
+            (evidence / "refreshed-roster-fixture.json").write_bytes(marked_receipt)
             os.write(fd, b"r")
+            assert h.wait_for_fixture_event(process, fd, output,
+                roster.refresh_started, timeout=WAIT_SECONDS), "fresh roster request missing"
+            assert REFRESH_APPLIED not in h.screen_text(bytes(output)), \
+                "held fresh roster was applied before release"
+            roster.release_refresh.set()
+
+            def fresh_roster_visible():
+                end = output.rfind(h.FRAME_END)
+                return end >= 0 and REFRESH_APPLIED in h.screen_text(
+                    bytes(output[:end + len(h.FRAME_END)]))
+
             assert h.wait_for_fixture_state(process, fd, output,
-                lambda: roster.count() > calls, timeout=WAIT_SECONDS), "fresh roster request missing"
+                fresh_roster_visible, timeout=WAIT_SECONDS), \
+                "fresh roster was not applied to the client-visible Current failure field"
             start = len(output)
             h.resize_and_wait(process, fd, output, rows=30, columns=99, needle=b"Identity")
             stable = wait_for_picture(process, fd, output, start=start, expected=equipped)
@@ -174,6 +204,12 @@ def remote_portrait(binary: str, evidence: Path) -> None:
                 "tui_binary_sha256": hashlib.sha256(Path(binary).read_bytes()).hexdigest(),
                 "native_build": manifest["build"],
                 "roster_requests": roster.calls,
+                "fresh_roster_application_barrier": {
+                    "source": "scenario derivative of native equipped roster receipt",
+                    "mutated_field": "runtime_blocker_summary",
+                    "display": "Keeper Info Current failure",
+                    "marker": REFRESH_APPLIED.decode(),
+                },
                 "pixel_dimensions": [160, 160],
                 "before_rgba_sha256": hashlib.sha256(rgba_png(first)[2]).hexdigest(),
                 "equipped_rgba_sha256": hashlib.sha256(rgba_png(changed)[2]).hexdigest(),
@@ -182,6 +218,7 @@ def remote_portrait(binary: str, evidence: Path) -> None:
             (evidence / "tui-manifest.json").write_text(json.dumps(proof, indent=2) + "\n")
             os.write(fd, b"q")
         finally:
+            roster.release_refresh.set()
             (evidence / "tui.pty").write_bytes(output)
 
     h.run_terminal_scenario(binary,

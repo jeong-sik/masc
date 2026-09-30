@@ -528,7 +528,7 @@ let test_metadata_edit_survives_event_recording_failure () =
     let goal = Yojson.Safe.Util.member "goal" updated in
     check string "metadata edit keeps the Goal phase" expected_phase (get_string_field goal "phase");
     check_event_recordings "failed projection is explicit after the committed edit"
-      [ "goal_updated", "failed" ] updated;
+      [ "goal_updated", "failed"; "goal_edited", "failed" ] updated;
     let recording = List.hd (event_recordings updated) in
     check bool "the receipt retains the append error" true
       (String.length (get_string_field recording "error") > 0);
@@ -536,6 +536,23 @@ let test_metadata_edit_survives_event_recording_failure () =
     check string "the missing row retains the caller" "planner" (get_string_field payload "actor");
     check string "the missing row retains the committed due date" "2099-01-01"
       (get_string_field payload "due_date");
+    let edit_recording = List.nth (event_recordings updated) 1 in
+    check bool "the metadata receipt retains its own append error" true
+      (String.length (get_string_field edit_recording "error") > 0);
+    let edit_payload = Yojson.Safe.Util.member "payload" edit_recording in
+    check string "the metadata receipt retains its caller" "planner"
+      (get_string_field edit_payload "actor");
+    let due = Yojson.Safe.Util.member "due_date" edit_payload in
+    check string "failed metadata row retains the original due date" "2000-01-01"
+      (get_string_field due "from");
+    check string "failed metadata row retains the new due date" "2099-01-01"
+      (get_string_field due "to");
+    let priority = Yojson.Safe.Util.member "priority" edit_payload in
+    check int "failed metadata row retains original priority"
+      Yojson.Safe.Util.(created |> member "goal" |> member "priority" |> to_int)
+      Yojson.Safe.Util.(priority |> member "from" |> to_int);
+    check int "failed metadata row retains new priority" 1
+      Yojson.Safe.Util.(priority |> member "to" |> to_int);
     let listed = call "masc_goal_list" [] |> Yojson.Safe.Util.member "goals" |> Yojson.Safe.Util.to_list in
     (match listed with
      | [ stored ] ->
@@ -587,6 +604,134 @@ let test_criterion_edit_reports_each_failed_event () =
   let repeated = call "masc_goal_upsert" [ "id", `String goal_id; "target_value", `String "2" ] in
   check_event_recordings "a later successful snapshot does not claim the lost phase append"
     [ "goal_updated", "recorded" ] repeated
+;;
+
+(* A due date or priority edit moves no phase, so it records a row of its own
+   with the value it replaced (#39878). Only the fields that changed are in it. *)
+let test_goal_due_date_and_priority_edits_are_recorded () =
+  with_workspace
+  @@ fun config ->
+  let events_path =
+    Filename.concat
+      (Filename.dirname (Goal_store.goals_path config))
+      "goal_events.jsonl"
+  in
+  let edits () =
+    if Sys.file_exists events_path
+    then
+      Fs_compat.load_file events_path
+      |> String.split_on_char '\n'
+      |> List.filter (fun line -> String.trim line <> "")
+      |> List.map Yojson.Safe.from_string
+      |> List.filter (fun event ->
+        String.equal (get_string_field event "event_type") "goal_edited")
+    else []
+  in
+  let upsert args =
+    match
+      Tool_workspace.dispatch
+        (workspace_ctx config)
+        ~name:"masc_goal_upsert"
+        ~args:(`Assoc args)
+    with
+    | Some result -> parse_json_result result
+    | None -> fail "masc_goal_upsert not handled"
+  in
+  let created =
+    upsert
+      [ "title", `String "Dated later"
+      ; "metric", `String "goals counted"
+      ; "target_value", `String "1"
+      ]
+  in
+  let goal_id = get_string_field created "goal_id" in
+  let edit_of = function
+    | [ event ] -> Yojson.Safe.Util.member "payload" event
+    | events -> fail (Printf.sprintf "expected one new edit, got %d" (List.length events))
+  in
+  let newest_edit ~already =
+    edit_of (List.filteri (fun index _ -> index >= already) (edits ()))
+  in
+  let change payload field =
+    let change = Yojson.Safe.Util.member field payload in
+    Yojson.Safe.Util.member "from" change, Yojson.Safe.Util.member "to" change
+  in
+  let json = testable Yojson.Safe.pp Yojson.Safe.equal in
+  let json_pair = pair json json in
+  check int "creating a goal records no edit" 0 (List.length (edits ()));
+  (* A due date that was not set comes from null. *)
+  ignore (upsert [ "id", `String goal_id; "due_date", `String "2026-10-15" ]);
+  let first = newest_edit ~already:0 in
+  check json_pair "due date set" (`Null, `String "2026-10-15") (change first "due_date");
+  check json "the priority did not change" `Null (Yojson.Safe.Util.member "priority" first);
+  check string "the editor is named" "planner" (get_string_field first "actor");
+  ignore (upsert [ "id", `String goal_id; "priority", `Int 1 ]);
+  let second = newest_edit ~already:1 in
+  check json_pair "priority moved" (`Int 3, `Int 1) (change second "priority");
+  check json "the due date did not change" `Null (Yojson.Safe.Util.member "due_date" second);
+  ignore
+    (upsert [ "id", `String goal_id; "due_date", `String "2026-11-01"; "priority", `Int 5 ]);
+  let third = newest_edit ~already:2 in
+  check json_pair "due date moved" (`String "2026-10-15", `String "2026-11-01") (change third "due_date");
+  check json_pair "priority moved again" (`Int 1, `Int 5) (change third "priority");
+  (* The dashboard reads what the handler wrote. Each side of this contract is
+     also pinned by hand-written rows in test_goal_timeline_projection, and a
+     renamed key would keep both green without this. *)
+  let projected = Dashboard_goals_types.goal_event_timeline_json (List.nth (edits ()) 2) in
+  check
+    string
+    "the timeline reads the row the handler wrote"
+    "due_date 2026-10-15 -> 2026-11-01, priority 1 -> 5 by planner"
+    (get_string_field projected "summary");
+  check string "and does not flag it" "ok" (get_string_field projected "severity");
+  (* The same values again, and an edit to something else, record nothing. *)
+  ignore
+    (upsert [ "id", `String goal_id; "due_date", `String "2026-11-01"; "priority", `Int 5 ]);
+  ignore (upsert [ "id", `String goal_id; "title", `String "Renamed" ]);
+  check int "an edit that changes neither field records nothing" 3 (List.length (edits ()))
+;;
+
+(* The edit is stored before its row is appended. A row that cannot be appended
+   (here the events path is a directory) must not turn a stored edit into a
+   failure: the caller would retry, see no difference, and record nothing. *)
+let test_a_goal_edit_whose_row_cannot_be_appended_still_succeeds () =
+  with_workspace
+  @@ fun config ->
+  (* Made without the tool, so nothing has opened the events file yet and no
+     cached handle can hide the failure. *)
+  let goal, _ =
+    match
+      Goal_store.upsert_goal
+        config
+        ~title:"Dated later"
+        ~metric:"goals counted"
+        ~target_value:"1"
+        ()
+    with
+    | Ok created -> created
+    | Error error -> failf "%s" (Goal_store.write_error_to_string error)
+  in
+  let events_path =
+    Filename.concat
+      (Filename.dirname (Goal_store.goals_path config))
+      "goal_events.jsonl"
+  in
+  Unix.mkdir events_path 0o755;
+  match
+    Tool_workspace.dispatch
+      (workspace_ctx config)
+      ~name:"masc_goal_upsert"
+      ~args:(`Assoc [ "id", `String goal.id; "due_date", `String "2026-10-15" ])
+  with
+  | None -> fail "masc_goal_upsert not handled"
+  | Some result ->
+    let json = parse_json_result result in
+    check string "the edit is reported as stored" goal.id (get_string_field json "goal_id");
+    check
+      string
+      "with the new due date"
+      "2026-10-15"
+      (get_string_field (Yojson.Safe.Util.member "goal" json) "due_date")
 ;;
 
 let test_goal_upsert_rejects_lifecycle_fields () =
@@ -1100,6 +1245,14 @@ let () =
             "criterion edit reports each failed event"
             `Quick
             test_criterion_edit_reports_each_failed_event
+        ; test_case
+            "due date and priority edits are recorded"
+            `Quick
+            test_goal_due_date_and_priority_edits_are_recorded
+        ; test_case
+            "a goal edit whose row cannot be appended still succeeds"
+            `Quick
+            test_a_goal_edit_whose_row_cannot_be_appended_still_succeeds
         ; test_case
             "goal review removed from dispatch"
             `Quick

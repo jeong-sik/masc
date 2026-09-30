@@ -8,16 +8,21 @@
     200 when the tool succeeded and 400 when it refused. Every call that ran
     wakes the Lane instances bound to the DOS machine once. *)
 
+val moves : (string * Masc_domain.tool_schema) list
+(** Every move route's path, with the schema of the tool whose arguments its
+    body is: press, type, step and pass, in that order. *)
+
 val press_into :
   config:Workspace.config ->
   who:string ->
   saves_name:string ->
   keys:string list ->
-  [> `OK | `Bad_request ] * Yojson.Safe.t
+  [> `OK | `Bad_request | `Service_unavailable ] * Yojson.Safe.t
 (** [POST /api/v1/dos/press] for a caller that chose [keys] from the layout
     of the program kept under [saves_name]: the same release, answer and
     wake, and the keys go in only while that program is loaded
     ({!Dos_lane.press_into}). Another program loaded by then is a 400 and
-    nothing is pressed. *)
+    nothing is pressed. Credential transaction admission failure is a 503; no
+    input is sent and no controller state is changed. *)
 
 val add_routes : Http_server_eio.Router.t -> Http_server_eio.Router.t

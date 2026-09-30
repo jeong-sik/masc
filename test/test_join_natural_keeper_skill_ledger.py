@@ -6,6 +6,8 @@ import sys
 import tempfile
 import unittest
 
+import skill_activation_event_log_fixture as log_fixture
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_DIR = REPO_ROOT / "scripts" / "harness" / "workload"
@@ -27,6 +29,7 @@ def load_module():
 
 joiner = load_module()
 proof = joiner.proof
+events = joiner.skill_activation_events
 HEAD = "a" * 40
 TREE = "b" * 40
 TURN_REF = "trace-one#7"
@@ -174,10 +177,7 @@ def activation(skill_id, turn_ref=TURN_REF):
             },
         },
         "delivery": {
-            "boundary": {
-                "kind": "model_response",
-                "response_id": f"response-{skill_id}",
-            },
+            "boundary": {"kind": "model_response", "agent_core_turn": 8},
             "runtime_id": "runtime-one",
             "delivered_at": "2026-08-27T00:00:01Z",
             "content_bytes": 4,
@@ -188,7 +188,7 @@ def activation(skill_id, turn_ref=TURN_REF):
                 "identity": {"kind": "call_id", "call_id": f"action-{skill_id}"},
                 "tool_name": "keeper_status",
                 "runtime_id": "runtime-one",
-                "agent_core_turn": 7,
+                "agent_core_turn": 8,
                 "observed_at": "2026-08-27T00:00:02Z",
             }
         ],
@@ -205,12 +205,12 @@ def ledger(activations, session_id="trace-one"):
         "activations": activations,
         "transition_rejections": [],
     }
-    value["revision"] = proof.ledger_revision(value)
+    value["revision"] = events.ledger_revision(value)
     return value
 
 
 def ledger_raw(value):
-    return (json.dumps(value, sort_keys=True) + "\n").encode()
+    return log_fixture.event_log(value)
 
 
 def dashboard(value):
@@ -476,17 +476,19 @@ class NaturalKeeperSkillLedgerJoinTest(unittest.TestCase):
         foreign_keeper["skill_activations"]["keeper_name"] = "keeper-foreign"
         wrong_tool_ledger = copy.deepcopy(durable)
         wrong_tool_ledger["activations"][0]["skill_tool_use_id"] = "call-foreign"
-        wrong_tool_ledger["revision"] = proof.ledger_revision(wrong_tool_ledger)
+        wrong_tool_ledger["revision"] = events.ledger_revision(wrong_tool_ledger)
         wrong_tool = unavailable_dashboard(wrong_tool_ledger, status="warming")
         wrong_runtime_ledger = copy.deepcopy(durable)
         wrong_runtime_ledger["activations"][0]["runtime_id"] = "runtime-foreign"
-        wrong_runtime_ledger["revision"] = proof.ledger_revision(wrong_runtime_ledger)
+        wrong_runtime_ledger["revision"] = events.ledger_revision(wrong_runtime_ledger)
         wrong_runtime = unavailable_dashboard(wrong_runtime_ledger, status="warming")
         wrong_delivery_ledger = copy.deepcopy(durable)
         wrong_delivery_ledger["activations"][0]["delivery"]["runtime_id"] = (
             "runtime-foreign"
         )
-        wrong_delivery_ledger["revision"] = proof.ledger_revision(wrong_delivery_ledger)
+        wrong_delivery_ledger["revision"] = events.ledger_revision(
+            wrong_delivery_ledger
+        )
         wrong_delivery = unavailable_dashboard(wrong_delivery_ledger, status="warming")
 
         for current, error in (
@@ -713,7 +715,7 @@ class NaturalKeeperSkillLedgerJoinTest(unittest.TestCase):
         durable = ledger([activation("call-skill-1")])
         projected_ledger = copy.deepcopy(durable)
         projected_ledger["activations"] = []
-        projected_ledger["revision"] = proof.ledger_revision(projected_ledger)
+        projected_ledger["revision"] = events.ledger_revision(projected_ledger)
 
         with self.assertRaisesRegex(joiner.JoinError, "differs from durable"):
             joiner.validate_join(
@@ -831,7 +833,7 @@ class NaturalKeeperSkillLedgerJoinTest(unittest.TestCase):
         durable = ledger([activation("call-skill-1")])
         before = dashboard(durable)
         advanced = ledger(
-            [activation("call-skill-1"), activation("call-skill-2", "trace-two#1")]
+            [activation("call-skill-1"), activation("call-skill-2", "trace-one#2")]
         )
 
         with self.assertRaisesRegex(joiner.JoinError, "differs from durable"):
@@ -857,7 +859,7 @@ class NaturalKeeperSkillLedgerJoinTest(unittest.TestCase):
         producer, raw = receipt()
         durable = ledger([activation("call-skill-1")])
         advanced = ledger(
-            [activation("call-skill-1"), activation("call-skill-2", "trace-two#1")]
+            [activation("call-skill-1"), activation("call-skill-2", "trace-one#2")]
         )
         projected = dashboard(durable)
 
@@ -885,8 +887,9 @@ class NaturalKeeperSkillLedgerJoinTest(unittest.TestCase):
         durable = ledger([activation("call-skill-1")])
         projected = dashboard(durable)
         before_raw = ledger_raw(durable)
-        after_raw = (json.dumps(durable, indent=2, sort_keys=True) + "\n").encode()
+        after_raw = log_fixture.event_log(durable, separators=(", ", ": "))
         self.assertNotEqual(after_raw, before_raw)
+        self.assertEqual(events.fold_event_log(after_raw), durable)
 
         with self.assertRaisesRegex(
             joiner.JoinError, "durable Skill ledger bytes changed"
@@ -966,6 +969,65 @@ class NaturalKeeperSkillLedgerJoinTest(unittest.TestCase):
                 durable_ledger_raw=ledger_raw(durable),
                 durable_ledger_after_raw=ledger_raw(durable),
             )
+
+    def test_durable_ledger_is_folded_from_the_session_event_log(self):
+        durable = ledger([activation("call-skill-1")])
+        with tempfile.TemporaryDirectory() as raw:
+            masc_root = Path(raw)
+            session_dir = masc_root / "traces" / "trace-one"
+            session_dir.mkdir(parents=True)
+            events_path = session_dir / events.EVENTS_FILENAME
+            payload = ledger_raw(durable)
+            events_path.write_bytes(payload)
+
+            folded, stored, resolved = joiner.read_durable_ledger(
+                effective_masc_root=str(masc_root), session_id="trace-one"
+            )
+
+        self.assertEqual(folded, durable)
+        self.assertEqual(stored, payload)
+        self.assertEqual(resolved.name, events.EVENTS_FILENAME)
+
+    def test_durable_ledger_read_refuses_empty_refused_and_symlinked_logs(self):
+        durable = ledger([activation("call-skill-1")])
+        with tempfile.TemporaryDirectory() as raw:
+            masc_root = Path(raw)
+            session_dir = masc_root / "traces" / "trace-one"
+            session_dir.mkdir(parents=True)
+            events_path = session_dir / events.EVENTS_FILENAME
+
+            def read():
+                return joiner.read_durable_ledger(
+                    effective_masc_root=str(masc_root), session_id="trace-one"
+                )
+
+            events_path.write_bytes(b"")
+            with self.assertRaisesRegex(joiner.JoinError, "has recorded nothing"):
+                read()
+
+            events_path.write_bytes(
+                log_fixture.encode_rows(
+                    [
+                        log_fixture.header_row(durable["workspace_key"], "trace-one"),
+                        log_fixture.delivery_row(
+                            "call-skill-1", durable["activations"][0]["delivery"]
+                        ),
+                    ]
+                )
+            )
+            with self.assertRaises(joiner.JoinError) as caught:
+                read()
+            self.assertIs(
+                caught.exception.__cause__.fault,
+                events.SkillLedgerFault.UNKNOWN_EVENT_ACTIVATION,
+            )
+
+            events_path.unlink()
+            target = masc_root / "elsewhere.jsonl"
+            target.write_bytes(ledger_raw(durable))
+            events_path.symlink_to(target)
+            with self.assertRaisesRegex(joiner.JoinError, "must not be a symlink"):
+                read()
 
     def test_duplicate_key_receipt_is_rejected_by_shared_strict_decoder(self):
         with self.assertRaisesRegex(proof.ProofError, "repeats field keeper"):

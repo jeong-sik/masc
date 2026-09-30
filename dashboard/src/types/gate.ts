@@ -174,7 +174,6 @@ export interface KeeperApprovalQueueItem {
   turn_id?: number | null
   task_id?: string | null
   goal_id?: string | null
-  goal_ids?: string[]
   input?: unknown
   input_preview?: string | null
   phase: ApprovalQueuePhase

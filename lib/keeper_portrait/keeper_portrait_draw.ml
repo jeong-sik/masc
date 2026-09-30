@@ -1204,6 +1204,84 @@ let render_with ~cull ~frame_of (b : body) (e : equipment) (p : pose) (n : size)
 let render_posed b e p n = render_with ~cull:true ~frame_of:e b e p n
 let render b e n = render_posed b e still n
 
+(* The mosaic has only 24 samples across a Keeper's band. Sampling the full
+   portrait at that size spends most of them on its round backdrop. Draw the
+   candle on a 24-unit grid instead: the eyes and mouth each own whole cells,
+   and the flame and horns keep their silhouette. *)
+let render_compact_posed (b : body) (e : equipment) (p : pose) (n : size) =
+  let colours = palette b in
+  let painted colour = (colour, 255) in
+  let clear = (rgb 0 0 0, 0) in
+  let near x y cx cy rx ry =
+    let dx = (x -. cx) /. rx and dy = (y -. cy) /. ry in
+    (dx *. dx) +. (dy *. dy) <= 1.0
+  in
+  let horn_height =
+    match b.horns with Nub -> 2.4 | Long | One -> 4.0 | Ram -> 3.2
+  in
+  let horn_centres = match b.horns with One -> [ 6.8 ] | Nub | Long | Ram -> [ 6.8; 17.2 ] in
+  let dish =
+    match e.base with
+    | No_dish -> None
+    | Dish material -> Some (paint_colour b (Dish_metal material))
+  in
+  image_init n (fun ~x ~y ->
+      let edge = float_of_int n in
+      let x = (float_of_int x +. 0.5) *. 24.0 /. edge in
+      let y = (float_of_int y +. 0.5) *. 24.0 /. edge -. (p.bob *. 0.35) in
+      let body =
+        x >= 5.0 && x < 19.0 && y >= 9.0 && y < 20.5
+        && (y >= 10.0 && y < 19.5 || x >= 6.0 && x < 18.0)
+      in
+      let eye cx = near x y cx 13.9 1.5 (if p.blink then 0.35 else 1.6) in
+      let glint cx = near x y (cx -. 0.4) 13.4 0.45 0.45 in
+      let mouth =
+        match b.mouth with
+        | O -> near x y 12.0 17.5 1.0 1.25
+        | Flat -> Float.abs (x -. 12.0) < 1.8 && Float.abs (y -. 17.5) < 0.45
+        | W | Smile | Fang ->
+            Float.abs (x -. 12.0) < 2.2
+            && Float.abs (y -. (18.0 -. (0.42 *. Float.abs (x -. 12.0)))) < 0.5
+      in
+      let horn =
+        List.exists
+          (fun cx ->
+            y >= 9.5 -. horn_height && y < 10.0
+            && Float.abs (x -. cx) < 0.25 +. ((y -. (9.5 -. horn_height)) *. 0.36))
+          horn_centres
+      in
+      let flame_x = x -. (p.flicker *. 0.4) in
+      let flame =
+        near flame_x y 12.0 5.5 2.5 (3.0 +. (p.flicker *. 0.25))
+        || (y >= 0.0 && y < 5.0
+            && Float.abs (flame_x -. 12.0) < 0.8 +. (y *. 0.35))
+      in
+      if body then
+        if eye 9.0 || eye 15.0 then
+          painted
+            (if not p.blink && (glint 9.0 || glint 15.0)
+             then colours.glint_rgb else colours.eye_rgb)
+        else if mouth then painted colours.mouth_rgb
+        else if b.blush && (near x y 7.3 16.3 1.0 0.75 || near x y 16.7 16.3 1.0 0.75)
+        then painted colours.blush_rgb
+        else if x < 5.8 || x >= 18.2 || y < 9.7 || y >= 19.8
+        then painted colours.ink_rgb
+        else if (x < 7.2 && y < 12.0) || (x > 16.8 && y < 11.0)
+        then painted colours.drip_rgb
+        else painted (if x > 15.5 then shade colours.wax_rgb else colours.wax_rgb)
+      else if horn then painted colours.horn_rgb
+      else if flame then
+        painted
+          (if near flame_x y 12.0 5.9 1.05 1.7
+           then colours.flame_core_rgb else colours.flame_rgb)
+      else if x >= 11.5 && x < 12.5 && y >= 8.0 && y < 9.6
+      then painted colours.ink_rgb
+      else
+        match dish with
+        | Some metal when x >= 4.2 && x < 19.8 && y >= 20.3 && y < 22.0 ->
+            painted metal
+        | Some _ | None -> clear)
+
 let pixel img ~x ~y =
   let x = max 0 (min (img.edge - 1) x) and y = max 0 (min (img.edge - 1) y) in
   let k = ((y * img.edge) + x) * 4 in

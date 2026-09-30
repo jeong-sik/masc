@@ -133,6 +133,14 @@ let configuration_and_ports () =
   check bool "Enter opens the exact broken installation" true
     (issue.focus=UI.Configurations && issue.presentation=UI.Technical
      && issue.configuration_cursor=1);
+  let raw_issue = UI.lines ~width:120
+    {overview with instance_cursor=1; focus=UI.Instances; presentation=UI.Technical} in
+  check bool "raw detail follows the selected unresolved installation" true
+    (List.exists
+      (String.starts_with ~prefix:"> unresolved installation · /config/lane-addons/broken.toml")
+      raw_issue
+     && not (List.exists (fun line -> String.ends_with ~suffix:"custom.toml" line)
+       raw_issue));
   check bool "Installation detail retains the selected source and a return path" true
     (List.exists (String.starts_with ~prefix:"Installation details · broken.toml")
        (UI.lines ~width:120 issue)
@@ -409,7 +417,8 @@ let context_flow_uses_declared_connections () =
       "installation_id":"project-observer","output_id":"events","selection":"latest_completed"}]}|}} in
   let declaration installation_id instance_id : UI.declaration =
     {source_path="/config/" ^ installation_id ^ ".toml";installation_id=Some installation_id;
-      instance_id=Some instance_id;desired=Some "1";applied=Some "1";issues=[]} in
+      instance_id=Some instance_id;desired=Some "1";applied=Some "1";issues=[];
+      origin=UI.Parsed_declaration} in
   let configuration : UI.configuration = {directory="/config";complete=true;
     declarations=[declaration "project-observer" producer.id;declaration "project-metric" consumer.id]} in
   let snapshot : UI.snapshot = {instances=[producer;consumer];configuration=Some configuration;
@@ -622,7 +631,7 @@ let refresh_preserves_operator_target () =
     display=Masc.Lane_addon_presentation.empty} in
   let declaration id : UI.declaration = {source_path=id ^ ".toml";
     installation_id=Some id;desired=Some "1";applied=Some "1";
-    instance_id=Some id;issues=[]} in
+    instance_id=Some id;issues=[];origin=UI.Parsed_declaration} in
   let snapshot : UI.snapshot = {instances=[worker "worker";worker "other"];
     output={rows=[row "chosen";row "other"];coverage=[]};complete=Some true;
     configuration=Some {directory="/config";complete=true;
@@ -688,14 +697,18 @@ let detail_keeps_installation_ownership () =
     action_schema=None;binding_schema=None;display=Masc.Lane_addon_presentation.empty} in
   let declaration id : UI.declaration = {source_path="/config/" ^ id ^ ".toml";
     installation_id=Some id;desired=Some "1";applied=Some "1";
-    instance_id=Some id;issues=[]} in
+    instance_id=Some id;issues=[];origin=UI.Parsed_declaration} in
   let row owner lane observed_at : UI.Row.row = {id=owner ^ "-" ^ lane;
     lane_id=owner ^ "/" ^ lane;kind=UI.Row.Value;title=owner ^ " " ^ lane;
-    observed_at;subject_id="project";clock=None;actor=None;
+    observed_at;subject_id=(if owner="b" && lane="last" then "guest" else "project");
+    clock=(if owner="b" && lane="last" then Some {domain="emulator";value="17"} else None);
+    actor=(if owner="b" && lane="last" then Some "operator" else None);
     fields=[];evidence=[];related_ids=[]} in
   let snapshot : UI.snapshot = {instances=[worker "a";worker "b"];
     output={rows=[row "a" "first" 1.;row "b" "first" 2.;
-      row "a" "last" 3.;row "b" "last" 4.];coverage=[]};complete=Some true;
+      row "a" "last" 3.;row "b" "last" 4.];
+      coverage=[{source_id="source-b";incarnation="inc-17";cursor=Some "offset-42";
+        complete=false;detail=Some "partial read"}]};complete=Some false;
     configuration=Some {directory="/config";complete=true;
       declarations=[declaration "a";declaration "b"]}} in
   let overview = {UI.initial with snapshot=Some snapshot;focus=UI.Instances;
@@ -711,6 +724,18 @@ let detail_keeps_installation_ownership () =
   let selected_id view = Option.map (fun (r : UI.Row.row) -> r.id) (UI.selected_row view) in
   check (option string) "Records starts at displayed installation" (Some "b-first") (selected_id detail);
   let last = UI.move_record {detail with focus=UI.Rows} 1 in
+  let raw = String.concat "" (UI.lines ~width:80 {last with presentation=UI.Technical}) in
+  let contains text =
+    let n = String.length text in
+    let rec at i = i+n <= String.length raw
+      && (String.sub raw i n=text || at (i+1)) in
+    at 0 in
+  List.iter (fun text -> check bool "selected empty-field record keeps its provenance" true
+    (contains text))
+    ["Row b-last";"Observed 1970-01-01 00:00:04.000 UTC";"Subject guest";
+     "Actor operator";"Clock emulator · 17";"Snapshot partial";
+     "source-b · partial · incarnation inc-17 · cursor offset-42 · partial read"];
+  check bool "raw detail excludes another installation's record" false (contains "Row a-last");
   check (option string) "Records next skips another installation's intervening row"
     (Some "b-last") (selected_id last);
   check (option string) "Records next stays within displayed installation"

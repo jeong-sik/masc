@@ -1,4 +1,4 @@
-"""The working Overview from the first frame; the candle belongs to /about.
+"""The working Dashboard from the first frame; the candle belongs to /about.
 Exercise real PTYs with mosaic, Kitty graphics and NO_COLOR terminals.
 """
 from __future__ import annotations
@@ -41,7 +41,7 @@ CHAT_TITLE = "Keepers ▸ alpha ▸ chat".encode()
 # Colour escapes the renderer writes for a foreground: 38;5 on a 256-colour
 # terminal, 38;2 on a truecolour one.
 FOREGROUND_ESCAPE = b"\x1b[38;"
-UNREAD_BRIEFING = b"Overview briefing not read yet"
+UNREAD_BRIEFING = b"Connecting to workspace"
 SCENARIO_COLUMNS = 100
 # The fewest rows a drawn candle has: the smallest mosaic edge the renderer
 # takes is 16 pixels, two to a row.
@@ -167,10 +167,12 @@ def mascot_transfers(wire: bytes) -> list[tuple[dict[bytes, bytes], bytes]]:
 
 def assert_working_overview(output: bytearray) -> bytes:
     screen = h.screen_text(bytes(output))
-    for label in (b"MASC Overview", b"Goals", b"Attention", b"Tasks"):
-        assert label in screen, f"working Overview omitted {label!r}: {screen!r}"
+    for label in (b"MASC Dashboard", b"Goals", b"Work", b"Usage", b"Needs you"):
+        assert label in screen, f"working Dashboard omitted {label!r}: {screen!r}"
     assert STARTUP_CAPTION not in screen, "startup branding replaced the work"
-    assert not HALF_BLOCK.search(bytes(output)), "startup drew a mosaic candle"
+    # Work's sparkline uses lower blocks, including U+2584. The candle's
+    # mosaic also paints upper half blocks, which the chart never emits.
+    assert b"\xe2\x96\x80" not in output, "startup drew a mosaic candle"
     assert not MASCOT_TRANSFER_HEAD.search(bytes(output)), "startup placed a mascot image"
     return screen
 
@@ -205,7 +207,7 @@ def startup_overview(binary: str, *, no_color: bool = False,
             assert b"Connecting to workspace" in screen, repr(screen)
             assert b"press 'r'" not in screen and b"press r" not in screen, \
                 "pending read already asks for a retry"
-            assert b"Attention (0)" not in screen, "unread attention was counted as empty"
+            assert b"0 attention items" not in screen, "unread attention was counted as empty"
             frame_evidence(binary, mode + ("-resized-80x24-loading" if narrow else "-loading"), output)
             start = len(output)
             gate.release.set()
@@ -222,7 +224,7 @@ def startup_overview(binary: str, *, no_color: bool = False,
         finally:
             gate.release.set()
 
-    h.run_terminal_scenario(binary, description="startup keeps the working Overview: " + mode,
+    h.run_terminal_scenario(binary, description="startup keeps the working Dashboard: " + mode,
                             interact=interact, http_fixtures=fixtures,
                             terminal_cols=80 if narrow else SCENARIO_COLUMNS,
                             extra_env={"NO_COLOR": "1"} if no_color else None,
@@ -239,16 +241,16 @@ def startup_keys_work(binary: str) -> None:
         try:
             wait_for_whole_frame(process, fd, output, UNREAD_BRIEFING, start=0, timeout=5.0)
             assert_working_overview(output)
-            h.send_and_wait(process, fd, output, b"2", b"MASC Keepers")
-            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Overview")
-            assert h.drain_until_quiet(process, fd, output), "Overview kept animating"
+            h.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
+            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
+            assert h.drain_until_quiet(process, fd, output), "Dashboard kept animating"
             assert_working_overview(output)
             gate.release.set()
             os.write(fd, b"q")
         finally:
             gate.release.set()
 
-    h.run_terminal_scenario(binary, description="Overview keys work during the first read",
+    h.run_terminal_scenario(binary, description="Dashboard keys work during the first read",
                             interact=interact, http_fixtures=fixtures)
 
 
@@ -257,7 +259,7 @@ def about_screen(binary: str, *, no_color: bool) -> None:
     fixtures["/api/v1/keepers/alpha/chat/history"] = (200, [])
 
     def interact(process, fd, _slave, output, _base):
-        h.send_and_wait(process, fd, output, b"2", b"MASC Keepers")
+        h.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
         h.select_keeper_row(process, fd, output, b"alpha")
         h.send_and_wait(process, fd, output, b"c", CHAT_TITLE)
         start = len(output)
@@ -278,7 +280,7 @@ def about_screen(binary: str, *, no_color: bool) -> None:
         assert h.drain_until_quiet(process, fd, output), "the screen kept moving after /about closed"
         assert not candle_rows(output), "the candle stayed after /about closed"
         h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Overview")
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
         os.write(fd, b"q")
 
     h.run_terminal_scenario(
@@ -298,9 +300,9 @@ def about_screen_with_graphics(binary: str) -> None:
         # holds none until the roster is read: an i that arrives first has
         # nobody to write to and is dropped. Choose alpha first, as
         # about_owns_the_keys does.
-        h.send_and_wait(process, fd, output, b"2", b"MASC Keepers")
+        h.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
         h.select_keeper_row(process, fd, output, b"alpha")
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Overview")
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
         h.send_and_wait(process, fd, output, b"i", h.COMPOSER_FOCUSED)
         start = len(output)
         h.send_and_wait(process, fd, output, b"/about\r", ABOUT_CAPTION)
@@ -336,7 +338,7 @@ def about_screen_with_graphics(binary: str) -> None:
         assert not candle_rows(output), "real pixels were drawn as a mosaic as well"
         # Esc closes /about and takes the picture down with it.
         start = len(output)
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Overview")
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
         h.wait_for_output(process, fd, output, MASCOT_DELETE, start=start, timeout=3.0)
         assert h.drain_until_quiet(process, fd, output), "the screen kept moving after /about closed"
         after = bytes(output[output.find(MASCOT_DELETE, start):])
@@ -355,9 +357,9 @@ def about_owns_the_keys(binary: str) -> None:
 
     def interact(process, fd, slave, output, _base):
         # The composer writes to the keeper the roster cursor holds.
-        h.send_and_wait(process, fd, output, b"2", b"MASC Keepers")
+        h.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
         h.select_keeper_row(process, fd, output, b"alpha")
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Overview")
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
         h.send_and_wait(process, fd, output, b"i", h.COMPOSER_FOCUSED)
         h.send_and_wait(process, fd, output, b"/about\r", ABOUT_CAPTION)
         # i would focus the composer, the text would be its draft and Enter
@@ -373,7 +375,7 @@ def about_owns_the_keys(binary: str) -> None:
         screen = h.screen_text(bytes(output))
         assert ABOUT_CAPTION in screen, "a key typed under /about closed it: " + repr(screen)
         assert SWALLOWED_TEXT not in screen, "text typed under /about reached the composer"
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Overview")
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
         assert h.drain_until_quiet(process, fd, output), "the screen kept moving after /about closed"
         screen = h.screen_text(bytes(output))
         assert ABOUT_CAPTION not in screen, "Esc left /about open"
@@ -410,9 +412,9 @@ def about_turns_the_candle(binary: str) -> None:
         raise AssertionError(f"no {what} candle was sent after the key")
 
     def interact(process, fd, _slave, output, _base):
-        h.send_and_wait(process, fd, output, b"2", b"MASC Keepers")
+        h.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
         h.select_keeper_row(process, fd, output, b"alpha")
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Overview")
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
         h.send_and_wait(process, fd, output, b"i", h.COMPOSER_FOCUSED)
         start = len(output)
         h.send_and_wait(process, fd, output, b"/about\r", ABOUT_CAPTION)
@@ -430,7 +432,7 @@ def about_turns_the_candle(binary: str) -> None:
         start = len(output)
         h.write_all(fd, output, b"c")
         transfer_after(process, fd, output, start, is_painted, "painted")
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Overview")
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
         os.write(fd, b"q")
 
     h.run_terminal_scenario(

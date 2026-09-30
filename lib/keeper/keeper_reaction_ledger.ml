@@ -1484,16 +1484,6 @@ let event_queue_reaction_seen_for_source_result
     | Ok () -> Ok !reaction_seen
 ;;
 
-let event_queue_turn_started_seen_for_source_result =
-  event_queue_reaction_seen_for_source_result
-    ~reaction_matches:(fun reaction_kind transition_receipt ->
-      match reaction_kind, transition_receipt with
-      | Turn_started, None -> true
-      | (Event_queue_ack | Event_queue_cancelled), _
-      | Turn_finished, _
-      | Turn_started, Some _ -> false)
-;;
-
 let event_queue_delivery_seen_for_source_result =
   event_queue_reaction_seen_for_source_result
     ~reaction_matches:(fun reaction_kind transition_receipt ->

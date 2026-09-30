@@ -19,9 +19,13 @@ let test_play_invite_responses_preserve_recovery_facts () =
     (Result.is_error (Tui_decode.decode_play_invite_issued
       (json {|{"name":"old","expires_at":"tomorrow"}|})));
   Alcotest.(check bool) "authoritative absence" true
-    (Tui_decode.play_invite_absent_body {|{"error":"no_such_invite"}|});
+    (Tui_decode.play_invite_absent_body
+       {|{"error":"no invite is named old","code":"no_such_invite"}|});
   Alcotest.(check bool) "another refusal is not absence" false
-    (Tui_decode.play_invite_absent_body {|{"error":"not_an_invite"}|})
+    (Tui_decode.play_invite_absent_body
+       {|{"error":"old is a worker credential, not an invite","code":"not_an_invite"}|});
+  Alcotest.(check bool) "a sentence is never read as the code" false
+    (Tui_decode.play_invite_absent_body {|{"error":"no_such_invite"}|})
 
 (* The saved-app reply's scope count picks the TUI notice: 0 says the
    service's own list will be asked for. A reply without [scopes] used to
@@ -12091,20 +12095,39 @@ let test_tool_approval_mode_unknown_word_fails () =
          in
          contains "alpha" && contains "manual")
 
+let test_keeper_usage_cache_failures_remain_visible () =
+  let decode text = Tui_decode.decode_keeper_usage_window (Yojson.Safe.from_string text) in
+  (match decode {|{"state":"loading","cache":{"state":"warming","last_error":"EACCES"}}|} with
+   | Error reason -> Alcotest.(check bool) "initial failure keeps its cause" true
+       (String_util.contains_substring reason "EACCES")
+   | Ok _ -> Alcotest.fail "failed computation became collecting");
+  (match decode {|{"generated_at":1,"window_minutes":1440,"keepers":[],"cache":{"state":"stale_refreshing","age_s":90,"last_error":"EIO"}}|} with
+   | Ok (Keeper_usage_window { kuw_freshness = Keeper_usage_stale { age_s; last_error }; _ }) ->
+       Alcotest.(check (float 0.0)) "stale reading keeps its age" 90. age_s;
+       Alcotest.(check (option string)) "refresh failure keeps its cause" (Some "EIO") last_error
+   | Ok _ -> Alcotest.fail "failed refresh became fresh"
+   | Error reason -> Alcotest.fail reason);
+  Alcotest.(check bool) "unknown cache is rejected" true
+    (Result.is_error (decode {|{"generated_at":1,"window_minutes":1440,"keepers":[],"cache":{"state":"future"}}|}))
+
 let test_play_revoke_failure_detail () =
   Alcotest.(check string) "500 preserves actual controller failure"
     "controller busy (HTTP 500: controller release failed)"
     (Tui_decode.play_revoke_http_error ~status_code:500
-      ~body:{|{"error":"release_failed","name":"guest1","released_controller":false,"release_error":"controller busy"}|});
-  Alcotest.(check string) "other failures retain their own reason" "HTTP 503: keepers_unreadable"
-    (Tui_decode.play_revoke_http_error ~status_code:503 ~body:{|{"error":"keepers_unreadable"}|});
+      ~body:{|{"error":"guest1 holds the DOS controller and it could not be released: controller busy","code":"release_failed","name":"guest1","released_controller":false,"release_error":"controller busy"}|});
+  Alcotest.(check string) "other failures show the server's sentence, not its code"
+    "HTTP 503: no keepers dir"
+    (Tui_decode.play_revoke_http_error ~status_code:503
+       ~body:{|{"error":"no keepers dir","code":"keepers_unreadable"}|});
   List.iter (fun body ->
     Alcotest.(check string) "malformed release details use ordinary HTTP error projection"
       (Tui_decode.http_status_error ~status_code:500 ~body)
       (Tui_decode.play_revoke_http_error ~status_code:500 ~body))
-    [{|{"error":"release_failed","released_controller":false,"release_error":42}|};
-     {|{"error":"release_failed","released_controller":true,"release_error":"busy"}|};
-     {|{"error":"release_failed","released_controller":false}|}; "not JSON"; "[]"; "null"; "42"]
+    [{|{"error":"x","code":"release_failed","released_controller":false,"release_error":42}|};
+     {|{"error":"x","code":"release_failed","released_controller":true,"release_error":"busy"}|};
+     {|{"error":"x","code":"release_failed","released_controller":false}|};
+     {|{"error":"release_failed","released_controller":false,"release_error":"busy"}|};
+     "not JSON"; "[]"; "null"; "42"]
 
 let () =
   Alcotest.run "tui_decode" [
@@ -12921,6 +12944,9 @@ let () =
       ; Alcotest.test_case "reads as of its time unless the runner is ok" `Quick
           test_schedule_hold_reads_as_of_its_time_unless_the_runner_is_ok
       ] );
+    ( "keeper usage cache"
+    , [ Alcotest.test_case "compute and refresh failures remain visible" `Quick
+          test_keeper_usage_cache_failures_remain_visible ] );
     ( "play invites"
     , [ Alcotest.test_case "preserves partial revoke and rejects unreadable links"
           `Quick test_play_invite_responses_preserve_recovery_facts ] );

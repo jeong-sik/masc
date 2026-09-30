@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import roll_ci
 
@@ -185,6 +186,31 @@ class RollScopeTests(unittest.TestCase):
         )
 
 
+class SelectorContractTests(unittest.TestCase):
+    def test_member_named_suite_uses_production_selector(self) -> None:
+        selection = roll_ci.select_sources(ROOT, [], "Test-suites: test_keeper_toml")
+        self.assertIn("test/test_keeper_toml.ml", selection["sources"])
+        with self.assertRaises(subprocess.CalledProcessError):
+            roll_ci.select_sources(ROOT, [], "Test-suites: test_roll_nonexistent")
+
+    def test_shared_parser_binds_ordered_members(self) -> None:
+        body = (
+            "<!-- masc-roll-input-v1\n"
+            + json.dumps(
+                {
+                    "base": "a" * 40,
+                    "members": [{"pr": 1, "head": "b" * 40, "review_base": "a" * 40}],
+                }
+            )
+            + "\n-->"
+        )
+        value = roll_ci.shared_input(body)
+        self.assertEqual(value["members"][0]["pr"], 1)
+        self.assertTrue(value["digest"].startswith("sha256:"))
+        with self.assertRaises(ValueError):
+            roll_ci.shared_input(body + "\n" + body)
+
+
 class RunnerReceiptTests(unittest.TestCase):
     def test_real_runner_records_only_successful_executables(self) -> None:
         with tempfile.TemporaryDirectory() as d:
@@ -210,6 +236,24 @@ for target in sys.argv[2:]:
     p.chmod(0o755)
 """)
             dune.chmod(0o755)
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "-c",
+                    "user.name=test",
+                    "-c",
+                    "user.email=test@example.invalid",
+                    "commit",
+                    "-qm",
+                    "runner fixture",
+                ],
+                cwd=root,
+                check=True,
+            )
+            checkout = roll_ci.git(root, "rev-parse", "HEAD")
+            tree = roll_ci.git(root, "rev-parse", "HEAD^{tree}")
             plan = root / "selection.json"
             executed = root / "executed.txt"
             cases: list[tuple[list[str], int, list[str], str]] = [
@@ -262,6 +306,32 @@ for target in sys.argv[2:]:
                         {"required_suites": sources}, actual, result.returncode
                     )
                     self.assertEqual(receipt["result"], expected)
+                    plan.write_text(
+                        json.dumps(
+                            {
+                                "checkout_commit": checkout,
+                                "roll_tree": tree,
+                                "required_suites": sources,
+                                "direct_sources": [],
+                            }
+                        )
+                    )
+                    output = root / "roll-evidence.json"
+                    with (
+                        patch.object(roll_ci, "ROOT", root),
+                        patch.dict(
+                            os.environ,
+                            {
+                                "PATH": str(bindir) + ":" + os.environ["PATH"],
+                            },
+                        ),
+                    ):
+                        result_code = roll_ci.run(plan, output, 30)
+                    saved = json.loads(output.read_text())
+                    self.assertEqual(result_code, 0 if expected == "success" else 1)
+                    self.assertEqual(saved["result"], expected)
+                    self.assertEqual(saved["runner_exit"], status)
+                    self.assertEqual(saved["executed_suites"], successful)
 
 
 if __name__ == "__main__":

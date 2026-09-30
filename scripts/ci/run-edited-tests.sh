@@ -575,7 +575,10 @@ STANZAS
     && [ -z "${stanza_suites}" ] && [ -z "${preflight_script_changed}" ] \
     && [ -z "${ocaml_sources_changed}" ]; then
     echo "no test source, config asset or named suite in this pull request"
-      return 1
+    # Keep the empty path selection so ROLL can still add this member's
+    # explicit Test-suites declaration and other members' requirements.
+    [ "${select_only}" = false ] || return 0
+    return 1
   fi
 
   count=$(printf '%s\n' "${sources}" | wc -l | tr -d ' ')

@@ -13,7 +13,8 @@ type judged =
       (** The configured destination, exact request-body digest, and the model
           the System One response says answered. *)
   ; confidence : float
-      (** Validated 0..1 confidence retained for observation, never routing. *)
+      (** Validated 0..1 confidence. The Board attention flow sends a decision
+          below its settle floor to the LLM lane. *)
   }
 
 val judge_candidate :

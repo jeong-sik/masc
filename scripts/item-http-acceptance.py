@@ -191,7 +191,7 @@ with (root / 'server.log').open('wb') as log:
             subprocess.run(['node', str(browser_script)], input=json.dumps({
                 'origin': origin, 'token': token, 'output': str(root),
                 'sourceSha': source, 'keeper': 'item-runtime-probe', 'ownedItem': item,
-            }), text=True, check=True, cwd=browser_script.parent)
+            }), text=True, check=True, cwd=browser_script.parent, env=env)
         restored = tool('keeper_candle_equip', {'slot': 'face', 'item': 'default'})
         assert restored['equipment'] == starting, restored
         status, restored_png = request('/api/v1/keepers/item-runtime-probe/portrait.png?size=96')

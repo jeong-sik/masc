@@ -90,13 +90,16 @@ let sync_bootable_keeper_credentials (state : Mcp_server.server_state) =
   in
   let synced_count, failed =
     List.fold_left
-      (fun (synced_count, failed) keeper_name ->
-        match Auth.ensure_keeper_credential base_path ~agent_name:keeper_name with
+      (fun (synced_count, failed) (keeper_name, result) ->
+        match result with
         | Ok _ -> (synced_count + 1, failed)
         | Error err ->
             ( synced_count,
               (keeper_name, Masc_domain.masc_error_to_string err) :: failed ))
-      (0, []) keeper_names
+      (0, [])
+      (match Auth.ensure_keeper_credentials base_path ~agent_names:keeper_names with
+       | Ok results -> results
+       | Error error -> List.map (fun name -> name, Error error) keeper_names)
   in
   if synced_count > 0 then
     Log.Server.info

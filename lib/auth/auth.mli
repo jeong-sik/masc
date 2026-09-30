@@ -337,6 +337,12 @@ val verify_internal_keeper_token :
 val ensure_internal_keeper_token :
   string -> string
 
+val ensure_keeper_credentials :
+  string -> agent_names:string list ->
+  ((string * (string * agent_credential, masc_error) result) list, masc_error) result
+(** Batch startup sync under one admitted snapshot. A publication failure stops
+    later writes rather than trusting an index with uncertain store effects. *)
+
 val ensure_keeper_credential :
   string -> agent_name:string ->
   (string * agent_credential, masc_error) result

@@ -424,25 +424,21 @@ let save_credential_in_transaction (Credential_transaction config) (cred : agent
   let json_str = Yojson.Safe.pretty_to_string json in
   let stub_file = credential_file config cred.agent_name in
   let previous_target = load_redirect_target config stub_file in
-  (match cred.id with
-   | Some cid ->
-     let uuid_file = credential_uuid_file config cid in
-     (match previous_target with
-      | Some old_file when old_file <> uuid_file -> remove_file_if_exists old_file
-      | _ -> ());
-     save_private_text_file uuid_file json_str;
-     let stub =
-       `Assoc [ "redirect_to", `String (Credential_id.to_string cid ^ ".json") ]
-     in
-     save_private_text_file stub_file (Yojson.Safe.pretty_to_string stub)
-   | None ->
-     Option.iter remove_file_if_exists previous_target;
-     save_private_text_file stub_file json_str);
-  (* Bypass forward-reference into the cache module below.  Stored as
-     a ref so the cache module can register its invalidator after both
-     definitions are visible; see [register_credential_cache_invalidator]
-     near [credential_token_index]. *)
-  !credential_cache_invalidator_ref config
+  Fun.protect ~finally:(fun () -> !credential_cache_invalidator_ref config) (fun () ->
+    match cred.id with
+    | Some cid ->
+      let uuid_file = credential_uuid_file config cid in
+      save_private_text_file uuid_file json_str;
+      let stub =
+        `Assoc [ "redirect_to", `String (Credential_id.to_string cid ^ ".json") ] in
+      save_private_text_file stub_file (Yojson.Safe.pretty_to_string stub);
+      (match previous_target with
+       | Some old_file when old_file <> uuid_file -> remove_file_if_exists old_file
+       | _ -> ())
+    | None ->
+      save_private_text_file stub_file json_str;
+      Option.iter remove_file_if_exists previous_target)
+
 ;;
 
 let save_credential config cred =
@@ -763,7 +759,11 @@ let credential_owned_uuid_target config name stored (credential : agent_credenti
   let refused detail = Error (System (System_error.ValidationError
       (Printf.sprintf "credential storage authority for %s: %s" name detail))) in
   let uuid_path id =
-    match redirect_target_file config (Credential_id.to_string id ^ ".json") with
+    let spelling = Credential_id.to_string id in
+    if spelling = "" || not (String.for_all
+        (function 'a' .. 'z' | '0' .. '9' | '-' -> true | _ -> false) spelling)
+    then refused "credential UUID must use canonical lowercase ASCII letters, digits and hyphens"
+    else match redirect_target_file config (spelling ^ ".json") with
     | Some target when String.equal target (credential_file config name) ->
       refused "UUID payload and named credential would share a path"
     | Some target -> Ok target
@@ -782,7 +782,13 @@ let credential_owned_uuid_target config name stored (credential : agent_credenti
     else
       let* target_record = read_stored_credential config name target in
       (match target_record with
-       | Stored_credential current when current = credential ->
+       | Stored_credential current
+         when String.equal current.agent_name credential.agent_name
+           && Option.equal Credential_id.equal current.id credential.id
+           && Option.equal Agent_id.equal current.agent_id credential.agent_id ->
+         (* The named direct record may still be old after a UUID payload
+            was published but replacing its stub failed. It is the same
+            owner, so a later admitted publisher can finish or replace it. *)
          Ok (Some target)
        | Stored_credential _ | Stored_redirect _ | Unresolved_credential ->
          refused "embedded UUID resolves to another credential")
@@ -882,16 +888,43 @@ let observe_credential_publication config (expected : agent_credential) =
 
 let publish_file_backed_credential_in_transaction
     ((Credential_transaction config) as transaction) credential ~raw_token =
-  let written = Fun.protect
-      ~finally:(fun () -> !credential_cache_invalidator_ref config)
-      (fun () -> credential_read_result (fun () ->
-        persist_raw_token config ~agent_name:credential.agent_name raw_token;
-        save_credential_in_transaction transaction credential)) in
-  match written with
-  | Ok () -> Ok ()
-  | Error error ->
+  let ( let* ) = Result.bind in
+  let saved_bytes path =
+    let* present = credential_path_exists path in
+    if present then read_regular_credential_file path |> Result.map Option.some
+    else Ok None in
+  let raw_path = raw_token_file config credential.agent_name in
+  let named_path = credential_file config credential.agent_name in
+  let failure error =
     let raw_token, credential = observe_credential_publication config credential in
-    Error { error; raw_token; credential }
+    Error { error; raw_token; credential } in
+  Fun.protect ~finally:(fun () -> !credential_cache_invalidator_ref config) (fun () ->
+    match (let* raw = saved_bytes raw_path in
+           let* named = saved_bytes named_path in Ok (raw, named)) with
+    | Error error -> failure error
+    | Ok (previous_raw, previous_named) ->
+      match credential_read_result (fun () ->
+        persist_raw_token config ~agent_name:credential.agent_name raw_token;
+        save_credential_in_transaction transaction credential) with
+      | Ok () -> Ok ()
+      | Error error ->
+        let _, published = observe_credential_publication config credential in
+        (* A redirect can keep identical bytes while its UUID payload advances.
+           Never restore the old raw token when the new credential is current. *)
+        match published, saved_bytes named_path with
+        | Not_published, Ok current_named when current_named = previous_named ->
+          (match credential_read_result (fun () ->
+             match previous_raw with
+             | Some raw -> save_private_text_file raw_path raw
+             | None -> remove_file_if_exists raw_path) with
+           | Ok () -> failure error
+           | Error restore_error -> failure (System (System_error.IoError
+               (Printf.sprintf "credential publication failed: %s; raw token restoration failed: %s"
+                  (masc_error_to_string error) (masc_error_to_string restore_error)))))
+        | _, Error observation_error -> failure (System (System_error.IoError
+            (Printf.sprintf "credential publication failed: %s; named publication is unreadable: %s"
+               (masc_error_to_string error) (masc_error_to_string observation_error))))
+        | Published, Ok _ | Publication_unreadable _, Ok _ | Not_published, Ok _ -> failure error)
 ;;
 
 let file_backed_publication_error failure =

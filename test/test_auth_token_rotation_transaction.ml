@@ -215,13 +215,13 @@ let test_credential_failure_after_raw_publication () =
   Unix.chmod directory 0o500;
   Fun.protect ~finally:(fun () -> Unix.chmod directory 0o700) (fun () ->
     match auth_ok (rotate base_path) with
-    | [ { Auth.rotated_agents = [ "aaa", Error { raw_token = Auth.Published;
-        credential = Auth.Not_published; _ }; "bbb", Error { raw_token = Auth.Published;
+    | [ { Auth.rotated_agents = [ "aaa", Error { raw_token = Auth.Not_published;
+        credential = Auth.Not_published; _ }; "bbb", Error { raw_token = Auth.Not_published;
         credential = Auth.Not_published; _ } ]; _ } ] -> ()
-    | _ -> fail "second-stage publication failure must report the already changed raw sidecar");
+    | _ -> fail "second-stage publication failure must report the restored raw sidecar");
   check (list string) "credential bytes remained old" before
     (List.map (fun name -> read (Auth.credential_file base_path name)) [ "aaa"; "bbb" ]);
-  List.iter (fun name -> check bool "failed rotation does not claim a recoverable bearer" false
+  List.iter (fun name -> check bool "failed rotation preserves the old recoverable bearer" true
     (String.equal (Auth.sha256_hash (current_raw base_path name)) (credential base_path name).token))
     [ "aaa"; "bbb" ]
 
@@ -332,10 +332,75 @@ let test_rotation_before_keeper () =
   check string "keeper reuses the current rotated token" token (current_raw base_path "aaa");
   List.iter (check_recoverable base_path) [ "aaa"; "bbb" ]
 
+let test_same_owner_partial_uuid_can_retry () =
+  with_workspace @@ fun base_path ->
+  let first, _ = seed_pair base_path in
+  let first = { first with id = Some (Masc_domain.Credential_id.of_string "retry-uuid") } in
+  Auth.save_private_text_file (Auth.credential_file base_path "aaa")
+    (Masc_domain.agent_credential_to_yojson first |> Yojson.Safe.to_string);
+  let attempted = { first with token = Auth.sha256_hash "interrupted-rotation" } in
+  Auth.save_private_text_file (Auth.credential_file base_path "retry-uuid")
+    (Masc_domain.agent_credential_to_yojson attempted |> Yojson.Safe.to_string);
+  check_rotated (rotate base_path);
+  List.iter (check_recoverable base_path) [ "aaa"; "bbb" ]
+
+let test_noncanonical_uuid_is_refused () =
+  with_workspace @@ fun base_path ->
+  let first, _ = seed_pair base_path in
+  Auth.save_private_text_file (Auth.credential_file base_path "aaa")
+    (Masc_domain.agent_credential_to_yojson
+       { first with id = Some (Masc_domain.Credential_id.of_string "AAA") } |> Yojson.Safe.to_string);
+  check_refused_before_writes base_path (snapshot base_path)
+
+let test_failed_supplied_token_preserves_previous_raw () =
+  with_workspace @@ fun base_path ->
+  let original = auth_ok (Auth.save_file_backed_raw_token_credential base_path
+      ~agent_name:"operator" ~role:Masc_domain.Admin ~raw_token:"recoverable-old-token") in
+  let id = Masc_domain.Credential_id.generate () in
+  Auth.save_credential base_path { original with id = Some id };
+  let uuid_file = Auth.credential_uuid_file base_path id in
+  let previous_uuid = read uuid_file in
+  let directory = Filename.dirname (Auth.credential_file base_path "operator") in
+  Unix.chmod directory 0o500;
+  Fun.protect ~finally:(fun () -> Unix.chmod directory 0o700) (fun () ->
+    check bool "credential replacement fails" true
+      (Result.is_error (Auth.save_file_backed_raw_token_credential base_path
+        ~agent_name:"operator" ~role:Masc_domain.Admin ~raw_token:"unpublished-new-token")));
+  check string "previous UUID authority survives failed named replacement" previous_uuid (read uuid_file);
+  check string "old recoverable bearer survives" "recoverable-old-token" (current_raw base_path "operator");
+  check_recoverable base_path "operator"
+
+let test_failed_keeper_remint_preserves_previous_pair () =
+  with_workspace @@ fun base_path ->
+  let _pair = seed_pair base_path in
+  let before = snapshot base_path in
+  let directory = Filename.dirname (Auth.credential_file base_path "aaa") in
+  Unix.chmod directory 0o500;
+  Fun.protect ~finally:(fun () -> Unix.chmod directory 0o700) (fun () ->
+    check bool "colliding Keeper remint refuses failed publication" true
+      (Result.is_error (Auth.ensure_keeper_credential base_path ~agent_name:"aaa")));
+  check bool "failed Keeper remint restores both old pairs" true (snapshot base_path = before)
+
+let test_keeper_batch_updates_its_admitted_index () =
+  with_workspace @@ fun base_path ->
+  let _pair = seed_pair base_path in
+  let results = auth_ok (Auth.ensure_keeper_credentials base_path ~agent_names:[ "aaa"; "bbb" ]) in
+  List.iter (fun (name, result) ->
+    let token, current = auth_ok result in
+    check string "batch result matches stored raw" token (current_raw base_path name);
+    check bool "batch result matches current credential" true (current = credential base_path name);
+    check_recoverable base_path name) results;
+  check int "both requested owners are returned" 2 (List.length results)
+
 let () =
   run "auth_token_rotation_transaction"
     [ "rotation",
-      [ test_case "unique owner UUID collision refuses before writes" `Quick test_unique_owner_uuid_collision_refused
+      [ test_case "same-owner partial UUID publication can retry" `Quick test_same_owner_partial_uuid_can_retry
+      ; test_case "noncanonical UUID refuses before writes" `Quick test_noncanonical_uuid_is_refused
+      ; test_case "failed supplied-token write preserves old bearer" `Quick test_failed_supplied_token_preserves_previous_raw
+      ; test_case "failed Keeper remint preserves previous pair" `Quick test_failed_keeper_remint_preserves_previous_pair
+      ; test_case "batch Keeper sync updates its admitted index" `Quick test_keeper_batch_updates_its_admitted_index
+      ; test_case "unique owner UUID collision refuses before writes" `Quick test_unique_owner_uuid_collision_refused
       ; test_case "one selected owner in a global shared group rotates" `Quick test_one_selected_owner_rotates
       ; test_case "keeper publisher before rotation" `Quick test_keeper_before_rotation
       ; test_case "rotation before keeper publisher" `Quick test_rotation_before_keeper

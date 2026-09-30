@@ -22,6 +22,7 @@ import {
   fetchBoardFlairs,
   fetchBoardPost,
   commentPost,
+  type BoardCommentPage,
   type BoardHearth,
   type BoardFlair,
 } from '../../api'
@@ -59,8 +60,11 @@ export const SORT_MODES: { id: BoardSortMode; label: string }[] = [
 // ── Signals: detail view ───────────────────────────────────────────
 export const detailPost = signal<BoardPost | null>(null)
 export const detailComments = signal<BoardComment[]>([])
+export const detailCommentPage = signal<BoardCommentPage>({ offset: 0, total: 0 })
 export const detailLoading = signal(false)
+export const detailLoadingOlder = signal(false)
 export const detailPostId = signal<string | null>(null)
+let detailRequestId = 0
 
 // ── Signals: hearth filters ───────────────────────────────────────
 export const boardHearths = signal<BoardHearth[]>([])
@@ -73,6 +77,7 @@ export const boardFlairsError = signal(false)
 let boardHearthsRequestId = 0
 
 // ── Signals: comments ──────────────────────────────────────────────
+const COMMENT_PAGE_SIZE = 20
 export const commentText = signal('')
 export const commentSubmitting = signal(false)
 export const replyingTo = signal<string | null>(null)
@@ -327,14 +332,17 @@ export function visibilityBadgeColor(vis: string): string {
 }
 
 // ── Data operations ────────────────────────────────────────────────
-export async function loadPostDetail(postId: string) {
+export async function loadPostDetail(postId: string, focusedCommentId?: string | null) {
+  const requestId = ++detailRequestId
   detailPostId.value = postId
   detailPost.value = null
   detailComments.value = []
+  detailCommentPage.value = { offset: 0, total: 0 }
+  detailLoadingOlder.value = false
   detailLoading.value = true
   try {
     const data = await fetchBoardPost(postId)
-    if (detailPostId.value !== postId) return
+    if (detailPostId.value !== postId || detailRequestId !== requestId) return
     detailPost.value = {
       id: data.id,
       author: data.author,
@@ -362,17 +370,56 @@ export async function loadPostDetail(postId: string) {
       // dropped here even after the wire/list-normalization fix landed.
       closed: data.closed,
     }
-    detailComments.value = data.comments ?? []
+    let comments = data.comments
+    let page = data.commentPage
+    while (focusedCommentId && page.offset > 0
+      && !comments.some(comment => comment.id === focusedCommentId)) {
+      const offset = Math.max(0, page.offset - COMMENT_PAGE_SIZE)
+      const older = await fetchBoardPost(postId, offset, page.offset - offset)
+      if (detailPostId.value !== postId || detailRequestId !== requestId) return
+      comments = [...older.comments, ...comments]
+      page = older.commentPage
+    }
+    detailComments.value = comments
+    detailCommentPage.value = page
   } catch (err) {
     console.warn('[Board] failed to load post detail:', postId, err)
-    if (detailPostId.value === postId) {
+    if (detailPostId.value === postId && detailRequestId === requestId) {
       detailPost.value = null
       detailComments.value = []
+      detailCommentPage.value = { offset: 0, total: 0 }
       showToast('글을 불러오는 데 실패했습니다', 'error')
     }
   } finally {
-    if (detailPostId.value === postId) {
+    if (detailPostId.value === postId && detailRequestId === requestId) {
       detailLoading.value = false
+    }
+  }
+}
+
+export async function loadOlderPostComments(postId: string) {
+  const page = detailCommentPage.value
+  if (detailPostId.value !== postId || page.offset === 0 || detailLoadingOlder.value) return
+  const requestId = detailRequestId
+  const offset = Math.max(0, page.offset - COMMENT_PAGE_SIZE)
+  detailLoadingOlder.value = true
+  try {
+    const data = await fetchBoardPost(postId, offset, page.offset - offset)
+    if (detailPostId.value !== postId || detailRequestId !== requestId) return
+    const seen = new Set(detailComments.value.map(comment => comment.id))
+    detailComments.value = [
+      ...data.comments.filter(comment => !seen.has(comment.id)),
+      ...detailComments.value,
+    ]
+    detailCommentPage.value = data.commentPage
+  } catch (err) {
+    console.warn('[Board] failed to load older comments:', postId, err)
+    if (detailPostId.value === postId && detailRequestId === requestId) {
+      showToast('이전 댓글을 불러오는 데 실패했습니다', 'error')
+    }
+  } finally {
+    if (detailPostId.value === postId && detailRequestId === requestId) {
+      detailLoadingOlder.value = false
     }
   }
 }

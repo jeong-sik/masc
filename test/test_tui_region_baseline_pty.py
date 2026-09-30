@@ -123,8 +123,14 @@ def layout(top, title, rules, bottom, last, blank, windows=(), **pinned):
 KEEPERS = layout("blank", 3, (4, 7, 28), None, 28, 17)
 BOARD = layout("blank", 3, (4, 7, 9), None, 13, 15)
 CONFIG = layout("blank", 3, (4, 9), None, 27, 1, last_source_line=18)
-DETAIL = layout("blank", 3, (4,), None, 27, 4, ("1-22/46",))
-DETAIL_BESIDE_ROSTER = layout("border", 3, (4, 28), 28, 28, 0, ("1-22/46",),
+# The fixture has local metadata but an empty live roster. Since #40010,
+# Info shows Identity (three rows) and Portrait unavailable (one) in place
+# of the old twelve-row name mosaic: 46 - 12 + 4 = 38 content rows.
+# At head 29f31ed3f9d99a0563af385bbdb3d97ebaa80b4a, PR check
+# 36674192191 job 109755479707 measured all eight Info frames: 38 content
+# rows, seven blanks without a roster, with unchanged borders and viewport.
+DETAIL = layout("blank", 3, (4,), None, 27, 7, ("1-22/38",))
+DETAIL_BESIDE_ROSTER = layout("border", 3, (4, 28), 28, 28, 0, ("1-22/38",),
                               roster={"top": 2, "bottom": 28})
 CHAT_BESIDE_ROSTER = layout("blank", 3, (4, 26), None, 29, 19,
                             roster={"top": 2, "bottom": 27})
@@ -263,6 +269,15 @@ def interaction(served: region.ServedFixtures):
         if left:
             measured[(screen, columns)]["roster"] = region.measure_pane(
                 rows, left=0, right=left)
+        if screen in ("keeper-detail", "keeper-detail-roster"):
+            # Local metadata cannot supply equipment absent from the live roster.
+            # Keep the reason and identity visible rather than invent a portrait.
+            body = "\n".join(region.body_row(rows, row, left=left, right=right)
+                             for row in range(3, region.TERMINAL_ROWS - 1))
+            for text in ("Identity", "Name: alpha", "Paused: no",
+                         "Portrait: unavailable: absent from live roster"):
+                if text not in body:
+                    raise AssertionError(f"{where}: Info omitted {text!r}: {body!r}")
         if screen == "config":
             # The body ends on a source line whose number leads the row. A
             # height one off shows a line more or fewer, or the frame cuts.

@@ -1624,7 +1624,7 @@ let run_turn
                   | Ok (Keeper_checkpoint_store.Stale_noop _) -> "stale_noop", "unknown"
                   | Error _ -> "error", "unknown"
                 in
-                Log.Keeper.info
+                Log.Keeper.info ~keeper_name:meta.name ~turn_id:manifest_keeper_turn_id
                   "checkpoint_save trace_id=%s stage=%s turn_count=%d start_s=%.6f end_s=%.6f duration_ms=%.3f canonical_bytes=%s outcome=%s"
                   trace_id
                   (Agent_core.Agent.checkpoint_stage_to_string snapshot.stage)

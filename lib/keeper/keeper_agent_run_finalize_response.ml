@@ -293,7 +293,7 @@ let finalize
                | Ok (Keeper_checkpoint_store.Stale_noop _) -> "stale_noop", "unknown"
                | Error _ -> "error", "unknown"
              in
-             Log.Keeper.info
+             Log.Keeper.info ~keeper_name:meta.name ~turn_id:manifest_keeper_turn_id
                "checkpoint_save trace_id=%s stage=finalize turn_count=%d start_s=%.6f end_s=%.6f duration_ms=%.3f canonical_bytes=%s outcome=%s"
                patched.session_id
                patched.turn_count

@@ -108,7 +108,11 @@ candidates = ["local.primary", "local.secondary"]
 ```
 
 Both runtime candidates must already exist in the host configuration. An absent
-or unknown route fails worker startup before container creation. The example
+or unknown route is a configuration issue before an instance is persisted or a
+container is created. Validation constructs and discards a side-effect-free callback
+with the proposed instance identity; actual worker startup constructs its callback
+with its own lifetime switch. Updating the runtime route lets the unchanged
+installation recover on the next reconciliation. The example
 names are illustrative, not installed routes.
 
 Native Agent Core requests use the runtime's inference-seeded provider binding,

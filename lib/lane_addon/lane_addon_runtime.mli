@@ -9,6 +9,7 @@ val register_delivery_handler :
 val register_sampling_factory :
   (sw:Eio.Switch.t -> store:Lane_addon_store.t -> instance_id:string ->
     package:Lane_addon_types.package -> binding:Yojson.Safe.t ->
+<<<<<<< HEAD
     (Lane_addon_sampling.t, string) result) -> unit
 (** Server-owned sampling boundary, registered before configuration maintenance.
     Called once per model-capable worker with its exact validated installation
@@ -34,6 +35,26 @@ val start_fleet_service : config:Workspace.config -> sw:Eio.Switch.t -> clock:_ 
     pending; a committed message is only read, never republished if missing. *)
 (** Omitted [access] is unauthenticated; [caller] carries attribution only. *)
 val dispatch : ?caller:string -> ?access:Lane_addon_sources.access -> config:Workspace.config -> operation:operation -> Yojson.Safe.t ->
+||||||| parent of 1b924667ff (fix(lane): validate host sampling routes before worker persistence)
+    (Agent_core.Mcp.sampling_handler, string) result) -> unit
+(** Server-owned model boundary, registered before configuration maintenance.
+    Called once per model-capable worker with its exact validated installation
+    binding and lifetime switch. Disabled packages do not request a callback.
+    The factory must retain model requests before invoking a provider and must
+    refuse stores outside its registering workspace. *)
+val dispatch : ?caller:string -> config:Workspace.config -> operation:operation -> Yojson.Safe.t ->
+=======
+    (Agent_core.Mcp.sampling_handler, string) result) -> unit
+(** Server-owned model boundary, registered before configuration maintenance.
+    Construction must perform no I/O, credential resolution, provider call or
+    store write: it validates the exact instance, package, binding and host route
+    and returns a closure. It is called before the entry is persisted with the
+    root switch; that validation closure is discarded. Worker startup constructs
+    its actual callback again with the worker lifetime switch. Disabled packages
+    do not request a callback. Construction refuses stores outside the registered
+    workspace. Invocation must retain model requests before invoking a provider. *)
+val dispatch : ?caller:string -> config:Workspace.config -> operation:operation -> Yojson.Safe.t ->
+>>>>>>> 1b924667ff (fix(lane): validate host sampling routes before worker persistence)
   (Yojson.Safe.t, error) result
 (** [caller] is provenance. An omitted [access] is [Unauthenticated]; a trusted
     host must pass verified Keeper or operator authority explicitly. *)

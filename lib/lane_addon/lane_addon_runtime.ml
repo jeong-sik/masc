@@ -84,6 +84,13 @@ let delivery_handler = ref None
 let register_delivery_handler handler = delivery_handler := Some handler
 let sampling_factory = ref None
 let register_sampling_factory factory = sampling_factory := Some factory
+let prepare_sampling_handler ~sw ~store ~instance_id ~(package : package) ~binding =
+  match package.model_access with
+  | Model_disabled -> Ok None
+  | Host_sampling ->
+      let* factory = match !sampling_factory with Some factory -> Ok factory
+        | None -> Error "host sampling runtime is unavailable" in
+      factory ~sw ~store ~instance_id ~package ~binding |> Result.map Option.some
 let text fields key = match List.assoc_opt key fields with
   | Some (`String value) when String.trim value <> "" -> Ok value
   | _ -> Error (key ^ " requires a non-blank string")
@@ -681,6 +688,7 @@ let backend ~store () = match !override with
     let control_timeout_sec = Env_config_runtime.Sidecar.control_command_timeout_sec in
     {
       start = (fun ~sw ~instance_id ~package ~binding ~on_created ->
+<<<<<<< HEAD
         let* sampling_handler = match package.model_access with
           | Model_disabled -> Ok None
           | Host_sampling ->
@@ -688,6 +696,17 @@ let backend ~store () = match !override with
                 | None -> Error "host sampling runtime is unavailable" in
               factory ~sw ~store ~instance_id ~package ~binding
               |> Result.map Option.some in
+||||||| parent of 1b924667ff (fix(lane): validate host sampling routes before worker persistence)
+        let* sampling_handler = match package.model_access with
+          | Model_disabled -> Ok None
+          | Host_sampling ->
+              let* factory = match !sampling_factory with Some factory -> Ok factory
+                | None -> Error "host sampling runtime is unavailable" in
+              factory ~sw ~store ~instance_id ~package ~binding |> Result.map Option.some in
+=======
+        let* sampling_handler = prepare_sampling_handler
+          ~sw ~store ~instance_id ~package ~binding in
+>>>>>>> 1b924667ff (fix(lane): validate host sampling routes before worker persistence)
         let wrap worker = {
           container_id = Lane_addon_worker.container_id worker;
           action_schema = (fun () -> Lane_addon_worker.action_schema worker);
@@ -996,6 +1015,11 @@ let attach_entry ~sw m ~run_id ~package ~binding ~configuration ~source_access ~
     running = true; persistence_mutex = Eio.Mutex.create (); coalesced_wakes = 0;
     action_queue = Queue.create (); current_action = None;
     cancel_worker = None; configuration; input_installations } in
+  (* Construction only validates the registered host boundary. Discard this
+     root-switch closure: backend.start constructs the actual callback with
+     the worker switch, so provider work cannot outlive its worker. *)
+  let* _prepared = prepare_sampling_handler ~sw ~store:m.store
+    ~instance_id:e.instance_id ~package ~binding in
   let* () = persist m e in
   Hashtbl.add m.entries e.instance_id e;
   wake e; run ~sw (backend ~store:m.store ()) m e;

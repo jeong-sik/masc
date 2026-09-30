@@ -173,7 +173,136 @@ max_reply_bytes=4194304
   check int "refused control performs no additional HTTP" 2
     (List.length !requests)
 
+let test_invalid_sampling_route_is_stable_until_runtime_update () =
+  Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
+  Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  Fs_compat.set_fs env#fs;
+  Eio_context.with_test_env ~sw ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock @@ fun () ->
+  let root = Filename.temp_dir "sampling-preflight-" "" |> Unix.realpath in
+  let old_runtime = Runtime.For_testing.snapshot () in
+  let old_startup = Runtime_startup_state.get () in
+  let old_catalog = Llm_provider.Model_catalog.global () in
+  Lane_addon_runtime.For_testing.reset ();
+  Eio.Switch.on_release sw (fun () ->
+    Lane_addon_runtime.For_testing.reset ();
+    Runtime.For_testing.restore old_runtime; Runtime_startup_state.set old_startup;
+    (match old_catalog with None -> Llm_provider.Model_catalog.clear_global ()
+      | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
+    Fs_compat.remove_tree root);
+  let config = Workspace.default_config root in
+  let masc = Workspace.masc_dir config in
+  Unix.mkdir masc 0o700;
+  let config_root = Filename.concat masc "config" in Unix.mkdir config_root 0o700;
+  let directory = Filename.concat config_root "lane-addons" in Unix.mkdir directory 0o700;
+  let store = Store.create ~root:(Filename.concat masc "lane-addons") in
+  let catalog_path = Filename.concat root "models.toml" in
+  write catalog_path {|[[models]]
+id_prefix="sampling-fixture"
+provider_name="primary"
+base="openai_chat"
+max_context_tokens=200000
+max_output_tokens=128
+chat_output_budget_field="max_tokens"
+supports_tools=false
+supports_system_prompt=true
+supports_native_streaming=false
+ignored_sampling_parameters=[]
+|};
+  Llm_provider.Model_catalog.set_global (require (Llm_provider.Model_catalog.load_file catalog_path));
+  let runtime_path = Filename.concat root "runtime.toml" in
+  let runtime_bytes = {|[runtime]
+default="primary.sample"
+[providers.primary]
+protocol="openai-compatible-http"
+endpoint="http://127.0.0.1:1"
+[models.sample]
+api-name="sampling-fixture"
+max-context=200000
+tools-support=false
+streaming=false
+[primary.sample]
+is-default=true
+|} in
+  write runtime_path runtime_bytes; require (Runtime.init_default ~config_path:runtime_path);
+  let manifest = Filename.concat root "lane.toml" in
+  write manifest {|id="sampling-preflight"
+revision="1"
+title="Sampling preflight"
+image="not-executed"
+command=["not-executed"]
+contributions=["derive"]
+[interface]
+model_access="host_sampling"
+[resources]
+cpus=0.5
+memory_bytes=134217728
+pids=16
+max_reply_bytes=4194304
+|};
+  let declaration = Filename.concat directory "observer.toml" in
+  let declare route = write declaration (Printf.sprintf
+    "id=\"observer\"\nrun_id=\"preflight-world\"\nmanifest_path=%S\n[binding]\nsources=[]\n%s" manifest route) in
+  let calls = ref [] and starts = ref [] and invocations = ref 0 in
+  let factory ~sw ~store ~instance_id ~package ~binding =
+    calls := (instance_id, sw) :: !calls;
+    Result.map (fun _handler -> fun _params -> incr invocations; Error "fixture forbids provider invocation")
+      (Server_lane_addon_sampling.create_handler ~config ~net:env#net ~sw
+        ~store ~instance_id ~package ~binding) in
+  let backend : Lane_addon_runtime.For_testing.backend = {
+    start=(fun ~sw ~instance_id ~package ~binding ~on_created ->
+      let _handler = require (factory ~sw ~store ~instance_id ~package ~binding) in
+      starts := instance_id :: !starts;
+      let connection : Lane_addon_runtime.For_testing.connection = {
+        container_id=Store.digest instance_id; action_schema=(fun () -> None);
+        act=(fun ~arguments:_ -> Error "read-only fixture");
+        observe=(fun ~binding:_ ~sources:_ -> Ok {Lane_addon_types.rows=[];coverage=[]});
+        stop=(fun () -> Ok ())} in
+      on_created connection; Ok connection);
+    acquire=(fun ~store:_ ~package:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
+    image_ready=(fun ~package:_ -> Ok ());
+    recover_stop=(fun ~instance_id:_ ~container_id:_ ~max_reply_bytes:_ -> Ok ())} in
+  Lane_addon_runtime.For_testing.with_backend backend (fun () ->
+    let reconcile () = require (Lane_addon_runtime.reconcile_configuration ~config ~directory) in
+    let inspect () = Lane_addon_runtime.dispatch ~config ~operation:Lane_addon_runtime.Inspect (`Assoc [])
+      |> Result.map_error Lane_addon_runtime.error_to_string |> require in
+    let stable_refusal label =
+      List.iter (fun _ ->
+        check int (label ^ " remains one configuration issue") 1
+          (member "issues" (reconcile ()) |> Yojson.Safe.Util.to_list |> List.length);
+        check int (label ^ " publishes no instance") 0
+          (member "instances" (inspect ()) |> Yojson.Safe.Util.to_list |> List.length);
+        check int (label ^ " persists no binding") 0 (require (Store.bindings store) |> List.length)) [1;2;3];
+      check int (label ^ " starts no worker") 0 (List.length !starts);
+      check int (label ^ " invokes no provider") 0 !invocations in
+    declare "model_route=\"primary.sample\"\n"; stable_refusal "absent host factory";
+    Lane_addon_runtime.register_sampling_factory factory;
+    declare ""; stable_refusal "missing route";
+    declare "model_route=\"later\"\n"; stable_refusal "unknown route";
+    let unchanged_declaration = In_channel.with_open_bin declaration In_channel.input_all in
+    write runtime_path (runtime_bytes ^ "\n[runtime.lanes.later]\ncandidates=[\"primary.sample\"]\n");
+    require (Runtime.init_default ~config_path:runtime_path);
+    ignore (reconcile ());
+    let rec await predicate = if not (predicate ()) then (Eio.Time.sleep env#clock 0.001; await predicate) in
+    await (fun () -> List.length !starts = 1);
+    let id = List.hd !starts in
+    let construction_switches = List.filter_map (fun (owner, switch) ->
+      if owner = id then Some switch else None) !calls in
+    check int "exact attached identity constructed twice" 2 (List.length construction_switches);
+    check bool "preflight uses root switch and worker callback uses another switch" true
+      (List.exists (fun switch -> switch == sw) construction_switches
+       && List.exists (fun switch -> switch != sw) construction_switches);
+    check string "runtime update recovers without editing installation TOML" unchanged_declaration
+      (In_channel.with_open_bin declaration In_channel.input_all);
+    check int "preflight and worker construction invoke no model" 0 !invocations;
+    ignore (Lane_addon_runtime.dispatch ~config ~operation:Lane_addon_runtime.Detach
+      (`Assoc ["instance_id", `String id]) |> Result.map_error Lane_addon_runtime.error_to_string |> require);
+    await (fun () -> member "instances" (inspect ()) |> Yojson.Safe.Util.to_list
+      |> List.for_all (fun item -> text "kind" (member "phase" item) = "detached")))
+
 let () = run "Server Lane sampling HTTP composition" ["host boundary",[
+  test_case "sampling route preflight stays stable and recovers after runtime update" `Quick
+    test_invalid_sampling_route_is_stable_until_runtime_update;
   test_case "installed route, serialized request, fallback and durable outcome" `Quick
     (fun () -> test_actual_http_route_and_durable_sampling ());
   test_case "thinking-only maxTokens falls back and fixed model temperature wins" `Quick

@@ -2,6 +2,140 @@
 
 ## [Unreleased]
 
+## [0.49.0] - 2026-09-29
+
+### Fresh state required
+
+- DOS checkpoints saved before this release are refused on restore: the DOS core now writes machine snapshots in format 3 and does not read format 2. Start the DOS game again (#39944).
+
+### Added
+
+- Open the shared DOS spectator directly with `go DOS` in the TUI command palette. Escape returns to the previous screen; game input and controller changes remain server-owned (#39852).
+- The Memory table now draws one row under the selected keeper: its state, when its memory was last saved, and an action row only when there is something to do (a lag, a lag that could not be read, Librarian failures, a stall, a read error or a server alert). Press `d` to show the full ledger detail — snapshot revision, recall size, source-bound snapshot and the context cycle rows — exactly as before (#39908).
+- Editing a Goal's `due_date` or `priority` now appends a `goal_edited` event to `goal_events.jsonl` with the editor and each changed field as `{from, to}`. Setting the same value again, or editing only the title, records nothing. If the row cannot be appended, the edit still succeeds and the error log names the goal and the payload. The dashboard timeline shows the row as `Goal Edit`, and marks a row it cannot read as a warning (#39951).
+
+### Changed
+
+- The TUI now opens on a measured Dashboard, groups Goals and active Tasks
+  under Work, and shows provider quota history, Keeper token and cost reports,
+  and operational telemetry in Usage. Missing and failed readings remain
+  explicit, and `/cost` opens Usage. Plan usage, with each account's email,
+  moves from the first screen to Usage; the startup splash and the first-use
+  steps stand on the Dashboard. A terminal too short for the whole Dashboard
+  says how many rows it left out (#38801).
+- A Keeper whose sandbox profile starts a container (docker, microVM) no
+  longer boots when its `sandbox_image` name is not in the image catalog, has
+  no promoted build in the store its container starts from, or the catalog
+  cannot be read. Boot records the cause `sandbox_image_unresolved` with the
+  commands that fix it, and `keeper up` refuses the same names for both
+  profiles before any preflight. A running Keeper's configuration re-sync is
+  not stopped by a catalog change (#38966).
+- Boot also refuses, with cause `config_invalid`, a Keeper whose effective
+  configuration cannot be made: a microVM Keeper with no `microvm_backend`
+  on a host with no default runtime, or a `remote_ssh` Keeper with no
+  endpoint. Such a Keeper used to boot and then fail every turn (#38966).
+- Lane Add-ons opens on an installed-package list with status and available actions; Enter opens one package's Activity, Links, Installation, and Records, and `?` shows its keys (#39859).
+- Package details keep configuration edits, record navigation, and evidence exports scoped to the selected installation and incarnation (#39859).
+- The setup save receipt reports `readiness: "partly_checked"` with a `not_rechecked` list when the save left a selected runtime uncalled. The TUI account screen, the dashboard picker and the installer show it as not checked again instead of verified (#39885).
+- `masc_task_set_goal` and the dashboard assign-goal route refuse a `done` or `cancelled` task. A task-goal link carries no timestamp, so a task finished before it was linked could not be told apart from work done for the goal (#39910).
+- Where auth requires a token, `masc_dos_pass` hands the DOS controller only to a Keeper, an operator or an unexpired invite; any other name is refused and the controller stays where it was. A Keeper's call, the play page's DOS routes and an MCP client run the same check (#39915).
+- Account login selects and verifies multiple usable models in one save, shows unavailable reasons, lets you retry after removing a failed model, and opens an existing account's remaining models without another login (#39971).
+
+### Removed
+
+- The microVM image gate no longer builds `masc-sandbox:general` from the
+  embedded recipe when a Keeper's image is missing from the store; it refuses
+  the missing image. A Keeper's image is the build the host catalog promoted,
+  and `masc sandbox-image` is what builds and promotes (#38798).
+
+### Fixed
+
+- A Keeper waiting for a missing sandbox image reports the refusal once and
+  again when its cause changes, instead of warning on every supervisor sweep
+  (#38798).
+- CI runs selected Python test rules in waves bounded by the existing Dune worker count, so queued rules do not share one suite's timeout across the entire selection. Failed waves retain their exit status and member names, and rules beyond the step budget remain explicitly unverified (#38801).
+- Web Keeper costs now distinguishes an aggregate still loading, a failed aggregate, and a completed result; pending and failed reads can be checked again without displaying a false empty total. #38801
+- Publish the probe's Exact registry through the existing server boot boundary
+  after loading runtime configuration. Manual artifact CI now exercises that
+  setup with an isolated synthetic config before any provider execution (#39390).
+- Preserve the explicitly selected runtime file through Exact registry publication; offline control failures retain fixed diagnostic receipts and a diagnostic binary artifact while CI remains failed. (#39390)
+- Retain typed Stagehand model refusal observations in probe trials, including HTTP status and prior candidate failures, without publishing provider bodies, messages or credentials (#39390).
+- Correct the real-model runbook's retired fallback example and state the account, catalog and artifact prerequisites for a new isolated measurement (#39390).
+- Require shared CI freshness checks before review approval and Keeper merges, including add-only Dune overlaps, and recheck trusted verdicts and change requests before writes. (#39421)
+- Check only the main history required to reach a proven candidate ancestor, allowing older shallow boundaries while refusing gaps inside the comparison. (#39421)
+- Invalidate dashboard and other non-OCaml evidence when shared PR-check, lint, test-selection or review-policy inputs change. (#39421)
+- Bind CI runs to the PR branch and association, include directly executed checker inputs, and recheck workflow/check state plus trusted formal approval before Keeper merges. Explicit repository paths work outside a checkout. (#39421)
+- Treat root OCaml build inputs as shared for every ready PR; conservatively include repository scripts, GitHub automation and test scripts so indirect mandatory lint changes invalidate old evidence. Recheck live head/open/draft/base/merged state around the final CI read, and reject missing approval-option values without looping. (#39421)
+- Treat nested Dune stanzas, includes, and dashboard build manifests/configs as shared evidence inputs; hold the review queue at review until a trusted formal approval lands, and reject truncated queue-ledger options without looping. (#39421)
+- Batch missing PR-head fetches before evaluating the review queue, and re-read structured verdicts after the final CI check before approval or merge guards return or write. (#39421)
+- Include non-product fixture/configuration inputs and the real HTTP-client staging fixture in CI freshness; retain creation order for edited PASS comments and read skipped-job policy from the immutable reviewed commit. (#39421)
+- Name shared CI input groups with their required-check consumers instead of treating every non-product file as shared. Unrelated evidence, proposals, and independent release fragments preserve an ordinary PR's successful run; changing a fragment consumer still requires fresh evidence after another fragment lands. Direct file overlaps and shared build inputs retain their checks. (#39421)
+- Include the TLA specification tree in shared CI inputs so changes to spec/source references, configuration pairs, and coverage cannot reuse an older disjoint PR run. (#39421)
+- Exempt skipped jobs only for recognized positive job-level dispatch conditions; unsupported condition forms refuse. Recheck formal change requests after approval's final CI read, including requests without a structured verdict. (#39421)
+- Require an unassociated run's check suite to name the candidate PR and branch before freshness can use it; another same-SHA/same-branch PR's suite refuses. (#39421)
+- Reuse the shared merge approval check before and after final CI: the same latest non-author approval must have trusted repository authority and name the current head in its verdict and guard footer. A retargeted REST commit ID is insufficient. (#39421)
+- Reopening the DOS spectator preserves previously observed activity when its next live read fails (#39852).
+- Saving a model in `/login` probes only the runtimes the save adds and a runtime promoted to first call, so an exhausted account already in the chain no longer blocks the save (#39885).
+- The TUI rejects a partly checked save receipt containing malformed runtime IDs instead of silently dropping them and showing a successful save (#39885).
+- Show Lane Add-on declarations, active workers, and configuration issues separately in the TUI so an unapplied TOML file is not counted as an installed worker (#39892).
+- Where auth requires a token, a controller held by a name that is not a Keeper and has no credential (a revoked invite whose last request re-took it) is released on the next move (#39915).
+- Lane Add-on Installation rows open a focused repair detail, and retained Overview counts are marked stale after a failed refresh (#39931).
+- Stalled verification notices now name the last verifier runtime when known and show when a scheduled retry is due; they say when the shared retry time is unknown (#39932).
+- Server startup waits until the dashboard is ready, and warming-up pages return HTTP 503 instead of a successful error page (#39937).
+- A verification request whose row cannot be built, such as one whose creation time `gmtime` cannot represent, is listed as unreadable with the reason instead of failing the whole listing with a 500. The summary counts it as unreadable, and the awaiting-operator view names it as unresolved, as it already did for a request the schema cannot read (#39938).
+- The builtin 삼국지3 pad sends the digit keys the battle map's hex cursor moves on (D-pad 8, 2, 7, 9; shoulders 1, 3) instead of arrow keys the game ignores, and Select sends 0, which places an officer before a battle (#39942).
+- East on the builtin 삼국지3 pad sends Backspace, which deletes a typed digit. It sent Esc, which does nothing anywhere in the game; Enter on an empty prompt goes back, so South is labelled 결정·뒤로 (#39942).
+- The DOS core is ocaml-dos 1d51834: EXEC of a truncated MZ child fails instead of raising, an unsupported instruction stops with IP still on it, and separate opens of one file share its bytes so closing one no longer overwrites another's writes (#39944).
+- The MSX core is ocaml-msx 052f50b, which reverts ocaml-msx #41: that change served BIOS ENASLT (0x0024) as a vector whose slot change is undone on return, so a Sangokushi II disk warm-boot drew only black (#39944).
+- Approvals shows the keys that work in each question mode, with the same ask navigation and decision labels as Help (#39945).
+- Refreshing a conversation now also recovers tool rows whose output read had failed; before, each row had to be retried on its own (#39948).
+- The TUI reads a Goal that is awaiting confirmation with a confirmation already recorded as confirmable, so `[a]` finishes it. Before, the decoder refused that state and the key sent no request. The state appears when the server's step after the confirmation refuses or the phase write fails (#39952).
+- Recover Play seat and frame reads after temporary failures, clear an ejected game's controls, and refresh participants when choosing a handoff. #39956
+- Keep returned Keeper portrait PNG artifacts available after transient screen frames are evicted. #39957
+- Keep the whole equipped Keeper portrait, including short-body medals and the backdrop, inside the image with stable framing throughout animation. #39961
+- Recover the shared DOS controller after any non-Keeper holder's credential expires under enforced authentication, and omit expired operators from handoff targets. #39962
+- Keep an expired invite holder's controller when names may be self-declared (`require_token=false` or auth disabled); credential expiry alone does not establish that the holder left in that mode. #39962
+- The file cache behind the schedule store, the keeper ask log and the verification listing no longer keeps a value decoded while a writer's `forget` ran on it. A writer that rewrote a file without changing its version (same inode and size within one file-time tick) and called `forget` during a reader's decode could otherwise leave the reader's value from before the write in the cache until the file changed again. Today's writers all rename, append or delete, which changes the version, so none reached this (#39973).
+- The TUI's MSX screen sends Enter and Backspace to the machine. It sent only space, the arrows and one printable character, so a disk game such as 삼국지2, which answers every numbered prompt with a number and Return, could not be played from the TUI (#39977).
+- Preserve a renewed player's DOS controller by serializing credential publication with stale-holder recovery. Credential deletion, aliases and token-index publication use the same transaction; an unavailable lock refuses the move. #39986
+- Keep explicit Play revocation and dashboard credential purge inside the same credential transaction, including current-role/owner checks and complete alias/UUID deletion. Publish controller announcements after releasing the lock. #39986
+- The web Gate shows pending approvals again: its row check no longer
+  requires `goal_ids`, which the server stopped writing, so live rows are
+  no longer filed as contract violations (#39991).
+- The web dashboard decodes three server payloads it had been refusing. The provider reachability probe accepts the `ok`, `idle`, `degraded` and `unavailable` statuses the server publishes, so a healthy, idle or fully failing fleet no longer shows a schema drift error. The async request list accepts the `request_context` field every row carries, so it no longer fails while a request is active. Keeper chat history keeps rows whose delivery key is `operation_checkpoint`, `operation_native` or `goal_notification` instead of dropping their tool rows (#39996).
+- The TUI Schedules summary and the chat Agenda strip show the next
+  scheduled wake again: the decoder reads the `fsm.next_due_at` member the
+  server writes instead of `next_due_at_iso` (#39998).
+- The DOS core pin moves to ocaml-dos e570d41. Re-mapping the EMS page a window already shows no longer wipes it, so 삼국지3 all-AI games no longer stop after a carried-over war returns as one ruler against himself; ENTER with a nesting level and 186 shift counts also match the chip (#40002).
+- Schedule supersede, `masc_schedule_cancel` and keeper retirement now
+  withdraw every pending wake of the schedule, including one a turn started
+  on and left pending when it failed without its ACK; the turn-end ACK of a
+  wake withdrawn under a running turn answers `Turn_selection_withdrawn`
+  instead of failing the cycle (#40006).
+- Approval and merge guards now read the main commit identity when a large commit's file list spans multiple GitHub API pages. (#40011)
+
+### Internal
+
+- Add a manual Stagehand model probe for real primary/fallback fixture validation
+  and explicitly synthetic HTTP 503 fallback control, with a credential-free CI
+  artifact build and secret-free host evidence output (#39390).
+- `masc_candle` library: the Candle ledger's `Snapshot` row and a closed JSONL codec that refuses unknown, missing or repeated fields, times that are not whole-second UTC, and a line that holds more than one row. Nothing reads or writes the ledger yet (#39919).
+- `Workspace_goals.commit_verifier_decision` and `confirm_completion` take an optional step that runs under the Goal lock, before a passing verdict reaches the verification ledger and after a confirmation is recorded. An `Error` from the step refuses the transition. Without a step nothing changes (#39922).
+- `Candle_ledger` reads and appends `candle-ledger.jsonl` through one family of `Fs_compat` private JSONL functions. `update` reads the ledger, lets the caller name the events to append, and appends them only if the file is still as it was read, reading again when another writer got in first. A lock that another process holds is returned at once as `Locked` or `Write_locked`, and is never waited for in a loop. A row that does not read, or a file that ends inside a row, fails the read, and only `recover_at_start` cuts a torn tail (#39929).
+- The `max-concurrent` comment no longer names a provider HTTP gate that is
+  not in the tree; it states what actually bounds a binding that does not
+  declare the key (#39980).
+
+### Performance
+
+- Use the shared executor for microVM shim hashing while retaining a fresh byte comparison against the release sidecar on every boot. Equal-length rewrites with restored modification times remain integrity failures, including on the inline fallback path. (#39921)
+- An authenticated request no longer stats `.masc/auth/config.json` on the fiber that serves it: the stat runs on a system thread, as the auth store's other file checks already do. While another process was scanning the disk, one such stat held the server's main domain for 2.9s; a request now waits for its own stat without holding the rest. With an idle filesystem the check takes 11µs instead of 1.2µs at p50 (#39935).
+- The verification dashboard (`/api/v1/verification/requests`, `/api/v1/verification/summary` and the proof compose) keeps each request's listing row for the version of its file, so a listing stats every request file but reads and parses only the ones that changed since the last listing, plus any it could not read last time. On the live store of 1,945 requests (70 MB), a listing after the first took 771 ms, most of it JSON parsing on the server's main domain, and now takes 6.0 ms; the kept rows hold 7.4 MB. The first listing after a start builds the row of every request rather than of one page, so it takes 952 ms where it took 809 ms. Each figure is the median of six runs (#39938).
+- `Otel_metric_store.metric_total` adds up only the series of the name it is asked for: the store files each series under its key and its name through one insert, instead of a total walking every series of every metric. `/health` reads three such totals per request. In a store of 6,003 series (300 names with 20 label sets each, plus three series of the name read) a total took 38.09µs and now takes 0.06µs; its cost now follows the number of series of that name (#39940).
+- A keeper turn asks several times which input modalities its run needs (for the reroute decision, the media walk and each attempt); each ask used to drop checkpoint messages equal to an earlier one, hashing and comparing whole messages. A repeated message adds no modality, so the modalities are now read off the messages as they come. On a 75 MB checkpoint of 20,512 messages one ask took 49.47 ms on the server's main domain and now takes 0.96 ms (median of five) (#39943).
+- `/health` summarizes the 600-sample scheduler lag ring on every request. The summary now selects its three percentiles instead of sorting the ring, and takes the maximum in one pass: 38.0 µs to 9.4 µs on a random ring. The percentiles and the maximum are the values the sort gave; the mean adds the samples in ring order, so it can differ from before in the last bits. A ring that defeats the selection's pivot, such as a lag rising and falling smoothly within the window, has what is left sorted after a bounded number of rounds, so over every starting position of such a ring the summary took at most 32.7 µs, under the 38.5 µs median of the sort (#39946).
+- The verification listing (`/api/v1/verification/requests`, `/api/v1/verification/summary` and the proof compose) walks the request directory, reads and projects the request files on the domain pool, not on the domain that asked, which in the server is the one serving requests. The first listing after a start parses and projects every file under 128 KiB (1,829 of 1,946 on the live store) and every later listing stats every file; a heartbeat fiber on the calling domain went from gaps of up to 17-24 ms to 1.4-13 ms during the first listing of the live store, measured under host load (#40005).
+
 ## [0.48.0] - 2026-09-29
 
 ### Fresh state required

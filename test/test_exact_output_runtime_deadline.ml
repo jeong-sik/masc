@@ -220,10 +220,10 @@ let test_connect_only_declaration_is_left_out_at_boot () =
   check (list string) "one gap per lane"
     expected_lane_ids
     (List.sort String.compare
-       (List.map (fun (gap : Runtime.exact_slot_body_deadline_gap) -> gap.lane_id)
+       (List.map (fun (gap : Runtime_config_error.exact_slot_body_deadline_gap) -> gap.lane_id)
           degradation.gaps));
   List.iter
-    (fun (gap : Runtime.exact_slot_body_deadline_gap) ->
+    (fun (gap : Runtime_config_error.exact_slot_body_deadline_gap) ->
        check string "the record names the slot" "openai-responses.probe" gap.slot_id;
        check string "the record names the provider" "openai-responses" gap.provider_id)
     degradation.gaps;
@@ -299,7 +299,7 @@ let test_a_lane_emptied_by_gaps_is_unavailable_alone () =
   check (list string) "both gap slots are recorded"
     (List.sort String.compare [ emptied; lane_id ])
     (List.sort String.compare
-       (List.map (fun (gap : Runtime.exact_slot_body_deadline_gap) -> gap.lane_id)
+       (List.map (fun (gap : Runtime_config_error.exact_slot_body_deadline_gap) -> gap.lane_id)
           degradation.gaps));
   Server_runtime_bootstrap.For_testing.configure_exact_output_registry
     ~config_root:(Filename.dirname path)
@@ -591,7 +591,7 @@ let test_an_unrelated_save_keeps_an_existing_gap () =
   boot (gap_beside_keyed_toml ());
   let gap_slots () =
     List.map
-      (fun (gap : Runtime.exact_slot_body_deadline_gap) -> gap.lane_id, gap.slot_id)
+      (fun (gap : Runtime_config_error.exact_slot_body_deadline_gap) -> gap.lane_id, gap.slot_id)
       (Runtime.exact_slot_body_deadline_gaps ())
   in
   check (list (pair string string)) "boot records the gap" [ lane_id, "nokey.other" ]

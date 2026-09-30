@@ -265,7 +265,9 @@ type model_spec =
 (** Where the keeper starts evicting carried history and where it stops, in
     the provider's tokens of the whole request: prefix, carried atoms and
     tail together, as the provider's [input_tokens] reports it (RFC
-    keeper-context-window-in-tokens §10.2, §10.5). Parsed as a pair so the
+    keeper-context-window-in-tokens §10.2, §10.5). Proactive turn-boundary
+    eviction applies these marks only when no Librarian continuity is applied;
+    recovery after a provider refusal is a separate path. Parsed as a pair so the
     invariant [0 < low_water_tokens < high_water_tokens] holds by
     construction; [high_water_tokens <= max-context] is checked once the model
     is resolved ({!Runtime.validate_runtime_context_marks}). *)

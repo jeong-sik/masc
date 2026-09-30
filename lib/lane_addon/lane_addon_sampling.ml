@@ -52,7 +52,7 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
     | Answer answer ->
         let metadata = match answer.S._meta with Some (`Assoc fields) -> fields | _ -> [] in
         Ok {answer with _meta=Some (`Assoc (("masc.lane_sampling",references)
-          :: List.remove_assoc "masc.lane_sampling" metadata))}
+          :: List.filter (fun (key, _) -> not (String.equal key "masc.lane_sampling")) metadata))}
     | Host_error detail ->
         Error (Yojson.Safe.to_string (`Assoc ["status",`String "host_error";
           "error",`String detail;"evidence",references]))

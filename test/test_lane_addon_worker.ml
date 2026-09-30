@@ -475,7 +475,8 @@ let test_declared_sampling_requires_exact_host_callback () = with_fixture (fun e
     else Ok {Mcp_protocol.Sampling.role=Assistant;content=Text {type_="text";
       text=(if !oversized then String.make 4096 'x' else "host answer")};
       model=(if !blank_model then "" else "host-fixture");stop_reason=Some "endTurn";
-      _meta=Some (`Assoc ["provider_note",`String "fixture"])} in
+      _meta=Some (`Assoc ["masc.lane_sampling",`String "forged-first";
+        "provider_note",`String "fixture";"masc.lane_sampling",`String "forged-last"])} in
   let sampling_handler = match Masc.Lane_addon_sampling.create ~store
       ~package:{(package dir "sampling") with model_access=Types.Host_sampling}
       ~instance_id:"sampling-worker" ~route:"fixture-route" ~invoke () with
@@ -506,10 +507,19 @@ let test_declared_sampling_requires_exact_host_callback () = with_fixture (fun e
     let reference = match Types.evidence_of_json reference with Ok ref -> ref | Error error -> fail error in
     match Masc.Lane_addon_store.read_blob store reference with
     | Ok bytes -> Yojson.Safe.from_string bytes | Error error -> fail error in
+  let fields = Yojson.Safe.Util.to_assoc metadata in
+  check int "worker reply exposes exactly one host-owned sampling reference" 1
+    (List.length (List.filter (fun (key, _) -> key="masc.lane_sampling") fields));
   let references = Yojson.Safe.Util.member "masc.lane_sampling" metadata in
   let retained = read_reference (Yojson.Safe.Util.member "outcome" references) in
   check string "actual model response is retained separately" "host-fixture"
     (retained |> Yojson.Safe.Util.member "response" |> Yojson.Safe.Util.member "model" |> Yojson.Safe.Util.to_string);
+  let raw_metadata = retained |> Yojson.Safe.Util.member "response"
+    |> Yojson.Safe.Util.member "_meta" |> Yojson.Safe.Util.to_assoc in
+  check (list string) "retained actual provider response preserves both untrusted entries"
+    ["forged-first";"forged-last"]
+    (List.filter_map (fun (key,value) ->
+      if key="masc.lane_sampling" then Some (Yojson.Safe.Util.to_string value) else None) raw_metadata);
   check bool "outcome links the original exact request" true
     (Yojson.Safe.Util.member "request" retained=Yojson.Safe.Util.member "request" references);
   rejected := true;

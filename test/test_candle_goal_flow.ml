@@ -106,7 +106,7 @@ let count_kind config kind =
 
 let rows_testable = list (triple string string string)
 
-(* The Goal is made and moved through the tools, as its owner would. *)
+(* The shared Goal is made and moved through the tools by the recorded actor. *)
 let dispatch config ~name args =
   match
     Tool_workspace.dispatch

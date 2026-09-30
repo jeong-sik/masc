@@ -2326,16 +2326,8 @@ let run_turn
                 (Turn_record.tool_surface_to_json
                    (List.map
                       (fun (tool : Agent_core.Tool.t) ->
-                         (* The wire encoding, not the storage one.
-                            [tool_schema_to_yojson] also emits [parameters],
-                            the derived view kept for argument validation; a
-                            definition carrying both is rejected on the way
-                            out, so those bytes reach no provider. Counting
-                            them put Execute at 10,396 bytes against the
-                            7,239 it sends, and ranked the surface by a
-                            number nobody is charged for. masc never sets
-                            [strict], so what this records is exactly what
-                            test_keeper_tool_schema_bytes ratchets. *)
+                         (* Record the exact provider wire schema; storage-only
+                            derived parameters are excluded. *)
                          { Turn_record.name = tool.Agent_core.Tool.schema.name
                          ; schema_bytes =
                              Agent_core.Base.Tool.wire_bytes_of_schema

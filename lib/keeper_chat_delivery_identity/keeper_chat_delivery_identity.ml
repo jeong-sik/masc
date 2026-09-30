@@ -37,11 +37,6 @@ type delivery_key =
   | Fusion_run of Request_id.t
   | Workspace_message of Request_id.t
   | Approval_lifecycle of Request_id.t
-  | Goal_notification of
-      { goal_id : string
-      ; owner : string
-      ; event : string
-      }
 
 type transcript_slot =
   | Accepted_user
@@ -123,13 +118,6 @@ let delivery_key_to_yojson = function
       [ "kind", `String "approval_lifecycle"
       ; "approval_id", `String (Request_id.to_string approval_id)
       ]
-  | Goal_notification { goal_id; owner; event } ->
-    `Assoc
-      [ "kind", `String "goal_notification"
-      ; "goal_id", `String goal_id
-      ; "owner", `String owner
-      ; "event", `String event
-      ]
 ;;
 
 let delivery_key_of_yojson = function
@@ -197,19 +185,6 @@ let delivery_key_of_yojson = function
        let* approval_id = string_field "approval_id" fields in
        let* approval_id = Request_id.of_string approval_id in
        Ok (Approval_lifecycle approval_id)
-     | "goal_notification" ->
-       let* () =
-         validate_fields
-           ~context:"goal notification delivery identity"
-           ~expected:[ "kind"; "goal_id"; "owner"; "event" ]
-           fields
-       in
-       let* goal_id = string_field "goal_id" fields in
-       let* owner = string_field "owner" fields in
-       let* event = string_field "event" fields in
-       if String.trim goal_id = "" || String.trim owner = "" || String.trim event = ""
-       then Error "goal notification delivery identity fields must not be blank"
-       else Ok (Goal_notification { goal_id; owner; event })
      | _ -> Error (Printf.sprintf "unsupported delivery identity kind %S" kind))
   | _ -> Error "delivery identity must be an object"
 ;;
@@ -226,12 +201,8 @@ let delivery_key_equal left right =
   | Fusion_run left, Fusion_run right -> Request_id.equal left right
   | Workspace_message left, Workspace_message right -> Request_id.equal left right
   | Approval_lifecycle left, Approval_lifecycle right -> Request_id.equal left right
-  | Goal_notification left, Goal_notification right ->
-    String.equal left.goal_id right.goal_id
-    && String.equal left.owner right.owner
-    && String.equal left.event right.event
-  | (Operation _ | Operation_checkpoint _ | Operation_native _ | Fusion_run _ | Workspace_message _ | Approval_lifecycle _ | Goal_notification _),
-    (Operation _ | Operation_checkpoint _ | Operation_native _ | Fusion_run _ | Workspace_message _ | Approval_lifecycle _ | Goal_notification _) ->
+  | (Operation _ | Operation_checkpoint _ | Operation_native _ | Fusion_run _ | Workspace_message _ | Approval_lifecycle _),
+    (Operation _ | Operation_checkpoint _ | Operation_native _ | Fusion_run _ | Workspace_message _ | Approval_lifecycle _) ->
     false
 ;;
 

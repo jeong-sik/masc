@@ -1,10 +1,6 @@
-(* Runs scripts/review/approve-guard-selftest.sh, which drives
-   scripts/review/approve-guard.sh against a fake gh (no network) through
-   every refusal the guard exists for: short/long SHA, Draft, moved head,
-   non-main base, merged PR, pending / failed / cancelled / empty check-runs,
-   a Draft-time suite whose check-run ids outrank the Ready-time suite, queued
-   workflow run, a cancelled twin run, empty body, duplicate approval, and a
-   posted review that reads back wrong. *)
+(* Exercises source-review and release admission against fake GitHub responses.
+   Covers exact heads, independent approvals, blocking reviews and full release
+   evidence without network access. *)
 
 let source_root () =
   match Sys.getenv_opt "DUNE_SOURCEROOT" with
@@ -13,9 +9,9 @@ let source_root () =
 
 let selftest () =
   let script =
-    Filename.concat (source_root ()) "scripts/review/approve-guard-selftest.sh"
+    Filename.concat (source_root ()) "scripts/review/test_source_review_policy.py"
   in
-  let rc = Sys.command (Printf.sprintf "bash %s" (Filename.quote script)) in
+  let rc = Sys.command (Printf.sprintf "python3 %s" (Filename.quote script)) in
   Alcotest.(check int) "approve-guard self-test exit status" 0 rc
 
 let () =

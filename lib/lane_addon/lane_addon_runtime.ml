@@ -17,7 +17,7 @@ type connection = {
 type backend = {
   start : sw:Eio.Switch.t -> instance_id:string -> package:package ->
     on_created:(connection -> unit) -> (connection, string) result;
-  acquire : store:Lane_addon_store.t -> package:package ->
+  acquire : access:Lane_addon_sources.access -> store:Lane_addon_store.t -> package:package ->
     resolve_lane_output:(installation_id:string -> (Lane_addon_sources.lane_output, string) result) ->
     binding:Yojson.Safe.t ->
     (Yojson.Safe.t, string) result;
@@ -45,6 +45,7 @@ type entry = {
   mutable cleanup_running : bool; mutable wake : unit Eio.Promise.t;
   mutable resolver : unit Eio.Promise.u; mutable pending : observation_request;
   refresh_interest : Lane_addon_sources.refresh_interest;
+  source_access : Lane_addon_sources.access;
   mutable last_committed_sources : string option;
   mutable unchanged_source_refreshes : int;
   mutable running : bool; persistence_mutex : Eio.Mutex.t;
@@ -371,7 +372,7 @@ let run ~sw backend m e =
                     let previous_phase = e.phase in
                     if request=Observe_now then e.phase <- Observing;
                     let result =
-                      let* sources = backend.acquire ~store:m.store ~package:e.package ~binding:e.binding
+                      let* sources = backend.acquire ~access:e.source_access ~store:m.store ~package:e.package ~binding:e.binding
                         ~resolve_lane_output:(resolve_lane_output m ~run_id:e.run_id) in
                       if e.stopping then Ok () else
                       let fingerprint =
@@ -639,7 +640,7 @@ let validate_connection m ~run_id ~configuration_id ~binding =
   let* () = visit [] configuration_id in
   Ok input_installations
 
-let attach_entry ~sw m ~run_id ~package ~binding ~configuration =
+let attach_entry ~sw m ~run_id ~package ~binding ~configuration ~source_access =
   let* refresh_interest = Lane_addon_sources.refresh_interest binding in
   let* input_installations = match configuration with
     | None -> Lane_addon_sources.dependencies binding
@@ -648,7 +649,7 @@ let attach_entry ~sw m ~run_id ~package ~binding ~configuration =
   let e = { instance_id = Random_id.uuid_v7 (); run_id; package; binding;
     phase = Attached; seq = 0; output = {rows=[];coverage=[]}; connection = None;
     stopping = false; cleanup_running = false; wake = promise; resolver; pending = Idle;
-    refresh_interest; last_committed_sources=None; unchanged_source_refreshes=0;
+    refresh_interest; source_access; last_committed_sources=None; unchanged_source_refreshes=0;
     running = true; persistence_mutex = Eio.Mutex.create (); coalesced_wakes = 0;
     action_queue = Queue.create (); current_action = None;
     cancel_worker = None; configuration; input_installations } in
@@ -683,13 +684,24 @@ let read_declaration ~config json = Eio_context.run_on_owner_domain (fun () ->
     offload (fun () -> Lane_addon_declaration.read ~directory ~source_path)
     |> Result.map Lane_addon_declaration.document_to_json))
 
-let save_declaration ~config json = Eio_context.run_on_owner_domain (fun () ->
+let save_declaration ?caller ~config json = Eio_context.run_on_owner_domain (fun () ->
   let* request = Lane_addon_declaration.write_request json in
   let* directory = edit_directory config in
   let m = manager config in
   (* Like reconcile and Detach, this recoverable serializer uses use_ro so an
      exception releases it without poisoning later configuration repairs. *)
   Eio.Mutex.use_ro m.configuration_mutex (fun () ->
+    let* () = match caller with
+      | None -> Ok ()
+      | Some keeper ->
+          let* declaration = offload (fun () -> Lane_addon_config.load_source
+            ~source_path:(Filename.concat directory request.file_name)
+            ~source_text:request.source_text)
+            |> Result.map_error (fun message -> {Lane_addon_declaration.code=Invalid_declaration;
+                message; current=None}) in
+          Lane_addon_sources.authorize ~access:(Lane_addon_sources.Keeper keeper) declaration.binding
+          |> Result.map_error (fun message -> {Lane_addon_declaration.code=Invalid_request;
+              message; current=None}) in
     let* receipt = offload (fun () -> Lane_addon_declaration.write ~directory request) in
     m.configuration_nudge ();
     Ok (Lane_addon_declaration.receipt_to_json receipt)))
@@ -896,7 +908,11 @@ let dispatch ?caller ~config ~operation json = Eio_context.run_on_owner_domain (
         | Some schema -> Lane_addon_action.validate_value ~schema ~name:"lane binding" binding |> Result.map (fun _ -> ())) in
       let* sw = match Eio_context.get_root_switch_opt () with
         | Some sw -> Ok sw | None -> Error (Runtime_failed "server background owner unavailable") in
-      runtime_result (attach_entry ~sw m ~run_id ~package ~binding ~configuration:None)
+      let source_access = match caller with
+        | Some keeper when String.trim keeper <> "" -> Lane_addon_sources.Keeper keeper
+        | Some _ | None -> Lane_addon_sources.Unauthenticated in
+      let* () = request_result (Lane_addon_sources.authorize ~access:source_access binding) in
+      runtime_result (attach_entry ~sw m ~run_id ~package ~binding ~configuration:None ~source_access)
   | Observe ->
       let* e = request_result (find m args) in
       if e.stopping then Error (Request_rejected "instance is stopping or detached")
@@ -1008,7 +1024,8 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
                  | Error message -> add_issue ~id:d.id d.source_path message
                  | Ok () ->
                      let owner = Some {id=d.id; source_path=d.source_path; revision=d.revision} in
-                     match attach_entry ~sw m ~run_id:d.run_id ~package:d.package ~binding:d.binding ~configuration:owner with
+                     match attach_entry ~sw m ~run_id:d.run_id ~package:d.package ~binding:d.binding ~configuration:owner
+                       ~source_access:Lane_addon_sources.Operator_configuration with
                      | Ok _ -> () | Error message -> add_issue ~id:d.id d.source_path message)
            | _ -> add_issue ~id:d.id d.source_path "multiple workers claim this configuration identity") snapshot.declarations
      | Ok _ -> ());
@@ -1088,7 +1105,7 @@ module For_testing = struct
   type nonrec backend = backend = {
     start : sw:Eio.Switch.t -> instance_id:string -> package:package ->
       on_created:(connection -> unit) -> (connection, string) result;
-    acquire : store:Lane_addon_store.t -> package:package ->
+    acquire : access:Lane_addon_sources.access -> store:Lane_addon_store.t -> package:package ->
       resolve_lane_output:(installation_id:string -> (Lane_addon_sources.lane_output, string) result) ->
       binding:Yojson.Safe.t ->
       (Yojson.Safe.t, string) result;

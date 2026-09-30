@@ -54,7 +54,7 @@ let backend fixture : Runtime.For_testing.backend = {
       stop=(fun () -> Ok ())} in
     on_created connection; Ok connection);
   image_ready=(fun ~package:_ -> Ok ());
-  acquire=(fun ~store:_ ~package:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
+  acquire=(fun ~access:_ ~store:_ ~package:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
   recover_stop=(fun ~instance_id:_ ~container_id:_ ~max_reply_bytes:_ -> Ok ())}
 let dispatch fixture operation fields =
   Runtime.dispatch ~caller:"authenticated-tester" ~config:fixture.config ~operation (obj fields)

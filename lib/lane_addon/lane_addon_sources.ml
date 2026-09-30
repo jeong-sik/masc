@@ -228,10 +228,28 @@ let envelope ~id ~incarnation ~cursor ~complete ~detail observations =
 let unavailable source message = envelope ~id:(source_id source) ~incarnation:"unobserved"
   ~cursor:`Null ~complete:false ~detail:(`String message) []
 
-let fusion_run ~store ~max_bytes ~id ~run_id =
+type access = Operator_configuration | Keeper of string | Unauthenticated
+
+let authorized_fusion_run ~access ~run_id =
   match Fusion_run_registry.get (Fusion_run_registry.global ()) ~run_id with
   | None -> Error ("Fusion run unavailable: " ^ run_id)
   | Some run ->
+      let* () = match access with
+        | Operator_configuration -> Ok ()
+        | Keeper keeper when String.equal keeper run.Fusion_run_registry.keeper -> Ok ()
+        | Keeper _ | Unauthenticated -> Error "Fusion run is not owned by the authenticated Keeper" in
+      Ok run
+let authorize ~access binding =
+  let* sources = parse binding in
+  List.fold_left (fun checked -> function
+    | Fusion_run {run_id;_} ->
+        let* () = checked in
+        (match access with Operator_configuration -> Ok ()
+         | Keeper _ | Unauthenticated -> Result.map (fun _ -> ()) (authorized_fusion_run ~access ~run_id))
+    | Snapshot_file _ | Msx_capture _ | Dos_capture _ | Lane_output _ | Browser_document _ -> checked)
+    (Ok ()) sources
+let fusion_run ~access ~store ~max_bytes ~id ~run_id =
+      let* run = authorized_fusion_run ~access ~run_id in
       let post = match Board_dispatch.find_post_by_run_id ~run_id with
         | Some post ->
             (match post.Board.origin with
@@ -460,12 +478,12 @@ let lane_output ~store ~max_bytes ~resolve_lane_output ~id ~installation_id ~out
       ~cursor:(`String (string_of_int captured.observation_seq)) ~complete
       ~detail:(Option.fold ~none:`Null ~some:(fun value -> `String value) detail) [observation])
 
-let acquire ~store ~(package : Lane_addon_types.package) ~resolve_lane_output ~binding =
+let acquire ~access ~store ~(package : Lane_addon_types.package) ~resolve_lane_output ~binding =
   let* () = validate binding in
   let* sources = parse binding in
   let capture ~max_bytes source =
     let result = match source with
-      | Fusion_run {id;run_id} -> fusion_run ~store ~max_bytes ~id ~run_id
+      | Fusion_run {id;run_id} -> fusion_run ~access ~store ~max_bytes ~id ~run_id
       | Snapshot_file {id;path} -> snapshot_file ~store ~max_bytes ~id path
       | Msx_capture {id} -> msx_capture ~store ~id
       | Dos_capture {id} -> dos_capture ~store ~id

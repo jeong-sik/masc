@@ -16543,13 +16543,33 @@ let render_palette (state : state) =
 
      The overlay contract draws the box and fills the rows under a short list
      of matches, so the footer stays on the composer's row. *)
+  let caret = "\xe2\x96\x8c" in
+  let prompt = Ansi.bold ^ prompt ^ Ansi.reset ^ " " in
+  let inner_width = framed_inner_width cols in
+  let prompt_width = Message_layout.display_width prompt in
+  let caret_width = Message_layout.display_width caret in
+  (* Keep the end being edited on screen. The masthead yields before the
+     filter loses all of its cells; it returns as the viewport grows. *)
+  let title = screen_title title ^ "  " in
+  let title =
+    if Message_layout.display_width title + prompt_width + caret_width
+       >= inner_width
+    then "" else title
+  in
+  let query_width =
+    max 0
+      (inner_width - Message_layout.display_width title - prompt_width
+       - caret_width)
+  in
+  let query =
+    Message_layout.input_viewport ~max_cells:query_width
+      (Terminal_text.single_line state.palette_query)
+  in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"palette"
     ~frame:Chrome_overlay
     ~title:
-      (screen_title title ^ "  "
-       ^ Ansi.bold ^ prompt ^ Ansi.reset ^ " "
-       ^ (Terminal_text.single_line state.palette_query)
-       ^ ((Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "\xe2\x96\x8c" ^ Ansi.reset))
+      (title ^ prompt ^ query
+       ^ Masc_tui_theme.tone Masc_tui_theme.Accent ^ caret ^ Ansi.reset)
     (* [key:label] items, two spaces apart, the way every other footer is
        written. In the dotted form this row was one item with no colon, so
        {!Masc_tui_footer} could shed no whole key and keep no door: it fell

@@ -81,7 +81,7 @@ let vocabularies =
        vocabulary the column draws is read from its source, and a promise with
        an arm left out is not that. *)
   ; ( "the settled statuses"
-    , "lib/tui_decode.ml"
+    , "lib/tui_decode_fusion.ml"
     , "fusion_run_status_to_string" )
   ]
 

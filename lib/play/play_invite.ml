@@ -160,6 +160,12 @@ let revoke ~base_path ~name ~after_revoke =
        | Some { Masc_domain.agent_name; _ } when not (String.equal agent_name name) ->
          Error (Credential_identity_mismatch agent_name)
        | Some { Masc_domain.role = Masc_domain.Player; _ } ->
+         let ( let* ) = Result.bind in
+         let* current = Auth.current_credential_in_transaction transaction name
+           |> Result.map_error (fun error -> Credential_not_deleted error) in
+         let* () = match current with
+           | None -> Error Credential_unreadable
+           | Some _ -> Ok () in
          Auth.delete_credential_in_transaction transaction name
          |> Result.map_error (fun error -> Credential_not_deleted error)
          |> Result.map (fun () -> after_revoke Deleted)

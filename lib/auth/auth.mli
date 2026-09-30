@@ -82,6 +82,12 @@ val credential_exists_in_transaction :
 (** Check the name file under the caller's admission. Only ENOENT is missing;
     a dangling redirect, symlink or unreadable file still occupies the name. *)
 
+val current_credential_in_transaction :
+  credential_transaction -> string -> (agent_credential option, masc_error) result
+(** Resolve the current named credential under admission, validating its exact
+    owner and UUID binding before authorizing an effect. [None] means the name
+    file is absent; unreadable, unresolved or contradictory storage is [Error]. *)
+
 val load_credential : string -> string -> agent_credential option
 (** [load_credential config agent_name] reads [agent_name]'s own credential
     file, following its redirect stub to the id-named file. [None] when the

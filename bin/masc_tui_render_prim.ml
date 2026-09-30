@@ -1497,12 +1497,10 @@ let count_frame_lines buf =
     else !n + 1
 
 
-(* The roster shows when the terminal can spare its columns and the reader
-   has not put it away. Width is the terminal's answer, [roster_pane_hidden]
-   is theirs, and hiding survives a resize because it is a decision rather
-   than a measurement. *)
+(* Resolve the chat default or explicit choice before applying the terminal's
+   width constraint; resizing never overwrites the reader's preference. *)
 let keeper_roster_pane_shown (state : state) ~cols =
-  Masc_tui_roster_pane.shown ~hidden:state.roster_pane_hidden ~cols
+  Masc_tui_roster_pane.shown ~hidden:(roster_pane_hidden state) ~cols
 
 
 (** Render the keeper list view *)

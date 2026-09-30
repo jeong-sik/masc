@@ -6,8 +6,8 @@ ci_gh_json() {
 
 read_current_pr() {
   local row
-  row=$(ci_gh_json "repos/$repo/pulls/$pr" '[.state, (.draft|tostring), .base.ref, .head.sha, (.merged|tostring), .head.ref, .user.login, .base.sha] | @tsv') || return 1
-  IFS=$'\t' read -r pr_state pr_draft pr_base pr_current pr_branch_merged pr_branch pr_author pr_base_sha <<<"$row"
+  row=$(ci_gh_json "repos/$repo/pulls/$pr" '[.state, (.draft|tostring), .base.ref, .head.sha, (.merged|tostring), .head.ref, .user.login, .base.sha, ((.stack // null)|tojson)] | @tsv') || return 1
+  IFS=$'\t' read -r pr_state pr_draft pr_base pr_current pr_branch_merged pr_branch pr_author pr_base_sha pr_stack <<<"$row"
   if [ "$pr_state" != open ] || [ "$pr_draft" != false ] || [ "$pr_branch_merged" != false ] ||
      [ "$pr_current" != "$head" ] || [ -z "$pr_base" ] || [ -z "$pr_branch" ] || [ -z "$pr_author" ]; then
     echo "REFUSED #$pr: require open, ready PR on exact head $head" >&2

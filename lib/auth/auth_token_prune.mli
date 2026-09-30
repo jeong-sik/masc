@@ -13,7 +13,13 @@ val run :
     expiry classification and deletion/cache invalidation. A read, ownership or admission
     error aborts before any deletion. Undecodable and mismatched credentials
     are preserved. Only ENOENT proves a redirect target absent; unreadable or
-    dangling targets are preserved or refuse the operation. A redirect must
+    dangling targets are preserved or refuse the operation. Credential and
+    redirect JSON reads require owned regular files: symbolic links and special
+    nodes refuse the whole plan. The opened descriptor's kind and identity are
+    checked before reading. Relative base paths and directory aliases resolve
+    through the canonical store root, without following a JSON leaf. Raw-token
+    sidecars keep their existing presence and
+    unlink semantics, including dangling links. A redirect must
     agree with its resolved credential's UUID. Any extra UUID deletion target
     must resolve to that same credential; a forged pointer refuses planning.
 

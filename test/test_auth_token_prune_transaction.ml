@@ -9,8 +9,7 @@ let auth_ok = function
   | Ok value -> value
   | Error error -> fail (Masc_domain.masc_error_to_string error)
 
-let with_workspace f =
-  let base_path = Filename.temp_dir "token-prune-transaction-" "" in
+let with_workspace_at base_path f =
   Eio_main.run @@ fun env ->
   Masc_test_deps.init_eio_clock env;
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -18,6 +17,9 @@ let with_workspace f =
     Auth.save_auth_config base_path
       { Masc_domain.default_auth_config with enabled = true; require_token = true };
     f base_path)
+
+let with_workspace f =
+  with_workspace_at (Filename.temp_dir "token-prune-transaction-" "") f
 
 (* A fixed clock leaves issuance's live bearers far from the expired fixture. *)
 let now = 1_735_689_600.
@@ -151,6 +153,94 @@ let test_read_failure_aborts_before_any_delete () =
   check bool "an earlier expired candidate was not removed" true
     (Sys.file_exists (Auth.credential_file base_path "aaa"))
 
+(* A real FIFO with no writer made the old prune block in open while holding
+   the credential transaction. Isolate the entire product call in a child;
+   the parent deadline guards CI even when the regression is reintroduced. *)
+let test_fifo_refusal_releases_publishers () =
+  let base_path = Filename.temp_dir "token-prune-fifo-" "" in
+  let finished_read, finished_write = Unix.pipe ~cloexec:true () in
+  match Unix.fork () with
+  | 0 ->
+      Unix.close finished_read;
+      (try
+         with_workspace_at base_path (fun base_path ->
+           let _expired_token = make_expired base_path "aaa" in
+           let canary = Auth.credential_file base_path "aaa" in
+           let before = In_channel.with_open_bin canary In_channel.input_all in
+           let fifo = Auth.credential_file base_path "zzz" in
+           Unix.mkfifo fifo 0o600;
+           List.iter (fun mode ->
+             match prune ~mode base_path with
+             | Error _ -> ()
+             | Ok _ -> fail "a FIFO credential must refuse the entire plan")
+             [Prune.Preview; Prune.Retire];
+           check bool "the FIFO is retained" true ((Unix.lstat fifo).st_kind = Unix.S_FIFO);
+           check string "no earlier candidate was deleted" before
+             (In_channel.with_open_bin canary In_channel.input_all);
+           Unix.unlink fifo;
+           let token, _ = mint base_path "publisher" Masc_domain.Admin in
+           check_live base_path token;
+           (match auth_ok (prune base_path) with
+            | [{Prune.agent_name="aaa"; reason=Prune.Expired; outcome=Prune.Retired}] -> ()
+            | _ -> fail "regular credential reads must still permit retirement"));
+         ignore (Unix.write_substring finished_write "x" 0 1 : int);
+         Unix.close finished_write;
+         Unix._exit 0
+       with
+       | Eio.Cancel.Cancelled _ as cancellation -> raise cancellation
+       | error ->
+           prerr_endline (Printexc.to_string error);
+           Unix.close finished_write;
+           Unix._exit 2)
+  | child ->
+      Unix.close finished_write;
+      let reaped = ref false in
+      Fun.protect
+        ~finally:(fun () ->
+          Unix.close finished_read;
+          if not !reaped then (
+            (try Unix.kill child Sys.sigkill with Unix.Unix_error (Unix.ESRCH, _, _) -> ());
+            ignore (Unix.waitpid [] child));
+          Fs_compat.remove_tree base_path)
+        (fun () ->
+          let ready, _, _ = Unix.select [finished_read] [] [] 10.0 in
+          if ready = [] then fail "FIFO prune or the following publisher blocked";
+          let completed = Bytes.create 1 in
+          let bytes = Unix.read finished_read completed 0 1 in
+          let _, status = Unix.waitpid [] child in
+          reaped := true;
+          check int "child completed its actual prune and publisher controls" 1 bytes;
+          match status with
+          | Unix.WEXITED 0 -> ()
+          | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
+              fail "isolated FIFO prune scenario failed")
+
+let test_regular_symlink_refuses_plan () =
+  with_workspace @@ fun base_path ->
+  let _expired_token = make_expired base_path "aaa" in
+  let token, _ = mint base_path "live" Masc_domain.Admin in
+  let alias = Auth.credential_file base_path "zzz" in
+  Unix.symlink (Auth.credential_file base_path "live") alias;
+  (match prune base_path with Error _ -> () | Ok _ -> fail "symlink JSON is not a prune read authority");
+  check bool "the symlink remains" true ((Unix.lstat alias).st_kind = Unix.S_LNK);
+  check bool "earlier expired credential remains" true (Sys.file_exists (Auth.credential_file base_path "aaa"));
+  check_live base_path token
+
+let test_relative_base_preserves_regular_reads () =
+  let base_path = Filename.temp_dir ~temp_dir:(Sys.getcwd ()) "token-prune-relative-" "" in
+  with_workspace_at base_path @@ fun base_path ->
+  let _expired_token = make_expired base_path "expired" in
+  let token, _ = mint base_path "live" Masc_domain.Admin in
+  let relative_base = Filename.basename base_path in
+  (match auth_ok (prune relative_base) with
+   | [{ Prune.agent_name = "expired"; reason = Prune.Expired; outcome = Prune.Retired }] -> ()
+   | _ -> fail "relative base must retire the actual expired credential");
+  check bool "expired credential was removed" false
+    (Sys.file_exists (Auth.credential_file base_path "expired"));
+  check_live base_path token;
+  let publisher, _ = mint relative_base "publisher" Masc_domain.Admin in
+  check_live relative_base publisher
+
 let test_dangling_target_is_not_orphan_authority () =
   with_workspace @@ fun base_path ->
   let target = Auth.credential_file base_path "target" in
@@ -259,6 +349,9 @@ let () =
       ; test_case "preview preserves exact files" `Quick test_preview_preserves_files
       ; test_case "UUID cleanup invalidates cached credentials" `Quick test_uuid_cleanup_and_cache
       ; test_case "read failure aborts the plan before deletion" `Quick test_read_failure_aborts_before_any_delete
+      ; test_case "FIFO refusal releases publishers and regular reads still retire" `Quick test_fifo_refusal_releases_publishers
+      ; test_case "regular symlink refuses the complete prune plan" `Quick test_regular_symlink_refuses_plan
+      ; test_case "relative base retains regular reads and publisher access" `Quick test_relative_base_preserves_regular_reads
       ; test_case "a dangling target is not an orphan" `Quick test_dangling_target_is_not_orphan_authority
       ; test_case "undecodable and mismatched files are preserved" `Quick test_undecodable_and_mismatched_are_preserved
       ; test_case "forged UUID cannot remove another owner's live credential" `Quick test_forged_uuid_cannot_delete_another_owners_bearer

@@ -17917,7 +17917,7 @@ def run_mermaid_chat_regression(executable: str) -> None:
 # RFC-0429 §1.3 and §4. The second recorded change carries
 # "let b = 2\nlet c = 3", and the Changes list has one line per row to say it
 # in. Printing the newline writes the rest of the row wherever the terminal's
-# cursor lands; Tui_decode.preview_line projects it to one cell instead.
+# cursor lands; Masc.Tui_terminal_text.preview_line projects it to one cell instead.
 #
 # This is its own lane rather than an assertion inside the default keyboard
 # regression: that lane stops before reaching the Changes surface, at the exit

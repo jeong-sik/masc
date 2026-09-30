@@ -47,6 +47,7 @@ def explicit_pane_choice(executable):
         h.send_and_wait(process, fd, output, b"\x0c", b"Continue")
         assert h.acting_pane_header_cell(output) == -1
         h.palette_go(process, fd, output, b"go keepers", b"MASC Keepers")
+        assert h.acting_pane_header_cell(output) == -1
         h.select_keeper_row(process, fd, output, b"beta")
         h.send_and_wait(process, fd, output, b"c", b"Esc:list")
         h.send_and_wait(process, fd, output, b"/activity fleet\r", b"Activity pane on Recent")

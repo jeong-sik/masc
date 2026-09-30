@@ -45,7 +45,7 @@ def viewport_journey(executable, *, unread, no_color):
             if unread:
                 assert b"No decision is waiting" not in visible, visible
             assert b"[Recent]" not in visible, visible
-            assert b"Changes \xc2\xb7 2 keepers" not in visible, visible
+            assert b"[Changes]" not in visible, visible
             # Verify terminal row addresses, not just presence in a log that
             # could contain offscreen output from an earlier size.
             assert max(screen) <= rows, visible

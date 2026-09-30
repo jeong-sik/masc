@@ -44,6 +44,15 @@ def fixtures():
                  "utilization": {"unit": "fraction", "value": 0.89},
                  "resets_at": now + 5 * 86400, "observed_at": now - 30, "source": "fixture"},
             ]})
+    scopes[0]["windows"][0]["resets_at"] = now - 300
+    scopes[0]["windows"].extend([
+        {"limit_id": "TOOL_LIMIT", "window": {"kind": "provider_label", "label": "tool calls"},
+         "role": "counts_other_use", "utilization": {"unit": "percent", "value": 100},
+         "resets_at": None, "observed_at": now - 30, "source": "fixture"},
+        {"limit_id": "UNKNOWN_LIMIT", "window": {"kind": "provider_label", "label": "unknown"},
+         "role": "unclassified_limit", "utilization": {"unit": "percent", "value": 80},
+         "resets_at": None, "observed_at": now - 30, "source": "fixture"},
+    ])
     runtime["provider_usage_windows"] = scopes
     runtime["runtimes"][0].update({"quota_scope": scopes[0]["scope"],
                                   "quota_exhausted": True,
@@ -87,7 +96,9 @@ def journey(executable, no_color=False):
         h.wait_for_output(process, fd, output, b"catalogue reopens", start=0, timeout=10)
         wide = capture(process, fd, output, "plan-wide-no-color" if no_color else "plan-wide",
                        48, 220, b"catalogue reopens")
-        for value in (b"Plan usage", b"0%", b"25%", b"33%", b"Reset", b"Catalogue", b"heard", b"claude@example.com"):
+        for value in (b"Plan usage", b"Used 0%", b"Used 25%", b"Used 33%", b"Reset",
+                      b"Last report", b"Model call limit", b"Other use", b"does not block model calls",
+                      b"Unclassified limit", b"Catalogue", b"heard", b"claude@example.com"):
             if value not in wide:
                 raise AssertionError(f"Plan omitted {value!r}: {wide!r}")
         if b"Quota scope trend" in wide or b"Keeper usage" in wide:

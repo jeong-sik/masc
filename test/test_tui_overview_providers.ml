@@ -124,9 +124,9 @@ let test_section_draws_three_line_shapes () =
   check string "plain usage title" " Plan usage" (plain section.title);
   let text = String.concat "\n" lines in
   List.iter (fun fact -> check bool ("retains " ^ fact) true (contains ~affix:fact text))
-    [ "Kimi Coding"; "Claude Max"; "5h"; "7d"; "67%"; "44%"; "100%"
-    ; " in 4h12m"; "heard 3m00s ago"; "reset time passed"
-    ; "no newer report"; "exhausted (observed)"; "catalogue reopens"; " in 2h00m" ];
+    [ "Kimi Coding"; "Claude Max"; "5h"; "7d"; "Used 67%"; "Used 44%"; "Used 100%"
+    ; "Model call limit"; " in 4h12m"; "heard 3m00s ago"; "reset time passed"
+    ; "no newer report"; "Last report"; "exhausted (observed)"; "catalogue reopens"; " in 2h00m" ];
   check bool "exhausted account is first" true
     (match lines with first :: _ -> contains ~affix:"Kimi Coding" first | [] -> false);
   check bool "unreported, unblocked accounts draw no invented meters" false
@@ -196,7 +196,18 @@ let test_meter_width_is_bounded () =
   check bool "a narrow card keeps a readable, bounded meter" true
     (narrow_cells >= 10 && narrow_cells <= 24);
   List.iter (fun line -> check bool "narrow card respects terminal cells" true
-    (Masc_tui_message_layout.display_width line <= 44)) (reported_section ~width:44)
+    (Masc_tui_message_layout.display_width line <= 44)) (reported_section ~width:44);
+  let separate = reported_section ~width:70 in
+  let text = String.concat "\n" separate in
+  check bool "one passed reset keeps the other account's report age" true
+    (contains ~affix:"Claude Max" text && contains ~affix:"heard 3m00s ago" text);
+  let observed = Unix.localtime 1790170000.0 in
+  let clock = Printf.sprintf "%02d:%02d" observed.Unix.tm_hour observed.Unix.tm_min in
+  check bool "the past-reset card names the actual observed clock" true
+    (contains ~affix:"reset time passed" text
+     && contains ~affix:("Last report " ^ clock) text);
+  List.iter (fun line -> check bool "separate cards fit the supplied width" true
+    (Masc_tui_message_layout.display_width line <= 70)) separate
 
 (* Z.AI's TIME_LIMIT counts MCP and tool calls: at 100% it refuses no model
    call, so it is not drawn in the exhausted tone, while the account's token
@@ -221,6 +232,11 @@ let test_window_that_gates_nothing_is_not_an_alarm () =
           "role": "gates_model_calls",
           "utilization": {"unit": "percent", "value": 100},
           "resets_at": 1790195300, "observed_at": 1790180000.0,
+          "source": "zai.quota_limit" },
+        { "limit_id": "UNKNOWN_LIMIT", "window": {"kind": "seven_day"},
+          "role": "unclassified_limit",
+          "utilization": {"unit": "percent", "value": 80},
+          "resets_at": null, "observed_at": 1790180000.0,
           "source": "zai.quota_limit" } ] }
   ]
 }|}
@@ -245,6 +261,11 @@ let test_window_that_gates_nothing_is_not_an_alarm () =
   let tokens_limit = List.find (fun line -> contains ~affix:"TOKENS_LIMIT" (plain line)) section.lines in
   check bool "the non-gating window is not an alarm" false (contains ~affix:bad time_limit);
   check bool "the model-call window at full is an alarm" true (contains ~affix:bad tokens_limit);
+  let text = String.concat "\n" (List.map plain section.lines) in
+  List.iter (fun fact -> check bool ("window role retains " ^ fact) true
+    (contains ~affix:fact text))
+    [ "Used 100%"; "Model call limit"; "Other use · does not block model calls"
+    ; "Unclassified limit"; "Used 80%" ];
   check bool "the source label is retained" true
     (List.exists (fun line -> contains ~affix:"1 x unit 5" (plain line)) section.lines);
   check bool "missing reset stays distinct from zero" true

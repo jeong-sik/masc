@@ -4,6 +4,7 @@
  (libraries
   alcotest
   astring
+  unix
   yojson
   masc
   masc_tui_types

@@ -328,6 +328,11 @@ let window_tone (window : Tui_decode.provider_usage_window) =
       if at_or_past_full window.puw_utilization then Some (Theme.bad ())
       else None
 
+let role_text = function
+  | Tui_decode.Role_gates_model_calls -> "Model call limit"
+  | Tui_decode.Role_counts_other_use -> "Other use · does not block model calls"
+  | Tui_decode.Role_unclassified_limit -> "Unclassified limit"
+
 (* An account owns its heading and metadata. A long catalogue explanation
    never consumes the meter columns of every other account. *)
 let draw_rows ~now ~width rows =
@@ -361,7 +366,7 @@ let draw_rows ~now ~width rows =
   in
   let window_lines window heard =
     let label = window_label window in
-    let value = utilization_text window.Tui_decode.puw_utilization in
+    let value = "Used " ^ utilization_text window.Tui_decode.puw_utilization in
     let label_cells = min 20 (max 6 (inner / 3)) in
     let value_cells = Text.display_width value in
     let room = inner - label_cells - value_cells - 4 in
@@ -374,8 +379,14 @@ let draw_rows ~now ~width rows =
       else wrap label @ wrap ?tone:(window_tone window) gauge
     in
     let reset_tone, reset = reset_text ~now window.puw_resets_at in
-    let metadata = "Reset " ^ reset ^ (match heard with None -> "" | Some heard -> " · " ^ heard) in
-    first @ wrap ?tone:reset_tone metadata
+    let report = match window.puw_resets_at with
+      | Some at when at <= now ->
+          " · Last report " ^ clock_text ~now window.puw_observed_at
+      | None | Some _ -> ""
+    in
+    let metadata = "Reset " ^ reset ^ report
+      ^ (match heard with None -> "" | Some heard -> " · " ^ heard) in
+    first @ wrap (role_text window.puw_role) @ wrap ?tone:reset_tone metadata
   in
   let render (name, held) =
     let blocked = List.exists (function

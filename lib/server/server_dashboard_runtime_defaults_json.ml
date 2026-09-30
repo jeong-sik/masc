@@ -12,7 +12,7 @@
    are intentionally avoided — the option-returning [get_default_runtime] is the
    only default source used here. *)
 
-(* [Runtime.t] record fields ([provider], [model], [binding]) and the nested
+(* [Runtime_instance.t] record fields ([provider], [model], [binding]) and the nested
    [Runtime_schema] record labels ([display_name], [api_name], [max_context],
    [is_default]) need to be in scope for field access. *)
 open Runtime_schema
@@ -74,18 +74,18 @@ let build ~generated_at_iso (r : resolved) : Yojson.Safe.t =
 let resolved_of_snapshot
     (snapshot : Runtime.dashboard_runtime_defaults_snapshot) : resolved =
   let default = snapshot.default_runtime in
-  let entry (rt : Runtime.t) : runtime_entry =
+  let entry (rt : Runtime_instance.t) : runtime_entry =
     { id = rt.id
     ; provider = rt.provider.display_name
     ; model = rt.model.api_name
-    ; max_context = Runtime.max_context_of_runtime rt
+    ; max_context = Runtime_instance.max_context_of_runtime rt
     ; is_default = rt.binding.is_default
     }
   in
-  { default_runtime_id = Option.map (fun (rt : Runtime.t) -> rt.id) default
-  ; default_model = Option.map (fun (rt : Runtime.t) -> rt.model.api_name) default
+  { default_runtime_id = Option.map (fun (rt : Runtime_instance.t) -> rt.id) default
+  ; default_model = Option.map (fun (rt : Runtime_instance.t) -> rt.model.api_name) default
   ; default_max_context =
-      Option.map Runtime.max_context_of_runtime default
+      Option.map Runtime_instance.max_context_of_runtime default
   ; runtimes = List.map entry snapshot.runtimes
   ; media_failover = snapshot.media_failover
   ; config_path = snapshot.config_path

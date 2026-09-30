@@ -442,7 +442,7 @@ let latest_tool_call_json ~(keeper_name : string) =
 let pending_approval_json_with_reader
     ~(read_pending :
        base_path:string ->
-       (Yojson.Safe.t list, Keeper_approval_queue.storage_error) result)
+       (Yojson.Safe.t list, Keeper_approval_queue_result.storage_error) result)
     ~(base_path : string) ~(keeper_name : string) =
   read_pending ~base_path
   |> Result.map (fun entries ->

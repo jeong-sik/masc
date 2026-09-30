@@ -1918,7 +1918,7 @@ let add_routes ~sw ~clock router =
            let default, runtimes = Runtime.get_default_and_runtimes () in
            let providers =
              List.fold_left
-               (fun providers (runtime : Runtime.t) ->
+               (fun providers (runtime : Runtime_instance.t) ->
                   if List.exists
                        (fun (known : Runtime_schema.provider) -> String.equal known.id runtime.provider.id)
                        providers

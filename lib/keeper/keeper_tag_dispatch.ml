@@ -129,13 +129,19 @@ let dispatch
         ~name
         ~args
     | Mod_misc ->
-      Tool_misc.dispatch
+      let candle operation = Some (Keeper_candle_tools.handle ~operation
+        ~base_path:config.base_path ~keeper_name ~tool_name:name ~start_time ~args) in
+      (match Tool_schemas_misc.misc_operation_of_tool_name name with
+       | Some Tool_schemas_misc.Misc_candle_balance -> candle Keeper_candle_tools.Balance
+       | Some Tool_schemas_misc.Misc_candle_catalog -> candle Keeper_candle_tools.Catalog
+       | Some Tool_schemas_misc.Misc_candle_purchase -> candle Keeper_candle_tools.Purchase
+       | Some _ | None -> Tool_misc.dispatch
         { Tool_misc.config
         ; agent_name
         ; help_schemas = Keeper_tool_descriptor.model_visible_schemas ()
         }
         ~name
-        ~args
+        ~args)
     | Mod_library ->
       Tool_library.dispatch
         { Tool_library.base_path = config.base_path; agent_name }

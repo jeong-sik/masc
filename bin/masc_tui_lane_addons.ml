@@ -812,18 +812,19 @@ let instance_controls (instance : instance) = match instance.phase with
 let overview_hints view =
   if view.help_open then "Esc:close help"
   else if Option.is_some view.document_key then
-    "?:help  Esc:back  E:edit  s:save  l:reload  u/U:revision"
+    "?:help  Esc:back  E:edit  s:save  l:reload  u/U:revision  Colon:palette  A:command"
   else match view.screen with
   | Overview when view.presentation=Technical && view.focus=Configurations
       && Option.is_none view.document_key ->
       "?:help  Esc:back"
       ^ (if Option.is_some (selected_source_path view) then "  E:edit TOML" else "")
+      ^ "  Colon:palette  A:command"
       ^ (if view.loading then "  Reading …" else "  r:refresh")
   | Overview ->
-      "?:help  Esc:back  Enter:open  h:history/current  i:install  n:new  S:subs"
+      "?:help  Colon:palette  Esc:back  Enter:open  h:history/current  i:install  n:new  S:subs  A:command"
       ^ (if view.loading then "  Reading …" else "  r:refresh")
   | Detail _ ->
-      "?:help  Esc:back  1-4:section  Tab:next section  j/k:move  " ^
+      "?:help  Colon:palette  Esc:back  A:command  1-4:section  Tab:next section  j/k:move  " ^
       (match selected_instance view with None -> "" | Some instance -> instance_controls instance ^ "  ") ^
       "D:raw  J/K:scroll"
       ^ (if view.loading then "  Reading …" else "  r:refresh")
@@ -1019,7 +1020,8 @@ let help_lines = [
   "Installation: E edit · s save · l reload · u/U revision";
   "Links: S subscriptions · Left/Right lane";
   "Records: Space mark row · e export marked rows";
-  "Advanced: : command (including :act)";
+  "Navigation: : command palette · Esc returns to Lane Add-ons";
+  "Advanced: A command (including act)";
 ]
 
 let detail_lines ~width view =

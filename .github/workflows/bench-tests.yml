@@ -74,7 +74,25 @@ concurrency:
   group: bench-tests-${{ inputs.compare_checkpoint_history && 'compare-checkpoint-history' || inputs.compare_vision && 'compare-vision' || inputs.compare_server && 'compare-server' || inputs.compare_tui && 'compare-tui' || 'pytest' }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  validate-inputs:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Reject conflicting comparison modes
+        env:
+          TUI: ${{ inputs.compare_tui }}
+          SERVER: ${{ inputs.compare_server }}
+          VISION: ${{ inputs.compare_vision }}
+          CHECKPOINT: ${{ inputs.compare_checkpoint_history }}
+        run: |
+          python3 - <<'PYVALIDATE'
+          import os
+          selected = [name for name in ('TUI', 'SERVER', 'VISION', 'CHECKPOINT') if os.environ[name] == 'true']
+          if len(selected) > 1:
+              raise SystemExit('Choose at most one comparison mode: ' + ', '.join(selected))
+          PYVALIDATE
   pytest:
+    needs: validate-inputs
     if: ${{ !inputs.compare_tui && !inputs.compare_server && !inputs.compare_vision && !inputs.compare_checkpoint_history }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -111,6 +129,7 @@ jobs:
           sys.exit(1 if skipped else 0)
           PY
   compare-tui:
+    needs: validate-inputs
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.compare_tui && !inputs.compare_server && !inputs.compare_vision && !inputs.compare_checkpoint_history }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -163,6 +182,7 @@ jobs:
           path: comparison-results/
           if-no-files-found: warn
   server-harness-tests:
+    needs: validate-inputs
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -174,8 +194,8 @@ jobs:
       - run: python3 -m unittest discover -s scripts/harness/perf -p test_vision_artifact_compare.py -v
       - run: python3 test/test_checkpoint_history_comparison.py
   compare-server:
+    needs: [validate-inputs, server-harness-tests]
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.compare_server && !inputs.compare_vision && !inputs.compare_checkpoint_history }}
-    needs: server-harness-tests
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -224,6 +244,7 @@ jobs:
           if-no-files-found: warn
 
   compare-vision:
+    needs: validate-inputs
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.compare_vision && !inputs.compare_server && !inputs.compare_tui && !inputs.compare_checkpoint_history }}
     runs-on: ubuntu-24.04
     timeout-minutes: 75
@@ -262,8 +283,8 @@ jobs:
             ${{ runner.temp }}/vision-results/window-*/state/window-start
             ${{ runner.temp }}/vision-results/window-*/state/window-complete
   compare-checkpoint-history:
+    needs: [validate-inputs, server-harness-tests]
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.compare_checkpoint_history }}
-    needs: server-harness-tests
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     permissions:

@@ -4,6 +4,7 @@
 
 open Alcotest
 module View = Masc_tui_portrait_view
+module Presenter = Masc_tui_frame_presenter
 module Draw = Keeper_portrait_draw
 module Layout = Masc_tui_message_layout
 module Palette = Masc_tui_terminal_palette
@@ -110,47 +111,97 @@ let test_placement_bytes_leave_the_cursor_where_it_was () =
   check bool "as many rows as the box" true
     (contains ~sub:(Printf.sprintf "r=%d," p.View.box.View.rows) bytes)
 
-(* What the frame erased and wrote again: nothing, every row, or some. *)
-let nothing _ = false
-let every_row _ = true
+(* What the presenter did with the frame: cleared the screen and wrote every
+   row, erased and wrote some rows, or wrote nothing. *)
+let cleared = Presenter.Presented Presenter.Whole_screen
+let rows_written rows = Presenter.Presented (Presenter.Rows rows)
 
-let frame ?(rewritten = nothing) requests =
+let frame ?(presented = Presenter.Unchanged) requests =
   View.begin_frame ();
   List.iter View.request requests;
   let written = Buffer.create 4096 in
-  View.flush ~rewritten ~write:(Buffer.add_string written);
+  View.flush presented ~write:(Buffer.add_string written);
   Buffer.contents written
 
 let deleted = Masc_tui_graphics.delete_image ~image_id:mascot_id
 
+let send_name = function
+  | View.Keep -> "keep"
+  | View.Put -> "put"
+  | View.Transmit -> "transmit"
+
+let send = testable (fun ppf s -> Format.pp_print_string ppf (send_name s)) ( = )
+
+let test_send_follows_what_the_frame_did () =
+  let p = placement 6 in
+  let moved = { p with View.row = p.View.row + 1 } in
+  let other = placement ~row:p.View.row 8 in
+  check send "nothing under the id: transmit" View.Transmit
+    (View.send Presenter.Unchanged ~shown:None p);
+  check send "other pixels under the id: transmit" View.Transmit
+    (View.send (rows_written []) ~shown:(Some other) p);
+  check send "a clear screen took the pixels: transmit" View.Transmit
+    (View.send cleared ~shown:(Some p) p);
+  check send "a rewritten row crossed it: put" View.Put
+    (View.send (rows_written [ p.View.row ]) ~shown:(Some p) p);
+  check send "it moved: put" View.Put (View.send Presenter.Unchanged ~shown:(Some p) moved);
+  check send "it moved while other rows were written: put" View.Put
+    (View.send (rows_written [ 0 ]) ~shown:(Some p) moved);
+  check send "rows it does not cross: keep" View.Keep
+    (View.send (rows_written [ p.View.row - 1 ]) ~shown:(Some p) p);
+  check send "nothing written: keep" View.Keep (View.send Presenter.Unchanged ~shown:(Some p) p)
+
 let test_flush_sends_only_what_changed () =
   ignore (frame []);
   let p = placement 6 in
-  check string "a new picture is placed" (View.placement_bytes p) (frame [ p ]);
+  check string "a new picture is transmitted" (View.placement_bytes p) (frame [ p ]);
   check string "the same picture on an unchanged frame is left alone" "" (frame [ p ]);
-  check string "a full redraw places it again" (View.placement_bytes p)
-    (frame ~rewritten:every_row [ p ]);
+  check string "a clear screen took it, so it is transmitted again" (View.placement_bytes p)
+    (frame ~presented:cleared [ p ]);
   let moved = { p with View.row = p.View.row + 1 } in
-  check string "a moved picture is placed again" (View.placement_bytes moved) (frame [ moved ]);
+  check string "a moved picture is put where it now stands" (View.put_bytes moved)
+    (frame [ moved ]);
+  let changed = placement ~row:moved.View.row 8 in
+  check string "a changed picture is transmitted" (View.placement_bytes changed)
+    (frame [ changed ]);
   check string "a frame that no longer asks deletes it" deleted (frame []);
   check string "and then there is nothing to delete" "" (frame [])
 
 (* A differential frame writes only the rows whose text changed. A picture
-   those rows miss is still on the terminal; one they cross may have lost
-   the cells the erase took. *)
-let test_a_rewritten_row_places_again_only_the_picture_it_crosses () =
+   those rows miss is left alone; one they cross is put back from the pixels
+   the terminal holds, since a terminal that ties a placement to its cells
+   loses the parts the text was written over. *)
+let test_a_rewritten_row_puts_back_only_the_picture_it_crosses () =
   ignore (frame []);
   let p = placement 6 in
   let top = p.View.row and bottom = p.View.row + p.View.box.View.rows - 1 in
   ignore (frame [ p ]);
   check string "a row above the picture leaves it alone" ""
-    (frame ~rewritten:(fun row -> row = top - 1) [ p ]);
+    (frame ~presented:(rows_written [ top - 1 ]) [ p ]);
   check string "a row below it leaves it alone" ""
-    (frame ~rewritten:(fun row -> row = bottom + 1) [ p ]);
-  check string "its top row places it again" (View.placement_bytes p)
-    (frame ~rewritten:(fun row -> row = top) [ p ]);
-  check string "its bottom row places it again" (View.placement_bytes p)
-    (frame ~rewritten:(fun row -> row = bottom) [ p ]);
+    (frame ~presented:(rows_written [ bottom + 1 ]) [ p ]);
+  check string "a frame that moved only the cursor leaves it alone" ""
+    (frame ~presented:(rows_written []) [ p ]);
+  check string "its top row puts it back" (View.put_bytes p)
+    (frame ~presented:(rows_written [ top ]) [ p ]);
+  check string "its bottom row puts it back" (View.put_bytes p)
+    (frame ~presented:(rows_written [ bottom ]) [ p ]);
+  ignore (frame [])
+
+(* A running turn rewrites its progress row every motion step, and that row
+   can sit beside the picture. No step may send the pixels again. *)
+let test_a_row_rewritten_every_step_never_resends_the_pixels () =
+  ignore (frame []);
+  let p = placement 6 in
+  ignore (frame [ p ]);
+  let beside = p.View.row + 2 in
+  for step = 1 to 20 do
+    let written = frame ~presented:(rows_written [ beside ]) [ p ] in
+    check string (Printf.sprintf "step %d puts the held pixels back" step) (View.put_bytes p) written;
+    check bool (Printf.sprintf "step %d carries no PNG" step) false (contains ~sub:"f=100" written)
+  done;
+  check bool "a put names the held image" true
+    (contains ~sub:(Printf.sprintf "a=p,i=%d," mascot_id) (View.put_bytes p));
   ignore (frame [])
 
 let test_a_second_request_replaces_the_first () =
@@ -173,9 +224,12 @@ let () =
     ; ( "placement"
       , [ test_case "placement bytes leave the cursor where it was" `Quick
             test_placement_bytes_leave_the_cursor_where_it_was
+        ; test_case "send follows what the frame did" `Quick test_send_follows_what_the_frame_did
         ; test_case "flush sends only what changed" `Quick test_flush_sends_only_what_changed
-        ; test_case "a rewritten row places again only the picture it crosses" `Quick
-            test_a_rewritten_row_places_again_only_the_picture_it_crosses
+        ; test_case "a rewritten row puts back only the picture it crosses" `Quick
+            test_a_rewritten_row_puts_back_only_the_picture_it_crosses
+        ; test_case "a row rewritten every step never resends the pixels" `Quick
+            test_a_row_rewritten_every_step_never_resends_the_pixels
         ; test_case "a second request replaces the first" `Quick
             test_a_second_request_replaces_the_first
         ] )

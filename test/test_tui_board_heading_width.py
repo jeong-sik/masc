@@ -128,6 +128,12 @@ def run_primary_list_studio(executable: str, no_color: bool = False) -> None:
                 raise AssertionError("Keeper health was not separated from the title")
             if b"connected" not in drawn[heading_row] or b"Health" in drawn[heading_row]:
                 raise AssertionError("Keeper title lost connection identity or mixes health")
+        # The preceding short-viewport case leaves 80 columns active. Restore
+        # the wide geometry before waiting for the entire long Board title;
+        # narrow previews intentionally fit their text to the current cells.
+        h.resize_and_wait(process, fd, output, rows=32, columns=140,
+                          needle=b"  Health  ", controls=(h.FULL_REDRAW,),
+                          final_cursor=b"\x1b[?25l")
         key(b":go Board\r", b"Selected post \xc2\xb7 " + title.encode())
         capture("board-wide", 32, 140, b"Selected post \xc2\xb7 " + title.encode())
         key(b"j", b"Selected post \xc2\xb7 " + next_title.encode())

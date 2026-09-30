@@ -14,4 +14,4 @@ defer_loading = true
 [[params]]
 name = "to"
 type = "string"
-description = "Keeper who takes the controller. Omit to free it."
+description = "Keeper, operator or invited player who takes it. Omit to free it."

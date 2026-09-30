@@ -46,6 +46,8 @@ let schema = function
   | Step -> Tool_schemas_misc_toml.dos_step
   | Pass -> Tool_schemas_misc_toml.dos_pass
 
+let moves = List.map (fun route -> path route, schema route) all_routes
+
 let result_json ~ok ~message data =
   `Assoc [ ("ok", `Bool ok); ("message", `String message); ("data", data) ]
 

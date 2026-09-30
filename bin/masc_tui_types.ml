@@ -6001,7 +6001,6 @@ type state = {
      read as having none. *)
   mutable keeper_schedules: (string * schedule_snapshot) option;
   mutable keeper_schedules_error: (string * string) option;
-  mutable keeper_schedules_inflight: string option;
   (* A cancel armed for a second keypress: which schedule. The cursor can move
      between the two presses, so the schedule id is captured at arm time and a
      press on a different row re-arms for that row. *)
@@ -7566,6 +7565,23 @@ let detail_read_waiting state ~tab ~keeper =
 let selected_keeper (state : state) =
   List.nth_opt state.keepers state.keeper_cursor
 
+let keeper_detail_target_matches state keeper_name =
+  match selected_keeper state with
+  | Some keeper -> String.equal keeper.k_name keeper_name
+  | None -> false
+
+(* Retirement belongs to the request even off screen; presentation belongs
+   only to the currently selected Keeper and the newest request generation. *)
+let apply_keeper_schedules_read state request result =
+  let current = finish_detail_read state request in
+  if current && keeper_detail_target_matches state request.drr_keeper then
+    match result with
+    | Ok snapshot ->
+        state.keeper_schedules <- Some (request.drr_keeper, snapshot);
+        state.keeper_schedules_error <- None
+    | Error err ->
+        state.keeper_schedules_error <- Some (request.drr_keeper, err)
+
 let fusion_snapshot_entries (snapshot : Tui_decode.fusion_snapshot) =
   List.map (fun run -> Tui_decode.Fusion_retained_run run) snapshot.fus_runs
   @ List.map (fun evidence -> Tui_decode.Fusion_historical_evidence evidence)
@@ -8167,7 +8183,6 @@ let create_state
   schedule_wake_history_inflight = None;
   keeper_schedules = None;
   keeper_schedules_error = None;
-  keeper_schedules_inflight = None;
   schedule_cancel_armed = None;
   schedule_cancel_error = None;
   lanes = None;

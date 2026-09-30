@@ -2331,7 +2331,7 @@ type async_msg =
   (* Carries the keeper it was asked about: the roster cursor can move while a
      load is in flight, and an answer that did not say whose it was would be
      filed under whoever is selected when it lands. *)
-  | Keeper_schedules_loaded of string * (schedule_snapshot, string) result
+  | Keeper_schedules_loaded of detail_read_request * (schedule_snapshot, string) result
   | System_logs_loaded of (system_log_snapshot, string) result
   | Schedule_cancel_done of (string, string) result
   (* (message, noop): [noop = true] says the verdict already stood. *)
@@ -3773,23 +3773,19 @@ let launch_schedule_wake_history_load state ~mailbox ~schedule_id =
              (Schedule_wake_history_loaded
                 (schedule_id, Error "Eio switch is unavailable")))
 let launch_keeper_schedules_load state ~mailbox ~keeper_name =
-  match state.keeper_schedules_inflight with
-  | Some inflight when String.equal inflight keeper_name -> ()
-  | Some _ | None ->
-      state.keeper_schedules_inflight <- Some keeper_name;
-      let host = server_peer_host in
-      let port = state.port in
-      let payload_target = "keeper:" ^ keeper_name in
-      Masc_tui_async_read.launch
-        ~source:Masc_tui_async_read.Keeper_schedule
-        ~on_not_run:(fun () ->
-          if Option.equal String.equal state.keeper_schedules_inflight
-               (Some keeper_name)
-          then state.keeper_schedules_inflight <- None)
-        ~deliver:(fun result ->
-          enqueue_async mailbox (Keeper_schedules_loaded (keeper_name, result)))
-        (fun () ->
-          Masc_tui_loader.load_schedules_for_target ~host ~port ~payload_target)
+  (* Tab entry is an explicit read. Reopening supersedes a pending answer,
+     while the request ledger retains the original elapsed interval. *)
+  let request = Masc_tui_types.mark_detail_read_started state
+    ~tab:Detail_automation ~keeper:keeper_name ~now_ns:(Mtime_clock.elapsed_ns ()) in
+  let host = server_peer_host in
+  let port = state.port in
+  let payload_target = "keeper:" ^ keeper_name in
+  Masc_tui_async_read.launch
+    ~source:Masc_tui_async_read.Keeper_schedule
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Keeper_schedules_loaded (request, result)))
+    (fun () ->
+      Masc_tui_loader.load_schedules_for_target ~host ~port ~payload_target)
 
 let launch_schedules_load ?(intent = Snapshot_read.Poll) state ~mailbox =
   let read, request = Snapshot_read.start ~intent state.schedules_read in
@@ -11152,7 +11148,9 @@ let launch_detail_tab_reading state ~mailbox (keeper : keeper) =
   | Detail_automation ->
       (* This Keeper's schedules (state.keeper_schedules, what the tab reads),
          not the fleet list. *)
-      state.keeper_schedules <- None;
+      (match state.keeper_schedules with
+       | Some (name, _) when String.equal name keeper.k_name -> ()
+       | Some _ | None -> state.keeper_schedules <- None);
       state.keeper_schedules_error <- None;
       launch_keeper_schedules_load state ~mailbox ~keeper_name:keeper.k_name
   | Detail_runs -> launch_fusion_runs_load state ~mailbox
@@ -14957,16 +14955,21 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                provider_id count (if count = 1 then "" else "s") )
          | Error detail ->
            (Masc_tui_types.Notice_bad, Printf.sprintf "%s: %s" provider_id detail))
-  | Identity_refreshed (keeper_name, result) -> (
-      match result with
-      (* Re-read rather than patch what is on screen: the catalog the server
-         just wrote is the answer, and building a second copy of it here is
-         how the two come to disagree. *)
-      | Ok () ->
-          state.identity_view <- None;
-          state.identity_view_error <- None;
-          launch_identity_view state ~mailbox keeper_name
-      | Error detail -> state.identity_view_error <- Some detail)
+  | Identity_refreshed (keeper_name, result) ->
+      (* The action still completed for its original Keeper. A delayed result
+         cannot clear the reading or file its error under a new selection. *)
+      if keeper_detail_target_matches state keeper_name then
+        (match result with
+         | Ok () ->
+             state.identity_view <- None;
+             state.identity_view_error <- None;
+             launch_identity_view state ~mailbox keeper_name
+         | Error detail -> state.identity_view_error <- Some detail)
+      else
+        report_action state "system"
+          (match result with
+           | Ok () -> Printf.sprintf "%s: identity refreshed" keeper_name
+           | Error detail -> Printf.sprintf "%s: identity refresh failed: %s" keeper_name detail)
   | Account_login_event (view, generation, event) ->
       (match state.account_login with
        | Some current when current == view && view.generation = generation ->
@@ -15125,21 +15128,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         Option.equal String.equal state.schedule_wake_history_inflight
           (Some schedule_id)
       then state.schedule_wake_history_inflight <- None
-  | Keeper_schedules_loaded (keeper_name, result) ->
-      (match state.keeper_schedules_inflight with
-       | Some inflight when String.equal inflight keeper_name ->
-           state.keeper_schedules_inflight <- None
-       | Some _ | None -> ());
-      (* A page that arrived for a keeper the cursor has left is not this tab's
-         answer; filing it would show one Keeper's schedules under another's
-         name. *)
-      (match result with
-       | Ok snapshot ->
-           state.keeper_schedules <- Some (keeper_name, snapshot);
-           state.keeper_schedules_error <- None
-       | Error err ->
-           state.keeper_schedules <- None;
-           state.keeper_schedules_error <- Some (keeper_name, err))
+  | Keeper_schedules_loaded (request, result) ->
+      apply_keeper_schedules_read state request result
   | Schedule_cancel_done result -> (
       match result with
       | Ok message ->

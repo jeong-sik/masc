@@ -443,15 +443,9 @@ let turn_id_of_fields fields =
         | Delivery_identity.Fusion_run request_id
         | Delivery_identity.Workspace_message request_id
         | Delivery_identity.Approval_lifecycle request_id ->
-            Some request_id
-        | Delivery_identity.Goal_notification _ -> None
+            request_id
       in
-      (match request_id with
-       | Some request_id -> Some (Delivery_identity.Request_id.to_string request_id)
-       | None -> (
-           match string_field fields "turn_ref" with
-           | Some _ as turn_ref -> turn_ref
-           | None -> autonomous_turn_id_of_fields fields))
+      Some (Delivery_identity.Request_id.to_string request_id)
   | Ok None | Error _ -> (
       match string_field fields "turn_ref" with
       | Some _ as turn_ref -> turn_ref
@@ -477,8 +471,7 @@ let operation_id_of_fields fields =
       (Some
          { Delivery_identity.delivery_key =
              ( Delivery_identity.Fusion_run _ | Delivery_identity.Workspace_message _
-             | Delivery_identity.Approval_lifecycle _
-             | Delivery_identity.Goal_notification _ )
+             | Delivery_identity.Approval_lifecycle _ )
          ; _
          }) ->
       None

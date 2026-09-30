@@ -1,0 +1,1 @@
+- Integrate complete Prompt registry and runtime asset detail documents with physical-row paging and edge navigation into the TUI stack.

@@ -95,6 +95,7 @@ let lane_specs =
     ; Standalone_lane.Workspace_curator
     ; Standalone_lane.Verifier
     ; Standalone_lane.Browser_stagehand
+    ; Standalone_lane.Candle_appraiser
     ]
 ;;
 
@@ -240,7 +241,8 @@ let retained_run_skill_evidence_json = function
      | Exact_lane_run_registry.Librarian
      | Exact_lane_run_registry.Hitl_auto_judge
      | Exact_lane_run_registry.Board_attention
-     | Exact_lane_run_registry.Workspace_curator ->
+     | Exact_lane_run_registry.Workspace_curator
+     | Exact_lane_run_registry.Candle_appraiser ->
        `Assoc [ "state", `String "no_keeper_skills" ])
   | Task_verification_run _ | Goal_verification_run _ ->
     `Assoc [ "state", `String "no_keeper_skills" ]
@@ -496,7 +498,8 @@ let exact_answered_by ~lane ~outcome = function
      | ( ( Exact_lane_run_registry.Board_attention
          | Exact_lane_run_registry.Librarian
          | Exact_lane_run_registry.Hitl_auto_judge
-         | Exact_lane_run_registry.Workspace_curator )
+         | Exact_lane_run_registry.Workspace_curator
+         | Exact_lane_run_registry.Candle_appraiser )
        , ( Exact_lane_run_registry.Succeeded
          | Exact_lane_run_registry.Cancelled
          | Exact_lane_run_registry.Failed _ ) ) -> No_slot)
@@ -747,6 +750,7 @@ let lane_json
     | Standalone_lane.Librarian
     | Standalone_lane.Hitl_auto_judge
     | Standalone_lane.Workspace_curator
+    | Standalone_lane.Candle_appraiser
     | Standalone_lane.Verifier
     | Standalone_lane.Browser_stagehand -> []
   in
@@ -901,7 +905,8 @@ let live_lane_configuration registry lane_id =
           ( Runtime.Librarian
           | Runtime.Hitl_auto_judge
           | Runtime.Board_attention
-          | Runtime.Workspace_curator )
+          | Runtime.Workspace_curator
+          | Runtime.Candle_appraiser )
         , _
       | None, _ -> registry_admitted_catalog_slots, cli_slots, [], [], None
     in

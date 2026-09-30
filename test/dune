@@ -4485,6 +4485,7 @@
  (name test_tui_render_memory)
  (modules test_tui_render_memory)
  (libraries
+  masc_tui_pick_list
   alcotest
   masc
   masc_tui_acting_pane

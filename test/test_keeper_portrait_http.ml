@@ -443,6 +443,9 @@ beanie = 200
       | None -> fail "public Keeper roster not registered" in
     let before = get ~router (path ~size:"160" keeper) in
     check int "starting portrait" 200 before.status;
+    let before96 = get ~router (path ~size:"96" keeper) in
+    check int "starting 96px portrait" 200 before96.status;
+    let before_roster = read_roster () in
     let reader = token_for config ~agent_name:"portrait-item-reader" Masc_domain.Worker in
     let credited = get ~router ~token:reader (item_path keeper) in
     let credited_json = Yojson.Safe.from_string credited.body in
@@ -474,7 +477,6 @@ beanie = 200
        check int "Item view starts without purchases" 0 (List.length account.owned_items)
      | Masc_tui_keeper_items.Off | Masc_tui_keeper_items.Disabled _ ->
        fail "credited Item account unavailable");
-    let before_roster = read_roster () in
     let snapshot_computations = ref 0 in
     let dashboard_portrait () =
       let snapshot = Dashboard_projection_cache.get_or_compute_snapshot_json
@@ -497,6 +499,13 @@ beanie = 200
      | Masc_tui_keeper_items.Off | Masc_tui_keeper_items.Disabled _ ->
        fail "purchased Item account unavailable");
     check string "purchase alone does not equip" before.body (get ~router (path ~size:"160" keeper)).body;
+    (match item_account (get ~router ~token:reader (item_path keeper)) with
+     | Masc_tui_keeper_items.Ready account ->
+       check int "Item view reads debit" 800 account.balance_milli;
+       check bool "Item view reads purchase" true (List.mem item account.owned_items)
+     | Masc_tui_keeper_items.Off | Masc_tui_keeper_items.Disabled _ ->
+       fail "purchased Item account unavailable");
+    check string "purchase alone does not equip" before96.body (get ~router (path ~size:"96" keeper)).body;
     let purchased = ledger_bytes () in
     (match call ~slot:"face" id with Tool_result.Completed _ -> fail "head item equipped into face slot" | _ -> ());
     check string "wrong-slot refusal does not append" purchased (ledger_bytes ());
@@ -539,6 +548,7 @@ beanie = 200
     Fs_compat.append_file (Candle_ledger.path ~base_path) "{partial";
     let corrupt = ledger_bytes () in
     check int "unreadable ledger refuses a cached portrait" 503 (get ~router (path ~size:"160" keeper)).status;
+    check int "unreadable ledger refuses a cached portrait" 503 (get ~router (path ~size:"96" keeper)).status;
     check int "unreadable ledger refuses an Item account" 503
       (get ~router ~token:reader (item_path keeper)).status;
     (match dashboard_portrait () with

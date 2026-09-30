@@ -255,17 +255,23 @@ be selected. If the target is unavailable, the TUI starts on the Dashboard
 and shows the reason near the top. An invalid opening setting also starts
 on the Dashboard with a reason.
 
-The candle on `/about` comes in two styles. `painted`
-is the 2D portrait, with smooth shading, a flickering flame and blinking
-eyes. `dotted` is a small 3D figure in square dots that sways on its axis.
-On a Kitty terminal it is sent as many pixels as its rows show, so the
-terminal never scales a dot. `c` on `/about` turns the candle to the other
-style and stores it; an absent key is `painted`, and an unknown one is
-named in the event log:
+`/about` shows the registered Keepers gathering beside the candle, then
+settling into a still roster after about two seconds. A narrow terminal shows
+two portraits and counts the rest as `+N`; a wider one shows up to four.
+Kitty graphics and the half-block mosaic use the same positions. A key
+during the arrival skips to the final frame without also activating its usual
+action; Esc closes `/about` directly. The animation stops when the final frame is drawn
+or the screen is closed. Set `reduce_motion` to show that frame immediately.
+
+The candle has two styles. `painted` is a 2D portrait with a flickering flame;
+`dotted` is a small figure in square dots. `c` on the settled `/about` screen
+turns the candle to the other style and stores it; an absent key is `painted`,
+and an unknown one is named in the event log:
 
 ```toml
 [tui]
 candle = "dotted" # or "painted"
+reduce_motion = true # optional; default false
 ```
 
 The table measures the seven colours MASC uses for semantic text against a

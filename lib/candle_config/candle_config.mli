@@ -23,7 +23,7 @@ type policy = private
 type price = Unpriced | Priced of int
 val price : policy -> Keeper_portrait_item.t -> price
 (** The explicit current milli-Candle price. A missing entry is [Unpriced],
-    including when the optional [shop] table is absent. *)
+    including when [shop] or its [prices_milli] table is absent. *)
 
 type t =
   | Off  (** There is no [candle.toml]. Nothing is recorded, paid or sold. *)

@@ -198,7 +198,7 @@ def fixtures() -> region.ServedFixtures:
     served[h.SCHEDULES_PATH] = (200, {
         "status": "ok", "schedule_runner": h.SCHEDULE_RUNNER_OK,
         "schedule_store_read_error": None, "request_count": 0,
-        "truncated": False, "fsm": {"next_due_at_iso": None}, "requests": [],
+        "truncated": False, "fsm": {"next_due_at": None}, "requests": [],
     })
     served[h.KEEPER_LANES_PATH] = h.keeper_lanes_response([])
     served["/api/v1/keepers/turns"] = (200, {
@@ -304,7 +304,7 @@ def interaction(served: region.ServedFixtures):
         h.palette_go(process, fd, output, b"go board", board)
         sweep(process, fd, output, "board", b"Hostile", WIDTHS)
 
-        h.tab_until(process, fd, output, b"MASC Config")
+        h.tab_until(process, fd, output, b"MASC System")
         sweep(process, fd, output, "config", CONFIG_LOADED, WIDTHS)
 
         h.tab_until(process, fd, output, b"MASC Keepers")

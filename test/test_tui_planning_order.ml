@@ -3,6 +3,7 @@ open Masc_tui_types
 
 let goal ?due ?updated id phase priority =
   { pg_id = id
+  ; pg_criterion_revision = None
   ; pg_title = id
   ; pg_phase = phase
   ; pg_priority = priority

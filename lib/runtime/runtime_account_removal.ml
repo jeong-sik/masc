@@ -194,10 +194,21 @@ let remove text ~id =
   in
   let vision_gone = List.filter is_runtime config.media_failover in
   let assignments = List.filter (fun (_, r) -> routes_here r) config.keeper_assignments in
-  (* The binding tables are named from what the loader read, never by the
-     id's namespace alone: an id that is also a reserved table's name owns
-     no table of that name. *)
-  let binding_paths = List.map (fun (b : S.binding) -> [ id; b.model_id ]) own in
+  (* Only explicit bindings have source tables to remove. A model-set's
+     bindings disappear with its provider, while its shared declaration and
+     model specifications remain for the other providers. Read the source
+     keys rather than guessing whether a missing header was generated: an
+     explicit inline or dotted binding still has to be refused below. *)
+  let* binding_paths =
+    match Otoml.Parser.from_string_result text with
+    | Error detail -> Error (Unparsable ("runtime.toml does not parse: " ^ detail))
+    | Ok source ->
+      (match Otoml.find_opt source Fun.id [ id ] with
+       | None -> Ok []
+       | Some (Otoml.TomlTable entries | Otoml.TomlInlineTable entries) ->
+         Ok (List.map (fun (model_id, _) -> [ id; model_id ]) entries)
+       | Some _ -> Error (cannot_reach id "the binding table"))
+  in
   let provider_paths = List.filter (is_prefix [ "providers"; id ]) (table_paths text) in
   let* () =
     if provider_paths = [] then Error (cannot_reach id "the provider table") else Ok ()
@@ -278,7 +289,7 @@ let remove text ~id =
     && List.length after.providers = List.length config.providers - 1
     && List.filter (fun (b : S.binding) -> not (String.equal b.provider_id id)) config.bindings
        = after.bindings
-    && List.length after.models = List.length config.models
+    && after.models = config.models
     && after.default_runtime_id = config.default_runtime_id
     && List.equal S.equal_lane_decl (List.map expected_lane config.lane_decls) after.lane_decls
     && List.equal

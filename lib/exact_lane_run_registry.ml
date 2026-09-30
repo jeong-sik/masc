@@ -3,12 +3,14 @@ type lane =
   | Hitl_auto_judge
   | Board_attention
   | Workspace_curator
+  | Candle_appraiser
 
 let standalone_lane = function
   | Librarian -> Standalone_lane.Librarian
   | Hitl_auto_judge -> Standalone_lane.Hitl_auto_judge
   | Board_attention -> Standalone_lane.Board_attention
   | Workspace_curator -> Standalone_lane.Workspace_curator
+  | Candle_appraiser -> Standalone_lane.Candle_appraiser
 ;;
 
 (* The one place this registry decides which lanes it records. Verifier reviews
@@ -19,6 +21,7 @@ let lane_of_standalone = function
   | Standalone_lane.Hitl_auto_judge -> Some Hitl_auto_judge
   | Standalone_lane.Board_attention -> Some Board_attention
   | Standalone_lane.Workspace_curator -> Some Workspace_curator
+  | Standalone_lane.Candle_appraiser -> Some Candle_appraiser
   | Standalone_lane.Verifier -> None
   | Standalone_lane.Browser_stagehand -> None
 ;;

@@ -3,12 +3,11 @@
     not here; the form is pure. *)
 open Alcotest
 module Launch = Masc_tui_fusion_launch
-module Decode = Masc.Tui_decode
 
 let ok = function Ok value -> value | Error detail -> fail detail
 
 let options ?(enabled = true) ?(default_preset = "trio") ?(presets = [ "trio"; "duo" ]) () =
-  { Decode.flo_enabled = enabled; flo_default_preset = default_preset; flo_presets = presets }
+  { Masc.Tui_decode_fusion.flo_enabled = enabled; flo_default_preset = default_preset; flo_presets = presets }
 
 let open_form ?(keepers = [ "analyst"; "scout" ]) ?keeper ?(options = options ()) () =
   Launch.open_form ~keepers ~keeper ~options |> ok

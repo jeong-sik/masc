@@ -12,8 +12,6 @@
 \* re-exports [Keeper_heartbeat_loop] via [include]).
 \*
 \* Function names are stable identifiers; lines drift across edits.
-\* iter 64 N-2.a removed line numbers; N-2.c adds a structural guard at
-\* scripts/audit-tla-ml-line-refs.sh.  Re-verified iter 90, 2026-05-12.
 \*
 \* Runtime entities modelled:
 \*

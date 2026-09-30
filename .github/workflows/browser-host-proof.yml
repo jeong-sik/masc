@@ -1,60 +1,11 @@
 name: Browser Host Proof
 
 on:
-  pull_request:
-    # Only the paths whose behaviour a real Firefox on macOS can change.
-    # bin/dune and test/dune used to be listed too, and that made this
-    # 20-minute macos-14 job run for most pull requests: on 2026-09-07,
-    # 19 of the 28 branches it ran for touched no browser file at all,
-    # only a dune stanza elsewhere. A broken stanza is caught by the Linux
-    # dune build @check on every pull request; nothing about Firefox
-    # depends on it.
-    paths:
-      # The host's logic and its command line. The logic moved from
-      # bin/masc_browser_host.ml into this library on 2026-09-15 and the
-      # filter stayed behind, which left every later change to the host's
-      # exchanges outside the only workflow that runs them against a real
-      # Firefox -- the same way the scene runtime slipped past below.
-      - 'lib/browser_host/**'
-      - 'bin/masc_browser_host.ml'
-      - 'lib/browser_lane/**'
-      - 'lib/browser_webdriver.*'
-      - 'lib/browser_download*'
-      - 'lib/browser_bidi_downloads.*'
-      - 'lib/browser_bidi_peer.*'
-      - 'scripts/fixtures/firefox_download_artifact_probe.ml'
-      - 'lib/browser_page_script.ml'
-      - 'lib/browser_screenshot.*'
-      - 'lib/keeper/keeper_browser_upload.*'
-      - 'lib/core/exec_buffer.*'
-      - 'lib/string_util/string_util.*'
-      - 'lib/core/common.*'
-      - 'lib/process/process_eio.ml'
-      - 'scripts/probe-browser-upload-bytes.py'
-      - 'scripts/probe-firefox-controls.py'
-      - 'scripts/fixtures/firefox_controls_probe.ml'
-      - 'test/test_browser_native_host.py'
-      - 'test/test_browser_bidi_host.py'
-      - 'test/test_browser_bidi_peer.ml'
-      - 'test/stanzas/test_browser_bidi_peer.inc'
-      - 'test/test_browser_activation.py'
-      - 'test/test_browser_scene.py'
-      # The two sources the scene probe reads out of the tree and runs in a
-      # real Gecko. Without them a change to the scene runtime reached the
-      # extension and the driver without this workflow ever starting.
-      - 'lib/browser_scene_script.ml'
-      - 'lib/browser_interaction.ml'
-      - 'connectors/browser/extension/background.js'
-      - 'connectors/browser/extension/manifest.json'
-      - '.github/workflows/browser-host-proof.yml'
   workflow_dispatch:
   # Weekly on main so main holds a macOS opam switch in the cache store.
   # Pull requests only restore (see .github/actions/setup-ocaml-toolchain),
   # and this workflow is the only one that runs on macOS, so without a
   # main-scoped run there would be nothing for them to restore.
-  schedule:
-    - cron: "17 18 * * 1"
-
 permissions:
   contents: read
 

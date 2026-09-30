@@ -94,12 +94,12 @@ related: ["every-lane-is-one-row-in-one-registry", "exact-lane-walks-one-slot-li
 
 | 이벤트 | 남기는 때 | 담는 것 |
 |---|---|---|
-| `Snapshot` | 검증기의 통과 결과를 검증 원장에 커밋하기 직전 | goal_id, 검증 요청 id, criterion revision, 검증 통과 시각, Goal 생성 시각, 그때의 기한(Goal 이 들고 있던 그대로. 없을 수 있다), 제목·metric·target, 그때 연결된 Task 의 id 목록 |
-| `PayoutOwed` | 사람이 확정할 때. 확정 기록을 저장한 다음, Goal phase 를 저장하기 전에(3.2) | goal_id, 검증 요청 id, 검증 통과 시각, 확정 시각 |
-| `Candidates` | 일꾼이 Task 를 읽은 뒤, 모델을 부르기 전에 | goal_id, 검증 요청 id, `Snapshot` 의 Task 마다 상태(찾음, 삭제됨)와 찾은 Task 의 제목·담당자·상태·끝난 시각, 후보 Task 와 후보 keeper 목록 |
-| `PayoutFailed` | 다시 시도해도 결과가 같은 이유가 생겼을 때(지금은 기한을 읽을 수 없음 하나) | goal_id, 검증 요청 id, 이유 |
-| `Paid` | 지급할 때. 한 줄에 전부 적는다 | goal_id, 검증 요청 id, 등급, 총액, 답한 lane 슬롯(모델) id(없을 수 있다), 후보 Task 마다 관계 판정, keeper 별 가중치·몫·감액 계수·지급액, 감액에 쓴 값(기준 시각, 기한, 감액률, 바닥) |
-| `Unattributed` | 받을 keeper 가 없어 지급 없이 끝낼 때 | goal_id, 검증 요청 id, 이유(후보 없음, 관계있는 Task 없음) |
+| `Snapshot` | 검증기의 통과 결과를 검증 원장에 커밋하기 직전 | goal_id, 검증 요청 id, 검증 실행 id(`verification_run_id`), criterion revision, 검증 통과 시각, Goal 생성 시각, 그때의 기한(Goal 이 들고 있던 그대로. 없을 수 있다), 제목·metric·target, 그때 연결된 Task 의 id 목록 |
+| `PayoutOwed` | 사람이 확정할 때. 확정 기록을 저장한 다음, Goal phase 를 저장하기 전에(3.2) | goal_id, 검증 요청 id, 검증 실행 id(`verification_run_id`), 검증 통과 시각, 확정 시각 |
+| `Candidates` | 일꾼이 Task 를 읽은 뒤, 모델을 부르기 전에 | goal_id, 검증 요청 id, 검증 실행 id(`verification_run_id`), `Snapshot` 의 Task 마다 상태(찾음, 삭제됨)와 찾은 Task 의 제목·담당자·상태·끝난 시각, 후보 Task 와 후보 keeper 목록 |
+| `PayoutFailed` | 다시 시도해도 결과가 같은 이유가 생겼을 때(지금은 기한을 읽을 수 없음 하나) | goal_id, 검증 요청 id, 검증 실행 id(`verification_run_id`), 이유 |
+| `Paid` | 지급할 때. 한 줄에 전부 적는다 | goal_id, 검증 요청 id, 검증 실행 id(`verification_run_id`), 등급, 총액, 답한 lane 슬롯(모델) id(없을 수 있다), 후보 Task 마다 관계 판정, keeper 별 가중치·몫·감액 계수·지급액, 감액에 쓴 값(기준 시각, 기한, 감액률, 바닥) |
+| `Unattributed` | 받을 keeper 가 없어 지급 없이 끝낼 때 | goal_id, 검증 요청 id, 검증 실행 id(`verification_run_id`), 이유(후보 없음, 관계있는 Task 없음) |
 | `Purchased` | keeper 가 아이템을 살 때 | keeper, 아이템, 낸 금액 |
 | `Equipped` | keeper 가 착용을 바꿀 때 | keeper, 슬롯, 아이템(이름에서 정한 기본 장신구로 되돌릴 때는 `Default`) |
 | `HalfLifeSet` | 설정의 반감기가 원장의 마지막 `HalfLifeSet` 과 다르거나 원장에 값이 없을 때 | 반감기(`Off` 또는 시간) |
@@ -151,8 +151,8 @@ related: ["every-lane-is-one-row-in-one-registry", "exact-lane-walks-one-slot-li
    - `Snapshot` 을 쓰지 못하면 그 전이를 거절한다. 검증기는 거절된 커밋을 실패로 남겨 두고 멈춘다(2장). 이것은 기존 Goal 전이가 검증 원장 기록을 phase 쓰기보다 먼저 하고, 그 기록이 실패하면 phase 쓰기를 막는 순서와 같다(`lib/workspace_goals.ml:409-416`). 이 거절은 Candle 이 켜져(`Enabled`) 있을 때만 일어난다.
    - `Snapshot` 에 넣는 Task 정보는 연결 파일의 id 목록뿐이다. 원본만 읽는 함수(`read_goal_task_links_authoritative_r`)로 읽고, 읽지 못하면 쓰지 않고 전이를 거절한다.
    - 잠금 순서는 Goal, backlog, links 다음에 원장이다(2장). 원장 잠금은 덧붙이는 동안만 잡고 그 안에서 다른 잠금을 잡지 않는다.
-   - 전이가 그 뒤에 실패하면 쓸모없는 `Snapshot` 이 남고, 같은 요청이 다시 오면 하나 더 남는다. 지급은 확정된 통과의 `Snapshot`(검증 요청 id 와 통과 시각이 같은 것)만 따른다.
-2. **사람의 확정.** `confirm_completion` 은 Goal 잠금을 잡은 채 세 가지를 차례로 저장한다. (가) 검증 원장의 확정 기록. (나) Candle 원장의 `PayoutOwed`. (다) Goal phase `Completed`. 셋은 다른 파일이라 한꺼번에 일어나지 않는다. 잠금이 막는 것은 그 사이에 다른 요청이 끼어드는 것뿐이다. 지급 의무는 (나)를 쓴 순간에 생긴다. (나)는 확정된 결과와 검증 요청 id, 통과 시각이 같은 `Snapshot` 이 있고, 지급 상태(3.1)가 새 `PayoutOwed` 를 쓸 수 있을 때만 쓴다. Candle 이 켜지기 전에 통과한 Goal 처럼 `Snapshot` 이 없으면 쓰지 않는다. (나)를 쓰지 못하면 (다)를 하지 않고 그 확정을 거절한다. 이미 `Completed` 인 Goal 에 확정이 다시 와도 같은 조건으로 판단한다.
+   - 전이가 그 뒤에 실패하면 쓸모없는 `Snapshot` 이 남고, 같은 요청이 다시 오면 하나 더 남는다. 지급은 확정된 통과의 `Snapshot`(Goal id·검증 요청 id·검증 실행 id와 통과 시각이 같은 것)만 따른다. 통과 시각은 초 단위이므로 같은 초의 재시도도 실제 검증 실행 id로 구분한다.
+2. **사람의 확정.** `confirm_completion` 은 Goal 잠금을 잡은 채 세 가지를 차례로 저장한다. (가) 검증 원장의 확정 기록. (나) Candle 원장의 `PayoutOwed`. (다) Goal phase `Completed`. 셋은 다른 파일이라 한꺼번에 일어나지 않는다. 잠금이 막는 것은 그 사이에 다른 요청이 끼어드는 것뿐이다. 지급 의무는 (나)를 쓴 순간에 생긴다. (나)는 확정된 결과와 Goal id·검증 요청 id·검증 실행 id, 통과 시각이 같은 `Snapshot` 이 있고, 지급 상태(3.1)가 새 `PayoutOwed` 를 쓸 수 있을 때만 쓴다. Candle 이 켜지기 전에 통과한 Goal 처럼 `Snapshot` 이 없으면 쓰지 않는다. (나)를 쓰지 못하면 (다)를 하지 않고 그 확정을 거절한다. 이미 `Completed` 인 Goal 에 확정이 다시 와도 같은 조건으로 판단한다.
    - 순서의 이유. (가) 다음에 (나)를 쓴다. 확정하지 않은 통과에 지급 의무가 남는 일이 없게 하려는 것이다. (나) 다음에 (다)를 저장한다. 기존 Goal 전이가 기록을 phase 쓰기보다 먼저 하는 순서와 같다(`lib/workspace_goals.ml:409-416`).
    - 잠금의 이유. 재오픈은 같은 Goal 잠금 안에서 검증 원장의 확정 기록을 지우고(`lib/goal/goal_verification.ml:426-465`), drop 은 같은 잠금 안에서 phase 를 쓴다(`lib/goal/goal_store.ml:622-648`). 잠금이 없으면 (가)와 (나) 사이에 재오픈이 끼어들어 확정 기록이 지워진 채 (나)가 쓰일 수 있다.
    - 확정 중에 실패하면 아래처럼 남는다. 서버가 그 자리에서 죽어도 같다. 원장 끝에 반쯤 쓰인 줄이 남으면 서버를 시작할 때 잘려 나가서 (나)가 실패한 것과 같아진다(3.1).
@@ -162,8 +162,10 @@ related: ["every-lane-is-one-row-in-one-registry", "exact-lane-walks-one-slot-li
      | (가) | 없다 | 처음부터 한다 | 지급 의무가 없다 |
      | (나) | 확정 기록만 있다. phase 는 `Awaiting_confirmation` | (나)와 (다)를 한다. `confirmed_at` 은 처음 확정한 시각이다 | 지급 의무가 없다. Goal 이 완료된 적이 없다. 재오픈하면 확정 기록이 지워지고, 다시 통과해 확정하면 새 `Snapshot` 과 새 `PayoutOwed` 를 쓴다 |
      | (다) | 확정 기록과 `PayoutOwed`. phase 는 `Awaiting_confirmation` | `PayoutOwed` 를 새로 쓰지 않고(3.1) phase 만 옮긴다 | `PayoutOwed` 가 남아 지급 대기다. 완료되지 않은 Goal 에 지급이 나간다. 7장에서 운영자가 정한다 |
+**[사실: 현재 구현 범위]** `Candle_payout_worker`는 `Candle_candidates.drain_once`로 후보를 준비하고, 후보 keeper가 없으면 `Unattributed`로 끝낸다. 후보가 있는 지급 의무는 `Candle_appraise.settle_one`을 통해 등급·관계·가중치를 판정하고 `Paid` 또는 `Unattributed`로 기록한다(`lib/candle_runtime/candle_payout_worker.ml`, `lib/candle_runtime/candle_candidates.ml`, `lib/candle_runtime/candle_appraise.ml`). 서버 maintenance는 같은 일꾼을 다시 깨운다(`lib/server/server_bootstrap_maintenance.ml`).
+
 3. **후보와 지급.** 일꾼이 지급 대기 Goal 마다 아래를 한다. 지급 대기 목록은 원장에서 읽고(3.1) Goal 의 phase 는 보지 않는다.
-   - Task 를 읽어 후보를 정하고 `Candidates` 를 쓴다(3.4). `Candidates` 가 이미 있으면 그것을 쓴다.
+   - Task 를 읽어 후보를 정하고 `Candidates` 를 쓴다(3.4). 같은 Goal id·검증 요청 id·검증 실행 id의 `Candidates` 가 이미 있으면 그것을 쓴다.
    - 모델을 부르고(3.4) `Paid` 나 `Unattributed` 를 쓴다.
    - 일꾼은 Goal 검증기와 같은 모양이다(2장). 조건 변수로 깨우고, 서버를 시작할 때 한 번 훑는다. Goal 하나에 하나만 돈다. 점검 루프나 확정 요청 안에서 모델을 부르지 않는다. 그 시간만큼 다른 요청이 멈추기 때문이다. lane 호출은 fork 해서 다른 Goal 의 처리가 긴 호출 뒤에 줄 서지 않게 하고, 깨움은 Atomic 표시로 놓치지 않게 한다(검증기가 그렇게 한다: `lib/goal_verification_agent.ml:745-770`, `:774`).
    - 일꾼은 이럴 때 깨어난다. `PayoutOwed` 를 썼을 때, 서버를 시작할 때, 다른 지급이 끝났을 때(`Paid`·`Unattributed`·`PayoutFailed`).

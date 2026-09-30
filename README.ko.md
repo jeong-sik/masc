@@ -326,7 +326,7 @@ UI를 닫기 전에 Keepers 화면의 실행 제어에서 일시 정지하세요
 | 절차와 스킬 추가하기 | [스킬](docs/SKILLS.md) |
 | 실행 설정과 프롬프트 이해하기 | [설정](docs/spec/14-configuration.md) · [환경변수](docs/ENV-CONTRACT.md) · [프롬프트 맵](docs/PROMPT-MAP.md) |
 | 설계와 다음 단계 살펴보기 | [명세](docs/spec/SPEC-INDEX.md) · [로드맵](ROADMAP.md) |
-| 변경에 기여하기 | [기여 안내](CONTRIBUTING.md) · [에이전트 지침](AGENTS.md) |
+| 변경에 기여하기 | [기여 안내](CONTRIBUTING.md) · [기여 절차](docs/guides/CONTRIBUTOR-WORKFLOW.ko.md) · [에이전트 지침](AGENTS.md) |
 
 ## 라이선스
 

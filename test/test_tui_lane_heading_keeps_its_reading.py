@@ -93,24 +93,31 @@ def run_unapplied_installations(executable: str) -> None:
             ],
         },
     }
-    reads = 0
+    fail_read = [False]
 
     def add_ons():
-        nonlocal reads
-        reads += 1
-        return (200, inventory) if reads == 1 else (503, {"error": "inventory unavailable"})
+        return (503, {"error": "inventory unavailable"}) if fail_read[0] else (200, inventory)
 
     fixtures["/api/v1/lane-addons"] = add_ons
 
     def interact(process, fd, _slave, output, _base_path):
         h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
         h.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
-        h.send_and_wait(process, fd, output, b"A", b"Lane Add-ons \xc2\xb7 2 declared")
+        # A opens the installation overview. Numeric section keys belong to
+        # an installed worker's detail, so observe this overview's fetch instead.
+        addon_start = len(output)
+        h.send_and_wait(process, fd, output, b"A", b"Lane Add-ons")
+        h.wait_for_output(process, fd, output, b"Lane Add-ons \xc2\xb7 2 declared",
+                          start=addon_start, timeout=3.0)
         frame = h.send_and_wait(process, fd, output, b"\x1b", b"2 declared")
         reading = b"Lane Add-ons: 2 declared \xc2\xb7 0 active \xc2\xb7 2 config issues"
         if reading not in h.screen_text(frame):
             raise AssertionError("unapplied TOML was counted as an installed worker")
-        h.send_and_wait(process, fd, output, b"A", b"HTTP 503")
+        fail_read[0] = True
+        addon_start = len(output)
+        h.send_and_wait(process, fd, output, b"A", b"Lane Add-ons")
+        h.wait_for_output(process, fd, output, b"HTTP 503",
+                          start=addon_start, timeout=3.0)
         stale = h.send_and_wait(process, fd, output, b"\x1b", b"STALE")
         if b"Lane Add-ons: STALE \xc2\xb7 2 declared" not in h.screen_text(stale):
             raise AssertionError("failed Add-on reread was shown as a current count")

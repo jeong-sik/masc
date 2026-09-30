@@ -22,3 +22,7 @@ val choose_preview : conversation:preview -> staged:Masc_tui_keeper_chat_project
 
 val decode_payload : string -> (string, string) result
 (** Decode a retained wire payload (bare base64 or a base64 data URI). *)
+
+val decode_artifact : Tool_output.artifact_ref -> Yojson.Safe.t -> (string, string) result
+(** Verify the response identity, retained wire byte count, and content digest
+    against the recorded reference before decoding the image payload. *)

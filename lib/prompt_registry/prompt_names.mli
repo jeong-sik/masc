@@ -429,3 +429,9 @@ val agent_core_handoff_prompt_param_description : string
 val agent_core_agent_tool_prompt_param_description : string
 val keeper_context_workspace_memory_available : string
 val keeper_context_workspace_memory_unavailable : string
+
+val candle_appraiser_grade : string
+
+val candle_appraiser_relation : string
+
+val candle_appraiser_weights : string

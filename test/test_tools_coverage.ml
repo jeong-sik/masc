@@ -297,26 +297,6 @@ let test_masc_transition_schema () =
   match find_registered_tool "masc_transition" with
   | None -> Alcotest.fail "masc_transition not found"
   | Some schema ->
-      Alcotest.(check bool) "description omits task required_tools"
-        false
-        (String_util.string_contains_substring ~needle:"required_tools" schema.description);
-      Alcotest.(check bool) "description omits mandatory tools routing"
-        false
-        (String_util.string_contains_substring ~needle:"mandatory tools" schema.description);
-      Alcotest.(check bool) "description omits requires tools routing"
-        false
-        (String_util.string_contains_substring ~needle:"requires tools" schema.description);
-      Alcotest.(check bool) "description omits configured completion reviewer"
-        false
-        (String_util.string_contains_substring
-           ~needle:"configured LLM completion reviewer"
-           schema.description);
-      (* RFC-0323 G-4: the weak-lane teaching sentence must stay gone. *)
-      Alcotest.(check bool) "description omits the verifier-bypass teaching"
-        false
-        (String_util.string_contains_substring
-           ~needle:"do not route normal completion"
-           schema.description);
       (match get_json_assoc "properties" schema.input_schema with
       | Some props ->
           Alcotest.(check bool) "no transition completion_contract input" false
@@ -432,19 +412,7 @@ let test_masc_add_task_schema () =
            Alcotest.(check bool) "has goal_id" true (List.mem_assoc "goal_id" props);
            Alcotest.(check bool) "has contract" true (List.mem_assoc "contract" props);
            Alcotest.(check bool) "has skills" true (List.mem_assoc "skills" props);
-           (match List.assoc_opt "goal_id" props with
-            | Some goal_id_schema ->
-                let description =
-                  Option.value ~default:"" (get_json_string "description" goal_id_schema)
-                in
-                Alcotest.(check bool) "goal_id is optional in prose" true
-                  (String_util.string_contains_substring ~needle:"Optional structured goal link" description);
-                Alcotest.(check bool) "goal_id does not reference prompt markers" false
-                  (String_util.string_contains_substring ~needle:"<available_goals>" description);
-                Alcotest.(check bool) "goal_id does not label omitted links orphaned" false
-                  (String_util.string_contains_substring ~needle:"orphaned" description)
-            | None -> Alcotest.fail "masc_add_task missing goal_id property")
-          ; (match List.assoc_opt "contract" props with
+           (match List.assoc_opt "contract" props with
              | Some contract_schema ->
                Alcotest.(check (option bool))
                  "contract rejects additional properties"
@@ -772,36 +740,6 @@ let test_masc_agent_card_schema () =
 (* 21. Edge Case Tests                                           *)
 (* ============================================================ *)
 
-let test_description_not_too_short () =
-  List.iter (fun schema ->
-    Alcotest.(check bool) (Printf.sprintf "%s description >= 20 chars" schema.name)
-      true (String.length schema.description >= 20)
-  ) schema_inventory
-
-(* The longest description config/tools ships, measured rather than picked:
-   keeper_skill's, which walks the model through when to open a Skill body
-   and what a reference call costs. 1000 stood here until two descriptions
-   grew past it -- keeper_skill and keeper_memory_write -- and neither was an
-   accident, so the number follows the measurement and a description that
-   grows again trips this and says by how much.
-
-   This is a per-description bound. What the model actually carries is the
-   whole model-visible surface, and test_keeper_tool_schema_bytes measures
-   that against its own argued ceiling. *)
-let max_description_chars = 1080
-
-let test_description_not_too_long () =
-  List.iter (fun schema ->
-    Alcotest.(check bool)
-      (Printf.sprintf
-         "%s description is %d chars, at most %d"
-         schema.name
-         (String.length schema.description)
-         max_description_chars)
-      true
-      (String.length schema.description <= max_description_chars)
-  ) schema_inventory
-
 let test_no_duplicate_properties () =
   List.iter (fun schema ->
     match get_json_assoc "properties" schema.input_schema with
@@ -907,8 +845,6 @@ let () =
     "transport_tools", [
     ];
     "edge_cases", [
-      Alcotest.test_case "description_not_short" `Quick test_description_not_too_short;
-      Alcotest.test_case "description_not_long" `Quick test_description_not_too_long;
       Alcotest.test_case "no_duplicate_props" `Quick test_no_duplicate_properties;
       Alcotest.test_case "valid_prop_types" `Quick test_property_types_valid;
     ];

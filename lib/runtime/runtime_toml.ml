@@ -3,7 +3,7 @@
     Re-homed from the deleted [Runtime_declarative_parser]. Parses RFC-0058
     layers 1-3 plus [[runtime].default] into a self-standing
     {!Runtime_schema.config}. Reserved top-level namespaces: providers,
-    models, runtime, web_search, exec (the [\[exec.ssh.endpoints.*\]] SSH
+    models, model_sets, runtime, web_search, exec (the [\[exec.ssh.endpoints.*\]] SSH
     endpoint registry, Phase 1 SSH lane spec §4.2). Dropped routing namespaces
     system, routes, and profiles are rejected rather than ignored. A top-level
     table whose name [\[providers\]] declares carries that provider's model
@@ -1401,7 +1401,7 @@ let parse_model (id : string) (tbl : Otoml.t)
   (* [max-context] is an explicit operator override, not a required field: a
      runtime whose model is covered by the AGENT_CORE capability catalog can leave it
      unset and inherit the catalog's max-context (see
-     [Runtime.resolve_max_context_of_runtime]). An operator-supplied value
+     [Runtime_instance.resolve_max_context_of_runtime]). An operator-supplied value
      must still be positive; [materialize_config] fail-closes at load time on
      a runtime that resolves neither source (RFC-0206 §2.1). *)
   let max_context_result = positive_int_opt_field ~path ~key:"max-context" tbl in
@@ -2381,6 +2381,60 @@ let declared_provider_ids (toml : Otoml.t) : string list =
   | Some _ | None -> []
 ;;
 
+(* Sets are source-level declarations, expanded into the same typed bindings
+   as explicit tables. The runtime has one provider × model resolution path;
+   account homes, credentials, quotas and overrides still belong to providers
+   and bindings rather than being copied into model specifications. *)
+let parse_model_sets (toml : Otoml.t)
+  : ((string * string list) list, parse_error list) result
+  =
+  let namespace = Ns.(key Model_sets) in
+  let declared_models =
+    match Otoml.find_opt toml Fun.id [ Ns.(key Models) ] with
+    | Some (Otoml.TomlTable entries | Otoml.TomlInlineTable entries) ->
+      List.map fst entries
+    | Some _ | None -> []
+  in
+  let parse_set (id, tbl) =
+    let path = Ns.(path Model_sets) id in
+    if not (is_toml_table tbl)
+    then Error (error path "model set must be a TOML table")
+    else (
+      let unknown =
+        List.concat_map
+          (fun (key, _) ->
+             if String.equal key "models" then []
+             else error (path ^ "." ^ key) "unknown model set key; expected models")
+          (Otoml.get_table tbl)
+      in
+      match typed_find "an array of strings" path tbl "models"
+              (Otoml.get_array Otoml.get_string) with
+      | Error errors -> Error (unknown @ errors)
+      | Ok None -> Error (unknown @ error (path ^ ".models") "models is required")
+      | Ok (Some models) ->
+        let references =
+          List.concat_map
+            (fun model ->
+               if List.mem model declared_models then []
+               else error (path ^ ".models") (Printf.sprintf "unknown model %S" model))
+            models
+        in
+        let duplicates =
+          if List.length models = List.length (List.sort_uniq String.compare models)
+          then []
+          else error (path ^ ".models") "model ids must not repeat"
+        in
+        match unknown @ references @ duplicates with
+        | [] -> Ok (id, models)
+        | errors -> Error errors)
+  in
+  match Otoml.find_opt toml Fun.id [ namespace ] with
+  | None -> Ok []
+  | Some (Otoml.TomlTable entries | Otoml.TomlInlineTable entries) ->
+    partition_results (List.map parse_set entries)
+  | Some _ -> Error (error namespace "model_sets must be a TOML table")
+;;
+
 let parse_bindings (toml : Otoml.t)
   : (Runtime_schema.binding list, parse_error list) result
   =
@@ -2402,12 +2456,44 @@ let parse_bindings (toml : Otoml.t)
         (not (is_reserved name)) && is_toml_table value && List.mem name declared)
       top_entries
   in
-  Result.map
-    List.concat
-    (partition_results
-       (List.map
-          (fun (provider_id, tbl) -> parse_provider_table provider_id tbl)
-          provider_tables))
+  let ( let* ) = Result.bind in
+  let* sets = parse_model_sets toml in
+  let* explicit =
+    Result.map List.concat
+      (partition_results
+         (List.map
+            (fun (provider_id, tbl) -> parse_provider_table provider_id tbl)
+            provider_tables))
+  in
+  let provider_set_bindings provider_id =
+    let path = Ns.(path Providers) provider_id in
+    match Otoml.find_opt toml Fun.id [ Ns.(key Providers); provider_id ] with
+    | None -> Ok []
+    | Some tbl when is_toml_table tbl ->
+      (match typed_find "a string" path tbl "model-set" Otoml.get_string with
+       | Error errors -> Error errors
+       | Ok None -> Ok []
+       | Ok (Some name) ->
+         (match List.assoc_opt name sets with
+          | None ->
+            Error (error (path ^ ".model-set") (Printf.sprintf "unknown model set %S" name))
+          | Some models ->
+            let missing =
+              List.filter
+                (fun model_id ->
+                   not (List.exists (fun (binding : Runtime_schema.binding) ->
+                     String.equal binding.provider_id provider_id
+                     && String.equal binding.model_id model_id) explicit))
+                models
+            in
+            partition_results
+              (List.map
+                 (fun model_id -> parse_binding_fields provider_id model_id (Otoml.TomlTable []))
+                 missing)))
+    | Some _ -> Ok [] (* parse_providers reports the malformed provider. *)
+  in
+  let* generated = partition_results (List.map provider_set_bindings declared) in
+  Ok (explicit @ List.concat generated)
 ;;
 
 (* --- Top-level parse --- *)
@@ -2486,7 +2572,7 @@ let parse_runtime_media_failover ~path value =
      to [] (the repo's Unknown→Permissive anti-pattern). An explicit empty array
      [] is preserved as the intentional derive-from-declared-caps signal; id typos
      in a well-typed array are still caught loudly by
-     {!Runtime.validate_runtime_references}, which now judges every [runtime]
+     {!Runtime_config_validation.validate_runtime_references}, which now judges every [runtime]
      field that names a routing target. *)
   try Ok (Otoml.get_array Otoml.get_string value) with
   | Otoml.Type_error msg ->
@@ -2881,7 +2967,15 @@ let validate_ollama_only_binding_fields
 (* --- [typesafeai] --- *)
 
 let typesafeai_keys =
-  [ "enabled"; "destinations"; "board_attention"; "absorb_gate"; "context_review"; "skill_applicability"; "excluded_keepers" ]
+  [ "enabled"
+  ; "destinations"
+  ; "board_attention"
+  ; "board_attention_confidence_floor"
+  ; "absorb_gate"
+  ; "context_review"
+  ; "skill_applicability"
+  ; "excluded_keepers"
+  ]
 ;;
 
 let typesafeai_destination_keys = [ "endpoint"; "model"; "api_key_env" ]
@@ -3021,6 +3115,22 @@ let parse_typesafeai_destinations ~(path : string) (tbl : Otoml.t)
   | Some _ -> Error (error key_path "destinations must be an array of tables")
 ;;
 
+(* [board_attention_confidence_floor] is a confidence Jev reports, so it is a
+   number from 0 to 1. A value outside that range would settle every answer or
+   none while looking like a floor. *)
+let parse_typesafeai_confidence_floor ~(path : string) (tbl : Otoml.t) ~default =
+  let key = "board_attention_confidence_floor" in
+  match typed_find_or "a float" path tbl key Otoml.get_float ~default with
+  | Error _ as refused -> refused
+  | Ok floor
+    when Float.is_nan floor || Float.compare floor 0.0 < 0 || Float.compare floor 1.0 > 0 ->
+    Error
+      (error
+         (path ^ "." ^ key)
+         (Printf.sprintf "must be a number from 0 to 1, got %g" floor))
+  | Ok floor -> Ok floor
+;;
+
 (* [\[typesafeai\]] -- the TypeSafe AI lane; the key is not here. An absent
    table is {!Runtime_schema.default_typesafeai}; a present one is read
    strictly, so a misspelt key is a load error rather than a switch that
@@ -3039,6 +3149,12 @@ let parse_typesafeai (toml : Otoml.t)
     let board_attention =
       typed_find_or "a boolean" path tbl "board_attention" Otoml.get_boolean ~default:d.board_attention
     in
+    let board_attention_confidence_floor =
+      parse_typesafeai_confidence_floor
+        ~path
+        tbl
+        ~default:d.board_attention_confidence_floor
+    in
     let absorb_gate =
       typed_find_or "a boolean" path tbl "absorb_gate" Otoml.get_boolean ~default:d.absorb_gate
     in
@@ -3049,11 +3165,22 @@ let parse_typesafeai (toml : Otoml.t)
       typed_find_or "a boolean" path tbl "skill_applicability" Otoml.get_boolean ~default:d.skill_applicability
     in
     let excluded_keepers = parse_typesafeai_excluded_keepers ~path tbl in
-    (match unknown, enabled, destinations, board_attention, absorb_gate, context_review, skill_applicability, excluded_keepers with
+    (match
+       ( unknown
+       , enabled
+       , destinations
+       , board_attention
+       , board_attention_confidence_floor
+       , absorb_gate
+       , context_review
+       , skill_applicability
+       , excluded_keepers )
+     with
      | ( []
        , Ok lane_enabled
        , Ok destinations
        , Ok board_attention
+       , Ok board_attention_confidence_floor
        , Ok absorb_gate
        , Ok context_review
        , Ok skill_applicability
@@ -3062,6 +3189,7 @@ let parse_typesafeai (toml : Otoml.t)
          { Runtime_schema.lane_enabled
          ; destinations
          ; board_attention
+         ; board_attention_confidence_floor
          ; absorb_gate
          ; context_review
          ; skill_applicability
@@ -3073,6 +3201,7 @@ let parse_typesafeai (toml : Otoml.t)
           @ result_errors enabled
           @ result_errors destinations
           @ result_errors board_attention
+          @ result_errors board_attention_confidence_floor
           @ result_errors absorb_gate
           @ result_errors context_review
           @ result_errors skill_applicability

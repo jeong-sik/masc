@@ -290,13 +290,19 @@ let goal_proof_lookup config ~submitted_evidence =
 
    The application-owned worker crosses a typed internal boundary. Public MCP
    callers can request lifecycle changes but cannot name verifier verdicts or
-   impersonate the fixed verifier authority. *)
+   impersonate the fixed verifier authority.
+
+   A passing verdict is committed after the Candle Snapshot step has recorded
+   the Goal's inputs to a payout (RFC-goal-candle-ledger 3.2). The step writes
+   nothing unless Candle is enabled, and while it is enabled a Snapshot that
+   cannot be written refuses the commit, so the request stays pending. *)
 
 let commit_gate_verdict config ~goal_id ~request_id ~criterion ~verification_run_id ~decision ~evidence
   : (unit, string) result
   =
   let result =
     Workspace_goals.commit_verifier_decision
+      ~before_proof_commit:(Candle_snapshot.before_proof_commit config)
       ~tool_name:"goal_verifier_commit"
       ~start_time:(Tool_timing.start ())
       config

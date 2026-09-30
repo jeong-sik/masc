@@ -1,0 +1,24 @@
+{
+  "scenario": "image",
+  "source_head": "cf6a0c37b52ce0a05ad4b717a4e98585c4cde131",
+  "binary_sha256": "3a1b674315ebd4cb59649f7cbc453e1ab497ac4a314dc86ffc17180e3bd54699",
+  "command": [
+    "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-keeper-snapshot-codec-pool/test/test_tui_stored_image_pty.py",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-keeper-snapshot-codec-pool/_build/default/bin/masc_tui.exe",
+    "--evidence-dir",
+    "/tmp/masc-tui-stack-final-20261001/image"
+  ],
+  "fixtures": [
+    {
+      "path": "test/test_tui_stored_image_pty.py",
+      "sha256": "f8c2eb3f150f63b939e81f2a702c5fd954c23dc41a0e3374147e9356fd4a3fde"
+    },
+    {
+      "path": "test/test_tui_keyboard_input.py",
+      "sha256": "bd45413731ce3455a7c0eff4ea6733e862415a206774d1984a08c71b9f76e28d"
+    }
+  ],
+  "exit_code": 0,
+  "elapsed_seconds": 25.04
+}

@@ -6,4 +6,10 @@
 (test
  (name test_goal_verification_agent)
  (modules test_goal_verification_agent)
- (libraries masc_test_deps digestif))
+ (libraries
+  masc_test_deps
+  digestif
+  masc_candle
+  masc_candle_store
+  masc_candle_config
+  masc_candle_runtime))

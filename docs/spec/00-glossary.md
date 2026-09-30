@@ -1490,21 +1490,22 @@ status: reference
 : Goal 완료에 대해 Keeper가 받는 보상 화폐. 정수 `milli-candle`로 센다(1 Candle = 1,000 milli-candle).
   부동소수점 단위를 쓰지 않는다.
   - 원장(`candle-ledger.jsonl`): `<base-path>/.masc/candle-ledger.jsonl`에 한 줄씩 이벤트를
-    덧붙이는 전용 원장. 각 행은 `kind`·`at`과 해당 종류의 필드를 담은 닫힌 JSON 객체다. 원장에는
-    사실(Snapshot·PayoutOwed·Candidates·PayoutFailed·Paid·Unattributed·Purchased·Equipped·HalfLifeSet)만
-    기록되며, 잔액 자체는 파일에 저장하지 않고 원장을 처음부터 읽어 계산한다. 헌법·승인·도구 호출 원장이나
+    덧붙이는 전용 원장. 각 행은 `kind`·`at`과 해당 종류의 필드를 담은 닫힌 JSON 객체다. 현재 원장에
+    기록되는 사건은 6종(`Snapshot`·`Payout_owed`·`Candidates`·`Unattributed`·`Paid`·`Payout_failed`)이며,
+    잔액은 파일에 누적 값을 따로 적지 않고 원장의 `Paid` 사실을 순서대로 재생하여 계산한다. 헌법·승인·도구 호출 원장이나
     `goal_verifications.json`(검증 원장)과 다른 별개 원장이다.
   - 발행과 지급: Goal이 검증기를 통과(`Snapshot`)하고 사람의 확정(`Confirm_completion`)으로
-    `Completed`가 되면 지급 의무(`PayoutOwed`)가 생긴다. 백그라운드 지급 일꾼이 기여 Task와 Keeper를
-    선별해 모델 감정을 거쳐 `Paid` 이벤트 한 줄로 지급을 기록한다. 분배는 한 줄에 원자적으로 적히므로
-    일부 Keeper만 지급되는 불완전 상태가 없다.
+    `Completed`가 되면 지급 의무(`Payout_owed`)가 생긴다. 백그라운드 지급 일꾼이 기여 Task와 Keeper를
+    선별(`Candidates`)해 모델 감정을 거쳐 `Paid` 이벤트 한 줄로 지급을 기록한다. 분배는 한 줄에 원자적으로 적히므로
+    일부 Keeper만 지급되는 불완전 상태가 없다. 기여자가 없으면 `Unattributed`, 오류 시 `Payout_failed`를 남긴다.
   - 사용처 한정: Candle로 살 수 있는 것은 초상화 장신구(**Keeper Portrait**의 장비 아이템)뿐이다.
-    도구, 스킬, 모델, 런타임 예산, 현상금 등 다른 자원은 구매할 수 없다(헌법 불변식). 아이템 구매는
-    `Purchased`, 착용 변경은 `Equipped` 이벤트로 남는다.
-  - 잔액 감쇠: 잔액은 시간이 지남에 따라 지수적으로 감소하며, 반감기는 설정(`half_life`)이 정한다.
+    도구, 스킬, 모델, 런타임 예산 등 다른 자원은 구매할 수 없다(헌법 불변식). 상점 구매와 착용 반영은
+    RFC 단계적 구현에 따르며, 현재 원장 스키마에는 포함되지 않는다.
+  - 잔액 감쇠: 헌법에 따라 잔액은 시간이 지남에 따라 지수적으로 감소하며, 반감기는 설정(`half_life`)이 정한다.
     원장에 기록된 과거 사실은 지워지지 않고 잔액만 시점 기준으로 계산된다. 이는 화폐 가치의 감쇠이며,
     `no_wall_clock_death` 불변식의 유일한 명시적 예외다(Task·Goal·Board 상태는 만료시키지 않는다).
   → [Candle_event](../../lib/candle/candle_event.mli) ·
+  [Candle_balance](../../lib/candle/candle_balance.mli) ·
   [Candle_ledger](../../lib/candle_store/candle_ledger.mli) ·
   [Candle_time](../../lib/candle/candle_time.mli) ·
   [docs/constitution.xml](../constitution.xml) ·

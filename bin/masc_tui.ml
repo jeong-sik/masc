@@ -2964,62 +2964,6 @@ let launch_keeper_deletions state ~mailbox ?retry () =
     | None -> enqueue_async mailbox (Keeper_deletions_loaded
         (generation, Error "Eio switch is unavailable")))
 
-let launch_resources_list state ~mailbox =
-  let host = server_peer_host in
-  let port = state.port in
-  let request_id = Printf.sprintf "tui-res-%.6f" (Unix.gettimeofday ()) in
-  let session = state.mcp_session in
-  Masc_tui_async_read.launch
-    ~deliver:(fun result ->
-      enqueue_async mailbox (Resources_listed result))
-    (fun () ->
-      let session_result =
-        match session with
-        | Some session_id -> Ok session_id
-        | None ->
-            Masc_tui_http.open_mcp_session ~host ~port
-              ~client_version:Runtime_build_version.current
-      in
-      match session_result with
-      | Error detail -> Error detail
-      | Ok session_id ->
-          Masc_tui_http.call_mcp_resources_list ~host ~port ~session_id
-            ~request_id)
-
-let launch_resource_read state ~mailbox ~uri =
-  let same_resource =
-    match state.resource_content with
-    | Some (current, _) -> String.equal current uri
-    | None -> false
-  in
-  state.resource_pending_uri <- Some uri;
-  if not same_resource then begin
-    state.resource_content <- None;
-    state.resource_content_error <- None;
-    state.resource_scroll <- 0
-  end;
-  let host = server_peer_host in
-  let port = state.port in
-  let request_id = Printf.sprintf "tui-res-%.6f" (Unix.gettimeofday ()) in
-  let session = state.mcp_session in
-  Masc_tui_async_read.launch
-    ~source:Masc_tui_async_read.Resource_read
-    ~deliver:(fun result ->
-      enqueue_async mailbox (Resource_read (uri, result)))
-    (fun () ->
-      let session_result =
-        match session with
-        | Some session_id -> Ok session_id
-        | None ->
-            Masc_tui_http.open_mcp_session ~host ~port
-              ~client_version:Runtime_build_version.current
-      in
-      match session_result with
-      | Error detail -> Error detail
-      | Ok session_id ->
-          Masc_tui_http.call_mcp_resources_read ~host ~port ~session_id
-            ~request_id ~uri)
-
 (* What the working tree is compared against, everywhere a tree diff is
    read. *)
 let tree_diff_base_ref = "HEAD"
@@ -5629,7 +5573,7 @@ let goto_surface ?(from_reference = false) state ~mailbox (destination : surface
        | Config_voice -> launch_voice_config_load state ~mailbox
        | Config_runtime | Config_models | Config_themes ->
            launch_runtime_config_load state ~mailbox)
-   | Resources -> launch_resources_list state ~mailbox
+   | Resources -> Masc_tui_resources_requests.launch_list state ~host:server_peer_host ~deliver:(fun message -> enqueue_async mailbox message)
    | Code -> Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(fun message -> enqueue_async mailbox message)
    | Metrics ->
        (* Usage is the top-level account reading. Explicit telemetry entry
@@ -20707,7 +20651,7 @@ and is loaded on demand through keeper_skill.
              ~delta:(if bracket = "]" then 1 else -1)
              ~set_cursor:(fun cursor -> state.resources_cursor <- cursor)
              ~reopen:(fun () ->
-               Masc_tui_resources_updates.open_selected state ~read:(fun ~uri -> launch_resource_read state ~mailbox:async_messages ~uri))
+               Masc_tui_resources_updates.open_selected state ~read:(fun ~uri -> Masc_tui_resources_requests.launch_read state ~host:server_peer_host ~deliver:(fun message -> enqueue_async async_messages message) ~uri))
        | Some "]" when state.view = Lanes ->
            (match state.lanes_mode, state.lane_runs_next, state.lane_runs_loading with
             | Lanes_run_list lane, Some before, false ->
@@ -20888,7 +20832,7 @@ and is loaded on demand through keeper_skill.
                 report_action state "system"
                   "Approval list changed; review the updated row before retrying")
        | Some "\r" when state.view = Resources ->
-           Masc_tui_resources_updates.open_selected state ~read:(fun ~uri -> launch_resource_read state ~mailbox:async_messages ~uri)
+           Masc_tui_resources_updates.open_selected state ~read:(fun ~uri -> Masc_tui_resources_requests.launch_read state ~host:server_peer_host ~deliver:(fun message -> enqueue_async async_messages message) ~uri)
        | Some "J" when state.view = Resources ->
            state.resource_scroll <-
              Masc_tui_types.scroll_down_from state.resource_scroll ~by:1
@@ -22356,7 +22300,7 @@ and is loaded on demand through keeper_skill.
                 | Config_runtime | Config_models | Config_themes ->
                     launch_runtime_config_load state ~mailbox:async_messages)
             | Resources ->
-                launch_resources_list state ~mailbox:async_messages
+                Masc_tui_resources_requests.launch_list state ~host:server_peer_host ~deliver:(fun message -> enqueue_async async_messages message)
             | Schedules -> launch_schedules_load state ~mailbox:async_messages
             | Keepers Keeper_runtime_pick ->
                 launch_runtime_catalog_load state ~mailbox:async_messages

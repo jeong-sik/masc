@@ -27,6 +27,8 @@ SOURCE_MODULES = (
     'bin/masc_tui_code_requests.mli',
     'bin/masc_tui_resources_updates.ml',
     'bin/masc_tui_resources_updates.mli',
+    'bin/masc_tui_resources_requests.ml',
+    'bin/masc_tui_resources_requests.mli',
 )
 
 if __name__ == "__main__":

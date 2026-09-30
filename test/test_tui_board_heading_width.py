@@ -112,7 +112,7 @@ def run_primary_list_studio(executable: str, no_color: bool = False) -> None:
                 "name": name + ("-no-color" if no_color else ""),
                 "rows": rows, "columns": columns, "provenance": "CI fixture PTY",
                 "frame_b64": base64.b64encode(frame).decode(),
-                "screen": screen.decode(errors="replace")}), flush=True)
+                "screen": b"\n".join(h.screen_rows(frame).get(row, b"") for row in range(1, rows + 1)).decode(errors="replace")}), flush=True)
             if name.startswith("keepers-") and not h.keeper_row_selected(b"alpha").search(frame):
                 raise AssertionError("Keeper selected row vanished from the captured viewport")
             return h.screen_rows(frame)

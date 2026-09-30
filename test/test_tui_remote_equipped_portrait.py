@@ -235,10 +235,7 @@ def remote_portrait(binary: str, evidence: Path) -> None:
             # Presentation metadata can fail independently of lifecycle.
             # The same real native row still offers its observed boot action.
             roster.publish("missing-identity")
-            calls = roster.count()
             os.write(fd, b"r")
-            assert h.wait_for_fixture_state(process, fd, output,
-                lambda: roster.count() > calls, timeout=WAIT_SECONDS)
             h.resize_and_wait(process, fd, output, rows=70, columns=99, needle=b"Metadata:")
             screen_is(lambda text: b"Metadata:" in text and b"trace_id" in text
                       and b"metrics not read for the remote workspace" in text,

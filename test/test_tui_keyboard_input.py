@@ -12630,8 +12630,9 @@ def run_tab_strip_keeps_current_entry_regression(executable: str) -> None:
 def run_activity_logs_tab_pane_regression(executable: str) -> None:
     """Dashboard, Work and Usage share the pane's 102-column surface floor.
 
-    At the narrow threshold they all retain the Recent pane. Activity's
-    Events and Logs readings suppress it, because they own that content.
+    Home stays compact by default. An explicit Ctrl-L choice opens the
+    Recent pane, whose 102-column surface boundary then persists on Work and
+    Usage. Activity Events and Logs suppress it because they own that content.
     """
 
     def pane_row(output: bytearray) -> int:

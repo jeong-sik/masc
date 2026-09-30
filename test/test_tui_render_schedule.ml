@@ -1379,8 +1379,15 @@ let test_narrow_repository_and_log_tables () =
         (fun column -> check bool "log context stays visible" true
             (List.mem column logs.Masc_tui_table.shown))
         Schedule.[ Log_time; Log_level; Log_message ];
-      check bool "repository path reaches the screen" true
-        (holds "/repo" repository);
+      Printf.printf "repository %d columns: %s\n%!" inner_width repository;
+      check bool "repository path keeps its root and distinguishing basename" true
+        (holds "/" repository && holds "example" repository);
+      if inner_width = 40 then
+        check bool "a folded path is visibly abbreviated" true
+          (holds "…" repository)
+      else
+        check bool "the complete short path remains visible when it fits" true
+          (holds "/repo/example" repository);
       check bool "log message reaches the screen" true
         (holds "failure" entry))
     [ 40; 56; 74; 100; 160 ]

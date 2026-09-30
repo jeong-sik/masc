@@ -33,6 +33,8 @@
 - Show individual Home decisions by request identity, keep successful source readings during partial failures, preserve exact detail and return context across refresh, and retain continuation beside long request lists. #40152
 - Runtime v opens complete default and ordered media route metadata, boot admission differences and read/action/probe diagnostics in a scrollable read-only detail, including when no candidate exists. (#40293)
 - Patch review supports Shift+Left/Right to pan long lines while old/new coordinates and diff markers stay fixed. Horizontal position is visible and clamps to actual content and pane width, resetting on reopen. (#40301)
+- Lane Add-ons now show package descriptions and the selected declared result before activity, with multiline report bodies, visible selection and separate coverage/delivery readings (#40206).
+- Match Records navigation to displayed chronology, reuse the selected result while rendering, and expose each selected result’s exact Lane in Summary and raw detail (#40206).
 
 ### Changed
 

@@ -217,6 +217,62 @@ def run_installation_detail(executable: str) -> None:
     print("Lane Add-on Installation detail: PASS")
 
 
+def run_grouped_history(executable: str, captures: Path | None) -> None:
+    fixtures = terminal.overview_event_http_fixtures()
+    captured = snapshot()
+    active = captured["instances"][0]
+    active["title"] = "Current reporter"
+    active["configuration"] = {"source_path": "/fixture/lane-addons/report.toml"}
+    old_runs = []
+    old_rows = []
+    for index in range(9):
+        owner = f"retained-{index}"
+        old_runs.append({**active, "instance_id": owner, "incarnation": owner,
+            "title": "Repeated counters", "phase": {"kind": "detached"},
+            "configuration": {"source_path": "/fixture/lane-addons/" + ("a.toml" if index % 2 == 0 else "b.toml")}})
+        old_rows.append({**captured["rows"][0], "id": owner + "/1/result", "lane_id": owner + "/browser",
+            "title": "Preserved old result", "fields": {"old_run": owner}})
+    captured["instances"] = [old_runs[0], active, *old_runs[1:]]
+    captured["rows"].extend(old_rows)
+    captured["configuration"]["declarations"] = [{"id": "report", "source_path": active["configuration"]["source_path"],
+        "desired_revision": "1", "applied_revision": "1", "instance_id": active["instance_id"]}]
+    fixtures["/api/v1/lane-addons"] = (200, captured)
+    requests: terminal.HttpRequests = []
+
+    def interact(process, master, _slave, output, _base):
+        terminal.wait_for_output(process, master, output, b"Health: ", start=0, timeout=10)
+        opened = terminal.send_and_wait(process, master, output, b":go lane add-ons\r", b"Retained history")
+        screen = terminal.screen_text(terminal.frame_containing(opened, b"Retained history"))
+        if b"> Current reporter" not in screen or b"Repeated counters" in screen:
+            raise AssertionError(f"old workers crowded current installations: {screen!r}")
+        terminal.send_and_wait(process, master, output, b"\r", b"Current reporter")
+        terminal.send_and_wait(process, master, output, b"\x1b", b"h:open")
+        history = terminal.send_and_wait(process, master, output, b"h", b"Instance retained-0")
+        history_screen = terminal.screen_text(terminal.frame_containing(history, b"Instance retained-0"))
+        if b"a.toml" not in history_screen or b"h:current installations" not in history_screen:
+            raise AssertionError("history lacked source grouping or return navigation")
+        if captures is not None:
+            captures.mkdir(parents=True, exist_ok=True)
+            (captures / "08-grouped-history.pty").write_bytes(bytes(output))
+        detail = terminal.send_and_wait(process, master, output, b"\r", b"Preserved old result")
+        if b"detached" not in terminal.screen_text(detail):
+            raise AssertionError("history detail did not retain detached state")
+        terminal.send_and_wait(process, master, output, b"D", b"retained-0/1/result")
+        terminal.send_and_wait(process, master, output, b"\x1b", b"Preserved old result")
+        terminal.send_and_wait(process, master, output, b"\x1b", b"Instance retained-0")
+        returned = terminal.send_and_wait(process, master, output, b"h", b"> Current reporter")
+        if b"Repeated counters" in terminal.screen_text(returned):
+            raise AssertionError("returning to installations expanded retained workers")
+        terminal.send_and_wait(process, master, output, b"q", b"MASC Dashboard")
+        os.write(master, b"q")
+
+    terminal.run_terminal_scenario(executable, description="current installations and grouped retained history",
+        interact=interact, http_fixtures=fixtures, http_requests=requests)
+    if any(path.startswith("/api/v1/lane-addons") for path, _ in requests):
+        raise AssertionError("history navigation sent a write")
+    print("Lane current list / grouped retained runs / exact raw target / return: PASS")
+
+
 def run_declared_report(executable: str, captures: Path | None) -> None:
     fixtures = terminal.overview_event_http_fixtures()
     captured = snapshot()
@@ -282,3 +338,4 @@ if __name__ == "__main__":
     main(os.path.abspath(args.executable), args.capture_dir)
     run_installation_detail(os.path.abspath(args.executable))
     run_declared_report(os.path.abspath(args.executable), args.capture_dir)
+    run_grouped_history(os.path.abspath(args.executable), args.capture_dir)

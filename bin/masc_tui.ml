@@ -20136,6 +20136,7 @@ and is loaded on demand through keeper_skill.
                               (match apply session with Ok session -> update (Addons.put_document {view with error=None} session)
                                | Error detail -> update {view with error=lane_addons_input_failure detail}))
                      | "r" -> launch_lane_addons state ~mailbox:async_messages Addons.Inspect
+                     | "h" when view.screen=Addons.Overview -> update (Addons.toggle_history view)
                      | "S" ->
                          if not view.loading then (
                            let keepers=List.map (fun (keeper:keeper) -> keeper.k_name) state.keepers in
@@ -20189,7 +20190,7 @@ and is loaded on demand through keeper_skill.
                                | Some configuration -> update {view with configuration_cursor=max 0
                                    (min (List.length configuration.declarations - 1) (view.configuration_cursor + delta))})
                           | Some snapshot, Addons.Overview, _ ->
-                              update {view with instance_cursor=max 0 (min (Addons.overview_count snapshot - 1) (view.instance_cursor + delta))}
+                              update {view with instance_cursor=max 0 (min (Addons.overview_count ~mode:view.overview_mode snapshot - 1) (view.instance_cursor + delta))}
                           | Some _, Addons.Detail _, (Addons.Configurations | Addons.Instances | Addons.Connections) -> ()
                           | Some _, Addons.Detail _, Addons.Rows ->
                               update (Addons.move_record view delta)

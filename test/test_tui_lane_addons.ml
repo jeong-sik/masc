@@ -194,7 +194,7 @@ let configuration_and_ports () =
     (Some "/config/lane-addons/custom.toml")
     (UI.selected_source_path selected_unapplied);
   check bool "saved declaration is shown without claiming an active worker" true
-    (List.exists (String.starts_with ~prefix:"  custom · pending · custom.toml")
+    (List.exists (String.starts_with ~prefix:"  custom · no current worker · custom.toml")
        (UI.lines ~width:120 {overview with snapshot=Some past}));
   let wrong_source = {snapshot with instances=List.map (fun (i : UI.instance) ->
     {i with source_path=Some "/config/lane-addons/elsewhere.toml"}) snapshot.instances} in
@@ -441,7 +441,7 @@ let context_flow_uses_declared_connections () =
     (List.exists (String.starts_with ~prefix:"  Project observer · attached") configured_lines
      && List.exists (String.starts_with ~prefix:"> Project metric · attached") configured_lines);
   check bool "overview offers help and opening" true
-    (List.exists (String.starts_with ~prefix:"?:help  Esc:back  Enter:open  i:install  n:new  S:subs  r:refresh") configured_lines);
+    (List.exists (String.starts_with ~prefix:"?:help  Esc:back  Enter:open  h:history/current  i:install  n:new  S:subs  r:refresh") configured_lines);
   check bool "overview omits the old timeline" true
     (not (List.exists (String.starts_with ~prefix:"Activity timeline") configured_lines));
   let worker_lines = UI.lines ~width:160 {configured with focus=UI.Instances} in
@@ -840,7 +840,60 @@ let declared_results_show_body_before_activity_and_keep_raw_evidence () =
     (not (List.mem "  Report: First finding" (UI.lines ~width:100
       {detail with snapshot=Some {snapshot with output={rows=[foreign];coverage=[]}}})))
 
+let current_installations_and_grouped_history_keep_exact_targets () =
+  let worker id run addon phase source_path : UI.instance = {
+    id;incarnation=id;run_id=run;addon_id=addon;title="Repeated title";
+    revision="1";phase;observation_seq=1;rows_count=1;source_path;
+    binding=`Assoc ["sources",`List []];outputs=[];skills_directory=None;
+    action_schema=None;binding_schema=None;display=Masc.Lane_addon_presentation.empty} in
+  let old = worker "old-a" "project" "analysis" UI.Row.Detached (Some "/config/a.toml") in
+  let current = worker "live-a" "project" "analysis" UI.Row.Attached (Some "/config/a.toml") in
+  let old_two = {old with id="old-a-two";incarnation="old-a-two"} in
+  let other = worker "old-b" "project" "analysis" UI.Row.Detached (Some "/elsewhere/a.toml") in
+  let declaration : UI.declaration = {source_path="/config/b.toml";installation_id=Some "b";
+    desired=Some "1";applied=Some "1";instance_id=Some "old-b-config";
+    issues=["missing image"];origin=UI.Parsed_declaration} in
+  let retired_declaration = worker "old-b-config" "project" "b" UI.Row.Detached (Some declaration.source_path) in
+  let snapshot : UI.snapshot = {instances=[old;current;other;old_two;retired_declaration];
+    configuration=Some {directory="/config";complete=true;declarations=[declaration]};
+    output={rows=[];coverage=[]};complete=None} in
+  let view = {UI.initial with snapshot=Some snapshot} in
+  check int "current worker and inactive declaration replace repeated retained rows" 2
+    (UI.overview_count snapshot);
+  check int "every retained incarnation remains available" 4
+    (UI.overview_count ~mode:UI.Retained_runs snapshot);
+  check (option string) "overview actions target visible live worker, not hidden old worker" (Some current.id)
+    (Option.map (fun (item : UI.instance) -> item.id) (UI.selected_instance view));
+  let lines = UI.lines ~width:120 view in
+  check bool "history is collapsed to an explicit navigation summary" true
+    (List.mem "Retained history · 4 runs · h:open" lines
+     && not (List.exists (String.starts_with ~prefix:"    Instance old-") lines));
+  let config = UI.open_selected_instance {view with instance_cursor=1} in
+  check int "inactive declaration still opens repair details" 0 config.configuration_cursor;
+  let history = UI.toggle_history view in
+  check bool "history mode is explicit" true (history.overview_mode=UI.Retained_runs);
+  let history_lines = UI.lines ~width:120 history in
+  check int "identical titles and basenames in different paths are distinct source groups" 2
+    (List.length (List.filter (String.equal "a.toml · run project") history_lines));
+  List.iter (fun id -> check bool "retained run identity is visible" true
+    (List.mem ("    Instance " ^ id) history_lines)) ["old-a";"old-a-two";"old-b";"old-b-config"];
+  let opened = UI.open_selected_instance history in
+  check (option string) "history Enter pins the selected incarnation" (Some "old-a")
+    (Option.map (fun (item : UI.instance) -> item.id) (UI.selected_instance opened));
+  let refreshed = UI.reconcile_snapshot history
+    {snapshot with instances=List.filter (fun (item : UI.instance) -> item.id<>"old-a") snapshot.instances} in
+  check int "refresh never selects another retained run when selected run disappears" (-1) refreshed.instance_cursor;
+  check (option string) "removed history target cannot become a live action target" None
+    (Option.map (fun (item : UI.instance) -> item.id) (UI.selected_instance refreshed));
+  let returned = UI.toggle_history refreshed in
+  check (option string) "explicit return restores current list selection" (Some "live-a")
+    (Option.map (fun (item : UI.instance) -> item.id) (UI.selected_instance returned));
+  check bool "detail ignores history toggle and stays pinned" true
+    (UI.toggle_history opened = opened)
+
 let () = run "TUI Lane package operations" ["operator scenarios",[
+  test_case "current installations and grouped retained runs preserve exact targets" `Quick
+    current_installations_and_grouped_history_keep_exact_targets;
   test_case "declared results show body before activity and preserve raw evidence" `Quick
     declared_results_show_body_before_activity_and_keep_raw_evidence;
   test_case "detail keeps installation ownership for edit, navigation and export" `Quick detail_keeps_installation_ownership;

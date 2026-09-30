@@ -73,6 +73,9 @@ def prepare(args) -> dict:
     credentials = provider.get("credentials", {})
     if credentials.get("type") != "env" or not isinstance(credentials.get("key"), str):
         raise ValueError("selected provider must use an environment credential reference")
+    if any(key.strip().lower() in {"authorization", "x-api-key", "api-key", "x-auth-token"}
+           for key in provider.get("headers", {})):
+        raise ValueError("selected provider contains credential headers; use its environment credential reference")
     credential_env = credentials["key"]
     if not os.environ.get(credential_env):
         raise ValueError("selected provider credential environment variable is unavailable")
@@ -127,6 +130,46 @@ def modes(counter: Counter) -> list:
     return sorted(k for k, n in counter.items() if n == max(counter.values())) if counter else []
 
 
+def expected_input(case: dict) -> dict:
+    data = case["input"]
+    if case["stage"] != "weights":
+        return data
+    return {"goal": data["goal"],
+            "tasks": [{"title": task["title"], "assignee": task["keeper"]} for task in data["tasks"]],
+            "keepers": data["keepers"], "weight_max": data["weight_max"]}
+
+
+def validate_receipt(row: dict, case: dict, plan: dict) -> None:
+    receipt = row["receipt"]
+    payload = receipt.get("input", {}).get("payload", {})
+    if (receipt.get("lane") != "candle_appraiser"
+            or receipt.get("input", {}).get("kind") != "exact"
+            or payload.get("goal_id") != case["id"]
+            or payload.get("request_id") != f"eval-{case['id']}-{row['trial']}"
+            or payload.get("verification_run_id") != "synthetic-eval-verification"
+            or payload.get("stage") != case["stage"]
+            or payload.get("actual_input") != expected_input(case)):
+        raise ValueError("result receipt does not match the planned case/trial input")
+    result = receipt.get("output", {}).get("result")
+    dispatches = [attempt for attempt in receipt.get("output", {}).get("attempts", [])
+                  if attempt.get("kind") == "dispatch"]
+    if len(dispatches) != 1 or dispatches[0].get("slot") != plan["runtime_id"]:
+        raise ValueError("result receipt does not match the planned runtime dispatch")
+    if row["status"] == "ok":
+        if (receipt.get("status") != "succeeded"
+                or receipt.get("selected_slot") != plan["runtime_id"]
+                or result != row["answer"]):
+            raise ValueError("successful result disagrees with its receipt")
+    else:
+        code = {"invalid_response": "candle_appraisal_rejected",
+                "transport_unavailable": "candle_appraisal_unavailable"}[row["status"]]
+        if (receipt.get("status") != "failed" or receipt.get("code") != code
+                or not isinstance(row["answer"], str)
+                or receipt.get("detail") != row["answer"]
+                or result != {"error": row["answer"]}):
+            raise ValueError("failed result disagrees with its receipt")
+
+
 def report(workspace: Path, evidence_path: Path | None = None) -> dict:
     plan = json.loads((workspace / "plan.json").read_text())
     if plan["schema"] != SCHEMA:
@@ -138,7 +181,16 @@ def report(workspace: Path, evidence_path: Path | None = None) -> dict:
     groups = {key: [] for key in cases}
     seen = set()
     run_ids = set()
-    path = (evidence_path or workspace / "evidence") / "results.jsonl"
+    evidence = evidence_path or workspace / "evidence"
+    metadata = json.loads((evidence / "metadata.json").read_text())
+    if metadata.get("plan") != plan:
+        raise ValueError("evidence metadata does not match the workspace plan")
+    build = metadata.get("build", {})
+    if (build.get("commit_source") != "embedded"
+            or build.get("commit") != plan["source_commit"]
+            or build.get("binary_commit") != plan["source_commit"]):
+        raise ValueError("evidence binary does not match the planned source commit")
+    path = evidence / "results.jsonl"
     for line in path.read_text().splitlines():
         row = json.loads(line)
         case_id, trial = row["case_id"], row["trial"]
@@ -157,6 +209,7 @@ def report(workspace: Path, evidence_path: Path | None = None) -> dict:
         if run_id in run_ids:
             raise ValueError("duplicate exact run receipt must not count as another trial")
         run_ids.add(run_id)
+        validate_receipt(row, cases[case_id], plan)
         groups[case_id].append(row)
     summaries = {}
     for case_id, rows in groups.items():

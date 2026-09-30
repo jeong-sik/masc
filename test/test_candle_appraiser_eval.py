@@ -1,5 +1,6 @@
 """The opt-in measurement must not mutate its source or inflate evidence."""
 import argparse
+import copy
 import importlib.util
 import json
 import os
@@ -80,6 +81,15 @@ streaming = true
             EVAL.prepare(self.args)
         self.assertFalse(self.args.workspace.exists())
 
+    def test_credential_headers_are_refused_before_creating_workspace(self):
+        original = self.source.read_text()
+        for header in ("Authorization", "X-API-KEY", "api-key", "x-auth-token"):
+            with self.subTest(header=header):
+                self.source.write_text(original + f'\n[providers.sample.headers]\n"{header}" = "private-header"\n')
+                with self.assertRaisesRegex(ValueError, "credential headers"):
+                    self.prepare()
+                self.assertFalse(self.args.workspace.exists())
+
     @unittest.skipIf(BINARY is None, "native executable is supplied by targeted CI")
     def test_prepared_fixture_passes_the_actual_opt_in_executable_without_calls(self):
         self.prepare()
@@ -95,12 +105,31 @@ streaming = true
         evidence = self.args.workspace / "evidence"
         evidence.mkdir(exist_ok=True)
         (evidence / "results.jsonl").write_text("".join(json.dumps(row) + "\n" for row in rows))
+        plan = json.loads((self.args.workspace / "plan.json").read_text())
+        (evidence / "metadata.json").write_text(json.dumps({"plan": plan, "build": {
+            "commit_source": "embedded", "commit": plan["source_commit"],
+            "binary_commit": plan["source_commit"]}}))
+
+    def row(self, *, trial=1, status="ok", answer=None, run_id="observed-run"):
+        case = json.loads((self.args.workspace / "cases.json").read_text())[0]
+        answer = ("rejected" if status != "ok" else {"grade": "small"}) if answer is None else answer
+        receipt = {"run_id": run_id, "lane": "candle_appraiser", "selected_slot": "sample.model",
+                   "status": "succeeded" if status == "ok" else "failed",
+                   "input": {"kind": "exact", "payload": {"goal_id": case["id"],
+                       "request_id": f"eval-{case['id']}-{trial}",
+                       "verification_run_id": "synthetic-eval-verification", "stage": case["stage"],
+                       "actual_input": case["input"]}},
+                   "output": {"result": answer if status == "ok" else {"error": answer},
+                              "attempts": [{"kind": "dispatch", "slot": "sample.model"}]}}
+        if status != "ok":
+            receipt.update(code={"invalid_response": "candle_appraisal_rejected",
+                                 "transport_unavailable": "candle_appraisal_unavailable"}[status], detail=answer)
+        return {"case_id": case["id"], "trial": trial, "stage": case["stage"],
+                "status": status, "answer": answer, "receipt": receipt}
 
     def test_failures_and_missing_trials_remain_visible_without_calibration_claim(self):
         self.prepare()
-        self.write_results([{"case_id": "grade-base", "trial": 1, "stage": "grade",
-                             "status": "invalid_response", "answer": "rejected",
-                             "receipt": {"run_id": "observed-run"}}])
+        self.write_results([self.row(status="invalid_response")])
         result = EVAL.report(self.args.workspace)
         self.assertFalse(result["complete"])
         base = result["cases"]["grade-base"]
@@ -112,20 +141,74 @@ streaming = true
 
     def test_duplicate_trials_cannot_inflate_the_mode_count(self):
         self.prepare()
-        row = {"case_id": "grade-base", "trial": 1, "stage": "grade", "status": "ok",
-               "answer": {"grade": "small"}, "receipt": {"run_id": "observed-run"}}
+        row = self.row()
         self.write_results([row, row])
         with self.assertRaisesRegex(ValueError, "duplicate"):
             EVAL.report(self.args.workspace)
 
     def test_one_receipt_cannot_be_counted_as_two_trials(self):
         self.prepare()
-        row = {"case_id": "grade-base", "trial": 1, "stage": "grade", "status": "ok",
-               "answer": {"grade": "small"}, "receipt": {"run_id": "observed-run"}}
+        row = self.row()
         self.write_results([row, {**row, "trial": 2}])
         with self.assertRaisesRegex(ValueError, "duplicate exact run"):
             EVAL.report(self.args.workspace)
 
+    def test_report_rejects_another_runs_metadata(self):
+        self.prepare()
+        self.write_results([self.row()])
+        path = self.args.workspace / "evidence/metadata.json"
+        data = json.loads(path.read_text())
+        data["plan"]["runtime_id"] = "another.provider"
+        path.write_text(json.dumps(data))
+        with self.assertRaisesRegex(ValueError, "metadata"):
+            EVAL.report(self.args.workspace)
+
+    def test_report_rejects_mispaired_receipts_and_changed_answers(self):
+        self.prepare()
+        for status in ("ok", "invalid_response", "transport_unavailable"):
+            original = self.row(status=status)
+            for change in ("input", "answer", "status", "code", "dispatch"):
+                if status == "ok" and change == "code":
+                    continue
+                with self.subTest(status=status, change=change):
+                    row = copy.deepcopy(original)
+                    if change == "input":
+                        row["receipt"]["input"]["payload"]["request_id"] = "another-trial"
+                    elif change == "answer":
+                        row["answer"] = "altered"
+                    elif change == "status":
+                        row["receipt"]["status"] = "cancelled"
+                    elif change == "dispatch":
+                        row["receipt"]["output"]["attempts"][0]["slot"] = "another.provider"
+                    else:
+                        row["receipt"]["code"] = "another-failure"
+                    self.write_results([row])
+                    with self.assertRaises(ValueError):
+                        EVAL.report(self.args.workspace)
+
+    def test_optimized_audit_still_rejects_misbound_metadata(self):
+        self.prepare()
+        self.write_results([self.row()])
+        path = self.args.workspace / "evidence/metadata.json"
+        data = json.loads(path.read_text())
+        data["plan"]["runtime_id"] = "another.provider"
+        path.write_text(json.dumps(data))
+        audit = ROOT / "docs/evidence/2026-09-30-candle-appraiser/audit-evaluation.py"
+        result = subprocess.run([sys.executable, "-O", str(audit), str(self.args.workspace),
+                                 str(self.args.workspace / "evidence")], capture_output=True, text=True)
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("audit check failed", result.stderr)
+        self.assertNotIn('"actual_inputs_match_frozen_corpus": true', result.stdout)
+
+    @unittest.skipIf(BINARY is None, "native executable is supplied by targeted CI")
+    def test_native_validation_rejects_ambient_replacement_catalog(self):
+        self.prepare()
+        result = subprocess.run([str(BINARY), "--base-path", str(self.args.workspace)],
+                                env={**os.environ, "AGENT_CORE_MODEL_CATALOG": "/unrelated/catalog.json"},
+                                capture_output=True, text=True)
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("AGENT_CORE_MODEL_CATALOG is not allowed", result.stderr)
+        self.assertFalse((self.args.workspace / "evidence").exists())
 
 if __name__ == "__main__":
     unittest.main()

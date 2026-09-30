@@ -5,6 +5,12 @@ adapter. They are not a global acceptance verdict. The 240-call GLM baseline
 completed with valid response shapes, but it exposed a Grade wording failure
 and variable contribution weights. Human calibration has not been performed.
 
+The current report/audit code checks metadata binding and failed as well as
+successful receipt outcomes. Its validation remains active under Python `-O`.
+The manifest updates only the revised auditor and explanatory README hashes; original run receipts,
+result rows and measured reports are unchanged. This repair is not a new model
+evaluation or human calibration result.
+
 ## Execution and isolation
 
 - Binary source: `4fae8f4e3fef99a0b23871dd6bfc58a0250df43f`.

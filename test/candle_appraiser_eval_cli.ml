@@ -70,6 +70,10 @@ let verify_file plan key path =
   contents
 
 let run ~base_path ~evidence_path ~execute =
+  (match Runtime.exact_output_target_source () with
+   | Runtime.Runtime_binding_targets -> ()
+   | Runtime.Replacement_catalog_targets _ ->
+     failwith "evaluation requires prepared runtime bindings; AGENT_CORE_MODEL_CATALOG is not allowed");
   let plan = Yojson.Safe.from_string (load (Filename.concat base_path "plan.json")) in
   if U.member "schema" plan <> `String "masc.candle_appraiser_eval.v1" then
     failwith "not a prepared Candle appraisal evaluation workspace";

@@ -2,7 +2,7 @@
 
     An official client's login prints what it would print to a terminal:
     grey for the version, blue for the link and the one-time code. Put
-    through {!Masc.Tui_decode.sanitize_terminal_text} as it is, every escape
+    through {!Masc.Tui_terminal_text.sanitize_terminal_text} as it is, every escape
     comes out as the six characters [\x1B[90m] in front of the text it was
     meant to colour.
 

@@ -1,5 +1,0 @@
-module type Callback_surface = sig
-  val measure : request:string -> callback:(unit -> unit) -> unit
-end
-
-include Callback_surface

@@ -254,6 +254,21 @@ let find_static_credential_by_token config ~token : (agent_credential, masc_erro
        require_live_credential ~now:(Time_compat.now ()) first)
 ;;
 
+let find_static_credential_in_transaction transaction ~token =
+  let ( let* ) = Result.bind in
+  let* snapshot = credential_store_snapshot_in_transaction transaction in
+  let token_hash = sha256_hash token in
+  let matches = List.filter_map (fun (_, (credential : agent_credential)) ->
+    if constant_time_string_equal credential.token token_hash then Some credential else None)
+      snapshot.current_credentials in
+  match matches with
+  | [] -> Error (Auth (Auth_error.InvalidToken "Token mismatch"))
+  | first :: rest ->
+    let* () = check_credential_collisions
+        ~token_hash_prefix:(token_hash_prefix_of token_hash) first rest in
+    require_live_credential ~now:(Time_compat.now ()) first
+;;
+
 (** Resolve either an OAuth access token or the existing static bearer.
     OAuth owns a token whenever its exact hash file exists, including expired
     or revoked records; those typed failures must not silently fall through to

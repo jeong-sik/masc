@@ -133,6 +133,14 @@ let configuration_and_ports () =
   check bool "Enter opens the exact broken installation" true
     (issue.focus=UI.Configurations && issue.presentation=UI.Technical
      && issue.configuration_cursor=1);
+  let raw_issue = UI.lines ~width:120
+    {overview with instance_cursor=1; focus=UI.Instances; presentation=UI.Technical} in
+  check bool "raw detail follows the selected unresolved installation" true
+    (List.exists
+      (String.starts_with ~prefix:"> unresolved installation · /config/lane-addons/broken.toml")
+      raw_issue
+     && not (List.exists (fun line -> String.ends_with ~suffix:"custom.toml" line)
+       raw_issue));
   check bool "Installation detail retains the selected source and a return path" true
     (List.exists (String.starts_with ~prefix:"Installation details · broken.toml")
        (UI.lines ~width:120 issue)

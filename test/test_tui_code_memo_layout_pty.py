@@ -55,7 +55,7 @@ def window(output, columns):
     return first, last, total, body
 
 
-def run(executable, columns, no_color):
+def run(executable, columns, no_color, hide_recent=True):
     fixtures = h.code_memo_fixtures()
     literal_memos = "".join(f"-- masc(literal-{index}): {body}\n"
                             for index, body in enumerate(LITERAL_BODIES))
@@ -70,18 +70,20 @@ def run(executable, columns, no_color):
         # Hide the default Recent pane at a width that permits its complete
         # narrow -> wide -> hidden cycle. Physical widths then equal the Code
         # surface widths used by the split-pane and wrapping assertions.
-        h.resize_and_wait(process, fd, output, rows=18,
-                          columns=h.ACTING_PANE_CYCLE_COLUMNS,
-                          needle=b"local lock = 1", controls=(h.FULL_REDRAW,))
-        h.send_and_wait(process, fd, output, b"\x0c", b"[Recent]")
-        assert h.acting_pane_header_cell(output) == (
-            h.ACTING_PANE_CYCLE_COLUMNS - h.ACTING_PANE_WIDE_COLUMNS + 1)
-        h.send_and_wait(process, fd, output, b"\x0c", b"local lock = 1")
-        assert h.acting_pane_header_cell(output) == -1
+        if hide_recent:
+            h.resize_and_wait(process, fd, output, rows=18,
+                              columns=h.ACTING_PANE_CYCLE_COLUMNS,
+                              needle=b"local lock = 1", controls=(h.FULL_REDRAW,))
+            h.send_and_wait(process, fd, output, b"\x0c", b"[Recent]")
+            assert h.acting_pane_header_cell(output) == (
+                h.ACTING_PANE_CYCLE_COLUMNS - h.ACTING_PANE_WIDE_COLUMNS + 1)
+            h.send_and_wait(process, fd, output, b"\x0c", b"local lock = 1")
+            assert h.acting_pane_header_cell(output) == -1
         # Resize while the file is open; the fixture starts at 100 columns.
         h.resize_and_wait(process, fd, output, rows=18, columns=columns,
                           needle=b"local lock = 1", controls=(h.FULL_REDRAW,))
-        assert h.acting_pane_header_cell(output) == -1
+        if hide_recent:
+            assert h.acting_pane_header_cell(output) == -1
         h.send_and_wait(process, fd, output, b"m", b"rows 1-")
         screen = h.screen_text(bytes(output)).decode("utf-8")
         assert "Esc:back" in screen, (columns, no_color, screen)
@@ -118,7 +120,7 @@ def run(executable, columns, no_color):
         os.write(fd, b"q")
 
     h.run_terminal_scenario(executable,
-        description=f"Code memo full text {columns} columns NO_COLOR={no_color}",
+        description=f"Code memo full text {columns} columns NO_COLOR={no_color} hide_recent={hide_recent}",
         interact=interact, http_fixtures=fixtures,
         extra_env={"NO_COLOR": "1"} if no_color else {})
 
@@ -127,4 +129,5 @@ if __name__ == "__main__":
     for plain in (False, True):
         for width in (30, 40, 60, 80, 120, 160):
             run(os.path.abspath(sys.argv[1]), width, plain)
+        run(os.path.abspath(sys.argv[1]), 160, plain, hide_recent=False)
     print("Code memo complete author/body and physical scrolling: PASS")

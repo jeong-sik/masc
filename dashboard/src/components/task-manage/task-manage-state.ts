@@ -27,7 +27,10 @@ export async function createTask(input: TaskCreateInput): Promise<boolean> {
     await Promise.all([
       refreshExecution({ force: true }),
       refreshGoals(),
-    ])
+    ]).catch(error => {
+      // The write already committed; its refresh error is visible in the store.
+      console.warn('[Tasks] post-write observation refresh failed:', error)
+    })
     return true
   } catch (err) {
     showToast(`태스크 생성 실패: ${errorToString(err)}`, 'error')
@@ -49,7 +52,10 @@ export async function assignTaskToGoal(taskId: string, goalId: string): Promise<
     await Promise.all([
       refreshExecution({ force: true }),
       refreshGoals(),
-    ])
+    ]).catch(error => {
+      // The write already committed; its refresh error is visible in the store.
+      console.warn('[Tasks] post-write observation refresh failed:', error)
+    })
     return true
   } catch (err) {
     showToast(`목표 배정 실패: ${errorToString(err)}`, 'error')

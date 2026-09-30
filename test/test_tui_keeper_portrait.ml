@@ -13,7 +13,7 @@ module Palette = Masc_tui_terminal_palette
 let project = Palette.For_testing.best_color_for_level ~level:Palette.True_color
 let pixels = View.Pixels { cell_width = 10; cell_height = 20 }
 
-(* Made-up Keepers: the portrait comes from the name alone. *)
+(* Body names are stable; equipment is an explicit server snapshot. *)
 let alpha = "alpha"
 let beta = "beta"
 
@@ -22,10 +22,10 @@ let size_on display = Option.get (Portrait.band_size display)
 let mosaic_size = size_on View.Mosaic
 let pixel_size = size_on pixels
 
-let band ?(cache = Portrait.cache ()) ?(display = View.Mosaic) ?(name = alpha)
+let band ?(equipment = Look.bare) ?(cache = Portrait.cache ()) ?(display = View.Mosaic) ?(name = alpha)
     ?(content_rows = Portrait.min_content_rows (size_on display))
     ?(content_cols = Portrait.min_content_cols (size_on display)) () =
-  Portrait.band cache ~display ~project ~name ~content_rows ~content_cols
+  Portrait.band cache ~display ~project ~name ~equipment ~content_rows ~content_cols
 
 let shows ?display ?content_rows ?content_cols () =
   Option.is_some (band ?display ?content_rows ?content_cols ())
@@ -72,9 +72,9 @@ let test_the_band_is_compact () =
 
 let test_the_still_portrait_the_name_draws () =
   let shown = Option.get (band ~display:pixels ()) in
-  let body = Look.body_of_name alpha and equipment = Look.equipment_of_name alpha in
+  let body = Look.body_of_name alpha and equipment = Look.bare in
   let drawn = Draw.render body equipment shown.Portrait.box.View.size in
-  check bool "placed pixels keep the full portrait" true
+  check bool "placed pixels keep the full portrait with server equipment" true
     (String.equal drawn.Draw.rgba shown.Portrait.image.Draw.rgba);
   let mosaic = Option.get (band ()) in
   let compact = Draw.render_compact_posed body equipment Draw.still mosaic.Portrait.box.View.size in
@@ -159,24 +159,48 @@ let test_the_cache_is_bounded () =
   let cache = Portrait.cache () in
   let size = Option.get (Draw.size_of_int Draw.min_size) in
   let name index = Printf.sprintf "keeper-%d" index in
-  let drawn = Array.init Portrait.cache_capacity (fun index -> Portrait.image cache ~name:(name index) size) in
+  let drawn = Array.init Portrait.cache_capacity (fun index -> Portrait.image cache ~equipment:Look.bare ~name:(name index) size) in
   check int "full" Portrait.cache_capacity (Portrait.cached cache);
   check bool "a portrait already drawn comes from the cache" true
-    (Portrait.image cache ~name:(name 0) size == drawn.(0));
+    (Portrait.image cache ~equipment:Look.bare ~name:(name 0) size == drawn.(0));
   (* keeper-0 was the oldest; used again it is the newest, so the next new
      name pushes out keeper-1 instead. *)
-  ignore (Portrait.image cache ~name:"one-more" size);
+  ignore (Portrait.image cache ~equipment:Look.bare ~name:"one-more" size);
   check int "never more than its capacity" Portrait.cache_capacity (Portrait.cached cache);
-  check bool "the one used last is kept" true (Portrait.image cache ~name:(name 0) size == drawn.(0));
+  check bool "the one used last is kept" true (Portrait.image cache ~equipment:Look.bare ~name:(name 0) size == drawn.(0));
   check bool "the one used longest ago is drawn again" false
-    (Portrait.image cache ~name:(name 1) size == drawn.(1));
+    (Portrait.image cache ~equipment:Look.bare ~name:(name 1) size == drawn.(1));
   let bigger = Option.get (Draw.size_of_int (Draw.min_size * 2)) in
   check bool "another size is another picture" false
-    (Portrait.image cache ~name:(name 0) bigger == drawn.(0));
-  let compact = Portrait.image ~compact:true cache ~name:(name 0) size in
+    (Portrait.image cache ~equipment:Look.bare ~name:(name 0) bigger == drawn.(0));
+  let compact = Portrait.image ~compact:true cache ~equipment:Look.bare ~name:(name 0) size in
   check bool "the compact drawing does not reuse placed pixels" false (compact == drawn.(0));
   check bool "the compact drawing is cached" true
-    (Portrait.image ~compact:true cache ~name:(name 0) size == compact)
+    (Portrait.image ~compact:true cache ~equipment:Look.bare ~name:(name 0) size == compact)
+
+let test_equipment_change_replaces_same_keeper_pixels () =
+  let cache = Portrait.cache () in
+  let first = Option.get (band ~cache ~display:pixels ~equipment:Look.bare ()) in
+  let equipped = {Look.bare with head=Look.Crown; hand=Look.Book} in
+  let second = Option.get (band ~cache ~display:pixels ~equipment:equipped ()) in
+  check bool "same name and edge reuse neither old pixels nor equipment" false
+    (first.Portrait.image == second.Portrait.image);
+  let expected = Draw.render (Look.body_of_name alpha) equipped second.Portrait.box.View.size in
+  check string "server equipment determines actual pixels" expected.Draw.rgba second.Portrait.image.Draw.rgba;
+  let unchanged = Option.get (band ~cache ~display:pixels ~equipment:equipped ()) in
+  check bool "unchanged equipment reuses the cache" true (second.Portrait.image == unchanged.Portrait.image);
+  let mosaic = Option.get (band ~cache ~equipment:equipped ()) in
+  let compact = Draw.render_compact_posed (Look.body_of_name alpha) equipped Draw.still mosaic.Portrait.box.View.size in
+  check string "mosaic keeps the server equipment in compact pixels"
+    compact.Draw.rgba mosaic.Portrait.image.Draw.rgba;
+  let placement band = Option.get (Portrait.placement band ~scroll:0
+    ~visible_rows:band.Portrait.box.View.rows ~origin:(4,2)) in
+  ignore (frame []);
+  ignore (frame [placement first]);
+  check string "equipping refreshes the same terminal image id"
+    (View.placement_bytes (placement second)) (frame [placement second]);
+  check string "unavailable snapshot removes the old picture"
+    (Masc_tui_graphics.delete_image ~image_id) (frame [])
 
 let () =
   run "tui_keeper_portrait"
@@ -195,5 +219,6 @@ let () =
         ; test_case "the picture leaves with the detail" `Quick
             test_the_picture_leaves_with_the_detail
         ] )
-    ; ("cache", [ test_case "the cache is bounded" `Quick test_the_cache_is_bounded ])
+    ; ("cache", [ test_case "the cache is bounded" `Quick test_the_cache_is_bounded;
+        test_case "equipment replaces same Keeper pixels" `Quick test_equipment_change_replaces_same_keeper_pixels ])
     ]

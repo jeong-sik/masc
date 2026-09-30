@@ -200,6 +200,8 @@ let build_keeper_briefs (config : Workspace.config) (keepers : Yojson.Safe.t lis
                  `Assoc
                    ([
                       ("name", `String name);
+           ("portrait", member_assoc "portrait" keeper);
+           ("candle_balance_milli", member_assoc "candle_balance_milli" keeper);
                       ("status", `String status);
                       ("context_ratio", Json_util.option_to_yojson (fun value -> `Float value) context_ratio);
                       ("context_metrics_unavailable", context_metrics_unavailable);

@@ -2447,6 +2447,7 @@ type keeper_mode =
     case a tab earns (unrelated content would want its own surface). *)
 type keeper_detail_tab =
   | Detail_info
+  | Detail_items
   | Detail_sandbox
   | Detail_instructions
   | Detail_secrets
@@ -2457,11 +2458,12 @@ type keeper_detail_tab =
   | Detail_runs
 
 let keeper_detail_tabs =
-  [ Detail_info; Detail_sandbox; Detail_instructions; Detail_secrets; Detail_github
+  [ Detail_info; Detail_items; Detail_sandbox; Detail_instructions; Detail_secrets; Detail_github
   ; Detail_identity; Detail_channels; Detail_automation; Detail_runs ]
 
 let keeper_detail_tab_label = function
   | Detail_info -> "Info"
+  | Detail_items -> "Items"
   | Detail_sandbox -> "Sandbox"
   | Detail_instructions -> "Settings"
   | Detail_secrets -> "Secrets"
@@ -2953,7 +2955,7 @@ and surface_needs_of_surface : surface -> surface_needs = function
   (* Home reads decision sources. Work owns Goal evidence and Usage owns
      provider reports; their detail payloads do not belong on this screen. *)
   | Overview ->
-      { nothing with needs_operator_approvals = true; needs_asks = true }
+      { nothing with needs_operator_approvals = true; needs_asks = true; needs_keeper_roster = true }
   (* Its rows come from the acting store and the keeper list, neither of which
      is fetched here. *)
   | Acting -> nothing
@@ -5676,6 +5678,9 @@ type state = {
   mutable runtime_config_cursor: int;
   mutable config_scroll: int;
   mutable detail_tab: keeper_detail_tab;
+  mutable item_cursor: int;
+  mutable item_account: (string * Masc_tui_keeper_items.t) option;
+  mutable item_account_error: string option;
   mutable keeper_run_cursor: int;
   mutable detail_reads: detail_read_request list;
   mutable detail_read_generation: int;
@@ -5744,6 +5749,7 @@ type state = {
      lifecycle actions. *)
   mutable keeper_roster: Masc_tui_keeper_control.roster;
   mutable keeper_roster_error: string option;
+  mutable candle_observation: (Candle_observation.t, string) result option;
   mutable keeper_action_inflight:
     (string * Masc_tui_keeper_control.action) option;
   mutable keeper_action_pending: Masc_tui_keeper_control.pending option;
@@ -8185,6 +8191,9 @@ let create_state
   runtime_config_cursor = 0;
   config_scroll = 0;
   detail_tab = Detail_info;
+  item_cursor = 0;
+  item_account = None;
+  item_account_error = None;
   keeper_run_cursor = 0;
   detail_reads = [];
   detail_read_generation = 0;
@@ -8218,6 +8227,7 @@ let create_state
   keepers_error = None;
   keeper_roster = Masc_tui_keeper_control.Roster_unobserved;
   keeper_roster_error = None;
+  candle_observation = None;
   keeper_action_inflight = None;
   keeper_action_pending = None;
   keeper_action_serial = 0;

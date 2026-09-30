@@ -195,7 +195,7 @@ def reopen_existing_without_login(binary):
     fixtures["/api/v1/setup/models"] = h.RequestHttpResponse(models)
 
     def interact(process, fd, _slave, output, _base_path):
-        h.tab_until(process, fd, output, b"MASC Keepers")
+        h.palette_go(process, fd, output, b"go keepers", b"MASC Keepers")
         h.select_keeper_row(process, fd, output, b"alpha")
         h.send_and_wait(process, fd, output, b"c", "Keepers ▸ alpha ▸ chat".encode())
         account_frame = h.send_and_wait(

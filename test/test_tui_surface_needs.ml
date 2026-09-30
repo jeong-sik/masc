@@ -35,6 +35,8 @@ let test_only_the_chat_pane_asks_for_chat_history () =
 ;;
 
 let test_every_keeper_sub_mode_still_asks_for_the_roster () =
+  check bool "Overview reads the Candle envelope with its Keeper pane hidden" true
+    (needs Types.Overview).Types.needs_keeper_roster;
   List.iter
     (fun (label, mode) ->
        let n = needs (Types.Keepers mode) in

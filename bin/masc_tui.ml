@@ -1494,11 +1494,10 @@ type http_scoped_surface_results = {
   http_planning: (planning_snapshot, string) result option;
   http_system_logs: (system_log_snapshot, string) result option;
   http_fleet_safety: (Tui_decode.fleet_safety_reading, string) result option;
-  (* [None] on surfaces that do not show it: the roster costs a request and
-     only the Keepers surface reads it, so leaving it out keeps whatever the
-     last Keepers refresh observed rather than dropping it. *)
+  (* [None] on surfaces that do not read the roster or its Candle summary;
+     leaving it out keeps the observation until a relevant refresh. *)
   http_keeper_roster:
-    (Keeper_control.roster, Keeper_control.roster_failure) result option;
+    (Keeper_control.roster * (Candle_observation.t, string) result, Keeper_control.roster_failure) result option;
   (* [None] off Dashboard and Usage. One fetch, two readings: the runtime
      rows and the provider usage windows. *)
   http_runtime_quota:
@@ -1905,6 +1904,8 @@ type async_msg =
       string * (Masc.Tui_decode.verification_evidence,
                 Masc_tui_types.Verification_evidence_read.failure) result
   | Keeper_config_view_loaded of Masc_tui_types.detail_read_request * (string list, string) result
+  | Keeper_items_loaded of
+      Masc_tui_types.detail_read_request * (Masc_tui_keeper_items.t, string) result
   | Keeper_sandbox_view_loaded of
       Masc_tui_types.detail_read_request * (Masc_tui_keeper_sandbox.t, string) result
   | Keeper_sandbox_logs_loaded of
@@ -4211,6 +4212,35 @@ let launch_keeper_config_view state ~mailbox keeper_name =
     ~deliver:(fun result ->
       enqueue_async mailbox (Keeper_config_view_loaded (request, result)))
     (fun () -> Masc_tui_loader.load_keeper_config_view ~host ~port ~keeper_name)
+
+let withdraw_keeper_items state =
+  state.item_account <- None;
+  state.item_account_error <- None;
+  (* Removing the pending receipt rejects its late answer. A later read uses
+     the existing monotonic detail generation, including after A -> B -> A. *)
+  state.detail_reads <- List.filter
+    (fun request -> request.drr_tab <> Detail_items) state.detail_reads
+
+let launch_keeper_items state ~mailbox keeper_name =
+  withdraw_keeper_items state;
+  match state.workspace_identity, state.server_identity with
+  | (Workspace_identity_unread | Workspace_identity_mismatch _), _
+  | Workspace_identity_match, None ->
+    state.item_account_error <- Some "Server workspace identity is unavailable or differs from the local workspace"
+  | Workspace_identity_match, Some identity ->
+  let request = mark_detail_read_started state ~tab:Detail_items ~keeper:keeper_name in
+  let host = server_peer_host in
+  let port = state.port in
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Keeper_items_loaded (request, result)))
+    (fun () ->
+      let path = "/api/v1/keepers/"
+        ^ Masc_tui_http.percent_encode_path_segment keeper_name ^ "/items?expected_workspace="
+        ^ Masc_tui_http.percent_encode_query_value identity.Tui_decode.sid_base_path in
+      let ( let* ) = Result.bind in
+      let* json = Masc_tui_http.get_json ~host ~port ~path in
+      Masc_tui_keeper_items.decode ~keeper_name json)
 
 let launch_keeper_sandbox_view state ~mailbox keeper_name =
   let request = mark_detail_read_started state ~tab:Detail_sandbox ~keeper:keeper_name in
@@ -10266,7 +10296,8 @@ let apply_overview_goals_load state = function
   | Error err -> state.overview_goals <- Goals_failed err
 
 let apply_keeper_roster_load state = function
-  | Ok roster ->
+  | Ok (roster, candle) ->
+      state.candle_observation <- Some candle;
       state.keeper_roster <- roster;
       state.keeper_roster_error <- None
   | Error failure ->
@@ -10276,6 +10307,8 @@ let apply_keeper_roster_load state = function
          back to unobserved withdraws the actions instead of offering the
          wrong one. *)
       state.keeper_roster <- Keeper_control.Roster_unobserved;
+      state.candle_observation <- Some (Error (Keeper_control.roster_failure_message
+        ~credential_sent:(Masc_tui_http.operator_token_present ()) failure));
       remember_surface_error state ~surface:"keeper roster"
         ~current_error:state.keeper_roster_error
         ~set_error:(fun value -> state.keeper_roster_error <- value)
@@ -10610,15 +10643,28 @@ let apply_http_scoped_surfaces state results =
    match reloads it, so a screen never shows rows from a workspace the server
    just stopped serving. *)
 let apply_server_identity_reading state reading =
+  let previous = state.workspace_identity in
   state.server_identity <- Masc_tui_types.server_identity_of_refresh reading;
   state.workspace_identity <-
     Masc_tui_types.workspace_identity_of_refresh
       ~local_base_path:state.local_base_path reading;
+  let same_workspace = match previous, state.workspace_identity with
+    | Workspace_identity_match, Workspace_identity_match -> true
+    | Workspace_identity_mismatch prior, Workspace_identity_mismatch current ->
+      String.equal prior.server_base_path current.server_base_path
+    | Workspace_identity_unread,
+        (Workspace_identity_match | Workspace_identity_mismatch _ | Workspace_identity_unread)
+    | (Workspace_identity_match | Workspace_identity_mismatch _), Workspace_identity_unread
+    | Workspace_identity_match, Workspace_identity_mismatch _
+    | Workspace_identity_mismatch _, Workspace_identity_match -> false
+  in
+  if not same_workspace then withdraw_keeper_items state;
   match state.workspace_identity with
   | Masc_tui_types.Workspace_identity_mismatch _ -> clear_local_workspace state
   | Masc_tui_types.Workspace_identity_match ->
     load_from_masc_dir state state.local_base_path
-  | Masc_tui_types.Workspace_identity_unread -> ()
+  | Masc_tui_types.Workspace_identity_unread ->
+    state.item_account_error <- Some "Server workspace identity is unavailable"
 
 let apply_http_surfaces state results =
   apply_overview_load state results.http_overview;
@@ -10692,6 +10738,8 @@ let load_keeper_logs_if_safe state base_path limit keeper =
 let launch_detail_tab_reading state ~mailbox (keeper : keeper) =
   match state.detail_tab with
   | Detail_info -> launch_keeper_board_quarantines state ~mailbox keeper.k_name
+  | Detail_items ->
+      launch_keeper_items state ~mailbox keeper.k_name
   | Detail_sandbox ->
       state.keeper_sandbox_view <- None;
       state.keeper_sandbox_view_error <- None;
@@ -10744,6 +10792,7 @@ let launch_detail_tab_reading state ~mailbox (keeper : keeper) =
 let enter_keeper_detail_tab state ~mailbox tab =
   state.detail_tab <- tab;
   state.detail_scroll <- 0;
+  if tab = Detail_items then state.item_cursor <- 0;
   match selected_keeper state with
   | Some keeper -> launch_detail_tab_reading state ~mailbox keeper
   | None -> ()
@@ -13628,7 +13677,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            apply_approval_observation state
              { ao_ticket; ao_result = Error err })
       approval_ticket;
-      state.server_identity <- None;
+      apply_server_identity_reading state (Error err);
       state.connection_status <- Masc_tui_types.Disconnected;
       add_event state "error" err;
       react_to_server_contact state ~base_path ~host:server_peer_host
@@ -13883,6 +13932,23 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             state.keeper_config_view_error <- None
         | Error detail ->
             state.keeper_config_view_error <- Some detail)
+  | Keeper_items_loaded (request, result) -> (
+      let current = Masc_tui_types.finish_detail_read state request in
+      let still_selected =
+        match selected_keeper state with
+        | Some keeper -> String.equal keeper.k_name request.drr_keeper
+        | None -> false
+      in
+      if current && still_selected
+         && state.workspace_identity = Masc_tui_types.Workspace_identity_match
+         && Option.is_some state.server_identity then
+        match result with
+        | Ok account ->
+            state.item_account <- Some (request.drr_keeper, account);
+            state.item_account_error <- None
+        | Error detail ->
+            state.item_account <- None;
+            state.item_account_error <- Some detail)
   | Keeper_sandbox_view_loaded (request, result) -> (
       let keeper_name = request.drr_keeper in
       let current = Masc_tui_types.finish_detail_read state request in
@@ -23351,6 +23417,13 @@ and is loaded on demand through keeper_skill.
            state.tools_scroll <-
              move_surface_to_end state ~rows:(surface_rows state)
                ~current:state.tools_scroll
+       | Some ("home" | "end")
+         when state.view = Keepers Keeper_detail
+              && state.detail_tab = Detail_items ->
+           state.item_cursor <-
+             if key = Some "home" then 0
+             else List.length Keeper_portrait_item.all - 1;
+           state.detail_scroll <- 0
        (* Reading a post with the list pane focused: j/k and the page keys move
           the list and open what they land on, so the edge keys reach the first
           and last post the same way. This cannot go through [row_list] -- the
@@ -23538,6 +23611,12 @@ and is loaded on demand through keeper_skill.
                the way Home and End do. Scrolling it instead wrote a value the
                drawing pulled straight back to the selected run, which is the
                same reason the edge keys had to move the cursor. *)
+            | Keepers Keeper_detail when state.detail_tab = Detail_items ->
+                state.item_cursor <-
+                  Masc_tui_scroll.cursor_move
+                    ~count:(List.length Keeper_portrait_item.all)
+                    ~delta:(direction * page) state.item_cursor;
+                state.detail_scroll <- 0
             | Keepers Keeper_detail when state.detail_tab = Detail_runs ->
                 move_list_by_rows state ~delta:(direction * page)
             | Keepers Keeper_detail when state.detail_tab = Detail_channels ->
@@ -24248,6 +24327,13 @@ and is loaded on demand through keeper_skill.
                   refresh_keeper_detail_selection state ~base_path
                     ~mailbox:async_messages
                 end
+                else if state.detail_tab = Detail_items then begin
+                  state.item_cursor <-
+                    Masc_tui_scroll.cursor_down
+                      ~count:(List.length Keeper_portrait_item.all)
+                      state.item_cursor;
+                  state.detail_scroll <- 0
+                end
                 else if state.detail_tab = Detail_identity then
                   move_identity_cursor state ~delta:1
                 else if state.detail_tab = Detail_channels then begin
@@ -24613,6 +24699,13 @@ and is loaded on demand through keeper_skill.
                   state.detail_scroll <- 0;
                   refresh_keeper_detail_selection state ~base_path
                     ~mailbox:async_messages
+                end
+                else if state.detail_tab = Detail_items then begin
+                  state.item_cursor <-
+                    Masc_tui_scroll.cursor_up
+                      ~count:(List.length Keeper_portrait_item.all)
+                      state.item_cursor;
+                  state.detail_scroll <- 0
                 end
                 else if state.detail_tab = Detail_identity then
                   move_identity_cursor state ~delta:(-1)

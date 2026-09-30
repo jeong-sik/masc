@@ -11,7 +11,7 @@ type t = {
    The portrait yields before that navigation capacity is reduced. *)
 let minimum_roster_rows = Masc_tui_frame.chrome_rows + 4
 
-let prepare cache ~display ~project ~name ~rows ~cols =
+let prepare cache ~display ~project ~name ~equipment ~rows ~cols =
   match Portrait.band_size display with
   | None -> None
   | Some band ->
@@ -22,7 +22,7 @@ let prepare cache ~display ~project ~name ~rows ~cols =
         |> Option.map (fun box ->
           let roster_rows = rows - box.View.rows - 2 in
           let padding = (inner - box.cols) / 2 in
-          let image = Portrait.image cache ~name box.size in
+          let image = Portrait.image cache ~name ~equipment box.size in
           let picture_lines =
             View.lines ~project display box image
             |> List.map (fun line -> String.make padding ' ' ^ line) in
@@ -39,6 +39,6 @@ let prepare cache ~display ~project ~name ~rows ~cols =
 
 let session_cache = Portrait.cache ()
 
-let shown ~name ~rows ~cols =
+let shown ~name ~equipment ~rows ~cols =
   prepare session_cache ~display:(View.current_display ())
-    ~project:Masc_tui_terminal_palette.best_color ~name ~rows ~cols
+    ~project:Masc_tui_terminal_palette.best_color ~name ~equipment ~rows ~cols

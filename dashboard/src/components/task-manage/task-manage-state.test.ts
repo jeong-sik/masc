@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
-import { showTaskCreate, taskCreating, createTask } from './task-manage-state'
+import { showTaskCreate, taskCreating, createTask, assignTaskToGoal } from './task-manage-state'
 
 const mockCallMcpTool = vi.fn()
 const mockShowToast = vi.fn()
@@ -112,4 +112,26 @@ describe('task-manage-state', () => {
     await createTask({ title: 't', description: '' })
     expect(taskCreating.value).toBe(false)
   })
+  it('preserves successful creation when only the following observation refresh fails', async () => {
+    showTaskCreate.value = true
+    mockRefreshExecution.mockRejectedValueOnce(new Error('observation unavailable'))
+    const result = await createTask({ title: 'created once', description: '' })
+    expect(result).toBe(true)
+    expect(mockCallMcpTool).toHaveBeenCalledOnce()
+    expect(mockShowToast).toHaveBeenCalledWith('태스크 생성 완료', 'success')
+    expect(mockShowToast).not.toHaveBeenCalledWith(expect.stringContaining('생성 실패'), 'error')
+    expect(showTaskCreate.value).toBe(false)
+    expect(taskCreating.value).toBe(false)
+  })
+
+  it('preserves a committed assignment after refresh failure but still refuses a real write failure', async () => {
+    mockRefreshExecution.mockRejectedValueOnce(new Error('observation unavailable'))
+    expect(await assignTaskToGoal('task-1', 'goal-1')).toBe(true)
+    expect(mockCallMcpTool).toHaveBeenCalledWith('masc_task_set_goal', { task_id: 'task-1', goal_id: 'goal-1' })
+    expect(mockShowToast).not.toHaveBeenCalledWith(expect.stringContaining('배정 실패'), 'error')
+    mockCallMcpTool.mockRejectedValueOnce(new Error('write refused'))
+    expect(await assignTaskToGoal('task-2', 'goal-1')).toBe(false)
+    expect(mockShowToast).toHaveBeenCalledWith('목표 배정 실패: write refused', 'error')
+  })
+
 })

@@ -3686,8 +3686,22 @@ let render_keeper_message (state : state) =
     if split then begin
       let left_buf = Buffer.create 1024 in
       let pane_rows = count_frame_lines chat_buf in
-      let portrait = Masc_tui_chat_portrait.shown ~name:keeper_name
-        ~rows:pane_rows ~cols:keeper_roster_pane_cols in
+      let portrait =
+        match List.find_opt
+          (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name)
+          state.keepers with
+        | None -> None
+        | Some keeper ->
+          (match (keeper_reading state keeper).Keeper_control.liveness with
+           | Keeper_control.Present runtime ->
+             (match runtime.kr_portrait with
+              | Tui_decode.Ready equipment ->
+                Masc_tui_chat_portrait.shown ~name:keeper_name ~equipment
+                  ~rows:pane_rows ~cols:keeper_roster_pane_cols
+              | Tui_decode.Unavailable _ -> None)
+           | Keeper_control.Unobserved | Keeper_control.Absent
+           | Keeper_control.Invalid _ -> None)
+      in
       let roster_rows = match portrait with
         | None -> pane_rows
         | Some portrait -> portrait.Masc_tui_chat_portrait.roster_rows in

@@ -186,6 +186,7 @@ describe('KeeperDetailHeaderInfo', () => {
     vi.stubGlobal('fetch', fetchMock)
     const keeper = {
       name: 'wick-header-probe',
+      portrait: { state: 'ready', equipment: { face: 'bare_face', neck: 'bare_neck', head: 'bare_head', hand: 'empty_hand', base: 'no_dish' } },
       status: 'active',
       phase: 'Running',
       lifecycle_phase: 'Running',
@@ -204,7 +205,11 @@ describe('KeeperDetailHeaderInfo', () => {
 
     await waitFor(() => expect(container.querySelector('img[data-testid="keeper-portrait"]')).not.toBeNull())
     const portrait = container.querySelector('img[data-testid="keeper-portrait"]') as HTMLImageElement
-    expect(fetchMock.mock.calls[0]![0]).toBe('/api/v1/keepers/wick-header-probe/portrait.png?size=64')
+    const request = new URL(fetchMock.mock.calls[0]![0], 'http://fixture.invalid')
+    expect(request.pathname).toBe('/api/v1/keepers/wick-header-probe/portrait.png')
+    expect(request.searchParams.get('size')).toBe('64')
+    if (keeper.portrait?.state !== 'ready') throw new Error('Expected ready fixture portrait')
+    expect(JSON.parse(request.searchParams.get('expected_equipment')!)).toEqual(keeper.portrait.equipment)
     expect(portrait.getAttribute('src')).toBe('blob:header-portrait')
     // The heading beside it already names the keeper.
     expect(portrait.getAttribute('alt')).toBe('')
@@ -215,6 +220,7 @@ describe('KeeperDetailHeaderInfo', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{"error":"not found"}', { status: 404 })))
     const keeper = {
       name: 'wick-header-probe',
+      portrait: { state: 'ready', equipment: { face: 'bare_face', neck: 'bare_neck', head: 'bare_head', hand: 'empty_hand', base: 'no_dish' } },
       status: 'active',
       phase: 'Running',
       lifecycle_phase: 'Running',
@@ -240,6 +246,7 @@ describe('KeeperDetailHeaderInfo', () => {
     vi.stubGlobal('fetch', fetchMock)
     const keeper = {
       name: 'wick-header-probe',
+      portrait: { state: 'ready', equipment: { face: 'bare_face', neck: 'bare_neck', head: 'bare_head', hand: 'empty_hand', base: 'no_dish' } },
       emoji: '🕯️',
       status: 'active',
       phase: 'Running',

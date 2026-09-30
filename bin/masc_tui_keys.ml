@@ -137,6 +137,9 @@ let runtime_keys =
   ; Every_reading
       (b Act "Right / Enter" "detail"
          ~help:"show the full runtime, lane, dispatch, and probe fields")
+  ; Every_reading
+      (b Act "v" "routes / status"
+         ~help:"read complete default and media routes, boot admission and probe diagnostics")
   ; Reading_walk
   ; Every_reading
       (b Navigate "c" "clients"

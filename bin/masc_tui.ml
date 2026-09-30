@@ -21127,6 +21127,19 @@ and is loaded on demand through keeper_skill.
               own arm below. *)
            let terminal_rows, _ = get_terminal_size () in
            keeper_runtime_pick_key state ~mailbox:async_messages ~terminal_rows k
+       | Some ("home" | "end" as edge)
+         when state.view = Runtime && Option.is_some state.runtime_detail_target ->
+           state.runtime_detail_scroll <-
+             (if String.equal edge "home" then 0
+              else Masc_tui_types.clamped_scroll_end)
+       | Some "v"
+         when state.view = Runtime
+              && Option.is_none state.runtime_detail_target
+              && Option.is_none state.runtime_lane_pick
+              && Option.is_none state.slot_editor
+              && Option.is_none (Masc_tui_types.runtime_lane_prompt state) ->
+           state.runtime_detail_target <- Some Runtime_routes;
+           state.runtime_detail_scroll <- 0
        | Some "e" | Some "E"
          when state.view = Runtime
               && state.runtime_mode = Masc_tui_types.Runtime_lanes

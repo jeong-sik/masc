@@ -12034,7 +12034,11 @@ let runtime_detail_field ~width ~style label value =
       ~max_cells:(max 1 (width - Message_layout.display_width prefix))
       (Terminal_text.single_line value)
   in
-  match lines with
+  if Message_layout.display_width prefix >= width then
+    Message_layout.wrap_words ~max_cells:width
+      (prefix ^ Terminal_text.single_line value)
+    |> List.map (fun line -> style, line)
+  else match lines with
   | [] -> [ style, prefix ^ Masc_tui_theme.Glyph.no_value ]
   | first :: rest ->
       (style, prefix ^ first)
@@ -12042,11 +12046,66 @@ let runtime_detail_field ~width ~style label value =
 
 let runtime_bool = function true -> "yes" | false -> "no"
 
+(* A route is not a candidate. This reading remains available when the
+   inventory is empty, and retains diagnostics beside a last-good snapshot. *)
+let runtime_routes_detail_lines state ~width =
+  let field ?(style = Ansi.reset) label value =
+    runtime_detail_field ~width ~style label value
+  in
+  let optional label = function
+    | None -> []
+    | Some value -> field ~style:(Theme.warn ()) label value
+  in
+  let resolved =
+    match state.runtime_surface with
+    | None -> field "Resolved" "Configuration has not been read"
+    | Some snapshot ->
+        let resolved = snapshot.Tui_decode.rss_resolved in
+        let route label values =
+          match values with
+          | [] -> field label "none"
+          | values ->
+              List.mapi
+                (fun index value ->
+                  field (Printf.sprintf "%s %d" label (index + 1)) value)
+                values
+              |> List.concat
+        in
+        let dropped =
+          List.filter
+            (fun id -> not (List.exists (String.equal id) resolved.rrs_media_failover))
+            resolved.rrs_media_failover_declared
+        in
+        field "Source" (Option.value resolved.rrs_config_path ~default:"unavailable")
+        @ field "Recorded" resolved.rrs_generated_at_iso
+        @ field "Default" (Option.value resolved.rrs_default_runtime_id ~default:"none")
+        @ route "Declared media" resolved.rrs_media_failover_declared
+        @ route "Admitted media" resolved.rrs_media_failover
+        @ route "Unresolved media" dropped
+        @ optional "Probe read error" snapshot.rss_probe_error
+        @ (match snapshot.rss_probe with
+           | None -> field "Probe" "unavailable; no observation has been read"
+           | Some probe ->
+               field "Probe status" (Tui_decode.runtime_probe_status_to_string probe.rps_status)
+               @ List.concat_map (field ~style:(Theme.warn ()) "Probe error") probe.rps_errors
+               @ List.concat_map (field "Probe limitation") probe.rps_limitations)
+  in
+  optional "Resolved read error" state.runtime_surface_error
+  @ resolved
+  @ (match state.runtime_lane_notice with
+     | None -> []
+     | Some notice ->
+         field ~style:(runtime_lane_notice_style notice) "Action result"
+           (Masc_tui_types.runtime_lane_notice_text notice))
+  @ List.concat_map (field ~style:(Theme.warn ()) "Stale configuration")
+      (Masc_tui_types.runtime_lane_stale_lines state)
+;;
+
 let runtime_detail_lines state target ~width =
   let open Masc.Tui_decode in
   let reading =
     match state.runtime_surface, target with
-    | None, _ -> None
+    | None, _ | Some _, Runtime_routes -> None
     | Some snapshot, Runtime_lane_candidate { lane_id; runtime_id } ->
         snapshot.rss_candidates
         |> List.find_opt (fun row ->
@@ -12076,9 +12135,11 @@ let runtime_detail_lines state target ~width =
   in
   match reading with
   | None ->
-      [ Theme.warn (),
-        "  This runtime row is no longer present in the refreshed projection"
-      ]
+      (match target with
+       | Runtime_routes -> runtime_routes_detail_lines state ~width
+       | Runtime_lane_candidate _ | Runtime_catalog_entry _ ->
+           runtime_detail_field ~width ~style:(Theme.warn ()) "Runtime"
+             "This runtime row is no longer present in the refreshed projection")
   | Some (runtime, lanes, position, probe) ->
       let fields =
         runtime_detail_field ~width ~style:Ansi.reset "Runtime ID" runtime.ro_id
@@ -12183,6 +12244,7 @@ let runtime_detail_lines state target ~width =
       let keeper_lines =
         let target_keepers =
           match target with
+          | Runtime_routes -> []
           | Runtime_lane_candidate { lane_id; runtime_id = _ } ->
               keepers_for_lane state lane_id
           | Runtime_catalog_entry { runtime_id } ->
@@ -12215,6 +12277,7 @@ let render_runtime_detail (state : state) target =
   let buf = Buffer.create 4096 in
   let target_label =
     match target with
+    | Runtime_routes -> "routes / status"
     | Runtime_lane_candidate { lane_id; runtime_id } -> lane_id ^ " / " ^ runtime_id
     | Runtime_catalog_entry { runtime_id } -> runtime_id
   in
@@ -12237,7 +12300,7 @@ let render_runtime_detail (state : state) target =
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:"j/k:scroll  PgUp/PgDn:page  Left / Esc:list  r:refresh  Tab:next");
+       ~hints:"j/k:scroll  PgUp/PgDn:page  Home/End:edges  Left / Esc:list  r:refresh  Tab:next");
   finish_surface state ~clamped:(Runtime_detail_scroll scroll)
     ~surface_key:"runtime-detail" ~rows:terminal_rows ~cols buf
 

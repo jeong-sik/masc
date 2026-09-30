@@ -100,7 +100,10 @@ function browserScene(args) {
   const nativeControlSelector = 'button,input:not([type=hidden]),textarea,select,summary,[contenteditable=true]';
   const controlSelector = nativeControlSelector + ',label,[onclick],[role]';
   const isControl = element => linkHref(element) !== null
-    || (element.localName === 'label' ? labelledControl(element) !== null
+    || (element.localName === 'label' ? (() => {
+        const target=labelledControl(element);
+        return target !== null && !(visible(target) && boxes(target.getClientRects(),target).length);
+      })()
       : element.matches(nativeControlSelector) || element.hasAttribute('onclick')
         || actionRoles.has(effectiveRole(element)));
   const disabledControl = element => {
@@ -158,19 +161,32 @@ function browserScene(args) {
   };
   const visibleText = element => {
     const pending=Array.from(element.childNodes || []).reverse(), parts=[];
+    let separator=null;
+    const append = text => {
+      if (!text) return;
+      if (separator !== null && parts.length && !/[\n\t]$/.test(parts[parts.length-1])) parts.push(separator);
+      separator=null; parts.push(text);
+    };
     while (pending.length) {
       const child=pending.pop();
-      if (typeof child === 'string') { parts.push(child); continue; }
+      if (child.separator) {
+        if (separator !== '\n') separator=child.separator;
+        continue;
+      }
       if (child.nodeType === 3) {
         const parent=child.parentElement;
         if (!parent || !child.textContent || !visible(parent)) continue;
         const range=document.createRange(); range.selectNodeContents(child);
-        if (boxes(range.getClientRects(),parent).length) parts.push(child.textContent);
+        if (boxes(range.getClientRects(),parent).length) append(child.textContent);
       } else if (child.nodeType === 1 && rendered(child)) {
-        if (child.localName === 'br' && visible(child)) { parts.push('\n'); continue; }
+        if (child.localName === 'br' && visible(child)) { separator=null; parts.push('\n'); continue; }
         const boundary = visible(child) && ['block','list-item','table-row','flex','grid'].includes(css(child).display);
-        const separator = css(child).display === 'table-cell' ? '\t' : '\n';
-        if (boundary || css(child).display === 'table-cell') { parts.push(separator); pending.push(separator); }
+        const boundarySeparator = css(child).display === 'table-cell' ? '\t' : '\n';
+        if (boundary || css(child).display === 'table-cell') {
+          pending.push({separator:boundarySeparator});
+          // Opening and closing boundaries coalesce until actual text arrives.
+          if (separator !== '\n') separator=boundarySeparator;
+        }
         for (let i=child.childNodes.length-1;i>=0;i--) pending.push(child.childNodes[i]);
       }
     }
@@ -577,11 +593,17 @@ function selector(el) {
   }
   return parts.join(' > ');
 }
-const visible = nodes.filter(el=>el.getClientRects().length && getComputedStyle(el).visibility!=='hidden'
+const observable = el => el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden'
+  && getComputedStyle(el).visibility !== 'collapse'
+  && (() => { for (let parent=el;parent;parent=parent.parentElement) {
+    const style=getComputedStyle(parent);
+    if (style.display === 'none' || Number(style.opacity) === 0) return false;
+  } return true; })();
+const visible = nodes.filter(el=>observable(el)
   && (!el.getAttribute('role') || actionRoles.has(effectiveRole(el))
     || ['a','button','input','textarea','select','summary','label'].includes(el.localName)
     || el.getAttribute('onclick') !== null || el.getAttribute('contenteditable') === 'true')
-  && (el.localName!=='label' || (el.control?.localName==='input' && ['checkbox','radio'].includes(el.control.type))));
+  && (el.localName!=='label' || (el.control?.localName==='input' && ['checkbox','radio'].includes(el.control.type) && !observable(el.control))));
 function disabled(el) {
   const target=(el.localName==='label' && el.control) || el;
   if (target.matches(':disabled')) return true;

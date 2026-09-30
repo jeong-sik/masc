@@ -101,7 +101,10 @@ let runtime = {js|function browserScene(args) {
   const nativeControlSelector = 'button,input:not([type=hidden]),textarea,select,summary,[contenteditable=true]';
   const controlSelector = nativeControlSelector + ',label,[onclick],[role]';
   const isControl = element => linkHref(element) !== null
-    || (element.localName === 'label' ? labelledControl(element) !== null
+    || (element.localName === 'label' ? (() => {
+        const target=labelledControl(element);
+        return target !== null && !(visible(target) && boxes(target.getClientRects(),target).length);
+      })()
       : element.matches(nativeControlSelector) || element.hasAttribute('onclick')
         || actionRoles.has(effectiveRole(element)));
   const disabledControl = element => {
@@ -159,19 +162,32 @@ let runtime = {js|function browserScene(args) {
   };
   const visibleText = element => {
     const pending=Array.from(element.childNodes || []).reverse(), parts=[];
+    let separator=null;
+    const append = text => {
+      if (!text) return;
+      if (separator !== null && parts.length && !/[\n\t]$/.test(parts[parts.length-1])) parts.push(separator);
+      separator=null; parts.push(text);
+    };
     while (pending.length) {
       const child=pending.pop();
-      if (typeof child === 'string') { parts.push(child); continue; }
+      if (child.separator) {
+        if (separator !== '\n') separator=child.separator;
+        continue;
+      }
       if (child.nodeType === 3) {
         const parent=child.parentElement;
         if (!parent || !child.textContent || !visible(parent)) continue;
         const range=document.createRange(); range.selectNodeContents(child);
-        if (boxes(range.getClientRects(),parent).length) parts.push(child.textContent);
+        if (boxes(range.getClientRects(),parent).length) append(child.textContent);
       } else if (child.nodeType === 1 && rendered(child)) {
-        if (child.localName === 'br' && visible(child)) { parts.push('\n'); continue; }
+        if (child.localName === 'br' && visible(child)) { separator=null; parts.push('\n'); continue; }
         const boundary = visible(child) && ['block','list-item','table-row','flex','grid'].includes(css(child).display);
-        const separator = css(child).display === 'table-cell' ? '\t' : '\n';
-        if (boundary || css(child).display === 'table-cell') { parts.push(separator); pending.push(separator); }
+        const boundarySeparator = css(child).display === 'table-cell' ? '\t' : '\n';
+        if (boundary || css(child).display === 'table-cell') {
+          pending.push({separator:boundarySeparator});
+          // Opening and closing boundaries coalesce until actual text arrives.
+          if (separator !== '\n') separator=boundarySeparator;
+        }
         for (let i=child.childNodes.length-1;i>=0;i--) pending.push(child.childNodes[i]);
       }
     }

@@ -34,11 +34,17 @@ function selector(el) {
   }
   return parts.join(' > ');
 }
-const visible = nodes.filter(el=>el.getClientRects().length && getComputedStyle(el).visibility!=='hidden'
+const observable = el => el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden'
+  && getComputedStyle(el).visibility !== 'collapse'
+  && (() => { for (let parent=el;parent;parent=parent.parentElement) {
+    const style=getComputedStyle(parent);
+    if (style.display === 'none' || Number(style.opacity) === 0) return false;
+  } return true; })();
+const visible = nodes.filter(el=>observable(el)
   && (!el.getAttribute('role') || actionRoles.has(effectiveRole(el))
     || ['a','button','input','textarea','select','summary','label'].includes(el.localName)
     || el.getAttribute('onclick') !== null || el.getAttribute('contenteditable') === 'true')
-  && (el.localName!=='label' || (el.control?.localName==='input' && ['checkbox','radio'].includes(el.control.type))));
+  && (el.localName!=='label' || (el.control?.localName==='input' && ['checkbox','radio'].includes(el.control.type) && !observable(el.control))));
 function disabled(el) {
   const target=(el.localName==='label' && el.control) || el;
   if (target.matches(':disabled')) return true;

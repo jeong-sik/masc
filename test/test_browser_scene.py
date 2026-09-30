@@ -318,6 +318,10 @@ try:
  check('elements exposes selected native label and ARIA state',any(n['tag']=='label' and n['text']=='Card B' and n.get('checked') is True for n in form_elements['elements']) and any(n['text']=='Custom card' and n.get('ariaChecked')=='true' for n in form_elements['elements']))
  # Review regressions: references preserve activation targets and declared semantics.
  js("""document.body.innerHTML=`<style>body{font:16px sans-serif;margin:8px}label{display:inline-block}input[type=radio]{display:none}</style>\n <input id="card-a" type="radio" name="review-card"><label for="card-a">Card A</label>\n <input id="card-b" type="radio" name="review-card"><label for="card-b">Card B</label>\n <button id="separated">Save<br>draft<span style="display:none">HIDDEN_LABEL</span></button>
+ <button id="blocks"><span style="display:block">Store</span><span style="display:block">draft</span></button>
+ <div role="button" id="cells"><span style="display:table-cell">Left</span><span style="display:table-cell">Right</span></div>
+ <label><input id="visible-check" type="checkbox">Visible agree</label>
+ <label><input id="visible-radio" type="radio" style="display:inline-block">Visible choice</label>
  <main id="delegated" onclick="this.dataset.clicked='yes'"><h2>Delegated heading</h2><p>Delegated paragraph</p><img alt="Delegated raster" style="width:40px;height:40px" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="></main>
  <input id="native-mixed" type="checkbox" style="display:none"><label for="native-mixed">Native mixed</label>
  <div role="tab" aria-selected="false" onclick="this.setAttribute('aria-selected','true')">Selectable tab</div>
@@ -327,6 +331,13 @@ try:
  document.querySelector('#native-mixed').indeterminate=true;""")
  semantics=observe()
  check('control labels preserve br separators and filter hidden descendants',control(semantics,'Save\ndraft')['text']=='Save\ndraft')
+ check('adjacent blocks insert one rendered newline',control(semantics,'Store\ndraft')['text']==js("return document.querySelector('#blocks').innerText;"))
+ check('adjacent table cells insert one rendered tab',control(semantics,'Left\tRight')['text']==js("return document.querySelector('#cells').innerText;"))
+ for label in ['Visible agree','Visible choice']:
+  observed=[n for n in semantics['nodes'] if n['kind']=='control' and n['text']==label]
+  check('visible native choice has exactly one scene target: '+label,len(observed)==1 and observed[0]['tag']=='input')
+ act(semantics,control(semantics,'Visible agree'),action='click')
+ check('visible checkbox remains selectable through its input',control(observe(),'Visible agree')['checked'] is True)
  check('delegated onclick retains heading geometry',any(n['kind']=='text' and n['text']=='Delegated heading' and n['headingLevel']==2 and n['rects'] for n in semantics['nodes']))
  check('delegated onclick retains paragraphs',any(n['kind']=='text' and n['text']=='Delegated paragraph' for n in semantics['nodes']))
  check('delegated onclick retains raster descendants',any(n['kind']=='raster' and n['text']=='Delegated raster' for n in semantics['nodes']))
@@ -337,6 +348,12 @@ try:
  check('effective heading role is not a fallback button',any(n['kind']=='text' and n['text']=='First role heading' and n['headingLevel']==2 for n in semantics['nodes']) and not any(n['kind']=='control' and n['text']=='First role heading' for n in semantics['nodes']))
  check('unknown leading role permits supported button fallback',control(semantics,'Fallback button')['role']=='button')
  form_elements=js(elements_script)
+ for label in ['Visible agree','Visible choice']:
+  observed=[n for n in form_elements['elements'] if n.get('tag')=='input' and n.get('name')==label]
+  check('visible native choice has exactly one elements target: '+label,len(observed)==1 and observed[0]['tag']=='input')
+  check('elements omits duplicate visible input label: '+label,not any(n.get('tag')=='label' and n.get('text')==label for n in form_elements['elements']))
+ check('elements and scene agree on block separators',any(n['text']=='Store\ndraft' for n in form_elements['elements']))
+ check('elements and scene agree on table separators',any(n['text']=='Left\tRight' for n in form_elements['elements']))
  check('elements and scene agree on separators',next(n for n in form_elements['elements'] if n['text']=='Save\ndraft')['text']==control(semantics,'Save\ndraft')['text'])
  check('elements exposes mixed labels and selected controls',any(n['text']=='Native mixed' and n.get('indeterminate') is True for n in form_elements['elements']) and any(n['text']=='Selectable tab' and n.get('ariaSelected')=='true' for n in form_elements['elements']))
  check('elements omits a non-actionable first role',not any(n['text']=='First role heading' for n in form_elements['elements']))

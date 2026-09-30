@@ -76,7 +76,7 @@ BrowserRead `mode=regions`는 화면의 의미 영역을 관측한다. 반환된
   입력·관측이 바뀌지 않은 실패 호출을 그대로 반복하지 않는다.
 - 카드사·옵션 선택은 글자 text보다 관측된 control을 고른다. 숨겨진 native
   radio/checkbox에는 연결된 label이 control로 나타나며 `checked`는 연결된 입력의
-  현재 상태다. ARIA 선택 항목은 `ariaChecked`로 선언된 상태를 확인한다.
+  현재 상태다. ARIA checkbox/radio는 `ariaChecked`, tab/option은 `ariaSelected`로 선언된 상태를 확인한다.
   click 응답은 activation 결과일 뿐 선택 완료가 아니다. 선택 상태를 다시 읽고,
   바뀌지 않았으면 확인·제출로 넘어가지 않는다. SPA 메뉴도 같은 URL에서 비동기로
   펼쳐질 수 있으므로 후속 관측의 실제 하위 메뉴·본문으로 이동 결과를 판단한다.

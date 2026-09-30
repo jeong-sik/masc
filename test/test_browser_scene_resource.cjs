@@ -115,3 +115,31 @@ for (const [name, alter] of [
   assert.throws(f.read, /scene_response_exceeds_1_mib/, `${name} must count toward full response bytes`);
 }
 console.log('scene resources: shared-script parity, insecure-context identity, observed href, and 6 JSON/UTF-8 overflow cases passed');
+
+// Run the shipped scene text walk against explicit DOM boundaries. Geometry
+// fixtures expose every text node; actual browser innerText parity is exercised
+// by test_browser_scene.py, independently of this offline execution seam.
+const textWalk = source.split('  const visibleText = element => {')[1].split('  const regionLabel =')[0];
+const textContext = vm.createContext({
+  css: node => ({display:node.display || 'inline'}),
+  visible: node => !node.hidden, rendered: node => !node.hidden,
+  boxes: rects => rects,
+  document:{createRange:() => ({selectNodeContents(){},getClientRects:() => [rect]})},
+});
+vm.runInContext('const visibleText = element => {' + textWalk, textContext);
+function element(tag, display, children) {
+  const node={nodeType:1,localName:tag,display,childNodes:children};
+  for (const child of children) child.parentElement=node;
+  return node;
+}
+const text=value => ({nodeType:3,textContent:value});
+const blockControl=element('button','inline',[
+  element('span','block',[text('Save')]),element('span','block',[text('draft')])]);
+const cellControl=element('div','inline',[
+  element('span','table-cell',[text('Left')]),element('span','table-cell',[text('Right')])]);
+const breakControl=element('button','inline',[text('Save'),element('br','inline',[]),text('draft')]);
+textContext.controls={blockControl,cellControl,breakControl};
+assert.equal(vm.runInContext('visibleText(controls.blockControl)',textContext),'Save\ndraft');
+assert.equal(vm.runInContext('visibleText(controls.cellControl)',textContext),'Left\tRight');
+assert.equal(vm.runInContext('visibleText(controls.breakControl)',textContext),'Save\ndraft');
+console.log('scene text boundaries: shipped walk preserves single block/cell boundaries and explicit br');

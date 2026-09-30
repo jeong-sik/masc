@@ -10601,7 +10601,13 @@ def planning_activity_actor_interaction() -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        tab_until(process, master_fd, output, b"MASC Work")
+        before_work = len(output)
+        work_frame = tab_until(process, master_fd, output, b"MASC Work")
+        work_start = bytes(output).find(work_frame, before_work)
+        wait_for_output(
+            process, master_fd, output, b"Actor-visible goal activity",
+            start=work_start, timeout=3.0,
+        )
         detail = send_and_wait(
             process, master_fd, output, b"\r", b"completed by beta"
         )
@@ -20188,6 +20194,7 @@ def dashboard_usage_interaction(
     send_and_wait(process, master_fd, output, b"p", b"MASC Usage / Telemetry")
     send_and_wait(process, master_fd, output, b"3", b"Gate Governance")
     send_and_wait(process, master_fd, output, b"p", b"MASC Usage")
+    send_and_wait(process, master_fd, output, b"w", b"1 UTC days")
     send_and_wait(process, master_fd, output, b"w", b"7 UTC days")
     system = tab_until(process, master_fd, output, b"MASC System")
     if b"MASC System" not in system:

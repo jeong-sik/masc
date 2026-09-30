@@ -116,7 +116,7 @@ def press_y(process, fd, output) -> bytes:
 
 
 def open_chat(process, fd, output):
-    h.send_and_wait(process, fd, output, b"2", b"MASC Keepers")
+    h.tab_until(process, fd, output, b"MASC Keepers")
     h.select_keeper_row(process, fd, output, b"alpha")
     h.send_and_wait(process, fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
     h.send_and_wait(process, fd, output, b"m", CHAT_TITLE)
@@ -404,7 +404,7 @@ def without_colour(binary: str) -> None:
     def interact(process, fd, _slave, output, _base):
         # NO_COLOR draws no bold either, so the chat is opened by the key the
         # emblem scenario uses and left by Esc.
-        h.send_and_wait(process, fd, output, b"2", b"MASC Keepers")
+        h.tab_until(process, fd, output, b"MASC Keepers")
         h.select_keeper_row(process, fd, output, b"alpha")
         h.send_and_wait(process, fd, output, b"c", CHAT_TITLE)
         resize(process, fd, output, rows=TALL_ROWS, needle=CHAT_TITLE)
@@ -418,7 +418,7 @@ def without_colour(binary: str) -> None:
         assert press_y(process, fd, output) == LINK.encode()
         h.send_and_wait(process, fd, output, b"\x1b", CHAT_TITLE)
         h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Overview")
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
         os.write(fd, b"q")
 
     h.run_terminal_scenario(

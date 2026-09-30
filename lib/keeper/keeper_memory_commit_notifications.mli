@@ -26,8 +26,8 @@ val subscribe : (event -> unit) -> (unit -> unit)
 
 val notify_committed : event -> unit
 (** Called by snapshot persistence owners only, after a successful authoritative
-    write and after releasing all store locks. Failed writes and unchanged
-    revalidations must not notify. Callback failures are isolated and logged;
+    write and after releasing all store locks. Failed writes, unchanged
+    commits and unchanged revalidations must not notify. Callback failures are isolated and logged;
     they cannot undo the committed snapshot or prevent other subscriptions from
     observing it. Cancellation is propagated with its backtrace after notifying
     the remaining subscriptions. This does not read or depend on a journal. *)

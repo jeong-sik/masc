@@ -196,7 +196,8 @@ def fixtures(*, absent_live_roster=False) -> region.ServedFixtures:
     served[roster_path] = keeper_roster
     if absent_live_roster:
         status, payload = keeper_roster
-        served[roster_path] = (status, {**payload, "count": 0, "total": 0, "keepers": []})
+        served[roster_path] = (status, {**payload, "count": 0, "total": 0,
+                                      "truncated": False, "keepers": []})
     served["/api/v1/board/hearths"] = (200, {"hearths": []})
     served["/api/v1/dashboard/gate"] = h.empty_gate_snapshot()
     served["/api/v1/dashboard/gate/keeper-settings"] = (200, {
@@ -282,7 +283,8 @@ def interaction(served: region.ServedFixtures, *, absent_live_roster=False):
         if screen in ("keeper-detail", "keeper-detail-roster"):
             body = "\n".join(region.body_row(rows, row, left=left, right=right)
                              for row in range(3, region.TERMINAL_ROWS - 1))
-            for text in ("Identity", "Name: alpha", "Paused: no"):
+            for text in ("Identity", "Name: alpha", "Paused: no",
+                         "Current failure", "Board attention", "Gate"):
                 if text not in body:
                     raise AssertionError(f"{where}: Info omitted {text!r}: {body!r}")
             unavailable = "Portrait: unavailable: absent from live roster"

@@ -689,24 +689,8 @@ let backend ~store () = match !override with
     {
       start = (fun ~sw ~instance_id ~package ~binding ~on_created ->
 <<<<<<< HEAD
-        let* sampling_handler = match package.model_access with
-          | Model_disabled -> Ok None
-          | Host_sampling ->
-              let* factory = match !sampling_factory with Some factory -> Ok factory
-                | None -> Error "host sampling runtime is unavailable" in
-              factory ~sw ~store ~instance_id ~package ~binding
-              |> Result.map Option.some in
-||||||| parent of 1b924667ff (fix(lane): validate host sampling routes before worker persistence)
-        let* sampling_handler = match package.model_access with
-          | Model_disabled -> Ok None
-          | Host_sampling ->
-              let* factory = match !sampling_factory with Some factory -> Ok factory
-                | None -> Error "host sampling runtime is unavailable" in
-              factory ~sw ~store ~instance_id ~package ~binding |> Result.map Option.some in
-=======
         let* sampling_handler = prepare_sampling_handler
           ~sw ~store ~instance_id ~package ~binding in
->>>>>>> 1b924667ff (fix(lane): validate host sampling routes before worker persistence)
         let wrap worker = {
           container_id = Lane_addon_worker.container_id worker;
           action_schema = (fun () -> Lane_addon_worker.action_schema worker);

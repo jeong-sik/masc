@@ -9,60 +9,24 @@ val register_delivery_handler :
 val register_sampling_factory :
   (sw:Eio.Switch.t -> store:Lane_addon_store.t -> instance_id:string ->
     package:Lane_addon_types.package -> binding:Yojson.Safe.t ->
-<<<<<<< HEAD
     (Lane_addon_sampling.t, string) result) -> unit
-(** Server-owned sampling boundary, registered before configuration maintenance.
-    Called once per model-capable worker with its exact validated installation
-    binding and lifetime switch. Disabled packages do not request a callback. *)
+(** Construction validates the exact package, installation binding and host route
+    without provider I/O. The worker constructs the callback on its lifetime
+    switch; disabled packages do not request a handler. *)
 type fleet_backend = {
-  snapshot : config:Workspace.config -> caller:string -> access:Lane_addon_sources.access -> (Lane_addon_broadcast_delivery.sender_authority * string list,string) result;
-  project : config:Workspace.config -> sender_authority:Lane_addon_broadcast_delivery.sender_authority -> delivery:Workspace_broadcast.broadcast_delivery ->
-    recipient:string -> (unit,string) result;
+  snapshot : config:Workspace.config -> caller:string -> access:Lane_addon_sources.access ->
+    (Lane_addon_broadcast_delivery.sender_authority * string list,string) result;
+  project : config:Workspace.config ->
+    sender_authority:Lane_addon_broadcast_delivery.sender_authority ->
+    delivery:Workspace_broadcast.broadcast_delivery -> recipient:string -> (unit,string) result;
 }
 val register_fleet_backend : fleet_backend -> unit
-(** Install trusted host roster capture and idempotent single-recipient projection.
-    Snapshot receives verified access, so speaker identity and self-exclusion
-    do not depend on the attributed caller name. It is captured before durable
-    admission, never on retry. *)
 val recover_fleet : config:Workspace.config -> sw:Eio.Switch.t -> (unit,string) result
-(** Scan durable intentions and schedule independent commit/recipient jobs on
-    the supplied server-root switch. Returns after scheduling, without waiting
-    for recipient I/O. Repeated scans share each operation/recipient's in-flight
-    owner. Job failures remain durable pending obligations and are logged;
-    cancellation releases ownership so the next service can retry. *)
 val start_fleet_service : config:Workspace.config -> sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> unit
-(** Server-root Pulse owns reconciliation and retry. Failed recipients remain
-    pending; a committed message is only read, never republished if missing. *)
-(** Omitted [access] is unauthenticated; [caller] carries attribution only. *)
-val dispatch : ?caller:string -> ?access:Lane_addon_sources.access -> config:Workspace.config -> operation:operation -> Yojson.Safe.t ->
-||||||| parent of 1b924667ff (fix(lane): validate host sampling routes before worker persistence)
-    (Agent_core.Mcp.sampling_handler, string) result) -> unit
-(** Server-owned model boundary, registered before configuration maintenance.
-    Called once per model-capable worker with its exact validated installation
-    binding and lifetime switch. Disabled packages do not request a callback.
-    The factory must retain model requests before invoking a provider and must
-    refuse stores outside its registering workspace. *)
-val dispatch : ?caller:string -> config:Workspace.config -> operation:operation -> Yojson.Safe.t ->
-=======
-    (Agent_core.Mcp.sampling_handler, string) result) -> unit
-(** Server-owned model boundary, registered before configuration maintenance.
-    Construction must perform no I/O, credential resolution, provider call or
-    store write: it validates the exact instance, package, binding and host route
-    and returns a closure. It is called before the entry is persisted with the
-    root switch; that validation closure is discarded. Worker startup constructs
-    its actual callback again with the worker lifetime switch. Disabled packages
-    do not request a callback. Construction refuses stores outside the registered
-    workspace. Invocation must retain model requests before invoking a provider. *)
-val dispatch : ?caller:string -> config:Workspace.config -> operation:operation -> Yojson.Safe.t ->
->>>>>>> 1b924667ff (fix(lane): validate host sampling routes before worker persistence)
+val dispatch : ?caller:string -> ?access:Lane_addon_sources.access ->
+  config:Workspace.config -> operation:operation -> Yojson.Safe.t ->
   (Yojson.Safe.t, error) result
-(** [caller] is provenance. An omitted [access] is [Unauthenticated]; a trusted
-    host must pass verified Keeper or operator authority explicitly. *)
-(** No I/O and no package callback. Runs on the root-switch owner domain: a
-    caller on another domain (the HTTP serving domain, a pool worker) is
-    carried there and waits until the hint is recorded. Only sources
-    interested in the typed activity receive a capture hint. Repeated hints
-    coalesce; explicit observations take precedence over refresh hints. *)
+(** [caller] is provenance. An omitted [access] is [Unauthenticated]. *)
 val notify_activity : config:Workspace.config -> activity:Lane_addon_sources.activity -> unit
 val notify_fusion_run : run_id:string -> unit
 (** Capture hints for exact-run bindings against the process-wide Fusion registry.

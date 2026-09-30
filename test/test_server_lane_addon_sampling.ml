@@ -115,7 +115,9 @@ max_reply_bytes=4194304
   let create ?(store=store) route = Server_lane_addon_sampling.create_handler
     ~config ~net:env#net ~sw ~store ~instance_id:"installed-analysis-worker" ~package
     ~binding:(`Assoc ["model_route",`String route]) in
-  let handler = require (create "analysis") in
+  let broker = require (create "analysis") in
+  let handler = require (Lane_addon_sampling.for_worker broker ~package
+    ~instance_id:"installed-analysis-worker") in
   let request_params = if omit_temperature then {params with temperature=None} else params in
   let answer = require (handler request_params) in
   check string "route fallback returns the actual responding model, not its configured alias"
@@ -246,9 +248,11 @@ max_reply_bytes=4194304
   let calls = ref [] and starts = ref [] and invocations = ref 0 in
   let factory ~sw ~store ~instance_id ~package ~binding =
     calls := (instance_id, sw) :: !calls;
-    Result.map (fun _handler -> fun _params -> incr invocations; Error "fixture forbids provider invocation")
-      (Server_lane_addon_sampling.create_handler ~config ~net:env#net ~sw
-        ~store ~instance_id ~package ~binding) in
+    Result.bind (Server_lane_addon_sampling.create_handler ~config ~net:env#net ~sw
+        ~store ~instance_id ~package ~binding) (fun _broker ->
+      Lane_addon_sampling.create ~store ~instance_id ~package ~route:"fixture"
+        ~invoke:(fun ~route:_ ~request:_ _params ->
+          incr invocations; Error "fixture forbids provider invocation") ()) in
   let backend : Lane_addon_runtime.For_testing.backend = {
     start=(fun ~sw ~instance_id ~package ~binding ~on_created ->
       let _handler = require (factory ~sw ~store ~instance_id ~package ~binding) in

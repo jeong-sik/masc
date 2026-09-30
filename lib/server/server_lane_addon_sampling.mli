@@ -22,5 +22,5 @@ val create_handler :
   config:Workspace.config -> net:Eio_context.eio_net -> sw:Eio.Switch.t ->
   store:Lane_addon_store.t -> instance_id:string ->
   package:Lane_addon_types.package -> binding:Yojson.Safe.t ->
-  (Agent_core.Mcp.sampling_handler, string) result
+  (Lane_addon_sampling.t, string) result
 (** Assemble the same worker-bound production handler installed by [register]. *)

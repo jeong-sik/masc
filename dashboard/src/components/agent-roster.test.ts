@@ -50,7 +50,6 @@ function makeCompositeSnapshot(
     runtime: { state: 'idle' },
     measurement: { captured: false },
     invariants: {
-      no_runtime_before_measurement: true,
       event_priority_monotone: true,
       phase_derivation_agreement: true,
     },

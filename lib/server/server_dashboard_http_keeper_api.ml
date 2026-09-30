@@ -767,8 +767,7 @@ let offline_keeper_composite_json ~config name (m : Keeper_meta_contract.keeper_
     ; "measurement", `Assoc [ "captured", `Bool false ]
     ; ( "invariants"
       , `Assoc
-          [ "no_runtime_before_measurement", `Bool true
-          ; "event_priority_monotone", `Bool true
+          [ "event_priority_monotone", `Bool true
           ; "phase_derivation_agreement", `Bool true
           ] )
     ; "is_live", `Bool false

@@ -8525,6 +8525,26 @@ def next_request_forecast_fixture(*, with_continuity: bool) -> dict[str, object]
     }
 
 
+def open_context_and_read_history_pages(process, master_fd, output) -> bytes:
+    # The loaded context can be taller than the terminal. Walk its actual
+    # reported pages, preserving the bytes for the existing content checks.
+    drawn = send_and_wait(process, master_fd, output, b"\r", b"WHAT WENT IN")
+    while True:
+        visible = screen_text(bytes(output))
+        bounds = re.search(rb"\[lines (\d+)-(\d+)/(\d+)\]", visible)
+        if bounds is None or int(bounds[2]) == int(bounds[3]):
+            break
+        first = int(bounds[1])
+        drawn += send_and_wait(process, master_fd, output, b"\x1b[6~", FRAME_END)
+        advanced = re.search(rb"\[lines (\d+)-(\d+)/(\d+)\]",
+                             screen_text(bytes(output)))
+        if advanced is not None and int(advanced[1]) <= first:
+            raise AssertionError("Context page down did not advance its reported window")
+    if b"HOW FAR BACK" not in CSI_RE.sub(b"", drawn):
+        raise AssertionError("Loaded Context pages omitted the history band")
+    return drawn
+
+
 def run_next_request_readability_regression(executable: str) -> None:
     for with_continuity in (True, False):
         for cols in (80, 140):
@@ -8549,7 +8569,7 @@ def run_next_request_readability_regression(executable: str) -> None:
                     process, master_fd, output, b"/context",
                     composer_showing(b"/context"),
                 )
-                send_and_wait(process, master_fd, output, b"\r", b"HOW FAR BACK")
+                send_and_wait(process, master_fd, output, b"\r", b"WHAT WENT IN")
                 for _ in range(90):
                     visible = screen_text(bytes(output))
                     if (
@@ -8563,7 +8583,7 @@ def run_next_request_readability_regression(executable: str) -> None:
                         )
                     ):
                         break
-                    send_and_wait(process, master_fd, output, b"j", b"MASC Context")
+                    send_and_wait(process, master_fd, output, b"j", FRAME_END)
                 else:
                     raise AssertionError(
                         f"Next Request meaning not visible at {cols} columns: "
@@ -8621,8 +8641,8 @@ def context_inspector_interaction() -> Interaction:
         send_and_wait(
             process, master_fd, output, b"/context", composer_showing(b"/context")
         )
-        composition = send_and_wait(
-            process, master_fd, output, b"\r", b"HOW FAR BACK"
+        composition = open_context_and_read_history_pages(
+            process, master_fd, output
         )
         composition_plain = CSI_RE.sub(b"", composition)
         for needle in (

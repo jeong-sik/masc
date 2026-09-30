@@ -98,8 +98,7 @@ class SharedCheckInputs:
 SHARED_CHECK_INPUTS = (
     SharedCheckInputs(
         "ci_drivers",
-        "pr-check.yml jobs and run-lint-suite.sh execute repository helpers; "
-        "check-guards-are-wired.py discovers checker scripts and their baselines",
+        "pr-check.yml jobs and run-lint-suite.sh execute repository helpers",
         paths=(".github/issue-taxonomy.json",),
         trees=("scripts/", ".github/workflows/", ".github/actions/")),
     SharedCheckInputs(
@@ -121,23 +120,18 @@ SHARED_CHECK_INPUTS = (
     SharedCheckInputs(
         "required_structural_fixtures",
         "pr-check.yml builds node parity aliases from test/dune and "
-        "test_browser_interaction.inc, and @packages/agent_core/test/exact-output-single-surface "
-        "whose explicit deps consume provider interfaces, implementations and fixtures",
-        paths=("connectors/browser/extension/background.js",
-               "packages/agent_core/test/check_public_mli_callbacks.ml"),
+        "test_browser_interaction.inc; @check compiles provider interfaces and tests",
+        paths=("connectors/browser/extension/background.js",),
         trees=("packages/agent_core/scripts/", "packages/agent_core/test/fixtures/",
                "packages/agent_core/lib/llm_provider/")),
     SharedCheckInputs(
         "runtime_configuration",
         "pr-check.yml installer fixtures read config/runtime.toml; @check embeds config; "
-        "run-lint-suite.sh validates prompt/tool registries",
+        "run-lint-suite.sh validates TOML syntax",
         trees=("config/",)),
     SharedCheckInputs(
         "tla_specifications",
-        "run-lint-suite.sh runs check-spec-truth.sh Mirrors resolution, "
-        "tla-bug-model-ratchet.sh, audit-tla-cfg-orphan.sh, "
-        "audit-tla-annotation-drift.sh --check-cross-spec and "
-        "check-tla-harness-coverage.sh over the specs tree",
+        "pr-check.yml runs TLC; lint checks cfg/spec pairing and harness coverage",
         trees=("specs/",)),
     SharedCheckInputs(
         "dashboard_build",
@@ -153,10 +147,9 @@ SHARED_CHECK_INPUTS = (
         trees=("dashboard/dev/",)),
     SharedCheckInputs(
         "document_contracts",
-        "pr-check.yml check-doc-truth.sh compares version/install/translation inputs "
-        "and the docs/spec invariant-prefix census; test_doc_truth_stable_inputs.py "
-        "runs the real checks and version bump in an isolated checkout; "
-        "run-lint-suite.sh/check-issue-taxonomy-truth.sh compares CONTRIBUTING.md to its SSOT",
+        "pr-check.yml check-doc-truth.sh compares version/install inputs "
+        "and local references; test_doc_truth_stable_inputs.py "
+        "runs the real checks and version bump in an isolated checkout",
         paths=("CONTRIBUTING.md", "CHANGELOG.md", "README.md", "README.ko.md", "ROADMAP.md",
                "docs/INSTALL.md", "docs/INSTALL.ko.md", "docs/PRODUCT-OPERATING-PLAN.md",
                "docs/MCP-TEMPLATE.md", "docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md",

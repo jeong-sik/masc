@@ -85,7 +85,10 @@ val to_agent_core_typed_result :
     provider normally receives a generic projection error. A typed
     [Proven_post_effect] failure whose artifact manifest is unavailable instead
     remains an error carrying the applied-effect warning and normalized artifact
-    retrieval handles; it never becomes success or retries manifest projection.
+    retrieval handles and the complete producer data under [data], including any
+    enclosing recovery descriptor. It never becomes success or retries manifest
+    projection. The producer owns this recovery payload; the bridge does not
+    reconstruct domain fields from a bare blob reference.
 
     When typed result data contains normalized artifact references, the
     producer must first call {!attach_artifact_manifest}; the provider-facing

@@ -496,7 +496,7 @@ let stimulus_ready_for_intake ~base_path (stimulus : Keeper_event_queue.stimulus
          "turn entry: HITL resolution held back because the approval store \
           could not be read approval=%s: %s"
          resolution.approval_id
-         (Keeper_approval_queue.storage_error_to_string detail);
+         (Keeper_approval_queue_result.storage_error_to_string detail);
        false)
   | Keeper_event_queue.Board_signal _
   | Keeper_event_queue.Board_attention _
@@ -532,7 +532,7 @@ let resolution_has_durable_record
      with
      | Ok _ -> true
      | Error error ->
-       (match Keeper_approval_queue.resolution_absence_of_grant_error error with
+       (match Keeper_approval_queue_result.resolution_absence_of_grant_error error with
         | Some _ -> false
         | None -> true))
 ;;
@@ -604,7 +604,7 @@ type spent_selection_reconciliation =
   | Spent_grant_replay_acknowledged
   | Absent_grant_retired of
       { approval_id : string
-      ; absence : Keeper_approval_queue.resolution_absence
+      ; absence : Keeper_approval_queue_result.resolution_absence
       }
 
 let reconcile_spent_selection
@@ -646,7 +646,7 @@ let reconcile_spent_selection
      with
      | Ok
          { request
-         ; state = Keeper_approval_queue.Resolution_consumed
+         ; state = Keeper_approval_queue_result.Resolution_consumed
          ; replay_outcome = Some replay_outcome
          ; _
          } ->
@@ -690,14 +690,14 @@ let reconcile_spent_selection
      | Ok
          { request
          ; state =
-             ( Keeper_approval_queue.Resolution_unconsumed
-             | Keeper_approval_queue.Resolution_consumed )
+             ( Keeper_approval_queue_result.Resolution_unconsumed
+             | Keeper_approval_queue_result.Resolution_consumed )
          ; replay_outcome = None
          ; _
          }
      | Ok
          { request
-         ; state = Keeper_approval_queue.Resolution_unconsumed
+         ; state = Keeper_approval_queue_result.Resolution_unconsumed
          ; replay_outcome = Some _
          ; _
          } ->
@@ -720,7 +720,7 @@ let reconcile_spent_selection
            ~tool_name:None
            ~decision:Keeper_approval_queue_rules_types.Decision.Approve
        in
-       (match Keeper_approval_queue.resolution_absence_of_grant_error error with
+       (match Keeper_approval_queue_result.resolution_absence_of_grant_error error with
         | None ->
           (* A read failure: the store may answer on the next turn. *)
           (match project_approved () with
@@ -737,10 +737,10 @@ let reconcile_spent_selection
              store that recorded a rejection already speaks for itself. *)
           let projection =
             match absence with
-            | Keeper_approval_queue.Resolution_not_approved -> Ok ()
-            | Keeper_approval_queue.Resolution_missing
-            | Keeper_approval_queue.Resolution_still_pending
-            | Keeper_approval_queue.Resolution_workspace_mismatch _ ->
+            | Keeper_approval_queue_result.Resolution_not_approved -> Ok ()
+            | Keeper_approval_queue_result.Resolution_missing
+            | Keeper_approval_queue_result.Resolution_still_pending
+            | Keeper_approval_queue_result.Resolution_workspace_mismatch _ ->
               project_approved ()
           in
           (match projection with
@@ -985,7 +985,7 @@ let heartbeat_event_intake
               record keeper=%s approval=%s store=%s"
              keeper_name
              approval_id
-             (Keeper_approval_queue.resolution_absence_to_string absence);
+             (Keeper_approval_queue_result.resolution_absence_to_string absence);
            loop remaining observations_rev selections_rev first_withdrawn rest
          | Ok Selection_actionable ->
            let connector_attention_items =

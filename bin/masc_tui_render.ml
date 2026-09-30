@@ -617,7 +617,7 @@ let overview_layout (state : state) ~terminal_rows ~cols =
   let allocate attention_items =
     let with_intro intro_count =
       Render_schedule.allocate_overview
-        ~terminal_rows:(max 0 (terminal_rows - List.length (overview_candle_lines state ~cols)))
+        ~terminal_rows
         ~intro_count ~attention_count:(List.length attention_items)
         ~goal_count:
           (Overview_goals.wanted_rows state.overview_goals)
@@ -656,7 +656,20 @@ let overview_layout (state : state) ~terminal_rows ~cols =
         Render_schedule.spend_spare_rows_on_team row_budget
           ~extra:(List.length (overview_team_detail_lines state))
   in
-  intro_lines, attention_items, tasks_error, row_budget
+  (* Candle spends only rows the unchanged baseline leaves spare, after
+     Team detail. It cannot displace any section's paid rows or diagnostics. *)
+  let full_candle = overview_candle_lines state ~cols in
+  let candle_lines =
+    if List.length full_candle <= row_budget.filler_rows then full_candle else []
+  in
+  let candle_status =
+    if candle_lines = [] then Masc_tui_candle.compact_status state.candle_observation
+    else None
+  in
+  let row_budget =
+    { row_budget with filler_rows = row_budget.filler_rows - List.length candle_lines }
+  in
+  intro_lines, attention_items, tasks_error, row_budget, candle_lines, candle_status
 
 (** Render the Overview surface (Dashboard V2 shell/briefing summary). *)
 let render_overview (state : state) =
@@ -768,16 +781,21 @@ let render_overview (state : state) =
           health_color health_label Ansi.reset keepers_cell
           o.ov_mcp_agents approval_count pulse_suffix
   in
+  let intro_lines, attention_items, tasks_error, row_budget, candle_lines, candle_status =
+    Masc_tui_frame_timing.time_stage ~name:"overview.layout"
+      (fun () -> overview_layout state ~terminal_rows:rows ~cols)
+  in
+  let summary_line =
+    match candle_status with
+    | None -> summary_line
+    | Some status -> "  " ^ status ^ " · " ^ summary_line
+  in
   box_line buf cols summary_line;
-  List.iter (box_line buf cols) (overview_candle_lines state ~cols);
+  List.iter (box_line buf cols) candle_lines;
 
   box_divider buf cols;
 
   (* Attention panel *)
-  let intro_lines, attention_items, tasks_error, row_budget =
-    Masc_tui_frame_timing.time_stage ~name:"overview.layout"
-      (fun () -> overview_layout state ~terminal_rows:rows ~cols)
-  in
   let sections_started = Masc_tui_frame_timing.start_stage () in
   let intro_lines =
     if List.length intro_lines > 1
@@ -7675,6 +7693,18 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
        | Tui_decode.Ready _ -> ()
        | Tui_decode.Unavailable reason -> add_row "Portrait:" ("unavailable: " ^ Terminal_text.single_line reason));
       add_empty ();
+      (* The short Overview names only the reading's state. Info retains
+         every diagnostic and exact supply amount, wrapped and scrollable. *)
+      let candle_lines = Masc_tui_candle.summary_lines state.candle_observation in
+      if candle_lines <> [] then (
+        add_section "Candle details";
+        List.iter
+          (fun line ->
+            Message_layout.wrap_words ~max_cells:(max 1 (inner - 2))
+              (Terminal_text.single_line line)
+            |> List.iter (fun line -> add_line ("  " ^ line)))
+          candle_lines;
+        add_empty ());
 
       (* The live roster owns this reading, including its absence after a
          successful turn. Neither historical last_error nor the last outcome

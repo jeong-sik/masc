@@ -119,6 +119,8 @@ val agenda_lines : Masc_tui_types.state -> Masc_tui_agenda.line list
     row the frame is not drawing. *)
 
 val agenda_viewport : Masc_tui_types.state -> int * int
+val presets_viewport : Masc_tui_types.state -> int * int
+(** Wrapped detail row count and height below the Presets selection list. *)
 val answering_viewport : Masc_tui_types.state -> int * int
 (** Pure projection for the visible Recent pane, or [None] when it will not
     consume chunks. Dimensions are the raw terminal measurement. The loop

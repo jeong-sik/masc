@@ -262,7 +262,8 @@ let test_the_overview_row_counts_every_approval_list () =
      one reading. [approvals_count_label] takes the count from
      [approvals_surface_pending] and the "?" from [approvals_reading_current],
      and test_tui_keys checks that the label follows the reading. Here: the
-     row draws that label and keeps no copy of either half. Two copies of the
+     row draws that label and its Enter destination asks the same shared
+     population and reading. Two copies of the
      judgement drift: at fe6315aa69 (2026-09-26) the strip's copy left the Gate
      queue out while this row's copy counted it. *)
   let calls callee =
@@ -273,9 +274,11 @@ let test_the_overview_row_counts_every_approval_list () =
   in
   Alcotest.(check int) "the row draws the shared count label" 1
     (calls "approvals_count_label");
-  Alcotest.(check int) "and counts no population of its own" 0
+  (* The card's Enter destination asks the same shared count and current
+     reading as the label, rather than inspecting any queue independently. *)
+  Alcotest.(check int) "the destination asks the shared approval population" 1
     (calls "approvals_surface_pending");
-  Alcotest.(check int) "and makes no reading judgement of its own" 0
+  Alcotest.(check int) "the destination asks the shared reading" 1
     (calls "approvals_reading_current" + calls "approvals_reading");
   Alcotest.(check int) "and reads no approval list's state itself" 0
     (reads ~binding_name:"render_overview"
@@ -876,32 +879,20 @@ let test_visible_navigation_glyphs_are_not_mojibake () =
   Alcotest.(check int) "preview has no double-encoded em dash" 0
     (count [ "live preview \xc3\xa2\xc2\x80\xc2\x94 none for this row" ])
 
-(* The Attention panel's badge. Critical and bad share a colour, so the word
-   is the only thing that tells those two rows apart -- and the badge fitted
-   that word to five fixed cells, which cut "critical" to [crit~] and padded
-   the shorter levels inside their own brackets as [bad  ].
-
-   Asserted at the source because nothing links the TUI executable, and
-   because both failures typecheck: a label one cell too long and a column one
-   cell too narrow are the same well-typed program. Two facts carry it -- the
-   vocabulary fits, and nothing cuts it. *)
-let test_the_attention_badge_cannot_cut_its_own_level () =
+(* Critical and bad share a colour, so their explicit short severity labels
+   must remain distinct. Cards wrap the whole detail, preserving the label. *)
+let test_attention_severity_labels_remain_distinct () =
   let literals binding names =
     Ast_grep.count_string_literals_in_value_binding ~module_path:render
       ~binding_name:binding ~literals:names
   in
   Alcotest.(check int) "every level is named and every name is short" 4
     (literals "attention_severity_label" [ "crit"; "bad"; "warn"; "info" ]);
-  Alcotest.(check int) "the level that did not fit its column is gone" 0
+  Alcotest.(check int) "severity names stay compact" 0
     (literals "attention_severity_label" [ "critical" ]);
-  let calls binding callee =
-    Ast_grep.count_calls_in_value_binding ~module_path:render
-      ~binding_name:binding ~callee
-  in
-  Alcotest.(check int) "the column measures the names" 1
-    (calls "attention_severity_badge_cells" "Message_layout.display_width");
-  Alcotest.(check int) "and the badge cuts nothing" 0
-    (calls "attention_severity_badge" "fit_width")
+  Alcotest.(check int) "the severity label cuts nothing" 0
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"attention_severity_label" ~callee:"fit_width")
 
 (* Three facts about a surface's row list -- how many rows, which one the
    cursor is on, how to put the cursor elsewhere -- used to live in three
@@ -1436,8 +1427,8 @@ let () =
             `Quick test_why_a_lane_cannot_admit_is_the_detail_panes_to_say
         ; Alcotest.test_case "visible navigation glyphs are not mojibake"
             `Quick test_visible_navigation_glyphs_are_not_mojibake
-        ; Alcotest.test_case "the attention badge cannot cut its own level"
-            `Quick test_the_attention_badge_cannot_cut_its_own_level
+        ; Alcotest.test_case "attention severity labels remain distinct"
+            `Quick test_attention_severity_labels_remain_distinct
         ; Alcotest.test_case "the row cursor has one source" `Quick
             test_the_row_cursor_has_one_source
         ; Alcotest.test_case "the window is measured where the cursor lands"

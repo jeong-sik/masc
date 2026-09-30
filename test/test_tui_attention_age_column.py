@@ -1,4 +1,4 @@
-"""The Attention panel's age column is drawn when some item has an age."""
+"""Dashboard attention cards retain stamped ages beside severity labels."""
 import os
 import sys
 import test_tui_keyboard_input as h
@@ -10,11 +10,10 @@ SOURCE_MODULES = (
 )
 
 BRIEFING = "/api/v1/dashboard/briefing"
-BADGE = b"[warn]"
+BADGE = b"warn"
 SUMMARY = b"sangsu has external attention"
-# What a row reads as when the column is not there: the badge, one space, and
-# the summary.
-BADGE_THEN_SUMMARY = BADGE + b" " + SUMMARY
+# Without a stamped age, severity leads directly into the summary.
+BADGE_THEN_SUMMARY = BADGE + b" \xc2\xb7 " + SUMMARY
 DASH = b"\xe2\x80\x94"
 
 
@@ -76,29 +75,29 @@ def summary_offset(executable: str, stamped: bool) -> bytes:
 
     h.run_terminal_scenario(
         executable,
-        description=f"attention age column, stamped={stamped}",
+        description=f"attention card inline age, stamped={stamped}",
         interact=interact, http_fixtures=fixtures)
     return measured["row"]
 
 
 def run(executable: str) -> None:
-    # No item has an age: the summary follows the badge, and no row carries
-    # the dash that stood for an age nobody stamped.
+    # No item has an age: no blank age or synthesized clock is inserted.
     bare = summary_offset(executable, stamped=False)
     if BADGE_THEN_SUMMARY not in bare:
         raise AssertionError(
-            f"a panel with no ages still keeps the column: {bare!r}")
+            f"an unstamped card inserted age metadata: {bare!r}")
     if DASH in bare:
         raise AssertionError(f"an item with no age still drew a dash: {bare!r}")
 
-    # One item is stamped: the column is back, for the whole panel, so the
-    # summary no longer sits against its badge.
+    # The stamped item adds its age between severity and summary.
     stamped = summary_offset(executable, stamped=True)
     if BADGE_THEN_SUMMARY in stamped:
         raise AssertionError(
-            f"a stamped item drew no age column: {stamped!r}")
+            f"a stamped item drew no inline age: {stamped!r}")
+    if stamped.count(b" \xc2\xb7 ") < 2:
+        raise AssertionError(f"a stamped card lost age or summary: {stamped!r}")
 
 
 if __name__ == "__main__":
     run(os.path.abspath(sys.argv[1]))
-    print("the attention age column follows its ages: PASS")
+    print("attention card ages follow their evidence: PASS")

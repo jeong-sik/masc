@@ -1574,6 +1574,23 @@ let test_an_unstageable_image_is_refused_not_pathed () =
       Alcotest.fail "an empty .png should say so, not silently become a path")
 ;;
 
+let test_http_error_preview_preserves_utf8 () =
+  let prefix = "Keeper chat HTTP 500: " in
+  List.iter
+    (fun boundary ->
+      let body = String.make boundary 'a' ^ "한글가나다라마" in
+      let rendered = Chat.error_to_string (Chat.Http_error {status = 500; body}) in
+      check bool "HTTP error preview is valid UTF-8" true
+        (String_util.is_valid_utf8 rendered);
+      check bool "byte budget includes the cut mark" true
+        (String.length rendered <= String.length prefix + 240);
+      check bool "overflow uses the shared cut mark" true
+        (String.ends_with ~suffix:Masc_tui_message_layout.cut_mark rendered))
+    [235; 236; 237; 238; 239; 240; 241];
+  check string "short Unicode HTTP body remains intact"
+    (prefix ^ "짧은 오류")
+    (Chat.error_to_string (Chat.Http_error {status = 500; body = "짧은 오류"}))
+
 let test_missing_file_is_named_in_the_error () =
   match Masc_tui_attachment.of_file ~path:"/nonexistent/masc-attach-probe.png" with
   | Ok _ -> Alcotest.fail "a missing path must not attach"
@@ -1680,6 +1697,7 @@ let () =
             test_a_recalled_line_still_carries_its_emoji
         ; test_case "request labels keep random suffix" `Quick
             test_request_labels_keep_random_suffix
+        ; test_case "HTTP preview UTF-8 boundaries" `Quick test_http_error_preview_preserves_utf8
         ; test_case "typed error certainty" `Quick test_error_certainty
         ; test_case "unauthenticated reader keeps the operation open" `Quick
             test_reader_unauthenticated

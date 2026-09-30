@@ -4055,6 +4055,7 @@
   masc.keeper_chat_operations
   masc.string_util
   masc_tui_keeper_chat_projection
+  masc_tui_message_layout
   masc.masc_random_id
   yojson))
 
@@ -4401,7 +4402,7 @@
 (test
  (name test_tui_board_composer)
  (modules test_tui_board_composer)
- (libraries alcotest masc_tui_board_composer))
+ (libraries alcotest masc_tui_board_composer masc.string_util masc_tui_message_layout))
 
 (test
  (name test_tui_magnitude)

@@ -274,8 +274,11 @@ let terminal_safe_text ?(preserve_newlines = false) text =
   Masc.Tui_terminal_text.escape_invisible (Buffer.contents output)
 
 let bounded value =
-  if String.length value <= 240 then value
-  else String.sub value 0 240 ^ "..."
+  (* This is a byte-bounded HTTP body preview, not a terminal column. The
+     suffix participates in the existing preview budget. *)
+  String_util.utf8_safe ~max_bytes:240
+    ~suffix:Masc_tui_message_layout.cut_mark value
+  |> String_util.to_string
 
 let stream_error_to_string = function
   | Malformed_event detail -> "invalid Keeper chat stream: " ^ detail

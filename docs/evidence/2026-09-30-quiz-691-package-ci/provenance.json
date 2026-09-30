@@ -1,0 +1,9 @@
+{
+  "source_commit": "691c204cce5ded67e4ac4ab52143716295a68fc1",
+  "run": 36659398616,
+  "package_job": 109710588700,
+  "python_tests": 75,
+  "quiz_image_jobs": "4/4 success at finishing boundary",
+  "scope": "package CI and image builds, no installed runtime",
+  "raw_log_sha256": "5ac3c8052b4fdf06912e19eb84adccfd6a54441726ad86b3477e07f4d5eb9a30"
+}

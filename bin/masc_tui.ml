@@ -3129,97 +3129,6 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
   | Refresh_removed _ ->
     view.phase<-Login.Loading; start_job (fun () -> enqueue (Masc_tui_http.get_json ~host ~port ~path:"/api/v1/setup/inventory"))
 
-(* The device-flow login, streamed. gh prints the one-time code on its
-   own output, which the server forwards redacted; every data line lands
-   in the GitHub tab as it arrives so the operator can read the code and
-   finish in the browser. When the stream ends the tab re-reads the
-   identity observation, which is the fact the login was for. *)
-let launch_github_login state ~mailbox keeper_name =
-  let host = server_peer_host in
-  let port = state.port in
-  (* Read once, at the key press: ticking another scope while the device flow
-     waits on the browser must not change what this login asked for. *)
-  let scopes = state.github_login_scopes in
-  let run () =
-    match Eio_context.get_clock_opt () with
-    | None ->
-        enqueue_async mailbox
-          (Github_login_finished (keeper_name, Error "Eio clock is unavailable"))
-    | Some clock ->
-        let reader = Masc_tui_sse_lines.create () in
-        let flush_lines chunk =
-          let lines =
-            Masc_tui_sse_lines.feed reader chunk
-            |> List.filter_map (fun line ->
-                   let line = String.trim line in
-                   if String.length line > 6
-                      && String.sub line 0 6 = "data: "
-                   then
-                     let payload =
-                       String.sub line 6 (String.length line - 6)
-                     in
-                     match Yojson.Safe.from_string payload with
-                     | `Assoc fields -> (
-                         match List.assoc_opt "text" fields with
-                         | Some (`String text) ->
-                             Some (String.split_on_char '\n' text)
-                         | _ -> (
-                             match List.assoc_opt "message" fields with
-                             | Some (`String message) ->
-                                 Some [ "error: " ^ message ]
-                             | _ -> Some [ payload ]))
-                     | _ | (exception Yojson.Json_error _) ->
-                         Some [ payload ]
-                   else None)
-            |> List.concat
-            |> List.map Masc.Tui_terminal_text.sanitize_terminal_text
-            |> List.filter (fun line -> String.trim line <> "")
-          in
-          if lines <> [] then
-            enqueue_async mailbox (Github_login_lines (keeper_name, lines))
-        in
-        let result =
-          try
-            Masc_tui_http.post_keeper_github_login_streaming ~clock ~host
-              ~port ~keeper_name ~scopes
-              ~on_chunk:flush_lines
-          with
-          | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn -> Error (Printexc.to_string exn)
-        in
-        enqueue_async mailbox (Github_login_finished (keeper_name, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Github_login_finished (keeper_name, Error "Eio switch is unavailable"))
-
-let launch_github_token_save state ~mailbox keeper_name token =
-  let host = server_peer_host in
-  let port = state.port in
-  let run () =
-    let result =
-      try
-        Masc_tui_http.post_keeper_github_token ~host ~port ~keeper_name ~token ()
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Github_token_saved (keeper_name, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Github_token_saved (keeper_name, Error "Eio switch is unavailable"))
-
 let launch_runtime_config_load state ~mailbox =
   let host = server_peer_host in
   let port = state.port in
@@ -12975,39 +12884,15 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             view.notice<-"계정을 지웠는지 확인하지 못했습니다. r로 목록을 다시 읽으세요. " ^ detail)
        | Some _ | None -> ())
   | Github_login_lines (keeper_name, lines) ->
-      (* Append under the stamped view; a login for another keeper than the
-         one on screen still lands on its own stamp. *)
-      let existing =
-        match state.github_identity_view with
-        | Some (stamp, lines_before) when String.equal stamp keeper_name ->
-            lines_before
-        | Some _ | None -> [ "# github login" ]
-      in
-      state.github_identity_view <- Some (keeper_name, existing @ lines);
-      state.github_identity_view_error <- None
-  | Github_login_finished (keeper_name, result) -> (
-      (match result with
-       | Ok () -> report_action state "system" (keeper_name ^ ": github login stream ended")
-       | Error detail ->
-           report_action state "error" (keeper_name ^ ": github login: " ^ detail));
-      Masc_tui_identity_requests.launch_github_view state ~host:server_peer_host ~deliver:(fun message -> enqueue_async mailbox message) keeper_name)
-  | Github_token_saved (keeper_name, result) -> (
-      (match result with
-       | Ok json ->
-           report_action state "system" (keeper_name ^ ": github token saved");
-           state.github_token_save_status <-
-             Some ((Theme.ok ()) ^ "✓ Token saved successfully" ^ Ansi.reset);
-           state.github_identity_view <-
-             Some
-               ( keeper_name
-               , Masc_tui_github_identity.view_lines
-                   ~sanitize:Masc.Tui_terminal_text.sanitize_terminal_text json );
-           state.github_identity_view_error <- None
-       | Error detail ->
-           report_action state "error" (keeper_name ^ ": github token save: " ^ detail);
-           state.github_token_save_status <-
-             Some ((Theme.bad ()) ^ "✗ Token save failed: " ^ detail ^ Ansi.reset));
-      Masc_tui_identity_requests.launch_github_view state ~host:server_peer_host ~deliver:(fun message -> enqueue_async mailbox message) keeper_name)
+      Masc_tui_github_ui.login_lines state ~keeper_name lines
+  | Github_login_finished (keeper_name, result) ->
+      Masc_tui_github_ui.login_finished ~keeper_name
+        ~report:(fun level detail -> report_action state level detail)
+        ~refresh:(fun keeper -> Masc_tui_identity_requests.launch_github_view state ~host:server_peer_host ~deliver:(fun message -> enqueue_async mailbox message) keeper) result
+  | Github_token_saved (keeper_name, result) ->
+      Masc_tui_github_ui.token_saved state ~keeper_name
+        ~report:(fun level detail -> report_action state level detail)
+        ~refresh:(fun keeper -> Masc_tui_identity_requests.launch_github_view state ~host:server_peer_host ~deliver:(fun message -> enqueue_async mailbox message) keeper) result
   | System_logs_loaded result -> apply_system_logs_load state result
   | Schedules_loaded (request, result) -> (
       match Snapshot_read.settle state.schedules_read request with
@@ -17493,8 +17378,7 @@ and is loaded on demand through keeper_skill.
             | Some Text_identity_filter ->
            Masc_tui_identity_input.paste_filter state text
             | Some Text_github_token ->
-                let current = Option.value state.github_token_input ~default:"" in
-                state.github_token_input <- Some (current ^ text)
+                Masc_tui_github_ui.paste_token state text
             (* A board post holds many lines, so this one takes the paste
                whole rather than on one line. It does not spill to a file the
                way the chat draft does: that file is written into the keeper's
@@ -19584,29 +19468,8 @@ and is loaded on demand through keeper_skill.
              ~login:(fun ~keeper_name ~provider_id ~label -> Masc_tui_identity_requests.launch_login state ~host:server_peer_host ~deliver:(fun message -> enqueue_async async_messages message) ~keeper_name ~provider_id ~label) k
        | Some k
          when text_input_target state ~compact_viewport
-              = Some Text_github_token -> (
-           let draft = Option.value state.github_token_input ~default:"" in
-           match k with
-           | "esc" ->
-               state.github_token_input <- None
-           | "\127" | "\b" ->
-               state.github_token_input <-
-                 Some (Masc_tui_message_layout.drop_last_utf8_scalar draft)
-           | "\r" | "\n" -> (
-               match selected_keeper state with
-               | Some keeper ->
-                   let token = String.trim draft in
-                   state.github_token_input <- None;
-                   if not (String.equal token "") then (
-                     state.github_token_save_status <-
-                       Some (Ansi.dim ^ "Saving GitHub token…" ^ Ansi.reset);
-                     launch_github_token_save state ~mailbox:async_messages keeper.k_name token)
-               | None -> state.github_token_input <- None)
-           | s
-             when (String.length s = 1 && Char.code s.[0] >= 32)
-                  || (String.length s > 1 && Char.code s.[0] >= 0x80) ->
-               state.github_token_input <- Some (draft ^ s)
-           | _ -> ())
+              = Some Text_github_token ->
+           Masc_tui_github_ui.token_key state ~save:(fun keeper token -> Masc_tui_github_requests.launch_token_save state ~host:server_peer_host ~deliver:(fun message -> enqueue_async async_messages message) keeper token) k
        | Some "/"
          when state.view = Keepers Keeper_detail
               && state.detail_tab = Detail_identity
@@ -20295,49 +20158,18 @@ and is loaded on demand through keeper_skill.
        | Some "L"
          when state.view = Keepers Keeper_detail
               && state.detail_tab = Detail_github ->
-           (match selected_keeper state with
-            | Some keeper ->
-                let asked =
-                  match state.github_login_scopes with
-                  | [] -> "gh's default scopes"
-                  | scopes ->
-                      "+"
-                      ^ String.concat ", +"
-                          (List.map
-                             Masc.Keeper_github_identity.login_scope_to_string
-                             scopes)
-                in
-                state.github_identity_view <-
-                  Some
-                    ( keeper.k_name,
-                      [ "# github login";
-                        "(starting gh device flow with " ^ asked ^ "\xe2\x80\xa6)" ] );
-                launch_github_login state ~mailbox:async_messages keeper.k_name
-            | None -> ())
+           Masc_tui_github_ui.start_login state ~login:(fun keeper -> Masc_tui_github_requests.launch_login state ~host:server_peer_host ~deliver:(fun message -> enqueue_async async_messages message) keeper)
        | Some digit
          when state.view = Keepers Keeper_detail
               && state.detail_tab = Detail_github
               && String.length digit = 1
               && digit.[0] >= '1'
-              && digit.[0] <= '9' -> (
-           (* The digit the tab printed beside the scope. Both sides index
-              [all_login_scopes], so what the screen numbered and what this
-              ticks are the same list. *)
-           match
-             List.nth_opt Masc.Keeper_github_identity.all_login_scopes
-               (Char.code digit.[0] - Char.code '1')
-           with
-           | Some scope ->
-               state.github_login_scopes <-
-                 (if List.mem scope state.github_login_scopes then
-                    List.filter (fun s -> s <> scope) state.github_login_scopes
-                  else scope :: state.github_login_scopes)
-           | None -> ())
+              && digit.[0] <= '9' ->
+           Masc_tui_github_ui.toggle_scope state ~index:(Char.code digit.[0] - Char.code '1')
        | Some ("P" | "p")
          when state.view = Keepers Keeper_detail
               && state.detail_tab = Detail_github ->
-           state.github_token_input <- Some "";
-           state.github_token_save_status <- None
+           Masc_tui_github_ui.open_token state
        (* The number the Identity tab printed. Both sides index
           [identity_connectable], so what the screen numbered and what this
           starts are the same list. *)

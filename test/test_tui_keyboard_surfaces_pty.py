@@ -47,6 +47,10 @@ SOURCE_MODULES = (
     'bin/masc_tui_render_identity.mli',
     'bin/masc_tui_identity_input.ml',
     'bin/masc_tui_identity_input.mli',
+    'bin/masc_tui_github_ui.ml',
+    'bin/masc_tui_github_ui.mli',
+    'bin/masc_tui_github_requests.ml',
+    'bin/masc_tui_github_requests.mli',
 )
 
 if __name__ == "__main__":

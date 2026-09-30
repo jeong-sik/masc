@@ -47,7 +47,7 @@ let item_of_id id =
   | Some item -> Ok item
   | None -> Error ("unknown Item id " ^ id)
 
-let rec decode_list ~context decode = function
+let decode_list ~context decode = function
   | `List values ->
     let rec loop reversed = function
       | [] -> Ok (List.rev reversed)

@@ -901,11 +901,18 @@ default = "fixture.selected"
         (* A config refresh after selection cannot change this verification's
            model or effort: it measures the captured runtime, like dispatch. *)
         load_config ~protocol ~model ~effort:(Some "low");
+        (* The readiness command gives each run its own private directory;
+           Codex prepares its isolated home once inside that directory. *)
+        let private_dir =
+          Filename.temp_dir ~temp_dir:directory "readiness-" "" |> Unix.realpath in
         let result = Verify.verify ~secure_random:env#secure_random ~sw ~net:env#net
-          ~mgr ~clock:env#clock ~cwd:Eio.Path.(env#fs / directory)
-          ~cwd_path:directory ~timeout_s:15. selected in
+          ~mgr ~clock:env#clock ~cwd:Eio.Path.(env#fs / private_dir)
+          ~cwd_path:private_dir ~timeout_s:15. selected in
         check (option string) (protocol ^ " actual readiness roundtrip") None
-          (Option.map Verify.failure_code result.failure);
+          (Option.map (fun failure ->
+             match Verify.failure_detail failure with
+             | Some detail -> Verify.failure_code failure ^ ": " ^ detail
+             | None -> Verify.failure_code failure) result.failure);
         check bool (protocol ^ " actual readiness tool consumed") true result.tool_roundtrip;
         check_capture (protocol ^ " readiness") expected model)
         [ "codex-app-server", "gpt-6.1-sol", Some "ultra", Some "ultra"

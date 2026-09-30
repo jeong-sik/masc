@@ -12,7 +12,7 @@ import sys
 
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = (
+SOURCE_MODULES = ("lib/tui_decode_memory_facts.ml", "lib/tui_decode_memory_facts.mli",
     "bin/masc_tui_render_memory.ml",
     "bin/masc_tui_keys.ml",
     "bin/masc_tui.ml",

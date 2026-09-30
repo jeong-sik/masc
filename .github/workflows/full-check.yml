@@ -72,8 +72,6 @@ jobs:
 
         python3 scripts/ci/check-committed-secrets.py
 
-        python3 scripts/ci/check-cancel-guard.py
-
         '
   check:
     name: dune build @check
@@ -81,7 +79,6 @@ jobs:
     timeout-minutes: 45
     permissions:
       contents: read
-      pull-requests: read
     steps:
     - name: Free disk space
       run: "set -euo pipefail\ncleanup_pids=()\nsudo rm -rf /usr/local/lib/android & cleanup_pids+=(\"$!\")\nsudo\

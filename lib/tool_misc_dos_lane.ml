@@ -494,6 +494,20 @@ let free_left_controller ~holder_left ~who =
   | Ok _ | Error _ -> ()
 ;;
 
+(* A Keeper removed for good cannot pass either, but the next move cannot
+   always tell that it left: with its meta gone, its own credential, which
+   has no expiry, reads like an agent that is coming back. The shutdown that
+   removes it lets its controller go here and tells the board, with the notice
+   a stopped Keeper's controller gets. [by] is who asked for the removal. No
+   credential transaction is held here, so the notice is posted before this
+   returns. *)
+let release_retired_keeper ~holder ~by =
+  after_announcing
+    (off_domain (fun () ->
+       Dos_lane.release_left ~holder
+         ~announce:(announce ~author:by (departure_notice holder Keeper_stopped))))
+;;
+
 let handle_load ~tool_name ~start_time ~base_path ~agent_name args =
   match get_string_opt args "program" with
   | None | Some "" ->

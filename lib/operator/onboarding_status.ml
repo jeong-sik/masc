@@ -103,7 +103,7 @@ let model_checks config_path =
     let selected = Runtime_verification.initial_runtime_id
       ~default_runtime_id:default.id ~assignments ~lanes ~keeper_name:"imp" in
     let runtime = Option.bind selected (fun id ->
-      List.find_opt (fun (runtime : Runtime.t) -> String.equal runtime.id id) runtimes) in
+      List.find_opt (fun (runtime : Runtime_instance.t) -> String.equal runtime.id id) runtimes) in
     match runtime with
     | None ->
       (* A loaded list has validated every assignment, lane candidate and the

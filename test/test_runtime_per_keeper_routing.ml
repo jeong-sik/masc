@@ -1818,14 +1818,14 @@ tools-support = true
         (String.concat "; " (List.map (fun e -> e.Runtime_toml.message) errors))
     | Ok config ->
       let binding = List.hd config.Runtime_schema.bindings in
-      (match Runtime.of_binding config binding with
+      (match Runtime_instance.of_binding config binding with
        | Error reason -> Alcotest.failf "relative inherited home dropped runtime: %s"
            (Runtime_config_error.string_of_drop_reason reason)
        | Ok runtime ->
          let expected = Filename.concat (Sys.getcwd ()) "relative-claude-account" in
          Alcotest.(check string) "runtime quota uses the selected child home"
            ("official:claude-code:home:" ^ expected)
-           (Runtime_quota_window.scope_to_string (Runtime.quota_scope_of_runtime runtime))));
+           (Runtime_quota_window.scope_to_string (Runtime_instance.quota_scope_of_runtime runtime))));
   Masc_test_deps.with_process_env "HOME" (Some "") (fun () ->
     Masc_test_deps.with_process_env "CODEX_HOME" (Some "") (fun () ->
       match Runtime_toml.parse_string
@@ -1854,13 +1854,13 @@ tools-support = true
           | Some b -> b
           | None -> Alcotest.fail ("missing binding " ^ id)
         in
-        (match Runtime.of_binding config (binding "codex") with
+        (match Runtime_instance.of_binding config (binding "codex") with
             | Error (Runtime_config_error.Execution_unbuildable reason) ->
               Alcotest.(check bool) "selected account needs a real home" true
                 (String_util.contains_substring reason "account-home")
             | Error _ | Ok _ ->
               Alcotest.fail "selected official client without HOME gained a shared scope");
-        (match Runtime.of_binding config (binding "http") with
+        (match Runtime_instance.of_binding config (binding "http") with
          | Ok _ -> ()
          | Error reason ->
            Alcotest.failf "unrelated HTTP binding was rejected: %s"
@@ -2294,13 +2294,13 @@ let test_get_runtime_by_id_resolves_and_fails_fast () =
       "known id resolves to its runtime"
       (Some "openai.gpt")
       (Option.map
-         (fun (rt : Runtime.t) -> rt.Runtime.id)
+         (fun (rt : Runtime_instance.t) -> rt.Runtime_instance.id)
          (Runtime.get_runtime_by_id "openai.gpt"));
     Alcotest.(check (option string))
       "unknown id resolves to None (driver fails fast, no default substitution)"
       None
       (Option.map
-         (fun (rt : Runtime.t) -> rt.Runtime.id)
+         (fun (rt : Runtime_instance.t) -> rt.Runtime_instance.id)
          (Runtime.get_runtime_by_id "bogus.binding")))
 ;;
 
@@ -2313,10 +2313,10 @@ let test_get_runtime_by_id_resolves_and_fails_fast () =
 
 let provider_base_url_of_runtime_id runtime_id =
   match Runtime.get_runtime_by_id runtime_id with
-  | Some { Runtime.execution = Runtime_execution.Agent_core provider_config; _ } ->
+  | Some { Runtime_instance.execution = Runtime_execution.Agent_core provider_config; _ } ->
     provider_config.Llm_provider.Provider_config.base_url
   | Some rt ->
-    Alcotest.failf "fixture runtime %s is not agent_core" rt.Runtime.id
+    Alcotest.failf "fixture runtime %s is not agent_core" rt.Runtime_instance.id
   | None -> Alcotest.failf "fixture runtime %s missing from catalog" runtime_id
 ;;
 
@@ -2502,11 +2502,11 @@ let test_runtime_budget_source_survives_to_status_json () =
         (Keeper_context_runtime.max_context_resolution_error_to_string error)
     | Ok resolution ->
       (match resolution.Keeper_context_runtime.runtime_budget_source with
-       | Runtime.Override -> ()
-       | (Runtime.Capability | Runtime.Override_clamped_by_capability) as other ->
+       | Runtime_instance.Override -> ()
+       | (Runtime_instance.Capability | Runtime_instance.Override_clamped_by_capability) as other ->
          Alcotest.failf
            "expected the runtime.toml override source, got %s"
-           (Runtime.max_context_source_to_string other));
+           (Runtime_instance.max_context_source_to_string other));
       let json =
         Keeper_context_runtime.context_budget_json_of_resolution
           ~runtime_id:"openai.gpt"
@@ -3102,7 +3102,7 @@ let test_seed_of_thinking_support_gate_contract () =
 
 let test_max_output_tokens_accessor_projects_catalog () =
   let max_output_tokens id =
-    Option.bind (Runtime.get_runtime_by_id id) Runtime.max_output_tokens_of_runtime
+    Option.bind (Runtime.get_runtime_by_id id) Runtime_instance.max_output_tokens_of_runtime
   in
   with_runtime_thinking (fun () ->
     Alcotest.(check (option int))
@@ -3248,7 +3248,7 @@ let test_agent_core_provider_config_carries_effective_context_window () =
   with_runtime_thinking (fun () ->
     let provider_config_of runtime_id =
       match Runtime.get_runtime_by_id runtime_id with
-      | Some (rt : Runtime.t) ->
+      | Some (rt : Runtime_instance.t) ->
         (match rt.execution with
          | Runtime_execution.Agent_core config -> config
          | Runtime_execution.Codex_app_server _
@@ -3327,7 +3327,7 @@ let test_max_context_of_uncatalogued_model_keeps_runtime_declaration () =
         Alcotest.(check string)
           "source is the runtime.toml override, not a preset clamp"
           "override"
-          (Runtime.max_context_source_to_string source))
+          (Runtime_instance.max_context_source_to_string source))
 ;;
 
 let test_historical_qwen36_context_overflow_fixture_replays_provider_cap () =

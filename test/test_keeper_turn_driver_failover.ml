@@ -694,7 +694,7 @@ let test_assignment_walk_order_demotes_a_resting_head () =
   with_runtime_config runtime_toml_with_lane (fun () ->
     let head = Option.get (Runtime.get_runtime_by_id "primary.test_model") in
     Runtime_candidate_backpressure.note_rate_limit
-      ~candidate:head.Runtime.candidate_backpressure ~retry_after:None;
+      ~candidate:head.Runtime_instance.candidate_backpressure ~retry_after:None;
     match Driver.assignment_walk_order ~walk:(Driver.Fresh_walk_by test_recorder) ~now:(Unix.gettimeofday ()) "resilient" with
     | Error _ -> Alcotest.fail "the lane resolves"
     | Ok walk ->
@@ -1144,7 +1144,7 @@ let test_lane_media_degrade_uses_first_candidate_runtime_id () =
        | Runtime_agent.No_reroute_needed ->
          Alcotest.fail "text-only lane should not admit an image turn"
        | Runtime_agent.Reroute { target; _ } ->
-         Alcotest.failf "text-only lane rerouted to %s" target.Runtime.id);
+         Alcotest.failf "text-only lane rerouted to %s" target.Runtime_instance.id);
       let decision =
         Driver.For_testing.media_degrade_manifest_decision
           ~runtime_id:first_candidate_id
@@ -1930,7 +1930,7 @@ let test_lane_media_reroute_prefers_lane_candidate () =
         Alcotest.(check string)
           "the reroute picks the lane's capable candidate"
           "lanevision.vision_model"
-          target.Runtime.id
+          target.Runtime_instance.id
       | Runtime_agent.No_reroute_needed ->
         Alcotest.fail "text-only first candidate should require image reroute"
       | Runtime_agent.No_capable_runtime _ ->
@@ -1948,7 +1948,7 @@ let test_lane_media_reroute_stays_in_lane () =
       | Some runtime -> runtime
       | None -> Alcotest.failf "missing runtime %s" id
     in
-    let ids = List.map (fun (runtime : Runtime.t) -> runtime.Runtime.id) in
+    let ids = List.map (fun (runtime : Runtime_instance.t) -> runtime.Runtime_instance.id) in
     let head = runtime "primary.text_model" in
     let image_block =
       Agent_core.Types.Image
@@ -1983,7 +1983,7 @@ let test_lane_media_reroute_stays_in_lane () =
      with
      | Runtime_agent.No_capable_runtime _ -> ()
      | Runtime_agent.Reroute { target; _ } ->
-       Alcotest.failf "an image turn left its lane for %s" target.Runtime.id
+       Alcotest.failf "an image turn left its lane for %s" target.Runtime_instance.id
      | Runtime_agent.No_reroute_needed ->
        Alcotest.fail "a text-only head must not claim the image");
     Alcotest.(check (list string))
@@ -2024,12 +2024,12 @@ let test_lane_media_reroute_walks_past_exhausted_candidate () =
         | Some runtime -> runtime
         | None -> Alcotest.failf "missing runtime %s" id
       in
-      let ids = List.map (fun (runtime : Runtime.t) -> runtime.Runtime.id) in
+      let ids = List.map (fun (runtime : Runtime_instance.t) -> runtime.Runtime_instance.id) in
       let head = runtime "primary.text_model" in
       let lanevision = runtime "lanevision.vision_model" in
       let backupvision = runtime "backupvision.vision_model" in
       Runtime_quota_window.note_observed_exhausted
-        ~scope:(Runtime.quota_scope_of_runtime lanevision);
+        ~scope:(Runtime_instance.quota_scope_of_runtime lanevision);
       let candidates =
         Driver.For_testing.modality_reroute_candidates ~walk:(Driver.Fresh_walk_by test_recorder)
           ~now:(Unix.gettimeofday ())
@@ -2063,7 +2063,7 @@ let test_lane_media_reroute_walks_past_exhausted_candidate () =
          Alcotest.(check string)
            "the reroute picks the live candidate"
            "backupvision.vision_model"
-           target.Runtime.id
+           target.Runtime_instance.id
        | Runtime_agent.No_reroute_needed ->
          Alcotest.fail "a text-only head must reroute an image turn"
        | Runtime_agent.No_capable_runtime _ ->
@@ -2126,12 +2126,12 @@ let test_media_turn_starts_from_the_live_walk_head () =
         | Some runtime -> runtime
         | None -> Alcotest.failf "missing runtime %s" id
       in
-      let ids = List.map (fun (runtime : Runtime.t) -> runtime.Runtime.id) in
+      let ids = List.map (fun (runtime : Runtime_instance.t) -> runtime.Runtime_instance.id) in
       let assigned = runtime "lanevision.vision_model" in
       let text_only = runtime "primary.text_model" in
       let backupvision = runtime "backupvision.vision_model" in
       Runtime_quota_window.note_observed_exhausted
-        ~scope:(Runtime.quota_scope_of_runtime assigned);
+        ~scope:(Runtime_instance.quota_scope_of_runtime assigned);
       let image_block =
         Agent_core.Types.Image
           { media_type = "image/png"
@@ -2158,7 +2158,7 @@ let test_media_turn_starts_from_the_live_walk_head () =
        | Runtime_agent.Reroute { target; _ } ->
          Alcotest.failf
            "an image-capable head must not reroute, got %s"
-           target.Runtime.id
+           target.Runtime_instance.id
        | Runtime_agent.No_capable_runtime _ ->
          Alcotest.fail "the assigned runtime takes the image");
       let media_walk = Runtime_agent.media_walk ~candidates [ image_block ] in
@@ -2275,7 +2275,7 @@ let test_runtime_dedupe_preserves_first_occurrence () =
         "outsidevision.vision_model";
         "primary.text_model";
       ]
-      (List.map (fun (runtime : Runtime.t) -> runtime.Runtime.id) deduped))
+      (List.map (fun (runtime : Runtime_instance.t) -> runtime.Runtime_instance.id) deduped))
 
 let test_attempt_loop_stops_on_nonretryable_failure () =
   let attempts = ref [] in
@@ -2434,7 +2434,7 @@ let test_cross_owner_fallback_returns_winning_runtime_authority () =
     let result =
       Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
         ~runtime_id:"checkpoint_lane"
-        ~runtime_id_of:(fun (runtime : Runtime.t) -> runtime.id)
+        ~runtime_id_of:(fun (runtime : Runtime_instance.t) -> runtime.id)
         ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
         ~run_attempt:(fun ~idx ~runtime_id runtime ->
           if String.equal runtime_id primary.id
@@ -2468,7 +2468,7 @@ let test_cross_owner_fallback_returns_winning_runtime_authority () =
         selected.Driver.selected_runtime_id;
       Alcotest.(check int)
         "selected context window"
-        (Runtime.max_context_of_runtime fallback)
+        (Runtime_instance.max_context_of_runtime fallback)
         selected.selected_max_context;
       Alcotest.(check int)
         "fallback candidate wins at lane index 1 (primary at 0 failed first)"
@@ -2490,7 +2490,7 @@ let test_first_candidate_success_keeps_lane_attempt_index_zero () =
     let result =
       Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
         ~runtime_id:"checkpoint_lane"
-        ~runtime_id_of:(fun (runtime : Runtime.t) -> runtime.id)
+        ~runtime_id_of:(fun (runtime : Runtime_instance.t) -> runtime.id)
         ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
         ~run_attempt:(fun ~idx ~runtime_id:_ runtime ->
           attempt_without_effect
@@ -2971,7 +2971,7 @@ let test_rate_limit_order_never_excludes_and_success_clears () =
 ;;
 
 let quota_lane_candidate id =
-  (Option.get (Runtime.get_runtime_by_id id)).Runtime.candidate_backpressure
+  (Option.get (Runtime.get_runtime_by_id id)).Runtime_instance.candidate_backpressure
 ;;
 
 (* Every quota_lane path starts serving: no candidate observation, no quota
@@ -3411,7 +3411,7 @@ let test_a_403_without_usage_read_rests_nothing () =
 let test_the_read_after_a_403_skips_and_contains_its_failures () =
   with_refusal_lane ~toml:runtime_toml_quota_lane_with_usage_read (fun () ->
     let refused = Option.get (Runtime.get_runtime_by_id "other.test_model") in
-    let scope = Runtime.quota_scope_of_runtime refused in
+    let scope = Runtime_instance.quota_scope_of_runtime refused in
     let read ?fetch () = outcome_label (Usage_read.read_runtime_after_account_refusal ?fetch refused) in
     Alcotest.(check string) "outside a server there is no net or clock to read with"
       "skipped: no net or clock" (read ());
@@ -3816,9 +3816,9 @@ let test_rate_limit_candidate_survives_unchanged_reload_only () =
     let old = Option.get (Runtime.get_runtime_by_id "shared_a.test_model") in
     let attempt runtime reload =
       let result = Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
-        ~runtime_id:"quota_lane" ~runtime_id_of:(fun (rt : Runtime.t) -> rt.id)
-        ~quota_scope_of:(fun rt -> Some (Runtime.quota_scope_of_runtime rt))
-        ~candidate_backpressure_of:(fun (rt : Runtime.t) -> Some rt.candidate_backpressure)
+        ~runtime_id:"quota_lane" ~runtime_id_of:(fun (rt : Runtime_instance.t) -> rt.id)
+        ~quota_scope_of:(fun rt -> Some (Runtime_instance.quota_scope_of_runtime rt))
+        ~candidate_backpressure_of:(fun (rt : Runtime_instance.t) -> Some rt.candidate_backpressure)
         ~candidate_dispatchable:(fun _ -> true)
         ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
         ~run_attempt:(fun ~idx:_ ~runtime_id:_ _ ->
@@ -4115,7 +4115,7 @@ let test_official_client_rate_limit_survives_unchanged_reload () =
   with_runtime_config runtime_toml_checkpoint_lane (fun () ->
     let head = Option.get (Runtime.get_runtime_by_id "codex.codex") in
     Runtime_candidate_backpressure.note_rate_limit
-      ~candidate:head.Runtime.candidate_backpressure ~retry_after:None;
+      ~candidate:head.Runtime_instance.candidate_backpressure ~retry_after:None;
     let order () =
       match Driver.assignment_walk_order ~walk:(Driver.Fresh_walk_by test_recorder) ~now:(Unix.gettimeofday ()) "checkpoint_lane" with
       | Ok walk -> walk.Driver.order
@@ -4141,9 +4141,9 @@ let test_rate_limit_credential_rotation_under_same_reference () =
       with_runtime_config toml (fun () ->
         let old = Option.get (Runtime.get_runtime_by_id "shared_a.test_model") in
         let result = Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
-          ~runtime_id:"quota_lane" ~runtime_id_of:(fun (rt : Runtime.t) -> rt.id)
-          ~quota_scope_of:(fun rt -> Some (Runtime.quota_scope_of_runtime rt))
-          ~candidate_backpressure_of:(fun (rt : Runtime.t) -> Some rt.candidate_backpressure)
+          ~runtime_id:"quota_lane" ~runtime_id_of:(fun (rt : Runtime_instance.t) -> rt.id)
+          ~quota_scope_of:(fun rt -> Some (Runtime_instance.quota_scope_of_runtime rt))
+          ~candidate_backpressure_of:(fun (rt : Runtime_instance.t) -> Some rt.candidate_backpressure)
           ~candidate_dispatchable:(fun _ -> true)
           ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
           ~run_attempt:(fun ~idx:_ ~runtime_id:_ _ ->
@@ -4217,13 +4217,13 @@ let test_attempt_quota_scope_survives_runtime_reload () =
          let attempted_runtime =
            Option.get (Runtime.get_runtime_by_id "shared_a.test_model")
          in
-         let attempted_scope = Runtime.quota_scope_of_runtime attempted_runtime in
+         let attempted_scope = Runtime_instance.quota_scope_of_runtime attempted_runtime in
          let result =
            Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
              ~runtime_id:"quota_lane"
-             ~runtime_id_of:(fun (runtime : Runtime.t) -> runtime.id)
+             ~runtime_id_of:(fun (runtime : Runtime_instance.t) -> runtime.id)
              ~quota_scope_of:(fun runtime ->
-               Some (Runtime.quota_scope_of_runtime runtime))
+               Some (Runtime_instance.quota_scope_of_runtime runtime))
              ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
              ~run_attempt:(fun ~idx:_ ~runtime_id:_ _candidate ->
                reload_runtime_config
@@ -4572,7 +4572,7 @@ let test_run_named_dispatches_the_recorders_marked_head_first () =
   with_runtime_config runtime_toml_with_lane (fun () ->
     let head = Option.get (Runtime.get_runtime_by_id lane_head) in
     Runtime_candidate_backpressure.note_failed_attempt
-      ~candidate:head.Runtime.candidate_backpressure
+      ~candidate:head.Runtime_instance.candidate_backpressure
       ~failure:Runtime_candidate_backpressure.Provider_timeout
       ~recorded_by:keeper_a;
     Alcotest.(check string) "keeper-a's turn dispatches the head it saw fail"
@@ -4590,7 +4590,7 @@ let test_run_named_reroutes_an_image_to_the_recorders_marked_candidate () =
   with_runtime_config runtime_toml_media_lane_with_two_vision_candidates (fun () ->
     let marked = Option.get (Runtime.get_runtime_by_id "lanevision.vision_model") in
     Runtime_candidate_backpressure.note_failed_attempt
-      ~candidate:marked.Runtime.candidate_backpressure
+      ~candidate:marked.Runtime_instance.candidate_backpressure
       ~failure:Runtime_candidate_backpressure.Provider_timeout
       ~recorded_by:keeper_a;
     let goal_blocks =

@@ -2999,6 +2999,9 @@ let internal_descriptors : t list =
   ; (masc_misc_descriptor ~ordinary_execution_mode:Concurrent
        "portrait_read" "keeper_portrait_read" ~readonly:true
        |> with_composable_output (Json_output { schema = portrait_read_output_schema }))
+  ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent "candle_balance" "keeper_candle_balance" ~readonly:true
+  ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent "candle_catalog" "keeper_candle_catalog" ~readonly:true
+  ; masc_misc_descriptor "candle_purchase" "keeper_candle_purchase" ~readonly:false
   (* MSX lane (RFC-0439 §3.5): the shared machine is one piece of state, so
      none of these opts into concurrent batches. *)
   ; masc_misc_descriptor "msx_load" "masc_msx_load" ~readonly:false

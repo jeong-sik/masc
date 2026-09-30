@@ -744,7 +744,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                       `Assoc
                         [
                           ( "approval_queue_state",
-                            Keeper_approval_queue
+                            Keeper_approval_queue_result
                             .approval_queue_unavailable_state_json
                               error );
                           ("count", `Null);
@@ -759,7 +759,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                       `Assoc
                         [
                           ( "approval_queue_state",
-                            Keeper_approval_queue
+                            Keeper_approval_queue_result
                             .approval_queue_ready_state_json );
                           ("count", `Int (List.length linked));
                           ( "nodes",

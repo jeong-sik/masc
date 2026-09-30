@@ -7234,7 +7234,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
         [prefix ^ value]
       else
         ("  " ^ label_style ^ label ^ Ansi.reset)
-        :: (Message_layout.wrap_words ~max_cells:(max 1 (width - 4)) value
+        :: (Message_layout.wrap_styled_words ~max_cells:(max 1 (width - 4)) value
             |> List.map (fun line -> "    " ^ line ^ Ansi.reset))
     in
 
@@ -8136,12 +8136,6 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
             state.identity_view_error
       | Detail_channels ->
           channel_lines ()
-          |> List.concat_map (fun line ->
-               if Message_layout.display_width line <= inner then [line]
-               else
-                 Message_layout.wrap_words ~max_cells:(max 1 (inner - 4)) line
-                 |> List.mapi (fun index row ->
-                      (if index = 0 then "  " else "    ") ^ row ^ Ansi.reset))
       | Detail_automation -> automation_lines ()
       | Detail_runs -> run_lines ()
     in

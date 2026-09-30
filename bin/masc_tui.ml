@@ -10061,7 +10061,7 @@ let apply_asks_load state = function
        | Ask_browsing -> ()
        | Ask_answering { aam_ask_id } ->
            (match List.find_index
-                    (fun (row : Tui_decode.ask_row) -> row.ar_id = aam_ask_id) next_rows with
+                    (fun (row : Masc.Tui_decode_asks.ask_row) -> row.ar_id = aam_ask_id) next_rows with
             | Some index -> state.ask_cursor <- index
             | None -> clear_ask_answering state));
       state.asks_snapshot <- Some snapshot;
@@ -11458,7 +11458,7 @@ let selected_ask_row state =
   match state.ask_answer_mode with
   | Ask_browsing -> List.nth_opt (open_ask_rows state) state.ask_cursor
   | Ask_answering { aam_ask_id } ->
-      List.find_opt (fun (row : Tui_decode.ask_row) -> row.ar_id = aam_ask_id)
+      List.find_opt (fun (row : Masc.Tui_decode_asks.ask_row) -> row.ar_id = aam_ask_id)
         (open_ask_rows state)
 
 let selected_ask_question state =
@@ -22484,7 +22484,7 @@ and is loaded on demand through keeper_skill.
                           state.approval_detail_scroll <- 0)
                  | Home_question ask_id ->
                      (match List.find_index
-                              (fun (row : Tui_decode.ask_row) -> row.ar_id = ask_id)
+                              (fun (row : Masc.Tui_decode_asks.ask_row) -> row.ar_id = ask_id)
                               (open_ask_rows state) with
                       | None -> report_action state "system" "Question changed; choose again"
                       | Some cursor ->

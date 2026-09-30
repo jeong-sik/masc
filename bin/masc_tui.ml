@@ -20996,6 +20996,17 @@ and is loaded on demand through keeper_skill.
            let close () = close_agenda state in
            (match k with
             | ";" | "esc" -> close ()
+            | "pageup" | "pagedown" | "home" | "end" | "g" | "G" ->
+                let count, height = Masc_tui_render.agenda_viewport state in
+                let scroll = Masc_tui_render.agenda_scroll_position state in
+                state.agenda_navigation <- Agenda_read_rows;
+                state.agenda_scroll <-
+                  (match k with
+                   | "pageup" -> Masc_tui_scroll.page_up ~count ~height scroll
+                   | "pagedown" -> Masc_tui_scroll.page_down ~count ~height scroll
+                   | "home" | "g" -> 0
+                   | "end" | "G" -> Masc_tui_scroll.maximum ~count ~height
+                   | _ -> scroll)
             | "j" | "down" | "k" | "up" ->
                 let lines = Masc_tui_render.agenda_lines state in
                 (match Masc_tui_agenda.target_indexes lines with
@@ -21013,6 +21024,7 @@ and is loaded on demand through keeper_skill.
                      state.agenda_scroll <-
                        move ~count ~height state.agenda_scroll
                  | _ :: _ ->
+                     state.agenda_navigation <- Agenda_follow_selection;
                      let direction =
                        match k with
                        | "j" | "down" -> Masc_tui_agenda.Next
@@ -21031,8 +21043,17 @@ and is loaded on demand through keeper_skill.
                           ~selected:state.agenda_selected))
             | "\r" ->
                 let lines = Masc_tui_render.agenda_lines state in
-                (match Masc_tui_agenda.selected_line lines
-                         ~selected:state.agenda_selected with
+                let _, height = Masc_tui_render.agenda_viewport state in
+                let scroll = Masc_tui_render.agenda_scroll_position state in
+                let selected =
+                  match Masc_tui_agenda.selected_index lines
+                          ~selected:state.agenda_selected with
+                  | Some index when index >= scroll && index < scroll + height ->
+                      Masc_tui_agenda.selected_line lines
+                        ~selected:state.agenda_selected
+                  | Some _ | None -> None
+                in
+                (match selected with
                  | Some { Masc_tui_agenda.goes_to = Masc_tui_agenda.Nowhere; _ }
                  | None -> ()
                  | Some
@@ -23037,11 +23058,10 @@ and is loaded on demand through keeper_skill.
        | Some ";" ->
            state.agenda_open <- true;
            state.agenda_scroll <- 0;
-           (* Open on the first row that leads somewhere rather than on the
-              heading above it, so the first Enter answers something. *)
-           state.agenda_selected <-
-             Masc_tui_agenda.step (Masc_tui_render.agenda_lines state)
-               ~selected:Masc_tui_agenda.Nowhere Masc_tui_agenda.Next
+           state.agenda_navigation <- Agenda_read_rows;
+           (* Start with the scheduled rows. A target is selected explicitly
+              with j/k, and Enter opens only a marked row in the window. *)
+           state.agenda_selected <- Masc_tui_agenda.Nowhere
        | Some "i"
          when (not message_mode)
               && (match state.msg_target_keeper_name with

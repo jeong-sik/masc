@@ -145,9 +145,12 @@ def main(executable: str, captures: Path | None) -> None:
         os.write(master, b"jjj")
         if not terminal.drain_until_quiet(process, master, output):
             raise AssertionError("Records did not settle after moving selection")
-        technical = key(b"D", b"Rows")
-        if b"outside-current-slice" not in technical:
-            raise AssertionError("raw Records lost declared relations")
+        technical = key(b"D", b"Raw details")
+        raw_screen = screen(technical, b"Raw details")
+        if b"outside-current-slice" not in raw_screen:
+            raise AssertionError("raw Records lost the selected row's declared relations")
+        if b"3 TOML" in raw_screen or b"4 Workers" in raw_screen or b"5 Rows" in raw_screen:
+            raise AssertionError("raw detail reopened the retired five-tab screen")
         key(b"\x1b", b"4 Records")
         timeline = key(b"1", b"Horizontal Lane timeline")
         plain = terminal.CSI_RE.sub(b"", timeline)

@@ -154,11 +154,16 @@ let json_response_with_source ~status ~source req reqd json =
   Http.Response.json_value ~status ~extra_headers:(source_header source)
     ~request:req json reqd
 
-let json_response_with_source_and_base ~status ~source ~base_path req reqd json =
+(* A cached workspace read goes out as the bytes the cache kept with the
+   entry, under the same source headers as an uncached answer. *)
+let cached_response_with_source ~source req reqd payload =
+  Server_cached_read_http.respond ~extra_headers:(source_header source)
+    ~request:req reqd payload
+
+let cached_response_with_source_and_base ~source ~base_path req reqd payload =
   let headers = ("X-Workspace-Base-Path", sanitize_header_value base_path)
                 :: source_header source in
-  Http.Response.json_value ~status ~extra_headers:headers
-    ~request:req json reqd
+  Server_cached_read_http.respond ~extra_headers:headers ~request:req reqd payload
 
 (* --- Safe path --- *)
 
@@ -908,8 +913,8 @@ let add_routes router =
                (source_to_string source)
                effective_depth effective_max_nodes include_diff
            in
-           let json =
-             Dashboard_cache.get_or_compute cache_key
+           let payload =
+             Dashboard_cache.get_or_compute_payload cache_key
                ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
                (fun () ->
                   Domain_pool_ref.submit_io_or_inline (fun () ->
@@ -926,8 +931,8 @@ let add_routes router =
                     in
                     `List (List.rev nodes)))
            in
-           json_response_with_source_and_base
-             ~status:`OK ~source ~base_path:base request reqd json)
+           cached_response_with_source_and_base ~source ~base_path:base request
+             reqd payload)
          request reqd)
 
   |> Http.Router.get "/api/v1/git/status" (fun request reqd ->
@@ -1017,8 +1022,8 @@ let add_routes router =
                   Printf.sprintf "workspace:children:%s:%s:%d:%d"
                     base file.lexical_path child_depth max_nodes
                 in
-                let json =
-                  Dashboard_cache.get_or_compute cache_key
+                let payload =
+                  Dashboard_cache.get_or_compute_payload cache_key
                     ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
                     (fun () ->
                        Domain_pool_ref.submit_io_or_inline (fun () ->
@@ -1039,8 +1044,8 @@ let add_routes router =
                            in
                            `List (List.rev nodes)))
                 in
-                json_response_with_source_and_base
-                  ~status:`OK ~source ~base_path:base request reqd json))
+                cached_response_with_source_and_base ~source ~base_path:base
+                  request reqd payload))
          request reqd)
 
   |> Http.Router.get "/api/v1/workspace/file" (fun request reqd ->
@@ -1276,8 +1281,8 @@ let add_routes router =
                       (source_to_string source)
                       rel
                   in
-                  let json =
-                    Dashboard_cache.get_or_compute cache_key
+                  let payload =
+                    Dashboard_cache.get_or_compute_payload cache_key
                       ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
                       (fun () ->
                          Domain_pool_ref.submit_io_or_inline (fun () ->
@@ -1290,7 +1295,7 @@ let add_routes router =
                              let grouped = group_blame_entries rel entries in
                              `List grouped))
                   in
-                  json_response_with_source ~status:`OK ~source request reqd json)))
+                  cached_response_with_source ~source request reqd payload)))
          request reqd)
 
   |> Http.Router.get "/api/v1/git/log" (fun request reqd ->
@@ -1331,8 +1336,8 @@ let add_routes router =
                          (source_to_string source)
                          rel limit
                      in
-                     let json =
-                       Dashboard_cache.get_or_compute cache_key
+                     let payload =
+                       Dashboard_cache.get_or_compute_payload cache_key
                          ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
                          (fun () ->
                             Domain_pool_ref.submit_io_or_inline (fun () ->
@@ -1353,8 +1358,7 @@ let add_routes router =
                                          lines) )
                                 ]))
                      in
-                     json_response_with_source ~status:`OK ~source request
-                       reqd json)))
+                     cached_response_with_source ~source request reqd payload)))
          request reqd)
 
   |> Http.Router.get "/api/v1/git/diff" (fun request reqd ->
@@ -1399,8 +1403,8 @@ let add_routes router =
                     base_ref
                     rel
                 in
-                let result =
-                  Dashboard_cache.get_or_compute cache_key
+                let payload =
+                  Dashboard_cache.get_or_compute_payload cache_key
                     ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
                     (fun () ->
                        Domain_pool_ref.submit_io_or_inline (fun () ->
@@ -1418,10 +1422,9 @@ let add_routes router =
                            let unified = parse_unified_diff diff_lines in
                            `Assoc [("unified", `List unified); ("has_changes", `Bool true)]))
                 in
-                (match result with
+                (match payload.json with
                  | `Null ->
                    json_response ~status:`Bad_request request reqd
                      (json_error "git diff failed")
-                 | data ->
-                   json_response_with_source ~status:`OK ~source request reqd data))))
+                 | _ -> cached_response_with_source ~source request reqd payload))))
          request reqd)

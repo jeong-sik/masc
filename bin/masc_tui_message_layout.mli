@@ -564,11 +564,6 @@ val chat_role_label_width : pane_cells:int -> int
     posted. The bounded 10--14 cell result keeps the built-in activity names
     whole without turning their alignment padding into a wide empty gutter. *)
 
-val local_body_cells : pane_cells:int -> inner_width:int -> int
-(** Conservative body width for a local message in the inline chat layout.
-    Reserves the rail, clock and full role-label budget so fixed-width
-    content such as a QR code is never sent into a wrapping body column. *)
-
 val speaker_mark : style -> string
 (** One glyph per speaker. Colour says the same thing more legibly, and
     NO_COLOR removes colour, so this is what still answers "who said this"

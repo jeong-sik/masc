@@ -565,10 +565,22 @@ let http_delete ~(host : string) ~(port : int) ~(path : string) =
 let list_play_invites ~host ~port =
   get_json ~host ~port ~path:"/api/v1/play/invites"
 
+(* The play routes say why in [message]; the shared refusal reads only the
+   [error] code, which leaves the operator with "HTTP 409: not_ready". The
+   credential's own 401 and 403, and a body with no sentence in it, keep the
+   shared wording. *)
+let play_mutation_outcome = function
+  | Ok (status_code, body) as answer when status_code >= 400 && status_code < 500 ->
+    (match Masc.Tui_decode.play_invite_refusal ~status_code ~body with
+     | Some said -> Post_refused said
+     | None -> mutation_outcome answer)
+  | answer -> mutation_outcome answer
+
 let issue_play_invite ~host ~port ~name ~hours =
-  post_json_outcome ~host ~port ~path:"/api/v1/play/invites"
+  http_post ~headers:(auth_headers ()) ~host ~port ~path:"/api/v1/play/invites"
     ~body:(Yojson.Safe.to_string
       (`Assoc [ "name", `String name; "hours", `Int hours ]))
+  |> play_mutation_outcome
 
 type revoke_outcome = Revoke_absent | Revoke_other of post_outcome
 
@@ -582,7 +594,7 @@ let revoke_play_invite ~host ~port ~name =
       Revoke_absent
   | Ok (status_code, body) when status_code >= 500 ->
       Revoke_other (Post_unanswered (Masc.Tui_decode.play_revoke_http_error ~status_code ~body))
-  | answer -> Revoke_other (mutation_outcome answer)
+  | answer -> Revoke_other (play_mutation_outcome answer)
 
 let post_json ~(host : string) ~(port : int) ~(path : string) ~(body : string) : (Yojson.Safe.t, string) result =
   match http_post ~headers:(auth_headers ()) ~host ~port ~path ~body with

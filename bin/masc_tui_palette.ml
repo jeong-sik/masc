@@ -12,6 +12,9 @@ let palette_starts_with ~needle haystack =
     ~prefix:(String.lowercase_ascii needle)
     (String.lowercase_ascii haystack)
 
+let palette_contains ~needle haystack =
+  Masc_tui_pick_list.lowercase_contains ~needle haystack
+
 (* Command-palette jump targets. Surfaces come from the same ring the strip
    draws; keepers come from the loaded roster, so the palette can only offer
    a chat the roster can open. *)
@@ -111,7 +114,6 @@ let code_cursor_line_symbols (state : state) =
 let lsp_question_prefixes =
   [ "def ", "definition"; "hover ", "hover"; "refs ", "references" ]
 
-(* Typed Code command shared by Enter and the palette preview. *)
 let palette_typed_question query =
   let query = String.trim query in
   let word, symbol =
@@ -267,7 +269,7 @@ let palette_matches (state : state) =
   let rank (label, action) =
     let texts = label :: palette_action_words action in
     if List.exists (palette_starts_with ~needle) texts then Some 0
-    else if List.exists (Masc_tui_pick_list.lowercase_contains ~needle) texts then Some 1
+    else if List.exists (palette_contains ~needle) texts then Some 1
     else if List.exists (palette_subsequence ~needle) texts then Some 2
     else None
   in

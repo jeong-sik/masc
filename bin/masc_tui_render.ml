@@ -7249,6 +7249,24 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
         | Detail_identity | Detail_channels | Detail_automation | Detail_runs), _ -> None
     in
 
+    let account =
+      match state.item_account with
+      | Some (name, account) when String.equal name k.k_name -> Some account
+      | Some _ | None -> None
+    in
+    let milli value = Printf.sprintf "%d.%03d" (value / 1000) (value mod 1000) in
+    let account_line =
+      match account, state.item_account_error with
+      | Some (Item_account.Ready account), _ ->
+          "  Balance " ^ milli account.balance_milli ^ " Candle · preview only"
+      | Some Item_account.Off, _ -> "  Candle off · preview only"
+      | Some (Item_account.Disabled reason), _ ->
+          "  Candle disabled: " ^ Terminal_text.single_line reason
+      | None, Some detail ->
+          "  Account unavailable: " ^ Terminal_text.single_line detail
+      | None, None -> "  Loading Item account…"
+    in
+
     let portrait =
       match state.detail_tab, portrait with
       | Detail_items, Some band ->
@@ -7258,7 +7276,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
               (Keeper_portrait_item.slot_id (Keeper_portrait_item.slot item))
               (Keeper_portrait_item.id item)) Keeper_portrait_item.all in
           if List.exists (fun line -> Message_layout.display_width line > inner)
-               (Masc_tui_keeper_portrait.beside band labels)
+               (Masc_tui_keeper_portrait.beside band (account_line :: labels))
           then None else Some band
       | _, portrait -> portrait
     in
@@ -7271,23 +7289,6 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
         (match portrait_reading with Tui_decode.Ready _ -> 0 | Tui_decode.Unavailable _ -> 1) in
       let visible = min count (max 1 (base_height - reserved)) in
       let first = max 0 (min (cursor - (visible / 2)) (count - visible)) in
-      let account =
-        match state.item_account with
-        | Some (name, account) when String.equal name k.k_name -> Some account
-        | Some _ | None -> None
-      in
-      let milli value = Printf.sprintf "%d.%03d" (value / 1000) (value mod 1000) in
-      let account_line =
-        match account, state.item_account_error with
-        | Some (Item_account.Ready account), _ ->
-            "  Balance " ^ milli account.balance_milli ^ " Candle · preview only"
-        | Some Item_account.Off, _ -> "  Candle off · preview only"
-        | Some (Item_account.Disabled reason), _ ->
-            "  Candle disabled: " ^ Terminal_text.single_line reason
-        | None, Some detail ->
-            "  Account unavailable: " ^ Terminal_text.single_line detail
-        | None, None -> "  Loading Item account…"
-      in
       let item_account_facts item =
         match account with
         | Some (Item_account.Ready account) ->
@@ -7345,10 +7346,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       in
       let listing =
         match portrait with
-        | Some band ->
-            let beside = Masc_tui_keeper_portrait.beside band (headline @ rows) in
-            if List.exists (fun line -> Message_layout.display_width line > inner) beside
-            then headline @ rows else beside
+        | Some band -> Masc_tui_keeper_portrait.beside band (headline @ rows)
         | None -> headline @ rows
       in
       let observation =

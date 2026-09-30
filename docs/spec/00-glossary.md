@@ -2045,9 +2045,11 @@ status: reference
   - 브랜치 계층: 스택의 가장 바닥(bottom) PR만 `main`을 base로 삼고, 그 위의 상위 PR들은 각자
     직전 스택 브랜치를 base로 지정한다. 기능(피처) 개발 스택과 CI·인프라 개선 스택은 섞지 않고
     각자의 독립 스택으로 분리해 진행한다.
-  - 전진과 리베이스: 스택 바닥 PR이 `main`에 병합(squash merge)되면, 바로 위 상위 PR의 base를
-    `main`으로 변경하고 직전 브랜치와의 델타를 리베이스한다. 베이스나 head가 바뀌면 변경된 내용을
-    다시 독립 검토한다.
+  - Native Stack: REST PR의 `stack`과 Stacks API가 구성·순서·최종 base의 근거다.
+    선택한 PR까지의 미병합 하위 PR은 비동기 병합 API로 함께 병합할 수 있다. 부모 미병합이나
+    non-main base만으로 차단하거나 수동 retarget하지 않는다. 전체 포함 범위를 리뷰한다.
+    Native Stack이 아닌 브랜치 체인은 부모부터 처리한다. base나 head가 바뀌면 다시 검토한다.
+    → [Native GitHub Stack 절차](../guides/NATIVE-GITHUB-STACKS.md)
   - 검증과 승인(2026-09-30 운영 정책): 일반 스택(Ordinary stack)은 CI 실행 여부나 대기에
     묶이지 않고, 현재 head에 대한 다각도 소스 검토(기능·논리·코드 청결도)를 통해 P0·P1·P2 결함이
     없으면 즉시 승인(Approve)한다. 판정 줄은 `verdict: PASS head: <40-hex SHA> by: <reviewer>`

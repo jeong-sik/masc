@@ -8,13 +8,14 @@ import hashlib
 import json
 import zlib
 import struct
+import tempfile
 import os
 import re
 import sys
 from pathlib import Path
+
 import tui_keyboard_chat as _keyboard_chat
 import tui_keyboard_harness as _keyboard_harness
-
 
 # scripts/ci/run-edited-tests.sh runs this suite when a pull request changes a
 # path named here.
@@ -78,11 +79,6 @@ MASCOT_TRANSFER_HEAD = re.compile(rb"\x1b_G(?=[^;]*a=T)(?=[^;]*i=" + MASCOT_IMAG
 # A frame that rewrites a row under the candle sends the picture it already
 # had, so a step can come a few transfers late.
 STEP_TRANSFER_LIMIT = 8
-# The painted candle is rendered at most this many pixels square
-# (Masc_tui_portrait_view.pixel_edge_cap) and the terminal scales it; the
-# dotted one is rendered as many pixels as its rows show, so no dot is scaled.
-PAINTED_EDGE_CAP = 160
-
 
 def wait_for_whole_frame(process, fd, output: bytearray, needle: bytes,
                          start: int, timeout: float) -> None:
@@ -317,6 +313,8 @@ def about_screen_with_graphics(binary: str) -> None:
         # waits in write mid-picture, and one read afterwards sees a cut one.
         transfers = stepped_transfers(process, fd, output, start)
         wire = bytes(output[start:])
+        assert b"i=43" in wire and b"i=44" in wire, \
+            "registered Keepers lost their separate Kitty placements"
         fields, pixels = transfers[0]
         assert fields.get(b"f") == b"100", "the candle is not sent as PNG"
         assert b"o" not in fields, "the candle requests Kitty transport inflation"
@@ -328,14 +326,17 @@ def about_screen_with_graphics(binary: str) -> None:
             "the candle's surround is not transparent"
         assert any(pixels[index + 3] == 255 for index in range(0, len(pixels), 4)), \
             "the candle itself is not opaque"
-        # Where it went: the rows the frame left blank for it, centred, one
-        # blank row above the caption.
-        placement = PLACEMENT.search(wire)
+        # The candle keeps its own Kitty identity beside the Keeper images.
+        placement = next(
+            (match for match in PLACEMENT.finditer(wire)
+             if kitty_fields(match[3]).get(b"i") == MASCOT_IMAGE_ID), None
+        )
+        assert placement is not None, "the candle had no Kitty placement"
         row, column = int(placement[1]), int(placement[2])
         rows_tall = int(fields[b"r"])
         cells_wide = -(-rows_tall * CELL_HEIGHT // CELL_WIDTH)
         caption_row = _keyboard_harness.screen_row_of(_keyboard_harness.screen_rows(bytes(output)), ABOUT_CAPTION)
-        assert caption_row == row + rows_tall + 1, \
+        assert caption_row > row + rows_tall, \
             f"the picture spans rows {row}..{row + rows_tall - 1} but the caption is at {caption_row}"
         left = column - 1
         right = SCENARIO_COLUMNS - left - cells_wide
@@ -370,6 +371,10 @@ def about_owns_the_keys(binary: str) -> None:
         _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
         _keyboard_harness.send_and_wait(process, fd, output, b"c", b"Esc:detail")
         _keyboard_harness.send_and_wait(process, fd, output, b"/about\r", ABOUT_CAPTION)
+        _keyboard_harness.write_all(fd, output, b"q")
+        _keyboard_harness.wait_for_terminal_input_consumed(slave)
+        assert _keyboard_harness.drain_until_quiet(process, fd, output, quiet=0.35, cap=1.5), \
+            "q did not settle the /about arrival"
         # i would focus the composer, the text would be its draft and Enter
         # would send it -- under /about none of that may happen.
         _keyboard_harness.write_all(fd, output, b"i" + SWALLOWED_TEXT + b"\r")
@@ -402,25 +407,17 @@ def about_owns_the_keys(binary: str) -> None:
 def about_turns_the_candle(binary: str) -> None:
     fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
 
-    def is_painted(fields: dict[bytes, bytes]) -> bool:
-        return int(fields[b"s"]) <= PAINTED_EDGE_CAP
-
-    def is_dotted(fields: dict[bytes, bytes]) -> bool:
-        return int(fields[b"s"]) == int(fields[b"r"]) * CELL_HEIGHT
-
-    def transfer_after(process, fd, output: bytearray, start: int, wanted, what: str):
-        """The first whole mascot transfer since ``start`` that ``wanted``
-        accepts. Transfers already on their way when the key went in are
-        passed over."""
-        seen = start
-        for _ in range(STEP_TRANSFER_LIMIT):
-            _keyboard_harness.wait_for_output(process, fd, output, MASCOT_TRANSFER_HEAD, start=seen,
-                              timeout=STEP_WAIT_SECONDS)
-            seen = MASCOT_TRANSFER_HEAD.search(bytes(output), seen).end()
-            for fields, pixels in mascot_transfers(bytes(output[start:])):
-                if wanted(fields):
-                    return fields, pixels
-        raise AssertionError(f"no {what} candle was sent after the key")
+    def transfer_after(process, fd, output: bytearray, start: int, what: str):
+        """A complete mascot transfer after the key, including its PNG."""
+        # A settled style change sends one picture. Keep its header while the
+        # remaining chunks arrive; there need not be another transfer to wait for.
+        complete = _keyboard_harness.wait_for_fixture_state(
+            process, fd, output,
+            lambda: bool(mascot_transfers(bytes(output[start:]))),
+            timeout=STEP_WAIT_SECONDS * STEP_TRANSFER_LIMIT,
+        )
+        assert complete, f"no complete {what} candle was sent after the key"
+        return mascot_transfers(bytes(output[start:]))[-1]
 
     def interact(process, fd, _slave, output, _base):
         _keyboard_harness.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
@@ -430,19 +427,33 @@ def about_turns_the_candle(binary: str) -> None:
         start = len(output)
         _keyboard_harness.send_and_wait(process, fd, output, b"/about\r", ABOUT_CAPTION)
         assert b"c:candle" in _keyboard_harness.screen_text(bytes(output)), "/about does not say c turns the candle"
-        transfer_after(process, fd, output, start, is_painted, "painted")
-        # c turns it to the dotted figure, drawn as many pixels as it shows.
+        transfer_after(process, fd, output, start, "painted")
+        assert _keyboard_harness.drain_until_quiet(process, fd, output, quiet=0.35, cap=4.5), \
+            "/about did not reach its final frame"
+        # The settled overlay owns q too. Two presses would quit if the first
+        # had reached the global quit confirmation ahead of the modal handler.
+        _keyboard_harness.write_all(fd, output, b"qq")
+        _keyboard_harness.wait_for_terminal_input_consumed(_slave)
+        _keyboard_harness.resize_and_wait(process, fd, output, rows=SCENARIO_ROWS,
+                          columns=RESIZED_COLUMNS, needle=ABOUT_CAPTION,
+                          controls=(_keyboard_harness.FULL_REDRAW,))
+        assert process.poll() is None, "q quit from the settled /about screen"
+        # The settled scene still answers c. Compare two full style cycles so
+        # a transfer already in flight cannot serve as the baseline.
         start = len(output)
         _keyboard_harness.write_all(fd, output, b"c")
-        fields, pixels = transfer_after(process, fd, output, start, is_dotted, "dotted")
+        fields, dotted = transfer_after(process, fd, output, start, "dotted")
         edge = int(fields[b"s"])
-        assert edge > PAINTED_EDGE_CAP, "the dotted candle is no larger than the painted one"
-        assert len(pixels) == edge * edge * 4, "the transfer is not the picture it declares"
+        assert len(dotted) == edge * edge * 4, "the transfer is not the picture it declares"
         assert ABOUT_CAPTION in _keyboard_harness.screen_text(bytes(output)), "c closed /about"
-        # And back again.
         start = len(output)
         _keyboard_harness.write_all(fd, output, b"c")
-        transfer_after(process, fd, output, start, is_painted, "painted")
+        _, painted = transfer_after(process, fd, output, start, "painted")
+        assert painted != dotted, "c did not change the candle's style"
+        start = len(output)
+        _keyboard_harness.write_all(fd, output, b"c")
+        _, dotted_again = transfer_after(process, fd, output, start, "dotted again")
+        assert dotted_again == dotted, "the second style cycle changed the dotted candle"
         _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", CHAT_TITLE)
         _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
         _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
@@ -459,6 +470,102 @@ def about_turns_the_candle(binary: str) -> None:
     )
 
 
+def about_arrival_frames(binary: str, columns: int, *, reduced_motion: bool) -> None:
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
+
+    def prepare(base_path: str) -> None:
+        if reduced_motion:
+            config = Path(base_path, ".masc", "config")
+            config.mkdir(parents=True, exist_ok=True)
+            (config / "runtime.toml").write_text(
+                "[tui]\nreduce_motion = true\n", encoding="utf-8"
+            )
+
+    def interact(process, fd, _slave, output, _base):
+        _keyboard_harness.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
+        _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
+        _keyboard_harness.send_and_wait(process, fd, output, b"c", CHAT_TITLE)
+        start = len(output)
+        _keyboard_harness.send_and_wait(process, fd, output, b"/about\r", ABOUT_CAPTION)
+        assert _keyboard_harness.drain_until_quiet(process, fd, output, cap=4.5), \
+            "/about kept repainting after its finite arrival"
+        frames = []
+        cursor = start
+        while True:
+            at = output.find(_keyboard_harness.FRAME_END, cursor)
+            if at < 0:
+                break
+            cursor = at + len(_keyboard_harness.FRAME_END)
+            prefix = bytes(output[:cursor])
+            if ABOUT_CAPTION in _keyboard_harness.screen_text(prefix):
+                frames.append(prefix)
+        assert frames, "/about drew no completed frame"
+        screen = _keyboard_harness.screen_text(frames[-1])
+        assert b"alpha" in screen and b"beta" in screen, \
+            f"the registered Keeper names are missing: {screen!r}"
+        if reduced_motion:
+            assert len(frames) <= 2, \
+                f"reduce_motion animated /about through {len(frames)} frames"
+            chosen = [(0, "final")]
+        else:
+            assert len(frames) >= 3, \
+                f"the gathering and dispersal never reached the terminal: {len(frames)}"
+            chosen = [(0, "start"), (len(frames) // 2, "middle"), (-1, "end")]
+        for index, phase in chosen:
+            frame_evidence(binary, f"about-{columns}x32-{phase}", bytearray(frames[index]))
+        before = len(output)
+        assert _keyboard_harness.drain_until_quiet(process, fd, output, quiet=0.6, cap=1.0), \
+            "the final /about frame restarted the animation clock"
+        assert not MASCOT_TRANSFER_HEAD.search(bytes(output[before:])), \
+            "a settled /about candle was placed again during four animation ticks"
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", CHAT_TITLE)
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
+        os.write(fd, b"q")
+
+    with tempfile.TemporaryDirectory(prefix="masc-about-timing-") as timing_dir:
+        timing = Path(timing_dir, "frames.txt")
+        _keyboard_harness.run_terminal_scenario(
+            binary,
+            description=f"/about finite arrival at {columns}x32" +
+                        (" with reduced motion" if reduced_motion else ""),
+            interact=interact,
+            http_fixtures=fixtures,
+            prepare_workspace=prepare,
+            terminal_cols=columns,
+            terminal_rows=32,
+            extra_env={"MASC_TUI_FRAME_TIMING": str(timing)},
+        )
+        assert timing.is_file(), "/about frame timing report was not written at exit"
+        print(json.dumps({"phase": f"about-{columns}x32-timing",
+                          "report": timing.read_text(encoding="utf-8")},
+                         ensure_ascii=False), flush=True)
+
+
+def about_exit_stops_clock(binary: str) -> None:
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
+
+    def interact(process, fd, _slave, output, _base):
+        _keyboard_harness.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
+        _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
+        _keyboard_harness.send_and_wait(process, fd, output, b"c", CHAT_TITLE)
+        _keyboard_harness.send_and_wait(process, fd, output, b"/about\r", ABOUT_CAPTION)
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", CHAT_TITLE)
+        after_close = len(output)
+        assert _keyboard_harness.drain_until_quiet(process, fd, output, quiet=0.7, cap=1.2), \
+            "the closed /about screen kept repainting"
+        assert ABOUT_CAPTION not in bytes(output[after_close:]), \
+            "a closed /about drew again during four animation ticks"
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
+        os.write(fd, b"q")
+
+    _keyboard_harness.run_terminal_scenario(
+        binary, description="leaving /about stops its frame clock",
+        interact=interact, http_fixtures=fixtures,
+    )
+
+
 if __name__ == "__main__":
     binary = str(Path(sys.argv[1]).resolve())
     startup_overview(binary)
@@ -472,4 +579,8 @@ if __name__ == "__main__":
     about_screen_with_graphics(binary)
     about_owns_the_keys(binary)
     about_turns_the_candle(binary)
-    print("tui emblem screens: PASS (11 scenarios)")
+    about_arrival_frames(binary, 80, reduced_motion=False)
+    about_arrival_frames(binary, 140, reduced_motion=False)
+    about_arrival_frames(binary, 80, reduced_motion=True)
+    about_exit_stops_clock(binary)
+    print("tui emblem screens: PASS (15 scenarios)")

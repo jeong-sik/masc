@@ -849,7 +849,7 @@
     "validation": "OCaml implementation/interface syntax and Python AST PASS; base-to-head diffcheck reports test/dune:7725 extra blank EOF (P3 deferred); usage-only10case fixture unexecuted",
     "execution": "not run under source-only policy",
     "remaining": [
-      "Existing J/K semantic Skill selection does not follow document scroll; action-target visibility not repaired",
+      "J/K selection visibility source repair is40328; runtime actionproof pending",
       "P3 test/dune:7725 extra blank EOF"
     ]
   },
@@ -865,5 +865,19 @@
     "review": "system_audit and agenda_finish source PASS at exact head, no unresolved P0/P1/P2",
     "validation": "three product ML/one MLI/existingkeys syntax, Python AST, fullbasediffcheck PASS; fixture10casesunexecuted",
     "execution": "not run under source-only policy"
+  },
+  "tools_selection_stack": {
+    "pr": 40328,
+    "base_pr": 40327,
+    "base_head": "8a669cc634c30b33fba56a5420292c8360442a75",
+    "head": "2133cf01a38b9c10bf87f54051c4b3bce70be6b2",
+    "scope": "pinned Skill index/count/name on all5Tools tabs; complete actionreference document; shared typed selection for display and Enter/edit; fixedrow budget included",
+    "review": "system_audit and agenda_finish source PASS exact head, no unresolved P0/P1/P2",
+    "validation": "five implementation and one interface syntax parses, full base-to-head whitespace check PASS; no newtests or execution",
+    "execution": "not run under source-only policy",
+    "deferred_p3": [
+      "Types helper insertion has extra blank lines",
+      "Render_tools introductory comment has stale exported-definition count"
+    ]
   }
 }

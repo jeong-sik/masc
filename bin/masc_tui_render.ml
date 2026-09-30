@@ -13667,7 +13667,7 @@ let code_notes_rows (state : state) ~cols =
     | None -> []
   in
   let wrap text =
-    Message_layout.wrap_body ~markdown:document_markdown
+    Message_layout.wrap_body
       ~max_cells:(max 1 (cols - 6)) ~sanitize:Terminal_text.single_line text
   in
   match memos with

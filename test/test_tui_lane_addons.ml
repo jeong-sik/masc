@@ -441,9 +441,13 @@ let context_flow_uses_declared_connections () =
   check (option string) "technical installation actions target their selected declaration" (Some producer.id)
     (Option.map (fun (i : UI.instance) -> i.id)
       (UI.selected_instance {configured with presentation=UI.Technical}));
-  check bool "overview lists both workers regardless of hidden focus" true
-    (List.exists (String.starts_with ~prefix:"  Project observer · attached") configured_lines
-     && List.exists (String.starts_with ~prefix:"> Project metric · attached") configured_lines);
+  check bool "overview starts with its selected worker regardless of hidden focus" true
+    (List.exists (String.starts_with ~prefix:"> Project metric · attached") configured_lines
+     && not (List.exists (String.starts_with ~prefix:"  Project observer · attached") configured_lines));
+  let observer_lines = UI.lines ~width:160 {configured with instance_cursor=0} in
+  check bool "moving selection still exposes the preceding observer" true
+    (List.exists (String.starts_with ~prefix:"> Project observer · attached") observer_lines
+     && List.exists (String.starts_with ~prefix:"  Project metric · attached") observer_lines);
   check bool "overview offers help and opening" true
     (List.exists (String.starts_with ~prefix:"?:help  Esc:back  Enter:open  h:history/current  i:install  n:new  S:subs  r:refresh") configured_lines);
   check bool "overview omits the old timeline" true
@@ -646,6 +650,13 @@ let evidence_export_chooses_a_keeper_by_name () =
   check bool "navigation retains an explicitly past receipt without assigning it to another worker" true
     (List.mem "Last evidence receipt" (UI.lines ~width:100 another_worker)
      && Option.map (fun (item : UI.instance) -> item.id) (UI.selected_instance another_worker)=Some "other");
+  let overview_with_receipt = UI.lines ~width:40 another_worker in
+  let selected_position = List.find_index (String.starts_with ~prefix:"> Observed value changes")
+      overview_with_receipt |> Option.get in
+  let receipt_position = List.find_index (String.equal "Last evidence receipt")
+      overview_with_receipt |> Option.get in
+  check bool "Overview presents the selected installation before its retained past receipt" true
+    (selected_position < receipt_position);
   let unsafe_receipt = `Assoc ["evidence",evidence;"row_count",`Int 2;
     "delivery",`Assoc ["destination",`String "broadcast";"status",`String "failed";
       "error",`String ("observer\027[2J" ^ String.make 120 'x')]] in
@@ -877,7 +888,42 @@ let declared_results_show_body_before_activity_and_keep_raw_evidence () =
   let foreign = {row with lane_id="report-worker/other"} in
   check bool "readings are scoped to the exact declared Lane" true
     (not (List.mem "  Report: First finding" (UI.lines ~width:100
-      {detail with snapshot=Some {snapshot with output={rows=[foreign];coverage=[]}}})))
+      {detail with snapshot=Some {snapshot with output={rows=[foreign];coverage=[]}}})));
+  let windows = {row with fields=["body",`String "First\r\n\r\nSecond\rstandalone\r"]} in
+  let windows_detail = {detail with snapshot=Some {snapshot with output={rows=[windows];coverage=[]}}} in
+  let windows_lines = UI.lines ~width:100 windows_detail in
+  check bool "CRLF report lines omit terminator CR and expose standalone CR" true
+    (List.mem "  Report: First" windows_lines
+     && List.mem "  " windows_lines
+     && List.mem "  Second\\x0Dstandalone\\x0D" windows_lines);
+  let grade = {row with id="grade";lane_id=worker.id ^ "/grades";
+    title="Old grade";observed_at=0.;fields=["grade",`String "incorrect"]} in
+  let score = {row with id="score";title="Declared score";observed_at=3.} in
+  let score_snapshot = {snapshot with output={rows=[grade;score];coverage=[]}} in
+  let preferred = UI.open_selected_instance {overview with snapshot=Some score_snapshot} in
+  check (option string) "opening selects declared result after preceding ordinary observations"
+    (Some score.id) (Option.map (fun (row : UI.Row.row) -> row.id) (UI.selected_row preferred));
+  let producer_last = {row with id="last";title="Last result";observed_at=5.} in
+  let producer_middle = {row with id="middle";title="Middle result";observed_at=2.} in
+  let unsorted = UI.open_selected_instance {overview with snapshot=Some
+    {snapshot with output={rows=[producer_last;row;producer_middle];coverage=[]}}} in
+  check (option string) "opening uses the same chronology as navigation" (Some row.id)
+    (Option.map (fun (row : UI.Row.row) -> row.id) (UI.selected_row unsorted));
+  let unsorted_lines = UI.lines ~width:100 unsorted in
+  let index text = List.find_index (String.equal text) unsorted_lines |> Option.get in
+  check bool "other results follow the advertised navigation order" true
+    (index "  Middle result" < index "  Last result");
+  check (option string) "j reaches the next displayed result" (Some producer_middle.id)
+    (Option.map (fun (row : UI.Row.row) -> row.id) (UI.selected_row (UI.move_observation unsorted 1)));
+  let many = List.init 6 (fun index -> {worker with id=Printf.sprintf "worker-%d" index;
+    title=Printf.sprintf "Worker %d" index;
+    display={display with description=Some (String.concat " " (List.init 30 (fun _ -> Printf.sprintf "description-%d" index)))}}) in
+  let selected_overview = {overview with instance_cursor=5;snapshot=Some {snapshot with instances=many}} in
+  let selected_lines = UI.lines ~width:30 selected_overview in
+  let first_rows = List.filteri (fun index _ -> index < 12) selected_lines |> String.concat "\n" in
+  check bool "selected Add-on remains near the overview top despite preceding long descriptions" true
+    (List.exists (String.starts_with ~prefix:"> Worker 5") (String.split_on_char '\n' first_rows)
+     && not (List.exists (fun line -> String.starts_with ~prefix:"    description-4" line) selected_lines))
 
 let current_installations_and_grouped_history_keep_exact_targets () =
   let worker id run addon phase source_path : UI.instance = {

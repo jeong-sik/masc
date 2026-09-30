@@ -335,6 +335,11 @@ let selected_instance view = Option.bind view.snapshot (fun snapshot ->
        | Timeline | Rows | Configurations | Connections | Instances ->
            (match at_cursor (overview_entries ~mode:view.overview_mode snapshot) view.instance_cursor with
             | Some (`Instance item) -> Some item | Some (`Declaration _) | None -> None)))
+let ordered_rows view snapshot =
+  rows_in_screen view snapshot
+  |> List.stable_sort (fun (_, (a : Row.row)) (_, (b : Row.row)) ->
+    let time = Float.compare a.observed_at b.observed_at in
+    if time=0 then String.compare a.id b.id else time)
 let open_selected_instance view =
   match view.snapshot with
   | None -> view
@@ -346,8 +351,15 @@ let open_selected_instance view =
       | Some (`Instance item) ->
           let next = {view with screen=Detail (item.id,item.incarnation); focus=Timeline;
             scroll=0; selected=[]; document_key=None} in
-          let row_cursor = match rows_in_screen next snapshot with
-            | (index, _) :: _ -> index | [] -> -1 in
+          let rows = ordered_rows next snapshot in
+          let declared = List.find_opt (fun (_, (row : Row.row)) ->
+            List.exists (fun (reading : Masc.Lane_addon_presentation.reading) ->
+              String.equal row.lane_id (item.id ^ "/" ^ reading.lane_id))
+              item.display.readings) rows in
+          let row_cursor = match declared, rows with
+            | Some (index, _), _ -> index
+            | None, (index, _) :: _ -> index
+            | None, [] -> -1 in
           {next with row_cursor}
       | None -> view
 let evidence_target view =
@@ -542,11 +554,6 @@ let action_lines view = match view.last_action with
               "  requester " ^ receipt.requester ^ " · executor " ^ Option.value ~default:"unknown" receipt.executor]
               @ (match receipt.detail with None -> [] | Some detail -> ["  " ^ detail])
               @ (match receipt.result with None -> [] | Some result -> String.split_on_char '\n' (Yojson.Safe.pretty_to_string result)))
-let ordered_rows view snapshot =
-  rows_in_screen view snapshot
-  |> List.stable_sort (fun (_, (a : Row.row)) (_, (b : Row.row)) ->
-    let time = Float.compare a.observed_at b.observed_at in
-    if time=0 then String.compare a.id b.id else time)
 let move_observation view delta =
   match view.snapshot with
   | None -> view
@@ -891,7 +898,8 @@ let result_lines (instance : instance) (row : Row.row) =
       let rendered = match P.render reading (`Assoc row.fields) with
         | Ok text -> text
         | Error detail -> reading.label ^ ": unavailable · " ^ detail in
-      String.split_on_char '\n' rendered |> List.map (fun line -> "  " ^ line)) readings
+      Masc_tui_text_block.lines rendered
+      |> List.map (fun line -> "  " ^ line)) readings
 
 let overview_lines ~width view =
   let wrap text = Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
@@ -922,7 +930,9 @@ let overview_lines ~width view =
           configuration_summary active failed
           (if Option.is_some view.snapshot_read_error then " · STALE" else "") in
         let entries = overview_entries ~mode:view.overview_mode snapshot in
-        let window = max 0 (view.instance_cursor - 4) in
+        (* Keep the selected entry first: wrapped history/count context already
+           spends rows before the list in a narrow terminal. *)
+        let window = max 0 view.instance_cursor in
         let items = List.mapi (fun index item -> index,item) entries
           |> List.filter (fun (index,_) -> index >= window && index < window + 9) in
         let empty = match view.overview_mode, snapshot.configuration with
@@ -955,7 +965,7 @@ let overview_lines ~width view =
                 let group_header = match view.overview_mode with
                   | Current_installations -> []
                   | Retained_runs ->
-                      let previous = List.nth_opt entries (index-1) in
+                      let previous = if index=0 then None else List.nth_opt entries (index-1) in
                       let same_group = match previous with
                         | Some (`Instance previous) -> history_group previous=history_group item
                         | Some (`Declaration _) | None -> false in
@@ -978,11 +988,13 @@ let overview_lines ~width view =
                 group_header @ [lead]
                 @ (match view.overview_mode with Current_installations -> []
                    | Retained_runs -> ["    Instance " ^ item.id])
-                @ Option.to_list (Option.map (fun text -> "    " ^ text) item.display.description)
+                @ (if index=view.instance_cursor then
+                     Option.to_list (Option.map (fun text -> "    " ^ text) item.display.description)
+                   else [])
                 @ [controls] @ detail) items
   in
-  List.concat_map wrap ([ overview_hints view; "" ]
-    @ diagnostic_lines view @ content @ action_lines view)
+  List.concat_map wrap (diagnostic_lines view @ content
+    @ [""; overview_hints view] @ action_lines view)
 
 let help_lines = [
   "Lane Add-ons keys · Esc:close";
@@ -1008,7 +1020,7 @@ let detail_lines ~width view =
       let tabs = String.concat "  " [
         tab Timeline "1 Results"; tab Connections "2 Links";
         tab Configurations "3 Installation"; tab Rows "4 Records"] in
-      let rows = List.map snd (rows_in_screen view snapshot) in
+      let rows = List.map snd (ordered_rows view snapshot) in
       let body = match view.focus with
       | Timeline | Instances ->
           if rows=[] then ["No observations yet. o:observe this Add-on."]
@@ -1270,9 +1282,9 @@ let lines ?(height=24) ?(failed_note = "") ~width view =
         let receipt_lines = List.concat_map (fun line ->
           Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
             (Masc.Tui_decode.sanitize_terminal_text line)) receipt_lines in
-        receipt_lines @ (match view.screen with
-        | Overview -> overview_lines ~width view
-        | Detail _ -> detail_lines ~width view
+        (match view.screen with
+        | Overview -> overview_lines ~width view @ receipt_lines
+        | Detail _ -> receipt_lines @ detail_lines ~width view
             @ (match view.focus with
                | Connections -> [""] @ (flow_lines view |> List.concat_map (fun line ->
                    Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)

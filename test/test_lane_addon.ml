@@ -514,7 +514,8 @@ let test_broadcast_failure_keeps_evidence_without_automatic_retry () =
     let previous = Workspace_broadcast.For_testing.replace_write_json_commit
       (fun _ _ _ -> incr attempts; Error "fixture authoritative write rejected") in
     let result = Fun.protect ~finally:(fun () ->
-      let _replaced_writer =
+      let (_ : Workspace_utils_backend_setup.config -> string -> Yojson.Safe.t ->
+        (Workspace_utils.write_json_commit, string) result) =
         Workspace_broadcast.For_testing.replace_write_json_commit previous in
       ()) (fun () ->
         check bool "two destinations are refused before publication" true

@@ -90,7 +90,11 @@ class ProtocolCase(unittest.TestCase):
         if result["isError"]:
             return result
         output = result["structuredContent"]
-        self.assertEqual(output, json.loads(result["content"][0]["text"]))
+        if package == "fusion-report":
+            self.assertEqual(result["content"], [{"type": "text", "text":
+                "Fusion reports are retained in structuredContent with exact upstream coordinates and evidence."}])
+        else:
+            self.assertEqual(output, json.loads(result["content"][0]["text"]))
         self.assertEqual(set(output), {"rows", "coverage"})
         for row in output["rows"]:
             self.assertEqual(set(row), ROW_FIELDS)

@@ -507,7 +507,11 @@ print(json.dumps(output))
     | _ -> fail "Fusion package MCP stdio observation failed")
 
 let test_native_fusion_report_is_readable_after_detach () =
-  with_fixture ~produce_package:fusion_package (fun clock config root directory _received _stopped ->
+  let produce_package (package : Types.package) ~binding ~sources =
+    (* The generic manifest names its file separately from its package id. *)
+    if package.id = "generic-package" then output
+    else fusion_package package ~binding ~sources in
+  with_fixture ~produce_package (fun clock config root directory received _stopped ->
     with_environment "MASC_BASE_PATH" root (fun () ->
       let reset_board () = Board_dispatch.reset_for_test (); Board.reset_global_for_test () in
       reset_board ();
@@ -537,18 +541,35 @@ let test_native_fusion_report_is_readable_after_detach () =
         let producer_path = declaration "fusion-results" (Printf.sprintf
           {|[{source_id="fusion",kind="fusion_run",run_id=%S}]|} run_id) in
         let report_path = declaration "fusion-report" (edge "fusion-results") in
+        let reader_manifest = manifest ~name:"report-reader" root in
+        let reader_path = declare ~run:"fusion-chain" directory reader_manifest "report-reader"
+          (edge ~output_id:"report" "fusion-report") in
         reconcile config directory;
         let producer = active config "fusion-results" |> text "instance_id" in
         let consumer = active config "fusion-report" |> text "instance_id" in
-        let report () = inspect config |> list "rows" |> List.find_opt (fun row ->
+        let reader = active config "report-reader" |> text "instance_id" in
+        let selected_rows () = match completed received reader with
+          | Some observation -> member "output" observation |> list "rows"
+          | None -> [] in
+        let report () = selected_rows () |> List.find_opt (fun row ->
           member "lane_id" row = `String (consumer ^ "/fusion/report")
           && member "input_complete" (member "fields" row) = `Bool true) in
         await clock (fun () -> Option.is_some (report ()));
         let row = require_some "complete Fusion report missing" (report ()) in
+        let context_id = match list "related_ids" row with
+          | [`String id] -> id
+          | _ -> fail "report must name its exact shared input context" in
+        let context = selected_rows () |> List.find_opt (fun item -> text "id" item = context_id)
+          |> require_some "named report port omitted the related context" in
+        check string "named report port retains the context lane"
+          (consumer ^ "/fusion/report-context") (text "lane_id" context);
+        let selected = require_some "named report output is missing" (completed received reader) in
+        check string "reader selected the declared report output" "report"
+          (member "producer" selected |> text "output_id");
         let fields = member "fields" row in
         check string "exact native Fusion run crosses both packages" run_id (text "fusion_run_id" fields);
         check string "upstream installation survives composition" producer
-          (member "producer" fields |> text "instance_id");
+          (member "fields" context |> member "producer" |> text "instance_id");
         check string "report does not claim delivery from observation" "not_attempted"
           (text "delivery_status" fields);
         check bool "report retains the Board analysis body" true
@@ -609,18 +630,20 @@ let test_native_fusion_report_is_readable_after_detach () =
             | Tool_output.Decoded_normalized_artifact_ref reference -> reference
             | _ -> fail "invalid published evidence reference" in
           reference.sha256, read reference.sha256) artifacts in
-        check bool "publication carries the exact report row" true
+        check bool "publication carries the exact report and its related context" true
           (List.exists (fun (_, bytes) ->
             let record = Yojson.Safe.from_string bytes in
             match member "output" record with
             | `Assoc output -> (match List.assoc_opt "rows" output with
-                | Some (`List rows) -> List.mem row rows
+                | Some (`List rows) -> List.mem row rows && List.mem context rows
                 | Some _ | None -> false)
             | _ -> false) retained);
-        Sys.remove producer_path; Sys.remove report_path; reconcile config directory;
+        Sys.remove producer_path; Sys.remove report_path; Sys.remove reader_path;
+        reconcile config directory;
         await clock (fun () ->
           text "kind" (member "phase" (instance config producer)) = "detached"
-          && text "kind" (member "phase" (instance config consumer)) = "detached");
+          && text "kind" (member "phase" (instance config consumer)) = "detached"
+          && text "kind" (member "phase" (instance config reader)) = "detached");
         let store = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
         remove (Store.root store);
         List.iter (fun (sha, expected) ->

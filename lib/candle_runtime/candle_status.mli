@@ -1,7 +1,8 @@
 (** Is Candle on right now (RFC-goal-candle-ledger 3.9)?
 
-    [candle.toml] is read on every call. When it says [Enabled], the first call
-    and the server appraiser check succeeds, the first read
+    [configured] reads configuration and checks the appraiser without touching
+    the ledger. [current] additionally owns recovery: when configuration says
+    [Enabled] and the server appraiser check succeeds, the first call
     for a base path in this process runs {!Candle_ledger.recover_at_start} on
     the ledger: a tail left by an append that never finished is cut, and a
     ledger that cannot be read makes the answer [Disabled] instead of blocking
@@ -18,6 +19,11 @@
     Recovery runs once per process. A tail left later refuses every transition
     until the server restarts. Two things leave one: a second writer that died
     mid-append, and an append of this process whose rollback failed too. *)
+
+val configured : base_path:string -> Candle_config.t
+(** Current configuration and appraiser availability only. Does not recover,
+    truncate or otherwise change the ledger. Read and purchase surfaces use
+    this before their authoritative ledger read. *)
 
 val current : base_path:string -> Candle_config.t
 

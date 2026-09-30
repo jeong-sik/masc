@@ -194,16 +194,16 @@ let capture_range ~origin ?end_atom ~catch_up_end_atom ~trace_id ~lines ~message
     else match Window.atom_opening_digest messages (end_atom - 1) with
       | None -> Error Uncovered_history | Some digest -> Ok digest in
   let* end_boundary_line, end_turn_ref =
-    match List.find_map (function
-      | line, Ok { B.event = B.Turn_ended
-          { turn_ref; position = B.Atom_history { end_atom; last_atom_digest }; _ }; _ }
-        when line >= range.history_start_boundary_line
-          && String.equal (Ids.Turn_ref.trace_id turn_ref) trace_id
-          && end_atom = range.end_atom
-          && String.equal last_atom_digest range.last_atom_digest -> Some (line, turn_ref)
-      | _ -> None) lines with
-    | Some ending -> Ok ending
-    | None -> Error Uncovered_history
+    (* The one test of whether a position stands on the log. An official-client
+       turn writes no atom position at its end, so the line that states where
+       the checkpoint's atoms end is the start state of a turn. *)
+    match
+      B.witness_line ~trace_id ~end_atom:range.end_atom
+        ~last_atom_digest:range.last_atom_digest lines
+    with
+    | Some (line, _recorded_at, turn_ref) when line >= range.history_start_boundary_line ->
+      Ok (line, turn_ref)
+    | Some _ | None -> Error Uncovered_history
   in
   validate
     { origin
@@ -236,14 +236,15 @@ let restore ~trace_id ~lines ~messages (snapshot : t) =
   else
     let source = match snapshot.origin with Witnessed_history -> source_range | Captured_checkpoint_prefix -> checkpoint_prefix_range in
     let* range = source ~trace_id ~lines ~messages in
-    let boundary_present = List.exists (function
-      | line, Ok { B.event = B.Turn_ended
-          { turn_ref; position = B.Atom_history { end_atom; last_atom_digest }; _ }; _ } ->
-        line = snapshot.end_boundary_line
-        && Ids.Turn_ref.equal turn_ref snapshot.end_turn_ref
-        && end_atom = snapshot.covering_end_atom
-        && String.equal last_atom_digest snapshot.covering_last_atom_digest
-      | _ -> false) lines
+    let boundary_present =
+      match
+        B.witness_line ~through:snapshot.end_boundary_line ~trace_id
+          ~end_atom:snapshot.covering_end_atom
+          ~last_atom_digest:snapshot.covering_last_atom_digest lines
+      with
+      | Some (line, _recorded_at, turn_ref) ->
+        line = snapshot.end_boundary_line && Ids.Turn_ref.equal turn_ref snapshot.end_turn_ref
+      | None -> false
     in
     if range.history_start_boundary_line <> snapshot.history_start_boundary_line
        || range.end_atom < snapshot.covering_end_atom || not boundary_present

@@ -21,6 +21,20 @@ let boundary ?(trace = trace_id) ?(turn = 1) ?(fresh = true) messages =
     ; position } }
 ;;
 let lines = [1, boundary history]
+
+(* An official-client turn writes no atom position at its end. The history it
+   started from is the only line that states where the checkpoint's atoms end. *)
+let official_client_turn ?(turn = 2) messages =
+  match B.position_of_messages messages with
+  | Ok (B.Atom_history { end_atom; last_atom_digest }) ->
+    Ok { B.recorded_at = 2.; event = B.Turn_ended
+      { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:turn
+      ; history_at_start =
+          B.Continued_history_from { start_atom = end_atom; start_atom_digest = last_atom_digest }
+      ; position = B.No_atom_history } }
+  | Ok (B.Empty_atom_history | B.No_atom_history | B.Stale_noop) | Error _ ->
+    fail "history states no atom position"
+;;
 let require = function Ok value -> value | Error error -> fail (S.error_to_string error)
 let capture () = S.capture ~trace_id ~lines ~messages:history ~working_state:state |> require
 let restore ?(trace_id = trace_id) ?(lines = lines) messages snapshot =
@@ -135,6 +149,24 @@ let test_captured_partial_prefix () =
     ((S.restore ~trace_id ~lines ~messages:history whole |> require).messages=[pinned])
 ;;
 
+let test_official_client_start_state_is_the_covering_line () =
+  let lines = [1, official_client_turn history] in
+  let snapshot =
+    S.capture_checkpoint_prefix ~catch_up_end_atom:None ~trace_id ~lines ~messages:history
+      ~working_state:state ()
+    |> require in
+  check int "the start state of the turn is the covering line" 1 snapshot.end_boundary_line;
+  check int "the whole prefix is covered" 2 snapshot.end_atom;
+  check bool "covered atoms removed, pinned retained" true
+    ((restore ~lines history snapshot |> require).messages = [pinned]);
+  let later = lines @ [2, official_client_turn ~turn:3 history] in
+  check bool "a later turn from the same position leaves the covering line alone" true
+    ((restore ~lines:later history snapshot |> require).messages = [pinned]);
+  (match restore ~lines:[1, official_client_turn ~turn:3 history] history snapshot with
+   | Error S.History_changed -> ()
+   | Ok _ | Error _ -> fail "another turn accepted as the covering line")
+;;
+
 (* A rewrite from atom 0 carries where requests started when it began. The
    key is written only while the snapshot is short of it, so an ordinary
    snapshot keeps the shape it always had. *)
@@ -159,7 +191,9 @@ let test_catch_up_target_codec () =
 ;;
 
 let () = run "offline continuity snapshot"
-  ["pair", [test_case "captured partial prefix" `Quick test_captured_partial_prefix;test_case "append and complete prefix" `Quick test_restore_append_and_all_covered;
+  ["pair", [test_case "captured partial prefix" `Quick test_captured_partial_prefix;
+            test_case "official-client start state" `Quick test_official_client_start_state_is_the_covering_line;
+            test_case "append and complete prefix" `Quick test_restore_append_and_all_covered;
             test_case "source identities" `Quick test_identity_rejections;
             test_case "restart witness required" `Quick test_capture_requires_witness;
             test_case "strict codec" `Quick test_exact_codec;

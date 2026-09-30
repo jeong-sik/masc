@@ -3,6 +3,9 @@ open Masc
 module Store = Lane_addon_store
 module Types = Lane_addon_types
 let unwrap = function Ok value -> value | Error message -> fail message
+let append_observation store ~instance_id ~seq ~sources output =
+  Store.append_observation store ~instance_id ~seq ~sources output
+  |> Result.map_error Store.observation_write_error_to_string
 let rec remove path =
   if Sys.is_directory path then (Array.iter (fun name -> remove (Filename.concat path name)) (Sys.readdir path); Unix.rmdir path)
   else Sys.remove path
@@ -22,7 +25,7 @@ let source seq detail : Types.coverage = {
   cursor = Some (string_of_int seq); complete = true; detail;
 }
 let append ?(coverage = []) store seq payload =
-  unwrap (Store.append_observation store ~instance_id ~seq ~sources:(`List [])
+  unwrap (append_observation store ~instance_id ~seq ~sources:(`List [])
     { rows = [row seq payload]; coverage })
 let query store ~expected_seq ~max_bytes ?since ?until ?lane_id () =
   unwrap (Store.query_observations store ~instance_id ~expected_seq ~max_bytes ~since ~until ~lane_id)
@@ -70,7 +73,7 @@ let lane_selection_with_covered_history () = with_store (fun _root store ->
   for seq = 1 to count do
     let observed = row seq "observation" in
     let observed = if seq = count then observed else { observed with lane_id = "other/source" } in
-    unwrap (Store.append_observation store ~instance_id ~seq ~sources:(`List [])
+    unwrap (append_observation store ~instance_id ~seq ~sources:(`List [])
       { rows = [observed]; coverage = [source seq None] })
   done;
   let max_bytes = 4096 in
@@ -88,9 +91,9 @@ let large_selected_coverage () = with_store (fun _root store ->
   let original = observation (String.make (max_bytes - base_size) 'x') in
   check int "source output itself respects the package envelope" max_bytes
     (String.length (Yojson.Safe.to_string (Types.output_to_json original)));
-  unwrap (Store.append_observation store ~instance_id ~seq:1 ~sources:(`List []) original);
+  unwrap (append_observation store ~instance_id ~seq:1 ~sources:(`List []) original);
   let unavailable : Types.coverage = { (source 2 (Some "machine unavailable")) with complete = false } in
-  unwrap (Store.append_observation store ~instance_id ~seq:2 ~sources:(`List [])
+  unwrap (append_observation store ~instance_id ~seq:2 ~sources:(`List [])
     { rows = []; coverage = [unavailable] });
   let output = query store ~expected_seq:2 ~max_bytes () in
   check (list string) "source coverage cannot displace a fitting selected row"
@@ -118,7 +121,7 @@ let coverage_without_rows () = with_store (fun _root store ->
   append store 1 "outside the selected window";
   let source : Types.coverage = { source_id = "msx"; incarnation = "unobserved";
     cursor = None; complete = false; detail = Some "machine unavailable" } in
-  unwrap (Store.append_observation store ~instance_id ~seq:2 ~sources:(`List [])
+  unwrap (append_observation store ~instance_id ~seq:2 ~sources:(`List [])
     { rows = []; coverage = [source] });
   let output = query store ~expected_seq:2 ~max_bytes:4096 ~since:3. () in
   check int "unavailable source has no fabricated rows" 0 (List.length output.rows);
@@ -140,7 +143,7 @@ let separate_source_and_output_envelopes () = with_store (fun root store ->
   let max_bytes = 4096 in
   let sources = `List [`String (String.make 3000 's')] in
   let output : Types.output = { rows = [row 1 (String.make 3000 'o')]; coverage = [] } in
-  unwrap (Store.append_observation store ~instance_id ~seq:1 ~sources output);
+  unwrap (append_observation store ~instance_id ~seq:1 ~sources output);
   let original = In_channel.with_open_bin (record root 1) In_channel.input_all in
   check bool "valid record exceeds one component envelope" true (String.length original > max_bytes);
   let queried = query store ~expected_seq:1 ~max_bytes () in
@@ -184,7 +187,7 @@ let published_evidence_is_readable_by_keeper () = with_store (fun root store ->
   let sources = `List [`Assoc ["snapshot_evidence", retained_json source;
     "external", `Assoc ["uri", `String ("file://" ^ external_path);
       "path", `String external_path; "sha256", `String (Store.digest external_bytes)]]] in
-  unwrap (Store.append_observation store ~instance_id ~seq:1 ~sources
+  unwrap (append_observation store ~instance_id ~seq:1 ~sources
     { rows = [row 1 "separate assertion"]; coverage = [] });
   let record_bytes = In_channel.with_open_bin (record root 1) In_channel.input_all in
   let frozen = unwrap (Store.freeze store ~instance_id ~binding:(binding 4096) ~row_ids:[(row 1 "").id]) in
@@ -218,7 +221,7 @@ let published_evidence_is_readable_by_keeper () = with_store (fun root store ->
     (List.mem (Store.digest external_bytes) (Tool_blob_store.list_all (Tool_blob_store.create ~base_path:root))))
 let corrupted_source_is_not_delivered () = with_store (fun root store ->
   let source = unwrap (Store.write_blob store "original source bytes") in
-  unwrap (Store.append_observation store ~instance_id ~seq:1
+  unwrap (append_observation store ~instance_id ~seq:1
     ~sources:(`List [retained_json source]) { rows = [row 1 "assertion"]; coverage = [] });
   let frozen = unwrap (Store.freeze store ~instance_id ~binding:(binding 4096) ~row_ids:[(row 1 "").id]) in
   let hash = Option.get source.sha256 in
@@ -259,7 +262,7 @@ let retained_sequences_grow_only_with_new_records () = with_store (fun root stor
 let sequence_graph_is_published_and_rejects_nonlocal_or_broken_links () = with_store (fun root store ->
   let snapshot = unwrap (Store.retain_jsonl store ~history:"captured" ~entry_count:2
     ~newest_first:["second\n"; "first\n"] ~encode:Fun.id) in
-  unwrap (Store.append_observation store ~instance_id ~seq:1
+  unwrap (append_observation store ~instance_id ~seq:1
     ~sources:(`List [`Assoc ["evidence", `List [retained_json snapshot.reference]]])
     {rows=[row 1 "ledger"];coverage=[]});
   let frozen = unwrap (Store.freeze store ~instance_id ~binding:(binding 4096)
@@ -310,13 +313,13 @@ let sequence_graph_is_published_and_rejects_nonlocal_or_broken_links () = with_s
   write (Filename.concat root ("sequences/" ^ Option.get corrupt.sha256 ^ ".json")) "changed";
   check bool "corrupt sequence bytes are rejected" true
     (Result.is_error (Store.read_jsonl store corrupt));
-  unwrap (Store.append_observation store ~instance_id ~seq:2
+  unwrap (append_observation store ~instance_id ~seq:2
     ~sources:(`Assoc ["arbitrary_plugin_field", retained_json corrupt])
     {rows=[row 2 "untrusted field"];coverage=[]});
   let opaque_frozen = unwrap (Store.freeze store ~instance_id ~binding:(binding 4096)
     ~row_ids:[(row 2 "").id]) in
   ignore (unwrap (Store.publish_for_keeper ~base_path:root store opaque_frozen));
-  unwrap (Store.append_observation store ~instance_id ~seq:3
+  unwrap (append_observation store ~instance_id ~seq:3
     ~sources:(`Assoc ["evidence", `List [retained_json corrupt]])
     {rows=[row 3 "unrelated corrupt sequence"];coverage=[]});
   let healthy_frozen = unwrap (Store.freeze store ~instance_id ~binding:(binding 4096)

@@ -246,17 +246,50 @@ let finalize_actions m e =
   Queue.iter (fun receipt -> finish receipt Lane_addon_action.Failed_before_effect
     "worker lifetime ended while request was queued") e.action_queue;
   Queue.clear e.action_queue
+type observation_writer = store:Lane_addon_store.t -> instance_id:string -> seq:int ->
+  sources:Yojson.Safe.t -> output -> (unit, Lane_addon_store.observation_write_error) result
+let observation_writer_key : observation_writer Eio.Fiber.key = Eio.Fiber.create_key ()
 let commit_output m e ~sources output =
   let seq = e.seq + 1 in
   let output = namespace e seq output in
   let* () =
     if String.length (Yojson.Safe.to_string (output_to_json output)) <= e.package.resources.max_reply_bytes
     then Ok () else Error "namespaced observation exceeds the package output envelope" in
-  let* () = offload (fun () -> Lane_addon_store.append_observation m.store
+  let write = match Eio.Fiber.get observation_writer_key with
+    | Some write -> write
+    | None -> (fun ~store ~instance_id ~seq ~sources output ->
+        Lane_addon_store.append_observation store ~instance_id ~seq ~sources output) in
+  let published = offload (fun () -> write ~store:m.store
     ~instance_id:e.instance_id ~seq ~sources output) in
-  e.seq <- seq; e.output <- output;
-  if not e.stopping then e.phase <- Attached;
-  let* () = persist m e in wake_dependents m e; Ok ()
+  let converge () = e.seq <- seq; e.output <- output in
+  match published with
+  | Ok () ->
+    converge ();
+    if not e.stopping then e.phase <- Attached;
+    let* () = persist m e in wake_dependents m e; Ok ()
+  | Error (Lane_addon_store.Observation_rejected detail) -> Error detail
+  | Error (Lane_addon_store.Publication_failed {failure;verification_error}) ->
+    let cause=Lane_addon_store.observation_write_error_to_string
+      (Lane_addon_store.Publication_failed {failure;verification_error}) in
+    (match failure.Fs_compat.stage with
+     | Fs_compat.Before_rename -> ()
+     | Fs_compat.After_rename ->
+       converge ();
+       if not e.stopping then e.phase <- Failed
+         ("observation published with unconfirmed durability: " ^
+           cause));
+    let detail = match failure.stage with
+      | Fs_compat.Before_rename -> cause
+      | Fs_compat.After_rename -> "observation published with unconfirmed durability: " ^ cause in
+    let saved = match failure.stage with
+      | Fs_compat.Before_rename -> Ok ()
+      | Fs_compat.After_rename -> persist m e in
+    wake_dependents m e;
+    (match failure.exception_ with
+     | Eio.Cancel.Cancelled _ -> Printexc.raise_with_backtrace failure.exception_ failure.backtrace
+     | _ -> match saved with
+       | Ok () -> Error detail
+       | Error error -> Error (detail ^ "; binding persistence: " ^ error))
 let perform_action m e c (queued : Lane_addon_action.receipt) =
   e.current_action <- Some queued;
   let running = {queued with state = Lane_addon_action.Running; executor = Some c.container_id} in
@@ -1092,6 +1125,7 @@ module For_testing = struct
   let with_backend backend f = let previous = !override in override := Some backend;
     Fun.protect ~finally:(fun () -> override := previous) f
   let with_action_writer write f = Eio.Fiber.with_binding action_writer_key write f
+  let with_observation_writer write f = Eio.Fiber.with_binding observation_writer_key write f
   let reset () =
     Hashtbl.iter (fun _ stop -> stop ()) configuration_services;
     Hashtbl.clear configuration_services; Hashtbl.clear managers;

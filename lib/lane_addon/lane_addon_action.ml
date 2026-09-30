@@ -68,6 +68,9 @@ let of_json json =
     | `Null -> Ok None
     | `Assoc _ as value -> let* value = canonical value in Ok (Some value)
     | _ -> Error "retained action result must be an object or null" in
+  let* () = match state,result with
+    | Confirmed,None -> Error "confirmed action receipt requires a retained result"
+    | Confirmed,Some _ | (Queued | Running | Failed_before_effect | Outcome_unknown),_ -> Ok () in
   let* normalized = canonical (arguments ~instance_id ~request_id ~action) in
   if incarnation <> instance_id || input_digest normalized <> input_sha256
   then Error "retained action identity or input digest mismatch"

@@ -113,6 +113,22 @@ host does not infer a model or provider identity. A package confirmation is not
 independent verification, nor does transport success establish an external
 effect. Package-specific tests must read the resulting state or artifact.
 
+A persisted `confirmed` receipt must retain an object-valued `result`. A missing
+result is a receipt error for status reads and duplicate requests; it does not
+authorize replay or rewrite the corrupted receipt. An `outcome_unknown` receipt
+may still have no result when the worker reply was lost, and an undispatched
+`failed_before_effect` receipt does not require one.
+
+If observation publication fails after rename, the host reserves that sequence
+and retains the proposed output with a failed, incomplete producer status.
+Visible-byte verification failure remains explicit; visibility establishes
+neither durable evidence nor action confirmation. A later observation uses the
+next sequence rather than colliding forever with the published record. Retained
+record reads strictly sync the exact file and parent directory before accepting
+its bytes. The original action remains `outcome_unknown`; a successful later
+observation does not upgrade or replay it. A failure before rename leaves the
+observation sequence unchanged.
+
 After a worker exits, orphaned running receipts become `outcome_unknown` and
 undispatched queued receipts become `failed_before_effect`. They are never
 automatically replayed against a replacement. Detachment retains receipts and

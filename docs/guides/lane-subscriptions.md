@@ -16,7 +16,11 @@ output_id = "changes"
 The direct and autonomous turn paths discover unread observation references,
 not source bodies. A subscription does not wake a Keeper. Already acknowledged
 output does not add context. A missing installation, invalid config, or replaced
-instance remains visible; it is not a successful empty observation.
+instance remains visible; it is not a successful empty observation. The producer
+phase must decode through the Lane lifecycle contract before reading or
+acknowledging. Unknown or malformed phases, and detaching or detached workers,
+remain unavailable without advancing the cursor. Attached, observing and failed
+workers may still expose their retained observations.
 
 `masc_lane_updates` has four operations:
 
@@ -66,3 +70,18 @@ sequence. A stale receipt cannot acknowledge the replacement or another record.
 Repeated reads before acknowledgement return the same record, allowing recovery
 when a tool response is lost. Original row evidence remains accessible through
 the existing Lane evidence and artifact paths.
+
+Acknowledgement publication distinguishes a failure before rename from one
+following rename. Before rename, the next unread receipt remains unchanged.
+After rename, the response reports `acknowledged=false`, `published=true`, and
+`durability="unconfirmed"`, including any visible-file verification failure.
+Every subsequent reader validates the cursor identity and strictly syncs the
+exact file and its parent directory before accepting its position. A failed sync
+makes the subscription unavailable, including after process restart. No cursor
+payload is rewritten by this verification.
+
+Retrying the exact currently published receipt revalidates its producer,
+incarnation, sequence, and retained output digest before returning an
+acknowledgement. It never consumes the following observation. An older receipt
+cannot move a later cursor backwards. These filesystem guarantees address
+process restart; they do not promise recovery from hardware or power loss.

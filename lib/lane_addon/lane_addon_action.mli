@@ -17,6 +17,8 @@ type package_status = Package_confirmed | Package_failed_before_effect | Package
 type package_result = { status : package_status; result : Yojson.Safe.t; output : Lane_addon_types.output }
 val to_json : receipt -> Yojson.Safe.t
 val of_json : Yojson.Safe.t -> (receipt, string) result
+(** Confirmed receipts require a retained object result. Other states may have
+    no result, including an unknown outcome after a lost worker reply. *)
 val canonical : Yojson.Safe.t -> (Yojson.Safe.t, string) result
 val arguments : instance_id:string -> request_id:string -> action:Yojson.Safe.t -> Yojson.Safe.t
 val context : string -> Yojson.Safe.t

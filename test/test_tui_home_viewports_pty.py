@@ -2,6 +2,7 @@
 import base64
 import json
 import os
+import re
 import sys
 
 import test_tui_home_journey_pty as home
@@ -37,19 +38,34 @@ def viewport_journey(executable, *, unread, no_color):
                 final_cursor=b"\x1b[?25l",
             )
             visible = h.screen_text(frame)
+            screen = h.screen_rows(frame)
             for needle in (expected, b"Continue", b"Choose a Keeper", b"Enter:open"):
                 assert needle in visible, (columns, rows, needle, visible)
-                assert 1 <= h.frame_row_of(frame, needle) <= rows
+                assert 1 <= h.screen_row_of(screen, needle) <= rows
             if unread:
                 assert b"No decision is waiting" not in visible, visible
             # Verify terminal row addresses, not just presence in a log that
             # could contain offscreen output from an earlier size.
-            assert max(h.screen_rows(frame)) <= rows, visible
+            assert max(screen) <= rows, visible
+            for row in screen.values():
+                assert h.fixture_cell_width(row.decode("utf-8")) <= columns, row
+            if no_color:
+                for sgr in re.findall(rb"\x1b\[([0-9;]*)m", frame):
+                    parameters = [int(part) for part in sgr.split(b";") if part]
+                    assert not any(
+                        30 <= value <= 48 and value != 39 or 90 <= value <= 107
+                        for value in parameters
+                    ), ("NO_COLOR emitted a color", sgr)
             print("HOME_JOURNEY_FRAME " + json.dumps({
                 "name": "unread" if unread else "requests",
                 "columns": columns, "rows": rows, "no_color": no_color,
                 "encoding": "base64", "pty": base64.b64encode(frame).decode(),
             }))
+            # Exercise Home's selected-row dispatch at each size, rather
+            # than proving only that a global shortcut works at the last one.
+            h.send_and_wait(process, fd, output, b"kkkk\r", b"MASC Approvals")
+            home.assert_no_decision_posts(requests)
+            h.palette_go(process, fd, output, b"go dashboard", ready)
         # The same recipient-selection action remains available after all
         # three resizes; this is navigation, so no product POST is allowed.
         h.send_and_wait(process, fd, output, b"i", b"MASC Keepers")

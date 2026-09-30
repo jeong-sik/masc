@@ -23,6 +23,11 @@ Home journey work, rather than being treated as completed requirements.
 | Removed selection requires reselection | `home_selected_action`; refresh scenario | Current-head pass; deleted Keeper resume case |
 | Fixed startup Keeper is not a last-chat receipt | `remember_home_chat`; `opening_boot_frames` | Current-head Overview PTY pass |
 | Home chat returns with draft intact | `Keeper_chat_return_home`; `unknown_and_resume` | Current-head PTY pass; draft during incoming notification |
+| Text, attachments and references stay bound to their recipient | `save_message_draft` currently saves only text | Preserve complete per-Keeper drafts and verify A→B→A wire payloads |
+| Creation failures retain input and malformed JSON is recoverable | Creation handler parses without an exception branch and restarts from a stem | Guard parsing, retain declarations, verify malformed/failed/success retry |
+| Created Keeper is selected for the first assignment | Creation currently reports success only | Refresh roster and hand off to the named composer |
+| Remembered target remains visible during roster failure | Resume currently requires a successful roster read | Last-record presentation with unavailable status and safe send authority |
+| Short-height Home reserves continuation and new work | Renderer currently ignores its body budget | Height-aware layout and short-height PTY acceptance |
 | Overview startup remembers a last conversation across restarts | `home_last_chat` is session-only | Independent durable navigation receipt and restart/deletion verification |
 | All sources retain their distinct decision identity | Home currently aggregates destinations | Individual request projection with kind + authoritative request ID; duplicate and same-task cases |
 | Acceptance sizes and color-independent actions | `test_tui_home_viewports_pty.py`: 80×24, 120×32, 160×48, normal and NO_COLOR | Execute new suite; inspect its 12 complete PTY frames |
@@ -32,8 +37,11 @@ Home journey work, rather than being treated as completed requirements.
 | Improved time to first action | No user timing measurement here | Same-task before/after operator observation; do not infer speed from layout |
 
 The viewport suite deliberately captures fresh full redraws after actual size
-changes. It checks terminal row addresses as well as text, emits raw base64 PTY
+changes. It checks final terminal row addresses, fixture cell widths and NO_COLOR
+color escapes as well as text, emits raw base64 PTY
 frames as `HOME_JOURNEY_FRAME`, and rejects product POSTs during navigation.
+Enter dispatch is exercised at each size. Visual inspection remains required;
+these checks do not emulate every terminal's display rules.
 These are synthetic fixture observations when executed. They cannot prove
 Keeper operation, production readiness, installation, or human action timing.
 

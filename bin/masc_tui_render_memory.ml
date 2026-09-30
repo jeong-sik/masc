@@ -1,5 +1,6 @@
 open Masc_tui_types
 open Masc.Tui_decode
+open Masc.Tui_decode_memory_health
 open Masc_tui_ansi
 
 module Render_schedule = Masc_tui_render_schedule

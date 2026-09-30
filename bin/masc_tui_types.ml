@@ -9304,7 +9304,7 @@ let memory_back (state : state) =
     | None -> Memory_leaves
 
 let visible_memory_keepers (state : state) =
-  let open Tui_decode in
+  let open Masc.Tui_decode_memory_health in
   let raw_keepers =
     match state.memory_health with
     | None -> []

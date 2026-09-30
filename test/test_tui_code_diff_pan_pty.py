@@ -52,6 +52,13 @@ def run(executable, no_color):
             h.send_and_wait(process, fd, output, RIGHT * 80, b"diff col 151 vs HEAD")
             h.drain_until_quiet(process, fd, output)
             tail = screen(output)
+            # At the narrow width, column 151 reaches the suffix but cannot
+            # hold it all beside the gutter. Pan to its actual text origin.
+            suffix_column = REMOVED.index("REMOVETAIL") + 1
+            h.send_and_wait(process, fd, output, RIGHT * (suffix_column - 151),
+                            f"diff col {suffix_column} vs HEAD".encode())
+            h.drain_until_quiet(process, fd, output)
+            tail = screen(output)
             assert "REMOVETAIL" in tail, tail
             # A removed row is wider than the current file: its actual width
             # controls the upper clamp, rather than the hidden file's width.

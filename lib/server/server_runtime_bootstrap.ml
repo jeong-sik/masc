@@ -868,6 +868,9 @@ let initialize_owner_state_blocking
       loop ()
     in
     loop ());
+  (* Initial owner preparation can checkpoint durable queue state, before
+     the shared runtime pool or Keeper lanes are activated. *)
+  Keeper_event_queue_snapshot_codec.install ~sw domain_mgr;
   let t0 = Eio.Time.now clock in
   Llm_metric_bridge.install ();
   Log.Server.info
@@ -1114,7 +1117,7 @@ let initialize_owner_state_blocking
   in
   install_domain_pool_references domain_pool;
   Log.Server.info
-    "Domain_pool created (%d domains) for dashboard/keeper compute"
+    "Domain_pool created (%d shared domains, 1 independent snapshot codec domain) for dashboard/keeper compute"
     (Domain_pool.domain_count domain_pool);
   { state; path_diagnostics; prepared_keeper_persistence; domain_pool }
 

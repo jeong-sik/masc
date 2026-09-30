@@ -6,6 +6,7 @@ import base64
 import copy
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -119,20 +120,30 @@ def run(executable: str, *, replace_proof: bool) -> None:
         )
         if read_count != 1 or posted:
             raise AssertionError("first key must read the proof without posting")
-        # Reader edges retain the inspected binding. The subsequent single
-        # confirmation key must still POST it, without another GET.
-        for edge in (b"\x1b[F", b"\x1b[H"):
-            start = len(output)
-            h.write_all(master_fd, output, edge)
-            h.wait_for_output(process, master_fd, output, h.FRAME_END,
-                              start=start, timeout=3.0)
-        h.drain_until_quiet(process, master_fd, output)
-        end = output.rfind(h.FRAME_END)
-        complete = bytes(output[:end + len(h.FRAME_END)])
-        if b"CONFIRM THIS PROOF" not in h.screen_text(complete):
-            raise AssertionError("reader edges discarded the inspected proof")
+        # Make the proof reader overflow, so its edges change real rows.
+        h.resize_and_wait(process, master_fd, output, rows=18, columns=80,
+                          needle=b"CONFIRM THIS PROOF", final_cursor=b"\x1b[?25l")
+        def reader_window():
+            end = output.rfind(h.FRAME_END)
+            complete = bytes(output[:end + len(h.FRAME_END)])
+            match = re.search(rb"\[lines (\d+)-(\d+)/(\d+)\]", h.screen_text(complete))
+            if match is None:
+                raise AssertionError("confirmation reader did not overflow")
+            return tuple(int(value) for value in match.groups())
+        first, last, total = reader_window()
+        if first != 1 or last >= total:
+            raise AssertionError("confirmation reader must start in an overflowing first window")
+        h.send_and_wait(process, master_fd, output, b"\x1b[F", b"[lines ")
+        end_first, end_last, end_total = reader_window()
+        if end_first <= first or end_last != total or end_total != total:
+            raise AssertionError("End did not reach the same proof document's last row")
+        h.send_and_wait(process, master_fd, output, b"\x1b[H", b"CONFIRM THIS PROOF")
+        if reader_window() != (first, last, total):
+            raise AssertionError("Home did not return to the same inspected proof")
         if read_count != 1 or posted:
             raise AssertionError("reader edges must not reread or post the proof")
+        h.resize_and_wait(process, master_fd, output, rows=50, columns=160,
+                          needle=b"CONFIRM THIS PROOF", final_cursor=b"\x1b[?25l")
         if replace_proof:
             verdict["verification_run_id"] = "run-2"
         needle = (

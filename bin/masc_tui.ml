@@ -19845,11 +19845,14 @@ and is loaded on demand through keeper_skill.
                          else (
                          let next = Addons.open_selected_instance view in
                          update next;
-                         (match Addons.selected_instance next with
-                          | Some item ->
+                         (match next.screen, Addons.selected_instance next with
+                          | Addons.Detail _, Some item ->
+                              let request = match view.overview_mode with
+                                | Addons.Retained_runs -> Addons.Slice ["run_id",item.run_id]
+                                | Addons.Current_installations -> Addons.Inspect in
                               launch_lane_addons ~initial_detail:(item.id,item.incarnation)
-                                state ~mailbox:async_messages (Addons.Slice ["run_id",item.run_id])
-                          | None -> ()))
+                                state ~mailbox:async_messages request
+                          | Addons.Overview, (Some _ | None) | Addons.Detail _, None -> ()))
                      | "i" ->
                          if view.loading then update {view with error=lane_addons_input_failure "Wait for the current Lane request before opening installation."}
                          else (match Masc_tui_lane_installer.create () with

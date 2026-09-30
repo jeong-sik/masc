@@ -11,8 +11,8 @@ usability experiment, installation test, or proof of Keeper continuity.
 | First contribution | CONTRIBUTING, README source prerequisites, Git worktree/fork branch semantics | Documentation path is available without private MASC access; source build is optional for docs |
 | External AI session | AGENTS and constitution execution_protocol | No local Dune build, no CI watch/wait, isolated changes, parallel adversarial review on moving work units |
 | Work coordination | config/tools/masc_goal_upsert.toml, masc_add_task.toml, masc_transition.toml, masc_board_post.toml | Goal source/target, explicit Task link, claim/start, handoff and Board purpose documented |
-| Validation and CI | .github/workflows/pr-check.yml, test.yml, linux-x64-probe.yml, release.yml | Draft skips required jobs; ready runs five required checks; targeted/full verification and binary probe have distinct purposes |
-| Review/integration | constitution, scripts/review/approve-guard.sh, merge-guard.sh, ci-freshness.py | Head-bound code review is separate from current-head CI/run, later reviews, base freshness and guarded integration |
+| Validation and CI | constitution, .github/workflows/pr-check.yml, ci.yml, release-candidate.yml, test.yml | Ready enables review, not automatic CI; explicit minimal jobs are limited to two minutes, Core belongs at the stack bottom, and full verification belongs at Release/Tag |
+| Review/integration | constitution, scripts/review/approve-guard.sh, merge-guard.sh, ci-checks.sh | Ordinary current-head source PASS has no run ID; independent approval and resolved P0/P1/P2 govern admission; Release requires successful full current-head CI |
 | Evidence/resume | config/tools/masc_transition.toml, masc_goal_transition.toml, keeper_task_done.toml | Verification submission, typed evidence, final human Goal confirmation and reread-before-retry documented |
 
 Source-matched procedure count: **6 / 6**. This count measures the coverage of the
@@ -29,12 +29,17 @@ Goal links, accepted evidence types and the incorrect RFC evidence link were
 addressed; its reviewer-request cleanup guidance was added. This is a document
 review, not the completion authority’s verdict.
 
-Remaining verification: Task review acceptance, current-head PR checks,
-and eventual operator confirmation of the Goal. A plan posted on the Board and
+Remaining verification: Task review acceptance and eventual operator confirmation
+of the Goal. Ordinary source review does not require a CI run; Release/Tag
+verification remains separate. A plan posted on the Board and
 this audit do not complete either Task automatically.
 
 
-## Adversarial self-review and external comparison
+## Historical onboarding reviews and external comparison
+
+The following records describe earlier revisions. Their automatic CI and
+run-freshness requirements are historical, not current contributor procedures.
+The current policy reconciliation below supersedes that guidance.
 
 Reviewed on 2026-09-30. This review asks whether a contributor without repository
 write access or a private MASC session can follow the document. Findings below
@@ -99,10 +104,25 @@ launch example's separate config root. The example now clears that variable for
 the command and states that existing target-directory configuration still applies.
 
 
-## Operator clarification: review is separate from CI
+## Current policy reconciliation
 
-The operator rejected waiting for CI before code review decisions. The English
-and Korean guides now distinguish `review: APPROVE|REQUEST_CHANGES` from the
-CI-backed integration `verdict: PASS|FAIL`. Clearing a review request depends on
-reviewing the corrected code, not a green check. The separate policy change is
-tracked by issue #40138 and task-1851; this contributor PR depends on that change.
+At `836ba279c2b30fdae1a2163e04e6e306ba88e898`, the English and Korean guides and
+CONTRIBUTING follow the full constitution's execution protocol: stacked work,
+ordinary independent source review, no automatic PR/push/scheduled CI,
+explicitly requested minimal jobs limited to two minutes, Core at the bottom
+of a stack, and the full cycle at Release/Tag. Ready-for-review changes review
+readiness, not CI triggers.
+
+Ordinary verdicts bind the current head without a run ID. Release verdicts
+also cite the completed successful full run. Approval and merge guards retain
+exact-head identity, independent approval and later blocking reviews. Parents
+land first; a changed child base/diff is reviewed before integration. Human/fork
+onboarding, Keeper toolchain permission, typed evidence and runtime isolation
+remain in both guides. The removed documentation checker is not an active
+command, and no deleted review module is restored by this reconciliation.
+
+The audit table above describes that current policy. Earlier audit notes remain
+historical records of the source and findings at their review time. None of
+those records supplies a current-head CI verdict, Task acceptance, fresh-machine
+installation proof or runtime observation. The original tracking IDs above
+remain historical records, not new acceptance.

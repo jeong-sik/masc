@@ -74,9 +74,10 @@ let payout_of_toml payout =
 
 let prices_of_toml shop =
   let* shop = exact_table "shop" ["prices_milli"] shop in
-  let* prices = required "shop" shop "prices_milli" in
-  let* fields = exact_table "shop.prices_milli"
-    (List.map Keeper_portrait_item.id Keeper_portrait_item.all) prices in
+  let* fields = match List.assoc_opt "prices_milli" shop with
+    | None -> Ok []
+    | Some prices -> exact_table "shop.prices_milli"
+        (List.map Keeper_portrait_item.id Keeper_portrait_item.all) prices in
   List.fold_right (fun item result ->
     let* prices = result in
     let key = Keeper_portrait_item.id item in

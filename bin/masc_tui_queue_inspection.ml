@@ -44,7 +44,7 @@ let list key json =
 let rec map_result f = function
   | [] -> Ok []
   | x :: xs -> let* value = f x in let* rest = map_result f xs in Ok (value :: rest)
-let safe = Masc.Tui_decode.sanitize_terminal_text
+let safe = Masc.Tui_terminal_text.sanitize_terminal_text
 (* The snapshot used to print one row per pending stimulus as
    "source: what — next_action" plus a 64-hex address, in queue order, with no
    clock: 31 occurrences of one schedule were 62 lines that read the same. The

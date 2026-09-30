@@ -17,7 +17,7 @@ type failure =
 let account_json (account : Candle_shop.account) =
   `Assoc
     [ "keeper", `String account.keeper
-    ; "balance_milli", `Int account.balance_milli
+    ; "balance_milli", `String (string_of_int account.balance_milli)
     ; ( "owned_items"
       , `List (List.map (fun item -> `String (Item.id item)) account.owned_items) )
     ]
@@ -32,7 +32,7 @@ let entry_json (entry : Candle_shop.catalog_entry) =
      match entry.price with
      | Candle_config.Unpriced -> [ "price_status", `String "unpriced" ]
      | Candle_config.Priced amount ->
-       [ "price_status", `String "priced"; "price_milli", `Int amount ])
+       [ "price_status", `String "priced"; "price_milli", `String (string_of_int amount) ])
 ;;
 
 let shop result = Result.map_error (fun error -> Shop_failed error) result
@@ -86,7 +86,7 @@ let run ~operation ~base_path ~keeper_name ~args =
       (`Assoc
           [ "account", account_json receipt.account
           ; "item", `String (Item.id receipt.item)
-          ; "amount_milli", `Int receipt.amount_milli
+          ; "amount_milli", `String (string_of_int receipt.amount_milli)
           ; "purchased_at", Candle_time.to_yojson receipt.purchased_at
           ])
 ;;

@@ -1816,7 +1816,8 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
         (Ast_grep.count_calls ~module_path ~callee:"print_string");
       check int "surface renderers perform no direct flushes" 0
         (Ast_grep.count_calls ~module_path ~callee:"flush"))
-    [ "bin/masc_tui_render.ml"; "bin/masc_tui_render_code.ml" ];
+    [ "bin/masc_tui_render.ml"; "bin/masc_tui_render_code.ml"
+    ; "bin/masc_tui_render_resources.ml" ];
   check int "main has one frame presentation boundary" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"main" ~callee:"Frame_presenter.present");
@@ -3029,7 +3030,7 @@ let test_the_pane_surfaces_open_on_a_title_row () =
     Ast_grep.count_calls_in_value_binding ~module_path ~binding_name ~callee
   in
   let in_code = calls ~module_path:"bin/masc_tui_render_code.ml" in
-  let in_resources = calls ~module_path:"bin/masc_tui_render.ml" in
+  let in_resources = calls ~module_path:"bin/masc_tui_render_resources.ml" in
   let in_prim = calls ~module_path:"bin/masc_tui_render_prim.ml" in
   check int "render_code draws the title row once" 1
     (in_code "render_code" "pane_surface_header");

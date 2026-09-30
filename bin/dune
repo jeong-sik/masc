@@ -1729,6 +1729,7 @@
   masc_tui
   masc_tui_render
   masc_tui_render_code
+  masc_tui_render_resources
   masc_tui_loader
   masc_tui_http)
  (public_name masc-tui)

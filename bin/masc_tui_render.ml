@@ -16903,7 +16903,12 @@ let render_answering (state : state) =
           | "" -> "(no text reported yet)"
           | tail -> tail
         in
-        [ Ansi.bold ^ keeper_name ^ Ansi.reset ^ "  " ^ (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ doing
+        let preview_width = framed_inner_width cols in
+        let name_width = min (Masc_tui_message_layout.display_width (Terminal_text.single_line keeper_name))
+          (max 0 ((preview_width - 2) / 2)) in
+        [ Ansi.bold ^ fit_width (Terminal_text.single_line keeper_name) name_width
+          ^ Ansi.reset ^ "  " ^ (Masc_tui_theme.tone Masc_tui_theme.Accent)
+          ^ fit_width doing (max 0 (preview_width - name_width - 2))
           ^ Ansi.reset
         ; Ansi.dim ^ tail ^ Ansi.reset
         ]
@@ -16916,7 +16921,7 @@ let render_answering (state : state) =
     ~frame:Chrome_overlay
     (* Enter and Esc are in the footer row below this overlay. *)
     ~title:(screen_title " MASC Answering")
-    ~hints:"j/k:move  Enter:open chat  Esc:close"
+    ~hints:"j/k:move  PgUp/PgDn:page  Home/End  Enter:chat  Esc:close"
     ~body:(fun ~budget c ->
       let content_height = max 1 (budget - answering_preview_rows) in
       let scroll =

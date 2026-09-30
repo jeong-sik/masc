@@ -1,0 +1,85 @@
+"""Answering keeps lanes visible and lets unavailable-only fleets be read."""
+import os
+import re
+import sys
+import time
+
+import test_tui_keyboard_input as h
+
+SOURCE_MODULES = (
+    "bin/masc_tui_answering.ml",
+    "bin/masc_tui_render_prim.ml",
+    "bin/masc_tui_render.ml",
+    "bin/masc_tui.ml",
+)
+
+
+def current_rows(output):
+    return h.screen_rows(bytes(output[:output.rfind(h.FRAME_END) + len(h.FRAME_END)]))
+
+
+def run(executable):
+    names = ["long-" + "keeper" * 24, "한글이름" * 30, "alpha"]
+    started = time.time() - 120
+    fixtures = h.keeper_runtime_http_fixtures()
+    fixtures["/api/v1/keepers/turns"] = (200, {
+        "schema": "masc.keeper_turns.v1",
+        "keepers": [{"keeper_name": name, "status": "ok", "turn": {
+            "lane": "chat_operation", "started_at_unix": started,
+            "preview": {"status_text": "PREVIEW working", "text_tail": "visible output",
+                        "updated_at_unix": started, "last_tool": None},
+        }} for name in names],
+    })
+
+    def inspect_running(process, master_fd, _slave_fd, output, _base_path):
+        h.send_and_wait(process, master_fd, output, b"@", b"PREVIEW")
+        for width in (60, 80, 120):
+            h.resize_and_wait(process, master_fd, output, rows=26, columns=width,
+                              needle=b"MASC Answering", final_cursor=b"\x1b[?25l")
+            h.drain_until_quiet(process, master_fd, output)
+            rows = current_rows(output)
+            running = [row for row in rows if b"chat_operation" in row]
+            assert len(running) == 3, (width, rows)
+            for row in running:
+                assert re.search(rb"chat_operation +2m[0-9]+s", row), (width, row)
+            assert any(b"alpha" in row for row in running), (width, rows)
+            assert any(b"long-" in row for row in running), (width, rows)
+            assert any("한글".encode() in row for row in running), (width, rows)
+            assert any(b"PREVIEW" in row for row in rows), (width, rows)
+        h.send_and_wait(process, master_fd, output, b"\x1b", b"MASC Dashboard")
+        os.write(master_fd, b"q")
+
+    h.run_terminal_scenario(executable, description="Answering fits long ASCII and CJK names without losing lane or age",
+                            interact=inspect_running, http_fixtures=fixtures)
+
+    fixtures = h.keeper_runtime_http_fixtures()
+    fixtures["/api/v1/keepers/turns"] = (200, {
+        "schema": "masc.keeper_turns.v1",
+        "keepers": [{"keeper_name": f"unavailable-{i:02d}", "status": "unavailable",
+                     "detail": f"owner read failed {i:02d}"} for i in range(40)],
+    })
+
+    def inspect_unavailable(process, master_fd, _slave_fd, output, _base_path):
+        h.resize_and_wait(process, master_fd, output, rows=26, columns=60,
+                          needle=b"MASC Dashboard", final_cursor=b"\x1b[?25l")
+        h.send_and_wait(process, master_fd, output, b"@", b"owner read failed 00")
+        # There are no actionable rows. j still moves the reading window.
+        h.send_and_wait(process, master_fd, output, b"j" * 40, b"owner read failed 39")
+        h.drain_until_quiet(process, master_fd, output)
+        assert any(b"owner read failed 39" in row for row in current_rows(output))
+        h.send_and_wait(process, master_fd, output, b"\x1b[H", b"owner read failed 00")
+        h.send_and_wait(process, master_fd, output, b"\x1b[6~", b"owner read failed 20")
+        h.send_and_wait(process, master_fd, output, b"\x1b[F", b"owner read failed 39")
+        h.send_and_wait(process, master_fd, output, b"\x1b[5~", b"owner read failed 10")
+        h.send_and_wait(process, master_fd, output, b"\x1b", b"MASC Dashboard")
+        os.write(master_fd, b"q")
+
+    h.run_terminal_scenario(executable, description="Answering scrolls unavailable rows with movement, page and edge keys",
+                            interact=inspect_unavailable, http_fixtures=fixtures)
+    print("tui answering layout: PASS")
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 2:
+        raise SystemExit("usage: test_tui_answering_layout_pty.py <masc_tui.exe>")
+    run(sys.argv[1])

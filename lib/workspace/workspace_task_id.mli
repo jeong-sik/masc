@@ -21,8 +21,10 @@ val archive_entries_of_json : Yojson.Safe.t -> Yojson.Safe.t list
     file does not exist. *)
 val read_archive_task_ids : Workspace_utils_backend_setup.config -> int list
 
-(** Append [tasks] to [tasks-archive.json], deduplicating by task id: a row
-    already in the archive wins, and a row with no id is kept.
+(** Append [tasks] to [tasks-archive.json]. The tasks given are the current
+    copies: each replaces the archive row with the same id, whatever that row
+    holds (an older copy, or a row that does not decode as a task). Every other
+    row stays as it is, rows with no id and repeated ids included.
     The read/merge/write sequence is wrapped in [with_file_lock] so
     concurrent callers cannot lose each other's archive entries.
 

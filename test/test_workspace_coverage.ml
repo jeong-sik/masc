@@ -2921,28 +2921,104 @@ let test_append_archive_tasks_refuses_a_file_that_is_not_an_archive () =
     ]
 ;;
 
-(* A row the archive holds without an id is not a duplicate and not ours to
-   drop, the rule [drop_archive_tasks] already states for the same file. *)
-let test_append_archive_tasks_keeps_a_row_with_no_id () =
+let archive_rows config =
+  match Yojson.Safe.from_string (Fs_compat.load_file (archive_file config)) with
+  | `Assoc fields ->
+    (match List.assoc_opt "tasks" fields with
+     | Some (`List rows) -> rows
+     | Some _ | None -> Alcotest.fail "the archive lost its tasks list")
+  | _ -> Alcotest.fail "the archive is not an object"
+;;
+
+(* The single archive row with [id], decoded as the Task it has to be. *)
+let archived_task config id =
+  match
+    List.filter (fun row -> Json_util.get_string row "id" = Some id) (archive_rows config)
+  with
+  | [ row ] ->
+    (match Masc_domain.task_of_yojson row with
+     | Ok task -> task
+     | Error detail ->
+       Alcotest.fail (id ^ " is in the archive but does not decode: " ^ detail))
+  | rows ->
+    Alcotest.fail
+      (Printf.sprintf "%s: expected one archive row, found %d" id (List.length rows))
+;;
+
+(* Only the tasks given replace anything. A row with no id is not a duplicate
+   of anything, and two rows that share an id are not ours to merge: the rule
+   [drop_archive_tasks] already applies to the same file. *)
+let test_append_archive_tasks_keeps_the_rows_it_does_not_replace () =
   with_test_env (fun config ->
-    let path = archive_file config in
-    Fs_compat.save_file path {|{"tasks":[{"title":"row with no id"}]}|};
+    Fs_compat.save_file
+      (archive_file config)
+      {|{"tasks":[{"title":"row with no id"},{"id":"task-943","title":"first copy"},{"id":"task-943","title":"second copy"}]}|};
     append_archive config [ gc_done_task "task-931" ];
-    let rows =
-      match Yojson.Safe.from_string (Fs_compat.load_file path) with
-      | `Assoc fields ->
-        (match List.assoc_opt "tasks" fields with
-         | Some (`List rows) -> rows
-         | Some _ | None -> Alcotest.fail "the archive lost its tasks list")
-      | _ -> Alcotest.fail "the archive is not an object"
+    let rows = archive_rows config in
+    Alcotest.(check int) "the three rows and the new one" 4 (List.length rows);
+    let titles = List.filter_map (fun row -> Json_util.get_string row "title") rows in
+    List.iter
+      (fun title -> Alcotest.(check bool) (title ^ " survived") true (List.mem title titles))
+      [ "row with no id"; "first copy"; "second copy"; "GC task-931" ])
+;;
+
+(* The tasks given are the current copies. An archive row with the same id that
+   does not decode as a Task must not stand in for one. *)
+let test_append_archive_tasks_replaces_a_row_that_does_not_decode () =
+  with_test_env (fun config ->
+    Fs_compat.save_file
+      (archive_file config)
+      {|{"tasks":[{"id":"task-942","title":"incomplete"}]}|};
+    append_archive config [ gc_done_task "task-942" ];
+    let archived = archived_task config "task-942" in
+    Alcotest.(check bool) "the row is the Done task given" true
+      (Masc_domain.task_status_is_terminal archived.task_status))
+;;
+
+(* The backlog commit must not leave a Task nowhere readable: an archive row
+   with the same id that does not decode is replaced by the row GC archives. *)
+let test_gc_archives_over_a_same_id_row_that_does_not_decode () =
+  with_test_env (fun config ->
+    write_tasks config [ gc_done_task "task-940" ];
+    Fs_compat.save_file
+      (archive_file config)
+      {|{"tasks":[{"id":"task-940","title":"incomplete"}]}|};
+    let _ = Workspace.gc config ~days:1 () in
+    Alcotest.(check bool) "the task left the live backlog" false
+      (gc_backlog_has config "task-940");
+    let archived = archived_task config "task-940" in
+    Alcotest.(check bool) "the archive holds the finished task" true
+      (Masc_domain.task_status_is_terminal archived.task_status))
+;;
+
+(* A stale non-terminal copy sits in the archive while the backlog holds the
+   same task finished. The backlog's row is the current one: GC archives it
+   over the stale copy, does not bring the stale copy back into the backlog,
+   and does not drop the row it has just written. *)
+let test_gc_archives_a_finished_task_over_its_stale_orphan_copy () =
+  with_test_env (fun config ->
+    let stale =
+      gc_make_task
+        ~id:"task-941"
+        ~created_at:gc_ancient_ts
+        ~status:
+          (Masc_domain.AwaitingVerification
+             { assignee = "claude"
+             ; started_at = gc_ancient_ts
+             ; submitted_at = gc_ancient_ts
+             ; verification_id = "verif-941"
+             })
     in
-    Alcotest.(check int) "both rows are in the archive" 2 (List.length rows);
-    Alcotest.(check bool) "the row with no id survived" true
-      (List.exists
-         (fun row ->
-           Option.is_none (Json_util.get_string row "id")
-           && Json_util.get_string row "title" = Some "row with no id")
-         rows))
+    append_archive config [ stale ];
+    write_tasks config [ gc_done_task "task-941" ];
+    let _ = Workspace.gc config ~days:1 () in
+    Alcotest.(check bool) "the stale copy is not brought back" false
+      (gc_backlog_has config "task-941");
+    let archived = archived_task config "task-941" in
+    Alcotest.(check bool) "the archive holds the finished task" true
+      (Masc_domain.task_status_is_terminal archived.task_status);
+    Alcotest.(check int) "no orphan is left in the archive" 0
+      (List.length (Workspace.read_orphaned_nonterminal_tasks config)))
 ;;
 
 (* A missing archive is an empty one: the first append creates it. *)
@@ -3705,6 +3781,14 @@ let () =
             "stops before the backlog when the archive is unreadable"
             `Quick
             test_gc_stops_before_the_backlog_when_the_archive_is_unreadable
+        ; Alcotest.test_case
+            "archives over a same-id row that does not decode"
+            `Quick
+            test_gc_archives_over_a_same_id_row_that_does_not_decode
+        ; Alcotest.test_case
+            "archives a finished task over its stale orphan copy"
+            `Quick
+            test_gc_archives_a_finished_task_over_its_stale_orphan_copy
         ] )
     ; (* === Task ID Parsing === *)
       ( "task_id"
@@ -3726,9 +3810,13 @@ let () =
             `Quick
             test_append_archive_tasks_refuses_a_file_that_is_not_an_archive
         ; Alcotest.test_case
-            "append keeps a row with no id"
+            "append keeps the rows it does not replace"
             `Quick
-            test_append_archive_tasks_keeps_a_row_with_no_id
+            test_append_archive_tasks_keeps_the_rows_it_does_not_replace
+        ; Alcotest.test_case
+            "append replaces a row that does not decode"
+            `Quick
+            test_append_archive_tasks_replaces_a_row_that_does_not_decode
         ; Alcotest.test_case
             "append creates a missing archive"
             `Quick

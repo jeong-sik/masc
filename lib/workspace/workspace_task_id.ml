@@ -61,21 +61,38 @@ let append_archive_tasks config (tasks : task list) =
           (Printf.sprintf
              "tasks-archive.json could not be read, so nothing was appended: %s"
              detail)
-      | Ok existing_tasks ->
-        let new_tasks = List.map task_to_yojson tasks in
+      | Ok existing_rows ->
+        let new_rows = List.map task_to_yojson tasks in
+        let id_of row = Json_util.get_string row "id" in
+        let incoming = Hashtbl.create 64 in
+        List.iter
+          (fun row -> Option.iter (fun id -> Hashtbl.replace incoming id ()) (id_of row))
+          new_rows;
+        (* The rows given are the current copies, so each replaces the archive
+           row with the same id, whatever that row holds: an older copy, or a
+           row that does not decode as a Task. Every other row stays as it is,
+           rows with no id and repeated ids included. This is not the place to
+           drop them, the rule [drop_archive_tasks] applies to the same file. *)
+        let kept =
+          List.filter
+            (fun row ->
+              match id_of row with
+              | Some id -> not (Hashtbl.mem incoming id)
+              | None -> true)
+            existing_rows
+        in
         let seen = Hashtbl.create 64 in
-        (* A row with no id is not a duplicate of anything and is not ours to
-           drop, the same rule [drop_archive_tasks] applies. *)
-        let dedup = List.filter (fun json ->
-          match Json_util.get_string json "id" with
-          | Some id ->
-              if Hashtbl.mem seen id then false
-              else (Hashtbl.add seen id (); true)
-          | None -> true
-        ) (existing_tasks @ new_tasks)
+        let appended =
+          List.filter
+            (fun row ->
+              match id_of row with
+              | Some id ->
+                if Hashtbl.mem seen id then false else (Hashtbl.add seen id (); true)
+              | None -> true)
+            new_rows
         in
         let archive_json = `Assoc [
-          ("tasks", `List dedup);
+          ("tasks", `List (kept @ appended));
           ("last_updated", `String (now_iso ()));
         ] in
         write_json_result config arch_path archive_json

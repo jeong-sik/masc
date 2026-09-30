@@ -377,8 +377,9 @@ class Grader(unittest.TestCase):
         facts = copy.deepcopy(DECK)
         changed = next(fact for fact in facts if fact["id"] == subject)
         changed["answer"] = choice
-        changed["record"]["sha256"] = hashlib.sha256(
-            ("updated retained record: " + choice).encode()).hexdigest()
+        # The captured answer changes inside the same cited record. Record
+        # equality cannot substitute for equality of the captured deck bytes.
+        self.assertEqual(changed["record"], next(fact["record"] for fact in DECK if fact["id"] == subject))
         source = deck_source(facts)
         original = deck_source(DECK)
         self.assertEqual(source["source_id"], original["source_id"])

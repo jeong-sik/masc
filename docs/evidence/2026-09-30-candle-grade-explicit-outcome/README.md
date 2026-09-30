@@ -4,6 +4,19 @@ The candidate improves the observed wording problem in this fixed corpus.
 It does not establish five-grade calibration, fair contribution allocation or
 overall payout readiness. Acceptance thresholds remain unset.
 
+The current PR preserves the previous runtime Grade prompt. The revised
+evaluation-only candidate is in
+[`docs/testing/candle-grade-explicit-outcome-candidate`](../../testing/candle-grade-explicit-outcome-candidate/candle_appraiser_grade.md)
+and explicitly allows the inherent difficulty of one promised capability to
+raise its grade. That revised candidate has not been measured. The frozen
+prompts and measurements below describe the earlier candidate only, and do not
+authorize a production payout rubric change. Human calibration remains required
+before proposing runtime activation.
+
+The current auditor validates failed answers and failure codes against their
+receipt outputs and retains checks under Python optimization. Its source and
+this README have updated manifest hashes; original run evidence is unchanged.
+
 ## Fixed conditions
 
 - Prompt change: `0ee4d40910ab0433cc8020c194a104873f7b6f82`, reviewed before execution.

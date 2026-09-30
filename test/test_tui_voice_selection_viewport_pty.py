@@ -32,8 +32,10 @@ def wizard(executable):
         # may hide its insertion point. Test both narrow and wide geometry.
         for text in ("prefix-" + "abcdef" * 24 + "-ASCII-END",
                      "머리-" + "가나다라마바사" * 24 + "-한글끝"):
-            settle(process, fd, output, b"\x15")
-            rows = settle(process, fd, output, text.encode())
+            # The initial Name field is empty: clearing it alone need not
+            # produce a changed frame. Typing after clear gives settle a
+            # meaningful redraw while still replacing the previous value.
+            rows = settle(process, fd, output, b"\x15" + text.encode())
             suffix = text[-8:].encode()
             for height, width in ((24, 64), (40, 110), (24, 80)):
                 h.resize_and_wait(process, fd, output, rows=height,

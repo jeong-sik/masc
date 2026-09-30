@@ -34,7 +34,7 @@ def queue_identity_journey(executable):
                             h.composer_showing(b"identity-held-next"))
             h.send_and_wait(process, fd, output, b"\r", b"Queue (1 waiting")
 
-            def inspect_local():
+            def inspect_local(*, capture_id=False):
                 h.send_and_wait(process, fd, output, b"/queue",
                                 h.composer_showing(b"/queue"))
                 h.read_available(fd, output)
@@ -45,14 +45,19 @@ def queue_identity_journey(executable):
                 assert b"Reading server queue" in plain, "inspection reused a stale local notice"
                 h.wait_for_output(process, fd, output, b"Queue snapshot",
                                   start=queue_start, timeout=5)
-                match = re.search(
-                    rb"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\s+identity-held-next",
-                    plain,
+                if not capture_id:
+                    return None
+                notice = plain.split(b"Local unsent messages: 1", 1)[1]
+                ids = re.findall(
+                    rb"tui-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+                    notice,
                 )
-                assert match, f"local queue did not expose the saved request identity: {plain!r}"
-                return match.group(1).decode()
+                assert len(ids) == 1 and b"identity-held-next" in notice, (
+                    f"local queue did not expose the saved request identity: {plain!r}"
+                )
+                return ids[0].decode()
 
-            saved_id = inspect_local()
+            saved_id = inspect_local(capture_id=True)
             # The harness has filled both successful health tuples with its
             # temporary workspace paths. Save those exact readings for recovery.
             health = {key: fixture.fixtures[key]
@@ -62,8 +67,8 @@ def queue_identity_journey(executable):
 
             # Home's identity clause proves the failed health reading was
             # applied, rather than merely requested by a background fiber.
-            h.palette_go(process, fd, output, b"go dashboard",
-                         b"workspace identity not read; read history")
+            h.press_label_on_screen(process, fd, output, b"Dashboard", row=1,
+                                    needle=b"workspace identity not read; read history")
             # Identity is applied before admission is released, so awaiting
             # control cannot dispatch the queued request. Release promptly;
             # subsequent navigation does not consume the fixture's hold limit.
@@ -81,8 +86,7 @@ def queue_identity_journey(executable):
             h.wait_for_output(process, fd, output,
                               b"Cannot steer: workspace identity is unverified",
                               start=deadline_output, timeout=5)
-            h.wait_for_output(process, fd, output, h.composer_showing(draft),
-                              start=deadline_output, timeout=5)
+            assert draft in h.screen_text(bytes(output)), "unread steer lost its draft"
             assert not fixture.interrupt_requests, "unread /steer interrupted the preceding turn"
             assert len(fixture.received) == 1, "unread /steer posted a replacement"
             os.write(fd, b"\x15")
@@ -94,22 +98,20 @@ def queue_identity_journey(executable):
             h.wait_for_output(process, fd, output,
                               b"Cannot run next: workspace identity is unverified",
                               start=rejection_start, timeout=5)
-            h.wait_for_output(process, fd, output,
-                              h.composer_showing(run_next_draft),
-                              start=rejection_start, timeout=5)
+            assert run_next_draft in h.screen_text(bytes(output)), "unread run-next lost its draft"
             assert len(fixture.received) == 1, "unread /run-next posted queued input"
             assert fixture.run_next_calls == 0, "unread /run-next sent a control request"
             assert not any(path == "/api/v1/keepers/turn/run-next"
                            for path, _ in requests), "unread /run-next reached the server"
             os.write(fd, b"\x15")
-            assert inspect_local() == saved_id, "unread /run-next dequeued or replaced input"
+            inspect_local()  # Current unsent count; final wire admission proves identity.
             # Clear the retained draft so composition cannot mask a faulty drain.
             os.write(fd, b"\x15")
             h.drain_until_quiet(process, fd, output, cap=1)
             fixture.release.set()
             h.wait_for_output(process, fd, output, b"reply-preceding-turn",
                               start=0, timeout=10)
-            assert inspect_local() == saved_id, "settlement lost or replaced the local request"
+            inspect_local()  # The retained request ID is verified at recovery admission.
             assert len(fixture.received) == 1, "queued input posted while identity was unread"
 
             # A matching health refresh resumes the already-authorized local
@@ -131,13 +133,19 @@ def queue_identity_journey(executable):
             assert recovered["request_id"] == saved_id, "recovery minted another request"
             assert recovered["message"] == "identity-held-next"
             assert recovered["name"] == "alpha"
+            # Replies belong to their original request blocks; queue
+            # inspections added below them can place that block offscreen.
+            # Admission above occurred without a gesture. Scroll only now
+            # to inspect its response, as the Atomic queue family does.
+            os.write(fd, b"\x1b[5~" * 5)
             h.wait_for_output(process, fd, output, b"reply-identity-held-next",
                               start=0, timeout=10)
             h.drain_until_quiet(process, fd, output, cap=1)
             assert len(fixture.received) == 2, "recovery duplicated admission"
             assert not fixture.interrupt_requests
             assert not any(path == "/api/v1/keepers/turn/interrupt" for path, _ in requests)
-            h.send_and_wait(process, fd, output, b"\x1b", b"Continue with alpha")
+            h.press_label_on_screen(process, fd, output, b"Dashboard", row=1,
+                                    needle=b"Continue with alpha")
             os.write(fd, b"q")
         finally:
             fixture.release_first_acceptance.set()

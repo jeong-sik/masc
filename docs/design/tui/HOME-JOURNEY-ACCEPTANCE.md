@@ -141,3 +141,24 @@ Native probe run36673326151 succeeded at ba0a831, which precedes these fixes.
 The installed c112 server rejects the new create-only argument; completing real
 creation requires the matching new server companion as well as the TUI. No old
 server mutation fallback or UI-only installation can close that journey.
+
+## Scoped navigation and composer follow-up
+
+Home entry through the surface strip now saves the complete recipient-bound
+composer draft and releases its focus. The mouse-entry fixture checks that Home
+Enter opens a destination before an explicit chat send, preserving text and media.
+Scoped HTTP bundles carry a freshly read workspace identity and share an ordered
+dispatch ticket with full refreshes. Superseded success, failure and booting
+results cannot restore authority or overwrite datasets. A newer full refresh
+reads all current surface datasets when it supersedes a scoped read. The
+switch-less scoped path uses the same success/failure and queue recovery logic.
+These changes require a newly built executable; parse checks are not proof.
+
+The source-specific native artifact from run 36690672472 at
+`6be390c6dfcfe31e388dace1d5e4247d10a0ae4c` passed the two question recovery
+fixture scenarios after its ZIP and file checksums and executable source identity
+were verified. This closes the before-fix Ask reproducer only at that head; it
+precedes the latest main integration and scoped/composer changes. The new suites
+`test_tui_home_composer_focus_pty` and `test_tui_home_scoped_identity_pty` cover
+these remaining transitions. Local queue checks use the complete displayed
+`tui-<UUID>` and real mouse navigation; chat text is not a palette command.

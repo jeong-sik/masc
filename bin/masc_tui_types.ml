@@ -3021,11 +3021,16 @@ let surface_needs_delta ~previous ~next =
 
 let surface_needs_any needs = needs <> nothing
 
-let full_refresh_needs ~scoped_refresh_inflight ~keeper_pane_drawn surface =
-  if scoped_refresh_inflight then nothing
-  else surface_needs ~keeper_pane_drawn surface
-
 type full_refresh_intent = Cadence | Revalidate
+
+(* Full and scoped bundles share one authority order. A later dispatch
+   supersedes an earlier result, including failure and booting results. *)
+module Http_refresh_order = struct
+  type ticket = Ticket of int
+  let initial = Ticket 0
+  let dispatch (Ticket generation) = Ticket (generation + 1)
+  let is_current latest ticket = latest = ticket
+end
 
 type scoped_refresh_followup =
   | No_scoped_followup
@@ -5804,6 +5809,7 @@ type state = {
   mutable fleet_safety_error: string option;
   mutable connection_status: connection_status;
   mutable http_refresh_started_ns: int64 option;
+  mutable http_refresh_order: Http_refresh_order.ticket;
   mutable local_workspace: local_workspace_reading;
   mutable view: surface;
   mutable opening_mode: Masc_tui_config.opening;
@@ -8179,6 +8185,7 @@ let create_state
   fleet_safety_error = None;
   connection_status = Disconnected;
   http_refresh_started_ns = None;
+  http_refresh_order = Http_refresh_order.initial;
   local_workspace = Local_workspace_unread;
   view = Overview;
   opening_mode = Masc_tui_config.Overview;

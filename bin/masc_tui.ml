@@ -1935,6 +1935,8 @@ type approval_observation = {
 }
 
 type http_scoped_surface_results = {
+  http_refresh_ticket: Http_refresh_order.ticket;
+  http_scoped_server_identity: (Tui_decode.server_identity, string) result;
   http_transport: (Tui_decode.transport_health, string) result option;
   http_approvals: approval_observation option;
   (* [None] on surfaces that do not draw them. Each is read by one surface, and
@@ -1983,7 +1985,8 @@ type http_surface_results = {
 type http_refresh_outcome =
   | Refresh_surfaces of http_surface_results
   | Refresh_server_booting of
-      { identity : (Tui_decode.server_identity, string) result
+      { refresh_ticket : Http_refresh_order.ticket
+      ; identity : (Tui_decode.server_identity, string) result
       ; (* The ticket [start_http_refresh] took before the probe went
            out. Carried so the approvals panel learns why its rows are stale,
            the same way a failed refresh tells it. *)
@@ -2077,10 +2080,12 @@ type async_msg =
   | Voice_discarded of { keeper : string; reason : string }
   | Voice_failed of { keeper : string; error : string }
   | Http_refresh_done of http_refresh_outcome
-  | Http_refresh_failed of string * Approval.Listing_order.ticket option
+  | Http_refresh_failed of
+      string * Approval.Listing_order.ticket option * Http_refresh_order.ticket
+  | Surface_composer_released
   | Http_scoped_refresh_done of http_scoped_surface_results
   | Http_scoped_refresh_failed of
-      string * Approval.Listing_order.ticket option
+      string * Approval.Listing_order.ticket option * Http_refresh_order.ticket
   | Board_post_refresh_done of
       Board_detail.request * (board_post * board_comment list, string) result
   | Approval_decision_done of
@@ -6816,6 +6821,12 @@ let goto_surface ?(from_reference = false) state ~mailbox (destination : surface
      The transport-list palette hides it explicitly before arriving here.
      Repository changes can overlay any surface, so every jump closes them. *)
   state.home_opened_request <- None;
+  if destination = Overview then begin
+    save_message_draft state;
+    let was_focused = state.composer_focused in
+    state.composer_focused <- false;
+    if was_focused then enqueue_async mailbox Surface_composer_released
+  end;
   if not from_reference then state.followed_from <- None;
   leave_browser_lane_for_surface state destination;
   if state.repository_changes_open then close_repository_changes state;
@@ -10941,7 +10952,7 @@ let refresh_status results =
   | n, total when n = total -> Masc_tui_types.Connected
   | _ -> Masc_tui_types.Degraded
 
-let load_http_scoped_surfaces ~host ~port ~approval_ticket ~board_sort
+let load_http_scoped_surfaces ~refresh_ticket ~server_identity ~host ~port ~approval_ticket ~board_sort
     ~board_hearth ~system_log_level ~provider_history_days
     ~(needs : Masc_tui_types.surface_needs) =
   let when_needed wanted load = if wanted then Some (load ()) else None in
@@ -11027,7 +11038,9 @@ let load_http_scoped_surfaces ~host ~port ~approval_ticket ~board_sort
         | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
         | exception exn -> Error (Printexc.to_string exn))
   in
-  { http_transport
+  { http_refresh_ticket = refresh_ticket
+  ; http_scoped_server_identity = server_identity
+  ; http_transport
   ; http_approvals
   ; http_asks
   ; http_board
@@ -11043,7 +11056,7 @@ let load_http_scoped_surfaces ~host ~port ~approval_ticket ~board_sort
   ; http_account_emails
   }
 
-let load_http_surfaces ~host ~port ~approval_ticket ~board_sort
+let load_http_surfaces ~refresh_ticket ~host ~port ~approval_ticket ~board_sort
     ~board_hearth ~system_log_level ~provider_history_days
     ~(needs : Masc_tui_types.surface_needs) =
   (* A process can disappear and another bind the same endpoint between two
@@ -11053,7 +11066,7 @@ let load_http_surfaces ~host ~port ~approval_ticket ~board_sort
      surface asked of it would only wait out its timeout. *)
   let http_server_identity = load_server_identity ~host ~port in
   if Masc_tui_types.server_is_booting http_server_identity
-  then Refresh_server_booting { identity = http_server_identity; approval_ticket }
+  then Refresh_server_booting { refresh_ticket; identity = http_server_identity; approval_ticket }
   else begin
     let http_overview = load_overview ~host ~port in
     let http_approvals =
@@ -11068,7 +11081,8 @@ let load_http_surfaces ~host ~port ~approval_ticket ~board_sort
          announced, so the periodic refresh always fetches them; the surface
          still decides whether the panel renders, only the fetch is
          unconditional. Targeted scoped refreshes keep their own needs. *)
-      load_http_scoped_surfaces ~host ~port ~approval_ticket:None
+      load_http_scoped_surfaces ~refresh_ticket ~server_identity:http_server_identity
+        ~host ~port ~approval_ticket:None
         ~board_sort ~board_hearth ~system_log_level ~provider_history_days
         ~needs:{ needs with needs_asks = true }
     in
@@ -11076,7 +11090,7 @@ let load_http_surfaces ~host ~port ~approval_ticket ~board_sort
       { http_overview; http_approvals; http_scoped; http_server_identity }
   end
 
-let apply_http_scoped_surfaces state results =
+let apply_http_scoped_data state results =
   Option.iter (apply_transport_load state) results.http_transport;
   Option.iter (apply_approval_observation state) results.http_approvals;
   Option.iter (apply_asks_load state) results.http_asks;
@@ -11115,11 +11129,51 @@ let apply_server_identity_reading state reading =
     load_from_masc_dir state state.local_base_path
   | Masc_tui_types.Workspace_identity_unread -> ()
 
+(* Scoped navigation reads carry the identity observed before their datasets.
+   A successful older full refresh cannot authorize a same-port replacement. *)
+let apply_http_scoped_surfaces state results =
+  if Http_refresh_order.is_current state.http_refresh_order results.http_refresh_ticket then begin
+    apply_server_identity_reading state results.http_scoped_server_identity;
+    apply_http_scoped_data state results
+  end
+
+let resume_authorized_input_after_refresh state ~was_unavailable ~base_path ~mailbox =
+  if was_unavailable
+     && state.workspace_identity = Workspace_identity_match
+     && Option.is_none state.keepers_error then begin
+    Chat_queue.waiting state.msg_queued
+    |> List.map (fun (item : Chat_queue.item) -> item.request.keeper_name)
+    |> List.sort_uniq String.compare
+    |> List.iter (fun keeper_name ->
+         launch_waiting_keeper_input state ~mailbox ~keeper_name);
+    drain_queued_message state ~base_path ~mailbox
+  end
+
+let apply_http_scoped_refresh_success state ~base_path ~mailbox results =
+  let was_unavailable =
+    state.workspace_identity <> Workspace_identity_match
+    || Option.is_some state.keepers_error
+  in
+  apply_http_scoped_surfaces state results;
+  resume_authorized_input_after_refresh state ~was_unavailable ~base_path ~mailbox
+
+let apply_http_scoped_refresh_failure state ~refresh_ticket ~approval_ticket err =
+  if Http_refresh_order.is_current state.http_refresh_order refresh_ticket then begin
+    apply_server_identity_reading state (Error err);
+    Option.iter
+      (fun ao_ticket ->
+         apply_approval_observation state { ao_ticket; ao_result = Error err })
+      approval_ticket;
+    add_event state "error" err
+  end
+
 let apply_http_surfaces state results =
+  if Http_refresh_order.is_current state.http_refresh_order
+       results.http_scoped.http_refresh_ticket then begin
   apply_server_identity_reading state results.http_server_identity;
   apply_overview_load state results.http_overview;
   Option.iter (apply_approval_observation state) results.http_approvals;
-  apply_http_scoped_surfaces state results.http_scoped;
+  apply_http_scoped_data state results.http_scoped;
   let reached result =
     Result.map (fun _ -> ()) result |> Result.map_error (fun _ -> ())
   in
@@ -11136,8 +11190,10 @@ let apply_http_surfaces state results =
             (fun observation -> reached observation.ao_result)
             results.http_approvals
           |> Option.to_list))
+  end
 
-let apply_server_booting state ~identity ~approval_ticket =
+let apply_server_booting state ~refresh_ticket ~identity ~approval_ticket =
+  if Http_refresh_order.is_current state.http_refresh_order refresh_ticket then begin
   (* The identity is read the same way a full refresh reads it, so a same-port
      replacement is noticed even while the new process is still booting. No
      surface was asked. The approvals panel is told why its rows are stale,
@@ -11149,11 +11205,12 @@ let apply_server_booting state ~identity ~approval_ticket =
          { ao_ticket; ao_result = Error "server booting" })
     approval_ticket;
   state.connection_status <- Masc_tui_types.Booting
+  end
 
 let apply_http_refresh_outcome state = function
   | Refresh_surfaces results -> apply_http_surfaces state results
-  | Refresh_server_booting { identity; approval_ticket } ->
-    apply_server_booting state ~identity ~approval_ticket
+  | Refresh_server_booting { refresh_ticket; identity; approval_ticket } ->
+    apply_server_booting state ~refresh_ticket ~identity ~approval_ticket
 
 let load_local_workspace_if_safe state base_path =
   match state.workspace_identity with
@@ -11570,6 +11627,8 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
       !scoped_refresh_followup;
   if not !refresh_inflight then begin
     refresh_inflight := true;
+    let refresh_ticket = Http_refresh_order.dispatch state.http_refresh_order in
+    state.http_refresh_order <- refresh_ticket;
     state.http_refresh_started_ns <- Some (Mtime_clock.elapsed_ns ());
     let approval_ticket = dispatch_approvals_listing state in
     (* Read before the label below moves. While the last probe said the
@@ -11589,8 +11648,9 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        | Reconnecting -> Masc_tui_types.Reconnecting
        | Disconnected | Connecting -> Masc_tui_types.Connecting);
     let needs =
-      Masc_tui_types.full_refresh_needs
-        ~scoped_refresh_inflight:!scoped_refresh_inflight
+      (* This newer bundle supersedes an inflight scoped read, so it must
+         replace every dataset currently drawn rather than omit that read. *)
+      Masc_tui_types.surface_needs
         ~keeper_pane_drawn:
           (not (Masc_tui_render.acting_pane_suppressed state))
         state.view
@@ -11658,7 +11718,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
       try
         enqueue_async mailbox
           (Http_refresh_done
-             (load_http_surfaces ~host ~port ~approval_ticket
+             (load_http_surfaces ~refresh_ticket ~host ~port ~approval_ticket
                 ~board_sort:state.board_sort
                 ~board_hearth:state.board_hearth
                 ~provider_history_days:state.provider_history_days
@@ -11672,7 +11732,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
         enqueue_async mailbox
           (Http_refresh_failed
              ( Printf.sprintf "HTTP refresh failed: %s" (Printexc.to_string exn)
-             , approval_ticket ))
+             , approval_ticket, refresh_ticket ))
     in
     match Eio_context.get_switch_opt () with
     | Some sw ->
@@ -11682,7 +11742,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
           ~finally:(fun () -> refresh_inflight := false)
           (fun () ->
              apply_http_refresh_outcome state
-               (load_http_surfaces ~host ~port ~approval_ticket
+               (load_http_surfaces ~refresh_ticket ~host ~port ~approval_ticket
                   ~board_sort:state.board_sort
                 ~board_hearth:state.board_hearth
                 ~provider_history_days:state.provider_history_days
@@ -11696,6 +11756,8 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight ~mailbox
     ~(needs : Masc_tui_types.surface_needs) =
   if not !refresh_inflight then begin
     refresh_inflight := true;
+    let refresh_ticket = Http_refresh_order.dispatch state.http_refresh_order in
+    state.http_refresh_order <- refresh_ticket;
     let approval_ticket =
       if not needs.needs_operator_approvals then None
       else dispatch_approvals_listing state
@@ -11708,26 +11770,27 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight ~mailbox
        match state.msg_target_keeper_name with
        | Some keeper_name -> launch_keeper_history_load state ~mailbox ~keeper_name
        | None -> ());
-    let run_refresh () =
+    let read_refresh () =
       try
-        enqueue_async mailbox
-          (Http_scoped_refresh_done
-             (load_http_scoped_surfaces ~host ~port
-                ~approval_ticket ~board_sort:state.board_sort
-                ~board_hearth:state.board_hearth
-                ~provider_history_days:state.provider_history_days
-                ~system_log_level:
-                  (Option.map Masc.Tui_decode.system_log_level_query
-                     state.system_logs_min_level)
-                ~needs))
+        Ok (load_http_scoped_surfaces ~refresh_ticket
+              ~server_identity:(load_server_identity ~host ~port) ~host ~port
+              ~approval_ticket ~board_sort:state.board_sort
+              ~board_hearth:state.board_hearth
+              ~provider_history_days:state.provider_history_days
+              ~system_log_level:
+                (Option.map Masc.Tui_decode.system_log_level_query
+                   state.system_logs_min_level)
+              ~needs)
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn ->
-        enqueue_async mailbox
-          (Http_scoped_refresh_failed
-             ( Printf.sprintf "HTTP surface refresh failed: %s"
-                 (Printexc.to_string exn)
-             , approval_ticket ))
+      | exn -> Error (Printf.sprintf "HTTP surface refresh failed: %s"
+                       (Printexc.to_string exn))
+    in
+    let run_refresh () =
+      enqueue_async mailbox
+        (match read_refresh () with
+         | Ok results -> Http_scoped_refresh_done results
+         | Error err -> Http_scoped_refresh_failed (err, approval_ticket, refresh_ticket))
     in
     match Eio_context.get_switch_opt () with
     | Some sw -> Eio.Fiber.fork ~sw run_refresh
@@ -11735,15 +11798,13 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight ~mailbox
         Fun.protect
           ~finally:(fun () -> refresh_inflight := false)
           (fun () ->
-             apply_http_scoped_surfaces state
-               (load_http_scoped_surfaces ~host ~port
-                  ~approval_ticket ~board_sort:state.board_sort
-                ~board_hearth:state.board_hearth
-                ~provider_history_days:state.provider_history_days
-                ~system_log_level:
-                  (Option.map Masc.Tui_decode.system_log_level_query
-                     state.system_logs_min_level)
-                ~needs))
+             match read_refresh () with
+             | Ok results ->
+                 apply_http_scoped_refresh_success state
+                   ~base_path:state.local_base_path ~mailbox results
+             | Error err ->
+                 apply_http_scoped_refresh_failure state
+                   ~refresh_ticket ~approval_ticket err)
   end
 
 let start_scoped_refresh_followup state ~host ~port ~refresh_inflight
@@ -13794,14 +13855,14 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         state.voice_floor <- None;
         chat_notice state ~keeper_name:(Some keeper) ~kind:Notice_failure
           ("voice failed: " ^ error))
-  | Http_refresh_done (Refresh_server_booting { identity; approval_ticket }) ->
+  | Http_refresh_done (Refresh_server_booting { refresh_ticket; identity; approval_ticket }) ->
       http_refresh_inflight := false;
       state.http_refresh_started_ns <- None;
       (* Nothing else was asked of a booting server, so nothing else follows:
          no held-call listing, no observer. The scoped follow-up is left
          queued on purpose -- draining it now would send surface loads to the
          booting server -- and the first non-booting completion drains it. *)
-      apply_server_booting state ~identity ~approval_ticket
+      apply_server_booting state ~refresh_ticket ~identity ~approval_ticket
   | Http_refresh_done (Refresh_surfaces results) ->
       http_refresh_inflight := false;
       state.http_refresh_started_ns <- None;
@@ -13810,16 +13871,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         || Option.is_some state.keepers_error
       in
       apply_http_surfaces state results;
-      if dispatch_was_unavailable
-         && state.workspace_identity = Workspace_identity_match
-         && Option.is_none state.keepers_error then begin
-        Chat_queue.waiting state.msg_queued
-        |> List.map (fun (item : Chat_queue.item) -> item.request.keeper_name)
-        |> List.sort_uniq String.compare
-        |> List.iter (fun keeper_name ->
-             launch_waiting_keeper_input state ~mailbox ~keeper_name);
-        drain_queued_message state ~base_path ~mailbox
-      end;
+      resume_authorized_input_after_refresh state
+        ~was_unavailable:dispatch_was_unavailable ~base_path ~mailbox;
       (* The local roster is trustworthy only after a workspace-matched read.
          Resolve the boot choice once; a key the operator pressed meanwhile
          takes precedence over the saved choice. *)
@@ -14145,17 +14198,19 @@ let apply_async_message state ~base_path ~http_refresh_inflight
          | Observer_closed_after_live _ ->
            Observer_closed_before_answer { reason; at });
       add_event state "observer" ("runtime event feed closed: " ^ reason)
-  | Http_refresh_failed (err, approval_ticket) ->
+  | Http_refresh_failed (err, approval_ticket, refresh_ticket) ->
       http_refresh_inflight := false;
       state.http_refresh_started_ns <- None;
+      if Http_refresh_order.is_current state.http_refresh_order refresh_ticket then begin
       Option.iter
         (fun ao_ticket ->
            apply_approval_observation state
              { ao_ticket; ao_result = Error err })
       approval_ticket;
-      state.server_identity <- None;
+      apply_server_identity_reading state (Error err);
       state.connection_status <- Masc_tui_types.Disconnected;
-      add_event state "error" err;
+      add_event state "error" err
+      end;
       react_to_server_contact state ~base_path ~host:server_peer_host
         ~port:state.port ~http_refresh_inflight ~http_scoped_refresh_inflight
         ~scoped_refresh_followup ~mailbox;
@@ -14163,9 +14218,11 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         ~port:state.port ~refresh_inflight:http_refresh_inflight
         ~scoped_refresh_inflight:http_scoped_refresh_inflight
         ~scoped_refresh_followup ~mailbox
+  | Surface_composer_released ->
+      drain_queued_message state ~base_path ~mailbox
   | Http_scoped_refresh_done results ->
       http_scoped_refresh_inflight := false;
-      apply_http_scoped_surfaces state results;
+      apply_http_scoped_refresh_success state ~base_path ~mailbox results;
       (match state.view with
        | Overview | Approvals -> launch_keeper_tool_approvals_load state ~mailbox
        | Keepers _ -> launch_keeper_tool_modes_load state ~mailbox
@@ -14174,17 +14231,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         ~port:state.port ~refresh_inflight:http_refresh_inflight
         ~scoped_refresh_inflight:http_scoped_refresh_inflight
         ~scoped_refresh_followup ~mailbox
-  | Http_scoped_refresh_failed (err, approval_ticket) ->
+  | Http_scoped_refresh_failed (err, approval_ticket, refresh_ticket) ->
       http_scoped_refresh_inflight := false;
-      Option.iter
-        (fun ao_ticket ->
-           apply_approval_observation state
-             { ao_ticket; ao_result = Error err })
-        approval_ticket;
-      (* A scoped surface read cannot establish that the server disappeared:
-         only the full refresh owns /health and connection status. Keep the
-         last observed connection and expose the failed dataset read. *)
-      add_event state "error" err;
+      apply_http_scoped_refresh_failure state ~refresh_ticket ~approval_ticket err;
       start_scoped_refresh_followup state ~host:(server_peer_host)
         ~port:state.port ~refresh_inflight:http_refresh_inflight
         ~scoped_refresh_inflight:http_scoped_refresh_inflight
@@ -26870,10 +26919,10 @@ and is loaded on demand through keeper_skill.
       | _ -> ());
 
       (* Surface navigation asks only for datasets the destination adds. The
-         full refresh owns connection identity and the global badges; replaying
+         full refresh owns aggregate connection status and global badges; replaying
          it for every Tab made an Overview -> Tools walk spend those requests
-         once per distinct [surface_needs] record. A scoped refresh neither
-         repeats them nor changes connection status. *)
+         once per distinct [surface_needs] record. A scoped refresh revalidates
+         identity before its datasets but keeps aggregate connection status. *)
       let needed =
         Masc_tui_types.surface_needs
           ~keeper_pane_drawn:

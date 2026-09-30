@@ -661,6 +661,25 @@ let test_broadcast_retry_reconciles_receipt_during_slow_fanout () =
       "broadcast",`Bool true;"request_id",`String "slow-send"] in
     let entered, mark_entered = Eio.Promise.create () in
     let release, mark_released = Eio.Promise.create () in
+    let before_commit, mark_before_commit = Eio.Promise.create () in
+    let allow_commit, mark_allow_commit = Eio.Promise.create () in
+    let retry_waiting, mark_retry_waiting = Eio.Promise.create () in
+    let cancelled_waiter, mark_cancelled_waiter = Eio.Promise.create () in
+    let waiter_context, mark_waiter_context = Eio.Promise.create () in
+    let waiters = ref 0 in
+    let writes = ref 0 in
+    let previous_write = Workspace_broadcast.For_testing.replace_write_json_commit
+      (fun config path json ->
+        incr writes;
+        if !writes=1 then (
+          Eio.Promise.resolve mark_before_commit ();
+          Eio.Promise.await allow_commit);
+        Workspace_utils.write_json_commit_result config path json) in
+    let previous_wait = Workspace_broadcast.For_testing.replace_on_exact_request_wait
+      (fun _request_id ->
+        incr waiters;
+        if !waiters=1 then Eio.Promise.resolve mark_cancelled_waiter ()
+        else if !waiters=2 then Eio.Promise.resolve mark_retry_waiting ()) in
     let failed = ref true and block = ref true in
     let roster = ref ["keeper-a";"keeper-b"] in
     let sender_authority=ref Masc.Lane_addon_broadcast_delivery.Keeper_sender in
@@ -680,9 +699,36 @@ let test_broadcast_retry_reconciles_receipt_during_slow_fanout () =
     Fun.protect ~finally:(fun () ->
       let (_ : Workspace_broadcast.broadcast_delivery -> Workspace_broadcast.mention_delivery) =
         Workspace_broadcast.For_testing.replace_on_broadcast_mention previous in
+      let (_ : string -> unit) =
+        Workspace_broadcast.For_testing.replace_on_exact_request_wait previous_wait in
+      let (_ : Workspace_utils_backend_setup.config -> string -> Yojson.Safe.t ->
+        (Workspace_utils.write_json_commit, string) result) =
+        Workspace_broadcast.For_testing.replace_write_json_commit previous_write in
+      if not (Eio.Promise.is_resolved allow_commit) then Eio.Promise.resolve mark_allow_commit ();
       if not (Eio.Promise.is_resolved release) then Eio.Promise.resolve mark_released ()) (fun () ->
       let send () = Runtime.dispatch ~caller:"fixture-operator" ~config ~operation:Runtime.Evidence args |> unwrap in
-      let original=send () in
+      let first = Eio.Fiber.fork_promise ~sw send in
+      Eio.Promise.await before_commit;
+      let cancelled_retry = Eio.Fiber.fork_promise ~sw (fun () ->
+        Eio.Cancel.sub (fun context ->
+          Eio.Promise.resolve mark_waiter_context context;
+          send ())) in
+      Eio.Promise.await cancelled_waiter;
+      Eio.Cancel.cancel (Eio.Promise.await waiter_context) Exit;
+      (match Eio.Promise.await cancelled_retry with
+       | Error (Eio.Cancel.Cancelled _) -> ()
+       | Error error -> raise error
+       | Ok _ -> Alcotest.fail "cancelled precommit retry must propagate cancellation");
+      check bool "cancelled waiter leaves the original owner waiting" false (Eio.Promise.is_resolved first);
+      let retry = Eio.Fiber.fork_promise ~sw send in
+      Eio.Promise.await retry_waiting;
+      check bool "retry arrived before the authoritative row" false (Eio.Promise.is_resolved retry);
+      Eio.Promise.resolve mark_allow_commit ();
+      let original=Eio.Promise.await_exn first in
+      let precommit_replay=Eio.Promise.await_exn retry in
+      check Alcotest.int "precommit retries create one authoritative message" 1 !writes;
+      check bool "precommit retry preserves the committed receipt" true
+        (member "delivery" original=member "delivery" precommit_replay);
       check string "durable message receipt returns before any recipient projection" "committed"
         (member "delivery" original |> text "status");
       check Alcotest.int "publication does not run synchronous fleet handler" 0 !immediate_calls;

@@ -607,7 +607,7 @@ let test_remote_identity_failure_preserves_observed_controls () =
   in
   let runtime = decode metadata in
   let keeper = Decode.keeper_of_runtime runtime in
-  Alcotest.(check (option string)) "canonical server trace" (Some "trace-1")
+  Alcotest.(check (result string string)) "canonical server trace" (Ok "trace-1")
     (Decode.keeper_trace_id keeper);
   Alcotest.(check bool) "public roster never invents activity" true
     (Option.is_none keeper.k_activity);
@@ -616,8 +616,25 @@ let test_remote_identity_failure_preserves_observed_controls () =
     let keeper = Decode.keeper_of_runtime runtime in
     Alcotest.(check bool) "invalid identity is explicit" true
       (Result.is_error keeper.k_identity);
-    Alcotest.(check (option string)) "invalid identity cannot attribute events" None
+    let reason = match keeper.k_identity with
+      | Error reason -> reason
+      | Ok _ -> Alcotest.fail "invalid identity unexpectedly succeeded" in
+    Alcotest.(check (result string string)) "original identity failure survives" (Error reason)
       (Decode.keeper_trace_id keeper);
+    let projection = Decode.keeper_trace_projection [keeper] in
+    Alcotest.(check (list (pair string string))) "invalid identity cannot bind events" [] projection.bindings;
+    Alcotest.(check (list (pair string string))) "named failure remains readable"
+      [keeper.k_name, reason] projection.unavailable;
+    let valid = Decode.keeper_of_runtime (decode (match row with
+      | `Assoc fields -> (match List.assoc "meta" fields with
+          | `Assoc fields -> fields
+          | _ -> Alcotest.fail "metadata fixture is not an object")
+      | _ -> Alcotest.fail "roster fixture is not an object")) in
+    let mixed = Decode.keeper_trace_projection [valid; keeper] in
+    Alcotest.(check (list (pair string string))) "valid correlation survives beside failure"
+      [valid.k_name, "trace-1"] mixed.bindings;
+    Alcotest.(check (list (pair string string))) "failure not hidden by valid correlation"
+      [keeper.k_name, reason] mixed.unavailable;
     let reading = reading ~liveness:(Control.Present runtime) keeper.k_name in
     check_actions "independently valid lifecycle remains actionable"
       [Control.Pause; Control.Wakeup; Control.Shutdown; Control.Delete]

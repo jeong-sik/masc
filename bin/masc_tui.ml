@@ -13898,13 +13898,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
          roster's trace ids resolve it. *)
       let pane_changes_keeper = acting_pane_changes_keeper state in
       let pane_keeper_acted = ref false in
-      let traces =
-        List.filter_map
-          (fun (keeper : keeper) ->
-            Option.map (fun trace -> keeper.k_name, trace)
-              (Tui_decode.keeper_trace_id keeper))
-          state.keepers
-      in
+      let trace_reading = Tui_decode.keeper_trace_projection state.keepers in
+      let traces = trace_reading.bindings in
       let acted_by_pane_keeper event =
         match pane_changes_keeper with
         | None -> false

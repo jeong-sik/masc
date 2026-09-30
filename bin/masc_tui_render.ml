@@ -7733,7 +7733,11 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
        | Ok identity ->
          add_row "Created:" (Terminal_text.short_timestamp identity.k_created_at);
          add_row "Updated:" (Terminal_text.short_timestamp identity.k_updated_at)
-       | Error reason -> add_row "Metadata:" (Terminal_text.single_line reason));
+       | Error reason ->
+           Message_layout.wrap_words ~max_cells:(max 1 (inner - 26))
+             (Terminal_text.single_line reason)
+           |> List.iteri (fun index line ->
+                add_row (if index = 0 then "Metadata:" else "") line));
 
       List.rev !lines
     in
@@ -13269,10 +13273,8 @@ let render_acting (state : state) =
   let held = List.length state.acting in
   (* The agent_core family names its runtime lane, not the keeper; the
      keeper is the one whose trace the event's correlation id carries. *)
-  let traces =
-    List.filter_map (fun keeper ->
-      Option.map (fun trace -> keeper.k_name, trace) (Tui_decode.keeper_trace_id keeper)) state.keepers
-  in
+  let trace_reading = Tui_decode.keeper_trace_projection state.keepers in
+  let traces = trace_reading.bindings in
   (* Visible entries, newest first, paired with the events older than each
      -- in a newest-first list, the tail after it -- so a completed call on
      the page can look up its start. Rows are built only for the page: the
@@ -13385,6 +13387,9 @@ let render_acting (state : state) =
     ("  " ^ Terminal_text.single_line (observer_replay_description state.observer_replay));
   box_line_styled buf cols ~style:(Theme.recede ())
     ("  " ^ Acting.filter_explanation state.acting_filter);
+  (match Masc_tui_acting_pane.trace_unavailable_summary trace_reading.unavailable with
+   | None -> ()
+   | Some summary -> box_line_styled buf cols ~style:(Theme.warn ()) ("  " ^ summary));
   box_divider buf cols;
   (* Measured over every row the filter keeps, not the page on screen, so the
      columns do not move while a reader scrolls. Only the two named columns

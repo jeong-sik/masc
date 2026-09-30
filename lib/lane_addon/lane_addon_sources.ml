@@ -229,9 +229,28 @@ let unavailable source message = envelope ~id:(source_id source) ~incarnation:"u
 
 type access = Operator_configuration | Keeper of string | Unauthenticated
 
+let access_to_json = function
+  | Operator_configuration -> `Assoc ["kind",`String "operator_configuration"]
+  | Keeper keeper -> `Assoc ["kind",`String "keeper";"keeper",`String keeper]
+  | Unauthenticated -> `Assoc ["kind",`String "unauthenticated"]
+let access_of_json = function
+  | `Assoc fields ->
+      (match List.sort (fun (a,_) (b,_) -> String.compare a b) fields with
+       | ["kind",`String "operator_configuration"] -> Ok Operator_configuration
+       | ["kind",`String "unauthenticated"] -> Ok Unauthenticated
+       | ["keeper",`String keeper;"kind",`String "keeper"] when String.trim keeper <> "" -> Ok (Keeper keeper)
+       | _ -> Error "invalid retained source authority")
+  | _ -> Error "invalid retained source authority"
+let has_native_fusion binding =
+  let* sources = parse binding in
+  Ok (List.exists (function Fusion_run _ -> true
+    | Snapshot_file _ | Msx_capture _ | Dos_capture _ | Lane_output _ | Browser_document _ -> false) sources)
+
 let authorized_fusion_run ~access ~run_id =
   match Fusion_run_registry.get (Fusion_run_registry.global ()) ~run_id with
-  | None -> Error ("Fusion run unavailable: " ^ run_id)
+  | None -> Error (match access with
+      | Operator_configuration -> "Fusion run unavailable: " ^ run_id
+      | Keeper _ | Unauthenticated -> "Fusion run is not owned by the authenticated Keeper")
   | Some run ->
       let* () = match access with
         | Operator_configuration -> Ok ()

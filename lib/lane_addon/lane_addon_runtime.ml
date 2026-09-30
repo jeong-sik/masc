@@ -90,7 +90,8 @@ let entry_json e =
     "observation_pending", `Bool (match e.pending with
       | Observe_now | Refresh_sources -> true | Run_actions | Idle -> false); "coalesced_wakes", `Int e.coalesced_wakes;
     "unchanged_source_refreshes", `Int e.unchanged_source_refreshes;
-    "binding", e.binding; "package", package_to_json e.package;
+    "binding", e.binding; "source_access", Lane_addon_sources.access_to_json e.source_access;
+    "package", package_to_json e.package;
     "configuration", Option.fold ~none:`Null ~some:configuration_json e.configuration;
     "container_id", (match e.connection with None -> `Null | Some c -> `String c.container_id)]
 (* A detached worker that never created a container and never committed an
@@ -549,13 +550,42 @@ let historical_detach ~sw m fields =
       | Error message ->
         Log.Misc.error "Lane recovered cleanup persistence: %s" message);
     Ok detaching
-let snapshot m ?instance_id () =
+let can_read_source ?caller ~binding ~access =
+  match Lane_addon_sources.has_native_fusion binding with
+  | Error _ -> false
+  | Ok false -> true
+  | Ok true -> (match access with
+      | Lane_addon_sources.Operator_configuration -> true
+      | Keeper owner -> Option.fold ~none:false ~some:(String.equal owner) caller
+      | Unauthenticated -> false)
+let can_read_fields ?caller fields =
+  match List.assoc_opt "binding" fields with
+  | None -> false
+  | Some binding ->
+      (match Lane_addon_sources.has_native_fusion binding with
+       | Error _ -> false
+       | Ok false -> true
+       | Ok true ->
+           match Option.map Lane_addon_sources.access_of_json (List.assoc_opt "source_access" fields) with
+           | Some (Ok access) -> can_read_source ?caller ~binding ~access
+           | Some (Error _) | None -> false)
+let authorize_instance ?caller m id =
+  let found = match Hashtbl.find_opt m.entries id with
+    | Some e -> runtime_result (object_ (entry_json e))
+    | None -> persisted_binding m id in
+  match found with
+  | Ok fields when can_read_fields ?caller fields -> Ok ()
+  | Error (Runtime_failed _ as error) -> Error error
+  | Ok _ | Error (Request_rejected _) ->
+      Error (Request_rejected "instance is unavailable to this caller")
+
+let snapshot m ?caller ?instance_id () =
   let* past = historical m in
   let live = entries m |> List.filter (fun e ->
-    Option.fold ~none:true ~some:(String.equal e.instance_id) instance_id) in
+    can_read_source ?caller ~binding:e.binding ~access:e.source_access && Option.fold ~none:true ~some:(String.equal e.instance_id) instance_id) in
   let past = List.filter (function `Assoc fields ->
-    Option.fold ~none:true ~some:(fun id -> List.assoc_opt "instance_id" fields = Some (`String id)) instance_id
-    | _ -> Option.is_none instance_id) past in
+    can_read_fields ?caller fields && Option.fold ~none:true ~some:(fun id -> List.assoc_opt "instance_id" fields = Some (`String id)) instance_id
+    | _ -> false) past in
   let* () = if Option.is_some instance_id && live = [] && past = [] then Error "unknown instance" else Ok () in
   let retained = function `Assoc fields ->
     let* owner = configuration_of_fields fields in
@@ -579,7 +609,7 @@ let snapshot m ?instance_id () =
   | `Assoc fields -> Ok (`Assoc (("configuration", m.configuration_status)
       :: ("instances", `List (List.map entry_json live @ past)) :: fields))
   | _ -> assert false
-let slice m args =
+let slice ?caller m args =
   let optional_text key = match List.assoc_opt key args with
     | None -> Ok None | Some _ -> Result.map Option.some (text args key) in
   let optional_time key = match List.assoc_opt key args with
@@ -592,6 +622,7 @@ let slice m args =
   let* bindings = runtime_result (offload (fun () -> Lane_addon_store.bindings m.store)) in
   let rec read acc statuses = function
     | [] -> Ok (List.rev acc, List.rev statuses)
+    | `Assoc fields :: rest when not (can_read_fields ?caller fields) -> read acc statuses rest
     | `Assoc fields :: rest ->
         let* id = text fields "instance_id" in let* run = text fields "run_id" in
         if Option.fold ~none:false ~some:(fun selected -> selected <> run) run_id then read acc statuses rest
@@ -699,9 +730,15 @@ let save_declaration ?caller ~config json = Eio_context.run_on_owner_domain (fun
             ~source_text:request.source_text)
             |> Result.map_error (fun message -> {Lane_addon_declaration.code=Invalid_declaration;
                 message; current=None}) in
-          Lane_addon_sources.authorize ~access:(Lane_addon_sources.Keeper keeper) declaration.binding
-          |> Result.map_error (fun message -> {Lane_addon_declaration.code=Invalid_request;
-              message; current=None}) in
+          let* native = Lane_addon_sources.has_native_fusion declaration.binding
+            |> Result.map_error (fun message -> {Lane_addon_declaration.code=Invalid_request;
+                message; current=None}) in
+          if native then Error {Lane_addon_declaration.code=Invalid_request;
+            message="Native Fusion declarations require operator-owned configuration; use authenticated Attach for a Keeper-owned run";
+            current=None}
+          else Lane_addon_sources.authorize ~access:(Lane_addon_sources.Keeper keeper) declaration.binding
+            |> Result.map_error (fun message -> {Lane_addon_declaration.code=Invalid_request;
+                message; current=None}) in
     let* receipt = offload (fun () -> Lane_addon_declaration.write ~directory request) in
     m.configuration_nudge ();
     Ok (Lane_addon_declaration.receipt_to_json receipt)))
@@ -851,14 +888,22 @@ let dispatch ?caller ~config ~operation json = Eio_context.run_on_owner_domain (
     || List.exists (fun name -> not (List.mem name allowed)) names
     then Error (Request_rejected "duplicate or unknown Lane request field") else Ok () in
   let m = manager config in
+  (* New evidence must pass the source-owner gate. A delivery with durable
+     retry support must authorize its retained operation by the saved caller
+     before this lookup: the original source binding may already be gone. *)
+  let* () = match operation with
+    | Inspect | Slice | Attach -> Ok ()
+    | Evidence | Observe | Detach | Act | Action_status ->
+        let* id = request_result (text args "instance_id") in
+        authorize_instance ?caller m id in
   match operation with
   | Act -> enqueue_action ?caller m args
   | Action_status -> action_status m args
   | Inspect ->
       let* instance_id = match List.assoc_opt "instance_id" args with
         | None -> Ok None | Some _ -> Result.map Option.some (request_result (text args "instance_id")) in
-      runtime_result (snapshot m ?instance_id ())
-  | Slice -> slice m args
+      runtime_result (snapshot m ?caller ?instance_id ())
+  | Slice -> slice ?caller m args
   | Evidence ->
       let* id = request_result (text args "instance_id") in
       let* binding = match Hashtbl.find_opt m.entries id with

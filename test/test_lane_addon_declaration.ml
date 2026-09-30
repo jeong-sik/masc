@@ -150,7 +150,17 @@ sources=[{kind="fusion_run", source_id="fusion", run_id=%S}]
     check bool "Keeper save rejects foreign Fusion capture" false (Tool_result.is_success result);
     check bool "rejected configuration cannot be reconciled as operator-owned" false
       (Sys.file_exists (Filename.concat directory "foreign.toml"));
-    check int "rejection starts no worker" 0 (List.length !started))
+    check int "rejection starts no worker" 0 (List.length !started);
+    Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id
+      ~keeper:"editor-keeper" ~preset:"default" ~roster:Fusion_types.preset_roster
+      ~topology:Fusion_types.Simple ~started_at:1.;
+    let own = keeper_call config "masc_lane_declaration_save"
+      (request ~mode:"create" ~file_name:"own.toml" bytes) in
+    check bool "Keeper cannot turn even its own native source into operator-owned configuration" false
+      (Tool_result.is_success own);
+    check bool "operator declaration writer remains available" true
+      (Result.is_ok (Runtime.save_declaration ~config
+        (request ~mode:"create" ~file_name:"operator.toml" bytes))))
 
 let test_conflicts_and_invalid_candidates_preserve_active () = with_fixture (fun clock config directory _root started ->
   let original = declaration () in

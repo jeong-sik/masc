@@ -180,7 +180,7 @@ let test_next_request_reasons_survive_80_and_140_columns () =
             "History preview: send the newest 20 of 2718 original atoms, starting at #2698"
             snapshot_rows
           && says
-               "The earlier 2698 atoms are represented by the Librarian working state (boundary line 2215)."
+               "The earlier 2698 atoms are represented by the Librarian working state (Turn Boundary log row 2215 covering the captured prefix)."
                snapshot_rows);
        Alcotest.(check bool) (label "ledger names its different source") true
          (says "History preview: send 20 of 2718 original atoms, starting at #2698"
@@ -198,8 +198,8 @@ let test_next_request_reasons_survive_80_and_140_columns () =
               (says "…" rows))
          [ snapshot_rows; ledger_rows ];
        Alcotest.(check bool) (label "a prior count is separate from settings") true
-         (says "Last request counted 71.0k input tok." ledger_rows
-          && not (says "Last request counted" snapshot_rows)))
+         (says "Last request measured 71.0k input tok." ledger_rows
+          && not (says "Last request measured" snapshot_rows)))
     [ 80; 140 ]
 
 let context_pane_lines ?(cols = 140)

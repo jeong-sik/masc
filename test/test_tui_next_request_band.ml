@@ -110,7 +110,7 @@ let test_the_band_separates_settings_from_the_range () =
     (says
        "Config / Runtime: this binding sets context-high-water-tokens to 120.0k tok and context-low-water-tokens to 80.0k tok."
        rows
-     && says "They trim history only without Librarian continuity" rows
+     && says "Without Librarian continuity, these marks evict oldest carried history at a turn boundary." rows
      && says "neither this forecast's size nor the model limit" rows);
   (* 87,000 / 3.39 = 25,664; 237,000 / 3.39 = 69,912. *)
   Alcotest.(check bool) "the fixed parts and the pinned blocks each carry the turn they were read from"
@@ -125,7 +125,7 @@ let test_the_band_separates_settings_from_the_range () =
     (says ("History preview: send 295 of 3395 original atoms, starting at #3100 (" ^ approx ^ "50.1k tok estimated).") rows
      && says "front from this runtime's ledger" rows);
   Alcotest.(check bool) "the last input count stands apart from configuration" true
-    (says "Last request counted 91.0k input tok." rows
+    (says "Last request measured 91.0k input tok." rows
      && not (says "against marks" rows));
   (* 131 / 3.39 = 38.6: the wake line is named in the same estimated tokens as
      every other figure of the band, never in bytes beside them. *)
@@ -227,7 +227,7 @@ let test_no_marks_still_points_to_configuration () =
   Alcotest.(check bool) "the setting is absent, not a forecast result" true
     (says "Config / Runtime: this binding has no context-high-water-tokens or context-low-water-tokens setting." rows);
   Alcotest.(check bool) "the count stands alone" true
-    (says "Last request counted 91.0k input tok." rows
+    (says "Last request measured 91.0k input tok." rows
      && not (says "against marks" rows))
 
 let test_a_cold_front_names_its_record_and_nothing_counted () =
@@ -292,7 +292,7 @@ let test_the_turn_start_and_refusal_fronts_say_why () =
     (says "the seed range was refused: front moved to where this turn began"
        (with_origin Inspector.Carried_turn_start_after_seed_refusal));
   Alcotest.(check bool) "a fitting snapshot" true
-    (says "The earlier 3100 atoms are represented by the Librarian working state (boundary line 42)."
+    (says "The earlier 3100 atoms are represented by the Librarian working state (Turn Boundary log row 42 covering the captured prefix)."
        (with_origin (Inspector.Carried_librarian_snapshot { end_atom = 3100; boundary_line = 42 })));
   Alcotest.(check bool) "the Librarian's read position" true
     (says "the Librarian has read up to atom 3100; nothing is sent in place of those atoms"

@@ -42,7 +42,7 @@ let rec origin_sentence = function
         reason
   | Inspector.Carried_librarian_snapshot { end_atom; boundary_line } ->
       Printf.sprintf
-        "the Librarian's working state stands in for the atoms before %d (boundary line %d)"
+        "the Librarian's working state stands in for the atoms before %d (Turn Boundary log row %d covering the captured prefix)"
         end_atom boundary_line
   | Inspector.Carried_librarian_progress { end_atom } ->
       Printf.sprintf
@@ -129,7 +129,7 @@ let candidate_lines ~prose ~fact ~safe ~scale ~(walk : Inspector.forecast_walk)
           match carried.origin with
           | Inspector.Carried_librarian_snapshot { end_atom; boundary_line } ->
               Printf.sprintf
-                "History preview: send the newest %d of %d original atoms, starting at #%d (%s tok estimated). The earlier %d atoms are represented by the Librarian working state (boundary line %d)."
+                "History preview: send the newest %d of %d original atoms, starting at #%d (%s tok estimated). The earlier %d atoms are represented by the Librarian working state (Turn Boundary log row %d covering the captured prefix)."
                 carried.kept_atoms candidate.history_atoms carried.first_atom
                 (approx carried.transmitted_bytes) end_atom boundary_line
           | origin ->
@@ -142,7 +142,7 @@ let candidate_lines ~prose ~fact ~safe ~scale ~(walk : Inspector.forecast_walk)
         @ (match carried.counted_tokens with
            | Some counted ->
                fact
-                 (Printf.sprintf "Last request counted %s input tok."
+                 (Printf.sprintf "Last request measured %s input tok."
                     (Inspector.format_tokens counted))
            | None -> [])
   in
@@ -153,9 +153,9 @@ let candidate_lines ~prose ~fact ~safe ~scale ~(walk : Inspector.forecast_walk)
         prose
           (Printf.sprintf
              "Config / Runtime: this binding sets context-high-water-tokens to %s tok \
-              and context-low-water-tokens to %s tok. They trim history only \
-              without Librarian continuity; they are neither this forecast's \
-              size nor the model limit."
+              and context-low-water-tokens to %s tok. Without Librarian continuity, \
+              these marks evict oldest carried history at a turn boundary. \
+              They are neither this forecast's size nor the model limit."
              (Inspector.format_tokens marks.high_water_tokens)
              (Inspector.format_tokens marks.low_water_tokens))
     | Inspector.Lane_agent_core, None ->

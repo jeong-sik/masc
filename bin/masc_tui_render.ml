@@ -10827,11 +10827,12 @@ let repository_studio_geometry (state : state) ~cols ~budget ~cursor =
         | Some detail -> [Theme.bad () ^ Terminal_text.single_line detail ^ Ansi.reset] in
       let context_budget = max 0 (if split then budget - 2 else budget - 6 - List.length errors) in
       let truncated = List.length context_lines > context_budget in
+      let show_notice = truncated && context_budget >= 2 in
       let visible_context =
-        List.take (max 0 (context_budget - if truncated then 1 else 0)) context_lines in
+        List.take (max 0 (context_budget - if show_notice then 1 else 0)) context_lines in
       let detail = studio_panel ~width:detail_width ~title:detail_title
           ~lines:(visible_context @
-            (if truncated && context_budget > 0
+            (if show_notice
              then ["More context · enlarge the terminal"] else [])) in
       let list_budget =
         if split then budget else max 4 (budget - List.length detail) in
@@ -14709,11 +14710,12 @@ let render_runtime_params (state : state) =
     | Some row ->
         studio_panel ~width:(framed_inner_width cols)
           ~title:("Selected setting · " ^ Terminal_text.single_line row.rpr_key)
-          ~lines:[
+          ~lines:(List.concat_map
+            (Message_layout.wrap_words ~max_cells:(max 1 (framed_inner_width cols - 4))) [
             "Current " ^ Terminal_text.single_line (runtime_param_value_text ~value_type:row.rpr_value_type row.rpr_current_json)
-            ^ " · Default " ^ Terminal_text.single_line (runtime_param_value_text ~value_type:row.rpr_value_type row.rpr_default_json)
-            ^ (if row.rpr_has_override then " · override" else " · default");
-            Terminal_text.single_line selected_contract ]
+            ; "Default " ^ Terminal_text.single_line (runtime_param_value_text ~value_type:row.rpr_value_type row.rpr_default_json)
+            ; (if row.rpr_has_override then "override" else "default");
+            Terminal_text.single_line selected_contract ])
   in
   let contract_extra_rows =
     if count_frame_lines buf + List.length contract_panel + 5 <= rows

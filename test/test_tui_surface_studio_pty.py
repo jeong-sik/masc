@@ -23,13 +23,20 @@ def run(executable, no_color=False):
         "local_path":"workspace/failed-repo",
         "resolved_local_path":"/srv/masc/" + "long-identity-segment/" * 16 + "failed-repo"})
     repositories["total"] = 3
+    page_names = [f"page-{index:02d}" for index in range(25)]
+    for name in page_names:
+        repositories["repositories"].append({**repositories["repositories"][0],
+            "id": name, "name": name, "local_path": "workspace/" + name,
+            "resolved_local_path": "/srv/masc/workspace/" + name})
+    repositories["total"] = len(repositories["repositories"])
     fixtures[h.REPOSITORIES_PATH] = (200, repositories)
     fixtures["/api/v1/runtime/params"] = (200, {"parameters": [
         {"key": "studio.enabled", "current": True, "default": False,
          "has_override": True, "meta": {"description": "Enable the observed feature",
          "value_type": "bool"}},
-        {"key": "studio.mode", "current": "quiet", "default": "quiet",
-         "has_override": False, "meta": {"description": "Presentation mode",
+        {"key": "studio.mode", "current": "user_only:" + "fixture-identity-" * 4,
+         "default": "mention_or_thread", "has_override": True,
+         "meta": {"description": "Presentation mode",
          "value_type": "string"}}], "surfaces": []})
     def interact(process, fd, _slave, output, _base):
         def key(value, needle):
@@ -44,7 +51,7 @@ def run(executable, no_color=False):
             print("STUDIO_CAPTURE="+json.dumps({"name":name+("-no-color" if no_color else ""),
                 "rows":rows,"columns":columns,"provenance":"CI fixture PTY",
                 "frame_b64":base64.b64encode(frame).decode(),
-                "screen":h.screen_text(frame).decode(errors="replace")}),flush=True)
+                "screen":b"\n".join(h.screen_rows(frame).get(row, b"") for row in range(1, rows + 1)).decode(errors="replace")}),flush=True)
             return h.screen_text(frame)
         h.wait_for_output(process,fd,output,b"Health: ",start=0,timeout=10)
         key(b":go Work\r",b"plan-alpha-29424")
@@ -69,6 +76,14 @@ def run(executable, no_color=False):
         failed = capture("workspace-failed-short",16,80,b"checkout unavailable", b"failed-repo")
         if b"Error: checkout unavailable" not in failed:
             raise AssertionError("long selected context hid the actual failure reason")
+        key(b"\x1b[H", b"/srv/masc/workspace/masc")
+        before=capture("workspace-page-start",24,80,b"/srv/masc/workspace/masc",b"masc")
+        names=[b"masc",b"next-repo",b"failed-repo"]+[name.encode() for name in page_names]
+        visible=sum(name in before for name in names)
+        paged=key(b"\x1b[6~",b"page-")
+        selected=[index for index,name in enumerate(names) if h.keeper_row_selected(name).search(paged)]
+        if len(selected)!=1 or not 0<selected[0]<=visible:
+            raise AssertionError(f"Workspace page skipped undisplayed repositories: {selected}, visible={visible}")
         key(b":settings\r",b"studio.enabled")
         wide=capture("system-wide",32,160,b"Selected setting")
         for needle in (b"Current on",b"Default off",b"override",b"Enable the observed feature"):
@@ -76,6 +91,10 @@ def run(executable, no_color=False):
         capture("system-short",16,80,b"studio.enabled")
         key(b"\r",b"editing studio.enabled")
         key(b"\x1b",b"studio.enabled")
+        key(b"j",b"studio.mode")
+        wrapped=capture("system-long-comparison",30,80,b"mention_or_thread")
+        for needle in (b"Current user_only:",b"Default mention_or_thread",b"override"):
+            if needle not in wrapped: raise AssertionError(f"System omitted comparison clause {needle!r}")
         key(b":go Dashboard\r",b"MASC Dashboard")
         os.write(fd,b"q")
     h.run_terminal_scenario(executable,description="surface studio"+(" no color" if no_color else ""),

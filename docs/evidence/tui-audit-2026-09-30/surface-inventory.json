@@ -748,6 +748,16 @@
     "review": "independent hostile and response source APPROVE exact recorded head, no unresolved P0/P1/P2",
     "validation": "syntax parsing and diff check only",
     "execution": "not run under source-only policy",
-    "remaining": "patch horizontal tail reachability and runtime race scenarios"
+    "remaining": "runtime race scenarios; patch horizontal source follow-up is PR40301, runtime not verified"
+  },
+  "patch_horizontal_stack": {
+    "pr": 40301,
+    "base_pr": 40296,
+    "base_head": "1cd694ed077b02a141cb17c2558fbd8f0c966d9d",
+    "head": "a720c60817917a6b1fbe32a7c20da7d8e1f6e8aa",
+    "scope": "body-cell pan with fixed diff gutters, content/pane bounds, both-axis frame clamp and reopen reset",
+    "review": "independent system_audit and agenda_finish source PASS at exact recorded head; no unresolved P0/P1/P2, initial public-interface P1 repaired",
+    "validation": "syntax parsing of four implementations and two interfaces, diff check only",
+    "execution": "not run under source-only policy"
   }
 }

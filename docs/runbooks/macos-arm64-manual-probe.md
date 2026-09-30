@@ -14,7 +14,7 @@ assets, `masc-runtime-macos-arm64.tar.gz` (libraries, Python, licenses and
 runtime provenance), `SHA256SUMS`, identity outputs, `dependencies.txt`, and
 `probe.json`. Checksums cover the final packaged files and metadata.
 
-The workflow change is prepared on a dedicated main-based branch. For a Home
+The workflow change is tracked in main-based PR #40205. For a Home
 branch artifact before merge, integrate that dependency and then:
 
 1. Apply this workflow change and this runbook to the Home branch, preserving

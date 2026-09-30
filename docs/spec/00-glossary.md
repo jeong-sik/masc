@@ -2503,8 +2503,8 @@ status: reference
 **Memory OS Recall (기억 회상 / 전송 투영)**
 : 매 턴 실행 시 저장된 Memory OS 사실(일반 사실 및 소스 바인딩 사실)을 모델의 프롬프트 문맥으로 주입(projection)하는 전송 메커니즘.
   `render_if_enabled`가 호출되어 각 스토어의 상태(`Present`, `Authoritatively empty / Absent`, `Unavailable`)를 투영하며, 회상 비활성화 시 안정적 중지 마커(`disabled`)를 방출한다.
-  현행 구현([`keeper_memory_os_recall.mli`](../../lib/keeper/keeper_memory_os_recall.mli))은 절단(truncate), 임의 순위화(rank), 부분 주입(partially inject)을 금지하고 current fact 전량을 전송한다. 소스 바인딩 사실(`source-bound fact`)은 주입 직전 대상 파일의 정확한 바이트를 재검증하며, 변경되거나 접근할 수 없는 소스는 이전 주장 대신 타입화된 무효화(`typed invalidation`)를 기여한다. 소스 스토어 읽기 실패가 발생해도 읽기 가능한 일반 사실(`ordinary fact`)은 보존하여 전달한다.
-  유계 작업연계 투영 계약(`RFC-memory-os-recall-selection`)은 전량 주입을 작업 중심의 유계 투영(Bounded Task-linked Projection with Explicit Omission)으로 정의한다:
+  현행 구현([`keeper_memory_os_recall.mli`](../../lib/keeper/keeper_memory_os_recall.mli))은 절단(truncate), 임의 순위화(rank), 부분 주입(partially inject)을 금지하고 current fact 전량을 전송한다. 소스 바인딩 사실(`source-bound fact`)은 주입 직전 대상 파일의 정확한 바이트를 재검증하며, 변경·삭제가 입증된 소스는 이전 주장 대신 타입화된 무효화(`typed invalidation`)를 기여한다. 반면 읽기 실패·접근 불능 소스는 기존 주장을 `verified=false`인 미검증 상태(`keep_unverified`)로 보존하여 모델에 전달하며, 소스 스토어 장애 시에도 읽기 가능한 일반 사실(`ordinary fact`)은 보존하여 전달한다.
+  유계 작업연계 투영 제안 규약(Draft [`RFC-memory-os-recall-selection`](../../docs/rfc/RFC-memory-os-recall-selection.md))은 현행 전량 주입 계약을 개정하여 작업 중심의 유계 투영(Bounded Task-linked Projection with Explicit Omission)을 도입하는 목표 아키텍처다:
   - **보존과 전송의 분리**: 저장소는 모든 current fact를 영구 보존하며, 전송 예산이나 링크 미부합으로 누락된 fact를 저장 사실의 삭제·철회·부정으로 해석하지 않는다.
   - **상시 블록(`Standing`)**: Keeper 정체성, 지속 선호, 권한 경계, 현재 Task/Goal 주소만 포함하며, 넓은 분류(`category=constraint`)만으로 상시 승격하지 않는다.
   - **후보 선정(`Candidate`)**: 현재 턴의 Task(`Task of task_id`), Goal(`Goal of goal_id`), 자극(`Stimulus of stimulus_id`)과 타입화 링크(`typed link`)가 확인된 사실만 후보가 되며, 비연결 사실에 최신순·문자열 유사도 점수를 임의 적용하지 않는다.

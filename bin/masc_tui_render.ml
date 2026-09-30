@@ -15687,7 +15687,7 @@ let finish_voice_surface (state : state) ~terminal_rows ~cols ~head ~body ~hints
     ~rows:terminal_rows ~cols buf
 ;;
 
-let render_voice_wizard (state : state) (session : voice_wizard_session) =
+let render_voice_wizard (state : state) (session : Masc_tui_voice_wizard_session.voice_wizard_session) =
   let terminal_rows, cols = get_terminal_size () in
   let head = Buffer.create 256 in
   let buf = Buffer.create 2048 in
@@ -15751,7 +15751,7 @@ let render_voice_wizard (state : state) (session : voice_wizard_session) =
    | Voice_wizard.Voice ->
      box_line buf cols
        (Printf.sprintf "    %s%s%s%s" Ansi.bold session.vws_input Ansi.reset
-          (if Masc_tui_types.voice_wizard_is_sending session then "" else "▏")));
+          (if Masc_tui_voice_wizard_session.voice_wizard_is_sending session then "" else "▏")));
   (* A local server that never asked for a key answers 200 only while nothing
      sends it one, so the blank is worth saying out loud rather than leaving as
      an empty line. *)

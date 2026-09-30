@@ -3337,13 +3337,13 @@ let test_runtime_refuses_context_marks_above_max_context () =
        | Ok rt -> rt
        | Error _ -> fail "local.sample should materialize")
   in
-  (match Runtime.validate_runtime_context_marks [ materialize ~high:2_048 ~low:300 ] with
+  (match Runtime_config_validation.validate_runtime_context_marks [ materialize ~high:2_048 ~low:300 ] with
    | Error (Runtime_config_error.Context_marks_exceed_max_context { high_water_tokens; max_context; _ }) ->
      check int "the mark" 2_048 high_water_tokens;
      check int "the model's context" 1_024 max_context
    | Error _ -> fail "expected the marks failure"
    | Ok () -> fail "a high-water mark above max-context must be refused");
-  match Runtime.validate_runtime_context_marks [ materialize ~high:900 ~low:300 ] with
+  match Runtime_config_validation.validate_runtime_context_marks [ materialize ~high:900 ~low:300 ] with
   | Ok () -> ()
   | Error _ -> fail "marks within max-context must pass"
 ;;

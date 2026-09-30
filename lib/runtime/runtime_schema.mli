@@ -270,7 +270,7 @@ type model_spec =
     recovery after a provider refusal is a separate path. Parsed as a pair so the
     invariant [0 < low_water_tokens < high_water_tokens] holds by
     construction; [high_water_tokens <= max-context] is checked once the model
-    is resolved ({!Runtime.validate_runtime_context_marks}). *)
+    is resolved ({!Runtime_config_validation.validate_runtime_context_marks}). *)
 type context_marks =
   { high_water_tokens : int  (** Eviction starts when the last measured total passes this. *)
   ; low_water_tokens : int  (** Eviction stops once the projected total is at or below this. *)

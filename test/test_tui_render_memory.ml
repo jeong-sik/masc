@@ -267,20 +267,20 @@ let test_narrow_detail_preserves_provenance () =
   let path = "docs/" ^ String.concat "/" (List.init 12 (fun _ -> "long-directory")) in
   let sha = String.make 64 'a' in
   let reason = "source_changed:" ^ String.make 80 'r' in
-  let fact : Decode.memory_fact =
+  let fact : Masc.Tui_decode_memory_facts.memory_fact =
     { mf_claim = "This fact retains its complete provenance."
     ; mf_category = Cat.Constraint
     ; mf_origin = origin
     ; mf_first_seen = 100.
     ; mf_last_seen = 200.
     ; mf_memory_id = memory_id
-    ; mf_events = Decode.no_memory_fact_events
+    ; mf_events = Masc.Tui_decode_memory_facts.no_memory_fact_events
     }
   in
-  let source : Decode.memory_source_fact =
+  let source : Masc.Tui_decode_memory_facts.memory_source_fact =
     { msf_claim = fact.mf_claim; msf_first_seen = 100.; msf_path = path; msf_sha256 = sha }
   in
-  let dropped : Decode.memory_invalidation =
+  let dropped : Masc.Tui_decode_memory_facts.memory_invalidation =
     { mi_source_path = path; mi_invalidated_at = 200.; mi_reason = reason }
   in
   let compact text =

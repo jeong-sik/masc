@@ -1597,14 +1597,6 @@
  (modules test_goal_timeline_projection)
  (libraries masc_test_deps))
 
-; #39571: owner-directed Goal notices — a refuted verdict and an overdue due
-; date each owe the Goal's owner one idempotent Pending Message.
-
-(test
- (name test_goal_owner_notification)
- (modules test_goal_owner_notification)
- (libraries masc_test_deps ptime))
-
 ; Goal_due: the one reading of a Goal's due date (the day it names, the UTC
 ; instant it falls due, the UTC days left).
 

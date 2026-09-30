@@ -52,6 +52,8 @@
 
     <goal src="lib/goal/goal_phase.mli">
       <rule>큰 단위의 목표를 설정한다.</rule>
+      <rule>Goal 은 workspace 가 공유하는 목표이며 개별 소유자를 두지 않는다.
+            생성·수정·검증 주체는 이벤트 actor 로 기록한다. Task 의 담당은 claim 으로 정한다.</rule>
       <rule>반드시 정량적인 성공 조건을 지정해야 생성할 수 있다.
             [parity B1: Goal_store.upsert_goal 은 새 Goal 생성 시 metric/target_value 두 값을 비어 있지 않게 요구한다.]</rule>
       <rule>성공조건은 구체적 내용을 포함하고, Verifier(내부 Standalone LLM Agent)가

@@ -620,31 +620,31 @@ let tools_display_lines ?(cols = 80) (state : state) =
             in
             (match state.tools_skill_evidence with
              | Some (observed_key, json) when String.equal key observed_key ->
-              (match Tui_decode.decode_skill_evidence json with
+              (match Masc.Tui_decode_skill_evidence.decode_skill_evidence json with
                | Error _ ->
                  [ Theme.bad (), "     Retained evidence response is malformed" ]
                | Ok evidence ->
                let evidence_lines =
-                 match evidence.Masc.Tui_decode.se_status with
-                 | Masc.Tui_decode.Skill_evidence_not_observed_in_retained_coverage ->
+                 match evidence.Masc.Tui_decode_skill_evidence.se_status with
+                 | Masc.Tui_decode_skill_evidence.Skill_evidence_not_observed_in_retained_coverage ->
                   [ Theme.warn (),
                     "     Retained evidence: not found in retained coverage (not proof of never)"
                   ]
-                 | Masc.Tui_decode.Skill_evidence_observed ->
+                 | Masc.Tui_decode_skill_evidence.Skill_evidence_observed ->
                   let activation_lines =
                     let items, tied =
                       match evidence.se_activation with
                       | None -> [], false
-                      | Some (Masc.Tui_decode.Skill_evidence_most_recent_observed item) ->
+                      | Some (Masc.Tui_decode_skill_evidence.Skill_evidence_most_recent_observed item) ->
                         [ item ], false
                       | Some
-                          (Masc.Tui_decode.Skill_evidence_most_recent_observed_timestamp_tie
+                          (Masc.Tui_decode_skill_evidence.Skill_evidence_most_recent_observed_timestamp_tie
                              items) ->
                         items, true
                     in
                     List.concat_map
                       (fun item ->
-                         let activation = item.Masc.Tui_decode.sea_activation in
+                         let activation = item.Masc.Tui_decode_skill_evidence.sea_activation in
                          let string_field name =
                            match json_assoc_member_opt name activation with
                            | Some (`String value) -> value
@@ -662,7 +662,7 @@ let tools_display_lines ?(cols = 80) (state : state) =
                          in
                          let keepers =
                            item.sea_owner_claims
-                           |> List.map (fun claim -> claim.seo_keeper)
+                           |> List.map (fun claim -> claim.Masc.Tui_decode_skill_evidence.seo_keeper)
                            |> String.concat ","
                          in
                          [ Ansi.bold,
@@ -741,12 +741,12 @@ let tools_display_lines ?(cols = 80) (state : state) =
                   activation_lines @ composition_lines
                in
                let coverage_lines =
-                 let coverage = evidence.Masc.Tui_decode.se_coverage in
+                 let coverage = evidence.Masc.Tui_decode_skill_evidence.se_coverage in
                  let composition_scope =
                    match coverage.sec_composition_scope with
-                   | Masc.Tui_decode.Skill_evidence_exact_reference_latest_completed ->
+                   | Masc.Tui_decode_skill_evidence.Skill_evidence_exact_reference_latest_completed ->
                      "latest_completed"
-                   | Masc.Tui_decode.Skill_evidence_composition_unavailable ->
+                   | Masc.Tui_decode_skill_evidence.Skill_evidence_composition_unavailable ->
                      "unavailable"
                  in
                  let unavailable =

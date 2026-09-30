@@ -91,6 +91,21 @@ let test_the_candle_stands_centred_over_its_caption () =
     lines;
   check bool "centred left to right" true (abs (left - (cols - left - box.View.cols)) <= 1)
 
+let test_mosaic_uses_the_compact_candle () =
+  let out = laid_out View.Mosaic in
+  let box = Option.get (View.fit View.Mosaic ~max_cols:cols ~max_rows:picture_rows) in
+  let body, equipment = Keeper_portrait_look.mascot in
+  let image = Draw.render_compact_posed body equipment Draw.still box.View.size in
+  let expected =
+    View.lines ~project View.Mosaic box image
+    |> List.map (fun line -> String.make ((cols - box.View.cols) / 2) ' ' ^ line)
+  in
+  let top = (rows - box.View.rows - List.length caption - 1) / 2 in
+  let actual =
+    List.filteri (fun index _ -> index >= top && index < top + box.View.rows) out.Screen.lines
+  in
+  check (list string) "the mosaic contains the compact candle" expected actual
+
 let test_pixels_leave_blank_rows_and_place_the_picture_there () =
   let out = laid_out pixels in
   check bool "drawn" true (out.Screen.drawn = Screen.Moving);
@@ -324,6 +339,8 @@ let () =
     [ ( "layout"
       , [ test_case "the candle stands centred over its caption on /about" `Quick
             test_the_candle_stands_centred_over_its_caption
+        ; test_case "the mosaic uses the compact candle" `Quick
+            test_mosaic_uses_the_compact_candle
         ; test_case "pixels leave blank rows and place the picture there" `Quick
             test_pixels_leave_blank_rows_and_place_the_picture_there
         ; test_case "no picture draws the caption alone" `Quick

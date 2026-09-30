@@ -1,0 +1,11 @@
+{
+  "source_commit": "e716f181773b6f61925f43771283a000c992e26a",
+  "downloaded_archive_checks": [
+    {
+      "package": "quiz-questions",
+      "architecture": "arm64",
+      "archive_sha256": "dd44a79903e7348e127308e8214f5cea760d8127727be99a7e6dc5db2c33276a"
+    }
+  ],
+  "archive_location": "GitHub image workflow artifacts; archives not committed"
+}

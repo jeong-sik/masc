@@ -43,6 +43,8 @@ SOURCE_MODULES = (
     'bin/masc_tui_github_ui.mli',
     'bin/masc_tui_github_requests.ml',
     'bin/masc_tui_github_requests.mli',
+    'bin/masc_tui_render_github.ml',
+    'bin/masc_tui_render_github.mli',
 )
 
 if __name__ == "__main__":

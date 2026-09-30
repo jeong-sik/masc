@@ -1830,7 +1830,7 @@
   masc_tui_http)
  (public_name masc-tui)
  (package masc)
- (libraries masc_tui_github_ui masc_tui_identity_input masc_tui_render_identity masc_tui_identity_model masc_tui_identity_updates masc_tui_resources_updates masc_tui_code_updates masc_tui_board_updates masc_tui_surface_search masc_tui_fusion_model masc_tui_fusion_updates masc_tui_home masc_tui_approvals_model masc_tui_surface_navigation
+ (libraries masc_tui_render_github masc_tui_github_ui masc_tui_identity_input masc_tui_render_identity masc_tui_identity_model masc_tui_identity_updates masc_tui_resources_updates masc_tui_code_updates masc_tui_board_updates masc_tui_surface_search masc_tui_fusion_model masc_tui_fusion_updates masc_tui_home masc_tui_approvals_model masc_tui_surface_navigation
   masc_tui_palette
   masc_tui_voice_wizard_session
   masc_tui_account_login
@@ -2319,3 +2319,9 @@
  (wrapped false)
  (modules masc_tui_github_ui)
  (libraries masc_tui_types masc_tui_ansi masc_tui_github_identity masc_tui_message_layout masc yojson))
+
+(library
+ (name masc_tui_render_github)
+ (wrapped false)
+ (modules masc_tui_render_github)
+ (libraries masc_tui_ansi masc))

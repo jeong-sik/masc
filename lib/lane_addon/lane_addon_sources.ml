@@ -249,15 +249,15 @@ let has_native_fusion binding =
 
 let authorized_fusion_run ~access ~run_id =
   match Fusion_run_registry.get (Fusion_run_registry.global ()) ~run_id with
-  | None -> Error (match access with
-      | Operator_configuration -> "Fusion run unavailable: " ^ run_id
-      | Keeper _ | Unauthenticated -> "Fusion run is not owned by the authenticated Keeper")
+  | None -> Error "Fusion run is unavailable to this caller"
   | Some run ->
       let* () = match access with
         | Operator_configuration -> Ok ()
         | Keeper keeper when String.equal keeper run.Fusion_run_registry.keeper -> Ok ()
-        | Keeper _ | Unauthenticated -> Error "Fusion run is not owned by the authenticated Keeper" in
+        | Keeper _ | Unauthenticated -> Error "Fusion run is unavailable to this caller" in
       Ok run
+let fusion_owner ~access ~run_id =
+  Result.map (fun run -> run.Fusion_run_registry.keeper) (authorized_fusion_run ~access ~run_id)
 let authorize ~access binding =
   let* sources = parse binding in
   List.fold_left (fun checked -> function

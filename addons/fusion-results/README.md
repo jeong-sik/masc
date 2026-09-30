@@ -96,7 +96,8 @@ discovers this package through lane.toml + Dockerfile.
 
 Native Fusion bindings attached by a Keeper are private to that authenticated
 Keeper. Inspect, retained slices, evidence export and instance operations keep
-that owner boundary after restart. Shared native Fusion declarations are written
-through the operator configuration path; Keeper and HTTP declaration editors
-cannot promote a native binding into shared operator authority. A Keeper uses
-`masc_lane_attach` for its own run instead.
+that owner boundary after restart. Configured native Fusion sources retain the authoritative registry Keeper as
+their read owner, including when the operator performs reconciliation. A verified
+Keeper may save its own run declaration or use `masc_lane_attach`; neither path
+promotes the source into shared read authority. Downstream output consumers inherit
+that visibility, and HTTP local attribution alone cannot grant private access.

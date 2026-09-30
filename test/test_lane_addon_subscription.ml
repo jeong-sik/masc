@@ -20,10 +20,11 @@ let subscription = `Assoc ["keeper_name",`String "researcher";"run_id",`String "
 let selection = ["run_id",`String "study";"installation_id",`String "documents";"output_id",`String "changes"]
 let args operation = `Assoc (("operation",`String operation)::selection)
 let call config caller args = S.handle ~config ~caller args
-let save config = call config "operator" (`Assoc ["operation",`String "save";"subscriptions",`List [subscription]]) |> ok
+let operator_call config args = S.handle ~access:Lane_addon_sources.Operator_configuration ~config ~caller:"operator" args
+let save config = operator_call config (`Assoc ["operation",`String "save";"subscriptions",`List [subscription]]) |> ok
 let store config = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons")
-let producer store id seq = Store.save_binding store ~instance_id:id
-  (`Assoc ["instance_id",`String id;"run_id",`String "study";"configuration",`Assoc ["id",`String "documents"];
+let producer ?(visibility=`Assoc ["kind",`String "shared"]) store id seq = Store.save_binding store ~instance_id:id
+  (`Assoc ["visibility",visibility;"instance_id",`String id;"run_id",`String "study";"configuration",`Assoc ["id",`String "documents"];
     "phase",`Assoc ["kind",`String "attached"];"observation_seq",`Int seq;
     "package",`Assoc ["outputs",`Assoc ["changes",`Assoc ["lanes",`List [`String "changes"]]];
       "resources",`Assoc ["max_reply_bytes",`Int 8192]]]) |> ok
@@ -36,6 +37,41 @@ let append ?(coverage=[]) store id seq =
 let receipt result = member "receipt" result
 let ack config receipt = call config "researcher"
   (`Assoc (("operation",`String "acknowledge")::("receipt",receipt)::selection))
+let private_producer_requires_real_owner_access () = with_workspace (fun config ->
+  ignore (save config);
+  let retained = store config in
+  let visibility keeper = `Assoc ["kind",`String "keeper";"keeper",`String keeper] in
+  producer ~visibility:(visibility "researcher") retained "private-instance" 1;
+  append retained "private-instance" 1;
+  let request = args "read" in
+  check bool "local attribution cannot read private output" true
+    (Result.is_error (S.handle ~access:Lane_addon_sources.Unauthenticated ~config ~caller:"researcher" request));
+  let hidden = S.handle ~access:Lane_addon_sources.Unauthenticated ~config ~caller:"researcher"
+    (`Assoc ["operation",`String "inspect"]) |> ok in
+  check int "unverified attribution reveals no private subscription identity" 0
+    (member "subscriptions" hidden |> Yojson.Safe.Util.to_list |> List.length);
+  let first = call config "researcher" request |> ok in
+  check int "actual owner receives complete named private output" 1
+    (member "output" first |> member "rows" |> Yojson.Safe.Util.to_list |> List.length);
+  producer ~visibility:(visibility "another-owner") retained "private-instance" 1;
+  check bool "foreign owner cannot read retained bytes" true
+    (Result.is_error (call config "researcher" request));
+  check bool "foreign owner cannot acknowledge an old receipt" true
+    (Result.is_error (ack config (receipt first)));
+  producer ~visibility:(visibility "researcher") retained "private-instance" 1;
+  check bool "denied acknowledgment preserved unread position" true
+    (receipt (call config "researcher" request |> ok) = receipt first);
+  producer ~visibility:(`Assoc ["kind",`String "unknown"]) retained "private-instance" 1;
+  check bool "unknown durable visibility fails closed" true
+    (Result.is_error (call config "researcher" request));
+  Store.save_binding retained ~instance_id:"private-instance"
+    (`Assoc ["instance_id",`String "private-instance";"run_id",`String "study";
+      "configuration",`Assoc ["id",`String "documents"];"phase",`Assoc ["kind",`String "attached"]]) |> ok;
+  check bool "missing durable visibility fails closed" true
+    (Result.is_error (call config "researcher" request));
+  producer ~visibility:(visibility "another-owner") retained "private-instance" 1;
+  check bool "explicit operator authority can read retained private output" true
+    (Result.is_ok (S.handle ~access:Lane_addon_sources.Operator_configuration ~config ~caller:"researcher" request)))
 let read_ack_and_restart () = with_workspace (fun config ->
   ignore(save config);let store=store config in producer store "instance-1" 2;
   append store "instance-1" 1;append store "instance-1" 2;
@@ -51,7 +87,7 @@ let read_ack_and_restart () = with_workspace (fun config ->
   check int "named output excludes other rows" 1 (List.length (member "output" first |> member "rows" |> Yojson.Safe.Util.to_list));
   let repeated=call config "researcher" (args "read") |> ok in
   check bool "lost response can be read again" true (receipt first=receipt repeated);
-  let manager_state () = call config "operator" (`Assoc ["operation",`String "inspect"])
+  let manager_state () = operator_call config (`Assoc ["operation",`String "inspect"])
     |> ok |> member "reader_states" |> Yojson.Safe.Util.to_list |> List.hd in
   check int "manager inspection does not turn reading into acknowledgment" 0
     (manager_state () |> member "after_sequence" |> Yojson.Safe.Util.to_int);
@@ -70,11 +106,11 @@ let failures_preserve_position () = with_workspace (fun config ->
   append store "instance-1" 1;
   let first=call config "researcher" (args "read") |> ok in
   check int "repaired record is still the next unread sequence" 1 (receipt first |> member "sequence" |> Yojson.Safe.Util.to_int);
-  let saved=call config "operator" (`Assoc ["operation",`String "inspect"]) |> ok in
+  let saved=operator_call config (`Assoc ["operation",`String "inspect"]) |> ok in
   check bool "stale subscription save rejected" true
-    (Result.is_error (call config "operator" (`Assoc ["operation",`String "save";"subscriptions",`List []])));
+    (Result.is_error (operator_call config (`Assoc ["operation",`String "save";"subscriptions",`List []])));
   let revision=member "source_revision" saved in
-  ignore(call config "operator" (`Assoc ["operation",`String "save";"expected_source_revision",revision;"subscriptions",`List []]) |> ok);
+  ignore(operator_call config (`Assoc ["operation",`String "save";"expected_source_revision",revision;"subscriptions",`List []]) |> ok);
   check bool "removal stops next-turn discovery" true (S.observe ~config ~keeper_name:"researcher"=Ok (`List [])))
 let cursor_identity_and_incomplete_source () = with_workspace (fun config ->
   ignore(save config);
@@ -116,6 +152,7 @@ let cursor_identity_and_incomplete_source () = with_workspace (fun config ->
     (Result.is_error (ack config (receipt first))))
 
 let () = run "Lane subscription use" ["operator scenarios",[
+  test_case "private producer enforces durable owner and verified access" `Quick private_producer_requires_real_owner_access;
   test_case "cursor identity and incomplete source remain distinct" `Quick cursor_identity_and_incomplete_source;
   test_case "reference discovery, explicit reading and durable acknowledgement" `Quick read_ack_and_restart;
   test_case "missing records and configuration conflicts preserve position" `Quick failures_preserve_position]]

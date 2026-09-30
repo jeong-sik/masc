@@ -156,7 +156,7 @@ sources=[{kind="fusion_run", source_id="fusion", run_id=%S}]
       ~topology:Fusion_types.Simple ~started_at:1.;
     let own = keeper_call config "masc_lane_declaration_save"
       (request ~mode:"create" ~file_name:"own.toml" bytes) in
-    check bool "Keeper cannot turn even its own native source into operator-owned configuration" false
+    check bool "Keeper can save its own source without granting shared read authority" true
       (Tool_result.is_success own);
     check bool "operator declaration writer remains available" true
       (Result.is_ok (Runtime.save_declaration ~config

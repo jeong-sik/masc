@@ -1491,18 +1491,19 @@ status: reference
   부동소수점 단위를 쓰지 않는다.
   - 원장(`candle-ledger.jsonl`): `<base-path>/.masc/candle-ledger.jsonl`에 한 줄씩 이벤트를
     덧붙이는 전용 원장. 각 행은 `kind`·`at`과 해당 종류의 필드를 담은 닫힌 JSON 객체다. 현재 원장에
-    기록되는 사건은 6종(`Snapshot`·`Payout_owed`·`Candidates`·`Unattributed`·`Paid`·`Payout_failed`)이며,
-    잔액은 파일에 누적 값을 따로 적지 않고 원장의 `Paid` 사실을 순서대로 재생하여 계산한다. 헌법·승인·도구 호출 원장이나
+    기록되는 사건은 8종(`Snapshot`·`Payout_owed`·`Candidates`·`Unattributed`·`Paid`·`Purchased`·`Equipped`·`Payout_failed`)이다.
+    잔액과 장비 상태는 누적 값을 따로 저장하지 않고 원장을 순서대로 재생하여 계산한다. `Paid`는 지급액을 더하고,
+    `Purchased`는 기록된 `amount_milli`를 차감하며 아이템 소유를 기록한다. `Equipped`는 슬롯의 착용 선택을 반영한다. 헌법·승인·도구 호출 원장이나
     `goal_verifications.json`(검증 원장)과 다른 별개 원장이다.
   - 발행과 지급: Goal이 검증기를 통과(`Snapshot`)하고 사람의 확정(`Confirm_completion`)으로
     `Completed`가 되면 지급 의무(`Payout_owed`)가 생긴다. 백그라운드 지급 일꾼이 기여 Task와 Keeper를
     선별(`Candidates`)해 모델 감정을 거쳐 `Paid` 이벤트 한 줄로 지급을 기록한다. 분배는 한 줄에 원자적으로 적히므로
     일부 Keeper만 지급되는 불완전 상태가 없다. 기여자가 없으면 `Unattributed`, 오류 시 `Payout_failed`를 남긴다.
   - 사용처 한정: Candle로 살 수 있는 것은 초상화 장신구(**Keeper Portrait**의 장비 아이템)뿐이다.
-    도구, 스킬, 모델, 런타임 예산 등 다른 자원은 구매할 수 없다(헌법 불변식). 상점 구매와 착용 반영은
-    RFC 단계적 구현에 따르며, 현재 원장 스키마에는 포함되지 않는다.
+    도구, 스킬, 모델, 런타임 예산 등 다른 자원은 구매할 수 없다(헌법 불변식). 상점 구매(`Purchased`)와
+    소유 아이템 또는 기본 장비의 착용 선택(`Equipped`)은 현재 원장 스키마에 포함된다.
   - 잔액 감쇠 규범: 헌법(`<candle>`, `no_wall_clock_death` 예외)은 잔액의 지수 감쇠를 요구한다.
-    현재 빌드의 잔액(`Candle_balance.of_events`)은 `Paid` 사실의 누적이며 시간 감쇠를 적용하지 않고,
+    현재 빌드의 잔액(`Candle_balance.of_events`)은 지급과 구매 사실을 재생한 값이며 시간 감쇠를 적용하지 않고,
     반감기 설정 키는 아직 없다(RFC의 `HalfLifeSet` 이벤트 및 반감기 설정 계획).
     원장에 기록된 과거 사실은 지워지지 않는 불변식을 유지하며, 이는 `no_wall_clock_death` 불변식의
     유일한 명시적 예외 요구다(Task·Goal·Board 상태는 만료시키지 않는다).
@@ -2045,9 +2046,12 @@ status: reference
   - 브랜치 계층: 스택의 가장 바닥(bottom) PR만 `main`을 base로 삼고, 그 위의 상위 PR들은 각자
     직전 스택 브랜치를 base로 지정한다. 기능(피처) 개발 스택과 CI·인프라 개선 스택은 섞지 않고
     각자의 독립 스택으로 분리해 진행한다.
-  - 전진과 리베이스: 스택 바닥 PR이 `main`에 병합(squash merge)되면, 바로 위 상위 PR의 base를
-    `main`으로 변경하고 직전 브랜치와의 델타를 리베이스한다. 베이스나 head가 바뀌면 변경된 내용을
-    다시 독립 검토한다.
+  - 구성 확인과 병합: PR의 REST stack 메타데이터와 Stacks API로 Native Stack인지 먼저 확인한다.
+    API 조회 실패는 stack 없음이 아니라 미확인이다. Native Stack은 선택한 PR까지의 미병합 하위 PR을
+    함께 아래부터 `stack.base`에 병합한다. `baseRefName`이 `main`이 아니라는 이유로 수동 retarget하지 않는다.
+    포함된 각 PR의 현재 head·독립 승인·판정을 검토하고 병합 직전에 스택 구성과 head를 다시 확인한다.
+    stack이 없는 일반 브랜치 체인은 부모부터 병합하고 이후 실제 base와 diff를 다시 확인한다.
+    base나 head가 바뀌어 diff가 달라지면 변경 범위를 독립 검토한다. 개별 PR 리뷰는 전체 스택 승인이 아니다.
   - 검증과 승인(2026-09-30 운영 정책): 일반 스택(Ordinary stack)은 CI 실행 여부나 대기에
     묶이지 않고, 현재 head에 대한 다각도 소스 검토(기능·논리·코드 청결도)를 통해 P0·P1·P2 결함이
     없으면 즉시 승인(Approve)한다. 판정 줄은 `verdict: PASS head: <40-hex SHA> by: <reviewer>`

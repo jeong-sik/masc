@@ -129,7 +129,10 @@ def main() -> None:
     parser.add_argument("--replay", type=Path, help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.replay is not None:
-        # ttyd forwards Enter only after the browser fixes terminal geometry.
+        # A visible ready record proves the websocket and replay process are
+        # connected before the browser fixes geometry and sends Enter.
+        sys.stdout.buffer.write(b"STUDIO_REPLAY_READY\r\n")
+        sys.stdout.buffer.flush()
         sys.stdin.buffer.readline()
         sys.stdout.buffer.write(args.replay.read_bytes())
         sys.stdout.buffer.flush()
@@ -205,6 +208,12 @@ def main() -> None:
                     page.goto(f"http://127.0.0.1:{port}")
                     page.wait_for_selector(".xterm-helper-textarea", state="attached")
                     page.wait_for_function("window.term && window.term.buffer.active.getLine(0)")
+                    page.wait_for_function("""() => {
+                        const term = window.term;
+                        return Array.from({length: term.rows}, (_, i) =>
+                            term.buffer.active.getLine(i)?.translateToString(true) ?? '')
+                            .some(line => line === 'STUDIO_REPLAY_READY');
+                    }""")
                     page.evaluate("([cols, rows]) => window.term.resize(cols, rows)", [columns, rows])
                     page.wait_for_function(
                         "([cols, rows]) => window.term.cols === cols && window.term.rows === rows",

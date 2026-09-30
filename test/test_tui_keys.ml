@@ -3287,10 +3287,10 @@ let test_the_code_footer_names_the_keys_of_the_pane_it_draws () =
     (fun (label, hints) ->
        check Alcotest.bool (label ^ " has no commit to open") false
          (holds "Enter (history)" hints))
-    [ ("the tree", tree); ("an open file", file); ("the diff", diff); ("history", history) ];
+    [ ("the tree", tree); ("an open file", file); ("the diff", diff); ("history", history); ("diff or notes", overlay) ];
   check Alcotest.bool "diff prioritizes its visible pan keys" true
     (String.starts_with ~prefix:"Shift-←/→:pan" diff);
-  check Alcotest.bool "history does not offer hidden file panning" false
+  check Alcotest.bool "overlay does not offer hidden file panning" false
     (holds "Shift-Left" overlay)
 
 let test_code_asks_the_language_server_three_questions () =

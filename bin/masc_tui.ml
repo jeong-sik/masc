@@ -20389,6 +20389,15 @@ and is loaded on demand through keeper_skill.
                  state.runtime_param_edit <- None;
                  state.runtime_params_notice <-
                    Some (true, edit.rpe_key ^ ": edit cancelled")
+               | "pageup" | "pagedown" ->
+                 let terminal_rows, _ = get_terminal_size () in
+                 let _, detail_height =
+                   Masc_tui_types.runtime_params_viewport state ~terminal_rows in
+                 let page = max 1 (detail_height - 1) in
+                 state.config_scroll <-
+                   (if String.equal k "pagedown" then
+                      Masc_tui_types.scroll_down_from state.config_scroll ~by:page
+                    else max 0 (state.config_scroll - page))
                | "\r" | "\n" | "enter" -> handle_runtime_param_edit_apply ()
                | "\127" | "\b" | "backspace" ->
                  set (Masc_tui_types.runtime_param_edit_backspace edit);

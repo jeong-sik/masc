@@ -14646,6 +14646,15 @@ let render_runtime_params (state : state) =
     :: (Masc_tui_text_block.rows ~max_cells:(max 1 (framed_inner_width cols - 4)) value
         |> List.map (fun line -> "    " ^ line))
   in
+  (* Values are exact JSON. Word wrapping can discard a space at a chunk
+     boundary, so split the sanitised value only between terminal cells. *)
+  let value_field label value =
+    ("  " ^ Ansi.bold ^ label ^ Ansi.reset)
+    :: (Message_layout.split_cells
+          ~max_cells:(max 1 (framed_inner_width cols - 4))
+          (Tui_decode.sanitize_terminal_text value)
+        |> List.map (fun line -> "    " ^ line))
+  in
   let selected_lines =
     (match state.runtime_params_notice with
      | None -> []
@@ -14656,11 +14665,11 @@ let render_runtime_params (state : state) =
     | Some row ->
       let open Tui_decode in
       field "Key" row.rpr_key
-      @ field "Current" row.rpr_current_json
-      @ field "Default" row.rpr_default_json
+      @ value_field "Current" row.rpr_current_json
+      @ value_field "Default" row.rpr_default_json
       @ field "Type" (if String.trim row.rpr_value_type = "" then "typed value" else row.rpr_value_type)
-      @ (match row.rpr_min_json with None -> [] | Some value -> field "Minimum" value)
-      @ (match row.rpr_max_json with None -> [] | Some value -> field "Maximum" value)
+      @ (match row.rpr_min_json with None -> [] | Some value -> value_field "Minimum" value)
+      @ (match row.rpr_max_json with None -> [] | Some value -> value_field "Maximum" value)
       @ (match row.rpr_choices with [] -> [] | choices -> field "Choices" (String.concat " · " choices))
       @ field "Contract" row.rpr_description
       @ (match row.rpr_surface with

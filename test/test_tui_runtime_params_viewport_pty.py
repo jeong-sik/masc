@@ -16,6 +16,13 @@ ZERO_KEY = "02.count"
 CONTRACT_ROWS = [f"contract-row-{index:02d}" for index in range(36)]
 
 
+def detail_position(screen):
+    match = re.search(rb"\b(\d+)-(\d+)/(\d+)\b", screen)
+    if match is None:
+        raise AssertionError(f"detail position missing: {screen!r}")
+    return tuple(map(int, match.groups()))
+
+
 def run(executable):
     requests = []
     fixtures = h.keeper_runtime_http_fixtures()
@@ -98,8 +105,22 @@ def run(executable):
                               needle=b"j/k selects", controls=(h.FULL_REDRAW,))
             scan(process, fd, output)
         # Scrolling the selected contract must not change the key Enter edits.
+        settle(process, fd, output, b"\x1b[H")
         settle(process, fd, output, b"\r")
         settle(process, fd, output, b"\x15typed value")
+        before = detail_position(h.screen_text(bytes(output)))
+        requests.clear()
+        after_screen = settle(process, fd, output, b"\x1b[6~")
+        after = detail_position(after_screen)
+        if after[0] != before[1]:
+            raise AssertionError(f"editor PageDown did not use detail height: {before!r} -> {after!r}")
+        if b"typed value" not in after_screen or b"editing " not in after_screen:
+            raise AssertionError(f"editor paging changed draft or key: {after_screen!r}")
+        back = detail_position(settle(process, fd, output, b"\x1b[5~"))
+        if back != before:
+            raise AssertionError(f"editor PageUp did not restore detail position: {before!r} -> {back!r}")
+        if any(path == "/api/v1/runtime/params/set" for path, _ in requests):
+            raise AssertionError("editor paging wrote a value")
         submit(process, fd, output, TEXT_KEY, "typed value")
         settle(process, fd, output, b"j")
         screen = settle(process, fd, output, b"\r")
@@ -109,7 +130,16 @@ def run(executable):
         settle(process, fd, output, b"j")
         settle(process, fd, output, b"\r")
         # Invalid int draft is refused locally and stays in the editor.
-        screen = settle(process, fd, output, b"\x15invalid\r")
+        screen = settle(process, fd, output, b"\x15invalid")
+        before = detail_position(screen)
+        after_screen = settle(process, fd, output, b"\x1b[6~")
+        # Even a short contract keeps the draft and edit target intact.
+        if b"invalid" not in after_screen or ("editing " + ZERO_KEY).encode() not in after_screen:
+            raise AssertionError(f"paging changed the invalid draft or key: {after_screen!r}")
+        settle(process, fd, output, b"\x1b[5~")
+        if detail_position(h.screen_text(bytes(output))) != before:
+            raise AssertionError("invalid-draft paging changed the initial viewport")
+        screen = settle(process, fd, output, b"\r")
         if any(path == "/api/v1/runtime/params/set" and json.loads(body).get("param_key") == ZERO_KEY
                for path, body in requests):
             raise AssertionError("invalid integer reached the write route")
@@ -172,7 +202,12 @@ def refresh_identity(executable):
 
 def boundary_and_string_values(executable):
     fixtures = h.keeper_runtime_http_fixtures()
+    # At 40 columns the value document has 32 cells: the JSON opening
+    # quote plus a 31-cell prefix fills a row exactly. The next row must
+    # retain one versus two spaces, including after a CJK prefix.
+    prefixes = ["a" * 31, "한" * 15 + "x"]
     values = ["\nfoo\n", "  foo", "", "foo"]
+    values += [prefix + spaces + "END" for prefix in prefixes for spaces in (" ", "  ")]
     keys = [f"value-{index}" for index in range(len(values))]
     fixtures["/api/v1/runtime/params"] = (200, {
         "parameters": [
@@ -203,11 +238,24 @@ def boundary_and_string_values(executable):
                 raise AssertionError(f"detail position missing: {screen!r}")
             return tuple(map(int, match.groups()))
 
+        h.resize_and_wait(process, fd, output, rows=32, columns=40,
+                          needle=b"j/k selects", controls=(h.FULL_REDRAW,))
         for index, value in enumerate(values):
             screen = press(b"\x1b[H")
             literal = json.dumps(value, ensure_ascii=False).encode()
-            if screen.count(literal) < 2:
-                raise AssertionError(f"current/default value lost its JSON representation: {literal!r}; {screen!r}")
+            if index < 4:
+                if screen.count(literal) < 2:
+                    raise AssertionError(f"current/default value lost its JSON representation: {literal!r}; {screen!r}")
+            else:
+                spaces = b" " if (index - 4) % 2 == 0 else b"  "
+                expected = b"      " + spaces + b'END"'
+                rows = h.screen_rows(bytes(output))
+                matching = [row for row in rows.values() if row.startswith(expected)]
+                if len(matching) != 2:
+                    raise AssertionError(f"wrapped current/default lost boundary spaces: {expected!r}; {rows!r}")
+                prefix = prefixes[(index - 4) // 2].encode()
+                if screen.count(b'"' + prefix) < 2:
+                    raise AssertionError(f"wrapped value lost its ASCII/CJK prefix: {screen!r}")
             if index in (0, len(values) - 1):
                 before = position(press(b"\x1b[6~"))
                 if before[0] <= 1:
@@ -224,7 +272,7 @@ def boundary_and_string_values(executable):
             raise AssertionError(f"previous selection retained detail offset: {screen!r}")
         # Enter still edits the selected key after the boundary input.
         screen = press(b"\r")
-        if b"editing value-2" not in screen:
+        if f"editing value-{len(values) - 2}".encode() not in screen:
             raise AssertionError(f"selection identity changed: {screen!r}")
         press(b"\x1b")
         h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")

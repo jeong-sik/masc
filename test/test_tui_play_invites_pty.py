@@ -10,16 +10,37 @@ SOURCE_MODULES = (
     "bin/masc_tui.ml",
     "bin/masc_tui_command.ml",
     "bin/masc_tui_http.ml",
+    "bin/masc_tui_play_card.ml",
+    "bin/masc_tui_render.ml",
+    "bin/masc_tui_types.ml",
     "lib/tui_decode.ml",
-    "bin/masc_tui_play_qr.ml",
 )
 
 LINK = "https://play.example.test/play#fixture-secret"
+CHAT = "Keepers ▸ alpha ▸ chat".encode()
+
+
+def assert_only_play_admin_requests(requests):
+    for path, body in requests:
+        if path in ("/api/v1/play/invites", "/api/v1/play/invites/guest1"):
+            continue
+        # The observer can initialize MCP while the TUI starts. It must not
+        # call a tool, submit a Keeper turn, or send an invite token elsewhere.
+        if path == "/mcp":
+            try:
+                message = json.loads(body)
+            except (ValueError, UnicodeDecodeError):
+                message = None
+            if (isinstance(message, dict) and message.get("jsonrpc") == "2.0"
+                    and message.get("method") in ("initialize", "notifications/initialized")):
+                continue
+        raise AssertionError(f"Play command caused a non-admin effect at {path!r}")
 
 
 def run(executable: str) -> None:
     requests: h.HttpRequests = []
     revoke_methods: list[str] = []
+    list_reads = []
     revokes = h.SequencedHttpResponse([
         (200, {"name": "guest1", "revoked": True,
                "released_controller": False, "release_error": "disk fault"}),
@@ -42,6 +63,7 @@ def run(executable: str) -> None:
             if payload != {"name": "guest1", "hours": 24}:
                 raise AssertionError(f"wrong invite request: {payload!r}")
             return 201, {"name": "guest1", "expires_at": "2026-09-30T00:00:00Z", "link": LINK}
+        list_reads.append(True)
         return 200, {"invites": [
             {"name": "guest1", "expires_at": "2026-09-30T00:00:00Z",
              "expired": False, "holds_controller": False},
@@ -59,14 +81,29 @@ def run(executable: str) -> None:
             h.send_and_wait(process, master, output, line, h.composer_showing(line))
             h.send_and_wait(process, master, output, b"\r", answer)
 
-        command(b"/play invite guest1 24", LINK.encode())
+        def close_card() -> None:
+            h.send_and_wait(process, master, output, b"\x1b", CHAT)
+
+        # The link is drawn only on its local invite card.
+        # Navigating and accepting the picker only changes the draft.
+        h.send_and_wait(process, master, output, b"/play ", b"Commands  1/4")
+        h.send_and_wait(process, master, output, b"\x1b[B", b"Commands  2/4")
+        h.send_and_wait(process, master, output, b"\r", h.composer_showing(b"/play invite"))
+        h.drain_until_quiet(process, master, output)
+        assert not list_reads and not revoke_methods, "selecting a Play action called the admin API"
+        assert not any(path.startswith("/api/v1/play/") for path, _ in requests), "accepting a suggestion executed a Play action"
+        assert_only_play_admin_requests(requests)
+        # Only an explicit expiry and a further Enter issue the invite.
+        h.send_and_wait(process, master, output, b" guest1 24", h.composer_showing(b"/play invite guest1 24"))
+        h.send_and_wait(process, master, output, b"\r", LINK.encode())
         h.wait_for_http_request(process, master, output, requests,
                                 path="/api/v1/play/invites")
-        command(b"/play link", b"Last play link issued")
-        qr_start = len(output)
-        command(b"/play qr", b"Play QR for guest1")
-        h.wait_for_output(process, master, output, b"\xe2\x96\x88",
-                          start=qr_start, timeout=3.0)
+        close_card()
+        h.drain_until_quiet(process, master, output)
+        if LINK.encode() in h.screen_text(bytes(output)):
+            raise AssertionError("the invite link stayed on screen after its card closed")
+        command(b"/play link", b"MASC Play invite")
+        close_card()
         command(b"/play invites", b"old \xc2\xb7 expires not recorded")
         command(b"/play revoke guest1", b"retry /play revoke guest1")
         h.wait_for_output(process, master, output, b"disk fault", start=0, timeout=5.0)
@@ -76,13 +113,17 @@ def run(executable: str) -> None:
         command(b"/play revoke guest1", b"controller still busy")
         command(b"/play revoke guest1", b"controller released")
         command(b"/play invite guest1 24", LINK.encode())
+        close_card()
         command(b"/play revoke guest1", b"is absent (no invite has that name)")
         command(b"/play link", b"No play link has been issued")
+        assert_only_play_admin_requests(requests)
         paths = [path for path, _ in requests]
         if paths.count("/api/v1/play/invites") != 2 or revokes.served != 4:
             raise AssertionError(f"the TUI did not issue and revoke through the play API: {paths!r}")
         if revoke_methods != ["DELETE"] * 4:
             raise AssertionError(f"play revokes used the wrong HTTP methods: {revoke_methods!r}")
+        # One Esc leaves the chat for the keeper's detail, not for the list, and
+        # how many it takes depends on the turn state: the harness counts.
         h.escape_to_keeper_detail(process, master, output, name=b"alpha")
         os.write(master, b"q")
 
@@ -95,8 +136,6 @@ def run(executable: str) -> None:
             "/api/v1/play/invites/guest1": h.MethodHttpResponse(revoke),
         },
         http_requests=requests,
-        terminal_cols=180,
-        terminal_rows=70,
     )
     print("tui play invites: PASS")
 

@@ -10,6 +10,7 @@ permissions:
   contents: write
   actions: write
   issues: write
+  pull-requests: read
 
 # Supersede older candidates on this branch as one unit. Child workflows use
 # separate run-scoped groups so they cannot cancel their caller or other lanes.
@@ -18,12 +19,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  validate:
+    name: Release candidate ref
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require a release branch or tag
+        run: |
+          case "$GITHUB_REF" in
+            refs/heads/release/v*|refs/tags/v*) ;;
+            *) echo "Full verification belongs to release/vX.Y.Z or a version tag" >&2; exit 1 ;;
+          esac
+
   compile:
-    uses: ./.github/workflows/ci.yml
-    with:
-      candidate_verification: true
+    needs: validate
+    uses: ./.github/workflows/full-check.yml
 
   behavior:
+    needs: validate
     uses: ./.github/workflows/test.yml
     with:
       candidate_verification: true
@@ -31,6 +43,7 @@ jobs:
       eio_backend: ""
 
   installation:
+    needs: validate
     uses: ./.github/workflows/release.yml
     with:
       candidate_verification: true

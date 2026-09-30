@@ -142,7 +142,7 @@ let candidate_lines ~prose ~fact ~safe ~scale ~(walk : Inspector.forecast_walk)
         @ (match carried.counted_tokens with
            | Some counted ->
                fact
-                 (Printf.sprintf "Last request measured %s input tok."
+                 (Printf.sprintf "Ledger baseline %s tok; may retain an earlier usage sample or be adjusted after history eviction."
                     (Inspector.format_tokens counted))
            | None -> [])
   in

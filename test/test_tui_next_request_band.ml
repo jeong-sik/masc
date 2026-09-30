@@ -1,6 +1,6 @@
 (* The NEXT REQUEST band draws the server's forecast in tokens at the tab's
-   scale: the carried range from the pair's front, the previous request's
-   count, the separate trim settings, and the parts in the order the request
+   scale: the carried range from the pair's front, the retained ledger
+   baseline, the separate trim settings, and the parts in the order the request
    carries them. The band is rendered here through its own entry point with
    plain folding, so the assertions are about the sentences, not the pane. *)
 
@@ -43,7 +43,7 @@ let lines ?(scale = Masc_tui_token_scale.fleet) forecast =
     forecast
 
 (* lane-smith on a deepseek binding with marks 120k/80k: the ledger's front
-   sits at atom 3,100 of 3,395, the last count was 91k tokens. *)
+   sits at atom 3,100 of 3,395, the ledger baseline is 91k tokens. *)
 let measured : Inspector.forecast =
   { checkpoint_messages = 6012
   ; wake_line_bytes = 131
@@ -124,8 +124,8 @@ let test_the_band_separates_settings_from_the_range () =
     true
     (says ("History preview: send 295 of 3395 original atoms, starting at #3100 (" ^ approx ^ "50.1k tok estimated).") rows
      && says "front from this runtime's ledger" rows);
-  Alcotest.(check bool) "the last input count stands apart from configuration" true
-    (says "Last request measured 91.0k input tok." rows
+  Alcotest.(check bool) "the ledger baseline stands apart from configuration" true
+    (says "Ledger baseline 91.0k tok; may retain an earlier usage sample or be adjusted after history eviction." rows
      && not (says "against marks" rows));
   (* 131 / 3.39 = 38.6: the wake line is named in the same estimated tokens as
      every other figure of the band, never in bytes beside them. *)
@@ -227,7 +227,7 @@ let test_no_marks_still_points_to_configuration () =
   Alcotest.(check bool) "the setting is absent, not a forecast result" true
     (says "Config / Runtime: this binding has no context-high-water-tokens or context-low-water-tokens setting." rows);
   Alcotest.(check bool) "the count stands alone" true
-    (says "Last request measured 91.0k input tok." rows
+    (says "Ledger baseline 91.0k tok; may retain an earlier usage sample or be adjusted after history eviction." rows
      && not (says "against marks" rows))
 
 let test_a_cold_front_names_its_record_and_nothing_counted () =
@@ -249,7 +249,7 @@ let test_a_cold_front_names_its_record_and_nothing_counted () =
   let rows = lines (Ok forecast) in
   Alcotest.(check bool) "the record's turn is named" true
     (says "front from turn #3581's record; nothing counted since the server started" rows);
-  Alcotest.(check bool) "no count line" false (says "last counted" rows)
+  Alcotest.(check bool) "no ledger baseline line" false (says "Ledger baseline" rows)
 
 let test_the_turn_start_and_refusal_fronts_say_why () =
   let with_origin origin =

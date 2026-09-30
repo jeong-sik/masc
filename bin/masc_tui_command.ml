@@ -10,8 +10,7 @@ type t =
   | About
   | Lane_addons of string
   | Play_invites
-  | Play_link
-  | Play_qr
+  | Play_link of string option
   | Play_invite of { name : string; hours : int }
   | Play_revoke of string
   | Play_invalid of string
@@ -102,7 +101,7 @@ let catalog =
     }
   ; { word = "play"
     ; aliases = []
-    ; args = "[invites|invite <name> <hours>|link|qr|revoke <name>]"
+    ; args = "[invites|invite <name> <hours>|link [name]|revoke <name>]"
     ; summary = "list, issue or revoke shared DOS play links"
     }
   ; { word = "settings"
@@ -347,10 +346,13 @@ let parse text =
     | "about", _ | "splash", _ -> About
     | "addons", arg -> Lane_addons arg
     | "play", "" | "play", "invites" -> Play_invites
-    | "play", "link" -> Play_link
-    | "play", "qr" -> Play_qr
+    | "play", "link" -> Play_link None
     | "play", arg -> (
         match split_word arg with
+        | "link", rest -> (
+            match split_word rest with
+            | name, "" when name <> "" -> Play_link (Some name)
+            | _ -> Play_invalid "use /play link [name]")
         | "invite", rest -> (
             let name, hours_and_tail = split_word rest in
             let raw_hours, tail = split_word hours_and_tail in
@@ -364,7 +366,7 @@ let parse text =
             match split_word rest with
             | name, "" when name <> "" -> Play_revoke name
             | _ -> Play_invalid "use /play revoke <name>")
-        | _ -> Play_invalid "use /play invites, /play invite <name> <hours>, /play link, /play qr, or /play revoke <name>")
+        | _ -> Play_invalid "use /play invites, /play invite <name> <hours>, /play link [name], or /play revoke <name>")
     | "metrics", _ | "telemetry", _ -> Open_metrics
     | "login", client -> Account_login client
     | "settings", _ -> Open_settings
@@ -696,6 +698,7 @@ let known_sub_arguments ~keeper_names word =
   (* [show] goes last: [save] is the older word and shares its first
      letter, so leading with [show] would move where "/preset s" lands. *)
   | "preset" -> [ "save"; "restore"; "show" ]
+  | "play" -> [ "invites"; "invite"; "link"; "revoke" ]
   | "keeper" -> keeper_names
   | _ -> []
 

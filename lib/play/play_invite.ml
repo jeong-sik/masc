@@ -54,6 +54,7 @@ type issued =
   }
 
 let play_path = "/play"
+let agent_guide_path = play_path ^ "/agent.md"
 
 (* Every gap at once, so the operator fixes the setup in one pass. *)
 let readiness ~(auth_config : Masc_domain.auth_config) ~public_base_url =
@@ -136,13 +137,19 @@ type revoked =
   | Deleted
   | Already_gone
 
-type revoke_error = Not_an_invite of Masc_domain.agent_role
+type revoke_error =
+  | Not_an_invite of Masc_domain.agent_role
+  | Credential_not_deleted of Masc_domain.masc_error
 
-let revoke ~base_path ~name =
-  match Auth.load_credential base_path name with
-  | Some { Masc_domain.agent_name; role = Masc_domain.Player; _ } when String.equal agent_name name ->
-    Auth.delete_credential base_path name;
-    Ok Deleted
-  | Some { Masc_domain.agent_name; role; _ } when String.equal agent_name name ->
-    Error (Not_an_invite role)
-  | Some _ | None -> Ok Already_gone
+let revoke ~base_path ~name ~after_revoke =
+  Auth.with_credential_transaction base_path (fun transaction ->
+    match Auth.load_credential base_path name with
+    | Some { Masc_domain.agent_name; role = Masc_domain.Player; _ } when String.equal agent_name name ->
+      Auth.delete_credential_in_transaction transaction name
+      |> Result.map_error (fun error -> Credential_not_deleted error)
+      |> Result.map (fun () -> after_revoke Deleted)
+    | Some { Masc_domain.agent_name; role; _ } when String.equal agent_name name ->
+      Error (Not_an_invite role)
+    | Some _ | None -> Ok (after_revoke Already_gone))
+  |> Result.map_error (fun error -> Credential_not_deleted error)
+  |> Result.join

@@ -10,11 +10,15 @@ val first : t -> Keeper_event_queue_state.pending_selection option
 
 val validate :
   diagnostic:Keeper_event_queue_state.pending_selection option ->
-  validate_selection:(Keeper_event_queue_state.pending_selection -> (unit, string) result) ->
-  t -> (unit, string) result
-(** Validate the exact batch. Only when no source was admitted, retain the
-    existing diagnostic-selection check. That diagnostic never becomes an
-    admitted source and is not returned by [selections]. *)
+  standing:
+    (Keeper_event_queue_state.pending_selection ->
+     (Keeper_event_queue_state.admitted_selection_standing, string) result) ->
+  t -> (t * Keeper_event_queue_state.pending_selection list, string) result
+(** Validate the exact batch at provider dispatch. A selection another
+    transition withdrew after intake leaves the returned batch and is listed
+    separately; the rest keep their order. Only when no source was admitted,
+    retain the existing diagnostic-selection check. That diagnostic never
+    becomes an admitted source and is not returned by [selections]. *)
 
 type turn_input
 val for_turn : reactive:bool -> t -> turn_input

@@ -9408,7 +9408,8 @@ def skills_usage_clarity_interaction(
         )
         rendered = CSI_RE.sub(b"", usage)
         expected = [
-            f"{1 if observed else 0} of 2 catalog Skills observed; {1 if observed else 2} without retained invocation".encode(),
+            f"{1 if observed else 0} of 2 catalog Skills observed".encode(),
+            f"{1 if observed else 2} without retained invocation".encode(),
             b"Scope: exact Skill revisions in current Keeper sessions",
             f"Activation ledgers loaded: {ledgers_loaded}; unavailable: {len(unavailable)}".encode(),
         ]
@@ -10709,7 +10710,13 @@ def planning_activity_actor_interaction() -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        tab_until(process, master_fd, output, b"MASC Work")
+        before_work = len(output)
+        work_frame = tab_until(process, master_fd, output, b"MASC Work")
+        work_start = bytes(output).find(work_frame, before_work)
+        wait_for_output(
+            process, master_fd, output, b"Actor-visible goal activity",
+            start=work_start, timeout=3.0,
+        )
         detail = send_and_wait(
             process, master_fd, output, b"\r", b"completed by beta"
         )
@@ -13951,7 +13958,7 @@ def schedule_detail_http_fixtures() -> HttpFixtures:
             "schedule_store_read_error": None,
             "request_count": 1,
             "truncated": False,
-            "fsm": {"next_due_at_iso": "2026-08-25T10:30:00Z"},
+            "fsm": {"next_due_at": "2026-08-25T10:30:00Z"},
             # The runner's status word rides the list once, the word /health
             # reports. The loader requires it: a row's runner_hold is only
             # current while this reads ok.
@@ -18096,6 +18103,11 @@ def run_schedule_delivery_regression(executable: str) -> None:
             # nothing ran it. The suite selects by edited path, and a change
             # to the row's renderer does not select this file.
             b"succeeded consumed_ack",
+            # The summary line's next wake, from the fixture's fsm. The
+            # decoder once read fsm.next_due_at_iso while the server writes
+            # fsm.next_due_at, and the fixture carried the decoder's spelling,
+            # so the line was never drawn and nothing noticed.
+            b"Next due:",
         ):
             if needle not in plain:
                 raise AssertionError(
@@ -20291,6 +20303,7 @@ def dashboard_usage_interaction(
     send_and_wait(process, master_fd, output, b"p", b"MASC Usage / Telemetry")
     send_and_wait(process, master_fd, output, b"3", b"Gate Governance")
     send_and_wait(process, master_fd, output, b"p", b"MASC Usage")
+    send_and_wait(process, master_fd, output, b"w", b"1 UTC days")
     send_and_wait(process, master_fd, output, b"w", b"7 UTC days")
     system = tab_until(process, master_fd, output, b"MASC System")
     if b"MASC System" not in system:

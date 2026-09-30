@@ -97,7 +97,9 @@ repeat `/play revoke <name>`: a second request can release a controller even
 after the invite credential was deleted.
 
 The invited person opens the link in a browser to watch and play the shared
-DOS machine. The TUI can also watch through `go DOS` or the `go MSX` menu's
+DOS machine. The link can also go to an AI agent (Claude Code, Codex, Hermes,
+OpenClaw, pi, ...): the page points it at `/play/agent.md`, which says how to
+join over MCP (`/mcp/play`) or plain HTTP with the token after `#`. The TUI can also watch through `go DOS` or the `go MSX` menu's
 `watch DOS machine` entry when a DOS machine is loaded.
 
 ## Options
@@ -579,6 +581,10 @@ The [Glossary](spec/00-glossary.md#core) uses Lane for the fixed exact-output ex
 For TOML package installations, open `/addons` from the composer or choose
 `go Lane Add-ons` in the palette. The [Lane Add-on guide](guides/tui-lane-addons.md)
 covers configuration editing, connections, Skills, actions and cross-Lane evidence.
+These are three different customization surfaces: Config → Runtime edits named
+Keeper candidate orders; the six exact-output work purposes on this screen are
+fixed, although their runtime slots can be edited; Lane Add-ons load custom
+TOML packages and require a working image before a worker is active.
 
 Standalone execution lanes only. Keeper lifecycle and turn-cycle facts live on
 Keepers, so this surface no longer repeats a second Keeper table. It hangs
@@ -610,8 +616,9 @@ the reading. This is a registry view, not a socket list - a leftover
 process holding a connection is still an `lsof` question.
 
 ```
- MASC Lanes · Standalone (4 lanes)  17:02:53  [connected]
-  Standalone LLM lanes · o:Lane Add-ons · a:append slot · observed 17:02:52
+ MASC Lanes (6 lanes)  17:02:53  [connected]
+  Lanes · observed 17:02:52
+  Lane Add-ons: 2 declared · 0 active · 2 config issues
     LANE       STATUS          ACTIVE  RUNS  OK/FAIL/CANCEL  P50     SLOTS            OBSERVED
  >◒ Librarian  running 12s          1    50  47/2/1          8.0s    librarian-exact  librarian-exact×50
 ```
@@ -625,11 +632,14 @@ a long name moves every row's columns together rather than one row's. The
 counts come before the slots because they are what a reader compares down
 the column; beside the Activity pane the slot column is the one cut, and the
 block under the list prints the selected lane's slots in full. This build
-projects four fixed consumers:
+projects six fixed consumers:
 `Board Attention` judges one durable Board attention candidate, `HITL Auto
 Judge` judges one held approval, `Librarian` selects the next Memory OS
 snapshot from immutable Keeper history, and `Verifier` reviews Task completion
-and Goal proof evidence.
+and Goal proof evidence. `Workspace Curator` classifies changed Keeper facts,
+and `Browser Stagehand` handles model-driven browser operations. The Add-on
+summary counts declared TOML files separately from active workers; a saved
+file can remain unapplied when its package image is unavailable.
 
 The selected row expands underneath the matrix instead of forcing its long
 identifiers through the clipped comparison row. It names the exact
@@ -1748,9 +1758,17 @@ Keeper's effective Tool surface, async requests, Skill activations, cross-Keeper
 Skill usage, and the registered Tool catalog. This keeps the Skill views from
 being buried below a long Tool list.
 
-The Skill Usage pane puts each Keeper on its own row under the skill, in
-columns: `TRIGGERED`, `DELIVERED`, `ACTIONS`, and when it last ran, in this
-terminal's zone like every other clock on the screen. If retained usage
+The Skill Usage pane opens with a summary box: observed catalog entries,
+distinct Keepers, and separate `TRIGGERED`, `DELIVERED`, and `ACTIONS` totals.
+These are observations from current Keeper sessions at exact Skill revisions,
+not lifetime totals or success rates. Missing ledgers make the totals partial
+and are called out beside the summary.
+
+Skill cards follow in descending invocation order. Each card shows its own
+totals and Keeper rows, with the last use in this terminal's timezone.
+Narrow terminals stack a Keeper's counts and last use below its name;
+wider terminals align them in columns. Source configuration and rejected or
+shadowed entries follow the usage cards. If retained usage
 coverage has no time, the row says `time unavailable`; it does not turn
 bounded evidence into a `never used` claim.
 

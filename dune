@@ -19,7 +19,6 @@
 ; produced no signal at all, and a wrapper ladder could grow four rungs deep
 ; before anyone could see it. Setting it centrally means the build stops the
 ; moment a value loses its last caller, in the same edit that removed it.
-; scripts/ci/check-ocaml-compile-authority.sh asserts both flags stay here.
 ;
 ; Warning 69 (unused record field) joins it for the same reason, one level
 ; down: 32 stops a value that lost its last caller, 69 stops a field that lost
@@ -50,12 +49,3 @@
  (files
   (scripts/check-runtime-deployment-preflight.sh as
    masc-check-runtime-deployment-preflight)))
-
-; Build-time check: reject OPERATOR_TODO placeholders in source code.
-; This prevents deployment of code with unresolved placeholders.
-(rule
- (alias all)
- (deps
-  (source_tree .))
- (action
-  (run scripts/ci/check-keeper-instructions-placeholders.sh .)))

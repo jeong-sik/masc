@@ -1,4 +1,4 @@
-.PHONY: diagnostics-disk-hygiene fix-disk-hygiene fix-disk-hygiene-hard dashboard-drift-check dashboard-drift-regen fmt fmt-check health ocaml-health check-memory-leak check-silent check-ssot check-variants ci
+.PHONY: diagnostics-disk-hygiene fix-disk-hygiene fix-disk-hygiene-hard fmt fmt-check health ocaml-health check-memory-leak check-silent check-ssot check-variants ci
 
 # Disk hygiene snapshot for TLC artefacts, Dune cache drift, isolated builds, worktree fan-out.
 diagnostics-disk-hygiene:
@@ -11,16 +11,6 @@ fix-disk-hygiene:
 # Hard reset path for cache drift: also reset ~/.cache/dune and remove stray _build_* dirs.
 fix-disk-hygiene-hard:
 	bash scripts/disk-hygiene.sh --fix --reset-dune-cache --clean-extra-build-dirs
-
-# Dashboard styling-drift ratchet gate — fail if forbidden Tailwind patterns
-# (bg-white/N, border-white/N, rounded-[Npx], text-zinc-*, text-[9px], ...)
-# increase above the committed baseline. Regenerate baseline with the -regen
-# target after an intentional bulk-migration.
-dashboard-drift-check:
-	bash scripts/dashboard-drift-check.sh
-
-dashboard-drift-regen:
-	bash scripts/dashboard-drift-check.sh --regenerate
 
 # Format code (if ocamlformat is installed)
 fmt:

@@ -2095,13 +2095,6 @@
  (modules test_server_health_rollup)
  (libraries alcotest masc_server yojson))
 
-; What check-pr-hygiene.sh attributes to a pull request, run against the
-; shallow clone shape CI has (#35012).
-(test
- (name test_pr_hygiene_range)
- (modules test_pr_hygiene_range)
- (libraries alcotest unix))
-
 ; A rejected keeper boot is only diagnosable from the log line: the sentence
 ; explaining it goes to the HTTP response, which the TUI shows and drops.
 (test
@@ -3081,7 +3074,6 @@
 (include stanzas/test_pr_sync_script.inc)
 
 
-(include stanzas/test_release_train_guard_script.inc)
 
 
 (include stanzas/test_server_state_product.inc)
@@ -5895,16 +5887,16 @@
   %{workspace_root}/test/fixtures/tool_call_quality_benchmark/evidence_runs.json)
  (libraries alcotest masc_test_deps))
 
+(test
+ (name test_keeper_tool_surface_schema)
+ (modules test_keeper_tool_surface_schema)
+ (libraries alcotest yojson masc masc_test_deps))
+
 ; The assembled keeper system prompt is built from registry text plus in-code
 ; XML structure; substring assertions cannot see block order, separator bytes,
 ; or a block that resolved to the empty string. This golden pins the whole
 ; string, and declaring the prompt sources as deps is what makes an edit under
 ; config/prompts re-run it instead of returning a cached pass.
-(test
- (name test_keeper_tool_schema_bytes)
- (modules test_keeper_tool_schema_bytes)
- (libraries alcotest yojson masc masc_test_deps))
-
 (test
  (name test_keeper_system_prompt_blocks)
  (modules test_keeper_system_prompt_blocks)

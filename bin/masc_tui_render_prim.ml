@@ -1740,7 +1740,7 @@ let data_unreliable_close = ")"
 
 
 let data_unreliable_row ~cols err =
-  let err = Tui_decode.sanitize_terminal_text err in
+  let err = Masc.Tui_terminal_text.sanitize_terminal_text err in
   let room =
     max 8
       (framed_inner_width cols

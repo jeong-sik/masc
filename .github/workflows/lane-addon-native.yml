@@ -7,7 +7,19 @@ concurrency:
   group: lane-addon-native-${{ github.ref }}
   cancel-in-progress: false
 jobs:
+  validate:
+    name: Release qualification ref
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Require a release branch or tag
+        run: |
+          case "$GITHUB_REF" in
+            refs/heads/release/v*|refs/tags/v*) ;;
+            *) echo "Native qualification belongs to a Release/Tag candidate" >&2; exit 1 ;;
+          esac
   macos:
+    needs: validate
     runs-on: macos-14
     timeout-minutes: 60
     steps:

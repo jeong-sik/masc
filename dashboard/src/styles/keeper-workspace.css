@@ -1122,8 +1122,7 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   .v2-app[data-reading="true"] > .v2-shell-panel,
   .v2-app[data-reading="true"] .dashboard-status-tray,
   .v2-app[data-reading="true"] .dashboard-focus-mode-toggle,
-  .v2-app[data-reading="true"] .topbar-copilot,
-  .v2-app[data-reading="true"] .kw-chat-actions {
+  .v2-app[data-reading="true"] .topbar-copilot {
     display: none;
   }
 
@@ -1211,6 +1210,13 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
     align-items: start;
     max-width: none;
     gap: 0;
+  }
+
+  /* The runtime alert precedes the rail and section. Give it a full row
+   * rather than auto-placing it in the 56px navigation column. */
+  .kw-detail-alert-strip {
+    grid-column: 1 / -1;
+    min-width: 0;
   }
 
   .kw-detail-section-rail {

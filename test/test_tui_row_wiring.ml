@@ -134,7 +134,7 @@ let test_a_labelled_field_does_not_bracket_its_missing_reading () =
 let heading_bindings =
   let prim = "bin/masc_tui_render_prim.ml" in
   [ (render, "render_lane_run_detail", "detail_heading")
-  ; (render, "fusion_detail_pane", "detail_heading")
+  ; ("bin/masc_tui_render_fusion.ml", "fusion_detail_pane", "detail_heading")
   ; (render, "harness_detail_pane", "harness_detail_heading")
   ; (prim, "harness_detail_heading", "detail_heading")
   ; (render, "render_runtime_detail", "detail_heading")
@@ -170,7 +170,8 @@ let test_the_roster_title_says_whether_the_reading_is_live () =
   (* Asked as "at least once", because a surface whose title has two branches
      -- one for the reading, one for the failure -- draws it in each. *)
   let draws binding_name =
-    Ast_grep.count_calls_in_value_binding ~module_path:render ~binding_name
+    Ast_grep.count_calls_in_value_binding
+      ~module_path:(if binding_name = "render_fusion_list" then "bin/masc_tui_render_fusion.ml" else render) ~binding_name
       ~callee:"connection_badge"
     > 0
   in

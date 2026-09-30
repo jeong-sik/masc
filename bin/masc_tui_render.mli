@@ -1,7 +1,8 @@
 (** Screen dispatch and shared rendering projections.
     Board, Code and MCP resource screens live in
     {!Masc_tui_render_board}, {!Masc_tui_render_code} and
-    {!Masc_tui_render_resources} and {!Masc_tui_render_approvals}. *)
+    {!Masc_tui_render_resources}, {!Masc_tui_render_approvals} and
+    {!Masc_tui_render_fusion}. *)
 
 module Frame_presenter = Masc_tui_frame_presenter
 module Ask_projection = Masc_tui_ask_projection

@@ -36,8 +36,10 @@ def run(executable, no_color):
         h.wait_for_output(process, fd, output, b"reachable", start=0, timeout=10)
         for all_runtimes in (False, True):
             if all_runtimes:
-                h.resize_and_wait(process, fd, output, rows=32, columns=120,
-                                  needle=b"ROUTE / PROBE", controls=(h.FULL_REDRAW,))
+                # The lane sweep already ended at120x32; an unchanged size
+                # produces no redraw. Check geometry, then wait for mode change.
+                size = os.get_terminal_size(fd)
+                assert (size.columns, size.lines) == (120, 32), size
                 h.send_and_wait(process, fd, output, b"p", b"All runtimes")
             for columns in (40, 60, 80, 120):
                 h.resize_and_wait(process, fd, output, rows=32, columns=columns,

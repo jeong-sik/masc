@@ -123,6 +123,60 @@ let test_retained_wire_payload_decode () =
   check bool "invalid base64 rejected" true
     (Result.is_error (Preview.decode_payload "%%%%"))
 
+let artifact_reference content =
+  let sha256 = Digestif.SHA256.(to_hex (digest_string content)) in
+  match Tool_output.make_artifact_ref ~sha256 ~bytes:(String.length content)
+          ~mime:"text/plain" ~preview:"attachment payload" with
+  | Ok reference -> reference
+  | Error error -> fail (Tool_output.make_error_to_string error)
+
+let artifact_envelope (reference : Tool_output.artifact_ref) content =
+  [ "sha256", `String reference.sha256
+  ; "bytes", `Int reference.bytes
+  ; "content", `String content
+  ]
+
+let test_artifact_checks_the_retained_wire_content () =
+  List.iter (fun content ->
+    let reference = artifact_reference content in
+    check (result string string) "verified wire payload decodes to image bytes"
+      (Ok "PNG")
+      (Preview.decode_artifact reference (`Assoc (artifact_envelope reference content))))
+    ["UE5H"; "data:image/png;base64,UE5H"]
+
+let test_artifact_rejects_missing_or_wrongly_typed_envelope_fields () =
+  let content = "UE5H" in
+  let reference = artifact_reference content in
+  let fields = artifact_envelope reference content in
+  List.iter (fun field ->
+    let without = List.remove_assoc field fields in
+    List.iter (fun json ->
+      check bool ("required field: " ^ field) true
+        (Result.is_error (Preview.decode_artifact reference json)))
+      [`Assoc without; `Assoc ((field, `Null) :: without)])
+    ["sha256"; "bytes"; "content"];
+  check bool "non-object response rejected" true
+    (Result.is_error (Preview.decode_artifact reference (`String content)))
+
+let test_artifact_rejects_substitution_or_corruption () =
+  let content = "UE5H" in
+  let reference = artifact_reference content in
+  let fields = artifact_envelope reference content in
+  let replace field value = `Assoc ((field, value) :: List.remove_assoc field fields) in
+  List.iter (fun (label, json) ->
+    check bool label true (Result.is_error (Preview.decode_artifact reference json)))
+    [ "different artifact", replace "sha256" (`String (String.make 64 'a'))
+    ; "recorded byte count differs", replace "bytes" (`Int (reference.bytes + 1))
+    ; "content length differs", replace "content" (`String "UE5HUE5H")
+    ; "same-length content was replaced", replace "content" (`String "SlBH")
+    ];
+  let longer_reference = artifact_reference "UE5HUE5H" in
+  let forged_fields =
+    ["sha256", `String longer_reference.sha256; "bytes", `Int 4; "content", `String content]
+  in
+  check bool "internally consistent envelope must also match recorded bytes" true
+    (Result.is_error (Preview.decode_artifact longer_reference (`Assoc forged_fields)))
+
 let () =
   run
     "tui_image_preview"
@@ -134,6 +188,12 @@ let () =
         ; test_case "sent images preserve staging and path order" `Quick
             test_new_staging_and_new_paths_order_against_sent_images
         ; test_case "retained wire payload decoding" `Quick test_retained_wire_payload_decode
+        ; test_case "artifact validates wire bytes before base64 decoding" `Quick
+            test_artifact_checks_the_retained_wire_content
+        ; test_case "artifact requires typed envelope fields" `Quick
+            test_artifact_rejects_missing_or_wrongly_typed_envelope_fields
+        ; test_case "artifact rejects substitution and corruption" `Quick
+            test_artifact_rejects_substitution_or_corruption
         ; test_case "a named path wins when its message is the newer one" `Quick
             test_a_named_path_wins_when_its_message_is_the_newer_one
         ; test_case "a staged attachment wins when it is the newer one" `Quick

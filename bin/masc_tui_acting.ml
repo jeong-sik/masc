@@ -1328,12 +1328,12 @@ let measured_of_event ~traces event =
 
 (* The cells a name takes once drawn. The table draws the keeper and the
    label through the renderer's [Terminal_text.single_line], which is
-   [Masc.Tui_decode.sanitize_terminal_text]: a control byte reaches the
+   [Masc.Tui_terminal_text.sanitize_terminal_text]: a control byte reaches the
    screen as its four-cell escape ([\x09], [\x1B]). Measuring the raw text
    sized the column narrower than the name it then drew. *)
 let drawn_cells text =
   Masc_tui_message_layout.display_width
-    (Masc.Tui_decode.sanitize_terminal_text text)
+    (Masc.Tui_terminal_text.sanitize_terminal_text text)
 
 let columns ~inner_width measures =
   (* The kept entries repeat a handful of keeper names and event words, and

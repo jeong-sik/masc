@@ -2648,6 +2648,7 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   (* Metadata rows now belong to [planning_detail_lines]. Its local [field]
      builder passes every value through the text-block sanitizer; the pane
      draws those projected rows and the separate transition-derived actions. *)
+  check_fields "planning_detail_pane" [ "pg_id" ];
   check_fields
     ~non_rendering_calls:[ "field"; "List.mem"; "Planning_detail.timeline"; "Link.reference" ]
     "planning_detail_lines"

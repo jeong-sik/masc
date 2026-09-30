@@ -14341,9 +14341,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            state.presets_snapshot <- Some snapshot;
            state.presets_error <- None;
            state.presets_cursor <- cursor;
-           (* The listing just changed, so whatever the cursor now points at
-              is a fresh question. *)
-           state.preset_detail <- Masc_tui_fetched.clear state.preset_detail;
+           (* Ask again while retaining the keyed reading. Clearing it first
+              shortens the document to its loading rows and clamps a reader
+              at its end to a different place before the answer arrives. *)
            ensure_preset_detail state ~mailbox
        | Preset_to_pane, Error detail -> state.presets_error <- Some detail)
   | Preset_contents_shown (sink, result) ->

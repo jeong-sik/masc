@@ -54,13 +54,21 @@ def run(executable, no_color):
               "runtime": {"status": "failed", "error": REASON}}}
     failed = threading.Event()
     reordered = threading.Event()
+    hold_detail = threading.Event()
+    detail_entered = threading.Event()
+    detail_released = threading.Event()
+    def shown_detail():
+        if hold_detail.is_set():
+            detail_entered.set()
+            assert detail_released.wait(10), "test did not release detail response"
+        return 200, detail
     other = dict(manifest, name="other-preset", description="Another preset")
     reloaded = dict(snapshot, presets=[other, manifest])
     fixtures = h.overview_event_http_fixtures()
     fixtures["/api/v1/presets"] = lambda: ((503, {"error": REFRESH_ERROR})
                                             if failed.is_set() else
                                             (200, reloaded if reordered.is_set() else snapshot))
-    fixtures["/api/v1/presets/show?name=layout-proof"] = (200, detail)
+    fixtures["/api/v1/presets/show?name=layout-proof"] = shown_detail
     fixtures["/api/v1/presets/show?name=other-preset"] = (200, dict(detail,
         directory="/fixture/unselected/OTHERONLY", preset=dict(detail["preset"], name="other-preset")))
     fixtures["/api/v1/presets/restore"] = (200, report)
@@ -112,6 +120,25 @@ def run(executable, no_color):
             h.press_and_settle(process, fd, output, b"\x1b[5~")
             assert window(output)[0] < start, "scroll did not return immediately from End"
             h.send_and_wait(process, fd, output, b"\x1b[H", b"DESCHEAD")
+        # Refetching the same preset retains its full document while the
+        # response is held. Otherwise a loading-only frame clamps End away.
+        h.send_and_wait(process, fd, output, b"\x1b[F", b"ERRORRECOVERYEND")
+        h.drain_until_quiet(process, fd, output)
+        held_window = window(output)
+        hold_detail.set()
+        os.write(fd, b"r")
+        try:
+            assert detail_entered.wait(5), "same-name refresh did not refetch detail"
+            # Inspect refresh-era frames, rather than an unchanged old End
+            # frame that happened to be quiet before the renderer ran.
+            h.send_and_wait(process, fd, output, b"\x1b[H", b"DESCHEAD")
+            h.send_and_wait(process, fd, output, b"\x1b[F", b"ERRORRECOVERYEND")
+            h.drain_until_quiet(process, fd, output)
+            assert window(output) == held_window, (held_window, window(output))
+            assert b"ERRORRECOVERYEND" in screen(output), screen(output)
+        finally:
+            detail_released.set()
+        h.send_and_wait(process, fd, output, b"\x1b[H", b"DESCHEAD")
         # Refresh keeps the selected row, full detail and report, with one
         # failure row outside the list. The end hint remains inside 18 rows.
         failed.set()

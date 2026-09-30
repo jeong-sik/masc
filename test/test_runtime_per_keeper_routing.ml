@@ -3102,7 +3102,7 @@ let test_seed_of_thinking_support_gate_contract () =
 
 let test_max_output_tokens_accessor_projects_catalog () =
   let max_output_tokens id =
-    Option.bind (Runtime.get_runtime_by_id id) Runtime.max_output_tokens_of_runtime
+    Option.bind (Runtime.get_runtime_by_id id) Runtime_instance.max_output_tokens_of_runtime
   in
   with_runtime_thinking (fun () ->
     Alcotest.(check (option int))

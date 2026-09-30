@@ -6,44 +6,56 @@ let minimum_size = 48
 let maximum_size = 512
 let default_size = 160
 
-let size_arg args =
+module Item = Keeper_portrait_item
+
+type mode = Starting | Preview of Item.t
+
+let request_arg args =
+  let ( let* ) = Result.bind in
   match args with
   | `Assoc fields ->
-      (match List.assoc_opt "size" fields with
-       | None -> Ok default_size
-       | Some (`Int size) -> Ok size
-       | Some _ -> Error "size must be an integer")
+      let* size =
+        match List.assoc_opt "size" fields with
+        | None -> Ok default_size
+        | Some (`Int size) -> Ok size
+        | Some _ -> Error "size must be an integer"
+      in
+      let* mode =
+        match List.assoc_opt "preview_item" fields with
+        | None -> Ok Starting
+        | Some (`String id) ->
+            (match Item.of_id id with
+             | Some item -> Ok (Preview item)
+             | None -> Error (Printf.sprintf "unknown portrait item: %S; use an id from catalog" id))
+        | Some _ -> Error "preview_item must be an item id string"
+      in
+      Ok (size, mode)
   | _ -> Error "arguments must be an object"
 
-let equipment_to_json (equipment : Keeper_portrait_look.equipment) =
-  let face =
-    match equipment.face with
-    | Bare_face -> "bare_face" | Glasses -> "glasses" | Shades -> "shades"
-    | Eye_patch -> "eye_patch" | Plaster -> "plaster" | Freckles -> "freckles" | Beard -> "beard"
-  in
-  let neck =
-    match equipment.neck with
-    | Bare_neck -> "bare_neck" | Scarf -> "scarf" | Bow_tie -> "bow_tie" | Medal -> "medal"
-  in
-  let head =
-    match equipment.head with
-    | Bare_head -> "bare_head" | Bow -> "bow" | Crown -> "crown" | Beanie -> "beanie"
-  in
-  let hand =
-    match equipment.hand with
-    | Empty_hand -> "empty_hand" | Book -> "book" | Mug -> "mug" | Quill -> "quill"
-  in
-  let base =
-    match equipment.base with
-    | No_dish -> "no_dish" | Dish Oak -> "dish_oak" | Dish Silver -> "dish_silver" | Dish Gilt -> "dish_gilt"
-  in
-  `Assoc [ "face", `String face; "neck", `String neck; "head", `String head
-         ; "hand", `String hand; "base", `String base ]
+let equipment_to_json equipment =
+  `Assoc
+    (List.map
+       (fun slot ->
+          let id =
+            match Item.in_slot equipment slot with
+            | Some item -> Item.id item
+            | None -> Item.empty_id slot
+          in
+          Item.slot_id slot, `String id)
+       Item.slots)
+
+let catalog =
+  `List
+    (List.map
+       (fun item ->
+          `Assoc [ "id", `String (Item.id item)
+                 ; "slot", `String (Item.slot_id (Item.slot item)) ])
+       Item.all)
 
 let handle ~keeper_name ~tool_name ~start_time ~args =
-  match size_arg args with
+  match request_arg args with
   | Error message -> Tool_result.make_err ~tool_name ~class_:Tool_result.Policy_rejection ~start_time message
-  | Ok size ->
+  | Ok (size, mode) ->
       let refuse () =
         Tool_result.make_err ~tool_name ~class_:Tool_result.Policy_rejection ~start_time
           (Printf.sprintf "size must be between %d and %d" minimum_size maximum_size)
@@ -54,7 +66,12 @@ let handle ~keeper_name ~tool_name ~start_time ~args =
        | None -> refuse ()
        | Some size ->
            let body = Keeper_portrait_look.body_of_name keeper_name in
-           let equipment = Keeper_portrait_look.equipment_of_name keeper_name in
+           let starting_equipment = Keeper_portrait_look.equipment_of_name keeper_name in
+           let equipment =
+             match mode with
+             | Starting -> starting_equipment
+             | Preview item -> Item.preview item starting_equipment
+           in
            let width = Keeper_portrait_draw.int_of_size size in
            (* Distance-field sampling, pixel composition and PNG compression
               are CPU work. Let other Keeper fibers run while rendering. *)
@@ -85,7 +102,11 @@ let handle ~keeper_name ~tool_name ~start_time ~args =
                 | Ok artifact ->
                     Tool_result.make_ok ~tool_name ~start_time
                       ~data:(`Assoc [ "name", `String keeper_name
+                                   ; "mode", `String (match mode with Starting -> "starting" | Preview _ -> "preview")
+                                   ; "preview_item", (match mode with Starting -> `Null | Preview item -> `String (Item.id item))
+                                   ; "starting_equipment", equipment_to_json starting_equipment
                                    ; "equipment", equipment_to_json equipment
+                                   ; "catalog", catalog
                                    ; "artifact", `String (Multimodal.Vision_artifact_store.to_string artifact)
                                    ; "media_type", `String "image/png"
                                    ; "width", `Int width; "height", `Int width

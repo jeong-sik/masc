@@ -74,3 +74,7 @@ by the shared save-body extraction, `dos_input_routes` and `dos_tools`.
 
 Independent source review found no blocking repair defect. It did not execute
 the regressions.
+
+## Refreshed main composition
+
+The September 30 refresh retains main a254129a87bdb388ad9e967332f32b27abaf8779 agent guidance and Server_refusal responses, replaces ignored lstat metadata with an explicit unused binding, and moves the release entry to changelog.d/40136.md. refresh-parse-only.json records syntax parsing only. The prior c121 native run does not validate this refreshed source. Local composition imported only the four overlapping main files; GitData publication starts with the complete pinned main tree.

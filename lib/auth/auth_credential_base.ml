@@ -390,7 +390,7 @@ let with_credential_transaction config f =
 let credential_exists_in_transaction (Credential_transaction config) agent_name =
   let file = credential_file config agent_name in
   try
-    run_blocking_io (fun () -> ignore (Unix.lstat file));
+    let _stat = run_blocking_io (fun () -> Unix.lstat file) in
     Ok true
   with
   | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false

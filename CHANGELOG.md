@@ -2,10 +2,6 @@
 
 ## [Unreleased]
 
-### Fixed
-
-- Play invite creation checks and publishes the credential in one Auth transaction, so an invite cannot overwrite a concurrently renewed credential. Revoking a present unreadable or mismatched credential now refuses the request and preserves its controller. Controller recovery uses the same file-presence authority and keeps the holder when the name is a dangling symlink or cannot be checked.
-
 ## [0.49.0] - 2026-09-29
 
 ### Fresh state required

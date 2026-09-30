@@ -1810,12 +1810,13 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
        ~binding_name:"refill_input_reader"
        ~callee:"Render_schedule.Input_wait.await"
      = 1);
-  check int "surface renderers perform no direct stdout writes" 0
-    (Ast_grep.count_calls
-       ~module_path:"bin/masc_tui_render.ml" ~callee:"print_string");
-  check int "surface renderers perform no direct flushes" 0
-    (Ast_grep.count_calls
-       ~module_path:"bin/masc_tui_render.ml" ~callee:"flush");
+  List.iter
+    (fun module_path ->
+      check int "surface renderers perform no direct stdout writes" 0
+        (Ast_grep.count_calls ~module_path ~callee:"print_string");
+      check int "surface renderers perform no direct flushes" 0
+        (Ast_grep.count_calls ~module_path ~callee:"flush"))
+    [ "bin/masc_tui_render.ml"; "bin/masc_tui_render_code.ml" ];
   check int "main has one frame presentation boundary" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"main" ~callee:"Frame_presenter.present");
@@ -3024,23 +3025,24 @@ let test_the_config_frame_is_the_shared_contract () =
    the title when the pane is alone, so the title is counted there and the
    surfaces are counted calling it. *)
 let test_the_pane_surfaces_open_on_a_title_row () =
-  let calls binding_name callee =
-    Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render.ml"
-      ~binding_name ~callee
+  let calls ~module_path binding_name callee =
+    Ast_grep.count_calls_in_value_binding ~module_path ~binding_name ~callee
   in
-  List.iter
-    (fun binding_name ->
-      check int (binding_name ^ " draws the title row once") 1
-        (calls binding_name "pane_surface_header"))
-    [ "render_code"; "render_resources" ];
+  let in_code = calls ~module_path:"bin/masc_tui_render_code.ml" in
+  let in_resources = calls ~module_path:"bin/masc_tui_render.ml" in
+  let in_prim = calls ~module_path:"bin/masc_tui_render_prim.ml" in
+  check int "render_code draws the title row once" 1
+    (in_code "render_code" "pane_surface_header");
+  check int "render_resources draws the title row once" 1
+    (in_resources "render_resources" "pane_surface_header");
   check int "the header draws the title once" 1
-    (calls "pane_surface_header" "pane_surface_title");
+    (in_prim "pane_surface_header" "pane_surface_title");
   check bool "Code's list reads the shared pane height" true
-    (calls "render_code" "code_pane_content_height" >= 1);
+    (in_code "render_code" "code_pane_content_height" >= 1);
   check bool "Code's pane height gives up the title row" true
-    (calls "code_pane_content_height" "pane_surface_content_height" >= 1);
+    (in_code "code_pane_content_height" "pane_surface_content_height" >= 1);
   check bool "Resources gives up the same title row" true
-    (calls "render_resources" "pane_surface_content_height" >= 1)
+    (in_resources "render_resources" "pane_surface_content_height" >= 1)
 ;;
 
 (* The runtime picker is the contract's too: the frame counts its rows, the

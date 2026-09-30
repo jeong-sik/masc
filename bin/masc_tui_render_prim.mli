@@ -616,3 +616,8 @@ val keeper_deletions_hints : Masc_tui_types.state -> scrollable:bool -> string
 val answering_lines : Masc_tui_types.state -> Masc_tui_answering.line list
 
 val answering_preview_rows : int
+
+(** Common title and content geometry for surfaces with two panes. *)
+val pane_surface_header : Buffer.t -> int -> Masc_tui_types.state ->
+  name:string -> split:bool -> unit
+val pane_surface_content_height : rows:int -> int

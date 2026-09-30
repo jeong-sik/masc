@@ -32,8 +32,9 @@ jobs:
   test:
     name: test suite
     runs-on: ubuntu-24.04
-    # Keep the existing operational backstop. Minimal scope is selected by
-    # explicit suites, not inferred from whether a job finishes in two minutes.
+    # Preserve the existing stalled-job backstop: cold setup can take about
+    # 75 minutes, followed by the full runner's 100-minute hang guard and margin.
+    # This is hang safety, not the size goal or a two-minute limit for minimal checks.
     timeout-minutes: 180
     steps:
       - name: Require explicit minimal suites
@@ -135,6 +136,8 @@ jobs:
           #    backstop -- reached only if the suite script cannot enforce
           #    its own deadline.
           # 3. The release job ends after 180 minutes from job start.
+          # Explicit minimal suites select less work; the two-minute example
+          # is not a deadline or a pass/fail boundary.
           MASC_TEST_SUITE_DEADLINE: "5400"
           CI_TEST_TIMEOUT_SEC: "6000"
           CI_TEST_HEARTBEAT_SEC: "30"

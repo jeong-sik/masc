@@ -158,6 +158,10 @@ the exact candidate SHA and preparation receipt; general compile/test runners
 are reusable only. Release candidates retain explicit full verification.
 See [the workflow](docs/CI-REVIEW-WORKFLOW.md).
 
+Prefer short, focused checks: the constitution's "about two minutes"
+describes their intended scale, not a timeout or a pass/fail threshold.
+Only an actual successful completion is build evidence.
+
 ## Commits
 
 Conventional commits, in English:

@@ -16,10 +16,11 @@ to prepare the candidate and receipt. Dispatch `leader-ci.yml` from main with th
 exact candidate SHA, receipt and chosen scopes. Main's verifier rechecks source
 approvals and reconstructs that candidate before build or test jobs begin.
 Ordinary compile builds only `lib/masc.cmxa` for the stack bottom. Ordinary behavior
-verification requires explicit suites. Prefer short, lightweight checks; the
-constitution's two-minute example is not a timeout or success criterion.
-A cold cache may prevent completion; incomplete or skipped
-coverage is never a successful build or test result.
+verification requires explicit suites. Prefer short, lightweight checks; about
+two minutes is an example of their size, not a fixed cap, job timeout or pass/fail
+boundary. Existing stalled-job and runner hang guards are separate resource
+safeguards. Incomplete or skipped coverage is never a successful build or test
+result.
 
 Native GitHub Stacks use REST `stack` metadata and the [stack workflow](guides/NATIVE-GITHUB-STACKS.md). The asynchronous merge endpoint includes all open downstack PRs through the selected PR. Inspect and approve every included head; do not treat a non-main direct base as a blocker or manually retarget a native stack. A leaf source-review PASS does not certify its downstack.
 
@@ -28,6 +29,10 @@ profile, dashboard, model checks, behavioral suites and distribution/installatio
 verification belong to `release-candidate.yml` at Release/Tag. Release publication
 requires an explicit `publish=true` dispatch on an existing version tag and full
 successful verification. Specialized host and packaging proofs remain manual.
+
+Prefer short, focused checks: the constitution's "about two minutes"
+describes their intended scale, not a timeout or a pass/fail threshold.
+Only an actual successful completion is build evidence.
 
 A combined candidate receipt names that candidate and selected coverage. It does
 not become an individual PR's check, an independent source approval or merge

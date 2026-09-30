@@ -452,16 +452,10 @@ let load_from_masc_dir (state : state) (base_path : string) =
   (* A roster change no longer dismisses an action notice: the notice answers
      the operator's last action, and a refresh tick would otherwise wipe it
      before it is read. User actions still clear it. *)
-  let next_navigation =
-    match keepers_error, current_navigation with
-    (* A failed roster cannot prove deletion of a named conversation. The
-       composer separately forbids a new send until the roster is reliable. *)
-    | Some _, Keeper_selection.Message_keeper _ -> current_navigation
-    | Some _, _ | None, _ ->
-        Keeper_selection.reconcile ~current_ids:current_keeper_ids
-          ~next_ids:next_keeper_ids ~current:current_navigation
-  in
-  (match next_navigation with
+  (match
+     Keeper_selection.reconcile ~current_ids:current_keeper_ids
+       ~next_ids:next_keeper_ids ~current:current_navigation
+   with
    | Keeper_selection.List_cursor cursor ->
        state.keeper_cursor <- cursor;
        (match current_keeper_mode with

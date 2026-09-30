@@ -2183,7 +2183,9 @@ Continue uses the last explicitly visited conversation saved as
 `opening = "keeper"` target is not a last-chat record. Failed saves retain the
 visited target with a session-only notice; a visible save whose durability is
 unconfirmed has its own notice. Unreadable receipts show history unavailable.
-A failed roster read offers named history without permitting a new send. With no available remembered target, choose a
+A failed roster read offers named history without permitting a new send.
+A deleted recipient can remain visible in already-open history; Home requires
+choosing an available Keeper to continue. With no available remembered target, choose a
 Keeper. An empty, successfully read roster offers creation while any existing
 Goal or task decisions remain visible. Home's `i` also selects a Keeper before
 writing. A conversation opened through Continue returns to Dashboard with Esc

@@ -291,11 +291,12 @@ def roster_failure_and_deletion(executable):
             if any(path.startswith("/api/v1/keepers/beta/chat")
                    for path, _body in requests[before:]):
                 raise AssertionError("read-only history sent a chat mutation")
-            # A complete observation of deletion now must dismiss named chat.
+            # A complete deletion keeps already-open history readable; Home
+            # offers selection rather than resuming the deleted recipient.
             metadata.unlink()
             start = len(output)
-            os.write(fd, h.FULL_REDRAW)
-            h.wait_for_output(process, fd, output, b"MASC Keepers", start=start, timeout=10)
+            h.wait_for_output(process, fd, output,
+                              "Keepers ▸ beta ▸ chat".encode(), start=start, timeout=10)
             home(process, fd, output, b"Last conversation beta unavailable")
         finally:
             metadata.write_bytes(original)
@@ -312,8 +313,11 @@ def roster_failure_and_deletion(executable):
 
 if __name__ == "__main__":
     executable = os.path.abspath(sys.argv[1])
-    for mode in ("overview", "keeper", "last"):
-        persistence(executable, mode)
+    if sys.platform == "linux":
+        for mode in ("overview", "keeper", "last"):
+            persistence(executable, mode)
+    else:
+        print("Home receipt restart: SKIP (Linux waitid WNOWAIT required)")
     unavailable_receipts(executable)
     session_only(executable)
     changed_disk_mode(executable)

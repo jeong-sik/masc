@@ -15527,22 +15527,35 @@ let help_viewport (state : state) =
    what is highlighted is what will run. *)
 let render_palette (state : state) =
   let terminal_rows, cols = get_terminal_size () in
+  let typed_question =
+    match state.palette_mode with
+    | Masc_tui_types.Palette_jump ->
+        Masc_tui_types.palette_typed_question state.palette_query
+    | Masc_tui_types.Palette_choice _ -> None
+  in
+  let explicit_question =
+    match typed_question with
+    | Some (question, Some symbol) -> Some (question, symbol)
+    | Some (_, None) | None -> None
+  in
   let matches = Masc_tui_types.palette_matches state in
   let total = List.length matches in
   let cursor = max 0 (min state.palette_cursor (total - 1)) in
-  (* A choice says which question, how many names and which line; the
-     prompt is a filter over those names, not a jump query. *)
+  let origin =
+    if Option.is_some state.lane_addons then "Lane Add-ons"
+    else match List.find_opt (fun (_, surface) -> surface = state.view)
+        Masc_tui_keys.help_surfaces with
+      | Some (title, _) -> title
+      | None -> "current screen"
+  in
   let title, prompt, action =
     match state.palette_mode with
-    (* The action reads as a footer label now, so it is spelled like one:
-       lower case, the way every other [key:label] item is. *)
-    | Masc_tui_types.Palette_jump -> (" MASC Command palette", ":", "run")
+    | Masc_tui_types.Palette_jump ->
+        (" MASC Command palette", ":", if Option.is_some typed_question then "ask" else "run")
     | Masc_tui_types.Palette_choice { choice_question; choice_line } ->
         let names = List.length (Masc_tui_types.code_cursor_line_symbols state) in
-        ( Printf.sprintf " %s \xc2\xb7 %d name%s on line %d" choice_question names
-            (if names = 1 then "" else "s") choice_line
-        , "filter:"
-        , "ask" )
+        ( Printf.sprintf " %s · %d names on line %d" choice_question names choice_line
+        , "filter:", "ask" )
   in
   (* The title names the palette the way the key table does (":" command
      palette) and the prompt follows it. It was "Quick Jump & Navigation" with
@@ -15589,18 +15602,30 @@ let render_palette (state : state) =
        it is not a key, and it is the first thing a narrow row should give
        up. *)
     ~hints:
-      (Printf.sprintf "%d/%d  Enter:%s  Up/Down:navigate  Esc:close"
+      (Printf.sprintf "%d/%d  Enter:%s  Up/Down:select  Home/End:first/last  Ctrl-U:clear  Esc:close"
          (if total = 0 then 0 else cursor + 1)
          total action)
     ~body:(fun ~budget c ->
-      let first = if cursor < budget then 0 else cursor - budget + 1 in
-      matches
-      |> List.filteri (fun i _ -> i >= first && i < first + budget)
-      |> List.iteri (fun visible_index (label, _) ->
-           if first + visible_index = cursor then
-             c.push_selected (" " ^ Masc_tui_theme.Glyph.current_entry ^ " " ^ label)
-           else c.push ("   " ^ label));
-      if total = 0 then c.push (Ansi.dim ^ "   (no match)" ^ Ansi.reset))
+      c.push_styled ~style:(Theme.recede ())
+        ("   From " ^ origin ^ " · Esc returns here");
+      match explicit_question with
+      | Some (question, symbol) ->
+          c.push_selected (" " ^ Masc_tui_theme.Glyph.current_entry ^ " " ^ question ^ " "
+            ^ Terminal_text.single_line symbol);
+          c.push "   Ask about this symbol in the file open on Code"
+      | None ->
+          c.push_styled ~style:(Theme.recede ())
+            (Printf.sprintf "   %d commands · %d/%d · type to filter"
+              total (if total = 0 then 0 else cursor + 1) total);
+          let list_rows = max 1 (budget - 2) in
+          let first = max 0 (cursor - list_rows + 1) in
+          matches
+          |> List.filteri (fun i _ -> i >= first && i < first + list_rows)
+          |> List.iteri (fun visible_index (label, _) ->
+               if first + visible_index = cursor then
+                 c.push_selected (" " ^ Masc_tui_theme.Glyph.current_entry ^ " " ^ label)
+               else c.push ("   " ^ label));
+          if total = 0 then c.push "   No matching command · Ctrl-U clears the filter")
 
 (* The patch review overlay. [surface_chrome] owns the box, the fill and the
    footer's row, so the rows are not counted here and the keys on screen are
@@ -16176,11 +16201,11 @@ let frame_choice (state : state) ~terminal_rows =
   | Some card -> `Play_card card
   | None -> match state.account_login with
   | Some view -> `Account_login view
+  | None when state.palette_open -> `Palette
   | None -> match state.lane_addons with
   | Some view -> `Lane_addons view
   | None ->
       if state.about_open then `About
-      else if state.palette_open then `Palette
       else if state.context_inspector_open then `Context
       else if state.keeper_deletions_open then `Keeper_deletions
       else if state.help_open then `Help

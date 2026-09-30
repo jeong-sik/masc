@@ -1,0 +1,28 @@
+{
+  "scope": "Python package-worker stdio, synthetic same-record answer rotation; no native build/Docker/host/live mutation",
+  "parent_candidate": "1d005437b90431cacd599723a8c80c8d276a9e28",
+  "checked_at": "2026-09-30T02:14:44.941230+00:00",
+  "python": "Python 3.14.4",
+  "positive": {
+    "command": [
+      "python3",
+      "-B",
+      "addons/tests/test_quiz_lane.py"
+    ],
+    "tests": 27,
+    "exit_code": 0
+  },
+  "mutation": {
+    "test": "Grader.test_rotating_bytes_with_the_same_incarnation_refuses_then_recovers",
+    "removed": "Only the immutable snapshot URI/SHA comparison; tuple source/incarnation/fact-ID join and record comparison remain",
+    "exit_code": 1,
+    "failures": 1,
+    "mutant_grader_sha256": "cf842e6edd70131573dd1039ddcdc0b215c8f881c151d64fcbcb606872bf9ac1"
+  },
+  "source_sha256": {
+    "addons/quiz-grader/server.py": "fed6ac73ae511f6f11f4e79ae4d90abd260a563a294da57ed1a11c70b5083abf",
+    "addons/quiz-questions/server.py": "00f2c1075a16fb5c1dc947f828eab7b4c30ab25788de32596e8ef8b86a689083",
+    "addons/protocol.py": "694108235985e142c8b0885a34d5d6355b56e9ac2eec9fb9b2bcd44642549362",
+    "addons/tests/test_quiz_lane.py": "136915f7100c3a861a6eff75aa1b8acadab55e4d74f3d5710e1c08e68c10ce5f"
+  }
+}

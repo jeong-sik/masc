@@ -3,7 +3,6 @@
 import base64
 import json
 import os
-import re
 import sys
 from pathlib import Path
 import threading
@@ -109,46 +108,31 @@ def first_use_frames(executable: str) -> None:
             # differs from the harness and the checks below to force a redraw.
             capture("LOADING", 120, b"Connecting to workspace")
             for columns in (80, 140):
-                unread = capture("UNREAD", columns, b"attention not observed")
-                if b"Start here (2 steps)" in unread:
+                unread = capture("UNREAD", columns, b"Approvals and questions: confirm queue not fully read")
+                if b"Create a Keeper" in unread:
                     raise AssertionError("an unread briefing claimed an empty fleet")
-                if b"0 attention items" in unread:
+                if b"No decision is waiting on you." in unread:
                     raise AssertionError("an unread briefing claimed zero attention items")
         finally:
             release.set()
 
         keyboard.wait_for_output(
-            process, fd, output, b"Start here (2 steps)", start=0, timeout=10
+            process, fd, output, b"Create a Keeper", start=0, timeout=10
         )
         for columns in (80, 140):
-            visible = capture("EMPTY", columns, b"Start here (2 steps)")
-            for expected in (
-                b"Start here (2 steps)",
-                b"masc keeper-create --edit --host 127.0.0.1 --port ",
-                b"Open Keepers with 3",
-                b"0 attention items",
-                b"9/9 quota scopes reported",
-            ):
+            visible = capture("EMPTY", columns, b"Create a Keeper")
+            for expected in (b"Create a Keeper", b"Continue", b"Health:"):
                 if expected not in visible:
-                    raise AssertionError(
-                        f"{columns} columns omitted {expected!r}: {visible!r}"
-                    )
-            port = re.search(rb"Port: (\d+)", visible)
-            if port is None:
-                raise AssertionError(f"{columns} columns omitted the server port: {visible!r}")
-            command = (
-                b"masc keeper-create --edit --host 127.0.0.1 --port "
-                + port.group(1)
-            )
-            if not any(command in line for line in visible.splitlines()):
-                raise AssertionError(
-                    f"{columns} columns did not target the displayed server: {visible!r}"
-                )
+                    raise AssertionError(f"{columns} columns omitted {expected!r}: {visible!r}")
+            for forbidden in (b"quota scopes reported", b"Plan usage", b"linked tasks", b"Start here"):
+                if forbidden in visible:
+                    raise AssertionError(f"Home repeated a detail panel: {visible!r}")
         os.write(fd, b"q")
 
     keyboard.run_terminal_scenario(
         executable, description="first-use Dashboard at 80 and 140 columns",
         interact=interact, http_fixtures=fixtures, workspace="overview-demo",
+        prepare_workspace=lambda base: [p.unlink() for p in (Path(base) / ".masc" / "keepers").glob("*.json")],
     )
 
 
@@ -157,14 +141,14 @@ def unreadable_keeper_listing_has_no_first_use_guide(executable: str) -> None:
     fixtures["/api/v1/dashboard/briefing"] = keyboard.unlisted_keepers_briefing()
 
     def interact(process, fd, _slave, output, _base):
-        keyboard.wait_for_output(process, fd, output, b"(EACCES)", start=0, timeout=10)
+        keyboard.wait_for_output(process, fd, output, b"Keepers unlisted: EACCES", start=0, timeout=10)
         frame = keyboard.resize_and_wait(
             process, fd, output, rows=32, columns=140,
-            needle=b"(EACCES)", controls=(keyboard.FULL_REDRAW,),
+            needle=b"Keepers unlisted: EACCES", controls=(keyboard.FULL_REDRAW,),
             final_cursor=b"\x1b[?25l",
         )
         visible = keyboard.screen_text(frame)
-        if b"Start here (2 steps)" in visible or b"masc keeper-create --edit" in visible:
+        if b"Create a Keeper" in visible or b"masc keeper-create --edit" in visible:
             raise AssertionError(f"an unreadable listing claimed an empty fleet: {visible!r}")
         os.write(fd, b"q")
 
@@ -216,10 +200,10 @@ def opening_boot_frames(executable: str) -> None:
 
         def interact(process, fd, _slave, output, base_path):
             chat = expected.startswith(b"Keepers ")
-            # The Dashboard draws its Goals row from the loading frame, but a
-            # fallback reason is set only once the Keeper list is known. Wait
-            # for both before reading the frame, or the read lands too early.
-            needles = (expected,) if chat else (b"Goals \xc2\xb7", expected)
+            # Home actions exist while the initial Keeper read is still in
+            # flight. A fallback must wait for that read's actual reason,
+            # not the earlier loading frame that already says Continue.
+            needles = (expected,) if chat or mode in ("last", "keeper") else (b"Continue",)
             for needle in needles:
                 keyboard.wait_for_output(
                     process, fd, output, needle, start=0, timeout=10
@@ -242,9 +226,9 @@ def opening_boot_frames(executable: str) -> None:
             if not chat:
                 rows = visible.splitlines()
                 reason = next((i for i, row in enumerate(rows) if expected in row), None)
-                goals = next((i for i, row in enumerate(rows) if b"Goals \xc2\xb7" in row), None)
-                if mode in ("last", "keeper") and (reason is None or goals is None or reason >= goals):
-                    raise AssertionError(f"fallback reason was not the first Dashboard row: {visible!r}")
+                continuation = next((i for i, row in enumerate(rows) if b"Continue" in row), None)
+                if mode in ("last", "keeper") and (reason is None or continuation is None or reason >= continuation):
+                    raise AssertionError(f"fallback reason was not before the Home actions: {visible!r}")
             if mode == "last" and target is None:
                 narrow = keyboard.resize_and_wait(
                     process, fd, output, rows=20, columns=80,
@@ -259,6 +243,15 @@ def opening_boot_frames(executable: str) -> None:
                 keyboard.wait_for_output(
                     process, fd, output, b":settings", start=start, timeout=3
                 )
+            if mode == "keeper" and target == "alpha":
+                home = keyboard.palette_go(
+                    process, fd, output, b"go dashboard", b"Choose a Keeper"
+                )
+                visible_home = keyboard.screen_text(home)
+                if b"Continue with alpha" in visible_home:
+                    raise AssertionError(
+                        f"fixed startup Keeper was remembered as a chat: {visible_home!r}"
+                    )
             if mode == "last" and target == "alpha":
                 keyboard.select_keeper_row(process, fd, output, b"beta")
                 keyboard.send_and_wait(

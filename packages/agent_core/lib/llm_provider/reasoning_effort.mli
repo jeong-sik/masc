@@ -13,15 +13,16 @@ type t =
   | High
   | XHigh
   | Max
+  | Ultra
 
 val all : t list
 
-(** Ordinal position on the canonical effort ladder (None_ = 0 .. Max = 6).
+(** Ordinal position on the canonical effort ladder (None_ = 0 .. Ultra = 7).
     Exposed so callers can order efforts for catalog-driven clamping without
     re-deriving the ladder at every consumer. *)
 val rank : t -> int
 
-(** Total order following the effort ladder ([None_] < [Minimal] < ... < [Max]).
+(** Total order following the effort ladder ([None_] < [Minimal] < ... < [Ultra]).
     Used by catalog-driven clamping to pick the nearest accepted effort below a
     requested one. *)
 val compare : t -> t -> int

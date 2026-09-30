@@ -13551,6 +13551,44 @@ let code_pane_content_height (state : state) =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   pane_surface_content_height ~rows
 
+let code_notes_rows (state : state) ~cols =
+  let memos =
+    match Masc_tui_fetched.current state.code_file with
+    | Some (_, Masc_tui_fetched.Ready _) -> state.code_memos
+    | Some (_, (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
+                | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _))
+    | None -> []
+  in
+  let wrap text =
+    Message_layout.wrap_body
+      ~max_cells:(max 1 (cols - 6)) ~sanitize:Terminal_text.single_line text
+  in
+  match memos with
+  | [] -> wrap "(no memo in this file: a comment on its own row reading masc(name): text)"
+  | _ :: _ ->
+      List.concat_map
+        (function
+          | Masc_tui_memo.Memo_at (line, memo) ->
+              let kind = match Ide_memo.kind_word memo.Ide_memo.kind with
+                | None -> "" | Some word -> " (" ^ word ^ ")"
+              in
+              wrap (Printf.sprintf "L%d · %s%s\n%s" line
+                      (Terminal_text.single_line memo.Ide_memo.author) kind
+                      (Terminal_text.single_line memo.Ide_memo.text))
+          | Masc_tui_memo.Broken_at (line, why) ->
+              wrap (Printf.sprintf "L%d · memo unreadable: %s" line
+                      (Terminal_text.single_line why)))
+        memos
+
+let code_notes_viewport (state : state) =
+  let _, cols = get_terminal_size () in
+  let pane_cols =
+    if cols >= keeper_split_threshold_cols then cols - keeper_roster_pane_cols
+    else cols
+  in
+  (List.length (code_notes_rows state ~cols:pane_cols),
+   max 1 (code_pane_content_height state - 1))
+
 let render_code (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let buf = Buffer.create 4096 in
@@ -13810,62 +13848,20 @@ let render_code (state : state) =
     box_divider pane_buf pane_cols;
     let content_height = code_pane_content_height state in
     (if notes_showing then
-       (* The memos are the file's own comments, so the overlay lists what
-          the loaded rows hold in the file's comment syntax and has no
-          reading state of its own. *)
-       (* Read off the rows at load, so this is a lookup. Shown only while
-          the file they came from is the loaded one: clearing the file
-          leaves the field behind, and a list captioning bytes that are no
-          longer on screen is worse than none. *)
-       let memos =
-         match Masc_tui_fetched.current state.code_file with
-         | Some (_, Masc_tui_fetched.Ready _) -> state.code_memos
-         | Some
-             ( _
-             , ( Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
-               | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _ ) )
-         | None -> []
-       in
-       match memos with
-       | [] ->
-           box_line pane_buf pane_cols
-             (Ansi.dim
-             ^ "  (no memo in this file: a comment on its own row reading \
-                masc(name): text)"
-             ^ Ansi.reset);
-           for _ = 2 to content_height do
-             box_empty pane_buf pane_cols
-           done
-       | _ :: _ ->
-           let total = List.length memos in
-           let max_scroll = max 0 (total - content_height) in
-           let scroll = max 0 (min state.code_notes_scroll max_scroll) in
-           let memos_window = Rows.of_list ~first:scroll ~height:content_height memos in
-           for i = 0 to content_height - 1 do
-             match Rows.at memos_window (scroll + i) with
-             | Some (Masc_tui_memo.Memo_at (line, memo)) ->
-                 let kind =
-                   match Ide_memo.kind_word memo.Ide_memo.kind with
-                   | None -> ""
-                   | Some word -> " (" ^ word ^ ")"
-                 in
-                 box_line pane_buf pane_cols
-                   (Printf.sprintf "  %s%-6s%s %s%s%s%s  %s" Ansi.dim
-                      (Printf.sprintf "L%d" line)
-                      Ansi.reset
-                      (Masc_tui_theme.tone Masc_tui_theme.Accent)
-                      (Terminal_text.single_line memo.Ide_memo.author)
-                      kind Ansi.reset
-                      (Terminal_text.single_line memo.Ide_memo.text))
-             | Some (Masc_tui_memo.Broken_at (line, why)) ->
-                 box_line pane_buf pane_cols
-                   (Printf.sprintf "  %s%-6s%s %smemo unreadable: %s%s" Ansi.dim
-                      (Printf.sprintf "L%d" line)
-                      Ansi.reset (Theme.bad ())
-                      (Terminal_text.single_line why)
-                      Ansi.reset)
-             | None -> box_empty pane_buf pane_cols
-           done
+       let rendered = code_notes_rows state ~cols:pane_cols in
+       let total = List.length rendered in
+       let height = max 1 (content_height - 1) in
+       let scroll = max 0 (min state.code_notes_scroll (max 0 (total - height))) in
+       if content_height > 1 then
+         box_line_styled pane_buf pane_cols ~style:(Theme.recede ())
+           (Printf.sprintf "  rows %d-%d of %d" (scroll + 1)
+              (min total (scroll + height)) total);
+       let window = Rows.of_list ~first:scroll ~height rendered in
+       for i = 0 to height - 1 do
+         match Rows.at window (scroll + i) with
+         | Some line -> box_line pane_buf pane_cols ("  " ^ line)
+         | None -> box_empty pane_buf pane_cols
+       done
      else if diff_showing then
        match Masc_tui_fetched.current state.code_diff with
        | Some (_, (Masc_tui_fetched.Stale (_, detail) | Masc_tui_fetched.Failed detail)) ->
@@ -14220,8 +14216,9 @@ let render_code (state : state) =
    else list_pane ~framed:false buf cols);
   let code_pane =
     if state.code_focus_file <> Right_pane then Masc_tui_keys.Code_tree
+    else if state.code_notes_open then Masc_tui_keys.Code_notes
     else if
-      state.code_history_open || state.code_diff_open || state.code_notes_open
+      state.code_history_open || state.code_diff_open
     then Masc_tui_keys.Code_overlay
     else Masc_tui_keys.Code_file
   in

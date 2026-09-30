@@ -1252,7 +1252,17 @@ let footer_hints_work_tasks = hints_of_bindings work_tasks_bindings
 type code_pane =
   | Code_tree  (** the file list has focus *)
   | Code_file  (** a file is open and nothing covers it *)
-  | Code_overlay  (** history, diff or notes is drawn over the file *)
+  | Code_overlay  (** history or diff is drawn over the file *)
+  | Code_notes  (** wrapped memo document is drawn over the file *)
+
+let code_notes_bindings =
+  [ b Navigate "j/k" "scroll"
+  ; b Navigate "PgUp/PgDn" "page"
+  ; b Navigate "Home/End" "edges"
+  ; b Act "m" "close"
+  ; b Navigate "Esc" "back"
+  ; b Meta "?" "help"
+  ]
 
 let footer_hints_code ~pane =
   let file_keys =
@@ -1267,7 +1277,7 @@ let footer_hints_code ~pane =
     match pane with
     | Code_tree -> overlay_keys @ file_keys
     | Code_file -> overlay_keys
-    | Code_overlay ->
+    | Code_overlay | Code_notes ->
         (* [Right / Enter] names the tree and file panes' open. With the
            history overlay up, the one arm behind Right and Enter takes the
            overlay's branch instead, so the row drew two items holding the
@@ -1281,6 +1291,10 @@ let footer_hints_code ~pane =
          { b with label = (match pane with Code_tree -> "move" | _ -> "scroll") }
        else b)
   |> hints_of_bindings
+  |> fun hints ->
+      match pane with
+      | Code_notes -> hints_of_bindings code_notes_bindings
+      | Code_tree | Code_file | Code_overlay -> hints
 
 (* The Runtime footer is the table's, with the two keys that depend on the
    reading on screen: [p] names where it goes from here, and [e] exists only on
@@ -1797,6 +1811,9 @@ let help_sections_for_state (state : state) =
       Some ("Keeper voices", bindings)
     else if state.view = Runtime && Option.is_some state.runtime_detail_target then
       Some ("Runtime detail", runtime_detail_bindings)
+    else if state.view = Code && state.code_focus_file = Right_pane
+            && state.code_notes_open && not state.repository_changes_open then
+      Some ("Code memos", code_notes_bindings)
     else if state.view = Repositories && not state.repository_changes_open
             && Option.is_some state.workspace_activity_repo then
       let context = Option.is_some state.workspace_activity_context_scroll in

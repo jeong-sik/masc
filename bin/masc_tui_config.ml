@@ -13,6 +13,7 @@ type t = {
   theme : string option;
   board_sort : string option;
   candle : string option;
+  reduce_motion : bool option;
   lift_colours : bool option;
   table_frame : bool option;
   hints_visible : bool option;
@@ -141,6 +142,9 @@ let lift_colours_of_doc doc = Keeper_toml_loader.toml_bool_opt doc (tui_table ^ 
    not ask is the change that needs the stronger reason. *)
 let table_frame_of_doc doc = Keeper_toml_loader.toml_bool_opt doc (tui_table ^ ".table_frame")
 
+let reduce_motion_of_doc doc =
+  Keeper_toml_loader.toml_bool_opt doc (tui_table ^ ".reduce_motion")
+
 (* Whether footers spell their key hints, [tui].hints_visible. Absent reads
    as "yes" -- the hints predate the key, and a reader who never set it must
    see no change. Off trades the hint text for status room: the tail
@@ -225,6 +229,7 @@ let load ~base_path =
     theme = read theme_of_doc;
     board_sort = read (fun doc -> Keeper_toml_loader.toml_string_opt doc (tui_table ^ ".board_sort"));
     candle = read (fun doc -> Keeper_toml_loader.toml_string_opt doc (tui_table ^ ".candle"));
+    reduce_motion = read reduce_motion_of_doc;
     lift_colours = read lift_colours_of_doc;
     table_frame = read table_frame_of_doc;
     hints_visible = read hints_visible_of_doc;

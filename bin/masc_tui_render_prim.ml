@@ -105,6 +105,7 @@ let clamped_scroll_now (state : state) = function
   | Acting_detail_scroll _ -> Acting_detail_scroll state.acting_detail_scroll
   | Memory_fact_detail_scroll _ ->
       Memory_fact_detail_scroll state.memory_fact_detail_scroll
+  | Client_detail_scroll _ -> Client_detail_scroll state.client_detail_scroll
   | Verification_detail_scroll _ ->
       Verification_detail_scroll state.verification_detail_scroll
   | Harness_detail_scroll _ -> Harness_detail_scroll state.harness_detail_scroll
@@ -152,6 +153,7 @@ let reader_after_wheel (reader : clamped_scroll)
   | Schedule_detail_scroll value -> Some (Schedule_detail_scroll (step value))
   | Acting_detail_scroll value -> Some (Acting_detail_scroll (step value))
   | Memory_fact_detail_scroll value -> Some (Memory_fact_detail_scroll (step value))
+  | Client_detail_scroll value -> Some (Client_detail_scroll (step value))
   | Verification_detail_scroll value ->
       Some (Verification_detail_scroll (step value))
   | Harness_detail_scroll value -> Some (Harness_detail_scroll (step value))
@@ -1499,12 +1501,10 @@ let count_frame_lines buf =
     else !n + 1
 
 
-(* The roster shows when the terminal can spare its columns and the reader
-   has not put it away. Width is the terminal's answer, [roster_pane_hidden]
-   is theirs, and hiding survives a resize because it is a decision rather
-   than a measurement. *)
+(* Resolve the chat default or explicit choice before applying the terminal's
+   width constraint; resizing never overwrites the reader's preference. *)
 let keeper_roster_pane_shown (state : state) ~cols =
-  Masc_tui_roster_pane.shown ~hidden:state.roster_pane_hidden ~cols
+  Masc_tui_roster_pane.shown ~hidden:(roster_pane_hidden state) ~cols
 
 
 (** Render the keeper list view *)

@@ -19,6 +19,8 @@ import tui_keyboard_harness as terminal
 # masc_tui_lane_addons.ml's, and the palette row this types
 # ("go Lane Add-ons") masc_tui_types.ml's.
 SOURCE_MODULES = (
+    "lib/tui_terminal_text.ml",
+    "lib/tui_terminal_text.mli",
     "bin/masc_tui_render.ml",
     "bin/masc_tui_lane_addons.ml",
     "bin/masc_tui_types.ml",

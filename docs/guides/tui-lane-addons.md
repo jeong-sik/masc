@@ -9,7 +9,7 @@
 
 Add-ons를 열면 **설치 목록**이 나온다. 설치 선언(TOML)과 실행 인스턴스(worker)가 한 목록에 나란히 놓인다.
 머리글은 서로 다른 세 수를 섞지 않는다 — 선언 수, 실행 중 인스턴스 수, 실패한 worker 수.
-선언은 `desired/applied revision`, 인스턴스는 `phase`로 상태를 보여 준다. 선언이 있어도 인스턴스가 없을 수 있고, 그 반대도 아니다.
+선언은 `desired/applied revision`, 인스턴스는 `phase`로 상태를 보여 준다. 선언이 있어도 인스턴스가 없을 수 있고, 수동 부착한 인스턴스는 선언 없이도 목록에 나온다.
 
 `j/k`로 항목을 고르고 Enter로 연다. 선언 항목의 Enter는 설치 선언 화면, 인스턴스 항목의 Enter는 Add-on 상세 화면이다.
 `i`는 패키지 설치기를 열고 `n`은 새 TOML 선언을 쓴다. `r`은 다시 읽는다. 읽기가 오래된 화면은 머리글에 `STALE`을 붙인다.
@@ -23,7 +23,7 @@ Add-ons를 열면 **설치 목록**이 나온다. 설치 선언(TOML)과 실행 
 | --- | --- | --- |
 | `1` | Activity | 관측 사건의 시간축. Lane은 가로 열, 관측 UTC 시각은 세로 행. 같은 시각의 사건을 나란히 비교 |
 | `2` | Links | 설정된 입력 → worker → named output 연결과 관측 범위 |
-| `3` | Installation | 설치 선언 원문, desired/applied revision, 적용 오류 |
+| `3` | Installation | Source·Revision·Instance, 연결된 선언의 Desired·Applied·Issue |
 | `4` | Records | 관측 행의 원문 필드와 근거 |
 
 Activity에서 `j/k`는 관측 시각 순서로 사건을 선택한다. 같은 시각의 사건도 각각 선택할 수 있다.
@@ -50,6 +50,7 @@ Links의 화살표는 선언된 binding이다. 성공한 전달이나 인과관�
 필수 자유 입력이 있는 스키마는 고급 `:act` 경로를 사용한다. `D`는 원문 보기이며
 원문 스키마·revision·연결·근거를 펼친다. 기본 화면에도 오류와 불완전한 입력은 표시된다.
 상세의 `Tab`은 Activity → Links → Installation → Records 순으로 화면을 바꾼다.
+설치 TOML 원문은 설치 목록에서 편집 가능한 선언을 골라 `E`로 편집기를 열어 확인한다.
 
 ## 패키지와 설치 선언
 
@@ -103,7 +104,7 @@ Keeper는 카탈로그의 정확한 reference로 기존 `keeper_skill`에서 본
 `increment`는 DOS 예다. 다른 패키지는 표시된 스키마를 따른다. `t` 또는 `:action {동일 요청 JSON}`은 상태만 조회한다.
 queued·running·confirmed·failed_before_effect·outcome_unknown과 executor·근거를 함께 확인한다.
 Records에서 행을 `Space`로 표시한 뒤 `e`로 근거를 고정한다.
-표시한 행 수와 export 대상 인스턴스를 확인한다. Timeline의 선택 Lane과 export 대상 인스턴스는 별개다.
+표시한 행 수와 export 대상 인스턴스를 확인한다. Activity의 선택 Lane과 export 대상 인스턴스는 별개다.
 직접 지정은 `:evidence {"instance_id":"<ID>","row_ids":["<row-ID>"]}`, 선택 전달은 `keeper_name`을 추가한다.
 `d` 또는 `:detach <instance-ID>`는 해당 설치와 소유 worker를 제거한다. DOS 설치 제거는 그 DOS 머신도 종료한다.
 통계·관측 패키지를 제거해도 별도 생산자는 계속 진행하며 과거 관측·근거는 남는다. `Esc`·`q`는 화면만 닫고, 기존 owner 작업 취소나 Keeper 필수 검토를 추가하지 않는다.

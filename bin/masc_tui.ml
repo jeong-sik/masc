@@ -3546,188 +3546,6 @@ let launch_board_quarantines_bulk_requeue state ~mailbox ~keeper_name items =
                 Masc_tui_http.Post_unanswered "Eio switch is unavailable")
              items ))
 
-let launch_github_identity_view state ~mailbox keeper_name =
-  let request = mark_detail_read_started state ~tab:Detail_github ~keeper:keeper_name in
-  let host = server_peer_host in
-  let port = state.port in
-  Masc_tui_async_read.launch
-    ~deliver:(fun result ->
-      enqueue_async mailbox (Github_identity_view_loaded (request, result)))
-    (fun () ->
-      Masc_tui_loader.load_keeper_github_identity_view ~host ~port
-        ~keeper_name)
-
-let launch_identity_view state ~mailbox keeper_name =
-  let request = mark_detail_read_started state ~tab:Detail_identity ~keeper:keeper_name in
-  let host = server_peer_host in
-  let port = state.port in
-  Masc_tui_async_read.launch
-    ~deliver:(fun result ->
-      enqueue_async mailbox (Identity_providers_loaded (request, result)))
-    (fun () -> Masc_tui_loader.load_identity_providers ~host ~port ~keeper_name)
-
-(* Throw or clear one attached service's switch. Off keeps the token and
-   catalog; the keeper's turns stop being handed that provider's tools. *)
-let launch_identity_switch state ~mailbox ~keeper_name ~provider_id ~enabled =
-  let host = server_peer_host in
-  let port = state.port in
-  let run () =
-    let result =
-      try
-        Masc_tui_http.post_identity_switch ~host ~port ~keeper_name
-          ~provider_id ~enabled
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox
-      (Identity_switch_set (keeper_name, provider_id, enabled, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Identity_switch_set
-           (keeper_name, provider_id, enabled, Error "Eio switch is unavailable"))
-
-(* Begin a login. The answer is a URL the operator has to open; nothing is
-   written to the keeper until the browser comes back to the server. *)
-(* Recording an app the operator made. Answers on the same notice line a
-   failed attempt uses -- what an operator wants after pressing save is one
-   sentence saying whether it took, in the place they are already reading. *)
-let launch_identity_app_save state ~mailbox
-      ~(form : Masc_tui_types.identity_app_form) =
-  let host = server_peer_host in
-  let port = state.port in
-  let provider_id = form.Masc_tui_types.iaf_provider in
-  let client_id = form.Masc_tui_types.iaf_client_id in
-  let client_secret = form.Masc_tui_types.iaf_client_secret in
-  let scopes = form.Masc_tui_types.iaf_scopes in
-  let run () =
-    let result =
-      try
-        match
-          Masc_tui_http.post_keeper_oauth_client ~host ~port ~provider_id
-            ~client_id ~client_secret ~scopes
-        with
-        | Error err -> Error err
-        | Ok json ->
-          Masc.Tui_decode.decode_oauth_client_saved json
-          |> Result.map_error (fun detail ->
-            "app recorded, but the reply could not be read: " ^ detail)
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Identity_app_saved (provider_id, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-    Eio.Fiber.fork_daemon ~sw (fun () ->
-      run ();
-      `Stop_daemon)
-  | None ->
-    enqueue_async mailbox
-      (Identity_app_saved (provider_id, Error "Eio switch is unavailable"))
-
-let launch_identity_login state ~mailbox ~keeper_name ~provider_id ~label =
-  let host = server_peer_host in
-  let port = state.port in
-  let run () =
-    let result =
-      try
-        match
-          Masc_tui_http.post_keeper_oauth_login ~host ~port ~keeper_name
-            ~provider_id
-        with
-        | Error err -> Masc_tui_identity_updates.Login_failed err
-        | Ok json -> (
-            match json with
-            | `Assoc fields -> (
-                match List.assoc_opt "attached" fields with
-                | Some (`Bool true) ->
-                    let msg =
-                      match List.assoc_opt "message" fields with
-                      | Some (`String m) -> m
-                      | _ -> label ^ ": credentials attached."
-                    in
-                    enqueue_async mailbox (Identity_refreshed (keeper_name, Ok ()));
-                    Masc_tui_identity_updates.Login_attached msg
-                | _ -> (
-                    match List.assoc_opt "authorize_url" fields with
-                    | Some (`String url) ->
-                        let provider_id =
-                          match List.assoc_opt "provider" fields with
-                          | Some (`String id) -> id
-                          | Some _ | None -> provider_id
-                        in
-                        (* Opened here, on this fiber, because the URL is about
-                           nine hundred characters and a pane truncates it -- an
-                           operator cannot select what is not on screen. It is
-                           still printed below, wrapped, for the machine that has
-                           no opener. *)
-                        (match Masc_tui_browser.open_url url with
-                        | Ok _ | Error _ -> ());
-                        Masc_tui_identity_updates.Login_started { provider_id; label; url }
-                    | Some _ | None ->
-                        Masc_tui_identity_updates.Login_failed "the server answered without an authorize_url"))
-            | _ ->
-                Masc_tui_identity_updates.Login_failed "the server answered with something this cannot read")
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Masc_tui_identity_updates.Login_failed (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Identity_login_started (keeper_name, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Identity_login_started
-           (keeper_name, Masc_tui_identity_updates.Login_failed "Eio switch is unavailable"))
-
-(* Ask every attached service again what tools it has. An operator action
-   rather than a timer: a stale catalog is visible and fixable, while a timer
-   is a network call nobody asked for. *)
-let launch_identity_refresh state ~mailbox ~keeper_name ~provider_ids =
-  let host = server_peer_host in
-  let port = state.port in
-  let run () =
-    let result =
-      try
-        List.fold_left
-          (fun acc provider_id ->
-            match acc with
-            | Error _ as err -> err
-            | Ok () -> (
-                match
-                  Masc_tui_http.post_keeper_identity_refresh ~host ~port
-                    ~keeper_name ~provider_id
-                with
-                | Ok _ -> Ok ()
-                | Error err -> Error (provider_id ^ ": " ^ err)))
-          (Ok ()) provider_ids
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Identity_refreshed (keeper_name, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Identity_refreshed (keeper_name, Error "Eio switch is unavailable"))
-
 let launch_connectors_load state ~mailbox =
   if state.connectors_inflight then ()
   else begin
@@ -9730,7 +9548,7 @@ let launch_detail_tab_reading state ~mailbox (keeper : keeper) =
   | Detail_github ->
       state.github_identity_view <- None;
       state.github_identity_view_error <- None;
-      launch_github_identity_view state ~mailbox keeper.k_name
+      Masc_tui_identity_requests.launch_github_view state ~host:server_peer_host ~deliver:(fun message -> enqueue_async mailbox message) keeper.k_name
   | Detail_identity ->
       state.identity_view <- None;
       state.identity_view_error <- None;
@@ -9739,7 +9557,7 @@ let launch_detail_tab_reading state ~mailbox (keeper : keeper) =
       state.identity_cursor <- 0;
       state.identity_attempt_error <- None;
       state.identity_filter <- None;
-      launch_identity_view state ~mailbox keeper.k_name
+      Masc_tui_identity_requests.launch_view state ~host:server_peer_host ~deliver:(fun message -> enqueue_async mailbox message) keeper.k_name
   | Detail_channels -> launch_connectors_load state ~mailbox
   | Detail_automation ->
       (* This Keeper's schedules (state.keeper_schedules, what the tab reads),
@@ -10146,7 +9964,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        | Some keeper when Option.is_none
            (Masc_tui_types.pending_detail_read state ~tab:Detail_identity
               ~keeper:keeper.k_name) ->
-           launch_identity_view state ~mailbox keeper.k_name
+           Masc_tui_identity_requests.launch_view state ~host:server_peer_host ~deliver:(fun message -> enqueue_async mailbox message) keeper.k_name
        | Some _ | None -> ());
     (* Held tool calls ride every tick, not just the Approvals surface: the
        strip's Approvals badge is drawn from every surface, and a stale count
@@ -13077,7 +12895,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
   | Identity_switch_set (keeper_name, provider_id, enabled, result) ->
       Masc_tui_identity_updates.switch_set state ~keeper_name ~provider_id ~enabled
         ~report:(fun level detail -> report_action state level detail)
-        ~refresh:(fun keeper -> launch_identity_view state ~mailbox keeper) result
+        ~refresh:(fun keeper -> Masc_tui_identity_requests.launch_view state ~host:server_peer_host ~deliver:(fun message -> enqueue_async mailbox message) keeper) result
   | Identity_providers_loaded (request, result) ->
       Masc_tui_identity_updates.providers_loaded state request result
   | Identity_login_started (keeper_name, result) ->
@@ -13086,7 +12904,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       Masc_tui_identity_updates.app_saved state ~provider_id result
   | Identity_refreshed (keeper_name, result) ->
       Masc_tui_identity_updates.refreshed state ~keeper_name
-        ~refresh:(fun keeper -> launch_identity_view state ~mailbox keeper) result
+        ~refresh:(fun keeper -> Masc_tui_identity_requests.launch_view state ~host:server_peer_host ~deliver:(fun message -> enqueue_async mailbox message) keeper) result
   | Account_login_event (view, generation, event) ->
       (match state.account_login with
        | Some current when current == view && view.generation = generation ->
@@ -13178,7 +12996,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
        | Ok () -> report_action state "system" (keeper_name ^ ": github login stream ended")
        | Error detail ->
            report_action state "error" (keeper_name ^ ": github login: " ^ detail));
-      launch_github_identity_view state ~mailbox keeper_name)
+      Masc_tui_identity_requests.launch_github_view state ~host:server_peer_host ~deliver:(fun message -> enqueue_async mailbox message) keeper_name)
   | Github_token_saved (keeper_name, result) -> (
       (match result with
        | Ok json ->
@@ -13195,7 +13013,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            report_action state "error" (keeper_name ^ ": github token save: " ^ detail);
            state.github_token_save_status <-
              Some ((Theme.bad ()) ^ "✗ Token save failed: " ^ detail ^ Ansi.reset));
-      launch_github_identity_view state ~mailbox keeper_name)
+      Masc_tui_identity_requests.launch_github_view state ~host:server_peer_host ~deliver:(fun message -> enqueue_async mailbox message) keeper_name)
   | System_logs_loaded result -> apply_system_logs_load state result
   | Schedules_loaded (request, result) -> (
       match Snapshot_read.settle state.schedules_read request with
@@ -19619,7 +19437,7 @@ and is loaded on demand through keeper_skill.
                            Masc_tui_types.iaf_field = Masc_tui_types.App_scopes
                          }
                    | Masc_tui_types.App_scopes ->
-                     launch_identity_app_save state ~mailbox:async_messages
+                     Masc_tui_identity_requests.launch_app_save state ~host:server_peer_host ~deliver:(fun message -> enqueue_async async_messages message)
                        ~form;
                      state.identity_app_form <- None)
                | s
@@ -19848,7 +19666,7 @@ and is loaded on demand through keeper_skill.
                     match row with
                     | Some (Some _, enabled, None) ->
                         state.identity_attempt_error <- None;
-                        launch_identity_switch state ~mailbox:async_messages
+                        Masc_tui_identity_requests.launch_switch state ~host:server_peer_host ~deliver:(fun message -> enqueue_async async_messages message)
                           ~keeper_name:keeper.k_name ~provider_id
                           ~enabled:(enabled = Some false)
                     | Some (Some _, _, Some problem) ->
@@ -19923,7 +19741,7 @@ and is loaded on demand through keeper_skill.
                    | Some (provider_id, label) ->
                      state.identity_login <- None;
                      state.identity_attempt_error <- None;
-                     launch_identity_login state ~mailbox:async_messages
+                     Masc_tui_identity_requests.launch_login state ~host:server_peer_host ~deliver:(fun message -> enqueue_async async_messages message)
                        ~keeper_name:keeper.k_name ~provider_id ~label
                    | None -> ())
                | Some _, (Some _ | None) | None, _ -> ())
@@ -20713,7 +20531,7 @@ and is loaded on demand through keeper_skill.
                    state.identity_cursor <- wanted;
                    state.identity_login <- None;
                    state.identity_attempt_error <- None;
-                   launch_identity_login state ~mailbox:async_messages
+                   Masc_tui_identity_requests.launch_login state ~host:server_peer_host ~deliver:(fun message -> enqueue_async async_messages message)
                      ~keeper_name:keeper.k_name ~provider_id ~label
                | None -> ())
            | Some _, (Some _ | None) | None, _ -> ())
@@ -20733,7 +20551,7 @@ and is loaded on demand through keeper_skill.
                    providers
                in
                if attached <> [] then
-                 launch_identity_refresh state ~mailbox:async_messages
+                 Masc_tui_identity_requests.launch_refresh state ~host:server_peer_host ~deliver:(fun message -> enqueue_async async_messages message)
                    ~keeper_name:keeper.k_name ~provider_ids:attached
            | Some _, (Some _ | None) | None, _ -> ())
        | Some "R" when state.view = Approvals ->
@@ -23310,7 +23128,7 @@ and is loaded on demand through keeper_skill.
                | Some (provider_id, label) ->
                    state.identity_login <- None;
                    state.identity_attempt_error <- None;
-                   launch_identity_login state ~mailbox:async_messages
+                   Masc_tui_identity_requests.launch_login state ~host:server_peer_host ~deliver:(fun message -> enqueue_async async_messages message)
                      ~keeper_name:keeper.k_name ~provider_id ~label
                | None -> ())
            | Some _, (Some _ | None) | None, _ -> ())

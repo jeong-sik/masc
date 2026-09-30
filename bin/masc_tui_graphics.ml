@@ -143,6 +143,11 @@ let identity ~image_id ~placement_id =
 let replace_rgb ~image_id ~placement_id =
   encode_rgb ~identity:(identity ~image_id ~placement_id)
 
+(* No payload and no format key: a=p names pixels the terminal already
+   holds, so there is nothing to decode. *)
+let put ~image_id ~placement_id ~rows =
+  Printf.sprintf "%sa=p%s,r=%d,q=2%s" apc (identity ~image_id ~placement_id) (max 1 rows) st
+
 let delete_image ~image_id =
   Printf.sprintf "%sa=d,d=I,i=%d,q=2%s" apc image_id st
 

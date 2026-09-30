@@ -42,6 +42,12 @@ Runtime picker [집중 run 36662423793](https://github.com/jeong-sik/masc/action
 
 Schedules `504b176078`의 새 viewport, hold, delivery는 PASS였으나 기존 source-status 시나리오가 실패했다. 이전 조회 유지 경고가 본문 스크롤 밖으로 사라진 실제 회귀이며, `f088db60a2`에서 고정 경고 행과 전체 오류 읽기·공유 높이를 함께 복구했다. [수정 실행36668855707](https://github.com/jeong-sik/masc/actions/runs/36668855707)은 요청 후 미확인이다.
 
+필수 검사 후속: Tables `2c7f3ff122`의 `36664455073`은 `/repo/example`이 40열에서 `/re…example`로 정상 접힌 뒤 `/repo` 문자열을 요구한 검사에서 실패했다. 원문을 읽고 root·basename·fold 표시 및 더 넓은 폭의 전체 경로 검사를 보완했고, main 통합 `560667e1a2`의 [집중 run36670468008](https://github.com/jeong-sik/masc/actions/runs/36670468008)을 요청했다. 잘못된 추가 suite 이름을 쓴 `36670398026`은 취소했으며 증거로 쓰지 않는다.
+
+Presets `3128a81dda`의 필수 run `36666262338`은 PTY holder의 bare Event.wait lint와 Config footer 기대값에서 실패했다. `f0f1cc6bce`는 PTY를 읽는 event 대기 helper를 쓰고 실제 `Home/End:detail` 안내를 기대값에 반영했다. 원문 실패 확인·독립 응답 리뷰·wait guard/Python/OCaml parsing은 완료했으며, [집중 run36670474174](https://github.com/jeong-sik/masc/actions/runs/36670474174)의 결과는 아직 미확인이다. 집중 실행 PASS를 필수 체크 PASS로 일반화하지 않는다.
+
+Board [#40088](https://github.com/jeong-sik/masc/pull/40088)은 조회 시 main에 merge commit `f960a2dada3583777c2abada69be2c557a8d4e59`로 병합되어 있었다. 필수 5 checks success를 확인했으나 설치 바이너리의 반영은 확인하지 않았다. Chat [#40186](https://github.com/jeong-sik/masc/pull/40186)의 `4e220fb942`는 전체 foreign stop 명령·물리 행 예산을 보완했으며 독립 리뷰/응답 리뷰 및 parsing을 마쳤다. 최신 CI는 요청되어 있고 아직 실행 PASS를 선언하지 않는다.
+
 ## 수정과 남은 결함
 
 `PR`는 구현이 게시되었다는 뜻이다. 아래에 적힌 PR들의 현재 head·CI·리뷰·병합 상태는 작업 직전에 다시 확인한다.

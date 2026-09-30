@@ -21,7 +21,17 @@ Choose exactly one grade:
 - small: one bounded change, including a single bounded new capability.
 - medium: a feature explicitly combining several distinct, connected outcomes.
 - large: substantial coordinated outcomes across features.
-- epic: a broad system-level outcome spanning several feature families.
+- epic: a broad system level outcome spanning several feature families, including
+  a common foundation with explicitly promised correctness or recovery guarantees
+  across several product domains.
+
+A shared implementation does not narrow the promised coverage. If the Goal
+explicitly commits a common foundation to coordinated behavior across several
+product domains, grade that system scope even when one subsystem implements it.
+Do not collapse that promise into one bounded capability. A technology swap
+alone, or several interfaces exposing the same bounded capability, does not
+establish that scope; the broad coverage must be explicit in the promised
+outcome and success condition.
 
 A short description and an expanded description of the same promised outcome
 receive the same grade. Added wording, persuasive language and requests for a

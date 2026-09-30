@@ -235,6 +235,36 @@ let test_alias_revocation_preserves_canonical_owner () =
     check bool "alias cannot revoke canonical owner, even with malformed expiry" true (Result.is_error result);
     check bool "alias rejection preserves every canonical artifact" true (bytes () = before)) [false; true]
 
+let test_malformed_direct_owner_revokes_verified_uuid () =
+  List.iter (fun foreign -> with_workspace @@ fun base_path _ ->
+    let token, credential = auth_ok (Auth.create_token_without_expiry base_path
+        ~agent_name:"operator" ~role:Masc_domain.Worker) in
+    let id = Masc_domain.Credential_id.generate () in
+    let credential = { credential with id = Some id } in
+    Auth.save_credential base_path credential;
+    let named = Auth.credential_file base_path "operator" in
+    let uuid = Filename.concat (Filename.dirname named) (Masc_domain.Credential_id.to_string id ^ ".json") in
+    Auth.save_private_text_file named
+      (Yojson.Safe.to_string (Masc_domain.agent_credential_to_yojson
+        { credential with expires_at = Some "invalid" }));
+    Auth.save_private_text_file (Auth.raw_token_file base_path "operator") token;
+    if foreign then Auth.save_private_text_file uuid
+      (Yojson.Safe.to_string (Masc_domain.agent_credential_to_yojson
+        { credential with agent_name = "other" }));
+    let paths = [named; uuid; Auth.raw_token_file base_path "operator"] in
+    let snapshot () = List.map (fun path -> In_channel.with_open_bin path In_channel.input_all) paths in
+    let before = snapshot () in
+    let result = Auth.with_credential_transaction base_path (fun transaction ->
+      Auth.delete_credential_in_transaction transaction "operator") |> Result.join in
+    if foreign then (
+      check bool "foreign UUID refuses revocation" true (Result.is_error result);
+      check bool "refusal precedes every deletion" true (snapshot () = before))
+    else (
+      let () = auth_ok result in
+      List.iter (fun path -> check bool "all canonical artifacts removed" false (Sys.file_exists path)) paths;
+      check bool "old bearer cannot authenticate from remaining UUID index" true
+        (Result.is_error (Auth.find_static_credential_by_token base_path ~token)))) [false; true]
+
 let test_revoke_unlinks_dangling_named_path () =
   with_workspace @@ fun base_path _ ->
   let path = Auth.credential_file base_path "dangling" in
@@ -264,7 +294,8 @@ let test_dangling_credential_directory_is_unreadable () =
 let () =
   run "credential expiry feature"
     [ "bearer, OAuth, seats and inventory",
-      [ test_case "redirect aliases cannot revoke canonical owners" `Quick test_alias_revocation_preserves_canonical_owner
+      [ test_case "malformed direct owner revokes only its verified UUID" `Quick test_malformed_direct_owner_revokes_verified_uuid
+      ; test_case "redirect aliases cannot revoke canonical owners" `Quick test_alias_revocation_preserves_canonical_owner
       ; test_case "revoke actually unlinks dangling named paths" `Quick test_revoke_unlinks_dangling_named_path
       ; test_case "malformed exact credential refuses prefix bearer and can be revoked" `Quick
           test_invalid_exact_identity_refuses_prefix_bearer

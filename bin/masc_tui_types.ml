@@ -2953,7 +2953,8 @@ and surface_needs_of_surface : surface -> surface_needs = function
   (* Home reads decision sources. Work owns Goal evidence and Usage owns
      provider reports; their detail payloads do not belong on this screen. *)
   | Overview ->
-      { nothing with needs_operator_approvals = true; needs_asks = true }
+      { nothing with needs_operator_approvals = true; needs_asks = true
+      ; needs_keeper_roster = true }
   (* Its rows come from the acting store and the keeper list, neither of which
      is fetched here. *)
   | Acting -> nothing

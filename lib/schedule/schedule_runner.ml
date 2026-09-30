@@ -239,7 +239,7 @@ type seen_primary_failure =
   | Seen_absent
   | Seen_unparseable of string
 
-let load_seen_primary config =
+let decode_seen_primary config =
   match Workspace_utils.read_json_doc config (signal_seen_path config) with
   | Error error -> Error (Seen_unparseable (Workspace_utils.json_doc_error_to_string error))
   | Ok None -> Error Seen_absent
@@ -247,6 +247,21 @@ let load_seen_primary config =
     (match parse_seen_json json with
      | Ok keys -> Ok keys
      | Error msg -> Error (Seen_unparseable msg))
+;;
+
+(* The primary seen list, kept with the file version it was read from. Every
+   tick reads it, and a tick that neither emits nor prunes writes nothing, so
+   most ticks find the file unchanged. [write_seen] forgets it after it
+   writes. The Memory backend is not a file, so its reads decode every
+   time, as [Schedule_store] does for the ledger. *)
+let decoded_seen_primary : string list File_version_cache.t = File_version_cache.create ()
+
+let load_seen_primary config =
+  let decode () = decode_seen_primary config in
+  match config.Workspace_utils.backend with
+  | Workspace_utils.FileSystem _ ->
+    File_version_cache.load decoded_seen_primary (signal_seen_path config) ~decode
+  | Workspace_utils.Memory _ -> decode ()
 ;;
 
 let load_seen_recovery config =
@@ -293,7 +308,10 @@ let read_seen config =
 let write_seen config keys =
   Workspace_utils.mkdir_p (schedules_dir config);
   let json = `List (List.map (fun key -> `String key) keys) in
-  let* () = Workspace_utils.write_json_result config (signal_seen_path config) json in
+  let written = Workspace_utils.write_json_result config (signal_seen_path config) json in
+  (* Landed or not, the file may no longer be the version that was read. *)
+  File_version_cache.forget decoded_seen_primary (signal_seen_path config);
+  let* () = written in
   (* The primary already committed above; a failed mirror write only means
      the next corrupt-primary read has no recovery source. *)
   (* fire-and-forget: a mirror write failure does not fail this commit. *)
@@ -316,6 +334,18 @@ let append_signal config signal =
          (Unix.error_message err))
 ;;
 
+(* The keys of the last schedule list they were taken from. The store hands
+   every tick of an unchanged ledger the same decoded list, and a decoded list
+   is never changed in place, so such a tick reuses the keys instead of
+   hashing every stored schedule again. A list the tick has not seen, from a
+   ledger that changed, takes its keys anew. Only [append_new_signals] reads
+   the table, and nothing writes it once it is kept. *)
+let keys_of_last_schedules :
+  (Schedule_domain.schedule_request list * (string, unit) Hashtbl.t) option Atomic.t
+  =
+  Atomic.make None
+;;
+
 (* A seen key is one occurrence id: a digest of the schedule instance, its
    schedule id, its due time and its payload. A tick can emit a key only for
    a request the ledger currently holds, at that request's current due time
@@ -335,12 +365,16 @@ let append_signal config signal =
    a base path and runs its ticks one after another, so no other tick can
    advance a schedule and record its new key in between. *)
 let current_occurrence_keys (state : Schedule_store.state) =
-  let keys = Hashtbl.create (List.length state.schedules) in
-  List.iter
-    (fun request ->
-       Hashtbl.replace keys (Schedule_occurrence_id.to_string (occurrence_id request)) ())
-    state.schedules;
-  keys
+  match Atomic.get keys_of_last_schedules with
+  | Some (schedules, keys) when schedules == state.schedules -> keys
+  | Some _ | None ->
+    let keys = Hashtbl.create (List.length state.schedules) in
+    List.iter
+      (fun request ->
+         Hashtbl.replace keys (Schedule_occurrence_id.to_string (occurrence_id request)) ())
+      state.schedules;
+    Atomic.set keys_of_last_schedules (Some (state.schedules, keys));
+    keys
 ;;
 
 let append_new_signals config ~(state : Schedule_store.state) candidates =

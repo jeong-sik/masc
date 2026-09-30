@@ -18,6 +18,7 @@ type attempt_outcome =
 
 val run :
   ?official_task_reference:Keeper_official_task_reference.t ->
+  ?composed_context:(unit -> Keeper_official_client_host.composed_context option) ->
   accepts_image_input:bool ->
   ?required_native_posture:Runtime_native_tools.posture ->
   ?official_client_continuation:Keeper_semantic_execution.official_client_checkpoint ->
@@ -88,7 +89,12 @@ val run :
     [Held_by_client_session]: the thread holds the conversation, and MASC sends
     only the per-turn context in front of the goal
     ({!Keeper_official_client_host.resume_prompt}), so its full model input
-    cannot be measured here. *)
+    cannot be measured here.
+
+    [composed_context] is read after each attempt's turn hooks have assembled
+    its context. It lets a resumed session omit unchanged blocks (including
+    Recall) even when another block, such as World State or the clock, changes.
+    Without it, the complete carrier is compared as one context. *)
 
 module For_testing : sig
   val note_transport_uncertainty : Keeper_provider_attempt_effect.t Atomic.t -> unit

@@ -338,6 +338,7 @@
   test_pool_dead_server_fd
   test_pool_address_selection
   test_pool_scope_failure
+  test_pool_stream_retention
   test_keeper_turn_disposition
   test_keeper_execution_receipt_observation_wire
   test_keeper_turn_terminal_disposition_field
@@ -699,6 +700,7 @@
   test_pool_dead_server_fd
   test_pool_address_selection
   test_pool_scope_failure
+  test_pool_stream_retention
   test_keeper_turn_disposition
   test_keeper_execution_receipt_observation_wire
   test_keeper_turn_terminal_disposition_field
@@ -2536,6 +2538,8 @@
 
 (include stanzas/test_board_persistence_load_contract.inc)
 
+(include stanzas/test_board_snapshot_rows.inc)
+
 (include stanzas/test_board_persistence_schema.inc)
 
 (include stanzas/test_board_sse_canonical_event_type.inc)
@@ -2899,6 +2903,8 @@
 
 (include stanzas/test_prompt_registry_dune_fallback.inc)
 (include stanzas/test_provider_usage_windows.inc)
+
+(include stanzas/test_runtime_resolved_fleet.inc)
 
 (include stanzas/test_tui_overview_providers.inc)
 
@@ -5338,8 +5344,10 @@
  (alias runtest-test_capture_keeper_skill_tui_proof)
  (deps
   test_capture_keeper_skill_tui_proof.py
+  skill_activation_event_log_fixture.py
   ../scripts/harness/workload/capture_keeper_skill_tui_proof.py
-  ../scripts/harness/workload/proof_http.py)
+  ../scripts/harness/workload/proof_http.py
+  ../scripts/harness/workload/skill_activation_events.py)
  (action
   (run python3 %{dep:test_capture_keeper_skill_tui_proof.py})))
 
@@ -5437,10 +5445,12 @@
  (alias runtest-test_join_natural_keeper_skill_ledger)
  (deps
   test_join_natural_keeper_skill_ledger.py
+  skill_activation_event_log_fixture.py
   ../scripts/harness/workload/join_natural_keeper_skill_ledger.py
   ../scripts/harness/workload/keeper_skill_use_proof.py
   ../scripts/harness/workload/proof_http.py
-  ../scripts/harness/workload/produce_natural_keeper_skill_proof.py)
+  ../scripts/harness/workload/produce_natural_keeper_skill_proof.py
+  ../scripts/harness/workload/skill_activation_events.py)
  (action
   (run python3 %{dep:test_join_natural_keeper_skill_ledger.py})))
 
@@ -5486,8 +5496,10 @@
  (alias runtest-test_keeper_skill_use_proof)
  (deps
   test_keeper_skill_use_proof.py
+  skill_activation_event_log_fixture.py
   ../scripts/harness/workload/keeper_skill_use_proof.py
-  ../scripts/harness/workload/proof_http.py)
+  ../scripts/harness/workload/proof_http.py
+  ../scripts/harness/workload/skill_activation_events.py)
  (action
   (run python3 %{dep:test_keeper_skill_use_proof.py})))
 
@@ -5558,15 +5570,44 @@
  (deps (alias runtest-test_run_local_executable_binding)))
 
 (rule
+ (alias runtest-test_skill_activation_events)
+ (deps
+  test_skill_activation_events.py
+  skill_activation_event_log_fixture.py
+  ../scripts/harness/workload/skill_activation_events.py)
+ (action
+  (run python3 %{dep:test_skill_activation_events.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_skill_activation_events)))
+
+(rule
+ (alias runtest-test_skill_usage_stats)
+ (deps
+  test_skill_usage_stats.py
+  skill_activation_event_log_fixture.py
+  ../scripts/skill-usage-stats.py
+  ../scripts/harness/workload/skill_activation_events.py)
+ (action
+  (run python3 %{dep:test_skill_usage_stats.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_skill_usage_stats)))
+
+(rule
  (alias runtest-test_verify_keeper_skill_proof_bundle)
  (deps
   test_verify_keeper_skill_proof_bundle.py
+  skill_activation_event_log_fixture.py
   ../scripts/harness/workload/verify_keeper_skill_proof_bundle.py
   ../scripts/harness/workload/join_natural_keeper_skill_ledger.py
   ../scripts/harness/workload/keeper_skill_use_proof.py
   ../scripts/harness/workload/capture_keeper_skill_tui_proof.py
   ../scripts/harness/workload/proof_http.py
-  ../scripts/harness/workload/produce_natural_keeper_skill_proof.py)
+  ../scripts/harness/workload/produce_natural_keeper_skill_proof.py
+  ../scripts/harness/workload/skill_activation_events.py)
  (action
   (run python3 %{dep:test_verify_keeper_skill_proof_bundle.py})))
 
@@ -7653,3 +7694,13 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_keeper_draft_payload_pty)))
+
+(rule
+ (alias runtest-test_tui_skills_usage_summary)
+ (deps test_tui_skills_usage_summary.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_skills_usage_summary.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_skills_usage_summary)))

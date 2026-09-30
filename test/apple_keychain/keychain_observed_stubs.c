@@ -47,4 +47,20 @@ CAMLprim value masc_test_observed_keychain_counts(value unit) {
   Store_field(counts, 2, Val_int(interaction_violations));
   CAMLreturn(counts);
 }
+#else
+#include <caml/mlvalues.h>
+#include <caml/fail.h>
+
+CAMLprim value masc_test_observed_keychain_item(value path, value clear) {
+  (void)path;
+  (void)clear;
+  caml_failwith("Apple Keychain test requires macOS");
+  return Val_unit;
+}
+
+CAMLprim value masc_test_observed_keychain_counts(value unit) {
+  (void)unit;
+  caml_failwith("Apple Keychain test requires macOS");
+  return Val_unit;
+}
 #endif /* __APPLE__ */

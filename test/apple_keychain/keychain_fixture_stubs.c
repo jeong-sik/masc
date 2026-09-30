@@ -31,4 +31,26 @@ CAMLprim value masc_test_keychain_set_interaction(value allowed) {
     caml_failwith("cannot set fixture interaction setting");
   return Val_unit;
 }
+#else
+#include <caml/mlvalues.h>
+#include <caml/fail.h>
+
+/* Dune builds the test executable on Linux even when enabled_if skips running it. */
+CAMLprim value masc_test_keychain_add_allowed(value path) {
+  (void)path;
+  caml_failwith("Apple Keychain test requires macOS");
+  return Val_unit;
+}
+
+CAMLprim value masc_test_keychain_interaction_allowed(value unit) {
+  (void)unit;
+  caml_failwith("Apple Keychain test requires macOS");
+  return Val_false;
+}
+
+CAMLprim value masc_test_keychain_set_interaction(value allowed) {
+  (void)allowed;
+  caml_failwith("Apple Keychain test requires macOS");
+  return Val_unit;
+}
 #endif /* __APPLE__ */

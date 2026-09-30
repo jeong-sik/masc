@@ -70,16 +70,18 @@ def prepare(base):
     Path(base, '.masc', 'tasks', 'backlog.json').write_text(json.dumps({
         'tasks': [{'id': TASK, 'title': TITLE, 'status': 'awaiting_verification',
                    'priority': 1, 'assignee': 'alpha', 'verification_id': REQUEST,
-                   'goal_ids': [GOAL], 'created_at': '2026-08-22T00:00:00Z',
+                   'created_at': '2026-08-22T00:00:00Z',
                    'started_at': '2026-08-22T00:00:00Z', 'submitted_at': '2026-08-22T00:00:00Z'}],
         'last_updated': '2026-08-22T00:00:00Z', 'version': 1}), encoding='utf-8')
+    Path(base, '.masc', 'tasks', 'goal_task_links.json').write_text(json.dumps({
+        'links': [{'goal_id': GOAL, 'task_ids': [TASK]}]}), encoding='utf-8')
 
 
 def run(binary, columns, plain, review):
     heading = 'VERIFICATION REQUEST' if review else 'EVALUATOR VERDICT'
 
     def interact(process, fd, _slave, output, _base):
-        h.wait_for_output(process, fd, output, b'1 awaiting verification', start=0, timeout=10)
+        h.wait_for_output(process, fd, output, b'MASC Dashboard', start=0, timeout=10)
         h.tab_until(process, fd, output, b'MASC Work')
         h.wait_for_output(process, fd, output, b'GOALHEAD', start=0, timeout=10)
         h.send_and_wait(process, fd, output, b'v', b'TITLEHEAD')
@@ -110,8 +112,9 @@ def run(binary, columns, plain, review):
 
         def window():
             screen = h.screen_rows(completed(output))
-            match = next(WINDOW.search(text.decode('utf-8')) for row, text in sorted(screen.items())
-                         if WINDOW.search(text.decode('utf-8')))
+            match = next((WINDOW.search(text.decode('utf-8')) for row, text in sorted(screen.items())
+                          if WINDOW.search(text.decode('utf-8'))), None)
+            assert match is not None, screen
             first, last, total = map(int, match.groups())
             body = []
             for index in range(last-first+1):

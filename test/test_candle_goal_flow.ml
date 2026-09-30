@@ -678,7 +678,8 @@ let test_a_confirmed_goal_pays_its_keeper_once_across_reopen_and_restart () =
     match List.filter_map (fun (event : Candle_event.t) -> match event.body with
       | Candle_event.Paid payment -> Some payment
       | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _
-      | Candle_event.Unattributed _ | Candle_event.Payout_failed _ -> None) (ledger_events config)
+      | Candle_event.Unattributed _ | Candle_event.Purchased _
+      | Candle_event.Payout_failed _ -> None) (ledger_events config)
     with
     | [payment] -> payment
     | _ -> fail "expected exactly one Paid fact"

@@ -1,6 +1,6 @@
 ---
 name: sangokushi-2
-description: "Sangokushi II (Koei 1990, Japanese, 3-disk set) on the shared MSX: media set and verified origin slot, the province command menu, in-game save flow, media-change pitfalls, and one-call macros for the two verified key sequences. Apply a fact only when the visible prompt matches it."
+description: "Sangokushi II (Koei 1990, Japanese, 3-disk set) on the shared MSX: media set and verified origin slot, starting a new game, the province command menu, going to war, placing units (digits move, 0 places), battle commands and retreat, in-game save flow, media-change pitfalls, an all-AI run to the game's end, and one-call macros for the two verified key sequences. Apply a fact only when the visible prompt matches it."
 ---
 
 # Sangokushi II
@@ -66,6 +66,57 @@ A subsequent Return by itself returned to the same province's main `(0-19)?`
 prompt with resources and month unchanged. Verify that prompt before sending
 province commands; do not assume Esc universally cancels.
 
+## Starting a new game
+
+Observed 2026-09-29 from a fresh boot of disk A.
+
+1. `何をしますか(1-3)?`: `1`, Return. `何番のシナリオですか(1-6)?`: the number,
+   Return.
+2. `第1ドライブにBディスクを入れ リターンキーを押して下さい`: change the disk
+   to B (`masc_msx_change_disk`), then Return.
+3. `何人でプレイしますか`, `プレイヤー 1 は誰を選びますか`, the level, other
+   wars, the mode: number, Return each. `すべてよろしいですか(Y/N)?`: `y`.
+4. An event screen can come first; Return goes on to the first
+   `<君主>様、第N国に御命令を(0-19)?`.
+
+## Going to war
+
+Observed 220年1月 as 曹丕, from 20 against 31 (劉備).
+
+1. `3`, Return: `どこへ攻め込みますか(1-41)?`; the province number, Return.
+2. `誰を出撃させますか(1-N)?`: one officer per answer, the number and Return;
+   a sent officer gets a `*`. Several can go. An empty Return ends the list.
+3. `軍資金をいくらもっていきますか`, then `兵糧をいくらもっていきますか`: the
+   amount, Return. `攻め込みますか(Y/N)?`: `y`.
+4. When the governor left, `第N国の太守を決めて下さい(1-N)?` picks the new one.
+
+## Placing units
+
+`<武将>を配置して下さい(0:配置)` asks for one unit at a time. The battle map is
+made of hexes and its cursor moves on the digit keys; arrow keys, `4` and `6`
+did nothing. `0` places the unit on the cursor's hex.
+
+The cursor stays where the last unit went, so `0` alone for the second unit
+lands on a taken hex: the game refuses it and the same prompt stays. That is
+what a stuck "second unit" prompt was. Move first — `1` (down-left) placed
+the second unit, and `7` (up-left) the third — then `0`. A hex off the map or
+outside the side's area also keeps the prompt.
+
+## Battle commands
+
+- A challenge such as `我が名は関索 いざ勝負せよ` asks
+  `申し込みを受けますか(Y/N)?`. Return there went on to the battle menu.
+- `1.移動 2.攻撃 3.待機 4.情報 5.工作 6.退却` and
+  `<君主>様、<武将>にご命令を(1-6)?`: the digit alone opens the command, with
+  no Return. A Return after it backs out of the menu the digit opened.
+- `1` gives `1.通常移動 2.誘導移動`; `1` again asks `どの方向ですか?` with
+  `機動力 N`. `2` moved the unit one hex down and spent the rest of its
+  mobility, and the next unit's menu came up.
+- `6` asks `全軍退却しますか(Y/N)?`; after `y` each unit asks
+  `<退却>:20 <武将>はどこに退却しますか?`. Type the province number shown and
+  Return; an empty Return is not an answer. After the last unit the map comes
+  back with the next province's command prompt.
+
 ## In-game save
 
 `1`, `9`, Return, then `5`, Return (command 19 機能, option 5) opens the save
@@ -88,8 +139,16 @@ when the game asks.
 Bitmap modes (GRAPHIC6 openings and scenes) leave name-table residue:
 `screen_text` there is not OCR of the visible scene. Read the actual image
 artifact with `keeper_analyze_image` — the `msx-observe` Skill does the
-capture and read in one call. A long unattended observer run ending in year
-293 is not proof of a victory; no full winning campaign is established.
+capture and read in one call.
+
+## Watching an all-AI game
+
+`0` at `何人でプレイしますか` starts with no human ruler and goes straight to the
+AI turns. Pressed with Return every 300 frames, one scenario 6 run went from
+220年 to 301年, when the last ruler died without an heir
+(`曹爽の一族は滅亡しました`) and the KOEI copyright screen came up. That is
+the game ending with no winner, not a victory; no full winning campaign is
+established.
 
 ## Repeated sequences
 

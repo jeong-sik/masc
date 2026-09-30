@@ -12,6 +12,7 @@ module Read = Masc.Keeper_portrait_read
 module Look = Keeper_portrait_look
 module Store = Multimodal.Vision_artifact_store
 module Vision = Masc.Keeper_vision_tool
+module Plan = Masc.Keeper_tool_plan
 
 let with_temp_base f =
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
@@ -51,6 +52,119 @@ let completed_data (result : Tool_result.result) =
   | Tool_result.Completed output -> output.data
   | Tool_result.Failed error -> Alcotest.fail error.message
   | Tool_result.Deferred _ -> Alcotest.fail "portrait read deferred"
+;;
+
+let string_field key data =
+  match field key data with
+  | `String value -> value
+  | _ -> Alcotest.failf "%s is not a string" key
+;;
+
+let output_validator args =
+  let id =
+    match Plan.Node_id.make "portrait" with
+    | Ok id -> id
+    | Error Plan.Node_id.Empty -> Alcotest.fail "empty portrait node id"
+  in
+  let node =
+    Plan.node ~id ~tool_name:"keeper_portrait_read"
+      ~input:(Plan.Json_template.literal args) ()
+  in
+  let plan =
+    match Plan.create ~descriptors:(Keeper_tool_descriptor.all_descriptors ()) [ node ] with
+    | Ok plan -> plan
+    | Error error -> Alcotest.fail (Plan.error_to_string error)
+  in
+  (match Plan.prepare_inputs plan with
+   | Ok _ -> ()
+   | Error _ -> Alcotest.fail "the declared tool input rejected a catalog preview");
+  fun data ->
+    match Plan.validate_output plan ~run_id:(Plan.Run_id.fresh ()) ~node_id:id data with
+    | Ok _ -> ()
+    | Error _ -> Alcotest.fail "the actual portrait response violated its composable schema"
+;;
+
+(* A Keeper discovers the catalog, tries every accessory on its own body and
+   reads its starting portrait again. The preview is a real retained PNG;
+   browsing does not become a purchase or a persisted equipment choice. *)
+let test_browse_and_preview_without_equipping () =
+  with_temp_base @@ fun () ->
+  let name = "portrait-item-browser" in
+  let args = `Assoc [ "size", `Int 48 ] in
+  let starting = call ~name ~args |> completed_data in
+  output_validator args starting;
+  Alcotest.(check string) "default view is explicitly starting" "starting"
+    (string_field "mode" starting);
+  Alcotest.(check bool) "default view has no preview item" true
+    (field "preview_item" starting = `Null);
+  let original_equipment = field "equipment" starting in
+  Alcotest.(check bool) "starting view shows the starting equipment" true
+    (original_equipment = field "starting_equipment" starting);
+  let items =
+    match field "catalog" starting with
+    | `List items -> items
+    | _ -> Alcotest.fail "catalog is not an array"
+  in
+  let ids = List.map (string_field "id") items in
+  Alcotest.(check int) "all nonempty renderer items are discoverable" 18 (List.length ids);
+  Alcotest.(check int) "every catalog id is unique" 18
+    (List.length (List.sort_uniq String.compare ids));
+  List.iter (fun (slot, count) ->
+    Alcotest.(check int) (slot ^ " item count") count
+      (List.length (List.filter (fun item -> String.equal (string_field "slot" item) slot) items)))
+    [ "face", 6; "neck", 3; "head", 3; "hand", 3; "base", 3 ];
+  List.iter
+    (fun item ->
+       let id = string_field "id" item in
+       let slot = string_field "slot" item in
+       let args = `Assoc [ "size", `Int 48; "preview_item", `String id ] in
+       let preview = call ~name ~args |> completed_data in
+       output_validator args preview;
+       Alcotest.(check string) (id ^ " is a preview") "preview" (string_field "mode" preview);
+       Alcotest.(check string) "the chosen id is explicit" id (string_field "preview_item" preview);
+       Alcotest.(check bool) "preview retains the starting gear" true
+         (field "starting_equipment" preview = original_equipment);
+       let shown = field "equipment" preview in
+       Alcotest.(check string) "the preview uses the catalog item's slot" id
+         (string_field slot shown);
+       List.iter (fun other ->
+         if not (String.equal slot other) then
+           Alcotest.(check bool) (other ^ " is unchanged") true
+             (field other shown = field other original_equipment))
+         [ "face"; "neck"; "head"; "hand"; "base" ];
+       let handle = string_field "artifact" preview in
+       (match Store.load ~dir:(Vision.vision_store_dir ~keeper_name:name) (Store.of_string handle) with
+        | Error error -> Alcotest.fail (Store.load_error_to_string error)
+        | Ok png ->
+            Alcotest.(check bool) "the preview artifact is a PNG" true
+              (String.length png >= 8 && String.sub png 0 8 = "\137PNG\r\n\026\n"));
+       if shown <> original_equipment then
+         Alcotest.(check bool) (id ^ " changes the actual image") false
+           (field "artifact" preview = field "artifact" starting))
+    items;
+  let after = call ~name ~args |> completed_data in
+  Alcotest.(check bool) "browsing preserves the starting picture" true
+    (field "artifact" after = field "artifact" starting);
+  Alcotest.(check bool) "browsing persists no equipment choice" true
+    (field "equipment" after = original_equipment)
+;;
+
+let test_invalid_preview_is_refused_before_artifacts () =
+  with_temp_base @@ fun () ->
+  let name = "invalid-item-preview" in
+  List.iter
+    (fun preview_item ->
+       match call ~name ~args:(`Assoc [ "preview_item", preview_item ]) with
+       | Tool_result.Failed error ->
+           Alcotest.(check bool) "invalid item is a policy rejection" true
+             (error.class_ = Tool_result.Policy_rejection)
+       | Tool_result.Completed _ | Tool_result.Deferred _ ->
+           Alcotest.fail "an unknown or empty item was previewed")
+    [ `Null; `Int 1; `List []; `String ""; `String "not-an-item"
+    ; `String "bare_face"; `String "bare_neck"; `String "bare_head"
+    ; `String "empty_hand"; `String "no_dish" ];
+  Alcotest.(check bool) "a refused preview creates no artifact store" false
+    (Sys.file_exists (Vision.vision_store_dir ~keeper_name:name))
 ;;
 
 (* The tool reports the equipment the name hash gives, through the same mapping
@@ -207,6 +321,10 @@ let () =
     [ ( "read-only portrait"
       , [ Alcotest.test_case "equipment matches the name hash" `Quick
             test_equipment_matches_the_name_hash
+        ; Alcotest.test_case "browse and preview without equipping" `Quick
+            test_browse_and_preview_without_equipping
+        ; Alcotest.test_case "invalid preview is refused before artifacts" `Quick
+            test_invalid_preview_is_refused_before_artifacts
         ; Alcotest.test_case "artifact is a readable PNG" `Quick test_artifact_is_a_readable_png
         ; Alcotest.test_case "artifact survives frame pressure" `Quick test_artifact_survives_frame_pressure
         ; Alcotest.test_case "size out of range is refused" `Quick test_size_out_of_range_is_refused

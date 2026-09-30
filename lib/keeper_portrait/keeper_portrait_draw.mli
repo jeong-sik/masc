@@ -66,6 +66,12 @@ val pose_at : milliseconds:int -> pose
 val render_posed :
   Keeper_portrait_look.body -> Keeper_portrait_look.equipment -> pose -> size -> image
 
+val render_compact_posed :
+  Keeper_portrait_look.body -> Keeper_portrait_look.equipment -> pose -> size -> image
+(** A simpler candle silhouette for terminal mosaics at 24–40 pixels. It
+    keeps the face and flame large enough to read and leaves the backdrop
+    transparent. Placed pixel portraits continue to use [render_posed]. *)
+
 val pixel : image -> x:int -> y:int -> rgb * int
 (** Colour and alpha of one pixel. [x] and [y] are clamped to the image. *)
 

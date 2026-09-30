@@ -12,6 +12,10 @@ type attempt_outcome =
 
 val run :
   ?official_task_reference:Keeper_official_task_reference.t ->
+  ?composed_context:(unit -> Keeper_official_client_host.composed_context option) ->
+  (* Read after hook assembly to preserve typed block rendering. This lane
+      resends context on every resume until a compaction/reset witness can
+      prove previously delivered blocks remain available to the model. *)
   accepts_image_input:bool ->
   ?required_native_posture:Runtime_native_tools.posture ->
   ?official_client_continuation:Keeper_semantic_execution.official_client_checkpoint ->

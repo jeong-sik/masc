@@ -105,7 +105,7 @@ def main(executable: str, captures: Path | None) -> None:
             raise AssertionError('Successful evidence preservation was reported as a request failure')
         # Raw detail puts the complete receipt after the records; scroll to
         # it rather than assuming it fits on the first terminal page.
-        key(b'D', b'Rows')
+        key(b'D', b'Raw details')
         start = len(output)
         os.write(master, b'J' * 80)
         if not terminal.drain_until_quiet(process, master, output):

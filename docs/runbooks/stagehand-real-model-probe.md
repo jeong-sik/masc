@@ -24,7 +24,9 @@ publication as the real probe, without invoking any model callback. It never cal
 provider and receives no provider credentials. The artifact includes its source
 commit, fixture, native dependency inventory and SHA-256 checksums.
 If an offline control fails, CI remains failed and still packages the built binary
-with `offline-controls.json`: exit codes and fixed failure categories only. The
+with `offline-controls.json`: exit codes and fixed failure categories only. Each
+control passes `--control-result`, and the probe writes its outcome there as one
+JSON object; a setup category is kept only when `--list-setup-reasons` lists it. The
 manifest repeats those results; a retained diagnostic artifact is not a passed
 setup control. Raw process output is never uploaded. Native
 Homebrew dependencies listed in `native-dependencies.txt` must exist on the host;
@@ -130,7 +132,10 @@ request counts. Invocation counts are **not** provider dispatch counts. It
 never prints model responses, prompts, error payloads, config paths or secrets
 in JSONL. `model_rpc_refused` intentionally does not infer a provider cause from
 error prose. Exit 0 requires every trial to pass; 1 means an invalid trial; 2
-means setup failed. A partial JSONL without all nine summaries is incomplete.
+means setup failed, and stderr names the category; 3 means an exception the
+probe does not handle, whose text stays on the private stderr. A partial JSONL
+without all nine summaries is incomplete. `--list-setup-reasons` prints every
+setup category as one JSON array.
 
 The validator checks the recorded fixture contracts, not arbitrary JSON Schema:
 

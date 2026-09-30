@@ -8,6 +8,10 @@
     200 when the tool succeeded and 400 when it refused. Every call that ran
     wakes the Lane instances bound to the DOS machine once. *)
 
+val moves : (string * Masc_domain.tool_schema) list
+(** Every move route's path, with the schema of the tool whose arguments its
+    body is: press, type, step and pass, in that order. *)
+
 val press_into :
   config:Workspace.config ->
   who:string ->

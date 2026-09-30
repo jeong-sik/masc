@@ -22,6 +22,8 @@ SOURCE_MODULES = (
     "bin/masc_tui_render_tools.ml",
     "test/tui_keyboard_harness.py",
     "test/tui_keyboard_tools.py",
+    "lib/tui_decode_skill_evidence.ml",
+    "lib/tui_decode_skill_evidence.mli",
 )
 
 

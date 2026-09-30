@@ -126,6 +126,11 @@
  (modules test_keeper_vision_official_client)
  (libraries masc_test_deps))
 
+(executable
+ (name vision_artifact_measure)
+ (modules vision_artifact_measure)
+ (libraries masc_test_deps))
+
 (test
  (name test_verifier_official_client)
  (modules test_verifier_official_client)
@@ -8669,7 +8674,6 @@
  (name test_lane_addon_worker)
  (modules test_lane_addon_worker)
  (libraries masc masc_random_id alcotest eio eio_main yojson unix))
-(include stanzas/test_runtime_model_discovery.inc)
 
 (include stanzas/test_bedrock_sdk.inc)
 (test

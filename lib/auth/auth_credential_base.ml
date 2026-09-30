@@ -535,6 +535,31 @@ let persist_raw_token config ~agent_name raw_token =
   save_private_text_file (raw_token_file config agent_name) raw_token
 ;;
 
+(* Open nonblocking and validate the descriptor we actually read. Following a
+   regular-file symlink is allowed; special-file replacement cannot block. *)
+let read_regular_credential_text path =
+  run_blocking_io (fun () ->
+    let fd = Unix.openfile path [Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC] 0 in
+    Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
+      let before = Unix.fstat fd in
+      if before.Unix.st_kind <> Unix.S_REG then
+        raise (Sys_error (Printf.sprintf "credential path is not a regular file: %s" path));
+      let content = Buffer.create 256 in
+      let chunk = Bytes.create 4096 in
+      let rec read () =
+        let count = Unix.read fd chunk 0 (Bytes.length chunk) in
+        if count > 0 then (Buffer.add_subbytes content chunk 0 count; read ()) in
+      read ();
+      let after = Unix.fstat fd in
+      let named = Unix.stat path in
+      if before.Unix.st_dev <> after.Unix.st_dev || before.Unix.st_ino <> after.Unix.st_ino
+         || before.Unix.st_size <> after.Unix.st_size || before.Unix.st_mtime <> after.Unix.st_mtime
+         || before.Unix.st_ctime <> after.Unix.st_ctime
+         || after.Unix.st_dev <> named.Unix.st_dev || after.Unix.st_ino <> named.Unix.st_ino
+      then raise (Sys_error (Printf.sprintf "credential changed during verified read: %s" path));
+      Buffer.contents content))
+;;
+
 (* Revocation admits only the payload's canonical name. Expiry need not decode,
    but an alias must not retire another owner's UUID and leave its raw bearer. *)
 let validate_revocation_owner config agent_name =
@@ -543,9 +568,7 @@ let validate_revocation_owner config agent_name =
       (Printf.sprintf "cannot revoke %s: %s" agent_name detail))) in
   let read_json path =
     try
-      let stat = run_blocking_io (fun () -> Unix.stat path) in
-      if stat.Unix.st_kind <> Unix.S_REG then refused "credential is not a regular file"
-      else Ok (Some (Yojson.Safe.from_string (read_text_file path)))
+      Ok (Some (Yojson.Safe.from_string (read_regular_credential_text path)))
     with
     | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
     | Yojson.Json_error _ -> refused "credential owner cannot be decoded"

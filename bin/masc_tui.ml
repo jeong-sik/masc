@@ -2153,7 +2153,7 @@ type async_msg =
      facts and, for the "all keepers" merge, the keepers it could not read. *)
   | Memory_facts_loaded of
       string Masc_tui_fetched.request
-      * (Masc.Tui_decode.memory_fact_snapshot * string option, string) result
+      * (Masc.Tui_decode_memory_facts.memory_fact_snapshot * string option, string) result
   | Repository_changes_loaded of
       Masc.Tui_decode.repository_change_scope
       * (Masc.Tui_decode.repository_change_snapshot, string) result
@@ -5519,7 +5519,7 @@ let launch_all_memory_facts_load state ~mailbox =
       (* One answer: the merged facts and the keepers missing from them
          travel together, so the handler never has to keep one answer across
          another. *)
-      Ok (Tui_decode.merge_keeper_memory_facts ~now:(Unix.gettimeofday ()) loads))
+      Ok (Masc.Tui_decode_memory_facts.merge_keeper_memory_facts ~now:(Unix.gettimeofday ()) loads))
 
 let open_all_fleet_memory state ~mailbox =
   state.memory_facts_keeper <- Some "*";

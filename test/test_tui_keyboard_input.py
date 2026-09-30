@@ -8556,6 +8556,35 @@ def open_context_and_read_history_pages(process, master_fd, output) -> bytes:
     return drawn
 
 
+def context_visible_pane(output) -> tuple[bytes, bytes, tuple[int, int, int] | None]:
+    """Current completed Context body, joining only its visible row payloads."""
+    end = output.rfind(FRAME_END)
+    if end < 0:
+        raise AssertionError("Context has no completed frame")
+    completed = bytes(output[:end + len(FRAME_END)])
+    rows = screen_rows(completed)
+    title = next((number for number, row in sorted(rows.items())
+                  if b"MASC Context" in row), None)
+    if title is None:
+        raise AssertionError(f"Context title is not visible: {screen_text(completed)!r}")
+    window = next(((number, match) for number, row in sorted(rows.items())
+                   if (match := LINES_WINDOW_RE.search(row)) is not None), None)
+    bounds = None if window is None else tuple(int(value) for value in window[1].groups())
+    if bounds is not None and not (1 <= bounds[0] <= bounds[1] <= bounds[2]):
+        raise AssertionError(f"Invalid Context window: {bounds!r}")
+    border = "│".encode()
+    payloads = []
+    for number, row in sorted(rows.items()):
+        if number <= title or (window is not None and number >= window[0]):
+            continue
+        plain = row.strip()
+        if plain.startswith(border) and plain.endswith(border):
+            payload = plain[len(border):-len(border)].strip()
+            if payload:
+                payloads.append(payload)
+    return screen_text(completed), b" ".join(payloads), bounds
+
+
 def run_next_request_readability_regression(executable: str) -> None:
     for with_continuity in (True, False):
         for cols in (80, 140):
@@ -8581,25 +8610,34 @@ def run_next_request_readability_regression(executable: str) -> None:
                     composer_showing(b"/context"),
                 )
                 send_and_wait(process, master_fd, output, b"\r", b"WHAT WENT IN")
-                for _ in range(90):
-                    visible = screen_text(bytes(output))
+                while True:
+                    visible, pane, bounds = context_visible_pane(output)
                     if (
-                        b"Config / Runtime:" in visible
-                        and b"model limit." in visible
-                        and b"History preview:" in visible
+                        b"Config / Runtime:" in pane
+                        and b"model limit." in pane
+                        and b"History preview:" in pane
                         and (
-                            (b"Librarian working state" in visible)
+                            (b"Librarian working state" in pane)
                             if with_continuity
-                            else (b"front from this runtime's ledger" in visible)
+                            else (b"front from this runtime's ledger" in pane)
                         )
                     ):
                         break
+                    # At the last reported row j changes nothing, so no new
+                    # frame is expected. Fail here with the current viewport.
+                    if bounds is None or bounds[1] == bounds[2]:
+                        raise AssertionError(
+                            f"Next Request meaning not visible at {cols} columns "
+                            f"at Context window {bounds!r}: {visible!r}"
+                        )
+                    first = bounds[0]
                     scroll_context_one_line(process, master_fd, output)
-                else:
-                    raise AssertionError(
-                        f"Next Request meaning not visible at {cols} columns: "
-                        f"{screen_text(bytes(output))!r}"
-                    )
+                    _visible, _pane, advanced = context_visible_pane(output)
+                    if advanced is None or advanced[0] <= first:
+                        raise AssertionError(
+                            f"Context j did not advance its reported window: "
+                            f"{bounds!r} -> {advanced!r}"
+                        )
                 if b"100.0k / 70.0k" in visible:
                     raise AssertionError("trim settings still look like a forecast figure")
                 print(

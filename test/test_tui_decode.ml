@@ -12096,7 +12096,7 @@ let test_tool_approval_mode_unknown_word_fails () =
          contains "alpha" && contains "manual")
 
 let test_keeper_usage_cache_failures_remain_visible () =
-  let decode text = Tui_decode.decode_keeper_usage_window (Yojson.Safe.from_string text) in
+  let decode text = Masc.Tui_decode_usage.decode_keeper_usage_window (Yojson.Safe.from_string text) in
   (match decode {|{"state":"loading","cache":{"state":"warming","last_error":"EACCES"}}|} with
    | Error reason -> Alcotest.(check bool) "initial failure keeps its cause" true
        (String_util.contains_substring reason "EACCES")

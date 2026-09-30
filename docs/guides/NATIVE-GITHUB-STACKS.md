@@ -36,6 +36,10 @@ FAIL/HOLD or change request cannot be cleared by a clean leaf. Release heads als
 need the full verification required by the repository. Ordinary MASC PRs do not
 require an Actions run simply because they belong to a stack.
 
+A closed but unmerged downstack PR still blocks the selected PR. Only already
+merged members can be excluded from new approval checks; closing a prerequisite
+is not equivalent to merging it. See [closed middle PRs](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-stacked-pull-requests#you-closed-a-pull-request-in-the-middle-of-the-stack).
+
 Use `scripts/review/merge-guard.sh --check --repo OWNER/REPO --pr NUMBER --head SHA`
 to check the included scope. To inspect the read-only identity snapshot directly:
 

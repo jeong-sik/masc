@@ -1,4 +1,4 @@
-open Keeper_approval_queue
+open Keeper_approval_queue_result
 open Keeper_approval_queue_rules_types
 
 module Exact_output = Agent_core.Exact_output
@@ -638,12 +638,12 @@ type flow_callback_error =
 let flow_callback_error_to_string = function
   | Exact_bind_failed error ->
     "exact bind failed: "
-    ^ Keeper_approval_queue.exact_attempt_error_to_string error
+    ^ Keeper_approval_queue_result.exact_attempt_error_to_string error
   | Exact_bind_sync_unconfirmed detail ->
     "exact bind sync unconfirmed: " ^ detail
   | Exact_release_failed error ->
     "exact release failed: "
-    ^ Keeper_approval_queue.exact_attempt_error_to_string error
+    ^ Keeper_approval_queue_result.exact_attempt_error_to_string error
   | Exact_release_sync_unconfirmed detail ->
     "exact release sync unconfirmed: " ^ detail
 ;;
@@ -750,7 +750,7 @@ let persist_identity_unbound (entry : pending_approval) =
   | Ok false ->
     Error `Transition_not_applied
   | Error (Exact_attempt_storage_error error) ->
-    Error (`Storage_failed (Keeper_approval_queue.storage_error_to_string error))
+    Error (`Storage_failed (Keeper_approval_queue_result.storage_error_to_string error))
   | Error (Exact_attempt_rejected rejection) ->
     Error (`Rejected rejection)
 ;;
@@ -766,7 +766,7 @@ let signal_terminalization_persistence_failure
      log_exact_error
        entry
        "persistence uncertainty observation"
-       (Keeper_approval_queue.exact_attempt_error_to_string marker_error));
+       (Keeper_approval_queue_result.exact_attempt_error_to_string marker_error));
   record_outcome Terminal_persistence_failure;
   log_exact_error entry operation detail;
   raise
@@ -822,7 +822,7 @@ let quarantine_identity_result
   | Error (Exact_attempt_storage_error error) ->
     Error
       (Exact_queue_persistence_failed
-         (Keeper_approval_queue.storage_error_to_string error))
+         (Keeper_approval_queue_result.storage_error_to_string error))
   | Error (Exact_attempt_rejected rejection) ->
     Error (Exact_queue_rejected rejection)
 ;;
@@ -861,7 +861,7 @@ let settle_current ~queue_ops (entry : pending_approval) ~reason ~cause =
   | Error error ->
     Error
       (Exact_settlement_persistence_failed
-         (Keeper_approval_queue.storage_error_to_string error))
+         (Keeper_approval_queue_result.storage_error_to_string error))
   | Ok None ->
     record_outcome Source_resolved;
     Ok ()
@@ -1056,7 +1056,7 @@ let handle_validated_success
     log_exact_error
       entry
       "completion"
-      (Keeper_approval_queue.storage_error_to_string error);
+      (Keeper_approval_queue_result.storage_error_to_string error);
     quarantine_identity
       ~queue_ops
       entry
@@ -1302,7 +1302,7 @@ let try_cli_slots
       | Ok { write_outcome = Fsync_completed; _ } -> Ok ()
       | Ok { write_outcome = Visible_sync_unconfirmed detail; _ } -> Error detail
       | Error error ->
-        Error (Keeper_approval_queue.exact_attempt_error_to_string error)
+        Error (Keeper_approval_queue_result.exact_attempt_error_to_string error)
     in
     let rec walk ~bound ~released_entry_binding ~last_cli_failure slots =
       match Keeper_lane_cli_oneshot.order_slots slots with
@@ -1392,7 +1392,7 @@ let try_cli_slots
               log_exact_error
                 entry
                 "cli slot bind"
-                (Keeper_approval_queue.exact_attempt_error_to_string error);
+                (Keeper_approval_queue_result.exact_attempt_error_to_string error);
               (* This slot never bound; the previous binding was already
                  released, so continue the walk with nothing bound. *)
               walk ~bound:None ~released_entry_binding ~last_cli_failure rest
@@ -1458,7 +1458,7 @@ let try_cli_slots
                        log_exact_error
                          entry
                          "cli completion"
-                         (Keeper_approval_queue.storage_error_to_string error);
+                         (Keeper_approval_queue_result.storage_error_to_string error);
                        quarantine_identity
                          ~queue_ops
                          entry
@@ -1592,7 +1592,7 @@ let execute_prepared_flow_with_queue_ops_current
          log_exact_error
            prepared.entry
            "cancellation uncertainty observation"
-           (Keeper_approval_queue.exact_attempt_error_to_string marker_error));
+           (Keeper_approval_queue_result.exact_attempt_error_to_string marker_error));
       raise
         (Cancelled_uncertain
            (cancellation, cancellation_backtrace, detail))
@@ -1659,7 +1659,7 @@ let execute_prepared_flow_with_queue_ops_current
     log_exact_error
       prepared.entry
       "terminalization rejected"
-      (Keeper_approval_queue.exact_attempt_error_to_string
+      (Keeper_approval_queue_result.exact_attempt_error_to_string
          (Exact_attempt_rejected rejection));
     Exact_rejection_blocked rejection
   | Exact_terminalization_identity_unbound _ ->
@@ -1951,7 +1951,7 @@ let spawn_with
       on_finish Terminalization_identity_unbound
     | `Rejected rejection ->
       let detail =
-        Keeper_approval_queue.exact_attempt_error_to_string
+        Keeper_approval_queue_result.exact_attempt_error_to_string
           (Exact_attempt_rejected rejection)
       in
       complete

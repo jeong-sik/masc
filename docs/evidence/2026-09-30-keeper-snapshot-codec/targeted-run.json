@@ -1,0 +1,20 @@
+{
+  "command": "opam exec --switch=5.5.1 -- scripts/dune-local.sh exec ./test/test_keeper_event_queue_codec_pool.exe",
+  "source_head_before_run": "8ded710514ccfc0f070f512c4bc1a4f1ffd8125c",
+  "uncommitted_build_input_change": "test/dune: add explicit eio library to targeted test stanza",
+  "compiler": "OCaml 5.5.1",
+  "alcotest_run_id": "4NEEPAOJ",
+  "test_count": 3,
+  "exit_code": 0,
+  "elapsed_test_seconds": 0.067,
+  "binary_sha256": "c855929b871ee2a1e862f9b918bb636842147daf43eb3f904bbe5f171d7bdcae",
+  "source_sha256": {
+    "lib/keeper_runtime/keeper_event_queue_snapshot_codec.ml": "9639c64bcb1136513202b6a7620843a6a60575d932a8a23c7104a5c28f35208e",
+    "lib/keeper_runtime/keeper_event_queue_snapshot_codec.mli": "2141939d1aa19f5d3b8da9c0540bac3d25d567a88976be0c6074d3ae669349f5",
+    "lib/keeper_runtime/keeper_event_queue_persistence.ml": "fb41df1b00d7a34a770a357278fa7009d585e3120f1a82031e7d04fce9d5ccf7",
+    "lib/keeper_runtime/keeper_event_queue_persistence.mli": "cfa6e3490d771491a3e1aa50146b99a14763fa56a5675b489f34f64cfe856a18",
+    "test/test_keeper_event_queue_codec_pool.ml": "f871408749ef01f49d24b5504684e71b91b410b333e04cbb011bf1b98a1a7ac9",
+    "test/dune": "56b279bbcc79cca83491a29f7d0904a7d10fc6e9664aeb0d79a61e3142c9122d"
+  },
+  "scope": "targeted native persistence/codec test, isolated temporary workspaces; no full application build, CI, server install or production execution"
+}

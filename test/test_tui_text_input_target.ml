@@ -112,7 +112,7 @@ let test_an_inline_setting_claims_over_the_palette () =
 let voice_wizard_open state =
   state.Tui_types.voice_wizard <-
     Some
-      (Tui_types.voice_wizard_open ~section:Voice_setup.Tts
+      (Masc_tui_voice_wizard_session.voice_wizard_open ~section:Voice_setup.Tts
          ~provider:Voice_wizard.Elevenlabs ~revision:"a-revision")
 ;;
 

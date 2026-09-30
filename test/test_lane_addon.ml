@@ -714,8 +714,14 @@ let test_broadcast_retry_reconciles_receipt_during_slow_fanout () =
           ~from_agent:"fixture-operator" ~content:"independent message"));
       Eio.Promise.resolve mark_released ();
       let original = Eio.Promise.await_exn first in
+      let receipt_of result = member "delivery" result |> member "receipt" in
+      check string "active replay exposes unfinished fanout" "active"
+        (receipt_of replay |> text "fanout_state");
+      check string "completed original exposes handler settlement" "finished"
+        (receipt_of original |> text "fanout_state");
       check bool "replayed receipt has original request identity and sequence" true
-        (member "delivery" original = member "delivery" replay);
+        (text "request_id" (receipt_of original)=text "request_id" (receipt_of replay)
+         && int "seq" (receipt_of original)=int "seq" (receipt_of replay));
       check bool "retry preserves original selected artifact despite changing live metadata" true
         (member "keeper_artifact" original = member "keeper_artifact" replay);
       let receipt = member "delivery" replay |> member "receipt" in

@@ -67,6 +67,11 @@ let task_cache_signal_of_args args =
   | Some _, None | None, Some _ -> Error task_cache_signal_partial_error
 ;;
 
+(** State of this immediate fanout invocation. [Fanout_not_started] reports an
+    early return before projection; [Fanout_finished] reports that the delivery
+    invocation ended, not that every Keeper accepted or read the message. *)
+type fanout_state = Fanout_not_started | Fanout_active | Fanout_finished
+
 type broadcast_delivery =
   { request_id : string
   ; seq : int
@@ -76,6 +81,7 @@ type broadcast_delivery =
   ; mention : string option
   ; msg_type : string
   ; mention_delivery : mention_delivery
+  ; fanout_state : fanout_state
   ; audience : audience
   }
 
@@ -199,6 +205,9 @@ let broadcast_delivery_to_yojson delivery =
     ; "mention", Json_util.string_opt_to_json delivery.mention
     ; "msg_type", `String delivery.msg_type
     ; "mention_delivery", mention_delivery_to_yojson delivery.mention_delivery
+    ; "fanout_state", `String (match delivery.fanout_state with
+        | Fanout_not_started -> "not_started"
+        | Fanout_active -> "active" | Fanout_finished -> "finished")
     ]
 
 let emit_message_activity config ~from_agent ~content ~mention
@@ -269,6 +278,7 @@ let delivery_of_message ~audience (message : Masc_domain.message) =
        live call, and the projection commits at first delivery. Startup
        reconciliation exists for the mention obligation, so a replay defaults
        to [System_record] rather than re-projecting. *)
+  ; fanout_state = Fanout_active
   ; audience
   }
 
@@ -887,6 +897,7 @@ let broadcast_with_mention ?trace_context ?request_id ?on_committed ~msg_type ~a
     ; msg_type = stored_msg_type
     ; mention_delivery =
         (match mention with None -> Passive | Some _ -> Pending)
+    ; fanout_state = Fanout_active
     ; audience
     }
   in
@@ -918,6 +929,7 @@ let broadcast_with_mention ?trace_context ?request_id ?on_committed ~msg_type ~a
          Ok
            { delivery with
              mention_delivery = Deferred Workspace_status_unavailable
+           ; fanout_state = Fanout_not_started
            })
    | Ok { mirror_error } ->
      Option.iter (fun notify -> notify ()) on_committed;
@@ -968,7 +980,7 @@ let broadcast_with_mention ?trace_context ?request_id ?on_committed ~msg_type ~a
        | Some reason -> Deferred reason
      in
      observe stored_msg_type;
-     Ok { delivery with mention_delivery })
+     Ok { delivery with mention_delivery; fanout_state=Fanout_finished })
 
 let broadcast_internal ?trace_context ?request_id ?on_committed ?(msg_type = "broadcast") ?task_cache_signal
       ~audience config ~from_agent ~content =
@@ -1102,7 +1114,8 @@ let broadcast_once ~request_id config ~from_agent ~content =
     (* Each Keeper's transcript projects by the persisted request ID. Replaying
        fills recipients missed by cancellation/restart and deduplicates those
        already written. A passive row proves commit, not completed fanout. *)
-    let run () = Ok {delivery with mention_delivery=deliver_committed_mention ~audience config message} in
+    let run () = Ok {delivery with mention_delivery=deliver_committed_mention ~audience config message;
+      fanout_state=Fanout_finished} in
     match message.mention with
     | None -> run ()
     | Some _ -> Cross_context_mutex.with_lock mention_delivery_mutex run in

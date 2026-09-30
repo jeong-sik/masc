@@ -64,7 +64,8 @@ let offers : Lane_id.builtin -> kind list = function
   | Lane_id.Exact
       ( Standalone_lane.Librarian | Standalone_lane.Hitl_auto_judge
       | Standalone_lane.Board_attention | Standalone_lane.Workspace_curator
-      | Standalone_lane.Verifier | Standalone_lane.Browser_stagehand ) -> []
+      | Standalone_lane.Verifier | Standalone_lane.Browser_stagehand
+      | Standalone_lane.Candle_appraiser ) -> []
   | Lane_id.Browser lane ->
     (match document_observer lane with
      | Operator_client_observer | Automation_observer -> [ Browser_document_kind ]

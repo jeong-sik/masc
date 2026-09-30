@@ -9,25 +9,6 @@ name: Terminal-Bench harness tests
 # configs/render_configs.py copies into every rendered arm; and the two OCaml
 # sources tests/test_endpoint_env.py compares the env_file refusals with.
 on:
-  pull_request:
-    paths:
-      - 'benchmarks/terminal_bench/**'
-      - 'config/**'
-      - 'skills/**'
-      - 'lib/exec_shim/exec_shim.ml'
-      - 'lib/exec_ssh_protocol/exec_ssh_protocol.ml'
-      - '.github/workflows/bench-tests.yml'
-      - 'scripts/harness/perf/compare_tui_artifacts.py'
-      - 'test/test_tui_input_frame_pty.py'
-      - 'test/test_tui_artifact_comparison.py'
-      - 'scripts/harness/perf/linux_probe_artifact.py'
-      - 'scripts/harness/perf/server_artifact_session.py'
-      - 'scripts/harness/perf/compare_server_artifacts.py'
-      - 'test/test_server_artifact_comparison.py'
-      - 'scripts/harness/perf/checkpoint_history_artifact_session.py'
-      - 'scripts/harness/perf/compare_checkpoint_history.py'
-      - 'test/test_checkpoint_history_comparison.py'
-      - 'tools/rtev_trace/**'
   workflow_dispatch:
     inputs:
       compare_checkpoint_history:

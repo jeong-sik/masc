@@ -4,7 +4,7 @@
     The headline counts the active tasks (in progress or awaiting
     verification) and how many of them a drawn goal lists. Each drawn goal
     uses one line with its title, attention state, linked task count and due
-    date. Ownership, proof and the Goal metric are in Planning detail. The
+    date. Proof and the Goal metric are in Planning detail. The
     task count is not a measure of Goal achievement. *)
 
 module Tui_decode = Masc.Tui_decode

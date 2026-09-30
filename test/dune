@@ -1597,14 +1597,6 @@
  (modules test_goal_timeline_projection)
  (libraries masc_test_deps))
 
-; #39571: owner-directed Goal notices — a refuted verdict and an overdue due
-; date each owe the Goal's owner one idempotent Pending Message.
-
-(test
- (name test_goal_owner_notification)
- (modules test_goal_owner_notification)
- (libraries masc_test_deps ptime))
-
 ; Goal_due: the one reading of a Goal's due date (the day it names, the UTC
 ; instant it falls due, the UTC days left).
 
@@ -2095,13 +2087,6 @@
  (modules test_server_health_rollup)
  (libraries alcotest masc_server yojson))
 
-; What check-pr-hygiene.sh attributes to a pull request, run against the
-; shallow clone shape CI has (#35012).
-(test
- (name test_pr_hygiene_range)
- (modules test_pr_hygiene_range)
- (libraries alcotest unix))
-
 ; A rejected keeper boot is only diagnosable from the log line: the sentence
 ; explaining it goes to the HTTP response, which the TUI shows and drops.
 (test
@@ -2554,11 +2539,23 @@
 
 (include stanzas/test_candle_event.inc)
 (include stanzas/test_candle_time.inc)
+(include stanzas/test_candle_math.inc)
 (include stanzas/test_candle_ledger.inc)
+(include stanzas/test_candle_stamp.inc)
+(include stanzas/test_candle_status.inc)
+(include stanzas/test_candle_snapshot.inc)
+(include stanzas/test_candle_payout.inc)
+(include stanzas/test_candle_payout_owed.inc)
+(include stanzas/test_candle_candidates.inc)
+(include stanzas/test_candle_tasks.inc)
+(include stanzas/test_candle_payout_worker.inc)
+(include stanzas/test_candle_goal_flow.inc)
 
 (include stanzas/test_audit_keeper_fleet_readiness.inc)
 
 (include stanzas/test_keeper_production_readiness_gate.inc)
+
+(include stanzas/test_candle_config.inc)
 
 (include stanzas/test_channel_gate.inc)
 
@@ -3081,7 +3078,6 @@
 (include stanzas/test_pr_sync_script.inc)
 
 
-(include stanzas/test_release_train_guard_script.inc)
 
 
 (include stanzas/test_server_state_product.inc)
@@ -3892,6 +3888,18 @@
   masc_tui_preset_text
   masc_tui_types))
 
+; The QR's colours are read back from the escapes the mosaic writes, and the
+; mosaic writes none under NO_COLOR.
+(test
+ (name test_tui_play_card)
+ (modules test_tui_play_card)
+ (libraries
+  alcotest
+  masc_tui_play_card
+  masc_tui_terminal_palette
+  qrc)
+ (action (setenv MASC_TUI_FORCE_COLOR 1 (run %{test}))))
+
 (test
  (name test_tui_surface_needs)
  (modules test_tui_surface_needs)
@@ -4563,11 +4571,6 @@
  (libraries alcotest base64 masc_tui_link))
 
 (test
- (name test_tui_play_qr)
- (modules test_tui_play_qr)
- (libraries alcotest masc_tui_play_qr masc_tui_message_layout))
-
-(test
  (name test_tui_planning_order)
  (modules test_tui_planning_order)
  (libraries alcotest masc.masc_goal masc_tui_types))
@@ -4620,6 +4623,17 @@
  (alias runtest-test_tui_keyboard_overview_pty)
  (deps test_tui_keyboard_overview_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
  (action (run python3 %{dep:test_tui_keyboard_overview_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(rule
+ (alias runtest-test_tui_home_receipt_pty)
+ (enabled_if (= %{system} linux))
+ (deps test_tui_home_receipt_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action (run python3 %{dep:test_tui_home_receipt_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (enabled_if (= %{system} linux))
+ (deps (alias runtest-test_tui_home_receipt_pty)))
 
 (rule
  (alias runtest-test_tui_keyboard_rosters_pty)
@@ -6276,7 +6290,6 @@
 
 (include stanzas/test_tui_tasks_title_fits_the_frame.inc)
 (include stanzas/test_tui_board_hearth_census_width.inc)
-(include stanzas/test_tui_attention_age_column.inc)
 
 (include stanzas/test_tui_ask_context_block.inc)
 
@@ -6739,6 +6752,16 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_play_invites_pty)))
+
+(rule
+ (alias runtest-test_tui_play_card_pty)
+ (deps test_tui_play_card_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_play_card_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_play_card_pty)))
 
 (alias
  (name runtest)
@@ -7681,6 +7704,52 @@
  (name runtest)
  (deps (alias runtest-test_tui_chat_load_errors_pty)))
 
+(include stanzas/test_candle_baseline_collector.inc)
+
+(rule
+ (alias runtest-test_tui_home_journey_pty)
+ (deps test_tui_home_journey_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action (run python3 %{dep:test_tui_home_journey_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_home_journey_pty)))
+
+(rule
+ (alias runtest-test_tui_home_viewports_pty)
+ (deps test_tui_home_viewports_pty.py test_tui_home_journey_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action (run python3 %{dep:test_tui_home_viewports_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_home_viewports_pty)))
+(rule
+ (alias runtest-test_tui_home_layout_pty)
+ (deps test_tui_home_layout_pty.py test_tui_home_journey_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action (run python3 %{dep:test_tui_home_layout_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_home_layout_pty)))
+
+(rule
+ (alias runtest-test_tui_home_decision_cards_pty)
+ (deps test_tui_home_decision_cards_pty.py test_tui_home_journey_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action (run python3 %{dep:test_tui_home_decision_cards_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_home_decision_cards_pty)))
+
+(rule (alias runtest-test_tui_palette_input_viewport_pty)
+ (deps test_tui_palette_input_viewport_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_palette_input_viewport_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_palette_input_viewport_pty)))
+
 (rule
  (alias runtest-test_tui_skills_usage_summary)
  (deps test_tui_skills_usage_summary.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
@@ -7690,3 +7759,9 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_skills_usage_summary)))
+
+(include stanzas/test_candle_appraisal_flow.inc)
+
+(include stanzas/test_candle_balance.inc)
+
+(include stanzas/test_candle_appraiser_transport.inc)

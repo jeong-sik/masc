@@ -134,6 +134,7 @@ def run(binary, columns, plain, review):
                     break
                 target = min(total-(last-first),first+1)
                 h.send_and_wait(process,fd,output,b'j',f'{target}-'.encode())
+                assert window()[0] == target
             h.send_and_wait(process,fd,output,b'\x1b[H',b'1-')
 
         captured = {}
@@ -144,6 +145,7 @@ def run(binary, columns, plain, review):
                 break
             target = min(total-(last-first), first+1)
             h.send_and_wait(process,fd,output,b'j', f'{target}-'.encode())
+            assert window()[0] == target
         compact = ''.join(''.join(captured[i].split()) for i in sorted(captured))
         fields = (TASK, TITLE, AGENT, REQUEST, REFERENCE, CONTENT, '2026-08-25T14:00:00+09:00') if review else (
             TASK, TITLE, AGENT, GATE, EVALUATOR, REASON, GOAL_TITLE, METRIC, '100%')

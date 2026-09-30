@@ -7297,6 +7297,8 @@
        ../addons/msx-observer/server.py ../addons/tests/test_packages.py)
  (libraries masc_test_deps masc.msx_lane eio eio_main yojson unix))
 
+(include stanzas/test_lane_quiz_packages.inc)
+
 (test
  (name test_lane_addon_reconcile)
  (modules test_lane_addon_reconcile)

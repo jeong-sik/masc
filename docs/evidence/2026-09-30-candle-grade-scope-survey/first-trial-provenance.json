@@ -1,0 +1,8 @@
+{
+  "scope": "First-trial input/template/slot provenance only; no grade acceptance",
+  "checked_completed_trials": 20,
+  "actual_inputs_equal_original_cases": true,
+  "candidate_template_and_rendered_request_match": true,
+  "declared_slot_only": true,
+  "human_or_assistant_grades_in_input": false
+}

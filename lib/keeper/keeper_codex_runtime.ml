@@ -291,10 +291,10 @@ let record_usage_windows ~quota_scope report =
    ([turn_failure_to_provider_error]), and the router stops picking the
    account, so no later turn will report its windows either. The account
    can still say when it resets without a turn, so ask it once. The read
-   outlives this turn ({!Runtime_provider_usage_read.read_codex_in_background}),
+   outlives this turn ({!Runtime_provider_usage_read.read_codex_after_spent_usage_refusal}),
    and the refused turn returns without waiting on it. *)
 let read_usage_after_quota_refusal ~keeper_name ~quota_scope ~clock ~cwd config =
-  match Runtime_provider_usage_read.read_codex_in_background
+  match Runtime_provider_usage_read.read_codex_after_spent_usage_refusal
           ~clock ~cwd ~scope:quota_scope config with
   | Runtime_provider_usage_read.Started | Runtime_provider_usage_read.Already_reading -> ()
   | Runtime_provider_usage_read.No_root_switch ->
@@ -385,7 +385,7 @@ let codex_stream_callback ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~
           report_usage ~thread_id ~turn_id ~model frame
         | Turn_started _ | Text_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
         | Native_tool_started _ | Native_tool_finished _ | Elicitation_cancelled _
-        | Turn_finished _ -> ())
+        | Compaction_observed | Turn_finished _ -> ())
   | _ ->
     let emit event = Option.iter (fun callback -> callback event) on_event in
     let next_tool_index = ref 1 in
@@ -482,6 +482,8 @@ let codex_stream_callback ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~
           record_usage_windows ~quota_scope report
         | Runtime_codex_app_server.Usage_reported { thread_id; turn_id; model; frame } ->
           report_usage ~thread_id ~turn_id ~model frame
+        | Runtime_codex_app_server.Compaction_observed ->
+          Log.Keeper.info ~keeper_name "Codex context compaction completed"
         | Runtime_codex_app_server.Turn_finished { text } ->
           Option.iter
             emit_text
@@ -751,7 +753,7 @@ let native_posture_note = function
   | Runtime_native_tools.Native_full | Runtime_native_tools.Native_none -> []
 ;;
 
-let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~quota_scope ~keeper_name
+let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~quota_scope ~keeper_name
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~loading_plan ~initial_messages ~declared_max_prompt_bytes ~capacity_bytes ~project_history
     ~on_transmitted_model_input ~hooks
@@ -1009,14 +1011,20 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         in
         Ok (history, context_frontier, composed_developer_instructions))
     in
+    let composed_context =
+      match composed_context with
+      | None -> None
+      | Some read -> read ()
+    in
     let prompt, held_context =
       match thread_mode with
       | Runtime_codex_app_server.Start ->
-        prompt, Host.start_held_context prepared.messages
+        prompt, Host.start_held_context ?composed_context prepared.messages
       | Runtime_codex_app_server.Resume _ ->
         let delivery =
           Host.resume_prompt
             ~goal:prompt
+            ?composed_context
             ~held:(Keeper_official_client_session_store.held_context_for_resume
                      claim_plan ~expected:stored_session)
             prepared.messages
@@ -1024,6 +1032,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         delivery.prompt, delivery.held_context
     in
     let context_frontier = { context_frontier with held_context } in
+    let settled_held_context = ref held_context in
     let developer_instructions = Some composed_developer_instructions in
     (* The window already fits; this is the account checked once more before
        anything is written, so a measure that ever undercounts is refused here
@@ -1374,9 +1383,17 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
           (match event with
            | Runtime_codex_app_server.Native_tool_started _
            | Native_tool_finished _ -> observe_effect_attempted ()
+           | Compaction_observed -> settled_held_context := []
+           | Usage_reported { frame; _ } ->
+             (* The final usage keeps only the newest request. A compaction
+                earlier in this turn still invalidates its context receipts. *)
+             (match frame with
+              | Runtime_codex_app_server.Counted { last = Context_estimate _; _ }
+              | Context_window_filled _ -> settled_held_context := []
+              | Counted { last = Request_usage _; _ } -> ())
            | Turn_started _ | Text_delta _ | Dynamic_tool_started _
            | Dynamic_tool_finished _ | Elicitation_cancelled _
-           | Usage_windows_reported _ | Usage_reported _ | Turn_finished _ -> ());
+           | Usage_windows_reported _ | Turn_finished _ -> ());
           Option.iter (fun observe -> observe event) observe_stream
         in
         (match
@@ -1503,38 +1520,14 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
        recovery_failure := Keeper_official_client_session_store.State_persistence_failed;
        let* () =
          match
-           (match turn.usage with
-            | Some (Runtime_codex_app_server.Thread_count
-                      { last = Runtime_codex_app_server.Context_estimate _; _ }) ->
-              (* The thread replaced its history during compaction; the
-                 pre-compaction context is no longer a held-context receipt. *)
-              Keeper_official_client_session_store.settle_holding
-                ~held_context:[]
-                ~base_path
-                ~keeper_name
-                ~expected:!session_state
-                ~session_id:turn.thread_id
-                ~turn_id:turn.turn_id
-                ~updated_at:(Time_compat.now ())
-            | Some Runtime_codex_app_server.Thread_count_replaced ->
-              Keeper_official_client_session_store.settle_holding
-                ~held_context:[]
-                ~base_path
-                ~keeper_name
-                ~expected:!session_state
-                ~session_id:turn.thread_id
-                ~turn_id:turn.turn_id
-                ~updated_at:(Time_compat.now ())
-            | Some (Runtime_codex_app_server.Thread_count
-                      { last = Runtime_codex_app_server.Request_usage _; _ })
-            | None ->
-              Keeper_official_client_session_store.settle
-                ~base_path
-                ~keeper_name
-                ~expected:!session_state
-                ~session_id:turn.thread_id
-                ~turn_id:turn.turn_id
-                ~updated_at:(Time_compat.now ()))
+           Keeper_official_client_session_store.settle_holding
+             ~held_context:!settled_held_context
+             ~base_path
+             ~keeper_name
+             ~expected:!session_state
+             ~session_id:turn.thread_id
+             ~turn_id:turn.turn_id
+             ~updated_at:(Time_compat.now ())
          with
          | Ok settled ->
            session_state := settled;
@@ -1658,7 +1651,7 @@ let note_transport_uncertainty effect_disposition =
   | true | false -> ()
 ;;
 
-let run ?official_task_reference ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
+let run ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ?(loading_plan = Keeper_official_client_host.All_on_demand) ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks
     ~context_injector ~context
@@ -1744,7 +1737,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
         (* A read in an abandoned attempt cannot certify a tool-only answer
            from the next one. Effect evidence remains cumulative. *)
         Atomic.set successful_tool_completion No_successful_tool_completion;
-        run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_session_settled ~official_client_continuation
+        run_without_lifecycle ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~official_client_continuation
           ~required_native_posture
           ~runtime_id
           ~quota_scope

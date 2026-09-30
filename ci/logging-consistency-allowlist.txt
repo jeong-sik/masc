@@ -117,10 +117,10 @@ bin/masc_lane_cli_probe.ml
 # measurement the operator asked for; sending them to the log file would
 # hide them from the terminal that ran the probe.
 bin/masc_http_probe.ml
-# stagehand_model_probe's exit-2 stderr category is parsed verbatim by
-# scripts/stagehand-probe-controls.py. This is the operator command protocol,
-# not a server log: adding a Log prefix would discard the typed setup cause.
-# Raw provider diagnostics stay private; only fixed category lines are public.
+# stagehand_model_probe is an operator command, not a server: its stderr names
+# the setup category for the person who ran it, and its stdout carries the
+# self-test lines and --list-setup-reasons. scripts/stagehand-probe-controls.py
+# reads only the --control-result file. Raw provider diagnostics stay private.
 bin/stagehand_model_probe.ml
 
 # --- Before the screen, and before the log ---

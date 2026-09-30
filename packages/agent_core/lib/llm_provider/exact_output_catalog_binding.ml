@@ -142,7 +142,7 @@ let normalize_identity value = String.lowercase_ascii (String.trim value)
 let model_identity_key (entry : Model_catalog.model_entry) =
   normalize_identity (Option.value entry.provider_name ~default:"")
   ^ "\x00"
-  ^ normalize_identity (Model_identifiers.Id_prefix.to_string entry.id_prefix)
+  ^ (Model_identifiers.Id_prefix.equality_key entry.id_prefix :> string)
 ;;
 
 let model_identities_unique entries =
@@ -305,7 +305,7 @@ let merge_exact_model_entry
 
 let model_row_key (entry : Model_catalog.model_entry) =
   Option.map normalize_identity entry.provider_name,
-  normalize_identity (Model_identifiers.Id_prefix.to_string entry.id_prefix)
+  Model_identifiers.Id_prefix.equality_key entry.id_prefix
 ;;
 
 let merge_exact_model_entries

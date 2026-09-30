@@ -278,10 +278,44 @@ let split_body body : body_split =
   gather ~preamble:[] ~slots:[] ~pending:None ~paragraph:[]
     (String.split_on_char '\n' body)
 
-let slot_paragraph body marker =
-  (split_body body).slots
+let slot_paragraph (split : body_split) marker =
+  split.slots
   |> List.find_opt (fun (m, _, _, _) -> String.equal m marker)
   |> Option.map (fun (_, _, _, paragraph) -> paragraph)
+
+(* A prompt file's body and its slot split, kept with the file version they
+   were read from. Every resolution reads the file of its key, and a keeper
+   turn resolves dozens of keys whose files change only when someone edits
+   one. Reading and splitting a group file again on every resolution was
+   3.6% of the serving domain's busy samples (2026-09-30). An edit gives the
+   file a new version, so the next resolution reads it again; nothing in
+   this process writes these files.
+
+   A version cannot see an edit that keeps the file's inode and size within
+   one file-time tick, which on Linux is a few milliseconds. A directory
+   scan and [clear] start the reads over, so what a resolution returns after
+   them is the file as the scan read it or newer. *)
+type prompt_file = {
+  body : string;
+  split : body_split;
+}
+
+let prompt_files : prompt_file File_version_cache.t Atomic.t =
+  Atomic.make (File_version_cache.create ())
+;;
+
+let forget_prompt_files () = Atomic.set prompt_files (File_version_cache.create ())
+
+let read_prompt_file path =
+  match
+    File_version_cache.load (Atomic.get prompt_files) path ~decode:(fun () ->
+      match read_file_if_exists path with
+      | Some body -> Ok { body; split = split_body body }
+      | None -> Error ())
+  with
+  | Ok file -> Some file
+  | Error () -> None
+;;
 
 (* ── Directory scan and commit ──────────────────────────────────────
 
@@ -443,6 +477,7 @@ let scan_prompt_directory dir =
 
 (* Caller holds the registry mutex. *)
 let commit_registrations registrations =
+  forget_prompt_files ();
   List.iter
     (fun { reg_key; reg_meta; reg_slot } ->
       (match reg_slot with
@@ -542,14 +577,13 @@ let file_value_of_key key =
   let (_ : string option) = effective_markdown_dir () in
   match Hashtbl.find_opt fragment_tbl key with
   | Some (group_key, marker) -> (
-    match Option.bind (prompt_markdown_path group_key) read_file_if_exists with
-    | Some body -> slot_paragraph body marker
+    match Option.bind (prompt_markdown_path group_key) read_prompt_file with
+    | Some file -> slot_paragraph file.split marker
     | None -> None)
   | None ->
-    Option.bind (prompt_markdown_path key) read_file_if_exists
-    |> Option.map (fun body ->
-           let split = split_body body in
-           if split.slots = [] then body else split.preamble)
+    Option.bind (prompt_markdown_path key) read_prompt_file
+    |> Option.map (fun file ->
+           if file.split.slots = [] then file.body else file.split.preamble)
 
 (** {1 Registration and Lookup} *)
 
@@ -600,6 +634,7 @@ let clear () : unit =
     Hashtbl.clear quarantine_tbl;
     Hashtbl.clear meta_tbl;
     Hashtbl.clear fragment_tbl;
+    forget_prompt_files ();
     prompts_dir := None;
     (* Unpins; under dune the next resolution pins the fallback again. *)
     markdown_dir := None;

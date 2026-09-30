@@ -26,11 +26,13 @@ def run(executable: str) -> None:
     revokes = h.SequencedHttpResponse([
         (200, {"name": "guest1", "revoked": True,
                "released_controller": False, "release_error": "disk fault"}),
-        (500, {"error": "release_failed", "name": "guest1",
+        (500, {"error": "guest1 holds the DOS controller and it could not be released: "
+                        "controller still busy",
+               "code": "release_failed", "name": "guest1",
                "released_controller": False, "release_error": "controller still busy"}),
         (200, {"name": "guest1", "revoked": False,
                "released_controller": True}),
-        (404, {"error": "no_such_invite", "message": "no invite is named guest1"}),
+        (404, {"error": "no invite is named guest1", "code": "no_such_invite"}),
     ])
 
     def revoke(method: str) -> h.HttpResponse:

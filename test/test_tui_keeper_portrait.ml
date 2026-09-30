@@ -72,9 +72,17 @@ let test_the_band_is_compact () =
 
 let test_the_still_portrait_the_name_draws () =
   let shown = Option.get (band ~display:pixels ()) in
-  let drawn = Draw.render (Look.body_of_name alpha) Look.bare shown.Portrait.box.View.size in
-  check bool "the name's body and server equipment, standing still" true
+  let body = Look.body_of_name alpha and equipment = Look.bare in
+  let drawn = Draw.render body equipment shown.Portrait.box.View.size in
+  check bool "placed pixels keep the full portrait with server equipment" true
     (String.equal drawn.Draw.rgba shown.Portrait.image.Draw.rgba);
+  let mosaic = Option.get (band ()) in
+  let compact = Draw.render_compact_posed body equipment Draw.still mosaic.Portrait.box.View.size in
+  check bool "mosaic draws the compact face" true
+    (String.equal compact.Draw.rgba mosaic.Portrait.image.Draw.rgba);
+  check bool "a compact face differs from the full backdrop" false
+    (String.equal compact.Draw.rgba
+       (Draw.render body equipment mosaic.Portrait.box.View.size).Draw.rgba);
   let other = Option.get (band ~display:pixels ~name:beta ()) in
   check bool "another Keeper draws another portrait" false
     (String.equal other.Portrait.image.Draw.rgba shown.Portrait.image.Draw.rgba)
@@ -164,7 +172,11 @@ let test_the_cache_is_bounded () =
     (Portrait.image cache ~equipment:Look.bare ~name:(name 1) size == drawn.(1));
   let bigger = Option.get (Draw.size_of_int (Draw.min_size * 2)) in
   check bool "another size is another picture" false
-    (Portrait.image cache ~equipment:Look.bare ~name:(name 0) bigger == drawn.(0))
+    (Portrait.image cache ~equipment:Look.bare ~name:(name 0) bigger == drawn.(0));
+  let compact = Portrait.image ~compact:true cache ~equipment:Look.bare ~name:(name 0) size in
+  check bool "the compact drawing does not reuse placed pixels" false (compact == drawn.(0));
+  check bool "the compact drawing is cached" true
+    (Portrait.image ~compact:true cache ~equipment:Look.bare ~name:(name 0) size == compact)
 
 let test_equipment_change_replaces_same_keeper_pixels () =
   let cache = Portrait.cache () in
@@ -177,6 +189,10 @@ let test_equipment_change_replaces_same_keeper_pixels () =
   check string "server equipment determines actual pixels" expected.Draw.rgba second.Portrait.image.Draw.rgba;
   let unchanged = Option.get (band ~cache ~display:pixels ~equipment:equipped ()) in
   check bool "unchanged equipment reuses the cache" true (second.Portrait.image == unchanged.Portrait.image);
+  let mosaic = Option.get (band ~cache ~equipment:equipped ()) in
+  let compact = Draw.render_compact_posed (Look.body_of_name alpha) equipped Draw.still mosaic.Portrait.box.View.size in
+  check string "mosaic keeps the server equipment in compact pixels"
+    compact.Draw.rgba mosaic.Portrait.image.Draw.rgba;
   let placement band = Option.get (Portrait.placement band ~scroll:0
     ~visible_rows:band.Portrait.box.View.rows ~origin:(4,2)) in
   ignore (frame []);

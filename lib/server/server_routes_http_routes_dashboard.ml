@@ -2890,11 +2890,8 @@ let add_routes ~sw ~clock router =
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/board" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let payload =
-           dashboard_memory_http_payload ~config:(Mcp_server.workspace_config state) req
-         in
-         Http.Response.json_lazy ~compress:true ~request:req ~etag:payload.etag
-           (fun () -> payload.raw_json) reqd
+         Server_cached_read_http.respond ~request:req reqd
+           (dashboard_memory_http_payload ~config:(Mcp_server.workspace_config state) req)
        ) request reqd)
   |> Http.Router.post "/api/v1/dashboard/link-previews" (fun request reqd ->
        with_permission_auth ~permission:Masc_domain.CanReadState
@@ -3125,12 +3122,9 @@ let add_routes ~sw ~clock router =
            Printf.sprintf "planning:%s"
              (Mcp_server.workspace_config state).base_path
          in
-         let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s (fun () ->
-             Domain_pool_ref.submit_io_or_inline (fun () ->
-               dashboard_planning_http_json ~config:(Mcp_server.workspace_config state)))
-         in
-         Http.Response.json_value ~compress:true ~request:req json reqd
+         respond_cached_read ~request:req ~reqd ~cache_key ~ttl:standard_cache_ttl_s
+           (fun () ->
+              dashboard_planning_http_json ~config:(Mcp_server.workspace_config state))
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/bootstrap" (fun request reqd ->
        (* Cold-start bootstrap: routes to the shared SSOT
@@ -3150,12 +3144,8 @@ let add_routes ~sw ~clock router =
            Printf.sprintf "goals_tree:%s:%d" config.base_path
              (Goal_projection_generation.current ())
          in
-         let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s
-             (fun () -> Domain_pool_ref.submit_io_or_inline (fun () ->
-                dashboard_goals_tree_http_json ~config))
-         in
-         Http.Response.json_value ~compress:true ~request:req json reqd
+         respond_cached_read ~request:req ~reqd ~cache_key ~ttl:standard_cache_ttl_s
+           (fun () -> dashboard_goals_tree_http_json ~config)
        ) request reqd)
   |> Http.Router.post "/api/v1/dashboard/goals/measurements" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
@@ -3202,12 +3192,8 @@ let add_routes ~sw ~clock router =
              Printf.sprintf "goal_detail:%s:%s:%d" config.base_path goal_id
                (Goal_projection_generation.current ())
            in
-           let json =
-             Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s
-               (fun () -> Domain_pool_ref.submit_io_or_inline (fun () ->
-                  dashboard_goal_detail_http_json ~config ~goal_id))
-           in
-           Http.Response.json_value ~compress:true ~request:req json reqd
+           respond_cached_read ~request:req ~reqd ~cache_key ~ttl:standard_cache_ttl_s
+             (fun () -> dashboard_goal_detail_http_json ~config ~goal_id)
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/tasks/search-text" (fun request reqd ->
        with_public_read (fun state req reqd ->
@@ -3240,12 +3226,8 @@ let add_routes ~sw ~clock router =
              "briefing"
              [ ("actor", dashboard_actor_cache_segment state req) ]
          in
-         let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:live_cache_ttl_s (fun () ->
-             Domain_pool_ref.submit_io_or_inline (fun () ->
-               dashboard_briefing_http_json ~state ~sw ~clock req))
-         in
-         Http.Response.json_value ~compress:true ~request:req json reqd
+         respond_cached_read ~request:req ~reqd ~cache_key ~ttl:live_cache_ttl_s
+           (fun () -> dashboard_briefing_http_json ~state ~sw ~clock req)
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/tools" (fun request reqd ->
        with_public_read (fun state req reqd ->
@@ -3312,22 +3294,20 @@ let add_routes ~sw ~clock router =
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/briefing/sections" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let json =
-           if Server_utils.bool_query_param req "force" ~default:false then
-             Domain_pool_ref.submit_io_or_inline (fun () ->
-               dashboard_briefing_sections_http_json ~state ~sw ~clock req)
-           else
-             let cache_key =
-               Server_dashboard_http_core_cache.dashboard_query_cache_key
-                 (Mcp_server.workspace_config state)
-                 "mission_briefing"
-                 [ ("actor", dashboard_actor_cache_segment state req) ]
-             in
-             Dashboard_cache.get_or_compute cache_key ~ttl:live_cache_ttl_s (fun () ->
-               Domain_pool_ref.submit_io_or_inline (fun () ->
-                 dashboard_briefing_sections_http_json ~state ~sw ~clock req))
-         in
-         Http.Response.json_value ~compress:true ~request:req json reqd
+         if Server_utils.bool_query_param req "force" ~default:false then
+           Http.Response.json_value ~compress:true ~request:req
+             (Domain_pool_ref.submit_io_or_inline (fun () ->
+                dashboard_briefing_sections_http_json ~state ~sw ~clock req))
+             reqd
+         else
+           let cache_key =
+             Server_dashboard_http_core_cache.dashboard_query_cache_key
+               (Mcp_server.workspace_config state)
+               "mission_briefing"
+               [ ("actor", dashboard_actor_cache_segment state req) ]
+           in
+           respond_cached_read ~request:req ~reqd ~cache_key ~ttl:live_cache_ttl_s
+             (fun () -> dashboard_briefing_sections_http_json ~state ~sw ~clock req)
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/tool-quality" (fun request reqd ->
        with_public_read (fun _state req reqd ->
@@ -3357,26 +3337,27 @@ let add_routes ~sw ~clock router =
             page→endpoint profile). The window itself is hours-scale so
             6× longer TTL still serves near-live data; under 30s window the
             poll just hit the previous compute and never wait 30s again. *)
-         (* [Dashboard_cache.get_or_compute] takes a [unit -> Yojson.Safe.t]
-            compute and must not store a 503 for the TTL, so the typed read
-            failure leaves the compute as an exception: the cache drops the
-            computing slot and re-raises when it has nothing stale to serve,
-            and the route answers 503 rather than a payload with zero calls
-            (audit F397). *)
-         let json =
+         (* [Dashboard_cache.get_or_compute_payload] takes a
+            [unit -> Yojson.Safe.t] compute and must not store a 503 for the
+            TTL, so the typed read failure leaves the compute as an exception:
+            the cache drops the computing slot and re-raises when it has
+            nothing stale to serve, and the route answers 503 rather than a
+            payload with zero calls (audit F397). *)
+         let payload =
            match
-             Dashboard_cache.get_or_compute cache_key ~ttl:config_cache_ttl_s (fun () ->
-               Domain_pool_ref.submit_io_or_inline (fun () ->
-                 match Dashboard_http_tool_quality.aggregate ~n ?window_hours () with
-                 | Ok json -> json
-                 | Error (Keeper_tool_call_log.Index_unavailable detail) ->
-                   raise (Tool_quality_log_unavailable detail)))
+             Dashboard_cache.get_or_compute_payload cache_key ~ttl:config_cache_ttl_s
+               (fun () ->
+                  Domain_pool_ref.submit_io_or_inline (fun () ->
+                    match Dashboard_http_tool_quality.aggregate ~n ?window_hours () with
+                    | Ok json -> json
+                    | Error (Keeper_tool_call_log.Index_unavailable detail) ->
+                      raise (Tool_quality_log_unavailable detail)))
            with
-           | json -> Ok json
+           | payload -> Ok payload
            | exception Tool_quality_log_unavailable detail -> Error detail
          in
-         match json with
-         | Ok json -> Http.Response.json_value ~compress:true ~request:req json reqd
+         match payload with
+         | Ok payload -> Server_cached_read_http.respond ~request:req reqd payload
          | Error detail ->
            Http.Response.json_value
              ~status:`Service_unavailable
@@ -3458,12 +3439,8 @@ let add_routes ~sw ~clock router =
              (Option.value ~default:"-" since)
              (Option.value ~default:"-" until)
          in
-         let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s (fun () ->
-             Domain_pool_ref.submit_io_or_inline (fun () ->
-               Dashboard_harness_health.json ?since ?until ()))
-         in
-         Http.Response.json_value ~compress:true ~request:req json reqd
+         respond_cached_read ~request:req ~reqd ~cache_key ~ttl:standard_cache_ttl_s
+           (fun () -> Dashboard_harness_health.json ?since ?until ())
        ) _request reqd)
   (* An operator's own verdict on a harness row. The label is ground truth
      for judge calibration, so it takes the admin permission and the
@@ -3496,9 +3473,8 @@ let add_routes ~sw ~clock router =
              (Option.value ~default:"-" (Option.map String.trim agent_name))
              limit
          in
-         let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s (fun () ->
-             Domain_pool_ref.submit_io_or_inline (fun () ->
+         respond_cached_read ~request:req ~reqd ~cache_key ~ttl:standard_cache_ttl_s
+           (fun () ->
          match agent_name with
            | Some name when String.trim name <> "" ->
                let snapshots =
@@ -3534,9 +3510,7 @@ let add_routes ~sw ~clock router =
                  ("generated_at", `String (Masc_domain.now_iso ()));
                  ("agent_count", `Int (List.length agents));
                  ("agents", `List per_agent);
-               ]))
-         in
-         Http.Response.json_value ~compress:true ~request:req json reqd
+               ])
        ) request reqd)
 
   (* ── Telemetry unified view ── *)

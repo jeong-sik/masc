@@ -431,6 +431,12 @@ open Alcotest
    a Keeper can equip an owned accessory or restore one slot's starting
    item, then read the actual equipped portrait. Pin to the measured
    inventory without adding headroom. *)
+(* Merge validation: job 109522529179's raw log confirms 131080 / 151 tools.
+   Compared with main 86751f610442, keeper_portrait_read's JSON-escaped
+   description is 591 bytes rather than 483 (+108), preserving the current
+   equipment explanation. This is a description-only source measurement;
+   the merged inventory still needs its own CI measurement. The ceiling is
+   retained, not raised on an estimate. *)
 let ceiling_bytes = 131_080
 
 

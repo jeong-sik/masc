@@ -235,10 +235,22 @@ let test_a_body_asks_for_its_picture () =
 
 let about ~cols ~frame display =
   Screen.about_rows ~style:Screen.Painted ~cols ~rows:24 ~caption
-    ~frame ~keepers:["fixture-alpha"; "fixture-bravo"; "fixture-charlie"; "fixture-delta"; "extra"]
+    ~frame ~keepers:(List.map (fun name ->
+      name, Keeper_portrait_equipment.Ready Keeper_portrait_look.bare)
+      ["fixture-alpha"; "fixture-bravo"; "fixture-charlie"; "fixture-delta"; "extra"])
     ~display ~project ~origin
 
 let test_the_arrival_gathers_then_stops () =
+  let unavailable = Screen.about_rows ~style:Screen.Painted ~cols:76 ~rows:24
+    ~caption ~frame:Screen.final_frame
+    ~keepers:["fixture-alpha", Keeper_portrait_equipment.Unavailable "not observed"]
+    ~display:pixels ~project ~origin in
+  check (list int) "unobserved equipment keeps only the mascot placement"
+    [Masc_tui_graphics.image_id Masc_tui_graphics.Mascot]
+    (List.map (fun p -> p.View.image_id) unavailable.Screen.placements);
+  check bool "unobserved equipment retains the registered name" true
+    (List.exists (fun line -> String.equal (trimmed line) "fixture-alpha")
+       unavailable.Screen.lines);
   let at_start = about ~cols:76 ~frame:0 pixels in
   let gathered = about ~cols:76 ~frame:7 pixels in
   let finished = about ~cols:76 ~frame:Screen.final_frame pixels in

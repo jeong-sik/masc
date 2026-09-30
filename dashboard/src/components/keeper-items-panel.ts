@@ -6,11 +6,12 @@ import { keeperEquipmentKey, type KeeperEquipment } from '../lib/keeper-portrait
 import { KeeperPortrait } from './keeper-portrait'
 import { KeeperBadge } from './keeper-badge'
 import type { Keeper } from '../types'
+import { executionWorkspaceAuthority, type ExecutionWorkspaceAuthority } from '../store'
 
 type Reading =
   | { kind: 'loading'; identity: string }
-  | { kind: 'loaded'; identity: string; value: KeeperItemsReading }
-  | { kind: 'error'; identity: string; message: string }
+  | { kind: 'loaded'; identity: string; authority: ExecutionWorkspaceAuthority; value: KeeperItemsReading }
+  | { kind: 'error'; identity: string; authority: ExecutionWorkspaceAuthority; message: string }
 
 type ItemSlot = keyof KeeperEquipment
 
@@ -24,6 +25,7 @@ function candle(milli: string): string {
 }
 
 export function KeeperItemsPanel({ keeper }: { keeper: Keeper }) {
+  const authority = executionWorkspaceAuthority.value
   const [revision, setRevision] = useState(0)
   const equipmentKey = keeper.portrait?.state === 'ready'
     ? keeperEquipmentKey(keeper.portrait.equipment) : null
@@ -31,27 +33,33 @@ export function KeeperItemsPanel({ keeper }: { keeper: Keeper }) {
   const [reading, setReading] = useState<Reading>({ kind: 'loading', identity })
 
   useEffect(() => {
-    const controller = new AbortController()
     setReading({ kind: 'loading', identity })
+    if (authority === null) return
+    const controller = new AbortController()
+    const currentRequest = () => !controller.signal.aborted
+      && executionWorkspaceAuthority.peek() === authority
     fetchKeeperItems(keeper.name, controller.signal)
-      .then(value => { if (!controller.signal.aborted) setReading({ kind: 'loaded', identity, value }) })
+      .then(value => { if (currentRequest()) setReading({ kind: 'loaded', identity, authority, value }) })
       .catch(error => {
         const message = error instanceof ApiRequestError
           ? error.detail ?? '계정 요청에 실패했습니다. 다시 시도해주세요.'
           : error instanceof Error ? error.message : 'Item 계정을 읽지 못했습니다'
-        if (!controller.signal.aborted) setReading({ kind: 'error', identity, message })
+        if (currentRequest()) setReading({ kind: 'error', identity, authority, message })
       })
     return () => controller.abort()
-  }, [identity])
+  }, [identity, authority])
 
-  const current = reading.identity === identity ? reading : { kind: 'loading' as const, identity }
+  const current = reading.identity === identity
+    && (reading.kind === 'loading' || reading.authority === authority)
+    ? reading : { kind: 'loading' as const, identity }
   const account = current.kind === 'loaded' && current.value.status === 'ready' ? current.value : null
   return html`
     <div class="flex flex-wrap items-center justify-between gap-3">
       <p class="m-0 text-xs text-[var(--color-fg-muted)]">Keeper가 직접 구매하고 착용한 결과를 보여 줍니다.</p>
       <button type="button" class="rounded-[var(--r-1)] border border-[var(--color-border-default)] px-3 py-1.5 text-xs text-[var(--color-fg-primary)] hover:bg-[var(--color-bg-hover)]" onClick=${() => setRevision(value => value + 1)}>새로고침</button>
     </div>
-    ${current.kind === 'loading' ? html`<p role="status">Item 계정 불러오는 중…</p>` : null}
+    ${authority === null ? html`<p role="status">현재 작업 공간을 확인하는 중…</p>`
+      : current.kind === 'loading' ? html`<p role="status">Item 계정 불러오는 중…</p>` : null}
     ${current.kind === 'error' ? html`<p role="alert">Item 계정을 읽지 못했습니다: ${current.message}</p>` : null}
     ${current.kind === 'loaded' && current.value.status === 'off' ? html`<p role="status">Candle 기능이 꺼져 있습니다.</p>` : null}
     ${current.kind === 'loaded' && current.value.status === 'disabled' ? html`<p role="alert">Candle 설정을 사용할 수 없습니다: ${current.value.reason}</p>` : null}

@@ -332,6 +332,19 @@ export function visibilityBadgeColor(vis: string): string {
 }
 
 // ── Data operations ────────────────────────────────────────────────
+function focusedCommentNeedsAncestors(comments: readonly BoardComment[], focusedCommentId: string): boolean {
+  const byId = new Map(comments.map(comment => [comment.id, comment]))
+  const visited = new Set<string>()
+  let id: string | null | undefined = focusedCommentId
+  while (id && !visited.has(id)) {
+    visited.add(id)
+    const comment = byId.get(id)
+    if (!comment) return true
+    id = comment.parent_id
+  }
+  return false
+}
+
 export async function loadPostDetail(postId: string, focusedCommentId?: string | null) {
   const requestId = ++detailRequestId
   detailPostId.value = postId
@@ -373,10 +386,13 @@ export async function loadPostDetail(postId: string, focusedCommentId?: string |
     let comments = data.comments
     let page = data.commentPage
     while (focusedCommentId && page.offset > 0
-      && !comments.some(comment => comment.id === focusedCommentId)) {
+      && focusedCommentNeedsAncestors(comments, focusedCommentId)) {
       const offset = Math.max(0, page.offset - COMMENT_PAGE_SIZE)
       const older = await fetchBoardPost(postId, offset, page.offset - offset)
       if (detailPostId.value !== postId || detailRequestId !== requestId) return
+      if (older.commentPage.offset >= page.offset) {
+        throw new Error('Older comment page did not advance toward the start')
+      }
       comments = [...older.comments, ...comments]
       page = older.commentPage
     }

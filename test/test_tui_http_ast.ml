@@ -590,10 +590,21 @@ let test_keeper_chat_uses_current_async_contract () =
   check int "chat send does not keep the root switch alive on exit" 0
     (Ast_grep.count_calls_in_value_binding ~module_path
        ~binding_name:"launch_keeper_request" ~callee:"Eio.Fiber.fork");
-  check bool "chat send runs in a cancellable daemon fiber" true
+  check int "chat send delegates once to its workspace job owner" 1
     (Ast_grep.count_calls_in_value_binding ~module_path
-       ~binding_name:"launch_keeper_request" ~callee:"Eio.Fiber.fork_daemon"
-     >= 1);
+       ~binding_name:"launch_keeper_request" ~callee:"fork_workspace_job");
+  check int "workspace jobs do not keep the root switch alive" 0
+    (Ast_grep.count_calls_in_value_binding ~module_path
+       ~binding_name:"fork_workspace_job" ~callee:"Eio.Fiber.fork");
+  check int "workspace job owner runs one daemon fiber" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path
+       ~binding_name:"fork_workspace_job" ~callee:"Eio.Fiber.fork_daemon");
+  check int "workspace job owns a cancellation context" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path
+       ~binding_name:"fork_workspace_job" ~callee:"Eio.Cancel.sub");
+  check int "workspace withdrawal cancels the owned context" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path
+       ~binding_name:"fork_workspace_job" ~callee:"Eio.Cancel.cancel");
   check bool "async completion checks request identity" true
     (Ast_grep.count_calls_in_value_binding ~module_path
        ~binding_name:"apply_keeper_chat_result"

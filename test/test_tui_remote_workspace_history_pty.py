@@ -209,8 +209,17 @@ def run(binary: str, captures: Path | None) -> None:
             with wire.lock:
                 assert not [event for event in wire.events
                     if event["event"] == "memory" and str(event["phase"]).startswith("b")],                     "a withdrawn A history read continued into B's memory journal"
+            refusal = b"Chat requires a matching workspace"
             for key in (b"m", b"i"):
-                h.send_and_wait(process, fd, output, key, b"Chat requires a matching workspace")
+                # A repeated refusal leaves identical footer cells, so the
+                # incremental renderer need not emit those bytes again.
+                # Require the previous notice to leave the current screen
+                # before asking this entry path for its own visible refusal.
+                if refusal in screen(output):
+                    h.write_all(fd, output, b"\x1b")
+                    await_screen(lambda text: refusal not in text,
+                                 "previous chat refusal did not clear")
+                h.send_and_wait(process, fd, output, key, refusal)
                 assert "▸ chat".encode() not in screen(output)
             h.palette_go(process, fd, output, b"keeper alpha", b"Chat requires a matching workspace")
             with wire.lock:

@@ -291,6 +291,9 @@ def remote_portrait(binary: str, evidence: Path) -> None:
             # Hold an already-dispatched Boot's paused-owner response across
             # the boundary. The remaining Resume/Boot plan belongs to its
             # original workspace, even though C names the same Keeper.
+            # Keep the exact authority path in the footer for this boundary
+            # proof; the earlier 99-column portrait pixel checks stay intact.
+            h.resize_and_wait(process, fd, output, rows=70, columns=300, needle=b"Identity")
             boot_armed.set()
             os.write(fd, b"p")
             assert h.wait_for_fixture_event(process, fd, output, held_boot.requested,
@@ -300,7 +303,15 @@ def remote_portrait(binary: str, evidence: Path) -> None:
             with roster.lock:
                 roster.snapshots["c-current"] = (200, json.dumps(c_payload).encode())
             roster.publish("c-current")
-            remote_identity.publish(str(evidence / "another-remote-workspace"))
+            c_base = str(evidence / "another-remote-workspace")
+            remote_identity.publish(c_base)
+            screen_is(lambda text: b"Base: " + c_base.encode() in text
+                      and b"MASC Keepers" in text,
+                      "C authority did not withdraw B's detail selection")
+            # Row withdrawal returns the old detail to the list. Select C's
+            # actual row and reopen Info, where Current failure is rendered.
+            h.select_keeper_row(process, fd, output, keeper.encode())
+            h.send_and_wait(process, fd, output, b"\r", INFO_TAB)
             screen_is(lambda text: b"authority-c-current-roster" in text,
                       "C roster was not applied while B Boot was held")
             lifecycle_offset = len(requests)

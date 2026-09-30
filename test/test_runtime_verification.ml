@@ -760,7 +760,7 @@ import sys
 
 args = sys.argv[1:]
 if "auth" in args and "status" in args:
-    print(json.dumps({"loggedIn": True, "authMethod": "claude.ai", "subscriptionType": "max"}))
+    print(json.dumps({"loggedIn": True, "authMethod": "claude.ai", "apiProvider": "firstParty", "subscriptionType": "max"}))
     sys.exit(0)
 
 def read():
@@ -864,11 +864,11 @@ protocol = %S
 command = %S
 account-home = %S
 is-non-interactive = true
-timeout-s = 15.0
 [models.selected]
 api-name = %S
 max-context = 272000
 tools-support = true
+turn-timeout-s = 15.0
 %s
 [fixture.selected]
 [runtime]

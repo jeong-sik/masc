@@ -213,11 +213,13 @@ def boundary_and_string_values(executable):
     values = ["\nfoo\n", "  foo", "", "foo"]
     values += [prefix + spaces + "END" for prefix in prefixes for spaces in (" ", "  ")]
     keys = [f"value-{index}" for index in range(len(values))]
+    choices = ["a b", "a  b", " leading · trailing "]
     fixtures["/api/v1/runtime/params"] = (200, {
         "parameters": [
             {"key": key, "current": value, "default": value,
              "has_override": False,
-             "meta": {"value_type": "string", "description": "\n".join(CONTRACT_ROWS)}}
+             "meta": {"value_type": "string", "description": "\n".join(CONTRACT_ROWS),
+                      "choices": choices if key == keys[0] else []}}
             for key, value in zip(keys, values)
         ],
     })
@@ -260,6 +262,18 @@ def boundary_and_string_values(executable):
                 prefix = prefixes[(index - 4) // 2].encode()
                 if screen.count(b'"' + prefix) < 2:
                     raise AssertionError(f"wrapped value lost its ASCII/CJK prefix: {screen!r}")
+            if index == 0:
+                expected_choices = {json.dumps(choice, ensure_ascii=False).encode() for choice in choices}
+                seen_choices = set()
+                for _ in range(40):
+                    seen_choices.update(choice for choice in expected_choices if choice in screen)
+                    start, end, total = position(screen)
+                    if end >= total:
+                        break
+                    screen = press(b"\x1b[6~")
+                if seen_choices != expected_choices:
+                    raise AssertionError(f"choice spellings lost spaces or punctuation: {expected_choices - seen_choices!r}")
+                press(b"\x1b[H")
             if index in (0, len(values) - 1):
                 before = position(press(b"\x1b[6~"))
                 if before[0] <= 1:

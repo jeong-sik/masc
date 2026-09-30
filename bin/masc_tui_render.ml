@@ -14670,7 +14670,9 @@ let render_runtime_params (state : state) =
       @ field "Type" (if String.trim row.rpr_value_type = "" then "typed value" else row.rpr_value_type)
       @ (match row.rpr_min_json with None -> [] | Some value -> value_field "Minimum" value)
       @ (match row.rpr_max_json with None -> [] | Some value -> value_field "Maximum" value)
-      @ (match row.rpr_choices with [] -> [] | choices -> field "Choices" (String.concat " · " choices))
+      @ (row.rpr_choices
+         |> List.mapi (fun index choice -> value_field (Printf.sprintf "Choice %d" (index + 1)) choice)
+         |> List.concat)
       @ field "Contract" row.rpr_description
       @ (match row.rpr_surface with
          | None -> []

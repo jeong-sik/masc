@@ -13756,7 +13756,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             ~scoped_refresh_followup ~mailbox
       | Error err ->
           state.goal_action_armed <- None;
-          state.goal_action_error <- Some err)
+          state.goal_action_error <- Some err;
+          report_action state "error" ("Goal: " ^ err))
   | Goal_confirmation_loaded (request, result) ->
       (match state.goal_confirmation with
        | Goal_confirmation.Inspecting read ->

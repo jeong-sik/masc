@@ -3312,7 +3312,10 @@ let planning_detail_lines (state : state) ~armed ~confirmation ~cols (goal : pla
     match Masc_tui_text_block.rows ~max_cells:width line.text with
     | [] -> [{line with text=""}]
     | rows -> List.map (fun text -> {line with text="  " ^ text}) rows) proof in
-  metadata @ linked @ wrapped_proof
+  (match confirmation with
+   | `Inspect Absent -> metadata @ linked @ wrapped_proof
+   | `Submitting | `Inspect (Ready _ | Loading | Stale _ | Failed _) ->
+       wrapped_proof @ metadata @ linked)
 
 let planning_detail_height ~rows ~action_rows ~count =
   Masc_tui_scroll.content_height ~rows ~chrome:(framed_chrome_rows + action_rows)

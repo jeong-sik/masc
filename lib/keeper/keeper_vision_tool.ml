@@ -531,6 +531,7 @@ let outcome_of_official_failure ~runtime_id failure =
 let official_failure_effect : Fusion_official_client.failure -> Tool_result.failure_effect_disposition = function
   | Setup_failure _ | Claude_admission_failure _ -> Proven_pre_effect
   | Codex_failure (Invalid_config _ | Subscription_required _ | Spawn_failed _
+      | Reasoning_effort_admission_failed _
       | Timeout { turn_accepted = false; _ }
       | Context_window_exceeded { tool_effect_attempted = false; _ }) -> Proven_pre_effect
   | Claude_failure (Invalid_config _ | Subscription_required _ | Spawn_failed _

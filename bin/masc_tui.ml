@@ -1471,7 +1471,6 @@ let decode_play_mutation decode = function
   | Masc_tui_http.Post_unanswered detail -> Play_unanswered detail
 
 
-
 let enqueue_async mailbox msg =
   Eio.Stream.add mailbox
     { ready_at_ns = Mtime_clock.elapsed_ns (); message = msg }
@@ -11085,9 +11084,10 @@ let start_keeper_action state ~base_path:_ ~mailbox keeper_name action =
 let split_board_draft (text : string) : string * string =
   Board_composer.split_draft text
 
-(* Post the draft through the tools endpoint. Runs in a fiber like a keeper
-   action: the compose pane must keep accepting keys while the request is
-   out, and the outcome lands in the same mailbox everything else does. *)
+
+(* Request a goal lifecycle change through the tools route. Runs in a fiber
+   like the other writes; the outcome lands in the shared mailbox and the
+   server's phase rules decide, so the TUI never pre-guesses a transition. *)
 let start_goal_transition state ~mailbox ~(goal_id : string)
     ~(action : Goal_phase.Public_action.t) =
   state.goal_action_error <- None;
@@ -11188,12 +11188,11 @@ let handle_goal_action_key state ~mailbox ~(action : Goal_phase.Public_action.t)
                goal_id))
   | Planning_list -> ()
 
-(* Compose-mode keys. Sending is armed rather than pressed: esc offers
-   send-or-discard, so a stray key during writing cannot publish. Returns
-   false for keys this pane does not own, so Tab and quit keep their global
-   meaning. *)
-(* Send a comment through the tools route. Same fiber-and-mailbox shape as
-   the other board writes; the route stamps the author. *)
+
+(* The vote keys on the list row under the cursor. Two presses: the first
+   names the post and direction, the same press again sends it. The post id
+   is captured at arm time, so moving the cursor between presses re-arms
+   for the new row rather than voting on the one the operator left. *)
 let handle_board_vote_key state ~mailbox ~(up : bool) =
   match state.board_mode with
   | Board_list -> (
@@ -11499,6 +11498,10 @@ let open_board_composer_editor state ~restore ~reenter =
           end )
 ;;
 
+(* Compose-mode keys. Sending is armed rather than pressed: esc offers
+   send-or-discard, so a stray key during writing cannot publish. Returns
+   false for keys this pane does not own, so Tab and quit keep their global
+   meaning. *)
 let handle_board_compose_key state ~mailbox ?restore ?reenter (key : string) : bool =
   let armed_allowed =
     if Option.is_none state.board_compose_reply_to then

@@ -33,6 +33,9 @@ let start_board_post_refresh state ~host ~port ~post_id ~deliver ~report_error =
     | Some sw -> Eio.Fiber.fork ~sw run_refresh
     | None -> Masc_tui_board_updates.apply_board_post_load state ~report_error request (load_result ())
 
+(* Post the draft through the tools endpoint. Runs in a fiber like a keeper
+   action: the compose pane must keep accepting keys while the request is
+   out, and the outcome lands in the same mailbox everything else does. *)
 let start_board_post state ~host ~deliver ~report ~(title : string) ~(body : string) ?hearth () =
   state.board_post_error <- None;
   state.board_post_inflight <- true;
@@ -54,11 +57,8 @@ let start_board_post state ~host ~deliver ~report ~(title : string) ~(body : str
   | Some sw -> Eio.Fiber.fork ~sw run_post
   | None -> run_post ()
 
-
-(* Request a goal lifecycle change through the tools route. Runs in a fiber
-   like the other writes; the outcome lands in the shared mailbox and the
-   server's phase rules decide, so the TUI never pre-guesses a transition. *)
-
+(* Send a comment through the tools route. Same fiber-and-mailbox shape as
+   the other board writes; the route stamps the author. *)
 let start_board_comment state ~host ~deliver ~report ~(post_id : string)
     ~(content : string) =
   state.board_post_error <- None;
@@ -97,8 +97,3 @@ let start_board_vote state ~host ~deliver ~report ~(post_id : string) ~(up : boo
   match Eio_context.get_switch_opt () with
   | Some sw -> Eio.Fiber.fork ~sw run_vote
   | None -> run_vote ()
-
-(* The vote keys on the list row under the cursor. Two presses: the first
-   names the post and direction, the same press again sends it. The post id
-   is captured at arm time, so moving the cursor between presses re-arms
-   for the new row rather than voting on the one the operator left. *)

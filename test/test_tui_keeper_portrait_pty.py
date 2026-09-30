@@ -407,7 +407,9 @@ def item_account_follows_roster_revision(binary: str) -> None:
 
     h.run_terminal_scenario(binary,
         description="an open Item account follows free purchase and price-only roster revisions",
-        interact=interact, http_fixtures=fixtures, terminal_cols=COLUMNS)
+        # The harness defaults to a 60-second cadence for keyboard tests;
+        # this scenario specifically exercises the public refresh cadence.
+        interact=interact, http_fixtures=fixtures, terminal_cols=COLUMNS, refresh=0.2)
 
 
 if __name__ == "__main__":

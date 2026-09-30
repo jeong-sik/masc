@@ -177,3 +177,6 @@ val browser_history_scroll_limit : Masc_tui_types.state -> terminal_rows:int -> 
 val repository_studio_content_height : Masc_tui_types.state -> cols:int -> budget:int -> cursor:int -> int
 (** The repository list's actual viewport, including the selected context panel.
     Keyboard page and cursor movement use the same geometry as rendering. *)
+
+val schedule_detail_viewport : Masc_tui_types.state -> int * int
+(** Physical-row count and height of the current Schedule evidence reader. *)

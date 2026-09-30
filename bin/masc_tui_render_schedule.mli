@@ -282,6 +282,7 @@ type schedule_column =
     the widths the columns were fitted with. *)
 type schedule_layout = private {
   sl_columns : schedule_column Masc_tui_table.layout;
+  sl_due_width : int;
   sl_target_width : int;
   sl_wake_width : int;
   sl_delivery_width : int;
@@ -295,9 +296,10 @@ val schedule_layout :
   schedule_layout
 (** The columns the list draws in [inner_width], given the target, wake and
     delivery widths measured from the page. When the row is narrow the
-    delivery goes first, then the wake and the state; the due time, the
-    target and the recurrence stay, and the recurrence takes what the others
-    leave, never below {!schedule_minimum_recurrence_width}. *)
+    delivery goes first, then the wake and state. Due time, target and
+    recurrence stay; target names are bounded before fitting so one long name
+    cannot consume the recurrence. Very narrow tables shrink those primary
+    widths and the detail carries their full readings. *)
 
 val schedule_header_row : layout:schedule_layout -> string
 

@@ -11,8 +11,6 @@ SOURCE_MODULES = (
     "bin/masc_tui_render.ml",
     "bin/masc_tui.ml",
     "bin/masc_tui_render_prim.ml",
-    "bin/masc_tui_render_approvals.ml",
-    "bin/masc_tui_render_approvals.mli",
 )
 TASK = 'task-' + 't' * 90 + '-TASKEND'
 REQUEST = 'request-' + 'r' * 95 + '-REQUESTEND'
@@ -83,7 +81,7 @@ def prepare(base):
         'links': [{'goal_id': GOAL, 'task_ids': [TASK]}]}), encoding='utf-8')
 
 
-def run(binary, columns, plain, review):
+def run(binary, columns, plain, review, timezone='UTC'):
     heading = 'VERIFICATION REQUEST' if review else 'EVALUATOR VERDICT'
 
     def interact(process, fd, _slave, output, _base):
@@ -156,21 +154,26 @@ def run(binary, columns, plain, review):
             h.send_and_wait(process,fd,output,b'j', f'{target}-'.encode())
             assert window()[0] == target
         compact = ''.join(''.join(captured[i].split()) for i in sorted(captured))
-        fields = (TASK, TITLE, AGENT, REQUEST, REFERENCE, CONTENT, '2026-08-25T14:00:00+09:00') if review else (
+        # The source is 14:00+09:00. Keep its complete displayed value
+        # through scroll, in the terminal zone used for this PTY process.
+        created = '2026-08-25 05:00:00' if timezone == 'UTC' else '2026-08-25 14:00:00'
+        fields = (TASK, TITLE, AGENT, REQUEST, REFERENCE, CONTENT, created) if review else (
             TASK, TITLE, AGENT, GATE, EVALUATOR, REASON, GOAL_TITLE, METRIC, '100%')
         for field in fields:
             assert ''.join(field.split()) in compact, (columns, plain, review, field, compact)
+        if review:
+            assert '2026-08-25T14:00:00+09:00' not in compact, (columns, timezone, compact)
         h.send_and_wait(process,fd,output,b'\x1b[H',b'1-')
         assert window()[0] == 1
         first,last,total,_ = window()
         h.send_and_wait(process,fd,output,b'\x1b[F',f'{max(1,total-(last-first))}-'.encode())
         assert window()[1] == total
-        print(f'JUDGEMENT_LAYOUT width={columns} NO_COLOR={plain} review={review}: full fields/scroll/edges PASS',flush=True)
+        print(f'JUDGEMENT_LAYOUT width={columns} NO_COLOR={plain} review={review} TZ={timezone}: full fields/scroll/edges PASS',flush=True)
         os.write(fd,b'q')
 
-    h.run_terminal_scenario(binary, description=f'Judgement complete fields {columns} plain={plain} review={review}',
+    h.run_terminal_scenario(binary, description=f'Judgement complete fields {columns} plain={plain} review={review} zone={timezone}',
         interact=interact, prepare_workspace=prepare, http_fixtures=fixtures(),
-        extra_env={'NO_COLOR':'1'} if plain else {})
+        extra_env={'TZ':timezone, **({'NO_COLOR':'1'} if plain else {})})
 
 
 if __name__ == '__main__':
@@ -178,4 +181,6 @@ if __name__ == '__main__':
         for columns in (30,40,60,80,120,160):
             for review in (True,False):
                 run(os.path.abspath(sys.argv[1]),columns,plain,review)
+    for plain in (False,True):
+        run(os.path.abspath(sys.argv[1]),60,plain,True,timezone='Asia/Seoul')
     print('Review and Verdict complete metadata: PASS')

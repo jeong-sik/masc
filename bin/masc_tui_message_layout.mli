@@ -615,6 +615,10 @@ val wrap_words : max_cells:int -> string -> string list
 (** Wrap a plain single-line string at spaces using a terminal-cell budget.
     Words wider than the budget are split between complete UTF-8 scalars. *)
 
+val wrap_styled_words : max_cells:int -> string -> string list
+(** Word wrapping for trusted renderer-owned SGR text. Each row replays the
+    preceding SGR state and ends with a reset, so any row can be drawn alone. *)
+
 val clause_separator : string
 (** What a header row puts between two clauses: [" · "]. *)
 

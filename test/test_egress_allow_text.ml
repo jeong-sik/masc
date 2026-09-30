@@ -40,7 +40,7 @@ let allow_of text ~keeper_name =
 ;;
 
 let test_a_new_table_is_appended_and_parses () =
-  let text = Runtime.update_egress_allow_text base ~keeper_name:"beta" ~allow:[ "example.com" ] in
+  let text = Runtime_config_text.update_egress_allow_text base ~keeper_name:"beta" ~allow:[ "example.com" ] in
   check (list string) "the new keeper has its allowlist" [ "example.com" ]
     (allow_of text ~keeper_name:"beta");
   check (list string) "and the existing one is untouched" [ "api.github.com" ]
@@ -50,7 +50,7 @@ let test_a_new_table_is_appended_and_parses () =
 (* The neighbouring table is what a naive "delete to end of file" edit eats. *)
 let test_the_following_table_survives () =
   let text =
-    Runtime.update_egress_allow_text base ~keeper_name:"alpha" ~allow:[ "example.com" ]
+    Runtime_config_text.update_egress_allow_text base ~keeper_name:"alpha" ~allow:[ "example.com" ]
   in
   let config = parse text in
   check int "the SSH endpoint registry is still there" 1
@@ -64,7 +64,7 @@ let test_the_following_table_survives () =
    entry by leaving it out. *)
 let test_a_rewrite_replaces_rather_than_merges () =
   let text =
-    Runtime.update_egress_allow_text base ~keeper_name:"alpha"
+    Runtime_config_text.update_egress_allow_text base ~keeper_name:"alpha"
       ~allow:[ "example.com"; "*.example.org" ]
   in
   check (list string) "the old entry is gone" [ "example.com"; "*.example.org" ]
@@ -72,14 +72,14 @@ let test_a_rewrite_replaces_rather_than_merges () =
 ;;
 
 let test_an_empty_allowlist_is_writable () =
-  let text = Runtime.update_egress_allow_text base ~keeper_name:"alpha" ~allow:[] in
+  let text = Runtime_config_text.update_egress_allow_text base ~keeper_name:"alpha" ~allow:[] in
   check (list string) "the keeper reaches nothing" [] (allow_of text ~keeper_name:"alpha");
   check int "and the file still loads" 1
     (List.length (parse text).Runtime_schema.egress_allowlists)
 ;;
 
 let test_removal_drops_only_that_table () =
-  let text = Runtime.remove_egress_allow_text base ~keeper_name:"alpha" in
+  let text = Runtime_config_text.remove_egress_allow_text base ~keeper_name:"alpha" in
   check int "no allowlists remain" 0
     (List.length (parse text).Runtime_schema.egress_allowlists);
   check int "and the SSH endpoint survives" 1
@@ -87,7 +87,7 @@ let test_removal_drops_only_that_table () =
 ;;
 
 let test_removing_an_absent_keeper_changes_nothing () =
-  let text = Runtime.remove_egress_allow_text base ~keeper_name:"nobody" in
+  let text = Runtime_config_text.remove_egress_allow_text base ~keeper_name:"nobody" in
   check string "the text is unchanged apart from its trailing newline"
     (String.trim base) (String.trim text)
 ;;
@@ -96,7 +96,7 @@ let test_removing_an_absent_keeper_changes_nothing () =
    fleet has edgar.a.poe, so this is not hypothetical. *)
 let test_a_dotted_keeper_name_stays_one_key () =
   let text =
-    Runtime.update_egress_allow_text base ~keeper_name:"edgar.a.poe"
+    Runtime_config_text.update_egress_allow_text base ~keeper_name:"edgar.a.poe"
       ~allow:[ "api.github.com" ]
   in
   check (list string) "the dotted name round-trips" [ "api.github.com" ]
@@ -110,7 +110,7 @@ let test_a_dotted_keeper_name_stays_one_key () =
    that the refusal names the table the rule sits in; the wording belongs to
    the TOML library and an upgrade may reword it. *)
 let test_a_control_byte_in_a_rule_fails_the_load_not_the_write () =
-  let text = Runtime.update_egress_allow_text base ~keeper_name:"alpha" ~allow:[ "evil\x00.com" ] in
+  let text = Runtime_config_text.update_egress_allow_text base ~keeper_name:"alpha" ~allow:[ "evil\x00.com" ] in
   match Runtime_toml.parse_string text with
   | Ok _ -> failf "expected a NUL rule to fail the load"
   | Error errors ->
@@ -124,7 +124,7 @@ let test_a_control_byte_in_a_rule_fails_the_load_not_the_write () =
 (* One that survives TOML and dies at the matcher instead, so both refusals
    are pinned rather than only the lexer's. *)
 let test_a_rule_the_matcher_refuses_fails_the_load () =
-  let text = Runtime.update_egress_allow_text base ~keeper_name:"alpha" ~allow:[ "evil .com" ] in
+  let text = Runtime_config_text.update_egress_allow_text base ~keeper_name:"alpha" ~allow:[ "evil .com" ] in
   match Runtime_toml.parse_string text with
   | Ok _ -> failf "expected a spaced host to fail the load"
   | Error errors ->
@@ -190,7 +190,7 @@ let test_a_rewrite_lands_on_the_table_however_it_is_spelled () =
     (fun (label, alder_header) ->
       let base = two_keepers ~alder_header in
       let text =
-        Runtime.update_egress_allow_text base ~keeper_name:"alder" ~allow:[ "example.com" ]
+        Runtime_config_text.update_egress_allow_text base ~keeper_name:"alder" ~allow:[ "example.com" ]
       in
       check (list int) (label ^ ": one table for alder, where it was")
         (header_lines base ~keeper_name:"alder")
@@ -208,7 +208,7 @@ let test_removal_takes_the_table_however_it_is_spelled () =
   List.iter
     (fun (label, alder_header) ->
       let base = two_keepers ~alder_header in
-      let text = Runtime.remove_egress_allow_text base ~keeper_name:"alder" in
+      let text = Runtime_config_text.remove_egress_allow_text base ~keeper_name:"alder" in
       check (list int) (label ^ ": no table for alder") [] (header_lines text ~keeper_name:"alder");
       check (list string) (label ^ ": alder2 keeps its allowlist") [ "alder2.example" ]
         (allow_of text ~keeper_name:"alder2");
@@ -226,14 +226,14 @@ let test_a_name_that_extends_another_is_its_own_keeper () =
     (fun (label, alder_header) ->
       let base = two_keepers ~alder_header in
       let rewritten =
-        Runtime.update_egress_allow_text base ~keeper_name:"alder2" ~allow:[ "example.org" ]
+        Runtime_config_text.update_egress_allow_text base ~keeper_name:"alder2" ~allow:[ "example.org" ]
       in
       check (list int) (label ^ ": alder2 is rewritten where it was")
         (header_lines base ~keeper_name:"alder2")
         (header_lines rewritten ~keeper_name:"alder2");
       check (list string) (label ^ ": alder keeps its allowlist") [ "api.github.com" ]
         (allow_of rewritten ~keeper_name:"alder");
-      let removed = Runtime.remove_egress_allow_text base ~keeper_name:"alder2" in
+      let removed = Runtime_config_text.remove_egress_allow_text base ~keeper_name:"alder2" in
       check (list int) (label ^ ": alder2 is gone") [] (header_lines removed ~keeper_name:"alder2");
       check (list string) (label ^ ": and alder still has its allowlist") [ "api.github.com" ]
         (allow_of removed ~keeper_name:"alder"))
@@ -245,14 +245,14 @@ let test_a_name_that_extends_another_is_its_own_keeper () =
 let test_a_dotted_name_header_is_rewritten_in_place () =
   let base = two_keepers ~alder_header:{|[egress.keepers."edgar.a.poe"]|} in
   let text =
-    Runtime.update_egress_allow_text base ~keeper_name:"edgar.a.poe" ~allow:[ "example.com" ]
+    Runtime_config_text.update_egress_allow_text base ~keeper_name:"edgar.a.poe" ~allow:[ "example.com" ]
   in
   check (list int) "one table for edgar.a.poe, where it was"
     (header_lines base ~keeper_name:"edgar.a.poe")
     (header_lines text ~keeper_name:"edgar.a.poe");
   check (list string) "holding the new allowlist" [ "example.com" ]
     (allow_of text ~keeper_name:"edgar.a.poe");
-  let removed = Runtime.remove_egress_allow_text base ~keeper_name:"edgar.a.poe" in
+  let removed = Runtime_config_text.remove_egress_allow_text base ~keeper_name:"edgar.a.poe" in
   check (list int) "and removal takes it" [] (header_lines removed ~keeper_name:"edgar.a.poe");
   check (list string) "leaving alder2" [ "alder2.example" ] (allow_of removed ~keeper_name:"alder2")
 ;;
@@ -265,7 +265,7 @@ let test_an_array_of_tables_is_not_the_keepers_table () =
   let array_header = "[[egress.keepers.alder]]" in
   let base = two_keepers ~alder_header:array_header in
   let text =
-    Runtime.update_egress_allow_text base ~keeper_name:"alder" ~allow:[ "example.com" ]
+    Runtime_config_text.update_egress_allow_text base ~keeper_name:"alder" ~allow:[ "example.com" ]
   in
   check bool "the array-of-tables line is left where it was" true
     (List.mem array_header (fst (Toml_line_editor.split_lines text)));

@@ -776,28 +776,6 @@ val load_config_observation :
 (** Load one immutable runtime.toml observation, including its exact source
     revision. *)
 
-val update_runtime_assignment_text :
-  string -> keeper_name:string -> runtime_id:string -> string
-(** runtime.toml text with [keeper_name] assigned to [runtime_id] in
-    [\[runtime.assignments\]]: the row is replaced or appended, the section
-    is created when absent, every other line is kept. Keys are quoted, so a
-    dotted keeper name stays one key. Pure; the commit is the caller's. *)
-
-val remove_runtime_assignment_text : string -> keeper_name:string -> string
-(** runtime.toml text without [keeper_name]'s row. Pure. *)
-
-val update_egress_allow_text : string -> keeper_name:string -> allow:string list -> string
-(** runtime.toml text with [keeper_name]'s [\[egress.keepers.<name>\]] table
-    holding exactly [allow] (RFC-0415). The table is replaced or appended,
-    every other line is kept, and the replacement is wholesale rather than a
-    merge: an allowlist is the complete statement of what a keeper may reach,
-    so a write that kept unnamed entries would leave an operator unable to
-    remove one. Pure; the commit is the caller's. *)
-
-val remove_egress_allow_text : string -> keeper_name:string -> string
-(** runtime.toml text without [keeper_name]'s egress table. The keeper then
-    has no allowlist, which admits nothing rather than everything. Pure. *)
-
 val save_config_text :
   ?runtime_config_path:string -> string -> (config_commit_receipt, string) result
 (** Validate raw runtime.toml and prepare its exact-output replacement without
@@ -946,28 +924,6 @@ val create_runtime_lane :
     output beyond an operator's reach. The Runtime surface marks which lanes a
     table declares. *)
 
-(** A place in runtime.toml that can name a lane. [\[runtime\].media_failover]
-    and [verifier_exact] slots name runtimes only and are not here. *)
-type route_reference =
-  | Keeper_assignment of string  (** [\[runtime.assignments\].<keeper>] *)
-  | Default_runtime  (** [\[runtime\].default] *)
-  | Fusion_seat of
-      { preset : string
-      ; seat : Fusion_policy.seat_kind
-      }  (** a seat of [\[fusion.presets.<preset>\]] *)
-
-val route_reference_to_string : route_reference -> string
-(** The operator's name for the place, e.g. [\[fusion.presets.trio\].judge]. *)
-
-val route_references :
-  Runtime_schema.config ->
-  (string * Fusion_policy.seat_kind * string) list ->
-  (route_reference * string) list
-(** Every place the config can name a lane, with the route it names. Keeper
-    assignments, then the default, then the Fusion seats as given, which are
-    {!Fusion_config.seat_routes_of_toml}'s (preset, seat, route). Seat routes
-    are trimmed, as a Fusion run trims them before it resolves them. The lane
-    rename and remove writers read references from here. *)
 
 val rename_runtime_lane :
   ?runtime_config_path:string ->

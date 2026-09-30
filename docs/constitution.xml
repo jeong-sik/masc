@@ -52,6 +52,8 @@
 
     <goal src="lib/goal/goal_phase.mli">
       <rule>큰 단위의 목표를 설정한다.</rule>
+      <rule>Goal 은 workspace 가 공유하는 목표이며 개별 소유자를 두지 않는다.
+            생성·수정·검증 주체는 이벤트 actor 로 기록한다. Task 의 담당은 claim 으로 정한다.</rule>
       <rule>반드시 정량적인 성공 조건을 지정해야 생성할 수 있다.
             [parity B1: Goal_store.upsert_goal 은 새 Goal 생성 시 metric/target_value 두 값을 비어 있지 않게 요구한다.]</rule>
       <rule>성공조건은 구체적 내용을 포함하고, Verifier(내부 Standalone LLM Agent)가
@@ -353,7 +355,7 @@
       일반 스택은 현재 head 의 리뷰와 P0·P1·P2 해소로 병합 판단을 한다.
       CI 가 없거나 진행 중이라는 이유만으로 일반 스택의 리뷰·승인·병합을 막지 않는다.
       현재 head 에 대한 독립 승인, 최신 FAIL·HOLD 와 미해결 변경 요청을 병합 직전에 다시 확인한다.
-      head 또는 검토한 base 가 바뀌면 변경된 내용을 다시 리뷰한다. CI 재실행을 자동 요구하지 않는다.
+      head 가 바뀌거나 base 변경으로 diff 가 달라지면 그 변경을 리뷰한다. CI 재실행을 자동 요구하지 않는다.
       스택은 아래부터 main 에 병합한다. 상위 PR 을 main 에 옮길 때 base 변경을 다시 확인한다.
       Release/Tag 단계는 현재 head 의 전체 검증이 성공해야 병합·게시한다.
       코딩 에이전트는 merge-guard.sh 를 --check 로 사용하며, 실제 병합은

@@ -87,7 +87,8 @@ let runtime = {js|function browserScene(args) {
   const disabledControl = element => {
     const target = labelledControl(element) || element;
     if (target.matches(':disabled')) return true;
-    for (let parent=target; parent; parent=parent.parentElement)
+    for (const start of new Set([element,target]))
+      for (let parent=start; parent; parent=parent.parentElement)
       if (attribute(parent,'aria-disabled') === 'true') return true;
     return false;
   };
@@ -301,6 +302,17 @@ let runtime = {js|function browserScene(args) {
           ? {ariaChecked:attribute(node,'aria-checked')} : {}),
         clickable:typeof node.click === 'function' && !disabled,
         headingLevel:headingLevel(node)});
+      // Containers can declare an action while retaining independent inputs.
+      // Visit the outermost nested controls; each visits its own descendants.
+      const nested=Array.from(node.querySelectorAll?.(controlSelector+',a') || [])
+        .filter(child => linkHref(child) !== null || (child.matches(controlSelector)
+          && (child.localName !== 'label' || labelledControl(child) !== null)));
+      const nestedSet=new Set(nested);
+      for (let i=nested.length-1;i>=0;i--) {
+        let ancestor=nested[i].parentElement;
+        while (ancestor && ancestor !== node && !nestedSet.has(ancestor)) ancestor=ancestor.parentElement;
+        if (ancestor === node) stack.push(nested[i]);
+      }
       continue;
     }
     if (visible(node) && ['img','svg','canvas','video','iframe','frame'].includes(tag)) {

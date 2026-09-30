@@ -1,7 +1,7 @@
 {
   "scene": {
     "schema": "masc.browser.scene.v1",
-    "documentId": "f380f582b005e6dc2b96112d6c46e87e",
+    "documentId": "86be257fd4742b620ff03a794484f7a2",
     "url": "about:blank",
     "title": "Browser form controls fixture",
     "viewport": {
@@ -13,7 +13,7 @@
     "nodes": [
       {
         "kind": "text",
-        "nodeId": "n17",
+        "nodeId": "n21",
         "tag": "h1",
         "text": "Observed form controls",
         "rects": [
@@ -26,7 +26,7 @@
         ],
         "sourceContext": null,
         "ancestorRegion": {
-          "nodeId": "n18",
+          "nodeId": "n22",
           "role": "main",
           "label": "Observed form controls"
         },
@@ -38,20 +38,20 @@
       },
       {
         "kind": "control",
-        "nodeId": "n19",
+        "nodeId": "n23",
         "tag": "label",
         "text": "Card A",
         "rects": [
           {
             "x": 40,
-            "y": 124.109375,
+            "y": 105.109375,
             "width": 81.046875,
             "height": 47
           }
         ],
         "sourceContext": null,
         "ancestorRegion": {
-          "nodeId": "n18",
+          "nodeId": "n22",
           "role": "main",
           "label": "Observed form controls"
         },
@@ -69,20 +69,20 @@
       },
       {
         "kind": "control",
-        "nodeId": "n20",
+        "nodeId": "n24",
         "tag": "label",
         "text": "Card B",
         "rects": [
           {
             "x": 142.0625,
-            "y": 124.109375,
+            "y": 105.109375,
             "width": 82.03125,
             "height": 47
           }
         ],
         "sourceContext": null,
         "ancestorRegion": {
-          "nodeId": "n18",
+          "nodeId": "n22",
           "role": "main",
           "label": "Observed form controls"
         },
@@ -100,20 +100,51 @@
       },
       {
         "kind": "control",
-        "nodeId": "n21",
+        "nodeId": "n25",
         "tag": "label",
         "text": "Locked card",
         "rects": [
           {
             "x": 245.109375,
-            "y": 124.109375,
+            "y": 105.109375,
             "width": 124.0625,
             "height": 47
           }
         ],
         "sourceContext": null,
         "ancestorRegion": {
-          "nodeId": "n18",
+          "nodeId": "n22",
+          "role": "main",
+          "label": "Observed form controls"
+        },
+        "color": "rgb(23, 33, 47)",
+        "fontSize": 18,
+        "fontWeight": "400",
+        "whiteSpace": "normal",
+        "controlType": "label",
+        "disabled": true,
+        "editable": false,
+        "role": null,
+        "checked": false,
+        "clickable": false,
+        "headingLevel": null
+      },
+      {
+        "kind": "control",
+        "nodeId": "n26",
+        "tag": "label",
+        "text": "Locked external label",
+        "rects": [
+          {
+            "x": 40,
+            "y": 168.109375,
+            "width": 196.125,
+            "height": 47
+          }
+        ],
+        "sourceContext": null,
+        "ancestorRegion": {
+          "nodeId": "n22",
           "role": "main",
           "label": "Observed form controls"
         },
@@ -131,20 +162,20 @@
       },
       {
         "kind": "text",
-        "nodeId": "n22",
+        "nodeId": "n27",
         "tag": "label",
         "text": "Notes",
         "rects": [
           {
-            "x": 403.1875,
-            "y": 137.109375,
+            "x": 53,
+            "y": 263.109375,
             "width": 47.03125,
             "height": 21
           }
         ],
         "sourceContext": null,
         "ancestorRegion": {
-          "nodeId": "n18",
+          "nodeId": "n22",
           "role": "main",
           "label": "Observed form controls"
         },
@@ -156,20 +187,20 @@
       },
       {
         "kind": "control",
-        "nodeId": "n23",
+        "nodeId": "n28",
         "tag": "textarea",
         "text": "Notes",
         "rects": [
           {
-            "x": 450.21875,
-            "y": 118.109375,
+            "x": 100.03125,
+            "y": 244.109375,
             "width": 182,
             "height": 36
           }
         ],
         "sourceContext": null,
         "ancestorRegion": {
-          "nodeId": "n18",
+          "nodeId": "n22",
           "role": "main",
           "label": "Observed form controls"
         },
@@ -186,20 +217,20 @@
       },
       {
         "kind": "text",
-        "nodeId": "n24",
+        "nodeId": "n29",
         "tag": "label",
         "text": "Unassociated text",
         "rects": [
           {
-            "x": 679.234375,
-            "y": 137.109375,
+            "x": 329.046875,
+            "y": 263.109375,
             "width": 143.078125,
             "height": 21
           }
         ],
         "sourceContext": null,
         "ancestorRegion": {
-          "nodeId": "n18",
+          "nodeId": "n22",
           "role": "main",
           "label": "Observed form controls"
         },
@@ -211,20 +242,170 @@
       },
       {
         "kind": "control",
-        "nodeId": "n25",
+        "nodeId": "n30",
+        "tag": "form",
+        "text": "Submit amount",
+        "rects": [
+          {
+            "x": 32,
+            "y": 305.109375,
+            "width": 1036,
+            "height": 23
+          }
+        ],
+        "sourceContext": null,
+        "ancestorRegion": {
+          "nodeId": "n22",
+          "role": "main",
+          "label": "Observed form controls"
+        },
+        "color": "rgb(23, 33, 47)",
+        "fontSize": 18,
+        "fontWeight": "400",
+        "whiteSpace": "normal",
+        "controlType": "form",
+        "disabled": false,
+        "editable": false,
+        "role": null,
+        "clickable": true,
+        "headingLevel": null
+      },
+      {
+        "kind": "control",
+        "nodeId": "n31",
+        "tag": "input",
+        "text": "Amount",
+        "rects": [
+          {
+            "x": 32,
+            "y": 307.109375,
+            "width": 153,
+            "height": 21
+          }
+        ],
+        "sourceContext": null,
+        "ancestorRegion": {
+          "nodeId": "n22",
+          "role": "main",
+          "label": "Observed form controls"
+        },
+        "color": "rgb(0, 0, 0)",
+        "fontSize": 13.3333,
+        "fontWeight": "400",
+        "whiteSpace": "normal",
+        "controlType": "text",
+        "disabled": false,
+        "editable": true,
+        "role": null,
+        "clickable": true,
+        "headingLevel": null
+      },
+      {
+        "kind": "control",
+        "nodeId": "n32",
+        "tag": "button",
+        "text": "Submit amount",
+        "rects": [
+          {
+            "x": 185,
+            "y": 307.109375,
+            "width": 105.65625,
+            "height": 21
+          }
+        ],
+        "sourceContext": null,
+        "ancestorRegion": {
+          "nodeId": "n22",
+          "role": "main",
+          "label": "Observed form controls"
+        },
+        "color": "rgb(0, 0, 0)",
+        "fontSize": 13.3333,
+        "fontWeight": "400",
+        "whiteSpace": "normal",
+        "controlType": "button",
+        "disabled": false,
+        "editable": false,
+        "role": null,
+        "clickable": true,
+        "headingLevel": null
+      },
+      {
+        "kind": "control",
+        "nodeId": "n33",
+        "tag": "div",
+        "text": "Card search",
+        "rects": [
+          {
+            "x": 40,
+            "y": 336.109375,
+            "width": 179,
+            "height": 49
+          }
+        ],
+        "sourceContext": null,
+        "ancestorRegion": {
+          "nodeId": "n22",
+          "role": "main",
+          "label": "Observed form controls"
+        },
+        "color": "rgb(23, 33, 47)",
+        "fontSize": 18,
+        "fontWeight": "400",
+        "whiteSpace": "normal",
+        "controlType": "div",
+        "disabled": false,
+        "editable": false,
+        "role": "combobox",
+        "clickable": true,
+        "headingLevel": null
+      },
+      {
+        "kind": "control",
+        "nodeId": "n34",
+        "tag": "input",
+        "text": "Search card",
+        "rects": [
+          {
+            "x": 53,
+            "y": 351.109375,
+            "width": 153,
+            "height": 21
+          }
+        ],
+        "sourceContext": null,
+        "ancestorRegion": {
+          "nodeId": "n22",
+          "role": "main",
+          "label": "Observed form controls"
+        },
+        "color": "rgb(0, 0, 0)",
+        "fontSize": 13.3333,
+        "fontWeight": "400",
+        "whiteSpace": "normal",
+        "controlType": "text",
+        "disabled": false,
+        "editable": true,
+        "role": null,
+        "clickable": true,
+        "headingLevel": null
+      },
+      {
+        "kind": "control",
+        "nodeId": "n35",
         "tag": "div",
         "text": "Custom card",
         "rects": [
           {
-            "x": 856.328125,
-            "y": 124.109375,
+            "x": 240.015625,
+            "y": 336.109375,
             "width": 128.046875,
             "height": 47
           }
         ],
         "sourceContext": null,
         "ancestorRegion": {
-          "nodeId": "n18",
+          "nodeId": "n22",
           "role": "main",
           "label": "Observed form controls"
         },
@@ -242,20 +423,20 @@
       },
       {
         "kind": "control",
-        "nodeId": "n26",
+        "nodeId": "n36",
         "tag": "div",
         "text": "Mixed selection",
         "rects": [
           {
-            "x": 40,
-            "y": 187.109375,
+            "x": 389.078125,
+            "y": 336.109375,
             "width": 150.0625,
             "height": 47
           }
         ],
         "sourceContext": null,
         "ancestorRegion": {
-          "nodeId": "n18",
+          "nodeId": "n22",
           "role": "main",
           "label": "Observed form controls"
         },
@@ -273,20 +454,20 @@
       },
       {
         "kind": "control",
-        "nodeId": "n27",
+        "nodeId": "n37",
         "tag": "div",
         "text": "Locked action",
         "rects": [
           {
-            "x": 211.078125,
-            "y": 187.109375,
+            "x": 560.15625,
+            "y": 336.109375,
             "width": 137.078125,
             "height": 47
           }
         ],
         "sourceContext": null,
         "ancestorRegion": {
-          "nodeId": "n18",
+          "nodeId": "n22",
           "role": "main",
           "label": "Observed form controls"
         },
@@ -303,20 +484,20 @@
       },
       {
         "kind": "control",
-        "nodeId": "n28",
+        "nodeId": "n38",
         "tag": "div",
         "text": "Expense menu",
         "rects": [
           {
-            "x": 369.171875,
-            "y": 187.109375,
+            "x": 718.25,
+            "y": 336.109375,
             "width": 146.078125,
             "height": 47
           }
         ],
         "sourceContext": null,
         "ancestorRegion": {
-          "nodeId": "n18",
+          "nodeId": "n22",
           "role": "main",
           "label": "Observed form controls"
         },
@@ -333,20 +514,20 @@
       },
       {
         "kind": "control",
-        "nodeId": "n29",
+        "nodeId": "n39",
         "tag": "div",
         "text": "Inline menu",
         "rects": [
           {
-            "x": 536.265625,
-            "y": 187.109375,
+            "x": 885.34375,
+            "y": 336.109375,
             "width": 119.0625,
             "height": 47
           }
         ],
         "sourceContext": null,
         "ancestorRegion": {
-          "nodeId": "n18",
+          "nodeId": "n22",
           "role": "main",
           "label": "Observed form controls"
         },
@@ -363,20 +544,20 @@
       },
       {
         "kind": "control",
-        "nodeId": "n30",
+        "nodeId": "n40",
         "tag": "summary",
         "text": "More",
         "rects": [
           {
             "x": 40,
-            "y": 250.109375,
+            "y": 401.109375,
             "width": 67.015625,
             "height": 47
           }
         ],
         "sourceContext": null,
         "ancestorRegion": {
-          "nodeId": "n18",
+          "nodeId": "n22",
           "role": "main",
           "label": "Observed form controls"
         },
@@ -393,20 +574,20 @@
       },
       {
         "kind": "text",
-        "nodeId": "n31",
+        "nodeId": "n41",
         "tag": "p",
         "text": "Expanded content",
         "rects": [
           {
             "x": 32,
-            "y": 323.109375,
+            "y": 474.109375,
             "width": 145.125,
             "height": 21
           }
         ],
         "sourceContext": null,
         "ancestorRegion": {
-          "nodeId": "n18",
+          "nodeId": "n22",
           "role": "main",
           "label": "Observed form controls"
         },
@@ -418,20 +599,20 @@
       },
       {
         "kind": "text",
-        "nodeId": "n32",
+        "nodeId": "n42",
         "tag": "div",
         "text": "Inline opened",
         "rects": [
           {
             "x": 32,
-            "y": 364.109375,
+            "y": 515.109375,
             "width": 108.109375,
             "height": 21
           }
         ],
         "sourceContext": null,
         "ancestorRegion": {
-          "nodeId": "n18",
+          "nodeId": "n22",
           "role": "main",
           "label": "Observed form controls"
         },
@@ -442,7 +623,7 @@
         "headingLevel": null
       }
     ],
-    "chars": 167,
+    "chars": 242,
     "truncated": false,
     "scope": null,
     "view": "content",
@@ -451,7 +632,7 @@
   "elements": {
     "url": "about:blank",
     "title": "Browser form controls fixture",
-    "total": 10,
+    "total": 16,
     "truncated": false,
     "elements": [
       {
@@ -488,6 +669,17 @@
         "checked": false
       },
       {
+        "selector": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > div:nth-of-type(1) > label:nth-of-type(1)",
+        "tag": "label",
+        "role": null,
+        "type": null,
+        "name": "",
+        "text": "Locked external label",
+        "href": null,
+        "disabled": true,
+        "checked": false
+      },
+      {
         "selector": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > label:nth-of-type(4) > textarea:nth-of-type(1)",
         "tag": "textarea",
         "role": null,
@@ -500,7 +692,61 @@
         "readOnly": false
       },
       {
-        "selector": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > div:nth-of-type(1)",
+        "selector": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > form:nth-of-type(1)",
+        "tag": "form",
+        "role": null,
+        "type": null,
+        "name": "",
+        "text": "Submit amount",
+        "href": null,
+        "disabled": false
+      },
+      {
+        "selector": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > form:nth-of-type(1) > input:nth-of-type(1)",
+        "tag": "input",
+        "role": null,
+        "type": "text",
+        "name": "Amount",
+        "text": "",
+        "href": null,
+        "disabled": false,
+        "readOnly": false,
+        "value": "42"
+      },
+      {
+        "selector": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > form:nth-of-type(1) > button:nth-of-type(1)",
+        "tag": "button",
+        "role": null,
+        "type": "button",
+        "name": "",
+        "text": "Submit amount",
+        "href": null,
+        "disabled": false
+      },
+      {
+        "selector": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > div:nth-of-type(2)",
+        "tag": "div",
+        "role": "combobox",
+        "type": null,
+        "name": "Card search",
+        "text": "",
+        "href": null,
+        "disabled": false
+      },
+      {
+        "selector": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > div:nth-of-type(2) > input:nth-of-type(1)",
+        "tag": "input",
+        "role": null,
+        "type": "text",
+        "name": "Search card",
+        "text": "",
+        "href": null,
+        "disabled": false,
+        "readOnly": false,
+        "value": ""
+      },
+      {
+        "selector": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > div:nth-of-type(3)",
         "tag": "div",
         "role": "radio",
         "type": null,
@@ -511,7 +757,7 @@
         "ariaChecked": "true"
       },
       {
-        "selector": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > div:nth-of-type(2)",
+        "selector": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > div:nth-of-type(4)",
         "tag": "div",
         "role": "checkbox",
         "type": null,
@@ -522,7 +768,7 @@
         "ariaChecked": "mixed"
       },
       {
-        "selector": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > div:nth-of-type(3)",
+        "selector": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > div:nth-of-type(5)",
         "tag": "div",
         "role": "button",
         "type": null,
@@ -532,7 +778,7 @@
         "disabled": true
       },
       {
-        "selector": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > div:nth-of-type(4)",
+        "selector": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > div:nth-of-type(6)",
         "tag": "div",
         "role": "menuitem",
         "type": null,
@@ -542,7 +788,7 @@
         "disabled": false
       },
       {
-        "selector": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > div:nth-of-type(5)",
+        "selector": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > div:nth-of-type(7)",
         "tag": "div",
         "role": null,
         "type": null,

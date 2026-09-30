@@ -33,7 +33,8 @@ const visible = nodes.filter(el=>el.getClientRects().length && getComputedStyle(
 function disabled(el) {
   const target=(el.localName==='label' && el.control) || el;
   if (target.matches(':disabled')) return true;
-  for (let parent=target;parent;parent=parent.parentElement)
+  for (const start of new Set([el,target]))
+    for (let parent=start;parent;parent=parent.parentElement)
     if (parent.getAttribute('aria-disabled')==='true') return true;
   return false;
 }

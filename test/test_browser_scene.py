@@ -286,11 +286,16 @@ try:
  selected=observe()
  check('observed label activates the correct hidden radio',control(selected,'Card B')['checked'] is True and control(selected,'Card A')['checked'] is False)
  check('textarea inside ordinary label remains editable',control(selected,'Notes')['editable'])
+ check('onclick container retains independently editable input',control(selected,'Amount')['editable'])
+ check('onclick container retains nested button once',len([n for n in selected['nodes'] if n['kind']=='control' and n['tag']=='button' and n['text']=='Submit amount'])==1)
+ check('combobox retains nested editable input',control(selected,'Search card')['editable'])
+ act(selected,control(selected,'Amount'),action='fill',text='42')
+ check('nested input can be filled through its observed reference',js("return document.querySelector('[aria-label=Amount]').value;")=='42')
  check('unassociated label remains text',not any(n['kind']=='control' and n['text']=='Unassociated text' for n in selected['nodes']))
  check('ARIA radio and mixed checkbox are observed controls',control(selected,'Custom card')['ariaChecked']=='false' and control(selected,'Mixed selection')['ariaChecked']=='mixed')
  act(selected,control(selected,'Custom card'),action='click')
  check('ARIA radio click updates the observed selection',control(observe(),'Custom card')['ariaChecked']=='true')
- for name in ['Locked card','Locked action']:
+ for name in ['Locked card','Locked action','Locked external label']:
   locked=control(observe(),name)
   check(name+' is visibly disabled',locked['disabled'] and not locked['clickable'])
   try:

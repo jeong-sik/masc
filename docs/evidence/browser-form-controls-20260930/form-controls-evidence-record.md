@@ -20,8 +20,8 @@
 
 - 1차: WHATWG label activation and WAI-ARIA role/state contracts read directly.
 - 2차: Node syntax check and shared native/extension script parity tests pass. Chromium 147.0.7727.15 executes the worktree scripts against test/fixtures/browser-form-controls.html.
-- 3차: proof.json records 16 checks, including the base script missing the labelled radio and ARIA menu, label activation, selected states, disabled pre-effect refusal, and ordinary textarea preservation. form-controls.json contains scene/elements observations; form-controls.png shows the resulting fixture.
-- 재현 결과: All 16 fixture checks pass. Existing Node elements/navigation tests pass (18 cases), interaction dispatch assertions pass, and scene resource/parity assertions pass. Ruff reports 103 existing findings and Pyright reports 4 existing errors on both base and modified test_browser_scene.py; the added lines introduce none. No local Dune build was run.
+- 3차: proof.json records 22 checks, including the base script missing the labelled radio and ARIA menu, label activation, selected states, disabled pre-effect refusal, and ordinary textarea preservation. form-controls.json contains scene/elements observations; form-controls.png shows the resulting fixture.
+- 재현 결과: All 22 fixture checks pass. Existing Node elements/navigation tests pass (18 cases), interaction dispatch assertions pass, and scene resource/parity assertions pass. Ruff reports 103 existing findings and Pyright reports 4 existing errors on both base and modified test_browser_scene.py; the added lines introduce none. No local Dune build was run.
 
 ## 불확실성 (Uncertainty)
 

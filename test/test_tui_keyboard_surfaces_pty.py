@@ -43,6 +43,8 @@ SOURCE_MODULES = (
     'bin/masc_tui_identity_requests.mli',
     'bin/masc_tui_identity_model.ml',
     'bin/masc_tui_identity_model.mli',
+    'bin/masc_tui_render_identity.ml',
+    'bin/masc_tui_render_identity.mli',
 )
 
 if __name__ == "__main__":

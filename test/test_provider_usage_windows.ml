@@ -909,6 +909,8 @@ let refusal_read decode body =
   | Runtime_provider_usage_read.Spent_until resets_at ->
     Printf.sprintf "spent until %.0f" resets_at
   | Spent_without_reset -> "spent without reset"
+  | Spent_in_several_limits limit_ids ->
+    "spent in " ^ String.concat "," (List.map (Option.value ~default:"-") limit_ids)
   | No_window_spent -> "no window spent"
 ;;
 
@@ -940,7 +942,18 @@ let test_only_gating_windows_explain_a_refusal () =
   check string "one short of the limit is headroom"
     "no window spent"
     (refusal_read Usage.decode_kimi_coding_usages
-       {|{"usage":{"limit":"100","used":"85","resetTime":"2026-09-30T10:10:16Z"},"limits":[{"window":{"duration":300,"timeUnit":"TIME_UNIT_MINUTE"},"detail":{"limit":"100","used":"99","resetTime":"2026-09-24T15:10:16Z"}}]}|})
+       {|{"usage":{"limit":"100","used":"85","resetTime":"2026-09-30T10:10:16Z"},"limits":[{"window":{"duration":300,"timeUnit":"TIME_UNIT_MINUTE"},"detail":{"limit":"100","used":"99","resetTime":"2026-09-24T15:10:16Z"}}]}|});
+  (* A Codex spent-usage refusal does not name the limit that refused it. The
+     read lists every metered limit, so a bucket that resets in a week must not
+     hold a call whose bucket resets in an hour. *)
+  check string "spent buckets of two Codex limits name no rest"
+    "spent in codex,codex_other"
+    (refusal_read Usage.decode_codex_rate_limits_read
+       {|{"rateLimits":{"limitId":"codex","primary":{"usedPercent":100,"windowDurationMins":300,"resetsAt":1790300000}},"rateLimitsByLimitId":{"codex":{"limitId":"codex","primary":{"usedPercent":100,"windowDurationMins":300,"resetsAt":1790300000},"secondary":null},"codex_other":{"primary":{"usedPercent":100,"windowDurationMins":10080,"resetsAt":1790900000},"secondary":null}}}|});
+  check string "two spent windows of one Codex limit rest until the later reset"
+    "spent until 1790900000"
+    (refusal_read Usage.decode_codex_rate_limits_read
+       {|{"rateLimits":{"limitId":"codex","primary":{"usedPercent":100,"windowDurationMins":300,"resetsAt":1790300000}},"rateLimitsByLimitId":{"codex":{"limitId":"codex","primary":{"usedPercent":100,"windowDurationMins":300,"resetsAt":1790300000},"secondary":{"usedPercent":100,"windowDurationMins":10080,"resetsAt":1790900000}},"codex_other":{"primary":{"usedPercent":12,"windowDurationMins":300,"resetsAt":1790301000},"secondary":null}}}|})
 ;;
 
 (* --- Repeating a read: [run_full]'s clock moves only when every fiber

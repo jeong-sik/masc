@@ -1695,8 +1695,12 @@ let test_context_frontier_is_acknowledged_only_by_settlement () =
       (validate_unchanged_context ~expected:(Some started) ~snapshot_sha256:frontier.snapshot_sha256 = Error Context_frontier_missing);
     check bool "acknowledged frontier survives reopen" true
       (load ~base_path ~keeper_name = Ok (Some settled));
+    let undelivered_recall =
+      { context = Context_block Prompt_block_id.Memory_os_recall
+      ; sha256 = String.make 64 'c' } in
     let guarded = claim_with_context_frontier
-      ~context_frontier:(Some {frontier with delivery=Canonical_source_guard; acknowledged_turn=None})
+      ~context_frontier:(Some {frontier with delivery=Canonical_source_guard;
+        acknowledged_turn=None; held_context=[undelivered_recall]})
       ~base_path ~keeper_name ~expected:(Some settled) ~client_kind:Codex ~owner_epoch
       ~runtime_id:"codex.default" ~tool_surface_sha256:empty_surface ~updated_at:6.
       |> Result.get_ok in
@@ -1710,6 +1714,8 @@ let test_context_frontier_is_acknowledged_only_by_settlement () =
       |> Result.get_ok in
     check bool "control: the released session is a resume" true
       (resumable_plan.previous_settlement <> None);
+    check bool "failed dispatch does not certify its unsent Recall" true
+      (held_context_for_resume resumable_plan ~expected:(Some released) = []);
     let unchanged = reconcile_context resumable_plan ~expected:(Some released)
         ~snapshot_sha256:frontier.snapshot_sha256 in
     check bool "unchanged source keeps resuming" true (unchanged.previous_settlement <> None);

@@ -123,7 +123,9 @@ def layout(top, title, rules, bottom, last, blank, windows=(), **pinned):
 KEEPERS = layout("blank", 3, (4, 7, 28), None, 28, 17)
 BOARD = layout("blank", 3, (4, 7, 9), None, 13, 15)
 CONFIG = layout("blank", 3, (4, 9), None, 27, 1, last_source_line=18)
-DETAIL = layout("blank", 3, (4,), None, 27, 4, ("1-22/46",))
+# The compact candle leaves one more transparent mosaic row than the old
+# portrait; the title, rule, last content row and 22-row viewport do not move.
+DETAIL = layout("blank", 3, (4,), None, 27, 5, ("1-22/46",))
 DETAIL_BESIDE_ROSTER = layout("border", 3, (4, 28), 28, 28, 0, ("1-22/46",),
                               roster={"top": 2, "bottom": 28})
 # #39883 reserves rows below the roster for the chat Keeper's portrait.

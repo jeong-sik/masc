@@ -153,6 +153,7 @@ let record_summary_updated ~now (entry : pending_approval) =
     | Summary_available summary -> summary.generated_at
     | Summary_not_requested | Summary_pending | Summary_failed _ -> now
   in
+  (* See Keeper_approval.Audit.record: it logs write failures; the summary broadcast must still run. *)
   ignore
     (Keeper_approval.Audit.record
        ~base_path:entry.audit_base_path

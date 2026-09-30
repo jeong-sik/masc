@@ -48,7 +48,7 @@ def snapshot() -> dict:
             "fields": {"fixture": "concurrent-lanes"}, "evidence": [],
             "related_ids": [f"{owner}/1/event-1", "outside-current-slice"] if index == 3 else []})
     instance = {"instance_id": owner, "run_id": "shared-world", "addon_id": "scene-fixture",
-        "title": "World observer", "revision": "1", "phase": {"kind": "attached"},
+        "title": "World observer", "revision": "1", "runtime_presence": "live", "phase": {"kind": "attached"},
         "observation_seq": 1, "rows_count": len(rows), "incarnation": owner,
         "configuration": None, "action_schema": None,
         "binding": {"sources": [{"source_id": "frames", "kind": "lane_output",

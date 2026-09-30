@@ -373,12 +373,15 @@ let test_restart_recovers_exact_owner_before_replacement () =
     await_ready clock config old_id;
     let captured = instance config old_id in
     let container_id = text "container_id" captured in
+    check string "runtime snapshot marks actual entry live" "live" (text "runtime_presence" captured);
     detach clock config old_id;
     (* All live fake work is stopped before replaying the captured persistent
        binding. Reset alone is never used to abandon an active worker. *)
     Runtime.For_testing.reset ();
     let store = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
     unwrap (Store.save_binding store ~instance_id:old_id captured);
+    check string "restart overrides persisted live provenance" "retained"
+      (text "runtime_presence" (instance config old_id));
     write path bytes;
     let recovered, release_recovery = Eio.Promise.create () in
     state.recovery_barrier := Some recovered;

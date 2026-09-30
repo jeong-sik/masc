@@ -3,6 +3,7 @@ open Masc
 
 module Http = Http_server_eio
 module Api = Server_dashboard_http_keeper_portrait
+module Items_api = Server_dashboard_http_keeper_items
 
 let () = Mirage_crypto_rng_unix.use_default ()
 let () = Server_startup_state.mark_state_ready () |> Result.get_ok
@@ -56,7 +57,13 @@ let test_route_is_exact () =
     ; "/api/v1/keepers/" ^ keeper ^ "/portrait.png/extra"
     ; "/api/v1/keepers/" ^ keeper ^ "/portrait.jpg"
     ; "/api/v1/keepers/" ^ keeper
-    ; "/api/v1/other/" ^ keeper ^ "/portrait.png" ]
+    ; "/api/v1/other/" ^ keeper ^ "/portrait.png" ];
+  check (option string) "Item account path" (Some keeper)
+    (Items_api.route ("/api/v1/keepers/" ^ keeper ^ "/items"));
+  List.iter (fun path -> check (option string) path None (Items_api.route path))
+    [ "/api/v1/keepers//items"
+    ; "/api/v1/keepers/" ^ keeper ^ "/items/extra"
+    ; "/api/v1/keepers/" ^ keeper ^ "/item" ]
 
 let test_size_and_default () =
   let width, height, depth, colour =
@@ -252,6 +259,14 @@ let path ?size name =
   "/api/v1/keepers/" ^ name ^ "/portrait.png"
   ^ match size with None -> "" | Some size -> "?size=" ^ size
 
+let item_path name = "/api/v1/keepers/" ^ name ^ "/items"
+
+let item_account reply =
+  check int "Item account HTTP response" 200 reply.status;
+  require_ok Fun.id
+    (Masc_tui_keeper_items.decode ~keeper_name:keeper
+       (Yojson.Safe.from_string reply.body))
+
 let test_router_serves_png_with_a_strong_tag () =
   with_router (fun ~config:_ router ->
     let first = get ~router (path ~size:"72" keeper) in
@@ -307,7 +322,27 @@ let test_router_strict_auth_needs_a_read_token () =
     let read = get ~router ~token:reader url in
     check int "a reader's token" 200 read.status;
     check string "a PNG" "image/png" (header read "content-type");
-    check int "a player's token" 403 (get ~router ~token:player url).status)
+    check int "a player's token" 403 (get ~router ~token:player url).status;
+    let items = item_path keeper in
+    check int "Item account rejects anonymous" 401 (get ~router items).status;
+    check bool "reader sees explicit Candle off" true
+      (item_account (get ~router ~token:reader items) = Masc_tui_keeper_items.Off);
+    check int "Item account rejects player" 403
+      (get ~router ~token:player items).status;
+    check int "Item account refuses an unknown Keeper" 404
+      (get ~router ~token:reader (item_path "portrait-http-nobody")).status;
+    check int "Item account refuses a malformed Keeper" 400
+      (get ~router ~token:reader (item_path "Not_A_Keeper!")).status;
+    let candle_path =
+      Config_dir_resolver.candle_toml_path_for_base_path
+        ~base_path:config.Workspace.base_path in
+    Fs_compat.mkdir_p (Filename.dirname candle_path);
+    Fs_compat.save_file candle_path "[shop]\nprices_milli = \"bad\"\n";
+    (match item_account (get ~router ~token:reader items) with
+     | Masc_tui_keeper_items.Disabled reason ->
+       check bool "disabled names a reason" true (String.length reason > 0)
+     | Masc_tui_keeper_items.Off | Masc_tui_keeper_items.Ready _ ->
+       fail "invalid Candle policy was not visible in Item account"))
 
 let file_state file =
   let stats = Unix.stat file in
@@ -409,6 +444,37 @@ beanie = 200
     let before = get ~router (path ~size:"160" keeper) in
     check int "starting portrait" 200 before.status;
     let before_roster = read_roster () in
+    let reader = token_for config ~agent_name:"portrait-item-reader" Masc_domain.Worker in
+    let credited = get ~router ~token:reader (item_path keeper) in
+    let credited_json = Yojson.Safe.from_string credited.body in
+    check string "Item balance is an exact decimal string" "1000"
+      Yojson.Safe.Util.(credited_json |> member "balance_milli" |> to_string);
+    let catalog_json = Yojson.Safe.Util.(credited_json |> member "catalog" |> to_list) in
+    let priced = List.find (fun entry ->
+      Yojson.Safe.Util.(entry |> member "id" |> to_string) = id) catalog_json in
+    check string "Item price is an exact decimal string" "200"
+      Yojson.Safe.Util.(priced |> member "price_milli" |> to_string);
+    let with_balance value = match credited_json with
+      | `Assoc fields -> `Assoc (List.map (fun (key, field) ->
+          key, if String.equal key "balance_milli" then value else field) fields)
+      | _ -> fail "Item account response is not an object" in
+    (match Masc_tui_keeper_items.decode ~keeper_name:keeper
+        (with_balance (`String (string_of_int max_int))) with
+     | Ok (Masc_tui_keeper_items.Ready account) ->
+       check int "Item decoder keeps the full OCaml wallet range" max_int account.balance_milli
+     | Ok _ | Error _ -> fail "Item decoder lost a valid large wallet");
+    List.iter (fun amount ->
+      match Masc_tui_keeper_items.decode ~keeper_name:keeper (with_balance amount) with
+      | Error _ -> ()
+      | Ok _ -> fail "Item decoder accepted a noncanonical wallet")
+      [`Int 1000; `String "01000"; `String "999999999999999999999999999999"];
+    (match item_account credited with
+     | Masc_tui_keeper_items.Ready account ->
+       check int "Item view reads credited balance" 1000 account.balance_milli;
+       check int "Item view reads full catalog" 18 (List.length account.catalog);
+       check int "Item view starts without purchases" 0 (List.length account.owned_items)
+     | Masc_tui_keeper_items.Off | Masc_tui_keeper_items.Disabled _ ->
+       fail "credited Item account unavailable");
     let snapshot_computations = ref 0 in
     let dashboard_portrait () =
       let snapshot = Dashboard_projection_cache.get_or_compute_snapshot_json
@@ -425,6 +491,13 @@ beanie = 200
     ignore (require_ok Candle_shop.error_to_string
       (Candle_shop.purchase ~now:(fun () -> 1790640000.) ~base_path ~keeper:owner ~item));
     check string "purchase alone does not equip" before.body (get ~router (path ~size:"160" keeper)).body;
+    (match item_account (get ~router ~token:reader (item_path keeper)) with
+     | Masc_tui_keeper_items.Ready account ->
+       check int "Item view reads debit" 800 account.balance_milli;
+       check bool "Item view reads purchase" true (List.mem item account.owned_items)
+     | Masc_tui_keeper_items.Off | Masc_tui_keeper_items.Disabled _ ->
+       fail "purchased Item account unavailable");
+    check string "purchase alone does not equip" before.body (get ~router (path ~size:"96" keeper)).body;
     let purchased = ledger_bytes () in
     (match call ~slot:"face" id with Tool_result.Completed _ -> fail "head item equipped into face slot" | _ -> ());
     check string "wrong-slot refusal does not append" purchased (ledger_bytes ());
@@ -458,6 +531,9 @@ beanie = 200
     Fs_compat.append_file (Candle_ledger.path ~base_path) "{partial";
     let corrupt = ledger_bytes () in
     check int "unreadable ledger refuses a cached portrait" 503 (get ~router (path ~size:"160" keeper)).status;
+    check int "unreadable ledger refuses a cached portrait" 503 (get ~router (path ~size:"96" keeper)).status;
+    check int "unreadable ledger refuses an Item account" 503
+      (get ~router ~token:reader (item_path keeper)).status;
     (match dashboard_portrait () with
      | Keeper_portrait_equipment.Unavailable _ -> ()
      | Keeper_portrait_equipment.Ready _ -> fail "dashboard hid unreadable authority with cached gear");

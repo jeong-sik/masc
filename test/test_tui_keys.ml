@@ -1204,7 +1204,7 @@ let test_keeper_operations_are_not_top_level_tabs () =
           match tab with
           | Detail_channels | Detail_automation | Detail_runs ->
               Some (keeper_detail_tab_label tab)
-          | Detail_info | Detail_sandbox | Detail_instructions | Detail_secrets
+          | Detail_info | Detail_items | Detail_sandbox | Detail_instructions | Detail_secrets
           | Detail_github | Detail_identity -> None)
        keeper_detail_tabs)
 
@@ -2882,6 +2882,7 @@ let test_detail_tab_hint_projects_the_table () =
    the Board requeue on Info). *)
 let live_tab_keys : (Masc_tui_types.keeper_detail_tab * string list) list =
   [ Detail_info, [ "b"; "B" ]
+  ; Detail_items, [ "j/k"; "PgUp/PgDn"; "Home/End" ]
   ; Detail_sandbox, [ "o"; "d/m/s"; "PgUp/PgDn"; "R" ]
   ; Detail_instructions, [ "e" ]
   ; Detail_secrets, []

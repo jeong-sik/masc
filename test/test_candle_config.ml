@@ -39,6 +39,27 @@ let test_explicit_policy () =
   | Off | Disabled _ -> Alcotest.fail "complete payout policy was rejected"
 ;;
 
+let test_optional_shop_prices () =
+  List.iter (fun suffix ->
+    match Candle_config.of_toml_string (valid_text ^ suffix) with
+    | Candle_config.Enabled policy ->
+        List.iter (fun item ->
+          Alcotest.(check bool) "omitted price is unpriced" true
+            (Candle_config.price policy item = Candle_config.Unpriced))
+          Keeper_portrait_item.all;
+        Alcotest.(check int) "payout remains enabled" 1000
+          (Candle_config.grade_amount_milli policy.payout Candle_grade.Trivial)
+    | Off | Disabled _ -> Alcotest.fail "omitting optional prices disabled payouts")
+    [""; "[shop]\n"; "[shop.prices_milli]\n"];
+  List.iter (fun suffix ->
+    ignore (disabled_reason (Candle_config.of_toml_string (valid_text ^ suffix))))
+    ["[shop]\nprices_milli = 1\n";
+     "[shop]\nunknown = 1\n";
+     "[shop.prices_milli]\nunknown_item = 1\n";
+     "[shop.prices_milli]\ncrown = -1\n";
+     "[shop.prices_milli]\ncrown = \"1\"\n"]
+;;
+
 let test_policy_boundaries () =
   let text ~weight ~amount = Printf.sprintf
     "[payout]\nweight_max = %d\ndeduction_rate = 0\ndeduction_floor = 1000\n[payout.grades_milli]\ntrivial = %d\nsmall = 0\nmedium = 0\nlarge = 0\nepic = 0\n" weight amount in
@@ -169,7 +190,8 @@ let () =
   Alcotest.run
     "candle_config"
     [ ( "content"
-      , [ Alcotest.test_case "arithmetic and required-field boundaries" `Quick test_policy_boundaries
+      , [ Alcotest.test_case "optional shop prices preserve payouts" `Quick test_optional_shop_prices
+        ; Alcotest.test_case "arithmetic and required-field boundaries" `Quick test_policy_boundaries
         ; Alcotest.test_case "explicit policy is required" `Quick test_explicit_policy
         ; Alcotest.test_case "a key this build does not know disables" `Quick
             test_a_key_this_build_does_not_know_disables

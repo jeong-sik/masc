@@ -37,6 +37,7 @@ module Markdown_cache = Masc_tui_markdown_render_cache
 module Composer = Masc_tui_composer
 module Composer_projection = Masc_tui_composer_projection
 module Keeper_control = Masc_tui_keeper_control
+module Item_account = Masc_tui_keeper_items
 module Task_selection = Masc_tui_task_selection
 module Overview_tasks = Masc_tui_overview_tasks
 module Tool_tree = Masc_tui_tool_tree
@@ -7001,21 +7002,139 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
     (* The content rows under the title and divider, before an overflow
        indicator takes one of them. *)
     let base_height = max 0 (rows - framed_chrome_rows) in
-    (* The Keeper's own portrait opens Info, its Identity facts beside it,
-       where the pane is tall and wide enough to keep its facts in sight.
-       The name only picks the drawing; it is never drawn as text. *)
+    (* Info shows the current outfit; Items changes only the drawing for its
+       selected preview. Both use the server's observed equipment. *)
     let portrait_reading = match (keeper_reading state k).Keeper_control.liveness with
       | Keeper_control.Present runtime -> runtime.kr_portrait
       | Keeper_control.Unobserved -> Tui_decode.Unavailable "not yet read"
       | Keeper_control.Absent -> Tui_decode.Unavailable "absent from live roster"
       | Keeper_control.Invalid detail -> Tui_decode.Unavailable detail in
+    let selected_item =
+      List.nth_opt Keeper_portrait_item.all state.item_cursor
+    in
+    let account =
+      match state.item_account with
+      | Some (name, account) when String.equal name k.k_name -> Some account
+      | Some _ | None -> None
+    in
+    let milli value = Printf.sprintf "%d.%03d" (value / 1000) (value mod 1000) in
+    let account_line =
+      match account, state.item_account_error with
+      | Some (Item_account.Ready account), _ ->
+          "  Balance " ^ milli account.balance_milli ^ " Candle · preview only"
+      | Some Item_account.Off, _ -> "  Candle off · preview only"
+      | Some (Item_account.Disabled reason), _ ->
+          "  Candle disabled: " ^ Terminal_text.single_line reason
+      | None, Some detail ->
+          "  Account unavailable: " ^ Terminal_text.single_line detail
+      | None, None -> "  Loading Item account…"
+    in
+    let item_account_facts item =
+      match account with
+      | Some (Item_account.Ready account) ->
+          let owned =
+            List.exists (fun owned ->
+              String.equal (Keeper_portrait_item.id owned)
+                (Keeper_portrait_item.id item)) account.owned_items in
+          let price =
+            match List.find_opt (fun (entry : Item_account.entry) ->
+              String.equal (Keeper_portrait_item.id entry.item)
+                (Keeper_portrait_item.id item)) account.catalog with
+            | Some entry ->
+              (match entry.price with
+               | Item_account.Unpriced -> "unpriced"
+               | Item_account.Priced amount -> milli amount)
+            | None -> "catalog unavailable"
+          in
+          Some (price ^ (if owned then " owned" else ""))
+      | Some (Item_account.Off | Item_account.Disabled _) | None -> None
+    in
     let portrait =
-      if state.detail_tab = Detail_info then
+      match state.detail_tab, portrait_reading with
+      | Detail_info, Tui_decode.Ready equipment ->
+          Masc_tui_keeper_portrait.shown ~name:k.k_name ~equipment
+            ~content_rows:base_height ~content_cols:inner
+      | Detail_items, Tui_decode.Ready equipment ->
+          Option.bind selected_item (fun item ->
+            Masc_tui_keeper_portrait.preview ~name:k.k_name
+              ~equipment:(Keeper_portrait_item.preview item equipment)
+              ~content_rows:base_height ~content_cols:inner)
+      | (Detail_info | Detail_items), Tui_decode.Unavailable _
+      | (Detail_sandbox | Detail_instructions | Detail_secrets | Detail_github
+        | Detail_identity | Detail_channels | Detail_automation | Detail_runs), _ -> None
+    in
+
+    let item_row cursor index item =
+      let worn =
         match portrait_reading with
+        | Tui_decode.Unavailable _ -> false
         | Tui_decode.Ready equipment ->
-          Masc_tui_keeper_portrait.shown ~name:k.k_name ~equipment ~content_rows:base_height ~content_cols:inner
-        | Tui_decode.Unavailable _ -> None
-      else None
+            (match Keeper_portrait_item.in_slot equipment
+                     (Keeper_portrait_item.slot item) with
+             | None -> false
+             | Some equipped ->
+                 String.equal (Keeper_portrait_item.id equipped)
+                   (Keeper_portrait_item.id item))
+      in
+      let account_facts =
+        if inner < 90 then ""
+        else match item_account_facts item with
+          | Some facts -> "  " ^ facts
+          | None -> ""
+      in
+      Printf.sprintf "  %s %2d %-5s %s%s%s"
+        (if index = cursor then ">" else " ") (index + 1)
+        (Keeper_portrait_item.slot_id (Keeper_portrait_item.slot item))
+        (Keeper_portrait_item.id item) account_facts
+        (if worn then "  equipped" else "")
+    in
+    let portrait =
+      match state.detail_tab, portrait with
+      | Detail_items, Some band ->
+          let labels = List.mapi (item_row state.item_cursor) Keeper_portrait_item.all in
+          if List.exists (fun line -> Message_layout.display_width line > inner)
+               (Masc_tui_keeper_portrait.beside band labels)
+          then None else Some band
+      | _, portrait -> portrait
+    in
+    let item_lines () =
+      let items = Keeper_portrait_item.all in
+      let count = List.length items in
+      let cursor = max 0 (min (count - 1) state.item_cursor) in
+      let headline =
+        [ Printf.sprintf "  Items %d/%d · j/k to preview" (cursor + 1) count
+        ; account_line
+        ] in
+      let observation =
+        match portrait_reading with
+        | Tui_decode.Ready _ -> []
+        | Tui_decode.Unavailable reason ->
+            [ "  Portrait unavailable: " ^ Terminal_text.single_line reason ] in
+      let selected_facts =
+        match List.nth_opt items cursor with
+        | None -> []
+        | Some item ->
+            (match item_account_facts item with
+             | Some facts -> [ "  Selected: " ^ facts ]
+             | None -> []) in
+      let footer = [ "  Preview changes this picture only." ] in
+      let reserved = List.length headline + List.length selected_facts
+                     + List.length observation + List.length footer in
+      let visible = min count (max 1 (base_height - reserved)) in
+      let first = max 0 (min (cursor - (visible / 2)) (count - visible)) in
+      let rows =
+        items
+        |> List.mapi (fun index item -> index, item)
+        |> List.filter_map (fun (index, item) ->
+             if index < first || index >= first + visible then None
+             else Some (item_row cursor index item))
+      in
+      let listing =
+        match portrait with
+        | Some band -> Masc_tui_keeper_portrait.beside band (headline @ rows)
+        | None -> headline @ rows
+      in
+      listing @ selected_facts @ observation @ footer
     in
 
     (* Each tab projects only when selected. Retained data for the other
@@ -7818,6 +7937,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
     let all_lines =
       match state.detail_tab with
       | Detail_info -> info_lines ()
+      | Detail_items -> item_lines ()
       | Detail_sandbox ->
           let width = max 24 (cols - 8) in
           let status =
@@ -7947,7 +8067,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
        opens with a section called "Identity", which is also the name of
        another tab, so a reader with no mark had a wrong guess waiting.
 
-       Drawn through [tab_strip] with the row's width: nine tabs are wider
+       Drawn through [tab_strip] with the row's width: ten tabs are wider
        than the row beside the roster pane, and cut from the right the mark
        on Runs was the part that went. *)
     let before =
@@ -16085,9 +16205,23 @@ let render_about (state : state) =
   surface_chrome ~overflow:Fits ~frame:Chrome_overlay state ~terminal_rows ~cols
     ~surface_key:"about" ~title:(screen_title " MASC") ~hints:"c:candle  Esc:close"
     ~body:(fun ~budget c ->
-      Masc_tui_emblem_screen.body
+      Masc_tui_emblem_screen.about_body
         ~cols:(framed_inner_width cols) ~rows:budget
         ~origin:(c.next_origin ())
+        ~frame:state.emblem_frame
+        ~keepers:(match keepers with
+          | Masc_tui_emblem_screen.Keepers_read _ ->
+              List.map (fun (keeper : Tui_decode.keeper) ->
+                let portrait =
+                  match Keeper_control.liveness_of_roster state.keeper_roster keeper.k_name with
+                  | Keeper_control.Present runtime -> runtime.kr_portrait
+                  | Keeper_control.Unobserved | Keeper_control.Absent
+                  | Keeper_control.Invalid _ ->
+                      Keeper_portrait_equipment.Unavailable "Keeper equipment not observed"
+                in
+                Terminal_text.single_line keeper.k_name, portrait) state.keepers
+          | Masc_tui_emblem_screen.Keepers_unreadable
+          | Masc_tui_emblem_screen.Keepers_unread -> [])
         ~caption:
           [ Masc_tui_theme.tone Masc_tui_theme.Accent
             ^ "MASC \xc2\xb7 Multi-Agent Shared Context" ^ Ansi.reset
@@ -16095,7 +16229,6 @@ let render_about (state : state) =
             ^ Masc_tui_emblem_screen.about_facts ~theme keepers
             ^ Ansi.reset
           ]
-        ~elapsed:(Masc_tui_types.motion_elapsed_seconds state.emblem_frame)
       |> List.iter c.push)
 
 let render_surface (state : state) =

@@ -659,5 +659,18 @@
       "receipt": "recorded-diff-targeted-pass.txt"
     },
     "activity_capture": "workspace-activity-ci-capture.json"
+  },
+  "tools_layout_request": {
+    "pr": 40263,
+    "base": "179544426a",
+    "head": "40c77d8d738cbaea794be922ed0ca3b7e9b74b67",
+    "focused_run_request": "36694877409",
+    "probe_request": "36694878753",
+    "scope": "complete physical rows for allTools panes; fullrevisions/rawtimestamps/usagecompositiondetails",
+    "new_fixture": "10 usage-pane combinations30/40/60/80/120 xcolor/NO_COLOR; full fields/pages/HomeEnd",
+    "other_panes_and_full_read_failure": "source reviewed only",
+    "before_receipt": "tools-before.txt",
+    "before_screenshot": "tools-before-browser.png",
+    "status": "source/static reviews and baseline evidence; newhead executable verification pending"
   }
 }

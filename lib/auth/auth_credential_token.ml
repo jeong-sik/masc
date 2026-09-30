@@ -697,7 +697,11 @@ let verify_token_owner_alias config ~agent_name ~token =
 let verify_token config ~agent_name ~token : (agent_credential, masc_error) result =
   match load_credential config agent_name with
   | None ->
-    (match Auth_oauth.find_access_credential ~base_path:config ~token with
+    let ( let* ) = Result.bind in
+    let* present = credential_path_exists (credential_file config agent_name) in
+    if present then Error (Auth (Auth_error.InvalidToken
+      "The exact credential exists but cannot be decoded; alias fallback is refused"))
+    else (match Auth_oauth.find_access_credential ~base_path:config ~token with
      | Ok (Some credential) when String.equal credential.agent_name agent_name ->
        Ok credential
      | Ok (Some credential) ->

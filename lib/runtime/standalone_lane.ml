@@ -7,6 +7,7 @@ type t =
   | Workspace_curator
   | Verifier
   | Browser_stagehand
+  | Candle_appraiser
 [@@deriving enumerate]
 
 let to_id = function
@@ -16,6 +17,7 @@ let to_id = function
   | Workspace_curator -> "workspace_curator_exact"
   | Verifier -> "verifier_exact"
   | Browser_stagehand -> "browser_stagehand_exact"
+  | Candle_appraiser -> "candle_appraiser"
 ;;
 
 let equal (left : t) (right : t) = left = right
@@ -33,7 +35,7 @@ type obligation =
    in the code (RFC every-lane-is-one-row-in-one-registry, decision d3). *)
 let obligation = function
   | Board_attention | Hitl_auto_judge -> Required
-  | Librarian | Workspace_curator | Verifier | Browser_stagehand -> Optional
+  | Librarian | Workspace_curator | Verifier | Browser_stagehand | Candle_appraiser -> Optional
 ;;
 
 let required_ids =

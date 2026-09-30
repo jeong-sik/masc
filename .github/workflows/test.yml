@@ -67,9 +67,6 @@ on:
       eio_backend:
         type: string
         default: ""
-  schedule:
-    # 17:43 UTC = 02:43 KST, off-peak for both GitHub runners and the team.
-    - cron: "43 17 * * *"
   workflow_dispatch:
     inputs:
       suite:

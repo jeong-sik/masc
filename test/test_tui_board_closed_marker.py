@@ -42,7 +42,7 @@ def run(executable: str) -> None:
     open_post = h.board_selection_post("open", "Still going", "Other body")
     fixtures["/api/v1/board?sort_by=hot"] = (200, {"posts": [closed, open_post]})
     fixtures["/api/v1/board/post-closed?format=flat"] = (
-        200, {"post": closed, "comments": []})
+        200, h.board_detail_page(closed, []))
 
     def interact(process, fd, _slave, output, _base):
         h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)

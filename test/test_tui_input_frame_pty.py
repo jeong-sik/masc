@@ -19,6 +19,8 @@ import tui_keyboard_harness as _keyboard_harness
 import tui_keyboard_keepers as _keyboard_keepers
 
 SOURCE_MODULES = (
+    "bin/masc_tui_input_reader.ml",
+    "bin/masc_tui_input_reader.mli",
     "bin/masc_tui.ml",
     "bin/masc_tui_render_schedule.ml",
     "test/tui_keyboard_harness.py",

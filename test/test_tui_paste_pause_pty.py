@@ -11,6 +11,8 @@ import tui_keyboard_chat as _keyboard_chat
 import tui_keyboard_harness as _keyboard_harness
 
 SOURCE_MODULES = (
+    "bin/masc_tui_input_reader.ml",
+    "bin/masc_tui_input_reader.mli",
     "bin/masc_tui.ml",
     "bin/masc_tui_paste.ml",
     "bin/masc_tui_paste.mli",

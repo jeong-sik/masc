@@ -5,6 +5,7 @@ import re
 import subprocess
 
 from tui_keyboard_harness import (
+    board_detail_page,
     ACTING_PANE_NARROW_TERMINAL_COLUMNS,
     CSI_RE,
     FRAME_END,
@@ -68,7 +69,7 @@ def board_reference_http_fixtures() -> HttpFixtures:
     for suffix, (title, body) in bodies.items():
         fixtures[f"/api/v1/board/post-{suffix}?format=flat"] = (
             200,
-            {"post": board_selection_post(suffix, title, body), "comments": []},
+            board_detail_page(board_selection_post(suffix, title, body), []),
         )
     return fixtures
 
@@ -609,7 +610,7 @@ def run_board_list_footer_regression(executable: str) -> None:
             (503, {"error": "board-down"}) if state == "failed" else response
         )
         fixtures["/api/v1/board/post-69?format=flat"] = (
-            200, {"post": posts[-1], "comments": []})
+            200, board_detail_page(posts[-1], []))
         marker = {"populated": b"board-00", "empty": b"(no board posts)",
                   "unread": b"not loaded yet", "failed": b"board-down"}[state]
 

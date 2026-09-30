@@ -69,6 +69,10 @@ def parse_detail(value: object) -> tuple[dict, RunState, EvidenceState, dict | N
                 raise InvalidInput(f"run.{key} must be a string")
     retained = object_value(detail.get("evidence"), "Fusion evidence")
     evidence_state = state(EvidenceState, retained.get("status"), "Fusion evidence status")
+    if evidence_state is EvidenceState.PENDING and run_state is not RunState.RUNNING:
+        raise InvalidInput("Pending Fusion evidence requires a running run")
+    if evidence_state is EvidenceState.ABSENT and run_state is RunState.RUNNING:
+        raise InvalidInput("Absent Fusion evidence requires a terminal run")
     if "post" not in retained:
         raise InvalidInput("Fusion evidence.post is required")
     post = retained["post"]
@@ -85,6 +89,8 @@ def parse_detail(value: object) -> tuple[dict, RunState, EvidenceState, dict | N
 
 def project(source: Source, observation: dict) -> tuple[list[dict], bool]:
     run, run_state, evidence_state, post = parse_detail(observation.get("detail"))
+    if source.incarnation != run["run_id"]:
+        raise InvalidInput("Fusion source incarnation does not identify this exact run")
     snapshots = evidence(observation.get("evidence"))
     if not snapshots or snapshots[0]["sha256"] is None:
         raise InvalidInput("Fusion observation requires immutable snapshot evidence")

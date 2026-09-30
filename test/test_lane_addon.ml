@@ -571,7 +571,7 @@ let test_broadcast_retry_reconciles_receipt_during_slow_fanout () =
         (member "delivery" recovered = member "delivery" original);
       check bool "restart recovers the same exact artifact" true
         (member "keeper_artifact" recovered = member "keeper_artifact" original);
-      check Alcotest.int "recovery never fans out a duplicate" 3 !fanouts))
+      check Alcotest.int "idle recovery replays the same idempotent fleet projection" 4 !fanouts))
 
 let test_broadcast_failure_keeps_evidence_without_automatic_retry () =
   with_fixture (fun env _ config dir _ ->

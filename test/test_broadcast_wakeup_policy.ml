@@ -390,6 +390,42 @@ let test_fleet_projection_adds_no_queue_entry () =
        (queued_workspace_messages ~base_path:config.base_path ~keeper_name:"alpha"))
 ;;
 
+let test_broadcast_retry_recovers_interrupted_fleet_projection () =
+  with_workspace @@ fun config ->
+  List.iter (persist_meta config) ["alpha"; "beta"];
+  let request_id = "wmsg-" ^ String.make 32 'c' in
+  let attempts = ref 0 and committed_seq = ref None in
+  let previous = Workspace_broadcast.For_testing.replace_on_broadcast_mention (fun delivery ->
+    incr attempts;
+    if !attempts=1 then committed_seq := Some delivery.Workspace_broadcast.seq;
+    Broadcast_wakeup.project_workspace_message_to_fleet ~base_path:config.base_path
+      ~registered_keepers:(fun () -> if !attempts=1 then ["alpha","alpha"]
+        else ["alpha","alpha";"beta","beta"]) delivery;
+    if !attempts=1 then raise (Eio.Cancel.Cancelled Exit);
+    Workspace_broadcast.Passive) in
+  Fun.protect ~finally:(fun () ->
+    let (_ : Workspace_broadcast.broadcast_delivery -> Workspace_broadcast.mention_delivery) =
+      Workspace_broadcast.For_testing.replace_on_broadcast_mention previous in ()) (fun () ->
+    let send config = Workspace_broadcast.broadcast_once ~request_id config
+      ~from_agent:"external-agent" ~content:"retained evidence" in
+    (match send config with
+     | exception Eio.Cancel.Cancelled Exit -> ()
+     | Ok _ | Error _ -> fail "the first fleet projection must be interrupted");
+    let rows keeper_name = count_delivery_rows ~base_path:config.base_path ~keeper_name ~request_id in
+    check int "first recipient was committed before cancellation" 1 (rows "alpha");
+    check int "second recipient was not reached" 0 (rows "beta");
+    let reopened = Workspace.default_config config.base_path in
+    for _ = 1 to 2 do
+      let receipt = match send reopened with
+        | Ok receipt -> receipt
+        | Error error -> fail (Workspace_broadcast.broadcast_error_to_string error) in
+      check (option int) "retry preserves the original message sequence" !committed_seq (Some receipt.seq);
+      check int "previous recipient is not duplicated" 1 (rows "alpha");
+      check int "missed recipient is recovered exactly once" 1 (rows "beta")
+    done;
+    check int "each idle retry safely reconciles the retained projection" 3 !attempts)
+;;
+
 (* The named target's row is written by the mention path with its mention ids.
    The fanout runs afterwards over the same delivery key, so it must find that
    row already present and leave the stamp — not overwrite it with an
@@ -670,6 +706,8 @@ let () =
             test_fleet_projection_reaches_other_keepers
         ; test_case "fleet projection adds no queue entry" `Quick
             test_fleet_projection_adds_no_queue_entry
+        ; test_case "Broadcast retry recovers interrupted fleet projection" `Quick
+            test_broadcast_retry_recovers_interrupted_fleet_projection
         ; test_case "fleet projection preserves the mention row" `Quick
             test_fleet_projection_preserves_the_mention_row
         ; test_case "a Keeper's broadcast is Keeper speech" `Quick

@@ -155,8 +155,10 @@ val broadcast_once :
   Workspace_utils_backend_setup.config -> from_agent:string -> content:string ->
   (broadcast_delivery, broadcast_error) result
 (** Reconcile an exact producer-owned request after an unanswered call. A
-    committed authoritative message returns its receipt without another write
-    or fleet fanout, even while the original fanout is still running. Reusing
+    committed authoritative message returns its receipt without another message
+    write. An idle retry replays the idempotent fleet projection to recover
+    interrupted recipients; an active fanout returns its receipt immediately.
+    Reusing
     an identity with different content or sender is rejected. This path always
     declares [Fleet_conversation]; callers cannot replay a different audience. *)
 

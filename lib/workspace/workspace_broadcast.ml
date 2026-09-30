@@ -1017,6 +1017,10 @@ let broadcast ?trace_context ?msg_type ?task_cache_signal ~audience config ~from
 type exact_request_lock = { mutex : Cross_context_mutex.t; mutable users : int }
 let exact_request_locks = Hashtbl.create 16
 let exact_request_locks_mutex = Mutex.create ()
+let release_exact_request_lock key lease =
+  Mutex.protect exact_request_locks_mutex (fun () ->
+    lease.users <- lease.users - 1;
+    if lease.users=0 then Hashtbl.remove exact_request_locks key)
 let with_exact_request_lock config request_id f =
   let key = masc_dir config, request_id in
   let lease = Mutex.protect exact_request_locks_mutex (fun () ->
@@ -1026,10 +1030,19 @@ let with_exact_request_lock config request_id f =
           Hashtbl.add exact_request_locks key lease; lease in
     lease.users <- lease.users + 1;
     lease) in
-  Fun.protect ~finally:(fun () -> Mutex.protect exact_request_locks_mutex (fun () ->
-    lease.users <- lease.users - 1;
-    if lease.users=0 then Hashtbl.remove exact_request_locks key))
+  Fun.protect ~finally:(fun () -> release_exact_request_lock key lease)
     (fun () -> Cross_context_mutex.with_lock lease.mutex f)
+
+let reconcile_if_idle config request_id ~busy f =
+  let key = masc_dir config, request_id in
+  let lease = Mutex.protect exact_request_locks_mutex (fun () ->
+    if Hashtbl.mem exact_request_locks key then None
+    else let lease = {mutex=Cross_context_mutex.create ();users=1} in
+      Hashtbl.add exact_request_locks key lease; Some lease) in
+  match lease with
+  | None -> busy ()
+  | Some lease -> Fun.protect ~finally:(fun () -> release_exact_request_lock key lease)
+      (fun () -> Cross_context_mutex.with_lock lease.mutex f)
 
 let broadcast_once ~request_id config ~from_agent ~content =
   ensure_initialized config;
@@ -1061,17 +1074,26 @@ let broadcast_once ~request_id config ~from_agent ~content =
             | Mention_passive -> Passive | Mention_pending -> Pending
             | Mention_accepted -> Already_accepted
             | Mention_rejected -> Rejected Invalid_request in
-          Ok (Some {delivery with mention_delivery})
+          Ok (Some (message, {delivery with mention_delivery}))
     | _ -> Error (Broadcast_dependency_unavailable "multiple committed messages share one request identity") in
+  let replay message delivery =
+    (* Each Keeper's transcript projects by the persisted request ID. Replaying
+       fills recipients missed by cancellation/restart and deduplicates those
+       already written. A passive row proves commit, not completed fanout. *)
+    let run () = Ok {delivery with mention_delivery=deliver_committed_mention ~audience config message} in
+    match message.mention with
+    | None -> run ()
+    | Some _ -> Cross_context_mutex.with_lock mention_delivery_mutex run in
   (* Read before waiting for the first caller: its message may already be
      committed while its fleet transcript writes are still blocked. *)
   let* existing = lookup () in
   match existing with
-  | Some delivery -> Ok delivery
+  | Some (message, delivery) -> reconcile_if_idle config request_id
+      ~busy:(fun () -> Ok delivery) (fun () -> replay message delivery)
   | None -> with_exact_request_lock config request_id (fun () ->
       let* existing = lookup () in
       match existing with
-      | Some delivery -> Ok delivery
+      | Some (message, delivery) -> replay message delivery
       | None -> broadcast_internal ~request_id ~audience config ~from_agent ~content)
 
 module For_testing = struct

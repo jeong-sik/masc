@@ -550,23 +550,24 @@ let tools_display_lines ?(cols = 80) (state : state) =
                price of a screen nobody can scan. *)
             let node_by_id id =
               List.find_opt
-                (fun node -> String.equal node.sfn_id id)
+                (fun (node : Masc.Tui_decode_tools.skill_flow_node) ->
+                   String.equal node.sfn_id id)
                 flow.sf_nodes
             in
-            let dependency_text node =
+            let dependency_text (node : Masc.Tui_decode_tools.skill_flow_node) =
               match node.sfn_dependencies with
               | [] -> ""
               | values ->
                 "  \xe2\x86\x90 "
                 ^ (values
-                   |> List.map (fun dependency ->
+                   |> List.map (fun (dependency : Masc.Tui_decode_tools.skill_flow_dependency) ->
                         dependency.sfd_node_id ^ ":" ^ dependency.sfd_kind)
                    |> String.concat ", ")
             in
             let batch_count = List.length flow.sf_batches in
             let batch_lines =
               flow.sf_batches
-              |> List.mapi (fun batch_position batch ->
+              |> List.mapi (fun batch_position (batch : Masc.Tui_decode_tools.skill_flow_batch) ->
                 let last_batch = batch_position = batch_count - 1 in
                 let node_count = List.length batch.sfb_node_ids in
                 batch.sfb_node_ids
@@ -1269,8 +1270,11 @@ let tools_display_lines ?(cols = 80) (state : state) =
           List.fold_left (fun sum (row : Masc.Tui_decode_tools.skill_usage_row) ->
             sum + field row) 0 rows
         in
-        let invocations rows = total (fun row -> row.su_invocations) rows in
-        let compare_surface (a : Masc.Tui_decode_tools.skills_catalog_surface) b =
+        let invocations rows =
+          total (fun (row : Masc.Tui_decode_tools.skill_usage_row) -> row.su_invocations) rows
+        in
+        let compare_surface (a : Masc.Tui_decode_tools.skills_catalog_surface)
+            (b : Masc.Tui_decode_tools.skills_catalog_surface) =
           let count = Int.compare (invocations b.scs_usage) (invocations a.scs_usage) in
           if count <> 0 then count else
           let name = String.compare a.scs_name b.scs_name in
@@ -1279,7 +1283,7 @@ let tools_display_lines ?(cols = 80) (state : state) =
         let used = List.stable_sort compare_surface used in
         let all_rows = List.concat_map
           (fun (surface : Masc.Tui_decode_tools.skills_catalog_surface) -> surface.scs_usage) used in
-        let keepers = all_rows |> List.map (fun row -> row.su_keeper)
+        let keepers = all_rows |> List.map (fun (row : Masc.Tui_decode_tools.skill_usage_row) -> row.su_keeper)
           |> List.sort_uniq String.compare |> List.length in
         let coverage_lines =
           match sc_usage_coverage with
@@ -1298,8 +1302,8 @@ let tools_display_lines ?(cols = 80) (state : state) =
                (List.length used) (List.length sc_surfaces)
            ; Theme.info (), Printf.sprintf "Keepers %d · TRIGGERED %d · DELIVERED %d · ACTIONS %d"
                keepers (invocations all_rows)
-               (total (fun row -> row.su_deliveries) all_rows)
-               (total (fun row -> row.su_actions) all_rows)
+               (total (fun (row : Masc.Tui_decode_tools.skill_usage_row) -> row.su_deliveries) all_rows)
+               (total (fun (row : Masc.Tui_decode_tools.skill_usage_row) -> row.su_actions) all_rows)
            ; Ansi.dim, "Scope: exact Skill revisions in current Keeper sessions"
            ; Ansi.dim, Printf.sprintf "%d without retained invocation; this does not establish never used."
                (List.length sc_surfaces - List.length used)
@@ -1308,7 +1312,10 @@ let tools_display_lines ?(cols = 80) (state : state) =
         let rows = List.concat_map
           (fun (surface : Masc.Tui_decode_tools.skills_catalog_surface) ->
             let keeper_readings = surface.scs_usage
-              |> List.stable_sort (fun a b -> String.compare a.su_keeper b.su_keeper)
+              |> List.stable_sort
+                   (fun (a : Masc.Tui_decode_tools.skill_usage_row)
+                        (b : Masc.Tui_decode_tools.skill_usage_row) ->
+                      String.compare a.su_keeper b.su_keeper)
               |> List.map (fun (row : Masc.Tui_decode_tools.skill_usage_row) ->
                   let last_used = match row.su_last_used_at with
                     | Some at when String.trim at <> "" -> Terminal_text.short_timestamp at
@@ -1324,7 +1331,7 @@ let tools_display_lines ?(cols = 80) (state : state) =
             let table_mode = fits Tool_table.skill_usage_keeper_header
               && List.for_all (fun (_, _, line) -> fits line) keeper_readings in
             let keeper_rows = List.concat_map
-              (fun (row, last_used, line) ->
+              (fun ((row : Masc.Tui_decode_tools.skill_usage_row), last_used, line) ->
                   if table_mode then [Ansi.dim, line]
                   else [ Ansi.bold, Terminal_text.single_line row.su_keeper
                        ; Ansi.dim, Printf.sprintf "TRIGGERED %d · DELIVERED %d · ACTIONS %d"
@@ -1340,8 +1347,8 @@ let tools_display_lines ?(cols = 80) (state : state) =
                    ^ Terminal_text.single_line surface.scs_kind
                ; Theme.info (), Printf.sprintf "TRIGGERED %d · DELIVERED %d · ACTIONS %d"
                    (invocations surface.scs_usage)
-                   (total (fun row -> row.su_deliveries) surface.scs_usage)
-                   (total (fun row -> row.su_actions) surface.scs_usage)
+                   (total (fun (row : Masc.Tui_decode_tools.skill_usage_row) -> row.su_deliveries) surface.scs_usage)
+                   (total (fun (row : Masc.Tui_decode_tools.skill_usage_row) -> row.su_actions) surface.scs_usage)
                ]
                @ (if table_mode
                   then [Ansi.dim, Tool_table.skill_usage_keeper_header] else [])

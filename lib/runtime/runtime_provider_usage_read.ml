@@ -70,14 +70,24 @@ let readable_scopes () =
   |> List.rev
 ;;
 
-let read_codex ~mgr ~clock ~cwd ~scope codex =
+(* The windows reach the operator projection on every read, stamped with the
+   time the answer arrived; whether the same answer also rests the scope is
+   the caller's ([read_codex_after_spent_usage_refusal]). *)
+let read_codex_report ~mgr ~clock ~cwd ~scope codex =
   match
     Runtime_codex_app_server.read_rate_limits ~mgr ~clock ~cwd (codex_config codex)
   with
   | Ok report ->
-    Runtime_provider_usage_window.record ~scope ~observed_at:(Time_compat.now ()) report;
-    Ok ()
+    let observed_at = Time_compat.now () in
+    Runtime_provider_usage_window.record ~scope ~observed_at report;
+    Ok (observed_at, report)
   | Error error -> Error (Runtime_codex_app_server.error_to_string error)
+;;
+
+let read_codex ~mgr ~clock ~cwd ~scope codex =
+  Result.map
+    (fun ((_ : float), (_ : Runtime_provider_usage_window.report)) -> ())
+    (read_codex_report ~mgr ~clock ~cwd ~scope codex)
 ;;
 
 let read_muse ~mgr ~clock ~cwd ~scope (config : Runtime_muse_serve.config) =
@@ -430,11 +440,6 @@ let read_client_in_background ~clock ~cwd ~scope read =
     Scheduling_failed
 ;;
 
-let read_codex_in_background ~clock ~cwd ~scope codex =
-  read_client_in_background ~clock ~cwd ~scope
-    (fun ~mgr ~clock ~cwd ~scope -> read_codex ~mgr ~clock ~cwd ~scope codex)
-;;
-
 let read_muse_in_background ~clock ~cwd ~scope config =
   read_client_in_background ~clock ~cwd ~scope
     (fun ~mgr ~clock ~cwd ~scope -> read_muse ~mgr ~clock ~cwd ~scope config)
@@ -445,18 +450,20 @@ module For_testing = struct
 end
 
 
-(* After a 403: the one read whose answer the walk reads.
+(* After an account refusal: the reads whose answer the walk reads.
 
    An HTTP 403 does not say why the account was refused. Kimi For Coding
    sends the same body type for a spent 5-hour window and for a client the
    plan does not admit. The provider's usage endpoint answers the question
    with counts: a window that gates model calls and whose used count reached
    its limit is spent until its stated reset. Only that answer rests the
-   scope; the status alone rests nothing. *)
+   scope; the status alone rests nothing. Codex account snapshots cannot
+   attribute a bucket to a refused call. *)
 
 type account_refusal_read =
   | Spent_until of float
   | Spent_without_reset
+  | Spent_in_several_limits of string option list
   | No_window_spent
 
 (* [used] reached [limit]. Count windows are decoded as [used / limit]
@@ -478,24 +485,55 @@ let gates_model_calls (window : Runtime_provider_usage_window.window) =
 (* The latest stated reset among the spent gating windows: every one of them
    refuses calls until it resets. A spent gating window that states no reset
    keeps the scope resting until its next success, whatever the others say. *)
+(* The spent gating windows of one limit. Codex reads every metered limit
+   ([rateLimitsByLimitId]) and a spent-usage refusal does not name the limit
+   that refused the call, so spent windows of two limits cannot say how long
+   the refused call stays refused: one bucket may reset in an hour and another
+   in a week. Only a single spent limit names the rest; within it the latest
+   reset is when every spent window of that limit has room again. *)
 let account_refusal_read_of_report (report : Runtime_provider_usage_window.report) =
-  List.fold_left
-    (fun acc (window : Runtime_provider_usage_window.window) ->
-      if not (gates_model_calls window && window_spent window)
-      then acc
-      else (
-        match acc, window.resets_at with
-        | Spent_without_reset, (Some _ | None) | (No_window_spent | Spent_until _), None ->
-          Spent_without_reset
-        | No_window_spent, Some resets_at -> Spent_until (Float.of_int resets_at)
-        | Spent_until held, Some resets_at -> Spent_until (Float.max held (Float.of_int resets_at))))
-    No_window_spent
-    report.windows
+  let spent =
+    List.filter
+      (fun (window : Runtime_provider_usage_window.window) ->
+         gates_model_calls window && window_spent window)
+      report.windows
+  in
+  match
+    List.sort_uniq
+      (Option.compare String.compare)
+      (List.map (fun (window : Runtime_provider_usage_window.window) -> window.limit_id) spent)
+  with
+  | [] -> No_window_spent
+  | _ :: _ :: _ as limit_ids -> Spent_in_several_limits limit_ids
+  | [ _ ] ->
+    List.fold_left
+      (fun acc (window : Runtime_provider_usage_window.window) ->
+         match acc, window.resets_at with
+         | Spent_without_reset, (Some _ | None)
+         | (No_window_spent | Spent_until _ | Spent_in_several_limits _), None ->
+           Spent_without_reset
+         | (No_window_spent | Spent_in_several_limits _), Some resets_at ->
+           Spent_until (Float.of_int resets_at)
+         | Spent_until held, Some resets_at ->
+           Spent_until (Float.max held (Float.of_int resets_at)))
+      No_window_spent
+      spent
 ;;
 
 let account_refusal_read_to_string = function
   | Spent_until resets_at -> Printf.sprintf "a gating window is spent until %.0f" resets_at
   | Spent_without_reset -> "a gating window is spent and states no reset"
+  | Spent_in_several_limits limit_ids ->
+    Printf.sprintf
+      "gating windows of %d limits are spent (%s) and the refusal names none of them"
+      (List.length limit_ids)
+      (String.concat
+         ", "
+         (List.map
+            (function
+              | Some limit_id -> limit_id
+              | None -> "a window without a limit id")
+            limit_ids))
   | No_window_spent -> "no gating window is spent"
 ;;
 
@@ -508,18 +546,62 @@ let materialized_api_key : Llm_provider.Provider_config.credential_source * _ ->
   | Refreshable_credential _, _ -> Error Credential_not_refreshed
 ;;
 
+(* A spent window whose stated reset is not after the moment the answer
+   arrived (a zero, a stale backend, a skewed clock) names no rest. Planted
+   as a window it would replace the refusal's observation with one already
+   over, and the scope would look available on the next cycle; the turn
+   driver drops a hint that is not ahead for the same reason
+   ([Keeper_runtime_failure_route.usable_retry_after]). It stays a spent
+   window without a reset. Returns the read as rested. *)
+let rest_on_account_refusal_read ~scope ~observed_at read =
+  let read =
+    match read with
+    | Spent_until resets_at when Float.compare resets_at observed_at <= 0 ->
+      Log.Runtime_agent.info
+        "provider usage read for %s states a spent window that reset at %.0f, not \
+         after the answer at %.0f: the scope rests until its next success"
+        (Runtime_quota_window.scope_to_string scope)
+        resets_at
+        observed_at;
+      Spent_without_reset
+    | Spent_until _ | Spent_without_reset | Spent_in_several_limits _ | No_window_spent ->
+      read
+  in
+  (match read with
+   | Spent_until resets_at -> Runtime_quota_window.note_exhausted ~scope ~resets_at
+   | Spent_without_reset -> Runtime_quota_window.note_observed_exhausted ~scope
+   | Spent_in_several_limits _ ->
+     Log.Runtime_agent.info
+       "provider usage read for %s: %s; the scope rests until its next success"
+       (Runtime_quota_window.scope_to_string scope)
+       (account_refusal_read_to_string read);
+     Runtime_quota_window.note_observed_exhausted ~scope
+   | No_window_spent -> ());
+  read
+;;
+
 let read_after_account_refusal ~fetch ~scope http =
   let ( let* ) = Result.bind in
   let* (report : Runtime_provider_usage_window.report) =
     usage_report ~api_key_of:materialized_api_key ~fetch http
   in
-  Runtime_provider_usage_window.record ~scope ~observed_at:(Time_compat.now ()) report;
-  let read = account_refusal_read_of_report report in
-  (match read with
-   | Spent_until resets_at -> Runtime_quota_window.note_exhausted ~scope ~resets_at
-   | Spent_without_reset -> Runtime_quota_window.note_observed_exhausted ~scope
-   | No_window_spent -> ());
-  Ok read
+  let observed_at = Time_compat.now () in
+  Runtime_provider_usage_window.record ~scope ~observed_at report;
+  Ok (rest_on_account_refusal_read ~scope ~observed_at (account_refusal_read_of_report report))
+;;
+
+(* The refusal carries no metered limit_id. The read's default snapshot and
+   per-limit map identify observed buckets, not the bucket of that failed
+   call. Even a single reported bucket cannot establish that attribution.
+   Keep the turn's Observed evidence and refresh only the operator projection. *)
+let read_codex_after_spent_usage_refusal ~clock ~cwd ~scope codex =
+  read_client_in_background ~clock ~cwd ~scope (fun ~mgr ~clock ~cwd ~scope ->
+    Result.map
+      (fun (_observed_at, _report) ->
+        Log.Runtime_agent.info
+          "Codex usage read for %s has no rejected limit_id attribution; keeping the refusal observation without a reset"
+          (Runtime_quota_window.scope_to_string scope))
+      (read_codex_report ~mgr ~clock ~cwd ~scope codex))
 ;;
 
 let http_read_of_runtime (rt : Runtime.t) =

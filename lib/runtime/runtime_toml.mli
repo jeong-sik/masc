@@ -7,6 +7,9 @@
     - [\[providers.*\]] — Layer 1
     - [\[models.*\]] — Layer 2
     - [<provider>.<model>] binding tables — Layer 3
+    - [model_sets.<name>].models — shared model ids. A provider's
+      [model-set] references one list, materializing its provider × model
+      bindings. Explicit binding tables override the generated defaults.
     - [\[runtime\].default] — the default Runtime id ([provider.model])
     - [\[exec.ssh.endpoints.*\]] — SSH remote execution endpoint registry
       (Phase 1 SSH lane, spec §4.2); exposed as

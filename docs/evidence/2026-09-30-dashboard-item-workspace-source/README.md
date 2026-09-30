@@ -7,7 +7,9 @@
 - Local partial baseline: `4e12031c141d30dafde4aa604ca05c22660e9395`. It starts from old local integration `09826ddd4f4f4e66432f40c2902493ea99c6f4b0`, imports the current parent's three overlapping consumers and two browser contract files, then composes the workspace repair. It is not a full checkout of the actual parent's tree. Publication must apply only the delta from this local baseline onto the actual full parent tree.
 - `composition.json` records the supplied parent, local import commits and verified Git blob identities of all five imported files. Existing account-revision refresh, free-purchase/repricing tests and the controlled reactive demo revision updater are preserved. The existing browser script remains byte-identical to its imported current-parent version.
 - This is a dependent Dashboard consumer fix. The base is an integration candidate, not a statement that the Item feature shipped on main.
-- `source-sha256.json` records exact candidate source bytes and the unchanged producer/decoder/HTTP client contracts read during the audit.
+- `source-sha256.json` records the current published source bytes, including
+  the browser workflow. It is regenerated when this candidate changes; the
+  historical composition and syntax receipts retain their original scope.
 - Changelog fragment `40190.md` cites the assigned child PR #40190; no placeholder was published.
 
 ## Reachable defect
@@ -40,6 +42,11 @@ The CI-only `vite.preview.config.ts` adds the existing Keeper Item HTML entry. T
 The new scenario specifies A → B → A with fixed Keeper, wallet, outfit and project label; different owned sets/prices; held first-A response; withdrawn B rows while the fresh A response is held; current A acceptance; and withdrawal for missing current root. It prepares desktop/mobile screenshots and a `workspace-manifest.json` with input scopes, request receipts, transport failures and screenshot hashes. Real browser AbortSignal cancellation may prevent the held old response from reaching JavaScript; the manifest records that transport outcome and does not claim forced resolution of an aborted promise. The component regression separately specifies an abort-ignoring mock promise.
 
 For a CI-produced preview, set `KEEPER_ITEMS_FIXTURE_URL` to its `/dev-fixtures/keeper-items-fixture.html`, set `KEEPER_ITEMS_ARTIFACT_DIR` and the exact `GITHUB_SHA`, then run `node dashboard/e2e/keeper-items-workspace.mjs` from an environment with the existing Playwright dependency. No preview was built or browser launched in this local work.
+
+The existing `capture_item_browser` workflow step now invokes both Item browser
+scripts. The workspace screenshots and `workspace-manifest.json` use the same
+artifact directory and are included in its existing upload. This wiring is
+source-verified; it is not a claim of a completed browser run on the new head.
 
 ## Evidence limits
 

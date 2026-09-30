@@ -12,20 +12,38 @@ SECOND = "SECOND-MEMO-END"
 WINDOW = re.compile(r"rows (\d+)-(\d+) of (\d+)")
 
 
+def cell_width(text):
+    return sum(0 if unicodedata.combining(char) else
+               2 if unicodedata.east_asian_width(char) in ("W", "F") else 1
+               for char in text)
+
+
+def from_cell(text, boundary):
+    cells = 0
+    for index, char in enumerate(text):
+        if cells == boundary:
+            return text[index:]
+        cells += cell_width(char)
+        assert cells <= boundary, (boundary, text)
+    assert cells == boundary, (boundary, text)
+    return ""
+
+
 def window(output, columns):
     rows = h.screen_rows(bytes(output))
     position, match = next((index, WINDOW.search(text.decode("utf-8")))
         for index, text in sorted(rows.items()) if WINDOW.search(text.decode("utf-8")))
     first, last, total = map(int, match.groups())
+    # Locate the reader in the rendered frame: a wide terminal can reserve
+    # an Activity pane and still render Code without its left tree.
+    counter = rows[position].decode("utf-8", errors="strict")
+    boundary = cell_width(counter[:match.start()])
     body = []
     for offset in range(last - first + 1):
         line = rows.get(position + 1 + offset, b"").decode("utf-8", errors="strict")
-        cells = sum(0 if unicodedata.combining(char) else
-                    2 if unicodedata.east_asian_width(char) in ("W", "F") else 1
-                    for char in line)
+        cells = cell_width(line)
         assert cells <= columns, (columns, cells, line)
-        # A wide terminal draws the tree beside the memo reader.
-        body.append(line[34:] if columns >= 120 else line)
+        body.append(from_cell(line, boundary))
     return first, last, total, body
 
 
@@ -42,7 +60,8 @@ def run(executable, columns, no_color):
         h.resize_and_wait(process, fd, output, rows=18, columns=columns,
                           needle=b"local lock = 1", controls=(h.FULL_REDRAW,))
         h.send_and_wait(process, fd, output, b"m", b"rows 1-")
-        assert "Esc:back" in h.screen_text(bytes(output)).decode("utf-8")
+        screen = h.screen_text(bytes(output)).decode("utf-8")
+        assert "Esc:back" in screen, (columns, no_color, screen)
         captured = {}
         while True:
             first, last, total, body = window(output, columns)

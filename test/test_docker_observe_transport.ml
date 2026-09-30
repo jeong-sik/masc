@@ -17,7 +17,7 @@ let run ~base_path ~container ~missing_container ~receipt_path ~workdir =
     Process_eio.reset_for_testing ();
     AQ.For_testing.reset_runtime_state ());
   (match AQ.install_persistence ~base_path with
-   | Ok _ -> () | Error error -> fail (AQ.install_error_to_string error));
+   | Ok _ -> () | Error error -> fail (Masc.Keeper_approval_queue_result.install_error_to_string error));
   let config = Masc.Workspace.default_config base_path in
   (match Masc.Keeper_gate_mode.set config ~actor:"test" Masc.Keeper_gate_mode.Auto_judge with
    | Ok _ -> () | Error error -> fail error);

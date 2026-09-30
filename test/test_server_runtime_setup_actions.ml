@@ -160,7 +160,7 @@ let test_configured_codex_account_save () = fixture (fun base runtime binary net
     Alcotest.check Alcotest.string "verification keeps the exact configured account home"
       account_home (verified |> member "account_home" |> to_string);
     let saved = Runtime_toml.parse_file runtime |> Result.get_ok in
-    let binding = List.find (fun binding -> Runtime.id_of_binding binding = runtime_id) saved.bindings in
+    let binding = List.find (fun binding -> Runtime_instance.id_of_binding binding = runtime_id) saved.bindings in
     let provider = List.find (fun (provider:Runtime_schema.provider) -> provider.id = binding.provider_id) saved.providers in
     Alcotest.check (Alcotest.option Alcotest.string) "new saved provider retains that same account"
       (Some account_home) provider.account_home;

@@ -148,7 +148,7 @@ let run_direct_attempt ~system_prompt ~base_path ~cli_path ~on_transmitted_model
                 let config =
                   match Runtime.get_runtime_by_id "codex.codex" with
                   | Some
-                      { Runtime.execution =
+                      { Runtime_instance.execution =
                           Runtime_execution.Codex_app_server config
                       ; _
                       } ->

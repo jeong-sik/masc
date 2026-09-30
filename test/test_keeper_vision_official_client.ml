@@ -269,9 +269,47 @@ let test_cancelled_frame_store_does_not_start () =
   check bool "cancelled caller did not create a frame directory" false
     (Sys.file_exists dir)
 
+let test_cancelled_queued_frame_store_does_not_start () =
+  with_fixture "valid" @@
+  fun ~root:_ ~load:_ ~run:_ ~execute:_ ~capture:_ ~fallback_capture:_ ->
+  Eio.Switch.run @@ fun sw ->
+  let pool = Option.get (Domain_pool_ref.get ()) in
+  let occupied, signal_occupied = Eio.Promise.create () in
+  let released, release_worker = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    Domain_pool.submit_cpu pool (fun () ->
+      Eio.Promise.resolve signal_occupied ();
+      Eio.Promise.await released));
+  Eio.Promise.await occupied;
+  Fun.protect
+    ~finally:(fun () ->
+      if not (Eio.Promise.is_resolved released) then Eio.Promise.resolve release_worker ())
+    (fun () ->
+      let context, signal_context = Eio.Promise.create () in
+      let cancelled = Eio.Fiber.fork_promise ~sw (fun () ->
+        try
+          Eio.Cancel.sub (fun cc ->
+            Eio.Promise.resolve signal_context cc;
+            ignore (V.store_frame ~keeper_name:"vision-fixture" (Base64.decode_exn png)));
+          false
+        with Eio.Cancel.Cancelled _ -> true)
+      in
+      let cc = Eio.Promise.await context in
+      Eio.Fiber.yield ();
+      check bool "store waits behind the occupied worker" false
+        (Eio.Promise.is_resolved cancelled);
+      Eio.Cancel.cancel cc Exit;
+      check bool "queued store propagates cancellation" true
+        (Eio.Promise.await_exn cancelled);
+      Eio.Promise.resolve release_worker ();
+      Domain_pool.submit_cpu pool (fun () -> ());
+      check bool "cancelled queued store creates no frame directory" false
+        (Sys.file_exists (V.frames_dir ~keeper_name:"vision-fixture")))
+
 let () = run "Keeper standalone official-client vision"
   [ "artifact pool", [test_case "frame store" `Quick test_frame_store_in_pool;
-                       test_case "cancelled frame store" `Quick test_cancelled_frame_store_does_not_start]
+                       test_case "cancelled frame store" `Quick test_cancelled_frame_store_does_not_start;
+                       test_case "cancelled queued frame store" `Quick test_cancelled_queued_frame_store_does_not_start]
   ; "image and result", List.map (fun mode -> test_case mode `Quick (fun () -> test_response mode))
       ["valid"; "malformed"; "empty"; "wrong-type"]
   ; "selection", [test_case "explicit media membership and fallback" `Quick test_selection]

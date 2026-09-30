@@ -1925,6 +1925,9 @@ let handle_masc_workspace_with_outcome ~(config : Workspace.config) ~(meta : kee
    back edge that previously cycled Config → ... →
    Keeper_tool_in_process_runtime. *)
 let handle_masc_misc_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
+  let candle operation =
+    Some (Keeper_candle_tools.handle ~operation ~base_path:config.base_path
+      ~keeper_name:meta.name ~tool_name:name ~start_time:(Tool_timing.start ()) ~args) in
   let ctx : Tool_misc.context =
     { config
     ; agent_name = meta.name
@@ -1938,6 +1941,9 @@ let handle_masc_misc_with_outcome ~(config : Workspace.config) ~(meta : keeper_m
    | Some Tool_schemas_misc.Misc_portrait_read ->
      Some (Keeper_portrait_read.handle ~keeper_name:meta.name ~tool_name:name
        ~start_time:(Tool_timing.start ()) ~args)
+   | Some Tool_schemas_misc.Misc_candle_balance -> candle Keeper_candle_tools.Balance
+   | Some Tool_schemas_misc.Misc_candle_catalog -> candle Keeper_candle_tools.Catalog
+   | Some Tool_schemas_misc.Misc_candle_purchase -> candle Keeper_candle_tools.Purchase
    | Some Tool_schemas_misc.Misc_dos_screen ->
      Some (Keeper_dos_screen.handle ~keeper_name:meta.name ~base_path:config.base_path
        ~tool_name:name ~start_time:(Tool_timing.start ()) args)

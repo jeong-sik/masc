@@ -262,6 +262,8 @@ def about_screen(binary: str, *, no_color: bool) -> None:
         h.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
         h.select_keeper_row(process, fd, output, b"alpha")
         h.send_and_wait(process, fd, output, b"c", CHAT_TITLE)
+        assert h.drain_until_quiet(process, fd, output), "the chat did not settle before /about"
+        chat_picture_rows = candle_rows(output)
         start = len(output)
         h.send_and_wait(process, fd, output, b"/about\r", ABOUT_CAPTION)
         # The workspace the harness seeds holds alpha and beta.
@@ -278,7 +280,8 @@ def about_screen(binary: str, *, no_color: bool) -> None:
         # Esc closes /about and nothing else: the chat is still underneath.
         h.send_and_wait(process, fd, output, b"\x1b", CHAT_TITLE)
         assert h.drain_until_quiet(process, fd, output), "the screen kept moving after /about closed"
-        assert not candle_rows(output), "the candle stayed after /about closed"
+        # Wide split chat has its own Keeper mosaic; Esc must restore that picture.
+        assert candle_rows(output) == chat_picture_rows, "the candle stayed after /about closed"
         h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
         h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
         os.write(fd, b"q")

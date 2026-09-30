@@ -15,15 +15,27 @@ type payout_policy = private {
 
 val grade_amount_milli : payout_policy -> Candle_grade.t -> int
 
+type policy = private
+  { payout : payout_policy
+  ; prices : (Keeper_portrait_item.t * int) list
+  }
+
+type price = Unpriced | Priced of int
+val price : policy -> Keeper_portrait_item.t -> price
+(** The explicit current milli-Candle price. A missing entry is [Unpriced],
+    including when [shop] or its [prices_milli] table is absent. *)
+
 type t =
   | Off  (** There is no [candle.toml]. Nothing is recorded, paid or sold. *)
-  | Enabled of payout_policy
+  | Enabled of policy
   | Disabled of { reason : string }
       (** The file is there and does not read. Nothing is recorded, paid or
           sold, and the reason is for the operator to see. *)
 
 val of_toml_string : string -> t
-(** The content of a [candle.toml]. All payout fields and all five grade amounts must be present. No defaults. *)
+(** All payout fields and all five grade amounts are required. The optional
+    [shop.prices_milli] table accepts only canonical catalog ids and
+    nonnegative integers. No default prices or payout values. *)
 
 val load_file : path:string -> t
 (** [Off] when [path] does not exist. Anything else that stops it from being

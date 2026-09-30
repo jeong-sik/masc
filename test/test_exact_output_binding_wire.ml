@@ -127,7 +127,7 @@ let with_runtime ?(explicit_publication = false) f =
          let keeper_config =
            match Runtime.get_runtimes () with
            | [ runtime ] ->
-             (match runtime.Runtime.execution with
+             (match runtime.Runtime_instance.execution with
               | Runtime_execution.Agent_core config -> config
               | Runtime_execution.Codex_app_server _
               | Runtime_execution.Claude_code _

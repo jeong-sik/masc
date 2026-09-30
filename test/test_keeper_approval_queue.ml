@@ -821,13 +821,24 @@ let write_pending_snapshot ~base_path json =
     output_string channel (Yojson.Safe.pretty_to_string json))
 ;;
 
-let delivery_json ~entry ~remember_rule =
+let delivery_json ~base_path ~entry ~remember_rule =
+  let rule_intent =
+    if not remember_rule then `Null else
+    let open Yojson.Safe.Util in
+    let id = entry |> member "id" |> to_string in
+    match Rules.prepare_rule_intent ~base_path
+      ~keeper_name:(entry |> member "keeper_name" |> to_string)
+      ~tool_name:(entry |> member "tool_name" |> to_string)
+      ~input:(entry |> member "input") ~operation_id:id ~source_approval_id:id () with
+    | Error error -> Alcotest.fail (Rule_types.rule_store_error_to_string error)
+    | Ok intent -> Keeper_rule_revision.intent_to_yojson intent in
   `Assoc
     [ "entry", entry
     ; "decision", `Assoc [ "kind", `String "approve" ]
     ; "source", `String "human_operator"
     ; "remember_rule", `Bool remember_rule
     ; "rule_expires_at", `Null
+    ; "rule_intent", rule_intent
     ; "created_by", `Null
     ; "grant_consumed", `Bool false
     ]
@@ -844,7 +855,7 @@ let test_install_serializes_snapshot_read_with_same_base_mutation () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-             [ "version", `Int 11
+             [ "version", `Int 12
             ; "generation", `Int 1
             ; "next_sequence", `Int 1
             ; "pending", `List []
@@ -1927,6 +1938,138 @@ let test_remembered_rule_carries_requested_expiry () =
            rule.expires_at
        | Ok rules ->
          Alcotest.failf "one remembered rule expected, got %d" (List.length rules))
+;;
+
+let test_renewal_preserves_newer_rule_across_delivery_replay () =
+  let base_path = temp_dir () in
+  let keeper_name = "renewal-replay-keeper" in
+  Fun.protect
+    ~finally:(fun () -> AQ.For_testing.reset_runtime_state (); cleanup_dir base_path)
+    (fun () ->
+      ignore (install_exn ~base_path);
+      let input = `Assoc [ "target", `String "same-exact-effect" ] in
+      let submit_task task_id = submit_with_context ~base_path ~keeper_name
+          ~input ~task_id () in
+      let resolve id expires_at =
+        match AQ.resolve_with_policy ~base_path ~id
+          ~decision:Rule_types.Decision.Approve ~source:Rule_types.Human_operator
+          ~remember_rule:true ~rule_expires_at:expires_at ~created_by:"operator" () with
+        | Ok result -> result | Error error -> Alcotest.fail (AQ.resolve_error_to_string error) in
+      let status expected result = Alcotest.(check string) "remembered rule disposition"
+          expected (Masc.Keeper_approval_queue_result.remembered_rule_status_to_string result.Masc.Keeper_approval_queue_result.remembered_rule_status) in
+      let id_a = submit_task "task-renewal-a" in
+      let saved_a = resolve id_a 1000.0 in
+      status "saved" saved_a;
+      let id_b = submit_task "task-renewal-b" in
+      let saved_b = resolve id_b 2000.0 in
+      status "saved" saved_b;
+      let rule_b = match saved_b.remembered_rule with
+        | Some rule -> rule | None -> Alcotest.fail "renewal did not return rule" in
+      status "conflicted" (resolve id_a 1000.0);
+      (match Server_dashboard_http.dashboard_gate_resolve_http_json ~base_path
+          ~created_by:"operator" ~args:(`Assoc [ "id", `String id_a;
+            "decision", `String "approve"; "remember_rule", `Bool true;
+            "rule_expires_at", `Float 1000.0 ]) with
+       | Error error -> Alcotest.fail (Server_dashboard_http.approval_resolve_http_error_to_string error)
+       | Ok json ->
+           let open Yojson.Safe.Util in
+           Alcotest.(check bool) "one-shot approval remains successful" true (json |> member "ok" |> to_bool);
+           Alcotest.(check string) "HTTP exposes renewal conflict" "conflicted"
+             (json |> member "remembered_rule_status" |> to_string));
+      (match AQ.approved_resolution_state ~base_path ~id:id_a with
+       | Ok AQ.Resolution_unconsumed -> ()
+       | _ -> Alcotest.fail "rule conflict revoked the one-shot approval");
+      AQ.For_testing.reset_runtime_state ();
+      let report = install_exn ~base_path in
+      Alcotest.(check int) "conflicts do not become replay failures" 0
+        (List.length report.delivery_replay_failures);
+      status "replayed" (resolve id_b 2000.0);
+      status "conflicted" (resolve id_a 1000.0);
+      (match Rules.list_rules ~base_path () with
+       | Ok [ rule ] -> Alcotest.(check string) "restart preserves newer revision" rule_b.id rule.id
+       | _ -> Alcotest.fail "new rule missing after restart");
+      (match Rules.delete_rule ~base_path ~id:rule_b.id () with
+       | Ok _ -> () | Error error -> Alcotest.fail (Rule_types.rule_store_error_to_string error));
+      status "conflicted" (resolve id_b 2000.0);
+      AQ.For_testing.reset_runtime_state ();
+      ignore (install_exn ~base_path);
+      (match Rules.list_rules ~base_path () with
+       | Ok [] -> () | _ -> Alcotest.fail "restart resurrected deleted rule");
+      let id_c = submit_task "task-renewal-c" in
+      status "saved" (resolve id_c 3000.0);
+      status "conflicted" (resolve id_a 1000.0))
+;;
+
+let test_consumed_delivery_recovers_unapplied_rule_intent () =
+  let base_path = temp_dir () in
+  let keeper_name = "consumed-rule-recovery" in
+  Fun.protect
+    ~finally:(fun () -> AQ.For_testing.reset_runtime_state (); cleanup_dir base_path)
+    (fun () ->
+      ignore (install_exn ~base_path);
+      let id = submit ~base_path ~keeper_name ~input:(`Assoc [ "target", `String "recovery" ]) in
+      let open Yojson.Safe.Util in
+      let snapshot = read_pending_snapshot ~base_path in
+      let entry = snapshot |> member "pending" |> to_list |> List.hd in
+      let delivery = match delivery_json ~base_path ~entry ~remember_rule:true with
+        | `Assoc fields -> `Assoc (("grant_consumed", `Bool true)
+            :: List.remove_assoc "grant_consumed" fields)
+        | _ -> Alcotest.fail "delivery object expected" in
+      let snapshot = match snapshot with
+        | `Assoc fields -> `Assoc (("pending", `List []) :: ("deliveries", `List [delivery])
+            :: List.remove_assoc "pending" (List.remove_assoc "deliveries" fields))
+        | _ -> Alcotest.fail "snapshot object expected" in
+      write_pending_snapshot ~base_path snapshot;
+      (* The decision was durable and the grant consumed, but the rule save
+         never completed. A failed recovery must retain its intent. *)
+      let rules_path = AQ.For_testing.always_allowed_store_path ~base_path in
+      ensure_dir (Filename.dirname rules_path);
+      Unix.mkdir rules_path 0o755;
+      AQ.For_testing.reset_runtime_state ();
+      let failed = install_exn ~base_path in
+      Alcotest.(check bool) "failed rule recovery is visible" true
+        (List.exists (fun failure -> String.equal failure.AQ.approval_id id)
+           failed.delivery_replay_failures);
+      let retained = read_pending_snapshot ~base_path |> member "deliveries" |> to_list in
+      Alcotest.(check int) "unapplied intent survives retirement" 1 (List.length retained);
+      Unix.rmdir rules_path;
+      AQ.For_testing.reset_runtime_state ();
+      let recovered = install_exn ~base_path in
+      Alcotest.(check int) "recovery failure clears" 0 (List.length recovered.delivery_replay_failures);
+      match Rules.list_rules ~base_path () with
+      | Ok [ rule ] -> Alcotest.(check (option string)) "original intent applied"
+          (Some id) rule.source_approval_id
+      | _ -> Alcotest.fail "consumed grant lost its remembered rule intent")
+;;
+
+let test_delivery_rejects_intent_with_different_approval_expiry () =
+  let base_path = temp_dir () in
+  let keeper_name = "rule-intent-authority" in
+  Fun.protect
+    ~finally:(fun () -> AQ.For_testing.reset_runtime_state (); cleanup_dir base_path)
+    (fun () ->
+      ignore (install_exn ~base_path);
+      let id = submit ~base_path ~keeper_name ~input:(`Assoc [ "target", `String "bound" ]) in
+      let open Yojson.Safe.Util in
+      let set key value = function
+        | `Assoc fields -> `Assoc ((key, value) :: List.remove_assoc key fields)
+        | _ -> Alcotest.fail "object expected" in
+      let snapshot = read_pending_snapshot ~base_path in
+      let entry = snapshot |> member "pending" |> to_list |> List.hd in
+      let delivery = delivery_json ~base_path ~entry ~remember_rule:true in
+      let intent = delivery |> member "rule_intent" in
+      let next = intent |> member "next" in
+      let changed_rule = next |> member "rule" |> set "expires_at" (`Float 2000.0) in
+      let corrupted = delivery |> set "rule_intent"
+        (intent |> set "next" (next |> set "rule" changed_rule)) in
+      write_pending_snapshot ~base_path
+        (snapshot |> set "pending" (`List []) |> set "deliveries" (`List [corrupted]));
+      AQ.For_testing.reset_runtime_state ();
+      ignore (AQ.install_persistence ~base_path);
+      (match AQ.approved_resolution_state ~base_path ~id with
+       | Error _ -> () | Ok _ -> Alcotest.fail "mismatched durable intent became an approved grant");
+      match Rules.list_rules ~base_path () with
+      | Ok [] -> () | _ -> Alcotest.fail "mismatched durable intent wrote a rule")
 ;;
 
 let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
@@ -4359,7 +4502,7 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-            [ "version", `Int 11
+            [ "version", `Int 12
             ; "generation", `Int 1
             ; "next_sequence", `Int 1
             ; "pending", `String "malformed-pending-array"
@@ -4396,7 +4539,7 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
          (Yojson.Safe.equal
             persisted
             (`Assoc
-               [ "version", `Int 11
+               [ "version", `Int 12
                ; "generation", `Int 1
                ; "next_sequence", `Int 1
                ; "pending", `String "malformed-pending-array"
@@ -4505,7 +4648,7 @@ let test_unsupported_version_snapshot_requires_runtime_reset () =
         | Error
             (Masc.Keeper_approval_queue_result.Install_storage_failed
               { reason =
-                  "gate_pending.version 8 is unsupported (current 11); reset \
+                  "gate_pending.version 8 is unsupported (current 12); reset \
                    runtime state before restarting MASC"
               ; _
               }) ->
@@ -4614,7 +4757,7 @@ let test_v10_store_requires_runtime_reset_before_rows_are_read () =
        | Error
            (Masc.Keeper_approval_queue_result.Install_storage_failed
              { reason =
-                 "gate_pending.version 10 is unsupported (current 11); reset \
+                 "gate_pending.version 10 is unsupported (current 12); reset \
                   runtime state before restarting MASC"
              ; _
              }) ->
@@ -5057,7 +5200,7 @@ let test_persisted_delivery_replays_before_origin_wake () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-             [ "version", `Int 11
+             [ "version", `Int 12
             ; "generation", `Int 1
             ; "next_sequence", `Int 2
             ; "pending", `List []
@@ -5068,6 +5211,7 @@ let test_persisted_delivery_replays_before_origin_wake () =
                       ; "decision", `Assoc [ "kind", `String "approve" ]
                       ; "source", `String "human_operator"
                       ; "remember_rule", `Bool false
+                      ; "rule_intent", `Null
                       ; "created_by", `Null
                       ; "grant_consumed", `Bool false
                       ]
@@ -5379,19 +5523,19 @@ let test_one_delivery_replay_failure_does_not_stop_others () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-             [ "version", `Int 11
+             [ "version", `Int 12
             ; "generation", `Int 1
             ; "next_sequence", `Int 4
             ; "pending", `List []
             ; ( "deliveries"
               , `List
-                  [ delivery_json
+                  [ delivery_json ~base_path
                       ~entry:(entry_at 1 first_id)
                       ~remember_rule:true
-                  ; delivery_json
+                  ; delivery_json ~base_path
                       ~entry:(entry_at 2 second_id)
                       ~remember_rule:true
-                  ; delivery_json
+                  ; delivery_json ~base_path
                       ~entry:(entry_at 3 successful_id)
                       ~remember_rule:false
                   ] )
@@ -6544,6 +6688,12 @@ let () =
             "remembered rule carries requested expiry"
             `Quick
             test_remembered_rule_carries_requested_expiry
+        ; Alcotest.test_case "renewal survives stale delivery and restart" `Quick
+            test_renewal_preserves_newer_rule_across_delivery_replay
+        ; Alcotest.test_case "consumed delivery recovers rule intent" `Quick
+            test_consumed_delivery_recovers_unapplied_rule_intent
+        ; Alcotest.test_case "delivery rejects mismatched intent expiry" `Quick
+            test_delivery_rejects_intent_with_different_approval_expiry
         ; Alcotest.test_case
             "cycle grant binds origin and is consumed once"
             `Quick

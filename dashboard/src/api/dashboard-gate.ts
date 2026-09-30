@@ -585,6 +585,7 @@ export interface ResolveGateApprovalResponse {
   id: string
   decision: 'approve' | 'reject'
   rule_id: string | null
+  remembered_rule_status: 'not_requested' | 'saved' | 'replayed' | 'conflicted' | 'skipped'
   audit_receipts: KeeperApprovalAuditReceipt[]
 }
 
@@ -607,6 +608,7 @@ function decodeResolveGateApprovalResponse(
   raw: unknown,
   requestedId: string,
   requestedDecision: 'approve' | 'reject',
+  rememberRule: boolean,
 ): ResolveGateApprovalResponse {
   const path = '/api/v1/dashboard/gate/resolve'
   if (!isRecord(raw) || !hasExactKeys(raw, [
@@ -614,6 +616,7 @@ function decodeResolveGateApprovalResponse(
     'id',
     'decision',
     'rule_id',
+    'remembered_rule_status',
     'audit_receipts',
   ])) return gateMutationProtocolDrift(path, 'fields must be exact')
   if (raw.ok !== true || raw.id !== requestedId || raw.decision !== requestedDecision) {
@@ -624,6 +627,15 @@ function decodeResolveGateApprovalResponse(
     : typeof raw.rule_id === 'string' && raw.rule_id.trim() !== ''
       ? raw.rule_id
       : gateMutationProtocolDrift(path, 'rule_id must be null or non-blank')
+  const ruleStatus = raw.remembered_rule_status
+  if (ruleStatus !== 'not_requested' && ruleStatus !== 'saved'
+      && ruleStatus !== 'replayed' && ruleStatus !== 'conflicted' && ruleStatus !== 'skipped') {
+    return gateMutationProtocolDrift(path, 'remembered_rule_status is invalid')
+  }
+  if ((ruleId !== null) !== (ruleStatus === 'saved' || ruleStatus === 'replayed')
+      || (ruleStatus !== 'not_requested') !== rememberRule) {
+    return gateMutationProtocolDrift(path, 'remembered rule status does not match rule_id or request')
+  }
   if (!Array.isArray(raw.audit_receipts)) {
     return gateMutationProtocolDrift(path, 'audit_receipts must be an array')
   }
@@ -633,12 +645,11 @@ function decodeResolveGateApprovalResponse(
   }
   const actualEvents = (auditReceipts as KeeperApprovalAuditReceipt[])
     .map(receipt => receipt.event)
-  const isResolutionOnly = actualEvents.length === 1 && actualEvents[0] === 'resolved'
-  const isRuleCreationAndResolution = ruleId !== null
-    && actualEvents.length === 2
-    && actualEvents[0] === 'rule_created'
-    && actualEvents[1] === 'resolved'
-  if (!isResolutionOnly && !isRuleCreationAndResolution) {
+  const expectedEvents = ruleStatus === 'saved' ? ['rule_created']
+    : ruleStatus === 'conflicted' ? ['rule_conflicted'] : []
+  const mutationEvents = actualEvents.at(-1) === 'resolved' ? actualEvents.slice(0, -1) : actualEvents
+  if (mutationEvents.length !== expectedEvents.length
+      || mutationEvents.some((event, index) => event !== expectedEvents[index])) {
     return gateMutationProtocolDrift(path, 'audit_receipts do not match the committed mutation')
   }
   return {
@@ -646,6 +657,7 @@ function decodeResolveGateApprovalResponse(
     id: requestedId,
     decision: requestedDecision,
     rule_id: ruleId,
+    remembered_rule_status: ruleStatus,
     audit_receipts: auditReceipts as KeeperApprovalAuditReceipt[],
   }
 }
@@ -681,7 +693,8 @@ export async function resolveGateApproval(
     reason: resolution.decision === 'reject' ? resolution.reason : undefined,
     rule_expires_at: resolution.decision === 'approve' ? resolution.ruleExpiresAt : undefined,
   })
-  return decodeResolveGateApprovalResponse(raw, id, resolution.decision)
+  return decodeResolveGateApprovalResponse(raw, id, resolution.decision,
+    resolution.decision === 'approve' && resolution.rememberRule)
 }
 
 export function retryGateAutoJudge(

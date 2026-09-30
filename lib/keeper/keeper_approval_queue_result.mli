@@ -186,8 +186,18 @@ val resolution_absence_to_string : resolution_absence -> string
 val install_error_to_string : install_error -> string
 
 
+type remembered_rule_status =
+  | Rule_not_requested
+  | Rule_saved
+  | Rule_replayed
+  | Rule_conflicted
+  | Rule_skipped
+
+val remembered_rule_status_to_string : remembered_rule_status -> string
+
 type resolution_result =
   { remembered_rule : approval_rule option
+  ; remembered_rule_status : remembered_rule_status
   ; audit_receipts : Keeper_approval.Audit.receipt list
   }
 

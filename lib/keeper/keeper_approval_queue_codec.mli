@@ -12,6 +12,7 @@ type persisted_delivery =
   ; source : decision_source
   ; remember_rule : bool
   ; rule_expires_at : float option
+  ; rule_intent : Keeper_rule_revision.intent option
   ; created_by : string option
   ; grant_consumed : bool
   ; replay_outcome : resolution_replay_outcome option

@@ -18,6 +18,7 @@ type event =
   | Resolved
   | Summary_updated
   | Rule_created
+  | Rule_conflicted
   | Rule_deleted
   | Grant_consumed
   | Gate_allowed

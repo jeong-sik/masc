@@ -3,7 +3,8 @@ open Keeper_approval_queue_result
 
 module SMap = Set_util.StringMap
 
-let pending_store_version = 11
+(* 12: deliveries persist the exact rule mutation intent for replay. *)
+let pending_store_version = 12
 let replay_results_store_version = 1
 
 type persisted_delivery =
@@ -12,6 +13,7 @@ type persisted_delivery =
   ; source : decision_source
   ; remember_rule : bool
   ; rule_expires_at : float option
+  ; rule_intent : Keeper_rule_revision.intent option
   ; created_by : string option
   ; grant_consumed : bool
   ; replay_outcome : resolution_replay_outcome option
@@ -105,6 +107,8 @@ let persisted_delivery_to_yojson delivery =
     ; "source", `String (decision_source_to_string delivery.source)
     ; "remember_rule", `Bool delivery.remember_rule
     ; "rule_expires_at", Json_util.float_opt_to_json delivery.rule_expires_at
+    ; "rule_intent", (match delivery.rule_intent with
+        | None -> `Null | Some intent -> Keeper_rule_revision.intent_to_yojson intent)
     ; "created_by", Json_util.string_opt_to_json delivery.created_by
     ; "grant_consumed", `Bool delivery.grant_consumed
     ]
@@ -568,6 +572,7 @@ let persisted_delivery_of_yojson ~base_path json =
           ; "source"
           ; "remember_rule"
           ; "rule_expires_at"
+          ; "rule_intent"
           ; "created_by"
           ; "grant_consumed"
           ]
@@ -591,6 +596,22 @@ let persisted_delivery_of_yojson ~base_path json =
     in
     let* rule_expires_at = optional_float ~surface "rule_expires_at" fields in
     let* created_by = optional_string ~surface "created_by" fields in
+    let* intent_json = required_member ~surface "rule_intent" fields in
+    let* rule_intent = match decision, remember_rule, intent_json with
+      | Decision.Approve, true, (`Assoc _ as json) ->
+          let* intent = Keeper_rule_revision.intent_of_yojson json in
+          let rule = intent.next.rule in
+          if intent.next.presence = Keeper_rule_revision.Active
+             && String.equal intent.next.operation_id entry.id
+             && rule.source_approval_id = Some entry.id
+             && String.equal rule.keeper_name entry.keeper_name
+             && String.equal rule.tool_name entry.tool_name
+             && String.equal rule.request_fingerprint (Keeper_approval_request_fingerprint.request_fingerprint entry.input)
+             && rule.expires_at = rule_expires_at && rule.created_by = created_by
+          then Ok (Some intent)
+          else Error (surface ^ ".rule_intent does not match approval authority")
+      | (Decision.Approve | Decision.Reject _), false, `Null -> Ok None
+      | _ -> Error (surface ^ ".rule_intent must match remembered approval") in
     let* grant_consumed =
       match List.assoc_opt "grant_consumed" fields with
       | Some (`Bool value) -> Ok value
@@ -610,6 +631,7 @@ let persisted_delivery_of_yojson ~base_path json =
       ; source
       ; remember_rule
       ; rule_expires_at
+      ; rule_intent
       ; created_by
       ; grant_consumed
       ; replay_outcome = None

@@ -2491,12 +2491,25 @@ let journal_resolution ~id ~decision ~source ~remember_rule ~rule_expires_at ~cr
     match SMap.find_opt id pending_map with
     | None -> Error Journal_not_found
     | Some entry ->
+      let prepared =
+        if remember_rule then
+          Keeper_approval_queue_rules.prepare_rule_intent
+            ~base_path:entry.audit_base_path ~keeper_name:entry.keeper_name
+            ~tool_name:entry.tool_name ~input:entry.input ~operation_id:entry.id
+            ~source_approval_id:entry.id ?created_by ?expires_at:rule_expires_at ()
+          |> Result.map Option.some
+        else Ok None
+      in
+      match prepared with
+      | Error error -> Error (Journal_storage { path = error.path; reason = error.reason })
+      | Ok rule_intent ->
       let delivery =
         { entry
         ; decision
         ; source
         ; remember_rule
         ; rule_expires_at
+        ; rule_intent
         ; created_by
         ; grant_consumed = false
         ; replay_outcome = None
@@ -2542,87 +2555,54 @@ let approval_decision_equal left right =
     false
 ;;
 
-let remember_rule_for_entry ~base_path ?created_by ?rule_expires_at (entry : pending_approval) =
-  try
-    match
-      Keeper_approval_queue_rules.upsert_rule
-        ~base_path
-        ~keeper_name:entry.keeper_name
-        ~tool_name:entry.tool_name
-        ~input:entry.input
-        ?created_by
-        ~source_approval_id:entry.id
-        ?expires_at:rule_expires_at
-        ()
-    with
-    | Ok (rule, created) ->
-      let audit_receipts =
-        if created
-        then
-          [ Keeper_approval.Audit.record_rule_created ~base_path rule ]
-        else []
-      in
-      Ok (rule, audit_receipts)
-    | Error reason -> Error reason
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn ->
-    let reason = Printexc.to_string exn in
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string ApprovalQueueFailures)
-      ~labels:
-        [ "keeper", entry.keeper_name
-        ; "site", Keeper_approval_queue_failure_site.(to_label Remember_rule)
-        ]
-      ();
-    Log.Keeper.warn
-      "approval_queue: remember rule failed id=%s err=%s"
-      entry.id
-      reason;
-    Error
-      ({ path = rules_path ~base_path ()
-       ; reason
-       }
-       : rule_store_error)
-;;
-
 let remember_rule_for_delivery delivery =
-  match delivery.decision, delivery.remember_rule with
-  | Decision.Approve, true ->
-    (match
-       remember_rule_for_entry
-         ~base_path:delivery.entry.audit_base_path
-         ?created_by:delivery.created_by
-         ?rule_expires_at:delivery.rule_expires_at
-         delivery.entry
-     with
-     | Ok (rule, audit_receipts) -> Ok (Some rule, audit_receipts)
-     | Error rule_error ->
-       Error
-         { path = rule_error.path
-         ; reason = rule_error.reason
-         })
-  | (Decision.Approve | Decision.Reject _),
-    false ->
-    Ok (None, [])
-  | Decision.Reject _, true -> Ok (None, [])
+  match delivery.rule_intent with
+  | None -> Ok (None, Rule_not_requested, [])
+  | Some intent ->
+      match Keeper_approval_queue_rules.apply_rule_intent
+          ~base_path:delivery.entry.audit_base_path intent with
+      | Error (error : rule_store_error) ->
+          Error ({ path = error.path; reason = error.reason } : storage_error)
+      | Ok (Keeper_approval_queue_rules.Rule_applied rule) ->
+          Ok (Some rule, Rule_saved,
+              [ Keeper_approval.Audit.record_rule_created
+                  ~base_path:delivery.entry.audit_base_path rule ])
+      | Ok (Keeper_approval_queue_rules.Rule_already_applied rule) ->
+          Ok (Some rule, Rule_replayed, [])
+      | Ok (Keeper_approval_queue_rules.Rule_conflict current) ->
+          let revision_json = function None -> `Null | Some value -> `String value in
+          let receipt = Keeper_approval.Audit.record
+              ~base_path:delivery.entry.audit_base_path
+              ~event_type:Keeper_approval.Audit.Rule_conflicted
+              ~id:delivery.entry.id ~keeper_name:delivery.entry.keeper_name
+              ~tool_name:delivery.entry.tool_name
+              ~source_approval_id:delivery.entry.id ?actor:delivery.created_by
+              ~extra_fields:[ "expected_revision", revision_json intent.expected_revision;
+                "current_revision", revision_json (Keeper_rule_revision.revision current) ] () in
+          Ok (None, Rule_conflicted, [receipt])
 ;;
 
-(* Why a delivery is being completed. The operator's decision reaches the
-   audit ledger as [Resolved] once, when [journal_resolution] has made it
-   durable (see [record_journaled_resolution]); no completion writes that row.
-   The occasion only says why the wake is being sent, and a boot replay or a
-   same-request resubmission logs it as a redelivery.
+(* A remembered rule is a separate durable effect from consuming the one-shot
+   grant or observing its wake. Reconcile it before either fact can retire the
+   delivery. Only authoritative absence permits skipping the rule. *)
+let reconcile_delivery_rule delivery =
+  match delivery.rule_intent with
+  | None -> remember_rule_for_delivery delivery
+  | Some _ ->
+    let config = Workspace.default_config delivery.entry.audit_base_path in
+    (match Keeper_meta_store.read_meta_presence config delivery.entry.keeper_name with
+     | Ok Keeper_meta_store.Meta_absent -> Ok (None, Rule_skipped, [])
+     | Ok (Keeper_meta_store.Meta_present _) -> remember_rule_for_delivery delivery
+     | Error reason ->
+       Error { path = pending_store_path ~base_path:delivery.entry.audit_base_path;
+               reason = "remembered rule reconciliation: keeper meta: " ^ reason }
+     | Ok (Keeper_meta_store.Meta_not_current detail) ->
+       Error { path = pending_store_path ~base_path:delivery.entry.audit_base_path;
+               reason = "remembered rule reconciliation: keeper meta not current: " ^ detail })
+;;
 
-   Writing the row on every completion counted one click as many decisions --
-   nineteen rows for one approval on 2026-09-22 while its keeper was offline
-   across twenty-one boots (#37964). Writing it on the first completion, after
-   the wake, lost the decision whenever that wake failed: the operator's second
-   press and every boot replay found no pending entry and never wrote it. *)
-type delivery_occasion =
-  | First_commit
-  | Boot_replay
-  | Same_request_resubmitted
+(* A decision is journaled once; wake redelivery does not create another decision. *)
+type delivery_occasion = First_commit | Boot_replay | Same_request_resubmitted
 
 let delivery_occasion_to_string = function
   | First_commit -> "first_commit"
@@ -2694,9 +2674,15 @@ let complete_delivery ~(occasion : delivery_occasion) delivery =
   | Ok () ->
     if delivery.grant_consumed
     then (
-      (* The keeper already used the grant, so no wake is sent. *)
-      project_resolution_chat delivery;
-      Ok { remembered_rule = None; audit_receipts = [] })
+      (* Consumption suppresses the wake, not the journaled rule mutation. *)
+      match reconcile_delivery_rule delivery with
+      | Error storage_error -> Error (Persistence_failed { approval_id = id; storage_error })
+      | Ok (remembered_rule, remembered_rule_status, audit_receipts) ->
+        (match remembered_rule_status with
+         | Rule_skipped -> ()
+         | Rule_not_requested | Rule_saved | Rule_replayed | Rule_conflicted ->
+           project_resolution_chat delivery);
+        Ok { remembered_rule; remembered_rule_status; audit_receipts })
     else
       (match deliver_resolution ~base_path delivery.entry delivery.decision with
        | Error Keeper_registry_event_queue.Hitl_recipient_absent ->
@@ -2714,14 +2700,17 @@ let complete_delivery ~(occasion : delivery_occasion) delivery =
               ~keeper_name:delivery.entry.keeper_name
               "hitl delivery retired: no such keeper approval=%s"
               id;
-            Ok { remembered_rule = None; audit_receipts = [] })
+            Ok { remembered_rule = None;
+                 remembered_rule_status =
+                   (if delivery.remember_rule then Rule_skipped else Rule_not_requested);
+                 audit_receipts = [] })
        | Error (Keeper_registry_event_queue.Hitl_enqueue_failed reason) ->
          Error (Delivery_failed { approval_id = id; reason })
        | Ok () ->
-         (match remember_rule_for_delivery delivery with
+         (match reconcile_delivery_rule delivery with
           | Error storage_error ->
             Error (Persistence_failed { approval_id = id; storage_error })
-          | Ok (remembered_rule, rule_audit_receipts) ->
+          | Ok (remembered_rule, remembered_rule_status, rule_audit_receipts) ->
             (* Both decisions remain authoritative after their wake is sent.
                A waiting direct operation must re-read the exact rejection as
                well as an approval; the wake alone is not the request store.
@@ -2731,7 +2720,7 @@ let complete_delivery ~(occasion : delivery_occasion) delivery =
               ~base_path
               ~keeper_name:delivery.entry.keeper_name
               ~approval_id:id;
-            Ok { remembered_rule; audit_receipts = rule_audit_receipts }))
+            Ok { remembered_rule; remembered_rule_status; audit_receipts = rule_audit_receipts }))
 ;;
 
 let delivery_wake_was_observed delivery =
@@ -3080,7 +3069,25 @@ let install_persistence_internal ~after_load ~base_path =
   match installed with
   | Error storage_error -> Error (Install_storage_failed storage_error)
   | Ok (loaded_pending, loaded_deliveries, replay_projection_error) ->
-    let spent_ids = spent_delivery_ids ~base_path loaded_deliveries in
+    let rule_failures =
+      List.filter_map (fun delivery ->
+        let result =
+          match resolve_store_readiness_error ~base_path ~approval_id:delivery.entry.id with
+          | Error _ as error -> error
+          | Ok () ->
+            (match reconcile_delivery_rule delivery with
+             | Ok _ -> Ok ()
+             | Error storage_error ->
+               Error (Persistence_failed { approval_id = delivery.entry.id; storage_error })) in
+        match result with
+        | Ok () -> None
+        | Error error -> Some { approval_id = delivery.entry.id;
+                                reason = resolve_error_to_string error })
+        loaded_deliveries in
+    let rule_failed id =
+      List.exists (fun failure -> String.equal failure.approval_id id) rule_failures in
+    let spent_ids = spent_delivery_ids ~base_path
+        (List.filter (fun delivery -> not (rule_failed delivery.entry.id)) loaded_deliveries) in
     let retired_deliveries, delivery_retirement_error, loaded_deliveries =
       match retire_spent_deliveries ~base_path spent_ids with
       | Ok 0 -> 0, None, loaded_deliveries
@@ -3103,7 +3110,9 @@ let install_persistence_internal ~after_load ~base_path =
           ; delivery_retirement_error
           }
       | delivery :: rest ->
-        if delivery.grant_consumed
+        if rule_failed delivery.entry.id
+        then replay count failures rest
+        else if delivery.grant_consumed
         then replay count failures rest
         else if delivery_wake_was_observed delivery
         then replay count failures rest
@@ -3118,7 +3127,7 @@ let install_persistence_internal ~after_load ~base_path =
              in
              replay count (failure :: failures) rest)
     in
-    replay 0 [] loaded_deliveries
+    replay 0 (List.rev rule_failures) loaded_deliveries
 ;;
 
 let install_persistence ~base_path =

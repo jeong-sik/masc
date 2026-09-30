@@ -424,6 +424,8 @@ let dashboard_gate_resolve_http_json ~base_path ~created_by ~(args : Yojson.Safe
                 [ "ok", `Bool true
                 ; "id", `String id
                 ; "decision", `String decision_name
+                ; "remembered_rule_status", `String
+                    (Keeper_approval_queue_result.remembered_rule_status_to_string result.remembered_rule_status)
                 ; ( "rule_id"
                   , match result.remembered_rule with
                     | Some rule -> `String rule.id

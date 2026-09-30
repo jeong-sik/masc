@@ -266,8 +266,11 @@ type resolve_error =
 
 val resolve_error_to_string : resolve_error -> string
 
-(** Commit a resolution, optionally persist an exact Always Allowed rule for
-    [Decision.Approve], then wake only the Keeper captured by the pending entry.
+(** Commit a resolution and its optional exact-rule intent, then wake only
+    the Keeper captured by the pending entry and apply that saved intent.
+    [Rule_conflicted] means a newer rule revision won: the one-shot approval
+    remains valid, but no remembered rule was written. Replays reuse the
+    journaled intent and never recapture the current rule revision.
     [rule_expires_at] is an absolute Unix expiry applied to the remembered
     rule; it is ignored unless [remember_rule] is [true].
 

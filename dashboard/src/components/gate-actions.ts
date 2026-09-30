@@ -37,12 +37,21 @@ export async function respondToKeeperApproval(
     const result = await resolveGateApproval(id, resolution)
     observeGateAuditReceipts(result.audit_receipts, { id, transport: 'http' })
     const auditFailed = result.audit_receipts.some(receipt => !receipt.recorded)
+    const ruleMessage = {
+      not_requested: 'keeper 승인 요청을 승인했습니다',
+      saved: 'keeper 승인 요청을 승인하고 Always 규칙을 저장했습니다',
+      replayed: 'keeper 승인 요청을 승인했습니다 · Always 규칙은 이미 저장되어 있습니다',
+      conflicted: '이번 요청은 승인했습니다 · Always 규칙 갱신은 다른 변경과 충돌해 적용하지 않았습니다',
+      skipped: '이번 요청의 승인 결정은 저장됐지만 Keeper가 없어 Always 규칙을 저장하지 않았습니다',
+    }[result.remembered_rule_status]
+    const ruleWarning = result.remembered_rule_status === 'conflicted'
+      || result.remembered_rule_status === 'skipped'
     const message = decision === 'approve'
-      ? (rememberRule ? 'keeper 승인 요청을 승인하고 Always 규칙을 저장했습니다' : 'keeper 승인 요청을 승인했습니다')
+      ? ruleMessage
       : 'keeper 승인 요청을 거부했습니다'
     showToast(
       auditFailed ? `${message} · 감사 기록은 저장되지 않았습니다` : message,
-      auditFailed ? 'warning' : 'success',
+      auditFailed || ruleWarning ? 'warning' : 'success',
     )
     await refreshGate({ force: true })
   } catch (err) {

@@ -92,7 +92,7 @@ let severity_of_approval_event (event : Keeper_approval.Audit.event)
   | Gate_allowed | Grant_consumed | Rule_created | Rule_deleted
   | Auto_judge_operator_retry_started | Summary_updated ->
       "ok"
-  | Pending | Gate_exact_rule_expired | Gate_grant_unavailable
+  | Pending | Rule_conflicted | Gate_exact_rule_expired | Gate_grant_unavailable
   | Auto_judge_block_observation_superseded
   | Auto_judge_restart_worker_recovered | Auto_judge_restart_judgment_recovered
     ->
@@ -203,6 +203,9 @@ let approval_event_timeline_event json =
               rule_title,
               "persistent approval rule recorded",
               None )
+        | Rule_conflicted ->
+            ( "approval_rule_conflicted", rule_title,
+              "persistent rule changed; one-shot approval remains valid", None )
         | Rule_deleted ->
             ( "approval_rule_deleted",
               rule_title,

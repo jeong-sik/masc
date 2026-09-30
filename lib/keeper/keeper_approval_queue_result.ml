@@ -130,8 +130,23 @@ type install_report =
 
 type install_error = Install_storage_failed of storage_error
 
+type remembered_rule_status =
+  | Rule_not_requested
+  | Rule_saved
+  | Rule_replayed
+  | Rule_conflicted
+  | Rule_skipped
+
+let remembered_rule_status_to_string = function
+  | Rule_not_requested -> "not_requested"
+  | Rule_saved -> "saved"
+  | Rule_replayed -> "replayed"
+  | Rule_conflicted -> "conflicted"
+  | Rule_skipped -> "skipped"
+
 type resolution_result =
   { remembered_rule : approval_rule option
+  ; remembered_rule_status : remembered_rule_status
   ; audit_receipts : Keeper_approval.Audit.receipt list
   }
 

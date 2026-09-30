@@ -127,6 +127,7 @@ type event =
   | Resolved
   | Summary_updated
   | Rule_created
+  | Rule_conflicted
   | Rule_deleted
   | Grant_consumed
   | Gate_allowed
@@ -143,6 +144,7 @@ let event_to_string = function
   | Resolved -> "resolved"
   | Summary_updated -> "summary_updated"
   | Rule_created -> "rule_created"
+  | Rule_conflicted -> "rule_conflicted"
   | Rule_deleted -> "rule_deleted"
   | Grant_consumed -> "grant_consumed"
   | Gate_allowed -> "gate_allowed"
@@ -165,6 +167,7 @@ let event_of_string = function
   | "resolved" -> Some Resolved
   | "summary_updated" -> Some Summary_updated
   | "rule_created" -> Some Rule_created
+  | "rule_conflicted" -> Some Rule_conflicted
   | "rule_deleted" -> Some Rule_deleted
   | "grant_consumed" -> Some Grant_consumed
   | "gate_allowed" -> Some Gate_allowed

@@ -1491,18 +1491,18 @@ status: reference
   부동소수점 단위를 쓰지 않는다.
   - 원장(`candle-ledger.jsonl`): `<base-path>/.masc/candle-ledger.jsonl`에 한 줄씩 이벤트를
     덧붙이는 전용 원장. 각 행은 `kind`·`at`과 해당 종류의 필드를 담은 닫힌 JSON 객체다. 현재 원장에
-    기록되는 사건은 6종(`Snapshot`·`Payout_owed`·`Candidates`·`Unattributed`·`Paid`·`Payout_failed`)이며,
-    잔액은 파일에 누적 값을 따로 적지 않고 원장의 `Paid` 사실을 순서대로 재생하여 계산한다. 헌법·승인·도구 호출 원장이나
+    기록되는 사건은 7종(`Snapshot`·`Payout_owed`·`Candidates`·`Unattributed`·`Paid`·`Purchased`·`Payout_failed`)이며,
+    잔액과 소유권은 파일에 누적 값을 따로 적지 않고 `Paid` 지급과 `Purchased` 구매를 순서대로 재생하여 계산한다. 구매 한 행은 차감과 소유권 부여를 함께 기록한다. 헌법·승인·도구 호출 원장이나
     `goal_verifications.json`(검증 원장)과 다른 별개 원장이다.
   - 발행과 지급: Goal이 검증기를 통과(`Snapshot`)하고 사람의 확정(`Confirm_completion`)으로
     `Completed`가 되면 지급 의무(`Payout_owed`)가 생긴다. 백그라운드 지급 일꾼이 기여 Task와 Keeper를
     선별(`Candidates`)해 모델 감정을 거쳐 `Paid` 이벤트 한 줄로 지급을 기록한다. 분배는 한 줄에 원자적으로 적히므로
     일부 Keeper만 지급되는 불완전 상태가 없다. 기여자가 없으면 `Unattributed`, 오류 시 `Payout_failed`를 남긴다.
   - 사용처 한정: Candle로 살 수 있는 것은 초상화 장신구(**Keeper Portrait**의 장비 아이템)뿐이다.
-    도구, 스킬, 모델, 런타임 예산 등 다른 자원은 구매할 수 없다(헌법 불변식). 상점 구매와 착용 반영은
-    RFC 단계적 구현에 따르며, 현재 원장 스키마에는 포함되지 않는다.
+    도구, 스킬, 모델, 런타임 예산 등 다른 자원은 구매할 수 없다(헌법 불변식). 상점 구매는
+    `Purchased`로 기록하며, 착용 반영은 후속 장착 스택에서 제공한다.
   - 잔액 감쇠 규범: 헌법(`<candle>`, `no_wall_clock_death` 예외)은 잔액의 지수 감쇠를 요구한다.
-    현재 빌드의 잔액(`Candle_balance.of_events`)은 `Paid` 사실의 누적이며 시간 감쇠를 적용하지 않고,
+    현재 빌드의 잔액(`Candle_balance.of_events`)은 지급과 구매를 재생하며 시간 감쇠를 적용하지 않고,
     반감기 설정 키는 아직 없다(RFC의 `HalfLifeSet` 이벤트 및 반감기 설정 계획).
     원장에 기록된 과거 사실은 지워지지 않는 불변식을 유지하며, 이는 `no_wall_clock_death` 불변식의
     유일한 명시적 예외 요구다(Task·Goal·Board 상태는 만료시키지 않는다).

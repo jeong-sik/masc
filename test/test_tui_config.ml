@@ -417,13 +417,17 @@ let opening_cases =
             | Ok target -> target
             | Error reason -> Alcotest.fail reason
           in
-          (match Config.set_opening_keeper ~base_path target with
-           | Ok () -> ()
+          (match Config.record_chat_visit ~base_path target with
+           | Ok (Runtime.Durable | Runtime.Durability_unconfirmed _) -> ()
            | Error reason -> Alcotest.fail reason);
           (match (Config.load ~base_path).opening with
            | Ok (Config.Last (Some saved)) ->
                Alcotest.(check string) "saved target" "alpha" (name saved)
            | _ -> Alcotest.fail "saved target was not read");
+          (match (Config.load ~base_path).last_chat_keeper with
+           | Ok (Some saved) ->
+               Alcotest.(check string) "conversation receipt" "alpha" (name saved)
+           | _ -> Alcotest.fail "conversation receipt was not read");
           check_opt "runtime default survives" (Some "local.sample")
             (Toml.toml_string_opt
                (doc_of (In_channel.with_open_bin path In_channel.input_all))

@@ -6,6 +6,7 @@ export type StandaloneLaneId =
   | 'hitl_auto_judge'
   | 'librarian_exact'
   | 'workspace_curator_exact'
+  | 'candle_appraiser'
   | 'verifier_exact'
   | 'browser_stagehand_exact'
 
@@ -87,6 +88,7 @@ export const LANE_IDS = [
   'hitl_auto_judge',
   'librarian_exact',
   'workspace_curator_exact',
+  'candle_appraiser',
   'verifier_exact',
   'browser_stagehand_exact',
 ] as const satisfies readonly StandaloneLaneId[]

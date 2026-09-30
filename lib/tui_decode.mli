@@ -3275,24 +3275,10 @@ type x10_mouse =
     the bytes either way. *)
 val x10_mouse_report :
   button:char -> column:char -> row:char -> x10_mouse option
-val required_string_field : Yojson.Safe.t -> string -> (string, string) result
-val optional_string_field :
-  Yojson.Safe.t -> string -> (string option, string) result
-val required_int_field : Yojson.Safe.t -> string -> (int, string) result
 val required_display_any_field :
   Yojson.Safe.t -> string list -> (string, string) result
 val optional_body_field : Yojson.Safe.t -> (string, string) result
 val required_body_field : Yojson.Safe.t -> (string, string) result
-val required_list_field :
-  Yojson.Safe.t -> string -> (Yojson.Safe.t list, string) result
-val optional_list_field :
-  Yojson.Safe.t -> string -> (Yojson.Safe.t list, string) result
-val required_object_field :
-  Yojson.Safe.t -> string -> (Yojson.Safe.t, string) result
-val optional_object_field :
-  Yojson.Safe.t -> string -> (Yojson.Safe.t option, string) result
-val decode_list :
-  string -> (Yojson.Safe.t -> ('a, string) result) -> Yojson.Safe.t list -> ('a list, string) result
 val bounded_parent_depth :
   ?max_depth:int ->
   id_of:('a -> string) ->

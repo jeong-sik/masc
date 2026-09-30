@@ -15,6 +15,7 @@
 - Editing a Goal's `due_date` or `priority` now appends a `goal_edited` event to `goal_events.jsonl` with the editor and each changed field as `{from, to}`. Setting the same value again, or editing only the title, records nothing. If the row cannot be appended, the edit still succeeds and the error log names the goal and the payload. The dashboard timeline shows the row as `Goal Edit`, and marks a row it cannot read as a warning (#39951).
 - Add an opt-in combined-tree CI evidence path for Keeper batch review and one squash publication of the tested ROLL. It preserves each member's successful checks and independent approval, reconstructs the reviewed tree, and stops on changed evidence or unexpected landing results. Operational use remains subject to rule adoption. (#39553)
 - Keeper portrait reads expose the 18-accessory catalog and accept `preview_item` to return a retained PNG preview. Explicit starting/preview modes separate the picture's equipment from the unchanged starting gear; previews do not grant ownership or persist equipment. (#39987)
+- An AI agent handed a shared DOS play invite link can now join: the `/play` page points it at `GET /play/agent.md`, a public guide to the seat over MCP (`/mcp/play`) or plain HTTP, with this server's addresses and each move's tool schema. (#40035)
 
 ### Changed
 
@@ -45,6 +46,25 @@
 - Terminal mosaic portraits in Keeper Info and `/about` draw a simpler candle silhouette with a larger face and flame at small sizes (#39886).
 - The `sangokushi-2` and `sangokushi-3` Skills describe the controls checked on new games: going to war, placing units with the digit keys and 0 (the 삼국지2 second-unit prompt stays until the cursor leaves the taken hex), battle commands, going back with an empty Enter, the 삼국지3 protection box `[孫李呂]`, the missing `ENDSTIL.DAT` for the 삼국지3 ending, and watching all-AI games (#39982).
 - Refresh English and Korean README with a candle Keeper illustration, current onboarding and TUI navigation; correct server lifecycle, MCP token identities and sandbox build paths, and mark the browser dashboard as incomplete. #40037
+- A schedule payload's digest is taken once, when the payload is decoded.
+  Each schedule runner tick used to digest every stored schedule's payload
+  again: 12.1-12.7 ms of domain 0 every 15 seconds on a 1,643-schedule
+  ledger. Decoding the ledger, which runs on the domain pool, takes about
+  11 ms longer (#40022).
+- A schedule runner tick of an unchanged ledger no longer takes the
+  occurrence key of every stored schedule again or re-parses
+  `signal_keys.json`. The keys are kept with the decoded schedule list they
+  came from, and the seen list with the file version it was read from. On a
+  copy of a 1,643-schedule ledger such a tick took 3.0-4.8 ms instead of
+  17.9-33.2 ms (#40026).
+- Show a boxed Skill usage summary and per-Skill cards in the TUI, with separate invocation, delivery and action counts, distinct Keeper totals, and labelled readings that fit narrow terminals. Keep partial and stale usage evidence visible. (#40031)
+- `stagehand_model_probe` exits 3 when an exception it does not handle stops it, so exit 2 again means only a setup refusal with its category on stderr. `--list-setup-reasons` prints every setup category as one JSON array, and `--control-result <file>` writes a self-test's outcome as one JSON object. The offline controls read only that file and keep a category only when the probe lists it (#40043).
+- A prompt resolution no longer reads its markdown file and splits it into
+  slot paragraphs every time. The body and split are kept with the file
+  version they were read from, and a directory scan or `clear` starts the
+  reads over. Resolving all 263 keys of a copy of the live prompt directory
+  took 0.47-0.48 ms instead of 29.9-30.3 ms (#40046).
+- Lane Add-ons raw details stay with the selected installation or record, replacing the retired five-tab text screen (#40107).
 
 ### Removed
 
@@ -55,6 +75,7 @@
 
 ### Fixed
 
+- Keep previously loaded Keeper conversation pages visible when switching away and back, even if the next refresh fails (#40145).
 - A Keeper waiting for a missing sandbox image reports the refusal once and
   again when its cause changes, instead of warning on every supervisor sweep
   (#38798).
@@ -147,6 +168,12 @@
   start state now witnesses where they end, so the atom position,
   continuity and checkpoint purge no longer stop there (#40019).
 - Bind Quiz grading and question identities to immutable captured decks, rejecting stale or substituted facts and allowing new captures to be answered without rewriting previous grades. (#40125)
+- The TUI no longer keeps the observer feed it has already decoded: a streaming request now takes a required `Keep_body` or `Discard_body`, the observer subscription always discards, and the two login streams discard. The observer feed carried 4.79MB in 90 seconds on a live fleet, and a TUI 21 minutes old held a 64MB buffer of it (#39914).
+- When a writer's `forget` stops the file cache behind the schedule store, the keeper ask log and the verification listing from keeping a freshly decoded value, it now also drops an entry kept for an older version of that file. Before, a file rewritten by something that never calls `forget`, which later returned to that older version with other bytes, could be answered from the older entry (#40007).
+- A Keeper removed for good (stopped with `remove_meta`, cleaned up by the supervisor, or purged) now releases the shared DOS controller it held. Before, its non-expiring credential kept the controller until the server restarted. (#40045)
+- The TUI now shows the reason a shared-play route (invites, pad, screen, seat) gives for refusing a request, instead of only its code such as `not_ready`. Those routes answer with the sentence in `error` and the code in `code`. (#40050)
+- Cached Board timeout responses remain HTTP 504 when a conditional request matches their ETag, including large timeout envelopes. (#40052)
+- A blank `hearth` query on `GET /api/v1/board` is no filter. It used to filter to posts with an empty hearth, an empty page, and cache that page under the key of the unfiltered listing. (#40052)
 
 ### Internal
 
@@ -171,6 +198,17 @@
 - `/health` summarizes the 600-sample scheduler lag ring on every request. The summary now selects its three percentiles instead of sorting the ring, and takes the maximum in one pass: 38.0 µs to 9.4 µs on a random ring. The percentiles and the maximum are the values the sort gave; the mean adds the samples in ring order, so it can differ from before in the last bits. A ring that defeats the selection's pivot, such as a lag rising and falling smoothly within the window, has what is left sorted after a bounded number of rounds, so over every starting position of such a ring the summary took at most 32.7 µs, under the 38.5 µs median of the sort (#39946).
 - The verification listing (`/api/v1/verification/requests`, `/api/v1/verification/summary` and the proof compose) walks the request directory, reads and projects the request files on the domain pool, not on the domain that asked, which in the server is the one serving requests. The first listing after a start parses and projects every file under 128 KiB (1,829 of 1,946 on the live store) and every later listing stats every file; a heartbeat fiber on the calling domain went from gaps of up to 17-24 ms to 1.4-13 ms during the first listing of the live store, measured under host load (#40005).
 - A board flush no longer turns every post and comment back into JSON. The posts and comments snapshots now keep each value's row and render again only the values replaced since the last snapshot, with byte-identical output. On the live board (1,529 posts, 10,128 comments, 20.3 MB), which flushes several times a minute and rendered it all on the domain serving requests, a snapshot with one post replaced took 84.5-85.2 ms of serialization and now takes 7.0-7.2 ms. The first snapshot after a start still renders everything, and the kept rows add about the board's size in memory (#39989).
+- A Librarian pass whose facts equal the stored Memory OS facts keeps the
+  stored snapshot: no new revision, no snapshot rewrite and no commit
+  notification. Its range receipts bind to the kept revision, and the journal
+  still records the pass (#40001).
+- Validate cold blob range reads on the CPU domain pool when available, keeping full-file hashing off the Eio main domain (#40015).
+- `GET /api/v1/board` sends its page from the bytes kept with the cached page, on HTTP/1 and HTTP/2. A cache hit used to serialize the page and hash it for its entity tag on every request (1.17 ms, median of 200 runs over a 288 KB copy of the live board page), and the HTTP/2 gateway built its own uncached copy of the page on every request. The HTTP/2 route now reads the same cache entry as HTTP/1: a post, comment, vote or reaction shows on the next read, while an edit, pin, close, reopen, delete or thread change shows once the entry is refreshed, up to about a minute later (#40062), as on HTTP/1. It answers the cache's timeout envelope with 504. (#40052)
+- The provider-scoped model catalog lookup (`Model_catalog.lookup_for_provider_result`, behind every capability read for a runtime that names its provider) reads an index built with the catalog instead of scanning every row. Over the repository catalog a lookup that finds its row takes 0.11 µs instead of 2.24 µs, and one that misses on a provider the catalog knows takes 0.60 µs instead of 4.01 µs; a miss still scans the provider rows for an alias (median of 5 runs of 2,000 rounds). (#40067)
+- The skill catalog's blank-body check stops at the first scalar that is not whitespace. It used to decode and copy the whole body for every instruction skill on each catalog projection: a 30 KB Korean body took 92.5 µs and allocated 184 KB, and now takes 0.005 µs. A value is blank exactly when it was before. (#40083)
+- Building a Keeper tool plan no longer re-derives every registered tool's model names or scans the descriptor list once per descriptor. The names are computed once when the program starts, and a plan looks descriptors up by id. Parsing the 21 skills of a copy of the live catalog, 8 of them compositions, took 3.44 ms and takes 2.31 ms, with the same answer for every skill. (#40084)
+- The skill catalog projects each entry of a published skill snapshot once. The effective catalog, the operator catalog, the skill inventory and a task's resolved skills all read that projection; a keeper turn used to project the whole snapshot at least twice, and the skills route once per request. For the 21 live skills, the catalog, inventory and operator projections together took 8.57 ms each time and take 2.5 µs once the snapshot has been projected. One snapshot is kept at a time: another workspace's snapshot, or the previous publication still held by a running turn, is projected on its own and replaces it. (#40085)
+- `GET /api/v1/runtime/resolved` lists the keeper directory once per request; the assignment rows and the lanes they resolve to come from that one listing. With the live runtime.toml (117 runtimes) and a keeper directory of 106 entries, building the document took about 582 µs and takes about 515 µs, the cost of one listing. (#40086)
 
 ## [0.48.0] - 2026-09-29
 

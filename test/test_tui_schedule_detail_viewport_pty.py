@@ -146,14 +146,26 @@ def run(executable):
         h.send_and_wait(process, fd, output, b"r", b"[scheduled]")
         h.drain_until_quiet(process, fd, output)
         assert b"HTTP 503" not in screen(output), screen(output)
-        h.send_and_wait(process, fd, output, b"\x1b[H", b"SCHEDULE")
+        for rows in (18, 24):
+            h.resize_and_wait(process, fd, output, rows=rows, columns=80,
+                              needle=b"SCHEDULE", final_cursor=b"\x1b[?25l")
+            h.send_and_wait(process, fd, output, b"\x1b[F", b"[lines ")
+            h.drain_until_quiet(process, fd, output)
+            assert window(output)[0] > 1 and window(output)[1] == window(output)[2], window(output)
+            before = len(posted)
+            h.press_and_settle(process, fd, output, b"x")
+            assert len(posted) == before, posted
+            assert window(output)[0] > 1, window(output)
+            # Refusal must be visible immediately in this small frame, before
+            # Home, resize, or another x can erase the action result.
+            h.send_and_wait(process, fd, output, b"x", b"CANCELREFUSED")
+            h.drain_until_quiet(process, fd, output)
+            assert window(output)[0] == 1, window(output)
+            assert b"Cancel error:" in screen(output) and b"CANCELREFUSED" in screen(output), screen(output)
+            assert posted[-1] == {"schedule_id": SCHEDULE_ID, "reason": "cancelled from the TUI"}, posted
+        assert posted == [{"schedule_id": SCHEDULE_ID, "reason": "cancelled from the TUI"}] * 2, posted
         h.resize_and_wait(process, fd, output, rows=400, columns=80,
-                          needle=b"SCHEDULE", final_cursor=b"\x1b[?25l")
-        h.send_and_wait(process, fd, output, b"x", b"Armed: cancel")
-        assert not posted, posted
-        h.send_and_wait(process, fd, output, b"x", b"CANCELREFUSED")
-        h.drain_until_quiet(process, fd, output)
-        assert posted == [{"schedule_id": SCHEDULE_ID, "reason": "cancelled from the TUI"}], posted
+                          needle=b"CANCELERROREND", final_cursor=b"\x1b[?25l")
         assert compact(CANCEL_ERROR.encode()) in compact(screen(output)), screen(output)
         # A retained detail id can point at a removed schedule while a new
         # visible list row owns the cursor. Its first x must arm that row.
@@ -167,7 +179,7 @@ def run(executable):
         h.send_and_wait(process, fd, output, b"r", b"Requests: 1")
         h.copy_reference(process, fd, output, ("masc://schedules/" + replacement_id).encode())
         h.send_and_wait(process, fd, output, b"x", b"armed: cancel " + replacement_id.encode())
-        assert len(posted) == 1, posted
+        assert len(posted) == 2, posted
         h.send_and_wait(process, fd, output, b"x", b"CANCELREPLACEMENTREFUSED")
         assert posted[-1] == {"schedule_id": replacement_id, "reason": "cancelled from the TUI"}, posted
         h.send_and_wait(process, fd, output, b"\r", replacement_id.encode())
@@ -178,7 +190,7 @@ def run(executable):
         h.drain_until_quiet(process, fd, output)
         os.write(fd, b"xx")
         h.drain_until_quiet(process, fd, output)
-        assert len(posted) == 2, posted
+        assert len(posted) == 3, posted
         assert b"SCHEDULE" not in screen(output), screen(output)
         os.write(fd, b"q")
 

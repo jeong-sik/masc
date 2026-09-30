@@ -15139,7 +15139,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           launch_schedules_load ~intent:Snapshot_read.Refresh state ~mailbox
       | Error err ->
           state.schedule_cancel_armed <- None;
-          state.schedule_cancel_error <- Some err)
+          state.schedule_cancel_error <- Some err;
+          (* A refusal is new evidence for the operator's action. Reveal its
+             first row even when the request was sent from the document end. *)
+          state.schedule_scroll <- 0)
   | Verification_verdict_done result -> (
       match result with
       | Ok (message, noop) ->

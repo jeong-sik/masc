@@ -4438,12 +4438,14 @@ let schedule_detail_content (state : state) ~cols ~runner (row : schedule_row) =
   let wire text = String.concat "\n"
       (List.map Terminal_text.single_line (String.split_on_char '\n' text)) in
   let warnings =
-    (match schedule_source_warning state with
-     | None -> [] | Some error -> [Theme.bad (), "Source: " ^ wire error])
+    (* The latest action refusal is the row the result handler reveals.
+       Source freshness still has its fixed summary outside this document. *)
+    (match state.schedule_cancel_error with
+     | None -> [] | Some error -> [Theme.bad (), "Cancel error: " ^ wire error])
+    @ (match schedule_source_warning state with
+       | None -> [] | Some error -> [Theme.bad (), "Source: " ^ wire error])
     @ (match state.schedule_cancel_armed with
-       | None -> [] | Some id -> [Theme.warn (), "Armed: cancel " ^ wire id ^ " -- press x again to submit"])
-    @ (match state.schedule_cancel_error with
-       | None -> [] | Some error -> [Theme.bad (), "Cancel error: " ^ wire error]) in
+       | None -> [] | Some id -> [Theme.warn (), "Armed: cancel " ^ wire id ^ " -- press x again to submit"]) in
   let fields = schedule_detail_lines ~width
       ~freshness:(schedule_list_freshness state) ~runner row
       ~wake_history:state.schedule_wake_history

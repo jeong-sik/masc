@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Code memos in the TUI wrap their complete author and text at the current file-pane width. Scroll and page keys read physical rows, and moving after resize starts from the visible position (#40240).
+
 ## [0.49.0] - 2026-09-29
 
 ### Fresh state required

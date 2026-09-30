@@ -1,0 +1,1 @@
+- Integrate Work rows that retain status/priority and Usage physical-row wrapping; compact narrow Task status labels preserve ID suffixes and title space.

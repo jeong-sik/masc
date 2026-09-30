@@ -227,7 +227,7 @@ let blame_author_cells = 9
 let blame_age_cells = 3
 let blame_margin_cells = blame_author_cells + blame_age_cells + 2
 
-let task_line (task : task) =
+let task_line ~cols (task : task) =
   let status = Masc_domain.task_status_to_string task.status in
   (* The icon and the status word share one color so the row's state reads at
      a glance: in-flight rows in cyan, waiting rows dimmed. Terminal states
@@ -253,20 +253,54 @@ let task_line (task : task) =
           (Terminal_text.single_line goal)
           Ansi.reset
   in
-  Printf.sprintf "%s%s%s %s[%s]%s %s %s(%s%s)%s %s%s"
-    status_color
-    (task_status_icon task.status)
-    Ansi.reset
-    Ansi.dim
-    (Terminal_text.single_line task.id)
-    Ansi.reset
-    (Terminal_text.single_line task.title)
-    status_color
-    status
-    assignee
-    Ansi.reset
-    (priority_indicator task.priority)
-    goal_tag
+  let prefix id =
+    Printf.sprintf "%s%s%s %s[%s]%s " status_color
+      (task_status_icon task.status) Ansi.reset Ansi.dim id Ansi.reset
+  in
+  let suffix status owner =
+    Printf.sprintf " %s(%s%s)%s %s" status_color status owner Ansi.reset
+      (priority_indicator task.priority)
+  in
+  (* State stays explicit, using a compact label when the full word leaves
+     no room for the identifier and title. Priority is kept. Remaining cells are shared
+     by the identifier, owner and title; each identifier gets at most a third
+     before the title takes the remainder. This bounds long owner names too.
+     Goal links appear only when the full title leaves room; detail keeps all
+     identifiers. The frame and leading space consume five cells. *)
+  let available = max 0 (framed_inner_width cols - 1) in
+  let status =
+    let required = Message_layout.display_width (prefix "")
+      + Message_layout.display_width (suffix status "")
+      + Message_layout.display_width "ID" + Message_layout.display_width "Task" in
+    if required <= available then status
+    else match task.status with
+      | Masc_domain.Todo -> "todo"
+      | Masc_domain.Claimed _ -> "claimed"
+      | Masc_domain.InProgress _ -> "active"
+      | Masc_domain.AwaitingVerification _ -> "verify"
+      | Masc_domain.Done _ -> "done"
+      | Masc_domain.Cancelled _ -> "cancelled"
+  in
+  let fixed_chrome = Message_layout.display_width (prefix "")
+    + Message_layout.display_width (suffix status "") in
+  let share = max 0 (available - fixed_chrome) / 3 in
+  let id = Terminal_text.single_line task.id in
+  let id = Message_layout.fit_middle (min share (Message_layout.display_width id)) id in
+  let assignee =
+    fit_width assignee (min share (Message_layout.display_width assignee))
+  in
+  let prefix = prefix id in
+  let suffix = suffix status assignee in
+  let fixed = Message_layout.display_width prefix + Message_layout.display_width suffix in
+  let title = Terminal_text.single_line task.title in
+  let goal_tag =
+    if fixed + Message_layout.display_width title
+       + Message_layout.display_width goal_tag <= available
+    then goal_tag else ""
+  in
+  prefix ^ fit_width title
+    (max 0 (available - fixed - Message_layout.display_width goal_tag))
+  ^ suffix ^ goal_tag
 
 (* Dashboard rows summarize sources without changing their meaning. The full
    task list lives in Work, Keeper rows in Keepers, and account windows in
@@ -707,7 +741,7 @@ let render_work_tasks (state : state) =
       List.iteri
         (fun index (task : Tui_decode.task) ->
            if index >= first && index < first + room then
-             let line = " " ^ task_line task in
+             let line = " " ^ task_line ~cols task in
              if Some index = selected then
                c.push_selected (Masc_tui_theme.strip_sgr line)
              else c.push line)
@@ -13356,8 +13390,18 @@ let usage_lines ~cols (state : state) =
           ^ Masc.Transport_metrics.queue_pressure_kind_to_string
               reading.th_queue_pressure ]
   in
-  scopes @ [ "" ] @ provider_history_lines state
-  @ [ "" ] @ keepers @ [ "" ] @ transport
+  let lines = scopes @ [ "" ] @ provider_history_lines state
+    @ [ "" ] @ keepers @ [ "" ] @ transport in
+  (* Wrap before the scroll window is counted. Coverage and missing samples
+     are evidence, so a narrow terminal must keep them as reachable rows. *)
+  List.concat_map
+    (fun line ->
+      if String.equal line "" then [ "" ]
+      else
+        Message_layout.wrap_words ~max_cells:(max 1 (cols - 7)) line
+        |> List.mapi (fun index text ->
+             if index = 0 then text else "   " ^ text))
+    lines
 
 let render_metrics (state : state) =
   let terminal_rows, cols = get_terminal_size () in

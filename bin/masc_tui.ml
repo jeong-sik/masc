@@ -10241,7 +10241,10 @@ let apply_overview_goals_load state = function
 
 let apply_keeper_roster_load state = function
   | Ok (roster, candle) ->
-      state.candle_observation <- Some candle;
+      state.candle_observation <-
+        (match state.server_identity with
+         | None | Some { Tui_decode.sid_state_ready = Some false; _ } -> None
+         | Some { Tui_decode.sid_state_ready = Some true | None; _ } -> Some candle);
       state.keeper_roster <- roster;
       state.keeper_roster_error <- None
   | Error failure ->
@@ -10587,6 +10590,10 @@ let apply_http_scoped_surfaces state results =
    match reloads it, so a screen never shows rows from a workspace the server
    just stopped serving. *)
 let apply_server_identity_reading state reading =
+  (* Currency belongs to this refresh's authority. A failed probe or booting
+     replacement cannot relabel the last workspace's amounts. A full refresh
+     applies its fresh roster only after this withdrawal. *)
+  state.candle_observation <- None;
   state.server_identity <- Masc_tui_types.server_identity_of_refresh reading;
   state.workspace_identity <-
     Masc_tui_types.workspace_identity_of_refresh
@@ -10598,10 +10605,10 @@ let apply_server_identity_reading state reading =
   | Masc_tui_types.Workspace_identity_unread -> ()
 
 let apply_http_surfaces state results =
+  apply_server_identity_reading state results.http_server_identity;
   apply_overview_load state results.http_overview;
   Option.iter (apply_approval_observation state) results.http_approvals;
   apply_http_scoped_surfaces state results.http_scoped;
-  apply_server_identity_reading state results.http_server_identity;
   let reached result =
     Result.map (fun _ -> ()) result |> Result.map_error (fun _ -> ())
   in
@@ -13606,6 +13613,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              { ao_ticket; ao_result = Error err })
       approval_ticket;
       state.server_identity <- None;
+      state.candle_observation <- None;
       state.connection_status <- Masc_tui_types.Disconnected;
       add_event state "error" err;
       react_to_server_contact state ~base_path ~host:server_peer_host

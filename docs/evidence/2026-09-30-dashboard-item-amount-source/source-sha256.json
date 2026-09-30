@@ -15,12 +15,12 @@
       "sha256": "ea2d10392aac053b62bc23ff7a13afce0bd696d58e9c1804cf0724fe579fda4a"
     },
     {
-      "path": "changelog.d/999994.md",
-      "sha256": "36f8ec968a2617b7e023f8862b74780122c577fc5b9b99c7debb3fcf2017191d"
+      "path": "changelog.d/40252.md",
+      "sha256": "af829ae53a505c7f4a41054f67d76bb82bac15a3cca1959fae0dba415cc959b6"
     },
     {
       "path": "docs/evidence/2026-09-30-dashboard-item-amount-source/README.md",
-      "sha256": "c47ea477a993a499065218a43b07409411fb15ee85338e494f0d5b1b2d3f3023"
+      "sha256": "16ada3127c06af6b4c01aefdb13fdc06957f1d0f2771106ad02a307fb250ed05"
     },
     {
       "path": "docs/evidence/2026-09-30-dashboard-item-amount-source/composition.json",

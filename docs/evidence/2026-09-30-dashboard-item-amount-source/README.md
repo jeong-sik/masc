@@ -21,3 +21,7 @@ The public `parseKeeperItems` regression source checks LF, CR, CRLF and both Uni
 `source-checks.json` records syntax checks for the three changed TypeScript files, whitespace validation and the changelog fragment check. `composition.json` records their source identity and unchanged Item account, workspace, browser and bundle boundaries. `source-sha256.json` hashes the candidate files.
 
 Required current-head CI selectors include `src/api/keeper-items.test.ts`, `src/api/schemas/candle-observation.test.ts`, `src/components/keeper-items-panel.test.ts` and the unchanged `src/dashboard-bundle-preload.test.ts`. The held A/B/A account and free-purchase/reprice scenarios are unchanged. Current-head CI and actual browser evidence remain required; this document makes no runtime, release or production claim.
+
+## Assigned publication
+
+PR #40252 overlays only this reviewed delta on actual #40241 headfc5bb8afc5cfe2a25a74fa70afc3a2477cc04337. No placeholder fragment was published. The three source/test files remain byte identical to reviewed2dbbc6e; the40252 fragment and manifest replace local placeholder data. Source parity is not a current typecheck/test/browser result.

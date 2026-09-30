@@ -1161,7 +1161,7 @@ let patch_review_bindings =
   ; b Navigate "Home/End / g/G" "edges"
   ; b Act "e" "edit" ~help:"leave review and open the project file in your editor"
   ; b Meta "?" "help"
-  ; b Meta "Esc/q" "close"
+  ; b Meta "Esc" "close" ~help:"Esc, q or Q closes the patch reader"
   ]
 
 let runtime_detail_bindings =

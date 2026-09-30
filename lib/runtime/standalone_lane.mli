@@ -17,6 +17,7 @@ type t =
   | Workspace_curator
   | Verifier
   | Browser_stagehand
+  | Candle_appraiser
 [@@deriving enumerate]
 
 val to_id : t -> string

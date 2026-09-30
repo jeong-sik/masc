@@ -8212,7 +8212,7 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
   | Some target when state.keeper_creation_awaiting_roster = Some target
                      && not (keeper_available_for_new_message state target) ->
       report_action state "error"
-        "Creation accepted; waiting for the current Keeper roster · draft retained · r to refresh"
+        "Creation accepted; waiting for the current Keeper roster · draft retained · Esc then r to refresh"
   | Some target when not (keeper_available_for_new_message state target) ->
       report_action state "error"
         (Printf.sprintf "Cannot send: Keeper %s is no longer registered"

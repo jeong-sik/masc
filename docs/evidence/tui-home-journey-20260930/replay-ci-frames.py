@@ -60,6 +60,20 @@ try:
                 page.goto(f'http://127.0.0.1:{port}', wait_until='domcontentloaded')
                 page.wait_for_function('window.term && window.term.rows > 0')
                 page.evaluate('''async ({cols, rows, raw}) => {
+                    // ttyd's resize observer can fit the terminal after DOM
+                    // initialization. Set the container to exact cell geometry
+                    // first, let that observer settle, then replay at that size.
+                    const cell = window.term._core._renderService.dimensions.css.cell;
+                    const container = document.querySelector('#terminal-container');
+                    container.style.padding = '0';
+                    // The terminal's screen is the screenshot target. Parent
+                    // clipping must not hide its final composer row.
+                    for (let parent = window.term.element; parent; parent = parent.parentElement) {
+                        parent.style.overflow = 'visible';
+                    }
+                    container.style.width = `${Math.ceil(cols * cell.width)}px`;
+                    container.style.height = `${Math.ceil(rows * cell.height)}px`;
+                    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
                     window.term.reset(); window.term.resize(cols, rows);
                     const bytes = Uint8Array.from(atob(raw), c => c.charCodeAt(0));
                     await new Promise(resolve => window.term.write(bytes, resolve));

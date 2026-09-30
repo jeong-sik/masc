@@ -17,10 +17,14 @@ let write t relative bytes = protect (fun () ->
   Fs_compat.mkdir_p (Filename.dirname path);
   Fs_compat.save_file_atomic_strict path bytes)
 let blob_path hash = Filename.concat "evidence" (hash ^ ".json")
-let write_blob t bytes =
+let blob_address bytes =
   let hash = digest bytes in
-  let* () = write t (blob_path hash) bytes in
-  Ok { uri = "lane-evidence:" ^ hash; sha256 = Some hash }
+  blob_path hash, { uri = "lane-evidence:" ^ hash; sha256 = Some hash }
+let blob_reference bytes = snd (blob_address bytes)
+let write_blob t bytes =
+  let path, reference = blob_address bytes in
+  let* () = write t path bytes in
+  Ok reference
 type retained_kind = Blob | Sequence
 let retained_address (reference : evidence) =
   match reference.sha256 with

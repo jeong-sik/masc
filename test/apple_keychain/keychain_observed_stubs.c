@@ -1,3 +1,8 @@
+/* Dune can compile foreign objects for @check even when this macOS-only
+ * test is disabled. Keep Security headers and the real fixture behind the
+ * same platform guard as the production stub. Unexpected calls elsewhere
+ * fail explicitly rather than inventing keychain or observation results. */
+#ifdef __APPLE__
 #include <Security/Security.h>
 
 /* A headless runner may reject a prompt even if MASC left interaction enabled.
@@ -46,3 +51,20 @@ CAMLprim value masc_test_observed_keychain_counts(value unit) {
   Store_field(counts, 2, Val_int(interaction_violations));
   CAMLreturn(counts);
 }
+
+#else
+#include <caml/mlvalues.h>
+#include <caml/fail.h>
+
+CAMLprim value masc_test_observed_keychain_item(value path, value remove_item) {
+  (void)path;
+  (void)remove_item;
+  caml_failwith("macOS Keychain test fixtures require macOS");
+}
+
+CAMLprim value masc_test_observed_keychain_counts(value unit) {
+  (void)unit;
+  caml_failwith("macOS Keychain test fixtures require macOS");
+}
+
+#endif

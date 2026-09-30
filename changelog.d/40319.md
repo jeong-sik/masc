@@ -1,0 +1,1 @@
+- Integrate complete literal Code memo reading and physical-row navigation into the TUI stack, with shared active memo help/footer bindings.

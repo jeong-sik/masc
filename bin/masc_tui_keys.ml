@@ -1213,7 +1213,8 @@ let footer_hints_work_tasks = hints_of_bindings work_tasks_bindings
 type code_pane =
   | Code_tree  (** the file list has focus *)
   | Code_file  (** a file is open and nothing covers it *)
-  | Code_overlay  (** history, diff or notes is drawn over the file *)
+  | Code_overlay  (** history or notes is drawn over the file *)
+  | Code_diff  (** the working-tree diff has its own horizontal position *)
 
 let footer_hints_code ~pane =
   let file_keys =
@@ -1228,6 +1229,8 @@ let footer_hints_code ~pane =
     match pane with
     | Code_tree -> overlay_keys @ file_keys
     | Code_file -> overlay_keys
+    | Code_diff -> overlay_keys @ ("Right / Enter" ::
+        List.filter (fun key -> not (String.equal key "Shift-Left / Shift-Right")) file_keys)
     | Code_overlay ->
         (* [Right / Enter] names the tree and file panes' open. With the
            history overlay up, the one arm behind Right and Enter takes the
@@ -1235,8 +1238,15 @@ let footer_hints_code ~pane =
            Enter atom and called both of them "open". *)
         "Right / Enter" :: file_keys
   in
-  for_surface Code
-  |> List.filter (fun b -> not (List.mem b.key dead))
+  let visible = for_surface Code
+      |> List.filter (fun b -> not (List.mem b.key dead)) in
+  let visible = match pane with
+    | Code_diff ->
+        let pan, others = List.partition
+            (fun b -> String.equal b.key "Shift-Left / Shift-Right") visible in
+        pan @ others
+    | Code_tree | Code_file | Code_overlay -> visible in
+  visible
   |> List.map (fun b ->
        if String.equal b.key "j/k" then
          { b with label = (match pane with Code_tree -> "move" | _ -> "scroll") }

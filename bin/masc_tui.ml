@@ -14683,6 +14683,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           state.code_diff <- Masc_tui_fetched.clear state.code_diff;
           state.code_diff_open <- false;
           state.code_diff_scroll <- 0;
+          state.code_diff_hscroll <- 0;
+          state.code_diff_max_width <- 0;
           state.code_notes_open <- false;
           state.code_notes_scroll <- 0;
           state.code_blame <- Masc_tui_fetched.clear state.code_blame
@@ -14761,7 +14763,17 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       in
       state.code_diff <-
         Masc_tui_fetched.complete ~equal:String.equal state.code_diff request result;
-      if landed then state.code_diff_scroll <- 0
+      if landed then begin
+        state.code_diff_scroll <- 0;
+        state.code_diff_hscroll <- 0;
+        state.code_diff_max_width <-
+          match result with
+          | Error _ -> 0
+          | Ok diff ->
+              List.fold_left (fun widest (row : Masc.Tui_decode.git_diff_row) ->
+                max widest (Message_layout.display_width
+                  (Terminal_text.single_line row.gdr_text))) 0 diff.gd_rows
+      end
   | Code_history_loaded (request, result) ->
       (* The scope travels in the key, so a slow answer from a repository the
          operator has left cannot caption the file now open at the same
@@ -23141,16 +23153,11 @@ and is loaded on demand through keeper_skill.
                if not (acting_pane_drawn state && focus_acting_pane state)
                then state.resource_focus <- Left_pane)
        | Some "shift-left"
-         when state.view = Code && state.code_focus_file = Right_pane
-              && not state.code_history_open ->
-           state.code_file_hscroll <- max 0 (state.code_file_hscroll - 1)
+         when state.view = Code && state.code_focus_file = Right_pane ->
+           pan_code_content state ~direction:(-1)
        | Some "shift-right"
-         when state.view = Code && state.code_focus_file = Right_pane
-              && not state.code_history_open ->
-           state.code_file_hscroll <-
-             min
-               (max 0 (state.code_file_max_width - 1))
-               (state.code_file_hscroll + 1)
+         when state.view = Code && state.code_focus_file = Right_pane ->
+           pan_code_content state ~direction:1
        | Some "B" when state.view = Code ->
            (* Walk back through the definition jumps, newest first. The
               stack holds where each jump left from; an empty stack says so

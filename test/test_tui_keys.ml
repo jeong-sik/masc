@@ -211,7 +211,7 @@ let drawn_rows () =
   @ List.map
       (fun (name, pane) -> (name, footer_hints_code ~pane))
       [ ("Code / tree", Code_tree); ("Code / file", Code_file)
-      ; ("Code / history", Code_overlay)
+      ; ("Code / history", Code_overlay); ("Code / diff", Code_diff)
       ]
 
 let test_no_drawn_row_names_one_key_twice () =
@@ -3214,6 +3214,7 @@ let test_the_code_footer_names_the_keys_of_the_pane_it_draws () =
   let overlay =
     Masc_tui_keys.footer_hints_code ~pane:Masc_tui_keys.Code_overlay
   in
+  let diff = Masc_tui_keys.footer_hints_code ~pane:Masc_tui_keys.Code_diff in
   let holds needle haystack =
     let n = String.length needle and h = String.length haystack in
     let rec scan i =
@@ -3250,7 +3251,11 @@ let test_the_code_footer_names_the_keys_of_the_pane_it_draws () =
     (fun (label, hints) ->
        check Alcotest.bool (label ^ " has no commit to open") false
          (holds "Enter (history)" hints))
-    [ ("the tree", tree); ("an open file", file) ]
+    [ ("the tree", tree); ("an open file", file); ("the diff", diff) ];
+  check Alcotest.bool "diff prioritizes its visible pan keys" true
+    (String.starts_with ~prefix:"Shift-Left / Shift-Right:pan" diff);
+  check Alcotest.bool "history does not offer hidden file panning" false
+    (holds "Shift-Left" overlay)
 
 let test_code_asks_the_language_server_three_questions () =
   (* K hover, D definition, R references -- one family, one case each, and

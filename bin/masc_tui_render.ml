@@ -13841,7 +13841,9 @@ let render_code (state : state) =
           in
           let base =
             if notes_showing then "notes: " ^ path
-            else if diff_showing then "diff vs HEAD: " ^ path
+            else if diff_showing then
+              Printf.sprintf "diff col %d vs HEAD: %s"
+                (state.code_diff_hscroll + 1) path
             else if history_showing then "history: " ^ path
             else path
           in
@@ -14072,7 +14074,8 @@ let render_code (state : state) =
                            | Gd_context -> Ansi.dim ^ text ^ Ansi.reset)
                      in
                      box_line pane_buf pane_cols
-                       (Ansi.dim ^ gutter ^ Ansi.reset ^ body)
+                       (Ansi.dim ^ gutter ^ Ansi.reset
+                        ^ Message_layout.drop_cells body state.code_diff_hscroll)
                  | None -> box_empty pane_buf pane_cols
                done)
      else if history_showing then
@@ -14327,8 +14330,8 @@ let render_code (state : state) =
    else list_pane ~framed:false buf cols);
   let code_pane =
     if state.code_focus_file <> Right_pane then Masc_tui_keys.Code_tree
-    else if
-      state.code_history_open || state.code_diff_open || state.code_notes_open
+    else if state.code_diff_open then Masc_tui_keys.Code_diff
+    else if state.code_history_open || state.code_notes_open
     then Masc_tui_keys.Code_overlay
     else Masc_tui_keys.Code_file
   in

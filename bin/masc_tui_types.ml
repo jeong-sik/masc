@@ -6275,6 +6275,8 @@ type state = {
   mutable code_diff: (string, Tui_decode.git_diff) Masc_tui_fetched.t;
   mutable code_diff_open: bool;
   mutable code_diff_scroll: int;
+  mutable code_diff_hscroll: int;
+  mutable code_diff_max_width: int;
   (* The file pane's notes view: m on an open file swaps the content for
      the memos written as comments in the file itself. Read off the rows
      once at load, like the width above: the memos change when the file
@@ -7697,6 +7699,8 @@ let enter_keeper_code_file state ~keeper ~path =
   state.code_diff <- Masc_tui_fetched.clear state.code_diff;
   state.code_diff_open <- false;
   state.code_diff_scroll <- 0;
+  state.code_diff_hscroll <- 0;
+  state.code_diff_max_width <- 0;
   state.code_memos <- [];
   state.code_notes_open <- false;
   state.code_notes_scroll <- 0;
@@ -7704,6 +7708,19 @@ let enter_keeper_code_file state ~keeper ~path =
   state.code_focus_file <- Right_pane;
   state.followed_from <- Some (state.view, None);
   state.view <- Code
+
+(* A visible overlay owns navigation; panning one must never move the
+   file hidden underneath it. History and notes currently have no pan axis. *)
+let pan_code_content (state : state) ~direction =
+  if state.repository_changes_open || state.code_history_open || state.code_notes_open then ()
+  else if state.code_diff_open then
+    state.code_diff_hscroll <-
+      max 0 (min (max 0 (state.code_diff_max_width - 1))
+        (state.code_diff_hscroll + direction))
+  else
+    state.code_file_hscroll <-
+      max 0 (min (max 0 (state.code_file_max_width - 1))
+        (state.code_file_hscroll + direction))
 
 let selected_standalone_lane (state : state) =
   match state.standalone_lanes with
@@ -8329,6 +8346,8 @@ let create_state
   code_diff = Masc_tui_fetched.initial;
   code_diff_open = false;
   code_diff_scroll = 0;
+  code_diff_hscroll = 0;
+  code_diff_max_width = 0;
   code_notes_open = false;
   code_notes_scroll = 0;
   code_blame = Masc_tui_fetched.initial;

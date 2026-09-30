@@ -12,6 +12,8 @@ import test_tui_keyboard_input as h
 SOURCE_MODULES = (
     "bin/masc_tui_async_protocol.ml",
     "bin/masc_tui_async_protocol.mli",
+    "bin/masc_tui_render_approvals.ml",
+    "bin/masc_tui_render_approvals.mli",
     "bin/masc_tui_types.ml",
     "bin/masc_tui_render_prim.ml",
     "bin/masc_tui_render.ml",

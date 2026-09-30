@@ -8,9 +8,11 @@ import test_tui_keyboard_input as h
 # a suite when a pull request changes a path the suite names, so without
 # this a change to the drawn text below reaches main with no scenario run.
 # The reader's own words ("Questions waiting on you", the empty note) come
-# from masc_tui_render.ml; the composer row's ("Press Enter again to send",
+# from masc_tui_render_approvals.ml; the composer row's ("Press Enter again to send",
 # "wrote: ") from masc_tui_render_prim.ml.
 SOURCE_MODULES = (
+    "bin/masc_tui_render_approvals.ml",
+    "bin/masc_tui_render_approvals.mli",
     "bin/masc_tui_render.ml",
     "bin/masc_tui_render_prim.ml",
 )

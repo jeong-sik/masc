@@ -15,8 +15,6 @@ SOURCE_MODULES = (
     "bin/masc_tui_render_prim.mli",
     "bin/masc_tui_render_code.ml",
     "bin/masc_tui_render_code.mli",
-    "bin/masc_tui_render_approvals.ml",
-    "bin/masc_tui_render_approvals.mli",
     "bin/masc_tui_approvals_model.ml",
     "bin/masc_tui_approvals_model.mli",
     "bin/masc_tui_surface_navigation.ml",

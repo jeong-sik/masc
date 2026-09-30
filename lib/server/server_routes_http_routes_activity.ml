@@ -1020,8 +1020,8 @@ let add_routes ~sw ~clock router =
              exclude_system
              exclude_automation
          in
-         let json =
-           Dashboard_cache.get_or_compute
+         let payload =
+           Dashboard_cache.get_or_compute_payload
              cache_key
              ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s
              (fun () ->
@@ -1036,7 +1036,7 @@ let add_routes ~sw ~clock router =
                     ) hearths));
                   ]))
          in
-         Http.Response.json_value json reqd
+         Server_cached_read_http.respond ~request:req reqd payload
        ) request reqd)
 
   |> Http.Router.get "/api/v1/board/curation" (fun request reqd ->

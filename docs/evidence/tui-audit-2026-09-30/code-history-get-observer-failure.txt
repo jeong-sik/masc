@@ -1,0 +1,6 @@
+Test run: 36692381154
+Run head: 705d49c54d83d65f165708166abd08478220af55 (run metadata, not raw checkout output)
+Raw: code-history-get-observer-failure.raw
+Raw SHA256: 92c1c458893f542165bcb7fa3e5d5383d00ddbb2494a189b28d9e2311575219e
+First30-column color case reached final GET query assertion after body/pages/owner/reopen checks, then failed empty query evidence. Shared http_requests observes only POST/DELETE. Concurrent remotece259d51 PathHttpResponse observers were integrated into a6379deb666ddb0de7a6159c6654ba5b33a951d7, preserving exact identity assertions and adding right-pane crop. Root exercised three real HTTP GET callbacks and distinct responses; this validates fixture observation only. Repositories/key suites passed. Focused36696373189/probe36696377152 requested; remaining matrix unproved.
+Root read first trace, final suite outcomes and relevant source. Independent hostile and response reviewers verified repairs. No local Dune build, repaired-head required-check/merge/install/production proof.

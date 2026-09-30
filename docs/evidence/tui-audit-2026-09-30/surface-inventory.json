@@ -672,5 +672,31 @@
     "before_receipt": "tools-before.txt",
     "before_screenshot": "tools-before-browser.png",
     "status": "source/static reviews and baseline evidence; newhead executable verification pending"
+  },
+  "code_prompt_verification_followup": {
+    "memo": {
+      "old_failed_run": "36692603068",
+      "receipt": "code-memo-recent-pane-failure.txt",
+      "repair_head": "7c8a737df2932b48316dc726cff35e6960ba9c81",
+      "focused_request": "36696258326"
+    },
+    "history": {
+      "old_failed_run": "36692381154",
+      "receipt": "code-history-get-observer-failure.txt",
+      "repair_head": "a6379deb666ddb0de7a6159c6654ba5b33a951d7",
+      "focused_request": "36696373189"
+    },
+    "prompts": {
+      "old_run": "36689755419",
+      "overall": "FAILURE",
+      "primary_pty": "PASS",
+      "held_back_pty": "PASS",
+      "key_cases_passed": 125,
+      "key_cases_failed": 1,
+      "receipt": "prompts-pty-pass-key-expectation-failure.txt",
+      "repair_head": "1be34f2ae7457c115b34910fe9320ee84de39921",
+      "focused_request": "36696374901"
+    },
+    "limits": "Repairedhead runs requested only; no installed or production proof"
   }
 }

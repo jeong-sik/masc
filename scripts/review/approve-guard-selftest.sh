@@ -1024,9 +1024,20 @@ d="$work/stacked-base-merge"; merge_setup "$d"
 merge_case stacked-base-blocks-merge 2 0 "$d" --check
 d="$work/approval-no-integration-pass"; merge_setup "$d"; echo '[]' > "$d/comments.json"
 merge_case source-approval-does-not-mint-integration-PASS 2 0 "$d" --check
-d="$work/source-refusal-after-pass"; merge_setup "$d"
-"$JQ" --arg h "$H" '. + [{created_at:"2026-01-01T00:55:00Z",author_association:"COLLABORATOR",body:("review: REQUEST_CHANGES head: "+$h+" by: keeper")}]' "$d/comments.json" > "$d/p"; mv "$d/p" "$d/comments.json"
-merge_case later-source-refusal-revokes-integration-PASS 2 0 "$d" --check
+# Source reviews never replace integration verdicts. Their current formal
+# state blocks merge, and explicit dismissal/replacement lifts that block.
+for mode in write check; do
+  set --; [ "$mode" != check ] || set -- --check
+  d="$work/source-formal-cr-$mode"; merge_setup "$d"
+  "$JQ" --arg h "$H" '. + [{id:889,state:"CHANGES_REQUESTED",commit_id:$h,user:{login:"source-reviewer"},submitted_at:"2026-01-01T00:55:00Z",author_association:"COLLABORATOR",body:("review: REQUEST_CHANGES head: "+$h+" by: source-keeper")}]' "$d/reviews.json" > "$d/p"; mv "$d/p" "$d/reviews.json"
+  merge_case "current-source-CR-blocks-formal-merge-$mode" 2 0 "$d" "$@"
+  "$JQ" 'map(if .id==889 then .state="DISMISSED" else . end)' "$d/reviews.json" > "$d/p"; mv "$d/p" "$d/reviews.json"
+  expected_write=1; [ "$mode" != check ] || expected_write=0
+  merge_case "dismissed-source-CR-with-current-approval-and-CI-merges-$mode" 0 "$expected_write" "$d" "$@"
+  d="$work/source-replaced-cr-$mode"; merge_setup "$d"
+  "$JQ" --arg h "$H" '. + [{id:889,state:"CHANGES_REQUESTED",commit_id:$h,user:{login:"reviewer"},submitted_at:"2026-01-01T00:39:00Z",author_association:"COLLABORATOR",body:("review: REQUEST_CHANGES head: "+$h+" by: source-keeper")}] | map(if .id==888 then .id=890 | .submitted_at="2026-01-01T00:55:00Z" else . end)' "$d/reviews.json" > "$d/p"; mv "$d/p" "$d/reviews.json"
+  merge_case "explicit-source-approval-replaces-CR-without-new-integration-PASS-$mode" 0 "$expected_write" "$d" "$@"
+done
 for mutation in own-cr head; do
   d="$work/source-race-$mutation"; setup "$d"
   case "$mutation" in own-cr) touch "$d/late_review_own_cr"; needle="--replace-own-cr 999" ;; head) touch "$d/late_review_head"; needle="head moved" ;; esac

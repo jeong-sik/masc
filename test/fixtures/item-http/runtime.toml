@@ -1,0 +1,35 @@
+[runtime]
+default = "deepseek.smoke"
+
+[runtime.exact_output_lanes.hitl_auto_judge]
+slots = ["deepseek.smoke"]
+
+[runtime.exact_output_lanes.board_attention_exact]
+slots = ["deepseek.smoke"]
+
+[providers.deepseek]
+display-name = "Transport Harness Smoke"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:9/v1"
+# Exact-output slots above run on this provider, and a slot whose provider
+# declares no exact-body-timeout-s is left out at boot (#38779). Nothing here is
+# ever answered, so the value only has to be a valid deadline.
+exact-body-timeout-s = 1200.0
+
+[models.smoke]
+# Harness-local opaque runtime alias. The adjacent typed capability block is
+# the sole declaration used when no exact AGENT_CORE catalog row exists.
+api-name = "transport-harness-smoke"
+max-context = 32768
+tools-support = true
+streaming = true
+
+[models.smoke.capabilities]
+supports-tool-choice = true
+
+[deepseek.smoke]
+is-default = true
+max-concurrent = 1
+
+[runtime.exact_output_lanes.candle_appraiser]
+slots = ["deepseek.smoke"]

@@ -32,6 +32,19 @@ def prepare(base_path):
     path.write_text(json.dumps(payload))
 
 
+OPAQUE_IDS = ("opaque-owner-first-" + "shared" * 8 + "-tail",
+              "opaque-owner-second-" + "shared" * 8 + "-tail")
+
+
+def prepare_opaque_ids(base_path):
+    prepare_colliding_ids(base_path)
+    path = Path(base_path) / ".masc" / "tasks" / "backlog.json"
+    payload = json.loads(path.read_text())
+    payload["tasks"] = [dict(task, id=task_id) for task, task_id
+                        in zip(payload["tasks"], OPAQUE_IDS)]
+    path.write_text(json.dumps(payload))
+
+
 def run(executable):
     def interact(process, master_fd, _slave_fd, output, _base_path):
         h.palette_go(process, master_fd, output, b"go Work", b"MASC Work")
@@ -79,6 +92,43 @@ def run(executable):
 
     h.run_terminal_scenario(executable, description="Work distinguishes same-suffix Task numbers and opens each",
                             interact=distinguish, prepare_workspace=prepare_colliding_ids)
+
+
+    def opaque(process, master_fd, _slave_fd, output, _base_path):
+        h.palette_go(process, master_fd, output, b"go Work", b"MASC Work")
+        h.send_and_wait(process, master_fd, output, b"t", b"MASC Work / Tasks")
+        h.wait_for_output(process, master_fd, output, b"tail]", start=0, timeout=10)
+        for width in (30, 40):
+            frame = h.resize_and_wait(process, master_fd, output, rows=40, columns=width,
+                                      needle=b"row 2]", final_cursor=b"\x1b[?25l")
+            rows = h.screen_rows(frame)
+            positions = [h.screen_row_of(rows, ordinal)
+                         for ordinal in (b"row 1]", b"row 2]")]
+            if min(positions) < 0 or positions[0] == positions[1]:
+                raise AssertionError(f"opaque Task rows are indistinguishable: {rows!r}")
+            for index, task_id in enumerate(OPAQUE_IDS):
+                start = len(output)
+                h.send_and_wait(process, master_fd, output, b"\r", b"MASC Task")
+                h.drain_until_quiet(process, master_fd, output)
+                detail = h.screen_text(bytes(output[start:]))
+                # The ID is ASCII and unbroken: every body-width chunk must
+                # appear in order, including the middle that a header folds.
+                offset = 0
+                body_width = width - 8 - 11
+                for first in range(0, len(task_id), body_width):
+                    chunk = task_id[first:first + body_width].encode()
+                    found = detail.find(chunk, offset)
+                    if found < 0:
+                        raise AssertionError(f"opaque ID chunk missing from detail: {chunk!r}, {detail!r}")
+                    offset = found + len(chunk)
+                h.send_and_wait(process, master_fd, output, b"\x1b", b"MASC Work / Tasks")
+                if index == 0:
+                    h.send_and_wait(process, master_fd, output, b"j", b"row 2]")
+            h.send_and_wait(process, master_fd, output, b"k", b"row 1]")
+        os.write(master_fd, b"q")
+
+    h.run_terminal_scenario(executable, description="Work distinguishes opaque IDs and reads complete detail",
+                            interact=opaque, prepare_workspace=prepare_opaque_ids)
 
 
 if __name__ == "__main__":

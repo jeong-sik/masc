@@ -227,7 +227,7 @@ let blame_author_cells = 9
 let blame_age_cells = 3
 let blame_margin_cells = blame_author_cells + blame_age_cells + 2
 
-let task_line ~cols (task : task) =
+let task_line ~cols ~ordinal (task : task) =
   let status = Masc_domain.task_status_to_string task.status in
   (* The icon and the status word share one color so the row's state reads at
      a glance: in-flight rows in cyan, waiting rows dimmed. Terminal states
@@ -289,7 +289,10 @@ let task_line ~cols (task : task) =
   let fields = max 0 (available - fixed_chrome) in
   let id = if Message_layout.display_width id + Message_layout.display_width "Task" <= fields
     then id else short_id in
-  let id = Message_layout.fit_middle (min fields (Message_layout.display_width id)) id in
+  (* A row coordinate stays distinct when an opaque ID cannot fit. The
+     original identifier remains the selection key and is readable in detail. *)
+  let id = if Message_layout.display_width id <= fields then id
+    else Printf.sprintf "row %d" ordinal in
   let remainder = max 0 (fields - Message_layout.display_width id) in
   let assignee =
     fit_width assignee (min (remainder / 2) (Message_layout.display_width assignee))
@@ -582,7 +585,8 @@ let task_detail_pane (state : state) ~rows ~cols (task : Masc_domain.task) buf =
   (* Labeled block: the label rides the first wrapped line and continuation
      lines keep the text column, so long handoff summaries stay readable. *)
   let labeled_lines label text =
-    let width = max 10 (cols - 16) in
+    (* The final body row has cols - 8 cells, including eleven label cells. *)
+    let width = max 1 (cols - 8 - 11) in
     (* The block has rows, so a line break in the text takes one instead of
        being spelled into the sentence. Of the 718 tasks on this workspace
        406 are written with line breaks. *)
@@ -600,7 +604,8 @@ let task_detail_pane (state : state) ~rows ~cols (task : Masc_domain.task) buf =
     List.concat_map (fun item -> labeled_lines label item) items
   in
   let body_lines =
-    (if String.equal task.description "" then [] else labeled_lines "what" task.description)
+    labeled_lines "ID" (Terminal_text.single_line task.id)
+    @ (if String.equal task.description "" then [] else labeled_lines "what" task.description)
     @ (match task.handoff_context with
        | None -> []
        | Some handoff ->
@@ -746,7 +751,7 @@ let render_work_tasks (state : state) =
       List.iteri
         (fun index (task : Tui_decode.task) ->
            if index >= first && index < first + room then
-             let line = " " ^ task_line ~cols task in
+             let line = " " ^ task_line ~cols ~ordinal:(index + 1) task in
              if Some index = selected then
                c.push_selected (Masc_tui_theme.strip_sgr line)
              else c.push line)

@@ -12605,8 +12605,9 @@ def run_tab_strip_keeps_current_entry_regression(executable: str) -> None:
 def run_activity_logs_tab_pane_regression(executable: str) -> None:
     """Dashboard, Work and Usage share the pane's 102-column surface floor.
 
-    At the narrow threshold they all retain the Recent pane. Activity's
-    Events and Logs readings suppress it, because they own that content.
+    Home stays compact by default. An explicit Ctrl-L choice opens the
+    Recent pane, whose102-column surface boundary then persists on Work and
+    Usage. Activity Events and Logs suppress it because they own that content.
     """
 
     def pane_row(output: bytearray) -> int:
@@ -12620,6 +12621,11 @@ def run_activity_logs_tab_pane_regression(executable: str) -> None:
         resize_and_wait(process, master_fd, output, rows=38,
                         columns=ACTING_PANE_THRESHOLD_COLUMNS,
                         needle=b"MASC Dashboard", final_cursor=b"\x1b[?25l")
+        if pane_row(output) >= 0:
+            raise AssertionError("default Home grew an Activity pane without a reader choice")
+        # Home's default is hidden; measure the shared boundary only after an
+        # actual user choice, preserving every geometry assertion below.
+        send_and_wait(process, master_fd, output, b"\x0c", b"[Recent]")
         for title, ready, whole_row in (
             (b"MASC Dashboard", b"Continue", b"Choose a Keeper"),
             (b"MASC Work", b"D12 Goal", b"D12 Goal"),

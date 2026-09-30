@@ -512,7 +512,11 @@ let task_detail_lines (state : state) ~cols (task : Masc_domain.task) =
          @ (if String.equal handoff.Masc_domain.summary "" then [] else labeled_lines "handoff" handoff.Masc_domain.summary)
          @ some_lines "next" handoff.Masc_domain.next_step
          @ some_lines "failure" handoff.Masc_domain.failure_mode
-         @ list_lines "evidence" handoff.Masc_domain.evidence_refs)
+         @ list_lines "evidence" handoff.Masc_domain.evidence_refs
+         @ some_lines "handoff policy"
+             (Option.map Masc_domain.task_reclaim_policy_to_string handoff.Masc_domain.reclaim_policy)
+         @ some_lines "handoff updated" handoff.Masc_domain.updated_at
+         @ some_lines "handoff editor" handoff.Masc_domain.updated_by)
   @ (match task.contract with
      | None -> []
      | Some contract ->

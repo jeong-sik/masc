@@ -18,6 +18,8 @@ VERIFICATION = "verification-" + "0123456789abcdef" * 7 + "VERIFYEND"
 NOTES = "NOTESHEAD\n\n" + "completed evidence " * 12 + "\nNOTESEND"
 REASON = "REASONHEAD\n\n" + "cancelled because source changed " * 8 + "\nREASONEND"
 HISTORY = "HISTORYHEAD " + "handoff observation " * 9 + "HISTORYEND"
+HANDOFF_STAMP = "2026-09-30T02:03:04Z"
+HANDOFF_EDITOR = "handoff-editor-" + "delegated-" * 8 + "HANDOFFEDITOREND"
 STAMP = "2026-09-30T01:02:03Z"
 WINDOW = re.compile(rb"\[lines (\d+)-(\d+)/(\d+)\]")
 
@@ -42,7 +44,10 @@ def window(output):
 def task(status):
     row = {"id": TASK_ID, "title": TITLE, "description": "Task description remains readable.",
            "status": status, "assignee": ACTOR, "priority": 2, "cycle_count": 7,
-           "created_at": STAMP, "created_by": CREATOR, "files": ["docs/evidence/task-metadata.md"]}
+           "created_at": STAMP, "created_by": CREATOR, "files": ["docs/evidence/task-metadata.md"],
+           "reclaim_policy": "block_reclaim",
+           "handoff_context": {"summary": "Operator handoff", "reclaim_policy": "allow_reclaim",
+                               "updated_at": HANDOFF_STAMP, "updated_by": HANDOFF_EDITOR}}
     if status == "awaiting_verification":
         row.update(started_at=STAMP, submitted_at=STAMP, verification_id=VERIFICATION)
     elif status == "done":
@@ -109,7 +114,9 @@ def run(executable):
                     h.wait_for_output(process, fd, output, b"HISTORYEND", start=0, timeout=10)
                     h.drain_until_quiet(process, fd, output)
                     all_text = compact(screen(output))
-                    for value in (TITLE, TASK_ID, ACTOR, CREATOR, STAMP, evidence, HISTORY):
+                    for value in (TITLE, TASK_ID, ACTOR, CREATOR, STAMP, evidence, HISTORY,
+                                  "handoff policy allow_reclaim", "reclaim policy block_reclaim",
+                                  "handoff updated " + HANDOFF_STAMP, "handoff editor " + HANDOFF_EDITOR):
                         assert compact(value.encode()) in all_text, (status, width, value, all_text)
                     h.resize_and_wait(process, fd, output, rows=18, columns=width,
                                       needle=b"TITLEHEAD", final_cursor=b"\x1b[?25l")

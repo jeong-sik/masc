@@ -197,9 +197,9 @@ let test_next_request_reasons_survive_80_and_140_columns () =
             Alcotest.(check bool) (label "setting has no cut mark") false
               (says "…" rows))
          [ snapshot_rows; ledger_rows ];
-       Alcotest.(check bool) (label "a prior count is separate from settings") true
-         (says "Last request measured 71.0k input tok." ledger_rows
-          && not (says "Last request measured" snapshot_rows)))
+       Alcotest.(check bool) (label "the ledger baseline is separate from settings") true
+         (says "Ledger baseline 71.0k tok; may retain an earlier usage sample or be adjusted after history eviction." ledger_rows
+          && not (says "Ledger baseline" snapshot_rows)))
     [ 80; 140 ]
 
 let context_pane_lines ?(cols = 140)

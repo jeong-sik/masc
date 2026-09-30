@@ -949,6 +949,83 @@ let visible_reply reply =
     { reply; turn_outcome = Masc.Keeper_turn_outcome.Visible_reply; turn_ref = "trace-1#1" }
 ;;
 
+let test_queue_summary_follows_admission_and_execution () =
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let accepted keeper at = inflight_with_log ~keeper_name:keeper ~started_at:at
+      [Live.Accepted {admission=Live.Queued; queue_length=99; interactive=None}] in
+  let first = accepted "alpha" 1. and second = accepted "alpha" 2. in
+  let other = accepted "beta" 3. in
+  let unsent = Keeper_chat.create_request ~keeper_name:"alpha" ~message:"local" () in
+  let local = match Masc_tui_keeper_chat_queue.push state.msg_queued
+      ~submitted_at:4. unsent with
+    | Ok (queue, _) -> queue | Error detail -> fail detail in
+  state.msg_queued <- local;
+  state.msg_inflight <- [other; second; first];
+  let waiting keeper = Tui_types.keeper_message_waiting_requests state ~keeper_name:keeper
+      |> List.map (fun (request, _) -> request.Keeper_chat.request_id) in
+  check (list string) "accepted input stays ahead of local input; snapshot count is not current count"
+    [first.sent_request.request_id; second.sent_request.request_id; unsent.request_id]
+    (waiting "alpha");
+  check (list string) "other Keeper has its own queue"
+    [other.sent_request.request_id] (waiting "beta");
+  state.msg_target_keeper_name <- Some "alpha";
+  let rows = Tui_types.keeper_message_activity_rows state in
+  check (list string) "queue status and local preview have separate rows"
+    ["Queue (3 pending) · auto-next:off · Ctrl-T:queue"
+    ; "2 queued at Keeper · /queue"; "Local NEXT: \"local\""]
+    (List.map Masc_tui_answering.chat_activity_row_text rows);
+  (match Masc_tui_keeper_chat_queue.push state.msg_queued ~submitted_at:1. first.sent_request with
+   | Error detail -> fail detail
+   | Ok (queue, _) -> state.msg_queued <- queue);
+  check int "handoff cannot count one request twice" 3 (List.length (waiting "alpha"));
+  state.msg_queued <- local;
+  Tui_types.turn_log_add ~now:5. first.log ~seq:(Some 1) Live.Run_started;
+  check (list string) "started request leaves queue even though its admission was Queued"
+    [second.sent_request.request_id; unsent.request_id] (waiting "alpha");
+  List.iteri (fun seq delta -> Tui_types.turn_log_add ~now:6. second.log ~seq:(Some (seq+1)) delta)
+    [Live.Run_started;
+     Live.Reply_details {reply=""; turn_outcome=Masc.Keeper_turn_outcome.Continuation_checkpoint;
+       turn_ref="trace#1"}; Live.Run_finished];
+  check (list string) "checkpoint wait is not a queued operator message"
+    [unsent.request_id] (waiting "alpha");
+  let excluded deltas =
+    state.msg_queued <- Masc_tui_keeper_chat_queue.empty;
+    state.msg_inflight <- [inflight_with_log ~keeper_name:"alpha" ~started_at:7. deltas];
+    check (list string) "only confirmed queued requests appear" [] (waiting "alpha") in
+  excluded [];
+  excluded [Live.Accepted {admission=Live.Running; queue_length=3; interactive=None}];
+  excluded [Live.Accepted {admission=Live.Settled; queue_length=3; interactive=None}];
+  excluded [Live.Accepted {admission=Live.Queued; queue_length=3; interactive=None};
+    Live.Run_started; visible_reply "done"; Live.Run_finished];
+  excluded [Live.Accepted {admission=Live.Queued; queue_length=3; interactive=None};
+    Live.Run_failed {message="cancelled"}];
+  let promoted = inflight_with_log ~keeper_name:"alpha" ~started_at:8. [] in
+  let promoted = {promoted with origin=Tui_types.Promoted_queue {
+      submission_seq=0; intent=Masc_tui_keeper_chat_queue.Next; causal_parent_request_id=None}} in
+  state.msg_inflight <- [promoted];
+  let expect_delivery label expected =
+    match Tui_types.keeper_message_waiting_requests state ~keeper_name:"alpha" with
+    | [(_, delivery)] -> check bool label true (delivery = expected)
+    | _ -> fail (label ^ ": expected one pending request") in
+  check (list string) "local queue remains visible while POST awaits admission"
+    [promoted.sent_request.request_id] (waiting "alpha");
+  expect_delivery "POST without receipt is not confirmed queued" Tui_types.Awaiting_receipt;
+  promoted.phase <- Tui_types.Turn_reconciling;
+  expect_delivery "unacknowledged reconnect is explicitly uncertain" Tui_types.Rechecking_delivery;
+  Tui_types.turn_log_add ~now:9. promoted.log ~seq:None
+    (Live.Accepted {admission=Live.Queued;queue_length=1;interactive=None});
+  expect_delivery "old admission does not claim current certainty during reconnect"
+    Tui_types.Rechecking_delivery;
+  promoted.phase <- Tui_types.Turn_streaming;
+  expect_delivery "live queued receipt restores confirmed status" Tui_types.Keeper_queued;
+  check (list string) "acceptance preserves the same queued request"
+    [promoted.sent_request.request_id] (waiting "alpha");
+  promoted.phase <- Tui_types.Turn_reconciling;
+  Tui_types.turn_log_add ~now:10. promoted.log ~seq:None Live.Run_started;
+  check (list string) "started execution leaves pending even while reconnecting"
+    [] (waiting "alpha")
+;;
+
 (* Settling commits the log, keeps it when it has anything to draw, and
    stops treating it as live; an empty log is committed and let go. *)
 let test_settle_turn_log_commits_holds_and_clears_live () =
@@ -4177,7 +4254,8 @@ let () =
     "tui_chat_queue_wiring"
     [ ( "link card layout", [test_case "actual body width and preview cache changes" `Quick test_link_cards_use_actual_message_body_width] )
     ; ( "wiring"
-      , [ test_case "checkpoint watcher allows new input" `Quick test_checkpoint_watcher_allows_new_input
+      , [ test_case "queue summary follows admission and execution" `Quick test_queue_summary_follows_admission_and_execution
+        ; test_case "checkpoint watcher allows new input" `Quick test_checkpoint_watcher_allows_new_input
         ; test_case "older queued watcher cannot rearm acknowledged stop" `Quick
             test_old_queued_watcher_does_not_rearm_esc
         ; test_case "batch watchers render one shared turn" `Quick test_batch_watchers_render_one_shared_settled_turn

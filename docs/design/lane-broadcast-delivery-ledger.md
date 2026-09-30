@@ -33,24 +33,43 @@ cleanup evidence. Recovery returns completed records with cleanup failures in
 settled_with_cleanup, separately from pending delivery obligations.
 Callers offload blocking ledger operations through the existing host boundary.
 
-## Required following units
+## Runtime integration child
 
-1. Extend the parent authenticated Evidence admission and status lookup. Publish and verify
-   the durable artifact first (already done by the parent), then admit its operation with the actual
-   fleet recipient snapshot. Preserve the caller key across an unanswered HTTP
-   request; reject contradictory reuse. Existing mutation authorization remains
-   authoritative.
-2. Give Workspace Broadcast an explicit durable deferred Fleet option. Commit
-   using the ledger request ID and sequence, reconcile an interrupted commit by
-   that ID, then return its committed receipt before synchronous fleet fanout.
-   Preserve other callers' existing semantics and the Fleet audience.
-3. Connect a server-root drain/recovery to the recipient journal. Use the existing
-   idempotent transcript append with the same request ID; persist each accepted
-   recipient and each failure. Do not replace Fleet with System_record or rely
-   on a detached fiber. Reading remains a separately observed state.
-4. Connect TUI status reconciliation and add actual end-to-end interrupted-POST,
-   partial-fanout restart and same-key retry fixtures. The ledger fixtures alone
-   do not prove Broadcast receipt latency, delivery or deduplicated transcripts.
+The next child activates the journal for optional Lane Evidence Broadcast.
+The authenticated Evidence path publishes its immutable artifact, captures the
+registered Fleet roster, and durably admits the caller's retained operation key
+before the workspace commit. A retry reuses that original audience and artifact.
+Workspace publication uses the same request ID. An interrupted publication is
+reconciled against the exact authoritative sender, content and sequence.
+A journaled committed message that is unavailable is refused, never republished.
 
-No runtime activation, live delivery, native test execution or P1 closure is
-claimed by this first unit.
+The explicit Deferred_fleet mode returns the workspace receipt before recipient
+projection. Ordinary Broadcast retains its existing immediate mention and Fleet
+behavior. Deferred mode rejects mention-bearing content before admission or
+workspace mutation because mention intake must settle before Fleet projection.
+The Lane path sends only the host-generated stored-artifact marker; selected
+report text, including any mentions, stays inside the immutable artifact.
+
+A server-root Pulse owns recovery under its root switch and the existing
+maintenance cadence. Admission nudges it. It reconciles unfinished commits and
+projects only pending members of the accepted roster. The production recipient
+adapter uses the existing Workspace_message request key and
+append_user_message_once. Cancellation after transcript append but before journal
+acknowledgement leaves a pending obligation: retrying the same key observes the
+existing transcript rather than appending a second row. Projection acceptance
+still does not establish that a Keeper read or used the report.
+
+An admitted intention whose workspace write is rejected reports pending_commit.
+A failure with uncertain commit evidence reports outcome_unknown. Both retain
+the operation key for retry; only an authoritative committed receipt acknowledges
+it in the TUI. Durable descriptor cleanup issues are logged without converting
+an accepted write into a replayable rejection.
+
+The child adds source fixtures for receipt return before blocked projection,
+partial recipient failure and restart, fixed-audience recovery, interrupted
+workspace publication, and the production adapter's transcript deduplication.
+These are proposed native fixtures, not executed native or live delivery proof.
+The child has no provider/model execution evidence. Current-caller and strict saved visibility authorization are inherited from
+privacy parent #40233 c327e74d4ba9f6f81da237d7938a78992286e9f5 through
+#40330 bad4c98f17a5a250d59a3c1e92afddb85281eb75. Cached retries validate
+the saved operation before looking up a source binding that may have been removed.

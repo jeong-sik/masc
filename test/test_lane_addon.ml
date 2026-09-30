@@ -127,6 +127,8 @@ let with_fixture ?acquire ?observe_step f =
           Eio_context.with_test_env ~sw ~net:(Eio.Stdenv.net env)
             ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env) (fun () ->
               Runtime.For_testing.reset ();
+              Runtime.register_fleet_backend {snapshot=(fun ~config:_ ~caller:_ -> Ok []);
+                project=(fun ~config:_ ~delivery:_ ~recipient:_ -> Error "empty fixture fleet has no recipient")};
               let state, backend = make_backend ?observe_step () in
               let backend = match acquire with None -> backend | Some acquire -> {backend with acquire} in
               Runtime.For_testing.with_backend backend (fun () ->
@@ -614,6 +616,9 @@ let test_private_broadcast_retry_uses_saved_visibility () = with_fixture (fun en
   unwrap (Store.remove_binding store ~instance_id:id);
   remove_tree (Filename.concat store_root (Filename.concat "observations" (Store.digest id)));
   Runtime.For_testing.reset ();
+  Runtime.register_fleet_backend {
+    snapshot=(fun ~config:_ ~caller:_ -> fail "cached private retry must retain its accepted audience");
+    project=(fun ~config:_ ~delivery:_ ~recipient:_ -> Error "private retry does not inline projection")};
   check bool "unverified claimed owner cannot retrieve cached private evidence" true
     (Result.is_error (send owner Lane_addon_sources.Unauthenticated));
   check bool "foreign caller cannot retrieve cached private evidence" true
@@ -643,67 +648,73 @@ let test_broadcast_retry_reconciles_receipt_during_slow_fanout () =
       "broadcast",`Bool true;"request_id",`String "slow-send"] in
     let entered, mark_entered = Eio.Promise.create () in
     let release, mark_released = Eio.Promise.create () in
-    let fanouts = ref 0 in
-    let previous = Workspace_broadcast.For_testing.replace_on_broadcast_mention (fun _delivery ->
-      incr fanouts;
-      if !fanouts=1 then (
-        Eio.Promise.resolve mark_entered ();
-        Eio.Promise.await release);
-      Workspace_broadcast.Passive) in
+    let failed = ref true and block = ref true in
+    let roster = ref ["keeper-a";"keeper-b"] in
+    let calls = ref [] and immediate_calls = ref 0 in
+    let install () = Runtime.register_fleet_backend {
+      snapshot=(fun ~config:_ ~caller:_ -> Ok !roster);
+      project=(fun ~config:_ ~delivery ~recipient ->
+        calls := (recipient,delivery.Workspace_broadcast.request_id)::!calls;
+        if recipient="keeper-a" && !block then (
+          Eio.Promise.resolve mark_entered (); Eio.Promise.await release);
+        if recipient="keeper-b" && !failed then Error "fixture recipient store unavailable" else Ok ())} in
+    install ();
+    let previous=Workspace_broadcast.For_testing.replace_on_broadcast_mention (fun _ ->
+      incr immediate_calls; Workspace_broadcast.Passive) in
     Fun.protect ~finally:(fun () ->
       let (_ : Workspace_broadcast.broadcast_delivery -> Workspace_broadcast.mention_delivery) =
         Workspace_broadcast.For_testing.replace_on_broadcast_mention previous in
       if not (Eio.Promise.is_resolved release) then Eio.Promise.resolve mark_released ()) (fun () ->
       let send () = Runtime.dispatch ~caller:"fixture-operator" ~config ~operation:Runtime.Evidence args |> unwrap in
-      let first = Eio.Fiber.fork_promise ~sw send in
+      let original=send () in
+      check string "durable message receipt returns before any recipient projection" "committed"
+        (member "delivery" original |> text "status");
+      check Alcotest.int "publication does not run synchronous fleet handler" 0 !immediate_calls;
+      check Alcotest.int "publication does not inline root recipient work" 0 (List.length !calls);
+      let first=Eio.Fiber.fork_promise ~sw (fun () -> Runtime.recover_fleet ~config) in
       Eio.Promise.await entered;
-      (* A new observation changes entry_json while the original caller is
-         blocked. Retry still has to return the originally published bundle. *)
       ignore (unwrap (dispatch config Runtime.Observe ["instance_id",`String id]));
       await clock (fun () -> int "observation_seq" (instance config id) = 2);
-      let replay = send () in
-      check bool "original request is still waiting for fleet delivery" false (Eio.Promise.is_resolved first);
-      check string "retry recovers authoritative commit during slow fanout" "committed"
-        (member "delivery" replay |> text "status");
-      check Alcotest.int "retry never starts another fleet fanout" 1 !fanouts;
-      check bool "a slow fanout does not block a different Broadcast identity" true
-        (Result.is_ok (Workspace_broadcast.broadcast_once config
-          ~request_id:("wmsg-" ^ String.make 32 'b')
-          ~from_agent:"fixture-operator" ~content:"independent message"));
-      Eio.Promise.resolve mark_released ();
-      let original = Eio.Promise.await_exn first in
-      check bool "replayed receipt has original request identity and sequence" true
+      let replay=send () in
+      check bool "root drain is still waiting for first recipient" false (Eio.Promise.is_resolved first);
+      check bool "same-key retry preserves exact committed receipt during drain" true
         (member "delivery" original = member "delivery" replay);
-      check bool "retry preserves original selected artifact despite changing live metadata" true
+      check bool "retry preserves original artifact despite changed live metadata" true
         (member "keeper_artifact" original = member "keeper_artifact" replay);
-      let receipt = member "delivery" replay |> member "receipt" in
-      check bool "same request cannot be reused for different message content" true
+      check Alcotest.int "retry launches no extra recipient call" 1 (List.length !calls);
+      check bool "ordinary Broadcast still uses its existing synchronous behavior" true
+        (Result.is_ok (Workspace_broadcast.broadcast_once config
+          ~request_id:("wmsg-" ^ String.make 32 'b') ~from_agent:"fixture-operator" ~content:"independent message"));
+      check Alcotest.int "ordinary caller still reaches existing handler" 1 !immediate_calls;
+      block:=false; Eio.Promise.resolve mark_released ();
+      check bool "partial recipient failure remains a failure" true
+        (Result.is_error (Eio.Promise.await_exn first));
+      let receipt=member "delivery" original |> member "receipt" in
+      let request_id=text "request_id" receipt in
+      check bool "same identity cannot replace committed content" true
         (Result.is_error (Workspace_broadcast.broadcast_once config
-          ~request_id:(text "request_id" receipt)
-          ~from_agent:"fixture-operator" ~content:"different content"));
-      let next_args = match args with `Assoc fields ->
-        `Assoc (("request_id",`String "deliberate-new-send") :: List.remove_assoc "request_id" fields)
-        | _ -> assert false in
-      let deliberate = Runtime.dispatch ~caller:"fixture-operator" ~config ~operation:Runtime.Evidence next_args |> unwrap in
-      check bool "new deliberate send of the same rows gets another receipt" true
-        (member "delivery" deliberate |> member "receipt" |> text "request_id"
-          <> text "request_id" receipt);
-      check Alcotest.int "new deliberate send still reaches the fleet" 3 !fanouts;
-      (* Remove all in-memory Lane state after detaching. The retry must find
-         both the prepared artifact and committed message on durable storage. *)
+          ~request_id ~from_agent:"fixture-operator" ~content:"different content"));
       detach config id; await_phase clock config id "detached";
-      let store_root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
+      let store_root=Filename.concat (Workspace.masc_dir config) "lane-addons" in
       unwrap (Store.remove_binding (Store.create ~root:store_root) ~instance_id:id);
       remove_tree (Filename.concat store_root (Filename.concat "observations" (Store.digest id)));
-      Runtime.For_testing.reset ();
-      let recovered = send () in
-      check bool "restart recovers receipt after source rows and binding disappear" true
+      Runtime.For_testing.reset (); roster:=["keeper-a";"keeper-b";"new-keeper"]; failed:=false; install ();
+      let recovered=send () in
+      check bool "restart reconciles receipt after original source disappears" true
         (member "delivery" recovered = member "delivery" original);
-      check bool "restart recovers the same exact artifact" true
+      check bool "restart retains original artifact" true
         (member "keeper_artifact" recovered = member "keeper_artifact" original);
-      check Alcotest.int "idle recovery replays the same idempotent fleet projection" 4 !fanouts))
+      unwrap (Runtime.recover_fleet ~config);
+      let count recipient=List.length (List.filter (fun (name,_) -> name=recipient) !calls) in
+      check Alcotest.int "accepted recipient is not projected again after restart" 1 (count "keeper-a");
+      check Alcotest.int "failed recipient is retried once using original identity" 2 (count "keeper-b");
+      check Alcotest.int "new roster member is outside accepted audience" 0 (count "new-keeper");
+      check bool "all recipient attempts share one authoritative message identity" true
+        (List.for_all (fun (_,id) -> id=request_id) !calls);
+      unwrap (Runtime.recover_fleet ~config);
+      check Alcotest.int "completed drain launches no further recipient work" 3 (List.length !calls)))
 
-let test_broadcast_failure_keeps_evidence_without_automatic_retry () =
+let test_broadcast_pending_commit_recovers_same_identity () =
   with_fixture (fun env _ config dir _ ->
     ignore (Workspace.init config ~agent_name:(Some "fixture-operator"));
     let clock = Eio.Stdenv.clock env in
@@ -732,7 +743,7 @@ let test_broadcast_failure_keeps_evidence_without_automatic_retry () =
         check Alcotest.int "invalid requests never reach Broadcast" 0 !attempts;
         Runtime.dispatch ~caller:"fixture-operator" ~config ~operation:Runtime.Evidence
           (`Assoc (args @ send_id @ ["broadcast",`Bool true])) |> unwrap) in
-    check string "failed authoritative publication remains a failed delivery" "failed"
+    check string "admitted intention remains queued while authoritative commit is rejected" "pending_commit"
       (member "delivery" result |> text "status");
     let evidence = member "evidence" result in
     check bool "failed Broadcast retains the exact selected evidence" true
@@ -741,6 +752,25 @@ let test_broadcast_failure_keeps_evidence_without_automatic_retry () =
     ignore (unwrap (dispatch config Runtime.Inspect []));
     ignore (unwrap (dispatch config Runtime.Evidence args));
     check Alcotest.int "inspection and preservation never rebroadcast" 1 !attempts;
+    let projections = ref [] in
+    Runtime.register_fleet_backend {
+      snapshot=(fun ~config:_ ~caller:_ -> fail "recovery must retain the admitted empty audience");
+      project=(fun ~config:_ ~delivery:_ ~recipient -> projections:=recipient::!projections; Ok ())};
+    unwrap (Runtime.recover_fleet ~config);
+    let recovered = Runtime.dispatch ~caller:"fixture-operator" ~config ~operation:Runtime.Evidence
+      (`Assoc (args @ send_id @ ["broadcast",`Bool true])) |> unwrap in
+    check string "queued intention becomes committed after storage recovers" "committed"
+      (member "delivery" recovered |> text "status");
+    check bool "commit recovery retains the exact published artifact" true
+      (member "keeper_artifact" recovered = member "keeper_artifact" result);
+    let receipt = member "delivery" recovered |> member "receipt" in
+    let found = Workspace_broadcast.find_broadcast ~request_id:(text "request_id" receipt)
+      config ~from_agent:"fixture-operator" ~content:(text "message" recovered) in
+    check bool "recovery finds the authoritative exact request without a new publication" true
+      (match found with Ok (Some delivery) -> delivery.seq = int "seq" receipt | _ -> false);
+    unwrap (Runtime.recover_fleet ~config);
+    check Alcotest.int "empty accepted audience stays empty despite the later backend" 0
+      (List.length !projections);
     Runtime.register_delivery_handler (fun ~config:_ ~caller:_ ~keeper_name:_ ~prompt:_ ->
       failwith "fixture recipient raised after accepting");
     let uncertain = Runtime.dispatch ~caller:"fixture-operator" ~config ~operation:Runtime.Evidence
@@ -756,8 +786,8 @@ let () = run "Lane Add-on runtime" ["optional extension", [
     test_private_broadcast_retry_uses_saved_visibility;
   test_case "Broadcast retry reconciles the committed receipt during slow fanout" `Quick
     test_broadcast_retry_reconciles_receipt_during_slow_fanout;
-  test_case "Broadcast failure retains evidence without automatic retry" `Quick
-    test_broadcast_failure_keeps_evidence_without_automatic_retry;
+  test_case "Broadcast intention and failed commit retain exact evidence" `Quick
+    test_broadcast_pending_commit_recovers_same_identity;
   test_case "Fusion read ownership survives retirement and restart" `Quick test_private_fusion_reads_survive_retirement;
   test_case "Fusion state hint wakes only the exact run binding" `Quick
     test_fusion_status_hint_wakes_only_its_bound_run;

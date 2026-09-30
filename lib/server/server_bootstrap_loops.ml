@@ -371,6 +371,21 @@ let mention_transcript_settled = function
   | Workspace_broadcast.Deferred _
   | Workspace_broadcast.Rejected _ -> false
 
+let append_workspace_message_to_recipient ~base_path ~is_registered_keeper
+    (delivery : Workspace_broadcast.broadcast_delivery) ~keeper_name =
+  let open Result.Syntax in
+  let* request_id=Keeper_chat_delivery_identity.Request_id.of_string delivery.request_id in
+  let delivery_key=Keeper_chat_delivery_identity.Workspace_message request_id in
+  let speaker=workspace_message_speaker ~is_registered_keeper ~from_agent:delivery.from_agent in
+  match Keeper_chat_store.append_user_message_once ~base_dir:base_path ~keeper_name ~delivery_key
+    ~content:delivery.content ~surface:Surface_ref.Broadcast ~external_message_id:delivery.request_id
+    ~speaker () with
+  | Error detail -> Error detail
+  | Ok (Keeper_chat_store.Already_present _) -> Ok ()
+  | Ok (Keeper_chat_store.Appended _) ->
+      Keeper_chat_broadcast.chat_appended ~keeper_name ~source:workspace_message_chat_source
+        ~content:delivery.content (); Ok ()
+
 let project_workspace_message_to_fleet
       ~base_path
       ~registered_keepers
@@ -470,6 +485,7 @@ module Projection_for_testing = struct
   let broadcast_mention_wakeup_action = broadcast_mention_wakeup_action
   let deliver_broadcast_mention = deliver_broadcast_mention
   let project_workspace_message_to_fleet = project_workspace_message_to_fleet
+  let append_workspace_message_to_recipient = append_workspace_message_to_recipient
   let mention_transcript_settled = mention_transcript_settled
 end
 
@@ -1855,6 +1871,19 @@ let start_keeper_loops_owned
             (Printexc.to_string exn)));
     mention_outcome
   in
+  Lane_addon_runtime.register_fleet_backend {
+    snapshot=(fun ~config ~caller ->
+      let registered=Keeper_registry.all ~base_path:config.Workspace.base_path () in
+      let same name=String.equal (String.lowercase_ascii (String.trim name))
+        (String.lowercase_ascii (String.trim caller)) in
+      Ok (List.filter_map (fun (entry : Keeper_registry.registry_entry) ->
+        if same entry.name then None else Some entry.name) registered
+        |> List.sort_uniq String.compare));
+    project=(fun ~config ~delivery ~recipient ->
+      append_workspace_message_to_recipient ~base_path:config.Workspace.base_path
+        ~is_registered_keeper:(Keeper_registry.is_registered ~base_path:config.base_path)
+        delivery ~keeper_name:recipient);
+  };
   Workspace_broadcast.set_on_broadcast_mention broadcast_mention_handler;
   install_workspace_message_mutation_invalidation
     ~invalidate_full_health_snapshot

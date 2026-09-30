@@ -187,6 +187,9 @@ module For_testing : sig
     Workspace_broadcast.broadcast_delivery ->
     Workspace_broadcast.mention_delivery
 
+  val append_workspace_message_to_recipient : base_path:string ->
+    is_registered_keeper:(string -> bool) -> Workspace_broadcast.broadcast_delivery ->
+    keeper_name:string -> (unit,string) result
   val project_workspace_message_to_fleet :
     base_path:string ->
     registered_keepers:(unit -> (string * string) list) ->

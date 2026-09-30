@@ -150,17 +150,29 @@ val broadcast : ?trace_context:string ->
            from_agent:string -> content:string ->
            (broadcast_delivery, broadcast_error) result
 
+val find_broadcast : request_id:string -> Workspace_utils_backend_setup.config ->
+  from_agent:string -> content:string -> (broadcast_delivery option, broadcast_error) result
+(** Read the exact authoritative committed row without publishing. Missing is
+    [Ok None]; unavailable, corrupt and contradictory rows remain errors. *)
+
+val validate_deferred_fleet_content : string -> (unit,broadcast_error) result
+(** Check before durable admission. The Lane caller supplies a host-authored
+    stored-artifact marker; selected report text is kept inside its artifact. *)
+type fleet_delivery_mode = Immediate_fleet | Deferred_fleet
 val broadcast_once :
-  request_id:string ->
+  ?fleet_delivery:fleet_delivery_mode -> request_id:string ->
   Workspace_utils_backend_setup.config -> from_agent:string -> content:string ->
   (broadcast_delivery, broadcast_error) result
 (** Reconcile an exact producer-owned request after an unanswered call. A
     committed authoritative message returns its receipt without another message
-    write. An idle retry replays the idempotent fleet projection to recover
-    interrupted recipients; an active fanout returns its receipt immediately.
-    Reusing
+    write. In [Immediate_fleet], an idle retry replays the idempotent fleet
+    projection to recover interrupted recipients; an active fanout returns its
+    receipt immediately. [Deferred_fleet] retries only return the receipt;
+    the root-owned recipient journal performs recovery. Reusing
     an identity with different content or sender is rejected. This path always
-    declares [Fleet_conversation]; callers cannot replay a different audience. *)
+    declares [Fleet_conversation]; callers cannot replay a different audience.
+    [Deferred_fleet] is only for a host with durable recipient obligations:
+    it commits without synchronous projection and refuses mention-bearing text. *)
 
 module For_testing : sig
   (** Replace the handler and return the prior one. Test isolation only. *)

@@ -827,7 +827,9 @@ let rewrite_task_cache_signal config ~msg_type ~task_cache_signal ~content =
         Error (Broadcast_dependency_unavailable detail))
 ;;
 
-let broadcast_with_mention ?trace_context ?request_id ~msg_type ~audience
+type fleet_delivery_mode = Immediate_fleet | Deferred_fleet
+
+let broadcast_with_mention ?trace_context ?request_id ~fleet_delivery ~msg_type ~audience
     config ~from_agent ~content ~pre_extract_mention ~deferred_by_predecessor =
   let started_at = Time_compat.now () in
   let observe final_msg_type =
@@ -962,14 +964,15 @@ let broadcast_with_mention ?trace_context ?request_id ~msg_type ~audience
      emit_message_activity config ~from_agent:stored_agent ~content:stored_content
        ~mention ();
      let mention_delivery =
-       match deferred_by_predecessor with
-       | None -> deliver_committed_mention ~audience config msg
-       | Some reason -> Deferred reason
+       match fleet_delivery, deferred_by_predecessor with
+       | Deferred_fleet, _ -> Passive
+       | Immediate_fleet, None -> deliver_committed_mention ~audience config msg
+       | Immediate_fleet, Some reason -> Deferred reason
      in
      observe stored_msg_type;
      Ok { delivery with mention_delivery })
 
-let broadcast_internal ?trace_context ?request_id ?(msg_type = "broadcast") ?task_cache_signal
+let broadcast_internal ?trace_context ?request_id ?(fleet_delivery=Immediate_fleet) ?(msg_type = "broadcast") ?task_cache_signal
       ~audience config ~from_agent ~content =
   ensure_initialized config;
   (* Preserve original content and extract mention tokens before any
@@ -983,7 +986,7 @@ let broadcast_internal ?trace_context ?request_id ?(msg_type = "broadcast") ?tas
   | Ok (content, msg_type) ->
     let run deferred_by_predecessor =
       broadcast_with_mention
-        ?trace_context ?request_id
+        ?trace_context ?request_id ~fleet_delivery
         ~msg_type
         ~audience
         config
@@ -1044,7 +1047,11 @@ let reconcile_if_idle config request_id ~busy f =
   | Some lease -> Fun.protect ~finally:(fun () -> release_exact_request_lock key lease)
       (fun () -> Cross_context_mutex.with_lock lease.mutex f)
 
-let broadcast_once ~request_id config ~from_agent ~content =
+let validate_deferred_fleet_content content = match Mention.extract content with
+  | Some _ -> Error (Broadcast_policy_rejected "deferred Fleet publication cannot carry a mention")
+  | None -> Ok ()
+
+let find_broadcast_message ~request_id config ~from_agent ~content =
   ensure_initialized config;
   let audience = Fleet_conversation in
   let open Result.Syntax in
@@ -1076,11 +1083,25 @@ let broadcast_once ~request_id config ~from_agent ~content =
             | Mention_rejected -> Rejected Invalid_request in
           Ok (Some (message, {delivery with mention_delivery}))
     | _ -> Error (Broadcast_dependency_unavailable "multiple committed messages share one request identity") in
+  lookup ()
+
+let find_broadcast ~request_id config ~from_agent ~content =
+  Result.map (Option.map snd) (find_broadcast_message ~request_id config ~from_agent ~content)
+
+let broadcast_once ?(fleet_delivery=Immediate_fleet) ~request_id config ~from_agent ~content =
+  let audience = Fleet_conversation in
+  let open Result.Syntax in
+  let* () = match fleet_delivery with
+    | Deferred_fleet -> validate_deferred_fleet_content content
+    | Immediate_fleet -> Ok () in
+  let lookup () = find_broadcast_message ~request_id config ~from_agent ~content in
   let replay message delivery =
     (* Each Keeper's transcript projects by the persisted request ID. Replaying
        fills recipients missed by cancellation/restart and deduplicates those
        already written. A passive row proves commit, not completed fanout. *)
-    let run () = Ok {delivery with mention_delivery=deliver_committed_mention ~audience config message} in
+    let run () = match fleet_delivery with
+      | Deferred_fleet -> Ok delivery
+      | Immediate_fleet -> Ok {delivery with mention_delivery=deliver_committed_mention ~audience config message} in
     match message.mention with
     | None -> run ()
     | Some _ -> Cross_context_mutex.with_lock mention_delivery_mutex run in
@@ -1088,13 +1109,15 @@ let broadcast_once ~request_id config ~from_agent ~content =
      committed while its fleet transcript writes are still blocked. *)
   let* existing = lookup () in
   match existing with
-  | Some (message, delivery) -> reconcile_if_idle config request_id
-      ~busy:(fun () -> Ok delivery) (fun () -> replay message delivery)
+  | Some (message, delivery) -> (match fleet_delivery with
+      | Deferred_fleet -> Ok delivery
+      | Immediate_fleet -> reconcile_if_idle config request_id
+          ~busy:(fun () -> Ok delivery) (fun () -> replay message delivery))
   | None -> with_exact_request_lock config request_id (fun () ->
       let* existing = lookup () in
       match existing with
       | Some (message, delivery) -> replay message delivery
-      | None -> broadcast_internal ~request_id ~audience config ~from_agent ~content)
+      | None -> broadcast_internal ~request_id ~fleet_delivery ~audience config ~from_agent ~content)
 
 module For_testing = struct
   let replace_on_broadcast_mention handler =

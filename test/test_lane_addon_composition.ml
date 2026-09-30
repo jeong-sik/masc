@@ -53,6 +53,8 @@ let with_fixture ?produce_package ?(produce=(fun ~binding:_ ~sources:_ -> output
             Eio_context.with_test_env ~sw ~net:(Eio.Stdenv.net env) ~clock
               ~mono_clock:(Eio.Stdenv.mono_clock env) (fun () ->
               Runtime.For_testing.reset ();
+              Runtime.register_fleet_backend {snapshot=(fun ~config:_ ~caller:_ -> Ok []);
+                project=(fun ~config:_ ~delivery:_ ~recipient:_ -> Error "empty fixture fleet has no recipient")};
               let config = Workspace.default_config root in
               check string "configuration resolves only to this owned fixture"
                 directory (Runtime.configuration_directory config);

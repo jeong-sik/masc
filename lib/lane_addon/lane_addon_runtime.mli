@@ -6,6 +6,18 @@ val error_to_string : error -> string
 val register_delivery_handler :
   (config:Workspace.config -> caller:string -> keeper_name:string -> prompt:string ->
     (Yojson.Safe.t, string) result) -> unit
+type fleet_backend = {
+  snapshot : config:Workspace.config -> caller:string -> (string list,string) result;
+  project : config:Workspace.config -> delivery:Workspace_broadcast.broadcast_delivery ->
+    recipient:string -> (unit,string) result;
+}
+val register_fleet_backend : fleet_backend -> unit
+(** Install trusted host roster capture and idempotent single-recipient projection.
+    Snapshot is captured before durable admission, never on retry. *)
+val recover_fleet : config:Workspace.config -> (unit,string) result
+val start_fleet_service : config:Workspace.config -> sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> unit
+(** Server-root Pulse owns reconciliation and retry. Failed recipients remain
+    pending; a committed message is only read, never republished if missing. *)
 val dispatch : ?caller:string -> ?access:Lane_addon_sources.access -> config:Workspace.config -> operation:operation -> Yojson.Safe.t ->
   (Yojson.Safe.t, error) result
 (** No I/O and no package callback. Runs on the root-switch owner domain: a

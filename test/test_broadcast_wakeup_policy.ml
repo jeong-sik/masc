@@ -678,6 +678,23 @@ let test_workspace_message_mutation_invalidates_workspace_and_health () =
       check int "full health invalidated once" 1 !full_health_invalidations)
 ;;
 
+let test_durable_fleet_recipient_projection_is_idempotent () =
+  with_workspace @@ fun config ->
+  persist_meta config "beta";
+  let request_id="wmsg-" ^ String.make 32 'c' in
+  let message=fleet_delivery ~request_id ~from_agent:"external-operator"
+    ~content:"Retained artifact marker; reading remains separately observed" in
+  let append ()=Broadcast_wakeup.append_workspace_message_to_recipient
+    ~base_path:config.base_path ~is_registered_keeper:(fun _ -> false) message ~keeper_name:"beta" in
+  check bool "actual durable recipient append succeeds" true (Result.is_ok (append ()));
+  check bool "same workspace message retry is accepted idempotently" true (Result.is_ok (append ()));
+  check int "repeated recipient attempt stores one transcript row" 1
+    (count_delivery_rows ~base_path:config.base_path ~keeper_name:"beta" ~request_id);
+  check bool "invalid recipient does not become accepted" true
+    (Result.is_error (Broadcast_wakeup.append_workspace_message_to_recipient
+      ~base_path:config.base_path ~is_registered_keeper:(fun _ -> false) message ~keeper_name:"../outside"))
+;;
+
 let () =
   run
     "broadcast_wakeup_policy"
@@ -702,7 +719,9 @@ let () =
         ] )
     ; ( "fleet_projection"
       , [
-          test_case "broadcast reaches other Keepers' windows" `Quick
+          test_case "durable single-recipient retry retains one transcript row" `Quick
+            test_durable_fleet_recipient_projection_is_idempotent
+        ; test_case "broadcast reaches other Keepers' windows" `Quick
             test_fleet_projection_reaches_other_keepers
         ; test_case "fleet projection adds no queue entry" `Quick
             test_fleet_projection_adds_no_queue_entry

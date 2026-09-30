@@ -1,0 +1,122 @@
+{
+  "observed_at": "2026-09-30T07:19:10.131224+00:00",
+  "main": "86751f610442e4d82992ebc54bf9eb8ba45ef6d2",
+  "native_runs": [
+    {
+      "conclusion": "success",
+      "head_sha": "19a1a1aca413a1636187c3d73e684ff2b586b010",
+      "id": 36672362813,
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "head_sha": "acb08a586cebbbbe7449ef140c112220fc83a7a1",
+      "id": 36672657120,
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "head_sha": "f80069e428c29784ad54b6387cfaeb19ff85306a",
+      "id": 36672818038,
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "head_sha": "4bcdd8e36c78cf55b93c23b6f34f186b5f2f7d1d",
+      "id": 36670251341,
+      "status": "completed"
+    }
+  ],
+  "scope": {
+    "play": {
+      "head": "19a1a1aca413a1636187c3d73e684ff2b586b010",
+      "native_selectors": 9,
+      "alcotest_suites": 8,
+      "alcotest_cases": 173,
+      "manual_route_suite": "passed; no fabricated case count",
+      "actual_invite_pty": "passed"
+    },
+    "prune": {
+      "head": "acb08a586cebbbbe7449ef140c112220fc83a7a1",
+      "requested_selectors": 12,
+      "current_raw": "unavailable: two TLS handshake download failures; stopped duplicate retries",
+      "exact_case_count": null
+    },
+    "rotation": {
+      "head": "f80069e428c29784ad54b6387cfaeb19ff85306a",
+      "native_suites": 9,
+      "alcotest_cases": 149
+    },
+    "goal": {
+      "head": "4bcdd8e36c78cf55b93c23b6f34f186b5f2f7d1d",
+      "native_suites": 5,
+      "alcotest_cases": 436,
+      "required_run": 36670195775,
+      "required_five": "success",
+      "live_cut": "unapplied; current20-row/v77 diff-only preview; regenerate after writers stopped"
+    },
+    "file_backed_first": {
+      "head": "9b2545974418d74060dbde90d61fa1254776c22d",
+      "run": 36676032252,
+      "own_suite_passed": 18,
+      "own_suite_total": 19,
+      "other_suites": 9,
+      "other_alcotest_cases": 149,
+      "failed_assertion": "test_auth_file_backed_transaction.ml:278 assumes absent auth config is disabled; authoritative default enabled=true require_token=true",
+      "repair": "source fixture correction underway; no revised native proof"
+    },
+    "dashboard": {
+      "base": "a065328066d9996f8658238e3077cad70c2c063c",
+      "base_run": 36675841756,
+      "base_bundle": "failure at initialModuleIds.some(isEffectModule) line152; preceding9 activation suites passed",
+      "old_head": "ce7d95cac4af3750e5bb45039102b9b530bdc0e2",
+      "old_artifact_run": 36670622682,
+      "old_required_run": 36670626246,
+      "old_type_failure": "TS2532 test line81",
+      "current_head": "9464d7404c97b086d1b5cdc7af2c817e8f5d23cc",
+      "current_source": "4-file test/evidence correction, independent review0; no production delta",
+      "current_browser": "pending"
+    },
+    "file_backed_current": {
+      "head": "f01a7fd45d7cc0f8e3d17b492ffd27c0b5f477c1",
+      "tree": "6cb83c6163ed610ff9e39240ceee34d76fb1178a",
+      "external_preserved_head": "68069b3af2da03639225f7bac95dcb61fb54c324",
+      "external_exact_import_tree": "dd6782bc547d40d1bb45827465ec4d7a8fa503fb",
+      "own_delta": "six test/evidence files; production/stanza/changelog bytes exact external parent",
+      "prepared_cases": 23,
+      "independent_source_review_findings": 0,
+      "native_run": 36682552861,
+      "native_status": "queued at dispatch; no current native PASS claimed",
+      "source_only_gates": "fixture parse, final strict ignore, diff0; earlier four unannotated ignore sites preserved as initial failure evidence"
+    }
+  },
+  "candle": {
+    "first_attempt": "400 DNS transport failures, not sent; zero provider grades",
+    "current_attempt": "epic-400-dns-ca",
+    "platform": "Apple container1.3.1 Ubuntu24.04 amd64/Rosetta microVM",
+    "dns": "isolated guest resolver1.1.1.1",
+    "public_ca_sha256": "21ee2fea04d036f645631b7df551c99cb33c0c8a9840e3d07017d37bc0a123b5",
+    "planned": 400,
+    "status": "stopped own microVM after64HTTP429 refusals",
+    "human_reference": "only case19 posthoc Epic;19 unlabelled; no full human-calibration or accuracy claim",
+    "process_exit": 137,
+    "result_rows": 167,
+    "validated_completed_rows": 167,
+    "successful_grades": 103,
+    "http429_refusals": 64,
+    "planned_but_not_completed": 233,
+    "one_inflight_registered_at_stop": true,
+    "case19": {
+      "planned_trials": 20,
+      "completed_trials": 8,
+      "actual_grades": {
+        "epic": 4
+      },
+      "http429_refusals": 4,
+      "missing_trials": 12
+    },
+    "analysis_boundary": "partial run; structural400 completeness false; human accuracy null; no retry/budget/runtime policy change"
+  },
+  "live_mutations": false,
+  "merged_by_root": false
+}

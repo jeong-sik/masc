@@ -2,9 +2,13 @@
 
 These checkpoints name different source commits. They are not a single released or integrated build.
 
-## Latest current-main checkpoint
+## Current measured checkpoint
 
-This section supersedes earlier pending observations below. Play19a1, expiry5f73, pruneacb0 and rotationf800 now preserve complete mainc112 plus each reviewed own delta. Required/current native CI remains pending; no merge/deployment is claimed. Prior pruning b695 completed Test36669352105 with8/8 suites133 cases. Prior rotation040 failed before suites on a private-helper fixture reference; refreshed f800 fixes it. Dashboard40190/ce7 publishes the workspace authority repair over a065; its Vitest/typecheck/browser evidence is queued, not measured. The remaining file-backed Keeper/bootstrap/login publication gaps are being repaired in the next stack.
+[Latest scopes, exact heads/runs and retained raw logs](../evidence/2026-09-30-feature-current-checkpoint/README.md) supersede all pending observations below. Current Play, prune, rotation and Goal native runs succeeded. File-backed23-case source is published with new native CI queued; Dashboard inherited bundle failure and corrected fixture are separately recorded. The revised Candle microVM experiment was stopped after64HTTP429 refusals with167complete receipts/103grades; it is not a400-call PASS. No release/live data cut is claimed.
+
+## Historical current-main checkpoint (superseded)
+
+This historical section is superseded by the current measured checkpoint above. Play19a1, expiry5f73, pruneacb0 and rotationf800 now preserve complete mainc112 plus each reviewed own delta. Required/current native CI remains pending; no merge/deployment is claimed. Prior pruning b695 completed Test36669352105 with8/8 suites133 cases. Prior rotation040 failed before suites on a private-helper fixture reference; refreshed f800 fixes it. Dashboard40190/ce7 publishes the workspace authority repair over a065; its Vitest/typecheck/browser evidence is queued, not measured. The remaining file-backed Keeper/bootstrap/login publication gaps are being repaired in the next stack.
 
 [Raw logs, current head/tree receipt and evidence limits](../evidence/2026-09-30-credential-current-main-native/README.md).
 

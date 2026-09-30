@@ -1,0 +1,41 @@
+{
+  "observed_at": "2026-09-30T07:02:10.411365+00:00",
+  "logs": [
+    {
+      "path": "play-current-native.log.gz",
+      "raw_bytes": 109014,
+      "raw_sha256": "bf6bfd89c9b2bc021198dbd65f11f53305ea2b7c9d2acb0788ede6f3b64d5640",
+      "gzip_sha256": "bbca02e908bda157e692efcee233e30fa380a11eb681d6218758e517cd878e31"
+    },
+    {
+      "path": "rotation-current-native.log.gz",
+      "raw_bytes": 60170,
+      "raw_sha256": "4a7fb1ea72ecd3be435f109cdd5e2bc519bf928e59ae10f82e9b7912ad100402",
+      "gzip_sha256": "940b57329b97d9f13147f833e92040a614e087a6a975ba26263179cb345b38ac"
+    },
+    {
+      "path": "goal-current-native.log.gz",
+      "raw_bytes": 159534,
+      "raw_sha256": "be9e3fbc34dfbaf7171abdb80d6b961edb9d7cc493d8eeff0648b78c623caec2",
+      "gzip_sha256": "67b1382f290062c3dd17faf0c7b9063847f3d003ed63b3005abab0bce30c3180"
+    },
+    {
+      "path": "file-backed-first-native-failure.log.gz",
+      "raw_bytes": 69210,
+      "raw_sha256": "c8e0aac8f51293bdebd9e1b3fab06a4400a2a994f8503fe95ff62c0468969505",
+      "gzip_sha256": "45651ac439acaeaf7f22277cbf6dcc7be88e735e9c23d36850b428c9545a393c"
+    },
+    {
+      "path": "dashboard-parent-bundle-failure.log.gz",
+      "raw_bytes": 29033,
+      "raw_sha256": "89d804cccfe7c58c46c20581dbe91ed12f5be1721d3d0db9e2157fa5ee777d75",
+      "gzip_sha256": "65b665ab065b57a728c719a763e2ff1a31230b75656ade6b64c202b751546ea4"
+    },
+    {
+      "path": "dashboard-item-typecheck-failure.log.gz",
+      "raw_bytes": 20853,
+      "raw_sha256": "b47b6d6d50471f25e271ab32fd967f8cbff13215005590e2a855984ef9af3815",
+      "gzip_sha256": "9d82c987633654092175cae4789a56c14c3e85995a526a5cfd714569944a93f1"
+    }
+  ]
+}

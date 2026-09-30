@@ -2042,7 +2042,7 @@
  (name masc_tui_image_preview)
  (wrapped false)
  (modules masc_tui_image_preview)
- (libraries masc_tui_keeper_chat_projection masc_tui_image_ref masc.masc_tool_blob_store base64))
+ (libraries masc_tui_keeper_chat_projection masc_tui_image_ref masc.masc_tool_blob_store base64 digestif yojson))
 
 (library
  (name masc_tui_link_label)

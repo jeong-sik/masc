@@ -152,10 +152,13 @@ def run(executable, no_color):
             h.send_and_wait(process, fd, output, b"\r", b"REMOVEHEAD")
             assert "ADDHEAD" in screen(output), screen(output)
             h.send_and_wait(process, fd, output, b"\x1b", b"lib/a.ml")
-            h.send_and_wait(process, fd, output, b"j", b"second.ml")
+            # The list folds lib/second.ml at 40 columns. Wait for the
+            # visible distinguishing tail, then prove the selected full path
+            # by opening its unique SECONDHEAD payload below.
+            h.send_and_wait(process, fd, output, b"j", b"cond.ml")
             h.send_and_wait(process, fd, output, b"\r", b"SECONDHEAD")
             assert "REMOVEHEAD" not in screen(output), screen(output)
-            h.send_and_wait(process, fd, output, b"\x1b", b"second.ml")
+            h.send_and_wait(process, fd, output, b"\x1b", b"cond.ml")
             h.send_and_wait(process, fd, output, b"k", b"lib/a.ml")
         os.write(fd, b"q")
 

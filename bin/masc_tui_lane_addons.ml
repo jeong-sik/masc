@@ -1318,14 +1318,14 @@ let lines ?(height=24) ?(failed_note = "") ~width view =
               | receipt -> ["Last evidence receipt"] @ receipt @ [""]) in
         let receipt_lines = List.concat_map (fun line ->
           Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
-            (Masc.Tui_decode.sanitize_terminal_text line)) receipt_lines in
+            (Masc.Tui_terminal_text.sanitize_terminal_text line)) receipt_lines in
         (match view.screen with
         | Overview -> overview_lines ~width view @ receipt_lines
         | Detail _ -> receipt_lines @ detail_lines ~width view
             @ (match view.focus with
                | Connections -> [""] @ (flow_lines ~embedded:true view |> List.concat_map (fun line ->
                    Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
-                     (Masc.Tui_decode.sanitize_terminal_text line)))
+                     (Masc.Tui_terminal_text.sanitize_terminal_text line)))
                | Timeline | Configurations | Instances | Rows -> []))
 
 (* A TOML declaration may exist while no worker can run. Keep the file count,

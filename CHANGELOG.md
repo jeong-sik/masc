@@ -2,10 +2,6 @@
 
 ## [Unreleased]
 
-### Fixed
-
-- The TUI Code history wraps complete commit and Keeper metadata, exposes file/scope and action notes, and resolves Enter from the record owning the first visible row. Every record remains selectable even when the document fits the pane (#40247).
-
 ## [0.49.0] - 2026-09-29
 
 ### Fresh state required

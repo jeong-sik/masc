@@ -1229,7 +1229,8 @@ let footer_hints_code ~pane =
     match pane with
     | Code_tree -> overlay_keys @ file_keys
     | Code_file -> overlay_keys
-    | Code_overlay | Code_history ->
+    | Code_overlay -> "Right / Enter" :: overlay_keys @ file_keys
+    | Code_history ->
         (* [Right / Enter] names the tree and file panes' open. With the
            history overlay up, the one arm behind Right and Enter takes the
            overlay's branch instead, so the row drew two items holding the

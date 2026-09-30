@@ -3,11 +3,13 @@ import os
 import re
 import sys
 import unicodedata
+from urllib.parse import parse_qs, urlsplit
 import test_tui_keyboard_input as h
 
 SOURCE_MODULES = ("bin/masc_tui.ml", "bin/masc_tui_render.ml", "bin/masc_tui_keys.ml")
-AUTHOR = "AUTHORHEAD-" + "a" * 110 + "-AUTHORTAIL"
-SUBJECT = "SUBJECTHEAD " + "한글 history evidence " * 45 + " SUBJECTTAIL (#7654)"
+FILE = "notes/[draft](final).lua"
+AUTHOR = "AUTHORHEAD-`literal`-" + "a" * 110 + "-AUTHORTAIL"
+SUBJECT = "SUBJECTHEAD fix glob **/*.ml preserve `literal` " + "한글 history evidence " * 45 + " SUBJECTTAIL (#7654)"
 TASK = "task-" + "t" * 95 + "-TASKTAIL"
 EXECUTION = "exec-" + "e" * 115 + "-EXECTAIL"
 WINDOW = re.compile(r"rows (\d+)-(\d+) of (\d+)")
@@ -49,7 +51,10 @@ def window(output, columns):
 
 def fixtures(short=False):
     result = h.code_memo_fixtures()
-    result[h.CODE_MEMO_FILE_PATH] = (200, {"ok": True, "content":
+    result[h.WORKSPACE_TREE_ROOT_PATH] = (200, [{
+        "path": FILE, "label": FILE, "depth": 0, "parent": "",
+        "hasChildren": False, "diff": None, "keeperId": None, "hueIndex": None}])
+    result["/api/v1/workspace/file"] = (200, {"ok": True, "content":
         "local lock = 1\nlocal target = 2\nlocal function read() return lock end\n"})
     commits = [{"hash": "abc1234", "timestamp_ms": 1787600200000,
                 "author": "alpha" if short else AUTHOR,
@@ -57,26 +62,27 @@ def fixtures(short=False):
     if short:
         commits.append({"hash": "xyz7890", "timestamp_ms": 1787600100000,
                         "author": "beta", "subject": "second (#8765)"})
-    result["/api/v1/git/log?path=init.lua&limit=50"] = (200, {"ok": True, "commits": commits})
+    result["/api/v1/git/log"] = (200, {"ok": True, "commits": commits})
     changes = [] if short else [{
         "at": 1787600100, "keeper": "keeper-" + "k" * 80 + "-KEEPERTAIL",
         "turn": 37, "task_id": TASK, "execution_id": EXECUTION,
-        "location": {"kind": "repo", "repo_id": "masc", "path": "init.lua"},
+        "location": {"kind": "repo", "repo_id": "masc", "path": FILE},
         "change": {"kind": "edit", "before": "local target = 1", "after": "local target = 2"},
         "succeeded": True, "line_evidence": {"kind": "edit", "occurrence_count": 1,
             "occurrences": [{"old_range": {"start_line": 2, "end_line": 2},
                              "new_range": {"start_line": 2, "end_line": 2}}]}}]
-    result["/api/v1/ide/file-activity?file_path=init.lua"] = (200, {"ok": True, "data": {
+    result["/api/v1/ide/file-activity"] = (200, {"ok": True, "data": {
         "schema": "masc.ide.file_activity.v1", "codebase": "/fixture", "repo_id": "masc",
-        "file_path": "init.lua", "window_hours": 24, "calls_in_window": len(changes),
+        "file_path": FILE, "window_hours": 24, "calls_in_window": len(changes),
         "changes": changes, "incomplete_over_budget": 0, "incomplete_malformed": 0,
         "unattributed_over_budget": 0, "unattributed_malformed": 0}})
     return result
 
 
 def run(executable, columns, no_color, short=False):
+    requests = []
     def interact(process, fd, _slave, output, _base):
-        h.palette_go(process, fd, output, b"go code", b"init.lua")
+        h.palette_go(process, fd, output, b"go code", b"[draft]")
         h.send_and_wait(process, fd, output, b"\r", b"local lock = 1")
         h.resize_and_wait(process, fd, output, rows=40 if short else 18, columns=columns,
                           needle=b"local lock = 1", controls=(h.FULL_REDRAW,))
@@ -102,7 +108,7 @@ def run(executable, columns, no_color, short=False):
                 expected_first = min(total, first + max(1, height - 1))
                 h.send_and_wait(process, fd, output, b"\x1b[6~", f"rows {expected_first}-".encode())
             compact = "".join("".join(captured[index].split()) for index in sorted(captured))
-            for field in (AUTHOR, SUBJECT, TASK, EXECUTION, "KEEPERTAIL", "Turn:37", "Result:applied", "File:init.lua", "Scope:Project", "Coverage:"):
+            for field in (AUTHOR, SUBJECT, TASK, EXECUTION, "KEEPERTAIL", "Turn:37", "Result:applied", "File:" + FILE, "Scope:Project", "Coverage:"):
                 assert "".join(field.split()) in compact, (columns, field, compact)
             h.send_and_wait(process, fd, output, b"\x1b[F", f"rows {total}-".encode())
             assert window(output, columns)[:2] == (total, total)
@@ -133,11 +139,18 @@ def run(executable, columns, no_color, short=False):
             assert re.search(rb"\x1b\[7m\s+2\x1b\[0m", jumped), jumped
             h.send_and_wait(process, fd, output, b"H", b"rows 1-")
             assert window(output, columns)[0] == 1
+        # Query escaping belongs to the client; compare the decoded identity.
+        for endpoint, field in (("/api/v1/workspace/file", "path"),
+                                ("/api/v1/git/log", "path"),
+                                ("/api/v1/ide/file-activity", "file_path")):
+            queries = [parse_qs(urlsplit(path).query) for path, _ in requests
+                       if urlsplit(path).path == endpoint]
+            assert queries and all(query.get(field) == [FILE] for query in queries), (endpoint, queries)
         os.write(fd, b"q")
 
     h.run_terminal_scenario(executable,
         description=f"Code history full metadata/owner {columns} NO_COLOR={no_color} short={short}",
-        interact=interact, http_fixtures=fixtures(short),
+        interact=interact, http_fixtures=fixtures(short), http_requests=requests,
         extra_env={"NO_COLOR": "1"} if no_color else {})
 
 

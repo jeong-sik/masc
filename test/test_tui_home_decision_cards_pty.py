@@ -201,7 +201,7 @@ def hidden_help_does_not_pin_unseen_request(executable):
                               start=len(output), timeout=10)
             assert b"MASC Cheat Sheet" in h.screen_text(bytes(output))
             h.send_and_wait(process, fd, output, b"\x1b", b"hidden-A-card")
-            assert_selected(output, b"[call-hidden-a]")
+            assert_selected(output, b"hidden-A-card")
             open_held_detail(process, fd, output, b"call-hidden-a",
                              b'{"command":"echo call-hidden-a"}')
             home.assert_no_decision_posts(requests)

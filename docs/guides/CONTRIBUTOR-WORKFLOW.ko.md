@@ -31,6 +31,9 @@ flowchart LR
 
 - Stacked PR로 작업합니다. 맨 아래 PR은 `main`을, 이후 PR은 직전 브랜치를 대상으로 합니다.
   PR 하나에는 구체적인 결과 하나를 담고 스택 아래부터 통합합니다.
+- GitHub Native Stack은 REST `stack`을 먼저 읽고 [전용 절차](NATIVE-GITHUB-STACKS.md)를 따릅니다.
+  선택한 PR 아래의 미병합 PR도 함께 병합되므로 전체 범위를 검토합니다. non-main base만으로
+  부모 선행 병합이나 수동 retarget을 요구하지 않습니다.
 - 동시 작업은 별도 worktree로 격리합니다. Task claim은 담당을 조율하며 파일을 잠그거나
   다른 체크아웃을 수정할 권한을 주지는 않습니다.
 - README는 제품 소개, CONTRIBUTING은 개발 시작, 매뉴얼은 사용법, 명세는 인터페이스,

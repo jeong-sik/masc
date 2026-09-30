@@ -1486,6 +1486,33 @@ status: reference
     아니라 연결된 Task 완료 수다.
   → [Goal_measurement](../../lib/goal/goal_measurement.mli)
 
+**Candle (보상 화폐)**
+: Goal 완료에 대해 Keeper가 받는 보상 화폐. 정수 `milli-candle`로 센다(1 Candle = 1,000 milli-candle).
+  부동소수점 단위를 쓰지 않는다.
+  - 원장(`candle-ledger.jsonl`): `<base-path>/.masc/candle-ledger.jsonl`에 한 줄씩 이벤트를
+    덧붙이는 전용 원장. 각 행은 `kind`·`at`과 해당 종류의 필드를 담은 닫힌 JSON 객체다. 현재 원장에
+    기록되는 사건은 6종(`Snapshot`·`Payout_owed`·`Candidates`·`Unattributed`·`Paid`·`Payout_failed`)이며,
+    잔액은 파일에 누적 값을 따로 적지 않고 원장의 `Paid` 사실을 순서대로 재생하여 계산한다. 헌법·승인·도구 호출 원장이나
+    `goal_verifications.json`(검증 원장)과 다른 별개 원장이다.
+  - 발행과 지급: Goal이 검증기를 통과(`Snapshot`)하고 사람의 확정(`Confirm_completion`)으로
+    `Completed`가 되면 지급 의무(`Payout_owed`)가 생긴다. 백그라운드 지급 일꾼이 기여 Task와 Keeper를
+    선별(`Candidates`)해 모델 감정을 거쳐 `Paid` 이벤트 한 줄로 지급을 기록한다. 분배는 한 줄에 원자적으로 적히므로
+    일부 Keeper만 지급되는 불완전 상태가 없다. 기여자가 없으면 `Unattributed`, 오류 시 `Payout_failed`를 남긴다.
+  - 사용처 한정: Candle로 살 수 있는 것은 초상화 장신구(**Keeper Portrait**의 장비 아이템)뿐이다.
+    도구, 스킬, 모델, 런타임 예산 등 다른 자원은 구매할 수 없다(헌법 불변식). 상점 구매와 착용 반영은
+    RFC 단계적 구현에 따르며, 현재 원장 스키마에는 포함되지 않는다.
+  - 잔액 감쇠 규범: 헌법(`<candle>`, `no_wall_clock_death` 예외)은 잔액의 지수 감쇠를 요구한다.
+    현재 빌드의 잔액(`Candle_balance.of_events`)은 `Paid` 사실의 누적이며 시간 감쇠를 적용하지 않고,
+    반감기 설정 키는 아직 없다(RFC의 `HalfLifeSet` 이벤트 및 반감기 설정 계획).
+    원장에 기록된 과거 사실은 지워지지 않는 불변식을 유지하며, 이는 `no_wall_clock_death` 불변식의
+    유일한 명시적 예외 요구다(Task·Goal·Board 상태는 만료시키지 않는다).
+  → [Candle_event](../../lib/candle/candle_event.mli) ·
+  [Candle_balance](../../lib/candle/candle_balance.mli) ·
+  [Candle_ledger](../../lib/candle_store/candle_ledger.mli) ·
+  [Candle_time](../../lib/candle/candle_time.mli) ·
+  [docs/constitution.xml](../constitution.xml) ·
+  [docs/rfc/RFC-goal-candle-ledger.md](../rfc/RFC-goal-candle-ledger.md)
+
 **Schedule (예약)**
 : 정한 시각에 Keeper를 깨우라는 요청. 저장되므로 서버를 다시 켜도 남는다. 만들기·조회·
   수정·취소와 기록(노트) 추가·조회 도구가 있다. Keeper를 깨울 뿐이고, 깨어난 Keeper가
@@ -2011,6 +2038,33 @@ status: reference
   TUI와 대시보드의 표시 전용(display only)이며, 커미터가 작성자 이름을 임의
   지정할 수 있으므로 권한(authority)이나 실행 증명으로 삼지 않는다.
   → [Server_repository_pulls](../../lib/server/server_repository_pulls.mli)
+
+**Stacked PR (스택 PR)**
+: 대규모 변경이나 연속 작업을 20k 토큰 이하의 작은 단위로 쪼개어 계층적으로 쌓아 올리는 PR 구조.
+  에이전트 협업의 컨텍스트 초과와 병목을 막고 빠른 릴리스 순환을 보장한다(헌법 `<work_unit>`·`<build_and_ci>`·`<merge>`).
+  - 브랜치 계층: 스택의 가장 바닥(bottom) PR만 `main`을 base로 삼고, 그 위의 상위 PR들은 각자
+    직전 스택 브랜치를 base로 지정한다. 기능(피처) 개발 스택과 CI·인프라 개선 스택은 섞지 않고
+    각자의 독립 스택으로 분리해 진행한다.
+  - Native Stack: REST PR의 `stack`과 Stacks API가 구성·순서·최종 base의 근거다.
+    선택한 PR까지의 미병합 하위 PR은 비동기 병합 API로 함께 병합할 수 있다. 부모 미병합이나
+    non-main base만으로 차단하거나 수동 retarget하지 않는다. 전체 포함 범위를 리뷰한다.
+    Native Stack이 아닌 브랜치 체인은 부모부터 처리한다. base나 head가 바뀌면 다시 검토한다.
+    → [Native GitHub Stack 절차](../guides/NATIVE-GITHUB-STACKS.md)
+  - 검증과 승인(2026-09-30 운영 정책): 일반 스택(Ordinary stack)은 CI 실행 여부나 대기에
+    묶이지 않고, 현재 head에 대한 다각도 소스 검토(기능·논리·코드 청결도)를 통해 P0·P1·P2 결함이
+    없으면 즉시 승인(Approve)한다. 판정 줄은 `verdict: PASS head: <40-hex SHA> by: <reviewer>`
+    형식을 쓰며, CI run ID를 요구하지 않는다. 사소한 P3(서식·단순 정리)는 승인을 막지 않고 모아서
+    일괄 수거한다.
+  - 빌드와 릴리스 집약: 일반 PR이나 스택 바닥 PR은 명시적으로 요청한 짧고 가벼운 최소 검사(`pr-check.yml`의
+    구문·자격증명 검사, `ci.yml`의 Core 라이브러리 빌드)만 확인하며, 전체 테스트 그래프는 돌리지 않는다.
+    "2분 정도"는 검사 규모를 설명하는 예시이며 강제 종료 시간이나 성공·실패 판정 기준이 아니다.
+    휴리스틱이나 임의 숫자·문구·snapshot 검사는 만들지 않는다. 전체 검증(Full CI Cycle:
+    `full-check.yml` 및 `release-candidate.yml`)은 개별 PR이 아닌 `release/vX.Y.Z` 브랜치나
+    Tag 단계에 집약하여 수행한다.
+  → [docs/constitution.xml](../constitution.xml) ·
+  [docs/AGENTIC-WORKFLOW.md](../AGENTIC-WORKFLOW.md) ·
+  [docs/CI-REVIEW-WORKFLOW.md](../CI-REVIEW-WORKFLOW.md) ·
+  [scripts/review/merge-guard.sh](../../scripts/review/merge-guard.sh)
 
 **Disposable Build Volume (일회용 빌드 볼륨)**
 : Apple container 샌드박스에서 Keeper의 `_build` 출력이 놓이는, Keeper마다 하나씩

@@ -11538,9 +11538,6 @@ let config_metadata_style = function
 let config_heading_rows (state : state) =
   1 + List.length (config_metadata_summary state) + 1
 
-(* The source rows the frame shows, and the height the cursor keeps itself
-   inside. One number for both: the frame is [surface_chrome]'s, so what it
-   spends is [surface_chrome_rows] and the heading above, not a literal. *)
 let config_content_height (state : state) =
   let terminal_rows, _ = get_terminal_size () in
   max 1
@@ -11623,7 +11620,7 @@ let finish_voice_surface (state : state) ~terminal_rows ~cols ~head ~body ~hints
    value rather than the clipped prefix of each logical line. *)
 let voice_body_rows cols content =
   let width = framed_inner_width cols in
-  if visible_width content <= width then [ content ]
+  if Message_layout.display_width content <= width then [ content ]
   else Message_layout.wrap_words ~max_cells:width content
 ;;
 
@@ -11769,7 +11766,7 @@ let render_voice_agent (state : state) (session : voice_agent_session) =
       | None -> Masc_tui_theme.Glyph.no_value
       | Some item -> draw item
     in
-    let room = max 1 (framed_inner_width cols - visible_width prefix) in
+    let room = max 1 (framed_inner_width cols - Message_layout.display_width prefix) in
     box_line head cols
       (prefix ^ Ansi.bold ^ Message_layout.fit_middle room value ^ Ansi.reset)
   in
@@ -12110,9 +12107,16 @@ let render_about (state : state) =
   surface_chrome ~overflow:Fits ~frame:Chrome_overlay state ~terminal_rows ~cols
     ~surface_key:"about" ~title:(screen_title " MASC") ~hints:"c:candle  Esc:close"
     ~body:(fun ~budget c ->
-      Masc_tui_emblem_screen.body
+      Masc_tui_emblem_screen.about_body
         ~cols:(framed_inner_width cols) ~rows:budget
         ~origin:(c.next_origin ())
+        ~frame:state.emblem_frame
+        ~keepers:(match keepers with
+          | Masc_tui_emblem_screen.Keepers_read _ ->
+              List.map (fun (keeper : Tui_decode.keeper) ->
+                Terminal_text.single_line keeper.k_name) state.keepers
+          | Masc_tui_emblem_screen.Keepers_unreadable
+          | Masc_tui_emblem_screen.Keepers_unread -> [])
         ~caption:
           [ Masc_tui_theme.tone Masc_tui_theme.Accent
             ^ "MASC \xc2\xb7 Multi-Agent Shared Context" ^ Ansi.reset
@@ -12120,7 +12124,6 @@ let render_about (state : state) =
             ^ Masc_tui_emblem_screen.about_facts ~theme keepers
             ^ Ansi.reset
           ]
-        ~elapsed:(Masc_tui_types.motion_elapsed_seconds state.emblem_frame)
       |> List.iter c.push)
 
 let render_surface (state : state) =
@@ -12563,9 +12566,9 @@ let patch_modal_horizontal_limit (state : state) =
   | Some (_, diff) ->
       List.fold_left
         (fun limit row ->
-          let body_width = max 1 (width - visible_width (tree_diff_gutter row)) in
+          let body_width = max 1 (width - Message_layout.display_width (tree_diff_gutter row)) in
           let cells =
-            visible_width (Terminal_text.single_line row.Tui_decode.gdr_text)
+            Message_layout.display_width (Terminal_text.single_line row.Tui_decode.gdr_text)
           in
           max limit (max 0 (cells - body_width)))
         0 diff.Tui_decode.gd_rows

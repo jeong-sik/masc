@@ -559,11 +559,11 @@ let test_private_fusion_reads_survive_retirement () = with_fixture (fun env _sw 
     [Runtime.Inspect;Runtime.Observe;Runtime.Detach;Runtime.Act;Runtime.Action_status];
   denied Runtime.Evidence ["instance_id",`String id;"row_ids",`List [`String row_id]];
   let public = unwrap (call foreign Runtime.Inspect []) in
-  check int "unfiltered inspection exposes no private instances" 0
+  check Alcotest.int "unfiltered inspection exposes no private instances" 0
     (member "instances" public |> Yojson.Safe.Util.to_list |> List.length);
-  check int "unfiltered inspection exposes no private rows" 0
+  check Alcotest.int "unfiltered inspection exposes no private rows" 0
     (member "rows" public |> Yojson.Safe.Util.to_list |> List.length);
-  check int "foreign range query excludes private observations" 0
+  check Alcotest.int "foreign range query excludes private observations" 0
     (unwrap (call foreign Runtime.Slice []) |> member "rows" |> Yojson.Safe.Util.to_list |> List.length);
   check bool "claimed owner with unauthenticated HTTP access is refused" true
     (Result.is_error (Lane_addon_runtime.dispatch ~caller:owner ~access:Lane_addon_sources.Unauthenticated
@@ -572,11 +572,11 @@ let test_private_fusion_reads_survive_retirement () = with_fixture (fun env _sw 
   ignore (unwrap (call owner Runtime.Detach ["instance_id",`String id]));
   await_phase clock config id "detached";
   Runtime.For_testing.reset ();
-  check int "owner can read durable rows after host manager restart" 1
+  check Alcotest.int "owner can read durable rows after host manager restart" 1
     (unwrap (call owner Runtime.Slice []) |> member "rows" |> Yojson.Safe.Util.to_list |> List.length);
   denied Runtime.Inspect ["instance_id",`String id];
   denied Runtime.Evidence ["instance_id",`String id;"row_ids",`List [`String row_id]];
-  check int "historical inspection excludes private bindings" 0
+  check Alcotest.int "historical inspection excludes private bindings" 0
     (unwrap (call foreign Runtime.Inspect []) |> member "instances" |> Yojson.Safe.Util.to_list |> List.length))
 
 let test_private_broadcast_retry_uses_saved_visibility () = with_fixture (fun env _ config dir _ ->
@@ -637,6 +637,19 @@ let test_private_broadcast_retry_uses_saved_visibility () = with_fixture (fun en
   check bool "owner recovers exact retained artifact" true
     (member "keeper_artifact" recovered = member "keeper_artifact" original))
 
+let fleet_record config operation =
+  let module Ledger = Masc.Lane_addon_broadcast_delivery in
+  let ledger=Ledger.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons/fleet-delivery") in
+  let operation_id=Ledger.Request_id.of_string operation |> unwrap in
+  Eio_unix.run_in_systhread (fun () -> Ledger.find ledger ~caller:"fixture-operator" ~operation_id)
+  |> unwrap |> function Some receipt -> receipt.record | None -> fail "Fleet intention absent"
+
+let fleet_recipient config operation recipient =
+  List.assoc recipient (fleet_record config operation).recipients
+
+let fleet_complete config operation =
+  Masc.Lane_addon_broadcast_delivery.complete (fleet_record config operation)
+
 let test_broadcast_retry_reconciles_receipt_during_slow_fanout () =
   with_fixture (fun env sw config dir _ ->
     ignore (Workspace.init config ~agent_name:(Some "fixture-operator"));
@@ -674,24 +687,31 @@ let test_broadcast_retry_reconciles_receipt_during_slow_fanout () =
         (member "delivery" original |> text "status");
       check Alcotest.int "publication does not run synchronous fleet handler" 0 !immediate_calls;
       check Alcotest.int "publication does not inline root recipient work" 0 (List.length !calls);
-      let first=Eio.Fiber.fork_promise ~sw (fun () -> Runtime.recover_fleet ~config) in
+      unwrap (Runtime.recover_fleet ~config ~sw);
       Eio.Promise.await entered;
+      await clock (fun () -> match fleet_recipient config "slow-send" "keeper-b" with
+        | Masc.Lane_addon_broadcast_delivery.Pending (Some _) -> true
+        | Accepted | Pending None -> false);
       ignore (unwrap (dispatch config Runtime.Observe ["instance_id",`String id]));
       await clock (fun () -> int "observation_seq" (instance config id) = 2);
       let replay=send () in
-      check bool "root drain is still waiting for first recipient" false (Eio.Promise.is_resolved first);
+      check bool "first recipient remains blocked after scheduling returns" false (Eio.Promise.is_resolved release);
       check bool "same-key retry preserves exact committed receipt during drain" true
         (member "delivery" original = member "delivery" replay);
       check bool "retry preserves original artifact despite changed live metadata" true
         (member "keeper_artifact" original = member "keeper_artifact" replay);
-      check Alcotest.int "retry launches no extra recipient call" 1 (List.length !calls);
+      check Alcotest.int "both recipients progress independently without replay" 2 (List.length !calls);
       check bool "ordinary Broadcast still uses its existing synchronous behavior" true
         (Result.is_ok (Workspace_broadcast.broadcast_once config
           ~request_id:("wmsg-" ^ String.make 32 'b') ~from_agent:"fixture-operator" ~content:"independent message"));
       check Alcotest.int "ordinary caller still reaches existing handler" 1 !immediate_calls;
       block:=false; Eio.Promise.resolve mark_released ();
-      check bool "partial recipient failure remains a failure" true
-        (Result.is_error (Eio.Promise.await_exn first));
+      await clock (fun () -> fleet_recipient config "slow-send" "keeper-a"
+        = Masc.Lane_addon_broadcast_delivery.Accepted);
+      check bool "partial recipient failure remains durably pending" true
+        (match fleet_recipient config "slow-send" "keeper-b" with
+         | Masc.Lane_addon_broadcast_delivery.Pending (Some _) -> true
+         | Accepted | Pending None -> false);
       let receipt=member "delivery" original |> member "receipt" in
       let request_id=text "request_id" receipt in
       check bool "same identity cannot replace committed content" true
@@ -707,20 +727,98 @@ let test_broadcast_retry_reconciles_receipt_during_slow_fanout () =
         (member "delivery" recovered = member "delivery" original);
       check bool "restart retains original artifact" true
         (member "keeper_artifact" recovered = member "keeper_artifact" original);
-      unwrap (Runtime.recover_fleet ~config);
+      unwrap (Runtime.recover_fleet ~config ~sw);
+      await clock (fun () -> fleet_complete config "slow-send");
       let count recipient=List.length (List.filter (fun (name,_) -> name=recipient) !calls) in
       check Alcotest.int "accepted recipient is not projected again after restart" 1 (count "keeper-a");
       check Alcotest.int "failed recipient is retried once using original identity" 2 (count "keeper-b");
       check Alcotest.int "new roster member is outside accepted audience" 0 (count "new-keeper");
       check bool "all recipient attempts share one authoritative message identity" true
         (List.for_all (fun (_,id) -> id=request_id) !calls);
-      unwrap (Runtime.recover_fleet ~config);
+      unwrap (Runtime.recover_fleet ~config ~sw);
       check Alcotest.int "completed drain launches no further recipient work" 3 (List.length !calls);
       check bool "sender authority survives restart and registry change" true
         (List.for_all ((=) Masc.Lane_addon_broadcast_delivery.Keeper_sender) !projected_authorities)))
 
+let test_fleet_service_isolates_blocked_recipient_and_admissions () =
+  with_fixture (fun env sw config dir _ ->
+    ignore (Workspace.init config ~agent_name:(Some "fixture-operator"));
+    let clock=Eio.Stdenv.clock env in
+    let id=attach config dir "good" in
+    await clock (fun () -> int "observation_seq" (instance config id) = 1);
+    let selected=inspect config |> member "rows" |> Yojson.Safe.Util.to_list |> List.hd |> text "id" in
+    let send operation=Runtime.dispatch ~caller:"fixture-operator" ~config ~operation:Runtime.Evidence
+      (`Assoc ["instance_id",`String id;"row_ids",`List [`String selected];
+        "broadcast",`Bool true;"request_id",`String operation]) |> unwrap in
+    let first_request=ref None and blocked=ref true in
+    let entered,mark_entered=Eio.Promise.create () in
+    let release,_=Eio.Promise.create () in
+    let calls=ref [] in
+    Runtime.register_fleet_backend {
+      snapshot=(fun ~config:_ ~caller:_ -> Ok (Masc.Lane_addon_broadcast_delivery.Keeper_sender,
+        ["keeper-a";"keeper-b"]));
+      project=(fun ~config:_ ~sender_authority:_ ~delivery ~recipient ->
+        calls:=(delivery.Workspace_broadcast.request_id,recipient)::!calls;
+        if Some delivery.request_id = !first_request && recipient="keeper-a" && !blocked then begin
+          ignore (Eio.Promise.try_resolve mark_entered ());
+          Eio.Promise.await release
+        end;
+        Ok ())};
+    let original=send "blocked-operation" in
+    let first_id=member "delivery" original |> member "receipt" |> text "request_id" in
+    first_request:=Some first_id;
+    let ready,mark_ready=Eio.Promise.create () in
+    let stay,_=Eio.Promise.create () in
+    let exception Stop_fixture_service in
+    let service=Eio.Fiber.fork_promise ~sw (fun () ->
+      try Eio.Cancel.sub (fun cancellation ->
+        Eio.Switch.run (fun service_sw ->
+          Runtime.start_fleet_service ~config ~sw:service_sw ~clock;
+          Eio.Promise.resolve mark_ready (service_sw,cancellation);
+          Eio.Promise.await stay))
+      with Eio.Cancel.Cancelled Stop_fixture_service -> ()) in
+    let service_sw,cancellation=Eio.Promise.await ready in
+    (* Kick the real service after it owns the root. The admitted replay's
+       nudge must dispatch a beat, not an awaited recipient drain. *)
+    ignore (send "blocked-operation");
+    Eio.Promise.await entered;
+    await clock (fun () -> fleet_recipient config "blocked-operation" "keeper-b"
+      = Masc.Lane_addon_broadcast_delivery.Accepted);
+    check bool "first recipient is still blocked while second settles" true !blocked;
+    let count request recipient=List.length (List.filter (fun pair -> pair=(request,recipient)) !calls) in
+    (* Overlapping authoritative scans must share a still-owned projection,
+       including when their snapshots were read before another acceptance. *)
+    unwrap (Runtime.recover_fleet ~config ~sw:service_sw);
+    unwrap (Runtime.recover_fleet ~config ~sw:service_sw);
+    let later=send "separately-admitted-operation" in
+    let later_id=member "delivery" later |> member "receipt" |> text "request_id" in
+    (* No manual drain after this send: its production admission nudge must
+       be handled even though the older recipient has not returned. *)
+    await clock (fun () -> fleet_complete config "separately-admitted-operation");
+    check Alcotest.int "duplicate scans launch blocked request/recipient once" 1 (count first_id "keeper-a");
+    check Alcotest.int "accepted second recipient is not reprojected" 1 (count first_id "keeper-b");
+    check Alcotest.int "separate admission delivers first recipient" 1 (count later_id "keeper-a");
+    check Alcotest.int "separate admission delivers second recipient" 1 (count later_id "keeper-b");
+    check bool "independent admission did not release blocked work" false (Eio.Promise.is_resolved release);
+    Eio.Cancel.cancel cancellation Stop_fixture_service;
+    Eio.Promise.await_exn service;
+    check bool "cancelled projection retains its pending obligation" true
+      (match fleet_recipient config "blocked-operation" "keeper-a" with
+       | Masc.Lane_addon_broadcast_delivery.Pending _ -> true | Accepted -> false);
+    check bool "independent completed message stays completed" true
+      (fleet_complete config "separately-admitted-operation");
+    blocked:=false;
+    unwrap (Runtime.recover_fleet ~config ~sw);
+    await clock (fun () -> fleet_complete config "blocked-operation");
+    check Alcotest.int "cancellation releases ownership for one retry" 2 (count first_id "keeper-a");
+    check Alcotest.int "retry does not repeat its accepted sibling" 1 (count first_id "keeper-b");
+    let replay=send "blocked-operation" in
+    check bool "cancellation and retry preserve the original workspace receipt" true
+      (member "delivery" original = member "delivery" replay);
+    detach config id; await_phase clock config id "detached")
+
 let test_broadcast_pending_commit_recovers_same_identity () =
-  with_fixture (fun env _ config dir _ ->
+  with_fixture (fun env sw config dir _ ->
     ignore (Workspace.init config ~agent_name:(Some "fixture-operator"));
     let clock = Eio.Stdenv.clock env in
     let id = attach config dir "good" in
@@ -761,7 +859,8 @@ let test_broadcast_pending_commit_recovers_same_identity () =
     Runtime.register_fleet_backend {
       snapshot=(fun ~config:_ ~caller:_ -> fail "recovery must retain the admitted empty audience");
       project=(fun ~config:_ ~sender_authority:_ ~delivery:_ ~recipient -> projections:=recipient::!projections; Ok ())};
-    unwrap (Runtime.recover_fleet ~config);
+    unwrap (Runtime.recover_fleet ~config ~sw);
+    await clock (fun () -> fleet_complete config "failed-send");
     let recovered = Runtime.dispatch ~caller:"fixture-operator" ~config ~operation:Runtime.Evidence
       (`Assoc (args @ send_id @ ["broadcast",`Bool true])) |> unwrap in
     check string "queued intention becomes committed after storage recovers" "committed"
@@ -773,7 +872,7 @@ let test_broadcast_pending_commit_recovers_same_identity () =
       config ~from_agent:"fixture-operator" ~content:(text "message" recovered) in
     check bool "recovery finds the authoritative exact request without a new publication" true
       (match found with Ok (Some delivery) -> delivery.seq = int "seq" receipt | _ -> false);
-    unwrap (Runtime.recover_fleet ~config);
+    unwrap (Runtime.recover_fleet ~config ~sw);
     check Alcotest.int "empty accepted audience stays empty despite the later backend" 0
       (List.length !projections);
     Runtime.register_delivery_handler (fun ~config:_ ~caller:_ ~keeper_name:_ ~prompt:_ ->
@@ -787,6 +886,8 @@ let test_broadcast_pending_commit_recovers_same_identity () =
     detach config id; await_phase clock config id "detached")
 
 let () = run "Lane Add-on runtime" ["optional extension", [
+  test_case "Fleet service isolates blocked recipients, later admissions and cancellation" `Quick
+    test_fleet_service_isolates_blocked_recipient_and_admissions;
   test_case "private Broadcast retry uses saved visibility after binding removal" `Quick
     test_private_broadcast_retry_uses_saved_visibility;
   test_case "Broadcast retry reconciles the committed receipt during slow fanout" `Quick

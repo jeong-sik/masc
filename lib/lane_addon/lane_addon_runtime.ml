@@ -66,7 +66,9 @@ type entry = {
 }
 type manager = { store : Lane_addon_store.t; entries : (string, entry) Hashtbl.t;
   recovering : (string, unit) Hashtbl.t;
-  configuration_mutex : Eio.Mutex.t; action_mutex : Eio.Mutex.t; broadcast_mutex : Eio.Mutex.t; fleet_mutex : Eio.Mutex.t; mutable fleet_nudge : unit -> unit; mutable configuration_status : Yojson.Safe.t;
+  configuration_mutex : Eio.Mutex.t; action_mutex : Eio.Mutex.t; broadcast_mutex : Eio.Mutex.t;
+  fleet_operations : ((string * string), unit) Hashtbl.t;
+  fleet_recipients : (((string * string) * string), unit) Hashtbl.t; mutable fleet_nudge : unit -> unit; mutable configuration_status : Yojson.Safe.t;
   mutable configuration_nudge : unit -> unit;
   mutable configuration_visibility : (string * visibility) list }
 let managers : (string, manager) Hashtbl.t = Hashtbl.create 4
@@ -514,7 +516,7 @@ let manager config =
   | None -> let m = { store = Lane_addon_store.create ~root; entries = Hashtbl.create 8;
                      recovering = Hashtbl.create 4; configuration_mutex = Eio.Mutex.create ();
                      action_mutex = Eio.Mutex.create (); broadcast_mutex = Eio.Mutex.create ();
-                     fleet_mutex=Eio.Mutex.create (); fleet_nudge=(fun () -> ());
+                     fleet_operations=Hashtbl.create 8; fleet_recipients=Hashtbl.create 16; fleet_nudge=(fun () -> ());
                      configuration_status = `Null; configuration_nudge = (fun () -> ()); configuration_visibility=[] } in
       Hashtbl.add managers root m; m
 (* Entries and their wake promises belong to the root-switch owner domain. A
@@ -1015,34 +1017,73 @@ let commit_fleet m ~config (record : Fleet_ledger.record) =
     |> Result.map_error (fun e -> Fleet_uncertain_commit e) in
   observe_fleet_settlement receipt;
   Ok delivery
-let recover_fleet ~config = Eio_context.run_on_owner_domain (fun () ->
+(* These tables are owned by the Eio owner domain. Claim before forking and
+   retain the claim through the durable acknowledgement, not just projection.
+   No shared I/O lock or recipient await belongs to the Pulse consumer. *)
+let fork_fleet_job ~sw ~owners ~key ~label work =
+  if not (Hashtbl.mem owners key) then begin
+    Hashtbl.add owners key ();
+    try
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+        Fun.protect ~finally:(fun () -> Hashtbl.remove owners key) (fun () ->
+          let result = try work () with
+            | Eio.Cancel.Cancelled _ as exn -> raise exn
+            | exn -> Error (Printexc.to_string exn) in
+          match result with
+          | Ok () -> ()
+          | Error detail -> Log.Misc.warn "Lane Fleet %s remains pending: %s" label detail);
+        `Stop_daemon)
+    with
+    | Eio.Cancel.Cancelled _ as exn -> Hashtbl.remove owners key; raise exn
+    | exn -> Hashtbl.remove owners key; raise exn
+  end
+
+let recover_fleet ~config ~sw = Eio_context.run_on_owner_domain (fun () ->
   let m=manager config in
-  Eio.Mutex.use_ro m.fleet_mutex (fun () ->
-    let* backend=match !fleet_backend with Some backend -> Ok backend
-      | None -> Error "Fleet delivery host boundary is unavailable" in
-    let* recovered=offload (fun () -> Fleet_ledger.recover (fleet_store m)) |> fleet_result in
-    List.iter observe_fleet_settlement recovered.settled_with_cleanup;
-    let failures=ref [] in
-    List.iter (fun (receipt : Fleet_ledger.receipt) ->
-      observe_fleet_settlement receipt;
-      let record=receipt.record in
-      match commit_fleet m ~config record with
-      | Error detail -> failures:=fleet_commit_error_to_string detail::!failures
-      | Ok delivery ->
-          List.iter (fun (recipient,state) -> match state with
-            | Fleet_ledger.Accepted -> ()
-            | Pending _ ->
-                let result=try backend.project ~config ~sender_authority:record.payload.sender_authority ~delivery ~recipient with
-                  | Eio.Cancel.Cancelled _ as e -> raise e
-                  | exn -> Error (Printexc.to_string exn) in
-                let next=match result with Ok () -> Fleet_ledger.Accepted
-                  | Error detail -> failures:=detail::!failures; Pending (Some detail) in
-                match offload (fun () -> Fleet_ledger.recipient_result (fleet_store m)
-                  ~caller:record.payload.caller ~operation_id:record.payload.operation_id ~recipient next)
-                  |> fleet_result with
-                | Ok receipt -> observe_fleet_settlement receipt
-                | Error detail -> failures:=detail::!failures) record.recipients) recovered.pending;
-    if !failures=[] then Ok () else Error (String.concat "; " (List.rev !failures))))
+  let* backend=match !fleet_backend with Some backend -> Ok backend
+    | None -> Error "Fleet delivery host boundary is unavailable" in
+  let ledger=fleet_store m in
+  let* recovered=offload (fun () -> Fleet_ledger.recover ledger) |> fleet_result in
+  List.iter observe_fleet_settlement recovered.settled_with_cleanup;
+  let current payload =
+    let* found=offload (fun () -> Fleet_ledger.find ledger
+      ~caller:payload.Fleet_ledger.caller ~operation_id:payload.operation_id) |> fleet_result in
+    match found with
+    | Some receipt -> observe_fleet_settlement receipt; Ok receipt.record
+    | None -> Error "Fleet admitted operation is unavailable" in
+  List.iter (fun (receipt : Fleet_ledger.receipt) ->
+    observe_fleet_settlement receipt;
+    let payload=receipt.record.payload in
+    let operation=payload.caller,Fleet_ledger.Request_id.to_string payload.operation_id in
+    fork_fleet_job ~sw ~owners:m.fleet_operations ~key:operation
+      ~label:("operation " ^ snd operation) (fun () ->
+        let* record=current payload in
+        let* delivery=commit_fleet m ~config record |> Result.map_error fleet_commit_error_to_string in
+        List.iter (fun (recipient,state) -> match state with
+          | Fleet_ledger.Accepted -> ()
+          | Pending _ ->
+            fork_fleet_job ~sw ~owners:m.fleet_recipients ~key:(operation,recipient)
+              ~label:("recipient " ^ recipient ^ " operation " ^ snd operation) (fun () ->
+                (* A scan may predate another job's durable acceptance. Read
+                   again after claiming this recipient before projecting it. *)
+                let* latest=current payload in
+                match List.assoc_opt recipient latest.recipients with
+                | Some Fleet_ledger.Accepted -> Ok ()
+                | None -> Error "Fleet recipient is outside the admitted audience"
+                | Some (Pending _) ->
+                  let result=try backend.project ~config ~sender_authority:payload.sender_authority
+                    ~delivery ~recipient with
+                    | Eio.Cancel.Cancelled _ as exn -> raise exn
+                    | exn -> Error (Printexc.to_string exn) in
+                  let next=match result with Ok () -> Fleet_ledger.Accepted
+                    | Error detail -> Fleet_ledger.Pending (Some detail) in
+                  let* receipt=offload (fun () -> Fleet_ledger.recipient_result ledger
+                    ~caller:payload.caller ~operation_id:payload.operation_id ~recipient next)
+                    |> fleet_result in
+                  observe_fleet_settlement receipt;
+                  result)) record.recipients;
+        Ok ())) recovered.pending;
+  Ok ())
 
 let prepare_broadcast m ~base_path ~caller ~access ~instance_id ~request_id ~row_ids ~freeze =
   let* () = match access with
@@ -1400,7 +1441,7 @@ let start_fleet_service ~config ~sw ~clock =
     let consumer : (module Pulse.Consumer) = (module struct
       let name="lane-addon-fleet-delivery"
       let should_act _ = !active
-      let on_beat _ = recover_fleet ~config
+      let on_beat _ = recover_fleet ~config ~sw
     end) in
     let interval=Env_config_runtime_services.Timeouts.maintenance_pulse_interval_sec in
     let pulse=Pulse.create ~clock

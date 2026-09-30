@@ -14,7 +14,12 @@ type fleet_backend = {
 val register_fleet_backend : fleet_backend -> unit
 (** Install trusted host roster capture and idempotent single-recipient projection.
     Snapshot is captured before durable admission, never on retry. *)
-val recover_fleet : config:Workspace.config -> (unit,string) result
+val recover_fleet : config:Workspace.config -> sw:Eio.Switch.t -> (unit,string) result
+(** Scan durable intentions and schedule independent commit/recipient jobs on
+    the supplied server-root switch. Returns after scheduling, without waiting
+    for recipient I/O. Repeated scans share each operation/recipient's in-flight
+    owner. Job failures remain durable pending obligations and are logged;
+    cancellation releases ownership so the next service can retry. *)
 val start_fleet_service : config:Workspace.config -> sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> unit
 (** Server-root Pulse owns reconciliation and retry. Failed recipients remain
     pending; a committed message is only read, never republished if missing. *)

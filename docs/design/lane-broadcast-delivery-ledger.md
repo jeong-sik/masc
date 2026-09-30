@@ -52,7 +52,14 @@ report text, including any mentions, stays inside the immutable artifact.
 
 A server-root Pulse owns recovery under its root switch and the existing
 maintenance cadence. Admission nudges it. It reconciles unfinished commits and
-projects only pending members of the accepted roster. The production recipient
+projects only pending members of the accepted roster. A beat scans and schedules
+work without awaiting recipient completion. Commit jobs own each caller/operation;
+projection jobs own each caller/operation/recipient through durable acknowledgement.
+A blocked recipient cannot hold a sibling or a separately admitted operation.
+Overlapping scans share those owners, and a recipient rereads its durable state
+before projection so an older scan cannot replay an already accepted member.
+Cancellation releases the in-flight owner while retaining the pending journal
+obligation for a later service. The production recipient
 adapter uses the existing Workspace_message request key and
 append_user_message_once. Cancellation after transcript append but before journal
 acknowledgement leaves a pending obligation: retrying the same key observes the
@@ -67,7 +74,8 @@ an accepted write into a replayable rejection.
 
 The child adds source fixtures for receipt return before blocked projection,
 partial recipient failure and restart, fixed-audience recovery, interrupted
-workspace publication, and the production adapter's transcript deduplication.
+workspace publication, independent sibling and newly admitted operation progress,
+duplicate scans and cancellation retry, and the production adapter's transcript deduplication.
 These are proposed native fixtures, not executed native or live delivery proof.
 The child has no provider/model execution evidence. Current-caller and strict saved visibility authorization are inherited from
 privacy parent #40233 c327e74d4ba9f6f81da237d7938a78992286e9f5 through

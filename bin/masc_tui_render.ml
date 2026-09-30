@@ -11097,23 +11097,6 @@ let render_repositories (state : state) =
   if state.repository_changes_open then render_repository_changes state
   else render_repository_list state
 
-let file_change_ranges (change : Masc.Tui_decode.file_change) =
-  match change.fc_line_evidence with
-  | Some (Masc.Keeper_file_change_evidence.Written { new_range = Some range }) ->
-    [ range ]
-  | Some
-      (Masc.Keeper_file_change_evidence.Edited
-        { occurrences = Some occurrences; _ }) ->
-    List.map
-      (fun (occurrence : Masc.Keeper_file_change_evidence.edit_occurrence) ->
-        Option.value ~default:occurrence.old_range occurrence.new_range)
-      occurrences
-  | Some (Masc.Keeper_file_change_evidence.Written { new_range = None })
-  | Some
-      (Masc.Keeper_file_change_evidence.Edited
-        { occurrences = None; _ })
-  | None -> []
-
 (* One line of what the change put there. An edit shows the text it wrote
    rather than the text it removed: the question a reader has is what the file
    says now. A write shows its size, because the whole body is never one row

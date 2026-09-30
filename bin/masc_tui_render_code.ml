@@ -34,6 +34,23 @@ let blame_author_cells = 9
 let blame_age_cells = 3
 let blame_margin_cells = blame_author_cells + blame_age_cells + 2
 
+let file_change_ranges (change : Masc.Tui_decode.file_change) =
+  match change.fc_line_evidence with
+  | Some (Masc.Keeper_file_change_evidence.Written { new_range = Some range }) ->
+    [ range ]
+  | Some
+      (Masc.Keeper_file_change_evidence.Edited
+        { occurrences = Some occurrences; _ }) ->
+    List.map
+      (fun (occurrence : Masc.Keeper_file_change_evidence.edit_occurrence) ->
+        Option.value ~default:occurrence.old_range occurrence.new_range)
+      occurrences
+  | Some (Masc.Keeper_file_change_evidence.Written { new_range = None })
+  | Some
+      (Masc.Keeper_file_change_evidence.Edited
+        { occurrences = None; _ })
+  | None -> []
+
 (* The file pane's usable rows: the surface title, then the pane's top gap,
    title, divider, bottom gap, and the footer. One owner — the dispatch keeps
    the cursor visible against the same number the renderer draws with. *)

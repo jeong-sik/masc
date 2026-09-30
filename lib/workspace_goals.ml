@@ -197,11 +197,11 @@ let emit_goal_event (ctx : context) ~goal_id ~event_type ~payload =
        ])
 ;;
 
-let goal_snapshot_event_payload (ctx : context) (goal : Goal_store.goal) =
+let goal_snapshot_event_payload (ctx : context) ~store_version (goal : Goal_store.goal) =
   (* The Goal encoder supplies the complete object snapshot. Attribution is
      event metadata, so it is added here and is never stored on the Goal. *)
   let fields = Goal_store.goal_to_yojson goal |> Yojson.Safe.Util.to_assoc in
-  `Assoc (("actor", `String ctx.agent_name) :: fields)
+  `Assoc (("store_version", `Int store_version) :: ("actor", `String ctx.agent_name) :: fields)
 ;;
 
 type goal_event_recording =
@@ -386,7 +386,7 @@ let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result
     let target_value = get_string_opt args "target_value" in
     let due_date = get_string_opt args "due_date" in
     (match
-          Goal_store.upsert_goal
+          Goal_store.upsert_goal_with_revision
             ctx.config
             ?id
             ?title
@@ -406,7 +406,7 @@ let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result
         | Error (Goal_store.Persist_failed _ as error) ->
           error_result_typed ~tool_name ~start_time ~code:Internal_error
             (Goal_store.write_error_to_string error)
-        | Ok (goal, action) ->
+        | Ok (goal, action, store_version) ->
           let action_name, event_type =
             match action with
             | `created -> "created", "goal_created"
@@ -417,7 +417,7 @@ let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result
              leaves the current store. *)
           let snapshot_recording =
             record_committed_goal_event ctx ~goal_id:goal.id ~event_type
-              ~payload:(goal_snapshot_event_payload ctx goal)
+              ~payload:(goal_snapshot_event_payload ctx ~store_version goal)
           in
           let update_recordings = match action with
            | `created -> []

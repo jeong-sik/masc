@@ -1237,7 +1237,7 @@ let load_runtime_resolved ~(host : string) ~(port : int) :
     fails both with one reason. *)
 let load_overview_runtime_resolved ~(host : string) ~(port : int) :
     (Tui_decode.runtime_option list, string) result
-    * (Tui_decode.provider_usage_windows, string) result =
+    * (Masc.Tui_decode_usage.provider_usage_windows, string) result =
   match fetch_runtime_resolved ~host ~port with
   | Error err ->
       let reason = "runtime catalogue load failed: " ^ err in
@@ -1246,12 +1246,12 @@ let load_overview_runtime_resolved ~(host : string) ~(port : int) :
       ( Result.map
           (fun (options, _lanes, _assignments) -> options)
           (Tui_decode.decode_runtime_resolved_full json)
-      , Tui_decode.decode_provider_usage_windows json )
+      , Masc.Tui_decode_usage.decode_provider_usage_windows json )
 
 let load_keeper_usage ~(host : string) ~(port : int) =
   match fetch_keeper_usage ~host ~port with
   | Error reason -> Error ("keeper usage load failed: " ^ reason)
-  | Ok json -> Tui_decode.decode_keeper_usage_window json
+  | Ok json -> Masc.Tui_decode_usage.decode_keeper_usage_window json
 
 let load_provider_usage_history ~(host : string) ~(port : int) ~(days : int) =
   match fetch_provider_usage_history ~host ~port ~days with
@@ -1275,7 +1275,7 @@ let load_provider_usage_history ~(host : string) ~(port : int) ~(days : int) =
            (match Json_util.assoc_member_opt "reason" json with
             | Some (`String reason) -> Error reason
             | _ -> Error "history unavailable without a reason")
-       | Some _ | None -> Tui_decode.decode_provider_usage_history json)
+       | Some _ | None -> Masc.Tui_decode_usage.decode_provider_usage_history json)
 
 type runtime_surface_load = {
   rsl_resolved : Tui_decode.runtime_resolved_snapshot;
@@ -1706,10 +1706,10 @@ let load_memory_health ~(host : string) ~(port : int) :
 
 (** Load one keeper's remembered facts, both stores. *)
 let load_memory_facts ~(host : string) ~(port : int) ~(keeper_name : string) :
-    (Tui_decode.memory_fact_snapshot, string) result =
+    (Masc.Tui_decode_memory_facts.memory_fact_snapshot, string) result =
   match fetch_keeper_memory_facts ~host ~port ~keeper_name with
   | Error err -> Error ("memory facts load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_memory_fact_snapshot json
+  | Ok json -> Masc.Tui_decode_memory_facts.decode_memory_fact_snapshot json
 
 (** Load the current project's Git working-tree changes. *)
 let load_project_changes ~(host : string) ~(port : int) :

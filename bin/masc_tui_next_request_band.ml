@@ -1,7 +1,7 @@
 (* The NEXT REQUEST band of the context inspector: the turn's own composition
    run forward by the server (the carried range from the pair's front over
-   the durable history), drawn in tokens at the tab's scale. What the marks
-   are read against is the provider's count, so it is shown as counted.
+   the durable history), drawn in tokens at the tab's scale. Binding marks
+   are configuration, not an input to this forecast's range calculation.
    Under the figures, the same parts in the order the request carries them. *)
 
 module Inspector = Masc_tui_context_inspector
@@ -42,7 +42,7 @@ let rec origin_sentence = function
         reason
   | Inspector.Carried_librarian_snapshot { end_atom; boundary_line } ->
       Printf.sprintf
-        "the Librarian's working state stands in for the atoms before %d (boundary line %d)"
+        "the Librarian's working state stands in for the atoms before %d (Turn Boundary log row %d covering the captured prefix)"
         end_atom boundary_line
   | Inspector.Carried_librarian_progress { end_atom } ->
       Printf.sprintf
@@ -98,17 +98,7 @@ let candidate_lines ~prose ~fact ~safe ~scale ~(walk : Inspector.forecast_walk)
     match candidate.lane with
     | Inspector.Lane_not_applicable reason ->
         fact (safe candidate.runtime_id) @ prose (safe reason ^ ".")
-    | Inspector.Lane_agent_core ->
-        (match candidate.marks with
-         | Some marks ->
-             fact
-               (Printf.sprintf "%s  \xc2\xb7  marks %s / %s tok" (safe candidate.runtime_id)
-                  (Inspector.format_tokens marks.high_water_tokens)
-                  (Inspector.format_tokens marks.low_water_tokens))
-         | None ->
-             fact
-               (Printf.sprintf "%s  \xc2\xb7  no marks declared: only a refusal moves the front"
-                  (safe candidate.runtime_id)))
+    | Inspector.Lane_agent_core -> fact (safe candidate.runtime_id)
   in
   (* The pinned figure names its lane only when it is not this one. *)
   let pinned_provenance (parts : Inspector.forecast_parts) =
@@ -135,20 +125,41 @@ let candidate_lines ~prose ~fact ~safe ~scale ~(walk : Inspector.forecast_walk)
           "No front to start from, and the cap fit charges the fixed parts, which are \
            unknown: no range was computed."
     | Inspector.Lane_agent_core, Some carried ->
-        fact
-          (Printf.sprintf "%d of %d atoms would go, from atom %d (%s tok)  \xc2\xb7  %s"
-             carried.kept_atoms candidate.history_atoms carried.first_atom
-             (approx carried.transmitted_bytes) (origin_sentence carried.origin))
-        @ (match carried.counted_tokens, candidate.marks with
-           | Some counted, Some marks ->
+        let history =
+          match carried.origin with
+          | Inspector.Carried_librarian_snapshot { end_atom; boundary_line } ->
+              Printf.sprintf
+                "History preview: send the newest %d of %d original atoms, starting at #%d (%s tok estimated). The earlier %d atoms are represented by the Librarian working state (Turn Boundary log row %d covering the captured prefix)."
+                carried.kept_atoms candidate.history_atoms carried.first_atom
+                (approx carried.transmitted_bytes) end_atom boundary_line
+          | origin ->
+              Printf.sprintf
+                "History preview: send %d of %d original atoms, starting at #%d (%s tok estimated). %s."
+                carried.kept_atoms candidate.history_atoms carried.first_atom
+                (approx carried.transmitted_bytes) (origin_sentence origin)
+        in
+        fact history
+        @ (match carried.counted_tokens with
+           | Some counted ->
                fact
-                 (Printf.sprintf "last counted %s tok against marks %s / %s"
-                    (Inspector.format_tokens counted)
-                    (Inspector.format_tokens marks.high_water_tokens)
-                    (Inspector.format_tokens marks.low_water_tokens))
-           | Some counted, None ->
-               fact (Printf.sprintf "last counted %s tok" (Inspector.format_tokens counted))
-           | None, (Some _ | None) -> [])
+                 (Printf.sprintf "Ledger baseline %s tok; may retain an earlier usage sample or be adjusted after history eviction."
+                    (Inspector.format_tokens counted))
+           | None -> [])
+  in
+  let settings_lines =
+    match candidate.lane, candidate.marks with
+    | Inspector.Lane_not_applicable _, (Some _ | None) -> []
+    | Inspector.Lane_agent_core, Some marks ->
+        prose
+          (Printf.sprintf
+             "Config / Runtime: this binding sets context-high-water-tokens to %s tok \
+              and context-low-water-tokens to %s tok. Without Librarian continuity, \
+              these marks evict oldest carried history at a turn boundary. \
+              They are neither this forecast's size nor the model limit."
+             (Inspector.format_tokens marks.high_water_tokens)
+             (Inspector.format_tokens marks.low_water_tokens))
+    | Inspector.Lane_agent_core, None ->
+        prose "Config / Runtime: this binding has no context-high-water-tokens or context-low-water-tokens setting."
   in
   (* The request in the order it travels, one numbered row per slot, the
      [system context] blocks named in the order the assembly concatenates
@@ -187,7 +198,8 @@ let candidate_lines ~prose ~fact ~safe ~scale ~(walk : Inspector.forecast_walk)
                              blocks)))
                slots)
   in
-  head @ prose (walk_sentence ~safe walk candidate) @ parts_line @ carried_lines @ assembly_lines
+  head @ prose (walk_sentence ~safe walk candidate) @ parts_line @ carried_lines
+  @ settings_lines @ assembly_lines
 ;;
 
 let lines ~prose ~fact ~safe ~scale
@@ -212,6 +224,7 @@ let lines ~prose ~fact ~safe ~scale
              (candidate_lines ~prose ~fact ~safe ~scale ~walk)
              forecast.Inspector.candidates
            @ checkpoint
+           @ prose "Figures marked ≈ estimate token equivalents from bytes; they are not provider usage."
            @ prose
                (Printf.sprintf
                   "Lane %s: %d candidates in the order the next cycle walks them; a turn \

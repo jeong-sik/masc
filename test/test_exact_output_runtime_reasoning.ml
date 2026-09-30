@@ -104,7 +104,7 @@ let with_runtime f =
     Runtime.init_default ~config_path:path |> require_ok "runtime initialization";
     let runtime = match Runtime.get_runtimes () with
       | [ runtime ] -> runtime | _ -> fail "expected one runtime" in
-    (match runtime.Runtime.execution with
+    (match runtime.Runtime_instance.execution with
      | Runtime_execution.Agent_core config ->
        check (option string) "ordinary runtime retains its declared effort" (Some effort)
          (Option.map Llm_provider.Reasoning_effort.to_string config.reasoning_effort)

@@ -1479,15 +1479,15 @@ let runtime_or_fail ?(provider = runpod_provider) () =
     ; lsp_servers = []
     }
   in
-  match Runtime.of_binding cfg runpod_binding with
+  match Runtime_instance.of_binding cfg runpod_binding with
   | Ok runtime -> runtime
   | Error reason ->
     failf
       "expected runtime binding to materialize: %s"
-      (Runtime.string_of_drop_reason reason)
+      (Runtime_config_error.string_of_drop_reason reason)
 
 let agent_core_provider_config_or_fail runtime =
-  match runtime.Runtime.execution with
+  match runtime.Runtime_instance.execution with
   | Runtime_execution.Agent_core provider_config -> provider_config
   | Runtime_execution.Codex_app_server _
   | Runtime_execution.Claude_code _
@@ -1503,13 +1503,13 @@ let test_dispatch_rejects_missing_declared_env_credential () =
     in
     let runtime = runtime_or_fail ~provider () in
     let provider_config = agent_core_provider_config_or_fail runtime in
-    match Runtime.validate_dispatch_credential ~provider_config runtime with
+    match Runtime_instance.validate_dispatch_credential ~provider_config runtime with
     | Error
-        ((Runtime.Required_env_credential_missing
+        ((Runtime_instance.Required_env_credential_missing
             { provider_id; env_key = actual_env_key }) as error) ->
       check string "provider id" "runpod_mtp" provider_id;
       check string "env key" env_key actual_env_key;
-      (match Runtime.dispatch_credential_error_to_core_error error with
+      (match Runtime_instance.dispatch_credential_error_to_core_error error with
        | Agent_core.Error.Config (Agent_core.Error.MissingEnvVar { var_name }) ->
          check string "typed missing credential env" env_key var_name
        | core_error ->
@@ -1519,15 +1519,15 @@ let test_dispatch_rejects_missing_declared_env_credential () =
     | Error error ->
       failf
         "expected missing env credential, got: %s"
-        (Runtime.dispatch_credential_error_to_string error)
+        (Runtime_instance.dispatch_credential_error_to_string error)
     | Ok () -> fail "expected dispatch credential validation to fail");
   let check_unavailable credential expected_carrier =
     let provider = { runpod_provider with credentials = Some credential } in
     let runtime = runtime_or_fail ~provider () in
     let provider_config = agent_core_provider_config_or_fail runtime in
-    match Runtime.validate_dispatch_credential ~provider_config runtime with
-    | Error (Runtime.Declared_credential_unavailable _ as error) ->
-      (match Runtime.dispatch_credential_error_to_core_error error with
+    match Runtime_instance.validate_dispatch_credential ~provider_config runtime with
+    | Error (Runtime_instance.Declared_credential_unavailable _ as error) ->
+      (match Runtime_instance.dispatch_credential_error_to_core_error error with
        | Agent_core.Error.Config
            (Agent_core.Error.CredentialUnavailable
               { provider_id; carrier }) ->
@@ -1540,7 +1540,7 @@ let test_dispatch_rejects_missing_declared_env_credential () =
     | Error error ->
       failf
         "expected unavailable credential, got: %s"
-        (Runtime.dispatch_credential_error_to_string error)
+        (Runtime_instance.dispatch_credential_error_to_string error)
     | Ok () -> fail "expected unavailable credential validation to fail"
   in
   check_unavailable
@@ -1564,14 +1564,14 @@ let test_dispatch_accepts_transformed_or_credential_free_provider () =
       }
     in
     check (result unit reject) "transformed credential" (Ok ())
-      (Runtime.validate_dispatch_credential
+      (Runtime_instance.validate_dispatch_credential
          ~provider_config:transformed_provider_config
          runtime));
   let provider = { runpod_provider with credentials = None } in
   let runtime = runtime_or_fail ~provider () in
   let provider_config = agent_core_provider_config_or_fail runtime in
   check (result unit reject) "credential-free provider" (Ok ())
-    (Runtime.validate_dispatch_credential ~provider_config runtime)
+    (Runtime_instance.validate_dispatch_credential ~provider_config runtime)
 
 let test_runtime_of_binding_preserves_failure_reason () =
   let cfg =
@@ -1588,16 +1588,16 @@ let test_runtime_of_binding_preserves_failure_reason () =
     ; lsp_servers = []
     }
   in
-  match Runtime.of_binding cfg { runpod_binding with enabled = false } with
+  match Runtime_instance.of_binding cfg { runpod_binding with enabled = false } with
   | Ok _ -> fail "expected disabled binding materialization to fail"
-  | Error Runtime.Binding_disabled ->
+  | Error Runtime_config_error.Binding_disabled ->
     check string "disabled binding reason"
       "binding is disabled by runtime.toml"
-      (Runtime.string_of_drop_reason Runtime.Binding_disabled)
+      (Runtime_config_error.string_of_drop_reason Runtime_config_error.Binding_disabled)
   | Error other ->
     failf
       "expected Binding_disabled, got %s"
-      (Runtime.string_of_drop_reason other)
+      (Runtime_config_error.string_of_drop_reason other)
 
 let with_dashboard_probe_http_get hook f =
   Server_dashboard_http_runtime_info.set_dashboard_runtime_provider_http_get_for_tests
@@ -1821,10 +1821,10 @@ let test_dashboard_runtime_probe_groups_models_by_provider () =
     }
   in
   let runtime binding =
-    match Runtime.of_binding config binding with
+    match Runtime_instance.of_binding config binding with
     | Ok runtime -> runtime
     | Error reason ->
-      failf "expected grouped runtime to materialize: %s" (Runtime.string_of_drop_reason reason)
+      failf "expected grouped runtime to materialize: %s" (Runtime_config_error.string_of_drop_reason reason)
   in
   let calls = ref 0 in
   let json =

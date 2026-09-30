@@ -272,4 +272,3 @@ let merge_keeper_memory_facts ~now loads =
               (List.map (fun (keeper_name, detail) -> keeper_name ^ ": " ^ detail) failures)))
   in
   snapshot, unread_summary
-

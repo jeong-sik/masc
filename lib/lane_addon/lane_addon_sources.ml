@@ -188,6 +188,7 @@ let activity_of_misc_operation : Tool_schemas_misc.misc_operation -> activity = 
   | Misc_lane_evidence | Misc_lane_act | Misc_lane_action_status | Misc_lane_updates
   | Misc_ask | Misc_ask_status | Misc_ask_withdraw
   | Misc_config | Misc_dashboard | Misc_gc | Misc_keeper_waiting_inventory
+  | Misc_candle_balance | Misc_candle_catalog | Misc_candle_purchase
   | Misc_tool_help | Misc_portrait_read | Misc_web_fetch | Misc_web_search -> Tool_completed
 let snapshot_files_only = function
   | [] -> false

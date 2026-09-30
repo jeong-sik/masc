@@ -1,0 +1,9 @@
+(test
+ (name test_apple_keychain)
+ (modules test_apple_keychain)
+ (enabled_if (= %{system} macosx))
+ (libraries masc.apple_keychain unix)
+ (foreign_stubs
+  (language c)
+  (names keychain_fixture_stubs keychain_observed_stubs)
+  (extra_deps ../../lib/apple_keychain/apple_keychain_stubs.c)))

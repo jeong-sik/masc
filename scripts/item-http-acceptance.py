@@ -19,6 +19,11 @@ import time
 import urllib.error
 import urllib.request
 
+def require(condition, detail):
+    if not condition:
+        raise RuntimeError(detail)
+
+
 parser = argparse.ArgumentParser()
 parser.add_argument('--output', type=Path, required=True)
 parser.add_argument('--binary', type=Path, required=True)
@@ -31,8 +36,8 @@ root.mkdir(parents=True, exist_ok=False)
 binary = args.binary.resolve()
 dashboard = args.dashboard.resolve()
 identity = json.loads((dashboard / '.build-identity.json').read_text())
-assert identity['schema'] == 'masc.dashboard-build.v1'
-assert identity['source_commit'] == args.source_sha, 'dashboard identity differs'
+require(identity['schema'] == 'masc.dashboard-build.v1', 'dashboard build identity schema differs')
+require(identity['source_commit'] == args.source_sha, 'dashboard identity differs')
 source = subprocess.check_output([str(binary), 'build-commit'], text=True).strip()
 if source != args.source_sha:
     raise SystemExit('native probe source differs from prepared dashboard')
@@ -69,12 +74,15 @@ keeper_login = subprocess.run([str(binary), 'login', '--base-path', str(base),
     env=env, capture_output=True, text=True, check=True)
 keeper_token = json.loads(keeper_login.stdout)['bearer_token']
 origin = f'http://127.0.0.1:{port}'
+# These requests target only the isolated child server and carry local auth.
+# Proxy settings in the invoking shell must not route them elsewhere.
+http = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 records = []
 def request(path, authenticated=True):
     headers = {'Authorization': 'Bearer ' + token} if authenticated else {}
     req = urllib.request.Request(origin + path, headers=headers)
     try:
-        response = urllib.request.urlopen(req, timeout=5)
+        response = http.open(req, timeout=5)
     except urllib.error.HTTPError as error:
         response = error
     with response:
@@ -96,7 +104,7 @@ def rpc(method, params, notification=False):
                'Content-Type': 'application/json',
                'Accept': 'application/json, text/event-stream', **rpc_session}
     req = urllib.request.Request(origin + '/mcp', data=json.dumps(payload).encode(), headers=headers)
-    with urllib.request.urlopen(req, timeout=10) as response:
+    with http.open(req, timeout=10) as response:
         body = response.read()
         records.append({'path': '/mcp', 'authenticated': True, 'rpc_method': method,
                         'status': response.status, 'sha256': hashlib.sha256(body).hexdigest()})
@@ -110,18 +118,21 @@ def rpc(method, params, notification=False):
     except json.JSONDecodeError:
         events = [json.loads(line[5:].strip()) for line in body.decode().splitlines()
                   if line.startswith('data:')]
-        assert len(events) == 1, 'expected one JSON-RPC SSE event'
+        require(len(events) == 1, 'expected one JSON-RPC SSE event')
         envelope = events[0]
-    assert envelope.get('id') == rpc_sequence and 'error' not in envelope, envelope
+    require(envelope.get('id') == rpc_sequence and 'error' not in envelope, envelope)
     return envelope['result']
 
-def tool(name, arguments, error_code=None):
+def tool(name, arguments, error_code=None, validation_reason=None):
     result = rpc('tools/call', {'name': name, 'arguments': arguments})
     failed = result.get('isError', False)
-    assert failed == (error_code is not None), result
+    require(failed == (error_code is not None or validation_reason is not None), result)
     data = result['structuredContent']
     if error_code is not None:
-        assert data['error_code'] == error_code, data
+        require(data['error_code'] == error_code, data)
+    if validation_reason is not None:
+        require(data['validation'] == 'agent_core_tool_middleware', data)
+        require(data['reason'] == validation_reason, data)
     tool_records.append({'name': name, 'arguments': arguments, 'is_error': failed,
                          'data': data})
     return data
@@ -145,53 +156,53 @@ with (root / 'server.log').open('wb') as log:
             time.sleep(0.2)
         path = '/api/v1/keepers/item-runtime-probe/items'
         status, _ = request(path, False)
-        assert status in (401, 403), ('account route bypassed auth', status)
+        require(status in (401, 403), ('account route bypassed auth', status))
         status, body = request(path)
         account = json.loads(body)
         (root / 'account.json').write_bytes(body)
-        assert status == 200 and account['status'] == 'ready', account
-        assert account['balance_milli'] == '0' and account['owned_items'] == [], account
-        assert len(account['catalog']) == 18, account
+        require(status == 200 and account['status'] == 'ready', account)
+        require(account['balance_milli'] == '0' and account['owned_items'] == [], account)
+        require(len(account['catalog']) == 18, account)
         glasses = next(item for item in account['catalog'] if item['id'] == 'glasses')
-        assert glasses['price_status'] == 'priced' and glasses['price_milli'] == '0', glasses
+        require(glasses['price_status'] == 'priced' and glasses['price_milli'] == '0', glasses)
         status, png = request('/api/v1/keepers/item-runtime-probe/portrait.png?size=96')
-        assert status == 200 and png.startswith(b'\x89PNG\r\n\x1a\n'), status
+        require(status == 200 and png.startswith(b'\x89PNG\r\n\x1a\n'), status)
         (root / 'portrait.png').write_bytes(png)
         rpc('initialize', {'protocolVersion': '2025-11-25', 'capabilities': {},
                            'clientInfo': {'name': 'item-http-acceptance', 'version': '1'}})
         rpc('notifications/initialized', {}, notification=True)
         own = tool('keeper_candle_balance', {})
-        assert own['keeper'] == 'item-runtime-probe' and own['balance_milli'] == '0', own
-        tool('keeper_candle_balance', {'keeper': 'another-keeper'}, 'invalid_arguments')
+        require(own['keeper'] == 'item-runtime-probe' and own['balance_milli'] == '0', own)
+        tool('keeper_candle_balance', {'keeper': 'another-keeper'}, validation_reason='empty_schema_args')
         starting = tool('keeper_candle_equip', {'slot': 'face', 'item': 'default'})['equipment']
         item = 'shades' if starting['face'] == 'glasses' else 'glasses'
         tool('keeper_candle_equip', {'slot': 'face', 'item': item}, 'equipment_refused')
         purchase = tool('keeper_candle_purchase', {'item': item})
-        assert purchase['amount_milli'] == '0', purchase
-        assert purchase['account']['owned_items'] == [item], purchase
+        require(purchase['amount_milli'] == '0', purchase)
+        require(purchase['account']['owned_items'] == [item], purchase)
         tool('keeper_candle_purchase', {'item': item}, 'already_owned')
         tool('keeper_candle_purchase', {'item': 'crown'}, 'insufficient_balance')
         equipped = tool('keeper_candle_equip', {'slot': 'face', 'item': item})
-        assert equipped['changed'] is True and equipped['equipment']['face'] == item, equipped
+        require(equipped['changed'] is True and equipped['equipment']['face'] == item, equipped)
         for slot in ('head', 'neck', 'hand', 'base'):
-            assert equipped['equipment'][slot] == starting[slot], equipped
+            require(equipped['equipment'][slot] == starting[slot], equipped)
         status, updated = request(path)
         account_after = json.loads(updated)
-        assert status == 200 and account_after['balance_milli'] == '0', account_after
-        assert account_after['owned_items'] == [item], account_after
+        require(status == 200 and account_after['balance_milli'] == '0', account_after)
+        require(account_after['owned_items'] == [item], account_after)
         (root / 'account-after.json').write_bytes(updated)
         status, equipped_png = request('/api/v1/keepers/item-runtime-probe/portrait.png?size=96')
-        assert status == 200 and equipped_png.startswith(b'\x89PNG\r\n\x1a\n'), status
-        assert equipped_png != png, 'equipment did not change the served portrait'
+        require(status == 200 and equipped_png.startswith(b'\x89PNG\r\n\x1a\n'), status)
+        require(equipped_png != png, 'equipment did not change the served portrait')
         (root / 'portrait-equipped.png').write_bytes(equipped_png)
         restored = tool('keeper_candle_equip', {'slot': 'face', 'item': 'default'})
-        assert restored['equipment'] == starting, restored
+        require(restored['equipment'] == starting, restored)
         status, restored_png = request('/api/v1/keepers/item-runtime-probe/portrait.png?size=96')
-        assert status == 200 and restored_png == png, 'default did not restore the served portrait'
+        require(status == 200 and restored_png == png, 'default did not restore the served portrait')
         status, index = request('/dashboard/', False)
-        assert status == 200, status
-        assert hashlib.sha256(index).hexdigest() == hashlib.sha256(
-            (dashboard / 'index.html').read_bytes()).hexdigest(), 'served index differs'
+        require(status == 200, status)
+        require(hashlib.sha256(index).hexdigest() == hashlib.sha256(
+            (dashboard / 'index.html').read_bytes()).hexdigest(), 'served index differs')
         result = dict(source_sha=source, binary_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
             fixture_sha256=config_hashes, dashboard_index_sha256=hashlib.sha256(index).hexdigest(),
             scope='Isolated CI binary over real TCP HTTP; synthetic current-schema paused Keeper metadata, empty test ledger and configured catalog; authenticated Keeper MCP purchase/equipment calls and ledger-backed HTTP; no lifecycle creation, model-driven decision, paid purchase/payout or production rollout',

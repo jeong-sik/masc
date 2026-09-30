@@ -1,4 +1,4 @@
-(* The wizard's rules live in Voice_wizard and its session in Masc_tui_types,
+(* The wizard's rules live in Voice_wizard and its session in Masc_tui_voice_wizard_session,
    and both are tested where they live. Neither test can tell whether the
    screen ever draws the wizard or whether any key reaches it -- a helper that
    no dispatcher calls compiles, passes its own tests, and is dead.
@@ -47,20 +47,20 @@ let test_the_prompts_come_from_the_state_machine () =
   reached render "render_voice_wizard" "Voice_wizard.step_prompt"
 
 let test_e_opens_the_wizard () =
-  reached tui "main" "Masc_tui_types.voice_wizard_open"
+  reached tui "main" "Masc_tui_voice_wizard_session.voice_wizard_open"
 
 (* Every session mover the wizard has, checked for a key that reaches it. One
    of these being absent is exactly the shape that ships a step you can enter
    and cannot leave. *)
 let movers =
-  [ "Masc_tui_types.voice_wizard_next"
-  ; "Masc_tui_types.voice_wizard_previous"
-  ; "Masc_tui_types.voice_wizard_append"
-  ; "Masc_tui_types.voice_wizard_backspace"
-  ; "Masc_tui_types.voice_wizard_clear"
-  ; "Masc_tui_types.voice_wizard_commit"
-  ; "Masc_tui_types.voice_wizard_cycle_provider"
-  ; "Masc_tui_types.voice_wizard_cycle_section"
+  [ "Masc_tui_voice_wizard_session.voice_wizard_next"
+  ; "Masc_tui_voice_wizard_session.voice_wizard_previous"
+  ; "Masc_tui_voice_wizard_session.voice_wizard_append"
+  ; "Masc_tui_voice_wizard_session.voice_wizard_backspace"
+  ; "Masc_tui_voice_wizard_session.voice_wizard_clear"
+  ; "Masc_tui_voice_wizard_session.voice_wizard_commit"
+  ; "Masc_tui_voice_wizard_session.voice_wizard_cycle_provider"
+  ; "Masc_tui_voice_wizard_session.voice_wizard_cycle_section"
   ]
 
 let test_every_mover_has_a_key () = List.iter (fun mover -> reached tui "main" mover) movers

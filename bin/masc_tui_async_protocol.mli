@@ -123,7 +123,7 @@ type async_msg =
   (* The wizard's replies carry the save they answer, and
      [Masc_tui_types.voice_wizard_after_save] and its two siblings drop one the
      open session is not waiting on. *)
-  | Voice_wizard_saved of int * Masc_tui_types.voice_wizard_save_reply
+  | Voice_wizard_saved of int * Masc_tui_voice_wizard_session.voice_wizard_save_reply
   (* The keeper-voice screen: the voices its endpoint answers to, and what
      the setup route said about the one line it writes. *)
   | Voice_agent_voices_loaded of (Yojson.Safe.t, string) result

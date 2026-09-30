@@ -4,7 +4,7 @@
    back to change an answer finds the answer they gave, and that switching the
    side or the provider does not leave a draft in a shape its own rules refuse. *)
 
-module T = Masc_tui_types
+module T = Masc_tui_voice_wizard_session
 
 let session () =
   T.voice_wizard_open ~section:Voice_setup.Tts ~provider:Voice_wizard.Elevenlabs

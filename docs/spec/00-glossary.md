@@ -1029,12 +1029,20 @@ status: reference
   쥔 참가자만 기계의 시간을 움직인다. 다른 참가자의 시간 이동 요청은 거절되지만
   화면은 볼 수 있다.
   `masc_dos_pass`로 Keeper에게 넘기면 보드 글이 그 Keeper를 @멘션해 깨운다.
+  모든 요청이 자격증명을 실어야 하는 환경(인증 켜짐·토큰 필수)에서는 기계 앞에
+  앉은 이름(`Play_seat.hand_to`가 돌려주는 Keeper·운영자·만료되지 않은 초대)에게만
+  넘길 수 있고, 다른 이름은 아무 일도 일어나기 전에 거절된다. 그 목록을 읽지 못하면
+  `Seats_unknown`으로 거절한다. 이름을 스스로 적을 수 있는 환경에는 목록이 없어
+  넘김이 그대로 통과한다.
   쥔 Keeper가 일시정지되거나 정지하면 다음 움직임 전에 풀리고, 만료된 `Player`
-  초대의 조종권도 풀린다. 충돌 뒤 자동 재시작을 기다리거나 막 켜지는 중인 Keeper는
-  그대로 쥔다. 조종권의 이름은 차례 기록이며 권한 증명이 아니다. `Player` 권한은
-  별도 자격증명으로 검사한다.
+  초대의 조종권도 풀린다. 모든 요청이 자격증명을 실어야 하는 환경에서는 Keeper가
+  아니면서 자격증명 파일이 없는 이름(회수된 초대)의 조종권도 풀린다. 자격증명
+  파일을 읽지 못한 경우는 없는 것으로 보지 않고 그대로 쥔다. 충돌 뒤 자동 재시작을
+  기다리거나 막 켜지는 중인 Keeper는 그대로 쥔다. 조종권의 이름은 차례 기록이며
+  권한 증명이 아니다. `Player` 권한은 별도 자격증명으로 검사한다.
   → [Dos_lane.pass](../../lib/dos_lane/dos_lane.mli) ·
   [Play_seat.participants](../../lib/play/play_seat.mli) ·
+  [Play_seat.hand_to](../../lib/play/play_seat.mli) ·
   [Keeper_dos_controller.holder_left](../../lib/keeper/keeper_dos_controller.mli)
 
 **Shared DOS Play Invite (공유 DOS 플레이 초대)**

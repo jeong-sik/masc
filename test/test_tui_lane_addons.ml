@@ -865,6 +865,47 @@ let declared_results_show_body_before_activity_and_keep_raw_evidence () =
     (index "  Middle result" < index "  Last result");
   check (option string) "j reaches the next displayed result" (Some producer_middle.id)
     (Option.map (fun (row : UI.Row.row) -> row.id) (UI.selected_row (UI.move_observation unsorted 1)));
+  let retained_worker = {worker with phase=UI.Row.Detached} in
+  let other_worker = {worker with id="foreign-worker";incarnation="foreign-incarnation"} in
+  let foreign_row = {row with id="foreign-row";lane_id="foreign-worker/report";observed_at=0.} in
+  let same_title = {producer_middle with id="middle-a";title=row.title;
+    lane_id=worker.id ^ "/other"} in
+  let tied = {producer_middle with id="middle-z"} in
+  let original_rows = [producer_last;foreign_row;tied;row;same_title] in
+  let retained_snapshot = {snapshot with instances=[retained_worker;other_worker];
+    output={rows=original_rows;coverage=[]}} in
+  let records = {detail with snapshot=Some retained_snapshot;
+    screen=UI.Detail (retained_worker.id, retained_worker.incarnation); focus=UI.Rows;
+    row_cursor=(List.find_index (fun (candidate : UI.Row.row) -> candidate.id=row.id) original_rows |> Option.get)} in
+  let selected_id view = Option.map (fun (row : UI.Row.row) -> row.id) (UI.selected_row view) in
+  let records_lines = UI.lines ~width:100 records in
+  let index text = List.find_index (String.equal text) records_lines |> Option.get in
+  check bool "Records displays retained owner rows chronologically with deterministic ties" true
+    (index ("Row " ^ row.id) < index "Row middle-a"
+     && index "Row middle-a" < index "Row middle-z"
+     && index "Row middle-z" < index "Row last"
+     && not (List.mem "Row foreign-row" records_lines));
+  let next = UI.move_record {records with scroll=9} 1 in
+  check (option string) "Records j selects the next displayed exact row" (Some same_title.id) (selected_id next);
+  check int "Records movement resets document scrolling" 0 next.scroll;
+  check (option string) "Records k returns to the displayed predecessor" (Some row.id)
+    (selected_id (UI.move_record next (-1)));
+  check (option string) "Records timestamp ties use row identity order" (Some tied.id)
+    (selected_id (UI.move_record next 1));
+  check bool "rendering and navigation preserve immutable producer order" true
+    (Option.map (fun (snapshot : UI.snapshot) -> snapshot.output.rows) next.snapshot = Some original_rows);
+  let same_title_summary = UI.lines ~width:100 {next with focus=UI.Timeline} in
+  check bool "same-titled results expose the selected exact Lane" true
+    (List.mem ("  Lane " ^ same_title.lane_id) same_title_summary);
+  let same_title_raw = UI.lines ~width:100 {next with presentation=UI.Technical} in
+  check bool "raw evidence joins the same selected row and Lane" true
+    (List.mem ("Row " ^ same_title.id) same_title_raw
+     && List.mem ("Lane " ^ same_title.lane_id) same_title_raw
+     && not (List.mem ("Row " ^ row.id) same_title_raw));
+  let exported = UI.evidence_request {next with selected=[same_title.id]} |> ok in
+  check bool "chronological movement preserves exact export ownership" true
+    (exported = UI.Evidence (`Assoc ["instance_id",`String worker.id;
+      "row_ids",`List [`String same_title.id]]));
   let many = List.init 6 (fun index -> {worker with id=Printf.sprintf "worker-%d" index;
     title=Printf.sprintf "Worker %d" index;
     display={display with description=Some (String.concat " " (List.init 30 (fun _ -> Printf.sprintf "description-%d" index)))}}) in

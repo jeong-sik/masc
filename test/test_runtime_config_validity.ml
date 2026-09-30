@@ -5866,6 +5866,21 @@ let test_typesafeai_refuses_a_stray_key () =
     "[typesafeai.absorb_gate]\nenabled = true\n" "absorb_gate must be a boolean"
 ;;
 
+(* otoml's strict float getter still reads a TOML integer, so the two
+   boundaries can be written as 0 and 1. *)
+let test_typesafeai_reads_integer_confidence_floor_boundaries () =
+  List.iter
+    (fun (literal, expected) ->
+       let tail = "[typesafeai]\nboard_attention_confidence_floor = " ^ literal ^ "\n" in
+       match Runtime_toml.parse_string (lsp_probe_config tail) with
+       | Error errors ->
+         failf "floor %s must parse: %s" literal (error_messages errors)
+       | Ok config ->
+         check (float 0.0) ("floor " ^ literal) expected
+           config.Runtime_schema.typesafeai.Runtime_schema.board_attention_confidence_floor)
+    [ "0", 0.0; "1", 1.0 ]
+;;
+
 let test_typesafeai_refuses_a_confidence_floor_outside_0_to_1 () =
   typesafeai_rejects ~what:"a floor above 1"
     "[typesafeai]\nboard_attention_confidence_floor = 1.5\n" "must be a number from 0 to 1";
@@ -6335,6 +6350,8 @@ let () =
         ; test_case "reads destinations written as table headers" `Quick
             test_typesafeai_reads_destinations_written_as_table_headers
         ; test_case "refuses a stray key" `Quick test_typesafeai_refuses_a_stray_key
+        ; test_case "reads integer confidence floor boundaries" `Quick
+            test_typesafeai_reads_integer_confidence_floor_boundaries
         ; test_case "refuses a confidence floor outside 0 to 1" `Quick
             test_typesafeai_refuses_a_confidence_floor_outside_0_to_1
         ; test_case "refuses a value that names nothing" `Quick

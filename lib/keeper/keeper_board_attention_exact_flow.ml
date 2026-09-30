@@ -537,11 +537,12 @@ type jev_first =
       (** Jev is on, but the lane declares no HTTP slot. Jev is asked only in
           front of the HTTP lane. *)
   | Jev_not_pending
-      (** Jev is on, but the candidate is not [Pending], so it is not eligible
-          for a new judgment. *)
+      (** Jev is on, but the candidate is neither pending nor a durably
+          requeued pending one, so it is not eligible for a new judgment. *)
   | Jev_decided of
       { provenance : Keeper_board_attention_candidate.system_one_provenance
       ; verdict : Keeper_board_attention_judgment.t
+      ; confidence : float
       ; judged_at : float
       }
   | Jev_low_confidence of
@@ -575,11 +576,27 @@ let ask_jev ~clock prepared =
       (match prepared.transport with
        | Cli_only _ -> Jev_cli_only
        | Http_flow _ ->
-         (match prepared.candidate.status with
-          | Keeper_board_attention_candidate.Judged _
-          | Keeper_board_attention_candidate.Consumed _
-          | Keeper_board_attention_candidate.Quarantine _ -> Jev_not_pending
-          | Keeper_board_attention_candidate.Pending _ ->
+         (* The same view [prepare] admits by: a durably requeued pending
+            candidate is judged like a pending one, so Jev is asked first for
+            both. *)
+         (match
+            Keeper_board_attention_candidate.status_view
+              prepared.candidate.Keeper_board_attention_candidate.status
+          with
+          | Keeper_board_attention_candidate.Suspended_quarantine _
+          | Keeper_board_attention_candidate.Direct_resumable
+              ( Keeper_board_attention_candidate.Resumable_judged _
+              | Keeper_board_attention_candidate.Resumable_consumed _ )
+          | Keeper_board_attention_candidate.Requeued_resumable
+              { resumable =
+                  ( Keeper_board_attention_candidate.Resumable_judged _
+                  | Keeper_board_attention_candidate.Resumable_consumed _ )
+              ; _
+              } -> Jev_not_pending
+          | Keeper_board_attention_candidate.Direct_resumable
+              (Keeper_board_attention_candidate.Resumable_pending _)
+          | Keeper_board_attention_candidate.Requeued_resumable
+              { resumable = Keeper_board_attention_candidate.Resumable_pending _; _ } ->
             (* A direct-style Eio request on this keeper's board-attention
                worker fiber: the wait suspends that fiber alone, as the
                [Exact_output] request does, so it delays this candidate's
@@ -602,7 +619,9 @@ let ask_jev ~clock prepared =
                       confidence
                       (Typesafeai_config.board_attention_confidence_floor ())
                     >= 0
-                  then Jev_decided { provenance; verdict; judged_at = Eio.Time.now clock }
+                  then
+                    Jev_decided
+                      { provenance; verdict; confidence; judged_at = Eio.Time.now clock }
                   else Jev_low_confidence { provenance; verdict; confidence })))))
 ;;
 
@@ -640,8 +659,8 @@ let jev_first_to_yojson jev_first result =
   in
   match jev_first with
   | Jev_off | Jev_cli_only | Jev_not_pending -> `Assoc [ answer ]
-  | Jev_decided { provenance; _ } ->
-    with_provenance provenance [ answer ]
+  | Jev_decided { provenance; confidence; _ } ->
+    with_provenance provenance [ answer; "confidence", `Float confidence ]
   | Jev_failed { reason } -> `Assoc [ answer; "reason", `String reason ]
   | Jev_low_confidence { provenance; verdict; confidence } ->
     with_provenance
@@ -827,7 +846,7 @@ let execute_current
              Error (Cli_slots_exhausted { prior_error = None; failures }))
         | Http_flow attempt ->
           (match jev_first with
-           | Jev_decided { provenance; verdict; judged_at } ->
+           | Jev_decided { provenance; verdict; judged_at; confidence = _ } ->
              Ok
                { Keeper_board_attention_candidate.verdict
                ; slot_id = provenance.answering_model_id

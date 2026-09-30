@@ -13392,6 +13392,7 @@ let provider_history_lines (state : state) =
          | rows -> List.map chart rows)
 
 let usage_lines ~cols (state : state) =
+  let open Masc.Tui_decode_usage in
   let scopes =
     match Overview_providers.section
             ~providers:state.overview_providers ~runtimes:state.overview_quota
@@ -13421,7 +13422,7 @@ let usage_lines ~cols (state : state) =
            kuw_window_minutes freshness)
         :: (if kuw_rows = [] then [ "   No Keepers in the returned roster" ]
             else List.map
-              (fun (row : Tui_decode.keeper_usage_row) ->
+              (fun (row : Masc.Tui_decode_usage.keeper_usage_row) ->
                 let tokens =
                   Option.fold ~none:"unreported" ~some:string_of_int row.kur_tokens in
                 let cost =

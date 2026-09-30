@@ -729,7 +729,8 @@
   masc.runtime
   masc.runtime_toml_namespace
   masc.toml_line_editor
-  masc.voice_config))
+  masc.voice_config
+  unix))
 
 (library
  (name masc_tui_theme_catalog)

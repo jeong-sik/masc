@@ -231,8 +231,10 @@ opening_keeper = "alpha"
 
 An absent `opening` or `overview` starts on the Dashboard. `keeper` opens the
 named Keeper's chat; it needs `opening_keeper`. `last` opens the most recent
-chat target and updates `opening_keeper` when a different Keeper's chat is
-opened. The choice and the name are separate, so a Keeper named `last` can
+explicitly visited chat target from `last_chat_keeper`. Explicit visits record
+that key in every opening mode; while the stored opening mode is `last`, the
+same locked config commit also updates `opening_keeper`. Automatic startup
+does not record a visit. A missing receipt uses the chosen Last opening target. The choice and the name are separate, so a Keeper named `last` can
 be selected. If the target is unavailable, the TUI starts on the Dashboard
 and shows the reason near the top. An invalid opening setting also starts
 on the Dashboard with a reason.
@@ -2176,9 +2178,12 @@ opens Agenda, and `m` opens Usage. Work retains Goal observations, task lists,
 and verification evidence; Usage retains quota and telemetry detail. Home shows
 only a brief task-flow reading, with no duplicated tables or quota graphs.
 
-Continue uses a Keeper whose chat was explicitly opened in this TUI session,
-or the saved target when `opening = "last"`. A fixed `opening = "keeper"`
-target is not a last-chat record. With no available remembered target, choose a
+Continue uses the last explicitly visited conversation saved as
+`[tui].last_chat_keeper`, independently of the opening preference. A fixed
+`opening = "keeper"` target is not a last-chat record. Failed saves retain the
+visited target with a session-only notice; a visible save whose durability is
+unconfirmed has its own notice. Unreadable receipts show history unavailable.
+A failed roster read offers named history without permitting a new send. With no available remembered target, choose a
 Keeper. An empty, successfully read roster offers creation while any existing
 Goal or task decisions remain visible. Home's `i` also selects a Keeper before
 writing. A conversation opened through Continue returns to Dashboard with Esc

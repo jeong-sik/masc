@@ -88,11 +88,13 @@ def short_home_keeps_destinations(executable):
         h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
         h.palette_go(process, fd, output, b"go dashboard", b"Continue with beta")
         frame = capture(process, fd, output, name="short-home-all-destinations",
-                        rows=15, columns=80, needle=b"New work")
+                        rows=17, columns=80, needle=b"New work")
         for expected in (b"3 need you", b"1 Goals to confirm", b"Continue with beta", b"New work", b"Enter:open"):
             assert expected in frame, (expected, frame)
-        # Reach the resume destination through Home selection, preserving
-        # the short frame and its draft on the return path.
+        # Home fits its minimum chrome height; grow before entering the
+        # composer, whose own fixed chrome requires additional rows.
+        capture(process, fd, output, name="short-home-before-chat",
+                rows=24, columns=80, needle=b"New work")
         h.send_and_wait(process, fd, output, b"kkkkjj\r", b"Esc:Dashboard")
         h.send_and_wait(process, fd, output, b"short-draft", b"short-draft")
         h.send_and_wait(process, fd, output, b"\x1b", b"Continue with beta")

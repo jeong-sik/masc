@@ -5231,6 +5231,7 @@ type home_action =
   | Home_approvals
   | Home_agenda
   | Home_resume of string
+  | Home_read_last of string
   | Home_choose_keeper
   | Home_create_keeper
 
@@ -5238,9 +5239,16 @@ type acting_pane_preference =
   | Default_acting_pane
   | Chosen_acting_pane of Masc_tui_acting_pane.layout
 
+type home_chat_receipt =
+  | No_chat_receipt
+  | Recorded_chat of Keeper_id.Keeper_name.t
+  | Session_chat of { keeper : Keeper_id.Keeper_name.t; save_error : string }
+  | Unconfirmed_chat of { keeper : Keeper_id.Keeper_name.t; detail : string }
+  | Unreadable_chat_receipt of string
+
 type state = {
   mutable home_selected : home_action option;
-  mutable home_last_chat : string option;
+  mutable home_last_chat : home_chat_receipt;
   mutable metrics_scroll: int;
   mutable metrics_section: metrics_section;
   mutable usage_telemetry_open: bool;
@@ -7853,7 +7861,7 @@ let create_state
   =
   {
   home_selected = None;
-  home_last_chat = None;
+  home_last_chat = No_chat_receipt;
   metrics_scroll = 0;
   metrics_section = Section_fleet;
   usage_telemetry_open = false;
@@ -11044,27 +11052,55 @@ let home_decision_rows (state : state) =
 let home_continue_rows (state : state) =
   let last =
     match state.home_last_chat, state.opening_mode with
-    | Some name, _ -> Some name
-    | None, Masc_tui_config.Last (Some name) ->
-        Some (Keeper_id.Keeper_name.to_string name)
-    | None, (Masc_tui_config.Last None | Masc_tui_config.Overview
-            | Masc_tui_config.Keeper _) -> None
+    | Recorded_chat name, _ -> Some (Keeper_id.Keeper_name.to_string name, "")
+    | Session_chat { keeper; _ }, _ ->
+        Some (Keeper_id.Keeper_name.to_string keeper, " · this session only")
+    | Unconfirmed_chat { keeper; _ }, _ ->
+        Some (Keeper_id.Keeper_name.to_string keeper, " · save durability unconfirmed")
+    | No_chat_receipt, Masc_tui_config.Last (Some name) ->
+        Some (Keeper_id.Keeper_name.to_string name, "")
+    | Unreadable_chat_receipt _, _
+    | No_chat_receipt, (Masc_tui_config.Last None | Masc_tui_config.Overview
+                       | Masc_tui_config.Keeper _) -> None
   in
   let resume =
     match last with
-    | Some name when state.workspace_identity = Workspace_identity_match
+    | Some (name, save_notice) when state.workspace_identity = Workspace_identity_match
                    && keeper_available_for_new_message state name ->
-        [ Home_resume name, "Continue with " ^ Tui_decode.sanitize_terminal_text name ]
+        [ Home_resume name,
+          "Continue with " ^ Tui_decode.sanitize_terminal_text name
+          ^ save_notice ]
+    | Some (name, _) when state.workspace_identity = Workspace_identity_match
+                         && Option.is_some state.keepers_error ->
+        [ Home_read_last name,
+          "Last conversation with " ^ Tui_decode.sanitize_terminal_text name
+          ^ " · roster unavailable; read history" ]
     | Some _ | None -> []
   in
   let choose =
     match state.workspace_identity, state.local_workspace, state.keepers_error, state.keepers with
     | Workspace_identity_match, Local_workspace_read, None, [] ->
-        [ Home_create_keeper, "Create a Keeper  · choose who will take the work" ]
+        [ Home_create_keeper,
+          (match state.home_last_chat, last with
+           | Unreadable_chat_receipt _, _ ->
+               "Create a Keeper · conversation history unavailable"
+           | (No_chat_receipt | Recorded_chat _ | Session_chat _ | Unconfirmed_chat _), Some (name, _) ->
+               "Create a Keeper · last conversation "
+               ^ Tui_decode.sanitize_terminal_text name ^ " unavailable"
+           | (No_chat_receipt | Recorded_chat _ | Session_chat _ | Unconfirmed_chat _), None ->
+               "Create a Keeper  · choose who will take the work") ]
     | _ ->
         [ Home_choose_keeper,
           (match resume with
-           | [] -> "Choose a Keeper  · start a conversation"
+           | [] ->
+               (match state.home_last_chat, last with
+                | Unreadable_chat_receipt _, _ ->
+                    "Conversation history unavailable · choose a Keeper"
+                | (No_chat_receipt | Recorded_chat _ | Session_chat _ | Unconfirmed_chat _), Some (name, _) ->
+                    "Last conversation " ^ Tui_decode.sanitize_terminal_text name
+                    ^ " unavailable · choose a Keeper"
+                | (No_chat_receipt | Recorded_chat _ | Session_chat _ | Unconfirmed_chat _), None ->
+                    "Choose a Keeper  · start a conversation")
            | _ :: _ -> "New work  · choose a Keeper") ]
   in
   resume @ choose

@@ -15767,11 +15767,11 @@ let render_voice_wizard (state : state) (session : voice_wizard_session) =
      empty field is visibly a field. *)
   (match session.vws_step with
    | Voice_wizard.Section ->
-     voice_body_line buf cols
+     box_line head cols
        (Printf.sprintf "    %s%s%s   %s←/→ or space to switch%s" Ansi.bold side
           Ansi.reset Ansi.dim Ansi.reset)
    | Voice_wizard.Provider ->
-     voice_body_line buf cols
+     box_line head cols
        (Printf.sprintf "    %s%s%s   %s←/→ or space to switch%s" Ansi.bold
           (Voice_wizard.provider_label draft.Voice_wizard.provider)
           Ansi.reset Ansi.dim Ansi.reset)
@@ -15791,9 +15791,15 @@ let render_voice_wizard (state : state) (session : voice_wizard_session) =
    | Voice_wizard.Credential
    | Voice_wizard.Model
    | Voice_wizard.Voice ->
-     voice_body_line buf cols
-       (Printf.sprintf "    %s%s%s%s" Ansi.bold (Terminal_text.single_line session.vws_input) Ansi.reset
+     box_line head cols
+       (Printf.sprintf "    %s%s%s%s" Ansi.bold (Message_layout.fit_middle (max 1 (framed_inner_width cols - 5))
+             (Terminal_text.single_line session.vws_input)) Ansi.reset
           (if Masc_tui_types.voice_wizard_is_sending session then "" else "▏")));
+  (match session.vws_step with
+   | Voice_wizard.Name | Voice_wizard.Address | Voice_wizard.Credential
+   | Voice_wizard.Model | Voice_wizard.Voice ->
+       field "typing" session.vws_input
+   | Voice_wizard.Section | Voice_wizard.Provider | Voice_wizard.Review -> ());
   (* A local server that never asked for a key answers 200 only while nothing
      sends it one, so the blank is worth saying out loud rather than leaving as
      an empty line. *)
@@ -15845,47 +15851,46 @@ let render_voice_agent (state : state) (session : voice_agent_session) =
   let terminal_rows, cols = get_terminal_size () in
   let head = Buffer.create 256 in
   let buf = Buffer.create 2048 in
-  let list_block label items cursor draw =
-    voice_body_line buf cols (Printf.sprintf "  %s%s%s" Ansi.bold label Ansi.reset);
-    let count = List.length items in
-    if count = 0
-    then voice_body_line buf cols (Printf.sprintf "    %s\xe2\x80\x94%s" Ansi.dim Ansi.reset)
-    else (
-      (* Every entry is laid out; [finish_voice_surface] takes the window and
-         reports where it is, so a list longer than the screen is scrolled
-         rather than cut at the fold. *)
-      List.iteri
-        (fun index item ->
-          voice_body_line buf cols
-            (if index = cursor
-             then
-               Printf.sprintf "    %s%s %s%s" Ansi.bold Masc_tui_theme.Glyph.current_entry
-                 (draw item)
-                 Ansi.reset
-             else Printf.sprintf "    %s  %s%s" Ansi.dim (draw item) Ansi.reset))
-        items;
-      voice_body_line buf cols
-        (Printf.sprintf "    %s%d of %d%s" Ansi.dim (cursor + 1) count Ansi.reset))
+  let selector label items cursor draw =
+    let position =
+      if items = [] then "0/0"
+      else Printf.sprintf "%d/%d" (cursor + 1) (List.length items)
+    in
+    let prefix = Printf.sprintf "  %s %s: " label position in
+    let value =
+      match List.nth_opt items cursor with
+      | None -> Masc_tui_theme.Glyph.no_value
+      | Some item -> draw item
+    in
+    let room = max 1 (framed_inner_width cols - visible_width prefix) in
+    box_line head cols
+      (prefix ^ Ansi.bold ^ Message_layout.fit_middle room value ^ Ansi.reset)
   in
   box_top head cols;
   box_line head cols
-    (config_pane_title ~cols ~name:(screen_title " MASC Voice \xc2\xb7 keeper voices") state);
+    (config_pane_title ~cols ~name:(screen_title " MASC Voice · keeper voices") state);
+  (* Both selected owners stay above the scrolling document. Enter therefore
+     acts on the displayed pair even after paging through long metadata. *)
+  selector "keeper" session.vas_agents session.vas_agent_cursor
+    Terminal_text.single_line;
+  selector "voice" session.vas_voices session.vas_voice_cursor
+    (fun (_, label) -> Terminal_text.single_line label);
   voice_body_line buf cols "";
-  list_block "keeper  (j/k)" session.vas_agents session.vas_agent_cursor (fun agent ->
-    Terminal_text.single_line agent);
-  voice_body_line buf cols "";
-  list_block "voice  (left/right)" session.vas_voices session.vas_voice_cursor
-    (fun (voice_id, label) ->
-      if String.equal voice_id label
-      then Terminal_text.single_line voice_id
-      else Printf.sprintf "%s  %s%s%s" (Terminal_text.single_line label) Ansi.dim
-             (Terminal_text.single_line voice_id) Ansi.reset);
+  (match List.nth_opt session.vas_agents session.vas_agent_cursor with
+   | None -> ()
+   | Some agent ->
+       voice_body_line buf cols ("  Keeper: " ^ Terminal_text.single_line agent));
+  (match List.nth_opt session.vas_voices session.vas_voice_cursor with
+   | None -> ()
+   | Some (voice_id, label) ->
+       voice_body_line buf cols ("  Voice: " ^ Terminal_text.single_line label);
+       voice_body_line buf cols ("  Voice ID: " ^ Terminal_text.single_line voice_id));
   (match session.vas_status with
    | None -> ()
    | Some status ->
      voice_body_line buf cols "";
      voice_body_line_styled buf cols ~style:(Theme.warn ())
-       (Printf.sprintf "  %s" (Terminal_text.single_line status)));
+       ("  " ^ Terminal_text.single_line status));
   finish_voice_surface state ~terminal_rows ~cols ~head ~body:buf
     ~hints:(Masc_tui_keys.footer_hints_voice_agent ())
 ;;
